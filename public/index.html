@@ -40,6 +40,14 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
 #toast{position:fixed;bottom:180px;left:50%;transform:translateX(-50%);z-index:300;background:#2B2B2B;color:#fff;
   padding:11px 18px;border-radius:14px;font:600 13px Manrope,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.3);display:none;max-width:320px;text-align:center}
 @media(max-width:430px){#genfab{left:auto;right:16px;transform:none}}
+.mcard{cursor:pointer;transition:transform .13s ease,box-shadow .13s ease}
+.mcard:active{transform:scale(.96);box-shadow:0 4px 14px rgba(20,20,30,.08)}
+.homebtn{transition:transform .12s ease}.homebtn:active{transform:scale(.94)}
+#h_ring{transition:stroke-dashoffset 1s cubic-bezier(.4,0,.2,1)}
+.mring{transition:stroke-dashoffset 1s cubic-bezier(.4,0,.2,1)}
+@keyframes goalglow{0%,100%{box-shadow:0 18px 34px rgba(242,104,63,.32)}50%{box-shadow:0 22px 46px rgba(242,104,63,.5)}}
+.goalcard{animation:goalglow 3.6s ease-in-out infinite}
+@media(prefers-reduced-motion:reduce){.goalcard{animation:none}}
 </style></head><body>
 <button id="navfab" onclick="document.getElementById('navmenu').classList.toggle('open')">Экраны ▾</button>
 <div id="navmenu"></div>
@@ -132,7 +140,7 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
       <!-- telegram -->
       <a id="tgbtn" href="#" target="_blank" rel="noopener" onclick="tgClick(event)" style="width:100%;height:56px;box-sizing:border-box;border:none;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:16px;font-family:Manrope;font-weight:700;font-size:16px;color:#fff;display:flex;align-items:center;justify-content:center;gap:10px;cursor:pointer;box-shadow:0 12px 24px rgba(242,104,63,.32);text-decoration:none;"><svg width="22" height="22" viewBox="0 0 24 24" fill="#fff"><path d="M21.5 4.3 2.9 11.5c-1 .4-1 1.8.1 2.1l4.6 1.4 1.8 5.6c.3.8 1.3 1 1.9.4l2.5-2.4 4.6 3.4c.7.5 1.7.1 1.9-.7L23 5.6c.2-1-.7-1.7-1.5-1.3Z"/></svg>Войти через Telegram</a>
       <div id="lg_msg" style="margin-top:12px;text-align:center;font-weight:600;font-size:13px;color:#E23B2B;"></div>
-      <div style="margin-top:16px;text-align:center;font-weight:600;font-size:12.5px;color:#8A8F98;">Быстрый вход по Telegram — без пароля <span style="color:#C4C8CE">· v10</span></div>
+      <div style="margin-top:16px;text-align:center;font-weight:600;font-size:12.5px;color:#8A8F98;">Быстрый вход по Telegram — без пароля <span style="color:#C4C8CE">· v11</span></div>
     </div>
   
 </div>
@@ -188,22 +196,31 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
       </div>
     </div>
     <!-- content -->
-    <div style="position:absolute;top:52px;left:0;right:0;bottom:0;padding:6px 20px 96px;">
+    <div style="position:absolute;top:52px;left:0;right:0;bottom:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:6px 20px 112px;">
       <!-- greeting -->
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
-        <div>
-          <div id="h_hello" style="font-weight:800;font-size:22px;color:#2B2B2B;letter-spacing:-.3px;">Привет, Аня 👋</div>
-          <div id="h_days" style="font-weight:600;font-size:13.5px;color:#8A8F98;margin-top:2px;">До ЕГЭ — 142 дня · пробник в феврале</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;">
+        <div style="min-width:0;">
+          <div id="h_hello" style="font-weight:800;font-size:22px;color:#2B2B2B;letter-spacing:-.3px;">Привет, Аня</div>
+          <div id="h_days" style="font-weight:600;font-size:13.5px;color:#8A8F98;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">До ЕГЭ — 142 дня</div>
         </div>
-        <div style="width:46px;height:46px;border-radius:15px;background:linear-gradient(135deg,#FFC861,#F2683F);display:grid;place-items:center;font-weight:800;font-size:18px;color:#fff;box-shadow:0 8px 18px rgba(242,104,63,.32);" id="h_ava">А</div>
+        <button class="homebtn" onclick="tab('scr16')" style="flex:none;display:flex;align-items:center;gap:7px;height:44px;padding:0 15px;border:none;border-radius:14px;background:linear-gradient(135deg,#2E2E33,#4A4A52);color:#fff;font-family:Manrope;font-weight:700;font-size:13.5px;cursor:pointer;box-shadow:0 8px 18px rgba(20,20,30,.24);">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2.5 1.5"/></svg>Экзамен
+        </button>
       </div>
       <!-- hero -->
-      <div style="background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:26px;padding:20px 22px;box-shadow:0 18px 34px rgba(242,104,63,.30);">
-        <div style="display:flex;align-items:center;justify-content:space-between;">
+      <div class="goalcard" style="position:relative;overflow:hidden;background:linear-gradient(140deg,#FF9E57 0%,#F2683F 55%,#E5491D 100%);border-radius:26px;padding:20px 22px;">
+        <svg style="position:absolute;inset:0;width:100%;height:100%;opacity:.5;pointer-events:none;" viewBox="0 0 320 230" preserveAspectRatio="xMidYMid slice" fill="#fff">
+          <path class="eb5sp" style="animation-delay:0s" d="M26,38 Q26,42 30,42 Q26,42 26,46 Q26,42 22,42 Q26,42 26,38 Z"/>
+          <path class="eb5sp" style="animation-delay:.7s" d="M292,30 Q292,34 296,34 Q292,34 292,38 Q292,34 288,34 Q292,34 292,30 Z"/>
+          <path class="eb5sp" style="animation-delay:1.3s" d="M256,158 Q256,161 259,161 Q256,161 256,164 Q256,161 253,161 Q256,161 256,158 Z"/>
+          <path class="eb5sp" style="animation-delay:.4s" d="M36,182 Q36,186 40,186 Q36,186 36,190 Q36,186 32,186 Q36,186 36,182 Z"/>
+          <path class="eb5sp" style="animation-delay:1.9s" d="M302,128 Q302,131 305,131 Q302,131 302,134 Q302,131 299,131 Q302,131 302,128 Z"/>
+        </svg>
+        <div style="position:relative;display:flex;align-items:center;justify-content:space-between;">
           <div>
-            <div style="font-weight:700;font-size:11px;letter-spacing:1.6px;color:rgba(255,255,255,.85);">ЦЕЛЬ ДНЯ</div>
-            <div style="margin-top:6px;display:flex;align-items:baseline;gap:6px;color:#fff;"><span id="h_min" style="font-weight:800;font-size:38px;letter-spacing:-1px;">18</span><span style="font-weight:700;font-size:17px;opacity:.85;">/ 30 мин</span></div>
-            <div style="margin-top:12px;display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,.22);border-radius:30px;padding:6px 12px;font-weight:700;font-size:12.5px;color:#fff;" id="h_streak">🔥 7 дней подряд</div>
+            <div style="font-weight:700;font-size:11px;letter-spacing:1.6px;color:rgba(255,255,255,.92);">ЦЕЛЬ ДНЯ</div>
+            <div style="margin-top:6px;display:flex;align-items:baseline;gap:6px;color:#fff;"><span id="h_min" style="font-weight:800;font-size:40px;letter-spacing:-1px;">18</span><span style="font-weight:700;font-size:17px;opacity:.9;">/ 30 мин</span></div>
+            <div style="margin-top:12px;display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,.24);border-radius:30px;padding:6px 12px;font-weight:700;font-size:12.5px;color:#fff;"><svg width="14" height="14" viewBox="0 0 24 24" fill="#FFD59E"><path d="M12 2c1.2 3-1 4.2-1 6.3 0 1.3 1 2.4 2.3 2.4 1.1 0 1.7-.7 1.9-1.7 1.4 1.4 2.3 3 2.3 5A5.5 5.5 0 0 1 6.5 14c0-2.6 1.6-4.4 2.7-6.4C10.3 9 12 8.2 12 6.5c0-1.4-.8-2.7-.6-4.5Z"/></svg><span id="h_streak">7 дней подряд</span></div>
           </div>
           <svg width="92" height="92" viewBox="0 0 100 100">
             <circle cx="50" cy="50" r="42" fill="none" stroke="rgba(255,255,255,.32)" stroke-width="9"/>
@@ -212,7 +229,7 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
           </svg>
         </div>
         <!-- week activity -->
-        <div style="margin-top:16px;display:flex;align-items:flex-end;justify-content:space-between;height:38px;">
+        <div style="position:relative;margin-top:16px;display:flex;align-items:flex-end;justify-content:space-between;height:38px;">
           <div style="display:flex;flex-direction:column;align-items:center;gap:6px;"><div style="width:7px;height:22px;border-radius:4px;background:rgba(255,255,255,.55);"></div><span style="font-size:9px;font-weight:700;color:rgba(255,255,255,.7);">П</span></div>
           <div style="display:flex;flex-direction:column;align-items:center;gap:6px;"><div style="width:7px;height:30px;border-radius:4px;background:rgba(255,255,255,.55);"></div><span style="font-size:9px;font-weight:700;color:rgba(255,255,255,.7);">В</span></div>
           <div style="display:flex;flex-direction:column;align-items:center;gap:6px;"><div style="width:7px;height:14px;border-radius:4px;background:rgba(255,255,255,.4);"></div><span style="font-size:9px;font-weight:700;color:rgba(255,255,255,.7);">С</span></div>
@@ -221,12 +238,13 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
           <div style="display:flex;flex-direction:column;align-items:center;gap:6px;"><div style="width:7px;height:18px;border-radius:4px;background:rgba(255,255,255,.4);"></div><span style="font-size:9px;font-weight:700;color:rgba(255,255,255,.7);">С</span></div>
           <div style="display:flex;flex-direction:column;align-items:center;gap:6px;"><div style="width:7px;height:20px;border-radius:4px;background:#fff;box-shadow:0 0 0 3px rgba(255,255,255,.25);"></div><span style="font-size:9px;font-weight:800;color:#fff;">В</span></div>
         </div>
+        <button class="homebtn" onclick="openLearn()" style="position:relative;margin-top:16px;width:100%;height:46px;border:none;border-radius:14px;background:rgba(255,255,255,.96);color:#F2683F;font-family:Manrope;font-weight:800;font-size:14.5px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:7px;">Продолжить занятие<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></button>
       </div>
       <!-- modules -->
       <div style="font-weight:700;font-size:11px;letter-spacing:1.6px;color:#8A8F98;margin:18px 2px 12px;">МОДУЛИ</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
         <!-- Слова -->
-        <div style="background:#fff;border-radius:20px;padding:15px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
+        <div class="mcard" onclick="tab('scr2')" style="background:#fff;border-radius:20px;padding:15px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;">
             <div style="width:38px;height:38px;border-radius:12px;background:#FFEDE4;display:grid;place-items:center;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="13" rx="2.5"/><path d="M8 5V3.5M16 5V3.5M4 9h16"/></svg></div>
             <svg width="44" height="44" viewBox="0 0 44 44"><defs><linearGradient id="r1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFA570"/><stop offset="1" stop-color="#F2683F"/></linearGradient></defs><circle cx="22" cy="22" r="18" fill="none" stroke="#EEF0F2" stroke-width="5"/><circle cx="22" cy="22" r="18" fill="none" stroke="url(#r1)" stroke-width="5" stroke-linecap="round" stroke-dasharray="113.1" stroke-dashoffset="40.7" id="ring_words" transform="rotate(-90 22 22)"/><text x="22" y="26" text-anchor="middle" font-family="Manrope" font-weight="800" font-size="11" fill="#2B2B2B" id="m_words">64</text></svg>
@@ -235,7 +253,7 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
           <div id="sub_words" style="font-weight:600;font-size:12px;color:#8A8F98;margin-top:1px;">учу · 320 / 500</div>
         </div>
         <!-- Грамматика -->
-        <div style="background:#fff;border-radius:20px;padding:15px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
+        <div class="mcard" onclick="tab('scr3')" style="background:#fff;border-radius:20px;padding:15px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;">
             <div style="width:38px;height:38px;border-radius:12px;background:#E5F4EC;display:grid;place-items:center;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1F9E5A" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h14v16H5z"/><path d="M9 9h6M9 13h6M9 17h3"/></svg></div>
             <svg width="44" height="44" viewBox="0 0 44 44"><defs><linearGradient id="r2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6FC2B0"/><stop offset="1" stop-color="#1F9E5A"/></linearGradient></defs><circle cx="22" cy="22" r="18" fill="none" stroke="#EEF0F2" stroke-width="5"/><circle cx="22" cy="22" r="18" fill="none" stroke="url(#r2)" stroke-width="5" stroke-linecap="round" stroke-dasharray="113.1" stroke-dashoffset="65.6" id="ring_gram" transform="rotate(-90 22 22)"/><text x="22" y="26" text-anchor="middle" font-family="Manrope" font-weight="800" font-size="11" fill="#2B2B2B" id="m_gram">42</text></svg>
@@ -244,7 +262,7 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
           <div style="font-weight:600;font-size:12px;color:#8A8F98;margin-top:1px;">12 тем пройдено</div>
         </div>
         <!-- Чтение -->
-        <div style="background:#fff;border-radius:20px;padding:15px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
+        <div class="mcard" onclick="tab('scr7')" style="background:#fff;border-radius:20px;padding:15px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;">
             <div style="width:38px;height:38px;border-radius:12px;background:#FFF4DE;display:grid;place-items:center;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#E8730A" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6c-2-1.3-4.5-1.5-7-1v13c2.5-.5 5-.3 7 1 2-1.3 4.5-1.5 7-1V5c-2.5-.5-5-.3-7 1Z"/><path d="M12 6v13"/></svg></div>
             <svg width="44" height="44" viewBox="0 0 44 44"><defs><linearGradient id="r3" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFC861"/><stop offset="1" stop-color="#E8730A"/></linearGradient></defs><circle cx="22" cy="22" r="18" fill="none" stroke="#EEF0F2" stroke-width="5"/><circle cx="22" cy="22" r="18" fill="none" stroke="url(#r3)" stroke-width="5" stroke-linecap="round" stroke-dasharray="113.1" stroke-dashoffset="24.9" id="ring_read" transform="rotate(-90 22 22)"/><text x="22" y="26" text-anchor="middle" font-family="Manrope" font-weight="800" font-size="11" fill="#2B2B2B" id="m_read">78</text></svg>
@@ -253,7 +271,7 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
           <div style="font-weight:600;font-size:12px;color:#8A8F98;margin-top:1px;">7 текстов</div>
         </div>
         <!-- Аудирование -->
-        <div style="background:#fff;border-radius:20px;padding:15px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
+        <div class="mcard" onclick="tab('scr4')" style="background:#fff;border-radius:20px;padding:15px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;">
             <div style="width:38px;height:38px;border-radius:12px;background:#E3F1F5;display:grid;place-items:center;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5FB6C9" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13v-1a8 8 0 0 1 16 0v1"/><rect x="3" y="13" width="4.2" height="6.5" rx="1.8"/><rect x="16.8" y="13" width="4.2" height="6.5" rx="1.8"/></svg></div>
             <svg width="44" height="44" viewBox="0 0 44 44"><defs><linearGradient id="r4" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5FB6C9"/><stop offset="1" stop-color="#3E93A8"/></linearGradient></defs><circle cx="22" cy="22" r="18" fill="none" stroke="#EEF0F2" stroke-width="5"/><circle cx="22" cy="22" r="18" fill="none" stroke="url(#r4)" stroke-width="5" stroke-linecap="round" stroke-dasharray="113.1" stroke-dashoffset="79.2" id="ring_listen" transform="rotate(-90 22 22)"/><text x="22" y="26" text-anchor="middle" font-family="Manrope" font-weight="800" font-size="11" fill="#2B2B2B" id="m_listen">30</text></svg>
@@ -262,8 +280,7 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
           <div style="font-weight:600;font-size:12px;color:#8A8F98;margin-top:1px;">слабое место</div>
         </div>
       </div>
-      <!-- mascot tip -->
-      <sc-if value="{{ showMascot }}" hint-placeholder-val="{{ true }}">
+      <!-- совет дня -->
         <div style="display:flex;align-items:center;gap:14px;background:#fff;border-radius:20px;padding:13px 15px;box-shadow:0 8px 22px rgba(20,20,30,.05);margin-top:14px;">
           <div style="width:54px;height:54px;flex:none;border-radius:17px;background:linear-gradient(135deg,#FFA570,#F2683F);display:grid;place-items:center;">
             <svg width="32" height="32" viewBox="0 0 38 38" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6a9 9 0 0 0-6 15.7c1 .9 1.4 1.6 1.5 2.8h9c.1-1.2.5-1.9 1.5-2.8A9 9 0 0 0 19 6Z"/><circle cx="15.6" cy="16" r="1.1" fill="#fff" stroke="none"/><circle cx="22.4" cy="16" r="1.1" fill="#fff" stroke="none"/><path d="M15.7 19.4c1.3 1.2 5.3 1.2 6.6 0"/><path d="M15.5 27.5h7M16.5 30.5h5"/></svg>
@@ -273,7 +290,6 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
             <div style="font-weight:600;font-size:13.5px;color:#2B2B2B;line-height:1.35;margin-top:3px;">Учи по 5 слов утром — на свежую голову запоминается легче 🧠</div>
           </div>
         </div>
-      </sc-if>
     </div>
     <!-- bottom nav -->
     <div style="position:absolute;left:0;right:0;bottom:0;height:86px;background:rgba(255,255,255,.97);border-top:1px solid #EEF0F2;display:flex;justify-content:space-around;padding:14px 8px 0;z-index:6;">
@@ -1355,12 +1371,11 @@ function setTxt(id,v){const e=document.getElementById(id);if(e)e.textContent=v}
 function setW(id,v){const e=document.getElementById(id);if(e)e.style.width=Math.round(v)+'%'}
 function ringOff(id,total,v){const e=document.getElementById(id);if(e)e.setAttribute('stroke-dashoffset',String(Math.round(total*(1-v/100))))}
 function renderHome(){if(!S)return;const u=currentUser||'друг';
-  setTxt('h_hello','Привет, '+u+' 👋');
-  setTxt('h_days','До ЕГЭ — '+daysLeft()+' дней · пробник в феврале');
-  setTxt('h_ava',u[0].toUpperCase());
+  setTxt('h_hello','Привет, '+u);
+  setTxt('h_days','До ЕГЭ — '+daysLeft()+' дней');
   const pct=Math.min(100,Math.round((S.dayMin||0)/30*100));
   setTxt('h_min',S.dayMin||0);setTxt('h_pct',pct+'%');ringOff('h_ring',263.9,pct);
-  setTxt('h_streak','🔥 '+(S.streak||0)+' дней подряд');
+  setTxt('h_streak',(S.streak||0)+' дней подряд');
   const p=S.prog||{};
   setTxt('m_words',p.words||0);ringOff('ring_words',113.1,p.words||0);
   setTxt('m_gram',p.gram||0);ringOff('ring_gram',113.1,p.gram||0);
