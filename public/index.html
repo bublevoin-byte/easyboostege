@@ -6,6 +6,7 @@
 <title>Easy Boost</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;800;900&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box}html,body{margin:0;padding:0}
 body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;align-items:center;justify-content:center;min-height:100vh;-webkit-font-smoothing:antialiased}
@@ -40,14 +41,30 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
 #toast{position:fixed;bottom:180px;left:50%;transform:translateX(-50%);z-index:300;background:#2B2B2B;color:#fff;
   padding:11px 18px;border-radius:14px;font:600 13px Manrope,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.3);display:none;max-width:320px;text-align:center}
 @media(max-width:430px){#genfab{left:auto;right:16px;transform:none}}
-.mcard{cursor:pointer;transition:transform .13s ease,box-shadow .13s ease}
-.mcard:active{transform:scale(.96);box-shadow:0 4px 14px rgba(20,20,30,.08)}
-.homebtn{transition:transform .12s ease}.homebtn:active{transform:scale(.94)}
-#h_ring{transition:stroke-dashoffset 1s cubic-bezier(.4,0,.2,1)}
-.mring{transition:stroke-dashoffset 1s cubic-bezier(.4,0,.2,1)}
-@keyframes goalglow{0%,100%{box-shadow:0 18px 34px rgba(242,104,63,.32)}50%{box-shadow:0 22px 46px rgba(242,104,63,.5)}}
-.goalcard{animation:goalglow 3.6s ease-in-out infinite}
-@media(prefers-reduced-motion:reduce){.goalcard{animation:none}}
+
+/* --- redesigned home (claymorphism) --- */
+@keyframes heroFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+.heroFloat{animation:heroFloat 5s ease-in-out infinite}
+@keyframes examShine{0%{left:-70%}55%,100%{left:130%}}
+#examBtn{position:relative;overflow:hidden}
+#examBtn::before{content:"";position:absolute;top:0;left:-70%;width:55%;height:100%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.22),transparent);transform:skewX(-18deg);pointer-events:none;animation:examShine 3.6s ease-in-out infinite}
+@media(prefers-reduced-motion:reduce){.heroFloat,#examBtn::before{animation:none}}
+.clayHero{position:relative;overflow:hidden;background:linear-gradient(150deg,#FFA570 0%,#F2683F 58%,#E44E20 100%);border-radius:32px;padding:22px 22px 18px;box-shadow:0 20px 40px rgba(242,104,63,.32),inset 0 2px 5px rgba(255,255,255,.5),inset 0 -10px 22px rgba(190,55,18,.28)}
+.clayCard{background:#fff;border-radius:24px;border:1px solid #F0EAE2;box-shadow:0 12px 26px rgba(60,45,30,.07),0 2px 6px rgba(60,45,30,.04),inset 0 2px 0 rgba(255,255,255,.9)}
+.sq{transition:transform .18s cubic-bezier(.34,1.56,.64,1)}
+.sq:active{transform:scale(.94)}
+.heroCta{position:relative;display:flex;align-items:center;justify-content:center;gap:8px;background:rgba(255,255,255,.97);border-radius:20px;padding:15px;margin-top:15px;font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:16px;color:#E44E20;box-shadow:0 10px 20px rgba(160,40,10,.24),inset 0 -4px 9px rgba(242,104,63,.16),inset 0 2px 0 #fff;cursor:pointer}
+.iconBlob{width:44px;height:44px;border-radius:16px;display:grid;place-items:center;box-shadow:inset 0 -3px 7px rgba(120,80,40,.08),inset 0 2px 3px rgba(255,255,255,.9)}
+.wcol{display:flex;flex-direction:column;align-items:center;gap:6px}
+.wcol span{font-size:9px;font-weight:700;color:rgba(255,255,255,.75)}
+.wcol.on span{font-weight:800;color:#fff}
+.wbar{width:10px;border-radius:6px;background:rgba(255,255,255,.55);box-shadow:inset 0 -2px 4px rgba(190,55,18,.28),inset 0 1px 2px rgba(255,255,255,.5)}
+.wbar.dim{background:rgba(255,255,255,.34)}
+.wbar.now{background:#fff;box-shadow:0 0 0 3.5px rgba(255,255,255,.28),0 3px 7px rgba(190,55,18,.3)}
+.navclay{height:72px;background:rgba(255,255,255,.97);border-radius:26px;border:1px solid #F0EAE2;display:flex;justify-content:space-around;align-items:center;box-shadow:0 14px 34px rgba(60,45,30,.16),inset 0 2px 0 #fff;padding:0 6px}
+.navit{display:flex;flex-direction:column;align-items:center;gap:4px;width:74px;padding:8px 0;border-radius:18px;transition:transform .18s cubic-bezier(.34,1.56,.64,1)}
+.navit:active{transform:scale(.92)}
+.navit.on{background:#FFEDE4;box-shadow:inset 0 -3px 7px rgba(242,104,63,.14),inset 0 2px 3px rgba(255,255,255,.9)}
 </style></head><body>
 <button id="navfab" onclick="document.getElementById('navmenu').classList.toggle('open')">Экраны ▾</button>
 <div id="navmenu"></div>
@@ -140,7 +157,7 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
       <!-- telegram -->
       <a id="tgbtn" href="#" target="_blank" rel="noopener" onclick="tgClick(event)" style="width:100%;height:56px;box-sizing:border-box;border:none;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:16px;font-family:Manrope;font-weight:700;font-size:16px;color:#fff;display:flex;align-items:center;justify-content:center;gap:10px;cursor:pointer;box-shadow:0 12px 24px rgba(242,104,63,.32);text-decoration:none;"><svg width="22" height="22" viewBox="0 0 24 24" fill="#fff"><path d="M21.5 4.3 2.9 11.5c-1 .4-1 1.8.1 2.1l4.6 1.4 1.8 5.6c.3.8 1.3 1 1.9.4l2.5-2.4 4.6 3.4c.7.5 1.7.1 1.9-.7L23 5.6c.2-1-.7-1.7-1.5-1.3Z"/></svg>Войти через Telegram</a>
       <div id="lg_msg" style="margin-top:12px;text-align:center;font-weight:600;font-size:13px;color:#E23B2B;"></div>
-      <div style="margin-top:16px;text-align:center;font-weight:600;font-size:12.5px;color:#8A8F98;">Быстрый вход по Telegram — без пароля <span style="color:#C4C8CE">· v11</span></div>
+      <div style="margin-top:16px;text-align:center;font-weight:600;font-size:12.5px;color:#8A8F98;">Быстрый вход по Telegram — без пароля <span style="color:#C4C8CE">· v10</span></div>
     </div>
   
 </div>
@@ -184,7 +201,7 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
     </div>
   
 </div>
-<div class="screen" id="scr1" data-name="Главная">
+<div class="screen" id="scr1" data-name="Главная" style="background:#F6F3EF;">
 
     <!-- status bar (dark) -->
     <div style="position:absolute;top:0;left:0;right:0;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 7px;z-index:6;">
@@ -196,108 +213,116 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
       </div>
     </div>
     <!-- content -->
-    <div style="position:absolute;top:52px;left:0;right:0;bottom:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:6px 20px 112px;">
-      <!-- greeting -->
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;">
-        <div style="min-width:0;">
-          <div id="h_hello" style="font-weight:800;font-size:22px;color:#2B2B2B;letter-spacing:-.3px;">Привет, Аня</div>
-          <div id="h_days" style="font-weight:600;font-size:13.5px;color:#8A8F98;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">До ЕГЭ — 142 дня</div>
+    <div style="position:absolute;top:52px;left:0;right:0;bottom:0;padding:8px 20px 118px;">
+      <!-- exam CTA -->
+      <div id="examBtn" class="sq clk" onclick="nav('scr16')" style="display:flex;align-items:center;gap:13px;margin-bottom:18px;background:linear-gradient(150deg,#3A3532,#2B2B2B);border-radius:22px;padding:12px 16px;box-shadow:0 14px 28px rgba(43,35,30,.32),inset 0 2px 3px rgba(255,255,255,.14),inset 0 -5px 10px rgba(0,0,0,.35);cursor:pointer;">
+        <div style="width:44px;height:44px;flex:none;border-radius:15px;background:linear-gradient(145deg,#FFC861,#F2683F);display:grid;place-items:center;box-shadow:0 6px 12px rgba(242,104,63,.4),inset 0 2px 3px rgba(255,255,255,.5),inset 0 -3px 6px rgba(190,55,18,.3);">
+          <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m2 9 10-4 10 4-10 4L2 9Z"/><path d="M6 11v4.5c0 1.2 2.7 2.5 6 2.5s6-1.3 6-2.5V11"/><path d="M22 9v5"/></svg>
         </div>
-        <button class="homebtn" onclick="tab('scr16')" style="flex:none;display:flex;align-items:center;gap:7px;height:44px;padding:0 15px;border:none;border-radius:14px;background:linear-gradient(135deg,#2E2E33,#4A4A52);color:#fff;font-family:Manrope;font-weight:700;font-size:13.5px;cursor:pointer;box-shadow:0 8px 18px rgba(20,20,30,.24);">
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2.5 1.5"/></svg>Экзамен
-        </button>
+        <div style="flex:1;min-width:0;">
+          <div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:16.5px;color:#fff;">Попробовать экзамен</div>
+          <div id="h_days" style="font-weight:600;font-size:11.5px;color:rgba(255,255,255,.62);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">До ЕГЭ — 142 дня · пробник в феврале</div>
+        </div>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.75)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><path d="m9 6 6 6-6 6"/></svg>
       </div>
-      <!-- hero -->
-      <div class="goalcard" style="position:relative;overflow:hidden;background:linear-gradient(140deg,#FF9E57 0%,#F2683F 55%,#E5491D 100%);border-radius:26px;padding:20px 22px;">
-        <svg style="position:absolute;inset:0;width:100%;height:100%;opacity:.5;pointer-events:none;" viewBox="0 0 320 230" preserveAspectRatio="xMidYMid slice" fill="#fff">
-          <path class="eb5sp" style="animation-delay:0s" d="M26,38 Q26,42 30,42 Q26,42 26,46 Q26,42 22,42 Q26,42 26,38 Z"/>
-          <path class="eb5sp" style="animation-delay:.7s" d="M292,30 Q292,34 296,34 Q292,34 292,38 Q292,34 288,34 Q292,34 292,30 Z"/>
-          <path class="eb5sp" style="animation-delay:1.3s" d="M256,158 Q256,161 259,161 Q256,161 256,164 Q256,161 253,161 Q256,161 256,158 Z"/>
-          <path class="eb5sp" style="animation-delay:.4s" d="M36,182 Q36,186 40,186 Q36,186 36,190 Q36,186 32,186 Q36,186 36,182 Z"/>
-          <path class="eb5sp" style="animation-delay:1.9s" d="M302,128 Q302,131 305,131 Q302,131 302,134 Q302,131 299,131 Q302,131 302,128 Z"/>
+      <!-- hero: goal of the day (clay) -->
+      <div class="clayHero heroFloat">
+        <div style="position:absolute;top:-46px;right:-30px;width:150px;height:150px;border-radius:50%;background:rgba(255,255,255,.13);"></div>
+        <div style="position:absolute;bottom:-64px;left:-40px;width:170px;height:170px;border-radius:50%;background:rgba(255,255,255,.08);"></div>
+        <svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;" viewBox="0 0 350 260" preserveAspectRatio="xMidYMid slice" fill="rgba(255,255,255,.9)">
+          <path class="eb5sp" style="animation-delay:0s" d="M36,30 Q36,35 41,35 Q36,35 36,40 Q36,35 31,35 Q36,35 36,30 Z"/>
+          <path class="eb5sp" style="animation-delay:.7s" d="M172,16 Q172,20 176,20 Q172,20 172,24 Q172,20 168,20 Q172,20 172,16 Z"/>
+          <path class="eb5sp" style="animation-delay:1.3s" d="M318,42 Q318,47 323,47 Q318,47 318,52 Q318,47 313,47 Q318,47 318,42 Z"/>
+          <path class="eb5sp" style="animation-delay:.4s" d="M338,120 Q338,124 342,124 Q338,124 338,128 Q338,124 334,124 Q338,124 338,120 Z"/>
+          <path class="eb5sp" style="animation-delay:1.8s" d="M20,105 Q20,109 24,109 Q20,109 20,113 Q20,109 16,109 Q20,109 20,105 Z"/>
+          <path class="eb5sp" style="animation-delay:1s" d="M200,88 Q200,91.5 203.5,91.5 Q200,91.5 200,95 Q200,91.5 196.5,91.5 Q200,91.5 200,88 Z"/>
+          <path class="eb5sp" style="animation-delay:2.2s" d="M150,140 Q150,144 154,144 Q150,144 150,148 Q150,144 146,144 Q150,144 150,140 Z"/>
         </svg>
         <div style="position:relative;display:flex;align-items:center;justify-content:space-between;">
           <div>
-            <div style="font-weight:700;font-size:11px;letter-spacing:1.6px;color:rgba(255,255,255,.92);">ЦЕЛЬ ДНЯ</div>
-            <div style="margin-top:6px;display:flex;align-items:baseline;gap:6px;color:#fff;"><span id="h_min" style="font-weight:800;font-size:40px;letter-spacing:-1px;">18</span><span style="font-weight:700;font-size:17px;opacity:.9;">/ 30 мин</span></div>
-            <div style="margin-top:12px;display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,.24);border-radius:30px;padding:6px 12px;font-weight:700;font-size:12.5px;color:#fff;"><svg width="14" height="14" viewBox="0 0 24 24" fill="#FFD59E"><path d="M12 2c1.2 3-1 4.2-1 6.3 0 1.3 1 2.4 2.3 2.4 1.1 0 1.7-.7 1.9-1.7 1.4 1.4 2.3 3 2.3 5A5.5 5.5 0 0 1 6.5 14c0-2.6 1.6-4.4 2.7-6.4C10.3 9 12 8.2 12 6.5c0-1.4-.8-2.7-.6-4.5Z"/></svg><span id="h_streak">7 дней подряд</span></div>
+            <div style="font-weight:800;font-size:11px;letter-spacing:1.8px;color:rgba(255,255,255,.9);">ЦЕЛЬ ДНЯ</div>
+            <div style="margin-top:7px;display:flex;align-items:baseline;gap:6px;color:#fff;"><span id="h_min" style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:42px;letter-spacing:-1px;">18</span><span style="font-weight:700;font-size:16px;opacity:.85;">/ 30 мин</span></div>
+            <div id="h_streak" style="margin-top:13px;display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,.24);border-radius:30px;padding:7px 13px;font-weight:800;font-size:12.5px;color:#fff;box-shadow:inset 0 2px 3px rgba(255,255,255,.35),inset 0 -3px 6px rgba(190,55,18,.22);">🔥 7 дней подряд</div>
           </div>
-          <svg width="92" height="92" viewBox="0 0 100 100">
-            <circle cx="50" cy="50" r="42" fill="none" stroke="rgba(255,255,255,.32)" stroke-width="9"/>
-            <circle cx="50" cy="50" r="42" fill="none" stroke="#fff" stroke-width="9" stroke-linecap="round" stroke-dasharray="263.9" stroke-dashoffset="105.6" transform="rotate(-90 50 50)" id="h_ring"/>
-            <text x="50" y="55" text-anchor="middle" font-family="Manrope" font-weight="800" font-size="22" fill="#fff" id="h_pct">60%</text>
+          <svg width="96" height="96" viewBox="0 0 100 100" style="filter:drop-shadow(0 6px 10px rgba(190,55,18,.25));">
+            <circle cx="50" cy="50" r="42" fill="none" stroke="rgba(190,55,18,.28)" stroke-width="10"/>
+            <circle cx="50" cy="50" r="42" fill="none" stroke="#fff" stroke-width="10" stroke-linecap="round" stroke-dasharray="263.9" stroke-dashoffset="105.6" transform="rotate(-90 50 50)" id="h_ring"/>
+            <text x="50" y="56" text-anchor="middle" font-family="Nunito,Manrope" font-weight="800" font-size="20" fill="#fff" id="h_pct">60%</text>
           </svg>
         </div>
         <!-- week activity -->
-        <div style="position:relative;margin-top:16px;display:flex;align-items:flex-end;justify-content:space-between;height:38px;">
-          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;"><div style="width:7px;height:22px;border-radius:4px;background:rgba(255,255,255,.55);"></div><span style="font-size:9px;font-weight:700;color:rgba(255,255,255,.7);">П</span></div>
-          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;"><div style="width:7px;height:30px;border-radius:4px;background:rgba(255,255,255,.55);"></div><span style="font-size:9px;font-weight:700;color:rgba(255,255,255,.7);">В</span></div>
-          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;"><div style="width:7px;height:14px;border-radius:4px;background:rgba(255,255,255,.4);"></div><span style="font-size:9px;font-weight:700;color:rgba(255,255,255,.7);">С</span></div>
-          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;"><div style="width:7px;height:34px;border-radius:4px;background:rgba(255,255,255,.55);"></div><span style="font-size:9px;font-weight:700;color:rgba(255,255,255,.7);">Ч</span></div>
-          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;"><div style="width:7px;height:26px;border-radius:4px;background:rgba(255,255,255,.55);"></div><span style="font-size:9px;font-weight:700;color:rgba(255,255,255,.7);">П</span></div>
-          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;"><div style="width:7px;height:18px;border-radius:4px;background:rgba(255,255,255,.4);"></div><span style="font-size:9px;font-weight:700;color:rgba(255,255,255,.7);">С</span></div>
-          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;"><div style="width:7px;height:20px;border-radius:4px;background:#fff;box-shadow:0 0 0 3px rgba(255,255,255,.25);"></div><span style="font-size:9px;font-weight:800;color:#fff;">В</span></div>
+        <div style="position:relative;margin-top:14px;display:flex;align-items:flex-end;justify-content:space-between;height:42px;padding:0 3px;">
+          <div class="wcol"><div class="wbar" style="height:22px;"></div><span>П</span></div>
+          <div class="wcol"><div class="wbar" style="height:30px;"></div><span>В</span></div>
+          <div class="wcol"><div class="wbar dim" style="height:14px;"></div><span>С</span></div>
+          <div class="wcol"><div class="wbar" style="height:34px;"></div><span>Ч</span></div>
+          <div class="wcol"><div class="wbar" style="height:26px;"></div><span>П</span></div>
+          <div class="wcol"><div class="wbar dim" style="height:18px;"></div><span>С</span></div>
+          <div class="wcol on"><div class="wbar now" style="height:22px;"></div><span>В</span></div>
         </div>
-        <button class="homebtn" onclick="openLearn()" style="position:relative;margin-top:16px;width:100%;height:46px;border:none;border-radius:14px;background:rgba(255,255,255,.96);color:#F2683F;font-family:Manrope;font-weight:800;font-size:14.5px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:7px;">Продолжить занятие<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></button>
+        <div class="heroCta sq clk" onclick="openLearn()">Продолжить занятие <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#E44E20" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></div>
       </div>
       <!-- modules -->
-      <div style="font-weight:700;font-size:11px;letter-spacing:1.6px;color:#8A8F98;margin:18px 2px 12px;">МОДУЛИ</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:12px;letter-spacing:1.8px;color:#A59C8D;margin:20px 2px 12px;">МОДУЛИ</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:13px;">
         <!-- Слова -->
-        <div class="mcard" onclick="tab('scr2')" style="background:#fff;border-radius:20px;padding:15px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
+        <div class="clayCard sq" style="padding:16px;">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;">
-            <div style="width:38px;height:38px;border-radius:12px;background:#FFEDE4;display:grid;place-items:center;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="13" rx="2.5"/><path d="M8 5V3.5M16 5V3.5M4 9h16"/></svg></div>
-            <svg width="44" height="44" viewBox="0 0 44 44"><defs><linearGradient id="r1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFA570"/><stop offset="1" stop-color="#F2683F"/></linearGradient></defs><circle cx="22" cy="22" r="18" fill="none" stroke="#EEF0F2" stroke-width="5"/><circle cx="22" cy="22" r="18" fill="none" stroke="url(#r1)" stroke-width="5" stroke-linecap="round" stroke-dasharray="113.1" stroke-dashoffset="40.7" id="ring_words" transform="rotate(-90 22 22)"/><text x="22" y="26" text-anchor="middle" font-family="Manrope" font-weight="800" font-size="11" fill="#2B2B2B" id="m_words">64</text></svg>
+            <div class="iconBlob" style="background:#FFEDE4;"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="13" rx="2.5"/><path d="M8 5V3.5M16 5V3.5M4 9h16"/></svg></div>
+            <svg width="46" height="46" viewBox="0 0 44 44"><defs><linearGradient id="r1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFA570"/><stop offset="1" stop-color="#F2683F"/></linearGradient></defs><circle cx="22" cy="22" r="18" fill="none" stroke="#F1EDE7" stroke-width="5.5"/><circle cx="22" cy="22" r="18" fill="none" stroke="url(#r1)" stroke-width="5.5" stroke-linecap="round" stroke-dasharray="113.1" stroke-dashoffset="40.7" id="ring_words" transform="rotate(-90 22 22)"/><text x="22" y="26" text-anchor="middle" font-family="Nunito,Manrope" font-weight="800" font-size="11" fill="#2B2B2B" id="m_words">64</text></svg>
           </div>
-          <div style="margin-top:11px;font-weight:700;font-size:16px;color:#2B2B2B;">Слова</div>
-          <div id="sub_words" style="font-weight:600;font-size:12px;color:#8A8F98;margin-top:1px;">учу · 320 / 500</div>
+          <span style="display:block;margin-top:12px;font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:16.5px;color:#2B2B2B;">Слова</span>
+          <div id="sub_words" style="font-weight:600;font-size:12px;color:#98917F;margin-top:2px;">учу · 320 / 500</div>
         </div>
         <!-- Грамматика -->
-        <div class="mcard" onclick="tab('scr3')" style="background:#fff;border-radius:20px;padding:15px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
+        <div class="clayCard sq" style="padding:16px;">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;">
-            <div style="width:38px;height:38px;border-radius:12px;background:#E5F4EC;display:grid;place-items:center;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1F9E5A" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h14v16H5z"/><path d="M9 9h6M9 13h6M9 17h3"/></svg></div>
-            <svg width="44" height="44" viewBox="0 0 44 44"><defs><linearGradient id="r2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6FC2B0"/><stop offset="1" stop-color="#1F9E5A"/></linearGradient></defs><circle cx="22" cy="22" r="18" fill="none" stroke="#EEF0F2" stroke-width="5"/><circle cx="22" cy="22" r="18" fill="none" stroke="url(#r2)" stroke-width="5" stroke-linecap="round" stroke-dasharray="113.1" stroke-dashoffset="65.6" id="ring_gram" transform="rotate(-90 22 22)"/><text x="22" y="26" text-anchor="middle" font-family="Manrope" font-weight="800" font-size="11" fill="#2B2B2B" id="m_gram">42</text></svg>
+            <div class="iconBlob" style="background:#E5F4EC;"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#1F9E5A" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h14v16H5z"/><path d="M9 9h6M9 13h6M9 17h3"/></svg></div>
+            <svg width="46" height="46" viewBox="0 0 44 44"><defs><linearGradient id="r2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6FC2B0"/><stop offset="1" stop-color="#1F9E5A"/></linearGradient></defs><circle cx="22" cy="22" r="18" fill="none" stroke="#F1EDE7" stroke-width="5.5"/><circle cx="22" cy="22" r="18" fill="none" stroke="url(#r2)" stroke-width="5.5" stroke-linecap="round" stroke-dasharray="113.1" stroke-dashoffset="65.6" id="ring_gram" transform="rotate(-90 22 22)"/><text x="22" y="26" text-anchor="middle" font-family="Nunito,Manrope" font-weight="800" font-size="11" fill="#2B2B2B" id="m_gram">42</text></svg>
           </div>
-          <div style="margin-top:11px;font-weight:700;font-size:16px;color:#2B2B2B;">Грамматика</div>
-          <div style="font-weight:600;font-size:12px;color:#8A8F98;margin-top:1px;">12 тем пройдено</div>
+          <span style="display:block;margin-top:12px;font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:16.5px;color:#2B2B2B;">Грамматика</span>
+          <div style="font-weight:600;font-size:12px;color:#98917F;margin-top:2px;">12 тем пройдено</div>
         </div>
         <!-- Чтение -->
-        <div class="mcard" onclick="tab('scr7')" style="background:#fff;border-radius:20px;padding:15px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
+        <div class="clayCard sq" style="padding:16px;">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;">
-            <div style="width:38px;height:38px;border-radius:12px;background:#FFF4DE;display:grid;place-items:center;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#E8730A" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6c-2-1.3-4.5-1.5-7-1v13c2.5-.5 5-.3 7 1 2-1.3 4.5-1.5 7-1V5c-2.5-.5-5-.3-7 1Z"/><path d="M12 6v13"/></svg></div>
-            <svg width="44" height="44" viewBox="0 0 44 44"><defs><linearGradient id="r3" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFC861"/><stop offset="1" stop-color="#E8730A"/></linearGradient></defs><circle cx="22" cy="22" r="18" fill="none" stroke="#EEF0F2" stroke-width="5"/><circle cx="22" cy="22" r="18" fill="none" stroke="url(#r3)" stroke-width="5" stroke-linecap="round" stroke-dasharray="113.1" stroke-dashoffset="24.9" id="ring_read" transform="rotate(-90 22 22)"/><text x="22" y="26" text-anchor="middle" font-family="Manrope" font-weight="800" font-size="11" fill="#2B2B2B" id="m_read">78</text></svg>
+            <div class="iconBlob" style="background:#FFF4DE;"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#E8730A" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6c-2-1.3-4.5-1.5-7-1v13c2.5-.5 5-.3 7 1 2-1.3 4.5-1.5 7-1V5c-2.5-.5-5-.3-7 1Z"/><path d="M12 6v13"/></svg></div>
+            <svg width="46" height="46" viewBox="0 0 44 44"><defs><linearGradient id="r3" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFC861"/><stop offset="1" stop-color="#E8730A"/></linearGradient></defs><circle cx="22" cy="22" r="18" fill="none" stroke="#F1EDE7" stroke-width="5.5"/><circle cx="22" cy="22" r="18" fill="none" stroke="url(#r3)" stroke-width="5.5" stroke-linecap="round" stroke-dasharray="113.1" stroke-dashoffset="24.9" id="ring_read" transform="rotate(-90 22 22)"/><text x="22" y="26" text-anchor="middle" font-family="Nunito,Manrope" font-weight="800" font-size="11" fill="#2B2B2B" id="m_read">78</text></svg>
           </div>
-          <div style="margin-top:11px;font-weight:700;font-size:16px;color:#2B2B2B;">Чтение</div>
-          <div style="font-weight:600;font-size:12px;color:#8A8F98;margin-top:1px;">7 текстов</div>
+          <span style="display:block;margin-top:12px;font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:16.5px;color:#2B2B2B;">Чтение</span>
+          <div style="font-weight:600;font-size:12px;color:#98917F;margin-top:2px;">7 текстов</div>
         </div>
         <!-- Аудирование -->
-        <div class="mcard" onclick="tab('scr4')" style="background:#fff;border-radius:20px;padding:15px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
+        <div class="clayCard sq" style="padding:16px;">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;">
-            <div style="width:38px;height:38px;border-radius:12px;background:#E3F1F5;display:grid;place-items:center;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5FB6C9" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13v-1a8 8 0 0 1 16 0v1"/><rect x="3" y="13" width="4.2" height="6.5" rx="1.8"/><rect x="16.8" y="13" width="4.2" height="6.5" rx="1.8"/></svg></div>
-            <svg width="44" height="44" viewBox="0 0 44 44"><defs><linearGradient id="r4" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5FB6C9"/><stop offset="1" stop-color="#3E93A8"/></linearGradient></defs><circle cx="22" cy="22" r="18" fill="none" stroke="#EEF0F2" stroke-width="5"/><circle cx="22" cy="22" r="18" fill="none" stroke="url(#r4)" stroke-width="5" stroke-linecap="round" stroke-dasharray="113.1" stroke-dashoffset="79.2" id="ring_listen" transform="rotate(-90 22 22)"/><text x="22" y="26" text-anchor="middle" font-family="Manrope" font-weight="800" font-size="11" fill="#2B2B2B" id="m_listen">30</text></svg>
+            <div class="iconBlob" style="background:#E3F1F5;"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#5FB6C9" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13v-1a8 8 0 0 1 16 0v1"/><rect x="3" y="13" width="4.2" height="6.5" rx="1.8"/><rect x="16.8" y="13" width="4.2" height="6.5" rx="1.8"/></svg></div>
+            <svg width="46" height="46" viewBox="0 0 44 44"><defs><linearGradient id="r4" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5FB6C9"/><stop offset="1" stop-color="#3E93A8"/></linearGradient></defs><circle cx="22" cy="22" r="18" fill="none" stroke="#F1EDE7" stroke-width="5.5"/><circle cx="22" cy="22" r="18" fill="none" stroke="url(#r4)" stroke-width="5.5" stroke-linecap="round" stroke-dasharray="113.1" stroke-dashoffset="79.2" id="ring_listen" transform="rotate(-90 22 22)"/><text x="22" y="26" text-anchor="middle" font-family="Nunito,Manrope" font-weight="800" font-size="11" fill="#2B2B2B" id="m_listen">30</text></svg>
           </div>
-          <div style="margin-top:11px;font-weight:700;font-size:16px;color:#2B2B2B;">Аудирование</div>
-          <div style="font-weight:600;font-size:12px;color:#8A8F98;margin-top:1px;">слабое место</div>
+          <span style="display:block;margin-top:12px;font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:16.5px;color:#2B2B2B;">Аудирование</span>
+          <div style="font-weight:600;font-size:12px;color:#98917F;margin-top:2px;">слабое место</div>
         </div>
       </div>
-      <!-- совет дня -->
-        <div style="display:flex;align-items:center;gap:14px;background:#fff;border-radius:20px;padding:13px 15px;box-shadow:0 8px 22px rgba(20,20,30,.05);margin-top:14px;">
-          <div style="width:54px;height:54px;flex:none;border-radius:17px;background:linear-gradient(135deg,#FFA570,#F2683F);display:grid;place-items:center;">
+      <!-- mascot tip -->
+      <sc-if value="{{ showMascot }}" hint-placeholder-val="{{ true }}">
+        <div class="clayCard" style="display:flex;align-items:center;gap:14px;padding:14px 16px;margin-top:15px;">
+          <div style="width:56px;height:56px;flex:none;border-radius:19px;background:linear-gradient(145deg,#FFA570,#F2683F);display:grid;place-items:center;box-shadow:0 8px 16px rgba(242,104,63,.3),inset 0 2px 3px rgba(255,255,255,.5),inset 0 -4px 8px rgba(190,55,18,.26);">
             <svg width="32" height="32" viewBox="0 0 38 38" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6a9 9 0 0 0-6 15.7c1 .9 1.4 1.6 1.5 2.8h9c.1-1.2.5-1.9 1.5-2.8A9 9 0 0 0 19 6Z"/><circle cx="15.6" cy="16" r="1.1" fill="#fff" stroke="none"/><circle cx="22.4" cy="16" r="1.1" fill="#fff" stroke="none"/><path d="M15.7 19.4c1.3 1.2 5.3 1.2 6.6 0"/><path d="M15.5 27.5h7M16.5 30.5h5"/></svg>
           </div>
           <div>
-            <div style="font-weight:800;font-size:11px;letter-spacing:1.2px;color:#F2683F;">СОВЕТ ДНЯ</div>
+            <div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:11px;letter-spacing:1.4px;color:#F2683F;">СОВЕТ ДНЯ</div>
             <div style="font-weight:600;font-size:13.5px;color:#2B2B2B;line-height:1.35;margin-top:3px;">Учи по 5 слов утром — на свежую голову запоминается легче 🧠</div>
           </div>
         </div>
+      </sc-if>
     </div>
-    <!-- bottom nav -->
-    <div style="position:absolute;left:0;right:0;bottom:0;height:86px;background:rgba(255,255,255,.97);border-top:1px solid #EEF0F2;display:flex;justify-content:space-around;padding:14px 8px 0;z-index:6;">
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#F2683F;">Главная</span></div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.3 8 5 5.5 5.4 4.6 5.5 4 6.3 4 7.2V18c0 .6.5 1 1.1.9 2.2-.3 4.5 0 6.4 1.4 1.9-1.4 4.2-1.7 6.4-1.4.6.1 1.1-.3 1.1-.9V7.2c0-.9-.6-1.7-1.5-1.8C15.5 5 13.7 5.3 12 6.5Z"/><path d="M12 6.5V20"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Учить</span></div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Прогресс</span></div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Профиль</span></div>
-      <div style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:128px;height:5px;border-radius:3px;background:#1d1d1f;opacity:.22;"></div>
+    <!-- bottom nav (floating clay pill) -->
+    <div style="position:absolute;left:0;right:0;bottom:0;padding:10px 14px 14px;z-index:6;background:linear-gradient(to top,rgba(246,243,239,.95) 55%,rgba(246,243,239,0));">
+      <div class="navclay">
+        <div class="navit on"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span style="font-weight:800;font-size:10.5px;color:#F2683F;">Главная</span></div>
+        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.3 8 5 5.5 5.4 4.6 5.5 4 6.3 4 7.2V18c0 .6.5 1 1.1.9 2.2-.3 4.5 0 6.4 1.4 1.9-1.4 4.2-1.7 6.4-1.4.6.1 1.1-.3 1.1-.9V7.2c0-.9-.6-1.7-1.5-1.8C15.5 5 13.7 5.3 12 6.5Z"/><path d="M12 6.5V20"/></svg><span style="font-weight:700;font-size:10.5px;color:#A59C8D;">Учить</span></div>
+        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg><span style="font-weight:700;font-size:10.5px;color:#A59C8D;">Прогресс</span></div>
+        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#A59C8D;">Профиль</span></div>
+      </div>
     </div>
   
 </div>
@@ -1371,11 +1396,12 @@ function setTxt(id,v){const e=document.getElementById(id);if(e)e.textContent=v}
 function setW(id,v){const e=document.getElementById(id);if(e)e.style.width=Math.round(v)+'%'}
 function ringOff(id,total,v){const e=document.getElementById(id);if(e)e.setAttribute('stroke-dashoffset',String(Math.round(total*(1-v/100))))}
 function renderHome(){if(!S)return;const u=currentUser||'друг';
-  setTxt('h_hello','Привет, '+u);
-  setTxt('h_days','До ЕГЭ — '+daysLeft()+' дней');
+  setTxt('h_hello','Привет, '+u+' 👋');
+  setTxt('h_days','До ЕГЭ — '+daysLeft()+' дней · пробник в феврале');
+  setTxt('h_ava',u[0].toUpperCase());
   const pct=Math.min(100,Math.round((S.dayMin||0)/30*100));
   setTxt('h_min',S.dayMin||0);setTxt('h_pct',pct+'%');ringOff('h_ring',263.9,pct);
-  setTxt('h_streak',(S.streak||0)+' дней подряд');
+  setTxt('h_streak','🔥 '+(S.streak||0)+' дней подряд');
   const p=S.prog||{};
   setTxt('m_words',p.words||0);ringOff('ring_words',113.1,p.words||0);
   setTxt('m_gram',p.gram||0);ringOff('ring_gram',113.1,p.gram||0);
