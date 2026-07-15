@@ -1681,4 +1681,33 @@ tgClick=function(e){
 };
 
 </script>
+<script>
+/* ===== ДОСТУП / ПОДПИСКА (paywall) ===== */
+function pwHide(){var o=document.getElementById('pw_ov');if(o)o.remove();}
+function pwShow(bot){
+  if(document.getElementById('pw_ov'))return;
+  var ov=document.createElement('div');ov.id='pw_ov';
+  ov.setAttribute('style','position:fixed;inset:0;z-index:99999;background:linear-gradient(160deg,#FFA570,#F2683F);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:28px;text-align:center;font-family:Manrope;color:#fff;');
+  var burl='https://t.me/'+(bot||'');
+  ov.innerHTML=
+    '<div style="font-size:46px;margin-bottom:10px;">🎓</div>'+
+    '<div style="font-weight:800;font-size:23px;margin-bottom:8px;">Easy Boost</div>'+
+    '<div style="font-weight:600;font-size:15px;line-height:1.55;max-width:300px;opacity:.96;margin-bottom:22px;">Чтобы заниматься, оформи доступ в нашем Telegram-боте — бесплатный месяц или подписку. Это займёт минуту.</div>'+
+    '<a href="'+burl+'" target="_blank" rel="noopener" style="display:block;width:100%;max-width:300px;box-sizing:border-box;height:54px;line-height:54px;background:#fff;color:#F2683F;border-radius:16px;font-weight:800;font-size:16px;text-decoration:none;margin-bottom:12px;box-shadow:0 12px 24px rgba(20,20,30,.18);">Открыть Telegram-бот</a>'+
+    '<button onclick="pwCheck(true)" style="width:100%;max-width:300px;height:48px;background:rgba(255,255,255,.16);color:#fff;border:1.5px solid rgba(255,255,255,.6);border-radius:14px;font-family:Manrope;font-weight:700;font-size:15px;cursor:pointer;">Я оформил — обновить</button>';
+  document.body.appendChild(ov);
+}
+async function pwCheck(){
+  if(typeof SRV==='undefined'||!SRV||!TOKEN){pwHide();return true;}
+  try{
+    var me=await apiGet('/api/me');
+    if(me&&me.active){pwHide();return true;}
+    pwShow(me&&me.bot);
+    return false;
+  }catch(e){ pwHide(); return true; } // при ошибке сети не блокируем доступ
+}
+window.checkSub=pwCheck;
+try{ if(typeof startApp==='function'){ var _sa=startApp; startApp=function(){ _sa.apply(this,arguments); try{pwCheck();}catch(e){} }; } }catch(e){}
+if(typeof SRV!=='undefined'&&SRV&&TOKEN){ setTimeout(function(){try{pwCheck();}catch(e){}},300); }
+</script>
 </body></html>

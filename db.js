@@ -56,3 +56,33 @@ export function createTelegramUser(tgId, displayName) {
   persist();
   return uname;
 }
+
+// --- Подписка / доступ ---
+export function ensureTelegramUser(tgId, displayName) {
+  const ex = getUserByTelegram(tgId);
+  if (ex) return ex.username;
+  return createTelegramUser(tgId, displayName);
+}
+// Продлить доступ на N дней (от текущего конца подписки, если он в будущем).
+export function grantDays(tgId, days, displayName) {
+  const uname = ensureTelegramUser(tgId, displayName);
+  const u = db.users[uname];
+  const now = Date.now();
+  const base = (u.sub_until && u.sub_until > now) ? u.sub_until : now;
+  u.sub_until = base + days * 86400000;
+  persist();
+  return { username: uname, sub_until: u.sub_until };
+}
+export function markTrialUsed(tgId, displayName) {
+  const uname = ensureTelegramUser(tgId, displayName);
+  db.users[uname].trial_used = true;
+  persist();
+  return uname;
+}
+// Статус доступа по имени пользователя (для приложения).
+export function getSub(username) {
+  const u = db.users[username];
+  if (!u) return { sub_until: 0, active: false, trial_used: false };
+  const su = u.sub_until || 0;
+  return { sub_until: su, active: su > Date.now(), trial_used: !!u.trial_used };
+}

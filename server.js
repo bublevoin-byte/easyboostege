@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { getProgress, saveProgress, getUserByTelegram, createTelegramUser } from './db.js';
+import { getProgress, saveProgress, getUserByTelegram, createTelegramUser, grantDays, markTrialUsed, getSub } from './db.js';
 
 dotenv.config();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -20,6 +20,9 @@ const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
 
 // Telegram
 const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+const ADMIN_ID = process.env.ADMIN_TELEGRAM_ID || ''; // твой Telegram ID — тебе приходят заявки на оплату
+const TRIAL_DAYS = 30;
+const SUB_DAYS = 30;
 let BOT_USERNAME = '';
 const tgCodes = {};   // code -> ts (ожидает подтверждения)
 const tgReady = {};   // code -> {telegram_id, name} (подтверждён)
@@ -51,6 +54,95 @@ async function tgApi(method, params) {
   });
   return r.json();
 }
+function fmtDate(ms) { return new Date(ms).toLocaleDateString('ru-RU'); }
+function nameOf(from) {
+  return ((from.first_name || '') + ' ' + (from.last_name || '')).trim() || from.username || ('id' + from.id);
+}
+function subKeyboard() {
+  return { inline_keyboard: [
+    [{ text: '🎁 Попробовать бесплатно месяц', callback_data: 'trial' }],
+    [{ text: '💳 Оплатить подписку', callback_data: 'pay' }],
+  ] };
+}
+
+// Входящее сообщение боту
+async function onMessage(m) {
+  if (!m.text) return;
+  const chatId = m.chat.id, fromId = m.from.id, name = nameOf(m.from);
+  if (m.text.startsWith('/start')) {
+    const code = m.text.split(' ')[1];
+    if (code && tgCodes[code]) {
+      tgReady[code] = { telegram_id: fromId, name };
+      await tgApi('sendMessage', { chat_id: chatId, text: 'Готово! Вход в Easy Boost выполнен ✅\n\nВыбери доступ, чтобы начать заниматься:', reply_markup: subKeyboard() });
+    } else {
+      await tgApi('sendMessage', { chat_id: chatId, text: 'Привет! Это Easy Boost 🎓 — подготовка к ЕГЭ по английскому.\nВыбери, как начать:', reply_markup: subKeyboard() });
+    }
+    return;
+  }
+  if (m.text.startsWith('/id')) {
+    await tgApi('sendMessage', { chat_id: chatId, text: 'Твой Telegram ID: ' + fromId });
+    return;
+  }
+  await tgApi('sendMessage', { chat_id: chatId, text: 'Меню Easy Boost:', reply_markup: subKeyboard() });
+}
+
+// Нажатие inline-кнопки
+async function onCallback(cq) {
+  const data = cq.data || '';
+  const fromId = cq.from.id, name = nameOf(cq.from);
+  const chatId = cq.message && cq.message.chat.id;
+  const ack = (text) => tgApi('answerCallbackQuery', { callback_query_id: cq.id, text: text || '' });
+
+  if (data === 'trial') {
+    const ex = getUserByTelegram(fromId);
+    if (ex && ex.trial_used) {
+      await ack('Пробный период уже был использован');
+      await tgApi('sendMessage', { chat_id: chatId, text: 'Пробный месяц уже был активирован раньше. Чтобы продолжить — оформи подписку.', reply_markup: { inline_keyboard: [[{ text: '💳 Оплатить подписку', callback_data: 'pay' }]] } });
+      return;
+    }
+    const g = grantDays(fromId, TRIAL_DAYS, name);
+    markTrialUsed(fromId, name);
+    await ack('Готово! Месяц активирован');
+    await tgApi('sendMessage', { chat_id: chatId, text: '🎁 Месяц бесплатного доступа активирован до ' + fmtDate(g.sub_until) + '!\nОткрой приложение Easy Boost и занимайся 💪' });
+    return;
+  }
+
+  if (data === 'pay') {
+    await ack('Заявка отправлена');
+    await tgApi('sendMessage', { chat_id: chatId, text: '💳 Заявка на подписку отправлена. Как только оплату подтвердят, доступ откроется — обычно это быстро. Спасибо!' });
+    if (ADMIN_ID) {
+      await tgApi('sendMessage', {
+        chat_id: ADMIN_ID,
+        text: '💳 Запрос на оплату подписки\n\nПользователь: ' + name + '\nID: ' + fromId,
+        reply_markup: { inline_keyboard: [[
+          { text: '✅ Активировать', callback_data: 'activate:' + fromId },
+          { text: '❌ Отказ', callback_data: 'deny:' + fromId },
+        ]] },
+      });
+    } else {
+      console.log('ADMIN_TELEGRAM_ID не задан — заявку на оплату некому отправить');
+    }
+    return;
+  }
+
+  if (data.startsWith('activate:') || data.startsWith('deny:')) {
+    if (String(fromId) !== String(ADMIN_ID)) { await ack('Недостаточно прав'); return; }
+    const targetId = Number(data.split(':')[1]);
+    if (data.startsWith('activate:')) {
+      const g = grantDays(targetId, SUB_DAYS);
+      await ack('Активировано');
+      if (cq.message) await tgApi('editMessageText', { chat_id: chatId, message_id: cq.message.message_id, text: (cq.message.text || '') + '\n\n✅ Активировано до ' + fmtDate(g.sub_until) });
+      await tgApi('sendMessage', { chat_id: targetId, text: '✅ Подписка активирована! Доступ открыт на 30 дней (до ' + fmtDate(g.sub_until) + ').\nОткрой приложение Easy Boost 🎓' });
+    } else {
+      await ack('Отклонено');
+      if (cq.message) await tgApi('editMessageText', { chat_id: chatId, message_id: cq.message.message_id, text: (cq.message.text || '') + '\n\n❌ Отклонено' });
+      await tgApi('sendMessage', { chat_id: targetId, text: '❌ Платёж не подтверждён. Пожалуйста, обратитесь в поддержку сервиса.' });
+    }
+    return;
+  }
+  await ack();
+}
+
 async function startTelegram() {
   if (!TG_TOKEN) { console.log('Telegram: TELEGRAM_BOT_TOKEN не задан — вход через Telegram выключен'); return; }
   try {
@@ -59,6 +151,7 @@ async function startTelegram() {
     else { console.log('Telegram getMe error:', me.description); return; }
   } catch (e) { console.log('Telegram getMe failed:', e.message); return; }
 
+  console.log('Telegram admin id:', ADMIN_ID || '(не задан — заявки на оплату приходить не будут)');
   let offset = 0;
   const poll = async () => {
     try {
@@ -66,17 +159,10 @@ async function startTelegram() {
       if (upd.ok) {
         for (const u of upd.result) {
           offset = u.update_id + 1;
-          const m = u.message;
-          if (m && m.text && m.text.startsWith('/start')) {
-            const code = m.text.split(' ')[1];
-            const name = ((m.from.first_name || '') + ' ' + (m.from.last_name || '')).trim() || m.from.username || ('id' + m.from.id);
-            if (code && tgCodes[code]) {
-              tgReady[code] = { telegram_id: m.from.id, name };
-              await tgApi('sendMessage', { chat_id: m.chat.id, text: 'Готово! Вернись в приложение Easy Boost — вход выполнен ✅' });
-            } else {
-              await tgApi('sendMessage', { chat_id: m.chat.id, text: 'Привет! Чтобы войти, нажми «Войти через Telegram» в приложении Easy Boost.' });
-            }
-          }
+          try {
+            if (u.message) await onMessage(u.message);
+            else if (u.callback_query) await onCallback(u.callback_query);
+          } catch (e) { console.log('Telegram handler error:', e.message); }
         }
       }
     } catch (e) { /* сеть — попробуем снова */ }
@@ -98,7 +184,12 @@ app.get('/api/tg/check', (req, res) => {
   delete tgReady[code]; delete tgCodes[code];
   const existing = getUserByTelegram(r.telegram_id);
   const uname = existing ? existing.username : createTelegramUser(r.telegram_id, r.name);
-  res.json({ token: makeToken(uname), username: uname });
+  res.json({ token: makeToken(uname), username: uname, ...getSub(uname), bot: BOT_USERNAME });
+});
+
+// ---- статус доступа (подписка) ----
+app.get('/api/me', auth, (req, res) => {
+  res.json({ username: req.user, bot: BOT_USERNAME, ...getSub(req.user) });
 });
 
 // ---- прогресс ----
