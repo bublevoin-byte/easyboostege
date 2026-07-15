@@ -1,0 +1,1664 @@
+<!DOCTYPE html>
+<html lang="ru"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="theme-color" content="#F2683F">
+<title>Easy Boost</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box}html,body{margin:0;padding:0}
+body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;align-items:center;justify-content:center;min-height:100vh;-webkit-font-smoothing:antialiased}
+#frame{width:390px;height:844px;position:relative;overflow:hidden;background:#F5F6F8;box-shadow:0 24px 70px rgba(0,0,0,.22);border-radius:38px}
+.screen{display:none;position:absolute;inset:0;width:390px;height:844px;overflow-y:auto;overflow-x:hidden}
+.screen::-webkit-scrollbar{display:none}.screen.on{display:block}.clk{cursor:pointer}
+#w_editor:empty:before{content:attr(data-ph);color:#B6BBC2}
+#navfab,#navmenu{display:none!important}
+#navfab{position:fixed;top:14px;right:14px;z-index:999;background:#2B2B2B;color:#fff;border:none;border-radius:11px;padding:9px 13px;font:600 12px Manrope,sans-serif;cursor:pointer;opacity:.85}
+#navmenu{position:fixed;top:52px;right:14px;z-index:999;background:#fff;border-radius:14px;box-shadow:0 14px 40px rgba(0,0,0,.25);padding:8px;display:none;max-height:80vh;overflow:auto;width:200px}
+#navmenu.open{display:block}
+#navmenu button{display:block;width:100%;text-align:left;border:none;background:none;padding:9px 11px;border-radius:9px;font:600 13px Manrope,sans-serif;color:#2B2B2B;cursor:pointer}
+#navmenu button:hover{background:#F5F6F8}
+@media(max-width:430px){body{background:#F5F6F8}#frame{width:100vw;height:100vh;border-radius:0}.screen{width:100vw;height:100vh}}
+
+#learnSheet{position:fixed;inset:0;z-index:200;display:none}
+#learnSheet.open{display:block}
+#learnSheet .bd{position:absolute;inset:0;background:rgba(0,0,0,.38)}
+#learnSheet .sheet{position:absolute;left:50%;transform:translateX(-50%);bottom:0;width:100%;max-width:430px;background:#F5F6F8;border-radius:26px 26px 0 0;padding:16px 20px 30px;box-shadow:0 -12px 40px rgba(0,0,0,.22);max-height:88vh;overflow:auto}
+#learnSheet .grip{width:40px;height:5px;border-radius:3px;background:#D5D8DD;margin:2px auto 12px}
+#learnSheet h3{font-size:19px;font-weight:800;color:#2B2B2B;margin:0 2px 12px}
+.lm{display:flex;align-items:center;gap:13px;background:#fff;border-radius:16px;padding:13px 14px;margin-bottom:10px;cursor:pointer;box-shadow:0 6px 18px rgba(20,20,30,.05);border:1.5px solid transparent}
+.lm:active{transform:scale(.99)}
+.lm .ic{width:42px;height:42px;flex:none;border-radius:13px;display:grid;place-items:center;font-size:20px;color:#fff}
+.lm .tx{flex:1}.lm .tx b{font-size:15px;color:#2B2B2B}.lm .tx div{font-size:12px;color:#8A8F98;font-weight:600;margin-top:1px}
+.lm .ch{color:#C4C8CE;font-weight:700}
+
+#genfab{position:fixed;bottom:100px;left:50%;transform:translateX(115px);z-index:150;display:none;
+  align-items:center;gap:7px;background:linear-gradient(135deg,#FFA570,#F2683F);color:#fff;border:none;
+  border-radius:26px;padding:11px 16px;font:700 13px Manrope,sans-serif;cursor:pointer;box-shadow:0 10px 24px rgba(242,104,63,.4)}
+#genfab:disabled{opacity:.6}
+#toast{position:fixed;bottom:180px;left:50%;transform:translateX(-50%);z-index:300;background:#2B2B2B;color:#fff;
+  padding:11px 18px;border-radius:14px;font:600 13px Manrope,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.3);display:none;max-width:320px;text-align:center}
+@media(max-width:430px){#genfab{left:auto;right:16px;transform:none}}
+</style></head><body>
+<button id="navfab" onclick="document.getElementById('navmenu').classList.toggle('open')">Экраны ▾</button>
+<div id="navmenu"></div>
+<div id="frame">
+<div class="screen on" id="scr5" data-name="Вход">
+
+    <!-- soft blobs -->
+    <div style="position:absolute;top:-60px;right:-40px;width:220px;height:220px;border-radius:50%;background:rgba(255,255,255,.16);"></div>
+    <div style="position:absolute;top:120px;left:-70px;width:180px;height:180px;border-radius:50%;background:rgba(255,255,255,.10);"></div>
+    <!-- status bar white -->
+    <div style="position:absolute;top:0;left:0;right:0;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 7px;z-index:6;">
+      <span style="font-weight:700;font-size:15px;color:#fff;">9:41</span>
+      <div style="display:flex;gap:7px;align-items:center;">
+        <svg width="17" height="11" viewBox="0 0 17 11" fill="#fff"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.7" y="5" width="3" height="6" rx="1"/><rect x="9.3" y="2.5" width="3" height="8.5" rx="1"/><rect x="14" y="0" width="3" height="11" rx="1"/></svg>
+        <svg width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round"><path d="M2 5a8 8 0 0 1 12 0"/><path d="M4.5 7.4a4.4 4.4 0 0 1 7 0"/><circle cx="8" cy="9.8" r="1" fill="#fff" stroke="none"/></svg>
+        <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3" stroke="#fff" opacity=".5"/><rect x="2.4" y="2.4" width="15" height="7.2" rx="1.6" fill="#fff"/><rect x="23" y="4" width="2" height="4" rx="1" fill="#fff"/></svg>
+      </div>
+    </div>
+    <!-- brand -->
+    <div style="position:absolute;top:118px;left:0;right:0;display:flex;flex-direction:column;align-items:center;z-index:5;">
+      <div style="width:78px;height:78px;border-radius:25px;background:rgba(255,255,255,.95);display:grid;place-items:center;box-shadow:0 18px 36px rgba(180,60,20,.28);">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z"/></svg>
+      </div>
+      <div style="margin-top:18px;font-weight:800;font-size:30px;color:#fff;letter-spacing:-.5px;">Easy Boost</div>
+      <div style="margin-top:6px;font-weight:600;font-size:14px;color:rgba(255,255,255,.88);">Английский к ЕГЭ — играючи</div>
+    </div>
+    <!-- sheet -->
+    <div style="position:absolute;left:0;right:0;bottom:0;background:#fff;border-radius:34px 34px 0 0;padding:30px 24px 30px;box-shadow:0 -12px 40px rgba(120,40,10,.18);z-index:5;">
+      <div style="font-weight:800;font-size:20px;color:#2B2B2B;">С возвращением 👋</div>
+      <!-- telegram -->
+      <a id="tgbtn" href="#" target="_blank" rel="noopener" onclick="tgClick(event)" style="width:100%;height:56px;box-sizing:border-box;border:none;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:16px;font-family:Manrope;font-weight:700;font-size:16px;color:#fff;display:flex;align-items:center;justify-content:center;gap:10px;cursor:pointer;box-shadow:0 12px 24px rgba(242,104,63,.32);text-decoration:none;"><svg width="22" height="22" viewBox="0 0 24 24" fill="#fff"><path d="M21.5 4.3 2.9 11.5c-1 .4-1 1.8.1 2.1l4.6 1.4 1.8 5.6c.3.8 1.3 1 1.9.4l2.5-2.4 4.6 3.4c.7.5 1.7.1 1.9-.7L23 5.6c.2-1-.7-1.7-1.5-1.3Z"/></svg>Войти через Telegram</a>
+      <div id="lg_msg" style="margin-top:12px;text-align:center;font-weight:600;font-size:13px;color:#E23B2B;"></div>
+      <div style="margin-top:16px;text-align:center;font-weight:600;font-size:12.5px;color:#8A8F98;">Быстрый вход по Telegram — без пароля</div>
+    </div>
+  
+</div>
+<div class="screen" id="scr6" data-name="Онбординг">
+
+    <!-- status bar dark -->
+    <div style="position:absolute;top:0;left:0;right:0;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 7px;z-index:6;">
+      <span style="font-weight:700;font-size:15px;color:#2B2B2B;">9:41</span>
+      <div style="display:flex;gap:7px;align-items:center;">
+        <svg width="17" height="11" viewBox="0 0 17 11" fill="#2B2B2B"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.7" y="5" width="3" height="6" rx="1"/><rect x="9.3" y="2.5" width="3" height="8.5" rx="1"/><rect x="14" y="0" width="3" height="11" rx="1"/></svg>
+        <svg width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="#2B2B2B" stroke-width="1.6" stroke-linecap="round"><path d="M2 5a8 8 0 0 1 12 0"/><path d="M4.5 7.4a4.4 4.4 0 0 1 7 0"/><circle cx="8" cy="9.8" r="1" fill="#2B2B2B" stroke="none"/></svg>
+        <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3" stroke="#2B2B2B" opacity=".4"/><rect x="2.4" y="2.4" width="15" height="7.2" rx="1.6" fill="#2B2B2B"/><rect x="23" y="4" width="2" height="4" rx="1" fill="#2B2B2B"/></svg>
+      </div>
+    </div>
+    <!-- skip -->
+    <div style="position:absolute;top:60px;right:24px;font-weight:700;font-size:13.5px;color:#8A8F98;z-index:6;">Пропустить</div>
+    <!-- illustration -->
+    <div style="position:absolute;top:118px;left:0;right:0;display:flex;justify-content:center;z-index:5;">
+      <div style="width:230px;height:230px;border-radius:50%;background:linear-gradient(135deg,#FFE0CE,#FFCBB0);display:grid;place-items:center;position:relative;">
+        <div style="position:absolute;top:18px;right:30px;width:34px;height:34px;border-radius:11px;background:#fff;display:grid;place-items:center;box-shadow:0 6px 14px rgba(200,90,40,.18);"><span style="font-size:18px;">🔥</span></div>
+        <div style="position:absolute;bottom:24px;left:22px;width:34px;height:34px;border-radius:11px;background:#fff;display:grid;place-items:center;box-shadow:0 6px 14px rgba(200,90,40,.18);"><span style="font-size:18px;">🎯</span></div>
+        <div style="width:128px;height:128px;border-radius:38px;background:linear-gradient(135deg,#FFA570,#F2683F);display:grid;place-items:center;box-shadow:0 20px 38px rgba(242,104,63,.34);">
+          <svg width="74" height="74" viewBox="0 0 38 38" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6a9 9 0 0 0-6 15.7c1 .9 1.4 1.6 1.5 2.8h9c.1-1.2.5-1.9 1.5-2.8A9 9 0 0 0 19 6Z"/><circle cx="15.6" cy="16" r="1.2" fill="#fff" stroke="none"/><circle cx="22.4" cy="16" r="1.2" fill="#fff" stroke="none"/><path d="M15.7 19.4c1.3 1.2 5.3 1.2 6.6 0"/><path d="M15.5 27.5h7M16.5 30.5h5"/></svg>
+        </div>
+      </div>
+    </div>
+    <!-- text -->
+    <div style="position:absolute;top:392px;left:0;right:0;padding:0 34px;text-align:center;z-index:5;">
+      <div style="font-weight:800;font-size:26px;color:#2B2B2B;letter-spacing:-.4px;line-height:1.25;">Готовимся к ЕГЭ<br>без зубрёжки</div>
+      <div style="margin-top:14px;font-weight:600;font-size:15px;color:#8A8F98;line-height:1.5;">Слова, грамматика, аудирование и эссе — по чуть-чуть каждый день. К февралю будешь готова 💪</div>
+    </div>
+    <!-- dots -->
+    <div style="position:absolute;bottom:150px;left:0;right:0;display:flex;justify-content:center;gap:7px;z-index:5;">
+      <div style="width:24px;height:7px;border-radius:4px;background:#F2683F;"></div>
+      <div style="width:7px;height:7px;border-radius:4px;background:#F6C9B6;"></div>
+      <div style="width:7px;height:7px;border-radius:4px;background:#F6C9B6;"></div>
+    </div>
+    <!-- cta -->
+    <div style="position:absolute;bottom:54px;left:24px;right:24px;z-index:5;">
+      <button style="width:100%;height:56px;border:none;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:18px;font-family:Manrope;font-weight:700;font-size:16px;color:#fff;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;box-shadow:0 14px 28px rgba(242,104,63,.32);">Поехали<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></button>
+    </div>
+  
+</div>
+<div class="screen" id="scr1" data-name="Главная">
+
+    <!-- status bar (dark) -->
+    <div style="position:absolute;top:0;left:0;right:0;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 7px;z-index:6;">
+      <span style="font-weight:700;font-size:15px;color:#2B2B2B;">9:41</span>
+      <div style="display:flex;gap:7px;align-items:center;">
+        <svg width="17" height="11" viewBox="0 0 17 11" fill="#2B2B2B"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.7" y="5" width="3" height="6" rx="1"/><rect x="9.3" y="2.5" width="3" height="8.5" rx="1"/><rect x="14" y="0" width="3" height="11" rx="1"/></svg>
+        <svg width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="#2B2B2B" stroke-width="1.6" stroke-linecap="round"><path d="M2 5a8 8 0 0 1 12 0"/><path d="M4.5 7.4a4.4 4.4 0 0 1 7 0"/><circle cx="8" cy="9.8" r="1" fill="#2B2B2B" stroke="none"/></svg>
+        <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3" stroke="#2B2B2B" opacity=".4"/><rect x="2.4" y="2.4" width="15" height="7.2" rx="1.6" fill="#2B2B2B"/><rect x="23" y="4" width="2" height="4" rx="1" fill="#2B2B2B"/></svg>
+      </div>
+    </div>
+    <!-- content -->
+    <div style="position:absolute;top:52px;left:0;right:0;bottom:0;padding:6px 20px 96px;">
+      <!-- greeting -->
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+        <div>
+          <div id="h_hello" style="font-weight:800;font-size:22px;color:#2B2B2B;letter-spacing:-.3px;">Привет, Аня 👋</div>
+          <div id="h_days" style="font-weight:600;font-size:13.5px;color:#8A8F98;margin-top:2px;">До ЕГЭ — 142 дня · пробник в феврале</div>
+        </div>
+        <div style="width:46px;height:46px;border-radius:15px;background:linear-gradient(135deg,#FFC861,#F2683F);display:grid;place-items:center;font-weight:800;font-size:18px;color:#fff;box-shadow:0 8px 18px rgba(242,104,63,.32);" id="h_ava">А</div>
+      </div>
+      <!-- hero -->
+      <div style="background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:26px;padding:20px 22px;box-shadow:0 18px 34px rgba(242,104,63,.30);">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <div>
+            <div style="font-weight:700;font-size:11px;letter-spacing:1.6px;color:rgba(255,255,255,.85);">ЦЕЛЬ ДНЯ</div>
+            <div style="margin-top:6px;display:flex;align-items:baseline;gap:6px;color:#fff;"><span id="h_min" style="font-weight:800;font-size:38px;letter-spacing:-1px;">18</span><span style="font-weight:700;font-size:17px;opacity:.85;">/ 30 мин</span></div>
+            <div style="margin-top:12px;display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,.22);border-radius:30px;padding:6px 12px;font-weight:700;font-size:12.5px;color:#fff;" id="h_streak">🔥 7 дней подряд</div>
+          </div>
+          <svg width="92" height="92" viewBox="0 0 100 100">
+            <circle cx="50" cy="50" r="42" fill="none" stroke="rgba(255,255,255,.32)" stroke-width="9"/>
+            <circle cx="50" cy="50" r="42" fill="none" stroke="#fff" stroke-width="9" stroke-linecap="round" stroke-dasharray="263.9" stroke-dashoffset="105.6" transform="rotate(-90 50 50)" id="h_ring"/>
+            <text x="50" y="55" text-anchor="middle" font-family="Manrope" font-weight="800" font-size="22" fill="#fff" id="h_pct">60%</text>
+          </svg>
+        </div>
+        <!-- week activity -->
+        <div style="margin-top:16px;display:flex;align-items:flex-end;justify-content:space-between;height:38px;">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;"><div style="width:7px;height:22px;border-radius:4px;background:rgba(255,255,255,.55);"></div><span style="font-size:9px;font-weight:700;color:rgba(255,255,255,.7);">П</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;"><div style="width:7px;height:30px;border-radius:4px;background:rgba(255,255,255,.55);"></div><span style="font-size:9px;font-weight:700;color:rgba(255,255,255,.7);">В</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;"><div style="width:7px;height:14px;border-radius:4px;background:rgba(255,255,255,.4);"></div><span style="font-size:9px;font-weight:700;color:rgba(255,255,255,.7);">С</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;"><div style="width:7px;height:34px;border-radius:4px;background:rgba(255,255,255,.55);"></div><span style="font-size:9px;font-weight:700;color:rgba(255,255,255,.7);">Ч</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;"><div style="width:7px;height:26px;border-radius:4px;background:rgba(255,255,255,.55);"></div><span style="font-size:9px;font-weight:700;color:rgba(255,255,255,.7);">П</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;"><div style="width:7px;height:18px;border-radius:4px;background:rgba(255,255,255,.4);"></div><span style="font-size:9px;font-weight:700;color:rgba(255,255,255,.7);">С</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;"><div style="width:7px;height:20px;border-radius:4px;background:#fff;box-shadow:0 0 0 3px rgba(255,255,255,.25);"></div><span style="font-size:9px;font-weight:800;color:#fff;">В</span></div>
+        </div>
+      </div>
+      <!-- modules -->
+      <div style="font-weight:700;font-size:11px;letter-spacing:1.6px;color:#8A8F98;margin:18px 2px 12px;">МОДУЛИ</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <!-- Слова -->
+        <div style="background:#fff;border-radius:20px;padding:15px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+            <div style="width:38px;height:38px;border-radius:12px;background:#FFEDE4;display:grid;place-items:center;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="13" rx="2.5"/><path d="M8 5V3.5M16 5V3.5M4 9h16"/></svg></div>
+            <svg width="44" height="44" viewBox="0 0 44 44"><defs><linearGradient id="r1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFA570"/><stop offset="1" stop-color="#F2683F"/></linearGradient></defs><circle cx="22" cy="22" r="18" fill="none" stroke="#EEF0F2" stroke-width="5"/><circle cx="22" cy="22" r="18" fill="none" stroke="url(#r1)" stroke-width="5" stroke-linecap="round" stroke-dasharray="113.1" stroke-dashoffset="40.7" id="ring_words" transform="rotate(-90 22 22)"/><text x="22" y="26" text-anchor="middle" font-family="Manrope" font-weight="800" font-size="11" fill="#2B2B2B" id="m_words">64</text></svg>
+          </div>
+          <div style="margin-top:11px;font-weight:700;font-size:16px;color:#2B2B2B;">Слова</div>
+          <div id="sub_words" style="font-weight:600;font-size:12px;color:#8A8F98;margin-top:1px;">учу · 320 / 500</div>
+        </div>
+        <!-- Грамматика -->
+        <div style="background:#fff;border-radius:20px;padding:15px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+            <div style="width:38px;height:38px;border-radius:12px;background:#E5F4EC;display:grid;place-items:center;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1F9E5A" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h14v16H5z"/><path d="M9 9h6M9 13h6M9 17h3"/></svg></div>
+            <svg width="44" height="44" viewBox="0 0 44 44"><defs><linearGradient id="r2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6FC2B0"/><stop offset="1" stop-color="#1F9E5A"/></linearGradient></defs><circle cx="22" cy="22" r="18" fill="none" stroke="#EEF0F2" stroke-width="5"/><circle cx="22" cy="22" r="18" fill="none" stroke="url(#r2)" stroke-width="5" stroke-linecap="round" stroke-dasharray="113.1" stroke-dashoffset="65.6" id="ring_gram" transform="rotate(-90 22 22)"/><text x="22" y="26" text-anchor="middle" font-family="Manrope" font-weight="800" font-size="11" fill="#2B2B2B" id="m_gram">42</text></svg>
+          </div>
+          <div style="margin-top:11px;font-weight:700;font-size:16px;color:#2B2B2B;">Грамматика</div>
+          <div style="font-weight:600;font-size:12px;color:#8A8F98;margin-top:1px;">12 тем пройдено</div>
+        </div>
+        <!-- Чтение -->
+        <div style="background:#fff;border-radius:20px;padding:15px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+            <div style="width:38px;height:38px;border-radius:12px;background:#FFF4DE;display:grid;place-items:center;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#E8730A" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6c-2-1.3-4.5-1.5-7-1v13c2.5-.5 5-.3 7 1 2-1.3 4.5-1.5 7-1V5c-2.5-.5-5-.3-7 1Z"/><path d="M12 6v13"/></svg></div>
+            <svg width="44" height="44" viewBox="0 0 44 44"><defs><linearGradient id="r3" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFC861"/><stop offset="1" stop-color="#E8730A"/></linearGradient></defs><circle cx="22" cy="22" r="18" fill="none" stroke="#EEF0F2" stroke-width="5"/><circle cx="22" cy="22" r="18" fill="none" stroke="url(#r3)" stroke-width="5" stroke-linecap="round" stroke-dasharray="113.1" stroke-dashoffset="24.9" id="ring_read" transform="rotate(-90 22 22)"/><text x="22" y="26" text-anchor="middle" font-family="Manrope" font-weight="800" font-size="11" fill="#2B2B2B" id="m_read">78</text></svg>
+          </div>
+          <div style="margin-top:11px;font-weight:700;font-size:16px;color:#2B2B2B;">Чтение</div>
+          <div style="font-weight:600;font-size:12px;color:#8A8F98;margin-top:1px;">7 текстов</div>
+        </div>
+        <!-- Аудирование -->
+        <div style="background:#fff;border-radius:20px;padding:15px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+            <div style="width:38px;height:38px;border-radius:12px;background:#E3F1F5;display:grid;place-items:center;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5FB6C9" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13v-1a8 8 0 0 1 16 0v1"/><rect x="3" y="13" width="4.2" height="6.5" rx="1.8"/><rect x="16.8" y="13" width="4.2" height="6.5" rx="1.8"/></svg></div>
+            <svg width="44" height="44" viewBox="0 0 44 44"><defs><linearGradient id="r4" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5FB6C9"/><stop offset="1" stop-color="#3E93A8"/></linearGradient></defs><circle cx="22" cy="22" r="18" fill="none" stroke="#EEF0F2" stroke-width="5"/><circle cx="22" cy="22" r="18" fill="none" stroke="url(#r4)" stroke-width="5" stroke-linecap="round" stroke-dasharray="113.1" stroke-dashoffset="79.2" id="ring_listen" transform="rotate(-90 22 22)"/><text x="22" y="26" text-anchor="middle" font-family="Manrope" font-weight="800" font-size="11" fill="#2B2B2B" id="m_listen">30</text></svg>
+          </div>
+          <div style="margin-top:11px;font-weight:700;font-size:16px;color:#2B2B2B;">Аудирование</div>
+          <div style="font-weight:600;font-size:12px;color:#8A8F98;margin-top:1px;">слабое место</div>
+        </div>
+      </div>
+      <!-- mascot tip -->
+      <sc-if value="{{ showMascot }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;align-items:center;gap:14px;background:#fff;border-radius:20px;padding:13px 15px;box-shadow:0 8px 22px rgba(20,20,30,.05);margin-top:14px;">
+          <div style="width:54px;height:54px;flex:none;border-radius:17px;background:linear-gradient(135deg,#FFA570,#F2683F);display:grid;place-items:center;">
+            <svg width="32" height="32" viewBox="0 0 38 38" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6a9 9 0 0 0-6 15.7c1 .9 1.4 1.6 1.5 2.8h9c.1-1.2.5-1.9 1.5-2.8A9 9 0 0 0 19 6Z"/><circle cx="15.6" cy="16" r="1.1" fill="#fff" stroke="none"/><circle cx="22.4" cy="16" r="1.1" fill="#fff" stroke="none"/><path d="M15.7 19.4c1.3 1.2 5.3 1.2 6.6 0"/><path d="M15.5 27.5h7M16.5 30.5h5"/></svg>
+          </div>
+          <div>
+            <div style="font-weight:800;font-size:11px;letter-spacing:1.2px;color:#F2683F;">СОВЕТ ДНЯ</div>
+            <div style="font-weight:600;font-size:13.5px;color:#2B2B2B;line-height:1.35;margin-top:3px;">Учи по 5 слов утром — на свежую голову запоминается легче 🧠</div>
+          </div>
+        </div>
+      </sc-if>
+    </div>
+    <!-- bottom nav -->
+    <div style="position:absolute;left:0;right:0;bottom:0;height:86px;background:rgba(255,255,255,.97);border-top:1px solid #EEF0F2;display:flex;justify-content:space-around;padding:14px 8px 0;z-index:6;">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#F2683F;">Главная</span></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.3 8 5 5.5 5.4 4.6 5.5 4 6.3 4 7.2V18c0 .6.5 1 1.1.9 2.2-.3 4.5 0 6.4 1.4 1.9-1.4 4.2-1.7 6.4-1.4.6.1 1.1-.3 1.1-.9V7.2c0-.9-.6-1.7-1.5-1.8C15.5 5 13.7 5.3 12 6.5Z"/><path d="M12 6.5V20"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Учить</span></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Прогресс</span></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Профиль</span></div>
+      <div style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:128px;height:5px;border-radius:3px;background:#1d1d1f;opacity:.22;"></div>
+    </div>
+  
+</div>
+<div class="screen" id="scr2" data-name="Слова">
+
+    <!-- gradient header -->
+    <div style="position:absolute;top:0;left:0;right:0;height:206px;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:0 0 30px 30px;z-index:1;"></div>
+    <!-- status bar (white) -->
+    <div style="position:absolute;top:0;left:0;right:0;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 7px;z-index:6;">
+      <span style="font-weight:700;font-size:15px;color:#fff;">9:41</span>
+      <div style="display:flex;gap:7px;align-items:center;">
+        <svg width="17" height="11" viewBox="0 0 17 11" fill="#fff"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.7" y="5" width="3" height="6" rx="1"/><rect x="9.3" y="2.5" width="3" height="8.5" rx="1"/><rect x="14" y="0" width="3" height="11" rx="1"/></svg>
+        <svg width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round"><path d="M2 5a8 8 0 0 1 12 0"/><path d="M4.5 7.4a4.4 4.4 0 0 1 7 0"/><circle cx="8" cy="9.8" r="1" fill="#fff" stroke="none"/></svg>
+        <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3" stroke="#fff" opacity=".5"/><rect x="2.4" y="2.4" width="15" height="7.2" rx="1.6" fill="#fff"/><rect x="23" y="4" width="2" height="4" rx="1" fill="#fff"/></svg>
+      </div>
+    </div>
+    <!-- header content -->
+    <div style="position:absolute;top:54px;left:0;right:0;padding:0 22px;z-index:6;">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><polyline points="14 6 8 12 14 18"/></svg>
+        <div style="font-weight:800;font-size:18px;color:#fff;">Слова</div>
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round"><line x1="5" y1="8" x2="19" y2="8"/><line x1="5" y1="12" x2="19" y2="12"/><line x1="5" y1="16" x2="19" y2="16"/></svg>
+      </div>
+      <!-- segmented tabs -->
+      <div style="margin-top:18px;background:rgba(255,255,255,.22);border-radius:16px;padding:4px;display:flex;gap:4px;">
+        <div style="flex:1;text-align:center;padding:8px 0;font-weight:700;font-size:13px;color:#F2683F;background:#fff;border-radius:12px;">Учу 12</div>
+        <div style="flex:1;text-align:center;padding:8px 0;font-weight:700;font-size:13px;color:rgba(255,255,255,.9);">Новые 28</div>
+        <div style="flex:1;text-align:center;padding:8px 0;font-weight:700;font-size:13px;color:rgba(255,255,255,.9);" id="w_know">Знаю 320</div>
+      </div>
+      <!-- progress to C1 -->
+      <div style="margin-top:16px;display:flex;align-items:center;justify-content:space-between;font-weight:600;font-size:11.5px;color:rgba(255,255,255,.9);">
+        <span style="font-weight:700;letter-spacing:.5px;">ПРОГРЕСС К C1</span><span id="w_today">8 / 20 сегодня</span>
+      </div>
+      <div style="margin-top:7px;height:7px;border-radius:5px;background:rgba(255,255,255,.28);"><div style="width:40%;height:100%;border-radius:5px;background:#fff;"></div></div>
+    </div>
+    <!-- flashcard -->
+    <div style="position:absolute;top:248px;left:22px;right:22px;z-index:5;">
+      <div style="background:#fff;border-radius:24px;box-shadow:0 18px 40px rgba(20,20,30,.10);padding:28px 24px;min-height:308px;display:flex;flex-direction:column;cursor:pointer;" id="w_card" onclick="flipWord()">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <span style="font-weight:700;font-size:10.5px;letter-spacing:1.4px;color:#F2683F;background:#FFEDE4;padding:5px 11px;border-radius:20px;" id="w_pos">ПРИЛАГАТЕЛЬНОЕ</span>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#C9B7B0" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-4-1-6-4-6-7a6 6 0 0 1 6-6h6"/><polyline points="13 3 16 6 13 9"/><path d="M15 5c4 1 6 4 6 7a6 6 0 0 1-6 6H9"/><polyline points="11 21 8 18 11 15"/></svg>
+        </div>
+        <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:14px 0;">
+          <div style="font-weight:800;font-size:38px;color:#2B2B2B;letter-spacing:-.8px;" id="w_word">ambiguous</div>
+          <div style="font-weight:500;font-size:15px;color:#8A8F98;margin-top:8px;" id="w_ipa">/æmˈbɪɡjuəs/</div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:center;gap:8px;border-top:1px solid #F1F1F3;padding-top:16px;color:#B6BBC2;font-weight:600;font-size:12.5px;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#B6BBC2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
+          Нажми, чтобы перевернуть
+        </div>
+      </div>
+    </div>
+    <!-- dots -->
+    <div style="position:absolute;top:580px;left:0;right:0;display:flex;justify-content:center;gap:6px;z-index:5;">
+      <div style="width:22px;height:6px;border-radius:4px;background:#F2683F;"></div>
+      <div style="width:6px;height:6px;border-radius:4px;background:#E4D9D4;"></div>
+      <div style="width:6px;height:6px;border-radius:4px;background:#E4D9D4;"></div>
+      <div style="width:6px;height:6px;border-radius:4px;background:#E4D9D4;"></div>
+    </div>
+    <!-- action buttons -->
+    <div style="position:absolute;bottom:108px;left:22px;right:22px;display:flex;gap:12px;z-index:5;">
+      <button onclick="rateCard(false)" style="flex:1;height:54px;border:1.6px solid #F2683F;background:#fff;border-radius:16px;font-family:Manrope;font-weight:700;font-size:15px;color:#F2683F;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/></svg>Ещё учу</button>
+      <button onclick="rateCard(true)" style="flex:1;height:54px;border:none;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:16px;font-family:Manrope;font-weight:700;font-size:15px;color:#fff;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;box-shadow:0 12px 24px rgba(242,104,63,.32);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 12 10 18 20 6"/></svg>Знаю</button>
+    </div>
+    <!-- bottom nav (Учить active) -->
+    <div style="position:absolute;left:0;right:0;bottom:0;height:86px;background:rgba(255,255,255,.97);border-top:1px solid #EEF0F2;display:flex;justify-content:space-around;padding:14px 8px 0;z-index:6;">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Главная</span></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.3 8 5 5.5 5.4 4.6 5.5 4 6.3 4 7.2V18c0 .6.5 1 1.1.9 2.2-.3 4.5 0 6.4 1.4 1.9-1.4 4.2-1.7 6.4-1.4.6.1 1.1-.3 1.1-.9V7.2c0-.9-.6-1.7-1.5-1.8C15.5 5 13.7 5.3 12 6.5Z"/><path d="M12 6.5V20"/></svg><span style="font-weight:700;font-size:10.5px;color:#F2683F;">Учить</span></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Прогресс</span></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Профиль</span></div>
+      <div style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:128px;height:5px;border-radius:3px;background:#1d1d1f;opacity:.22;"></div>
+    </div>
+  
+</div>
+<div class="screen" id="scr3" data-name="Грамматика">
+
+    <div style="position:absolute;top:0;left:0;right:0;height:182px;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:0 0 30px 30px;z-index:1;"></div>
+    <!-- status bar white -->
+    <div style="position:absolute;top:0;left:0;right:0;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 7px;z-index:6;">
+      <span style="font-weight:700;font-size:15px;color:#fff;">9:41</span>
+      <div style="display:flex;gap:7px;align-items:center;">
+        <svg width="17" height="11" viewBox="0 0 17 11" fill="#fff"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.7" y="5" width="3" height="6" rx="1"/><rect x="9.3" y="2.5" width="3" height="8.5" rx="1"/><rect x="14" y="0" width="3" height="11" rx="1"/></svg>
+        <svg width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round"><path d="M2 5a8 8 0 0 1 12 0"/><path d="M4.5 7.4a4.4 4.4 0 0 1 7 0"/><circle cx="8" cy="9.8" r="1" fill="#fff" stroke="none"/></svg>
+        <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3" stroke="#fff" opacity=".5"/><rect x="2.4" y="2.4" width="15" height="7.2" rx="1.6" fill="#fff"/><rect x="23" y="4" width="2" height="4" rx="1" fill="#fff"/></svg>
+      </div>
+    </div>
+    <!-- header -->
+    <div style="position:absolute;top:54px;left:0;right:0;padding:0 22px;z-index:6;">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><polyline points="14 6 8 12 14 18"/></svg>
+        <div style="font-weight:800;font-size:18px;color:#fff;">Грамматика</div>
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round"><line x1="5" y1="8" x2="19" y2="8"/><line x1="5" y1="12" x2="19" y2="12"/><line x1="5" y1="16" x2="19" y2="16"/></svg>
+      </div>
+      <div id="g_head" style="margin-top:16px;font-weight:600;font-size:13px;color:rgba(255,255,255,.92);">Present Perfect</div>
+      <!-- stepper dots -->
+      <div id="g_steps" style="margin-top:10px;display:flex;gap:5px;"></div>
+    </div>
+    <!-- body -->
+    <div style="position:absolute;top:200px;left:0;right:0;bottom:0;padding:0 22px 100px;z-index:5;overflow:hidden;">
+      <!-- rule card -->
+      <div style="background:#fff;border-radius:20px;padding:15px 17px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
+        <div style="font-weight:700;font-size:10.5px;letter-spacing:1.4px;color:#1F9E5A;">ПРАВИЛО</div>
+        <div style="margin-top:7px;font-weight:600;font-size:13.5px;color:#2B2B2B;line-height:1.45;">Present Perfect = <b>have / has</b> + 3-я форма глагола. Используем для результата к настоящему моменту.</div>
+      </div>
+      <!-- question -->
+      <div id="g_q" style="margin-top:16px;font-weight:800;font-size:17px;color:#2B2B2B;line-height:1.4;"></div>
+      <div id="g_opts" style="margin-top:16px;display:flex;flex-direction:column;gap:10px;"></div>
+      <!-- explanation -->
+      <div id="g_exp" style="display:none;margin-top:14px;gap:10px;background:#EAF7F0;border-radius:15px;padding:13px 15px;"></div>
+    </div>
+    <!-- next button -->
+    <div style="position:absolute;bottom:100px;left:22px;right:22px;z-index:6;">
+      <button id="g_next" onclick="nextG()" style="width:100%;height:54px;border:none;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:16px;font-family:Manrope;font-weight:700;font-size:15px;color:#fff;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;box-shadow:0 12px 24px rgba(242,104,63,.32);opacity:.45;">Дальше<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></button>
+    </div>
+    <!-- bottom nav (Учить active) -->
+    <div style="position:absolute;left:0;right:0;bottom:0;height:86px;background:rgba(255,255,255,.97);border-top:1px solid #EEF0F2;display:flex;justify-content:space-around;padding:14px 8px 0;z-index:6;">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Главная</span></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.3 8 5 5.5 5.4 4.6 5.5 4 6.3 4 7.2V18c0 .6.5 1 1.1.9 2.2-.3 4.5 0 6.4 1.4 1.9-1.4 4.2-1.7 6.4-1.4.6.1 1.1-.3 1.1-.9V7.2c0-.9-.6-1.7-1.5-1.8C15.5 5 13.7 5.3 12 6.5Z"/><path d="M12 6.5V20"/></svg><span style="font-weight:700;font-size:10.5px;color:#F2683F;">Учить</span></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Прогресс</span></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Профиль</span></div>
+      <div style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:128px;height:5px;border-radius:3px;background:#1d1d1f;opacity:.22;"></div>
+    </div>
+  
+</div>
+<div class="screen" id="scr4" data-name="Аудирование">
+
+    <div style="position:absolute;top:0;left:0;right:0;height:158px;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:0 0 30px 30px;z-index:1;"></div>
+    <!-- status bar white -->
+    <div style="position:absolute;top:0;left:0;right:0;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 7px;z-index:6;">
+      <span style="font-weight:700;font-size:15px;color:#fff;">9:41</span>
+      <div style="display:flex;gap:7px;align-items:center;">
+        <svg width="17" height="11" viewBox="0 0 17 11" fill="#fff"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.7" y="5" width="3" height="6" rx="1"/><rect x="9.3" y="2.5" width="3" height="8.5" rx="1"/><rect x="14" y="0" width="3" height="11" rx="1"/></svg>
+        <svg width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round"><path d="M2 5a8 8 0 0 1 12 0"/><path d="M4.5 7.4a4.4 4.4 0 0 1 7 0"/><circle cx="8" cy="9.8" r="1" fill="#fff" stroke="none"/></svg>
+        <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3" stroke="#fff" opacity=".5"/><rect x="2.4" y="2.4" width="15" height="7.2" rx="1.6" fill="#fff"/><rect x="23" y="4" width="2" height="4" rx="1" fill="#fff"/></svg>
+      </div>
+    </div>
+    <!-- header -->
+    <div style="position:absolute;top:54px;left:0;right:0;padding:0 22px;z-index:6;">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><polyline points="14 6 8 12 14 18"/></svg>
+        <div style="font-weight:800;font-size:18px;color:#fff;">Аудирование</div>
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round"><line x1="5" y1="8" x2="19" y2="8"/><line x1="5" y1="12" x2="19" y2="12"/><line x1="5" y1="16" x2="19" y2="16"/></svg>
+      </div>
+      <div style="margin-top:14px;display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,.22);border-radius:30px;padding:6px 13px;font-weight:700;font-size:12.5px;color:#fff;">💪 Слабое место — качаем</div>
+    </div>
+    <!-- body -->
+    <div style="position:absolute;top:174px;left:0;right:0;bottom:0;padding:0 22px 100px;z-index:5;overflow:hidden;">
+      <!-- player card -->
+      <div style="background:#fff;border-radius:24px;padding:22px;box-shadow:0 14px 34px rgba(20,20,30,.08);">
+        <div style="display:flex;align-items:center;gap:16px;">
+          <div id="l_play" onclick="playListen()" style="width:62px;height:62px;flex:none;border-radius:50%;background:linear-gradient(135deg,#FFA570,#F2683F);display:grid;place-items:center;box-shadow:0 12px 24px rgba(242,104,63,.34);cursor:pointer;"><svg width="24" height="24" viewBox="0 0 24 24" fill="#fff"><path d="M8 5.5v13l11-6.5z"/></svg></div>
+          <div style="flex:1;">
+            <div id="l_title" style="font-weight:800;font-size:15px;color:#2B2B2B;">Диалог 1 · В кафе</div>
+            <div style="font-weight:600;font-size:12px;color:#8A8F98;margin-top:2px;">Задание 1–3 · уровень B1</div>
+          </div>
+          <div style="font-weight:700;font-size:11.5px;color:#F2683F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">1×</div>
+        </div>
+        <!-- waveform -->
+        <div style="margin-top:18px;display:flex;align-items:center;gap:3px;height:36px;">
+          <div style="flex:1;height:30%;border-radius:3px;background:#F2683F;"></div><div style="flex:1;height:55%;border-radius:3px;background:#F2683F;"></div><div style="flex:1;height:80%;border-radius:3px;background:#F2683F;"></div><div style="flex:1;height:45%;border-radius:3px;background:#F2683F;"></div><div style="flex:1;height:65%;border-radius:3px;background:#F2683F;"></div><div style="flex:1;height:100%;border-radius:3px;background:#F2683F;"></div><div style="flex:1;height:50%;border-radius:3px;background:#F2683F;"></div><div style="flex:1;height:70%;border-radius:3px;background:#FBC4AC;"></div><div style="flex:1;height:40%;border-radius:3px;background:#FBC4AC;"></div><div style="flex:1;height:60%;border-radius:3px;background:#FBC4AC;"></div><div style="flex:1;height:35%;border-radius:3px;background:#FBC4AC;"></div><div style="flex:1;height:75%;border-radius:3px;background:#FBC4AC;"></div><div style="flex:1;height:50%;border-radius:3px;background:#FBC4AC;"></div><div style="flex:1;height:85%;border-radius:3px;background:#FBC4AC;"></div><div style="flex:1;height:45%;border-radius:3px;background:#FBC4AC;"></div><div style="flex:1;height:55%;border-radius:3px;background:#FBC4AC;"></div><div style="flex:1;height:30%;border-radius:3px;background:#FBC4AC;"></div>
+        </div>
+        <div style="margin-top:8px;display:flex;justify-content:space-between;font-weight:600;font-size:11.5px;color:#8A8F98;"><span style="color:#F2683F;font-weight:700;">0:42</span><span>2:15</span></div>
+      </div>
+      <!-- questions label -->
+      <div style="font-weight:700;font-size:11px;letter-spacing:1.6px;color:#8A8F98;margin:18px 2px 12px;">ВОПРОСЫ</div>
+      <!-- Q1 -->
+      <div style="background:#fff;border-radius:18px;padding:15px 16px;box-shadow:0 8px 22px rgba(20,20,30,.05);"><div id="l_q1t" style="font-weight:700;font-size:13.5px;color:#2B2B2B;">1. Где происходит разговор?</div><div id="l_q1" style="margin-top:11px;display:flex;flex-direction:column;gap:8px;"></div></div>
+      <!-- Q2 -->
+      <div style="background:#fff;border-radius:18px;padding:15px 16px;box-shadow:0 8px 22px rgba(20,20,30,.05);margin-top:12px;"><div id="l_q2t" style="font-weight:700;font-size:13.5px;color:#2B2B2B;">2. Что заказал мужчина?</div><div id="l_q2" style="margin-top:11px;display:flex;flex-direction:column;gap:8px;"></div></div>
+      <div id="l_script" style="display:none;margin-top:12px;background:#fff;border-radius:16px;padding:14px 16px;box-shadow:0 8px 22px rgba(20,20,30,.05);font-size:13px;color:#5b5f66;line-height:1.55;"></div>
+      <!-- script toggle -->
+      <div onclick="toggleScript()" style="margin-top:14px;display:flex;align-items:center;justify-content:space-between;background:#fff;border-radius:16px;padding:14px 16px;box-shadow:0 8px 22px rgba(20,20,30,.05);cursor:pointer;">
+        <div style="display:flex;align-items:center;gap:11px;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#8A8F98" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h14v16H5z"/><path d="M9 9h6M9 13h6M9 17h3"/></svg>
+          <span style="font-weight:700;font-size:13.5px;color:#2B2B2B;">Показать скрипт</span>
+        </div>
+        <div id="l_toggle" style="width:46px;height:27px;border-radius:20px;background:#E7E9EC;position:relative;transition:.2s;"><div id="l_knob" style="position:absolute;top:3px;left:3px;width:21px;height:21px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:.2s;"></div></div>
+      </div>
+    </div>
+    <!-- bottom nav (Учить active) -->
+    <div style="position:absolute;left:0;right:0;bottom:0;height:86px;background:rgba(255,255,255,.97);border-top:1px solid #EEF0F2;display:flex;justify-content:space-around;padding:14px 8px 0;z-index:6;">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Главная</span></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.3 8 5 5.5 5.4 4.6 5.5 4 6.3 4 7.2V18c0 .6.5 1 1.1.9 2.2-.3 4.5 0 6.4 1.4 1.9-1.4 4.2-1.7 6.4-1.4.6.1 1.1-.3 1.1-.9V7.2c0-.9-.6-1.7-1.5-1.8C15.5 5 13.7 5.3 12 6.5Z"/><path d="M12 6.5V20"/></svg><span style="font-weight:700;font-size:10.5px;color:#F2683F;">Учить</span></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Прогресс</span></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Профиль</span></div>
+      <div style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:128px;height:5px;border-radius:3px;background:#1d1d1f;opacity:.22;"></div>
+    </div>
+  
+</div>
+<div class="screen" id="scr7" data-name="Чтение">
+
+    <div style="position:absolute;top:0;left:0;right:0;height:158px;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:0 0 30px 30px;z-index:1;"></div>
+    <div style="position:absolute;top:0;left:0;right:0;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 7px;z-index:6;">
+      <span style="font-weight:700;font-size:15px;color:#fff;">9:41</span>
+      <div style="display:flex;gap:7px;align-items:center;">
+        <svg width="17" height="11" viewBox="0 0 17 11" fill="#fff"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.7" y="5" width="3" height="6" rx="1"/><rect x="9.3" y="2.5" width="3" height="8.5" rx="1"/><rect x="14" y="0" width="3" height="11" rx="1"/></svg>
+        <svg width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round"><path d="M2 5a8 8 0 0 1 12 0"/><path d="M4.5 7.4a4.4 4.4 0 0 1 7 0"/><circle cx="8" cy="9.8" r="1" fill="#fff" stroke="none"/></svg>
+        <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3" stroke="#fff" opacity=".5"/><rect x="2.4" y="2.4" width="15" height="7.2" rx="1.6" fill="#fff"/><rect x="23" y="4" width="2" height="4" rx="1" fill="#fff"/></svg>
+      </div>
+    </div>
+    <div style="position:absolute;top:54px;left:0;right:0;padding:0 22px;z-index:6;">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><polyline points="14 6 8 12 14 18"/></svg>
+        <div style="font-weight:800;font-size:18px;color:#fff;">Чтение</div>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5V6a2 2 0 0 1 2-2h12v16H6a2 2 0 0 0-2 2Z"/><path d="M8 7h7"/></svg>
+      </div>
+      <div style="margin-top:13px;display:flex;align-items:center;gap:10px;font-weight:600;font-size:12.5px;color:rgba(255,255,255,.92);">
+        <span style="font-weight:800;">A Gap Year</span><span style="opacity:.7;">·</span><span>уровень B1</span><span style="margin-left:auto;background:rgba(255,255,255,.22);padding:4px 10px;border-radius:20px;font-weight:700;">3 мин</span>
+      </div>
+    </div>
+    <!-- reading body -->
+    <div style="position:absolute;top:174px;left:0;right:0;bottom:86px;padding:0 22px 16px;z-index:5;overflow:hidden;">
+      <div style="background:#fff;border-radius:22px;padding:20px;box-shadow:0 10px 26px rgba(20,20,30,.06);">
+        <p id="r_text" style="margin:0;font-weight:500;font-size:15.5px;line-height:1.7;color:#2B2B2B;"></p>
+      </div>
+      <!-- word popover -->
+      <div id="r_pop" style="margin-top:14px;background:#fff;border-radius:20px;padding:16px 18px;box-shadow:0 14px 30px rgba(20,20,30,.10);display:none;">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <div style="display:flex;align-items:baseline;gap:10px;"><span id="r_word" style="font-weight:800;font-size:19px;color:#2B2B2B;">valuable</span><span id="r_ipa" style="font-weight:500;font-size:13px;color:#8A8F98;">/ˈvæljuəbl/</span></div>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M16 9a4 4 0 0 1 0 6"/></svg>
+        </div>
+        <div id="r_tr" style="margin-top:6px;font-weight:600;font-size:14px;color:#5b5f66;">ценный, полезный</div>
+        <div style="margin-top:12px;display:flex;gap:10px;">
+          <button style="flex:1;height:42px;border:1.5px solid #F2683F;background:#fff;border-radius:13px;font-family:Manrope;font-weight:700;font-size:13px;color:#F2683F;cursor:pointer;" onclick="r_add('learn')">+ Учить</button>
+          <button style="flex:1;height:42px;border:none;background:#EAF7F0;border-radius:13px;font-family:Manrope;font-weight:700;font-size:13px;color:#1F8A50;cursor:pointer;" onclick="r_add('know')">✓ Знаю</button>
+        </div>
+      </div>
+      <!-- question -->
+      <div style="margin-top:14px;background:#fff;border-radius:18px;padding:15px 16px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
+        <div style="font-weight:700;font-size:13px;color:#2B2B2B;">Вопрос 1 · A gap year helps students to…</div>
+        <div style="margin-top:11px;display:flex;align-items:center;gap:10px;font-weight:600;font-size:13px;color:#9aa0a8;"><span style="width:18px;height:18px;border-radius:50%;border:2px solid #E1E3E6;"></span>earn a degree faster</div>
+        <div style="margin-top:9px;display:flex;align-items:center;gap:10px;font-weight:700;font-size:13px;color:#2B2B2B;"><span style="width:18px;height:18px;border-radius:50%;border:2px solid #F2683F;"></span>become more independent</div>
+      </div>
+    </div>
+    <!-- legend chips -->
+    <div style="position:absolute;bottom:86px;left:0;right:0;display:none;"></div>
+    <!-- bottom nav (Учить) -->
+    <div style="position:absolute;left:0;right:0;bottom:0;height:86px;background:rgba(255,255,255,.97);border-top:1px solid #EEF0F2;display:flex;justify-content:space-around;padding:14px 8px 0;z-index:6;">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Главная</span></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.3 8 5 5.5 5.4 4.6 5.5 4 6.3 4 7.2V18c0 .6.5 1 1.1.9 2.2-.3 4.5 0 6.4 1.4 1.9-1.4 4.2-1.7 6.4-1.4.6.1 1.1-.3 1.1-.9V7.2c0-.9-.6-1.7-1.5-1.8C15.5 5 13.7 5.3 12 6.5Z"/><path d="M12 6.5V20"/></svg><span style="font-weight:700;font-size:10.5px;color:#F2683F;">Учить</span></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Прогресс</span></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Профиль</span></div>
+      <div style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:128px;height:5px;border-radius:3px;background:#1d1d1f;opacity:.22;"></div>
+    </div>
+  
+</div>
+<div class="screen" id="scr8" data-name="Письмо">
+
+    <div style="position:absolute;top:0;left:0;right:0;height:172px;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:0 0 30px 30px;z-index:1;"></div>
+    <div style="position:absolute;top:0;left:0;right:0;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 7px;z-index:6;">
+      <span style="font-weight:700;font-size:15px;color:#fff;">9:41</span>
+      <div style="display:flex;gap:7px;align-items:center;">
+        <svg width="17" height="11" viewBox="0 0 17 11" fill="#fff"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.7" y="5" width="3" height="6" rx="1"/><rect x="9.3" y="2.5" width="3" height="8.5" rx="1"/><rect x="14" y="0" width="3" height="11" rx="1"/></svg>
+        <svg width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round"><path d="M2 5a8 8 0 0 1 12 0"/><path d="M4.5 7.4a4.4 4.4 0 0 1 7 0"/><circle cx="8" cy="9.8" r="1" fill="#fff" stroke="none"/></svg>
+        <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3" stroke="#fff" opacity=".5"/><rect x="2.4" y="2.4" width="15" height="7.2" rx="1.6" fill="#fff"/><rect x="23" y="4" width="2" height="4" rx="1" fill="#fff"/></svg>
+      </div>
+    </div>
+    <div style="position:absolute;top:54px;left:0;right:0;padding:0 22px;z-index:6;">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><polyline points="14 6 8 12 14 18"/></svg>
+        <div style="font-weight:800;font-size:18px;color:#fff;">Письмо</div>
+        <span style="width:26px;"></span>
+      </div>
+      <!-- task switcher -->
+      <div style="margin-top:16px;background:rgba(255,255,255,.22);border-radius:14px;padding:4px;display:flex;gap:4px;">
+        <div style="flex:1;text-align:center;padding:8px 0;font-weight:700;font-size:13px;color:rgba(255,255,255,.92);cursor:pointer;" id="w_seg37" onclick="setTask(37)">37 · Письмо другу</div>
+        <div style="flex:1;text-align:center;padding:8px 0;font-weight:700;font-size:13px;color:#F2683F;background:#fff;border-radius:11px;cursor:pointer;" id="w_seg38" onclick="setTask(38)">38 · Эссе</div>
+      </div>
+    </div>
+    <div style="position:absolute;top:188px;left:0;right:0;bottom:86px;padding:0 22px 16px;z-index:5;overflow:hidden;">
+      <!-- task -->
+      <div style="background:#fff;border-radius:18px;padding:15px 16px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
+        <div style="font-weight:700;font-size:10.5px;letter-spacing:1.4px;color:#F2683F;" id="w_tasklabel">ЗАДАНИЕ 38 · OPINION ESSAY</div>
+        <div style="margin-top:7px;font-weight:600;font-size:13.5px;color:#2B2B2B;line-height:1.45;" id="w_prompt">“Online learning is better than studying at school.” What is your opinion?</div>
+        <div style="margin-top:10px;display:inline-flex;align-items:center;gap:7px;background:#FFF4DE;border-radius:10px;padding:7px 11px;font-weight:700;font-size:11.5px;color:#C77400;" id="w_tablehint">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#C77400" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M7 9h4M7 13h7"/></svg>
+          К заданию есть таблица-опрос
+        </div>
+      </div>
+      <!-- editor -->
+      <div style="margin-top:12px;background:#fff;border-radius:18px;padding:15px 16px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
+        <div id="w_editor" contenteditable="true" oninput="countWords()" data-ph="Пиши свой ответ здесь…" style="font-weight:500;font-size:13.5px;line-height:1.6;color:#2B2B2B;min-height:130px;outline:none;"></div>
+        <div style="margin-top:12px;display:flex;align-items:center;justify-content:space-between;border-top:1px solid #F1F1F3;padding-top:11px;">
+          <span style="font-weight:700;font-size:12px;color:#8A8F98;" id="w_count">0 / 200–250 слов</span>
+          <div style="display:flex;gap:14px;color:#B6BBC2;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#B6BBC2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V5h16v2M9 19h6M12 5v14"/></svg>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#B6BBC2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h13M3 12h13M3 17h9M19 9l2 2-2 2"/></svg>
+          </div>
+        </div>
+      </div>
+      <!-- criteria checklist -->
+      <div style="margin-top:12px;background:#fff;border-radius:18px;padding:15px 16px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
+        <div style="font-weight:700;font-size:11px;letter-spacing:1.4px;color:#8A8F98;margin-bottom:11px;">КРИТЕРИИ</div>
+        <div style="display:flex;align-items:center;gap:10px;font-weight:600;font-size:13px;color:#1F8A50;margin-bottom:9px;"><span style="width:20px;height:20px;border-radius:7px;background:#1F9E5A;display:grid;place-items:center;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 12 10 18 20 6"/></svg></span>Вступление с мнением</div>
+        <div style="display:flex;align-items:center;gap:10px;font-weight:600;font-size:13px;color:#1F8A50;margin-bottom:9px;"><span style="width:20px;height:20px;border-radius:7px;background:#1F9E5A;display:grid;place-items:center;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 12 10 18 20 6"/></svg></span>Контраргумент</div>
+        <div style="display:flex;align-items:center;gap:10px;font-weight:600;font-size:13px;color:#B6BBC2;"><span style="width:20px;height:20px;border-radius:7px;border:2px solid #E1E3E6;"></span>Заключение</div>
+      </div>
+      <!-- AI check -->
+      <button onclick="checkWriting()" style="margin-top:14px;width:100%;height:52px;border:none;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:16px;font-family:Manrope;font-weight:700;font-size:15px;color:#fff;display:flex;align-items:center;justify-content:center;gap:9px;cursor:pointer;box-shadow:0 12px 24px rgba(242,104,63,.32);"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 1.9 4.6L19 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"/><path d="M19 16l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></svg>Проверить с ИИ</button>
+    </div>
+    <div style="position:absolute;left:0;right:0;bottom:0;height:86px;background:rgba(255,255,255,.97);border-top:1px solid #EEF0F2;display:flex;justify-content:space-around;padding:14px 8px 0;z-index:6;">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Главная</span></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.3 8 5 5.5 5.4 4.6 5.5 4 6.3 4 7.2V18c0 .6.5 1 1.1.9 2.2-.3 4.5 0 6.4 1.4 1.9-1.4 4.2-1.7 6.4-1.4.6.1 1.1-.3 1.1-.9V7.2c0-.9-.6-1.7-1.5-1.8C15.5 5 13.7 5.3 12 6.5Z"/><path d="M12 6.5V20"/></svg><span style="font-weight:700;font-size:10.5px;color:#F2683F;">Учить</span></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Прогресс</span></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Профиль</span></div>
+      <div style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:128px;height:5px;border-radius:3px;background:#1d1d1f;opacity:.22;"></div>
+    </div>
+  
+</div>
+<div class="screen" id="scr9" data-name="Говорение">
+
+    <div style="position:absolute;top:0;left:0;right:0;height:140px;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:0 0 30px 30px;z-index:1;"></div>
+    <div style="position:absolute;top:0;left:0;right:0;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 7px;z-index:6;">
+      <span style="font-weight:700;font-size:15px;color:#fff;">9:41</span>
+      <div style="display:flex;gap:7px;align-items:center;">
+        <svg width="17" height="11" viewBox="0 0 17 11" fill="#fff"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.7" y="5" width="3" height="6" rx="1"/><rect x="9.3" y="2.5" width="3" height="8.5" rx="1"/><rect x="14" y="0" width="3" height="11" rx="1"/></svg>
+        <svg width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round"><path d="M2 5a8 8 0 0 1 12 0"/><path d="M4.5 7.4a4.4 4.4 0 0 1 7 0"/><circle cx="8" cy="9.8" r="1" fill="#fff" stroke="none"/></svg>
+        <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3" stroke="#fff" opacity=".5"/><rect x="2.4" y="2.4" width="15" height="7.2" rx="1.6" fill="#fff"/><rect x="23" y="4" width="2" height="4" rx="1" fill="#fff"/></svg>
+      </div>
+    </div>
+    <div style="position:absolute;top:54px;left:0;right:0;padding:0 22px;z-index:6;">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><polyline points="14 6 8 12 14 18"/></svg>
+        <div style="font-weight:800;font-size:18px;color:#fff;">Говорение</div>
+        <span style="width:26px;"></span>
+      </div>
+      <div style="margin-top:10px;font-weight:600;font-size:12.5px;color:rgba(255,255,255,.92);text-align:center;">Задание 2 · Интервью · 3 из 5</div>
+    </div>
+    <!-- timer ring -->
+    <div style="position:absolute;top:172px;left:0;right:0;display:flex;flex-direction:column;align-items:center;z-index:5;">
+      <div style="position:relative;width:220px;height:220px;">
+        <svg width="220" height="220" viewBox="0 0 220 220">
+          <circle cx="110" cy="110" r="96" fill="#fff" stroke="#EEF0F2" stroke-width="14"/>
+          <circle cx="110" cy="110" r="96" fill="none" stroke="url(#spk)" stroke-width="14" stroke-linecap="round" stroke-dasharray="603" stroke-dashoffset="0" transform="rotate(-90 110 110)" id="sp_ring"/>
+          <defs><linearGradient id="spk" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFA570"/><stop offset="1" stop-color="#F2683F"/></linearGradient></defs>
+        </svg>
+        <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;">
+          <div style="font-weight:700;font-size:11px;letter-spacing:1.8px;color:#F2683F;">ОТВЕТ</div>
+          <div id="sp_time" style="font-weight:800;font-size:52px;color:#2B2B2B;letter-spacing:-1px;line-height:1;margin-top:4px;">0:40</div>
+          <div id="sp_sub" style="font-weight:600;font-size:12.5px;color:#8A8F98;margin-top:4px;">осталось из 0:40</div>
+        </div>
+      </div>
+    </div>
+    <!-- question -->
+    <div style="position:absolute;top:418px;left:22px;right:22px;z-index:5;">
+      <div style="background:#fff;border-radius:18px;padding:16px 18px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
+        <div style="font-weight:700;font-size:10.5px;letter-spacing:1.4px;color:#5FB6C9;">ВОПРОС ИНТЕРВЬЮЕРА</div>
+        <div id="sp_q" style="margin-top:7px;font-weight:600;font-size:14.5px;color:#2B2B2B;line-height:1.45;">How often do you use the internet for studying?</div>
+      </div>
+    </div>
+    <!-- record controls -->
+    <div style="position:absolute;bottom:128px;left:0;right:0;display:flex;align-items:center;justify-content:center;gap:34px;z-index:5;">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:7px;">
+        <div style="width:54px;height:54px;border-radius:50%;background:#fff;display:grid;place-items:center;box-shadow:0 8px 18px rgba(20,20,30,.08);cursor:pointer;" onclick="resetSpeaking()"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#8A8F98" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/></svg></div>
+        <span style="font-weight:600;font-size:11px;color:#8A8F98;">заново</span>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:7px;">
+        <div id="sp_recbtn" onclick="toggleRec()" style="width:84px;height:84px;border-radius:50%;background:linear-gradient(135deg,#FF7A5C,#E23B2B);display:grid;place-items:center;box-shadow:0 16px 32px rgba(226,59,43,.36);position:relative;cursor:pointer;">
+          <div style="position:absolute;inset:-7px;border-radius:50%;border:3px solid rgba(226,59,43,.22);"></div>
+          <div style="width:28px;height:28px;border-radius:9px;background:#fff;"></div>
+        </div>
+        <span id="sp_reclabel" style="font-weight:700;font-size:11.5px;color:#E23B2B;">нажми, чтобы записать</span>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:7px;">
+        <div style="width:54px;height:54px;border-radius:50%;background:#fff;display:grid;place-items:center;box-shadow:0 8px 18px rgba(20,20,30,.08);cursor:pointer;" onclick="playRec()"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#8A8F98" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M16 9a4 4 0 0 1 0 6"/></svg></div>
+        <span style="font-weight:600;font-size:11px;color:#8A8F98;">прослушать</span>
+      </div>
+    </div>
+    <div style="position:absolute;left:0;right:0;bottom:0;height:86px;background:rgba(255,255,255,.97);border-top:1px solid #EEF0F2;display:flex;justify-content:space-around;padding:14px 8px 0;z-index:6;">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Главная</span></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.3 8 5 5.5 5.4 4.6 5.5 4 6.3 4 7.2V18c0 .6.5 1 1.1.9 2.2-.3 4.5 0 6.4 1.4 1.9-1.4 4.2-1.7 6.4-1.4.6.1 1.1-.3 1.1-.9V7.2c0-.9-.6-1.7-1.5-1.8C15.5 5 13.7 5.3 12 6.5Z"/><path d="M12 6.5V20"/></svg><span style="font-weight:700;font-size:10.5px;color:#F2683F;">Учить</span></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Прогресс</span></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Профиль</span></div>
+      <div style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:128px;height:5px;border-radius:3px;background:#1d1d1f;opacity:.22;"></div>
+    </div>
+  
+</div>
+<div class="screen" id="scr12" data-name="Разбор ИИ">
+
+    <div style="position:absolute;top:0;left:0;right:0;height:206px;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:0 0 30px 30px;z-index:1;"></div>
+    <div style="position:absolute;top:0;left:0;right:0;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 7px;z-index:6;">
+      <span style="font-weight:700;font-size:15px;color:#fff;">9:41</span>
+      <div style="display:flex;gap:7px;align-items:center;">
+        <svg width="17" height="11" viewBox="0 0 17 11" fill="#fff"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.7" y="5" width="3" height="6" rx="1"/><rect x="9.3" y="2.5" width="3" height="8.5" rx="1"/><rect x="14" y="0" width="3" height="11" rx="1"/></svg>
+        <svg width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round"><path d="M2 5a8 8 0 0 1 12 0"/><path d="M4.5 7.4a4.4 4.4 0 0 1 7 0"/><circle cx="8" cy="9.8" r="1" fill="#fff" stroke="none"/></svg>
+        <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3" stroke="#fff" opacity=".5"/><rect x="2.4" y="2.4" width="15" height="7.2" rx="1.6" fill="#fff"/><rect x="23" y="4" width="2" height="4" rx="1" fill="#fff"/></svg>
+      </div>
+    </div>
+    <div style="position:absolute;top:54px;left:0;right:0;padding:0 22px;z-index:6;">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><polyline points="14 6 8 12 14 18"/></svg>
+        <div style="font-weight:800;font-size:18px;color:#fff;">Разбор эссе</div>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5 15.4 17.5M15.4 6.5 8.6 10.5"/></svg>
+      </div>
+      <!-- score banner -->
+      <div style="margin-top:16px;display:flex;align-items:center;gap:16px;">
+        <svg width="86" height="86" viewBox="0 0 86 86">
+          <circle cx="43" cy="43" r="36" fill="rgba(255,255,255,.22)"/>
+          <circle cx="43" cy="43" r="36" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round" stroke-dasharray="226" stroke-dashoffset="64" transform="rotate(-90 43 43)" id="rv_ring"/>
+          <text x="43" y="40" text-anchor="middle" font-family="Manrope" font-weight="800" font-size="24" fill="#fff" id="rv_score">11</text>
+          <text x="43" y="56" text-anchor="middle" font-family="Manrope" font-weight="700" font-size="11" fill="rgba(255,255,255,.85)" id="rv_max">из 14</text>
+        </svg>
+        <div style="color:#fff;">
+          <div style="font-weight:800;font-size:19px;letter-spacing:-.3px;" id="rv_verdict">Хороший результат!</div>
+          <div style="font-weight:600;font-size:13px;color:rgba(255,255,255,.9);margin-top:3px;line-height:1.4;" id="rv_sub">Близко к максимуму.</div>
+        </div>
+      </div>
+    </div>
+    <div style="position:absolute;top:226px;left:0;right:0;bottom:0;padding:0 22px 24px;z-index:5;overflow:hidden;">
+      <!-- criteria scores -->
+      <div style="font-weight:700;font-size:11px;letter-spacing:1.4px;color:#8A8F98;margin:2px 2px 11px;">БАЛЛЫ ПО КРИТЕРИЯМ</div>
+      <div style="background:#fff;border-radius:18px;padding:15px 16px;box-shadow:0 8px 22px rgba(20,20,30,.05);display:flex;flex-direction:column;gap:13px;" id="rv_crit">
+        <div style="display:flex;align-items:center;gap:12px;"><span style="flex:1;font-weight:600;font-size:13px;color:#2B2B2B;">Решение задачи</span><div style="width:96px;height:8px;border-radius:5px;background:#F1F1F3;"><div style="width:100%;height:100%;border-radius:5px;background:#1F9E5A;"></div></div><span style="font-weight:800;font-size:12.5px;color:#1F8A50;width:30px;text-align:right;">3/3</span></div>
+        <div style="display:flex;align-items:center;gap:12px;"><span style="flex:1;font-weight:600;font-size:13px;color:#2B2B2B;">Организация текста</span><div style="width:96px;height:8px;border-radius:5px;background:#F1F1F3;"><div style="width:66%;height:100%;border-radius:5px;background:#E8A33C;"></div></div><span style="font-weight:800;font-size:12.5px;color:#C77400;width:30px;text-align:right;">2/3</span></div>
+        <div style="display:flex;align-items:center;gap:12px;"><span style="flex:1;font-weight:600;font-size:13px;color:#2B2B2B;">Лексика</span><div style="width:96px;height:8px;border-radius:5px;background:#F1F1F3;"><div style="width:100%;height:100%;border-radius:5px;background:#1F9E5A;"></div></div><span style="font-weight:800;font-size:12.5px;color:#1F8A50;width:30px;text-align:right;">3/3</span></div>
+        <div style="display:flex;align-items:center;gap:12px;"><span style="flex:1;font-weight:600;font-size:13px;color:#2B2B2B;">Грамматика</span><div style="width:96px;height:8px;border-radius:5px;background:#F1F1F3;"><div style="width:66%;height:100%;border-radius:5px;background:#E8A33C;"></div></div><span style="font-weight:800;font-size:12.5px;color:#C77400;width:30px;text-align:right;">2/3</span></div>
+        <div style="display:flex;align-items:center;gap:12px;"><span style="flex:1;font-weight:600;font-size:13px;color:#2B2B2B;">Орфография</span><div style="width:96px;height:8px;border-radius:5px;background:#F1F1F3;"><div style="width:50%;height:100%;border-radius:5px;background:#E26A56;"></div></div><span style="font-weight:800;font-size:12.5px;color:#C9503C;width:30px;text-align:right;">1/2</span></div>
+      </div>
+      <!-- inline error breakdown -->
+      <div style="font-weight:700;font-size:11px;letter-spacing:1.4px;color:#8A8F98;margin:18px 2px 11px;" id="rv_errhdr">РАЗБОР ОШИБОК</div>
+      <div id="rv_err" style="background:#fff;border-radius:18px;padding:15px 16px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
+        <div style="display:flex;gap:11px;">
+          <span style="width:26px;height:26px;flex:none;border-radius:9px;background:#FCEEEC;display:grid;place-items:center;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C9503C" stroke-width="2.4" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></span>
+          <div style="flex:1;">
+            <div style="font-weight:700;font-size:13.5px;color:#2B2B2B;">Грамматика · артикль</div>
+            <div style="margin-top:4px;font-weight:500;font-size:12.5px;color:#8A8F98;line-height:1.45;"><span style="text-decoration:line-through;color:#C9503C;">go to the school</span> → <span style="color:#1F8A50;font-weight:700;">go to school</span></div>
+          </div>
+        </div>
+        <div style="height:1px;background:#F4F5F6;margin:13px 0;"></div>
+        <div style="display:flex;gap:11px;">
+          <span style="width:26px;height:26px;flex:none;border-radius:9px;background:#FCEEEC;display:grid;place-items:center;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C9503C" stroke-width="2.4" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></span>
+          <div style="flex:1;">
+            <div style="font-weight:700;font-size:13.5px;color:#2B2B2B;">Орфография</div>
+            <div style="margin-top:4px;font-weight:500;font-size:12.5px;color:#8A8F98;line-height:1.45;"><span style="text-decoration:line-through;color:#C9503C;">advanteges</span> → <span style="color:#1F8A50;font-weight:700;">advantages</span></div>
+          </div>
+        </div>
+        <div style="height:1px;background:#F4F5F6;margin:13px 0;"></div>
+        <div style="display:flex;gap:11px;">
+          <span style="width:26px;height:26px;flex:none;border-radius:9px;background:#FFF4DE;display:grid;place-items:center;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C77400" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 2 18a2 2 0 0 0 1.7 3h16.6A2 2 0 0 0 22 18L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg></span>
+          <div style="flex:1;">
+            <div style="font-weight:700;font-size:13.5px;color:#2B2B2B;">Связки · совет</div>
+            <div style="margin-top:4px;font-weight:500;font-size:12.5px;color:#8A8F98;line-height:1.45;">Добавь <b style="color:#2B2B2B;">However</b> и <b style="color:#2B2B2B;">In conclusion</b> для связности.</div>
+          </div>
+        </div>
+      </div>
+      <!-- actions -->
+      <div style="margin-top:14px;display:flex;gap:12px;">
+        <button style="flex:1;height:52px;border:1.6px solid #F2683F;background:#fff;border-radius:16px;font-family:Manrope;font-weight:700;font-size:14px;color:#F2683F;cursor:pointer;" onclick="tab('scr8')">Исправить</button>
+        <button style="flex:1;height:52px;border:none;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:16px;font-family:Manrope;font-weight:700;font-size:14px;color:#fff;cursor:pointer;box-shadow:0 12px 24px rgba(242,104,63,.3);" onclick="tab('scr10')">Сохранить в прогресс</button>
+      </div>
+    </div>
+  
+</div>
+<div class="screen" id="scr13" data-name="ИИ проверяет">
+
+    <div style="position:absolute;top:0;left:0;right:0;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 7px;z-index:6;">
+      <span style="font-weight:700;font-size:15px;color:#2B2B2B;">9:41</span>
+      <div style="display:flex;gap:7px;align-items:center;">
+        <svg width="17" height="11" viewBox="0 0 17 11" fill="#2B2B2B"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.7" y="5" width="3" height="6" rx="1"/><rect x="9.3" y="2.5" width="3" height="8.5" rx="1"/><rect x="14" y="0" width="3" height="11" rx="1"/></svg>
+        <svg width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="#2B2B2B" stroke-width="1.6" stroke-linecap="round"><path d="M2 5a8 8 0 0 1 12 0"/><path d="M4.5 7.4a4.4 4.4 0 0 1 7 0"/><circle cx="8" cy="9.8" r="1" fill="#2B2B2B" stroke="none"/></svg>
+        <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3" stroke="#2B2B2B" opacity=".4"/><rect x="2.4" y="2.4" width="15" height="7.2" rx="1.6" fill="#2B2B2B"/><rect x="23" y="4" width="2" height="4" rx="1" fill="#2B2B2B"/></svg>
+      </div>
+    </div>
+    <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 40px;text-align:center;">
+      <div style="position:relative;width:130px;height:130px;">
+        <svg width="130" height="130" viewBox="0 0 130 130">
+          <circle cx="65" cy="65" r="54" fill="none" stroke="#FCE3D6" stroke-width="10"/>
+          <circle cx="65" cy="65" r="54" fill="none" stroke="url(#ld)" stroke-width="10" stroke-linecap="round" stroke-dasharray="339" stroke-dashoffset="230" transform="rotate(-90 65 65)"/>
+          <defs><linearGradient id="ld" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFA570"/><stop offset="1" stop-color="#F2683F"/></linearGradient></defs>
+        </svg>
+        <div style="position:absolute;inset:0;display:grid;place-items:center;">
+          <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 1.9 4.6L19 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"/><path d="M19 16l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></svg>
+        </div>
+      </div>
+      <div style="margin-top:30px;font-weight:800;font-size:21px;color:#2B2B2B;">ИИ проверяет эссе…</div>
+      <div style="margin-top:10px;font-weight:600;font-size:14px;color:#8A8F98;line-height:1.5;">Анализируем грамматику, лексику<br>и структуру. Это займёт ~15 секунд.</div>
+      <!-- step pills -->
+      <div style="margin-top:26px;display:flex;flex-direction:column;gap:10px;width:100%;max-width:250px;">
+        <div style="display:flex;align-items:center;gap:10px;background:#fff;border-radius:13px;padding:11px 14px;box-shadow:0 6px 16px rgba(20,20,30,.05);"><span style="width:20px;height:20px;border-radius:50%;background:#1F9E5A;display:grid;place-items:center;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 12 10 18 20 6"/></svg></span><span style="font-weight:600;font-size:13px;color:#2B2B2B;">Орфография проверена</span></div>
+        <div style="display:flex;align-items:center;gap:10px;background:#fff;border-radius:13px;padding:11px 14px;box-shadow:0 6px 16px rgba(20,20,30,.05);"><span style="width:20px;height:20px;border-radius:50%;border:2.5px solid #F2683F;border-right-color:transparent;"></span><span style="font-weight:600;font-size:13px;color:#2B2B2B;">Анализ грамматики…</span></div>
+        <div style="display:flex;align-items:center;gap:10px;background:#fff;border-radius:13px;padding:11px 14px;box-shadow:0 6px 16px rgba(20,20,30,.05);opacity:.5;"><span style="width:20px;height:20px;border-radius:50%;border:2px solid #D8DCE1;"></span><span style="font-weight:600;font-size:13px;color:#8A8F98;">Оценка по критериям</span></div>
+      </div>
+    </div>
+  
+</div>
+<div class="screen" id="scr10" data-name="Прогресс">
+
+    <div style="position:absolute;top:0;left:0;right:0;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 7px;z-index:6;">
+      <span style="font-weight:700;font-size:15px;color:#2B2B2B;">9:41</span>
+      <div style="display:flex;gap:7px;align-items:center;">
+        <svg width="17" height="11" viewBox="0 0 17 11" fill="#2B2B2B"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.7" y="5" width="3" height="6" rx="1"/><rect x="9.3" y="2.5" width="3" height="8.5" rx="1"/><rect x="14" y="0" width="3" height="11" rx="1"/></svg>
+        <svg width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="#2B2B2B" stroke-width="1.6" stroke-linecap="round"><path d="M2 5a8 8 0 0 1 12 0"/><path d="M4.5 7.4a4.4 4.4 0 0 1 7 0"/><circle cx="8" cy="9.8" r="1" fill="#2B2B2B" stroke="none"/></svg>
+        <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3" stroke="#2B2B2B" opacity=".4"/><rect x="2.4" y="2.4" width="15" height="7.2" rx="1.6" fill="#2B2B2B"/><rect x="23" y="4" width="2" height="4" rx="1" fill="#2B2B2B"/></svg>
+      </div>
+    </div>
+    <div style="position:absolute;top:52px;left:0;right:0;bottom:86px;padding:8px 20px 14px;z-index:5;overflow:hidden;">
+      <div style="font-weight:800;font-size:22px;color:#2B2B2B;letter-spacing:-.3px;">Мой прогресс</div>
+      <!-- big number row -->
+      <div style="margin-top:16px;display:flex;gap:12px;">
+        <div style="flex:1;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:20px;padding:16px;color:#fff;box-shadow:0 14px 28px rgba(242,104,63,.28);">
+          <div style="font-weight:800;font-size:34px;letter-spacing:-1px;line-height:1;">B1</div>
+          <div style="margin-top:8px;font-weight:700;font-size:10.5px;letter-spacing:1.2px;opacity:.9;">ОБЩИЙ УРОВЕНЬ</div>
+        </div>
+        <div style="flex:1;display:flex;flex-direction:column;gap:12px;">
+          <div style="background:#fff;border-radius:16px;padding:12px 14px;box-shadow:0 8px 20px rgba(20,20,30,.05);"><div id="p_streak" style="font-weight:800;font-size:22px;color:#2B2B2B;">🔥 12</div><div style="font-weight:600;font-size:11px;color:#8A8F98;margin-top:1px;">дней серия</div></div>
+          <div style="background:#fff;border-radius:16px;padding:12px 14px;box-shadow:0 8px 20px rgba(20,20,30,.05);"><div id="p_words" style="font-weight:800;font-size:22px;color:#2B2B2B;">320</div><div style="font-weight:600;font-size:11px;color:#8A8F98;margin-top:1px;">слов выучено</div></div>
+        </div>
+      </div>
+      <!-- line chart -->
+      <div style="margin-top:14px;background:#fff;border-radius:20px;padding:16px 16px 12px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <div style="font-weight:700;font-size:13px;color:#2B2B2B;">Баллы по месяцам</div>
+          <div style="font-weight:800;font-size:13px;color:#1F9E5A;">+18 ▲</div>
+        </div>
+        <svg width="100%" height="96" viewBox="0 0 318 96" preserveAspectRatio="none" style="margin-top:10px;">
+          <defs><linearGradient id="lg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F2683F" stop-opacity=".22"/><stop offset="1" stop-color="#F2683F" stop-opacity="0"/></linearGradient></defs>
+          <path d="M0 78 L53 70 L106 72 L159 52 L212 40 L265 30 L318 16 L318 96 L0 96 Z" fill="url(#lg)"/>
+          <path d="M0 78 L53 70 L106 72 L159 52 L212 40 L265 30 L318 16" fill="none" stroke="#F2683F" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="318" cy="16" r="4.5" fill="#F2683F" stroke="#fff" stroke-width="2.5"/>
+        </svg>
+        <div style="display:flex;justify-content:space-between;font-weight:600;font-size:10px;color:#B6BBC2;margin-top:2px;"><span>Дек</span><span>Янв</span><span>Фев</span><span>Мар</span><span>Апр</span><span>Май</span><span>Июн</span></div>
+      </div>
+      <!-- section bars -->
+      <div style="margin-top:14px;background:#fff;border-radius:20px;padding:16px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
+        <div style="font-weight:700;font-size:13px;color:#2B2B2B;margin-bottom:14px;">Уровень по разделам</div>
+        <div style="display:flex;flex-direction:column;gap:13px;">
+          <div style="display:flex;align-items:center;gap:12px;"><span style="width:78px;font-weight:600;font-size:12.5px;color:#5b5f66;">Чтение</span><div style="flex:1;height:9px;border-radius:6px;background:#F1F1F3;"><div id="pb_read" style="width:78%;height:100%;border-radius:6px;background:linear-gradient(90deg,#FFA570,#F2683F);"></div></div><span style="font-weight:700;font-size:11.5px;color:#2B2B2B;width:24px;text-align:right;">B2</span></div>
+          <div style="display:flex;align-items:center;gap:12px;"><span style="width:78px;font-weight:600;font-size:12.5px;color:#5b5f66;">Грамматика</span><div style="flex:1;height:9px;border-radius:6px;background:#F1F1F3;"><div id="pb_gram" style="width:62%;height:100%;border-radius:6px;background:linear-gradient(90deg,#FFA570,#F2683F);"></div></div><span style="font-weight:700;font-size:11.5px;color:#2B2B2B;width:24px;text-align:right;">B1</span></div>
+          <div style="display:flex;align-items:center;gap:12px;"><span style="width:78px;font-weight:600;font-size:12.5px;color:#5b5f66;">Слова</span><div style="flex:1;height:9px;border-radius:6px;background:#F1F1F3;"><div id="pb_words" style="width:70%;height:100%;border-radius:6px;background:linear-gradient(90deg,#FFA570,#F2683F);"></div></div><span style="font-weight:700;font-size:11.5px;color:#2B2B2B;width:24px;text-align:right;">B1</span></div>
+          <div style="display:flex;align-items:center;gap:12px;"><span style="width:78px;font-weight:600;font-size:12.5px;color:#5b5f66;">Аудирование</span><div style="flex:1;height:9px;border-radius:6px;background:#F1F1F3;"><div id="pb_listen" style="width:36%;height:100%;border-radius:6px;background:linear-gradient(90deg,#5FB6C9,#3E93A8);"></div></div><span style="font-weight:700;font-size:11.5px;color:#2B2B2B;width:24px;text-align:right;">A2</span></div>
+          <div style="display:flex;align-items:center;gap:12px;"><span style="width:78px;font-weight:600;font-size:12.5px;color:#5b5f66;">Говорение</span><div style="flex:1;height:9px;border-radius:6px;background:#F1F1F3;"><div id="pb_speak" style="width:48%;height:100%;border-radius:6px;background:linear-gradient(90deg,#FFA570,#F2683F);"></div></div><span style="font-weight:700;font-size:11.5px;color:#2B2B2B;width:24px;text-align:right;">B1</span></div>
+        </div>
+      </div>
+    </div>
+    <div style="position:absolute;left:0;right:0;bottom:0;height:86px;background:rgba(255,255,255,.97);border-top:1px solid #EEF0F2;display:flex;justify-content:space-around;padding:14px 8px 0;z-index:6;">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Главная</span></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.3 8 5 5.5 5.4 4.6 5.5 4 6.3 4 7.2V18c0 .6.5 1 1.1.9 2.2-.3 4.5 0 6.4 1.4 1.9-1.4 4.2-1.7 6.4-1.4.6.1 1.1-.3 1.1-.9V7.2c0-.9-.6-1.7-1.5-1.8C15.5 5 13.7 5.3 12 6.5Z"/><path d="M12 6.5V20"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Учить</span></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg><span style="font-weight:700;font-size:10.5px;color:#F2683F;">Прогресс</span></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Профиль</span></div>
+      <div style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:128px;height:5px;border-radius:3px;background:#1d1d1f;opacity:.22;"></div>
+    </div>
+  
+</div>
+<div class="screen" id="scr11" data-name="Профиль">
+
+    <div style="position:absolute;top:0;left:0;right:0;height:200px;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:0 0 30px 30px;z-index:1;"></div>
+    <div style="position:absolute;top:0;left:0;right:0;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 7px;z-index:6;">
+      <span style="font-weight:700;font-size:15px;color:#fff;">9:41</span>
+      <div style="display:flex;gap:7px;align-items:center;">
+        <svg width="17" height="11" viewBox="0 0 17 11" fill="#fff"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.7" y="5" width="3" height="6" rx="1"/><rect x="9.3" y="2.5" width="3" height="8.5" rx="1"/><rect x="14" y="0" width="3" height="11" rx="1"/></svg>
+        <svg width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round"><path d="M2 5a8 8 0 0 1 12 0"/><path d="M4.5 7.4a4.4 4.4 0 0 1 7 0"/><circle cx="8" cy="9.8" r="1" fill="#fff" stroke="none"/></svg>
+        <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3" stroke="#fff" opacity=".5"/><rect x="2.4" y="2.4" width="15" height="7.2" rx="1.6" fill="#fff"/><rect x="23" y="4" width="2" height="4" rx="1" fill="#fff"/></svg>
+      </div>
+    </div>
+    <div style="position:absolute;top:64px;left:0;right:0;text-align:center;z-index:6;font-weight:800;font-size:18px;color:#fff;">Профиль</div>
+    <!-- avatar card -->
+    <div style="position:absolute;top:112px;left:20px;right:20px;background:#fff;border-radius:22px;padding:18px;display:flex;align-items:center;gap:14px;box-shadow:0 14px 30px rgba(20,20,30,.10);z-index:5;">
+      <div style="width:58px;height:58px;border-radius:18px;background:linear-gradient(135deg,#FFC861,#F2683F);display:grid;place-items:center;font-weight:800;font-size:24px;color:#fff;" id="pf_ava">А</div>
+      <div style="flex:1;">
+        <div id="pf_name" style="font-weight:800;font-size:17px;color:#2B2B2B;">Аня Соколова</div>
+        <div style="font-weight:600;font-size:12.5px;color:#8A8F98;margin-top:2px;">11 класс · цель: 85+ баллов</div>
+      </div>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#C4C8CE" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
+    </div>
+    <!-- settings list -->
+    <div style="position:absolute;top:206px;left:0;right:0;bottom:86px;padding:14px 20px;z-index:5;overflow:hidden;">
+      <div style="font-weight:700;font-size:11px;letter-spacing:1.4px;color:#8A8F98;margin:4px 2px 10px;">ЗАНЯТИЯ</div>
+      <div style="background:#fff;border-radius:18px;box-shadow:0 8px 22px rgba(20,20,30,.05);overflow:hidden;">
+        <div style="display:flex;align-items:center;gap:13px;padding:15px 16px;border-bottom:1px solid #F4F5F6;">
+          <span style="width:34px;height:34px;border-radius:11px;background:#FFEDE4;display:grid;place-items:center;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v2M12 19v2M5 12H3M21 12h-2M6 6 4.5 4.5M18 6l1.5-1.5"/><circle cx="12" cy="12" r="4"/></svg></span>
+          <span style="flex:1;font-weight:700;font-size:14px;color:#2B2B2B;">Цель в день</span>
+          <span style="font-weight:600;font-size:13px;color:#8A8F98;">30 мин</span>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#C4C8CE" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
+        </div>
+        <div style="display:flex;align-items:center;gap:13px;padding:15px 16px;">
+          <span style="width:34px;height:34px;border-radius:11px;background:#FFF4DE;display:grid;place-items:center;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#C77400" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg></span>
+          <span style="flex:1;font-weight:700;font-size:14px;color:#2B2B2B;">Напоминания</span>
+          <div style="width:46px;height:27px;border-radius:20px;background:linear-gradient(135deg,#FFA570,#F2683F);position:relative;"><div style="position:absolute;top:3px;right:3px;width:21px;height:21px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.2);"></div></div>
+        </div>
+      </div>
+      <div style="font-weight:700;font-size:11px;letter-spacing:1.4px;color:#8A8F98;margin:18px 2px 10px;">ИИ И АККАУНТ</div>
+      <div style="background:#fff;border-radius:18px;box-shadow:0 8px 22px rgba(20,20,30,.05);overflow:hidden;">
+        <div onclick="setKeyPrompt()" style="display:flex;align-items:center;gap:13px;padding:15px 16px;border-bottom:1px solid #F4F5F6;cursor:pointer;">
+          <span style="width:34px;height:34px;border-radius:11px;background:#E5F4EC;display:grid;place-items:center;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1F9E5A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 1.9 4.6L19 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"/></svg></span>
+          <span style="flex:1;font-weight:700;font-size:14px;color:#2B2B2B;">Проверка эссе ИИ</span>
+          <span id="pf_ai" style="font-weight:700;font-size:11.5px;color:#1F8A50;background:#EAF7F0;padding:4px 10px;border-radius:20px;">вкл</span>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#C4C8CE" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
+        </div>
+        <div style="display:flex;align-items:center;gap:13px;padding:15px 16px;">
+          <span style="width:34px;height:34px;border-radius:11px;background:#E3F1F5;display:grid;place-items:center;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#3E93A8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3.5 9h17M3.5 15h17M12 3c2.5 3 2.5 15 0 18M12 3c-2.5 3-2.5 15 0 18"/></svg></span>
+          <span style="flex:1;font-weight:700;font-size:14px;color:#2B2B2B;">Язык интерфейса</span>
+          <span style="font-weight:600;font-size:13px;color:#8A8F98;">Русский</span>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#C4C8CE" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
+        </div>
+      </div>
+      <!-- logout -->
+      <button onclick="logout()" style="margin-top:18px;width:100%;height:50px;border:1.6px solid #F3D2C8;background:#fff;border-radius:16px;font-family:Manrope;font-weight:700;font-size:14.5px;color:#E23B2B;display:flex;align-items:center;justify-content:center;gap:9px;cursor:pointer;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#E23B2B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>Выйти</button>
+    </div>
+    <div style="position:absolute;left:0;right:0;bottom:0;height:86px;background:rgba(255,255,255,.97);border-top:1px solid #EEF0F2;display:flex;justify-content:space-around;padding:14px 8px 0;z-index:6;">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Главная</span></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.3 8 5 5.5 5.4 4.6 5.5 4 6.3 4 7.2V18c0 .6.5 1 1.1.9 2.2-.3 4.5 0 6.4 1.4 1.9-1.4 4.2-1.7 6.4-1.4.6.1 1.1-.3 1.1-.9V7.2c0-.9-.6-1.7-1.5-1.8C15.5 5 13.7 5.3 12 6.5Z"/><path d="M12 6.5V20"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Учить</span></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Прогресс</span></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#F2683F;">Профиль</span></div>
+      <div style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:128px;height:5px;border-radius:3px;background:#1d1d1f;opacity:.22;"></div>
+    </div>
+  
+</div>
+<div class="screen" id="scr16" data-name="Пробник">
+
+    <div style="position:absolute;top:0;left:0;right:0;height:236px;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:0 0 30px 30px;z-index:1;"></div>
+    <div style="position:absolute;top:0;left:0;right:0;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 7px;z-index:6;">
+      <span style="font-weight:700;font-size:15px;color:#fff;">9:41</span>
+      <div style="display:flex;gap:7px;align-items:center;">
+        <svg width="17" height="11" viewBox="0 0 17 11" fill="#fff"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.7" y="5" width="3" height="6" rx="1"/><rect x="9.3" y="2.5" width="3" height="8.5" rx="1"/><rect x="14" y="0" width="3" height="11" rx="1"/></svg>
+        <svg width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round"><path d="M2 5a8 8 0 0 1 12 0"/><path d="M4.5 7.4a4.4 4.4 0 0 1 7 0"/><circle cx="8" cy="9.8" r="1" fill="#fff" stroke="none"/></svg>
+        <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3" stroke="#fff" opacity=".5"/><rect x="2.4" y="2.4" width="15" height="7.2" rx="1.6" fill="#fff"/><rect x="23" y="4" width="2" height="4" rx="1" fill="#fff"/></svg>
+      </div>
+    </div>
+    <div style="position:absolute;top:54px;left:0;right:0;padding:0 22px;z-index:6;color:#fff;">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><polyline points="14 6 8 12 14 18"/></svg>
+        <div style="font-weight:800;font-size:18px;">Пробный ЕГЭ</div>
+        <span style="width:26px;"></span>
+      </div>
+      <!-- timer + progress -->
+      <div style="margin-top:18px;display:flex;align-items:center;justify-content:space-between;">
+        <div>
+          <div style="font-weight:700;font-size:10.5px;letter-spacing:1.6px;color:rgba(255,255,255,.85);">ОСТАЛОСЬ ВРЕМЕНИ</div>
+          <div style="font-weight:800;font-size:40px;letter-spacing:-1px;line-height:1;margin-top:5px;">1:42:30</div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-weight:800;font-size:24px;">14<span style="font-size:15px;opacity:.8;">/40</span></div>
+          <div style="font-weight:600;font-size:11.5px;color:rgba(255,255,255,.85);margin-top:2px;">отвечено</div>
+        </div>
+      </div>
+      <div style="margin-top:14px;height:7px;border-radius:5px;background:rgba(255,255,255,.28);"><div style="width:35%;height:100%;border-radius:5px;background:#fff;"></div></div>
+    </div>
+    <div style="position:absolute;top:256px;left:0;right:0;bottom:88px;padding:0 22px;z-index:5;overflow:hidden;">
+      <!-- sections -->
+      <div style="font-weight:700;font-size:11px;letter-spacing:1.4px;color:#8A8F98;margin:2px 2px 12px;">РАЗДЕЛЫ</div>
+      <div style="display:flex;flex-direction:column;gap:11px;">
+        <div style="display:flex;align-items:center;gap:13px;background:#fff;border-radius:16px;padding:14px 16px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
+          <span style="width:36px;height:36px;border-radius:11px;background:#EAF7F0;display:grid;place-items:center;"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#1F9E5A" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 12 10 18 20 6"/></svg></span>
+          <div style="flex:1;"><div style="font-weight:700;font-size:14.5px;color:#2B2B2B;">Аудирование</div><div style="font-weight:600;font-size:11.5px;color:#1F8A50;margin-top:1px;">завершено · 9/9</div></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:13px;background:#fff;border-radius:16px;padding:14px 16px;box-shadow:0 10px 24px rgba(242,104,63,.14);border:1.5px solid #FAD3C4;">
+          <span style="width:36px;height:36px;border-radius:11px;background:#FFEDE4;display:grid;place-items:center;"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6c-2-1.3-4.5-1.5-7-1v13c2.5-.5 5-.3 7 1 2-1.3 4.5-1.5 7-1V5c-2.5-.5-5-.3-7 1Z"/><path d="M12 6v13"/></svg></span>
+          <div style="flex:1;"><div style="font-weight:700;font-size:14.5px;color:#2B2B2B;">Чтение</div><div style="font-weight:600;font-size:11.5px;color:#F2683F;margin-top:1px;">сейчас · 5/9</div></div>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
+        </div>
+        <div style="display:flex;align-items:center;gap:13px;background:#fff;border-radius:16px;padding:14px 16px;box-shadow:0 8px 22px rgba(20,20,30,.05);opacity:.65;">
+          <span style="width:36px;height:36px;border-radius:11px;background:#F1F1F3;display:grid;place-items:center;"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h14v16H5z"/><path d="M9 9h6M9 13h6M9 17h3"/></svg></span>
+          <div style="flex:1;"><div style="font-weight:700;font-size:14.5px;color:#2B2B2B;">Грамматика и лексика</div><div style="font-weight:600;font-size:11.5px;color:#8A8F98;margin-top:1px;">далее · 0/20</div></div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C4C8CE" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+        </div>
+        <div style="display:flex;align-items:center;gap:13px;background:#fff;border-radius:16px;padding:14px 16px;box-shadow:0 8px 22px rgba(20,20,30,.05);opacity:.65;">
+          <span style="width:36px;height:36px;border-radius:11px;background:#F1F1F3;display:grid;place-items:center;"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V5h16v2M9 19h6M12 5v14"/></svg></span>
+          <div style="flex:1;"><div style="font-weight:700;font-size:14.5px;color:#2B2B2B;">Письмо</div><div style="font-weight:600;font-size:11.5px;color:#8A8F98;margin-top:1px;">далее · 0/2</div></div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C4C8CE" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+        </div>
+      </div>
+    </div>
+    <!-- pause/finish -->
+    <div style="position:absolute;bottom:24px;left:22px;right:22px;display:flex;gap:12px;z-index:6;">
+      <button style="flex:1;height:52px;border:1.6px solid #E6E8EB;background:#fff;border-radius:16px;font-family:Manrope;font-weight:700;font-size:14px;color:#8A8F98;cursor:pointer;">Пауза</button>
+      <button style="flex:1.4;height:52px;border:none;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:16px;font-family:Manrope;font-weight:700;font-size:14px;color:#fff;cursor:pointer;box-shadow:0 12px 24px rgba(242,104,63,.3);">Завершить пробник</button>
+    </div>
+  
+</div>
+<div class="screen" id="scr17" data-name="Достижения">
+
+    <div style="position:absolute;top:0;left:0;right:0;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 7px;z-index:6;">
+      <span style="font-weight:700;font-size:15px;color:#2B2B2B;">9:41</span>
+      <div style="display:flex;gap:7px;align-items:center;">
+        <svg width="17" height="11" viewBox="0 0 17 11" fill="#2B2B2B"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.7" y="5" width="3" height="6" rx="1"/><rect x="9.3" y="2.5" width="3" height="8.5" rx="1"/><rect x="14" y="0" width="3" height="11" rx="1"/></svg>
+        <svg width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="#2B2B2B" stroke-width="1.6" stroke-linecap="round"><path d="M2 5a8 8 0 0 1 12 0"/><path d="M4.5 7.4a4.4 4.4 0 0 1 7 0"/><circle cx="8" cy="9.8" r="1" fill="#2B2B2B" stroke="none"/></svg>
+        <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3" stroke="#2B2B2B" opacity=".4"/><rect x="2.4" y="2.4" width="15" height="7.2" rx="1.6" fill="#2B2B2B"/><rect x="23" y="4" width="2" height="4" rx="1" fill="#2B2B2B"/></svg>
+      </div>
+    </div>
+    <div style="position:absolute;top:52px;left:0;right:0;bottom:0;padding:8px 20px 20px;z-index:5;overflow:hidden;">
+      <div style="font-weight:800;font-size:22px;color:#2B2B2B;letter-spacing:-.3px;">Достижения</div>
+      <div style="font-weight:600;font-size:13px;color:#8A8F98;margin-top:3px;">Получено 8 из 24 бейджей</div>
+      <!-- streak hero badge -->
+      <div style="margin-top:16px;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:22px;padding:18px 20px;display:flex;align-items:center;gap:16px;color:#fff;box-shadow:0 16px 32px rgba(242,104,63,.28);">
+        <div style="width:62px;height:62px;flex:none;border-radius:50%;background:rgba(255,255,255,.22);display:grid;place-items:center;font-size:30px;">🔥</div>
+        <div style="flex:1;">
+          <div style="font-weight:800;font-size:17px;">Серия 12 дней</div>
+          <div style="font-weight:600;font-size:12.5px;color:rgba(255,255,255,.9);margin-top:2px;">Ещё 3 дня до бейджа «2 недели»</div>
+          <div style="margin-top:9px;height:6px;border-radius:4px;background:rgba(255,255,255,.28);"><div style="width:80%;height:100%;border-radius:4px;background:#fff;"></div></div>
+        </div>
+      </div>
+      <!-- badge grid -->
+      <div style="font-weight:700;font-size:11px;letter-spacing:1.4px;color:#8A8F98;margin:18px 2px 12px;">КОЛЛЕКЦИЯ</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+        <!-- earned -->
+        <div style="background:#fff;border-radius:18px;padding:14px 8px;text-align:center;box-shadow:0 8px 20px rgba(20,20,30,.05);"><div style="width:48px;height:48px;margin:0 auto;border-radius:14px;background:#FFEDE4;display:grid;place-items:center;font-size:24px;">🎯</div><div style="font-weight:700;font-size:11px;color:#2B2B2B;margin-top:8px;">Первые 100</div></div>
+        <div style="background:#fff;border-radius:18px;padding:14px 8px;text-align:center;box-shadow:0 8px 20px rgba(20,20,30,.05);"><div style="width:48px;height:48px;margin:0 auto;border-radius:14px;background:#E5F4EC;display:grid;place-items:center;font-size:24px;">📖</div><div style="font-weight:700;font-size:11px;color:#2B2B2B;margin-top:8px;">10 текстов</div></div>
+        <div style="background:#fff;border-radius:18px;padding:14px 8px;text-align:center;box-shadow:0 8px 20px rgba(20,20,30,.05);"><div style="width:48px;height:48px;margin:0 auto;border-radius:14px;background:#FFF4DE;display:grid;place-items:center;font-size:24px;">⭐</div><div style="font-weight:700;font-size:11px;color:#2B2B2B;margin-top:8px;">Эссе 14/14</div></div>
+        <div style="background:#fff;border-radius:18px;padding:14px 8px;text-align:center;box-shadow:0 8px 20px rgba(20,20,30,.05);"><div style="width:48px;height:48px;margin:0 auto;border-radius:14px;background:#E3F1F5;display:grid;place-items:center;font-size:24px;">🎧</div><div style="font-weight:700;font-size:11px;color:#2B2B2B;margin-top:8px;">Аудио-старт</div></div>
+        <!-- locked -->
+        <div style="background:#fff;border-radius:18px;padding:14px 8px;text-align:center;box-shadow:0 8px 20px rgba(20,20,30,.05);opacity:.55;"><div style="width:48px;height:48px;margin:0 auto;border-radius:14px;background:#F1F1F3;display:grid;place-items:center;"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#B6BBC2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></div><div style="font-weight:700;font-size:11px;color:#8A8F98;margin-top:8px;">500 слов</div></div>
+        <div style="background:#fff;border-radius:18px;padding:14px 8px;text-align:center;box-shadow:0 8px 20px rgba(20,20,30,.05);opacity:.55;"><div style="width:48px;height:48px;margin:0 auto;border-radius:14px;background:#F1F1F3;display:grid;place-items:center;"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#B6BBC2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></div><div style="font-weight:700;font-size:11px;color:#8A8F98;margin-top:8px;">Пробник 80+</div></div>
+      </div>
+      <!-- next milestone -->
+      <div style="margin-top:16px;display:flex;align-items:center;gap:13px;background:#fff;border-radius:16px;padding:14px 16px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
+        <span style="width:38px;height:38px;border-radius:12px;background:#FFEDE4;display:grid;place-items:center;font-size:19px;">🏆</span>
+        <div style="flex:1;"><div style="font-weight:700;font-size:13.5px;color:#2B2B2B;">Цель недели</div><div style="font-weight:600;font-size:11.5px;color:#8A8F98;margin-top:1px;">5 из 7 занятий · ещё 2 дня</div></div>
+        <span style="font-weight:800;font-size:13px;color:#F2683F;">+50 XP</span>
+      </div>
+    </div>
+  
+</div>
+<div class="screen" id="scr14" data-name="Нет сети">
+
+    <div style="position:absolute;top:0;left:0;right:0;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 7px;z-index:6;">
+      <span style="font-weight:700;font-size:15px;color:#2B2B2B;">9:41</span>
+      <div style="display:flex;gap:7px;align-items:center;">
+        <svg width="17" height="11" viewBox="0 0 17 11" fill="#C4C8CE"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.7" y="5" width="3" height="6" rx="1"/><rect x="9.3" y="2.5" width="3" height="8.5" rx="1"/><rect x="14" y="0" width="3" height="11" rx="1"/></svg>
+        <svg width="18" height="12" viewBox="0 0 18 12" fill="none" stroke="#C4C8CE" stroke-width="1.6" stroke-linecap="round"><path d="M2 5a8 8 0 0 1 12 0"/><line x1="2" y1="2" x2="16" y2="11"/></svg>
+        <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3" stroke="#2B2B2B" opacity=".4"/><rect x="2.4" y="2.4" width="9" height="7.2" rx="1.6" fill="#E26A56"/><rect x="23" y="4" width="2" height="4" rx="1" fill="#2B2B2B"/></svg>
+      </div>
+    </div>
+    <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 44px;text-align:center;">
+      <div style="width:120px;height:120px;border-radius:36px;background:#fff;display:grid;place-items:center;box-shadow:0 16px 34px rgba(200,90,40,.12);">
+        <svg width="58" height="58" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.8a16 16 0 0 1 5-3.2M9.5 4.4a16 16 0 0 1 12.5 4.4M5 12.5a11 11 0 0 1 4-2.4M12.5 10.2a11 11 0 0 1 6.5 2.3M8.5 16.2a6 6 0 0 1 7 0"/><circle cx="12" cy="20" r="1.1" fill="#F2683F" stroke="none"/><line x1="3" y1="3" x2="21" y2="21" stroke="#E26A56"/></svg>
+      </div>
+      <div style="margin-top:30px;font-weight:800;font-size:21px;color:#2B2B2B;">Нет соединения</div>
+      <div style="margin-top:10px;font-weight:600;font-size:14px;color:#8A8F98;line-height:1.5;">Проверка эссе требует интернета.<br>Слова и грамматику можно учить офлайн.</div>
+      <button style="margin-top:26px;width:100%;max-width:230px;height:52px;border:none;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:16px;font-family:Manrope;font-weight:700;font-size:15px;color:#fff;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;box-shadow:0 12px 24px rgba(242,104,63,.3);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/></svg>Повторить</button>
+      <button style="margin-top:12px;width:100%;max-width:230px;height:48px;border:none;background:transparent;font-family:Manrope;font-weight:700;font-size:14px;color:#8A8F98;cursor:pointer;">Учить офлайн</button>
+    </div>
+  
+</div>
+<div class="screen" id="scr15" data-name="Пусто">
+
+    <div style="position:absolute;top:0;left:0;right:0;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 7px;z-index:6;">
+      <span style="font-weight:700;font-size:15px;color:#2B2B2B;">9:41</span>
+      <div style="display:flex;gap:7px;align-items:center;">
+        <svg width="17" height="11" viewBox="0 0 17 11" fill="#2B2B2B"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.7" y="5" width="3" height="6" rx="1"/><rect x="9.3" y="2.5" width="3" height="8.5" rx="1"/><rect x="14" y="0" width="3" height="11" rx="1"/></svg>
+        <svg width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="#2B2B2B" stroke-width="1.6" stroke-linecap="round"><path d="M2 5a8 8 0 0 1 12 0"/><path d="M4.5 7.4a4.4 4.4 0 0 1 7 0"/><circle cx="8" cy="9.8" r="1" fill="#2B2B2B" stroke="none"/></svg>
+        <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3" stroke="#2B2B2B" opacity=".4"/><rect x="2.4" y="2.4" width="15" height="7.2" rx="1.6" fill="#2B2B2B"/><rect x="23" y="4" width="2" height="4" rx="1" fill="#2B2B2B"/></svg>
+      </div>
+    </div>
+    <!-- header -->
+    <div style="position:absolute;top:60px;left:0;right:0;padding:0 22px;z-index:6;text-align:center;font-weight:800;font-size:18px;color:#2B2B2B;">Мои слова</div>
+    <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 44px;text-align:center;">
+      <div style="width:128px;height:128px;border-radius:50%;background:#fff;display:grid;place-items:center;box-shadow:0 16px 34px rgba(20,20,30,.06);position:relative;">
+        <svg width="58" height="58" viewBox="0 0 24 24" fill="none" stroke="#F4A984" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="13" rx="2.5"/><path d="M8 5V3.5M16 5V3.5M4 9h16"/></svg>
+        <div style="position:absolute;-bottom:6px;bottom:8px;right:14px;width:34px;height:34px;border-radius:11px;background:linear-gradient(135deg,#FFA570,#F2683F);display:grid;place-items:center;box-shadow:0 8px 16px rgba(242,104,63,.3);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round"><line x1="12" y1="6" x2="12" y2="18"/><line x1="6" y1="12" x2="18" y2="12"/></svg></div>
+      </div>
+      <div style="margin-top:28px;font-weight:800;font-size:21px;color:#2B2B2B;">Пока пусто</div>
+      <div style="margin-top:10px;font-weight:600;font-size:14px;color:#8A8F98;line-height:1.5;">Добавляй слова из чтения или подборок —<br>они появятся здесь для повторения.</div>
+      <button style="margin-top:26px;width:100%;max-width:240px;height:54px;border:none;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:16px;font-family:Manrope;font-weight:700;font-size:15px;color:#fff;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;box-shadow:0 12px 24px rgba(242,104,63,.3);">Добавить первые слова</button>
+    </div>
+    <div style="position:absolute;left:0;right:0;bottom:0;height:86px;background:rgba(255,255,255,.97);border-top:1px solid #EEF0F2;display:flex;justify-content:space-around;padding:14px 8px 0;z-index:6;">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Главная</span></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.3 8 5 5.5 5.4 4.6 5.5 4 6.3 4 7.2V18c0 .6.5 1 1.1.9 2.2-.3 4.5 0 6.4 1.4 1.9-1.4 4.2-1.7 6.4-1.4.6.1 1.1-.3 1.1-.9V7.2c0-.9-.6-1.7-1.5-1.8C15.5 5 13.7 5.3 12 6.5Z"/><path d="M12 6.5V20"/></svg><span style="font-weight:700;font-size:10.5px;color:#F2683F;">Учить</span></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Прогресс</span></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Профиль</span></div>
+      <div style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:128px;height:5px;border-radius:3px;background:#1d1d1f;opacity:.22;"></div>
+    </div>
+  
+</div>
+</div>
+
+<script>
+const EMBEDDED_KEY="AQ.Ab8RN6KxBVIq24DE8PXvyovXUgQiZY7SiNfjByRgPyR6MS2HCA";
+const HIST=[];
+function cur(){const o=document.querySelector('.screen.on');return o?o.id:'scr5'}
+function showScreen(id){const t=document.getElementById(id);if(!t)return;document.querySelectorAll('.screen').forEach(s=>s.classList.remove('on'));t.classList.add('on');t.scrollTop=0;document.getElementById('navmenu').classList.remove('open')}
+function tab(id){if(id!==cur())HIST.push(cur());showScreen(id);if(id==='scr2')initWords();if(id==='scr8')setTask(curTask)}
+function nav(id){tab(id)}
+function back(){showScreen(HIST.pop()||'scr1')}
+(function(){const m=document.getElementById('navmenu');document.querySelectorAll('.screen').forEach(sc=>{const b=document.createElement('button');b.textContent=sc.id.replace('scr','')+' · '+sc.dataset.name;b.onclick=()=>{HIST.length=0;tab(sc.id)};m.appendChild(b)})})();
+
+/* ---------- STATE ---------- */
+const todayStr=()=>new Date().toISOString().slice(0,10);
+let currentUser=localStorage.getItem('eb_current')||null,S=null;
+function dataKey(){return 'eb_data_'+(currentUser||'guest')}
+function getUsers(){try{return JSON.parse(localStorage.getItem('eb_users'))||{}}catch(e){return{}}}
+function setUsers(u){localStorage.setItem('eb_users',JSON.stringify(u))}
+function load(){let d=null;try{d=JSON.parse(localStorage.getItem(dataKey()))}catch(e){}if(!d)d={};
+  d.box=d.box||{};d.learned=d.learned==null?320:d.learned;d.essays=d.essays||0;return d}
+function save(){if(currentUser)localStorage.setItem(dataKey(),JSON.stringify(S))}
+
+/* ---------- DATA ---------- */
+const WORDS=[
+ {w:'ambiguous',pos:'ПРИЛАГАТЕЛЬНОЕ',ipa:'/æmˈbɪɡjuəs/',tr:'двусмысленный',ex:'The instructions were ambiguous.'},
+ {w:'resilient',pos:'ПРИЛАГАТЕЛЬНОЕ',ipa:'/rɪˈzɪliənt/',tr:'стойкий',ex:'Children are remarkably resilient.'},
+ {w:'to acknowledge',pos:'ГЛАГОЛ',ipa:'/əkˈnɒlɪdʒ/',tr:'признавать',ex:'She acknowledged the problem.'},
+ {w:'compelling',pos:'ПРИЛАГАТЕЛЬНОЕ',ipa:'/kəmˈpelɪŋ/',tr:'убедительный',ex:'A compelling argument.'},
+ {w:'to mitigate',pos:'ГЛАГОЛ',ipa:'/ˈmɪtɪɡeɪt/',tr:'смягчать',ex:'Steps to mitigate the damage.'},
+ {w:'sustainable',pos:'ПРИЛАГАТЕЛЬНОЕ',ipa:'/səˈsteɪnəbl/',tr:'устойчивый',ex:'Sustainable solutions.'},
+ {w:'to foster',pos:'ГЛАГОЛ',ipa:'/ˈfɒstə/',tr:'развивать',ex:'Teachers foster curiosity.'},
+ {w:'coherent',pos:'ПРИЛАГАТЕЛЬНОЕ',ipa:'/kəʊˈhɪərənt/',tr:'связный',ex:'Write a coherent essay.'},
+ {w:'substantial',pos:'ПРИЛАГАТЕЛЬНОЕ',ipa:'/səbˈstænʃl/',tr:'значительный',ex:'A substantial number.'},
+ {w:'to enhance',pos:'ГЛАГОЛ',ipa:'/ɪnˈhɑːns/',tr:'усиливать',ex:'Music enhances mood.'}
+];
+const WRITE={
+ 37:{label:'ЗАДАНИЕ 37 · ПИСЬМО ДРУГУ',range:'100–140',min:100,max:140,table:false,
+   prompt:'Your friend Sam asks about your hobbies. Answer his 3 questions and ask 3 questions about his guitar lessons.'},
+ 38:{label:'ЗАДАНИЕ 38 · OPINION ESSAY',range:'200–250',min:200,max:250,table:true,
+   prompt:'“Online learning is better than studying at school.” Опиши данные опроса, дай мнение с аргументами, контраргумент и вывод.'}
+};
+
+/* ---------- WORDS ---------- */
+let queue=[],ci=0,flipped=false;
+function initWords(){queue=WORDS.map((x,i)=>({...x,i})).filter(x=>(S.box[x.w]||0)<3);if(!queue.length)queue=WORDS.slice();queue=queue.slice(0,10);ci=0;
+  var k=document.getElementById('w_know');if(k)k.textContent='Знаю '+S.learned;showCard()}
+function showCard(){flipped=false;const c=queue[ci];if(!c){document.getElementById('w_pos').textContent='ГОТОВО';document.getElementById('w_word').textContent='🎉';document.getElementById('w_ipa').textContent='На сегодня всё!';return}
+  document.getElementById('w_pos').textContent=c.pos;document.getElementById('w_word').textContent=c.w;document.getElementById('w_ipa').textContent=c.ipa;
+  var t=document.getElementById('w_today');if(t)t.textContent=ci+' / '+queue.length+' сегодня'}
+function flipWord(){const c=queue[ci];if(!c)return;flipped=!flipped;
+  if(flipped){document.getElementById('w_pos').textContent='ПЕРЕВОД';document.getElementById('w_word').textContent=c.tr;document.getElementById('w_word').style.fontSize='30px';document.getElementById('w_ipa').textContent='“'+c.ex+'”'}
+  else{document.getElementById('w_word').style.fontSize='38px';showCard()}}
+function rateCard(k){const c=queue[ci];if(!c)return;if(k){S.box[c.w]=Math.min(3,(S.box[c.w]||0)+1);if(S.box[c.w]===3)S.learned++}else{S.box[c.w]=0;queue.push(c)}ci++;save();
+  document.getElementById('w_word').style.fontSize='38px';var k2=document.getElementById('w_know');if(k2)k2.textContent='Знаю '+S.learned;showCard()}
+
+/* ---------- WRITING ---------- */
+let curTask=38;
+const SEG_ON='flex:1;text-align:center;padding:8px 0;font-weight:700;font-size:13px;color:#F2683F;background:#fff;border-radius:11px;cursor:pointer;';
+const SEG_OFF='flex:1;text-align:center;padding:8px 0;font-weight:700;font-size:13px;color:rgba(255,255,255,.92);cursor:pointer;';
+function setTask(n){curTask=n;const d=WRITE[n];
+  document.getElementById('w_seg37').setAttribute('style',n===37?SEG_ON:SEG_OFF);
+  document.getElementById('w_seg38').setAttribute('style',n===38?SEG_ON:SEG_OFF);
+  document.getElementById('w_tasklabel').textContent=d.label;
+  document.getElementById('w_prompt').textContent=d.prompt;
+  document.getElementById('w_tablehint').style.display=d.table?'inline-flex':'none';
+  countWords()}
+function countWords(){const d=WRITE[curTask];const t=(document.getElementById('w_editor').innerText||'').trim();const n=t?t.split(/\s+/).length:0;
+  const e=document.getElementById('w_count');e.textContent=n+' / '+d.range+' слов';e.style.color=(n>=d.min&&n<=d.max)?'#1F8A50':(n>d.max?'#C9503C':'#8A8F98')}
+
+async function checkWriting(){
+  const t=(document.getElementById('w_editor').innerText||'').trim();
+  if(t.split(/\s+/).filter(Boolean).length<10){alert('Напиши хотя бы несколько предложений.');return}
+  tab('scr13');
+  const task=curTask;
+  const sys='Ты эксперт ЕГЭ по английскому, проверяешь письменную часть по критериям ФИПИ. Британский английский. Верни СТРОГО JSON без markdown и пояснений.';
+  const fmt='{"words":n,"in_range":true,"overall_got":n,"overall_max":n,"verdict":"фраза 2-4 слова","sub":"совет 1 фраза","criteria":[{"name":"...","got":n,"max":n}],"errors":[{"title":"тип · тема","wrong":"...","right":"...","kind":"err|warn","note":""}]}';
+  const ctx=task===37?'Задание 37 письмо другу 100-140 слов. Критерии: Решение задачи(3), Организация(2), Языковое оформление(3). Максимум 8.':'Задание 38 эссе 200-250 слов. Критерии: Решение задачи(3), Организация(3), Лексика(3), Грамматика(3), Орфография(2). Максимум 14.';
+  const user=ctx+' Проверь и верни JSON: '+fmt+'. Для errors до 4 пунктов, kind=err для ошибки, warn для совета. Текст: """'+t+'"""';
+  try{const out=await callGemini(sys,user);let d=null;try{d=JSON.parse(out.replace(/```json|```/g,'').trim())}catch(e){}
+    if(!d){alert('ИИ вернул неожиданный ответ, попробуй ещё раз.');tab('scr8');return}
+    renderReview(d);S.essays++;save();showScreen('scr12');HIST.push('scr8');
+  }catch(e){showScreen('scr14');HIST.push('scr8')}
+}
+function renderReview(d){
+  const got=d.overall_got!=null?d.overall_got:(d.criteria||[]).reduce((a,c)=>a+(c.got||0),0);
+  const mx=d.overall_max!=null?d.overall_max:(d.criteria||[]).reduce((a,c)=>a+(c.max||0),0);
+  document.getElementById('rv_score').textContent=got;
+  document.getElementById('rv_max').textContent='из '+mx;
+  document.getElementById('rv_ring').setAttribute('stroke-dashoffset',String(226-226*(mx?got/mx:0)));
+  document.getElementById('rv_verdict').textContent=d.verdict||'Готово!';
+  document.getElementById('rv_sub').textContent=d.sub||'';
+  const cc=document.getElementById('rv_crit');cc.innerHTML='';
+  (d.criteria||[]).forEach(c=>{const p=c.max?Math.round(c.got/c.max*100):0;const col=p>=100?'#1F9E5A':p>=60?'#E8A33C':'#E26A56';const tc=p>=100?'#1F8A50':p>=60?'#C77400':'#C9503C';
+    cc.insertAdjacentHTML('beforeend','<div style="display:flex;align-items:center;gap:12px;"><span style="flex:1;font-weight:600;font-size:13px;color:#2B2B2B;">'+c.name+'</span><div style="width:96px;height:8px;border-radius:5px;background:#F1F1F3;"><div style="width:'+p+'%;height:100%;border-radius:5px;background:'+col+';"></div></div><span style="font-weight:800;font-size:12.5px;color:'+tc+';width:30px;text-align:right;">'+c.got+'/'+c.max+'</span></div>')});
+  const errs=d.errors||[];document.getElementById('rv_errhdr').textContent='РАЗБОР ОШИБОК · '+errs.length;
+  const eb=document.getElementById('rv_err');eb.innerHTML='';
+  errs.forEach((e,idx)=>{const warn=e.kind==='warn';
+    const icon=warn?'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C77400" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 2 18a2 2 0 0 0 1.7 3h16.6A2 2 0 0 0 22 18L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>':'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C9503C" stroke-width="2.4" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>';
+    const body=warn?(e.note||''):'<span style="text-decoration:line-through;color:#C9503C;">'+(e.wrong||'')+'</span> → <span style="color:#1F8A50;font-weight:700;">'+(e.right||'')+'</span>'+(e.note?'<br>'+e.note:'');
+    if(idx)eb.insertAdjacentHTML('beforeend','<div style="height:1px;background:#F4F5F6;margin:13px 0;"></div>');
+    eb.insertAdjacentHTML('beforeend','<div style="display:flex;gap:11px;"><span style="width:26px;height:26px;flex:none;border-radius:9px;background:'+(warn?'#FFF4DE':'#FCEEEC')+';display:grid;place-items:center;">'+icon+'</span><div style="flex:1;"><div style="font-weight:700;font-size:13.5px;color:#2B2B2B;">'+(e.title||'Ошибка')+'</div><div style="margin-top:4px;font-weight:500;font-size:12.5px;color:#8A8F98;line-height:1.45;">'+body+'</div></div></div>')});
+}
+
+/* ---------- GEMINI ---------- */
+async function callGemini(sys,user){
+  const key=(localStorage.getItem('eb_key')||EMBEDDED_KEY||'').trim();
+  const model=(localStorage.getItem('eb_model')||'gemini-2.5-flash').trim();
+  const url='https://generativelanguage.googleapis.com/v1beta/models/'+model+':generateContent';
+  const body={contents:[{parts:[{text:user}]}],generationConfig:{temperature:0.3,maxOutputTokens:1600}};
+  if(sys)body.systemInstruction={parts:[{text:sys}]};
+  let r;try{r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':key},body:JSON.stringify(body)})}catch(e){throw new Error('net')}
+  const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error((j.error&&j.error.message)||'err');
+  const c=j.candidates&&j.candidates[0];return (c&&c.content&&c.content.parts&&c.content.parts.map(x=>x.text||'').join(''))||''}
+
+/* ---------- NAV WIRING (tabs/back/tiles/flows) ---------- */
+const TABROUTE={'Главная':'scr1','Учить':'scr2','Прогресс':'scr10','Профиль':'scr11'};
+const TILEROUTE={'Слова':'scr2','Грамматика':'scr3','Чтение':'scr7','Аудирование':'scr4','Письмо':'scr8','Говорение':'scr9'};
+function txt(el){return (el.textContent||'').trim()}
+function bindText(screen,label,fn){const sc=document.getElementById(screen);if(!sc)return;sc.querySelectorAll('div,span,button,a').forEach(el=>{if(txt(el)===label&&el.children.length<=2){el.classList.add('clk');el.addEventListener('click',e=>{e.stopPropagation();fn()})}})}
+function wire(){
+  document.querySelectorAll('.screen').forEach(scr=>{
+    scr.querySelectorAll('div,span,a').forEach(el=>{const t=txt(el);if(TABROUTE[t]&&el.children.length<=1&&t.length<11){el.classList.add('clk');el.addEventListener('click',e=>{e.stopPropagation();nav(TABROUTE[t])})}});
+    scr.querySelectorAll('svg').forEach(sv=>{const h=(sv.innerHTML||'').toLowerCase();if(h.includes('14 6 8 12 14 18')){const p=sv.parentElement||sv;p.classList.add('clk');p.addEventListener('click',e=>{e.stopPropagation();back()})}});
+  });
+  const s1=document.getElementById('scr1');
+  if(s1)s1.querySelectorAll('div,span').forEach(el=>{const t=txt(el);if(TILEROUTE[t]&&el.children.length===0){const card=el.closest('div');(card||el).classList.add('clk');(card||el).addEventListener('click',e=>{e.stopPropagation();nav(TILEROUTE[t])})}});
+  bindText('scr5','Войти',()=>doLogin());bindText('scr5','Создать',()=>doRegister());
+  bindText('scr6','Поехали',()=>startApp());bindText('scr6','Пропустить',()=>startApp());
+  bindText('scr11','Выйти',()=>{localStorage.removeItem('eb_current');location.reload()});
+  bindText('scr14','Повторить',()=>tab('scr8'));bindText('scr14','Учить офлайн',()=>tab('scr2'));
+}
+
+/* ---------- AUTH ---------- */
+function inputVal(scr,ph){const el=document.querySelector('#'+scr+' input[placeholder*="'+ph+'"]');return el?el.value.trim():''}
+function startApp(){S=load();tab('scr1')}
+function doRegister(){startApp()}
+function doLogin(){startApp()}
+
+document.addEventListener('DOMContentLoaded',()=>{wire();
+  currentUser=currentUser||'Аня';localStorage.setItem('eb_current',currentUser);
+});
+wire();
+S=load();
+
+/* ===== READING ===== */
+const READ_TXT="Many students take a gap year before university. They travel, work or do volunteering. It can be a valuable experience that helps them become more independent and confident.";
+let lastWord="";
+function initReading(){S.wstatus=S.wstatus||{};const host=document.getElementById('r_text');if(!host)return;host.innerHTML='';
+  READ_TXT.split(/(\s+)/).forEach(tok=>{
+    if(/^\s+$/.test(tok)){host.appendChild(document.createTextNode(tok));return}
+    const clean=tok.replace(/[^A-Za-z'-]/g,'').toLowerCase();const sp=document.createElement('span');sp.textContent=tok;
+    if(clean){sp.style.cursor='pointer';const st=S.wstatus[clean];
+      if(st==='know')sp.setAttribute('style','cursor:pointer;background:#E5F4EC;color:#1F8A50;border-radius:6px;padding:1px 5px;font-weight:700;');
+      else if(st==='learn')sp.setAttribute('style','cursor:pointer;background:#FFF4DE;color:#C77400;border-radius:6px;padding:1px 5px;font-weight:700;');
+      sp.onclick=()=>trWord(clean)}
+    host.appendChild(sp)})}
+async function trWord(w){lastWord=w;const pop=document.getElementById('r_pop');
+  document.getElementById('r_word').textContent=w;document.getElementById('r_ipa').textContent='';document.getElementById('r_tr').textContent='перевод…';pop.style.display='block';
+  try{const out=await callGemini('Британский учебный словарь. Верни строго JSON.','Слово "'+w+'". JSON: {"ipa":"/../","tr":"перевод 1-3 слова"}');
+    let d=null;try{d=JSON.parse(out.replace(/```json|```/g,'').trim())}catch(e){}
+    if(d){document.getElementById('r_ipa').textContent=d.ipa||'';document.getElementById('r_tr').textContent=d.tr||out}
+    else document.getElementById('r_tr').textContent=out.slice(0,80)}
+  catch(e){document.getElementById('r_tr').textContent='нет сети — включи интернет'}}
+function r_add(st){if(!lastWord)return;S.wstatus[lastWord]=st;if(st==='know')S.learned++;save();document.getElementById('r_pop').style.display='none';initReading()}
+
+/* ===== GRAMMAR ===== */
+const GRAM_Q=[
+ {t:['She ','_____',' already finished her homework.'],o:['have','has','had','is'],a:1,e:'<b>She/he/it</b> — третье лицо, поэтому <b>has</b>.'},
+ {t:['I ','_____',' this film before.'],o:['see','saw','have seen','seeing'],a:2,e:'Опыт без времени → <b>have seen</b>.'},
+ {t:['They ','_____',' just arrived.'],o:['have','has','did','was'],a:0,e:'<b>They</b> → have; <b>just</b> → Present Perfect.'},
+ {t:['','_____',' you ever been to London?'],o:['Did','Have','Was','Are'],a:1,e:'<b>ever</b> + опыт → <b>Have you ever been</b>.'},
+ {t:['He ','_____',' not called yet.'],o:['did','has','have','is'],a:1,e:'<b>He</b> → has; <b>yet</b> → Present Perfect.'}
+];
+let gi=0,gScore=0,gAns=false;
+function initGrammar(){gi=0;gScore=0;renderG()}
+function renderG(){gAns=false;const q=GRAM_Q[gi];
+  document.getElementById('g_head').textContent='Present Perfect · Вопрос '+(gi+1)+' из '+GRAM_Q.length;
+  document.getElementById('g_steps').innerHTML=GRAM_Q.map((_,i)=>'<div style="flex:1;height:5px;border-radius:3px;background:'+(i<=gi?'#fff':'rgba(255,255,255,.35)')+';"></div>').join('');
+  document.getElementById('g_q').innerHTML=q.t[0]+'<span style="display:inline-block;min-width:62px;border-bottom:2.5px dashed #F2683F;text-align:center;color:#F2683F;">_____</span>'+q.t[2];
+  const op=document.getElementById('g_opts');op.innerHTML='';
+  q.o.forEach((opt,oi)=>{const d=document.createElement('div');d.setAttribute('data-i',oi);
+    d.setAttribute('style','display:flex;align-items:center;justify-content:space-between;background:#fff;border:1.5px solid #EDEEF0;border-radius:15px;padding:14px 16px;font-weight:700;font-size:15px;color:#8A8F98;cursor:pointer;');
+    d.innerHTML=opt+'<span style="width:22px;height:22px;border-radius:50%;border:2px solid #E1E3E6;"></span>';
+    d.onclick=()=>pickG(oi);op.appendChild(d)});
+  document.getElementById('g_exp').style.display='none';
+  const nx=document.getElementById('g_next');nx.style.opacity='.45';nx.textContent='Дальше';}
+function pickG(oi){if(gAns)return;gAns=true;const q=GRAM_Q[gi];
+  [...document.getElementById('g_opts').children].forEach(d=>{const i=+d.getAttribute('data-i');
+    if(i===q.a)d.setAttribute('style','display:flex;align-items:center;justify-content:space-between;background:#EAF7F0;border:1.5px solid #1F9E5A;border-radius:15px;padding:14px 16px;font-weight:800;font-size:15px;color:#1F8A50;'),d.querySelector('span').setAttribute('style','width:24px;height:24px;border-radius:50%;background:#1F9E5A;display:grid;place-items:center;'),d.querySelector('span').innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 12 10 18 20 6"/></svg>';
+    else if(i===oi)d.setAttribute('style','display:flex;align-items:center;justify-content:space-between;background:#FCEEEC;border:1.5px solid #E26A56;border-radius:15px;padding:14px 16px;font-weight:700;font-size:15px;color:#C9503C;'),d.querySelector('span').setAttribute('style','width:24px;height:24px;border-radius:50%;background:#E26A56;display:grid;place-items:center;'),d.querySelector('span').innerHTML='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>';
+    else d.style.opacity='.55'});
+  if(oi===q.a)gScore++;
+  const ex=document.getElementById('g_exp');ex.style.display='flex';
+  ex.innerHTML='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1F9E5A" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:1px;"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg><div style="font-weight:600;font-size:12.5px;color:#1F7A47;line-height:1.4;">'+(oi===q.a?'Верно! ':'Правильный ответ: <b>'+q.o[q.a]+'</b>. ')+q.e+'</div>';
+  const nx=document.getElementById('g_next');nx.style.opacity='1';nx.textContent=(gi<GRAM_Q.length-1?'Дальше':'Завершить');}
+function nextG(){if(!gAns)return;if(gi<GRAM_Q.length-1){gi++;renderG()}else{alert('Результат: '+gScore+' из '+GRAM_Q.length+' 🎯');tab('scr1')}}
+
+/* patch tab to init reading/grammar */
+(function(){const _t=tab;tab=function(id){_t(id);if(id==='scr7')initReading();if(id==='scr3')initGrammar();}})();
+
+
+/* ===== LISTENING ===== */
+const LISTEN={dialog:"— Hi, can I get a coffee and a croissant, please?  — Sure, that's four pounds fifty. Anything else?  — No, that's all, thanks.",
+  q1:{o:['В кафе','В магазине','В библиотеке'],a:0},q2:{o:['Чай и тост','Кофе и круассан'],a:1}};
+function playListen(){if(!('speechSynthesis'in window))return;speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(LISTEN.dialog);u.lang='en-GB';u.rate=.9;const v=speechSynthesis.getVoices().find(x=>/en-GB/i.test(x.lang));if(v)u.voice=v;speechSynthesis.speak(u)}
+function lOpt(host,q,mod){const el=document.getElementById(host);el.innerHTML='';
+  q.o.forEach((opt,oi)=>{const d=document.createElement('div');d.setAttribute('data-i',oi);
+    d.setAttribute('style','display:flex;align-items:center;gap:10px;font-weight:600;font-size:13px;color:#9aa0a8;cursor:pointer;');
+    d.innerHTML='<span style="width:18px;height:18px;border-radius:50%;border:2px solid #E1E3E6;"></span>'+opt;
+    d.onclick=()=>{if(el.dataset.d)return;el.dataset.d=1;[...el.children].forEach(c=>{const i=+c.getAttribute('data-i');
+      if(i===q.a){c.setAttribute('style','display:flex;align-items:center;gap:10px;font-weight:600;font-size:13px;color:#1F8A50;');c.querySelector('span').setAttribute('style','width:18px;height:18px;border-radius:50%;background:#1F9E5A;display:grid;place-items:center;');c.querySelector('span').innerHTML='<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 12 10 18 20 6"/></svg>'}
+      else if(i===oi){c.setAttribute('style','display:flex;align-items:center;gap:10px;font-weight:600;font-size:13px;color:#C9503C;');c.querySelector('span').setAttribute('style','width:18px;height:18px;border-radius:50%;background:#E26A56;display:grid;place-items:center;');c.querySelector('span').innerHTML='<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>'}
+      else c.style.opacity='.5'});bump('listen',60)}
+    el.appendChild(d)})}
+function initListening(){const a=document.getElementById('l_q1'),b=document.getElementById('l_q2');if(!a)return;delete a.dataset.d;delete b.dataset.d;lOpt('l_q1',LISTEN.q1);lOpt('l_q2',LISTEN.q2);
+  document.getElementById('l_script').style.display='none';var t=document.getElementById('l_toggle');if(t){t.style.background='#E7E9EC';document.getElementById('l_knob').style.left='3px'}}
+function toggleScript(){const s=document.getElementById('l_script'),t=document.getElementById('l_toggle'),k=document.getElementById('l_knob');
+  const on=s.style.display==='none';s.style.display=on?'block':'none';s.textContent=LISTEN.dialog;t.style.background=on?'#F2683F':'#E7E9EC';k.style.left=on?'22px':'3px'}
+
+/* ===== SPEAKING ===== */
+const SPK_Q=['How often do you use the internet for studying?','What do you usually do at weekends?','Do you prefer books or films? Why?','How important is English for your future?','What kind of music do you like?'];
+let spT=null,spLeft=40,recing=false,mediaRec=null,chunks=[],lastUrl=null;
+function fmt(x){return '0:'+String(Math.max(0,x)).padStart(2,'0')}
+function initSpeaking(){clearInterval(spT);recing=false;spLeft=40;
+  document.getElementById('sp_q').textContent=SPK_Q[Math.floor(Math.random()*SPK_Q.length)];
+  document.getElementById('sp_time').textContent='0:40';document.getElementById('sp_sub').textContent='осталось из 0:40';
+  document.getElementById('sp_ring').setAttribute('stroke-dashoffset','0');
+  document.getElementById('sp_reclabel').textContent='нажми, чтобы записать';document.getElementById('sp_reclabel').style.color='#8A8F98'}
+function resetSpeaking(){initSpeaking();lastUrl=null}
+function tick(){spLeft--;document.getElementById('sp_time').textContent=fmt(spLeft);
+  document.getElementById('sp_ring').setAttribute('stroke-dashoffset',String(Math.round(603*(1-spLeft/40))));
+  if(spLeft<=0){clearInterval(spT);if(recing)toggleRec()}}
+async function toggleRec(){const lab=document.getElementById('sp_reclabel');
+  if(!recing){try{const st=await navigator.mediaDevices.getUserMedia({audio:true});mediaRec=new MediaRecorder(st);chunks=[];
+    mediaRec.ondataavailable=e=>chunks.push(e.data);mediaRec.onstop=()=>{lastUrl=URL.createObjectURL(new Blob(chunks,{type:'audio/webm'}));st.getTracks().forEach(t=>t.stop())};
+    mediaRec.start();recing=true;lab.textContent='запись…';lab.style.color='#E23B2B';spLeft=40;clearInterval(spT);spT=setInterval(tick,1000)}
+    catch(e){lab.textContent='нет доступа к микрофону';lab.style.color='#C9503C'}}
+  else{try{mediaRec.stop()}catch(e){}recing=false;clearInterval(spT);lab.textContent='готово — нажми ▶';lab.style.color='#1F8A50';bump('speak',Math.min(100,(S.prog.speak||48)+6))}}
+function playRec(){if(lastUrl){const a=new Audio(lastUrl);a.play()}}
+
+(function(){const _t=tab;tab=function(id){_t(id);if(id==='scr4')initListening();if(id==='scr9')initSpeaking();}})();
+
+
+/* ===== ROBUSTNESS + DEMO FALLBACK (overrides) ===== */
+const DICT={
+ many:{ipa:'/ˈmeni/',tr:'многие'},students:{ipa:'/ˈstjuːdnts/',tr:'студенты'},take:{ipa:'/teɪk/',tr:'брать, взять'},
+ gap:{ipa:'/ɡæp/',tr:'промежуток, разрыв'},year:{ipa:'/jɪə/',tr:'год'},before:{ipa:'/bɪˈfɔː/',tr:'перед, до'},
+ university:{ipa:'/ˌjuːnɪˈvɜːsəti/',tr:'университет'},they:{ipa:'/ðeɪ/',tr:'они'},travel:{ipa:'/ˈtrævl/',tr:'путешествовать'},
+ work:{ipa:'/wɜːk/',tr:'работать, работа'},volunteering:{ipa:'/ˌvɒlənˈtɪərɪŋ/',tr:'волонтёрство'},
+ valuable:{ipa:'/ˈvæljuəbl/',tr:'ценный, полезный'},experience:{ipa:'/ɪkˈspɪəriəns/',tr:'опыт'},
+ helps:{ipa:'/helps/',tr:'помогает'},become:{ipa:'/bɪˈkʌm/',tr:'становиться'},more:{ipa:'/mɔː/',tr:'больше, более'},
+ independent:{ipa:'/ˌɪndɪˈpendənt/',tr:'независимый, самостоятельный'},confident:{ipa:'/ˈkɒnfɪdənt/',tr:'уверенный'},
+ experience_:{}
+};
+async function callGemini(sys,user){
+  const key=(localStorage.getItem('eb_key')||EMBEDDED_KEY||'').trim();
+  const model=(localStorage.getItem('eb_model')||'gemini-2.5-flash').trim();
+  const url='https://generativelanguage.googleapis.com/v1beta/models/'+model+':generateContent';
+  const body={contents:[{parts:[{text:user}]}],generationConfig:{temperature:0.3,maxOutputTokens:1600}};
+  if(sys)body.systemInstruction={parts:[{text:sys}]};
+  const ctl=new AbortController();const to=setTimeout(()=>ctl.abort(),15000);
+  let r;
+  try{r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':key},body:JSON.stringify(body),signal:ctl.signal})}
+  catch(e){clearTimeout(to);throw new Error('ИИ недоступен (нет сети / регион заблокирован — нужен VPN)')}
+  clearTimeout(to);
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok)throw new Error((j.error&&j.error.message)||('ИИ вернул ошибку '+r.status));
+  const c=j.candidates&&j.candidates[0];return (c&&c.content&&c.content.parts&&c.content.parts.map(x=>x.text||'').join(''))||''}
+
+/* translate: AI first, else offline dictionary */
+async function trWord(w){lastWord=w;const pop=document.getElementById('r_pop');
+  document.getElementById('r_word').textContent=w;document.getElementById('r_ipa').textContent='';document.getElementById('r_tr').textContent='перевод…';pop.style.display='block';
+  try{const out=await callGemini('Британский учебный словарь. Верни строго JSON.','Слово "'+w+'". JSON: {"ipa":"/../","tr":"перевод 1-3 слова"}');
+    let d=null;try{d=JSON.parse(out.replace(/```json|```/g,'').trim())}catch(e){}
+    if(d&&d.tr){document.getElementById('r_ipa').textContent=d.ipa||'';document.getElementById('r_tr').textContent=d.tr}
+    else{document.getElementById('r_tr').textContent=(out||'').slice(0,80)}}
+  catch(e){const off=DICT[w];
+    if(off){document.getElementById('r_ipa').textContent=off.ipa||'';document.getElementById('r_tr').textContent=off.tr+'  · офлайн-словарь'}
+    else{document.getElementById('r_ipa').textContent='';document.getElementById('r_tr').textContent='ИИ офлайн, слова нет в мини-словаре. Включи VPN/ключ.'}}}
+
+/* writing: AI first, else basic local review */
+async function checkWriting(){
+  const t=(document.getElementById('w_editor').innerText||'').trim();
+  const n=t?t.split(/\s+/).filter(Boolean).length:0;
+  if(n<10){alert('Напиши хотя бы несколько предложений.');return}
+  tab('scr13');const task=curTask;
+  const sys='Ты эксперт ЕГЭ по английскому, проверяешь письменную часть по критериям ФИПИ. Британский английский. Верни СТРОГО JSON без markdown.';
+  const fmt='{"words":n,"in_range":true,"overall_got":n,"overall_max":n,"verdict":"фраза","sub":"совет","criteria":[{"name":"...","got":n,"max":n}],"errors":[{"title":"тип","wrong":"...","right":"...","kind":"err|warn","note":""}]}';
+  const ctx=task===37?'Задание 37 письмо другу 100-140 слов. Критерии: Решение задачи(3),Организация(2),Языковое оформление(3). Макс 8.':'Задание 38 эссе 200-250 слов. Критерии: Решение задачи(3),Организация(3),Лексика(3),Грамматика(3),Орфография(2). Макс 14.';
+  try{const out=await callGemini(sys,ctx+' Верни JSON: '+fmt+'. errors до 4. Текст: """'+t+'"""');
+    let d=null;try{d=JSON.parse(out.replace(/```json|```/g,'').trim())}catch(e){}
+    if(!d)throw new Error('bad');renderReview(d);S.essays++;save();showScreen('scr12');HIST.push('scr8')}
+  catch(e){renderReview(localReview(n,task,e.message));showScreen('scr12');HIST.push('scr8')}}
+function localReview(n,task,msg){
+  const rng=task===37?[100,140]:[200,250];const ok=n>=rng[0]&&n<=rng[1];
+  return {overall_got:ok?1:0,overall_max:1,verdict:'Черновая проверка',
+    sub:'ИИ офлайн ('+(msg||'нет сети')+'). Показана базовая проверка — для полного разбора нужен интернет/VPN.',
+    criteria:[{name:'Объём ('+rng[0]+'–'+rng[1]+' слов)',got:ok?1:0,max:1}],
+    errors:[{title:'Совет по структуре',kind:'warn',note:(task===38?'Проверь: вступление с мнением → аргументы → контраргумент → вывод. Используй however, therefore, in conclusion.':'Проверь: приветствие, ответы на 3 вопроса, 3 своих вопроса, завершение.')},
+            {title:'ИИ-разбор',kind:'warn',note:'Полная проверка орфографии и грамматики появится, когда заработает ИИ (VPN/ключ Gemini).'}]}}
+
+
+/* ===== DASHBOARD / PROGRESS / PROFILE (real data) ===== */
+const EXAM=new Date('2027-06-01');
+function daysLeft(){return Math.max(0,Math.round((EXAM-new Date())/864e5))}
+function setTxt(id,v){const e=document.getElementById(id);if(e)e.textContent=v}
+function setW(id,v){const e=document.getElementById(id);if(e)e.style.width=Math.round(v)+'%'}
+function ringOff(id,total,v){const e=document.getElementById(id);if(e)e.setAttribute('stroke-dashoffset',String(Math.round(total*(1-v/100))))}
+function renderHome(){if(!S)return;const u=currentUser||'друг';
+  setTxt('h_hello','Привет, '+u+' 👋');
+  setTxt('h_days','До ЕГЭ — '+daysLeft()+' дней · пробник в феврале');
+  setTxt('h_ava',u[0].toUpperCase());
+  const pct=Math.min(100,Math.round((S.dayMin||0)/30*100));
+  setTxt('h_min',S.dayMin||0);setTxt('h_pct',pct+'%');ringOff('h_ring',263.9,pct);
+  setTxt('h_streak','🔥 '+(S.streak||0)+' дней подряд');
+  const p=S.prog||{};
+  setTxt('m_words',p.words||0);ringOff('ring_words',113.1,p.words||0);
+  setTxt('m_gram',p.gram||0);ringOff('ring_gram',113.1,p.gram||0);
+  setTxt('m_read',p.read||0);ringOff('ring_read',113.1,p.read||0);
+  setTxt('m_listen',p.listen||0);ringOff('ring_listen',113.1,p.listen||0);
+  setTxt('sub_words','учу · '+(S.learned||0)+' / 500')}
+function renderProgress(){if(!S)return;const p=S.prog||{};
+  setTxt('p_streak','🔥 '+(S.streak||0));setTxt('p_words',S.learned||0);
+  setW('pb_read',p.read||0);setW('pb_gram',p.gram||0);setW('pb_words',p.words||0);setW('pb_listen',p.listen||0);setW('pb_speak',p.speak||0)}
+function renderProfile(){const u=currentUser||'Гость';setTxt('pf_ava',u[0].toUpperCase());setTxt('pf_name',u);
+  setTxt('pf_ai',localStorage.getItem('eb_key')?'свой ключ':'встроенный')}
+function setKeyPrompt(){const k=prompt('Вставь свой ключ Gemini (пусто = встроенный):',localStorage.getItem('eb_key')||'');
+  if(k===null)return;if(k.trim())localStorage.setItem('eb_key',k.trim());else localStorage.removeItem('eb_key');renderProfile();alert('Сохранено ✓')}
+function logout(){localStorage.removeItem('eb_current');location.reload()}
+(function(){const _t=tab;tab=function(id){_t(id);if(id==='scr1')renderHome();if(id==='scr10')renderProgress();if(id==='scr11')renderProfile();}})();
+
+
+/* ===== FIX TABBAR HIT-AREA + LEARN SHEET ===== */
+const LEARN_MODS=[
+ ['📇','Слова','лексика · карточки','scr2','linear-gradient(135deg,#FFA570,#F2683F)'],
+ ['📐','Грамматика','правила + тесты','scr3','linear-gradient(135deg,#6FC2B0,#1F9E5A)'],
+ ['📖','Чтение','перевод по клику','scr7','linear-gradient(135deg,#FFC861,#E8730A)'],
+ ['🎧','Аудирование','слушай и отвечай','scr4','linear-gradient(135deg,#5FB6C9,#3E93A8)'],
+ ['✍️','Письмо','задания 37 / 38 + ИИ','scr8','linear-gradient(135deg,#FF9E8A,#E26A56)'],
+ ['🎤','Говорение','таймер + запись','scr9','linear-gradient(135deg,#FFB07A,#F2683F)'],
+ ['⏱','Пробный ЕГЭ','вариант на время','scr16','linear-gradient(135deg,#B6BBC2,#8A8F98)'],
+ ['🏆','Достижения','бейджи и серии','scr17','linear-gradient(135deg,#FFC861,#F2683F)']
+];
+function buildLearnSheet(){
+  if(document.getElementById('learnSheet'))return;
+  const w=document.createElement('div');w.id='learnSheet';
+  const rows=LEARN_MODS.map(m=>'<div class="lm" onclick="learnGo(\''+m[3]+'\')"><div class="ic" style="background:'+m[4]+'">'+m[0]+'</div><div class="tx"><b>'+m[1]+'</b><div>'+m[2]+'</div></div><span class="ch">›</span></div>').join('');
+  w.innerHTML='<div class="bd" onclick="closeLearn()"></div><div class="sheet"><div class="grip"></div><h3>Учить</h3>'+rows+'</div>';
+  document.body.appendChild(w);
+}
+function openLearn(){buildLearnSheet();document.getElementById('learnSheet').classList.add('open')}
+function closeLearn(){const e=document.getElementById('learnSheet');if(e)e.classList.remove('open')}
+function learnGo(id){closeLearn();nav(id)}
+
+function wireTabs(){
+  const R={'Главная':'scr1','Прогресс':'scr10','Профиль':'scr11'};
+  document.querySelectorAll('.screen').forEach(scr=>{
+    scr.querySelectorAll('span').forEach(sp=>{
+      const t=(sp.textContent||'').trim();
+      if(t==='Главная'||t==='Учить'||t==='Прогресс'||t==='Профиль'){
+        const fresh=sp.cloneNode(true);sp.replaceWith(fresh);       // strip old text-only listener
+        const col=fresh.parentElement;if(!col)return;col.style.cursor='pointer';
+        col.onclick=(e)=>{e.stopPropagation();if(t==='Учить')openLearn();else nav(R[t]);};
+      }
+    });
+  });
+}
+document.addEventListener('DOMContentLoaded',()=>{buildLearnSheet();wireTabs()});
+buildLearnSheet();wireTabs();
+
+
+/* ===== AI CONTENT GENERATION ===== */
+let GQ=GRAM_Q.slice();
+let LIS={title:'Диалог 1 · В кафе',dialog:LISTEN.dialog,q1:{q:'1. Где происходит разговор?',o:LISTEN.q1.o.slice(),a:LISTEN.q1.a},q2:{q:'2. Что заказал мужчина?',o:LISTEN.q2.o.slice(),a:LISTEN.q2.a}};
+let RTXT=READ_TXT;
+
+/* -- override grammar to use GQ -- */
+function initGrammar(){gi=0;gScore=0;renderG()}
+function renderG(){gAns=false;const q=GQ[gi];
+  document.getElementById('g_head').textContent='Грамматика · Вопрос '+(gi+1)+' из '+GQ.length;
+  document.getElementById('g_steps').innerHTML=GQ.map((_,i)=>'<div style="flex:1;height:5px;border-radius:3px;background:'+(i<=gi?'#fff':'rgba(255,255,255,.35)')+';"></div>').join('');
+  document.getElementById('g_q').innerHTML=q.t[0]+'<span style="display:inline-block;min-width:62px;border-bottom:2.5px dashed #F2683F;text-align:center;color:#F2683F;">_____</span>'+q.t[2];
+  const op=document.getElementById('g_opts');op.innerHTML='';
+  q.o.forEach((opt,oi)=>{const d=document.createElement('div');d.setAttribute('data-i',oi);
+    d.setAttribute('style','display:flex;align-items:center;justify-content:space-between;background:#fff;border:1.5px solid #EDEEF0;border-radius:15px;padding:14px 16px;font-weight:700;font-size:15px;color:#8A8F98;cursor:pointer;');
+    d.innerHTML=opt+'<span style="width:22px;height:22px;border-radius:50%;border:2px solid #E1E3E6;"></span>';
+    d.onclick=()=>pickG(oi);op.appendChild(d)});
+  document.getElementById('g_exp').style.display='none';
+  const nx=document.getElementById('g_next');nx.style.opacity='.45';nx.textContent='Дальше'}
+function pickG(oi){if(gAns)return;gAns=true;const q=GQ[gi];
+  [...document.getElementById('g_opts').children].forEach(d=>{const i=+d.getAttribute('data-i');
+    if(i===q.a){d.setAttribute('style','display:flex;align-items:center;justify-content:space-between;background:#EAF7F0;border:1.5px solid #1F9E5A;border-radius:15px;padding:14px 16px;font-weight:800;font-size:15px;color:#1F8A50;');d.querySelector('span').setAttribute('style','width:24px;height:24px;border-radius:50%;background:#1F9E5A;display:grid;place-items:center;');d.querySelector('span').innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 12 10 18 20 6"/></svg>'}
+    else if(i===oi){d.setAttribute('style','display:flex;align-items:center;justify-content:space-between;background:#FCEEEC;border:1.5px solid #E26A56;border-radius:15px;padding:14px 16px;font-weight:700;font-size:15px;color:#C9503C;');d.querySelector('span').setAttribute('style','width:24px;height:24px;border-radius:50%;background:#E26A56;display:grid;place-items:center;');d.querySelector('span').innerHTML='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>'}
+    else d.style.opacity='.55'});
+  if(oi===q.a)gScore++;
+  const ex=document.getElementById('g_exp');ex.style.display='flex';
+  ex.innerHTML='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1F9E5A" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:1px;"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg><div style="font-weight:600;font-size:12.5px;color:#1F7A47;line-height:1.4;">'+(oi===q.a?'Верно! ':'Правильный ответ: <b>'+q.o[q.a]+'</b>. ')+q.e+'</div>';
+  const nx=document.getElementById('g_next');nx.style.opacity='1';nx.textContent=(gi<GQ.length-1?'Дальше':'Завершить')}
+function nextG(){if(!gAns)return;if(gi<GQ.length-1){gi++;renderG()}else{alert('Результат: '+gScore+' из '+GQ.length+' 🎯');tab('scr1')}}
+
+/* -- override listening to use LIS -- */
+function initListening(){const a=document.getElementById('l_q1'),b=document.getElementById('l_q2');if(!a)return;delete a.dataset.d;delete b.dataset.d;
+  var t=document.getElementById('l_title');if(t)t.textContent=LIS.title;
+  var q1=document.getElementById('l_q1t');if(q1)q1.textContent=LIS.q1.q;
+  var q2=document.getElementById('l_q2t');if(q2)q2.textContent=LIS.q2.q;
+  lOpt('l_q1',LIS.q1);lOpt('l_q2',LIS.q2);
+  document.getElementById('l_script').style.display='none';var tg=document.getElementById('l_toggle');if(tg){tg.style.background='#E7E9EC';document.getElementById('l_knob').style.left='3px'}}
+function playListen(){if(!('speechSynthesis'in window))return;speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(LIS.dialog);u.lang='en-GB';u.rate=.9;const v=speechSynthesis.getVoices().find(x=>/en-GB/i.test(x.lang));if(v)u.voice=v;speechSynthesis.speak(u)}
+function toggleScript(){const s=document.getElementById('l_script'),t=document.getElementById('l_toggle'),k=document.getElementById('l_knob');const on=s.style.display==='none';s.style.display=on?'block':'none';s.textContent=LIS.dialog;t.style.background=on?'#F2683F':'#E7E9EC';k.style.left=on?'22px':'3px'}
+
+/* -- override reading to use RTXT -- */
+function initReading(){S.wstatus=S.wstatus||{};const host=document.getElementById('r_text');if(!host)return;host.innerHTML='';
+  RTXT.split(/(\s+)/).forEach(tok=>{if(/^\s+$/.test(tok)){host.appendChild(document.createTextNode(tok));return}
+    const clean=tok.replace(/[^A-Za-z'-]/g,'').toLowerCase();const sp=document.createElement('span');sp.textContent=tok;
+    if(clean){sp.style.cursor='pointer';const st=S.wstatus[clean];
+      if(st==='know')sp.setAttribute('style','cursor:pointer;background:#E5F4EC;color:#1F8A50;border-radius:6px;padding:1px 5px;font-weight:700;');
+      else if(st==='learn')sp.setAttribute('style','cursor:pointer;background:#FFF4DE;color:#C77400;border-radius:6px;padding:1px 5px;font-weight:700;');
+      sp.onclick=()=>trWord(clean)}
+    host.appendChild(sp)})}
+
+/* -- toast + FAB -- */
+let toastT=null;
+function toast(m,ms){const e=document.getElementById('toast');if(!e)return;e.textContent=m;e.style.display='block';clearTimeout(toastT);if(ms!==0)toastT=setTimeout(()=>e.style.display='none',ms||2600)}
+function parseJSON(s){try{return JSON.parse(s.replace(/```json|```/g,'').trim())}catch(e){const m=s.match(/[\[{][\s\S]*[\]}]/);if(m){try{return JSON.parse(m[0])}catch(e2){}}return null}}
+async function genForCurrent(){const id=cur();const fab=document.getElementById('genfab');fab.disabled=true;toast('ИИ придумывает задание…',0);
+  try{
+    if(id==='scr2')await genWords();
+    else if(id==='scr3')await genGrammar();
+    else if(id==='scr4')await genListening();
+    else if(id==='scr7')await genReading();
+    toast('Готово — новое задание ✨');
+  }catch(e){toast('ИИ недоступен — оставил встроенное задание')}
+  fab.disabled=false}
+async function genWords(){
+  const out=await callGemini('Ты составляешь карточки для ЕГЭ. Британский английский, уровень B2-C1. Только JSON.',
+    'Дай 6 новых слов массивом JSON: [{"w":"слово","pos":"ПРИЛАГАТЕЛЬНОЕ|ГЛАГОЛ|СУЩЕСТВИТЕЛЬНОЕ|НАРЕЧИЕ","ipa":"/../","tr":"перевод","ex":"пример на английском"}]');
+  const d=parseJSON(out);if(!Array.isArray(d)||!d.length)throw 0;
+  d.forEach(x=>{if(x.w&&x.tr)WORDS.push({w:x.w,pos:x.pos||'СЛОВО',ipa:x.ipa||'',tr:x.tr,ex:x.ex||''})});
+  initWords()}
+async function genGrammar(){
+  const out=await callGemini('Ты составляешь тест по грамматике для ЕГЭ. Британский английский. Только JSON.',
+    'Придумай 5 заданий на случайную тему грамматики (одну). JSON: [{"before":"текст до пропуска","after":"текст после","options":["4 варианта"],"answer":индекс_верного_0-3,"explain":"краткое пояснение"}]');
+  const d=parseJSON(out);if(!Array.isArray(d)||!d.length)throw 0;
+  GQ=d.filter(x=>x.options&&x.options.length>=2).map(x=>({t:[x.before||'',' _____ ',x.after||''],o:x.options,a:x.answer||0,e:x.explain||''}));
+  if(!GQ.length){GQ=GRAM_Q.slice();throw 0}initGrammar()}
+async function genListening(){
+  const out=await callGemini('Ты составляешь задание по аудированию для ЕГЭ. Британский английский, уровень B1. Только JSON.',
+    'Придумай короткий диалог (3-5 реплик) в общественном месте и 2 вопроса к нему. JSON: {"title":"Диалог · тема","dialog":"— ...  — ...","q1":{"q":"1. вопрос по-русски","o":["3 варианта по-русски"],"a":индекс},"q2":{"q":"2. вопрос по-русски","o":["2-3 варианта"],"a":индекс}}');
+  const d=parseJSON(out);if(!d||!d.dialog||!d.q1||!d.q2)throw 0;
+  LIS={title:d.title||'Новый диалог',dialog:d.dialog,q1:{q:d.q1.q||'1.',o:d.q1.o,a:d.q1.a||0},q2:{q:d.q2.q||'2.',o:d.q2.o,a:d.q2.a||0}};
+  initListening()}
+async function genReading(){
+  const out=await callGemini('Ты составляешь текст для чтения ЕГЭ. Британский английский, уровень B1, 45-70 слов. Только JSON.',
+    'Придумай короткий текст на случайную тему. JSON: {"text":"текст на английском"}');
+  const d=parseJSON(out);if(!d||!d.text)throw 0;RTXT=d.text;initReading()}
+
+/* -- FAB visibility -- */
+(function(){
+  const fab=document.createElement('button');fab.id='genfab';fab.innerHTML='✨ ИИ: новое';fab.onclick=genForCurrent;document.body.appendChild(fab);
+  const tt=document.createElement('div');tt.id='toast';document.body.appendChild(tt);
+  const _t=tab;tab=function(id){_t(id);const show=['scr2','scr3','scr4','scr7'].includes(id);fab.style.display=show?'inline-flex':'none'};
+})();
+
+
+/* ===== SWITCH TO GROQ (overrides) ===== */
+async function callGemini(sys,user){
+  const key=(localStorage.getItem('eb_key')||'').trim();
+  const model=(localStorage.getItem('eb_model')||'llama-3.3-70b-versatile').trim();
+  if(!key)throw new Error('Добавь ключ Groq в Профиле (⚙️)');
+  const ctl=new AbortController();const to=setTimeout(()=>ctl.abort(),20000);
+  let r;
+  try{r=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},
+    body:JSON.stringify({model:model,temperature:0.3,max_tokens:1600,
+      messages:[...(sys?[{role:'system',content:sys}]:[]),{role:'user',content:user}]}),signal:ctl.signal})}
+  catch(e){clearTimeout(to);throw new Error('ИИ недоступен (нет сети)')}
+  clearTimeout(to);
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok)throw new Error((j.error&&j.error.message)||('Ошибка Groq '+r.status));
+  return (j.choices&&j.choices[0]&&j.choices[0].message&&j.choices[0].message.content)||''}
+
+function renderProfile(){const u=currentUser||'Гость';
+  var a=document.getElementById('pf_ava');if(a)a.textContent=u[0].toUpperCase();
+  var n=document.getElementById('pf_name');if(n)n.textContent=u;
+  var ai=document.getElementById('pf_ai');if(ai){const has=!!localStorage.getItem('eb_key');ai.textContent=has?'Groq ✓':'нет ключа';ai.style.color=has?'#1F8A50':'#C77400';ai.style.background=has?'#EAF7F0':'#FFF4DE'}}
+function setKeyPrompt(){
+  const k=prompt('Вставь ключ Groq (начинается с gsk_). Пусто = убрать ключ:',localStorage.getItem('eb_key')||'');
+  if(k===null)return;if(k.trim())localStorage.setItem('eb_key',k.trim());else localStorage.removeItem('eb_key');
+  if(!localStorage.getItem('eb_model'))localStorage.setItem('eb_model','llama-3.3-70b-versatile');
+  renderProfile();alert(k.trim()?'Ключ Groq сохранён ✓':'Ключ удалён')}
+
+
+/* ===== SWITCH TO GROK (xAI) (overrides) ===== */
+async function callGemini(sys,user){
+  const key=(localStorage.getItem('eb_key')||'').trim();
+  const model=(localStorage.getItem('eb_model')||'grok-4.5').trim();
+  if(!key)throw new Error('Добавь ключ xAI (Grok) в Профиле (⚙️)');
+  const ctl=new AbortController();const to=setTimeout(()=>ctl.abort(),25000);
+  let r;
+  try{r=await fetch('https://api.x.ai/v1/chat/completions',{method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},
+    body:JSON.stringify({model:model,temperature:0.3,max_tokens:1600,
+      messages:[...(sys?[{role:'system',content:sys}]:[]),{role:'user',content:user}]}),signal:ctl.signal})}
+  catch(e){clearTimeout(to);throw new Error('ИИ недоступен (нет сети)')}
+  clearTimeout(to);
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok)throw new Error((j.error&&j.error.message)||('Ошибка Grok '+r.status));
+  return (j.choices&&j.choices[0]&&j.choices[0].message&&j.choices[0].message.content)||''}
+
+function renderProfile(){const u=currentUser||'Гость';
+  var a=document.getElementById('pf_ava');if(a)a.textContent=u[0].toUpperCase();
+  var n=document.getElementById('pf_name');if(n)n.textContent=u;
+  var ai=document.getElementById('pf_ai');if(ai){const has=!!localStorage.getItem('eb_key');ai.textContent=has?'Grok ✓':'нет ключа';ai.style.color=has?'#1F8A50':'#C77400';ai.style.background=has?'#EAF7F0':'#FFF4DE'}}
+function setKeyPrompt(){
+  const k=prompt('Вставь ключ xAI (Grok), начинается с xai-. Пусто = убрать:',localStorage.getItem('eb_key')||'');
+  if(k===null)return;if(k.trim())localStorage.setItem('eb_key',k.trim());else localStorage.removeItem('eb_key');
+  if(!localStorage.getItem('eb_model'))localStorage.setItem('eb_model','grok-4.5');
+  renderProfile();alert(k.trim()?'Ключ Grok сохранён ✓':'Ключ удалён')}
+
+
+/* ===== GROK primary + GROQ fallback (overrides) ===== */
+async function _ask(url,key,model,sys,user){
+  const ctl=new AbortController();const to=setTimeout(()=>ctl.abort(),25000);
+  let r;
+  try{r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},
+    body:JSON.stringify({model:model,temperature:0.3,max_tokens:1600,messages:[...(sys?[{role:'system',content:sys}]:[]),{role:'user',content:user}]}),signal:ctl.signal})}
+  catch(e){clearTimeout(to);throw new Error('нет сети')}
+  clearTimeout(to);const j=await r.json().catch(()=>({}));
+  if(!r.ok)throw new Error((j.error&&j.error.message)||('HTTP '+r.status));
+  return (j.choices&&j.choices[0]&&j.choices[0].message&&j.choices[0].message.content)||''}
+async function callGemini(sys,user){
+  const xk=(localStorage.getItem('eb_key')||'').trim();
+  const gk=(localStorage.getItem('eb_groq')||'').trim();
+  const xm=(localStorage.getItem('eb_model')||'grok-4.5').trim();
+  const gm=(localStorage.getItem('eb_groq_model')||'llama-3.3-70b-versatile').trim();
+  if(!xk&&!gk)throw new Error('Добавь ключ в Профиле (⚙️)');
+  let lastErr='';
+  if(xk){try{return await _ask('https://api.x.ai/v1/chat/completions',xk,xm,sys,user)}catch(e){lastErr=e.message}}
+  if(gk){try{return await _ask('https://api.groq.com/openai/v1/chat/completions',gk,gm,sys,user)}catch(e){lastErr=e.message}}
+  throw new Error(lastErr||'ИИ недоступен')}
+
+function renderProfile(){const u=currentUser||'Гость';
+  var a=document.getElementById('pf_ava');if(a)a.textContent=u[0].toUpperCase();
+  var n=document.getElementById('pf_name');if(n)n.textContent=u;
+  var ai=document.getElementById('pf_ai');if(ai){const x=!!localStorage.getItem('eb_key'),g=!!localStorage.getItem('eb_groq');
+    const t=(x&&g)?'Grok + Groq ✓':x?'Grok ✓':g?'Groq ✓':'нет ключа';const has=x||g;
+    ai.textContent=t;ai.style.color=has?'#1F8A50':'#C77400';ai.style.background=has?'#EAF7F0':'#FFF4DE'}}
+function setKeyPrompt(){
+  const k=prompt('Основной ключ xAI (Grok), начинается с xai-. Пусто = убрать:',localStorage.getItem('eb_key')||'');
+  if(k!==null){if(k.trim())localStorage.setItem('eb_key',k.trim());else localStorage.removeItem('eb_key')}
+  const g=prompt('Запасной БЕСПЛАТНЫЙ ключ Groq (gsk_...) — подхватит, если у Grok кончатся токены. Пусто = без резерва:',localStorage.getItem('eb_groq')||'');
+  if(g!==null){if(g.trim())localStorage.setItem('eb_groq',g.trim());else localStorage.removeItem('eb_groq')}
+  if(!localStorage.getItem('eb_model'))localStorage.setItem('eb_model','grok-4.5');
+  renderProfile();alert('Сохранено ✓')}
+
+
+/* ===== SERVER CONNECT (Этап 5) ===== */
+const SRV=(location.protocol==='http:'||location.protocol==='https:');
+const API=location.origin;
+let TOKEN=localStorage.getItem('eb_token')||'';
+function gv(id){var e=document.getElementById(id);return e?(e.value||'').trim():''}
+function lgMsg(t){var e=document.getElementById('lg_msg');if(e)e.textContent=t}
+async function apiPost(p,body,authed){
+  const r=await fetch(API+p,{method:'POST',headers:Object.assign({'Content-Type':'application/json'},(authed&&TOKEN)?{'Authorization':'Bearer '+TOKEN}:{}),body:JSON.stringify(body||{})});
+  const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||('Ошибка '+r.status));return j}
+async function apiGet(p){
+  const r=await fetch(API+p,{headers:TOKEN?{'Authorization':'Bearer '+TOKEN}:{}});
+  const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||('Ошибка '+r.status));return j}
+function fillDefaults(d){d=d||{};d.box=d.box||{};d.wstatus=d.wstatus||{};d.learned=d.learned==null?320:d.learned;
+  d.streak=d.streak||7;d.lastDay=d.lastDay||null;d.dayMin=d.dayMin||18;d.dayMinDate=d.dayMinDate||todayStr();
+  d.essays=d.essays||0;d.speak=d.speak||0;d.prog=d.prog||{words:64,gram:42,read:78,listen:30,write:40,speak:48};return d}
+
+/* save/load через сервер (или локально) */
+let _saveT=null;
+save=function(){
+  if(SRV){if(!TOKEN)return;clearTimeout(_saveT);_saveT=setTimeout(()=>{apiPost('/api/progress',S,true).catch(()=>{})},600)}
+  else{if(currentUser)localStorage.setItem(dataKey(),JSON.stringify(S))}}
+startApp=async function(){
+  if(SRV){if(!TOKEN){show('scr5');document.getElementById('tabbar').style.display='none';return}
+    try{const d=await apiGet('/api/progress');S=fillDefaults(d)}catch(e){S=fillDefaults({})}}
+  else{S=load()}
+  tab('scr1')}
+
+/* вход/регистрация */
+doLogin=async function(){
+  if(!SRV){const u=gv('lg_user')||'Аня';currentUser=u;localStorage.setItem('eb_current',currentUser);startApp();return}
+  const u=gv('lg_user'),p=gv('lg_pass');if(!u||!p){lgMsg('Введите имя и пароль');return}
+  lgMsg('Вход…');
+  try{const d=await apiPost('/api/login',{username:u,password:p});TOKEN=d.token;localStorage.setItem('eb_token',TOKEN);
+    currentUser=d.username;localStorage.setItem('eb_current',currentUser);lgMsg('');startApp()}
+  catch(e){lgMsg(e.message)}}
+doRegister=async function(){
+  if(!SRV){const u=gv('lg_user')||'Аня';currentUser=u;localStorage.setItem('eb_current',currentUser);show('scr6');document.getElementById('tabbar').style.display='none';return}
+  const u=gv('lg_user'),p=gv('lg_pass');if(!u||!p){lgMsg('Введите имя и пароль');return}
+  lgMsg('Создаём аккаунт…');
+  try{const d=await apiPost('/api/register',{username:u,password:p});TOKEN=d.token;localStorage.setItem('eb_token',TOKEN);
+    currentUser=d.username;localStorage.setItem('eb_current',currentUser);lgMsg('');show('scr6');document.getElementById('tabbar').style.display='none'}
+  catch(e){lgMsg(e.message)}}
+logout=function(){localStorage.removeItem('eb_token');localStorage.removeItem('eb_current');TOKEN='';location.reload()}
+
+/* ИИ через сервер (ключи на сервере), иначе локальный путь (Grok/Groq) */
+const _localCall=callGemini;
+callGemini=async function(sys,user){
+  if(SRV){const d=await apiPost('/api/ai',{system:sys,user:user},true);return d.text||''}
+  return _localCall(sys,user)}
+
+/* профиль: в серверном режиме ключ не нужен на клиенте */
+const _rp=renderProfile;
+renderProfile=function(){_rp();if(SRV){var ai=document.getElementById('pf_ai');if(ai){ai.textContent='через сервер ✓';ai.style.color='#1F8A50';ai.style.background='#EAF7F0'}}}
+
+/* финальная инициализация под серверный режим */
+if(SRV){ if(TOKEN){ startApp(); } else { var tb=document.getElementById('tabbar'); if(tb)tb.style.display='none'; show('scr5'); } }
+
+
+/* ===== TELEGRAM-ONLY LOGIN ===== */
+tgVerify=async function(){
+  if(typeof SRV==='undefined'||!SRV){lgMsg('Вход через Telegram работает на сервере (открой по ссылке сервера).');return}
+  lgMsg('Открываю Telegram…');
+  let d;
+  try{d=await apiPost('/api/tg/start',{})}catch(e){lgMsg(e.message||'Ошибка сервера');return}
+  window.open(d.url,'_blank');
+  lgMsg('Подтверди вход в Telegram и вернись сюда…');
+  const code=d.code;let tries=0;
+  const iv=setInterval(async()=>{tries++;
+    try{const c=await apiGet('/api/tg/check?code='+encodeURIComponent(code));
+      if(c&&c.token){clearInterval(iv);TOKEN=c.token;localStorage.setItem('eb_token',TOKEN);
+        currentUser=c.username;localStorage.setItem('eb_current',currentUser);lgMsg('');startApp()}
+    }catch(e){}
+    if(tries>150){clearInterval(iv);lgMsg('Время вышло — нажми «Войти через Telegram» ещё раз')}
+  },2000)}
+
+
+/* ===== TELEGRAM LOGIN v2 (mobile-safe) ===== */
+let TG_URL='', TG_CODE='', TG_IV=null;
+async function tgInit(){
+  if(typeof SRV==='undefined'||!SRV)return;
+  try{const d=await apiPost('/api/tg/start',{});TG_URL=d.url;TG_CODE=d.code;tgPoll();}
+  catch(e){lgMsg('Сервер недоступен, обнови страницу');}
+}
+function tgPoll(){
+  if(!TG_CODE)return;let tries=0;clearInterval(TG_IV);
+  TG_IV=setInterval(async()=>{tries++;
+    try{const c=await apiGet('/api/tg/check?code='+encodeURIComponent(TG_CODE));
+      if(c&&c.token){clearInterval(TG_IV);TOKEN=c.token;localStorage.setItem('eb_token',TOKEN);
+        currentUser=c.username;localStorage.setItem('eb_current',currentUser);lgMsg('');startApp();}
+    }catch(e){}
+    if(tries>300){clearInterval(TG_IV)}
+  },2000);
+}
+tgVerify=function(){
+  if(typeof SRV==='undefined'||!SRV){lgMsg('Вход через Telegram работает на сервере (открой по ссылке сервера).');return}
+  if(!TG_URL){tgInit();lgMsg('Секунду, готовлю вход…');setTimeout(tgVerify,900);return}
+  var w=null;try{w=window.open(TG_URL,'_blank')}catch(e){}
+  var m=document.getElementById('lg_msg');
+  if(w){lgMsg('Открой бота → нажми Start → вернись сюда');}
+  else if(m){m.innerHTML='Нажми: <a href="'+TG_URL+'" target="_blank" rel="noopener" style="color:#F2683F;font-weight:800;text-decoration:underline;">Открыть Telegram-бот</a> → Start → вернись';}
+  tgPoll();
+}
+if(typeof SRV!=='undefined'&&SRV&&!TOKEN){tgInit();}
+
+
+/* ===== TELEGRAM login v3: настоящая ссылка (iOS-safe) ===== */
+tgInit=async function(){
+  if(typeof SRV==='undefined'||!SRV)return;
+  try{const d=await apiPost('/api/tg/start',{});TG_URL=d.url;TG_CODE=d.code;
+    var a=document.getElementById('tgbtn');if(a)a.href=TG_URL;tgPoll();}
+  catch(e){lgMsg('Сервер недоступен — обнови страницу');}
+}
+function tgClick(e){
+  if(!TG_URL){ if(e&&e.preventDefault)e.preventDefault(); lgMsg('Секунду, готовлю вход…'); tgInit(); return false; }
+  lgMsg('Открой бота → нажми Start → вернись сюда'); tgPoll();
+}
+try{clearInterval(TG_IV)}catch(e){}
+if(typeof SRV!=='undefined'&&SRV&&!TOKEN){tgInit();}
+
+</script>
+</body></html>

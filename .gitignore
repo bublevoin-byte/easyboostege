@@ -1,0 +1,6 @@
+# не загружаем в git секреты и мусор
+node_modules/
+.env
+data.json
+*.log
+.DS_Store
