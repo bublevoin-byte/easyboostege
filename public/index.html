@@ -43,6 +43,8 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
 @media(max-width:430px){#genfab{left:auto;right:16px;transform:none}}
 
 /* --- redesigned home (claymorphism) --- */
+.homeScroll{overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none}
+.homeScroll::-webkit-scrollbar{display:none}
 @keyframes heroFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
 .heroFloat{animation:heroFloat 5s ease-in-out infinite}
 @keyframes examShine{0%{left:-70%}55%,100%{left:130%}}
@@ -201,7 +203,7 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
     </div>
   
 </div>
-<div class="screen" id="scr1" data-name="Главная" style="background:#F6F3EF;">
+<div class="screen" id="scr1" data-name="Главная" style="background:#F6F3EF;overflow:hidden;">
 
     <!-- status bar (dark) -->
     <div style="position:absolute;top:0;left:0;right:0;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 7px;z-index:6;">
@@ -213,7 +215,7 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
       </div>
     </div>
     <!-- content -->
-    <div style="position:absolute;top:52px;left:0;right:0;bottom:0;padding:8px 20px 118px;">
+    <div class="homeScroll" style="position:absolute;top:52px;left:0;right:0;bottom:0;padding:8px 20px 118px;">
       <!-- exam CTA -->
       <div id="examBtn" class="sq clk" onclick="nav('scr16')" style="display:flex;align-items:center;gap:13px;margin-bottom:18px;background:linear-gradient(150deg,#3A3532,#2B2B2B);border-radius:22px;padding:12px 16px;box-shadow:0 14px 28px rgba(43,35,30,.32),inset 0 2px 3px rgba(255,255,255,.14),inset 0 -5px 10px rgba(0,0,0,.35);cursor:pointer;">
         <div style="width:44px;height:44px;flex:none;border-radius:15px;background:linear-gradient(145deg,#FFC861,#F2683F);display:grid;place-items:center;box-shadow:0 6px 12px rgba(242,104,63,.4),inset 0 2px 3px rgba(255,255,255,.5),inset 0 -3px 6px rgba(190,55,18,.3);">
@@ -388,12 +390,13 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
       <button onclick="rateCard(true)" style="flex:1;height:54px;border:none;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:16px;font-family:Manrope;font-weight:700;font-size:15px;color:#fff;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;box-shadow:0 12px 24px rgba(242,104,63,.32);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 12 10 18 20 6"/></svg>Знаю</button>
     </div>
     <!-- bottom nav (Учить active) -->
-    <div style="position:absolute;left:0;right:0;bottom:0;height:86px;background:rgba(255,255,255,.97);border-top:1px solid #EEF0F2;display:flex;justify-content:space-around;padding:14px 8px 0;z-index:6;">
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Главная</span></div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.3 8 5 5.5 5.4 4.6 5.5 4 6.3 4 7.2V18c0 .6.5 1 1.1.9 2.2-.3 4.5 0 6.4 1.4 1.9-1.4 4.2-1.7 6.4-1.4.6.1 1.1-.3 1.1-.9V7.2c0-.9-.6-1.7-1.5-1.8C15.5 5 13.7 5.3 12 6.5Z"/><path d="M12 6.5V20"/></svg><span style="font-weight:700;font-size:10.5px;color:#F2683F;">Учить</span></div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Прогресс</span></div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Профиль</span></div>
-      <div style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:128px;height:5px;border-radius:3px;background:#1d1d1f;opacity:.22;"></div>
+    <div style="position:absolute;left:0;right:0;bottom:0;padding:10px 14px 14px;z-index:6;background:linear-gradient(to top,rgba(245,246,248,.95) 55%,rgba(245,246,248,0));">
+      <div class="navclay">
+        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#A59C8D;">Главная</span></div>
+        <div class="navit on"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.3 8 5 5.5 5.4 4.6 5.5 4 6.3 4 7.2V18c0 .6.5 1 1.1.9 2.2-.3 4.5 0 6.4 1.4 1.9-1.4 4.2-1.7 6.4-1.4.6.1 1.1-.3 1.1-.9V7.2c0-.9-.6-1.7-1.5-1.8C15.5 5 13.7 5.3 12 6.5Z"/><path d="M12 6.5V20"/></svg><span style="font-weight:800;font-size:10.5px;color:#F2683F;">Учить</span></div>
+        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg><span style="font-weight:700;font-size:10.5px;color:#A59C8D;">Прогресс</span></div>
+        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#A59C8D;">Профиль</span></div>
+      </div>
     </div>
   
 </div>
@@ -438,12 +441,13 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
       <button id="g_next" onclick="nextG()" style="width:100%;height:54px;border:none;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:16px;font-family:Manrope;font-weight:700;font-size:15px;color:#fff;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;box-shadow:0 12px 24px rgba(242,104,63,.32);opacity:.45;">Дальше<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></button>
     </div>
     <!-- bottom nav (Учить active) -->
-    <div style="position:absolute;left:0;right:0;bottom:0;height:86px;background:rgba(255,255,255,.97);border-top:1px solid #EEF0F2;display:flex;justify-content:space-around;padding:14px 8px 0;z-index:6;">
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Главная</span></div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.3 8 5 5.5 5.4 4.6 5.5 4 6.3 4 7.2V18c0 .6.5 1 1.1.9 2.2-.3 4.5 0 6.4 1.4 1.9-1.4 4.2-1.7 6.4-1.4.6.1 1.1-.3 1.1-.9V7.2c0-.9-.6-1.7-1.5-1.8C15.5 5 13.7 5.3 12 6.5Z"/><path d="M12 6.5V20"/></svg><span style="font-weight:700;font-size:10.5px;color:#F2683F;">Учить</span></div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Прогресс</span></div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Профиль</span></div>
-      <div style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:128px;height:5px;border-radius:3px;background:#1d1d1f;opacity:.22;"></div>
+    <div style="position:absolute;left:0;right:0;bottom:0;padding:10px 14px 14px;z-index:6;background:linear-gradient(to top,rgba(245,246,248,.95) 55%,rgba(245,246,248,0));">
+      <div class="navclay">
+        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#A59C8D;">Главная</span></div>
+        <div class="navit on"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.3 8 5 5.5 5.4 4.6 5.5 4 6.3 4 7.2V18c0 .6.5 1 1.1.9 2.2-.3 4.5 0 6.4 1.4 1.9-1.4 4.2-1.7 6.4-1.4.6.1 1.1-.3 1.1-.9V7.2c0-.9-.6-1.7-1.5-1.8C15.5 5 13.7 5.3 12 6.5Z"/><path d="M12 6.5V20"/></svg><span style="font-weight:800;font-size:10.5px;color:#F2683F;">Учить</span></div>
+        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg><span style="font-weight:700;font-size:10.5px;color:#A59C8D;">Прогресс</span></div>
+        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#A59C8D;">Профиль</span></div>
+      </div>
     </div>
   
 </div>
@@ -503,12 +507,13 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
       </div>
     </div>
     <!-- bottom nav (Учить active) -->
-    <div style="position:absolute;left:0;right:0;bottom:0;height:86px;background:rgba(255,255,255,.97);border-top:1px solid #EEF0F2;display:flex;justify-content:space-around;padding:14px 8px 0;z-index:6;">
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Главная</span></div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.3 8 5 5.5 5.4 4.6 5.5 4 6.3 4 7.2V18c0 .6.5 1 1.1.9 2.2-.3 4.5 0 6.4 1.4 1.9-1.4 4.2-1.7 6.4-1.4.6.1 1.1-.3 1.1-.9V7.2c0-.9-.6-1.7-1.5-1.8C15.5 5 13.7 5.3 12 6.5Z"/><path d="M12 6.5V20"/></svg><span style="font-weight:700;font-size:10.5px;color:#F2683F;">Учить</span></div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Прогресс</span></div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Профиль</span></div>
-      <div style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:128px;height:5px;border-radius:3px;background:#1d1d1f;opacity:.22;"></div>
+    <div style="position:absolute;left:0;right:0;bottom:0;padding:10px 14px 14px;z-index:6;background:linear-gradient(to top,rgba(245,246,248,.95) 55%,rgba(245,246,248,0));">
+      <div class="navclay">
+        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#A59C8D;">Главная</span></div>
+        <div class="navit on"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.3 8 5 5.5 5.4 4.6 5.5 4 6.3 4 7.2V18c0 .6.5 1 1.1.9 2.2-.3 4.5 0 6.4 1.4 1.9-1.4 4.2-1.7 6.4-1.4.6.1 1.1-.3 1.1-.9V7.2c0-.9-.6-1.7-1.5-1.8C15.5 5 13.7 5.3 12 6.5Z"/><path d="M12 6.5V20"/></svg><span style="font-weight:800;font-size:10.5px;color:#F2683F;">Учить</span></div>
+        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg><span style="font-weight:700;font-size:10.5px;color:#A59C8D;">Прогресс</span></div>
+        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#A59C8D;">Профиль</span></div>
+      </div>
     </div>
   
 </div>
@@ -560,12 +565,13 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
     <!-- legend chips -->
     <div style="position:absolute;bottom:86px;left:0;right:0;display:none;"></div>
     <!-- bottom nav (Учить) -->
-    <div style="position:absolute;left:0;right:0;bottom:0;height:86px;background:rgba(255,255,255,.97);border-top:1px solid #EEF0F2;display:flex;justify-content:space-around;padding:14px 8px 0;z-index:6;">
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Главная</span></div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.3 8 5 5.5 5.4 4.6 5.5 4 6.3 4 7.2V18c0 .6.5 1 1.1.9 2.2-.3 4.5 0 6.4 1.4 1.9-1.4 4.2-1.7 6.4-1.4.6.1 1.1-.3 1.1-.9V7.2c0-.9-.6-1.7-1.5-1.8C15.5 5 13.7 5.3 12 6.5Z"/><path d="M12 6.5V20"/></svg><span style="font-weight:700;font-size:10.5px;color:#F2683F;">Учить</span></div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Прогресс</span></div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Профиль</span></div>
-      <div style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:128px;height:5px;border-radius:3px;background:#1d1d1f;opacity:.22;"></div>
+    <div style="position:absolute;left:0;right:0;bottom:0;padding:10px 14px 14px;z-index:6;background:linear-gradient(to top,rgba(245,246,248,.95) 55%,rgba(245,246,248,0));">
+      <div class="navclay">
+        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#A59C8D;">Главная</span></div>
+        <div class="navit on"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.3 8 5 5.5 5.4 4.6 5.5 4 6.3 4 7.2V18c0 .6.5 1 1.1.9 2.2-.3 4.5 0 6.4 1.4 1.9-1.4 4.2-1.7 6.4-1.4.6.1 1.1-.3 1.1-.9V7.2c0-.9-.6-1.7-1.5-1.8C15.5 5 13.7 5.3 12 6.5Z"/><path d="M12 6.5V20"/></svg><span style="font-weight:800;font-size:10.5px;color:#F2683F;">Учить</span></div>
+        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg><span style="font-weight:700;font-size:10.5px;color:#A59C8D;">Прогресс</span></div>
+        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#A59C8D;">Профиль</span></div>
+      </div>
     </div>
   
 </div>
@@ -623,12 +629,13 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
       <!-- AI check -->
       <button onclick="checkWriting()" style="margin-top:14px;width:100%;height:52px;border:none;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:16px;font-family:Manrope;font-weight:700;font-size:15px;color:#fff;display:flex;align-items:center;justify-content:center;gap:9px;cursor:pointer;box-shadow:0 12px 24px rgba(242,104,63,.32);"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 1.9 4.6L19 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"/><path d="M19 16l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></svg>Проверить с ИИ</button>
     </div>
-    <div style="position:absolute;left:0;right:0;bottom:0;height:86px;background:rgba(255,255,255,.97);border-top:1px solid #EEF0F2;display:flex;justify-content:space-around;padding:14px 8px 0;z-index:6;">
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Главная</span></div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.3 8 5 5.5 5.4 4.6 5.5 4 6.3 4 7.2V18c0 .6.5 1 1.1.9 2.2-.3 4.5 0 6.4 1.4 1.9-1.4 4.2-1.7 6.4-1.4.6.1 1.1-.3 1.1-.9V7.2c0-.9-.6-1.7-1.5-1.8C15.5 5 13.7 5.3 12 6.5Z"/><path d="M12 6.5V20"/></svg><span style="font-weight:700;font-size:10.5px;color:#F2683F;">Учить</span></div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Прогресс</span></div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Профиль</span></div>
-      <div style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:128px;height:5px;border-radius:3px;background:#1d1d1f;opacity:.22;"></div>
+    <div style="position:absolute;left:0;right:0;bottom:0;padding:10px 14px 14px;z-index:6;background:linear-gradient(to top,rgba(245,246,248,.95) 55%,rgba(245,246,248,0));">
+      <div class="navclay">
+        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#A59C8D;">Главная</span></div>
+        <div class="navit on"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.3 8 5 5.5 5.4 4.6 5.5 4 6.3 4 7.2V18c0 .6.5 1 1.1.9 2.2-.3 4.5 0 6.4 1.4 1.9-1.4 4.2-1.7 6.4-1.4.6.1 1.1-.3 1.1-.9V7.2c0-.9-.6-1.7-1.5-1.8C15.5 5 13.7 5.3 12 6.5Z"/><path d="M12 6.5V20"/></svg><span style="font-weight:800;font-size:10.5px;color:#F2683F;">Учить</span></div>
+        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg><span style="font-weight:700;font-size:10.5px;color:#A59C8D;">Прогресс</span></div>
+        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#A59C8D;">Профиль</span></div>
+      </div>
     </div>
   
 </div>
@@ -691,12 +698,13 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
         <span style="font-weight:600;font-size:11px;color:#8A8F98;">прослушать</span>
       </div>
     </div>
-    <div style="position:absolute;left:0;right:0;bottom:0;height:86px;background:rgba(255,255,255,.97);border-top:1px solid #EEF0F2;display:flex;justify-content:space-around;padding:14px 8px 0;z-index:6;">
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Главная</span></div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.3 8 5 5.5 5.4 4.6 5.5 4 6.3 4 7.2V18c0 .6.5 1 1.1.9 2.2-.3 4.5 0 6.4 1.4 1.9-1.4 4.2-1.7 6.4-1.4.6.1 1.1-.3 1.1-.9V7.2c0-.9-.6-1.7-1.5-1.8C15.5 5 13.7 5.3 12 6.5Z"/><path d="M12 6.5V20"/></svg><span style="font-weight:700;font-size:10.5px;color:#F2683F;">Учить</span></div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Прогресс</span></div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Профиль</span></div>
-      <div style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:128px;height:5px;border-radius:3px;background:#1d1d1f;opacity:.22;"></div>
+    <div style="position:absolute;left:0;right:0;bottom:0;padding:10px 14px 14px;z-index:6;background:linear-gradient(to top,rgba(245,246,248,.95) 55%,rgba(245,246,248,0));">
+      <div class="navclay">
+        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#A59C8D;">Главная</span></div>
+        <div class="navit on"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.3 8 5 5.5 5.4 4.6 5.5 4 6.3 4 7.2V18c0 .6.5 1 1.1.9 2.2-.3 4.5 0 6.4 1.4 1.9-1.4 4.2-1.7 6.4-1.4.6.1 1.1-.3 1.1-.9V7.2c0-.9-.6-1.7-1.5-1.8C15.5 5 13.7 5.3 12 6.5Z"/><path d="M12 6.5V20"/></svg><span style="font-weight:800;font-size:10.5px;color:#F2683F;">Учить</span></div>
+        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg><span style="font-weight:700;font-size:10.5px;color:#A59C8D;">Прогресс</span></div>
+        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#A59C8D;">Профиль</span></div>
+      </div>
     </div>
   
 </div>
@@ -857,12 +865,13 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
         </div>
       </div>
     </div>
-    <div style="position:absolute;left:0;right:0;bottom:0;height:86px;background:rgba(255,255,255,.97);border-top:1px solid #EEF0F2;display:flex;justify-content:space-around;padding:14px 8px 0;z-index:6;">
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Главная</span></div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.3 8 5 5.5 5.4 4.6 5.5 4 6.3 4 7.2V18c0 .6.5 1 1.1.9 2.2-.3 4.5 0 6.4 1.4 1.9-1.4 4.2-1.7 6.4-1.4.6.1 1.1-.3 1.1-.9V7.2c0-.9-.6-1.7-1.5-1.8C15.5 5 13.7 5.3 12 6.5Z"/><path d="M12 6.5V20"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Учить</span></div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg><span style="font-weight:700;font-size:10.5px;color:#F2683F;">Прогресс</span></div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Профиль</span></div>
-      <div style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:128px;height:5px;border-radius:3px;background:#1d1d1f;opacity:.22;"></div>
+    <div style="position:absolute;left:0;right:0;bottom:0;padding:10px 14px 14px;z-index:6;background:linear-gradient(to top,rgba(245,246,248,.95) 55%,rgba(245,246,248,0));">
+      <div class="navclay">
+        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#A59C8D;">Главная</span></div>
+        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.3 8 5 5.5 5.4 4.6 5.5 4 6.3 4 7.2V18c0 .6.5 1 1.1.9 2.2-.3 4.5 0 6.4 1.4 1.9-1.4 4.2-1.7 6.4-1.4.6.1 1.1-.3 1.1-.9V7.2c0-.9-.6-1.7-1.5-1.8C15.5 5 13.7 5.3 12 6.5Z"/><path d="M12 6.5V20"/></svg><span style="font-weight:700;font-size:10.5px;color:#A59C8D;">Учить</span></div>
+        <div class="navit on"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg><span style="font-weight:800;font-size:10.5px;color:#F2683F;">Прогресс</span></div>
+        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#A59C8D;">Профиль</span></div>
+      </div>
     </div>
   
 </div>
@@ -921,12 +930,13 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
       <!-- logout -->
       <button onclick="logout()" style="margin-top:18px;width:100%;height:50px;border:1.6px solid #F3D2C8;background:#fff;border-radius:16px;font-family:Manrope;font-weight:700;font-size:14.5px;color:#E23B2B;display:flex;align-items:center;justify-content:center;gap:9px;cursor:pointer;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#E23B2B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>Выйти</button>
     </div>
-    <div style="position:absolute;left:0;right:0;bottom:0;height:86px;background:rgba(255,255,255,.97);border-top:1px solid #EEF0F2;display:flex;justify-content:space-around;padding:14px 8px 0;z-index:6;">
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Главная</span></div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.3 8 5 5.5 5.4 4.6 5.5 4 6.3 4 7.2V18c0 .6.5 1 1.1.9 2.2-.3 4.5 0 6.4 1.4 1.9-1.4 4.2-1.7 6.4-1.4.6.1 1.1-.3 1.1-.9V7.2c0-.9-.6-1.7-1.5-1.8C15.5 5 13.7 5.3 12 6.5Z"/><path d="M12 6.5V20"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Учить</span></div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Прогресс</span></div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#F2683F;">Профиль</span></div>
-      <div style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:128px;height:5px;border-radius:3px;background:#1d1d1f;opacity:.22;"></div>
+    <div style="position:absolute;left:0;right:0;bottom:0;padding:10px 14px 14px;z-index:6;background:linear-gradient(to top,rgba(245,246,248,.95) 55%,rgba(245,246,248,0));">
+      <div class="navclay">
+        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#A59C8D;">Главная</span></div>
+        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.3 8 5 5.5 5.4 4.6 5.5 4 6.3 4 7.2V18c0 .6.5 1 1.1.9 2.2-.3 4.5 0 6.4 1.4 1.9-1.4 4.2-1.7 6.4-1.4.6.1 1.1-.3 1.1-.9V7.2c0-.9-.6-1.7-1.5-1.8C15.5 5 13.7 5.3 12 6.5Z"/><path d="M12 6.5V20"/></svg><span style="font-weight:700;font-size:10.5px;color:#A59C8D;">Учить</span></div>
+        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg><span style="font-weight:700;font-size:10.5px;color:#A59C8D;">Прогресс</span></div>
+        <div class="navit on"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5"/></svg><span style="font-weight:800;font-size:10.5px;color:#F2683F;">Профиль</span></div>
+      </div>
     </div>
   
 </div>
@@ -1077,12 +1087,13 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
       <div style="margin-top:10px;font-weight:600;font-size:14px;color:#8A8F98;line-height:1.5;">Добавляй слова из чтения или подборок —<br>они появятся здесь для повторения.</div>
       <button style="margin-top:26px;width:100%;max-width:240px;height:54px;border:none;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:16px;font-family:Manrope;font-weight:700;font-size:15px;color:#fff;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;box-shadow:0 12px 24px rgba(242,104,63,.3);">Добавить первые слова</button>
     </div>
-    <div style="position:absolute;left:0;right:0;bottom:0;height:86px;background:rgba(255,255,255,.97);border-top:1px solid #EEF0F2;display:flex;justify-content:space-around;padding:14px 8px 0;z-index:6;">
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Главная</span></div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.3 8 5 5.5 5.4 4.6 5.5 4 6.3 4 7.2V18c0 .6.5 1 1.1.9 2.2-.3 4.5 0 6.4 1.4 1.9-1.4 4.2-1.7 6.4-1.4.6.1 1.1-.3 1.1-.9V7.2c0-.9-.6-1.7-1.5-1.8C15.5 5 13.7 5.3 12 6.5Z"/><path d="M12 6.5V20"/></svg><span style="font-weight:700;font-size:10.5px;color:#F2683F;">Учить</span></div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Прогресс</span></div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;width:64px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#9aa0a8;">Профиль</span></div>
-      <div style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:128px;height:5px;border-radius:3px;background:#1d1d1f;opacity:.22;"></div>
+    <div style="position:absolute;left:0;right:0;bottom:0;padding:10px 14px 14px;z-index:6;background:linear-gradient(to top,rgba(245,246,248,.95) 55%,rgba(245,246,248,0));">
+      <div class="navclay">
+        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#A59C8D;">Главная</span></div>
+        <div class="navit on"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.3 8 5 5.5 5.4 4.6 5.5 4 6.3 4 7.2V18c0 .6.5 1 1.1.9 2.2-.3 4.5 0 6.4 1.4 1.9-1.4 4.2-1.7 6.4-1.4.6.1 1.1-.3 1.1-.9V7.2c0-.9-.6-1.7-1.5-1.8C15.5 5 13.7 5.3 12 6.5Z"/><path d="M12 6.5V20"/></svg><span style="font-weight:800;font-size:10.5px;color:#F2683F;">Учить</span></div>
+        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg><span style="font-weight:700;font-size:10.5px;color:#A59C8D;">Прогресс</span></div>
+        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#A59C8D;">Профиль</span></div>
+      </div>
     </div>
   
 </div>
