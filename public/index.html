@@ -68,9 +68,67 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
       <div style="margin-top:18px;font-weight:800;font-size:30px;color:#fff;letter-spacing:-.5px;">Easy Boost</div>
       <div style="margin-top:6px;font-weight:600;font-size:14px;color:rgba(255,255,255,.88);">Английский к ЕГЭ — играючи</div>
     </div>
+    <!-- звёздочки по всему экрану -->
+    <svg style="position:absolute;inset:0;width:100%;height:100%;z-index:1;pointer-events:none;" viewBox="0 0 390 844" preserveAspectRatio="xMidYMid slice" fill="#fff">
+      <path class="eb5sp" style="animation-delay:0s" d="M42,113 Q42,118 47,118 Q42,118 42,123 Q42,118 37,118 Q42,118 42,113 Z"/>
+      <path class="eb5sp" style="animation-delay:.5s" d="M338,146 Q338,150 342,150 Q338,150 338,154 Q338,150 334,150 Q338,150 338,146 Z"/>
+      <path class="eb5sp" style="animation-delay:1.2s" d="M96,232 Q96,236 100,236 Q96,236 96,240 Q96,236 92,236 Q96,236 96,232 Z"/>
+      <path class="eb5sp" style="animation-delay:.3s" d="M300,257 Q300,262 305,262 Q300,262 300,267 Q300,262 295,262 Q300,262 300,257 Z"/>
+      <path class="eb5sp" style="animation-delay:1.7s" d="M54,348 Q54,352 58,352 Q54,352 54,356 Q54,352 50,352 Q54,352 54,348 Z"/>
+      <path class="eb5sp" style="animation-delay:.9s" d="M350,368 Q350,372 354,372 Q350,372 350,376 Q350,372 346,372 Q350,372 350,368 Z"/>
+      <path class="eb5sp" style="animation-delay:2.1s" d="M34,481 Q34,486 39,486 Q34,486 34,491 Q34,486 29,486 Q34,486 34,481 Z"/>
+      <path class="eb5sp" style="animation-delay:1.1s" d="M360,512 Q360,516 364,516 Q360,516 360,520 Q360,516 356,516 Q360,516 360,512 Z"/>
+      <path class="eb5sp" style="animation-delay:.4s" d="M74,562 Q74,566 78,566 Q74,566 74,570 Q74,566 70,566 Q74,566 74,562 Z"/>
+      <path class="eb5sp" style="animation-delay:1.9s" d="M330,587 Q330,592 335,592 Q330,592 330,597 Q330,592 325,592 Q330,592 330,587 Z"/>
+      <path class="eb5sp" style="animation-delay:.7s" d="M150,644 Q150,648 154,648 Q150,648 150,652 Q150,648 146,648 Q150,648 150,644 Z"/>
+      <path class="eb5sp" style="animation-delay:1.5s" d="M250,658 Q250,662 254,662 Q250,662 250,666 Q250,662 246,662 Q250,662 250,658 Z"/>
+      <path class="eb5sp" style="animation-delay:2.3s" d="M112,146.5 Q112,150 115.5,150 Q112,150 112,153.5 Q112,150 108.5,150 Q112,150 112,146.5 Z"/>
+      <path class="eb5sp" style="animation-delay:.6s" d="M288,112 Q288,116 292,116 Q288,116 288,120 Q288,116 284,116 Q288,116 288,112 Z"/>
+      <path class="eb5sp" style="animation-delay:1s" d="M196,302.5 Q196,306 199.5,306 Q196,306 196,309.5 Q196,306 192.5,306 Q196,306 196,302.5 Z"/>
+    </svg>
+    <!-- 2D анимация: экзамены — это просто -->
+    <style>
+    @keyframes eb5bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}
+    @keyframes eb5pop{0%{opacity:0;transform:scale(0)}8%{opacity:1;transform:scale(1.25)}16%,74%{opacity:1;transform:scale(1)}88%,100%{opacity:0;transform:scale(.5)}}
+    @keyframes eb5tw{0%,100%{opacity:.3;transform:scale(.6)}50%{opacity:1;transform:scale(1.1)}}
+    @keyframes eb5star{0%,100%{transform:scale(1) rotate(0)}50%{transform:scale(1.15) rotate(8deg)}}
+    .eb5wrap{animation:eb5bob 4.5s ease-in-out infinite}
+    .eb5ck{transform-box:fill-box;transform-origin:center;animation:eb5pop 4.2s ease-in-out infinite}
+    .eb5ck2{animation-delay:.5s}.eb5ck3{animation-delay:1s}
+    .eb5sp{transform-box:fill-box;transform-origin:center;animation:eb5tw 2.6s ease-in-out infinite}
+    .eb5sp2{animation-delay:.9s}.eb5sp3{animation-delay:1.6s}
+    .eb5st{transform-box:fill-box;transform-origin:center;animation:eb5star 3s ease-in-out infinite}
+    @keyframes tgpulse{0%,100%{transform:scale(1);box-shadow:0 12px 24px rgba(242,104,63,.32)}50%{transform:scale(1.02);box-shadow:0 16px 34px rgba(242,104,63,.5)}}
+    @keyframes tgshine{0%{left:-70%}55%,100%{left:130%}}
+    #tgbtn{position:relative;overflow:hidden;animation:tgpulse 2.6s ease-in-out infinite}
+    #tgbtn::before{content:"";position:absolute;top:0;left:-70%;width:55%;height:100%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.4),transparent);transform:skewX(-18deg);pointer-events:none;animation:tgshine 3.6s ease-in-out infinite}
+    #tgbtn:active{transform:scale(.96)!important;transition:transform .12s}
+    @media(prefers-reduced-motion:reduce){.eb5wrap,.eb5ck,.eb5sp,.eb5st,#tgbtn{animation:none}.eb5ck{opacity:1}#tgbtn::before{display:none}}
+    </style>
+    <div style="position:absolute;top:372px;left:0;right:0;display:flex;justify-content:center;z-index:2;pointer-events:none;">
+      <svg class="eb5wrap" width="250" height="226" viewBox="0 0 210 190" fill="none">
+        <rect x="52" y="34" width="116" height="128" rx="18" fill="rgba(255,255,255,.15)" stroke="#fff" stroke-width="3"/>
+        <rect x="68" y="52" width="52" height="8" rx="4" fill="rgba(255,255,255,.85)"/>
+        <circle cx="76" cy="84" r="9" stroke="#fff" stroke-width="2.6"/>
+        <rect x="92" y="80" width="60" height="7" rx="3.5" fill="rgba(255,255,255,.55)"/>
+        <path class="eb5ck" d="M71 84l4 4 6-8" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="76" cy="110" r="9" stroke="#fff" stroke-width="2.6"/>
+        <rect x="92" y="106" width="60" height="7" rx="3.5" fill="rgba(255,255,255,.55)"/>
+        <path class="eb5ck eb5ck2" d="M71 110l4 4 6-8" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="76" cy="136" r="9" stroke="#fff" stroke-width="2.6"/>
+        <rect x="92" y="132" width="44" height="7" rx="3.5" fill="rgba(255,255,255,.55)"/>
+        <path class="eb5ck eb5ck3" d="M71 136l4 4 6-8" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+        <g class="eb5st">
+          <circle cx="163" cy="40" r="20" fill="#fff"/>
+          <path d="M163 30l2.7 5.6 6.1.8-4.5 4.2 1.1 6-5.4-2.9-5.4 2.9 1.1-6-4.5-4.2 6.1-.8z" fill="#F2683F"/>
+        </g>
+        <path class="eb5sp" d="M40 60l2 6 6 2-6 2-2 6-2-6-6-2 6-2z" fill="#fff"/>
+        <path class="eb5sp eb5sp2" d="M186 98l1.6 4.6 4.6 1.6-4.6 1.6-1.6 4.6-1.6-4.6-4.6-1.6 4.6-1.6z" fill="#fff"/>
+        <path class="eb5sp eb5sp3" d="M44 150l1.6 4.6 4.6 1.6-4.6 1.6-1.6 4.6-1.6-4.6-4.6-1.6 4.6-1.6z" fill="#fff"/>
+      </svg>
+    </div>
     <!-- sheet -->
-    <div style="position:absolute;left:0;right:0;bottom:0;background:#fff;border-radius:34px 34px 0 0;padding:30px 24px 30px;box-shadow:0 -12px 40px rgba(120,40,10,.18);z-index:5;">
-      <div style="font-weight:800;font-size:20px;color:#2B2B2B;">С возвращением 👋</div>
+    <div style="position:absolute;left:0;right:0;bottom:0;background:#fff;border-radius:34px 34px 0 0;padding:26px 24px 30px;box-shadow:0 -12px 40px rgba(120,40,10,.18);z-index:5;">
       <!-- telegram -->
       <a id="tgbtn" href="#" target="_blank" rel="noopener" onclick="tgClick(event)" style="width:100%;height:56px;box-sizing:border-box;border:none;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:16px;font-family:Manrope;font-weight:700;font-size:16px;color:#fff;display:flex;align-items:center;justify-content:center;gap:10px;cursor:pointer;box-shadow:0 12px 24px rgba(242,104,63,.32);text-decoration:none;"><svg width="22" height="22" viewBox="0 0 24 24" fill="#fff"><path d="M21.5 4.3 2.9 11.5c-1 .4-1 1.8.1 2.1l4.6 1.4 1.8 5.6c.3.8 1.3 1 1.9.4l2.5-2.4 4.6 3.4c.7.5 1.7.1 1.9-.7L23 5.6c.2-1-.7-1.7-1.5-1.3Z"/></svg>Войти через Telegram</a>
       <div id="lg_msg" style="margin-top:12px;text-align:center;font-weight:600;font-size:13px;color:#E23B2B;"></div>
