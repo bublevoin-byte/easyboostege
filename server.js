@@ -21,6 +21,7 @@ const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
 // Telegram
 const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 const ADMIN_ID = process.env.ADMIN_TELEGRAM_ID || ''; // твой Telegram ID — тебе приходят заявки на оплату
+const APP_URL = process.env.APP_URL || 'https://useboost.ru'; // адрес приложения для ссылки входа из бота
 const TRIAL_DAYS = 30;
 const SUB_DAYS = 30;
 let BOT_USERNAME = '';
@@ -73,7 +74,17 @@ async function onMessage(m) {
     const code = m.text.split(' ')[1];
     if (code && tgCodes[code]) {
       tgReady[code] = { telegram_id: fromId, name };
-      await tgApi('sendMessage', { chat_id: chatId, text: 'Готово! Вход в Easy Boost выполнен ✅\n\nВыбери доступ, чтобы начать заниматься:', reply_markup: subKeyboard() });
+      const uname = getUserByTelegram(fromId)?.username || createTelegramUser(fromId, name);
+      const loginUrl = APP_URL + '/?t=' + makeToken(uname);
+      await tgApi('sendMessage', {
+        chat_id: chatId,
+        text: 'Готово! Вход выполнен ✅\nНажми кнопку, чтобы открыть приложение:',
+        reply_markup: { inline_keyboard: [
+          [{ text: '✅ Открыть Easy Boost', url: loginUrl }],
+          [{ text: '🎁 Попробовать бесплатно месяц', callback_data: 'trial' }],
+          [{ text: '💳 Оплатить подписку', callback_data: 'pay' }],
+        ] },
+      });
     } else {
       await tgApi('sendMessage', { chat_id: chatId, text: 'Привет! Это Easy Boost 🎓 — подготовка к ЕГЭ по английскому.\nВыбери, как начать:', reply_markup: subKeyboard() });
     }

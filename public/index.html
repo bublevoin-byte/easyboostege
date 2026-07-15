@@ -1770,4 +1770,28 @@ window.checkSub=pwCheck;
 try{ if(typeof startApp==='function'){ var _sa=startApp; startApp=function(){ _sa.apply(this,arguments); try{pwCheck();}catch(e){} }; } }catch(e){}
 if(typeof SRV!=='undefined'&&SRV&&TOKEN){ setTimeout(function(){try{pwCheck();}catch(e){}},300); }
 </script>
+<script>
+/* ===== Вход по ссылке из бота (magic link) — без всплывающих окон ===== */
+(function(){
+  try{
+    var t=new URLSearchParams(location.search).get('t');
+    if(t){
+      try{localStorage.setItem('eb_token',t);}catch(_){}
+      try{TOKEN=t;}catch(_){window.TOKEN=t;}
+      try{history.replaceState(null,'',location.pathname);}catch(_){}
+      try{if(typeof startApp==='function')startApp();}catch(_){}
+      try{if(typeof checkSub==='function')checkSub();}catch(_){}
+    }
+  }catch(e){}
+})();
+/* Кнопка Telegram: обычный переход по ссылке (чинит «лишнюю вкладку» на iPhone) */
+tgClick=function(e){
+  if(typeof SRV==='undefined'||!SRV){ if(e&&e.preventDefault)e.preventDefault(); lgMsg('Открой приложение по ссылке сервера.'); return false; }
+  if(typeof TG_URL==='undefined'||!TG_URL){ if(e&&e.preventDefault)e.preventDefault(); lgMsg('Секунду, готовлю вход…'); if(typeof tgInit==='function')tgInit(); return false; }
+  var a=document.getElementById('tgbtn'); if(a)a.href=TG_URL;
+  lgMsg('Нажми Start в боте → затем кнопку «Открыть Easy Boost»');
+  if(typeof tgPoll==='function')tgPoll();
+  return true;
+};
+</script>
 </body></html>
