@@ -3108,8 +3108,18 @@ function rHub(){var area=document.getElementById('r_area');if(!area)return;RH=nu
     +'<span style="flex:none;width:38px;height:38px;border-radius:13px;background:#FFF4DE;display:grid;place-items:center;"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#E8730A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg></span>'
     +'<div style="font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.45;">Тапни любое слово в тексте — покажем перевод и добавим его в модуль «Слова»</div></div>';
   setTxt('r_today','3 тренажёра');rGen()}
+/* перемешивание вариантов с пересчётом ответов */
+function rPerm(n){var idx=[];for(var i=0;i<n;i++)idx.push(i);
+  for(var i=n-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=idx[i];idx[i]=idx[j];idx[j]=t}
+  var inv=[];idx.forEach(function(o,ni){inv[o]=ni});return{idx:idx,inv:inv}}
+function rShufHl(set){var p=rPerm(5);
+  return {hl:p.idx.map(function(o){return set.hl[o]}),
+          txts:set.txts.map(function(t){return {t:t.t,a:p.inv[t.a],k:t.k}})}}
+function rShufGp(set){var p=rPerm(4);
+  return {tx:set.tx.slice(),fr:p.idx.map(function(o){return set.fr[o]}),
+          a:set.a.map(function(x){return p.inv[x]}),k:set.k.slice()}}
 /* ---- Задание 10: заголовки ---- */
-function rHl(){S.readIdxH=(S.readIdxH||0);var pool=rPool('h',R_HL);var set=pool[S.readIdxH%pool.length];S.readIdxH++;
+function rHl(){S.readIdxH=(S.readIdxH||0);var pool=rPool('h',R_HL);var set=rShufHl(pool[S.readIdxH%pool.length]);S.readIdxH++;
   RH={set:set,sel:[null,null,null,null],done:false};rHlRender()}
 function rHlRender(){var area=document.getElementById('r_area');var set=RH.set;
   var L='ABCDE';
@@ -3200,7 +3210,7 @@ function rQsExplain(q){var area=document.getElementById('r_area');
     +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="RQ.i++;rSync();save();rQsRender()">Понятно, дальше</button>';
   rAnim('wflip','.5s')}
 /* ---- Задание 11: пропуски ---- */
-function rGp(){S.readIdxG=(S.readIdxG||0);var pool=rPool('g',R_GAPS);var set=pool[S.readIdxG%pool.length];S.readIdxG++;
+function rGp(){S.readIdxG=(S.readIdxG||0);var pool=rPool('g',R_GAPS);var set=rShufGp(pool[S.readIdxG%pool.length]);S.readIdxG++;
   RG={set:set,sel:[null,null,null],done:false};rGpRender()}
 function rGpRender(){var area=document.getElementById('r_area');var set=RG.set,L='ABCD';
   var txt='';
@@ -3279,7 +3289,7 @@ function rExam(){var area=document.getElementById('r_area');if(!area)return;
 function rExamStart(){
   var ph=rPool('h',R_HL),pg=rPool('g',R_GAPS),pq=rPool('q',R_QS);
   S.reIdx=(S.reIdx||0);
-  RE={h:ph[S.reIdx%ph.length],g:pg[S.reIdx%pg.length],q:pq[S.reIdx%pq.length],
+  RE={h:rShufHl(ph[S.reIdx%ph.length]),g:rShufGp(pg[S.reIdx%pg.length]),q:pq[S.reIdx%pq.length],
       selH:[null,null,null,null],selG:[null,null,null],ansQ:[],stage:0,t0:Date.now()};
   S.reIdx++;
   RE.iv=setInterval(function(){if(RE)setTxt('r_today',gExamFmt(Math.floor((Date.now()-RE.t0)/1000)))},1000);
@@ -3562,8 +3572,13 @@ function lHub(){var area=document.getElementById('l_area');if(!area)return;LM=nu
     +'<span style="flex:none;width:38px;height:38px;border-radius:13px;background:#E3F1F5;display:grid;place-items:center;"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#3E93A8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg></span>'
     +'<div style="font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.45;">Сначала прочитай вопросы, потом слушай — как на экзамене. Запись можно включить дважды</div></div>';
   setTxt('l_today','3 тренажёра');lGen()}
+function lShufM(set){var idx=[0,1,2,3,4];
+  for(var i=4;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=idx[i];idx[i]=idx[j];idx[j]=t}
+  var inv=[];idx.forEach(function(o,ni){inv[o]=ni});
+  return {st:idx.map(function(o){return set.st[o]}),sp:set.sp,
+          a:set.a.map(function(x){return inv[x]}),k:set.k}}
 /* ---- задание 1: соответствия ---- */
-function lMt(){S.lisIdxM=(S.lisIdxM||0);var pool=lPool('m',L_M);var set=pool[S.lisIdxM%pool.length];S.lisIdxM++;
+function lMt(){S.lisIdxM=(S.lisIdxM||0);var pool=lPool('m',L_M);var set=lShufM(pool[S.lisIdxM%pool.length]);S.lisIdxM++;
   LM={set:set,sel:[null,null,null,null],done:false};LPLAYS=0;lMtRender()}
 function lMtLines(){return LM.set.sp.map(function(sp,i){return {s:i%2,t:'Speaker '+'ABCD'[i]+'. '+sp.t}})}
 function lMtRender(){var area=document.getElementById('l_area');var set=LM.set;
@@ -3703,7 +3718,7 @@ function lExam(){var area=document.getElementById('l_area');if(!area)return;lSto
 function lExamStart(){
   var pm=lPool('m',L_M),pt=lPool('tf',L_TF),pi=lPool('iq',L_IN);
   S.leIdx=(S.leIdx||0);
-  LE={m:pm[S.leIdx%pm.length],tf:pt[S.leIdx%pt.length],iq:pi[S.leIdx%pi.length],
+  LE={m:lShufM(pm[S.leIdx%pm.length]),tf:pt[S.leIdx%pt.length],iq:pi[S.leIdx%pi.length],
       stage:0,selM:[null,null,null,null],plays:[0,0,0],t0:Date.now()};
   LE.selT=LE.tf.st.map(function(){return null});
   LE.selI=LE.iq.qs.map(function(){return null});
