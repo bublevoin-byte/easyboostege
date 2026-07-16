@@ -3,6 +3,8 @@ import express from 'express';
 import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
 import path from 'path';
+import fs from 'fs';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { getProgress, saveProgress, getUserByTelegram, createTelegramUser, grantDays, markTrialUsed, getSub } from './db.js';
 
@@ -272,6 +274,46 @@ app.post('/api/ai', auth, async (req, res) => {
     catch (e) { lastErr = e.message; }
   }
   res.status(502).json({ error: 'ИИ недоступен: ' + lastErr });
+});
+
+// ---- нейро-озвучка (Edge TTS, бесплатно) с кэшем на диске ----
+const TTS_DIR = path.join(__dirname, 'tts-cache');
+try { fs.mkdirSync(TTS_DIR, { recursive: true }); } catch (e) {}
+const TTS_VOICES = new Set(['en-GB-SoniaNeural', 'en-GB-RyanNeural', 'en-GB-LibbyNeural', 'en-GB-ThomasNeural']);
+let _ttsMod = null;
+app.get('/api/tts', auth, async (req, res) => {
+  try {
+    const text = String(req.query.text || '').slice(0, 500).trim();
+    if (!text) return res.status(400).json({ error: 'нет текста' });
+    const voice = TTS_VOICES.has(req.query.voice) ? req.query.voice : 'en-GB-SoniaNeural';
+    const slow = req.query.slow === '1';
+    const key = crypto.createHash('sha1').update(voice + '|' + (slow ? 1 : 0) + '|' + text).digest('hex');
+    const file = path.join(TTS_DIR, key + '.mp3');
+    if (fs.existsSync(file)) {
+      res.setHeader('Content-Type', 'audio/mpeg');
+      res.setHeader('Cache-Control', 'public, max-age=604800');
+      return res.sendFile(file);
+    }
+    if (!_ttsMod) _ttsMod = await import('msedge-tts');
+    const { MsEdgeTTS, OUTPUT_FORMAT } = _ttsMod;
+    const tts = new MsEdgeTTS();
+    await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
+    const st = await tts.toStream(text, slow ? { rate: '-25%' } : undefined);
+    const stream = st && st.audioStream ? st.audioStream : st;
+    const chunks = [];
+    stream.on('data', (c) => chunks.push(c));
+    stream.on('end', () => {
+      const buf = Buffer.concat(chunks);
+      if (!buf.length) return res.status(502).json({ error: 'пустое аудио' });
+      try { fs.writeFileSync(file, buf); } catch (e) {}
+      res.setHeader('Content-Type', 'audio/mpeg');
+      res.setHeader('Cache-Control', 'public, max-age=604800');
+      res.end(buf);
+    });
+    stream.on('error', (e) => { try { res.status(502).json({ error: 'TTS: ' + e.message }); } catch (_) {} });
+  } catch (e) {
+    res.status(503).json({ error: 'Озвучка не установлена: выполни npm i в /opt/easyboost (' + e.message + ')' });
+  }
 });
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));

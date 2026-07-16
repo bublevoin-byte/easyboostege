@@ -3805,4 +3805,48 @@ var _t8=tab;tab=function(id){_t8(id);lStop();if(LE&&LE.iv){clearInterval(LE.iv);
 var _sa5=startApp;startApp=async function(){await _sa5.apply(this,arguments);try{lSync()}catch(e){}};
 
 </script>
+<script>
+/* ===== TTS v2: нейроголоса Edge через сервер, фолбэк — встроенный синтез ===== */
+(function(){
+  var cache={},cur=null,seq=0;
+  function fetchAudio(text,voice,slow){
+    var k=voice+'|'+(slow?1:0)+'|'+text;
+    if(cache[k])return Promise.resolve(cache[k]);
+    return fetch(API+'/api/tts?text='+encodeURIComponent(text)+'&voice='+voice+(slow?'&slow=1':''),
+      {headers:TOKEN?{'Authorization':'Bearer '+TOKEN}:{}})
+      .then(function(r){if(!r.ok)throw 0;return r.blob()})
+      .then(function(b){if(!b.size)throw 0;var u=URL.createObjectURL(b);cache[k]=u;return u})}
+  function stopAudio(){seq++;if(cur){try{cur.pause()}catch(e){}cur=null}}
+  /* стоп глушит и нейро, и встроенный синтез */
+  if(typeof lStop==='function'){
+    lStop=function(){stopAudio();try{speechSynthesis.cancel()}catch(e){}}}
+  /* диалоги и монологи */
+  if(typeof lPlayRaw==='function'){
+    var _raw=lPlayRaw;
+    lPlayRaw=function(lines){
+      if(typeof SRV==='undefined'||!SRV||!TOKEN){_raw(lines);return}
+      stopAudio();try{speechSynthesis.cancel()}catch(e){}
+      var my=++seq;
+      Promise.all(lines.map(function(ln){
+        return fetchAudio(ln.t,ln.s?'en-GB-SoniaNeural':'en-GB-RyanNeural',LSLOW)}))
+      .then(function(urls){
+        if(my!==seq)return;
+        var i=0;
+        (function next(){
+          if(my!==seq||i>=urls.length){if(my===seq)cur=null;return}
+          cur=new Audio(urls[i++]);cur.onended=next;cur.onerror=next;
+          cur.play().catch(function(){next()})})()})
+      .catch(function(){if(my===seq)_raw(lines)})}}
+  /* отдельные слова */
+  if(typeof wSpeak==='function'){
+    var _ws=wSpeak;
+    wSpeak=function(txt){
+      var t=(txt||'').replace(/^to /,'').trim();if(!t)return;
+      if(typeof SRV==='undefined'||!SRV||!TOKEN){_ws(txt);return}
+      var my=++seq;
+      fetchAudio(t,'en-GB-SoniaNeural',false)
+        .then(function(u){if(my!==seq)return;if(cur){try{cur.pause()}catch(e){}}cur=new Audio(u);cur.play().catch(function(){})})
+        .catch(function(){if(my===seq)_ws(txt)})}}
+})();
+</script>
 </body></html>
