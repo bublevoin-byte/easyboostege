@@ -312,6 +312,24 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
           <span style="display:block;margin-top:12px;font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:16.5px;color:#2B2B2B;">Аудирование</span>
           <div id="sub_listen" style="font-weight:600;font-size:12px;color:#98917F;margin-top:2px;">начни с первого диалога</div>
         </div>
+        <!-- Письмо -->
+        <div class="clayCard sq" style="padding:16px;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+            <div class="iconBlob" style="background:#FBE9EF;"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#D4537E" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></div>
+            <svg width="46" height="46" viewBox="0 0 44 44"><defs><linearGradient id="r5" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F0997B"/><stop offset="1" stop-color="#D4537E"/></linearGradient></defs><circle cx="22" cy="22" r="18" fill="none" stroke="#F1EDE7" stroke-width="5.5"/><circle cx="22" cy="22" r="18" fill="none" stroke="url(#r5)" stroke-width="5.5" stroke-linecap="round" stroke-dasharray="113.1" stroke-dashoffset="67.9" id="ring_write" transform="rotate(-90 22 22)"/><text x="22" y="26" text-anchor="middle" font-family="Nunito,Manrope" font-weight="800" font-size="11" fill="#2B2B2B" id="m_write">40</text></svg>
+          </div>
+          <span style="display:block;margin-top:12px;font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:16.5px;color:#2B2B2B;">Письмо</span>
+          <div style="font-weight:600;font-size:12px;color:#98917F;margin-top:2px;">задания 37–38 · ИИ</div>
+        </div>
+        <!-- Говорение -->
+        <div class="clayCard sq" style="padding:16px;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+            <div class="iconBlob" style="background:#E7F3F1;"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#3E93A8" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3Z"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg></div>
+            <svg width="46" height="46" viewBox="0 0 44 44"><defs><linearGradient id="r6" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6FC2B0"/><stop offset="1" stop-color="#3E93A8"/></linearGradient></defs><circle cx="22" cy="22" r="18" fill="none" stroke="#F1EDE7" stroke-width="5.5"/><circle cx="22" cy="22" r="18" fill="none" stroke="url(#r6)" stroke-width="5.5" stroke-linecap="round" stroke-dasharray="113.1" stroke-dashoffset="58.8" id="ring_speak" transform="rotate(-90 22 22)"/><text x="22" y="26" text-anchor="middle" font-family="Nunito,Manrope" font-weight="800" font-size="11" fill="#2B2B2B" id="m_speak">48</text></svg>
+          </div>
+          <span style="display:block;margin-top:12px;font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:16.5px;color:#2B2B2B;">Говорение</span>
+          <div style="font-weight:600;font-size:12px;color:#98917F;margin-top:2px;">устная часть · запись</div>
+        </div>
       </div>
       <!-- mascot tip -->
       <sc-if value="{{ showMascot }}" hint-placeholder-val="{{ true }}">
@@ -1421,6 +1439,8 @@ function renderHome(){if(!S)return;const u=currentUser||'друг';
   setTxt('m_gram',p.gram||0);ringOff('ring_gram',113.1,p.gram||0);
   setTxt('m_read',p.read||0);ringOff('ring_read',113.1,p.read||0);
   setTxt('m_listen',p.listen||0);ringOff('ring_listen',113.1,p.listen||0);
+  setTxt('m_write',p.write||0);ringOff('ring_write',113.1,p.write||0);
+  setTxt('m_speak',p.speak||0);ringOff('ring_speak',113.1,p.speak||0);
   setTxt('sub_words','учу · '+(S.learned||0)+' / 500')}
 function renderProgress(){if(!S)return;const p=S.prog||{};
   setTxt('p_streak','🔥 '+(S.streak||0));setTxt('p_words',S.learned||0);
@@ -1463,7 +1483,7 @@ function wireTabs(){
       if(t==='Главная'||t==='Учить'||t==='Прогресс'||t==='Профиль'){
         const fresh=sp.cloneNode(true);sp.replaceWith(fresh);       // strip old text-only listener
         const col=fresh.parentElement;if(!col)return;col.style.cursor='pointer';
-        col.onclick=(e)=>{e.stopPropagation();if(t==='Учить')openLearn();else nav(R[t]);};
+        col.onclick=(e)=>{e.stopPropagation();if(t!=='Учить')nav(R[t]);};
       }
     });
   });
