@@ -298,7 +298,7 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
             <svg width="46" height="46" viewBox="0 0 44 44"><defs><linearGradient id="r3" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFC861"/><stop offset="1" stop-color="#E8730A"/></linearGradient></defs><circle cx="22" cy="22" r="18" fill="none" stroke="#F1EDE7" stroke-width="5.5"/><circle cx="22" cy="22" r="18" fill="none" stroke="url(#r3)" stroke-width="5.5" stroke-linecap="round" stroke-dasharray="113.1" stroke-dashoffset="24.9" id="ring_read" transform="rotate(-90 22 22)"/><text x="22" y="26" text-anchor="middle" font-family="Nunito,Manrope" font-weight="800" font-size="11" fill="#2B2B2B" id="m_read">78</text></svg>
           </div>
           <span style="display:block;margin-top:12px;font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:16.5px;color:#2B2B2B;">Чтение</span>
-          <div style="font-weight:600;font-size:12px;color:#98917F;margin-top:2px;">7 текстов</div>
+          <div id="sub_read" style="font-weight:600;font-size:12px;color:#98917F;margin-top:2px;">начни с первого текста</div>
         </div>
         <!-- Аудирование -->
         <div class="clayCard sq" style="padding:16px;">
@@ -514,7 +514,24 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
 </div>
 <div class="screen" id="scr7" data-name="Чтение">
 
-    <div style="position:absolute;top:0;left:0;right:0;height:158px;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:0 0 30px 30px;z-index:1;"></div>
+    <!-- starry gradient header -->
+    <div style="position:absolute;top:0;left:0;right:0;height:206px;background:linear-gradient(150deg,#FFA570 0%,#F2683F 62%,#E44E20 100%);border-radius:0 0 32px 32px;z-index:1;overflow:hidden;box-shadow:0 14px 30px rgba(242,104,63,.25),inset 0 -8px 18px rgba(190,55,18,.22);">
+      <svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;" viewBox="0 0 390 206" preserveAspectRatio="xMidYMid slice" fill="rgba(255,255,255,.85)">
+        <path class="eb5sp" style="animation-delay:.2s" d="M30,60 Q30,64 34,64 Q30,64 30,68 Q30,64 26,64 Q30,64 30,60 Z"/>
+        <path class="eb5sp" style="animation-delay:1s" d="M355,48 Q355,52 359,52 Q355,52 355,56 Q355,52 351,52 Q355,52 355,48 Z"/>
+        <path class="eb5sp" style="animation-delay:1.6s" d="M330,160 Q330,164 334,164 Q330,164 330,168 Q330,164 326,164 Q330,164 330,160 Z"/>
+        <path class="eb5sp" style="animation-delay:.6s" d="M45,150 Q45,154 49,154 Q45,154 45,158 Q45,154 41,154 Q45,154 45,150 Z"/>
+        <path class="eb5sp" style="animation-delay:2s" d="M200,40 Q200,43.5 203.5,43.5 Q200,43.5 200,47 Q200,43.5 196.5,43.5 Q200,43.5 200,40 Z"/>
+        <path class="eb5sp" style="animation-delay:.9s" d="M120,30 Q120,34.5 124.5,34.5 Q120,34.5 120,39 Q120,34.5 115.5,34.5 Q120,34.5 120,30 Z"/>
+        <path class="eb5sp" style="animation-delay:1.3s" d="M280,80 Q280,84 284,84 Q280,84 280,88 Q280,84 276,84 Q280,84 280,80 Z"/>
+        <path class="eb5sp" style="animation-delay:.4s" d="M150,120 Q150,123.5 153.5,123.5 Q150,123.5 150,127 Q150,123.5 146.5,123.5 Q150,123.5 150,120 Z"/>
+        <path class="eb5sp" style="animation-delay:1.8s" d="M245,150 Q245,154.5 249.5,154.5 Q245,154.5 245,159 Q245,154.5 240.5,154.5 Q245,154.5 245,150 Z"/>
+        <path class="eb5sp" style="animation-delay:.1s" d="M310,115 Q310,118.5 313.5,118.5 Q310,118.5 310,122 Q310,118.5 306.5,118.5 Q310,118.5 310,115 Z"/>
+      </svg>
+      <div style="position:absolute;top:-40px;right:-30px;width:130px;height:130px;border-radius:50%;background:rgba(255,255,255,.12);"></div>
+      <div style="position:absolute;bottom:-55px;left:-35px;width:150px;height:150px;border-radius:50%;background:rgba(255,255,255,.09);"></div>
+    </div>
+    <!-- status bar white -->
     <div style="position:absolute;top:0;left:0;right:0;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 7px;z-index:6;">
       <span style="font-weight:700;font-size:15px;color:#fff;">9:41</span>
       <div style="display:flex;gap:7px;align-items:center;">
@@ -523,42 +540,36 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
         <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3" stroke="#fff" opacity=".5"/><rect x="2.4" y="2.4" width="15" height="7.2" rx="1.6" fill="#fff"/><rect x="23" y="4" width="2" height="4" rx="1" fill="#fff"/></svg>
       </div>
     </div>
+    <!-- header -->
     <div style="position:absolute;top:54px;left:0;right:0;padding:0 22px;z-index:6;">
       <div style="display:flex;align-items:center;justify-content:space-between;">
         <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><polyline points="14 6 8 12 14 18"/></svg>
         <div style="font-weight:800;font-size:18px;color:#fff;">Чтение</div>
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5V6a2 2 0 0 1 2-2h12v16H6a2 2 0 0 0-2 2Z"/><path d="M8 7h7"/></svg>
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round"><line x1="5" y1="8" x2="19" y2="8"/><line x1="5" y1="12" x2="19" y2="12"/><line x1="5" y1="16" x2="19" y2="16"/></svg>
       </div>
-      <div style="margin-top:13px;display:flex;align-items:center;gap:10px;font-weight:600;font-size:12.5px;color:rgba(255,255,255,.92);">
-        <span style="font-weight:800;">A Gap Year</span><span style="opacity:.7;">·</span><span>уровень B1</span><span style="margin-left:auto;background:rgba(255,255,255,.22);padding:4px 10px;border-radius:20px;font-weight:700;">3 мин</span>
+      <div id="r_sumline" style="margin-top:16px;font-weight:700;font-size:13px;color:rgba(255,255,255,.95);">Два тренажёра — как на экзамене</div>
+      <div style="margin-top:12px;display:flex;align-items:center;justify-content:space-between;font-weight:600;font-size:11.5px;color:rgba(255,255,255,.9);">
+        <span style="font-weight:700;letter-spacing:.5px;">ЗАДАНИЯ 10–18</span><span id="r_today">2 тренажёра</span>
       </div>
+      <div style="margin-top:7px;height:7px;border-radius:5px;background:rgba(255,255,255,.28);"><div id="r_bar" style="width:2%;height:100%;border-radius:5px;background:#fff;"></div></div>
     </div>
-    <!-- reading body -->
-    <div style="position:absolute;top:174px;left:0;right:0;bottom:86px;padding:0 22px 16px;z-index:5;overflow:hidden;">
-      <div style="background:#fff;border-radius:22px;padding:20px;box-shadow:0 10px 26px rgba(20,20,30,.06);">
-        <p id="r_text" style="margin:0;font-weight:500;font-size:15.5px;line-height:1.7;color:#2B2B2B;"></p>
-      </div>
-      <!-- word popover -->
-      <div id="r_pop" style="margin-top:14px;background:#fff;border-radius:20px;padding:16px 18px;box-shadow:0 14px 30px rgba(20,20,30,.10);display:none;">
-        <div style="display:flex;align-items:center;justify-content:space-between;">
-          <div style="display:flex;align-items:baseline;gap:10px;"><span id="r_word" style="font-weight:800;font-size:19px;color:#2B2B2B;">valuable</span><span id="r_ipa" style="font-weight:500;font-size:13px;color:#8A8F98;">/ˈvæljuəbl/</span></div>
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M16 9a4 4 0 0 1 0 6"/></svg>
-        </div>
-        <div id="r_tr" style="margin-top:6px;font-weight:600;font-size:14px;color:#5b5f66;">ценный, полезный</div>
-        <div style="margin-top:12px;display:flex;gap:10px;">
-          <button style="flex:1;height:42px;border:1.5px solid #F2683F;background:#fff;border-radius:13px;font-family:Manrope;font-weight:700;font-size:13px;color:#F2683F;cursor:pointer;" onclick="r_add('learn')">+ Учить</button>
-          <button style="flex:1;height:42px;border:none;background:#EAF7F0;border-radius:13px;font-family:Manrope;font-weight:700;font-size:13px;color:#1F8A50;cursor:pointer;" onclick="r_add('know')">✓ Знаю</button>
+    <!-- exercise area -->
+    <div id="r_area" style="position:absolute;top:236px;left:22px;right:22px;bottom:104px;z-index:5;display:block;overflow-y:auto;scrollbar-width:none;"></div>
+    <!-- word popover (floating) -->
+    <div id="r_pop" style="position:absolute;left:22px;right:22px;bottom:110px;z-index:60;background:#fff;border-radius:20px;border:1px solid #F0EAE2;padding:16px 18px;box-shadow:0 18px 40px rgba(60,45,30,.22),inset 0 2px 0 rgba(255,255,255,.9);display:none;">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <div style="display:flex;align-items:baseline;gap:10px;"><span id="r_word" style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:19px;color:#2B2B2B;">word</span><span id="r_ipa" style="font-weight:500;font-size:13px;color:#8A8F98;"></span></div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="clk" onclick="wSpeak(lastWord)" style="cursor:pointer;display:grid;place-items:center;width:32px;height:32px;border-radius:11px;background:#FFF4DE;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#E8730A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg></span>
+          <span class="clk" onclick="document.getElementById('r_pop').style.display='none'" style="cursor:pointer;display:grid;place-items:center;width:32px;height:32px;border-radius:11px;background:#F1F2F4;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8A8F98" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></span>
         </div>
       </div>
-      <!-- question -->
-      <div style="margin-top:14px;background:#fff;border-radius:18px;padding:15px 16px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
-        <div style="font-weight:700;font-size:13px;color:#2B2B2B;">Вопрос 1 · A gap year helps students to…</div>
-        <div style="margin-top:11px;display:flex;align-items:center;gap:10px;font-weight:600;font-size:13px;color:#9aa0a8;"><span style="width:18px;height:18px;border-radius:50%;border:2px solid #E1E3E6;"></span>earn a degree faster</div>
-        <div style="margin-top:9px;display:flex;align-items:center;gap:10px;font-weight:700;font-size:13px;color:#2B2B2B;"><span style="width:18px;height:18px;border-radius:50%;border:2px solid #F2683F;"></span>become more independent</div>
+      <div id="r_tr" style="margin-top:6px;font-weight:600;font-size:14px;color:#5b5f66;">перевод…</div>
+      <div style="margin-top:12px;display:flex;gap:10px;">
+        <button class="sq" style="flex:1;height:44px;border:1.5px solid #F2683F;background:#fff;border-radius:14px;font-family:Manrope,sans-serif;font-weight:700;font-size:13px;color:#F2683F;cursor:pointer;" onclick="r_add('learn')">+ Учить</button>
+        <button class="sq" style="flex:1;height:44px;border:none;background:#EAF7F0;border-radius:14px;font-family:Manrope,sans-serif;font-weight:700;font-size:13px;color:#1F8A50;cursor:pointer;" onclick="r_add('know')">✓ Знаю</button>
       </div>
     </div>
-    <!-- legend chips -->
-    <div style="position:absolute;bottom:86px;left:0;right:0;display:none;"></div>
     <!-- bottom nav (Учить) -->
     <div style="position:absolute;left:0;right:0;bottom:0;padding:10px 14px 14px;z-index:6;background:linear-gradient(to top,rgba(245,246,248,.95) 55%,rgba(245,246,248,0));">
       <div class="navclay">
@@ -2967,6 +2978,193 @@ async function gGen(t){
 /* прячем FAB на грамматике, синк при старте */
 var _t5=tab;tab=function(id){_t5(id);if(EX&&EX.iv){clearInterval(EX.iv);EX=null}if(id==='scr3'){var f=document.getElementById('genfab');if(f)f.style.display='none';GS=null}};
 var _sa3=startApp;startApp=async function(){await _sa3.apply(this,arguments);try{gSync()}catch(e){}};
+
+</script>
+<script>
+/* ===== READING v2: задание 10 + задания 12-18 + словарь в SRS ===== */
+const R_HL=[
+{hl:['A hobby for everyone','Dangers of city life','A new way to travel','Sport at school','Eating for health'],
+ txts:[
+ {t:'More and more teenagers choose cycling to get to school. It is cheap, fast and green. Some cities even build special lanes for young riders.',a:2,k:'cycling to get to school, special lanes — речь о способе добираться, то есть о передвижении.'},
+ {t:'Doctors say that fruit and vegetables must be on your plate every day. A balanced diet gives you energy and protects you from illnesses.',a:4,k:'balanced diet, fruit and vegetables — про здоровое питание.'},
+ {t:'Football, volleyball and athletics are part of the timetable in most Russian schools. PE lessons help students stay active and make friends.',a:3,k:'PE lessons, timetable — спорт именно в школе.'},
+ {t:'Collecting stamps, drawing or playing chess — there is an activity for every character. The main thing is to find what you really enjoy.',a:0,k:'an activity for every character — хобби найдётся для каждого.'}]},
+{hl:['A famous discovery','Learning languages online','Weather and mood','A family tradition','Protecting nature'],
+ txts:[
+ {t:'Every Sunday my grandmother bakes her special apple pie, and the whole family meets at her place. This custom is more than fifty years old.',a:3,k:'custom, every Sunday, the whole family — семейная традиция.'},
+ {t:'Scientists say that sunny days make people happier and more active, while long rains can cause sadness and low energy.',a:2,k:'sunny days → happier; rains → sadness — связь погоды и настроения.'},
+ {t:'Volunteers clean rivers and plant trees in our region every spring. They want to keep the local forests safe for animals and people.',a:4,k:'clean rivers, plant trees, keep forests safe — защита природы.'},
+ {t:'With modern apps you can practise English anywhere: on the bus, at breakfast or before sleep. Short daily lessons work better than long ones.',a:1,k:'apps, practise English anywhere — изучение языка онлайн.'}]},
+{hl:['A useful invention','Holiday plans','A school project','Reading habits','City transport problems'],
+ txts:[
+ {t:'Teenagers read fewer paper books today, but they read a lot online: articles, blogs and e-books. The way of reading has changed, not the love for it.',a:3,k:'read online, e-books — о том, КАК читают, то есть о привычках чтения.'},
+ {t:'Next summer our class is going to the sea. We have already booked the hotel and planned excursions to two ancient towns.',a:1,k:'next summer, booked the hotel — планы на каникулы.'},
+ {t:'Our students made a website about the history of our town. They interviewed old residents and collected photos from family albums.',a:2,k:'students made a website, interviewed — школьный проект.'},
+ {t:'Traffic jams make people in big cities lose hours every day. Experts suggest developing the metro and building more bike lanes.',a:4,k:'traffic jams, metro, bike lanes — транспортные проблемы города.'}]}
+];
+const R_QS=[
+{tx:'Many British students take a gap year before university. During this year they travel, work or volunteer in other countries. Supporters say that a gap year helps young people become independent and understand what they really want to study. However, some parents are afraid that after a long break their children will not want to return to studying. Universities report that gap-year students usually get better marks in the first year, because they are more motivated and organised. Experts advise planning the year carefully: a person who just stays at home often wastes time and loses study habits.',
+ qs:[
+ {q:'What do many British students do before university?',o:['They take exams again','They take a year off','They start full-time careers','They move abroad for good'],a:1,ev:'Many British students take a gap year before university.',e:'gap year — это год перерыва между школой и университетом.'},
+ {q:'What are some parents afraid of?',o:['Money problems','Danger during travel','That children will not return to study','Bad school marks'],a:2,ev:'…some parents are afraid that after a long break their children will not want to return to studying.',e:'Страх родителей — что ребёнок не захочет вернуться к учёбе.'},
+ {q:'According to universities, gap-year students usually…',o:['get better first-year marks','miss more lessons','choose easier subjects','leave university earlier'],a:0,ev:'Universities report that gap-year students usually get better marks in the first year…',e:'better marks in the first year — лучшие оценки на первом курсе.'},
+ {q:'What do experts advise?',o:['To stay at home','To plan the year carefully','To avoid working','To skip the gap year'],a:1,ev:'Experts advise planning the year carefully…',e:'Главный совет экспертов — тщательно планировать год.'}]},
+{tx:'Some schools in Europe have banned smartphones during lessons and breaks. Teachers noticed that students talk to each other more and play active games in the yard again. Not everyone is happy, though. Many parents want to be able to contact their children at any moment. Some students say phones help them study: they use dictionaries, calculators and educational apps. Scientists offer a compromise: keep phones in special boxes during lessons and return them after classes. In schools that tried this system, test results improved and the number of conflicts between students went down.',
+ qs:[
+ {q:'What happened after the smartphone ban?',o:['Students became lonely','Students talk and play more','Parents visited school more often','Lessons became longer'],a:1,ev:'…students talk to each other more and play active games in the yard again.',e:'Ученики стали больше общаться вживую и играть во дворе.'},
+ {q:'Why are many parents unhappy about the ban?',o:['Phones are expensive','They cannot contact their children','Children play too much','Teachers became stricter'],a:1,ev:'Many parents want to be able to contact their children at any moment.',e:'Родителям важна возможность связаться с ребёнком в любой момент.'},
+ {q:'How do phones help students, according to some of them?',o:['They give study tools','They help make friends','They improve sport results','They help fall asleep'],a:0,ev:'…they use dictionaries, calculators and educational apps.',e:'Словари, калькуляторы, учебные приложения — инструменты для учёбы.'},
+ {q:'What compromise do scientists suggest?',o:['Shorter lessons','No homework','Phones in boxes during lessons','Moving school online'],a:2,ev:'…keep phones in special boxes during lessons and return them after classes.',e:'Компромисс — телефоны в коробках на время уроков.'}]},
+{tx:'Last year more than a million Russian teenagers took part in volunteer projects. They helped animal shelters, visited elderly people and cleaned parks. Psychologists say that volunteering makes teenagers more confident and teaches them to work in a team. It can also help with a future career: universities pay attention to social activity, and some companies prefer candidates with volunteer experience. To become a volunteer, you do not need money or special skills — only free time and the wish to help. Most projects accept school students from the age of fourteen.',
+ qs:[
+ {q:'What did teenagers do as volunteers?',o:['They built new houses','They helped shelters and elderly people','They taught at schools','They worked only in hospitals'],a:1,ev:'They helped animal shelters, visited elderly people and cleaned parks.',e:'Приюты, пожилые люди, парки — именно это перечислено в тексте.'},
+ {q:'What do psychologists say about volunteering?',o:['It takes too much time','It builds confidence and teamwork','It is dangerous for teens','It is only for adults'],a:1,ev:'…volunteering makes teenagers more confident and teaches them to work in a team.',e:'Уверенность и командная работа — эффект волонтёрства.'},
+ {q:'How can volunteering help in the future?',o:['It guarantees any job','Universities and companies value it','It pays very well','It replaces school exams'],a:1,ev:'…universities pay attention to social activity, and some companies prefer candidates with volunteer experience.',e:'Вузы и работодатели ценят волонтёрский опыт — но не «гарантируют работу».'},
+ {q:'What do you need to become a volunteer?',o:['Money','Special skills','Free time and the wish to help','A special diploma'],a:2,ev:'…you do not need money or special skills — only free time and the wish to help.',e:'Нужны только свободное время и желание помогать.'}]}
+];
+let RH=null,RQ=null;
+function rSt(){S.read=S.read||{h:{ok:0,tot:0},q:{ok:0,tot:0},texts:0};return S.read}
+function rSync(){if(!S)return;var r=rSt();var ok=r.h.ok+r.q.ok,tot=r.h.tot+r.q.tot;
+  var acc=tot?Math.round(ok/tot*100):0;
+  S.prog=S.prog||{};S.prog.read=acc;
+  setTxt('sub_read',r.texts?('текстов: '+r.texts+' · точность '+acc+'%'):'начни с первого текста');
+  setTxt('r_sumline',r.texts?('Прочитано '+r.texts+' · точность '+acc+'%'):'Два тренажёра — как на экзамене');
+  var bar=document.getElementById('r_bar');if(bar)bar.style.width=Math.max(2,acc)+'%'}
+function rAnim(name,dur){var c=document.getElementById('r_card');if(!c)return;c.style.animation='none';void c.offsetWidth;c.style.animation=name+' '+dur+' cubic-bezier(.25,.75,.35,1)'}
+function rEsc(w){return w.replace(/[&<>"]/g,'')}
+function rWordsHtml(text){return text.split(/(\s+)/).map(function(tok){
+  if(/^\s+$/.test(tok))return tok;
+  var m=tok.match(/[A-Za-z][A-Za-z'-]*/);if(!m)return rEsc(tok);
+  var clean=m[0].toLowerCase();
+  var st=S.wstatus&&S.wstatus[clean];
+  var bg=st==='learn'?'background:#FFEDE4;border-radius:5px;':(st==='know'?'background:#EAF7F0;border-radius:5px;':'');
+  return '<span class="clk" data-w="'+clean+'" onclick="trWord(this.dataset.w)" style="cursor:pointer;'+bg+'">'+rEsc(tok)+'</span>'}).join('')}
+initReading=function(){if(!S)return;rSync();rHub()}
+function rHub(){var area=document.getElementById('r_area');if(!area)return;RH=null;RQ=null;
+  var r=rSt();var GA=0;function ga(){return 'animation:win .34s '+((GA++)*0.06)+'s cubic-bezier(.25,.75,.35,1) both;'}
+  function acc(x){return x.tot?Math.round(x.ok/x.tot*100)+'%':'—'}
+  area.innerHTML=
+   '<div class="clayCard sq clk" onclick="rHl()" style="'+ga()+'padding:16px 18px;margin-bottom:12px;cursor:pointer;">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'
+    +'<div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:15.5px;color:#2B2B2B;">Заголовки</div>'
+    +'<div style="font-weight:600;font-size:12px;color:#98917F;margin-top:2px;">задание 10 · подбери заголовок к тексту</div></div>'
+    +'<span style="flex:none;font-weight:800;font-size:12px;color:#E44E20;background:#FFEDE4;padding:8px 12px;border-radius:14px;">'+acc(r.h)+'</span></div></div>'
+   +'<div class="clayCard sq clk" onclick="rQs()" style="'+ga()+'padding:16px 18px;margin-bottom:12px;cursor:pointer;">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'
+    +'<div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:15.5px;color:#2B2B2B;">Полное понимание</div>'
+    +'<div style="font-weight:600;font-size:12px;color:#98917F;margin-top:2px;">задания 12–18 · текст и вопросы</div></div>'
+    +'<span style="flex:none;font-weight:800;font-size:12px;color:#1F8A50;background:#EAF7F0;padding:8px 12px;border-radius:14px;">'+acc(r.q)+'</span></div></div>'
+   +'<div class="clayCard" style="'+ga()+'display:flex;align-items:center;gap:12px;padding:13px 15px;">'
+    +'<span style="flex:none;width:38px;height:38px;border-radius:13px;background:#FFF4DE;display:grid;place-items:center;"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#E8730A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg></span>'
+    +'<div style="font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.45;">Тапни любое слово в тексте — покажем перевод и добавим его в модуль «Слова»</div></div>';
+  setTxt('r_today','2 тренажёра')}
+/* ---- Задание 10: заголовки ---- */
+function rHl(){S.readIdxH=(S.readIdxH||0);var set=R_HL[S.readIdxH%R_HL.length];S.readIdxH++;
+  RH={set:set,sel:[null,null,null,null],done:false};rHlRender()}
+function rHlRender(){var area=document.getElementById('r_area');var set=RH.set;
+  var L='ABCDE';
+  var h='<div id="r_card" class="clayCard" style="position:relative;overflow:hidden;padding:16px 18px;margin-bottom:12px;">'+wDeco()
+    +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#F2683F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">ЗАДАНИЕ 10 · ЗАГОЛОВКИ</span>'
+    +'<div style="font-weight:600;font-size:12px;color:#98917F;margin-top:10px;">Подбери заголовок к каждому тексту. Один заголовок лишний.</div>'
+    +set.hl.map(function(x,i){return '<div style="margin-top:8px;font-weight:700;font-size:13px;color:#2B2B2B;"><b style="color:#F2683F;">'+L[i]+'.</b> '+x+'</div>'}).join('')+'</div>';
+  set.txts.forEach(function(tx,ti){
+    h+='<div class="clayCard" style="padding:15px 16px;margin-bottom:12px;">'
+      +'<div style="font-weight:500;font-size:13.5px;line-height:1.6;color:#2B2B2B;">'+rWordsHtml(tx.t)+'</div>'
+      +'<div style="margin-top:11px;display:flex;gap:8px;" id="rhl_row_'+ti+'">'
+      +set.hl.map(function(_,hi){var on=RH.sel[ti]===hi;
+        return '<button onclick="rHlPick('+ti+','+hi+')" style="flex:1;height:38px;border-radius:12px;border:1.5px solid '+(on?'#F2683F':'#F0EAE2')+';background:'+(on?'#FFEDE4':'#fff')+';font-family:Manrope,sans-serif;font-weight:800;font-size:13px;color:'+(on?'#E44E20':'#8A8F98')+';cursor:pointer;">'+L[hi]+'</button>'}).join('')
+      +'</div><div id="rhl_res_'+ti+'"></div></div>'});
+  var all=RH.sel.every(function(x){return x!==null});
+  h+='<div style="margin-bottom:8px;">'
+    +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);'+(all?'':'opacity:.45;pointer-events:none;')+'" onclick="rHlCheck()">Проверить</button>'
+    +'<button class="sq" style="'+WBTN+'color:#F2683F;margin-top:10px;" onclick="rHub()">← К чтению</button></div>';
+  area.innerHTML=h;setTxt('r_today',RH.sel.filter(function(x){return x!==null}).length+' / 4 выбрано')}
+function rHlPick(ti,hi){if(RH.done)return;
+  RH.sel=RH.sel.map(function(x,i){return i===ti?hi:(x===hi?null:x)});
+  rHlRender()}
+function rHlCheck(){if(RH.done)return;RH.done=true;var set=RH.set,L='ABCDE',r=rSt(),okn=0;
+  set.txts.forEach(function(tx,ti){var ok=RH.sel[ti]===tx.a;if(ok)okn++;
+    r.h.tot++;if(ok)r.h.ok++;
+    var el=document.getElementById('rhl_res_'+ti);
+    if(el)el.innerHTML='<div style="margin-top:10px;padding:10px 12px;border-radius:12px;background:'+(ok?'#EAF7F0':'#FDEDEA')+';">'
+      +'<div style="font-weight:800;font-size:12.5px;color:'+(ok?'#1F8A50':'#C0392B')+';">'+(ok?'Верно · ':'Неверно · правильный ответ ')+L[tx.a]+'. '+set.hl[tx.a]+'</div>'
+      +'<div style="font-weight:600;font-size:12px;color:#4A453E;margin-top:4px;line-height:1.5;"><b>Ключ:</b> '+tx.k+'</div></div>';
+    var row=document.getElementById('rhl_row_'+ti);if(row)row.style.pointerEvents='none'});
+  var used={};set.txts.forEach(function(t){used[t.a]=1});
+  var extra=[0,1,2,3,4].find(function(i){return !used[i]});
+  r.texts++;rSync();save();
+  var area=document.getElementById('r_area');
+  var d=document.createElement('div');
+  d.innerHTML='<div class="clayCard" style="padding:16px 18px;margin-bottom:12px;text-align:center;animation:win .35s both;">'
+    +'<div style="font-size:36px;">'+(okn===4?'🏆':(okn>=2?'💪':'📚'))+'</div>'
+    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:19px;color:#2B2B2B;margin-top:6px;">'+okn+' из 4</div>'
+    +'<div style="font-weight:600;font-size:12.5px;color:#98917F;margin-top:4px;">Лишний заголовок: '+'ABCDE'[extra]+'. '+RH.set.hl[extra]+'</div>'
+    +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);margin-top:12px;" onclick="rHl()">Ещё подход</button></div>';
+  area.insertBefore(d,area.firstChild);
+  try{d.scrollIntoView({behavior:'smooth',block:'start'})}catch(e){}}
+/* ---- Задания 12-18: полное понимание ---- */
+function rQs(){S.readIdxQ=(S.readIdxQ||0);var set=R_QS[S.readIdxQ%R_QS.length];S.readIdxQ++;
+  RQ={set:set,i:-1,ok:0,showTx:false};rQsRender()}
+function rQsRender(){var area=document.getElementById('r_area');var set=RQ.set;
+  if(RQ.i<0){
+    area.innerHTML='<div id="r_card" class="clayCard" style="position:relative;overflow:hidden;padding:18px;margin-bottom:12px;">'+wDeco()
+      +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#1F8A50;background:#EAF7F0;padding:5px 10px;border-radius:20px;">ЗАДАНИЯ 12–18 · ТЕКСТ</span>'
+      +'<div style="font-weight:500;font-size:14px;line-height:1.7;color:#2B2B2B;margin-top:12px;">'+rWordsHtml(set.tx)+'</div></div>'
+      +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="RQ.i=0;rQsRender()">К вопросам</button>'
+      +'<button class="sq" style="'+WBTN+'color:#F2683F;margin-top:10px;" onclick="rHub()">← К чтению</button>';
+    rAnim('win','.32s');setTxt('r_today','читаем текст');return}
+  var q=set.qs[RQ.i];
+  if(!q){var r=rSt();r.texts++;rSync();save();
+    area.innerHTML='<div id="r_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;text-align:center;">'+wDeco()
+      +'<div style="font-size:42px;">'+(RQ.ok===set.qs.length?'🏆':(RQ.ok>=2?'💪':'📚'))+'</div>'
+      +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:21px;color:#2B2B2B;margin-top:8px;">'+RQ.ok+' из '+set.qs.length+'</div>'
+      +'<div style="font-weight:600;font-size:13px;color:#98917F;margin-top:4px;">Точность в этом тренажёре: '+(rSt().q.tot?Math.round(rSt().q.ok/rSt().q.tot*100):0)+'%</div></div>'
+      +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
+      +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="rQs()">Ещё текст</button>'
+      +'<button class="sq" style="'+WBTN+'color:#F2683F;" onclick="rHub()">К чтению</button></div>';
+    rAnim('win','.32s');return}
+  area.innerHTML=(RQ.showTx?('<div class="clayCard" style="padding:15px 16px;margin-bottom:12px;"><div style="font-weight:500;font-size:13px;line-height:1.65;color:#2B2B2B;">'+rWordsHtml(set.tx)+'</div></div>'):'')
+    +'<div id="r_card" class="clayCard" style="position:relative;overflow:hidden;padding:18px;margin-bottom:12px;">'+wDeco()
+    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'
+    +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#F2683F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">ВОПРОС '+(RQ.i+1)+' ИЗ '+set.qs.length+'</span>'
+    +'<span class="clk" onclick="RQ.showTx=!RQ.showTx;rQsRender()" style="font-weight:800;font-size:10px;letter-spacing:.6px;color:#1F8A50;background:#EAF7F0;padding:5px 10px;border-radius:20px;cursor:pointer;">'+(RQ.showTx?'СКРЫТЬ ТЕКСТ':'ТЕКСТ')+'</span></div>'
+    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:16.5px;color:#2B2B2B;line-height:1.45;margin-top:12px;">'+q.q+'</div></div>'
+    +'<div style="display:flex;flex-direction:column;gap:10px;">'
+    +q.o.map(function(o,i){return '<button class="sq" style="'+WBTN+'text-align:left;" onclick="rQsPick(this,'+i+')">'+o+'</button>'}).join('')+'</div>';
+  rAnim('win','.32s');setTxt('r_today',(RQ.i+1)+' / '+set.qs.length)}
+function rQsPick(btn,i){var q=RQ.set.qs[RQ.i];if(!q||btn.dataset.done)return;
+  var all=btn.parentElement.querySelectorAll('button');all.forEach(function(b){b.dataset.done=1});
+  var ok=i===q.a,r=rSt();r.q.tot++;if(ok){r.q.ok++;RQ.ok++}
+  if(ok){btn.style.background='#EAF7F0';btn.style.borderColor='#1F9E5A';btn.style.color='#1F8A50';rAnim('wpop','.35s');
+    setTimeout(function(){RQ.i++;rSync();save();rQsRender()},650)}
+  else{btn.style.background='#FDEDEA';btn.style.borderColor='#E24B4A';btn.style.color='#C0392B';
+    all.forEach(function(b,bi){if(bi===q.a){b.style.background='#EAF7F0';b.style.borderColor='#1F9E5A';b.style.color='#1F8A50'}});
+    rAnim('wshake','.42s');
+    setTimeout(function(){rQsExplain(q)},900)}}
+function rQsExplain(q){var area=document.getElementById('r_area');
+  area.innerHTML='<div id="r_card" class="clayCard" style="position:relative;overflow:hidden;padding:20px;">'+wDeco()
+    +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#C0392B;background:#FDEDEA;padding:5px 10px;border-radius:20px;">РАЗБОР ОШИБКИ</span>'
+    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:17px;color:#1F8A50;margin-top:12px;">'+q.o[q.a]+'</div>'
+    +'<div style="font-weight:600;font-size:13px;color:#2B2B2B;line-height:1.6;margin-top:10px;background:#F2F8F4;border-left:3px solid #1F9E5A;border-radius:0 14px 14px 0;padding:11px 14px;"><b>В тексте:</b> «'+q.ev+'»</div>'
+    +'<div style="font-weight:600;font-size:13px;color:#4A453E;line-height:1.6;margin-top:10px;background:#FDF3EC;border-left:3px solid #F2683F;border-radius:0 14px 14px 0;padding:11px 14px;"><b>Почему:</b> '+q.e+'</div></div>'
+    +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="RQ.i++;rSync();save();rQsRender()">Понятно, дальше</button>';
+  rAnim('wflip','.5s')}
+/* ---- слово из текста → в модуль Слова ---- */
+r_add=function(st){if(!lastWord)return;
+  S.wstatus=S.wstatus||{};S.wstatus[lastWord]=st;
+  if(st==='learn'){
+    var tr=(document.getElementById('r_tr')||{}).textContent||'';
+    if(tr&&tr.indexOf('перевод')<0&&tr.indexOf('офлайн, слова нет')<0&&tr.length<60){
+      var have=EGE_WORDS.some(function(x){return wBase(x.w)===lastWord});
+      if(!have){var it={w:lastWord,p:'n',t:0,tr:tr.replace(' · офлайн-словарь','').trim(),ex:''};
+        EGE_WORDS.push(it);S.aiWords=(S.aiWords||[]).concat([it]);
+        try{toast('Добавлено в «Слова» ✓')}catch(e){}}
+      else{try{toast('Это слово уже в изучении')}catch(e){}}}}
+  save();var p=document.getElementById('r_pop');if(p)p.style.display='none';
+  try{wSync()}catch(e){}}
+/* FAB прячем и на чтении; синк при старте */
+var _t7=tab;tab=function(id){_t7(id);if(id==='scr7'){var f=document.getElementById('genfab');if(f)f.style.display='none'}};
+var _sa4=startApp;startApp=async function(){await _sa4.apply(this,arguments);try{rSync()}catch(e){}};
 
 </script>
 </body></html>
