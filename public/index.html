@@ -577,7 +577,24 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
 </div>
 <div class="screen" id="scr8" data-name="Письмо">
 
-    <div style="position:absolute;top:0;left:0;right:0;height:172px;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:0 0 30px 30px;z-index:1;"></div>
+    <!-- starry gradient header -->
+    <div style="position:absolute;top:0;left:0;right:0;height:206px;background:linear-gradient(150deg,#FFA570 0%,#F2683F 62%,#E44E20 100%);border-radius:0 0 32px 32px;z-index:1;overflow:hidden;box-shadow:0 14px 30px rgba(242,104,63,.25),inset 0 -8px 18px rgba(190,55,18,.22);">
+      <svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;" viewBox="0 0 390 206" preserveAspectRatio="xMidYMid slice" fill="rgba(255,255,255,.85)">
+        <path class="eb5sp" style="animation-delay:.2s" d="M30,60 Q30,64 34,64 Q30,64 30,68 Q30,64 26,64 Q30,64 30,60 Z"/>
+        <path class="eb5sp" style="animation-delay:1s" d="M355,48 Q355,52 359,52 Q355,52 355,56 Q355,52 351,52 Q355,52 355,48 Z"/>
+        <path class="eb5sp" style="animation-delay:1.6s" d="M330,160 Q330,164 334,164 Q330,164 330,168 Q330,164 326,164 Q330,164 330,160 Z"/>
+        <path class="eb5sp" style="animation-delay:.6s" d="M45,150 Q45,154 49,154 Q45,154 45,158 Q45,154 41,154 Q45,154 45,150 Z"/>
+        <path class="eb5sp" style="animation-delay:2s" d="M200,40 Q200,43.5 203.5,43.5 Q200,43.5 200,47 Q200,43.5 196.5,43.5 Q200,43.5 200,40 Z"/>
+        <path class="eb5sp" style="animation-delay:.9s" d="M120,30 Q120,34.5 124.5,34.5 Q120,34.5 120,39 Q120,34.5 115.5,34.5 Q120,34.5 120,30 Z"/>
+        <path class="eb5sp" style="animation-delay:1.3s" d="M280,80 Q280,84 284,84 Q280,84 280,88 Q280,84 276,84 Q280,84 280,80 Z"/>
+        <path class="eb5sp" style="animation-delay:.4s" d="M150,120 Q150,123.5 153.5,123.5 Q150,123.5 150,127 Q150,123.5 146.5,123.5 Q150,123.5 150,120 Z"/>
+        <path class="eb5sp" style="animation-delay:1.8s" d="M245,150 Q245,154.5 249.5,154.5 Q245,154.5 245,159 Q245,154.5 240.5,154.5 Q245,154.5 245,150 Z"/>
+        <path class="eb5sp" style="animation-delay:.1s" d="M310,115 Q310,118.5 313.5,118.5 Q310,118.5 310,122 Q310,118.5 306.5,118.5 Q310,118.5 310,115 Z"/>
+      </svg>
+      <div style="position:absolute;top:-40px;right:-30px;width:130px;height:130px;border-radius:50%;background:rgba(255,255,255,.12);"></div>
+      <div style="position:absolute;bottom:-55px;left:-35px;width:150px;height:150px;border-radius:50%;background:rgba(255,255,255,.09);"></div>
+    </div>
+    <!-- status bar white -->
     <div style="position:absolute;top:0;left:0;right:0;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 7px;z-index:6;">
       <span style="font-weight:700;font-size:15px;color:#fff;">9:41</span>
       <div style="display:flex;gap:7px;align-items:center;">
@@ -586,50 +603,41 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
         <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3" stroke="#fff" opacity=".5"/><rect x="2.4" y="2.4" width="15" height="7.2" rx="1.6" fill="#fff"/><rect x="23" y="4" width="2" height="4" rx="1" fill="#fff"/></svg>
       </div>
     </div>
+    <!-- header -->
     <div style="position:absolute;top:54px;left:0;right:0;padding:0 22px;z-index:6;">
       <div style="display:flex;align-items:center;justify-content:space-between;">
         <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><polyline points="14 6 8 12 14 18"/></svg>
         <div style="font-weight:800;font-size:18px;color:#fff;">Письмо</div>
-        <span style="width:26px;"></span>
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round"><line x1="5" y1="8" x2="19" y2="8"/><line x1="5" y1="12" x2="19" y2="12"/><line x1="5" y1="16" x2="19" y2="16"/></svg>
       </div>
-      <!-- task switcher -->
-      <div style="margin-top:16px;background:rgba(255,255,255,.22);border-radius:14px;padding:4px;display:flex;gap:4px;">
-        <div style="flex:1;text-align:center;padding:8px 0;font-weight:700;font-size:13px;color:rgba(255,255,255,.92);cursor:pointer;" id="w_seg37" onclick="setTask(37)">37 · Письмо другу</div>
-        <div style="flex:1;text-align:center;padding:8px 0;font-weight:700;font-size:13px;color:#F2683F;background:#fff;border-radius:11px;cursor:pointer;" id="w_seg38" onclick="setTask(38)">38 · Эссе</div>
+      <div style="margin-top:16px;background:rgba(255,255,255,.22);border-radius:16px;padding:4px;display:flex;gap:4px;">
+        <div id="w_seg37" onclick="setTask(37)" style="flex:1;text-align:center;padding:8px 0;font-weight:700;font-size:13px;color:rgba(255,255,255,.92);cursor:pointer;">37 · Письмо другу</div>
+        <div id="w_seg38" onclick="setTask(38)" style="flex:1;text-align:center;padding:8px 0;font-weight:700;font-size:13px;color:#F2683F;background:#fff;border-radius:11px;cursor:pointer;">38 · Проект</div>
+      </div>
+      <div style="margin-top:14px;display:flex;align-items:center;justify-content:space-between;font-weight:600;font-size:11.5px;color:rgba(255,255,255,.9);">
+        <span style="font-weight:700;letter-spacing:.5px;">ПИСЬМЕННАЯ ЧАСТЬ</span><span>письмо — 6 б. · проект — 14 б.</span>
       </div>
     </div>
-    <div style="position:absolute;top:188px;left:0;right:0;bottom:86px;padding:0 22px 16px;z-index:5;overflow:hidden;">
-      <!-- task -->
-      <div style="background:#fff;border-radius:18px;padding:15px 16px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
-        <div style="font-weight:700;font-size:10.5px;letter-spacing:1.4px;color:#F2683F;" id="w_tasklabel">ЗАДАНИЕ 38 · OPINION ESSAY</div>
-        <div style="margin-top:7px;font-weight:600;font-size:13.5px;color:#2B2B2B;line-height:1.45;" id="w_prompt">“Online learning is better than studying at school.” What is your opinion?</div>
-        <div style="margin-top:10px;display:inline-flex;align-items:center;gap:7px;background:#FFF4DE;border-radius:10px;padding:7px 11px;font-weight:700;font-size:11.5px;color:#C77400;" id="w_tablehint">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#C77400" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M7 9h4M7 13h7"/></svg>
-          К заданию есть таблица-опрос
+    <!-- work area (scrollable) -->
+    <div id="w8_area" style="position:absolute;top:224px;left:22px;right:22px;bottom:104px;z-index:5;display:block;overflow-y:auto;scrollbar-width:none;">
+      <div class="clayCard" style="position:relative;overflow:hidden;padding:16px 18px;margin-bottom:12px;">
+        <div id="w_tasklabel" style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:11px;letter-spacing:1.4px;color:#F2683F;">ЗАДАНИЕ 37 · ПИСЬМО ДРУГУ</div>
+        <div id="w_prompt" style="margin-top:9px;"></div>
+        <span id="w_tablehint" style="display:none;"></span>
+      </div>
+      <div class="clayCard" style="padding:16px 18px;margin-bottom:12px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <span style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:11px;letter-spacing:1.4px;color:#1F8A50;">ТВОЙ ОТВЕТ</span>
+          <span id="w_count" style="font-weight:700;font-size:12px;color:#8A8F98;">0 / 100–140 слов</span>
         </div>
+        <div id="w_editor" contenteditable="true" oninput="countWords()" data-ph="Пиши свой ответ здесь…" style="margin-top:10px;font-weight:500;font-size:14px;line-height:1.65;color:#2B2B2B;min-height:200px;outline:none;"></div>
       </div>
-      <!-- editor -->
-      <div style="margin-top:12px;background:#fff;border-radius:18px;padding:15px 16px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
-        <div id="w_editor" contenteditable="true" oninput="countWords()" data-ph="Пиши свой ответ здесь…" style="font-weight:500;font-size:13.5px;line-height:1.6;color:#2B2B2B;min-height:130px;outline:none;"></div>
-        <div style="margin-top:12px;display:flex;align-items:center;justify-content:space-between;border-top:1px solid #F1F1F3;padding-top:11px;">
-          <span style="font-weight:700;font-size:12px;color:#8A8F98;" id="w_count">0 / 200–250 слов</span>
-          <div style="display:flex;gap:14px;color:#B6BBC2;">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#B6BBC2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V5h16v2M9 19h6M12 5v14"/></svg>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#B6BBC2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h13M3 12h13M3 17h9M19 9l2 2-2 2"/></svg>
-          </div>
-        </div>
-      </div>
-      <!-- criteria checklist -->
-      <div style="margin-top:12px;background:#fff;border-radius:18px;padding:15px 16px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
-        <div style="font-weight:700;font-size:11px;letter-spacing:1.4px;color:#8A8F98;margin-bottom:11px;">КРИТЕРИИ</div>
-        <div style="display:flex;align-items:center;gap:10px;font-weight:600;font-size:13px;color:#1F8A50;margin-bottom:9px;"><span style="width:20px;height:20px;border-radius:7px;background:#1F9E5A;display:grid;place-items:center;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 12 10 18 20 6"/></svg></span>Вступление с мнением</div>
-        <div style="display:flex;align-items:center;gap:10px;font-weight:600;font-size:13px;color:#1F8A50;margin-bottom:9px;"><span style="width:20px;height:20px;border-radius:7px;background:#1F9E5A;display:grid;place-items:center;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 12 10 18 20 6"/></svg></span>Контраргумент</div>
-        <div style="display:flex;align-items:center;gap:10px;font-weight:600;font-size:13px;color:#B6BBC2;"><span style="width:20px;height:20px;border-radius:7px;border:2px solid #E1E3E6;"></span>Заключение</div>
-      </div>
-      <!-- AI check -->
-      <button onclick="checkWriting()" style="margin-top:14px;width:100%;height:52px;border:none;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:16px;font-family:Manrope;font-weight:700;font-size:15px;color:#fff;display:flex;align-items:center;justify-content:center;gap:9px;cursor:pointer;box-shadow:0 12px 24px rgba(242,104,63,.32);"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 1.9 4.6L19 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"/><path d="M19 16l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></svg>Проверить с ИИ</button>
+      <button class="sq" onclick="checkWriting()" style="width:100%;min-height:54px;border:none;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:18px;font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:16px;color:#fff;display:flex;align-items:center;justify-content:center;gap:9px;cursor:pointer;box-shadow:0 12px 26px rgba(242,104,63,.35),inset 0 2px 3px rgba(255,255,255,.4),inset 0 -4px 8px rgba(190,55,18,.28);margin-bottom:10px;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9Z"/></svg>
+        Проверить с ИИ</button>
     </div>
-    <div style="position:absolute;left:0;right:0;bottom:0;padding:10px 14px 14px;z-index:6;background:linear-gradient(to top,rgba(245,246,248,.95) 55%,rgba(245,246,248,0));">
+    
+<div style="position:absolute;left:0;right:0;bottom:0;padding:10px 14px 14px;z-index:6;background:linear-gradient(to top,rgba(245,246,248,.95) 55%,rgba(245,246,248,0));">
       <div class="navclay">
         <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#A59C8D;">Главная</span></div>
         <div class="navit on"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.3 8 5 5.5 5.4 4.6 5.5 4 6.3 4 7.2V18c0 .6.5 1 1.1.9 2.2-.3 4.5 0 6.4 1.4 1.9-1.4 4.2-1.7 6.4-1.4.6.1 1.1-.3 1.1-.9V7.2c0-.9-.6-1.7-1.5-1.8C15.5 5 13.7 5.3 12 6.5Z"/><path d="M12 6.5V20"/></svg><span style="font-weight:800;font-size:10.5px;color:#F2683F;">Учить</span></div>
@@ -3915,14 +3923,26 @@ function wrHistHtml(){var ws=(S.works||[]).slice(-3).reverse();
       return '<div style="display:flex;justify-content:space-between;margin-top:6px;font-weight:600;font-size:12px;color:#4A453E;">'
         +'<span>Задание '+w.t+' · '+('0'+d.getDate()).slice(-2)+'.'+('0'+(d.getMonth()+1)).slice(-2)+'</span>'
         +'<span style="font-weight:800;color:'+(w.g/w.m>=0.7?'#1F8A50':(w.g/w.m>=0.4?'#C77400':'#C0392B'))+';">'+w.g+' из '+w.m+'</span></div>'}).join('')+'</div>'}
-const W_SHEET37='<div style="font-weight:800;font-size:10px;letter-spacing:1.2px;color:#1F8A50;">ШПАРГАЛКА · ПИСЬМО (задание 37)</div>'
- +'<div style="font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.65;margin-top:6px;">'
- +'<b>Структура (100–140 слов):</b><br>1. Dear + имя, — с новой строки<br>2. Благодарность и ссылка: Thanks for your email! It was great to hear from you.<br>3. Ответы на все <b>3 вопроса</b> друга (по 1-2 предложения)<br>4. <b>Ровно 3 вопроса</b> о теме из задания (не забудь!)<br>5. Причина завершения: Anyway, I have to go now — my mum is calling me.<br>6. Hope to hear from you soon.<br>7. Best wishes, — с новой строки<br>8. Только имя (без фамилии и точки)'
- +'<br><b>Ловушки:</b> адрес и дата в email НЕ нужны; вопросы — о том, что просят, а не о чём угодно.</div>';
-const W_SHEET38='<div style="font-weight:800;font-size:10px;letter-spacing:1.2px;color:#1F8A50;">ШПАРГАЛКА · ПРОЕКТ (задание 38)</div>'
- +'<div style="font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.65;margin-top:6px;">'
- +'<b>План (200–250 слов, 5 абзацев):</b><br>1. Вступление: цель проекта. The table presents data on…<br>2. 2–3 факта из таблицы: According to the data, … / Almost half of…<br>3. 1–2 сравнения: … twice as many as… / while only 10%…<br>4. Проблема + решение: However, there is a problem of… A possible solution is…<br>5. Вывод с мнением: In conclusion, I strongly believe that…'
- +'<br><b>Клише:</b> it is worth noting, significantly more, the least popular, this proves that.<br><b>Ловушки:</b> не копируй строки таблицы дословно; мнение — только в выводе и вступлении.</div>';
+const W_SHEET37='<div style="font-weight:800;font-size:10px;letter-spacing:1.2px;color:#1F8A50;">КАК ПИСАТЬ ПИСЬМО · ПОШАГОВО</div>'
+ +'<div style="font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.7;margin-top:8px;">'
+ +'Письмо собирается как конструктор из 7 частей — иди по шагам:<br><br>'
+ +'<b>1. Поздоровайся.</b> На отдельной строке: <i>Dear Emily,</i><br><br>'
+ +'<b>2. Поблагодари за письмо</b> (1-2 предложения): <i>Thanks a lot for your email! It was great to hear from you again.</i><br><br>'
+ +'<b>3. Ответь на все 3 вопроса друга.</b> Перечитай письмо сверху — в нём три вопроса со знаком «?». На каждый ответь 1-2 предложениями. Пропустишь вопрос — потеряешь баллы.<br><br>'
+ +'<b>4. Задай свои 3 вопроса</b> о том, что выделено в задании жирным. Например, о новой квартире: <i>By the way, what is your new flat like? How many rooms are there? Is it far from your school?</i><br><br>'
+ +'<b>5. Объясни, почему заканчиваешь:</b> <i>Anyway, I have to go now — it is time for my English lesson.</i><br><br>'
+ +'<b>6. Пожелай на прощание:</b> <i>Hope to hear from you soon!</i><br><br>'
+ +'<b>7. Подпишись.</b> На отдельной строке <i>Best wishes,</i> и ниже только имя без точки: <i>Anya</i><br><br>'
+ +'<b>Перед отправкой проверь:</b> 100–140 слов · ровно три «?» в твоих вопросах · без адреса и даты — в электронном письме они не нужны.</div>';
+const W_SHEET38='<div style="font-weight:800;font-size:10px;letter-spacing:1.2px;color:#1F8A50;">КАК ПИСАТЬ ПРОЕКТ · ПОШАГОВО</div>'
+ +'<div style="font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.7;margin-top:8px;">'
+ +'Это сочинение по данным опроса из таблицы. Ровно <b>5 абзацев</b>, у каждого своя задача:<br><br>'
+ +'<b>1. Вступление — зачем этот проект:</b> <i>I am currently working on a project on why teenagers do sport. I have found a table with the results of a survey, and I would like to comment on the data.</i><br><br>'
+ +'<b>2. Назови 2-3 цифры из таблицы своими словами:</b> <i>According to the data, almost half of the teenagers (45%) do sport to keep fit.</i> Дословно переписывать строки таблицы нельзя!<br><br>'
+ +'<b>3. Сравни 1-2 показателя:</b> <i>Keeping fit is almost twice as popular as meeting friends — 45% against 25%.</i><br><br>'
+ +'<b>4. Назови проблему по теме и предложи решение:</b> <i>However, many teenagers give up sport because of school workload. A possible solution is short workouts at home.</i><br><br>'
+ +'<b>5. Вывод + твоё мнение:</b> <i>In conclusion, I strongly believe that sport plays an important role in teenagers\u0027 lives.</i><br><br>'
+ +'<b>Перед отправкой проверь:</b> 200–250 слов · мнение только во вступлении и выводе · пять абзацев на месте.</div>';
 /* — перерисовка карточки задания — */
 setTask=function(n){curTask=n;var d=WRITE[n],tp=wrCur();
   var s37=document.getElementById('w_seg37'),s38=document.getElementById('w_seg38');
