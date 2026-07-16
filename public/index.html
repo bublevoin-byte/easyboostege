@@ -289,7 +289,7 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
             <svg width="46" height="46" viewBox="0 0 44 44"><defs><linearGradient id="r2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6FC2B0"/><stop offset="1" stop-color="#1F9E5A"/></linearGradient></defs><circle cx="22" cy="22" r="18" fill="none" stroke="#F1EDE7" stroke-width="5.5"/><circle cx="22" cy="22" r="18" fill="none" stroke="url(#r2)" stroke-width="5.5" stroke-linecap="round" stroke-dasharray="113.1" stroke-dashoffset="65.6" id="ring_gram" transform="rotate(-90 22 22)"/><text x="22" y="26" text-anchor="middle" font-family="Nunito,Manrope" font-weight="800" font-size="11" fill="#2B2B2B" id="m_gram">42</text></svg>
           </div>
           <span style="display:block;margin-top:12px;font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:16.5px;color:#2B2B2B;">Грамматика</span>
-          <div style="font-weight:600;font-size:12px;color:#98917F;margin-top:2px;">12 тем пройдено</div>
+          <div id="sub_gram" style="font-weight:600;font-size:12px;color:#98917F;margin-top:2px;">закреплено 0 из 12 тем</div>
         </div>
         <!-- Чтение -->
         <div class="clayCard sq" style="padding:16px;">
@@ -395,7 +395,22 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
 </div>
 <div class="screen" id="scr3" data-name="Грамматика">
 
-    <div style="position:absolute;top:0;left:0;right:0;height:182px;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:0 0 30px 30px;z-index:1;"></div>
+    <div style="position:absolute;top:0;left:0;right:0;height:206px;background:linear-gradient(150deg,#FFA570 0%,#F2683F 62%,#E44E20 100%);border-radius:0 0 32px 32px;z-index:1;overflow:hidden;box-shadow:0 14px 30px rgba(242,104,63,.25),inset 0 -8px 18px rgba(190,55,18,.22);">
+      <svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;" viewBox="0 0 390 206" preserveAspectRatio="xMidYMid slice" fill="rgba(255,255,255,.85)">
+        <path class="eb5sp" style="animation-delay:.2s" d="M30,60 Q30,64 34,64 Q30,64 30,68 Q30,64 26,64 Q30,64 30,60 Z"/>
+        <path class="eb5sp" style="animation-delay:1s" d="M355,48 Q355,52 359,52 Q355,52 355,56 Q355,52 351,52 Q355,52 355,48 Z"/>
+        <path class="eb5sp" style="animation-delay:1.6s" d="M330,160 Q330,164 334,164 Q330,164 330,168 Q330,164 326,164 Q330,164 330,160 Z"/>
+        <path class="eb5sp" style="animation-delay:.6s" d="M45,150 Q45,154 49,154 Q45,154 45,158 Q45,154 41,154 Q45,154 45,150 Z"/>
+        <path class="eb5sp" style="animation-delay:2s" d="M200,40 Q200,43.5 203.5,43.5 Q200,43.5 200,47 Q200,43.5 196.5,43.5 Q200,43.5 200,40 Z"/>
+        <path class="eb5sp" style="animation-delay:.9s" d="M120,30 Q120,34.5 124.5,34.5 Q120,34.5 120,39 Q120,34.5 115.5,34.5 Q120,34.5 120,30 Z"/>
+        <path class="eb5sp" style="animation-delay:1.3s" d="M280,80 Q280,84 284,84 Q280,84 280,88 Q280,84 276,84 Q280,84 280,80 Z"/>
+        <path class="eb5sp" style="animation-delay:.4s" d="M150,120 Q150,123.5 153.5,123.5 Q150,123.5 150,127 Q150,123.5 146.5,123.5 Q150,123.5 150,120 Z"/>
+        <path class="eb5sp" style="animation-delay:1.8s" d="M245,150 Q245,154.5 249.5,154.5 Q245,154.5 245,159 Q245,154.5 240.5,154.5 Q245,154.5 245,150 Z"/>
+        <path class="eb5sp" style="animation-delay:.1s" d="M310,115 Q310,118.5 313.5,118.5 Q310,118.5 310,122 Q310,118.5 306.5,118.5 Q310,118.5 310,115 Z"/>
+      </svg>
+      <div style="position:absolute;top:-40px;right:-30px;width:130px;height:130px;border-radius:50%;background:rgba(255,255,255,.12);"></div>
+      <div style="position:absolute;bottom:-55px;left:-35px;width:150px;height:150px;border-radius:50%;background:rgba(255,255,255,.09);"></div>
+    </div>
     <!-- status bar white -->
     <div style="position:absolute;top:0;left:0;right:0;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 7px;z-index:6;">
       <span style="font-weight:700;font-size:15px;color:#fff;">9:41</span>
@@ -412,27 +427,14 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
         <div style="font-weight:800;font-size:18px;color:#fff;">Грамматика</div>
         <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round"><line x1="5" y1="8" x2="19" y2="8"/><line x1="5" y1="12" x2="19" y2="12"/><line x1="5" y1="16" x2="19" y2="16"/></svg>
       </div>
-      <div id="g_head" style="margin-top:16px;font-weight:600;font-size:13px;color:rgba(255,255,255,.92);">Present Perfect</div>
-      <!-- stepper dots -->
-      <div id="g_steps" style="margin-top:10px;display:flex;gap:5px;"></div>
-    </div>
-    <!-- body -->
-    <div style="position:absolute;top:200px;left:0;right:0;bottom:0;padding:0 22px 100px;z-index:5;overflow:hidden;">
-      <!-- rule card -->
-      <div style="background:#fff;border-radius:20px;padding:15px 17px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
-        <div style="font-weight:700;font-size:10.5px;letter-spacing:1.4px;color:#1F9E5A;">ПРАВИЛО</div>
-        <div style="margin-top:7px;font-weight:600;font-size:13.5px;color:#2B2B2B;line-height:1.45;">Present Perfect = <b>have / has</b> + 3-я форма глагола. Используем для результата к настоящему моменту.</div>
+      <div id="g_sumline" style="margin-top:16px;font-weight:700;font-size:13px;color:rgba(255,255,255,.95);">Закреплено 0 из 12 тем</div>
+      <div style="margin-top:12px;display:flex;align-items:center;justify-content:space-between;font-weight:600;font-size:11.5px;color:rgba(255,255,255,.9);">
+        <span style="font-weight:700;letter-spacing:.5px;">ТЕМЫ ЕГЭ</span><span id="g_today">12 тем</span>
       </div>
-      <!-- question -->
-      <div id="g_q" style="margin-top:16px;font-weight:800;font-size:17px;color:#2B2B2B;line-height:1.4;"></div>
-      <div id="g_opts" style="margin-top:16px;display:flex;flex-direction:column;gap:10px;"></div>
-      <!-- explanation -->
-      <div id="g_exp" style="display:none;margin-top:14px;gap:10px;background:#EAF7F0;border-radius:15px;padding:13px 15px;"></div>
+      <div style="margin-top:7px;height:7px;border-radius:5px;background:rgba(255,255,255,.28);"><div id="g_bar" style="width:2%;height:100%;border-radius:5px;background:#fff;"></div></div>
     </div>
-    <!-- next button -->
-    <div style="position:absolute;bottom:100px;left:22px;right:22px;z-index:6;">
-      <button id="g_next" onclick="nextG()" style="width:100%;height:54px;border:none;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:16px;font-family:Manrope;font-weight:700;font-size:15px;color:#fff;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;box-shadow:0 12px 24px rgba(242,104,63,.32);opacity:.45;">Дальше<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></button>
-    </div>
+    <!-- exercise area -->
+    <div id="g_area" style="position:absolute;top:236px;left:22px;right:22px;bottom:104px;z-index:5;display:flex;flex-direction:column;overflow-y:auto;scrollbar-width:none;"></div>
     <!-- bottom nav (Учить active) -->
     <div style="position:absolute;left:0;right:0;bottom:0;padding:10px 14px 14px;z-index:6;background:linear-gradient(to top,rgba(245,246,248,.95) 55%,rgba(245,246,248,0));">
       <div class="navclay">
@@ -2383,6 +2385,297 @@ try{if(S)wSync()}catch(e){}
 var _fd2=fillDefaults;fillDefaults=function(d){d=_fd2(d);d.srs=d.srs||{};return d};
 var _sa2=startApp;startApp=async function(){await _sa2.apply(this,arguments);try{wMigrate();wMergeAi();wSync()}catch(e){}};
 var _t3=tab;tab=function(id){_t3(id);if(id==='scr2'){var f=document.getElementById('genfab');if(f)f.style.display='none'}};
+
+</script>
+<script>
+/* ===== GRAMMAR v2: карта тем ЕГЭ + теория + 2 уровня практики ===== */
+const G_GROUPS=[{n:'Времена',ids:[1,2,3,4]},{n:'Глагол',ids:[5,6,7,8,9]},{n:'Части речи',ids:[10,11,12]}];
+const G_TOPICS={
+1:{n:'Present Simple и Continuous',th:'<b>Present Simple</b> — регулярные действия, факты: V / V+s (he, she, it).<br>Маркеры: every day, usually, often, never.<br><b>Present Continuous</b> — действие прямо сейчас: am/is/are + V-ing.<br>Маркеры: now, at the moment, Look!, Listen!<br><b>Ловушка ЕГЭ:</b> глаголы состояния (know, like, want, hear, believe) не используются в Continuous.'},
+2:{n:'Past Simple и Continuous',th:'<b>Past Simple</b> — завершённое действие в прошлом: V2 / did + V.<br>Маркеры: yesterday, last week, in 2020, ago.<br><b>Past Continuous</b> — процесс в момент прошлого: was/were + V-ing.<br>Маркеры: while, at 5 pm yesterday, when (фон действия).<br><b>Ловушка:</b> длинное действие — Continuous, короткое ворвавшееся — Simple: I <b>was cooking</b> when he <b>came</b>.'},
+3:{n:'Present Perfect и Past Simple',th:'<b>Present Perfect</b> — результат к настоящему: have/has + V3.<br>Маркеры: already, just, yet, ever, never, since, for.<br><b>Past Simple</b> — факт в конкретном прошлом: yesterday, last year, in 2019.<br><b>Правило выбора:</b> есть точное время в прошлом → Past Simple. Важен результат сейчас → Present Perfect.'},
+4:{n:'Будущее время',th:'<b>will + V</b> — предсказание, спонтанное решение, обещание.<br><b>be going to</b> — намерение или очевидное будущее (Look at the clouds!).<br><b>Present Continuous</b> — личная договорённость (We are flying on Friday).<br><b>Present Simple</b> — расписания: The train <b>leaves</b> at 6.<br><b>Ловушка:</b> после if/when о будущем — настоящее время!'},
+5:{n:'Пассивный залог',th:'<b>Passive</b> = be (в нужном времени) + V3.<br>is/are + V3 — регулярно; was/were + V3 — прошлое;<br>will be + V3 — будущее; is being + V3 — прямо сейчас;<br>has been + V3 — результат.<br><b>Ловушка ЕГЭ:</b> в заданиях 19–24 если подлежащее само не делает действие — это пассив: The bridge <b>was built</b>.'},
+6:{n:'Условные предложения',th:'<b>0 тип</b> (факты): If + Present, Present. If you heat ice, it melts.<br><b>1 тип</b> (реально): If + Present, will + V. If it rains, we will stay.<br><b>2 тип</b> (нереально сейчас): If + Past, would + V. If I were you…<br><b>3 тип</b> (нереально в прошлом): If + had V3, would have V3.<br><b>Ловушка:</b> после if НЕ ставим will.'},
+7:{n:'Косвенная речь',th:'Сдвиг времён после said/told/asked:<br>Present Simple → Past Simple; Present Perfect / Past Simple → Past Perfect;<br>will → would, can → could, may → might.<br>Вопросы: he asked <b>if</b>… / he asked <b>where I lived</b> (прямой порядок слов!).<br><b>Ловушка:</b> в косвенном вопросе нет do/does/did.'},
+8:{n:'Модальные глаголы',th:'<b>must</b> — обязан (сам считаю); <b>have to</b> — вынужден (обстоятельства);<br><b>mustn\'t</b> — запрещено; <b>don\'t have to</b> — не обязательно;<br><b>should</b> — совет; <b>can/could</b> — умение, возможность;<br><b>may/might</b> — разрешение, вероятность.<br><b>Ловушка:</b> после модальных — инфинитив без to (кроме have to, ought to).'},
+9:{n:'Инфинитив и герундий',th:'<b>Герундий (V-ing)</b> после: enjoy, avoid, mind, suggest, finish, stop, look forward to, предлогов.<br><b>Инфинитив с to</b> после: want, decide, hope, plan, promise, it is easy…<br><b>Без to</b> после: let, make, модальных.<br><b>Ловушка:</b> stop doing — перестать делать; stop to do — остановиться, чтобы сделать.'},
+10:{n:'Степени сравнения',th:'Короткие прилагательные: -er / the -est (big → bigger → the biggest).<br>Длинные: more / the most interesting.<br><b>Исключения:</b> good → better → best; bad → worse → worst; far → further; little → less; many/much → more → most.<br><b>Конструкции:</b> as … as, than.<br><b>Ловушка ЕГЭ:</b> в 19–24 слово GOOD в сравнении — это better/best.'},
+11:{n:'Местоимения',th:'<b>Притяжательные:</b> my/your/his/her/its/our/their + сущ.; без сущ. — mine, yours, hers, theirs.<br><b>Возвратные:</b> myself, himself, herself, itself, ourselves, themselves.<br><b>some/any:</b> some — утверждение, any — вопрос и отрицание.<br><b>Ловушка:</b> its (его) без апострофа; it\'s = it is.'},
+12:{n:'Числительные',th:'<b>Порядковые:</b> the first, second, third, дальше -th: fifth (!), ninth (!), twelfth (!), twentieth.<br>Даты: on the fifth of May.<br><b>Ловушка ЕГЭ:</b> в 19–24 слово TWO/FIVE часто нужно превратить в second/fifth (этаж, место, день рождения).<br>hundreds/thousands <b>of</b> people, но two hundred people.'}
+};
+const G_BANK={
+1:{c:[
+ {t:['She ',' to school every day.'],o:['go','goes','is going','went'],a:1,e:'every day → Present Simple, she → V+s.'},
+ {t:['Look! It ',' .'],o:['rains','is raining','rain','rained'],a:1,e:'Look! → действие сейчас → Continuous.'},
+ {t:['Water ',' at 100 degrees.'],o:['boils','is boiling','boil','boiled'],a:0,e:'Факт природы → Present Simple.'},
+ {t:['I ',' you well now.'],o:['hear','am hearing','hears','heard'],a:0,e:'hear — глагол состояния, без Continuous.'},
+ {t:['He usually ',' up at seven.'],o:['get','gets','is getting','got'],a:1,e:'usually → Simple, he → gets.'}],
+f:[
+ {s:'My brother _____ (WATCH) TV every evening.',b:'WATCH',ans:['watches'],e:'every evening → Present Simple, 3-е лицо → watches.'},
+ {s:'Listen! Somebody _____ (SING).',b:'SING',ans:['is singing'],e:'Listen! → прямо сейчас → is singing.'},
+ {s:'She _____ (NOT LIKE) loud music.',b:'NOT LIKE',ans:['does not like','doesnt like'],e:'Отрицание в Present Simple → does not like.'},
+ {s:'We _____ (STUDY) English twice a week.',b:'STUDY',ans:['study'],e:'Регулярность → Present Simple, we → study.'},
+ {s:'Right now they _____ (PLAY) chess.',b:'PLAY',ans:['are playing'],e:'right now → are playing.'}]},
+2:{c:[
+ {t:['I ',' him yesterday.'],o:['see','saw','have seen','was seeing'],a:1,e:'yesterday → Past Simple.'},
+ {t:['While I ',' dinner, the phone rang.'],o:['cooked','was cooking','cook','am cooking'],a:1,e:'while → процесс → Past Continuous.'},
+ {t:['They ',' to Moscow in 2020.'],o:['move','moved','have moved','were moving'],a:1,e:'in 2020 → Past Simple.'},
+ {t:['When she came in, he ',' TV.'],o:['watched','was watching','watches','has watched'],a:1,e:'Фоновый процесс → was watching.'},
+ {t:['Columbus ',' America in 1492.'],o:['discovers','discovered','has discovered','was discovering'],a:1,e:'Дата в прошлом → Past Simple.'}],
+f:[
+ {s:'She _____ (BUY) a new dress last week.',b:'BUY',ans:['bought'],e:'last week → Past Simple: buy → bought.'},
+ {s:'At 5 pm yesterday we _____ (PLAY) football.',b:'PLAY',ans:['were playing'],e:'Момент-процесс → were playing.'},
+ {s:'He _____ (COME) home late last night.',b:'COME',ans:['came'],e:'last night → came.'},
+ {s:'While mum _____ (COOK), dad set the table.',b:'COOK',ans:['was cooking'],e:'while → was cooking.'},
+ {s:'I _____ (NOT SEE) him at school yesterday.',b:'NOT SEE',ans:['did not see','didnt see'],e:'Отрицание в Past Simple → did not see.'}]},
+3:{c:[
+ {t:['She ',' already finished her homework.'],o:['have','has','had','is'],a:1,e:'she → has; already → Present Perfect.'},
+ {t:['I ',' this film before.'],o:['see','saw','have seen','seeing'],a:2,e:'Опыт без даты → have seen.'},
+ {t:['He ',' to London last year.'],o:['has gone','went','goes','has been'],a:1,e:'last year → Past Simple.'},
+ {t:['',' you ever been to Paris?'],o:['Did','Have','Was','Are'],a:1,e:'ever → Have you ever been.'},
+ {t:['We ',' friends since 2015.'],o:['are','were','have been','had been'],a:2,e:'since → Present Perfect.'}],
+f:[
+ {s:'I _____ (KNOW) her for ten years.',b:'KNOW',ans:['have known'],e:'for + период до сейчас → have known.'},
+ {s:'They _____ (JUST ARRIVE) — meet them!',b:'JUST ARRIVE',ans:['have just arrived'],e:'just → have just arrived.'},
+ {s:'She _____ (VISIT) Rome in 2019.',b:'VISIT',ans:['visited'],e:'in 2019 → visited.'},
+ {s:'He _____ (NOT FINISH) the report yet.',b:'NOT FINISH',ans:['has not finished','hasnt finished'],e:'yet → Present Perfect: has not finished.'},
+ {s:'We _____ (BE) here since morning.',b:'BE',ans:['have been'],e:'since → have been.'}]},
+4:{c:[
+ {t:['I think it ',' tomorrow.'],o:['rains','will rain','is raining','rained'],a:1,e:'Предсказание с I think → will.'},
+ {t:['Look at the clouds! It ',' .'],o:['will rain','is going to rain','rains','rained'],a:1,e:'Очевидно по признакам → be going to.'},
+ {t:['The train ',' at 6:30.'],o:['leaves','will leave','is leaving','left'],a:0,e:'Расписание → Present Simple.'},
+ {t:['We ',' to the cinema tonight — I have the tickets.'],o:['go','are going','will go','went'],a:1,e:'Договорённость → Present Continuous.'},
+ {t:['I promise I ',' you.'],o:['help','am helping','will help','helped'],a:2,e:'Обещание → will.'}],
+f:[
+ {s:'I am sure she _____ (COME) tomorrow.',b:'COME',ans:['will come'],e:'Уверенность о будущем → will come.'},
+ {s:'I hope he _____ (WIN) the match.',b:'WIN',ans:['will win'],e:'hope → will win.'},
+ {s:'The lesson _____ (START) at nine on Mondays.',b:'START',ans:['starts'],e:'Расписание → starts.'},
+ {s:'Wait, I _____ (HELP) you with the bags.',b:'HELP',ans:['will help'],e:'Спонтанное решение → will help.'},
+ {s:'We will go out when the rain _____ (STOP).',b:'STOP',ans:['stops'],e:'После when о будущем — Present Simple.'}]},
+5:{c:[
+ {t:['This book ',' in 1997.'],o:['wrote','was written','is written','has written'],a:1,e:'Книга не сама пишет → пассив прошлого.'},
+ {t:['Letters ',' every day.'],o:['deliver','are delivered','delivered','are delivering'],a:1,e:'Регулярный пассив → are delivered.'},
+ {t:['The new school ',' next year.'],o:['will build','will be built','is built','builds'],a:1,e:'Будущий пассив → will be built.'},
+ {t:['English ',' all over the world.'],o:['speaks','is spoken','spoke','is speaking'],a:1,e:'Пассив: is spoken.'},
+ {t:['The room ',' right now.'],o:['is cleaned','is being cleaned','cleans','was cleaned'],a:1,e:'Процесс сейчас в пассиве → is being cleaned.'}],
+f:[
+ {s:'The bridge _____ (BUILD) in 1932.',b:'BUILD',ans:['was built'],e:'Пассив прошлого → was built.'},
+ {s:'Rice _____ (GROW) in China.',b:'GROW',ans:['is grown'],e:'Факт-пассив → is grown.'},
+ {s:'The letter _____ (SEND) tomorrow.',b:'SEND',ans:['will be sent'],e:'Будущее в пассиве → will be sent.'},
+ {s:'This song _____ (WRITE) by The Beatles.',b:'WRITE',ans:['was written'],e:'by → пассив: was written.'},
+ {s:'Dinner _____ (COOK) at the moment.',b:'COOK',ans:['is being cooked'],e:'at the moment + пассив → is being cooked.'}]},
+6:{c:[
+ {t:['If it rains, we ',' at home.'],o:['stay','will stay','would stay','stayed'],a:1,e:'1 тип: If + Present, will.'},
+ {t:['If I ',' you, I would apologise.'],o:['am','was','were','be'],a:2,e:'2 тип: If I were you.'},
+ {t:['She would come if you ',' her.'],o:['invite','invited','will invite','had invited'],a:1,e:'2 тип: If + Past Simple.'},
+ {t:['If you heat ice, it ',' .'],o:['melts','will melt','would melt','melted'],a:0,e:'0 тип — факт: Present + Present.'},
+ {t:['If I had known, I ',' you.'],o:['would tell','told','would have told','will tell'],a:2,e:'3 тип: would have + V3.'}],
+f:[
+ {s:'If he _____ (HAVE) time, he will call you.',b:'HAVE',ans:['has'],e:'1 тип: после if — Present Simple.'},
+ {s:'If I _____ (BE) you, I would wait.',b:'BE',ans:['were'],e:'2 тип: were для всех лиц.'},
+ {s:'We will go out if the rain _____ (STOP).',b:'STOP',ans:['stops'],e:'После if НЕ будет will → stops.'},
+ {s:'If she studied harder, she _____ (PASS) her exams.',b:'PASS',ans:['would pass'],e:'2 тип: would + V.'},
+ {s:'If they _____ (LEAVE) earlier, they would have caught the train.',b:'LEAVE',ans:['had left'],e:'3 тип: If + had V3.'}]},
+7:{c:[
+ {t:['He said he ',' busy.'],o:['is','was','were','be'],a:1,e:'Сдвиг: is → was.'},
+ {t:['She said she ',' come the next day.'],o:['will','would','can','shall'],a:1,e:'will → would.'},
+ {t:['Tom asked where I ',' .'],o:['live','lived','do live','living'],a:1,e:'Косвенный вопрос: прямой порядок, сдвиг → lived.'},
+ {t:['Mum said she ',' the film before.'],o:['saw','has seen','had seen','sees'],a:2,e:'Past/Perfect → Past Perfect.'},
+ {t:['He asked if I ',' help.'],o:['need','needed','will need','am needing'],a:1,e:'Сдвиг в косвенном вопросе → needed.'}],
+f:[
+ {s:'She said she _____ (LIVE) in Kazan.',b:'LIVE',ans:['lived'],e:'Сдвиг: lives → lived.'},
+ {s:'He told me he _____ (CALL) later.',b:'CALL',ans:['would call'],e:'will call → would call.'},
+ {s:'They said they _____ (FINISH) the project already.',b:'FINISH',ans:['had finished'],e:'Сдвиг → had finished.'},
+ {s:'He asked what time it _____ (BE).',b:'BE',ans:['was'],e:'Косвенный вопрос → was.'},
+ {s:'She said she _____ (CAN) not come.',b:'CAN',ans:['could'],e:'can → could.'}]},
+8:{c:[
+ {t:['You ',' wear a helmet — it is the law.'],o:['can','must','may','might'],a:1,e:'Обязанность → must.'},
+ {t:['You ',' smoke here — it is forbidden.'],o:['must not','do not have to','may','need'],a:0,e:'Запрет → must not.'},
+ {t:['',' I open the window, please?'],o:['Must','May','Should','Have'],a:1,e:'Просьба о разрешении → May I…'},
+ {t:['He ',' swim when he was five.'],o:['can','could','may','must'],a:1,e:'Умение в прошлом → could.'},
+ {t:['You look tired — you ',' rest.'],o:['must not','should','may not','could not'],a:1,e:'Совет → should.'}],
+c2:[
+ {t:['You ',' pay — the museum is free today.'],o:['must not','do not have to','can not','should'],a:1,e:'Нет необходимости → do not have to (must not = запрет!).'},
+ {t:['She ',' be at home — the lights are on.'],o:['must','has to','should','need'],a:0,e:'Логический вывод → must be.'},
+ {t:['I ',' get up early yesterday.'],o:['must','had to','should','may'],a:1,e:'Вынужденность в прошлом → had to.'},
+ {t:['',' you help me with this bag?'],o:['Must','Could','Should','May'],a:1,e:'Вежливая просьба → Could you…'},
+ {t:['It ',' rain later — take an umbrella.'],o:['must','might','has to','should'],a:1,e:'Вероятность → might.'}]},
+9:{c:[
+ {t:['I enjoy ',' detective stories.'],o:['read','to read','reading','reads'],a:2,e:'enjoy + V-ing.'},
+ {t:['She wants ',' a doctor.'],o:['become','becoming','to become','becomes'],a:2,e:'want + to V.'},
+ {t:['He stopped ',' last year — good for him!'],o:['smoke','smoking','to smoke','smoked'],a:1,e:'stop doing = бросить.'},
+ {t:['Let me ',' you.'],o:['help','to help','helping','helped'],a:0,e:'let + инфинитив без to.'},
+ {t:['It is easy ',' mistakes.'],o:['make','making','to make','made'],a:2,e:'It is easy + to V.'}],
+f:[
+ {s:'Avoid _____ (MAKE) noise after ten.',b:'MAKE',ans:['making'],e:'avoid + V-ing.'},
+ {s:'They decided _____ (STAY) at home.',b:'STAY',ans:['to stay'],e:'decide + to V.'},
+ {s:'I look forward to _____ (SEE) you.',b:'SEE',ans:['seeing'],e:'look forward to + V-ing.'},
+ {s:'He made me _____ (LAUGH).',b:'LAUGH',ans:['laugh'],e:'make + инфинитив без to.'},
+ {s:'She suggested _____ (GO) for a walk.',b:'GO',ans:['going'],e:'suggest + V-ing.'}]},
+10:{c:[
+ {t:['This task is ',' than that one.'],o:['easy','easier','the easiest','more easy'],a:1,e:'Сравнение коротких: -er + than.'},
+ {t:['It is the ',' film I have ever seen.'],o:['good','better','best','goodest'],a:2,e:'good → better → the best.'},
+ {t:['My car is ',' expensive than yours.'],o:['more','most','much','many'],a:0,e:'Длинное прилагательное → more + adj.'},
+ {t:['The weather is getting ',' .'],o:['bad','worse','the worst','badly'],a:1,e:'bad → worse.'},
+ {t:['He is as ',' as his brother.'],o:['tall','taller','the tallest','more tall'],a:0,e:'as + положительная степень + as.'}],
+f:[
+ {s:'February is the _____ (SHORT) month of the year.',b:'SHORT',ans:['shortest'],e:'Превосходная: the shortest.'},
+ {s:'This road is _____ (BAD) than ours.',b:'BAD',ans:['worse'],e:'bad → worse.'},
+ {s:'It was the _____ (INTERESTING) trip in my life.',b:'INTERESTING',ans:['most interesting'],e:'Длинное → the most interesting.'},
+ {s:'Winters here are _____ (COLD) than at home.',b:'COLD',ans:['colder'],e:'Короткое → colder.'},
+ {s:'She sings much _____ (GOOD) than me.',b:'GOOD',ans:['better'],e:'good → better.'}]},
+11:{c:[
+ {t:['This is ',' book, not yours.'],o:['my','mine','me','myself'],a:0,e:'Перед сущ. → my.'},
+ {t:['The red bag is ',' .'],o:['her','hers','she','herself'],a:1,e:'Без сущ. → hers.'},
+ {t:['I fixed the bike ',' .'],o:['me','my','myself','mine'],a:2,e:'Сам → myself.'},
+ {t:['There is ',' milk in the fridge.'],o:['some','any','no one','every'],a:0,e:'Утверждение → some.'},
+ {t:['Is there ',' juice left?'],o:['some','any','none','a'],a:1,e:'Вопрос → any.'}],
+f:[
+ {s:'Look at _____ (SHE) new dress!',b:'SHE',ans:['her'],e:'Перед сущ. → her.'},
+ {s:'These toys are _____ (THEY).',b:'THEY',ans:['theirs'],e:'Без сущ. → theirs.'},
+ {s:'We enjoyed _____ (WE) at the party.',b:'WE',ans:['ourselves'],e:'enjoy oneself → ourselves.'},
+ {s:'The cat licked _____ (IT) paw.',b:'IT',ans:['its'],e:'Притяжательное its — без апострофа.'},
+ {s:'He cut _____ (HE) while cooking.',b:'HE',ans:['himself'],e:'Возвратное → himself.'}]},
+12:{c:[
+ {t:['My birthday is on the ',' of May.'],o:['five','fifth','fifty','fiveth'],a:1,e:'Дата → порядковое: the fifth.'},
+ {t:['There are ',' months in a year.'],o:['twelve','twelfth','twelves','twelfths'],a:0,e:'Количество → twelve.'},
+ {t:['He came ',' in the race.'],o:['first','one','once','firstly'],a:0,e:'Место в гонке → first.'},
+ {t:['Open your books at page ',' .'],o:['three','third','thirds','thirdly'],a:0,e:'После сущ. (page 3) → количественное.'},
+ {t:['',' of people visited the fair.'],o:['Hundred','Hundreds','The hundred','Hundredth'],a:1,e:'Hundreds of people (неточное число).'}],
+f:[
+ {s:'Today is her _____ (TWELVE) birthday.',b:'TWELVE',ans:['twelfth'],e:'12th → twelfth (без e!).'},
+ {s:'He finished _____ (TWO) in the marathon.',b:'TWO',ans:['second'],e:'Место → second.'},
+ {s:'It is my _____ (ONE) visit to Moscow.',b:'ONE',ans:['first'],e:'one → first.'},
+ {s:'The _____ (FIVE) lesson starts at one o\'clock.',b:'FIVE',ans:['fifth'],e:'five → fifth (f!).'},
+ {s:'Our office is on the _____ (TWENTY) floor.',b:'TWENTY',ans:['twentieth'],e:'twenty → twentieth.'}]}
+};
+/* --- состояние: S.gram = {tid:{st,ok,err,sr}} --- */
+let GS=null;
+function gRec(t){S.gram=S.gram||{};return S.gram[t]||(S.gram[t]={st:0,ok:0,err:0,sr:0})}
+function gClosed(){var n=0;for(var t=1;t<=12;t++){if(S.gram&&S.gram[t]&&S.gram[t].st===2)n++}return n}
+function gSync(){if(!S)return;var c=gClosed();S.prog=S.prog||{};S.prog.gram=Math.round(c/12*100);
+  setTxt('sub_gram','закреплено '+c+' из 12 тем');setTxt('g_sumline','Закреплено '+c+' из 12 тем');
+  var bar=document.getElementById('g_bar');if(bar)bar.style.width=Math.max(2,Math.round(c/12*100))+'%'}
+function gAnim(name,dur){var c=document.getElementById('g_card');if(!c)return;c.style.animation='none';void c.offsetWidth;c.style.animation=name+' '+dur+' cubic-bezier(.25,.75,.35,1)'}
+function gStatusChip(st){
+  if(st===2)return '<span style="font-weight:800;font-size:10px;letter-spacing:.6px;color:#1F8A50;background:#EAF7F0;padding:5px 10px;border-radius:20px;">ЗАКРЕПЛЕНА</span>';
+  if(st===1)return '<span style="font-weight:800;font-size:10px;letter-spacing:.6px;color:#C77400;background:#FFF4DE;padding:5px 10px;border-radius:20px;">ИЗУЧАЕТСЯ</span>';
+  return '<span style="font-weight:800;font-size:10px;letter-spacing:.6px;color:#8A8F98;background:#F1F2F4;padding:5px 10px;border-radius:20px;">НЕ НАЧАТА</span>'}
+initGrammar=function(){if(!S)return;gSync();gMap()}
+function gMap(){var area=document.getElementById('g_area');if(!area)return;
+  var h='';
+  G_GROUPS.forEach(function(gr){
+    h+='<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:12px;letter-spacing:1.8px;color:#A59C8D;margin:6px 2px 10px;">'+gr.n.toUpperCase()+'</div>';
+    gr.ids.forEach(function(t){var r=gRec(t),tp=G_TOPICS[t];
+      var pct=r.st===2?100:Math.min(99,Math.round(r.sr/4*100));
+      h+='<div class="clayCard sq clk" onclick="gOpen('+t+')" style="padding:14px 16px;margin-bottom:11px;cursor:pointer;">'
+        +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'
+        +'<div style="font-weight:800;font-size:14.5px;color:#2B2B2B;">'+tp.n+'</div>'+gStatusChip(r.st)+'</div>'
+        +'<div style="margin-top:10px;height:6px;border-radius:4px;background:#F1EDE7;"><div style="width:'+pct+'%;height:100%;border-radius:4px;background:linear-gradient(90deg,#FFA570,#F2683F);"></div></div>'
+        +(r.ok+r.err>0?'<div style="margin-top:7px;font-weight:600;font-size:11px;color:#98917F;">верно '+r.ok+' · ошибок '+r.err+'</div>':'')
+        +'</div>'});
+  });
+  area.innerHTML=h;setTxt('g_today','12 тем')}
+function gOpen(t){gTheory(t,true)}
+function gTheory(t,fromMap){var area=document.getElementById('g_area');if(!area)return;var tp=G_TOPICS[t];
+  area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:20px;">'
+    +wDeco()
+    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'
+    +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#1F8A50;background:#EAF7F0;padding:5px 10px;border-radius:20px;">ПРАВИЛО</span>'
+    +gStatusChip(gRec(t).st)+'</div>'
+    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:19px;color:#2B2B2B;margin-top:12px;">'+tp.n+'</div>'
+    +'<div style="font-weight:600;font-size:13.5px;color:#4A453E;line-height:1.6;margin-top:10px;">'+tp.th+'</div></div>'
+    +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
+    +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="'+(fromMap?('gStart('+t+')'):'gResume()')+'">'+(fromMap?'Начать практику':'Продолжить практику')+'</button>'
+    +'<button class="sq" style="'+WBTN+'color:#F2683F;" onclick="gMap()">← К темам</button></div>';
+  gAnim('win','.32s')}
+function gShuffle(a){return a.slice().sort(function(){return Math.random()-.5})}
+function gStart(t){var b=G_BANK[t],r=gRec(t);
+  var lvl2=b.f&&b.f.length?b.f.map(function(q){return{k:'f',q:q}}):(b.c2||[]).map(function(q){return{k:'c2',q:q}});
+  var lvl1=b.c.map(function(q){return{k:'c',q:q}});
+  var queue=r.st>=1? gShuffle(lvl1).slice(0,2).concat(gShuffle(lvl2)) : gShuffle(lvl1).concat(gShuffle(lvl2).slice(0,3));
+  GS={t:t,queue:queue,i:0,ok:0,done:0};
+  gRenderQ()}
+function gResume(){if(GS)gRenderQ();else gMap()}
+function gProgressLine(){setTxt('g_today',(GS.done)+' / '+GS.queue.length+' в подходе')}
+function gRenderQ(){var area=document.getElementById('g_area');if(!area||!GS)return;gProgressLine();
+  var it=GS.queue[GS.i];
+  if(!it){gFinish();return}
+  var t=GS.t,tp=G_TOPICS[t];
+  var head='<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'
+    +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#F2683F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">'+(it.k==='c'?'УРОВЕНЬ 1 · ВЫБОР':'УРОВЕНЬ 2 · КАК НА ЕГЭ')+'</span>'
+    +'<span class="clk" onclick="gTheory('+t+')" style="font-weight:800;font-size:10px;letter-spacing:.6px;color:#1F8A50;background:#EAF7F0;padding:5px 10px;border-radius:20px;cursor:pointer;">ПРАВИЛО</span></div>';
+  if(it.k==='c'||it.k==='c2'){var q=it.q;
+    area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:20px;min-height:150px;">'+wDeco()+head
+      +'<div style="font-weight:600;font-size:11px;color:#98917F;margin-top:14px;">'+tp.n+'</div>'
+      +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:18px;color:#2B2B2B;line-height:1.5;margin-top:8px;">'
+      +q.t[0]+'<span style="display:inline-block;min-width:64px;border-bottom:2.5px dashed #F2683F;text-align:center;color:#F2683F;">&nbsp;?&nbsp;</span>'+q.t[1]+'</div></div>'
+      +'<div id="g_btns" style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
+      +q.o.map(function(o,i){return '<button class="sq" style="'+WBTN+'" onclick="gPick(this,'+i+')">'+o+'</button>'}).join('')+'</div>';
+  }else{var q=it.q;
+    area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:20px;min-height:150px;">'+wDeco()+head
+      +'<div style="font-weight:600;font-size:11px;color:#98917F;margin-top:14px;">'+tp.n+' · впиши форму слова</div>'
+      +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:17px;color:#2B2B2B;line-height:1.55;margin-top:8px;">'
+      +q.s.replace('_____','<span style="display:inline-block;min-width:70px;border-bottom:2.5px dashed #F2683F;text-align:center;color:#F2683F;">&nbsp;?&nbsp;</span>')+'</div></div>'
+      +'<div id="g_btns" style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
+      +'<input id="g_inp" autocapitalize="none" autocomplete="off" spellcheck="false" placeholder="Форма слова '+q.b+'" '
+      +'style="width:100%;box-sizing:border-box;height:52px;border:1px solid #F0EAE2;border-radius:18px;padding:0 16px;font-family:Manrope,sans-serif;font-weight:700;font-size:15px;color:#2B2B2B;outline:none;box-shadow:inset 0 2px 4px rgba(60,45,30,.05);" onkeydown="if(event.key===\'Enter\')gSubmit()">'
+      +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="gSubmit()">Проверить</button>'}
+  gAnim('win','.32s')}
+function gNorm(v){return (v||'').toLowerCase().replace(/[’’']/g,'').replace(/\s+/g,' ').replace(/\.$/,'').trim()}
+function gExplain(it,userWrong){var q=it.q,t=GS.t;
+  var right=it.k==='f'?q.ans[0]:q.o[q.a];
+  var area=document.getElementById('g_area');
+  area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:20px;">'+wDeco()
+    +'<div style="display:flex;align-items:center;gap:8px;"><span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#C0392B;background:#FDEDEA;padding:5px 10px;border-radius:20px;">РАЗБОР ОШИБКИ</span></div>'
+    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:20px;color:#1F8A50;margin-top:14px;text-align:center;">'+right+'</div>'
+    +'<div style="font-weight:600;font-size:13.5px;color:#4A453E;line-height:1.6;margin-top:10px;background:#FAF6F1;border-radius:14px;padding:12px 14px;">'+(q.e||'')+'</div>'
+    +'<div style="font-weight:600;font-size:11.5px;color:#C0B7AA;margin-top:10px;text-align:center;">Вопрос вернётся в конце подхода</div></div>'
+    +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
+    +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="gAfterExplain()">Понятно, дальше</button>'
+    +'<button class="sq" style="'+WBTN+'color:#1F8A50;" onclick="gTheory('+t+')">Открыть правило</button></div>';
+  gAnim('wflip','.5s')}
+function gAfterExplain(){GS.i++;gSync();save();gRenderQ()}
+function gAnswer(ok,it){var r=gRec(GS.t);if(r.st===0)r.st=1;
+  if(ok){r.ok++;GS.ok++;
+    if(it.k!=='c'){r.sr++;if(r.sr>=4)r.st=2}
+  }else{r.err++;
+    if(it.k!=='c'){r.sr=0;if(r.st===2)r.st=1}
+    GS.queue.push(it)}
+  GS.done++}
+function gPick(btn,i){var it=GS.queue[GS.i];if(!it||btn.dataset.done)return;var q=it.q;
+  var all=btn.parentElement.querySelectorAll('button');all.forEach(function(b){b.dataset.done=1});
+  var ok=i===q.a;
+  gAnswer(ok,it);
+  if(ok){btn.style.background='#EAF7F0';btn.style.borderColor='#1F9E5A';btn.style.color='#1F8A50';gAnim('wpop','.35s');
+    setTimeout(function(){GS.i++;gSync();save();gRenderQ()},600)}
+  else{btn.style.background='#FDEDEA';btn.style.borderColor='#E24B4A';btn.style.color='#C0392B';
+    all.forEach(function(b,bi){if(bi===q.a){b.style.background='#EAF7F0';b.style.borderColor='#1F9E5A';b.style.color='#1F8A50'}});
+    gAnim('wshake','.42s');
+    setTimeout(function(){gExplain(it)},900)}}
+function gSubmit(){var it=GS.queue[GS.i];if(!it)return;var inp=document.getElementById('g_inp');if(!inp||inp.dataset.done)return;
+  var q=it.q,val=gNorm(inp.value);
+  var ok=q.ans.some(function(a){return gNorm(a)===val});
+  inp.dataset.done=1;
+  inp.style.borderColor=ok?'#1F9E5A':'#E24B4A';inp.style.background=ok?'#EAF7F0':'#FDEDEA';
+  gAnswer(ok,it);
+  if(ok){gAnim('wpop','.35s');setTimeout(function(){GS.i++;gSync();save();gRenderQ()},600)}
+  else{inp.value=q.ans[0];gAnim('wshake','.42s');setTimeout(function(){gExplain(it)},900)}}
+function gFinish(){var area=document.getElementById('g_area');var r=gRec(GS.t),tp=G_TOPICS[GS.t];
+  var closed=r.st===2;
+  area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:24px;">'+wDeco()
+    +'<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:14px 0;">'
+    +'<div style="font-size:44px;">'+(closed?'🏆':'💪')+'</div>'
+    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:21px;color:#2B2B2B;margin-top:10px;">'+(closed?'Тема закреплена!':'Подход завершён')+'</div>'
+    +'<div style="font-weight:600;font-size:13.5px;color:#98917F;margin-top:8px;line-height:1.5;">'+tp.n+'<br>Верно: '+GS.ok+' из '+GS.done+(closed?'':'<br>Для закрепления — 4 верных ответа уровня 2 подряд')+'</div></div></div>'
+    +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
+    +(closed?'':'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="gStart('+GS.t+')">Ещё подход</button>')
+    +'<button class="sq" style="'+WBTN+'color:#F2683F;" onclick="GS=null;initGrammar()">К темам</button></div>';
+  gAnim('win','.32s');gSync();save()}
+/* прячем FAB на грамматике, синк при старте */
+var _t5=tab;tab=function(id){_t5(id);if(id==='scr3'){var f=document.getElementById('genfab');if(f)f.style.display='none';GS=null}};
+var _sa3=startApp;startApp=async function(){await _sa3.apply(this,arguments);try{gSync()}catch(e){}};
 
 </script>
 </body></html>
