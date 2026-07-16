@@ -4095,7 +4095,23 @@ function spStopAll(){clearInterval(SP_tm);SP_tm=null;
 initSpeaking=function(){if(!S)return;spStopAll();SP=null;spSync();spHub()}
 function spHub(){var area=document.getElementById('s9_area');if(!area)return;
   var r=spSt();var GA=0;function ga(){return 'animation:win .34s '+((GA++)*0.06)+'s cubic-bezier(.25,.75,.35,1) both;'}
-  area.innerHTML=[1,2,3,4].map(function(t){var c=SP_CONF[t];
+  var se=S.spkExam||{};
+  var exCard='<div class="sq clk" onclick="spExam()" style="'+ga()+'position:relative;overflow:hidden;border-radius:24px;padding:16px 18px;margin-bottom:12px;cursor:pointer;background:linear-gradient(150deg,#3A3532,#2B2B2B);box-shadow:0 14px 28px rgba(43,35,30,.32),inset 0 2px 3px rgba(255,255,255,.14),inset 0 -5px 10px rgba(0,0,0,.35);">'
+    +'<svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;" viewBox="0 0 346 80" preserveAspectRatio="xMidYMid slice">'
+    +'<g fill="rgba(255,255,255,.75)">'
+    +'<path class="eb5sp" style="animation-delay:.3s" d="M22,14 Q22,17.5 25.5,17.5 Q22,17.5 22,21 Q22,17.5 18.5,17.5 Q22,17.5 22,14 Z"/>'
+    +'<path class="eb5sp" style="animation-delay:1.4s" d="M210,12 Q210,15 213,15 Q210,15 210,18 Q210,15 207,15 Q210,15 210,12 Z"/>'
+    +'<path class="eb5sp" style="animation-delay:.9s" d="M180,58 Q180,61 183,61 Q180,61 180,64 Q180,61 177,61 Q180,61 180,58 Z"/>'
+    +'</g><g fill="rgba(255,178,76,.85)">'
+    +'<path class="eb5sp" style="animation-delay:1.9s" d="M250,30 Q250,34 254,34 Q250,34 250,38 Q250,34 246,34 Q250,34 250,30 Z"/>'
+    +'<path class="eb5sp" style="animation-delay:.6s" d="M60,54 Q60,57.5 63.5,57.5 Q60,57.5 60,61 Q60,57.5 56.5,57.5 Q60,57.5 60,54 Z"/>'
+    +'</g></svg>'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'
+    +'<div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:15.5px;color:#fff;">Экзамен · устная часть</div>'
+    +'<div style="font-weight:600;font-size:12px;color:rgba(255,255,255,.62);margin-top:2px;">'+(se.n?('лучший результат: '+se.best+' из 20'):'4 задания подряд, оценка ИИ')+'</div></div>'
+    +'<span style="flex:none;background:linear-gradient(145deg,#FFC861,#F2683F);border-radius:14px;width:42px;height:42px;display:grid;place-items:center;box-shadow:0 6px 12px rgba(242,104,63,.4),inset 0 2px 3px rgba(255,255,255,.5);">'
+    +'<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span></div></div>';
+  area.innerHTML=exCard+[1,2,3,4].map(function(t){var c=SP_CONF[t];
     return '<div class="clayCard sq clk" onclick="spOpen('+t+')" style="'+ga()+'padding:16px 18px;margin-bottom:12px;cursor:pointer;">'
       +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'
       +'<div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:15.5px;color:#2B2B2B;">'+c.name+'</div>'
@@ -4104,8 +4120,9 @@ function spHub(){var area=document.getElementById('s9_area');if(!area)return;
    +'<div class="clayCard" style="'+ga()+'display:flex;align-items:center;gap:12px;padding:13px 15px;">'
     +'<span style="flex:none;width:38px;height:38px;border-radius:13px;background:#FBE9EF;display:grid;place-items:center;"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#D4537E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3Z"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg></span>'
     +'<div style="font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.45;">Сначала подготовка по таймеру, потом запись — тайминги как на настоящем экзамене</div></div>';
-  setTxt('s9_today','4 задания')}
-function spSet(t){var pool=[SP1,SP2,SP3,SP4][t-1];var k='spIdx'+t;S[k]=(S[k]||0);return pool[S[k]%pool.length]}
+  setTxt('s9_today','4 задания');spGen()}
+function spPool(t){var ai=(S&&S.spkAi&&S.spkAi['p'+t])||[];return [SP1,SP2,SP3,SP4][t-1].concat(ai)}
+function spSet(t){var pool=spPool(t);var k='spIdx'+t;S[k]=(S[k]||0);return pool[S[k]%pool.length]}
 function spNextSet(t){S['spIdx'+t]=(S['spIdx'+t]||0)+1;save()}
 function spOpen(t){SP={t:t,set:spSet(t),phase:'intro',qi:0,url:null};SP_sheet=false;spRender()}
 function spBtn(label,fn,solid){return '<button class="sq" style="'+WBTN+(solid?'background:linear-gradient(135deg,#FFA570,#F2683F);color:#fff;border:none;box-shadow:0 12px 24px rgba(242,104,63,.32);':'color:#F2683F;')+'" onclick="'+fn+'">'+label+'</button>'}
@@ -4240,7 +4257,7 @@ async function spSTT(blob){
   var j=await r.json().catch(function(){return{}});
   if(!r.ok)throw new Error(j.error||('Ошибка '+r.status));
   return j.text||''}
-function spEvalCtx(tr){var t=SP.t,set=SP.set;
+function spEvalCtx(tr,tt,ss){var t=tt||SP.t,set=ss||SP.set;
   if(t===1)return 'Задание 1 устной части ЕГЭ — чтение текста вслух. Оригинал: """'+set.tx+'""". Расшифровка чтения ученика: """'+tr+'""". Сравни с оригиналом: прочитан ли текст полностью, какие слова пропущены, заменены или искажены (перечисли в fix). 1 балл — если текст прочитан целиком и искажений не больше четырёх. criteria: один пункт «Чтение вслух» (max 1).';
   if(t===2)return 'Задание 2 устной части — прямые вопросы по объявлению: "'+set.ad+'". Пункты: '+set.points.join('; ')+'. Расшифровка речи ученика: """'+tr+'""". По 1 баллу за каждый грамматически корректный ПРЯМОЙ вопрос строго по своему пункту («What about…», косвенные вопросы и простое зачитывание пункта не засчитываются). max=4, в criteria — по пункту на каждый вопрос.';
   if(t===3)return 'Задание 3 устной части — интервью на тему «'+set.topic+'». Вопросы: '+set.qs.join(' | ')+'. Расшифровка ответов ученика: """'+tr+'""". По 1 баллу за развёрнутый (минимум 2 предложения) релевантный ответ на каждый вопрос. max=5, в criteria — по строке на вопрос.';
@@ -4312,8 +4329,177 @@ async function spSample(btn){
 function spVoiceSample(){if(!SP||!SP.sample)return;
   var parts=(SP.sample.match(/[^.!?]+[.!?]+/g)||[SP.sample]).map(function(x){return {s:0,t:x.trim()}});
   try{lPlayRaw(parts)}catch(e){}}
+/* ---- этап 3: экзамен устной части целиком ---- */
+let SPE=null;
+function spExam(){var area=document.getElementById('s9_area');if(!area)return;spStopAll();SP=null;
+  var st=S.spkExam||{};
+  area.innerHTML='<div id="s9_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;">'+wDeco()
+    +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#F2683F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">КАК НА ЕГЭ</span>'
+    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:19px;color:#2B2B2B;margin-top:12px;">Устная часть целиком</div>'
+    +'<div style="font-weight:600;font-size:13.5px;color:#4A453E;line-height:1.6;margin-top:8px;">Чтение → вопросы → интервью → монолог, всё подряд с экзаменационными таймерами и без шпаргалок. Задания переключаются сами. В конце ИИ оценит каждую запись — максимум 20 баллов.</div>'
+    +(st.n?'<div style="margin-top:12px;font-weight:700;font-size:12.5px;color:#98917F;">Попыток: '+st.n+' · последний: '+st.last+' из 20 · лучший: '+st.best+' из 20</div>':'')
+    +'</div>'
+    +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
+    +spBtn('Начать экзамен','speStart()',true)
+    +spBtn('← К заданиям','initSpeaking()')+'</div>';
+  spAnim('win','.32s')}
+function speStart(){
+  S.spExIdx=(S.spExIdx||0);
+  var sets={};[1,2,3,4].forEach(function(t){var p=spPool(t);sets[t]=p[S.spExIdx%p.length]});
+  S.spExIdx++;save();
+  SPE={stage:1,sets:sets,blobs:{},qi:0,t0:Date.now(),tm:null};
+  speStage()}
+function speStage(){var c=SP_CONF[SPE.stage];
+  if(c.prep){SPE.phase='prep';SPE.left=c.prep;speRender();
+    speTick(c.prep,function(){speRec()})}
+  else speRec()}
+async function speRec(){var c=SP_CONF[SPE.stage];
+  clearInterval(SPE.tm);
+  try{
+    var st=await navigator.mediaDevices.getUserMedia({audio:true});
+    SPE.stream=st;SPE.chunks=[];SPE.rec=new MediaRecorder(st);
+    SPE.rec.ondataavailable=function(e){SPE.chunks.push(e.data)};
+    SPE.rec.start();
+  }catch(e){SPE.rec=null;try{toast('Нет доступа к микрофону — задание будет без записи')}catch(_){}}
+  SPE.phase='rec';SPE.left=c.rec;SPE.qi=0;speRender();
+  if(SPE.stage===3){try{lPlayRaw([{s:1,t:SPE.sets[3].qs[0]}])}catch(e){}}
+  speTick(c.rec,function(){SPE.stage===3?speNextQ():speEndStage()})}
+function speNextQ(){if(!SPE)return;
+  if(SPE.qi>=4){speEndStage();return}
+  SPE.qi++;SPE.left=SP_CONF[3].rec;speRender();
+  try{lPlayRaw([{s:1,t:SPE.sets[3].qs[SPE.qi]}])}catch(e){}
+  speTick(SP_CONF[3].rec,function(){SPE.qi>=4?speEndStage():speNextQ()})}
+function speEndStage(){if(!SPE)return;clearInterval(SPE.tm);try{lStop()}catch(e){}
+  var done=function(){if(!SPE)return;
+    if(SPE.stage<4){SPE.stage++;speStage()}else speFinish()};
+  if(SPE.rec&&SPE.rec.state!=='inactive'){
+    var stg=SPE.stage;
+    SPE.rec.onstop=function(){if(!SPE)return;
+      SPE.blobs[stg]=new Blob(SPE.chunks,{type:'audio/webm'});
+      try{SPE.stream.getTracks().forEach(function(x){x.stop()})}catch(e){}
+      done()};
+    try{SPE.rec.stop()}catch(e){done()}}
+  else done()}
+function speTick(total,onEnd){clearInterval(SPE.tm);
+  SPE.tm=setInterval(function(){if(!SPE){return}
+    SPE.left--;setTxt('s9_timer',spFmt(SPE.left));
+    var b=document.getElementById('s9_tbar');if(b)b.style.width=Math.max(0,Math.round(SPE.left/total*100))+'%';
+    setTxt('s9_today','задание '+SPE.stage+' · '+spFmt(SPE.left));
+    if(SPE.left<=0){clearInterval(SPE.tm);onEnd()}},1000)}
+function speTaskBody(){var t=SPE.stage,set=SPE.sets[t];
+  if(t===1)return '<div style="font-weight:500;font-size:13.5px;line-height:1.7;color:#2B2B2B;margin-top:10px;">'+set.tx+'</div>';
+  if(t===2)return '<div style="margin-top:10px;background:#FAF6F1;border-radius:14px;padding:11px 13px;font-weight:600;font-size:13px;color:#4A453E;line-height:1.6;font-style:italic;">'+set.ad+'</div>'
+    +'<div style="margin-top:9px;font-weight:600;font-size:12.5px;color:#2B2B2B;">Задай прямые вопросы о:</div>'
+    +set.points.map(function(p,i){return '<div style="margin-top:5px;font-weight:700;font-size:13px;color:#E44E20;">'+(i+1)+'. '+p+'</div>'}).join('');
+  if(t===3)return '<div style="font-weight:600;font-size:12px;color:#98917F;margin-top:10px;">Вопрос '+(SPE.qi+1)+' из 5</div>'
+    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:17px;color:#2B2B2B;line-height:1.5;margin-top:6px;">'+set.qs[SPE.qi]+'</div>'
+    +'<div style="margin-top:10px;"><span class="clk sq" onclick="lPlayRaw([{s:1,t:SPE.sets[3].qs[SPE.qi]}])" style="display:inline-flex;align-items:center;gap:7px;background:#E3F1F5;border-radius:13px;padding:9px 14px;font-weight:800;font-size:12px;color:#3E93A8;cursor:pointer;">🔊 Повторить вопрос</span></div>';
+  return '<div style="margin-top:10px;font-weight:700;font-size:13.5px;color:#2B2B2B;">Тема: '+set.topic+'</div>'
+    +set.ph.map(function(p){return '<div style="margin-top:8px;background:#FAF6F1;border-radius:14px;padding:10px 13px;font-weight:600;font-size:12.5px;color:#4A453E;font-style:italic;">'+p+'</div>'}).join('')
+    +'<div style="margin-top:9px;font-weight:600;font-size:12.5px;color:#2B2B2B;">План:</div>'
+    +set.plan.map(function(p,i){return '<div style="margin-top:4px;font-weight:600;font-size:12.5px;color:#4A453E;">'+(i+1)+'. '+p+'</div>'}).join('')}
+function speRender(){var area=document.getElementById('s9_area');if(!area||!SPE)return;
+  var c=SP_CONF[SPE.stage];
+  var chip=SPE.phase==='prep'
+    ?'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#C77400;background:#FFF4DE;padding:5px 10px;border-radius:20px;">ПОДГОТОВКА</span>'
+    :'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#C0392B;background:#FDEDEA;padding:5px 10px;border-radius:20px;">● ЗАПИСЬ</span>';
+  area.innerHTML='<div id="s9_card" class="clayCard" style="position:relative;overflow:hidden;padding:18px;margin-bottom:12px;">'+wDeco()
+    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'
+    +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#F2683F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">ЭКЗАМЕН · '+SPE.stage+' ИЗ 4 · '+SP_CONF[SPE.stage].name.toUpperCase()+'</span>'+chip+'</div>'
+    +speTaskBody()
+    +'<div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-top:12px;">'
+    +'<span id="s9_timer" style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:34px;color:#2B2B2B;">'+spFmt(SPE.left)+'</span></div>'
+    +'<div style="margin-top:8px;height:7px;border-radius:5px;background:#F1EDE7;"><div id="s9_tbar" style="width:100%;height:100%;border-radius:5px;background:linear-gradient(90deg,#FFA570,#F2683F);"></div></div>'
+    +'</div>'
+    +(SPE.phase==='prep'
+      ?spBtn('Готово — к записи','clearInterval(SPE.tm);speRec()',true)
+      :(SPE.stage===3&&SPE.qi<4?spBtn('Следующий вопрос →','clearInterval(SPE.tm);speNextQ()',true):spBtn(SPE.stage<4?'Стоп — дальше':'Завершить экзамен','clearInterval(SPE.tm);speEndStage()',true)))}
+async function speFinish(){if(!SPE)return;clearInterval(SPE.tm);try{lStop()}catch(e){}
+  var sec=Math.floor((Date.now()-SPE.t0)/1000);
+  var area=document.getElementById('s9_area');
+  area.innerHTML='<div id="s9_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;text-align:center;">'+wDeco()
+    +'<div style="font-size:42px;">🎧</div>'
+    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:20px;color:#2B2B2B;margin-top:8px;">Экзамен записан!</div>'
+    +'<div id="spe_prog" style="font-weight:600;font-size:13px;color:#98917F;margin-top:6px;">Начинаю проверку…</div>'
+    +'<div style="margin-top:12px;"><span style="display:inline-block;width:22px;height:22px;border-radius:50%;border:3px solid #F1EDE7;border-top-color:#F2683F;animation:lspin .8s linear infinite;"></span></div></div>';
+  var results={},got=0;
+  for(var t=1;t<=4;t++){
+    setTxt('spe_prog','Оцениваю задание '+t+' из 4…');
+    var d=null,bl=SPE.blobs[t];
+    if(bl){try{
+      var tr=await spSTT(bl);
+      if(tr&&tr.split(/\s+/).length>=3){
+        var fmt='{"got":n,"max":n,"verdict":"короткий итог по-русски","fix":[{"wrong":"...","right":"...","note":"..."}]}';
+        var out=await callGemini('Ты эксперт устной части ЕГЭ по английскому. Оцениваешь строго по критериям ФИПИ, кратко и по-русски. Текст — автоматическая расшифровка речи, произношение не оценивай. Верни СТРОГО JSON.',
+          spEvalCtx(tr,t,SPE.sets[t])+' Верни JSON: '+fmt+'. fix до 2 пунктов.');
+        var p=parseJSON(out);
+        if(p&&typeof p.got!=='undefined')d={got:Math.max(0,Math.min(SP_CONF[t].max,+p.got||0)),verdict:String(p.verdict||''),fix:Array.isArray(p.fix)?p.fix:[]}}
+    }catch(e){}}
+    if(!d)d={got:0,verdict:bl?'не удалось оценить запись':'записи нет',fix:[]};
+    results[t]=d;got+=d.got;
+    S.spkScores=(S.spkScores||[]).concat([{t:t,g:d.got,m:SP_CONF[t].max,ts:Date.now()}]).slice(-30);
+  }
+  var st=S.spkExam||{n:0,last:0,best:0};st.n++;st.last=got;st.best=Math.max(st.best||0,got);S.spkExam=st;
+  var r=spSt();r.t1.n++;r.t2.n++;r.t3.n++;r.t4.n++;
+  spSync();save();
+  var weak=[1,2,3,4].sort(function(a,b){return results[a].got/SP_CONF[a].max-results[b].got/SP_CONF[b].max})[0];
+  var rows=[1,2,3,4].map(function(t){var d=results[t];
+    return '<div style="padding:9px 2px;border-bottom:1px solid #F4EFE9;">'
+      +'<div style="display:flex;justify-content:space-between;gap:10px;font-weight:700;font-size:13px;color:#2B2B2B;"><span>'+SP_CONF[t].name+'</span><b style="flex:none;color:'+(d.got/SP_CONF[t].max>=0.7?'#1F8A50':(d.got>0?'#C77400':'#C0392B'))+';">'+d.got+' / '+SP_CONF[t].max+'</b></div>'
+      +(d.verdict?'<div style="font-weight:600;font-size:12px;color:#98917F;margin-top:3px;">'+d.verdict+'</div>':'')
+      +(d.fix||[]).map(function(f){return '<div style="font-weight:600;font-size:12px;color:#4A453E;margin-top:4px;line-height:1.5;">'+(f.wrong?'<s style="color:#C0392B;">'+f.wrong+'</s> → ':'')+(f.right?'<b style="color:#1F8A50;">'+f.right+'</b> ':'')+(f.note||'')+'</div>'}).join('')
+      +'</div>'}).join('');
+  SPE=null;
+  area.innerHTML='<div id="s9_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;">'+wDeco()
+    +'<div style="text-align:center;"><div style="font-size:42px;">'+(got>=16?'🏆':(got>=10?'💪':'📚'))+'</div>'
+    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:26px;color:#2B2B2B;margin-top:8px;">'+got+' из 20</div>'
+    +'<div style="font-weight:600;font-size:13px;color:#98917F;margin-top:4px;">Время: '+spFmt(sec)+'</div>'
+    +(got<20?'<div style="font-weight:700;font-size:12.5px;color:#C77400;margin-top:6px;">Слабое место: '+SP_CONF[weak].name.toLowerCase()+' — потренируй отдельно</div>':'')
+    +'</div><div style="margin-top:12px;">'+rows+'</div></div>'
+    +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
+    +spBtn('Ещё раз','speStart()',true)
+    +spBtn('К заданиям','initSpeaking()')+'</div>';
+  spAnim('win','.32s');spGen()}
+/* ---- фоновая ИИ-генерация комплектов говорения ---- */
+var SPGEN=false;
+async function spGen(){
+  if(SPGEN)return;if(typeof SRV==='undefined'||!SRV||!TOKEN)return;
+  S.spkAi=S.spkAi||{p1:[],p2:[],p3:[],p4:[]};
+  var kind=null;
+  for(var t=1;t<=4;t++){if(spPool(t).length<5){kind=t;break}}
+  if(!kind)return;SPGEN=true;
+  try{
+    var sys='Ты составляешь задания устной части ЕГЭ по английскому (уровень B1-B2, темы кодификатора: школа, семья, спорт, путешествия, технологии, экология). Только JSON.';
+    var out,d,item=null;
+    if(kind===1){
+      out=await callGemini(sys,'Задание 1: связный научно-популярный текст для чтения вслух, 85-105 слов, простые предложения. JSON: {"tx":"текст"}');
+      d=parseJSON(out);
+      if(d&&d.tx&&String(d.tx).split(/\s+/).length>=60)item={tx:String(d.tx)};
+    }else if(kind===2){
+      out=await callGemini(sys,'Задание 2: рекламное объявление (1-2 предложения) и 4 пункта для прямых вопросов + образцовые вопросы. JSON: {"ad":"объявление","points":["4 пункта по-английски"],"exq":["4 образцовых прямых вопроса"]}');
+      d=parseJSON(out);
+      if(d&&d.ad&&Array.isArray(d.points)&&d.points.length===4&&Array.isArray(d.exq)&&d.exq.length===4)
+        item={ad:String(d.ad),points:d.points.map(String),exq:d.exq.map(String)};
+    }else if(kind===3){
+      out=await callGemini(sys,'Задание 3: тема интервью (по-русски, 2-4 слова) и 5 вопросов подростку на английском. JSON: {"topic":"тема","qs":["5 вопросов"]}');
+      d=parseJSON(out);
+      if(d&&d.topic&&Array.isArray(d.qs)&&d.qs.length===5)item={topic:String(d.topic),qs:d.qs.map(String)};
+    }else{
+      out=await callGemini(sys,'Задание 4: тема проекта (по-русски) и описания двух контрастных фотографий. JSON: {"topic":"тема по-русски","ph":["Фото 1: описание по-русски","Фото 2: описание по-русски"]}');
+      d=parseJSON(out);
+      if(d&&d.topic&&Array.isArray(d.ph)&&d.ph.length===2)
+        item={topic:String(d.topic),ph:d.ph.map(String),plan:['кратко опиши обе фотографии','скажи, что общего у фотографий','скажи, чем они различаются','скажи, что ближе тебе, и объясни почему']};
+    }
+    if(item){S.spkAi['p'+kind]=(S.spkAi['p'+kind]||[]).concat([item]);save()}
+  }catch(e){}
+  SPGEN=false;
+  try{var need=false;for(var t=1;t<=4;t++)if(spPool(t).length<5){need=true;break}
+    if(need)setTimeout(spGen,4000)}catch(e){}}
 /* уборка при уходе с экрана + синк */
-var _t10=tab;tab=function(id){_t10(id);if(id!=='scr9'&&SP){spStopAll();SP=null}};
+var _t10=tab;tab=function(id){_t10(id);
+  if(id!=='scr9'){
+    if(SP){spStopAll();SP=null}
+    if(SPE){clearInterval(SPE.tm);try{if(SPE.rec&&SPE.rec.state!=='inactive')SPE.rec.stop()}catch(e){}try{SPE.stream&&SPE.stream.getTracks().forEach(function(x){x.stop()})}catch(e){}SPE=null}}};
 var _sa7=startApp;startApp=async function(){await _sa7.apply(this,arguments);try{spSync()}catch(e){}};
 
 </script>
