@@ -2568,6 +2568,13 @@ initGrammar=function(){if(!S)return;gSync();gMap()}
 function gMap(){var area=document.getElementById('g_area');if(!area)return;
   var due=gDue();
   var h='';
+  var e19=S.exam19||{};
+  h+='<div class="sq clk" onclick="gExam()" style="position:relative;overflow:hidden;border-radius:24px;padding:16px 18px;margin-bottom:14px;cursor:pointer;background:linear-gradient(150deg,#3A3532,#2B2B2B);box-shadow:0 14px 28px rgba(43,35,30,.32),inset 0 2px 3px rgba(255,255,255,.14),inset 0 -5px 10px rgba(0,0,0,.35);">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'
+    +'<div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:15.5px;color:#fff;">Экзамен · задания 19–24</div>'
+    +'<div style="font-weight:600;font-size:12px;color:rgba(255,255,255,.62);margin-top:2px;">'+(e19.n?('лучший результат: '+e19.best+' из 6'):'текст с пропусками, без подсказок')+'</div></div>'
+    +'<span style="flex:none;background:linear-gradient(145deg,#FFC861,#F2683F);border-radius:14px;width:42px;height:42px;display:grid;place-items:center;box-shadow:0 6px 12px rgba(242,104,63,.4),inset 0 2px 3px rgba(255,255,255,.5);">'
+    +'<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span></div></div>';
   if(due.length)h+='<div class="sq clk" onclick="gReview()" style="position:relative;overflow:hidden;border-radius:24px;padding:16px 18px;margin-bottom:14px;cursor:pointer;background:linear-gradient(135deg,#FFA570,#F2683F);box-shadow:0 14px 28px rgba(242,104,63,.32),inset 0 2px 4px rgba(255,255,255,.45),inset 0 -6px 14px rgba(190,55,18,.25);">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'
     +'<div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:15.5px;color:#fff;">Пора повторить</div>'
@@ -2720,6 +2727,106 @@ function gFinishRev(){var area=document.getElementById('g_area');var rows='';
     +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
     +'<button class="sq" style="'+WBTN+'color:#F2683F;" onclick="GS=null;initGrammar()">К темам</button></div>';
   GS=null;gSync();save();gAnim('win','.32s')}
+/* ===== ЭКЗАМЕН: задания 19–24 (текст с 6 пропусками) ===== */
+const G_EXAMS=[
+{tx:['Last summer Kate and her brother ',' to St Petersburg. It was their ',' visit to the city. The Hermitage ',' in 1764. Kate thought the real palaces were much ',' than in photos. Now she ',' a new trip together with ',' best friend.'],
+ gaps:[{b:'GO',ans:['went'],e:'last summer → Past Simple: went.',t:2},
+  {b:'ONE',ans:['first'],e:'Порядковое: one → first.',t:12},
+  {b:'FOUND',ans:['was founded'],e:'Музей основали → пассив прошлого: was founded.',t:5},
+  {b:'BEAUTIFUL',ans:['more beautiful'],e:'Длинное прилагательное → more beautiful.',t:10},
+  {b:'PLAN',ans:['is planning'],e:'now → Present Continuous: is planning.',t:1},
+  {b:'SHE',ans:['her'],e:'Перед сущ. → притяжательное her.',t:11}]},
+{tx:['Tom is fond of science. Every week he ',' a robotics club. Yesterday, while he ',' on his robot, his teacher said that the results ',' impressive. If Tom ',' the city contest, he will go to the national final. It will be the ',' competition in his life. Tom believes that in the future robots ',' everywhere.'],
+ gaps:[{b:'ATTEND',ans:['attends'],e:'every week → Present Simple, he → attends.',t:1},
+  {b:'WORK',ans:['was working'],e:'while → Past Continuous: was working.',t:2},
+  {b:'BE',ans:['were'],e:'Косвенная речь: сдвиг are → were.',t:7},
+  {b:'WIN',ans:['wins'],e:'1 тип условия: после if — Present Simple.',t:6},
+  {b:'THREE',ans:['third'],e:'three → third.',t:12},
+  {b:'USE',ans:['will be used'],e:'Будущее в пассиве → will be used.',t:5}]},
+{tx:['My granny lives in the country. Her house ',' by my great-grandfather. It is much ',' than our flat. When I visited her last month, she ',' jam. She said she ',' me a jar. Granny keeps three cats, and each of ',' has ',' own bowl.'],
+ gaps:[{b:'BUILD',ans:['was built'],e:'Дом построили → пассив: was built.',t:5},
+  {b:'OLD',ans:['older'],e:'Сравнение: older than.',t:10},
+  {b:'MAKE',ans:['was making'],e:'Процесс в момент прошлого → was making.',t:2},
+  {b:'GIVE',ans:['would give'],e:'Косвенная речь: will give → would give.',t:7},
+  {b:'THEY',ans:['them'],e:'each of them.',t:11},
+  {b:'IT',ans:['its'],e:'Притяжательное its (без апострофа).',t:11}]}
+];
+let EX=null;
+function gExamPool(){var ai=(S&&S.examAi)||[];return G_EXAMS.concat(ai)}
+function gExamFmt(sec){var m=Math.floor(sec/60),x=sec%60;return m+':'+(x<10?'0':'')+x}
+function gExam(){var area=document.getElementById('g_area');if(!area)return;
+  var st=S.exam19||{};
+  area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;">'+wDeco()
+    +'<div style="display:flex;align-items:center;gap:8px;"><span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#F2683F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">КАК НА ЕГЭ</span></div>'
+    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:19px;color:#2B2B2B;margin-top:12px;">Задания 19–24</div>'
+    +'<div style="font-weight:600;font-size:13.5px;color:#4A453E;line-height:1.6;margin-top:8px;">Связный текст с шестью пропусками. Впиши правильную форму слов, данных ЗАГЛАВНЫМИ буквами — без вариантов ответа, как на настоящем экзамене. Идёт таймер.</div>'
+    +(st.n?'<div style="margin-top:12px;font-weight:700;font-size:12.5px;color:#98917F;">Попыток: '+st.n+' · последний результат: '+st.last+' из 6 · лучший: '+st.best+' из 6</div>':'')
+    +'</div>'
+    +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
+    +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="gExamStart()">Начать</button>'
+    +'<button class="sq" style="'+WBTN+'color:#F2683F;" onclick="gMap()">← К темам</button></div>';
+  gAnim('win','.32s');gExamGen()}
+function gExamStart(){var pool=gExamPool();
+  S.examIdx=(S.examIdx||0);var ex=pool[S.examIdx%pool.length];S.examIdx++;
+  if(EX&&EX.iv)clearInterval(EX.iv);
+  EX={ex:ex,t0:Date.now(),iv:setInterval(function(){setTxt('g_today',gExamFmt(Math.floor((Date.now()-EX.t0)/1000)))},1000)};
+  var area=document.getElementById('g_area');
+  var txt='';
+  ex.tx.forEach(function(seg,i){txt+=seg;
+    if(i<6)txt+='<b style="color:#F2683F;">'+(19+i)+'</b>&nbsp;<span style="display:inline-block;min-width:56px;border-bottom:2.5px dashed #F2683F;"></span>&nbsp;<b style="color:#98917F;font-size:12px;">('+ex.gaps[i].b+')</b> '});
+  var inputs=ex.gaps.map(function(g,i){
+    return '<div style="display:flex;align-items:center;gap:10px;">'
+      +'<span style="flex:none;width:64px;font-weight:800;font-size:12.5px;color:#F2683F;">'+(19+i)+' · '+g.b+'</span>'
+      +'<input id="g_ex_'+i+'" autocapitalize="none" autocomplete="off" spellcheck="false" style="flex:1;box-sizing:border-box;height:46px;border:1px solid #F0EAE2;border-radius:15px;padding:0 13px;font-family:Manrope,sans-serif;font-weight:700;font-size:14px;color:#2B2B2B;outline:none;box-shadow:inset 0 2px 4px rgba(60,45,30,.05);"></div>'}).join('');
+  area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:20px;">'+wDeco()
+    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#F2683F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">ЗАДАНИЯ 19–24</span></div>'
+    +'<div style="font-weight:600;font-size:14px;color:#2B2B2B;line-height:1.7;margin-top:12px;">'+txt+'</div></div>'
+    +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:9px;">'+inputs
+    +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);margin-top:3px;" onclick="gExamCheck()">Проверить</button></div>';
+  gAnim('win','.32s')}
+function gExamCheck(){if(!EX)return;var ex=EX.ex;
+  clearInterval(EX.iv);var sec=Math.floor((Date.now()-EX.t0)/1000);
+  var score=0,rows='';
+  ex.gaps.forEach(function(g,i){var inp=document.getElementById('g_ex_'+i);var val=gNorm(inp?inp.value:'');
+    var ok=g.ans.some(function(a){return gNorm(a)===val});
+    if(ok)score++;
+    else{if(g.t){var r=gRec(g.t);r.err++;if(r.st===2)r.due=Date.now()}}
+    rows+='<div style="padding:10px 2px;border-bottom:1px solid #F4EFE9;">'
+      +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'
+      +'<span style="font-weight:800;font-size:13px;color:'+(ok?'#1F8A50':'#C0392B')+';">'+(19+i)+' · '+g.b+' → '+g.ans[0]+'</span>'
+      +(ok?'<span style="font-weight:800;font-size:10px;color:#1F8A50;background:#EAF7F0;padding:4px 9px;border-radius:20px;">ВЕРНО</span>'
+          :'<span style="font-weight:800;font-size:10px;color:#C0392B;background:#FDEDEA;padding:4px 9px;border-radius:20px;">'+((document.getElementById('g_ex_'+i)||{}).value||'—')+'</span>')
+      +'</div>'
+      +(ok?'':'<div style="font-weight:600;font-size:12px;color:#98917F;margin-top:4px;">'+g.e+'</div>')
+      +'</div>'});
+  var st=S.exam19||{n:0,last:0,best:0};
+  st.n++;st.last=score;st.best=Math.max(st.best||0,score);S.exam19=st;
+  EX=null;save();gSync();
+  var area=document.getElementById('g_area');
+  area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;">'+wDeco()
+    +'<div style="text-align:center;"><div style="font-size:42px;">'+(score===6?'🏆':(score>=4?'💪':'📚'))+'</div>'
+    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:22px;color:#2B2B2B;margin-top:8px;">'+score+' из 6</div>'
+    +'<div style="font-weight:600;font-size:13px;color:#98917F;margin-top:4px;">Время: '+gExamFmt(sec)+(score<6?' · слабые темы отмечены к повторению':'')+'</div></div>'
+    +'<div style="margin-top:12px;">'+rows+'</div></div>'
+    +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
+    +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="gExamStart()">Ещё текст</button>'
+    +'<button class="sq" style="'+WBTN+'color:#F2683F;" onclick="gMap()">К темам</button></div>';
+  gAnim('win','.32s');gExamGen()}
+/* фоновая генерация новых экзаменационных текстов */
+var G_EXGEN=false;
+async function gExamGen(){
+  if(G_EXGEN)return;if(typeof SRV==='undefined'||!SRV||!TOKEN)return;
+  if(gExamPool().length>=8)return;G_EXGEN=true;
+  try{
+    var out=await callGemini('Ты составляешь задания 19-24 ЕГЭ по английскому: связный текст с 6 пропусками на грамматические формы (времена, пассив, косвенная речь, условные, степени сравнения, местоимения, числительные). Уровень B1-B2. Только JSON.',
+      'Придумай один связный текст (6-8 предложений) с 6 пропусками. Строго JSON: {"tx":["фрагмент текста до пропуска 1","между 1 и 2","между 2 и 3","между 3 и 4","между 4 и 5","между 5 и 6","после 6"],"gaps":[{"b":"СЛОВО заглавными","ans":["правильная форма"],"e":"краткое объяснение по-русски","t":номер_темы_от_1_до_12}]} — ровно 7 фрагментов и 6 пропусков.');
+    var d=parseJSON(out);
+    if(d&&Array.isArray(d.tx)&&d.tx.length===7&&Array.isArray(d.gaps)&&d.gaps.length===6
+       &&d.gaps.every(function(g){return g&&g.b&&Array.isArray(g.ans)&&g.ans.length})){
+      var ex={tx:d.tx.map(String),gaps:d.gaps.map(function(g){return{b:String(g.b),ans:g.ans.map(String),e:String(g.e||''),t:+g.t||0}})};
+      S.examAi=(S.examAi||[]).concat([ex]);save()}
+  }catch(e){}
+  G_EXGEN=false}
 /* фоновая ИИ-догенерация заданий по теме */
 var G_GEN=false;
 async function gGen(t){
@@ -2737,7 +2844,7 @@ async function gGen(t){
   }catch(e){}
   G_GEN=false}
 /* прячем FAB на грамматике, синк при старте */
-var _t5=tab;tab=function(id){_t5(id);if(id==='scr3'){var f=document.getElementById('genfab');if(f)f.style.display='none';GS=null}};
+var _t5=tab;tab=function(id){_t5(id);if(EX&&EX.iv){clearInterval(EX.iv);EX=null}if(id==='scr3'){var f=document.getElementById('genfab');if(f)f.style.display='none';GS=null}};
 var _sa3=startApp;startApp=async function(){await _sa3.apply(this,arguments);try{gSync()}catch(e){}};
 
 </script>
