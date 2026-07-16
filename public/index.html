@@ -2780,7 +2780,7 @@ function gRenderQ(){var area=document.getElementById('g_area');if(!area||!GS)ret
       +'style="width:100%;box-sizing:border-box;height:52px;border:1px solid #F0EAE2;border-radius:18px;padding:0 16px;font-family:Manrope,sans-serif;font-weight:700;font-size:15px;color:#2B2B2B;outline:none;box-shadow:inset 0 2px 4px rgba(60,45,30,.05);" onkeydown="if(event.key===\'Enter\')gSubmit()">'
       +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="gSubmit()">Проверить</button>'}
   gAnim('win','.32s')}
-function gNorm(v){return (v||'').toLowerCase().replace(/[’’']/g,'').replace(/\s+/g,' ').replace(/\.$/,'').trim()}
+function gNorm(v){return (v||'').toLowerCase().replace(/[’’']/g,'').replace(/\s+/g,' ').trim().replace(/\.+$/,'').trim()}
 function gExplain(it,userWrong){var q=it.q,t=it.t||GS.t;
   var right=it.k==='f'?q.ans[0]:q.o[q.a];
   var sent=it.k==='f'
