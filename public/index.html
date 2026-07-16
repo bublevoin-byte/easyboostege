@@ -3077,9 +3077,9 @@ function rHub(){var area=document.getElementById('r_area');if(!area)return;RH=nu
    +'<div class="clayCard" style="'+ga()+'display:flex;align-items:center;gap:12px;padding:13px 15px;">'
     +'<span style="flex:none;width:38px;height:38px;border-radius:13px;background:#FFF4DE;display:grid;place-items:center;"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#E8730A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg></span>'
     +'<div style="font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.45;">Тапни любое слово в тексте — покажем перевод и добавим его в модуль «Слова»</div></div>';
-  setTxt('r_today','3 тренажёра')}
+  setTxt('r_today','3 тренажёра');rGen()}
 /* ---- Задание 10: заголовки ---- */
-function rHl(){S.readIdxH=(S.readIdxH||0);var set=R_HL[S.readIdxH%R_HL.length];S.readIdxH++;
+function rHl(){S.readIdxH=(S.readIdxH||0);var pool=rPool('h',R_HL);var set=pool[S.readIdxH%pool.length];S.readIdxH++;
   RH={set:set,sel:[null,null,null,null],done:false};rHlRender()}
 function rHlRender(){var area=document.getElementById('r_area');var set=RH.set;
   var L='ABCDE';
@@ -3121,9 +3121,9 @@ function rHlCheck(){if(RH.done)return;RH.done=true;var set=RH.set,L='ABCDE',r=rS
     +'<div style="font-weight:600;font-size:12.5px;color:#98917F;margin-top:4px;">Лишний заголовок: '+'ABCDE'[extra]+'. '+RH.set.hl[extra]+'</div>'
     +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);margin-top:12px;" onclick="rHl()">Ещё подход</button></div>';
   area.insertBefore(d,area.firstChild);
-  try{d.scrollIntoView({behavior:'smooth',block:'start'})}catch(e){}}
+  try{d.scrollIntoView({behavior:'smooth',block:'start'})}catch(e){};rGen()}
 /* ---- Задания 12-18: полное понимание ---- */
-function rQs(){S.readIdxQ=(S.readIdxQ||0);var set=R_QS[S.readIdxQ%R_QS.length];S.readIdxQ++;
+function rQs(){S.readIdxQ=(S.readIdxQ||0);var pool=rPool('q',R_QS);var set=pool[S.readIdxQ%pool.length];S.readIdxQ++;
   RQ={set:set,i:-1,ok:0,showTx:false};rQsRender()}
 function rQsRender(){var area=document.getElementById('r_area');var set=RQ.set;
   if(RQ.i<0){
@@ -3170,7 +3170,7 @@ function rQsExplain(q){var area=document.getElementById('r_area');
     +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="RQ.i++;rSync();save();rQsRender()">Понятно, дальше</button>';
   rAnim('wflip','.5s')}
 /* ---- Задание 11: пропуски ---- */
-function rGp(){S.readIdxG=(S.readIdxG||0);var set=R_GAPS[S.readIdxG%R_GAPS.length];S.readIdxG++;
+function rGp(){S.readIdxG=(S.readIdxG||0);var pool=rPool('g',R_GAPS);var set=pool[S.readIdxG%pool.length];S.readIdxG++;
   RG={set:set,sel:[null,null,null],done:false};rGpRender()}
 function rGpRender(){var area=document.getElementById('r_area');var set=RG.set,L='ABCD';
   var txt='';
@@ -3218,7 +3218,7 @@ function rGpCheck(){if(RG.done)return;RG.done=true;var set=RG.set,L='ABCD',r=rSt
     +'<div style="font-weight:600;font-size:12.5px;color:#98917F;margin-top:4px;">Лишняя фраза: '+L[extra]+'. '+set.fr[extra]+'</div>'
     +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);margin-top:12px;" onclick="rGp()">Ещё подход</button></div>';
   area.insertBefore(d,area.firstChild);
-  try{d.scrollIntoView({behavior:'smooth',block:'start'})}catch(e){}}
+  try{d.scrollIntoView({behavior:'smooth',block:'start'})}catch(e){};rGen()}
 /* ---- слово из текста → в модуль Слова ---- */
 r_add=function(st){if(!lastWord)return;
   S.wstatus=S.wstatus||{};S.wstatus[lastWord]=st;
@@ -3232,6 +3232,47 @@ r_add=function(st){if(!lastWord)return;
       else{try{toast('Это слово уже в изучении')}catch(e){}}}}
   save();var p=document.getElementById('r_pop');if(p)p.style.display='none';
   try{wSync()}catch(e){}}
+/* ---- фоновая ИИ-генерация комплектов чтения ---- */
+function rPool(kind,base){var ai=(S&&S.readAi&&S.readAi[kind])||[];return base.concat(ai)}
+var R_GEN=false;
+async function rGen(){
+  if(R_GEN)return;if(typeof SRV==='undefined'||!SRV||!TOKEN)return;
+  S.readAi=S.readAi||{h:[],q:[],g:[]};
+  var kind=null;
+  if(rPool('h',R_HL).length<6)kind='h';
+  else if(rPool('q',R_QS).length<6)kind='q';
+  else if(rPool('g',R_GAPS).length<6)kind='g';
+  if(!kind)return;R_GEN=true;
+  try{
+    var sys='Ты составляешь задания по чтению для ЕГЭ по английскому (уровень B1-B2, британский английский, темы кодификатора ФИПИ: школа, семья, экология, технологии, путешествия, спорт, культура). Только JSON, без пояснений.';
+    var out,d,item=null;
+    if(kind==='h'){
+      out=await callGemini(sys,'Комплект задания 10: четыре коротких текста (2-3 предложения) и пять заголовков, один лишний. JSON: {"hl":["5 заголовков на английском"],"txts":[{"t":"текст на английском","a":индекс_верного_заголовка_0_4,"k":"объяснение по-русски: ключевые слова текста"}]} — ровно 4 текста, все a разные.');
+      d=parseJSON(out);
+      if(d&&Array.isArray(d.hl)&&d.hl.length===5&&Array.isArray(d.txts)&&d.txts.length===4
+        &&d.txts.every(function(t){return t&&t.t&&t.a>=0&&t.a<5&&t.k})
+        &&new Set(d.txts.map(function(t){return +t.a})).size===4){
+        item={hl:d.hl.map(String),txts:d.txts.map(function(t){return{t:String(t.t),a:+t.a,k:String(t.k)}})}}
+    }else if(kind==='q'){
+      out=await callGemini(sys,'Комплект заданий 12-18: текст 90-130 слов и 4 вопроса. JSON: {"tx":"текст на английском","qs":[{"q":"вопрос на английском","o":["4 варианта"],"a":индекс_верного_0_3,"ev":"точная цитата из текста с ответом","e":"объяснение по-русски"}]} — ровно 4 вопроса.');
+      d=parseJSON(out);
+      if(d&&d.tx&&Array.isArray(d.qs)&&d.qs.length===4
+        &&d.qs.every(function(q){return q&&q.q&&Array.isArray(q.o)&&q.o.length===4&&q.a>=0&&q.a<4&&q.ev&&q.e})){
+        item={tx:String(d.tx),qs:d.qs.map(function(q){return{q:String(q.q),o:q.o.map(String),a:+q.a,ev:String(q.ev),e:String(q.e)}})}}
+    }else{
+      out=await callGemini(sys,'Комплект задания 11: связный текст из 4 фрагментов с 3 пропусками между ними и 4 фразы, одна лишняя. JSON: {"tx":["фрагмент до пропуска 1","между 1 и 2","между 2 и 3","после 3"],"fr":["4 фразы на английском"],"a":[индекс_фразы_для_пропуска_1,для_2,для_3],"k":["3 объяснения по-русски, почему фраза подходит грамматически"]} — индексы в a разные, от 0 до 3.');
+      d=parseJSON(out);
+      if(d&&Array.isArray(d.tx)&&d.tx.length===4&&Array.isArray(d.fr)&&d.fr.length===4
+        &&Array.isArray(d.a)&&d.a.length===3&&d.a.every(function(x){return x>=0&&x<4})
+        &&new Set(d.a.map(Number)).size===3&&Array.isArray(d.k)&&d.k.length===3){
+        item={tx:d.tx.map(String),fr:d.fr.map(String),a:d.a.map(Number),k:d.k.map(String)}}
+    }
+    if(item){S.readAi[kind]=(S.readAi[kind]||[]).concat([item]);save()}
+  }catch(e){}
+  R_GEN=false;
+  /* если ещё есть чем пополнить — продолжим в фоне */
+  try{var need=rPool('h',R_HL).length<6||rPool('q',R_QS).length<6||rPool('g',R_GAPS).length<6;
+    if(need)setTimeout(rGen,4000)}catch(e){}}
 /* FAB прячем и на чтении; синк при старте */
 var _t7=tab;tab=function(id){_t7(id);if(id==='scr7'){var f=document.getElementById('genfab');if(f)f.style.display='none'}};
 var _sa4=startApp;startApp=async function(){await _sa4.apply(this,arguments);try{rSync()}catch(e){}};
