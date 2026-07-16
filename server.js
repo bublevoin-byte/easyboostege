@@ -340,6 +340,28 @@ app.get('/api/tts', auth, async (req, res) => {
   }
 });
 
+// ---- расшифровка речи (Grok STT) для оценки говорения ----
+app.post('/api/stt', auth, express.raw({ type: () => true, limit: '20mb' }), async (req, res) => {
+  try {
+    if (!XAI_KEY) return res.status(503).json({ error: 'XAI_API_KEY не задан на сервере' });
+    const buf = req.body;
+    if (!buf || !buf.length) return res.status(400).json({ error: 'нет аудио' });
+    const fd = new FormData();
+    fd.append('file', new Blob([buf], { type: req.headers['content-type'] || 'audio/webm' }), 'rec.webm');
+    fd.append('language', 'en');
+    const r = await fetch('https://api.x.ai/v1/stt', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + XAI_KEY },
+      body: fd,
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return res.status(502).json({ error: 'STT: ' + ((j.error && (j.error.message || j.error)) || r.status) });
+    res.json({ text: j.text || '', duration: j.duration || 0 });
+  } catch (e) {
+    res.status(502).json({ error: 'STT: ' + e.message });
+  }
+});
+
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 app.listen(PORT, () => console.log('Easy Boost server on http://localhost:' + PORT));

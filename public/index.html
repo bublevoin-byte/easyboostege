@@ -4076,10 +4076,16 @@ const SP_SHEET={
 let SP=null,SP_rec=null,SP_chunks=[],SP_tm=null,SP_sheet=false;
 function spSt(){S.spk=S.spk||{t1:{n:0},t2:{n:0},t3:{n:0},t4:{n:0}};return S.spk}
 function spSync(){if(!S)return;var r=spSt();var tot=r.t1.n+r.t2.n+r.t3.n+r.t4.n;
-  S.prog=S.prog||{};S.prog.speak=Math.min(100,tot*4);
-  setTxt('sub_speak',tot?('тренировок: '+tot):'устная часть · запись');
-  setTxt('s9_sumline',tot?('Тренировок: '+tot+' · 4 задания'):'Четыре задания — как на экзамене');
-  var bar=document.getElementById('s9_bar');if(bar)bar.style.width=Math.max(2,Math.min(100,tot*4))+'%';
+  S.prog=S.prog||{};var sc=S.spkScores||[];
+  if(sc.length){var last=sc.slice(-5);
+    var avg=Math.round(last.reduce(function(s,x){return s+x.g/(x.m||1)},0)/last.length*100);
+    S.prog.speak=avg;
+    setTxt('sub_speak','оценок: '+sc.length+' · средний '+avg+'%');
+    setTxt('s9_sumline','Оценок ИИ: '+sc.length+' · средний '+avg+'%');
+  }else{S.prog.speak=Math.min(100,tot*4);
+    setTxt('sub_speak',tot?('тренировок: '+tot):'устная часть · запись');
+    setTxt('s9_sumline',tot?('Тренировок: '+tot+' · 4 задания'):'Четыре задания — как на экзамене');}
+  var bar=document.getElementById('s9_bar');if(bar)bar.style.width=Math.max(2,Math.min(100,S.prog.speak||0))+'%';
   try{setTxt('m_speak',S.prog.speak);ringOff('ring_speak',113.1,S.prog.speak)}catch(e){}}
 function spAnim(n,d){var c=document.getElementById('s9_card');if(!c)return;c.style.animation='none';void c.offsetWidth;c.style.animation=n+' '+d+' cubic-bezier(.25,.75,.35,1)'}
 function spFmt(s){s=Math.max(0,s);return Math.floor(s/60)+':'+('0'+s%60).slice(-2)}
@@ -4174,6 +4180,9 @@ function spRender(){var area=document.getElementById('s9_area');if(!area||!SP)re
       +'<div style="font-weight:600;font-size:13px;color:#98917F;margin-top:5px;">Послушай себя со стороны и сверься со шпаргалкой.<br>Тренировок в этом задании: '+r['t'+t].n+'</div></div>'
       +'<div style="height:12px;"></div>'
       +(SP.url?spBtn('▶ Послушать свою запись','spPlay()',true):'<div style="text-align:center;font-weight:600;font-size:12.5px;color:#C0392B;">Запись не получилась — проверь доступ к микрофону</div>')
+      +(SP.blob?'<div style="height:10px;"></div><button class="sq" onclick="spEval(this)" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#6FC2B0,#1F9E5A)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(31,158,90,.3);">✨ Оценить с ИИ по критериям</button>':'')
+      +(SP.t>1?'<div style="height:10px;"></div>'+spBtn('Образец ответа от ИИ','spSample(this)'):'')
+      +'<div id="sp_evalbox"></div>'
       +extra
       +'<div style="height:10px;"></div>'+spBtn('Ещё раз','spNextSet(SP.t);spOpen(SP.t)')
       +'<div style="height:10px;"></div>'+spBtn('К заданиям','spStopAll();initSpeaking()');
@@ -4198,7 +4207,7 @@ async function spRec(){var c=SP_CONF[SP.t];
     var st=await navigator.mediaDevices.getUserMedia({audio:true});
     SP_rec=new MediaRecorder(st);SP_chunks=[];
     SP_rec.ondataavailable=function(e){SP_chunks.push(e.data)};
-    SP_rec.onstop=function(){SP.url=URL.createObjectURL(new Blob(SP_chunks,{type:'audio/webm'}));st.getTracks().forEach(function(x){x.stop()});
+    SP_rec.onstop=function(){var bl=new Blob(SP_chunks,{type:'audio/webm'});SP.blob=bl;SP.url=URL.createObjectURL(bl);st.getTracks().forEach(function(x){x.stop()});
       if(SP.phase==='done')spRender()};
     SP_rec.start();
   }catch(e){SP.url=null;try{toast('Нет доступа к микрофону')}catch(_){}}
@@ -4223,6 +4232,85 @@ function spPlay(){if(!SP||!SP.url)return;
 function spEtalon(){if(!SP||SP.t!==1)return;
   if(SP_audio){try{SP_audio.pause()}catch(e){}}
   var parts=(SP.set.tx.match(/[^.!?]+[.!?]+/g)||[SP.set.tx]).map(function(x){return {s:0,t:x.trim()}});
+  try{lPlayRaw(parts)}catch(e){}}
+/* ---- этап 2: расшифровка и оценка ИИ ---- */
+async function spSTT(blob){
+  var r=await fetch(API+'/api/stt',{method:'POST',
+    headers:Object.assign({'Content-Type':blob.type||'audio/webm'},TOKEN?{'Authorization':'Bearer '+TOKEN}:{}),body:blob});
+  var j=await r.json().catch(function(){return{}});
+  if(!r.ok)throw new Error(j.error||('Ошибка '+r.status));
+  return j.text||''}
+function spEvalCtx(tr){var t=SP.t,set=SP.set;
+  if(t===1)return 'Задание 1 устной части ЕГЭ — чтение текста вслух. Оригинал: """'+set.tx+'""". Расшифровка чтения ученика: """'+tr+'""". Сравни с оригиналом: прочитан ли текст полностью, какие слова пропущены, заменены или искажены (перечисли в fix). 1 балл — если текст прочитан целиком и искажений не больше четырёх. criteria: один пункт «Чтение вслух» (max 1).';
+  if(t===2)return 'Задание 2 устной части — прямые вопросы по объявлению: "'+set.ad+'". Пункты: '+set.points.join('; ')+'. Расшифровка речи ученика: """'+tr+'""". По 1 баллу за каждый грамматически корректный ПРЯМОЙ вопрос строго по своему пункту («What about…», косвенные вопросы и простое зачитывание пункта не засчитываются). max=4, в criteria — по пункту на каждый вопрос.';
+  if(t===3)return 'Задание 3 устной части — интервью на тему «'+set.topic+'». Вопросы: '+set.qs.join(' | ')+'. Расшифровка ответов ученика: """'+tr+'""". По 1 баллу за развёрнутый (минимум 2 предложения) релевантный ответ на каждый вопрос. max=5, в criteria — по строке на вопрос.';
+  return 'Задание 4 устной части — монолог по теме «'+set.topic+'». План: '+set.plan.join('; ')+'. Фото: '+set.ph.join(' / ')+'. Расшифровка монолога: """'+tr+'""". Критерии: Решение коммуникативной задачи — все пункты плана (max 3), Организация — вступление, завершение, связки (max 3), Языковое оформление (max 4). max=10.'}
+async function spEval(btn){
+  if(!SP||!SP.blob)return;
+  if(btn){if(btn.dataset.busy)return;btn.dataset.busy=1;btn.textContent='Расшифровываю запись…';btn.style.pointerEvents='none'}
+  try{
+    var tr=await spSTT(SP.blob);
+    if(!tr||tr.split(/\s+/).length<3)throw new Error('речь не распознана — говори громче и ближе к микрофону');
+    if(btn)btn.textContent='Оцениваю по критериям…';
+    var fmt='{"got":n,"max":n,"verdict":"короткий итог по-русски","criteria":[{"name":"критерий","got":n,"max":n}],"good":["что получилось хорошо, по-русски"],"fix":[{"wrong":"фраза ученика","right":"как правильнее","note":"пояснение по-русски"}]}';
+    var out=await callGemini('Ты эксперт устной части ЕГЭ по английскому. Оцениваешь строго по критериям ФИПИ, объясняешь по-русски доброжелательно. Текст — автоматическая расшифровка речи: пунктуация может отсутствовать, произношение по ней не оценивай. Верни СТРОГО JSON без markdown.',
+      spEvalCtx(tr)+' Верни JSON: '+fmt+'. В good до 3 пунктов, в fix до 4.');
+    var d=parseJSON(out);
+    if(!d||typeof d.got==='undefined')throw new Error('ИИ вернул неожиданный ответ, попробуй ещё раз');
+    d.got=Math.max(0,+d.got||0);d.max=+d.max||SP_CONF[SP.t].max;
+    S.spkScores=(S.spkScores||[]).concat([{t:SP.t,g:d.got,m:d.max,ts:Date.now()}]).slice(-30);
+    spSync();save();
+    if(btn){btn.style.display='none'}
+    spShowEval(d,tr);
+  }catch(e){
+    if(btn){btn.textContent='✨ Оценить с ИИ · повторить';btn.style.pointerEvents='';delete btn.dataset.busy}
+    try{toast('Не получилось: '+(e.message||'ошибка'))}catch(_){}}}
+function spShowEval(d,tr){var box=document.getElementById('sp_evalbox');if(!box)return;
+  var pct=d.got/(d.max||1);
+  var col=pct>=0.7?'#1F8A50':(pct>=0.4?'#C77400':'#C0392B');
+  var h='<div class="clayCard" style="position:relative;overflow:hidden;padding:18px;margin-top:12px;animation:wflip .5s cubic-bezier(.25,.75,.35,1) both;">'
+    +'<div style="text-align:center;">'
+    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:30px;color:'+col+';">'+d.got+' из '+d.max+'</div>'
+    +'<div style="font-weight:700;font-size:13.5px;color:#2B2B2B;margin-top:4px;">'+(d.verdict||'')+'</div></div>';
+  if(Array.isArray(d.criteria)&&d.criteria.length)
+    h+='<div style="margin-top:12px;">'+d.criteria.map(function(c){
+      return '<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid #F4EFE9;font-weight:600;font-size:12.5px;color:#4A453E;"><span>'+c.name+'</span><b style="flex:none;color:'+((+c.got||0)>=(+c.max||1)?'#1F8A50':'#C77400')+';">'+c.got+' / '+c.max+'</b></div>'}).join('')+'</div>';
+  if(Array.isArray(d.good)&&d.good.length)
+    h+='<div style="margin-top:12px;background:#F2F8F4;border-radius:14px;padding:11px 13px;">'
+      +'<div style="font-weight:800;font-size:10px;letter-spacing:1.2px;color:#1F8A50;">ЧТО ПОЛУЧИЛОСЬ</div>'
+      +d.good.map(function(g){return '<div style="margin-top:5px;font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.5;">• '+g+'</div>'}).join('')+'</div>';
+  if(Array.isArray(d.fix)&&d.fix.length)
+    h+='<div style="margin-top:10px;background:#FDF3EC;border-radius:14px;padding:11px 13px;">'
+      +'<div style="font-weight:800;font-size:10px;letter-spacing:1.2px;color:#E44E20;">НАД ЧЕМ ПОРАБОТАТЬ</div>'
+      +d.fix.map(function(f){return '<div style="margin-top:7px;font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.5;">'
+        +(f.wrong?'<s style="color:#C0392B;">'+f.wrong+'</s> → ':'')+(f.right?'<b style="color:#1F8A50;">'+f.right+'</b><br>':'')+(f.note||'')+'</div>'}).join('')+'</div>';
+  h+='<details style="margin-top:12px;"><summary style="font-weight:700;font-size:12px;color:#98917F;cursor:pointer;">Расшифровка твоей речи</summary>'
+    +'<div style="margin-top:8px;font-weight:500;font-size:12.5px;color:#4A453E;line-height:1.6;font-style:italic;">'+tr+'</div></details>'
+    +'</div>';
+  box.innerHTML=h;
+  try{box.scrollIntoView({behavior:'smooth',block:'start'})}catch(e){}}
+async function spSample(btn){
+  if(!SP)return;var t=SP.t,set=SP.set;
+  if(btn){if(btn.dataset.busy)return;btn.dataset.busy=1;btn.textContent='Готовлю образец…';btn.style.pointerEvents='none'}
+  var ask=t===2?'Составь 4 образцовых прямых вопроса по объявлению "'+set.ad+'" о пунктах: '+set.points.join('; ')+'.'
+    :(t===3?'Составь образцовые развёрнутые ответы (по 2-3 предложения) на вопросы интервью: '+set.qs.join(' | ')+'.'
+    :'Составь образцовый монолог (~170 слов) для задания 4 по теме «'+set.topic+'». Фото: '+set.ph.join(' / ')+'. План: '+set.plan.join('; ')+'.');
+  try{
+    var out=await callGemini('Ты готовишь образцовые ответы устной части ЕГЭ. Уровень B1-B2, живой простой английский. Верни СТРОГО JSON.',ask+' JSON: {"text":"образец на английском"}');
+    var d=parseJSON(out);if(!d||!d.text)throw new Error('не получилось');
+    SP.sample=String(d.text);
+    var box=document.getElementById('sp_evalbox');
+    if(box)box.insertAdjacentHTML('afterbegin','<div class="clayCard" style="padding:16px;margin-top:12px;animation:win .35s both;">'
+      +'<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'
+      +'<span style="font-weight:800;font-size:10px;letter-spacing:1.2px;color:#1F8A50;">ОБРАЗЕЦ ОТ ИИ</span>'
+      +'<span class="clk sq" onclick="spVoiceSample()" style="display:inline-flex;align-items:center;gap:6px;background:#E3F1F5;border-radius:12px;padding:7px 12px;font-weight:800;font-size:11px;color:#3E93A8;cursor:pointer;">🔊 Озвучить</span></div>'
+      +'<div style="margin-top:9px;font-weight:500;font-size:13px;color:#2B2B2B;line-height:1.65;">'+SP.sample+'</div></div>');
+    if(btn){btn.style.display='none'}
+  }catch(e){
+    if(btn){btn.textContent='Образец ответа от ИИ · повторить';btn.style.pointerEvents='';delete btn.dataset.busy}
+    try{toast('Не получилось: '+(e.message||'ошибка'))}catch(_){}}}
+function spVoiceSample(){if(!SP||!SP.sample)return;
+  var parts=(SP.sample.match(/[^.!?]+[.!?]+/g)||[SP.sample]).map(function(x){return {s:0,t:x.trim()}});
   try{lPlayRaw(parts)}catch(e){}}
 /* уборка при уходе с экрана + синк */
 var _t10=tab;tab=function(id){_t10(id);if(id!=='scr9'&&SP){spStopAll();SP=null}};
