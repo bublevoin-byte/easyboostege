@@ -1104,9 +1104,9 @@ const HIST=[];
 function cur(){const o=document.querySelector('.screen.on');return o?o.id:'scr5'}
 function showScreen(id){const t=document.getElementById(id);if(!t)return;document.querySelectorAll('.screen').forEach(s=>s.classList.remove('on'));t.classList.add('on');t.scrollTop=0;var nm=document.getElementById('navmenu');if(nm)nm.classList.remove('open')}
 function show(id){return showScreen(id);}
-function tab(id){if(id!==cur())HIST.push(cur());showScreen(id);if(id==='scr2')initWords();if(id==='scr8')setTask(curTask)}
+function tab(id){const c=cur();if(id!==c&&c!=='scr5'&&c!=='scr6')HIST.push(c);showScreen(id);if(id==='scr2')initWords();if(id==='scr8')setTask(curTask)}
 function nav(id){tab(id)}
-function back(){showScreen(HIST.pop()||'scr1')}
+function back(){let id=HIST.pop()||'scr1';if(id==='scr5'||id==='scr6')id='scr1';showScreen(id)}
 (function(){const m=document.getElementById('navmenu');document.querySelectorAll('.screen').forEach(sc=>{const b=document.createElement('button');b.textContent=sc.id.replace('scr','')+' · '+sc.dataset.name;b.onclick=()=>{HIST.length=0;tab(sc.id)};m.appendChild(b)})})();
 
 /* ---------- STATE ---------- */
