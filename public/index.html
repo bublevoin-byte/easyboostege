@@ -1226,7 +1226,7 @@ function wire(){
   if(s1)s1.querySelectorAll('div,span').forEach(el=>{const t=txt(el);if(TILEROUTE[t]&&el.children.length===0){const card=el.closest('div');(card||el).classList.add('clk');(card||el).addEventListener('click',e=>{e.stopPropagation();nav(TILEROUTE[t])})}});
   bindText('scr5','Войти',()=>doLogin());bindText('scr5','Создать',()=>doRegister());
   bindText('scr6','Поехали',()=>startApp());bindText('scr6','Пропустить',()=>startApp());
-  bindText('scr11','Выйти',()=>{localStorage.removeItem('eb_current');location.reload()});
+  bindText('scr11','Выйти',()=>logout());
   bindText('scr14','Повторить',()=>tab('scr8'));bindText('scr14','Учить офлайн',()=>tab('scr2'));
 }
 
@@ -1852,5 +1852,59 @@ tgClick=async function(e){
   try{ window.location.href=TG_URL; }catch(_){}
   return false;
 };
+</script>
+<script>
+/* ===== SESSION v2: постоянный вход, восстановление сессии, подписка ===== */
+(function(){
+  function saveTok(t,u){if(t){TOKEN=t;try{localStorage.setItem('eb_token',t)}catch(_){}}
+    if(u){currentUser=u;try{localStorage.setItem('eb_current',u)}catch(_){}}}
+  async function me(){try{return await apiGet('/api/me')}catch(e){return null}}
+  window.ebMe=me;
+  /* вход через Telegram переживает перезагрузку страницы */
+  try{
+    var _tp=tgPoll;
+    tgPoll=function(){try{if(TG_CODE)localStorage.setItem('eb_tg_code',TG_CODE)}catch(_){};_tp()};
+    var pc=localStorage.getItem('eb_tg_code');
+    if(!TOKEN&&pc){TG_CODE=pc;tgPoll();}
+  }catch(_){}
+  setInterval(function(){if(TOKEN){try{localStorage.removeItem('eb_tg_code')}catch(_){}}},3000);
+  /* восстановление сессии из cookie + продление токена при каждом заходе */
+  (async function(){
+    if(typeof SRV==='undefined'||!SRV)return;
+    var m=await me();
+    if(m&&m.username){
+      var had=!!TOKEN;
+      saveTok(m.token||TOKEN,m.username);
+      window.__sub=m;
+      if(!had){try{localStorage.removeItem('eb_tg_code')}catch(_){};startApp();}
+    }
+  })();
+  /* выход: чистим и cookie на сервере */
+  logout=function(){
+    try{apiPost('/api/logout',{})}catch(_){}
+    TOKEN='';
+    try{localStorage.removeItem('eb_token');localStorage.removeItem('eb_current');localStorage.removeItem('eb_tg_code')}catch(_){}
+    setTimeout(function(){location.reload()},200)};
+  /* статус подписки в профиле */
+  function fmt(ts){var d=new Date(ts);return ('0'+d.getDate()).slice(-2)+'.'+('0'+(d.getMonth()+1)).slice(-2)+'.'+d.getFullYear()}
+  function subLine(m){
+    if(!m||!m.sub_until)return ['Доступ не активирован — открой бота','#C77400','#FFF4DE'];
+    var left=Math.max(0,Math.ceil((m.sub_until-Date.now())/86400000));
+    if(m.active)return ['Подписка до '+fmt(m.sub_until)+' · осталось '+left+' дн.','#1F8A50','#EAF7F0'];
+    return ['Подписка закончилась '+fmt(m.sub_until),'#C0392B','#FDEDEA'];
+  }
+  var _rp=renderProfile;
+  renderProfile=function(){_rp();
+    if(typeof SRV==='undefined'||!SRV)return;
+    var host=document.getElementById('pf_name');if(!host||!host.parentElement)return;
+    var el=document.getElementById('pf_sub');
+    if(!el){el=document.createElement('div');el.id='pf_sub';
+      el.setAttribute('style','display:inline-block;margin-top:6px;font:700 11.5px Manrope,sans-serif;padding:5px 10px;border-radius:20px;');
+      host.parentElement.appendChild(el);}
+    var use=function(m){var s=subLine(m);el.textContent=s[0];el.style.color=s[1];el.style.background=s[2]};
+    if(window.__sub)use(window.__sub);
+    me().then(function(m){if(m){window.__sub=m;use(m)}});
+  };
+})();
 </script>
 </body></html>

@@ -30,14 +30,29 @@ const tgReady = {};   // code -> {telegram_id, name} (подтверждён)
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
+app.get('/', (req, res, next) => {
+  const t = req.query.t;
+  if (!t) return next();
+  try { jwt.verify(t, SECRET); setAuthCookie(req, res, t); } catch (e) {}
+  res.redirect('/');
+});
 app.use(express.static(path.join(__dirname, 'public')));
 
 function makeToken(username) {
-  return jwt.sign({ u: username }, SECRET, { expiresIn: '60d' });
+  return jwt.sign({ u: username }, SECRET, { expiresIn: '365d' });
+}
+function getCookie(req, name) {
+  const c = req.headers.cookie || '';
+  const m = c.match(new RegExp('(?:^|;\\s*)' + name + '=([^;]+)'));
+  return m ? decodeURIComponent(m[1]) : '';
+}
+function setAuthCookie(req, res, token) {
+  const secure = (req.headers['x-forwarded-proto'] || req.protocol) === 'https' ? '; Secure' : '';
+  res.setHeader('Set-Cookie', 'eb_token=' + encodeURIComponent(token) + '; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax' + secure);
 }
 function auth(req, res, next) {
   const h = req.headers.authorization || '';
-  const token = h.startsWith('Bearer ') ? h.slice(7) : '';
+  const token = (h.startsWith('Bearer ') ? h.slice(7) : '') || getCookie(req, 'eb_token');
   try {
     req.user = jwt.verify(token, SECRET).u;
     next();
@@ -195,12 +210,20 @@ app.get('/api/tg/check', (req, res) => {
   delete tgReady[code]; delete tgCodes[code];
   const existing = getUserByTelegram(r.telegram_id);
   const uname = existing ? existing.username : createTelegramUser(r.telegram_id, r.name);
-  res.json({ token: makeToken(uname), username: uname, ...getSub(uname), bot: BOT_USERNAME });
+  const token = makeToken(uname);
+  setAuthCookie(req, res, token);
+  res.json({ token, username: uname, ...getSub(uname), bot: BOT_USERNAME });
 });
 
 // ---- статус доступа (подписка) ----
 app.get('/api/me', auth, (req, res) => {
-  res.json({ username: req.user, bot: BOT_USERNAME, ...getSub(req.user) });
+  const token = makeToken(req.user);
+  setAuthCookie(req, res, token);
+  res.json({ username: req.user, token, bot: BOT_USERNAME, ...getSub(req.user) });
+});
+app.post('/api/logout', (req, res) => {
+  res.setHeader('Set-Cookie', 'eb_token=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax');
+  res.json({ ok: true });
 });
 
 // ---- прогресс ----
