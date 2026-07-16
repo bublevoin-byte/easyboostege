@@ -73,6 +73,9 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
 @keyframes wpop{0%{transform:scale(1)}40%{transform:scale(1.045)}100%{transform:scale(1)}}
 @keyframes win{0%{opacity:.35;transform:translateY(10px)}100%{opacity:1;transform:none}}
 @media(prefers-reduced-motion:reduce){#w_card{animation:none!important}}
+@keyframes lspin{to{transform:rotate(360deg)}}
+@keyframes leq{0%,100%{transform:scaleY(.35)}50%{transform:scaleY(1)}}
+@keyframes lpulse{0%,100%{box-shadow:0 12px 26px rgba(242,104,63,.35)}50%{box-shadow:0 14px 38px rgba(242,104,63,.62)}}
 </style></head><body>
 <button id="navfab" onclick="document.getElementById('navmenu').classList.toggle('open')">Экраны ▾</button>
 <div id="navmenu"></div>
@@ -3469,17 +3472,30 @@ function lVoice(i){try{var vs=(speechSynthesis.getVoices()||[]).filter(function(
 function lPlayRaw(lines){
   if(!('speechSynthesis'in window)){try{toast('Озвучка недоступна в этом браузере')}catch(e){}return}
   lStop();
-  lines.forEach(function(ln){var u=new SpeechSynthesisUtterance(ln.t);
+  var us=lines.map(function(ln){var u=new SpeechSynthesisUtterance(ln.t);
     u.lang='en-GB';u.rate=LSLOW?0.68:0.85;u.pitch=ln.s?1.15:0.92;
-    var v=lVoice(ln.s);if(v)u.voice=v;
-    speechSynthesis.speak(u)})}
+    var v=lVoice(ln.s);if(v)u.voice=v;return u});
+  if(us.length){us[us.length-1].onend=function(){try{lPlayBtn('')}catch(e){}};try{lPlayBtn('play')}catch(e){}}
+  us.forEach(function(u){speechSynthesis.speak(u)})}
 function lPlay(lines){LPLAYS++;lPlaysUi();lPlayRaw(lines)}
 function lPlaysUi(){var el=document.getElementById('l_plays');if(!el)return;
   el.textContent=LPLAYS<=2?('прослушиваний: '+LPLAYS+' из 2'):(LPLAYS+'-е — на ЕГЭ так нельзя!');
   el.style.color=LPLAYS<=2?'#1F8A50':'#C77400';el.style.background=LPLAYS<=2?'#EAF7F0':'#FFF4DE'}
+var L_PLAYSVG='<svg width="17" height="17" viewBox="0 0 24 24" fill="#fff"><path d="M7 5v14l12-7z"/></svg>';
+function lPlayBtn(st){var b=document.getElementById('l_playbtn'),ic=document.getElementById('l_playic'),tx=document.getElementById('l_playtx');
+  if(!b||!ic||!tx)return;
+  if(st==='load'){b.style.animation='lpulse 1.1s ease-in-out infinite';b.style.pointerEvents='none';
+    ic.innerHTML='<span style="display:block;width:18px;height:18px;border-radius:50%;border:2.5px solid rgba(255,255,255,.4);border-top-color:#fff;animation:lspin .8s linear infinite;"></span>';
+    tx.textContent='Готовлю озвучку…'}
+  else if(st==='play'){b.style.animation='';b.style.pointerEvents='';
+    ic.innerHTML='<span style="display:flex;align-items:flex-end;gap:2.5px;height:18px;">'
+      +[0,1,2,3].map(function(i){return '<span style="width:3.5px;height:18px;border-radius:2px;background:#fff;transform-origin:bottom;animation:leq '+(0.7+i*0.13)+'s ease-in-out infinite;"></span>'}).join('')+'</span>';
+    tx.textContent='Играет'}
+  else{b.style.animation='';b.style.pointerEvents='';ic.innerHTML=L_PLAYSVG;tx.textContent='Слушать'}}
 function lCtl(fn){
   return '<div style="display:flex;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap;">'
-    +'<button class="sq" onclick="'+fn+'" style="flex:none;display:inline-flex;align-items:center;gap:7px;background:linear-gradient(135deg,#FFA570,#F2683F);border:none;border-radius:15px;padding:11px 16px;font-family:Manrope,sans-serif;font-weight:800;font-size:13.5px;color:#fff;cursor:pointer;box-shadow:0 10px 20px rgba(242,104,63,.3);"><svg width="14" height="14" viewBox="0 0 24 24" fill="#fff"><path d="M7 5v14l12-7z"/></svg>Слушать</button>'
+    +'<button id="l_playbtn" class="sq" onclick="'+fn+'" style="flex:1;min-width:160px;min-height:54px;display:inline-flex;align-items:center;justify-content:center;gap:10px;background:linear-gradient(135deg,#FFA570,#F2683F);border:none;border-radius:18px;padding:0 18px;font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:16px;color:#fff;cursor:pointer;box-shadow:0 12px 26px rgba(242,104,63,.35),inset 0 2px 3px rgba(255,255,255,.4),inset 0 -4px 8px rgba(190,55,18,.28);">'
+    +'<span id="l_playic" style="display:grid;place-items:center;width:22px;">'+L_PLAYSVG+'</span><span id="l_playtx">Слушать</span></button>'
     +'<button class="sq" onclick="lStop()" style="flex:none;width:40px;height:40px;border-radius:14px;border:1px solid #F0EAE2;background:#fff;cursor:pointer;display:grid;place-items:center;"><svg width="13" height="13" viewBox="0 0 24 24" fill="#8A8F98"><rect x="5" y="5" width="14" height="14" rx="2"/></svg></button>'
     +'<button class="sq" onclick="LSLOW=!LSLOW;this.style.background=LSLOW?\'#FFEDE4\':\'#fff\';this.style.color=LSLOW?\'#E44E20\':\'#8A8F98\'" style="flex:none;height:40px;border-radius:14px;border:1px solid #F0EAE2;background:'+(LSLOW?'#FFEDE4':'#fff')+';color:'+(LSLOW?'#E44E20':'#8A8F98')+';padding:0 13px;font-family:Manrope,sans-serif;font-weight:800;font-size:12px;cursor:pointer;">0.7×</button>'
     +'<span id="l_plays" style="flex:none;font-weight:800;font-size:11px;padding:7px 11px;border-radius:14px;color:#8A8F98;background:#F1F2F4;">прослушиваний: 0 из 2</span></div>'}
@@ -3682,7 +3698,8 @@ function lExamPlay(){if(!LE)return;
     el.style.color=LE.plays[LE.stage]>=2?'#C77400':'#1F8A50';el.style.background=LE.plays[LE.stage]>=2?'#FFF4DE':'#EAF7F0'}}
 function lExamCtl(){
   return '<div style="display:flex;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap;">'
-    +'<button class="sq" onclick="lExamPlay()" style="flex:none;display:inline-flex;align-items:center;gap:7px;background:linear-gradient(135deg,#FFA570,#F2683F);border:none;border-radius:15px;padding:11px 16px;font-family:Manrope,sans-serif;font-weight:800;font-size:13.5px;color:#fff;cursor:pointer;box-shadow:0 10px 20px rgba(242,104,63,.3);"><svg width="14" height="14" viewBox="0 0 24 24" fill="#fff"><path d="M7 5v14l12-7z"/></svg>Слушать</button>'
+    +'<button id="l_playbtn" class="sq" onclick="lExamPlay()" style="flex:1;min-width:160px;min-height:54px;display:inline-flex;align-items:center;justify-content:center;gap:10px;background:linear-gradient(135deg,#FFA570,#F2683F);border:none;border-radius:18px;padding:0 18px;font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:16px;color:#fff;cursor:pointer;box-shadow:0 12px 26px rgba(242,104,63,.35),inset 0 2px 3px rgba(255,255,255,.4),inset 0 -4px 8px rgba(190,55,18,.28);">'
+    +'<span id="l_playic" style="display:grid;place-items:center;width:22px;">'+L_PLAYSVG+'</span><span id="l_playtx">Слушать</span></button>'
     +'<button class="sq" onclick="lStop()" style="flex:none;width:40px;height:40px;border-radius:14px;border:1px solid #F0EAE2;background:#fff;cursor:pointer;display:grid;place-items:center;"><svg width="13" height="13" viewBox="0 0 24 24" fill="#8A8F98"><rect x="5" y="5" width="14" height="14" rx="2"/></svg></button>'
     +'<span id="lex_plays" style="flex:none;font-weight:800;font-size:11px;padding:7px 11px;border-radius:14px;color:'+(LE.plays[LE.stage]>=2?'#C77400':'#1F8A50')+';background:'+(LE.plays[LE.stage]>=2?'#FFF4DE':'#EAF7F0')+';">прослушиваний: '+LE.plays[LE.stage]+' из 2</span></div>'}
 function lExamNextBtn(ok,label,fn){
@@ -3819,7 +3836,7 @@ var _sa5=startApp;startApp=async function(){await _sa5.apply(this,arguments);try
   function stopAudio(){seq++;if(cur){try{cur.pause()}catch(e){}cur=null}}
   /* стоп глушит и нейро, и встроенный синтез */
   if(typeof lStop==='function'){
-    lStop=function(){stopAudio();try{speechSynthesis.cancel()}catch(e){}}}
+    lStop=function(){stopAudio();try{speechSynthesis.cancel()}catch(e){};try{lPlayBtn('')}catch(e){}}}
   /* диалоги и монологи */
   if(typeof lPlayRaw==='function'){
     var _raw=lPlayRaw;
@@ -3827,16 +3844,18 @@ var _sa5=startApp;startApp=async function(){await _sa5.apply(this,arguments);try
       if(typeof SRV==='undefined'||!SRV||!TOKEN){_raw(lines);return}
       stopAudio();try{speechSynthesis.cancel()}catch(e){}
       var my=++seq;
+      try{lPlayBtn('load')}catch(e){}
       Promise.all(lines.map(function(ln){
         return fetchAudio(ln.t,ln.s?'en-GB-SoniaNeural':'en-GB-RyanNeural',LSLOW)}))
       .then(function(urls){
         if(my!==seq)return;
         var i=0;
         (function next(){
-          if(my!==seq||i>=urls.length){if(my===seq)cur=null;return}
+          if(my!==seq||i>=urls.length){if(my===seq){cur=null;try{lPlayBtn('')}catch(e){}}return}
+          if(i===0)try{lPlayBtn('play')}catch(e){}
           cur=new Audio(urls[i++]);cur.onended=next;cur.onerror=next;
           cur.play().catch(function(){next()})})()})
-      .catch(function(){if(my===seq)_raw(lines)})}}
+      .catch(function(){if(my===seq){try{lPlayBtn('')}catch(e){}_raw(lines)}})}}
   /* отдельные слова */
   if(typeof wSpeak==='function'){
     var _ws=wSpeak;
