@@ -3466,13 +3466,14 @@ function lVoice(i){try{var vs=(speechSynthesis.getVoices()||[]).filter(function(
   var gb=vs.filter(function(v){return /GB/i.test(v.lang)});
   var pool=gb.length>1?gb:vs;
   return pool[i%pool.length]}catch(e){return null}}
-function lPlay(lines){
+function lPlayRaw(lines){
   if(!('speechSynthesis'in window)){try{toast('Озвучка недоступна в этом браузере')}catch(e){}return}
-  lStop();LPLAYS++;lPlaysUi();
+  lStop();
   lines.forEach(function(ln){var u=new SpeechSynthesisUtterance(ln.t);
     u.lang='en-GB';u.rate=LSLOW?0.68:0.85;u.pitch=ln.s?1.15:0.92;
     var v=lVoice(ln.s);if(v)u.voice=v;
     speechSynthesis.speak(u)})}
+function lPlay(lines){LPLAYS++;lPlaysUi();lPlayRaw(lines)}
 function lPlaysUi(){var el=document.getElementById('l_plays');if(!el)return;
   el.textContent=LPLAYS<=2?('прослушиваний: '+LPLAYS+' из 2'):(LPLAYS+'-е — на ЕГЭ так нельзя!');
   el.style.color=LPLAYS<=2?'#1F8A50':'#C77400';el.style.background=LPLAYS<=2?'#EAF7F0':'#FFF4DE'}
@@ -3499,16 +3500,32 @@ function lHub(){var area=document.getElementById('l_area');if(!area)return;LM=nu
       +'<div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:15.5px;color:#2B2B2B;">'+title+'</div>'
       +'<div style="font-weight:600;font-size:12px;color:#98917F;margin-top:2px;">'+sub+'</div></div>'
       +'<span style="flex:none;font-weight:800;font-size:12px;color:'+color+';background:'+bg+';padding:8px 12px;border-radius:14px;">'+chip+'</span></div></div>'}
-  area.innerHTML=
-    card('lMt()','Соответствия','задание 1 · кто о чём говорит',acc(r.m),'#E44E20','#FFEDE4')
+  var le=S.lisExam||{};
+  var exCard='<div class="sq clk" onclick="lExam()" style="'+ga()+'position:relative;overflow:hidden;border-radius:24px;padding:16px 18px;margin-bottom:12px;cursor:pointer;background:linear-gradient(150deg,#3A3532,#2B2B2B);box-shadow:0 14px 28px rgba(43,35,30,.32),inset 0 2px 3px rgba(255,255,255,.14),inset 0 -5px 10px rgba(0,0,0,.35);">'
+    +'<svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;" viewBox="0 0 346 80" preserveAspectRatio="xMidYMid slice">'
+    +'<g fill="rgba(255,255,255,.75)">'
+    +'<path class="eb5sp" style="animation-delay:.3s" d="M22,14 Q22,17.5 25.5,17.5 Q22,17.5 22,21 Q22,17.5 18.5,17.5 Q22,17.5 22,14 Z"/>'
+    +'<path class="eb5sp" style="animation-delay:1.4s" d="M210,12 Q210,15 213,15 Q210,15 210,18 Q210,15 207,15 Q210,15 210,12 Z"/>'
+    +'<path class="eb5sp" style="animation-delay:.9s" d="M180,58 Q180,61 183,61 Q180,61 180,64 Q180,61 177,61 Q180,61 180,58 Z"/>'
+    +'</g><g fill="rgba(255,178,76,.85)">'
+    +'<path class="eb5sp" style="animation-delay:1.9s" d="M250,30 Q250,34 254,34 Q250,34 250,38 Q250,34 246,34 Q250,34 250,30 Z"/>'
+    +'<path class="eb5sp" style="animation-delay:.6s" d="M60,54 Q60,57.5 63.5,57.5 Q60,57.5 60,61 Q60,57.5 56.5,57.5 Q60,57.5 60,54 Z"/>'
+    +'</g></svg>'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'
+    +'<div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:15.5px;color:#fff;">Экзамен · задания 1–9</div>'
+    +'<div style="font-weight:600;font-size:12px;color:rgba(255,255,255,.62);margin-top:2px;">'+(le.n?('лучший результат: '+le.best+' из 13'):'три задания подряд · запись дважды')+'</div></div>'
+    +'<span style="flex:none;background:linear-gradient(145deg,#FFC861,#F2683F);border-radius:14px;width:42px;height:42px;display:grid;place-items:center;box-shadow:0 6px 12px rgba(242,104,63,.4),inset 0 2px 3px rgba(255,255,255,.5);">'
+    +'<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span></div></div>';
+  area.innerHTML=exCard
+    +card('lMt()','Соответствия','задание 1 · кто о чём говорит',acc(r.m),'#E44E20','#FFEDE4')
    +card('lTf()','Верно · Неверно · Не сказано','задание 2 · диалог и утверждения',acc(r.tf),'#C77400','#FFF4DE')
    +card('lIq()','Интервью','задания 3–9 · вопросы с выбором',acc(r.iq),'#1F8A50','#EAF7F0')
    +'<div class="clayCard" style="'+ga()+'display:flex;align-items:center;gap:12px;padding:13px 15px;">'
     +'<span style="flex:none;width:38px;height:38px;border-radius:13px;background:#E3F1F5;display:grid;place-items:center;"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#3E93A8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg></span>'
     +'<div style="font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.45;">Сначала прочитай вопросы, потом слушай — как на экзамене. Запись можно включить дважды</div></div>';
-  setTxt('l_today','3 тренажёра')}
+  setTxt('l_today','3 тренажёра');lGen()}
 /* ---- задание 1: соответствия ---- */
-function lMt(){S.lisIdxM=(S.lisIdxM||0);var set=L_M[S.lisIdxM%L_M.length];S.lisIdxM++;
+function lMt(){S.lisIdxM=(S.lisIdxM||0);var pool=lPool('m',L_M);var set=pool[S.lisIdxM%pool.length];S.lisIdxM++;
   LM={set:set,sel:[null,null,null,null],done:false};LPLAYS=0;lMtRender()}
 function lMtLines(){return LM.set.sp.map(function(sp,i){return {s:i%2,t:'Speaker '+'ABCD'[i]+'. '+sp.t}})}
 function lMtRender(){var area=document.getElementById('l_area');var set=LM.set;
@@ -3552,9 +3569,9 @@ function lMtCheck(){if(LM.done)return;LM.done=true;lStop();var set=LM.set,r=lSt(
     +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);margin-top:12px;" onclick="lMt()">Ещё подход</button></div>'
     +lTranscript(lMtLines(),[]);
   area.insertBefore(d,area.firstChild);
-  try{d.scrollIntoView({behavior:'smooth',block:'start'})}catch(e){}}
+  try{d.scrollIntoView({behavior:'smooth',block:'start'})}catch(e){};lGen()}
 /* ---- задание 2: True/False/Not stated ---- */
-function lTf(){S.lisIdxT=(S.lisIdxT||0);var set=L_TF[S.lisIdxT%L_TF.length];S.lisIdxT++;
+function lTf(){S.lisIdxT=(S.lisIdxT||0);var pool=lPool('tf',L_TF);var set=pool[S.lisIdxT%pool.length];S.lisIdxT++;
   LT={set:set,sel:set.st.map(function(){return null}),done:false};LPLAYS=0;lTfRender()}
 function lTfRender(){var area=document.getElementById('l_area');var set=LT.set;
   var LBL=['Верно','Неверно','Не сказано'];
@@ -3592,9 +3609,9 @@ function lTfCheck(){if(LT.done)return;LT.done=true;lStop();var set=LT.set,r=lSt(
     +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);margin-top:12px;" onclick="lTf()">Ещё подход</button></div>'
     +lTranscript(set.d,set.st.map(function(x){return x.ev}));
   area.insertBefore(d,area.firstChild);
-  try{d.scrollIntoView({behavior:'smooth',block:'start'})}catch(e){}}
+  try{d.scrollIntoView({behavior:'smooth',block:'start'})}catch(e){};lGen()}
 /* ---- задания 3-9: интервью ---- */
-function lIq(){S.lisIdxI=(S.lisIdxI||0);var set=L_IN[S.lisIdxI%L_IN.length];S.lisIdxI++;
+function lIq(){S.lisIdxI=(S.lisIdxI||0);var pool=lPool('iq',L_IN);var set=pool[S.lisIdxI%pool.length];S.lisIdxI++;
   LI={set:set,sel:set.qs.map(function(){return null}),done:false};LPLAYS=0;lIqRender()}
 function lIqRender(){var area=document.getElementById('l_area');var set=LI.set;
   var h='<div id="l_card" class="clayCard" style="position:relative;overflow:hidden;padding:16px 18px;margin-bottom:12px;">'+wDeco()
@@ -3630,9 +3647,161 @@ function lIqCheck(){if(LI.done)return;LI.done=true;lStop();var set=LI.set,r=lSt(
     +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);margin-top:12px;" onclick="lIq()">Ещё подход</button></div>'
     +lTranscript(set.d,set.qs.map(function(q){return q.ev}));
   area.insertBefore(d,area.firstChild);
-  try{d.scrollIntoView({behavior:'smooth',block:'start'})}catch(e){}}
+  try{d.scrollIntoView({behavior:'smooth',block:'start'})}catch(e){};lGen()}
+/* ---- экзамен по аудированию: 1 + 2 + 3-9 ---- */
+let LE=null;
+function lExam(){var area=document.getElementById('l_area');if(!area)return;lStop();
+  var st=S.lisExam||{};
+  area.innerHTML='<div id="l_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;">'+wDeco()
+    +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#F2683F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">КАК НА ЕГЭ</span>'
+    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:19px;color:#2B2B2B;margin-top:12px;">Раздел «Аудирование» целиком</div>'
+    +'<div style="font-weight:600;font-size:13.5px;color:#4A453E;line-height:1.6;margin-top:8px;">Соответствия → верно/неверно/не сказано → интервью. Каждую запись можно включить только дважды, разбор — в конце. Максимум 13 баллов.</div>'
+    +(st.n?'<div style="margin-top:12px;font-weight:700;font-size:12.5px;color:#98917F;">Попыток: '+st.n+' · последний: '+st.last+' из 13 · лучший: '+st.best+' из 13</div>':'')
+    +'</div>'
+    +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
+    +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="lExamStart()">Начать</button>'
+    +'<button class="sq" style="'+WBTN+'color:#F2683F;" onclick="lHub()">← К аудированию</button></div>';
+  lAnim('win','.32s')}
+function lExamStart(){
+  var pm=lPool('m',L_M),pt=lPool('tf',L_TF),pi=lPool('iq',L_IN);
+  S.leIdx=(S.leIdx||0);
+  LE={m:pm[S.leIdx%pm.length],tf:pt[S.leIdx%pt.length],iq:pi[S.leIdx%pi.length],
+      stage:0,selM:[null,null,null,null],plays:[0,0,0],t0:Date.now()};
+  LE.selT=LE.tf.st.map(function(){return null});
+  LE.selI=LE.iq.qs.map(function(){return null});
+  S.leIdx++;LSLOW=false;
+  LE.iv=setInterval(function(){if(LE)setTxt('l_today',gExamFmt(Math.floor((Date.now()-LE.t0)/1000)))},1000);
+  lExamRender()}
+function lExamPlay(){if(!LE)return;
+  if(LE.plays[LE.stage]>=2){try{toast('На ЕГЭ запись звучит только дважды')}catch(e){}return}
+  LE.plays[LE.stage]++;
+  var lines=LE.stage===0?LE.m.sp.map(function(sp,i){return{s:i%2,t:'Speaker '+'ABCD'[i]+'. '+sp.t}}):(LE.stage===1?LE.tf.d:LE.iq.d);
+  lPlayRaw(lines);
+  var el=document.getElementById('lex_plays');
+  if(el){el.textContent='прослушиваний: '+LE.plays[LE.stage]+' из 2';
+    el.style.color=LE.plays[LE.stage]>=2?'#C77400':'#1F8A50';el.style.background=LE.plays[LE.stage]>=2?'#FFF4DE':'#EAF7F0'}}
+function lExamCtl(){
+  return '<div style="display:flex;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap;">'
+    +'<button class="sq" onclick="lExamPlay()" style="flex:none;display:inline-flex;align-items:center;gap:7px;background:linear-gradient(135deg,#FFA570,#F2683F);border:none;border-radius:15px;padding:11px 16px;font-family:Manrope,sans-serif;font-weight:800;font-size:13.5px;color:#fff;cursor:pointer;box-shadow:0 10px 20px rgba(242,104,63,.3);"><svg width="14" height="14" viewBox="0 0 24 24" fill="#fff"><path d="M7 5v14l12-7z"/></svg>Слушать</button>'
+    +'<button class="sq" onclick="lStop()" style="flex:none;width:40px;height:40px;border-radius:14px;border:1px solid #F0EAE2;background:#fff;cursor:pointer;display:grid;place-items:center;"><svg width="13" height="13" viewBox="0 0 24 24" fill="#8A8F98"><rect x="5" y="5" width="14" height="14" rx="2"/></svg></button>'
+    +'<span id="lex_plays" style="flex:none;font-weight:800;font-size:11px;padding:7px 11px;border-radius:14px;color:'+(LE.plays[LE.stage]>=2?'#C77400':'#1F8A50')+';background:'+(LE.plays[LE.stage]>=2?'#FFF4DE':'#EAF7F0')+';">прослушиваний: '+LE.plays[LE.stage]+' из 2</span></div>'}
+function lExamNextBtn(ok,label,fn){
+  return '<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);margin-top:4px;'+(ok?'':'opacity:.45;pointer-events:none;')+'" onclick="'+fn+'">'+label+'</button>'}
+function lExamRender(){var area=document.getElementById('l_area');if(!area||!LE)return;
+  if(LE.stage===0){var set=LE.m;
+    var h='<div id="l_card" class="clayCard" style="position:relative;overflow:hidden;padding:16px 18px;margin-bottom:12px;">'+wDeco()
+      +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#E44E20;background:#FFEDE4;padding:5px 10px;border-radius:20px;">ЭКЗАМЕН · 1 ИЗ 3 · СООТВЕТСТВИЯ</span>'
+      +set.st.map(function(x,i){return '<div style="margin-top:8px;font-weight:700;font-size:13px;color:#2B2B2B;"><b style="color:#F2683F;">'+(i+1)+'.</b> '+x+'</div>'}).join('')
+      +lExamCtl()+'</div>';
+    'ABCD'.split('').forEach(function(L,si){
+      h+='<div class="clayCard" style="padding:12px 14px;margin-bottom:10px;display:flex;align-items:center;gap:8px;">'
+        +'<span style="flex:none;font-weight:800;font-size:12px;color:#E44E20;width:82px;">Говорящий '+L+'</span>'
+        +'<div style="flex:1;display:flex;gap:7px;">'
+        +set.st.map(function(_,ti){var on=LE.selM[si]===ti;
+          return '<button onclick="LE.selM['+si+']='+ti+';lExamDedup(\'selM\','+si+','+ti+');lExamRender()" style="flex:1;height:36px;border-radius:11px;border:1.5px solid '+(on?'#F2683F':'#F0EAE2')+';background:'+(on?'#FFEDE4':'#fff')+';font-family:Manrope,sans-serif;font-weight:800;font-size:13px;color:'+(on?'#E44E20':'#8A8F98')+';cursor:pointer;">'+(ti+1)+'</button>'}).join('')+'</div></div>'});
+    h+=lExamNextBtn(LE.selM.every(function(x){return x!==null}),'Дальше → верно/неверно','lStop();LE.stage=1;lExamRender()');
+    area.innerHTML=h;return}
+  if(LE.stage===1){var set=LE.tf,LBL=['Верно','Неверно','Не сказано'];
+    var h='<div id="l_card" class="clayCard" style="position:relative;overflow:hidden;padding:16px 18px;margin-bottom:12px;">'+wDeco()
+      +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#C77400;background:#FFF4DE;padding:5px 10px;border-radius:20px;">ЭКЗАМЕН · 2 ИЗ 3 · ВЕРНО / НЕВЕРНО / НЕ СКАЗАНО</span>'
+      +lExamCtl()+'</div>';
+    set.st.forEach(function(x,i){
+      h+='<div class="clayCard" style="padding:13px 14px;margin-bottom:10px;">'
+        +'<div style="font-weight:700;font-size:13px;color:#2B2B2B;line-height:1.5;">'+(i+1)+'. '+x.t+'</div>'
+        +'<div style="margin-top:9px;display:flex;gap:7px;">'
+        +LBL.map(function(l,li){var on=LE.selT[i]===li;
+          return '<button onclick="LE.selT['+i+']='+li+';lExamRender()" style="flex:1;height:36px;border-radius:11px;border:1.5px solid '+(on?'#F2683F':'#F0EAE2')+';background:'+(on?'#FFEDE4':'#fff')+';font-family:Manrope,sans-serif;font-weight:800;font-size:11.5px;color:'+(on?'#E44E20':'#8A8F98')+';cursor:pointer;">'+l+'</button>'}).join('')+'</div></div>'});
+    h+=lExamNextBtn(LE.selT.every(function(x){return x!==null}),'Дальше → интервью','lStop();LE.stage=2;lExamRender()');
+    area.innerHTML=h;return}
+  var set=LE.iq;
+  var h='<div id="l_card" class="clayCard" style="position:relative;overflow:hidden;padding:16px 18px;margin-bottom:12px;">'+wDeco()
+    +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#1F8A50;background:#EAF7F0;padding:5px 10px;border-radius:20px;">ЭКЗАМЕН · 3 ИЗ 3 · ИНТЕРВЬЮ</span>'
+    +lExamCtl()+'</div>';
+  set.qs.forEach(function(q,i){
+    h+='<div class="clayCard" style="padding:13px 14px;margin-bottom:10px;">'
+      +'<div style="font-weight:700;font-size:13px;color:#2B2B2B;line-height:1.5;">'+(i+1)+'. '+q.q+'</div>'
+      +'<div style="margin-top:9px;display:flex;flex-direction:column;gap:7px;">'
+      +q.o.map(function(o,oi){var on=LE.selI[i]===oi;
+        return '<button onclick="LE.selI['+i+']='+oi+';lExamRender()" style="text-align:left;padding:10px 12px;border-radius:12px;border:1.5px solid '+(on?'#F2683F':'#F0EAE2')+';background:'+(on?'#FFEDE4':'#fff')+';font-family:Manrope,sans-serif;font-weight:700;font-size:12.5px;color:'+(on?'#E44E20':'#5b5f66')+';cursor:pointer;">'+o+'</button>'}).join('')+'</div></div>'});
+  h+=lExamNextBtn(LE.selI.every(function(x){return x!==null}),'Завершить','lExamFinish()');
+  area.innerHTML=h}
+function lExamDedup(field,idx,val){LE[field]=LE[field].map(function(x,i){return i===idx?val:(x===val?null:x)})}
+function lExamFinish(){if(!LE)return;clearInterval(LE.iv);lStop();
+  var sec=Math.floor((Date.now()-LE.t0)/1000),r=lSt(),LBL=['Верно','Неверно','Не сказано'];
+  var okM=0;LE.m.a.forEach(function(a,si){r.m.tot++;if(LE.selM[si]===a){okM++;r.m.ok++}});
+  var okT=0;LE.tf.st.forEach(function(x,i){r.tf.tot++;if(LE.selT[i]===x.a){okT++;r.tf.ok++}});
+  var okI=0;LE.iq.qs.forEach(function(q,i){r.iq.tot++;if(LE.selI[i]===q.a){okI++;r.iq.ok++}});
+  var total=okM+okT+okI;
+  var st=S.lisExam||{n:0,last:0,best:0};st.n++;st.last=total;st.best=Math.max(st.best||0,total);S.lisExam=st;
+  var rows='';
+  LE.m.a.forEach(function(a,si){if(LE.selM[si]!==a)
+    rows+='<div style="padding:9px 2px;border-bottom:1px solid #F4EFE9;"><div style="font-weight:800;font-size:12.5px;color:#C0392B;">Говорящий '+'ABCD'[si]+' → '+(a+1)+'. '+LE.m.st[a]+'</div><div style="font-weight:600;font-size:12px;color:#98917F;margin-top:3px;">'+LE.m.k[si]+'</div></div>'});
+  LE.tf.st.forEach(function(x,i){if(LE.selT[i]!==x.a)
+    rows+='<div style="padding:9px 2px;border-bottom:1px solid #F4EFE9;"><div style="font-weight:800;font-size:12.5px;color:#C0392B;">Утверждение '+(i+1)+' → '+LBL[x.a]+'</div><div style="font-weight:600;font-size:12px;color:#98917F;margin-top:3px;">«'+x.ev+'» — '+x.e+'</div></div>'});
+  LE.iq.qs.forEach(function(q,i){if(LE.selI[i]!==q.a)
+    rows+='<div style="padding:9px 2px;border-bottom:1px solid #F4EFE9;"><div style="font-weight:800;font-size:12.5px;color:#C0392B;">Вопрос '+(i+1)+' → '+q.o[q.a]+'</div><div style="font-weight:600;font-size:12px;color:#98917F;margin-top:3px;">«'+q.ev+'»</div></div>'});
+  var tr1=lTranscript(LE.m.sp.map(function(sp,i){return{s:i%2,t:'Speaker '+'ABCD'[i]+'. '+sp.t}}),[]);
+  var tr2=lTranscript(LE.tf.d,LE.tf.st.map(function(x){return x.ev}));
+  var tr3=lTranscript(LE.iq.d,LE.iq.qs.map(function(q){return q.ev}));
+  LE=null;r.done++;lSync();save();
+  var parts=[['Соответствия',okM,4],['Верно/неверно',okT,5],['Интервью',okI,4]];
+  var weak=parts.slice().sort(function(a,b){return a[1]/a[2]-b[1]/b[2]})[0];
+  var area=document.getElementById('l_area');
+  area.innerHTML='<div id="l_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;">'+wDeco()
+    +'<div style="text-align:center;"><div style="font-size:42px;">'+(total>=12?'🏆':(total>=8?'💪':'📚'))+'</div>'
+    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:22px;color:#2B2B2B;margin-top:8px;">'+total+' из 13</div>'
+    +'<div style="font-weight:600;font-size:13px;color:#98917F;margin-top:4px;">Время: '+gExamFmt(sec)+' · '+parts.map(function(p){return p[0]+' '+p[1]+'/'+p[2]}).join(' · ')+'</div>'
+    +(total<13?'<div style="font-weight:700;font-size:12.5px;color:#C77400;margin-top:6px;">Слабое место: '+weak[0].toLowerCase()+' — потренируй отдельно</div>':'')
+    +'</div>'+(rows?'<div style="margin-top:12px;">'+rows+'</div>':'')+'</div>'
+    +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
+    +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="lExamStart()">Ещё раз</button>'
+    +'<button class="sq" style="'+WBTN+'color:#F2683F;" onclick="lHub()">К аудированию</button></div>'
+    +tr1+tr2+tr3;
+  lAnim('win','.32s');lGen()}
+/* ---- фоновая ИИ-генерация комплектов аудирования ---- */
+function lPool(kind,base){var ai=(S&&S.lisAi&&S.lisAi[kind])||[];return base.concat(ai)}
+var L_GEN=false;
+async function lGen(){
+  if(L_GEN)return;if(typeof SRV==='undefined'||!SRV||!TOKEN)return;
+  S.lisAi=S.lisAi||{m:[],tf:[],iq:[]};
+  var kind=null;
+  if(lPool('m',L_M).length<5)kind='m';
+  else if(lPool('tf',L_TF).length<5)kind='tf';
+  else if(lPool('iq',L_IN).length<5)kind='iq';
+  if(!kind)return;L_GEN=true;
+  try{
+    var sys='Ты составляешь задания по аудированию для ЕГЭ по английскому (уровень B1-B2, британский английский, темы: школа, семья, хобби, спорт, путешествия, экология). Текст будет озвучен синтезом речи. Только JSON, без пояснений.';
+    var out,d,item=null;
+    if(kind==='m'){
+      out=await callGemini(sys,'Комплект задания 1: 4 коротких монолога (2-3 предложения) и 5 утверждений, одно лишнее. JSON: {"st":["5 утверждений на английском вида The speaker …"],"sp":[{"t":"монолог"}],"a":[индексы утверждений для говорящих A-D, все разные],"k":["4 объяснения по-русски: ключевые слова"]}');
+      d=parseJSON(out);
+      if(d&&Array.isArray(d.st)&&d.st.length===5&&Array.isArray(d.sp)&&d.sp.length===4
+        &&Array.isArray(d.a)&&d.a.length===4&&d.a.every(function(x){return x>=0&&x<5})&&new Set(d.a.map(Number)).size===4
+        &&Array.isArray(d.k)&&d.k.length===4&&d.sp.every(function(s){return s&&s.t})){
+        item={st:d.st.map(String),sp:d.sp.map(function(s){return{t:String(s.t)}}),a:d.a.map(Number),k:d.k.map(String)}}
+    }else if(kind==='tf'){
+      out=await callGemini(sys,'Комплект задания 2: диалог двух людей (6-8 реплик) и 5 утверждений True/False/Not stated (обязательно хотя бы одно Not stated). JSON: {"d":[{"s":0_или_1,"t":"реплика"}],"st":[{"t":"утверждение","a":0_true_1_false_2_notstated,"ev":"цитата из диалога","e":"объяснение по-русски"}]}');
+      d=parseJSON(out);
+      if(d&&Array.isArray(d.d)&&d.d.length>=5&&d.d.every(function(x){return x&&x.t&&(x.s===0||x.s===1)})
+        &&Array.isArray(d.st)&&d.st.length===5
+        &&d.st.every(function(x){return x&&x.t&&x.a>=0&&x.a<3&&x.ev&&x.e})
+        &&d.st.some(function(x){return +x.a===2})){
+        item={d:d.d.map(function(x){return{s:+x.s,t:String(x.t)}}),st:d.st.map(function(x){return{t:String(x.t),a:+x.a,ev:String(x.ev),e:String(x.e)}})}}
+    }else{
+      out=await callGemini(sys,'Комплект заданий 3-9: интервью (7-9 реплик, s:1 — ведущий, s:0 — гость) и 4 вопроса с 3 вариантами. JSON: {"d":[{"s":0_или_1,"t":"реплика"}],"qs":[{"q":"вопрос","o":["3 варианта"],"a":индекс_0_2,"ev":"цитата из интервью","e":"объяснение по-русски"}]}');
+      d=parseJSON(out);
+      if(d&&Array.isArray(d.d)&&d.d.length>=6&&d.d.every(function(x){return x&&x.t&&(x.s===0||x.s===1)})
+        &&Array.isArray(d.qs)&&d.qs.length===4
+        &&d.qs.every(function(q){return q&&q.q&&Array.isArray(q.o)&&q.o.length===3&&q.a>=0&&q.a<3&&q.ev&&q.e})){
+        item={d:d.d.map(function(x){return{s:+x.s,t:String(x.t)}}),qs:d.qs.map(function(q){return{q:String(q.q),o:q.o.map(String),a:+q.a,ev:String(q.ev),e:String(q.e)}})}}
+    }
+    if(item){S.lisAi[kind]=(S.lisAi[kind]||[]).concat([item]);save()}
+  }catch(e){}
+  L_GEN=false;
+  try{var need=lPool('m',L_M).length<5||lPool('tf',L_TF).length<5||lPool('iq',L_IN).length<5;
+    if(need)setTimeout(lGen,4000)}catch(e){}}
 /* FAB прячем, звук глушим при уходе, синк при старте */
-var _t8=tab;tab=function(id){_t8(id);lStop();if(id==='scr4'){var f=document.getElementById('genfab');if(f)f.style.display='none'}};
+var _t8=tab;tab=function(id){_t8(id);lStop();if(LE&&LE.iv){clearInterval(LE.iv);LE=null}if(id==='scr4'){var f=document.getElementById('genfab');if(f)f.style.display='none'}};
 var _sa5=startApp;startApp=async function(){await _sa5.apply(this,arguments);try{lSync()}catch(e){}};
 
 </script>
