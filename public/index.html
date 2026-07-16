@@ -307,7 +307,7 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
             <svg width="46" height="46" viewBox="0 0 44 44"><defs><linearGradient id="r4" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5FB6C9"/><stop offset="1" stop-color="#3E93A8"/></linearGradient></defs><circle cx="22" cy="22" r="18" fill="none" stroke="#F1EDE7" stroke-width="5.5"/><circle cx="22" cy="22" r="18" fill="none" stroke="url(#r4)" stroke-width="5.5" stroke-linecap="round" stroke-dasharray="113.1" stroke-dashoffset="79.2" id="ring_listen" transform="rotate(-90 22 22)"/><text x="22" y="26" text-anchor="middle" font-family="Nunito,Manrope" font-weight="800" font-size="11" fill="#2B2B2B" id="m_listen">30</text></svg>
           </div>
           <span style="display:block;margin-top:12px;font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:16.5px;color:#2B2B2B;">Аудирование</span>
-          <div style="font-weight:600;font-size:12px;color:#98917F;margin-top:2px;">слабое место</div>
+          <div id="sub_listen" style="font-weight:600;font-size:12px;color:#98917F;margin-top:2px;">начни с первого диалога</div>
         </div>
       </div>
       <!-- mascot tip -->
@@ -448,7 +448,23 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
 </div>
 <div class="screen" id="scr4" data-name="Аудирование">
 
-    <div style="position:absolute;top:0;left:0;right:0;height:158px;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:0 0 30px 30px;z-index:1;"></div>
+    <!-- starry gradient header -->
+    <div style="position:absolute;top:0;left:0;right:0;height:206px;background:linear-gradient(150deg,#FFA570 0%,#F2683F 62%,#E44E20 100%);border-radius:0 0 32px 32px;z-index:1;overflow:hidden;box-shadow:0 14px 30px rgba(242,104,63,.25),inset 0 -8px 18px rgba(190,55,18,.22);">
+      <svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;" viewBox="0 0 390 206" preserveAspectRatio="xMidYMid slice" fill="rgba(255,255,255,.85)">
+        <path class="eb5sp" style="animation-delay:.2s" d="M30,60 Q30,64 34,64 Q30,64 30,68 Q30,64 26,64 Q30,64 30,60 Z"/>
+        <path class="eb5sp" style="animation-delay:1s" d="M355,48 Q355,52 359,52 Q355,52 355,56 Q355,52 351,52 Q355,52 355,48 Z"/>
+        <path class="eb5sp" style="animation-delay:1.6s" d="M330,160 Q330,164 334,164 Q330,164 330,168 Q330,164 326,164 Q330,164 330,160 Z"/>
+        <path class="eb5sp" style="animation-delay:.6s" d="M45,150 Q45,154 49,154 Q45,154 45,158 Q45,154 41,154 Q45,154 45,150 Z"/>
+        <path class="eb5sp" style="animation-delay:2s" d="M200,40 Q200,43.5 203.5,43.5 Q200,43.5 200,47 Q200,43.5 196.5,43.5 Q200,43.5 200,40 Z"/>
+        <path class="eb5sp" style="animation-delay:.9s" d="M120,30 Q120,34.5 124.5,34.5 Q120,34.5 120,39 Q120,34.5 115.5,34.5 Q120,34.5 120,30 Z"/>
+        <path class="eb5sp" style="animation-delay:1.3s" d="M280,80 Q280,84 284,84 Q280,84 280,88 Q280,84 276,84 Q280,84 280,80 Z"/>
+        <path class="eb5sp" style="animation-delay:.4s" d="M150,120 Q150,123.5 153.5,123.5 Q150,123.5 150,127 Q150,123.5 146.5,123.5 Q150,123.5 150,120 Z"/>
+        <path class="eb5sp" style="animation-delay:1.8s" d="M245,150 Q245,154.5 249.5,154.5 Q245,154.5 245,159 Q245,154.5 240.5,154.5 Q245,154.5 245,150 Z"/>
+        <path class="eb5sp" style="animation-delay:.1s" d="M310,115 Q310,118.5 313.5,118.5 Q310,118.5 310,122 Q310,118.5 306.5,118.5 Q310,118.5 310,115 Z"/>
+      </svg>
+      <div style="position:absolute;top:-40px;right:-30px;width:130px;height:130px;border-radius:50%;background:rgba(255,255,255,.12);"></div>
+      <div style="position:absolute;bottom:-55px;left:-35px;width:150px;height:150px;border-radius:50%;background:rgba(255,255,255,.09);"></div>
+    </div>
     <!-- status bar white -->
     <div style="position:absolute;top:0;left:0;right:0;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 7px;z-index:6;">
       <span style="font-weight:700;font-size:15px;color:#fff;">9:41</span>
@@ -465,42 +481,14 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
         <div style="font-weight:800;font-size:18px;color:#fff;">Аудирование</div>
         <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round"><line x1="5" y1="8" x2="19" y2="8"/><line x1="5" y1="12" x2="19" y2="12"/><line x1="5" y1="16" x2="19" y2="16"/></svg>
       </div>
-      <div style="margin-top:14px;display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,.22);border-radius:30px;padding:6px 13px;font-weight:700;font-size:12.5px;color:#fff;">💪 Слабое место — качаем</div>
-    </div>
-    <!-- body -->
-    <div style="position:absolute;top:174px;left:0;right:0;bottom:0;padding:0 22px 100px;z-index:5;overflow:hidden;">
-      <!-- player card -->
-      <div style="background:#fff;border-radius:24px;padding:22px;box-shadow:0 14px 34px rgba(20,20,30,.08);">
-        <div style="display:flex;align-items:center;gap:16px;">
-          <div id="l_play" onclick="playListen()" style="width:62px;height:62px;flex:none;border-radius:50%;background:linear-gradient(135deg,#FFA570,#F2683F);display:grid;place-items:center;box-shadow:0 12px 24px rgba(242,104,63,.34);cursor:pointer;"><svg width="24" height="24" viewBox="0 0 24 24" fill="#fff"><path d="M8 5.5v13l11-6.5z"/></svg></div>
-          <div style="flex:1;">
-            <div id="l_title" style="font-weight:800;font-size:15px;color:#2B2B2B;">Диалог 1 · В кафе</div>
-            <div style="font-weight:600;font-size:12px;color:#8A8F98;margin-top:2px;">Задание 1–3 · уровень B1</div>
-          </div>
-          <div style="font-weight:700;font-size:11.5px;color:#F2683F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">1×</div>
-        </div>
-        <!-- waveform -->
-        <div style="margin-top:18px;display:flex;align-items:center;gap:3px;height:36px;">
-          <div style="flex:1;height:30%;border-radius:3px;background:#F2683F;"></div><div style="flex:1;height:55%;border-radius:3px;background:#F2683F;"></div><div style="flex:1;height:80%;border-radius:3px;background:#F2683F;"></div><div style="flex:1;height:45%;border-radius:3px;background:#F2683F;"></div><div style="flex:1;height:65%;border-radius:3px;background:#F2683F;"></div><div style="flex:1;height:100%;border-radius:3px;background:#F2683F;"></div><div style="flex:1;height:50%;border-radius:3px;background:#F2683F;"></div><div style="flex:1;height:70%;border-radius:3px;background:#FBC4AC;"></div><div style="flex:1;height:40%;border-radius:3px;background:#FBC4AC;"></div><div style="flex:1;height:60%;border-radius:3px;background:#FBC4AC;"></div><div style="flex:1;height:35%;border-radius:3px;background:#FBC4AC;"></div><div style="flex:1;height:75%;border-radius:3px;background:#FBC4AC;"></div><div style="flex:1;height:50%;border-radius:3px;background:#FBC4AC;"></div><div style="flex:1;height:85%;border-radius:3px;background:#FBC4AC;"></div><div style="flex:1;height:45%;border-radius:3px;background:#FBC4AC;"></div><div style="flex:1;height:55%;border-radius:3px;background:#FBC4AC;"></div><div style="flex:1;height:30%;border-radius:3px;background:#FBC4AC;"></div>
-        </div>
-        <div style="margin-top:8px;display:flex;justify-content:space-between;font-weight:600;font-size:11.5px;color:#8A8F98;"><span style="color:#F2683F;font-weight:700;">0:42</span><span>2:15</span></div>
+      <div id="l_sumline" style="margin-top:16px;font-weight:700;font-size:13px;color:rgba(255,255,255,.95);">Три формата — как на экзамене</div>
+      <div style="margin-top:12px;display:flex;align-items:center;justify-content:space-between;font-weight:600;font-size:11.5px;color:rgba(255,255,255,.9);">
+        <span style="font-weight:700;letter-spacing:.5px;">ЗАДАНИЯ 1–9</span><span id="l_today">3 тренажёра</span>
       </div>
-      <!-- questions label -->
-      <div style="font-weight:700;font-size:11px;letter-spacing:1.6px;color:#8A8F98;margin:18px 2px 12px;">ВОПРОСЫ</div>
-      <!-- Q1 -->
-      <div style="background:#fff;border-radius:18px;padding:15px 16px;box-shadow:0 8px 22px rgba(20,20,30,.05);"><div id="l_q1t" style="font-weight:700;font-size:13.5px;color:#2B2B2B;">1. Где происходит разговор?</div><div id="l_q1" style="margin-top:11px;display:flex;flex-direction:column;gap:8px;"></div></div>
-      <!-- Q2 -->
-      <div style="background:#fff;border-radius:18px;padding:15px 16px;box-shadow:0 8px 22px rgba(20,20,30,.05);margin-top:12px;"><div id="l_q2t" style="font-weight:700;font-size:13.5px;color:#2B2B2B;">2. Что заказал мужчина?</div><div id="l_q2" style="margin-top:11px;display:flex;flex-direction:column;gap:8px;"></div></div>
-      <div id="l_script" style="display:none;margin-top:12px;background:#fff;border-radius:16px;padding:14px 16px;box-shadow:0 8px 22px rgba(20,20,30,.05);font-size:13px;color:#5b5f66;line-height:1.55;"></div>
-      <!-- script toggle -->
-      <div onclick="toggleScript()" style="margin-top:14px;display:flex;align-items:center;justify-content:space-between;background:#fff;border-radius:16px;padding:14px 16px;box-shadow:0 8px 22px rgba(20,20,30,.05);cursor:pointer;">
-        <div style="display:flex;align-items:center;gap:11px;">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#8A8F98" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h14v16H5z"/><path d="M9 9h6M9 13h6M9 17h3"/></svg>
-          <span style="font-weight:700;font-size:13.5px;color:#2B2B2B;">Показать скрипт</span>
-        </div>
-        <div id="l_toggle" style="width:46px;height:27px;border-radius:20px;background:#E7E9EC;position:relative;transition:.2s;"><div id="l_knob" style="position:absolute;top:3px;left:3px;width:21px;height:21px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:.2s;"></div></div>
-      </div>
+      <div style="margin-top:7px;height:7px;border-radius:5px;background:rgba(255,255,255,.28);"><div id="l_bar" style="width:2%;height:100%;border-radius:5px;background:#fff;"></div></div>
     </div>
+    <!-- exercise area -->
+    <div id="l_area" style="position:absolute;top:236px;left:22px;right:22px;bottom:104px;z-index:5;display:block;overflow-y:auto;scrollbar-width:none;"></div>
     <!-- bottom nav (Учить active) -->
     <div style="position:absolute;left:0;right:0;bottom:0;padding:10px 14px 14px;z-index:6;background:linear-gradient(to top,rgba(245,246,248,.95) 55%,rgba(245,246,248,0));">
       <div class="navclay">
@@ -555,21 +543,6 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
     </div>
     <!-- exercise area -->
     <div id="r_area" style="position:absolute;top:236px;left:22px;right:22px;bottom:104px;z-index:5;display:block;overflow-y:auto;scrollbar-width:none;"></div>
-    <!-- word popover (floating) -->
-    <div id="r_pop" style="position:absolute;left:22px;right:22px;bottom:110px;z-index:60;background:#fff;border-radius:20px;border:1px solid #F0EAE2;padding:16px 18px;box-shadow:0 18px 40px rgba(60,45,30,.22),inset 0 2px 0 rgba(255,255,255,.9);display:none;">
-      <div style="display:flex;align-items:center;justify-content:space-between;">
-        <div style="display:flex;align-items:baseline;gap:10px;"><span id="r_word" style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:19px;color:#2B2B2B;">word</span><span id="r_ipa" style="font-weight:500;font-size:13px;color:#8A8F98;"></span></div>
-        <div style="display:flex;align-items:center;gap:10px;">
-          <span class="clk" onclick="wSpeak(lastWord)" style="cursor:pointer;display:grid;place-items:center;width:32px;height:32px;border-radius:11px;background:#FFF4DE;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#E8730A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg></span>
-          <span class="clk" onclick="document.getElementById('r_pop').style.display='none'" style="cursor:pointer;display:grid;place-items:center;width:32px;height:32px;border-radius:11px;background:#F1F2F4;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8A8F98" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></span>
-        </div>
-      </div>
-      <div id="r_tr" style="margin-top:6px;font-weight:600;font-size:14px;color:#5b5f66;">перевод…</div>
-      <div style="margin-top:12px;display:flex;gap:10px;">
-        <button class="sq" style="flex:1;height:44px;border:1.5px solid #F2683F;background:#fff;border-radius:14px;font-family:Manrope,sans-serif;font-weight:700;font-size:13px;color:#F2683F;cursor:pointer;" onclick="r_add('learn')">+ Учить</button>
-        <button class="sq" style="flex:1;height:44px;border:none;background:#EAF7F0;border-radius:14px;font-family:Manrope,sans-serif;font-weight:700;font-size:13px;color:#1F8A50;cursor:pointer;" onclick="r_add('know')">✓ Знаю</button>
-      </div>
-    </div>
     <!-- bottom nav (Учить) -->
     <div style="position:absolute;left:0;right:0;bottom:0;padding:10px 14px 14px;z-index:6;background:linear-gradient(to top,rgba(245,246,248,.95) 55%,rgba(245,246,248,0));">
       <div class="navclay">
@@ -1109,6 +1082,21 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
     </div>
   
 </div>
+<!-- word popover (floating) -->
+    <div id="r_pop" style="position:absolute;left:22px;right:22px;bottom:110px;z-index:60;background:#fff;border-radius:20px;border:1px solid #F0EAE2;padding:16px 18px;box-shadow:0 18px 40px rgba(60,45,30,.22),inset 0 2px 0 rgba(255,255,255,.9);display:none;">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <div style="display:flex;align-items:baseline;gap:10px;"><span id="r_word" style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:19px;color:#2B2B2B;">word</span><span id="r_ipa" style="font-weight:500;font-size:13px;color:#8A8F98;"></span></div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="clk" onclick="wSpeak(lastWord)" style="cursor:pointer;display:grid;place-items:center;width:32px;height:32px;border-radius:11px;background:#FFF4DE;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#E8730A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg></span>
+          <span class="clk" onclick="document.getElementById('r_pop').style.display='none'" style="cursor:pointer;display:grid;place-items:center;width:32px;height:32px;border-radius:11px;background:#F1F2F4;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8A8F98" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></span>
+        </div>
+      </div>
+      <div id="r_tr" style="margin-top:6px;font-weight:600;font-size:14px;color:#5b5f66;">перевод…</div>
+      <div style="margin-top:12px;display:flex;gap:10px;">
+        <button class="sq" style="flex:1;height:44px;border:1.5px solid #F2683F;background:#fff;border-radius:14px;font-family:Manrope,sans-serif;font-weight:700;font-size:13px;color:#F2683F;cursor:pointer;" onclick="r_add('learn')">+ Учить</button>
+        <button class="sq" style="flex:1;height:44px;border:none;background:#EAF7F0;border-radius:14px;font-family:Manrope,sans-serif;font-weight:700;font-size:13px;color:#1F8A50;cursor:pointer;" onclick="r_add('know')">✓ Знаю</button>
+      </div>
+    </div>
 </div>
 
 <script>
@@ -3383,6 +3371,269 @@ async function rGen(){
 /* FAB прячем и на чтении; синк при старте */
 var _t7=tab;tab=function(id){_t7(id);if(RE&&RE.iv){clearInterval(RE.iv);RE=null}if(id==='scr7'){var f=document.getElementById('genfab');if(f)f.style.display='none'}};
 var _sa4=startApp;startApp=async function(){await _sa4.apply(this,arguments);try{rSync()}catch(e){}};
+
+</script>
+<script>
+/* ===== LISTENING v2: задания 1, 2, 3-9 + озвучка по ролям ===== */
+const L_M=[
+{st:['Music helps this speaker to relax.','This speaker prefers active holidays.','This speaker enjoys cooking for the family.','This speaker spends a lot of time reading.','This speaker dreams of travelling abroad.'],
+ sp:[
+ {t:'After school I always put on my headphones. When I listen to my favourite songs, all my problems disappear and I feel calm again.'},
+ {t:'On holidays I never stay at home. My family goes hiking in the mountains, and in summer we swim and ride bikes all day long.'},
+ {t:'Every weekend I try a new recipe. My parents say my pancakes are the best, and I love making dinner for everybody on Sundays.'},
+ {t:'I can spend the whole evening with a good detective story. Last month I read five books, and my room looks like a small library.'}],
+ a:[0,1,2,3],
+ k:['listen to songs → feel calm — музыка помогает расслабиться.','hiking, swim, ride bikes — активный отдых.','a new recipe, making dinner for everybody — готовит для семьи.','detective story, read five books — много читает.']},
+{st:['The speaker finds exams stressful.','The speaker likes studying with friends.','The speaker is happy with a new school subject.','The speaker complains about too much homework.','The speaker wants to change schools.'],
+ sp:[
+ {t:'Before every test my hands shake and I cannot sleep well. Even when I know the material, I am still afraid of getting a bad mark.'},
+ {t:'It is boring to do exercises alone. When my classmates come to my place, we explain difficult things to each other and studying becomes fun.'},
+ {t:'This year we started learning economics. The lessons are so interesting that I even read extra articles at home.'},
+ {t:'Teachers give us so many tasks that I sit at my desk till late evening. I have almost no time for walks or sport.'}],
+ a:[0,1,2,3],
+ k:['hands shake, afraid of a bad mark — экзамены вызывают стресс.','with classmates studying becomes fun — любит заниматься с друзьями.','started learning economics, so interesting — рад новому предмету.','so many tasks, no time for walks — жалуется на объём домашки.']}
+];
+const L_TF=[
+{d:[
+ {s:0,t:'Hi Kate! Are you free on Saturday? There is a new science museum in the city centre.'},
+ {s:1,t:'Oh, I have heard about it! Tickets are half price for students, right?'},
+ {s:0,t:'Exactly, five pounds instead of ten. My brother went last week and loved the space hall.'},
+ {s:1,t:'Great. Shall we go in the morning? In the afternoon I have a piano lesson.'},
+ {s:0,t:'Morning works for me. Let us meet at the bus stop at ten.'},
+ {s:1,t:'Perfect. I will bring my camera — I hope taking photos is allowed there.'}],
+ st:[
+ {t:'The museum is in the city centre.',a:0,ev:'There is a new science museum in the city centre.',e:'Прямо сказано в первой реплике.'},
+ {t:'Students pay ten pounds for a ticket.',a:1,ev:'…five pounds instead of ten.',e:'Для студентов полцены — пять фунтов, а не десять → False.'},
+ {t:'The boy’s brother has already been to the museum.',a:0,ev:'My brother went last week and loved the space hall.',e:'Брат ходил на прошлой неделе → True.'},
+ {t:'Kate is busy on Saturday afternoon.',a:0,ev:'In the afternoon I have a piano lesson.',e:'Днём у Кейт урок фортепиано → True.'},
+ {t:'Taking photos is allowed in the museum.',a:2,ev:'I hope taking photos is allowed there.',e:'Кейт только НАДЕЕТСЯ — разрешено или нет, в диалоге не сказано → Not stated.'}]},
+{d:[
+ {s:1,t:'Tom, you look tired today. Is everything OK?'},
+ {s:0,t:'We got a puppy two days ago, and he cries every night. I get up three or four times to calm him down.'},
+ {s:1,t:'Poor you! What breed is he?'},
+ {s:0,t:'A beagle. He is only two months old, but he is very clever. He already knows his name — Rex.'},
+ {s:1,t:'My cat never comes when I call her. By the way, who walks him in the morning?'},
+ {s:0,t:'My dad does, before work. And I walk him after school. The vet says short walks are better for puppies.'}],
+ st:[
+ {t:'Tom got his puppy two days ago.',a:0,ev:'We got a puppy two days ago…',e:'Прямое совпадение с репликой Тома.'},
+ {t:'The puppy sleeps well at night.',a:1,ev:'…he cries every night. I get up three or four times…',e:'Щенок плачет по ночам → False.'},
+ {t:'Rex is six months old.',a:1,ev:'He is only two months old…',e:'Ему два месяца, а не шесть → False.'},
+ {t:'The girl’s cat comes when she calls it.',a:1,ev:'My cat never comes when I call her.',e:'Кошка никогда не приходит → False.'},
+ {t:'Tom’s dad walks the puppy in the park.',a:2,ev:'My dad does, before work.',e:'Папа гуляет утром, но ГДЕ — не говорится → Not stated.'}]}
+];
+const L_IN=[
+{d:[
+ {s:1,t:'Today our guest is Alex, a young swimmer who won the regional championship. Alex, when did you start swimming?'},
+ {s:0,t:'When I was six. My mum took me to the pool because I was often ill, and doctors advised sport.'},
+ {s:1,t:'Do you train every day?'},
+ {s:0,t:'Five times a week, early in the morning before school. On Sundays I always rest — my coach says rest is part of training.'},
+ {s:1,t:'What was the hardest moment in your career?'},
+ {s:0,t:'Last year I broke my arm and missed four months. I thought about leaving sport, but my team supported me.'},
+ {s:1,t:'And what are your plans?'},
+ {s:0,t:'I dream of the national team, but first I want to win the city cup in May.'}],
+ qs:[
+ {q:'Why did Alex start swimming?',o:['Doctors recommended sport','His friends invited him','He watched it on TV'],a:0,ev:'…I was often ill, and doctors advised sport.',e:'Причина — совет врачей из-за частых болезней.'},
+ {q:'How often does Alex train?',o:['Every day','Five times a week','Only at weekends'],a:1,ev:'Five times a week, early in the morning before school.',e:'Пять раз в неделю, воскресенье — отдых.'},
+ {q:'What happened to Alex last year?',o:['He left his team','He broke his arm','He lost the championship'],a:1,ev:'Last year I broke my arm and missed four months.',e:'Сломал руку и пропустил четыре месяца.'},
+ {q:'What does Alex want to do first?',o:['Join the national team','Win the city cup','Become a coach'],a:1,ev:'…but first I want to win the city cup in May.',e:'Сначала — кубок города, сборная — мечта на потом.'}]},
+{d:[
+ {s:0,t:'Our guest today is Lena, who runs a popular blog about school life. Lena, how did it all begin?'},
+ {s:1,t:'Two years ago I started posting short videos with study tips. At first only my classmates watched them.'},
+ {s:0,t:'And now you have thousands of followers! How much time does the blog take?'},
+ {s:1,t:'About two hours a day. I film in the evening and edit videos at the weekend. My parents help me with the camera.'},
+ {s:0,t:'Has the blog changed your life?'},
+ {s:1,t:'Yes, I have become more confident. But my marks went down a little last term, so now I plan my time more carefully.'},
+ {s:0,t:'What advice can you give to beginners?'},
+ {s:1,t:'Do not copy others. Viewers feel when you are honest, and honesty works better than expensive equipment.'}],
+ qs:[
+ {q:'When did Lena start her blog?',o:['Two years ago','Two months ago','Last term'],a:0,ev:'Two years ago I started posting short videos…',e:'Прямо названо в начале интервью.'},
+ {q:'Who helps Lena with her blog?',o:['Her classmates','Her parents','Her teachers'],a:1,ev:'My parents help me with the camera.',e:'С камерой помогают родители.'},
+ {q:'What problem did the blog cause?',o:['She lost her friends','Her marks got worse','She stopped sleeping'],a:1,ev:'…my marks went down a little last term…',e:'Оценки немного снизились — пришлось планировать время.'},
+ {q:'What does Lena advise beginners?',o:['To buy a good camera','To copy popular bloggers','To be honest'],a:2,ev:'…honesty works better than expensive equipment.',e:'Главный совет — честность, а не дорогая техника.'}]}
+];
+let LM=null,LT=null,LI=null,LPLAYS=0,LSLOW=false;
+function lSt(){S.lis=S.lis||{m:{ok:0,tot:0},tf:{ok:0,tot:0},iq:{ok:0,tot:0},done:0};return S.lis}
+function lSync(){if(!S)return;var r=lSt();var ok=r.m.ok+r.tf.ok+r.iq.ok,tot=r.m.tot+r.tf.tot+r.iq.tot;
+  var acc=tot?Math.round(ok/tot*100):0;
+  S.prog=S.prog||{};S.prog.listen=acc;
+  setTxt('sub_listen',r.done?('подходов: '+r.done+' · точность '+acc+'%'):'начни с первого диалога');
+  setTxt('l_sumline',r.done?('Пройдено '+r.done+' · точность '+acc+'%'):'Три формата — как на экзамене');
+  var bar=document.getElementById('l_bar');if(bar)bar.style.width=Math.max(2,acc)+'%'}
+function lAnim(name,dur){var c=document.getElementById('l_card');if(!c)return;c.style.animation='none';void c.offsetWidth;c.style.animation=name+' '+dur+' cubic-bezier(.25,.75,.35,1)'}
+function lStop(){try{speechSynthesis.cancel()}catch(e){}}
+function lVoice(i){try{var vs=(speechSynthesis.getVoices()||[]).filter(function(v){return /^en[-_]/i.test(v.lang)});
+  if(!vs.length)return null;
+  var gb=vs.filter(function(v){return /GB/i.test(v.lang)});
+  var pool=gb.length>1?gb:vs;
+  return pool[i%pool.length]}catch(e){return null}}
+function lPlay(lines){
+  if(!('speechSynthesis'in window)){try{toast('Озвучка недоступна в этом браузере')}catch(e){}return}
+  lStop();LPLAYS++;lPlaysUi();
+  lines.forEach(function(ln){var u=new SpeechSynthesisUtterance(ln.t);
+    u.lang='en-GB';u.rate=LSLOW?0.68:0.85;u.pitch=ln.s?1.15:0.92;
+    var v=lVoice(ln.s);if(v)u.voice=v;
+    speechSynthesis.speak(u)})}
+function lPlaysUi(){var el=document.getElementById('l_plays');if(!el)return;
+  el.textContent=LPLAYS<=2?('прослушиваний: '+LPLAYS+' из 2'):(LPLAYS+'-е — на ЕГЭ так нельзя!');
+  el.style.color=LPLAYS<=2?'#1F8A50':'#C77400';el.style.background=LPLAYS<=2?'#EAF7F0':'#FFF4DE'}
+function lCtl(fn){
+  return '<div style="display:flex;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap;">'
+    +'<button class="sq" onclick="'+fn+'" style="flex:none;display:inline-flex;align-items:center;gap:7px;background:linear-gradient(135deg,#FFA570,#F2683F);border:none;border-radius:15px;padding:11px 16px;font-family:Manrope,sans-serif;font-weight:800;font-size:13.5px;color:#fff;cursor:pointer;box-shadow:0 10px 20px rgba(242,104,63,.3);"><svg width="14" height="14" viewBox="0 0 24 24" fill="#fff"><path d="M7 5v14l12-7z"/></svg>Слушать</button>'
+    +'<button class="sq" onclick="lStop()" style="flex:none;width:40px;height:40px;border-radius:14px;border:1px solid #F0EAE2;background:#fff;cursor:pointer;display:grid;place-items:center;"><svg width="13" height="13" viewBox="0 0 24 24" fill="#8A8F98"><rect x="5" y="5" width="14" height="14" rx="2"/></svg></button>'
+    +'<button class="sq" onclick="LSLOW=!LSLOW;this.style.background=LSLOW?\'#FFEDE4\':\'#fff\';this.style.color=LSLOW?\'#E44E20\':\'#8A8F98\'" style="flex:none;height:40px;border-radius:14px;border:1px solid #F0EAE2;background:'+(LSLOW?'#FFEDE4':'#fff')+';color:'+(LSLOW?'#E44E20':'#8A8F98')+';padding:0 13px;font-family:Manrope,sans-serif;font-weight:800;font-size:12px;cursor:pointer;">0.7×</button>'
+    +'<span id="l_plays" style="flex:none;font-weight:800;font-size:11px;padding:7px 11px;border-radius:14px;color:#8A8F98;background:#F1F2F4;">прослушиваний: 0 из 2</span></div>'}
+function lTranscript(lines,evs){
+  return '<div class="clayCard" style="padding:15px 16px;margin-bottom:12px;">'
+    +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#8A8F98;background:#F1F2F4;padding:5px 10px;border-radius:20px;">ТРАНСКРИПТ · тапни слово для перевода</span>'
+    +lines.map(function(ln){
+      var hl=(evs||[]).some(function(ev){return ev&&ln.t.indexOf(ev.replace(/^…/,'').replace(/…$/,'').replace(/\.$/,'').slice(0,25))>=0});
+      return '<div style="margin-top:8px;font-weight:500;font-size:13px;line-height:1.6;color:#2B2B2B;'+(hl?'background:#FFF4DE;border-radius:8px;padding:5px 8px;':'')+'">'
+        +'<b style="color:'+(ln.s?'#3E93A8':'#F2683F')+';">—</b> '+rWordsHtml(ln.t)+'</div>'}).join('')+'</div>'}
+initListening=function(){if(!S)return;lSync();lHub()}
+function lHub(){var area=document.getElementById('l_area');if(!area)return;LM=null;LT=null;LI=null;lStop();
+  var r=lSt();var GA=0;function ga(){return 'animation:win .34s '+((GA++)*0.06)+'s cubic-bezier(.25,.75,.35,1) both;'}
+  function acc(x){return x.tot?Math.round(x.ok/x.tot*100)+'%':'—'}
+  function card(fn,title,sub,chip,color,bg){
+    return '<div class="clayCard sq clk" onclick="'+fn+'" style="'+ga()+'padding:16px 18px;margin-bottom:12px;cursor:pointer;">'
+      +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'
+      +'<div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:15.5px;color:#2B2B2B;">'+title+'</div>'
+      +'<div style="font-weight:600;font-size:12px;color:#98917F;margin-top:2px;">'+sub+'</div></div>'
+      +'<span style="flex:none;font-weight:800;font-size:12px;color:'+color+';background:'+bg+';padding:8px 12px;border-radius:14px;">'+chip+'</span></div></div>'}
+  area.innerHTML=
+    card('lMt()','Соответствия','задание 1 · кто о чём говорит',acc(r.m),'#E44E20','#FFEDE4')
+   +card('lTf()','Верно · Неверно · Не сказано','задание 2 · диалог и утверждения',acc(r.tf),'#C77400','#FFF4DE')
+   +card('lIq()','Интервью','задания 3–9 · вопросы с выбором',acc(r.iq),'#1F8A50','#EAF7F0')
+   +'<div class="clayCard" style="'+ga()+'display:flex;align-items:center;gap:12px;padding:13px 15px;">'
+    +'<span style="flex:none;width:38px;height:38px;border-radius:13px;background:#E3F1F5;display:grid;place-items:center;"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#3E93A8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg></span>'
+    +'<div style="font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.45;">Сначала прочитай вопросы, потом слушай — как на экзамене. Запись можно включить дважды</div></div>';
+  setTxt('l_today','3 тренажёра')}
+/* ---- задание 1: соответствия ---- */
+function lMt(){S.lisIdxM=(S.lisIdxM||0);var set=L_M[S.lisIdxM%L_M.length];S.lisIdxM++;
+  LM={set:set,sel:[null,null,null,null],done:false};LPLAYS=0;lMtRender()}
+function lMtLines(){return LM.set.sp.map(function(sp,i){return {s:i%2,t:'Speaker '+'ABCD'[i]+'. '+sp.t}})}
+function lMtRender(){var area=document.getElementById('l_area');var set=LM.set;
+  var h='<div id="l_card" class="clayCard" style="position:relative;overflow:hidden;padding:16px 18px;margin-bottom:12px;">'+wDeco()
+    +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#E44E20;background:#FFEDE4;padding:5px 10px;border-radius:20px;">ЗАДАНИЕ 1 · СООТВЕТСТВИЯ</span>'
+    +'<div style="font-weight:600;font-size:12px;color:#98917F;margin-top:10px;">Прочитай утверждения, послушай четырёх говорящих и подбери соответствия. Одно утверждение лишнее.</div>'
+    +set.st.map(function(x,i){return '<div style="margin-top:8px;font-weight:700;font-size:13px;color:#2B2B2B;"><b style="color:#F2683F;">'+(i+1)+'.</b> '+x+'</div>'}).join('')
+    +lCtl('lPlay(lMtLines())')+'</div>';
+  'ABCD'.split('').forEach(function(L,si){
+    h+='<div class="clayCard" style="padding:12px 14px;margin-bottom:10px;">'
+      +'<div style="display:flex;align-items:center;gap:8px;">'
+      +'<span style="flex:none;font-weight:800;font-size:12px;color:#E44E20;width:82px;">Говорящий '+L+'</span>'
+      +'<div style="flex:1;display:flex;gap:7px;" id="lmt_row_'+si+'">'
+      +set.st.map(function(_,ti){var on=LM.sel[si]===ti;
+        return '<button onclick="lMtPick('+si+','+ti+')" style="flex:1;height:36px;border-radius:11px;border:1.5px solid '+(on?'#F2683F':'#F0EAE2')+';background:'+(on?'#FFEDE4':'#fff')+';font-family:Manrope,sans-serif;font-weight:800;font-size:13px;color:'+(on?'#E44E20':'#8A8F98')+';cursor:pointer;">'+(ti+1)+'</button>'}).join('')
+      +'</div></div><div id="lmt_res_'+si+'"></div></div>'});
+  var all=LM.sel.every(function(x){return x!==null});
+  h+='<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);'+(all?'':'opacity:.45;pointer-events:none;')+'" onclick="lMtCheck()">Проверить</button>'
+    +'<button class="sq" style="'+WBTN+'color:#F2683F;margin-top:10px;" onclick="lHub()">← К аудированию</button>';
+  area.innerHTML=h;lPlaysUi();setTxt('l_today',LM.sel.filter(function(x){return x!==null}).length+' / 4 выбрано')}
+function lMtPick(si,ti){if(LM.done)return;
+  LM.sel=LM.sel.map(function(x,i){return i===si?ti:(x===ti?null:x)});
+  lMtRender()}
+function lMtCheck(){if(LM.done)return;LM.done=true;lStop();var set=LM.set,r=lSt(),okn=0;
+  'ABCD'.split('').forEach(function(L,si){var ok=LM.sel[si]===set.a[si];if(ok)okn++;
+    r.m.tot++;if(ok)r.m.ok++;
+    var el=document.getElementById('lmt_res_'+si);
+    if(el)el.innerHTML='<div style="margin-top:9px;padding:10px 12px;border-radius:12px;background:'+(ok?'#EAF7F0':'#FDEDEA')+';">'
+      +'<div style="font-weight:800;font-size:12.5px;color:'+(ok?'#1F8A50':'#C0392B')+';">'+(ok?'Верно · ':'Неверно · правильно ')+(set.a[si]+1)+'. '+set.st[set.a[si]]+'</div>'
+      +'<div style="font-weight:600;font-size:12px;color:#4A453E;margin-top:4px;line-height:1.5;"><b>Ключ:</b> '+set.k[si]+'</div></div>';
+    var row=document.getElementById('lmt_row_'+si);if(row)row.style.pointerEvents='none'});
+  var used={};set.a.forEach(function(x){used[x]=1});
+  var extra=[0,1,2,3,4].find(function(i){return !used[i]});
+  r.done++;lSync();save();
+  var area=document.getElementById('l_area');
+  var d=document.createElement('div');
+  d.innerHTML='<div class="clayCard" style="padding:16px 18px;margin-bottom:12px;text-align:center;animation:win .35s both;">'
+    +'<div style="font-size:36px;">'+(okn===4?'🏆':(okn>=2?'💪':'📚'))+'</div>'
+    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:19px;color:#2B2B2B;margin-top:6px;">'+okn+' из 4</div>'
+    +'<div style="font-weight:600;font-size:12.5px;color:#98917F;margin-top:4px;">Лишнее утверждение: '+(extra+1)+'. '+set.st[extra]+'</div>'
+    +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);margin-top:12px;" onclick="lMt()">Ещё подход</button></div>'
+    +lTranscript(lMtLines(),[]);
+  area.insertBefore(d,area.firstChild);
+  try{d.scrollIntoView({behavior:'smooth',block:'start'})}catch(e){}}
+/* ---- задание 2: True/False/Not stated ---- */
+function lTf(){S.lisIdxT=(S.lisIdxT||0);var set=L_TF[S.lisIdxT%L_TF.length];S.lisIdxT++;
+  LT={set:set,sel:set.st.map(function(){return null}),done:false};LPLAYS=0;lTfRender()}
+function lTfRender(){var area=document.getElementById('l_area');var set=LT.set;
+  var LBL=['Верно','Неверно','Не сказано'];
+  var h='<div id="l_card" class="clayCard" style="position:relative;overflow:hidden;padding:16px 18px;margin-bottom:12px;">'+wDeco()
+    +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#C77400;background:#FFF4DE;padding:5px 10px;border-radius:20px;">ЗАДАНИЕ 2 · ВЕРНО / НЕВЕРНО / НЕ СКАЗАНО</span>'
+    +'<div style="font-weight:600;font-size:12px;color:#98917F;margin-top:10px;">Прочитай утверждения, послушай диалог и реши: верно, неверно или об этом не говорилось.</div>'
+    +lCtl('lPlay(LT.set.d)')+'</div>';
+  set.st.forEach(function(x,i){
+    h+='<div class="clayCard" style="padding:13px 14px;margin-bottom:10px;">'
+      +'<div style="font-weight:700;font-size:13px;color:#2B2B2B;line-height:1.5;">'+(i+1)+'. '+x.t+'</div>'
+      +'<div style="margin-top:9px;display:flex;gap:7px;" id="ltf_row_'+i+'">'
+      +LBL.map(function(l,li){var on=LT.sel[i]===li;
+        return '<button onclick="lTfPick('+i+','+li+')" style="flex:1;height:36px;border-radius:11px;border:1.5px solid '+(on?'#F2683F':'#F0EAE2')+';background:'+(on?'#FFEDE4':'#fff')+';font-family:Manrope,sans-serif;font-weight:800;font-size:11.5px;color:'+(on?'#E44E20':'#8A8F98')+';cursor:pointer;">'+l+'</button>'}).join('')
+      +'</div><div id="ltf_res_'+i+'"></div></div>'});
+  var all=LT.sel.every(function(x){return x!==null});
+  h+='<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);'+(all?'':'opacity:.45;pointer-events:none;')+'" onclick="lTfCheck()">Проверить</button>'
+    +'<button class="sq" style="'+WBTN+'color:#F2683F;margin-top:10px;" onclick="lHub()">← К аудированию</button>';
+  area.innerHTML=h;lPlaysUi();setTxt('l_today',LT.sel.filter(function(x){return x!==null}).length+' / '+set.st.length+' отмечено')}
+function lTfPick(i,li){if(LT.done)return;LT.sel[i]=li;lTfRender()}
+function lTfCheck(){if(LT.done)return;LT.done=true;lStop();var set=LT.set,r=lSt(),okn=0;
+  var LBL=['Верно','Неверно','Не сказано'];
+  set.st.forEach(function(x,i){var ok=LT.sel[i]===x.a;if(ok)okn++;
+    r.tf.tot++;if(ok)r.tf.ok++;
+    var el=document.getElementById('ltf_res_'+i);
+    if(el)el.innerHTML='<div style="margin-top:9px;padding:10px 12px;border-radius:12px;background:'+(ok?'#EAF7F0':'#FDEDEA')+';">'
+      +'<div style="font-weight:800;font-size:12.5px;color:'+(ok?'#1F8A50':'#C0392B')+';">'+(ok?'Верно · ':'Неверно · правильно: ')+LBL[x.a]+'</div>'
+      +'<div style="font-weight:600;font-size:12px;color:#4A453E;margin-top:4px;line-height:1.5;"><b>В записи:</b> «'+x.ev+'» — '+x.e+'</div></div>';
+    var row=document.getElementById('ltf_row_'+i);if(row)row.style.pointerEvents='none'});
+  r.done++;lSync();save();
+  var area=document.getElementById('l_area');
+  var d=document.createElement('div');
+  d.innerHTML='<div class="clayCard" style="padding:16px 18px;margin-bottom:12px;text-align:center;animation:win .35s both;">'
+    +'<div style="font-size:36px;">'+(okn===set.st.length?'🏆':(okn>=3?'💪':'📚'))+'</div>'
+    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:19px;color:#2B2B2B;margin-top:6px;">'+okn+' из '+set.st.length+'</div>'
+    +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);margin-top:12px;" onclick="lTf()">Ещё подход</button></div>'
+    +lTranscript(set.d,set.st.map(function(x){return x.ev}));
+  area.insertBefore(d,area.firstChild);
+  try{d.scrollIntoView({behavior:'smooth',block:'start'})}catch(e){}}
+/* ---- задания 3-9: интервью ---- */
+function lIq(){S.lisIdxI=(S.lisIdxI||0);var set=L_IN[S.lisIdxI%L_IN.length];S.lisIdxI++;
+  LI={set:set,sel:set.qs.map(function(){return null}),done:false};LPLAYS=0;lIqRender()}
+function lIqRender(){var area=document.getElementById('l_area');var set=LI.set;
+  var h='<div id="l_card" class="clayCard" style="position:relative;overflow:hidden;padding:16px 18px;margin-bottom:12px;">'+wDeco()
+    +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#1F8A50;background:#EAF7F0;padding:5px 10px;border-radius:20px;">ЗАДАНИЯ 3–9 · ИНТЕРВЬЮ</span>'
+    +'<div style="font-weight:600;font-size:12px;color:#98917F;margin-top:10px;">Прочитай вопросы, послушай интервью и выбери ответы.</div>'
+    +lCtl('lPlay(LI.set.d)')+'</div>';
+  set.qs.forEach(function(q,i){
+    h+='<div class="clayCard" style="padding:13px 14px;margin-bottom:10px;">'
+      +'<div style="font-weight:700;font-size:13px;color:#2B2B2B;line-height:1.5;">'+(i+1)+'. '+q.q+'</div>'
+      +'<div style="margin-top:9px;display:flex;flex-direction:column;gap:7px;" id="liq_row_'+i+'">'
+      +q.o.map(function(o,oi){var on=LI.sel[i]===oi;
+        return '<button onclick="lIqPick('+i+','+oi+')" style="text-align:left;padding:10px 12px;border-radius:12px;border:1.5px solid '+(on?'#F2683F':'#F0EAE2')+';background:'+(on?'#FFEDE4':'#fff')+';font-family:Manrope,sans-serif;font-weight:700;font-size:12.5px;color:'+(on?'#E44E20':'#5b5f66')+';cursor:pointer;">'+o+'</button>'}).join('')
+      +'</div><div id="liq_res_'+i+'"></div></div>'});
+  var all=LI.sel.every(function(x){return x!==null});
+  h+='<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);'+(all?'':'opacity:.45;pointer-events:none;')+'" onclick="lIqCheck()">Проверить</button>'
+    +'<button class="sq" style="'+WBTN+'color:#F2683F;margin-top:10px;" onclick="lHub()">← К аудированию</button>';
+  area.innerHTML=h;lPlaysUi();setTxt('l_today',LI.sel.filter(function(x){return x!==null}).length+' / '+set.qs.length+' отвечено')}
+function lIqPick(i,oi){if(LI.done)return;LI.sel[i]=oi;lIqRender()}
+function lIqCheck(){if(LI.done)return;LI.done=true;lStop();var set=LI.set,r=lSt(),okn=0;
+  set.qs.forEach(function(q,i){var ok=LI.sel[i]===q.a;if(ok)okn++;
+    r.iq.tot++;if(ok)r.iq.ok++;
+    var el=document.getElementById('liq_res_'+i);
+    if(el)el.innerHTML='<div style="margin-top:9px;padding:10px 12px;border-radius:12px;background:'+(ok?'#EAF7F0':'#FDEDEA')+';">'
+      +'<div style="font-weight:800;font-size:12.5px;color:'+(ok?'#1F8A50':'#C0392B')+';">'+(ok?'Верно':'Правильно: '+q.o[q.a])+'</div>'
+      +'<div style="font-weight:600;font-size:12px;color:#4A453E;margin-top:4px;line-height:1.5;"><b>В записи:</b> «'+q.ev+'» — '+q.e+'</div></div>';
+    var row=document.getElementById('liq_row_'+i);if(row)row.style.pointerEvents='none'});
+  r.done++;lSync();save();
+  var area=document.getElementById('l_area');
+  var d=document.createElement('div');
+  d.innerHTML='<div class="clayCard" style="padding:16px 18px;margin-bottom:12px;text-align:center;animation:win .35s both;">'
+    +'<div style="font-size:36px;">'+(okn===set.qs.length?'🏆':(okn>=2?'💪':'📚'))+'</div>'
+    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:19px;color:#2B2B2B;margin-top:6px;">'+okn+' из '+set.qs.length+'</div>'
+    +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);margin-top:12px;" onclick="lIq()">Ещё подход</button></div>'
+    +lTranscript(set.d,set.qs.map(function(q){return q.ev}));
+  area.insertBefore(d,area.firstChild);
+  try{d.scrollIntoView({behavior:'smooth',block:'start'})}catch(e){}}
+/* FAB прячем, звук глушим при уходе, синк при старте */
+var _t8=tab;tab=function(id){_t8(id);lStop();if(id==='scr4'){var f=document.getElementById('genfab');if(f)f.style.display='none'}};
+var _sa5=startApp;startApp=async function(){await _sa5.apply(this,arguments);try{lSync()}catch(e){}};
 
 </script>
 </body></html>
