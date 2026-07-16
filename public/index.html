@@ -2550,7 +2550,8 @@ f:[
  {s:'The _____ (FIVE) lesson starts at one o\'clock.',b:'FIVE',ans:['fifth'],e:'five → fifth (f!).'},
  {s:'Our office is on the _____ (TWENTY) floor.',b:'TWENTY',ans:['twentieth'],e:'twenty → twentieth.'}]}
 };
-/* --- состояние: S.gram = {tid:{st,ok,err,sr}} --- */
+const G_RINT=[7,16,35];
+/* --- состояние: S.gram = {tid:{st,ok,err,sr,rs,due}} --- */
 let GS=null;
 function gRec(t){S.gram=S.gram||{};return S.gram[t]||(S.gram[t]={st:0,ok:0,err:0,sr:0})}
 function gClosed(){var n=0;for(var t=1;t<=12;t++){if(S.gram&&S.gram[t]&&S.gram[t].st===2)n++}return n}
@@ -2558,25 +2559,33 @@ function gSync(){if(!S)return;var c=gClosed();S.prog=S.prog||{};S.prog.gram=Math
   setTxt('sub_gram','закреплено '+c+' из 12 тем');setTxt('g_sumline','Закреплено '+c+' из 12 тем');
   var bar=document.getElementById('g_bar');if(bar)bar.style.width=Math.max(2,Math.round(c/12*100))+'%'}
 function gAnim(name,dur){var c=document.getElementById('g_card');if(!c)return;c.style.animation='none';void c.offsetWidth;c.style.animation=name+' '+dur+' cubic-bezier(.25,.75,.35,1)'}
-function gStatusChip(st){
+function gStatusChip(st,isDue){
+  if(st===2&&isDue)return '<span style="font-weight:800;font-size:10px;letter-spacing:.6px;color:#E44E20;background:#FFEDE4;padding:5px 10px;border-radius:20px;">ПОРА ПОВТОРИТЬ</span>';
   if(st===2)return '<span style="font-weight:800;font-size:10px;letter-spacing:.6px;color:#1F8A50;background:#EAF7F0;padding:5px 10px;border-radius:20px;">ЗАКРЕПЛЕНА</span>';
   if(st===1)return '<span style="font-weight:800;font-size:10px;letter-spacing:.6px;color:#C77400;background:#FFF4DE;padding:5px 10px;border-radius:20px;">ИЗУЧАЕТСЯ</span>';
   return '<span style="font-weight:800;font-size:10px;letter-spacing:.6px;color:#8A8F98;background:#F1F2F4;padding:5px 10px;border-radius:20px;">НЕ НАЧАТА</span>'}
 initGrammar=function(){if(!S)return;gSync();gMap()}
 function gMap(){var area=document.getElementById('g_area');if(!area)return;
+  var due=gDue();
   var h='';
+  if(due.length)h+='<div class="sq clk" onclick="gReview()" style="position:relative;overflow:hidden;border-radius:24px;padding:16px 18px;margin-bottom:14px;cursor:pointer;background:linear-gradient(135deg,#FFA570,#F2683F);box-shadow:0 14px 28px rgba(242,104,63,.32),inset 0 2px 4px rgba(255,255,255,.45),inset 0 -6px 14px rgba(190,55,18,.25);">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'
+    +'<div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:15.5px;color:#fff;">Пора повторить</div>'
+    +'<div style="font-weight:600;font-size:12px;color:rgba(255,255,255,.85);margin-top:2px;">'+due.length+' '+(due.length===1?'тема ждёт':(due.length<5?'темы ждут':'тем ждут'))+' проверки памяти</div></div>'
+    +'<span style="flex:none;background:rgba(255,255,255,.96);border-radius:14px;padding:9px 14px;font-weight:800;font-size:12.5px;color:#E44E20;">Начать</span></div></div>';
   G_GROUPS.forEach(function(gr){
     h+='<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:12px;letter-spacing:1.8px;color:#A59C8D;margin:6px 2px 10px;">'+gr.n.toUpperCase()+'</div>';
     gr.ids.forEach(function(t){var r=gRec(t),tp=G_TOPICS[t];
+      var isDue=r.st===2&&r.due&&r.due<=Date.now();
       var pct=r.st===2?100:Math.min(99,Math.round(r.sr/4*100));
       h+='<div class="clayCard sq clk" onclick="gOpen('+t+')" style="padding:14px 16px;margin-bottom:11px;cursor:pointer;">'
         +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'
-        +'<div style="font-weight:800;font-size:14.5px;color:#2B2B2B;">'+tp.n+'</div>'+gStatusChip(r.st)+'</div>'
+        +'<div style="font-weight:800;font-size:14.5px;color:#2B2B2B;">'+tp.n+'</div>'+gStatusChip(r.st,isDue)+'</div>'
         +'<div style="margin-top:10px;height:6px;border-radius:4px;background:#F1EDE7;"><div style="width:'+pct+'%;height:100%;border-radius:4px;background:linear-gradient(90deg,#FFA570,#F2683F);"></div></div>'
         +(r.ok+r.err>0?'<div style="margin-top:7px;font-weight:600;font-size:11px;color:#98917F;">верно '+r.ok+' · ошибок '+r.err+'</div>':'')
         +'</div>'});
   });
-  area.innerHTML=h;setTxt('g_today','12 тем')}
+  area.innerHTML=h;setTxt('g_today','12 тем'+(due.length?' · '+due.length+' на повторение':''))}
 function gOpen(t){gTheory(t,true)}
 function gTheory(t,fromMap){var area=document.getElementById('g_area');if(!area)return;var tp=G_TOPICS[t];
   area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:20px;">'
@@ -2591,20 +2600,35 @@ function gTheory(t,fromMap){var area=document.getElementById('g_area');if(!area)
     +'<button class="sq" style="'+WBTN+'color:#F2683F;" onclick="gMap()">← К темам</button></div>';
   gAnim('win','.32s')}
 function gShuffle(a){return a.slice().sort(function(){return Math.random()-.5})}
-function gStart(t){var b=G_BANK[t],r=gRec(t);
-  var lvl2=b.f&&b.f.length?b.f.map(function(q){return{k:'f',q:q}}):(b.c2||[]).map(function(q){return{k:'c2',q:q}});
-  var lvl1=b.c.map(function(q){return{k:'c',q:q}});
-  var queue=r.st>=1? gShuffle(lvl1).slice(0,2).concat(gShuffle(lvl2)) : gShuffle(lvl1).concat(gShuffle(lvl2).slice(0,3));
+function gBankEff(t){var b=G_BANK[t]||{};var ai=(S&&S.gramAi&&S.gramAi[t])||[];
+  return {c:(b.c||[]).concat(ai.filter(function(x){return x.k==='c'}).map(function(x){return x.q})),
+          f:(b.f||[]).concat(ai.filter(function(x){return x.k==='f'}).map(function(x){return x.q})),
+          c2:(b.c2||[])}}
+function gLvl2(t){var e=gBankEff(t);
+  if(e.f.length)return e.f.map(function(q){return{k:'f',q:q,t:t}});
+  if(e.c2.length)return e.c2.map(function(q){return{k:'c2',q:q,t:t}});
+  return e.c.map(function(q){return{k:'c2',q:q,t:t}})}
+function gDue(){var out=[];for(var t=1;t<=12;t++){var r=S.gram&&S.gram[t];
+  if(r&&r.st===2&&r.due&&r.due<=Date.now())out.push(t)}return out}
+function gStart(t){var e=gBankEff(t),r=gRec(t);
+  var lvl2=gLvl2(t);
+  var lvl1=e.c.map(function(q){return{k:'c',q:q,t:t}});
+  var queue=r.st>=1? gShuffle(lvl1).slice(0,2).concat(gShuffle(lvl2).slice(0,6)) : gShuffle(lvl1).slice(0,4).concat(gShuffle(lvl2).slice(0,3));
   GS={t:t,queue:queue,i:0,ok:0,done:0};
-  gRenderQ()}
+  gRenderQ();gGen(t)}
 function gResume(){if(GS)gRenderQ();else gMap()}
+function gReview(){var due=gDue();if(!due.length){gMap();return}
+  var items=[];
+  due.forEach(function(t){items=items.concat(gShuffle(gLvl2(t)).slice(0,2))});
+  GS={mode:'rev',revT:due.slice(),queue:gShuffle(items),i:0,ok:0,done:0,errT:{}};
+  gRenderQ()}
 function gProgressLine(){setTxt('g_today',(GS.done)+' / '+GS.queue.length+' в подходе')}
 function gRenderQ(){var area=document.getElementById('g_area');if(!area||!GS)return;gProgressLine();
   var it=GS.queue[GS.i];
   if(!it){gFinish();return}
-  var t=GS.t,tp=G_TOPICS[t];
+  var t=it.t||GS.t,tp=G_TOPICS[t];
   var head='<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'
-    +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#F2683F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">'+(it.k==='c'?'УРОВЕНЬ 1 · ВЫБОР':'УРОВЕНЬ 2 · КАК НА ЕГЭ')+'</span>'
+    +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#F2683F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">'+(GS.mode==='rev'?'ПОВТОРЕНИЕ':(it.k==='c'?'УРОВЕНЬ 1 · ВЫБОР':'УРОВЕНЬ 2 · КАК НА ЕГЭ'))+'</span>'
     +'<span class="clk" onclick="gTheory('+t+')" style="font-weight:800;font-size:10px;letter-spacing:.6px;color:#1F8A50;background:#EAF7F0;padding:5px 10px;border-radius:20px;cursor:pointer;">ПРАВИЛО</span></div>';
   if(it.k==='c'||it.k==='c2'){var q=it.q;
     area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:20px;min-height:150px;">'+wDeco()+head
@@ -2624,7 +2648,7 @@ function gRenderQ(){var area=document.getElementById('g_area');if(!area||!GS)ret
       +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="gSubmit()">Проверить</button>'}
   gAnim('win','.32s')}
 function gNorm(v){return (v||'').toLowerCase().replace(/[’’']/g,'').replace(/\s+/g,' ').replace(/\.$/,'').trim()}
-function gExplain(it,userWrong){var q=it.q,t=GS.t;
+function gExplain(it,userWrong){var q=it.q,t=it.t||GS.t;
   var right=it.k==='f'?q.ans[0]:q.o[q.a];
   var area=document.getElementById('g_area');
   area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:20px;">'+wDeco()
@@ -2637,11 +2661,16 @@ function gExplain(it,userWrong){var q=it.q,t=GS.t;
     +'<button class="sq" style="'+WBTN+'color:#1F8A50;" onclick="gTheory('+t+')">Открыть правило</button></div>';
   gAnim('wflip','.5s')}
 function gAfterExplain(){GS.i++;gSync();save();gRenderQ()}
-function gAnswer(ok,it){var r=gRec(GS.t);if(r.st===0)r.st=1;
+function gAnswer(ok,it){var r=gRec(it.t||GS.t);
+  if(GS.mode==='rev'){GS.done++;
+    if(ok){r.ok++;GS.ok++}
+    else{r.err++;GS.errT[it.t]=1;GS.queue.push(it)}
+    return}
+  if(r.st===0)r.st=1;
   if(ok){r.ok++;GS.ok++;
-    if(it.k!=='c'){r.sr++;if(r.sr>=4)r.st=2}
+    if(it.k!=='c'){r.sr++;if(r.sr>=4&&r.st!==2){r.st=2;r.rs=0;r.due=Date.now()+G_RINT[0]*86400000}}
   }else{r.err++;
-    if(it.k!=='c'){r.sr=0;if(r.st===2)r.st=1}
+    if(it.k!=='c'){r.sr=0;if(r.st===2){r.st=1;r.due=0}}
     GS.queue.push(it)}
   GS.done++}
 function gPick(btn,i){var it=GS.queue[GS.i];if(!it||btn.dataset.done)return;var q=it.q;
@@ -2662,7 +2691,8 @@ function gSubmit(){var it=GS.queue[GS.i];if(!it)return;var inp=document.getEleme
   gAnswer(ok,it);
   if(ok){gAnim('wpop','.35s');setTimeout(function(){GS.i++;gSync();save();gRenderQ()},600)}
   else{inp.value=q.ans[0];gAnim('wshake','.42s');setTimeout(function(){gExplain(it)},900)}}
-function gFinish(){var area=document.getElementById('g_area');var r=gRec(GS.t),tp=G_TOPICS[GS.t];
+function gFinish(){if(GS&&GS.mode==='rev'){gFinishRev();return}
+  var area=document.getElementById('g_area');var r=gRec(GS.t),tp=G_TOPICS[GS.t];
   var closed=r.st===2;
   area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:24px;">'+wDeco()
     +'<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:14px 0;">'
@@ -2673,6 +2703,39 @@ function gFinish(){var area=document.getElementById('g_area');var r=gRec(GS.t),t
     +(closed?'':'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="gStart('+GS.t+')">Ещё подход</button>')
     +'<button class="sq" style="'+WBTN+'color:#F2683F;" onclick="GS=null;initGrammar()">К темам</button></div>';
   gAnim('win','.32s');gSync();save()}
+function gFinishRev(){var area=document.getElementById('g_area');var rows='';
+  GS.revT.forEach(function(t){var r=gRec(t);var bad=GS.errT[t];
+    if(bad){r.st=1;r.sr=0;r.due=0}
+    else{r.rs=Math.min(2,(r.rs||0)+1);r.due=Date.now()+G_RINT[r.rs]*86400000}
+    rows+='<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 2px;border-bottom:1px solid #F4EFE9;">'
+      +'<div style="font-weight:700;font-size:13.5px;color:#2B2B2B;">'+G_TOPICS[t].n+'</div>'
+      +(bad?'<span style="flex:none;font-weight:800;font-size:10px;color:#C77400;background:#FFF4DE;padding:5px 10px;border-radius:20px;">СНОВА В РАБОТЕ</span>'
+           :'<span style="flex:none;font-weight:800;font-size:10px;color:#1F8A50;background:#EAF7F0;padding:5px 10px;border-radius:20px;">ЧЕРЕЗ '+G_RINT[r.rs]+' ДН.</span>')
+      +'</div>'});
+  area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;">'+wDeco()
+    +'<div style="text-align:center;"><div style="font-size:42px;">🧠</div>'
+    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:21px;color:#2B2B2B;margin-top:8px;">Повторение завершено</div>'
+    +'<div style="font-weight:600;font-size:13px;color:#98917F;margin-top:5px;">Верно: '+GS.ok+' из '+GS.done+'</div></div>'
+    +'<div style="margin-top:12px;">'+rows+'</div></div>'
+    +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
+    +'<button class="sq" style="'+WBTN+'color:#F2683F;" onclick="GS=null;initGrammar()">К темам</button></div>';
+  GS=null;gSync();save();gAnim('win','.32s')}
+/* фоновая ИИ-догенерация заданий по теме */
+var G_GEN=false;
+async function gGen(t){
+  if(G_GEN)return;if(typeof SRV==='undefined'||!SRV||!TOKEN)return;
+  var ai=(S.gramAi&&S.gramAi[t])||[];
+  if(ai.length>=15)return;G_GEN=true;
+  try{
+    var tp=G_TOPICS[t];
+    var out=await callGemini('Ты составляешь задания по грамматике английского для ЕГЭ (уровень B1-B2, британский английский). Только JSON, без пояснений.',
+      'Тема: "'+tp.n+'". Придумай 3 задания с выбором из 4 и 3 задания формата ЕГЭ 19-24 (вписать форму слова). Строго JSON: {"c":[{"t":["текст до пропуска","текст после пропуска"],"o":["вариант1","вариант2","вариант3","вариант4"],"a":индекс_верного_0_3,"e":"краткое объяснение по-русски"}],"f":[{"s":"предложение с пропуском _____ и словом в скобках ЗАГЛАВНЫМИ, например: She _____ (GO) to school.","b":"СЛОВО","ans":["правильная форма"],"e":"краткое объяснение по-русски"}]}');
+    var d=parseJSON(out);var add=[];
+    if(d&&Array.isArray(d.c))d.c.forEach(function(q){if(q&&Array.isArray(q.t)&&q.t.length>=2&&Array.isArray(q.o)&&q.o.length===4&&+q.a>=0&&+q.a<4)add.push({k:'c',q:{t:[String(q.t[0]),String(q.t[1])],o:q.o.map(String),a:+q.a,e:String(q.e||'')}})});
+    if(d&&Array.isArray(d.f))d.f.forEach(function(q){if(q&&q.s&&String(q.s).indexOf('_____')>=0&&Array.isArray(q.ans)&&q.ans.length)add.push({k:'f',q:{s:String(q.s),b:String(q.b||''),ans:q.ans.map(String),e:String(q.e||'')}})});
+    if(add.length){S.gramAi=S.gramAi||{};S.gramAi[t]=((S.gramAi[t])||[]).concat(add);save()}
+  }catch(e){}
+  G_GEN=false}
 /* прячем FAB на грамматике, синк при старте */
 var _t5=tab;tab=function(id){_t5(id);if(id==='scr3'){var f=document.getElementById('genfab');if(f)f.style.display='none';GS=null}};
 var _sa3=startApp;startApp=async function(){await _sa3.apply(this,arguments);try{gSync()}catch(e){}};
