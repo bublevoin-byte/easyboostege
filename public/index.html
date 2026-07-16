@@ -338,7 +338,7 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
             <svg width="46" height="46" viewBox="0 0 44 44"><defs><linearGradient id="r6" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6FC2B0"/><stop offset="1" stop-color="#3E93A8"/></linearGradient></defs><circle cx="22" cy="22" r="18" fill="none" stroke="#F1EDE7" stroke-width="5.5"/><circle cx="22" cy="22" r="18" fill="none" stroke="url(#r6)" stroke-width="5.5" stroke-linecap="round" stroke-dasharray="113.1" stroke-dashoffset="58.8" id="ring_speak" transform="rotate(-90 22 22)"/><text x="22" y="26" text-anchor="middle" font-family="Nunito,Manrope" font-weight="800" font-size="11" fill="#2B2B2B" id="m_speak">48</text></svg>
           </div>
           <span style="display:block;margin-top:12px;font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:16.5px;color:#2B2B2B;">Говорение</span>
-          <div style="font-weight:600;font-size:12px;color:#98917F;margin-top:2px;">устная часть · запись</div>
+          <div id="sub_speak" style="font-weight:600;font-size:12px;color:#98917F;margin-top:2px;">устная часть · запись</div>
         </div>
       </div>
       <!-- mascot tip -->
@@ -659,7 +659,24 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
 </div>
 <div class="screen" id="scr9" data-name="Говорение">
 
-    <div style="position:absolute;top:0;left:0;right:0;height:140px;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:0 0 30px 30px;z-index:1;"></div>
+    <!-- starry gradient header -->
+    <div style="position:absolute;top:0;left:0;right:0;height:206px;background:linear-gradient(150deg,#FFA570 0%,#F2683F 62%,#E44E20 100%);border-radius:0 0 32px 32px;z-index:1;overflow:hidden;box-shadow:0 14px 30px rgba(242,104,63,.25),inset 0 -8px 18px rgba(190,55,18,.22);">
+      <svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;" viewBox="0 0 390 206" preserveAspectRatio="xMidYMid slice" fill="rgba(255,255,255,.85)">
+        <path class="eb5sp" style="animation-delay:.2s" d="M30,60 Q30,64 34,64 Q30,64 30,68 Q30,64 26,64 Q30,64 30,60 Z"/>
+        <path class="eb5sp" style="animation-delay:1s" d="M355,48 Q355,52 359,52 Q355,52 355,56 Q355,52 351,52 Q355,52 355,48 Z"/>
+        <path class="eb5sp" style="animation-delay:1.6s" d="M330,160 Q330,164 334,164 Q330,164 330,168 Q330,164 326,164 Q330,164 330,160 Z"/>
+        <path class="eb5sp" style="animation-delay:.6s" d="M45,150 Q45,154 49,154 Q45,154 45,158 Q45,154 41,154 Q45,154 45,150 Z"/>
+        <path class="eb5sp" style="animation-delay:2s" d="M200,40 Q200,43.5 203.5,43.5 Q200,43.5 200,47 Q200,43.5 196.5,43.5 Q200,43.5 200,40 Z"/>
+        <path class="eb5sp" style="animation-delay:.9s" d="M120,30 Q120,34.5 124.5,34.5 Q120,34.5 120,39 Q120,34.5 115.5,34.5 Q120,34.5 120,30 Z"/>
+        <path class="eb5sp" style="animation-delay:1.3s" d="M280,80 Q280,84 284,84 Q280,84 280,88 Q280,84 276,84 Q280,84 280,80 Z"/>
+        <path class="eb5sp" style="animation-delay:.4s" d="M150,120 Q150,123.5 153.5,123.5 Q150,123.5 150,127 Q150,123.5 146.5,123.5 Q150,123.5 150,120 Z"/>
+        <path class="eb5sp" style="animation-delay:1.8s" d="M245,150 Q245,154.5 249.5,154.5 Q245,154.5 245,159 Q245,154.5 240.5,154.5 Q245,154.5 245,150 Z"/>
+        <path class="eb5sp" style="animation-delay:.1s" d="M310,115 Q310,118.5 313.5,118.5 Q310,118.5 310,122 Q310,118.5 306.5,118.5 Q310,118.5 310,115 Z"/>
+      </svg>
+      <div style="position:absolute;top:-40px;right:-30px;width:130px;height:130px;border-radius:50%;background:rgba(255,255,255,.12);"></div>
+      <div style="position:absolute;bottom:-55px;left:-35px;width:150px;height:150px;border-radius:50%;background:rgba(255,255,255,.09);"></div>
+    </div>
+    <!-- status bar white -->
     <div style="position:absolute;top:0;left:0;right:0;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 7px;z-index:6;">
       <span style="font-weight:700;font-size:15px;color:#fff;">9:41</span>
       <div style="display:flex;gap:7px;align-items:center;">
@@ -668,54 +685,21 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
         <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3" stroke="#fff" opacity=".5"/><rect x="2.4" y="2.4" width="15" height="7.2" rx="1.6" fill="#fff"/><rect x="23" y="4" width="2" height="4" rx="1" fill="#fff"/></svg>
       </div>
     </div>
+    <!-- header -->
     <div style="position:absolute;top:54px;left:0;right:0;padding:0 22px;z-index:6;">
       <div style="display:flex;align-items:center;justify-content:space-between;">
         <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><polyline points="14 6 8 12 14 18"/></svg>
         <div style="font-weight:800;font-size:18px;color:#fff;">Говорение</div>
-        <span style="width:26px;"></span>
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round"><line x1="5" y1="8" x2="19" y2="8"/><line x1="5" y1="12" x2="19" y2="12"/><line x1="5" y1="16" x2="19" y2="16"/></svg>
       </div>
-      <div style="margin-top:10px;font-weight:600;font-size:12.5px;color:rgba(255,255,255,.92);text-align:center;">Задание 2 · Интервью · 3 из 5</div>
+      <div id="s9_sumline" style="margin-top:16px;font-weight:700;font-size:13px;color:rgba(255,255,255,.95);">Четыре задания — как на экзамене</div>
+      <div style="margin-top:12px;display:flex;align-items:center;justify-content:space-between;font-weight:600;font-size:11.5px;color:rgba(255,255,255,.9);">
+        <span style="font-weight:700;letter-spacing:.5px;">УСТНАЯ ЧАСТЬ · 20 БАЛЛОВ</span><span id="s9_today">4 задания</span>
+      </div>
+      <div style="margin-top:7px;height:7px;border-radius:5px;background:rgba(255,255,255,.28);"><div id="s9_bar" style="width:2%;height:100%;border-radius:5px;background:#fff;"></div></div>
     </div>
-    <!-- timer ring -->
-    <div style="position:absolute;top:172px;left:0;right:0;display:flex;flex-direction:column;align-items:center;z-index:5;">
-      <div style="position:relative;width:220px;height:220px;">
-        <svg width="220" height="220" viewBox="0 0 220 220">
-          <circle cx="110" cy="110" r="96" fill="#fff" stroke="#EEF0F2" stroke-width="14"/>
-          <circle cx="110" cy="110" r="96" fill="none" stroke="url(#spk)" stroke-width="14" stroke-linecap="round" stroke-dasharray="603" stroke-dashoffset="0" transform="rotate(-90 110 110)" id="sp_ring"/>
-          <defs><linearGradient id="spk" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFA570"/><stop offset="1" stop-color="#F2683F"/></linearGradient></defs>
-        </svg>
-        <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;">
-          <div style="font-weight:700;font-size:11px;letter-spacing:1.8px;color:#F2683F;">ОТВЕТ</div>
-          <div id="sp_time" style="font-weight:800;font-size:52px;color:#2B2B2B;letter-spacing:-1px;line-height:1;margin-top:4px;">0:40</div>
-          <div id="sp_sub" style="font-weight:600;font-size:12.5px;color:#8A8F98;margin-top:4px;">осталось из 0:40</div>
-        </div>
-      </div>
-    </div>
-    <!-- question -->
-    <div style="position:absolute;top:418px;left:22px;right:22px;z-index:5;">
-      <div style="background:#fff;border-radius:18px;padding:16px 18px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
-        <div style="font-weight:700;font-size:10.5px;letter-spacing:1.4px;color:#5FB6C9;">ВОПРОС ИНТЕРВЬЮЕРА</div>
-        <div id="sp_q" style="margin-top:7px;font-weight:600;font-size:14.5px;color:#2B2B2B;line-height:1.45;">How often do you use the internet for studying?</div>
-      </div>
-    </div>
-    <!-- record controls -->
-    <div style="position:absolute;bottom:128px;left:0;right:0;display:flex;align-items:center;justify-content:center;gap:34px;z-index:5;">
-      <div style="display:flex;flex-direction:column;align-items:center;gap:7px;">
-        <div style="width:54px;height:54px;border-radius:50%;background:#fff;display:grid;place-items:center;box-shadow:0 8px 18px rgba(20,20,30,.08);cursor:pointer;" onclick="resetSpeaking()"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#8A8F98" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/></svg></div>
-        <span style="font-weight:600;font-size:11px;color:#8A8F98;">заново</span>
-      </div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:7px;">
-        <div id="sp_recbtn" onclick="toggleRec()" style="width:84px;height:84px;border-radius:50%;background:linear-gradient(135deg,#FF7A5C,#E23B2B);display:grid;place-items:center;box-shadow:0 16px 32px rgba(226,59,43,.36);position:relative;cursor:pointer;">
-          <div style="position:absolute;inset:-7px;border-radius:50%;border:3px solid rgba(226,59,43,.22);"></div>
-          <div style="width:28px;height:28px;border-radius:9px;background:#fff;"></div>
-        </div>
-        <span id="sp_reclabel" style="font-weight:700;font-size:11.5px;color:#E23B2B;">нажми, чтобы записать</span>
-      </div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:7px;">
-        <div style="width:54px;height:54px;border-radius:50%;background:#fff;display:grid;place-items:center;box-shadow:0 8px 18px rgba(20,20,30,.08);cursor:pointer;" onclick="playRec()"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#8A8F98" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M16 9a4 4 0 0 1 0 6"/></svg></div>
-        <span style="font-weight:600;font-size:11px;color:#8A8F98;">прослушать</span>
-      </div>
-    </div>
+    <!-- work area -->
+    <div id="s9_area" style="position:absolute;top:236px;left:22px;right:22px;bottom:104px;z-index:5;display:block;overflow-y:auto;scrollbar-width:none;"></div>
     <div style="position:absolute;left:0;right:0;bottom:0;padding:10px 14px 14px;z-index:6;background:linear-gradient(to top,rgba(245,246,248,.95) 55%,rgba(245,246,248,0));">
       <div class="navclay">
         <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#A59C8D;">Главная</span></div>
@@ -4059,5 +4043,190 @@ var _sa6=startApp;startApp=async function(){await _sa6.apply(this,arguments);try
     if(t.id==='w_editor'){var g=document.getElementById('w_edglow');if(g)g.classList.remove('glow-on')}
     if(t.tagName==='INPUT')t.classList.remove('glow-input')});
 })();
+</script>
+<script>
+/* ===== SPEAKING v2: устная часть ЕГЭ, 4 задания ===== */
+const SP1=[
+{tx:'Libraries are changing fast. Twenty years ago they were quiet places with paper books only. Today a modern library offers computers, online courses and clubs for different hobbies. People come here not only to read, but also to meet friends, work on projects or listen to interesting lectures. Many libraries stay open late in the evening, so students often do their homework there. Scientists say that such places help people of all ages to keep learning through the whole life.'},
+{tx:'Walking is the easiest kind of sport. You do not need special equipment, a gym or a trainer — only comfortable shoes. Doctors say that thirty minutes of walking a day make the heart stronger, improve sleep and even help the brain to work better. Walking with friends is also a great way to spend time together. Some schools now organise walking clubs, where students discover interesting places in their city and learn to notice the beauty around them.'}];
+const SP2=[
+{ad:'Language Summer Camp «Sunny Hills». English every day with native speakers, sports and new friends! Join us this summer!',
+ points:['dates of the course','price','number of lessons a day','accommodation'],
+ exq:['When does the course start?','How much does the course cost?','How many lessons a day are there?','Where will the students live?']},
+{ad:'New Fitness Club «Energy» is open in your district! Modern gym, swimming pool and yoga classes for teenagers.',
+ points:['opening hours','monthly fee','age requirements','personal trainer availability'],
+ exq:['What are the opening hours?','How much is a monthly membership?','How old should I be to join the club?','Can I train with a personal trainer?']}];
+const SP3=[
+{topic:'Хобби и свободное время',qs:['What do you usually do in your free time?','Why do teenagers need hobbies?','What new hobby would you like to try and why?','Do you prefer spending free time alone or with friends? Why?','What can a hobby teach a person?']},
+{topic:'Школьная жизнь',qs:['What is your favourite school subject and why?','How much time do you usually spend on homework?','What would you like to change in your school?','Why is it important to get a good education?','What are you going to do after leaving school?']}];
+const SP4=[
+{topic:'Зимние каникулы',ph:['Фото 1: семья катается на лыжах в горах в солнечный день','Фото 2: девушка читает книгу у камина дома'],
+ plan:['кратко опиши обе фотографии — что на них происходит','скажи, что общего у этих фотографий','скажи, чем они различаются','скажи, какой отдых ближе тебе, и объясни почему']},
+{topic:'Еда дома и в кафе',ph:['Фото 1: мама с сыном вместе готовят ужин на кухне','Фото 2: друзья едят пиццу в кафе'],
+ plan:['кратко опиши обе фотографии','скажи, что общего у фотографий','скажи, чем они различаются','скажи, что предпочитаешь ты, и объясни почему']}];
+const SP_CONF={1:{name:'Чтение вслух',prep:90,rec:90,max:1,sub:'задание 1 · 1 балл'},
+ 2:{name:'Вопросы к объявлению',prep:60,rec:80,per:20,max:4,sub:'задание 2 · 4 балла'},
+ 3:{name:'Интервью',prep:0,rec:40,max:5,sub:'задание 3 · 5 баллов'},
+ 4:{name:'Монолог по фото',prep:60,rec:150,max:10,sub:'задание 4 · 10 баллов'}};
+const SP_SHEET={
+1:'<b>Как читать вслух на 1 балл:</b><br>— Во время подготовки прочитай текст про себя и отметь трудные слова.<br>— Читай по смысловым кусочкам, с паузами на запятых и точках.<br>— Не глотай окончания <i>-s</i> и <i>-ed</i>: he work<b>s</b>, play<b>ed</b>.<br>— Вопросы читай с восходящей интонацией, утверждения — с нисходящей.<br>— Лучше чуть медленнее, но чётко: ошибки в словах = потеря балла.',
+2:'<b>Как задавать прямые вопросы:</b><br>Каждый пункт превращай в ПРЯМОЙ вопрос:<br>— цена → <i>How much does it cost?</i><br>— даты → <i>When does the course start?</i><br>— место → <i>Where is the club located?</i><br>— возможность → <i>Can I…? / Is it possible to…?</i><br><b>Ловушки:</b> «What about the price?» — НЕ вопрос, балл не дадут. Вопрос «зачитыванием пункта» (price?) — тоже. Нужен полный вопрос с вспомогательным глаголом.',
+3:'<b>Как отвечать на вопросы интервью:</b><br>— Отвечай развёрнуто: 2-3 предложения, а не «Yes, I do».<br>— Формула: прямой ответ → причина → пример. <i>I usually read in my free time. It helps me to relax. For example, last week I finished a great detective story.</i><br>— Не молчи: если нужно время, начни с <i>Well, let me think…</i><br>— Следи за временем вопроса: «What did you do…» → отвечай в прошедшем.',
+4:'<b>Скелет монолога (2,5–3 минуты):</b><br>1. Вступление: <i>I have found two photos for our project about…</i><br>2. Описание: <i>In the first photo we can see… In the second photo there is…</i><br>3. Общее: <i>Both photos show… / What these photos have in common is…</i><br>4. Различия: <i>The main difference is that… while…</i><br>5. Мнение: <i>As for me, I prefer… because…</i><br>6. Финал: <i>That is all I wanted to say.</i><br><b>Ловушка:</b> пропустил пункт плана — минус баллы за решение задачи.'};
+let SP=null,SP_rec=null,SP_chunks=[],SP_tm=null,SP_sheet=false;
+function spSt(){S.spk=S.spk||{t1:{n:0},t2:{n:0},t3:{n:0},t4:{n:0}};return S.spk}
+function spSync(){if(!S)return;var r=spSt();var tot=r.t1.n+r.t2.n+r.t3.n+r.t4.n;
+  S.prog=S.prog||{};S.prog.speak=Math.min(100,tot*4);
+  setTxt('sub_speak',tot?('тренировок: '+tot):'устная часть · запись');
+  setTxt('s9_sumline',tot?('Тренировок: '+tot+' · 4 задания'):'Четыре задания — как на экзамене');
+  var bar=document.getElementById('s9_bar');if(bar)bar.style.width=Math.max(2,Math.min(100,tot*4))+'%';
+  try{setTxt('m_speak',S.prog.speak);ringOff('ring_speak',113.1,S.prog.speak)}catch(e){}}
+function spAnim(n,d){var c=document.getElementById('s9_card');if(!c)return;c.style.animation='none';void c.offsetWidth;c.style.animation=n+' '+d+' cubic-bezier(.25,.75,.35,1)'}
+function spFmt(s){s=Math.max(0,s);return Math.floor(s/60)+':'+('0'+s%60).slice(-2)}
+function spStopAll(){clearInterval(SP_tm);SP_tm=null;
+  if(SP_rec&&SP_rec.state!=='inactive'){try{SP_rec.stop()}catch(e){}}
+  try{lStop()}catch(e){}}
+initSpeaking=function(){if(!S)return;spStopAll();SP=null;spSync();spHub()}
+function spHub(){var area=document.getElementById('s9_area');if(!area)return;
+  var r=spSt();var GA=0;function ga(){return 'animation:win .34s '+((GA++)*0.06)+'s cubic-bezier(.25,.75,.35,1) both;'}
+  area.innerHTML=[1,2,3,4].map(function(t){var c=SP_CONF[t];
+    return '<div class="clayCard sq clk" onclick="spOpen('+t+')" style="'+ga()+'padding:16px 18px;margin-bottom:12px;cursor:pointer;">'
+      +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'
+      +'<div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:15.5px;color:#2B2B2B;">'+c.name+'</div>'
+      +'<div style="font-weight:600;font-size:12px;color:#98917F;margin-top:2px;">'+c.sub+'</div></div>'
+      +'<span style="flex:none;font-weight:800;font-size:12px;color:#E44E20;background:#FFEDE4;padding:8px 12px;border-radius:14px;">'+(r['t'+t].n||'—')+'</span></div></div>'}).join('')
+   +'<div class="clayCard" style="'+ga()+'display:flex;align-items:center;gap:12px;padding:13px 15px;">'
+    +'<span style="flex:none;width:38px;height:38px;border-radius:13px;background:#FBE9EF;display:grid;place-items:center;"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#D4537E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3Z"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg></span>'
+    +'<div style="font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.45;">Сначала подготовка по таймеру, потом запись — тайминги как на настоящем экзамене</div></div>';
+  setTxt('s9_today','4 задания')}
+function spSet(t){var pool=[SP1,SP2,SP3,SP4][t-1];var k='spIdx'+t;S[k]=(S[k]||0);return pool[S[k]%pool.length]}
+function spNextSet(t){S['spIdx'+t]=(S['spIdx'+t]||0)+1;save()}
+function spOpen(t){SP={t:t,set:spSet(t),phase:'intro',qi:0,url:null};SP_sheet=false;spRender()}
+function spBtn(label,fn,solid){return '<button class="sq" style="'+WBTN+(solid?'background:linear-gradient(135deg,#FFA570,#F2683F);color:#fff;border:none;box-shadow:0 12px 24px rgba(242,104,63,.32);':'color:#F2683F;')+'" onclick="'+fn+'">'+label+'</button>'}
+function spTimerChip(){return '<div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-top:12px;">'
+  +'<span id="s9_timer" style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:34px;color:#2B2B2B;">'+spFmt(SP.left)+'</span></div>'
+  +'<div style="margin-top:8px;height:7px;border-radius:5px;background:#F1EDE7;"><div id="s9_tbar" style="width:100%;height:100%;border-radius:5px;background:linear-gradient(90deg,#FFA570,#F2683F);"></div></div>'}
+function spTick(total,onEnd){clearInterval(SP_tm);
+  SP_tm=setInterval(function(){if(!SP){clearInterval(SP_tm);return}
+    SP.left--;setTxt('s9_timer',spFmt(SP.left));
+    var b=document.getElementById('s9_tbar');if(b)b.style.width=Math.max(0,Math.round(SP.left/total*100))+'%';
+    setTxt('s9_today',spFmt(SP.left));
+    if(SP.left<=0){clearInterval(SP_tm);onEnd()}},1000)}
+function spRender(){var area=document.getElementById('s9_area');if(!area||!SP)return;
+  var t=SP.t,c=SP_CONF[t],set=SP.set;
+  /* ---- интро ---- */
+  if(SP.phase==='intro'){
+    var body='';
+    if(t===1)body='<div style="font-weight:600;font-size:13px;color:#4A453E;line-height:1.6;">Прочитай текст вслух. Подготовка — '+spFmt(c.prep)+', чтение — до '+spFmt(c.rec)+'.</div>';
+    if(t===2)body='<div style="font-weight:600;font-size:13px;color:#4A453E;line-height:1.6;">Изучи объявление и задай <b>4 прямых вопроса</b> по пунктам. Подготовка — '+spFmt(c.prep)+', на каждый вопрос — 20 секунд.</div>';
+    if(t===3)body='<div style="font-weight:600;font-size:13px;color:#4A453E;line-height:1.6;">Интервью на тему «'+set.topic+'». Услышишь 5 вопросов — на каждый отвечай развёрнуто, до 40 секунд. Подготовки нет, как на экзамене.</div>';
+    if(t===4)body='<div style="font-weight:600;font-size:13px;color:#4A453E;line-height:1.6;">Голосовое сообщение другу: сравни две фотографии по плану. Подготовка — '+spFmt(c.prep)+', монолог — до '+spFmt(c.rec)+'.</div>';
+    area.innerHTML='<div id="s9_card" class="clayCard" style="position:relative;overflow:hidden;padding:18px;margin-bottom:12px;">'+wDeco()
+      +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#F2683F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">'+c.sub.toUpperCase()+'</span>'
+      +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:19px;color:#2B2B2B;margin-top:10px;">'+c.name+'</div>'
+      +'<div style="margin-top:8px;">'+body+'</div>'
+      +'<div style="margin-top:11px;display:flex;gap:8px;">'
+      +'<span class="clk sq" onclick="spNextSet(SP.t);spOpen(SP.t)" style="flex:1;text-align:center;background:#FFEDE4;border-radius:13px;padding:9px 0;font-weight:800;font-size:12px;color:#E44E20;cursor:pointer;">Другой вариант</span>'
+      +'<span class="clk sq" onclick="SP_sheet=!SP_sheet;spRender()" style="flex:1;text-align:center;background:#EAF7F0;border-radius:13px;padding:9px 0;font-weight:800;font-size:12px;color:#1F8A50;cursor:pointer;">'+(SP_sheet?'Скрыть шпаргалку':'Шпаргалка')+'</span></div>'
+      +(SP_sheet?'<div style="margin-top:11px;background:#F2F8F4;border-radius:14px;padding:11px 13px;font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.65;">'+SP_SHEET[t]+'</div>':'')
+      +'</div>'
+      +spBtn(c.prep?'Начать подготовку':'Начать интервью','spPrep()',true)
+      +'<div style="height:10px;"></div>'
+      +spBtn('← К заданиям','spStopAll();initSpeaking()');
+    spAnim('win','.32s');setTxt('s9_today',c.name);return}
+  /* ---- подготовка ---- */
+  if(SP.phase==='prep'){
+    area.innerHTML='<div id="s9_card" class="clayCard" style="position:relative;overflow:hidden;padding:18px;margin-bottom:12px;">'+wDeco()
+      +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#C77400;background:#FFF4DE;padding:5px 10px;border-radius:20px;">ПОДГОТОВКА</span>'
+      +spTaskBody()
+      +spTimerChip()+'</div>'
+      +spBtn('Готово — к записи','spRec()',true)
+      +'<div style="height:10px;"></div>'
+      +spBtn('← К заданиям','spStopAll();initSpeaking()');
+    spAnim('win','.32s');return}
+  /* ---- запись ---- */
+  if(SP.phase==='rec'){
+    var head=SP.t===3
+      ?'<div style="font-weight:600;font-size:12px;color:#98917F;margin-top:10px;">Вопрос '+(SP.qi+1)+' из 5</div>'
+       +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:17px;color:#2B2B2B;line-height:1.5;margin-top:6px;">'+SP.set.qs[SP.qi]+'</div>'
+       +'<div style="margin-top:10px;"><span class="clk sq" onclick="lPlayRaw([{s:1,t:SP.set.qs[SP.qi]}])" style="display:inline-flex;align-items:center;gap:7px;background:#E3F1F5;border-radius:13px;padding:9px 14px;font-weight:800;font-size:12px;color:#3E93A8;cursor:pointer;">🔊 Озвучить вопрос</span></div>'
+      :spTaskBody();
+    area.innerHTML='<div id="s9_card" class="clayCard" style="position:relative;overflow:hidden;padding:18px;margin-bottom:12px;">'+wDeco()
+      +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#C0392B;background:#FDEDEA;padding:5px 10px;border-radius:20px;">● ИДЁТ ЗАПИСЬ</span>'
+      +head+spTimerChip()+'</div>'
+      +(SP.t===3&&SP.qi<4?spBtn('Следующий вопрос →','spNextQ()',true)+'<div style="height:10px;"></div>':'')
+      +spBtn(SP.t===3&&SP.qi>=4?'Завершить интервью':'Стоп — закончить запись','spFinish()',SP.t===3)
+      ;
+    return}
+  /* ---- результат ---- */
+  if(SP.phase==='done'){var r=spSt();
+    var extra='';
+    if(t===1)extra='<div style="height:10px;"></div>'+spBtn('🔊 Эталон диктора','spEtalon()');
+    if(t===2)extra='<div class="clayCard" style="padding:14px 16px;margin-top:12px;"><div style="font-weight:800;font-size:10px;letter-spacing:1.2px;color:#1F8A50;">ОБРАЗЦЫ ВОПРОСОВ</div>'
+      +set.points.map(function(p,i){return '<div style="margin-top:8px;font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.5;"><b>'+(i+1)+'. '+p+':</b><br><i>'+set.exq[i]+'</i></div>'}).join('')+'</div>';
+    if(t===4)extra='<div class="clayCard" style="padding:14px 16px;margin-top:12px;"><div style="font-weight:800;font-size:10px;letter-spacing:1.2px;color:#1F8A50;">ПРОВЕРЬ СЕБЯ</div>'
+      +set.plan.map(function(p,i){return '<div style="margin-top:7px;font-weight:600;font-size:12.5px;color:#4A453E;">'+(i+1)+'. '+p+'?</div>'}).join('')+'</div>';
+    if(t===3)extra='<div class="clayCard" style="padding:14px 16px;margin-top:12px;"><div style="font-weight:800;font-size:10px;letter-spacing:1.2px;color:#1F8A50;">ВОПРОСЫ ИНТЕРВЬЮ</div>'
+      +set.qs.map(function(q,i){return '<div style="margin-top:7px;font-weight:600;font-size:12.5px;color:#4A453E;">'+(i+1)+'. '+q+'</div>'}).join('')+'</div>';
+    area.innerHTML='<div id="s9_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;text-align:center;">'+wDeco()
+      +'<div style="font-size:42px;">🎙️</div>'
+      +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:20px;color:#2B2B2B;margin-top:8px;">Запись готова!</div>'
+      +'<div style="font-weight:600;font-size:13px;color:#98917F;margin-top:5px;">Послушай себя со стороны и сверься со шпаргалкой.<br>Тренировок в этом задании: '+r['t'+t].n+'</div></div>'
+      +'<div style="height:12px;"></div>'
+      +(SP.url?spBtn('▶ Послушать свою запись','spPlay()',true):'<div style="text-align:center;font-weight:600;font-size:12.5px;color:#C0392B;">Запись не получилась — проверь доступ к микрофону</div>')
+      +extra
+      +'<div style="height:10px;"></div>'+spBtn('Ещё раз','spNextSet(SP.t);spOpen(SP.t)')
+      +'<div style="height:10px;"></div>'+spBtn('К заданиям','spStopAll();initSpeaking()');
+    spAnim('win','.32s');setTxt('s9_today',SP_CONF[t].name);return}}
+function spTaskBody(){var t=SP.t,set=SP.set;
+  if(t===1)return '<div style="font-weight:500;font-size:13.5px;line-height:1.7;color:#2B2B2B;margin-top:10px;">'+set.tx+'</div>';
+  if(t===2)return '<div style="margin-top:10px;background:#FAF6F1;border-radius:14px;padding:11px 13px;font-weight:600;font-size:13px;color:#4A453E;line-height:1.6;font-style:italic;">'+set.ad+'</div>'
+    +'<div style="margin-top:9px;font-weight:600;font-size:12.5px;color:#2B2B2B;">Задай прямые вопросы о:</div>'
+    +set.points.map(function(p,i){return '<div style="margin-top:5px;font-weight:700;font-size:13px;color:#E44E20;">'+(i+1)+'. '+p+'</div>'}).join('');
+  if(t===4)return '<div style="margin-top:10px;font-weight:700;font-size:13.5px;color:#2B2B2B;">Тема: '+set.topic+'</div>'
+    +set.ph.map(function(p){return '<div style="margin-top:8px;background:#FAF6F1;border-radius:14px;padding:10px 13px;font-weight:600;font-size:12.5px;color:#4A453E;font-style:italic;">'+p+'</div>'}).join('')
+    +'<div style="margin-top:9px;font-weight:600;font-size:12.5px;color:#2B2B2B;">План:</div>'
+    +set.plan.map(function(p,i){return '<div style="margin-top:4px;font-weight:600;font-size:12.5px;color:#4A453E;">'+(i+1)+'. '+p+'</div>'}).join('');
+  return ''}
+function spPrep(){var c=SP_CONF[SP.t];
+  if(!c.prep){spRec();return}
+  SP.phase='prep';SP.left=c.prep;spRender();
+  spTick(c.prep,function(){spRec()})}
+async function spRec(){var c=SP_CONF[SP.t];
+  clearInterval(SP_tm);
+  try{
+    var st=await navigator.mediaDevices.getUserMedia({audio:true});
+    SP_rec=new MediaRecorder(st);SP_chunks=[];
+    SP_rec.ondataavailable=function(e){SP_chunks.push(e.data)};
+    SP_rec.onstop=function(){SP.url=URL.createObjectURL(new Blob(SP_chunks,{type:'audio/webm'}));st.getTracks().forEach(function(x){x.stop()});
+      if(SP.phase==='done')spRender()};
+    SP_rec.start();
+  }catch(e){SP.url=null;try{toast('Нет доступа к микрофону')}catch(_){}}
+  SP.phase='rec';SP.left=c.rec;SP.qi=0;spRender();
+  if(SP.t===3){try{lPlayRaw([{s:1,t:SP.set.qs[0]}])}catch(e){}}
+  spTick(c.rec,function(){SP.t===3?spNextQ():spFinish()})}
+function spNextQ(){if(!SP)return;
+  if(SP.qi>=4){spFinish();return}
+  SP.qi++;SP.left=SP_CONF[3].rec;spRender();
+  try{lPlayRaw([{s:1,t:SP.set.qs[SP.qi]}])}catch(e){}
+  spTick(SP_CONF[3].rec,function(){SP.qi>=4?spFinish():spNextQ()})}
+function spFinish(){if(!SP)return;clearInterval(SP_tm);try{lStop()}catch(e){}
+  var r=spSt();r['t'+SP.t].n++;spNextSet(SP.t);
+  SP.phase='done';
+  if(SP_rec&&SP_rec.state!=='inactive'){try{SP_rec.stop()}catch(e){}}
+  spSync();save();spRender()}
+var SP_audio=null;
+function spPlay(){if(!SP||!SP.url)return;
+  try{lStop()}catch(e){}
+  if(SP_audio){try{SP_audio.pause()}catch(e){}}
+  SP_audio=new Audio(SP.url);SP_audio.play().catch(function(){})}
+function spEtalon(){if(!SP||SP.t!==1)return;
+  if(SP_audio){try{SP_audio.pause()}catch(e){}}
+  var parts=(SP.set.tx.match(/[^.!?]+[.!?]+/g)||[SP.set.tx]).map(function(x){return {s:0,t:x.trim()}});
+  try{lPlayRaw(parts)}catch(e){}}
+/* уборка при уходе с экрана + синк */
+var _t10=tab;tab=function(id){_t10(id);if(id!=='scr9'&&SP){spStopAll();SP=null}};
+var _sa7=startApp;startApp=async function(){await _sa7.apply(this,arguments);try{spSync()}catch(e){}};
+
 </script>
 </body></html>
