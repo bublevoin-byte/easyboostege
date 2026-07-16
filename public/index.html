@@ -3058,8 +3058,25 @@ initReading=function(){if(!S)return;rSync();rHub()}
 function rHub(){var area=document.getElementById('r_area');if(!area)return;RH=null;RQ=null;
   var r=rSt();var GA=0;function ga(){return 'animation:win .34s '+((GA++)*0.06)+'s cubic-bezier(.25,.75,.35,1) both;'}
   function acc(x){return x.tot?Math.round(x.ok/x.tot*100)+'%':'—'}
+  var re=S.readExam||{};
   area.innerHTML=
-   '<div class="clayCard sq clk" onclick="rHl()" style="'+ga()+'padding:16px 18px;margin-bottom:12px;cursor:pointer;">'
+   '<div class="sq clk" onclick="rExam()" style="'+ga()+'position:relative;overflow:hidden;border-radius:24px;padding:16px 18px;margin-bottom:12px;cursor:pointer;background:linear-gradient(150deg,#3A3532,#2B2B2B);box-shadow:0 14px 28px rgba(43,35,30,.32),inset 0 2px 3px rgba(255,255,255,.14),inset 0 -5px 10px rgba(0,0,0,.35);">'
+    +'<svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;" viewBox="0 0 346 80" preserveAspectRatio="xMidYMid slice">'
+    +'<g fill="rgba(255,255,255,.75)">'
+    +'<path class="eb5sp" style="animation-delay:.3s" d="M22,14 Q22,17.5 25.5,17.5 Q22,17.5 22,21 Q22,17.5 18.5,17.5 Q22,17.5 22,14 Z"/>'
+    +'<path class="eb5sp" style="animation-delay:1.4s" d="M210,12 Q210,15 213,15 Q210,15 210,18 Q210,15 207,15 Q210,15 210,12 Z"/>'
+    +'<path class="eb5sp" style="animation-delay:.9s" d="M180,58 Q180,61 183,61 Q180,61 180,64 Q180,61 177,61 Q180,61 180,58 Z"/>'
+    +'</g><g fill="rgba(255,178,76,.85)">'
+    +'<path class="eb5sp" style="animation-delay:1.9s" d="M250,30 Q250,34 254,34 Q250,34 250,38 Q250,34 246,34 Q250,34 250,30 Z"/>'
+    +'<path class="eb5sp" style="animation-delay:.6s" d="M60,54 Q60,57.5 63.5,57.5 Q60,57.5 60,61 Q60,57.5 56.5,57.5 Q60,57.5 60,54 Z"/>'
+    +'<path class="eb5sp" style="animation-delay:2.3s" d="M120,20 Q120,23 123,23 Q120,23 120,26 Q120,23 117,23 Q120,23 120,20 Z"/>'
+    +'</g></svg>'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'
+    +'<div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:15.5px;color:#fff;">Экзамен · задания 10–18</div>'
+    +'<div style="font-weight:600;font-size:12px;color:rgba(255,255,255,.62);margin-top:2px;">'+(re.n?('лучший результат: '+re.best+' из 11'):'все три задания подряд, на время')+'</div></div>'
+    +'<span style="flex:none;background:linear-gradient(145deg,#FFC861,#F2683F);border-radius:14px;width:42px;height:42px;display:grid;place-items:center;box-shadow:0 6px 12px rgba(242,104,63,.4),inset 0 2px 3px rgba(255,255,255,.5);">'
+    +'<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span></div></div>'
+   +'<div class="clayCard sq clk" onclick="rHl()" style="'+ga()+'padding:16px 18px;margin-bottom:12px;cursor:pointer;">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'
     +'<div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:15.5px;color:#2B2B2B;">Заголовки</div>'
     +'<div style="font-weight:600;font-size:12px;color:#98917F;margin-top:2px;">задание 10 · подбери заголовок к тексту</div></div>'
@@ -3232,6 +3249,96 @@ r_add=function(st){if(!lastWord)return;
       else{try{toast('Это слово уже в изучении')}catch(e){}}}}
   save();var p=document.getElementById('r_pop');if(p)p.style.display='none';
   try{wSync()}catch(e){}}
+/* ---- экзамен по чтению: 10 + 11 + 12-18 ---- */
+let RE=null;
+function rExam(){var area=document.getElementById('r_area');if(!area)return;
+  var st=S.readExam||{};
+  area.innerHTML='<div id="r_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;">'+wDeco()
+    +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#F2683F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">КАК НА ЕГЭ</span>'
+    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:19px;color:#2B2B2B;margin-top:12px;">Раздел «Чтение» целиком</div>'
+    +'<div style="font-weight:600;font-size:13.5px;color:#4A453E;line-height:1.6;margin-top:8px;">Заголовки → пропуски → текст с вопросами. Никаких подсказок до конца, идёт таймер. Максимум 11 баллов.</div>'
+    +(st.n?'<div style="margin-top:12px;font-weight:700;font-size:12.5px;color:#98917F;">Попыток: '+st.n+' · последний: '+st.last+' из 11 · лучший: '+st.best+' из 11</div>':'')
+    +'</div>'
+    +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
+    +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="rExamStart()">Начать</button>'
+    +'<button class="sq" style="'+WBTN+'color:#F2683F;" onclick="rHub()">← К чтению</button></div>';
+  rAnim('win','.32s')}
+function rExamStart(){
+  var ph=rPool('h',R_HL),pg=rPool('g',R_GAPS),pq=rPool('q',R_QS);
+  S.reIdx=(S.reIdx||0);
+  RE={h:ph[S.reIdx%ph.length],g:pg[S.reIdx%pg.length],q:pq[S.reIdx%pq.length],
+      selH:[null,null,null,null],selG:[null,null,null],ansQ:[],stage:0,t0:Date.now()};
+  S.reIdx++;
+  RE.iv=setInterval(function(){if(RE)setTxt('r_today',gExamFmt(Math.floor((Date.now()-RE.t0)/1000)))},1000);
+  rExamRender()}
+function rExamBtnRow(ok,label,fn){
+  return '<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);margin-top:4px;'+(ok?'':'opacity:.45;pointer-events:none;')+'" onclick="'+fn+'">'+label+'</button>'}
+function rExamRender(){var area=document.getElementById('r_area');if(!area||!RE)return;var L='ABCDE';
+  if(RE.stage===0){var set=RE.h;
+    var h='<div id="r_card" class="clayCard" style="position:relative;overflow:hidden;padding:16px 18px;margin-bottom:12px;">'+wDeco()
+      +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#F2683F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">ЭКЗАМЕН · 1 ИЗ 3 · ЗАГОЛОВКИ</span>'
+      +set.hl.map(function(x,i){return '<div style="margin-top:8px;font-weight:700;font-size:13px;color:#2B2B2B;"><b style="color:#F2683F;">'+L[i]+'.</b> '+x+'</div>'}).join('')+'</div>';
+    set.txts.forEach(function(tx,ti){
+      h+='<div class="clayCard" style="padding:14px 16px;margin-bottom:11px;">'
+        +'<div style="font-weight:500;font-size:13px;line-height:1.6;color:#2B2B2B;">'+rEsc(tx.t)+'</div>'
+        +'<div style="margin-top:10px;display:flex;gap:8px;">'
+        +set.hl.map(function(_,hi){var on=RE.selH[ti]===hi;
+          return '<button onclick="RE.selH['+ti+']='+hi+';rExamDedup(\'selH\','+ti+','+hi+');rExamRender()" style="flex:1;height:36px;border-radius:11px;border:1.5px solid '+(on?'#F2683F':'#F0EAE2')+';background:'+(on?'#FFEDE4':'#fff')+';font-family:Manrope,sans-serif;font-weight:800;font-size:13px;color:'+(on?'#E44E20':'#8A8F98')+';cursor:pointer;">'+L[hi]+'</button>'}).join('')+'</div></div>'});
+    h+=rExamBtnRow(RE.selH.every(function(x){return x!==null}),'Дальше → пропуски','RE.stage=1;rExamRender()');
+    area.innerHTML=h;return}
+  if(RE.stage===1){var set=RE.g;
+    var txt='';set.tx.forEach(function(seg,i){txt+=rEsc(seg);
+      if(i<3){var s=RE.selG[i];txt+=' <b style="color:#F2683F;">('+(i+1)+')</b>&nbsp;<span style="display:inline-block;min-width:50px;border-bottom:2.5px dashed #F2683F;text-align:center;font-weight:800;color:#E44E20;">'+(s!==null?'ABCD'[s]:'&nbsp;')+'</span> '}});
+    var h='<div id="r_card" class="clayCard" style="position:relative;overflow:hidden;padding:16px 18px;margin-bottom:12px;">'+wDeco()
+      +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#C77400;background:#FFF4DE;padding:5px 10px;border-radius:20px;">ЭКЗАМЕН · 2 ИЗ 3 · ПРОПУСКИ</span>'
+      +'<div style="font-weight:500;font-size:13.5px;line-height:1.7;color:#2B2B2B;margin-top:10px;">'+txt+'</div>'
+      +set.fr.map(function(f,i){return '<div style="margin-top:6px;font-weight:700;font-size:12.5px;color:#2B2B2B;"><b style="color:#F2683F;">'+'ABCD'[i]+'.</b> '+rEsc(f)+'</div>'}).join('')+'</div>';
+    [0,1,2].forEach(function(gi){
+      h+='<div class="clayCard" style="padding:12px 14px;margin-bottom:10px;display:flex;align-items:center;gap:8px;">'
+        +'<span style="flex:none;font-weight:800;font-size:12px;color:#E44E20;width:56px;">Пропуск '+(gi+1)+'</span>'
+        +'<div style="flex:1;display:flex;gap:8px;">'
+        +set.fr.map(function(_,fi){var on=RE.selG[gi]===fi;
+          return '<button onclick="RE.selG['+gi+']='+fi+';rExamDedup(\'selG\','+gi+','+fi+');rExamRender()" style="flex:1;height:34px;border-radius:11px;border:1.5px solid '+(on?'#F2683F':'#F0EAE2')+';background:'+(on?'#FFEDE4':'#fff')+';font-family:Manrope,sans-serif;font-weight:800;font-size:12.5px;color:'+(on?'#E44E20':'#8A8F98')+';cursor:pointer;">'+'ABCD'[fi]+'</button>'}).join('')+'</div></div>'});
+    h+=rExamBtnRow(RE.selG.every(function(x){return x!==null}),'Дальше → текст','RE.stage=2;rExamRender()');
+    area.innerHTML=h;return}
+  var set=RE.q,qi=RE.ansQ.length;
+  if(qi>=set.qs.length){rExamFinish();return}
+  var q=set.qs[qi];
+  area.innerHTML='<div class="clayCard" style="padding:15px 16px;margin-bottom:12px;"><div style="font-weight:500;font-size:13px;line-height:1.65;color:#2B2B2B;">'+rEsc(set.tx)+'</div></div>'
+    +'<div id="r_card" class="clayCard" style="position:relative;overflow:hidden;padding:18px;margin-bottom:12px;">'+wDeco()
+    +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#1F8A50;background:#EAF7F0;padding:5px 10px;border-radius:20px;">ЭКЗАМЕН · 3 ИЗ 3 · ВОПРОС '+(qi+1)+' ИЗ '+set.qs.length+'</span>'
+    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:16px;color:#2B2B2B;line-height:1.45;margin-top:12px;">'+rEsc(q.q)+'</div></div>'
+    +'<div style="display:flex;flex-direction:column;gap:10px;">'
+    +q.o.map(function(o,i){return '<button class="sq" style="'+WBTN+'text-align:left;" onclick="RE.ansQ.push('+i+');rExamRender()">'+rEsc(o)+'</button>'}).join('')+'</div>'}
+function rExamDedup(field,idx,val){RE[field]=RE[field].map(function(x,i){return i===idx?val:(x===val?null:x)})}
+function rExamFinish(){if(!RE)return;clearInterval(RE.iv);
+  var sec=Math.floor((Date.now()-RE.t0)/1000),L='ABCDE',r=rSt();
+  var okH=0;RE.h.txts.forEach(function(tx,ti){r.h.tot++;if(RE.selH[ti]===tx.a){okH++;r.h.ok++}});
+  var okG=0;[0,1,2].forEach(function(gi){r.g.tot++;if(RE.selG[gi]===RE.g.a[gi]){okG++;r.g.ok++}});
+  var okQ=0;RE.q.qs.forEach(function(q,i){r.q.tot++;if(RE.ansQ[i]===q.a){okQ++;r.q.ok++}});
+  var total=okH+okG+okQ;
+  var st=S.readExam||{n:0,last:0,best:0};st.n++;st.last=total;st.best=Math.max(st.best||0,total);S.readExam=st;
+  var rows='';
+  RE.h.txts.forEach(function(tx,ti){if(RE.selH[ti]!==tx.a)
+    rows+='<div style="padding:9px 2px;border-bottom:1px solid #F4EFE9;"><div style="font-weight:800;font-size:12.5px;color:#C0392B;">Заголовки · текст '+(ti+1)+' → '+L[tx.a]+'. '+rEsc(RE.h.hl[tx.a])+'</div><div style="font-weight:600;font-size:12px;color:#98917F;margin-top:3px;">'+tx.k+'</div></div>'});
+  [0,1,2].forEach(function(gi){if(RE.selG[gi]!==RE.g.a[gi])
+    rows+='<div style="padding:9px 2px;border-bottom:1px solid #F4EFE9;"><div style="font-weight:800;font-size:12.5px;color:#C0392B;">Пропуск '+(gi+1)+' → '+'ABCD'[RE.g.a[gi]]+'. '+rEsc(RE.g.fr[RE.g.a[gi]])+'</div><div style="font-weight:600;font-size:12px;color:#98917F;margin-top:3px;">'+RE.g.k[gi]+'</div></div>'});
+  RE.q.qs.forEach(function(q,i){if(RE.ansQ[i]!==q.a)
+    rows+='<div style="padding:9px 2px;border-bottom:1px solid #F4EFE9;"><div style="font-weight:800;font-size:12.5px;color:#C0392B;">Вопрос '+(i+1)+' → '+rEsc(q.o[q.a])+'</div><div style="font-weight:600;font-size:12px;color:#98917F;margin-top:3px;">«'+rEsc(q.ev)+'»</div></div>'});
+  RE=null;rSync();save();
+  var parts=[['Заголовки',okH,4],['Пропуски',okG,3],['Вопросы',okQ,4]];
+  var weak=parts.slice().sort(function(a,b){return a[1]/a[2]-b[1]/b[2]})[0];
+  var area=document.getElementById('r_area');
+  area.innerHTML='<div id="r_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;">'+wDeco()
+    +'<div style="text-align:center;"><div style="font-size:42px;">'+(total>=10?'🏆':(total>=7?'💪':'📚'))+'</div>'
+    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:22px;color:#2B2B2B;margin-top:8px;">'+total+' из 11</div>'
+    +'<div style="font-weight:600;font-size:13px;color:#98917F;margin-top:4px;">Время: '+gExamFmt(sec)+' · '+parts.map(function(p){return p[0]+' '+p[1]+'/'+p[2]}).join(' · ')+'</div>'
+    +(total<11?'<div style="font-weight:700;font-size:12.5px;color:#C77400;margin-top:6px;">Слабое место: '+weak[0].toLowerCase()+' — потренируй отдельно</div>':'')
+    +'</div>'+(rows?'<div style="margin-top:12px;">'+rows+'</div>':'')+'</div>'
+    +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
+    +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="rExamStart()">Ещё раз</button>'
+    +'<button class="sq" style="'+WBTN+'color:#F2683F;" onclick="rHub()">К чтению</button></div>';
+  rAnim('win','.32s');rGen()}
 /* ---- фоновая ИИ-генерация комплектов чтения ---- */
 function rPool(kind,base){var ai=(S&&S.readAi&&S.readAi[kind])||[];return base.concat(ai)}
 var R_GEN=false;
@@ -3274,7 +3381,7 @@ async function rGen(){
   try{var need=rPool('h',R_HL).length<6||rPool('q',R_QS).length<6||rPool('g',R_GAPS).length<6;
     if(need)setTimeout(rGen,4000)}catch(e){}}
 /* FAB прячем и на чтении; синк при старте */
-var _t7=tab;tab=function(id){_t7(id);if(id==='scr7'){var f=document.getElementById('genfab');if(f)f.style.display='none'}};
+var _t7=tab;tab=function(id){_t7(id);if(RE&&RE.iv){clearInterval(RE.iv);RE=null}if(id==='scr7'){var f=document.getElementById('genfab');if(f)f.style.display='none'}};
 var _sa4=startApp;startApp=async function(){await _sa4.apply(this,arguments);try{rSync()}catch(e){}};
 
 </script>
