@@ -549,7 +549,7 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
       </div>
       <div id="r_sumline" style="margin-top:16px;font-weight:700;font-size:13px;color:rgba(255,255,255,.95);">Два тренажёра — как на экзамене</div>
       <div style="margin-top:12px;display:flex;align-items:center;justify-content:space-between;font-weight:600;font-size:11.5px;color:rgba(255,255,255,.9);">
-        <span style="font-weight:700;letter-spacing:.5px;">ЗАДАНИЯ 10–18</span><span id="r_today">2 тренажёра</span>
+        <span style="font-weight:700;letter-spacing:.5px;">ЗАДАНИЯ 10–18</span><span id="r_today">3 тренажёра</span>
       </div>
       <div style="margin-top:7px;height:7px;border-radius:5px;background:rgba(255,255,255,.28);"><div id="r_bar" style="width:2%;height:100%;border-radius:5px;background:#fff;"></div></div>
     </div>
@@ -3022,9 +3022,24 @@ const R_QS=[
  {q:'How can volunteering help in the future?',o:['It guarantees any job','Universities and companies value it','It pays very well','It replaces school exams'],a:1,ev:'…universities pay attention to social activity, and some companies prefer candidates with volunteer experience.',e:'Вузы и работодатели ценят волонтёрский опыт — но не «гарантируют работу».'},
  {q:'What do you need to become a volunteer?',o:['Money','Special skills','Free time and the wish to help','A special diploma'],a:2,ev:'…you do not need money or special skills — only free time and the wish to help.',e:'Нужны только свободное время и желание помогать.'}]}
 ];
+const R_GAPS=[
+{tx:['Our school library is more than just a room with books. Students come here ',' or to prepare for lessons. Last year the library bought new computers, ',' much faster. Teachers say that students ',' now spend more time reading than before.'],
+ fr:['to do their homework in silence','which made the search for information','who visit the library regularly','that was built ten years ago'],
+ a:[0,1,2],
+ k:['Цель прихода → инфинитив: come here TO DO homework.','which относится к computers, а дальше есть made … faster — фраза продолжает мысль о поиске.','who — придаточное о людях; речь о студентах, которые ходят в библиотеку.']},
+{tx:['The new park opened in our city last spring. People of all ages come there ',' . There is a special area for dogs, ',' without a lead. Next year the city plans to build an open-air stage ',' .'],
+ fr:['to walk, run and ride bikes','where they can play freely','where concerts and festivals will take place','that sells ice cream'],
+ a:[0,1,2],
+ k:['Зачем приходят → инфинитив цели: TO WALK, run and ride bikes.','where + play freely without a lead — место для собак.','Сцена — место будущих концертов: where concerts … will take place.']},
+{tx:['Last month a student from Britain joined our class. At first it was hard for him ',' , but soon he made friends. He says Russian winter is the coldest thing ',' . Next month our class is planning a trip to Suzdal ',' .'],
+ fr:['to understand our fast speech','that he has ever experienced','to show him old Russian towns','who lives near the school'],
+ a:[0,1,2],
+ k:['it was hard for him + инфинитив: TO UNDERSTAND.','the coldest thing THAT he has ever experienced — классика с ever после превосходной степени.','Цель поездки → инфинитив: TO SHOW him old towns.']}
+];
+let RG=null;
 let RH=null,RQ=null;
-function rSt(){S.read=S.read||{h:{ok:0,tot:0},q:{ok:0,tot:0},texts:0};return S.read}
-function rSync(){if(!S)return;var r=rSt();var ok=r.h.ok+r.q.ok,tot=r.h.tot+r.q.tot;
+function rSt(){S.read=S.read||{h:{ok:0,tot:0},q:{ok:0,tot:0},texts:0};S.read.g=S.read.g||{ok:0,tot:0};return S.read}
+function rSync(){if(!S)return;var r=rSt();var ok=r.h.ok+r.q.ok+r.g.ok,tot=r.h.tot+r.q.tot+r.g.tot;
   var acc=tot?Math.round(ok/tot*100):0;
   S.prog=S.prog||{};S.prog.read=acc;
   setTxt('sub_read',r.texts?('текстов: '+r.texts+' · точность '+acc+'%'):'начни с первого текста');
@@ -3054,10 +3069,15 @@ function rHub(){var area=document.getElementById('r_area');if(!area)return;RH=nu
     +'<div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:15.5px;color:#2B2B2B;">Полное понимание</div>'
     +'<div style="font-weight:600;font-size:12px;color:#98917F;margin-top:2px;">задания 12–18 · текст и вопросы</div></div>'
     +'<span style="flex:none;font-weight:800;font-size:12px;color:#1F8A50;background:#EAF7F0;padding:8px 12px;border-radius:14px;">'+acc(r.q)+'</span></div></div>'
+   +'<div class="clayCard sq clk" onclick="rGp()" style="'+ga()+'padding:16px 18px;margin-bottom:12px;cursor:pointer;">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'
+    +'<div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:15.5px;color:#2B2B2B;">Пропуски</div>'
+    +'<div style="font-weight:600;font-size:12px;color:#98917F;margin-top:2px;">задание 11 · верни фразы в текст</div></div>'
+    +'<span style="flex:none;font-weight:800;font-size:12px;color:#C77400;background:#FFF4DE;padding:8px 12px;border-radius:14px;">'+acc(r.g)+'</span></div></div>'
    +'<div class="clayCard" style="'+ga()+'display:flex;align-items:center;gap:12px;padding:13px 15px;">'
     +'<span style="flex:none;width:38px;height:38px;border-radius:13px;background:#FFF4DE;display:grid;place-items:center;"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#E8730A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg></span>'
     +'<div style="font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.45;">Тапни любое слово в тексте — покажем перевод и добавим его в модуль «Слова»</div></div>';
-  setTxt('r_today','2 тренажёра')}
+  setTxt('r_today','3 тренажёра')}
 /* ---- Задание 10: заголовки ---- */
 function rHl(){S.readIdxH=(S.readIdxH||0);var set=R_HL[S.readIdxH%R_HL.length];S.readIdxH++;
   RH={set:set,sel:[null,null,null,null],done:false};rHlRender()}
@@ -3149,6 +3169,56 @@ function rQsExplain(q){var area=document.getElementById('r_area');
     +'<div style="font-weight:600;font-size:13px;color:#4A453E;line-height:1.6;margin-top:10px;background:#FDF3EC;border-left:3px solid #F2683F;border-radius:0 14px 14px 0;padding:11px 14px;"><b>Почему:</b> '+q.e+'</div></div>'
     +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="RQ.i++;rSync();save();rQsRender()">Понятно, дальше</button>';
   rAnim('wflip','.5s')}
+/* ---- Задание 11: пропуски ---- */
+function rGp(){S.readIdxG=(S.readIdxG||0);var set=R_GAPS[S.readIdxG%R_GAPS.length];S.readIdxG++;
+  RG={set:set,sel:[null,null,null],done:false};rGpRender()}
+function rGpRender(){var area=document.getElementById('r_area');var set=RG.set,L='ABCD';
+  var txt='';
+  set.tx.forEach(function(seg,i){txt+=rWordsHtml(seg);
+    if(i<3){var s=RG.sel[i];
+      txt+=' <b style="color:#F2683F;">('+(i+1)+')</b>&nbsp;<span style="display:inline-block;min-width:54px;border-bottom:2.5px dashed #F2683F;text-align:center;font-weight:800;color:#E44E20;">'+(s!==null?L[s]:'&nbsp;')+'</span> '}});
+  var h='<div id="r_card" class="clayCard" style="position:relative;overflow:hidden;padding:16px 18px;margin-bottom:12px;">'+wDeco()
+    +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#C77400;background:#FFF4DE;padding:5px 10px;border-radius:20px;">ЗАДАНИЕ 11 · ПРОПУСКИ</span>'
+    +'<div style="font-weight:600;font-size:12px;color:#98917F;margin-top:10px;">Верни фразы на свои места. Одна фраза лишняя.</div>'
+    +'<div style="font-weight:500;font-size:13.5px;line-height:1.7;color:#2B2B2B;margin-top:10px;">'+txt+'</div></div>'
+    +'<div class="clayCard" style="padding:14px 16px;margin-bottom:12px;">'
+    +set.fr.map(function(f,i){return '<div style="margin-top:6px;font-weight:700;font-size:12.5px;color:#2B2B2B;"><b style="color:#F2683F;">'+L[i]+'.</b> '+f+'</div>'}).join('')+'</div>';
+  [0,1,2].forEach(function(gi){
+    h+='<div class="clayCard" style="padding:12px 14px;margin-bottom:10px;">'
+      +'<div style="display:flex;align-items:center;gap:8px;">'
+      +'<span style="flex:none;font-weight:800;font-size:12px;color:#E44E20;width:56px;">Пропуск '+(gi+1)+'</span>'
+      +'<div style="flex:1;display:flex;gap:8px;" id="rgp_row_'+gi+'">'
+      +set.fr.map(function(_,fi){var on=RG.sel[gi]===fi;
+        return '<button onclick="rGpPick('+gi+','+fi+')" style="flex:1;height:36px;border-radius:11px;border:1.5px solid '+(on?'#F2683F':'#F0EAE2')+';background:'+(on?'#FFEDE4':'#fff')+';font-family:Manrope,sans-serif;font-weight:800;font-size:13px;color:'+(on?'#E44E20':'#8A8F98')+';cursor:pointer;">'+L[fi]+'</button>'}).join('')
+      +'</div></div><div id="rgp_res_'+gi+'"></div></div>'});
+  var all=RG.sel.every(function(x){return x!==null});
+  h+='<div style="margin-bottom:8px;">'
+    +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);'+(all?'':'opacity:.45;pointer-events:none;')+'" onclick="rGpCheck()">Проверить</button>'
+    +'<button class="sq" style="'+WBTN+'color:#F2683F;margin-top:10px;" onclick="rHub()">← К чтению</button></div>';
+  area.innerHTML=h;setTxt('r_today',RG.sel.filter(function(x){return x!==null}).length+' / 3 выбрано')}
+function rGpPick(gi,fi){if(RG.done)return;
+  RG.sel=RG.sel.map(function(x,i){return i===gi?fi:(x===fi?null:x)});
+  rGpRender()}
+function rGpCheck(){if(RG.done)return;RG.done=true;var set=RG.set,L='ABCD',r=rSt(),okn=0;
+  [0,1,2].forEach(function(gi){var ok=RG.sel[gi]===set.a[gi];if(ok)okn++;
+    r.g.tot++;if(ok)r.g.ok++;
+    var el=document.getElementById('rgp_res_'+gi);
+    if(el)el.innerHTML='<div style="margin-top:9px;padding:10px 12px;border-radius:12px;background:'+(ok?'#EAF7F0':'#FDEDEA')+';">'
+      +'<div style="font-weight:800;font-size:12.5px;color:'+(ok?'#1F8A50':'#C0392B')+';">'+(ok?'Верно · ':'Неверно · правильно ')+L[set.a[gi]]+'. '+set.fr[set.a[gi]]+'</div>'
+      +'<div style="font-weight:600;font-size:12px;color:#4A453E;margin-top:4px;line-height:1.5;"><b>Почему:</b> '+set.k[gi]+'</div></div>';
+    var row=document.getElementById('rgp_row_'+gi);if(row)row.style.pointerEvents='none'});
+  var used={};set.a.forEach(function(x){used[x]=1});
+  var extra=[0,1,2,3].find(function(i){return !used[i]});
+  r.texts++;rSync();save();
+  var area=document.getElementById('r_area');
+  var d=document.createElement('div');
+  d.innerHTML='<div class="clayCard" style="padding:16px 18px;margin-bottom:12px;text-align:center;animation:win .35s both;">'
+    +'<div style="font-size:36px;">'+(okn===3?'🏆':(okn>=2?'💪':'📚'))+'</div>'
+    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:19px;color:#2B2B2B;margin-top:6px;">'+okn+' из 3</div>'
+    +'<div style="font-weight:600;font-size:12.5px;color:#98917F;margin-top:4px;">Лишняя фраза: '+L[extra]+'. '+set.fr[extra]+'</div>'
+    +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);margin-top:12px;" onclick="rGp()">Ещё подход</button></div>';
+  area.insertBefore(d,area.firstChild);
+  try{d.scrollIntoView({behavior:'smooth',block:'start'})}catch(e){}}
 /* ---- слово из текста → в модуль Слова ---- */
 r_add=function(st){if(!lastWord)return;
   S.wstatus=S.wstatus||{};S.wstatus[lastWord]=st;
