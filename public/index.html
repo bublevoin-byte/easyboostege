@@ -319,7 +319,7 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
             <svg width="46" height="46" viewBox="0 0 44 44"><defs><linearGradient id="r5" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F0997B"/><stop offset="1" stop-color="#D4537E"/></linearGradient></defs><circle cx="22" cy="22" r="18" fill="none" stroke="#F1EDE7" stroke-width="5.5"/><circle cx="22" cy="22" r="18" fill="none" stroke="url(#r5)" stroke-width="5.5" stroke-linecap="round" stroke-dasharray="113.1" stroke-dashoffset="67.9" id="ring_write" transform="rotate(-90 22 22)"/><text x="22" y="26" text-anchor="middle" font-family="Nunito,Manrope" font-weight="800" font-size="11" fill="#2B2B2B" id="m_write">40</text></svg>
           </div>
           <span style="display:block;margin-top:12px;font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:16.5px;color:#2B2B2B;">Письмо</span>
-          <div style="font-weight:600;font-size:12px;color:#98917F;margin-top:2px;">задания 37–38 · ИИ</div>
+          <div id="sub_write" style="font-weight:600;font-size:12px;color:#98917F;margin-top:2px;">задания 37–38 · ИИ</div>
         </div>
         <!-- Говорение -->
         <div class="clayCard sq" style="padding:16px;">
@@ -3887,5 +3887,136 @@ var _sa5=startApp;startApp=async function(){await _sa5.apply(this,arguments);try
         .then(function(u){if(my!==seq)return;if(cur){try{cur.pause()}catch(e){}}cur=new Audio(u);cur.play().catch(function(){})})
         .catch(function(){if(my===seq)_ws(txt)})}}
 })();
+</script>
+<script>
+/* ===== WRITING v2: банк тем, стимулы как на ЕГЭ, шпаргалки, черновики, история ===== */
+const W37=[
+{from:'Emily',stim:'…We moved to a new flat last month, and I had to change my school too. Have you ever changed schools? How do you usually make new friends? What do you like most about your school?… Oh, my mum is calling me. Write back soon!',ask:'her new flat'},
+{from:'Ben',stim:'…Last weekend I tried cooking for the first time and made pasta for the whole family! What food can you cook? Do you help your parents about the house? What do you usually do at weekends?… Sorry, I have to walk my dog now.',ask:'his dog'},
+{from:'Kate',stim:'…I have just come back from my first real football match — our school team won! Do you do any sport? How much free time do you have on school days? Where do you like spending your holidays?… Got to go, my dad needs the laptop.',ask:'the football match'}
+];
+const W38=[
+{topic:'Why teenagers do sport',rows:[['To keep fit',45],['To meet friends',25],['To achieve results and win',18],['Other reasons',12]]},
+{topic:'How teenagers spend their free time',rows:[['Playing computer games',40],['Doing sport',25],['Reading books and blogs',15],['Creative hobbies',12],['Other activities',8]]},
+{topic:'The most important school subjects according to students',rows:[['Maths',35],['Foreign languages',30],['Science',20],['Literature',10],['Other subjects',5]]}
+];
+let W_SHEET=false,_wrBound=false;
+function wrPool(t){var ai=(S&&S.writeAi&&S.writeAi['t'+t])||[];return (t===37?W37:W38).concat(ai)}
+function wrCur(){var t=curTask,pool=wrPool(t);var idx=(t===37?(S.wIdx37||0):(S.wIdx38||0))%pool.length;return pool[idx]}
+function wrKey(){return 'd'+curTask+'_'+(curTask===37?(S.wIdx37||0):(S.wIdx38||0))}
+function wrNext(){if(curTask===37)S.wIdx37=(S.wIdx37||0)+1;else S.wIdx38=(S.wIdx38||0)+1;
+  W_SHEET=false;save();setTask(curTask);wrGen()}
+function wrSheet(){W_SHEET=!W_SHEET;setTask(curTask)}
+function wrHistHtml(){var ws=(S.works||[]).slice(-3).reverse();
+  if(!ws.length)return '';
+  return '<div style="margin-top:12px;border-top:1px solid #F4EFE9;padding-top:10px;">'
+    +'<div style="font-weight:800;font-size:10px;letter-spacing:1.2px;color:#A59C8D;">ПОСЛЕДНИЕ РАБОТЫ</div>'
+    +ws.map(function(w){var d=new Date(w.ts);
+      return '<div style="display:flex;justify-content:space-between;margin-top:6px;font-weight:600;font-size:12px;color:#4A453E;">'
+        +'<span>Задание '+w.t+' · '+('0'+d.getDate()).slice(-2)+'.'+('0'+(d.getMonth()+1)).slice(-2)+'</span>'
+        +'<span style="font-weight:800;color:'+(w.g/w.m>=0.7?'#1F8A50':(w.g/w.m>=0.4?'#C77400':'#C0392B'))+';">'+w.g+' из '+w.m+'</span></div>'}).join('')+'</div>'}
+const W_SHEET37='<div style="font-weight:800;font-size:10px;letter-spacing:1.2px;color:#1F8A50;">ШПАРГАЛКА · ПИСЬМО (задание 37)</div>'
+ +'<div style="font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.65;margin-top:6px;">'
+ +'<b>Структура (100–140 слов):</b><br>1. Dear + имя, — с новой строки<br>2. Благодарность и ссылка: Thanks for your email! It was great to hear from you.<br>3. Ответы на все <b>3 вопроса</b> друга (по 1-2 предложения)<br>4. <b>Ровно 3 вопроса</b> о теме из задания (не забудь!)<br>5. Причина завершения: Anyway, I have to go now — my mum is calling me.<br>6. Hope to hear from you soon.<br>7. Best wishes, — с новой строки<br>8. Только имя (без фамилии и точки)'
+ +'<br><b>Ловушки:</b> адрес и дата в email НЕ нужны; вопросы — о том, что просят, а не о чём угодно.</div>';
+const W_SHEET38='<div style="font-weight:800;font-size:10px;letter-spacing:1.2px;color:#1F8A50;">ШПАРГАЛКА · ПРОЕКТ (задание 38)</div>'
+ +'<div style="font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.65;margin-top:6px;">'
+ +'<b>План (200–250 слов, 5 абзацев):</b><br>1. Вступление: цель проекта. The table presents data on…<br>2. 2–3 факта из таблицы: According to the data, … / Almost half of…<br>3. 1–2 сравнения: … twice as many as… / while only 10%…<br>4. Проблема + решение: However, there is a problem of… A possible solution is…<br>5. Вывод с мнением: In conclusion, I strongly believe that…'
+ +'<br><b>Клише:</b> it is worth noting, significantly more, the least popular, this proves that.<br><b>Ловушки:</b> не копируй строки таблицы дословно; мнение — только в выводе и вступлении.</div>';
+/* — перерисовка карточки задания — */
+setTask=function(n){curTask=n;var d=WRITE[n],tp=wrCur();
+  var s37=document.getElementById('w_seg37'),s38=document.getElementById('w_seg38');
+  if(s37)s37.setAttribute('style',n===37?SEG_ON:SEG_OFF);
+  if(s38)s38.setAttribute('style',n===38?SEG_ON:SEG_OFF);
+  setTxt('w_tasklabel',n===37?'ЗАДАНИЕ 37 · ПИСЬМО ДРУГУ':'ЗАДАНИЕ 38 · ПРОЕКТ С ДАННЫМИ');
+  var th=document.getElementById('w_tablehint');if(th)th.style.display='none';
+  var p=document.getElementById('w_prompt');
+  if(p){var h='';
+    if(n===37){
+      h+='<div style="background:#FAF6F1;border-radius:14px;padding:11px 13px;font-weight:500;font-size:12.5px;color:#4A453E;line-height:1.6;font-style:italic;">From: '+tp.from+'<br>'+tp.stim+'</div>'
+        +'<div style="margin-top:9px;font-weight:600;font-size:13px;color:#2B2B2B;line-height:1.5;">Напиши ответ (100–140 слов): ответь на 3 вопроса '+tp.from+' и задай <b>3 вопроса</b> about <b>'+tp.ask+'</b>.</div>';
+    }else{
+      h+='<div style="font-weight:600;font-size:13px;color:#2B2B2B;line-height:1.5;">Imagine you are doing a project «<b>'+tp.topic+'</b>». You have found some data (see the table). Comment on the data and give your opinion (200–250 слов).</div>'
+        +'<div style="margin-top:9px;background:#FAF6F1;border-radius:14px;padding:6px 13px;">'
+        +tp.rows.map(function(r){return '<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #F0E9E0;font-weight:600;font-size:12.5px;color:#4A453E;"><span>'+r[0]+'</span><b style="color:#E44E20;">'+r[1]+'%</b></div>'}).join('')+'</div>';
+    }
+    h+='<div style="margin-top:11px;display:flex;gap:8px;">'
+      +'<span class="clk sq" onclick="wrNext()" style="flex:1;text-align:center;background:#FFEDE4;border-radius:13px;padding:9px 0;font-weight:800;font-size:12px;color:#E44E20;cursor:pointer;">Новая тема</span>'
+      +'<span class="clk sq" onclick="wrSheet()" style="flex:1;text-align:center;background:#EAF7F0;border-radius:13px;padding:9px 0;font-weight:800;font-size:12px;color:#1F8A50;cursor:pointer;">'+(W_SHEET?'Скрыть шпаргалку':'Шпаргалка')+'</span></div>';
+    if(W_SHEET)h+='<div style="margin-top:11px;background:#F2F8F4;border-radius:14px;padding:11px 13px;">'+(n===37?W_SHEET37:W_SHEET38)+'</div>';
+    h+=wrHistHtml();
+    p.innerHTML=h;
+  }
+  /* черновик */
+  var ed=document.getElementById('w_editor');
+  if(ed){S.drafts=S.drafts||{};ed.innerText=S.drafts[wrKey()]||'';
+    if(!_wrBound){_wrBound=true;
+      ed.addEventListener('input',function(){S.drafts=S.drafts||{};S.drafts[wrKey()]=ed.innerText;save()})}}
+  countWords()}
+/* — проверка ИИ: актуальные критерии + контекст темы + история — */
+checkWriting=async function(){
+  var t=(document.getElementById('w_editor').innerText||'').trim();
+  var n=t?t.split(/\s+/).filter(Boolean).length:0;
+  if(n<10){alert('Напиши хотя бы несколько предложений.');return}
+  tab('scr13');var task=curTask,tp=wrCur();
+  var sys='Ты эксперт ЕГЭ по английскому языку, проверяешь письменную часть строго по критериям ФИПИ, но объясняешь по-доброму и по-русски. Британский английский. Верни СТРОГО JSON без markdown.';
+  var fmt='{"words":n,"in_range":true,"overall_got":n,"overall_max":n,"verdict":"короткая фраза-итог","sub":"главный совет одной фразой","criteria":[{"name":"критерий","got":n,"max":n}],"errors":[{"title":"тип ошибки","wrong":"как написано","right":"как надо","kind":"err|warn","note":"пояснение по-русски"}]}';
+  var ctx=task===37
+    ?'Задание 37 — электронное письмо другу, 100–140 слов. Входящее письмо от '+tp.from+': "'+tp.stim+'". Ученик должен ответить на все 3 вопроса друга и задать ровно 3 вопроса about '+tp.ask+'. Критерии: Решение коммуникативной задачи (макс 2), Организация текста (макс 2), Языковое оформление (макс 2). overall_max=6. Особо проверь: все ли 3 ответа даны, есть ли ровно 3 вопроса о нужной теме, формат письма (обращение, благодарность, завершение, подпись именем).'
+    :'Задание 38 — письменное высказывание с элементами рассуждения на основе таблицы, 200–250 слов. Тема проекта: "'+tp.topic+'". Данные опроса: '+tp.rows.map(function(r){return r[0]+' — '+r[1]+'%'}).join('; ')+'. План: вступление о цели проекта; 2–3 факта из данных; 1–2 сравнения; проблема и её решение; вывод с мнением. Критерии: Решение коммуникативной задачи (макс 3), Организация (макс 3), Лексика (макс 3), Грамматика (макс 3), Орфография и пунктуация (макс 2). overall_max=14.';
+  try{
+    var out=await callGemini(sys,ctx+' Верни JSON: '+fmt+'. В errors до 5 самых важных ошибок из текста ученика. Текст ученика: """'+t+'"""');
+    var d=null;try{d=JSON.parse(out.replace(/```json|```/g,'').trim())}catch(e){}
+    if(!d||!d.criteria)throw new Error('bad');
+    wrStore(d,n,task);
+    renderReview(d);S.essays=(S.essays||0)+1;save();showScreen('scr12');HIST.push('scr8');
+  }catch(e){renderReview(localReview(n,task,e.message));showScreen('scr12');HIST.push('scr8')}}
+function wrStore(d,n,task){
+  S.works=S.works||[];
+  S.works.push({t:task,g:+d.overall_got||0,m:+d.overall_max||(task===37?6:14),n:n,ts:Date.now()});
+  if(S.works.length>30)S.works=S.works.slice(-30);
+  var last=S.works.slice(-5);
+  var avg=Math.round(last.reduce(function(s,w){return s+(w.g/(w.m||1))},0)/last.length*100);
+  S.prog=S.prog||{};S.prog.write=avg;
+  setTxt('sub_write','работ: '+S.works.length+' · средний '+avg+'%');
+  try{setTxt('m_write',avg);ringOff('ring_write',113.1,avg)}catch(e){}}
+function wrSyncTile(){if(!S)return;var ws=S.works||[];
+  if(!ws.length){setTxt('sub_write','задания 37–38 · ИИ');return}
+  var last=ws.slice(-5);
+  var avg=Math.round(last.reduce(function(s,w){return s+(w.g/(w.m||1))},0)/last.length*100);
+  S.prog=S.prog||{};S.prog.write=avg;
+  setTxt('sub_write','работ: '+ws.length+' · средний '+avg+'%')}
+/* — фоновая ИИ-генерация тем — */
+var WR_GEN=false;
+async function wrGen(){
+  if(WR_GEN)return;if(typeof SRV==='undefined'||!SRV||!TOKEN)return;
+  S.writeAi=S.writeAi||{t37:[],t38:[]};
+  var kind=null;
+  if(wrPool(37).length<6)kind=37;else if(wrPool(38).length<6)kind=38;
+  if(!kind)return;WR_GEN=true;
+  try{
+    var sys='Ты составляешь задания письменной части ЕГЭ по английскому (уровень B1-B2). Только JSON.';
+    var out,d,item=null;
+    if(kind===37){
+      out=await callGemini(sys,'Задание 37: короткое письмо от друга-подростка (40-60 слов, разговорный стиль, с тремя вопросами к адресату) и тема для встречных вопросов. JSON: {"from":"имя","stim":"текст письма с 3 вопросами","ask":"о чём задать 3 вопроса, по-английски, 2-4 слова"}');
+      d=parseJSON(out);
+      if(d&&d.from&&d.stim&&d.ask&&(String(d.stim).match(/\?/g)||[]).length>=3)
+        item={from:String(d.from),stim:String(d.stim),ask:String(d.ask)};
+      if(item){S.writeAi.t37.push(item);save()}
+    }else{
+      out=await callGemini(sys,'Задание 38: тема проекта и таблица данных опроса подростков (4-5 строк, проценты в сумме 100). JSON: {"topic":"тема по-английски","rows":[["вариант ответа по-английски",число]]}');
+      d=parseJSON(out);
+      if(d&&d.topic&&Array.isArray(d.rows)&&d.rows.length>=4&&d.rows.length<=5
+        &&d.rows.every(function(r){return Array.isArray(r)&&r[0]&&typeof +r[1]==='number'&&+r[1]>0})){
+        item={topic:String(d.topic),rows:d.rows.map(function(r){return [String(r[0]),+r[1]]})};
+        S.writeAi.t38.push(item);save()}
+    }
+  }catch(e){}
+  WR_GEN=false;
+  try{if(wrPool(37).length<6||wrPool(38).length<6)setTimeout(wrGen,4000)}catch(e){}}
+/* — запуск генерации при входе, синк плитки при старте — */
+var _t9=tab;tab=function(id){_t9(id);if(id==='scr8'){wrGen()}};
+var _sa6=startApp;startApp=async function(){await _sa6.apply(this,arguments);try{wrSyncTile()}catch(e){}};
+
 </script>
 </body></html>
