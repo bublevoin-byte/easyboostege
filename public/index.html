@@ -331,7 +331,16 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
 <div class="screen" id="scr2" data-name="Слова">
 
     <!-- gradient header -->
-    <div style="position:absolute;top:0;left:0;right:0;height:206px;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:0 0 30px 30px;z-index:1;"></div>
+    <div style="position:absolute;top:0;left:0;right:0;height:206px;background:linear-gradient(150deg,#FFA570 0%,#F2683F 62%,#E44E20 100%);border-radius:0 0 32px 32px;z-index:1;overflow:hidden;box-shadow:0 14px 30px rgba(242,104,63,.25),inset 0 -8px 18px rgba(190,55,18,.22);">
+      <svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;" viewBox="0 0 390 206" preserveAspectRatio="xMidYMid slice" fill="rgba(255,255,255,.85)">
+        <path class="eb5sp" style="animation-delay:.2s" d="M30,60 Q30,64 34,64 Q30,64 30,68 Q30,64 26,64 Q30,64 30,60 Z"/>
+        <path class="eb5sp" style="animation-delay:1s" d="M355,48 Q355,52 359,52 Q355,52 355,56 Q355,52 351,52 Q355,52 355,48 Z"/>
+        <path class="eb5sp" style="animation-delay:1.6s" d="M330,160 Q330,164 334,164 Q330,164 330,168 Q330,164 326,164 Q330,164 330,160 Z"/>
+        <path class="eb5sp" style="animation-delay:.6s" d="M45,150 Q45,154 49,154 Q45,154 45,158 Q45,154 41,154 Q45,154 45,150 Z"/>
+        <path class="eb5sp" style="animation-delay:2s" d="M200,40 Q200,43.5 203.5,43.5 Q200,43.5 200,47 Q200,43.5 196.5,43.5 Q200,43.5 200,40 Z"/>
+      </svg>
+      <div style="position:absolute;top:-40px;right:-30px;width:130px;height:130px;border-radius:50%;background:rgba(255,255,255,.12);"></div>
+    </div>
     <!-- status bar (white) -->
     <div style="position:absolute;top:0;left:0;right:0;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 7px;z-index:6;">
       <span style="font-weight:700;font-size:15px;color:#fff;">9:41</span>
@@ -348,11 +357,13 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
         <div style="font-weight:800;font-size:18px;color:#fff;">Слова</div>
         <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round"><line x1="5" y1="8" x2="19" y2="8"/><line x1="5" y1="12" x2="19" y2="12"/><line x1="5" y1="16" x2="19" y2="16"/></svg>
       </div>
-      <!-- segmented tabs -->
-      <div style="margin-top:18px;background:rgba(255,255,255,.22);border-radius:16px;padding:4px;display:flex;gap:4px;">
-        <div id="w_tab1" style="flex:1;text-align:center;padding:8px 0;font-weight:700;font-size:13px;color:#F2683F;background:#fff;border-radius:12px;">Учу</div>
-        <div id="w_tab2" style="flex:1;text-align:center;padding:8px 0;font-weight:700;font-size:13px;color:rgba(255,255,255,.9);">Новые</div>
-        <div style="flex:1;text-align:center;padding:8px 0;font-weight:700;font-size:13px;color:rgba(255,255,255,.9);" id="w_know">Знаю 320</div>
+      <!-- сводка + выученные -->
+      <div style="margin-top:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;">
+        <div id="w_sumline" style="font-weight:700;font-size:13px;color:rgba(255,255,255,.95);">Выучено 0 из 299 слов</div>
+        <div class="sq clk" onclick="wShowKnown()" style="flex:none;display:inline-flex;align-items:center;gap:7px;background:rgba(255,255,255,.96);border-radius:16px;padding:9px 14px;box-shadow:0 8px 16px rgba(160,40,10,.22),inset 0 -3px 7px rgba(242,104,63,.15),inset 0 2px 0 #fff;cursor:pointer;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#1F9E5A" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 12 10 18 20 6"/></svg>
+          <span id="w_know_n" style="font-weight:800;font-size:13px;color:#E44E20;">Знаю 0</span>
+        </div>
       </div>
       <!-- progress to C1 -->
       <div style="margin-top:16px;display:flex;align-items:center;justify-content:space-between;font-weight:600;font-size:11.5px;color:rgba(255,255,255,.9);">
@@ -362,7 +373,7 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
     </div>
     <!-- exercise area -->
     <div id="w_area" style="position:absolute;top:236px;left:22px;right:22px;bottom:104px;z-index:5;display:flex;flex-direction:column;overflow-y:auto;scrollbar-width:none;">
-      <div id="w_card" style="background:#fff;border-radius:24px;box-shadow:0 18px 40px rgba(20,20,30,.10);padding:24px;min-height:200px;display:flex;flex-direction:column;flex:none;"></div>
+      <div id="w_card" style="background:#fff;border-radius:26px;border:1px solid #F0EAE2;box-shadow:0 14px 30px rgba(60,45,30,.08),0 2px 6px rgba(60,45,30,.04),inset 0 2px 0 rgba(255,255,255,.9);padding:24px;min-height:200px;display:flex;flex-direction:column;flex:none;"></div>
       <div id="w_opts" style="margin-top:12px;display:flex;flex-direction:column;gap:10px;padding-bottom:8px;"></div>
     </div>
     <!-- bottom nav (Учить active) -->
@@ -2200,22 +2211,22 @@ function wStats(){var L=0,ing=0,tot=EGE_WORDS.length;
   EGE_WORDS.forEach(function(x){var r=wRec(x.w);if(!r||!r.s)return;(r.s>=5?L++:ing++)});
   return {learned:L,learning:ing,fresh:tot-L-ing,total:tot}}
 function wSync(){var st=wStats();S.learned=st.learned;S.prog=S.prog||{};S.prog.words=Math.round(st.learned/st.total*100);
-  setTxt('w_tab1','Учу '+st.learning);setTxt('w_tab2','Новые '+st.fresh);setTxt('w_know','Знаю '+st.learned);
+  setTxt('w_know_n','Знаю '+st.learned);setTxt('w_sumline','Выучено '+st.learned+' из '+st.total+' слов');
   var bar=document.getElementById('w_bar');if(bar)bar.style.width=Math.max(2,Math.round(st.learned/st.total*100))+'%';
   setTxt('sub_words','учу · '+st.learned+' / '+st.total)}
 function wMigrate(){if(S.srsMig)return;S.srsMig=1;S.srs=S.srs||{};
   EGE_WORDS.forEach(function(x){var b=S.box&&S.box[x.w];if(b&&!S.srs[x.w])S.srs[x.w]={s:Math.min(3,b),e:0,n:b,due:Date.now()}})}
-initWords=function(){if(!S)return;wMigrate();
+initWords=function(){if(!S)return;wMigrate();wMergeAi();
   if(S.wday!==todayStr()){S.wday=todayStr();S.wnewUsed=0}
   var due=[],fresh=[];
   EGE_WORDS.forEach(function(x){var r=wRec(x.w);
     if(r&&r.s>0){if(r.due<=Date.now())due.push(x)}else fresh.push(x)});
   due.sort(function(a,b){return wRec(a.w).due-wRec(b.w).due});
-  var lim=Math.max(0,(S.wnew||15)-(S.wnewUsed||0));
+  var lim=Math.max(0,(S.wnew||30)-(S.wnewUsed||0));
   WQ=due.concat(fresh.slice(0,lim));WI=0;WDONE=0;
-  wSync();wRender()}
+  wSync();wRender();wTopUp()}
 function wModeFor(w){var r=wRec(w),s=r?r.s:0;
-  if(s===0)return 'intro';if(s===1)return 'c1';if(s===2)return 'c2';return 'type'}
+  if(s<=1)return 'c1';if(s===2)return 'c2';return 'type'}
 function wSpeak(txt){try{var u=new SpeechSynthesisUtterance(txt.replace(/^to /,''));u.lang='en-GB';u.rate=.9;speechSynthesis.cancel();speechSynthesis.speak(u)}catch(e){}}
 function wBadge(x){var pos=W_POS[x.p]||x.pos||'СЛОВО';var top=W_TOPICS[x.t]||'';
   return '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'
@@ -2223,7 +2234,7 @@ function wBadge(x){var pos=W_POS[x.p]||x.pos||'СЛОВО';var top=W_TOPICS[x.t]
   +(top?'<span style="font-weight:700;font-size:10px;letter-spacing:.6px;color:#8A8F98;background:#F1F2F4;padding:5px 10px;border-radius:20px;">'+top+'</span>':'')
   +'<span onclick="wSpeak(WQ[WI]?WQ[WI].w:\'\')" style="cursor:pointer;flex:none;display:grid;place-items:center;width:34px;height:34px;border-radius:12px;background:#FFF4DE;">'
   +'<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#E8730A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18 6a8.5 8.5 0 0 1 0 12"/></svg></span></div>'}
-const WBTN='width:100%;min-height:52px;border:1.6px solid #EDE6DF;background:#fff;border-radius:16px;font-family:Manrope,sans-serif;font-weight:700;font-size:15px;color:#2B2B2B;cursor:pointer;padding:13px 14px;text-align:center;box-shadow:0 6px 16px rgba(20,20,30,.04);';
+const WBTN='width:100%;min-height:52px;border:1px solid #F0EAE2;background:#fff;border-radius:18px;font-family:Manrope,sans-serif;font-weight:700;font-size:15px;color:#2B2B2B;cursor:pointer;padding:13px 14px;text-align:center;box-shadow:0 10px 22px rgba(60,45,30,.07),inset 0 2px 0 rgba(255,255,255,.9);';
 function wProgress(){var t=document.getElementById('w_today');if(t)t.textContent=WDONE+' / '+WQ.length+' сегодня'}
 function wDistract(x,field){var pool=EGE_WORDS.filter(function(y){return y.w!==x.w&&(y.p===x.p||Math.random()<.25)});
   pool.sort(function(){return Math.random()-.5});
@@ -2233,69 +2244,103 @@ function wDistract(x,field){var pool=EGE_WORDS.filter(function(y){return y.w!==x
 function wRender(){var card=document.getElementById('w_card'),opts=document.getElementById('w_opts');
   if(!card||!opts)return;wProgress();
   var x=WQ[WI];
-  if(!x){var st=wStats();
+  if(!x){var st=wStats(),n=S.wnewUsed||0;
     card.innerHTML='<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:22px 0;">'
-      +'<div style="font-size:44px;">🎉</div><div style="font-weight:800;font-size:21px;color:#2B2B2B;margin-top:10px;">На сегодня всё!</div>'
-      +'<div style="font-weight:600;font-size:13.5px;color:#8A8F98;margin-top:6px;line-height:1.5;">Выучено: '+st.learned+' из '+st.total+'<br>Повторишь их, когда придёт срок</div></div>';
-    opts.innerHTML='<button style="'+WBTN+'" onclick="wExtra()">Ещё 10 новых слов</button>'
-      +'<button style="'+WBTN+'border-color:#F2683F;color:#F2683F;" onclick="nav(\'scr1\')">На главную</button>';
+      +'<div style="font-size:44px;">🎉</div>'
+      +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:22px;color:#2B2B2B;margin-top:10px;">'+(n>0?'Ура! Сегодня +'+n+' новых слов':'На сегодня всё!')+'</div>'
+      +'<div style="font-weight:600;font-size:13.5px;color:#98917F;margin-top:8px;line-height:1.5;">Выучено полностью: '+st.learned+' из '+st.total+'<br>Слова вернутся на повторение в свой срок</div></div>';
+    opts.innerHTML='<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="wExtra()">Хочу ещё 30 слов</button>'
+      +'<button class="sq" style="'+WBTN+'color:#F2683F;" onclick="nav(\'scr1\')">На главную</button>';
     return}
   var mode=wModeFor(x.w);
-  if(mode==='intro'){
-    card.innerHTML=wBadge(x)
-      +'<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:16px 0;">'
-      +'<div style="font-weight:800;font-size:32px;color:#2B2B2B;letter-spacing:-.6px;">'+x.w+'</div>'
-      +(x.ipa?'<div style="font-weight:500;font-size:14px;color:#8A8F98;margin-top:5px;">'+x.ipa+'</div>':'')
-      +'<div style="font-weight:700;font-size:19px;color:#F2683F;margin-top:12px;">'+x.tr+'</div>'
-      +'<div style="font-weight:500;font-size:13.5px;color:#8A8F98;margin-top:10px;font-style:italic;line-height:1.45;">'+(x.ex||'')+'</div></div>';
-    opts.innerHTML='<div style="display:flex;gap:10px;">'
-      +'<button style="'+WBTN+'flex:1;" onclick="wIntro(1)">Уже знаю</button>'
-      +'<button style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1.6px solid #EDE6DF','border:none')+'flex:1;box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="wIntro(0)">Учить</button></div>';
-    wSpeak(x.w);return}
   if(mode==='c1'||mode==='c2'){
     var q=mode==='c1'?x.w:x.tr, field=mode==='c1'?'tr':'w';
     var right=x[field], all=wDistract(x,field).concat([right]).sort(function(){return Math.random()-.5});
     card.innerHTML=wBadge(x)
       +'<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:16px 0;">'
-      +'<div style="font-weight:600;font-size:11.5px;letter-spacing:1px;color:#8A8F98;">'+(mode==='c1'?'ВЫБЕРИ ПЕРЕВОД':'ВЫБЕРИ СЛОВО')+'</div>'
-      +'<div style="font-weight:800;font-size:'+(mode==='c1'?'30':'24')+'px;color:#2B2B2B;margin-top:10px;letter-spacing:-.5px;">'+q+'</div></div>';
-    opts.innerHTML=all.map(function(v){return '<button style="'+WBTN+'" onclick="wPick(this,\''+encodeURIComponent(v)+'\',\''+encodeURIComponent(right)+'\')">'+v+'</button>'}).join('');
+      +'<div style="font-weight:600;font-size:11.5px;letter-spacing:1px;color:#98917F;">'+(mode==='c1'?'ВЫБЕРИ ПЕРЕВОД':'ВЫБЕРИ СЛОВО')+'</div>'
+      +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:'+(mode==='c1'?'30':'24')+'px;color:#2B2B2B;margin-top:10px;letter-spacing:-.5px;">'+q+'</div></div>';
+    opts.innerHTML=all.map(function(v){return '<button class="sq" style="'+WBTN+'" onclick="wPick(this,\''+encodeURIComponent(v)+'\',\''+encodeURIComponent(right)+'\')">'+v+'</button>'}).join('');
     if(mode==='c1')wSpeak(x.w);
     return}
-  /* type */
   var blank=(x.ex||'').replace(new RegExp(wBase(x.w).replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'i'),'_____');
   card.innerHTML=wBadge(x)
     +'<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:16px 0;">'
-    +'<div style="font-weight:600;font-size:11.5px;letter-spacing:1px;color:#8A8F98;">НАПИШИ СЛОВО</div>'
-    +'<div style="font-weight:800;font-size:24px;color:#F2683F;margin-top:8px;">'+x.tr+'</div>'
-    +'<div style="font-weight:500;font-size:13.5px;color:#8A8F98;margin-top:10px;font-style:italic;line-height:1.5;">'+blank+'</div></div>';
+    +'<div style="font-weight:600;font-size:11.5px;letter-spacing:1px;color:#98917F;">НАПИШИ СЛОВО</div>'
+    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:24px;color:#F2683F;margin-top:8px;">'+x.tr+'</div>'
+    +'<div style="font-weight:500;font-size:13.5px;color:#98917F;margin-top:10px;font-style:italic;line-height:1.5;">'+blank+'</div></div>';
   opts.innerHTML='<input id="w_inp" autocapitalize="none" autocomplete="off" spellcheck="false" placeholder="Введи слово по-английски" '
-    +'style="width:100%;box-sizing:border-box;height:52px;border:1.6px solid #EDE6DF;border-radius:16px;padding:0 16px;font-family:Manrope,sans-serif;font-weight:700;font-size:15px;color:#2B2B2B;outline:none;" '
+    +'style="width:100%;box-sizing:border-box;height:52px;border:1px solid #F0EAE2;border-radius:18px;padding:0 16px;font-family:Manrope,sans-serif;font-weight:700;font-size:15px;color:#2B2B2B;outline:none;box-shadow:inset 0 2px 4px rgba(60,45,30,.05);" '
     +'onkeydown="if(event.key===\'Enter\')wSubmit()">'
-    +'<button style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1.6px solid #EDE6DF','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="wSubmit()">Проверить</button>'}
+    +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="wSubmit()">Проверить</button>'}
+/* карточка-переворот после ошибки */
+function wFlip(x){var card=document.getElementById('w_card'),opts=document.getElementById('w_opts');
+  if(!card||!opts)return;
+  card.innerHTML=wBadge(x)
+    +'<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:16px 0;">'
+    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:30px;color:#2B2B2B;letter-spacing:-.6px;">'+x.w+'</div>'
+    +(x.ipa?'<div style="font-weight:500;font-size:14px;color:#98917F;margin-top:5px;">'+x.ipa+'</div>':'')
+    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:20px;color:#F2683F;margin-top:12px;">'+x.tr+'</div>'
+    +'<div style="font-weight:500;font-size:13.5px;color:#98917F;margin-top:12px;font-style:italic;line-height:1.5;background:#FAF6F1;border-radius:14px;padding:10px 14px;">'+(x.ex||'')+'</div>'
+    +'<div style="font-weight:600;font-size:11.5px;color:#C0B7AA;margin-top:10px;">Запомни — слово вернётся позже</div></div>';
+  opts.innerHTML='<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="wNext()">Понятно, дальше</button>';
+  wSpeak(x.w)}
+/* список выученных */
+function wShowKnown(){var card=document.getElementById('w_card'),opts=document.getElementById('w_opts');
+  if(!card||!opts)return;
+  var list=EGE_WORDS.filter(function(x){var r=wRec(x.w);return r&&r.s>=5});
+  var rows=list.map(function(x){
+    return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 2px;border-bottom:1px solid #F4EFE9;">'
+      +'<div style="min-width:0;"><div style="font-weight:800;font-size:15px;color:#2B2B2B;">'+x.w+'</div>'
+      +'<div style="font-weight:600;font-size:12px;color:#98917F;margin-top:1px;">'+x.tr+'</div></div>'
+      +'<span onclick="wSpeak(\''+x.w.replace(/'/g,'')+'\')" style="cursor:pointer;flex:none;display:grid;place-items:center;width:32px;height:32px;border-radius:11px;background:#FFF4DE;">'
+      +'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#E8730A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg></span></div>'}).join('');
+  card.innerHTML='<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:18px;color:#2B2B2B;">Выученные слова · '+list.length+'</div>'
+    +(list.length?('<div style="margin-top:6px;">'+rows+'</div>')
+      :'<div style="flex:1;display:flex;align-items:center;justify-content:center;text-align:center;font-weight:600;font-size:13.5px;color:#98917F;line-height:1.5;padding:26px 0;">Пока пусто.<br>Слово попадает сюда, когда ты<br>подтвердишь его на всех повторениях</div>');
+  opts.innerHTML='<button class="sq" style="'+WBTN+'color:#F2683F;" onclick="wRender()">← Вернуться к занятию</button>'}
 function wNext(){WI++;wSync();save();wRender()}
-function wIntro(know){var x=WQ[WI];if(!x)return;var r=wSet(x.w);
-  if(know){r.s=3;r.due=Date.now()+SRS_INT[3]*86400000;r.n++}
-  else{r.s=1;r.due=Date.now()+86400000;r.n++}
-  S.wnewUsed=(S.wnewUsed||0)+1;WDONE++;wNext()}
 function wPick(btn,vEnc,rightEnc){var x=WQ[WI];if(!x||btn.dataset.done)return;
   var v=decodeURIComponent(vEnc),right=decodeURIComponent(rightEnc);
   var all=btn.parentElement.querySelectorAll('button');all.forEach(function(b){b.dataset.done=1});
+  var r0=wRec(x.w),isNew=!r0||!r0.s;
+  if(isNew)S.wnewUsed=(S.wnewUsed||0)+1;
   if(v===right){btn.style.background='#EAF7F0';btn.style.borderColor='#1F9E5A';btn.style.color='#1F8A50';srsOk(x.w);WDONE++;
     setTimeout(wNext,650)}
   else{btn.style.background='#FDEDEA';btn.style.borderColor='#E24B4A';btn.style.color='#C0392B';
     all.forEach(function(b){if(b.textContent===right){b.style.background='#EAF7F0';b.style.borderColor='#1F9E5A';b.style.color='#1F8A50'}});
     srsFail(x.w);WDONE++;WQ.push(x);
-    setTimeout(wNext,1600)}}
+    setTimeout(function(){wFlip(x)},900)}}
 function wSubmit(){var x=WQ[WI];if(!x)return;var inp=document.getElementById('w_inp');if(!inp||inp.dataset.done)return;
   var val=(inp.value||'').toLowerCase().trim().replace(/^to /,'');
   var ok=val===wBase(x.w);inp.dataset.done=1;
   inp.style.borderColor=ok?'#1F9E5A':'#E24B4A';inp.style.background=ok?'#EAF7F0':'#FDEDEA';
   if(!ok){inp.value=wBase(x.w);srsFail(x.w);WQ.push(x)}else srsOk(x.w);
-  WDONE++;wSpeak(x.w);
-  setTimeout(wNext,ok?650:1700)}
-function wExtra(){var fresh=EGE_WORDS.filter(function(x){var r=wRec(x.w);return !r||!r.s});
-  WQ=fresh.slice(0,10);WI=0;WDONE=0;S.wnewUsed=(S.wnewUsed||0);wRender()}
+  WDONE++;if(ok)wSpeak(x.w);
+  setTimeout(ok?wNext:function(){wFlip(x)},ok?650:900)}
+function wExtra(){wMergeAi();
+  var fresh=EGE_WORDS.filter(function(x){var r=wRec(x.w);return !r||!r.s});
+  WQ=fresh.slice(0,30);WI=0;WDONE=0;wRender();
+  if(fresh.length<40)wTopUp()}
+function wMergeAi(){if(!S||!S.aiWords)return;var have={};EGE_WORDS.forEach(function(x){have[x.w]=1});
+  S.aiWords.forEach(function(x){if(x&&x.w&&x.tr&&!have[x.w]){EGE_WORDS.push(x);have[x.w]=1}})}
+/* фоновая генерация: база сама пополняется, сверяясь с уже известными словами */
+var W_GEN=false;
+async function wTopUp(){
+  if(W_GEN)return;if(typeof SRV==='undefined'||!SRV||!TOKEN)return;
+  var fresh=EGE_WORDS.filter(function(x){var r=wRec(x.w);return !r||!r.s}).length;
+  if(fresh>=40)return;W_GEN=true;
+  try{
+    var have=EGE_WORDS.map(function(x){return x.w}).join(', ');
+    var out=await callGemini('Ты составляешь словарь для подготовки к ЕГЭ по английскому языку: лексический минимум ФИПИ, уровень B1-B2, британский английский. Только JSON, без пояснений.',
+      'Дай ровно 30 новых полезных для ЕГЭ слов, которых НЕТ в этом списке: '+have+'. Массив JSON: [{"w":"слово (глаголы с to)","p":"n|v|adj|adv|ph|id","tr":"краткий перевод","ex":"короткий пример, где слово стоит в начальной форме"}]');
+    var d=parseJSON(out);
+    if(Array.isArray(d)&&d.length){var have2={};EGE_WORDS.forEach(function(x){have2[x.w]=1});
+      var added=[];
+      d.forEach(function(x){if(x.w&&x.tr&&!have2[x.w]&&(x.ex||'').toLowerCase().indexOf(x.w.replace(/^to /,'').toLowerCase())>=0){var it={w:x.w,p:x.p||'n',t:0,tr:x.tr,ex:x.ex||''};EGE_WORDS.push(it);added.push(it);have2[x.w]=1}});
+      if(added.length){S.aiWords=(S.aiWords||[]).concat(added);save();wSync()}}
+  }catch(e){}
+  W_GEN=false}
 /* ИИ-набор слов теперь пополняет базу ЕГЭ */
 genWords=async function(){
   const out=await callGemini('Ты составляешь словарные карточки для ЕГЭ по английскому. Уровень B1-B2, британский английский. Только JSON.',
@@ -2307,7 +2352,8 @@ genWords=async function(){
 /* домашняя плитка при загрузке */
 try{if(S)wSync()}catch(e){}
 var _fd2=fillDefaults;fillDefaults=function(d){d=_fd2(d);d.srs=d.srs||{};return d};
-var _sa2=startApp;startApp=async function(){await _sa2.apply(this,arguments);try{wMigrate();wSync()}catch(e){}};
+var _sa2=startApp;startApp=async function(){await _sa2.apply(this,arguments);try{wMigrate();wMergeAi();wSync()}catch(e){}};
+var _t3=tab;tab=function(id){_t3(id);if(id==='scr2'){var f=document.getElementById('genfab');if(f)f.style.display='none'}};
 
 </script>
 </body></html>
