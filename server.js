@@ -7,7 +7,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { closeDatabase, getProgress, saveProgress, getUserByTelegram, createTelegramUser, grantDays, markTrialUsed, getSub } from './db.js';
+import { closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, createTelegramAuthCode, getProgress, saveProgress, getUserByTelegram, createTelegramUser, grantDays, markTrialUsed, getSub } from './db.js';
 import { config } from './config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, writingRequestSchema } from './ai/writing.js';
 
@@ -29,8 +29,6 @@ const APP_URL = config.appUrl; // адрес приложения для ссы�
 const TRIAL_DAYS = 30;
 const SUB_DAYS = 30;
 let BOT_USERNAME = '';
-const tgCodes = {};   // code -> ts (ожидает подтверждения)
-const tgReady = {};   // code -> {telegram_id, name} (подтверждён)
 
 const app = express();
 app.disable('x-powered-by');
@@ -39,11 +37,24 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false,
 }));
 app.use(express.json({ limit: '1mb' }));
-app.get('/', (req, res, next) => {
-  const t = req.query.t;
-  if (!t) return next();
-  try { jwt.verify(t, SECRET); setAuthCookie(req, res, t); } catch (e) {}
-  res.redirect('/');
+app.get('/', async (req, res, next) => {
+  try {
+    const loginCode = String(req.query.login_code || '');
+    if (loginCode) {
+      const confirmed = await consumeTelegramAuthCode(loginCode);
+      if (!confirmed) return res.redirect('/?login_error=expired');
+      const existing = await getUserByTelegram(confirmed.telegram_id);
+      const username = existing ? existing.username : await createTelegramUser(confirmed.telegram_id, confirmed.name);
+      setAuthCookie(req, res, makeToken(username));
+      return res.redirect('/');
+    }
+
+    // Временная обратная совместимость со старыми ссылками. Новые ссылки JWT в URL не создают.
+    const token = req.query.t;
+    if (!token) return next();
+    try { jwt.verify(token, SECRET); setAuthCookie(req, res, token); } catch (error) {}
+    res.redirect('/');
+  } catch (error) { next(error); }
 });
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -96,11 +107,10 @@ async function onMessage(m) {
   const chatId = m.chat.id, fromId = m.from.id, name = nameOf(m.from);
   if (m.text.startsWith('/start')) {
     const code = m.text.split(' ')[1];
-    if (code && tgCodes[code]) {
-      tgReady[code] = { telegram_id: fromId, name };
+    if (code && await confirmTelegramAuthCode(code, fromId, name)) {
       const existing = await getUserByTelegram(fromId);
       const uname = existing?.username || await createTelegramUser(fromId, name);
-      const loginUrl = APP_URL + '/?t=' + makeToken(uname);
+      const loginUrl = APP_URL + '/?login_code=' + encodeURIComponent(code);
       await tgApi('sendMessage', {
         chat_id: chatId,
         text: 'Готово! Вход выполнен ✅\nНажми кнопку, чтобы открыть приложение:',
@@ -207,18 +217,19 @@ async function startTelegram() {
   poll();
 }
 
-app.post('/api/tg/start', (req, res) => {
+app.post('/api/tg/start', async (req, res, next) => {
+  try {
   if (!TG_TOKEN || !BOT_USERNAME) return res.status(503).json({ error: 'Telegram-вход не настроен на сервере' });
-  const code = Math.random().toString(36).slice(2, 10);
-  tgCodes[code] = Date.now();
+  const code = crypto.randomBytes(24).toString('base64url');
+  await createTelegramAuthCode(code, Date.now() + config.telegram.authCodeTtlMs);
   res.json({ code, url: `https://t.me/${BOT_USERNAME}?start=${code}` });
+  } catch (error) { next(error); }
 });
 app.get('/api/tg/check', async (req, res, next) => {
   try {
-    const code = req.query.code;
-    const r = code && tgReady[code];
+    const code = String(req.query.code || '');
+    const r = code && await consumeTelegramAuthCode(code);
     if (!r) return res.json({ pending: true });
-    delete tgReady[code]; delete tgCodes[code];
     const existing = await getUserByTelegram(r.telegram_id);
     const uname = existing ? existing.username : await createTelegramUser(r.telegram_id, r.name);
     const token = makeToken(uname);

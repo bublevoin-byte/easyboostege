@@ -16,4 +16,7 @@ export const ensureTelegramUser = (...args) => repository.ensureTelegramUser(...
 export const grantDays = (...args) => repository.grantDays(...args);
 export const markTrialUsed = (...args) => repository.markTrialUsed(...args);
 export const getSub = (...args) => repository.getSub(...args);
+export const createTelegramAuthCode = (...args) => repository.createTelegramAuthCode(...args);
+export const confirmTelegramAuthCode = (...args) => repository.confirmTelegramAuthCode(...args);
+export const consumeTelegramAuthCode = (...args) => repository.consumeTelegramAuthCode(...args);
 export const closeDatabase = () => repository.close();

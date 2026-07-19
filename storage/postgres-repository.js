@@ -1,5 +1,5 @@
 import pg from 'pg';
-import { normalizeUsername, subscriptionView } from './shared.js';
+import { hashAuthCode, normalizeUsername, subscriptionView } from './shared.js';
 
 const { Pool } = pg;
 
@@ -105,6 +105,50 @@ export function createPostgresRepository(connectionString) {
     return subscriptionView(await getUser(username));
   }
 
+  async function createTelegramAuthCode(code, expiresAt) {
+    await pool.query('DELETE FROM telegram_auth_codes WHERE expires_at <= NOW()');
+    await pool.query(
+      `INSERT INTO telegram_auth_codes (code_hash, expires_at)
+       VALUES ($1, $2)
+       ON CONFLICT (code_hash) DO UPDATE SET
+         status = 'pending', telegram_id = NULL, display_name = NULL,
+         expires_at = EXCLUDED.expires_at, confirmed_at = NULL, created_at = NOW()`,
+      [hashAuthCode(code), new Date(Number(expiresAt))],
+    );
+  }
+
+  async function confirmTelegramAuthCode(code, telegramId, displayName) {
+    const result = await pool.query(
+      `UPDATE telegram_auth_codes
+       SET status = 'ready', telegram_id = $2, display_name = $3, confirmed_at = NOW()
+       WHERE code_hash = $1 AND status = 'pending' AND expires_at > NOW()
+       RETURNING code_hash`,
+      [hashAuthCode(code), String(telegramId), String(displayName || '').slice(0, 160)],
+    );
+    return result.rowCount === 1;
+  }
+
+  async function consumeTelegramAuthCode(code) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await client.query(
+        `DELETE FROM telegram_auth_codes
+         WHERE code_hash = $1 AND status = 'ready' AND expires_at > NOW()
+         RETURNING telegram_id, display_name`,
+        [hashAuthCode(code)],
+      );
+      await client.query('COMMIT');
+      if (!result.rowCount) return null;
+      return { telegram_id: Number(result.rows[0].telegram_id), name: result.rows[0].display_name || '' };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   return {
     getUser,
     createUser,
@@ -116,7 +160,9 @@ export function createPostgresRepository(connectionString) {
     grantDays,
     markTrialUsed,
     getSub,
+    createTelegramAuthCode,
+    confirmTelegramAuthCode,
+    consumeTelegramAuthCode,
     close: () => pool.end(),
   };
 }
-

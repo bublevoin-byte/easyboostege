@@ -1,3 +1,5 @@
+import crypto from 'node:crypto';
+
 export function normalizeUsername(displayName, telegramId) {
   const fallback = `tg${telegramId}`;
   const base = String(displayName || fallback)
@@ -18,3 +20,6 @@ export function subscriptionView(user) {
   };
 }
 
+export function hashAuthCode(code) {
+  return crypto.createHash('sha256').update(String(code)).digest('hex');
+}

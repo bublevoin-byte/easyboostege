@@ -44,6 +44,7 @@ export const config = Object.freeze({
   telegram: Object.freeze({
     token: process.env.TELEGRAM_BOT_TOKEN || '',
     adminId: process.env.ADMIN_TELEGRAM_ID || '',
+    authCodeTtlMs: readInteger('TELEGRAM_AUTH_CODE_TTL_MS', 600_000, { min: 60_000, max: 3_600_000 }),
   }),
   ai: Object.freeze({
     xaiKey: process.env.XAI_API_KEY || '',

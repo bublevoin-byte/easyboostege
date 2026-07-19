@@ -47,3 +47,23 @@ test('telegram user creation is idempotent', async () => {
   });
 });
 
+test('telegram auth code is pending until confirmed and can be consumed once', async () => {
+  await withRepository(async (repository) => {
+    await repository.createTelegramAuthCode('secret-code', Date.now() + 60_000);
+    assert.equal(await repository.consumeTelegramAuthCode('secret-code'), null);
+    assert.equal(await repository.confirmTelegramAuthCode('secret-code', 2001, 'Student'), true);
+    assert.deepEqual(await repository.consumeTelegramAuthCode('secret-code'), {
+      telegram_id: 2001,
+      name: 'Student',
+    });
+    assert.equal(await repository.consumeTelegramAuthCode('secret-code'), null);
+  });
+});
+
+test('expired telegram auth code cannot be confirmed', async () => {
+  await withRepository(async (repository) => {
+    await repository.createTelegramAuthCode('expired-code', Date.now() - 1);
+    assert.equal(await repository.confirmTelegramAuthCode('expired-code', 2002, 'Student'), false);
+    assert.equal(await repository.consumeTelegramAuthCode('expired-code'), null);
+  });
+});

@@ -1,10 +1,10 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { normalizeUsername, subscriptionView } from './shared.js';
+import { hashAuthCode, normalizeUsername, subscriptionView } from './shared.js';
 
 export function createFileRepository(filePath) {
   let loaded = false;
-  let state = { users: {}, progress: {} };
+  let state = { users: {}, progress: {}, auth_codes: {} };
   let writeQueue = Promise.resolve();
 
   async function load() {
@@ -16,6 +16,7 @@ export function createFileRepository(filePath) {
         state = {
           users: parsed.users && typeof parsed.users === 'object' ? parsed.users : {},
           progress: parsed.progress && typeof parsed.progress === 'object' ? parsed.progress : {},
+          auth_codes: parsed.auth_codes && typeof parsed.auth_codes === 'object' ? parsed.auth_codes : {},
         };
       }
     } catch (error) {
@@ -109,6 +110,64 @@ export function createFileRepository(filePath) {
     return subscriptionView(await getUser(username));
   }
 
+  function removeExpiredAuthCodes(now = Date.now()) {
+    let changed = false;
+    for (const [codeHash, entry] of Object.entries(state.auth_codes)) {
+      if (Number(entry.expires_at) <= now) {
+        delete state.auth_codes[codeHash];
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  async function createTelegramAuthCode(code, expiresAt) {
+    await load();
+    removeExpiredAuthCodes();
+    const codeHash = hashAuthCode(code);
+    state.auth_codes[codeHash] = {
+      status: 'pending',
+      expires_at: Number(expiresAt),
+      created_at: Date.now(),
+    };
+    await persist();
+  }
+
+  async function confirmTelegramAuthCode(code, telegramId, displayName) {
+    await load();
+    const codeHash = hashAuthCode(code);
+    const entry = state.auth_codes[codeHash];
+    if (!entry || Number(entry.expires_at) <= Date.now() || entry.status !== 'pending') {
+      if (entry) {
+        delete state.auth_codes[codeHash];
+        await persist();
+      }
+      return false;
+    }
+    entry.status = 'ready';
+    entry.telegram_id = Number(telegramId);
+    entry.display_name = String(displayName || '').slice(0, 160);
+    entry.confirmed_at = Date.now();
+    await persist();
+    return true;
+  }
+
+  async function consumeTelegramAuthCode(code) {
+    await load();
+    const codeHash = hashAuthCode(code);
+    const entry = state.auth_codes[codeHash];
+    if (!entry || Number(entry.expires_at) <= Date.now() || entry.status !== 'ready') {
+      if (entry && Number(entry.expires_at) <= Date.now()) {
+        delete state.auth_codes[codeHash];
+        await persist();
+      }
+      return null;
+    }
+    delete state.auth_codes[codeHash];
+    await persist();
+    return { telegram_id: entry.telegram_id, name: entry.display_name };
+  }
+
   return {
     getUser,
     createUser,
@@ -120,7 +179,9 @@ export function createFileRepository(filePath) {
     grantDays,
     markTrialUsed,
     getSub,
+    createTelegramAuthCode,
+    confirmTelegramAuthCode,
+    consumeTelegramAuthCode,
     async close() { await writeQueue; },
   };
 }
-
