@@ -10,6 +10,7 @@ import { fileURLToPath } from 'url';
 import { closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, createTelegramAuthCode, createWritingAttempt, finishWritingAttempt, getProgress, getUser, healthCheck, saveProgress, getUserByTelegram, createTelegramUser, grantDays, logAiRequest, markTrialUsed, getSub } from './db.js';
 import { config } from './config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from './ai/writing.js';
+import { protectCookieRequests } from './security/request-origin.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -43,6 +44,7 @@ app.use((req, res, next) => {
   req.requestId = /^[A-Za-z0-9._-]{8,100}$/u.test(incoming) ? incoming : crypto.randomUUID();
   res.setHeader('X-Request-Id', req.requestId);
   const startedAt = Date.now();
+  const requestPath = req.path;
   res.once('finish', () => {
     console.log(JSON.stringify({
       timestamp: new Date().toISOString(),
@@ -50,7 +52,7 @@ app.use((req, res, next) => {
       type: 'http_request',
       requestId: req.requestId,
       method: req.method,
-      path: req.path,
+      path: requestPath,
       status: res.statusCode,
       durationMs: Date.now() - startedAt,
       authenticated: Boolean(req.user),
@@ -58,6 +60,7 @@ app.use((req, res, next) => {
   });
   next();
 });
+app.use('/api', protectCookieRequests(config.appUrl));
 
 app.get('/health/live', (req, res) => {
   res.json({ status: 'ok' });
