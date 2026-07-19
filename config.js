@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+import { fileURLToPath } from 'node:url';
 
 dotenv.config();
 
@@ -15,9 +16,18 @@ function readInteger(name, fallback, { min = 1, max = Number.MAX_SAFE_INTEGER } 
 const nodeEnv = process.env.NODE_ENV || 'development';
 const isProduction = nodeEnv === 'production';
 const jwtSecret = process.env.JWT_SECRET || '';
+const databaseProvider = process.env.DATABASE_PROVIDER || (process.env.DATABASE_URL ? 'postgres' : 'file');
+
+if (!['file', 'postgres'].includes(databaseProvider)) {
+  throw new Error('DATABASE_PROVIDER must be either file or postgres');
+}
 
 if (isProduction && jwtSecret.length < 32) {
   throw new Error('JWT_SECRET is required in production and must contain at least 32 characters');
+}
+
+if (isProduction && databaseProvider !== 'postgres') {
+  throw new Error('PostgreSQL storage is required in production');
 }
 
 export const config = Object.freeze({
@@ -26,6 +36,11 @@ export const config = Object.freeze({
   port: readInteger('PORT', 3000, { min: 1, max: 65535 }),
   jwtSecret: jwtSecret || 'development-only-secret-change-before-production',
   appUrl: process.env.APP_URL || 'http://localhost:3000',
+  database: Object.freeze({
+    provider: databaseProvider,
+    url: process.env.DATABASE_URL || '',
+    file: process.env.DATA_FILE || fileURLToPath(new URL('./data.json', import.meta.url)),
+  }),
   telegram: Object.freeze({
     token: process.env.TELEGRAM_BOT_TOKEN || '',
     adminId: process.env.ADMIN_TELEGRAM_ID || '',
@@ -39,4 +54,3 @@ export const config = Object.freeze({
     maxRequestsPerHour: readInteger('AI_REQUESTS_PER_HOUR', 60, { min: 1, max: 1000 }),
   }),
 });
-

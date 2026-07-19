@@ -7,7 +7,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { getProgress, saveProgress, getUserByTelegram, createTelegramUser, grantDays, markTrialUsed, getSub } from './db.js';
+import { closeDatabase, getProgress, saveProgress, getUserByTelegram, createTelegramUser, grantDays, markTrialUsed, getSub } from './db.js';
 import { config } from './config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, writingRequestSchema } from './ai/writing.js';
 
@@ -98,7 +98,8 @@ async function onMessage(m) {
     const code = m.text.split(' ')[1];
     if (code && tgCodes[code]) {
       tgReady[code] = { telegram_id: fromId, name };
-      const uname = getUserByTelegram(fromId)?.username || createTelegramUser(fromId, name);
+      const existing = await getUserByTelegram(fromId);
+      const uname = existing?.username || await createTelegramUser(fromId, name);
       const loginUrl = APP_URL + '/?t=' + makeToken(uname);
       await tgApi('sendMessage', {
         chat_id: chatId,
@@ -129,14 +130,14 @@ async function onCallback(cq) {
   const ack = (text) => tgApi('answerCallbackQuery', { callback_query_id: cq.id, text: text || '' });
 
   if (data === 'trial') {
-    const ex = getUserByTelegram(fromId);
+    const ex = await getUserByTelegram(fromId);
     if (ex && ex.trial_used) {
       await ack('Пробный период уже был использован');
       await tgApi('sendMessage', { chat_id: chatId, text: 'Пробный месяц уже был активирован раньше. Чтобы продолжить — оформи подписку.', reply_markup: { inline_keyboard: [[{ text: '💳 Оплатить подписку', callback_data: 'pay' }]] } });
       return;
     }
-    const g = grantDays(fromId, TRIAL_DAYS, name);
-    markTrialUsed(fromId, name);
+    const g = await grantDays(fromId, TRIAL_DAYS, name);
+    await markTrialUsed(fromId, name);
     await ack('Готово! Месяц активирован');
     await tgApi('sendMessage', { chat_id: chatId, text: '🎁 Месяц бесплатного доступа активирован до ' + fmtDate(g.sub_until) + '!\nОткрой приложение Easy Boost и занимайся 💪' });
     return;
@@ -164,7 +165,7 @@ async function onCallback(cq) {
     if (String(fromId) !== String(ADMIN_ID)) { await ack('Недостаточно прав'); return; }
     const targetId = Number(data.split(':')[1]);
     if (data.startsWith('activate:')) {
-      const g = grantDays(targetId, SUB_DAYS);
+      const g = await grantDays(targetId, SUB_DAYS);
       await ack('Активировано');
       if (cq.message) await tgApi('editMessageText', { chat_id: chatId, message_id: cq.message.message_id, text: (cq.message.text || '') + '\n\n✅ Активировано до ' + fmtDate(g.sub_until) });
       await tgApi('sendMessage', { chat_id: targetId, text: '✅ Подписка активирована! Доступ открыт на 30 дней (до ' + fmtDate(g.sub_until) + ').\nОткрой приложение Easy Boost 🎓' });
@@ -212,23 +213,27 @@ app.post('/api/tg/start', (req, res) => {
   tgCodes[code] = Date.now();
   res.json({ code, url: `https://t.me/${BOT_USERNAME}?start=${code}` });
 });
-app.get('/api/tg/check', (req, res) => {
-  const code = req.query.code;
-  const r = code && tgReady[code];
-  if (!r) return res.json({ pending: true });
-  delete tgReady[code]; delete tgCodes[code];
-  const existing = getUserByTelegram(r.telegram_id);
-  const uname = existing ? existing.username : createTelegramUser(r.telegram_id, r.name);
-  const token = makeToken(uname);
-  setAuthCookie(req, res, token);
-  res.json({ token, username: uname, ...getSub(uname), bot: BOT_USERNAME });
+app.get('/api/tg/check', async (req, res, next) => {
+  try {
+    const code = req.query.code;
+    const r = code && tgReady[code];
+    if (!r) return res.json({ pending: true });
+    delete tgReady[code]; delete tgCodes[code];
+    const existing = await getUserByTelegram(r.telegram_id);
+    const uname = existing ? existing.username : await createTelegramUser(r.telegram_id, r.name);
+    const token = makeToken(uname);
+    setAuthCookie(req, res, token);
+    res.json({ token, username: uname, ...await getSub(uname), bot: BOT_USERNAME });
+  } catch (error) { next(error); }
 });
 
 // ---- статус доступа (подписка) ----
-app.get('/api/me', auth, (req, res) => {
-  const token = makeToken(req.user);
-  setAuthCookie(req, res, token);
-  res.json({ username: req.user, token, bot: BOT_USERNAME, ...getSub(req.user) });
+app.get('/api/me', auth, async (req, res, next) => {
+  try {
+    const token = makeToken(req.user);
+    setAuthCookie(req, res, token);
+    res.json({ username: req.user, token, bot: BOT_USERNAME, ...await getSub(req.user) });
+  } catch (error) { next(error); }
 });
 app.post('/api/logout', (req, res) => {
   res.setHeader('Set-Cookie', 'eb_token=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax');
@@ -236,22 +241,16 @@ app.post('/api/logout', (req, res) => {
 });
 
 // ---- прогресс ----
-app.get('/api/progress', auth, (req, res) => res.json(getProgress(req.user)));
-app.post('/api/progress', auth, (req, res) => {
-  saveProgress(req.user, req.body || {});
-  res.json({ ok: true });
+app.get('/api/progress', auth, async (req, res, next) => {
+  try { res.json(await getProgress(req.user)); } catch (error) { next(error); }
+});
+app.post('/api/progress', auth, async (req, res, next) => {
+  try {
+    await saveProgress(req.user, req.body || {});
+    res.json({ ok: true });
+  } catch (error) { next(error); }
 });
 
-// ---- лимит на ИИ ----
-const hits = {};
-function overLimit(user) {
-  const now = Date.now();
-  const w = hits[user] || { t: now, n: 0 };
-  if (now - w.t > 3600000) { w.t = now; w.n = 0; }
-  w.n++;
-  hits[user] = w;
-  return w.n > 200;
-}
 async function askProvider({ url, key, model }, system, user) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), config.ai.timeoutMs);
@@ -313,12 +312,14 @@ const aiLimiter = rateLimit({
   message: { error: { code: 'RATE_LIMITED', message: 'Слишком много запросов. Попробуйте позже.' } },
 });
 
-function requireActiveSubscription(req, res, next) {
-  const subscription = getSub(req.user);
-  if (!subscription.active) {
-    return res.status(403).json({ error: { code: 'SUBSCRIPTION_REQUIRED', message: 'Для этой функции требуется активный доступ.' } });
-  }
-  next();
+async function requireActiveSubscription(req, res, next) {
+  try {
+    const subscription = await getSub(req.user);
+    if (!subscription.active) {
+      return res.status(403).json({ error: { code: 'SUBSCRIPTION_REQUIRED', message: 'Для этой функции требуется активный доступ.' } });
+    }
+    next();
+  } catch (error) { next(error); }
 }
 
 app.post('/api/v1/ai/evaluate-writing', auth, requireActiveSubscription, aiLimiter, async (req, res) => {
@@ -349,8 +350,7 @@ app.post('/api/v1/ai/evaluate-writing', auth, requireActiveSubscription, aiLimit
   }
 });
 
-app.post('/api/ai', auth, async (req, res) => {
-  if (overLimit(req.user)) return res.status(429).json({ error: 'Слишком много запросов, попробуй позже' });
+app.post('/api/ai', auth, requireActiveSubscription, aiLimiter, async (req, res) => {
   const { system, user } = req.body || {};
   if (!user) return res.status(400).json({ error: 'Пустой запрос' });
   const providers = aiProviders();
@@ -402,7 +402,7 @@ async function edgeTts(text, voice, slow) {
     stream.on('error', reject);
   });
 }
-app.get('/api/tts', auth, async (req, res) => {
+app.get('/api/tts', auth, requireActiveSubscription, aiLimiter, async (req, res) => {
   const text = String(req.query.text || '').slice(0, 500).trim();
   if (!text) return res.status(400).json({ error: 'нет текста' });
   const voice = TTS_VOICES.has(req.query.voice) ? req.query.voice : 'en-GB-SoniaNeural';
@@ -428,7 +428,7 @@ app.get('/api/tts', auth, async (req, res) => {
 });
 
 // ---- расшифровка речи (Grok STT) для оценки говорения ----
-app.post('/api/stt', auth, express.raw({ type: () => true, limit: '20mb' }), async (req, res) => {
+app.post('/api/stt', auth, requireActiveSubscription, aiLimiter, express.raw({ type: () => true, limit: '20mb' }), async (req, res) => {
   try {
     if (!XAI_KEY) return res.status(503).json({ error: 'XAI_API_KEY не задан на сервере' });
     const buf = req.body;
@@ -451,5 +451,22 @@ app.post('/api/stt', auth, express.raw({ type: () => true, limit: '20mb' }), asy
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-app.listen(PORT, () => console.log('Easy Boost server on http://localhost:' + PORT));
+app.use((error, req, res, next) => {
+  console.error('Request failed:', error.message);
+  if (res.headersSent) return next(error);
+  res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Внутренняя ошибка сервера.' } });
+});
+
+const server = app.listen(PORT, () => console.log('Easy Boost server on http://localhost:' + PORT));
 startTelegram();
+
+async function shutdown(signal) {
+  console.log(signal + ': shutting down');
+  server.close(async () => {
+    try { await closeDatabase(); } finally { process.exit(0); }
+  });
+  setTimeout(() => process.exit(1), 10_000).unref();
+}
+
+process.once('SIGTERM', () => shutdown('SIGTERM'));
+process.once('SIGINT', () => shutdown('SIGINT'));

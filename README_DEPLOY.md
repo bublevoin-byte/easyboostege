@@ -100,3 +100,36 @@ certbot --nginx -d твойдомен.ru
 - Обязательно длинный случайный `JWT_SECRET`.
 - HTTPS (сделали через certbot).
 - Регулярно копируй `data.json` (это вся база).
+# Production hardening: база данных
+
+В локальной разработке по умолчанию используется атомарное файловое хранилище `data.json`.
+В production приложение запускается только с PostgreSQL.
+
+Обязательные production-переменные:
+
+```env
+NODE_ENV=production
+JWT_SECRET=случайная-строка-не-короче-32-символов
+DATABASE_PROVIDER=postgres
+DATABASE_URL=postgresql://user:password@host:5432/easyboost
+```
+
+Применение миграций:
+
+```bash
+npm run db:migrate
+```
+
+Проверка старого `data.json` без записи в PostgreSQL:
+
+```bash
+npm run db:import-json -- data.json --dry-run
+```
+
+Импорт после успешного dry-run и создания резервной копии:
+
+```bash
+npm run db:import-json -- data.json
+```
+
+Исходный `data.json` скрипт автоматически не удаляет.
