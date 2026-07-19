@@ -46,6 +46,8 @@ export const config = Object.freeze({
     token: process.env.TELEGRAM_BOT_TOKEN || '',
     adminId: process.env.ADMIN_TELEGRAM_ID || '',
     authCodeTtlMs: readInteger('TELEGRAM_AUTH_CODE_TTL_MS', 600_000, { min: 60_000, max: 3_600_000 }),
+    authStartsPer15Minutes: readInteger('TELEGRAM_AUTH_STARTS_PER_15_MINUTES', 10, { min: 1, max: 100 }),
+    authChecksPer15Minutes: readInteger('TELEGRAM_AUTH_CHECKS_PER_15_MINUTES', 300, { min: 10, max: 2000 }),
   }),
   ai: Object.freeze({
     xaiKey: process.env.XAI_API_KEY || '',

@@ -256,7 +256,23 @@ async function startTelegram() {
   poll();
 }
 
-app.post('/api/tg/start', async (req, res, next) => {
+const telegramStartLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: config.telegram.authStartsPer15Minutes,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { error: { code: 'RATE_LIMITED', message: 'Слишком много попыток входа. Попробуйте позже.' } },
+});
+
+const telegramCheckLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: config.telegram.authChecksPer15Minutes,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { error: { code: 'RATE_LIMITED', message: 'Слишком много проверок входа. Начните вход заново.' } },
+});
+
+app.post('/api/tg/start', telegramStartLimiter, async (req, res, next) => {
   try {
   if (!TG_TOKEN || !BOT_USERNAME) return res.status(503).json({ error: 'Telegram-вход не настроен на сервере' });
   const code = crypto.randomBytes(24).toString('base64url');
@@ -264,7 +280,7 @@ app.post('/api/tg/start', async (req, res, next) => {
   res.json({ code, url: `https://t.me/${BOT_USERNAME}?start=${code}` });
   } catch (error) { next(error); }
 });
-app.get('/api/tg/check', async (req, res, next) => {
+app.get('/api/tg/check', telegramCheckLimiter, async (req, res, next) => {
   try {
     const code = String(req.query.code || '');
     const r = code && await consumeTelegramAuthCode(code);
