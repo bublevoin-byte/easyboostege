@@ -922,11 +922,10 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
       </div>
       <div style="font-weight:700;font-size:11px;letter-spacing:1.4px;color:#8A8F98;margin:18px 2px 10px;">ИИ И АККАУНТ</div>
       <div style="background:#fff;border-radius:18px;box-shadow:0 8px 22px rgba(20,20,30,.05);overflow:hidden;">
-        <div onclick="setKeyPrompt()" style="display:flex;align-items:center;gap:13px;padding:15px 16px;border-bottom:1px solid #F4F5F6;cursor:pointer;">
+        <div style="display:flex;align-items:center;gap:13px;padding:15px 16px;border-bottom:1px solid #F4F5F6;">
           <span style="width:34px;height:34px;border-radius:11px;background:#E5F4EC;display:grid;place-items:center;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1F9E5A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 1.9 4.6L19 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"/></svg></span>
           <span style="flex:1;font-weight:700;font-size:14px;color:#2B2B2B;">Проверка эссе ИИ</span>
           <span id="pf_ai" style="font-weight:700;font-size:11.5px;color:#1F8A50;background:#EAF7F0;padding:4px 10px;border-radius:20px;">вкл</span>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#C4C8CE" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
         </div>
         <div style="display:flex;align-items:center;gap:13px;padding:15px 16px;">
           <span style="width:34px;height:34px;border-radius:11px;background:#E3F1F5;display:grid;place-items:center;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#3E93A8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3.5 9h17M3.5 15h17M12 3c2.5 3 2.5 15 0 18M12 3c-2.5 3-2.5 15 0 18"/></svg></span>
@@ -1123,7 +1122,6 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
 </div>
 
 <script>
-const EMBEDDED_KEY="AQ.Ab8RN6KxBVIq24DE8PXvyovXUgQiZY7SiNfjByRgPyR6MS2HCA";
 const HIST=[];
 function cur(){const o=document.querySelector('.screen.on');return o?o.id:'scr5'}
 function showScreen(id){const t=document.getElementById(id);if(!t)return;document.querySelectorAll('.screen').forEach(s=>s.classList.remove('on'));t.classList.add('on');t.scrollTop=0;var nm=document.getElementById('navmenu');if(nm)nm.classList.remove('open')}
@@ -1224,17 +1222,6 @@ function renderReview(d){
     if(idx)eb.insertAdjacentHTML('beforeend','<div style="height:1px;background:#F4F5F6;margin:13px 0;"></div>');
     eb.insertAdjacentHTML('beforeend','<div style="display:flex;gap:11px;"><span style="width:26px;height:26px;flex:none;border-radius:9px;background:'+(warn?'#FFF4DE':'#FCEEEC')+';display:grid;place-items:center;">'+icon+'</span><div style="flex:1;"><div style="font-weight:700;font-size:13.5px;color:#2B2B2B;">'+safe(e.title||'Ошибка')+'</div><div style="margin-top:4px;font-weight:500;font-size:12.5px;color:#8A8F98;line-height:1.45;">'+body+'</div></div></div>')});
 }
-
-/* ---------- GEMINI ---------- */
-async function callGemini(sys,user){
-  const key=(localStorage.getItem('eb_key')||EMBEDDED_KEY||'').trim();
-  const model=(localStorage.getItem('eb_model')||'gemini-2.5-flash').trim();
-  const url='https://generativelanguage.googleapis.com/v1beta/models/'+model+':generateContent';
-  const body={contents:[{parts:[{text:user}]}],generationConfig:{temperature:0.3,maxOutputTokens:1600}};
-  if(sys)body.systemInstruction={parts:[{text:sys}]};
-  let r;try{r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':key},body:JSON.stringify(body)})}catch(e){throw new Error('net')}
-  const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error((j.error&&j.error.message)||'err');
-  const c=j.candidates&&j.candidates[0];return (c&&c.content&&c.content.parts&&c.content.parts.map(x=>x.text||'').join(''))||''}
 
 /* ---------- NAV WIRING (tabs/back/tiles/flows) ---------- */
 const TABROUTE={'Главная':'scr1','Учить':'scr2','Прогресс':'scr10','Профиль':'scr11'};
@@ -1376,21 +1363,6 @@ const DICT={
  independent:{ipa:'/ˌɪndɪˈpendənt/',tr:'независимый, самостоятельный'},confident:{ipa:'/ˈkɒnfɪdənt/',tr:'уверенный'},
  experience_:{}
 };
-async function callGemini(sys,user){
-  const key=(localStorage.getItem('eb_key')||EMBEDDED_KEY||'').trim();
-  const model=(localStorage.getItem('eb_model')||'gemini-2.5-flash').trim();
-  const url='https://generativelanguage.googleapis.com/v1beta/models/'+model+':generateContent';
-  const body={contents:[{parts:[{text:user}]}],generationConfig:{temperature:0.3,maxOutputTokens:1600}};
-  if(sys)body.systemInstruction={parts:[{text:sys}]};
-  const ctl=new AbortController();const to=setTimeout(()=>ctl.abort(),15000);
-  let r;
-  try{r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':key},body:JSON.stringify(body),signal:ctl.signal})}
-  catch(e){clearTimeout(to);throw new Error('ИИ недоступен (нет сети / регион заблокирован — нужен VPN)')}
-  clearTimeout(to);
-  const j=await r.json().catch(()=>({}));
-  if(!r.ok)throw new Error((j.error&&j.error.message)||('ИИ вернул ошибку '+r.status));
-  const c=j.candidates&&j.candidates[0];return (c&&c.content&&c.content.parts&&c.content.parts.map(x=>x.text||'').join(''))||''}
-
 /* translate: AI first, else offline dictionary */
 async function trWord(w){lastWord=w;const pop=document.getElementById('r_pop');
   document.getElementById('r_word').textContent=w;document.getElementById('r_ipa').textContent='';document.getElementById('r_tr').textContent='перевод…';pop.style.display='block';
@@ -1448,10 +1420,7 @@ function renderHome(){if(!S)return;const u=currentUser||'друг';
 function renderProgress(){if(!S)return;const p=S.prog||{};
   setTxt('p_streak','🔥 '+(S.streak||0));setTxt('p_words',S.learned||0);
   setW('pb_read',p.read||0);setW('pb_gram',p.gram||0);setW('pb_words',p.words||0);setW('pb_listen',p.listen||0);setW('pb_speak',p.speak||0)}
-function renderProfile(){const u=currentUser||'Гость';setTxt('pf_ava',u[0].toUpperCase());setTxt('pf_name',u);
-  setTxt('pf_ai',localStorage.getItem('eb_key')?'свой ключ':'встроенный')}
-function setKeyPrompt(){const k=prompt('Вставь свой ключ Gemini (пусто = встроенный):',localStorage.getItem('eb_key')||'');
-  if(k===null)return;if(k.trim())localStorage.setItem('eb_key',k.trim());else localStorage.removeItem('eb_key');renderProfile();alert('Сохранено ✓')}
+function renderProfile(){const u=currentUser||'Гость';setTxt('pf_ava',u[0].toUpperCase());setTxt('pf_name',u);setTxt('pf_ai','через сервер ✓')}
 function logout(){localStorage.removeItem('eb_current');location.reload()}
 (function(){const _t=tab;tab=function(id){_t(id);if(id==='scr1')renderHome();if(id==='scr10')renderProgress();if(id==='scr11')renderProfile();}})();
 
@@ -1588,102 +1557,12 @@ async function genReading(){
 })();
 
 
-/* ===== SWITCH TO GROQ (overrides) ===== */
-async function callGemini(sys,user){
-  const key=(localStorage.getItem('eb_key')||'').trim();
-  const model=(localStorage.getItem('eb_model')||'llama-3.3-70b-versatile').trim();
-  if(!key)throw new Error('Добавь ключ Groq в Профиле (⚙️)');
-  const ctl=new AbortController();const to=setTimeout(()=>ctl.abort(),20000);
-  let r;
-  try{r=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',
-    headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},
-    body:JSON.stringify({model:model,temperature:0.3,max_tokens:1600,
-      messages:[...(sys?[{role:'system',content:sys}]:[]),{role:'user',content:user}]}),signal:ctl.signal})}
-  catch(e){clearTimeout(to);throw new Error('ИИ недоступен (нет сети)')}
-  clearTimeout(to);
-  const j=await r.json().catch(()=>({}));
-  if(!r.ok)throw new Error((j.error&&j.error.message)||('Ошибка Groq '+r.status));
-  return (j.choices&&j.choices[0]&&j.choices[0].message&&j.choices[0].message.content)||''}
-
-function renderProfile(){const u=currentUser||'Гость';
-  var a=document.getElementById('pf_ava');if(a)a.textContent=u[0].toUpperCase();
-  var n=document.getElementById('pf_name');if(n)n.textContent=u;
-  var ai=document.getElementById('pf_ai');if(ai){const has=!!localStorage.getItem('eb_key');ai.textContent=has?'Groq ✓':'нет ключа';ai.style.color=has?'#1F8A50':'#C77400';ai.style.background=has?'#EAF7F0':'#FFF4DE'}}
-function setKeyPrompt(){
-  const k=prompt('Вставь ключ Groq (начинается с gsk_). Пусто = убрать ключ:',localStorage.getItem('eb_key')||'');
-  if(k===null)return;if(k.trim())localStorage.setItem('eb_key',k.trim());else localStorage.removeItem('eb_key');
-  if(!localStorage.getItem('eb_model'))localStorage.setItem('eb_model','llama-3.3-70b-versatile');
-  renderProfile();alert(k.trim()?'Ключ Groq сохранён ✓':'Ключ удалён')}
-
-
-/* ===== SWITCH TO GROK (xAI) (overrides) ===== */
-async function callGemini(sys,user){
-  const key=(localStorage.getItem('eb_key')||'').trim();
-  const model=(localStorage.getItem('eb_model')||'grok-4.5').trim();
-  if(!key)throw new Error('Добавь ключ xAI (Grok) в Профиле (⚙️)');
-  const ctl=new AbortController();const to=setTimeout(()=>ctl.abort(),25000);
-  let r;
-  try{r=await fetch('https://api.x.ai/v1/chat/completions',{method:'POST',
-    headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},
-    body:JSON.stringify({model:model,temperature:0.3,max_tokens:1600,
-      messages:[...(sys?[{role:'system',content:sys}]:[]),{role:'user',content:user}]}),signal:ctl.signal})}
-  catch(e){clearTimeout(to);throw new Error('ИИ недоступен (нет сети)')}
-  clearTimeout(to);
-  const j=await r.json().catch(()=>({}));
-  if(!r.ok)throw new Error((j.error&&j.error.message)||('Ошибка Grok '+r.status));
-  return (j.choices&&j.choices[0]&&j.choices[0].message&&j.choices[0].message.content)||''}
-
-function renderProfile(){const u=currentUser||'Гость';
-  var a=document.getElementById('pf_ava');if(a)a.textContent=u[0].toUpperCase();
-  var n=document.getElementById('pf_name');if(n)n.textContent=u;
-  var ai=document.getElementById('pf_ai');if(ai){const has=!!localStorage.getItem('eb_key');ai.textContent=has?'Grok ✓':'нет ключа';ai.style.color=has?'#1F8A50':'#C77400';ai.style.background=has?'#EAF7F0':'#FFF4DE'}}
-function setKeyPrompt(){
-  const k=prompt('Вставь ключ xAI (Grok), начинается с xai-. Пусто = убрать:',localStorage.getItem('eb_key')||'');
-  if(k===null)return;if(k.trim())localStorage.setItem('eb_key',k.trim());else localStorage.removeItem('eb_key');
-  if(!localStorage.getItem('eb_model'))localStorage.setItem('eb_model','grok-4.5');
-  renderProfile();alert(k.trim()?'Ключ Grok сохранён ✓':'Ключ удалён')}
-
-
-/* ===== GROK primary + GROQ fallback (overrides) ===== */
-async function _ask(url,key,model,sys,user){
-  const ctl=new AbortController();const to=setTimeout(()=>ctl.abort(),25000);
-  let r;
-  try{r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},
-    body:JSON.stringify({model:model,temperature:0.3,max_tokens:1600,messages:[...(sys?[{role:'system',content:sys}]:[]),{role:'user',content:user}]}),signal:ctl.signal})}
-  catch(e){clearTimeout(to);throw new Error('нет сети')}
-  clearTimeout(to);const j=await r.json().catch(()=>({}));
-  if(!r.ok)throw new Error((j.error&&j.error.message)||('HTTP '+r.status));
-  return (j.choices&&j.choices[0]&&j.choices[0].message&&j.choices[0].message.content)||''}
-async function callGemini(sys,user){
-  const xk=(localStorage.getItem('eb_key')||'').trim();
-  const gk=(localStorage.getItem('eb_groq')||'').trim();
-  const xm=(localStorage.getItem('eb_model')||'grok-4.5').trim();
-  const gm=(localStorage.getItem('eb_groq_model')||'llama-3.3-70b-versatile').trim();
-  if(!xk&&!gk)throw new Error('Добавь ключ в Профиле (⚙️)');
-  let lastErr='';
-  if(xk){try{return await _ask('https://api.x.ai/v1/chat/completions',xk,xm,sys,user)}catch(e){lastErr=e.message}}
-  if(gk){try{return await _ask('https://api.groq.com/openai/v1/chat/completions',gk,gm,sys,user)}catch(e){lastErr=e.message}}
-  throw new Error(lastErr||'ИИ недоступен')}
-
-function renderProfile(){const u=currentUser||'Гость';
-  var a=document.getElementById('pf_ava');if(a)a.textContent=u[0].toUpperCase();
-  var n=document.getElementById('pf_name');if(n)n.textContent=u;
-  var ai=document.getElementById('pf_ai');if(ai){const x=!!localStorage.getItem('eb_key'),g=!!localStorage.getItem('eb_groq');
-    const t=(x&&g)?'Grok + Groq ✓':x?'Grok ✓':g?'Groq ✓':'нет ключа';const has=x||g;
-    ai.textContent=t;ai.style.color=has?'#1F8A50':'#C77400';ai.style.background=has?'#EAF7F0':'#FFF4DE'}}
-function setKeyPrompt(){
-  const k=prompt('Основной ключ xAI (Grok), начинается с xai-. Пусто = убрать:',localStorage.getItem('eb_key')||'');
-  if(k!==null){if(k.trim())localStorage.setItem('eb_key',k.trim());else localStorage.removeItem('eb_key')}
-  const g=prompt('Запасной БЕСПЛАТНЫЙ ключ Groq (gsk_...) — подхватит, если у Grok кончатся токены. Пусто = без резерва:',localStorage.getItem('eb_groq')||'');
-  if(g!==null){if(g.trim())localStorage.setItem('eb_groq',g.trim());else localStorage.removeItem('eb_groq')}
-  if(!localStorage.getItem('eb_model'))localStorage.setItem('eb_model','grok-4.5');
-  renderProfile();alert('Сохранено ✓')}
-
-
 /* ===== SERVER CONNECT (Этап 5) ===== */
 const SRV=(location.protocol==='http:'||location.protocol==='https:');
 const API=location.origin;
-try{localStorage.removeItem('eb_token')}catch(_){}
+try{
+  ['eb_token','eb_key','eb_groq','eb_model','eb_groq_model'].forEach(function(key){localStorage.removeItem(key)})
+}catch(_){}
 let TOKEN=''; // маркер активной cookie-сессии; сам JWT недоступен JavaScript
 function gv(id){var e=document.getElementById(id);return e?(e.value||'').trim():''}
 function lgMsg(t){var e=document.getElementById('lg_msg');if(e)e.textContent=t}
@@ -1725,15 +1604,14 @@ doRegister=async function(){
   catch(e){lgMsg(e.message)}}
 logout=function(){localStorage.removeItem('eb_current');TOKEN='';location.reload()}
 
-/* ИИ через сервер (ключи на сервере), иначе локальный путь (Grok/Groq) */
-const _localCall=callGemini;
+/* ИИ работает только через сервер; ключи провайдеров недоступны браузеру. */
 callGemini=async function(sys,user){
-  if(SRV){const d=await apiPost('/api/ai',{system:sys,user:user},true);return d.text||''}
-  return _localCall(sys,user)}
+  if(!SRV)throw new Error('ИИ доступен только в серверной версии приложения');
+  const d=await apiPost('/api/ai',{system:sys,user:user},true);return d.text||''}
 
 /* профиль: в серверном режиме ключ не нужен на клиенте */
 const _rp=renderProfile;
-renderProfile=function(){_rp();if(SRV){var ai=document.getElementById('pf_ai');if(ai){ai.textContent='через сервер ✓';ai.style.color='#1F8A50';ai.style.background='#EAF7F0'}}}
+renderProfile=function(){_rp();var ai=document.getElementById('pf_ai');if(ai){ai.textContent='через сервер ✓';ai.style.color='#1F8A50';ai.style.background='#EAF7F0'}}
 
 /* финальная инициализация под серверный режим */
 if(SRV){ if(TOKEN){ startApp(); } else { var tb=document.getElementById('tabbar'); if(tb)tb.style.display='none'; show('scr5'); } }

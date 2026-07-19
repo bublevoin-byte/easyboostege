@@ -18,3 +18,18 @@ test('session endpoints do not expose JWT in JSON', async () => {
   assert.match(server, /authenticated:\s*true/);
 });
 
+test('frontend contains no embedded or browser-managed AI credentials', async () => {
+  const frontend = await fs.readFile(frontendPath, 'utf8');
+  assert.doesNotMatch(frontend, /EMBEDDED_KEY/);
+  assert.doesNotMatch(frontend, /localStorage\.(?:getItem|setItem)\(['"]eb_(?:key|groq|model|groq_model)/);
+  assert.doesNotMatch(frontend, /x-goog-api-key/i);
+  assert.doesNotMatch(frontend, /generativelanguage\.googleapis\.com|api\.groq\.com|api\.x\.ai/i);
+  assert.match(frontend, /apiPost\('\/api\/ai'/);
+});
+
+test('frontend inline scripts remain syntactically valid', async () => {
+  const frontend = await fs.readFile(frontendPath, 'utf8');
+  const scripts = [...frontend.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/giu)];
+  assert.ok(scripts.length > 0);
+  for (const script of scripts) assert.doesNotThrow(() => new Function(script[1]));
+});

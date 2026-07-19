@@ -377,14 +377,21 @@ async function askWithFallback(system, user) {
   throw error;
 }
 
-const aiLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000,
-  limit: config.ai.maxRequestsPerHour,
-  standardHeaders: 'draft-8',
-  legacyHeaders: false,
-  keyGenerator: (req) => req.user,
-  message: { error: { code: 'RATE_LIMITED', message: 'Слишком много запросов. Попробуйте позже.' } },
-});
+function createUserRateLimiter(limit) {
+  return rateLimit({
+    windowMs: 60 * 60 * 1000,
+    limit,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+    keyGenerator: (req) => req.user,
+    message: { error: { code: 'RATE_LIMITED', message: 'Слишком много запросов. Попробуйте позже.' } },
+  });
+}
+
+const chatLimiter = createUserRateLimiter(config.ai.maxRequestsPerHour);
+const writingLimiter = createUserRateLimiter(config.ai.maxWritingRequestsPerHour);
+const ttsLimiter = createUserRateLimiter(config.ai.maxTtsRequestsPerHour);
+const sttLimiter = createUserRateLimiter(config.ai.maxSttRequestsPerHour);
 
 async function requireActiveSubscription(req, res, next) {
   try {
@@ -396,7 +403,7 @@ async function requireActiveSubscription(req, res, next) {
   } catch (error) { next(error); }
 }
 
-app.post('/api/v1/ai/evaluate-writing', auth, requireActiveSubscription, aiLimiter, async (req, res, next) => {
+app.post('/api/v1/ai/evaluate-writing', auth, requireActiveSubscription, writingLimiter, async (req, res, next) => {
   const parsed = writingRequestSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({
@@ -461,7 +468,7 @@ app.post('/api/v1/ai/evaluate-writing', auth, requireActiveSubscription, aiLimit
   }
 });
 
-app.post('/api/ai', auth, requireActiveSubscription, aiLimiter, async (req, res) => {
+app.post('/api/ai', auth, requireActiveSubscription, chatLimiter, async (req, res) => {
   const parsed = legacyAiRequestSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректный запрос к ИИ.' } });
@@ -516,7 +523,7 @@ async function edgeTts(text, voice, slow) {
     stream.on('error', reject);
   });
 }
-app.get('/api/tts', auth, requireActiveSubscription, aiLimiter, async (req, res) => {
+app.get('/api/tts', auth, requireActiveSubscription, ttsLimiter, async (req, res) => {
   const text = String(req.query.text || '').slice(0, 500).trim();
   if (!text) return res.status(400).json({ error: 'нет текста' });
   const voice = TTS_VOICES.has(req.query.voice) ? req.query.voice : 'en-GB-SoniaNeural';
@@ -542,7 +549,7 @@ app.get('/api/tts', auth, requireActiveSubscription, aiLimiter, async (req, res)
 });
 
 // ---- расшифровка речи (Grok STT) для оценки говорения ----
-app.post('/api/stt', auth, requireActiveSubscription, aiLimiter, express.raw({ type: () => true, limit: '20mb' }), async (req, res) => {
+app.post('/api/stt', auth, requireActiveSubscription, sttLimiter, express.raw({ type: () => true, limit: '20mb' }), async (req, res) => {
   try {
     if (!XAI_KEY) return res.status(503).json({ error: 'XAI_API_KEY не задан на сервере' });
     const buf = req.body;

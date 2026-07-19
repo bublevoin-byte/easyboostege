@@ -114,8 +114,9 @@ docker compose -f compose.production.yml run --rm app npm run db:import-json -- 
 - JSON API ограничен 1 МБ, прогресс — 512 КБ и структурными лимитами;
 - Telegram-вход и дорогие AI/TTS/STT операции ограничены по частоте;
 - Telegram login codes одноразовые и хранятся только в виде SHA-256 hash.
+- AI API keys используются только сервером; frontend очищает старые browser-managed ключи и не обращается к провайдерам напрямую.
 
-Лимиты настраиваются через `SESSION_DAYS`, `TELEGRAM_AUTH_CODE_TTL_MS`, `TELEGRAM_AUTH_STARTS_PER_15_MINUTES`, `TELEGRAM_AUTH_CHECKS_PER_15_MINUTES`, `AI_TIMEOUT_MS` и `AI_REQUESTS_PER_HOUR`.
+Лимиты настраиваются через `SESSION_DAYS`, `TELEGRAM_AUTH_CODE_TTL_MS`, `TELEGRAM_AUTH_STARTS_PER_15_MINUTES`, `TELEGRAM_AUTH_CHECKS_PER_15_MINUTES`, `AI_TIMEOUT_MS`, `AI_REQUESTS_PER_HOUR`, `WRITING_REQUESTS_PER_HOUR`, `TTS_REQUESTS_PER_HOUR` и `STT_REQUESTS_PER_HOUR`.
 
 ## Проверка перед релизом
 
