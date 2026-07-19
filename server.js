@@ -11,6 +11,7 @@ import { closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, create
 import { config } from './config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from './ai/writing.js';
 import { protectCookieRequests } from './security/request-origin.js';
+import { classifyBodyParserError, legacyAiRequestSchema, validateProgress } from './validation/api-input.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -295,7 +296,11 @@ app.get('/api/progress', auth, async (req, res, next) => {
 });
 app.post('/api/progress', auth, async (req, res, next) => {
   try {
-    await saveProgress(req.user, req.body || {});
+    const parsed = validateProgress(req.body);
+    if (!parsed.ok) {
+      return res.status(400).json({ error: { code: 'INVALID_PROGRESS', message: 'Некорректные данные прогресса.', reason: parsed.code } });
+    }
+    await saveProgress(req.user, parsed.data);
     res.json({ ok: true });
   } catch (error) { next(error); }
 });
@@ -441,8 +446,11 @@ app.post('/api/v1/ai/evaluate-writing', auth, requireActiveSubscription, aiLimit
 });
 
 app.post('/api/ai', auth, requireActiveSubscription, aiLimiter, async (req, res) => {
-  const { system, user } = req.body || {};
-  if (!user) return res.status(400).json({ error: 'Пустой запрос' });
+  const parsed = legacyAiRequestSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректный запрос к ИИ.' } });
+  }
+  const { system, user } = parsed.data;
   const providers = aiProviders();
   if (!providers.length) return res.status(503).json({ error: 'ИИ не настроен (нет ключей)' });
   let lastErr = '';
@@ -542,6 +550,7 @@ app.post('/api/stt', auth, requireActiveSubscription, aiLimiter, express.raw({ t
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 app.use((error, req, res, next) => {
+  const publicError = classifyBodyParserError(error);
   console.error(JSON.stringify({
     timestamp: new Date().toISOString(),
     level: 'error',
@@ -549,9 +558,14 @@ app.use((error, req, res, next) => {
     requestId: req.requestId,
     method: req.method,
     path: req.path,
-    errorCode: error.code || 'INTERNAL_ERROR',
+    errorCode: publicError?.code || error.code || 'INTERNAL_ERROR',
   }));
   if (res.headersSent) return next(error);
+  if (publicError) {
+    return res.status(publicError.status).json({
+      error: { code: publicError.code, message: publicError.message, requestId: req.requestId },
+    });
+  }
   res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Внутренняя ошибка сервера.', requestId: req.requestId } });
 });
 
