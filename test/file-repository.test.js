@@ -99,3 +99,12 @@ test('writing attempt and AI metadata are persisted without prompt text in the A
     assert.equal(JSON.stringify(stored.ai_requests).includes('Student answer text'), false);
   });
 });
+
+test('file repository readiness check succeeds after pending writes', async () => {
+  await withRepository(async (repository) => {
+    const username = await repository.createTelegramUser(4001, 'Health User');
+    const save = repository.saveProgress(username, { ready: true });
+    assert.equal(await repository.healthCheck(), true);
+    await save;
+  });
+});

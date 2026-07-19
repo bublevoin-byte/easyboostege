@@ -184,6 +184,11 @@ export function createPostgresRepository(connectionString) {
     return Number(result.rows[0].id);
   }
 
+  async function healthCheck() {
+    await pool.query('SELECT 1');
+    return true;
+  }
+
   return {
     getUser,
     createUser,
@@ -201,6 +206,7 @@ export function createPostgresRepository(connectionString) {
     createWritingAttempt,
     finishWritingAttempt,
     logAiRequest,
+    healthCheck,
     close: () => pool.end(),
   };
 }

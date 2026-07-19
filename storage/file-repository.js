@@ -208,6 +208,12 @@ export function createFileRepository(filePath) {
     return id;
   }
 
+  async function healthCheck() {
+    await load();
+    await writeQueue;
+    return true;
+  }
+
   return {
     getUser,
     createUser,
@@ -225,6 +231,7 @@ export function createFileRepository(filePath) {
     createWritingAttempt,
     finishWritingAttempt,
     logAiRequest,
+    healthCheck,
     async close() { await writeQueue; },
   };
 }

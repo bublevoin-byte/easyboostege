@@ -7,7 +7,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, createTelegramAuthCode, createWritingAttempt, finishWritingAttempt, getProgress, getUser, saveProgress, getUserByTelegram, createTelegramUser, grantDays, logAiRequest, markTrialUsed, getSub } from './db.js';
+import { closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, createTelegramAuthCode, createWritingAttempt, finishWritingAttempt, getProgress, getUser, healthCheck, saveProgress, getUserByTelegram, createTelegramUser, grantDays, logAiRequest, markTrialUsed, getSub } from './db.js';
 import { config } from './config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from './ai/writing.js';
 
@@ -31,12 +31,46 @@ const SUB_DAYS = 30;
 let BOT_USERNAME = '';
 
 const app = express();
+if (config.isProduction) app.set('trust proxy', 1);
 app.disable('x-powered-by');
 app.use(helmet({
   contentSecurityPolicy: false, // Временно: текущий MVP использует inline script/style. Включить после frontend-рефакторинга.
   crossOriginEmbedderPolicy: false,
 }));
 app.use(express.json({ limit: '1mb' }));
+app.use((req, res, next) => {
+  const incoming = String(req.headers['x-request-id'] || '');
+  req.requestId = /^[A-Za-z0-9._-]{8,100}$/u.test(incoming) ? incoming : crypto.randomUUID();
+  res.setHeader('X-Request-Id', req.requestId);
+  const startedAt = Date.now();
+  res.once('finish', () => {
+    console.log(JSON.stringify({
+      timestamp: new Date().toISOString(),
+      level: res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info',
+      type: 'http_request',
+      requestId: req.requestId,
+      method: req.method,
+      path: req.path,
+      status: res.statusCode,
+      durationMs: Date.now() - startedAt,
+      authenticated: Boolean(req.user),
+    }));
+  });
+  next();
+});
+
+app.get('/health/live', (req, res) => {
+  res.json({ status: 'ok' });
+});
+
+app.get('/health/ready', async (req, res) => {
+  try {
+    await healthCheck();
+    res.json({ status: 'ready', storage: config.database.provider });
+  } catch (error) {
+    res.status(503).json({ status: 'not_ready' });
+  }
+});
 app.get('/', async (req, res, next) => {
   try {
     const loginCode = String(req.query.login_code || '');
@@ -505,9 +539,17 @@ app.post('/api/stt', auth, requireActiveSubscription, aiLimiter, express.raw({ t
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 app.use((error, req, res, next) => {
-  console.error('Request failed:', error.message);
+  console.error(JSON.stringify({
+    timestamp: new Date().toISOString(),
+    level: 'error',
+    type: 'request_error',
+    requestId: req.requestId,
+    method: req.method,
+    path: req.path,
+    errorCode: error.code || 'INTERNAL_ERROR',
+  }));
   if (res.headersSent) return next(error);
-  res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Внутренняя ошибка сервера.' } });
+  res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Внутренняя ошибка сервера.', requestId: req.requestId } });
 });
 
 const server = app.listen(PORT, () => console.log('Easy Boost server on http://localhost:' + PORT));
