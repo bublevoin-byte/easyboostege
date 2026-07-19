@@ -245,7 +245,7 @@ async function startTelegram() {
     else { console.log('Telegram getMe error:', me.description); return; }
   } catch (e) { console.log('Telegram getMe failed:', e.message); return; }
 
-  console.log('Telegram admin id:', ADMIN_ID || '(не задан — заявки на оплату приходить не будут)');
+  console.log('Telegram admin notifications:', ADMIN_ID ? 'configured' : 'disabled');
   let offset = 0;
   const poll = async () => {
     try {
