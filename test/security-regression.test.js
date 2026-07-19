@@ -16,6 +16,7 @@ test('session endpoints do not expose JWT in JSON', async () => {
   const server = await fs.readFile(serverPath, 'utf8');
   assert.doesNotMatch(server, /res\.json\(\{\s*token\s*[,}]/);
   assert.match(server, /authenticated:\s*true/);
+  assert.match(server, /if \(!await getUser\(username\)\)[\s\S]{0,160}req\.user = username/);
 });
 
 test('frontend contains no embedded or browser-managed AI credentials', async () => {

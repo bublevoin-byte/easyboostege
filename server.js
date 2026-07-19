@@ -12,8 +12,10 @@ import { config } from './config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from './ai/writing.js';
 import { protectCookieRequests } from './security/request-origin.js';
 import { classifyBodyParserError, legacyAiRequestSchema, validateProgress } from './validation/api-input.js';
+import { contentSecurityPolicy } from './security/csp.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const frontendHtml = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
 
 const SECRET = config.jwtSecret;
 const PORT = config.port;
@@ -36,9 +38,15 @@ const app = express();
 if (config.isProduction) app.set('trust proxy', 1);
 app.disable('x-powered-by');
 app.use(helmet({
-  contentSecurityPolicy: false, // Временно: текущий MVP использует inline script/style. Включить после frontend-рефакторинга.
+  contentSecurityPolicy: contentSecurityPolicy(frontendHtml, config.isProduction),
   crossOriginEmbedderPolicy: false,
+  hsts: config.isProduction ? { maxAge: 31_536_000, includeSubDomains: true } : false,
+  referrerPolicy: { policy: 'no-referrer' },
 }));
+app.use((req, res, next) => {
+  res.setHeader('Permissions-Policy', 'camera=(), geolocation=(), microphone=(self), payment=()');
+  next();
+});
 app.use(express.json({ limit: '1mb' }));
 app.use((req, res, next) => {
   const incoming = String(req.headers['x-request-id'] || '');
@@ -112,8 +120,9 @@ async function auth(req, res, next) {
   const h = req.headers.authorization || '';
   const token = (h.startsWith('Bearer ') ? h.slice(7) : '') || getCookie(req, 'eb_token');
   try {
-    req.user = jwt.verify(token, SECRET).u;
-    if (!await getUser(req.user)) return res.status(401).json({ error: 'Требуется вход' });
+    const username = jwt.verify(token, SECRET).u;
+    if (!await getUser(username)) return res.status(401).json({ error: 'Требуется вход' });
+    req.user = username;
     next();
   } catch (e) {
     res.status(401).json({ error: 'Требуется вход' });
