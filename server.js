@@ -7,7 +7,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, createTelegramAuthCode, createWritingAttempt, finishWritingAttempt, getProgress, saveProgress, getUserByTelegram, createTelegramUser, grantDays, logAiRequest, markTrialUsed, getSub } from './db.js';
+import { closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, createTelegramAuthCode, createWritingAttempt, finishWritingAttempt, getProgress, getUser, saveProgress, getUserByTelegram, createTelegramUser, grantDays, logAiRequest, markTrialUsed, getSub } from './db.js';
 import { config } from './config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from './ai/writing.js';
 
@@ -59,7 +59,7 @@ app.get('/', async (req, res, next) => {
 app.use(express.static(path.join(__dirname, 'public')));
 
 function makeToken(username) {
-  return jwt.sign({ u: username }, SECRET, { expiresIn: '365d' });
+  return jwt.sign({ u: username }, SECRET, { expiresIn: config.sessionDays + 'd' });
 }
 function getCookie(req, name) {
   const c = req.headers.cookie || '';
@@ -68,13 +68,14 @@ function getCookie(req, name) {
 }
 function setAuthCookie(req, res, token) {
   const secure = (req.headers['x-forwarded-proto'] || req.protocol) === 'https' ? '; Secure' : '';
-  res.setHeader('Set-Cookie', 'eb_token=' + encodeURIComponent(token) + '; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax' + secure);
+  res.setHeader('Set-Cookie', 'eb_token=' + encodeURIComponent(token) + '; Path=/; Max-Age=' + (config.sessionDays * 86400) + '; HttpOnly; SameSite=Lax' + secure);
 }
-function auth(req, res, next) {
+async function auth(req, res, next) {
   const h = req.headers.authorization || '';
   const token = (h.startsWith('Bearer ') ? h.slice(7) : '') || getCookie(req, 'eb_token');
   try {
     req.user = jwt.verify(token, SECRET).u;
+    if (!await getUser(req.user)) return res.status(401).json({ error: 'Требуется вход' });
     next();
   } catch (e) {
     res.status(401).json({ error: 'Требуется вход' });
@@ -234,7 +235,7 @@ app.get('/api/tg/check', async (req, res, next) => {
     const uname = existing ? existing.username : await createTelegramUser(r.telegram_id, r.name);
     const token = makeToken(uname);
     setAuthCookie(req, res, token);
-    res.json({ token, username: uname, ...await getSub(uname), bot: BOT_USERNAME });
+    res.json({ authenticated: true, username: uname, ...await getSub(uname), bot: BOT_USERNAME });
   } catch (error) { next(error); }
 });
 
@@ -243,7 +244,7 @@ app.get('/api/me', auth, async (req, res, next) => {
   try {
     const token = makeToken(req.user);
     setAuthCookie(req, res, token);
-    res.json({ username: req.user, token, bot: BOT_USERNAME, ...await getSub(req.user) });
+    res.json({ authenticated: true, username: req.user, bot: BOT_USERNAME, ...await getSub(req.user) });
   } catch (error) { next(error); }
 });
 app.post('/api/logout', (req, res) => {

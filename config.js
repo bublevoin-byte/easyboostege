@@ -35,6 +35,7 @@ export const config = Object.freeze({
   isProduction,
   port: readInteger('PORT', 3000, { min: 1, max: 65535 }),
   jwtSecret: jwtSecret || 'development-only-secret-change-before-production',
+  sessionDays: readInteger('SESSION_DAYS', 30, { min: 1, max: 90 }),
   appUrl: process.env.APP_URL || 'http://localhost:3000',
   database: Object.freeze({
     provider: databaseProvider,

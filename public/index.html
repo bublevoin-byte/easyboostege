@@ -1683,15 +1683,16 @@ function setKeyPrompt(){
 /* ===== SERVER CONNECT (Этап 5) ===== */
 const SRV=(location.protocol==='http:'||location.protocol==='https:');
 const API=location.origin;
-let TOKEN=localStorage.getItem('eb_token')||'';
+try{localStorage.removeItem('eb_token')}catch(_){}
+let TOKEN=''; // маркер активной cookie-сессии; сам JWT недоступен JavaScript
 function gv(id){var e=document.getElementById(id);return e?(e.value||'').trim():''}
 function lgMsg(t){var e=document.getElementById('lg_msg');if(e)e.textContent=t}
 async function apiPost(p,body,authed){
-  const r=await fetch(API+p,{method:'POST',headers:Object.assign({'Content-Type':'application/json'},(authed&&TOKEN)?{'Authorization':'Bearer '+TOKEN}:{}),body:JSON.stringify(body||{})});
-  const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||('Ошибка '+r.status));return j}
+  const r=await fetch(API+p,{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify(body||{})});
+  const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error((j.error&&j.error.message)||j.error||('Ошибка '+r.status));return j}
 async function apiGet(p){
-  const r=await fetch(API+p,{headers:TOKEN?{'Authorization':'Bearer '+TOKEN}:{}});
-  const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||('Ошибка '+r.status));return j}
+  const r=await fetch(API+p,{credentials:'same-origin'});
+  const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error((j.error&&j.error.message)||j.error||('Ошибка '+r.status));return j}
 function fillDefaults(d){d=d||{};d.box=d.box||{};d.wstatus=d.wstatus||{};d.learned=d.learned==null?320:d.learned;
   d.streak=d.streak||7;d.lastDay=d.lastDay||null;d.dayMin=d.dayMin||18;d.dayMinDate=d.dayMinDate||todayStr();
   d.essays=d.essays||0;d.speak=d.speak||0;d.prog=d.prog||{words:64,gram:42,read:78,listen:30,write:40,speak:48};return d}
@@ -1712,17 +1713,17 @@ doLogin=async function(){
   if(!SRV){const u=gv('lg_user')||'Аня';currentUser=u;localStorage.setItem('eb_current',currentUser);startApp();return}
   const u=gv('lg_user'),p=gv('lg_pass');if(!u||!p){lgMsg('Введите имя и пароль');return}
   lgMsg('Вход…');
-  try{const d=await apiPost('/api/login',{username:u,password:p});TOKEN=d.token;localStorage.setItem('eb_token',TOKEN);
+  try{const d=await apiPost('/api/login',{username:u,password:p});TOKEN=d.authenticated?'cookie':'';
     currentUser=d.username;localStorage.setItem('eb_current',currentUser);lgMsg('');startApp()}
   catch(e){lgMsg(e.message)}}
 doRegister=async function(){
   if(!SRV){const u=gv('lg_user')||'Аня';currentUser=u;localStorage.setItem('eb_current',currentUser);show('scr6');document.getElementById('tabbar').style.display='none';return}
   const u=gv('lg_user'),p=gv('lg_pass');if(!u||!p){lgMsg('Введите имя и пароль');return}
   lgMsg('Создаём аккаунт…');
-  try{const d=await apiPost('/api/register',{username:u,password:p});TOKEN=d.token;localStorage.setItem('eb_token',TOKEN);
+  try{const d=await apiPost('/api/register',{username:u,password:p});TOKEN=d.authenticated?'cookie':'';
     currentUser=d.username;localStorage.setItem('eb_current',currentUser);lgMsg('');show('scr6');document.getElementById('tabbar').style.display='none'}
   catch(e){lgMsg(e.message)}}
-logout=function(){localStorage.removeItem('eb_token');localStorage.removeItem('eb_current');TOKEN='';location.reload()}
+logout=function(){localStorage.removeItem('eb_current');TOKEN='';location.reload()}
 
 /* ИИ через сервер (ключи на сервере), иначе локальный путь (Grok/Groq) */
 const _localCall=callGemini;
@@ -1749,7 +1750,7 @@ tgVerify=async function(){
   const code=d.code;let tries=0;
   const iv=setInterval(async()=>{tries++;
     try{const c=await apiGet('/api/tg/check?code='+encodeURIComponent(code));
-      if(c&&c.token){clearInterval(iv);TOKEN=c.token;localStorage.setItem('eb_token',TOKEN);
+      if(c&&c.authenticated){clearInterval(iv);TOKEN='cookie';
         currentUser=c.username;localStorage.setItem('eb_current',currentUser);lgMsg('');startApp()}
     }catch(e){}
     if(tries>150){clearInterval(iv);lgMsg('Время вышло — нажми «Войти через Telegram» ещё раз')}
@@ -1767,7 +1768,7 @@ function tgPoll(){
   if(!TG_CODE)return;let tries=0;clearInterval(TG_IV);
   TG_IV=setInterval(async()=>{tries++;
     try{const c=await apiGet('/api/tg/check?code='+encodeURIComponent(TG_CODE));
-      if(c&&c.token){clearInterval(TG_IV);TOKEN=c.token;localStorage.setItem('eb_token',TOKEN);
+      if(c&&c.authenticated){clearInterval(TG_IV);TOKEN='cookie';
         currentUser=c.username;localStorage.setItem('eb_current',currentUser);lgMsg('');startApp();}
     }catch(e){}
     if(tries>300){clearInterval(TG_IV)}
@@ -1782,7 +1783,7 @@ tgVerify=function(){
   else if(m){m.innerHTML='Нажми: <a href="'+TG_URL+'" target="_blank" rel="noopener" style="color:#F2683F;font-weight:800;text-decoration:underline;">Открыть Telegram-бот</a> → Start → вернись';}
   tgPoll();
 }
-if(typeof SRV!=='undefined'&&SRV&&!TOKEN){tgInit();}
+// Telegram-код создаётся только после явного действия пользователя.
 
 
 /* ===== TELEGRAM login v3: настоящая ссылка (iOS-safe) ===== */
@@ -1797,7 +1798,7 @@ function tgClick(e){
   lgMsg('Открой бота → нажми Start → вернись сюда'); tgPoll();
 }
 try{clearInterval(TG_IV)}catch(e){}
-if(typeof SRV!=='undefined'&&SRV&&!TOKEN){tgInit();}
+// Восстановление существующей cookie-сессии выполняется ниже через /api/me.
 
 
 /* ===== TELEGRAM login v7: открыть окно синхронно, потом редирект (iOS-safe) ===== */
@@ -1853,14 +1854,8 @@ if(typeof SRV!=='undefined'&&SRV&&TOKEN){ setTimeout(function(){try{pwCheck();}c
 /* ===== Вход по ссылке из бота (magic link) — без всплывающих окон ===== */
 (function(){
   try{
-    var t=new URLSearchParams(location.search).get('t');
-    if(t){
-      try{localStorage.setItem('eb_token',t);}catch(_){}
-      try{TOKEN=t;}catch(_){window.TOKEN=t;}
-      try{history.replaceState(null,'',location.pathname);}catch(_){}
-      try{if(typeof startApp==='function')startApp();}catch(_){}
-      try{if(typeof checkSub==='function')checkSub();}catch(_){}
-    }
+    // Старые magic-link JWT обрабатываются сервером до загрузки страницы.
+    if(new URLSearchParams(location.search).has('t'))history.replaceState(null,'',location.pathname);
   }catch(e){}
 })();
 /* Кнопка Telegram v9: берём ссылку по клику и сразу открываем бота + видимый запасной линк */
@@ -1882,7 +1877,7 @@ tgClick=async function(e){
 <script>
 /* ===== SESSION v2: постоянный вход, восстановление сессии, подписка ===== */
 (function(){
-  function saveTok(t,u){if(t){TOKEN=t;try{localStorage.setItem('eb_token',t)}catch(_){}}
+  function saveTok(t,u){if(t||u)TOKEN='cookie';
     if(u){currentUser=u;try{localStorage.setItem('eb_current',u)}catch(_){}}}
   async function me(){try{return await apiGet('/api/me')}catch(e){return null}}
   window.ebMe=me;
@@ -1900,7 +1895,7 @@ tgClick=async function(e){
     var m=await me();
     if(m&&m.username){
       var had=!!TOKEN;
-      saveTok(m.token||TOKEN,m.username);
+      saveTok(m.authenticated,m.username);
       window.__sub=m;
       if(!had){try{localStorage.removeItem('eb_tg_code')}catch(_){};startApp();}
     }
@@ -1909,7 +1904,7 @@ tgClick=async function(e){
   logout=function(){
     try{apiPost('/api/logout',{})}catch(_){}
     TOKEN='';
-    try{localStorage.removeItem('eb_token');localStorage.removeItem('eb_current');localStorage.removeItem('eb_tg_code')}catch(_){}
+    try{localStorage.removeItem('eb_current');localStorage.removeItem('eb_tg_code')}catch(_){}
     setTimeout(function(){location.reload()},200)};
   /* статус подписки в профиле */
   function fmt(ts){var d=new Date(ts);return ('0'+d.getDate()).slice(-2)+'.'+('0'+(d.getMonth()+1)).slice(-2)+'.'+d.getFullYear()}
@@ -3868,7 +3863,7 @@ var _sa5=startApp;startApp=async function(){await _sa5.apply(this,arguments);try
     var k=voice+'|'+(slow?1:0)+'|'+text;
     if(cache[k])return Promise.resolve(cache[k]);
     return fetch(API+'/api/tts?text='+encodeURIComponent(text)+'&voice='+voice+(slow?'&slow=1':''),
-      {headers:TOKEN?{'Authorization':'Bearer '+TOKEN}:{}})
+      {credentials:'same-origin'})
       .then(function(r){if(!r.ok)throw 0;return r.blob()})
       .then(function(b){if(!b.size)throw 0;var u=URL.createObjectURL(b);cache[k]=u;return u})}
   function stopAudio(){seq++;if(cur){try{cur.pause()}catch(e){}cur=null}}
@@ -4277,7 +4272,7 @@ function spEtalon(){if(!SP||SP.t!==1)return;
 /* ---- этап 2: расшифровка и оценка ИИ ---- */
 async function spSTT(blob){
   var r=await fetch(API+'/api/stt',{method:'POST',
-    headers:Object.assign({'Content-Type':blob.type||'application/octet-stream'},TOKEN?{'Authorization':'Bearer '+TOKEN}:{}),body:blob});
+    headers:{'Content-Type':blob.type||'application/octet-stream'},credentials:'same-origin',body:blob});
   var j=await r.json().catch(function(){return{}});
   if(!r.ok)throw new Error(j.error||('Ошибка '+r.status));
   return j.text||''}
