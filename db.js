@@ -19,4 +19,7 @@ export const getSub = (...args) => repository.getSub(...args);
 export const createTelegramAuthCode = (...args) => repository.createTelegramAuthCode(...args);
 export const confirmTelegramAuthCode = (...args) => repository.confirmTelegramAuthCode(...args);
 export const consumeTelegramAuthCode = (...args) => repository.consumeTelegramAuthCode(...args);
+export const createWritingAttempt = (...args) => repository.createWritingAttempt(...args);
+export const finishWritingAttempt = (...args) => repository.finishWritingAttempt(...args);
+export const logAiRequest = (...args) => repository.logAiRequest(...args);
 export const closeDatabase = () => repository.close();

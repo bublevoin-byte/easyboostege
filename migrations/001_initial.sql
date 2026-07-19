@@ -62,4 +62,3 @@ CREATE TABLE IF NOT EXISTS ai_requests (
 
 CREATE INDEX IF NOT EXISTS ai_requests_user_created_idx
   ON ai_requests (username, created_at DESC);
-

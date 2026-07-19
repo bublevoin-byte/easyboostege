@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+export const WRITING_PROMPT_VERSION = 'writing-v1';
+
 const task37AssignmentSchema = z.object({
   from: z.string().trim().min(1).max(40),
   stimulus: z.string().trim().min(20).max(1500),
@@ -162,4 +164,3 @@ export function parseAndValidateWritingReview(raw, input) {
 export function getWritingRules(taskType) {
   return TASK_RULES[taskType];
 }
-

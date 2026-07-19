@@ -67,3 +67,35 @@ test('expired telegram auth code cannot be confirmed', async () => {
     assert.equal(await repository.consumeTelegramAuthCode('expired-code'), null);
   });
 });
+
+test('writing attempt and AI metadata are persisted without prompt text in the AI log', async () => {
+  await withRepository(async (repository, file) => {
+    const username = await repository.createTelegramUser(3001, 'Writer');
+    const attemptId = await repository.createWritingAttempt(username, {
+      taskType: 'writing_37',
+      assignment: { from: 'Ben', stimulus: 'Three questions from a friend.', questionsTopic: 'his dog' },
+      answer: 'Student answer text',
+    }, 'writing-v1');
+    await repository.finishWritingAttempt(attemptId, {
+      status: 'failed',
+      provider: 'groq',
+      errorCode: 'AI_UNAVAILABLE',
+    });
+    await repository.logAiRequest({
+      username,
+      operation: 'writing_37',
+      provider: 'groq',
+      model: 'test-model',
+      promptVersion: 'writing-v1',
+      status: 'failed',
+      durationMs: 123,
+      errorCode: 'AI_UNAVAILABLE',
+    });
+
+    const stored = JSON.parse(await fs.readFile(file, 'utf8'));
+    assert.equal(stored.writing_attempts[0].status, 'failed');
+    assert.equal(stored.writing_attempts[0].error_code, 'AI_UNAVAILABLE');
+    assert.equal(stored.ai_requests[0].durationMs, 123);
+    assert.equal(JSON.stringify(stored.ai_requests).includes('Student answer text'), false);
+  });
+});

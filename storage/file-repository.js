@@ -4,7 +4,7 @@ import { hashAuthCode, normalizeUsername, subscriptionView } from './shared.js';
 
 export function createFileRepository(filePath) {
   let loaded = false;
-  let state = { users: {}, progress: {}, auth_codes: {} };
+  let state = { users: {}, progress: {}, auth_codes: {}, writing_attempts: [], ai_requests: [] };
   let writeQueue = Promise.resolve();
 
   async function load() {
@@ -17,6 +17,8 @@ export function createFileRepository(filePath) {
           users: parsed.users && typeof parsed.users === 'object' ? parsed.users : {},
           progress: parsed.progress && typeof parsed.progress === 'object' ? parsed.progress : {},
           auth_codes: parsed.auth_codes && typeof parsed.auth_codes === 'object' ? parsed.auth_codes : {},
+          writing_attempts: Array.isArray(parsed.writing_attempts) ? parsed.writing_attempts : [],
+          ai_requests: Array.isArray(parsed.ai_requests) ? parsed.ai_requests : [],
         };
       }
     } catch (error) {
@@ -168,6 +170,44 @@ export function createFileRepository(filePath) {
     return { telegram_id: entry.telegram_id, name: entry.display_name };
   }
 
+  async function createWritingAttempt(username, input, promptVersion) {
+    await load();
+    const id = (state.writing_attempts.at(-1)?.id || 0) + 1;
+    state.writing_attempts.push({
+      id,
+      username,
+      task_type: input.taskType,
+      assignment: structuredClone(input.assignment),
+      answer: input.answer,
+      prompt_version: promptVersion,
+      status: 'pending',
+      created_at: Date.now(),
+    });
+    await persist();
+    return id;
+  }
+
+  async function finishWritingAttempt(id, result) {
+    await load();
+    const attempt = state.writing_attempts.find((item) => item.id === Number(id));
+    if (!attempt) throw new Error('WRITING_ATTEMPT_NOT_FOUND');
+    attempt.status = result.status;
+    attempt.review = result.review ? structuredClone(result.review) : null;
+    attempt.provider = result.provider || null;
+    attempt.error_code = result.errorCode || null;
+    attempt.evaluated_at = Date.now();
+    await persist();
+  }
+
+  async function logAiRequest(entry) {
+    await load();
+    const id = (state.ai_requests.at(-1)?.id || 0) + 1;
+    state.ai_requests.push({ id, ...structuredClone(entry), created_at: Date.now() });
+    if (state.ai_requests.length > 5000) state.ai_requests = state.ai_requests.slice(-5000);
+    await persist();
+    return id;
+  }
+
   return {
     getUser,
     createUser,
@@ -182,6 +222,9 @@ export function createFileRepository(filePath) {
     createTelegramAuthCode,
     confirmTelegramAuthCode,
     consumeTelegramAuthCode,
+    createWritingAttempt,
+    finishWritingAttempt,
+    logAiRequest,
     async close() { await writeQueue; },
   };
 }

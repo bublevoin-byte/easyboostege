@@ -7,9 +7,9 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, createTelegramAuthCode, getProgress, saveProgress, getUserByTelegram, createTelegramUser, grantDays, markTrialUsed, getSub } from './db.js';
+import { closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, createTelegramAuthCode, createWritingAttempt, finishWritingAttempt, getProgress, saveProgress, getUserByTelegram, createTelegramUser, grantDays, logAiRequest, markTrialUsed, getSub } from './db.js';
 import { config } from './config.js';
-import { buildWritingPrompt, parseAndValidateWritingReview, writingRequestSchema } from './ai/writing.js';
+import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from './ai/writing.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -303,14 +303,18 @@ async function askWithFallback(system, user) {
   let lastError = null;
   for (const provider of providers) {
     try {
-      return { text: await askProvider(provider, system, user), provider: provider.name };
+      return { text: await askProvider(provider, system, user), provider: provider.name, model: provider.model };
     } catch (error) {
       lastError = error;
+      lastError.provider = provider.name;
+      lastError.model = provider.model;
     }
   }
   const error = new Error('AI_UNAVAILABLE');
   error.status = 502;
   error.cause = lastError;
+  error.provider = lastError?.provider;
+  error.model = lastError?.model;
   throw error;
 }
 
@@ -333,7 +337,7 @@ async function requireActiveSubscription(req, res, next) {
   } catch (error) { next(error); }
 }
 
-app.post('/api/v1/ai/evaluate-writing', auth, requireActiveSubscription, aiLimiter, async (req, res) => {
+app.post('/api/v1/ai/evaluate-writing', auth, requireActiveSubscription, aiLimiter, async (req, res, next) => {
   const parsed = writingRequestSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({
@@ -345,19 +349,56 @@ app.post('/api/v1/ai/evaluate-writing', auth, requireActiveSubscription, aiLimit
     });
   }
 
+  const input = parsed.data;
+  const startedAt = Date.now();
+  let attemptId;
+  let provider = null;
+  let model = null;
   try {
-    const input = parsed.data;
+    attemptId = await createWritingAttempt(req.user, input, WRITING_PROMPT_VERSION);
     const prompt = buildWritingPrompt(input);
     const result = await askWithFallback(prompt.system, prompt.user);
+    provider = result.provider;
+    model = result.model;
     const review = parseAndValidateWritingReview(result.text, input);
-    res.json({ review, provider: result.provider });
+    await finishWritingAttempt(attemptId, { status: 'completed', review, provider });
+    await logAiRequest({
+      username: req.user,
+      operation: input.taskType,
+      provider,
+      model,
+      promptVersion: WRITING_PROMPT_VERSION,
+      status: 'completed',
+      durationMs: Date.now() - startedAt,
+    });
+    res.json({ review, provider, attemptId });
   } catch (error) {
-    if (String(error.message).startsWith('AI_RESPONSE_')) {
-      return res.status(502).json({ error: { code: 'AI_RESPONSE_INVALID', message: 'ИИ вернул некорректный разбор. Попробуйте ещё раз.' } });
-    }
-    const status = error.status || 502;
-    const code = error.message === 'AI_NOT_CONFIGURED' ? 'AI_NOT_CONFIGURED' : 'AI_UNAVAILABLE';
-    res.status(status).json({ error: { code, message: code === 'AI_NOT_CONFIGURED' ? 'ИИ не настроен на сервере.' : 'ИИ временно недоступен.' } });
+    if (!attemptId) return next(error);
+    provider ||= error.provider || error.cause?.provider || null;
+    model ||= error.model || error.cause?.model || null;
+    const invalidResponse = String(error.message).startsWith('AI_RESPONSE_');
+    const code = invalidResponse
+      ? 'AI_RESPONSE_INVALID'
+      : error.message === 'AI_NOT_CONFIGURED' ? 'AI_NOT_CONFIGURED' : 'AI_UNAVAILABLE';
+    const status = invalidResponse ? 502 : (error.status || 502);
+    const writes = [logAiRequest({
+      username: req.user,
+      operation: input.taskType,
+      provider,
+      model,
+      promptVersion: WRITING_PROMPT_VERSION,
+      status: 'failed',
+      durationMs: Date.now() - startedAt,
+      errorCode: code,
+    })];
+    if (attemptId) writes.push(finishWritingAttempt(attemptId, { status: 'failed', provider, errorCode: code }));
+    await Promise.allSettled(writes);
+    const message = code === 'AI_NOT_CONFIGURED'
+      ? 'ИИ не настроен на сервере.'
+      : code === 'AI_RESPONSE_INVALID'
+        ? 'ИИ вернул некорректный разбор. Попробуйте ещё раз.'
+        : 'ИИ временно недоступен.';
+    res.status(status).json({ error: { code, message } });
   }
 });
 

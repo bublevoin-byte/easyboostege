@@ -149,6 +149,41 @@ export function createPostgresRepository(connectionString) {
     }
   }
 
+  async function createWritingAttempt(username, input, promptVersion) {
+    const result = await pool.query(
+      `INSERT INTO writing_attempts
+       (username, task_type, assignment, answer, prompt_version, status)
+       VALUES ($1, $2, $3::jsonb, $4, $5, 'pending')
+       RETURNING id`,
+      [username, input.taskType, JSON.stringify(input.assignment), input.answer, promptVersion],
+    );
+    return Number(result.rows[0].id);
+  }
+
+  async function finishWritingAttempt(id, result) {
+    const updated = await pool.query(
+      `UPDATE writing_attempts
+       SET status = $2, review = $3::jsonb, provider = $4,
+           error_code = $5, evaluated_at = NOW()
+       WHERE id = $1
+       RETURNING id`,
+      [id, result.status, result.review ? JSON.stringify(result.review) : null, result.provider || null, result.errorCode || null],
+    );
+    if (!updated.rowCount) throw new Error('WRITING_ATTEMPT_NOT_FOUND');
+  }
+
+  async function logAiRequest(entry) {
+    const result = await pool.query(
+      `INSERT INTO ai_requests
+       (username, operation, provider, model, prompt_version, status, duration_ms, error_code)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id`,
+      [entry.username || null, entry.operation, entry.provider || null, entry.model || null,
+        entry.promptVersion || null, entry.status, entry.durationMs || null, entry.errorCode || null],
+    );
+    return Number(result.rows[0].id);
+  }
+
   return {
     getUser,
     createUser,
@@ -163,6 +198,9 @@ export function createPostgresRepository(connectionString) {
     createTelegramAuthCode,
     confirmTelegramAuthCode,
     consumeTelegramAuthCode,
+    createWritingAttempt,
+    finishWritingAttempt,
+    logAiRequest,
     close: () => pool.end(),
   };
 }
