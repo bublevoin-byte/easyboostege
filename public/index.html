@@ -1205,6 +1205,7 @@ async function checkWriting(){
   }catch(e){showScreen('scr14');HIST.push('scr8')}
 }
 function renderReview(d){
+  const safe=function(v){return String(v==null?'':v).replace(/[&<>"]/g,function(ch){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]})};
   const got=d.overall_got!=null?d.overall_got:(d.criteria||[]).reduce((a,c)=>a+(c.got||0),0);
   const mx=d.overall_max!=null?d.overall_max:(d.criteria||[]).reduce((a,c)=>a+(c.max||0),0);
   document.getElementById('rv_score').textContent=got;
@@ -1214,14 +1215,14 @@ function renderReview(d){
   document.getElementById('rv_sub').textContent=d.sub||'';
   const cc=document.getElementById('rv_crit');cc.innerHTML='';
   (d.criteria||[]).forEach(c=>{const p=c.max?Math.round(c.got/c.max*100):0;const col=p>=100?'#1F9E5A':p>=60?'#E8A33C':'#E26A56';const tc=p>=100?'#1F8A50':p>=60?'#C77400':'#C9503C';
-    cc.insertAdjacentHTML('beforeend','<div style="display:flex;align-items:center;gap:12px;"><span style="flex:1;font-weight:600;font-size:13px;color:#2B2B2B;">'+c.name+'</span><div style="width:96px;height:8px;border-radius:5px;background:#F1F1F3;"><div style="width:'+p+'%;height:100%;border-radius:5px;background:'+col+';"></div></div><span style="font-weight:800;font-size:12.5px;color:'+tc+';width:30px;text-align:right;">'+c.got+'/'+c.max+'</span></div>')});
+    cc.insertAdjacentHTML('beforeend','<div style="display:flex;align-items:center;gap:12px;"><span style="flex:1;font-weight:600;font-size:13px;color:#2B2B2B;">'+safe(c.name)+'</span><div style="width:96px;height:8px;border-radius:5px;background:#F1F1F3;"><div style="width:'+p+'%;height:100%;border-radius:5px;background:'+col+';"></div></div><span style="font-weight:800;font-size:12.5px;color:'+tc+';width:30px;text-align:right;">'+safe(c.got)+'/'+safe(c.max)+'</span></div>')});
   const errs=d.errors||[];document.getElementById('rv_errhdr').textContent='РАЗБОР ОШИБОК · '+errs.length;
   const eb=document.getElementById('rv_err');eb.innerHTML='';
   errs.forEach((e,idx)=>{const warn=e.kind==='warn';
     const icon=warn?'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C77400" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 2 18a2 2 0 0 0 1.7 3h16.6A2 2 0 0 0 22 18L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>':'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C9503C" stroke-width="2.4" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>';
-    const body=warn?(e.note||''):'<span style="text-decoration:line-through;color:#C9503C;">'+(e.wrong||'')+'</span> → <span style="color:#1F8A50;font-weight:700;">'+(e.right||'')+'</span>'+(e.note?'<br>'+e.note:'');
+    const body=warn?safe(e.note||''):'<span style="text-decoration:line-through;color:#C9503C;">'+safe(e.wrong||'')+'</span> → <span style="color:#1F8A50;font-weight:700;">'+safe(e.right||'')+'</span>'+(e.note?'<br>'+safe(e.note):'');
     if(idx)eb.insertAdjacentHTML('beforeend','<div style="height:1px;background:#F4F5F6;margin:13px 0;"></div>');
-    eb.insertAdjacentHTML('beforeend','<div style="display:flex;gap:11px;"><span style="width:26px;height:26px;flex:none;border-radius:9px;background:'+(warn?'#FFF4DE':'#FCEEEC')+';display:grid;place-items:center;">'+icon+'</span><div style="flex:1;"><div style="font-weight:700;font-size:13.5px;color:#2B2B2B;">'+(e.title||'Ошибка')+'</div><div style="margin-top:4px;font-weight:500;font-size:12.5px;color:#8A8F98;line-height:1.45;">'+body+'</div></div></div>')});
+    eb.insertAdjacentHTML('beforeend','<div style="display:flex;gap:11px;"><span style="width:26px;height:26px;flex:none;border-radius:9px;background:'+(warn?'#FFF4DE':'#FCEEEC')+';display:grid;place-items:center;">'+icon+'</span><div style="flex:1;"><div style="font-weight:700;font-size:13.5px;color:#2B2B2B;">'+safe(e.title||'Ошибка')+'</div><div style="margin-top:4px;font-weight:500;font-size:12.5px;color:#8A8F98;line-height:1.45;">'+body+'</div></div></div>')});
 }
 
 /* ---------- GEMINI ---------- */
@@ -1419,7 +1420,7 @@ function localReview(n,task,msg){
   return {overall_got:ok?1:0,overall_max:1,verdict:'Черновая проверка',
     sub:'ИИ офлайн ('+(msg||'нет сети')+'). Показана базовая проверка — для полного разбора нужен интернет/VPN.',
     criteria:[{name:'Объём ('+rng[0]+'–'+rng[1]+' слов)',got:ok?1:0,max:1}],
-    errors:[{title:'Совет по структуре',kind:'warn',note:(task===38?'Проверь: вступление с мнением → аргументы → контраргумент → вывод. Используй however, therefore, in conclusion.':'Проверь: приветствие, ответы на 3 вопроса, 3 своих вопроса, завершение.')},
+    errors:[{title:'Совет по структуре',kind:'warn',note:(task===38?'Проверь: цель проекта → 2–3 факта из таблицы → 1–2 сравнения → проблема и решение → вывод с мнением.':'Проверь: приветствие, ответы на 3 вопроса, 3 своих вопроса, завершение.')},
             {title:'ИИ-разбор',kind:'warn',note:'Полная проверка орфографии и грамматики появится, когда заработает ИИ (VPN/ключ Gemini).'}]}}
 
 
@@ -3988,14 +3989,12 @@ checkWriting=async function(){
   var n=t?t.split(/\s+/).filter(Boolean).length:0;
   if(n<10){alert('Напиши хотя бы несколько предложений.');return}
   tab('scr13');var task=curTask,tp=wrCur();
-  var sys='Ты эксперт ЕГЭ по английскому языку, проверяешь письменную часть строго по критериям ФИПИ, но объясняешь по-доброму и по-русски. Британский английский. Верни СТРОГО JSON без markdown.';
-  var fmt='{"words":n,"in_range":true,"overall_got":n,"overall_max":n,"verdict":"короткая фраза-итог","sub":"главный совет одной фразой","criteria":[{"name":"критерий","got":n,"max":n}],"errors":[{"title":"тип ошибки","wrong":"как написано","right":"как надо","kind":"err|warn","note":"пояснение по-русски"}]}';
-  var ctx=task===37
-    ?'Задание 37 — электронное письмо другу, 100–140 слов. Входящее письмо от '+tp.from+': "'+tp.stim+'". Ученик должен ответить на все 3 вопроса друга и задать ровно 3 вопроса about '+tp.ask+'. Критерии: Решение коммуникативной задачи (макс 2), Организация текста (макс 2), Языковое оформление (макс 2). overall_max=6. Особо проверь: все ли 3 ответа даны, есть ли ровно 3 вопроса о нужной теме, формат письма (обращение, благодарность, завершение, подпись именем).'
-    :'Задание 38 — письменное высказывание с элементами рассуждения на основе таблицы, 200–250 слов. Тема проекта: "'+tp.topic+'". Данные опроса: '+tp.rows.map(function(r){return r[0]+' — '+r[1]+'%'}).join('; ')+'. План: вступление о цели проекта; 2–3 факта из данных; 1–2 сравнения; проблема и её решение; вывод с мнением. Критерии: Решение коммуникативной задачи (макс 3), Организация (макс 3), Лексика (макс 3), Грамматика (макс 3), Орфография и пунктуация (макс 2). overall_max=14.';
   try{
-    var out=await callGemini(sys,ctx+' Верни JSON: '+fmt+'. В errors до 5 самых важных ошибок из текста ученика. Текст ученика: """'+t+'"""');
-    var d=null;try{d=JSON.parse(out.replace(/```json|```/g,'').trim())}catch(e){}
+    var payload=task===37
+      ?{taskType:'writing_37',answer:t,assignment:{from:String(tp.from||''),stimulus:String(tp.stim||''),questionsTopic:String(tp.ask||'')}}
+      :{taskType:'writing_38',answer:t,assignment:{topic:String(tp.topic||''),rows:(tp.rows||[]).map(function(r){return {label:String(r[0]),percent:Number(r[1])}})}};
+    var response=await apiPost('/api/v1/ai/evaluate-writing',payload,true);
+    var d=response&&response.review;
     if(!d||!d.criteria)throw new Error('bad');
     wrStore(d,n,task);
     renderReview(d);S.essays=(S.essays||0)+1;save();showScreen('scr12');HIST.push('scr8');

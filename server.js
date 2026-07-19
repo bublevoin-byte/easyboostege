@@ -1,29 +1,31 @@
 // Easy Boost — сервер: вход через Telegram, прогресс, ИИ-прокси с резервом (Grok → Groq).
 import express from 'express';
 import jwt from 'jsonwebtoken';
-import dotenv from 'dotenv';
+import helmet from 'helmet';
+import { rateLimit } from 'express-rate-limit';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { getProgress, saveProgress, getUserByTelegram, createTelegramUser, grantDays, markTrialUsed, getSub } from './db.js';
+import { config } from './config.js';
+import { buildWritingPrompt, parseAndValidateWritingReview, writingRequestSchema } from './ai/writing.js';
 
-dotenv.config();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
-const PORT = process.env.PORT || 3000;
+const SECRET = config.jwtSecret;
+const PORT = config.port;
 
 // ИИ: основной Grok (xAI, платный), резерв Groq (бесплатный)
-const XAI_KEY = process.env.XAI_API_KEY || '';
-const XAI_MODEL = process.env.XAI_MODEL || 'grok-4.5';
-const GROQ_KEY = process.env.GROQ_API_KEY || '';
-const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+const XAI_KEY = config.ai.xaiKey;
+const XAI_MODEL = config.ai.xaiModel;
+const GROQ_KEY = config.ai.groqKey;
+const GROQ_MODEL = config.ai.groqModel;
 
 // Telegram
-const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
-const ADMIN_ID = process.env.ADMIN_TELEGRAM_ID || ''; // твой Telegram ID — тебе приходят заявки на оплату
-const APP_URL = process.env.APP_URL || 'https://useboost.ru'; // адрес приложения для ссылки входа из бота
+const TG_TOKEN = config.telegram.token;
+const ADMIN_ID = config.telegram.adminId; // твой Telegram ID — тебе приходят заявки на оплату
+const APP_URL = config.appUrl; // адрес приложения для ссылки входа из бота
 const TRIAL_DAYS = 30;
 const SUB_DAYS = 30;
 let BOT_USERNAME = '';
@@ -31,6 +33,11 @@ const tgCodes = {};   // code -> ts (ожидает подтверждения)
 const tgReady = {};   // code -> {telegram_id, name} (подтверждён)
 
 const app = express();
+app.disable('x-powered-by');
+app.use(helmet({
+  contentSecurityPolicy: false, // Временно: текущий MVP использует inline script/style. Включить после frontend-рефакторинга.
+  crossOriginEmbedderPolicy: false,
+}));
 app.use(express.json({ limit: '1mb' }));
 app.get('/', (req, res, next) => {
   const t = req.query.t;
@@ -246,9 +253,14 @@ function overLimit(user) {
   return w.n > 200;
 }
 async function askProvider({ url, key, model }, system, user) {
-  const r = await fetch(url, {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), config.ai.timeoutMs);
+  let r;
+  try {
+    r = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key },
+    signal: controller.signal,
     body: JSON.stringify({
       model,
       temperature: 0.3,
@@ -256,17 +268,92 @@ async function askProvider({ url, key, model }, system, user) {
       messages: [...(system ? [{ role: 'system', content: system }] : []), { role: 'user', content: user }],
     }),
   });
+  } finally {
+    clearTimeout(timeout);
+  }
   const j = await r.json();
   if (!r.ok) throw new Error((j.error && j.error.message) || ('HTTP ' + r.status));
   return j.choices?.[0]?.message?.content || '';
 }
+
+function aiProviders() {
+  const providers = [];
+  if (XAI_KEY) providers.push({ name: 'grok', url: 'https://api.x.ai/v1/chat/completions', key: XAI_KEY, model: XAI_MODEL });
+  if (GROQ_KEY) providers.push({ name: 'groq', url: 'https://api.groq.com/openai/v1/chat/completions', key: GROQ_KEY, model: GROQ_MODEL });
+  return providers;
+}
+
+async function askWithFallback(system, user) {
+  const providers = aiProviders();
+  if (!providers.length) {
+    const error = new Error('AI_NOT_CONFIGURED');
+    error.status = 503;
+    throw error;
+  }
+  let lastError = null;
+  for (const provider of providers) {
+    try {
+      return { text: await askProvider(provider, system, user), provider: provider.name };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  const error = new Error('AI_UNAVAILABLE');
+  error.status = 502;
+  error.cause = lastError;
+  throw error;
+}
+
+const aiLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: config.ai.maxRequestsPerHour,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user,
+  message: { error: { code: 'RATE_LIMITED', message: 'Слишком много запросов. Попробуйте позже.' } },
+});
+
+function requireActiveSubscription(req, res, next) {
+  const subscription = getSub(req.user);
+  if (!subscription.active) {
+    return res.status(403).json({ error: { code: 'SUBSCRIPTION_REQUIRED', message: 'Для этой функции требуется активный доступ.' } });
+  }
+  next();
+}
+
+app.post('/api/v1/ai/evaluate-writing', auth, requireActiveSubscription, aiLimiter, async (req, res) => {
+  const parsed = writingRequestSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Некорректные данные письменного задания.',
+        fields: parsed.error.issues.map((issue) => issue.path.join('.')),
+      },
+    });
+  }
+
+  try {
+    const input = parsed.data;
+    const prompt = buildWritingPrompt(input);
+    const result = await askWithFallback(prompt.system, prompt.user);
+    const review = parseAndValidateWritingReview(result.text, input);
+    res.json({ review, provider: result.provider });
+  } catch (error) {
+    if (String(error.message).startsWith('AI_RESPONSE_')) {
+      return res.status(502).json({ error: { code: 'AI_RESPONSE_INVALID', message: 'ИИ вернул некорректный разбор. Попробуйте ещё раз.' } });
+    }
+    const status = error.status || 502;
+    const code = error.message === 'AI_NOT_CONFIGURED' ? 'AI_NOT_CONFIGURED' : 'AI_UNAVAILABLE';
+    res.status(status).json({ error: { code, message: code === 'AI_NOT_CONFIGURED' ? 'ИИ не настроен на сервере.' : 'ИИ временно недоступен.' } });
+  }
+});
+
 app.post('/api/ai', auth, async (req, res) => {
   if (overLimit(req.user)) return res.status(429).json({ error: 'Слишком много запросов, попробуй позже' });
   const { system, user } = req.body || {};
   if (!user) return res.status(400).json({ error: 'Пустой запрос' });
-  const providers = [];
-  if (XAI_KEY) providers.push({ name: 'grok', url: 'https://api.x.ai/v1/chat/completions', key: XAI_KEY, model: XAI_MODEL });
-  if (GROQ_KEY) providers.push({ name: 'groq', url: 'https://api.groq.com/openai/v1/chat/completions', key: GROQ_KEY, model: GROQ_MODEL });
+  const providers = aiProviders();
   if (!providers.length) return res.status(503).json({ error: 'ИИ не настроен (нет ключей)' });
   let lastErr = '';
   for (const p of providers) {
