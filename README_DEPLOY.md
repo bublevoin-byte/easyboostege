@@ -50,6 +50,7 @@ docker compose -f compose.production.yml logs --tail=100 app
 Перед обновлением сделайте backup PostgreSQL. Затем:
 
 ```bash
+npm run db:backup
 git pull --ff-only
 docker compose -f compose.production.yml build app
 docker compose -f compose.production.yml up -d app
@@ -58,6 +59,31 @@ curl --fail http://127.0.0.1:3000/health/ready
 ```
 
 Не удаляйте volume `postgres-data` при обновлении.
+
+## Backup и восстановление PostgreSQL
+
+Создать атомарный backup в каталоге `backups/`:
+
+```bash
+npm run db:backup
+```
+
+Можно указать собственный путь: `npm run db:backup -- /secure/easyboost.dump`. Храните копии вне VPS и регулярно проверяйте восстановление на отдельном стенде.
+
+Восстановление полностью заменяет содержимое базы из архива и требует явного подтверждения:
+
+```bash
+npm run db:restore -- /secure/easyboost.dump --confirm-restore
+```
+
+Скрипт сначала проверяет структуру архива, затем останавливает `app`, выполняет `pg_restore` и снова запускает приложение. Перед восстановлением сделайте дополнительную копию текущей базы.
+
+Пример ежедневного cron с хранением 14 дней:
+
+```cron
+15 3 * * * cd /opt/easyboost && /usr/bin/npm run db:backup >> /var/log/easyboost-backup.log 2>&1
+25 4 * * * find /opt/easyboost/backups -type f -name 'easyboost-*.dump' -mtime +14 -delete
+```
 
 ## Откат приложения
 
