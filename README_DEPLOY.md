@@ -1,156 +1,103 @@
-# Easy Boost — развёртывание сервера на VPS
+# Easy Boost: production-развёртывание
 
-Этот бэкенд даёт: настоящие аккаунты, хранение прогресса на сервере и прокси к Gemini (ключ спрятан на сервере, в браузер не попадает). Он же отдаёт само приложение (PWA).
+Приложение состоит из Node.js/Express-сервера, статического frontend, Telegram-входа, PostgreSQL и серверных интеграций xAI/Groq. В production файловое хранилище запрещено.
 
-## Что внутри папки `server/`
-- `server.js` — сам сервер (Express).
-- `db.js` — хранилище (файл `data.json`, создастся сам).
-- `package.json` — зависимости.
-- `.env.example` — образец настроек (скопировать в `.env`).
-- `public/` — сюда положить приложение как `index.html` (см. шаг 4).
+## Требования
 
-## ИИ: xAI (Grok)
-Приложение использует **xAI / Grok** (OpenAI-совместимый). Ключ (`xai-...`) из console.x.ai → API Keys кладётся в `.env` как `XAI_API_KEY` и лежит только на сервере — в браузер не попадает. Модель по умолчанию `grok-4.5` (можно поменять в `.env` через `XAI_MODEL`). Grok платный — расходует баланс твоего аккаунта xAI.
+- Docker Engine с Compose v2;
+- домен с HTTPS на reverse proxy;
+- PostgreSQL 17 (включён в `compose.production.yml`);
+- Telegram bot token;
+- минимум один AI API key: xAI или Groq.
 
----
+## Настройка
 
-## Шаги развёртывания
-
-### 1. Домен
-Купить домен, в его DNS указать **A-запись** на IP твоего VPS. Подождать, пока обновится (до нескольких часов).
-
-### 2. Подключиться к VPS и поставить нужное
-```bash
-ssh root@ТВОЙ_IP
-apt update && apt -y upgrade
-# Node.js LTS
-curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-apt -y install nodejs nginx
-npm i -g pm2
-```
-
-### 3. Загрузить папку server на сервер
-С компьютера (из папки проекта):
-```bash
-scp -r server root@ТВОЙ_IP:/opt/easyboost
-```
-(или через git — как удобнее).
-
-### 4. Положить приложение внутрь
-На сервере:
-```bash
-mkdir -p /opt/easyboost/public
-# скопируй Easy_Boost.html в public как index.html:
-cp /путь/к/Easy_Boost.html /opt/easyboost/public/index.html
-```
-(Файл `Easy_Boost.html` — из папки проекта. После подключения клиента к серверу — см. следующий этап — он будет брать данные и ИИ с сервера.)
-
-### 5. Настройки и запуск
-```bash
-cd /opt/easyboost
-cp .env.example .env
-nano .env          # впиши JWT_SECRET (любая длинная строка) и XAI_API_KEY (xai-...)
-npm install
-pm2 start server.js --name easyboost
-pm2 save
-pm2 startup        # выполни команду, которую он подскажет — для автозапуска
-```
-Проверка: `curl http://localhost:3000` должен вернуть страницу.
-
-### 6. Nginx + HTTPS
-Создай конфиг:
-```bash
-nano /etc/nginx/sites-available/easyboost
-```
-Вставь (замени домен):
-```
-server {
-    server_name твойдомен.ru;
-    location / {
-        proxy_pass http://localhost:3000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
-```
-Включи и выпусти сертификат:
-```bash
-ln -s /etc/nginx/sites-available/easyboost /etc/nginx/sites-enabled/
-nginx -t && systemctl reload nginx
-apt -y install certbot python3-certbot-nginx
-certbot --nginx -d твойдомен.ru
-```
-Готово — открой `https://твойдомен.ru`.
-
----
-
-## API (что умеет сервер)
-- `POST /api/register` `{username, password}` → `{token, username}`
-- `POST /api/login` `{username, password}` → `{token, username}`
-- `GET  /api/progress` (заголовок `Authorization: Bearer <token>`) → прогресс
-- `POST /api/progress` `{...прогресс...}` → сохранить
-- `POST /api/ai` `{system, user}` → `{text}` (ключ xAI берётся на сервере)
-
-## Дальнейшие этапы
-- **Подключить клиент к серверу** (следующий этап): в приложении заменить прямые вызовы Google и локальные аккаунты на эти эндпоинты. Тогда прогресс синхронизируется между устройствами, а ключ уйдёт с клиента.
-- **Telegram-вход** (Этап 4): добавить бота и эндпоинт подтверждения.
-- **Переезд на PostgreSQL** при росте числа пользователей (интерфейс в `db.js` тот же).
-
-## Безопасность (минимум)
-- Обязательно длинный случайный `JWT_SECRET`.
-- HTTPS (сделали через certbot).
-- Регулярно копируй `data.json` (это вся база).
-# Production hardening: база данных
-
-В локальной разработке по умолчанию используется атомарное файловое хранилище `data.json`.
-В production приложение запускается только с PostgreSQL.
-
-Обязательные production-переменные:
+Создайте `.env` из `.env.example`. Обязательные production-значения:
 
 ```env
 NODE_ENV=production
-JWT_SECRET=случайная-строка-не-короче-32-символов
-DATABASE_PROVIDER=postgres
-DATABASE_URL=postgresql://user:password@host:5432/easyboost
+APP_URL=https://example.ru
+JWT_SECRET=случайная-строка-минимум-32-символа
+POSTGRES_PASSWORD=отдельный-длинный-пароль
+TELEGRAM_BOT_TOKEN=...
+ADMIN_TELEGRAM_ID=...
+XAI_API_KEY=...
 ```
 
-Применение миграций:
+Не коммитьте `.env`. `APP_URL` должен точно совпадать с внешним origin: схема, домен и нестандартный порт, если он есть.
+
+## Первый запуск
 
 ```bash
-npm run db:migrate
+docker compose -f compose.production.yml config
+docker compose -f compose.production.yml build
+docker compose -f compose.production.yml up -d
+docker compose -f compose.production.yml ps
 ```
 
-Проверка старого `data.json` без записи в PostgreSQL:
+Контейнер приложения автоматически выполняет SQL-миграции перед запуском сервера. Порт приложения доступен только на `127.0.0.1:3000`; наружу его должен публиковать HTTPS reverse proxy.
+
+Проверка:
 
 ```bash
-npm run db:import-json -- data.json --dry-run
+curl --fail http://127.0.0.1:3000/health/live
+curl --fail http://127.0.0.1:3000/health/ready
+docker compose -f compose.production.yml logs --tail=100 app
 ```
 
-Импорт после успешного dry-run и создания резервной копии:
+## Обновление
+
+Перед обновлением сделайте backup PostgreSQL. Затем:
 
 ```bash
-npm run db:import-json -- data.json
+git pull --ff-only
+docker compose -f compose.production.yml build app
+docker compose -f compose.production.yml up -d app
+docker compose -f compose.production.yml ps
+curl --fail http://127.0.0.1:3000/health/ready
 ```
 
-Исходный `data.json` скрипт автоматически не удаляет.
+Не удаляйте volume `postgres-data` при обновлении.
 
-## Проверка состояния
+## Откат приложения
 
-Для мониторинга и платформы развёртывания доступны:
+Переключитесь на предыдущий проверенный commit/tag, пересоберите `app` и снова проверьте readiness. Миграции должны оставаться обратно совместимыми; автоматического отката схемы нет.
 
-```text
-GET /health/live   — процесс Node.js принимает запросы
-GET /health/ready  — приложение готово и хранилище отвечает
+## Импорт старого data.json
+
+После запуска PostgreSQL сначала выполните dry-run:
+
+```bash
+docker compose -f compose.production.yml run --rm app npm run db:import-json -- /backup/data.json --dry-run
 ```
 
-Каждый HTTP-ответ содержит `X-Request-Id`. Сервер пишет HTTP-события в stdout в формате JSON. Пользовательские работы, токены и Telegram-имена в технический HTTP-лог не записываются.
+Для реального импорта файл должен быть доступен внутри контейнера через read-only bind mount. Исходный файл скрипт не удаляет.
 
-## Защита cookie-сессии
+## Наблюдаемость
 
-Изменяющие `/api`-запросы с cookie `eb_token` принимаются только при совпадении заголовка `Origin` с origin из `APP_URL`. В production `APP_URL` должен точно содержать публичную схему, домен и порт приложения. API-клиенты без session-cookie остаются совместимыми.
+- `GET /health/live` — процесс принимает запросы;
+- `GET /health/ready` — приложение и БД готовы;
+- каждый ответ содержит `X-Request-Id`;
+- HTTP-события и ошибки пишутся в stdout как JSON без токенов и пользовательских работ.
 
-## Ограничения входных данных
+## Защитные ограничения
 
-JSON API принимает тело до 1 МБ. Сохраняемый прогресс дополнительно ограничен 512 КБ, глубиной 10 уровней и безопасным числом элементов. Универсальный AI-маршрут проверяет типы, допустимые поля и длину инструкций до отправки внешнему провайдеру.
+- production требует PostgreSQL и JWT secret длиной от 32 символов;
+- session JWT хранится в `HttpOnly; SameSite=Lax` cookie;
+- изменяющие cookie-запросы сверяются с `APP_URL`;
+- JSON API ограничен 1 МБ, прогресс — 512 КБ и структурными лимитами;
+- Telegram-вход и дорогие AI/TTS/STT операции ограничены по частоте;
+- Telegram login codes одноразовые и хранятся только в виде SHA-256 hash.
 
-Публичные Telegram-endpoint ограничены по IP: по умолчанию не более 10 запусков и 300 проверок статуса за 15 минут. Лимиты настраиваются через `TELEGRAM_AUTH_STARTS_PER_15_MINUTES` и `TELEGRAM_AUTH_CHECKS_PER_15_MINUTES`.
+Лимиты настраиваются через `SESSION_DAYS`, `TELEGRAM_AUTH_CODE_TTL_MS`, `TELEGRAM_AUTH_STARTS_PER_15_MINUTES`, `TELEGRAM_AUTH_CHECKS_PER_15_MINUTES`, `AI_TIMEOUT_MS` и `AI_REQUESTS_PER_HOUR`.
+
+## Проверка перед релизом
+
+```bash
+npm ci
+npm run check
+npm test
+docker compose -f compose.production.yml config
+```
+
+CI выполняет чистую установку, синтаксическую проверку и тесты на Node.js 22.

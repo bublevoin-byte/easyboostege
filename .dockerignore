@@ -1,0 +1,11 @@
+.git
+.github
+.env
+node_modules
+data.json
+*.test-data.json
+tts-cache
+coverage
+*.log
+README_DEPLOY.md
+РАЗМЕЩЕНИЕ_рядом_с_ботом.md

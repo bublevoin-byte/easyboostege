@@ -6,6 +6,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "start:production": "npm run db:migrate && node server.js",
+    "check": "node --check server.js && node --check config.js && node --check db.js",
     "test": "node --test",
     "db:migrate": "node scripts/migrate.js",
     "db:import-json": "node scripts/import-json.js"
