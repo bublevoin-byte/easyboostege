@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { pipeline } from 'node:stream/promises';
 
 const [backupArgument, confirmation] = process.argv.slice(2);
 if (!backupArgument || confirmation !== '--confirm-restore') {
@@ -13,14 +14,16 @@ const backup = path.resolve(backupArgument);
 const composeFile = path.resolve('compose.production.yml');
 
 async function docker(args, inputFile) {
-  const input = inputFile ? fs.createReadStream(inputFile) : 'ignore';
   const child = spawn('docker', ['compose', '-f', composeFile, ...args], {
-    stdio: [input, 'inherit', 'inherit'],
+    stdio: [inputFile ? 'pipe' : 'ignore', 'inherit', 'inherit'],
   });
-  const exitCode = await new Promise((resolve, reject) => {
+  const exitCodePromise = new Promise((resolve, reject) => {
     child.once('error', reject);
     child.once('close', resolve);
   });
+  const tasks = [exitCodePromise];
+  if (inputFile) tasks.push(pipeline(fs.createReadStream(inputFile), child.stdin));
+  const [exitCode] = await Promise.all(tasks);
   if (exitCode !== 0) throw new Error(`docker compose ${args.join(' ')} failed with exit code ${exitCode}`);
 }
 

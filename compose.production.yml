@@ -20,10 +20,13 @@ services:
     build: .
     restart: unless-stopped
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       NODE_ENV: production
       PORT: 3000
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      APP_URL: ${APP_URL:?APP_URL is required}
       DATABASE_PROVIDER: postgres
       DATABASE_URL: postgresql://easyboost:${POSTGRES_PASSWORD}@postgres:5432/easyboost
     ports:

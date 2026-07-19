@@ -2,6 +2,8 @@
 
 Приложение состоит из Node.js/Express-сервера, статического frontend, Telegram-входа, PostgreSQL и серверных интеграций xAI/Groq. В production файловое хранилище запрещено.
 
+Перед релизом пройдите `RELEASE_CHECKLIST.md`.
+
 ## Требования
 
 - Docker Engine с Compose v2;
@@ -129,3 +131,6 @@ docker compose -f compose.production.yml config
 ```
 
 CI выполняет чистую установку, синтаксическую проверку и тесты на Node.js 22.
+PostgreSQL integration-тест запускается при наличии `TEST_DATABASE_URL`; CI поднимает для него отдельный PostgreSQL 17 и сначала применяет все миграции.
+
+Перед релизом также выполняйте `npm audit --omit=dev`. Текущий production dependency tree не содержит известных npm audit уязвимостей.
