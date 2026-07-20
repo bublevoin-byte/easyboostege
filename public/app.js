@@ -304,7 +304,7 @@ async function genReading(){
 /* -- FAB visibility -- */
 (function(){
   const fab=document.createElement('button');fab.id='genfab';fab.innerHTML='✨ ИИ: новое';fab.onclick=genForCurrent;document.body.appendChild(fab);
-  const tt=document.createElement('div');tt.id='toast';document.body.appendChild(tt);
+  const tt=document.createElement('div');tt.id='toast';tt.setAttribute('role','status');tt.setAttribute('aria-live','polite');tt.setAttribute('aria-atomic','true');document.body.appendChild(tt);
   registerRouteHook(function(id){const show=['scr2','scr3','scr4','scr7'].includes(id);fab.style.display=show?'inline-flex':'none'});
 })();
 

@@ -103,3 +103,13 @@ test('PWA shell is installable and never caches API responses', async () => {
   assert.match(worker, /caches\.match\('\/offline\.html'\)/u);
   assert.doesNotMatch(offline, /<script|onclick=/iu);
 });
+
+test('frontend keeps zoom, keyboard focus and assistive announcements accessible', async () => {
+  const { html, script } = await readFrontend();
+  assert.doesNotMatch(html, /user-scalable\s*=\s*no|maximum-scale\s*=\s*1/iu);
+  assert.match(html, /viewport-fit=cover/u);
+  assert.match(html, /:focus-visible/u);
+  assert.match(html, /prefers-reduced-motion/u);
+  assert.match(html, /id="w_editor"[^>]*role="textbox"[^>]*aria-label="Письменный ответ"/u);
+  assert.match(script, /setAttribute\('aria-live','polite'\)/u);
+});

@@ -9,4 +9,4 @@ function tab(id){const previous=cur();if(id!==previous&&previous!=='scr5'&&previ
 function nav(id){tab(id)}
 function back(){let id=HIST.pop()||'scr1';if(id==='scr5'||id==='scr6')id='scr1';showScreen(id)}
 
-(function buildDebugNavigation(){const menu=document.getElementById('navmenu');document.querySelectorAll('.screen').forEach(function(screen){const button=document.createElement('button');button.textContent=screen.id.replace('scr','')+' · '+screen.dataset.name;button.onclick=function(){HIST.length=0;tab(screen.id)};menu.appendChild(button)})})();
+(function buildDebugNavigation(){const menu=document.getElementById('navmenu');document.querySelectorAll('.screen').forEach(function(screen){const button=document.createElement('button');button.type='button';button.textContent=screen.id.replace('scr','')+' · '+screen.dataset.name;button.setAttribute('aria-label','Открыть экран '+(screen.dataset.name||screen.id));button.onclick=function(){HIST.length=0;tab(screen.id)};menu.appendChild(button)})})();
