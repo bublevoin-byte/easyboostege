@@ -2789,11 +2789,11 @@ function spEtalon(){if(!SP||SP.t!==1)return;
 async function spSTT(blob){
   var j=await apiPostBinary('/api/stt',blob,blob.type||'application/octet-stream');
   return j.text||''}
-function spEvalCtx(tr,tt,ss){var t=tt||SP.t,set=ss||SP.set;
-  if(t===1)return 'Задание 1 устной части ЕГЭ — чтение текста вслух. Оригинал: """'+set.tx+'""". Расшифровка чтения ученика: """'+tr+'""". Сравни с оригиналом: прочитан ли текст полностью, какие слова пропущены, заменены или искажены (перечисли в fix). 1 балл — если текст прочитан целиком и искажений не больше четырёх. criteria: один пункт «Чтение вслух» (max 1).';
-  if(t===2)return 'Задание 2 устной части — прямые вопросы по объявлению: "'+set.ad+'". Пункты: '+set.points.join('; ')+'. Расшифровка речи ученика: """'+tr+'""". По 1 баллу за каждый грамматически корректный ПРЯМОЙ вопрос строго по своему пункту («What about…», косвенные вопросы и простое зачитывание пункта не засчитываются). max=4, в criteria — по пункту на каждый вопрос.';
-  if(t===3)return 'Задание 3 устной части — интервью на тему «'+set.topic+'». Вопросы: '+set.qs.join(' | ')+'. Расшифровка ответов ученика: """'+tr+'""". По 1 баллу за развёрнутый (минимум 2 предложения) релевантный ответ на каждый вопрос. max=5, в criteria — по строке на вопрос.';
-  return 'Задание 4 устной части — монолог по теме «'+set.topic+'». План: '+set.plan.join('; ')+'. Фото: '+set.ph.join(' / ')+'. Расшифровка монолога: """'+tr+'""". Критерии: Решение коммуникативной задачи — все пункты плана (max 3), Организация — вступление, завершение, связки (max 3), Языковое оформление (max 4). max=10.'}
+function spAssignment(t,set){
+  if(t===1)return {tx:set.tx};
+  if(t===2)return {ad:set.ad,points:set.points};
+  if(t===3)return {topic:set.topic,qs:set.qs};
+  return {topic:set.topic,plan:set.plan,ph:set.ph}}
 async function spEval(btn){
   if(!SP||!SP.blob)return;
   if(btn){if(btn.dataset.busy)return;btn.dataset.busy=1;btn.textContent='Расшифровываю запись…';btn.style.pointerEvents='none'}
@@ -2801,10 +2801,8 @@ async function spEval(btn){
     var tr=await spSTT(SP.blob);
     if(!tr||tr.split(/\s+/).length<3)throw new Error('речь не распознана — говори громче и ближе к микрофону');
     if(btn)btn.textContent='Оцениваю по критериям…';
-    var fmt='{"got":n,"max":n,"verdict":"короткий итог по-русски","criteria":[{"name":"критерий","got":n,"max":n}],"good":["что получилось хорошо, по-русски"],"fix":[{"wrong":"фраза ученика","right":"как правильнее","note":"пояснение по-русски"}]}';
-    var out=await callGemini('Ты эксперт устной части ЕГЭ по английскому. Оцениваешь строго по критериям ФИПИ, объясняешь по-русски доброжелательно. Текст — автоматическая расшифровка речи: пунктуация может отсутствовать, произношение по ней не оценивай. Верни СТРОГО JSON без markdown.',
-      spEvalCtx(tr)+' Верни JSON: '+fmt+'. В good до 3 пунктов, в fix до 4.');
-    var d=parseJSON(out);
+    var response=await apiPost('/api/v1/ai/evaluate-speaking',{taskType:SP.t,transcript:tr,assignment:spAssignment(SP.t,SP.set)},true);
+    var d=response.review;
     if(!d||typeof d.got==='undefined')throw new Error('ИИ вернул неожиданный ответ, попробуй ещё раз');
     d.got=Math.max(0,+d.got||0);d.max=+d.max||SP_CONF[SP.t].max;
     S.spkScores=(S.spkScores||[]).concat([{t:SP.t,g:d.got,m:d.max,ts:Date.now()}]).slice(-30);
@@ -2963,10 +2961,8 @@ async function speFinish(){if(!SPE)return;clearInterval(SPE.tm);try{lStop()}catc
     if(bl){try{
       var tr=await spSTT(bl);
       if(tr&&tr.split(/\s+/).length>=3){
-        var fmt='{"got":n,"max":n,"verdict":"короткий итог по-русски","fix":[{"wrong":"...","right":"...","note":"..."}]}';
-        var out=await callGemini('Ты эксперт устной части ЕГЭ по английскому. Оцениваешь строго по критериям ФИПИ, кратко и по-русски. Текст — автоматическая расшифровка речи, произношение не оценивай. Верни СТРОГО JSON.',
-          spEvalCtx(tr,t,SPE.sets[t])+' Верни JSON: '+fmt+'. fix до 2 пунктов.');
-        var p=parseJSON(out);
+        var response=await apiPost('/api/v1/ai/evaluate-speaking',{taskType:t,transcript:tr,assignment:spAssignment(t,SPE.sets[t])},true);
+        var p=response.review;
         if(p&&typeof p.got!=='undefined')d={got:Math.max(0,Math.min(SP_CONF[t].max,+p.got||0)),verdict:String(p.verdict||''),fix:Array.isArray(p.fix)?p.fix:[]}}
     }catch(e){}}
     if(!d)d={got:0,verdict:bl?'не удалось оценить запись':'записи нет',fix:[]};

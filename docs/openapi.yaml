@@ -172,6 +172,27 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/v1/ai/evaluate-speaking:
+    post:
+      summary: Evaluate an EGE speaking transcript with server-owned criteria
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [taskType, transcript, assignment]
+              properties:
+                taskType: { type: integer, enum: [1, 2, 3, 4] }
+                transcript: { type: string, maxLength: 20000 }
+                assignment: { type: object }
+              additionalProperties: false
+      responses:
+        '200': { description: Schema-validated speaking review }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /api/ai:
     post:
       summary: Legacy bounded AI operation

@@ -11,6 +11,7 @@ import { closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, create
 import { config } from './config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from './ai/writing.js';
 import { buildContentPrompt, CONTENT_PROMPT_VERSION, contentRequestSchema, parseContentResponse } from './ai/content.js';
+import { buildSpeakingPrompt, parseSpeakingReview, SPEAKING_PROMPT_VERSION, speakingRequestSchema } from './ai/speaking.js';
 import { protectCookieRequests } from './security/request-origin.js';
 import { classifyBodyParserError, legacyAiRequestSchema, validateProgress } from './validation/api-input.js';
 import { contentSecurityPolicy } from './security/csp.js';
@@ -568,6 +569,28 @@ app.post('/api/v1/ai/generate-content', auth, requireActiveSubscription, require
   }
   const status = lastCode === 'AI_RESPONSE_INVALID' ? 502 : 503;
   res.status(status).json({ error: { code: lastCode, message: 'Не удалось подготовить корректный учебный материал.' } });
+});
+
+app.post('/api/v1/ai/evaluate-speaking', auth, requireActiveSubscription, requirePrivacyConsent('voice_processing'), chatLimiter, async (req, res) => {
+  const parsed = speakingRequestSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректные данные устного ответа.' } });
+  const input = parsed.data;
+  const prompt = buildSpeakingPrompt(input);
+  const startedAt = Date.now();
+  const providers = aiProviders();
+  if (!providers.length) return res.status(503).json({ error: { code: 'AI_NOT_CONFIGURED', message: 'ИИ не настроен на сервере.' } });
+  let lastCode = 'AI_PROVIDER_UNAVAILABLE';
+  for (const provider of providers) {
+    try {
+      const review = parseSpeakingReview(input.taskType, await askProvider(provider, prompt.system, prompt.user));
+      await logAiRequest({ username: req.user, operation: `evaluate_speaking_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt });
+      return res.json({ review, provider: provider.name, promptVersion: SPEAKING_PROMPT_VERSION });
+    } catch (error) {
+      lastCode = error.code === 'AI_RESPONSE_INVALID' ? error.code : 'AI_PROVIDER_UNAVAILABLE';
+      await logAiRequest({ username: req.user, operation: `evaluate_speaking_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'failed', durationMs: Date.now() - startedAt, errorCode: lastCode });
+    }
+  }
+  res.status(lastCode === 'AI_RESPONSE_INVALID' ? 502 : 503).json({ error: { code: lastCode, message: 'Не удалось корректно оценить устный ответ.' } });
 });
 
 app.post('/api/ai', auth, requireActiveSubscription, requirePrivacyConsent('text_processing'), chatLimiter, async (req, res) => {
