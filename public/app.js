@@ -7,7 +7,7 @@ function dataKey(){return 'eb_data_'+(currentUser||'guest')}
 function getUsers(){try{return JSON.parse(localStorage.getItem('eb_users'))||{}}catch(e){return{}}}
 function setUsers(u){localStorage.setItem('eb_users',JSON.stringify(u))}
 function load(){let d=null;try{d=JSON.parse(localStorage.getItem(dataKey()))}catch(e){}if(!d)d={};
-  d.box=d.box||{};d.learned=d.learned==null?320:d.learned;d.essays=d.essays||0;return d}
+  d.box=d.box||{};d.learned=d.learned==null?0:d.learned;d.essays=d.essays||0;return d}
 /* ---------- DATA ---------- */
 const WORDS=[
  {w:'ambiguous',pos:'ПРИЛАГАТЕЛЬНОЕ',ipa:'/æmˈbɪɡjuəs/',tr:'двусмысленный',ex:'The instructions were ambiguous.'},
@@ -321,9 +321,9 @@ const apiPost=EasyBoostApi.post;
 const apiGet=EasyBoostApi.get;
 const apiGetBlob=EasyBoostApi.getBlob;
 const apiPostBinary=EasyBoostApi.postBinary;
-function fillDefaults(d){d=d||{};d.box=d.box||{};d.wstatus=d.wstatus||{};d.learned=d.learned==null?320:d.learned;
-  d.streak=d.streak||7;d.lastDay=d.lastDay||null;d.dayMin=d.dayMin||18;d.dayMinDate=d.dayMinDate||todayStr();
-  d.essays=d.essays||0;d.speak=d.speak||0;d.srs=d.srs||{};d.prog=d.prog||{words:64,gram:42,read:78,listen:30,write:40,speak:48};return d}
+function fillDefaults(d){d=d||{};d.box=d.box||{};d.wstatus=d.wstatus||{};d.learned=d.learned==null?0:d.learned;
+  d.streak=d.streak==null?0:d.streak;d.lastDay=d.lastDay||null;d.dayMin=d.dayMin==null?0:d.dayMin;d.dayMinDate=d.dayMinDate||todayStr();
+  d.essays=d.essays||0;d.speak=d.speak||0;d.srs=d.srs||{};d.prog=d.prog||{words:0,gram:0,read:0,listen:0,write:0,speak:0};return d}
 
 /* save/load через сервер (или локально) */
 let _saveT=null;

@@ -113,3 +113,10 @@ test('frontend keeps zoom, keyboard focus and assistive announcements accessible
   assert.match(html, /id="w_editor"[^>]*role="textbox"[^>]*aria-label="Письменный ответ"/u);
   assert.match(script, /setAttribute\('aria-live','polite'\)/u);
 });
+
+test('new production users start with zero real progress', async () => {
+  const { script } = await readFrontend();
+  assert.doesNotMatch(script, /learned==null\?320|streak\|\|7|dayMin\|\|18/u);
+  assert.match(script, /learned=d\.learned==null\?0:d\.learned/u);
+  assert.match(script, /prog=d\.prog\|\|\{words:0,gram:0,read:0,listen:0,write:0,speak:0\}/u);
+});
