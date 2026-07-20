@@ -6,6 +6,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import jwt from 'jsonwebtoken';
 
 const projectDirectory = fileURLToPath(new URL('..', import.meta.url));
 const serverPath = fileURLToPath(new URL('../server.js', import.meta.url));
@@ -50,6 +51,15 @@ test('application starts and serves health, security headers and PWA assets', { 
   const temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-smoke-'));
   const port = await findAvailablePort();
   const baseUrl = `http://127.0.0.1:${port}`;
+  const dataFile = path.join(temporaryDirectory, 'data.json');
+  const jwtSecret = 'smoke-test-secret-with-at-least-32-characters';
+  await fs.writeFile(dataFile, JSON.stringify({
+    users: {
+      expired: { created: Date.now(), sub_until: Date.now() - 60_000 },
+      active: { created: Date.now(), sub_until: Date.now() + 60_000 },
+    },
+    progress: { expired: {}, active: {} },
+  }), 'utf8');
   const output = [];
   const child = spawn(process.execPath, [serverPath], {
     cwd: projectDirectory,
@@ -59,7 +69,8 @@ test('application starts and serves health, security headers and PWA assets', { 
       PORT: String(port),
       APP_URL: baseUrl,
       DATABASE_PROVIDER: 'file',
-      DATA_FILE: path.join(temporaryDirectory, 'data.json'),
+      DATA_FILE: dataFile,
+      JWT_SECRET: jwtSecret,
       TELEGRAM_BOT_TOKEN: '',
       ADMIN_TELEGRAM_ID: '',
       XAI_API_KEY: '',
@@ -93,6 +104,26 @@ test('application starts and serves health, security headers and PWA assets', { 
     const serviceWorkerSource = await serviceWorker.text();
     assert.match(serviceWorkerSource, /CACHE_NAME/u);
     assert.match(serviceWorkerSource, /url\.pathname\.startsWith\('\/api\/'\)/u);
+
+    const expiredAuthorization = { Authorization: `Bearer ${jwt.sign({ u: 'expired' }, jwtSecret)}` };
+    const paidRequests = [
+      fetch(`${baseUrl}/api/ai`, { method: 'POST', headers: { ...expiredAuthorization, 'Content-Type': 'application/json' }, body: JSON.stringify({ system: 'Tutor', user: 'Help' }) }),
+      fetch(`${baseUrl}/api/tts?text=hello`, { headers: expiredAuthorization }),
+      fetch(`${baseUrl}/api/stt`, { method: 'POST', headers: { ...expiredAuthorization, 'Content-Type': 'audio/webm' }, body: new Uint8Array([1]) }),
+    ];
+    for (const response of await Promise.all(paidRequests)) {
+      assert.equal(response.status, 403);
+      assert.equal((await response.json()).error.code, 'SUBSCRIPTION_REQUIRED');
+    }
+
+    const activeAuthorization = { Authorization: `Bearer ${jwt.sign({ u: 'active' }, jwtSecret)}`, 'Content-Type': 'application/json' };
+    const activeAi = await fetch(`${baseUrl}/api/ai`, {
+      method: 'POST',
+      headers: activeAuthorization,
+      body: JSON.stringify({ system: 'Tutor', user: 'Help' }),
+    });
+    assert.equal(activeAi.status, 503);
+    assert.equal((await activeAi.json()).error.code, 'AI_NOT_CONFIGURED');
   } finally {
     await stopProcess(child);
     await fs.rm(temporaryDirectory, { recursive: true, force: true });
