@@ -13,6 +13,14 @@ function readInteger(name, fallback, { min = 1, max = Number.MAX_SAFE_INTEGER } 
   return value;
 }
 
+function readBoolean(name, fallback = true) {
+  const raw = process.env[name];
+  if (raw == null || raw === '') return fallback;
+  if (raw === 'true' || raw === '1') return true;
+  if (raw === 'false' || raw === '0') return false;
+  throw new Error(`${name} must be true, false, 1 or 0`);
+}
+
 const nodeEnv = process.env.NODE_ENV || 'development';
 const isProduction = nodeEnv === 'production';
 const jwtSecret = process.env.JWT_SECRET || '';
@@ -51,13 +59,16 @@ export const config = Object.freeze({
   }),
   ai: Object.freeze({
     xaiKey: process.env.XAI_API_KEY || '',
+    xaiEnabled: readBoolean('XAI_ENABLED'),
     xaiModel: process.env.XAI_MODEL || 'grok-4.5',
     groqKey: process.env.GROQ_API_KEY || '',
+    groqEnabled: readBoolean('GROQ_ENABLED'),
     groqModel: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
     timeoutMs: readInteger('AI_TIMEOUT_MS', 25_000, { min: 1_000, max: 120_000 }),
     maxRequestsPerHour: readInteger('AI_REQUESTS_PER_HOUR', 60, { min: 1, max: 1000 }),
     maxWritingRequestsPerHour: readInteger('WRITING_REQUESTS_PER_HOUR', 30, { min: 1, max: 500 }),
     maxTtsRequestsPerHour: readInteger('TTS_REQUESTS_PER_HOUR', 300, { min: 1, max: 5000 }),
     maxSttRequestsPerHour: readInteger('STT_REQUESTS_PER_HOUR', 30, { min: 1, max: 500 }),
+    dailyRequestBudget: readInteger('AI_DAILY_REQUEST_BUDGET', 1000, { min: 1, max: 1_000_000 }),
   }),
 });

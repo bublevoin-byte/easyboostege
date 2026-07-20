@@ -25,6 +25,7 @@ export const consumeTelegramAuthCode = (...args) => repository.consumeTelegramAu
 export const createWritingAttempt = (...args) => repository.createWritingAttempt(...args);
 export const finishWritingAttempt = (...args) => repository.finishWritingAttempt(...args);
 export const logAiRequest = (...args) => repository.logAiRequest(...args);
+export const countAiRequestsSince = (...args) => repository.countAiRequestsSince(...args);
 export const exportUserData = (...args) => repository.exportUserData(...args);
 export const deleteUserData = (...args) => repository.deleteUserData(...args);
 export const healthCheck = (...args) => repository.healthCheck(...args);

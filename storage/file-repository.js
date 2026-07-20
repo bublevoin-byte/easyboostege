@@ -243,6 +243,12 @@ export function createFileRepository(filePath) {
     return id;
   }
 
+  async function countAiRequestsSince(since) {
+    await load();
+    const timestamp = since instanceof Date ? since.getTime() : Number(since);
+    return state.ai_requests.filter((item) => Number(item.created_at) >= timestamp).length;
+  }
+
   async function exportUserData(username) {
     await load();
     const user = state.users[username];
@@ -308,6 +314,7 @@ export function createFileRepository(filePath) {
     createWritingAttempt,
     finishWritingAttempt,
     logAiRequest,
+    countAiRequestsSince,
     exportUserData,
     deleteUserData,
     healthCheck,

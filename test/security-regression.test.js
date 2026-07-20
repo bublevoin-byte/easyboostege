@@ -163,6 +163,7 @@ test('AI, TTS and STT endpoints return stable public error codes', async () => {
     assert.match(server, new RegExp(`code: '${code}'`, 'u'));
   }
   assert.match(server, /'AI_PROVIDER_UNAVAILABLE'/u);
+  assert.match(server, /code: 'AI_BUDGET_EXHAUSTED'/u);
   assert.doesNotMatch(server, /res\.status\((?:502|503)\)\.json\(\{ error: '(?:ИИ|Озвучка|STT)[^']*' \+ /u);
 });
 

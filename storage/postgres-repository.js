@@ -223,6 +223,11 @@ export function createPostgresRepository(connectionString) {
     return Number(result.rows[0].id);
   }
 
+  async function countAiRequestsSince(since) {
+    const result = await pool.query('SELECT COUNT(*)::int AS count FROM ai_requests WHERE created_at >= $1', [since]);
+    return Number(result.rows[0].count);
+  }
+
   async function exportUserData(username) {
     const [account, progress, privacyConsent, subscriptionEvents, writingAttempts, aiRequests] = await Promise.all([
       pool.query('SELECT username, telegram_id, trial_used, subscription_until, created_at, updated_at FROM users WHERE username = $1', [username]),
@@ -286,6 +291,7 @@ export function createPostgresRepository(connectionString) {
     createWritingAttempt,
     finishWritingAttempt,
     logAiRequest,
+    countAiRequestsSince,
     exportUserData,
     deleteUserData,
     healthCheck,

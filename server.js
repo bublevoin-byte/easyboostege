@@ -7,7 +7,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, createTelegramAuthCode, createWritingAttempt, deleteUserData, exportUserData, finishWritingAttempt, getPrivacyConsent, getProgress, getUser, healthCheck, saveProgress, setPrivacyConsent, mergeProgress, getUserByTelegram, createTelegramUser, grantDays, logAiRequest, markTrialUsed, getSub } from './db.js';
+import { closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, countAiRequestsSince, createTelegramAuthCode, createWritingAttempt, deleteUserData, exportUserData, finishWritingAttempt, getPrivacyConsent, getProgress, getUser, healthCheck, saveProgress, setPrivacyConsent, mergeProgress, getUserByTelegram, createTelegramUser, grantDays, logAiRequest, markTrialUsed, getSub } from './db.js';
 import { config } from './config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from './ai/writing.js';
 import { buildContentPrompt, CONTENT_PROMPT_VERSION, contentRequestSchema, parseContentResponse } from './ai/content.js';
@@ -413,8 +413,8 @@ async function askProvider({ url, key, model }, system, user) {
 
 function aiProviders() {
   const providers = [];
-  if (XAI_KEY) providers.push({ name: 'grok', url: 'https://api.x.ai/v1/chat/completions', key: XAI_KEY, model: XAI_MODEL });
-  if (GROQ_KEY) providers.push({ name: 'groq', url: 'https://api.groq.com/openai/v1/chat/completions', key: GROQ_KEY, model: GROQ_MODEL });
+  if (config.ai.xaiEnabled && XAI_KEY) providers.push({ name: 'grok', url: 'https://api.x.ai/v1/chat/completions', key: XAI_KEY, model: XAI_MODEL });
+  if (config.ai.groqEnabled && GROQ_KEY) providers.push({ name: 'groq', url: 'https://api.groq.com/openai/v1/chat/completions', key: GROQ_KEY, model: GROQ_MODEL });
   return providers;
 }
 
@@ -459,6 +459,18 @@ const writingLimiter = createUserRateLimiter(config.ai.maxWritingRequestsPerHour
 const ttsLimiter = createUserRateLimiter(config.ai.maxTtsRequestsPerHour);
 const sttLimiter = createUserRateLimiter(config.ai.maxSttRequestsPerHour);
 
+async function requireAiBudget(req, res, next) {
+  try {
+    const now = new Date();
+    const startOfUtcDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const used = await countAiRequestsSince(startOfUtcDay);
+    if (used >= config.ai.dailyRequestBudget) {
+      return res.status(503).json({ error: { code: 'AI_BUDGET_EXHAUSTED', message: 'Дневной лимит ИИ исчерпан. Попробуйте завтра.' } });
+    }
+    next();
+  } catch (error) { next(error); }
+}
+
 async function requireActiveSubscription(req, res, next) {
   try {
     const subscription = await getSub(req.user);
@@ -481,7 +493,7 @@ function requirePrivacyConsent(kind) {
   };
 }
 
-app.post('/api/v1/ai/evaluate-writing', auth, requireActiveSubscription, requirePrivacyConsent('text_processing'), writingLimiter, async (req, res, next) => {
+app.post('/api/v1/ai/evaluate-writing', auth, requireActiveSubscription, requirePrivacyConsent('text_processing'), requireAiBudget, writingLimiter, async (req, res, next) => {
   const parsed = writingRequestSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({
@@ -546,7 +558,7 @@ app.post('/api/v1/ai/evaluate-writing', auth, requireActiveSubscription, require
   }
 });
 
-app.post('/api/v1/ai/generate-content', auth, requireActiveSubscription, requirePrivacyConsent('text_processing'), chatLimiter, async (req, res) => {
+app.post('/api/v1/ai/generate-content', auth, requireActiveSubscription, requirePrivacyConsent('text_processing'), requireAiBudget, chatLimiter, async (req, res) => {
   const parsed = contentRequestSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректные параметры генерации.' } });
   const input = parsed.data;
@@ -571,7 +583,7 @@ app.post('/api/v1/ai/generate-content', auth, requireActiveSubscription, require
   res.status(status).json({ error: { code: lastCode, message: 'Не удалось подготовить корректный учебный материал.' } });
 });
 
-app.post('/api/v1/ai/evaluate-speaking', auth, requireActiveSubscription, requirePrivacyConsent('voice_processing'), chatLimiter, async (req, res) => {
+app.post('/api/v1/ai/evaluate-speaking', auth, requireActiveSubscription, requirePrivacyConsent('voice_processing'), requireAiBudget, chatLimiter, async (req, res) => {
   const parsed = speakingRequestSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректные данные устного ответа.' } });
   const input = parsed.data;
@@ -593,7 +605,7 @@ app.post('/api/v1/ai/evaluate-speaking', auth, requireActiveSubscription, requir
   res.status(lastCode === 'AI_RESPONSE_INVALID' ? 502 : 503).json({ error: { code: lastCode, message: 'Не удалось корректно оценить устный ответ.' } });
 });
 
-app.post('/api/v1/ai/generate-speaking-sample', auth, requireActiveSubscription, requirePrivacyConsent('text_processing'), chatLimiter, async (req, res) => {
+app.post('/api/v1/ai/generate-speaking-sample', auth, requireActiveSubscription, requirePrivacyConsent('text_processing'), requireAiBudget, chatLimiter, async (req, res) => {
   const parsed = speakingSampleRequestSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректные параметры образцового ответа.' } });
   const input = parsed.data;

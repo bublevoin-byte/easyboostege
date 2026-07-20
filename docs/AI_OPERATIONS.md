@@ -18,4 +18,6 @@
 | TTS | `/api/tts` | auth, subscription, rate limit, voice allowlist | Web Speech API |
 | STT | `/api/stt` | auth, subscription, rate limit, 20 MB body limit | повтор записи |
 
-Версия prompt для письменной проверки задаётся `WRITING_PROMPT_VERSION` в `ai/writing.js`. Пять типизированных операций учебного контента используют `CONTENT_PROMPT_VERSION` из `ai/content.js`. Обе версии вместе с операцией, провайдером, моделью, длительностью и результатом записываются в `ai_requests`. Оставшиеся legacy-операции должны получить отдельные схемы до полного закрытия P0.
+Версия prompt для письменной проверки задаётся `WRITING_PROMPT_VERSION` в `ai/writing.js`, для устной части — `SPEAKING_PROMPT_VERSION`, для генерации контента — `CONTENT_PROMPT_VERSION`. Версия вместе с операцией, провайдером, моделью, длительностью и результатом записывается в `ai_requests`. Универсального AI proxy в production API нет.
+
+Дневной проектный бюджет задаётся `AI_DAILY_REQUEST_BUDGET` и считается по устойчивому журналу `ai_requests` с начала UTC-суток. При исчерпании API возвращает `AI_BUDGET_EXHAUSTED`. Провайдеры можно аварийно отключить независимо через `XAI_ENABLED=false` или `GROQ_ENABLED=false`, не удаляя ключи.

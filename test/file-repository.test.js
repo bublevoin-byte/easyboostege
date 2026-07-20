@@ -100,6 +100,8 @@ test('writing attempt and AI metadata are persisted without prompt text in the A
       durationMs: 123,
       errorCode: 'AI_UNAVAILABLE',
     });
+    assert.equal(await repository.countAiRequestsSince(new Date(Date.now() - 60_000)), 1);
+    assert.equal(await repository.countAiRequestsSince(new Date(Date.now() + 60_000)), 0);
 
     const stored = JSON.parse(await fs.readFile(file, 'utf8'));
     assert.equal(stored.writing_attempts[0].status, 'failed');
