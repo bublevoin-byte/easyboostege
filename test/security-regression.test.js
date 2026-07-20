@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 
 const frontendPath = new URL('../public/index.html', import.meta.url);
 const frontendApiPath = new URL('../public/api.js', import.meta.url);
-const frontendScriptPaths = ['router.js', 'app.js', 'tts.js', 'pwa.js'].map(
+const frontendScriptPaths = ['sync.js', 'router.js', 'app.js', 'tts.js', 'pwa.js'].map(
   (name) => new URL(`../public/${name}`, import.meta.url),
 );
 const serverPath = new URL('../server.js', import.meta.url);
@@ -50,7 +50,7 @@ test('frontend contains no embedded or browser-managed AI credentials', async ()
 
 test('frontend uses ordered external scripts that remain syntactically valid', async () => {
   const { html, api, scripts } = await readFrontend();
-  assert.match(html, /<script src="\/api\.js" defer><\/script>\s*<script src="\/router\.js" defer><\/script>\s*<script src="\/app\.js" defer><\/script>\s*<script src="\/tts\.js" defer><\/script>/u);
+  assert.match(html, /<script src="\/api\.js" defer><\/script>\s*<script src="\/sync\.js" defer><\/script>\s*<script src="\/router\.js" defer><\/script>\s*<script src="\/app\.js" defer><\/script>\s*<script src="\/tts\.js" defer><\/script>/u);
   assert.doesNotMatch(html, /<script(?![^>]*\bsrc\s*=)(?:\s[^>]*)?>/iu);
   assert.doesNotThrow(() => new Function(api));
   for (const script of scripts) assert.doesNotThrow(() => new Function(script));
@@ -98,6 +98,9 @@ test('PWA shell is installable and never caches API responses', async () => {
   const manifest = JSON.parse(manifestText);
   assert.equal(manifest.display, 'standalone');
   assert.equal(manifest.start_url, '/');
+  assert.ok(manifest.icons.some((icon) => icon.sizes === '192x192' && icon.type === 'image/png'));
+  assert.ok(manifest.icons.some((icon) => icon.sizes === '512x512' && icon.type === 'image/png'));
+  assert.ok(manifest.icons.some((icon) => icon.purpose === 'maskable'));
   assert.match(html, /<link rel="manifest" href="\/manifest\.json">/u);
   assert.match(worker, /url\.pathname\.startsWith\('\/api\/'\)/u);
   assert.match(worker, /caches\.match\('\/offline\.html'\)/u);
@@ -119,4 +122,14 @@ test('new production users start with zero real progress', async () => {
   assert.doesNotMatch(script, /learned==null\?320|streak\|\|7|dayMin\|\|18/u);
   assert.match(script, /learned=d\.learned==null\?0:d\.learned/u);
   assert.match(script, /prog=d\.prog\|\|\{words:0,gram:0,read:0,listen:0,write:0,speak:0\}/u);
+});
+
+test('progress sync queues the latest state and retries when connectivity returns', async () => {
+  const sync = await fs.readFile(new URL('../public/sync.js', import.meta.url), 'utf8');
+  assert.match(sync, /easyboost_pending_progress_v1/u);
+  assert.match(sync, /navigator\.onLine===false/u);
+  assert.match(sync, /window\.addEventListener\('online',flush\)/u);
+  assert.match(sync, /EasyBoostApi\.post\('\/api\/progress',progress,true\)/u);
+  assert.match(sync, /error\.status>=500/u);
+  assert.doesNotMatch(sync, /push\(/u);
 });

@@ -330,13 +330,14 @@ let _saveT=null;
 const START_HOOKS=[];
 function registerStartHook(hook){START_HOOKS.push(hook)}
 function save(){
-  if(SRV){if(!TOKEN)return;clearTimeout(_saveT);_saveT=setTimeout(()=>{apiPost('/api/progress',S,true).catch(()=>{})},600)}
+  if(SRV){if(!TOKEN)return;clearTimeout(_saveT);_saveT=setTimeout(()=>{EasyBoostSync.saveProgress(S)},600)}
   else{if(currentUser)localStorage.setItem(dataKey(),JSON.stringify(S))}}
 async function startApp(){
   if(SRV){if(!TOKEN){show('scr5');document.getElementById('tabbar').style.display='none';return}
     try{const d=await apiGet('/api/progress');S=fillDefaults(d)}catch(e){S=fillDefaults({})}}
   else{S=load()}
   tab('scr1');
+  EasyBoostSync.flush();
   for(const hook of START_HOOKS){try{await hook()}catch(e){}}
 }
 
