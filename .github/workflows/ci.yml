@@ -38,6 +38,8 @@ jobs:
       - run: npm ci
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
+      - name: Scan tracked files for secrets
+        run: npm run security:secrets
       - run: npm run check
       - run: npm run db:migrate
       - run: npm test
