@@ -108,9 +108,6 @@ function wire(){
 
 /* ---------- AUTH ---------- */
 function inputVal(scr,ph){const el=document.querySelector('#'+scr+' input[placeholder*="'+ph+'"]');return el?el.value.trim():''}
-function doRegister(){startApp()}
-function doLogin(){startApp()}
-
 document.addEventListener('DOMContentLoaded',()=>{wire();
   currentUser=currentUser||'Аня';localStorage.setItem('eb_current',currentUser);
 });
@@ -239,8 +236,9 @@ function renderHome(){if(!S)return;const u=currentUser||'друг';
 function renderProgress(){if(!S)return;const p=S.prog||{};
   setTxt('p_streak','🔥 '+(S.streak||0));setTxt('p_words',S.learned||0);
   setW('pb_read',p.read||0);setW('pb_gram',p.gram||0);setW('pb_words',p.words||0);setW('pb_listen',p.listen||0);setW('pb_speak',p.speak||0)}
-function renderProfile(){const u=currentUser||'Гость';setTxt('pf_ava',u[0].toUpperCase());setTxt('pf_name',u);setTxt('pf_ai','через сервер ✓')}
-function logout(){localStorage.removeItem('eb_current');location.reload()}
+const PROFILE_HOOKS=[];
+function registerProfileHook(hook){PROFILE_HOOKS.push(hook)}
+function renderProfile(){const u=currentUser||'Гость';setTxt('pf_ava',u[0].toUpperCase());setTxt('pf_name',u);setTxt('pf_ai','через сервер ✓');PROFILE_HOOKS.forEach(function(hook){try{hook()}catch(e){console.error('Profile hook failed',e)}})}
 registerRouteHook(function(id){if(id==='scr1')renderHome();if(id==='scr10')renderProgress();if(id==='scr11')renderProfile()});
 
 
@@ -408,60 +406,47 @@ async function startApp(){
 }
 
 /* вход/регистрация */
-doLogin=async function(){
+async function doLogin(){
   if(!SRV){const u=gv('lg_user')||'Аня';currentUser=u;localStorage.setItem('eb_current',currentUser);startApp();return}
   const u=gv('lg_user'),p=gv('lg_pass');if(!u||!p){lgMsg('Введите имя и пароль');return}
   lgMsg('Вход…');
   try{const d=await apiPost('/api/login',{username:u,password:p});TOKEN=d.authenticated?'cookie':'';
     currentUser=d.username;localStorage.setItem('eb_current',currentUser);lgMsg('');startApp()}
   catch(e){lgMsg(e.message)}}
-doRegister=async function(){
+async function doRegister(){
   if(!SRV){const u=gv('lg_user')||'Аня';currentUser=u;localStorage.setItem('eb_current',currentUser);show('scr6');document.getElementById('tabbar').style.display='none';return}
   const u=gv('lg_user'),p=gv('lg_pass');if(!u||!p){lgMsg('Введите имя и пароль');return}
   lgMsg('Создаём аккаунт…');
   try{const d=await apiPost('/api/register',{username:u,password:p});TOKEN=d.authenticated?'cookie':'';
     currentUser=d.username;localStorage.setItem('eb_current',currentUser);lgMsg('');show('scr6');document.getElementById('tabbar').style.display='none'}
   catch(e){lgMsg(e.message)}}
-logout=function(){localStorage.removeItem('eb_current');TOKEN='';location.reload()}
+async function logout(){
+  try{if(SRV)await apiPost('/api/logout',{})}catch(_){}
+  TOKEN='';
+  try{localStorage.removeItem('eb_current');localStorage.removeItem('eb_tg_code')}catch(_){}
+  location.reload()
+}
 
 /* Временный legacy-адаптер до миграции всех операций на типизированные API. */
 callGemini=EasyBoostApi.legacyAi;
 
 /* профиль: в серверном режиме ключ не нужен на клиенте */
-const _rp=renderProfile;
-renderProfile=function(){_rp();var ai=document.getElementById('pf_ai');if(ai){ai.textContent='через сервер ✓';ai.style.color='#1F8A50';ai.style.background='#EAF7F0'}}
+registerProfileHook(function(){var ai=document.getElementById('pf_ai');if(ai){ai.textContent='через сервер ✓';ai.style.color='#1F8A50';ai.style.background='#EAF7F0'}})
 
 /* финальная инициализация под серверный режим */
 if(SRV){ if(TOKEN){ startApp(); } else { var tb=document.getElementById('tabbar'); if(tb)tb.style.display='none'; show('scr5'); } }
-
-
-/* ===== TELEGRAM-ONLY LOGIN ===== */
-tgVerify=async function(){
-  if(typeof SRV==='undefined'||!SRV){lgMsg('Вход через Telegram работает на сервере (открой по ссылке сервера).');return}
-  lgMsg('Открываю Telegram…');
-  let d;
-  try{d=await apiPost('/api/tg/start',{})}catch(e){lgMsg(e.message||'Ошибка сервера');return}
-  window.open(d.url,'_blank');
-  lgMsg('Подтверди вход в Telegram и вернись сюда…');
-  const code=d.code;let tries=0;
-  const iv=setInterval(async()=>{tries++;
-    try{const c=await apiGet('/api/tg/check?code='+encodeURIComponent(code));
-      if(c&&c.authenticated){clearInterval(iv);TOKEN='cookie';
-        currentUser=c.username;localStorage.setItem('eb_current',currentUser);lgMsg('');startApp()}
-    }catch(e){}
-    if(tries>150){clearInterval(iv);lgMsg('Время вышло — нажми «Войти через Telegram» ещё раз')}
-  },2000)}
 
 
 /* ===== TELEGRAM LOGIN v2 (mobile-safe) ===== */
 let TG_URL='', TG_CODE='', TG_IV=null;
 async function tgInit(){
   if(typeof SRV==='undefined'||!SRV)return;
-  try{const d=await apiPost('/api/tg/start',{});TG_URL=d.url;TG_CODE=d.code;tgPoll();}
-  catch(e){lgMsg('Сервер недоступен, обнови страницу');}
+  try{const d=await apiPost('/api/tg/start',{});TG_URL=d.url;TG_CODE=d.code;
+    var a=document.getElementById('tgbtn');if(a)a.href=TG_URL;tgPoll();}
+  catch(e){lgMsg('Сервер недоступен — обнови страницу');}
 }
 function tgPoll(){
-  if(!TG_CODE)return;let tries=0;clearInterval(TG_IV);
+  if(!TG_CODE)return;try{localStorage.setItem('eb_tg_code',TG_CODE)}catch(_){};let tries=0;clearInterval(TG_IV);
   TG_IV=setInterval(async()=>{tries++;
     try{const c=await apiGet('/api/tg/check?code='+encodeURIComponent(TG_CODE));
       if(c&&c.authenticated){clearInterval(TG_IV);TOKEN='cookie';
@@ -470,51 +455,13 @@ function tgPoll(){
     if(tries>300){clearInterval(TG_IV)}
   },2000);
 }
-tgVerify=function(){
-  if(typeof SRV==='undefined'||!SRV){lgMsg('Вход через Telegram работает на сервере (открой по ссылке сервера).');return}
-  if(!TG_URL){tgInit();lgMsg('Секунду, готовлю вход…');setTimeout(tgVerify,900);return}
-  var w=null;try{w=window.open(TG_URL,'_blank')}catch(e){}
-  var m=document.getElementById('lg_msg');
-  if(w){lgMsg('Открой бота → нажми Start → вернись сюда');}
-  else if(m){m.innerHTML='Нажми: <a href="'+TG_URL+'" target="_blank" rel="noopener" style="color:#F2683F;font-weight:800;text-decoration:underline;">Открыть Telegram-бот</a> → Start → вернись';}
-  tgPoll();
-}
 // Telegram-код создаётся только после явного действия пользователя.
 
 
-/* ===== TELEGRAM login v3: настоящая ссылка (iOS-safe) ===== */
-tgInit=async function(){
-  if(typeof SRV==='undefined'||!SRV)return;
-  try{const d=await apiPost('/api/tg/start',{});TG_URL=d.url;TG_CODE=d.code;
-    var a=document.getElementById('tgbtn');if(a)a.href=TG_URL;tgPoll();}
-  catch(e){lgMsg('Сервер недоступен — обнови страницу');}
-}
-function tgClick(e){
-  if(!TG_URL){ if(e&&e.preventDefault)e.preventDefault(); lgMsg('Секунду, готовлю вход…'); tgInit(); return false; }
-  lgMsg('Открой бота → нажми Start → вернись сюда'); tgPoll();
-}
+/* ===== TELEGRAM login: настоящая ссылка (iOS-safe) ===== */
 try{clearInterval(TG_IV)}catch(e){}
 // Восстановление существующей cookie-сессии выполняется ниже через /api/me.
 
-
-/* ===== TELEGRAM login v7: открыть окно синхронно, потом редирект (iOS-safe) ===== */
-function showTgLink(url){var m=document.getElementById('lg_msg');if(m)m.innerHTML='Не открылось? <a href="'+url+'" target="_blank" rel="noopener" style="color:#F2683F;font-weight:800;text-decoration:underline;">Открыть бота</a> → Start → вернись';}
-tgClick=function(e){
-  if(e&&e.preventDefault)e.preventDefault();
-  if(typeof SRV==='undefined'||!SRV){lgMsg('Открой приложение по ссылке сервера.');return false;}
-  var win=null; try{win=window.open('about:blank','_blank');}catch(_){}
-  lgMsg('Открываю Telegram…');
-  apiPost('/api/tg/start',{}).then(function(d){
-    TG_URL=d.url;TG_CODE=d.code;tgPoll();
-    if(win){ try{win.location.href=d.url;}catch(_){ try{win.close();}catch(__){} showTgLink(d.url); } }
-    else { showTgLink(d.url); }
-    lgMsg('Открой бота → нажми Start → вернись сюда');
-  }).catch(function(err){
-    if(win){try{win.close();}catch(_){}}
-    lgMsg('Сервер недоступен: '+((err&&err.message)||'ошибка')+' — обнови страницу');
-  });
-  return false;
-};
 
 /* legacy block 2 */
 /* ===== ДОСТУП / ПОДПИСКА (paywall) ===== */
@@ -555,7 +502,7 @@ if(typeof SRV!=='undefined'&&SRV&&TOKEN){ setTimeout(function(){try{pwCheck();}c
 })();
 /* Кнопка Telegram v9: берём ссылку по клику и сразу открываем бота + видимый запасной линк */
 try{var _tb=document.getElementById('tgbtn'); if(_tb)_tb.removeAttribute('target');}catch(_){}
-tgClick=async function(e){
+async function tgClick(e){
   if(e&&e.preventDefault)e.preventDefault();
   if(typeof SRV==='undefined'||!SRV){ lgMsg('Открой приложение по ссылке сервера.'); return false; }
   lgMsg('Готовлю вход…');
@@ -567,7 +514,7 @@ tgClick=async function(e){
   if(m) m.innerHTML='<a href="'+TG_URL+'" style="display:inline-block;margin-top:2px;color:#F2683F;font-weight:800;text-decoration:underline;font-size:14.5px;">Открыть Telegram-бот</a><div style="margin-top:5px;font-size:12.5px;color:#8A8F98;">нажми ссылку → Start → кнопка «Открыть Easy Boost»</div>';
   try{ window.location.href=TG_URL; }catch(_){}
   return false;
-};
+}
 
 /* legacy block 4 */
 /* ===== SESSION v2: постоянный вход, восстановление сессии, подписка ===== */
@@ -578,8 +525,6 @@ tgClick=async function(e){
   window.ebMe=me;
   /* вход через Telegram переживает перезагрузку страницы */
   try{
-    var _tp=tgPoll;
-    tgPoll=function(){try{if(TG_CODE)localStorage.setItem('eb_tg_code',TG_CODE)}catch(_){};_tp()};
     var pc=localStorage.getItem('eb_tg_code');
     if(!TOKEN&&pc){TG_CODE=pc;tgPoll();}
   }catch(_){}
@@ -595,12 +540,6 @@ tgClick=async function(e){
       if(!had){try{localStorage.removeItem('eb_tg_code')}catch(_){};startApp();}
     }
   })();
-  /* выход: чистим и cookie на сервере */
-  logout=function(){
-    try{apiPost('/api/logout',{})}catch(_){}
-    TOKEN='';
-    try{localStorage.removeItem('eb_current');localStorage.removeItem('eb_tg_code')}catch(_){}
-    setTimeout(function(){location.reload()},200)};
   /* статус подписки в профиле */
   function fmt(ts){var d=new Date(ts);return ('0'+d.getDate()).slice(-2)+'.'+('0'+(d.getMonth()+1)).slice(-2)+'.'+d.getFullYear()}
   function subLine(m){
@@ -609,8 +548,7 @@ tgClick=async function(e){
     if(m.active)return ['Подписка до '+fmt(m.sub_until)+' · осталось '+left+' дн.','#1F8A50','#EAF7F0'];
     return ['Подписка закончилась '+fmt(m.sub_until),'#C0392B','#FDEDEA'];
   }
-  var _rp=renderProfile;
-  renderProfile=function(){_rp();
+  registerProfileHook(function(){
     if(typeof SRV==='undefined'||!SRV)return;
     var host=document.getElementById('pf_name');if(!host||!host.parentElement)return;
     var el=document.getElementById('pf_sub');
@@ -620,7 +558,7 @@ tgClick=async function(e){
     var use=function(m){var s=subLine(m);el.textContent=s[0];el.style.color=s[1];el.style.background=s[2]};
     if(window.__sub)use(window.__sub);
     me().then(function(m){if(m){window.__sub=m;use(m)}});
-  };
+  });
 })();
 
 /* legacy block 5 */
