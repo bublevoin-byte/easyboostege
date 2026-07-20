@@ -2839,12 +2839,9 @@ function spShowEval(d,tr){var box=document.getElementById('sp_evalbox');if(!box)
 async function spSample(btn){
   if(!SP)return;var t=SP.t,set=SP.set;
   if(btn){if(btn.dataset.busy)return;btn.dataset.busy=1;btn.textContent='Готовлю образец…';btn.style.pointerEvents='none'}
-  var ask=t===2?'Составь 4 образцовых прямых вопроса по объявлению "'+set.ad+'" о пунктах: '+set.points.join('; ')+'.'
-    :(t===3?'Составь образцовые развёрнутые ответы (по 2-3 предложения) на вопросы интервью: '+set.qs.join(' | ')+'.'
-    :'Составь образцовый монолог (~170 слов) для задания 4 по теме «'+set.topic+'». Фото: '+set.ph.join(' / ')+'. План: '+set.plan.join('; ')+'.');
   try{
-    var out=await callGemini('Ты готовишь образцовые ответы устной части ЕГЭ. Уровень B1-B2, живой простой английский. Верни СТРОГО JSON.',ask+' JSON: {"text":"образец на английском"}');
-    var d=parseJSON(out);if(!d||!d.text)throw new Error('не получилось');
+    var response=await apiPost('/api/v1/ai/generate-speaking-sample',{taskType:t,assignment:spAssignment(t,set)},true);
+    var d=response.data;if(!d||!d.text)throw new Error('не получилось');
     SP.sample=String(d.text);
     var box=document.getElementById('sp_evalbox');
     if(box)box.insertAdjacentHTML('afterbegin','<div class="clayCard" style="padding:16px;margin-top:12px;animation:win .35s both;">'

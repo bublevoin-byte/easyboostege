@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSpeakingPrompt, parseSpeakingReview, speakingRequestSchema } from '../ai/speaking.js';
+import { buildSpeakingPrompt, buildSpeakingSamplePrompt, parseSpeakingReview, parseSpeakingSample, speakingRequestSchema, speakingSampleRequestSchema } from '../ai/speaking.js';
 
 const request = { taskType: 2, transcript: 'How much does it cost? Where is it located?', assignment: { ad: 'Visit our club.', points: ['price', 'location', 'hours', 'equipment'] } };
 
@@ -27,4 +27,13 @@ test('speaking review validates task maximum and criterion totals', () => {
   assert.throws(() => parseSpeakingReview(2, JSON.stringify({ ...review, max: 5 })), /AI_RESPONSE_INVALID/u);
   review.criteria[0].got = 0;
   assert.throws(() => parseSpeakingReview(2, JSON.stringify(review)), /AI_RESPONSE_INVALID/u);
+});
+
+test('speaking sample uses typed assignment and validates output', () => {
+  const sampleRequest = speakingSampleRequestSchema.parse({ taskType: 2, assignment: request.assignment });
+  const prompt = buildSpeakingSamplePrompt(sampleRequest);
+  assert.doesNotMatch(prompt.system, /Visit our club/u);
+  const sample = { text: 'How much does it cost? Where is it located? When does it open? What equipment is available?' };
+  assert.equal(parseSpeakingSample(2, JSON.stringify(sample)).text, sample.text);
+  assert.throws(() => parseSpeakingSample(2, '{"text":"Only one question?"}'), /AI_RESPONSE_INVALID/u);
 });

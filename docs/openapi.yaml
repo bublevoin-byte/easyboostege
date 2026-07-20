@@ -193,6 +193,15 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/v1/ai/generate-speaking-sample:
+    post:
+      summary: Generate a validated model answer for speaking tasks 2-4
+      responses:
+        '200': { description: Schema-validated English model answer }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /api/ai:
     post:
       summary: Legacy bounded AI operation
