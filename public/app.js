@@ -1,14 +1,4 @@
 ﻿/* legacy block 1 */
-const HIST=[];
-function cur(){const o=document.querySelector('.screen.on');return o?o.id:'scr5'}
-function showScreen(id){const t=document.getElementById(id);if(!t)return;document.querySelectorAll('.screen').forEach(s=>s.classList.remove('on'));t.classList.add('on');t.scrollTop=0;var nm=document.getElementById('navmenu');if(nm)nm.classList.remove('open')}
-function show(id){return showScreen(id);}
-const ROUTE_HOOKS=[];
-function registerRouteHook(hook){ROUTE_HOOKS.push(hook)}
-function tab(id){const c=cur();if(id!==c&&c!=='scr5'&&c!=='scr6')HIST.push(c);showScreen(id);if(id==='scr2')initWords();if(id==='scr8')setTask(curTask);ROUTE_HOOKS.forEach(function(hook){try{hook(id,c)}catch(e){console.error('Route hook failed',e)}})}
-function nav(id){tab(id)}
-function back(){let id=HIST.pop()||'scr1';if(id==='scr5'||id==='scr6')id='scr1';showScreen(id)}
-(function(){const m=document.getElementById('navmenu');document.querySelectorAll('.screen').forEach(sc=>{const b=document.createElement('button');b.textContent=sc.id.replace('scr','')+' · '+sc.dataset.name;b.onclick=()=>{HIST.length=0;tab(sc.id)};m.appendChild(b)})})();
 
 /* ---------- STATE ---------- */
 const todayStr=()=>new Date().toISOString().slice(0,10);
@@ -2427,38 +2417,6 @@ async function lGen(){
 /* FAB прячем, звук глушим при уходе, синк при старте */
 registerRouteHook(function(id){lStop();if(LE&&LE.iv){clearInterval(LE.iv);LE=null}if(id==='scr4'){var f=document.getElementById('genfab');if(f)f.style.display='none'}});
 registerStartHook(function(){return lSync()});
-
-/* ===== TTS: нейроголоса Edge через сервер, фолбэк — встроенный синтез ===== */
-var TTS_CACHE={},TTS_CURRENT=null,TTS_SEQUENCE=0;
-function fetchTtsAudio(text,voice,slow){
-    var k=voice+'|'+(slow?1:0)+'|'+text;
-    if(TTS_CACHE[k])return Promise.resolve(TTS_CACHE[k]);
-    return apiGetBlob('/api/tts?text='+encodeURIComponent(text)+'&voice='+voice+(slow?'&slow=1':''))
-      .then(function(b){if(!b.size)throw 0;var u=URL.createObjectURL(b);TTS_CACHE[k]=u;return u})}
-function stopTtsAudio(){TTS_SEQUENCE++;if(TTS_CURRENT){try{TTS_CURRENT.pause()}catch(e){}TTS_CURRENT=null}}
-function lStop(){stopTtsAudio();lStopFallback();try{lPlayBtn('')}catch(e){}}
-function lPlayRaw(lines){
-  if(typeof SRV==='undefined'||!SRV||!TOKEN){lPlayRawFallback(lines);return}
-  stopTtsAudio();lStopFallback();
-  var my=++TTS_SEQUENCE;
-  try{lPlayBtn('load')}catch(e){}
-  Promise.all(lines.map(function(ln){return fetchTtsAudio(ln.t,ln.s?'en-GB-SoniaNeural':'en-GB-RyanNeural',LSLOW)}))
-    .then(function(urls){
-      if(my!==TTS_SEQUENCE)return;
-      var i=0;
-      (function next(){
-        if(my!==TTS_SEQUENCE||i>=urls.length){if(my===TTS_SEQUENCE){TTS_CURRENT=null;try{lPlayBtn('')}catch(e){}}return}
-        if(i===0)try{lPlayBtn('play')}catch(e){}
-        TTS_CURRENT=new Audio(urls[i++]);TTS_CURRENT.onended=next;TTS_CURRENT.onerror=next;
-        TTS_CURRENT.play().catch(function(){next()})})()})
-    .catch(function(){if(my===TTS_SEQUENCE){try{lPlayBtn('')}catch(e){}lPlayRawFallback(lines)}})}
-function wSpeak(txt){
-  var t=(txt||'').replace(/^to /,'').trim();if(!t)return;
-  if(typeof SRV==='undefined'||!SRV||!TOKEN){wSpeakFallback(txt);return}
-  var my=++TTS_SEQUENCE;
-  fetchTtsAudio(t,'en-GB-SoniaNeural',false)
-    .then(function(u){if(my!==TTS_SEQUENCE)return;if(TTS_CURRENT){try{TTS_CURRENT.pause()}catch(e){}}TTS_CURRENT=new Audio(u);TTS_CURRENT.play().catch(function(){})})
-    .catch(function(){if(my===TTS_SEQUENCE)wSpeakFallback(txt)})}
 
 /* legacy block 10 */
 /* ===== WRITING v2: банк тем, стимулы как на ЕГЭ, шпаргалки, черновики, история ===== */

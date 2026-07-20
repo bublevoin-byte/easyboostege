@@ -4,16 +4,19 @@ import fs from 'node:fs/promises';
 
 const frontendPath = new URL('../public/index.html', import.meta.url);
 const frontendApiPath = new URL('../public/api.js', import.meta.url);
-const frontendScriptPath = new URL('../public/app.js', import.meta.url);
+const frontendScriptPaths = ['router.js', 'app.js', 'tts.js'].map(
+  (name) => new URL(`../public/${name}`, import.meta.url),
+);
 const serverPath = new URL('../server.js', import.meta.url);
 
 async function readFrontend() {
-  const [html, api, script] = await Promise.all([
+  const [html, api, scripts] = await Promise.all([
     fs.readFile(frontendPath, 'utf8'),
     fs.readFile(frontendApiPath, 'utf8'),
-    fs.readFile(frontendScriptPath, 'utf8'),
+    Promise.all(frontendScriptPaths.map((path) => fs.readFile(path, 'utf8'))),
   ]);
-  return { html, api, script, combined: `${html}\n${api}\n${script}` };
+  const script = scripts.join('\n');
+  return { html, api, scripts, script, combined: `${html}\n${api}\n${script}` };
 }
 
 test('frontend never persists or sends the session JWT', async () => {
@@ -46,11 +49,11 @@ test('frontend contains no embedded or browser-managed AI credentials', async ()
 });
 
 test('frontend uses ordered external scripts that remain syntactically valid', async () => {
-  const { html, api, script } = await readFrontend();
-  assert.match(html, /<script src="\/api\.js" defer><\/script>\s*<script src="\/app\.js" defer><\/script>/u);
+  const { html, api, scripts } = await readFrontend();
+  assert.match(html, /<script src="\/api\.js" defer><\/script>\s*<script src="\/router\.js" defer><\/script>\s*<script src="\/app\.js" defer><\/script>\s*<script src="\/tts\.js" defer><\/script>/u);
   assert.doesNotMatch(html, /<script(?![^>]*\bsrc\s*=)(?:\s[^>]*)?>/iu);
   assert.doesNotThrow(() => new Function(api));
-  assert.doesNotThrow(() => new Function(script));
+  for (const script of scripts) assert.doesNotThrow(() => new Function(script));
 });
 
 test('legacy application code delegates network access to the API layer', async () => {
