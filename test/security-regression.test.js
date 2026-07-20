@@ -3,15 +3,17 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 
 const frontendPath = new URL('../public/index.html', import.meta.url);
+const frontendApiPath = new URL('../public/api.js', import.meta.url);
 const frontendScriptPath = new URL('../public/app.js', import.meta.url);
 const serverPath = new URL('../server.js', import.meta.url);
 
 async function readFrontend() {
-  const [html, script] = await Promise.all([
+  const [html, api, script] = await Promise.all([
     fs.readFile(frontendPath, 'utf8'),
+    fs.readFile(frontendApiPath, 'utf8'),
     fs.readFile(frontendScriptPath, 'utf8'),
   ]);
-  return { html, script, combined: `${html}\n${script}` };
+  return { html, api, script, combined: `${html}\n${api}\n${script}` };
 }
 
 test('frontend never persists or sends the session JWT', async () => {
@@ -40,12 +42,22 @@ test('frontend contains no embedded or browser-managed AI credentials', async ()
   assert.doesNotMatch(frontend, /localStorage\.(?:getItem|setItem)\(['"]eb_(?:key|groq|model|groq_model)/);
   assert.doesNotMatch(frontend, /x-goog-api-key/i);
   assert.doesNotMatch(frontend, /generativelanguage\.googleapis\.com|api\.groq\.com|api\.x\.ai/i);
-  assert.match(frontend, /apiPost\('\/api\/ai'/);
+  assert.match(frontend, /post\('\/api\/ai'/);
 });
 
-test('frontend uses one external script that remains syntactically valid', async () => {
-  const { html, script } = await readFrontend();
-  assert.match(html, /<script src="\/app\.js" defer><\/script>/u);
+test('frontend uses ordered external scripts that remain syntactically valid', async () => {
+  const { html, api, script } = await readFrontend();
+  assert.match(html, /<script src="\/api\.js" defer><\/script>\s*<script src="\/app\.js" defer><\/script>/u);
   assert.doesNotMatch(html, /<script(?![^>]*\bsrc\s*=)(?:\s[^>]*)?>/iu);
+  assert.doesNotThrow(() => new Function(api));
   assert.doesNotThrow(() => new Function(script));
+});
+
+test('legacy application code delegates network access to the API layer', async () => {
+  const { api, script } = await readFrontend();
+  assert.doesNotMatch(script, /\bfetch\s*\(/u);
+  assert.match(script, /const apiPost=EasyBoostApi\.post/u);
+  assert.match(script, /const apiPostBinary=EasyBoostApi\.postBinary/u);
+  assert.match(api, /credentials:\s*'same-origin'/u);
+  assert.match(api, /requestId/u);
 });

@@ -436,19 +436,16 @@ async function genReading(){
 
 /* ===== SERVER CONNECT (Этап 5) ===== */
 const SRV=(location.protocol==='http:'||location.protocol==='https:');
-const API=location.origin;
 try{
   ['eb_token','eb_key','eb_groq','eb_model','eb_groq_model'].forEach(function(key){localStorage.removeItem(key)})
 }catch(_){}
 let TOKEN=''; // маркер активной cookie-сессии; сам JWT недоступен JavaScript
 function gv(id){var e=document.getElementById(id);return e?(e.value||'').trim():''}
 function lgMsg(t){var e=document.getElementById('lg_msg');if(e)e.textContent=t}
-async function apiPost(p,body,authed){
-  const r=await fetch(API+p,{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify(body||{})});
-  const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error((j.error&&j.error.message)||j.error||('Ошибка '+r.status));return j}
-async function apiGet(p){
-  const r=await fetch(API+p,{credentials:'same-origin'});
-  const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error((j.error&&j.error.message)||j.error||('Ошибка '+r.status));return j}
+const apiPost=EasyBoostApi.post;
+const apiGet=EasyBoostApi.get;
+const apiGetBlob=EasyBoostApi.getBlob;
+const apiPostBinary=EasyBoostApi.postBinary;
 function fillDefaults(d){d=d||{};d.box=d.box||{};d.wstatus=d.wstatus||{};d.learned=d.learned==null?320:d.learned;
   d.streak=d.streak||7;d.lastDay=d.lastDay||null;d.dayMin=d.dayMin||18;d.dayMinDate=d.dayMinDate||todayStr();
   d.essays=d.essays||0;d.speak=d.speak||0;d.prog=d.prog||{words:64,gram:42,read:78,listen:30,write:40,speak:48};return d}
@@ -481,10 +478,8 @@ doRegister=async function(){
   catch(e){lgMsg(e.message)}}
 logout=function(){localStorage.removeItem('eb_current');TOKEN='';location.reload()}
 
-/* ИИ работает только через сервер; ключи провайдеров недоступны браузеру. */
-callGemini=async function(sys,user){
-  if(!SRV)throw new Error('ИИ доступен только в серверной версии приложения');
-  const d=await apiPost('/api/ai',{system:sys,user:user},true);return d.text||''}
+/* Временный legacy-адаптер до миграции всех операций на типизированные API. */
+callGemini=EasyBoostApi.legacyAi;
 
 /* профиль: в серверном режиме ключ не нужен на клиенте */
 const _rp=renderProfile;
@@ -2612,9 +2607,7 @@ var _sa5=startApp;startApp=async function(){await _sa5.apply(this,arguments);try
   function fetchAudio(text,voice,slow){
     var k=voice+'|'+(slow?1:0)+'|'+text;
     if(cache[k])return Promise.resolve(cache[k]);
-    return fetch(API+'/api/tts?text='+encodeURIComponent(text)+'&voice='+voice+(slow?'&slow=1':''),
-      {credentials:'same-origin'})
-      .then(function(r){if(!r.ok)throw 0;return r.blob()})
+    return apiGetBlob('/api/tts?text='+encodeURIComponent(text)+'&voice='+voice+(slow?'&slow=1':''))
       .then(function(b){if(!b.size)throw 0;var u=URL.createObjectURL(b);cache[k]=u;return u})}
   function stopAudio(){seq++;if(cur){try{cur.pause()}catch(e){}cur=null}}
   /* стоп глушит и нейро, и встроенный синтез */
@@ -3020,10 +3013,7 @@ function spEtalon(){if(!SP||SP.t!==1)return;
   try{lPlayRaw(parts)}catch(e){}}
 /* ---- этап 2: расшифровка и оценка ИИ ---- */
 async function spSTT(blob){
-  var r=await fetch(API+'/api/stt',{method:'POST',
-    headers:{'Content-Type':blob.type||'application/octet-stream'},credentials:'same-origin',body:blob});
-  var j=await r.json().catch(function(){return{}});
-  if(!r.ok)throw new Error(j.error||('Ошибка '+r.status));
+  var j=await apiPostBinary('/api/stt',blob,blob.type||'application/octet-stream');
   return j.text||''}
 function spEvalCtx(tr,tt,ss){var t=tt||SP.t,set=ss||SP.set;
   if(t===1)return 'Задание 1 устной части ЕГЭ — чтение текста вслух. Оригинал: """'+set.tx+'""". Расшифровка чтения ученика: """'+tr+'""". Сравни с оригиналом: прочитан ли текст полностью, какие слова пропущены, заменены или искажены (перечисли в fix). 1 балл — если текст прочитан целиком и искажений не больше четырёх. criteria: один пункт «Чтение вслух» (max 1).';
