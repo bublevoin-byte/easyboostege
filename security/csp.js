@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 
 export function inlineScriptHashes(html) {
-  const scripts = [...String(html).matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/giu)];
+  const scripts = [...String(html).matchAll(/<script(?![^>]*\bsrc\s*=)(?:\s[^>]*)?>([\s\S]*?)<\/script>/giu)];
   return scripts.map((match) => {
     const normalized = match[1].replace(/\r\n?/gu, '\n');
     const digest = crypto.createHash('sha256').update(normalized, 'utf8').digest('base64');
@@ -11,7 +11,6 @@ export function inlineScriptHashes(html) {
 
 export function contentSecurityPolicy(html, isProduction) {
   const scriptHashes = inlineScriptHashes(html);
-  if (!scriptHashes.length) throw new Error('Frontend must contain at least one script for CSP hashing');
   return {
     useDefaults: false,
     directives: {
