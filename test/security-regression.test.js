@@ -126,12 +126,23 @@ test('new production users start with zero real progress', async () => {
 
 test('progress sync queues the latest state and retries when connectivity returns', async () => {
   const sync = await fs.readFile(new URL('../public/sync.js', import.meta.url), 'utf8');
-  assert.match(sync, /easyboost_pending_progress_v1/u);
+  assert.match(sync, /easyboost_pending_modules_v2/u);
   assert.match(sync, /navigator\.onLine===false/u);
   assert.match(sync, /window\.addEventListener\('online',flush\)/u);
-  assert.match(sync, /EasyBoostApi\.post\('\/api\/progress',progress,true\)/u);
+  assert.match(sync, /EasyBoostApi\.post\('\/api\/progress\/modules',\{modules:modules\},true\)/u);
   assert.match(sync, /error\.status>=500/u);
+  assert.match(sync, /pending&&pending\.modules/u);
   assert.doesNotMatch(sync, /push\(/u);
+});
+
+test('module progress endpoint merges validated keys instead of replacing the document', async () => {
+  const [server, postgres] = await Promise.all([
+    fs.readFile(serverPath, 'utf8'),
+    fs.readFile(new URL('../storage/postgres-repository.js', import.meta.url), 'utf8'),
+  ]);
+  assert.match(server, /app\.post\('\/api\/progress\/modules', auth/u);
+  assert.match(server, /validateProgress\(modules\)/u);
+  assert.match(postgres, /COALESCE\(user_progress\.data, '\{\}'::jsonb\) \|\| EXCLUDED\.data/u);
 });
 
 test('demo mode is isolated from persistence and paid AI calls', async () => {

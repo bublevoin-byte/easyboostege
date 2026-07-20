@@ -7,7 +7,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, createTelegramAuthCode, createWritingAttempt, finishWritingAttempt, getProgress, getUser, healthCheck, saveProgress, getUserByTelegram, createTelegramUser, grantDays, logAiRequest, markTrialUsed, getSub } from './db.js';
+import { closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, createTelegramAuthCode, createWritingAttempt, finishWritingAttempt, getProgress, getUser, healthCheck, saveProgress, mergeProgress, getUserByTelegram, createTelegramUser, grantDays, logAiRequest, markTrialUsed, getSub } from './db.js';
 import { config } from './config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from './ai/writing.js';
 import { protectCookieRequests } from './security/request-origin.js';
@@ -327,6 +327,17 @@ app.post('/api/progress', auth, async (req, res, next) => {
     }
     await saveProgress(req.user, parsed.data);
     res.json({ ok: true });
+  } catch (error) { next(error); }
+});
+app.post('/api/progress/modules', auth, async (req, res, next) => {
+  try {
+    const modules = req.body?.modules;
+    const parsed = validateProgress(modules);
+    if (!parsed.ok || Object.keys(parsed.data || {}).length === 0 || Object.keys(parsed.data).length > 64) {
+      return res.status(400).json({ error: { code: 'INVALID_PROGRESS_MODULES', message: 'Некорректные модули прогресса.', reason: parsed.code || 'INVALID_MODULE_COUNT' } });
+    }
+    const progress = await mergeProgress(req.user, parsed.data);
+    res.json({ ok: true, progress });
   } catch (error) { next(error); }
 });
 

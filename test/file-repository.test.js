@@ -29,6 +29,15 @@ test('file repository persists progress atomically', async () => {
   });
 });
 
+test('file repository merges progress modules without replacing siblings', async () => {
+  await withRepository(async (repository) => {
+    const username = await repository.createTelegramUser(1005, 'Merge User');
+    await repository.saveProgress(username, { words: { learned: 3 }, grammar: { score: 4 } });
+    const merged = await repository.mergeProgress(username, { words: { learned: 5 }, reading: { score: 2 } });
+    assert.deepEqual(merged, { words: { learned: 5 }, grammar: { score: 4 }, reading: { score: 2 } });
+  });
+});
+
 test('trial and subscription status are persisted', async () => {
   await withRepository(async (repository) => {
     const result = await repository.grantDays(1002, 30, 'Student');

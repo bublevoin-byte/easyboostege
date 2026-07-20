@@ -51,6 +51,19 @@ export function createPostgresRepository(connectionString) {
     );
   }
 
+  async function mergeProgress(username, modules) {
+    const result = await pool.query(
+      `INSERT INTO user_progress (username, data, updated_at)
+       VALUES ($1, $2::jsonb, NOW())
+       ON CONFLICT (username) DO UPDATE
+       SET data = COALESCE(user_progress.data, '{}'::jsonb) || EXCLUDED.data,
+           updated_at = NOW()
+       RETURNING data`,
+      [username, JSON.stringify(modules || {})],
+    );
+    return result.rows[0]?.data || {};
+  }
+
   async function getUserByTelegram(telegramId) {
     const result = await pool.query('SELECT * FROM users WHERE telegram_id = $1', [String(telegramId)]);
     return mapUser(result.rows[0]);
@@ -194,6 +207,7 @@ export function createPostgresRepository(connectionString) {
     createUser,
     getProgress,
     saveProgress,
+    mergeProgress,
     getUserByTelegram,
     createTelegramUser,
     ensureTelegramUser,

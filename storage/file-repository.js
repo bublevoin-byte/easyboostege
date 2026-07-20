@@ -62,6 +62,13 @@ export function createFileRepository(filePath) {
     await persist();
   }
 
+  async function mergeProgress(username, modules) {
+    await load();
+    state.progress[username] = { ...(state.progress[username] || {}), ...structuredClone(modules || {}) };
+    await persist();
+    return structuredClone(state.progress[username]);
+  }
+
   async function getUserByTelegram(telegramId) {
     await load();
     const id = String(telegramId);
@@ -219,6 +226,7 @@ export function createFileRepository(filePath) {
     createUser,
     getProgress,
     saveProgress,
+    mergeProgress,
     getUserByTelegram,
     createTelegramUser,
     ensureTelegramUser,

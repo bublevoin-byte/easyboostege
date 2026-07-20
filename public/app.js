@@ -338,8 +338,8 @@ async function startApp(){
   if(SRV){if(!TOKEN){show('scr5');document.getElementById('tabbar').style.display='none';return}
     try{const d=await apiGet('/api/progress');S=fillDefaults(d)}catch(e){S=fillDefaults({})}}
   else{S=load()}
+  EasyBoostSync.setBaseline(S);
   tab('scr1');
-  EasyBoostSync.flush();
   for(const hook of START_HOOKS){try{await hook()}catch(e){}}
 }
 

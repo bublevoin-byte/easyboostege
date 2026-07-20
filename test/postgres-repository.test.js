@@ -25,6 +25,8 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     const progress = { learned: 12, prog: { words: 33 }, marker: suffix };
     await repository.saveProgress(username, progress);
     assert.deepEqual(await repository.getProgress(username), progress);
+    await repository.mergeProgress(username, { prog: { words: 44 }, extra: true });
+    assert.deepEqual(await repository.getProgress(username), { learned: 12, prog: { words: 44 }, marker: suffix, extra: true });
 
     const code = crypto.randomBytes(24).toString('base64url');
     await repository.createTelegramAuthCode(code, Date.now() + 60_000);

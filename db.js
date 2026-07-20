@@ -10,6 +10,7 @@ export const getUser = (...args) => repository.getUser(...args);
 export const createUser = (...args) => repository.createUser(...args);
 export const getProgress = (...args) => repository.getProgress(...args);
 export const saveProgress = (...args) => repository.saveProgress(...args);
+export const mergeProgress = (...args) => repository.mergeProgress(...args);
 export const getUserByTelegram = (...args) => repository.getUserByTelegram(...args);
 export const createTelegramUser = (...args) => repository.createTelegramUser(...args);
 export const ensureTelegramUser = (...args) => repository.ensureTelegramUser(...args);
