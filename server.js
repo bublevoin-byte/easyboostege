@@ -7,7 +7,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, countAiRequestsSince, createTelegramAuthCode, createWritingAttempt, deleteUserData, exportUserData, finishWritingAttempt, getPrivacyConsent, getProgress, getUser, healthCheck, saveProgress, setPrivacyConsent, mergeProgress, getUserByTelegram, createTelegramUser, grantDays, logAiRequest, markTrialUsed, getSub } from './db.js';
+import { closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, countAiRequestsSince, createSession, createTelegramAuthCode, createWritingAttempt, deleteUserData, exportUserData, finishWritingAttempt, getPrivacyConsent, getProgress, getUser, healthCheck, isSessionActive, revokeSession, saveProgress, setPrivacyConsent, mergeProgress, getUserByTelegram, createTelegramUser, grantDays, logAiRequest, markTrialUsed, getSub } from './db.js';
 import { config } from './config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from './ai/writing.js';
 import { buildContentPrompt, CONTENT_PROMPT_VERSION, contentRequestSchema, parseContentResponse } from './ai/content.js';
@@ -96,7 +96,7 @@ app.get('/', async (req, res, next) => {
       if (!confirmed) return res.redirect('/?login_error=expired');
       const existing = await getUserByTelegram(confirmed.telegram_id);
       const username = existing ? existing.username : await createTelegramUser(confirmed.telegram_id, confirmed.name);
-      setAuthCookie(req, res, makeToken(username));
+      setAuthCookie(req, res, await issueToken(username));
       return res.redirect('/');
     }
 
@@ -113,8 +113,11 @@ app.use(express.static(path.join(__dirname, 'public'), {
   },
 }));
 
-function makeToken(username) {
-  return jwt.sign({ u: username }, SECRET, { expiresIn: config.sessionDays + 'd' });
+async function issueToken(username) {
+  const sid = crypto.randomUUID();
+  const expiresAt = Date.now() + config.sessionDays * 86_400_000;
+  await createSession(sid, username, expiresAt);
+  return jwt.sign({ u: username, sid }, SECRET, { expiresIn: config.sessionDays + 'd' });
 }
 function getCookie(req, name) {
   const c = req.headers.cookie || '';
@@ -125,13 +128,23 @@ function setAuthCookie(req, res, token) {
   const secure = (req.headers['x-forwarded-proto'] || req.protocol) === 'https' ? '; Secure' : '';
   res.setHeader('Set-Cookie', 'eb_token=' + encodeURIComponent(token) + '; Path=/; Max-Age=' + (config.sessionDays * 86400) + '; HttpOnly; SameSite=Lax' + secure);
 }
+function clearAuthCookie(req, res) {
+  const secure = (req.headers['x-forwarded-proto'] || req.protocol) === 'https' ? '; Secure' : '';
+  res.setHeader('Set-Cookie', 'eb_token=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax' + secure);
+}
 async function auth(req, res, next) {
   const h = req.headers.authorization || '';
   const token = (h.startsWith('Bearer ') ? h.slice(7) : '') || getCookie(req, 'eb_token');
   try {
-    const username = jwt.verify(token, SECRET).u;
+    const claims = jwt.verify(token, SECRET);
+    const username = claims.u;
     if (!await getUser(username)) return res.status(401).json({ error: 'Требуется вход' });
+    if (claims.sid && !await isSessionActive(claims.sid, username)) {
+      return res.status(401).json({ error: { code: 'SESSION_REVOKED', message: 'Сессия завершена. Войдите снова.' } });
+    }
     req.user = username;
+    req.sessionId = claims.sid || null;
+    req.authToken = token;
     next();
   } catch (e) {
     res.status(401).json({ error: 'Требуется вход' });
@@ -305,7 +318,7 @@ app.get('/api/tg/check', telegramCheckLimiter, async (req, res, next) => {
     if (!r) return res.json({ pending: true });
     const existing = await getUserByTelegram(r.telegram_id);
     const uname = existing ? existing.username : await createTelegramUser(r.telegram_id, r.name);
-    const token = makeToken(uname);
+    const token = await issueToken(uname);
     setAuthCookie(req, res, token);
     res.json({ authenticated: true, username: uname, ...await getSub(uname), bot: BOT_USERNAME });
   } catch (error) { next(error); }
@@ -314,14 +327,23 @@ app.get('/api/tg/check', telegramCheckLimiter, async (req, res, next) => {
 // ---- статус доступа (подписка) ----
 app.get('/api/me', auth, async (req, res, next) => {
   try {
-    const token = makeToken(req.user);
+    const token = req.sessionId ? req.authToken : await issueToken(req.user);
     setAuthCookie(req, res, token);
     res.json({ authenticated: true, username: req.user, bot: BOT_USERNAME, ...await getSub(req.user) });
   } catch (error) { next(error); }
 });
-app.post('/api/logout', (req, res) => {
-  res.setHeader('Set-Cookie', 'eb_token=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax');
-  res.json({ ok: true });
+app.post('/api/logout', async (req, res, next) => {
+  try {
+    const token = getCookie(req, 'eb_token') || String(req.headers.authorization || '').replace(/^Bearer\s+/u, '');
+    if (token) {
+      try {
+        const claims = jwt.verify(token, SECRET);
+        if (claims.sid && claims.u) await revokeSession(claims.sid, claims.u);
+      } catch (error) { /* expired or invalid cookies are cleared as well */ }
+    }
+    clearAuthCookie(req, res);
+    res.json({ ok: true });
+  } catch (error) { next(error); }
 });
 
 app.get('/api/account/export', auth, async (req, res, next) => {
@@ -339,7 +361,7 @@ app.delete('/api/account', auth, async (req, res, next) => {
       return res.status(400).json({ error: { code: 'CONFIRMATION_REQUIRED', message: 'Подтвердите удаление аккаунта.' } });
     }
     await deleteUserData(req.user);
-    res.setHeader('Set-Cookie', 'eb_token=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax');
+    clearAuthCookie(req, res);
     res.json({ ok: true });
   } catch (error) { next(error); }
 });

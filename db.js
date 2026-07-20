@@ -26,6 +26,9 @@ export const createWritingAttempt = (...args) => repository.createWritingAttempt
 export const finishWritingAttempt = (...args) => repository.finishWritingAttempt(...args);
 export const logAiRequest = (...args) => repository.logAiRequest(...args);
 export const countAiRequestsSince = (...args) => repository.countAiRequestsSince(...args);
+export const createSession = (...args) => repository.createSession(...args);
+export const isSessionActive = (...args) => repository.isSessionActive(...args);
+export const revokeSession = (...args) => repository.revokeSession(...args);
 export const exportUserData = (...args) => repository.exportUserData(...args);
 export const deleteUserData = (...args) => repository.deleteUserData(...args);
 export const healthCheck = (...args) => repository.healthCheck(...args);

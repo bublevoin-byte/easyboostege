@@ -229,6 +229,33 @@ export function createPostgresRepository(connectionString) {
     return Number(result.rows[0].count);
   }
 
+  async function createSession(id, username, expiresAt) {
+    await pool.query('DELETE FROM sessions WHERE expires_at <= NOW()');
+    await pool.query(
+      'INSERT INTO sessions (id, username, expires_at) VALUES ($1, $2, $3)',
+      [id, username, new Date(Number(expiresAt))],
+    );
+  }
+
+  async function isSessionActive(id, username) {
+    const result = await pool.query(
+      `SELECT id FROM sessions
+       WHERE id = $1 AND username = $2 AND revoked_at IS NULL AND expires_at > NOW()`,
+      [id, username],
+    );
+    return result.rowCount === 1;
+  }
+
+  async function revokeSession(id, username) {
+    const result = await pool.query(
+      `UPDATE sessions SET revoked_at = NOW()
+       WHERE id = $1 AND username = $2 AND revoked_at IS NULL
+       RETURNING id`,
+      [id, username],
+    );
+    return result.rowCount === 1;
+  }
+
   async function exportUserData(username) {
     const [account, progress, privacyConsent, subscriptionEvents, writingAttempts, aiRequests] = await Promise.all([
       pool.query('SELECT username, telegram_id, trial_used, subscription_until, created_at, updated_at FROM users WHERE username = $1', [username]),
@@ -293,6 +320,9 @@ export function createPostgresRepository(connectionString) {
     finishWritingAttempt,
     logAiRequest,
     countAiRequestsSince,
+    createSession,
+    isSessionActive,
+    revokeSession,
     exportUserData,
     deleteUserData,
     healthCheck,

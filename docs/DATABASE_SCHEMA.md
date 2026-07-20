@@ -6,6 +6,7 @@
 |---|---|---|
 | `schema_migrations` | применённые миграции | `version`, `applied_at` |
 | `users` | аккаунты Telegram/legacy | `username`, `telegram_id`, subscription fields |
+| `sessions` | серверные пользовательские сессии | `id`, `username`, expiry, revoke timestamp |
 | `user_progress` | JSONB-прогресс пользователя | `username`, `data`, `updated_at` |
 | `telegram_auth_codes` | одноразовые коды входа | hash кода, expiry, consumed state |
 | `writing_attempts` | попытки заданий 37/38 | assignment, answer, review, provider status |

@@ -53,12 +53,15 @@ test('application starts and serves health, security headers and PWA assets', { 
   const baseUrl = `http://127.0.0.1:${port}`;
   const dataFile = path.join(temporaryDirectory, 'data.json');
   const jwtSecret = 'smoke-test-secret-with-at-least-32-characters';
+  const sessionId = '750f111c-1f2f-48c7-9956-b2c284722a2b';
   await fs.writeFile(dataFile, JSON.stringify({
     users: {
       expired: { created: Date.now(), sub_until: Date.now() - 60_000 },
       active: { created: Date.now(), sub_until: Date.now() + 60_000, privacy_consent: { text_processing: true, voice_processing: true, policy_version: '2026-07-20', updated_at: new Date().toISOString() } },
+      sessionuser: { created: Date.now(), sub_until: Date.now() + 60_000 },
     },
-    progress: { expired: {}, active: {} },
+    progress: { expired: {}, active: {}, sessionuser: {} },
+    sessions: { [sessionId]: { username: 'sessionuser', expires_at: Date.now() + 60_000, created_at: Date.now(), revoked_at: null } },
   }), 'utf8');
   const output = [];
   const child = spawn(process.execPath, [serverPath], {
@@ -153,6 +156,19 @@ test('application starts and serves health, security headers and PWA assets', { 
     assert.equal(exported.status, 200);
     assert.match(exported.headers.get('content-disposition') || '', /easyboost-data\.json/u);
     assert.equal((await exported.json()).account.username, 'active');
+
+    const revocableToken = jwt.sign({ u: 'sessionuser', sid: sessionId }, jwtSecret, { expiresIn: '1h' });
+    const sessionBeforeLogout = await fetch(`${baseUrl}/api/me`, { headers: { Authorization: `Bearer ${revocableToken}` } });
+    assert.equal(sessionBeforeLogout.status, 200);
+    const logout = await fetch(`${baseUrl}/api/logout`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${revocableToken}` },
+    });
+    assert.equal(logout.status, 200);
+    assert.match(logout.headers.get('set-cookie') || '', /Max-Age=0/u);
+    const sessionAfterLogout = await fetch(`${baseUrl}/api/me`, { headers: { Authorization: `Bearer ${revocableToken}` } });
+    assert.equal(sessionAfterLogout.status, 401);
+    assert.equal((await sessionAfterLogout.json()).error.code, 'SESSION_REVOKED');
 
     const unconfirmedDeletion = await fetch(`${baseUrl}/api/account`, {
       method: 'DELETE',

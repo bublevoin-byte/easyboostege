@@ -4,7 +4,7 @@ import { hashAuthCode, normalizeUsername, subscriptionView } from './shared.js';
 
 export function createFileRepository(filePath) {
   let loaded = false;
-  let state = { users: {}, progress: {}, auth_codes: {}, writing_attempts: [], ai_requests: [] };
+  let state = { users: {}, progress: {}, auth_codes: {}, writing_attempts: [], ai_requests: [], sessions: {} };
   let writeQueue = Promise.resolve();
 
   async function load() {
@@ -19,6 +19,7 @@ export function createFileRepository(filePath) {
           auth_codes: parsed.auth_codes && typeof parsed.auth_codes === 'object' ? parsed.auth_codes : {},
           writing_attempts: Array.isArray(parsed.writing_attempts) ? parsed.writing_attempts : [],
           ai_requests: Array.isArray(parsed.ai_requests) ? parsed.ai_requests : [],
+          sessions: parsed.sessions && typeof parsed.sessions === 'object' ? parsed.sessions : {},
         };
       }
     } catch (error) {
@@ -249,6 +250,36 @@ export function createFileRepository(filePath) {
     return state.ai_requests.filter((item) => Number(item.created_at) >= timestamp).length;
   }
 
+  function removeExpiredSessions(now = Date.now()) {
+    for (const [id, session] of Object.entries(state.sessions)) {
+      if (Number(session.expires_at) <= now) delete state.sessions[id];
+    }
+  }
+
+  async function createSession(id, username, expiresAt) {
+    await load();
+    if (!state.users[username]) throw new Error('USER_NOT_FOUND');
+    removeExpiredSessions();
+    state.sessions[id] = { username, expires_at: Number(expiresAt), created_at: Date.now(), last_seen_at: Date.now(), revoked_at: null };
+    await persist();
+  }
+
+  async function isSessionActive(id, username) {
+    await load();
+    const session = state.sessions[id];
+    if (!session || session.username !== username || session.revoked_at || Number(session.expires_at) <= Date.now()) return false;
+    return true;
+  }
+
+  async function revokeSession(id, username) {
+    await load();
+    const session = state.sessions[id];
+    if (!session || session.username !== username || session.revoked_at) return false;
+    session.revoked_at = Date.now();
+    await persist();
+    return true;
+  }
+
   async function exportUserData(username) {
     await load();
     const user = state.users[username];
@@ -279,6 +310,9 @@ export function createFileRepository(filePath) {
     delete state.progress[username];
     state.writing_attempts = state.writing_attempts.filter((item) => item.username !== username);
     state.ai_requests = state.ai_requests.filter((item) => item.username !== username);
+    for (const [id, session] of Object.entries(state.sessions)) {
+      if (session.username === username) delete state.sessions[id];
+    }
     if (telegramId) {
       for (const [codeHash, entry] of Object.entries(state.auth_codes)) {
         if (String(entry.telegram_id) === telegramId) delete state.auth_codes[codeHash];
@@ -315,6 +349,9 @@ export function createFileRepository(filePath) {
     finishWritingAttempt,
     logAiRequest,
     countAiRequestsSince,
+    createSession,
+    isSessionActive,
+    revokeSession,
     exportUserData,
     deleteUserData,
     healthCheck,

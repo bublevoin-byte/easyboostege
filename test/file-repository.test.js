@@ -77,6 +77,19 @@ test('expired telegram auth code cannot be confirmed', async () => {
   });
 });
 
+test('sessions can be validated and revoked server-side', async () => {
+  await withRepository(async (repository) => {
+    const username = await repository.createTelegramUser(2010, 'Session User');
+    const sessionId = '4f24a754-d25a-49ab-8182-111c02ef225d';
+    await repository.createSession(sessionId, username, Date.now() + 60_000);
+    assert.equal(await repository.isSessionActive(sessionId, username), true);
+    assert.equal(await repository.isSessionActive(sessionId, 'another-user'), false);
+    assert.equal(await repository.revokeSession(sessionId, username), true);
+    assert.equal(await repository.isSessionActive(sessionId, username), false);
+    assert.equal(await repository.revokeSession(sessionId, username), false);
+  });
+});
+
 test('writing attempt and AI metadata are persisted without prompt text in the AI log', async () => {
   await withRepository(async (repository, file) => {
     const username = await repository.createTelegramUser(3001, 'Writer');
