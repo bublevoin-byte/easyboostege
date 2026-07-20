@@ -4,7 +4,7 @@ import { hashAuthCode, normalizeUsername, subscriptionView } from './shared.js';
 
 export function createFileRepository(filePath) {
   let loaded = false;
-  let state = { users: {}, progress: {}, auth_codes: {}, writing_attempts: [], ai_requests: [], sessions: {} };
+  let state = { users: {}, progress: {}, auth_codes: {}, writing_attempts: [], ai_requests: [], sessions: {}, subscriptions: {}, payment_requests: {}, subscription_events: [] };
   let writeQueue = Promise.resolve();
 
   async function load() {
@@ -20,6 +20,9 @@ export function createFileRepository(filePath) {
           writing_attempts: Array.isArray(parsed.writing_attempts) ? parsed.writing_attempts : [],
           ai_requests: Array.isArray(parsed.ai_requests) ? parsed.ai_requests : [],
           sessions: parsed.sessions && typeof parsed.sessions === 'object' ? parsed.sessions : {},
+          subscriptions: parsed.subscriptions && typeof parsed.subscriptions === 'object' ? parsed.subscriptions : {},
+          payment_requests: parsed.payment_requests && typeof parsed.payment_requests === 'object' ? parsed.payment_requests : {},
+          subscription_events: Array.isArray(parsed.subscription_events) ? parsed.subscription_events : [],
         };
       }
     } catch (error) {
@@ -104,8 +107,41 @@ export function createFileRepository(filePath) {
     const user = state.users[username];
     const now = Date.now();
     user.sub_until = Math.max(now, Number(user.sub_until || 0)) + Number(days) * 86_400_000;
+    state.subscriptions[username] = { status: 'active', source: displayName ? 'trial' : 'manual', starts_at: now, ends_at: user.sub_until, updated_at: now };
     await persist();
     return { username, sub_until: user.sub_until };
+  }
+
+  async function createPaymentRequest(id, telegramId, displayName) {
+    await load();
+    const username = await ensureTelegramUser(telegramId, displayName);
+    const existing = Object.values(state.payment_requests).find((request) => request.username === username && request.status === 'new');
+    if (existing) return structuredClone(existing);
+    const request = { id, username, status: 'new', created_at: Date.now() };
+    state.payment_requests[id] = request;
+    await persist();
+    return structuredClone(request);
+  }
+
+  async function resolvePaymentRequest(id, decision, actorTelegramId, days) {
+    await load();
+    if (!['approved', 'rejected', 'cancelled'].includes(decision)) throw new Error('INVALID_PAYMENT_DECISION');
+    const request = state.payment_requests[id];
+    if (!request) throw new Error('PAYMENT_REQUEST_NOT_FOUND');
+    const user = state.users[request.username];
+    if (request.status !== 'new') return { applied: false, status: request.status, username: request.username, telegram_id: user.telegram_id, sub_until: user.sub_until || 0 };
+    if (decision === 'approved') {
+      const now = Date.now();
+      user.sub_until = Math.max(now, Number(user.sub_until || 0)) + Number(days) * 86_400_000;
+      state.subscriptions[request.username] = { status: 'active', source: 'manual', starts_at: now, ends_at: user.sub_until, updated_at: now };
+      state.subscription_events.push({ username: request.username, event_type: 'payment_approved', days: Number(days), actor_telegram_id: Number(actorTelegramId), metadata: { payment_request_id: id }, created_at: now });
+    }
+    request.status = decision;
+    request.actor_telegram_id = Number(actorTelegramId);
+    request.result = decision;
+    request.resolved_at = Date.now();
+    await persist();
+    return { applied: true, status: decision, username: request.username, telegram_id: user.telegram_id, sub_until: user.sub_until || 0 };
   }
 
   async function markTrialUsed(telegramId, displayName) {
@@ -114,6 +150,20 @@ export function createFileRepository(filePath) {
     state.users[username].trial_used = true;
     await persist();
     return username;
+  }
+
+  async function activateTrial(telegramId, days, displayName) {
+    await load();
+    const username = await ensureTelegramUser(telegramId, displayName);
+    const user = state.users[username];
+    if (user.trial_used) return { applied: false, username, sub_until: user.sub_until || 0 };
+    const now = Date.now();
+    user.trial_used = true;
+    user.sub_until = Math.max(now, Number(user.sub_until || 0)) + Number(days) * 86_400_000;
+    state.subscriptions[username] = { status: 'active', source: 'trial', starts_at: now, ends_at: user.sub_until, updated_at: now };
+    state.subscription_events.push({ username, event_type: 'trial_activated', days: Number(days), actor_telegram_id: Number(telegramId), metadata: {}, created_at: now });
+    await persist();
+    return { applied: true, username, sub_until: user.sub_until };
   }
 
   async function getSub(username) {
@@ -305,7 +355,8 @@ export function createFileRepository(filePath) {
       },
       progress: state.progress[username] || {},
       privacy_consent: await getPrivacyConsent(username),
-      subscription_events: [],
+      subscription_events: state.subscription_events.filter((item) => item.username === username),
+      payment_requests: Object.values(state.payment_requests).filter((item) => item.username === username),
       writing_attempts: state.writing_attempts.filter((item) => item.username === username),
       ai_requests: state.ai_requests.filter((item) => item.username === username),
     });
@@ -320,6 +371,9 @@ export function createFileRepository(filePath) {
     delete state.progress[username];
     state.writing_attempts = state.writing_attempts.filter((item) => item.username !== username);
     state.ai_requests = state.ai_requests.filter((item) => item.username !== username);
+    delete state.subscriptions[username];
+    state.subscription_events = state.subscription_events.filter((item) => item.username !== username);
+    for (const [id, request] of Object.entries(state.payment_requests)) if (request.username === username) delete state.payment_requests[id];
     for (const [id, session] of Object.entries(state.sessions)) {
       if (session.username === username) delete state.sessions[id];
     }
@@ -348,7 +402,10 @@ export function createFileRepository(filePath) {
     createTelegramUser,
     ensureTelegramUser,
     grantDays,
+    createPaymentRequest,
+    resolvePaymentRequest,
     markTrialUsed,
+    activateTrial,
     getSub,
     setUserRole,
     getPrivacyConsent,

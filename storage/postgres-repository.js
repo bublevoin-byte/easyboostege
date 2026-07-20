@@ -106,13 +106,118 @@ export function createPostgresRepository(connectionString) {
        RETURNING subscription_until`,
       [username, Number(days)],
     );
+    await pool.query(
+      `INSERT INTO subscriptions (username, status, source, starts_at, ends_at)
+       VALUES ($1, 'active', $3, NOW(), $2)
+       ON CONFLICT (username) DO UPDATE SET status = 'active', source = EXCLUDED.source,
+         ends_at = EXCLUDED.ends_at, updated_at = NOW()`,
+      [username, result.rows[0].subscription_until, displayName ? 'trial' : 'manual'],
+    );
     return { username, sub_until: new Date(result.rows[0].subscription_until).getTime() };
+  }
+
+  async function createPaymentRequest(id, telegramId, displayName) {
+    const username = await ensureTelegramUser(telegramId, displayName);
+    try {
+      const result = await pool.query(
+        `INSERT INTO payment_requests (id, username) VALUES ($1, $2)
+         RETURNING id, username, status`, [id, username],
+      );
+      return result.rows[0];
+    } catch (error) {
+      if (error.code !== '23505') throw error;
+      const existing = await pool.query(
+        `SELECT id, username, status FROM payment_requests
+         WHERE username = $1 AND status = 'new' ORDER BY created_at DESC LIMIT 1`, [username],
+      );
+      if (existing.rowCount) return existing.rows[0];
+      throw error;
+    }
+  }
+
+  async function resolvePaymentRequest(id, decision, actorTelegramId, days) {
+    if (!['approved', 'rejected', 'cancelled'].includes(decision)) throw new Error('INVALID_PAYMENT_DECISION');
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const locked = await client.query(
+        `SELECT pr.id, pr.username, pr.status, u.telegram_id, u.subscription_until
+         FROM payment_requests pr JOIN users u ON u.username = pr.username
+         WHERE pr.id = $1 FOR UPDATE`, [id],
+      );
+      if (!locked.rowCount) throw new Error('PAYMENT_REQUEST_NOT_FOUND');
+      const request = locked.rows[0];
+      if (request.status !== 'new') {
+        await client.query('COMMIT');
+        return { applied: false, status: request.status, username: request.username, telegram_id: Number(request.telegram_id), sub_until: request.subscription_until ? new Date(request.subscription_until).getTime() : 0 };
+      }
+      let subUntil = request.subscription_until;
+      if (decision === 'approved') {
+        const updated = await client.query(
+          `UPDATE users SET subscription_until = GREATEST(COALESCE(subscription_until, NOW()), NOW()) + ($2 * INTERVAL '1 day'), updated_at = NOW()
+           WHERE username = $1 RETURNING subscription_until`, [request.username, Number(days)],
+        );
+        subUntil = updated.rows[0].subscription_until;
+        await client.query(
+          `INSERT INTO subscriptions (username, status, source, starts_at, ends_at)
+           VALUES ($1, 'active', 'manual', NOW(), $2)
+           ON CONFLICT (username) DO UPDATE SET status = 'active', source = 'manual', ends_at = EXCLUDED.ends_at, updated_at = NOW()`,
+          [request.username, subUntil],
+        );
+        await client.query(
+          `INSERT INTO subscription_events (username, event_type, days, actor_telegram_id, metadata)
+           VALUES ($1, 'payment_approved', $2, $3, $4::jsonb)`,
+          [request.username, Number(days), String(actorTelegramId), JSON.stringify({ payment_request_id: id })],
+        );
+      }
+      await client.query(
+        `UPDATE payment_requests SET status = $2, actor_telegram_id = $3, result = $2, resolved_at = NOW() WHERE id = $1`,
+        [id, decision, String(actorTelegramId)],
+      );
+      await client.query('COMMIT');
+      return { applied: true, status: decision, username: request.username, telegram_id: Number(request.telegram_id), sub_until: subUntil ? new Date(subUntil).getTime() : 0 };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
   }
 
   async function markTrialUsed(telegramId, displayName) {
     const username = await ensureTelegramUser(telegramId, displayName);
     await pool.query('UPDATE users SET trial_used = TRUE, updated_at = NOW() WHERE username = $1', [username]);
     return username;
+  }
+
+  async function activateTrial(telegramId, days, displayName) {
+    const username = await ensureTelegramUser(telegramId, displayName);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const user = await client.query('SELECT trial_used, subscription_until FROM users WHERE username = $1 FOR UPDATE', [username]);
+      if (user.rows[0].trial_used) {
+        await client.query('COMMIT');
+        return { applied: false, username, sub_until: user.rows[0].subscription_until ? new Date(user.rows[0].subscription_until).getTime() : 0 };
+      }
+      const updated = await client.query(
+        `UPDATE users SET trial_used = TRUE,
+           subscription_until = GREATEST(COALESCE(subscription_until, NOW()), NOW()) + ($2 * INTERVAL '1 day'), updated_at = NOW()
+         WHERE username = $1 RETURNING subscription_until`, [username, Number(days)],
+      );
+      await client.query(
+        `INSERT INTO subscriptions (username, status, source, starts_at, ends_at)
+         VALUES ($1, 'active', 'trial', NOW(), $2)
+         ON CONFLICT (username) DO UPDATE SET status = 'active', source = 'trial', ends_at = EXCLUDED.ends_at, updated_at = NOW()`,
+        [username, updated.rows[0].subscription_until],
+      );
+      await client.query(
+        `INSERT INTO subscription_events (username, event_type, days, actor_telegram_id)
+         VALUES ($1, 'trial_activated', $2, $3)`, [username, Number(days), String(telegramId)],
+      );
+      await client.query('COMMIT');
+      return { applied: true, username, sub_until: new Date(updated.rows[0].subscription_until).getTime() };
+    } catch (error) {
+      await client.query('ROLLBACK'); throw error;
+    } finally { client.release(); }
   }
 
   async function getSub(username) {
@@ -268,11 +373,12 @@ export function createPostgresRepository(connectionString) {
   }
 
   async function exportUserData(username) {
-    const [account, progress, privacyConsent, subscriptionEvents, writingAttempts, aiRequests] = await Promise.all([
+    const [account, progress, privacyConsent, subscriptionEvents, paymentRequests, writingAttempts, aiRequests] = await Promise.all([
       pool.query('SELECT username, telegram_id, role, trial_used, subscription_until, created_at, updated_at FROM users WHERE username = $1', [username]),
       pool.query('SELECT data, updated_at FROM user_progress WHERE username = $1', [username]),
       pool.query('SELECT text_processing, voice_processing, policy_version, text_consented_at, voice_consented_at, updated_at FROM privacy_consents WHERE username = $1', [username]),
       pool.query('SELECT id, event_type, days, metadata, created_at FROM subscription_events WHERE username = $1 ORDER BY created_at', [username]),
+      pool.query('SELECT id, status, actor_telegram_id, result, created_at, resolved_at FROM payment_requests WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, task_type, assignment, answer, review, provider, prompt_version, status, created_at, evaluated_at FROM writing_attempts WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, operation, provider, model, prompt_version, status, duration_ms, error_code, prompt_tokens, completion_tokens, estimated_cost_microusd, created_at FROM ai_requests WHERE username = $1 ORDER BY created_at', [username]),
     ]);
@@ -283,6 +389,7 @@ export function createPostgresRepository(connectionString) {
       progress: progress.rows[0]?.data || {},
       privacy_consent: privacyConsent.rows[0] || null,
       subscription_events: subscriptionEvents.rows,
+      payment_requests: paymentRequests.rows,
       writing_attempts: writingAttempts.rows,
       ai_requests: aiRequests.rows,
     };
@@ -320,7 +427,10 @@ export function createPostgresRepository(connectionString) {
     createTelegramUser,
     ensureTelegramUser,
     grantDays,
+    createPaymentRequest,
+    resolvePaymentRequest,
     markTrialUsed,
+    activateTrial,
     getSub,
     setUserRole,
     getPrivacyConsent,

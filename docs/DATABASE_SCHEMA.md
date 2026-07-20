@@ -7,6 +7,8 @@
 | `schema_migrations` | применённые миграции | `version`, `applied_at` |
 | `users` | аккаунты Telegram/legacy и роли | `username`, `telegram_id`, `role`, subscription fields |
 | `sessions` | серверные пользовательские сессии | `id`, `username`, expiry, revoke timestamp |
+| `subscriptions` | текущее состояние доступа | `username`, status, source, start/end timestamps |
+| `payment_requests` | ручные заявки на оплату | status, administrator, result and resolution time |
 | `user_progress` | JSONB-прогресс пользователя | `username`, `data`, `updated_at` |
 | `telegram_auth_codes` | одноразовые коды входа | hash кода, expiry, consumed state |
 | `writing_attempts` | попытки заданий 37/38 | assignment, answer, review, provider status |

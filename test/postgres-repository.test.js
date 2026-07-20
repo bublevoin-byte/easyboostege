@@ -19,12 +19,22 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
       '001_initial.sql', '002_telegram_auth_codes.sql', '003_writing_attempt_error_code.sql',
       '004_privacy_consents.sql', '005_ai_token_usage.sql', '006_ai_estimated_cost.sql', '007_sessions.sql',
       '008_user_roles.sql',
+      '009_subscriptions_and_payments.sql',
     ]);
 
     const username = await repository.createTelegramUser(telegramId, `Integration ${suffix}`);
     assert.equal((await repository.getUser(username)).telegram_id, telegramId);
     assert.equal(await repository.setUserRole(username, 'admin'), 'admin');
     assert.equal((await repository.getUser(username)).role, 'admin');
+
+    const trial = await repository.activateTrial(telegramId, 30, 'Integration User');
+    assert.equal(trial.applied, true);
+    assert.equal((await repository.activateTrial(telegramId, 30, 'Integration User')).applied, false);
+
+    const paymentRequest = await repository.createPaymentRequest(crypto.randomUUID(), telegramId, 'Integration User');
+    const approvedPayment = await repository.resolvePaymentRequest(paymentRequest.id, 'approved', telegramId, 30);
+    assert.equal(approvedPayment.applied, true);
+    assert.equal((await repository.resolvePaymentRequest(paymentRequest.id, 'approved', telegramId, 30)).applied, false);
 
     const sessionId = crypto.randomUUID();
     await repository.createSession(sessionId, username, Date.now() + 60_000);

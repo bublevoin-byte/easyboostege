@@ -40,11 +40,31 @@ test('file repository merges progress modules without replacing siblings', async
 
 test('trial and subscription status are persisted', async () => {
   await withRepository(async (repository) => {
-    const result = await repository.grantDays(1002, 30, 'Student');
-    await repository.markTrialUsed(1002, 'Student');
+    const result = await repository.activateTrial(1002, 30, 'Student');
+    assert.equal(result.applied, true);
+    assert.equal((await repository.activateTrial(1002, 30, 'Student')).applied, false);
     const subscription = await repository.getSub(result.username);
     assert.equal(subscription.active, true);
     assert.equal(subscription.trial_used, true);
+    assert.equal((await repository.exportUserData(result.username)).subscription_events.length, 1);
+  });
+});
+
+test('payment approval is idempotent and records its actor and result', async () => {
+  await withRepository(async (repository) => {
+    const request = await repository.createPaymentRequest('b82c0a3f-1800-4b04-b573-4bb23bdf5b5a', 1012, 'Paying Student');
+    const duplicate = await repository.createPaymentRequest('4c9c0821-6894-47eb-9f5d-a2cf1ef95073', 1012, 'Paying Student');
+    assert.equal(duplicate.id, request.id);
+    const approved = await repository.resolvePaymentRequest(request.id, 'approved', 9001, 30);
+    assert.equal(approved.applied, true);
+    const subscriptionAfterFirstClick = (await repository.getUser(request.username)).sub_until;
+    const repeated = await repository.resolvePaymentRequest(request.id, 'approved', 9001, 30);
+    assert.equal(repeated.applied, false);
+    assert.equal((await repository.getUser(request.username)).sub_until, subscriptionAfterFirstClick);
+    const exported = await repository.exportUserData(request.username);
+    assert.equal(exported.payment_requests[0].status, 'approved');
+    assert.equal(exported.payment_requests[0].actor_telegram_id, 9001);
+    assert.equal(exported.subscription_events.length, 1);
   });
 });
 

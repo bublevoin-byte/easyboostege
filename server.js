@@ -7,7 +7,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, countAiRequestsSince, createSession, createTelegramAuthCode, createWritingAttempt, deleteUserData, exportUserData, finishWritingAttempt, getPrivacyConsent, getProgress, getUser, healthCheck, isSessionActive, revokeSession, saveProgress, setPrivacyConsent, setUserRole, mergeProgress, getUserByTelegram, createTelegramUser, grantDays, logAiRequest, markTrialUsed, getSub } from './db.js';
+import { activateTrial, closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, countAiRequestsSince, createPaymentRequest, createSession, createTelegramAuthCode, createWritingAttempt, deleteUserData, exportUserData, finishWritingAttempt, getPrivacyConsent, getProgress, getUser, healthCheck, isSessionActive, resolvePaymentRequest, revokeSession, saveProgress, setPrivacyConsent, setUserRole, mergeProgress, getUserByTelegram, createTelegramUser, logAiRequest, getSub } from './db.js';
 import { config } from './config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from './ai/writing.js';
 import { buildContentPrompt, CONTENT_PROMPT_VERSION, contentRequestSchema, parseContentResponse } from './ai/content.js';
@@ -223,14 +223,15 @@ async function onCallback(cq) {
       await tgApi('sendMessage', { chat_id: chatId, text: 'Пробный месяц уже был активирован раньше. Чтобы продолжить — оформи подписку.', reply_markup: { inline_keyboard: [[{ text: '💳 Оплатить подписку', callback_data: 'pay' }]] } });
       return;
     }
-    const g = await grantDays(fromId, TRIAL_DAYS, name);
-    await markTrialUsed(fromId, name);
+    const g = await activateTrial(fromId, TRIAL_DAYS, name);
+    if (!g.applied) { await ack('Пробный период уже был использован'); return; }
     await ack('Готово! Месяц активирован');
     await tgApi('sendMessage', { chat_id: chatId, text: '🎁 Месяц бесплатного доступа активирован до ' + fmtDate(g.sub_until) + '!\nОткрой приложение Easy Boost и занимайся 💪' });
     return;
   }
 
   if (data === 'pay') {
+    const paymentRequest = await createPaymentRequest(crypto.randomUUID(), fromId, name);
     await ack('Заявка отправлена');
     await tgApi('sendMessage', { chat_id: chatId, text: '💳 Заявка на подписку отправлена. Как только оплату подтвердят, доступ откроется — обычно это быстро. Спасибо!' });
     if (ADMIN_ID) {
@@ -238,8 +239,8 @@ async function onCallback(cq) {
         chat_id: ADMIN_ID,
         text: '💳 Запрос на оплату подписки\n\nПользователь: ' + name + '\nID: ' + fromId,
         reply_markup: { inline_keyboard: [[
-          { text: '✅ Активировать', callback_data: 'activate:' + fromId },
-          { text: '❌ Отказ', callback_data: 'deny:' + fromId },
+          { text: '✅ Активировать', callback_data: 'approve:' + paymentRequest.id },
+          { text: '❌ Отказ', callback_data: 'reject:' + paymentRequest.id },
         ]] },
       });
     } else {
@@ -248,18 +249,20 @@ async function onCallback(cq) {
     return;
   }
 
-  if (data.startsWith('activate:') || data.startsWith('deny:')) {
+  if (data.startsWith('approve:') || data.startsWith('reject:')) {
     if (String(fromId) !== String(ADMIN_ID)) { await ack('Недостаточно прав'); return; }
-    const targetId = Number(data.split(':')[1]);
-    if (data.startsWith('activate:')) {
-      const g = await grantDays(targetId, SUB_DAYS);
+    const requestId = data.slice(data.indexOf(':') + 1);
+    const decision = data.startsWith('approve:') ? 'approved' : 'rejected';
+    const result = await resolvePaymentRequest(requestId, decision, fromId, SUB_DAYS);
+    if (!result.applied) { await ack('Заявка уже обработана'); return; }
+    if (decision === 'approved') {
       await ack('Активировано');
-      if (cq.message) await tgApi('editMessageText', { chat_id: chatId, message_id: cq.message.message_id, text: (cq.message.text || '') + '\n\n✅ Активировано до ' + fmtDate(g.sub_until) });
-      await tgApi('sendMessage', { chat_id: targetId, text: '✅ Подписка активирована! Доступ открыт на 30 дней (до ' + fmtDate(g.sub_until) + ').\nОткрой приложение Easy Boost 🎓' });
+      if (cq.message) await tgApi('editMessageText', { chat_id: chatId, message_id: cq.message.message_id, text: (cq.message.text || '') + '\n\n✅ Активировано до ' + fmtDate(result.sub_until) });
+      await tgApi('sendMessage', { chat_id: result.telegram_id, text: '✅ Подписка активирована! Доступ открыт на 30 дней (до ' + fmtDate(result.sub_until) + ').\nОткрой приложение Easy Boost 🎓' });
     } else {
       await ack('Отклонено');
       if (cq.message) await tgApi('editMessageText', { chat_id: chatId, message_id: cq.message.message_id, text: (cq.message.text || '') + '\n\n❌ Отклонено' });
-      await tgApi('sendMessage', { chat_id: targetId, text: '❌ Платёж не подтверждён. Пожалуйста, обратитесь в поддержку сервиса.' });
+      await tgApi('sendMessage', { chat_id: result.telegram_id, text: '❌ Платёж не подтверждён. Пожалуйста, обратитесь в поддержку сервиса.' });
     }
     return;
   }
