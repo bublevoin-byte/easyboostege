@@ -17,6 +17,7 @@
 | `module_attempts` | нормализованная история учебных результатов | module, activity, score, duration and bounded metadata |
 | `word_progress` | состояние интервального повторения слов | word, stage, errors, reviews and due time |
 | `error_bank` | агрегированный банк учебных ошибок | module, item key, type, bounded details and occurrence count |
+| `audit_log` | неизменяемый журнал административных действий | actor, action, target, result and bounded metadata |
 | `ai_requests` | технический журнал ИИ | operation, provider, model, duration, status, error code, tokens, estimated cost |
 
 Связи привязаны к `users.username`; API всегда определяет пользователя из HttpOnly-сессии. Изменения схемы добавляются новой нумерованной миграцией и проверяются `npm run db:migrate`.

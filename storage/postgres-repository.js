@@ -174,6 +174,11 @@ export function createPostgresRepository(connectionString) {
         `UPDATE payment_requests SET status = $2, actor_telegram_id = $3, result = $2, resolved_at = NOW() WHERE id = $1`,
         [id, decision, String(actorTelegramId)],
       );
+      await client.query(
+        `INSERT INTO audit_log (actor_telegram_id, action, target_type, target_id, result, metadata)
+         VALUES ($1, 'payment.resolve', 'payment_request', $2, $3, $4::jsonb)`,
+        [String(actorTelegramId), id, decision, JSON.stringify({ username: request.username, days: decision === 'approved' ? Number(days) : 0 })],
+      );
       await client.query('COMMIT');
       return { applied: true, status: decision, username: request.username, telegram_id: Number(request.telegram_id), sub_until: subUntil ? new Date(subUntil).getTime() : 0 };
     } catch (error) {
@@ -466,7 +471,7 @@ export function createPostgresRepository(connectionString) {
   }
 
   async function exportUserData(username) {
-    const [account, progress, privacyConsent, subscriptionEvents, paymentRequests, writingAttempts, speakingAttempts, generatedTasks, moduleAttempts, wordProgress, errorBank, aiRequests] = await Promise.all([
+    const [account, progress, privacyConsent, subscriptionEvents, paymentRequests, writingAttempts, speakingAttempts, generatedTasks, moduleAttempts, wordProgress, errorBank, aiRequests, auditLog] = await Promise.all([
       pool.query('SELECT username, telegram_id, role, trial_used, subscription_until, created_at, updated_at FROM users WHERE username = $1', [username]),
       pool.query('SELECT data, updated_at FROM user_progress WHERE username = $1', [username]),
       pool.query('SELECT text_processing, voice_processing, policy_version, text_consented_at, voice_consented_at, updated_at FROM privacy_consents WHERE username = $1', [username]),
@@ -479,6 +484,7 @@ export function createPostgresRepository(connectionString) {
       pool.query('SELECT word, stage, error_count, review_count, due_at, updated_at FROM word_progress WHERE username = $1 ORDER BY word', [username]),
       pool.query('SELECT id, module, item_key, error_type, details, occurrence_count, first_seen_at, last_seen_at, resolved_at FROM error_bank WHERE username = $1 ORDER BY last_seen_at DESC', [username]),
       pool.query('SELECT id, operation, provider, model, prompt_version, status, duration_ms, error_code, prompt_tokens, completion_tokens, estimated_cost_microusd, created_at FROM ai_requests WHERE username = $1 ORDER BY created_at', [username]),
+      pool.query("SELECT id, actor_telegram_id, action, target_type, target_id, result, metadata, created_at FROM audit_log WHERE metadata->>'username' = $1 ORDER BY created_at", [username]),
     ]);
     if (!account.rowCount) return null;
     return {
@@ -495,6 +501,7 @@ export function createPostgresRepository(connectionString) {
       word_progress: wordProgress.rows,
       error_bank: errorBank.rows,
       ai_requests: aiRequests.rows,
+      audit_log: auditLog.rows,
     };
   }
 

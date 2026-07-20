@@ -4,7 +4,7 @@ import { hashAuthCode, normalizeUsername, subscriptionView } from './shared.js';
 
 export function createFileRepository(filePath) {
   let loaded = false;
-  let state = { users: {}, progress: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], generated_tasks: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], sessions: {}, subscriptions: {}, payment_requests: {}, subscription_events: [] };
+  let state = { users: {}, progress: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], generated_tasks: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, payment_requests: {}, subscription_events: [] };
   let writeQueue = Promise.resolve();
 
   async function load() {
@@ -24,6 +24,7 @@ export function createFileRepository(filePath) {
           word_progress: parsed.word_progress && typeof parsed.word_progress === 'object' ? parsed.word_progress : {},
           error_bank: Array.isArray(parsed.error_bank) ? parsed.error_bank : [],
           ai_requests: Array.isArray(parsed.ai_requests) ? parsed.ai_requests : [],
+          audit_log: Array.isArray(parsed.audit_log) ? parsed.audit_log : [],
           sessions: parsed.sessions && typeof parsed.sessions === 'object' ? parsed.sessions : {},
           subscriptions: parsed.subscriptions && typeof parsed.subscriptions === 'object' ? parsed.subscriptions : {},
           payment_requests: parsed.payment_requests && typeof parsed.payment_requests === 'object' ? parsed.payment_requests : {},
@@ -145,6 +146,7 @@ export function createFileRepository(filePath) {
     request.actor_telegram_id = Number(actorTelegramId);
     request.result = decision;
     request.resolved_at = Date.now();
+    state.audit_log.push({ id: (state.audit_log.at(-1)?.id || 0) + 1, actor_telegram_id: Number(actorTelegramId), action: 'payment.resolve', target_type: 'payment_request', target_id: id, result: decision, metadata: { username: request.username, days: decision === 'approved' ? Number(days) : 0 }, created_at: Date.now() });
     await persist();
     return { applied: true, status: decision, username: request.username, telegram_id: user.telegram_id, sub_until: user.sub_until || 0 };
   }
@@ -440,6 +442,7 @@ export function createFileRepository(filePath) {
       word_progress: Object.values(state.word_progress[username] || {}),
       error_bank: state.error_bank.filter((item) => item.username === username),
       ai_requests: state.ai_requests.filter((item) => item.username === username),
+      audit_log: state.audit_log.filter((item) => item.metadata?.username === username),
     });
   }
 

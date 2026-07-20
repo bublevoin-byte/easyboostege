@@ -65,6 +65,8 @@ test('payment approval is idempotent and records its actor and result', async ()
     assert.equal(exported.payment_requests[0].status, 'approved');
     assert.equal(exported.payment_requests[0].actor_telegram_id, 9001);
     assert.equal(exported.subscription_events.length, 1);
+    assert.equal(exported.audit_log.length, 1);
+    assert.equal(exported.audit_log[0].action, 'payment.resolve');
   });
 });
 

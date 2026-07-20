@@ -25,6 +25,7 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
       '012_module_attempts.sql',
       '013_word_progress.sql',
       '014_error_bank.sql',
+      '015_audit_log.sql',
     ]);
 
     const username = await repository.createTelegramUser(telegramId, `Integration ${suffix}`);
@@ -100,6 +101,7 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     assert.equal(exported.word_progress[0].word, 'achievement');
     assert.equal(exported.error_bank.length, 1);
     assert.equal(exported.error_bank[0].occurrence_count, 2);
+    assert.equal(exported.audit_log[0].action, 'payment.resolve');
     assert.equal(exported.ai_requests.length, 1);
 
     assert.equal(await repository.deleteUserData(username), true);
