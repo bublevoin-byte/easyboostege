@@ -12,6 +12,7 @@ import { config } from './config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from './ai/writing.js';
 import { buildContentPrompt, CONTENT_PROMPT_VERSION, contentRequestSchema, parseContentResponse } from './ai/content.js';
 import { buildSpeakingPrompt, buildSpeakingSamplePrompt, parseSpeakingReview, parseSpeakingSample, SPEAKING_PROMPT_VERSION, speakingRequestSchema, speakingSampleRequestSchema } from './ai/speaking.js';
+import { estimateCostMicrousd, runProviderFallback, TtlCache } from './ai/provider-control.js';
 import { protectCookieRequests } from './security/request-origin.js';
 import { classifyBodyParserError, validateProgress } from './validation/api-input.js';
 import { contentSecurityPolicy } from './security/csp.js';
@@ -417,34 +418,28 @@ async function askProvider({ url, key, model }, system, user) {
 
 function aiProviders() {
   const providers = [];
-  if (config.ai.xaiEnabled && XAI_KEY) providers.push({ name: 'grok', url: 'https://api.x.ai/v1/chat/completions', key: XAI_KEY, model: XAI_MODEL });
-  if (config.ai.groqEnabled && GROQ_KEY) providers.push({ name: 'groq', url: 'https://api.groq.com/openai/v1/chat/completions', key: GROQ_KEY, model: GROQ_MODEL });
+  if (config.ai.xaiEnabled && XAI_KEY) providers.push({ name: 'grok', url: 'https://api.x.ai/v1/chat/completions', key: XAI_KEY, model: XAI_MODEL, inputMicrousdPerMillion: config.ai.xaiInputMicrousdPerMillion, outputMicrousdPerMillion: config.ai.xaiOutputMicrousdPerMillion });
+  if (config.ai.groqEnabled && GROQ_KEY) providers.push({ name: 'groq', url: 'https://api.groq.com/openai/v1/chat/completions', key: GROQ_KEY, model: GROQ_MODEL, inputMicrousdPerMillion: config.ai.groqInputMicrousdPerMillion, outputMicrousdPerMillion: config.ai.groqOutputMicrousdPerMillion });
   return providers;
 }
 
 async function askWithFallback(system, user) {
   const providers = aiProviders();
-  if (!providers.length) {
-    const error = new Error('AI_NOT_CONFIGURED');
-    error.status = 503;
-    throw error;
-  }
-  let lastError = null;
-  for (const provider of providers) {
-    try {
-      return { ...await askProvider(provider, system, user), provider: provider.name, model: provider.model };
-    } catch (error) {
-      lastError = error;
-      lastError.provider = provider.name;
-      lastError.model = provider.model;
-    }
-  }
-  const error = new Error('AI_UNAVAILABLE');
-  error.status = 502;
-  error.cause = lastError;
-  error.provider = lastError?.provider;
-  error.model = lastError?.model;
-  throw error;
+  return runProviderFallback(providers, (provider) => askProvider(provider, system, user));
+}
+
+function aiUsage(provider, response) {
+  return { promptTokens: response.promptTokens, completionTokens: response.completionTokens, estimatedCostMicrousd: estimateCostMicrousd(response, provider) };
+}
+
+const dictionaryCache = new TtlCache(config.ai.dictionaryCacheTtlMs, 5000);
+function serveCachedDictionary(req, res, next) {
+  if (req.body?.operation !== 'dictionary_lookup') return next();
+  const parsed = contentRequestSchema.safeParse(req.body);
+  if (!parsed.success) return next();
+  const cached = dictionaryCache.get(parsed.data.word.toLocaleLowerCase('en'));
+  if (!cached) return next();
+  return res.json({ data: cached, provider: 'cache', promptVersion: CONTENT_PROMPT_VERSION, cached: true });
 }
 
 function createUserRateLimiter(limit) {
@@ -536,6 +531,7 @@ app.post('/api/v1/ai/evaluate-writing', auth, requireActiveSubscription, require
       durationMs: Date.now() - startedAt,
       promptTokens: result.promptTokens,
       completionTokens: result.completionTokens,
+      estimatedCostMicrousd: estimateCostMicrousd(result, aiProviders().find((item) => item.name === provider)),
     });
     res.json({ review, provider, attemptId });
   } catch (error) {
@@ -558,6 +554,7 @@ app.post('/api/v1/ai/evaluate-writing', auth, requireActiveSubscription, require
       errorCode: code,
       promptTokens,
       completionTokens,
+      estimatedCostMicrousd: estimateCostMicrousd({ promptTokens, completionTokens }, aiProviders().find((item) => item.name === provider)),
     })];
     if (attemptId) writes.push(finishWritingAttempt(attemptId, { status: 'failed', provider, errorCode: code }));
     await Promise.allSettled(writes);
@@ -570,7 +567,7 @@ app.post('/api/v1/ai/evaluate-writing', auth, requireActiveSubscription, require
   }
 });
 
-app.post('/api/v1/ai/generate-content', auth, requireActiveSubscription, requirePrivacyConsent('text_processing'), requireAiBudget, chatLimiter, async (req, res) => {
+app.post('/api/v1/ai/generate-content', auth, requireActiveSubscription, requirePrivacyConsent('text_processing'), chatLimiter, serveCachedDictionary, requireAiBudget, async (req, res) => {
   const parsed = contentRequestSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректные параметры генерации.' } });
   const input = parsed.data;
@@ -586,11 +583,12 @@ app.post('/api/v1/ai/generate-content', auth, requireActiveSubscription, require
       usage = response;
       const data = parseContentResponse(input.operation, response.text);
       if (input.operation === 'vocabulary_cards' && data.length !== input.count) throw Object.assign(new Error('AI_RESPONSE_INVALID'), { code: 'AI_RESPONSE_INVALID' });
-      await logAiRequest({ username: req.user, operation: input.operation, provider: provider.name, model: provider.model, promptVersion: CONTENT_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt, promptTokens: usage.promptTokens, completionTokens: usage.completionTokens });
+      if (input.operation === 'dictionary_lookup') dictionaryCache.set(input.word.toLocaleLowerCase('en'), data);
+      await logAiRequest({ username: req.user, operation: input.operation, provider: provider.name, model: provider.model, promptVersion: CONTENT_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt, ...aiUsage(provider, usage) });
       return res.json({ data, provider: provider.name, promptVersion: CONTENT_PROMPT_VERSION });
     } catch (error) {
       lastCode = error.code === 'AI_RESPONSE_INVALID' ? error.code : 'AI_PROVIDER_UNAVAILABLE';
-      await logAiRequest({ username: req.user, operation: input.operation, provider: provider.name, model: provider.model, promptVersion: CONTENT_PROMPT_VERSION, status: 'failed', durationMs: Date.now() - startedAt, errorCode: lastCode, promptTokens: usage.promptTokens, completionTokens: usage.completionTokens });
+      await logAiRequest({ username: req.user, operation: input.operation, provider: provider.name, model: provider.model, promptVersion: CONTENT_PROMPT_VERSION, status: 'failed', durationMs: Date.now() - startedAt, errorCode: lastCode, ...aiUsage(provider, usage) });
     }
   }
   const status = lastCode === 'AI_RESPONSE_INVALID' ? 502 : 503;
@@ -612,11 +610,11 @@ app.post('/api/v1/ai/evaluate-speaking', auth, requireActiveSubscription, requir
       const response = await askProvider(provider, prompt.system, prompt.user);
       usage = response;
       const review = parseSpeakingReview(input.taskType, response.text);
-      await logAiRequest({ username: req.user, operation: `evaluate_speaking_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt, promptTokens: usage.promptTokens, completionTokens: usage.completionTokens });
+      await logAiRequest({ username: req.user, operation: `evaluate_speaking_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt, ...aiUsage(provider, usage) });
       return res.json({ review, provider: provider.name, promptVersion: SPEAKING_PROMPT_VERSION });
     } catch (error) {
       lastCode = error.code === 'AI_RESPONSE_INVALID' ? error.code : 'AI_PROVIDER_UNAVAILABLE';
-      await logAiRequest({ username: req.user, operation: `evaluate_speaking_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'failed', durationMs: Date.now() - startedAt, errorCode: lastCode, promptTokens: usage.promptTokens, completionTokens: usage.completionTokens });
+      await logAiRequest({ username: req.user, operation: `evaluate_speaking_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'failed', durationMs: Date.now() - startedAt, errorCode: lastCode, ...aiUsage(provider, usage) });
     }
   }
   res.status(lastCode === 'AI_RESPONSE_INVALID' ? 502 : 503).json({ error: { code: lastCode, message: 'Не удалось корректно оценить устный ответ.' } });
@@ -637,11 +635,11 @@ app.post('/api/v1/ai/generate-speaking-sample', auth, requireActiveSubscription,
       const response = await askProvider(provider, prompt.system, prompt.user);
       usage = response;
       const data = parseSpeakingSample(input.taskType, response.text);
-      await logAiRequest({ username: req.user, operation: `speaking_sample_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt, promptTokens: usage.promptTokens, completionTokens: usage.completionTokens });
+      await logAiRequest({ username: req.user, operation: `speaking_sample_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt, ...aiUsage(provider, usage) });
       return res.json({ data, provider: provider.name, promptVersion: SPEAKING_PROMPT_VERSION });
     } catch (error) {
       lastCode = error.code === 'AI_RESPONSE_INVALID' ? error.code : 'AI_PROVIDER_UNAVAILABLE';
-      await logAiRequest({ username: req.user, operation: `speaking_sample_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'failed', durationMs: Date.now() - startedAt, errorCode: lastCode, promptTokens: usage.promptTokens, completionTokens: usage.completionTokens });
+      await logAiRequest({ username: req.user, operation: `speaking_sample_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'failed', durationMs: Date.now() - startedAt, errorCode: lastCode, ...aiUsage(provider, usage) });
     }
   }
   res.status(lastCode === 'AI_RESPONSE_INVALID' ? 502 : 503).json({ error: { code: lastCode, message: 'Не удалось подготовить образцовый ответ.' } });

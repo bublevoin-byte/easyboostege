@@ -70,5 +70,10 @@ export const config = Object.freeze({
     maxTtsRequestsPerHour: readInteger('TTS_REQUESTS_PER_HOUR', 300, { min: 1, max: 5000 }),
     maxSttRequestsPerHour: readInteger('STT_REQUESTS_PER_HOUR', 30, { min: 1, max: 500 }),
     dailyRequestBudget: readInteger('AI_DAILY_REQUEST_BUDGET', 1000, { min: 1, max: 1_000_000 }),
+    dictionaryCacheTtlMs: readInteger('AI_DICTIONARY_CACHE_TTL_MS', 86_400_000, { min: 1_000, max: 604_800_000 }),
+    xaiInputMicrousdPerMillion: readInteger('XAI_INPUT_MICROUSD_PER_MILLION', 0, { min: 0, max: 1_000_000_000 }),
+    xaiOutputMicrousdPerMillion: readInteger('XAI_OUTPUT_MICROUSD_PER_MILLION', 0, { min: 0, max: 1_000_000_000 }),
+    groqInputMicrousdPerMillion: readInteger('GROQ_INPUT_MICROUSD_PER_MILLION', 0, { min: 0, max: 1_000_000_000 }),
+    groqOutputMicrousdPerMillion: readInteger('GROQ_OUTPUT_MICROUSD_PER_MILLION', 0, { min: 0, max: 1_000_000_000 }),
   }),
 });
