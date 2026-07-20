@@ -14,6 +14,7 @@
 | `writing_attempts` | попытки заданий 37/38 | assignment, answer, review, provider status |
 | `speaking_attempts` | текстовые результаты устной части | assignment, transcript, review, provider status; audio is not stored |
 | `generated_tasks` | валидированные результаты генерации | operation, versioned request hash, request/result and provider |
+| `module_attempts` | нормализованная история учебных результатов | module, activity, score, duration and bounded metadata |
 | `ai_requests` | технический журнал ИИ | operation, provider, model, duration, status, error code, tokens, estimated cost |
 
 Связи привязаны к `users.username`; API всегда определяет пользователя из HttpOnly-сессии. Изменения схемы добавляются новой нумерованной миграцией и проверяются `npm run db:migrate`.

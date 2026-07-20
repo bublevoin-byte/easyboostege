@@ -191,6 +191,18 @@ test('generated tasks are reused by request hash and exported without internal h
   });
 });
 
+test('module attempts are idempotent and included in user export', async () => {
+  await withRepository(async (repository) => {
+    const username = await repository.createTelegramUser(3030, 'Module Student');
+    const attempt = { id: '222b90b8-0f21-481c-b606-5211b2c65754', module: 'exam', activity: 'grammar_19_24', score: 4, maxScore: 6, durationMs: 60_000, metadata: { source: 'builtin' } };
+    assert.equal((await repository.recordModuleAttempt(username, attempt)).created, true);
+    assert.equal((await repository.recordModuleAttempt(username, attempt)).created, false);
+    const exported = await repository.exportUserData(username);
+    assert.equal(exported.module_attempts.length, 1);
+    assert.equal(exported.module_attempts[0].score, 4);
+  });
+});
+
 test('file repository readiness check succeeds after pending writes', async () => {
   await withRepository(async (repository) => {
     const username = await repository.createTelegramUser(4001, 'Health User');

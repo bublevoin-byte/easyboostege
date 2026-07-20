@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "start:production": "npm run db:migrate && node server.js",
-    "check": "node --check server.js && node --check config.js && node --check db.js && node --check ai/content.js && node --check ai/speaking.js && node --check ai/provider-control.js && node --check ai/quality.js && node --check audio/controls.js && node --check scripts/ai-quality-report.js && node --check public/api.js && node --check public/sync.js && node --check public/router.js && node --check public/app.js && node --check public/privacy.js && node --check public/tts.js && node --check public/pwa.js && node --check public/service-worker.js && node --check security/csp.js && node --check scripts/postgres-backup.js && node --check scripts/postgres-restore.js",
+    "check": "node --check server.js && node --check config.js && node --check db.js && node --check ai/content.js && node --check ai/speaking.js && node --check ai/provider-control.js && node --check ai/quality.js && node --check audio/controls.js && node --check validation/module-attempt.js && node --check scripts/ai-quality-report.js && node --check public/api.js && node --check public/sync.js && node --check public/router.js && node --check public/app.js && node --check public/privacy.js && node --check public/tts.js && node --check public/pwa.js && node --check public/service-worker.js && node --check security/csp.js && node --check scripts/postgres-backup.js && node --check scripts/postgres-restore.js",
     "test": "node --test",
     "audit:production": "npm audit --omit=dev --audit-level=high",
     "security:secrets": "node scripts/scan-secrets.js",

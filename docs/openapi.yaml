@@ -133,6 +133,29 @@ paths:
       responses:
         '200': { description: Merged progress }
         '400': { $ref: '#/components/responses/BadRequest' }
+  /api/module-attempts:
+    post:
+      summary: Record an idempotent learning-module result
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, module, activity, score, maxScore]
+              properties:
+                id: { type: string, format: uuid }
+                module: { type: string, enum: [grammar, vocabulary, reading, listening, writing, speaking, exam] }
+                activity: { type: string, maxLength: 80 }
+                score: { type: integer, minimum: 0 }
+                maxScore: { type: integer, minimum: 1 }
+                durationMs: { type: integer, minimum: 0, maximum: 14400000 }
+                metadata: { type: object, additionalProperties: true }
+      responses:
+        '201': { description: Attempt created }
+        '200': { description: Duplicate event accepted without creating another attempt }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '429': { $ref: '#/components/responses/RateLimited' }
   /api/v1/ai/evaluate-writing:
     post:
       summary: Evaluate EGE writing task 37 or 38

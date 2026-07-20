@@ -158,6 +158,14 @@ test('application starts and serves health, security headers and PWA assets', { 
     assert.match(exported.headers.get('content-disposition') || '', /easyboost-data\.json/u);
     assert.equal((await exported.json()).account.username, 'active');
 
+    const moduleAttempt = { id: '58ffc848-99ab-4a9d-99c4-f960558c1e51', module: 'exam', activity: 'grammar_19_24', score: 5, maxScore: 6, durationMs: 45_000 };
+    const recordedAttempt = await fetch(`${baseUrl}/api/module-attempts`, { method: 'POST', headers: activeAuthorization, body: JSON.stringify(moduleAttempt) });
+    assert.equal(recordedAttempt.status, 201);
+    assert.equal((await recordedAttempt.json()).created, true);
+    const duplicateAttempt = await fetch(`${baseUrl}/api/module-attempts`, { method: 'POST', headers: activeAuthorization, body: JSON.stringify(moduleAttempt) });
+    assert.equal(duplicateAttempt.status, 200);
+    assert.equal((await duplicateAttempt.json()).created, false);
+
     const studentAdminRequest = await fetch(`${baseUrl}/api/admin/status`, { headers: activeAuthorization });
     assert.equal(studentAdminRequest.status, 403);
     assert.equal((await studentAdminRequest.json()).error.code, 'FORBIDDEN');

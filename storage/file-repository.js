@@ -4,7 +4,7 @@ import { hashAuthCode, normalizeUsername, subscriptionView } from './shared.js';
 
 export function createFileRepository(filePath) {
   let loaded = false;
-  let state = { users: {}, progress: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], generated_tasks: [], ai_requests: [], sessions: {}, subscriptions: {}, payment_requests: {}, subscription_events: [] };
+  let state = { users: {}, progress: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], generated_tasks: [], module_attempts: [], ai_requests: [], sessions: {}, subscriptions: {}, payment_requests: {}, subscription_events: [] };
   let writeQueue = Promise.resolve();
 
   async function load() {
@@ -20,6 +20,7 @@ export function createFileRepository(filePath) {
           writing_attempts: Array.isArray(parsed.writing_attempts) ? parsed.writing_attempts : [],
           speaking_attempts: Array.isArray(parsed.speaking_attempts) ? parsed.speaking_attempts : [],
           generated_tasks: Array.isArray(parsed.generated_tasks) ? parsed.generated_tasks : [],
+          module_attempts: Array.isArray(parsed.module_attempts) ? parsed.module_attempts : [],
           ai_requests: Array.isArray(parsed.ai_requests) ? parsed.ai_requests : [],
           sessions: parsed.sessions && typeof parsed.sessions === 'object' ? parsed.sessions : {},
           subscriptions: parsed.subscriptions && typeof parsed.subscriptions === 'object' ? parsed.subscriptions : {},
@@ -332,6 +333,14 @@ export function createFileRepository(filePath) {
     return id;
   }
 
+  async function recordModuleAttempt(username, attempt) {
+    await load();
+    if (state.module_attempts.some((item) => item.id === attempt.id)) return { id: attempt.id, created: false };
+    state.module_attempts.push({ id: attempt.id, username, module: attempt.module, activity: attempt.activity, score: attempt.score, max_score: attempt.maxScore, duration_ms: attempt.durationMs ?? null, metadata: structuredClone(attempt.metadata || {}), created_at: Date.now() });
+    await persist();
+    return { id: attempt.id, created: true };
+  }
+
   async function logAiRequest(entry) {
     await load();
     const id = (state.ai_requests.at(-1)?.id || 0) + 1;
@@ -398,6 +407,7 @@ export function createFileRepository(filePath) {
       writing_attempts: state.writing_attempts.filter((item) => item.username === username),
       speaking_attempts: state.speaking_attempts.filter((item) => item.username === username),
       generated_tasks: state.generated_tasks.filter((item) => item.username === username).map(({ request_hash, username: owner, ...item }) => item),
+      module_attempts: state.module_attempts.filter((item) => item.username === username),
       ai_requests: state.ai_requests.filter((item) => item.username === username),
     });
   }
@@ -412,6 +422,7 @@ export function createFileRepository(filePath) {
     state.writing_attempts = state.writing_attempts.filter((item) => item.username !== username);
     state.speaking_attempts = state.speaking_attempts.filter((item) => item.username !== username);
     state.generated_tasks = state.generated_tasks.filter((item) => item.username !== username);
+    state.module_attempts = state.module_attempts.filter((item) => item.username !== username);
     state.ai_requests = state.ai_requests.filter((item) => item.username !== username);
     delete state.subscriptions[username];
     state.subscription_events = state.subscription_events.filter((item) => item.username !== username);
@@ -461,6 +472,7 @@ export function createFileRepository(filePath) {
     finishSpeakingAttempt,
     getGeneratedTask,
     saveGeneratedTask,
+    recordModuleAttempt,
     logAiRequest,
     countAiRequestsSince,
     createSession,

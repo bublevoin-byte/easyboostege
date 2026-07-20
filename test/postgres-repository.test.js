@@ -22,6 +22,7 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
       '009_subscriptions_and_payments.sql',
       '010_speaking_attempts.sql',
       '011_generated_tasks.sql',
+      '012_module_attempts.sql',
     ]);
 
     const username = await repository.createTelegramUser(telegramId, `Integration ${suffix}`);
@@ -69,6 +70,9 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     const taskHash = crypto.createHash('sha256').update(suffix).digest('hex');
     await repository.saveGeneratedTask(username, { operation: 'grammar_quiz', requestHash: taskHash, request: { operation: 'grammar_quiz' }, result: [{ q: suffix }], provider: 'test', promptVersion: 'content-v1' });
     assert.equal((await repository.getGeneratedTask(username, taskHash)).result[0].q, suffix);
+    const moduleAttemptId = crypto.randomUUID();
+    assert.equal((await repository.recordModuleAttempt(username, { id: moduleAttemptId, module: 'exam', activity: 'grammar_19_24', score: 5, maxScore: 6, durationMs: 50_000, metadata: {} })).created, true);
+    assert.equal((await repository.recordModuleAttempt(username, { id: moduleAttemptId, module: 'exam', activity: 'grammar_19_24', score: 5, maxScore: 6, durationMs: 50_000, metadata: {} })).created, false);
     await repository.logAiRequest({
       username, operation: 'integration', provider: 'test', model: 'test',
       promptVersion: 'integration-v1', status: 'completed', durationMs: 1,
@@ -86,6 +90,7 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     assert.equal(exported.writing_attempts.length, 1);
     assert.equal(exported.speaking_attempts.length, 1);
     assert.equal(exported.generated_tasks.length, 1);
+    assert.equal(exported.module_attempts.length, 1);
     assert.equal(exported.ai_requests.length, 1);
 
     assert.equal(await repository.deleteUserData(username), true);

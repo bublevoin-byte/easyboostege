@@ -1508,6 +1508,8 @@ function gExamCheck(){if(!EX)return;var ex=EX.ex;
       +'</div>'});
   var st=S.exam19||{n:0,last:0,best:0};
   st.n++;st.last=score;st.best=Math.max(st.best||0,score);S.exam19=st;
+  if(typeof SRV!=='undefined'&&SRV&&TOKEN&&typeof crypto!=='undefined'&&crypto.randomUUID){
+    apiPost('/api/module-attempts',{id:crypto.randomUUID(),module:'exam',activity:'grammar_19_24',score:score,maxScore:6,durationMs:sec*1000,metadata:{source:'builtin'}}).catch(function(){})}
   EX=null;save();gSync();
   var area=document.getElementById('g_area');
   area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;">'+wDeco()
