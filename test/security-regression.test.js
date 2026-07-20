@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 
 const frontendPath = new URL('../public/index.html', import.meta.url);
 const frontendApiPath = new URL('../public/api.js', import.meta.url);
-const frontendScriptPaths = ['router.js', 'app.js', 'tts.js'].map(
+const frontendScriptPaths = ['router.js', 'app.js', 'tts.js', 'pwa.js'].map(
   (name) => new URL(`../public/${name}`, import.meta.url),
 );
 const serverPath = new URL('../server.js', import.meta.url);
@@ -86,4 +86,20 @@ test('legacy application script has no duplicate top-level function declarations
     assert.doesNotMatch(script, new RegExp(`\\b${name}\\s*=\\s*(?:async\\s+)?function`, 'u'));
   }
   assert.match(script, /const PROFILE_HOOKS=\[\]/u);
+});
+
+test('PWA shell is installable and never caches API responses', async () => {
+  const { html } = await readFrontend();
+  const [manifestText, worker, offline] = await Promise.all([
+    fs.readFile(new URL('../public/manifest.json', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../public/service-worker.js', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../public/offline.html', import.meta.url), 'utf8'),
+  ]);
+  const manifest = JSON.parse(manifestText);
+  assert.equal(manifest.display, 'standalone');
+  assert.equal(manifest.start_url, '/');
+  assert.match(html, /<link rel="manifest" href="\/manifest\.json">/u);
+  assert.match(worker, /url\.pathname\.startsWith\('\/api\/'\)/u);
+  assert.match(worker, /caches\.match\('\/offline\.html'\)/u);
+  assert.doesNotMatch(offline, /<script|onclick=/iu);
 });

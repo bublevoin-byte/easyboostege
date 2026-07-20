@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "start:production": "npm run db:migrate && node server.js",
-    "check": "node --check server.js && node --check config.js && node --check db.js && node --check public/api.js && node --check public/router.js && node --check public/app.js && node --check public/tts.js && node --check security/csp.js && node --check scripts/postgres-backup.js && node --check scripts/postgres-restore.js",
+    "check": "node --check server.js && node --check config.js && node --check db.js && node --check public/api.js && node --check public/router.js && node --check public/app.js && node --check public/tts.js && node --check public/pwa.js && node --check public/service-worker.js && node --check security/csp.js && node --check scripts/postgres-backup.js && node --check scripts/postgres-restore.js",
     "test": "node --test",
     "db:migrate": "node scripts/migrate.js",
     "db:import-json": "node scripts/import-json.js",
