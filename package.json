@@ -9,13 +9,14 @@
     "start:production": "npm run db:migrate && node server.js",
     "check": "node --check server.js && node --check config.js && node --check db.js && node --check public/api.js && node --check public/sync.js && node --check public/router.js && node --check public/app.js && node --check public/tts.js && node --check public/pwa.js && node --check public/service-worker.js && node --check security/csp.js && node --check scripts/postgres-backup.js && node --check scripts/postgres-restore.js",
     "test": "node --test",
+    "audit:production": "npm audit --omit=dev --audit-level=high",
     "db:migrate": "node scripts/migrate.js",
     "db:import-json": "node scripts/import-json.js",
     "db:backup": "node scripts/postgres-backup.js",
     "db:restore": "node scripts/postgres-restore.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
