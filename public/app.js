@@ -3,7 +3,9 @@ const HIST=[];
 function cur(){const o=document.querySelector('.screen.on');return o?o.id:'scr5'}
 function showScreen(id){const t=document.getElementById(id);if(!t)return;document.querySelectorAll('.screen').forEach(s=>s.classList.remove('on'));t.classList.add('on');t.scrollTop=0;var nm=document.getElementById('navmenu');if(nm)nm.classList.remove('open')}
 function show(id){return showScreen(id);}
-function tab(id){const c=cur();if(id!==c&&c!=='scr5'&&c!=='scr6')HIST.push(c);showScreen(id);if(id==='scr2')initWords();if(id==='scr8')setTask(curTask)}
+const ROUTE_HOOKS=[];
+function registerRouteHook(hook){ROUTE_HOOKS.push(hook)}
+function tab(id){const c=cur();if(id!==c&&c!=='scr5'&&c!=='scr6')HIST.push(c);showScreen(id);if(id==='scr2')initWords();if(id==='scr8')setTask(curTask);ROUTE_HOOKS.forEach(function(hook){try{hook(id,c)}catch(e){console.error('Route hook failed',e)}})}
 function nav(id){tab(id)}
 function back(){let id=HIST.pop()||'scr1';if(id==='scr5'||id==='scr6')id='scr1';showScreen(id)}
 (function(){const m=document.getElementById('navmenu');document.querySelectorAll('.screen').forEach(sc=>{const b=document.createElement('button');b.textContent=sc.id.replace('scr','')+' · '+sc.dataset.name;b.onclick=()=>{HIST.length=0;tab(sc.id)};m.appendChild(b)})})();
@@ -130,7 +132,7 @@ const GRAM_Q=[
 ];
 let gi=0,gScore=0,gAns=false;
 /* patch tab to init reading/grammar */
-(function(){const _t=tab;tab=function(id){_t(id);if(id==='scr7')initReading();if(id==='scr3')initGrammar();}})();
+registerRouteHook(function(id){if(id==='scr7')initReading();if(id==='scr3')initGrammar()});
 
 
 /* ===== LISTENING ===== */
@@ -166,7 +168,7 @@ async function toggleRec(){const lab=document.getElementById('sp_reclabel');
   else{try{mediaRec.stop()}catch(e){}recing=false;clearInterval(spT);lab.textContent='готово — нажми ▶';lab.style.color='#1F8A50';bump('speak',Math.min(100,(S.prog.speak||48)+6))}}
 function playRec(){if(lastUrl){const a=new Audio(lastUrl);a.play()}}
 
-(function(){const _t=tab;tab=function(id){_t(id);if(id==='scr4')initListening();if(id==='scr9')initSpeaking();}})();
+registerRouteHook(function(id){if(id==='scr4')initListening();if(id==='scr9')initSpeaking()});
 
 
 /* ===== ROBUSTNESS + DEMO FALLBACK (overrides) ===== */
@@ -239,7 +241,7 @@ function renderProgress(){if(!S)return;const p=S.prog||{};
   setW('pb_read',p.read||0);setW('pb_gram',p.gram||0);setW('pb_words',p.words||0);setW('pb_listen',p.listen||0);setW('pb_speak',p.speak||0)}
 function renderProfile(){const u=currentUser||'Гость';setTxt('pf_ava',u[0].toUpperCase());setTxt('pf_name',u);setTxt('pf_ai','через сервер ✓')}
 function logout(){localStorage.removeItem('eb_current');location.reload()}
-(function(){const _t=tab;tab=function(id){_t(id);if(id==='scr1')renderHome();if(id==='scr10')renderProgress();if(id==='scr11')renderProfile();}})();
+registerRouteHook(function(id){if(id==='scr1')renderHome();if(id==='scr10')renderProgress();if(id==='scr11')renderProfile()});
 
 
 /* ===== FIX TABBAR HIT-AREA + LEARN SHEET ===== */
@@ -370,7 +372,7 @@ async function genReading(){
 (function(){
   const fab=document.createElement('button');fab.id='genfab';fab.innerHTML='✨ ИИ: новое';fab.onclick=genForCurrent;document.body.appendChild(fab);
   const tt=document.createElement('div');tt.id='toast';document.body.appendChild(tt);
-  const _t=tab;tab=function(id){_t(id);const show=['scr2','scr3','scr4','scr7'].includes(id);fab.style.display=show?'inline-flex':'none'};
+  registerRouteHook(function(id){const show=['scr2','scr3','scr4','scr7'].includes(id);fab.style.display=show?'inline-flex':'none'});
 })();
 
 
@@ -1097,7 +1099,7 @@ genWords=async function(){
 try{if(S)wSync()}catch(e){}
 var _fd2=fillDefaults;fillDefaults=function(d){d=_fd2(d);d.srs=d.srs||{};return d};
 registerStartHook(function(){wMigrate();wMergeAi();return wSync()});
-var _t3=tab;tab=function(id){_t3(id);if(id==='scr2'){var f=document.getElementById('genfab');if(f)f.style.display='none'}};
+registerRouteHook(function(id){if(id==='scr2'){var f=document.getElementById('genfab');if(f)f.style.display='none'}});
 
 /* legacy block 6 */
 /* ===== GRAMMAR v2: карта тем ЕГЭ + теория + 2 уровня практики ===== */
@@ -1677,7 +1679,7 @@ async function gGen(t){
   }catch(e){}
   G_GEN=false}
 /* прячем FAB на грамматике, синк при старте */
-var _t5=tab;tab=function(id){_t5(id);if(EX&&EX.iv){clearInterval(EX.iv);EX=null}if(id==='scr3'){var f=document.getElementById('genfab');if(f)f.style.display='none';GS=null}};
+registerRouteHook(function(id){if(EX&&EX.iv){clearInterval(EX.iv);EX=null}if(id==='scr3'){var f=document.getElementById('genfab');if(f)f.style.display='none';GS=null}});
 registerStartHook(function(){return gSync()});
 
 /* legacy block 7 */
@@ -2091,7 +2093,7 @@ async function rGen(){
   try{var need=rPool('h',R_HL).length<6||rPool('q',R_QS).length<6||rPool('g',R_GAPS).length<6;
     if(need)setTimeout(rGen,4000)}catch(e){}}
 /* FAB прячем и на чтении; синк при старте */
-var _t7=tab;tab=function(id){_t7(id);if(RE&&RE.iv){clearInterval(RE.iv);RE=null}if(id==='scr7'){var f=document.getElementById('genfab');if(f)f.style.display='none'}};
+registerRouteHook(function(id){if(RE&&RE.iv){clearInterval(RE.iv);RE=null}if(id==='scr7'){var f=document.getElementById('genfab');if(f)f.style.display='none'}});
 registerStartHook(function(){return rSync()});
 
 /* legacy block 8 */
@@ -2541,7 +2543,7 @@ async function lGen(){
   try{var need=lPool('m',L_M).length<5||lPool('tf',L_TF).length<5||lPool('iq',L_IN).length<5;
     if(need)setTimeout(lGen,4000)}catch(e){}}
 /* FAB прячем, звук глушим при уходе, синк при старте */
-var _t8=tab;tab=function(id){_t8(id);lStop();if(LE&&LE.iv){clearInterval(LE.iv);LE=null}if(id==='scr4'){var f=document.getElementById('genfab');if(f)f.style.display='none'}};
+registerRouteHook(function(id){lStop();if(LE&&LE.iv){clearInterval(LE.iv);LE=null}if(id==='scr4'){var f=document.getElementById('genfab');if(f)f.style.display='none'}});
 registerStartHook(function(){return lSync()});
 
 /* legacy block 9 */
@@ -2725,7 +2727,7 @@ async function wrGen(){
   WR_GEN=false;
   try{if(wrPool(37).length<6||wrPool(38).length<6)setTimeout(wrGen,4000)}catch(e){}}
 /* — запуск генерации при входе, синк плитки при старте — */
-var _t9=tab;tab=function(id){_t9(id);if(id==='scr8'){wrGen()}};
+registerRouteHook(function(id){if(id==='scr8'){wrGen()}});
 registerStartHook(function(){return wrSyncTile()});
 
 /* legacy block 11 */
@@ -3200,8 +3202,8 @@ async function spGen(){
   try{var need=false;for(var t=1;t<=4;t++)if(spPool(t).length<5){need=true;break}
     if(need)setTimeout(spGen,4000)}catch(e){}}
 /* уборка при уходе с экрана + синк */
-var _t10=tab;tab=function(id){_t10(id);
+registerRouteHook(function(id){
   if(id!=='scr9'){
     if(SP){spStopAll();SP=null}
-    if(SPE){clearInterval(SPE.tm);try{if(SPE.rec&&SPE.rec.state!=='inactive')SPE.rec.stop()}catch(e){}try{SPE.stream&&SPE.stream.getTracks().forEach(function(x){x.stop()})}catch(e){}SPE=null}}};
+    if(SPE){clearInterval(SPE.tm);try{if(SPE.rec&&SPE.rec.state!=='inactive')SPE.rec.stop()}catch(e){}try{SPE.stream&&SPE.stream.getTracks().forEach(function(x){x.stop()})}catch(e){}SPE=null}}});
 registerStartHook(function(){return spSync()});

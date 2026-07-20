@@ -65,7 +65,7 @@ test('legacy application code delegates network access to the API layer', async 
 test('legacy application script has no duplicate top-level function declarations', async () => {
   const { script } = await readFrontend();
   const guardedNames = [
-    'startApp', 'checkWriting', 'trWord', 'initReading', 'initGrammar', 'renderG',
+    'startApp', 'tab', 'checkWriting', 'trWord', 'initReading', 'initGrammar', 'renderG',
     'pickG', 'nextG', 'initListening', 'playListen', 'toggleScript',
   ];
   for (const name of guardedNames) {
@@ -74,4 +74,6 @@ test('legacy application script has no duplicate top-level function declarations
   }
   assert.doesNotMatch(script, /\bstartApp\s*=\s*(?:async\s+)?function/u);
   assert.match(script, /const START_HOOKS=\[\]/u);
+  assert.doesNotMatch(script, /\btab\s*=\s*function/u);
+  assert.match(script, /const ROUTE_HOOKS=\[\]/u);
 });
