@@ -43,3 +43,14 @@ test('content response parser enforces reading length and vocabulary fields', ()
   assert.throws(() => parseContentResponse('dictionary_lookup', '{broken'), /AI_RESPONSE_INVALID/u);
   assert.throws(() => parseContentResponse('dictionary_lookup', '{"ipa":"/x/","tr":"икс","extra":true}'), /AI_RESPONSE_INVALID/u);
 });
+
+test('writing task generation enforces EGE assignment invariants', () => {
+  const stimulus = Array.from({ length: 40 }, (_, index) => index < 3 ? `Question${index}?` : `word${index}`).join(' ');
+  const task37 = { from: 'Alex', stim: stimulus, ask: 'your new hobby' };
+  assert.equal(parseContentResponse('writing_task_37', JSON.stringify(task37)).from, 'Alex');
+  assert.throws(() => parseContentResponse('writing_task_37', JSON.stringify({ ...task37, stim: 'Too short? One question.' })), /AI_RESPONSE_INVALID/u);
+  const task38 = { topic: 'Teenagers and free time', rows: [['Sport', 35], ['Reading', 25], ['Gaming', 20], ['Music', 20]] };
+  assert.equal(parseContentResponse('writing_task_38', JSON.stringify(task38)).rows.length, 4);
+  task38.rows[3][1] = 19;
+  assert.throws(() => parseContentResponse('writing_task_38', JSON.stringify(task38)), /AI_RESPONSE_INVALID/u);
+});

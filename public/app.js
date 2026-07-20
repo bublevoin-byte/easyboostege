@@ -2538,17 +2538,14 @@ async function wrGen(){
   if(wrPool(37).length<6)kind=37;else if(wrPool(38).length<6)kind=38;
   if(!kind)return;WR_GEN=true;
   try{
-    var sys='Ты составляешь задания письменной части ЕГЭ по английскому (уровень B1-B2). Только JSON.';
-    var out,d,item=null;
+    var d,item=null;
     if(kind===37){
-      out=await callGemini(sys,'Задание 37: короткое письмо от друга-подростка (40-60 слов, разговорный стиль, с тремя вопросами к адресату) и тема для встречных вопросов. JSON: {"from":"имя","stim":"текст письма с 3 вопросами","ask":"о чём задать 3 вопроса, по-английски, 2-4 слова"}');
-      d=parseJSON(out);
+      d=await generateAiContent('writing_task_37');
       if(d&&d.from&&d.stim&&d.ask&&(String(d.stim).match(/\?/g)||[]).length>=3)
         item={from:String(d.from),stim:String(d.stim),ask:String(d.ask)};
       if(item){S.writeAi.t37.push(item);save()}
     }else{
-      out=await callGemini(sys,'Задание 38: тема проекта и таблица данных опроса подростков (4-5 строк, проценты в сумме 100). JSON: {"topic":"тема по-английски","rows":[["вариант ответа по-английски",число]]}');
-      d=parseJSON(out);
+      d=await generateAiContent('writing_task_38');
       if(d&&d.topic&&Array.isArray(d.rows)&&d.rows.length>=4&&d.rows.length<=5
         &&d.rows.every(function(r){return Array.isArray(r)&&r[0]&&typeof +r[1]==='number'&&+r[1]>0})){
         item={topic:String(d.topic),rows:d.rows.map(function(r){return [String(r[0]),+r[1]]})};
