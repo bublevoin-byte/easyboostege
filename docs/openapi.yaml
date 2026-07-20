@@ -1,0 +1,146 @@
+openapi: 3.0.3
+info:
+  title: Easy Boost API
+  version: 1.0.0
+  description: Production HTTP API. Authentication uses an HttpOnly SameSite cookie.
+servers:
+  - url: https://useboost.ru
+security:
+  - cookieAuth: []
+paths:
+  /health/live:
+    get:
+      security: []
+      summary: Process liveness
+      responses:
+        '200': { description: Process is alive }
+  /health/ready:
+    get:
+      security: []
+      summary: Application and database readiness
+      responses:
+        '200': { description: Ready }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/tg/start:
+    post:
+      security: []
+      summary: Create a short-lived Telegram authorization code
+      responses:
+        '200':
+          description: Authorization URL and opaque code
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /api/tg/check:
+    get:
+      security: []
+      summary: Check and consume Telegram authorization code
+      parameters:
+        - in: query
+          name: code
+          required: true
+          schema: { type: string, maxLength: 256 }
+      responses:
+        '200': { description: Pending or authenticated state }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /api/me:
+    get:
+      summary: Current user and subscription
+      responses:
+        '200': { description: User profile }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/logout:
+    post:
+      summary: Clear authentication cookie
+      responses:
+        '200': { description: Logged out }
+  /api/progress:
+    get:
+      summary: Read complete progress document
+      responses:
+        '200': { description: Progress JSON object }
+    post:
+      summary: Replace progress document (legacy compatibility)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Progress' }
+      responses:
+        '200': { description: Saved }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /api/progress/modules:
+    post:
+      summary: Atomically merge changed top-level progress modules
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [modules]
+              properties:
+                modules: { $ref: '#/components/schemas/Progress' }
+      responses:
+        '200': { description: Merged progress }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /api/v1/ai/evaluate-writing:
+    post:
+      summary: Evaluate EGE writing task 37 or 38
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [taskType, answer, assignment]
+              properties:
+                taskType: { type: string, enum: [writing_37, writing_38] }
+                answer: { type: string }
+                assignment: { type: object, additionalProperties: true }
+      responses:
+        '200': { description: Validated review and metadata }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /api/ai:
+    post:
+      summary: Legacy bounded AI operation
+      responses:
+        '200': { description: Provider text }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/tts:
+    get:
+      summary: Generate or return cached speech audio
+      parameters:
+        - { in: query, name: text, required: true, schema: { type: string, maxLength: 500 } }
+        - { in: query, name: voice, schema: { type: string } }
+        - { in: query, name: slow, schema: { type: string, enum: ['0', '1'] } }
+      responses:
+        '200': { description: MPEG audio, content: { audio/mpeg: {} } }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /api/stt:
+    post:
+      summary: Transcribe speech recording
+      requestBody:
+        required: true
+        content:
+          audio/webm:
+            schema: { type: string, format: binary }
+      responses:
+        '200': { description: Transcript }
+        '429': { $ref: '#/components/responses/RateLimited' }
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: eb_token
+  schemas:
+    Progress:
+      type: object
+      additionalProperties: true
+  responses:
+    BadRequest: { description: Invalid request }
+    Unauthorized: { description: Missing or expired session }
+    Forbidden: { description: Subscription inactive }
+    RateLimited: { description: Rate limit exceeded }
+    ServiceUnavailable: { description: Dependency unavailable }

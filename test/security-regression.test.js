@@ -164,6 +164,21 @@ test('AI, TTS and STT endpoints return stable public error codes', async () => {
   assert.doesNotMatch(server, /res\.status\((?:502|503)\)\.json\(\{ error: '(?:ИИ|Озвучка|STT)[^']*' \+ /u);
 });
 
+test('production documentation covers local setup, API, database and operations', async () => {
+  const paths = ['../README.md', '../docs/openapi.yaml', '../docs/DATABASE_SCHEMA.md', '../docs/AI_OPERATIONS.md', '../docs/KEY_ROTATION.md', '../docs/SUPPORT.md', '../docs/KNOWN_LIMITATIONS.md', '../docs/TELEGRAM_ADMIN.md'];
+  const documents = await Promise.all(paths.map((path) => fs.readFile(new URL(path, import.meta.url), 'utf8')));
+  assert.match(documents[0], /npm ci[\s\S]*npm run check[\s\S]*npm test/u);
+  for (const route of ['/health/live', '/health/ready', '/api/tg/start', '/api/me', '/api/progress/modules', '/api/v1/ai/evaluate-writing', '/api/tts', '/api/stt']) {
+    assert.match(documents[1], new RegExp(route.replaceAll('/', '\\/'), 'u'));
+  }
+  assert.match(documents[2], /user_progress/u);
+  assert.match(documents[3], /WRITING_PROMPT_VERSION/u);
+  assert.match(documents[4], /JWT_SECRET/u);
+  assert.match(documents[5], /requestId/u);
+  assert.match(documents[6], /Известные ограничения/u);
+  assert.match(documents[7], /TELEGRAM_BOT_TOKEN/u);
+});
+
 test('demo mode is isolated from persistence and paid AI calls', async () => {
   const { html, script } = await readFrontend();
   assert.match(html, /id="demo_btn"[^>]*onclick="startDemo\(\)"/u);
