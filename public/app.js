@@ -2609,7 +2609,8 @@ function spFmt(s){s=Math.max(0,s);return Math.floor(s/60)+':'+('0'+s%60).slice(-
 function spStopAll(){clearInterval(SP_tm);SP_tm=null;
   if(SP_rec&&SP_rec.state!=='inactive'){try{SP_rec.stop()}catch(e){}}
   try{lStop()}catch(e){}}
-function initSpeaking(){if(!S)return;spStopAll();SP=null;spSync();spHub()}
+function spReleaseRecording(){if(SP&&SP.url)try{URL.revokeObjectURL(SP.url)}catch(e){}if(SP){SP.url=null;SP.blob=null}SP_chunks=[]}
+function initSpeaking(){if(!S)return;spStopAll();spReleaseRecording();SP=null;spSync();spHub()}
 function spHub(){var area=document.getElementById('s9_area');if(!area)return;
   var r=spSt();var GA=0;function ga(){return 'animation:win .34s '+((GA++)*0.06)+'s cubic-bezier(.25,.75,.35,1) both;'}
   var se=S.spkExam||{};
@@ -2641,7 +2642,7 @@ function spHub(){var area=document.getElementById('s9_area');if(!area)return;
 function spPool(t){var ai=(S&&S.spkAi&&S.spkAi['p'+t])||[];return [SP1,SP2,SP3,SP4][t-1].concat(ai)}
 function spSet(t){var pool=spPool(t);var k='spIdx'+t;S[k]=(S[k]||0);return pool[S[k]%pool.length]}
 function spNextSet(t){S['spIdx'+t]=(S['spIdx'+t]||0)+1;save()}
-function spOpen(t){SP={t:t,set:spSet(t),phase:'intro',qi:0,url:null};SP_sheet=false;spRender()}
+function spOpen(t){spReleaseRecording();SP={t:t,set:spSet(t),phase:'intro',qi:0,url:null};SP_sheet=false;spRender()}
 function spBtn(label,fn,solid){return '<button class="sq" style="'+WBTN+(solid?'background:linear-gradient(135deg,#FFA570,#F2683F);color:#fff;border:none;box-shadow:0 12px 24px rgba(242,104,63,.32);':'color:#F2683F;')+'" onclick="'+fn+'">'+label+'</button>'}
 function spTimerChip(){return '<div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-top:12px;">'
   +'<span id="s9_timer" style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:34px;color:#2B2B2B;">'+spFmt(SP.left)+'</span></div>'
@@ -2715,6 +2716,7 @@ function spRender(){var area=document.getElementById('s9_area');if(!area||!SP)re
       +'<div style="height:12px;"></div>'
       +(SP.url?spBtn('▶ Послушать свою запись','spPlay()',true):'<div style="text-align:center;font-weight:600;font-size:12.5px;color:#C0392B;">Запись не получилась — проверь доступ к микрофону</div>')
       +(SP.blob?'<div style="height:10px;"></div><button class="sq" onclick="spEval(this)" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#6FC2B0,#1F9E5A)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(31,158,90,.3);">✨ Оценить с ИИ по критериям</button>':'')
+      +(SP.blob?'<div style="height:10px;"></div>'+spBtn('Удалить запись','spDeleteRecording()'):'')
       +(SP.t>1?'<div style="height:10px;"></div>'+spBtn('Образец ответа от ИИ','spSample(this)'):'')
       +'<div id="sp_evalbox"></div>'
       +extra
@@ -2737,6 +2739,7 @@ function spPrep(){var c=SP_CONF[SP.t];
   spTick(c.prep,function(){spRec()})}
 async function spRec(){var c=SP_CONF[SP.t];
   clearInterval(SP_tm);
+  spReleaseRecording();
   try{
     var st=await navigator.mediaDevices.getUserMedia({audio:true});
     var mime=spMime();
@@ -2746,7 +2749,7 @@ async function spRec(){var c=SP_CONF[SP.t];
       var bl=tp?new Blob(SP_chunks,{type:tp}):new Blob(SP_chunks);SP.blob=bl;SP.url=URL.createObjectURL(bl);st.getTracks().forEach(function(x){x.stop()});
       if(SP.phase==='done')spRender()};
     SP_rec.start();
-  }catch(e){SP.url=null;try{toast('Нет доступа к микрофону')}catch(_){}}
+  }catch(e){SP.url=null;SP.phase='intro';spRender();try{toast('Нет доступа к микрофону. Разреши доступ в настройках браузера и попробуй снова.')}catch(_){}return}
   SP.phase='rec';SP.left=c.rec;SP.qi=0;spRender();
   if(SP.t===3){try{lPlayRaw([{s:1,t:SP.set.qs[0]}])}catch(e){}}
   spTick(c.rec,function(){SP.t===3?spNextQ():spFinish()})}
@@ -2767,6 +2770,7 @@ function spPlay(){if(!SP||!SP.url)return;
   SP_audio=new Audio(SP.url);
   SP_audio.onerror=function(){try{toast('Не удалось воспроизвести запись — попробуй записать ещё раз')}catch(e){}};
   SP_audio.play().catch(function(){try{toast('Браузер не дал воспроизвести — нажми ещё раз')}catch(e){}})}
+function spDeleteRecording(){if(!SP)return;if(SP.url)try{URL.revokeObjectURL(SP.url)}catch(e){}SP.url=null;SP.blob=null;SP_chunks=[];spRender();try{toast('Запись удалена')}catch(e){}}
 function spEtalon(){if(!SP||SP.t!==1)return;
   if(SP_audio){try{SP_audio.pause()}catch(e){}}
   var parts=(SP.set.tx.match(/[^.!?]+[.!?]+/g)||[SP.set.tx]).map(function(x){return {s:0,t:x.trim()}});
@@ -2817,11 +2821,13 @@ function spShowEval(d,tr){var box=document.getElementById('sp_evalbox');if(!box)
       +'<div style="font-weight:800;font-size:10px;letter-spacing:1.2px;color:#E44E20;">НАД ЧЕМ ПОРАБОТАТЬ</div>'
       +d.fix.map(function(f){return '<div style="margin-top:7px;font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.5;">'
         +(f.wrong?'<s style="color:#C0392B;">'+f.wrong+'</s> → ':'')+(f.right?'<b style="color:#1F8A50;">'+f.right+'</b><br>':'')+(f.note||'')+'</div>'}).join('')+'</div>';
+  h+='<div style="margin-top:10px;font-weight:600;font-size:11.5px;color:#98917F;line-height:1.5;">ИИ проверил текст ответа. Произношение, интонация, паузы и беглость не оценивались.</div>';
   h+='<details style="margin-top:12px;"><summary style="font-weight:700;font-size:12px;color:#98917F;cursor:pointer;">Расшифровка твоей речи</summary>'
-    +'<div style="margin-top:8px;font-weight:500;font-size:12.5px;color:#4A453E;line-height:1.6;font-style:italic;">'+tr+'</div></details>'
+    +'<div style="margin-top:8px;font-weight:500;font-size:12.5px;color:#4A453E;line-height:1.6;font-style:italic;">'+tr+'</div><button class="sq" onclick="spFlagTranscript()" style="margin-top:8px;border:0;background:#F4EFE9;padding:7px 10px;border-radius:10px;font-weight:700;font-size:11px;">Расшифровка неточная</button></details>'
     +'</div>';
   box.innerHTML=h;
   try{box.scrollIntoView({behavior:'smooth',block:'start'})}catch(e){}}
+function spFlagTranscript(){S.sttFeedback=(S.sttFeedback||0)+1;save();try{toast('Спасибо, отметка сохранена')}catch(e){}}
 async function spSample(btn){
   if(!SP)return;var t=SP.t,set=SP.set;
   if(btn){if(btn.dataset.busy)return;btn.dataset.busy=1;btn.textContent='Готовлю образец…';btn.style.pointerEvents='none'}

@@ -13,6 +13,7 @@ import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSI
 import { buildContentPrompt, CONTENT_PROMPT_VERSION, contentRequestSchema, parseContentResponse } from './ai/content.js';
 import { buildSpeakingPrompt, buildSpeakingSamplePrompt, parseSpeakingReview, parseSpeakingSample, SPEAKING_PROMPT_VERSION, speakingRequestSchema, speakingSampleRequestSchema } from './ai/speaking.js';
 import { estimateCostMicrousd, runProviderFallback, TtlCache } from './ai/provider-control.js';
+import { pruneAudioCache, validateAudioUpload, withTimeout } from './audio/controls.js';
 import { protectCookieRequests } from './security/request-origin.js';
 import { classifyBodyParserError, validateProgress } from './validation/api-input.js';
 import { contentSecurityPolicy } from './security/csp.js';
@@ -648,6 +649,7 @@ app.post('/api/v1/ai/generate-speaking-sample', auth, requireActiveSubscription,
 // ---- нейро-озвучка: Grok TTS (основной) + Edge TTS (запасной и для медленного) ----
 const TTS_DIR = path.join(__dirname, 'tts-cache');
 try { fs.mkdirSync(TTS_DIR, { recursive: true }); } catch (e) {}
+pruneAudioCache(TTS_DIR, { maxAgeMs: config.ai.ttsCacheMaxAgeMs, maxBytes: config.ai.ttsCacheMaxBytes });
 const TTS_VOICES = new Set(['en-GB-SoniaNeural', 'en-GB-RyanNeural', 'en-GB-LibbyNeural', 'en-GB-ThomasNeural']);
 // соответствие ролей: женский/мужской
 const GROK_VOICE = { 'en-GB-SoniaNeural': 'eve', 'en-GB-RyanNeural': 'rex', 'en-GB-LibbyNeural': 'ara', 'en-GB-ThomasNeural': 'leo' };
@@ -655,16 +657,19 @@ let _ttsMod = null;
 
 function ttsSend(res, buf, file) {
   try { fs.writeFileSync(file, buf); } catch (e) {}
+  try { pruneAudioCache(TTS_DIR, { maxAgeMs: config.ai.ttsCacheMaxAgeMs, maxBytes: config.ai.ttsCacheMaxBytes }); } catch (e) {}
   res.setHeader('Content-Type', 'audio/mpeg');
-  res.setHeader('Cache-Control', 'public, max-age=604800');
+  res.setHeader('Cache-Control', 'private, max-age=604800');
   res.end(buf);
 }
 async function grokTts(text, voice) {
-  const r = await fetch('https://api.x.ai/v1/tts', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + XAI_KEY },
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), config.ai.ttsTimeoutMs);
+  let r;
+  try { r = await fetch('https://api.x.ai/v1/tts', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + XAI_KEY }, signal: controller.signal,
     body: JSON.stringify({ text, voice_id: GROK_VOICE[voice] || 'eve', language: 'en' }),
-  });
+  }); } finally { clearTimeout(timer); }
   if (!r.ok) throw new Error('Grok TTS HTTP ' + r.status);
   const buf = Buffer.from(await r.arrayBuffer());
   if (!buf.length) throw new Error('Grok TTS: пустое аудио');
@@ -677,24 +682,24 @@ async function edgeTts(text, voice, slow) {
   await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
   const st = await tts.toStream(text, slow ? { rate: '-25%' } : undefined);
   const stream = st && st.audioStream ? st.audioStream : st;
-  return new Promise((resolve, reject) => {
+  return withTimeout(new Promise((resolve, reject) => {
     const chunks = [];
     stream.on('data', (c) => chunks.push(c));
     stream.on('end', () => { const b = Buffer.concat(chunks); b.length ? resolve(b) : reject(new Error('пустое аудио')); });
     stream.on('error', reject);
-  });
+  }), config.ai.ttsTimeoutMs, 'TTS_TIMEOUT');
 }
 app.get('/api/tts', auth, requireActiveSubscription, ttsLimiter, async (req, res) => {
   const text = String(req.query.text || '').slice(0, 500).trim();
-  if (!text) return res.status(400).json({ error: 'нет текста' });
+  if (!text) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Не указан текст для озвучивания.' } });
   const voice = TTS_VOICES.has(req.query.voice) ? req.query.voice : 'en-GB-SoniaNeural';
   const slow = req.query.slow === '1';
-  const useGrok = !!XAI_KEY && !slow;
-  const key = crypto.createHash('sha1').update((useGrok ? 'g' : 'e') + '|' + voice + '|' + (slow ? 1 : 0) + '|' + text).digest('hex');
+  const useGrok = config.ai.xaiEnabled && !!XAI_KEY && !slow;
+  const key = crypto.createHash('sha256').update((useGrok ? 'g' : 'e') + '|' + voice + '|' + (slow ? 1 : 0) + '|' + text).digest('hex');
   const file = path.join(TTS_DIR, key + '.mp3');
   if (fs.existsSync(file)) {
     res.setHeader('Content-Type', 'audio/mpeg');
-    res.setHeader('Cache-Control', 'public, max-age=604800');
+    res.setHeader('Cache-Control', 'private, max-age=604800');
     return res.sendFile(file);
   }
   if (useGrok) {
@@ -702,7 +707,7 @@ app.get('/api/tts', auth, requireActiveSubscription, ttsLimiter, async (req, res
     catch (e) { console.log('Grok TTS не сработал, пробую Edge:', e.message); }
   }
   try {
-    const ekey = crypto.createHash('sha1').update('e|' + voice + '|' + (slow ? 1 : 0) + '|' + text).digest('hex');
+    const ekey = crypto.createHash('sha256').update('e|' + voice + '|' + (slow ? 1 : 0) + '|' + text).digest('hex');
     return ttsSend(res, await edgeTts(text, voice, slow), path.join(TTS_DIR, ekey + '.mp3'));
   } catch (e) {
     res.status(503).json({ error: { code: 'TTS_UNAVAILABLE', message: 'Озвучка временно недоступна.' } });
@@ -710,19 +715,21 @@ app.get('/api/tts', auth, requireActiveSubscription, ttsLimiter, async (req, res
 });
 
 // ---- расшифровка речи (Grok STT) для оценки говорения ----
-app.post('/api/stt', auth, requireActiveSubscription, requirePrivacyConsent('voice_processing'), sttLimiter, express.raw({ type: () => true, limit: '20mb' }), async (req, res) => {
+app.post('/api/stt', auth, requireActiveSubscription, requirePrivacyConsent('voice_processing'), sttLimiter, express.raw({ type: () => true, limit: config.ai.sttMaxBytes }), async (req, res) => {
   try {
-    if (!XAI_KEY) return res.status(503).json({ error: { code: 'STT_NOT_CONFIGURED', message: 'Распознавание речи не настроено.' } });
+    if (!config.ai.xaiEnabled || !XAI_KEY) return res.status(503).json({ error: { code: 'STT_NOT_CONFIGURED', message: 'Распознавание речи не настроено.' } });
     const buf = req.body;
-    if (!buf || !buf.length) return res.status(400).json({ error: 'нет аудио' });
+    const upload = validateAudioUpload(req.headers['content-type'], buf, config.ai.sttMaxBytes);
+    if (!upload.ok) return res.status(upload.status).json({ error: { code: upload.code, message: upload.code === 'UNSUPPORTED_AUDIO_TYPE' ? 'Формат аудио не поддерживается.' : upload.code === 'AUDIO_TOO_LARGE' ? 'Аудиозапись слишком большая.' : 'Аудиозапись пуста.' } });
     const fd = new FormData();
-    fd.append('file', new Blob([buf], { type: req.headers['content-type'] || 'audio/webm' }), 'rec.webm');
+    const extension = upload.mimeType === 'audio/mp4' ? 'mp4' : upload.mimeType === 'audio/mpeg' ? 'mp3' : upload.mimeType.includes('wav') ? 'wav' : upload.mimeType === 'audio/ogg' ? 'ogg' : 'webm';
+    fd.append('file', new Blob([buf], { type: upload.mimeType }), `rec.${extension}`);
     fd.append('language', 'en');
-    const r = await fetch('https://api.x.ai/v1/stt', {
-      method: 'POST',
-      headers: { Authorization: 'Bearer ' + XAI_KEY },
-      body: fd,
-    });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), config.ai.sttTimeoutMs);
+    let r;
+    try { r = await fetch('https://api.x.ai/v1/stt', { method: 'POST', headers: { Authorization: 'Bearer ' + XAI_KEY }, body: fd, signal: controller.signal }); }
+    finally { clearTimeout(timer); }
     const j = await r.json().catch(() => ({}));
     if (!r.ok) return res.status(502).json({ error: { code: 'STT_PROVIDER_UNAVAILABLE', message: 'Распознавание речи временно недоступно.' } });
     res.json({ text: j.text || '', duration: j.duration || 0 });

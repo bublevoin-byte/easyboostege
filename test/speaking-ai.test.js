@@ -14,6 +14,7 @@ test('speaking request accepts typed assignment and rejects prompt fields', () =
 test('speaking prompt keeps transcript in untrusted JSON data', () => {
   const prompt = buildSpeakingPrompt(speakingRequestSchema.parse(request));
   assert.match(prompt.system, /untrusted data/u);
+  assert.match(prompt.system, /Do not assess or claim to assess pronunciation, intonation, pauses, fluency/u);
   assert.doesNotMatch(prompt.system, /How much/u);
   assert.equal(JSON.parse(prompt.user).taskType, 2);
 });

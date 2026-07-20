@@ -167,6 +167,21 @@ test('AI, TTS and STT endpoints return stable public error codes', async () => {
   assert.doesNotMatch(server, /res\.status\((?:502|503)\)\.json\(\{ error: '(?:ИИ|Озвучка|STT)[^']*' \+ /u);
 });
 
+test('audio endpoints enforce upload controls, timeouts and private cached responses', async () => {
+  const [server, frontend] = await Promise.all([
+    fs.readFile(serverPath, 'utf8'),
+    fs.readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
+  ]);
+  assert.match(server, /validateAudioUpload\(req\.headers\['content-type'\], buf, config\.ai\.sttMaxBytes\)/u);
+  assert.match(server, /controller\.abort\(\), config\.ai\.sttTimeoutMs/u);
+  assert.match(server, /pruneAudioCache\(TTS_DIR/u);
+  assert.match(server, /Cache-Control', 'private, max-age=604800'/u);
+  assert.doesNotMatch(server, /Cache-Control', 'public, max-age=604800'/u);
+  assert.match(frontend, /function spDeleteRecording\(/u);
+  assert.match(frontend, /function spFlagTranscript\(/u);
+  assert.match(frontend, /Произношение, интонация, паузы и беглость не оценивались/u);
+});
+
 test('production documentation covers local setup, API, database and operations', async () => {
   const paths = ['../README.md', '../docs/openapi.yaml', '../docs/DATABASE_SCHEMA.md', '../docs/AI_OPERATIONS.md', '../docs/KEY_ROTATION.md', '../docs/SUPPORT.md', '../docs/KNOWN_LIMITATIONS.md', '../docs/TELEGRAM_ADMIN.md', '../docs/AI_QUALITY.md'];
   const documents = await Promise.all(paths.map((path) => fs.readFile(new URL(path, import.meta.url), 'utf8')));

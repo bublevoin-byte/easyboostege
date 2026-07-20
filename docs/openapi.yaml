@@ -220,8 +220,18 @@ paths:
         content:
           audio/webm:
             schema: { type: string, format: binary }
+          audio/mp4:
+            schema: { type: string, format: binary }
+          audio/mpeg:
+            schema: { type: string, format: binary }
+          audio/ogg:
+            schema: { type: string, format: binary }
+          audio/wav:
+            schema: { type: string, format: binary }
       responses:
         '200': { description: Transcript }
+        '413': { description: Audio payload exceeds configured maximum }
+        '415': { description: Unsupported audio MIME type }
         '429': { $ref: '#/components/responses/RateLimited' }
 components:
   securitySchemes:
