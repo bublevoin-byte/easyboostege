@@ -5,7 +5,7 @@
 | Таблица | Назначение | Ключевые данные |
 |---|---|---|
 | `schema_migrations` | применённые миграции | `version`, `applied_at` |
-| `users` | аккаунты Telegram/legacy | `username`, `telegram_id`, subscription fields |
+| `users` | аккаунты Telegram/legacy и роли | `username`, `telegram_id`, `role`, subscription fields |
 | `sessions` | серверные пользовательские сессии | `id`, `username`, expiry, revoke timestamp |
 | `user_progress` | JSONB-прогресс пользователя | `username`, `data`, `updated_at` |
 | `telegram_auth_codes` | одноразовые коды входа | hash кода, expiry, consumed state |

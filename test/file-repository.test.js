@@ -90,6 +90,16 @@ test('sessions can be validated and revoked server-side', async () => {
   });
 });
 
+test('user roles are validated and persisted', async () => {
+  await withRepository(async (repository) => {
+    const username = await repository.createTelegramUser(2020, 'Role User');
+    assert.equal((await repository.getUser(username)).role, 'student');
+    assert.equal(await repository.setUserRole(username, 'admin'), 'admin');
+    assert.equal((await repository.getUser(username)).role, 'admin');
+    await assert.rejects(repository.setUserRole(username, 'owner'), /INVALID_ROLE/u);
+  });
+});
+
 test('writing attempt and AI metadata are persisted without prompt text in the AI log', async () => {
   await withRepository(async (repository, file) => {
     const username = await repository.createTelegramUser(3001, 'Writer');

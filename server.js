@@ -7,7 +7,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, countAiRequestsSince, createSession, createTelegramAuthCode, createWritingAttempt, deleteUserData, exportUserData, finishWritingAttempt, getPrivacyConsent, getProgress, getUser, healthCheck, isSessionActive, revokeSession, saveProgress, setPrivacyConsent, mergeProgress, getUserByTelegram, createTelegramUser, grantDays, logAiRequest, markTrialUsed, getSub } from './db.js';
+import { closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, countAiRequestsSince, createSession, createTelegramAuthCode, createWritingAttempt, deleteUserData, exportUserData, finishWritingAttempt, getPrivacyConsent, getProgress, getUser, healthCheck, isSessionActive, revokeSession, saveProgress, setPrivacyConsent, setUserRole, mergeProgress, getUserByTelegram, createTelegramUser, grantDays, logAiRequest, markTrialUsed, getSub } from './db.js';
 import { config } from './config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from './ai/writing.js';
 import { buildContentPrompt, CONTENT_PROMPT_VERSION, contentRequestSchema, parseContentResponse } from './ai/content.js';
@@ -96,6 +96,7 @@ app.get('/', async (req, res, next) => {
       if (!confirmed) return res.redirect('/?login_error=expired');
       const existing = await getUserByTelegram(confirmed.telegram_id);
       const username = existing ? existing.username : await createTelegramUser(confirmed.telegram_id, confirmed.name);
+      await promoteConfiguredAdmin(username, confirmed.telegram_id);
       setAuthCookie(req, res, await issueToken(username));
       return res.redirect('/');
     }
@@ -114,6 +115,9 @@ async function issueToken(username) {
   const expiresAt = Date.now() + config.sessionDays * 86_400_000;
   await createSession(sid, username, expiresAt);
   return jwt.sign({ u: username, sid }, SECRET, { expiresIn: config.sessionDays + 'd' });
+}
+async function promoteConfiguredAdmin(username, telegramId) {
+  if (ADMIN_ID && String(telegramId) === String(ADMIN_ID)) await setUserRole(username, 'admin');
 }
 function getCookie(req, name) {
   const c = req.headers.cookie || '';
@@ -134,17 +138,24 @@ async function auth(req, res, next) {
   try {
     const claims = jwt.verify(token, SECRET);
     const username = claims.u;
-    if (!await getUser(username)) return res.status(401).json({ error: 'Требуется вход' });
+    const user = await getUser(username);
+    if (!user) return res.status(401).json({ error: 'Требуется вход' });
     if (claims.sid && !await isSessionActive(claims.sid, username)) {
       return res.status(401).json({ error: { code: 'SESSION_REVOKED', message: 'Сессия завершена. Войдите снова.' } });
     }
     req.user = username;
+    req.role = user.role || 'student';
     req.sessionId = claims.sid || null;
     req.authToken = token;
     next();
   } catch (e) {
     res.status(401).json({ error: 'Требуется вход' });
   }
+}
+function requireRole(...roles) {
+  return (req, res, next) => roles.includes(req.role)
+    ? next()
+    : res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Недостаточно прав.' } });
 }
 
 // ---- Telegram bot ----
@@ -314,6 +325,7 @@ app.get('/api/tg/check', telegramCheckLimiter, async (req, res, next) => {
     if (!r) return res.json({ pending: true });
     const existing = await getUserByTelegram(r.telegram_id);
     const uname = existing ? existing.username : await createTelegramUser(r.telegram_id, r.name);
+    await promoteConfiguredAdmin(uname, r.telegram_id);
     const token = await issueToken(uname);
     setAuthCookie(req, res, token);
     res.json({ authenticated: true, username: uname, ...await getSub(uname), bot: BOT_USERNAME });
@@ -325,8 +337,12 @@ app.get('/api/me', auth, async (req, res, next) => {
   try {
     const token = req.sessionId ? req.authToken : await issueToken(req.user);
     setAuthCookie(req, res, token);
-    res.json({ authenticated: true, username: req.user, bot: BOT_USERNAME, ...await getSub(req.user) });
+    res.json({ authenticated: true, username: req.user, role: req.role, bot: BOT_USERNAME, ...await getSub(req.user) });
   } catch (error) { next(error); }
+});
+
+app.get('/api/admin/status', auth, requireRole('admin'), (req, res) => {
+  res.json({ status: 'ok', role: req.role });
 });
 app.post('/api/logout', async (req, res, next) => {
   try {

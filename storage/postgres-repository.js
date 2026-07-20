@@ -12,6 +12,7 @@ function mapUser(row) {
     created: new Date(row.created_at).getTime(),
     sub_until: row.subscription_until ? new Date(row.subscription_until).getTime() : 0,
     trial_used: row.trial_used,
+    role: row.role || 'student',
   };
 }
 
@@ -116,6 +117,16 @@ export function createPostgresRepository(connectionString) {
 
   async function getSub(username) {
     return subscriptionView(await getUser(username));
+  }
+
+  async function setUserRole(username, role) {
+    if (!['student', 'admin'].includes(role)) throw new Error('INVALID_ROLE');
+    const result = await pool.query(
+      'UPDATE users SET role = $2, updated_at = NOW() WHERE username = $1 RETURNING role',
+      [username, role],
+    );
+    if (!result.rowCount) throw new Error('USER_NOT_FOUND');
+    return result.rows[0].role;
   }
 
   async function getPrivacyConsent(username) {
@@ -258,7 +269,7 @@ export function createPostgresRepository(connectionString) {
 
   async function exportUserData(username) {
     const [account, progress, privacyConsent, subscriptionEvents, writingAttempts, aiRequests] = await Promise.all([
-      pool.query('SELECT username, telegram_id, trial_used, subscription_until, created_at, updated_at FROM users WHERE username = $1', [username]),
+      pool.query('SELECT username, telegram_id, role, trial_used, subscription_until, created_at, updated_at FROM users WHERE username = $1', [username]),
       pool.query('SELECT data, updated_at FROM user_progress WHERE username = $1', [username]),
       pool.query('SELECT text_processing, voice_processing, policy_version, text_consented_at, voice_consented_at, updated_at FROM privacy_consents WHERE username = $1', [username]),
       pool.query('SELECT id, event_type, days, metadata, created_at FROM subscription_events WHERE username = $1 ORDER BY created_at', [username]),
@@ -311,6 +322,7 @@ export function createPostgresRepository(connectionString) {
     grantDays,
     markTrialUsed,
     getSub,
+    setUserRole,
     getPrivacyConsent,
     setPrivacyConsent,
     createTelegramAuthCode,

@@ -46,7 +46,7 @@ export function createFileRepository(filePath) {
   async function createUser(username, hash) {
     await load();
     if (state.users[username]) throw new Error('USER_EXISTS');
-    state.users[username] = { hash, created: Date.now() };
+    state.users[username] = { hash, role: 'student', created: Date.now() };
     state.progress[username] ||= {};
     await persist();
     return { username, ...state.users[username] };
@@ -87,7 +87,7 @@ export function createFileRepository(filePath) {
     let username = base;
     let suffix = 1;
     while (state.users[username]) username = `${base.slice(0, 16)}_${suffix++}`;
-    state.users[username] = { telegram_id: Number(telegramId), created: Date.now() };
+    state.users[username] = { telegram_id: Number(telegramId), role: 'student', created: Date.now() };
     state.progress[username] ||= {};
     await persist();
     return username;
@@ -118,6 +118,15 @@ export function createFileRepository(filePath) {
 
   async function getSub(username) {
     return subscriptionView(await getUser(username));
+  }
+
+  async function setUserRole(username, role) {
+    await load();
+    if (!['student', 'admin'].includes(role)) throw new Error('INVALID_ROLE');
+    if (!state.users[username]) throw new Error('USER_NOT_FOUND');
+    state.users[username].role = role;
+    await persist();
+    return role;
   }
 
   async function getPrivacyConsent(username) {
@@ -289,6 +298,7 @@ export function createFileRepository(filePath) {
       account: {
         username,
         telegram_id: user.telegram_id ?? null,
+        role: user.role || 'student',
         trial_used: Boolean(user.trial_used),
         subscription_until: user.sub_until ?? null,
         created_at: user.created ?? null,
@@ -340,6 +350,7 @@ export function createFileRepository(filePath) {
     grantDays,
     markTrialUsed,
     getSub,
+    setUserRole,
     getPrivacyConsent,
     setPrivacyConsent,
     createTelegramAuthCode,

@@ -18,10 +18,13 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     assert.deepEqual(migrations.rows.map((row) => row.version), [
       '001_initial.sql', '002_telegram_auth_codes.sql', '003_writing_attempt_error_code.sql',
       '004_privacy_consents.sql', '005_ai_token_usage.sql', '006_ai_estimated_cost.sql', '007_sessions.sql',
+      '008_user_roles.sql',
     ]);
 
     const username = await repository.createTelegramUser(telegramId, `Integration ${suffix}`);
     assert.equal((await repository.getUser(username)).telegram_id, telegramId);
+    assert.equal(await repository.setUserRole(username, 'admin'), 'admin');
+    assert.equal((await repository.getUser(username)).role, 'admin');
 
     const sessionId = crypto.randomUUID();
     await repository.createSession(sessionId, username, Date.now() + 60_000);

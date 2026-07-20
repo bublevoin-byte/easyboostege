@@ -47,6 +47,13 @@ paths:
       responses:
         '200': { description: User profile }
         '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/admin/status:
+    get:
+      summary: Verify administrator access
+      responses:
+        '200': { description: Administrator access confirmed }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Authenticated user does not have the admin role }
   /api/logout:
     post:
       summary: Clear authentication cookie
