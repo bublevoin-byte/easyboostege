@@ -1,0 +1,100 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import fs from 'node:fs/promises';
+import net from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const projectDirectory = fileURLToPath(new URL('..', import.meta.url));
+const serverPath = fileURLToPath(new URL('../server.js', import.meta.url));
+
+async function findAvailablePort() {
+  const listener = net.createServer();
+  await new Promise((resolve, reject) => {
+    listener.once('error', reject);
+    listener.listen(0, '127.0.0.1', resolve);
+  });
+  const { port } = listener.address();
+  await new Promise((resolve, reject) => listener.close((error) => error ? reject(error) : resolve()));
+  return port;
+}
+
+async function waitForReady(baseUrl, child, output) {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) throw new Error(`Server exited early (${child.exitCode}).\n${output.join('')}`);
+    try {
+      const response = await fetch(`${baseUrl}/health/ready`);
+      if (response.ok) return response;
+    } catch {
+      // The socket is expected to reject connections while the process starts.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Server did not become ready.\n${output.join('')}`);
+}
+
+async function stopProcess(child) {
+  if (child.exitCode !== null) return;
+  child.kill('SIGTERM');
+  await Promise.race([
+    new Promise((resolve) => child.once('exit', resolve)),
+    new Promise((resolve) => setTimeout(resolve, 3_000)),
+  ]);
+  if (child.exitCode === null) child.kill('SIGKILL');
+}
+
+test('application starts and serves health, security headers and PWA assets', { timeout: 20_000 }, async () => {
+  const temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-smoke-'));
+  const port = await findAvailablePort();
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const output = [];
+  const child = spawn(process.execPath, [serverPath], {
+    cwd: projectDirectory,
+    env: {
+      ...process.env,
+      NODE_ENV: 'test',
+      PORT: String(port),
+      APP_URL: baseUrl,
+      DATABASE_PROVIDER: 'file',
+      DATA_FILE: path.join(temporaryDirectory, 'data.json'),
+      TELEGRAM_BOT_TOKEN: '',
+      ADMIN_TELEGRAM_ID: '',
+      XAI_API_KEY: '',
+      GROQ_API_KEY: '',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  child.stdout.on('data', (chunk) => output.push(chunk.toString()));
+  child.stderr.on('data', (chunk) => output.push(chunk.toString()));
+
+  try {
+    const ready = await waitForReady(baseUrl, child, output);
+    assert.deepEqual(await ready.json(), { status: 'ready', storage: 'file' });
+
+    const live = await fetch(`${baseUrl}/health/live`);
+    assert.equal(live.status, 200);
+    assert.deepEqual(await live.json(), { status: 'ok' });
+
+    const home = await fetch(`${baseUrl}/`);
+    assert.equal(home.status, 200);
+    assert.match(home.headers.get('content-security-policy') || '', /default-src 'self'/u);
+    assert.match(home.headers.get('cache-control') || '', /no-store/u);
+    assert.match(await home.text(), /<title>Easy Boost<\/title>/u);
+
+    const manifest = await fetch(`${baseUrl}/manifest.json`);
+    assert.equal(manifest.status, 200);
+    assert.equal((await manifest.json()).display, 'standalone');
+
+    const serviceWorker = await fetch(`${baseUrl}/service-worker.js`);
+    assert.equal(serviceWorker.status, 200);
+    const serviceWorkerSource = await serviceWorker.text();
+    assert.match(serviceWorkerSource, /CACHE_NAME/u);
+    assert.match(serviceWorkerSource, /url\.pathname\.startsWith\('\/api\/'\)/u);
+  } finally {
+    await stopProcess(child);
+    await fs.rm(temporaryDirectory, { recursive: true, force: true });
+  }
+});

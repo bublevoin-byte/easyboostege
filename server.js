@@ -102,7 +102,11 @@ app.get('/', async (req, res, next) => {
     res.redirect('/');
   } catch (error) { next(error); }
 });
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders(res, filePath) {
+    if (path.basename(filePath) === 'index.html') res.setHeader('Cache-Control', 'no-store');
+  },
+}));
 
 function makeToken(username) {
   return jwt.sign({ u: username }, SECRET, { expiresIn: config.sessionDays + 'd' });
@@ -590,7 +594,10 @@ app.post('/api/stt', auth, requireActiveSubscription, sttLimiter, express.raw({ 
   }
 });
 
-app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+app.get('*', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
 app.use((error, req, res, next) => {
   const publicError = classifyBodyParserError(error);
