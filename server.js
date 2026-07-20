@@ -7,7 +7,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { activateTrial, closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, countAiRequestsSince, createPaymentRequest, createSession, createSpeakingAttempt, createTelegramAuthCode, createWritingAttempt, deleteUserData, exportUserData, finishSpeakingAttempt, finishWritingAttempt, getGeneratedTask, getPrivacyConsent, getProgress, getUser, healthCheck, isSessionActive, recordModuleAttempt, resolvePaymentRequest, revokeSession, saveGeneratedTask, saveProgress, setPrivacyConsent, setUserRole, mergeProgress, getUserByTelegram, createTelegramUser, logAiRequest, getSub } from './db.js';
+import { activateTrial, closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, countAiRequestsSince, createPaymentRequest, createSession, createSpeakingAttempt, createTelegramAuthCode, createWritingAttempt, deleteUserData, exportUserData, finishSpeakingAttempt, finishWritingAttempt, getGeneratedTask, getPrivacyConsent, getProgress, getUser, healthCheck, isSessionActive, recordModuleAttempt, resolvePaymentRequest, revokeSession, saveGeneratedTask, saveProgress, setPrivacyConsent, setUserRole, upsertWordProgress, mergeProgress, getUserByTelegram, createTelegramUser, logAiRequest, getSub } from './db.js';
 import { config } from './config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from './ai/writing.js';
 import { buildContentPrompt, CONTENT_PROMPT_VERSION, contentRequestSchema, parseContentResponse } from './ai/content.js';
@@ -17,6 +17,7 @@ import { pruneAudioCache, validateAudioUpload, withTimeout } from './audio/contr
 import { protectCookieRequests } from './security/request-origin.js';
 import { classifyBodyParserError, validateProgress } from './validation/api-input.js';
 import { moduleAttemptSchema } from './validation/module-attempt.js';
+import { wordProgressBatchSchema } from './validation/word-progress.js';
 import { contentSecurityPolicy } from './security/csp.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -440,6 +441,18 @@ app.post('/api/module-attempts', auth, moduleAttemptLimiter, async (req, res, ne
     if (!parsed.success) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректные данные попытки.' } });
     const result = await recordModuleAttempt(req.user, parsed.data);
     res.status(result.created ? 201 : 200).json(result);
+  } catch (error) { next(error); }
+});
+const wordProgressLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, limit: 120, standardHeaders: 'draft-8', legacyHeaders: false,
+  keyGenerator: (req) => req.user,
+  message: { error: { code: 'RATE_LIMITED', message: 'Слишком много обновлений словаря.' } },
+});
+app.put('/api/word-progress', auth, wordProgressLimiter, async (req, res, next) => {
+  try {
+    const parsed = wordProgressBatchSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректный прогресс слов.' } });
+    res.json(await upsertWordProgress(req.user, parsed.data.words));
   } catch (error) { next(error); }
 });
 

@@ -4,7 +4,7 @@ import { hashAuthCode, normalizeUsername, subscriptionView } from './shared.js';
 
 export function createFileRepository(filePath) {
   let loaded = false;
-  let state = { users: {}, progress: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], generated_tasks: [], module_attempts: [], ai_requests: [], sessions: {}, subscriptions: {}, payment_requests: {}, subscription_events: [] };
+  let state = { users: {}, progress: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], generated_tasks: [], module_attempts: [], word_progress: {}, ai_requests: [], sessions: {}, subscriptions: {}, payment_requests: {}, subscription_events: [] };
   let writeQueue = Promise.resolve();
 
   async function load() {
@@ -21,6 +21,7 @@ export function createFileRepository(filePath) {
           speaking_attempts: Array.isArray(parsed.speaking_attempts) ? parsed.speaking_attempts : [],
           generated_tasks: Array.isArray(parsed.generated_tasks) ? parsed.generated_tasks : [],
           module_attempts: Array.isArray(parsed.module_attempts) ? parsed.module_attempts : [],
+          word_progress: parsed.word_progress && typeof parsed.word_progress === 'object' ? parsed.word_progress : {},
           ai_requests: Array.isArray(parsed.ai_requests) ? parsed.ai_requests : [],
           sessions: parsed.sessions && typeof parsed.sessions === 'object' ? parsed.sessions : {},
           subscriptions: parsed.subscriptions && typeof parsed.subscriptions === 'object' ? parsed.subscriptions : {},
@@ -341,6 +342,15 @@ export function createFileRepository(filePath) {
     return { id: attempt.id, created: true };
   }
 
+  async function upsertWordProgress(username, words) {
+    await load();
+    state.word_progress[username] ||= {};
+    const now = Date.now();
+    for (const item of words) state.word_progress[username][item.word.toLocaleLowerCase('en')] = { word: item.word.toLocaleLowerCase('en'), stage: item.stage, error_count: item.errorCount, review_count: item.reviewCount, due_at: item.dueAt, updated_at: now };
+    await persist();
+    return { updated: words.length };
+  }
+
   async function logAiRequest(entry) {
     await load();
     const id = (state.ai_requests.at(-1)?.id || 0) + 1;
@@ -408,6 +418,7 @@ export function createFileRepository(filePath) {
       speaking_attempts: state.speaking_attempts.filter((item) => item.username === username),
       generated_tasks: state.generated_tasks.filter((item) => item.username === username).map(({ request_hash, username: owner, ...item }) => item),
       module_attempts: state.module_attempts.filter((item) => item.username === username),
+      word_progress: Object.values(state.word_progress[username] || {}),
       ai_requests: state.ai_requests.filter((item) => item.username === username),
     });
   }
@@ -423,6 +434,7 @@ export function createFileRepository(filePath) {
     state.speaking_attempts = state.speaking_attempts.filter((item) => item.username !== username);
     state.generated_tasks = state.generated_tasks.filter((item) => item.username !== username);
     state.module_attempts = state.module_attempts.filter((item) => item.username !== username);
+    delete state.word_progress[username];
     state.ai_requests = state.ai_requests.filter((item) => item.username !== username);
     delete state.subscriptions[username];
     state.subscription_events = state.subscription_events.filter((item) => item.username !== username);
@@ -473,6 +485,7 @@ export function createFileRepository(filePath) {
     getGeneratedTask,
     saveGeneratedTask,
     recordModuleAttempt,
+    upsertWordProgress,
     logAiRequest,
     countAiRequestsSince,
     createSession,

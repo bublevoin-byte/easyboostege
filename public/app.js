@@ -310,6 +310,7 @@ let TOKEN=''; // маркер активной cookie-сессии; сам JWT �
 function gv(id){var e=document.getElementById(id);return e?(e.value||'').trim():''}
 function lgMsg(t){var e=document.getElementById('lg_msg');if(e)e.textContent=t}
 const apiPost=EasyBoostApi.post;
+const apiPut=EasyBoostApi.put;
 const apiGet=EasyBoostApi.get;
 const apiGetBlob=EasyBoostApi.getBlob;
 const apiPostBinary=EasyBoostApi.postBinary;
@@ -807,12 +808,16 @@ const EGE_WORDS=[
 ];
 const SRS_INT=[0,1,3,7,16,35];
 let WQ=[],WI=0,WDONE=0;
+var W_SYNC={},W_SYNC_T=null;
+function wQueueServer(w){if(typeof SRV==='undefined'||!SRV||!TOKEN)return;var r=wRec(w);if(!r)return;
+  W_SYNC[w]={word:w,stage:r.s||0,errorCount:r.e||0,reviewCount:r.n||0,dueAt:r.due||null};clearTimeout(W_SYNC_T);
+  W_SYNC_T=setTimeout(function(){var pending=W_SYNC;W_SYNC={};apiPut('/api/word-progress',{words:Object.keys(pending).map(function(k){return pending[k]})}).catch(function(){Object.keys(pending).forEach(function(k){W_SYNC[k]=pending[k]})})},900)}
 function wToday0(){var d=new Date();d.setHours(0,0,0,0);return d.getTime()}
 function wRec(w){S.srs=S.srs||{};return S.srs[w]}
 function wSet(w){S.srs=S.srs||{};return S.srs[w]||(S.srs[w]={s:0,e:0,n:0,due:0})}
 function wBase(w){return w.replace(/^to /,'').toLowerCase().trim()}
-function srsOk(w){var r=wSet(w);r.n++;r.s=Math.min(5,(r.s||0)+1);r.due=Date.now()+SRS_INT[r.s]*86400000}
-function srsFail(w){var r=wSet(w);r.n++;r.e=(r.e||0)+1;r.s=Math.max(1,(r.s||0)-2);r.due=Date.now()}
+function srsOk(w){var r=wSet(w);r.n++;r.s=Math.min(5,(r.s||0)+1);r.due=Date.now()+SRS_INT[r.s]*86400000;wQueueServer(w)}
+function srsFail(w){var r=wSet(w);r.n++;r.e=(r.e||0)+1;r.s=Math.max(1,(r.s||0)-2);r.due=Date.now();wQueueServer(w)}
 function wStats(){var L=0,ing=0,tot=EGE_WORDS.length;
   EGE_WORDS.forEach(function(x){var r=wRec(x.w);if(!r||!r.s)return;(r.s>=5?L++:ing++)});
   return {learned:L,learning:ing,fresh:tot-L-ing,total:tot}}

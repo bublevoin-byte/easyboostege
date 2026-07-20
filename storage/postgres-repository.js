@@ -376,6 +376,27 @@ export function createPostgresRepository(connectionString) {
     return { id: attempt.id, created: result.rowCount === 1 };
   }
 
+  async function upsertWordProgress(username, words) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      for (const item of words) {
+        await client.query(
+          `INSERT INTO word_progress (username, word, stage, error_count, review_count, due_at)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           ON CONFLICT (username, word) DO UPDATE SET stage = EXCLUDED.stage,
+             error_count = EXCLUDED.error_count, review_count = EXCLUDED.review_count,
+             due_at = EXCLUDED.due_at, updated_at = NOW()`,
+          [username, item.word.toLocaleLowerCase('en'), item.stage, item.errorCount, item.reviewCount, item.dueAt == null ? null : new Date(item.dueAt)],
+        );
+      }
+      await client.query('COMMIT');
+      return { updated: words.length };
+    } catch (error) {
+      await client.query('ROLLBACK'); throw error;
+    } finally { client.release(); }
+  }
+
   async function logAiRequest(entry) {
     const result = await pool.query(
       `INSERT INTO ai_requests
@@ -422,7 +443,7 @@ export function createPostgresRepository(connectionString) {
   }
 
   async function exportUserData(username) {
-    const [account, progress, privacyConsent, subscriptionEvents, paymentRequests, writingAttempts, speakingAttempts, generatedTasks, moduleAttempts, aiRequests] = await Promise.all([
+    const [account, progress, privacyConsent, subscriptionEvents, paymentRequests, writingAttempts, speakingAttempts, generatedTasks, moduleAttempts, wordProgress, aiRequests] = await Promise.all([
       pool.query('SELECT username, telegram_id, role, trial_used, subscription_until, created_at, updated_at FROM users WHERE username = $1', [username]),
       pool.query('SELECT data, updated_at FROM user_progress WHERE username = $1', [username]),
       pool.query('SELECT text_processing, voice_processing, policy_version, text_consented_at, voice_consented_at, updated_at FROM privacy_consents WHERE username = $1', [username]),
@@ -432,6 +453,7 @@ export function createPostgresRepository(connectionString) {
       pool.query('SELECT id, task_type, assignment, transcript, review, provider, prompt_version, status, error_code, created_at, evaluated_at FROM speaking_attempts WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, operation, request, result, provider, prompt_version, created_at FROM generated_tasks WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, module, activity, score, max_score, duration_ms, metadata, created_at FROM module_attempts WHERE username = $1 ORDER BY created_at', [username]),
+      pool.query('SELECT word, stage, error_count, review_count, due_at, updated_at FROM word_progress WHERE username = $1 ORDER BY word', [username]),
       pool.query('SELECT id, operation, provider, model, prompt_version, status, duration_ms, error_code, prompt_tokens, completion_tokens, estimated_cost_microusd, created_at FROM ai_requests WHERE username = $1 ORDER BY created_at', [username]),
     ]);
     if (!account.rowCount) return null;
@@ -446,6 +468,7 @@ export function createPostgresRepository(connectionString) {
       speaking_attempts: speakingAttempts.rows,
       generated_tasks: generatedTasks.rows,
       module_attempts: moduleAttempts.rows,
+      word_progress: wordProgress.rows,
       ai_requests: aiRequests.rows,
     };
   }
@@ -500,6 +523,7 @@ export function createPostgresRepository(connectionString) {
     getGeneratedTask,
     saveGeneratedTask,
     recordModuleAttempt,
+    upsertWordProgress,
     logAiRequest,
     countAiRequestsSince,
     createSession,

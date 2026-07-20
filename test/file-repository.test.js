@@ -203,6 +203,18 @@ test('module attempts are idempotent and included in user export', async () => {
   });
 });
 
+test('word progress upserts normalized SRS state', async () => {
+  await withRepository(async (repository) => {
+    const username = await repository.createTelegramUser(3040, 'Words Student');
+    await repository.upsertWordProgress(username, [{ word: 'Achievement', stage: 2, errorCount: 1, reviewCount: 3, dueAt: 1000 }]);
+    await repository.upsertWordProgress(username, [{ word: 'achievement', stage: 3, errorCount: 1, reviewCount: 4, dueAt: 2000 }]);
+    const exported = await repository.exportUserData(username);
+    assert.equal(exported.word_progress.length, 1);
+    assert.equal(exported.word_progress[0].word, 'achievement');
+    assert.equal(exported.word_progress[0].stage, 3);
+  });
+});
+
 test('file repository readiness check succeeds after pending writes', async () => {
   await withRepository(async (repository) => {
     const username = await repository.createTelegramUser(4001, 'Health User');

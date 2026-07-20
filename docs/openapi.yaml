@@ -156,6 +156,34 @@ paths:
         '200': { description: Duplicate event accepted without creating another attempt }
         '400': { $ref: '#/components/responses/BadRequest' }
         '429': { $ref: '#/components/responses/RateLimited' }
+  /api/word-progress:
+    put:
+      summary: Upsert a bounded batch of spaced-repetition word states
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [words]
+              properties:
+                words:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items:
+                    type: object
+                    required: [word, stage, errorCount, reviewCount, dueAt]
+                    properties:
+                      word: { type: string, maxLength: 120 }
+                      stage: { type: integer, minimum: 0, maximum: 5 }
+                      errorCount: { type: integer, minimum: 0 }
+                      reviewCount: { type: integer, minimum: 0 }
+                      dueAt: { type: integer, nullable: true }
+      responses:
+        '200': { description: Word states updated }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '429': { $ref: '#/components/responses/RateLimited' }
   /api/v1/ai/evaluate-writing:
     post:
       summary: Evaluate EGE writing task 37 or 38

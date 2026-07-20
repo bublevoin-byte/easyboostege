@@ -165,6 +165,12 @@ test('application starts and serves health, security headers and PWA assets', { 
     const duplicateAttempt = await fetch(`${baseUrl}/api/module-attempts`, { method: 'POST', headers: activeAuthorization, body: JSON.stringify(moduleAttempt) });
     assert.equal(duplicateAttempt.status, 200);
     assert.equal((await duplicateAttempt.json()).created, false);
+    const wordSync = await fetch(`${baseUrl}/api/word-progress`, {
+      method: 'PUT', headers: activeAuthorization,
+      body: JSON.stringify({ words: [{ word: 'achievement', stage: 2, errorCount: 1, reviewCount: 3, dueAt: Date.now() + 60_000 }] }),
+    });
+    assert.equal(wordSync.status, 200);
+    assert.equal((await wordSync.json()).updated, 1);
 
     const studentAdminRequest = await fetch(`${baseUrl}/api/admin/status`, { headers: activeAuthorization });
     assert.equal(studentAdminRequest.status, 403);
