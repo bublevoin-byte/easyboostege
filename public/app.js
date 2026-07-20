@@ -154,10 +154,8 @@ const DICT={
 /* translate: AI first, else offline dictionary */
 async function trWord(w){lastWord=w;const pop=document.getElementById('r_pop');
   document.getElementById('r_word').textContent=w;document.getElementById('r_ipa').textContent='';document.getElementById('r_tr').textContent='перевод…';pop.style.display='block';
-  try{const out=await callGemini('Британский учебный словарь. Верни строго JSON.','Слово "'+w+'". JSON: {"ipa":"/../","tr":"перевод 1-3 слова"}');
-    let d=null;try{d=JSON.parse(out.replace(/```json|```/g,'').trim())}catch(e){}
-    if(d&&d.tr){document.getElementById('r_ipa').textContent=d.ipa||'';document.getElementById('r_tr').textContent=d.tr}
-    else{document.getElementById('r_tr').textContent=(out||'').slice(0,80)}}
+  try{const d=await generateAiContent('dictionary_lookup',{word:w});
+    document.getElementById('r_ipa').textContent=d.ipa||'';document.getElementById('r_tr').textContent=d.tr}
   catch(e){const off=DICT[w];
     if(off){document.getElementById('r_ipa').textContent=off.ipa||'';document.getElementById('r_tr').textContent=off.tr+'  · офлайн-словарь'}
     else{document.getElementById('r_ipa').textContent='';document.getElementById('r_tr').textContent='ИИ офлайн, слова нет в мини-словаре. Включи VPN/ключ.'}}}
@@ -285,21 +283,15 @@ async function genForCurrent(){const id=cur();const fab=document.getElementById(
   }catch(e){toast('ИИ недоступен — оставил встроенное задание')}
   fab.disabled=false}
 async function genGrammar(){
-  const out=await callGemini('Ты составляешь тест по грамматике для ЕГЭ. Британский английский. Только JSON.',
-    'Придумай 5 заданий на случайную тему грамматики (одну). JSON: [{"before":"текст до пропуска","after":"текст после","options":["4 варианта"],"answer":индекс_верного_0-3,"explain":"краткое пояснение"}]');
-  const d=parseJSON(out);if(!Array.isArray(d)||!d.length)throw 0;
+  const d=await generateAiContent('grammar_quiz');if(!Array.isArray(d)||!d.length)throw 0;
   GQ=d.filter(x=>x.options&&x.options.length>=2).map(x=>({t:[x.before||'',' _____ ',x.after||''],o:x.options,a:x.answer||0,e:x.explain||''}));
   if(!GQ.length){GQ=GRAM_Q.slice();throw 0}initGrammar()}
 async function genListening(){
-  const out=await callGemini('Ты составляешь задание по аудированию для ЕГЭ. Британский английский, уровень B1. Только JSON.',
-    'Придумай короткий диалог (3-5 реплик) в общественном месте и 2 вопроса к нему. JSON: {"title":"Диалог · тема","dialog":"— ...  — ...","q1":{"q":"1. вопрос по-русски","o":["3 варианта по-русски"],"a":индекс},"q2":{"q":"2. вопрос по-русски","o":["2-3 варианта"],"a":индекс}}');
-  const d=parseJSON(out);if(!d||!d.dialog||!d.q1||!d.q2)throw 0;
+  const d=await generateAiContent('listening_dialog');if(!d||!d.dialog||!d.q1||!d.q2)throw 0;
   LIS={title:d.title||'Новый диалог',dialog:d.dialog,q1:{q:d.q1.q||'1.',o:d.q1.o,a:d.q1.a||0},q2:{q:d.q2.q||'2.',o:d.q2.o,a:d.q2.a||0}};
   initListening()}
 async function genReading(){
-  const out=await callGemini('Ты составляешь текст для чтения ЕГЭ. Британский английский, уровень B1, 45-70 слов. Только JSON.',
-    'Придумай короткий текст на случайную тему. JSON: {"text":"текст на английском"}');
-  const d=parseJSON(out);if(!d||!d.text)throw 0;RTXT=d.text;initReading()}
+  const d=await generateAiContent('reading_text');if(!d||!d.text)throw 0;RTXT=d.text;initReading()}
 
 /* -- FAB visibility -- */
 (function(){
@@ -377,6 +369,7 @@ async function startDemo(){
 
 /* Временный legacy-адаптер до миграции всех операций на типизированные API. */
 callGemini=function(systemPrompt,userPrompt){if(DEMO_MODE)return Promise.reject(new Error('ИИ недоступен в демо-режиме'));return EasyBoostApi.legacyAi(systemPrompt,userPrompt)};
+function generateAiContent(operation,payload){if(DEMO_MODE)return Promise.reject(new Error('ИИ недоступен в демо-режиме'));return EasyBoostApi.generateContent(operation,payload)}
 
 /* профиль: в серверном режиме ключ не нужен на клиенте */
 registerProfileHook(function(){var ai=document.getElementById('pf_ai');if(ai){ai.textContent='через сервер ✓';ai.style.color='#1F8A50';ai.style.background='#EAF7F0'}})
@@ -963,10 +956,8 @@ async function wTopUp(){
   var fresh=EGE_WORDS.filter(function(x){var r=wRec(x.w);return !r||!r.s}).length;
   if(fresh>=40)return;W_GEN=true;
   try{
-    var have=EGE_WORDS.map(function(x){return x.w}).join(', ');
-    var out=await callGemini('Ты составляешь словарь для подготовки к ЕГЭ по английскому языку: лексический минимум ФИПИ, уровень B1-B2, британский английский. Только JSON, без пояснений.',
-      'Дай ровно 30 новых полезных для ЕГЭ слов, которых НЕТ в этом списке: '+have+'. Массив JSON: [{"w":"слово (глаголы с to)","p":"n|v|adj|adv|ph|id","tr":"краткий перевод","ex":"короткий пример, где слово стоит в начальной форме"}]');
-    var d=parseJSON(out);
+    var have=EGE_WORDS.map(function(x){return x.w}).slice(0,500);
+    var d=await generateAiContent('vocabulary_cards',{count:30,exclude:have});
     if(Array.isArray(d)&&d.length){var have2={};EGE_WORDS.forEach(function(x){have2[x.w]=1});
       var added=[];
       d.forEach(function(x){if(x.w&&x.tr&&!have2[x.w]&&(x.ex||'').toLowerCase().indexOf(x.w.replace(/^to /,'').toLowerCase())>=0){var it={w:x.w,p:x.p||'n',t:0,tr:x.tr,ex:x.ex||''};EGE_WORDS.push(it);added.push(it);have2[x.w]=1}});
@@ -975,9 +966,7 @@ async function wTopUp(){
   W_GEN=false}
 /* ИИ-набор слов теперь пополняет базу ЕГЭ */
 async function genWords(){
-  const out=await callGemini('Ты составляешь словарные карточки для ЕГЭ по английскому. Уровень B1-B2, британский английский. Только JSON.',
-    'Дай 8 полезных для ЕГЭ слов массивом JSON: [{"w":"слово (глаголы с to)","p":"n|v|adj|adv|ph|id","tr":"перевод","ex":"короткий пример, где слово стоит в начальной форме"}]');
-  const d=parseJSON(out);if(!Array.isArray(d)||!d.length)throw 0;
+  const d=await generateAiContent('vocabulary_cards',{count:8,exclude:EGE_WORDS.map(function(x){return x.w}).slice(0,500)});if(!Array.isArray(d)||!d.length)throw 0;
   var have={};EGE_WORDS.forEach(function(x){have[x.w]=1});
   d.forEach(function(x){if(x.w&&x.tr&&!have[x.w])EGE_WORDS.push({w:x.w,p:x.p||'n',t:0,tr:x.tr,ex:x.ex||''})});
   initWords()}

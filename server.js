@@ -10,6 +10,7 @@ import { fileURLToPath } from 'url';
 import { closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, createTelegramAuthCode, createWritingAttempt, deleteUserData, exportUserData, finishWritingAttempt, getPrivacyConsent, getProgress, getUser, healthCheck, saveProgress, setPrivacyConsent, mergeProgress, getUserByTelegram, createTelegramUser, grantDays, logAiRequest, markTrialUsed, getSub } from './db.js';
 import { config } from './config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from './ai/writing.js';
+import { buildContentPrompt, CONTENT_PROMPT_VERSION, contentRequestSchema, parseContentResponse } from './ai/content.js';
 import { protectCookieRequests } from './security/request-origin.js';
 import { classifyBodyParserError, legacyAiRequestSchema, validateProgress } from './validation/api-input.js';
 import { contentSecurityPolicy } from './security/csp.js';
@@ -542,6 +543,31 @@ app.post('/api/v1/ai/evaluate-writing', auth, requireActiveSubscription, require
         : 'ИИ временно недоступен.';
     res.status(status).json({ error: { code, message } });
   }
+});
+
+app.post('/api/v1/ai/generate-content', auth, requireActiveSubscription, requirePrivacyConsent('text_processing'), chatLimiter, async (req, res) => {
+  const parsed = contentRequestSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректные параметры генерации.' } });
+  const input = parsed.data;
+  const prompt = buildContentPrompt(input);
+  const startedAt = Date.now();
+  const providers = aiProviders();
+  if (!providers.length) return res.status(503).json({ error: { code: 'AI_NOT_CONFIGURED', message: 'ИИ не настроен на сервере.' } });
+  let lastCode = 'AI_PROVIDER_UNAVAILABLE';
+  for (const provider of providers) {
+    try {
+      const raw = await askProvider(provider, prompt.system, prompt.user);
+      const data = parseContentResponse(input.operation, raw);
+      if (input.operation === 'vocabulary_cards' && data.length !== input.count) throw Object.assign(new Error('AI_RESPONSE_INVALID'), { code: 'AI_RESPONSE_INVALID' });
+      await logAiRequest({ username: req.user, operation: input.operation, provider: provider.name, model: provider.model, promptVersion: CONTENT_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt });
+      return res.json({ data, provider: provider.name, promptVersion: CONTENT_PROMPT_VERSION });
+    } catch (error) {
+      lastCode = error.code === 'AI_RESPONSE_INVALID' ? error.code : 'AI_PROVIDER_UNAVAILABLE';
+      await logAiRequest({ username: req.user, operation: input.operation, provider: provider.name, model: provider.model, promptVersion: CONTENT_PROMPT_VERSION, status: 'failed', durationMs: Date.now() - startedAt, errorCode: lastCode });
+    }
+  }
+  const status = lastCode === 'AI_RESPONSE_INVALID' ? 502 : 503;
+  res.status(status).json({ error: { code: lastCode, message: 'Не удалось подготовить корректный учебный материал.' } });
 });
 
 app.post('/api/ai', auth, requireActiveSubscription, requirePrivacyConsent('text_processing'), chatLimiter, async (req, res) => {

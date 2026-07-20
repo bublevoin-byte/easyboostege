@@ -101,5 +101,11 @@
     return result.text || '';
   }
 
-  global.EasyBoostApi = Object.freeze({ ApiError, get, post, put, remove, getBlob, postBinary, legacyAi, messageFor });
+  async function generateContent(operation, payload = {}) {
+    if (!isServerMode) throw new ApiError('ИИ доступен только в серверной версии приложения');
+    const result = await post('/api/v1/ai/generate-content', { operation, ...payload });
+    return result.data;
+  }
+
+  global.EasyBoostApi = Object.freeze({ ApiError, get, post, put, remove, getBlob, postBinary, generateContent, legacyAi, messageFor });
 })(window);

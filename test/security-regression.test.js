@@ -46,6 +46,7 @@ test('frontend contains no embedded or browser-managed AI credentials', async ()
   assert.doesNotMatch(frontend, /x-goog-api-key/i);
   assert.doesNotMatch(frontend, /generativelanguage\.googleapis\.com|api\.groq\.com|api\.x\.ai/i);
   assert.match(frontend, /post\('\/api\/ai'/);
+  assert.match(frontend, /post\('\/api\/v1\/ai\/generate-content'/);
 });
 
 test('frontend uses ordered external scripts that remain syntactically valid', async () => {
@@ -168,7 +169,7 @@ test('production documentation covers local setup, API, database and operations'
   const paths = ['../README.md', '../docs/openapi.yaml', '../docs/DATABASE_SCHEMA.md', '../docs/AI_OPERATIONS.md', '../docs/KEY_ROTATION.md', '../docs/SUPPORT.md', '../docs/KNOWN_LIMITATIONS.md', '../docs/TELEGRAM_ADMIN.md'];
   const documents = await Promise.all(paths.map((path) => fs.readFile(new URL(path, import.meta.url), 'utf8')));
   assert.match(documents[0], /npm ci[\s\S]*npm run check[\s\S]*npm test/u);
-  for (const route of ['/health/live', '/health/ready', '/api/tg/start', '/api/me', '/api/account/export', '/api/account', '/api/privacy/consent', '/api/progress/modules', '/api/v1/ai/evaluate-writing', '/api/tts', '/api/stt']) {
+  for (const route of ['/health/live', '/health/ready', '/api/tg/start', '/api/me', '/api/account/export', '/api/account', '/api/privacy/consent', '/api/progress/modules', '/api/v1/ai/generate-content', '/api/v1/ai/evaluate-writing', '/api/tts', '/api/stt']) {
     assert.match(documents[1], new RegExp(route.replaceAll('/', '\\/'), 'u'));
   }
   assert.match(documents[2], /user_progress/u);
@@ -197,6 +198,7 @@ test('demo mode is isolated from persistence and paid AI calls', async () => {
   assert.match(html, /id="demo_btn"[^>]*onclick="startDemo\(\)"/u);
   assert.match(script, /function save\(\)\{\s*if\(DEMO_MODE\)return;/u);
   assert.match(script, /callGemini=function\(systemPrompt,userPrompt\)\{if\(DEMO_MODE\)return Promise\.reject/u);
+  assert.match(script, /function generateAiContent\(operation,payload\)\{if\(DEMO_MODE\)return Promise\.reject/u);
   assert.match(script, /if\(DEMO_MODE\)\{renderReview\(localReview/u);
   assert.match(script, /Демо · войти для сохранения/u);
 });
