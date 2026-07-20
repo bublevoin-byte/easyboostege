@@ -61,3 +61,17 @@ test('legacy application code delegates network access to the API layer', async 
   assert.match(api, /credentials:\s*'same-origin'/u);
   assert.match(api, /requestId/u);
 });
+
+test('legacy application script has no duplicate top-level function declarations', async () => {
+  const { script } = await readFrontend();
+  const guardedNames = [
+    'startApp', 'checkWriting', 'trWord', 'initReading', 'initGrammar', 'renderG',
+    'pickG', 'nextG', 'initListening', 'playListen', 'toggleScript',
+  ];
+  for (const name of guardedNames) {
+    const declarations = script.match(new RegExp(`(?:async\\s+)?function\\s+${name}\\s*\\(`, 'gu')) || [];
+    assert.equal(declarations.length, 1, `${name} must have one declaration`);
+  }
+  assert.doesNotMatch(script, /\bstartApp\s*=\s*(?:async\s+)?function/u);
+  assert.match(script, /const START_HOOKS=\[\]/u);
+});

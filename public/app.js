@@ -65,20 +65,6 @@ function setTask(n){curTask=n;const d=WRITE[n];
 function countWords(){const d=WRITE[curTask];const t=(document.getElementById('w_editor').innerText||'').trim();const n=t?t.split(/\s+/).length:0;
   const e=document.getElementById('w_count');e.textContent=n+' / '+d.range+' слов';e.style.color=(n>=d.min&&n<=d.max)?'#1F8A50':(n>d.max?'#C9503C':'#8A8F98')}
 
-async function checkWriting(){
-  const t=(document.getElementById('w_editor').innerText||'').trim();
-  if(t.split(/\s+/).filter(Boolean).length<10){alert('Напиши хотя бы несколько предложений.');return}
-  tab('scr13');
-  const task=curTask;
-  const sys='Ты эксперт ЕГЭ по английскому, проверяешь письменную часть по критериям ФИПИ. Британский английский. Верни СТРОГО JSON без markdown и пояснений.';
-  const fmt='{"words":n,"in_range":true,"overall_got":n,"overall_max":n,"verdict":"фраза 2-4 слова","sub":"совет 1 фраза","criteria":[{"name":"...","got":n,"max":n}],"errors":[{"title":"тип · тема","wrong":"...","right":"...","kind":"err|warn","note":""}]}';
-  const ctx=task===37?'Задание 37 письмо другу 100-140 слов. Критерии: Решение задачи(3), Организация(2), Языковое оформление(3). Максимум 8.':'Задание 38 эссе 200-250 слов. Критерии: Решение задачи(3), Организация(3), Лексика(3), Грамматика(3), Орфография(2). Максимум 14.';
-  const user=ctx+' Проверь и верни JSON: '+fmt+'. Для errors до 4 пунктов, kind=err для ошибки, warn для совета. Текст: """'+t+'"""';
-  try{const out=await callGemini(sys,user);let d=null;try{d=JSON.parse(out.replace(/```json|```/g,'').trim())}catch(e){}
-    if(!d){alert('ИИ вернул неожиданный ответ, попробуй ещё раз.');tab('scr8');return}
-    renderReview(d);S.essays++;save();showScreen('scr12');HIST.push('scr8');
-  }catch(e){showScreen('scr14');HIST.push('scr8')}
-}
 function renderReview(d){
   const safe=function(v){return String(v==null?'':v).replace(/[&<>"]/g,function(ch){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]})};
   const got=d.overall_got!=null?d.overall_got:(d.criteria||[]).reduce((a,c)=>a+(c.got||0),0);
@@ -120,7 +106,6 @@ function wire(){
 
 /* ---------- AUTH ---------- */
 function inputVal(scr,ph){const el=document.querySelector('#'+scr+' input[placeholder*="'+ph+'"]');return el?el.value.trim():''}
-function startApp(){S=load();tab('scr1')}
 function doRegister(){startApp()}
 function doLogin(){startApp()}
 
@@ -133,22 +118,6 @@ S=load();
 /* ===== READING ===== */
 const READ_TXT="Many students take a gap year before university. They travel, work or do volunteering. It can be a valuable experience that helps them become more independent and confident.";
 let lastWord="";
-function initReading(){S.wstatus=S.wstatus||{};const host=document.getElementById('r_text');if(!host)return;host.innerHTML='';
-  READ_TXT.split(/(\s+)/).forEach(tok=>{
-    if(/^\s+$/.test(tok)){host.appendChild(document.createTextNode(tok));return}
-    const clean=tok.replace(/[^A-Za-z'-]/g,'').toLowerCase();const sp=document.createElement('span');sp.textContent=tok;
-    if(clean){sp.style.cursor='pointer';const st=S.wstatus[clean];
-      if(st==='know')sp.setAttribute('style','cursor:pointer;background:#E5F4EC;color:#1F8A50;border-radius:6px;padding:1px 5px;font-weight:700;');
-      else if(st==='learn')sp.setAttribute('style','cursor:pointer;background:#FFF4DE;color:#C77400;border-radius:6px;padding:1px 5px;font-weight:700;');
-      sp.onclick=()=>trWord(clean)}
-    host.appendChild(sp)})}
-async function trWord(w){lastWord=w;const pop=document.getElementById('r_pop');
-  document.getElementById('r_word').textContent=w;document.getElementById('r_ipa').textContent='';document.getElementById('r_tr').textContent='перевод…';pop.style.display='block';
-  try{const out=await callGemini('Британский учебный словарь. Верни строго JSON.','Слово "'+w+'". JSON: {"ipa":"/../","tr":"перевод 1-3 слова"}');
-    let d=null;try{d=JSON.parse(out.replace(/```json|```/g,'').trim())}catch(e){}
-    if(d){document.getElementById('r_ipa').textContent=d.ipa||'';document.getElementById('r_tr').textContent=d.tr||out}
-    else document.getElementById('r_tr').textContent=out.slice(0,80)}
-  catch(e){document.getElementById('r_tr').textContent='нет сети — включи интернет'}}
 function r_add(st){if(!lastWord)return;S.wstatus[lastWord]=st;if(st==='know')S.learned++;save();document.getElementById('r_pop').style.display='none';initReading()}
 
 /* ===== GRAMMAR ===== */
@@ -160,29 +129,6 @@ const GRAM_Q=[
  {t:['He ','_____',' not called yet.'],o:['did','has','have','is'],a:1,e:'<b>He</b> → has; <b>yet</b> → Present Perfect.'}
 ];
 let gi=0,gScore=0,gAns=false;
-function initGrammar(){gi=0;gScore=0;renderG()}
-function renderG(){gAns=false;const q=GRAM_Q[gi];
-  document.getElementById('g_head').textContent='Present Perfect · Вопрос '+(gi+1)+' из '+GRAM_Q.length;
-  document.getElementById('g_steps').innerHTML=GRAM_Q.map((_,i)=>'<div style="flex:1;height:5px;border-radius:3px;background:'+(i<=gi?'#fff':'rgba(255,255,255,.35)')+';"></div>').join('');
-  document.getElementById('g_q').innerHTML=q.t[0]+'<span style="display:inline-block;min-width:62px;border-bottom:2.5px dashed #F2683F;text-align:center;color:#F2683F;">_____</span>'+q.t[2];
-  const op=document.getElementById('g_opts');op.innerHTML='';
-  q.o.forEach((opt,oi)=>{const d=document.createElement('div');d.setAttribute('data-i',oi);
-    d.setAttribute('style','display:flex;align-items:center;justify-content:space-between;background:#fff;border:1.5px solid #EDEEF0;border-radius:15px;padding:14px 16px;font-weight:700;font-size:15px;color:#8A8F98;cursor:pointer;');
-    d.innerHTML=opt+'<span style="width:22px;height:22px;border-radius:50%;border:2px solid #E1E3E6;"></span>';
-    d.onclick=()=>pickG(oi);op.appendChild(d)});
-  document.getElementById('g_exp').style.display='none';
-  const nx=document.getElementById('g_next');nx.style.opacity='.45';nx.textContent='Дальше';}
-function pickG(oi){if(gAns)return;gAns=true;const q=GRAM_Q[gi];
-  [...document.getElementById('g_opts').children].forEach(d=>{const i=+d.getAttribute('data-i');
-    if(i===q.a)d.setAttribute('style','display:flex;align-items:center;justify-content:space-between;background:#EAF7F0;border:1.5px solid #1F9E5A;border-radius:15px;padding:14px 16px;font-weight:800;font-size:15px;color:#1F8A50;'),d.querySelector('span').setAttribute('style','width:24px;height:24px;border-radius:50%;background:#1F9E5A;display:grid;place-items:center;'),d.querySelector('span').innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 12 10 18 20 6"/></svg>';
-    else if(i===oi)d.setAttribute('style','display:flex;align-items:center;justify-content:space-between;background:#FCEEEC;border:1.5px solid #E26A56;border-radius:15px;padding:14px 16px;font-weight:700;font-size:15px;color:#C9503C;'),d.querySelector('span').setAttribute('style','width:24px;height:24px;border-radius:50%;background:#E26A56;display:grid;place-items:center;'),d.querySelector('span').innerHTML='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>';
-    else d.style.opacity='.55'});
-  if(oi===q.a)gScore++;
-  const ex=document.getElementById('g_exp');ex.style.display='flex';
-  ex.innerHTML='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1F9E5A" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:1px;"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg><div style="font-weight:600;font-size:12.5px;color:#1F7A47;line-height:1.4;">'+(oi===q.a?'Верно! ':'Правильный ответ: <b>'+q.o[q.a]+'</b>. ')+q.e+'</div>';
-  const nx=document.getElementById('g_next');nx.style.opacity='1';nx.textContent=(gi<GRAM_Q.length-1?'Дальше':'Завершить');}
-function nextG(){if(!gAns)return;if(gi<GRAM_Q.length-1){gi++;renderG()}else{alert('Результат: '+gScore+' из '+GRAM_Q.length+' 🎯');tab('scr1')}}
-
 /* patch tab to init reading/grammar */
 (function(){const _t=tab;tab=function(id){_t(id);if(id==='scr7')initReading();if(id==='scr3')initGrammar();}})();
 
@@ -190,7 +136,6 @@ function nextG(){if(!gAns)return;if(gi<GRAM_Q.length-1){gi++;renderG()}else{aler
 /* ===== LISTENING ===== */
 const LISTEN={dialog:"— Hi, can I get a coffee and a croissant, please?  — Sure, that's four pounds fifty. Anything else?  — No, that's all, thanks.",
   q1:{o:['В кафе','В магазине','В библиотеке'],a:0},q2:{o:['Чай и тост','Кофе и круассан'],a:1}};
-function playListen(){if(!('speechSynthesis'in window))return;speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(LISTEN.dialog);u.lang='en-GB';u.rate=.9;const v=speechSynthesis.getVoices().find(x=>/en-GB/i.test(x.lang));if(v)u.voice=v;speechSynthesis.speak(u)}
 function lOpt(host,q,mod){const el=document.getElementById(host);el.innerHTML='';
   q.o.forEach((opt,oi)=>{const d=document.createElement('div');d.setAttribute('data-i',oi);
     d.setAttribute('style','display:flex;align-items:center;gap:10px;font-weight:600;font-size:13px;color:#9aa0a8;cursor:pointer;');
@@ -200,11 +145,6 @@ function lOpt(host,q,mod){const el=document.getElementById(host);el.innerHTML=''
       else if(i===oi){c.setAttribute('style','display:flex;align-items:center;gap:10px;font-weight:600;font-size:13px;color:#C9503C;');c.querySelector('span').setAttribute('style','width:18px;height:18px;border-radius:50%;background:#E26A56;display:grid;place-items:center;');c.querySelector('span').innerHTML='<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>'}
       else c.style.opacity='.5'});bump('listen',60)}
     el.appendChild(d)})}
-function initListening(){const a=document.getElementById('l_q1'),b=document.getElementById('l_q2');if(!a)return;delete a.dataset.d;delete b.dataset.d;lOpt('l_q1',LISTEN.q1);lOpt('l_q2',LISTEN.q2);
-  document.getElementById('l_script').style.display='none';var t=document.getElementById('l_toggle');if(t){t.style.background='#E7E9EC';document.getElementById('l_knob').style.left='3px'}}
-function toggleScript(){const s=document.getElementById('l_script'),t=document.getElementById('l_toggle'),k=document.getElementById('l_knob');
-  const on=s.style.display==='none';s.style.display=on?'block':'none';s.textContent=LISTEN.dialog;t.style.background=on?'#F2683F':'#E7E9EC';k.style.left=on?'22px':'3px'}
-
 /* ===== SPEAKING ===== */
 const SPK_Q=['How often do you use the internet for studying?','What do you usually do at weekends?','Do you prefer books or films? Why?','How important is English for your future?','What kind of music do you like?'];
 let spT=null,spLeft=40,recing=false,mediaRec=null,chunks=[],lastUrl=null;
@@ -452,14 +392,18 @@ function fillDefaults(d){d=d||{};d.box=d.box||{};d.wstatus=d.wstatus||{};d.learn
 
 /* save/load через сервер (или локально) */
 let _saveT=null;
+const START_HOOKS=[];
+function registerStartHook(hook){START_HOOKS.push(hook)}
 save=function(){
   if(SRV){if(!TOKEN)return;clearTimeout(_saveT);_saveT=setTimeout(()=>{apiPost('/api/progress',S,true).catch(()=>{})},600)}
   else{if(currentUser)localStorage.setItem(dataKey(),JSON.stringify(S))}}
-startApp=async function(){
+async function startApp(){
   if(SRV){if(!TOKEN){show('scr5');document.getElementById('tabbar').style.display='none';return}
     try{const d=await apiGet('/api/progress');S=fillDefaults(d)}catch(e){S=fillDefaults({})}}
   else{S=load()}
-  tab('scr1')}
+  tab('scr1');
+  for(const hook of START_HOOKS){try{await hook()}catch(e){}}
+}
 
 /* вход/регистрация */
 doLogin=async function(){
@@ -596,7 +540,7 @@ async function pwCheck(){
   }catch(e){ pwHide(); return true; } // при ошибке сети не блокируем доступ
 }
 window.checkSub=pwCheck;
-try{ if(typeof startApp==='function'){ var _sa=startApp; startApp=function(){ _sa.apply(this,arguments); try{pwCheck();}catch(e){} }; } }catch(e){}
+registerStartHook(function(){return pwCheck()});
 if(typeof SRV!=='undefined'&&SRV&&TOKEN){ setTimeout(function(){try{pwCheck();}catch(e){}},300); }
 
 /* legacy block 3 */
@@ -1152,7 +1096,7 @@ genWords=async function(){
 /* домашняя плитка при загрузке */
 try{if(S)wSync()}catch(e){}
 var _fd2=fillDefaults;fillDefaults=function(d){d=_fd2(d);d.srs=d.srs||{};return d};
-var _sa2=startApp;startApp=async function(){await _sa2.apply(this,arguments);try{wMigrate();wMergeAi();wSync()}catch(e){}};
+registerStartHook(function(){wMigrate();wMergeAi();return wSync()});
 var _t3=tab;tab=function(id){_t3(id);if(id==='scr2'){var f=document.getElementById('genfab');if(f)f.style.display='none'}};
 
 /* legacy block 6 */
@@ -1734,7 +1678,7 @@ async function gGen(t){
   G_GEN=false}
 /* прячем FAB на грамматике, синк при старте */
 var _t5=tab;tab=function(id){_t5(id);if(EX&&EX.iv){clearInterval(EX.iv);EX=null}if(id==='scr3'){var f=document.getElementById('genfab');if(f)f.style.display='none';GS=null}};
-var _sa3=startApp;startApp=async function(){await _sa3.apply(this,arguments);try{gSync()}catch(e){}};
+registerStartHook(function(){return gSync()});
 
 /* legacy block 7 */
 /* ===== READING v2: задание 10 + задания 12-18 + словарь в SRS ===== */
@@ -2148,7 +2092,7 @@ async function rGen(){
     if(need)setTimeout(rGen,4000)}catch(e){}}
 /* FAB прячем и на чтении; синк при старте */
 var _t7=tab;tab=function(id){_t7(id);if(RE&&RE.iv){clearInterval(RE.iv);RE=null}if(id==='scr7'){var f=document.getElementById('genfab');if(f)f.style.display='none'}};
-var _sa4=startApp;startApp=async function(){await _sa4.apply(this,arguments);try{rSync()}catch(e){}};
+registerStartHook(function(){return rSync()});
 
 /* legacy block 8 */
 /* ===== LISTENING v2: задания 1, 2, 3-9 + озвучка по ролям ===== */
@@ -2598,7 +2542,7 @@ async function lGen(){
     if(need)setTimeout(lGen,4000)}catch(e){}}
 /* FAB прячем, звук глушим при уходе, синк при старте */
 var _t8=tab;tab=function(id){_t8(id);lStop();if(LE&&LE.iv){clearInterval(LE.iv);LE=null}if(id==='scr4'){var f=document.getElementById('genfab');if(f)f.style.display='none'}};
-var _sa5=startApp;startApp=async function(){await _sa5.apply(this,arguments);try{lSync()}catch(e){}};
+registerStartHook(function(){return lSync()});
 
 /* legacy block 9 */
 /* ===== TTS v2: нейроголоса Edge через сервер, фолбэк — встроенный синтез ===== */
@@ -2782,7 +2726,7 @@ async function wrGen(){
   try{if(wrPool(37).length<6||wrPool(38).length<6)setTimeout(wrGen,4000)}catch(e){}}
 /* — запуск генерации при входе, синк плитки при старте — */
 var _t9=tab;tab=function(id){_t9(id);if(id==='scr8'){wrGen()}};
-var _sa6=startApp;startApp=async function(){await _sa6.apply(this,arguments);try{wrSyncTile()}catch(e){}};
+registerStartHook(function(){return wrSyncTile()});
 
 /* legacy block 11 */
 /* ===== GLOW: переливающаяся рамка при вводе ===== */
@@ -3260,4 +3204,4 @@ var _t10=tab;tab=function(id){_t10(id);
   if(id!=='scr9'){
     if(SP){spStopAll();SP=null}
     if(SPE){clearInterval(SPE.tm);try{if(SPE.rec&&SPE.rec.state!=='inactive')SPE.rec.stop()}catch(e){}try{SPE.stream&&SPE.stream.getTracks().forEach(function(x){x.stop()})}catch(e){}SPE=null}}};
-var _sa7=startApp;startApp=async function(){await _sa7.apply(this,arguments);try{spSync()}catch(e){}};
+registerStartHook(function(){return spSync()});
