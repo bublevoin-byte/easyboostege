@@ -4,7 +4,7 @@ import { hashAuthCode, normalizeUsername, subscriptionView } from './shared.js';
 
 export function createFileRepository(filePath) {
   let loaded = false;
-  let state = { users: {}, progress: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], generated_tasks: [], module_attempts: [], word_progress: {}, ai_requests: [], sessions: {}, subscriptions: {}, payment_requests: {}, subscription_events: [] };
+  let state = { users: {}, progress: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], generated_tasks: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], sessions: {}, subscriptions: {}, payment_requests: {}, subscription_events: [] };
   let writeQueue = Promise.resolve();
 
   async function load() {
@@ -22,6 +22,7 @@ export function createFileRepository(filePath) {
           generated_tasks: Array.isArray(parsed.generated_tasks) ? parsed.generated_tasks : [],
           module_attempts: Array.isArray(parsed.module_attempts) ? parsed.module_attempts : [],
           word_progress: parsed.word_progress && typeof parsed.word_progress === 'object' ? parsed.word_progress : {},
+          error_bank: Array.isArray(parsed.error_bank) ? parsed.error_bank : [],
           ai_requests: Array.isArray(parsed.ai_requests) ? parsed.ai_requests : [],
           sessions: parsed.sessions && typeof parsed.sessions === 'object' ? parsed.sessions : {},
           subscriptions: parsed.subscriptions && typeof parsed.subscriptions === 'object' ? parsed.subscriptions : {},
@@ -351,6 +352,24 @@ export function createFileRepository(filePath) {
     return { updated: words.length };
   }
 
+  async function upsertErrorBank(username, errors) {
+    await load();
+    const now = Date.now();
+    for (const item of errors) {
+      const existing = state.error_bank.find((entry) => entry.username === username && entry.module === item.module && entry.item_key === item.itemKey && entry.error_type === item.errorType);
+      if (existing) {
+        existing.details = structuredClone(item.details || {});
+        existing.occurrence_count += 1;
+        existing.last_seen_at = now;
+        existing.resolved_at = null;
+      } else {
+        state.error_bank.push({ id: (state.error_bank.at(-1)?.id || 0) + 1, username, module: item.module, item_key: item.itemKey, error_type: item.errorType, details: structuredClone(item.details || {}), occurrence_count: 1, first_seen_at: now, last_seen_at: now, resolved_at: null });
+      }
+    }
+    await persist();
+    return { updated: errors.length };
+  }
+
   async function logAiRequest(entry) {
     await load();
     const id = (state.ai_requests.at(-1)?.id || 0) + 1;
@@ -419,6 +438,7 @@ export function createFileRepository(filePath) {
       generated_tasks: state.generated_tasks.filter((item) => item.username === username).map(({ request_hash, username: owner, ...item }) => item),
       module_attempts: state.module_attempts.filter((item) => item.username === username),
       word_progress: Object.values(state.word_progress[username] || {}),
+      error_bank: state.error_bank.filter((item) => item.username === username),
       ai_requests: state.ai_requests.filter((item) => item.username === username),
     });
   }
@@ -435,6 +455,7 @@ export function createFileRepository(filePath) {
     state.generated_tasks = state.generated_tasks.filter((item) => item.username !== username);
     state.module_attempts = state.module_attempts.filter((item) => item.username !== username);
     delete state.word_progress[username];
+    state.error_bank = state.error_bank.filter((item) => item.username !== username);
     state.ai_requests = state.ai_requests.filter((item) => item.username !== username);
     delete state.subscriptions[username];
     state.subscription_events = state.subscription_events.filter((item) => item.username !== username);
@@ -486,6 +507,7 @@ export function createFileRepository(filePath) {
     saveGeneratedTask,
     recordModuleAttempt,
     upsertWordProgress,
+    upsertErrorBank,
     logAiRequest,
     countAiRequestsSince,
     createSession,

@@ -215,6 +215,19 @@ test('word progress upserts normalized SRS state', async () => {
   });
 });
 
+test('error bank aggregates repeated learning errors', async () => {
+  await withRepository(async (repository) => {
+    const username = await repository.createTelegramUser(3050, 'Error Student');
+    const error = { module: 'grammar', itemKey: 'grammar_19_24:go', errorType: 'incorrect_form', details: { expected: 'went' } };
+    await repository.upsertErrorBank(username, [error]);
+    await repository.upsertErrorBank(username, [error]);
+    const exported = await repository.exportUserData(username);
+    assert.equal(exported.error_bank.length, 1);
+    assert.equal(exported.error_bank[0].occurrence_count, 2);
+    assert.equal(exported.error_bank[0].details.expected, 'went');
+  });
+});
+
 test('file repository readiness check succeeds after pending writes', async () => {
   await withRepository(async (repository) => {
     const username = await repository.createTelegramUser(4001, 'Health User');

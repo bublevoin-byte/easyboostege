@@ -184,6 +184,33 @@ paths:
         '200': { description: Word states updated }
         '400': { $ref: '#/components/responses/BadRequest' }
         '429': { $ref: '#/components/responses/RateLimited' }
+  /api/error-bank:
+    post:
+      summary: Aggregate a bounded batch of learning errors
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [errors]
+              properties:
+                errors:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items:
+                    type: object
+                    required: [module, itemKey, errorType]
+                    properties:
+                      module: { type: string, enum: [grammar, vocabulary, reading, listening, writing, speaking, exam] }
+                      itemKey: { type: string, maxLength: 160 }
+                      errorType: { type: string, maxLength: 60 }
+                      details: { type: object, additionalProperties: true }
+      responses:
+        '200': { description: Errors aggregated }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '429': { $ref: '#/components/responses/RateLimited' }
   /api/v1/ai/evaluate-writing:
     post:
       summary: Evaluate EGE writing task 37 or 38

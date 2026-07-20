@@ -1498,11 +1498,12 @@ function gExamStart(){var pool=gExamPool();
   gAnim('win','.32s')}
 function gExamCheck(){if(!EX)return;var ex=EX.ex;
   clearInterval(EX.iv);var sec=Math.floor((Date.now()-EX.t0)/1000);
-  var score=0,rows='';
+  var score=0,rows='',bank=[];
   ex.gaps.forEach(function(g,i){var inp=document.getElementById('g_ex_'+i);var val=gNorm(inp?inp.value:'');
     var ok=g.ans.some(function(a){return gNorm(a)===val});
     if(ok)score++;
-    else{if(g.t){var r=gRec(g.t);r.err++;if(r.st===2)r.due=Date.now()}}
+    else{if(g.t){var r=gRec(g.t);r.err++;if(r.st===2)r.due=Date.now()}
+      bank.push({module:'grammar',itemKey:'grammar_19_24:'+String(g.b).toLowerCase(),errorType:'incorrect_form',details:{expected:String(g.ans[0])}})}
     rows+='<div style="padding:10px 2px;border-bottom:1px solid #F4EFE9;">'
       +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'
       +'<span style="font-weight:800;font-size:13px;color:'+(ok?'#1F8A50':'#C0392B')+';">'+(19+i)+' · '+g.b+' → '+g.ans[0]+'</span>'
@@ -1515,6 +1516,7 @@ function gExamCheck(){if(!EX)return;var ex=EX.ex;
   st.n++;st.last=score;st.best=Math.max(st.best||0,score);S.exam19=st;
   if(typeof SRV!=='undefined'&&SRV&&TOKEN&&typeof crypto!=='undefined'&&crypto.randomUUID){
     apiPost('/api/module-attempts',{id:crypto.randomUUID(),module:'exam',activity:'grammar_19_24',score:score,maxScore:6,durationMs:sec*1000,metadata:{source:'builtin'}}).catch(function(){})}
+  if(bank.length&&typeof SRV!=='undefined'&&SRV&&TOKEN){apiPost('/api/error-bank',{errors:bank}).catch(function(){})}
   EX=null;save();gSync();
   var area=document.getElementById('g_area');
   area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;">'+wDeco()

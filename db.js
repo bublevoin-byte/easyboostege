@@ -34,6 +34,7 @@ export const getGeneratedTask = (...args) => repository.getGeneratedTask(...args
 export const saveGeneratedTask = (...args) => repository.saveGeneratedTask(...args);
 export const recordModuleAttempt = (...args) => repository.recordModuleAttempt(...args);
 export const upsertWordProgress = (...args) => repository.upsertWordProgress(...args);
+export const upsertErrorBank = (...args) => repository.upsertErrorBank(...args);
 export const logAiRequest = (...args) => repository.logAiRequest(...args);
 export const countAiRequestsSince = (...args) => repository.countAiRequestsSince(...args);
 export const createSession = (...args) => repository.createSession(...args);

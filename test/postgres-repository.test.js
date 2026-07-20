@@ -24,6 +24,7 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
       '011_generated_tasks.sql',
       '012_module_attempts.sql',
       '013_word_progress.sql',
+      '014_error_bank.sql',
     ]);
 
     const username = await repository.createTelegramUser(telegramId, `Integration ${suffix}`);
@@ -75,6 +76,9 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     assert.equal((await repository.recordModuleAttempt(username, { id: moduleAttemptId, module: 'exam', activity: 'grammar_19_24', score: 5, maxScore: 6, durationMs: 50_000, metadata: {} })).created, true);
     assert.equal((await repository.recordModuleAttempt(username, { id: moduleAttemptId, module: 'exam', activity: 'grammar_19_24', score: 5, maxScore: 6, durationMs: 50_000, metadata: {} })).created, false);
     await repository.upsertWordProgress(username, [{ word: 'Achievement', stage: 2, errorCount: 1, reviewCount: 3, dueAt: Date.now() + 60_000 }]);
+    const learningError = { module: 'grammar', itemKey: `grammar_19_24:${suffix}`, errorType: 'incorrect_form', details: { expected: 'went' } };
+    await repository.upsertErrorBank(username, [learningError]);
+    await repository.upsertErrorBank(username, [learningError]);
     await repository.logAiRequest({
       username, operation: 'integration', provider: 'test', model: 'test',
       promptVersion: 'integration-v1', status: 'completed', durationMs: 1,
@@ -94,6 +98,8 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     assert.equal(exported.generated_tasks.length, 1);
     assert.equal(exported.module_attempts.length, 1);
     assert.equal(exported.word_progress[0].word, 'achievement');
+    assert.equal(exported.error_bank.length, 1);
+    assert.equal(exported.error_bank[0].occurrence_count, 2);
     assert.equal(exported.ai_requests.length, 1);
 
     assert.equal(await repository.deleteUserData(username), true);

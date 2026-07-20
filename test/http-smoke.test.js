@@ -171,6 +171,12 @@ test('application starts and serves health, security headers and PWA assets', { 
     });
     assert.equal(wordSync.status, 200);
     assert.equal((await wordSync.json()).updated, 1);
+    const errorSync = await fetch(`${baseUrl}/api/error-bank`, {
+      method: 'POST', headers: activeAuthorization,
+      body: JSON.stringify({ errors: [{ module: 'grammar', itemKey: 'grammar_19_24:go', errorType: 'incorrect_form', details: { expected: 'went' } }] }),
+    });
+    assert.equal(errorSync.status, 200);
+    assert.equal((await errorSync.json()).updated, 1);
 
     const studentAdminRequest = await fetch(`${baseUrl}/api/admin/status`, { headers: activeAuthorization });
     assert.equal(studentAdminRequest.status, 403);
