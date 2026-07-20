@@ -53,13 +53,6 @@ function rateCard(k){const c=queue[ci];if(!c)return;if(k){S.box[c.w]=Math.min(3,
 let curTask=38;
 const SEG_ON='flex:1;text-align:center;padding:8px 0;font-weight:700;font-size:13px;color:#F2683F;background:#fff;border-radius:11px;cursor:pointer;';
 const SEG_OFF='flex:1;text-align:center;padding:8px 0;font-weight:700;font-size:13px;color:rgba(255,255,255,.92);cursor:pointer;';
-function setTask(n){curTask=n;const d=WRITE[n];
-  document.getElementById('w_seg37').setAttribute('style',n===37?SEG_ON:SEG_OFF);
-  document.getElementById('w_seg38').setAttribute('style',n===38?SEG_ON:SEG_OFF);
-  document.getElementById('w_tasklabel').textContent=d.label;
-  document.getElementById('w_prompt').textContent=d.prompt;
-  document.getElementById('w_tablehint').style.display=d.table?'inline-flex':'none';
-  countWords()}
 function countWords(){const d=WRITE[curTask];const t=(document.getElementById('w_editor').innerText||'').trim();const n=t?t.split(/\s+/).length:0;
   const e=document.getElementById('w_count');e.textContent=n+' / '+d.range+' слов';e.style.color=(n>=d.min&&n<=d.max)?'#1F8A50':(n>d.max?'#C9503C':'#8A8F98')}
 
@@ -113,8 +106,6 @@ S=load();
 /* ===== READING ===== */
 const READ_TXT="Many students take a gap year before university. They travel, work or do volunteering. It can be a valuable experience that helps them become more independent and confident.";
 let lastWord="";
-function r_add(st){if(!lastWord)return;S.wstatus[lastWord]=st;if(st==='know')S.learned++;save();document.getElementById('r_pop').style.display='none';initReading()}
-
 /* ===== GRAMMAR ===== */
 const GRAM_Q=[
  {t:['She ','_____',' already finished her homework.'],o:['have','has','had','is'],a:1,e:'<b>She/he/it</b> — третье лицо, поэтому <b>has</b>.'},
@@ -144,11 +135,6 @@ function lOpt(host,q,mod){const el=document.getElementById(host);el.innerHTML=''
 const SPK_Q=['How often do you use the internet for studying?','What do you usually do at weekends?','Do you prefer books or films? Why?','How important is English for your future?','What kind of music do you like?'];
 let spT=null,spLeft=40,recing=false,mediaRec=null,chunks=[],lastUrl=null;
 function fmt(x){return '0:'+String(Math.max(0,x)).padStart(2,'0')}
-function initSpeaking(){clearInterval(spT);recing=false;spLeft=40;
-  document.getElementById('sp_q').textContent=SPK_Q[Math.floor(Math.random()*SPK_Q.length)];
-  document.getElementById('sp_time').textContent='0:40';document.getElementById('sp_sub').textContent='осталось из 0:40';
-  document.getElementById('sp_ring').setAttribute('stroke-dashoffset','0');
-  document.getElementById('sp_reclabel').textContent='нажми, чтобы записать';document.getElementById('sp_reclabel').style.color='#8A8F98'}
 function resetSpeaking(){initSpeaking();lastUrl=null}
 function tick(){spLeft--;document.getElementById('sp_time').textContent=fmt(spLeft);
   document.getElementById('sp_ring').setAttribute('stroke-dashoffset',String(Math.round(603*(1-spLeft/40))));
@@ -269,8 +255,7 @@ let GQ=GRAM_Q.slice();
 let LIS={title:'Диалог 1 · В кафе',dialog:LISTEN.dialog,q1:{q:'1. Где происходит разговор?',o:LISTEN.q1.o.slice(),a:LISTEN.q1.a},q2:{q:'2. Что заказал мужчина?',o:LISTEN.q2.o.slice(),a:LISTEN.q2.a}};
 let RTXT=READ_TXT;
 
-/* -- override grammar to use GQ -- */
-function initGrammar(){gi=0;gScore=0;renderG()}
+/* -- grammar fallback renderer -- */
 function renderG(){gAns=false;const q=GQ[gi];
   document.getElementById('g_head').textContent='Грамматика · Вопрос '+(gi+1)+' из '+GQ.length;
   document.getElementById('g_steps').innerHTML=GQ.map((_,i)=>'<div style="flex:1;height:5px;border-radius:3px;background:'+(i<=gi?'#fff':'rgba(255,255,255,.35)')+';"></div>').join('');
@@ -293,25 +278,8 @@ function pickG(oi){if(gAns)return;gAns=true;const q=GQ[gi];
   const nx=document.getElementById('g_next');nx.style.opacity='1';nx.textContent=(gi<GQ.length-1?'Дальше':'Завершить')}
 function nextG(){if(!gAns)return;if(gi<GQ.length-1){gi++;renderG()}else{alert('Результат: '+gScore+' из '+GQ.length+' 🎯');tab('scr1')}}
 
-/* -- override listening to use LIS -- */
-function initListening(){const a=document.getElementById('l_q1'),b=document.getElementById('l_q2');if(!a)return;delete a.dataset.d;delete b.dataset.d;
-  var t=document.getElementById('l_title');if(t)t.textContent=LIS.title;
-  var q1=document.getElementById('l_q1t');if(q1)q1.textContent=LIS.q1.q;
-  var q2=document.getElementById('l_q2t');if(q2)q2.textContent=LIS.q2.q;
-  lOpt('l_q1',LIS.q1);lOpt('l_q2',LIS.q2);
-  document.getElementById('l_script').style.display='none';var tg=document.getElementById('l_toggle');if(tg){tg.style.background='#E7E9EC';document.getElementById('l_knob').style.left='3px'}}
 function playListen(){if(!('speechSynthesis'in window))return;speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(LIS.dialog);u.lang='en-GB';u.rate=.9;const v=speechSynthesis.getVoices().find(x=>/en-GB/i.test(x.lang));if(v)u.voice=v;speechSynthesis.speak(u)}
 function toggleScript(){const s=document.getElementById('l_script'),t=document.getElementById('l_toggle'),k=document.getElementById('l_knob');const on=s.style.display==='none';s.style.display=on?'block':'none';s.textContent=LIS.dialog;t.style.background=on?'#F2683F':'#E7E9EC';k.style.left=on?'22px':'3px'}
-
-/* -- override reading to use RTXT -- */
-function initReading(){S.wstatus=S.wstatus||{};const host=document.getElementById('r_text');if(!host)return;host.innerHTML='';
-  RTXT.split(/(\s+)/).forEach(tok=>{if(/^\s+$/.test(tok)){host.appendChild(document.createTextNode(tok));return}
-    const clean=tok.replace(/[^A-Za-z'-]/g,'').toLowerCase();const sp=document.createElement('span');sp.textContent=tok;
-    if(clean){sp.style.cursor='pointer';const st=S.wstatus[clean];
-      if(st==='know')sp.setAttribute('style','cursor:pointer;background:#E5F4EC;color:#1F8A50;border-radius:6px;padding:1px 5px;font-weight:700;');
-      else if(st==='learn')sp.setAttribute('style','cursor:pointer;background:#FFF4DE;color:#C77400;border-radius:6px;padding:1px 5px;font-weight:700;');
-      sp.onclick=()=>trWord(clean)}
-    host.appendChild(sp)})}
 
 /* -- toast + FAB -- */
 let toastT=null;
@@ -1296,7 +1264,7 @@ function gStatusChip(st,isDue){
   if(st===2)return '<span style="font-weight:800;font-size:10px;letter-spacing:.6px;color:#1F8A50;background:#EAF7F0;padding:5px 10px;border-radius:20px;">ЗАКРЕПЛЕНА</span>';
   if(st===1)return '<span style="font-weight:800;font-size:10px;letter-spacing:.6px;color:#C77400;background:#FFF4DE;padding:5px 10px;border-radius:20px;">ИЗУЧАЕТСЯ</span>';
   return '<span style="font-weight:800;font-size:10px;letter-spacing:.6px;color:#8A8F98;background:#F1F2F4;padding:5px 10px;border-radius:20px;">НЕ НАЧАТА</span>'}
-initGrammar=function(){if(!S)return;gSync();gMap()}
+function initGrammar(){if(!S)return;gSync();gMap()}
 function gMap(){var area=document.getElementById('g_area');if(!area)return;
   var due=gDue();
   var GA=0;function ga(){return 'animation:win .34s '+((GA++)*0.05)+'s cubic-bezier(.25,.75,.35,1) both;'}
@@ -1670,7 +1638,7 @@ function rWordsHtml(text){return text.split(/(\s+)/).map(function(tok){
   var st=S.wstatus&&S.wstatus[clean];
   var bg=st==='learn'?'background:#FFEDE4;border-radius:5px;':(st==='know'?'background:#EAF7F0;border-radius:5px;':'');
   return '<span class="clk" data-w="'+clean+'" onclick="trWord(this.dataset.w)" style="cursor:pointer;'+bg+'">'+rEsc(tok)+'</span>'}).join('')}
-initReading=function(){if(!S)return;rSync();rHub()}
+function initReading(){if(!S)return;rSync();rHub()}
 function rHub(){var area=document.getElementById('r_area');if(!area)return;RH=null;RQ=null;
   var r=rSt();var GA=0;function ga(){return 'animation:win .34s '+((GA++)*0.06)+'s cubic-bezier(.25,.75,.35,1) both;'}
   function acc(x){return x.tot?Math.round(x.ok/x.tot*100)+'%':'—'}
@@ -1863,7 +1831,7 @@ function rGpCheck(){if(RG.done)return;RG.done=true;var set=RG.set,L='ABCD',r=rSt
   area.insertBefore(d,area.firstChild);
   try{d.scrollIntoView({behavior:'smooth',block:'start'})}catch(e){};rGen()}
 /* ---- слово из текста → в модуль Слова ---- */
-r_add=function(st){if(!lastWord)return;
+function r_add(st){if(!lastWord)return;
   S.wstatus=S.wstatus||{};S.wstatus[lastWord]=st;
   if(st==='learn'){
     var tr=(document.getElementById('r_tr')||{}).textContent||'';
@@ -2140,7 +2108,7 @@ function lTranscript(lines,evs){
       var hl=(evs||[]).some(function(ev){return ev&&ln.t.indexOf(ev.replace(/^…/,'').replace(/…$/,'').replace(/\.$/,'').slice(0,25))>=0});
       return '<div style="margin-top:8px;font-weight:500;font-size:13px;line-height:1.6;color:#2B2B2B;'+(hl?'background:#FFF4DE;border-radius:8px;padding:5px 8px;':'')+'">'
         +'<b style="color:'+(ln.s?'#3E93A8':'#F2683F')+';">—</b> '+rWordsHtml(ln.t)+'</div>'}).join('')+'</div>'}
-initListening=function(){if(!S)return;lSync();lHub()}
+function initListening(){if(!S)return;lSync();lHub()}
 function lHub(){var area=document.getElementById('l_area');if(!area)return;LM=null;LT=null;LI=null;lStop();
   var r=lSt();var GA=0;function ga(){return 'animation:win .34s '+((GA++)*0.06)+'s cubic-bezier(.25,.75,.35,1) both;'}
   function acc(x){return x.tot?Math.round(x.ok/x.tot*100)+'%':'—'}
@@ -2552,7 +2520,7 @@ const W_SHEET38='<div style="font-weight:800;font-size:10px;letter-spacing:1.2px
  +'<b>5. Вывод + твоё мнение:</b> <i>In conclusion, I strongly believe that sport plays an important role in teenagers\u0027 lives.</i><br><br>'
  +'<b>Перед отправкой проверь:</b> 200–250 слов · мнение только во вступлении и выводе · пять абзацев на месте.</div>';
 /* — перерисовка карточки задания — */
-setTask=function(n){curTask=n;var d=WRITE[n],tp=wrCur();
+function setTask(n){curTask=n;var d=WRITE[n],tp=wrCur();
   var s37=document.getElementById('w_seg37'),s38=document.getElementById('w_seg38');
   if(s37)s37.setAttribute('style',n===37?SEG_ON:SEG_OFF);
   if(s38)s38.setAttribute('style',n===38?SEG_ON:SEG_OFF);
@@ -2709,7 +2677,7 @@ function spFmt(s){s=Math.max(0,s);return Math.floor(s/60)+':'+('0'+s%60).slice(-
 function spStopAll(){clearInterval(SP_tm);SP_tm=null;
   if(SP_rec&&SP_rec.state!=='inactive'){try{SP_rec.stop()}catch(e){}}
   try{lStop()}catch(e){}}
-initSpeaking=function(){if(!S)return;spStopAll();SP=null;spSync();spHub()}
+function initSpeaking(){if(!S)return;spStopAll();SP=null;spSync();spHub()}
 function spHub(){var area=document.getElementById('s9_area');if(!area)return;
   var r=spSt();var GA=0;function ga(){return 'animation:win .34s '+((GA++)*0.06)+'s cubic-bezier(.25,.75,.35,1) both;'}
   var se=S.spkExam||{};
