@@ -215,6 +215,44 @@ export function createFileRepository(filePath) {
     return id;
   }
 
+  async function exportUserData(username) {
+    await load();
+    const user = state.users[username];
+    if (!user) return null;
+    return structuredClone({
+      exported_at: new Date().toISOString(),
+      account: {
+        username,
+        telegram_id: user.telegram_id ?? null,
+        trial_used: Boolean(user.trial_used),
+        subscription_until: user.sub_until ?? null,
+        created_at: user.created ?? null,
+      },
+      progress: state.progress[username] || {},
+      subscription_events: [],
+      writing_attempts: state.writing_attempts.filter((item) => item.username === username),
+      ai_requests: state.ai_requests.filter((item) => item.username === username),
+    });
+  }
+
+  async function deleteUserData(username) {
+    await load();
+    const user = state.users[username];
+    if (!user) return false;
+    const telegramId = user.telegram_id == null ? null : String(user.telegram_id);
+    delete state.users[username];
+    delete state.progress[username];
+    state.writing_attempts = state.writing_attempts.filter((item) => item.username !== username);
+    state.ai_requests = state.ai_requests.filter((item) => item.username !== username);
+    if (telegramId) {
+      for (const [codeHash, entry] of Object.entries(state.auth_codes)) {
+        if (String(entry.telegram_id) === telegramId) delete state.auth_codes[codeHash];
+      }
+    }
+    await persist();
+    return true;
+  }
+
   async function healthCheck() {
     await load();
     await writeQueue;
@@ -239,6 +277,8 @@ export function createFileRepository(filePath) {
     createWritingAttempt,
     finishWritingAttempt,
     logAiRequest,
+    exportUserData,
+    deleteUserData,
     healthCheck,
     async close() { await writeQueue; },
   };

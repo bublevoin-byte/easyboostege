@@ -197,6 +197,42 @@ export function createPostgresRepository(connectionString) {
     return Number(result.rows[0].id);
   }
 
+  async function exportUserData(username) {
+    const [account, progress, subscriptionEvents, writingAttempts, aiRequests] = await Promise.all([
+      pool.query('SELECT username, telegram_id, trial_used, subscription_until, created_at, updated_at FROM users WHERE username = $1', [username]),
+      pool.query('SELECT data, updated_at FROM user_progress WHERE username = $1', [username]),
+      pool.query('SELECT id, event_type, days, metadata, created_at FROM subscription_events WHERE username = $1 ORDER BY created_at', [username]),
+      pool.query('SELECT id, task_type, assignment, answer, review, provider, prompt_version, status, created_at, evaluated_at FROM writing_attempts WHERE username = $1 ORDER BY created_at', [username]),
+      pool.query('SELECT id, operation, provider, model, prompt_version, status, duration_ms, error_code, created_at FROM ai_requests WHERE username = $1 ORDER BY created_at', [username]),
+    ]);
+    if (!account.rowCount) return null;
+    return {
+      exported_at: new Date().toISOString(),
+      account: account.rows[0],
+      progress: progress.rows[0]?.data || {},
+      subscription_events: subscriptionEvents.rows,
+      writing_attempts: writingAttempts.rows,
+      ai_requests: aiRequests.rows,
+    };
+  }
+
+  async function deleteUserData(username) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('DELETE FROM telegram_auth_codes WHERE telegram_id = (SELECT telegram_id FROM users WHERE username = $1)', [username]);
+      await client.query('DELETE FROM ai_requests WHERE username = $1', [username]);
+      const deleted = await client.query('DELETE FROM users WHERE username = $1 RETURNING username', [username]);
+      await client.query('COMMIT');
+      return Boolean(deleted.rowCount);
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async function healthCheck() {
     await pool.query('SELECT 1');
     return true;
@@ -220,6 +256,8 @@ export function createPostgresRepository(connectionString) {
     createWritingAttempt,
     finishWritingAttempt,
     logAiRequest,
+    exportUserData,
+    deleteUserData,
     healthCheck,
     close: () => pool.end(),
   };

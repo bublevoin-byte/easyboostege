@@ -133,6 +133,29 @@ test('application starts and serves health, security headers and PWA assets', { 
     });
     assert.equal(rateLimitedAi.status, 429);
     assert.equal((await rateLimitedAi.json()).error.code, 'RATE_LIMITED');
+
+    const exported = await fetch(`${baseUrl}/api/account/export`, { headers: activeAuthorization });
+    assert.equal(exported.status, 200);
+    assert.match(exported.headers.get('content-disposition') || '', /easyboost-data\.json/u);
+    assert.equal((await exported.json()).account.username, 'active');
+
+    const unconfirmedDeletion = await fetch(`${baseUrl}/api/account`, {
+      method: 'DELETE',
+      headers: activeAuthorization,
+      body: JSON.stringify({ confirmation: 'NO' }),
+    });
+    assert.equal(unconfirmedDeletion.status, 400);
+    assert.equal((await unconfirmedDeletion.json()).error.code, 'CONFIRMATION_REQUIRED');
+
+    const deletion = await fetch(`${baseUrl}/api/account`, {
+      method: 'DELETE',
+      headers: activeAuthorization,
+      body: JSON.stringify({ confirmation: 'DELETE' }),
+    });
+    assert.equal(deletion.status, 200);
+    assert.equal((await deletion.json()).ok, true);
+    const deletedSession = await fetch(`${baseUrl}/api/me`, { headers: activeAuthorization });
+    assert.equal(deletedSession.status, 401);
   } finally {
     await stopProcess(child);
     await fs.rm(temporaryDirectory, { recursive: true, force: true });

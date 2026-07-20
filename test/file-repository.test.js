@@ -117,3 +117,31 @@ test('file repository readiness check succeeds after pending writes', async () =
     await save;
   });
 });
+
+test('user data can be exported and deleted with all related records', async () => {
+  await withRepository(async (repository) => {
+    const username = await repository.createTelegramUser(5001, 'Privacy User');
+    await repository.saveProgress(username, { words: { learned: 7 } });
+    const attemptId = await repository.createWritingAttempt(username, {
+      taskType: 'writing_37',
+      assignment: { from: 'Ben', stimulus: 'Questions', questionsTopic: 'school' },
+      answer: 'Private answer',
+    }, 'writing-v1');
+    await repository.finishWritingAttempt(attemptId, { status: 'failed', errorCode: 'TEST' });
+    await repository.logAiRequest({ username, operation: 'writing_37', status: 'failed' });
+
+    const exported = await repository.exportUserData(username);
+    assert.equal(exported.account.username, username);
+    assert.equal(exported.account.telegram_id, 5001);
+    assert.deepEqual(exported.progress, { words: { learned: 7 } });
+    assert.equal(exported.writing_attempts.length, 1);
+    assert.equal(exported.ai_requests.length, 1);
+    assert.equal('hash' in exported.account, false);
+
+    assert.equal(await repository.deleteUserData(username), true);
+    assert.equal(await repository.getUser(username), null);
+    assert.deepEqual(await repository.getProgress(username), {});
+    assert.equal(await repository.exportUserData(username), null);
+    assert.equal(await repository.deleteUserData(username), false);
+  });
+});

@@ -50,6 +50,17 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     assert.deepEqual(attempt.rows[0], { status: 'failed', error_code: 'EXPECTED_TEST_ERROR' });
     const aiLog = await client.query('SELECT operation, status FROM ai_requests WHERE username = $1', [username]);
     assert.deepEqual(aiLog.rows[0], { operation: 'integration', status: 'completed' });
+
+    const exported = await repository.exportUserData(username);
+    assert.equal(exported.account.username, username);
+    assert.deepEqual(exported.progress, { learned: 12, prog: { words: 44 }, marker: suffix, extra: true });
+    assert.equal(exported.writing_attempts.length, 1);
+    assert.equal(exported.ai_requests.length, 1);
+
+    assert.equal(await repository.deleteUserData(username), true);
+    assert.equal(await repository.getUser(username), null);
+    assert.equal((await client.query('SELECT 1 FROM writing_attempts WHERE username = $1', [username])).rowCount, 0);
+    assert.equal((await client.query('SELECT 1 FROM ai_requests WHERE username = $1', [username])).rowCount, 0);
   } finally {
     await repository.close();
     await client.end();

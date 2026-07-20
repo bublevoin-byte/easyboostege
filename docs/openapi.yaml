@@ -52,6 +52,28 @@ paths:
       summary: Clear authentication cookie
       responses:
         '200': { description: Logged out }
+  /api/account/export:
+    get:
+      summary: Export the authenticated user's account, progress and attempt data
+      responses:
+        '200': { description: User data export as JSON attachment }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/account:
+    delete:
+      summary: Permanently delete the authenticated user and related data
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirmation]
+              properties:
+                confirmation: { type: string, enum: [DELETE] }
+      responses:
+        '200': { description: Account deleted and cookie cleared }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
   /api/progress:
     get:
       summary: Read complete progress document

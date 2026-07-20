@@ -7,7 +7,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, createTelegramAuthCode, createWritingAttempt, finishWritingAttempt, getProgress, getUser, healthCheck, saveProgress, mergeProgress, getUserByTelegram, createTelegramUser, grantDays, logAiRequest, markTrialUsed, getSub } from './db.js';
+import { closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, createTelegramAuthCode, createWritingAttempt, deleteUserData, exportUserData, finishWritingAttempt, getProgress, getUser, healthCheck, saveProgress, mergeProgress, getUserByTelegram, createTelegramUser, grantDays, logAiRequest, markTrialUsed, getSub } from './db.js';
 import { config } from './config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from './ai/writing.js';
 import { protectCookieRequests } from './security/request-origin.js';
@@ -317,6 +317,26 @@ app.get('/api/me', auth, async (req, res, next) => {
 app.post('/api/logout', (req, res) => {
   res.setHeader('Set-Cookie', 'eb_token=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax');
   res.json({ ok: true });
+});
+
+app.get('/api/account/export', auth, async (req, res, next) => {
+  try {
+    const data = await exportUserData(req.user);
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Content-Disposition', 'attachment; filename="easyboost-data.json"');
+    res.json(data);
+  } catch (error) { next(error); }
+});
+
+app.delete('/api/account', auth, async (req, res, next) => {
+  try {
+    if (req.body?.confirmation !== 'DELETE') {
+      return res.status(400).json({ error: { code: 'CONFIRMATION_REQUIRED', message: 'Подтвердите удаление аккаунта.' } });
+    }
+    await deleteUserData(req.user);
+    res.setHeader('Set-Cookie', 'eb_token=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax');
+    res.json({ ok: true });
+  } catch (error) { next(error); }
 });
 
 // ---- прогресс ----
