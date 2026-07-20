@@ -119,6 +119,34 @@ export function createFileRepository(filePath) {
     return subscriptionView(await getUser(username));
   }
 
+  async function getPrivacyConsent(username) {
+    await load();
+    const consent = state.users[username]?.privacy_consent || {};
+    return {
+      text_processing: Boolean(consent.text_processing),
+      voice_processing: Boolean(consent.voice_processing),
+      policy_version: consent.policy_version || null,
+      updated_at: consent.updated_at || null,
+    };
+  }
+
+  async function setPrivacyConsent(username, consent) {
+    await load();
+    if (!state.users[username]) throw new Error('USER_NOT_FOUND');
+    const previous = state.users[username].privacy_consent || {};
+    const now = new Date().toISOString();
+    state.users[username].privacy_consent = {
+      text_processing: Boolean(consent.text_processing),
+      voice_processing: Boolean(consent.voice_processing),
+      policy_version: consent.policy_version,
+      text_consented_at: consent.text_processing ? (previous.text_consented_at || now) : null,
+      voice_consented_at: consent.voice_processing ? (previous.voice_consented_at || now) : null,
+      updated_at: now,
+    };
+    await persist();
+    return getPrivacyConsent(username);
+  }
+
   function removeExpiredAuthCodes(now = Date.now()) {
     let changed = false;
     for (const [codeHash, entry] of Object.entries(state.auth_codes)) {
@@ -229,6 +257,7 @@ export function createFileRepository(filePath) {
         created_at: user.created ?? null,
       },
       progress: state.progress[username] || {},
+      privacy_consent: await getPrivacyConsent(username),
       subscription_events: [],
       writing_attempts: state.writing_attempts.filter((item) => item.username === username),
       ai_requests: state.ai_requests.filter((item) => item.username === username),
@@ -271,6 +300,8 @@ export function createFileRepository(filePath) {
     grantDays,
     markTrialUsed,
     getSub,
+    getPrivacyConsent,
+    setPrivacyConsent,
     createTelegramAuthCode,
     confirmTelegramAuthCode,
     consumeTelegramAuthCode,

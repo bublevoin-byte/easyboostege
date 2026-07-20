@@ -56,7 +56,7 @@ test('application starts and serves health, security headers and PWA assets', { 
   await fs.writeFile(dataFile, JSON.stringify({
     users: {
       expired: { created: Date.now(), sub_until: Date.now() - 60_000 },
-      active: { created: Date.now(), sub_until: Date.now() + 60_000 },
+      active: { created: Date.now(), sub_until: Date.now() + 60_000, privacy_consent: { text_processing: true, voice_processing: true, policy_version: '2026-07-20', updated_at: new Date().toISOString() } },
     },
     progress: { expired: {}, active: {} },
   }), 'utf8');
@@ -133,6 +133,21 @@ test('application starts and serves health, security headers and PWA assets', { 
     });
     assert.equal(rateLimitedAi.status, 429);
     assert.equal((await rateLimitedAi.json()).error.code, 'RATE_LIMITED');
+
+    const consent = await fetch(`${baseUrl}/api/privacy/consent`, { headers: activeAuthorization });
+    assert.equal(consent.status, 200);
+    assert.equal((await consent.json()).text_processing, true);
+
+    const revokedConsent = await fetch(`${baseUrl}/api/privacy/consent`, {
+      method: 'PUT', headers: activeAuthorization, body: JSON.stringify({ text_processing: false, voice_processing: false }),
+    });
+    assert.equal(revokedConsent.status, 200);
+    assert.equal((await revokedConsent.json()).text_processing, false);
+    const blockedByConsent = await fetch(`${baseUrl}/api/ai`, {
+      method: 'POST', headers: activeAuthorization, body: JSON.stringify({ system: 'Tutor', user: 'Private text' }),
+    });
+    assert.equal(blockedByConsent.status, 403);
+    assert.equal((await blockedByConsent.json()).error.code, 'PRIVACY_CONSENT_REQUIRED');
 
     const exported = await fetch(`${baseUrl}/api/account/export`, { headers: activeAuthorization });
     assert.equal(exported.status, 200);

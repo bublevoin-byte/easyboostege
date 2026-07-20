@@ -74,6 +74,28 @@ paths:
         '200': { description: Account deleted and cookie cleared }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/privacy/consent:
+    get:
+      summary: Read the user's text and voice processing choices
+      responses:
+        '200': { description: Consent state and current policy version }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    put:
+      summary: Grant or withdraw text and voice processing consent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text_processing, voice_processing]
+              properties:
+                text_processing: { type: boolean }
+                voice_processing: { type: boolean }
+      responses:
+        '200': { description: Updated consent state }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
   /api/progress:
     get:
       summary: Read complete progress document

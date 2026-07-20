@@ -7,7 +7,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, createTelegramAuthCode, createWritingAttempt, deleteUserData, exportUserData, finishWritingAttempt, getProgress, getUser, healthCheck, saveProgress, mergeProgress, getUserByTelegram, createTelegramUser, grantDays, logAiRequest, markTrialUsed, getSub } from './db.js';
+import { closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, createTelegramAuthCode, createWritingAttempt, deleteUserData, exportUserData, finishWritingAttempt, getPrivacyConsent, getProgress, getUser, healthCheck, saveProgress, setPrivacyConsent, mergeProgress, getUserByTelegram, createTelegramUser, grantDays, logAiRequest, markTrialUsed, getSub } from './db.js';
 import { config } from './config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from './ai/writing.js';
 import { protectCookieRequests } from './security/request-origin.js';
@@ -19,6 +19,7 @@ const frontendHtml = fs.readFileSync(path.join(__dirname, 'public', 'index.html'
 
 const SECRET = config.jwtSecret;
 const PORT = config.port;
+const PRIVACY_POLICY_VERSION = '2026-07-20';
 
 // ИИ: основной Grok (xAI, платный), резерв Groq (бесплатный)
 const XAI_KEY = config.ai.xaiKey;
@@ -339,6 +340,25 @@ app.delete('/api/account', auth, async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
+app.get('/api/privacy/consent', auth, async (req, res, next) => {
+  try { res.json({ ...(await getPrivacyConsent(req.user)), current_policy_version: PRIVACY_POLICY_VERSION }); }
+  catch (error) { next(error); }
+});
+
+app.put('/api/privacy/consent', auth, async (req, res, next) => {
+  try {
+    const body = req.body;
+    if (!body || typeof body !== 'object' || typeof body.text_processing !== 'boolean' || typeof body.voice_processing !== 'boolean') {
+      return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Укажите согласие на обработку текста и голоса.' } });
+    }
+    res.json(await setPrivacyConsent(req.user, {
+      text_processing: body.text_processing,
+      voice_processing: body.voice_processing,
+      policy_version: PRIVACY_POLICY_VERSION,
+    }));
+  } catch (error) { next(error); }
+});
+
 // ---- прогресс ----
 app.get('/api/progress', auth, async (req, res, next) => {
   try { res.json(await getProgress(req.user)); } catch (error) { next(error); }
@@ -447,7 +467,19 @@ async function requireActiveSubscription(req, res, next) {
   } catch (error) { next(error); }
 }
 
-app.post('/api/v1/ai/evaluate-writing', auth, requireActiveSubscription, writingLimiter, async (req, res, next) => {
+function requirePrivacyConsent(kind) {
+  return async (req, res, next) => {
+    try {
+      const consent = await getPrivacyConsent(req.user);
+      if (consent.policy_version !== PRIVACY_POLICY_VERSION || !consent[kind]) {
+        return res.status(403).json({ error: { code: 'PRIVACY_CONSENT_REQUIRED', message: 'Перед отправкой данных подтвердите согласие в профиле.' } });
+      }
+      next();
+    } catch (error) { next(error); }
+  };
+}
+
+app.post('/api/v1/ai/evaluate-writing', auth, requireActiveSubscription, requirePrivacyConsent('text_processing'), writingLimiter, async (req, res, next) => {
   const parsed = writingRequestSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({
@@ -512,7 +544,7 @@ app.post('/api/v1/ai/evaluate-writing', auth, requireActiveSubscription, writing
   }
 });
 
-app.post('/api/ai', auth, requireActiveSubscription, chatLimiter, async (req, res) => {
+app.post('/api/ai', auth, requireActiveSubscription, requirePrivacyConsent('text_processing'), chatLimiter, async (req, res) => {
   const parsed = legacyAiRequestSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректный запрос к ИИ.' } });
@@ -593,7 +625,7 @@ app.get('/api/tts', auth, requireActiveSubscription, ttsLimiter, async (req, res
 });
 
 // ---- расшифровка речи (Grok STT) для оценки говорения ----
-app.post('/api/stt', auth, requireActiveSubscription, sttLimiter, express.raw({ type: () => true, limit: '20mb' }), async (req, res) => {
+app.post('/api/stt', auth, requireActiveSubscription, requirePrivacyConsent('voice_processing'), sttLimiter, express.raw({ type: () => true, limit: '20mb' }), async (req, res) => {
   try {
     if (!XAI_KEY) return res.status(503).json({ error: { code: 'STT_NOT_CONFIGURED', message: 'Распознавание речи не настроено.' } });
     const buf = req.body;

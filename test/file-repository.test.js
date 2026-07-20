@@ -122,6 +122,8 @@ test('user data can be exported and deleted with all related records', async () 
   await withRepository(async (repository) => {
     const username = await repository.createTelegramUser(5001, 'Privacy User');
     await repository.saveProgress(username, { words: { learned: 7 } });
+    const consent = await repository.setPrivacyConsent(username, { text_processing: true, voice_processing: false, policy_version: 'test-v1' });
+    assert.equal(consent.text_processing, true);
     const attemptId = await repository.createWritingAttempt(username, {
       taskType: 'writing_37',
       assignment: { from: 'Ben', stimulus: 'Questions', questionsTopic: 'school' },
@@ -136,6 +138,7 @@ test('user data can be exported and deleted with all related records', async () 
     assert.deepEqual(exported.progress, { words: { learned: 7 } });
     assert.equal(exported.writing_attempts.length, 1);
     assert.equal(exported.ai_requests.length, 1);
+    assert.equal(exported.privacy_consent.policy_version, 'test-v1');
     assert.equal('hash' in exported.account, false);
 
     assert.equal(await repository.deleteUserData(username), true);

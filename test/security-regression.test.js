@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 
 const frontendPath = new URL('../public/index.html', import.meta.url);
 const frontendApiPath = new URL('../public/api.js', import.meta.url);
-const frontendScriptPaths = ['sync.js', 'router.js', 'app.js', 'tts.js', 'pwa.js'].map(
+const frontendScriptPaths = ['sync.js', 'router.js', 'app.js', 'privacy.js', 'tts.js', 'pwa.js'].map(
   (name) => new URL(`../public/${name}`, import.meta.url),
 );
 const serverPath = new URL('../server.js', import.meta.url);
@@ -50,7 +50,7 @@ test('frontend contains no embedded or browser-managed AI credentials', async ()
 
 test('frontend uses ordered external scripts that remain syntactically valid', async () => {
   const { html, api, scripts } = await readFrontend();
-  assert.match(html, /<script src="\/api\.js" defer><\/script>\s*<script src="\/sync\.js" defer><\/script>\s*<script src="\/router\.js" defer><\/script>\s*<script src="\/app\.js" defer><\/script>\s*<script src="\/tts\.js" defer><\/script>/u);
+  assert.match(html, /<script src="\/api\.js" defer><\/script>\s*<script src="\/sync\.js" defer><\/script>\s*<script src="\/router\.js" defer><\/script>\s*<script src="\/app\.js" defer><\/script>\s*<script src="\/privacy\.js" defer><\/script>\s*<script src="\/tts\.js" defer><\/script>/u);
   assert.doesNotMatch(html, /<script(?![^>]*\bsrc\s*=)(?:\s[^>]*)?>/iu);
   assert.doesNotThrow(() => new Function(api));
   for (const script of scripts) assert.doesNotThrow(() => new Function(script));
@@ -168,7 +168,7 @@ test('production documentation covers local setup, API, database and operations'
   const paths = ['../README.md', '../docs/openapi.yaml', '../docs/DATABASE_SCHEMA.md', '../docs/AI_OPERATIONS.md', '../docs/KEY_ROTATION.md', '../docs/SUPPORT.md', '../docs/KNOWN_LIMITATIONS.md', '../docs/TELEGRAM_ADMIN.md'];
   const documents = await Promise.all(paths.map((path) => fs.readFile(new URL(path, import.meta.url), 'utf8')));
   assert.match(documents[0], /npm ci[\s\S]*npm run check[\s\S]*npm test/u);
-  for (const route of ['/health/live', '/health/ready', '/api/tg/start', '/api/me', '/api/account/export', '/api/account', '/api/progress/modules', '/api/v1/ai/evaluate-writing', '/api/tts', '/api/stt']) {
+  for (const route of ['/health/live', '/health/ready', '/api/tg/start', '/api/me', '/api/account/export', '/api/account', '/api/privacy/consent', '/api/progress/modules', '/api/v1/ai/evaluate-writing', '/api/tts', '/api/stt']) {
     assert.match(documents[1], new RegExp(route.replaceAll('/', '\\/'), 'u'));
   }
   assert.match(documents[2], /user_progress/u);
@@ -177,6 +177,19 @@ test('production documentation covers local setup, API, database and operations'
   assert.match(documents[5], /requestId/u);
   assert.match(documents[6], /Известные ограничения/u);
   assert.match(documents[7], /TELEGRAM_BOT_TOKEN/u);
+});
+
+test('privacy UI separates text and voice consent and explains external processing', async () => {
+  const [script, policy] = await Promise.all([
+    fs.readFile(new URL('../public/privacy.js', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../public/privacy.html', import.meta.url), 'utf8'),
+  ]);
+  assert.match(script, /id="privacyText" type="checkbox"/u);
+  assert.match(script, /id="privacyVoice" type="checkbox"/u);
+  assert.match(script, /xAI[\s\S]*Groq/u);
+  assert.match(script, /\/api\/privacy\/consent/u);
+  assert.match(policy, /не является официальн/u);
+  assert.match(policy, /Сроки хранения/u);
 });
 
 test('demo mode is isolated from persistence and paid AI calls', async () => {

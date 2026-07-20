@@ -22,6 +22,7 @@
   function messageFor(error, context = 'request') {
     const status = Number(error && error.status) || 0;
     const code = String((error && error.code) || 'REQUEST_FAILED');
+    if (code === 'PRIVACY_CONSENT_REQUIRED') return 'Подтвердите согласие на обработку данных в профиле.';
     if (code === 'NETWORK_ERROR' || status === 0) return 'Нет подключения к интернету. Проверьте сеть и повторите попытку.';
     if (status === 401) return 'Сессия истекла. Войдите снова.';
     if (status === 402 || status === 403) return 'Доступ неактивен. Проверьте подписку в Telegram-боте.';
@@ -62,6 +63,20 @@
     return parseResponse(response);
   }
 
+  async function put(path, body) {
+    const response = await request(baseUrl + path, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(body || {}),
+    });
+    return parseResponse(response);
+  }
+
+  async function remove(path, body) {
+    const response = await request(baseUrl + path, {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(body || {}),
+    });
+    return parseResponse(response);
+  }
+
   async function getBlob(path) {
     const response = await request(baseUrl + path, { credentials: 'same-origin' });
     if (!response.ok) await parseResponse(response);
@@ -86,5 +101,5 @@
     return result.text || '';
   }
 
-  global.EasyBoostApi = Object.freeze({ ApiError, get, post, getBlob, postBinary, legacyAi, messageFor });
+  global.EasyBoostApi = Object.freeze({ ApiError, get, post, put, remove, getBlob, postBinary, legacyAi, messageFor });
 })(window);

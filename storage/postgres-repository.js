@@ -118,6 +118,32 @@ export function createPostgresRepository(connectionString) {
     return subscriptionView(await getUser(username));
   }
 
+  async function getPrivacyConsent(username) {
+    const result = await pool.query(
+      'SELECT text_processing, voice_processing, policy_version, updated_at FROM privacy_consents WHERE username = $1',
+      [username],
+    );
+    return result.rows[0] || { text_processing: false, voice_processing: false, policy_version: null, updated_at: null };
+  }
+
+  async function setPrivacyConsent(username, consent) {
+    const result = await pool.query(
+      `INSERT INTO privacy_consents
+       (username, text_processing, voice_processing, policy_version, text_consented_at, voice_consented_at)
+       VALUES ($1, $2, $3, $4, CASE WHEN $2 THEN NOW() END, CASE WHEN $3 THEN NOW() END)
+       ON CONFLICT (username) DO UPDATE SET
+         text_processing = EXCLUDED.text_processing,
+         voice_processing = EXCLUDED.voice_processing,
+         policy_version = EXCLUDED.policy_version,
+         text_consented_at = CASE WHEN EXCLUDED.text_processing THEN COALESCE(privacy_consents.text_consented_at, NOW()) END,
+         voice_consented_at = CASE WHEN EXCLUDED.voice_processing THEN COALESCE(privacy_consents.voice_consented_at, NOW()) END,
+         updated_at = NOW()
+       RETURNING text_processing, voice_processing, policy_version, updated_at`,
+      [username, consent.text_processing, consent.voice_processing, consent.policy_version],
+    );
+    return result.rows[0];
+  }
+
   async function createTelegramAuthCode(code, expiresAt) {
     await pool.query('DELETE FROM telegram_auth_codes WHERE expires_at <= NOW()');
     await pool.query(
@@ -198,9 +224,10 @@ export function createPostgresRepository(connectionString) {
   }
 
   async function exportUserData(username) {
-    const [account, progress, subscriptionEvents, writingAttempts, aiRequests] = await Promise.all([
+    const [account, progress, privacyConsent, subscriptionEvents, writingAttempts, aiRequests] = await Promise.all([
       pool.query('SELECT username, telegram_id, trial_used, subscription_until, created_at, updated_at FROM users WHERE username = $1', [username]),
       pool.query('SELECT data, updated_at FROM user_progress WHERE username = $1', [username]),
+      pool.query('SELECT text_processing, voice_processing, policy_version, text_consented_at, voice_consented_at, updated_at FROM privacy_consents WHERE username = $1', [username]),
       pool.query('SELECT id, event_type, days, metadata, created_at FROM subscription_events WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, task_type, assignment, answer, review, provider, prompt_version, status, created_at, evaluated_at FROM writing_attempts WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, operation, provider, model, prompt_version, status, duration_ms, error_code, created_at FROM ai_requests WHERE username = $1 ORDER BY created_at', [username]),
@@ -210,6 +237,7 @@ export function createPostgresRepository(connectionString) {
       exported_at: new Date().toISOString(),
       account: account.rows[0],
       progress: progress.rows[0]?.data || {},
+      privacy_consent: privacyConsent.rows[0] || null,
       subscription_events: subscriptionEvents.rows,
       writing_attempts: writingAttempts.rows,
       ai_requests: aiRequests.rows,
@@ -250,6 +278,8 @@ export function createPostgresRepository(connectionString) {
     grantDays,
     markTrialUsed,
     getSub,
+    getPrivacyConsent,
+    setPrivacyConsent,
     createTelegramAuthCode,
     confirmTelegramAuthCode,
     consumeTelegramAuthCode,

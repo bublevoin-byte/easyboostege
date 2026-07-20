@@ -17,6 +17,7 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     const migrations = await client.query('SELECT version FROM schema_migrations ORDER BY version');
     assert.deepEqual(migrations.rows.map((row) => row.version), [
       '001_initial.sql', '002_telegram_auth_codes.sql', '003_writing_attempt_error_code.sql',
+      '004_privacy_consents.sql',
     ]);
 
     const username = await repository.createTelegramUser(telegramId, `Integration ${suffix}`);
