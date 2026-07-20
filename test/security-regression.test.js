@@ -168,7 +168,7 @@ test('AI, TTS and STT endpoints return stable public error codes', async () => {
 });
 
 test('production documentation covers local setup, API, database and operations', async () => {
-  const paths = ['../README.md', '../docs/openapi.yaml', '../docs/DATABASE_SCHEMA.md', '../docs/AI_OPERATIONS.md', '../docs/KEY_ROTATION.md', '../docs/SUPPORT.md', '../docs/KNOWN_LIMITATIONS.md', '../docs/TELEGRAM_ADMIN.md'];
+  const paths = ['../README.md', '../docs/openapi.yaml', '../docs/DATABASE_SCHEMA.md', '../docs/AI_OPERATIONS.md', '../docs/KEY_ROTATION.md', '../docs/SUPPORT.md', '../docs/KNOWN_LIMITATIONS.md', '../docs/TELEGRAM_ADMIN.md', '../docs/AI_QUALITY.md'];
   const documents = await Promise.all(paths.map((path) => fs.readFile(new URL(path, import.meta.url), 'utf8')));
   assert.match(documents[0], /npm ci[\s\S]*npm run check[\s\S]*npm test/u);
   for (const route of ['/health/live', '/health/ready', '/api/tg/start', '/api/me', '/api/account/export', '/api/account', '/api/privacy/consent', '/api/progress/modules', '/api/v1/ai/generate-content', '/api/v1/ai/evaluate-writing', '/api/v1/ai/evaluate-speaking', '/api/v1/ai/generate-speaking-sample', '/api/tts', '/api/stt']) {
@@ -180,6 +180,7 @@ test('production documentation covers local setup, API, database and operations'
   assert.match(documents[5], /requestId/u);
   assert.match(documents[6], /Известные ограничения/u);
   assert.match(documents[7], /TELEGRAM_BOT_TOKEN/u);
+  assert.match(documents[8], /quality:release/u);
 });
 
 test('privacy UI separates text and voice consent and explains external processing', async () => {

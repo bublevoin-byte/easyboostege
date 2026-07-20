@@ -30,11 +30,14 @@
 npm ci
 npm run check
 npm test
+npm run quality:check
 npm audit --omit=dev
 docker compose -f compose.production.yml config
 docker compose -f compose.production.yml build
 docker compose -f compose.production.yml up -d
 curl --fail http://127.0.0.1:3000/health/ready
 ```
+
+Перед публичным заявлением о методической точности дополнительно выполнить `npm run quality:release -- quality/release.json` на наборе, независимо размеченном квалифицированным преподавателем.
 
 Релиз разрешён только после заполнения внешних production-пунктов и успешного CI на конкретном release commit.
