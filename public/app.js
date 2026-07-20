@@ -2,7 +2,7 @@
 
 /* ---------- STATE ---------- */
 const todayStr=()=>new Date().toISOString().slice(0,10);
-let currentUser=localStorage.getItem('eb_current')||null,S=null;
+let currentUser=localStorage.getItem('eb_current')||null,S=null,DEMO_MODE=false;
 function dataKey(){return 'eb_data_'+(currentUser||'guest')}
 function getUsers(){try{return JSON.parse(localStorage.getItem('eb_users'))||{}}catch(e){return{}}}
 function setUsers(u){localStorage.setItem('eb_users',JSON.stringify(u))}
@@ -330,9 +330,11 @@ let _saveT=null;
 const START_HOOKS=[];
 function registerStartHook(hook){START_HOOKS.push(hook)}
 function save(){
+  if(DEMO_MODE)return;
   if(SRV){if(!TOKEN)return;clearTimeout(_saveT);_saveT=setTimeout(()=>{EasyBoostSync.saveProgress(S)},600)}
   else{if(currentUser)localStorage.setItem(dataKey(),JSON.stringify(S))}}
 async function startApp(){
+  if(DEMO_MODE){tab('scr1');return}
   if(SRV){if(!TOKEN){show('scr5');document.getElementById('tabbar').style.display='none';return}
     try{const d=await apiGet('/api/progress');S=fillDefaults(d)}catch(e){S=fillDefaults({})}}
   else{S=load()}
@@ -363,8 +365,17 @@ async function logout(){
   location.reload()
 }
 
+async function startDemo(){
+  DEMO_MODE=true;TOKEN='';currentUser='Демо';S=fillDefaults({demo:true});
+  var bar=document.getElementById('tabbar');if(bar)bar.style.display='flex';
+  var banner=document.getElementById('demo_banner');
+  if(!banner){banner=document.createElement('button');banner.id='demo_banner';banner.type='button';banner.textContent='Демо · войти для сохранения';banner.setAttribute('aria-label','Демонстрационный режим. Войти для сохранения прогресса');banner.setAttribute('style','position:fixed;z-index:9998;top:max(8px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);border:0;border-radius:18px;background:#2B2B2B;color:#fff;padding:8px 14px;font:700 11px Manrope;cursor:pointer;');banner.onclick=function(){location.reload()};document.body.appendChild(banner)}
+  tab('scr1');
+  for(const hook of START_HOOKS){try{await hook()}catch(e){}}
+}
+
 /* Временный legacy-адаптер до миграции всех операций на типизированные API. */
-callGemini=EasyBoostApi.legacyAi;
+callGemini=function(systemPrompt,userPrompt){if(DEMO_MODE)return Promise.reject(new Error('ИИ недоступен в демо-режиме'));return EasyBoostApi.legacyAi(systemPrompt,userPrompt)};
 
 /* профиль: в серверном режиме ключ не нужен на клиенте */
 registerProfileHook(function(){var ai=document.getElementById('pf_ai');if(ai){ai.textContent='через сервер ✓';ai.style.color='#1F8A50';ai.style.background='#EAF7F0'}})
@@ -2502,6 +2513,7 @@ async function checkWriting(){
   var n=t?t.split(/\s+/).filter(Boolean).length:0;
   if(n<10){alert('Напиши хотя бы несколько предложений.');return}
   tab('scr13');var task=curTask,tp=wrCur();
+  if(DEMO_MODE){renderReview(localReview(n,task,'демо-режим'));showScreen('scr12');HIST.push('scr8');return}
   try{
     var payload=task===37
       ?{taskType:'writing_37',answer:t,assignment:{from:String(tp.from||''),stimulus:String(tp.stim||''),questionsTopic:String(tp.ask||'')}}

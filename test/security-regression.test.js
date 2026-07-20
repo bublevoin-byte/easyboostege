@@ -133,3 +133,12 @@ test('progress sync queues the latest state and retries when connectivity return
   assert.match(sync, /error\.status>=500/u);
   assert.doesNotMatch(sync, /push\(/u);
 });
+
+test('demo mode is isolated from persistence and paid AI calls', async () => {
+  const { html, script } = await readFrontend();
+  assert.match(html, /id="demo_btn"[^>]*onclick="startDemo\(\)"/u);
+  assert.match(script, /function save\(\)\{\s*if\(DEMO_MODE\)return;/u);
+  assert.match(script, /callGemini=function\(systemPrompt,userPrompt\)\{if\(DEMO_MODE\)return Promise\.reject/u);
+  assert.match(script, /if\(DEMO_MODE\)\{renderReview\(localReview/u);
+  assert.match(script, /Демо · войти для сохранения/u);
+});
