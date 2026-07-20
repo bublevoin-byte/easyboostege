@@ -158,7 +158,7 @@ paths:
               properties:
                 operation:
                   type: string
-                  enum: [dictionary_lookup, grammar_quiz, listening_dialog, reading_text, vocabulary_cards, writing_task_37, writing_task_38]
+                  enum: [dictionary_lookup, grammar_quiz, listening_dialog, reading_text, vocabulary_cards, writing_task_37, writing_task_38, speaking_task_1, speaking_task_2, speaking_task_3, speaking_task_4]
                 word: { type: string, maxLength: 80 }
                 count: { type: integer, minimum: 1, maximum: 30 }
                 exclude:

@@ -3003,24 +3003,19 @@ async function spGen(){
   for(var t=1;t<=4;t++){if(spPool(t).length<5){kind=t;break}}
   if(!kind)return;SPGEN=true;
   try{
-    var sys='Ты составляешь задания устной части ЕГЭ по английскому (уровень B1-B2, темы кодификатора: школа, семья, спорт, путешествия, технологии, экология). Только JSON.';
-    var out,d,item=null;
+    var d,item=null;
     if(kind===1){
-      out=await callGemini(sys,'Задание 1: связный научно-популярный текст для чтения вслух, 85-105 слов, простые предложения. JSON: {"tx":"текст"}');
-      d=parseJSON(out);
+      d=await generateAiContent('speaking_task_1');
       if(d&&d.tx&&String(d.tx).split(/\s+/).length>=60)item={tx:String(d.tx)};
     }else if(kind===2){
-      out=await callGemini(sys,'Задание 2: рекламное объявление (1-2 предложения) и 4 пункта для прямых вопросов + образцовые вопросы. JSON: {"ad":"объявление","points":["4 пункта по-английски"],"exq":["4 образцовых прямых вопроса"]}');
-      d=parseJSON(out);
+      d=await generateAiContent('speaking_task_2');
       if(d&&d.ad&&Array.isArray(d.points)&&d.points.length===4&&Array.isArray(d.exq)&&d.exq.length===4)
         item={ad:String(d.ad),points:d.points.map(String),exq:d.exq.map(String)};
     }else if(kind===3){
-      out=await callGemini(sys,'Задание 3: тема интервью (по-русски, 2-4 слова) и 5 вопросов подростку на английском. JSON: {"topic":"тема","qs":["5 вопросов"]}');
-      d=parseJSON(out);
+      d=await generateAiContent('speaking_task_3');
       if(d&&d.topic&&Array.isArray(d.qs)&&d.qs.length===5)item={topic:String(d.topic),qs:d.qs.map(String)};
     }else{
-      out=await callGemini(sys,'Задание 4: тема проекта (по-русски) и описания двух контрастных фотографий. JSON: {"topic":"тема по-русски","ph":["Фото 1: описание по-русски","Фото 2: описание по-русски"]}');
-      d=parseJSON(out);
+      d=await generateAiContent('speaking_task_4');
       if(d&&d.topic&&Array.isArray(d.ph)&&d.ph.length===2)
         item={topic:String(d.topic),ph:d.ph.map(String),plan:['кратко опиши обе фотографии','скажи, что общего у фотографий','скажи, чем они различаются','скажи, что ближе тебе, и объясни почему']};
     }

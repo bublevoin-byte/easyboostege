@@ -12,6 +12,10 @@ const requests = {
   reading_text: z.object({ operation: z.literal('reading_text') }).strict(),
   writing_task_37: z.object({ operation: z.literal('writing_task_37') }).strict(),
   writing_task_38: z.object({ operation: z.literal('writing_task_38') }).strict(),
+  speaking_task_1: z.object({ operation: z.literal('speaking_task_1') }).strict(),
+  speaking_task_2: z.object({ operation: z.literal('speaking_task_2') }).strict(),
+  speaking_task_3: z.object({ operation: z.literal('speaking_task_3') }).strict(),
+  speaking_task_4: z.object({ operation: z.literal('speaking_task_4') }).strict(),
   vocabulary_cards: z.object({
     operation: z.literal('vocabulary_cards'),
     count: z.number().int().min(1).max(30),
@@ -73,6 +77,25 @@ const outputs = {
   ),
   writing_task_37: writingTask37,
   writing_task_38: writingTask38,
+  speaking_task_1: z.object({ tx: shortText(1800) }).strict().refine(
+    (value) => value.tx.split(/\s+/u).length >= 85 && value.tx.split(/\s+/u).length <= 105,
+    { message: 'speaking task 1 must contain 85-105 words' },
+  ),
+  speaking_task_2: z.object({
+    ad: shortText(500),
+    points: z.array(shortText(160)).length(4),
+    exq: z.array(shortText(300)).length(4),
+  }).strict().refine((value) => value.exq.every((question) => question.endsWith('?')), {
+    message: 'sample direct questions must end with a question mark',
+  }),
+  speaking_task_3: z.object({
+    topic: shortText(120),
+    qs: z.array(shortText(300)).length(5),
+  }).strict().refine((value) => {
+    const words = value.topic.split(/\s+/u).length;
+    return words >= 2 && words <= 4 && value.qs.every((question) => question.endsWith('?'));
+  }, { message: 'speaking task 3 must have a 2-4 word topic and five questions' }),
+  speaking_task_4: z.object({ topic: shortText(160), ph: z.array(shortText(500)).length(2) }).strict(),
   vocabulary_cards: z.array(vocabularyCard).min(1).max(30),
 };
 
@@ -83,6 +106,10 @@ const instructions = {
   reading_text: 'Create a coherent British English B1 reading text of 45-70 words. Return {"text":"..."}.',
   writing_task_37: 'Create EGE writing task 37: an informal 40-60 word email from a teenager containing at least three questions, plus a 2-4 word English topic for three questions in reply. Return {"from":"name","stim":"email","ask":"topic"}.',
   writing_task_38: 'Create EGE writing task 38: an English project topic and 4-5 unique survey options for teenagers with positive integer percentages totalling exactly 100. Return {"topic":"...","rows":[["option",percent]]}.',
+  speaking_task_1: 'Create EGE speaking task 1: a coherent popular-science British English B1-B2 text for reading aloud, exactly 85-105 words, with clear sentences. Return {"tx":"text"}.',
+  speaking_task_2: 'Create EGE speaking task 2: a 1-2 sentence English advertisement, exactly four English information points and exactly four matching sample direct questions. Return {"ad":"...","points":["..."],"exq":["...? "]}.',
+  speaking_task_3: 'Create EGE speaking task 3: a 2-4 word Russian interview topic and exactly five English questions for a teenager. Return {"topic":"...","qs":["...? "]}.',
+  speaking_task_4: 'Create EGE speaking task 4: a Russian project topic and exactly two contrasting photo descriptions in Russian. Return {"topic":"...","ph":["Фото 1: ...","Фото 2: ..."]}.',
   vocabulary_cards: 'Create useful British English B1-B2 EGE vocabulary cards. Return a JSON array with w, p (n|v|adj|adv|ph|id), short Russian tr and example ex using the base form.',
 };
 

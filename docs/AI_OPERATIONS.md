@@ -11,6 +11,7 @@
 | Словарные карточки | `/api/v1/ai/generate-content` (`vocabulary_cards`) | Zod request + строгая схема карточек и точное количество | встроенный словарь |
 | Генерация задания 37 | `/api/v1/ai/generate-content` (`writing_task_37`) | 40–60 слов, минимум 3 вопроса, тема 2–4 слова | встроенный банк тем |
 | Генерация задания 38 | `/api/v1/ai/generate-content` (`writing_task_38`) | 4–5 уникальных строк, целые проценты в сумме 100 | встроенный банк тем |
+| Генерация устных заданий 1–4 | `/api/v1/ai/generate-content` (`speaking_task_1`…`speaking_task_4`) | отдельная строгая схема каждого типа, контроль количества слов и элементов | встроенный банк заданий |
 | Остальная legacy-генерация | `/api/ai` | ограниченные поля и длина промптов | встроенный банк заданий |
 | TTS | `/api/tts` | auth, subscription, rate limit, voice allowlist | Web Speech API |
 | STT | `/api/stt` | auth, subscription, rate limit, 20 MB body limit | повтор записи |

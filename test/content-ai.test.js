@@ -54,3 +54,17 @@ test('writing task generation enforces EGE assignment invariants', () => {
   task38.rows[3][1] = 19;
   assert.throws(() => parseContentResponse('writing_task_38', JSON.stringify(task38)), /AI_RESPONSE_INVALID/u);
 });
+
+test('speaking task generation validates all four task contracts', () => {
+  const tx = Array.from({ length: 90 }, (_, index) => `word${index}`).join(' ');
+  assert.equal(parseContentResponse('speaking_task_1', JSON.stringify({ tx })).tx, tx);
+  assert.throws(() => parseContentResponse('speaking_task_1', '{"tx":"too short"}'), /AI_RESPONSE_INVALID/u);
+  const task2 = { ad: 'Visit our sports centre.', points: ['price', 'location', 'opening hours', 'equipment'], exq: ['How much does it cost?', 'Where is it located?', 'When does it open?', 'What equipment is available?'] };
+  assert.equal(parseContentResponse('speaking_task_2', JSON.stringify(task2)).points.length, 4);
+  const task3 = { topic: 'Занятия спортом', qs: ['What sport do you do?', 'How often do you train?', 'Where do you train?', 'Who do you train with?', 'Why is sport useful?'] };
+  assert.equal(parseContentResponse('speaking_task_3', JSON.stringify(task3)).qs.length, 5);
+  const task4 = { topic: 'Активный отдых', ph: ['Фото 1: велосипедная прогулка', 'Фото 2: поход в горы'] };
+  assert.equal(parseContentResponse('speaking_task_4', JSON.stringify(task4)).ph.length, 2);
+  task3.qs[4] = 'Not a question';
+  assert.throws(() => parseContentResponse('speaking_task_3', JSON.stringify(task3)), /AI_RESPONSE_INVALID/u);
+});
