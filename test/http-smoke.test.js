@@ -75,6 +75,7 @@ test('application starts and serves health, security headers and PWA assets', { 
       ADMIN_TELEGRAM_ID: '',
       XAI_API_KEY: '',
       GROQ_API_KEY: '',
+      AI_REQUESTS_PER_HOUR: '1',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -124,6 +125,14 @@ test('application starts and serves health, security headers and PWA assets', { 
     });
     assert.equal(activeAi.status, 503);
     assert.equal((await activeAi.json()).error.code, 'AI_NOT_CONFIGURED');
+
+    const rateLimitedAi = await fetch(`${baseUrl}/api/ai`, {
+      method: 'POST',
+      headers: activeAuthorization,
+      body: JSON.stringify({ system: 'Tutor', user: 'Help again' }),
+    });
+    assert.equal(rateLimitedAi.status, 429);
+    assert.equal((await rateLimitedAi.json()).error.code, 'RATE_LIMITED');
   } finally {
     await stopProcess(child);
     await fs.rm(temporaryDirectory, { recursive: true, force: true });
