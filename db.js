@@ -28,6 +28,8 @@ export const confirmTelegramAuthCode = (...args) => repository.confirmTelegramAu
 export const consumeTelegramAuthCode = (...args) => repository.consumeTelegramAuthCode(...args);
 export const createWritingAttempt = (...args) => repository.createWritingAttempt(...args);
 export const finishWritingAttempt = (...args) => repository.finishWritingAttempt(...args);
+export const createSpeakingAttempt = (...args) => repository.createSpeakingAttempt(...args);
+export const finishSpeakingAttempt = (...args) => repository.finishSpeakingAttempt(...args);
 export const logAiRequest = (...args) => repository.logAiRequest(...args);
 export const countAiRequestsSince = (...args) => repository.countAiRequestsSince(...args);
 export const createSession = (...args) => repository.createSession(...args);

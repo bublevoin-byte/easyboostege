@@ -4,7 +4,7 @@ import { hashAuthCode, normalizeUsername, subscriptionView } from './shared.js';
 
 export function createFileRepository(filePath) {
   let loaded = false;
-  let state = { users: {}, progress: {}, auth_codes: {}, writing_attempts: [], ai_requests: [], sessions: {}, subscriptions: {}, payment_requests: {}, subscription_events: [] };
+  let state = { users: {}, progress: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], ai_requests: [], sessions: {}, subscriptions: {}, payment_requests: {}, subscription_events: [] };
   let writeQueue = Promise.resolve();
 
   async function load() {
@@ -18,6 +18,7 @@ export function createFileRepository(filePath) {
           progress: parsed.progress && typeof parsed.progress === 'object' ? parsed.progress : {},
           auth_codes: parsed.auth_codes && typeof parsed.auth_codes === 'object' ? parsed.auth_codes : {},
           writing_attempts: Array.isArray(parsed.writing_attempts) ? parsed.writing_attempts : [],
+          speaking_attempts: Array.isArray(parsed.speaking_attempts) ? parsed.speaking_attempts : [],
           ai_requests: Array.isArray(parsed.ai_requests) ? parsed.ai_requests : [],
           sessions: parsed.sessions && typeof parsed.sessions === 'object' ? parsed.sessions : {},
           subscriptions: parsed.subscriptions && typeof parsed.subscriptions === 'object' ? parsed.subscriptions : {},
@@ -294,6 +295,26 @@ export function createFileRepository(filePath) {
     await persist();
   }
 
+  async function createSpeakingAttempt(username, input, promptVersion) {
+    await load();
+    const id = (state.speaking_attempts.at(-1)?.id || 0) + 1;
+    state.speaking_attempts.push({ id, username, task_type: input.taskType, assignment: structuredClone(input.assignment), transcript: input.transcript, prompt_version: promptVersion, status: 'pending', created_at: Date.now() });
+    await persist();
+    return id;
+  }
+
+  async function finishSpeakingAttempt(id, result) {
+    await load();
+    const attempt = state.speaking_attempts.find((item) => item.id === Number(id));
+    if (!attempt) throw new Error('SPEAKING_ATTEMPT_NOT_FOUND');
+    attempt.status = result.status;
+    attempt.review = result.review ? structuredClone(result.review) : null;
+    attempt.provider = result.provider || null;
+    attempt.error_code = result.errorCode || null;
+    attempt.evaluated_at = Date.now();
+    await persist();
+  }
+
   async function logAiRequest(entry) {
     await load();
     const id = (state.ai_requests.at(-1)?.id || 0) + 1;
@@ -358,6 +379,7 @@ export function createFileRepository(filePath) {
       subscription_events: state.subscription_events.filter((item) => item.username === username),
       payment_requests: Object.values(state.payment_requests).filter((item) => item.username === username),
       writing_attempts: state.writing_attempts.filter((item) => item.username === username),
+      speaking_attempts: state.speaking_attempts.filter((item) => item.username === username),
       ai_requests: state.ai_requests.filter((item) => item.username === username),
     });
   }
@@ -370,6 +392,7 @@ export function createFileRepository(filePath) {
     delete state.users[username];
     delete state.progress[username];
     state.writing_attempts = state.writing_attempts.filter((item) => item.username !== username);
+    state.speaking_attempts = state.speaking_attempts.filter((item) => item.username !== username);
     state.ai_requests = state.ai_requests.filter((item) => item.username !== username);
     delete state.subscriptions[username];
     state.subscription_events = state.subscription_events.filter((item) => item.username !== username);
@@ -415,6 +438,8 @@ export function createFileRepository(filePath) {
     consumeTelegramAuthCode,
     createWritingAttempt,
     finishWritingAttempt,
+    createSpeakingAttempt,
+    finishSpeakingAttempt,
     logAiRequest,
     countAiRequestsSince,
     createSession,

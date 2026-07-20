@@ -20,6 +20,7 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
       '004_privacy_consents.sql', '005_ai_token_usage.sql', '006_ai_estimated_cost.sql', '007_sessions.sql',
       '008_user_roles.sql',
       '009_subscriptions_and_payments.sql',
+      '010_speaking_attempts.sql',
     ]);
 
     const username = await repository.createTelegramUser(telegramId, `Integration ${suffix}`);
@@ -60,6 +61,10 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     await repository.finishWritingAttempt(attemptId, {
       status: 'failed', provider: 'test', errorCode: 'EXPECTED_TEST_ERROR',
     });
+    const speakingAttemptId = await repository.createSpeakingAttempt(username, {
+      taskType: 2, assignment: { ad: 'Integration', points: ['a', 'b', 'c', 'd'] }, transcript: 'Four questions.',
+    }, 'integration-speaking-v1');
+    await repository.finishSpeakingAttempt(speakingAttemptId, { status: 'failed', provider: 'test', errorCode: 'EXPECTED_TEST_ERROR' });
     await repository.logAiRequest({
       username, operation: 'integration', provider: 'test', model: 'test',
       promptVersion: 'integration-v1', status: 'completed', durationMs: 1,
@@ -75,6 +80,7 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     assert.equal(exported.account.username, username);
     assert.deepEqual(exported.progress, { learned: 12, prog: { words: 44 }, marker: suffix, extra: true });
     assert.equal(exported.writing_attempts.length, 1);
+    assert.equal(exported.speaking_attempts.length, 1);
     assert.equal(exported.ai_requests.length, 1);
 
     assert.equal(await repository.deleteUserData(username), true);

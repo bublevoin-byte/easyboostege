@@ -160,6 +160,23 @@ test('writing attempt and AI metadata are persisted without prompt text in the A
   });
 });
 
+test('speaking attempts persist transcript review metadata but never audio', async () => {
+  await withRepository(async (repository, file) => {
+    const username = await repository.createTelegramUser(3010, 'Speaker');
+    const attemptId = await repository.createSpeakingAttempt(username, {
+      taskType: 2,
+      assignment: { ad: 'Ask about a course.', points: ['price', 'place', 'time', 'equipment'] },
+      transcript: 'How much does it cost?',
+    }, 'speaking-eval-v1');
+    await repository.finishSpeakingAttempt(attemptId, { status: 'completed', provider: 'test', review: { got: 1, max: 4 } });
+    const exported = await repository.exportUserData(username);
+    assert.equal(exported.speaking_attempts[0].transcript, 'How much does it cost?');
+    assert.equal(exported.speaking_attempts[0].review.got, 1);
+    const stored = JSON.parse(await fs.readFile(file, 'utf8'));
+    assert.equal(JSON.stringify(stored.speaking_attempts).includes('audio'), false);
+  });
+});
+
 test('file repository readiness check succeeds after pending writes', async () => {
   await withRepository(async (repository) => {
     const username = await repository.createTelegramUser(4001, 'Health User');

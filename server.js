@@ -7,7 +7,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { activateTrial, closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, countAiRequestsSince, createPaymentRequest, createSession, createTelegramAuthCode, createWritingAttempt, deleteUserData, exportUserData, finishWritingAttempt, getPrivacyConsent, getProgress, getUser, healthCheck, isSessionActive, resolvePaymentRequest, revokeSession, saveProgress, setPrivacyConsent, setUserRole, mergeProgress, getUserByTelegram, createTelegramUser, logAiRequest, getSub } from './db.js';
+import { activateTrial, closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, countAiRequestsSince, createPaymentRequest, createSession, createSpeakingAttempt, createTelegramAuthCode, createWritingAttempt, deleteUserData, exportUserData, finishSpeakingAttempt, finishWritingAttempt, getPrivacyConsent, getProgress, getUser, healthCheck, isSessionActive, resolvePaymentRequest, revokeSession, saveProgress, setPrivacyConsent, setUserRole, mergeProgress, getUserByTelegram, createTelegramUser, logAiRequest, getSub } from './db.js';
 import { config } from './config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from './ai/writing.js';
 import { buildContentPrompt, CONTENT_PROMPT_VERSION, contentRequestSchema, parseContentResponse } from './ai/content.js';
@@ -638,9 +638,13 @@ app.post('/api/v1/ai/evaluate-speaking', auth, requireActiveSubscription, requir
   if (!parsed.success) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректные данные устного ответа.' } });
   const input = parsed.data;
   const prompt = buildSpeakingPrompt(input);
+  const attemptId = await createSpeakingAttempt(req.user, input, SPEAKING_PROMPT_VERSION);
   const startedAt = Date.now();
   const providers = aiProviders();
-  if (!providers.length) return res.status(503).json({ error: { code: 'AI_NOT_CONFIGURED', message: 'ИИ не настроен на сервере.' } });
+  if (!providers.length) {
+    await finishSpeakingAttempt(attemptId, { status: 'failed', errorCode: 'AI_NOT_CONFIGURED' });
+    return res.status(503).json({ error: { code: 'AI_NOT_CONFIGURED', message: 'ИИ не настроен на сервере.' } });
+  }
   let lastCode = 'AI_PROVIDER_UNAVAILABLE';
   for (const provider of providers) {
     let usage = {};
@@ -648,13 +652,17 @@ app.post('/api/v1/ai/evaluate-speaking', auth, requireActiveSubscription, requir
       const response = await askProvider(provider, prompt.system, prompt.user);
       usage = response;
       const review = parseSpeakingReview(input.taskType, response.text);
-      await logAiRequest({ username: req.user, operation: `evaluate_speaking_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt, ...aiUsage(provider, usage) });
+      await Promise.all([
+        logAiRequest({ username: req.user, operation: `evaluate_speaking_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt, ...aiUsage(provider, usage) }),
+        finishSpeakingAttempt(attemptId, { status: 'completed', review, provider: provider.name }),
+      ]);
       return res.json({ review, provider: provider.name, promptVersion: SPEAKING_PROMPT_VERSION });
     } catch (error) {
       lastCode = error.code === 'AI_RESPONSE_INVALID' ? error.code : 'AI_PROVIDER_UNAVAILABLE';
       await logAiRequest({ username: req.user, operation: `evaluate_speaking_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'failed', durationMs: Date.now() - startedAt, errorCode: lastCode, ...aiUsage(provider, usage) });
     }
   }
+  await finishSpeakingAttempt(attemptId, { status: 'failed', errorCode: lastCode });
   res.status(lastCode === 'AI_RESPONSE_INVALID' ? 502 : 503).json({ error: { code: lastCode, message: 'Не удалось корректно оценить устный ответ.' } });
 });
 
