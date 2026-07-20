@@ -214,11 +214,12 @@ export function createPostgresRepository(connectionString) {
   async function logAiRequest(entry) {
     const result = await pool.query(
       `INSERT INTO ai_requests
-       (username, operation, provider, model, prompt_version, status, duration_ms, error_code)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       (username, operation, provider, model, prompt_version, status, duration_ms, error_code, prompt_tokens, completion_tokens)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING id`,
       [entry.username || null, entry.operation, entry.provider || null, entry.model || null,
-        entry.promptVersion || null, entry.status, entry.durationMs || null, entry.errorCode || null],
+        entry.promptVersion || null, entry.status, entry.durationMs || null, entry.errorCode || null,
+        entry.promptTokens ?? null, entry.completionTokens ?? null],
     );
     return Number(result.rows[0].id);
   }
@@ -235,7 +236,7 @@ export function createPostgresRepository(connectionString) {
       pool.query('SELECT text_processing, voice_processing, policy_version, text_consented_at, voice_consented_at, updated_at FROM privacy_consents WHERE username = $1', [username]),
       pool.query('SELECT id, event_type, days, metadata, created_at FROM subscription_events WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, task_type, assignment, answer, review, provider, prompt_version, status, created_at, evaluated_at FROM writing_attempts WHERE username = $1 ORDER BY created_at', [username]),
-      pool.query('SELECT id, operation, provider, model, prompt_version, status, duration_ms, error_code, created_at FROM ai_requests WHERE username = $1 ORDER BY created_at', [username]),
+      pool.query('SELECT id, operation, provider, model, prompt_version, status, duration_ms, error_code, prompt_tokens, completion_tokens, created_at FROM ai_requests WHERE username = $1 ORDER BY created_at', [username]),
     ]);
     if (!account.rowCount) return null;
     return {

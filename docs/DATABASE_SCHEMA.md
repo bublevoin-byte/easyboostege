@@ -9,6 +9,6 @@
 | `user_progress` | JSONB-прогресс пользователя | `username`, `data`, `updated_at` |
 | `telegram_auth_codes` | одноразовые коды входа | hash кода, expiry, consumed state |
 | `writing_attempts` | попытки заданий 37/38 | assignment, answer, review, provider status |
-| `ai_requests` | технический журнал ИИ | operation, provider, model, duration, status, error code |
+| `ai_requests` | технический журнал ИИ | operation, provider, model, duration, status, error code, prompt/completion tokens |
 
 Связи привязаны к `users.username`; API всегда определяет пользователя из HttpOnly-сессии. Изменения схемы добавляются новой нумерованной миграцией и проверяются `npm run db:migrate`.

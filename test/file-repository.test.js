@@ -99,6 +99,8 @@ test('writing attempt and AI metadata are persisted without prompt text in the A
       status: 'failed',
       durationMs: 123,
       errorCode: 'AI_UNAVAILABLE',
+      promptTokens: 42,
+      completionTokens: 17,
     });
     assert.equal(await repository.countAiRequestsSince(new Date(Date.now() - 60_000)), 1);
     assert.equal(await repository.countAiRequestsSince(new Date(Date.now() + 60_000)), 0);
@@ -107,6 +109,8 @@ test('writing attempt and AI metadata are persisted without prompt text in the A
     assert.equal(stored.writing_attempts[0].status, 'failed');
     assert.equal(stored.writing_attempts[0].error_code, 'AI_UNAVAILABLE');
     assert.equal(stored.ai_requests[0].durationMs, 123);
+    assert.equal(stored.ai_requests[0].promptTokens, 42);
+    assert.equal(stored.ai_requests[0].completionTokens, 17);
     assert.equal(JSON.stringify(stored.ai_requests).includes('Student answer text'), false);
   });
 });

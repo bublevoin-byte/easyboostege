@@ -408,7 +408,11 @@ async function askProvider({ url, key, model }, system, user) {
   }
   const j = await r.json();
   if (!r.ok) throw new Error((j.error && j.error.message) || ('HTTP ' + r.status));
-  return j.choices?.[0]?.message?.content || '';
+  return {
+    text: j.choices?.[0]?.message?.content || '',
+    promptTokens: Number.isInteger(j.usage?.prompt_tokens) ? j.usage.prompt_tokens : null,
+    completionTokens: Number.isInteger(j.usage?.completion_tokens) ? j.usage.completion_tokens : null,
+  };
 }
 
 function aiProviders() {
@@ -428,7 +432,7 @@ async function askWithFallback(system, user) {
   let lastError = null;
   for (const provider of providers) {
     try {
-      return { text: await askProvider(provider, system, user), provider: provider.name, model: provider.model };
+      return { ...await askProvider(provider, system, user), provider: provider.name, model: provider.model };
     } catch (error) {
       lastError = error;
       lastError.provider = provider.name;
@@ -510,12 +514,16 @@ app.post('/api/v1/ai/evaluate-writing', auth, requireActiveSubscription, require
   let attemptId;
   let provider = null;
   let model = null;
+  let promptTokens = null;
+  let completionTokens = null;
   try {
     attemptId = await createWritingAttempt(req.user, input, WRITING_PROMPT_VERSION);
     const prompt = buildWritingPrompt(input);
     const result = await askWithFallback(prompt.system, prompt.user);
     provider = result.provider;
     model = result.model;
+    promptTokens = result.promptTokens;
+    completionTokens = result.completionTokens;
     const review = parseAndValidateWritingReview(result.text, input);
     await finishWritingAttempt(attemptId, { status: 'completed', review, provider });
     await logAiRequest({
@@ -526,6 +534,8 @@ app.post('/api/v1/ai/evaluate-writing', auth, requireActiveSubscription, require
       promptVersion: WRITING_PROMPT_VERSION,
       status: 'completed',
       durationMs: Date.now() - startedAt,
+      promptTokens: result.promptTokens,
+      completionTokens: result.completionTokens,
     });
     res.json({ review, provider, attemptId });
   } catch (error) {
@@ -546,6 +556,8 @@ app.post('/api/v1/ai/evaluate-writing', auth, requireActiveSubscription, require
       status: 'failed',
       durationMs: Date.now() - startedAt,
       errorCode: code,
+      promptTokens,
+      completionTokens,
     })];
     if (attemptId) writes.push(finishWritingAttempt(attemptId, { status: 'failed', provider, errorCode: code }));
     await Promise.allSettled(writes);
@@ -568,15 +580,17 @@ app.post('/api/v1/ai/generate-content', auth, requireActiveSubscription, require
   if (!providers.length) return res.status(503).json({ error: { code: 'AI_NOT_CONFIGURED', message: 'ИИ не настроен на сервере.' } });
   let lastCode = 'AI_PROVIDER_UNAVAILABLE';
   for (const provider of providers) {
+    let usage = {};
     try {
-      const raw = await askProvider(provider, prompt.system, prompt.user);
-      const data = parseContentResponse(input.operation, raw);
+      const response = await askProvider(provider, prompt.system, prompt.user);
+      usage = response;
+      const data = parseContentResponse(input.operation, response.text);
       if (input.operation === 'vocabulary_cards' && data.length !== input.count) throw Object.assign(new Error('AI_RESPONSE_INVALID'), { code: 'AI_RESPONSE_INVALID' });
-      await logAiRequest({ username: req.user, operation: input.operation, provider: provider.name, model: provider.model, promptVersion: CONTENT_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt });
+      await logAiRequest({ username: req.user, operation: input.operation, provider: provider.name, model: provider.model, promptVersion: CONTENT_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt, promptTokens: usage.promptTokens, completionTokens: usage.completionTokens });
       return res.json({ data, provider: provider.name, promptVersion: CONTENT_PROMPT_VERSION });
     } catch (error) {
       lastCode = error.code === 'AI_RESPONSE_INVALID' ? error.code : 'AI_PROVIDER_UNAVAILABLE';
-      await logAiRequest({ username: req.user, operation: input.operation, provider: provider.name, model: provider.model, promptVersion: CONTENT_PROMPT_VERSION, status: 'failed', durationMs: Date.now() - startedAt, errorCode: lastCode });
+      await logAiRequest({ username: req.user, operation: input.operation, provider: provider.name, model: provider.model, promptVersion: CONTENT_PROMPT_VERSION, status: 'failed', durationMs: Date.now() - startedAt, errorCode: lastCode, promptTokens: usage.promptTokens, completionTokens: usage.completionTokens });
     }
   }
   const status = lastCode === 'AI_RESPONSE_INVALID' ? 502 : 503;
@@ -593,13 +607,16 @@ app.post('/api/v1/ai/evaluate-speaking', auth, requireActiveSubscription, requir
   if (!providers.length) return res.status(503).json({ error: { code: 'AI_NOT_CONFIGURED', message: 'ИИ не настроен на сервере.' } });
   let lastCode = 'AI_PROVIDER_UNAVAILABLE';
   for (const provider of providers) {
+    let usage = {};
     try {
-      const review = parseSpeakingReview(input.taskType, await askProvider(provider, prompt.system, prompt.user));
-      await logAiRequest({ username: req.user, operation: `evaluate_speaking_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt });
+      const response = await askProvider(provider, prompt.system, prompt.user);
+      usage = response;
+      const review = parseSpeakingReview(input.taskType, response.text);
+      await logAiRequest({ username: req.user, operation: `evaluate_speaking_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt, promptTokens: usage.promptTokens, completionTokens: usage.completionTokens });
       return res.json({ review, provider: provider.name, promptVersion: SPEAKING_PROMPT_VERSION });
     } catch (error) {
       lastCode = error.code === 'AI_RESPONSE_INVALID' ? error.code : 'AI_PROVIDER_UNAVAILABLE';
-      await logAiRequest({ username: req.user, operation: `evaluate_speaking_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'failed', durationMs: Date.now() - startedAt, errorCode: lastCode });
+      await logAiRequest({ username: req.user, operation: `evaluate_speaking_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'failed', durationMs: Date.now() - startedAt, errorCode: lastCode, promptTokens: usage.promptTokens, completionTokens: usage.completionTokens });
     }
   }
   res.status(lastCode === 'AI_RESPONSE_INVALID' ? 502 : 503).json({ error: { code: lastCode, message: 'Не удалось корректно оценить устный ответ.' } });
@@ -615,13 +632,16 @@ app.post('/api/v1/ai/generate-speaking-sample', auth, requireActiveSubscription,
   if (!providers.length) return res.status(503).json({ error: { code: 'AI_NOT_CONFIGURED', message: 'ИИ не настроен на сервере.' } });
   let lastCode = 'AI_PROVIDER_UNAVAILABLE';
   for (const provider of providers) {
+    let usage = {};
     try {
-      const data = parseSpeakingSample(input.taskType, await askProvider(provider, prompt.system, prompt.user));
-      await logAiRequest({ username: req.user, operation: `speaking_sample_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt });
+      const response = await askProvider(provider, prompt.system, prompt.user);
+      usage = response;
+      const data = parseSpeakingSample(input.taskType, response.text);
+      await logAiRequest({ username: req.user, operation: `speaking_sample_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt, promptTokens: usage.promptTokens, completionTokens: usage.completionTokens });
       return res.json({ data, provider: provider.name, promptVersion: SPEAKING_PROMPT_VERSION });
     } catch (error) {
       lastCode = error.code === 'AI_RESPONSE_INVALID' ? error.code : 'AI_PROVIDER_UNAVAILABLE';
-      await logAiRequest({ username: req.user, operation: `speaking_sample_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'failed', durationMs: Date.now() - startedAt, errorCode: lastCode });
+      await logAiRequest({ username: req.user, operation: `speaking_sample_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'failed', durationMs: Date.now() - startedAt, errorCode: lastCode, promptTokens: usage.promptTokens, completionTokens: usage.completionTokens });
     }
   }
   res.status(lastCode === 'AI_RESPONSE_INVALID' ? 502 : 503).json({ error: { code: lastCode, message: 'Не удалось подготовить образцовый ответ.' } });
