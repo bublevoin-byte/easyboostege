@@ -16,6 +16,14 @@ const requests = {
   speaking_task_2: z.object({ operation: z.literal('speaking_task_2') }).strict(),
   speaking_task_3: z.object({ operation: z.literal('speaking_task_3') }).strict(),
   speaking_task_4: z.object({ operation: z.literal('speaking_task_4') }).strict(),
+  grammar_exam_19_24: z.object({ operation: z.literal('grammar_exam_19_24') }).strict(),
+  grammar_topic_set: z.object({ operation: z.literal('grammar_topic_set'), topicId: z.number().int().min(1).max(20), topic: shortText(100) }).strict(),
+  reading_headings: z.object({ operation: z.literal('reading_headings') }).strict(),
+  reading_questions: z.object({ operation: z.literal('reading_questions') }).strict(),
+  reading_gaps: z.object({ operation: z.literal('reading_gaps') }).strict(),
+  listening_matching: z.object({ operation: z.literal('listening_matching') }).strict(),
+  listening_true_false: z.object({ operation: z.literal('listening_true_false') }).strict(),
+  listening_interview: z.object({ operation: z.literal('listening_interview') }).strict(),
   vocabulary_cards: z.object({
     operation: z.literal('vocabulary_cards'),
     count: z.number().int().min(1).max(30),
@@ -59,6 +67,12 @@ const writingTask38 = z.object({
   message: 'writing task 38 labels must be unique',
 });
 
+const examQuestion = (optionCount) => z.object({
+  q: shortText(400), o: z.array(shortText(240)).length(optionCount),
+  a: z.number().int().min(0).max(optionCount - 1), ev: shortText(500), e: shortText(600),
+}).strict();
+const dialogueLine = z.object({ s: z.number().int().min(0).max(1), t: shortText(600) }).strict();
+
 const outputs = {
   dictionary_lookup: z.object({ ipa: z.string().trim().max(120), tr: shortText(160) }).strict(),
   grammar_quiz: z.array(z.object({
@@ -96,6 +110,28 @@ const outputs = {
     return words >= 2 && words <= 4 && value.qs.every((question) => question.endsWith('?'));
   }, { message: 'speaking task 3 must have a 2-4 word topic and five questions' }),
   speaking_task_4: z.object({ topic: shortText(160), ph: z.array(shortText(500)).length(2) }).strict(),
+  grammar_exam_19_24: z.object({
+    tx: z.array(z.string().max(1200)).length(7),
+    gaps: z.array(z.object({ b: shortText(100), ans: z.array(shortText(100)).min(1).max(3), e: shortText(500), t: z.number().int().min(1).max(20) }).strict()).length(6),
+  }).strict(),
+  grammar_topic_set: z.object({
+    c: z.array(z.object({ t: z.array(z.string().max(500)).length(2), o: z.array(shortText(160)).length(4), a: z.number().int().min(0).max(3), e: shortText(500) }).strict()).length(3),
+    f: z.array(z.object({ s: shortText(600), b: shortText(100), ans: z.array(shortText(100)).min(1).max(3), e: shortText(500) }).strict().refine((value) => value.s.includes('_____'), { message: 'grammar form task requires a blank' })).length(3),
+  }).strict(),
+  reading_headings: z.object({
+    hl: z.array(shortText(240)).length(5),
+    txts: z.array(z.object({ t: shortText(1000), a: z.number().int().min(0).max(4), k: shortText(600) }).strict()).length(4),
+  }).strict().refine((value) => new Set(value.txts.map((item) => item.a)).size === 4, { message: 'heading answers must be unique' }),
+  reading_questions: z.object({ tx: shortText(2500), qs: z.array(examQuestion(4)).length(4) }).strict()
+    .refine((value) => value.tx.split(/\s+/u).length >= 90 && value.tx.split(/\s+/u).length <= 130, { message: 'reading passage must contain 90-130 words' })
+    .refine((value) => value.qs.every((item) => value.tx.includes(item.ev)), { message: 'reading evidence must be an exact passage quote' }),
+  reading_gaps: z.object({ tx: z.array(z.string().max(1200)).length(4), fr: z.array(shortText(600)).length(4), a: z.array(z.number().int().min(0).max(3)).length(3), k: z.array(shortText(600)).length(3) }).strict()
+    .refine((value) => new Set(value.a).size === 3, { message: 'gap answers must be unique' }),
+  listening_matching: z.object({ st: z.array(shortText(300)).length(5), sp: z.array(z.object({ t: shortText(800) }).strict()).length(4), a: z.array(z.number().int().min(0).max(4)).length(4), k: z.array(shortText(600)).length(4) }).strict()
+    .refine((value) => new Set(value.a).size === 4, { message: 'matching answers must be unique' }),
+  listening_true_false: z.object({ d: z.array(dialogueLine).min(6).max(8), st: z.array(z.object({ t: shortText(300), a: z.number().int().min(0).max(2), ev: shortText(500), e: shortText(600) }).strict()).length(5) }).strict()
+    .refine((value) => value.st.some((item) => item.a === 2), { message: 'true/false set requires a not stated answer' }),
+  listening_interview: z.object({ d: z.array(dialogueLine).min(7).max(9), qs: z.array(examQuestion(3)).length(4) }).strict(),
   vocabulary_cards: z.array(vocabularyCard).min(1).max(30),
 };
 
@@ -110,6 +146,14 @@ const instructions = {
   speaking_task_2: 'Create EGE speaking task 2: a 1-2 sentence English advertisement, exactly four English information points and exactly four matching sample direct questions. Return {"ad":"...","points":["..."],"exq":["...? "]}.',
   speaking_task_3: 'Create EGE speaking task 3: a 2-4 word Russian interview topic and exactly five English questions for a teenager. Return {"topic":"...","qs":["...? "]}.',
   speaking_task_4: 'Create EGE speaking task 4: a Russian project topic and exactly two contrasting photo descriptions in Russian. Return {"topic":"...","ph":["Фото 1: ...","Фото 2: ..."]}.',
+  grammar_exam_19_24: 'Create one coherent EGE tasks 19-24 grammar passage with exactly 7 text fragments around 6 gaps. Return {tx,gaps}; each gap has uppercase base b, accepted ans, Russian explanation e and topic id t from 1 to 20.',
+  grammar_topic_set: 'Create exactly 3 four-option multiple-choice tasks and 3 word-form tasks for the supplied grammar topic. Return {c:[{t:[before,after],o,a,e}],f:[{s,b,ans,e}]}; every f.s contains _____.',
+  reading_headings: 'Create EGE reading task 10: exactly five English headings and four short texts, one heading unused. Return {hl,txts:[{t,a,k}]}; answer indices must be unique and k is a Russian explanation.',
+  reading_questions: 'Create a 90-130 word EGE passage and exactly four questions with four options. Return {tx,qs:[{q,o,a,ev,e}]}; ev must be an exact quote from tx and e is Russian.',
+  reading_gaps: 'Create EGE reading task 11 with exactly four passage fragments, four phrases, three gaps and one unused phrase. Return {tx,fr,a,k}; answer indices are unique and k contains Russian explanations.',
+  listening_matching: 'Create EGE listening task 1 for speech synthesis: five statements and four 2-3 sentence monologues. Return {st,sp:[{t}],a,k}; answer indices are unique and k is Russian.',
+  listening_true_false: 'Create EGE listening task 2: a 6-8 line two-person dialogue and five True/False/Not stated statements, including at least one Not stated. Return {d:[{s,t}],st:[{t,a,ev,e}]}.',
+  listening_interview: 'Create EGE listening tasks 3-9: a 7-9 line interview and exactly four questions with three options. Return {d:[{s,t}],qs:[{q,o,a,ev,e}]}.',
   vocabulary_cards: 'Create useful British English B1-B2 EGE vocabulary cards. Return a JSON array with w, p (n|v|adj|adv|ph|id), short Russian tr and example ex using the base form.',
 };
 
@@ -124,7 +168,9 @@ export function buildContentPrompt(input) {
     ? { word: input.word }
     : input.operation === 'vocabulary_cards'
       ? { count: input.count, excluded_words: input.exclude }
-      : {};
+      : input.operation === 'grammar_topic_set'
+        ? { topicId: input.topicId, topic: input.topic }
+        : {};
   return { system, user: JSON.stringify({ operation: input.operation, data }) };
 }
 

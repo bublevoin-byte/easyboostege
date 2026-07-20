@@ -108,7 +108,7 @@ test('application starts and serves health, security headers and PWA assets', { 
 
     const expiredAuthorization = { Authorization: `Bearer ${jwt.sign({ u: 'expired' }, jwtSecret)}` };
     const paidRequests = [
-      fetch(`${baseUrl}/api/ai`, { method: 'POST', headers: { ...expiredAuthorization, 'Content-Type': 'application/json' }, body: JSON.stringify({ system: 'Tutor', user: 'Help' }) }),
+      fetch(`${baseUrl}/api/v1/ai/generate-content`, { method: 'POST', headers: { ...expiredAuthorization, 'Content-Type': 'application/json' }, body: JSON.stringify({ operation: 'grammar_quiz' }) }),
       fetch(`${baseUrl}/api/tts?text=hello`, { headers: expiredAuthorization }),
       fetch(`${baseUrl}/api/stt`, { method: 'POST', headers: { ...expiredAuthorization, 'Content-Type': 'audio/webm' }, body: new Uint8Array([1]) }),
     ];
@@ -118,18 +118,18 @@ test('application starts and serves health, security headers and PWA assets', { 
     }
 
     const activeAuthorization = { Authorization: `Bearer ${jwt.sign({ u: 'active' }, jwtSecret)}`, 'Content-Type': 'application/json' };
-    const activeAi = await fetch(`${baseUrl}/api/ai`, {
+    const activeAi = await fetch(`${baseUrl}/api/v1/ai/generate-content`, {
       method: 'POST',
       headers: activeAuthorization,
-      body: JSON.stringify({ system: 'Tutor', user: 'Help' }),
+      body: JSON.stringify({ operation: 'grammar_quiz' }),
     });
     assert.equal(activeAi.status, 503);
     assert.equal((await activeAi.json()).error.code, 'AI_NOT_CONFIGURED');
 
-    const rateLimitedAi = await fetch(`${baseUrl}/api/ai`, {
+    const rateLimitedAi = await fetch(`${baseUrl}/api/v1/ai/generate-content`, {
       method: 'POST',
       headers: activeAuthorization,
-      body: JSON.stringify({ system: 'Tutor', user: 'Help again' }),
+      body: JSON.stringify({ operation: 'grammar_quiz' }),
     });
     assert.equal(rateLimitedAi.status, 429);
     assert.equal((await rateLimitedAi.json()).error.code, 'RATE_LIMITED');
@@ -143,8 +143,8 @@ test('application starts and serves health, security headers and PWA assets', { 
     });
     assert.equal(revokedConsent.status, 200);
     assert.equal((await revokedConsent.json()).text_processing, false);
-    const blockedByConsent = await fetch(`${baseUrl}/api/ai`, {
-      method: 'POST', headers: activeAuthorization, body: JSON.stringify({ system: 'Tutor', user: 'Private text' }),
+    const blockedByConsent = await fetch(`${baseUrl}/api/v1/ai/generate-content`, {
+      method: 'POST', headers: activeAuthorization, body: JSON.stringify({ operation: 'grammar_quiz' }),
     });
     assert.equal(blockedByConsent.status, 403);
     assert.equal((await blockedByConsent.json()).error.code, 'PRIVACY_CONSENT_REQUIRED');

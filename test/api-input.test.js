@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { classifyBodyParserError, legacyAiRequestSchema, validateProgress } from '../validation/api-input.js';
+import { classifyBodyParserError, validateProgress } from '../validation/api-input.js';
 
 test('progress validator accepts the extensible application state', () => {
   const progress = { learned: 42, prog: { words: 10 }, srs: { example: { s: 2, due: Date.now() } }, works: [{ t: 37, g: 5 }] };
@@ -18,13 +18,6 @@ test('progress validator rejects non-object roots and excessive nesting', () => 
 test('progress validator rejects dangerous keys and oversized strings', () => {
   assert.equal(validateProgress(JSON.parse('{"__proto__":{"admin":true}}')).code, 'FORBIDDEN_KEY');
   assert.equal(validateProgress({ draft: 'x'.repeat(20_001) }).code, 'STRING_TOO_LONG');
-});
-
-test('legacy AI request has strict fields and bounded prompts', () => {
-  assert.equal(legacyAiRequestSchema.safeParse({ user: 'Explain this' }).success, true);
-  assert.equal(legacyAiRequestSchema.safeParse({ user: '' }).success, false);
-  assert.equal(legacyAiRequestSchema.safeParse({ user: 'ok', unexpected: true }).success, false);
-  assert.equal(legacyAiRequestSchema.safeParse({ user: 'x'.repeat(30_001) }).success, false);
 });
 
 test('body parser failures map to safe client errors', () => {

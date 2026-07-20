@@ -45,7 +45,7 @@ test('frontend contains no embedded or browser-managed AI credentials', async ()
   assert.doesNotMatch(frontend, /localStorage\.(?:getItem|setItem)\(['"]eb_(?:key|groq|model|groq_model)/);
   assert.doesNotMatch(frontend, /x-goog-api-key/i);
   assert.doesNotMatch(frontend, /generativelanguage\.googleapis\.com|api\.groq\.com|api\.x\.ai/i);
-  assert.match(frontend, /post\('\/api\/ai'/);
+  assert.doesNotMatch(frontend, /\/api\/ai|legacyAi|callGemini/u);
   assert.match(frontend, /post\('\/api\/v1\/ai\/generate-content'/);
 });
 
@@ -159,9 +159,10 @@ test('frontend maps network, auth, subscription, limit and provider errors separ
 
 test('AI, TTS and STT endpoints return stable public error codes', async () => {
   const server = await fs.readFile(serverPath, 'utf8');
-  for (const code of ['AI_NOT_CONFIGURED', 'AI_PROVIDER_UNAVAILABLE', 'TTS_UNAVAILABLE', 'STT_NOT_CONFIGURED', 'STT_PROVIDER_UNAVAILABLE', 'STT_UNAVAILABLE']) {
+  for (const code of ['AI_NOT_CONFIGURED', 'TTS_UNAVAILABLE', 'STT_NOT_CONFIGURED', 'STT_PROVIDER_UNAVAILABLE', 'STT_UNAVAILABLE']) {
     assert.match(server, new RegExp(`code: '${code}'`, 'u'));
   }
+  assert.match(server, /'AI_PROVIDER_UNAVAILABLE'/u);
   assert.doesNotMatch(server, /res\.status\((?:502|503)\)\.json\(\{ error: '(?:ИИ|Озвучка|STT)[^']*' \+ /u);
 });
 
@@ -197,7 +198,6 @@ test('demo mode is isolated from persistence and paid AI calls', async () => {
   const { html, script } = await readFrontend();
   assert.match(html, /id="demo_btn"[^>]*onclick="startDemo\(\)"/u);
   assert.match(script, /function save\(\)\{\s*if\(DEMO_MODE\)return;/u);
-  assert.match(script, /callGemini=function\(systemPrompt,userPrompt\)\{if\(DEMO_MODE\)return Promise\.reject/u);
   assert.match(script, /function generateAiContent\(operation,payload\)\{if\(DEMO_MODE\)return Promise\.reject/u);
   assert.match(script, /if\(DEMO_MODE\)\{renderReview\(localReview/u);
   assert.match(script, /Демо · войти для сохранения/u);

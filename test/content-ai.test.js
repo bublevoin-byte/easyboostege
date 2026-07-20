@@ -68,3 +68,41 @@ test('speaking task generation validates all four task contracts', () => {
   task3.qs[4] = 'Not a question';
   assert.throws(() => parseContentResponse('speaking_task_3', JSON.stringify(task3)), /AI_RESPONSE_INVALID/u);
 });
+
+test('advanced grammar operations enforce exact EGE structures', () => {
+  const gap = { b: 'GO', ans: ['went'], e: 'Past Simple.', t: 2 };
+  const exam = { tx: Array.from({ length: 7 }, (_, index) => `fragment ${index}`), gaps: Array.from({ length: 6 }, () => ({ ...gap })) };
+  assert.equal(parseContentResponse('grammar_exam_19_24', JSON.stringify(exam)).gaps.length, 6);
+  const choice = { t: ['She ', ' home.'], o: ['go', 'goes', 'went', 'gone'], a: 1, e: 'Present Simple.' };
+  const form = { s: 'She _____ (GO) home.', b: 'GO', ans: ['goes'], e: 'Third person.' };
+  const topic = { c: Array.from({ length: 3 }, () => ({ ...choice })), f: Array.from({ length: 3 }, () => ({ ...form })) };
+  assert.equal(parseContentResponse('grammar_topic_set', JSON.stringify(topic)).c.length, 3);
+  topic.f[0].s = 'No blank here';
+  assert.throws(() => parseContentResponse('grammar_topic_set', JSON.stringify(topic)), /AI_RESPONSE_INVALID/u);
+});
+
+test('reading operations validate evidence, counts and unique answers', () => {
+  const headings = { hl: ['A', 'B', 'C', 'D', 'E'], txts: [0, 1, 2, 3].map((a) => ({ t: `Text ${a}`, a, k: 'Ключевые слова.' })) };
+  assert.equal(parseContentResponse('reading_headings', JSON.stringify(headings)).txts.length, 4);
+  headings.txts[3].a = 2;
+  assert.throws(() => parseContentResponse('reading_headings', JSON.stringify(headings)), /AI_RESPONSE_INVALID/u);
+  const passage = Array.from({ length: 95 }, (_, index) => `word${index}`).join(' ');
+  const rq = { tx: passage, qs: Array.from({ length: 4 }, (_, index) => ({ q: `Question ${index}?`, o: ['A', 'B', 'C', 'D'], a: index, ev: `word${index}`, e: 'Объяснение.' })) };
+  assert.equal(parseContentResponse('reading_questions', JSON.stringify(rq)).qs.length, 4);
+  rq.qs[0].ev = 'missing quote';
+  assert.throws(() => parseContentResponse('reading_questions', JSON.stringify(rq)), /AI_RESPONSE_INVALID/u);
+  const gaps = { tx: ['A', 'B', 'C', 'D'], fr: ['one', 'two', 'three', 'extra'], a: [0, 1, 2], k: ['why 1', 'why 2', 'why 3'] };
+  assert.equal(parseContentResponse('reading_gaps', JSON.stringify(gaps)).a.length, 3);
+});
+
+test('listening operations validate dialogue and answer invariants', () => {
+  const matching = { st: ['A', 'B', 'C', 'D', 'E'], sp: [1, 2, 3, 4].map((n) => ({ t: `Speaker ${n}` })), a: [0, 1, 2, 3], k: ['why 1', 'why 2', 'why 3', 'why 4'] };
+  assert.equal(parseContentResponse('listening_matching', JSON.stringify(matching)).sp.length, 4);
+  const d = Array.from({ length: 7 }, (_, index) => ({ s: index % 2, t: `Line ${index}` }));
+  const tf = { d: d.slice(0, 6), st: [0, 1, 2, 0, 1].map((a, index) => ({ t: `Statement ${index}`, a, ev: `Line ${index}`, e: 'Объяснение.' })) };
+  assert.equal(parseContentResponse('listening_true_false', JSON.stringify(tf)).st[2].a, 2);
+  tf.st[2].a = 1;
+  assert.throws(() => parseContentResponse('listening_true_false', JSON.stringify(tf)), /AI_RESPONSE_INVALID/u);
+  const interview = { d, qs: Array.from({ length: 4 }, (_, index) => ({ q: `Question ${index}?`, o: ['A', 'B', 'C'], a: index % 3, ev: `Line ${index}`, e: 'Объяснение.' })) };
+  assert.equal(parseContentResponse('listening_interview', JSON.stringify(interview)).qs.length, 4);
+});

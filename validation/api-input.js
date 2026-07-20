@@ -1,11 +1,4 @@
-import { z } from 'zod';
-
 const FORBIDDEN_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
-
-export const legacyAiRequestSchema = z.object({
-  system: z.string().trim().max(20_000).optional().default(''),
-  user: z.string().trim().min(1).max(30_000),
-}).strict();
 
 export function classifyBodyParserError(error) {
   if (error?.type === 'entity.too.large') {

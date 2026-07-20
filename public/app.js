@@ -367,8 +367,6 @@ async function startDemo(){
   for(const hook of START_HOOKS){try{await hook()}catch(e){}}
 }
 
-/* Временный legacy-адаптер до миграции всех операций на типизированные API. */
-callGemini=function(systemPrompt,userPrompt){if(DEMO_MODE)return Promise.reject(new Error('ИИ недоступен в демо-режиме'));return EasyBoostApi.legacyAi(systemPrompt,userPrompt)};
 function generateAiContent(operation,payload){if(DEMO_MODE)return Promise.reject(new Error('ИИ недоступен в демо-режиме'));return EasyBoostApi.generateContent(operation,payload)}
 
 /* профиль: в серверном режиме ключ не нужен на клиенте */
@@ -1527,9 +1525,7 @@ async function gExamGen(){
   if(G_EXGEN)return;if(typeof SRV==='undefined'||!SRV||!TOKEN)return;
   if(gExamPool().length>=8)return;G_EXGEN=true;
   try{
-    var out=await callGemini('Ты составляешь задания 19-24 ЕГЭ по английскому: связный текст с 6 пропусками на грамматические формы (времена, пассив, косвенная речь, условные, степени сравнения, местоимения, числительные). Уровень B1-B2. Только JSON.',
-      'Придумай один связный текст (6-8 предложений) с 6 пропусками. Строго JSON: {"tx":["фрагмент текста до пропуска 1","между 1 и 2","между 2 и 3","между 3 и 4","между 4 и 5","между 5 и 6","после 6"],"gaps":[{"b":"СЛОВО заглавными","ans":["правильная форма"],"e":"краткое объяснение по-русски","t":номер_темы_от_1_до_12}]} — ровно 7 фрагментов и 6 пропусков.');
-    var d=parseJSON(out);
+    var d=await generateAiContent('grammar_exam_19_24');
     if(d&&Array.isArray(d.tx)&&d.tx.length===7&&Array.isArray(d.gaps)&&d.gaps.length===6
        &&d.gaps.every(function(g){return g&&g.b&&Array.isArray(g.ans)&&g.ans.length})){
       var ex={tx:d.tx.map(String),gaps:d.gaps.map(function(g){return{b:String(g.b),ans:g.ans.map(String),e:String(g.e||''),t:+g.t||0}})};
@@ -1544,9 +1540,7 @@ async function gGen(t){
   if(ai.length>=15)return;G_GEN=true;
   try{
     var tp=G_TOPICS[t];
-    var out=await callGemini('Ты составляешь задания по грамматике английского для ЕГЭ (уровень B1-B2, британский английский). Только JSON, без пояснений.',
-      'Тема: "'+tp.n+'". Придумай 3 задания с выбором из 4 и 3 задания формата ЕГЭ 19-24 (вписать форму слова). Строго JSON: {"c":[{"t":["текст до пропуска","текст после пропуска"],"o":["вариант1","вариант2","вариант3","вариант4"],"a":индекс_верного_0_3,"e":"краткое объяснение по-русски"}],"f":[{"s":"предложение с пропуском _____ и словом в скобках ЗАГЛАВНЫМИ, например: She _____ (GO) to school.","b":"СЛОВО","ans":["правильная форма"],"e":"краткое объяснение по-русски"}]}');
-    var d=parseJSON(out);var add=[];
+    var d=await generateAiContent('grammar_topic_set',{topicId:t,topic:tp.n});var add=[];
     if(d&&Array.isArray(d.c))d.c.forEach(function(q){if(q&&Array.isArray(q.t)&&q.t.length>=2&&Array.isArray(q.o)&&q.o.length===4&&+q.a>=0&&+q.a<4)add.push({k:'c',q:{t:[String(q.t[0]),String(q.t[1])],o:q.o.map(String),a:+q.a,e:String(q.e||'')}})});
     if(d&&Array.isArray(d.f))d.f.forEach(function(q){if(q&&q.s&&String(q.s).indexOf('_____')>=0&&Array.isArray(q.ans)&&q.ans.length)add.push({k:'f',q:{s:String(q.s),b:String(q.b||''),ans:q.ans.map(String),e:String(q.e||'')}})});
     if(add.length){S.gramAi=S.gramAi||{};S.gramAi[t]=((S.gramAi[t])||[]).concat(add);save()}
@@ -1937,24 +1931,20 @@ async function rGen(){
   else if(rPool('g',R_GAPS).length<6)kind='g';
   if(!kind)return;R_GEN=true;
   try{
-    var sys='Ты составляешь задания по чтению для ЕГЭ по английскому (уровень B1-B2, британский английский, темы кодификатора ФИПИ: школа, семья, экология, технологии, путешествия, спорт, культура). Только JSON, без пояснений.';
-    var out,d,item=null;
+    var d,item=null;
     if(kind==='h'){
-      out=await callGemini(sys,'Комплект задания 10: четыре коротких текста (2-3 предложения) и пять заголовков, один лишний. JSON: {"hl":["5 заголовков на английском"],"txts":[{"t":"текст на английском","a":индекс_верного_заголовка_0_4,"k":"объяснение по-русски: ключевые слова текста"}]} — ровно 4 текста, все a разные.');
-      d=parseJSON(out);
+      d=await generateAiContent('reading_headings');
       if(d&&Array.isArray(d.hl)&&d.hl.length===5&&Array.isArray(d.txts)&&d.txts.length===4
         &&d.txts.every(function(t){return t&&t.t&&t.a>=0&&t.a<5&&t.k})
         &&new Set(d.txts.map(function(t){return +t.a})).size===4){
         item={hl:d.hl.map(String),txts:d.txts.map(function(t){return{t:String(t.t),a:+t.a,k:String(t.k)}})}}
     }else if(kind==='q'){
-      out=await callGemini(sys,'Комплект заданий 12-18: текст 90-130 слов и 4 вопроса. JSON: {"tx":"текст на английском","qs":[{"q":"вопрос на английском","o":["4 варианта"],"a":индекс_верного_0_3,"ev":"точная цитата из текста с ответом","e":"объяснение по-русски"}]} — ровно 4 вопроса.');
-      d=parseJSON(out);
+      d=await generateAiContent('reading_questions');
       if(d&&d.tx&&Array.isArray(d.qs)&&d.qs.length===4
         &&d.qs.every(function(q){return q&&q.q&&Array.isArray(q.o)&&q.o.length===4&&q.a>=0&&q.a<4&&q.ev&&q.e})){
         item={tx:String(d.tx),qs:d.qs.map(function(q){return{q:String(q.q),o:q.o.map(String),a:+q.a,ev:String(q.ev),e:String(q.e)}})}}
     }else{
-      out=await callGemini(sys,'Комплект задания 11: связный текст из 4 фрагментов с 3 пропусками между ними и 4 фразы, одна лишняя. JSON: {"tx":["фрагмент до пропуска 1","между 1 и 2","между 2 и 3","после 3"],"fr":["4 фразы на английском"],"a":[индекс_фразы_для_пропуска_1,для_2,для_3],"k":["3 объяснения по-русски, почему фраза подходит грамматически"]} — индексы в a разные, от 0 до 3.');
-      d=parseJSON(out);
+      d=await generateAiContent('reading_gaps');
       if(d&&Array.isArray(d.tx)&&d.tx.length===4&&Array.isArray(d.fr)&&d.fr.length===4
         &&Array.isArray(d.a)&&d.a.length===3&&d.a.every(function(x){return x>=0&&x<4})
         &&new Set(d.a.map(Number)).size===3&&Array.isArray(d.k)&&d.k.length===3){
@@ -2386,26 +2376,22 @@ async function lGen(){
   else if(lPool('iq',L_IN).length<5)kind='iq';
   if(!kind)return;L_GEN=true;
   try{
-    var sys='Ты составляешь задания по аудированию для ЕГЭ по английскому (уровень B1-B2, британский английский, темы: школа, семья, хобби, спорт, путешествия, экология). Текст будет озвучен синтезом речи. Только JSON, без пояснений.';
-    var out,d,item=null;
+    var d,item=null;
     if(kind==='m'){
-      out=await callGemini(sys,'Комплект задания 1: 4 коротких монолога (2-3 предложения) и 5 утверждений, одно лишнее. JSON: {"st":["5 утверждений на английском вида The speaker …"],"sp":[{"t":"монолог"}],"a":[индексы утверждений для говорящих A-D, все разные],"k":["4 объяснения по-русски: ключевые слова"]}');
-      d=parseJSON(out);
+      d=await generateAiContent('listening_matching');
       if(d&&Array.isArray(d.st)&&d.st.length===5&&Array.isArray(d.sp)&&d.sp.length===4
         &&Array.isArray(d.a)&&d.a.length===4&&d.a.every(function(x){return x>=0&&x<5})&&new Set(d.a.map(Number)).size===4
         &&Array.isArray(d.k)&&d.k.length===4&&d.sp.every(function(s){return s&&s.t})){
         item={st:d.st.map(String),sp:d.sp.map(function(s){return{t:String(s.t)}}),a:d.a.map(Number),k:d.k.map(String)}}
     }else if(kind==='tf'){
-      out=await callGemini(sys,'Комплект задания 2: диалог двух людей (6-8 реплик) и 5 утверждений True/False/Not stated (обязательно хотя бы одно Not stated). JSON: {"d":[{"s":0_или_1,"t":"реплика"}],"st":[{"t":"утверждение","a":0_true_1_false_2_notstated,"ev":"цитата из диалога","e":"объяснение по-русски"}]}');
-      d=parseJSON(out);
+      d=await generateAiContent('listening_true_false');
       if(d&&Array.isArray(d.d)&&d.d.length>=5&&d.d.every(function(x){return x&&x.t&&(x.s===0||x.s===1)})
         &&Array.isArray(d.st)&&d.st.length===5
         &&d.st.every(function(x){return x&&x.t&&x.a>=0&&x.a<3&&x.ev&&x.e})
         &&d.st.some(function(x){return +x.a===2})){
         item={d:d.d.map(function(x){return{s:+x.s,t:String(x.t)}}),st:d.st.map(function(x){return{t:String(x.t),a:+x.a,ev:String(x.ev),e:String(x.e)}})}}
     }else{
-      out=await callGemini(sys,'Комплект заданий 3-9: интервью (7-9 реплик, s:1 — ведущий, s:0 — гость) и 4 вопроса с 3 вариантами. JSON: {"d":[{"s":0_или_1,"t":"реплика"}],"qs":[{"q":"вопрос","o":["3 варианта"],"a":индекс_0_2,"ev":"цитата из интервью","e":"объяснение по-русски"}]}');
-      d=parseJSON(out);
+      d=await generateAiContent('listening_interview');
       if(d&&Array.isArray(d.d)&&d.d.length>=6&&d.d.every(function(x){return x&&x.t&&(x.s===0||x.s===1)})
         &&Array.isArray(d.qs)&&d.qs.length===4
         &&d.qs.every(function(q){return q&&q.q&&Array.isArray(q.o)&&q.o.length===3&&q.a>=0&&q.a<3&&q.ev&&q.e})){

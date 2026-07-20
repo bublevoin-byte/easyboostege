@@ -13,7 +13,7 @@ import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSI
 import { buildContentPrompt, CONTENT_PROMPT_VERSION, contentRequestSchema, parseContentResponse } from './ai/content.js';
 import { buildSpeakingPrompt, buildSpeakingSamplePrompt, parseSpeakingReview, parseSpeakingSample, SPEAKING_PROMPT_VERSION, speakingRequestSchema, speakingSampleRequestSchema } from './ai/speaking.js';
 import { protectCookieRequests } from './security/request-origin.js';
-import { classifyBodyParserError, legacyAiRequestSchema, validateProgress } from './validation/api-input.js';
+import { classifyBodyParserError, validateProgress } from './validation/api-input.js';
 import { contentSecurityPolicy } from './security/csp.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -613,22 +613,6 @@ app.post('/api/v1/ai/generate-speaking-sample', auth, requireActiveSubscription,
     }
   }
   res.status(lastCode === 'AI_RESPONSE_INVALID' ? 502 : 503).json({ error: { code: lastCode, message: 'Не удалось подготовить образцовый ответ.' } });
-});
-
-app.post('/api/ai', auth, requireActiveSubscription, requirePrivacyConsent('text_processing'), chatLimiter, async (req, res) => {
-  const parsed = legacyAiRequestSchema.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректный запрос к ИИ.' } });
-  }
-  const { system, user } = parsed.data;
-  const providers = aiProviders();
-  if (!providers.length) return res.status(503).json({ error: { code: 'AI_NOT_CONFIGURED', message: 'ИИ не настроен на сервере.' } });
-  let lastErr = '';
-  for (const p of providers) {
-    try { return res.json({ text: await askProvider(p, system, user), provider: p.name }); }
-    catch (e) { lastErr = e.message; }
-  }
-  res.status(502).json({ error: { code: 'AI_PROVIDER_UNAVAILABLE', message: 'ИИ временно недоступен.' } });
 });
 
 // ---- нейро-озвучка: Grok TTS (основной) + Edge TTS (запасной и для медленного) ----
