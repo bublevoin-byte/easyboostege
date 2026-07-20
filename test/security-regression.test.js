@@ -33,6 +33,7 @@ test('session endpoints do not expose JWT in JSON', async () => {
   assert.match(server, /if \(!await getUser\(username\)\)/u);
   assert.match(server, /isSessionActive\(claims\.sid, username\)/u);
   assert.match(server, /req\.user = username/u);
+  assert.doesNotMatch(server, /req\.query\.t(?:\W|$)/u);
 });
 
 test('startup logs do not expose the Telegram admin identifier', async () => {

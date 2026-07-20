@@ -100,11 +100,7 @@ app.get('/', async (req, res, next) => {
       return res.redirect('/');
     }
 
-    // Временная обратная совместимость со старыми ссылками. Новые ссылки JWT в URL не создают.
-    const token = req.query.t;
-    if (!token) return next();
-    try { jwt.verify(token, SECRET); setAuthCookie(req, res, token); } catch (error) {}
-    res.redirect('/');
+    return next();
   } catch (error) { next(error); }
 });
 app.use(express.static(path.join(__dirname, 'public'), {
