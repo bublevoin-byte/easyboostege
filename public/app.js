@@ -839,7 +839,7 @@ function initWords(){if(!S)return;wMigrate();wMergeAi();
   wSync();wRender();wTopUp()}
 function wModeFor(w){var r=wRec(w),s=r?r.s:0;
   if(s<=1)return 'c1';if(s===2)return 'c2';return 'type'}
-function wSpeak(txt){try{var u=new SpeechSynthesisUtterance(txt.replace(/^to /,''));u.lang='en-GB';u.rate=.9;speechSynthesis.cancel();speechSynthesis.speak(u)}catch(e){}}
+function wSpeakFallback(txt){try{var u=new SpeechSynthesisUtterance(txt.replace(/^to /,''));u.lang='en-GB';u.rate=.9;speechSynthesis.cancel();speechSynthesis.speak(u)}catch(e){}}
 function wBadge(x){var pos=W_POS[x.p]||x.pos||'СЛОВО';var top=W_TOPICS[x.t]||'';
   return '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'
   +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#F2683F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">'+pos+'</span>'
@@ -2065,13 +2065,13 @@ function lSync(){if(!S)return;var r=lSt();var ok=r.m.ok+r.tf.ok+r.iq.ok,tot=r.m.
   setTxt('l_sumline',r.done?('Пройдено '+r.done+' · точность '+acc+'%'):'Три формата — как на экзамене');
   var bar=document.getElementById('l_bar');if(bar)bar.style.width=Math.max(2,acc)+'%'}
 function lAnim(name,dur){var c=document.getElementById('l_card');if(!c)return;c.style.animation='none';void c.offsetWidth;c.style.animation=name+' '+dur+' cubic-bezier(.25,.75,.35,1)'}
-function lStop(){try{speechSynthesis.cancel()}catch(e){}}
+function lStopFallback(){try{speechSynthesis.cancel()}catch(e){}}
 function lVoice(i){try{var vs=(speechSynthesis.getVoices()||[]).filter(function(v){return /^en[-_]/i.test(v.lang)});
   if(!vs.length)return null;
   var gb=vs.filter(function(v){return /GB/i.test(v.lang)});
   var pool=gb.length>1?gb:vs;
   return pool[i%pool.length]}catch(e){return null}}
-function lPlayRaw(lines){
+function lPlayRawFallback(lines){
   if(!('speechSynthesis'in window)){try{toast('Озвучка недоступна в этом браузере')}catch(e){}return}
   lStop();
   var us=lines.map(function(ln){var u=new SpeechSynthesisUtterance(ln.t);
@@ -2428,49 +2428,37 @@ async function lGen(){
 registerRouteHook(function(id){lStop();if(LE&&LE.iv){clearInterval(LE.iv);LE=null}if(id==='scr4'){var f=document.getElementById('genfab');if(f)f.style.display='none'}});
 registerStartHook(function(){return lSync()});
 
-/* legacy block 9 */
-/* ===== TTS v2: нейроголоса Edge через сервер, фолбэк — встроенный синтез ===== */
-(function(){
-  var cache={},cur=null,seq=0;
-  function fetchAudio(text,voice,slow){
+/* ===== TTS: нейроголоса Edge через сервер, фолбэк — встроенный синтез ===== */
+var TTS_CACHE={},TTS_CURRENT=null,TTS_SEQUENCE=0;
+function fetchTtsAudio(text,voice,slow){
     var k=voice+'|'+(slow?1:0)+'|'+text;
-    if(cache[k])return Promise.resolve(cache[k]);
+    if(TTS_CACHE[k])return Promise.resolve(TTS_CACHE[k]);
     return apiGetBlob('/api/tts?text='+encodeURIComponent(text)+'&voice='+voice+(slow?'&slow=1':''))
-      .then(function(b){if(!b.size)throw 0;var u=URL.createObjectURL(b);cache[k]=u;return u})}
-  function stopAudio(){seq++;if(cur){try{cur.pause()}catch(e){}cur=null}}
-  /* стоп глушит и нейро, и встроенный синтез */
-  if(typeof lStop==='function'){
-    lStop=function(){stopAudio();try{speechSynthesis.cancel()}catch(e){};try{lPlayBtn('')}catch(e){}}}
-  /* диалоги и монологи */
-  if(typeof lPlayRaw==='function'){
-    var _raw=lPlayRaw;
-    lPlayRaw=function(lines){
-      if(typeof SRV==='undefined'||!SRV||!TOKEN){_raw(lines);return}
-      stopAudio();try{speechSynthesis.cancel()}catch(e){}
-      var my=++seq;
-      try{lPlayBtn('load')}catch(e){}
-      Promise.all(lines.map(function(ln){
-        return fetchAudio(ln.t,ln.s?'en-GB-SoniaNeural':'en-GB-RyanNeural',LSLOW)}))
-      .then(function(urls){
-        if(my!==seq)return;
-        var i=0;
-        (function next(){
-          if(my!==seq||i>=urls.length){if(my===seq){cur=null;try{lPlayBtn('')}catch(e){}}return}
-          if(i===0)try{lPlayBtn('play')}catch(e){}
-          cur=new Audio(urls[i++]);cur.onended=next;cur.onerror=next;
-          cur.play().catch(function(){next()})})()})
-      .catch(function(){if(my===seq){try{lPlayBtn('')}catch(e){}_raw(lines)}})}}
-  /* отдельные слова */
-  if(typeof wSpeak==='function'){
-    var _ws=wSpeak;
-    wSpeak=function(txt){
-      var t=(txt||'').replace(/^to /,'').trim();if(!t)return;
-      if(typeof SRV==='undefined'||!SRV||!TOKEN){_ws(txt);return}
-      var my=++seq;
-      fetchAudio(t,'en-GB-SoniaNeural',false)
-        .then(function(u){if(my!==seq)return;if(cur){try{cur.pause()}catch(e){}}cur=new Audio(u);cur.play().catch(function(){})})
-        .catch(function(){if(my===seq)_ws(txt)})}}
-})();
+      .then(function(b){if(!b.size)throw 0;var u=URL.createObjectURL(b);TTS_CACHE[k]=u;return u})}
+function stopTtsAudio(){TTS_SEQUENCE++;if(TTS_CURRENT){try{TTS_CURRENT.pause()}catch(e){}TTS_CURRENT=null}}
+function lStop(){stopTtsAudio();lStopFallback();try{lPlayBtn('')}catch(e){}}
+function lPlayRaw(lines){
+  if(typeof SRV==='undefined'||!SRV||!TOKEN){lPlayRawFallback(lines);return}
+  stopTtsAudio();lStopFallback();
+  var my=++TTS_SEQUENCE;
+  try{lPlayBtn('load')}catch(e){}
+  Promise.all(lines.map(function(ln){return fetchTtsAudio(ln.t,ln.s?'en-GB-SoniaNeural':'en-GB-RyanNeural',LSLOW)}))
+    .then(function(urls){
+      if(my!==TTS_SEQUENCE)return;
+      var i=0;
+      (function next(){
+        if(my!==TTS_SEQUENCE||i>=urls.length){if(my===TTS_SEQUENCE){TTS_CURRENT=null;try{lPlayBtn('')}catch(e){}}return}
+        if(i===0)try{lPlayBtn('play')}catch(e){}
+        TTS_CURRENT=new Audio(urls[i++]);TTS_CURRENT.onended=next;TTS_CURRENT.onerror=next;
+        TTS_CURRENT.play().catch(function(){next()})})()})
+    .catch(function(){if(my===TTS_SEQUENCE){try{lPlayBtn('')}catch(e){}lPlayRawFallback(lines)}})}
+function wSpeak(txt){
+  var t=(txt||'').replace(/^to /,'').trim();if(!t)return;
+  if(typeof SRV==='undefined'||!SRV||!TOKEN){wSpeakFallback(txt);return}
+  var my=++TTS_SEQUENCE;
+  fetchTtsAudio(t,'en-GB-SoniaNeural',false)
+    .then(function(u){if(my!==TTS_SEQUENCE)return;if(TTS_CURRENT){try{TTS_CURRENT.pause()}catch(e){}}TTS_CURRENT=new Audio(u);TTS_CURRENT.play().catch(function(){})})
+    .catch(function(){if(my===TTS_SEQUENCE)wSpeakFallback(txt)})}
 
 /* legacy block 10 */
 /* ===== WRITING v2: банк тем, стимулы как на ЕГЭ, шпаргалки, черновики, история ===== */
