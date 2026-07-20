@@ -145,6 +145,25 @@ test('module progress endpoint merges validated keys instead of replacing the do
   assert.match(postgres, /COALESCE\(user_progress\.data, '\{\}'::jsonb\) \|\| EXCLUDED\.data/u);
 });
 
+test('frontend maps network, auth, subscription, limit and provider errors separately', async () => {
+  const { api, script } = await readFrontend();
+  assert.match(api, /code === 'NETWORK_ERROR'/u);
+  assert.match(api, /status === 401/u);
+  assert.match(api, /status === 402 \|\| status === 403/u);
+  assert.match(api, /status === 429/u);
+  assert.match(api, /context === 'telegram'/u);
+  assert.match(api, /context === 'ai'/u);
+  assert.doesNotMatch(script, /Сервер недоступен/u);
+});
+
+test('AI, TTS and STT endpoints return stable public error codes', async () => {
+  const server = await fs.readFile(serverPath, 'utf8');
+  for (const code of ['AI_NOT_CONFIGURED', 'AI_PROVIDER_UNAVAILABLE', 'TTS_UNAVAILABLE', 'STT_NOT_CONFIGURED', 'STT_PROVIDER_UNAVAILABLE', 'STT_UNAVAILABLE']) {
+    assert.match(server, new RegExp(`code: '${code}'`, 'u'));
+  }
+  assert.doesNotMatch(server, /res\.status\((?:502|503)\)\.json\(\{ error: '(?:ИИ|Озвучка|STT)[^']*' \+ /u);
+});
+
 test('demo mode is isolated from persistence and paid AI calls', async () => {
   const { html, script } = await readFrontend();
   assert.match(html, /id="demo_btn"[^>]*onclick="startDemo\(\)"/u);

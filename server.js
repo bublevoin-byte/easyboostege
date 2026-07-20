@@ -495,13 +495,13 @@ app.post('/api/ai', auth, requireActiveSubscription, chatLimiter, async (req, re
   }
   const { system, user } = parsed.data;
   const providers = aiProviders();
-  if (!providers.length) return res.status(503).json({ error: 'ИИ не настроен (нет ключей)' });
+  if (!providers.length) return res.status(503).json({ error: { code: 'AI_NOT_CONFIGURED', message: 'ИИ не настроен на сервере.' } });
   let lastErr = '';
   for (const p of providers) {
     try { return res.json({ text: await askProvider(p, system, user), provider: p.name }); }
     catch (e) { lastErr = e.message; }
   }
-  res.status(502).json({ error: 'ИИ недоступен: ' + lastErr });
+  res.status(502).json({ error: { code: 'AI_PROVIDER_UNAVAILABLE', message: 'ИИ временно недоступен.' } });
 });
 
 // ---- нейро-озвучка: Grok TTS (основной) + Edge TTS (запасной и для медленного) ----
@@ -564,14 +564,14 @@ app.get('/api/tts', auth, requireActiveSubscription, ttsLimiter, async (req, res
     const ekey = crypto.createHash('sha1').update('e|' + voice + '|' + (slow ? 1 : 0) + '|' + text).digest('hex');
     return ttsSend(res, await edgeTts(text, voice, slow), path.join(TTS_DIR, ekey + '.mp3'));
   } catch (e) {
-    res.status(503).json({ error: 'Озвучка недоступна: ' + e.message });
+    res.status(503).json({ error: { code: 'TTS_UNAVAILABLE', message: 'Озвучка временно недоступна.' } });
   }
 });
 
 // ---- расшифровка речи (Grok STT) для оценки говорения ----
 app.post('/api/stt', auth, requireActiveSubscription, sttLimiter, express.raw({ type: () => true, limit: '20mb' }), async (req, res) => {
   try {
-    if (!XAI_KEY) return res.status(503).json({ error: 'XAI_API_KEY не задан на сервере' });
+    if (!XAI_KEY) return res.status(503).json({ error: { code: 'STT_NOT_CONFIGURED', message: 'Распознавание речи не настроено.' } });
     const buf = req.body;
     if (!buf || !buf.length) return res.status(400).json({ error: 'нет аудио' });
     const fd = new FormData();
@@ -583,10 +583,10 @@ app.post('/api/stt', auth, requireActiveSubscription, sttLimiter, express.raw({ 
       body: fd,
     });
     const j = await r.json().catch(() => ({}));
-    if (!r.ok) return res.status(502).json({ error: 'STT: ' + ((j.error && (j.error.message || j.error)) || r.status) });
+    if (!r.ok) return res.status(502).json({ error: { code: 'STT_PROVIDER_UNAVAILABLE', message: 'Распознавание речи временно недоступно.' } });
     res.json({ text: j.text || '', duration: j.duration || 0 });
   } catch (e) {
-    res.status(502).json({ error: 'STT: ' + e.message });
+    res.status(502).json({ error: { code: 'STT_UNAVAILABLE', message: 'Не удалось распознать запись.' } });
   }
 });
 

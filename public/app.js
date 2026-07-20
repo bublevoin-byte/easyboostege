@@ -321,6 +321,7 @@ const apiPost=EasyBoostApi.post;
 const apiGet=EasyBoostApi.get;
 const apiGetBlob=EasyBoostApi.getBlob;
 const apiPostBinary=EasyBoostApi.postBinary;
+const apiMessage=EasyBoostApi.messageFor;
 function fillDefaults(d){d=d||{};d.box=d.box||{};d.wstatus=d.wstatus||{};d.learned=d.learned==null?0:d.learned;
   d.streak=d.streak==null?0:d.streak;d.lastDay=d.lastDay||null;d.dayMin=d.dayMin==null?0:d.dayMin;d.dayMinDate=d.dayMinDate||todayStr();
   d.essays=d.essays||0;d.speak=d.speak||0;d.srs=d.srs||{};d.prog=d.prog||{words:0,gram:0,read:0,listen:0,write:0,speak:0};return d}
@@ -350,14 +351,14 @@ async function doLogin(){
   lgMsg('Вход…');
   try{const d=await apiPost('/api/login',{username:u,password:p});TOKEN=d.authenticated?'cookie':'';
     currentUser=d.username;localStorage.setItem('eb_current',currentUser);lgMsg('');startApp()}
-  catch(e){lgMsg(e.message)}}
+  catch(e){lgMsg(apiMessage(e,'auth'))}}
 async function doRegister(){
   if(!SRV){const u=gv('lg_user')||'Аня';currentUser=u;localStorage.setItem('eb_current',currentUser);show('scr6');document.getElementById('tabbar').style.display='none';return}
   const u=gv('lg_user'),p=gv('lg_pass');if(!u||!p){lgMsg('Введите имя и пароль');return}
   lgMsg('Создаём аккаунт…');
   try{const d=await apiPost('/api/register',{username:u,password:p});TOKEN=d.authenticated?'cookie':'';
     currentUser=d.username;localStorage.setItem('eb_current',currentUser);lgMsg('');show('scr6');document.getElementById('tabbar').style.display='none'}
-  catch(e){lgMsg(e.message)}}
+  catch(e){lgMsg(apiMessage(e,'auth'))}}
 async function logout(){
   try{if(SRV)await apiPost('/api/logout',{})}catch(_){}
   TOKEN='';
@@ -390,7 +391,7 @@ async function tgInit(){
   if(typeof SRV==='undefined'||!SRV)return;
   try{const d=await apiPost('/api/tg/start',{});TG_URL=d.url;TG_CODE=d.code;
     var a=document.getElementById('tgbtn');if(a)a.href=TG_URL;tgPoll();}
-  catch(e){lgMsg('Сервер недоступен — обнови страницу');}
+  catch(e){lgMsg(apiMessage(e,'telegram'));}
 }
 function tgPoll(){
   if(!TG_CODE)return;try{localStorage.setItem('eb_tg_code',TG_CODE)}catch(_){};let tries=0;clearInterval(TG_IV);
@@ -455,7 +456,7 @@ async function tgClick(e){
   lgMsg('Готовлю вход…');
   try{
     if(typeof TG_URL==='undefined'||!TG_URL){ var d=await apiPost('/api/tg/start',{}); TG_URL=d.url; TG_CODE=d.code; }
-  }catch(err){ lgMsg('Сервер недоступен: '+((err&&err.message)||'ошибка')+' — обнови страницу'); return false; }
+  }catch(err){ lgMsg(apiMessage(err,'telegram')); return false; }
   try{ if(typeof tgPoll==='function') tgPoll(); }catch(_){}
   var m=document.getElementById('lg_msg');
   if(m) m.innerHTML='<a href="'+TG_URL+'" style="display:inline-block;margin-top:2px;color:#F2683F;font-weight:800;text-decoration:underline;font-size:14.5px;">Открыть Telegram-бот</a><div style="margin-top:5px;font-size:12.5px;color:#8A8F98;">нажми ссылку → Start → кнопка «Открыть Easy Boost»</div>';
@@ -2826,7 +2827,7 @@ async function spEval(btn){
     spShowEval(d,tr);
   }catch(e){
     if(btn){btn.textContent='✨ Оценить с ИИ · повторить';btn.style.pointerEvents='';delete btn.dataset.busy}
-    try{toast('Не получилось: '+(e.message||'ошибка'))}catch(_){}}}
+    try{toast(apiMessage(e,'stt'))}catch(_){}}}
 function spShowEval(d,tr){var box=document.getElementById('sp_evalbox');if(!box)return;
   var pct=d.got/(d.max||1);
   var col=pct>=0.7?'#1F8A50':(pct>=0.4?'#C77400':'#C0392B');
@@ -2870,7 +2871,7 @@ async function spSample(btn){
     if(btn){btn.style.display='none'}
   }catch(e){
     if(btn){btn.textContent='Образец ответа от ИИ · повторить';btn.style.pointerEvents='';delete btn.dataset.busy}
-    try{toast('Не получилось: '+(e.message||'ошибка'))}catch(_){}}}
+    try{toast(apiMessage(e,'ai'))}catch(_){}}}
 function spVoiceSample(){if(!SP||!SP.sample)return;
   var parts=(SP.sample.match(/[^.!?]+[.!?]+/g)||[SP.sample]).map(function(x){return {s:0,t:x.trim()}});
   try{lPlayRaw(parts)}catch(e){}}

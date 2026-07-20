@@ -14,6 +14,26 @@
     }
   }
 
+  async function request(url, options) {
+    try { return await global.fetch(url, options); }
+    catch (error) { throw new ApiError('Нет подключения к интернету.', { code: 'NETWORK_ERROR' }); }
+  }
+
+  function messageFor(error, context = 'request') {
+    const status = Number(error && error.status) || 0;
+    const code = String((error && error.code) || 'REQUEST_FAILED');
+    if (code === 'NETWORK_ERROR' || status === 0) return 'Нет подключения к интернету. Проверьте сеть и повторите попытку.';
+    if (status === 401) return 'Сессия истекла. Войдите снова.';
+    if (status === 402 || status === 403) return 'Доступ неактивен. Проверьте подписку в Telegram-боте.';
+    if (status === 429) return 'Лимит запросов исчерпан. Попробуйте позже.';
+    if (context === 'telegram') return 'Не удалось подготовить вход через Telegram. Попробуйте ещё раз.';
+    if (context === 'ai') return 'ИИ временно недоступен. Встроенные задания продолжают работать.';
+    if (context === 'tts') return 'Озвучка временно недоступна.';
+    if (context === 'stt') return 'Не удалось распознать запись. Попробуйте ещё раз.';
+    if (status >= 500) return 'Внутренняя ошибка сервиса. Повторите попытку позже.';
+    return (error && error.message) || 'Не удалось выполнить запрос.';
+  }
+
   async function parseResponse(response) {
     const payload = await response.json().catch(() => ({}));
     if (response.ok) return payload;
@@ -28,12 +48,12 @@
   }
 
   async function get(path) {
-    const response = await global.fetch(baseUrl + path, { credentials: 'same-origin' });
+    const response = await request(baseUrl + path, { credentials: 'same-origin' });
     return parseResponse(response);
   }
 
   async function post(path, body) {
-    const response = await global.fetch(baseUrl + path, {
+    const response = await request(baseUrl + path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
@@ -43,7 +63,7 @@
   }
 
   async function getBlob(path) {
-    const response = await global.fetch(baseUrl + path, { credentials: 'same-origin' });
+    const response = await request(baseUrl + path, { credentials: 'same-origin' });
     if (!response.ok) await parseResponse(response);
     const blob = await response.blob();
     if (!blob.size) throw new ApiError('Сервер вернул пустой файл', { status: response.status });
@@ -51,7 +71,7 @@
   }
 
   async function postBinary(path, body, contentType = 'application/octet-stream') {
-    const response = await global.fetch(baseUrl + path, {
+    const response = await request(baseUrl + path, {
       method: 'POST',
       headers: { 'Content-Type': contentType },
       credentials: 'same-origin',
@@ -66,5 +86,5 @@
     return result.text || '';
   }
 
-  global.EasyBoostApi = Object.freeze({ ApiError, get, post, getBlob, postBinary, legacyAi });
+  global.EasyBoostApi = Object.freeze({ ApiError, get, post, getBlob, postBinary, legacyAi, messageFor });
 })(window);
