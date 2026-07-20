@@ -67,7 +67,8 @@ test('legacy application script has no duplicate top-level function declarations
   const guardedNames = [
     'startApp', 'tab', 'checkWriting', 'trWord', 'initReading', 'initGrammar', 'renderG',
     'pickG', 'nextG', 'initListening', 'playListen', 'toggleScript', 'doLogin',
-    'doRegister', 'logout', 'renderProfile', 'tgInit', 'tgPoll', 'tgClick',
+    'doRegister', 'logout', 'renderProfile', 'tgInit', 'tgPoll', 'tgClick', 'save',
+    'fillDefaults', 'genWords',
   ];
   for (const name of guardedNames) {
     const declarations = script.match(new RegExp(`(?:async\\s+)?function\\s+${name}\\s*\\(`, 'gu')) || [];
@@ -77,7 +78,7 @@ test('legacy application script has no duplicate top-level function declarations
   assert.match(script, /const START_HOOKS=\[\]/u);
   assert.doesNotMatch(script, /\btab\s*=\s*function/u);
   assert.match(script, /const ROUTE_HOOKS=\[\]/u);
-  for (const name of ['doLogin', 'doRegister', 'logout', 'renderProfile', 'tgInit', 'tgPoll', 'tgClick']) {
+  for (const name of ['doLogin', 'doRegister', 'logout', 'renderProfile', 'tgInit', 'tgPoll', 'tgClick', 'save', 'fillDefaults', 'checkWriting', 'initWords', 'genWords']) {
     assert.doesNotMatch(script, new RegExp(`\\b${name}\\s*=\\s*(?:async\\s+)?function`, 'u'));
   }
   assert.match(script, /const PROFILE_HOOKS=\[\]/u);

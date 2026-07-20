@@ -18,8 +18,6 @@ function getUsers(){try{return JSON.parse(localStorage.getItem('eb_users'))||{}}
 function setUsers(u){localStorage.setItem('eb_users',JSON.stringify(u))}
 function load(){let d=null;try{d=JSON.parse(localStorage.getItem(dataKey()))}catch(e){}if(!d)d={};
   d.box=d.box||{};d.learned=d.learned==null?320:d.learned;d.essays=d.essays||0;return d}
-function save(){if(currentUser)localStorage.setItem(dataKey(),JSON.stringify(S))}
-
 /* ---------- DATA ---------- */
 const WORDS=[
  {w:'ambiguous',pos:'ПРИЛАГАТЕЛЬНОЕ',ipa:'/æmˈbɪɡjuəs/',tr:'двусмысленный',ex:'The instructions were ambiguous.'},
@@ -42,8 +40,6 @@ const WRITE={
 
 /* ---------- WORDS ---------- */
 let queue=[],ci=0,flipped=false;
-function initWords(){queue=WORDS.map((x,i)=>({...x,i})).filter(x=>(S.box[x.w]||0)<3);if(!queue.length)queue=WORDS.slice();queue=queue.slice(0,10);ci=0;
-  var k=document.getElementById('w_know');if(k)k.textContent='Знаю '+S.learned;showCard()}
 function showCard(){flipped=false;const c=queue[ci];if(!c){document.getElementById('w_pos').textContent='ГОТОВО';document.getElementById('w_word').textContent='🎉';document.getElementById('w_ipa').textContent='На сегодня всё!';return}
   document.getElementById('w_pos').textContent=c.pos;document.getElementById('w_word').textContent=c.w;document.getElementById('w_ipa').textContent=c.ipa;
   var t=document.getElementById('w_today');if(t)t.textContent=ci+' / '+queue.length+' сегодня'}
@@ -190,19 +186,6 @@ async function trWord(w){lastWord=w;const pop=document.getElementById('r_pop');
     if(off){document.getElementById('r_ipa').textContent=off.ipa||'';document.getElementById('r_tr').textContent=off.tr+'  · офлайн-словарь'}
     else{document.getElementById('r_ipa').textContent='';document.getElementById('r_tr').textContent='ИИ офлайн, слова нет в мини-словаре. Включи VPN/ключ.'}}}
 
-/* writing: AI first, else basic local review */
-async function checkWriting(){
-  const t=(document.getElementById('w_editor').innerText||'').trim();
-  const n=t?t.split(/\s+/).filter(Boolean).length:0;
-  if(n<10){alert('Напиши хотя бы несколько предложений.');return}
-  tab('scr13');const task=curTask;
-  const sys='Ты эксперт ЕГЭ по английскому, проверяешь письменную часть по критериям ФИПИ. Британский английский. Верни СТРОГО JSON без markdown.';
-  const fmt='{"words":n,"in_range":true,"overall_got":n,"overall_max":n,"verdict":"фраза","sub":"совет","criteria":[{"name":"...","got":n,"max":n}],"errors":[{"title":"тип","wrong":"...","right":"...","kind":"err|warn","note":""}]}';
-  const ctx=task===37?'Задание 37 письмо другу 100-140 слов. Критерии: Решение задачи(3),Организация(2),Языковое оформление(3). Макс 8.':'Задание 38 эссе 200-250 слов. Критерии: Решение задачи(3),Организация(3),Лексика(3),Грамматика(3),Орфография(2). Макс 14.';
-  try{const out=await callGemini(sys,ctx+' Верни JSON: '+fmt+'. errors до 4. Текст: """'+t+'"""');
-    let d=null;try{d=JSON.parse(out.replace(/```json|```/g,'').trim())}catch(e){}
-    if(!d)throw new Error('bad');renderReview(d);S.essays++;save();showScreen('scr12');HIST.push('scr8')}
-  catch(e){renderReview(localReview(n,task,e.message));showScreen('scr12');HIST.push('scr8')}}
 function localReview(n,task,msg){
   const rng=task===37?[100,140]:[200,250];const ok=n>=rng[0]&&n<=rng[1];
   return {overall_got:ok?1:0,overall_max:1,verdict:'Черновая проверка',
@@ -343,12 +326,6 @@ async function genForCurrent(){const id=cur();const fab=document.getElementById(
     toast('Готово — новое задание ✨');
   }catch(e){toast('ИИ недоступен — оставил встроенное задание')}
   fab.disabled=false}
-async function genWords(){
-  const out=await callGemini('Ты составляешь карточки для ЕГЭ. Британский английский, уровень B2-C1. Только JSON.',
-    'Дай 6 новых слов массивом JSON: [{"w":"слово","pos":"ПРИЛАГАТЕЛЬНОЕ|ГЛАГОЛ|СУЩЕСТВИТЕЛЬНОЕ|НАРЕЧИЕ","ipa":"/../","tr":"перевод","ex":"пример на английском"}]');
-  const d=parseJSON(out);if(!Array.isArray(d)||!d.length)throw 0;
-  d.forEach(x=>{if(x.w&&x.tr)WORDS.push({w:x.w,pos:x.pos||'СЛОВО',ipa:x.ipa||'',tr:x.tr,ex:x.ex||''})});
-  initWords()}
 async function genGrammar(){
   const out=await callGemini('Ты составляешь тест по грамматике для ЕГЭ. Британский английский. Только JSON.',
     'Придумай 5 заданий на случайную тему грамматики (одну). JSON: [{"before":"текст до пропуска","after":"текст после","options":["4 варианта"],"answer":индекс_верного_0-3,"explain":"краткое пояснение"}]');
@@ -388,13 +365,13 @@ const apiGetBlob=EasyBoostApi.getBlob;
 const apiPostBinary=EasyBoostApi.postBinary;
 function fillDefaults(d){d=d||{};d.box=d.box||{};d.wstatus=d.wstatus||{};d.learned=d.learned==null?320:d.learned;
   d.streak=d.streak||7;d.lastDay=d.lastDay||null;d.dayMin=d.dayMin||18;d.dayMinDate=d.dayMinDate||todayStr();
-  d.essays=d.essays||0;d.speak=d.speak||0;d.prog=d.prog||{words:64,gram:42,read:78,listen:30,write:40,speak:48};return d}
+  d.essays=d.essays||0;d.speak=d.speak||0;d.srs=d.srs||{};d.prog=d.prog||{words:64,gram:42,read:78,listen:30,write:40,speak:48};return d}
 
 /* save/load через сервер (или локально) */
 let _saveT=null;
 const START_HOOKS=[];
 function registerStartHook(hook){START_HOOKS.push(hook)}
-save=function(){
+function save(){
   if(SRV){if(!TOKEN)return;clearTimeout(_saveT);_saveT=setTimeout(()=>{apiPost('/api/progress',S,true).catch(()=>{})},600)}
   else{if(currentUser)localStorage.setItem(dataKey(),JSON.stringify(S))}}
 async function startApp(){
@@ -883,7 +860,7 @@ function wSync(){var st=wStats();S.learned=st.learned;S.prog=S.prog||{};S.prog.w
   setTxt('sub_words','учу · '+st.learned+' / '+st.total)}
 function wMigrate(){if(S.srsMig)return;S.srsMig=1;S.srs=S.srs||{};
   EGE_WORDS.forEach(function(x){var b=S.box&&S.box[x.w];if(b&&!S.srs[x.w])S.srs[x.w]={s:Math.min(3,b),e:0,n:b,due:Date.now()}})}
-initWords=function(){if(!S)return;wMigrate();wMergeAi();
+function initWords(){if(!S)return;wMigrate();wMergeAi();
   if(S.wday!==todayStr()){S.wday=todayStr();S.wnewUsed=0}
   var due=[],fresh=[];
   EGE_WORDS.forEach(function(x){var r=wRec(x.w);
@@ -1026,7 +1003,7 @@ async function wTopUp(){
   }catch(e){}
   W_GEN=false}
 /* ИИ-набор слов теперь пополняет базу ЕГЭ */
-genWords=async function(){
+async function genWords(){
   const out=await callGemini('Ты составляешь словарные карточки для ЕГЭ по английскому. Уровень B1-B2, британский английский. Только JSON.',
     'Дай 8 полезных для ЕГЭ слов массивом JSON: [{"w":"слово (глаголы с to)","p":"n|v|adj|adv|ph|id","tr":"перевод","ex":"короткий пример, где слово стоит в начальной форме"}]');
   const d=parseJSON(out);if(!Array.isArray(d)||!d.length)throw 0;
@@ -1035,7 +1012,6 @@ genWords=async function(){
   initWords()}
 /* домашняя плитка при загрузке */
 try{if(S)wSync()}catch(e){}
-var _fd2=fillDefaults;fillDefaults=function(d){d=_fd2(d);d.srs=d.srs||{};return d};
 registerStartHook(function(){wMigrate();wMergeAi();return wSync()});
 registerRouteHook(function(id){if(id==='scr2'){var f=document.getElementById('genfab');if(f)f.style.display='none'}});
 
@@ -2606,7 +2582,7 @@ setTask=function(n){curTask=n;var d=WRITE[n],tp=wrCur();
       ed.addEventListener('input',function(){S.drafts=S.drafts||{};S.drafts[wrKey()]=ed.innerText;save()})}}
   countWords()}
 /* — проверка ИИ: актуальные критерии + контекст темы + история — */
-checkWriting=async function(){
+async function checkWriting(){
   var t=(document.getElementById('w_editor').innerText||'').trim();
   var n=t?t.split(/\s+/).filter(Boolean).length:0;
   if(n<10){alert('Напиши хотя бы несколько предложений.');return}
