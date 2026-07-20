@@ -30,6 +30,8 @@ export const createWritingAttempt = (...args) => repository.createWritingAttempt
 export const finishWritingAttempt = (...args) => repository.finishWritingAttempt(...args);
 export const createSpeakingAttempt = (...args) => repository.createSpeakingAttempt(...args);
 export const finishSpeakingAttempt = (...args) => repository.finishSpeakingAttempt(...args);
+export const getGeneratedTask = (...args) => repository.getGeneratedTask(...args);
+export const saveGeneratedTask = (...args) => repository.saveGeneratedTask(...args);
 export const logAiRequest = (...args) => repository.logAiRequest(...args);
 export const countAiRequestsSince = (...args) => repository.countAiRequestsSince(...args);
 export const createSession = (...args) => repository.createSession(...args);

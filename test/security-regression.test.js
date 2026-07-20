@@ -170,6 +170,16 @@ test('AI, TTS and STT endpoints return stable public error codes', async () => {
   assert.doesNotMatch(server, /res\.status\((?:502|503)\)\.json\(\{ error: '(?:ИИ|Озвучка|STT)[^']*' \+ /u);
 });
 
+test('validated generated content is cached before external AI budget checks', async () => {
+  const server = await fs.readFile(serverPath, 'utf8');
+  const cacheLookup = server.indexOf('const stored = await getGeneratedTask(req.user, requestHash)');
+  const budgetCheck = server.indexOf('if (!await hasAiBudget())', cacheLookup);
+  const providerCall = server.indexOf('const response = await askProvider(provider', cacheLookup);
+  assert.ok(cacheLookup > 0 && budgetCheck > cacheLookup && providerCall > budgetCheck);
+  assert.match(server, /saveGeneratedTask\(req\.user/u);
+  assert.match(server, /promptVersion: CONTENT_PROMPT_VERSION, input/u);
+});
+
 test('audio endpoints enforce upload controls, timeouts and private cached responses', async () => {
   const [server, frontend] = await Promise.all([
     fs.readFile(serverPath, 'utf8'),

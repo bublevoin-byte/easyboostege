@@ -4,7 +4,7 @@ import { hashAuthCode, normalizeUsername, subscriptionView } from './shared.js';
 
 export function createFileRepository(filePath) {
   let loaded = false;
-  let state = { users: {}, progress: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], ai_requests: [], sessions: {}, subscriptions: {}, payment_requests: {}, subscription_events: [] };
+  let state = { users: {}, progress: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], generated_tasks: [], ai_requests: [], sessions: {}, subscriptions: {}, payment_requests: {}, subscription_events: [] };
   let writeQueue = Promise.resolve();
 
   async function load() {
@@ -19,6 +19,7 @@ export function createFileRepository(filePath) {
           auth_codes: parsed.auth_codes && typeof parsed.auth_codes === 'object' ? parsed.auth_codes : {},
           writing_attempts: Array.isArray(parsed.writing_attempts) ? parsed.writing_attempts : [],
           speaking_attempts: Array.isArray(parsed.speaking_attempts) ? parsed.speaking_attempts : [],
+          generated_tasks: Array.isArray(parsed.generated_tasks) ? parsed.generated_tasks : [],
           ai_requests: Array.isArray(parsed.ai_requests) ? parsed.ai_requests : [],
           sessions: parsed.sessions && typeof parsed.sessions === 'object' ? parsed.sessions : {},
           subscriptions: parsed.subscriptions && typeof parsed.subscriptions === 'object' ? parsed.subscriptions : {},
@@ -315,6 +316,22 @@ export function createFileRepository(filePath) {
     await persist();
   }
 
+  async function getGeneratedTask(username, requestHash) {
+    await load();
+    const task = state.generated_tasks.find((item) => item.username === username && item.request_hash === requestHash);
+    return task ? structuredClone({ result: task.result, provider: task.provider, prompt_version: task.prompt_version, created_at: task.created_at }) : null;
+  }
+
+  async function saveGeneratedTask(username, entry) {
+    await load();
+    const existing = state.generated_tasks.find((item) => item.username === username && item.request_hash === entry.requestHash);
+    if (existing) return existing.id;
+    const id = (state.generated_tasks.at(-1)?.id || 0) + 1;
+    state.generated_tasks.push({ id, username, operation: entry.operation, request_hash: entry.requestHash, request: structuredClone(entry.request), result: structuredClone(entry.result), provider: entry.provider, prompt_version: entry.promptVersion, created_at: Date.now() });
+    await persist();
+    return id;
+  }
+
   async function logAiRequest(entry) {
     await load();
     const id = (state.ai_requests.at(-1)?.id || 0) + 1;
@@ -380,6 +397,7 @@ export function createFileRepository(filePath) {
       payment_requests: Object.values(state.payment_requests).filter((item) => item.username === username),
       writing_attempts: state.writing_attempts.filter((item) => item.username === username),
       speaking_attempts: state.speaking_attempts.filter((item) => item.username === username),
+      generated_tasks: state.generated_tasks.filter((item) => item.username === username).map(({ request_hash, username: owner, ...item }) => item),
       ai_requests: state.ai_requests.filter((item) => item.username === username),
     });
   }
@@ -393,6 +411,7 @@ export function createFileRepository(filePath) {
     delete state.progress[username];
     state.writing_attempts = state.writing_attempts.filter((item) => item.username !== username);
     state.speaking_attempts = state.speaking_attempts.filter((item) => item.username !== username);
+    state.generated_tasks = state.generated_tasks.filter((item) => item.username !== username);
     state.ai_requests = state.ai_requests.filter((item) => item.username !== username);
     delete state.subscriptions[username];
     state.subscription_events = state.subscription_events.filter((item) => item.username !== username);
@@ -440,6 +459,8 @@ export function createFileRepository(filePath) {
     finishWritingAttempt,
     createSpeakingAttempt,
     finishSpeakingAttempt,
+    getGeneratedTask,
+    saveGeneratedTask,
     logAiRequest,
     countAiRequestsSince,
     createSession,

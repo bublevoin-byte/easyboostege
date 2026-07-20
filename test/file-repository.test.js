@@ -177,6 +177,20 @@ test('speaking attempts persist transcript review metadata but never audio', asy
   });
 });
 
+test('generated tasks are reused by request hash and exported without internal hashes', async () => {
+  await withRepository(async (repository) => {
+    const username = await repository.createTelegramUser(3020, 'Generator');
+    const entry = { operation: 'grammar_quiz', requestHash: 'a'.repeat(64), request: { operation: 'grammar_quiz' }, result: [{ q: 'One' }], provider: 'test', promptVersion: 'content-v1' };
+    const firstId = await repository.saveGeneratedTask(username, entry);
+    assert.equal(await repository.saveGeneratedTask(username, entry), firstId);
+    const cached = await repository.getGeneratedTask(username, entry.requestHash);
+    assert.deepEqual(cached.result, entry.result);
+    const exported = await repository.exportUserData(username);
+    assert.equal(exported.generated_tasks.length, 1);
+    assert.equal('request_hash' in exported.generated_tasks[0], false);
+  });
+});
+
 test('file repository readiness check succeeds after pending writes', async () => {
   await withRepository(async (repository) => {
     const username = await repository.createTelegramUser(4001, 'Health User');

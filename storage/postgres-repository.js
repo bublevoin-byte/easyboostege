@@ -346,6 +346,25 @@ export function createPostgresRepository(connectionString) {
     if (!updated.rowCount) throw new Error('SPEAKING_ATTEMPT_NOT_FOUND');
   }
 
+  async function getGeneratedTask(username, requestHash) {
+    const result = await pool.query(
+      `SELECT result, provider, prompt_version, created_at FROM generated_tasks
+       WHERE username = $1 AND request_hash = $2`, [username, requestHash],
+    );
+    return result.rows[0] || null;
+  }
+
+  async function saveGeneratedTask(username, entry) {
+    const result = await pool.query(
+      `INSERT INTO generated_tasks (username, operation, request_hash, request, result, provider, prompt_version)
+       VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7)
+       ON CONFLICT (username, request_hash) DO UPDATE SET request_hash = EXCLUDED.request_hash
+       RETURNING id`,
+      [username, entry.operation, entry.requestHash, JSON.stringify(entry.request), JSON.stringify(entry.result), entry.provider, entry.promptVersion],
+    );
+    return Number(result.rows[0].id);
+  }
+
   async function logAiRequest(entry) {
     const result = await pool.query(
       `INSERT INTO ai_requests
@@ -392,7 +411,7 @@ export function createPostgresRepository(connectionString) {
   }
 
   async function exportUserData(username) {
-    const [account, progress, privacyConsent, subscriptionEvents, paymentRequests, writingAttempts, speakingAttempts, aiRequests] = await Promise.all([
+    const [account, progress, privacyConsent, subscriptionEvents, paymentRequests, writingAttempts, speakingAttempts, generatedTasks, aiRequests] = await Promise.all([
       pool.query('SELECT username, telegram_id, role, trial_used, subscription_until, created_at, updated_at FROM users WHERE username = $1', [username]),
       pool.query('SELECT data, updated_at FROM user_progress WHERE username = $1', [username]),
       pool.query('SELECT text_processing, voice_processing, policy_version, text_consented_at, voice_consented_at, updated_at FROM privacy_consents WHERE username = $1', [username]),
@@ -400,6 +419,7 @@ export function createPostgresRepository(connectionString) {
       pool.query('SELECT id, status, actor_telegram_id, result, created_at, resolved_at FROM payment_requests WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, task_type, assignment, answer, review, provider, prompt_version, status, created_at, evaluated_at FROM writing_attempts WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, task_type, assignment, transcript, review, provider, prompt_version, status, error_code, created_at, evaluated_at FROM speaking_attempts WHERE username = $1 ORDER BY created_at', [username]),
+      pool.query('SELECT id, operation, request, result, provider, prompt_version, created_at FROM generated_tasks WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, operation, provider, model, prompt_version, status, duration_ms, error_code, prompt_tokens, completion_tokens, estimated_cost_microusd, created_at FROM ai_requests WHERE username = $1 ORDER BY created_at', [username]),
     ]);
     if (!account.rowCount) return null;
@@ -412,6 +432,7 @@ export function createPostgresRepository(connectionString) {
       payment_requests: paymentRequests.rows,
       writing_attempts: writingAttempts.rows,
       speaking_attempts: speakingAttempts.rows,
+      generated_tasks: generatedTasks.rows,
       ai_requests: aiRequests.rows,
     };
   }
@@ -463,6 +484,8 @@ export function createPostgresRepository(connectionString) {
     finishWritingAttempt,
     createSpeakingAttempt,
     finishSpeakingAttempt,
+    getGeneratedTask,
+    saveGeneratedTask,
     logAiRequest,
     countAiRequestsSince,
     createSession,

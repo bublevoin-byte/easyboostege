@@ -7,7 +7,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { activateTrial, closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, countAiRequestsSince, createPaymentRequest, createSession, createSpeakingAttempt, createTelegramAuthCode, createWritingAttempt, deleteUserData, exportUserData, finishSpeakingAttempt, finishWritingAttempt, getPrivacyConsent, getProgress, getUser, healthCheck, isSessionActive, resolvePaymentRequest, revokeSession, saveProgress, setPrivacyConsent, setUserRole, mergeProgress, getUserByTelegram, createTelegramUser, logAiRequest, getSub } from './db.js';
+import { activateTrial, closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, countAiRequestsSince, createPaymentRequest, createSession, createSpeakingAttempt, createTelegramAuthCode, createWritingAttempt, deleteUserData, exportUserData, finishSpeakingAttempt, finishWritingAttempt, getGeneratedTask, getPrivacyConsent, getProgress, getUser, healthCheck, isSessionActive, resolvePaymentRequest, revokeSession, saveGeneratedTask, saveProgress, setPrivacyConsent, setUserRole, mergeProgress, getUserByTelegram, createTelegramUser, logAiRequest, getSub } from './db.js';
 import { config } from './config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from './ai/writing.js';
 import { buildContentPrompt, CONTENT_PROMPT_VERSION, contentRequestSchema, parseContentResponse } from './ai/content.js';
@@ -496,12 +496,15 @@ const writingLimiter = createUserRateLimiter(config.ai.maxWritingRequestsPerHour
 const ttsLimiter = createUserRateLimiter(config.ai.maxTtsRequestsPerHour);
 const sttLimiter = createUserRateLimiter(config.ai.maxSttRequestsPerHour);
 
-async function requireAiBudget(req, res, next) {
-  try {
+async function hasAiBudget() {
     const now = new Date();
     const startOfUtcDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
     const used = await countAiRequestsSince(startOfUtcDay);
-    if (used >= config.ai.dailyRequestBudget) {
+    return used < config.ai.dailyRequestBudget;
+}
+async function requireAiBudget(req, res, next) {
+  try {
+    if (!await hasAiBudget()) {
       return res.status(503).json({ error: { code: 'AI_BUDGET_EXHAUSTED', message: 'Дневной лимит ИИ исчерпан. Попробуйте завтра.' } });
     }
     next();
@@ -605,10 +608,14 @@ app.post('/api/v1/ai/evaluate-writing', auth, requireActiveSubscription, require
   }
 });
 
-app.post('/api/v1/ai/generate-content', auth, requireActiveSubscription, requirePrivacyConsent('text_processing'), chatLimiter, serveCachedDictionary, requireAiBudget, async (req, res) => {
+app.post('/api/v1/ai/generate-content', auth, requireActiveSubscription, requirePrivacyConsent('text_processing'), chatLimiter, serveCachedDictionary, async (req, res) => {
   const parsed = contentRequestSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректные параметры генерации.' } });
   const input = parsed.data;
+  const requestHash = crypto.createHash('sha256').update(JSON.stringify({ promptVersion: CONTENT_PROMPT_VERSION, input })).digest('hex');
+  const stored = await getGeneratedTask(req.user, requestHash);
+  if (stored) return res.json({ data: stored.result, provider: 'cache', sourceProvider: stored.provider, promptVersion: stored.prompt_version, cached: true });
+  if (!await hasAiBudget()) return res.status(503).json({ error: { code: 'AI_BUDGET_EXHAUSTED', message: 'Дневной лимит ИИ исчерпан. Попробуйте завтра.' } });
   const prompt = buildContentPrompt(input);
   const startedAt = Date.now();
   const providers = aiProviders();
@@ -622,7 +629,10 @@ app.post('/api/v1/ai/generate-content', auth, requireActiveSubscription, require
       const data = parseContentResponse(input.operation, response.text);
       if (input.operation === 'vocabulary_cards' && data.length !== input.count) throw Object.assign(new Error('AI_RESPONSE_INVALID'), { code: 'AI_RESPONSE_INVALID' });
       if (input.operation === 'dictionary_lookup') dictionaryCache.set(input.word.toLocaleLowerCase('en'), data);
-      await logAiRequest({ username: req.user, operation: input.operation, provider: provider.name, model: provider.model, promptVersion: CONTENT_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt, ...aiUsage(provider, usage) });
+      await Promise.all([
+        logAiRequest({ username: req.user, operation: input.operation, provider: provider.name, model: provider.model, promptVersion: CONTENT_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt, ...aiUsage(provider, usage) }),
+        saveGeneratedTask(req.user, { operation: input.operation, requestHash, request: input, result: data, provider: provider.name, promptVersion: CONTENT_PROMPT_VERSION }),
+      ]);
       return res.json({ data, provider: provider.name, promptVersion: CONTENT_PROMPT_VERSION });
     } catch (error) {
       lastCode = error.code === 'AI_RESPONSE_INVALID' ? error.code : 'AI_PROVIDER_UNAVAILABLE';
