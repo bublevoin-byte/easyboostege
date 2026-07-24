@@ -4,7 +4,7 @@ import { hashAuthCode, normalizeUsername, subscriptionView } from './shared.js';
 
 export function createFileRepository(filePath) {
   let loaded = false;
-  let state = { users: {}, progress: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], generated_tasks: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, payment_requests: {}, subscription_events: [] };
+  let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], generated_tasks: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, payment_requests: {}, subscription_events: [] };
   let writeQueue = Promise.resolve();
 
   async function load() {
@@ -16,6 +16,7 @@ export function createFileRepository(filePath) {
         state = {
           users: parsed.users && typeof parsed.users === 'object' ? parsed.users : {},
           progress: parsed.progress && typeof parsed.progress === 'object' ? parsed.progress : {},
+          progress_summary: parsed.progress_summary && typeof parsed.progress_summary === 'object' ? parsed.progress_summary : {},
           auth_codes: parsed.auth_codes && typeof parsed.auth_codes === 'object' ? parsed.auth_codes : {},
           writing_attempts: Array.isArray(parsed.writing_attempts) ? parsed.writing_attempts : [],
           speaking_attempts: Array.isArray(parsed.speaking_attempts) ? parsed.speaking_attempts : [],
@@ -341,6 +342,16 @@ export function createFileRepository(filePath) {
     await load();
     if (state.module_attempts.some((item) => item.id === attempt.id)) return { id: attempt.id, created: false };
     state.module_attempts.push({ id: attempt.id, username, module: attempt.module, activity: attempt.activity, score: attempt.score, max_score: attempt.maxScore, duration_ms: attempt.durationMs ?? null, metadata: structuredClone(attempt.metadata || {}), created_at: Date.now() });
+    state.progress_summary[username] ||= {};
+    const summary = state.progress_summary[username][attempt.module] ||= { module: attempt.module, attempt_count: 0, best_score: 0, best_max_score: 1, total_duration_ms: 0, last_attempt_at: null, updated_at: null };
+    summary.attempt_count += 1;
+    if (attempt.score / attempt.maxScore > summary.best_score / summary.best_max_score) {
+      summary.best_score = attempt.score;
+      summary.best_max_score = attempt.maxScore;
+    }
+    summary.total_duration_ms += attempt.durationMs ?? 0;
+    summary.last_attempt_at = Date.now();
+    summary.updated_at = summary.last_attempt_at;
     await persist();
     return { id: attempt.id, created: true };
   }
@@ -439,6 +450,7 @@ export function createFileRepository(filePath) {
       speaking_attempts: state.speaking_attempts.filter((item) => item.username === username),
       generated_tasks: state.generated_tasks.filter((item) => item.username === username).map(({ request_hash, username: owner, ...item }) => item),
       module_attempts: state.module_attempts.filter((item) => item.username === username),
+      progress_summary: Object.values(state.progress_summary[username] || {}),
       word_progress: Object.values(state.word_progress[username] || {}),
       error_bank: state.error_bank.filter((item) => item.username === username),
       ai_requests: state.ai_requests.filter((item) => item.username === username),
@@ -457,6 +469,7 @@ export function createFileRepository(filePath) {
     state.speaking_attempts = state.speaking_attempts.filter((item) => item.username !== username);
     state.generated_tasks = state.generated_tasks.filter((item) => item.username !== username);
     state.module_attempts = state.module_attempts.filter((item) => item.username !== username);
+    delete state.progress_summary[username];
     delete state.word_progress[username];
     state.error_bank = state.error_bank.filter((item) => item.username !== username);
     state.ai_requests = state.ai_requests.filter((item) => item.username !== username);

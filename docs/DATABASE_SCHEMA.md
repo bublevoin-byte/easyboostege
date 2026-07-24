@@ -15,6 +15,7 @@
 | `speaking_attempts` | текстовые результаты устной части | assignment, transcript, review, provider status; audio is not stored |
 | `generated_tasks` | валидированные результаты генерации | operation, versioned request hash, request/result and provider |
 | `module_attempts` | нормализованная история учебных результатов | module, activity, score, duration and bounded metadata |
+| `progress_summary` | серверная агрегированная сводка прогресса | attempts, best normalized score, total duration and last attempt |
 | `word_progress` | состояние интервального повторения слов | word, stage, errors, reviews and due time |
 | `error_bank` | агрегированный банк учебных ошибок | module, item key, type, bounded details and occurrence count |
 | `audit_log` | неизменяемый журнал административных действий | actor, action, target, result and bounded metadata |

@@ -371,14 +371,42 @@ export function createPostgresRepository(connectionString) {
   }
 
   async function recordModuleAttempt(username, attempt) {
-    const result = await pool.query(
-      `INSERT INTO module_attempts (id, username, module, activity, score, max_score, duration_ms, metadata)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
-       ON CONFLICT (id) DO NOTHING RETURNING id`,
-      [attempt.id, username, attempt.module, attempt.activity, attempt.score, attempt.maxScore,
-        attempt.durationMs ?? null, JSON.stringify(attempt.metadata || {})],
-    );
-    return { id: attempt.id, created: result.rowCount === 1 };
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await client.query(
+        `INSERT INTO module_attempts (id, username, module, activity, score, max_score, duration_ms, metadata)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+         ON CONFLICT (id) DO NOTHING RETURNING id, created_at`,
+        [attempt.id, username, attempt.module, attempt.activity, attempt.score, attempt.maxScore,
+          attempt.durationMs ?? null, JSON.stringify(attempt.metadata || {})],
+      );
+      if (result.rowCount === 1) {
+        await client.query(
+          `INSERT INTO progress_summary
+           (username, module, attempt_count, best_score, best_max_score, total_duration_ms, last_attempt_at)
+           VALUES ($1, $2, 1, $3, $4, $5, $6)
+           ON CONFLICT (username, module) DO UPDATE SET
+             attempt_count = progress_summary.attempt_count + 1,
+             best_score = CASE
+               WHEN EXCLUDED.best_score::numeric / EXCLUDED.best_max_score >
+                    progress_summary.best_score::numeric / progress_summary.best_max_score
+               THEN EXCLUDED.best_score ELSE progress_summary.best_score END,
+             best_max_score = CASE
+               WHEN EXCLUDED.best_score::numeric / EXCLUDED.best_max_score >
+                    progress_summary.best_score::numeric / progress_summary.best_max_score
+               THEN EXCLUDED.best_max_score ELSE progress_summary.best_max_score END,
+             total_duration_ms = progress_summary.total_duration_ms + EXCLUDED.total_duration_ms,
+             last_attempt_at = EXCLUDED.last_attempt_at,
+             updated_at = NOW()`,
+          [username, attempt.module, attempt.score, attempt.maxScore, attempt.durationMs ?? 0, result.rows[0].created_at],
+        );
+      }
+      await client.query('COMMIT');
+      return { id: attempt.id, created: result.rowCount === 1 };
+    } catch (error) {
+      await client.query('ROLLBACK'); throw error;
+    } finally { client.release(); }
   }
 
   async function upsertWordProgress(username, words) {
@@ -471,7 +499,7 @@ export function createPostgresRepository(connectionString) {
   }
 
   async function exportUserData(username) {
-    const [account, progress, privacyConsent, subscriptionEvents, paymentRequests, writingAttempts, speakingAttempts, generatedTasks, moduleAttempts, wordProgress, errorBank, aiRequests, auditLog] = await Promise.all([
+    const [account, progress, privacyConsent, subscriptionEvents, paymentRequests, writingAttempts, speakingAttempts, generatedTasks, moduleAttempts, progressSummary, wordProgress, errorBank, aiRequests, auditLog] = await Promise.all([
       pool.query('SELECT username, telegram_id, role, trial_used, subscription_until, created_at, updated_at FROM users WHERE username = $1', [username]),
       pool.query('SELECT data, updated_at FROM user_progress WHERE username = $1', [username]),
       pool.query('SELECT text_processing, voice_processing, policy_version, text_consented_at, voice_consented_at, updated_at FROM privacy_consents WHERE username = $1', [username]),
@@ -481,6 +509,7 @@ export function createPostgresRepository(connectionString) {
       pool.query('SELECT id, task_type, assignment, transcript, review, provider, prompt_version, status, error_code, created_at, evaluated_at FROM speaking_attempts WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, operation, request, result, provider, prompt_version, created_at FROM generated_tasks WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, module, activity, score, max_score, duration_ms, metadata, created_at FROM module_attempts WHERE username = $1 ORDER BY created_at', [username]),
+      pool.query('SELECT module, attempt_count, best_score, best_max_score, total_duration_ms, last_attempt_at, updated_at FROM progress_summary WHERE username = $1 ORDER BY module', [username]),
       pool.query('SELECT word, stage, error_count, review_count, due_at, updated_at FROM word_progress WHERE username = $1 ORDER BY word', [username]),
       pool.query('SELECT id, module, item_key, error_type, details, occurrence_count, first_seen_at, last_seen_at, resolved_at FROM error_bank WHERE username = $1 ORDER BY last_seen_at DESC', [username]),
       pool.query('SELECT id, operation, provider, model, prompt_version, status, duration_ms, error_code, prompt_tokens, completion_tokens, estimated_cost_microusd, created_at FROM ai_requests WHERE username = $1 ORDER BY created_at', [username]),
@@ -498,6 +527,7 @@ export function createPostgresRepository(connectionString) {
       speaking_attempts: speakingAttempts.rows,
       generated_tasks: generatedTasks.rows,
       module_attempts: moduleAttempts.rows,
+      progress_summary: progressSummary.rows,
       word_progress: wordProgress.rows,
       error_bank: errorBank.rows,
       ai_requests: aiRequests.rows,

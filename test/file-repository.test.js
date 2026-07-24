@@ -202,6 +202,9 @@ test('module attempts are idempotent and included in user export', async () => {
     const exported = await repository.exportUserData(username);
     assert.equal(exported.module_attempts.length, 1);
     assert.equal(exported.module_attempts[0].score, 4);
+    assert.equal(exported.progress_summary.length, 1);
+    assert.equal(exported.progress_summary[0].attempt_count, 1);
+    assert.equal(exported.progress_summary[0].best_score, 4);
   });
 });
 
