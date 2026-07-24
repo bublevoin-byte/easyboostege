@@ -49,7 +49,7 @@ let databaseCreated = false;
 try {
   backup = path.resolve(process.argv[2] || await latestBackup());
   await fsp.access(backup);
-  await docker(['exec', '-T', 'postgres', 'pg_restore', '--list'], { inputFile: backup });
+  await docker(['exec', '-T', 'postgres', 'pg_restore', '--list'], { inputFile: backup, capture: true });
   await docker(['exec', '-T', 'postgres', 'createdb', '-U', 'easyboost', databaseName]);
   databaseCreated = true;
   await docker([
