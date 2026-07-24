@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import test from 'node:test';
-import { metricsSnapshot, recordHttpRequest, resetMetricsForTest } from '../observability/metrics.js';
+import { metricsSnapshot, recordDependencyEvent, recordHttpRequest, resetMetricsForTest } from '../observability/metrics.js';
 
 test('HTTP metrics calculate errors and bounded latency summaries', () => {
   resetMetricsForTest();
@@ -25,4 +25,12 @@ test('HTTP metrics keep at most 1000 latency samples and normalize UUIDs', () =>
   assert.equal(metrics.http.requests, 1100);
   assert.equal(metrics.http.latencySampleSize, 1000);
   assert.equal(Object.keys(metrics.http.routes).length, 1);
+});
+
+test('dependency metrics count only known services and outcomes', () => {
+  resetMetricsForTest();
+  assert.equal(recordDependencyEvent('ai', 'error'), true);
+  assert.equal(recordDependencyEvent('ai', 'fallback'), true);
+  assert.equal(recordDependencyEvent('unknown', 'error'), false);
+  assert.deepEqual(metricsSnapshot().dependencies.ai, { success: 0, error: 1, fallback: 1 });
 });

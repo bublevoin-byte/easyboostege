@@ -12,6 +12,7 @@ test('provider fallback uses the secondary provider after primary failure', asyn
   assert.deepEqual(calls, ['primary', 'secondary']);
   assert.equal(result.provider, 'secondary');
   assert.equal(result.text, 'ok');
+  assert.equal(result.attempts, 2);
 });
 
 test('provider fallback returns stable errors when unavailable', async () => {

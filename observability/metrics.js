@@ -6,6 +6,9 @@ let totalDurationMs = 0;
 const latencySamples = [];
 const statusCounts = new Map();
 const routeCounts = new Map();
+const dependencyCounts = new Map();
+const allowedDependencies = new Set(['database', 'telegram', 'ai', 'stt', 'tts']);
+const allowedOutcomes = new Set(['success', 'error', 'fallback']);
 
 function boundedRoute(route) {
   const value = String(route || 'unknown').slice(0, 160);
@@ -23,6 +26,14 @@ export function recordHttpRequest({ route, status, durationMs }) {
   statusCounts.set(String(safeStatus), (statusCounts.get(String(safeStatus)) || 0) + 1);
   const key = boundedRoute(route);
   routeCounts.set(key, (routeCounts.get(key) || 0) + 1);
+}
+
+export function recordDependencyEvent(dependency, outcome) {
+  if (!allowedDependencies.has(dependency) || !allowedOutcomes.has(outcome)) return false;
+  const current = dependencyCounts.get(dependency) || { success: 0, error: 0, fallback: 0 };
+  current[outcome] += 1;
+  dependencyCounts.set(dependency, current);
+  return true;
 }
 
 function percentile(values, quantile) {
@@ -45,6 +56,7 @@ export function metricsSnapshot(now = Date.now()) {
       statuses: Object.fromEntries(statusCounts),
       routes: Object.fromEntries(routeCounts),
     },
+    dependencies: Object.fromEntries(dependencyCounts),
   };
 }
 
@@ -55,4 +67,5 @@ export function resetMetricsForTest() {
   latencySamples.length = 0;
   statusCounts.clear();
   routeCounts.clear();
+  dependencyCounts.clear();
 }

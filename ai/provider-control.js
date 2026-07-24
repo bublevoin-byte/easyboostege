@@ -8,8 +8,10 @@ export function estimateCostMicrousd(usage, prices) {
 export async function runProviderFallback(providers, invoke) {
   if (!providers.length) throw Object.assign(new Error('AI_NOT_CONFIGURED'), { status: 503 });
   let lastError = null;
+  let attempts = 0;
   for (const provider of providers) {
-    try { return { ...await invoke(provider), provider: provider.name, model: provider.model }; }
+    attempts += 1;
+    try { return { ...await invoke(provider), provider: provider.name, model: provider.model, attempts }; }
     catch (error) { lastError = error; lastError.provider = provider.name; lastError.model = provider.model; }
   }
   throw Object.assign(new Error('AI_UNAVAILABLE'), { status: 502, cause: lastError, provider: lastError?.provider, model: lastError?.model });

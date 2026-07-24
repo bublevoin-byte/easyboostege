@@ -20,7 +20,7 @@ import { moduleAttemptSchema } from './validation/module-attempt.js';
 import { wordProgressBatchSchema } from './validation/word-progress.js';
 import { errorBankBatchSchema } from './validation/error-bank.js';
 import { contentSecurityPolicy } from './security/csp.js';
-import { metricsSnapshot, recordHttpRequest } from './observability/metrics.js';
+import { metricsSnapshot, recordDependencyEvent, recordHttpRequest } from './observability/metrics.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const frontendHtml = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
@@ -93,8 +93,10 @@ app.get('/health/live', (req, res) => {
 app.get('/health/ready', async (req, res) => {
   try {
     await healthCheck();
+    recordDependencyEvent('database', 'success');
     res.json({ status: 'ready', storage: config.database.provider });
   } catch (error) {
+    recordDependencyEvent('database', 'error');
     res.status(503).json({ status: 'not_ready' });
   }
 });
@@ -283,9 +285,9 @@ async function startTelegram() {
   if (!TG_TOKEN) { console.log('Telegram: TELEGRAM_BOT_TOKEN не задан — вход через Telegram выключен'); return; }
   try {
     const me = await tgApi('getMe');
-    if (me.ok) { BOT_USERNAME = me.result.username; console.log('Telegram bot: @' + BOT_USERNAME); }
-    else { console.log('Telegram getMe error:', me.description); return; }
-  } catch (e) { console.log('Telegram getMe failed:', e.message); return; }
+    if (me.ok) { BOT_USERNAME = me.result.username; recordDependencyEvent('telegram', 'success'); console.log('Telegram bot: @' + BOT_USERNAME); }
+    else { recordDependencyEvent('telegram', 'error'); console.log('Telegram getMe error:', me.description); return; }
+  } catch (e) { recordDependencyEvent('telegram', 'error'); console.log('Telegram getMe failed:', e.message); return; }
 
   console.log('Telegram admin notifications:', ADMIN_ID ? 'configured' : 'disabled');
   let offset = 0;
@@ -298,7 +300,7 @@ async function startTelegram() {
           try {
             if (u.message) await onMessage(u.message);
             else if (u.callback_query) await onCallback(u.callback_query);
-          } catch (e) { console.log('Telegram handler error:', e.message); }
+          } catch (e) { recordDependencyEvent('telegram', 'error'); console.log('Telegram handler error:', e.message); }
         }
       }
     } catch (e) { /* сеть — попробуем снова */ }
@@ -610,6 +612,8 @@ app.post('/api/v1/ai/evaluate-writing', auth, requireActiveSubscription, require
     attemptId = await createWritingAttempt(req.user, input, WRITING_PROMPT_VERSION);
     const prompt = buildWritingPrompt(input);
     const result = await askWithFallback(prompt.system, prompt.user);
+    recordDependencyEvent('ai', 'success');
+    if (result.attempts > 1) recordDependencyEvent('ai', 'fallback');
     provider = result.provider;
     model = result.model;
     promptTokens = result.promptTokens;
@@ -630,6 +634,7 @@ app.post('/api/v1/ai/evaluate-writing', auth, requireActiveSubscription, require
     });
     res.json({ review, provider, attemptId });
   } catch (error) {
+    recordDependencyEvent('ai', 'error');
     if (!attemptId) return next(error);
     provider ||= error.provider || error.cause?.provider || null;
     model ||= error.model || error.cause?.model || null;
@@ -675,7 +680,7 @@ app.post('/api/v1/ai/generate-content', auth, requireActiveSubscription, require
   const providers = aiProviders();
   if (!providers.length) return res.status(503).json({ error: { code: 'AI_NOT_CONFIGURED', message: 'ИИ не настроен на сервере.' } });
   let lastCode = 'AI_PROVIDER_UNAVAILABLE';
-  for (const provider of providers) {
+  for (const [providerIndex, provider] of providers.entries()) {
     let usage = {};
     try {
       const response = await askProvider(provider, prompt.system, prompt.user);
@@ -687,8 +692,11 @@ app.post('/api/v1/ai/generate-content', auth, requireActiveSubscription, require
         logAiRequest({ username: req.user, operation: input.operation, provider: provider.name, model: provider.model, promptVersion: CONTENT_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt, ...aiUsage(provider, usage) }),
         saveGeneratedTask(req.user, { operation: input.operation, requestHash, request: input, result: data, provider: provider.name, promptVersion: CONTENT_PROMPT_VERSION }),
       ]);
+      recordDependencyEvent('ai', 'success');
+      if (providerIndex > 0) recordDependencyEvent('ai', 'fallback');
       return res.json({ data, provider: provider.name, promptVersion: CONTENT_PROMPT_VERSION });
     } catch (error) {
+      recordDependencyEvent('ai', 'error');
       lastCode = error.code === 'AI_RESPONSE_INVALID' ? error.code : 'AI_PROVIDER_UNAVAILABLE';
       await logAiRequest({ username: req.user, operation: input.operation, provider: provider.name, model: provider.model, promptVersion: CONTENT_PROMPT_VERSION, status: 'failed', durationMs: Date.now() - startedAt, errorCode: lastCode, ...aiUsage(provider, usage) });
     }
@@ -710,7 +718,7 @@ app.post('/api/v1/ai/evaluate-speaking', auth, requireActiveSubscription, requir
     return res.status(503).json({ error: { code: 'AI_NOT_CONFIGURED', message: 'ИИ не настроен на сервере.' } });
   }
   let lastCode = 'AI_PROVIDER_UNAVAILABLE';
-  for (const provider of providers) {
+  for (const [providerIndex, provider] of providers.entries()) {
     let usage = {};
     try {
       const response = await askProvider(provider, prompt.system, prompt.user);
@@ -720,8 +728,11 @@ app.post('/api/v1/ai/evaluate-speaking', auth, requireActiveSubscription, requir
         logAiRequest({ username: req.user, operation: `evaluate_speaking_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt, ...aiUsage(provider, usage) }),
         finishSpeakingAttempt(attemptId, { status: 'completed', review, provider: provider.name }),
       ]);
+      recordDependencyEvent('ai', 'success');
+      if (providerIndex > 0) recordDependencyEvent('ai', 'fallback');
       return res.json({ review, provider: provider.name, promptVersion: SPEAKING_PROMPT_VERSION });
     } catch (error) {
+      recordDependencyEvent('ai', 'error');
       lastCode = error.code === 'AI_RESPONSE_INVALID' ? error.code : 'AI_PROVIDER_UNAVAILABLE';
       await logAiRequest({ username: req.user, operation: `evaluate_speaking_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'failed', durationMs: Date.now() - startedAt, errorCode: lastCode, ...aiUsage(provider, usage) });
     }
@@ -739,15 +750,18 @@ app.post('/api/v1/ai/generate-speaking-sample', auth, requireActiveSubscription,
   const providers = aiProviders();
   if (!providers.length) return res.status(503).json({ error: { code: 'AI_NOT_CONFIGURED', message: 'ИИ не настроен на сервере.' } });
   let lastCode = 'AI_PROVIDER_UNAVAILABLE';
-  for (const provider of providers) {
+  for (const [providerIndex, provider] of providers.entries()) {
     let usage = {};
     try {
       const response = await askProvider(provider, prompt.system, prompt.user);
       usage = response;
       const data = parseSpeakingSample(input.taskType, response.text);
       await logAiRequest({ username: req.user, operation: `speaking_sample_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt, ...aiUsage(provider, usage) });
+      recordDependencyEvent('ai', 'success');
+      if (providerIndex > 0) recordDependencyEvent('ai', 'fallback');
       return res.json({ data, provider: provider.name, promptVersion: SPEAKING_PROMPT_VERSION });
     } catch (error) {
+      recordDependencyEvent('ai', 'error');
       lastCode = error.code === 'AI_RESPONSE_INVALID' ? error.code : 'AI_PROVIDER_UNAVAILABLE';
       await logAiRequest({ username: req.user, operation: `speaking_sample_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'failed', durationMs: Date.now() - startedAt, errorCode: lastCode, ...aiUsage(provider, usage) });
     }
@@ -812,13 +826,23 @@ app.get('/api/tts', auth, requireActiveSubscription, ttsLimiter, async (req, res
     return res.sendFile(file);
   }
   if (useGrok) {
-    try { return ttsSend(res, await grokTts(text, voice), file); }
-    catch (e) { console.log('Grok TTS не сработал, пробую Edge:', e.message); }
+    try {
+      const audio = await grokTts(text, voice);
+      recordDependencyEvent('tts', 'success');
+      return ttsSend(res, audio, file);
+    } catch (e) {
+      recordDependencyEvent('tts', 'error');
+      recordDependencyEvent('tts', 'fallback');
+      console.log('Grok TTS не сработал, пробую Edge:', e.message);
+    }
   }
   try {
     const ekey = crypto.createHash('sha256').update('e|' + voice + '|' + (slow ? 1 : 0) + '|' + text).digest('hex');
-    return ttsSend(res, await edgeTts(text, voice, slow), path.join(TTS_DIR, ekey + '.mp3'));
+    const audio = await edgeTts(text, voice, slow);
+    recordDependencyEvent('tts', 'success');
+    return ttsSend(res, audio, path.join(TTS_DIR, ekey + '.mp3'));
   } catch (e) {
+    recordDependencyEvent('tts', 'error');
     res.status(503).json({ error: { code: 'TTS_UNAVAILABLE', message: 'Озвучка временно недоступна.' } });
   }
 });
@@ -826,7 +850,10 @@ app.get('/api/tts', auth, requireActiveSubscription, ttsLimiter, async (req, res
 // ---- расшифровка речи (Grok STT) для оценки говорения ----
 app.post('/api/stt', auth, requireActiveSubscription, requirePrivacyConsent('voice_processing'), sttLimiter, express.raw({ type: () => true, limit: config.ai.sttMaxBytes }), async (req, res) => {
   try {
-    if (!config.ai.xaiEnabled || !XAI_KEY) return res.status(503).json({ error: { code: 'STT_NOT_CONFIGURED', message: 'Распознавание речи не настроено.' } });
+    if (!config.ai.xaiEnabled || !XAI_KEY) {
+      recordDependencyEvent('stt', 'error');
+      return res.status(503).json({ error: { code: 'STT_NOT_CONFIGURED', message: 'Распознавание речи не настроено.' } });
+    }
     const buf = req.body;
     const upload = validateAudioUpload(req.headers['content-type'], buf, config.ai.sttMaxBytes);
     if (!upload.ok) return res.status(upload.status).json({ error: { code: upload.code, message: upload.code === 'UNSUPPORTED_AUDIO_TYPE' ? 'Формат аудио не поддерживается.' : upload.code === 'AUDIO_TOO_LARGE' ? 'Аудиозапись слишком большая.' : 'Аудиозапись пуста.' } });
@@ -840,9 +867,14 @@ app.post('/api/stt', auth, requireActiveSubscription, requirePrivacyConsent('voi
     try { r = await fetch('https://api.x.ai/v1/stt', { method: 'POST', headers: { Authorization: 'Bearer ' + XAI_KEY }, body: fd, signal: controller.signal }); }
     finally { clearTimeout(timer); }
     const j = await r.json().catch(() => ({}));
-    if (!r.ok) return res.status(502).json({ error: { code: 'STT_PROVIDER_UNAVAILABLE', message: 'Распознавание речи временно недоступно.' } });
+    if (!r.ok) {
+      recordDependencyEvent('stt', 'error');
+      return res.status(502).json({ error: { code: 'STT_PROVIDER_UNAVAILABLE', message: 'Распознавание речи временно недоступно.' } });
+    }
+    recordDependencyEvent('stt', 'success');
     res.json({ text: j.text || '', duration: j.duration || 0 });
   } catch (e) {
+    recordDependencyEvent('stt', 'error');
     res.status(502).json({ error: { code: 'STT_UNAVAILABLE', message: 'Не удалось распознать запись.' } });
   }
 });
