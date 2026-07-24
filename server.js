@@ -20,6 +20,7 @@ import { moduleAttemptSchema } from './validation/module-attempt.js';
 import { wordProgressBatchSchema } from './validation/word-progress.js';
 import { errorBankBatchSchema } from './validation/error-bank.js';
 import { contentSecurityPolicy } from './security/csp.js';
+import { metricsSnapshot, recordHttpRequest } from './observability/metrics.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const frontendHtml = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
@@ -66,6 +67,8 @@ app.use((req, res, next) => {
   const startedAt = Date.now();
   const requestPath = req.path;
   res.once('finish', () => {
+    const durationMs = Date.now() - startedAt;
+    recordHttpRequest({ route: requestPath, status: res.statusCode, durationMs });
     console.log(JSON.stringify({
       timestamp: new Date().toISOString(),
       level: res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info',
@@ -74,7 +77,7 @@ app.use((req, res, next) => {
       method: req.method,
       path: requestPath,
       status: res.statusCode,
-      durationMs: Date.now() - startedAt,
+      durationMs,
       authenticated: Boolean(req.user),
       userId: logUserId(req.user),
     }));
@@ -353,6 +356,10 @@ app.get('/api/me', auth, async (req, res, next) => {
 
 app.get('/api/admin/status', auth, requireRole('admin'), (req, res) => {
   res.json({ status: 'ok', role: req.role });
+});
+app.get('/api/admin/metrics', auth, requireRole('admin'), (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json(metricsSnapshot());
 });
 app.post('/api/logout', async (req, res, next) => {
   try {

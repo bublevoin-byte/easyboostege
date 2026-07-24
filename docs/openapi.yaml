@@ -8,6 +8,13 @@ servers:
 security:
   - cookieAuth: []
 paths:
+  /api/admin/metrics:
+    get:
+      summary: Read process uptime and bounded HTTP metrics
+      responses:
+        '200': { description: Metrics snapshot for an administrator }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /health/live:
     get:
       security: []

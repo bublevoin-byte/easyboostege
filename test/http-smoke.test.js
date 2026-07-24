@@ -185,6 +185,13 @@ test('application starts and serves health, security headers and PWA assets', { 
     const adminRequest = await fetch(`${baseUrl}/api/admin/status`, { headers: adminAuthorization });
     assert.equal(adminRequest.status, 200);
     assert.equal((await adminRequest.json()).role, 'admin');
+    const metricsRequest = await fetch(`${baseUrl}/api/admin/metrics`, { headers: adminAuthorization });
+    assert.equal(metricsRequest.status, 200);
+    assert.match(metricsRequest.headers.get('cache-control') || '', /no-store/u);
+    const metrics = await metricsRequest.json();
+    assert.ok(metrics.http.requests > 0);
+    assert.equal(typeof metrics.http.serverErrorRate, 'number');
+    assert.equal(typeof metrics.http.p95DurationMs, 'number');
 
     const revocableToken = jwt.sign({ u: 'sessionuser', sid: sessionId }, jwtSecret, { expiresIn: '1h' });
     const sessionBeforeLogout = await fetch(`${baseUrl}/api/me`, { headers: { Authorization: `Bearer ${revocableToken}` } });
