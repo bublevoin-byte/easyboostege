@@ -21,6 +21,7 @@ import { wordProgressBatchSchema } from './validation/word-progress.js';
 import { errorBankBatchSchema } from './validation/error-bank.js';
 import { contentSecurityPolicy } from './security/csp.js';
 import { metricsSnapshot, recordDependencyEvent, recordHttpRequest } from './observability/metrics.js';
+import { collectSystemMetrics } from './observability/system-metrics.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const frontendHtml = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
@@ -362,7 +363,8 @@ app.get('/api/admin/status', auth, requireRole('admin'), (req, res) => {
 app.get('/api/admin/metrics', auth, requireRole('admin'), async (req, res, next) => {
   try {
     res.setHeader('Cache-Control', 'no-store');
-    res.json({ ...metricsSnapshot(), aiUsage: await getAiUsageMetrics(24) });
+    const [aiUsage, system] = await Promise.all([getAiUsageMetrics(24), collectSystemMetrics(__dirname)]);
+    res.json({ ...metricsSnapshot(), aiUsage, system });
   } catch (error) { next(error); }
 });
 app.post('/api/logout', async (req, res, next) => {
