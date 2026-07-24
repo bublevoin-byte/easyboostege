@@ -398,6 +398,20 @@ export function createFileRepository(filePath) {
     return state.ai_requests.filter((item) => Number(item.created_at) >= timestamp).length;
   }
 
+  async function getAiUsageMetrics(hours = 24) {
+    await load();
+    const safeHours = Math.max(1, Math.min(Number(hours) || 24, 168));
+    const since = Date.now() - safeHours * 3_600_000;
+    const entries = state.ai_requests.filter((item) => Number(item.created_at) >= since);
+    return {
+      windowHours: safeHours,
+      requests: entries.length,
+      promptTokens: entries.reduce((sum, item) => sum + (Number(item.promptTokens) || 0), 0),
+      completionTokens: entries.reduce((sum, item) => sum + (Number(item.completionTokens) || 0), 0),
+      estimatedCostMicrousd: entries.reduce((sum, item) => sum + (Number(item.estimatedCostMicrousd) || 0), 0),
+    };
+  }
+
   function removeExpiredSessions(now = Date.now()) {
     for (const [id, session] of Object.entries(state.sessions)) {
       if (Number(session.expires_at) <= now) delete state.sessions[id];
@@ -532,6 +546,7 @@ export function createFileRepository(filePath) {
     upsertErrorBank,
     logAiRequest,
     countAiRequestsSince,
+    getAiUsageMetrics,
     createSession,
     isSessionActive,
     revokeSession,

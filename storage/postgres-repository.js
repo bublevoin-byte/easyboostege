@@ -471,6 +471,26 @@ export function createPostgresRepository(connectionString) {
     return Number(result.rows[0].count);
   }
 
+  async function getAiUsageMetrics(hours = 24) {
+    const safeHours = Math.max(1, Math.min(Number(hours) || 24, 168));
+    const result = await pool.query(
+      `SELECT COUNT(*)::int AS requests,
+              COALESCE(SUM(prompt_tokens), 0)::bigint AS prompt_tokens,
+              COALESCE(SUM(completion_tokens), 0)::bigint AS completion_tokens,
+              COALESCE(SUM(estimated_cost_microusd), 0)::bigint AS estimated_cost_microusd
+       FROM ai_requests WHERE created_at >= NOW() - ($1 * INTERVAL '1 hour')`,
+      [safeHours],
+    );
+    const row = result.rows[0];
+    return {
+      windowHours: safeHours,
+      requests: Number(row.requests),
+      promptTokens: Number(row.prompt_tokens),
+      completionTokens: Number(row.completion_tokens),
+      estimatedCostMicrousd: Number(row.estimated_cost_microusd),
+    };
+  }
+
   async function createSession(id, username, expiresAt) {
     await pool.query('DELETE FROM sessions WHERE expires_at <= NOW()');
     await pool.query(
@@ -595,6 +615,7 @@ export function createPostgresRepository(connectionString) {
     upsertErrorBank,
     logAiRequest,
     countAiRequestsSince,
+    getAiUsageMetrics,
     createSession,
     isSessionActive,
     revokeSession,

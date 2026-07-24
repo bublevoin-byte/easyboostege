@@ -37,6 +37,7 @@ export const upsertWordProgress = (...args) => repository.upsertWordProgress(...
 export const upsertErrorBank = (...args) => repository.upsertErrorBank(...args);
 export const logAiRequest = (...args) => repository.logAiRequest(...args);
 export const countAiRequestsSince = (...args) => repository.countAiRequestsSince(...args);
+export const getAiUsageMetrics = (...args) => repository.getAiUsageMetrics(...args);
 export const createSession = (...args) => repository.createSession(...args);
 export const isSessionActive = (...args) => repository.isSessionActive(...args);
 export const revokeSession = (...args) => repository.revokeSession(...args);

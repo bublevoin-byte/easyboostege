@@ -7,7 +7,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { activateTrial, closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, countAiRequestsSince, createPaymentRequest, createSession, createSpeakingAttempt, createTelegramAuthCode, createWritingAttempt, deleteUserData, exportUserData, finishSpeakingAttempt, finishWritingAttempt, getGeneratedTask, getPrivacyConsent, getProgress, getUser, healthCheck, isSessionActive, recordModuleAttempt, resolvePaymentRequest, revokeSession, saveGeneratedTask, saveProgress, setPrivacyConsent, setUserRole, upsertErrorBank, upsertWordProgress, mergeProgress, getUserByTelegram, createTelegramUser, logAiRequest, getSub } from './db.js';
+import { activateTrial, closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, countAiRequestsSince, createPaymentRequest, createSession, createSpeakingAttempt, createTelegramAuthCode, createWritingAttempt, deleteUserData, exportUserData, finishSpeakingAttempt, finishWritingAttempt, getAiUsageMetrics, getGeneratedTask, getPrivacyConsent, getProgress, getUser, healthCheck, isSessionActive, recordModuleAttempt, resolvePaymentRequest, revokeSession, saveGeneratedTask, saveProgress, setPrivacyConsent, setUserRole, upsertErrorBank, upsertWordProgress, mergeProgress, getUserByTelegram, createTelegramUser, logAiRequest, getSub } from './db.js';
 import { config } from './config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from './ai/writing.js';
 import { buildContentPrompt, CONTENT_PROMPT_VERSION, contentRequestSchema, parseContentResponse } from './ai/content.js';
@@ -359,9 +359,11 @@ app.get('/api/me', auth, async (req, res, next) => {
 app.get('/api/admin/status', auth, requireRole('admin'), (req, res) => {
   res.json({ status: 'ok', role: req.role });
 });
-app.get('/api/admin/metrics', auth, requireRole('admin'), (req, res) => {
-  res.setHeader('Cache-Control', 'no-store');
-  res.json(metricsSnapshot());
+app.get('/api/admin/metrics', auth, requireRole('admin'), async (req, res, next) => {
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ ...metricsSnapshot(), aiUsage: await getAiUsageMetrics(24) });
+  } catch (error) { next(error); }
 });
 app.post('/api/logout', async (req, res, next) => {
   try {

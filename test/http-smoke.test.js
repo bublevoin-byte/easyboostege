@@ -192,6 +192,9 @@ test('application starts and serves health, security headers and PWA assets', { 
     assert.ok(metrics.http.requests > 0);
     assert.equal(typeof metrics.http.serverErrorRate, 'number');
     assert.equal(typeof metrics.http.p95DurationMs, 'number');
+    assert.deepEqual(metrics.aiUsage, {
+      windowHours: 24, requests: 0, promptTokens: 0, completionTokens: 0, estimatedCostMicrousd: 0,
+    });
 
     const revocableToken = jwt.sign({ u: 'sessionuser', sid: sessionId }, jwtSecret, { expiresIn: '1h' });
     const sessionBeforeLogout = await fetch(`${baseUrl}/api/me`, { headers: { Authorization: `Bearer ${revocableToken}` } });

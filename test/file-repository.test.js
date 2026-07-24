@@ -150,6 +150,9 @@ test('writing attempt and AI metadata are persisted without prompt text in the A
     });
     assert.equal(await repository.countAiRequestsSince(new Date(Date.now() - 60_000)), 1);
     assert.equal(await repository.countAiRequestsSince(new Date(Date.now() + 60_000)), 0);
+    assert.deepEqual(await repository.getAiUsageMetrics(24), {
+      windowHours: 24, requests: 1, promptTokens: 42, completionTokens: 17, estimatedCostMicrousd: 25,
+    });
 
     const stored = JSON.parse(await fs.readFile(file, 'utf8'));
     assert.equal(stored.writing_attempts[0].status, 'failed');
