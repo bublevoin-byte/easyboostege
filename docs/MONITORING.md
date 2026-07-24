@@ -21,3 +21,27 @@
 заменяет внешний uptime-monitor и оповещения: они должны проверять `/health/ready`
 и формировать алерты независимо от процесса приложения. Поэтому доступность ещё
 не считается закрытым требованием до подключения внешней проверки.
+
+## Host-monitor и Telegram
+
+В production задайте случайный `MONITORING_TOKEN` длиной не менее 32 символов.
+Скрипт `npm run monitor` независимо проверяет `/health/ready`, получает технические
+метрики через `/internal/metrics`, применяет пороги и отправляет сообщения через
+существующие `TELEGRAM_BOT_TOKEN` и `ADMIN_TELEGRAM_ID`.
+
+Состояние активных проблем сохраняется в `MONITORING_STATE_FILE`: повторные
+сообщения подавляются, а после нормализации отправляется recovery-уведомление.
+При недоступности приложения прежние проблемы не считаются устранёнными.
+
+Production cron запускается каждые пять минут:
+
+```cron
+*/5 * * * * root cd /opt/easyboost-next && MONITORING_URL=http://127.0.0.1:3000 MONITORING_APP_DIR=/opt/easyboost-next MONITORING_STATE_FILE=/var/lib/easyboost-monitor/state.json /usr/bin/npm run monitor >> /var/log/easyboost-monitor.log 2>&1
+```
+
+Проверка доставки сообщения:
+
+```bash
+cd /opt/easyboost-next
+MONITORING_STATE_FILE=/var/lib/easyboost-monitor/state.json npm run monitor -- --test-alert
+```

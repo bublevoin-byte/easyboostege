@@ -30,8 +30,14 @@ export function recordHttpRequest({ route, status, durationMs }) {
 
 export function recordDependencyEvent(dependency, outcome) {
   if (!allowedDependencies.has(dependency) || !allowedOutcomes.has(outcome)) return false;
-  const current = dependencyCounts.get(dependency) || { success: 0, error: 0, fallback: 0 };
+  const current = dependencyCounts.get(dependency) || {
+    success: 0, error: 0, fallback: 0, consecutiveErrors: 0, lastOutcome: null, lastEventAt: null,
+  };
   current[outcome] += 1;
+  if (outcome === 'error') current.consecutiveErrors += 1;
+  if (outcome === 'success') current.consecutiveErrors = 0;
+  current.lastOutcome = outcome;
+  current.lastEventAt = new Date().toISOString();
   dependencyCounts.set(dependency, current);
   return true;
 }

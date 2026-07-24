@@ -38,6 +38,10 @@ if (isProduction && databaseProvider !== 'postgres') {
   throw new Error('PostgreSQL storage is required in production');
 }
 
+if (isProduction && process.env.MONITORING_TOKEN && process.env.MONITORING_TOKEN.length < 32) {
+  throw new Error('MONITORING_TOKEN must contain at least 32 characters when configured');
+}
+
 export const config = Object.freeze({
   nodeEnv,
   isProduction,
@@ -45,6 +49,9 @@ export const config = Object.freeze({
   jwtSecret: jwtSecret || 'development-only-secret-change-before-production',
   sessionDays: readInteger('SESSION_DAYS', 30, { min: 1, max: 90 }),
   appUrl: process.env.APP_URL || 'http://localhost:3000',
+  monitoring: Object.freeze({
+    token: process.env.MONITORING_TOKEN || '',
+  }),
   database: Object.freeze({
     provider: databaseProvider,
     url: process.env.DATABASE_URL || '',

@@ -170,6 +170,22 @@ function requireRole(...roles) {
     ? next()
     : res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Недостаточно прав.' } });
 }
+function monitoringAuth(req, res, next) {
+  const configured = config.monitoring.token;
+  const provided = String(req.headers.authorization || '').replace(/^Bearer\s+/u, '');
+  if (!configured) return res.status(404).end();
+  const expectedBuffer = Buffer.from(configured);
+  const providedBuffer = Buffer.from(provided);
+  if (expectedBuffer.length !== providedBuffer.length || !crypto.timingSafeEqual(expectedBuffer, providedBuffer)) {
+    return res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Monitoring token required.' } });
+  }
+  next();
+}
+
+async function buildMonitoringSnapshot() {
+  const [aiUsage, system] = await Promise.all([getAiUsageMetrics(24), collectSystemMetrics(__dirname)]);
+  return { ...metricsSnapshot(), aiUsage, system };
+}
 
 // ---- Telegram bot ----
 async function tgApi(method, params) {
@@ -363,8 +379,13 @@ app.get('/api/admin/status', auth, requireRole('admin'), (req, res) => {
 app.get('/api/admin/metrics', auth, requireRole('admin'), async (req, res, next) => {
   try {
     res.setHeader('Cache-Control', 'no-store');
-    const [aiUsage, system] = await Promise.all([getAiUsageMetrics(24), collectSystemMetrics(__dirname)]);
-    res.json({ ...metricsSnapshot(), aiUsage, system });
+    res.json(await buildMonitoringSnapshot());
+  } catch (error) { next(error); }
+});
+app.get('/internal/metrics', monitoringAuth, async (req, res, next) => {
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(await buildMonitoringSnapshot());
   } catch (error) { next(error); }
 });
 app.post('/api/logout', async (req, res, next) => {

@@ -80,6 +80,7 @@ test('application starts and serves health, security headers and PWA assets', { 
       XAI_API_KEY: '',
       GROQ_API_KEY: '',
       AI_REQUESTS_PER_HOUR: '1',
+      MONITORING_TOKEN: 'monitoring-test-token-with-32-characters',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -197,6 +198,13 @@ test('application starts and serves health, security headers and PWA assets', { 
     });
     assert.ok(metrics.system.disk.totalBytes > 0);
     assert.equal(metrics.system.backup.fresh, false);
+    const unauthorizedMetrics = await fetch(`${baseUrl}/internal/metrics`);
+    assert.equal(unauthorizedMetrics.status, 401);
+    const internalMetrics = await fetch(`${baseUrl}/internal/metrics`, {
+      headers: { Authorization: 'Bearer monitoring-test-token-with-32-characters' },
+    });
+    assert.equal(internalMetrics.status, 200);
+    assert.equal(typeof (await internalMetrics.json()).http.requests, 'number');
 
     const revocableToken = jwt.sign({ u: 'sessionuser', sid: sessionId }, jwtSecret, { expiresIn: '1h' });
     const sessionBeforeLogout = await fetch(`${baseUrl}/api/me`, { headers: { Authorization: `Bearer ${revocableToken}` } });

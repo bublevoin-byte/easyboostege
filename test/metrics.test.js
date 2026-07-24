@@ -32,5 +32,10 @@ test('dependency metrics count only known services and outcomes', () => {
   assert.equal(recordDependencyEvent('ai', 'error'), true);
   assert.equal(recordDependencyEvent('ai', 'fallback'), true);
   assert.equal(recordDependencyEvent('unknown', 'error'), false);
-  assert.deepEqual(metricsSnapshot().dependencies.ai, { success: 0, error: 1, fallback: 1 });
+  const ai = metricsSnapshot().dependencies.ai;
+  assert.equal(ai.success, 0);
+  assert.equal(ai.error, 1);
+  assert.equal(ai.fallback, 1);
+  assert.equal(ai.consecutiveErrors, 1);
+  assert.equal(ai.lastOutcome, 'fallback');
 });
