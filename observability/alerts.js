@@ -41,5 +41,10 @@ export function evaluateAlerts({ healthOk, metrics, thresholds = {} }) {
       ? `🔴 Backup устарел: ${metrics.system.backup.ageHours} ч.`
       : '🔴 Актуальный backup не найден.';
   }
+  if (!metrics.system?.restoreCheck?.fresh) {
+    alerts.restore_check_failed = metrics.system?.restoreCheck?.status === 'failed'
+      ? '🔴 Последняя проверка восстановления backup завершилась ошибкой.'
+      : '🔴 Успешная проверка восстановления backup отсутствует или старше 35 дней.';
+  }
   return alerts;
 }

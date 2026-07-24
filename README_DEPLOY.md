@@ -70,6 +70,14 @@ curl --fail http://127.0.0.1:3000/health/ready
 npm run db:backup
 ```
 
+Проверить последний архив реальным восстановлением в изолированную временную базу:
+
+```bash
+npm run db:verify-backup
+```
+
+Команда проверяет структуру архива, создаёт временную БД, выполняет `pg_restore`, проверяет основные таблицы и миграции, а затем удаляет временную БД. Рабочая база и приложение не останавливаются. Результат и длительность записываются в `backups/restore-check-status.json`.
+
 Можно указать собственный путь: `npm run db:backup -- /secure/easyboost.dump`. Храните копии вне VPS и регулярно проверяйте восстановление на отдельном стенде.
 
 Восстановление полностью заменяет содержимое базы из архива и требует явного подтверждения:
@@ -85,6 +93,7 @@ npm run db:restore -- /secure/easyboost.dump --confirm-restore
 ```cron
 15 3 * * * cd /opt/easyboost && /usr/bin/npm run db:backup >> /var/log/easyboost-backup.log 2>&1
 25 4 * * * find /opt/easyboost/backups -type f -name 'easyboost-*.dump' -mtime +14 -delete
+20 5 1 * * cd /opt/easyboost && /usr/bin/npm run db:verify-backup >> /var/log/easyboost-restore-check.log 2>&1
 ```
 
 ## Откат приложения

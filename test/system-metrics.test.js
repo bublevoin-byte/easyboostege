@@ -12,11 +12,18 @@ test('system metrics report disk and latest backup freshness', async () => {
     await fs.mkdir(backups);
     const file = path.join(backups, 'easyboost-test.dump');
     await fs.writeFile(file, 'backup');
+    const checkedAt = new Date().toISOString();
+    await fs.writeFile(path.join(backups, 'restore-check-status.json'), JSON.stringify({
+      status: 'success', checkedAt, durationMs: 1500, backup: 'easyboost-test.dump',
+    }));
     const metrics = await collectSystemMetrics(directory);
     assert.ok(metrics.disk.totalBytes > 0);
     assert.ok(metrics.disk.usedPercent >= 0 && metrics.disk.usedPercent <= 100);
     assert.equal(metrics.backup.file, 'easyboost-test.dump');
     assert.equal(metrics.backup.fresh, true);
+    assert.equal(metrics.restoreCheck.status, 'success');
+    assert.equal(metrics.restoreCheck.fresh, true);
+    assert.equal(metrics.restoreCheck.durationMs, 1500);
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }
@@ -25,8 +32,12 @@ test('system metrics report disk and latest backup freshness', async () => {
 test('system metrics report a missing backup as not fresh', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-metrics-'));
   try {
-    assert.deepEqual((await collectSystemMetrics(directory)).backup, {
+    const metrics = await collectSystemMetrics(directory);
+    assert.deepEqual(metrics.backup, {
       file: null, sizeBytes: 0, createdAt: null, ageHours: null, fresh: false,
+    });
+    assert.deepEqual(metrics.restoreCheck, {
+      status: 'missing', checkedAt: null, ageDays: null, fresh: false,
     });
   } finally {
     await fs.rm(directory, { recursive: true, force: true });

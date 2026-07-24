@@ -27,6 +27,25 @@ export async function collectSystemMetrics(appDirectory, now = Date.now()) {
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
   }
+  let restoreCheck = { status: 'missing', checkedAt: null, ageDays: null, fresh: false };
+  try {
+    const stored = JSON.parse(await fs.readFile(path.join(backupDirectory, 'restore-check-status.json'), 'utf8'));
+    const checkedAtMs = Date.parse(stored.checkedAt);
+    const ageDays = Number.isFinite(checkedAtMs)
+      ? Math.round(((now - checkedAtMs) / 86_400_000) * 100) / 100
+      : null;
+    restoreCheck = {
+      status: stored.status,
+      checkedAt: stored.checkedAt || null,
+      ageDays,
+      fresh: stored.status === 'success' && ageDays !== null && ageDays <= 35,
+      durationMs: Number.isFinite(stored.durationMs) ? stored.durationMs : null,
+      backup: stored.backup || null,
+    };
+  } catch (error) {
+    if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
+    if (error instanceof SyntaxError) restoreCheck.status = 'invalid';
+  }
   return {
     disk,
     backup: latest ? {
@@ -36,5 +55,6 @@ export async function collectSystemMetrics(appDirectory, now = Date.now()) {
       ageHours: Math.round(((now - latest.mtimeMs) / 3_600_000) * 100) / 100,
       fresh: now - latest.mtimeMs <= 36 * 3_600_000,
     } : { file: null, sizeBytes: 0, createdAt: null, ageHours: null, fresh: false },
+    restoreCheck,
   };
 }

@@ -9,6 +9,7 @@
 - [x] `/health/live` и `/health/ready` отвечают из production Compose.
 - [x] Backup создаётся атомарно; restore проверяет архив и требует подтверждения.
 - [x] Backup/restore rehearsal возвращает удалённую marker-запись и healthy-состояние приложения.
+- [x] Проверка backup автоматически восстанавливает архив в изолированную временную БД и публикует статус для мониторинга.
 - [x] Cookie-session, CSRF, CSP и отсутствие frontend-секретов покрыты regression-тестами.
 - [x] `npm audit --omit=dev` сообщает 0 известных уязвимостей.
 - [x] CI запускает миграции и integration-тест с PostgreSQL 17.
