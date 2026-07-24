@@ -272,3 +272,15 @@ test('user data can be exported and deleted with all related records', async () 
     assert.equal(await repository.deleteUserData(username), false);
   });
 });
+
+test('account deletion anonymizes retained administrative audit', async () => {
+  await withRepository(async (repository, file) => {
+    const request = await repository.createPaymentRequest('77e30d65-c90e-49a2-8d17-e08b5958c310', 5002, 'Deleted Payer');
+    await repository.resolvePaymentRequest(request.id, 'rejected', 9001, 30);
+    await repository.deleteUserData(request.username);
+    const stored = JSON.parse(await fs.readFile(file, 'utf8'));
+    assert.equal(stored.audit_log.length, 1);
+    assert.equal(stored.audit_log[0].metadata.username, undefined);
+    assert.equal(stored.audit_log[0].metadata.account_deleted, true);
+  });
+});

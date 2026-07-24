@@ -541,6 +541,12 @@ export function createPostgresRepository(connectionString) {
       await client.query('BEGIN');
       await client.query('DELETE FROM telegram_auth_codes WHERE telegram_id = (SELECT telegram_id FROM users WHERE username = $1)', [username]);
       await client.query('DELETE FROM ai_requests WHERE username = $1', [username]);
+      await client.query(
+        `UPDATE audit_log
+         SET metadata = (metadata - 'username') || '{"account_deleted":true}'::jsonb
+         WHERE metadata->>'username' = $1`,
+        [username],
+      );
       const deleted = await client.query('DELETE FROM users WHERE username = $1 RETURNING username', [username]);
       await client.query('COMMIT');
       return Boolean(deleted.rowCount);

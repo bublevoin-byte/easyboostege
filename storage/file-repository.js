@@ -463,6 +463,12 @@ export function createFileRepository(filePath) {
     const user = state.users[username];
     if (!user) return false;
     const telegramId = user.telegram_id == null ? null : String(user.telegram_id);
+    for (const entry of state.audit_log) {
+      if (entry.metadata?.username === username) {
+        delete entry.metadata.username;
+        entry.metadata.account_deleted = true;
+      }
+    }
     delete state.users[username];
     delete state.progress[username];
     state.writing_attempts = state.writing_attempts.filter((item) => item.username !== username);

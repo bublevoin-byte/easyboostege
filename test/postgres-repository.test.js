@@ -111,6 +111,9 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     assert.equal(await repository.getUser(username), null);
     assert.equal((await client.query('SELECT 1 FROM writing_attempts WHERE username = $1', [username])).rowCount, 0);
     assert.equal((await client.query('SELECT 1 FROM ai_requests WHERE username = $1', [username])).rowCount, 0);
+    const retainedAudit = await client.query('SELECT metadata FROM audit_log WHERE target_id = $1', [paymentRequest.id]);
+    assert.equal(retainedAudit.rows[0].metadata.username, undefined);
+    assert.equal(retainedAudit.rows[0].metadata.account_deleted, true);
   } finally {
     await repository.close();
     await client.end();
