@@ -27,6 +27,9 @@ const frontendHtml = fs.readFileSync(path.join(__dirname, 'public', 'index.html'
 const SECRET = config.jwtSecret;
 const PORT = config.port;
 const PRIVACY_POLICY_VERSION = '2026-07-20';
+const logUserId = (username) => username
+  ? crypto.createHmac('sha256', SECRET).update(String(username)).digest('hex').slice(0, 20)
+  : null;
 
 // ИИ: основной Grok (xAI, платный), резерв Groq (бесплатный)
 const XAI_KEY = config.ai.xaiKey;
@@ -73,6 +76,7 @@ app.use((req, res, next) => {
       status: res.statusCode,
       durationMs: Date.now() - startedAt,
       authenticated: Boolean(req.user),
+      userId: logUserId(req.user),
     }));
   });
   next();
@@ -850,6 +854,7 @@ app.use((error, req, res, next) => {
     requestId: req.requestId,
     method: req.method,
     path: req.path,
+    userId: logUserId(req.user),
     errorCode: publicError?.code || error.code || 'INTERNAL_ERROR',
   }));
   if (res.headersSent) return next(error);

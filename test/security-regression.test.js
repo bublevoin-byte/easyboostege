@@ -92,6 +92,12 @@ test('legacy application script has no duplicate top-level function declarations
   assert.match(script, /const PROFILE_HOOKS=\[\]/u);
 });
 
+test('request logs use a pseudonymous internal user identifier', async () => {
+  const server = await fs.readFile(serverPath, 'utf8');
+  assert.match(server, /createHmac\('sha256', SECRET\)/u);
+  assert.equal((server.match(/userId:\s*logUserId\(req\.user\)/gu) || []).length, 2);
+});
+
 test('PWA shell is installable and never caches API responses', async () => {
   const { html } = await readFrontend();
   const [manifestText, worker, offline] = await Promise.all([
