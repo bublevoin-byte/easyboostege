@@ -3,7 +3,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const DEFAULT_BASE_URL = 'https://staging.useboost.ru';
-const POLL_INTERVAL_MS = 2_000;
+// Keep a full 15-minute run below the default 300-check server rate limit.
+const POLL_INTERVAL_MS = 4_000;
 const DEFAULT_TIMEOUT_MS = 5 * 60_000;
 
 function usage() {
