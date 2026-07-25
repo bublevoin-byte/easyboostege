@@ -1,0 +1,24 @@
+[Unit]
+Description=Easy Boost staging soak sample
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+DynamicUser=yes
+WorkingDirectory=/opt/easyboost-staging
+StateDirectory=easyboost-staging-soak
+Environment=STAGING_SOAK_URL=https://staging.useboost.ru
+Environment=STAGING_SOAK_DIR=/var/lib/easyboost-staging-soak
+ExecStart=/usr/bin/node /opt/easyboost-staging/scripts/staging-soak-check.js
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+
+[Install]
+WantedBy=multi-user.target

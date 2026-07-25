@@ -197,3 +197,37 @@ install -o root -g root -m 755 scripts/staging-deploy.sh /usr/local/sbin/easyboo
 ```
 
 Отдельному SSH-пользователю разрешается через `sudo` запускать только `/usr/local/sbin/easyboost-staging-deploy`; workflow загружает архив, но не исполняемый root-скрипт. Staging URL публикуется отдельным Cloudflare Tunnel route на `http://127.0.0.1:3001`; production route и контейнеры не изменяются.
+
+### Нагрузочная и длительная проверка staging
+
+Контролируемый smoke-тест по умолчанию создаёт 10 параллельных клиентов, ограничивает суммарную частоту 50 запросами в секунду и работает 30 секунд:
+
+```bash
+LOAD_TEST_URL=https://staging.useboost.ru npm run load:smoke
+```
+
+Gate требует минимум 100 запросов, error rate не выше 1% и p95 не выше 500 мс. Максимальные ограничения инструмента — 50 клиентов, 200 запросов/с и 5 минут; production URL не используется в эксплуатационной процедуре.
+
+Один замер семидневного soak test:
+
+```bash
+STAGING_SOAK_URL=https://staging.useboost.ru \
+STAGING_SOAK_DIR=/var/lib/easyboost-staging-soak \
+npm run soak:check
+```
+
+Команда проверяет homepage и readiness, дописывает обезличенный NDJSON и атомарно обновляет `staging-soak-status.json`. Результат считается завершённым только после семи суток без неуспешных samples.
+
+Установка изолированного systemd timer на VPS:
+
+```bash
+install -o root -g root -m 644 deploy/easyboost-staging-soak.service /etc/systemd/system/
+install -o root -g root -m 644 deploy/easyboost-staging-soak.timer /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now easyboost-staging-soak.timer
+systemctl start easyboost-staging-soak.service
+systemctl status easyboost-staging-soak.timer --no-pager
+cat /var/lib/easyboost-staging-soak/staging-soak-status.json
+```
+
+Service запускается с `DynamicUser`, получает запись только в выделенный `StateDirectory` и не читает staging secrets.

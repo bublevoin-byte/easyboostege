@@ -8,5 +8,6 @@ tts-cache/
 coverage/
 dist/
 backups/
+soak-results/
 *.log
 .DS_Store

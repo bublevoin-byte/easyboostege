@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Easy Boost staging soak sample every 15 minutes
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+RandomizedDelaySec=30
+Unit=easyboost-staging-soak.service
+
+[Install]
+WantedBy=timers.target
