@@ -17,6 +17,7 @@ const grammarModule=window.EasyBoostGrammar;
 const readingModule=window.EasyBoostReading;
 const listeningModule=window.EasyBoostListening;
 const writingModule=window.EasyBoostWriting;
+const speakingModule=window.EasyBoostSpeaking;
 function getUsers(){try{return JSON.parse(localStorage.getItem('eb_users'))||{}}catch(e){return{}}}
 function setUsers(u){localStorage.setItem('eb_users',JSON.stringify(u))}
 /* ---------- DATA ---------- */
@@ -2515,37 +2516,27 @@ const SP4=[
  plan:['кратко опиши обе фотографии — что на них происходит','скажи, что общего у этих фотографий','скажи, чем они различаются','скажи, какой отдых ближе тебе, и объясни почему']},
 {topic:'Еда дома и в кафе',ph:['Фото 1: мама с сыном вместе готовят ужин на кухне','Фото 2: друзья едят пиццу в кафе'],
  plan:['кратко опиши обе фотографии','скажи, что общего у фотографий','скажи, чем они различаются','скажи, что предпочитаешь ты, и объясни почему']}];
-const SP_CONF={1:{name:'Чтение вслух',prep:90,rec:90,max:1,sub:'задание 1 · 1 балл'},
- 2:{name:'Вопросы к объявлению',prep:60,rec:80,per:20,max:4,sub:'задание 2 · 4 балла'},
- 3:{name:'Интервью',prep:0,rec:40,max:5,sub:'задание 3 · 5 баллов'},
- 4:{name:'Монолог по фото',prep:60,rec:150,max:10,sub:'задание 4 · 10 баллов'}};
+const SP_CONF={1:speakingModule.config(1),2:speakingModule.config(2),3:speakingModule.config(3),4:speakingModule.config(4)};
 const SP_SHEET={
 1:'<b>Как читать вслух на 1 балл:</b><br>— Во время подготовки прочитай текст про себя и отметь трудные слова.<br>— Читай по смысловым кусочкам, с паузами на запятых и точках.<br>— Не глотай окончания <i>-s</i> и <i>-ed</i>: he work<b>s</b>, play<b>ed</b>.<br>— Вопросы читай с восходящей интонацией, утверждения — с нисходящей.<br>— Лучше чуть медленнее, но чётко: ошибки в словах = потеря балла.',
 2:'<b>Как задавать прямые вопросы:</b><br>Каждый пункт превращай в ПРЯМОЙ вопрос:<br>— цена → <i>How much does it cost?</i><br>— даты → <i>When does the course start?</i><br>— место → <i>Where is the club located?</i><br>— возможность → <i>Can I…? / Is it possible to…?</i><br><b>Ловушки:</b> «What about the price?» — НЕ вопрос, балл не дадут. Вопрос «зачитыванием пункта» (price?) — тоже. Нужен полный вопрос с вспомогательным глаголом.',
 3:'<b>Как отвечать на вопросы интервью:</b><br>— Отвечай развёрнуто: 2-3 предложения, а не «Yes, I do».<br>— Формула: прямой ответ → причина → пример. <i>I usually read in my free time. It helps me to relax. For example, last week I finished a great detective story.</i><br>— Не молчи: если нужно время, начни с <i>Well, let me think…</i><br>— Следи за временем вопроса: «What did you do…» → отвечай в прошедшем.',
 4:'<b>Скелет монолога (2,5–3 минуты):</b><br>1. Вступление: <i>I have found two photos for our project about…</i><br>2. Описание: <i>In the first photo we can see… In the second photo there is…</i><br>3. Общее: <i>Both photos show… / What these photos have in common is…</i><br>4. Различия: <i>The main difference is that… while…</i><br>5. Мнение: <i>As for me, I prefer… because…</i><br>6. Финал: <i>That is all I wanted to say.</i><br><b>Ловушка:</b> пропустил пункт плана — минус баллы за решение задачи.'};
 let SP=null,SP_rec=null,SP_chunks=[],SP_tm=null,SP_sheet=false;
-function spSt(){S.spk=S.spk||{t1:{n:0},t2:{n:0},t3:{n:0},t4:{n:0}};return S.spk}
-function spSync(){if(!S)return;var r=spSt();var tot=r.t1.n+r.t2.n+r.t3.n+r.t4.n;
-  S.prog=S.prog||{};var sc=S.spkScores||[];
-  if(sc.length){var last=sc.slice(-5);
-    var avg=Math.round(last.reduce(function(s,x){return s+x.g/(x.m||1)},0)/last.length*100);
-    S.prog.speak=avg;
-    setTxt('sub_speak','оценок: '+sc.length+' · средний '+avg+'%');
-    setTxt('s9_sumline','Оценок ИИ: '+sc.length+' · средний '+avg+'%');
-  }else{S.prog.speak=Math.min(100,tot*4);
+function spSt(){S.spk=speakingModule.normalizeState(S.spk);return S.spk}
+function spSync(){if(!S)return;var sum=speakingModule.summary(S.spkScores,spSt()),tot=sum.trainings;
+  S.prog=S.prog||{};S.prog.speak=sum.progress;
+  if(sum.rated){
+    setTxt('sub_speak','оценок: '+sum.count+' · средний '+sum.average+'%');
+    setTxt('s9_sumline','Оценок ИИ: '+sum.count+' · средний '+sum.average+'%');
+  }else{
     setTxt('sub_speak',tot?('тренировок: '+tot):'устная часть · запись');
     setTxt('s9_sumline',tot?('Тренировок: '+tot+' · 4 задания'):'Четыре задания — как на экзамене');}
   var bar=document.getElementById('s9_bar');if(bar)bar.style.width=Math.max(2,Math.min(100,S.prog.speak||0))+'%';
   try{setTxt('m_speak',S.prog.speak);ringOff('ring_speak',113.1,S.prog.speak)}catch(e){}}
 function spAnim(n,d){ui.animate('s9_card',n,d)}
-function spMime(){try{
-  if(!window.MediaRecorder||!MediaRecorder.isTypeSupported)return '';
-  if(MediaRecorder.isTypeSupported('audio/mp4'))return 'audio/mp4';
-  if(MediaRecorder.isTypeSupported('audio/webm;codecs=opus'))return 'audio/webm;codecs=opus';
-  if(MediaRecorder.isTypeSupported('audio/webm'))return 'audio/webm';
-  }catch(e){}return ''}
-function spFmt(s){s=Math.max(0,s);return Math.floor(s/60)+':'+('0'+s%60).slice(-2)}
+function spMime(){return speakingModule.preferredMimeType(window.MediaRecorder)}
+function spFmt(s){return speakingModule.formatTime(s)}
 function spStopAll(){clearInterval(SP_tm);SP_tm=null;
   if(SP_rec&&SP_rec.state!=='inactive'){try{SP_rec.stop()}catch(e){}}
   try{lStop()}catch(e){}}
@@ -2566,7 +2557,7 @@ function spHub(){var area=document.getElementById('s9_area');if(!area)return;
     +'</g></svg>'
     +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'
     +'<div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:15.5px;color:#fff;">Экзамен · устная часть</div>'
-    +'<div style="font-weight:600;font-size:12px;color:rgba(255,255,255,.62);margin-top:2px;">'+(se.n?('лучший результат: '+se.best+' из 20'):'4 задания подряд, оценка ИИ')+'</div></div>'
+    +'<div style="font-weight:600;font-size:12px;color:rgba(255,255,255,.62);margin-top:2px;">'+(se.n?('лучший результат: '+se.best+' из '+speakingModule.EXAM_MAX):'4 задания подряд, оценка ИИ')+'</div></div>'
     +'<span style="flex:none;background:linear-gradient(145deg,#FFC861,#F2683F);border-radius:14px;width:42px;height:42px;display:grid;place-items:center;box-shadow:0 6px 12px rgba(242,104,63,.4),inset 0 2px 3px rgba(255,255,255,.5);">'
     +'<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span></div></button>';
   area.innerHTML=exCard+[1,2,3,4].map(function(t){var c=SP_CONF[t];
@@ -2579,8 +2570,8 @@ function spHub(){var area=document.getElementById('s9_area');if(!area)return;
     +'<span style="flex:none;width:38px;height:38px;border-radius:13px;background:#FBE9EF;display:grid;place-items:center;"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#D4537E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3Z"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg></span>'
     +'<div style="font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.45;">Сначала подготовка по таймеру, потом запись — тайминги как на настоящем экзамене</div></div>';
   setTxt('s9_today','4 задания');spGen()}
-function spPool(t){var ai=(S&&S.spkAi&&S.spkAi['p'+t])||[];return [SP1,SP2,SP3,SP4][t-1].concat(ai)}
-function spSet(t){var pool=spPool(t);var k='spIdx'+t;S[k]=(S[k]||0);return pool[S[k]%pool.length]}
+function spPool(t){var ai=(S&&S.spkAi&&S.spkAi['p'+t])||[];return speakingModule.pool([SP1,SP2,SP3,SP4][t-1],ai)}
+function spSet(t){var k='spIdx'+t;S[k]=(S[k]||0);return speakingModule.select(spPool(t),S[k])}
 function spNextSet(t){S['spIdx'+t]=(S['spIdx'+t]||0)+1;save()}
 function spOpen(t){spReleaseRecording();SP={t:t,set:spSet(t),phase:'intro',qi:0,url:null};SP_sheet=false;spRender()}
 function spBtn(label,fn,solid){return '<button class="sq" style="'+WBTN+(solid?'background:linear-gradient(135deg,#FFA570,#F2683F);color:#fff;border:none;box-shadow:0 12px 24px rgba(242,104,63,.32);':'color:#F2683F;')+'" onclick="'+fn+'">'+label+'</button>'}
@@ -2713,29 +2704,25 @@ function spPlay(){if(!SP||!SP.url)return;
 function spDeleteRecording(){if(!SP)return;if(SP.url)try{URL.revokeObjectURL(SP.url)}catch(e){}SP.url=null;SP.blob=null;SP_chunks=[];spRender();try{toast('Запись удалена')}catch(e){}}
 function spEtalon(){if(!SP||SP.t!==1)return;
   if(SP_audio){try{SP_audio.pause()}catch(e){}}
-  var parts=(SP.set.tx.match(/[^.!?]+[.!?]+/g)||[SP.set.tx]).map(function(x){return {s:0,t:x.trim()}});
+  var parts=speakingModule.sentences(SP.set.tx).map(function(x){return {s:0,t:x}});
   try{lPlayRaw(parts)}catch(e){}}
 /* ---- этап 2: расшифровка и оценка ИИ ---- */
 async function spSTT(blob){
   var j=await apiPostBinary('/api/stt',blob,blob.type||'application/octet-stream');
   return j.text||''}
-function spAssignment(t,set){
-  if(t===1)return {tx:set.tx};
-  if(t===2)return {ad:set.ad,points:set.points};
-  if(t===3)return {topic:set.topic,qs:set.qs};
-  return {topic:set.topic,plan:set.plan,ph:set.ph}}
+function spAssignment(t,set){return speakingModule.assignment(t,set)}
 async function spEval(btn){
   if(!SP||!SP.blob)return;
   if(btn){if(btn.dataset.busy)return;btn.dataset.busy=1;btn.textContent='Расшифровываю запись…';btn.style.pointerEvents='none'}
   try{
     var tr=await spSTT(SP.blob);
-    if(!tr||tr.split(/\s+/).length<3)throw new Error('речь не распознана — говори громче и ближе к микрофону');
+    if(!speakingModule.isTranscriptUsable(tr))throw new Error('речь не распознана — говори громче и ближе к микрофону');
     if(btn)btn.textContent='Оцениваю по критериям…';
     var response=await apiPost('/api/v1/ai/evaluate-speaking',{taskType:SP.t,transcript:tr,assignment:spAssignment(SP.t,SP.set)},true);
     var d=response.review;
     if(!d||typeof d.got==='undefined')throw new Error('ИИ вернул неожиданный ответ, попробуй ещё раз');
-    d.got=Math.max(0,+d.got||0);d.max=+d.max||SP_CONF[SP.t].max;
-    S.spkScores=(S.spkScores||[]).concat([{t:SP.t,g:d.got,m:d.max,ts:Date.now()}]).slice(-30);
+    var score=speakingModule.clampScore(d,SP.t);d.got=score.got;d.max=score.max;
+    S.spkScores=speakingModule.appendScore(S.spkScores,{t:SP.t,g:d.got,m:d.max,ts:Date.now()});
     spSync();save();
     if(btn){btn.style.display='none'}
     spShowEval(d,tr);
@@ -2786,7 +2773,7 @@ async function spSample(btn){
     if(btn){btn.textContent='Образец ответа от ИИ · повторить';btn.style.pointerEvents='';delete btn.dataset.busy}
     try{toast(apiMessage(e,'ai'))}catch(_){}}}
 function spVoiceSample(){if(!SP||!SP.sample)return;
-  var parts=(SP.sample.match(/[^.!?]+[.!?]+/g)||[SP.sample]).map(function(x){return {s:0,t:x.trim()}});
+  var parts=speakingModule.sentences(SP.sample).map(function(x){return {s:0,t:x}});
   try{lPlayRaw(parts)}catch(e){}}
 /* ---- этап 3: экзамен устной части целиком ---- */
 let SPE=null;
@@ -2796,7 +2783,7 @@ function spExam(){var area=document.getElementById('s9_area');if(!area)return;sp
     +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#F2683F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">КАК НА ЕГЭ</span>'
     +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:19px;color:#2B2B2B;margin-top:12px;">Устная часть целиком</div>'
     +'<div style="font-weight:600;font-size:13.5px;color:#4A453E;line-height:1.6;margin-top:8px;">Чтение → вопросы → интервью → монолог, всё подряд с экзаменационными таймерами и без шпаргалок. Задания переключаются сами. В конце ИИ оценит каждую запись — максимум 20 баллов.</div>'
-    +(st.n?'<div style="margin-top:12px;font-weight:700;font-size:12.5px;color:#98917F;">Попыток: '+st.n+' · последний: '+st.last+' из 20 · лучший: '+st.best+' из 20</div>':'')
+    +(st.n?'<div style="margin-top:12px;font-weight:700;font-size:12.5px;color:#98917F;">Попыток: '+st.n+' · последний: '+st.last+' из '+speakingModule.EXAM_MAX+' · лучший: '+st.best+' из '+speakingModule.EXAM_MAX+'</div>':'')
     +'</div>'
     +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
     +spBtn('Начать экзамен','speStart()',true)
@@ -2804,7 +2791,7 @@ function spExam(){var area=document.getElementById('s9_area');if(!area)return;sp
   spAnim('win','.32s')}
 function speStart(){
   S.spExIdx=(S.spExIdx||0);
-  var sets={};[1,2,3,4].forEach(function(t){var p=spPool(t);sets[t]=p[S.spExIdx%p.length]});
+  var sets={};speakingModule.TASKS.forEach(function(t){sets[t]=speakingModule.select(spPool(t),S.spExIdx)});
   S.spExIdx++;save();
   SPE={stage:1,sets:sets,blobs:{},qi:0,t0:Date.now(),tm:null};
   speStage()}
@@ -2883,25 +2870,26 @@ async function speFinish(){if(!SPE)return;clearInterval(SPE.tm);try{lStop()}catc
     +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:20px;color:#2B2B2B;margin-top:8px;">Экзамен записан!</div>'
     +'<div id="spe_prog" style="font-weight:600;font-size:13px;color:#98917F;margin-top:6px;">Начинаю проверку…</div>'
     +'<div style="margin-top:12px;"><span style="display:inline-block;width:22px;height:22px;border-radius:50%;border:3px solid #F1EDE7;border-top-color:#F2683F;animation:lspin .8s linear infinite;"></span></div></div>';
-  var results={},got=0;
+  var results={};
   for(var t=1;t<=4;t++){
     setTxt('spe_prog','Оцениваю задание '+t+' из 4…');
     var d=null,bl=SPE.blobs[t];
     if(bl){try{
       var tr=await spSTT(bl);
-      if(tr&&tr.split(/\s+/).length>=3){
+      if(speakingModule.isTranscriptUsable(tr)){
         var response=await apiPost('/api/v1/ai/evaluate-speaking',{taskType:t,transcript:tr,assignment:spAssignment(t,SPE.sets[t])},true);
         var p=response.review;
-        if(p&&typeof p.got!=='undefined')d={got:Math.max(0,Math.min(SP_CONF[t].max,+p.got||0)),verdict:String(p.verdict||''),fix:Array.isArray(p.fix)?p.fix:[]}}
+        if(p&&typeof p.got!=='undefined')d={got:speakingModule.clampScore(p,t).got,verdict:String(p.verdict||''),fix:Array.isArray(p.fix)?p.fix:[]}}
     }catch(e){}}
     if(!d)d={got:0,verdict:bl?'не удалось оценить запись':'записи нет',fix:[]};
-    results[t]=d;got+=d.got;
-    S.spkScores=(S.spkScores||[]).concat([{t:t,g:d.got,m:SP_CONF[t].max,ts:Date.now()}]).slice(-30);
+    results[t]=d;
+    S.spkScores=speakingModule.appendScore(S.spkScores,{t:t,g:d.got,m:SP_CONF[t].max,ts:Date.now()});
   }
-  var st=S.spkExam||{n:0,last:0,best:0};st.n++;st.last=got;st.best=Math.max(st.best||0,got);S.spkExam=st;
+  var got=speakingModule.examTotal(results);
+  S.spkExam=speakingModule.updateExamRecord(S.spkExam,got);
   var r=spSt();r.t1.n++;r.t2.n++;r.t3.n++;r.t4.n++;
   spSync();save();
-  var weak=[1,2,3,4].sort(function(a,b){return results[a].got/SP_CONF[a].max-results[b].got/SP_CONF[b].max})[0];
+  var weak=speakingModule.weakestTask(results);
   var rows=[1,2,3,4].map(function(t){var d=results[t];
     return '<div style="padding:9px 2px;border-bottom:1px solid #F4EFE9;">'
       +'<div style="display:flex;justify-content:space-between;gap:10px;font-weight:700;font-size:13px;color:#2B2B2B;"><span>'+SP_CONF[t].name+'</span><b style="flex:none;color:'+(d.got/SP_CONF[t].max>=0.7?'#1F8A50':(d.got>0?'#C77400':'#C0392B'))+';">'+d.got+' / '+SP_CONF[t].max+'</b></div>'
@@ -2911,9 +2899,9 @@ async function speFinish(){if(!SPE)return;clearInterval(SPE.tm);try{lStop()}catc
   SPE=null;
   area.innerHTML='<div id="s9_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;">'+wDeco()
     +'<div style="text-align:center;"><div style="font-size:42px;">'+(got>=16?'🏆':(got>=10?'💪':'📚'))+'</div>'
-    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:26px;color:#2B2B2B;margin-top:8px;">'+got+' из 20</div>'
+    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:26px;color:#2B2B2B;margin-top:8px;">'+got+' из '+speakingModule.EXAM_MAX+'</div>'
     +'<div style="font-weight:600;font-size:13px;color:#98917F;margin-top:4px;">Время: '+spFmt(sec)+'</div>'
-    +(got<20?'<div style="font-weight:700;font-size:12.5px;color:#C77400;margin-top:6px;">Слабое место: '+SP_CONF[weak].name.toLowerCase()+' — потренируй отдельно</div>':'')
+    +(got<speakingModule.EXAM_MAX?'<div style="font-weight:700;font-size:12.5px;color:#C77400;margin-top:6px;">Слабое место: '+SP_CONF[weak].name.toLowerCase()+' — потренируй отдельно</div>':'')
     +'</div><div style="margin-top:12px;">'+rows+'</div></div>'
     +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
     +spBtn('Ещё раз','speStart()',true)
@@ -2928,22 +2916,8 @@ async function spGen(){
   for(var t=1;t<=4;t++){if(spPool(t).length<5){kind=t;break}}
   if(!kind)return;SPGEN=true;
   try{
-    var d,item=null;
-    if(kind===1){
-      d=await generateAiContent('speaking_task_1');
-      if(d&&d.tx&&String(d.tx).split(/\s+/).length>=60)item={tx:String(d.tx)};
-    }else if(kind===2){
-      d=await generateAiContent('speaking_task_2');
-      if(d&&d.ad&&Array.isArray(d.points)&&d.points.length===4&&Array.isArray(d.exq)&&d.exq.length===4)
-        item={ad:String(d.ad),points:d.points.map(String),exq:d.exq.map(String)};
-    }else if(kind===3){
-      d=await generateAiContent('speaking_task_3');
-      if(d&&d.topic&&Array.isArray(d.qs)&&d.qs.length===5)item={topic:String(d.topic),qs:d.qs.map(String)};
-    }else{
-      d=await generateAiContent('speaking_task_4');
-      if(d&&d.topic&&Array.isArray(d.ph)&&d.ph.length===2)
-        item={topic:String(d.topic),ph:d.ph.map(String),plan:['кратко опиши обе фотографии','скажи, что общего у фотографий','скажи, чем они различаются','скажи, что ближе тебе, и объясни почему']};
-    }
+    var d=await generateAiContent('speaking_task_'+kind);
+    var item=speakingModule.normalizeGenerated(kind,d);
     if(item){S.spkAi['p'+kind]=(S.spkAi['p'+kind]||[]).concat([item]);save()}
   }catch(e){}
   SPGEN=false;
