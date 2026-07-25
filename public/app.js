@@ -41,8 +41,8 @@ function rateCard(k){const c=queue[ci];if(!c)return;if(k){S.box[c.w]=Math.min(3,
 
 /* ---------- WRITING ---------- */
 let curTask=38;
-const SEG_ON='flex:1;text-align:center;padding:8px 0;font-weight:700;font-size:13px;color:#F2683F;background:#fff;border-radius:11px;cursor:pointer;';
-const SEG_OFF='flex:1;text-align:center;padding:8px 0;font-weight:700;font-size:13px;color:rgba(255,255,255,.92);cursor:pointer;';
+const SEG_ON='flex:1;border:0;font-family:inherit;text-align:center;padding:8px 0;font-weight:700;font-size:13px;color:#F2683F;background:#fff;border-radius:11px;cursor:pointer;';
+const SEG_OFF='flex:1;border:0;font-family:inherit;text-align:center;padding:8px 0;font-weight:700;font-size:13px;color:rgba(255,255,255,.92);background:transparent;cursor:pointer;';
 function countWords(){const d=WRITE[curTask];const t=(document.getElementById('w_editor').innerText||'').trim();const n=t?t.split(/\s+/).length:0;
   const e=document.getElementById('w_count');e.textContent=n+' / '+d.range+' слов';e.style.color=(n>=d.min&&n<=d.max)?'#1F8A50':(n>d.max?'#C9503C':'#8A8F98')}
 
@@ -2558,7 +2558,7 @@ async function wrGen(){
   WR_GEN=false;
   try{if(wrPool(37).length<6||wrPool(38).length<6)setTimeout(wrGen,4000)}catch(e){}}
 /* — запуск генерации при входе, синк плитки при старте — */
-registerRouteHook(function(id){if(id==='scr8'){wrGen()}});
+registerRouteHook(function(id){if(id==='scr8'){setTask(curTask);wrGen()}});
 registerStartHook(function(){return wrSyncTile()});
 
 /* legacy block 11 */

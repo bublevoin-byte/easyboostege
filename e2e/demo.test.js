@@ -160,6 +160,44 @@ test('Chrome E2E: critical user flows are accessible and resilient', { timeout: 
       sameSite: 'Lax',
     }]);
     const authenticatedPage = await authenticatedContext.newPage();
+    const evaluatedWritingTasks = [];
+    await authenticatedPage.route('**/api/v1/ai/evaluate-writing', async (route) => {
+      const request = route.request();
+      const input = request.postDataJSON();
+      const task37 = input.taskType === 'writing_37';
+      const criteria = task37
+        ? [
+            { name: 'Решение коммуникативной задачи', got: 2, max: 2 },
+            { name: 'Организация текста', got: 2, max: 2 },
+            { name: 'Языковое оформление', got: 2, max: 2 },
+          ]
+        : [
+            { name: 'Решение коммуникативной задачи', got: 3, max: 3 },
+            { name: 'Организация текста', got: 3, max: 3 },
+            { name: 'Лексика', got: 3, max: 3 },
+            { name: 'Грамматика', got: 3, max: 3 },
+            { name: 'Орфография и пунктуация', got: 2, max: 2 },
+          ];
+      evaluatedWritingTasks.push(input.taskType);
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          review: {
+            words: input.answer.trim().split(/\s+/u).length,
+            in_range: true,
+            overall_got: criteria.reduce((total, criterion) => total + criterion.got, 0),
+            overall_max: task37 ? 6 : 14,
+            verdict: task37 ? 'Задание 37 проверено' : 'Задание 38 проверено',
+            sub: 'Изолированный E2E-разбор',
+            criteria,
+            errors: [],
+          },
+          provider: 'e2e',
+          attemptId: task37 ? 'writing-37-e2e' : 'writing-38-e2e',
+        }),
+      });
+    });
     await authenticatedPage.goto(baseUrl, { waitUntil: 'networkidle' });
     await authenticatedPage.locator('#scr1.on').waitFor({ state: 'visible', timeout: 5_000 });
     console.log('e2e: authenticated session restored');
@@ -180,6 +218,31 @@ test('Chrome E2E: critical user flows are accessible and resilient', { timeout: 
     assert.equal(persisted.words.known, 1);
     console.log('e2e: progress persisted after reload');
 
+    await authenticatedPage.getByRole('button', { name: 'Письмо', exact: true }).press('Enter');
+    await authenticatedPage.locator('#scr8.on').waitFor({ state: 'visible', timeout: 5_000 });
+    await authenticatedPage.getByRole('button', { name: '37 · Письмо другу' }).click();
+    await authenticatedPage.getByRole('textbox', { name: 'Письменный ответ' }).fill(
+      Array.from({ length: 105 }, (_, index) => `word${index + 1}`).join(' '),
+    );
+    await authenticatedPage.getByRole('button', { name: 'Проверить с ИИ' }).click();
+    await authenticatedPage.locator('#scr12.on').waitFor({ state: 'visible', timeout: 5_000 });
+    assert.equal(await authenticatedPage.locator('#rv_score').textContent(), '6');
+    assert.equal(await authenticatedPage.locator('#rv_verdict').innerText(), 'Задание 37 проверено');
+
+    await authenticatedPage.getByRole('button', { name: 'Исправить' }).click();
+    await authenticatedPage.getByRole('button', { name: '38 · Проект' }).click();
+    await authenticatedPage.getByRole('textbox', { name: 'Письменный ответ' }).fill(
+      Array.from({ length: 205 }, (_, index) => `project${index + 1}`).join(' '),
+    );
+    await authenticatedPage.getByRole('button', { name: 'Проверить с ИИ' }).click();
+    await authenticatedPage.locator('#scr12.on').waitFor({ state: 'visible', timeout: 5_000 });
+    assert.equal(await authenticatedPage.locator('#rv_score').textContent(), '14');
+    assert.equal(await authenticatedPage.locator('#rv_verdict').innerText(), 'Задание 38 проверено');
+    assert.deepEqual(evaluatedWritingTasks, ['writing_37', 'writing_38']);
+    console.log('e2e: writing tasks 37 and 38 received structured reviews');
+
+    await authenticatedPage.getByRole('button', { name: 'Исправить' }).click();
+    await authenticatedPage.getByRole('button', { name: 'Главная' }).click();
     await authenticatedPage.getByRole('button', { name: 'Говорение', exact: true }).press('Enter');
     const speakingTask = authenticatedPage.getByRole('button', { name: /Чтение вслух/ });
     await speakingTask.waitFor({ state: 'visible', timeout: 5_000 });
