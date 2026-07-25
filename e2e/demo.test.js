@@ -68,7 +68,7 @@ async function chromeExecutable() {
   throw new Error('Chrome/Chromium executable was not found. Set CHROME_PATH.');
 }
 
-test('Chrome E2E: critical user flows are accessible and resilient', { timeout: 45_000 }, async () => {
+test('Chrome E2E: critical user flows are accessible and resilient', { timeout: 60_000 }, async () => {
   const temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-e2e-'));
   const port = await findAvailablePort();
   const baseUrl = `http://127.0.0.1:${port}`;
@@ -227,6 +227,40 @@ test('Chrome E2E: critical user flows are accessible and resilient', { timeout: 
     assert.match(await botLink.getAttribute('href'), /^https:\/\/t\.me\//);
     console.log('e2e: expired subscription shows recovery path');
     await expiredContext.close();
+
+    const viewportMatrix = [
+      { width: 320, height: 568 },
+      { width: 375, height: 667 },
+      { width: 390, height: 844 },
+      { width: 430, height: 932 },
+      { width: 768, height: 1024 },
+      { width: 1024, height: 768 },
+      { width: 1440, height: 900 },
+    ];
+    for (const viewport of viewportMatrix) {
+      const viewportContext = await browser.newContext({ viewport });
+      const viewportPage = await viewportContext.newPage();
+      await viewportPage.goto(baseUrl, { waitUntil: 'networkidle' });
+      await viewportPage.getByRole('button', { name: 'Попробовать демо' }).click();
+      await viewportPage.locator('#scr1.on').waitFor({ state: 'visible', timeout: 5_000 });
+      const layout = await viewportPage.evaluate(() => {
+        const frame = document.querySelector('#frame').getBoundingClientRect();
+        const activeScreen = document.querySelector('.screen.on').getBoundingClientRect();
+        return {
+          viewportWidth: window.innerWidth,
+          documentWidth: document.documentElement.scrollWidth,
+          frameLeft: frame.left,
+          frameRight: frame.right,
+          screenLeft: activeScreen.left,
+          screenRight: activeScreen.right,
+        };
+      });
+      assert.ok(layout.documentWidth <= layout.viewportWidth);
+      assert.ok(layout.frameLeft >= -0.5 && layout.frameRight <= layout.viewportWidth + 0.5);
+      assert.ok(layout.screenLeft >= -0.5 && layout.screenRight <= layout.viewportWidth + 0.5);
+      await viewportContext.close();
+    }
+    console.log('e2e: responsive matrix 320–1440 px has no horizontal overflow');
   } finally {
     if (browser) await browser.close();
     await stopProcess(child);
