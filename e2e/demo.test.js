@@ -68,15 +68,30 @@ async function chromeExecutable() {
   throw new Error('Chrome/Chromium executable was not found. Set CHROME_PATH.');
 }
 
-test('Chrome E2E: demo word task is keyboard accessible and PWA-ready', { timeout: 30_000 }, async () => {
+test('Chrome E2E: critical user flows are accessible and resilient', { timeout: 45_000 }, async () => {
   const temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-e2e-'));
   const port = await findAvailablePort();
   const baseUrl = `http://127.0.0.1:${port}`;
   const dataFile = path.join(temporaryDirectory, 'data.json');
   const jwtSecret = 'e2e-test-secret-with-at-least-32-characters';
   await fs.writeFile(dataFile, JSON.stringify({
-    users: { e2euser: { created: Date.now(), sub_until: Date.now() + 86_400_000 } },
-    progress: { e2euser: { words: { known: 0 } } },
+    users: {
+      e2euser: {
+        created: Date.now(),
+        sub_until: Date.now() + 86_400_000,
+        privacy_consent: {
+          text_processing: true,
+          voice_processing: true,
+          policy_version: '2026-07-20',
+          updated_at: Date.now(),
+        },
+      },
+      expireduser: { created: Date.now(), sub_until: Date.now() - 60_000 },
+    },
+    progress: {
+      e2euser: { words: { known: 0 } },
+      expireduser: {},
+    },
   }));
   const output = [];
   const child = spawn(process.execPath, [serverPath], {
@@ -165,6 +180,20 @@ test('Chrome E2E: demo word task is keyboard accessible and PWA-ready', { timeou
     assert.equal(persisted.words.known, 1);
     console.log('e2e: progress persisted after reload');
 
+    await authenticatedPage.getByRole('button', { name: 'Говорение', exact: true }).press('Enter');
+    const speakingTask = authenticatedPage.getByRole('button', { name: /Чтение вслух/ });
+    await speakingTask.waitFor({ state: 'visible', timeout: 5_000 });
+    await speakingTask.press('Enter');
+    await authenticatedPage.getByRole('button', { name: 'Начать подготовку' }).click();
+    await authenticatedPage.getByRole('button', { name: 'Готово — к записи' }).click();
+    const microphoneToast = authenticatedPage.locator('#toast');
+    await microphoneToast.waitFor({ state: 'visible', timeout: 5_000 });
+    assert.match(await microphoneToast.innerText(), /Нет доступа к микрофону/);
+    await authenticatedPage.getByRole('button', { name: 'Начать подготовку' }).waitFor({ state: 'visible' });
+    console.log('e2e: microphone denial handled without losing the task');
+
+    await authenticatedPage.getByRole('button', { name: '← К заданиям' }).click();
+    await authenticatedPage.getByRole('button', { name: 'Главная' }).click();
     const profileButton = authenticatedPage.locator('#scr1.on [role="button"][aria-label="Профиль"]');
     assert.equal(await profileButton.count(), 1);
     await profileButton.press('Enter');
@@ -180,6 +209,24 @@ test('Chrome E2E: demo word task is keyboard accessible and PWA-ready', { timeou
     await authenticatedPage.getByRole('button', { name: 'Попробовать демо' }).waitFor({ state: 'visible', timeout: 5_000 });
     assert.equal((await authenticatedContext.cookies()).some((cookie) => cookie.name === 'eb_token'), false);
     await authenticatedContext.close();
+
+    const expiredContext = await browser.newContext();
+    await expiredContext.addCookies([{
+      name: 'eb_token',
+      value: jwt.sign({ u: 'expireduser' }, jwtSecret, { expiresIn: '1h' }),
+      url: baseUrl,
+      httpOnly: true,
+      sameSite: 'Lax',
+    }]);
+    const expiredPage = await expiredContext.newPage();
+    await expiredPage.goto(baseUrl, { waitUntil: 'networkidle' });
+    const paywall = expiredPage.locator('#pw_ov');
+    await paywall.waitFor({ state: 'visible', timeout: 5_000 });
+    assert.match(await paywall.innerText(), /Чтобы заниматься, оформи доступ/);
+    const botLink = paywall.getByRole('link', { name: 'Открыть Telegram-бот' });
+    assert.match(await botLink.getAttribute('href'), /^https:\/\/t\.me\//);
+    console.log('e2e: expired subscription shows recovery path');
+    await expiredContext.close();
   } finally {
     if (browser) await browser.close();
     await stopProcess(child);
