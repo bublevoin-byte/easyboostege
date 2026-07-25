@@ -33,3 +33,45 @@ test('frontend store exposes the offline synchronization layer', () => {
   assert.equal(store.loadLocal('broken').learned, 0);
   assert.equal(store.saveLocal('', {}), false);
 });
+
+test('restore prefers the server answer and normalizes it', () => {
+  const { store } = createStore({ eb_data_student: JSON.stringify({ learned: 4, streak: 9 }) });
+  const state = store.restore('student', { learned: 12 }, {});
+
+  assert.equal(state.learned, 12);
+  assert.equal(state.streak, 0, 'the server answer replaces the snapshot, it is not merged into it');
+  assert.deepEqual(Object.keys(state.prog), ['words', 'gram', 'read', 'listen', 'write', 'speak']);
+});
+
+test('restore falls back to the local snapshot when the network is gone', () => {
+  const { store } = createStore({
+    eb_data_student: JSON.stringify({ learned: 4, streak: 9, box: { apple: 3 }, prog: { words: 40 } }),
+  });
+  const state = store.restore('student', null, {});
+
+  assert.equal(state.learned, 4);
+  assert.equal(state.streak, 9);
+  assert.equal(state.box.apple, 3);
+  assert.equal(state.prog.words, 40);
+});
+
+test('restore starts from zero on a device with no snapshot', () => {
+  const { store } = createStore();
+  const state = store.restore('newcomer', null, {});
+
+  assert.equal(state.learned, 0);
+  assert.equal(state.streak, 0);
+  assert.deepEqual(Object.keys(state.box), []);
+});
+
+test('queued modules win over both the server answer and the snapshot', () => {
+  const { store } = createStore({ eb_data_student: JSON.stringify({ learned: 4 }) });
+  const fromServer = store.restore('student', { learned: 12, srs: { a: 1 } }, { learned: 15 });
+  const offline = store.restore('student', null, { learned: 15 });
+
+  assert.equal(fromServer.learned, 15);
+  assert.deepEqual({ ...fromServer.srs }, { a: 1 }, 'untouched modules keep the server value');
+  assert.equal(offline.learned, 15);
+  assert.equal(store.applyModules({ learned: 1 }, { learned: undefined }).learned, 1);
+  assert.equal(store.applyModules({ learned: 1 }, null).learned, 1);
+});

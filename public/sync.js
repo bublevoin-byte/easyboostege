@@ -38,5 +38,6 @@
   function setBaseline(progress){baseline=clone(progress||{});return flush()}
 
   if(typeof window!=='undefined')window.addEventListener('online',flush);
-  global.EasyBoostSync=Object.freeze({saveProgress:saveProgress,setBaseline:setBaseline,flush:flush,hasPending:function(){return Boolean(readPending())}});
+  function pendingModules(){const pending=readPending();return (pending&&pending.modules)||{}}
+  global.EasyBoostSync=Object.freeze({saveProgress:saveProgress,setBaseline:setBaseline,flush:flush,pendingModules:pendingModules,hasPending:function(){return Boolean(readPending())}});
 })(window);

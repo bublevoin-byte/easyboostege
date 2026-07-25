@@ -154,10 +154,25 @@ test('PWA shell is installable and never caches API responses', async () => {
   assert.match(html, /<link rel="manifest" href="\/manifest\.json">/u);
   assert.match(worker, /url\.pathname\.startsWith\('\/api\/'\)/u);
   assert.match(worker, /caches\.match\('\/offline\.html'\)/u);
+  // A reload without network must reopen the cached application, not the placeholder page.
+  assert.match(worker, /caches\.match\('\/'\)\.then\(shell=>shell\|\|caches\.match\('\/offline\.html'\)\)/u);
   assert.match(worker, /fetch\(request\).*catch\(\(\)=>caches\.match\(request\)\)/u);
   assert.match(worker, /self\.skipWaiting\(\)/u);
   assert.match(worker, /self\.clients\.claim\(\)/u);
   assert.doesNotMatch(offline, /<script|onclick=/iu);
+});
+
+test('progress is snapshotted locally so an offline start is not a blank slate', async () => {
+  const [app, store] = await Promise.all([
+    fs.readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../public/store.js', import.meta.url), 'utf8'),
+  ]);
+  // Every save writes the snapshot, in server mode too — not only the sync queue.
+  assert.match(app, /store\.saveLocal\(currentUser,S\);\s*\n\s*if\(SRV\)\{clearTimeout/u);
+  // A failed /api/progress must never reset the visible state to defaults.
+  assert.doesNotMatch(app, /catch\(e\)\{S=fillDefaults\(\{\}\)\}/u);
+  assert.match(app, /S=store\.restore\(currentUser,served,store\.sync\.pendingModules\(\)\)/u);
+  assert.match(store, /function restore\(username, serverState, pendingModules\)/u);
 });
 
 test('frontend keeps zoom, keyboard focus and assistive announcements accessible', async () => {

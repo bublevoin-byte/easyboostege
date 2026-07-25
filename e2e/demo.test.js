@@ -255,6 +255,38 @@ async function runE2E() {
     assert.equal(persisted.words.known, 1);
     console.log('e2e: progress persisted after reload');
 
+    // Section 6.1: built-in tasks and saved progress must survive a start without network.
+    const snapshot = await authenticatedPage.evaluate(() => {
+      const user = localStorage.getItem('eb_current');
+      const state = window.EasyBoostStore.loadLocal(user);
+      state.learned = 42;
+      state.prog.words = 63;
+      state.prog.read = 55;
+      state.streak = 7;
+      window.EasyBoostStore.saveLocal(user, state);
+      return window.EasyBoostStore.loadLocal(user).learned;
+    });
+    assert.equal(snapshot, 42, 'the running app keeps a local snapshot for offline starts');
+    await authenticatedContext.setOffline(true);
+    await authenticatedPage.evaluate(() => window.startApp());
+    await authenticatedPage.locator('#scr1.on').waitFor({ state: 'visible', timeout: 5_000 });
+    assert.equal(await authenticatedPage.locator('#m_words').textContent(), '63');
+    assert.equal(await authenticatedPage.locator('#m_read').textContent(), '55');
+    assert.match(await authenticatedPage.locator('#h_streak').textContent(), /7 дней подряд/u);
+    console.log('e2e: saved progress readable without network');
+
+    await authenticatedPage.getByRole('button', { name: 'Слова', exact: true }).press('Enter');
+    await authenticatedPage.locator('#scr2.on').waitFor({ state: 'visible', timeout: 5_000 });
+    assert.ok(await authenticatedPage.locator('#w_opts button').count() >= 2);
+    await authenticatedPage.evaluate(() => window.tab('scr1'));
+    await authenticatedPage.locator('#scr1.on').waitFor({ state: 'visible', timeout: 5_000 });
+    await authenticatedPage.getByRole('button', { name: 'Грамматика', exact: true }).press('Enter');
+    await authenticatedPage.locator('#scr3.on').waitFor({ state: 'visible', timeout: 5_000 });
+    assert.ok(await authenticatedPage.locator('#g_area button').count() >= 1);
+    console.log('e2e: built-in word and grammar tasks work offline');
+    await authenticatedContext.setOffline(false);
+    await authenticatedPage.evaluate(() => window.tab('scr1'));
+
     await authenticatedPage.getByRole('button', { name: 'Письмо', exact: true }).press('Enter');
     await authenticatedPage.locator('#scr8.on').waitFor({ state: 'visible', timeout: 5_000 });
     await authenticatedPage.getByRole('button', { name: '37 · Письмо другу' }).click();

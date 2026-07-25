@@ -38,10 +38,27 @@
     }
   }
 
+  // Modules still waiting in the sync queue are newer than anything the server returned.
+  function applyModules(state, modules) {
+    const target = normalize(state);
+    Object.keys(modules || {}).forEach((key) => {
+      if (modules[key] !== undefined) target[key] = modules[key];
+    });
+    return target;
+  }
+
+  // Server answer first, the local snapshot when the network is gone, defaults only for a new device.
+  function restore(username, serverState, pendingModules) {
+    const base = serverState ? normalize(serverState) : loadLocal(username);
+    return applyModules(base, pendingModules);
+  }
+
   global.EasyBoostStore = Object.freeze({
     normalize,
     loadLocal,
     saveLocal,
+    applyModules,
+    restore,
     sync,
   });
 })(window);

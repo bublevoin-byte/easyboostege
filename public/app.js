@@ -278,12 +278,18 @@ const START_HOOKS=[];
 function registerStartHook(hook){START_HOOKS.push(hook)}
 function save(){
   if(DEMO_MODE)return;
-  if(SRV){if(!TOKEN)return;clearTimeout(_saveT);_saveT=setTimeout(()=>{store.sync.saveProgress(S)},600)}
-  else{store.saveLocal(currentUser,S)}}
+  if(SRV&&!TOKEN)return;
+  /* локальный снимок держит слова, SRS, грамматику и прогресс доступными без сети */
+  store.saveLocal(currentUser,S);
+  if(SRV){clearTimeout(_saveT);_saveT=setTimeout(()=>{store.sync.saveProgress(S)},600)}}
 async function startApp(){
   if(DEMO_MODE){tab('scr1');return}
   if(SRV){if(!TOKEN){show('scr5');document.getElementById('tabbar').style.display='none';return}
-    try{const d=await apiGet('/api/progress');S=fillDefaults(d)}catch(e){S=fillDefaults({})}}
+    var served=null;
+    try{served=await apiGet('/api/progress')}catch(e){served=null}
+    S=store.restore(currentUser,served,store.sync.pendingModules());
+    store.saveLocal(currentUser,S);
+    if(!served)try{toast('Нет сети — показан сохранённый прогресс')}catch(e){}}
   else{S=store.loadLocal(currentUser)}
   store.sync.setBaseline(S);
   tab('scr1');
