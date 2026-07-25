@@ -114,6 +114,7 @@ test('PWA shell is installable and never caches API responses', async () => {
   assert.match(html, /<link rel="manifest" href="\/manifest\.json">/u);
   assert.match(worker, /url\.pathname\.startsWith\('\/api\/'\)/u);
   assert.match(worker, /caches\.match\('\/offline\.html'\)/u);
+  assert.match(worker, /fetch\(request\).*catch\(\(\)=>caches\.match\(request\)\)/u);
   assert.doesNotMatch(offline, /<script|onclick=/iu);
 });
 
