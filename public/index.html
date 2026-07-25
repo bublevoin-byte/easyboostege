@@ -19,6 +19,12 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
 .cardbtn{display:block;width:100%;box-sizing:border-box;text-align:left;border:0;background:none;padding:0;margin:0;font:inherit;color:inherit}
 .iconbtn{border:0;background:none;padding:0;margin:0;font:inherit;color:inherit}
 .ansmark{margin-left:6px;font-weight:900}
+.ebstate{display:flex;flex-direction:column;align-items:center;gap:7px;text-align:center;border-radius:18px;padding:20px 16px;font-family:Manrope,system-ui,sans-serif}
+.ebstate-title{font-weight:800;font-size:14px}
+.ebstate-text{font-weight:600;font-size:12.5px;line-height:1.5;max-width:34ch}
+.ebstate-glyph{display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:rgba(255,255,255,.75);font-weight:900;font-size:16px}
+.ebstate-spin{width:22px;height:22px;border-radius:50%;border:3px solid rgba(255,255,255,.85);border-top-color:currentColor;animation:lspin .8s linear infinite}
+.ebstate-action{margin-top:4px;min-height:44px;border:1.5px solid currentColor;background:rgba(255,255,255,.8);border-radius:14px;padding:0 16px;font:800 13px Manrope,sans-serif;color:inherit;cursor:pointer}
 #w_editor:empty:before{content:attr(data-ph);color:#73767A}
 #navfab,#navmenu{display:none!important}
 #navfab{position:fixed;top:14px;right:14px;z-index:999;background:#2B2B2B;color:#fff;border:none;border-radius:11px;padding:9px 13px;font:600 12px Manrope,sans-serif;cursor:pointer;opacity:.85}
@@ -48,6 +54,8 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
 #genfab:disabled{opacity:.6}
 #toast{position:fixed;bottom:180px;left:50%;transform:translateX(-50%);z-index:300;background:#2B2B2B;color:#fff;
   padding:11px 18px;border-radius:14px;font:600 13px Manrope,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.3);display:none;max-width:320px;text-align:center}
+#genstate{position:fixed;bottom:160px;left:50%;transform:translateX(-50%);z-index:300;width:min(320px,calc(100vw - 32px));box-shadow:0 10px 30px rgba(60,45,30,.22);border-radius:18px}
+#genstate:empty{display:none}
 @media(max-width:430px){#genfab{left:auto;right:16px;transform:none}}
 
 /* --- redesigned home (claymorphism) --- */

@@ -88,6 +88,42 @@
     return elements;
   }
 
+  // Every asynchronous operation needs its own visible state, not just a silent screen.
+  const STATES = {
+    loading: { role: 'status', glyph: '', color: '#6A6E75', background: '#F1F2F4' },
+    success: { role: 'status', glyph: '✓', color: '#1D7F4A', background: '#EAF7F0' },
+    empty: { role: 'status', glyph: '·', color: '#75705F', background: '#FAF6F1' },
+    error: { role: 'alert', glyph: '!', color: '#A83226', background: '#FDEDEA' },
+  };
+
+  function stateMarkup(options = {}) {
+    const kind = STATES[options.kind] ? options.kind : 'loading';
+    const state = STATES[kind];
+    const glyph = kind === 'loading'
+      ? '<span class="ebstate-spin" aria-hidden="true"></span>'
+      : `<span class="ebstate-glyph" aria-hidden="true">${escapeHtml(state.glyph)}</span>`;
+    const description = options.description
+      ? `<span class="ebstate-text">${escapeHtml(options.description)}</span>`
+      : '';
+    const action = options.actionLabel
+      ? `<button type="button" class="ebstate-action sq">${escapeHtml(options.actionLabel)}</button>`
+      : '';
+    const live = state.role === 'status' ? ' aria-live="polite"' : '';
+    return `<div class="ebstate ebstate-${kind}" role="${state.role}"${live} style="color:${state.color};background:${state.background};">`
+      + `${glyph}<strong class="ebstate-title">${escapeHtml(options.title ?? '')}</strong>${description}${action}</div>`;
+  }
+
+  function renderState(host, options = {}) {
+    const element = typeof host === 'string' ? byId(host) : host;
+    if (!element) return null;
+    element.innerHTML = stateMarkup(options);
+    const action = element.querySelector('.ebstate-action');
+    if (action && typeof options.onAction === 'function') {
+      action.addEventListener('click', () => options.onAction());
+    }
+    return element.firstElementChild;
+  }
+
   function animate(id, name, duration = '180ms') {
     const element = byId(id);
     if (!element) return null;
@@ -141,6 +177,8 @@
     elementText,
     makeInteractive,
     markAnswer,
+    stateMarkup,
+    renderState,
     bindText,
     animate,
     escapeHtml,

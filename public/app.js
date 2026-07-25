@@ -219,14 +219,25 @@ function nextG(){if(!gAns)return;if(gi<GQ.length-1){gi++;renderG()}else{alert('�
 
 /* -- toast + FAB -- */
 function parseJSON(s){try{return JSON.parse(s.replace(/```json|```/g,'').trim())}catch(e){const m=s.match(/[\[{][\s\S]*[\]}]/);if(m){try{return JSON.parse(m[0])}catch(e2){}}return null}}
-async function genForCurrent(){const id=cur();const fab=document.getElementById('genfab');fab.disabled=true;toast('ИИ придумывает задание…',0);
+const GEN_STATE_ID='genstate';
+function genStateHost(){var el=document.getElementById(GEN_STATE_ID);
+  if(!el){el=document.createElement('div');el.id=GEN_STATE_ID;document.body.appendChild(el)}
+  return el}
+function genState(options){ui.renderState(genStateHost(),options)}
+function genStateClear(){genStateHost().innerHTML=''}
+async function genForCurrent(){const id=cur();const fab=document.getElementById('genfab');fab.disabled=true;
+  genState({kind:'loading',title:'ИИ придумывает задание',description:'Обычно это занимает несколько секунд'});
   try{
     if(id==='scr2')await genWords();
     else if(id==='scr3')await genGrammar();
     else if(id==='scr4')await genListening();
     else if(id==='scr7')await genReading();
-    toast('Готово — новое задание ✨');
-  }catch(e){toast('ИИ недоступен — оставил встроенное задание')}
+    genState({kind:'success',title:'Готово — новое задание',description:'Можно продолжать занятие'});
+    setTimeout(genStateClear,2600);
+  }catch(e){
+    genState({kind:'error',title:'ИИ недоступен',description:apiMessage(e,'ai')+' Встроенное задание осталось на месте.',
+      actionLabel:'Повторить',onAction:function(){genStateClear();genForCurrent()}});
+  }
   fab.disabled=false}
 async function genGrammar(){
   const d=await generateAiContent('grammar_quiz');if(!Array.isArray(d)||!d.length)throw 0;
@@ -243,7 +254,7 @@ async function genReading(){
 (function(){
   const fab=document.createElement('button');fab.id='genfab';fab.innerHTML='✨ ИИ: новое';fab.onclick=genForCurrent;document.body.appendChild(fab);
   ui.ensureLiveRegion('toast');
-  registerRouteHook(function(id){const show=['scr2','scr3','scr4','scr7'].includes(id);fab.style.display=show?'inline-flex':'none'});
+  registerRouteHook(function(id){const show=['scr2','scr3','scr4','scr7'].includes(id);fab.style.display=show?'inline-flex':'none';if(!show)genStateClear()});
 })();
 
 
@@ -847,8 +858,11 @@ function wShowKnown(){var card=document.getElementById('w_card'),opts=document.g
       +'<button type="button" class="iconbtn clk" aria-label="Озвучить слово '+ui.escapeHtml(x.w)+'" onclick="wSpeak(\''+x.w.replace(/'/g,'')+'\')" style="cursor:pointer;flex:none;display:grid;place-items:center;width:32px;height:32px;border-radius:11px;background:#FFF4DE;">'
       +'<svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#E8730A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg></button></div>'}).join('');
   card.innerHTML='<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:18px;color:#2B2B2B;">Выученные слова · '+list.length+'</div>'
-    +(list.length?('<div style="margin-top:6px;">'+rows+'</div>')
-      :'<div style="flex:1;display:flex;align-items:center;justify-content:center;text-align:center;font-weight:600;font-size:13.5px;color:#777163;line-height:1.5;padding:26px 0;">Пока пусто.<br>Слово попадает сюда, когда ты<br>подтвердишь его на всех повторениях</div>');
+    +'<div id="w_known_body" style="margin-top:10px;"></div>';
+  if(list.length)document.getElementById('w_known_body').innerHTML=rows;
+  else ui.renderState('w_known_body',{kind:'empty',title:'Пока пусто',
+    description:'Слово попадает сюда, когда ты подтвердишь его на всех повторениях',
+    actionLabel:'Начать занятие',onAction:wRender});
   opts.innerHTML='<button class="sq" style="'+WBTN+'color:#B54E2F;" onclick="wRender()">← Вернуться к занятию</button>'}
 function wNext(){WI++;wSync();save();wRender()}
 function wPick(btn,vEnc,rightEnc){var x=WQ[WI];if(!x||btn.dataset.done)return;
@@ -2324,13 +2338,15 @@ function wrNext(){if(curTask===37)S.wIdx37=(S.wIdx37||0)+1;else S.wIdx38=(S.wIdx
   W_SHEET=false;save();setTask(curTask);wrGen()}
 function wrSheet(){W_SHEET=!W_SHEET;setTask(curTask)}
 function wrHistHtml(){var ws=(S.works||[]).slice(-3).reverse();
-  if(!ws.length)return '';
+  if(!ws.length)return '<div style="margin-top:12px;">'
+    +ui.stateMarkup({kind:'empty',title:'Проверенных работ пока нет',
+      description:'Напиши ответ и нажми «Проверить» — разбор появится здесь'})+'</div>';
   return '<div style="margin-top:12px;border-top:1px solid #F4EFE9;padding-top:10px;">'
     +'<div style="font-weight:800;font-size:10px;letter-spacing:1.2px;color:#6F695E;">ПОСЛЕДНИЕ РАБОТЫ</div>'
     +ws.map(function(w){var d=new Date(w.ts);
       return '<div style="display:flex;justify-content:space-between;margin-top:6px;font-weight:600;font-size:12px;color:#4A453E;">'
         +'<span>Задание '+w.t+' · '+('0'+d.getDate()).slice(-2)+'.'+('0'+(d.getMonth()+1)).slice(-2)+'</span>'
-        +'<span style="font-weight:800;color:'+(w.g/w.m>=0.7?'#1F8A50':(w.g/w.m>=0.4?'#C77400':'#C0392B'))+';">'+w.g+' из '+w.m+'</span></div>'}).join('')+'</div>'}
+        +'<span style="font-weight:800;color:'+(w.g/w.m>=0.7?'#1D7F4A':(w.g/w.m>=0.4?'#A56000':'#A83226'))+';">'+w.g+' из '+w.m+'</span></div>'}).join('')+'</div>'}
 const W_SHEET37='<div style="font-weight:800;font-size:10px;letter-spacing:1.2px;color:#1D7F4A;">КАК ПИСАТЬ ПИСЬМО · ПОШАГОВО</div>'
  +'<div style="font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.7;margin-top:8px;">'
  +'Письмо собирается как конструктор из 7 частей — иди по шагам:<br><br>'
