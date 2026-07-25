@@ -38,3 +38,26 @@ test('speaking sample uses typed assignment and validates output', () => {
   assert.equal(parseSpeakingSample(2, JSON.stringify(sample)).text, sample.text);
   assert.throws(() => parseSpeakingSample(2, '{"text":"Only one question?"}'), /AI_RESPONSE_INVALID/u);
 });
+
+test('speaking outputs reject HTML markup from the AI', () => {
+  const review = {
+    got: 1,
+    max: 4,
+    verdict: '<img src=x onerror=alert(1)>',
+    criteria: [
+      { name: 'Price', got: 1, max: 1 },
+      { name: 'Location', got: 0, max: 1 },
+      { name: 'Hours', got: 0, max: 1 },
+      { name: 'Equipment', got: 0, max: 1 },
+    ],
+    good: [],
+    fix: [],
+  };
+  assert.throws(() => parseSpeakingReview(2, JSON.stringify(review)), /AI_RESPONSE_INVALID/u);
+  assert.throws(
+    () => parseSpeakingSample(2, JSON.stringify({
+      text: 'How much does it cost? Where is it located? When does it open? <b>What equipment is available?</b>',
+    })),
+    /AI_RESPONSE_INVALID/u,
+  );
+});

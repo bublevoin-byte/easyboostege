@@ -128,6 +128,9 @@ docker compose -f compose.production.yml run --rm app npm run db:import-json -- 
 - Telegram-вход и дорогие AI/TTS/STT операции ограничены по частоте;
 - Telegram login codes одноразовые и хранятся только в виде SHA-256 hash.
 - AI API keys используются только сервером; frontend очищает старые browser-managed ключи и не обращается к провайдерам напрямую.
+- Telegram updates валидируются по ограниченной серверной схеме до обработки.
+- Сгенерированные ИИ строки с HTML-разметкой отклоняются до передачи во frontend.
+- CI сканирует на секреты как рабочее дерево, так и полную Git-историю (`npm run security:history`).
 - CSP разрешает только hashed inline scripts и свой origin для сетевых запросов; frames и object/embed запрещены. Inline styles и event handlers временно разрешены до разделения монолитного frontend.
 
 Лимиты настраиваются через `SESSION_DAYS`, `TELEGRAM_AUTH_CODE_TTL_MS`, `TELEGRAM_AUTH_STARTS_PER_15_MINUTES`, `TELEGRAM_AUTH_CHECKS_PER_15_MINUTES`, `AI_TIMEOUT_MS`, `AI_REQUESTS_PER_HOUR`, `WRITING_REQUESTS_PER_HOUR`, `TTS_REQUESTS_PER_HOUR` и `STT_REQUESTS_PER_HOUR`.

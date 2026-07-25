@@ -44,6 +44,18 @@ test('content response parser enforces reading length and vocabulary fields', ()
   assert.throws(() => parseContentResponse('dictionary_lookup', '{"ipa":"/x/","tr":"икс","extra":true}'), /AI_RESPONSE_INVALID/u);
 });
 
+test('content response parser rejects HTML markup from the AI', () => {
+  const text = Array.from({ length: 50 }, (_, index) => `word${index}`).join(' ');
+  assert.throws(
+    () => parseContentResponse('reading_text', JSON.stringify({ text: `${text}<img src=x onerror=alert(1)>` })),
+    /AI_RESPONSE_INVALID/u,
+  );
+  assert.throws(
+    () => parseContentResponse('dictionary_lookup', '{"ipa":"/x/","tr":"<b>икс</b>"}'),
+    /AI_RESPONSE_INVALID/u,
+  );
+});
+
 test('writing task generation enforces EGE assignment invariants', () => {
   const stimulus = Array.from({ length: 40 }, (_, index) => index < 3 ? `Question${index}?` : `word${index}`).join(' ');
   const task37 = { from: 'Alex', stim: stimulus, ask: 'your new hobby' };

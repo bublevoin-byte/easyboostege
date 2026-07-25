@@ -20,6 +20,7 @@ import { classifyBodyParserError, validateProgress } from './validation/api-inpu
 import { moduleAttemptSchema } from './validation/module-attempt.js';
 import { wordProgressBatchSchema } from './validation/word-progress.js';
 import { errorBankBatchSchema } from './validation/error-bank.js';
+import { parseTelegramUpdate } from './validation/telegram-update.js';
 import { contentSecurityPolicy } from './security/csp.js';
 import { metricsSnapshot, recordDependencyEvent, recordHttpRequest } from './observability/metrics.js';
 import { collectSystemMetrics } from './observability/system-metrics.js';
@@ -313,9 +314,16 @@ async function startTelegram() {
   const poll = async () => {
     try {
       const upd = await tgApi('getUpdates', { offset, timeout: 30 });
-      if (upd.ok) {
-        for (const u of upd.result) {
-          offset = u.update_id + 1;
+      if (upd.ok && Array.isArray(upd.result)) {
+        for (const rawUpdate of upd.result) {
+          if (Number.isSafeInteger(rawUpdate?.update_id) && rawUpdate.update_id >= 0) {
+            offset = Math.max(offset, rawUpdate.update_id + 1);
+          }
+          const u = parseTelegramUpdate(rawUpdate);
+          if (!u) {
+            recordDependencyEvent('telegram', 'error');
+            continue;
+          }
           try {
             if (u.message) await onMessage(u.message);
             else if (u.callback_query) await onCallback(u.callback_query);

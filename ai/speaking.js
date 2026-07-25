@@ -2,6 +2,8 @@ import { z } from 'zod';
 
 export const SPEAKING_PROMPT_VERSION = 'speaking-eval-v1';
 const text = (max) => z.string().trim().min(1).max(max);
+const generatedText = (max) => text(max)
+  .refine((value) => !/[<>]/u.test(value), { message: 'HTML markup is not allowed' });
 const assignments = {
   1: z.object({ tx: text(2000) }).strict(),
   2: z.object({ ad: text(600), points: z.array(text(200)).length(4) }).strict(),
@@ -14,12 +16,16 @@ export const speakingRequestSchema = z.discriminatedUnion('taskType', [1, 2, 3, 
 export const speakingSampleRequestSchema = z.discriminatedUnion('taskType', [2, 3, 4].map((taskType) => z.object({
   taskType: z.literal(taskType), assignment: assignments[taskType],
 }).strict()));
-const criterion = z.object({ name: text(160), got: z.number().int().min(0).max(10), max: z.number().int().min(1).max(10) })
+const criterion = z.object({ name: generatedText(160), got: z.number().int().min(0).max(10), max: z.number().int().min(1).max(10) })
   .strict().refine((value) => value.got <= value.max, { message: 'criterion score exceeds maximum' });
-const correction = z.object({ wrong: z.string().trim().max(300), right: z.string().trim().max(300), note: text(500) }).strict();
+const correction = z.object({
+  wrong: generatedText(300).or(z.literal('')),
+  right: generatedText(300).or(z.literal('')),
+  note: generatedText(500),
+}).strict();
 const reviewSchema = z.object({
-  got: z.number().int().min(0).max(10), max: z.number().int().min(1).max(10), verdict: text(600),
-  criteria: z.array(criterion).min(1).max(5), good: z.array(text(400)).max(3), fix: z.array(correction).max(4),
+  got: z.number().int().min(0).max(10), max: z.number().int().min(1).max(10), verdict: generatedText(600),
+  criteria: z.array(criterion).min(1).max(5), good: z.array(generatedText(400)).max(3), fix: z.array(correction).max(4),
 }).strict();
 const taskRules = {
   1: { max: 1, criteria: 'one criterion "Чтение вслух" with max 1; compare completeness and substitutions, but do not assess pronunciation from text' },
@@ -64,7 +70,7 @@ export function parseSpeakingSample(taskType, raw) {
   let parsed;
   try { parsed = JSON.parse(String(raw).replace(/^```(?:json)?\s*|\s*```$/giu, '').trim()); }
   catch { throw Object.assign(new Error('AI_RESPONSE_INVALID'), { code: 'AI_RESPONSE_INVALID' }); }
-  const result = z.object({ text: text(4000) }).strict().safeParse(parsed);
+  const result = z.object({ text: generatedText(4000) }).strict().safeParse(parsed);
   if (!result.success) throw Object.assign(new Error('AI_RESPONSE_INVALID'), { code: 'AI_RESPONSE_INVALID' });
   const words = result.data.text.split(/\s+/u).length;
   if ((taskType === 2 && (result.data.text.match(/\?/gu) || []).length !== 4)

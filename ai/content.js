@@ -3,7 +3,8 @@ import { z } from 'zod';
 export const CONTENT_PROMPT_VERSION = 'content-v1';
 
 const wordSchema = z.string().trim().min(1).max(80).regex(/^[\p{L}\p{M}' -]+$/u);
-const shortText = (max) => z.string().trim().min(1).max(max);
+const shortText = (max) => z.string().trim().min(1).max(max)
+  .refine((value) => !/[<>]/u.test(value), { message: 'HTML markup is not allowed' });
 
 const requests = {
   dictionary_lookup: z.object({ operation: z.literal('dictionary_lookup'), word: wordSchema }).strict(),
