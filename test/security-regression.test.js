@@ -9,6 +9,10 @@ const frontendScriptPaths = ['auth.js', 'sync.js', 'store.js', 'components.js', 
   (name) => new URL(`../public/${name}`, import.meta.url),
 );
 const serverPath = new URL('../server.js', import.meta.url);
+const usersRoutePath = new URL('../routes/users.js', import.meta.url);
+const progressRoutePath = new URL('../routes/progress.js', import.meta.url);
+const aiRoutePath = new URL('../routes/ai.js', import.meta.url);
+const mediaRoutePath = new URL('../routes/media.js', import.meta.url);
 
 async function readFrontend() {
   const [html, api, scripts] = await Promise.all([
@@ -28,19 +32,30 @@ test('frontend never persists or sends the session JWT', async () => {
 });
 
 test('session endpoints do not expose JWT in JSON', async () => {
-  const server = await fs.readFile(serverPath, 'utf8');
-  assert.doesNotMatch(server, /res\.json\(\{\s*token\s*[,}]/);
-  assert.match(server, /authenticated:\s*true/);
-  assert.match(server, /const user = await getUser\(username\);[\s\S]{0,80}if \(!user\)/u);
-  assert.match(server, /isSessionActive\(claims\.sid, username\)/u);
-  assert.match(server, /req\.user = username/u);
+  const [server, authentication] = await Promise.all([
+    fs.readFile(serverPath, 'utf8'),
+    fs.readFile(new URL('../middleware/authentication.js', import.meta.url), 'utf8'),
+  ]);
+  const users = await fs.readFile(usersRoutePath, 'utf8');
+  assert.doesNotMatch(users, /res\.json\(\{\s*token\s*[,}]/);
+  assert.match(users, /authenticated: true/u);
   assert.doesNotMatch(server, /req\.query\.t(?:\W|$)/u);
+  assert.match(authentication, /const user = await getUser\(username\);[\s\S]{0,80}if \(!user\)/u);
+  assert.match(authentication, /isSessionActive\(claims\.sid, username\)/u);
+  assert.match(authentication, /req\.user = username/u);
+  // The session cookie stays HttpOnly and the token never reaches a response body.
+  assert.match(authentication, /HttpOnly; SameSite=Lax/u);
+  assert.doesNotMatch(authentication, /res\.json\([^)]*token/u);
 });
 
 test('startup logs do not expose the Telegram admin identifier', async () => {
-  const server = await fs.readFile(serverPath, 'utf8');
+  const [server, telegram] = await Promise.all([
+    fs.readFile(serverPath, 'utf8'),
+    fs.readFile(new URL('../services/telegram.js', import.meta.url), 'utf8'),
+  ]);
   assert.doesNotMatch(server, /console\.log\(['"]Telegram admin id:/u);
-  assert.match(server, /Telegram admin notifications:/u);
+  assert.doesNotMatch(telegram, /Telegram admin id:/u);
+  assert.match(telegram, /Telegram admin notifications:/u);
 });
 
 test('frontend contains no embedded or browser-managed AI credentials', async () => {
@@ -204,12 +219,12 @@ test('progress sync queues the latest state and retries when connectivity return
 });
 
 test('module progress endpoint merges validated keys instead of replacing the document', async () => {
-  const [server, postgres] = await Promise.all([
-    fs.readFile(serverPath, 'utf8'),
+  const [progress, postgres] = await Promise.all([
+    fs.readFile(progressRoutePath, 'utf8'),
     fs.readFile(new URL('../storage/postgres-repository.js', import.meta.url), 'utf8'),
   ]);
-  assert.match(server, /app\.post\('\/api\/progress\/modules', auth/u);
-  assert.match(server, /validateProgress\(modules\)/u);
+  assert.match(progress, /router\.post\('\/api\/progress\/modules', auth/u);
+  assert.match(progress, /validateProgress\(modules\)/u);
   assert.match(postgres, /COALESCE\(user_progress\.data, '\{\}'::jsonb\) \|\| EXCLUDED\.data/u);
 });
 
@@ -225,35 +240,41 @@ test('frontend maps network, auth, subscription, limit and provider errors separ
 });
 
 test('AI, TTS and STT endpoints return stable public error codes', async () => {
-  const server = await fs.readFile(serverPath, 'utf8');
+  const [ai, media, subscriptionMiddleware] = await Promise.all([
+    fs.readFile(aiRoutePath, 'utf8'),
+    fs.readFile(mediaRoutePath, 'utf8'),
+    fs.readFile(new URL('../middleware/subscription.js', import.meta.url), 'utf8'),
+  ]);
+  const routes = `${ai}
+${media}`;
   for (const code of ['AI_NOT_CONFIGURED', 'TTS_UNAVAILABLE', 'STT_NOT_CONFIGURED', 'STT_PROVIDER_UNAVAILABLE', 'STT_UNAVAILABLE']) {
-    assert.match(server, new RegExp(`code: '${code}'`, 'u'));
+    assert.match(routes, new RegExp(`code: '${code}'`, 'u'));
   }
-  assert.match(server, /'AI_PROVIDER_UNAVAILABLE'/u);
-  assert.match(server, /code: 'AI_BUDGET_EXHAUSTED'/u);
-  assert.doesNotMatch(server, /res\.status\((?:502|503)\)\.json\(\{ error: '(?:ИИ|Озвучка|STT)[^']*' \+ /u);
+  assert.match(routes, /'AI_PROVIDER_UNAVAILABLE'/u);
+  assert.match(subscriptionMiddleware, /code: 'AI_BUDGET_EXHAUSTED'/u);
+  assert.doesNotMatch(routes, /res\.status\((?:502|503)\)\.json\(\{ error: '(?:ИИ|Озвучка|STT)[^']*' \+ /u);
 });
 
 test('validated generated content is cached before external AI budget checks', async () => {
-  const server = await fs.readFile(serverPath, 'utf8');
-  const cacheLookup = server.indexOf('const stored = await getGeneratedTask(req.user, requestHash)');
-  const budgetCheck = server.indexOf('if (!await hasAiBudget())', cacheLookup);
-  const providerCall = server.indexOf('const response = await askProvider(provider', cacheLookup);
+  const ai = await fs.readFile(aiRoutePath, 'utf8');
+  const cacheLookup = ai.indexOf('const stored = await getGeneratedTask(req.user, requestHash)');
+  const budgetCheck = ai.indexOf('if (!await hasAiBudget())', cacheLookup);
+  const providerCall = ai.indexOf('const response = await askProvider(provider', cacheLookup);
   assert.ok(cacheLookup > 0 && budgetCheck > cacheLookup && providerCall > budgetCheck);
-  assert.match(server, /saveGeneratedTask\(req\.user/u);
-  assert.match(server, /promptVersion: CONTENT_PROMPT_VERSION, input/u);
+  assert.match(ai, /saveGeneratedTask\(req\.user/u);
+  assert.match(ai, /promptVersion: CONTENT_PROMPT_VERSION, input/u);
 });
 
 test('audio endpoints enforce upload controls, timeouts and private cached responses', async () => {
-  const [server, frontend] = await Promise.all([
-    fs.readFile(serverPath, 'utf8'),
+  const [media, frontend] = await Promise.all([
+    fs.readFile(mediaRoutePath, 'utf8'),
     fs.readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
   ]);
-  assert.match(server, /validateAudioUpload\(req\.headers\['content-type'\], buf, config\.ai\.sttMaxBytes\)/u);
-  assert.match(server, /controller\.abort\(\), config\.ai\.sttTimeoutMs/u);
-  assert.match(server, /pruneAudioCache\(TTS_DIR/u);
-  assert.match(server, /Cache-Control', 'private, max-age=604800'/u);
-  assert.doesNotMatch(server, /Cache-Control', 'public, max-age=604800'/u);
+  assert.match(media, /validateAudioUpload\(req\.headers\['content-type'\], buf, config\.ai\.sttMaxBytes\)/u);
+  assert.match(media, /controller\.abort\(\), config\.ai\.sttTimeoutMs/u);
+  assert.match(media, /pruneAudioCache\(TTS_DIR/u);
+  assert.match(media, /Cache-Control', 'private, max-age=604800'/u);
+  assert.doesNotMatch(media, /Cache-Control', 'public, max-age=604800'/u);
   assert.match(frontend, /function spDeleteRecording\(/u);
   assert.match(frontend, /function spFlagTranscript\(/u);
   assert.match(frontend, /Произношение, интонация, паузы и беглость не оценивались/u);

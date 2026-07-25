@@ -1,0 +1,82 @@
+import express from 'express';
+import { rateLimit } from 'express-rate-limit';
+
+import { validateProgress } from '../validation/api-input.js';
+import { moduleAttemptSchema } from '../validation/module-attempt.js';
+import { wordProgressBatchSchema } from '../validation/word-progress.js';
+import { errorBankBatchSchema } from '../validation/error-bank.js';
+
+const MAX_MODULES_PER_REQUEST = 64;
+
+function perUserLimiter(limit, message) {
+  return rateLimit({
+    windowMs: 60 * 60 * 1000,
+    limit,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+    keyGenerator: (req) => req.user,
+    message: { error: { code: 'RATE_LIMITED', message } },
+  });
+}
+
+// Progress, module attempts, word cards and the error bank — everything a student generates.
+export function createProgressRoutes({ authentication, db }) {
+  const router = express.Router();
+  const { auth } = authentication;
+
+  router.get('/api/progress', auth, async (req, res, next) => {
+    try { res.json(await db.getProgress(req.user)); } catch (error) { next(error); }
+  });
+
+  router.post('/api/progress', auth, async (req, res, next) => {
+    try {
+      const parsed = validateProgress(req.body);
+      if (!parsed.ok) {
+        return res.status(400).json({ error: { code: 'INVALID_PROGRESS', message: 'Некорректные данные прогресса.', reason: parsed.code } });
+      }
+      await db.saveProgress(req.user, parsed.data);
+      res.json({ ok: true });
+    } catch (error) { next(error); }
+  });
+
+  // Module-level merge: a partial update must never replace the whole progress object.
+  router.post('/api/progress/modules', auth, async (req, res, next) => {
+    try {
+      const modules = req.body?.modules;
+      const parsed = validateProgress(modules);
+      const count = Object.keys(parsed.data || {}).length;
+      if (!parsed.ok || count === 0 || count > MAX_MODULES_PER_REQUEST) {
+        return res.status(400).json({ error: { code: 'INVALID_PROGRESS_MODULES', message: 'Некорректные модули прогресса.', reason: parsed.code || 'INVALID_MODULE_COUNT' } });
+      }
+      const progress = await db.mergeProgress(req.user, parsed.data);
+      res.json({ ok: true, progress });
+    } catch (error) { next(error); }
+  });
+
+  router.post('/api/module-attempts', auth, perUserLimiter(240, 'Слишком много результатов за короткое время.'), async (req, res, next) => {
+    try {
+      const parsed = moduleAttemptSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректные данные попытки.' } });
+      const result = await db.recordModuleAttempt(req.user, parsed.data);
+      res.status(result.created ? 201 : 200).json(result);
+    } catch (error) { next(error); }
+  });
+
+  router.put('/api/word-progress', auth, perUserLimiter(120, 'Слишком много обновлений словаря.'), async (req, res, next) => {
+    try {
+      const parsed = wordProgressBatchSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректный прогресс слов.' } });
+      res.json(await db.upsertWordProgress(req.user, parsed.data.words));
+    } catch (error) { next(error); }
+  });
+
+  router.post('/api/error-bank', auth, perUserLimiter(120, 'Слишком много обновлений банка ошибок.'), async (req, res, next) => {
+    try {
+      const parsed = errorBankBatchSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректные данные банка ошибок.' } });
+      res.json(await db.upsertErrorBank(req.user, parsed.data.errors));
+    } catch (error) { next(error); }
+  });
+
+  return router;
+}
