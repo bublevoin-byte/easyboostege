@@ -123,6 +123,19 @@ test('application starts and serves health, security headers and PWA assets', { 
     }
 
     const activeAuthorization = { Authorization: `Bearer ${jwt.sign({ u: 'active' }, jwtSecret)}`, 'Content-Type': 'application/json' };
+    const apiDurations = [];
+    for (let index = 0; index < 60; index += 1) {
+      const startedAt = performance.now();
+      const progressResponse = await fetch(`${baseUrl}/api/progress`, { headers: activeAuthorization });
+      apiDurations.push(performance.now() - startedAt);
+      assert.equal(progressResponse.status, 200);
+      await progressResponse.arrayBuffer();
+    }
+    apiDurations.sort((left, right) => left - right);
+    const apiP95Ms = apiDurations[Math.ceil(apiDurations.length * 0.95) - 1];
+    assert.ok(apiP95Ms < 500, `ordinary API p95 is ${apiP95Ms.toFixed(1)} ms`);
+    console.log(`performance: ordinary API p95=${apiP95Ms.toFixed(1)} ms over ${apiDurations.length} requests`);
+
     const activeAi = await fetch(`${baseUrl}/api/v1/ai/generate-content`, {
       method: 'POST',
       headers: activeAuthorization,

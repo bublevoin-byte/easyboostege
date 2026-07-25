@@ -246,18 +246,44 @@ test('Chrome E2E: critical user flows are accessible and resilient', { timeout: 
       const layout = await viewportPage.evaluate(() => {
         const frame = document.querySelector('#frame').getBoundingClientRect();
         const activeScreen = document.querySelector('.screen.on').getBoundingClientRect();
+        const interactive = [...document.querySelectorAll('.screen.on button, .screen.on a, .screen.on input, .screen.on textarea, .screen.on [role="button"]')]
+          .filter((element) => {
+            const style = getComputedStyle(element);
+            const rect = element.getBoundingClientRect();
+            return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+          })
+          .map((element) => {
+            const rect = element.getBoundingClientRect();
+            return {
+              label: element.getAttribute('aria-label') || element.textContent?.trim().slice(0, 40) || element.id,
+              width: rect.width,
+              height: rect.height,
+            };
+          });
+        const homeScroll = document.querySelector('#scr1 .homeScroll');
+        const homeNav = document.querySelector('#scr1 .navclay');
+        homeScroll.scrollTop = homeScroll.scrollHeight;
+        const lastContent = homeScroll.lastElementChild.getBoundingClientRect();
+        const navigation = homeNav.getBoundingClientRect();
         return {
           viewportWidth: window.innerWidth,
           documentWidth: document.documentElement.scrollWidth,
+          frameWidth: frame.width,
           frameLeft: frame.left,
           frameRight: frame.right,
           screenLeft: activeScreen.left,
           screenRight: activeScreen.right,
+          undersized: interactive.filter((item) => item.width < 44 || item.height < 44),
+          lastContentBottom: lastContent.bottom,
+          navigationTop: navigation.top,
         };
       });
       assert.ok(layout.documentWidth <= layout.viewportWidth);
       assert.ok(layout.frameLeft >= -0.5 && layout.frameRight <= layout.viewportWidth + 0.5);
       assert.ok(layout.screenLeft >= -0.5 && layout.screenRight <= layout.viewportWidth + 0.5);
+      assert.ok(layout.frameWidth <= 720, `content line length is too wide at ${viewport.width}px`);
+      assert.deepEqual(layout.undersized, [], `undersized controls at ${viewport.width}px`);
+      assert.ok(layout.lastContentBottom <= layout.navigationTop, `content overlaps navigation at ${viewport.width}px`);
       await viewportContext.close();
     }
     console.log('e2e: responsive matrix 320–1440 px has no horizontal overflow');
