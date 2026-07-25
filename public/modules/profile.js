@@ -5,10 +5,11 @@
   const GUEST = 'Гость';
   const GREETING_FALLBACK = 'друг';
 
+  // Text colours meet WCAG 2.1 AA (4.5:1) against their own tinted background.
   const SUBSCRIPTION_STYLES = {
-    none: { color: '#C77400', background: '#FFF4DE' },
-    active: { color: '#1F8A50', background: '#EAF7F0' },
-    expired: { color: '#C0392B', background: '#FDEDEA' },
+    none: { color: '#A56000', background: '#FFF4DE' },
+    active: { color: '#1D7F4A', background: '#EAF7F0' },
+    expired: { color: '#A83226', background: '#FDEDEA' },
   };
 
   function displayName(user, fallback) {

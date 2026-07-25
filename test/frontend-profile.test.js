@@ -36,7 +36,7 @@ test('profile module reports an unactivated subscription', () => {
 
   assert.equal(status.state, 'none');
   assert.equal(status.text, 'Доступ не активирован — открой бота');
-  assert.equal(status.color, '#C77400');
+  assert.equal(status.color, '#A56000');
   assert.equal(status.background, '#FFF4DE');
   assert.equal(profile.subscriptionStatus({ active: true }, Date.now()).state, 'none');
 });
@@ -50,7 +50,7 @@ test('profile module counts the days left on an active subscription', () => {
   assert.equal(status.state, 'active');
   assert.equal(status.daysLeft, 7);
   assert.equal(status.text, 'Подписка до 01.08.2026 · осталось 7 дн.');
-  assert.equal(status.color, '#1F8A50');
+  assert.equal(status.color, '#1D7F4A');
 });
 
 test('profile module reports an expired subscription without a countdown', () => {
@@ -61,6 +61,6 @@ test('profile module reports an expired subscription without a countdown', () =>
   assert.equal(status.state, 'expired');
   assert.equal(status.daysLeft, 0);
   assert.equal(status.text, 'Подписка закончилась 30.06.2026');
-  assert.equal(status.color, '#C0392B');
+  assert.equal(status.color, '#A83226');
   assert.equal(status.background, '#FDEDEA');
 });

@@ -18,13 +18,20 @@
     return value ? value.split(/\s+/).filter(Boolean).length : 0;
   }
 
+  // Colour alone must not signal the volume, so each state carries its own wording.
+  const COUNT_HINTS = {
+    short: 'мало',
+    ok: 'в норме',
+    over: 'превышение',
+  };
+
   function wordCountStatus(text, task) {
     const bounds = limits(task);
     const count = countWords(text);
     let state = 'short';
     if (count > bounds.max) state = 'over';
     else if (count >= bounds.min) state = 'ok';
-    return { count, range: bounds.range, state, ok: state === 'ok' };
+    return { count, range: bounds.range, state, ok: state === 'ok', hint: COUNT_HINTS[state] };
   }
 
   function pool(base, generated) {

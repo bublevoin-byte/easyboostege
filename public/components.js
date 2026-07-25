@@ -56,6 +56,29 @@
     return element;
   }
 
+  // Colour alone must not carry the verdict, so every marked answer also gets a glyph and a label.
+  const ANSWER_MARKS = {
+    correct: { background: '#EAF7F0', borderColor: '#198049', color: '#1D7F4A', mark: '✓', label: 'верно' },
+    wrong: { background: '#FDEDEA', borderColor: '#C23A39', color: '#A83226', mark: '✗', label: 'неверно' },
+  };
+
+  function markAnswer(element, state) {
+    const style = ANSWER_MARKS[state];
+    if (!element || !style || element.dataset.ebMark) return element;
+    element.dataset.ebMark = state;
+    const text = elementText(element);
+    element.style.background = style.background;
+    element.style.borderColor = style.borderColor;
+    element.style.color = style.color;
+    const mark = global.document.createElement('span');
+    mark.className = 'ansmark';
+    mark.setAttribute('aria-hidden', 'true');
+    mark.textContent = style.mark;
+    element.appendChild(mark);
+    element.setAttribute('aria-label', `${text} — ${style.label}`);
+    return element;
+  }
+
   function bindText(screenId, label, handler) {
     const screen = byId(screenId);
     if (!screen) return [];
@@ -117,6 +140,7 @@
     setRingOffset,
     elementText,
     makeInteractive,
+    markAnswer,
     bindText,
     animate,
     escapeHtml,

@@ -27,9 +27,9 @@ test('writing module counts words and reports the task volume limits', () => {
   const exact = writing.wordCountStatus(new Array(100).fill('word').join(' '), 37);
   const over = writing.wordCountStatus(new Array(251).fill('word').join(' '), 38);
 
-  assert.deepEqual({ ...short }, { count: 99, range: '100–140', state: 'short', ok: false });
-  assert.deepEqual({ ...exact }, { count: 100, range: '100–140', state: 'ok', ok: true });
-  assert.deepEqual({ ...over }, { count: 251, range: '200–250', state: 'over', ok: false });
+  assert.deepEqual({ ...short }, { count: 99, range: '100–140', state: 'short', ok: false, hint: 'мало' });
+  assert.deepEqual({ ...exact }, { count: 100, range: '100–140', state: 'ok', ok: true, hint: 'в норме' });
+  assert.deepEqual({ ...over }, { count: 251, range: '200–250', state: 'over', ok: false, hint: 'превышение' });
   assert.equal(writing.limits(37).maxScore, 6);
   assert.equal(writing.limits(38).maxScore, 14);
 });
