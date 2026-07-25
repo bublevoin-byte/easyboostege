@@ -3,11 +3,9 @@
 /* ---------- STATE ---------- */
 const todayStr=()=>new Date().toISOString().slice(0,10);
 let currentUser=localStorage.getItem('eb_current')||null,S=null,DEMO_MODE=false;
-function dataKey(){return 'eb_data_'+(currentUser||'guest')}
+const store=window.EasyBoostStore;
 function getUsers(){try{return JSON.parse(localStorage.getItem('eb_users'))||{}}catch(e){return{}}}
 function setUsers(u){localStorage.setItem('eb_users',JSON.stringify(u))}
-function load(){let d=null;try{d=JSON.parse(localStorage.getItem(dataKey()))}catch(e){}if(!d)d={};
-  d.box=d.box||{};d.learned=d.learned==null?0:d.learned;d.essays=d.essays||0;return d}
 /* ---------- DATA ---------- */
 const WORDS=[
  {w:'ambiguous',pos:'ПРИЛАГАТЕЛЬНОЕ',ipa:'/æmˈbɪɡjuəs/',tr:'двусмысленный',ex:'The instructions were ambiguous.'},
@@ -99,7 +97,7 @@ document.addEventListener('DOMContentLoaded',()=>{wire();
   currentUser=currentUser||'Аня';localStorage.setItem('eb_current',currentUser);
 });
 wire();
-S=load();
+S=store.loadLocal(currentUser);
 
 /* ===== READING ===== */
 const READ_TXT="Many students take a gap year before university. They travel, work or do volunteering. It can be a valuable experience that helps them become more independent and confident.";
@@ -321,9 +319,7 @@ const apiGet=EasyBoostApi.get;
 const apiGetBlob=EasyBoostApi.getBlob;
 const apiPostBinary=EasyBoostApi.postBinary;
 const apiMessage=EasyBoostApi.messageFor;
-function fillDefaults(d){d=d||{};d.box=d.box||{};d.wstatus=d.wstatus||{};d.learned=d.learned==null?0:d.learned;
-  d.streak=d.streak==null?0:d.streak;d.lastDay=d.lastDay||null;d.dayMin=d.dayMin==null?0:d.dayMin;d.dayMinDate=d.dayMinDate||todayStr();
-  d.essays=d.essays||0;d.speak=d.speak||0;d.srs=d.srs||{};d.prog=d.prog||{words:0,gram:0,read:0,listen:0,write:0,speak:0};return d}
+const fillDefaults=store.normalize;
 
 /* save/load через сервер (или локально) */
 let _saveT=null;
@@ -331,14 +327,14 @@ const START_HOOKS=[];
 function registerStartHook(hook){START_HOOKS.push(hook)}
 function save(){
   if(DEMO_MODE)return;
-  if(SRV){if(!TOKEN)return;clearTimeout(_saveT);_saveT=setTimeout(()=>{EasyBoostSync.saveProgress(S)},600)}
-  else{if(currentUser)localStorage.setItem(dataKey(),JSON.stringify(S))}}
+  if(SRV){if(!TOKEN)return;clearTimeout(_saveT);_saveT=setTimeout(()=>{store.sync.saveProgress(S)},600)}
+  else{store.saveLocal(currentUser,S)}}
 async function startApp(){
   if(DEMO_MODE){tab('scr1');return}
   if(SRV){if(!TOKEN){show('scr5');document.getElementById('tabbar').style.display='none';return}
     try{const d=await apiGet('/api/progress');S=fillDefaults(d)}catch(e){S=fillDefaults({})}}
-  else{S=load()}
-  EasyBoostSync.setBaseline(S);
+  else{S=store.loadLocal(currentUser)}
+  store.sync.setBaseline(S);
   tab('scr1');
   for(const hook of START_HOOKS){try{await hook()}catch(e){}}
 }

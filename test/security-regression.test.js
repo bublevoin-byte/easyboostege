@@ -5,7 +5,7 @@ import fs from 'node:fs/promises';
 const frontendPath = new URL('../public/index.html', import.meta.url);
 const frontendApiPath = new URL('../public/api.js', import.meta.url);
 const frontendAuthPath = new URL('../public/auth.js', import.meta.url);
-const frontendScriptPaths = ['auth.js', 'sync.js', 'router.js', 'learning.js', 'app.js', 'privacy.js', 'tts.js', 'pwa.js'].map(
+const frontendScriptPaths = ['auth.js', 'sync.js', 'store.js', 'router.js', 'learning.js', 'app.js', 'privacy.js', 'tts.js', 'pwa.js'].map(
   (name) => new URL(`../public/${name}`, import.meta.url),
 );
 const serverPath = new URL('../server.js', import.meta.url);
@@ -55,7 +55,7 @@ test('frontend contains no embedded or browser-managed AI credentials', async ()
 
 test('frontend uses ordered external scripts that remain syntactically valid', async () => {
   const { html, api, scripts } = await readFrontend();
-  assert.match(html, /<script src="\/api\.js" defer><\/script>\s*<script src="\/auth\.js" defer><\/script>\s*<script src="\/sync\.js" defer><\/script>\s*<script src="\/router\.js" defer><\/script>\s*<script src="\/learning\.js" defer><\/script>\s*<script src="\/app\.js" defer><\/script>\s*<script src="\/privacy\.js" defer><\/script>\s*<script src="\/tts\.js" defer><\/script>/u);
+  assert.match(html, /<script src="\/api\.js" defer><\/script>\s*<script src="\/auth\.js" defer><\/script>\s*<script src="\/sync\.js" defer><\/script>\s*<script src="\/store\.js" defer><\/script>\s*<script src="\/router\.js" defer><\/script>\s*<script src="\/learning\.js" defer><\/script>\s*<script src="\/app\.js" defer><\/script>\s*<script src="\/privacy\.js" defer><\/script>\s*<script src="\/tts\.js" defer><\/script>/u);
   assert.doesNotMatch(html, /<script(?![^>]*\bsrc\s*=)(?:\s[^>]*)?>/iu);
   assert.doesNotThrow(() => new Function(api));
   for (const script of scripts) assert.doesNotThrow(() => new Function(script));
@@ -76,7 +76,7 @@ test('legacy application script has no duplicate top-level function declarations
     'startApp', 'tab', 'checkWriting', 'trWord', 'initReading', 'initGrammar', 'renderG',
     'pickG', 'nextG', 'initListening', 'playListen', 'toggleScript', 'doLogin',
     'doRegister', 'logout', 'renderProfile', 'tgInit', 'tgPoll', 'tgClick', 'save',
-    'fillDefaults', 'genWords', 'initSpeaking', 'r_add', 'setTask', 'lStop',
+    'genWords', 'initSpeaking', 'r_add', 'setTask', 'lStop',
     'lPlayRaw', 'wSpeak',
   ];
   for (const name of guardedNames) {
@@ -87,7 +87,7 @@ test('legacy application script has no duplicate top-level function declarations
   assert.match(script, /const START_HOOKS=\[\]/u);
   assert.doesNotMatch(script, /\btab\s*=\s*function/u);
   assert.match(script, /const ROUTE_HOOKS=\[\]/u);
-  for (const name of ['doLogin', 'doRegister', 'logout', 'renderProfile', 'tgInit', 'tgPoll', 'tgClick', 'save', 'fillDefaults', 'checkWriting', 'initWords', 'genWords', 'initGrammar', 'initReading', 'r_add', 'initListening', 'setTask', 'initSpeaking', 'lStop', 'lPlayRaw', 'wSpeak']) {
+  for (const name of ['doLogin', 'doRegister', 'logout', 'renderProfile', 'tgInit', 'tgPoll', 'tgClick', 'save', 'checkWriting', 'initWords', 'genWords', 'initGrammar', 'initReading', 'r_add', 'initListening', 'setTask', 'initSpeaking', 'lStop', 'lPlayRaw', 'wSpeak']) {
     assert.doesNotMatch(script, new RegExp(`\\b${name}\\s*=\\s*(?:async\\s+)?function`, 'u'));
   }
   assert.match(script, /const PROFILE_HOOKS=\[\]/u);
@@ -158,8 +158,8 @@ test('frontend keeps zoom, keyboard focus and assistive announcements accessible
 test('new production users start with zero real progress', async () => {
   const { script } = await readFrontend();
   assert.doesNotMatch(script, /learned==null\?320|streak\|\|7|dayMin\|\|18/u);
-  assert.match(script, /learned=d\.learned==null\?0:d\.learned/u);
-  assert.match(script, /prog=d\.prog\|\|\{words:0,gram:0,read:0,listen:0,write:0,speak:0\}/u);
+  assert.match(script, /state\.learned = state\.learned == null \? 0 : state\.learned/u);
+  assert.match(script, /state\.prog = state\.prog \|\| \{ words: 0, gram: 0, read: 0, listen: 0, write: 0, speak: 0 \}/u);
 });
 
 test('progress sync queues the latest state and retries when connectivity returns', async () => {
