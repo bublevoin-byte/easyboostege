@@ -13,6 +13,7 @@ const setW=ui.setWidth;
 const ringOff=ui.setRingOffset;
 const toast=ui.notify;
 const wordModule=window.EasyBoostWords;
+const grammarModule=window.EasyBoostGrammar;
 function getUsers(){try{return JSON.parse(localStorage.getItem('eb_users'))||{}}catch(e){return{}}}
 function setUsers(u){localStorage.setItem('eb_users',JSON.stringify(u))}
 /* ---------- DATA ---------- */
@@ -1232,7 +1233,7 @@ const G_RINT=[7,16,35];
 /* --- состояние: S.gram = {tid:{st,ok,err,sr,rs,due}} --- */
 let GS=null;
 function gRec(t){S.gram=S.gram||{};return S.gram[t]||(S.gram[t]={st:0,ok:0,err:0,sr:0})}
-function gClosed(){var n=0;for(var t=1;t<=20;t++){if(S.gram&&S.gram[t]&&S.gram[t].st===2)n++}return n}
+function gClosed(){return grammarModule.countClosed(S.gram)}
 function gSync(){if(!S)return;var c=gClosed();S.prog=S.prog||{};S.prog.gram=Math.round(c/20*100);
   setTxt('sub_gram','закреплено '+c+' из 20 тем');setTxt('g_sumline','Закреплено '+c+' из 20 тем');
   var bar=document.getElementById('g_bar');if(bar)bar.style.width=Math.max(2,Math.round(c/20*100))+'%'}
@@ -1295,21 +1296,13 @@ function gTheory(t,fromMap){var area=document.getElementById('g_area');if(!area)
     +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="'+(fromMap?('gStart('+t+')'):'gResume()')+'">'+(fromMap?'Начать практику':'Продолжить практику')+'</button>'
     +'<button class="sq" style="'+WBTN+'color:#F2683F;" onclick="gMap()">← К темам</button></div>';
   gAnim('win','.32s')}
-function gShuffle(a){return a.slice().sort(function(){return Math.random()-.5})}
+function gShuffle(a){return grammarModule.shuffled(a)}
 function gBankEff(t){var b=G_BANK[t]||{};var ai=(S&&S.gramAi&&S.gramAi[t])||[];
-  return {c:(b.c||[]).concat(ai.filter(function(x){return x.k==='c'}).map(function(x){return x.q})),
-          f:(b.f||[]).concat(ai.filter(function(x){return x.k==='f'}).map(function(x){return x.q})),
-          c2:(b.c2||[])}}
-function gLvl2(t){var e=gBankEff(t);
-  if(e.f.length)return e.f.map(function(q){return{k:'f',q:q,t:t}});
-  if(e.c2.length)return e.c2.map(function(q){return{k:'c2',q:q,t:t}});
-  return e.c.map(function(q){return{k:'c2',q:q,t:t}})}
-function gDue(){var out=[];for(var t=1;t<=20;t++){var r=S.gram&&S.gram[t];
-  if(r&&r.st===2&&r.due&&r.due<=Date.now())out.push(t)}return out}
+  return grammarModule.effectiveBank(b,ai)}
+function gLvl2(t){return grammarModule.levelTwo(gBankEff(t),t)}
+function gDue(){return grammarModule.dueTopics(S.gram)}
 function gStart(t){var e=gBankEff(t),r=gRec(t);
-  var lvl2=gLvl2(t);
-  var lvl1=e.c.map(function(q){return{k:'c',q:q,t:t}});
-  var queue=r.st>=1? gShuffle(lvl1).slice(0,2).concat(gShuffle(lvl2).slice(0,6)) : gShuffle(lvl1).slice(0,4).concat(gShuffle(lvl2).slice(0,3));
+  var queue=grammarModule.buildTopicQueue(e,t,r);
   GS={t:t,queue:queue,i:0,ok:0,done:0};
   gRenderQ();gGen(t)}
 function gResume(){if(GS)gRenderQ();else gMap()}
@@ -1343,7 +1336,7 @@ function gRenderQ(){var area=document.getElementById('g_area');if(!area||!GS)ret
       +'style="width:100%;box-sizing:border-box;height:52px;border:1px solid #F0EAE2;border-radius:18px;padding:0 16px;font-family:Manrope,sans-serif;font-weight:700;font-size:15px;color:#2B2B2B;outline:none;box-shadow:inset 0 2px 4px rgba(60,45,30,.05);" onkeydown="if(event.key===\'Enter\')gSubmit()">'
       +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="gSubmit()">Проверить</button>'}
   gAnim('win','.32s')}
-function gNorm(v){return (v||'').toLowerCase().replace(/[’’']/g,'').replace(/\s+/g,' ').trim().replace(/\.+$/,'').trim()}
+function gNorm(v){return grammarModule.normalizeAnswer(v)}
 function gExplain(it,userWrong){var q=it.q,t=it.t||GS.t;
   var right=it.k==='f'?q.ans[0]:q.o[q.a];
   var sent=it.k==='f'
@@ -1363,18 +1356,7 @@ function gExplain(it,userWrong){var q=it.q,t=it.t||GS.t;
     +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="gAfterExplain()">Понятно, дальше</button></div>';
   gAnim('wflip','.5s')}
 function gAfterExplain(){GS.i++;gSync();save();gRenderQ()}
-function gAnswer(ok,it){var r=gRec(it.t||GS.t);
-  if(GS.mode==='rev'){GS.done++;
-    if(ok){r.ok++;GS.ok++}
-    else{r.err++;GS.errT[it.t]=1;GS.queue.push(it)}
-    return}
-  if(r.st===0)r.st=1;
-  if(ok){r.ok++;GS.ok++;
-    if(it.k!=='c'){r.sr++;if(r.sr>=4&&r.st!==2){r.st=2;r.rs=0;r.due=Date.now()+G_RINT[0]*86400000}}
-  }else{r.err++;
-    if(it.k!=='c'){r.sr=0;if(r.st===2){r.st=1;r.due=0}}
-    GS.queue.push(it)}
-  GS.done++}
+function gAnswer(ok,it){grammarModule.applyAnswer(gRec(it.t||GS.t),GS,it,ok)}
 function gPick(btn,i){var it=GS.queue[GS.i];if(!it||btn.dataset.done)return;var q=it.q;
   var all=btn.parentElement.querySelectorAll('button');all.forEach(function(b){b.dataset.done=1});
   var ok=i===q.a;
@@ -1448,7 +1430,7 @@ const G_EXAMS=[
 ];
 let EX=null;
 function gExamPool(){var ai=(S&&S.examAi)||[];return G_EXAMS.concat(ai)}
-function gExamFmt(sec){var m=Math.floor(sec/60),x=sec%60;return m+':'+(x<10?'0':'')+x}
+function gExamFmt(sec){return grammarModule.formatDuration(sec)}
 function gExam(){var area=document.getElementById('g_area');if(!area)return;
   var st=S.exam19||{};
   area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;">'+wDeco()
