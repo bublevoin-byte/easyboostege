@@ -22,7 +22,7 @@
 - [ ] Настроить `TELEGRAM_BOT_TOKEN`, `ADMIN_TELEGRAM_ID` и минимум один AI provider key.
 - [ ] Настроить HTTPS reverse proxy и проверить forwarded protocol/IP headers.
 - [ ] Настроить внешний backup storage, расписание и мониторинг неуспешных backup.
-- [ ] Выполнить restore rehearsal на отдельной production-like среде.
+- [x] Выполнить restore rehearsal на отдельной production-like среде.
 - [ ] Настроить алерты на `/health/ready`, HTTP 5xx и рост AI ошибок/таймаутов.
 
 ## Команды release gate

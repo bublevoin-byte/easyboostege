@@ -64,6 +64,8 @@ curl --fail http://127.0.0.1:3000/health/ready
 
 ## Backup и восстановление PostgreSQL
 
+Полный порядок аварийного восстановления, бюджет RTO и последний результат тренировки описаны в [`docs/DISASTER_RECOVERY.md`](docs/DISASTER_RECOVERY.md).
+
 Создать атомарный backup в каталоге `backups/`:
 
 ```bash
