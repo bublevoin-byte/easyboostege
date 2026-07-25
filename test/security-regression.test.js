@@ -5,7 +5,7 @@ import fs from 'node:fs/promises';
 const frontendPath = new URL('../public/index.html', import.meta.url);
 const frontendApiPath = new URL('../public/api.js', import.meta.url);
 const frontendAuthPath = new URL('../public/auth.js', import.meta.url);
-const frontendScriptPaths = ['auth.js', 'sync.js', 'store.js', 'components.js', 'router.js', 'learning.js', 'modules/words.js', 'modules/grammar.js', 'modules/reading.js', 'app.js', 'privacy.js', 'tts.js', 'pwa.js'].map(
+const frontendScriptPaths = ['auth.js', 'sync.js', 'store.js', 'components.js', 'router.js', 'learning.js', 'modules/words.js', 'modules/grammar.js', 'modules/reading.js', 'modules/listening.js', 'app.js', 'privacy.js', 'tts.js', 'pwa.js'].map(
   (name) => new URL(`../public/${name}`, import.meta.url),
 );
 const serverPath = new URL('../server.js', import.meta.url);
@@ -55,7 +55,7 @@ test('frontend contains no embedded or browser-managed AI credentials', async ()
 
 test('frontend uses ordered external scripts that remain syntactically valid', async () => {
   const { html, api, scripts } = await readFrontend();
-  assert.match(html, /<script src="\/api\.js" defer><\/script>\s*<script src="\/auth\.js" defer><\/script>\s*<script src="\/sync\.js" defer><\/script>\s*<script src="\/store\.js" defer><\/script>\s*<script src="\/components\.js" defer><\/script>\s*<script src="\/router\.js" defer><\/script>\s*<script src="\/learning\.js" defer><\/script>\s*<script src="\/modules\/words\.js" defer><\/script>\s*<script src="\/modules\/grammar\.js" defer><\/script>\s*<script src="\/modules\/reading\.js" defer><\/script>\s*<script src="\/app\.js" defer><\/script>\s*<script src="\/privacy\.js" defer><\/script>\s*<script src="\/tts\.js" defer><\/script>/u);
+  assert.match(html, /<script src="\/api\.js" defer><\/script>\s*<script src="\/auth\.js" defer><\/script>\s*<script src="\/sync\.js" defer><\/script>\s*<script src="\/store\.js" defer><\/script>\s*<script src="\/components\.js" defer><\/script>\s*<script src="\/router\.js" defer><\/script>\s*<script src="\/learning\.js" defer><\/script>\s*<script src="\/modules\/words\.js" defer><\/script>\s*<script src="\/modules\/grammar\.js" defer><\/script>\s*<script src="\/modules\/reading\.js" defer><\/script>\s*<script src="\/modules\/listening\.js" defer><\/script>\s*<script src="\/app\.js" defer><\/script>\s*<script src="\/privacy\.js" defer><\/script>\s*<script src="\/tts\.js" defer><\/script>/u);
   assert.doesNotMatch(html, /<script(?![^>]*\bsrc\s*=)(?:\s[^>]*)?>/iu);
   assert.doesNotThrow(() => new Function(api));
   for (const script of scripts) assert.doesNotThrow(() => new Function(script));
