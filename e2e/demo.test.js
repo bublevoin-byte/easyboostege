@@ -292,13 +292,17 @@ async function runE2E() {
     await authenticatedPage.getByRole('button', { name: 'Главная' }).click();
     await authenticatedPage.evaluate(() => {
       window.__e2eMicrophoneMode = 'success';
-      if (!navigator.mediaDevices) {
-        Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: {} });
-      }
-      navigator.mediaDevices.getUserMedia = async () => {
-        if (window.__e2eMicrophoneMode === 'denied') throw new DOMException('Permission denied', 'NotAllowedError');
-        return { getTracks: () => [{ stop() {} }] };
-      };
+      Object.defineProperty(navigator, 'mediaDevices', {
+        configurable: true,
+        value: {
+          getUserMedia: async () => {
+            if (window.__e2eMicrophoneMode === 'denied') {
+              throw new DOMException('Permission denied', 'NotAllowedError');
+            }
+            return { getTracks: () => [{ stop() {} }] };
+          },
+        },
+      });
       class E2EMediaRecorder {
         static isTypeSupported(type) {
           return type === 'audio/webm';
