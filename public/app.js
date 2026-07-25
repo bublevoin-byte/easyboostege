@@ -18,6 +18,7 @@ const readingModule=window.EasyBoostReading;
 const listeningModule=window.EasyBoostListening;
 const writingModule=window.EasyBoostWriting;
 const speakingModule=window.EasyBoostSpeaking;
+const examModule=window.EasyBoostExam;
 function getUsers(){try{return JSON.parse(localStorage.getItem('eb_users'))||{}}catch(e){return{}}}
 function setUsers(u){localStorage.setItem('eb_users',JSON.stringify(u))}
 /* ---------- DATA ---------- */
@@ -1459,7 +1460,7 @@ function gExamStart(){var pool=gExamPool();
     +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);margin-top:3px;" onclick="gExamCheck()">Проверить</button></div>';
   gAnim('win','.32s')}
 function gExamCheck(){if(!EX)return;var ex=EX.ex;
-  clearInterval(EX.iv);var sec=Math.floor((Date.now()-EX.t0)/1000);
+  clearInterval(EX.iv);var sec=examModule.elapsedSeconds(EX.t0,Date.now());
   var score=0,rows='',bank=[];
   ex.gaps.forEach(function(g,i){var inp=document.getElementById('g_ex_'+i);var val=gNorm(inp?inp.value:'');
     var ok=g.ans.some(function(a){return gNorm(a)===val});
@@ -1474,15 +1475,14 @@ function gExamCheck(){if(!EX)return;var ex=EX.ex;
       +'</div>'
       +(ok?'':'<div style="font-weight:600;font-size:12px;color:#98917F;margin-top:4px;">'+g.e+'</div>')
       +'</div>'});
-  var st=S.exam19||{n:0,last:0,best:0};
-  st.n++;st.last=score;st.best=Math.max(st.best||0,score);S.exam19=st;
+  S.exam19=examModule.record(S.exam19,score);
   if(typeof SRV!=='undefined'&&SRV&&TOKEN&&typeof crypto!=='undefined'&&crypto.randomUUID){
-    apiPost('/api/module-attempts',{id:crypto.randomUUID(),module:'exam',activity:'grammar_19_24',score:score,maxScore:6,durationMs:sec*1000,metadata:{source:'builtin'}}).catch(function(){})}
+    apiPost('/api/module-attempts',examModule.attempt(crypto.randomUUID(),{module:'exam',activity:'grammar_19_24',score:score,maxScore:6,durationMs:sec*1000})).catch(function(){})}
   if(bank.length&&typeof SRV!=='undefined'&&SRV&&TOKEN){apiPost('/api/error-bank',{errors:bank}).catch(function(){})}
   EX=null;save();gSync();
   var area=document.getElementById('g_area');
   area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;">'+wDeco()
-    +'<div style="text-align:center;"><div style="font-size:42px;">'+(score===6?'🏆':(score>=4?'💪':'📚'))+'</div>'
+    +'<div style="text-align:center;"><div style="font-size:42px;">'+examModule.badge(score,6)+'</div>'
     +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:22px;color:#2B2B2B;margin-top:8px;">'+score+' из 6</div>'
     +'<div style="font-weight:600;font-size:13px;color:#98917F;margin-top:4px;">Время: '+gExamFmt(sec)+(score<6?' · слабые темы отмечены к повторению':'')+'</div></div>'
     +'<div style="margin-top:12px;">'+rows+'</div></div>'
@@ -1855,12 +1855,12 @@ function rExamRender(){var area=document.getElementById('r_area');if(!area||!RE)
     +q.o.map(function(o,i){return '<button class="sq" style="'+WBTN+'text-align:left;" onclick="RE.ansQ.push('+i+');rExamRender()">'+rEsc(o)+'</button>'}).join('')+'</div>'}
 function rExamDedup(field,idx,val){RE[field]=readingModule.selectUnique(RE[field],idx,val)}
 function rExamFinish(){if(!RE)return;clearInterval(RE.iv);
-  var sec=Math.floor((Date.now()-RE.t0)/1000),L='ABCDE',r=rSt();
+  var sec=examModule.elapsedSeconds(RE.t0,Date.now()),L='ABCDE',r=rSt();
   var okH=0;RE.h.txts.forEach(function(tx,ti){r.h.tot++;if(RE.selH[ti]===tx.a){okH++;r.h.ok++}});
   var okG=0;[0,1,2].forEach(function(gi){r.g.tot++;if(RE.selG[gi]===RE.g.a[gi]){okG++;r.g.ok++}});
   var okQ=0;RE.q.qs.forEach(function(q,i){r.q.tot++;if(RE.ansQ[i]===q.a){okQ++;r.q.ok++}});
   var total=okH+okG+okQ;
-  var st=S.readExam||{n:0,last:0,best:0};st.n++;st.last=total;st.best=Math.max(st.best||0,total);S.readExam=st;
+  S.readExam=examModule.record(S.readExam,total);
   var rows='';
   RE.h.txts.forEach(function(tx,ti){if(RE.selH[ti]!==tx.a)
     rows+='<div style="padding:9px 2px;border-bottom:1px solid #F4EFE9;"><div style="font-weight:800;font-size:12.5px;color:#C0392B;">Заголовки · текст '+(ti+1)+' → '+L[tx.a]+'. '+rEsc(RE.h.hl[tx.a])+'</div><div style="font-weight:600;font-size:12px;color:#98917F;margin-top:3px;">'+tx.k+'</div></div>'});
@@ -1870,13 +1870,13 @@ function rExamFinish(){if(!RE)return;clearInterval(RE.iv);
     rows+='<div style="padding:9px 2px;border-bottom:1px solid #F4EFE9;"><div style="font-weight:800;font-size:12.5px;color:#C0392B;">Вопрос '+(i+1)+' → '+rEsc(q.o[q.a])+'</div><div style="font-weight:600;font-size:12px;color:#98917F;margin-top:3px;">«'+rEsc(q.ev)+'»</div></div>'});
   RE=null;rSync();save();
   var parts=[['Заголовки',okH,4],['Пропуски',okG,3],['Вопросы',okQ,4]];
-  var weak=parts.slice().sort(function(a,b){return a[1]/a[2]-b[1]/b[2]})[0];
+  var max=examModule.maxScore(parts),weak=examModule.weakestSection(parts);
   var area=document.getElementById('r_area');
   area.innerHTML='<div id="r_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;">'+wDeco()
-    +'<div style="text-align:center;"><div style="font-size:42px;">'+(total>=10?'🏆':(total>=7?'💪':'📚'))+'</div>'
-    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:22px;color:#2B2B2B;margin-top:8px;">'+total+' из 11</div>'
-    +'<div style="font-weight:600;font-size:13px;color:#98917F;margin-top:4px;">Время: '+gExamFmt(sec)+' · '+parts.map(function(p){return p[0]+' '+p[1]+'/'+p[2]}).join(' · ')+'</div>'
-    +(total<11?'<div style="font-weight:700;font-size:12.5px;color:#C77400;margin-top:6px;">Слабое место: '+weak[0].toLowerCase()+' — потренируй отдельно</div>':'')
+    +'<div style="text-align:center;"><div style="font-size:42px;">'+examModule.badge(total,max)+'</div>'
+    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:22px;color:#2B2B2B;margin-top:8px;">'+total+' из '+max+'</div>'
+    +'<div style="font-weight:600;font-size:13px;color:#98917F;margin-top:4px;">Время: '+gExamFmt(sec)+' · '+examModule.sectionLine(parts)+'</div>'
+    +(total<max?'<div style="font-weight:700;font-size:12.5px;color:#C77400;margin-top:6px;">Слабое место: '+weak.label.toLowerCase()+' — потренируй отдельно</div>':'')
     +'</div>'+(rows?'<div style="margin-top:12px;">'+rows+'</div>':'')+'</div>'
     +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
     +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="rExamStart()">Ещё раз</button>'
@@ -2290,12 +2290,12 @@ function lExamRender(){var area=document.getElementById('l_area');if(!area||!LE)
   area.innerHTML=h}
 function lExamDedup(field,idx,val){LE[field]=listeningModule.selectUnique(LE[field],idx,val)}
 function lExamFinish(){if(!LE)return;clearInterval(LE.iv);lStop();
-  var sec=Math.floor((Date.now()-LE.t0)/1000),r=lSt(),LBL=['Верно','Неверно','Не сказано'];
+  var sec=examModule.elapsedSeconds(LE.t0,Date.now()),r=lSt(),LBL=['Верно','Неверно','Не сказано'];
   var okM=0;LE.m.a.forEach(function(a,si){r.m.tot++;if(LE.selM[si]===a){okM++;r.m.ok++}});
   var okT=0;LE.tf.st.forEach(function(x,i){r.tf.tot++;if(LE.selT[i]===x.a){okT++;r.tf.ok++}});
   var okI=0;LE.iq.qs.forEach(function(q,i){r.iq.tot++;if(LE.selI[i]===q.a){okI++;r.iq.ok++}});
   var total=okM+okT+okI;
-  var st=S.lisExam||{n:0,last:0,best:0};st.n++;st.last=total;st.best=Math.max(st.best||0,total);S.lisExam=st;
+  S.lisExam=examModule.record(S.lisExam,total);
   var rows='';
   LE.m.a.forEach(function(a,si){if(LE.selM[si]!==a)
     rows+='<div style="padding:9px 2px;border-bottom:1px solid #F4EFE9;"><div style="font-weight:800;font-size:12.5px;color:#C0392B;">Говорящий '+'ABCD'[si]+' → '+(a+1)+'. '+LE.m.st[a]+'</div><div style="font-weight:600;font-size:12px;color:#98917F;margin-top:3px;">'+LE.m.k[si]+'</div></div>'});
@@ -2308,13 +2308,13 @@ function lExamFinish(){if(!LE)return;clearInterval(LE.iv);lStop();
   var tr3=lTranscript(LE.iq.d,LE.iq.qs.map(function(q){return q.ev}));
   LE=null;r.done++;lSync();save();
   var parts=[['Соответствия',okM,4],['Верно/неверно',okT,5],['Интервью',okI,4]];
-  var weak=parts.slice().sort(function(a,b){return a[1]/a[2]-b[1]/b[2]})[0];
+  var max=examModule.maxScore(parts),weak=examModule.weakestSection(parts);
   var area=document.getElementById('l_area');
   area.innerHTML='<div id="l_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;">'+wDeco()
-    +'<div style="text-align:center;"><div style="font-size:42px;">'+(total>=12?'🏆':(total>=8?'💪':'📚'))+'</div>'
-    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:22px;color:#2B2B2B;margin-top:8px;">'+total+' из 13</div>'
-    +'<div style="font-weight:600;font-size:13px;color:#98917F;margin-top:4px;">Время: '+gExamFmt(sec)+' · '+parts.map(function(p){return p[0]+' '+p[1]+'/'+p[2]}).join(' · ')+'</div>'
-    +(total<13?'<div style="font-weight:700;font-size:12.5px;color:#C77400;margin-top:6px;">Слабое место: '+weak[0].toLowerCase()+' — потренируй отдельно</div>':'')
+    +'<div style="text-align:center;"><div style="font-size:42px;">'+examModule.badge(total,max)+'</div>'
+    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:22px;color:#2B2B2B;margin-top:8px;">'+total+' из '+max+'</div>'
+    +'<div style="font-weight:600;font-size:13px;color:#98917F;margin-top:4px;">Время: '+gExamFmt(sec)+' · '+examModule.sectionLine(parts)+'</div>'
+    +(total<max?'<div style="font-weight:700;font-size:12.5px;color:#C77400;margin-top:6px;">Слабое место: '+weak.label.toLowerCase()+' — потренируй отдельно</div>':'')
     +'</div>'+(rows?'<div style="margin-top:12px;">'+rows+'</div>':'')+'</div>'
     +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
     +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="lExamStart()">Ещё раз</button>'
@@ -2886,7 +2886,7 @@ async function speFinish(){if(!SPE)return;clearInterval(SPE.tm);try{lStop()}catc
     S.spkScores=speakingModule.appendScore(S.spkScores,{t:t,g:d.got,m:SP_CONF[t].max,ts:Date.now()});
   }
   var got=speakingModule.examTotal(results);
-  S.spkExam=speakingModule.updateExamRecord(S.spkExam,got);
+  S.spkExam=examModule.record(S.spkExam,got);
   var r=spSt();r.t1.n++;r.t2.n++;r.t3.n++;r.t4.n++;
   spSync();save();
   var weak=speakingModule.weakestTask(results);
@@ -2898,7 +2898,7 @@ async function speFinish(){if(!SPE)return;clearInterval(SPE.tm);try{lStop()}catc
       +'</div>'}).join('');
   SPE=null;
   area.innerHTML='<div id="s9_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;">'+wDeco()
-    +'<div style="text-align:center;"><div style="font-size:42px;">'+(got>=16?'🏆':(got>=10?'💪':'📚'))+'</div>'
+    +'<div style="text-align:center;"><div style="font-size:42px;">'+examModule.badge(got,speakingModule.EXAM_MAX,speakingModule.BADGES)+'</div>'
     +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:26px;color:#2B2B2B;margin-top:8px;">'+got+' из '+speakingModule.EXAM_MAX+'</div>'
     +'<div style="font-weight:600;font-size:13px;color:#98917F;margin-top:4px;">Время: '+spFmt(sec)+'</div>'
     +(got<speakingModule.EXAM_MAX?'<div style="font-weight:700;font-size:12.5px;color:#C77400;margin-top:6px;">Слабое место: '+SP_CONF[weak].name.toLowerCase()+' — потренируй отдельно</div>':'')

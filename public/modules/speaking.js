@@ -14,6 +14,8 @@
   const AVERAGE_WINDOW = 5;
   const MIN_TRANSCRIPT_WORDS = 3;
   const MIME_CANDIDATES = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'];
+  // The oral exam rewards a lower share of the maximum than the written sections.
+  const BADGES = { gold: 0.8, silver: 0.5 };
 
   function config(task) {
     return CONFIG[task] || CONFIG[1];
@@ -113,16 +115,6 @@
     ))[0];
   }
 
-  function updateExamRecord(record, got) {
-    const previous = record && typeof record === 'object' ? record : { n: 0, last: 0, best: 0 };
-    const score = Math.max(0, Number(got) || 0);
-    return {
-      n: (Number(previous.n) || 0) + 1,
-      last: score,
-      best: Math.max(Number(previous.best) || 0, score),
-    };
-  }
-
   function normalizeGenerated(task, data) {
     if (!data) return null;
     if (task === 1) {
@@ -168,10 +160,10 @@
     sentences,
     examTotal,
     weakestTask,
-    updateExamRecord,
     normalizeGenerated,
     TASKS,
     EXAM_MAX,
+    BADGES,
     SCORE_LIMIT,
     AVERAGE_WINDOW,
   });

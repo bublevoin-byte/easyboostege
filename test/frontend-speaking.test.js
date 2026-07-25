@@ -97,15 +97,14 @@ test('speaking module rejects unusable transcripts and clamps AI scores to the t
   assert.deepEqual({ ...speaking.clampScore(null, 3) }, { got: 0, max: 5 });
 });
 
-test('speaking module totals the exam, finds the weakest task and updates the record', () => {
+test('speaking module totals the exam and finds the weakest task', () => {
   const speaking = createSpeakingModule();
   const results = { 1: { got: 1 }, 2: { got: 4 }, 3: { got: 1 }, 4: { got: 8 } };
 
   assert.equal(speaking.examTotal(results), 14);
   assert.equal(speaking.weakestTask(results), 3);
-  assert.deepEqual(plain(speaking.updateExamRecord(undefined, 14)), { n: 1, last: 14, best: 14 });
-  assert.deepEqual(plain(speaking.updateExamRecord({ n: 1, last: 14, best: 14 }, 9)), { n: 2, last: 9, best: 14 });
   assert.equal(speaking.examTotal({}), 0);
+  assert.deepEqual(plain(speaking.BADGES), { gold: 0.8, silver: 0.5 });
 });
 
 test('speaking module splits sample answers into sentences for playback', () => {
