@@ -1,6 +1,7 @@
 # не загружаем в git секреты и мусор
 node_modules/
 .env
+.env.staging
 data.json
 *.test-data.json
 tts-cache/

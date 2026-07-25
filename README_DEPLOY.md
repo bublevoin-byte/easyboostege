@@ -147,3 +147,53 @@ PostgreSQL integration-тест запускается при наличии `TE
 Chrome E2E использует установленный Chrome/Chromium; нестандартный путь можно передать через `CHROME_PATH`.
 
 Перед релизом также выполняйте `npm audit --omit=dev`. Текущий production dependency tree не содержит известных npm audit уязвимостей.
+
+## Staging
+
+Staging полностью отделён от production:
+
+- каталог `/opt/easyboost-staging`;
+- compose project `easyboost-staging`;
+- PostgreSQL volume и база `easyboost_staging`;
+- loopback-порт `127.0.0.1:3001`;
+- файл секретов `.env.staging`;
+- отдельные Telegram bot token, JWT secret, database password и AI budgets.
+
+Первичная настройка на сервере:
+
+```bash
+install -d -m 755 /opt/easyboost-staging
+install -m 600 .env.staging.example /opt/easyboost-staging/.env.staging
+editor /opt/easyboost-staging/.env.staging
+```
+
+`APP_URL` должен быть staging-origin, например `https://staging.useboost.ru`. Не копируйте production secrets. До создания отдельного Telegram-бота и AI-ключей оставляйте эти интеграции выключенными.
+
+Ручной неизменяемый deploy:
+
+```bash
+git archive --format=tar.gz --output=easyboost-staging-release.tar.gz HEAD
+sha256sum easyboost-staging-release.tar.gz
+sudo scripts/staging-deploy.sh easyboost-staging-release.tar.gz <sha256>
+```
+
+Скрипт сверяет checksum, перед обновлением создаёт PostgreSQL backup и архив кода для rollback, пересобирает контейнеры и ждёт readiness. Откат к последнему сохранённому коду:
+
+```bash
+sudo /opt/easyboost-staging/scripts/staging-rollback.sh
+```
+
+Workflow `.github/workflows/deploy-staging.yml` запускается вручную или при push в `main`. Для GitHub environment `staging` нужны secrets:
+
+- `STAGING_HOST`;
+- `STAGING_USER`;
+- `STAGING_SSH_PRIVATE_KEY`;
+- `STAGING_SSH_HOST_KEY` — полная закреплённая строка из `ssh-keyscan`, проверенная владельцем сервера.
+
+На VPS должна быть установлена root-owned копия deploy script:
+
+```bash
+install -o root -g root -m 755 scripts/staging-deploy.sh /usr/local/sbin/easyboost-staging-deploy
+```
+
+Отдельному SSH-пользователю разрешается через `sudo` запускать только `/usr/local/sbin/easyboost-staging-deploy`; workflow загружает архив, но не исполняемый root-скрипт. Staging URL публикуется отдельным Cloudflare Tunnel route на `http://127.0.0.1:3001`; production route и контейнеры не изменяются.

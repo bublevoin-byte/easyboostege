@@ -45,6 +45,11 @@ jobs:
       - run: npm run check
       - name: Build and verify frontend assets
         run: npm run build:frontend
+      - name: Validate staging deployment
+        run: |
+          bash -n scripts/staging-deploy.sh scripts/staging-rollback.sh
+          cp .env.staging.example .env.staging
+          docker compose -f compose.staging.yml --env-file .env.staging config --quiet
       - run: npm run db:migrate
       - run: npm test
       - name: Chrome E2E
