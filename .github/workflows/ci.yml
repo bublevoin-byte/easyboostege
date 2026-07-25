@@ -10,7 +10,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     services:
       postgres:
         image: postgres:17-alpine
@@ -54,9 +54,13 @@ jobs:
       - run: npm test
       - name: Chrome E2E
         run: npm run test:e2e
-      - name: Install Firefox for Playwright
-        run: npx playwright install --with-deps firefox
+      - name: Chrome Android E2E
+        run: npm run test:e2e:android
+      - name: Install Firefox and WebKit for Playwright
+        run: npx playwright install --with-deps firefox webkit
       - name: Firefox E2E
         run: npm run test:e2e:firefox
+      - name: iPhone WebKit E2E
+        run: npm run test:e2e:iphone-webkit
       - name: Validate AI quality tooling and engineering fixtures
         run: npm run quality:check

@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import jwt from 'jsonwebtoken';
-import { chromium, firefox } from 'playwright';
+import { chromium, devices, firefox, webkit } from 'playwright';
 
 const projectDirectory = fileURLToPath(new URL('..', import.meta.url));
 const serverPath = fileURLToPath(new URL('../server.js', import.meta.url));
@@ -68,11 +68,22 @@ async function chromeExecutable() {
 }
 
 const browserEngine = process.env.E2E_BROWSER || 'chromium';
-if (!['chromium', 'firefox'].includes(browserEngine)) {
-  throw new Error('E2E_BROWSER must be chromium or firefox');
+const browserProfile = process.env.E2E_PROFILE || 'desktop';
+if (!['chromium', 'firefox', 'webkit'].includes(browserEngine)) {
+  throw new Error('E2E_BROWSER must be chromium, firefox or webkit');
+}
+if (!['desktop', 'android', 'iphone'].includes(browserProfile)) {
+  throw new Error('E2E_PROFILE must be desktop, android or iphone');
+}
+if (browserProfile === 'android' && browserEngine !== 'chromium') {
+  throw new Error('The android profile requires E2E_BROWSER=chromium');
+}
+if (browserProfile === 'iphone' && browserEngine !== 'webkit') {
+  throw new Error('The iphone profile requires E2E_BROWSER=webkit');
 }
 
 async function launchBrowser() {
+  if (browserEngine === 'webkit') return webkit.launch({ headless: true });
   if (browserEngine === 'firefox') {
     return firefox.launch({
       headless: true,
@@ -84,13 +95,22 @@ async function launchBrowser() {
   return chromium.launch({ headless: true, executablePath: await chromeExecutable() });
 }
 
+function contextOptions(overrides = {}) {
+  const profile = browserProfile === 'android'
+    ? devices['Pixel 7']
+    : browserProfile === 'iphone'
+      ? devices['iPhone 15']
+      : {};
+  return { ...profile, ...overrides };
+}
+
 async function runE2E() {
   let temporaryDirectory;
   let child;
   let browser;
   try {
     browser = await launchBrowser();
-    const context = await browser.newContext();
+    const context = await browser.newContext(contextOptions());
     const page = await context.newPage();
     temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-e2e-'));
     const port = await findAvailablePort();
@@ -168,7 +188,7 @@ async function runE2E() {
 
     await context.close();
 
-    const authenticatedContext = await browser.newContext();
+    const authenticatedContext = await browser.newContext(contextOptions({ serviceWorkers: 'block' }));
     await authenticatedContext.addCookies([{
       name: 'eb_token',
       value: jwt.sign({ u: 'e2euser' }, jwtSecret, { expiresIn: '1h' }),
@@ -243,6 +263,11 @@ async function runE2E() {
     );
     await authenticatedPage.getByRole('button', { name: 'Проверить с ИИ' }).click();
     await authenticatedPage.locator('#scr12.on').waitFor({ state: 'visible', timeout: 5_000 });
+    await authenticatedPage.waitForFunction(
+      () => document.querySelector('#rv_score')?.textContent === '6',
+      null,
+      { timeout: 5_000 },
+    );
     assert.equal(await authenticatedPage.locator('#rv_score').textContent(), '6');
     assert.equal(await authenticatedPage.locator('#rv_verdict').innerText(), 'Задание 37 проверено');
 
@@ -253,6 +278,11 @@ async function runE2E() {
     );
     await authenticatedPage.getByRole('button', { name: 'Проверить с ИИ' }).click();
     await authenticatedPage.locator('#scr12.on').waitFor({ state: 'visible', timeout: 5_000 });
+    await authenticatedPage.waitForFunction(
+      () => document.querySelector('#rv_score')?.textContent === '14',
+      null,
+      { timeout: 5_000 },
+    );
     assert.equal(await authenticatedPage.locator('#rv_score').textContent(), '14');
     assert.equal(await authenticatedPage.locator('#rv_verdict').innerText(), 'Задание 38 проверено');
     assert.deepEqual(evaluatedWritingTasks, ['writing_37', 'writing_38']);
@@ -262,6 +292,9 @@ async function runE2E() {
     await authenticatedPage.getByRole('button', { name: 'Главная' }).click();
     await authenticatedPage.evaluate(() => {
       window.__e2eMicrophoneMode = 'success';
+      if (!navigator.mediaDevices) {
+        Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: {} });
+      }
       navigator.mediaDevices.getUserMedia = async () => {
         if (window.__e2eMicrophoneMode === 'denied') throw new DOMException('Permission denied', 'NotAllowedError');
         return { getTracks: () => [{ stop() {} }] };
@@ -333,7 +366,7 @@ async function runE2E() {
     assert.equal((await authenticatedContext.cookies()).some((cookie) => cookie.name === 'eb_token'), false);
     await authenticatedContext.close();
 
-    const expiredContext = await browser.newContext();
+    const expiredContext = await browser.newContext(contextOptions());
     await expiredContext.addCookies([{
       name: 'eb_token',
       value: jwt.sign({ u: 'expireduser' }, jwtSecret, { expiresIn: '1h' }),
@@ -361,7 +394,7 @@ async function runE2E() {
       { width: 1440, height: 900 },
     ];
     for (const viewport of viewportMatrix) {
-      const viewportContext = await browser.newContext({ viewport });
+      const viewportContext = await browser.newContext(contextOptions({ viewport }));
       const viewportPage = await viewportContext.newPage();
       await viewportPage.goto(baseUrl, { waitUntil: 'networkidle' });
       await viewportPage.getByRole('button', { name: 'Попробовать демо' }).click();
@@ -418,7 +451,7 @@ async function runE2E() {
 }
 
 runE2E()
-  .then(() => console.log(`e2e: ${browserEngine} critical user flows passed`))
+  .then(() => console.log(`e2e: ${browserEngine}/${browserProfile} critical user flows passed`))
   .catch((error) => {
     console.error(error);
     process.exitCode = 1;
