@@ -71,14 +71,22 @@ function renderReview(d){
 const TABROUTE={'Главная':'scr1','Учить':'scr2','Прогресс':'scr10','Профиль':'scr11'};
 const TILEROUTE={'Слова':'scr2','Грамматика':'scr3','Чтение':'scr7','Аудирование':'scr4','Письмо':'scr8','Говорение':'scr9'};
 function txt(el){return (el.textContent||'').trim()}
-function bindText(screen,label,fn){const sc=document.getElementById(screen);if(!sc)return;sc.querySelectorAll('div,span,button,a').forEach(el=>{if(txt(el)===label&&el.children.length<=2){el.classList.add('clk');el.addEventListener('click',e=>{e.stopPropagation();fn()})}})}
+function makeInteractive(el,label,fn){
+  if(!el||el.dataset.ebInteractive==='true')return;
+  el.dataset.ebInteractive='true';el.classList.add('clk');
+  if(!/^(BUTTON|A)$/.test(el.tagName)){el.setAttribute('role','button');el.setAttribute('tabindex','0')}
+  if(label&&!el.getAttribute('aria-label'))el.setAttribute('aria-label',label);
+  el.addEventListener('click',e=>{e.stopPropagation();fn()});
+  el.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();e.stopPropagation();fn()}});
+}
+function bindText(screen,label,fn){const sc=document.getElementById(screen);if(!sc)return;sc.querySelectorAll('div,span,button,a').forEach(el=>{if(txt(el)===label&&el.children.length<=2)makeInteractive(el,label,fn)})}
 function wire(){
   document.querySelectorAll('.screen').forEach(scr=>{
-    scr.querySelectorAll('div,span,a').forEach(el=>{const t=txt(el);if(TABROUTE[t]&&el.children.length<=1&&t.length<11){el.classList.add('clk');el.addEventListener('click',e=>{e.stopPropagation();nav(TABROUTE[t])})}});
-    scr.querySelectorAll('svg').forEach(sv=>{const h=(sv.innerHTML||'').toLowerCase();if(h.includes('14 6 8 12 14 18')){const p=sv.parentElement||sv;p.classList.add('clk');p.addEventListener('click',e=>{e.stopPropagation();back()})}});
+    scr.querySelectorAll('div,span,a').forEach(el=>{const t=txt(el);if(TABROUTE[t]&&el.children.length<=1&&t.length<11){const control=el.closest('.navit')||el;makeInteractive(control,t,()=>nav(TABROUTE[t]))}});
+    scr.querySelectorAll('svg').forEach(sv=>{const h=(sv.innerHTML||'').toLowerCase();if(h.includes('14 6 8 12 14 18')){const p=sv.parentElement||sv;makeInteractive(p,'Назад',()=>back())}});
   });
   const s1=document.getElementById('scr1');
-  if(s1)s1.querySelectorAll('div,span').forEach(el=>{const t=txt(el);if(TILEROUTE[t]&&el.children.length===0){const card=el.closest('div');(card||el).classList.add('clk');(card||el).addEventListener('click',e=>{e.stopPropagation();nav(TILEROUTE[t])})}});
+  if(s1)s1.querySelectorAll('div,span').forEach(el=>{const t=txt(el);if(TILEROUTE[t]&&el.children.length===0){const card=el.closest('.clayCard')||el;makeInteractive(card,t,()=>nav(TILEROUTE[t]))}});
   bindText('scr5','Войти',()=>doLogin());bindText('scr5','Создать',()=>doRegister());
   bindText('scr6','Поехали',()=>startApp());bindText('scr6','Пропустить',()=>startApp());
   bindText('scr11','Выйти',()=>logout());
@@ -229,7 +237,7 @@ function wireTabs(){
       if(t==='Главная'||t==='Учить'||t==='Прогресс'||t==='Профиль'){
         const fresh=sp.cloneNode(true);sp.replaceWith(fresh);       // strip old text-only listener
         const col=fresh.parentElement;if(!col)return;col.style.cursor='pointer';
-        col.onclick=(e)=>{e.stopPropagation();if(t!=='Учить')nav(R[t]);};
+        makeInteractive(col,t,()=>{if(t==='Учить')openLearn();else nav(R[t])});
       }
     });
   });

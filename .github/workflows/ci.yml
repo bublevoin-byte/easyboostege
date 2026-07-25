@@ -43,5 +43,7 @@ jobs:
       - run: npm run check
       - run: npm run db:migrate
       - run: npm test
+      - name: Chrome E2E
+        run: npm run test:e2e
       - name: Validate AI quality tooling and engineering fixtures
         run: npm run quality:check

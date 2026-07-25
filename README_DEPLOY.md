@@ -138,10 +138,12 @@ docker compose -f compose.production.yml run --rm app npm run db:import-json -- 
 npm ci
 npm run check
 npm test
+npm run test:e2e
 docker compose -f compose.production.yml config
 ```
 
 CI выполняет чистую установку, синтаксическую проверку и тесты на Node.js 22.
 PostgreSQL integration-тест запускается при наличии `TEST_DATABASE_URL`; CI поднимает для него отдельный PostgreSQL 17 и сначала применяет все миграции.
+Chrome E2E использует установленный Chrome/Chromium; нестандартный путь можно передать через `CHROME_PATH`.
 
 Перед релизом также выполняйте `npm audit --omit=dev`. Текущий production dependency tree не содержит известных npm audit уязвимостей.

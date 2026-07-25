@@ -6,6 +6,7 @@
 - [x] Docker image собирается и запускается от непривилегированного пользователя `node`.
 - [x] PostgreSQL 17 проходит healthcheck; все SQL-миграции применяются автоматически.
 - [x] Repository integration flow проверен на реальной PostgreSQL 17.
+- [x] Chrome E2E проверяет demo, клавиатурную навигацию, слова, offline/recovery, сохранение прогресса, logout и PWA.
 - [x] `/health/live` и `/health/ready` отвечают из production Compose.
 - [x] Backup создаётся атомарно; restore проверяет архив и требует подтверждения.
 - [x] Backup/restore rehearsal возвращает удалённую marker-запись и healthy-состояние приложения.
@@ -31,6 +32,7 @@
 npm ci
 npm run check
 npm test
+npm run test:e2e
 npm run quality:check
 npm audit --omit=dev
 docker compose -f compose.production.yml config
