@@ -1,0 +1,563 @@
+[
+  {
+    "id": "sp3-fipi-2023-2750ba48",
+    "operation": "speaking_3",
+    "tags": [
+      "weak",
+      "fipi-2023",
+      "topic-unknown"
+    ],
+    "assignment": {
+      "topic": "интервью",
+      "qs": [
+        "What part of Russia do you live in? What’s the weather like in summer there?",
+        "What else would you like our listeners to know about your region?",
+        "What can you tell us about your family?",
+        "How did you use to spend your summer holidays when you were seven?",
+        "How would you like to spend your summer holidays in 10 years?"
+      ]
+    },
+    "transcript": "In Troitsk. It's a part of Moscow. Quite warm. It's green. There is rivers. I live with my parents. I've got an elder sister called Masha. I used to go abroad. I swim in the sea. I had a great time. Somewhere far from big cities. Maybe on the Maldives.",
+    "human": {
+      "total": 1,
+      "max": 5,
+      "criteria": {
+        "q1": 0,
+        "q2": 0,
+        "q3": 1,
+        "q4": 0,
+        "q5": 0
+      },
+      "reviewer": "fipi-2023-expert-manual",
+      "notes": [
+        "0 баллов. Ответ состоит из одного простого предложения и двух неполных предложений.",
+        "0 баллов. Второе предложение содержит грубую грамматическую ошибку, препятствующую пониманию.",
+        "1 балл.",
+        "0 баллов. Второе предложение содержит грамматическую ошибку. Ставится 0 баллов, так как ответ оценивается целиком (холистическая шкала). Обращаем внимание экспертов на то, что действовавший в прошлом году с учётом новизны задания подход: если ответ содержит 2 коммуникативно оправданных предложения без элементарных ошибок, то он оценивается 1 баллом – в 2023 г. отменён.",
+        "0 баллов. Ответ состоит из неполных предложений. ЗАДАНИЕ 6 Изучите скрипт ответа на задание 3 и скажите, согласны ли вы с комментариями. Что вы можете добавить к ним?"
+      ]
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "sp3-fipi-2023-7dd46e20",
+    "operation": "speaking_3",
+    "tags": [
+      "weak",
+      "fipi-2023"
+    ],
+    "assignment": {
+      "topic": "summer holidays",
+      "qs": [
+        "What part of Russia do you live in? What’s the weather like in summer there?",
+        "What else would you like our listeners to know about your region?",
+        "What can you tell us about your family?",
+        "How did you use to spend your summer holidays when you were seven?",
+        "How would you like to spend your summer holidays in 10 years?"
+      ]
+    },
+    "transcript": "I living in Siberia. The weather hot in summer. Quite big. Many animals living here. It's small. I living with parents. In the village. It's great to swim in a river. In the Crimea. I’d enjoy nature.",
+    "human": {
+      "total": 0,
+      "max": 5,
+      "criteria": {
+        "q1": 0,
+        "q2": 0,
+        "q3": 0,
+        "q4": 0,
+        "q5": 0
+      },
+      "reviewer": "fipi-2023-expert-manual",
+      "notes": [
+        "0 баллов. В первом предложении пропущен вспомогательный глагол, во втором – глагол-связка. Предложения превратились в набор слов.",
+        "0 баллов. Можно рассматривать как два неполных предложения, можно как первое неполное и второе с неверным выбором глагольной формы и ошибкой в её формировании. В любом случае – не принято.",
+        "0 баллов. Неверный выбор глагольной формы и ошибка в её формировании.",
+        "0 баллов. Первое предложение неполное. Содержание не соответствует вопросу.",
+        "0 баллов. Первое предложение неполное. Во втором неуместна (и просто непонятна) конструкция I’d enjoy. ЗАДАНИЕ 7 Изучите скрипт задания 3 и скажите, согласны ли вы с комментариями. Что вы можете добавить к ним? Tapescript for Task 3"
+      ]
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "sp3-fipi-2023-7504a195",
+    "operation": "speaking_3",
+    "tags": [
+      "middle",
+      "fipi-2023"
+    ],
+    "assignment": {
+      "topic": "teens’ free time",
+      "qs": [
+        "How old are you? What class are you in?",
+        "How do you usually spend your free time? What do you like to do on Sundays?",
+        "Do you prefer to spend your free time with your friends or your family? Why?",
+        "How do your friends spend their free time? Where do they go and what do they do?",
+        "How do you think you will spend your free time in ten years’ time?"
+      ]
+    },
+    "transcript": "I’m seventeen years old and I’m in eleventh grade. I usually like reading some detective and science fiction book. On Sundays I like walking in the streets, go to some remote places with my family and friends. I do it for recharging the batteries and putting my feet up. I prefer spending my time with my friends because it is very fun and very great for me. We like spending time together in some quest rooms or in my home. We are an avid… we are the avid fans of cooking, playing some boardgames, and also we like cycling. Speaking about my best friend, she always plays a guitar and piano, and it is a very great way for her to recharge the batteries and relax. And another my best friend, he plays football in his free time, and he is also interested in cooking. I will spend my free time in 10 years very great, I think. First of all, I will study more languages like Spanish and German; also, I would like to learn some French, learn French and polish up my language skills.",
+    "human": {
+      "total": 3,
+      "max": 5,
+      "criteria": {
+        "q1": 1,
+        "q2": 1,
+        "q3": 1,
+        "q4": 0,
+        "q5": 0
+      },
+      "reviewer": "fipi-2023-expert-manual",
+      "notes": [
+        "1 балл. Ответ по содержанию соответствует вопросу, содержит 2 фразы. Ошибка в артикле во второй фразе не влияет на смысл.",
+        "1 балл. Ответ по содержанию соответствует вопросу, по объёму – соответствует требованиям; не содержит ошибок элементарного уровня.",
+        "1 балл. Ответ по содержанию соответствует вопросу, по объёму – соответствует требованиям; ошибка в артикле во второй фразе не влияет на смысл: наблюдается ошибочное использование усилителя very, однако это не входит в список проверяемых явлений и не препятствует коммуникации.",
+        "0 баллов. Нет ответа на второй вопрос.",
+        "0 баллов, так как ответ содержит ошибку элементарного уровня (концовка первой фразы построена неверно, нарушены структура предложения и лексическая сочетаемость в рамках программы начальной школы: использование прилагательных как определений к существительным и наречий – как слов, поясняющих глаголы)."
+      ]
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "sp3-fipi-2023-c54aea03",
+    "operation": "speaking_3",
+    "tags": [
+      "weak",
+      "fipi-2023"
+    ],
+    "assignment": {
+      "topic": "watching TV – now and then",
+      "qs": [
+        "Do you think watching TV is a good way to spend your free time or not? Why do you think so?",
+        "What can you tell us about some of the TV programmes you like?",
+        "What did you use to watch on TV when you were seven?",
+        "How did you use TV for self-education?",
+        "What TV programmes would you like to appear in the near future?"
+      ]
+    },
+    "transcript": "I think spending my… spending time watching TV is a good way because you can relax and also know about last news in the world and know about important issues in the world. Also, you can know about life celebrities and you can relax after a hard day in the school or work. I like watching TV programmes such as comedies channel, and my favourite programme is Dance on the TNT and comedy club and I like watching different animations for children. When I was seven I liked watch Disney channel, it was my favourite channel because there are different beautiful animations and I like see movies about princes and different wonderies. My favourite moves was Cinderella, and I really liked this… I like watch different scientist channel where I can know about… issu… about important issues, something like global warming or the latest innovations and inventions and something scientists’ innovations. It is a good way to know new… I want start to watch the new scientist channel which started a couple week ago but because of my study I can’t do it but I hope I will watch it for near future.",
+    "human": {
+      "total": 0,
+      "max": 5,
+      "criteria": {
+        "q1": 0,
+        "q2": 0,
+        "q3": 0,
+        "q4": 0,
+        "q5": 0
+      },
+      "reviewer": "fipi-2023-expert-manual",
+      "notes": [
+        "0 баллов. Многочисленные лексико-грамматические ошибки элементарного уровня затрудняют понимание.",
+        "0 баллов. Отвечающий только называет передачи, ничего о них не говорит, а задан вопрос «ЧТО вы можете сказать о ТВ программах, которые Вам нравятся?» Если бы был задан вопрос «КАКИЕ ТВ программы Вам нравятся?», то ответ был бы принят в содержательном плане. В языковом плане отметим некоторые погрешности: comedies channel (надо comedy channel), TNT (произносит по-русски «тэ-эн-тэ»), different animations for children (вместо cartoons/animated films), что, как показывают данные корпусной лингвистики, допустимо. Данные погрешности не затрудняют понимания (не входят в обязательный список проверяемых элементов содержания), и если бы ответ был коммуникативно верен, он был бы принят.",
+        "0 баллов. Многочисленные лексико-грамматические ошибки элементарного уровня затрудняют понимание.",
+        "0 баллов. Многочисленные лексико-грамматические ошибки элементарного уровня затрудняют понимание.",
+        "0 баллов. Заданный интервьюером вопрос не понят. Оценка за ответ на задание 3 – 0 баллов из 5 возможных. ЗАДАНИЕ 12 73 Прослушайте запись ответов обучающегося на вопросы интервью (аудиозапись: Задание 3, Работа 2). Заполните дополнительную схему оценивания. Прокомментируйте выставленные баллы. (Задание для учащихся см. в предыдущем задании 11, дополнительную схему – в Приложении 2). ЗАДАНИЕ 13 Обсудите в парах наиболее типичные ошибки, допущенные обучающимися при выполнении задания 3. ЗАДАНИЕ 14 Составьте памятку для участников экзамена по выполнению задания 3. ЗАДАНИЕ 15 Составьте памятку для эксперта по оцениванию задания 3. 74 Тема 4. Технология оценивания задания 4 «Развёрнутое монологическое высказывание – обоснование выбора иллюстраций к проектной работе и выражение своего мнения по её проблематике» ЗАДАНИЕ 1 Прочитайте нижеприведённый текст и объясните, что такое монологическая речь и каковы её единицы. «Монологическая речь представляет собой монологический текст, т.е. группу предложений, связанных между собой по смыслу, расположенных в логической последовательности и соединённых друг с другом при помощи специальных языковых средств. В устном монологе предложения называют фразами. Фраза – минимальная единица монолога. Фразы объединены в сверхфразовые единства, которые представляют собой сложное синтаксическое целое, отрезок речи в форме последовательности двух и более самостоятельных фраз, объединённых общностью темы в смысловые блоки». ЗАДАНИЕ 2 Установите соответствие терминов (1–6) их дефинициям (А–З). Используйте каждую букву только один раз. Два определения являются лишними. После заполнения таблицы ответов назовите термины, соответствующие этим определениям. Термины 3. Коммуникативная 5. Говорение 1. Коммуникация компетенция 6. Монологическая речь 2. Речевая деятельность 4. Коммуникативная задача Дефиниции А) форма речи, обращённой к одному Д) установка перед выполнением задания, слушателю (собеседнику) или группе, которая мотивирует обучающихся на решение иногда – к самому себе; активный вид проблемы, поставленной в этом задании речевой деятельности, рассчитанный на коммуникативным способом восприятие Б) продуктивный вид речевой Е) специфический вид деятельности, деятельности, посредством которого содержанием которого является обмен (совместно с аудированием) информацией между членами одного языкового осуществляется устное вербальное сообщества для достижения понимания и общение взаимодействия В) активный, целенаправленный, Ж) совокупность самых различных опосредованный языковой системой побудителей, потребностей, мотивов, чувств, и обусловленный ситуацией общения правил, норм, желаний и др. процесс передачи и приёма сообщений Г) способность и готовность З) результат владения компетенциями, осуществлять межкультурное способность успешной деятельности за счёт и межъязыковое общение средствами усвоенных стратегий успеха, сформированных иностранного языка умений и приобретённых практических знаний Ваши ответы 1 2 3 4 5 6 75 ЗАДАНИЕ 3 Ответьте на следующие вопросы, используя информацию, данную в первом разделе и в приложениях. 1. Какие виды монологов вы знаете? Какие из них являются наиболее сложными? 2. Какого рода монолог ожидается от экзаменуемого в задании 4? 3. Каковы характерные признаки данного вида монолога? 4. Чем отличается описание картинки от сравнения картинок? 5. Какие умения и навыки проверяет задание 4? 6. Какие темы и ситуации могут использоваться в задании 4? 7. Что можно считать вступительной и заключительной фразами в задании 4? 8. Какие средства логической связи могут использоваться при сравнении картинок? 9. Каков уровень сложности этого задания? 10. Как оценивается выполнение данного задания? 11. Какие предметные и метапредметные умения и навыки учитываются при оценивании задания 4? 12. Легко или трудно будет оценивать данное задание? Почему? 13. В чём смысл включения этого задания в устную часть ЕГЭ по иностранным языкам? ЗАДАНИЕ 4 Просмотрите нижеприведённое задание. Какие умения и навыки владения монологической речью можно проверить на нём? Какие метапредметные умения можно проверить на нём? Задание для участников экзамена 4 Task 4. Imagine that you that you and your friend are doing a school project “Life without gadgets”. You have found some illustrations and want to share the news. Leave a voice message to your friend. In 2.5 minutes be ready to:  explain the choice of the illustrations for the project by briefly describing them and noting the differences;  mention the advantages (1–2) of the two types of reading;  mention the disadvantages (1–2) of the two types of reading;  express your opinion on the subject of the project – which way of reading you prefer and why. You will speak for not more than 3 minutes (12–15 sentences). You have to talk continuously. Photo 1 Photo 2 76 ЗАДАНИЕ 5 Прочитайте приведённое ниже задание 4. Проанализируйте задание для участника экзамена и дополнительную схему оценивания. Покажите, как задачи, которые поставлены перед экзаменуемым, отражены в дополнительной схеме оценивания для эксперта. Задание для участников экзамена Task 4. Imagine that you and your friend are doing a school project “Part-time jobs”. You have found some illustrations and want to share the news. Leave a voice message to your friend. In 2.5 minutes be ready to:  explain the choice of the illustrations for the project by briefly describing them and noting the differences;  mention the advantages (1–2) of the two part-time jobs;  mention the disadvantages (1–2) of the two part-time jobs;  express your opinion on the subject of the project – which of these part-time jobs you’d prefer and why. You will speak for not more than 3 minutes (12–15 sentences). You have to talk continuously. Photo 1 Photo 2 77 Таблица 2.3. Дополнительная схема оценивания задания 4 (Part-time jobs)НОМЕР БЛАНКА ФИО эксперта _____________________________ Код эксперта ____________________ 1. Решение коммуникативной задачи (Содержание) Аспект 1. Объяснение выбора иллюстраций к проекту (краткое описание фотографий и указание на различия между ними) дано; связь фотографий с темой проекта 2. Организация выявлена Аспект 2. Преимущества (1–2) двух видов подработки названы Аспект 3. Недостатки (1–2) двух видов подработки названы Аспект 4. Мнение автора по теме проектной работы высказано – какую из этих подработок он бы предпочел и почему ИТОГОВЫЙ БАЛЛ (максимальный балл – 3) Наличие вступления и заключения, завершённость высказывания Логичность и использование средств логической связи ИТОГОВЫЙ БАЛЛ (максимальный балл – 2) 3. ЯЗЫКОВОЕ ОФОРМЛЕНИЕ ВЫСКАЗЫВАНИЯ (максимальный балл – 2) ЗАДАНИЕ 6 Соотнесите критерии оценивания выполнения задания 4 (см. Приложение 1) и дополнительную схему оценивания (выше). Как дополнительная схема оценивания помогает эксперту объективно и адекватно выставить баллы по критериям К1–К3? ЗАДАНИЕ 7 Придумайте тему проекта к нижеследующим фотографиям, заполните дополнительную схему в соответствии с темой. Задание для участников экзамена Task 4. Imagine that you and your friend are doing a school project “…” together with your friend. You have found some illustrations and want to share the news. Leave a voice message to your friend. In 2.5 minutes be ready to:  explain the choice of the illustrations for the project by briefly describing them and noting the differences;  mention the advantages (1–2) of the two types of …;  mention the disadvantages (1–2) of the two types of …;  express your opinion on the subject of the project – … and why. You will speak for not more than 3 minutes (12–15 sentences). You have to talk continuously. 78 Photo 1 Photo 2 Таблица 2.4. Дополнительная схема оценивания задания 4 (фото к проектной работе)НОМЕ Р БЛАНКА Аспект 1. Объяснение выбора иллюстраций к проекту (краткое описание 1. Решение коммуникативной фотографий и указание на различия между ними) дано; связь фотографий с темой задачи (Содержание) проекта выявлена Аспект 2. Достоинства (1–2) двух видов … названы 2. Организация Аспект 3. Недостатки (1–2) двух видов … названы Аспект 4. Мнение автора по теме проектной работы высказано – … и почему – высказано ИТОГОВЫЙ БАЛЛ (максимальный балл – 4) Наличие вступления с обращением к другу и заключения, завершённость высказывания Логичность и использование средств логической связи ИТОГОВЫЙ БАЛЛ (максимальный балл – 3) 3 ЯЗЫКОВОЕ ОФОРМЛЕНИЕ ВЫСКАЗЫВАНИЯ (максимальный балл – 3) ЗАДАНИЕ 8. Прочитайте внимательно инструкцию к заданию 4, критерии и дополнительную схему оценивания (Приложения 1 и 2). Определите, правильно ли даны участником вступительная и 79 заключительная фразы. Какой максимальный балл может получить участник экзамена по критерию «Организация текста» за ответ, исходя из приведённых фрагментов?6 4 Task 4. Imagine that you and your friend are doing a school project “Shopping”. You have found some illustrations and want to share the news. Leave a voice message to your friend. In 2.5 minutes be ready to:  explain the choice of the illustrations for the project by briefly describing them and noting the differences;  mention the advantages (1–2) of the two types of shopping;  mention the disadvantages (1–2) of the two types of shopping;  express your opinion on the subject of the project – which way of shopping you prefer and why. You will speak for not more than 3 minutes (12–15 sentences). You have to talk continuously. Photo 1 Photo 2 Фрагменты ответа участника экзамена I’d like to compare and contrast two pictures. ………………………………………………. ………………………………………………. I like shopping online. Это все. ЗАДАНИЕ 9 Проанализируйте выполнение участниками аспекта 1 по критерию РКЗ (задание 4 “Shopping” см. в предыдущем задании 8). Что вы поставите в дополнительной схеме оценивания: «+» (верно), «–» (неверно), «±» (неполно/неточно)? Прокомментируйте своё решение. Аспект 1. Объяснение выбора иллюстраций к проекту (краткое описание фотографий и указание на различия между ними) дано; связь фотографий с темой проекта выявлена 6 Все ответы даны в языковом оформлении оригинала (участника экзамена). 80 1. These two photos show people shopping. But the main difference is that in photo 1 there are people in the shop but in photo 2 there is a woman who is shopping online. 2. Both photos show people doing shopping. However, the ways of buying goods differ greatly. In the first photo we can see a family of three in the supermarket with their trolley full of the necessary items. While in the second one a young pretty girl is at home planning her purchases in front of the computer holding a plastic card in her hand. 3. In Photo 1 I can see a family in a shop. They are smiling. They have got a trolley full of things. In Photo 2 there is a woman who is staying at home and choosing things on her computer. The main difference is that the family in Photo 1 are going to pay by cash. The woman is going to pay by credit card. 4. In Photo 1 there are people choosing things they need to buy in a shop but in photo 2 the woman is buying things online. But the photos are different. In photo 1 the people can touch things they are buying but in photo 2 the woman can only see the pictures of the things she is buying. 5. Both photos show people shopping. The difference is in different ways of shopping. ЗАДАНИЕ 10 Проанализируйте выполнение участниками аспекта 2 по критерию РКЗ (задание 4 “Shopping”). Что вы поставите в дополнительной схеме оценивания: «+» (верно), «–» (неверно), «±» (неполно/неточно)? Прокомментируйте своё решение. Аспект 2. Достоинства (1–2) двух способов делать покупки названы 1. The main advantage of shopping in a real shop is that people can ask a shop assistant about the things they can buy. But the main advantage of buying things online is saving your time for more important things. 2. Both kinds of shopping have their advantages. Buying things in a regular shop enables you to examine the quality and the expiry dates of the products. The main plus of shopping online is comfort as you don’t need to go out especially if the weather is nasty. 3.The main advantage of buying things in a shop is that you can see what you are buying but the main advantage of online shopping is that the choice of the things is much bigger than in a regular shop. 4. The main advantage of shopping with your family is that it’s fun. Also parents can teach their children how to choose thing. The main advantage of shopping alone is that nobody distracts you and you can concentrate on choosing the things. 5. The main advantages of both ways of shopping is that food is always fresh. ЗАДАНИЕ 11 Проанализируйте выполнение участниками аспекта 3 по критерию РКЗ (задание 4 “Shopping”). Что вы поставите в дополнительной схеме оценивания: «+» (верно), «–» (неверно), «±» (неполно/неточно)? Прокомментируйте своё решение. Аспект 3. Недостатки (1–2) двух способов делать покупки названы 81 1. The main disadvantage of buying things in the shop is that the choice of things is limited. The main disadvantage of buying things in an online shop is that you cannot get reliable information about goods. 2. The main disadvantage of buying things with your relatives is that you can disagree about things you want to buy. Children often demand that their parents buy them some toys or sweets. The main disadvantage of buying things alone is that nobody can give you advice about things you see in the pictures. Besides, there are many fake sites and criminals can steal your money. 3.Tastes differ. Some people prefer buying things online, some people want to visit shops. 4. The main disadvantage of the first picture is that the family have to carry a heavy bag. The main disadvantage of the way of shopping in picture two is that you cannot get the things you buy immediately. 5. The main drawback of shopping offline is that sometimes you have to queue at the checkout. Unfortunately, online shopping has its own minuses too because it involves the risk of identity theft. ЗАДАНИЕ 12 Проанализируйте выполнение участниками аспекта 4 по критерию РКЗ (задание 4 “Shopping”). Что вы поставите в дополнительной схеме оценивания: «+» (верно), «–» (неверно), «±» (неполно/неточно)? Прокомментируйте своё решение. Аспект 4. Мнение автора по теме проектной работы – какой способ делать покупки он предпочитает и почему – высказано 1. As for me, I prefer buying things alone because I can concentrate and avoid buying things I don’t need. 2. As for me, I prefer buying things in a regular shop because I can get all the information I need about the things I am buying. 3. Personally, I prefer shopping offline because shopping online can be dangerous. 4. As for me, I like buying things together with my friends because it’s fun. 5. Personally, I prefer shopping offline because it seems to be more reliable and safe to me. ЗАДАНИЕ 13 Прослушайте ответ № (066)7901 на задание 4 и оцените его. Используйте критерии и дополнительную схему оценивания (Приложения 1 и 2). Сравните свои баллы с выставленными экспертами ниже. Изучите скрипт и прочитайте комментарии эксперта. Согласны ли вы с ними? Task 4. Imagine that you and your friend are doing a school project “Happy childhood” together with your friend. You have found some illustrations and want to share the news. Leave a voice message to your friend. In 2.5 minutes be ready to:  explain the choice of the illustrations for the project by briefly describing them and noting the differences;  mention the advantages (1–2) of the two types of of children’s leisure activities; 82  mention the disadvantages (1–2) of the two types of of children’s leisure activities;  express your opinion on the subject of the project – which leisure activity you preferred as a child and why. You will speak for not more than 3 minutes (12–15 sentences). You have to talk continuously. Photo 1 Photo 2 Анализ выполнения задания 4 “Happy childhood” Решение Аспект 1. Еxplain the Ответ неточный (±): автор даёт коммуникативной choice of the illustrations описание фото, частично объясняющее задачи for the project by briefly их выбор в качестве иллюстраций, describing them and noting однако по линии сравнения указывает the differences только малозначительные детали, не связанные с проектной работой Аспект 2. mention the (1 человек – 4 человека): advantages (1–2) of the Well, the first photo demonstrates us four two types of of children’s children playing outside, while second leisure activities photo shows us a girl who is interesting… who is interested in books and studying. That’s why I think that these pictures illustrate our project perfectly, because they show happy childhood. It is obvious that these pictures are completely different. The main difference between these photos are number of children and the place. In the first photo we can see 4 children playing outside on the ground, whereas second photo… in the second photo girl is inside and she is alone. Ответ полный (+): Also, different childhoods have some advantages and disadvantages. And speaking about first photo, people while walking and playing outside, communicate with another children and they improve some communication skills, leadership skills and it is very great for their future. 83 Speaking about second photo, the girl loves studying, and it is also great for your future. She has an opportunity to improve her critical, logical and analytical thinking, also books are the great relaxation technique for everyone. Аспект 3. Mention the Ответ полный (+): But unfortunately, they disadvantages (1–2) of the two types of of children’s run a risk of suffering from bullying and leisure activities different insults from other children. Аспект 4. Express your opinion on the subject of But speaking about some cons, this reading the project – which leisure activity you preferred as and studying can be exhausting and a child and why sometimes time-consuming and even boring, Объём высказывания Итоговый балл so person runs a risk of being overcharged. (максимальный балл – 4) Ответ полный (+): Speaking about my Наличие вступительной (обращения к другу) childhood, I preferred attending dancing и заключительной фразы, завершённость classes, I was an avid fan of ballet-dancing. высказывания And I communicated with another people Логичность и использование средств and liked to spend time with them. логической связи Более строгие эксперты могут счесть ответ неточным, поскольку участник экзамена в заключении не говорит о разных типах досуга, т.е. не связывает напрямую своё мнение с темой проекта, однако в конечном итоге оценивание этого аспекта как полного и точного или неточного не влияет на балл по РКЗ – см. критерии Соответствует требованиям 3 балла (независимо от того, как эксперт оценит аспект 4): Коммуникативная задача выполнена в основном: 1–2 аспекта раскрыты неполно/неточно Организация Вступительная фраза есть, адресность высказывания присутствует: Hello! I’ve just found two photos for our project and I’m going to discuss them with you. Заключительная фраза соответствует предложенной коммуникативной ситуации: Please let me know whether you like the choice of two photos for our project. Некоторое нарушение логики в описании фотографии читающей девочки (соединение постоянного качества и конкретного действия, протекающего в конкретный момент): who is interested in books and studying. Нарушение в употреблении средств логической связи: your future – не то реферируемое слово. Автор объединил 2-й и 3-й пункты, но сделал это логично. Средства логической связи используются правильно и достаточном количестве 84 Итоговый балл 2 балла (максимальный балл – 3) 3 балла по ОТ выставляется при полном отсутствии замечаний. В данном случае Языковое Максимальный балл – 3 замечания есть, но они не носят оформление принципиального характера (см. высказывания оценивание на 1 балл): высказывание в основном логично, имеет достаточно завершённый характер, имеется вступительная фраза с обращением к другу и заключительная фраза, средства логической связи используются достаточно, но имеется 1 нарушение логики и 1 ошибка в средствах логической связи 0 баллов (8 и более неповторяющихся ошибок). Лексико-грамматические ошибки (см. ниже скрипт с отмеченными ошибками): более 8 неповторяющихся ошибок. Некоторые ошибки в высказывании являются повторяющимися, особенно это касается артиклей, но эти ошибки затрагивают как определённый, так и неопределённый артикли (общие правила), а также особые случаи их употребления. Фонетические ошибки отсутствуют ИТОГО: 5 баллов (К1 – 3, К2 – 2, К3 – 0) Скрипт ответа с отмеченными логическими и языковыми ошибками Hello! I’ve just found two photos for our project and I’m going to discuss them with you. Well, the first photo demonstrates GR/LEX us four children playing outside, while ART second photo shows us a girl who is interesting… who is interested in books and studyingLOGIC . That’s why I think that these pictures illustrate our project perfectly, because they show ART happy childhood. It is obvious that these pictures are completely different. The main difference between these photos areGR ARTnumber of children and the place. In the first photo we can see 4 children playing outside on the groundLEX, whereas second photo… in the second photo ARTgirl is inside and she is alone. Also, different childhoods have some advantages and disadvantages. And speaking about ARTfirst photo, people while walking and playing outside, communicate with anotherGR children and they improve some communication skills, leadership skills and it is veryLEX great for their future. But unfortunately, they run a risk of suffering from bullying and different insults from other children. Speaking about ARTsecond photo, the girl loves studying, and it is also great for yourLOGIC future. She has an opportunity to improve her critical, logical and analytical thinking, also books are theART great relaxation technique for everyone. But speaking about some cons, this reading and studying can be exhausting and sometimes time-consuming and even boring, so ARTperson runs a risk of being overchargedLEX. Speaking about my childhood, I preferred attending dancing classes, I was an avid fan of ballet- dancing. And I communicated with anotherGR-R people and liked to spend time with them. Please let me know whether you like the choice of two photos for our project. 85 ЗАДАНИЕ 14 Прослушайте ответы № (066)7948 на задания 1–4 и оцените их. Используйте критерии и дополнительные схемы оценивания (Приложения 1 и 2). Task 1. Imagine that you are preparing a project with your friend. You have found some interesting material for the presentation and you want to read this text to your friend. You have 1.5 minutes to read the text silently, then be ready to read it out aloud. You will not have more than 1.5 minutes to read it. When you are going to design a room, it is a good idea to think about the psychology of colour. When you plan your space, keep in mind that different colours, textures and layouts can have an impact on the way people feel in your room. Colour in particular can influence people’s mood. Red is associated with passion and anger, and can even cause headaches. It is a great accent colour for one wall, or for a couch or another piece of furniture, but some experts suggest that you should not paint an entire room red. Green is associated with calm and rest, and is a great colour for living rooms and bedrooms. However, too much green might take the energy out of a room, so you should combine it with a bit of red or orange to counteract its calming effects. Blue is also known as a calming and intellectual colour, but it can also appear cold unless you choose a blue with a warm base instead of a cool base. Задание 2 Task 2. Study the advertisement. 2 You are considering taking some lessons and now you’d like to get more information. In 1.5 minutes you are to ask four direct questions to find out about the following: 1) location; Family weekend on the lake! 2) accommodation; 3) price for the weekend for a family of three; 4) fishing equipment rental. You have 20 seconds to ask each question. Tapescript for Task 3 (вариант 307)"
+      ]
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "sp3-fipi-2024-e6cdd269",
+    "operation": "speaking_3",
+    "tags": [
+      "weak",
+      "fipi-2024"
+    ],
+    "assignment": {
+      "topic": "teenagers’ attitude to science",
+      "qs": [
+        "What science subjects have you studied? Which of them did you enjoy?",
+        "Are there any inventions or discoveries which had negative effects?",
+        "What would you like scientists to discover or invent in the future? Why?",
+        "What scientist of the past or the present do you admire? Why?",
+        "What discovery or invention can you not live without? Why?"
+      ]
+    },
+    "transcript": "I studied mathematic, informatic. It is my favourite subjects. I think these subjects don’t get negative effects. I’d like to be scientist. It was a very interesting and amazing profession. I think I admire scientists which can help nature in the future. ________________________…….",
+    "human": {
+      "total": 0,
+      "max": 5,
+      "criteria": {
+        "q1": 0,
+        "q2": 0,
+        "q3": 0,
+        "q4": 0,
+        "q5": 0
+      },
+      "reviewer": "fipi-2024-expert-manual",
+      "notes": [
+        "0 баллов. Ответ по содержанию соответствует вопросу, по объёму – соответствует требованиям; однако содержит ошибки элементарного уровня.",
+        "0 баллов. Ответ по содержанию соответствует вопросу, по объёму – не соответствует требованиям.",
+        "0 баллов. Не понял вопрос.",
+        "0 баллов. Вопрос не понят.",
+        "0 баллов. Нет ответа."
+      ]
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "sp3-fipi-2025-57d7995b",
+    "operation": "speaking_3",
+    "tags": [
+      "middle",
+      "fipi-2025"
+    ],
+    "assignment": {
+      "topic": "teenagers’ attitude to clothes",
+      "qs": [
+        "What style of clothes do you prefer?",
+        "Where do you buy most of your clothes? How often do you buy clothes for yourself?",
+        "Why do you think teenagers often experiment with their clothes?",
+        "Is fashion important for you? Why or why not?",
+        "Has your taste in clothes changed over time?"
+      ]
+    },
+    "transcript": "Well, for me, I prefer a casual style of clothes. Also I like a classic style. I often buy clothes at/and (?) online shops. Usually, I buy clothes probably two… probably twice a month. I think teenagers often experiment with their clothes because they want to introduce themselves.… They want… Actually, is fashion… is not important for me. The reason for that is I’m wearing… I’m wearing that I want… that I want. Taste in clothes… my taste in clothes not change… not change over time because I wear… I wear the same clothes every year.",
+    "human": {
+      "total": 2,
+      "max": 5,
+      "criteria": {
+        "q1": 1,
+        "q2": 1,
+        "q3": 0,
+        "q4": 0,
+        "q5": 0
+      },
+      "reviewer": "fipi-2025-expert-manual",
+      "notes": [
+        "1 балл. Ответ по содержанию соответствует вопросу, по объёму – соответствует требованиям; не содержит ошибок элементарного уровня.",
+        "1 балл. Ответ по содержанию соответствует вопросу, по объёму – соответствует требованиям; не содержит ошибок элементарного уровня, нечётко произнесённое служебное слово не считается ошибкой – сомнения трактуются в пользу участника экзамена.",
+        "0 баллов. Ответ по содержанию не соответствует вопросу из-за лексической ошибки, которая приводит к сбою коммуникации (to introduce themselves). 72",
+        "0 баллов. Ответ по содержанию не соответствует вопросу, набор слов.",
+        "0 баллов. Ответ по содержанию непонятен (одежду не меняет годами?) и содержит элементарную грамматическую ошибку."
+      ]
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "sp3-fipi-2025-a9bd84ec",
+    "operation": "speaking_3",
+    "tags": [
+      "weak",
+      "fipi-2025"
+    ],
+    "assignment": {
+      "topic": "teenagers’ attitude to public transport",
+      "qs": [
+        "Do you use public transport on a regular basis?",
+        "What public transport is available in the place where you live? Does this place need more public transport?",
+        "What are the main advantages and disadvantages of public transport?",
+        "What do you usually do when you get stuck in a traffic jam?",
+        "Do you agree that people should try to use public transport more often? Why or why not?"
+      ]
+    },
+    "transcript": "Yes, I do use regular transport, like a bus, because I live too far away from school… and my mom always busy, that’s why I have to use buses. I have a bus station not so far away from the place I live. I believe that our city or place I live need to increase amount of public transport because our city is growing bigger and bigger and we’re lacking public transport currently. I believe that there are an advantages and disadvantages. The advantages are that it’s very convenient and very cheap to pay for a ride on a public transport. The disadvantages are that it can be late or the fact that lack of places to sit. Usually, I’m just waiting the bus the next station because it would be faster than keep waiting till the traffic jam would disappear let’s say. I think that people should use public transport more often because it would be ecologically safer because it would decrease amount of exhaust fumes. Instead of riding your own car you will ride the bus.",
+    "human": {
+      "total": 1,
+      "max": 5,
+      "criteria": {
+        "q1": 0,
+        "q2": 0,
+        "q3": 0,
+        "q4": 0,
+        "q5": 1
+      },
+      "reviewer": "fipi-2025-expert-manual",
+      "notes": [
+        "0 баллов. Содержательно непонятно упоминание мамы, ответ также содержит элементарную грамматическую ошибку.",
+        "0 баллов. Ошибки делают ответ непонятным.",
+        "0 баллов. Ответ содержит ряд элементарных грамматических ошибок.",
+        "0 баллов. Ответ содержит ряд элементарных грамматических ошибок, по сути является набором слов.",
+        "1 балл. Ответ по содержанию соответствует вопросу, ride the bus – возможный вариант, хотя он более характерен для американского английского и в обучении следует придерживаться предложной конструкции to ride on."
+      ]
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "sp3-fipi-2025-b61fb7b0",
+    "operation": "speaking_3",
+    "tags": [
+      "middle",
+      "fipi-2025"
+    ],
+    "assignment": {
+      "topic": "teenagers’ attitude to shopping",
+      "qs": [
+        "Do you like shopping? Is shopping a popular activity in Russia?",
+        "Who do you love shopping with? Why?",
+        "What do you like more: shopping for clothes or shopping for food? Why?",
+        "Why do you think online shopping is so popular these days?",
+        "How do you think people’s shopping habits will change in the future?"
+      ]
+    },
+    "transcript": "Yes, I like shopping and in Russia it’s a very popular activity. Many teenagers and young people go to the mall every month. I like going shopping with my mom because we can choose clothes for her and for me. We speak with her on many interesting the mesPHON, about our everyday problems… for example about our… our everyday problems and how to solve it… to solve them. I… I very like go shopping to the mall for… I like going… I going… I go shopping for clothes because it’s bring me a lot of positive emotions and after that I can show it all my friends that can understand me. I think that online shopping is popular now because you can order clothes or food at home. It’s more comfortable for many people. You don’t need to go to the mall or to the shop. It’s… it’s time consuming it’s not… it’s doesn’t… it doesn’t time consuming. I think that in the future shopping habits can change because it will change in… it will change in sight of online shopping at all because many people want to order… order food and clothes at home without… without any pleasure.",
+    "human": {
+      "total": 2,
+      "max": 5,
+      "criteria": {
+        "q1": 1,
+        "q2": 1,
+        "q3": 0,
+        "q4": 0,
+        "q5": 0
+      },
+      "reviewer": "fipi-2025-expert-manual",
+      "notes": [
+        "1 балл. Ответ по содержанию соответствует вопросу, по объёму – соответствует требованиям; не содержит ошибок элементарного уровня.",
+        "1 балл. Ответ по содержанию соответствует вопросу, по объёму – соответствует требованиям; не содержит ошибок элементарного уровня, фонетическая ошибка не влияет на понимание.",
+        "0 баллов. Ответ по содержанию не соответствует вопросу, альтернативный вопрос не понят, много ошибок.",
+        "0 баллов. Ошибки.",
+        "0 баллов. Ответ по содержанию не соответствует вопросу, фактически набор слов."
+      ]
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "sp3-fipi-2025-d61bba79",
+    "operation": "speaking_3",
+    "tags": [
+      "weak",
+      "fipi-2025"
+    ],
+    "assignment": {
+      "topic": "teenagers’ attitude to science",
+      "qs": [
+        "What science subjects have you studied? Which of them did you enjoy?",
+        "Are there any inventions or discoveries which had negative effects?",
+        "What would you like scientists to discover or invent in the future? Why?",
+        "What scientist of the past or the present do you admire? Why?",
+        "What discovery or invention can you not live without? Why?"
+      ]
+    },
+    "transcript": "I studied mathematic, informatic. It is my favourite subjects. I think these subjects don’t get negative effects. I’d like to be scientist. It was a very interesting and amazing profession. I think I admire scientists which can help nature in the future. …",
+    "human": {
+      "total": 0,
+      "max": 5,
+      "criteria": {
+        "q1": 0,
+        "q2": 0,
+        "q3": 0,
+        "q4": 0,
+        "q5": 0
+      },
+      "reviewer": "fipi-2025-expert-manual",
+      "notes": [
+        "0 баллов. Ответ по содержанию соответствует вопросу, по объёму – соответствует требованиям, однако содержит ошибки элементарного уровня.",
+        "0 баллов. Ответ по содержанию соответствует вопросу, по объёму – не соответствует требованиям.",
+        "0 баллов. Экзаменуемый не понял вопроса.",
+        "0 баллов. Вопрос не понят.",
+        "0 баллов. Нет ответа. 78"
+      ]
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "sp3-fipi-2026-68d18261",
+    "operation": "speaking_3",
+    "tags": [
+      "middle",
+      "fipi-2026"
+    ],
+    "assignment": {
+      "topic": "teenagers’ attitude to television",
+      "qs": [
+        "How much time a week do you usually spend watching TV?",
+        "What TV programmes are now popular among teenagers?",
+        "What is your favourite TV show? Why?",
+        "Why is watching too much TV a bad idea for a teenager?",
+        "What would you like to change about Russian TV?"
+      ]
+    },
+    "transcript": "I watch TV for seven hours a day. I think that it’s too much and I should watch TV less. Cooks’ programmes are popular with teenagers in Russia. Also, programmes with animals are popular with teenagers in Russia too. My favourite TV programme is about sweets, ‘Confectioner’. I think so because I like to watch programmes where people cook different baked goods. I think that spending too much time watching television is very bad for teenagers 76 because their sight can be worse. Also, teenagers spend all their time watching TV, and they don’t prepare for their exams. Actually, I would like to make TVs more… I would like… Actually, I would like to make TVs bigger. Also, I would make them not expensive.",
+    "human": {
+      "total": 3,
+      "max": 5,
+      "criteria": {
+        "q1": 0,
+        "q2": 1,
+        "q3": 1,
+        "q4": 1,
+        "q5": 0
+      },
+      "reviewer": "fipi-2026-expert-manual",
+      "notes": [
+        "0 баллов. Ответ по содержанию не соответствует вопросу: в сутках всего 24 часа, и школьник не может позволить себе смотреть ТВ по 7 часов в день.",
+        "1 балл. Ответ по содержанию соответствует вопросу, по объёму соответствует требованиям, не содержит ошибок элементарного уровня. Использование в одном предложении also и too допустимо в устной спонтанной речи.",
+        "1 балл. Ответ по содержанию соответствует вопросу, по объёму соответствует требованиям, не содержит ошибок элементарного уровня. Лексическая погрешность в словосочетании cook different baked goods не ведёт к сбою коммуникации.",
+        "1 балл. Ответ по содержанию соответствует вопросу, по объёму соответствует требованиям, не содержит ошибок элементарного уровня.",
+        "0 баллов. Ответ по содержанию не соответствует вопросу, по объёму соответствует требованиям, не содержит ошибок элементарного уровня."
+      ]
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "sp3-fipi-2026-6ca5776d",
+    "operation": "speaking_3",
+    "tags": [
+      "middle",
+      "fipi-2026"
+    ],
+    "assignment": {
+      "topic": "teenagers’ attitude to modern inventions",
+      "qs": [
+        "What gadgets do you use in your daily life?",
+        "How do digital technologies make our life easier?",
+        "What do you think the best invention of mankind is?",
+        "What famous Russian inventors do you know? What are they famous for?",
+        "Do you think you can live without a mobile phone for a month? Why or why not?"
+      ]
+    },
+    "transcript": "I usually use my phone, television and computer. Also, I can use… notebook to do my homework. I think that technologies can make our life easier. For example, they can make easier study, students can find some important information in few seconds. I think that the best invention it’s computer, because he can make our life easier. For example, we can talk with our relatives and friends all over the world. I know a lot of… a lot of Russian inventors. For example… Nikorich, he made a new computer that can help doctors to find… I think that I can live without my phone… For example, I can cook, I can clean my home, and I know a lot of about our world and how to survive. I think it is not difficult to live without phones.",
+    "human": {
+      "total": 2,
+      "max": 5,
+      "criteria": {
+        "q1": 1,
+        "q2": 0,
+        "q3": 0,
+        "q4": 0,
+        "q5": 1
+      },
+      "reviewer": "fipi-2026-expert-manual",
+      "notes": [
+        "1 балл. Ответ по содержанию соответствует вопросу, по объёму соответствует требованиям, не содержит ошибок элементарного уровня.",
+        "0 баллов. Ответ по содержанию соответствует вопросу, по объёму соответствует требованиям, однако содержит ошибки элементарного уровня (порядок слов в предложении; study – нужно мн. ч. сущ. либо герундий).",
+        "0 баллов. Ответ содержит ошибки элементарного уровня (вместо глагола-связки is дано подлежащее со сказуемым, надо the best invention is computer; вместо местоимения it использовано he).",
+        "0 баллов. Ответ по содержанию не соответствует требованиям, дано вымышленное имя.",
+        "1 балл. Ответ по содержанию соответствует вопросу, по объёму соответствует требованиям, не содержит ошибок элементарного уровня."
+      ]
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "sp3-fipi-2026-a8a5c7b0",
+    "operation": "speaking_3",
+    "tags": [
+      "strong",
+      "fipi-2026"
+    ],
+    "assignment": {
+      "topic": "teenagers’ attitude to their accommodation",
+      "qs": [
+        "In what region do you live? Do you live in a big city, a town or in a village?",
+        "Do you live in a flat or in a house? What is it like?",
+        "What would you like to change about your flat or house? Why?",
+        "What do you like and dislike about your neighbourhood?",
+        "What kind of housing would you like to have in the future?"
+      ]
+    },
+    "transcript": "I live in the Moscow region. I live in a fairly medium-sized city of Podolsk. I live in a flat, and it's a convenient experience, because many forms of public transport are available close to the apartment building. Well, I'd definitely renovate the whole flat, because it has some outdated furniture, and it's been a general idea of our whole family... So, yeah. Well, I love the fact that it's very conveniently located just right to the railroad, very close to the railroad. What I dislike, well, my neighbourhood is very loud, both in terms of… people who go out at night and the railroad that's close by. I'd love to have a townhouse, maybe somewhere close to forests or mountains. I think it's very calming.",
+    "human": {
+      "total": 5,
+      "max": 5,
+      "criteria": {
+        "q1": 1,
+        "q2": 1,
+        "q3": 1,
+        "q4": 1,
+        "q5": 1
+      },
+      "reviewer": "fipi-2026-expert-manual",
+      "notes": [
+        "1 балл. Ответ по содержанию соответствует вопросу, по объёму соответствует требованиям, не содержит ошибок элементарного уровня.",
+        "1 балл. Вопрос What is it like? скорее относится конкретно к квартире или дому, в котором живёт участник экзамена (какая она – квартира или какой он – дом), однако может быть истолкован и по-другому, в более общем плане: «И как там живётся?». Поэтому ответ следует оценить положительно: он по содержанию соответствует вопросу, по объёму соответствует требованиям, не содержит ошибок элементарного уровня.",
+        "1 балл. Ответ по содержанию соответствует вопросу, по объёму соответствует требованиям, не содержит ошибок элементарного уровня.",
+        "1 балл. Ответ по содержанию соответствует вопросу, по объёму соответствует требованиям, не содержит ошибок элементарного уровня.",
+        "1 балл. Ответ по содержанию соответствует вопросу, по объёму соответствует требованиям, не содержит ошибок элементарного уровня."
+      ]
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "sp3-fipi-2026-aa9205f7",
+    "operation": "speaking_3",
+    "tags": [
+      "middle",
+      "fipi-2026"
+    ],
+    "assignment": {
+      "topic": "teenagers’ attitude to shopping",
+      "qs": [
+        "Do you like shopping? Is shopping a popular activity in Russia?",
+        "Who do you love shopping with? Why?",
+        "What do you like more: shopping for clothes or shopping for food? Why?",
+        "Why do you think online shopping is so popular these days?",
+        "How do you think people’s shopping habits will change in the future?"
+      ]
+    },
+    "transcript": "Yes, I like shopping and in Russia it’s a very popular activity. Many teenagers and young people go to the mall every month. I like going shopping with my mom because we can choose clothes for her and for me. We speak with her on many interesting the mesPHON, about our everyday problems… for example, about our… our everyday problems and how to solve it… to solve them. I… I very like go shopping to the mall for… I like going… I going… I go shopping for clothes because it’s bring me a lot of positive emotions and after that I can show it all my friends that can understand me. I think that online shopping is popular now because you can order clothes or food at home. It’s more comfortable for many people. You don’t need to go to the mall or to the shop. It’s… it’s time consuming it’s not… it’s doesn’t… it doesn’t time consuming. I think that in the future shopping habits can change because it will change in… it will change in sight of online shopping at all because many people want to order… order food and clothes at home without… without any pleasure.",
+    "human": {
+      "total": 2,
+      "max": 5,
+      "criteria": {
+        "q1": 1,
+        "q2": 1,
+        "q3": 0,
+        "q4": 0,
+        "q5": 0
+      },
+      "reviewer": "fipi-2026-expert-manual",
+      "notes": [
+        "1 балл. Ответ по содержанию соответствует вопросу, по объёму – соответствует требованиям; не содержит ошибок элементарного уровня.",
+        "1 балл. Ответ по содержанию соответствует вопросу, по объёму – соответствует требованиям, не содержит ошибок элементарного уровня; фонетическая ошибка не влияет на понимание.",
+        "0 баллов. Ответ по содержанию не соответствует вопросу, альтернативный вопрос не понят, много ошибок.",
+        "0 баллов. Ошибки.",
+        "0 баллов. Ответ по содержанию не соответствует вопросу, фактически набор слов."
+      ]
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "sp3-fipi-2026-034f3f25",
+    "operation": "speaking_3",
+    "tags": [
+      "middle",
+      "fipi-2026"
+    ],
+    "assignment": {
+      "topic": "teenagers’ attitude to photography",
+      "qs": [
+        "Why do you think people like taking photographs?",
+        "Do you like having your photo taken? Why or why not?",
+        "How often do you take photos? What of?",
+        "What is your favourite photo?",
+        "Why do you think so many people enjoy taking selfies?"
+      ]
+    },
+    "transcript": "People like taking photographs because people can capture a lot of sights, a lot of beautiful places that they see. And photos bring memories, so people could remember places they visited and remember emotions that they felt that day when they took a picture. Yes, I love my photo taking it’s a breathtaking process and I love capturing all the things that I see and things I consider very beautiful and fascinating. Also, I love pictures that I take usually because I have kind of a talent taking them. I take photos almost every day, usually I take photos of nature, for example, flowers or beautiful trees, especially in the summertime or in the spring because all plants are green and colourful, so it is a big pleasure to take photos and then enjoy them. My favourite photo is the photo of a big… big tree that I can see I can observe near my house. It is very beautiful and it’s huge, so, its view fascinates me, and every season I like taking a photo of it. Every season. I think they enjoy it because selfies are very easy to take. Also, people when they get dressed up or doing make-ups, they love themselves and they like doing photos of themselves, so they can enjoy their very beautiful look and of course upload these photos in social media so they can get a lot of attention from other people.",
+    "human": {
+      "total": 3,
+      "max": 5,
+      "criteria": {
+        "q1": 1,
+        "q2": 0,
+        "q3": 1,
+        "q4": 1,
+        "q5": 0
+      },
+      "reviewer": "fipi-2026-expert-manual",
+      "notes": [
+        "1 балл. Ответ по содержанию соответствует вопросу, по объёму – соответствует требованиям; не содержит ошибок элементарного уровня.",
+        "0 баллов. Ответ по содержанию не соответствует вопросу, экзаменуемый не понял вопроса.",
+        "1 балл. Ответ по содержанию соответствует вопросу, по объёму – соответствует требованиям; не содержит ошибок элементарного уровня.",
+        "1 балл. Ответ по содержанию соответствует вопросу, по объёму – соответствует требованиям; не содержит ошибок элементарного уровня.",
+        "0 баллов. Ответ по содержанию соответствует вопросу, по объёму – соответствует требованиям, но содержит ошибки элементарного уровня."
+      ]
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  }
+]
