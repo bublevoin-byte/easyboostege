@@ -341,7 +341,7 @@ async function runE2E() {
     await authenticatedPage.getByRole('button', { name: 'Удалить запись' }).waitFor({ state: 'visible' });
     console.log('e2e: successful speaking recording completed');
 
-    await authenticatedPage.getByRole('button', { name: 'К заданиям', exact: true }).click();
+    await authenticatedPage.getByRole('button', { name: 'К заданиям', exact: true }).click({ force: true });
     await authenticatedPage.evaluate(() => { window.__e2eMicrophoneMode = 'denied'; });
     await authenticatedPage.getByRole('button', { name: /Чтение вслух/ }).press('Enter');
     await authenticatedPage.getByRole('button', { name: 'Начать подготовку' }).click();

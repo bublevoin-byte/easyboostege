@@ -56,10 +56,12 @@ test('frontend components safely render text, progress and HTML values', () => {
   components.setText('label', '<script>alert(1)</script>');
   components.setWidth('bar', 140);
   components.setRingOffset('ring', 200, 25);
+  components.animate('bar', 'appear', '.32s');
 
   assert.equal(label.textContent, '<script>alert(1)</script>');
   assert.equal(bar.style.width, '100%');
   assert.equal(ring.getAttribute('stroke-dashoffset'), '150');
+  assert.equal(bar.style.animation, 'appear .32s cubic-bezier(.25,.75,.35,1)');
   assert.equal(components.escapeHtml(`<a title="'">&`), '&lt;a title=&quot;&#39;&quot;&gt;&amp;');
 });
 

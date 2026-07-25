@@ -65,12 +65,15 @@
     return elements;
   }
 
-  function animate(id, name, duration = 180) {
+  function animate(id, name, duration = '180ms') {
     const element = byId(id);
     if (!element) return null;
+    const cssDuration = typeof duration === 'number'
+      ? `${Math.max(0, duration)}ms`
+      : (/^\d*\.?\d+(?:ms|s)$/u.test(String(duration)) ? String(duration) : '180ms');
     element.style.animation = 'none';
     void element.offsetWidth;
-    element.style.animation = `${name} ${Math.max(0, Number(duration) || 0)}ms cubic-bezier(.25,.75,.35,1)`;
+    element.style.animation = `${name} ${cssDuration} cubic-bezier(.25,.75,.35,1)`;
     return element;
   }
 
