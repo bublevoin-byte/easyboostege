@@ -1,5 +1,6 @@
 // Easy Boost — сервер: вход через Telegram, прогресс, ИИ-прокси с резервом (Grok → Groq).
 import express from 'express';
+import compression from 'compression';
 import jwt from 'jsonwebtoken';
 import helmet from 'helmet';
 import { rateLimit } from 'express-rate-limit';
@@ -56,6 +57,7 @@ app.use(helmet({
   hsts: config.isProduction ? { maxAge: 31_536_000, includeSubDomains: true } : false,
   referrerPolicy: { policy: 'no-referrer' },
 }));
+app.use(compression());
 app.use((req, res, next) => {
   res.setHeader('Permissions-Policy', 'camera=(), geolocation=(), microphone=(self), payment=()');
   next();

@@ -92,6 +92,16 @@ test('legacy application script has no duplicate top-level function declarations
   assert.match(script, /const PROFILE_HOOKS=\[\]/u);
 });
 
+test('frontend fonts have system fallbacks and PWA images stay optimized', async () => {
+  const html = await fs.readFile(frontendPath, 'utf8');
+  assert.match(html, /font-family:Manrope,system-ui,sans-serif/u);
+  assert.match(html, /font-family:Nunito,Manrope,sans-serif/u);
+  for (const name of ['icon-192.png', 'icon-512.png', 'icon-maskable-512.png']) {
+    const image = await fs.stat(new URL(`../public/${name}`, import.meta.url));
+    assert.ok(image.size < 50_000, `${name} exceeds the 50 KB PWA image budget`);
+  }
+});
+
 test('request logs use a pseudonymous internal user identifier', async () => {
   const server = await fs.readFile(serverPath, 'utf8');
   assert.match(server, /createHmac\('sha256', SECRET\)/u);

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
+import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -45,6 +46,21 @@ async function stopProcess(child) {
     new Promise((resolve) => setTimeout(resolve, 3_000)),
   ]);
   if (child.exitCode === null) child.kill('SIGKILL');
+}
+
+async function rawGet(url, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const request = http.get(url, { headers }, (response) => {
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('end', () => resolve({
+        status: response.statusCode,
+        headers: response.headers,
+        body: Buffer.concat(chunks),
+      }));
+    });
+    request.on('error', reject);
+  });
 }
 
 test('application starts and serves health, security headers and PWA assets', { timeout: 20_000 }, async () => {
@@ -110,6 +126,13 @@ test('application starts and serves health, security headers and PWA assets', { 
     const serviceWorkerSource = await serviceWorker.text();
     assert.match(serviceWorkerSource, /CACHE_NAME/u);
     assert.match(serviceWorkerSource, /url\.pathname\.startsWith\('\/api\/'\)/u);
+
+    const compressedApp = await rawGet(`${baseUrl}/app.js`, { 'Accept-Encoding': 'gzip' });
+    const appSourceSize = (await fs.stat(path.join(projectDirectory, 'public', 'app.js'))).size;
+    assert.equal(compressedApp.status, 200);
+    assert.equal(compressedApp.headers['content-encoding'], 'gzip');
+    assert.ok(compressedApp.body.length < appSourceSize * 0.5);
+    console.log(`performance: app.js gzip=${compressedApp.body.length} bytes, source=${appSourceSize} bytes`);
 
     const expiredAuthorization = { Authorization: `Bearer ${jwt.sign({ u: 'expired' }, jwtSecret)}` };
     const paidRequests = [
