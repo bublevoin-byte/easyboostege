@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - production-hardening
 
 concurrency:
   group: easyboost-staging

@@ -183,7 +183,7 @@ sudo scripts/staging-deploy.sh easyboost-staging-release.tar.gz <sha256>
 sudo /opt/easyboost-staging/scripts/staging-rollback.sh
 ```
 
-Workflow `.github/workflows/deploy-staging.yml` запускается вручную или при push в `main`. Для GitHub environment `staging` нужны secrets:
+Workflow `.github/workflows/deploy-staging.yml` запускается вручную или при push в `main`/`production-hardening`. Для GitHub environment `staging` нужны secrets:
 
 - `STAGING_HOST`;
 - `STAGING_USER`;
