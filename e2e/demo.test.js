@@ -243,10 +243,53 @@ test('Chrome E2E: critical user flows are accessible and resilient', { timeout: 
 
     await authenticatedPage.getByRole('button', { name: 'Исправить' }).click();
     await authenticatedPage.getByRole('button', { name: 'Главная' }).click();
+    await authenticatedPage.evaluate(() => {
+      window.__e2eMicrophoneMode = 'success';
+      navigator.mediaDevices.getUserMedia = async () => {
+        if (window.__e2eMicrophoneMode === 'denied') throw new DOMException('Permission denied', 'NotAllowedError');
+        return { getTracks: () => [{ stop() {} }] };
+      };
+      class E2EMediaRecorder {
+        static isTypeSupported(type) {
+          return type === 'audio/webm';
+        }
+
+        constructor() {
+          this.mimeType = 'audio/webm';
+          this.state = 'inactive';
+          this.ondataavailable = null;
+          this.onstop = null;
+        }
+
+        start() {
+          this.state = 'recording';
+        }
+
+        stop() {
+          this.state = 'inactive';
+          this.ondataavailable?.({ data: new Blob(['e2e-audio'], { type: this.mimeType }) });
+          this.onstop?.();
+        }
+      }
+      Object.defineProperty(window, 'MediaRecorder', { configurable: true, value: E2EMediaRecorder });
+      URL.createObjectURL = () => 'blob:e2e-recording';
+      URL.revokeObjectURL = () => {};
+    });
+
     await authenticatedPage.getByRole('button', { name: 'Говорение', exact: true }).press('Enter');
     const speakingTask = authenticatedPage.getByRole('button', { name: /Чтение вслух/ });
     await speakingTask.waitFor({ state: 'visible', timeout: 5_000 });
     await speakingTask.press('Enter');
+    await authenticatedPage.getByRole('button', { name: 'Начать подготовку' }).click();
+    await authenticatedPage.getByRole('button', { name: 'Готово — к записи' }).click();
+    await authenticatedPage.getByRole('button', { name: 'Стоп — закончить запись' }).click();
+    await authenticatedPage.getByText('Запись готова!').waitFor({ state: 'visible', timeout: 5_000 });
+    await authenticatedPage.getByRole('button', { name: 'Удалить запись' }).waitFor({ state: 'visible' });
+    console.log('e2e: successful speaking recording completed');
+
+    await authenticatedPage.getByRole('button', { name: 'К заданиям', exact: true }).click();
+    await authenticatedPage.evaluate(() => { window.__e2eMicrophoneMode = 'denied'; });
+    await authenticatedPage.getByRole('button', { name: /Чтение вслух/ }).press('Enter');
     await authenticatedPage.getByRole('button', { name: 'Начать подготовку' }).click();
     await authenticatedPage.getByRole('button', { name: 'Готово — к записи' }).click();
     const microphoneToast = authenticatedPage.locator('#toast');
