@@ -4,7 +4,8 @@ import fs from 'node:fs/promises';
 
 const frontendPath = new URL('../public/index.html', import.meta.url);
 const frontendApiPath = new URL('../public/api.js', import.meta.url);
-const frontendScriptPaths = ['sync.js', 'router.js', 'learning.js', 'app.js', 'privacy.js', 'tts.js', 'pwa.js'].map(
+const frontendAuthPath = new URL('../public/auth.js', import.meta.url);
+const frontendScriptPaths = ['auth.js', 'sync.js', 'router.js', 'learning.js', 'app.js', 'privacy.js', 'tts.js', 'pwa.js'].map(
   (name) => new URL(`../public/${name}`, import.meta.url),
 );
 const serverPath = new URL('../server.js', import.meta.url);
@@ -54,7 +55,7 @@ test('frontend contains no embedded or browser-managed AI credentials', async ()
 
 test('frontend uses ordered external scripts that remain syntactically valid', async () => {
   const { html, api, scripts } = await readFrontend();
-  assert.match(html, /<script src="\/api\.js" defer><\/script>\s*<script src="\/sync\.js" defer><\/script>\s*<script src="\/router\.js" defer><\/script>\s*<script src="\/learning\.js" defer><\/script>\s*<script src="\/app\.js" defer><\/script>\s*<script src="\/privacy\.js" defer><\/script>\s*<script src="\/tts\.js" defer><\/script>/u);
+  assert.match(html, /<script src="\/api\.js" defer><\/script>\s*<script src="\/auth\.js" defer><\/script>\s*<script src="\/sync\.js" defer><\/script>\s*<script src="\/router\.js" defer><\/script>\s*<script src="\/learning\.js" defer><\/script>\s*<script src="\/app\.js" defer><\/script>\s*<script src="\/privacy\.js" defer><\/script>\s*<script src="\/tts\.js" defer><\/script>/u);
   assert.doesNotMatch(html, /<script(?![^>]*\bsrc\s*=)(?:\s[^>]*)?>/iu);
   assert.doesNotThrow(() => new Function(api));
   for (const script of scripts) assert.doesNotThrow(() => new Function(script));
@@ -90,6 +91,20 @@ test('legacy application script has no duplicate top-level function declarations
     assert.doesNotMatch(script, new RegExp(`\\b${name}\\s*=\\s*(?:async\\s+)?function`, 'u'));
   }
   assert.match(script, /const PROFILE_HOOKS=\[\]/u);
+});
+
+test('authentication endpoints are isolated behind the auth module', async () => {
+  const [auth, app] = await Promise.all([
+    fs.readFile(frontendAuthPath, 'utf8'),
+    fs.readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
+  ]);
+  for (const endpoint of ['/api/login', '/api/register', '/api/logout', '/api/me', '/api/tg/start', '/api/tg/check']) {
+    assert.match(auth, new RegExp(endpoint.replaceAll('/', '\\/'), 'u'));
+    assert.doesNotMatch(app, new RegExp(`(?:apiGet|apiPost)\\(['"]${endpoint.replaceAll('/', '\\/')}`, 'u'));
+  }
+  assert.match(auth, /global\.EasyBoostAuth = Object\.freeze/u);
+  assert.match(app, /auth\.currentSession\(\)/u);
+  assert.match(app, /auth\.startTelegramLogin\(\)/u);
 });
 
 test('frontend fonts have system fallbacks and PWA images stay optimized', async () => {

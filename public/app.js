@@ -310,10 +310,8 @@ async function genReading(){
 
 
 /* ===== SERVER CONNECT (Этап 5) ===== */
-const SRV=(location.protocol==='http:'||location.protocol==='https:');
-try{
-  ['eb_token','eb_key','eb_groq','eb_model','eb_groq_model'].forEach(function(key){localStorage.removeItem(key)})
-}catch(_){}
+const auth=window.EasyBoostAuth;
+const SRV=auth.isServerMode;
 let TOKEN=''; // маркер активной cookie-сессии; сам JWT недоступен JavaScript
 function gv(id){var e=document.getElementById(id);return e?(e.value||'').trim():''}
 function lgMsg(t){var e=document.getElementById('lg_msg');if(e)e.textContent=t}
@@ -350,18 +348,18 @@ async function doLogin(){
   if(!SRV){const u=gv('lg_user')||'Аня';currentUser=u;localStorage.setItem('eb_current',currentUser);startApp();return}
   const u=gv('lg_user'),p=gv('lg_pass');if(!u||!p){lgMsg('Введите имя и пароль');return}
   lgMsg('Вход…');
-  try{const d=await apiPost('/api/login',{username:u,password:p});TOKEN=d.authenticated?'cookie':'';
+  try{const d=await auth.login(u,p);TOKEN=d.authenticated?'cookie':'';
     currentUser=d.username;localStorage.setItem('eb_current',currentUser);lgMsg('');startApp()}
   catch(e){lgMsg(apiMessage(e,'auth'))}}
 async function doRegister(){
   if(!SRV){const u=gv('lg_user')||'Аня';currentUser=u;localStorage.setItem('eb_current',currentUser);show('scr6');document.getElementById('tabbar').style.display='none';return}
   const u=gv('lg_user'),p=gv('lg_pass');if(!u||!p){lgMsg('Введите имя и пароль');return}
   lgMsg('Создаём аккаунт…');
-  try{const d=await apiPost('/api/register',{username:u,password:p});TOKEN=d.authenticated?'cookie':'';
+  try{const d=await auth.register(u,p);TOKEN=d.authenticated?'cookie':'';
     currentUser=d.username;localStorage.setItem('eb_current',currentUser);lgMsg('');show('scr6');document.getElementById('tabbar').style.display='none'}
   catch(e){lgMsg(apiMessage(e,'auth'))}}
 async function logout(){
-  try{if(SRV)await apiPost('/api/logout',{})}catch(_){}
+  try{if(SRV)await auth.logout()}catch(_){}
   TOKEN='';
   try{localStorage.removeItem('eb_current');localStorage.removeItem('eb_tg_code')}catch(_){}
   location.reload()
@@ -389,14 +387,14 @@ if(SRV){ if(TOKEN){ startApp(); } else { var tb=document.getElementById('tabbar'
 let TG_URL='', TG_CODE='', TG_IV=null;
 async function tgInit(){
   if(typeof SRV==='undefined'||!SRV)return;
-  try{const d=await apiPost('/api/tg/start',{});TG_URL=d.url;TG_CODE=d.code;
+  try{const d=await auth.startTelegramLogin();TG_URL=d.url;TG_CODE=d.code;
     var a=document.getElementById('tgbtn');if(a)a.href=TG_URL;tgPoll();}
   catch(e){lgMsg(apiMessage(e,'telegram'));}
 }
 function tgPoll(){
   if(!TG_CODE)return;try{localStorage.setItem('eb_tg_code',TG_CODE)}catch(_){};let tries=0;clearInterval(TG_IV);
   TG_IV=setInterval(async()=>{tries++;
-    try{const c=await apiGet('/api/tg/check?code='+encodeURIComponent(TG_CODE));
+    try{const c=await auth.checkTelegramLogin(TG_CODE);
       if(c&&c.authenticated){clearInterval(TG_IV);TOKEN='cookie';
         currentUser=c.username;localStorage.setItem('eb_current',currentUser);lgMsg('');startApp();}
     }catch(e){}
@@ -430,7 +428,7 @@ function pwShow(bot){
 async function pwCheck(){
   if(typeof SRV==='undefined'||!SRV||!TOKEN){pwHide();return true;}
   try{
-    var me=await apiGet('/api/me');
+    var me=await auth.currentSession();
     if(me&&me.active){pwHide();return true;}
     pwShow(me&&me.bot);
     return false;
@@ -455,7 +453,7 @@ async function tgClick(e){
   if(typeof SRV==='undefined'||!SRV){ lgMsg('Открой приложение по ссылке сервера.'); return false; }
   lgMsg('Готовлю вход…');
   try{
-    if(typeof TG_URL==='undefined'||!TG_URL){ var d=await apiPost('/api/tg/start',{}); TG_URL=d.url; TG_CODE=d.code; }
+    if(typeof TG_URL==='undefined'||!TG_URL){ var d=await auth.startTelegramLogin(); TG_URL=d.url; TG_CODE=d.code; }
   }catch(err){ lgMsg(apiMessage(err,'telegram')); return false; }
   try{ if(typeof tgPoll==='function') tgPoll(); }catch(_){}
   var m=document.getElementById('lg_msg');
@@ -469,7 +467,7 @@ async function tgClick(e){
 (function(){
   function saveTok(t,u){if(t||u)TOKEN='cookie';
     if(u){currentUser=u;try{localStorage.setItem('eb_current',u)}catch(_){}}}
-  async function me(){try{return await apiGet('/api/me')}catch(e){return null}}
+  async function me(){try{return await auth.currentSession()}catch(e){return null}}
   window.ebMe=me;
   /* вход через Telegram переживает перезагрузку страницы */
   try{

@@ -27,4 +27,8 @@ npm test
 
 Production-развёртывание, backup, restore и rollback описаны в [README_DEPLOY.md](./README_DEPLOY.md). API — в [docs/openapi.yaml](./docs/openapi.yaml).
 
-Никогда не коммитьте `.env`, дампы БД и реальные токены. Перед PR выполните `npm run security:secrets` и `npm run audit:production`.
+## Frontend-архитектура
+
+Frontend использует обычный JavaScript с отдельными слоями: `api.js` отвечает за HTTP, `auth.js` — за login, cookie-сессию и Telegram-вход, `sync.js` — за очередь прогресса, `router.js` — за навигацию, `learning.js` — за детерминированную учебную логику. `app.js` пока содержит экраны и предметные модули; их перенос выполняется инкрементально под E2E-защитой.
+
+Никогда не коммитьте `.env`, дампы БД и реальные токены. Перед PR выполните `npm run security:secrets`, `npm run security:history` и `npm run audit:production`.

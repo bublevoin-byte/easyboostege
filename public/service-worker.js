@@ -1,5 +1,5 @@
-const CACHE_NAME='easyboost-static-v5';
-const APP_SHELL=['/','/offline.html','/privacy.html','/api.js','/sync.js','/router.js','/learning.js','/app.js','/privacy.js','/tts.js','/pwa.js','/manifest.json','/pwa-icon.svg','/icon-192.png','/icon-512.png','/icon-maskable-512.png'];
+const CACHE_NAME='easyboost-static-v6';
+const APP_SHELL=['/','/offline.html','/privacy.html','/api.js','/auth.js','/sync.js','/router.js','/learning.js','/app.js','/privacy.js','/tts.js','/pwa.js','/manifest.json','/pwa-icon.svg','/icon-192.png','/icon-512.png','/icon-maskable-512.png'];
 self.addEventListener('install',event=>{event.waitUntil(Promise.all([caches.open(CACHE_NAME).then(cache=>cache.addAll(APP_SHELL)),self.skipWaiting()]))});
 self.addEventListener('activate',event=>{event.waitUntil(Promise.all([caches.keys().then(keys=>Promise.all(keys.filter(key=>key!==CACHE_NAME).map(key=>caches.delete(key)))),self.clients.claim()]))});
 self.addEventListener('message',event=>{if(event.data&&event.data.type==='SKIP_WAITING')self.skipWaiting()});
