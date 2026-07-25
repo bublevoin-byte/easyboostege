@@ -4,10 +4,9 @@ import fs from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import jwt from 'jsonwebtoken';
-import { chromium } from 'playwright-core';
+import { chromium, firefox } from 'playwright';
 
 const projectDirectory = fileURLToPath(new URL('..', import.meta.url));
 const serverPath = fileURLToPath(new URL('../server.js', import.meta.url));
@@ -68,58 +67,76 @@ async function chromeExecutable() {
   throw new Error('Chrome/Chromium executable was not found. Set CHROME_PATH.');
 }
 
-test('Chrome E2E: critical user flows are accessible and resilient', { timeout: 60_000 }, async () => {
-  const temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-e2e-'));
-  const port = await findAvailablePort();
-  const baseUrl = `http://127.0.0.1:${port}`;
-  const dataFile = path.join(temporaryDirectory, 'data.json');
-  const jwtSecret = 'e2e-test-secret-with-at-least-32-characters';
-  await fs.writeFile(dataFile, JSON.stringify({
-    users: {
-      e2euser: {
-        created: Date.now(),
-        sub_until: Date.now() + 86_400_000,
-        privacy_consent: {
-          text_processing: true,
-          voice_processing: true,
-          policy_version: '2026-07-20',
-          updated_at: Date.now(),
-        },
-      },
-      expireduser: { created: Date.now(), sub_until: Date.now() - 60_000 },
-    },
-    progress: {
-      e2euser: { words: { known: 0 } },
-      expireduser: {},
-    },
-  }));
-  const output = [];
-  const child = spawn(process.execPath, [serverPath], {
-    cwd: projectDirectory,
-    env: {
-      ...process.env,
-      NODE_ENV: 'test',
-      PORT: String(port),
-      APP_URL: baseUrl,
-      DATABASE_PROVIDER: 'file',
-      DATA_FILE: dataFile,
-      JWT_SECRET: jwtSecret,
-      TELEGRAM_BOT_TOKEN: '',
-      ADMIN_TELEGRAM_ID: '',
-      XAI_API_KEY: '',
-      GROQ_API_KEY: '',
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  child.stdout.on('data', (chunk) => output.push(chunk.toString()));
-  child.stderr.on('data', (chunk) => output.push(chunk.toString()));
+const browserEngine = process.env.E2E_BROWSER || 'chromium';
+if (!['chromium', 'firefox'].includes(browserEngine)) {
+  throw new Error('E2E_BROWSER must be chromium or firefox');
+}
 
+async function launchBrowser() {
+  if (browserEngine === 'firefox') {
+    return firefox.launch({
+      headless: true,
+      env: process.platform === 'win32'
+        ? { ...process.env, MOZ_DISABLE_CONTENT_SANDBOX: '1' }
+        : process.env,
+    });
+  }
+  return chromium.launch({ headless: true, executablePath: await chromeExecutable() });
+}
+
+async function runE2E() {
+  let temporaryDirectory;
+  let child;
   let browser;
   try {
-    await waitForReady(baseUrl, child, output);
-    browser = await chromium.launch({ headless: true, executablePath: await chromeExecutable() });
+    browser = await launchBrowser();
     const context = await browser.newContext();
     const page = await context.newPage();
+    temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-e2e-'));
+    const port = await findAvailablePort();
+    const baseUrl = `http://127.0.0.1:${port}`;
+    const dataFile = path.join(temporaryDirectory, 'data.json');
+    const jwtSecret = 'e2e-test-secret-with-at-least-32-characters';
+    await fs.writeFile(dataFile, JSON.stringify({
+      users: {
+        e2euser: {
+          created: Date.now(),
+          sub_until: Date.now() + 86_400_000,
+          privacy_consent: {
+            text_processing: true,
+            voice_processing: true,
+            policy_version: '2026-07-20',
+            updated_at: Date.now(),
+          },
+        },
+        expireduser: { created: Date.now(), sub_until: Date.now() - 60_000 },
+      },
+      progress: {
+        e2euser: { words: { known: 0 } },
+        expireduser: {},
+      },
+    }));
+    const output = [];
+    child = spawn(process.execPath, [serverPath], {
+      cwd: projectDirectory,
+      env: {
+        ...process.env,
+        NODE_ENV: 'test',
+        PORT: String(port),
+        APP_URL: baseUrl,
+        DATABASE_PROVIDER: 'file',
+        DATA_FILE: dataFile,
+        JWT_SECRET: jwtSecret,
+        TELEGRAM_BOT_TOKEN: '',
+        ADMIN_TELEGRAM_ID: '',
+        XAI_API_KEY: '',
+        GROQ_API_KEY: '',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    child.stdout.on('data', (chunk) => output.push(chunk.toString()));
+    child.stderr.on('data', (chunk) => output.push(chunk.toString()));
+    await waitForReady(baseUrl, child, output);
     await page.goto(baseUrl, { waitUntil: 'networkidle' });
     console.log('e2e: login screen loaded');
 
@@ -395,7 +412,14 @@ test('Chrome E2E: critical user flows are accessible and resilient', { timeout: 
     console.log('e2e: responsive matrix 320–1440 px has no horizontal overflow');
   } finally {
     if (browser) await browser.close();
-    await stopProcess(child);
-    await fs.rm(temporaryDirectory, { recursive: true, force: true });
+    if (child) await stopProcess(child);
+    if (temporaryDirectory) await fs.rm(temporaryDirectory, { recursive: true, force: true });
   }
-});
+}
+
+runE2E()
+  .then(() => console.log(`e2e: ${browserEngine} critical user flows passed`))
+  .catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });

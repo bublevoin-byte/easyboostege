@@ -54,5 +54,9 @@ jobs:
       - run: npm test
       - name: Chrome E2E
         run: npm run test:e2e
+      - name: Install Firefox for Playwright
+        run: npx playwright install --with-deps firefox
+      - name: Firefox E2E
+        run: npm run test:e2e:firefox
       - name: Validate AI quality tooling and engineering fixtures
         run: npm run quality:check
