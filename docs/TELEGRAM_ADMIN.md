@@ -7,3 +7,49 @@
 5. При компрометации токена перевыпустить его через BotFather, заменить значение на сервере, перезапустить приложение и проверить логи без публикации токена.
 6. При сбое сохранить время события и безопасный `requestId`, затем проверить статус процесса бота и журналы сервиса. Пользовательские cookie, пароли и токены в обращение не включать.
 
+## Реальный E2E на staging
+
+Для проверки нужен отдельный бот, созданный через `@BotFather`. Production-токен
+нельзя использовать на staging: Telegram разрешает только один активный
+`getUpdates` consumer для одного токена, поэтому два окружения будут мешать друг
+другу.
+
+В `/opt/easyboost-staging/.env.staging` должны быть заданы:
+
+```dotenv
+APP_URL=https://staging.useboost.ru
+TELEGRAM_BOT_TOKEN=<отдельный staging token>
+ADMIN_TELEGRAM_ID=<Telegram ID тестового администратора или пусто>
+```
+
+Токен вводится только непосредственно на VPS и не публикуется в чате, GitHub
+Actions или командной истории. После изменения пересоберите только staging app и
+проверьте, что бот определился:
+
+```bash
+cd /opt/easyboost-staging
+docker compose --env-file .env.staging -p easyboost-staging \
+  -f compose.staging.yml up -d --build app
+docker compose --env-file .env.staging -p easyboost-staging \
+  -f compose.staging.yml logs --tail=50 app
+curl --fail https://staging.useboost.ru/health/ready
+```
+
+Затем на локальной машине:
+
+```bash
+npm run test:telegram:staging
+```
+
+Сценарий:
+
+1. отказывается работать с production URL;
+2. проверяет readiness staging;
+3. создаёт одноразовый код и показывает ссылку staging-бота;
+4. ждёт нажатия Start пользователем;
+5. проверяет cookie-сессию и невозможность повторного использования кода;
+6. ждёт активации пробного периода и проверяет доступ через `/api/me`.
+
+Для повторной проверки аккаунта с уже активным доступом шаг пробного периода
+завершится сразу. Если проверяется только вход, можно задать
+`TELEGRAM_E2E_SKIP_TRIAL=1`.
