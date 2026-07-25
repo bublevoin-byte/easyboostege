@@ -70,6 +70,18 @@ test('application starts and serves health, security headers and PWA assets', { 
   const dataFile = path.join(temporaryDirectory, 'data.json');
   const jwtSecret = 'smoke-test-secret-with-at-least-32-characters';
   const sessionId = '750f111c-1f2f-48c7-9956-b2c284722a2b';
+  const providerPort = await findAvailablePort();
+  const providerRequests = [];
+  const providerServer = http.createServer((request, response) => {
+    providerRequests.push(request.url);
+    request.resume();
+    response.writeHead(503, { 'Content-Type': 'application/json' });
+    response.end(JSON.stringify({ error: { message: 'Expected provider failure' } }));
+  });
+  await new Promise((resolve, reject) => {
+    providerServer.once('error', reject);
+    providerServer.listen(providerPort, '127.0.0.1', resolve);
+  });
   await fs.writeFile(dataFile, JSON.stringify({
     users: {
       expired: { created: Date.now(), sub_until: Date.now() - 60_000 },
@@ -93,8 +105,10 @@ test('application starts and serves health, security headers and PWA assets', { 
       JWT_SECRET: jwtSecret,
       TELEGRAM_BOT_TOKEN: '',
       ADMIN_TELEGRAM_ID: '',
-      XAI_API_KEY: '',
-      GROQ_API_KEY: '',
+      XAI_API_KEY: 'xai-integration-test-key',
+      XAI_API_URL: `http://127.0.0.1:${providerPort}/xai`,
+      GROQ_API_KEY: 'groq-integration-test-key',
+      GROQ_API_URL: `http://127.0.0.1:${providerPort}/groq`,
       AI_REQUESTS_PER_HOUR: '1',
       MONITORING_TOKEN: 'monitoring-test-token-with-32-characters',
     },
@@ -165,7 +179,8 @@ test('application starts and serves health, security headers and PWA assets', { 
       body: JSON.stringify({ operation: 'grammar_quiz' }),
     });
     assert.equal(activeAi.status, 503);
-    assert.equal((await activeAi.json()).error.code, 'AI_NOT_CONFIGURED');
+    assert.equal((await activeAi.json()).error.code, 'AI_PROVIDER_UNAVAILABLE');
+    assert.deepEqual(providerRequests, ['/xai', '/groq']);
 
     const rateLimitedAi = await fetch(`${baseUrl}/api/v1/ai/generate-content`, {
       method: 'POST',
@@ -230,7 +245,7 @@ test('application starts and serves health, security headers and PWA assets', { 
     assert.equal(typeof metrics.http.serverErrorRate, 'number');
     assert.equal(typeof metrics.http.p95DurationMs, 'number');
     assert.deepEqual(metrics.aiUsage, {
-      windowHours: 24, requests: 0, promptTokens: 0, completionTokens: 0, estimatedCostMicrousd: 0,
+      windowHours: 24, requests: 2, promptTokens: 0, completionTokens: 0, estimatedCostMicrousd: 0,
     });
     assert.ok(metrics.system.disk.totalBytes > 0);
     assert.equal(metrics.system.backup.fresh, false);
@@ -274,6 +289,7 @@ test('application starts and serves health, security headers and PWA assets', { 
     assert.equal(deletedSession.status, 401);
   } finally {
     await stopProcess(child);
+    await new Promise((resolve, reject) => providerServer.close((error) => error ? reject(error) : resolve()));
     await fs.rm(temporaryDirectory, { recursive: true, force: true });
   }
 });

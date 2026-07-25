@@ -539,8 +539,8 @@ async function askProvider({ url, key, model }, system, user) {
 
 function aiProviders() {
   const providers = [];
-  if (config.ai.xaiEnabled && XAI_KEY) providers.push({ name: 'grok', url: 'https://api.x.ai/v1/chat/completions', key: XAI_KEY, model: XAI_MODEL, inputMicrousdPerMillion: config.ai.xaiInputMicrousdPerMillion, outputMicrousdPerMillion: config.ai.xaiOutputMicrousdPerMillion });
-  if (config.ai.groqEnabled && GROQ_KEY) providers.push({ name: 'groq', url: 'https://api.groq.com/openai/v1/chat/completions', key: GROQ_KEY, model: GROQ_MODEL, inputMicrousdPerMillion: config.ai.groqInputMicrousdPerMillion, outputMicrousdPerMillion: config.ai.groqOutputMicrousdPerMillion });
+  if (config.ai.xaiEnabled && XAI_KEY) providers.push({ name: 'grok', url: config.ai.xaiUrl, key: XAI_KEY, model: XAI_MODEL, inputMicrousdPerMillion: config.ai.xaiInputMicrousdPerMillion, outputMicrousdPerMillion: config.ai.xaiOutputMicrousdPerMillion });
+  if (config.ai.groqEnabled && GROQ_KEY) providers.push({ name: 'groq', url: config.ai.groqUrl, key: GROQ_KEY, model: GROQ_MODEL, inputMicrousdPerMillion: config.ai.groqInputMicrousdPerMillion, outputMicrousdPerMillion: config.ai.groqOutputMicrousdPerMillion });
   return providers;
 }
 

@@ -23,6 +23,24 @@ function readBoolean(name, fallback = true) {
 
 const nodeEnv = process.env.NODE_ENV || 'development';
 const isProduction = nodeEnv === 'production';
+
+function readProviderUrl(name, fallback) {
+  const value = process.env[name] || fallback;
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`${name} must be an absolute URL`);
+  }
+  const loopbackTestUrl = nodeEnv === 'test'
+    && url.protocol === 'http:'
+    && ['127.0.0.1', 'localhost', '::1'].includes(url.hostname);
+  if (url.protocol !== 'https:' && !loopbackTestUrl) {
+    throw new Error(`${name} must use HTTPS (loopback HTTP is allowed only in tests)`);
+  }
+  return url.toString();
+}
+
 const jwtSecret = process.env.JWT_SECRET || '';
 const databaseProvider = process.env.DATABASE_PROVIDER || (process.env.DATABASE_URL ? 'postgres' : 'file');
 
@@ -68,9 +86,11 @@ export const config = Object.freeze({
     xaiKey: process.env.XAI_API_KEY || '',
     xaiEnabled: readBoolean('XAI_ENABLED'),
     xaiModel: process.env.XAI_MODEL || 'grok-4.5',
+    xaiUrl: readProviderUrl('XAI_API_URL', 'https://api.x.ai/v1/chat/completions'),
     groqKey: process.env.GROQ_API_KEY || '',
     groqEnabled: readBoolean('GROQ_ENABLED'),
     groqModel: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+    groqUrl: readProviderUrl('GROQ_API_URL', 'https://api.groq.com/openai/v1/chat/completions'),
     timeoutMs: readInteger('AI_TIMEOUT_MS', 25_000, { min: 1_000, max: 120_000 }),
     maxRequestsPerHour: readInteger('AI_REQUESTS_PER_HOUR', 60, { min: 1, max: 1000 }),
     maxWritingRequestsPerHour: readInteger('WRITING_REQUESTS_PER_HOUR', 30, { min: 1, max: 500 }),

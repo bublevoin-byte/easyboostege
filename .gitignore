@@ -5,6 +5,7 @@ data.json
 *.test-data.json
 tts-cache/
 coverage/
+dist/
 backups/
 *.log
 .DS_Store
