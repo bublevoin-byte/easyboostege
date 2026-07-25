@@ -16,6 +16,7 @@ const wordModule=window.EasyBoostWords;
 const grammarModule=window.EasyBoostGrammar;
 const readingModule=window.EasyBoostReading;
 const listeningModule=window.EasyBoostListening;
+const writingModule=window.EasyBoostWriting;
 function getUsers(){try{return JSON.parse(localStorage.getItem('eb_users'))||{}}catch(e){return{}}}
 function setUsers(u){localStorage.setItem('eb_users',JSON.stringify(u))}
 /* ---------- DATA ---------- */
@@ -53,13 +54,12 @@ function rateCard(k){const c=queue[ci];if(!c)return;if(k){S.box[c.w]=Math.min(3,
 let curTask=38;
 const SEG_ON='flex:1;border:0;font-family:inherit;text-align:center;padding:8px 0;font-weight:700;font-size:13px;color:#F2683F;background:#fff;border-radius:11px;cursor:pointer;';
 const SEG_OFF='flex:1;border:0;font-family:inherit;text-align:center;padding:8px 0;font-weight:700;font-size:13px;color:rgba(255,255,255,.92);background:transparent;cursor:pointer;';
-function countWords(){const d=WRITE[curTask];const t=(document.getElementById('w_editor').innerText||'').trim();const n=t?t.split(/\s+/).length:0;
-  const e=document.getElementById('w_count');e.textContent=n+' / '+d.range+' слов';e.style.color=(n>=d.min&&n<=d.max)?'#1F8A50':(n>d.max?'#C9503C':'#8A8F98')}
+function countWords(){const st=writingModule.wordCountStatus(document.getElementById('w_editor').innerText,curTask);
+  const e=document.getElementById('w_count');e.textContent=st.count+' / '+st.range+' слов';e.style.color=st.ok?'#1F8A50':(st.state==='over'?'#C9503C':'#8A8F98')}
 
 function renderReview(d){
   const safe=ui.escapeHtml;
-  const got=d.overall_got!=null?d.overall_got:(d.criteria||[]).reduce((a,c)=>a+(c.got||0),0);
-  const mx=d.overall_max!=null?d.overall_max:(d.criteria||[]).reduce((a,c)=>a+(c.max||0),0);
+  const totals=writingModule.reviewTotals(d);const got=totals.got,mx=totals.max;
   document.getElementById('rv_score').textContent=got;
   document.getElementById('rv_max').textContent='из '+mx;
   document.getElementById('rv_ring').setAttribute('stroke-dashoffset',String(226-226*(mx?got/mx:0)));
@@ -168,13 +168,7 @@ async function trWord(w){lastWord=w;const pop=document.getElementById('r_pop');
     if(off){document.getElementById('r_ipa').textContent=off.ipa||'';document.getElementById('r_tr').textContent=off.tr+'  · офлайн-словарь'}
     else{document.getElementById('r_ipa').textContent='';document.getElementById('r_tr').textContent='ИИ офлайн, слова нет в мини-словаре. Включи VPN/ключ.'}}}
 
-function localReview(n,task,msg){
-  const rng=task===37?[100,140]:[200,250];const ok=n>=rng[0]&&n<=rng[1];
-  return {overall_got:ok?1:0,overall_max:1,verdict:'Черновая проверка',
-    sub:'ИИ офлайн ('+(msg||'нет сети')+'). Показана базовая проверка — для полного разбора нужен интернет/VPN.',
-    criteria:[{name:'Объём ('+rng[0]+'–'+rng[1]+' слов)',got:ok?1:0,max:1}],
-    errors:[{title:'Совет по структуре',kind:'warn',note:(task===38?'Проверь: цель проекта → 2–3 факта из таблицы → 1–2 сравнения → проблема и решение → вывод с мнением.':'Проверь: приветствие, ответы на 3 вопроса, 3 своих вопроса, завершение.')},
-            {title:'ИИ-разбор',kind:'warn',note:'Полная проверка орфографии и грамматики появится, когда заработает ИИ (VPN/ключ Gemini).'}]}}
+function localReview(n,task,msg){return writingModule.localReview(n,task,msg)}
 
 
 /* ===== DASHBOARD / PROGRESS / PROFILE (real data) ===== */
@@ -2381,9 +2375,10 @@ const W38=[
 {topic:'The most important school subjects according to students',rows:[['Maths',35],['Foreign languages',30],['Science',20],['Literature',10],['Other subjects',5]]}
 ];
 let W_SHEET=false,_wrBound=false;
-function wrPool(t){var ai=(S&&S.writeAi&&S.writeAi['t'+t])||[];return (t===37?W37:W38).concat(ai)}
-function wrCur(){var t=curTask,pool=wrPool(t);var idx=(t===37?(S.wIdx37||0):(S.wIdx38||0))%pool.length;return pool[idx]}
-function wrKey(){return 'd'+curTask+'_'+(curTask===37?(S.wIdx37||0):(S.wIdx38||0))}
+function wrPool(t){var ai=(S&&S.writeAi&&S.writeAi['t'+t])||[];return writingModule.pool(t===37?W37:W38,ai)}
+function wrIdx(t){return (t===37?(S.wIdx37||0):(S.wIdx38||0))}
+function wrCur(){return writingModule.current(wrPool(curTask),wrIdx(curTask))}
+function wrKey(){return writingModule.draftKey(curTask,wrIdx(curTask))}
 function wrNext(){if(curTask===37)S.wIdx37=(S.wIdx37||0)+1;else S.wIdx38=(S.wIdx38||0)+1;
   W_SHEET=false;save();setTask(curTask);wrGen()}
 function wrSheet(){W_SHEET=!W_SHEET;setTask(curTask)}
@@ -2448,14 +2443,12 @@ function setTask(n){curTask=n;var d=WRITE[n],tp=wrCur();
 /* — проверка ИИ: актуальные критерии + контекст темы + история — */
 async function checkWriting(){
   var t=(document.getElementById('w_editor').innerText||'').trim();
-  var n=t?t.split(/\s+/).filter(Boolean).length:0;
+  var n=writingModule.countWords(t);
   if(n<10){alert('Напиши хотя бы несколько предложений.');return}
   tab('scr13');var task=curTask,tp=wrCur();
   if(DEMO_MODE){renderReview(localReview(n,task,'демо-режим'));showScreen('scr12');HIST.push('scr8');return}
   try{
-    var payload=task===37
-      ?{taskType:'writing_37',answer:t,assignment:{from:String(tp.from||''),stimulus:String(tp.stim||''),questionsTopic:String(tp.ask||'')}}
-      :{taskType:'writing_38',answer:t,assignment:{topic:String(tp.topic||''),rows:(tp.rows||[]).map(function(r){return {label:String(r[0]),percent:Number(r[1])}})}};
+    var payload=writingModule.buildPayload(task,tp,t);
     var response=await apiPost('/api/v1/ai/evaluate-writing',payload,true);
     var d=response&&response.review;
     if(!d||!d.criteria)throw new Error('bad');
@@ -2463,20 +2456,15 @@ async function checkWriting(){
     renderReview(d);S.essays=(S.essays||0)+1;save();showScreen('scr12');HIST.push('scr8');
   }catch(e){renderReview(localReview(n,task,e.message));showScreen('scr12');HIST.push('scr8')}}
 function wrStore(d,n,task){
-  S.works=S.works||[];
-  S.works.push({t:task,g:+d.overall_got||0,m:+d.overall_max||(task===37?6:14),n:n,ts:Date.now()});
-  if(S.works.length>30)S.works=S.works.slice(-30);
-  var last=S.works.slice(-5);
-  var avg=Math.round(last.reduce(function(s,w){return s+(w.g/(w.m||1))},0)/last.length*100);
+  S.works=writingModule.appendWork(S.works,{t:task,g:+d.overall_got||0,m:+d.overall_max||writingModule.limits(task).maxScore,n:n,ts:Date.now()});
+  var sum=writingModule.summary(S.works),avg=sum.average;
   S.prog=S.prog||{};S.prog.write=avg;
-  setTxt('sub_write','работ: '+S.works.length+' · средний '+avg+'%');
+  setTxt('sub_write','работ: '+sum.count+' · средний '+avg+'%');
   try{setTxt('m_write',avg);ringOff('ring_write',113.1,avg)}catch(e){}}
-function wrSyncTile(){if(!S)return;var ws=S.works||[];
-  if(!ws.length){setTxt('sub_write','задания 37–38 · ИИ');return}
-  var last=ws.slice(-5);
-  var avg=Math.round(last.reduce(function(s,w){return s+(w.g/(w.m||1))},0)/last.length*100);
-  S.prog=S.prog||{};S.prog.write=avg;
-  setTxt('sub_write','работ: '+ws.length+' · средний '+avg+'%')}
+function wrSyncTile(){if(!S)return;var sum=writingModule.summary(S.works);
+  if(!sum.count){setTxt('sub_write','задания 37–38 · ИИ');return}
+  S.prog=S.prog||{};S.prog.write=sum.average;
+  setTxt('sub_write','работ: '+sum.count+' · средний '+sum.average+'%')}
 /* — фоновая ИИ-генерация тем — */
 var WR_GEN=false;
 async function wrGen(){
@@ -2486,19 +2474,9 @@ async function wrGen(){
   if(wrPool(37).length<6)kind=37;else if(wrPool(38).length<6)kind=38;
   if(!kind)return;WR_GEN=true;
   try{
-    var d,item=null;
-    if(kind===37){
-      d=await generateAiContent('writing_task_37');
-      if(d&&d.from&&d.stim&&d.ask&&(String(d.stim).match(/\?/g)||[]).length>=3)
-        item={from:String(d.from),stim:String(d.stim),ask:String(d.ask)};
-      if(item){S.writeAi.t37.push(item);save()}
-    }else{
-      d=await generateAiContent('writing_task_38');
-      if(d&&d.topic&&Array.isArray(d.rows)&&d.rows.length>=4&&d.rows.length<=5
-        &&d.rows.every(function(r){return Array.isArray(r)&&r[0]&&typeof +r[1]==='number'&&+r[1]>0})){
-        item={topic:String(d.topic),rows:d.rows.map(function(r){return [String(r[0]),+r[1]]})};
-        S.writeAi.t38.push(item);save()}
-    }
+    var d=await generateAiContent(kind===37?'writing_task_37':'writing_task_38');
+    var item=writingModule.normalizeGenerated(kind,d);
+    if(item){S.writeAi['t'+kind].push(item);save()}
   }catch(e){}
   WR_GEN=false;
   try{if(wrPool(37).length<6||wrPool(38).length<6)setTimeout(wrGen,4000)}catch(e){}}
