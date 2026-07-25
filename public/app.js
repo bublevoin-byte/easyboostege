@@ -24,35 +24,12 @@ const profileModule=window.EasyBoostProfile;
 function getUsers(){try{return JSON.parse(localStorage.getItem('eb_users'))||{}}catch(e){return{}}}
 function setUsers(u){localStorage.setItem('eb_users',JSON.stringify(u))}
 /* ---------- DATA ---------- */
-const WORDS=[
- {w:'ambiguous',pos:'ПРИЛАГАТЕЛЬНОЕ',ipa:'/æmˈbɪɡjuəs/',tr:'двусмысленный',ex:'The instructions were ambiguous.'},
- {w:'resilient',pos:'ПРИЛАГАТЕЛЬНОЕ',ipa:'/rɪˈzɪliənt/',tr:'стойкий',ex:'Children are remarkably resilient.'},
- {w:'to acknowledge',pos:'ГЛАГОЛ',ipa:'/əkˈnɒlɪdʒ/',tr:'признавать',ex:'She acknowledged the problem.'},
- {w:'compelling',pos:'ПРИЛАГАТЕЛЬНОЕ',ipa:'/kəmˈpelɪŋ/',tr:'убедительный',ex:'A compelling argument.'},
- {w:'to mitigate',pos:'ГЛАГОЛ',ipa:'/ˈmɪtɪɡeɪt/',tr:'смягчать',ex:'Steps to mitigate the damage.'},
- {w:'sustainable',pos:'ПРИЛАГАТЕЛЬНОЕ',ipa:'/səˈsteɪnəbl/',tr:'устойчивый',ex:'Sustainable solutions.'},
- {w:'to foster',pos:'ГЛАГОЛ',ipa:'/ˈfɒstə/',tr:'развивать',ex:'Teachers foster curiosity.'},
- {w:'coherent',pos:'ПРИЛАГАТЕЛЬНОЕ',ipa:'/kəʊˈhɪərənt/',tr:'связный',ex:'Write a coherent essay.'},
- {w:'substantial',pos:'ПРИЛАГАТЕЛЬНОЕ',ipa:'/səbˈstænʃl/',tr:'значительный',ex:'A substantial number.'},
- {w:'to enhance',pos:'ГЛАГОЛ',ipa:'/ɪnˈhɑːns/',tr:'усиливать',ex:'Music enhances mood.'}
-];
 const WRITE={
  37:{label:'ЗАДАНИЕ 37 · ПИСЬМО ДРУГУ',range:'100–140',min:100,max:140,table:false,
    prompt:'Your friend Sam asks about your hobbies. Answer his 3 questions and ask 3 questions about his guitar lessons.'},
  38:{label:'ЗАДАНИЕ 38 · OPINION ESSAY',range:'200–250',min:200,max:250,table:true,
    prompt:'“Online learning is better than studying at school.” Опиши данные опроса, дай мнение с аргументами, контраргумент и вывод.'}
 };
-
-/* ---------- WORDS ---------- */
-let queue=[],ci=0,flipped=false;
-function showCard(){flipped=false;const c=queue[ci];if(!c){document.getElementById('w_pos').textContent='ГОТОВО';document.getElementById('w_word').textContent='🎉';document.getElementById('w_ipa').textContent='На сегодня всё!';return}
-  document.getElementById('w_pos').textContent=c.pos;document.getElementById('w_word').textContent=c.w;document.getElementById('w_ipa').textContent=c.ipa;
-  var t=document.getElementById('w_today');if(t)t.textContent=ci+' / '+queue.length+' сегодня'}
-function flipWord(){const c=queue[ci];if(!c)return;flipped=!flipped;
-  if(flipped){document.getElementById('w_pos').textContent='ПЕРЕВОД';document.getElementById('w_word').textContent=c.tr;document.getElementById('w_word').style.fontSize='30px';document.getElementById('w_ipa').textContent='“'+c.ex+'”'}
-  else{document.getElementById('w_word').style.fontSize='38px';showCard()}}
-function rateCard(k){const c=queue[ci];if(!c)return;if(k){S.box[c.w]=Math.min(3,(S.box[c.w]||0)+1);if(S.box[c.w]===3)S.learned++}else{S.box[c.w]=0;queue.push(c)}ci++;save();
-  document.getElementById('w_word').style.fontSize='38px';var k2=document.getElementById('w_know');if(k2)k2.textContent='Знаю '+S.learned;showCard()}
 
 /* ---------- WRITING ---------- */
 let curTask=38;
@@ -124,31 +101,6 @@ registerRouteHook(function(id){if(id==='scr7')initReading();if(id==='scr3')initG
 /* ===== LISTENING ===== */
 const LISTEN={dialog:"— Hi, can I get a coffee and a croissant, please?  — Sure, that's four pounds fifty. Anything else?  — No, that's all, thanks.",
   q1:{o:['В кафе','В магазине','В библиотеке'],a:0},q2:{o:['Чай и тост','Кофе и круассан'],a:1}};
-function lOpt(host,q,mod){const el=document.getElementById(host);el.innerHTML='';
-  q.o.forEach((opt,oi)=>{const d=document.createElement('div');d.setAttribute('data-i',oi);
-    d.setAttribute('style','display:flex;align-items:center;gap:10px;font-weight:600;font-size:13px;color:#9aa0a8;cursor:pointer;');
-    d.innerHTML='<span style="width:18px;height:18px;border-radius:50%;border:2px solid #E1E3E6;"></span>'+opt;
-    d.onclick=()=>{if(el.dataset.d)return;el.dataset.d=1;[...el.children].forEach(c=>{const i=+c.getAttribute('data-i');
-      if(i===q.a){c.setAttribute('style','display:flex;align-items:center;gap:10px;font-weight:600;font-size:13px;color:#1F8A50;');c.querySelector('span').setAttribute('style','width:18px;height:18px;border-radius:50%;background:#1F9E5A;display:grid;place-items:center;');c.querySelector('span').innerHTML='<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 12 10 18 20 6"/></svg>'}
-      else if(i===oi){c.setAttribute('style','display:flex;align-items:center;gap:10px;font-weight:600;font-size:13px;color:#C9503C;');c.querySelector('span').setAttribute('style','width:18px;height:18px;border-radius:50%;background:#E26A56;display:grid;place-items:center;');c.querySelector('span').innerHTML='<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>'}
-      else c.style.opacity='.5'});bump('listen',60)}
-    el.appendChild(d)})}
-/* ===== SPEAKING ===== */
-const SPK_Q=['How often do you use the internet for studying?','What do you usually do at weekends?','Do you prefer books or films? Why?','How important is English for your future?','What kind of music do you like?'];
-let spT=null,spLeft=40,recing=false,mediaRec=null,chunks=[],lastUrl=null;
-function fmt(x){return '0:'+String(Math.max(0,x)).padStart(2,'0')}
-function resetSpeaking(){initSpeaking();lastUrl=null}
-function tick(){spLeft--;document.getElementById('sp_time').textContent=fmt(spLeft);
-  document.getElementById('sp_ring').setAttribute('stroke-dashoffset',String(Math.round(603*(1-spLeft/40))));
-  if(spLeft<=0){clearInterval(spT);if(recing)toggleRec()}}
-async function toggleRec(){const lab=document.getElementById('sp_reclabel');
-  if(!recing){try{const st=await navigator.mediaDevices.getUserMedia({audio:true});mediaRec=new MediaRecorder(st);chunks=[];
-    mediaRec.ondataavailable=e=>chunks.push(e.data);mediaRec.onstop=()=>{lastUrl=URL.createObjectURL(new Blob(chunks,{type:'audio/webm'}));st.getTracks().forEach(t=>t.stop())};
-    mediaRec.start();recing=true;lab.textContent='запись…';lab.style.color='#E23B2B';spLeft=40;clearInterval(spT);spT=setInterval(tick,1000)}
-    catch(e){lab.textContent='нет доступа к микрофону';lab.style.color='#C9503C'}}
-  else{try{mediaRec.stop()}catch(e){}recing=false;clearInterval(spT);lab.textContent='готово — нажми ▶';lab.style.color='#1F8A50';bump('speak',Math.min(100,(S.prog.speak||48)+6))}}
-function playRec(){if(lastUrl){const a=new Audio(lastUrl);a.play()}}
-
 registerRouteHook(function(id){if(id==='scr4')initListening();if(id==='scr9')initSpeaking()});
 
 
@@ -264,9 +216,6 @@ function pickG(oi){if(gAns)return;gAns=true;const q=GQ[gi];
   ex.innerHTML='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1F9E5A" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:1px;"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg><div style="font-weight:600;font-size:12.5px;color:#1F7A47;line-height:1.4;">'+(oi===q.a?'Верно! ':'Правильный ответ: <b>'+q.o[q.a]+'</b>. ')+q.e+'</div>';
   const nx=document.getElementById('g_next');nx.style.opacity='1';nx.textContent=(gi<GQ.length-1?'Дальше':'Завершить')}
 function nextG(){if(!gAns)return;if(gi<GQ.length-1){gi++;renderG()}else{alert('Результат: '+gScore+' из '+GQ.length+' 🎯');tab('scr1')}}
-
-function playListen(){if(!('speechSynthesis'in window))return;speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(LIS.dialog);u.lang='en-GB';u.rate=.9;const v=speechSynthesis.getVoices().find(x=>/en-GB/i.test(x.lang));if(v)u.voice=v;speechSynthesis.speak(u)}
-function toggleScript(){const s=document.getElementById('l_script'),t=document.getElementById('l_toggle'),k=document.getElementById('l_knob');const on=s.style.display==='none';s.style.display=on?'block':'none';s.textContent=LIS.dialog;t.style.background=on?'#F2683F':'#E7E9EC';k.style.left=on?'22px':'3px'}
 
 /* -- toast + FAB -- */
 function parseJSON(s){try{return JSON.parse(s.replace(/```json|```/g,'').trim())}catch(e){const m=s.match(/[\[{][\s\S]*[\]}]/);if(m){try{return JSON.parse(m[0])}catch(e2){}}return null}}

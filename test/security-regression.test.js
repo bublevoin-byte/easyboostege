@@ -74,7 +74,7 @@ test('legacy application script has no duplicate top-level function declarations
   const { script } = await readFrontend();
   const guardedNames = [
     'startApp', 'tab', 'checkWriting', 'trWord', 'initReading', 'initGrammar', 'renderG',
-    'pickG', 'nextG', 'initListening', 'playListen', 'toggleScript', 'doLogin',
+    'pickG', 'nextG', 'initListening', 'doLogin',
     'doRegister', 'logout', 'renderProfile', 'tgInit', 'tgPoll', 'tgClick', 'save',
     'genWords', 'initSpeaking', 'r_add', 'setTask', 'lStop',
     'lPlayRaw', 'wSpeak',
@@ -91,6 +91,21 @@ test('legacy application script has no duplicate top-level function declarations
     assert.doesNotMatch(script, new RegExp(`\\b${name}\\s*=\\s*(?:async\\s+)?function`, 'u'));
   }
   assert.match(script, /const PROFILE_HOOKS=\[\]/u);
+});
+
+test('legacy prototype screens stay out of the production bundle', async () => {
+  const { script } = await readFrontend();
+  const removedNames = [
+    'showCard', 'flipWord', 'rateCard', 'lOpt', 'resetSpeaking', 'toggleRec', 'playRec',
+    'playListen', 'toggleScript',
+  ];
+  for (const name of removedNames) {
+    assert.doesNotMatch(script, new RegExp(`function\\s+${name}\\s*\\(`, 'u'), `${name} is a removed prototype`);
+  }
+  // These prototypes called a helper that no longer exists and would have thrown if reached.
+  assert.doesNotMatch(script, /\bbump\s*\(/u);
+  assert.doesNotMatch(script, /\bconst WORDS\s*=/u);
+  assert.doesNotMatch(script, /\bconst SPK_Q\s*=/u);
 });
 
 test('authentication endpoints are isolated behind the auth module', async () => {
