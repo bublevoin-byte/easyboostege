@@ -14,6 +14,7 @@ const ringOff=ui.setRingOffset;
 const toast=ui.notify;
 const wordModule=window.EasyBoostWords;
 const grammarModule=window.EasyBoostGrammar;
+const readingModule=window.EasyBoostReading;
 function getUsers(){try{return JSON.parse(localStorage.getItem('eb_users'))||{}}catch(e){return{}}}
 function setUsers(u){localStorage.setItem('eb_users',JSON.stringify(u))}
 /* ---------- DATA ---------- */
@@ -1582,9 +1583,8 @@ const R_GAPS=[
 ];
 let RG=null;
 let RH=null,RQ=null;
-function rSt(){S.read=S.read||{h:{ok:0,tot:0},q:{ok:0,tot:0},texts:0};S.read.g=S.read.g||{ok:0,tot:0};return S.read}
-function rSync(){if(!S)return;var r=rSt();var ok=r.h.ok+r.q.ok+r.g.ok,tot=r.h.tot+r.q.tot+r.g.tot;
-  var acc=tot?Math.round(ok/tot*100):0;
+function rSt(){S.read=readingModule.normalizeState(S.read);return S.read}
+function rSync(){if(!S)return;var r=rSt();var stats=readingModule.summary(r),acc=stats.accuracy;
   S.prog=S.prog||{};S.prog.read=acc;
   setTxt('sub_read',r.texts?('текстов: '+r.texts+' · точность '+acc+'%'):'начни с первого текста');
   setTxt('r_sumline',r.texts?('Прочитано '+r.texts+' · точность '+acc+'%'):'Два тренажёра — как на экзамене');
@@ -1640,15 +1640,8 @@ function rHub(){var area=document.getElementById('r_area');if(!area)return;RH=nu
     +'<div style="font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.45;">Тапни любое слово в тексте — покажем перевод и добавим его в модуль «Слова»</div></div>';
   setTxt('r_today','3 тренажёра');rGen()}
 /* перемешивание вариантов с пересчётом ответов */
-function rPerm(n){var idx=[];for(var i=0;i<n;i++)idx.push(i);
-  for(var i=n-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=idx[i];idx[i]=idx[j];idx[j]=t}
-  var inv=[];idx.forEach(function(o,ni){inv[o]=ni});return{idx:idx,inv:inv}}
-function rShufHl(set){var p=rPerm(5);
-  return {hl:p.idx.map(function(o){return set.hl[o]}),
-          txts:set.txts.map(function(t){return {t:t.t,a:p.inv[t.a],k:t.k}})}}
-function rShufGp(set){var p=rPerm(4);
-  return {tx:set.tx.slice(),fr:p.idx.map(function(o){return set.fr[o]}),
-          a:set.a.map(function(x){return p.inv[x]}),k:set.k.slice()}}
+function rShufHl(set){return readingModule.shuffleHeadings(set)}
+function rShufGp(set){return readingModule.shuffleGaps(set)}
 /* ---- Задание 10: заголовки ---- */
 function rHl(){S.readIdxH=(S.readIdxH||0);var pool=rPool('h',R_HL);var set=rShufHl(pool[S.readIdxH%pool.length]);S.readIdxH++;
   RH={set:set,sel:[null,null,null,null],done:false};rHlRender()}
@@ -1671,7 +1664,7 @@ function rHlRender(){var area=document.getElementById('r_area');var set=RH.set;
     +'<button class="sq" style="'+WBTN+'color:#F2683F;margin-top:10px;" onclick="rHub()">← К чтению</button></div>';
   area.innerHTML=h;setTxt('r_today',RH.sel.filter(function(x){return x!==null}).length+' / 4 выбрано')}
 function rHlPick(ti,hi){if(RH.done)return;
-  RH.sel=RH.sel.map(function(x,i){return i===ti?hi:(x===hi?null:x)});
+  RH.sel=readingModule.selectUnique(RH.sel,ti,hi);
   rHlRender()}
 function rHlCheck(){if(RH.done)return;RH.done=true;var set=RH.set,L='ABCDE',r=rSt(),okn=0;
   set.txts.forEach(function(tx,ti){var ok=RH.sel[ti]===tx.a;if(ok)okn++;
@@ -1768,7 +1761,7 @@ function rGpRender(){var area=document.getElementById('r_area');var set=RG.set,L
     +'<button class="sq" style="'+WBTN+'color:#F2683F;margin-top:10px;" onclick="rHub()">← К чтению</button></div>';
   area.innerHTML=h;setTxt('r_today',RG.sel.filter(function(x){return x!==null}).length+' / 3 выбрано')}
 function rGpPick(gi,fi){if(RG.done)return;
-  RG.sel=RG.sel.map(function(x,i){return i===gi?fi:(x===fi?null:x)});
+  RG.sel=readingModule.selectUnique(RG.sel,gi,fi);
   rGpRender()}
 function rGpCheck(){if(RG.done)return;RG.done=true;var set=RG.set,L='ABCD',r=rSt(),okn=0;
   [0,1,2].forEach(function(gi){var ok=RG.sel[gi]===set.a[gi];if(ok)okn++;
@@ -1864,7 +1857,7 @@ function rExamRender(){var area=document.getElementById('r_area');if(!area||!RE)
     +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:16px;color:#2B2B2B;line-height:1.45;margin-top:12px;">'+rEsc(q.q)+'</div></div>'
     +'<div style="display:flex;flex-direction:column;gap:10px;">'
     +q.o.map(function(o,i){return '<button class="sq" style="'+WBTN+'text-align:left;" onclick="RE.ansQ.push('+i+');rExamRender()">'+rEsc(o)+'</button>'}).join('')+'</div>'}
-function rExamDedup(field,idx,val){RE[field]=RE[field].map(function(x,i){return i===idx?val:(x===val?null:x)})}
+function rExamDedup(field,idx,val){RE[field]=readingModule.selectUnique(RE[field],idx,val)}
 function rExamFinish(){if(!RE)return;clearInterval(RE.iv);
   var sec=Math.floor((Date.now()-RE.t0)/1000),L='ABCDE',r=rSt();
   var okH=0;RE.h.txts.forEach(function(tx,ti){r.h.tot++;if(RE.selH[ti]===tx.a){okH++;r.h.ok++}});
@@ -1894,7 +1887,7 @@ function rExamFinish(){if(!RE)return;clearInterval(RE.iv);
     +'<button class="sq" style="'+WBTN+'color:#F2683F;" onclick="rHub()">К чтению</button></div>';
   rAnim('win','.32s');rGen()}
 /* ---- фоновая ИИ-генерация комплектов чтения ---- */
-function rPool(kind,base){var ai=(S&&S.readAi&&S.readAi[kind])||[];return base.concat(ai)}
+function rPool(kind,base){var ai=(S&&S.readAi&&S.readAi[kind])||[];return readingModule.pool(base,ai)}
 var R_GEN=false;
 async function rGen(){
   if(R_GEN)return;if(typeof SRV==='undefined'||!SRV||!TOKEN)return;
