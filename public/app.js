@@ -19,6 +19,8 @@ const listeningModule=window.EasyBoostListening;
 const writingModule=window.EasyBoostWriting;
 const speakingModule=window.EasyBoostSpeaking;
 const examModule=window.EasyBoostExam;
+const progressModule=window.EasyBoostProgress;
+const profileModule=window.EasyBoostProfile;
 function getUsers(){try{return JSON.parse(localStorage.getItem('eb_users'))||{}}catch(e){return{}}}
 function setUsers(u){localStorage.setItem('eb_users',JSON.stringify(u))}
 /* ---------- DATA ---------- */
@@ -174,29 +176,25 @@ function localReview(n,task,msg){return writingModule.localReview(n,task,msg)}
 
 
 /* ===== DASHBOARD / PROGRESS / PROFILE (real data) ===== */
-const EXAM=new Date('2027-06-01');
-function daysLeft(){return Math.max(0,Math.round((EXAM-new Date())/864e5))}
-function renderHome(){if(!S)return;const u=currentUser||'друг';
-  setTxt('h_hello','Привет, '+u+' 👋');
-  setTxt('h_days','До ЕГЭ — '+daysLeft()+' дней · пробник в феврале');
-  setTxt('h_ava',u[0].toUpperCase());
-  const pct=Math.min(100,Math.round((S.dayMin||0)/30*100));
-  setTxt('h_min',S.dayMin||0);setTxt('h_pct',pct+'%');ringOff('h_ring',263.9,pct);
-  setTxt('h_streak','🔥 '+(S.streak||0)+' дней подряд');
-  const p=S.prog||{};
-  setTxt('m_words',p.words||0);ringOff('ring_words',113.1,p.words||0);
-  setTxt('m_gram',p.gram||0);ringOff('ring_gram',113.1,p.gram||0);
-  setTxt('m_read',p.read||0);ringOff('ring_read',113.1,p.read||0);
-  setTxt('m_listen',p.listen||0);ringOff('ring_listen',113.1,p.listen||0);
-  setTxt('m_write',p.write||0);ringOff('ring_write',113.1,p.write||0);
-  setTxt('m_speak',p.speak||0);ringOff('ring_speak',113.1,p.speak||0);
-  setTxt('sub_words','учу · '+(S.learned||0)+' / 500')}
-function renderProgress(){if(!S)return;const p=S.prog||{};
-  setTxt('p_streak','🔥 '+(S.streak||0));setTxt('p_words',S.learned||0);
-  setW('pb_read',p.read||0);setW('pb_gram',p.gram||0);setW('pb_words',p.words||0);setW('pb_listen',p.listen||0);setW('pb_speak',p.speak||0)}
+const RING_IDS={words:'ring_words',gram:'ring_gram',read:'ring_read',listen:'ring_listen',write:'ring_write',speak:'ring_speak'};
+const METRIC_IDS={words:'m_words',gram:'m_gram',read:'m_read',listen:'m_listen',write:'m_write',speak:'m_speak'};
+const BAR_IDS={words:'pb_words',gram:'pb_gram',read:'pb_read',listen:'pb_listen',speak:'pb_speak'};
+function daysLeft(){return progressModule.daysLeft(Date.now())}
+function renderHome(){if(!S)return;const view=progressModule.overview(S,Date.now());
+  setTxt('h_hello',profileModule.greeting(currentUser));
+  setTxt('h_days','До ЕГЭ — '+view.daysLeft+' дней · пробник в феврале');
+  setTxt('h_ava',profileModule.initial(currentUser||'друг'));
+  setTxt('h_min',view.daily.minutes);setTxt('h_pct',view.daily.percent+'%');ringOff('h_ring',263.9,view.daily.percent);
+  setTxt('h_streak',progressModule.streakLabel(view.streak,true));
+  progressModule.MODULES.forEach(function(name){
+    setTxt(METRIC_IDS[name],view.modules[name]);ringOff(RING_IDS[name],113.1,view.modules[name])});
+  setTxt('sub_words',progressModule.learnedLabel(view.learned))}
+function renderProgress(){if(!S)return;const view=progressModule.overview(S,Date.now());
+  setTxt('p_streak',progressModule.streakLabel(view.streak));setTxt('p_words',view.learned);
+  Object.keys(BAR_IDS).forEach(function(name){setW(BAR_IDS[name],view.modules[name])})}
 const PROFILE_HOOKS=[];
 function registerProfileHook(hook){PROFILE_HOOKS.push(hook)}
-function renderProfile(){const u=currentUser||'Гость';setTxt('pf_ava',u[0].toUpperCase());setTxt('pf_name',u);setTxt('pf_ai','через сервер ✓');PROFILE_HOOKS.forEach(function(hook){try{hook()}catch(e){console.error('Profile hook failed',e)}})}
+function renderProfile(){const u=profileModule.displayName(currentUser);setTxt('pf_ava',profileModule.initial(u));setTxt('pf_name',u);setTxt('pf_ai','через сервер ✓');PROFILE_HOOKS.forEach(function(hook){try{hook()}catch(e){console.error('Profile hook failed',e)}})}
 registerRouteHook(function(id){if(id==='scr1')renderHome();if(id==='scr10')renderProgress();if(id==='scr11')renderProfile()});
 
 
@@ -476,13 +474,6 @@ async function tgClick(e){
     }
   })();
   /* статус подписки в профиле */
-  function fmt(ts){var d=new Date(ts);return ('0'+d.getDate()).slice(-2)+'.'+('0'+(d.getMonth()+1)).slice(-2)+'.'+d.getFullYear()}
-  function subLine(m){
-    if(!m||!m.sub_until)return ['Доступ не активирован — открой бота','#C77400','#FFF4DE'];
-    var left=Math.max(0,Math.ceil((m.sub_until-Date.now())/86400000));
-    if(m.active)return ['Подписка до '+fmt(m.sub_until)+' · осталось '+left+' дн.','#1F8A50','#EAF7F0'];
-    return ['Подписка закончилась '+fmt(m.sub_until),'#C0392B','#FDEDEA'];
-  }
   registerProfileHook(function(){
     if(typeof SRV==='undefined'||!SRV)return;
     var host=document.getElementById('pf_name');if(!host||!host.parentElement)return;
@@ -490,7 +481,7 @@ async function tgClick(e){
     if(!el){el=document.createElement('div');el.id='pf_sub';
       el.setAttribute('style','display:inline-block;margin-top:6px;font:700 11.5px Manrope,sans-serif;padding:5px 10px;border-radius:20px;');
       host.parentElement.appendChild(el);}
-    var use=function(m){var s=subLine(m);el.textContent=s[0];el.style.color=s[1];el.style.background=s[2]};
+    var use=function(m){var s=profileModule.subscriptionStatus(m,Date.now());el.textContent=s.text;el.style.color=s.color;el.style.background=s.background};
     if(window.__sub)use(window.__sub);
     me().then(function(m){if(m){window.__sub=m;use(m)}});
   });
