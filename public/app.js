@@ -12,6 +12,7 @@ const setTxt=ui.setText;
 const setW=ui.setWidth;
 const ringOff=ui.setRingOffset;
 const toast=ui.notify;
+const wordModule=window.EasyBoostWords;
 function getUsers(){try{return JSON.parse(localStorage.getItem('eb_users'))||{}}catch(e){return{}}}
 function setUsers(u){localStorage.setItem('eb_users',JSON.stringify(u))}
 /* ---------- DATA ---------- */
@@ -809,30 +810,22 @@ function wQueueServer(w){if(typeof SRV==='undefined'||!SRV||!TOKEN)return;var r=
 function wToday0(){var d=new Date();d.setHours(0,0,0,0);return d.getTime()}
 function wRec(w){S.srs=S.srs||{};return S.srs[w]}
 function wSet(w){S.srs=S.srs||{};return S.srs[w]||(S.srs[w]={s:0,e:0,n:0,due:0})}
-function wBase(w){return w.replace(/^to /,'').toLowerCase().trim()}
+function wBase(w){return wordModule.baseForm(w)}
 function srsApply(w,ok){S.srs=S.srs||{};S.srs[w]=EasyBoostLearning.reviewWord(wSet(w),ok);wQueueServer(w)}
 function srsOk(w){srsApply(w,true)}
 function srsFail(w){srsApply(w,false)}
-function wStats(){var L=0,ing=0,tot=EGE_WORDS.length;
-  EGE_WORDS.forEach(function(x){var r=wRec(x.w);if(!r||!r.s)return;(r.s>=5?L++:ing++)});
-  return {learned:L,learning:ing,fresh:tot-L-ing,total:tot}}
+function wStats(){return wordModule.calculateStats(EGE_WORDS,S.srs)}
 function wSync(){var st=wStats();S.learned=st.learned;S.prog=S.prog||{};S.prog.words=EasyBoostLearning.calculateProgress(st.learned,st.total);
   setTxt('w_know_n','Знаю '+st.learned);setTxt('pf_known_n',String(st.learned));setTxt('w_sumline','Выучено '+st.learned+' из '+st.total+' слов');
   var bar=document.getElementById('w_bar');if(bar)bar.style.width=Math.max(2,Math.round(st.learned/st.total*100))+'%';
   setTxt('sub_words','учу · '+st.learned+' / '+st.total)}
-function wMigrate(){if(S.srsMig)return;S.srsMig=1;S.srs=S.srs||{};
-  EGE_WORDS.forEach(function(x){var b=S.box&&S.box[x.w];if(b&&!S.srs[x.w])S.srs[x.w]={s:Math.min(3,b),e:0,n:b,due:Date.now()}})}
+function wMigrate(){if(S.srsMig)return;S.srsMig=1;S.srs=wordModule.migrateLegacy(EGE_WORDS,S.box,S.srs||{})}
 function initWords(){if(!S)return;wMigrate();wMergeAi();
   if(S.wday!==todayStr()){S.wday=todayStr();S.wnewUsed=0}
-  var due=[],fresh=[];
-  EGE_WORDS.forEach(function(x){var r=wRec(x.w);
-    if(r&&r.s>0){if(r.due<=Date.now())due.push(x)}else fresh.push(x)});
-  due.sort(function(a,b){return wRec(a.w).due-wRec(b.w).due});
   var lim=Math.max(0,(S.wnew||30)-(S.wnewUsed||0));
-  WQ=due.concat(fresh.slice(0,lim));WI=0;WDONE=0;
+  WQ=wordModule.buildDailyQueue(EGE_WORDS,S.srs,{newLimit:lim});WI=0;WDONE=0;
   wSync();wRender();wTopUp()}
-function wModeFor(w){var r=wRec(w),s=r?r.s:0;
-  if(s<=1)return 'c1';if(s===2)return 'c2';return 'type'}
+function wModeFor(w){return wordModule.modeFor(wRec(w))}
 function wSpeakFallback(txt){try{var u=new SpeechSynthesisUtterance(txt.replace(/^to /,''));u.lang='en-GB';u.rate=.9;speechSynthesis.cancel();speechSynthesis.speak(u)}catch(e){}}
 function wBadge(x){var pos=W_POS[x.p]||x.pos||'СЛОВО';var top=W_TOPICS[x.t]||'';
   return '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'
@@ -857,11 +850,7 @@ function wDeco(){return '<svg style="position:absolute;inset:0;width:100%;height
 function wAnim(name,dur){ui.animate('w_card',name,dur)}
 const WBTN='width:100%;min-height:52px;border:1px solid #F0EAE2;background:#fff;border-radius:18px;font-family:Manrope,sans-serif;font-weight:700;font-size:15px;color:#2B2B2B;cursor:pointer;padding:13px 14px;text-align:center;box-shadow:0 10px 22px rgba(60,45,30,.07),inset 0 2px 0 rgba(255,255,255,.9);';
 function wProgress(){var t=document.getElementById('w_today');if(t)t.textContent=WDONE+' / '+WQ.length+' сегодня'}
-function wDistract(x,field){var pool=EGE_WORDS.filter(function(y){return y.w!==x.w&&(y.p===x.p||Math.random()<.25)});
-  pool.sort(function(){return Math.random()-.5});
-  var out=[],seen={};seen[x[field]]=1;
-  for(var i=0;i<pool.length&&out.length<3;i++){var v=pool[i][field];if(!seen[v]){seen[v]=1;out.push(v)}}
-  return out}
+function wDistract(x,field){return wordModule.distractors(EGE_WORDS,x,field)}
 function wRender(){var card=document.getElementById('w_card'),opts=document.getElementById('w_opts');
   if(!card||!opts)return;wProgress();
   wAnim('win','.32s');
@@ -945,8 +934,7 @@ function wExtra(){wMergeAi();
   var fresh=EGE_WORDS.filter(function(x){var r=wRec(x.w);return !r||!r.s});
   WQ=fresh.slice(0,30);WI=0;WDONE=0;wRender();
   if(fresh.length<40)wTopUp()}
-function wMergeAi(){if(!S||!S.aiWords)return;var have={};EGE_WORDS.forEach(function(x){have[x.w]=1});
-  S.aiWords.forEach(function(x){if(x&&x.w&&x.tr&&!have[x.w]){EGE_WORDS.push(x);have[x.w]=1}})}
+function wMergeAi(){if(!S||!S.aiWords)return;wordModule.mergeGenerated(EGE_WORDS,S.aiWords)}
 /* фоновая генерация: база сама пополняется, сверяясь с уже известными словами */
 var W_GEN=false;
 async function wTopUp(){

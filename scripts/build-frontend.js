@@ -11,12 +11,24 @@ await fs.rm(outputDirectory, { recursive: true, force: true });
 await fs.mkdir(path.dirname(outputDirectory), { recursive: true });
 await fs.cp(sourceDirectory, outputDirectory, { recursive: true });
 
-const names = (await fs.readdir(outputDirectory)).sort();
+async function listFiles(directory, prefix = '') {
+  const entries = await fs.readdir(directory, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    const relativePath = path.posix.join(prefix, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...await listFiles(path.join(directory, entry.name), relativePath));
+    } else if (entry.isFile()) {
+      files.push(relativePath);
+    }
+  }
+  return files;
+}
+
+const names = (await listFiles(outputDirectory)).sort();
 const assets = {};
 for (const name of names) {
   const file = path.join(outputDirectory, name);
-  const stat = await fs.stat(file);
-  if (!stat.isFile()) continue;
   const content = await fs.readFile(file);
   assets[name] = {
     bytes: content.length,
