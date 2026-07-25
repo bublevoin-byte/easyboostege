@@ -11,3 +11,4 @@ backups/
 soak-results/
 *.log
 .DS_Store
+quality/sources/
