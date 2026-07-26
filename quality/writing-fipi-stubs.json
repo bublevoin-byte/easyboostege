@@ -1,0 +1,747 @@
+[
+  {
+    "id": "w37-fipi-2023-001",
+    "operation": "writing_37",
+    "tags": [
+      "fipi-2023",
+      "needs-answer-text"
+    ],
+    "assignment": "You have received an email message from your English-speaking pen-friend Mike: From: Mike@mail.uk To: Russian_friend@ege.ru Subject: Mobile devices …I’ve recently been involved in a school survey on gadgets and devices. What device is your favourite, if any? What do you usually use it for? Do you consider using mobile phones essential for young people, why or why not? I’ve recently returned from a nice summer camp… Write an email to Mike. In your message: – answer his questions; – ask questions about the summer camp. Write 100–140 words. Remember the rules of email writing.",
+    "answer": "",
+    "human": {
+      "total": 0,
+      "max": 6,
+      "criteria": {
+        "k1": 0,
+        "k2": 0,
+        "k3": 0
+      },
+      "criteriaLabels": {
+        "k1": "Решение коммуникативной задачи",
+        "k2": "Организация текста",
+        "k3": "Языковое оформление"
+      },
+      "reviewer": "fipi-2023-expert-manual"
+    },
+    "source": {
+      "manual": "fipi-pch-2023.pdf",
+      "work": null,
+      "wordCount": 134,
+      "reprintedIn": [
+        "fipi-pch-2024.pdf",
+        "fipi-pch-2025.pdf",
+        "fipi-pch-2026.pdf"
+      ]
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "w37-fipi-2023-002",
+    "operation": "writing_37",
+    "tags": [
+      "fipi-2023",
+      "needs-answer-text",
+      "total-only"
+    ],
+    "assignment": "You have received an email message from your English-speaking pen-friend Emily: From: Emily@mail.uk To: Russian_friend@ege.ru Subject: Camping …All of my friends think camping is a perfect way to spend the holidays. What is your attitude to camping? Is it popular with Russian teenagers, and why or why not? What are the best ways to spend the holidays for you and your friends? I’ve just started watching an interesting TV show… Write an email to Emily. In your message: – answer her questions; – ask questions about the TV show. Write 100–140 words. Remember the rules of email writing.",
+    "answer": "",
+    "human": {
+      "total": 3,
+      "max": 6,
+      "criteria": null,
+      "criteriaLabels": {
+        "k1": "Решение коммуникативной задачи",
+        "k2": "Организация текста",
+        "k3": "Языковое оформление"
+      },
+      "reviewer": "fipi-2023-expert-manual"
+    },
+    "source": {
+      "manual": "fipi-pch-2023.pdf",
+      "work": null,
+      "wordCount": 133,
+      "reprintedIn": [
+        "fipi-pch-2024.pdf",
+        "fipi-pch-2025.pdf"
+      ]
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "w37-fipi-2023-003",
+    "operation": "writing_37",
+    "tags": [
+      "fipi-2023",
+      "needs-answer-text",
+      "total-only"
+    ],
+    "assignment": "You have received an email message from your English-speaking pen-friend Ronny: From: Ronny@mail.uk To: Russian_friend@ege.ru Subject: Summer …I am so happy that summer has come and we are going to have a long holiday. What’s the weather like in Russia in summer? What is your favourite season and why this one? What are your plans for the summer? My uncle Keith is coming to visit us next week... Write an email to Ronny. In your message:  answer his questions;  ask questions about his uncle. Write 100–140 words. Remember the rules of email writing.",
+    "answer": "",
+    "human": {
+      "total": 5,
+      "max": 6,
+      "criteria": null,
+      "criteriaLabels": {
+        "k1": "Решение коммуникативной задачи",
+        "k2": "Организация текста",
+        "k3": "Языковое оформление"
+      },
+      "reviewer": "fipi-2023-expert-manual"
+    },
+    "source": {
+      "manual": "fipi-pch-2023.pdf",
+      "work": null,
+      "wordCount": null
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "w37-fipi-2023-004",
+    "operation": "writing_37",
+    "tags": [
+      "fipi-2023",
+      "needs-answer-text",
+      "total-only"
+    ],
+    "assignment": "You have received an email message from your English-speaking pen-friend Mary who writes: From: Mary@mail.uk To: Russian_friend@ege.ru Subject: Cooking …I am learning to cook from my mother now. But I prefer eating out. There are so many cafés around, why should one cook at home? What about you – what are your preferences and why? Do you ever cook for yourself or for the family? I am learning Russian now and I’ve started reading a very interesting book in Russian… Write an email to Mary. In your message:  answer her questions;  ask questions about the book. Write 100–140 words. Remember the rules of email writing.",
+    "answer": "",
+    "human": {
+      "total": 5,
+      "max": 6,
+      "criteria": null,
+      "criteriaLabels": {
+        "k1": "Решение коммуникативной задачи",
+        "k2": "Организация текста",
+        "k3": "Языковое оформление"
+      },
+      "reviewer": "fipi-2023-expert-manual"
+    },
+    "source": {
+      "manual": "fipi-pch-2023.pdf",
+      "work": null,
+      "wordCount": 118
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "w38-fipi-2023-005",
+    "operation": "writing_38",
+    "tags": [
+      "fipi-2023",
+      "needs-answer-text"
+    ],
+    "assignment": "Imagine that you are doing a project on what film genres are popular among teenagers in Zetland. You have found some data on the subject – the results of the opinion polls (see the table below). Comment on the data in the table and give your opinion on the subject of the project. Film genre Number of respondents (%) Fantasy, sci-fi Horror, thriller Comedy Drama, melodrama Detective films Write 200–250 words.",
+    "answer": "",
+    "human": {
+      "total": 7,
+      "max": 14,
+      "criteria": {
+        "k1": 3,
+        "k2": 2,
+        "k3": 1,
+        "k4": 1,
+        "k5": 0
+      },
+      "criteriaLabels": {
+        "k1": "Решение коммуникативной задачи",
+        "k2": "Организация текста",
+        "k3": "Лексика",
+        "k4": "Грамматика",
+        "k5": "Орфография и пунктуация"
+      },
+      "reviewer": "fipi-2023-expert-manual"
+    },
+    "source": {
+      "manual": "fipi-pch-2023.pdf",
+      "work": null,
+      "wordCount": null
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "w38-fipi-2023-006",
+    "operation": "writing_38",
+    "tags": [
+      "fipi-2023",
+      "needs-answer-text",
+      "total-only",
+      "assignment-partial"
+    ],
+    "assignment": "Imagine that you are doing a project on what people use their smartphones for in Zetland. You have found some data on the subject – the results of the opinion polls (see the diagram below). Comment on the data in the pie chart and give your opinion on the subject of the project. Write 200–250 words.",
+    "answer": "",
+    "human": {
+      "total": 12,
+      "max": 14,
+      "criteria": null,
+      "criteriaLabels": {
+        "k1": "Решение коммуникативной задачи",
+        "k2": "Организация текста",
+        "k3": "Лексика",
+        "k4": "Грамматика",
+        "k5": "Орфография и пунктуация"
+      },
+      "reviewer": "fipi-2023-expert-manual"
+    },
+    "source": {
+      "manual": "fipi-pch-2023.pdf",
+      "work": null,
+      "wordCount": 225
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "w37-fipi-2024-003",
+    "operation": "writing_37",
+    "tags": [
+      "fipi-2024",
+      "needs-answer-text"
+    ],
+    "assignment": "You have received an email message from your English-speaking pen-friend Charles: From: Charles@mail.uk To: Russian_friend@ege.ru Subject: Internet … My parents gave me a laptop for my birthday. What do you use the Internet for? What do you usually download from the Internet? Is it popular with Russian teenagers to have their own blogs or websites, why or why not? Yesterday I went with my class on a school trip to the capital … Write an email to Charles. In your message: – answer his questions; – ask questions about the school trip. Write 100–140 words. Remember the rules of email writing.",
+    "answer": "",
+    "human": {
+      "total": 2,
+      "max": 6,
+      "criteria": {
+        "k1": 1,
+        "k2": 1,
+        "k3": 0
+      },
+      "criteriaLabels": {
+        "k1": "Решение коммуникативной задачи",
+        "k2": "Организация текста",
+        "k3": "Языковое оформление"
+      },
+      "reviewer": "fipi-2024-expert-manual"
+    },
+    "source": {
+      "manual": "fipi-pch-2024.pdf",
+      "work": null,
+      "wordCount": 137
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "w37-fipi-2024-004",
+    "operation": "writing_37",
+    "tags": [
+      "fipi-2024",
+      "needs-answer-text"
+    ],
+    "assignment": "You have received an email message from your English-speaking pen-friend Mark: From: Mark@mail.uk To: Russian_friend@ege.ru Subject: Inventions … Last week we went to the science museum in Chicago with my classmates. We learned a lot about modern inventions. What is the most useful modern invention in your opinion? What museums do you like going to, if any? How often do you go on excursions to museums with your classmates? I spent hours working on a group project last week … Write an email to Mark. In your message: – answer his questions; – ask questions about his group project. Write 100–140 words. Remember the rules of email writing.",
+    "answer": "",
+    "human": {
+      "total": 6,
+      "max": 6,
+      "criteria": {
+        "k1": 2,
+        "k2": 2,
+        "k3": 2
+      },
+      "criteriaLabels": {
+        "k1": "Решение коммуникативной задачи",
+        "k2": "Организация текста",
+        "k3": "Языковое оформление"
+      },
+      "reviewer": "fipi-2024-expert-manual"
+    },
+    "source": {
+      "manual": "fipi-pch-2024.pdf",
+      "work": null,
+      "wordCount": 139,
+      "reprintedIn": [
+        "fipi-pch-2025.pdf"
+      ]
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "w38-fipi-2024-005",
+    "operation": "writing_38",
+    "tags": [
+      "fipi-2024",
+      "needs-answer-text"
+    ],
+    "assignment": "38.1 Imagine that you are doing a project on where Zetlanders prefer to spend a Saturday evening. You have found some data on the subject – the results of the opinion polls (see the table below). Comment on the data in the table and give your opinion on the subject of the project. The opinion poll question: Where do you prefer to spend a Saturday evening? Places Number of respondents (%) Restaurant or café Park Sports centre Hobby club Theatre or museum Write 200–250 words.",
+    "answer": "",
+    "human": {
+      "total": 10,
+      "max": 14,
+      "criteria": {
+        "k1": 1,
+        "k2": 1,
+        "k3": 3,
+        "k4": 3,
+        "k5": 2
+      },
+      "criteriaLabels": {
+        "k1": "Решение коммуникативной задачи",
+        "k2": "Организация текста",
+        "k3": "Лексика",
+        "k4": "Грамматика",
+        "k5": "Орфография и пунктуация"
+      },
+      "reviewer": "fipi-2024-expert-manual"
+    },
+    "source": {
+      "manual": "fipi-pch-2024.pdf",
+      "work": null,
+      "wordCount": null,
+      "reprintedIn": [
+        "fipi-pch-2025.pdf"
+      ]
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "w38-fipi-2024-006",
+    "operation": "writing_38",
+    "tags": [
+      "fipi-2024",
+      "needs-answer-text",
+      "total-only"
+    ],
+    "assignment": "Imagine that you are doing a project on the preparations for the New Year that Zetlanders consider most important. You have found some data on the subject – the results of the opinion polls (see the table below). Comment on the data in the table and give your opinion on the subject of the project. The opinion poll question: What is the most important thing for you in preparing for the New Year? Things to do Number of respondents (%) Tidy the house Decorate a New Year tree Cook traditional New Year dishes Buy presents for friends and relatives Buy a new outfit Write 200–250 words.",
+    "answer": "",
+    "human": {
+      "total": 0,
+      "max": 14,
+      "criteria": null,
+      "criteriaLabels": {
+        "k1": "Решение коммуникативной задачи",
+        "k2": "Организация текста",
+        "k3": "Лексика",
+        "k4": "Грамматика",
+        "k5": "Орфография и пунктуация"
+      },
+      "reviewer": "fipi-2024-expert-manual"
+    },
+    "source": {
+      "manual": "fipi-pch-2024.pdf",
+      "work": null,
+      "wordCount": null,
+      "reprintedIn": [
+        "fipi-pch-2025.pdf"
+      ]
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "w37-fipi-2025-001",
+    "operation": "writing_37",
+    "tags": [
+      "fipi-2025",
+      "needs-answer-text"
+    ],
+    "assignment": "You have received an email message from your English-speaking pen-friend Oscar: From: Oscar@mail.uk To: Russian_friend@ege.ru Subject: Russian literature …Yesterday at school our foreign language teacher told us a lot about Russian literature. What Russian writers are popular with Russian teenagers? Who is your favourite writer? What book of Russian literature do you think a foreigner should read first, and why? I’ve just got an unusual present… Write an email to Oscar. In your message:  answer his questions;  ask questions about the present. Write 100–140 words. Remember the rules of email writing.",
+    "answer": "",
+    "human": {
+      "total": 0,
+      "max": 6,
+      "criteria": {
+        "k1": 0,
+        "k2": 0,
+        "k3": 0
+      },
+      "criteriaLabels": {
+        "k1": "Решение коммуникативной задачи",
+        "k2": "Организация текста",
+        "k3": "Языковое оформление"
+      },
+      "reviewer": "fipi-2025-expert-manual"
+    },
+    "source": {
+      "manual": "fipi-pch-2025.pdf",
+      "work": null,
+      "wordCount": null
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "w37-fipi-2025-002",
+    "operation": "writing_37",
+    "tags": [
+      "fipi-2025",
+      "needs-answer-text"
+    ],
+    "assignment": "You have received an email message from your English-speaking pen-friend Olive: From: Olive@mail.uk To: Russian_friend@ege.ru Subject: St. Petersburg …At college we are doing projects on the historic cities of the world. If I choose St. Petersburg in Russia, what places of interest should I write about? Is St. Petersburg popular among foreign and local tourists, and why? What season is the best to visit St. Petersburg? We’ve just returned from the trip to the seaside… Write an email to Olive. In your message:  answer her questions;  ask questions about the trip. Write 100–140 words. Remember the rules of email writing.",
+    "answer": "",
+    "human": {
+      "total": 6,
+      "max": 6,
+      "criteria": {
+        "k1": 2,
+        "k2": 2,
+        "k3": 2
+      },
+      "criteriaLabels": {
+        "k1": "Решение коммуникативной задачи",
+        "k2": "Организация текста",
+        "k3": "Языковое оформление"
+      },
+      "reviewer": "fipi-2025-expert-manual"
+    },
+    "source": {
+      "manual": "fipi-pch-2025.pdf",
+      "work": null,
+      "wordCount": 105,
+      "reprintedIn": [
+        "fipi-pch-2026.pdf"
+      ]
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "w37-fipi-2025-003",
+    "operation": "writing_37",
+    "tags": [
+      "fipi-2025",
+      "needs-answer-text"
+    ],
+    "assignment": "You have received an email message from your English-speaking pen-friend Sandra: From: Sandra@mail.uk To: Russian_friend@ege.ru Subject: Food preferences … Nowadays I always try to eat healthy food. But in the past, I used to love sweets and fast food very much. What kind of food do Russian people eat most often? How have your food preferences changed since you were a kid? Do you think your food preferences will continue to change as you get older, why or why not? My family and I still write letters to Santa at Christmas … Write an email to Sandra. In your message: – answer her questions; – ask questions about her letters to Santa. Write 100–140 words. Remember the rules of email writing.",
+    "answer": "",
+    "human": {
+      "total": 5,
+      "max": 6,
+      "criteria": {
+        "k1": 2,
+        "k2": 2,
+        "k3": 1
+      },
+      "criteriaLabels": {
+        "k1": "Решение коммуникативной задачи",
+        "k2": "Организация текста",
+        "k3": "Языковое оформление"
+      },
+      "reviewer": "fipi-2025-expert-manual"
+    },
+    "source": {
+      "manual": "fipi-pch-2025.pdf",
+      "work": null,
+      "wordCount": 148
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "w38-fipi-2025-007",
+    "operation": "writing_38",
+    "tags": [
+      "fipi-2025",
+      "needs-answer-text"
+    ],
+    "assignment": "Imagine that you are doing a project on why some Zetlanders refuse to attend music schools. You have found some data on the subject – the results of a survey (see the table below). Comment on the survey data in the table and give your opinion on the subject of the project. The survey question: Why do you refuse to attend a music school? Reasons Number of respondents (%) No fast result Time-consuming Not interested in music Far from home No money for a quality instrument Write 200–250 words.",
+    "answer": "",
+    "human": {
+      "total": 12,
+      "max": 14,
+      "criteria": {
+        "k1": 3,
+        "k2": 2,
+        "k3": 2,
+        "k4": 3,
+        "k5": 2
+      },
+      "criteriaLabels": {
+        "k1": "Решение коммуникативной задачи",
+        "k2": "Организация текста",
+        "k3": "Лексика",
+        "k4": "Грамматика",
+        "k5": "Орфография и пунктуация"
+      },
+      "reviewer": "fipi-2025-expert-manual"
+    },
+    "source": {
+      "manual": "fipi-pch-2025.pdf",
+      "work": null,
+      "wordCount": null
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "w38-fipi-2025-008",
+    "operation": "writing_38",
+    "tags": [
+      "fipi-2025",
+      "needs-answer-text"
+    ],
+    "assignment": "Imagine that you are doing a project on why some Zetlanders refuse to attend music schools. You have found some data on the subject – the results of a survey (see the table below). Comment on the survey data in the table and give your opinion on the subject of the project. The survey question: Why do you refuse to attend a music school? Reasons Number of respondents (%) No fast result Time-consuming Not interested in music Far from home No money for a quality instrument Write 200–250 words.",
+    "answer": "",
+    "human": {
+      "total": 9,
+      "max": 14,
+      "criteria": {
+        "k1": 3,
+        "k2": 2,
+        "k3": 2,
+        "k4": 1,
+        "k5": 1
+      },
+      "criteriaLabels": {
+        "k1": "Решение коммуникативной задачи",
+        "k2": "Организация текста",
+        "k3": "Лексика",
+        "k4": "Грамматика",
+        "k5": "Орфография и пунктуация"
+      },
+      "reviewer": "fipi-2025-expert-manual"
+    },
+    "source": {
+      "manual": "fipi-pch-2025.pdf",
+      "work": null,
+      "wordCount": null
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "w37-fipi-2026-001",
+    "operation": "writing_37",
+    "tags": [
+      "fipi-2026",
+      "needs-answer-text"
+    ],
+    "assignment": "You have received an email message from your English-speaking pen-friend Alison: From: Alison@mail.uk To: Russian_friend@ege.ru Subject: Reading …Most of my friends enjoy reading books in their free time, and I like it too. Is reading a popular hobby with teenagers in Russia? What books do you read in your free time? What book by a Russian writer would you advise me to read in the future, and why this one? I’ve just finished my school project on history… Write an email to Alison. In your message: – answer her questions; – ask questions about the school project. Write 100–140 words. Remember the rules of email writing.",
+    "answer": "",
+    "human": {
+      "total": 0,
+      "max": 6,
+      "criteria": {
+        "k1": 0,
+        "k2": 0,
+        "k3": 0
+      },
+      "criteriaLabels": {
+        "k1": "Решение коммуникативной задачи",
+        "k2": "Организация текста",
+        "k3": "Языковое оформление"
+      },
+      "reviewer": "fipi-2026-expert-manual"
+    },
+    "source": {
+      "manual": "fipi-pch-2026.pdf",
+      "work": null,
+      "wordCount": 142
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "w37-fipi-2026-3896",
+    "operation": "writing_37",
+    "tags": [
+      "fipi-2026",
+      "needs-answer-text"
+    ],
+    "assignment": "You have received an email message from your English-speaking pen-friend Alice: From: Alice@mail.uk To: Russian_friend@ege.ru Subject: Russian cuisine …Our school teacher asked us to do a project on national dishes of different countries. I want to write about the Russian cuisine. What traditional dishes are popular in your country? What national dish is the easiest to cook? What ingredients are needed to cook it? I want to start taking singing lessons… Write an email to Alice. In your message: – answer her questions; – ask questions about the singing lessons. Write 100–140 words. Remember the rules of email writing.",
+    "answer": "",
+    "human": {
+      "total": 4,
+      "max": 6,
+      "criteria": {
+        "k1": 1,
+        "k2": 2,
+        "k3": 1
+      },
+      "criteriaLabels": {
+        "k1": "Решение коммуникативной задачи",
+        "k2": "Организация текста",
+        "k3": "Языковое оформление"
+      },
+      "reviewer": "fipi-2026-expert-manual"
+    },
+    "source": {
+      "manual": "fipi-pch-2026.pdf",
+      "work": "3896",
+      "wordCount": 132
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "w37-fipi-2026-3468",
+    "operation": "writing_37",
+    "tags": [
+      "fipi-2026",
+      "needs-answer-text"
+    ],
+    "assignment": "You have received an email message from your English-speaking pen-friend Chris: From: Chris@mail.uk To: Russian_friend@ege.ru Subject: Russian science …Yesterday our school teacher told us a lot about Russian scientific inventions. What is the most famous Russian invention? Why is it important to study science at school? What Russian scientist do you think a foreigner should learn about, and why? I’ve just bought a present for my brother… Write an email to Chris. In your message: – answer his questions; – ask questions about the present. Write 100–140 words. Remember the rules of email writing.",
+    "answer": "",
+    "human": {
+      "total": 2,
+      "max": 6,
+      "criteria": {
+        "k1": 1,
+        "k2": 1,
+        "k3": 0
+      },
+      "criteriaLabels": {
+        "k1": "Решение коммуникативной задачи",
+        "k2": "Организация текста",
+        "k3": "Языковое оформление"
+      },
+      "reviewer": "fipi-2026-expert-manual"
+    },
+    "source": {
+      "manual": "fipi-pch-2026.pdf",
+      "work": "3468",
+      "wordCount": 128
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "w37-fipi-2026-4798",
+    "operation": "writing_37",
+    "tags": [
+      "fipi-2026",
+      "needs-answer-text"
+    ],
+    "assignment": "You have received an email message from your English-speaking pen-friend Oscar: From: Oscar@mail.uk To: Russian_friend@ege.ru Subject: Russian literature …Yesterday at school our foreign language teacher told us a lot about Russian literature. What Russian writers are popular with Russian teenagers? Who is your favourite writer? What book of Russian literature do you think a foreigner should read first, and why? I’ve just got an unusual present… Write an email to Oscar. In your message:  answer his questions;  ask questions about the present. Write 100–140 words. Remember the rules of email writing.",
+    "answer": "",
+    "human": {
+      "total": 0,
+      "max": 6,
+      "criteria": {
+        "k1": 0,
+        "k2": 0,
+        "k3": 0
+      },
+      "criteriaLabels": {
+        "k1": "Решение коммуникативной задачи",
+        "k2": "Организация текста",
+        "k3": "Языковое оформление"
+      },
+      "reviewer": "fipi-2026-expert-manual"
+    },
+    "source": {
+      "manual": "fipi-pch-2026.pdf",
+      "work": "4798",
+      "wordCount": 172
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "w38-fipi-2026-3896",
+    "operation": "writing_38",
+    "tags": [
+      "fipi-2026",
+      "needs-answer-text",
+      "assignment-partial"
+    ],
+    "assignment": "Imagine that you are doing a project on Zetland teenagers’ preparation for final exams. You have found some data on the subject – the results of a survey conducted among Zetland teenagers (see the pie chart below). Comment on the survey data and give your opinion on the subject of the project. The survey question: What helped you the most in preparing for final exams? 1. Choose one option Write 200–250 words.",
+    "answer": "",
+    "human": {
+      "total": 8,
+      "max": 14,
+      "criteria": {
+        "k1": 1,
+        "k2": 1,
+        "k3": 2,
+        "k4": 2,
+        "k5": 2
+      },
+      "criteriaLabels": {
+        "k1": "Решение коммуникативной задачи",
+        "k2": "Организация текста",
+        "k3": "Лексика",
+        "k4": "Грамматика",
+        "k5": "Орфография и пунктуация"
+      },
+      "reviewer": "fipi-2026-expert-manual"
+    },
+    "source": {
+      "manual": "fipi-pch-2026.pdf",
+      "work": "3896",
+      "wordCount": null
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "w38-fipi-2026-3468",
+    "operation": "writing_38",
+    "tags": [
+      "fipi-2026",
+      "needs-answer-text",
+      "assignment-partial"
+    ],
+    "assignment": "Imagine that you are doing a project on Zetlanders’ priorities in reading and discussing the news in social networks. You have found some data on the subject – the results of a survey conducted among Zetland social network users (see the pie chart below). Comment on the survey data and give your opinion on the subject of the project. The survey question: What is your priority in reading and discussing the news in social networks? Choose one option Write 200–250 words.",
+    "answer": "",
+    "human": {
+      "total": 6,
+      "max": 14,
+      "criteria": {
+        "k1": 1,
+        "k2": 2,
+        "k3": 0,
+        "k4": 1,
+        "k5": 2
+      },
+      "criteriaLabels": {
+        "k1": "Решение коммуникативной задачи",
+        "k2": "Организация текста",
+        "k3": "Лексика",
+        "k4": "Грамматика",
+        "k5": "Орфография и пунктуация"
+      },
+      "reviewer": "fipi-2026-expert-manual"
+    },
+    "source": {
+      "manual": "fipi-pch-2026.pdf",
+      "work": "3468",
+      "wordCount": null
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "w38-fipi-2026-4563",
+    "operation": "writing_38",
+    "tags": [
+      "fipi-2026",
+      "needs-answer-text"
+    ],
+    "assignment": "Imagine that you are doing a project on why some Zetlanders refuse to attend music schools. You have found some data on the subject – the results of a survey conducted among Zetlanders (see the table below). Comment on the survey data in the table and give your opinion on the subject of the project. The survey question: Why do you refuse to attend a music school? Choose one option Options Number of respondents (%) No fast result Time-consuming Not interested in music Far from home No money for a quality instrument Write 200–250 words.",
+    "answer": "",
+    "human": {
+      "total": 8,
+      "max": 14,
+      "criteria": {
+        "k1": 2,
+        "k2": 2,
+        "k3": 2,
+        "k4": 1,
+        "k5": 1
+      },
+      "criteriaLabels": {
+        "k1": "Решение коммуникативной задачи",
+        "k2": "Организация текста",
+        "k3": "Лексика",
+        "k4": "Грамматика",
+        "k5": "Орфография и пунктуация"
+      },
+      "reviewer": "fipi-2026-expert-manual"
+    },
+    "source": {
+      "manual": "fipi-pch-2026.pdf",
+      "work": "4563",
+      "wordCount": null
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  }
+]
