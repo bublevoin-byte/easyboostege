@@ -1,6 +1,9 @@
 import { z } from 'zod';
 
-export const WRITING_PROMPT_VERSION = 'writing-v1';
+import { analyzeWriting, countWords as countAnswerWords, describeFacts } from './writing-facts.js';
+
+// v2 adds the deterministic pre-check block to the prompt (section 10.5).
+export const WRITING_PROMPT_VERSION = 'writing-v2';
 
 const task37AssignmentSchema = z.object({
   from: z.string().trim().min(1).max(40),
@@ -81,9 +84,7 @@ const TASK_RULES = Object.freeze({
   }),
 });
 
-export function countWords(text) {
-  return text.trim() ? text.trim().split(/\s+/u).filter(Boolean).length : 0;
-}
+export const countWords = countAnswerWords;
 
 export function buildWritingPrompt(input) {
   const rules = TASK_RULES[input.taskType];
@@ -111,16 +112,18 @@ export function buildWritingPrompt(input) {
     errors: [{ title: 'тип ошибки', wrong: 'фрагмент', right: 'исправление', kind: 'err', note: 'пояснение' }],
   };
 
+  const facts = analyzeWriting(input);
   const user = [
     `Тип задания: ${input.taskType}. Допустимый объём: ${rules.minWords}–${rules.maxWords} слов.`,
     assignment,
     `Критерии: ${criteria}. Общий максимум: ${rules.overallMax}.`,
+    describeFacts(facts, input.taskType),
     `Верни JSON следующей формы: ${JSON.stringify(responseShape)}.`,
     'Укажи не более пяти самых важных ошибок. Не придумывай фрагменты, которых нет в ответе.',
     `Ответ ученика: ${JSON.stringify(input.answer)}`,
   ].join('\n');
 
-  return { system, user };
+  return { system, user, facts };
 }
 
 export function parseAndValidateWritingReview(raw, input) {
