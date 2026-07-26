@@ -328,6 +328,14 @@ export function createFileRepository(filePath) {
     return task ? structuredClone({ result: task.result, provider: task.provider, prompt_version: task.prompt_version, created_at: task.created_at }) : null;
   }
 
+  // Section 10.8: an identical task is reused whoever generated it first.
+  async function getSharedGeneratedTask(requestHash) {
+    await load();
+    const tasks = state.generated_tasks.filter((item) => item.request_hash === requestHash);
+    const task = tasks.at(-1);
+    return task ? structuredClone({ result: task.result, provider: task.provider, prompt_version: task.prompt_version, created_at: task.created_at }) : null;
+  }
+
   async function saveGeneratedTask(username, entry) {
     await load();
     const existing = state.generated_tasks.find((item) => item.username === username && item.request_hash === entry.requestHash);
@@ -540,6 +548,7 @@ export function createFileRepository(filePath) {
     createSpeakingAttempt,
     finishSpeakingAttempt,
     getGeneratedTask,
+    getSharedGeneratedTask,
     saveGeneratedTask,
     recordModuleAttempt,
     upsertWordProgress,

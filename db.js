@@ -31,6 +31,7 @@ export const finishWritingAttempt = (...args) => repository.finishWritingAttempt
 export const createSpeakingAttempt = (...args) => repository.createSpeakingAttempt(...args);
 export const finishSpeakingAttempt = (...args) => repository.finishSpeakingAttempt(...args);
 export const getGeneratedTask = (...args) => repository.getGeneratedTask(...args);
+export const getSharedGeneratedTask = (...args) => repository.getSharedGeneratedTask(...args);
 export const saveGeneratedTask = (...args) => repository.saveGeneratedTask(...args);
 export const recordModuleAttempt = (...args) => repository.recordModuleAttempt(...args);
 export const upsertWordProgress = (...args) => repository.upsertWordProgress(...args);

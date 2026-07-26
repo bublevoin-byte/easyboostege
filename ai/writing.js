@@ -1,6 +1,13 @@
 import { z } from 'zod';
 
 import { analyzeWriting, countWords as countAnswerWords, describeFacts } from './writing-facts.js';
+import { sanitizeStudentText } from '../validation/student-text.js';
+
+// The answer is normalised at the boundary, so the prompt, the pre-checks and the stored attempt
+// all work on the same string. What survives sanitising must still be a real answer.
+const studentAnswer = (max) => z.string().trim().min(20).max(max)
+  .transform(sanitizeStudentText)
+  .refine((value) => value.length >= 20, { message: 'answer is empty after sanitising' });
 
 // v2 adds the deterministic pre-check block to the prompt (section 10.5).
 export const WRITING_PROMPT_VERSION = 'writing-v2';
@@ -24,12 +31,12 @@ const task38AssignmentSchema = z.object({
 export const writingRequestSchema = z.discriminatedUnion('taskType', [
   z.object({
     taskType: z.literal('writing_37'),
-    answer: z.string().trim().min(20).max(12_000),
+    answer: studentAnswer(12_000),
     assignment: task37AssignmentSchema,
   }).strict(),
   z.object({
     taskType: z.literal('writing_38'),
-    answer: z.string().trim().min(20).max(20_000),
+    answer: studentAnswer(20_000),
     assignment: task38AssignmentSchema,
   }).strict(),
 ]);

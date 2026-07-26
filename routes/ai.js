@@ -13,6 +13,13 @@ import { recordDependencyEvent } from '../observability/metrics.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// A single line an operator can grep: which provider gave up, on what, and whether a spare was left.
+function describeFallback(provider, code, error, index, total) {
+  const reason = error?.message && error.message !== code ? `${code}: ${String(error.message).slice(0, 120)}` : code;
+  return `${provider.name} → ${index + 1 < total ? 'switched to next provider' : 'no provider left'} (${reason})`;
+}
+
+
 const XAI_KEY = config.ai.xaiKey;
 const XAI_MODEL = config.ai.xaiModel;
 const GROQ_KEY = config.ai.groqKey;
@@ -25,7 +32,7 @@ export function createAiRoutes({ authentication, access, db }) {
   const { chatLimiter, writingLimiter, requireAiBudget, requireActiveSubscription, requirePrivacyConsent, hasAiBudget } = access;
   const {
     createWritingAttempt, finishWritingAttempt, createSpeakingAttempt, finishSpeakingAttempt,
-    getGeneratedTask, saveGeneratedTask, logAiRequest,
+    getGeneratedTask, getSharedGeneratedTask, saveGeneratedTask, logAiRequest,
   } = db;
 
   async function askProvider({ url, key, model }, system, user) {
@@ -121,6 +128,7 @@ export function createAiRoutes({ authentication, access, db }) {
         promptVersion: WRITING_PROMPT_VERSION,
         status: 'completed',
         durationMs: Date.now() - startedAt,
+        fallbackReason: result.fallbackReason,
         promptTokens: result.promptTokens,
         completionTokens: result.completionTokens,
         estimatedCostMicrousd: estimateCostMicrousd(result, aiProviders().find((item) => item.name === provider)),
@@ -145,6 +153,7 @@ export function createAiRoutes({ authentication, access, db }) {
         status: 'failed',
         durationMs: Date.now() - startedAt,
         errorCode: code,
+        fallbackReason: error.fallbackReason || error.cause?.fallbackReason || null,
         promptTokens,
         completionTokens,
         estimatedCostMicrousd: estimateCostMicrousd({ promptTokens, completionTokens }, aiProviders().find((item) => item.name === provider)),
@@ -165,7 +174,9 @@ export function createAiRoutes({ authentication, access, db }) {
     if (!parsed.success) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректные параметры генерации.' } });
     const input = parsed.data;
     const requestHash = crypto.createHash('sha256').update(JSON.stringify({ promptVersion: CONTENT_PROMPT_VERSION, input })).digest('hex');
-    const stored = await getGeneratedTask(req.user, requestHash);
+    // Own copy first, then anyone's: the same input always produces the same exercise, so a
+    // second student must not cost a second paid call.
+    const stored = await getGeneratedTask(req.user, requestHash) || await getSharedGeneratedTask(requestHash);
     if (stored) return res.json({ data: stored.result, provider: 'cache', sourceProvider: stored.provider, promptVersion: stored.prompt_version, cached: true });
     if (!await hasAiBudget()) return res.status(503).json({ error: { code: 'AI_BUDGET_EXHAUSTED', message: 'Дневной лимит ИИ исчерпан. Попробуйте завтра.' } });
     const prompt = buildContentPrompt(input);
@@ -173,6 +184,7 @@ export function createAiRoutes({ authentication, access, db }) {
     const providers = aiProviders();
     if (!providers.length) return res.status(503).json({ error: { code: 'AI_NOT_CONFIGURED', message: 'ИИ не настроен на сервере.' } });
     let lastCode = 'AI_PROVIDER_UNAVAILABLE';
+    let fallbackReason = null;
     for (const [providerIndex, provider] of providers.entries()) {
       let usage = {};
       try {
@@ -182,7 +194,7 @@ export function createAiRoutes({ authentication, access, db }) {
         if (input.operation === 'vocabulary_cards' && data.length !== input.count) throw Object.assign(new Error('AI_RESPONSE_INVALID'), { code: 'AI_RESPONSE_INVALID' });
         if (input.operation === 'dictionary_lookup') dictionaryCache.set(input.word.toLocaleLowerCase('en'), data);
         await Promise.all([
-          logAiRequest({ username: req.user, operation: input.operation, provider: provider.name, model: provider.model, promptVersion: CONTENT_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt, ...aiUsage(provider, usage) }),
+          logAiRequest({ username: req.user, operation: input.operation, provider: provider.name, model: provider.model, promptVersion: CONTENT_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt, fallbackReason, ...aiUsage(provider, usage) }),
           saveGeneratedTask(req.user, { operation: input.operation, requestHash, request: input, result: data, provider: provider.name, promptVersion: CONTENT_PROMPT_VERSION }),
         ]);
         recordDependencyEvent('ai', 'success');
@@ -190,8 +202,9 @@ export function createAiRoutes({ authentication, access, db }) {
         return res.json({ data, provider: provider.name, promptVersion: CONTENT_PROMPT_VERSION });
       } catch (error) {
         recordDependencyEvent('ai', 'error');
+        fallbackReason = describeFallback(provider, lastCode, error, providerIndex, providers.length);
         lastCode = error.code === 'AI_RESPONSE_INVALID' ? error.code : 'AI_PROVIDER_UNAVAILABLE';
-        await logAiRequest({ username: req.user, operation: input.operation, provider: provider.name, model: provider.model, promptVersion: CONTENT_PROMPT_VERSION, status: 'failed', durationMs: Date.now() - startedAt, errorCode: lastCode, ...aiUsage(provider, usage) });
+        await logAiRequest({ username: req.user, operation: input.operation, provider: provider.name, model: provider.model, promptVersion: CONTENT_PROMPT_VERSION, status: 'failed', durationMs: Date.now() - startedAt, errorCode: lastCode, fallbackReason: describeFallback(provider, lastCode, error, providerIndex, providers.length), ...aiUsage(provider, usage) });
       }
     }
     const status = lastCode === 'AI_RESPONSE_INVALID' ? 502 : 503;
@@ -211,6 +224,7 @@ export function createAiRoutes({ authentication, access, db }) {
       return res.status(503).json({ error: { code: 'AI_NOT_CONFIGURED', message: 'ИИ не настроен на сервере.' } });
     }
     let lastCode = 'AI_PROVIDER_UNAVAILABLE';
+    let fallbackReason = null;
     for (const [providerIndex, provider] of providers.entries()) {
       let usage = {};
       try {
@@ -218,7 +232,7 @@ export function createAiRoutes({ authentication, access, db }) {
         usage = response;
         const review = parseSpeakingReview(input.taskType, response.text);
         await Promise.all([
-          logAiRequest({ username: req.user, operation: `evaluate_speaking_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt, ...aiUsage(provider, usage) }),
+          logAiRequest({ username: req.user, operation: `evaluate_speaking_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt, fallbackReason, ...aiUsage(provider, usage) }),
           finishSpeakingAttempt(attemptId, { status: 'completed', review, provider: provider.name }),
         ]);
         recordDependencyEvent('ai', 'success');
@@ -226,8 +240,9 @@ export function createAiRoutes({ authentication, access, db }) {
         return res.json({ review, provider: provider.name, promptVersion: SPEAKING_PROMPT_VERSION });
       } catch (error) {
         recordDependencyEvent('ai', 'error');
+        fallbackReason = describeFallback(provider, lastCode, error, providerIndex, providers.length);
         lastCode = error.code === 'AI_RESPONSE_INVALID' ? error.code : 'AI_PROVIDER_UNAVAILABLE';
-        await logAiRequest({ username: req.user, operation: `evaluate_speaking_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'failed', durationMs: Date.now() - startedAt, errorCode: lastCode, ...aiUsage(provider, usage) });
+        await logAiRequest({ username: req.user, operation: `evaluate_speaking_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'failed', durationMs: Date.now() - startedAt, errorCode: lastCode, fallbackReason: describeFallback(provider, lastCode, error, providerIndex, providers.length), ...aiUsage(provider, usage) });
       }
     }
     await finishSpeakingAttempt(attemptId, { status: 'failed', errorCode: lastCode });
@@ -243,20 +258,22 @@ export function createAiRoutes({ authentication, access, db }) {
     const providers = aiProviders();
     if (!providers.length) return res.status(503).json({ error: { code: 'AI_NOT_CONFIGURED', message: 'ИИ не настроен на сервере.' } });
     let lastCode = 'AI_PROVIDER_UNAVAILABLE';
+    let fallbackReason = null;
     for (const [providerIndex, provider] of providers.entries()) {
       let usage = {};
       try {
         const response = await askProvider(provider, prompt.system, prompt.user);
         usage = response;
         const data = parseSpeakingSample(input.taskType, response.text);
-        await logAiRequest({ username: req.user, operation: `speaking_sample_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt, ...aiUsage(provider, usage) });
+        await logAiRequest({ username: req.user, operation: `speaking_sample_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt, fallbackReason, ...aiUsage(provider, usage) });
         recordDependencyEvent('ai', 'success');
         if (providerIndex > 0) recordDependencyEvent('ai', 'fallback');
         return res.json({ data, provider: provider.name, promptVersion: SPEAKING_PROMPT_VERSION });
       } catch (error) {
         recordDependencyEvent('ai', 'error');
+        fallbackReason = describeFallback(provider, lastCode, error, providerIndex, providers.length);
         lastCode = error.code === 'AI_RESPONSE_INVALID' ? error.code : 'AI_PROVIDER_UNAVAILABLE';
-        await logAiRequest({ username: req.user, operation: `speaking_sample_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'failed', durationMs: Date.now() - startedAt, errorCode: lastCode, ...aiUsage(provider, usage) });
+        await logAiRequest({ username: req.user, operation: `speaking_sample_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'failed', durationMs: Date.now() - startedAt, errorCode: lastCode, fallbackReason: describeFallback(provider, lastCode, error, providerIndex, providers.length), ...aiUsage(provider, usage) });
       }
     }
     res.status(lastCode === 'AI_RESPONSE_INVALID' ? 502 : 503).json({ error: { code: lastCode, message: 'Не удалось подготовить образцовый ответ.' } });

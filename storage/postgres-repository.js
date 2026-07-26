@@ -359,6 +359,15 @@ export function createPostgresRepository(connectionString) {
     return result.rows[0] || null;
   }
 
+  // Section 10.8: an identical task is reused whoever generated it first.
+  async function getSharedGeneratedTask(requestHash) {
+    const result = await pool.query(
+      `SELECT result, provider, prompt_version, created_at FROM generated_tasks
+       WHERE request_hash = $1 ORDER BY created_at DESC LIMIT 1`, [requestHash],
+    );
+    return result.rows[0] || null;
+  }
+
   async function saveGeneratedTask(username, entry) {
     const result = await pool.query(
       `INSERT INTO generated_tasks (username, operation, request_hash, request, result, provider, prompt_version)
@@ -456,12 +465,13 @@ export function createPostgresRepository(connectionString) {
   async function logAiRequest(entry) {
     const result = await pool.query(
       `INSERT INTO ai_requests
-       (username, operation, provider, model, prompt_version, status, duration_ms, error_code, prompt_tokens, completion_tokens, estimated_cost_microusd)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       (username, operation, provider, model, prompt_version, status, duration_ms, error_code, prompt_tokens, completion_tokens, estimated_cost_microusd, fallback_reason)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING id`,
       [entry.username || null, entry.operation, entry.provider || null, entry.model || null,
         entry.promptVersion || null, entry.status, entry.durationMs || null, entry.errorCode || null,
-        entry.promptTokens ?? null, entry.completionTokens ?? null, entry.estimatedCostMicrousd ?? null],
+        entry.promptTokens ?? null, entry.completionTokens ?? null, entry.estimatedCostMicrousd ?? null,
+        entry.fallbackReason || null],
     );
     return Number(result.rows[0].id);
   }
@@ -609,6 +619,7 @@ export function createPostgresRepository(connectionString) {
     createSpeakingAttempt,
     finishSpeakingAttempt,
     getGeneratedTask,
+    getSharedGeneratedTask,
     saveGeneratedTask,
     recordModuleAttempt,
     upsertWordProgress,

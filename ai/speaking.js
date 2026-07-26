@@ -1,7 +1,13 @@
 import { z } from 'zod';
 
+import { sanitizeStudentText } from '../validation/student-text.js';
+
 export const SPEAKING_PROMPT_VERSION = 'speaking-eval-v1';
 const text = (max) => z.string().trim().min(1).max(max);
+// The transcript comes back from an external STT service, so it is untrusted just like typed text.
+const transcript = (max) => text(max)
+  .transform(sanitizeStudentText)
+  .refine((value) => value.length > 0, { message: 'transcript is empty after sanitising' });
 const generatedText = (max) => text(max)
   .refine((value) => !/[<>]/u.test(value), { message: 'HTML markup is not allowed' });
 const assignments = {
@@ -11,7 +17,7 @@ const assignments = {
   4: z.object({ topic: text(200), plan: z.array(text(300)).length(4), ph: z.array(text(600)).length(2) }).strict(),
 };
 export const speakingRequestSchema = z.discriminatedUnion('taskType', [1, 2, 3, 4].map((taskType) => z.object({
-  taskType: z.literal(taskType), transcript: text(20_000), assignment: assignments[taskType],
+  taskType: z.literal(taskType), transcript: transcript(20_000), assignment: assignments[taskType],
 }).strict()));
 export const speakingSampleRequestSchema = z.discriminatedUnion('taskType', [2, 3, 4].map((taskType) => z.object({
   taskType: z.literal(taskType), assignment: assignments[taskType],

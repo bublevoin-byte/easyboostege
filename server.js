@@ -8,7 +8,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { activateTrial, closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, countAiRequestsSince, createPaymentRequest, createSession, createSpeakingAttempt, createTelegramAuthCode, createWritingAttempt, deleteUserData, exportUserData, finishSpeakingAttempt, finishWritingAttempt, getAiUsageMetrics, getGeneratedTask, getPrivacyConsent, getProgress, getUser, healthCheck, isSessionActive, recordModuleAttempt, resolvePaymentRequest, revokeSession, saveGeneratedTask, saveProgress, setPrivacyConsent, setUserRole, upsertErrorBank, upsertWordProgress, mergeProgress, getUserByTelegram, createTelegramUser, logAiRequest, getSub } from './db.js';
+import { activateTrial, closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, countAiRequestsSince, createPaymentRequest, createSession, createSpeakingAttempt, createTelegramAuthCode, createWritingAttempt, deleteUserData, exportUserData, finishSpeakingAttempt, finishWritingAttempt, getAiUsageMetrics, getGeneratedTask, getSharedGeneratedTask, getPrivacyConsent, getProgress, getUser, healthCheck, isSessionActive, recordModuleAttempt, resolvePaymentRequest, revokeSession, saveGeneratedTask, saveProgress, setPrivacyConsent, setUserRole, upsertErrorBank, upsertWordProgress, mergeProgress, getUserByTelegram, createTelegramUser, logAiRequest, getSub } from './db.js';
 import { config } from './config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from './ai/writing.js';
 import { buildContentPrompt, CONTENT_PROMPT_VERSION, contentRequestSchema, parseContentResponse } from './ai/content.js';
@@ -25,7 +25,7 @@ import { contentSecurityPolicy } from './security/csp.js';
 import { metricsSnapshot, recordDependencyEvent, recordHttpRequest } from './observability/metrics.js';
 import { collectSystemMetrics } from './observability/system-metrics.js';
 import { createAuthentication } from './middleware/authentication.js';
-import { createAccessControl } from './middleware/subscription.js';
+import { createAccessControl, createAnonymousIpLimiter } from './middleware/subscription.js';
 import { createSubscriptionService } from './services/subscription.js';
 import { createTelegramService } from './services/telegram.js';
 import { createUserRoutes } from './routes/users.js';
@@ -97,6 +97,7 @@ app.use((req, res, next) => {
   next();
 });
 app.use('/api', protectCookieRequests(config.appUrl));
+app.use('/api', createAnonymousIpLimiter(config.security.anonymousRequestsPer15Minutes));
 
 app.get('/health/live', (req, res) => {
   res.json({ status: 'ok' });
@@ -149,7 +150,7 @@ const dbApi = {
   revokeSession, exportUserData, deleteUserData, getPrivacyConsent, setPrivacyConsent,
   getProgress, saveProgress, mergeProgress, recordModuleAttempt, upsertWordProgress, upsertErrorBank,
   createWritingAttempt, finishWritingAttempt, createSpeakingAttempt, finishSpeakingAttempt,
-  getGeneratedTask, saveGeneratedTask, logAiRequest,
+  getGeneratedTask, getSharedGeneratedTask, saveGeneratedTask, logAiRequest,
 };
 async function promoteConfiguredAdmin(username, telegramId) {
   if (ADMIN_ID && String(telegramId) === String(ADMIN_ID)) await setUserRole(username, 'admin');

@@ -1,5 +1,20 @@
 import { rateLimit } from 'express-rate-limit';
 
+// Section 10.8: a caller without a session is bounded by address, since there is no user to count
+// against. Authenticated traffic is left to the per-user limiters inside createAccessControl.
+export function createAnonymousIpLimiter(limit = 120) {
+  return rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+    skip: (req) => Boolean(req.user)
+      || Boolean(req.headers.authorization)
+      || /(?:^|;\s*)eb_token=/u.test(req.headers.cookie || ''),
+    message: { error: { code: 'RATE_LIMITED', message: 'Слишком много запросов. Попробуйте позже.' } },
+  });
+}
+
 // Everything that decides whether a paid operation may run: access, consent, budget and rate.
 export function createAccessControl({ ai, privacyPolicyVersion, countAiRequestsSince, getSub, getPrivacyConsent }) {
   function createUserRateLimiter(limit) {

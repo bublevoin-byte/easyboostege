@@ -5,16 +5,41 @@ export function estimateCostMicrousd(usage, prices) {
   return Math.ceil((input + output) / 1_000_000);
 }
 
+// Section 10.7: when a provider is abandoned the log has to say which one and why, otherwise an
+// operator sees only that a call eventually succeeded and never learns the primary is broken.
+function describeSkipped(skipped) {
+  return skipped.length ? skipped.map(({ name, reason }) => `${name}: ${reason}`).join('; ') : null;
+}
+
 export async function runProviderFallback(providers, invoke) {
   if (!providers.length) throw Object.assign(new Error('AI_NOT_CONFIGURED'), { status: 503 });
   let lastError = null;
   let attempts = 0;
+  const skipped = [];
   for (const provider of providers) {
     attempts += 1;
-    try { return { ...await invoke(provider), provider: provider.name, model: provider.model, attempts }; }
-    catch (error) { lastError = error; lastError.provider = provider.name; lastError.model = provider.model; }
+    try {
+      return {
+        ...await invoke(provider),
+        provider: provider.name,
+        model: provider.model,
+        attempts,
+        fallbackReason: describeSkipped(skipped),
+      };
+    } catch (error) {
+      lastError = error;
+      lastError.provider = provider.name;
+      lastError.model = provider.model;
+      skipped.push({ name: provider.name, reason: String(error?.message || 'unknown').slice(0, 120) });
+    }
   }
-  throw Object.assign(new Error('AI_UNAVAILABLE'), { status: 502, cause: lastError, provider: lastError?.provider, model: lastError?.model });
+  throw Object.assign(new Error('AI_UNAVAILABLE'), {
+    status: 502,
+    cause: lastError,
+    provider: lastError?.provider,
+    model: lastError?.model,
+    fallbackReason: describeSkipped(skipped),
+  });
 }
 
 export class TtlCache {

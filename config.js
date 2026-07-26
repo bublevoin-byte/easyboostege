@@ -70,6 +70,10 @@ export const config = Object.freeze({
   monitoring: Object.freeze({
     token: process.env.MONITORING_TOKEN || '',
   }),
+  security: Object.freeze({
+    // Ceiling for callers without a session, counted per address over 15 minutes.
+    anonymousRequestsPer15Minutes: readInteger('ANONYMOUS_REQUESTS_PER_15_MINUTES', 300, { min: 10, max: 5000 }),
+  }),
   database: Object.freeze({
     provider: databaseProvider,
     url: process.env.DATABASE_URL || '',
