@@ -214,7 +214,7 @@ app.use(createUserRoutes({
 app.use(createProgressRoutes({ authentication, db: dbApi }));
 
 const {
-  chatLimiter, writingLimiter, ttsLimiter, sttLimiter, hasAiBudget,
+  createOperationLimiter, ttsLimiter, sttLimiter, hasAiBudget,
   requireAiBudget, requireActiveSubscription, requirePrivacyConsent,
 } = createAccessControl({
   ai: config.ai,
@@ -226,7 +226,7 @@ const {
 
 
 const access = {
-  chatLimiter, writingLimiter, ttsLimiter, sttLimiter, hasAiBudget,
+  createOperationLimiter, ttsLimiter, sttLimiter, hasAiBudget,
   requireAiBudget, requireActiveSubscription, requirePrivacyConsent,
 };
 app.use(createAiRoutes({ authentication, access, db: dbApi }));

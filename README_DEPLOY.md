@@ -37,7 +37,8 @@
 - `services/telegram.js` — транспорт бота: polling, сообщения и inline-кнопки;
 - `routes/users.js` — вход по Telegram, сессия, экспорт и удаление аккаунта, согласия, админ- и internal-метрики;
 - `routes/progress.js` — прогресс, модульное слияние, попытки, словарь и банк ошибок;
-- `routes/ai.js` — серверные ИИ-операции с выбором провайдера, кэшем и учётом стоимости;
+- `ai/operations.js` — реестр ИИ-операций: лимит токенов, таймаут, часовой лимит, правило fallback и версия промпта для каждой;
+- `routes/ai.js` — серверные ИИ-операции с выбором провайдера, кэшем, очередью и учётом стоимости;
 - `routes/media.js` — TTS с дисковым кэшем и STT с ограничениями загрузки.
 
 ## Требования
@@ -172,6 +173,8 @@ docker compose -f compose.production.yml run --rm app npm run db:import-json -- 
 - Запросы без сессии ограничены по адресу: `ANONYMOUS_REQUESTS_PER_15_MINUTES` (по умолчанию 300).
 - CI сканирует на секреты как рабочее дерево, так и полную Git-историю (`npm run security:history`).
 - CSP разрешает только hashed inline scripts и свой origin для сетевых запросов; frames и object/embed запрещены. Inline styles и event handlers временно разрешены до разделения монолитного frontend.
+
+Лимиты каждой ИИ-операции заданы в `ai/operations.js`; переменные окружения работают как потолок и могут только ужесточить их: `AI_REQUESTS_PER_HOUR` ограничивает часовой лимит, `AI_MAX_TIMEOUT_MS` — таймаут. Одновременных обращений к провайдеру не больше `AI_MAX_CONCURRENT_REQUESTS` (по умолчанию 4), остальные ждут очереди и получают `AI_QUEUE_TIMEOUT`, если ожидание затянулось.
 
 Лимиты настраиваются через `SESSION_DAYS`, `TELEGRAM_AUTH_CODE_TTL_MS`, `TELEGRAM_AUTH_STARTS_PER_15_MINUTES`, `TELEGRAM_AUTH_CHECKS_PER_15_MINUTES`, `AI_TIMEOUT_MS`, `AI_REQUESTS_PER_HOUR`, `WRITING_REQUESTS_PER_HOUR`, `TTS_REQUESTS_PER_HOUR` и `STT_REQUESTS_PER_HOUR`.
 

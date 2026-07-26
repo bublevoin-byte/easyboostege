@@ -42,6 +42,42 @@ export async function runProviderFallback(providers, invoke) {
   });
 }
 
+// Section 10.8: a burst of students must not open a burst of provider connections. Calls above the
+// limit wait in order instead of being rejected, and a caller that waits too long gives up so the
+// HTTP request cannot hang forever.
+export function createConcurrencyGate(limit, maxWaitMs = 20_000) {
+  const waiting = [];
+  let active = 0;
+
+  function release() {
+    active -= 1;
+    const next = waiting.shift();
+    if (next) next();
+  }
+
+  async function acquire() {
+    if (active < limit) { active += 1; return; }
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        const index = waiting.indexOf(admit);
+        if (index !== -1) waiting.splice(index, 1);
+        reject(Object.assign(new Error('AI_QUEUE_TIMEOUT'), { code: 'AI_QUEUE_TIMEOUT', status: 503 }));
+      }, maxWaitMs);
+      function admit() { clearTimeout(timer); active += 1; resolve(); }
+      waiting.push(admit);
+    });
+  }
+
+  return {
+    async run(task) {
+      await acquire();
+      try { return await task(); }
+      finally { release(); }
+    },
+    stats() { return { active, waiting: waiting.length, limit }; },
+  };
+}
+
 export class TtlCache {
   constructor(ttlMs, maxEntries = 1000) { this.ttlMs = ttlMs; this.maxEntries = maxEntries; this.values = new Map(); }
   get(key, now = Date.now()) {

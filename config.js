@@ -96,6 +96,10 @@ export const config = Object.freeze({
     groqModel: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
     groqUrl: readProviderUrl('GROQ_API_URL', 'https://api.groq.com/openai/v1/chat/completions'),
     timeoutMs: readInteger('AI_TIMEOUT_MS', 25_000, { min: 1_000, max: 120_000 }),
+    // How many provider calls may be in flight at once; the rest queue (section 10.8).
+    maxConcurrentRequests: readInteger('AI_MAX_CONCURRENT_REQUESTS', 4, { min: 1, max: 64 }),
+    // Hard ceiling over the per-operation timeouts in ai/operations.js.
+    maxTimeoutMs: readInteger('AI_MAX_TIMEOUT_MS', 90_000, { min: 1_000, max: 300_000 }),
     maxRequestsPerHour: readInteger('AI_REQUESTS_PER_HOUR', 60, { min: 1, max: 1000 }),
     maxWritingRequestsPerHour: readInteger('WRITING_REQUESTS_PER_HOUR', 30, { min: 1, max: 500 }),
     maxTtsRequestsPerHour: readInteger('TTS_REQUESTS_PER_HOUR', 300, { min: 1, max: 5000 }),

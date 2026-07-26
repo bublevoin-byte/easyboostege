@@ -41,18 +41,25 @@ export const writingRequestSchema = z.discriminatedUnion('taskType', [
   }).strict(),
 ]);
 
+// Section 10.4: no text field of a review may carry markup. The browser escapes on render, but a
+// review that contains a tag at all means the model ignored its contract, so it is rejected here.
+const reviewText = (max) => z.string().trim().min(1).max(max)
+  .refine((value) => !/[<>]/u.test(value), { message: 'HTML markup is not allowed' });
+const optionalReviewText = (max) => z.string().max(max).default('')
+  .refine((value) => !/[<>]/u.test(value), { message: 'HTML markup is not allowed' });
+
 const reviewCriterionSchema = z.object({
-  name: z.string().trim().min(1).max(120),
+  name: reviewText(120),
   got: z.number().int().min(0),
   max: z.number().int().min(1),
 }).strict();
 
 const reviewErrorSchema = z.object({
-  title: z.string().trim().min(1).max(160),
-  wrong: z.string().max(500).default(''),
-  right: z.string().max(500).default(''),
+  title: reviewText(160),
+  wrong: optionalReviewText(500),
+  right: optionalReviewText(500),
   kind: z.enum(['err', 'warn']),
-  note: z.string().trim().min(1).max(1000),
+  note: reviewText(1000),
 }).strict();
 
 export const writingReviewSchema = z.object({
@@ -60,8 +67,8 @@ export const writingReviewSchema = z.object({
   in_range: z.boolean(),
   overall_got: z.number().int().min(0),
   overall_max: z.number().int().positive(),
-  verdict: z.string().trim().min(1).max(160),
-  sub: z.string().trim().min(1).max(500),
+  verdict: reviewText(160),
+  sub: reviewText(500),
   criteria: z.array(reviewCriterionSchema).min(1).max(6),
   errors: z.array(reviewErrorSchema).max(5),
 }).strict();

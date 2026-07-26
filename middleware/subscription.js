@@ -66,8 +66,21 @@ export function createAccessControl({ ai, privacyPolicyVersion, countAiRequestsS
     };
   }
 
+  // Section 10.2: each operation has its own hourly allowance, so a cheap dictionary lookup is not
+  // rationed like a full essay review. Limiters are built once and reused per operation.
+  function createOperationLimiter(resolveOperation, limitFor) {
+    const limiters = new Map();
+    return (req, res, next) => {
+      const operation = resolveOperation(req);
+      if (!operation) return next();
+      if (!limiters.has(operation)) limiters.set(operation, createUserRateLimiter(limitFor(operation)));
+      return limiters.get(operation)(req, res, next);
+    };
+  }
+
   return {
     createUserRateLimiter,
+    createOperationLimiter,
     hasAiBudget,
     requireAiBudget,
     requireActiveSubscription,

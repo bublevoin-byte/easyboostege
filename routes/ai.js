@@ -8,7 +8,8 @@ import { config } from '../config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from '../ai/writing.js';
 import { buildContentPrompt, CONTENT_PROMPT_VERSION, contentRequestSchema, parseContentResponse } from '../ai/content.js';
 import { buildSpeakingPrompt, buildSpeakingSamplePrompt, parseSpeakingReview, parseSpeakingSample, SPEAKING_PROMPT_VERSION, speakingRequestSchema, speakingSampleRequestSchema } from '../ai/speaking.js';
-import { estimateCostMicrousd, runProviderFallback, TtlCache } from '../ai/provider-control.js';
+import { createConcurrencyGate, estimateCostMicrousd, runProviderFallback, TtlCache } from '../ai/provider-control.js';
+import { operationLimits, providersFor } from '../ai/operations.js';
 import { recordDependencyEvent } from '../observability/metrics.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -20,6 +21,20 @@ function describeFallback(provider, code, error, index, total) {
 }
 
 
+// Section 10.8: bound how many provider calls run at once; the rest wait their turn.
+const gate = createConcurrencyGate(config.ai.maxConcurrentRequests);
+
+// The registry states what an operation needs; the environment states what the deployment allows.
+// The stricter of the two wins, so an operator can still clamp everything down in one place.
+function limitsFor(operation) {
+  const base = operationLimits(operation);
+  return {
+    ...base,
+    requestsPerHour: Math.min(base.requestsPerHour, config.ai.maxRequestsPerHour),
+    timeoutMs: Math.min(base.timeoutMs, config.ai.maxTimeoutMs),
+  };
+}
+
 const XAI_KEY = config.ai.xaiKey;
 const XAI_MODEL = config.ai.xaiModel;
 const GROQ_KEY = config.ai.groqKey;
@@ -29,28 +44,35 @@ const GROQ_MODEL = config.ai.groqModel;
 export function createAiRoutes({ authentication, access, db }) {
   const router = express.Router();
   const { auth } = authentication;
-  const { chatLimiter, writingLimiter, requireAiBudget, requireActiveSubscription, requirePrivacyConsent, hasAiBudget } = access;
+  const { createOperationLimiter, requireAiBudget, requireActiveSubscription, requirePrivacyConsent, hasAiBudget } = access;
+  const perOperation = (resolve) => createOperationLimiter(resolve, (operation) => limitsFor(operation).requestsPerHour);
+  // Each endpoint is rationed by the operation actually requested, not by a shared category quota.
+  const writingLimiter = perOperation((req) => (typeof req.body?.taskType === 'string' ? req.body.taskType : 'writing_37'));
+  const contentLimiter = perOperation((req) => (typeof req.body?.operation === 'string' ? req.body.operation : 'grammar_quiz'));
+  const speakingEvalLimiter = perOperation(() => 'evaluate_speaking');
+  const speakingSampleLimiter = perOperation(() => 'speaking_sample');
   const {
     createWritingAttempt, finishWritingAttempt, createSpeakingAttempt, finishSpeakingAttempt,
     getGeneratedTask, getSharedGeneratedTask, saveGeneratedTask, logAiRequest,
   } = db;
 
-  async function askProvider({ url, key, model }, system, user) {
+  async function askProvider({ url, key, model }, system, user, operation) {
+    const limits = limitsFor(operation);
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), config.ai.timeoutMs);
+    const timeout = setTimeout(() => controller.abort(), limits.timeoutMs);
     let r;
     try {
-      r = await fetch(url, {
+      r = await gate.run(() => fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key },
       signal: controller.signal,
       body: JSON.stringify({
         model,
         temperature: 0.3,
-        max_tokens: 1600,
+        max_tokens: limits.maxTokens,
         messages: [...(system ? [{ role: 'system', content: system }] : []), { role: 'user', content: user }],
       }),
-    });
+    }));
     } finally {
       clearTimeout(timeout);
     }
@@ -70,9 +92,9 @@ export function createAiRoutes({ authentication, access, db }) {
     return providers;
   }
 
-  async function askWithFallback(system, user) {
-    const providers = aiProviders();
-    return runProviderFallback(providers, (provider) => askProvider(provider, system, user));
+  async function askWithFallback(system, user, operation) {
+    const providers = providersFor(operation, aiProviders());
+    return runProviderFallback(providers, (provider) => askProvider(provider, system, user, operation));
   }
 
   function aiUsage(provider, response) {
@@ -111,7 +133,7 @@ export function createAiRoutes({ authentication, access, db }) {
     try {
       attemptId = await createWritingAttempt(req.user, input, WRITING_PROMPT_VERSION);
       const prompt = buildWritingPrompt(input);
-      const result = await askWithFallback(prompt.system, prompt.user);
+      const result = await askWithFallback(prompt.system, prompt.user, input.taskType);
       recordDependencyEvent('ai', 'success');
       if (result.attempts > 1) recordDependencyEvent('ai', 'fallback');
       provider = result.provider;
@@ -169,7 +191,7 @@ export function createAiRoutes({ authentication, access, db }) {
     }
   });
 
-  router.post('/api/v1/ai/generate-content', auth, requireActiveSubscription, requirePrivacyConsent('text_processing'), chatLimiter, serveCachedDictionary, async (req, res) => {
+  router.post('/api/v1/ai/generate-content', auth, requireActiveSubscription, requirePrivacyConsent('text_processing'), contentLimiter, serveCachedDictionary, async (req, res) => {
     const parsed = contentRequestSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректные параметры генерации.' } });
     const input = parsed.data;
@@ -188,7 +210,7 @@ export function createAiRoutes({ authentication, access, db }) {
     for (const [providerIndex, provider] of providers.entries()) {
       let usage = {};
       try {
-        const response = await askProvider(provider, prompt.system, prompt.user);
+        const response = await askProvider(provider, prompt.system, prompt.user, input.operation);
         usage = response;
         const data = parseContentResponse(input.operation, response.text);
         if (input.operation === 'vocabulary_cards' && data.length !== input.count) throw Object.assign(new Error('AI_RESPONSE_INVALID'), { code: 'AI_RESPONSE_INVALID' });
@@ -211,7 +233,7 @@ export function createAiRoutes({ authentication, access, db }) {
     res.status(status).json({ error: { code: lastCode, message: 'Не удалось подготовить корректный учебный материал.' } });
   });
 
-  router.post('/api/v1/ai/evaluate-speaking', auth, requireActiveSubscription, requirePrivacyConsent('voice_processing'), requireAiBudget, chatLimiter, async (req, res) => {
+  router.post('/api/v1/ai/evaluate-speaking', auth, requireActiveSubscription, requirePrivacyConsent('voice_processing'), requireAiBudget, speakingEvalLimiter, async (req, res) => {
     const parsed = speakingRequestSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректные данные устного ответа.' } });
     const input = parsed.data;
@@ -228,7 +250,7 @@ export function createAiRoutes({ authentication, access, db }) {
     for (const [providerIndex, provider] of providers.entries()) {
       let usage = {};
       try {
-        const response = await askProvider(provider, prompt.system, prompt.user);
+        const response = await askProvider(provider, prompt.system, prompt.user, 'evaluate_speaking');
         usage = response;
         const review = parseSpeakingReview(input.taskType, response.text);
         await Promise.all([
@@ -249,20 +271,21 @@ export function createAiRoutes({ authentication, access, db }) {
     res.status(lastCode === 'AI_RESPONSE_INVALID' ? 502 : 503).json({ error: { code: lastCode, message: 'Не удалось корректно оценить устный ответ.' } });
   });
 
-  router.post('/api/v1/ai/generate-speaking-sample', auth, requireActiveSubscription, requirePrivacyConsent('text_processing'), requireAiBudget, chatLimiter, async (req, res) => {
+  router.post('/api/v1/ai/generate-speaking-sample', auth, requireActiveSubscription, requirePrivacyConsent('text_processing'), requireAiBudget, speakingSampleLimiter, async (req, res) => {
     const parsed = speakingSampleRequestSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректные параметры образцового ответа.' } });
     const input = parsed.data;
     const prompt = buildSpeakingSamplePrompt(input);
     const startedAt = Date.now();
-    const providers = aiProviders();
+    // A sample answer is a convenience: its registry entry forbids a second provider.
+    const providers = providersFor('speaking_sample', aiProviders());
     if (!providers.length) return res.status(503).json({ error: { code: 'AI_NOT_CONFIGURED', message: 'ИИ не настроен на сервере.' } });
     let lastCode = 'AI_PROVIDER_UNAVAILABLE';
     let fallbackReason = null;
     for (const [providerIndex, provider] of providers.entries()) {
       let usage = {};
       try {
-        const response = await askProvider(provider, prompt.system, prompt.user);
+        const response = await askProvider(provider, prompt.system, prompt.user, 'speaking_sample');
         usage = response;
         const data = parseSpeakingSample(input.taskType, response.text);
         await logAiRequest({ username: req.user, operation: `speaking_sample_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt, fallbackReason, ...aiUsage(provider, usage) });
