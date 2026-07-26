@@ -87,9 +87,14 @@ function extract(text, year) {
   let assignment = '';
   let work = null;
   let words = null;
+  let page = 1;
+  let assignmentPage = 1;
+  let workPage = null;
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
+    // pdftotext writes a form feed at the start of every new page.
+    page += (line.match(/\f/gu) || []).length;
     const trimmed = line.trim();
 
     // The condition always precedes its work, so it is the reliable signal for which task follows.
@@ -97,14 +102,16 @@ function extract(text, year) {
       if (!candidate.start.test(trimmed)) continue;
       taskNumber = Number(number);
       assignment = readAssignment(lines, index, candidate);
+      assignmentPage = page;
       work = null;
+      workPage = null;
       words = null;
       break;
     }
     if (!taskNumber) continue;
     const task = TASKS[taskNumber];
     const found = line.trim().match(WORK);
-    if (found) { work = found[1]; continue; }
+    if (found) { work = found[1]; workPage = page; continue; }
     const counted = line.match(WORDS_COUNTED);
     if (counted) { words = Number(counted[1]); continue; }
     if (!SUMMARY.test(line)) continue;
@@ -151,11 +158,12 @@ function extract(text, year) {
         criteriaLabels: task.labels,
         reviewer: `fipi-${year}-expert-manual`,
       },
-      source: { manual: `fipi-pch-${year}.pdf`, work: work || null, wordCount: words },
+      source: { manual: `fipi-pch-${year}.pdf`, work: work || null, wordCount: words, page: workPage || assignmentPage, assignmentPage },
       expectedCriticalErrors: [],
       aiRuns: [],
     });
     work = null;
+    workPage = null;
     words = null;
   }
   return { stubs, problems };
