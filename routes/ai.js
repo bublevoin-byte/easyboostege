@@ -8,6 +8,7 @@ import { config } from '../config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from '../ai/writing.js';
 import { buildContentPrompt, CONTENT_PROMPT_VERSION, contentRequestSchema, parseContentResponse } from '../ai/content.js';
 import { buildSpeakingPrompt, buildSpeakingSamplePrompt, parseSpeakingReview, parseSpeakingSample, SPEAKING_PROMPT_VERSION, speakingRequestSchema, speakingSampleRequestSchema } from '../ai/speaking.js';
+import { buildRepairRequest, isFormatFailure } from '../ai/format-repair.js';
 import { createConcurrencyGate, estimateCostMicrousd, runProviderFallback, TtlCache } from '../ai/provider-control.js';
 import { operationLimits, providersFor } from '../ai/operations.js';
 import { recordDependencyEvent } from '../observability/metrics.js';
@@ -101,6 +102,59 @@ export function createAiRoutes({ authentication, access, db }) {
     return { promptTokens: response.promptTokens, completionTokens: response.completionTokens, estimatedCostMicrousd: estimateCostMicrousd(response, provider) };
   }
 
+  /*
+   * Section 10.3: parse the answer; on a contract violation give the model exactly one corrected
+   * attempt, then validate again. The retry goes back to the same provider on purpose — the
+   * complaint is about shape, and the provider that produced the content is the one that can fix
+   * it. Both calls are reported so the budget and the cost metrics stay truthful: a repaired
+   * request really did cost two calls.
+   */
+  async function parseWithOneRepair({ provider, text, parse, system, user, operation }) {
+    try {
+      return { value: parse(text), repair: null };
+    } catch (firstError) {
+      if (!isFormatFailure(firstError)) throw firstError;
+      if (!provider) throw firstError;
+
+      const startedAt = Date.now();
+      let retry;
+      try {
+        retry = await askProvider(provider, system, buildRepairRequest(user, text, firstError), operation);
+      } catch (retryError) {
+        /* The repair call itself failed; the original contract violation is the honest answer. */
+        retryError.repairOf = firstError.message;
+        throw firstError;
+      }
+
+      const value = parse(retry.text);
+      return {
+        value,
+        repair: {
+          provider,
+          usage: retry,
+          durationMs: Date.now() - startedAt,
+          reason: firstError.message,
+        },
+      };
+    }
+  }
+
+  /* The rejected first call is a real event: it consumed tokens and it explains the latency. */
+  function logRepairedAttempt({ username, operation, promptVersion, repair, model }) {
+    return logAiRequest({
+      username,
+      operation,
+      provider: repair.provider.name,
+      model,
+      promptVersion,
+      status: 'failed',
+      durationMs: repair.durationMs,
+      errorCode: repair.reason,
+      fallbackReason: `${repair.provider.name} → format repair requested (${repair.reason})`,
+      ...aiUsage(repair.provider, repair.usage),
+    });
+  }
+
   const dictionaryCache = new TtlCache(config.ai.dictionaryCacheTtlMs, 5000);
   function serveCachedDictionary(req, res, next) {
     if (req.body?.operation !== 'dictionary_lookup') return next();
@@ -140,7 +194,24 @@ export function createAiRoutes({ authentication, access, db }) {
       model = result.model;
       promptTokens = result.promptTokens;
       completionTokens = result.completionTokens;
-      const review = parseAndValidateWritingReview(result.text, input);
+      const outcome = await parseWithOneRepair({
+        provider: aiProviders().find((item) => item.name === result.provider),
+        text: result.text,
+        parse: (text) => parseAndValidateWritingReview(text, input),
+        system: prompt.system,
+        user: prompt.user,
+        operation: input.taskType,
+      });
+      const review = outcome.value;
+      if (outcome.repair) {
+        /* The rejected call is logged separately; the accepted answer came from the repair. */
+        await logRepairedAttempt({
+          username: req.user, operation: input.taskType, promptVersion: WRITING_PROMPT_VERSION, repair: outcome.repair, model,
+        });
+        promptTokens = outcome.repair.usage.promptTokens;
+        completionTokens = outcome.repair.usage.completionTokens;
+      }
+      const accepted = outcome.repair ? outcome.repair.usage : result;
       await finishWritingAttempt(attemptId, { status: 'completed', review, provider });
       await logAiRequest({
         username: req.user,
@@ -151,9 +222,9 @@ export function createAiRoutes({ authentication, access, db }) {
         status: 'completed',
         durationMs: Date.now() - startedAt,
         fallbackReason: result.fallbackReason,
-        promptTokens: result.promptTokens,
-        completionTokens: result.completionTokens,
-        estimatedCostMicrousd: estimateCostMicrousd(result, aiProviders().find((item) => item.name === provider)),
+        promptTokens: accepted.promptTokens,
+        completionTokens: accepted.completionTokens,
+        estimatedCostMicrousd: estimateCostMicrousd(accepted, aiProviders().find((item) => item.name === provider)),
       });
       res.json({ review, provider, attemptId });
     } catch (error) {
@@ -212,8 +283,28 @@ export function createAiRoutes({ authentication, access, db }) {
       try {
         const response = await askProvider(provider, prompt.system, prompt.user, input.operation);
         usage = response;
-        const data = parseContentResponse(input.operation, response.text);
-        if (input.operation === 'vocabulary_cards' && data.length !== input.count) throw Object.assign(new Error('AI_RESPONSE_INVALID'), { code: 'AI_RESPONSE_INVALID' });
+        const outcome = await parseWithOneRepair({
+          provider,
+          text: response.text,
+          parse: (text) => {
+            const candidate = parseContentResponse(input.operation, text);
+            /* A short vocabulary set is a contract violation like any other, so it is repairable. */
+            if (input.operation === 'vocabulary_cards' && candidate.length !== input.count) {
+              throw Object.assign(new Error('AI_RESPONSE_INVALID'), { code: 'AI_RESPONSE_INVALID' });
+            }
+            return candidate;
+          },
+          system: prompt.system,
+          user: prompt.user,
+          operation: input.operation,
+        });
+        const data = outcome.value;
+        if (outcome.repair) {
+          usage = outcome.repair.usage;
+          await logRepairedAttempt({
+            username: req.user, operation: input.operation, promptVersion: CONTENT_PROMPT_VERSION, repair: outcome.repair, model: provider.model,
+          });
+        }
         if (input.operation === 'dictionary_lookup') dictionaryCache.set(input.word.toLocaleLowerCase('en'), data);
         await Promise.all([
           logAiRequest({ username: req.user, operation: input.operation, provider: provider.name, model: provider.model, promptVersion: CONTENT_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt, fallbackReason, ...aiUsage(provider, usage) }),
@@ -252,7 +343,21 @@ export function createAiRoutes({ authentication, access, db }) {
       try {
         const response = await askProvider(provider, prompt.system, prompt.user, 'evaluate_speaking');
         usage = response;
-        const review = parseSpeakingReview(input.taskType, response.text);
+        const outcome = await parseWithOneRepair({
+          provider,
+          text: response.text,
+          parse: (text) => parseSpeakingReview(input.taskType, text),
+          system: prompt.system,
+          user: prompt.user,
+          operation: 'evaluate_speaking',
+        });
+        const review = outcome.value;
+        if (outcome.repair) {
+          usage = outcome.repair.usage;
+          await logRepairedAttempt({
+            username: req.user, operation: `evaluate_speaking_${input.taskType}`, promptVersion: SPEAKING_PROMPT_VERSION, repair: outcome.repair, model: provider.model,
+          });
+        }
         await Promise.all([
           logAiRequest({ username: req.user, operation: `evaluate_speaking_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt, fallbackReason, ...aiUsage(provider, usage) }),
           finishSpeakingAttempt(attemptId, { status: 'completed', review, provider: provider.name }),
