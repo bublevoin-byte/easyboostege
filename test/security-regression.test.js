@@ -8,8 +8,12 @@ import { analyzeInlineHandlers } from '../scripts/check-inline-handlers.js';
 const frontendPath = new URL('../public/index.html', import.meta.url);
 const frontendApiPath = new URL('../public/api.js', import.meta.url);
 const frontendAuthPath = new URL('../public/auth.js', import.meta.url);
-/* Порядок повторяет порядок импортов в public/main.js — он же прежний порядок тегов <script>. */
-const frontendScriptNames = ['main.js', 'auth.js', 'sync.js', 'store.js', 'components.js', 'router.js', 'learning.js', 'modules/words.js', 'modules/grammar.js', 'modules/reading.js', 'modules/listening.js', 'modules/writing.js', 'modules/speaking.js', 'modules/exam.js', 'modules/progress.js', 'modules/profile.js', 'app.js', 'privacy.js', 'tts.js', 'pwa.js'];
+/*
+ * Порядок повторяет порядок импортов в public/main.js — он же прежний порядок тегов <script>.
+ * Чанки экранов идут следом: в точку входа они не подключены, но это тот же код приложения,
+ * и требования к нему не меняются от того, что он приезжает позже.
+ */
+const frontendScriptNames = ['main.js', 'globals.js', 'auth.js', 'sync.js', 'store.js', 'components.js', 'router.js', 'learning.js', 'modules/words.js', 'modules/grammar.js', 'modules/reading.js', 'modules/listening.js', 'modules/writing.js', 'modules/speaking.js', 'modules/exam.js', 'modules/progress.js', 'modules/profile.js', 'app.js', 'screens.js', 'screens/words.js', 'screens/grammar.js', 'screens/reading.js', 'screens/listening.js', 'screens/writing.js', 'screens/speaking.js', 'screens/progress.js', 'screens/profile.js', 'privacy.js', 'tts.js', 'pwa.js'];
 const frontendScriptPaths = frontendScriptNames.map((name) => new URL(`../public/${name}`, import.meta.url));
 const serverPath = new URL('../server.js', import.meta.url);
 const usersRoutePath = new URL('../routes/users.js', import.meta.url);
@@ -86,11 +90,35 @@ test('frontend loads through a single module entry point that keeps the previous
   const entry = await fs.readFile(new URL('../public/main.js', import.meta.url), 'utf8');
   const imported = [...entry.matchAll(/^import\s+(?:[^;']*from\s*)?'\.\/([^']+)'/gmu)].map((match) => match[1]);
   assert.deepEqual(imported, [
-    'api.js', 'auth.js', 'sync.js', 'store.js', 'components.js', 'router.js', 'learning.js',
-    'modules/words.js', 'modules/grammar.js', 'modules/reading.js', 'modules/listening.js',
-    'modules/writing.js', 'modules/speaking.js', 'modules/exam.js', 'modules/progress.js',
-    'modules/profile.js', 'app.js', 'privacy.js', 'tts.js', 'pwa.js',
+    'globals.js', 'api.js', 'auth.js', 'sync.js', 'store.js', 'components.js', 'router.js',
+    'learning.js', 'modules/words.js', 'modules/grammar.js', 'modules/reading.js',
+    'modules/listening.js', 'modules/writing.js', 'modules/speaking.js', 'modules/exam.js',
+    'modules/progress.js', 'modules/profile.js', 'app.js',
+    'screens/words.js', 'screens/grammar.js', 'screens/progress.js',
+    'privacy.js', 'tts.js', 'pwa.js',
   ]);
+
+  /*
+   * Разделение экранов на статические и ленивые — требование, а не вкус. Раздел 6.1 ТЗ обещает без
+   * сети словарные карточки, интервальное повторение, встроенные грамматические тесты и просмотр
+   * сохранённого прогресса, поэтому эти три экрана обязаны быть в оболочке: обещание, отложенное до
+   * первого перехода, ученик, ушедший в офлайн раньше, не получит, а кэш service worker гарантией
+   * быть не может — там, где service worker заблокирован, её просто нет.
+   *
+   * Остальные пять экранов обязаны остаться ленивыми: на них держится бюджет раздела 19.
+   * Ни один список не должен молча съехать в другую сторону, поэтому проверяются оба.
+   */
+  const eagerScreens = imported.filter((name) => name.startsWith('screens/'));
+  assert.deepEqual(eagerScreens, ['screens/words.js', 'screens/grammar.js', 'screens/progress.js']);
+  const loader = await fs.readFile(new URL('../public/screens.js', import.meta.url), 'utf8');
+  const lazy = [...loader.matchAll(/import\(\s*'\.\/(screens\/[^']+)'\s*\)/gu)].map((match) => match[1]);
+  assert.deepEqual(lazy, [
+    'screens/listening.js', 'screens/reading.js',
+    'screens/writing.js', 'screens/speaking.js', 'screens/profile.js',
+  ]);
+  for (const screen of eagerScreens) {
+    assert.ok(!lazy.includes(screen), `${screen} не может быть одновременно в оболочке и чанком`);
+  }
 });
 
 test('every frontend module is syntactically valid as an ES module', async () => {
@@ -311,7 +339,8 @@ test('validated generated content is cached before external AI budget checks', a
 test('audio endpoints enforce upload controls, timeouts and private cached responses', async () => {
   const [media, frontend] = await Promise.all([
     fs.readFile(mediaRoutePath, 'utf8'),
-    fs.readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
+    /* Запись голоса живёт в чанке экрана говорения. */
+    fs.readFile(new URL('../public/screens/speaking.js', import.meta.url), 'utf8'),
   ]);
   assert.match(media, /validateAudioUpload\(req\.headers\['content-type'\], buf, config\.ai\.sttMaxBytes\)/u);
   assert.match(media, /controller\.abort\(\), config\.ai\.sttTimeoutMs/u);

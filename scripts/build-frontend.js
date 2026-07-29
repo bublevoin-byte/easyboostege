@@ -57,6 +57,13 @@ async function verifyModuleGraph(entry) {
       if (!specifier.startsWith('.')) throw new Error(`Frontend module ${name} imports outside the bundle: ${specifier}`);
       queue.push(path.posix.normalize(path.posix.join(path.posix.dirname(name), specifier)));
     }
+    /* Экран приезжает динамическим import(): опечатка в его пути не сломает старт приложения,
+       но ученик увидит пустой переход вместо экрана. Проверяем такие пути наравне со статическими. */
+    for (const statement of source.matchAll(/import\(\s*'([^']+)'\s*\)/gu)) {
+      const specifier = statement[1];
+      if (!specifier.startsWith('.')) throw new Error(`Frontend module ${name} imports outside the bundle: ${specifier}`);
+      queue.push(path.posix.normalize(path.posix.join(path.posix.dirname(name), specifier)));
+    }
   }
   return seen;
 }

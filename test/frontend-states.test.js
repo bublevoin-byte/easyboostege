@@ -3,8 +3,22 @@ import fs from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
 
+/*
+ * Код предметных экранов приезжает отдельными чанками, поэтому «приложение» — это оболочка
+ * public/app.js плюс всё, что лежит в public/screens.
+ */
+async function readApplicationSource() {
+  const screensDirectory = new URL('../public/screens/', import.meta.url);
+  const names = (await fs.readdir(screensDirectory)).filter((name) => name.endsWith('.js')).sort();
+  const sources = await Promise.all([
+    fs.readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
+    ...names.map((name) => fs.readFile(new URL(name, screensDirectory), 'utf8')),
+  ]);
+  return sources.join('\n');
+}
+
 const source = await fs.readFile(new URL('../public/components.js', import.meta.url), 'utf8');
-const appSource = await fs.readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+const appSource = await readApplicationSource();
 const htmlSource = await fs.readFile(new URL('../public/index.html', import.meta.url), 'utf8');
 
 function createComponents() {

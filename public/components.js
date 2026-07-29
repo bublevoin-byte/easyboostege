@@ -129,6 +129,35 @@
     return element.firstElementChild;
   }
 
+  /*
+   * Экран приезжает отдельным чанком, и на медленной сети переход не должен выглядеть как
+   * зависание. Хост состояния живёт над экранами: он переживает переключение и не трогает
+   * разметку самого экрана, поэтому пришедший чанк рисует поверх нетронутой страницы.
+   */
+  function screenStateHost() {
+    let element = byId('screenstate');
+    if (element) return element;
+    element = global.document.createElement('div');
+    element.id = 'screenstate';
+    element.setAttribute('style', 'position:fixed;z-index:400;left:50%;bottom:160px;transform:translateX(-50%);width:min(320px,calc(100vw - 32px));border-radius:18px;box-shadow:0 10px 30px rgba(60,45,30,.22);');
+    global.document.body.appendChild(element);
+    return element;
+  }
+
+  function screenState(options = {}) {
+    const host = screenStateHost();
+    host.style.display = 'block';
+    return renderState(host, options);
+  }
+
+  function clearScreenState() {
+    const host = byId('screenstate');
+    if (!host) return null;
+    host.innerHTML = '';
+    host.style.display = 'none';
+    return host;
+  }
+
   function animate(id, name, duration = '180ms') {
     const element = byId(id);
     if (!element) return null;
@@ -184,6 +213,8 @@
     markAnswer,
     stateMarkup,
     renderState,
+    screenState,
+    clearScreenState,
     bindText,
     animate,
     escapeHtml,

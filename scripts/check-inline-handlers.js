@@ -304,7 +304,51 @@ function exportedNames(source) {
 }
 
 /*
- * main.js — единственное место, где имена появляются на window. Читаем именно его,
+ * Второе место, где имена появляются на window, — загрузчик экранов. Код экрана приезжает
+ * динамическим import() при первом переходе, и его экспорты раскладываются тем же exposeGlobals.
+ * Проверять «что лежит на window при старте» здесь нельзя: при старте там нет ничего от экранов.
+ * Поэтому разбираем экспорты лениво загружаемых модулей статически — по литералам путей в
+ * screens.js, которые видит и сборщик.
+ */
+async function exposedByScreens() {
+  const loaderPath = path.join(publicDirectory, 'screens.js');
+  const loader = await fs.readFile(loaderPath, 'utf8');
+  if (!/(?<!function\s+)exposeGlobals\(/u.test(loader)) {
+    throw new Error('public/screens.js не раскладывает экспорты чанка по window — обработчики экрана останутся неразрешимыми');
+  }
+
+  const registered = new Set();
+  const names = new Set();
+  for (const match of loader.matchAll(/import\(\s*'(\.\/screens\/[^']+)'\s*\)/gu)) {
+    const specifier = match[1].replace(/^\.\//u, '');
+    registered.add(path.posix.basename(specifier));
+    const source = await fs.readFile(path.join(publicDirectory, specifier), 'utf8');
+    for (const name of exportedNames(source)) names.add(name);
+  }
+
+  /*
+   * Экран может приезжать чанком, а может входить в оболочку: три экрана раздела 6.1 ТЗ
+   * («Слова», «Грамматика», «Прогресс») импортирует main.js статически, потому что офлайн они
+   * обещаны и до первого перехода ждать не могут.
+   *
+   * Не подключённый ни там, ни там экран — это код, который никто не загрузит, и его имена не
+   * должны считаться разрешимыми только потому, что файл лежит рядом.
+   */
+  const entry = await fs.readFile(path.join(publicDirectory, 'main.js'), 'utf8');
+  for (const match of entry.matchAll(/from\s*'\.\/(screens\/[^']+)'/gu)) {
+    registered.add(path.posix.basename(match[1]));
+  }
+  for (const file of await fs.readdir(path.join(publicDirectory, 'screens'), { withFileTypes: true })) {
+    if (file.isFile() && file.name.endsWith('.js') && !registered.has(file.name)) {
+      throw new Error(`public/screens/${file.name} не подключён ни к screens.js, ни к main.js — его никто не загрузит`);
+    }
+  }
+
+  return names;
+}
+
+/*
+ * main.js — единственное место, где имена оболочки появляются на window. Читаем именно его,
  * чтобы список разрешимых имён не расходился с тем, что реально выполняется в браузере.
  */
 async function exposedByEntryPoint() {
@@ -332,8 +376,11 @@ async function frontendScripts() {
   for (const entry of (await fs.readdir(publicDirectory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
     if (entry.isFile() && entry.name.endsWith('.js') && entry.name !== 'main.js') files.push(entry.name);
   }
-  for (const entry of (await fs.readdir(path.join(publicDirectory, 'modules'), { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
-    if (entry.isFile() && entry.name.endsWith('.js')) files.push(path.posix.join('modules', entry.name));
+  /* Разметку экранов собирает их собственный код, поэтому чанки разбираются наравне с оболочкой. */
+  for (const directory of ['modules', 'screens']) {
+    for (const entry of (await fs.readdir(path.join(publicDirectory, directory), { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
+      if (entry.isFile() && entry.name.endsWith('.js')) files.push(path.posix.join(directory, entry.name));
+    }
   }
   return files;
 }
@@ -343,7 +390,7 @@ export async function analyzeInlineHandlers() {
   const handlers = handlersFromHtml(html, 'public/index.html');
   const markupHandlerCount = handlers.length;
 
-  const bound = new Set(await exposedByEntryPoint());
+  const bound = new Set([...await exposedByEntryPoint(), ...await exposedByScreens()]);
   for (const file of await frontendScripts()) {
     const source = await fs.readFile(path.join(publicDirectory, file), 'utf8');
     handlers.push(...handlersFromScript(source, `public/${file}`));
