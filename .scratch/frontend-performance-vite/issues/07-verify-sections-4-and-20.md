@@ -1,6 +1,6 @@
 # 07 — Проверить и отметить открытые пункты разделов 4 и 20 ТЗ
 
-Status: ready-for-agent
+Status: done
 Blocked by: —
 Spec: .scratch/frontend-performance-vite/spec.md#5-критерии-приёмки
 
