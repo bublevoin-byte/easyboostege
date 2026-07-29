@@ -103,7 +103,7 @@ async function measureAiLoadingState(browser, baseUrl, jwtSecret) {
       await new Promise((resolve) => setTimeout(resolve, 1_000));
       await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'AI_UNAVAILABLE', message: 'stub' } }) });
     });
-    const probe = page.waitForResponse((response) => response.url().endsWith('/api/me'), { timeout: 15_000 }).catch(() => null);
+    const probe = page.waitForResponse((response) => response.url().endsWith('/api/v1/me'), { timeout: 15_000 }).catch(() => null);
     await page.goto(baseUrl, { waitUntil: 'load' });
     await probe;
     await page.locator('#scr1.on').waitFor({ state: 'visible', timeout: 15_000 });
@@ -182,7 +182,7 @@ async function run() {
 
     // Waiting for the session probe rather than for networkidle: the page pulls fonts from an
     // external host, and an early click would be undone when the probe returns to the login screen.
-    const sessionProbe = page.waitForResponse((response) => response.url().endsWith('/api/me'), { timeout: 15_000 })
+    const sessionProbe = page.waitForResponse((response) => response.url().endsWith('/api/v1/me'), { timeout: 15_000 })
       .catch(() => null);
     await page.goto(baseUrl, { waitUntil: 'load' });
     await sessionProbe;

@@ -24,6 +24,7 @@ import { parseTelegramUpdate } from './validation/telegram-update.js';
 import { contentSecurityPolicy } from './security/csp.js';
 import { metricsSnapshot, recordDependencyEvent, recordHttpRequest } from './observability/metrics.js';
 import { collectSystemMetrics } from './observability/system-metrics.js';
+import { createApiVersionRewrite } from './middleware/api-version.js';
 import { createAuthentication } from './middleware/authentication.js';
 import { createAccessControl, createAnonymousIpLimiter } from './middleware/subscription.js';
 import { createSubscriptionService } from './services/subscription.js';
@@ -98,6 +99,9 @@ app.use((req, res, next) => {
 });
 app.use('/api', protectCookieRequests(config.appUrl));
 app.use('/api', createAnonymousIpLimiter(config.security.anonymousRequestsPer15Minutes));
+/* Runs after the request log, so an unversioned caller stays visible in the logs
+   and metrics under the path it actually used (section 13.1). */
+app.use(createApiVersionRewrite({ enabled: config.api.acceptLegacyPaths }));
 
 app.get('/health/live', (req, res) => {
   res.json({ status: 'ok' });
@@ -231,6 +235,19 @@ const access = {
 };
 app.use(createAiRoutes({ authentication, access, db: dbApi }));
 app.use(createMediaRoutes({ authentication, access }));
+
+/* An unknown API path is an error, not a request for the application shell.
+   Without this the SPA fallback below would answer 200 and a page of HTML, and a
+   client calling a misspelled or retired endpoint would never learn it was wrong. */
+app.use('/api', (req, res) => {
+  res.status(404).json({
+    error: {
+      code: 'UNKNOWN_ENDPOINT',
+      message: 'Неизвестный маршрут API.',
+      requestId: req.requestId,
+    },
+  });
+});
 
 app.get('*', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');

@@ -3,7 +3,7 @@ var TTS_CACHE={},TTS_CURRENT=null,TTS_SEQUENCE=0;
 function fetchTtsAudio(text,voice,slow){
   var key=voice+'|'+(slow?1:0)+'|'+text;
   if(TTS_CACHE[key])return Promise.resolve(TTS_CACHE[key]);
-  return apiGetBlob('/api/tts?text='+encodeURIComponent(text)+'&voice='+voice+(slow?'&slow=1':''))
+  return apiGetBlob('/api/v1/tts?text='+encodeURIComponent(text)+'&voice='+voice+(slow?'&slow=1':''))
     .then(function(blob){if(!blob.size)throw new Error('Empty TTS response');var url=URL.createObjectURL(blob);TTS_CACHE[key]=url;return url})}
 function stopTtsAudio(){TTS_SEQUENCE++;if(TTS_CURRENT){try{TTS_CURRENT.pause()}catch(e){}TTS_CURRENT=null}}
 function lStop(){stopTtsAudio();lStopFallback();try{lPlayBtn('')}catch(e){}}

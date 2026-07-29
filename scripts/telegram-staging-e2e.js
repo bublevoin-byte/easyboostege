@@ -79,7 +79,7 @@ export async function runTelegramStagingE2e(environment = process.env) {
   const ready = await requestJson(new URL('/health/ready', baseUrl));
   if (ready.body?.status !== 'ready') throw new Error('Staging is not ready.');
 
-  const started = await requestJson(new URL('/api/tg/start', baseUrl), {
+  const started = await requestJson(new URL('/api/v1/tg/start', baseUrl), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Origin: origin },
     body: '{}',
@@ -99,7 +99,7 @@ export async function runTelegramStagingE2e(environment = process.env) {
 
   const authenticated = await waitUntil('Telegram confirmation', timeoutMs, async () => {
     const checked = await requestJson(
-      new URL(`/api/tg/check?code=${encodeURIComponent(started.body.code)}`, baseUrl),
+      new URL(`/api/v1/tg/check?code=${encodeURIComponent(started.body.code)}`, baseUrl),
     );
     if (!checked.body?.authenticated) return null;
     const cookie = cookieFrom(checked.response);
@@ -108,17 +108,17 @@ export async function runTelegramStagingE2e(environment = process.env) {
   });
 
   const replay = await requestJson(
-    new URL(`/api/tg/check?code=${encodeURIComponent(started.body.code)}`, baseUrl),
+    new URL(`/api/v1/tg/check?code=${encodeURIComponent(started.body.code)}`, baseUrl),
   );
   if (replay.body?.authenticated || replay.body?.pending !== true) {
     throw new Error('Telegram login code could be consumed more than once.');
   }
 
-  const me = await requestJson(new URL('/api/me', baseUrl), {
+  const me = await requestJson(new URL('/api/v1/me', baseUrl), {
     headers: { Cookie: authenticated.cookie },
   });
   if (!me.body?.username || me.body.username !== authenticated.body.username) {
-    throw new Error('Telegram session was not accepted by /api/me.');
+    throw new Error('Telegram session was not accepted by /api/v1/me.');
   }
 
   console.log(`Login passed for staging user ${me.body.username}.`);
@@ -133,7 +133,7 @@ export async function runTelegramStagingE2e(environment = process.env) {
     console.log('In the staging bot, press “🎁 Попробовать бесплатно месяц”.');
     console.log('Waiting for trial activation...');
     await waitUntil('trial activation', timeoutMs, async () => {
-      const current = await requestJson(new URL('/api/me', baseUrl), {
+      const current = await requestJson(new URL('/api/v1/me', baseUrl), {
         headers: { Cookie: authenticated.cookie },
       });
       return current.body?.active ? current.body : null;

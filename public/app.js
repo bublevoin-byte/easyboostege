@@ -286,7 +286,7 @@ async function startApp(){
   if(DEMO_MODE){tab('scr1');return}
   if(SRV){if(!TOKEN){show('scr5');document.getElementById('tabbar').style.display='none';return}
     var served=null;
-    try{served=await apiGet('/api/progress')}catch(e){served=null}
+    try{served=await apiGet('/api/v1/progress')}catch(e){served=null}
     S=store.restore(currentUser,served,store.sync.pendingModules());
     store.saveLocal(currentUser,S);
     if(!served)try{toast('Нет сети — показан сохранённый прогресс')}catch(e){}}
@@ -359,7 +359,7 @@ function tgPoll(){
 
 /* ===== TELEGRAM login: настоящая ссылка (iOS-safe) ===== */
 try{clearInterval(TG_IV)}catch(e){}
-// Восстановление существующей cookie-сессии выполняется ниже через /api/me.
+// Восстановление существующей cookie-сессии выполняется ниже через /api/v1/me.
 
 
 /* legacy block 2 */
@@ -762,7 +762,7 @@ let WQ=[],WI=0,WDONE=0;
 var W_SYNC={},W_SYNC_T=null;
 function wQueueServer(w){if(typeof SRV==='undefined'||!SRV||!TOKEN)return;var r=wRec(w);if(!r)return;
   W_SYNC[w]={word:w,stage:r.s||0,errorCount:r.e||0,reviewCount:r.n||0,dueAt:r.due||null};clearTimeout(W_SYNC_T);
-  W_SYNC_T=setTimeout(function(){var pending=W_SYNC;W_SYNC={};apiPut('/api/word-progress',{words:Object.keys(pending).map(function(k){return pending[k]})}).catch(function(){Object.keys(pending).forEach(function(k){W_SYNC[k]=pending[k]})})},900)}
+  W_SYNC_T=setTimeout(function(){var pending=W_SYNC;W_SYNC={};apiPut('/api/v1/word-progress',{words:Object.keys(pending).map(function(k){return pending[k]})}).catch(function(){Object.keys(pending).forEach(function(k){W_SYNC[k]=pending[k]})})},900)}
 function wToday0(){var d=new Date();d.setHours(0,0,0,0);return d.getTime()}
 function wRec(w){S.srs=S.srs||{};return S.srs[w]}
 function wSet(w){S.srs=S.srs||{};return S.srs[w]||(S.srs[w]={s:0,e:0,n:0,due:0})}
@@ -1437,8 +1437,8 @@ function gExamCheck(){if(!EX)return;var ex=EX.ex;
       +'</div>'});
   S.exam19=examModule.record(S.exam19,score);
   if(typeof SRV!=='undefined'&&SRV&&TOKEN&&typeof crypto!=='undefined'&&crypto.randomUUID){
-    apiPost('/api/module-attempts',examModule.attempt(crypto.randomUUID(),{module:'exam',activity:'grammar_19_24',score:score,maxScore:6,durationMs:sec*1000})).catch(function(){})}
-  if(bank.length&&typeof SRV!=='undefined'&&SRV&&TOKEN){apiPost('/api/error-bank',{errors:bank}).catch(function(){})}
+    apiPost('/api/v1/module-attempts',examModule.attempt(crypto.randomUUID(),{module:'exam',activity:'grammar_19_24',score:score,maxScore:6,durationMs:sec*1000})).catch(function(){})}
+  if(bank.length&&typeof SRV!=='undefined'&&SRV&&TOKEN){apiPost('/api/v1/error-bank',{errors:bank}).catch(function(){})}
   EX=null;save();gSync();
   var area=document.getElementById('g_area');
   area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;">'+wDeco()
@@ -2670,7 +2670,7 @@ function spEtalon(){if(!SP||SP.t!==1)return;
   try{lPlayRaw(parts)}catch(e){}}
 /* ---- этап 2: расшифровка и оценка ИИ ---- */
 async function spSTT(blob){
-  var j=await apiPostBinary('/api/stt',blob,blob.type||'application/octet-stream');
+  var j=await apiPostBinary('/api/v1/stt',blob,blob.type||'application/octet-stream');
   return j.text||''}
 function spAssignment(t,set){return speakingModule.assignment(t,set)}
 async function spEval(btn){

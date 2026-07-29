@@ -11,27 +11,27 @@
   }
 
   async function login(username, password) {
-    return api.post('/api/login', { username, password });
+    return api.post('/api/v1/login', { username, password });
   }
 
   async function register(username, password) {
-    return api.post('/api/register', { username, password });
+    return api.post('/api/v1/register', { username, password });
   }
 
   async function requestLogout() {
-    return api.post('/api/logout', {});
+    return api.post('/api/v1/logout', {});
   }
 
   async function currentSession() {
-    return api.get('/api/me');
+    return api.get('/api/v1/me');
   }
 
   async function startTelegramLogin() {
-    return api.post('/api/tg/start', {});
+    return api.post('/api/v1/tg/start', {});
   }
 
   async function checkTelegramLogin(code) {
-    return api.get(`/api/tg/check?code=${encodeURIComponent(code)}`);
+    return api.get(`/api/v1/tg/check?code=${encodeURIComponent(code)}`);
   }
 
   clearLegacySecrets();

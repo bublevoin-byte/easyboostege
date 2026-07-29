@@ -251,7 +251,7 @@ async function runE2E() {
     assert.equal(await authenticatedPage.evaluate(() => window.EasyBoostSync.hasPending()), false);
     console.log('e2e: queued progress synchronized');
     await authenticatedPage.reload({ waitUntil: 'networkidle' });
-    const persisted = await authenticatedPage.evaluate(async () => (await fetch('/api/progress')).json());
+    const persisted = await authenticatedPage.evaluate(async () => (await fetch('/api/v1/progress')).json());
     assert.equal(persisted.words.known, 1);
     console.log('e2e: progress persisted after reload');
 

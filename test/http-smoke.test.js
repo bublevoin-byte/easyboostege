@@ -151,8 +151,8 @@ test('application starts and serves health, security headers and PWA assets', { 
     const expiredAuthorization = { Authorization: `Bearer ${jwt.sign({ u: 'expired' }, jwtSecret)}` };
     const paidRequests = [
       fetch(`${baseUrl}/api/v1/ai/generate-content`, { method: 'POST', headers: { ...expiredAuthorization, 'Content-Type': 'application/json' }, body: JSON.stringify({ operation: 'grammar_quiz' }) }),
-      fetch(`${baseUrl}/api/tts?text=hello`, { headers: expiredAuthorization }),
-      fetch(`${baseUrl}/api/stt`, { method: 'POST', headers: { ...expiredAuthorization, 'Content-Type': 'audio/webm' }, body: new Uint8Array([1]) }),
+      fetch(`${baseUrl}/api/v1/tts?text=hello`, { headers: expiredAuthorization }),
+      fetch(`${baseUrl}/api/v1/stt`, { method: 'POST', headers: { ...expiredAuthorization, 'Content-Type': 'audio/webm' }, body: new Uint8Array([1]) }),
     ];
     for (const response of await Promise.all(paidRequests)) {
       assert.equal(response.status, 403);
@@ -163,7 +163,7 @@ test('application starts and serves health, security headers and PWA assets', { 
     const apiDurations = [];
     for (let index = 0; index < 60; index += 1) {
       const startedAt = performance.now();
-      const progressResponse = await fetch(`${baseUrl}/api/progress`, { headers: activeAuthorization });
+      const progressResponse = await fetch(`${baseUrl}/api/v1/progress`, { headers: activeAuthorization });
       apiDurations.push(performance.now() - startedAt);
       assert.equal(progressResponse.status, 200);
       await progressResponse.arrayBuffer();
@@ -190,11 +190,11 @@ test('application starts and serves health, security headers and PWA assets', { 
     assert.equal(rateLimitedAi.status, 429);
     assert.equal((await rateLimitedAi.json()).error.code, 'RATE_LIMITED');
 
-    const consent = await fetch(`${baseUrl}/api/privacy/consent`, { headers: activeAuthorization });
+    const consent = await fetch(`${baseUrl}/api/v1/privacy/consent`, { headers: activeAuthorization });
     assert.equal(consent.status, 200);
     assert.equal((await consent.json()).text_processing, true);
 
-    const revokedConsent = await fetch(`${baseUrl}/api/privacy/consent`, {
+    const revokedConsent = await fetch(`${baseUrl}/api/v1/privacy/consent`, {
       method: 'PUT', headers: activeAuthorization, body: JSON.stringify({ text_processing: false, voice_processing: false }),
     });
     assert.equal(revokedConsent.status, 200);
@@ -205,39 +205,39 @@ test('application starts and serves health, security headers and PWA assets', { 
     assert.equal(blockedByConsent.status, 403);
     assert.equal((await blockedByConsent.json()).error.code, 'PRIVACY_CONSENT_REQUIRED');
 
-    const exported = await fetch(`${baseUrl}/api/account/export`, { headers: activeAuthorization });
+    const exported = await fetch(`${baseUrl}/api/v1/account/export`, { headers: activeAuthorization });
     assert.equal(exported.status, 200);
     assert.match(exported.headers.get('content-disposition') || '', /easyboost-data\.json/u);
     assert.equal((await exported.json()).account.username, 'active');
 
     const moduleAttempt = { id: '58ffc848-99ab-4a9d-99c4-f960558c1e51', module: 'exam', activity: 'grammar_19_24', score: 5, maxScore: 6, durationMs: 45_000 };
-    const recordedAttempt = await fetch(`${baseUrl}/api/module-attempts`, { method: 'POST', headers: activeAuthorization, body: JSON.stringify(moduleAttempt) });
+    const recordedAttempt = await fetch(`${baseUrl}/api/v1/module-attempts`, { method: 'POST', headers: activeAuthorization, body: JSON.stringify(moduleAttempt) });
     assert.equal(recordedAttempt.status, 201);
     assert.equal((await recordedAttempt.json()).created, true);
-    const duplicateAttempt = await fetch(`${baseUrl}/api/module-attempts`, { method: 'POST', headers: activeAuthorization, body: JSON.stringify(moduleAttempt) });
+    const duplicateAttempt = await fetch(`${baseUrl}/api/v1/module-attempts`, { method: 'POST', headers: activeAuthorization, body: JSON.stringify(moduleAttempt) });
     assert.equal(duplicateAttempt.status, 200);
     assert.equal((await duplicateAttempt.json()).created, false);
-    const wordSync = await fetch(`${baseUrl}/api/word-progress`, {
+    const wordSync = await fetch(`${baseUrl}/api/v1/word-progress`, {
       method: 'PUT', headers: activeAuthorization,
       body: JSON.stringify({ words: [{ word: 'achievement', stage: 2, errorCount: 1, reviewCount: 3, dueAt: Date.now() + 60_000 }] }),
     });
     assert.equal(wordSync.status, 200);
     assert.equal((await wordSync.json()).updated, 1);
-    const errorSync = await fetch(`${baseUrl}/api/error-bank`, {
+    const errorSync = await fetch(`${baseUrl}/api/v1/error-bank`, {
       method: 'POST', headers: activeAuthorization,
       body: JSON.stringify({ errors: [{ module: 'grammar', itemKey: 'grammar_19_24:go', errorType: 'incorrect_form', details: { expected: 'went' } }] }),
     });
     assert.equal(errorSync.status, 200);
     assert.equal((await errorSync.json()).updated, 1);
 
-    const studentAdminRequest = await fetch(`${baseUrl}/api/admin/status`, { headers: activeAuthorization });
+    const studentAdminRequest = await fetch(`${baseUrl}/api/v1/admin/status`, { headers: activeAuthorization });
     assert.equal(studentAdminRequest.status, 403);
     assert.equal((await studentAdminRequest.json()).error.code, 'FORBIDDEN');
     const adminAuthorization = { Authorization: `Bearer ${jwt.sign({ u: 'admin' }, jwtSecret)}` };
-    const adminRequest = await fetch(`${baseUrl}/api/admin/status`, { headers: adminAuthorization });
+    const adminRequest = await fetch(`${baseUrl}/api/v1/admin/status`, { headers: adminAuthorization });
     assert.equal(adminRequest.status, 200);
     assert.equal((await adminRequest.json()).role, 'admin');
-    const metricsRequest = await fetch(`${baseUrl}/api/admin/metrics`, { headers: adminAuthorization });
+    const metricsRequest = await fetch(`${baseUrl}/api/v1/admin/metrics`, { headers: adminAuthorization });
     assert.equal(metricsRequest.status, 200);
     assert.match(metricsRequest.headers.get('cache-control') || '', /no-store/u);
     const metrics = await metricsRequest.json();
@@ -258,19 +258,19 @@ test('application starts and serves health, security headers and PWA assets', { 
     assert.equal(typeof (await internalMetrics.json()).http.requests, 'number');
 
     const revocableToken = jwt.sign({ u: 'sessionuser', sid: sessionId }, jwtSecret, { expiresIn: '1h' });
-    const sessionBeforeLogout = await fetch(`${baseUrl}/api/me`, { headers: { Authorization: `Bearer ${revocableToken}` } });
+    const sessionBeforeLogout = await fetch(`${baseUrl}/api/v1/me`, { headers: { Authorization: `Bearer ${revocableToken}` } });
     assert.equal(sessionBeforeLogout.status, 200);
-    const logout = await fetch(`${baseUrl}/api/logout`, {
+    const logout = await fetch(`${baseUrl}/api/v1/logout`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${revocableToken}` },
     });
     assert.equal(logout.status, 200);
     assert.match(logout.headers.get('set-cookie') || '', /Max-Age=0/u);
-    const sessionAfterLogout = await fetch(`${baseUrl}/api/me`, { headers: { Authorization: `Bearer ${revocableToken}` } });
+    const sessionAfterLogout = await fetch(`${baseUrl}/api/v1/me`, { headers: { Authorization: `Bearer ${revocableToken}` } });
     assert.equal(sessionAfterLogout.status, 401);
     assert.equal((await sessionAfterLogout.json()).error.code, 'SESSION_REVOKED');
 
-    const unconfirmedDeletion = await fetch(`${baseUrl}/api/account`, {
+    const unconfirmedDeletion = await fetch(`${baseUrl}/api/v1/account`, {
       method: 'DELETE',
       headers: activeAuthorization,
       body: JSON.stringify({ confirmation: 'NO' }),
@@ -278,14 +278,14 @@ test('application starts and serves health, security headers and PWA assets', { 
     assert.equal(unconfirmedDeletion.status, 400);
     assert.equal((await unconfirmedDeletion.json()).error.code, 'CONFIRMATION_REQUIRED');
 
-    const deletion = await fetch(`${baseUrl}/api/account`, {
+    const deletion = await fetch(`${baseUrl}/api/v1/account`, {
       method: 'DELETE',
       headers: activeAuthorization,
       body: JSON.stringify({ confirmation: 'DELETE' }),
     });
     assert.equal(deletion.status, 200);
     assert.equal((await deletion.json()).ok, true);
-    const deletedSession = await fetch(`${baseUrl}/api/me`, { headers: activeAuthorization });
+    const deletedSession = await fetch(`${baseUrl}/api/v1/me`, { headers: activeAuthorization });
     assert.equal(deletedSession.status, 401);
   } finally {
     await stopProcess(child);

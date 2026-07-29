@@ -48,7 +48,7 @@
     const button = document.getElementById('privacySave'); const status = document.getElementById('privacyStatus');
     button.disabled = true; status.textContent = 'Сохраняем…';
     try {
-      current = await api.put('/api/privacy/consent', { text_processing: document.getElementById('privacyText').checked, voice_processing: document.getElementById('privacyVoice').checked });
+      current = await api.put('/api/v1/privacy/consent', { text_processing: document.getElementById('privacyText').checked, voice_processing: document.getElementById('privacyVoice').checked });
       status.textContent = 'Выбор сохранён.'; setTimeout(closePrivacy, 500); updateProfile();
     } catch (error) { status.textContent = api.messageFor(error); }
     finally { button.disabled = false; }
@@ -59,20 +59,20 @@
   }
   async function loadPrivacy(showIfNew) {
     if (typeof SRV === 'undefined' || !SRV || (typeof DEMO_MODE !== 'undefined' && DEMO_MODE)) return;
-    try { current = await api.get('/api/privacy/consent'); updateProfile(); if (showIfNew && !current.policy_version) openPrivacy(); } catch (_) {}
+    try { current = await api.get('/api/v1/privacy/consent'); updateProfile(); if (showIfNew && !current.policy_version) openPrivacy(); } catch (_) {}
   }
   function addProfileControls() {
     const label = document.getElementById('pf_ai'); const card = label?.closest('div[style*="display:flex"]')?.parentElement;
     if (!card || document.getElementById('privacyProfileButton')) return;
     const button = document.createElement('button'); button.id = 'privacyProfileButton'; button.type = 'button'; button.className = 'privacyProfileBtn'; button.textContent = 'Настройки приватности'; button.onclick = openPrivacy; card.appendChild(button);
-    const exportButton = document.createElement('button'); exportButton.type = 'button'; exportButton.className = 'privacyProfileBtn'; exportButton.textContent = 'Скачать мои данные'; exportButton.onclick = () => { global.location.href = '/api/account/export'; }; card.appendChild(exportButton);
+    const exportButton = document.createElement('button'); exportButton.type = 'button'; exportButton.className = 'privacyProfileBtn'; exportButton.textContent = 'Скачать мои данные'; exportButton.onclick = () => { global.location.href = '/api/v1/account/export'; }; card.appendChild(exportButton);
     const deleteButton = document.createElement('button'); deleteButton.type = 'button'; deleteButton.className = 'privacyProfileBtn'; deleteButton.style.color = '#B42318'; deleteButton.textContent = 'Удалить аккаунт'; deleteButton.onclick = deleteAccount; card.appendChild(deleteButton);
     loadPrivacy(false);
   }
   async function deleteAccount() {
     if (!global.confirm('Аккаунт, прогресс и ответы будут удалены без возможности восстановления. Продолжить?')) return;
     if (global.prompt('Для подтверждения введите DELETE') !== 'DELETE') return;
-    try { await api.remove('/api/account', { confirmation: 'DELETE' }); global.localStorage.removeItem('eb_current'); global.location.reload(); }
+    try { await api.remove('/api/v1/account', { confirmation: 'DELETE' }); global.localStorage.removeItem('eb_current'); global.location.reload(); }
     catch (error) { global.alert(api.messageFor(error)); }
   }
   global.openPrivacy = openPrivacy;

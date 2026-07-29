@@ -8,7 +8,7 @@ servers:
 security:
   - cookieAuth: []
 paths:
-  /api/admin/metrics:
+  /api/v1/admin/metrics:
     get:
       summary: Read process uptime and bounded HTTP metrics
       responses:
@@ -28,7 +28,7 @@ paths:
       responses:
         '200': { description: Ready }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
-  /api/tg/start:
+  /api/v1/tg/start:
     post:
       security: []
       summary: Create a short-lived Telegram authorization code
@@ -36,7 +36,7 @@ paths:
         '200':
           description: Authorization URL and opaque code
         '429': { $ref: '#/components/responses/RateLimited' }
-  /api/tg/check:
+  /api/v1/tg/check:
     get:
       security: []
       summary: Check and consume Telegram authorization code
@@ -48,31 +48,31 @@ paths:
       responses:
         '200': { description: Pending or authenticated state }
         '429': { $ref: '#/components/responses/RateLimited' }
-  /api/me:
+  /api/v1/me:
     get:
       summary: Current user and subscription
       responses:
         '200': { description: User profile }
         '401': { $ref: '#/components/responses/Unauthorized' }
-  /api/admin/status:
+  /api/v1/admin/status:
     get:
       summary: Verify administrator access
       responses:
         '200': { description: Administrator access confirmed }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { description: Authenticated user does not have the admin role }
-  /api/logout:
+  /api/v1/logout:
     post:
       summary: Clear authentication cookie
       responses:
         '200': { description: Logged out }
-  /api/account/export:
+  /api/v1/account/export:
     get:
       summary: Export the authenticated user's account, progress and attempt data
       responses:
         '200': { description: User data export as JSON attachment }
         '401': { $ref: '#/components/responses/Unauthorized' }
-  /api/account:
+  /api/v1/account:
     delete:
       summary: Permanently delete the authenticated user and related data
       requestBody:
@@ -88,7 +88,7 @@ paths:
         '200': { description: Account deleted and cookie cleared }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
-  /api/privacy/consent:
+  /api/v1/privacy/consent:
     get:
       summary: Read the user's text and voice processing choices
       responses:
@@ -110,7 +110,7 @@ paths:
         '200': { description: Updated consent state }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
-  /api/progress:
+  /api/v1/progress:
     get:
       summary: Read complete progress document
       responses:
@@ -125,7 +125,7 @@ paths:
       responses:
         '200': { description: Saved }
         '400': { $ref: '#/components/responses/BadRequest' }
-  /api/progress/modules:
+  /api/v1/progress/modules:
     post:
       summary: Atomically merge changed top-level progress modules
       requestBody:
@@ -140,7 +140,7 @@ paths:
       responses:
         '200': { description: Merged progress }
         '400': { $ref: '#/components/responses/BadRequest' }
-  /api/module-attempts:
+  /api/v1/module-attempts:
     post:
       summary: Record an idempotent learning-module result
       requestBody:
@@ -163,7 +163,7 @@ paths:
         '200': { description: Duplicate event accepted without creating another attempt }
         '400': { $ref: '#/components/responses/BadRequest' }
         '429': { $ref: '#/components/responses/RateLimited' }
-  /api/word-progress:
+  /api/v1/word-progress:
     put:
       summary: Upsert a bounded batch of spaced-repetition word states
       requestBody:
@@ -191,7 +191,7 @@ paths:
         '200': { description: Word states updated }
         '400': { $ref: '#/components/responses/BadRequest' }
         '429': { $ref: '#/components/responses/RateLimited' }
-  /api/error-bank:
+  /api/v1/error-bank:
     post:
       summary: Aggregate a bounded batch of learning errors
       requestBody:
@@ -294,7 +294,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
-  /api/tts:
+  /api/v1/tts:
     get:
       summary: Generate or return cached speech audio
       parameters:
@@ -304,7 +304,7 @@ paths:
       responses:
         '200': { description: MPEG audio, content: { audio/mpeg: {} } }
         '429': { $ref: '#/components/responses/RateLimited' }
-  /api/stt:
+  /api/v1/stt:
     post:
       summary: Transcribe speech recording
       requestBody:

@@ -74,6 +74,13 @@ export const config = Object.freeze({
     // Ceiling for callers without a session, counted per address over 15 minutes.
     anonymousRequestsPer15Minutes: readInteger('ANONYMOUS_REQUESTS_PER_15_MINUTES', 300, { min: 10, max: 5000 }),
   }),
+  api: Object.freeze({
+    // Section 13.1: /api/v1 is the only supported contract.
+    // Unversioned paths are rewritten and logged so a device running a cached
+    // service worker shell survives the deploy. Turn this off once the logs stop
+    // reporting api_legacy_path; keeping it forever would make the version meaningless.
+    acceptLegacyPaths: readBoolean('API_ACCEPT_LEGACY_PATHS', true),
+  }),
   database: Object.freeze({
     provider: databaseProvider,
     url: process.env.DATABASE_URL || '',

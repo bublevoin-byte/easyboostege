@@ -18,7 +18,7 @@
 
   async function sendModules(modules){
     if(!Object.keys(modules).length)return true;
-    try{await EasyBoostApi.post('/api/progress/modules',{modules:modules},true);applyBaseline(modules);clearPending();return true}
+    try{await EasyBoostApi.post('/api/v1/progress/modules',{modules:modules},true);applyBaseline(modules);clearPending();return true}
     catch(error){if(shouldRetry(error))queueModules(modules);throw error}
   }
   async function flush(){

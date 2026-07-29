@@ -18,7 +18,7 @@ export function createUserRoutes({
   const router = express.Router();
   const { auth, requireRole, monitoringAuth, issueToken, readCookie, setAuthCookie, clearAuthCookie } = authentication;
 
-  router.post('/api/tg/start', limiters.telegramStart, async (req, res, next) => {
+  router.post('/api/v1/tg/start', limiters.telegramStart, async (req, res, next) => {
     try {
       if (!telegramEnabled() || !botUsername()) {
         return res.status(503).json({ error: 'Telegram-вход не настроен на сервере' });
@@ -29,7 +29,7 @@ export function createUserRoutes({
     } catch (error) { next(error); }
   });
 
-  router.get('/api/tg/check', limiters.telegramCheck, async (req, res, next) => {
+  router.get('/api/v1/tg/check', limiters.telegramCheck, async (req, res, next) => {
     try {
       const code = String(req.query.code || '');
       const confirmed = code && await db.consumeTelegramAuthCode(code);
@@ -42,7 +42,7 @@ export function createUserRoutes({
     } catch (error) { next(error); }
   });
 
-  router.get('/api/me', auth, async (req, res, next) => {
+  router.get('/api/v1/me', auth, async (req, res, next) => {
     try {
       const token = req.sessionId ? req.authToken : await issueToken(req.user);
       setAuthCookie(req, res, token);
@@ -50,11 +50,11 @@ export function createUserRoutes({
     } catch (error) { next(error); }
   });
 
-  router.get('/api/admin/status', auth, requireRole('admin'), (req, res) => {
+  router.get('/api/v1/admin/status', auth, requireRole('admin'), (req, res) => {
     res.json({ status: 'ok', role: req.role });
   });
 
-  router.get('/api/admin/metrics', auth, requireRole('admin'), async (req, res, next) => {
+  router.get('/api/v1/admin/metrics', auth, requireRole('admin'), async (req, res, next) => {
     try {
       res.setHeader('Cache-Control', 'no-store');
       res.json(await buildMonitoringSnapshot());
@@ -69,7 +69,7 @@ export function createUserRoutes({
   });
 
   // Logging out revokes the session server-side, so a stolen cookie stops working too.
-  router.post('/api/logout', async (req, res, next) => {
+  router.post('/api/v1/logout', async (req, res, next) => {
     try {
       const token = readCookie(req, 'eb_token') || String(req.headers.authorization || '').replace(/^Bearer\s+/u, '');
       if (token) {
@@ -83,7 +83,7 @@ export function createUserRoutes({
     } catch (error) { next(error); }
   });
 
-  router.get('/api/account/export', auth, async (req, res, next) => {
+  router.get('/api/v1/account/export', auth, async (req, res, next) => {
     try {
       const data = await db.exportUserData(req.user);
       res.setHeader('Cache-Control', 'no-store');
@@ -92,7 +92,7 @@ export function createUserRoutes({
     } catch (error) { next(error); }
   });
 
-  router.delete('/api/account', auth, async (req, res, next) => {
+  router.delete('/api/v1/account', auth, async (req, res, next) => {
     try {
       if (req.body?.confirmation !== 'DELETE') {
         return res.status(400).json({ error: { code: 'CONFIRMATION_REQUIRED', message: 'Подтвердите удаление аккаунта.' } });
@@ -103,12 +103,12 @@ export function createUserRoutes({
     } catch (error) { next(error); }
   });
 
-  router.get('/api/privacy/consent', auth, async (req, res, next) => {
+  router.get('/api/v1/privacy/consent', auth, async (req, res, next) => {
     try { res.json({ ...(await db.getPrivacyConsent(req.user)), current_policy_version: privacyPolicyVersion }); }
     catch (error) { next(error); }
   });
 
-  router.put('/api/privacy/consent', auth, async (req, res, next) => {
+  router.put('/api/v1/privacy/consent', auth, async (req, res, next) => {
     try {
       const body = req.body;
       if (!body || typeof body !== 'object' || typeof body.text_processing !== 'boolean' || typeof body.voice_processing !== 'boolean') {

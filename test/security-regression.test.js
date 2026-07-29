@@ -128,7 +128,7 @@ test('authentication endpoints are isolated behind the auth module', async () =>
     fs.readFile(frontendAuthPath, 'utf8'),
     fs.readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
   ]);
-  for (const endpoint of ['/api/login', '/api/register', '/api/logout', '/api/me', '/api/tg/start', '/api/tg/check']) {
+  for (const endpoint of ['/api/v1/login', '/api/v1/register', '/api/v1/logout', '/api/v1/me', '/api/v1/tg/start', '/api/v1/tg/check']) {
     assert.match(auth, new RegExp(endpoint.replaceAll('/', '\\/'), 'u'));
     assert.doesNotMatch(app, new RegExp(`(?:apiGet|apiPost)\\(['"]${endpoint.replaceAll('/', '\\/')}`, 'u'));
   }
@@ -184,7 +184,7 @@ test('progress is snapshotted locally so an offline start is not a blank slate',
   ]);
   // Every save writes the snapshot, in server mode too — not only the sync queue.
   assert.match(app, /store\.saveLocal\(currentUser,S\);\s*\n\s*if\(SRV\)\{clearTimeout/u);
-  // A failed /api/progress must never reset the visible state to defaults.
+  // A failed /api/v1/progress must never reset the visible state to defaults.
   assert.doesNotMatch(app, /catch\(e\)\{S=fillDefaults\(\{\}\)\}/u);
   assert.match(app, /S=store\.restore\(currentUser,served,store\.sync\.pendingModules\(\)\)/u);
   assert.match(store, /function restore\(username, serverState, pendingModules\)/u);
@@ -212,7 +212,7 @@ test('progress sync queues the latest state and retries when connectivity return
   assert.match(sync, /easyboost_pending_modules_v2/u);
   assert.match(sync, /navigator\.onLine===false/u);
   assert.match(sync, /window\.addEventListener\('online',flush\)/u);
-  assert.match(sync, /EasyBoostApi\.post\('\/api\/progress\/modules',\{modules:modules\},true\)/u);
+  assert.match(sync, /EasyBoostApi\.post\('\/api\/v1\/progress\/modules',\{modules:modules\},true\)/u);
   assert.match(sync, /error\.status>=500/u);
   assert.match(sync, /pending&&pending\.modules/u);
   assert.doesNotMatch(sync, /push\(/u);
@@ -223,7 +223,7 @@ test('module progress endpoint merges validated keys instead of replacing the do
     fs.readFile(progressRoutePath, 'utf8'),
     fs.readFile(new URL('../storage/postgres-repository.js', import.meta.url), 'utf8'),
   ]);
-  assert.match(progress, /router\.post\('\/api\/progress\/modules', auth/u);
+  assert.match(progress, /router\.post\('\/api\/v1\/progress\/modules', auth/u);
   assert.match(progress, /validateProgress\(modules\)/u);
   assert.match(postgres, /COALESCE\(user_progress\.data, '\{\}'::jsonb\) \|\| EXCLUDED\.data/u);
 });
@@ -284,7 +284,7 @@ test('production documentation covers local setup, API, database and operations'
   const paths = ['../README.md', '../docs/openapi.yaml', '../docs/DATABASE_SCHEMA.md', '../docs/AI_OPERATIONS.md', '../docs/KEY_ROTATION.md', '../docs/SUPPORT.md', '../docs/KNOWN_LIMITATIONS.md', '../docs/TELEGRAM_ADMIN.md', '../docs/AI_QUALITY.md'];
   const documents = await Promise.all(paths.map((path) => fs.readFile(new URL(path, import.meta.url), 'utf8')));
   assert.match(documents[0], /npm ci[\s\S]*npm run check[\s\S]*npm test/u);
-  for (const route of ['/health/live', '/health/ready', '/api/tg/start', '/api/me', '/api/account/export', '/api/account', '/api/privacy/consent', '/api/progress/modules', '/api/module-attempts', '/api/word-progress', '/api/error-bank', '/api/v1/ai/generate-content', '/api/v1/ai/evaluate-writing', '/api/v1/ai/evaluate-speaking', '/api/v1/ai/generate-speaking-sample', '/api/tts', '/api/stt']) {
+  for (const route of ['/health/live', '/health/ready', '/api/v1/tg/start', '/api/v1/me', '/api/v1/account/export', '/api/v1/account', '/api/v1/privacy/consent', '/api/v1/progress/modules', '/api/v1/module-attempts', '/api/v1/word-progress', '/api/v1/error-bank', '/api/v1/ai/generate-content', '/api/v1/ai/evaluate-writing', '/api/v1/ai/evaluate-speaking', '/api/v1/ai/generate-speaking-sample', '/api/v1/tts', '/api/v1/stt']) {
     assert.match(documents[1], new RegExp(route.replaceAll('/', '\\/'), 'u'));
   }
   assert.match(documents[2], /user_progress/u);
@@ -304,7 +304,7 @@ test('privacy UI separates text and voice consent and explains external processi
   assert.match(script, /id="privacyText" type="checkbox"/u);
   assert.match(script, /id="privacyVoice" type="checkbox"/u);
   assert.match(script, /xAI[\s\S]*Groq/u);
-  assert.match(script, /\/api\/privacy\/consent/u);
+  assert.match(script, /\/api\/v1\/privacy\/consent/u);
   assert.match(policy, /не является официальн/u);
   assert.match(policy, /Сроки хранения/u);
 });

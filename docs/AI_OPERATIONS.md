@@ -17,8 +17,8 @@
 | Оценка устного ответа | `/api/v1/ai/evaluate-speaking` | отдельная схема задания и ответа, серверная проверка максимумов и суммы критериев | повтор оценки/встроенная практика |
 | Образец устного ответа | `/api/v1/ai/generate-speaking-sample` | типизированное задание, строгий JSON, контроль 4 вопросов/объёма монолога | встроенные подсказки |
 | Экзаменационная грамматика, чтение и аудирование | `/api/v1/ai/generate-content` | восемь отдельных операций со строгими структурными проверками | встроенные банки заданий |
-| TTS | `/api/tts` | auth, subscription, rate limit, voice allowlist | Web Speech API |
-| STT | `/api/stt` | auth, subscription, rate limit, 20 MB body limit | повтор записи |
+| TTS | `/api/v1/tts` | auth, subscription, rate limit, voice allowlist | Web Speech API |
+| STT | `/api/v1/stt` | auth, subscription, rate limit, 20 MB body limit | повтор записи |
 
 Версия prompt для письменной проверки задаётся `WRITING_PROMPT_VERSION` в `ai/writing.js`, для устной части — `SPEAKING_PROMPT_VERSION`, для генерации контента — `CONTENT_PROMPT_VERSION`. Версия вместе с операцией, провайдером, моделью, длительностью и результатом записывается в `ai_requests`. Универсального AI proxy в production API нет.
 

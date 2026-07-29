@@ -61,7 +61,7 @@ export function createMediaRoutes({ authentication, access }) {
       stream.on('error', reject);
     }), config.ai.ttsTimeoutMs, 'TTS_TIMEOUT');
   }
-  router.get('/api/tts', auth, requireActiveSubscription, ttsLimiter, async (req, res) => {
+  router.get('/api/v1/tts', auth, requireActiveSubscription, ttsLimiter, async (req, res) => {
     const text = String(req.query.text || '').slice(0, 500).trim();
     if (!text) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Не указан текст для озвучивания.' } });
     const voice = TTS_VOICES.has(req.query.voice) ? req.query.voice : 'en-GB-SoniaNeural';
@@ -97,7 +97,7 @@ export function createMediaRoutes({ authentication, access }) {
   });
 
   // ---- расшифровка речи (Grok STT) для оценки говорения ----
-  router.post('/api/stt', auth, requireActiveSubscription, requirePrivacyConsent('voice_processing'), sttLimiter, express.raw({ type: () => true, limit: config.ai.sttMaxBytes }), async (req, res) => {
+  router.post('/api/v1/stt', auth, requireActiveSubscription, requirePrivacyConsent('voice_processing'), sttLimiter, express.raw({ type: () => true, limit: config.ai.sttMaxBytes }), async (req, res) => {
     try {
       if (!config.ai.xaiEnabled || !XAI_KEY) {
         recordDependencyEvent('stt', 'error');

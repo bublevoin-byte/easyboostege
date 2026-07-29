@@ -24,11 +24,11 @@ export function createProgressRoutes({ authentication, db }) {
   const router = express.Router();
   const { auth } = authentication;
 
-  router.get('/api/progress', auth, async (req, res, next) => {
+  router.get('/api/v1/progress', auth, async (req, res, next) => {
     try { res.json(await db.getProgress(req.user)); } catch (error) { next(error); }
   });
 
-  router.post('/api/progress', auth, async (req, res, next) => {
+  router.post('/api/v1/progress', auth, async (req, res, next) => {
     try {
       const parsed = validateProgress(req.body);
       if (!parsed.ok) {
@@ -40,7 +40,7 @@ export function createProgressRoutes({ authentication, db }) {
   });
 
   // Module-level merge: a partial update must never replace the whole progress object.
-  router.post('/api/progress/modules', auth, async (req, res, next) => {
+  router.post('/api/v1/progress/modules', auth, async (req, res, next) => {
     try {
       const modules = req.body?.modules;
       const parsed = validateProgress(modules);
@@ -53,7 +53,7 @@ export function createProgressRoutes({ authentication, db }) {
     } catch (error) { next(error); }
   });
 
-  router.post('/api/module-attempts', auth, perUserLimiter(240, 'Слишком много результатов за короткое время.'), async (req, res, next) => {
+  router.post('/api/v1/module-attempts', auth, perUserLimiter(240, 'Слишком много результатов за короткое время.'), async (req, res, next) => {
     try {
       const parsed = moduleAttemptSchema.safeParse(req.body);
       if (!parsed.success) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректные данные попытки.' } });
@@ -62,7 +62,7 @@ export function createProgressRoutes({ authentication, db }) {
     } catch (error) { next(error); }
   });
 
-  router.put('/api/word-progress', auth, perUserLimiter(120, 'Слишком много обновлений словаря.'), async (req, res, next) => {
+  router.put('/api/v1/word-progress', auth, perUserLimiter(120, 'Слишком много обновлений словаря.'), async (req, res, next) => {
     try {
       const parsed = wordProgressBatchSchema.safeParse(req.body);
       if (!parsed.success) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректный прогресс слов.' } });
@@ -70,7 +70,7 @@ export function createProgressRoutes({ authentication, db }) {
     } catch (error) { next(error); }
   });
 
-  router.post('/api/error-bank', auth, perUserLimiter(120, 'Слишком много обновлений банка ошибок.'), async (req, res, next) => {
+  router.post('/api/v1/error-bank', auth, perUserLimiter(120, 'Слишком много обновлений банка ошибок.'), async (req, res, next) => {
     try {
       const parsed = errorBankBatchSchema.safeParse(req.body);
       if (!parsed.success) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректные данные банка ошибок.' } });
