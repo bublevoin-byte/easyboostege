@@ -1,5 +1,5 @@
 ﻿/* legacy block 1 */
-import {back,cur,nav,registerRouteHook,show,tab} from './router.js';
+import {back,cur,nav,prepareScreen,registerRouteHook,show,tab} from './router.js';
 import {configureTts,lStop} from './tts.js';
 /*
  * Оболочка не знает, что умеет экран: она знает только, что его код приезжает отдельным чанком.
@@ -263,6 +263,12 @@ registerProfileHook(function(){var ai=document.getElementById('pf_ai');if(ai){ai
 
 /* финальная инициализация под серверный режим */
 if(SRV){ if(TOKEN){ startApp(); } else { var tb=document.getElementById('tabbar'); if(tb)tb.style.display='none'; show('scr5'); } }
+/*
+ * С экрана входа ученик уходит только на «Главную» — и входом, и «Попробовать демо». Готовим её
+ * заранее: первая отрисовка этого экрана стоит около двухсот миллисекунд, и внутри клика она
+ * целиком попадает в окно взаимодействия. См. prepareScreen в router.js.
+ */
+prepareScreen('scr1');
 
 
 /* ===== TELEGRAM LOGIN v2 (mobile-safe) ===== */
