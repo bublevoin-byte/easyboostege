@@ -1,6 +1,6 @@
 # 01 — Зафиксировать базовую линию производительности
 
-Status: ready-for-agent
+Status: done
 Blocked by: —
 Spec: .scratch/frontend-performance-vite/spec.md#2-измеренная-базовая-линия
 
