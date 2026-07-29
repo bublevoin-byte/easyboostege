@@ -14,8 +14,19 @@ import { chromium } from 'playwright';
 const projectDirectory = fileURLToPath(new URL('..', import.meta.url));
 const serverPath = fileURLToPath(new URL('../server.js', import.meta.url));
 
-// Thresholds straight from section 19.
-const BUDGET = { lcpMs: 2500, cls: 0.1, inpMs: 200 };
+// Thresholds straight from section 19; the first-load weight comes from the performance spec.
+const BUDGET = { lcpMs: 2500, cls: 0.1, inpMs: 200, firstLoadKb: 150 };
+
+// Раздел 4.2 спеки: код этих экранов приезжает по требованию, при первом переходе на него, и не
+// имеет права участвовать в первой загрузке — на этом держится её вес.
+const LAZY_SCREENS = [
+  'screens/listening.js', 'screens/reading.js',
+  'screens/writing.js', 'screens/speaking.js', 'screens/profile.js',
+];
+// А эти обязаны приехать сразу: раздел 6.1 ТЗ обещает словарные карточки, интервальное повторение,
+// встроенные грамматические тесты и просмотр сохранённого прогресса без сети. Ученик может уйти в
+// офлайн, ни разу их не открыв. Проверяются оба списка, чтобы ни один не съехал молча в свою сторону.
+const SHELL_SCREENS = ['screens/words.js', 'screens/grammar.js', 'screens/progress.js'];
 
 async function findAvailablePort() {
   const listener = net.createServer();
@@ -91,6 +102,47 @@ const COLLECTOR = `
   });
 `;
 
+// Вес первой загрузки снимается на отдельном контексте и до любой навигации по экранам: суммировать
+// ресурсы после обхода экранов нельзя — в сумму попадут чанки, которые ученик как раз и не платит
+// при старте.
+//
+// Service worker выключен намеренно, и это не осторожность, а условие измеримости: он забирает
+// себе все запросы страницы, и тогда `transferSize` равен нулю, `deliveryType` — `cache`, а
+// `encodedBodySize` показывает несжатый размер. Байт по сети в таком замере нет вообще, а запрос
+// чанка в нём не отличить от попадания в кэш.
+async function measureFirstLoad(browser, baseUrl) {
+  const context = await browser.newContext({ serviceWorkers: 'block' });
+  try {
+    const page = await context.newPage();
+    const requestedScreens = [];
+    page.on('request', (request) => {
+      const match = /\/(screens\/[^/?#]+\.js)(?:[?#]|$)/u.exec(request.url());
+      if (match) requestedScreens.push(match[1]);
+    });
+    const sessionProbe = page.waitForResponse((response) => response.url().endsWith('/api/v1/me'), { timeout: 15_000 })
+      .catch(() => null);
+    await page.goto(baseUrl, { waitUntil: 'load' });
+    await sessionProbe;
+    // Оболочка ставит подготовку главного экрана после первого кадра; ждём дольше этого, чтобы
+    // запоздавший запрос чанка попал в замер, а не остался за его границей.
+    await page.waitForTimeout(1_000);
+
+    // encodedBodySize — это байты по сети, со сжатием, а не размер файла на диске. Считаются
+    // только свои скрипты: у сторонних источников это поле закрыто и всегда равно нулю.
+    const scripts = await page.evaluate((origin) => performance.getEntriesByType('resource')
+      .filter((entry) => entry.name.startsWith(origin) && entry.name.endsWith('.js'))
+      .map((entry) => ({ encoded: entry.encodedBodySize || 0, decoded: entry.decodedBodySize || 0 })), baseUrl);
+    return {
+      bytes: scripts.reduce((total, script) => total + script.encoded, 0),
+      unpackedBytes: scripts.reduce((total, script) => total + script.decoded, 0),
+      files: scripts.length,
+      requestedScreens,
+    };
+  } finally {
+    await context.close();
+  }
+}
+
 // Opens a real session, makes the review call take a second, and times how long the interface
 // waits before telling the student that something is happening.
 async function measureAiLoadingState(browser, baseUrl, jwtSecret) {
@@ -126,9 +178,9 @@ async function measureAiLoadingState(browser, baseUrl, jwtSecret) {
 // the state of the others.
 const exceeded = [];
 
-function report(name, value, budget, unit) {
+function report(name, value, budget, unit, digits = unit === 'ms' ? 0 : 3) {
   const within = value <= budget;
-  const shown = `${value.toFixed(unit === 'ms' ? 0 : 3)}${unit}`;
+  const shown = `${value.toFixed(digits)}${unit}`;
   console.log(`performance: ${name} = ${shown} (бюджет ${budget}${unit}) — ${within ? 'ok' : 'ПРЕВЫШЕНО'}`);
   if (!within) exceeded.push(`${name}: ${shown} при бюджете ${budget}${unit}`);
 }
@@ -180,6 +232,9 @@ async function run() {
     child.stderr.on('data', (chunk) => output.push(chunk.toString()));
     await waitForReady(baseUrl, child, output);
 
+    // Первым делом — вес первой загрузки, на чистом контексте, пока ни один экран не открывали.
+    const firstLoad = await measureFirstLoad(browser, baseUrl);
+
     // Waiting for the session probe rather than for networkidle: the page pulls fonts from an
     // external host, and an early click would be undone when the probe returns to the login screen.
     const sessionProbe = page.waitForResponse((response) => response.url().endsWith('/api/v1/me'), { timeout: 15_000 })
@@ -216,7 +271,11 @@ async function run() {
     report('LCP', vitals.lcp, BUDGET.lcpMs, 'ms');
     report('CLS', vitals.cls, BUDGET.cls, '');
     report('INP', inp, BUDGET.inpMs, 'ms');
-    console.log(`performance: JavaScript по сети ${(vitals.scriptBytes / 1024).toFixed(0)} КБ, взаимодействий измерено ${vitals.interactions.length}`);
+    report('JavaScript первой загрузки', firstLoad.bytes / 1024, BUDGET.firstLoadKb, ' КБ', 1);
+    console.log(`performance: первая загрузка — ${firstLoad.files} файлов, ${(firstLoad.unpackedBytes / 1024).toFixed(0)} КБ без сжатия, экраны: ${firstLoad.requestedScreens.join(', ') || 'ни одного'}`);
+    // Этот проход идёт с работающим service worker, поэтому число здесь — несжатый объём всего
+    // разобранного JavaScript, а не байты по сети. Оно сравнимо с базовой линией, снятой так же.
+    console.log(`performance: JavaScript разобрано к концу обхода ${(vitals.scriptBytes / 1024).toFixed(0)} КБ без сжатия, взаимодействий измерено ${vitals.interactions.length}`);
 
     console.log(`performance: взаимодействия по убыванию, мс: ${vitals.interactions.map((value) => value.toFixed(0)).join(', ')}`);
 
@@ -229,6 +288,18 @@ async function run() {
     // A metric that was not collected is a broken measurement, not a pass.
     assert.ok(vitals.lcp > 0, 'LCP не измерен — наблюдатель не получил ни одной записи');
     assert.ok(vitals.interactions.length > 0, 'ни одного взаимодействия не измерено — проверьте сценарий');
+    assert.ok(firstLoad.bytes > 0, 'первая загрузка не измерена — ни одного своего скрипта в записях');
+
+    // Состав первой загрузки — правило, а не наблюдение. Лишний экран в ней возвращает вес,
+    // пропавший — офлайн-обещание раздела 6.1.
+    assert.deepEqual(
+      LAZY_SCREENS.filter((screen) => firstLoad.requestedScreens.includes(screen)), [],
+      'при первой загрузке запрошен ленивый экран: его код должен приезжать при первом переходе',
+    );
+    assert.deepEqual(
+      SHELL_SCREENS.filter((screen) => !firstLoad.requestedScreens.includes(screen)), [],
+      'экран раздела 6.1 не приехал при первой загрузке: без сети он должен работать сразу',
+    );
 
     if (exceeded.length) {
       throw new Error(`Бюджеты раздела 19 превышены:\n  - ${exceeded.join('\n  - ')}`);
