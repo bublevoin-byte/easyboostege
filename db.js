@@ -33,6 +33,12 @@ export const finishSpeakingAttempt = (...args) => repository.finishSpeakingAttem
 export const getGeneratedTask = (...args) => repository.getGeneratedTask(...args);
 export const getSharedGeneratedTask = (...args) => repository.getSharedGeneratedTask(...args);
 export const saveGeneratedTask = (...args) => repository.saveGeneratedTask(...args);
+export const upsertBankTask = (...args) => repository.upsertBankTask(...args);
+export const getBankTask = (...args) => repository.getBankTask(...args);
+export const getBankTaskByExternalId = (...args) => repository.getBankTaskByExternalId(...args);
+export const claimUnseenBankTask = (...args) => repository.claimUnseenBankTask(...args);
+export const recordTaskDelivery = (...args) => repository.recordTaskDelivery(...args);
+export const listBankTaskContents = (...args) => repository.listBankTaskContents(...args);
 export const recordModuleAttempt = (...args) => repository.recordModuleAttempt(...args);
 export const upsertWordProgress = (...args) => repository.upsertWordProgress(...args);
 export const upsertErrorBank = (...args) => repository.upsertErrorBank(...args);

@@ -283,6 +283,9 @@ function save(){
   store.saveLocal(currentUser,S);
   if(SRV){clearTimeout(_saveT);_saveT=setTimeout(()=>{store.sync.saveProgress(S)},600)}}
 async function startApp(){
+  /* Встроенные задания нужны до первого экрана письма и должны быть доступны офлайн,
+     поэтому банк загружается из закэшированного /task-bank.json на старте. */
+  await loadTaskBank();
   if(DEMO_MODE){tab('scr1');return}
   if(SRV){if(!TOKEN){show('scr5');document.getElementById('tabbar').style.display='none';return}
     var served=null;
@@ -2325,17 +2328,23 @@ registerStartHook(function(){return lSync()});
 
 /* legacy block 10 */
 /* ===== WRITING v2: банк тем, стимулы как на ЕГЭ, шпаргалки, черновики, история ===== */
-const W37=[
-{from:'Emily',stim:'…We moved to a new flat last month, and I had to change my school too. Have you ever changed schools? How do you usually make new friends? What do you like most about your school?… Oh, my mum is calling me. Write back soon!',ask:'her new flat'},
-{from:'Ben',stim:'…Last weekend I tried cooking for the first time and made pasta for the whole family! What food can you cook? Do you help your parents about the house? What do you usually do at weekends?… Sorry, I have to walk my dog now.',ask:'his dog'},
-{from:'Kate',stim:'…I have just come back from my first real football match — our school team won! Do you do any sport? How much free time do you have on school days? Where do you like spending your holidays?… Got to go, my dad needs the laptop.',ask:'the football match'}
-];
-const W38=[
-{topic:'Why teenagers do sport',rows:[['To keep fit',45],['To meet friends',25],['To achieve results and win',18],['Other reasons',12]]},
-{topic:'How teenagers spend their free time',rows:[['Playing computer games',40],['Doing sport',25],['Reading books and blogs',15],['Creative hobbies',12],['Other activities',8]]},
-{topic:'The most important school subjects according to students',rows:[['Maths',35],['Foreign languages',30],['Science',20],['Literature',10],['Other subjects',5]]}
-];
+/*
+ * Section 10.1: the built-in tasks come from the shared /task-bank.json, the same file the server
+ * reads. One source means the identifier the client sends always means something on the server.
+ * The file is part of the offline shell, so section 6.1 keeps working without a network.
+ */
+var W37=[],W38=[];
+function applyTaskBank(bank){
+  var b=bank||{};
+  W37=(b.writing_task_37||[]).map(function(t){return {id:t.id,from:t.from,stim:t.stim,ask:t.ask}});
+  W38=(b.writing_task_38||[]).map(function(t){return {id:t.id,topic:t.topic,rows:t.rows}});
+  return W37.length+W38.length;
+}
+function loadTaskBank(){
+  return EasyBoostApi.get('/task-bank.json').then(applyTaskBank).catch(function(){return 0});
+}
 let W_SHEET=false,_wrBound=false;
+
 function wrPool(t){var ai=(S&&S.writeAi&&S.writeAi['t'+t])||[];return writingModule.pool(t===37?W37:W38,ai)}
 function wrIdx(t){return (t===37?(S.wIdx37||0):(S.wIdx38||0))}
 function wrCur(){return writingModule.current(wrPool(curTask),wrIdx(curTask))}
@@ -2410,6 +2419,7 @@ async function checkWriting(){
   if(n<10){alert('Напиши хотя бы несколько предложений.');return}
   tab('scr13');var task=curTask,tp=wrCur();
   if(DEMO_MODE){renderReview(localReview(n,task,'демо-режим'));showScreen('scr12');HIST.push('scr8');return}
+  if(!tp||!tp.id){renderReview(localReview(n,task,'задание не определено'));showScreen('scr12');HIST.push('scr8');return}
   try{
     var payload=writingModule.buildPayload(task,tp,t);
     var response=await apiPost('/api/v1/ai/evaluate-writing',payload,true);
@@ -2437,9 +2447,11 @@ async function wrGen(){
   if(wrPool(37).length<6)kind=37;else if(wrPool(38).length<6)kind=38;
   if(!kind)return;WR_GEN=true;
   try{
-    var d=await generateAiContent(kind===37?'writing_task_37':'writing_task_38');
-    var item=writingModule.normalizeGenerated(kind,d);
-    if(item){S.writeAi['t'+kind].push(item);save()}
+    /* Раздел 10.1: сервер сначала отдаёт задание из общего банка и платит за генерацию,
+       только если для этого ученика в банке ничего нового не осталось. */
+    var r=await apiPost('/api/v1/tasks/next',{operation:kind===37?'writing_task_37':'writing_task_38'},true);
+    var item=writingModule.normalizeGenerated(kind,r&&r.task,r&&(r.externalId||r.taskId));
+    if(item&&!wrPool(kind).some(function(x){return x.id===item.id})){S.writeAi['t'+kind].push(item);save()}
   }catch(e){}
   WR_GEN=false;
   try{if(wrPool(37).length<6||wrPool(38).length<6)setTimeout(wrGen,4000)}catch(e){}}

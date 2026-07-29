@@ -76,42 +76,36 @@
     return { got, max, percent: max ? Math.round(got / max * 100) : 0 };
   }
 
+  /*
+   * Section 10.1: the request carries the identifier of the task, the type of work and the answer.
+   * The assignment itself lives on the server, so nothing here can change what the answer is
+   * marked against.
+   */
   function buildPayload(task, topic, answer) {
-    const assignment = topic || {};
-    if (task === 37) {
-      return {
-        taskType: 'writing_37',
-        answer: String(answer == null ? '' : answer),
-        assignment: {
-          from: String(assignment.from || ''),
-          stimulus: String(assignment.stim || ''),
-          questionsTopic: String(assignment.ask || ''),
-        },
-      };
-    }
     return {
-      taskType: 'writing_38',
+      taskType: task === 37 ? 'writing_37' : 'writing_38',
+      taskId: String((topic && topic.id) || ''),
       answer: String(answer == null ? '' : answer),
-      assignment: {
-        topic: String(assignment.topic || ''),
-        rows: (assignment.rows || []).map((row) => ({ label: String(row[0]), percent: Number(row[1]) })),
-      },
     };
   }
 
-  function normalizeGenerated(task, data) {
+  /* A task delivered by the bank always arrives with its identifier; without one it is unusable,
+     because the answer could never be submitted for marking. */
+  function normalizeGenerated(task, data, taskId) {
     if (!data) return null;
+    const id = String(taskId == null ? (data.id || '') : taskId);
+    if (!id) return null;
     if (task === 37) {
       const stimulus = String(data.stim || '');
       const questions = (stimulus.match(/\?/g) || []).length;
       if (!data.from || !stimulus || !data.ask || questions < 3) return null;
-      return { from: String(data.from), stim: stimulus, ask: String(data.ask) };
+      return { id: id, from: String(data.from), stim: stimulus, ask: String(data.ask) };
     }
     const rows = Array.isArray(data.rows) ? data.rows : [];
     if (!data.topic || rows.length < 4 || rows.length > 5) return null;
     const valid = rows.every((row) => Array.isArray(row) && row[0] && Number.isFinite(Number(row[1])) && Number(row[1]) > 0);
     if (!valid) return null;
-    return { topic: String(data.topic), rows: rows.map((row) => [String(row[0]), Number(row[1])]) };
+    return { id: id, topic: String(data.topic), rows: rows.map((row) => [String(row[0]), Number(row[1])]) };
   }
 
   function localReview(count, task, message) {

@@ -28,17 +28,31 @@ const task38AssignmentSchema = z.object({
   rows: z.array(tableRowSchema).min(3).max(8),
 }).strict();
 
+/*
+ * Section 10.1: what a client is allowed to send.
+ *
+ * Only the operation type, the identifier of the task and the student's own answer. The assignment
+ * itself is resolved from the task bank on the server, so a browser cannot claim that an essay was
+ * written for an easier task than the one it was given, and the server always marks against the
+ * text it actually holds.
+ */
 export const writingRequestSchema = z.discriminatedUnion('taskType', [
   z.object({
     taskType: z.literal('writing_37'),
+    taskId: z.string().trim().min(1).max(120),
     answer: studentAnswer(12_000),
-    assignment: task37AssignmentSchema,
   }).strict(),
   z.object({
     taskType: z.literal('writing_38'),
+    taskId: z.string().trim().min(1).max(120),
     answer: studentAnswer(20_000),
-    assignment: task38AssignmentSchema,
   }).strict(),
+]);
+
+/* The resolved shape the prompt and the deterministic pre-checks work on. */
+export const writingAssignmentSchema = z.discriminatedUnion('taskType', [
+  z.object({ taskType: z.literal('writing_37'), assignment: task37AssignmentSchema }),
+  z.object({ taskType: z.literal('writing_38'), assignment: task38AssignmentSchema }),
 ]);
 
 // Section 10.4: no text field of a review may carry markup. The browser escapes on render, but a

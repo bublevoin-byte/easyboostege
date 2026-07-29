@@ -8,7 +8,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { activateTrial, closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, countAiRequestsSince, createPaymentRequest, createSession, createSpeakingAttempt, createTelegramAuthCode, createWritingAttempt, deleteUserData, exportUserData, finishSpeakingAttempt, finishWritingAttempt, getAiUsageMetrics, getGeneratedTask, getSharedGeneratedTask, getPrivacyConsent, getProgress, getUser, healthCheck, isSessionActive, recordModuleAttempt, resolvePaymentRequest, revokeSession, saveGeneratedTask, saveProgress, setPrivacyConsent, setUserRole, upsertErrorBank, upsertWordProgress, mergeProgress, getUserByTelegram, createTelegramUser, logAiRequest, getSub } from './db.js';
+import { claimUnseenBankTask, getBankTask, getBankTaskByExternalId, listBankTaskContents, recordTaskDelivery, upsertBankTask, activateTrial, closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, countAiRequestsSince, createPaymentRequest, createSession, createSpeakingAttempt, createTelegramAuthCode, createWritingAttempt, deleteUserData, exportUserData, finishSpeakingAttempt, finishWritingAttempt, getAiUsageMetrics, getGeneratedTask, getSharedGeneratedTask, getPrivacyConsent, getProgress, getUser, healthCheck, isSessionActive, recordModuleAttempt, resolvePaymentRequest, revokeSession, saveGeneratedTask, saveProgress, setPrivacyConsent, setUserRole, upsertErrorBank, upsertWordProgress, mergeProgress, getUserByTelegram, createTelegramUser, logAiRequest, getSub } from './db.js';
 import { config } from './config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from './ai/writing.js';
 import { buildContentPrompt, CONTENT_PROMPT_VERSION, contentRequestSchema, parseContentResponse } from './ai/content.js';
@@ -33,6 +33,7 @@ import { createUserRoutes } from './routes/users.js';
 import { createProgressRoutes } from './routes/progress.js';
 import { createAiRoutes } from './routes/ai.js';
 import { createMediaRoutes } from './routes/media.js';
+import { createTaskRoutes, seedBuiltinTasks } from './routes/tasks.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const frontendHtml = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
@@ -155,6 +156,7 @@ const dbApi = {
   getProgress, saveProgress, mergeProgress, recordModuleAttempt, upsertWordProgress, upsertErrorBank,
   createWritingAttempt, finishWritingAttempt, createSpeakingAttempt, finishSpeakingAttempt,
   getGeneratedTask, getSharedGeneratedTask, saveGeneratedTask, logAiRequest,
+  upsertBankTask, getBankTask, getBankTaskByExternalId, claimUnseenBankTask, recordTaskDelivery, listBankTaskContents,
 };
 async function promoteConfiguredAdmin(username, telegramId) {
   if (ADMIN_ID && String(telegramId) === String(ADMIN_ID)) await setUserRole(username, 'admin');
@@ -233,7 +235,16 @@ const access = {
   createOperationLimiter, ttsLimiter, sttLimiter, hasAiBudget,
   requireAiBudget, requireActiveSubscription, requirePrivacyConsent,
 };
-app.use(createAiRoutes({ authentication, access, db: dbApi }));
+const aiRoutes = createAiRoutes({ authentication, access, db: dbApi });
+app.use(aiRoutes.router);
+app.use(createTaskRoutes({
+  authentication,
+  access,
+  db: dbApi,
+  /* Section 10.1: the bank pays for a task only when this student has seen everything it holds. */
+  generateBankTask: ({ username, operation, exclude }) =>
+    aiRoutes.runContentGeneration({ username, input: { operation, exclude } }),
+}));
 app.use(createMediaRoutes({ authentication, access }));
 
 /* An unknown API path is an error, not a request for the application shell.
@@ -277,6 +288,18 @@ app.use((error, req, res, next) => {
 
 const server = app.listen(PORT, () => console.log('Easy Boost server on http://localhost:' + PORT));
 startTelegram();
+
+/* Section 10.1: built-in tasks need rows in the bank, otherwise they have no identifier a client
+   could send. Seeding is keyed on content, so a restart adds nothing. A failure here must not take
+   the process down — the built-in tasks still work offline in the browser. */
+seedBuiltinTasks(dbApi).catch((error) => {
+  console.error(JSON.stringify({
+    timestamp: new Date().toISOString(),
+    level: 'error',
+    type: 'task_bank_seed_failed',
+    errorCode: error.code || 'SEED_FAILED',
+  }));
+});
 
 async function shutdown(signal) {
   console.log(signal + ': shutting down');

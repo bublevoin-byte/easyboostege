@@ -1,0 +1,40 @@
+{
+  "note": "Единственный источник встроенных заданий. Сервер читает этот файл при старте и заводит записи в банке, клиент забирает его как часть оболочки приложения, поэтому встроенные задания работают офлайн (раздел 6.1). Идентификаторы менять нельзя: по ним сервер узнаёт, какое задание проверяет.",
+  "writing_task_37": [
+    {
+      "id": "builtin:writing_37:emily-new-flat",
+      "from": "Emily",
+      "stim": "…We moved to a new flat last month, and I had to change my school too. Have you ever changed schools? How do you usually make new friends? What do you like most about your school?… Oh, my mum is calling me. Write back soon!",
+      "ask": "her new flat"
+    },
+    {
+      "id": "builtin:writing_37:ben-cooking",
+      "from": "Ben",
+      "stim": "…Last weekend I tried cooking for the first time and made pasta for the whole family! What food can you cook? Do you help your parents about the house? What do you usually do at weekends?… Sorry, I have to walk my dog now.",
+      "ask": "his dog"
+    },
+    {
+      "id": "builtin:writing_37:kate-football",
+      "from": "Kate",
+      "stim": "…I have just come back from my first real football match — our school team won! Do you do any sport? How much free time do you have on school days? Where do you like spending your holidays?… Got to go, my dad needs the laptop.",
+      "ask": "the football match"
+    }
+  ],
+  "writing_task_38": [
+    {
+      "id": "builtin:writing_38:teen-sport",
+      "topic": "Why teenagers do sport",
+      "rows": [["To keep fit", 45], ["To meet friends", 25], ["To achieve results and win", 18], ["Other reasons", 12]]
+    },
+    {
+      "id": "builtin:writing_38:free-time",
+      "topic": "How teenagers spend their free time",
+      "rows": [["Playing computer games", 40], ["Doing sport", 25], ["Reading books and blogs", 15], ["Creative hobbies", 12], ["Other activities", 8]]
+    },
+    {
+      "id": "builtin:writing_38:school-subjects",
+      "topic": "The most important school subjects according to students",
+      "rows": [["Maths", 35], ["Foreign languages", 30], ["Science", 20], ["Literature", 10], ["Other subjects", 5]]
+    }
+  ]
+}

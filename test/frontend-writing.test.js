@@ -76,43 +76,42 @@ test('writing module derives review totals from criteria when overall score is a
   );
 });
 
-test('writing module builds typed payloads for both exam tasks', () => {
+/* Section 10.1: the payload names the task, it does not describe it. */
+test('writing module sends the task identifier instead of the assignment', () => {
   const writing = createWritingModule();
 
   assert.deepEqual(
-    plain(writing.buildPayload(37, { from: 'Emily', stim: 'text?', ask: 'her flat' }, ' answer ')),
-    {
-      taskType: 'writing_37',
-      answer: ' answer ',
-      assignment: { from: 'Emily', stimulus: 'text?', questionsTopic: 'her flat' },
-    },
+    plain(writing.buildPayload(37, { id: 'builtin:writing_37:emily-new-flat', from: 'Emily', stim: 'text?', ask: 'her flat' }, ' answer ')),
+    { taskType: 'writing_37', taskId: 'builtin:writing_37:emily-new-flat', answer: ' answer ' },
   );
   assert.deepEqual(
-    plain(writing.buildPayload(38, { topic: 'Sport', rows: [['Fit', '45']] }, 'answer')),
-    {
-      taskType: 'writing_38',
-      answer: 'answer',
-      assignment: { topic: 'Sport', rows: [{ label: 'Fit', percent: 45 }] },
-    },
+    plain(writing.buildPayload(38, { id: '42', topic: 'Sport', rows: [['Fit', 45]] }, 'answer')),
+    { taskType: 'writing_38', taskId: '42', answer: 'answer' },
   );
-  assert.deepEqual(plain(writing.buildPayload(37, null, null).assignment), { from: '', stimulus: '', questionsTopic: '' });
+
+  /* The assignment must not travel with the answer, whatever the caller passes in. */
+  const payload = plain(writing.buildPayload(37, { id: '7', from: 'Emily', stim: 'text?', ask: 'her flat' }, 'answer'));
+  assert.deepEqual(Object.keys(payload).sort(), ['answer', 'taskId', 'taskType']);
+  assert.equal(plain(writing.buildPayload(37, null, null)).taskId, '', 'без задания идентификатор пустой, а не выдуманный');
 });
 
 test('writing module rejects malformed AI-generated topics', () => {
   const writing = createWritingModule();
 
-  assert.equal(writing.normalizeGenerated(37, { from: 'Ben', stim: 'One? Two?', ask: 'dog' }), null);
+  assert.equal(writing.normalizeGenerated(37, { from: 'Ben', stim: 'One? Two?', ask: 'dog' }, '5'), null);
   assert.deepEqual(
-    plain(writing.normalizeGenerated(37, { from: 'Ben', stim: 'One? Two? Three?', ask: 'dog' })),
-    { from: 'Ben', stim: 'One? Two? Three?', ask: 'dog' },
+    plain(writing.normalizeGenerated(37, { from: 'Ben', stim: 'One? Two? Three?', ask: 'dog' }, '5')),
+    { id: '5', from: 'Ben', stim: 'One? Two? Three?', ask: 'dog' },
   );
-  assert.equal(writing.normalizeGenerated(38, { topic: 'T', rows: [['a', 50], ['b', 50], ['c', 0]] }), null);
-  assert.equal(writing.normalizeGenerated(38, { topic: 'T', rows: [['a', 40], ['b', 30], ['c', 20], ['d', 'x']] }), null);
+  /* A task without an identifier could never be submitted for marking, so it is not kept. */
+  assert.equal(writing.normalizeGenerated(37, { from: 'Ben', stim: 'One? Two? Three?', ask: 'dog' }, ''), null);
+  assert.equal(writing.normalizeGenerated(38, { topic: 'T', rows: [['a', 50], ['b', 50], ['c', 0]] }, '6'), null);
+  assert.equal(writing.normalizeGenerated(38, { topic: 'T', rows: [['a', 40], ['b', 30], ['c', 20], ['d', 'x']] }, '6'), null);
   assert.deepEqual(
-    plain(writing.normalizeGenerated(38, { topic: 'T', rows: [['a', 40], ['b', '30'], ['c', 20], ['d', 10]] })),
-    { topic: 'T', rows: [['a', 40], ['b', 30], ['c', 20], ['d', 10]] },
+    plain(writing.normalizeGenerated(38, { topic: 'T', rows: [['a', 40], ['b', '30'], ['c', 20], ['d', 10]] }, '6')),
+    { id: '6', topic: 'T', rows: [['a', 40], ['b', 30], ['c', 20], ['d', 10]] },
   );
-  assert.equal(writing.normalizeGenerated(38, null), null);
+  assert.equal(writing.normalizeGenerated(38, null, '6'), null);
 });
 
 test('writing module produces an offline review that only scores volume', () => {

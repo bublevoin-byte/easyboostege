@@ -257,11 +257,11 @@ ${media}`;
 
 test('validated generated content is cached before external AI budget checks', async () => {
   const ai = await fs.readFile(aiRoutePath, 'utf8');
-  const cacheLookup = ai.indexOf('const stored = await getGeneratedTask(req.user, requestHash)');
+  const cacheLookup = ai.indexOf('const stored = await getGeneratedTask(username, requestHash)');
   const budgetCheck = ai.indexOf('if (!await hasAiBudget())', cacheLookup);
   const providerCall = ai.indexOf('const response = await askProvider(provider', cacheLookup);
   assert.ok(cacheLookup > 0 && budgetCheck > cacheLookup && providerCall > budgetCheck);
-  assert.match(ai, /saveGeneratedTask\(req\.user/u);
+  assert.match(ai, /saveGeneratedTask\(username/u);
   assert.match(ai, /promptVersion: CONTENT_PROMPT_VERSION, input/u);
 });
 

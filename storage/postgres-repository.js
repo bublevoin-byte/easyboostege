@@ -379,6 +379,88 @@ export function createPostgresRepository(connectionString) {
     return Number(result.rows[0].id);
   }
 
+  /* ---------- Section 10.1: the shared task bank ---------- */
+
+  async function upsertBankTask(task) {
+    const result = await pool.query(
+      `INSERT INTO task_bank (operation, external_id, content_hash, content, source, provider, prompt_version)
+       VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
+       ON CONFLICT (operation, content_hash) DO UPDATE SET operation = EXCLUDED.operation
+       RETURNING id`,
+      [task.operation, task.externalId || null, task.contentHash, JSON.stringify(task.content),
+        task.source || 'generated', task.provider || '', task.promptVersion || ''],
+    );
+    return Number(result.rows[0].id);
+  }
+
+  async function getBankTask(taskId) {
+    const result = await pool.query(
+      'SELECT id, operation, external_id, content, source FROM task_bank WHERE id = $1', [Number(taskId)],
+    );
+    const row = result.rows[0];
+    return row ? { id: Number(row.id), operation: row.operation, externalId: row.external_id, content: row.content, source: row.source } : null;
+  }
+
+  async function getBankTaskByExternalId(externalId) {
+    const result = await pool.query(
+      'SELECT id, operation, external_id, content, source FROM task_bank WHERE external_id = $1', [externalId],
+    );
+    const row = result.rows[0];
+    return row ? { id: Number(row.id), operation: row.operation, externalId: row.external_id, content: row.content, source: row.source } : null;
+  }
+
+  /*
+   * Hand the student the oldest task they have not been given yet and mark it as delivered in the
+   * same transaction. Doing both at once is what stops two parallel requests from spending two paid
+   * generations, or from handing out the same task twice.
+   */
+  async function claimUnseenBankTask(username, operation) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await client.query(
+        `SELECT b.id, b.operation, b.external_id, b.content, b.source FROM task_bank b
+         WHERE b.operation = $2 AND b.retired_at IS NULL
+           AND NOT EXISTS (SELECT 1 FROM task_deliveries d WHERE d.task_id = b.id AND d.username = $1)
+         ORDER BY b.created_at, b.id
+         LIMIT 1
+         FOR UPDATE SKIP LOCKED`,
+        [username, operation],
+      );
+      const row = result.rows[0];
+      if (!row) {
+        await client.query('COMMIT');
+        return null;
+      }
+      await client.query(
+        'INSERT INTO task_deliveries (username, task_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+        [username, row.id],
+      );
+      await client.query('COMMIT');
+      return { id: Number(row.id), operation: row.operation, externalId: row.external_id, content: row.content, source: row.source };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async function recordTaskDelivery(username, taskId) {
+    await pool.query(
+      'INSERT INTO task_deliveries (username, task_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+      [username, Number(taskId)],
+    );
+  }
+
+  async function listBankTaskContents(operation, limit = 60) {
+    const result = await pool.query(
+      `SELECT content FROM task_bank WHERE operation = $1 AND retired_at IS NULL
+       ORDER BY created_at DESC LIMIT $2`, [operation, limit],
+    );
+    return result.rows.map((row) => row.content);
+  }
+
   async function recordModuleAttempt(username, attempt) {
     const client = await pool.connect();
     try {
@@ -621,6 +703,12 @@ export function createPostgresRepository(connectionString) {
     getGeneratedTask,
     getSharedGeneratedTask,
     saveGeneratedTask,
+    upsertBankTask,
+    getBankTask,
+    getBankTaskByExternalId,
+    claimUnseenBankTask,
+    recordTaskDelivery,
+    listBankTaskContents,
     recordModuleAttempt,
     upsertWordProgress,
     upsertErrorBank,

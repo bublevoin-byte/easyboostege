@@ -11,8 +11,11 @@ const requests = {
   grammar_quiz: z.object({ operation: z.literal('grammar_quiz') }).strict(),
   listening_dialog: z.object({ operation: z.literal('listening_dialog') }).strict(),
   reading_text: z.object({ operation: z.literal('reading_text') }).strict(),
-  writing_task_37: z.object({ operation: z.literal('writing_task_37') }).strict(),
-  writing_task_38: z.object({ operation: z.literal('writing_task_38') }).strict(),
+  // Section 10.1: the bank tells the model what it already holds, so a paid call buys a new task
+  // instead of a copy of one that exists. Without this the request is identical every time and
+  // the shared cache of section 10.8 keeps returning the first task forever.
+  writing_task_37: z.object({ operation: z.literal('writing_task_37'), exclude: z.array(shortText(200)).max(200).default([]) }).strict(),
+  writing_task_38: z.object({ operation: z.literal('writing_task_38'), exclude: z.array(shortText(200)).max(200).default([]) }).strict(),
   speaking_task_1: z.object({ operation: z.literal('speaking_task_1') }).strict(),
   speaking_task_2: z.object({ operation: z.literal('speaking_task_2') }).strict(),
   speaking_task_3: z.object({ operation: z.literal('speaking_task_3') }).strict(),
@@ -141,8 +144,8 @@ const instructions = {
   grammar_quiz: 'Create exactly 5 British English B1-B2 grammar multiple-choice tasks on one random topic. Return JSON array with before, after, exactly 4 options, zero-based answer and a short Russian explanation.',
   listening_dialog: 'Create a B1 British English public-place dialogue of 3-5 turns and two Russian comprehension questions. Return {title,dialog,q1:{q,o,a},q2:{q,o,a}}.',
   reading_text: 'Create a coherent British English B1 reading text of 45-70 words. Return {"text":"..."}.',
-  writing_task_37: 'Create EGE writing task 37: an informal 40-60 word email from a teenager containing at least three questions, plus a 2-4 word English topic for three questions in reply. Return {"from":"name","stim":"email","ask":"topic"}.',
-  writing_task_38: 'Create EGE writing task 38: an English project topic and 4-5 unique survey options for teenagers with positive integer percentages totalling exactly 100. Return {"topic":"...","rows":[["option",percent]]}.',
+  writing_task_37: 'Create EGE writing task 37: an informal 40-60 word email from a teenager containing at least three questions, plus a 2-4 word English topic for three questions in reply. The data field lists tasks the bank already holds: your task must differ from all of them in sender, situation and topic. Return {"from":"name","stim":"email","ask":"topic"}.',
+  writing_task_38: 'Create EGE writing task 38: an English project topic and 4-5 unique survey options for teenagers with positive integer percentages totalling exactly 100. The data field lists tasks the bank already holds: your topic must differ from all of them. Return {"topic":"...","rows":[["option",percent]]}.',
   speaking_task_1: 'Create EGE speaking task 1: a coherent popular-science British English B1-B2 text for reading aloud, exactly 85-105 words, with clear sentences. Return {"tx":"text"}.',
   speaking_task_2: 'Create EGE speaking task 2: a 1-2 sentence English advertisement, exactly four English information points and exactly four matching sample direct questions. Return {"ad":"...","points":["..."],"exq":["...? "]}.',
   speaking_task_3: 'Create EGE speaking task 3: a 2-4 word Russian interview topic and exactly five English questions for a teenager. Return {"topic":"...","qs":["...? "]}.',
@@ -169,6 +172,8 @@ export function buildContentPrompt(input) {
     ? { word: input.word }
     : input.operation === 'vocabulary_cards'
       ? { count: input.count, excluded_words: input.exclude }
+      : (input.operation === 'writing_task_37' || input.operation === 'writing_task_38')
+        ? { existing_tasks: input.exclude }
       : input.operation === 'grammar_topic_set'
         ? { topicId: input.topicId, topic: input.topic }
         : {};

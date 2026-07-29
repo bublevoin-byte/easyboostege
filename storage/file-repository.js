@@ -4,7 +4,7 @@ import { hashAuthCode, normalizeUsername, subscriptionView } from './shared.js';
 
 export function createFileRepository(filePath) {
   let loaded = false;
-  let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], generated_tasks: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, payment_requests: {}, subscription_events: [] };
+  let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, payment_requests: {}, subscription_events: [] };
   let writeQueue = Promise.resolve();
 
   async function load() {
@@ -21,6 +21,8 @@ export function createFileRepository(filePath) {
           writing_attempts: Array.isArray(parsed.writing_attempts) ? parsed.writing_attempts : [],
           speaking_attempts: Array.isArray(parsed.speaking_attempts) ? parsed.speaking_attempts : [],
           generated_tasks: Array.isArray(parsed.generated_tasks) ? parsed.generated_tasks : [],
+          task_bank: Array.isArray(parsed.task_bank) ? parsed.task_bank : [],
+          task_deliveries: Array.isArray(parsed.task_deliveries) ? parsed.task_deliveries : [],
           module_attempts: Array.isArray(parsed.module_attempts) ? parsed.module_attempts : [],
           word_progress: parsed.word_progress && typeof parsed.word_progress === 'object' ? parsed.word_progress : {},
           error_bank: Array.isArray(parsed.error_bank) ? parsed.error_bank : [],
@@ -346,6 +348,74 @@ export function createFileRepository(filePath) {
     return id;
   }
 
+  /* ---------- Section 10.1: the shared task bank ---------- */
+
+  async function upsertBankTask(task) {
+    await load();
+    const existing = state.task_bank.find((item) => item.operation === task.operation && item.content_hash === task.contentHash);
+    if (existing) return existing.id;
+    const id = (state.task_bank.at(-1)?.id || 0) + 1;
+    state.task_bank.push({
+      id,
+      operation: task.operation,
+      external_id: task.externalId || null,
+      content_hash: task.contentHash,
+      content: structuredClone(task.content),
+      source: task.source || 'generated',
+      provider: task.provider || '',
+      prompt_version: task.promptVersion || '',
+      retired_at: null,
+      created_at: Date.now(),
+    });
+    await persist();
+    return id;
+  }
+
+  function viewBankTask(row) {
+    return row
+      ? structuredClone({ id: row.id, operation: row.operation, externalId: row.external_id, content: row.content, source: row.source })
+      : null;
+  }
+
+  async function getBankTask(taskId) {
+    await load();
+    return viewBankTask(state.task_bank.find((item) => item.id === Number(taskId)));
+  }
+
+  async function getBankTaskByExternalId(externalId) {
+    await load();
+    return viewBankTask(state.task_bank.find((item) => item.external_id === externalId));
+  }
+
+  async function claimUnseenBankTask(username, operation) {
+    await load();
+    const delivered = new Set(state.task_deliveries.filter((item) => item.username === username).map((item) => item.task_id));
+    const row = state.task_bank
+      .filter((item) => item.operation === operation && !item.retired_at && !delivered.has(item.id))
+      .sort((first, second) => first.created_at - second.created_at || first.id - second.id)[0];
+    if (!row) return null;
+    state.task_deliveries.push({ username, task_id: row.id, delivered_at: Date.now() });
+    await persist();
+    return viewBankTask(row);
+  }
+
+  async function recordTaskDelivery(username, taskId) {
+    await load();
+    const id = Number(taskId);
+    if (state.task_deliveries.some((item) => item.username === username && item.task_id === id)) return;
+    state.task_deliveries.push({ username, task_id: id, delivered_at: Date.now() });
+    await persist();
+  }
+
+  async function listBankTaskContents(operation, limit = 60) {
+    await load();
+    return state.task_bank
+      .filter((item) => item.operation === operation && !item.retired_at)
+      .sort((first, second) => second.created_at - first.created_at)
+      .slice(0, limit)
+      .map((item) => structuredClone(item.content));
+  }
+
   async function recordModuleAttempt(username, attempt) {
     await load();
     if (state.module_attempts.some((item) => item.id === attempt.id)) return { id: attempt.id, created: false };
@@ -550,6 +620,12 @@ export function createFileRepository(filePath) {
     getGeneratedTask,
     getSharedGeneratedTask,
     saveGeneratedTask,
+    upsertBankTask,
+    getBankTask,
+    getBankTaskByExternalId,
+    claimUnseenBankTask,
+    recordTaskDelivery,
+    listBankTaskContents,
     recordModuleAttempt,
     upsertWordProgress,
     upsertErrorBank,

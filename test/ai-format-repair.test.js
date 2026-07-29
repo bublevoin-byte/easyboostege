@@ -126,6 +126,8 @@ async function startStack({ replies }) {
     } catch { /* still starting */ }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
+  /* The task bank is seeded after listen; the evaluation needs those rows. */
+  await new Promise((resolve) => setTimeout(resolve, 300));
 
   return {
     baseUrl,
@@ -144,8 +146,8 @@ async function startStack({ replies }) {
         },
         body: JSON.stringify({
           taskType: 'writing_37',
+          taskId: 'builtin:writing_37:emily-new-flat',
           answer,
-          assignment: { from: 'Sam', stimulus: 'Tell me about your hobbies and your school week please.', questionsTopic: 'guitar lessons' },
         }),
       });
       return { status: response.status, body: await response.json() };

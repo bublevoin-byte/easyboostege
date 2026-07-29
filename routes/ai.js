@@ -9,6 +9,7 @@ import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSI
 import { buildContentPrompt, CONTENT_PROMPT_VERSION, contentRequestSchema, parseContentResponse } from '../ai/content.js';
 import { buildSpeakingPrompt, buildSpeakingSamplePrompt, parseSpeakingReview, parseSpeakingSample, SPEAKING_PROMPT_VERSION, speakingRequestSchema, speakingSampleRequestSchema } from '../ai/speaking.js';
 import { buildRepairRequest, isFormatFailure } from '../ai/format-repair.js';
+import { assignmentFor, OPERATION_FOR_TASK_TYPE } from '../ai/task-bank.js';
 import { createConcurrencyGate, estimateCostMicrousd, runProviderFallback, TtlCache } from '../ai/provider-control.js';
 import { operationLimits, providersFor } from '../ai/operations.js';
 import { recordDependencyEvent } from '../observability/metrics.js';
@@ -55,6 +56,7 @@ export function createAiRoutes({ authentication, access, db }) {
   const {
     createWritingAttempt, finishWritingAttempt, createSpeakingAttempt, finishSpeakingAttempt,
     getGeneratedTask, getSharedGeneratedTask, saveGeneratedTask, logAiRequest,
+    getBankTask, getBankTaskByExternalId,
   } = db;
 
   async function askProvider({ url, key, model }, system, user, operation) {
@@ -165,6 +167,26 @@ export function createAiRoutes({ authentication, access, db }) {
     return res.json({ data: cached, provider: 'cache', promptVersion: CONTENT_PROMPT_VERSION, cached: true });
   }
 
+  /*
+   * Turn the identifier the client sent into the assignment the server holds. A built-in task may
+   * be named by its stable external id, a generated one by its numeric bank id; anything that does
+   * not resolve to a task of the right type is refused before a paid call is made.
+   */
+  async function resolveWritingTask({ taskType, taskId, answer }) {
+    const operation = OPERATION_FOR_TASK_TYPE[taskType];
+    const record = /^\d+$/u.test(taskId)
+      ? await getBankTask(taskId)
+      : await getBankTaskByExternalId(taskId);
+
+    if (!record) {
+      throw Object.assign(new Error('Задание не найдено.'), { status: 404, code: 'UNKNOWN_TASK' });
+    }
+    if (record.operation !== operation) {
+      throw Object.assign(new Error('Идентификатор задания не соответствует типу работы.'), { status: 400, code: 'TASK_TYPE_MISMATCH' });
+    }
+    return { taskType, answer, taskId: String(record.id), assignment: assignmentFor(operation, record.content) };
+  }
+
   router.post('/api/v1/ai/evaluate-writing', auth, requireActiveSubscription, requirePrivacyConsent('text_processing'), requireAiBudget, writingLimiter, async (req, res, next) => {
     const parsed = writingRequestSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -177,7 +199,16 @@ export function createAiRoutes({ authentication, access, db }) {
       });
     }
 
-    const input = parsed.data;
+    /* Section 10.1: the assignment comes from the bank, never from the request body. */
+    let input;
+    try {
+      input = await resolveWritingTask(parsed.data);
+    } catch (error) {
+      return res.status(error.status || 400).json({
+        error: { code: error.code || 'UNKNOWN_TASK', message: error.message, requestId: req.requestId },
+      });
+    }
+
     const startedAt = Date.now();
     let attemptId;
     let provider = null;
@@ -262,20 +293,22 @@ export function createAiRoutes({ authentication, access, db }) {
     }
   });
 
-  router.post('/api/v1/ai/generate-content', auth, requireActiveSubscription, requirePrivacyConsent('text_processing'), contentLimiter, serveCachedDictionary, async (req, res) => {
-    const parsed = contentRequestSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректные параметры генерации.' } });
-    const input = parsed.data;
+  /*
+   * The generation core, separate from the endpoint, because the task bank of section 10.1 needs
+   * the same work without an HTTP request in front of it. Failures come back as errors carrying a
+   * status and a public code, so both callers can answer without re-deriving them.
+   */
+  async function runContentGeneration({ username, input }) {
     const requestHash = crypto.createHash('sha256').update(JSON.stringify({ promptVersion: CONTENT_PROMPT_VERSION, input })).digest('hex');
     // Own copy first, then anyone's: the same input always produces the same exercise, so a
     // second student must not cost a second paid call.
-    const stored = await getGeneratedTask(req.user, requestHash) || await getSharedGeneratedTask(requestHash);
-    if (stored) return res.json({ data: stored.result, provider: 'cache', sourceProvider: stored.provider, promptVersion: stored.prompt_version, cached: true });
-    if (!await hasAiBudget()) return res.status(503).json({ error: { code: 'AI_BUDGET_EXHAUSTED', message: 'Дневной лимит ИИ исчерпан. Попробуйте завтра.' } });
+    const stored = await getGeneratedTask(username, requestHash) || await getSharedGeneratedTask(requestHash);
+    if (stored) return { data: stored.result, provider: 'cache', sourceProvider: stored.provider, promptVersion: stored.prompt_version, cached: true };
+    if (!await hasAiBudget()) throw Object.assign(new Error('Дневной лимит ИИ исчерпан. Попробуйте завтра.'), { status: 503, code: 'AI_BUDGET_EXHAUSTED' });
     const prompt = buildContentPrompt(input);
     const startedAt = Date.now();
     const providers = aiProviders();
-    if (!providers.length) return res.status(503).json({ error: { code: 'AI_NOT_CONFIGURED', message: 'ИИ не настроен на сервере.' } });
+    if (!providers.length) throw Object.assign(new Error('ИИ не настроен на сервере.'), { status: 503, code: 'AI_NOT_CONFIGURED' });
     let lastCode = 'AI_PROVIDER_UNAVAILABLE';
     let fallbackReason = null;
     for (const [providerIndex, provider] of providers.entries()) {
@@ -302,26 +335,41 @@ export function createAiRoutes({ authentication, access, db }) {
         if (outcome.repair) {
           usage = outcome.repair.usage;
           await logRepairedAttempt({
-            username: req.user, operation: input.operation, promptVersion: CONTENT_PROMPT_VERSION, repair: outcome.repair, model: provider.model,
+            username, operation: input.operation, promptVersion: CONTENT_PROMPT_VERSION, repair: outcome.repair, model: provider.model,
           });
         }
         if (input.operation === 'dictionary_lookup') dictionaryCache.set(input.word.toLocaleLowerCase('en'), data);
         await Promise.all([
-          logAiRequest({ username: req.user, operation: input.operation, provider: provider.name, model: provider.model, promptVersion: CONTENT_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt, fallbackReason, ...aiUsage(provider, usage) }),
-          saveGeneratedTask(req.user, { operation: input.operation, requestHash, request: input, result: data, provider: provider.name, promptVersion: CONTENT_PROMPT_VERSION }),
+          logAiRequest({ username, operation: input.operation, provider: provider.name, model: provider.model, promptVersion: CONTENT_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt, fallbackReason, ...aiUsage(provider, usage) }),
+          saveGeneratedTask(username, { operation: input.operation, requestHash, request: input, result: data, provider: provider.name, promptVersion: CONTENT_PROMPT_VERSION }),
         ]);
         recordDependencyEvent('ai', 'success');
         if (providerIndex > 0) recordDependencyEvent('ai', 'fallback');
-        return res.json({ data, provider: provider.name, promptVersion: CONTENT_PROMPT_VERSION });
+        return { data, provider: provider.name, promptVersion: CONTENT_PROMPT_VERSION, cached: false };
       } catch (error) {
+        if (error.status && error.code) throw error;
         recordDependencyEvent('ai', 'error');
         fallbackReason = describeFallback(provider, lastCode, error, providerIndex, providers.length);
         lastCode = error.code === 'AI_RESPONSE_INVALID' ? error.code : 'AI_PROVIDER_UNAVAILABLE';
-        await logAiRequest({ username: req.user, operation: input.operation, provider: provider.name, model: provider.model, promptVersion: CONTENT_PROMPT_VERSION, status: 'failed', durationMs: Date.now() - startedAt, errorCode: lastCode, fallbackReason: describeFallback(provider, lastCode, error, providerIndex, providers.length), ...aiUsage(provider, usage) });
+        await logAiRequest({ username, operation: input.operation, provider: provider.name, model: provider.model, promptVersion: CONTENT_PROMPT_VERSION, status: 'failed', durationMs: Date.now() - startedAt, errorCode: lastCode, fallbackReason: describeFallback(provider, lastCode, error, providerIndex, providers.length), ...aiUsage(provider, usage) });
       }
     }
-    const status = lastCode === 'AI_RESPONSE_INVALID' ? 502 : 503;
-    res.status(status).json({ error: { code: lastCode, message: 'Не удалось подготовить корректный учебный материал.' } });
+    throw Object.assign(new Error('Не удалось подготовить корректный учебный материал.'), {
+      status: lastCode === 'AI_RESPONSE_INVALID' ? 502 : 503,
+      code: lastCode,
+    });
+  }
+
+  router.post('/api/v1/ai/generate-content', auth, requireActiveSubscription, requirePrivacyConsent('text_processing'), contentLimiter, serveCachedDictionary, async (req, res) => {
+    const parsed = contentRequestSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректные параметры генерации.' } });
+    try {
+      const result = await runContentGeneration({ username: req.user, input: parsed.data });
+      return res.json(result);
+    } catch (error) {
+      if (!error.status || !error.code) throw error;
+      return res.status(error.status).json({ error: { code: error.code, message: error.message, requestId: req.requestId } });
+    }
   });
 
   router.post('/api/v1/ai/evaluate-speaking', auth, requireActiveSubscription, requirePrivacyConsent('voice_processing'), requireAiBudget, speakingEvalLimiter, async (req, res) => {
@@ -409,5 +457,5 @@ export function createAiRoutes({ authentication, access, db }) {
 
   // ---- нейро-озвучка: Grok TTS (основной) + Edge TTS (запасной и для медленного) ----
 
-  return router;
+  return { router, runContentGeneration };
 }
