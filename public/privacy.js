@@ -1,3 +1,10 @@
+/*
+ * Режим работы и точки подключения к профилю раньше искались в глобальной области.
+ * В модуле их не видно, а `typeof SRV === 'undefined'` тихо отключил бы согласия целиком,
+ * поэтому зависимости приходят импортом — импортированное имя остаётся живым и видит startDemo().
+ */
+import {DEMO_MODE, SRV, registerProfileHook, registerStartHook} from './app.js';
+
 (function initializePrivacyControls(global) {
   'use strict';
   const api = global.EasyBoostApi;
@@ -58,7 +65,7 @@
     if (label) { label.textContent = current?.text_processing ? 'согласие ✓' : 'выкл'; label.style.color = current?.text_processing ? '#1F8A50' : '#8A8F98'; }
   }
   async function loadPrivacy(showIfNew) {
-    if (typeof SRV === 'undefined' || !SRV || (typeof DEMO_MODE !== 'undefined' && DEMO_MODE)) return;
+    if (!SRV || DEMO_MODE) return;
     try { current = await api.get('/api/v1/privacy/consent'); updateProfile(); if (showIfNew && !current.policy_version) openPrivacy(); } catch (_) {}
   }
   function addProfileControls() {
@@ -76,6 +83,6 @@
     catch (error) { global.alert(api.messageFor(error)); }
   }
   global.openPrivacy = openPrivacy;
-  if (typeof global.registerProfileHook === 'function') global.registerProfileHook(addProfileControls);
-  if (typeof global.registerStartHook === 'function') global.registerStartHook(() => loadPrivacy(true));
+  registerProfileHook(addProfileControls);
+  registerStartHook(() => loadPrivacy(true));
 })(window);

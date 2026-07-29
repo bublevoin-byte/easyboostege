@@ -20,42 +20,27 @@ export default [
     },
   },
   {
+    /*
+     * Frontend — нативные ES-модули с единой точкой входа public/main.js. Именно поэтому
+     * список «общих» глобальных имён здесь почти пуст: всё, что раньше передавалось через
+     * глобальную область, теперь передаётся импортом, и no-undef это стережёт.
+     */
     files: ['public/**/*.js'],
     languageOptions: {
-      sourceType: 'script',
+      sourceType: 'module',
       globals: {
         ...globals.browser,
-        ...globals.serviceworker,
-        DEMO_MODE: 'readonly',
         EasyBoostApi: 'readonly',
         EasyBoostLearning: 'readonly',
-        EasyBoostRouter: 'readonly',
-        EasyBoostSync: 'readonly',
-        HIST: 'readonly',
-        LSLOW: 'readonly',
-        SRV: 'readonly',
-        TOKEN: 'readonly',
-        apiGetBlob: 'readonly',
-        back: 'readonly',
-        bump: 'readonly',
-        cur: 'readonly',
-        curTask: 'readonly',
-        initWords: 'readonly',
-        lPlayBtn: 'readonly',
-        lPlayRaw: 'writable',
-        lPlayRawFallback: 'readonly',
-        lStop: 'writable',
-        lStopFallback: 'readonly',
-        nav: 'readonly',
-        registerRouteHook: 'readonly',
-        setTask: 'readonly',
-        show: 'readonly',
-        showScreen: 'readonly',
-        tab: 'readonly',
-        toast: 'readonly',
-        wSpeak: 'writable',
-        wSpeakFallback: 'readonly',
       },
+    },
+  },
+  {
+    /* Service worker регистрируется классическим скриптом, а не модулем. */
+    files: ['public/service-worker.js'],
+    languageOptions: {
+      sourceType: 'script',
+      globals: globals.serviceworker,
     },
   },
   {

@@ -1,4 +1,10 @@
 ﻿/* legacy block 1 */
+import {HIST,back,cur,nav,registerRouteHook,show,showScreen,tab} from './router.js';
+import {configureTts,lPlayRaw,lStop,wSpeak} from './tts.js';
+
+/* Маршрутизатор больше не знает про экраны слов и письма. Хук регистрируется первым,
+   чтобы подготовка экрана шла до остальных хуков — ровно как раньше внутри tab(). */
+registerRouteHook(function(id){if(id==='scr2')initWords();if(id==='scr8')setTask(curTask)});
 
 /* ---------- STATE ---------- */
 const todayStr=()=>new Date().toISOString().slice(0,10);
@@ -1205,6 +1211,8 @@ function gStatusChip(st,isDue){
   if(st===1)return '<span style="font-weight:800;font-size:10px;letter-spacing:.6px;color:#A56000;background:#FFF4DE;padding:5px 10px;border-radius:20px;">ИЗУЧАЕТСЯ</span>';
   return '<span style="font-weight:800;font-size:10px;letter-spacing:.6px;color:#6A6E75;background:#F1F2F4;padding:5px 10px;border-radius:20px;">НЕ НАЧАТА</span>'}
 function initGrammar(){if(!S)return;gSync();gMap()}
+/* Обработчик разметки не может присвоить переменную модуля, поэтому сброс темы — функция. */
+function gToThemes(){GS=null;initGrammar()}
 function gMap(){var area=document.getElementById('g_area');if(!area)return;
   var due=gDue();
   var GA=0;function ga(){return 'animation:win .34s '+((GA++)*0.05)+'s cubic-bezier(.25,.75,.35,1) both;'}
@@ -1346,7 +1354,7 @@ function gFinish(){if(GS&&GS.mode==='rev'){gFinishRev();return}
     +'<div style="font-weight:600;font-size:13.5px;color:#777163;margin-top:8px;line-height:1.5;">'+tp.n+'<br>Верно: '+GS.ok+' из '+GS.done+(closed?'':'<br>Для закрепления — 4 верных ответа уровня 2 подряд')+'</div></div></div>'
     +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
     +(closed?'':'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="gStart('+GS.t+')">Ещё подход</button>')
-    +'<button class="sq" style="'+WBTN+'color:#B54E2F;" onclick="GS=null;initGrammar()">К темам</button></div>';
+    +'<button class="sq" style="'+WBTN+'color:#B54E2F;" onclick="gToThemes()">К темам</button></div>';
   gAnim('win','.32s');gSync();save()}
 function gFinishRev(){var area=document.getElementById('g_area');var rows='';
   GS.revT.forEach(function(t){var r=gRec(t);var bad=GS.errT[t];
@@ -1363,7 +1371,7 @@ function gFinishRev(){var area=document.getElementById('g_area');var rows='';
     +'<div style="font-weight:600;font-size:13px;color:#777163;margin-top:5px;">Верно: '+GS.ok+' из '+GS.done+'</div></div>'
     +'<div style="margin-top:12px;">'+rows+'</div></div>'
     +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
-    +'<button class="sq" style="'+WBTN+'color:#B54E2F;" onclick="GS=null;initGrammar()">К темам</button></div>';
+    +'<button class="sq" style="'+WBTN+'color:#B54E2F;" onclick="gToThemes()">К темам</button></div>';
   GS=null;gSync();save();gAnim('win','.32s')}
 /* ===== ЭКЗАМЕН: задания 19–24 (текст с 6 пропусками) ===== */
 const G_EXAMS=[
@@ -2001,12 +2009,14 @@ function lPlayBtn(st){var b=document.getElementById('l_playbtn'),ic=document.get
       +[0,1,2,3].map(function(i){return '<span style="width:3.5px;height:18px;border-radius:2px;background:#fff;transform-origin:bottom;animation:leq '+(0.7+i*0.13)+'s ease-in-out infinite;"></span>'}).join('')+'</span>';
     tx.textContent='Играет'}
   else{b.style.animation='';b.style.pointerEvents='';ic.innerHTML=L_PLAYSVG;tx.textContent='Слушать'}}
+/* Переключение замедленной озвучки: переменную модуля разметка присвоить не может. */
+function lToggleSlow(button){LSLOW=!LSLOW;button.style.background=LSLOW?'#FFEDE4':'#fff';button.style.color=LSLOW?'#C2421B':'#6A6E75'}
 function lCtl(fn){
   return '<div style="display:flex;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap;">'
     +'<button id="l_playbtn" class="sq" onclick="'+fn+'" style="flex:1;min-width:160px;min-height:54px;display:inline-flex;align-items:center;justify-content:center;gap:10px;background:linear-gradient(135deg,#FFA570,#F2683F);border:none;border-radius:18px;padding:0 18px;font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:16px;color:#fff;cursor:pointer;box-shadow:0 12px 26px rgba(242,104,63,.35),inset 0 2px 3px rgba(255,255,255,.4),inset 0 -4px 8px rgba(190,55,18,.28);">'
     +'<span id="l_playic" style="display:grid;place-items:center;width:22px;">'+L_PLAYSVG+'</span><span id="l_playtx">Слушать</span></button>'
     +'<button type="button" class="sq" aria-label="Остановить воспроизведение" onclick="lStop()" style="flex:none;width:40px;height:40px;border-radius:14px;border:1px solid #F0EAE2;background:#fff;cursor:pointer;display:grid;place-items:center;"><svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="#8A8F98"><rect x="5" y="5" width="14" height="14" rx="2"/></svg></button>'
-    +'<button class="sq" onclick="LSLOW=!LSLOW;this.style.background=LSLOW?\'#FFEDE4\':\'#fff\';this.style.color=LSLOW?\'#C2421B\':\'#6A6E75\'" style="flex:none;height:40px;border-radius:14px;border:1px solid #F0EAE2;background:'+(LSLOW?'#FFEDE4':'#fff')+';color:'+(LSLOW?'#E44E20':'#8A8F98')+';padding:0 13px;font-family:Manrope,sans-serif;font-weight:800;font-size:12px;cursor:pointer;">0.7×</button>'
+    +'<button class="sq" onclick="lToggleSlow(this)" style="flex:none;height:40px;border-radius:14px;border:1px solid #F0EAE2;background:'+(LSLOW?'#FFEDE4':'#fff')+';color:'+(LSLOW?'#E44E20':'#8A8F98')+';padding:0 13px;font-family:Manrope,sans-serif;font-weight:800;font-size:12px;cursor:pointer;">0.7×</button>'
     +'<span id="l_plays" style="flex:none;font-weight:800;font-size:11px;padding:7px 11px;border-radius:14px;color:#6A6E75;background:#F1F2F4;">прослушиваний: 0 из 2</span></div>'}
 function lTranscript(lines,evs){
   return '<div class="clayCard" style="padding:15px 16px;margin-bottom:12px;">'
@@ -2558,6 +2568,8 @@ function spTick(total,onEnd){clearInterval(SP_tm);
     var b=document.getElementById('s9_tbar');if(b)b.style.width=Math.max(0,Math.round(SP.left/total*100))+'%';
     setTxt('s9_today',spFmt(SP.left));
     if(SP.left<=0){clearInterval(SP_tm);onEnd()}},1000)}
+/* Показ листа с подсказками: переменную модуля разметка присвоить не может. */
+function spToggleSheet(){SP_sheet=!SP_sheet;spRender()}
 function spRender(){var area=document.getElementById('s9_area');if(!area||!SP)return;
   var t=SP.t,c=SP_CONF[t],set=SP.set;
   /* ---- интро ---- */
@@ -2573,7 +2585,7 @@ function spRender(){var area=document.getElementById('s9_area');if(!area||!SP)re
       +'<div style="margin-top:8px;">'+body+'</div>'
       +'<div style="margin-top:11px;display:flex;gap:8px;">'
       +'<button type="button" class="clk sq iconbtn" onclick="spNextSet(SP.t);spOpen(SP.t)" style="flex:1;text-align:center;background:#FFEDE4;border-radius:13px;padding:9px 0;font-weight:800;font-size:12px;color:#C2421B;cursor:pointer;">Другой вариант</button>'
-      +'<button type="button" class="clk sq iconbtn" onclick="SP_sheet=!SP_sheet;spRender()" style="flex:1;text-align:center;background:#EAF7F0;border-radius:13px;padding:9px 0;font-weight:800;font-size:12px;color:#1D7F4A;cursor:pointer;">'+(SP_sheet?'Скрыть шпаргалку':'Шпаргалка')+'</button></div>'
+      +'<button type="button" class="clk sq iconbtn" onclick="spToggleSheet()" style="flex:1;text-align:center;background:#EAF7F0;border-radius:13px;padding:9px 0;font-weight:800;font-size:12px;color:#1D7F4A;cursor:pointer;">'+(SP_sheet?'Скрыть шпаргалку':'Шпаргалка')+'</button></div>'
       +(SP_sheet?'<div style="margin-top:11px;background:#F2F8F4;border-radius:14px;padding:11px 13px;font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.65;">'+SP_SHEET[t]+'</div>':'')
       +'</div>'
       +spBtn(c.prep?'Начать подготовку':'Начать интервью','spPrep()',true)
@@ -2906,3 +2918,40 @@ registerRouteHook(function(id){
     if(SP){spStopAll();SP=null}
     if(SPE){clearInterval(SPE.tm);try{if(SPE.rec&&SPE.rec.state!=='inactive')SPE.rec.stop()}catch(e){}try{SPE.stream&&SPE.stream.getTracks().forEach(function(x){x.stop()})}catch(e){}SPE=null}}});
 registerStartHook(function(){return spSync()});
+
+/* ---------- ГРАНИЦА МОДУЛЯ ---------- */
+/* Озвучка живёт отдельным модулем и не имеет доступа к состоянию приложения.
+   Изменяемое (сессия, замедление) передаётся функциями, иначе tts.js увидит снимок на момент старта. */
+configureTts({
+  apiGetBlob:apiGetBlob,
+  lPlayBtn:lPlayBtn,
+  lStopFallback:lStopFallback,
+  lPlayRawFallback:lPlayRawFallback,
+  wSpeakFallback:wSpeakFallback,
+  serverAvailable:function(){return Boolean(SRV&&TOKEN)},
+  slow:function(){return LSLOW}
+});
+
+/*
+ * Имена, которые обязаны быть видны за пределами модуля: их ищут инлайновые обработчики
+ * разметки, сгенерированная разметка экранов и e2e-сценарии. Список сверяется автоматически —
+ * `npm run check` запускает scripts/check-inline-handlers.js. Раскладывает их по window main.js.
+ */
+export {
+  LE,LI,LT,RE,RQ,SP,SPE,WI,WQ,lastWord,
+  checkWriting,closeLearn,countWords,learnGo,logout,openLearn,pwCheck,r_add,save,setTask,
+  startApp,startDemo,tgClick,trWord,
+  gAfterExplain,gExam,gExamCheck,gExamStart,gMap,gOpen,gPick,gResume,gReview,gStart,gSubmit,
+  gTheory,gToThemes,
+  lExam,lExamDedup,lExamFinish,lExamPlay,lExamRender,lExamStart,lHub,lIq,lIqCheck,lIqPick,
+  lMt,lMtCheck,lMtLines,lMtPick,lPlay,lTf,lTfCheck,lTfPick,lToggleSlow,
+  rExam,rExamDedup,rExamRender,rExamStart,rGp,rGpCheck,rGpPick,rHl,rHlCheck,rHlPick,rHub,
+  rQs,rQsPick,rQsRender,rSync,
+  initSpeaking,spDeleteRecording,spEtalon,spEval,spExam,spFinish,spFlagTranscript,spNextQ,
+  spNextSet,spOpen,spPlay,spPrep,spRec,spSample,spStopAll,spToggleSheet,spVoiceSample,
+  speEndStage,speNextQ,speRec,speStart,
+  wExtra,wNext,wPick,wRender,wShowKnown,wSubmit,wrNext,wrSheet,
+};
+
+/* Зависимости privacy.js и pwa.js, которые раньше находились через глобальную область. */
+export {DEMO_MODE,SRV,registerProfileHook,registerStartHook,toast};

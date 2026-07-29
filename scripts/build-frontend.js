@@ -36,10 +36,39 @@ for (const name of names) {
   };
 }
 
+/*
+ * Разметка подключает одну точку входа, поэтому проверить только теги <script> уже недостаточно:
+ * опечатка в импорте внутри модуля сломала бы приложение молча. Идём по статическим импортам от
+ * точки входа и убеждаемся, что каждый файл действительно попал в сборку.
+ */
+async function verifyModuleGraph(entry) {
+  const seen = new Set();
+  const queue = [entry];
+  while (queue.length) {
+    const name = queue.shift();
+    if (seen.has(name)) continue;
+    seen.add(name);
+    if (!assets[name]) throw new Error(`Missing frontend module: ${name}`);
+    const source = await fs.readFile(path.join(outputDirectory, name), 'utf8');
+    /* Импорт — всегда инструкция верхнего уровня, поэтому ищем от начала строки:
+       иначе `from '…'` внутри учебного текста будет принят за зависимость. */
+    for (const statement of source.matchAll(/^import\s+[^;']*from\s*'([^']+)'|^import\s*'([^']+)'/gmu)) {
+      const specifier = statement[1] || statement[2];
+      if (!specifier.startsWith('.')) throw new Error(`Frontend module ${name} imports outside the bundle: ${specifier}`);
+      queue.push(path.posix.normalize(path.posix.join(path.posix.dirname(name), specifier)));
+    }
+  }
+  return seen;
+}
+
 const html = await fs.readFile(path.join(outputDirectory, 'index.html'), 'utf8');
+const entryPoints = [];
 for (const source of html.matchAll(/<script[^>]+src="\/([^"]+)"/gu)) {
   if (!assets[source[1]]) throw new Error(`Missing frontend script: ${source[1]}`);
+  entryPoints.push(source[1]);
 }
+if (!entryPoints.length) throw new Error('index.html подключает ноль скриптов — приложение не запустится');
+for (const entry of entryPoints) await verifyModuleGraph(entry);
 
 await fs.writeFile(
   path.join(outputDirectory, 'asset-manifest.json'),

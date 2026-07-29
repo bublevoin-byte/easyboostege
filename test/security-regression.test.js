@@ -1,13 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { analyzeInlineHandlers } from '../scripts/check-inline-handlers.js';
 
 const frontendPath = new URL('../public/index.html', import.meta.url);
 const frontendApiPath = new URL('../public/api.js', import.meta.url);
 const frontendAuthPath = new URL('../public/auth.js', import.meta.url);
-const frontendScriptPaths = ['auth.js', 'sync.js', 'store.js', 'components.js', 'router.js', 'learning.js', 'modules/words.js', 'modules/grammar.js', 'modules/reading.js', 'modules/listening.js', 'modules/writing.js', 'modules/speaking.js', 'modules/exam.js', 'modules/progress.js', 'modules/profile.js', 'app.js', 'privacy.js', 'tts.js', 'pwa.js'].map(
-  (name) => new URL(`../public/${name}`, import.meta.url),
-);
+/* Порядок повторяет порядок импортов в public/main.js — он же прежний порядок тегов <script>. */
+const frontendScriptNames = ['main.js', 'auth.js', 'sync.js', 'store.js', 'components.js', 'router.js', 'learning.js', 'modules/words.js', 'modules/grammar.js', 'modules/reading.js', 'modules/listening.js', 'modules/writing.js', 'modules/speaking.js', 'modules/exam.js', 'modules/progress.js', 'modules/profile.js', 'app.js', 'privacy.js', 'tts.js', 'pwa.js'];
+const frontendScriptPaths = frontendScriptNames.map((name) => new URL(`../public/${name}`, import.meta.url));
 const serverPath = new URL('../server.js', import.meta.url);
 const usersRoutePath = new URL('../routes/users.js', import.meta.url);
 const progressRoutePath = new URL('../routes/progress.js', import.meta.url);
@@ -68,12 +71,52 @@ test('frontend contains no embedded or browser-managed AI credentials', async ()
   assert.match(frontend, /post\('\/api\/v1\/ai\/generate-content'/);
 });
 
-test('frontend uses ordered external scripts that remain syntactically valid', async () => {
-  const { html, api, scripts } = await readFrontend();
-  assert.match(html, /<script src="\/api\.js" defer><\/script>\s*<script src="\/auth\.js" defer><\/script>\s*<script src="\/sync\.js" defer><\/script>\s*<script src="\/store\.js" defer><\/script>\s*<script src="\/components\.js" defer><\/script>\s*<script src="\/router\.js" defer><\/script>\s*<script src="\/learning\.js" defer><\/script>\s*<script src="\/modules\/words\.js" defer><\/script>\s*<script src="\/modules\/grammar\.js" defer><\/script>\s*<script src="\/modules\/reading\.js" defer><\/script>\s*<script src="\/modules\/listening\.js" defer><\/script>\s*<script src="\/modules\/writing\.js" defer><\/script>\s*<script src="\/modules\/speaking\.js" defer><\/script>\s*<script src="\/modules\/exam\.js" defer><\/script>\s*<script src="\/modules\/progress\.js" defer><\/script>\s*<script src="\/modules\/profile\.js" defer><\/script>\s*<script src="\/app\.js" defer><\/script>\s*<script src="\/privacy\.js" defer><\/script>\s*<script src="\/tts\.js" defer><\/script>/u);
+test('frontend loads through a single module entry point that keeps the previous order', async () => {
+  const { html } = await readFrontend();
+
+  /* Одна точка входа: всё остальное подключается импортами, а не тегами. */
+  const tags = [...html.matchAll(/<script[^>]*>(?:[\s\S]*?<\/script>)?/giu)].map((match) => match[0]);
+  assert.deepEqual(tags, ['<script type="module" src="/main.js"></script>']);
   assert.doesNotMatch(html, /<script(?![^>]*\bsrc\s*=)(?:\s[^>]*)?>/iu);
-  assert.doesNotThrow(() => new Function(api));
-  for (const script of scripts) assert.doesNotThrow(() => new Function(script));
+
+  /*
+   * Порядок выполнения модулей — часть контракта, а не деталь оформления: модули предметных
+   * экранов кладут себя в window.EasyBoostЧто-то, а app.js читает эти имена на верхнем уровне.
+   */
+  const entry = await fs.readFile(new URL('../public/main.js', import.meta.url), 'utf8');
+  const imported = [...entry.matchAll(/^import\s+(?:[^;']*from\s*)?'\.\/([^']+)'/gmu)].map((match) => match[1]);
+  assert.deepEqual(imported, [
+    'api.js', 'auth.js', 'sync.js', 'store.js', 'components.js', 'router.js', 'learning.js',
+    'modules/words.js', 'modules/grammar.js', 'modules/reading.js', 'modules/listening.js',
+    'modules/writing.js', 'modules/speaking.js', 'modules/exam.js', 'modules/progress.js',
+    'modules/profile.js', 'app.js', 'privacy.js', 'tts.js', 'pwa.js',
+  ]);
+});
+
+test('every frontend module is syntactically valid as an ES module', async () => {
+  /*
+   * new Function() здесь больше не годится: он разбирает текст как классический скрипт и споткнётся
+   * о первый же import. Node разбирает эти файлы ровно так же, как их разберёт браузер.
+   */
+  for (const path of [frontendApiPath, ...frontendScriptPaths]) {
+    assert.doesNotThrow(
+      () => execFileSync(process.execPath, ['--check', fileURLToPath(path)], { stdio: 'pipe' }),
+      `${path.pathname} должен оставаться корректным ES-модулем`,
+    );
+  }
+});
+
+test('no frontend module relies on a declaration becoming a global name', async () => {
+  /*
+   * Инлайновый обработчик ищет имя на window. В классическом скрипте оно попадало туда само,
+   * в модуле — нет, и клик молча ломается. Разбор обработчиков — единственная проверка,
+   * которая это ловит без браузера.
+   */
+  const report = await analyzeInlineHandlers();
+  assert.deepEqual(report.missing, []);
+  assert.ok(report.handlers.length > 100, 'разбор обработчиков не должен схлопнуться до пустого списка');
+  assert.ok(report.bound.has('tab'), 'window.tab нужен разметке и e2e-сценарию производительности');
+  assert.ok(report.bound.has('startApp'), 'window.startApp вызывает e2e-сценарий demo');
 });
 
 test('legacy application code delegates network access to the API layer', async () => {
