@@ -36,6 +36,8 @@ npm ci
 npm run check
 npm test
 npm run test:e2e
+npm run build:frontend
+npm run test:e2e
 npm run test:e2e:performance
 npm run quality:check
 npm audit --omit=dev
@@ -44,6 +46,10 @@ docker compose -f compose.production.yml build
 docker compose -f compose.production.yml up -d
 curl --fail http://127.0.0.1:3000/health/ready
 ```
+
+`npm run test:e2e` выполняется дважды намеренно: до сборки сервер отдаёт `public/`, после —
+`dist/public`. В образ уезжает второй вариант, поэтому `npm run build:frontend` обязан пройти до
+`docker compose build`; без него контейнер получит исходники и будет работать, но без бандла.
 
 Перед публичным заявлением о методической точности дополнительно выполнить `npm run quality:release -- quality/release.json` на наборе, независимо размеченном квалифицированным преподавателем.
 

@@ -36,7 +36,17 @@ import { createMediaRoutes } from './routes/media.js';
 import { createTaskRoutes, seedBuiltinTasks } from './routes/tasks.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const frontendHtml = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
+/* Собранный frontend предпочтительнее исходников, но не обязателен: на чистом клоне и в разработке
+   dist/public нет, и приложение должно запускаться из public/ ровно как раньше.
+   Каталог выбирается один раз и используется везде — статика, SPA-fallback и подсчёт хешей
+   инлайновых скриптов для CSP. Считать политику по одной разметке, а отдавать другую нельзя:
+   политика и разметка разъедутся, и приложение перестанет запускаться в production. */
+const buildDirectory = path.join(__dirname, 'dist', 'public');
+const frontendDirectory = fs.existsSync(path.join(buildDirectory, 'index.html'))
+  ? buildDirectory
+  : path.join(__dirname, 'public');
+const frontendIndex = path.join(frontendDirectory, 'index.html');
+const frontendHtml = fs.readFileSync(frontendIndex, 'utf8');
 
 const SECRET = config.jwtSecret;
 const PORT = config.port;
@@ -134,7 +144,7 @@ app.get('/', async (req, res, next) => {
     return next();
   } catch (error) { next(error); }
 });
-app.use(express.static(path.join(__dirname, 'public'), {
+app.use(express.static(frontendDirectory, {
   setHeaders(res, filePath) {
     if (path.basename(filePath) === 'index.html') res.setHeader('Cache-Control', 'no-store');
   },
@@ -262,7 +272,7 @@ app.use('/api', (req, res) => {
 
 app.get('*', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  res.sendFile(frontendIndex);
 });
 
 app.use((error, req, res, next) => {
@@ -286,7 +296,10 @@ app.use((error, req, res, next) => {
   res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Внутренняя ошибка сервера.', requestId: req.requestId } });
 });
 
-const server = app.listen(PORT, () => console.log('Easy Boost server on http://localhost:' + PORT));
+const server = app.listen(PORT, () => console.log(
+  'Easy Boost server on http://localhost:' + PORT
+  + ' (frontend: ' + (frontendDirectory === buildDirectory ? 'dist/public' : 'public') + ')',
+));
 startTelegram();
 
 /* Section 10.1: built-in tasks need rows in the bank, otherwise they have no identifier a client

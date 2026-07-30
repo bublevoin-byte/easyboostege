@@ -1,12 +1,26 @@
-const CACHE_NAME='easyboost-static-v21';
 /*
- * Точка входа и все модули, которые она тянет статически: офлайн приложение должно стартовать
- * целиком. Сюда входят и три экрана раздела 6.1 — «Слова», «Грамматика», «Прогресс», — потому что
- * main.js импортирует их наравне с оболочкой. Пять ленивых чанков здесь отсутствуют: страница не
- * должна просить их при первой загрузке. В кэш они попадают ниже, в обработчике fetch, когда
- * ученик впервые открывает свой экран, — поэтому офлайн-запуск открывает уже виденные экраны.
+ * Оболочка приложения в кэше.
+ *
+ * Список файлов генерирует сборка. В `dist/public` имена хешированные, и держать их здесь руками
+ * нельзя: `scripts/build-frontend.js` заменяет блок между маркерами содержимым манифеста Vite.
+ * Версия ниже — для исходников, которые сервер отдаёт, когда сборки нет; тот же скрипт сверяет её
+ * с графом статических импортов `main.js`, поэтому и она не разъезжается молча.
+ *
+ * Сюда входят три экрана раздела 6.1 — «Слова», «Грамматика», «Прогресс», — потому что main.js
+ * импортирует их наравне с оболочкой. Пять ленивых чанков здесь отсутствуют: страница не должна
+ * просить их при первой загрузке. В кэш они попадают ниже, в обработчике fetch, когда ученик
+ * впервые открывает свой экран, — поэтому офлайн-запуск открывает уже виденные экраны.
  */
+/* build:app-shell */
 const APP_SHELL=['/','/offline.html','/privacy.html','/task-bank.json','/main.js','/globals.js','/api.js','/auth.js','/sync.js','/store.js','/components.js','/router.js','/learning.js','/modules/words.js','/modules/grammar.js','/modules/reading.js','/modules/listening.js','/modules/writing.js','/modules/speaking.js','/modules/exam.js','/modules/progress.js','/modules/profile.js','/app.js','/screens.js','/screens/words.js','/screens/grammar.js','/screens/progress.js','/privacy.js','/tts.js','/pwa.js','/manifest.json','/pwa-icon.svg','/icon-192.png','/icon-512.png','/icon-maskable-512.png'];
+/* end build:app-shell */
+/*
+ * Имя кэша считается по самому списку, а не пишется руками. Прежний `easyboost-static-vNN` нужно
+ * было поднимать при каждом изменении набора файлов, и забытый бамп оставлял ученика на старой
+ * оболочке. В сборке имена файлов хешированные, поэтому любое изменение содержимого меняет список —
+ * а значит, и имя кэша.
+ */
+const CACHE_NAME='easyboost-static-'+APP_SHELL.join('|').split('').reduce(function(hash,character){return Math.imul(hash^character.charCodeAt(0),16777619)>>>0},2166136261).toString(36);
 self.addEventListener('install',event=>{event.waitUntil(Promise.all([caches.open(CACHE_NAME).then(cache=>cache.addAll(APP_SHELL)),self.skipWaiting()]))});
 self.addEventListener('activate',event=>{event.waitUntil(Promise.all([caches.keys().then(keys=>Promise.all(keys.filter(key=>key!==CACHE_NAME).map(key=>caches.delete(key)))),self.clients.claim()]))});
 self.addEventListener('message',event=>{if(event.data&&event.data.type==='SKIP_WAITING')self.skipWaiting()});

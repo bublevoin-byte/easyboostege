@@ -129,7 +129,8 @@ test('application starts and serves health, security headers and PWA assets', { 
     assert.equal(home.status, 200);
     assert.match(home.headers.get('content-security-policy') || '', /default-src 'self'/u);
     assert.match(home.headers.get('cache-control') || '', /no-store/u);
-    assert.match(await home.text(), /<title>Easy Boost<\/title>/u);
+    const homeMarkup = await home.text();
+    assert.match(homeMarkup, /<title>Easy Boost<\/title>/u);
 
     const manifest = await fetch(`${baseUrl}/manifest.json`);
     assert.equal(manifest.status, 200);
@@ -141,12 +142,17 @@ test('application starts and serves health, security headers and PWA assets', { 
     assert.match(serviceWorkerSource, /CACHE_NAME/u);
     assert.match(serviceWorkerSource, /url\.pathname\.startsWith\('\/api\/'\)/u);
 
-    const compressedApp = await rawGet(`${baseUrl}/app.js`, { 'Accept-Encoding': 'gzip' });
-    const appSourceSize = (await fs.stat(path.join(projectDirectory, 'public', 'app.js'))).size;
-    assert.equal(compressedApp.status, 200);
-    assert.equal(compressedApp.headers['content-encoding'], 'gzip');
-    assert.ok(compressedApp.body.length < appSourceSize * 0.5);
-    console.log(`performance: app.js gzip=${compressedApp.body.length} bytes, source=${appSourceSize} bytes`);
+    /* Точка входа называется по-разному в исходниках и в собранной версии, поэтому берётся из
+       отданной разметки: сжатие проверяется на том файле, который страница действительно грузит. */
+    const entryScript = /<script[^>]+src="(\/[^"]+\.js)"/u.exec(homeMarkup);
+    assert.ok(entryScript, 'отданная разметка обязана подключать точку входа');
+    const compressedEntry = await rawGet(`${baseUrl}${entryScript[1]}`, { 'Accept-Encoding': 'gzip' });
+    const plainEntry = await rawGet(`${baseUrl}${entryScript[1]}`, { 'Accept-Encoding': 'identity' });
+    assert.equal(compressedEntry.status, 200);
+    assert.equal(plainEntry.status, 200);
+    assert.equal(compressedEntry.headers['content-encoding'], 'gzip');
+    assert.ok(compressedEntry.body.length < plainEntry.body.length * 0.5);
+    console.log(`performance: ${entryScript[1]} gzip=${compressedEntry.body.length} bytes, served=${plainEntry.body.length} bytes`);
 
     const expiredAuthorization = { Authorization: `Bearer ${jwt.sign({ u: 'expired' }, jwtSecret)}` };
     const paidRequests = [

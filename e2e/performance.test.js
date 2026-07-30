@@ -28,6 +28,35 @@ const LAZY_SCREENS = [
 // офлайн, ни разу их не открыв. Проверяются оба списка, чтобы ни один не съехал молча в свою сторону.
 const SHELL_SCREENS = ['screens/words.js', 'screens/grammar.js', 'screens/progress.js'];
 
+/*
+ * Сервер отдаёт `dist/public`, если сборка есть, и `public/` иначе — замер должен идти по тому же
+ * правилу. В сборке имя файла больше ничего не говорит: Vite переименовывает чанки в хешированные
+ * имена, а три статических экрана вовсе растворяются в точке входа. Поэтому экран сопоставляется с
+ * файлом по манифесту сборки, а на исходниках соответствие тождественно.
+ *
+ * Правило от этого не слабеет, а становится точнее: ленивый экран уезжает в отдельный чанк, и его
+ * появление при старте видно; статический попадает в точку входа, и его исчезновение оттуда —
+ * тоже. Оба списка проверяются, чтобы ни один не съехал молча в свою сторону.
+ */
+async function servedScreenFiles() {
+  const screens = [...LAZY_SCREENS, ...SHELL_SCREENS];
+  let modules = null;
+  try {
+    const manifest = await fs.readFile(new URL('../dist/public/asset-manifest.json', import.meta.url), 'utf8');
+    await fs.access(new URL('../dist/public/index.html', import.meta.url));
+    modules = JSON.parse(manifest).modules;
+  } catch {
+    // Сборки нет — сервер отдаёт исходники, и каждый экран остаётся отдельным файлом.
+  }
+  const files = new Map();
+  for (const screen of screens) {
+    const file = modules ? modules[screen] : screen;
+    if (!file) throw new Error(`Манифест сборки не знает, в какой файл попал ${screen}`);
+    files.set(screen, `/${file}`);
+  }
+  return { files, built: Boolean(modules) };
+}
+
 async function findAvailablePort() {
   const listener = net.createServer();
   await new Promise((resolve, reject) => {
@@ -114,10 +143,12 @@ async function measureFirstLoad(browser, baseUrl) {
   const context = await browser.newContext({ serviceWorkers: 'block' });
   try {
     const page = await context.newPage();
-    const requestedScreens = [];
+    const requestedScripts = new Set();
     page.on('request', (request) => {
-      const match = /\/(screens\/[^/?#]+\.js)(?:[?#]|$)/u.exec(request.url());
-      if (match) requestedScreens.push(match[1]);
+      const url = request.url();
+      if (!url.startsWith(baseUrl)) return;
+      const { pathname } = new URL(url);
+      if (pathname.endsWith('.js')) requestedScripts.add(pathname);
     });
     const sessionProbe = page.waitForResponse((response) => response.url().endsWith('/api/v1/me'), { timeout: 15_000 })
       .catch(() => null);
@@ -136,7 +167,7 @@ async function measureFirstLoad(browser, baseUrl) {
       bytes: scripts.reduce((total, script) => total + script.encoded, 0),
       unpackedBytes: scripts.reduce((total, script) => total + script.decoded, 0),
       files: scripts.length,
-      requestedScreens,
+      requestedScripts,
     };
   } finally {
     await context.close();
@@ -233,7 +264,10 @@ async function run() {
     await waitForReady(baseUrl, child, output);
 
     // Первым делом — вес первой загрузки, на чистом контексте, пока ни один экран не открывали.
+    const { files: screenFiles, built } = await servedScreenFiles();
     const firstLoad = await measureFirstLoad(browser, baseUrl);
+    const screensAtStart = [...LAZY_SCREENS, ...SHELL_SCREENS]
+      .filter((screen) => firstLoad.requestedScripts.has(screenFiles.get(screen)));
 
     // Waiting for the session probe rather than for networkidle: the page pulls fonts from an
     // external host, and an early click would be undone when the probe returns to the login screen.
@@ -272,7 +306,7 @@ async function run() {
     report('CLS', vitals.cls, BUDGET.cls, '');
     report('INP', inp, BUDGET.inpMs, 'ms');
     report('JavaScript первой загрузки', firstLoad.bytes / 1024, BUDGET.firstLoadKb, ' КБ', 1);
-    console.log(`performance: первая загрузка — ${firstLoad.files} файлов, ${(firstLoad.unpackedBytes / 1024).toFixed(0)} КБ без сжатия, экраны: ${firstLoad.requestedScreens.join(', ') || 'ни одного'}`);
+    console.log(`performance: первая загрузка — ${firstLoad.files} файлов, ${(firstLoad.unpackedBytes / 1024).toFixed(0)} КБ без сжатия, источник: ${built ? 'сборка dist/public' : 'исходники public'}, экраны: ${screensAtStart.join(', ') || 'ни одного'}`);
     // Этот проход идёт с работающим service worker, поэтому число здесь — несжатый объём всего
     // разобранного JavaScript, а не байты по сети. Оно сравнимо с базовой линией, снятой так же.
     console.log(`performance: JavaScript разобрано к концу обхода ${(vitals.scriptBytes / 1024).toFixed(0)} КБ без сжатия, взаимодействий измерено ${vitals.interactions.length}`);
@@ -293,13 +327,21 @@ async function run() {
     // Состав первой загрузки — правило, а не наблюдение. Лишний экран в ней возвращает вес,
     // пропавший — офлайн-обещание раздела 6.1.
     assert.deepEqual(
-      LAZY_SCREENS.filter((screen) => firstLoad.requestedScreens.includes(screen)), [],
+      LAZY_SCREENS.filter((screen) => screensAtStart.includes(screen)), [],
       'при первой загрузке запрошен ленивый экран: его код должен приезжать при первом переходе',
     );
     assert.deepEqual(
-      SHELL_SCREENS.filter((screen) => !firstLoad.requestedScreens.includes(screen)), [],
+      SHELL_SCREENS.filter((screen) => !screensAtStart.includes(screen)), [],
       'экран раздела 6.1 не приехал при первой загрузке: без сети он должен работать сразу',
     );
+    // Иначе проверка выше стала бы бессодержательной: если бы ленивый экран лежал в том же файле,
+    // что оболочка, «не запрошен при старте» было бы недостижимо, а не выполнено.
+    for (const screen of LAZY_SCREENS) {
+      assert.ok(
+        SHELL_SCREENS.every((shell) => screenFiles.get(shell) !== screenFiles.get(screen)),
+        `${screen} лежит в том же файле, что экран оболочки — ленивым он быть перестал`,
+      );
+    }
 
     if (exceeded.length) {
       throw new Error(`Бюджеты раздела 19 превышены:\n  - ${exceeded.join('\n  - ')}`);
