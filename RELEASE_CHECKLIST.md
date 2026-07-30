@@ -16,6 +16,7 @@
 - [x] Текущие файлы и полная Git-история автоматически проверяются на секреты без вывода найденных значений.
 - [x] `npm audit --omit=dev` сообщает 0 известных уязвимостей.
 - [x] CI запускает миграции и integration-тест с PostgreSQL 17.
+- [x] `npm run test:e2e:performance` держит пять бюджетов раздела 19 ТЗ — LCP, CLS, INP, задержку индикатора проверки ИИ и вес JavaScript первой загрузки — и падает, если ленивый экран приедет при первой загрузке или экран раздела 6.1 не приедет. Прогон 30 июля 2026 года: 92–100 мс, 0.000, 56 мс, 34–36 мс, 81,9 КБ по сети.
 
 ## Перед первым production-запуском
 
@@ -35,6 +36,7 @@ npm ci
 npm run check
 npm test
 npm run test:e2e
+npm run test:e2e:performance
 npm run quality:check
 npm audit --omit=dev
 docker compose -f compose.production.yml config

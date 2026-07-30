@@ -1,6 +1,6 @@
 # 09 — Обновить статус в ТЗ и эксплуатационную документацию
 
-Status: ready-for-agent
+Status: done
 Blocked by: 07, 08
 Spec: .scratch/frontend-performance-vite/spec.md#5-критерии-приёмки
 
