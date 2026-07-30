@@ -61,9 +61,12 @@ npm run build:frontend
 источник. Разработка от этого не зависит — на чистом клоне `npm start` работает из `public/` без
 сборки, и все тесты читают исходники оттуда же.
 
-`npm run build:frontend` обязан пройти **до** `docker compose build`: образ копирует рабочее дерево
-вместе с `dist/`, а `vite` внутри образа нет. Без сборки контейнер будет работать из `public/` —
-приложение живо, но без бандла и минификации.
+**Перед `docker compose build` эту команду выполнять не нужно.** Frontend собирает отдельная стадия
+`Dockerfile` из тех же исходников, а `.dockerignore` исключает `dist/`, поэтому каталог с рабочей
+машины в контекст сборки не попадает вовсе. Содержимое образа определяется репозиторием, а не тем,
+что случайно лежит на диске: ни отсутствующая, ни устаревшая локальная сборка на образ не влияют.
+Стадия сборки ставит полный набор зависимостей, финальный образ — по-прежнему `npm ci --omit=dev`,
+так что `vite` в него не попадает.
 
 Вес первой загрузки, замер 30 июля 2026 года: исходники — 26 файлов, 229 КБ несжатого JavaScript,
 81,9 КБ по сети; сборка — 1 файл, 165 КБ несжатого, 54,5 КБ по сети. Бюджет спеки — 150 КБ.
@@ -122,7 +125,6 @@ XAI_API_KEY=...
 
 ```bash
 npm ci
-npm run build:frontend
 docker compose -f compose.production.yml config
 docker compose -f compose.production.yml build
 docker compose -f compose.production.yml up -d
@@ -147,7 +149,6 @@ docker compose -f compose.production.yml logs --tail=100 app
 npm run db:backup
 git pull --ff-only
 npm ci
-npm run build:frontend
 docker compose -f compose.production.yml build app
 docker compose -f compose.production.yml up -d app
 docker compose -f compose.production.yml ps
@@ -156,10 +157,10 @@ curl --fail http://127.0.0.1:3000/health/ready
 
 Не удаляйте volume `postgres-data` при обновлении.
 
-Если обновление меняло файлы в `public/`, пересоберите frontend перед сборкой образа: имя кэша и
-список `APP_SHELL` для service worker считает `npm run build:frontend`, и без него устройство
-продолжит открывать прежнюю оболочку — см. «Сборка frontend». Сбрасывать кэш на устройстве ученика
-не нужно и нельзя: он получит уведомление о новой версии сам.
+Если обновление меняло файлы в `public/`, отдельного шага не требуется: имя кэша и список
+`APP_SHELL` для service worker считает сборка frontend, а её выполняет стадия сборки образа — см.
+«Сборка frontend». Сбрасывать кэш на устройстве ученика не нужно и нельзя: он получит уведомление
+о новой версии сам.
 
 ## Backup и восстановление PostgreSQL
 

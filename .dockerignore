@@ -6,6 +6,7 @@ data.json
 *.test-data.json
 tts-cache
 coverage
+dist
 *.log
 README_DEPLOY.md
 РАЗМЕЩЕНИЕ_рядом_с_ботом.md

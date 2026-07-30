@@ -1,7 +1,10 @@
 # 10 — Собирать frontend внутри образа, а не приносить его с машины владельца
 
-Status: needs-info
-Blocked by: 06, и запущенный Docker Desktop
+Status: done
+Blocked by: —
+
+Docker Desktop запущен владельцем 30 июля 2026 года: демон 28.0.1, API 1.48, buildx 0.21.1.
+Блокировка снята.
 Решение владельца: 30 июля 2026 года — многостадийная сборка
 
 ## Зачем
@@ -63,14 +66,45 @@ Blocked by: 06, и запущенный Docker Desktop
 
 ## Definition of Done
 
-- [ ] `docker build` проходит, образ собирается с нуля.
-- [ ] Внутри образа `dist/public/index.html` существует и собран стадией сборки, а не скопирован
+- [x] `docker build` проходит, образ собирается с нуля (`--no-cache` тоже).
+- [x] Внутри образа `dist/public/index.html` существует и собран стадией сборки, а не скопирован
       с хоста — проверено сборкой при **отсутствующем** `dist/` в рабочем каталоге.
-- [ ] Запущенный контейнер отвечает на `/health/ready` и отдаёт собранную версию: разметка ссылается
+- [x] Запущенный контейнер отвечает на `/health/ready` и отдаёт собранную версию: разметка ссылается
       на хешированный ассет из `/assets/`, а не на `/main.js`.
-- [ ] `.dockerignore` исключает `dist/`; сборка при **устаревшей** `dist/` на хосте даёт в образе
+- [x] `.dockerignore` исключает `dist/`; сборка при **устаревшей** `dist/` на хосте даёт в образе
       свежую — проверено намеренной порчей локальной `dist/`.
-- [ ] `docker compose -f compose.production.yml config` проходит.
-- [ ] `README_DEPLOY.md` и `RELEASE_CHECKLIST.md` не содержат ручного шага сборки frontend.
-- [ ] `npm run lint`, `npm run check`, `npm test` проходят: 262 успешных, 0 упавших, 1 пропущен.
-- [ ] Один коммит.
+- [x] `docker compose -f compose.production.yml config` проходит.
+- [x] `README_DEPLOY.md` и `RELEASE_CHECKLIST.md` не содержат ручного шага сборки frontend.
+- [x] `npm run lint`, `npm run check`, `npm test` проходят: 262 успешных, 0 упавших, 1 пропущен.
+- [x] Один коммит.
+
+## Результат
+
+Образ собирает frontend сам, отдельной стадией `frontend-build` из `public/`, `vite.config.js` и
+`scripts/build-frontend.js`; `dist/` исключён из контекста сборки. Проверено на живом Docker 28.0.1:
+
+- при удалённом `dist/` на хосте образ всё равно содержит `dist/public/index.html` с
+  `<script src="/assets/index-D1RXDPa-.js">` и пятью ленивыми чанками в `assets/`;
+- при намеренно испорченном локальном `dist/public/index.html` строка `POISONED-DIST-MARKER` в
+  образе не встречается ни в одном файле (`--no-cache`-сборка), а разметка внутри — свежая;
+- контейнер из `compose.production.yml` вместе с PostgreSQL 17 отвечает `{"status":"ready",
+  "storage":"postgres"}` на `/health/ready`, `HEALTHCHECK` даёт `healthy`, `/` отдаёт хешированный
+  ассет, `/main.js` — SPA-fallback `text/html`, лог запуска называет `frontend: dist/public`.
+
+Размер образа не изменился: 289 423 895 байт до, 289 425 675 после — стадия сборки в финальный
+образ не входит, а собранный `dist/public` тот же, что раньше приезжал с хоста.
+
+## Что разошлось с постановкой
+
+- **Стадии сборки нужен `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`.** `npm ci` без `--omit=dev` ставит и
+  `playwright`, чей postinstall тянет три браузера — сотни мегабайт загрузки, которыми в образе
+  никто не пользуется, и лишний повод для падения сборки на чужой сети. Стадия временная, на
+  финальный образ переменная не влияет.
+- **Стадия сборки копирует не всё дерево, а только входы сборки frontend** — `package.json`,
+  `package-lock.json`, `vite.config.js`, `scripts/build-frontend.js`, `public/`. Правка в
+  `server.js` или в тестах не переигрывает сборку frontend.
+- **`.github/workflows/ci.yml` не тронут:** сборки образа в нём нет, только
+  `docker compose -f compose.staging.yml config --quiet`. Приводить в соответствие нечего.
+- **`docker compose -f compose.production.yml config` без `.env` падает на обязательных
+  `POSTGRES_PASSWORD`, `JWT_SECRET` и `APP_URL`** — так было и до тикета, это проверка секретов, а
+  не конфигурации. Проверялось с временным `--env-file`.
