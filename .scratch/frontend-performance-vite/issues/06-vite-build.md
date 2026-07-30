@@ -1,7 +1,13 @@
 # 06 — Подключить Vite как сборщик frontend
 
-Status: needs-info
-Blocked by: 04, 05, и установка зависимости владельцем
+Status: ready-for-agent
+Blocked by: —
+
+## Зависимость установлена
+
+30 июля 2026 года владелец выполнил `npm install --save-dev vite`: в `package.json` записан
+`"vite": "^8.1.5"`, установлено `vite/8.1.5`, `npm audit` показывает 0 уязвимостей.
+Блокировка снята, тикет можно брать в работу.
 Spec: .scratch/frontend-performance-vite/spec.md#44-сборка
 ADR: docs/adr/0001-frontend-build-and-framework.md
 
