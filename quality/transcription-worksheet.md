@@ -289,23 +289,16 @@ the rules of email writing.
 <!-- w37-fipi-2025-001 -->
 ```text
 Hello Oscar
-Thank you for your email Excuse mo I can't write earlier because I working
-hard in my store I glad to hearing from you In your recent email you ask
-me about Russian literature and Russian Writers.
+Thank you for your email Excuse mo I can't write earlier because I working hard in my store I glad to hearing from you In your recent email you ask me about Russian literature and Russian Writers.
 
-Pushkin, Gogol, Tolstoy, Dostayeuskiy and Solticov-Shedrin are so popular
-with Russian teenager because students are learning classical
-literature at school.
+Pushkin, Gogol, Tolstoy, Dostayeuskiy and Solticov-Shedrin are so popular with Russian teenager because students are learning classical literature at school.
 
-As for me, I think my favorite writer is Dostayeuskiy because he
-is smart and horrible. He was writed my favorite book ,, Prestuplenie,
+As for me, I think my favorite writer is Dostayeuskiy because he is smart and horrible. He was writed my favorite book ,, Prestuplenie,
 Nakazanie". Well, I think foreigner should to read the mertvie dushi by
 Gogol because this book can show russian life. This book looks like horror.
 You can see a Russian socity in prime!
 
-Thank you for your present. I like presents so much! What is the
-size of the present? What is the coluor of the present? What is the
-cost of the present? Can you show me your present in your next email ?
+Thank you for your present. I like presents so much! What is the size of the present? What is the coluor of the present? What is the cost of the present? Can you show me your present in your next email ?
 Sorry, I can't write more because we need to go ! See you later !
 
 Goodbuy
@@ -346,15 +339,9 @@ Remember the rules of email writing.
 Dear Olive,
 Thanks for your email. I hope you're doing fine.
 In your email you ask me some questions about St.
-Petersburg. I think you should write about Hermitage
-and Petergof. In my opinion St Petersburg is popular
-among foreign and local tourists because it's the most
-beautiful historic city Of the world. I think summer is the
-best season to visit St. Petersburg.
+Petersburg. I think you should write about Hermitage and Petergof. In my opinion St Petersburg is popular among foreign and local tourists because it's the most beautiful historic city Of the world. I think summer is the best season to visit St. Petersburg.
 
-By the way, I want to ask you some questions about the
-trip. How long was your trip? What interesting things did you
-see? Did you go to the trip by yourself?
+By the way, I want to ask you some questions about the trip. How long was your trip? What interesting things did you see? Did you go to the trip by yourself?
 
 I guess that's all for now. Write back soon.
 
@@ -393,8 +380,7 @@ of email writing.
  Dear Sandra,
      Thank you for your letter! It's a big pleasure to receive it from you.
 
-     Now, I'd like to answer your questions. Well,I think, that the most popular food among ussian is the soup. We have different kinds
-of soup in our cuisine, like schi or borsch. Honestly, I used to hate fish when i was a kid, but now, I'm a big fan of sushi. I think, that my food preferences will not change as I will get older, because I'm a person, who can eat anything.
+     Now, I'd like to answer your questions. Well,I think, that the most popular food among ussian is the soup. We have different kinds of soup in our cuisine, like schi or borsch. Honestly, I used to hate fish when i was a kid, but now, I'm a big fan of sushi. I think, that my food preferences will not change as I will get older, because I'm a person, who can eat anything.
 
      Now, I would like to know more about your letters to Santa! What was your last letter to Santa about? When do you write your letters? Do you think you will continue to write letters to Santa as you get. Older?
 
@@ -474,21 +460,12 @@ rules of email writing.
 <!-- w37-fipi-2026-3896 -->
 ```text
 Dear Alice ,
-       Thank you for your email. I was very glad to hear from
-you again.
+       Thank you for your email. I was very glad to hear from you again.
 
-       In your email you asked me about Russian traditional
-dishes. There are a lot of traditional dishes that are
-popular in my country. For example, borsh, blini, pirozhki,
-solyanka, and okroshka. I think okroshka is the easiest
-to cook. You only need to slice the ingredients and add some
-water with smetana. The needed ingredients are eggs,
-meat, potatoes, cucumbers, smetana, and water or kvas.
+       In your email you asked me about Russian traditional dishes. There are a lot of traditional dishes that are popular in my country. For example, borsh, blini, pirozhki, solyanka, and okroshka. I think okroshka is the easiest to cook. You only need to slice the ingredients and add some water with smetana. The needed ingredients are eggs, meat, potatoes, cucumbers, smetana, and water or kvas.
 
-      By the way , tell me more about the singing
-lessons. What kind of programm do singing lessons provide?
-What is the fee of the singing lessons? Are the
-singing lessons online or offline?
+      By the way , tell me more about the singing lessons. What kind of programm do singing lessons provide?
+What is the fee of the singing lessons? Are the singing lessons online or offline?
 
      Now I have to go. I have some housework to do.
 Text me back soon.
@@ -527,19 +504,12 @@ writing.
 ```text
  Dear Chris,
 
-    Thank you for your quick email. It's a great
-pleasure for me to read and answer them.
+    Thank you for your quick email. It's a great pleasure for me to read and answer them.
 
-     In your message you asked me about the most
-famous Russian invention . I think that
-Mendeleev made a great invention opening his
-own table . Without its help we can't imagine our
-Chemistry lessons. It's very important to study science
-at school because all base information we can learn
-only there. Russia is fulled of different inventions
-and scientists which foreigner should learn about.
-Such as Lomonosov, Mendeleev, Pushkin. They are
-brough a big influence around the world.
+     In your message you asked me about the most famous Russian invention . I think that
+Mendeleev made a great invention opening his own table . Without its help we can't imagine our
+Chemistry lessons. It's very important to study science at school because all base information we can learn only there. Russia is fulled of different inventions and scientists which foreigner should learn about.
+Such as Lomonosov, Mendeleev, Pushkin. They are brough a big influence around the world.
 
       Now it's my turn to ask you some questions.
 Where did you buy a present? What did you buy?
@@ -578,23 +548,16 @@ the rules of email writing.
 <!-- w37-fipi-2026-4798 -->
 ```text
 Hello Oscar
-Thank you for your email Excuse mo I can't write earlier because I working
-hard in my store I glad to hearing from you In your recent email you ask
-me about Russian literature and Russian Writers.
+Thank you for your email Excuse mo I can't write earlier because I working hard in my store I glad to hearing from you In your recent email you ask me about Russian literature and Russian Writers.
 
-Pushkin, Gogol, Tolstoy, Dostayeuskiy and Solticov-Shedrin are so popular
-with Russian teenager because students are learning classical
-literature at school.
+Pushkin, Gogol, Tolstoy, Dostayeuskiy and Solticov-Shedrin are so popular with Russian teenager because students are learning classical literature at school.
 
-As for me, I think my favorite writer is Dostayeuskiy because he
-is smart and horrible. He was writed my favorite book ,, Prestuplenie,
+As for me, I think my favorite writer is Dostayeuskiy because he is smart and horrible. He was writed my favorite book ,, Prestuplenie,
 Nakazanie". Well, I think foreigner should to read the mertvie dushi by
 Gogol because this book can show russian life. This book looks like horror.
 You can see a Russian socity in prime!
 
-Thank you for your present. I like presents so much! What is the
-size of the present? What is the coluor of the present? What is the
-cost of the present? Can you show me your present in your next email ?
+Thank you for your present. I like presents so much! What is the size of the present? What is the coluor of the present? What is the cost of the present? Can you show me your present in your next email ?
 Sorry, I can't write more because we need to go ! See you later !
 
 Goodbuy
@@ -633,33 +596,17 @@ Write 200–250 words.
 
 <!-- w38-fipi-2023-005 -->
 ```text
-Undoubtedly, films are very important in our life. Doing
-a project about film genres I found an oppinion poll
-on what film genres are popular among teenagers in
-Zetland and collected some data I am going to
-comment on several key features of the result of the poll.
+Undoubtedly, films are very important in our life. Doing a project about film genres I found an oppinion poll on what film genres are popular among teenagers in
+Zetland and collected some data I am going to comment on several key features of the result of the poll.
 
-Looking at the details, the most popular genre is
-fantasy, sci-fi with 42% of teenagers because it very
-exiting. On the contrary, the least popular genre is
-detective films (5%).
+Looking at the details, the most popular genre is fantasy, sci-fi with 42% of teenagers because it very exiting. On the contrary, the least popular genre is detective films (5%).
 
-According to the data in the table teenagers also watch horror, thriller films (23%), and it is 5 percent more than comedy (18%). It demonstrates
-that teenagers prefer scary films rather than fun
-movies.
+According to the data in the table teenagers also watch horror, thriller films (23%), and it is 5 percent more than comedy (18%). It demonstrates that teenagers prefer scary films rather than fun movies.
 
-As far as I can see, watching films can couse
-several problems. The most grave one is that teenagers
-watch violent movies. It can lead to agrassive
-behaviour and cruel attitude to people and animals.
-However, there is a solution to this proplem. Parents
-should check movies which their children want to see before
-the allowance to watch it.
+As far as I can see, watching films can couse several problems. The most grave one is that teenagers watch violent movies. It can lead to agrassive behaviour and cruel attitude to people and animals.
+However, there is a solution to this proplem. Parents should check movies which their children want to see before the allowance to watch it.
 
-In conclusion, I think that movies play an integral
-role in our life. Watching films widen mind bounda-
-ries and help to see another life full of advanture
-and new expirience.
+In conclusion, I think that movies play an integral role in our life. Watching films widen mind bounda- ries and help to see another life full of advanture and new expirience.
 ```
 
 ## 15. w38-fipi-2023-006
@@ -761,35 +708,14 @@ Year dishes Buy presents for friends and relatives Buy a new outfit Write 200–
 
 <!-- w38-fipi-2024-006 -->
 ```text
-Celebrations are an important part of our life. My
-project which I am still working on is aimed at
-finding out what the preparations for the New Year
-that Zetlanders consider most important. I have just
-found some data on this issue and organised it in
-the table below.
+Celebrations are an important part of our life. My project which I am still working on is aimed at finding out what the preparations for the New Year that Zetlanders consider most important. I have just found some data on this issue and organised it in the table below.
 
-I can identify two main features The first one is that the majority of people
-are sure that tiding the house is the moust important
-thing for preparition for New Year. The second key
-that only third persent of respondents consider
-buying a new outfit is the moust neccssery thing
-for preparation.
+I can identify two main features The first one is that the majority of people are sure that tiding the house is the moust important thing for preparition for New Year. The second key that only third persent of respondents consider buying a new outfit is the moust neccssery thing for preparation.
 
-It is also worth mentioning that 20
-per cent of people think that cooking traditional
-New Year dishes is important thing is only sightly
-lower than people who consider the moust im-
-portant thing is decorate a New Year tree.
+It is also worth mentioning that 20 per cent of people think that cooking traditional
+New Year dishes is important thing is only sightly lower than people who consider the moust im- portant thing is decorate a New Year tree.
 
-In my opinion the statistics reveal an impor-
-tant problem. We can see that only seven per
-cent of respondent buy presents for friends and
-relatives. It mean that people don'not exchage
-their gifts. However, it is really necessery
-traditions in every family I am sure that
-in order to solve this problem people
-have get togerther every celebration. It makes us
-more happy.
+In my opinion the statistics reveal an impor- tant problem. We can see that only seven per cent of respondent buy presents for friends and relatives. It mean that people don'not exchage their gifts. However, it is really necessery traditions in every family I am sure that in order to solve this problem people have get togerther every celebration. It makes us more happy.
 
 In conclusion, I belive that people will celebrate
 New Year funny with their relatives
@@ -897,39 +823,18 @@ Write 200–250 words.
 
 <!-- w38-fipi-2026-3896 -->
 ```text
- As part of my project on what helped Zetland
-teenagers the most in preparing for final exams, I have
-found a pie chart with some relevant results of a
-survey. I am going to analyse the information and
-give my opinion on the subject of the project.
+ As part of my project on what helped Zetland teenagers the most in preparing for final exams, I have found a pie chart with some relevant results of a survey. I am going to analyse the information and give my opinion on the subject of the project.
 
-        As can be seen from the data provided, we can
-observe the key insights the options of Zetland youth
-when it comes to exams preparing. Firstly, 26%
-of the respondents prioritise to get parents' support.
+        As can be seen from the data provided, we can observe the key insights the options of Zetland youth when it comes to exams preparing. Firstly, 26% of the respondents prioritise to get parents' support.
 Secondly, only 9% of the respondents mark the option
 "Positive mindset".
 
-        Comparing the options to choose among Zetland
-students, I noticed some interesting trends. "Regular
-study routine" appears to be the most popular option,
-with 34% of the respondents, while the option
-"Time management" seems to be less favoured, getting
-only 11%. This significant difference of 23 percentage
-points highlights how important regular study routine
-in Zetland teenagers' life is.
+        Comparing the options to choose among Zetland students, I noticed some interesting trends. "Regular study routine" appears to be the most popular option, with 34% of the respondents, while the option
+"Time management" seems to be less favoured, getting only 11%. This significant difference of 23 percentage points highlights how important regular study routine in Zetland teenagers' life is.
 
-         There is a problem that can arise with preparing
-for final exams. Students can work too hard
-and get tired and sick of studying. A possible
-solution is to manage time and take a rest
-every time you feel tired.
+         There is a problem that can arise with preparing for final exams. Students can work too hard and get tired and sick of studying. A possible solution is to manage time and take a rest every time you feel tired.
 
-         I conclusion, I strongly believe that every student
-should not pay all the attention to studying. Otherwise,
-he can feel bad. Everyone needs to manage time
-properly, sleep well, and take a rest. This is
-the way to pass all the exams.
+         I conclusion, I strongly believe that every student should not pay all the attention to studying. Otherwise, he can feel bad. Everyone needs to manage time properly, sleep well, and take a rest. This is the way to pass all the exams.
 ```
 
 ## 21. w38-fipi-2026-3468
