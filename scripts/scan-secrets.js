@@ -3,12 +3,19 @@ import fs from 'node:fs';
 
 const SELF='scripts/scan-secrets.js';
 const files=execFileSync('git',['ls-files','-z'],{encoding:'utf8'}).split('\0').filter(Boolean);
+/*
+ * Префикс ключа обязан начинать слово. Без этого условия `sk-` находилось в середине любого
+ * слова, кончающегося на «sk», и `task-bank-test-secret-with-32-characters` — обычный тестовый
+ * JWT-секрет — читался как ключ OpenAI. Проверка от этого не слабеет: настоящий ключ начинается
+ * с префикса, а не продолжает им предыдущее слово.
+ */
+const START='(?<![A-Za-z0-9_-])';
 const rules=[
   ['private key',new RegExp('-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----','u')],
-  ['OpenAI-style key',new RegExp('s'+'k-[A-Za-z0-9_-]{32,}','u')],
-  ['xAI key',new RegExp('x'+'ai-[A-Za-z0-9_-]{32,}','u')],
-  ['Groq key',new RegExp('g'+'sk_[A-Za-z0-9_-]{32,}','u')],
-  ['GitHub token',new RegExp('gh'+'[pousr]_[A-Za-z0-9]{30,}','u')],
+  ['OpenAI-style key',new RegExp(START+'s'+'k-[A-Za-z0-9_-]{32,}','u')],
+  ['xAI key',new RegExp(START+'x'+'ai-[A-Za-z0-9_-]{32,}','u')],
+  ['Groq key',new RegExp(START+'g'+'sk_[A-Za-z0-9_-]{32,}','u')],
+  ['GitHub token',new RegExp(START+'gh'+'[pousr]_[A-Za-z0-9]{30,}','u')],
   ['Telegram bot token',new RegExp('\\b\\d{8,12}:[A-Za-z0-9_-]{30,}\\b','u')],
 ];
 const findings=[];

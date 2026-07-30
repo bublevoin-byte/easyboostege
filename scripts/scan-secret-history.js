@@ -1,12 +1,21 @@
 import { execFileSync } from 'node:child_process';
 
 const self = 'scripts/scan-secret-history.js';
+/*
+ * Префикс ключа обязан начинать слово — то же условие, что в scripts/scan-secrets.js и по той же
+ * причине: без него `sk-` находилось в середине любого слова, кончающегося на «sk», и тестовый
+ * JWT-секрет `task-bank-test-secret-with-32-characters` читался как ключ OpenAI.
+ *
+ * Здесь это записано группой, а не ретроспективной проверкой: `git grep -E` разбирает POSIX ERE,
+ * а lookbehind в нём нет.
+ */
+const START = '(^|[^A-Za-z0-9_-])';
 const patterns = [
   '-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----',
-  's' + 'k-[A-Za-z0-9_-]{32,}',
-  'x' + 'ai-[A-Za-z0-9_-]{32,}',
-  'g' + 'sk_[A-Za-z0-9_-]{32,}',
-  'gh' + '[pousr]_[A-Za-z0-9]{30,}',
+  START + 's' + 'k-[A-Za-z0-9_-]{32,}',
+  START + 'x' + 'ai-[A-Za-z0-9_-]{32,}',
+  START + 'g' + 'sk_[A-Za-z0-9_-]{32,}',
+  START + 'gh' + '[pousr]_[A-Za-z0-9]{30,}',
   '[0-9]{8,12}:[A-Za-z0-9_-]{30,}',
 ];
 const commits = execFileSync('git', ['rev-list', '--all'], { encoding: 'utf8' })
