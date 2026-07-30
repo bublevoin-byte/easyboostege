@@ -53,7 +53,15 @@ about the summer camp. Write 100–140 words. Remember the rules of email writin
 
 <!-- w37-fipi-2023-001 -->
 ```text
+Hey, Mike.
 
+How`s it going? As for me, im pretty fine. Actually, i`m really to hear you again since last time we were chatting. Well, speaking of devices i personally prefer PCs rather than mobile phones. Usually, i`m playing videogames on it. But i also use it for watching movies with my girlfriend, doing homework, preparing for exams, ets. You know all this stuff. Mate to be honest, i do think that mobile phones are essential for teenagers. This is a part of modern culture. This is the way to be in touch with many people. Summer camp sounds pretty nice. Wanna tell me more about your timespan out there? Isit was nice or not? Could you recommend me visit any or better not?
+
+I`ll be waiting for your emails. 
+
+Best wishes,
+
+Danil.
 ```
 
 ## 2. w37-fipi-2023-002
@@ -84,7 +92,19 @@ ask questions about the TV show. Write 100–140 words. Remember the rules of em
 
 <!-- w37-fipi-2023-002 -->
 ```text
+Hi Emily,
 
+    Thank you for the e-mail. I’m so glad to hear from you again.
+
+     Oh, I agree with your friends camping is a really nice way to spend the holidays because it’s very intresting. Camping is very popular with Russian teenagers because they like active rest more over nature of Russia is very rich. That’s why teenagers have x a lot of places where to go. The best ways of spending holidays with friends are go to the teature or get together in cafe and disuss about something.
+
+     It’s so nice that you have enought time to watch TV show. What is the name of this TV show? Is it available to watch online? How long does one episode continue?
+
+    That’s all. I have to do my homework.
+     Keep in touch.
+
+                                                                              Yours,
+                                                                               Arina.
 ```
 
 ## 3. w37-fipi-2023-003
@@ -114,7 +134,15 @@ Write 100–140 words. Remember the rules of email writing.
 
 <!-- w37-fipi-2023-003 -->
 ```text
-
+Dear Ronny,
+I was glad to hear from you again.
+Actually, summer in Russia is quite hot and dry, though it depends on certain region.
+To be honest, my favourite season is winter because this time is associated with Christmas and New Year. If my parents allowed me to visit Australia I would be happy to spend my next summer in this exotic country.
+Having written about the upcoming visit of your uncle, you made me curios. What is the profession of your uncle? Has he got any hobbies? Is he going to visit some museums or theatres within his staying, or not?
+Regretfully, I've got to finish my letter.
+Looking forward to hearing from you soon.
+Best wishes,
+Denis  
 ```
 
 ## 4. w37-fipi-2023-004
@@ -145,7 +173,14 @@ the rules of email writing.
 
 <!-- w37-fipi-2023-004 -->
 ```text
-
+Dear Mary,
+Thanks for your message. It was great to hear from you again! Sorry, I haven't answered earlier, but I was really busy. I'm glad you are OK!
+Well, I think that one should cook at home because it's cheaper than eating out. As for me, I like to cook at home and it makes me happy. Actually, I often cook for my family because they like my dishes.
+By the way, tell me about your learning Russian. When did you start it? Do you practice it?
+What's the name of that book?
+Actually, I'd go better now because my mother wants me to help me with shopping. Take care and write me soon!
+Best wishes,
+Veronika
 ```
 
 ## 5. w37-fipi-2024-003
@@ -175,7 +210,13 @@ email writing.
 
 <!-- w37-fipi-2024-003 -->
 ```text
+Dear Charles,
 
+    Thank you for your recent message. I was very glad to hear from you again.
+    You asked me about the Internet. Well, I can say that I use the Internet for studying because it helps me find unfamiliar information. Usually, I download films from the Internet because it's convinient for me and I like watching films. Well, owning Blogs or websites is a popular topic for russian teenagers because a majority of teenagers like watching Blogs while they doing something. Also teenagers like listening video Blogs and check the websites because it inspires and make them calm.
+      Now, it's my turn to ask questions. How long will you be there? What's the name of the capital? What kind of transport will you use for your trip? Hope to hear from you again.
+      Best wishes,
+      Dominika
 ```
 
 ## 6. w37-fipi-2024-004
@@ -206,7 +247,18 @@ project. Write 100–140 words. Remember the rules of email writing.
 
 <!-- w37-fipi-2024-004 -->
 ```text
+Dear Mark,
 
+Thank you for your last email. It is always nice to hear from you. Sorry for not writing you earlier, I was busy with my homework.
+
+I'll be happy to answer your questions. In my opinion, telephone is the most useful modern invention, because it helps people to communicate with each other, even if they're in different countries. As for me, I like going to history museums. I'm found of history and I always enjoy discovering something new about the past. Unfortunatly, I can't say that I'm going on excursions to museums with my classmates often.
+
+Anyways, you've mentioned that you spent hours working on a group project last week. What is the subject of your project? Is this project interesting? Do you like this project?
+
+That's all for now. Write back soon.
+
+All the best,
+Fatima
 ```
 
 ## 7. w37-fipi-2025-001
@@ -236,7 +288,31 @@ the rules of email writing.
 
 <!-- w37-fipi-2025-001 -->
 ```text
+Hello Oscar
+Thank you for your email Excuse mo I can't write earlier because I working
+hard in my store I glad to hearing from you In your recent email you ask
+me about Russian literature and Russian Writers.
 
+Pushkin, Gogol, Tolstoy, Dostayeuskiy and Solticov-Shedrin are so popular
+with Russian teenager because students are learning classical
+literature at school.
+
+As for me, I think my favorite writer is Dostayeuskiy because he
+is smart and horrible. He was writed my favorite book ,, Prestuplenie,
+Nakazanie". Well, I think foreigner should to read the mertvie dushi by
+Gogol because this book can show russian life. This book looks like horror.
+You can see a Russian socity in prime!
+
+Thank you for your present. I like presents so much! What is the
+size of the present? What is the coluor of the present? What is the
+cost of the present? Can you show me your present in your next email ?
+Sorry, I can't write more because we need to go ! See you later !
+
+Goodbuy
+
+Best wishes
+
+Danila.
 ```
 
 ## 8. w37-fipi-2025-002
@@ -267,7 +343,23 @@ Remember the rules of email writing.
 
 <!-- w37-fipi-2025-002 -->
 ```text
+Dear Olive,
+Thanks for your email. I hope you're doing fine.
+In your email you ask me some questions about St.
+Petersburg. I think you should write about Hermitage
+and Petergof. In my opinion St Petersburg is popular
+among foreign and local tourists because it's the most
+beautiful historic city Of the world. I think summer is the
+best season to visit St. Petersburg.
 
+By the way, I want to ask you some questions about the
+trip. How long was your trip? What interesting things did you
+see? Did you go to the trip by yourself?
+
+I guess that's all for now. Write back soon.
+
+Best wishes,
+Liza
 ```
 
 ## 9. w37-fipi-2025-003
@@ -298,6 +390,23 @@ of email writing.
 
 <!-- w37-fipi-2025-003 -->
 ```text
+ Dear Sandra,
+     Thank you for your letter! It's a big pleasure to receive it from you.
+
+     Now, I'd like to answer your questions. Well,I think, that the most popular food among ussian is the soup. We have different kinds
+of soup in our cuisine, like schi or borsch. Honestly, I used to hate fish when i was a kid, but now, I'm a big fan of sushi. I think, that my food preferences will not change as I will get older, because I'm a person, who can eat anything.
+
+     Now, I would like to know more about your letters to Santa! What was your last letter to Santa about? When do you write your letters? Do you think you will continue to write letters to Santa as you get. Older?
+
+I'm sorry, my mom needs my help, so,
+
+I got to go.
+
+Write back soon!
+
+Yours,
+
+Gleb
 
 ```
 
@@ -328,7 +437,13 @@ words. Remember the rules of email writing.
 
 <!-- w37-fipi-2026-001 -->
 ```text
+Dear Alison,
 
+I am glad to received message from you. And with all my pleasure I have answered to your's questions. Talking about popularity of reading as a hobby among teens in Russia, I can say that reading is very unpopular. But for me reading books one of my favourite hobby's and when I have some free time I prefer very unsimular geners , : fantasy, detective, some books about ordinary people routine or russian classic I can give you advise for future plans in reading and recomend to you book which title is "Crime and punishement" , and writer of this artwork is Feodor Dostoevski, and why I recomend this book because of vibes which book give to reader. And what book you are reading right now? What theme of your project? Can you tell me about your fawourite books?
+
+With best wishes,
+
+Sofia.
 ```
 
 ## 11. w37-fipi-2026-3896
@@ -358,7 +473,29 @@ rules of email writing.
 
 <!-- w37-fipi-2026-3896 -->
 ```text
+Dear Alice ,
+       Thank you for your email. I was very glad to hear from
+you again.
 
+       In your email you asked me about Russian traditional
+dishes. There are a lot of traditional dishes that are
+popular in my country. For example, borsh, blini, pirozhki,
+solyanka, and okroshka. I think okroshka is the easiest
+to cook. You only need to slice the ingredients and add some
+water with smetana. The needed ingredients are eggs,
+meat, potatoes, cucumbers, smetana, and water or kvas.
+
+      By the way , tell me more about the singing
+lessons. What kind of programm do singing lessons provide?
+What is the fee of the singing lessons? Are the
+singing lessons online or offline?
+
+     Now I have to go. I have some housework to do.
+Text me back soon.
+
+With love ,
+
+Angelina
 ```
 
 ## 12. w37-fipi-2026-3468
@@ -388,7 +525,29 @@ writing.
 
 <!-- w37-fipi-2026-3468 -->
 ```text
+ Dear Chris,
 
+    Thank you for your quick email. It's a great
+pleasure for me to read and answer them.
+
+     In your message you asked me about the most
+famous Russian invention . I think that
+Mendeleev made a great invention opening his
+own table . Without its help we can't imagine our
+Chemistry lessons. It's very important to study science
+at school because all base information we can learn
+only there. Russia is fulled of different inventions
+and scientists which foreigner should learn about.
+Such as Lomonosov, Mendeleev, Pushkin. They are
+brough a big influence around the world.
+
+      Now it's my turn to ask you some questions.
+Where did you buy a present? What did you buy?
+How much did you pay for it?
+
+       Keep in touch.
+       Best wishes,
+       Sonya
 ```
 
 ## 13. w37-fipi-2026-4798
@@ -418,7 +577,31 @@ the rules of email writing.
 
 <!-- w37-fipi-2026-4798 -->
 ```text
+Hello Oscar
+Thank you for your email Excuse mo I can't write earlier because I working
+hard in my store I glad to hearing from you In your recent email you ask
+me about Russian literature and Russian Writers.
 
+Pushkin, Gogol, Tolstoy, Dostayeuskiy and Solticov-Shedrin are so popular
+with Russian teenager because students are learning classical
+literature at school.
+
+As for me, I think my favorite writer is Dostayeuskiy because he
+is smart and horrible. He was writed my favorite book ,, Prestuplenie,
+Nakazanie". Well, I think foreigner should to read the mertvie dushi by
+Gogol because this book can show russian life. This book looks like horror.
+You can see a Russian socity in prime!
+
+Thank you for your present. I like presents so much! What is the
+size of the present? What is the coluor of the present? What is the
+cost of the present? Can you show me your present in your next email ?
+Sorry, I can't write more because we need to go ! See you later !
+
+Goodbuy
+
+Best wishes
+
+Danila.
 ```
 
 ---
@@ -450,7 +633,33 @@ Write 200–250 words.
 
 <!-- w38-fipi-2023-005 -->
 ```text
+Undoubtedly, films are very important in our life. Doing
+a project about film genres I found an oppinion poll
+on what film genres are popular among teenagers in
+Zetland and collected some data I am going to
+comment on several key features of the result of the poll.
 
+Looking at the details, the most popular genre is
+fantasy, sci-fi with 42% of teenagers because it very
+exiting. On the contrary, the least popular genre is
+detective films (5%).
+
+According to the data in the table teenagers also watch horror, thriller films (23%), and it is 5 percent more than comedy (18%). It demonstrates
+that teenagers prefer scary films rather than fun
+movies.
+
+As far as I can see, watching films can couse
+several problems. The most grave one is that teenagers
+watch violent movies. It can lead to agrassive
+behaviour and cruel attitude to people and animals.
+However, there is a solution to this proplem. Parents
+should check movies which their children want to see before
+the allowance to watch it.
+
+In conclusion, I think that movies play an integral
+role in our life. Watching films widen mind bounda-
+ries and help to see another life full of advanture
+and new expirience.
 ```
 
 ## 15. w38-fipi-2023-006
@@ -478,7 +687,13 @@ words.
 
 <!-- w38-fipi-2023-006 -->
 ```text
+Today we all live in the age of technology. Smartphones have become an indispensable part of people’s lives. People in Zetland use their smartphones for different purposes. My project, which I am still working on, is aimed at finding out the ways of using smartphones. I have found some data on this issue presented in the pie chart. 
+It becomes clear from the diagram that people mostly use smartphones for sending emails (30%) and making phone calls (27%). At the same time the use of smartphones for purchases is the lowest (10%).  
+It is worth mentioning that the difference between the percentage of people who are mostly playing games (17%) and surfing the Internet (16%) is very small, only 1 percent. The explanation may lie in the fact that both are used mainly for entertainment. 
 
+The statistics of the pie chart, in my opinion, reveal an important problem. We can see that nobody is reading e-books on their smartphones, therefore they are missing an opportunity of reading books anywhere and at any time. 
+
+I would like to say that the role of smartphones in today’s life can hardly be overestimated. With the help of smartphones people can communicate quickly and efficiently, they can use them to find any information on the Internet quickly, and smartphone apps allow people to have access to many documents or photos.
 ```
 
 ## 16. w38-fipi-2024-005
@@ -507,7 +722,15 @@ Restaurant or café Park Sports centre Hobby club Theatre or museum Write 200–
 
 <!-- w38-fipi-2024-005 -->
 ```text
+These days the topic of spending free time results in a great discussion in the society. While doing a project on where Zetlanders prefer to spend a Saturday evening, I discovered a table chart containing relevant data. In this essay I am going to analyze it and present my conclusions.
 
+According to the information shown in the opinion polls in the table chart, the largest number of the respondents prefer to spend their Saturday evening in a restaurant or in a café, (37%). The idea of spending a Saturday evening in a sports centre is not so popular among Zetlanders, (15%). A theatre or a museum appears to be the least preferable place to spend a Saturday evening, with only 5%.
+
+The data analysis reveals that the percentage of those who would like to spend their Saturday evening in a park (34%) is almost four times higher than the percentage of those who prefer to spend a Saturday evening in a hobby club.(9%). It is not a surprise, because people also should rest from their hobby and going for a walk in a park is the best way to relax.
+
+There is one issue that can arise with spending free time. People often spend too much time on resting and forget to do important things. This problem can be easily solved. You should make a to do-list. It will definatly help you to control yourself.
+
+In conclusion I would like to say that going for a walk in a park is the best way to spend a Saturday evening. I think so because while walking in a park you forget everything bad and just enjoy the nature.
 ```
 
 ## 17. w38-fipi-2024-006
@@ -538,7 +761,38 @@ Year dishes Buy presents for friends and relatives Buy a new outfit Write 200–
 
 <!-- w38-fipi-2024-006 -->
 ```text
+Celebrations are an important part of our life. My
+project which I am still working on is aimed at
+finding out what the preparations for the New Year
+that Zetlanders consider most important. I have just
+found some data on this issue and organised it in
+the table below.
 
+I can identify two main features The first one is that the majority of people
+are sure that tiding the house is the moust important
+thing for preparition for New Year. The second key
+that only third persent of respondents consider
+buying a new outfit is the moust neccssery thing
+for preparation.
+
+It is also worth mentioning that 20
+per cent of people think that cooking traditional
+New Year dishes is important thing is only sightly
+lower than people who consider the moust im-
+portant thing is decorate a New Year tree.
+
+In my opinion the statistics reveal an impor-
+tant problem. We can see that only seven per
+cent of respondent buy presents for friends and
+relatives. It mean that people don'not exchage
+their gifts. However, it is really necessery
+traditions in every family I am sure that
+in order to solve this problem people
+have get togerther every celebration. It makes us
+more happy.
+
+In conclusion, I belive that people will celebrate
+New Year funny with their relatives
 ```
 
 ## 18. w38-fipi-2025-007
@@ -643,7 +897,39 @@ Write 200–250 words.
 
 <!-- w38-fipi-2026-3896 -->
 ```text
+ As part of my project on what helped Zetland
+teenagers the most in preparing for final exams, I have
+found a pie chart with some relevant results of a
+survey. I am going to analyse the information and
+give my opinion on the subject of the project.
 
+        As can be seen from the data provided, we can
+observe the key insights the options of Zetland youth
+when it comes to exams preparing. Firstly, 26%
+of the respondents prioritise to get parents' support.
+Secondly, only 9% of the respondents mark the option
+"Positive mindset".
+
+        Comparing the options to choose among Zetland
+students, I noticed some interesting trends. "Regular
+study routine" appears to be the most popular option,
+with 34% of the respondents, while the option
+"Time management" seems to be less favoured, getting
+only 11%. This significant difference of 23 percentage
+points highlights how important regular study routine
+in Zetland teenagers' life is.
+
+         There is a problem that can arise with preparing
+for final exams. Students can work too hard
+and get tired and sick of studying. A possible
+solution is to manage time and take a rest
+every time you feel tired.
+
+         I conclusion, I strongly believe that every student
+should not pay all the attention to studying. Otherwise,
+he can feel bad. Everyone needs to manage time
+properly, sleep well, and take a rest. This is
+the way to pass all the exams.
 ```
 
 ## 21. w38-fipi-2026-3468
@@ -672,7 +958,15 @@ discussing the news in social networks? Choose one option Write 200–250 words.
 
 <!-- w38-fipi-2026-3468 -->
 ```text
+ I am doing a project on Zetlander's priorities in reading and discussing the news in social networks. I have found a pie chart with some results of a survey. I will analyse the data and express my opinion on the subject of the project.
 
+        According to the pie chart, answering the question 'What is your priority in reading and discussing the news in social networks?' the surveyed have chosen 'Reliable information' (34%), followed by 'Internet security' (26%). By contrast, the least of the surveyed think that 'Friendly attitude of other social network users' is a great idea, only 9%.
+
+         Moreover, it is worth mentioning that the percentage of Zetlander's who have chosen 'Reliable information' is higher than the percentage of those who chose 'Discussing information with other social network users' (34% and 11% respectively), the difference is 23%. I think it is because people do not want to discuss something with unknown people.
+
+          Analysing this topic, I can outline a problem which can arise with reading and discussing the news in social networks. It can get a bad influence on real-life communication. To solve this problem, Zetlanders must communicate with each other not only in social network.
+
+          In conclusion, I want to say that discussing in social network has some advantages. For example, people who afraid give their attitude in real-life can text it online.
 ```
 
 ## 22. w38-fipi-2026-4563
@@ -701,5 +995,13 @@ quality instrument Write 200–250 words.
 
 <!-- w38-fipi-2026-4563 -->
 ```text
+Nowadays not so many people attend music schools. The aim of my project, that I am working on, is to find out why some Zetlanders refuse to attend music schools. Doing a project I have found some data in a form of a table with results of relevant opinion polls, that I am going to analyse now.
 
+As it can be see frome the table, "Time-consuming" is one of the most popular answers to question "Why do you refuse to attend a music school?" (23%). Another popular variant is "Far from home" (15%), followed by "No money for a quality instrument" (14%).
+
+Looking more closely at the data it can be mentioned, that difference between percentage of those surveyd, who chose variant "No fast result" and those, who voted for "Not interested in music" is 10% (29% and 19%, respectievly). This statistic shows that many people, who refuse to attend a musical school, are interested in music, but don't have enough patience to learn it.
+
+It is worth mentioning, that one of the problems, which can arise with learning to play a musical instrument is that sometimes this process can be exhausting. One of the possible solutions to this issue is to have small periods of rest during the learning process.
+
+In conclusion, I strongly believe, that playing a musical instrument can make every person more intilligent, and that is the reason why everyone should be able to do it.
 ```
