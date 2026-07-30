@@ -13,9 +13,19 @@ test('the stub file keeps the works extracted from the manuals', () => {
   const ids = new Set(stubs.map((item) => item.id));
   assert.equal(ids.size, stubs.length, 'ids must be unique');
   const count = (operation) => stubs.filter((item) => item.operation === operation).length;
-  // Section 11.1 asks for 20 and 30; the manuals give fewer, so these are floors, not the target.
-  assert.ok(count('writing_37') >= 13, `task 37 stubs dropped to ${count('writing_37')}`);
+  /*
+   * Section 11.1 asks for 20 and 30; the manuals give fewer, so these are floors against silent
+   * loss, not the target. Task 37 stood at 13 until work 4798 turned out to be one work printed
+   * by two manuals: the 2025 heading is set in capitals, the extractor read only the capitalised
+   * form it expected, and a work without a number could not be recognised as a reprint. Twelve is
+   * therefore the corrected count, not a work lost — lowering this floor again needs the same
+   * kind of evidence.
+   */
+  assert.ok(count('writing_37') >= 12, `task 37 stubs dropped to ${count('writing_37')}`);
   assert.ok(count('writing_38') >= 9, `task 38 stubs dropped to ${count('writing_38')}`);
+  // Two records of one work is the failure that cost this correction; catch it by number.
+  const numbered = stubs.filter((item) => item.source.work).map((item) => `${item.operation}|${item.source.work}|${item.human.total}`);
+  assert.equal(new Set(numbered).size, numbered.length, 'the same work appears twice under one number and score');
 });
 
 test('expert scores stay inside the official maxima and add up', () => {

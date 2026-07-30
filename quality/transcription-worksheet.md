@@ -1,6 +1,11 @@
 # Набор работ ЕГЭ со сканов — рабочий лист
 
-Работ к набору: **22** (задание 37 — 13, задание 38 — 9).
+Работ к набору: **21 уникальная** (задание 37 — 12, задание 38 — 9), блоков в листе 22.
+
+Блоков на один больше, чем работ: блоки 7 и 13 оказались одной и той же работой № 4798,
+переизданной в методичках 2025 и 2026 годов. Обнаружилось это уже после набора — оба блока
+заполнены, но в набор переносится только блок 7. Блок 13 оставлен как есть, с пометкой,
+чтобы нумерация не поехала и было видно, что работа проверена, а не пропущена.
 
 Что нужно сделать: открыть указанный PDF на указанной странице, найти скан работы участника
 и перенести её текст в поле ниже. Оценки, условие и объём уже проставлены — их менять не нужно.
@@ -26,10 +31,10 @@
 ---
 # Задание 37 — электронное личное письмо
 
-## 1. w37-fipi-2023-001
+## 1. w37-fipi-2023-8447
 
 - **Файл:** `fipi-pch-2023.pdf`, страница **70**
-- **Работа:** номер бланка не указан — ищите по условию
+- **Работа:** № 8447
 - **Задание:** 37, электронное письмо
 - **Объём по подсчёту эксперта:** 134 слов
 - **Оценка эксперта:** 0 из 6: Решение коммуникативной задачи — 0, Организация текста — 0, Языковое оформление — 0
@@ -51,7 +56,7 @@ about the summer camp. Write 100–140 words. Remember the rules of email writin
 
 Наберите текст работы между строками ниже, ничего не исправляя:
 
-<!-- w37-fipi-2023-001 -->
+<!-- w37-fipi-2023-8447 -->
 ```text
 Hey, Mike.
 
@@ -64,10 +69,10 @@ Best wishes,
 Danil.
 ```
 
-## 2. w37-fipi-2023-002
+## 2. w37-fipi-2023-4764
 
-- **Файл:** `fipi-pch-2023.pdf`, страница **72**
-- **Работа:** номер бланка не указан — ищите по условию
+- **Файл:** `fipi-pch-2023.pdf`, страница **73**
+- **Работа:** № 4764
 - **Задание:** 37, электронное письмо
 - **Объём по подсчёту эксперта:** 133 слов
 - **Оценка эксперта:** общий балл 3 из 6 (по критериям в методичке не разбит)
@@ -90,7 +95,7 @@ ask questions about the TV show. Write 100–140 words. Remember the rules of em
 
 Наберите текст работы между строками ниже, ничего не исправляя:
 
-<!-- w37-fipi-2023-002 -->
+<!-- w37-fipi-2023-4764 -->
 ```text
 Hi Emily,
 
@@ -261,10 +266,10 @@ All the best,
 Fatima
 ```
 
-## 7. w37-fipi-2025-001
+## 7. w37-fipi-2025-4798
 
-- **Файл:** `fipi-pch-2025.pdf`, страница **87**
-- **Работа:** номер бланка не указан — ищите по условию
+- **Файл:** `fipi-pch-2025.pdf`, страница **89**
+- **Работа:** № 4798
 - **Задание:** 37, электронное письмо
 - **Объём по подсчёту эксперта:** не указан
 - **Оценка эксперта:** 0 из 6: Решение коммуникативной задачи — 0, Организация текста — 0, Языковое оформление — 0
@@ -286,7 +291,7 @@ the rules of email writing.
 
 Наберите текст работы между строками ниже, ничего не исправляя:
 
-<!-- w37-fipi-2025-001 -->
+<!-- w37-fipi-2025-4798 -->
 ```text
 Hello Oscar
 Thank you for your email Excuse mo I can't write earlier because I working hard in my store I glad to hearing from you In your recent email you ask me about Russian literature and Russian Writers.
@@ -308,10 +313,10 @@ Best wishes
 Danila.
 ```
 
-## 8. w37-fipi-2025-002
+## 8. w37-fipi-2025-8311
 
-- **Файл:** `fipi-pch-2025.pdf`, страница **91**
-- **Работа:** номер бланка не указан — ищите по условию
+- **Файл:** `fipi-pch-2025.pdf`, страница **93**
+- **Работа:** № 8311
 - **Задание:** 37, электронное письмо
 - **Объём по подсчёту эксперта:** 105 слов
 - **Оценка эксперта:** 6 из 6: Решение коммуникативной задачи — 2, Организация текста — 2, Языковое оформление — 2
@@ -334,7 +339,7 @@ Remember the rules of email writing.
 
 Наберите текст работы между строками ниже, ничего не исправляя:
 
-<!-- w37-fipi-2025-002 -->
+<!-- w37-fipi-2025-8311 -->
 ```text
 Dear Olive,
 Thanks for your email. I hope you're doing fine.
@@ -520,9 +525,17 @@ How much did you pay for it?
        Sonya
 ```
 
-## 13. w37-fipi-2026-4798
+## 13. w37-fipi-2025-4798 — ДУБЛЬ блока 7
 
-- **Файл:** `fipi-pch-2026.pdf`, страница **107**
+> **Эта работа уже есть в блоке 7.** Методички 2025 и 2026 годов печатают одну и ту же работу
+> № 4798, и первая версия рабочего листа просила набрать её дважды: в 2025 году заголовок набран
+> заглавными («РАБОТА 4798»), и разбор его не распознал, поэтому работа осталась без номера и
+> выглядела как другая. Оба блока заполнены и совпадают дословно — это подтверждение, а не ошибка.
+>
+> В набор переносится блок 7. Здесь текст оставлен как есть: удалять его незачем, а нумерация
+> блоков не должна поехать.
+
+- **Файл:** `fipi-pch-2025.pdf`, страница **89**
 - **Работа:** № 4798
 - **Задание:** 37, электронное письмо
 - **Объём по подсчёту эксперта:** 172 слов
@@ -545,7 +558,7 @@ the rules of email writing.
 
 Наберите текст работы между строками ниже, ничего не исправляя:
 
-<!-- w37-fipi-2026-4798 -->
+<!-- ДУБЛЬ: та же работа, что в блоке 7 (w37-fipi-2025-4798) — в набор не переносится -->
 ```text
 Hello Oscar
 Thank you for your email Excuse mo I can't write earlier because I working hard in my store I glad to hearing from you In your recent email you ask me about Russian literature and Russian Writers.
@@ -571,10 +584,10 @@ Danila.
 
 # Задание 38 — письменное высказывание с элементами рассуждения
 
-## 14. w38-fipi-2023-005
+## 14. w38-fipi-2023-4764
 
-- **Файл:** `fipi-pch-2023.pdf`, страница **107**
-- **Работа:** номер бланка не указан — ищите по условию
+- **Файл:** `fipi-pch-2023.pdf`, страница **108**
+- **Работа:** № 4764
 - **Задание:** 38, проект с данными опроса
 - **Объём по подсчёту эксперта:** не указан
 - **Оценка эксперта:** 7 из 14: Решение коммуникативной задачи — 3, Организация текста — 2, Лексика — 1, Грамматика — 1, Орфография и пунктуация — 0
@@ -594,7 +607,7 @@ Write 200–250 words.
 
 Наберите текст работы между строками ниже, ничего не исправляя:
 
-<!-- w38-fipi-2023-005 -->
+<!-- w38-fipi-2023-4764 -->
 ```text
 Undoubtedly, films are very important in our life. Doing a project about film genres I found an oppinion poll on what film genres are popular among teenagers in
 Zetland and collected some data I am going to comment on several key features of the result of the poll.
@@ -643,10 +656,10 @@ The statistics of the pie chart, in my opinion, reveal an important problem. We 
 I would like to say that the role of smartphones in today’s life can hardly be overestimated. With the help of smartphones people can communicate quickly and efficiently, they can use them to find any information on the Internet quickly, and smartphone apps allow people to have access to many documents or photos.
 ```
 
-## 16. w38-fipi-2024-005
+## 16. w38-fipi-2024-5806
 
-- **Файл:** `fipi-pch-2024.pdf`, страница **119**
-- **Работа:** номер бланка не указан — ищите по условию
+- **Файл:** `fipi-pch-2024.pdf`, страница **120**
+- **Работа:** № 5806
 - **Задание:** 38, проект с данными опроса
 - **Объём по подсчёту эксперта:** не указан
 - **Оценка эксперта:** 10 из 14: Решение коммуникативной задачи — 1, Организация текста — 1, Лексика — 3, Грамматика — 3, Орфография и пунктуация — 2
@@ -667,7 +680,7 @@ Restaurant or café Park Sports centre Hobby club Theatre or museum Write 200–
 
 Наберите текст работы между строками ниже, ничего не исправляя:
 
-<!-- w38-fipi-2024-005 -->
+<!-- w38-fipi-2024-5806 -->
 ```text
 These days the topic of spending free time results in a great discussion in the society. While doing a project on where Zetlanders prefer to spend a Saturday evening, I discovered a table chart containing relevant data. In this essay I am going to analyze it and present my conclusions.
 
@@ -680,10 +693,10 @@ There is one issue that can arise with spending free time. People often spend to
 In conclusion I would like to say that going for a walk in a park is the best way to spend a Saturday evening. I think so because while walking in a park you forget everything bad and just enjoy the nature.
 ```
 
-## 17. w38-fipi-2024-006
+## 17. w38-fipi-2024-8781
 
 - **Файл:** `fipi-pch-2024.pdf`, страница **124**
-- **Работа:** номер бланка не указан — ищите по условию
+- **Работа:** № 8781
 - **Задание:** 38, проект с данными опроса
 - **Объём по подсчёту эксперта:** не указан
 - **Оценка эксперта:** общий балл 0 из 14 (по критериям в методичке не разбит)
@@ -706,7 +719,7 @@ Year dishes Buy presents for friends and relatives Buy a new outfit Write 200–
 
 Наберите текст работы между строками ниже, ничего не исправляя:
 
-<!-- w38-fipi-2024-006 -->
+<!-- w38-fipi-2024-8781 -->
 ```text
 Celebrations are an important part of our life. My project which I am still working on is aimed at finding out what the preparations for the New Year that Zetlanders consider most important. I have just found some data on this issue and organised it in the table below.
 
@@ -721,7 +734,7 @@ In conclusion, I belive that people will celebrate
 New Year funny with their relatives
 ```
 
-## 18. w38-fipi-2025-007
+## 18. w38-fipi-2025-1025
 
 > **Внимание: это одна из двух работ на одно и то же условие.** Вторая — блок 19. Условие у них
 > совпадает дословно, а работы разные: их писали разные ученики, и эксперт поставил разные баллы.
@@ -736,8 +749,8 @@ New Year funny with their relatives
 > разбора. Если на 134-й видите только одну работу — листайте дальше, до второго разбора с этим же
 > условием.
 
-- **Файл:** `fipi-pch-2025.pdf`, страница **134**
-- **Работа:** номер бланка не указан — ищите по условию и по баллам
+- **Файл:** `fipi-pch-2025.pdf`, страница **135**
+- **Работа:** № 1025
 - **Задание:** 38, проект с данными опроса
 - **Объём по подсчёту эксперта:** не указан
 - **Оценка эксперта:** 12 из 14: Решение коммуникативной задачи — 3, Организация текста — 2, Лексика — 2, Грамматика — 3, Орфография и пунктуация — 2
@@ -758,20 +771,49 @@ words.
 
 Наберите текст работы между строками ниже, ничего не исправляя:
 
-<!-- w38-fipi-2025-007 -->
+<!-- w38-fipi-2025-1025 -->
 ```text
+Nowadays people do not value music. As part of
+my project on why some Zetlanders refuse to attend
+music schools, I have found a table containing some
+relevant results of the opinion polls that I am going
+to comment on.
 
+According to the data, the majority of the respondents choose
+,,No fast result" while answering the question ,,Why do you refuse
+to attend a music school?". The second most sizeable group
+vote for ,,Time-consuming" (23%). It can also be seen that
+the least favoured option is . No money for a quality
+instrument" chosen by 14% of the surveyed.
+
+Looking more closely at the table, one can note that
+,,Not interested in music" appears to be a more widespread
+answer than ,,Far from home" as the difference between
+these two options is 4 percentage points. This fact is
+quite explicable given that more people are interested
+in other hobbies.
+
+It is worth mentioning that one of the problems that may
+arise with learning to play a musical instrument is that
+one can not find a suitable teacher. However, there is
+a possible solution to this problem. A person should attend
+trial lessons and ask questions about teachers' learning
+techniques.
+
+In conclusion, I believe that being able to play a musical
+instrument is important. That is because a person can always
+find comfort in music.
 ```
 
-## 19. w38-fipi-2025-008
+## 19. w38-fipi-2025-4563
 
 > **Внимание: это вторая из двух работ на одно и то же условие.** Первая — блок 18. Условие
 > совпадает дословно, работы разные. Сюда — работа на **9 из 14** (3 / 2 / 2 / **1** / **1**),
 > в блок 18 — на **12 из 14** (3 / 2 / 2 / **3** / **2**). Различаются грамматика и орфография:
 > в этой работе ошибок заметно больше, и именно они делают её ценной для проверки.
 
-- **Файл:** `fipi-pch-2025.pdf`, страница **134**
-- **Работа:** номер бланка не указан — ищите по условию и по баллам
+- **Файл:** `fipi-pch-2025.pdf`, страница **139**
+- **Работа:** № 4563
 - **Задание:** 38, проект с данными опроса
 - **Объём по подсчёту эксперта:** не указан
 - **Оценка эксперта:** 9 из 14: Решение коммуникативной задачи — 3, Организация текста — 2, Лексика — 2, Грамматика — 1, Орфография и пунктуация — 1
@@ -792,9 +834,35 @@ words.
 
 Наберите текст работы между строками ниже, ничего не исправляя:
 
-<!-- w38-fipi-2025-008 -->
+<!-- w38-fipi-2025-4563 -->
 ```text
+Nowadays not so many people attend music schools. The aim of
+my project, that I am working on, is to find out why some Zetlan-
+ders refuse to attend music schools. Doing a project I have found
+some data in a form of a table with results of relevant opinion polls,
+that I am going to analyse now.
 
+As it can be see frome the table, ,,Time-consuming" is one of the
+most popular answers to question ,,Why do you refuse to attend a music
+school?" (23%). Another popular variant is ,,Far from home"
+(15%), followed by ,,No money for a quality instrument" (14%).
+
+Looking more closely at the data it can be mentioned, that difference
+between percentage of those surveyd, who chose variant ,,No fast
+result" and those, who voted for ,,Not interested in music" is 10%
+(29% and 19%, respectievly). This statistic shows that many
+people, who refuse to attend a musical school, are interested in music,
+but don't have enough patience to learn it.
+
+It is worth mentioning, that one of the problems which can arise
+with learning to play a musical instrument is that sometimes
+this process can be exhausting. One of the possible solutions
+to this issue is to have small periods of rest during the
+learning process.
+
+In conclusion, I strongly believe, that playing a musical instrument
+can make every person more intilligent, and
+that is the reason why everyone should be able to do it.
 ```
 
 ## 20. w38-fipi-2026-3896

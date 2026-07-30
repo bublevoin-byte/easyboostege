@@ -11,24 +11,40 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-test('the worksheet has a labelled slot for every work still missing its text', () => {
-  const pending = stubs.filter((item) => !item.answer);
-  for (const item of pending) {
+test('the worksheet has a labelled slot for every work in the set', () => {
+  for (const item of stubs) {
     assert.ok(worksheet.includes(`<!-- ${item.id} -->`), `${item.id}: no slot in the worksheet`);
     assert.ok(worksheet.includes(`страница **${item.source.page}**`), `${item.id}: no page reference`);
   }
-  // Empty slots stay empty until somebody types into them.
-  assert.equal(parseWorksheet(worksheet).size, 0);
+});
+
+/*
+ * The worksheet and the set have to agree in both directions. A typed work that no id claims is
+ * lost silently, and an id nobody typed under is a work the set believes it has. The duplicate
+ * block — work 4798, printed by two manuals and typed twice before that was noticed — carries a
+ * comment instead of an id precisely so it does not enter the set a second time.
+ */
+test('every typed slot belongs to the set, and every work in the set was typed', () => {
+  const answers = parseWorksheet(worksheet);
+  const ids = new Set(stubs.map((item) => item.id));
+  for (const id of answers.keys()) assert.ok(ids.has(id), `${id}: typed under an id the set does not have`);
+  for (const item of stubs) {
+    if (item.answer) assert.ok(answers.has(item.id), `${item.id}: the set has an answer the worksheet does not`);
+  }
+  assert.equal(answers.size, stubs.filter((item) => item.answer).length);
 });
 
 test('a filled slot is read back under its own id', () => {
-  const filled = worksheet.replace(
-    `<!-- ${stubs[0].id} -->\n\`\`\`text\n\n\`\`\``,
-    `<!-- ${stubs[0].id} -->\n\`\`\`text\nDear Mike,\n\nThanks for your email.\n\`\`\``,
-  );
-  const answers = parseWorksheet(filled);
-  assert.equal(answers.size, 1);
-  assert.equal(answers.get(stubs[0].id), 'Dear Mike,\n\nThanks for your email.');
+  // Built here rather than by editing the real worksheet: the assertion is about parsing, and it
+  // must keep meaning the same thing whether the worksheet is empty, half typed or finished.
+  const sample = [
+    '## 1. w37-fipi-demo-001', '', '<!-- w37-fipi-demo-001 -->', '```text',
+    'Dear Mike,', '', 'Thanks for your email.', '```', '',
+    '## 2. w37-fipi-demo-002', '', '<!-- w37-fipi-demo-002 -->', '```text', '', '```', '',
+  ].join('\n');
+  const answers = parseWorksheet(sample);
+  assert.equal(answers.size, 1, 'an empty slot is not an answer');
+  assert.equal(answers.get('w37-fipi-demo-001'), 'Dear Mike,\n\nThanks for your email.');
 });
 
 test('word counting ignores the transcriber notes', () => {

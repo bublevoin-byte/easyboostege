@@ -1,13 +1,12 @@
 [
   {
-    "id": "w37-fipi-2023-001",
+    "id": "w37-fipi-2023-8447",
     "operation": "writing_37",
     "tags": [
-      "fipi-2023",
-      "needs-answer-text"
+      "fipi-2023"
     ],
     "assignment": "You have received an email message from your English-speaking pen-friend Mike: From: Mike@mail.uk To: Russian_friend@ege.ru Subject: Mobile devices …I’ve recently been involved in a school survey on gadgets and devices. What device is your favourite, if any? What do you usually use it for? Do you consider using mobile phones essential for young people, why or why not? I’ve recently returned from a nice summer camp… Write an email to Mike. In your message: – answer his questions; – ask questions about the summer camp. Write 100–140 words. Remember the rules of email writing.",
-    "answer": "",
+    "answer": "Hey, Mike.\n\nHow`s it going? As for me, im pretty fine. Actually, i`m really to hear you again since last time we were chatting. Well, speaking of devices i personally prefer PCs rather than mobile phones. Usually, i`m playing videogames on it. But i also use it for watching movies with my girlfriend, doing homework, preparing for exams, ets. You know all this stuff. Mate to be honest, i do think that mobile phones are essential for teenagers. This is a part of modern culture. This is the way to be in touch with many people. Summer camp sounds pretty nice. Wanna tell me more about your timespan out there? Isit was nice or not? Could you recommend me visit any or better not?\n\nI`ll be waiting for your emails. \n\nBest wishes,\n\nDanil.",
     "human": {
       "total": 0,
       "max": 6,
@@ -25,7 +24,7 @@
     },
     "source": {
       "manual": "fipi-pch-2023.pdf",
-      "work": null,
+      "work": "8447",
       "wordCount": 134,
       "page": 70,
       "assignmentPage": 70,
@@ -39,15 +38,14 @@
     "aiRuns": []
   },
   {
-    "id": "w37-fipi-2023-002",
+    "id": "w37-fipi-2023-4764",
     "operation": "writing_37",
     "tags": [
       "fipi-2023",
-      "needs-answer-text",
       "total-only"
     ],
     "assignment": "You have received an email message from your English-speaking pen-friend Emily: From: Emily@mail.uk To: Russian_friend@ege.ru Subject: Camping …All of my friends think camping is a perfect way to spend the holidays. What is your attitude to camping? Is it popular with Russian teenagers, and why or why not? What are the best ways to spend the holidays for you and your friends? I’ve just started watching an interesting TV show… Write an email to Emily. In your message: – answer her questions; – ask questions about the TV show. Write 100–140 words. Remember the rules of email writing.",
-    "answer": "",
+    "answer": "Hi Emily,\n\n    Thank you for the e-mail. I’m so glad to hear from you again.\n\n     Oh, I agree with your friends camping is a really nice way to spend the holidays because it’s very intresting. Camping is very popular with Russian teenagers because they like active rest more over nature of Russia is very rich. That’s why teenagers have x a lot of places where to go. The best ways of spending holidays with friends are go to the teature or get together in cafe and disuss about something.\n\n     It’s so nice that you have enought time to watch TV show. What is the name of this TV show? Is it available to watch online? How long does one episode continue?\n\n    That’s all. I have to do my homework.\n     Keep in touch.\n\n                                                                              Yours,\n                                                                               Arina.",
     "human": {
       "total": 3,
       "max": 6,
@@ -61,9 +59,9 @@
     },
     "source": {
       "manual": "fipi-pch-2023.pdf",
-      "work": null,
+      "work": "4764",
       "wordCount": 133,
-      "page": 72,
+      "page": 73,
       "assignmentPage": 72,
       "reprintedIn": [
         "fipi-pch-2024.pdf",
@@ -78,11 +76,10 @@
     "operation": "writing_37",
     "tags": [
       "fipi-2023",
-      "needs-answer-text",
       "total-only"
     ],
     "assignment": "You have received an email message from your English-speaking pen-friend Ronny: From: Ronny@mail.uk To: Russian_friend@ege.ru Subject: Summer …I am so happy that summer has come and we are going to have a long holiday. What’s the weather like in Russia in summer? What is your favourite season and why this one? What are your plans for the summer? My uncle Keith is coming to visit us next week... Write an email to Ronny. In your message:  answer his questions;  ask questions about his uncle. Write 100–140 words. Remember the rules of email writing.",
-    "answer": "",
+    "answer": "Dear Ronny,\nI was glad to hear from you again.\nActually, summer in Russia is quite hot and dry, though it depends on certain region.\nTo be honest, my favourite season is winter because this time is associated with Christmas and New Year. If my parents allowed me to visit Australia I would be happy to spend my next summer in this exotic country.\nHaving written about the upcoming visit of your uncle, you made me curios. What is the profession of your uncle? Has he got any hobbies? Is he going to visit some museums or theatres within his staying, or not?\nRegretfully, I've got to finish my letter.\nLooking forward to hearing from you soon.\nBest wishes,\nDenis",
     "human": {
       "total": 5,
       "max": 6,
@@ -109,11 +106,10 @@
     "operation": "writing_37",
     "tags": [
       "fipi-2023",
-      "needs-answer-text",
       "total-only"
     ],
     "assignment": "You have received an email message from your English-speaking pen-friend Mary who writes: From: Mary@mail.uk To: Russian_friend@ege.ru Subject: Cooking …I am learning to cook from my mother now. But I prefer eating out. There are so many cafés around, why should one cook at home? What about you – what are your preferences and why? Do you ever cook for yourself or for the family? I am learning Russian now and I’ve started reading a very interesting book in Russian… Write an email to Mary. In your message:  answer her questions;  ask questions about the book. Write 100–140 words. Remember the rules of email writing.",
-    "answer": "",
+    "answer": "Dear Mary,\nThanks for your message. It was great to hear from you again! Sorry, I haven't answered earlier, but I was really busy. I'm glad you are OK!\nWell, I think that one should cook at home because it's cheaper than eating out. As for me, I like to cook at home and it makes me happy. Actually, I often cook for my family because they like my dishes.\nBy the way, tell me about your learning Russian. When did you start it? Do you practice it?\nWhat's the name of that book?\nActually, I'd go better now because my mother wants me to help me with shopping. Take care and write me soon!\nBest wishes,\nVeronika",
     "human": {
       "total": 5,
       "max": 6,
@@ -136,14 +132,13 @@
     "aiRuns": []
   },
   {
-    "id": "w38-fipi-2023-005",
+    "id": "w38-fipi-2023-4764",
     "operation": "writing_38",
     "tags": [
-      "fipi-2023",
-      "needs-answer-text"
+      "fipi-2023"
     ],
     "assignment": "Imagine that you are doing a project on what film genres are popular among teenagers in Zetland. You have found some data on the subject – the results of the opinion polls (see the table below). Comment on the data in the table and give your opinion on the subject of the project. Film genre Number of respondents (%) Fantasy, sci-fi Horror, thriller Comedy Drama, melodrama Detective films Write 200–250 words.",
-    "answer": "",
+    "answer": "Undoubtedly, films are very important in our life. Doing a project about film genres I found an oppinion poll on what film genres are popular among teenagers in\nZetland and collected some data I am going to comment on several key features of the result of the poll.\n\nLooking at the details, the most popular genre is fantasy, sci-fi with 42% of teenagers because it very exiting. On the contrary, the least popular genre is detective films (5%).\n\nAccording to the data in the table teenagers also watch horror, thriller films (23%), and it is 5 percent more than comedy (18%). It demonstrates that teenagers prefer scary films rather than fun movies.\n\nAs far as I can see, watching films can couse several problems. The most grave one is that teenagers watch violent movies. It can lead to agrassive behaviour and cruel attitude to people and animals.\nHowever, there is a solution to this proplem. Parents should check movies which their children want to see before the allowance to watch it.\n\nIn conclusion, I think that movies play an integral role in our life. Watching films widen mind bounda- ries and help to see another life full of advanture and new expirience.",
     "human": {
       "total": 7,
       "max": 14,
@@ -165,9 +160,9 @@
     },
     "source": {
       "manual": "fipi-pch-2023.pdf",
-      "work": null,
+      "work": "4764",
       "wordCount": null,
-      "page": 107,
+      "page": 108,
       "assignmentPage": 107
     },
     "expectedCriticalErrors": [],
@@ -178,12 +173,11 @@
     "operation": "writing_38",
     "tags": [
       "fipi-2023",
-      "needs-answer-text",
       "total-only",
       "assignment-partial"
     ],
     "assignment": "Imagine that you are doing a project on what people use their smartphones for in Zetland. You have found some data on the subject – the results of the opinion polls (see the diagram below). Comment on the data in the pie chart and give your opinion on the subject of the project. Write 200–250 words.",
-    "answer": "",
+    "answer": "Today we all live in the age of technology. Smartphones have become an indispensable part of people’s lives. People in Zetland use their smartphones for different purposes. My project, which I am still working on, is aimed at finding out the ways of using smartphones. I have found some data on this issue presented in the pie chart. \nIt becomes clear from the diagram that people mostly use smartphones for sending emails (30%) and making phone calls (27%). At the same time the use of smartphones for purchases is the lowest (10%).  \nIt is worth mentioning that the difference between the percentage of people who are mostly playing games (17%) and surfing the Internet (16%) is very small, only 1 percent. The explanation may lie in the fact that both are used mainly for entertainment. \n\nThe statistics of the pie chart, in my opinion, reveal an important problem. We can see that nobody is reading e-books on their smartphones, therefore they are missing an opportunity of reading books anywhere and at any time. \n\nI would like to say that the role of smartphones in today’s life can hardly be overestimated. With the help of smartphones people can communicate quickly and efficiently, they can use them to find any information on the Internet quickly, and smartphone apps allow people to have access to many documents or photos.",
     "human": {
       "total": 12,
       "max": 14,
@@ -211,11 +205,10 @@
     "id": "w37-fipi-2024-003",
     "operation": "writing_37",
     "tags": [
-      "fipi-2024",
-      "needs-answer-text"
+      "fipi-2024"
     ],
     "assignment": "You have received an email message from your English-speaking pen-friend Charles: From: Charles@mail.uk To: Russian_friend@ege.ru Subject: Internet … My parents gave me a laptop for my birthday. What do you use the Internet for? What do you usually download from the Internet? Is it popular with Russian teenagers to have their own blogs or websites, why or why not? Yesterday I went with my class on a school trip to the capital … Write an email to Charles. In your message: – answer his questions; – ask questions about the school trip. Write 100–140 words. Remember the rules of email writing.",
-    "answer": "",
+    "answer": "Dear Charles,\n\n    Thank you for your recent message. I was very glad to hear from you again.\n    You asked me about the Internet. Well, I can say that I use the Internet for studying because it helps me find unfamiliar information. Usually, I download films from the Internet because it's convinient for me and I like watching films. Well, owning Blogs or websites is a popular topic for russian teenagers because a majority of teenagers like watching Blogs while they doing something. Also teenagers like listening video Blogs and check the websites because it inspires and make them calm.\n      Now, it's my turn to ask questions. How long will you be there? What's the name of the capital? What kind of transport will you use for your trip? Hope to hear from you again.\n      Best wishes,\n      Dominika",
     "human": {
       "total": 2,
       "max": 6,
@@ -245,11 +238,10 @@
     "id": "w37-fipi-2024-004",
     "operation": "writing_37",
     "tags": [
-      "fipi-2024",
-      "needs-answer-text"
+      "fipi-2024"
     ],
     "assignment": "You have received an email message from your English-speaking pen-friend Mark: From: Mark@mail.uk To: Russian_friend@ege.ru Subject: Inventions … Last week we went to the science museum in Chicago with my classmates. We learned a lot about modern inventions. What is the most useful modern invention in your opinion? What museums do you like going to, if any? How often do you go on excursions to museums with your classmates? I spent hours working on a group project last week … Write an email to Mark. In your message: – answer his questions; – ask questions about his group project. Write 100–140 words. Remember the rules of email writing.",
-    "answer": "",
+    "answer": "Dear Mark,\n\nThank you for your last email. It is always nice to hear from you. Sorry for not writing you earlier, I was busy with my homework.\n\nI'll be happy to answer your questions. In my opinion, telephone is the most useful modern invention, because it helps people to communicate with each other, even if they're in different countries. As for me, I like going to history museums. I'm found of history and I always enjoy discovering something new about the past. Unfortunatly, I can't say that I'm going on excursions to museums with my classmates often.\n\nAnyways, you've mentioned that you spent hours working on a group project last week. What is the subject of your project? Is this project interesting? Do you like this project?\n\nThat's all for now. Write back soon.\n\nAll the best,\nFatima",
     "human": {
       "total": 6,
       "max": 6,
@@ -279,14 +271,13 @@
     "aiRuns": []
   },
   {
-    "id": "w38-fipi-2024-005",
+    "id": "w38-fipi-2024-5806",
     "operation": "writing_38",
     "tags": [
-      "fipi-2024",
-      "needs-answer-text"
+      "fipi-2024"
     ],
     "assignment": "38.1 Imagine that you are doing a project on where Zetlanders prefer to spend a Saturday evening. You have found some data on the subject – the results of the opinion polls (see the table below). Comment on the data in the table and give your opinion on the subject of the project. The opinion poll question: Where do you prefer to spend a Saturday evening? Places Number of respondents (%) Restaurant or café Park Sports centre Hobby club Theatre or museum Write 200–250 words.",
-    "answer": "",
+    "answer": "These days the topic of spending free time results in a great discussion in the society. While doing a project on where Zetlanders prefer to spend a Saturday evening, I discovered a table chart containing relevant data. In this essay I am going to analyze it and present my conclusions.\n\nAccording to the information shown in the opinion polls in the table chart, the largest number of the respondents prefer to spend their Saturday evening in a restaurant or in a café, (37%). The idea of spending a Saturday evening in a sports centre is not so popular among Zetlanders, (15%). A theatre or a museum appears to be the least preferable place to spend a Saturday evening, with only 5%.\n\nThe data analysis reveals that the percentage of those who would like to spend their Saturday evening in a park (34%) is almost four times higher than the percentage of those who prefer to spend a Saturday evening in a hobby club.(9%). It is not a surprise, because people also should rest from their hobby and going for a walk in a park is the best way to relax.\n\nThere is one issue that can arise with spending free time. People often spend too much time on resting and forget to do important things. This problem can be easily solved. You should make a to do-list. It will definatly help you to control yourself.\n\nIn conclusion I would like to say that going for a walk in a park is the best way to spend a Saturday evening. I think so because while walking in a park you forget everything bad and just enjoy the nature.",
     "human": {
       "total": 10,
       "max": 14,
@@ -308,9 +299,9 @@
     },
     "source": {
       "manual": "fipi-pch-2024.pdf",
-      "work": null,
+      "work": "5806",
       "wordCount": null,
-      "page": 119,
+      "page": 120,
       "assignmentPage": 119,
       "reprintedIn": [
         "fipi-pch-2025.pdf"
@@ -320,15 +311,14 @@
     "aiRuns": []
   },
   {
-    "id": "w38-fipi-2024-006",
+    "id": "w38-fipi-2024-8781",
     "operation": "writing_38",
     "tags": [
       "fipi-2024",
-      "needs-answer-text",
       "total-only"
     ],
     "assignment": "Imagine that you are doing a project on the preparations for the New Year that Zetlanders consider most important. You have found some data on the subject – the results of the opinion polls (see the table below). Comment on the data in the table and give your opinion on the subject of the project. The opinion poll question: What is the most important thing for you in preparing for the New Year? Things to do Number of respondents (%) Tidy the house Decorate a New Year tree Cook traditional New Year dishes Buy presents for friends and relatives Buy a new outfit Write 200–250 words.",
-    "answer": "",
+    "answer": "Celebrations are an important part of our life. My project which I am still working on is aimed at finding out what the preparations for the New Year that Zetlanders consider most important. I have just found some data on this issue and organised it in the table below.\n\nI can identify two main features The first one is that the majority of people are sure that tiding the house is the moust important thing for preparition for New Year. The second key that only third persent of respondents consider buying a new outfit is the moust neccssery thing for preparation.\n\nIt is also worth mentioning that 20 per cent of people think that cooking traditional\nNew Year dishes is important thing is only sightly lower than people who consider the moust im- portant thing is decorate a New Year tree.\n\nIn my opinion the statistics reveal an impor- tant problem. We can see that only seven per cent of respondent buy presents for friends and relatives. It mean that people don'not exchage their gifts. However, it is really necessery traditions in every family I am sure that in order to solve this problem people have get togerther every celebration. It makes us more happy.\n\nIn conclusion, I belive that people will celebrate\nNew Year funny with their relatives",
     "human": {
       "total": 0,
       "max": 14,
@@ -344,7 +334,7 @@
     },
     "source": {
       "manual": "fipi-pch-2024.pdf",
-      "work": null,
+      "work": "8781",
       "wordCount": null,
       "page": 124,
       "assignmentPage": 124,
@@ -356,14 +346,13 @@
     "aiRuns": []
   },
   {
-    "id": "w37-fipi-2025-001",
+    "id": "w37-fipi-2025-4798",
     "operation": "writing_37",
     "tags": [
-      "fipi-2025",
-      "needs-answer-text"
+      "fipi-2025"
     ],
     "assignment": "You have received an email message from your English-speaking pen-friend Oscar: From: Oscar@mail.uk To: Russian_friend@ege.ru Subject: Russian literature …Yesterday at school our foreign language teacher told us a lot about Russian literature. What Russian writers are popular with Russian teenagers? Who is your favourite writer? What book of Russian literature do you think a foreigner should read first, and why? I’ve just got an unusual present… Write an email to Oscar. In your message:  answer his questions;  ask questions about the present. Write 100–140 words. Remember the rules of email writing.",
-    "answer": "",
+    "answer": "Hello Oscar\nThank you for your email Excuse mo I can't write earlier because I working hard in my store I glad to hearing from you In your recent email you ask me about Russian literature and Russian Writers.\n\nPushkin, Gogol, Tolstoy, Dostayeuskiy and Solticov-Shedrin are so popular with Russian teenager because students are learning classical literature at school.\n\nAs for me, I think my favorite writer is Dostayeuskiy because he is smart and horrible. He was writed my favorite book ,, Prestuplenie,\nNakazanie\". Well, I think foreigner should to read the mertvie dushi by\nGogol because this book can show russian life. This book looks like horror.\nYou can see a Russian socity in prime!\n\nThank you for your present. I like presents so much! What is the size of the present? What is the coluor of the present? What is the cost of the present? Can you show me your present in your next email ?\nSorry, I can't write more because we need to go ! See you later !\n\nGoodbuy\n\nBest wishes\n\nDanila.",
     "human": {
       "total": 0,
       "max": 6,
@@ -381,23 +370,25 @@
     },
     "source": {
       "manual": "fipi-pch-2025.pdf",
-      "work": null,
-      "wordCount": null,
-      "page": 87,
-      "assignmentPage": 87
+      "work": "4798",
+      "wordCount": 172,
+      "page": 89,
+      "assignmentPage": 87,
+      "reprintedIn": [
+        "fipi-pch-2026.pdf"
+      ]
     },
     "expectedCriticalErrors": [],
     "aiRuns": []
   },
   {
-    "id": "w37-fipi-2025-002",
+    "id": "w37-fipi-2025-8311",
     "operation": "writing_37",
     "tags": [
-      "fipi-2025",
-      "needs-answer-text"
+      "fipi-2025"
     ],
     "assignment": "You have received an email message from your English-speaking pen-friend Olive: From: Olive@mail.uk To: Russian_friend@ege.ru Subject: St. Petersburg …At college we are doing projects on the historic cities of the world. If I choose St. Petersburg in Russia, what places of interest should I write about? Is St. Petersburg popular among foreign and local tourists, and why? What season is the best to visit St. Petersburg? We’ve just returned from the trip to the seaside… Write an email to Olive. In your message:  answer her questions;  ask questions about the trip. Write 100–140 words. Remember the rules of email writing.",
-    "answer": "",
+    "answer": "Dear Olive,\nThanks for your email. I hope you're doing fine.\nIn your email you ask me some questions about St.\nPetersburg. I think you should write about Hermitage and Petergof. In my opinion St Petersburg is popular among foreign and local tourists because it's the most beautiful historic city Of the world. I think summer is the best season to visit St. Petersburg.\n\nBy the way, I want to ask you some questions about the trip. How long was your trip? What interesting things did you see? Did you go to the trip by yourself?\n\nI guess that's all for now. Write back soon.\n\nBest wishes,\nLiza",
     "human": {
       "total": 6,
       "max": 6,
@@ -415,9 +406,9 @@
     },
     "source": {
       "manual": "fipi-pch-2025.pdf",
-      "work": null,
+      "work": "8311",
       "wordCount": 105,
-      "page": 91,
+      "page": 93,
       "assignmentPage": 91,
       "reprintedIn": [
         "fipi-pch-2026.pdf"
@@ -430,11 +421,10 @@
     "id": "w37-fipi-2025-003",
     "operation": "writing_37",
     "tags": [
-      "fipi-2025",
-      "needs-answer-text"
+      "fipi-2025"
     ],
     "assignment": "You have received an email message from your English-speaking pen-friend Sandra: From: Sandra@mail.uk To: Russian_friend@ege.ru Subject: Food preferences … Nowadays I always try to eat healthy food. But in the past, I used to love sweets and fast food very much. What kind of food do Russian people eat most often? How have your food preferences changed since you were a kid? Do you think your food preferences will continue to change as you get older, why or why not? My family and I still write letters to Santa at Christmas … Write an email to Sandra. In your message: – answer her questions; – ask questions about her letters to Santa. Write 100–140 words. Remember the rules of email writing.",
-    "answer": "",
+    "answer": " Dear Sandra,\n     Thank you for your letter! It's a big pleasure to receive it from you.\n\n     Now, I'd like to answer your questions. Well,I think, that the most popular food among ussian is the soup. We have different kinds of soup in our cuisine, like schi or borsch. Honestly, I used to hate fish when i was a kid, but now, I'm a big fan of sushi. I think, that my food preferences will not change as I will get older, because I'm a person, who can eat anything.\n\n     Now, I would like to know more about your letters to Santa! What was your last letter to Santa about? When do you write your letters? Do you think you will continue to write letters to Santa as you get. Older?\n\nI'm sorry, my mom needs my help, so,\n\nI got to go.\n\nWrite back soon!\n\nYours,\n\nGleb",
     "human": {
       "total": 5,
       "max": 6,
@@ -461,14 +451,13 @@
     "aiRuns": []
   },
   {
-    "id": "w38-fipi-2025-007",
+    "id": "w38-fipi-2025-1025",
     "operation": "writing_38",
     "tags": [
-      "fipi-2025",
-      "needs-answer-text"
+      "fipi-2025"
     ],
     "assignment": "Imagine that you are doing a project on why some Zetlanders refuse to attend music schools. You have found some data on the subject – the results of a survey (see the table below). Comment on the survey data in the table and give your opinion on the subject of the project. The survey question: Why do you refuse to attend a music school? Reasons Number of respondents (%) No fast result Time-consuming Not interested in music Far from home No money for a quality instrument Write 200–250 words.",
-    "answer": "",
+    "answer": "Nowadays people do not value music. As part of\nmy project on why some Zetlanders refuse to attend\nmusic schools, I have found a table containing some\nrelevant results of the opinion polls that I am going\nto comment on.\n\nAccording to the data, the majority of the respondents choose\n,,No fast result\" while answering the question ,,Why do you refuse\nto attend a music school?\". The second most sizeable group\nvote for ,,Time-consuming\" (23%). It can also be seen that\nthe least favoured option is . No money for a quality\ninstrument\" chosen by 14% of the surveyed.\n\nLooking more closely at the table, one can note that\n,,Not interested in music\" appears to be a more widespread\nanswer than ,,Far from home\" as the difference between\nthese two options is 4 percentage points. This fact is\nquite explicable given that more people are interested\nin other hobbies.\n\nIt is worth mentioning that one of the problems that may\narise with learning to play a musical instrument is that\none can not find a suitable teacher. However, there is\na possible solution to this problem. A person should attend\ntrial lessons and ask questions about teachers' learning\ntechniques.\n\nIn conclusion, I believe that being able to play a musical\ninstrument is important. That is because a person can always\nfind comfort in music.",
     "human": {
       "total": 12,
       "max": 14,
@@ -490,23 +479,22 @@
     },
     "source": {
       "manual": "fipi-pch-2025.pdf",
-      "work": null,
+      "work": "1025",
       "wordCount": null,
-      "page": 134,
+      "page": 135,
       "assignmentPage": 134
     },
     "expectedCriticalErrors": [],
     "aiRuns": []
   },
   {
-    "id": "w38-fipi-2025-008",
+    "id": "w38-fipi-2025-4563",
     "operation": "writing_38",
     "tags": [
-      "fipi-2025",
-      "needs-answer-text"
+      "fipi-2025"
     ],
     "assignment": "Imagine that you are doing a project on why some Zetlanders refuse to attend music schools. You have found some data on the subject – the results of a survey (see the table below). Comment on the survey data in the table and give your opinion on the subject of the project. The survey question: Why do you refuse to attend a music school? Reasons Number of respondents (%) No fast result Time-consuming Not interested in music Far from home No money for a quality instrument Write 200–250 words.",
-    "answer": "",
+    "answer": "Nowadays not so many people attend music schools. The aim of\nmy project, that I am working on, is to find out why some Zetlan-\nders refuse to attend music schools. Doing a project I have found\nsome data in a form of a table with results of relevant opinion polls,\nthat I am going to analyse now.\n\nAs it can be see frome the table, ,,Time-consuming\" is one of the\nmost popular answers to question ,,Why do you refuse to attend a music\nschool?\" (23%). Another popular variant is ,,Far from home\"\n(15%), followed by ,,No money for a quality instrument\" (14%).\n\nLooking more closely at the data it can be mentioned, that difference\nbetween percentage of those surveyd, who chose variant ,,No fast\nresult\" and those, who voted for ,,Not interested in music\" is 10%\n(29% and 19%, respectievly). This statistic shows that many\npeople, who refuse to attend a musical school, are interested in music,\nbut don't have enough patience to learn it.\n\nIt is worth mentioning, that one of the problems which can arise\nwith learning to play a musical instrument is that sometimes\nthis process can be exhausting. One of the possible solutions\nto this issue is to have small periods of rest during the\nlearning process.\n\nIn conclusion, I strongly believe, that playing a musical instrument\ncan make every person more intilligent, and\nthat is the reason why everyone should be able to do it.",
     "human": {
       "total": 9,
       "max": 14,
@@ -528,9 +516,9 @@
     },
     "source": {
       "manual": "fipi-pch-2025.pdf",
-      "work": null,
+      "work": "4563",
       "wordCount": null,
-      "page": 134,
+      "page": 139,
       "assignmentPage": 134
     },
     "expectedCriticalErrors": [],
@@ -540,11 +528,10 @@
     "id": "w37-fipi-2026-001",
     "operation": "writing_37",
     "tags": [
-      "fipi-2026",
-      "needs-answer-text"
+      "fipi-2026"
     ],
     "assignment": "You have received an email message from your English-speaking pen-friend Alison: From: Alison@mail.uk To: Russian_friend@ege.ru Subject: Reading …Most of my friends enjoy reading books in their free time, and I like it too. Is reading a popular hobby with teenagers in Russia? What books do you read in your free time? What book by a Russian writer would you advise me to read in the future, and why this one? I’ve just finished my school project on history… Write an email to Alison. In your message: – answer her questions; – ask questions about the school project. Write 100–140 words. Remember the rules of email writing.",
-    "answer": "",
+    "answer": "Dear Alison,\n\nI am glad to received message from you. And with all my pleasure I have answered to your's questions. Talking about popularity of reading as a hobby among teens in Russia, I can say that reading is very unpopular. But for me reading books one of my favourite hobby's and when I have some free time I prefer very unsimular geners , : fantasy, detective, some books about ordinary people routine or russian classic I can give you advise for future plans in reading and recomend to you book which title is \"Crime and punishement\" , and writer of this artwork is Feodor Dostoevski, and why I recomend this book because of vibes which book give to reader. And what book you are reading right now? What theme of your project? Can you tell me about your fawourite books?\n\nWith best wishes,\n\nSofia.",
     "human": {
       "total": 0,
       "max": 6,
@@ -574,11 +561,10 @@
     "id": "w37-fipi-2026-3896",
     "operation": "writing_37",
     "tags": [
-      "fipi-2026",
-      "needs-answer-text"
+      "fipi-2026"
     ],
     "assignment": "You have received an email message from your English-speaking pen-friend Alice: From: Alice@mail.uk To: Russian_friend@ege.ru Subject: Russian cuisine …Our school teacher asked us to do a project on national dishes of different countries. I want to write about the Russian cuisine. What traditional dishes are popular in your country? What national dish is the easiest to cook? What ingredients are needed to cook it? I want to start taking singing lessons… Write an email to Alice. In your message: – answer her questions; – ask questions about the singing lessons. Write 100–140 words. Remember the rules of email writing.",
-    "answer": "",
+    "answer": "Dear Alice ,\n       Thank you for your email. I was very glad to hear from you again.\n\n       In your email you asked me about Russian traditional dishes. There are a lot of traditional dishes that are popular in my country. For example, borsh, blini, pirozhki, solyanka, and okroshka. I think okroshka is the easiest to cook. You only need to slice the ingredients and add some water with smetana. The needed ingredients are eggs, meat, potatoes, cucumbers, smetana, and water or kvas.\n\n      By the way , tell me more about the singing lessons. What kind of programm do singing lessons provide?\nWhat is the fee of the singing lessons? Are the singing lessons online or offline?\n\n     Now I have to go. I have some housework to do.\nText me back soon.\n\nWith love ,\n\nAngelina",
     "human": {
       "total": 4,
       "max": 6,
@@ -608,11 +594,10 @@
     "id": "w37-fipi-2026-3468",
     "operation": "writing_37",
     "tags": [
-      "fipi-2026",
-      "needs-answer-text"
+      "fipi-2026"
     ],
     "assignment": "You have received an email message from your English-speaking pen-friend Chris: From: Chris@mail.uk To: Russian_friend@ege.ru Subject: Russian science …Yesterday our school teacher told us a lot about Russian scientific inventions. What is the most famous Russian invention? Why is it important to study science at school? What Russian scientist do you think a foreigner should learn about, and why? I’ve just bought a present for my brother… Write an email to Chris. In your message: – answer his questions; – ask questions about the present. Write 100–140 words. Remember the rules of email writing.",
-    "answer": "",
+    "answer": " Dear Chris,\n\n    Thank you for your quick email. It's a great pleasure for me to read and answer them.\n\n     In your message you asked me about the most famous Russian invention . I think that\nMendeleev made a great invention opening his own table . Without its help we can't imagine our\nChemistry lessons. It's very important to study science at school because all base information we can learn only there. Russia is fulled of different inventions and scientists which foreigner should learn about.\nSuch as Lomonosov, Mendeleev, Pushkin. They are brough a big influence around the world.\n\n      Now it's my turn to ask you some questions.\nWhere did you buy a present? What did you buy?\nHow much did you pay for it?\n\n       Keep in touch.\n       Best wishes,\n       Sonya",
     "human": {
       "total": 2,
       "max": 6,
@@ -639,49 +624,14 @@
     "aiRuns": []
   },
   {
-    "id": "w37-fipi-2026-4798",
-    "operation": "writing_37",
-    "tags": [
-      "fipi-2026",
-      "needs-answer-text"
-    ],
-    "assignment": "You have received an email message from your English-speaking pen-friend Oscar: From: Oscar@mail.uk To: Russian_friend@ege.ru Subject: Russian literature …Yesterday at school our foreign language teacher told us a lot about Russian literature. What Russian writers are popular with Russian teenagers? Who is your favourite writer? What book of Russian literature do you think a foreigner should read first, and why? I’ve just got an unusual present… Write an email to Oscar. In your message:  answer his questions;  ask questions about the present. Write 100–140 words. Remember the rules of email writing.",
-    "answer": "",
-    "human": {
-      "total": 0,
-      "max": 6,
-      "criteria": {
-        "k1": 0,
-        "k2": 0,
-        "k3": 0
-      },
-      "criteriaLabels": {
-        "k1": "Решение коммуникативной задачи",
-        "k2": "Организация текста",
-        "k3": "Языковое оформление"
-      },
-      "reviewer": "fipi-2026-expert-manual"
-    },
-    "source": {
-      "manual": "fipi-pch-2026.pdf",
-      "work": "4798",
-      "wordCount": 172,
-      "page": 107,
-      "assignmentPage": 106
-    },
-    "expectedCriticalErrors": [],
-    "aiRuns": []
-  },
-  {
     "id": "w38-fipi-2026-3896",
     "operation": "writing_38",
     "tags": [
       "fipi-2026",
-      "needs-answer-text",
       "assignment-partial"
     ],
     "assignment": "Imagine that you are doing a project on Zetland teenagers’ preparation for final exams. You have found some data on the subject – the results of a survey conducted among Zetland teenagers (see the pie chart below). Comment on the survey data and give your opinion on the subject of the project. The survey question: What helped you the most in preparing for final exams? 1. Choose one option Write 200–250 words.",
-    "answer": "",
+    "answer": " As part of my project on what helped Zetland teenagers the most in preparing for final exams, I have found a pie chart with some relevant results of a survey. I am going to analyse the information and give my opinion on the subject of the project.\n\n        As can be seen from the data provided, we can observe the key insights the options of Zetland youth when it comes to exams preparing. Firstly, 26% of the respondents prioritise to get parents' support.\nSecondly, only 9% of the respondents mark the option\n\"Positive mindset\".\n\n        Comparing the options to choose among Zetland students, I noticed some interesting trends. \"Regular study routine\" appears to be the most popular option, with 34% of the respondents, while the option\n\"Time management\" seems to be less favoured, getting only 11%. This significant difference of 23 percentage points highlights how important regular study routine in Zetland teenagers' life is.\n\n         There is a problem that can arise with preparing for final exams. Students can work too hard and get tired and sick of studying. A possible solution is to manage time and take a rest every time you feel tired.\n\n         I conclusion, I strongly believe that every student should not pay all the attention to studying. Otherwise, he can feel bad. Everyone needs to manage time properly, sleep well, and take a rest. This is the way to pass all the exams.",
     "human": {
       "total": 8,
       "max": 14,
@@ -716,11 +666,10 @@
     "operation": "writing_38",
     "tags": [
       "fipi-2026",
-      "needs-answer-text",
       "assignment-partial"
     ],
     "assignment": "Imagine that you are doing a project on Zetlanders’ priorities in reading and discussing the news in social networks. You have found some data on the subject – the results of a survey conducted among Zetland social network users (see the pie chart below). Comment on the survey data and give your opinion on the subject of the project. The survey question: What is your priority in reading and discussing the news in social networks? Choose one option Write 200–250 words.",
-    "answer": "",
+    "answer": " I am doing a project on Zetlander's priorities in reading and discussing the news in social networks. I have found a pie chart with some results of a survey. I will analyse the data and express my opinion on the subject of the project.\n\n        According to the pie chart, answering the question 'What is your priority in reading and discussing the news in social networks?' the surveyed have chosen 'Reliable information' (34%), followed by 'Internet security' (26%). By contrast, the least of the surveyed think that 'Friendly attitude of other social network users' is a great idea, only 9%.\n\n         Moreover, it is worth mentioning that the percentage of Zetlander's who have chosen 'Reliable information' is higher than the percentage of those who chose 'Discussing information with other social network users' (34% and 11% respectively), the difference is 23%. I think it is because people do not want to discuss something with unknown people.\n\n          Analysing this topic, I can outline a problem which can arise with reading and discussing the news in social networks. It can get a bad influence on real-life communication. To solve this problem, Zetlanders must communicate with each other not only in social network.\n\n          In conclusion, I want to say that discussing in social network has some advantages. For example, people who afraid give their attitude in real-life can text it online.",
     "human": {
       "total": 6,
       "max": 14,
@@ -754,11 +703,10 @@
     "id": "w38-fipi-2026-4563",
     "operation": "writing_38",
     "tags": [
-      "fipi-2026",
-      "needs-answer-text"
+      "fipi-2026"
     ],
     "assignment": "Imagine that you are doing a project on why some Zetlanders refuse to attend music schools. You have found some data on the subject – the results of a survey conducted among Zetlanders (see the table below). Comment on the survey data in the table and give your opinion on the subject of the project. The survey question: Why do you refuse to attend a music school? Choose one option Options Number of respondents (%) No fast result Time-consuming Not interested in music Far from home No money for a quality instrument Write 200–250 words.",
-    "answer": "",
+    "answer": "Nowadays not so many people attend music schools. The aim of my project, that I am working on, is to find out why some Zetlanders refuse to attend music schools. Doing a project I have found some data in a form of a table with results of relevant opinion polls, that I am going to analyse now.\n\nAs it can be see frome the table, \"Time-consuming\" is one of the most popular answers to question \"Why do you refuse to attend a music school?\" (23%). Another popular variant is \"Far from home\" (15%), followed by \"No money for a quality instrument\" (14%).\n\nLooking more closely at the data it can be mentioned, that difference between percentage of those surveyd, who chose variant \"No fast result\" and those, who voted for \"Not interested in music\" is 10% (29% and 19%, respectievly). This statistic shows that many people, who refuse to attend a musical school, are interested in music, but don't have enough patience to learn it.\n\nIt is worth mentioning, that one of the problems, which can arise with learning to play a musical instrument is that sometimes this process can be exhausting. One of the possible solutions to this issue is to have small periods of rest during the learning process.\n\nIn conclusion, I strongly believe, that playing a musical instrument can make every person more intilligent, and that is the reason why everyone should be able to do it.",
     "human": {
       "total": 8,
       "max": 14,

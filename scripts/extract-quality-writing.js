@@ -36,7 +36,14 @@ const TASKS = {
   },
 };
 
-const WORK = /^Работа\s+(\d{3,5})/u;
+/*
+ * Заголовок работы набран по-разному в разные годы: «Работа 4798» в методичке 2026 года и
+ * «РАБОТА 4798 (с сохранением языкового оформления оригинала)» в методичках 2023–2025.
+ * Чувствительный к регистру шаблон видел только первый вариант, и пять работ остались без номера —
+ * а вместе с номером они теряли и единственный надёжный признак, по которому переиздание одной
+ * и той же работы отличается от двух разных.
+ */
+const WORK = /^\s*работа\s+(\d{3,5})/iu;
 // \b is ASCII-only in JavaScript, so a Cyrillic word boundary has to be spelled out.
 // The manuals close a review either with "Итог ..." or with "за работу автор получит ...".
 const SUMMARY = /^\s*Итог[оа]?(?![А-Яа-яЁё])|за (?:всю )?работу (?:автор |участник (?:экзамена )?)?получит/u;
@@ -177,19 +184,33 @@ function signature(stub) {
     (stub.assignment || '').slice(0, 120),
     stub.human.total,
     JSON.stringify(stub.human.criteria),
-    stub.source.wordCount ?? '',
   ].join('|');
 }
 
+/*
+ * Поле, которое напечатала только одна из двух методичек, не может служить доказательством
+ * различия. Прежняя подпись включала объём по подсчёту эксперта наравне с остальным, и работа
+ * 4798 попала в набор дважды: методичка 2026 года объём печатает, методичка 2025-го — нет.
+ * Разошлись подписи, а работа одна и та же.
+ */
+function agrees(left, right) {
+  return left == null || right == null || String(left) === String(right);
+}
+
 function dedupe(stubs) {
-  const bySignature = new Map();
+  const groups = new Map();
   for (const stub of stubs) {
     const key = signature(stub);
-    const existing = bySignature.get(key);
-    if (!existing) { bySignature.set(key, stub); continue; }
-    existing.source.reprintedIn = [...(existing.source.reprintedIn || []), stub.source.manual];
+    const bucket = groups.get(key) || [];
+    const twin = bucket.find((kept) => agrees(kept.source.work, stub.source.work)
+      && agrees(kept.source.wordCount, stub.source.wordCount));
+    if (!twin) { bucket.push(stub); groups.set(key, bucket); continue; }
+    twin.source.reprintedIn = [...(twin.source.reprintedIn || []), stub.source.manual];
+    /* Годы дополняют друг друга: что напечатал один, оставляем, даже если другой промолчал. */
+    twin.source.work = twin.source.work ?? stub.source.work;
+    twin.source.wordCount = twin.source.wordCount ?? stub.source.wordCount;
   }
-  return [...bySignature.values()];
+  return [...groups.values()].flat();
 }
 
 async function main() {
