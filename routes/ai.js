@@ -8,10 +8,10 @@ import { config } from '../config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from '../ai/writing.js';
 import { buildContentPrompt, CONTENT_PROMPT_VERSION, contentRequestSchema, parseContentResponse } from '../ai/content.js';
 import { buildSpeakingPrompt, buildSpeakingSamplePrompt, parseSpeakingReview, parseSpeakingSample, SPEAKING_PROMPT_VERSION, speakingRequestSchema, speakingSampleRequestSchema } from '../ai/speaking.js';
-import { buildRepairRequest, isFormatFailure } from '../ai/format-repair.js';
 import { assignmentFor, OPERATION_FOR_TASK_TYPE } from '../ai/task-bank.js';
-import { createConcurrencyGate, estimateCostMicrousd, runProviderFallback, TtlCache } from '../ai/provider-control.js';
-import { operationLimits, providersFor } from '../ai/operations.js';
+import { estimateCostMicrousd, TtlCache } from '../ai/provider-control.js';
+import { createProviderClient } from '../ai/provider-client.js';
+import { providersFor } from '../ai/operations.js';
 import { recordDependencyEvent } from '../observability/metrics.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -23,24 +23,9 @@ function describeFallback(provider, code, error, index, total) {
 }
 
 
-// Section 10.8: bound how many provider calls run at once; the rest wait their turn.
-const gate = createConcurrencyGate(config.ai.maxConcurrentRequests);
-
-// The registry states what an operation needs; the environment states what the deployment allows.
-// The stricter of the two wins, so an operator can still clamp everything down in one place.
-function limitsFor(operation) {
-  const base = operationLimits(operation);
-  return {
-    ...base,
-    requestsPerHour: Math.min(base.requestsPerHour, config.ai.maxRequestsPerHour),
-    timeoutMs: Math.min(base.timeoutMs, config.ai.maxTimeoutMs),
-  };
-}
-
-const XAI_KEY = config.ai.xaiKey;
-const XAI_MODEL = config.ai.xaiModel;
-const GROQ_KEY = config.ai.groqKey;
-const GROQ_MODEL = config.ai.groqModel;
+// The web server takes the standard chain: both providers, fallback allowed. Pinning exists for
+// the quality runner of section 11.2 and has no business in a student's request.
+const { askProvider, aiProviders, askWithFallback, limitsFor, parseWithOneRepair } = createProviderClient();
 
 // Server-side AI operations. The client never sends a system prompt: each operation has its own contract.
 export function createAiRoutes({ authentication, access, db }) {
@@ -59,86 +44,8 @@ export function createAiRoutes({ authentication, access, db }) {
     getBankTask, getBankTaskByExternalId,
   } = db;
 
-  async function askProvider({ url, key, model }, system, user, operation) {
-    const limits = limitsFor(operation);
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), limits.timeoutMs);
-    let r;
-    try {
-      r = await gate.run(() => fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key },
-      signal: controller.signal,
-      body: JSON.stringify({
-        model,
-        temperature: 0.3,
-        max_tokens: limits.maxTokens,
-        messages: [...(system ? [{ role: 'system', content: system }] : []), { role: 'user', content: user }],
-      }),
-    }));
-    } finally {
-      clearTimeout(timeout);
-    }
-    const j = await r.json();
-    if (!r.ok) throw new Error((j.error && j.error.message) || ('HTTP ' + r.status));
-    return {
-      text: j.choices?.[0]?.message?.content || '',
-      promptTokens: Number.isInteger(j.usage?.prompt_tokens) ? j.usage.prompt_tokens : null,
-      completionTokens: Number.isInteger(j.usage?.completion_tokens) ? j.usage.completion_tokens : null,
-    };
-  }
-
-  function aiProviders() {
-    const providers = [];
-    if (config.ai.xaiEnabled && XAI_KEY) providers.push({ name: 'grok', url: config.ai.xaiUrl, key: XAI_KEY, model: XAI_MODEL, inputMicrousdPerMillion: config.ai.xaiInputMicrousdPerMillion, outputMicrousdPerMillion: config.ai.xaiOutputMicrousdPerMillion });
-    if (config.ai.groqEnabled && GROQ_KEY) providers.push({ name: 'groq', url: config.ai.groqUrl, key: GROQ_KEY, model: GROQ_MODEL, inputMicrousdPerMillion: config.ai.groqInputMicrousdPerMillion, outputMicrousdPerMillion: config.ai.groqOutputMicrousdPerMillion });
-    return providers;
-  }
-
-  async function askWithFallback(system, user, operation) {
-    const providers = providersFor(operation, aiProviders());
-    return runProviderFallback(providers, (provider) => askProvider(provider, system, user, operation));
-  }
-
   function aiUsage(provider, response) {
     return { promptTokens: response.promptTokens, completionTokens: response.completionTokens, estimatedCostMicrousd: estimateCostMicrousd(response, provider) };
-  }
-
-  /*
-   * Section 10.3: parse the answer; on a contract violation give the model exactly one corrected
-   * attempt, then validate again. The retry goes back to the same provider on purpose — the
-   * complaint is about shape, and the provider that produced the content is the one that can fix
-   * it. Both calls are reported so the budget and the cost metrics stay truthful: a repaired
-   * request really did cost two calls.
-   */
-  async function parseWithOneRepair({ provider, text, parse, system, user, operation }) {
-    try {
-      return { value: parse(text), repair: null };
-    } catch (firstError) {
-      if (!isFormatFailure(firstError)) throw firstError;
-      if (!provider) throw firstError;
-
-      const startedAt = Date.now();
-      let retry;
-      try {
-        retry = await askProvider(provider, system, buildRepairRequest(user, text, firstError), operation);
-      } catch (retryError) {
-        /* The repair call itself failed; the original contract violation is the honest answer. */
-        retryError.repairOf = firstError.message;
-        throw firstError;
-      }
-
-      const value = parse(retry.text);
-      return {
-        value,
-        repair: {
-          provider,
-          usage: retry,
-          durationMs: Date.now() - startedAt,
-          reason: firstError.message,
-        },
-      };
-    }
   }
 
   /* The rejected first call is a real event: it consumed tokens and it explains the latency. */

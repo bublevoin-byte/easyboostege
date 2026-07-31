@@ -98,8 +98,14 @@ test('a caller that waits too long is refused rather than hanging', async () => 
   assert.equal(gate.stats().waiting, 0, 'a timed-out caller leaves no entry behind');
 });
 
+/*
+ * The clamps moved to ai/provider-client.js with the rest of the provider call chain, so that the
+ * quality runner of section 11.2 measures the code students hit rather than a copy of it. Only the
+ * file being read changed: the guarantee under test — the deployment may tighten the registry but
+ * never loosen it — is the same one, asserted the same way.
+ */
 test('the deployment can clamp the registry but not raise it', async () => {
-  const route = await fs.readFile(new URL('../routes/ai.js', import.meta.url), 'utf8');
+  const route = await fs.readFile(new URL('../ai/provider-client.js', import.meta.url), 'utf8');
   assert.match(route, /Math\.min\(base\.requestsPerHour, config\.ai\.maxRequestsPerHour\)/u);
   assert.match(route, /Math\.min\(base\.timeoutMs, config\.ai\.maxTimeoutMs\)/u);
   assert.match(route, /max_tokens: limits\.maxTokens/u);
