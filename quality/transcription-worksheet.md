@@ -187,12 +187,17 @@ the rules of email writing.
 <!-- w37-fipi-2023-004 -->
 ```text
 Dear Mary,
+
 Thanks for your message. It was great to hear from you again! Sorry, I haven't answered earlier, but I was really busy. I'm glad you are OK!
+
 Well, I think that one should cook at home because it's cheaper than eating out. As for me, I like to cook at home and it makes me happy. Actually, I often cook for my family because they like my dishes.
-By the way, tell me about your learning Russian. When did you start it? Do you practice it?
-What's the name of that book?
+
+By the way, tell me about your learning Russian. When did you start it? Do you practice it? What's the name of that book?
+
 Actually, I'd go better now because my mother wants me to help me with shopping. Take care and write me soon!
+
 Best wishes,
+
 Veronika
 ```
 
