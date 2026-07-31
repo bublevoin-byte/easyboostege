@@ -17,6 +17,52 @@ export function validateQualityDataset(cases, { release = false } = {}) {
   return { ok: errors.length === 0, errors, counts };
 }
 
+/*
+ * Прогон опознаётся парой «провайдер + модель» — тем же способом, каким его опознаёт слияние
+ * журналов (`runKey` в scripts/merge-quality-runs.js). Записи без этих полей — прогоны, сделанные
+ * до того, как модель стали записывать; они образуют собственную пару и ни с какой названной
+ * моделью не совпадают: «неизвестно чей прогон» и «прогон этой модели» — разные вещи.
+ */
+const variantOf = (run) => ({ provider: run?.provider ?? null, model: run?.model ?? null });
+
+export function listRunVariants(cases) {
+  const seen = new Map();
+  for (const item of Array.isArray(cases) ? cases : []) {
+    for (const run of Array.isArray(item?.aiRuns) ? item.aiRuns : []) {
+      const variant = variantOf(run);
+      const key = `${variant.provider}|${variant.model}`;
+      if (!seen.has(key)) seen.set(key, variant);
+    }
+  }
+  return [...seen.values()];
+}
+
+/*
+ * Отбирает прогоны, по которым считать метрики. После слияния двух журналов у работы лежат прогоны
+ * обеих моделей, и метрика по ним всем сразу измерением не является: stabilityWithinOnePoint
+ * назвала бы расхождение между разными моделями нестабильностью одной. Формулы это не меняет —
+ * calculateQualityMetrics получает тот же набор, только с отобранными прогонами.
+ *
+ * Работы возвращаются все до одной, в том числе те, у которых под фильтром не осталось ни одного
+ * прогона: их идентификаторы едут в `emptied`, чтобы отчёт назвал их поимённо. Набор, измеренный
+ * наполовину, не то же самое, что измеренный целиком, и молча укоротить его нельзя.
+ */
+export function filterQualityRuns(cases, { provider = null, model = null } = {}) {
+  const list = Array.isArray(cases) ? cases : [];
+  if (provider === null && model === null) return { cases: list, filtered: false, matched: null, emptied: [] };
+  const matches = (run) => (provider === null || (run?.provider ?? null) === provider)
+    && (model === null || (run?.model ?? null) === model);
+  const emptied = [];
+  let matched = 0;
+  const selected = list.map((item) => {
+    const aiRuns = (Array.isArray(item?.aiRuns) ? item.aiRuns : []).filter(matches);
+    matched += aiRuns.length;
+    if (!aiRuns.length) emptied.push(item?.id ?? '<без id>');
+    return { ...item, aiRuns };
+  });
+  return { cases: selected, filtered: true, matched, emptied };
+}
+
 export function calculateQualityMetrics(cases) {
   const runs = cases.flatMap((item) => item.aiRuns.map((run) => ({ item, run })));
   const valid = runs.filter(({ run }) => run.valid === true);
