@@ -1,6 +1,6 @@
 # 07 — Опросник корректности разборов и слияние ответов
 
-Status: ready-for-agent
+Status: done
 Blocked by: 06
 Spec: .scratch/ai-quality-runner/spec.md#опросники-для-владельца
 
