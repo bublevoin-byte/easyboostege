@@ -10,7 +10,9 @@ const studentAnswer = (max) => z.string().trim().min(20).max(max)
   .refine((value) => value.length >= 20, { message: 'answer is empty after sanitising' });
 
 // v2 adds the deterministic pre-check block to the prompt (section 10.5).
-export const WRITING_PROMPT_VERSION = 'writing-v2';
+// v3 names the allowed `kind` values and the three FIPI rules that force a zero. The first
+// measurement showed the model inventing a third `kind` and never reaching zero on its own.
+export const WRITING_PROMPT_VERSION = 'writing-v3';
 
 const task37AssignmentSchema = z.object({
   from: z.string().trim().min(1).max(40),
@@ -140,14 +142,34 @@ export function buildWritingPrompt(input) {
     errors: [{ title: 'тип ошибки', wrong: 'фрагмент', right: 'исправление', kind: 'err', note: 'пояснение' }],
   };
 
+  // The three FIPI rules that force a zero. Their thresholds are derived from the same TASK_RULES
+  // the criteria and the range come from: a second set of constants would drift on the first edit
+  // and the prompt would start stating rules the server does not hold.
+  const [communicativeCriterion] = rules.criteria[0];
+  const zeroBelowWords = Math.round(rules.minWords * 0.9);
+  const cutOffAboveWords = Math.round(rules.maxWords * 1.1);
+  const zeroRules = [
+    'Правила ФИПИ, обязательные при выставлении баллов:',
+    `1. Ноль по критерию «${communicativeCriterion}» означает ноль по всем остальным критериям и overall_got = 0.`,
+    `2. Меньше ${zeroBelowWords} слов — задание проверке не подлежит: ноль по всем критериям и overall_got = 0.`,
+    `3. Больше ${cutOffAboveWords} слов — оценивай только первые ${rules.maxWords} слов ответа, остальное не читай и не учитывай.`,
+    // Правило 3 сужает то, что оценивается, но не то, что считается. Поле words сверяется сервером
+    // с фактическим объёмом всего ответа, и «оценивай только первые N слов» без этой оговорки
+    // читается как «столько и напиши»: отсечённая работа получала бы AI_RESPONSE_INVALID_WORD_COUNT
+    // — новый отказ ровно на тех работах, ради которых правило и добавлено.
+    'При этом поле words — всегда полный объём всего ответа, а не оценённой части; in_range считай тоже по полному объёму.',
+  ].join('\n');
+
   const facts = analyzeWriting(input);
   const user = [
     `Тип задания: ${input.taskType}. Допустимый объём: ${rules.minWords}–${rules.maxWords} слов.`,
     assignment,
     `Критерии: ${criteria}. Общий максимум: ${rules.overallMax}.`,
+    zeroRules,
     describeFacts(facts, input.taskType),
     `Верни JSON следующей формы: ${JSON.stringify(responseShape)}.`,
     'Укажи не более пяти самых важных ошибок. Не придумывай фрагменты, которых нет в ответе.',
+    'Поле kind принимает ровно два значения: "err" — нарушение, снижающее балл; "warn" — недочёт, балл за который не снижается. Третьего значения нет. Невыполненный пункт плана, неотвеченный вопрос и нарушение объёма — это kind: "err".',
     `Ответ ученика: ${JSON.stringify(input.answer)}`,
   ].join('\n');
 

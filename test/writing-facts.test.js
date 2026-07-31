@@ -116,7 +116,8 @@ test('the prompt ships the pre-check results and says so in its version', () => 
     assignment: { from: 'Alison', stimulus: 'Do you read? What books? Which one would you advise?', questionsTopic: 'the project' },
   });
 
-  assert.equal(WRITING_PROMPT_VERSION, 'writing-v2');
+  // Version string only: v3 adds the allowed `kind` values and the FIPI zero rules (issue 12).
+  assert.equal(WRITING_PROMPT_VERSION, 'writing-v3');
   assert.match(prompt.user, /Проверено программно/u);
   assert.equal(prompt.facts.questionSentences, 3);
   assert.equal(prompt.facts.words, countWords(LETTER));

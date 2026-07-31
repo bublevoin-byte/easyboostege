@@ -242,7 +242,8 @@ test('both calls of a repaired request are reported, so the budget stays truthfu
     assert.match(rejected.fallbackReason, /format repair requested/u);
     assert.ok(rejected.completionTokens > 0, 'потраченные токены не должны потеряться');
     assert.ok(accepted, 'принятый разбор тоже записывается');
-    assert.equal(accepted.promptVersion, 'writing-v2');
+    // Version string only: v3 adds the allowed `kind` values and the FIPI zero rules (issue 12).
+    assert.equal(accepted.promptVersion, 'writing-v3');
   } finally {
     await stack.stop();
   }
