@@ -40,7 +40,62 @@
       ]
     },
     "expectedCriticalErrors": [],
-    "aiRuns": []
+    "aiRuns": [
+      {
+        "valid": true,
+        "total": 3,
+        "criteria": {
+          "k1": 1,
+          "k2": 1,
+          "k3": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": true,
+        "total": 3,
+        "criteria": {
+          "k1": 1,
+          "k2": 2,
+          "k3": 0
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": false,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": true,
+        "total": 3,
+        "criteria": {
+          "k1": 1,
+          "k2": 1,
+          "k3": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      }
+    ]
   },
   {
     "id": "w37-fipi-2023-4764",
@@ -79,7 +134,52 @@
       ]
     },
     "expectedCriticalErrors": [],
-    "aiRuns": []
+    "aiRuns": [
+      {
+        "valid": true,
+        "total": 3,
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": true,
+        "total": 3,
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": true,
+        "total": 1,
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": true,
+        "total": 3,
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      }
+    ]
   },
   {
     "id": "w37-fipi-2023-003",
@@ -114,7 +214,42 @@
       "assignmentPage": 80
     },
     "expectedCriticalErrors": [],
-    "aiRuns": []
+    "aiRuns": [
+      {
+        "valid": true,
+        "total": 4,
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": true,
+        "total": 3,
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": false,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": false,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      }
+    ]
   },
   {
     "id": "w37-fipi-2023-004",
@@ -149,7 +284,47 @@
       "assignmentPage": 82
     },
     "expectedCriticalErrors": [],
-    "aiRuns": []
+    "aiRuns": [
+      {
+        "valid": true,
+        "total": 4,
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": true,
+        "total": 3,
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": true,
+        "total": 1,
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": false,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      }
+    ]
   },
   {
     "id": "w38-fipi-2023-4764",
@@ -211,7 +386,56 @@
       "assignmentPage": 107
     },
     "expectedCriticalErrors": [],
-    "aiRuns": []
+    "aiRuns": [
+      {
+        "valid": true,
+        "total": 9,
+        "criteria": {
+          "k1": 2,
+          "k2": 3,
+          "k3": 1,
+          "k4": 2,
+          "k5": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": true,
+        "total": 8,
+        "criteria": {
+          "k1": 2,
+          "k2": 3,
+          "k3": 1,
+          "k4": 1,
+          "k5": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": false,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": false,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      }
+    ]
   },
   {
     "id": "w38-fipi-2023-006",
@@ -269,7 +493,32 @@
       "assignmentPage": 115
     },
     "expectedCriticalErrors": [],
-    "aiRuns": []
+    "aiRuns": [
+      {
+        "valid": false,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": false,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": false,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": false,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      }
+    ]
   },
   {
     "id": "w37-fipi-2024-003",
@@ -307,7 +556,62 @@
       "assignmentPage": 88
     },
     "expectedCriticalErrors": [],
-    "aiRuns": []
+    "aiRuns": [
+      {
+        "valid": true,
+        "total": 5,
+        "criteria": {
+          "k1": 2,
+          "k2": 2,
+          "k3": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": true,
+        "total": 4,
+        "criteria": {
+          "k1": 1,
+          "k2": 2,
+          "k3": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": false,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": true,
+        "total": 5,
+        "criteria": {
+          "k1": 2,
+          "k2": 2,
+          "k3": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      }
+    ]
   },
   {
     "id": "w37-fipi-2024-004",
@@ -348,7 +652,52 @@
       ]
     },
     "expectedCriticalErrors": [],
-    "aiRuns": []
+    "aiRuns": [
+      {
+        "valid": true,
+        "total": 5,
+        "criteria": {
+          "k1": 2,
+          "k2": 2,
+          "k3": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": true,
+        "total": 5,
+        "criteria": {
+          "k1": 2,
+          "k2": 2,
+          "k3": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": false,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": false,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      }
+    ]
   },
   {
     "id": "w38-fipi-2024-5806",
@@ -413,7 +762,80 @@
       ]
     },
     "expectedCriticalErrors": [],
-    "aiRuns": []
+    "aiRuns": [
+      {
+        "valid": true,
+        "total": 10,
+        "criteria": {
+          "k1": 2,
+          "k2": 3,
+          "k3": 2,
+          "k4": 2,
+          "k5": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": true,
+        "total": 9,
+        "criteria": {
+          "k1": 2,
+          "k2": 2,
+          "k3": 2,
+          "k4": 2,
+          "k5": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": true,
+        "total": 9,
+        "criteria": {
+          "k1": 2,
+          "k2": 3,
+          "k3": 2,
+          "k4": 1,
+          "k5": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": true,
+        "total": 9,
+        "criteria": {
+          "k1": 2,
+          "k2": 3,
+          "k3": 2,
+          "k4": 1,
+          "k5": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      }
+    ]
   },
   {
     "id": "w38-fipi-2024-8781",
@@ -473,7 +895,52 @@
       ]
     },
     "expectedCriticalErrors": [],
-    "aiRuns": []
+    "aiRuns": [
+      {
+        "valid": true,
+        "total": 4,
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": true,
+        "total": 6,
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": true,
+        "total": 7,
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": true,
+        "total": 7,
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      }
+    ]
   },
   {
     "id": "w37-fipi-2025-4798",
@@ -514,7 +981,72 @@
       ]
     },
     "expectedCriticalErrors": [],
-    "aiRuns": []
+    "aiRuns": [
+      {
+        "valid": true,
+        "total": 2,
+        "criteria": {
+          "k1": 1,
+          "k2": 1,
+          "k3": 0
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": true,
+        "total": 2,
+        "criteria": {
+          "k1": 1,
+          "k2": 1,
+          "k3": 0
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": true,
+        "total": 1,
+        "criteria": {
+          "k1": 0,
+          "k2": 1,
+          "k3": 0
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": true,
+        "total": 2,
+        "criteria": {
+          "k1": 1,
+          "k2": 0,
+          "k3": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      }
+    ]
   },
   {
     "id": "w37-fipi-2025-8311",
@@ -555,7 +1087,52 @@
       ]
     },
     "expectedCriticalErrors": [],
-    "aiRuns": []
+    "aiRuns": [
+      {
+        "valid": true,
+        "total": 5,
+        "criteria": {
+          "k1": 2,
+          "k2": 2,
+          "k3": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": true,
+        "total": 5,
+        "criteria": {
+          "k1": 2,
+          "k2": 2,
+          "k3": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": false,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": false,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      }
+    ]
   },
   {
     "id": "w37-fipi-2025-003",
@@ -593,7 +1170,62 @@
       "assignmentPage": 95
     },
     "expectedCriticalErrors": [],
-    "aiRuns": []
+    "aiRuns": [
+      {
+        "valid": true,
+        "total": 3,
+        "criteria": {
+          "k1": 2,
+          "k2": 1,
+          "k3": 0
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": false,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": true,
+        "total": 3,
+        "criteria": {
+          "k1": 1,
+          "k2": 1,
+          "k3": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": true,
+        "total": 3,
+        "criteria": {
+          "k1": 1,
+          "k2": 1,
+          "k3": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      }
+    ]
   },
   {
     "id": "w38-fipi-2025-1025",
@@ -655,7 +1287,56 @@
       "assignmentPage": 134
     },
     "expectedCriticalErrors": [],
-    "aiRuns": []
+    "aiRuns": [
+      {
+        "valid": true,
+        "total": 10,
+        "criteria": {
+          "k1": 2,
+          "k2": 3,
+          "k3": 2,
+          "k4": 2,
+          "k5": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": true,
+        "total": 9,
+        "criteria": {
+          "k1": 2,
+          "k2": 3,
+          "k3": 2,
+          "k4": 1,
+          "k5": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": false,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": false,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      }
+    ]
   },
   {
     "id": "w38-fipi-2025-4563",
@@ -717,7 +1398,80 @@
       "assignmentPage": 134
     },
     "expectedCriticalErrors": [],
-    "aiRuns": []
+    "aiRuns": [
+      {
+        "valid": true,
+        "total": 9,
+        "criteria": {
+          "k1": 2,
+          "k2": 2,
+          "k3": 2,
+          "k4": 2,
+          "k5": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": true,
+        "total": 8,
+        "criteria": {
+          "k1": 2,
+          "k2": 2,
+          "k3": 2,
+          "k4": 1,
+          "k5": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": true,
+        "total": 9,
+        "criteria": {
+          "k1": 2,
+          "k2": 2,
+          "k3": 2,
+          "k4": 2,
+          "k5": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": true,
+        "total": 10,
+        "criteria": {
+          "k1": 3,
+          "k2": 2,
+          "k3": 2,
+          "k4": 2,
+          "k5": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      }
+    ]
   },
   {
     "id": "w37-fipi-2026-001",
@@ -755,7 +1509,72 @@
       "assignmentPage": 91
     },
     "expectedCriticalErrors": [],
-    "aiRuns": []
+    "aiRuns": [
+      {
+        "valid": true,
+        "total": 2,
+        "criteria": {
+          "k1": 1,
+          "k2": 1,
+          "k3": 0
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": true,
+        "total": 2,
+        "criteria": {
+          "k1": 1,
+          "k2": 1,
+          "k3": 0
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": true,
+        "total": 2,
+        "criteria": {
+          "k1": 1,
+          "k2": 1,
+          "k3": 0
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": true,
+        "total": 3,
+        "criteria": {
+          "k1": 2,
+          "k2": 0,
+          "k3": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      }
+    ]
   },
   {
     "id": "w37-fipi-2026-3896",
@@ -793,7 +1612,72 @@
       "assignmentPage": 95
     },
     "expectedCriticalErrors": [],
-    "aiRuns": []
+    "aiRuns": [
+      {
+        "valid": true,
+        "total": 4,
+        "criteria": {
+          "k1": 2,
+          "k2": 1,
+          "k3": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": true,
+        "total": 4,
+        "criteria": {
+          "k1": 2,
+          "k2": 1,
+          "k3": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": true,
+        "total": 4,
+        "criteria": {
+          "k1": 2,
+          "k2": 1,
+          "k3": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": true,
+        "total": 4,
+        "criteria": {
+          "k1": 2,
+          "k2": 1,
+          "k3": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      }
+    ]
   },
   {
     "id": "w37-fipi-2026-3468",
@@ -831,7 +1715,62 @@
       "assignmentPage": 100
     },
     "expectedCriticalErrors": [],
-    "aiRuns": []
+    "aiRuns": [
+      {
+        "valid": true,
+        "total": 3,
+        "criteria": {
+          "k1": 1,
+          "k2": 2,
+          "k3": 0
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": true,
+        "total": 3,
+        "criteria": {
+          "k1": 1,
+          "k2": 2,
+          "k3": 0
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": true,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": true,
+        "total": 4,
+        "criteria": {
+          "k1": 1,
+          "k2": 2,
+          "k3": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": false,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      }
+    ]
   },
   {
     "id": "w38-fipi-2026-3896",
@@ -894,7 +1833,68 @@
       "assignmentPage": 140
     },
     "expectedCriticalErrors": [],
-    "aiRuns": []
+    "aiRuns": [
+      {
+        "valid": true,
+        "total": 10,
+        "criteria": {
+          "k1": 2,
+          "k2": 3,
+          "k3": 2,
+          "k4": 2,
+          "k5": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": true,
+        "total": 9,
+        "criteria": {
+          "k1": 2,
+          "k2": 2,
+          "k3": 2,
+          "k4": 2,
+          "k5": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": true,
+        "total": 10,
+        "criteria": {
+          "k1": 3,
+          "k2": 2,
+          "k3": 2,
+          "k4": 2,
+          "k5": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": false,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      }
+    ]
   },
   {
     "id": "w38-fipi-2026-3468",
@@ -957,7 +1957,80 @@
       "assignmentPage": 152
     },
     "expectedCriticalErrors": [],
-    "aiRuns": []
+    "aiRuns": [
+      {
+        "valid": true,
+        "total": 8,
+        "criteria": {
+          "k1": 2,
+          "k2": 3,
+          "k3": 2,
+          "k4": 1,
+          "k5": 0
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": true,
+        "total": 9,
+        "criteria": {
+          "k1": 2,
+          "k2": 3,
+          "k3": 2,
+          "k4": 1,
+          "k5": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": true,
+        "total": 10,
+        "criteria": {
+          "k1": 3,
+          "k2": 2,
+          "k3": 2,
+          "k4": 2,
+          "k5": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": true,
+        "total": 10,
+        "criteria": {
+          "k1": 3,
+          "k2": 2,
+          "k3": 2,
+          "k4": 2,
+          "k5": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      }
+    ]
   },
   {
     "id": "w38-fipi-2026-4563",
@@ -1019,6 +2092,79 @@
       "assignmentPage": 159
     },
     "expectedCriticalErrors": [],
-    "aiRuns": []
+    "aiRuns": [
+      {
+        "valid": true,
+        "total": 9,
+        "criteria": {
+          "k1": 2,
+          "k2": 3,
+          "k3": 2,
+          "k4": 1,
+          "k5": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": true,
+        "total": 9,
+        "criteria": {
+          "k1": 2,
+          "k2": 3,
+          "k3": 2,
+          "k4": 1,
+          "k5": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.3"
+      },
+      {
+        "valid": true,
+        "total": 10,
+        "criteria": {
+          "k1": 3,
+          "k2": 2,
+          "k3": 2,
+          "k4": 2,
+          "k5": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": true,
+        "total": 10,
+        "criteria": {
+          "k1": 3,
+          "k2": 2,
+          "k3": 2,
+          "k4": 2,
+          "k5": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.20-non-reasoning"
+      }
+    ]
   }
 ]
