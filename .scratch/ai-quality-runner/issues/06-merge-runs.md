@@ -1,6 +1,6 @@
 # 06 — Слияние журнала прогона в эталонный набор
 
-Status: ready-for-agent
+Status: done
 Blocked by: 05
 Spec: .scratch/ai-quality-runner/spec.md#слияние-scriptsmerge-quality-runsjs
 
