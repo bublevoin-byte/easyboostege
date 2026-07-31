@@ -119,7 +119,9 @@ function header(count) {
 
 async function main() {
   const stubs = JSON.parse(await fs.readFile(stubsFile, 'utf8'));
-  const pending = stubs.filter((item) => item.tags.includes('assignment-partial'));
+  /* Уже перенесённая работа остаётся в листе: цифры с картинки читает человек, а человек ошибается,
+     и опечатку надо иметь возможность найти и поправить, не собирая опросник заново с нуля. */
+  const pending = stubs.filter((item) => item.tags.some((tag) => tag === 'assignment-partial' || tag === 'assignment-typed'));
 
   // Rebuilding the worksheet must never cost the owner what is already typed.
   let existing = new Map();

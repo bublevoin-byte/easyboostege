@@ -82,6 +82,8 @@ test('task 38 percentages are the ones printed in the manual', { skip: withoutMa
   let checked = 0;
   for (const item of stubs) {
     if (item.operation !== 'writing_38' || !item.assignmentData) continue;
+    // Диаграмму владелец переносил глазами: в текстовом слое её цифр нет, сверять не с чем.
+    if (item.tags.includes('assignment-typed')) continue;
     const page = assignmentPage(item);
     if (page === null) continue;
     for (const row of item.assignmentData.rows) {

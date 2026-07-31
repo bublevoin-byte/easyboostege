@@ -29,7 +29,13 @@ const fixture = () => [{
 const sheet = (id, lines) => [`<!-- ${id} -->`, '```text', '# подпись сектора | процент', ...lines, '```'].join('\n');
 
 test('the worksheet has a filled-in block for every work whose chart is a picture', () => {
-  const partial = stubs.filter((item) => item.tags.includes('assignment-partial'));
+  /*
+   * Работа с диаграммой остаётся работой с диаграммой и после того, как её цифры перенесли:
+   * assignment-partial означает «ещё не перенесено», assignment-typed — «перенесено человеком».
+   * Считать надо оба тега, иначе тест начнёт краснеть ровно в тот момент, когда владелец сделает
+   * то, о чём его просили, а перенос данных не должен выглядеть как поломка сборки.
+   */
+  const partial = stubs.filter((item) => item.tags.some((tag) => tag === 'assignment-partial' || tag === 'assignment-typed'));
   assert.equal(partial.length, 3, `работ с диаграммой ${partial.length}, а не 3`);
   const blocks = parseWorksheet(worksheet);
   for (const item of partial) {

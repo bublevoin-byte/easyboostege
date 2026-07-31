@@ -93,7 +93,16 @@ export function applyCharts(stubs, blocks) {
         throw new Error(`условие не прошло writingAssignmentSchema — ${details}`);
       }
       stub.assignmentData = checked.data.assignment;
-      stub.tags = stub.tags.filter((tag) => tag !== 'assignment-partial');
+      /*
+       * Тег не снимается, а заменяется: набор эталонный, и происхождение каждой цифры — часть
+       * данных, а не служебная пометка. Шесть таблиц задания 38 сверяются с текстовым слоем
+       * методички построчно, и выдуманное «по смыслу» число там не пройдёт. У диаграмм такой
+       * опоры нет и не будет: их цифры существуют только картинкой, и единственный источник —
+       * глаза владельца. Работа, помеченная assignment-typed, честно говорит, что её проценты
+       * сверить не с чем, — и проверки, которые ищут строку в методичке, её пропускают, вместо
+       * того чтобы падать на данных, которые сами же и просили перенести.
+       */
+      stub.tags = stub.tags.map((tag) => (tag === 'assignment-partial' ? 'assignment-typed' : tag));
       applied.push(id);
     } catch (error) {
       problems.push(`${id}: ${error.message}`);

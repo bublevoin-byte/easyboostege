@@ -66,6 +66,11 @@ words.
 <!-- w38-fipi-2023-006 -->
 ```text
 # подпись сектора | процент
+Email | 30
+Making phone calls | 27
+Surfing the Internet | 17
+Playing games | 16
+Paying for purchases | 10
 ```
 
 ## 2. w38-fipi-2026-3896
@@ -95,6 +100,11 @@ Write 200–250 words.
 <!-- w38-fipi-2026-3896 -->
 ```text
 # подпись сектора | процент
+Regular study routine | 34
+Parents’ support | 26
+Practice and review | 20
+Time management | 11
+Positive mindset | 9
 ```
 
 ## 3. w38-fipi-2026-3468
@@ -124,4 +134,9 @@ discussing the news in social networks? Choose one option Write 200–250 words.
 <!-- w38-fipi-2026-3468 -->
 ```text
 # подпись сектора | процент
+Reliable information | 34
+Internet security | 26
+Volume of information | 20
+Discussing information with other social network users | 11
+Friendly attitude of other social network users | 9
 ```

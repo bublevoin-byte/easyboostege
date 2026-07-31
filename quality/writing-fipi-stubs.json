@@ -219,10 +219,34 @@
     "tags": [
       "fipi-2023",
       "total-only",
-      "assignment-partial"
+      "assignment-typed"
     ],
     "assignment": "Imagine that you are doing a project on what people use their smartphones for in Zetland. You have found some data on the subject – the results of the opinion polls (see the diagram below). Comment on the data in the pie chart and give your opinion on the subject of the project. Write 200–250 words.",
-    "assignmentData": null,
+    "assignmentData": {
+      "topic": "what people use their smartphones for in Zetland",
+      "rows": [
+        {
+          "label": "Email",
+          "percent": 30
+        },
+        {
+          "label": "Making phone calls",
+          "percent": 27
+        },
+        {
+          "label": "Surfing the Internet",
+          "percent": 17
+        },
+        {
+          "label": "Playing games",
+          "percent": 16
+        },
+        {
+          "label": "Paying for purchases",
+          "percent": 10
+        }
+      ]
+    },
     "answer": "Today we all live in the age of technology. Smartphones have become an indispensable part of people’s lives. People in Zetland use their smartphones for different purposes. My project, which I am still working on, is aimed at finding out the ways of using smartphones. I have found some data on this issue presented in the pie chart. \nIt becomes clear from the diagram that people mostly use smartphones for sending emails (30%) and making phone calls (27%). At the same time the use of smartphones for purchases is the lowest (10%).  \nIt is worth mentioning that the difference between the percentage of people who are mostly playing games (17%) and surfing the Internet (16%) is very small, only 1 percent. The explanation may lie in the fact that both are used mainly for entertainment. \n\nThe statistics of the pie chart, in my opinion, reveal an important problem. We can see that nobody is reading e-books on their smartphones, therefore they are missing an opportunity of reading books anywhere and at any time. \n\nI would like to say that the role of smartphones in today’s life can hardly be overestimated. With the help of smartphones people can communicate quickly and efficiently, they can use them to find any information on the Internet quickly, and smartphone apps allow people to have access to many documents or photos.",
     "human": {
       "total": 12,
@@ -814,10 +838,34 @@
     "operation": "writing_38",
     "tags": [
       "fipi-2026",
-      "assignment-partial"
+      "assignment-typed"
     ],
     "assignment": "Imagine that you are doing a project on Zetland teenagers’ preparation for final exams. You have found some data on the subject – the results of a survey conducted among Zetland teenagers (see the pie chart below). Comment on the survey data and give your opinion on the subject of the project. The survey question: What helped you the most in preparing for final exams? 1. Choose one option Write 200–250 words.",
-    "assignmentData": null,
+    "assignmentData": {
+      "topic": "Zetland teenagers’ preparation for final exams",
+      "rows": [
+        {
+          "label": "Regular study routine",
+          "percent": 34
+        },
+        {
+          "label": "Parents’ support",
+          "percent": 26
+        },
+        {
+          "label": "Practice and review",
+          "percent": 20
+        },
+        {
+          "label": "Time management",
+          "percent": 11
+        },
+        {
+          "label": "Positive mindset",
+          "percent": 9
+        }
+      ]
+    },
     "answer": " As part of my project on what helped Zetland teenagers the most in preparing for final exams, I have found a pie chart with some relevant results of a survey. I am going to analyse the information and give my opinion on the subject of the project.\n\n        As can be seen from the data provided, we can observe the key insights the options of Zetland youth when it comes to exams preparing. Firstly, 26% of the respondents prioritise to get parents' support.\nSecondly, only 9% of the respondents mark the option\n\"Positive mindset\".\n\n        Comparing the options to choose among Zetland students, I noticed some interesting trends. \"Regular study routine\" appears to be the most popular option, with 34% of the respondents, while the option\n\"Time management\" seems to be less favoured, getting only 11%. This significant difference of 23 percentage points highlights how important regular study routine in Zetland teenagers' life is.\n\n         There is a problem that can arise with preparing for final exams. Students can work too hard and get tired and sick of studying. A possible solution is to manage time and take a rest every time you feel tired.\n\n         I conclusion, I strongly believe that every student should not pay all the attention to studying. Otherwise, he can feel bad. Everyone needs to manage time properly, sleep well, and take a rest. This is the way to pass all the exams.",
     "human": {
       "total": 8,
@@ -853,10 +901,34 @@
     "operation": "writing_38",
     "tags": [
       "fipi-2026",
-      "assignment-partial"
+      "assignment-typed"
     ],
     "assignment": "Imagine that you are doing a project on Zetlanders’ priorities in reading and discussing the news in social networks. You have found some data on the subject – the results of a survey conducted among Zetland social network users (see the pie chart below). Comment on the survey data and give your opinion on the subject of the project. The survey question: What is your priority in reading and discussing the news in social networks? Choose one option Write 200–250 words.",
-    "assignmentData": null,
+    "assignmentData": {
+      "topic": "Zetlanders’ priorities in reading and discussing the news in social networks",
+      "rows": [
+        {
+          "label": "Reliable information",
+          "percent": 34
+        },
+        {
+          "label": "Internet security",
+          "percent": 26
+        },
+        {
+          "label": "Volume of information",
+          "percent": 20
+        },
+        {
+          "label": "Discussing information with other social network users",
+          "percent": 11
+        },
+        {
+          "label": "Friendly attitude of other social network users",
+          "percent": 9
+        }
+      ]
+    },
     "answer": " I am doing a project on Zetlander's priorities in reading and discussing the news in social networks. I have found a pie chart with some results of a survey. I will analyse the data and express my opinion on the subject of the project.\n\n        According to the pie chart, answering the question 'What is your priority in reading and discussing the news in social networks?' the surveyed have chosen 'Reliable information' (34%), followed by 'Internet security' (26%). By contrast, the least of the surveyed think that 'Friendly attitude of other social network users' is a great idea, only 9%.\n\n         Moreover, it is worth mentioning that the percentage of Zetlander's who have chosen 'Reliable information' is higher than the percentage of those who chose 'Discussing information with other social network users' (34% and 11% respectively), the difference is 23%. I think it is because people do not want to discuss something with unknown people.\n\n          Analysing this topic, I can outline a problem which can arise with reading and discussing the news in social networks. It can get a bad influence on real-life communication. To solve this problem, Zetlanders must communicate with each other not only in social network.\n\n          In conclusion, I want to say that discussing in social network has some advantages. For example, people who afraid give their attitude in real-life can text it online.",
     "human": {
       "total": 6,
