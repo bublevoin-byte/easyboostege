@@ -73,11 +73,19 @@ function configuredProviders() {
  * disables the fallback. Section 11.3 compares repeated runs of the same works, and a run that
  * silently changed provider halfway would make the stability figure unreadable. The application
  * passes nothing and keeps both providers.
+ *
+ * `model` replaces the model id the environment gives that provider, for this client only. It
+ * exists because section 11.2 has to compare two models of the same provider, and the alternative
+ * — editing XAI_MODEL in .env between two paid runs — makes the model an invisible property of the
+ * machine rather than of the run. The application passes nothing here either and keeps the models
+ * from the environment; prices stay the provider's, since the configuration prices a provider and
+ * not a model, so the cost estimate of an overridden run is an estimate of the provider's tariff.
  */
-export function createProviderClient({ provider: pinned = null } = {}) {
+export function createProviderClient({ provider: pinned = null, model = null } = {}) {
   function aiProviders() {
     const providers = configuredProviders();
-    return pinned ? providers.filter((item) => item.name === pinned) : providers;
+    const chosen = pinned ? providers.filter((item) => item.name === pinned) : providers;
+    return model ? chosen.map((item) => ({ ...item, model })) : chosen;
   }
 
   async function askWithFallback(system, user, operation) {

@@ -23,6 +23,8 @@ delete process.env.DATABASE_URL;
 const runner = await import('../scripts/ai-quality-run.js');
 const { countWords, getWritingRules } = await import('../ai/writing.js');
 const { sanitizeStudentText } = await import('../validation/student-text.js');
+const { AI_OPERATIONS } = await import('../ai/operations.js');
+const { createProviderClient } = await import('../ai/provider-client.js');
 
 const repositoryRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -129,6 +131,94 @@ test('ключи разбираются, а провайдер обязател�
   assert.throws(() => runner.parseArgs([]), /--provider/u);
   assert.throws(() => runner.parseArgs(['--provider=grok', '--runs=0']), /--runs/u);
   assert.throws(() => runner.parseArgs(['--provider=grok', 'runs=2']), /не понимаю аргумент/u);
+});
+
+test('--model называет модель прогона: она уходит в тело запроса, в журнал и в имя журнала', async () => {
+  const parsed = runner.parseArgs(['--provider=grok', '--model=grok-4.3']);
+  assert.equal(parsed.model, 'grok-4.3');
+  assert.equal(parsed.out, runner.defaultJournal(runner.DEFAULT_DATASET, 'grok', 'grok-4.3'));
+  assert.notEqual(parsed.out, runner.defaultJournal(runner.DEFAULT_DATASET, 'grok'));
+  /* Имя модели становится именем файла, поэтому проверяется до того, как им станет. */
+  assert.throws(() => runner.parseArgs(['--provider=grok', '--model=../журнал']), /--model/u);
+
+  const { dataset, out } = await workspace();
+  const calls = stubFetch((call) => validReview(call.user));
+
+  const summary = await runner.runQuality({ provider: 'grok', model: 'grok-4.3', runs: 1, delayMs: 0, dataset, out, log: () => {} });
+
+  assert.deepEqual(calls.map((call) => call.model), ['grok-4.3'], 'модель ключа доходит до тела запроса, а не остаётся в аргументах');
+  assert.equal(summary.model, 'grok-4.3');
+  const [line] = await journalLines(out);
+  assert.equal(line.model, 'grok-4.3');
+  assert.equal(line.provider, 'grok');
+});
+
+test('прогоны двух моделей расходятся по журналам и не засчитывают чужие ответы себе', async () => {
+  const { directory, dataset } = await workspace();
+  const journalOf = (model) => path.join(directory, 'runs', path.basename(runner.defaultJournal(dataset, 'grok', model)));
+  assert.notEqual(journalOf('grok-4.3'), journalOf('grok-4.20-non-reasoning'));
+
+  let calls = stubFetch((call) => validReview(call.user));
+  await runner.runQuality({ provider: 'grok', model: 'grok-4.3', runs: 2, delayMs: 0, dataset, out: journalOf('grok-4.3'), log: () => {} });
+  assert.equal(calls.length, 2);
+
+  calls = stubFetch((call) => validReview(call.user));
+  const second = await runner.runQuality({
+    provider: 'grok', model: 'grok-4.20-non-reasoning', runs: 2, delayMs: 0, dataset, out: journalOf('grok-4.20-non-reasoning'), log: () => {},
+  });
+
+  /* Главное этого теста: второй прогон оплачен и состоялся. Возобновление опознаёт пару «работа +
+   * номер прогона», модель в неё не входит — общий файл заставил бы раннер отчитаться, что всё уже
+   * сделано, и вторая модель осталась бы неопрошенной. */
+  assert.equal(calls.length, 2, 'вторая модель спрашивается заново, а не считается уже прогнанной');
+  assert.equal(second.resumedFrom, 0);
+  assert.equal(second.calls, 2);
+  const lines = await journalLines(journalOf('grok-4.20-non-reasoning'));
+  assert.deepEqual([...new Set(lines.map((line) => line.model))], ['grok-4.20-non-reasoning']);
+
+  // А если модели всё-таки сведены в один файл, прогон отказывается до первого платного вызова.
+  calls = stubFetch((call) => validReview(call.user));
+  await assert.rejects(
+    () => runner.runQuality({ provider: 'grok', model: 'grok-4.3', runs: 2, delayMs: 0, dataset, out: journalOf('grok-4.20-non-reasoning'), log: () => {} }),
+    /grok-4.20-non-reasoning/u,
+  );
+  assert.equal(calls.length, 0, 'чужой журнал распознан до вызовов, а не после оплаты');
+});
+
+test('отказ несёт причину и применённый бюджет: таймаут читается из записи, ключ в неё не попадает', async () => {
+  const { dataset, out } = await workspace();
+  const urls = [];
+  globalThis.fetch = async (url) => {
+    urls.push(url);
+    // Ровно так обрывается вызов, когда AbortController срабатывает по бюджету операции.
+    throw new DOMException('This operation was aborted', 'AbortError');
+  };
+
+  const summary = await runner.runQuality({ provider: 'grok', runs: 1, delayMs: 0, dataset, out, log: () => {} });
+
+  assert.equal(urls.length, 1);
+  assert.equal(summary.invalid, 1);
+  const [line] = await journalLines(out);
+  assert.equal(line.valid, false);
+  assert.equal(line.errorCode, 'AI_UNAVAILABLE', 'обёртка остаётся кодом отказа');
+  /* …а под ней теперь видно, что произошло: отсечка по таймауту и бюджет, по которому она сработала.
+   * До этого поля диагноз ставили сопоставлением durationMs с бюджетом. */
+  assert.equal(line.failure.timedOut, true);
+  assert.equal(line.failure.timeoutMs, createProviderClient().limitsFor('writing_37').timeoutMs);
+  assert.ok(line.failure.timeoutMs <= AI_OPERATIONS.writing_37.timeoutMs);
+  assert.equal(line.failure.maxTokens, AI_OPERATIONS.writing_37.maxTokens);
+  assert.match(line.failure.cause, /AbortError/u);
+  assert.match(line.failure.fallbackReason, /grok/u);
+  assert.match(
+    runner.formatProgress({ position: 1, total: 1, caseId: 'w37-x', run: 1, entry: line, human: null }),
+    /отказ AI_UNAVAILABLE — таймаут/u,
+  );
+
+  /* Причина отказа — сообщение и статус, и ничего больше: заголовки запроса несут ключ провайдера,
+   * а журнал — файл, который владелец хранит и показывает. */
+  const written = await fs.readFile(out, 'utf8');
+  assert.ok(!written.includes(process.env.XAI_API_KEY), 'ключ провайдера в журнал не попадает');
+  assert.ok(!/authorization/iu.test(written), 'заголовки запроса в журнал не попадают');
 });
 
 test('ответ нормализуется ровно так же, как в приложении', () => {

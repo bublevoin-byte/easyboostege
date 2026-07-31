@@ -45,6 +45,8 @@ export const RUNS_DIR = 'quality/runs';
 // A rejected answer is evidence, but it is bounded evidence: maxTokens caps a review far below
 // this, and a provider that answers with a web page must not blow up a line of the journal.
 export const MAX_RAW_CHARS = 20_000;
+// The reason of a refusal is a sentence, not a document: enough to read a cut-off or an HTTP code.
+export const MAX_CAUSE_CHARS = 300;
 
 const WRITING_OPERATIONS = new Set(['writing_37', 'writing_38']);
 
@@ -65,10 +67,30 @@ function readInteger(values, name, fallback, { min, max }) {
  * The journal name is derived, not stamped with the time, and that is the point: a repeated run
  * with the same keys lands on the same file and resumes instead of starting a second paid pass.
  * `--out` is there for the owner who really wants a separate journal.
+ *
+ * The named model is part of the name for the opposite reason. Resuming recognises a pair «work +
+ * run number»; the model is not in that pair. Two models writing into one journal would therefore
+ * make the second run pay for nothing and report that everything was already done — so a run that
+ * names its model lands in a file of its own without anybody having to remember `--out`.
  */
-export function defaultJournal(dataset, provider) {
+export function defaultJournal(dataset, provider, model = null) {
   const label = path.basename(dataset).replace(/\.json$/u, '');
-  return path.posix.join(RUNS_DIR, `${label}-${provider}.jsonl`);
+  return path.posix.join(RUNS_DIR, `${label}-${provider}${model ? `-${model}` : ''}.jsonl`);
+}
+
+/*
+ * A model id is also a part of a file name, so it is checked before it becomes one: everything
+ * outside latin letters, digits, dot, dash and underscore is refused rather than escaped. Nothing
+ * a provider actually calls a model looks different, and `--model=../secrets` writing a journal
+ * outside quality/runs is not a trade worth making for a permissive key.
+ */
+function readModel(values) {
+  const raw = values.get('model');
+  if (raw == null || raw === '') return null;
+  if (!/^[a-z0-9][a-z0-9._-]*$/iu.test(raw)) {
+    throw new Error(`--model=${raw}: имя модели — латинские буквы, цифры, точка, дефис и подчёркивание`);
+  }
+  return raw;
 }
 
 export function parseArgs(argv) {
@@ -87,13 +109,18 @@ export function parseArgs(argv) {
   }
 
   const dataset = values.get('dataset') || DEFAULT_DATASET;
+  const model = readModel(values);
   return {
     provider,
     dataset,
     runs: readInteger(values, 'runs', DEFAULT_RUNS, { min: 1, max: 20 }),
     delayMs: readInteger(values, 'delay', DEFAULT_DELAY_MS, { min: 0, max: 600_000 }),
-    out: values.get('out') || defaultJournal(dataset, provider),
+    out: values.get('out') || defaultJournal(dataset, provider, model),
     only: values.get('only') || null,
+    /* The key appears among the options only when it was actually named. Without it the run takes
+     * the model from XAI_MODEL / GROQ_MODEL exactly as before, and there is no empty override to
+     * mistake for a choice. */
+    ...(model ? { model } : {}),
   };
 }
 
@@ -177,23 +204,56 @@ export async function readJournal(file) {
   try {
     text = await fs.readFile(file, 'utf8');
   } catch (error) {
-    if (error.code === 'ENOENT') return { done: new Set(), damaged: 0 };
+    if (error.code === 'ENOENT') return { done: new Set(), damaged: 0, models: new Set() };
     throw error;
   }
 
   const done = new Set();
+  const models = new Set();
   let damaged = 0;
   for (const line of text.split(/\r?\n/u)) {
     if (!line.trim()) continue;
     try {
       const entry = JSON.parse(line);
-      if (entry && typeof entry.caseId === 'string' && Number.isInteger(entry.run)) done.add(key(entry.caseId, entry.run));
-      else damaged += 1;
+      if (entry && typeof entry.caseId === 'string' && Number.isInteger(entry.run)) {
+        done.add(key(entry.caseId, entry.run));
+        // Which models the journal already holds: resuming counts a pair «work + run number» as
+        // paid for, and it must not count an answer of another model as this model's answer.
+        if (typeof entry.model === 'string' && entry.model) models.add(entry.model);
+      } else damaged += 1;
     } catch {
       damaged += 1;
     }
   }
-  return { done, damaged };
+  return { done, damaged, models };
+}
+
+/*
+ * Why the call failed, in a form that can be read straight from the line. The first paid run wrote
+ * five identical `AI_UNAVAILABLE` lines: that is the wrapper `runProviderFallback` puts around the
+ * real error, and the only surviving trace of a 45-second cut-off was `durationMs` matching the
+ * budget to the millisecond. The real error travels in `cause`, and the budget the call was given
+ * is written down beside it, so a timeout reads as a timeout instead of being reconstructed from
+ * durations.
+ *
+ * The message, the name and the status of the error — and nothing else. Not the request: its
+ * headers carry the provider key, and the journal is a file the owner keeps, moves and shows.
+ */
+export function describeFailure(error, limits = {}) {
+  const cause = error?.cause && typeof error.cause === 'object' ? error.cause : null;
+  const name = typeof cause?.name === 'string' ? cause.name : null;
+  const code = typeof cause?.code === 'string' ? cause.code : null;
+  const status = Number.isInteger(cause?.status) ? cause.status : (Number.isInteger(error?.status) ? error.status : null);
+  return {
+    cause: cause ? `${name || 'Error'}: ${String(cause.message ?? '').slice(0, MAX_CAUSE_CHARS)}` : null,
+    causeCode: code,
+    status,
+    fallbackReason: typeof error?.fallbackReason === 'string' ? error.fallbackReason : null,
+    // The request was cut off by the operation budget: AbortController fired before the answer.
+    timedOut: name === 'AbortError' || name === 'TimeoutError' || code === 'ABORT_ERR',
+    timeoutMs: Number.isInteger(limits?.timeoutMs) ? limits.timeoutMs : null,
+    maxTokens: Number.isInteger(limits?.maxTokens) ? limits.maxTokens : null,
+  };
 }
 
 function usageOf(usage, prices) {
@@ -206,7 +266,12 @@ function usageOf(usage, prices) {
 
 export function formatProgress({ position, total, caseId, run, entry, human }) {
   const head = `[${position}/${total}] ${caseId} прогон ${run}:`;
-  if (!entry.valid) return `${head} отказ ${entry.errorCode}`;
+  if (!entry.valid) {
+    // A cut-off is called by its name while the run is still going: five refusals in a row mean
+    // «this model does not fit the budget», and that is worth knowing before paying for the rest.
+    const timedOut = entry.failure?.timedOut ? ` — таймаут${entry.failure.timeoutMs ? ` ${entry.failure.timeoutMs} мс` : ''}` : '';
+    return `${head} отказ ${entry.errorCode}${timedOut}`;
+  }
   const expert = Number.isFinite(human?.total) ? ` (эксперт ${human.total})` : '';
   const schema = entry.repaired ? 'схема ok после починки' : 'схема ok';
   return `${head} ${entry.review.overall_got} из ${entry.review.overall_max}${expert}, ${schema}`;
@@ -231,6 +296,7 @@ export function createStopFlag(target = process, signals = ['SIGINT', 'SIGTERM']
 
 export async function runQuality({
   provider,
+  model = null,
   runs = DEFAULT_RUNS,
   delayMs = DEFAULT_DELAY_MS,
   dataset = DEFAULT_DATASET,
@@ -242,8 +308,8 @@ export async function runQuality({
   stopRequested = () => false,
 } = {}) {
   if (!provider) throw new Error('runQuality: не указан провайдер');
-  const journalFile = out || defaultJournal(dataset, provider);
-  const chain = client || createProviderClient({ provider });
+  const journalFile = out || defaultJournal(dataset, provider, model);
+  const chain = client || createProviderClient({ provider, model });
 
   /*
    * The provider is checked before a single work is read. A run without a key would otherwise
@@ -259,7 +325,19 @@ export async function runQuality({
   const cases = JSON.parse(await fs.readFile(dataset, 'utf8'));
   const { work, skipped } = planWork(cases, { only });
 
-  const { done, damaged } = await readJournal(journalFile);
+  const { done, damaged, models } = await readJournal(journalFile);
+  /*
+   * A journal of another model is not this run's journal. Resuming recognises a pair «work + run
+   * number» and would report those pairs as already paid for, so the run would quietly do nothing
+   * and the owner would read «всё уже сделано» about a model that was never asked a question.
+   */
+  const foreign = [...models].filter((name) => name !== pinned[0].model);
+  if (foreign.length) {
+    throw new Error(
+      `журнал ${journalFile} уже содержит ответы модели ${foreign.join(', ')}, а прогон идёт моделью ${pinned[0].model}: `
+      + 'назовите модель ключом --model=<id> — тогда журнал будет свой — либо укажите --out=<файл>',
+    );
+  }
   await fs.mkdir(path.dirname(journalFile), { recursive: true });
 
   // Work first, run number second: an interrupted pass leaves whole works finished, and section
@@ -272,7 +350,7 @@ export async function runQuality({
 
   log(`Набор: ${dataset} — работ к прогону ${work.length}, пропущено ${skipped.length}.`);
   log(`Журнал: ${journalFile} — уже записано ${done.size} пар «работа + прогон»${damaged ? `, нечитаемых строк ${damaged}` : ''}.`);
-  log(`Провайдер: ${pinned[0].name}, модель ${pinned[0].model}. Вызовов осталось: ${pending.length}.`);
+  log(`Провайдер: ${pinned[0].name}, модель ${pinned[0].model} (${model ? 'ключ --model' : 'из .env'}). Вызовов осталось: ${pending.length}.`);
 
   const totals = { calls: 0, valid: 0, invalid: 0, promptTokens: 0, completionTokens: 0, estimatedCostMicrousd: 0 };
   let interrupted = false;
@@ -343,6 +421,10 @@ export async function runQuality({
         valid: false,
         repaired: false,
         errorCode,
+        /* `AI_UNAVAILABLE` names the wrapper, not the failure. What actually happened, and under
+         * which budget, goes here — a run that refuses everything must be diagnosable from its
+         * journal alone. */
+        failure: describeFailure(error, typeof chain.limitsFor === 'function' ? chain.limitsFor(item.input.taskType) : {}),
         /* The chain does not hand back the text of a failed repair, so this is the first answer:
          * the one the contract check rejected. */
         raw: truncate(first?.text),
@@ -386,8 +468,10 @@ export async function runQuality({
   };
 
   log('');
-  log(`Вызовов сделано: ${summary.calls} — валидных ${summary.valid}, отказов ${summary.invalid}.`);
-  log(`Токены: ${summary.promptTokens} на вход, ${summary.completionTokens} на выход. Оценка стоимости: ${summary.estimatedCostMicrousd} микро-USD.`);
+  // The model stands next to the figures it produced: a number of calls and a cost belong to the
+  // model that was asked, and §11.2 compares models by exactly these numbers.
+  log(`Вызовов сделано: ${summary.calls} — валидных ${summary.valid}, отказов ${summary.invalid}. Провайдер: ${summary.provider}, модель ${summary.model}.`);
+  log(`Токены: ${summary.promptTokens} на вход, ${summary.completionTokens} на выход. Оценка стоимости: ${summary.estimatedCostMicrousd} микро-USD по тарифу провайдера ${summary.provider}.`);
   if (skipped.length) {
     log(`Пропущено работ: ${skipped.length}`);
     for (const item of skipped) log(`  ${item.id}: ${item.reason}`);

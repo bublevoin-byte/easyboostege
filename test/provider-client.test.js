@@ -75,6 +75,20 @@ test('a pinned provider is the only one offered', () => {
   assert.deepEqual(createProviderClient({ provider: 'groq' }).aiProviders().map((item) => item.name), ['groq']);
 });
 
+test('a named model belongs to one client, never to the application', async () => {
+  const client = createProviderClient({ provider: 'grok', model: 'grok-4.3' });
+  const calls = stubFetch(() => answer('{"ok":true}'));
+
+  assert.deepEqual(client.aiProviders().map((item) => item.model), ['grok-4.3']);
+  await client.askWithFallback('system text', 'user text', 'writing_37');
+  assert.equal(calls[0].body.model, 'grok-4.3', 'the named model reaches the request body');
+
+  /* The application passes nothing and keeps the models the environment gave it: comparing two
+   * models is a run of the quality runner, not a change of what students are answered by. */
+  assert.deepEqual(createProviderClient().aiProviders().map((item) => item.model), ['stub-grok', 'stub-llama']);
+  assert.deepEqual(createProviderClient({ provider: 'grok' }).aiProviders().map((item) => item.model), ['stub-grok']);
+});
+
 test('a pinned provider that fails is not replaced by the spare', async () => {
   const client = createProviderClient({ provider: 'grok' });
   const calls = stubFetch(() => refusal('down for maintenance'));
