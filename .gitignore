@@ -12,3 +12,5 @@ soak-results/
 *.log
 .DS_Store
 quality/sources/
+# журналы платных прогонов ИИ: в набор они приезжают слиянием, сырой журнал остаётся у владельца
+quality/runs/*.jsonl

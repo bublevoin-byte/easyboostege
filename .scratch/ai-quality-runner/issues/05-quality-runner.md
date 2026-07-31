@@ -1,6 +1,6 @@
 # 05 — Раннер прогона: scripts/ai-quality-run.js
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01, 02
 Spec: .scratch/ai-quality-runner/spec.md#раннер-scriptsai-quality-runjs
 
