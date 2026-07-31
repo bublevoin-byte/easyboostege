@@ -2,6 +2,12 @@
 // Builds writing 37/38 dataset stubs from the FIPI expert manuals.
 // The student answers are scans of handwritten answer sheets, so only the assignment, the work
 // number and the expert scores can be extracted. `answer` stays empty for a human to type in.
+//
+// Пересборка сливается с тем, что уже лежит в наборе, а не пишет его поверх. Когда скрипт писали,
+// файла не существовало и перезапись была верна; с тех пор в набор легло то, чего в методичках нет
+// и не может быть: тексты работ, набранные с рукописных сканов, разобранные условия, проценты
+// диаграмм, прочитанные глазами с картинки, и результаты платных прогонов ИИ. Восстановить это
+// автоматически нечем, поэтому из методички обновляются только поля, которые из неё и приходят.
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -213,6 +219,113 @@ function dedupe(stubs) {
   return [...groups.values()].flat();
 }
 
+/*
+ * Поля, которые целиком приходят из методички: их пересборка обновляет. Всё остальное в записи —
+ * `answer`, `assignmentData`, `aiRuns`, `expectedCriticalErrors` — в PDF отсутствует, поэтому
+ * слияние их не касается вовсе: они переезжают из старой записи как есть.
+ */
+const FROM_PDF = ['assignment', 'human', 'source'];
+
+// Теги, которые выводит из методички extract(). Любой другой тег в наборе поставлен человеком.
+const DERIVED_TAGS = new Set(['needs-answer-text', 'total-only', 'assignment-partial']);
+const YEAR_TAG = /^fipi-20\d\d$/u;
+export const isDerivedTag = (tag) => DERIVED_TAGS.has(tag) || YEAR_TAG.test(tag);
+
+/*
+ * Состояние тегов частью отражает ручную работу, и пересборка не имеет права его отменить.
+ * `needs-answer-text` снимает слияние набранного текста, `assignment-partial` заменяется на
+ * `assignment-typed`, когда владелец перенёс проценты с картинки. Вернуть эти теги значило бы
+ * сказать, что работа не сделана, — и отправить человека делать её второй раз.
+ */
+function mergeTags(kept, fresh) {
+  const had = new Set(kept);
+  const derived = fresh.filter((tag) => {
+    if (tag === 'needs-answer-text' && !had.has(tag)) return false;
+    if (tag === 'assignment-partial' && had.has('assignment-typed')) return false;
+    return true;
+  });
+  const manual = kept.filter((tag) => !isDerivedTag(tag) && !derived.includes(tag));
+  return [...derived, ...manual];
+}
+
+const isRecord = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+function show(value) {
+  if (value === undefined) return '—';
+  const text = JSON.stringify(value);
+  return text.length > 90 ? `${text.slice(0, 90)}…` : text;
+}
+
+const WINDOW = 70;
+
+/*
+ * Условие работы — абзац на несколько строк, и обрезка с начала показала бы у обеих сторон одно и
+ * то же: расхождение почти всегда в середине. Поэтому окно сдвигается к первому несовпавшему
+ * символу — иначе «расхождение напечатано» на глаз неотличимо от «расхождение скрыто».
+ */
+function excerpt(text, from) {
+  return `«${from > 0 ? '…' : ''}${text.slice(from, from + WINDOW)}${from + WINDOW < text.length ? '…' : ''}»`;
+}
+
+// Расхождение печатается по самому мелкому полю, какое удаётся выделить: «source.wordCount»
+// читается, а разница двух JSON целиком — нет.
+function differences(before, after, field) {
+  if (JSON.stringify(before) === JSON.stringify(after)) return [];
+  if (isRecord(before) && isRecord(after)) {
+    const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])];
+    return keys.flatMap((key) => differences(before[key], after[key], `${field}.${key}`));
+  }
+  if (typeof before === 'string' && typeof after === 'string') {
+    let same = 0;
+    while (same < before.length && before[same] === after[same]) same += 1;
+    const from = Math.max(0, same - 20);
+    return [`${field}: было ${excerpt(before, from)} → стало ${excerpt(after, from)}`];
+  }
+  return [`${field}: было ${show(before)} → стало ${show(after)}`];
+}
+
+function mergeStub(kept, fresh) {
+  const merged = { ...kept };
+  const changes = [];
+  for (const field of FROM_PDF) {
+    changes.push(...differences(kept[field], fresh[field], field));
+    merged[field] = fresh[field];
+  }
+  const tags = mergeTags(kept.tags || [], fresh.tags || []);
+  changes.push(...differences(kept.tags || [], tags, 'tags'));
+  merged.tags = tags;
+  return { stub: merged, changes };
+}
+
+/*
+ * Слияние по `id`. Порядок существующих записей сохраняется, новые дописываются в конец: набор
+ * читают и правят руками, и перестановка строк в diff означала бы правку там, где её нет.
+ * Работа, которой нет в пересборке, остаётся в наборе: разрыв §11.1 закрывается живой оценкой
+ * преподавателя, таких работ нет ни в одной методичке, а регрессия разбора выглядит точно так же.
+ * И то и другое хуже потерять, чем сохранить лишнее.
+ */
+export function mergeStubs(kept, fresh) {
+  const rebuilt = new Map(fresh.map((stub) => [stub.id, stub]));
+  const stubs = [];
+  const updated = [];
+  const untouched = [];
+  const missing = [];
+
+  for (const stub of kept) {
+    const found = rebuilt.get(stub.id);
+    if (!found) { stubs.push(stub); missing.push(stub.id); continue; }
+    rebuilt.delete(stub.id);
+    const { stub: merged, changes } = mergeStub(stub, found);
+    stubs.push(merged);
+    if (changes.length) updated.push({ id: stub.id, changes });
+    else untouched.push(stub.id);
+  }
+
+  const added = [...rebuilt.values()];
+  stubs.push(...added);
+  return { stubs, added: added.map((stub) => stub.id), updated, untouched, missing };
+}
+
 async function main() {
   const stubs = [];
   const problems = [];
@@ -233,21 +346,52 @@ async function main() {
   }
 
   const unique = dedupe(stubs);
-  await fs.writeFile(outputFile, `${JSON.stringify(unique, null, 2)}\n`, 'utf8');
+  let existing = null;
+  try { existing = await fs.readFile(outputFile, 'utf8'); }
+  catch (error) {
+    // Первый запуск: файла нет, сливать не с чем, набор создаётся целиком — как было раньше.
+    if (error.code !== 'ENOENT') throw error;
+  }
+
+  const merge = mergeStubs(existing === null ? [] : JSON.parse(existing), unique);
+  const serialised = `${JSON.stringify(merge.stubs, null, 2)}\n`;
+  const rewritten = serialised !== existing;
+  if (rewritten) await fs.writeFile(outputFile, serialised, 'utf8');
+
   report.forEach((line) => console.log(line));
   if (problems.length) {
     console.log('\nНе разобрано (проверьте вручную):');
     problems.forEach((line) => console.log('  ' + line));
   }
-  const total37 = unique.filter((item) => item.operation === 'writing_37').length;
-  const total38 = unique.filter((item) => item.operation === 'writing_38').length;
+
+  const total37 = merge.stubs.filter((item) => item.operation === 'writing_37').length;
+  const total38 = merge.stubs.filter((item) => item.operation === 'writing_38').length;
   console.log(`\nПовторов между годами убрано: ${stubs.length - unique.length}`);
   console.log(`Уникальных заготовок: задание 37 — ${total37} из 20, задание 38 — ${total38} из 30`);
-  console.log('В каждой заготовке пустое поле answer: текст работы набирается со скана вручную.');
-  console.log(`Файл: ${outputFile}`);
+
+  console.log(existing === null ? '\nНабор создан заново: файла не было.' : '\nСлияние с набором по id:');
+  console.log(`  добавлено: ${merge.added.length}${merge.added.length ? ` — ${merge.added.join(', ')}` : ''}`);
+  console.log(`  обновлено: ${merge.updated.length}`);
+  // Молчаливая пересборка эталонного набора необъяснима, поэтому расхождение называется целиком.
+  for (const { id, changes } of merge.updated) {
+    console.log(`    ${id}`);
+    changes.forEach((line) => console.log(`      ${line}`));
+  }
+  console.log(`  сохранено нетронутыми: ${merge.untouched.length}`);
+  console.log(`  оставлено как не найденные в методичках: ${merge.missing.length}${merge.missing.length ? ` — ${merge.missing.join(', ')}` : ''}`);
+  if (existing !== null) {
+    console.log('  ни у одной работы не тронуты: answer, assignmentData, aiRuns, expectedCriticalErrors.');
+  }
+  if (merge.added.length) {
+    console.log('\nУ добавленных заготовок поле answer пустое: текст работы набирается со скана вручную.');
+  }
+  console.log(rewritten ? `\nФайл: ${outputFile}` : `\nФайл не изменился: ${outputFile}`);
 }
 
-main().catch((error) => {
-  console.error(error.message);
-  process.exitCode = 1;
-});
+// Только при прямом запуске: функции слияния выше импортируются тестами.
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error(error.message);
+    process.exitCode = 1;
+  });
+}

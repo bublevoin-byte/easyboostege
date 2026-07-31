@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import test from 'node:test';
 
+import { isDerivedTag, mergeStubs } from '../scripts/extract-quality-writing.js';
+
 const stubs = JSON.parse(await fs.readFile(new URL('../quality/writing-fipi-stubs.json', import.meta.url), 'utf8'));
 
 const LIMITS = {
@@ -64,4 +66,89 @@ test('a stub without the answer text is marked as unfinished', () => {
     }
     assert.ok(item.tags.includes('needs-answer-text'), `${item.id}: an empty answer must be tagged`);
   }
+});
+
+/*
+ * `npm run quality:stubs` пересобирает набор из методичек, а в наборе лежит то, чего в методичках
+ * нет: тексты работ со сканов, разобранные условия, проценты диаграмм, оплаченные прогоны ИИ.
+ * Ниже — то, что пересборка обязана оставить в покое. `rebuilt` изображает свежую заготовку из
+ * PDF: та же работа, но без всего набранного руками и с вернувшимися тегами «не сделано».
+ */
+const rebuilt = (item) => ({
+  id: item.id,
+  operation: item.operation,
+  tags: [
+    ...item.tags.filter((tag) => isDerivedTag(tag) && tag !== 'needs-answer-text'),
+    'needs-answer-text',
+    ...(item.tags.includes('assignment-typed') ? ['assignment-partial'] : []),
+  ],
+  assignment: item.assignment,
+  answer: '',
+  human: item.human,
+  source: item.source,
+  expectedCriticalErrors: [],
+  aiRuns: [],
+});
+
+test('a rebuild from the manuals merges into the dataset instead of overwriting it', () => {
+  const merged = mergeStubs(stubs, stubs.map(rebuilt));
+
+  assert.equal(merged.missing.length, 0, 'every work of the dataset is in the rebuild of itself');
+  assert.equal(merged.added.length, 0, 'a rebuild of the dataset adds nothing');
+  assert.deepEqual(merged.updated, [], 'nothing came out of the manuals differently, so nothing changes');
+  assert.equal(merged.untouched.length, stubs.length);
+  // Побайтовое равенство: в наборе нет поля, которое пересборка сдвинула бы или переписала.
+  assert.equal(JSON.stringify(merged.stubs, null, 2), JSON.stringify(stubs, null, 2));
+
+  for (const [index, item] of merged.stubs.entries()) {
+    const before = stubs[index];
+    assert.equal(item.answer, before.answer, `${item.id}: the typed answer survives the rebuild`);
+    assert.deepEqual(item.assignmentData, before.assignmentData, `${item.id}: assignmentData survives`);
+    assert.deepEqual(item.aiRuns, before.aiRuns, `${item.id}: paid AI runs survive`);
+    assert.deepEqual(item.expectedCriticalErrors, before.expectedCriticalErrors, `${item.id}: expectedCriticalErrors survives`);
+    if (item.answer) assert.ok(!item.tags.includes('needs-answer-text'), `${item.id}: the dropped tag does not come back`);
+    if (before.tags.includes('assignment-typed')) {
+      assert.ok(item.tags.includes('assignment-typed'), `${item.id}: percentages read off the picture stay marked as such`);
+      assert.ok(!item.tags.includes('assignment-partial'), `${item.id}: the typed chart is not asked for a second time`);
+    }
+  }
+});
+
+test('a work the manuals no longer yield stays in the dataset and is named', () => {
+  const merged = mergeStubs(stubs, []);
+  assert.deepEqual(merged.stubs, stubs, 'an empty rebuild is a parsing regression, not permission to delete');
+  assert.deepEqual(merged.missing, stubs.map((item) => item.id));
+  assert.equal(merged.updated.length + merged.added.length, 0);
+});
+
+test('the first run on a missing file writes the rebuild as it is', () => {
+  const fresh = stubs.map(rebuilt);
+  const merged = mergeStubs([], fresh);
+  assert.deepEqual(merged.stubs, fresh);
+  assert.deepEqual(merged.added, fresh.map((item) => item.id));
+  assert.equal(merged.missing.length, 0);
+});
+
+test('a field that came out of the manual differently is applied and reported', () => {
+  const [kept] = stubs;
+  const fresh = rebuilt(kept);
+  fresh.assignment = `${kept.assignment} And one more question.`;
+  fresh.source = { ...kept.source, page: kept.source.page + 1 };
+  fresh.human = { ...kept.human, reviewer: 'fipi-2099-expert-manual' };
+
+  const merged = mergeStubs([kept], [fresh]);
+  const [stub] = merged.stubs;
+  assert.equal(stub.assignment, fresh.assignment, 'the condition comes from the manual, so the manual wins');
+  assert.equal(stub.source.page, fresh.source.page);
+  assert.equal(stub.human.reviewer, fresh.human.reviewer);
+  // И ровно то же самое — в сводке: пересборка эталонного набора не имеет права быть молчаливой.
+  assert.equal(merged.updated.length, 1);
+  const [{ id, changes }] = merged.updated;
+  assert.equal(id, kept.id);
+  assert.ok(changes.some((line) => line.startsWith('assignment:')), changes.join('\n'));
+  assert.ok(changes.some((line) => line.startsWith('source.page:')), changes.join('\n'));
+  assert.ok(changes.some((line) => line.startsWith('human.reviewer:')), changes.join('\n'));
+  // Обновление полей из PDF не повод потерять набранное руками.
+  assert.equal(stub.answer, kept.answer);
+  assert.deepEqual(stub.assignmentData, kept.assignmentData);
 });
