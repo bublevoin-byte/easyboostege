@@ -37,13 +37,23 @@ test('every structured assignment matches the shape the prompt is built from', (
 test('only the works whose data is a picture are left without an assignment', () => {
   const partial = stubs.filter((item) => item.tags.includes('assignment-partial')).map((item) => item.id);
   const empty = stubs.filter((item) => item.assignmentData === null).map((item) => item.id);
-  // Три работы задания 38 построены на круговой диаграмме: цифр нет в текстовом слое PDF.
+  /*
+   * Инвариант, который держится всегда: работа либо имеет разобранное условие, либо помечена как
+   * та, чьи данные существуют только картинкой. Третьего состояния нет, и оно проверяется точно.
+   *
+   * А вот сами числа подвижны в одну сторону. Три работы с круговой диаграммой ждут, пока владелец
+   * перенесёт цифры по `quality/pie-chart-worksheet.md`; после каждого переноса работ с диаграммой
+   * становится меньше, а готовых — больше. Закреплённое здесь «ровно 3» и «ровно 6» покраснело бы
+   * ровно в тот момент, когда владелец сделает то, чего от него ждут, и его ввод данных выглядел
+   * бы как поломка сборки. Поэтому пороги, а не равенства: они ловят молчаливую потерю условия,
+   * ради которой тест и написан, и не мешают набору пополняться.
+   */
   assert.deepEqual(empty.sort(), partial.sort(), 'без условия остаются ровно работы с тегом assignment-partial');
-  assert.equal(partial.length, 3, `работ с диаграммой ${partial.length}, а не 3`);
+  assert.ok(partial.length <= 3, `работ с диаграммой ${partial.length}, а было не больше 3`);
 
   const ready = (operation) => stubs.filter((item) => item.operation === operation && item.assignmentData).length;
-  assert.equal(ready('writing_37'), 12, 'задание 37 разбирается механически, работ должно быть 12');
-  assert.equal(ready('writing_38'), 6, 'таблицы задания 38: 6 работ из 9');
+  assert.ok(ready('writing_37') >= 12, `задание 37 разбирается механически, готовых работ ${ready('writing_37')} из 12`);
+  assert.ok(ready('writing_38') >= 6, `таблицы задания 38: готовых работ ${ready('writing_38')}, а было 6`);
 });
 
 test('the structured assignment reaches the prompt the student would get', () => {
