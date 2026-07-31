@@ -140,14 +140,22 @@ Write 100–140 words. Remember the rules of email writing.
 <!-- w37-fipi-2023-003 -->
 ```text
 Dear Ronny,
+
 I was glad to hear from you again.
+
 Actually, summer in Russia is quite hot and dry, though it depends on certain region.
+
 To be honest, my favourite season is winter because this time is associated with Christmas and New Year. If my parents allowed me to visit Australia I would be happy to spend my next summer in this exotic country.
+
 Having written about the upcoming visit of your uncle, you made me curios. What is the profession of your uncle? Has he got any hobbies? Is he going to visit some museums or theatres within his staying, or not?
+
 Regretfully, I've got to finish my letter.
+
 Looking forward to hearing from you soon.
+
 Best wishes,
-Denis  
+
+Denis
 ```
 
 ## 4. w37-fipi-2023-004
