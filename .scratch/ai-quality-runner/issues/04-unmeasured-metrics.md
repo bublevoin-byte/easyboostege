@@ -1,6 +1,6 @@
 # 04 — Отличить «не измерено» от «не пройдено» в расчёте метрик
 
-Status: ready-for-agent
+Status: done
 Blocked by: —
 Spec: .scratch/ai-quality-runner/spec.md#правка-aiqualityjs
 
