@@ -32,8 +32,9 @@ const XAI_MODEL = config.ai.xaiModel;
 const GROQ_KEY = config.ai.groqKey;
 const GROQ_MODEL = config.ai.groqModel;
 
-async function askProvider({ url, key, model }, system, user, operation) {
-  const limits = limitsFor(operation);
+// The limits arrive resolved rather than looked up here: the client is what decides them, and it is
+// the client — not the operation registry — that a quality run may give a longer timeout.
+async function askProvider({ url, key, model }, system, user, limits) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), limits.timeoutMs);
   let r;
@@ -80,8 +81,27 @@ function configuredProviders() {
  * machine rather than of the run. The application passes nothing here either and keeps the models
  * from the environment; prices stay the provider's, since the configuration prices a provider and
  * not a model, so the cost estimate of an overridden run is an estimate of the provider's tariff.
+ *
+ * `timeoutMs` gives the calls of this client — and of no other — more time than the operation
+ * budget allows. It exists because a reasoning model that never finishes inside 45 seconds cannot
+ * be measured at all: every call is cut off and section 11.2 gets a journal of refusals instead of
+ * grades. What such a run measures is a model beyond the budget the application gives it, which is
+ * not what students get, so the runner says so in its own header and `ai/operations.js` keeps the
+ * budgets that stand behind the button. The application passes nothing here and stays clamped by
+ * `config.ai.maxTimeoutMs` exactly as before; the override is deliberately outside that ceiling,
+ * because the ceiling protects a waiting student and there is no student in a run.
  */
-export function createProviderClient({ provider: pinned = null, model = null } = {}) {
+export function createProviderClient({ provider: pinned = null, model = null, timeoutMs = null } = {}) {
+  const overrideTimeoutMs = Number.isInteger(timeoutMs) && timeoutMs > 0 ? timeoutMs : null;
+
+  // What this client actually applies; `appLimitsFor` stays the budget the application would apply,
+  // so a caller that raises the timeout can still see — and report — what it raised it above.
+  const clientLimitsFor = (operation) => (
+    overrideTimeoutMs ? { ...limitsFor(operation), timeoutMs: overrideTimeoutMs } : limitsFor(operation)
+  );
+
+  const ask = (item, system, user, operation) => askProvider(item, system, user, clientLimitsFor(operation));
+
   function aiProviders() {
     const providers = configuredProviders();
     const chosen = pinned ? providers.filter((item) => item.name === pinned) : providers;
@@ -90,7 +110,7 @@ export function createProviderClient({ provider: pinned = null, model = null } =
 
   async function askWithFallback(system, user, operation) {
     const providers = providersFor(operation, aiProviders());
-    return runProviderFallback(providers, (item) => askProvider(item, system, user, operation));
+    return runProviderFallback(providers, (item) => ask(item, system, user, operation));
   }
 
   /*
@@ -110,7 +130,7 @@ export function createProviderClient({ provider: pinned = null, model = null } =
       const startedAt = Date.now();
       let retry;
       try {
-        retry = await askProvider(provider, system, buildRepairRequest(user, text, firstError), operation);
+        retry = await ask(provider, system, buildRepairRequest(user, text, firstError), operation);
       } catch (retryError) {
         /* The repair call itself failed; the original contract violation is the honest answer. */
         retryError.repairOf = firstError.message;
@@ -130,5 +150,5 @@ export function createProviderClient({ provider: pinned = null, model = null } =
     }
   }
 
-  return { askProvider, aiProviders, askWithFallback, parseWithOneRepair, limitsFor };
+  return { askProvider: ask, aiProviders, askWithFallback, parseWithOneRepair, limitsFor: clientLimitsFor, appLimitsFor: limitsFor };
 }

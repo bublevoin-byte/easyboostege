@@ -154,3 +154,49 @@ test('the chain asks for the registry budget, clamped by the deployment ceiling'
   assert.equal(limitsFor('writing_38').requestsPerHour, AI_OPERATIONS.writing_38.requestsPerHour);
   assert.ok(limitsFor('writing_38').timeoutMs <= AI_OPERATIONS.writing_38.timeoutMs);
 });
+
+test('a raised timeout belongs to one client, and the budget it was raised above stays readable', () => {
+  const application = createProviderClient();
+  const raised = createProviderClient({ timeoutMs: 180_000 });
+
+  assert.equal(raised.limitsFor('writing_37').timeoutMs, 180_000, 'the client applies the number it was given');
+  /* Only the timeout moves: a run that quietly also changed maxTokens would compare two different
+   * questions and call the difference a difference between models. */
+  assert.equal(raised.limitsFor('writing_37').maxTokens, AI_OPERATIONS.writing_37.maxTokens);
+  assert.equal(raised.limitsFor('writing_37').requestsPerHour, application.limitsFor('writing_37').requestsPerHour);
+
+  /* The budget the application would have applied is still there, under its own name: whoever
+   * raises the timeout has to be able to say what it was raised above. */
+  assert.equal(raised.appLimitsFor('writing_37').timeoutMs, application.limitsFor('writing_37').timeoutMs);
+  assert.ok(raised.appLimitsFor('writing_37').timeoutMs < 180_000);
+
+  /* And the application itself is untouched: it passes nothing, and keeps the registry budget
+   * clamped by config.ai.maxTimeoutMs exactly as before. */
+  assert.equal(application.limitsFor('writing_37').timeoutMs, Math.min(AI_OPERATIONS.writing_37.timeoutMs, 90_000));
+  assert.equal(application.appLimitsFor('writing_37').timeoutMs, application.limitsFor('writing_37').timeoutMs);
+});
+
+test('the raised timeout is the one the call is actually cut off by', async () => {
+  /* The number has to reach AbortController, not just the report: a run whose calls are still cut
+   * off at the operation budget would produce the same journal of refusals and a header claiming
+   * otherwise. The stub never answers, so only the abort can end this call. */
+  globalThis.fetch = async (url, init) => new Promise((resolve, reject) => {
+    // Не даёт тесту повиснуть навсегда, если ключ до контроллера не дошёл: сообщение не совпадёт
+    // с ожидаемым, и провал будет назван, а не превратится в бесконечное ожидание.
+    const guard = setTimeout(() => reject(new Error('вызов не оборван за 10 секунд')), 10_000);
+    init.signal.addEventListener('abort', () => {
+      clearTimeout(guard);
+      reject(new DOMException('This operation was aborted', 'AbortError'));
+    });
+  });
+
+  const budget = createProviderClient().limitsFor('writing_37').timeoutMs;
+  const startedAt = Date.now();
+  await assert.rejects(
+    () => createProviderClient({ timeoutMs: 1_000 }).askProvider(GROK, 'system text', 'user text', 'writing_37'),
+    /aborted/u,
+  );
+  const elapsed = Date.now() - startedAt;
+
+  assert.ok(elapsed < budget, `вызов оборван за ${elapsed} мс — по ключу, а не по бюджету операции ${budget} мс`);
+});

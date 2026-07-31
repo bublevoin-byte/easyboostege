@@ -110,6 +110,10 @@ export function parseArgs(argv) {
 
   const dataset = values.get('dataset') || DEFAULT_DATASET;
   const model = readModel(values);
+  /* The lower bound is a second of patience, the upper one is ten minutes: below the first nothing
+   * a language model does can finish, and above the second a stuck call would hold the run for
+   * longer than the owner is at the keyboard. `null` means «no key given» — see below. */
+  const timeoutMs = readInteger(values, 'timeout', null, { min: 1_000, max: 600_000 });
   return {
     provider,
     dataset,
@@ -121,6 +125,9 @@ export function parseArgs(argv) {
      * the model from XAI_MODEL / GROQ_MODEL exactly as before, and there is no empty override to
      * mistake for a choice. */
     ...(model ? { model } : {}),
+    /* Same rule for the timeout: unnamed means the operation budget of ai/operations.js, and no
+     * empty override that could be mistaken for a raised one. */
+    ...(timeoutMs ? { timeoutMs } : {}),
   };
 }
 
@@ -149,6 +156,22 @@ export function normalizeAnswer(stub) {
 }
 
 /*
+ * Which works `--only` names. A list rather than a single id, because a full run of a slow model
+ * can cost more than the owner has left on the account: comparing two models on six works chosen
+ * for their spread is a run he can afford, and «one work or all 21» is not that choice.
+ *
+ * A set, so a repeated id does not buy the same work twice; order stays the dataset's, so a subset
+ * run reads like the full run it is a part of.
+ */
+export function parseOnly(only) {
+  if (only == null || only === '') return null;
+  const ids = (Array.isArray(only) ? only : String(only).split(','))
+    .map((id) => String(id).trim())
+    .filter((id) => id !== '');
+  return ids.length ? new Set(ids) : null;
+}
+
+/*
  * What can actually be sent, and why the rest cannot. The set grows — the next batch of works
  * arrives without a parsed condition — so an unusable work is skipped with a reason and never
  * stops the run.
@@ -156,11 +179,12 @@ export function normalizeAnswer(stub) {
 export function planWork(cases, { only = null } = {}) {
   const work = [];
   const skipped = [];
-  let matched = 0;
+  const wanted = parseOnly(only);
+  const matched = new Set();
 
   for (const stub of Array.isArray(cases) ? cases : []) {
-    if (only && stub?.id !== only) continue;
-    matched += 1;
+    if (wanted && !wanted.has(stub?.id)) continue;
+    if (wanted) matched.add(stub?.id);
     const id = stub?.id || '(без идентификатора)';
 
     if (!WRITING_OPERATIONS.has(stub?.operation)) {
@@ -190,7 +214,12 @@ export function planWork(cases, { only = null } = {}) {
     }
   }
 
-  if (only && !matched) throw new Error(`работы «${only}» нет в наборе`);
+  /* Every named work is named back if it is missing. A typo in one id of six would otherwise
+   * shrink the run silently, and a comparison of two models on different subsets is not one. */
+  if (wanted) {
+    const missing = [...wanted].filter((id) => !matched.has(id));
+    if (missing.length) throw new Error(`работы «${missing.join('», «')}» нет в наборе`);
+  }
   return { work, skipped };
 }
 
@@ -294,6 +323,38 @@ export function createStopFlag(target = process, signals = ['SIGINT', 'SIGTERM']
   return () => requested;
 }
 
+/*
+ * The run was given more time than the application gives the same call, so it says so before the
+ * first answer arrives — not in a footnote afterwards, when the numbers are already being read.
+ * `--timeout` is reconnaissance: it answers «does this model grade better at all», and the separate
+ * question «does a student wait two minutes» is decided by the owner in `ai/operations.js`, not by
+ * a key of the runner. A report that forgets which of the two it holds is the failure this guards
+ * against.
+ */
+export function formatTimeoutNotice(timeoutMs, budgets) {
+  const applied = `Таймаут вызова: ${timeoutMs} мс — ключ --timeout, а не бюджет операции.`;
+  const over = budgets.filter(({ budget }) => Number.isInteger(budget) && timeoutMs > budget);
+  if (!over.length) {
+    return [`${applied} Бюджет операций прогона он не превышает.`];
+  }
+  const named = over.map(({ operation, budget }) => `${operation} — ${budget} мс`).join(', ');
+  const rule = '#'.repeat(96);
+  return [
+    applied,
+    '',
+    rule,
+    '# ВНИМАНИЕ: измеряется модель за пределами того, что ей отведено в приложении.',
+    `# Ключ --timeout=${timeoutMs} мс превышает бюджет операции: ${named} (ai/operations.js).`,
+    '# За кнопкой в приложении стоит этот бюджет, и ученик получает от модели ровно столько',
+    '# времени. Прогон измеряет не его: это разведка — «точнее ли эта модель в принципе», —',
+    '# а не измерение того, что получают ученики.',
+    '# Чтобы результат стал измерением, бюджет поднимается в ai/operations.js. Это решение',
+    '# владельца о том, сколько ученик ждёт ответа, и ключ раннера его не заменяет.',
+    rule,
+    '',
+  ];
+}
+
 export async function runQuality({
   provider,
   model = null,
@@ -302,6 +363,7 @@ export async function runQuality({
   dataset = DEFAULT_DATASET,
   out = null,
   only = null,
+  timeoutMs = null,
   client = null,
   log = console.log,
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
@@ -309,7 +371,7 @@ export async function runQuality({
 } = {}) {
   if (!provider) throw new Error('runQuality: не указан провайдер');
   const journalFile = out || defaultJournal(dataset, provider, model);
-  const chain = client || createProviderClient({ provider, model });
+  const chain = client || createProviderClient({ provider, model, timeoutMs });
 
   /*
    * The provider is checked before a single work is read. A run without a key would otherwise
@@ -351,6 +413,17 @@ export async function runQuality({
   log(`Набор: ${dataset} — работ к прогону ${work.length}, пропущено ${skipped.length}.`);
   log(`Журнал: ${journalFile} — уже записано ${done.size} пар «работа + прогон»${damaged ? `, нечитаемых строк ${damaged}` : ''}.`);
   log(`Провайдер: ${pinned[0].name}, модель ${pinned[0].model} (${model ? 'ключ --model' : 'из .env'}). Вызовов осталось: ${pending.length}.`);
+  if (timeoutMs) {
+    /* Compared against the budgets of the operations this run actually contains: task 37 and task
+     * 38 are not given the same patience, and naming a budget nobody in this run is subject to
+     * would be a warning about the wrong thing. */
+    const operations = [...new Set(work.map((item) => item.input.taskType))];
+    const budgets = operations.map((operation) => ({
+      operation,
+      budget: typeof chain.appLimitsFor === 'function' ? chain.appLimitsFor(operation).timeoutMs : null,
+    }));
+    for (const line of formatTimeoutNotice(timeoutMs, budgets)) log(line);
+  }
 
   const totals = { calls: 0, valid: 0, invalid: 0, promptTokens: 0, completionTokens: 0, estimatedCostMicrousd: 0 };
   let interrupted = false;
@@ -454,6 +527,8 @@ export async function runQuality({
     journal: journalFile,
     provider: pinned[0].name,
     model: pinned[0].model,
+    // `null` — вызовам применён бюджет операции; число — ключ --timeout, и прогон это разведка.
+    timeoutMs: timeoutMs || null,
     planned: pending.length,
     calls: totals.calls,
     valid: totals.valid,
@@ -472,6 +547,10 @@ export async function runQuality({
   // model that was asked, and §11.2 compares models by exactly these numbers.
   log(`Вызовов сделано: ${summary.calls} — валидных ${summary.valid}, отказов ${summary.invalid}. Провайдер: ${summary.provider}, модель ${summary.model}.`);
   log(`Токены: ${summary.promptTokens} на вход, ${summary.completionTokens} на выход. Оценка стоимости: ${summary.estimatedCostMicrousd} микро-USD по тарифу провайдера ${summary.provider}.`);
+  if (summary.timeoutMs) {
+    // Итог читают отдельно от шапки, и цифры не должны уехать из-под условия, при котором получены.
+    log(`Вызовам дано ${summary.timeoutMs} мс ключом --timeout — не бюджет операции. См. предупреждение в начале прогона.`);
+  }
   if (skipped.length) {
     log(`Пропущено работ: ${skipped.length}`);
     for (const item of skipped) log(`  ${item.id}: ${item.reason}`);

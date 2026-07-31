@@ -424,6 +424,133 @@ test('--only прогоняет одну работу, а закрепление
   assert.equal(line.review.criteria.length, 5);
 });
 
+/* Три готовые работы: подмножество имеет смысл проверять только там, где есть из чего выбирать. */
+function threeReadyCases() {
+  const cases = sampleCases();
+  cases[1].assignmentData = { topic: 'sport at school', rows: [{ label: 'football', percent: 40 }, { label: 'hockey', percent: 35 }, { label: 'chess', percent: 25 }] };
+  cases[1].answer = 'This project looks at sport at our school and the survey we have collected shows what students really prefer to do after lessons every week.';
+  cases.push({
+    id: 'w37-stub-third',
+    operation: 'writing_37',
+    assignment: 'raw condition text',
+    assignmentData: { from: 'Ann@mail.uk', stimulus: 'Subject: Books. What book impressed you most?', questionsTopic: 'the school library' },
+    answer: READY_ANSWER,
+    human: { total: 2, max: 6, criteria: { k1: 1, k2: 1, k3: 0 } },
+    aiRuns: [],
+  });
+  return cases;
+}
+
+test('--only принимает список: прогоняется ровно названное подмножество', async () => {
+  /* Полный прогон медленной модели дороже остатка на счёте владельца, поэтому сравнение идёт на
+   * подмножестве, выбранном по разбросу оценок. Одна работа за ключ этого не даёт. */
+  const cases = threeReadyCases();
+  const all = runner.planWork(cases).work.map((item) => item.id);
+  assert.equal(all.length, 3, 'фикстура: выбирать есть из чего');
+
+  const pair = runner.planWork(cases, { only: `${all[0]},${all[2]}` });
+  assert.deepEqual(pair.work.map((item) => item.id), [all[0], all[2]]);
+  /* Порядок остаётся порядком набора, а не порядком ключа: подмножество читается как часть
+   * полного прогона, частью которого оно и является. */
+  assert.deepEqual(runner.planWork(cases, { only: `${all[2]},${all[0]}` }).work.map((item) => item.id), [all[0], all[2]]);
+  // Пробелы после запятой — то, как список пишут руками; повтор не оплачивается дважды.
+  assert.deepEqual(runner.planWork(cases, { only: ` ${all[0]} , ${all[0]} ` }).work.map((item) => item.id), [all[0]]);
+  assert.deepEqual(runner.planWork(cases, { only: all[1] }).work.map((item) => item.id), [all[1]]);
+
+  /* Опечатка в одном имени из шести назвалась бы молчаливым уменьшением прогона, а сравнение двух
+   * моделей на разных подмножествах сравнением не является. */
+  assert.throws(() => runner.planWork(cases, { only: `${all[0]},нет-такой-работы` }), /«нет-такой-работы» нет в наборе/u);
+
+  const { dataset, out } = await workspace(cases);
+  const calls = stubFetch((call) => validReview(call.user));
+  const summary = await runner.runQuality({ provider: 'grok', runs: 1, delayMs: 0, dataset, out, only: `${all[0]},${all[2]}`, log: () => {} });
+
+  assert.equal(calls.length, 2, 'оплачиваются ровно названные работы');
+  assert.equal(summary.calls, 2);
+  assert.deepEqual((await journalLines(out)).map((line) => line.caseId), [all[0], all[2]]);
+});
+
+test('список --only отбирает три работы и в эталонном наборе', async () => {
+  const cases = JSON.parse(await fs.readFile(path.join(repositoryRoot, 'quality', 'writing-fipi-stubs.json'), 'utf8'));
+  // Идентификаторы берутся из набора, а не вписываются: набор пополняется, состав меняется по плану.
+  const chosen = runner.planWork(cases).work.slice(0, 3).map((item) => item.id);
+  assert.equal(chosen.length, 3);
+
+  const subset = runner.planWork(cases, { only: chosen.join(',') });
+  assert.deepEqual(subset.work.map((item) => item.id), chosen);
+});
+
+test('--timeout поднимает бюджет вызова и говорит об этом в шапке', async () => {
+  assert.equal(runner.parseArgs(['--provider=grok']).timeoutMs, undefined, 'без ключа переопределения нет вовсе');
+  assert.equal(runner.parseArgs(['--provider=grok', '--timeout=180000']).timeoutMs, 180_000);
+  assert.throws(() => runner.parseArgs(['--provider=grok', '--timeout=0']), /--timeout/u);
+  assert.throws(() => runner.parseArgs(['--provider=grok', '--timeout=600001']), /--timeout/u);
+
+  const budget = createProviderClient().limitsFor('writing_37').timeoutMs;
+  assert.ok(budget < 180_000, 'фикстура: 180 секунд действительно выше бюджета операции');
+
+  const { dataset, out } = await workspace();
+  globalThis.fetch = async () => { throw new DOMException('This operation was aborted', 'AbortError'); };
+  const printed = [];
+
+  const summary = await runner.runQuality({
+    provider: 'grok', runs: 1, delayMs: 0, dataset, out, timeoutMs: 180_000, log: (line) => printed.push(line),
+  });
+
+  /* Главное: шапка называет прогон тем, что он есть. Отчёт, забывший, что модели дали втрое
+   * больше времени, чем ей отведено за кнопкой, читался бы как измерение того, что получают
+   * ученики, — а это не оно. */
+  const header = printed.join('\n');
+  assert.match(header, /ВНИМАНИЕ: измеряется модель за пределами того, что ей отведено в приложении/u);
+  assert.match(header, new RegExp(`--timeout=180000 мс превышает бюджет операции: writing_37 — ${budget} мс`, 'u'));
+  assert.match(header, /ai\/operations\.js/u);
+  assert.match(header, /разведка/u);
+
+  // Применённый таймаут — это тот, что записан в журнал: диагноз ставится по строке, а не по памяти.
+  const [line] = await journalLines(out);
+  assert.equal(line.failure.timedOut, true);
+  assert.equal(line.failure.timeoutMs, 180_000);
+  assert.equal(line.failure.maxTokens, AI_OPERATIONS.writing_37.maxTokens, 'ключ двигает только таймаут');
+  assert.equal(summary.timeoutMs, 180_000);
+});
+
+test('таймаут ниже бюджета операции предупреждения не печатает, а без ключа шапка прежняя', async () => {
+  const budget = createProviderClient().limitsFor('writing_37').timeoutMs;
+  const below = runner.formatTimeoutNotice(budget - 1, [{ operation: 'writing_37', budget }]).join('\n');
+  assert.match(below, new RegExp(`Таймаут вызова: ${budget - 1} мс`, 'u'));
+  assert.doesNotMatch(below, /ВНИМАНИЕ/u, 'предупреждение — про превышение бюджета, а не про сам ключ');
+
+  const { dataset, out } = await workspace();
+  stubFetch((call) => validReview(call.user));
+  const printed = [];
+  const summary = await runner.runQuality({ provider: 'grok', runs: 1, delayMs: 0, dataset, out, log: (line) => printed.push(line) });
+
+  assert.equal(summary.timeoutMs, null, 'без ключа вызовам применён бюджет операции');
+  assert.doesNotMatch(printed.join('\n'), /--timeout/u);
+});
+
+test('число ключа --timeout доходит до обрыва вызова, а не только до отчёта', async () => {
+  /* Отчёт, называющий 180 секунд, при вызовах, которые по-прежнему рвутся на 45-й, дал бы тот же
+   * журнал отказов и шапку, утверждающую обратное. Заглушка не отвечает никогда: закончить вызов
+   * может только отсечка. */
+  const { dataset, out } = await workspace();
+  globalThis.fetch = async (url, init) => new Promise((resolve, reject) => {
+    const guard = setTimeout(() => reject(new Error('вызов не оборван за 10 секунд')), 10_000);
+    init.signal.addEventListener('abort', () => {
+      clearTimeout(guard);
+      reject(new DOMException('This operation was aborted', 'AbortError'));
+    });
+  });
+
+  const budget = createProviderClient().limitsFor('writing_37').timeoutMs;
+  await runner.runQuality({ provider: 'grok', runs: 1, delayMs: 0, dataset, out, timeoutMs: 1_000, log: () => {} });
+
+  const [line] = await journalLines(out);
+  assert.equal(line.failure.timedOut, true);
+  assert.equal(line.failure.timeoutMs, 1_000);
+  assert.ok(line.durationMs < budget, `вызов оборван за ${line.durationMs} мс — по ключу, а не по бюджету операции ${budget} мс`);
+});
+
 test('раннер не притрагивается к базе данных', async () => {
   const source = await fs.readFile(path.join(repositoryRoot, 'scripts', 'ai-quality-run.js'), 'utf8');
   assert.ok(!/from '\.\.\/db\.js'/u.test(source), 'соединение с базой не открывается');
