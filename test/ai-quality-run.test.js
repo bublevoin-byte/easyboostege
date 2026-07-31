@@ -21,7 +21,7 @@ process.env.GROQ_MODEL = 'stub-llama';
 delete process.env.DATABASE_URL;
 
 const runner = await import('../scripts/ai-quality-run.js');
-const { countWords, getWritingRules } = await import('../ai/writing.js');
+const { countWords, getWritingRules, WRITING_PROMPT_VERSION } = await import('../ai/writing.js');
 const { sanitizeStudentText } = await import('../validation/student-text.js');
 const { AI_OPERATIONS } = await import('../ai/operations.js');
 const { createProviderClient } = await import('../ai/provider-client.js');
@@ -183,6 +183,70 @@ test('прогоны двух моделей расходятся по журн�
     /grok-4.20-non-reasoning/u,
   );
   assert.equal(calls.length, 0, 'чужой журнал распознан до вызовов, а не после оплаты');
+});
+
+test('журнал чужой версии промпта останавливает прогон до первого платного вызова', async () => {
+  /* Имя журнала разводит версии промпта так же, как модели: правка промпта переносит замер в свой
+   * файл сама, без ключа --out, который пришлось бы вспомнить ровно в тот момент, когда правку
+   * проверяют впервые и особенно хотят верить результату. */
+  assert.ok(runner.defaultJournal(runner.DEFAULT_DATASET, 'grok').endsWith(`-${WRITING_PROMPT_VERSION}.jsonl`));
+  assert.notEqual(
+    runner.defaultJournal(runner.DEFAULT_DATASET, 'grok', 'grok-4.3'),
+    runner.defaultJournal(runner.DEFAULT_DATASET, 'grok', 'grok-4.3', 'writing-v2'),
+  );
+  assert.equal(
+    runner.parseArgs(['--provider=grok', '--model=grok-4.3']).out,
+    runner.defaultJournal(runner.DEFAULT_DATASET, 'grok', 'grok-4.3', WRITING_PROMPT_VERSION),
+  );
+
+  const { dataset, out } = await workspace();
+  await fs.mkdir(path.dirname(out), { recursive: true });
+  /* Ровно то, что лежит в журнале прошлого прогона: те же пары «работа + прогон», но полученные
+   * промптом, которого больше нет. */
+  const old = { caseId: 'w37-stub-ready', run: 1, operation: 'writing_37', provider: 'grok', model: 'stub-grok', promptVersion: 'writing-v2', valid: true };
+  const before = `${JSON.stringify(old)}\n${JSON.stringify({ ...old, run: 2 })}\n`;
+  await fs.writeFile(out, before, 'utf8');
+
+  const calls = stubFetch((call) => validReview(call.user));
+  await assert.rejects(
+    () => runner.runQuality({ provider: 'grok', runs: 2, delayMs: 0, dataset, out, log: () => {} }),
+    (error) => {
+      // Названы обе версии: иначе отказ читается как поломка, а не как разведённые замеры.
+      assert.match(error.message, /writing-v2/u);
+      assert.match(error.message, new RegExp(WRITING_PROMPT_VERSION, 'u'));
+      assert.match(error.message, /--out/u, 'предложено, куда писать новый журнал');
+      return true;
+    },
+  );
+
+  /* Главное этого теста: прогон, который «всё уже сделано», не состоялся бы вовсе — ни одного
+   * вызова, зато метрики старого промпта достались бы проверке новой правки. */
+  assert.equal(calls.length, 0, 'чужая версия промпта распознана до оплаты, а не после');
+  assert.equal(await fs.readFile(out, 'utf8'), before, 'записанный журнал не тронут');
+});
+
+test('журнал без версии промпта не роняет прогон, но текущей версии не засчитывается', async () => {
+  const { dataset, out } = await workspace();
+  await fs.mkdir(path.dirname(out), { recursive: true });
+  // Так выглядит строка журнала, записанного до того, как раннер стал помечать версию промпта.
+  await fs.writeFile(out, `${JSON.stringify({ caseId: 'w37-stub-ready', run: 1, operation: 'writing_37', provider: 'grok', model: 'stub-grok', valid: true })}\n`, 'utf8');
+
+  const calls = stubFetch((call) => validReview(call.user));
+  const printed = [];
+  const summary = await runner.runQuality({ provider: 'grok', runs: 2, delayMs: 0, dataset, out, log: (line) => printed.push(line) });
+
+  assert.equal(summary.calls, 1, 'старый журнал дочитывается, а не оплачивается заново и не роняет прогон');
+  assert.equal(calls.length, 1);
+
+  const header = printed.join('\n');
+  assert.match(header, /Строк без версии промпта: 1/u);
+  assert.match(header, new RegExp(`Прогоном ${WRITING_PROMPT_VERSION} они не считаются`, 'u'));
+
+  /* Неизвестная версия остаётся неизвестной: она не приписывается текущей — иначе отчёт называл бы
+   * измерением промпта то, чем эти строки получены, проверить нельзя. */
+  const read = await runner.readJournal(out);
+  assert.equal(read.unversioned, 1);
+  assert.deepEqual([...read.promptVersions], [WRITING_PROMPT_VERSION]);
 });
 
 test('отказ несёт причину и применённый бюджет: таймаут читается из записи, ключ в неё не попадает', async () => {

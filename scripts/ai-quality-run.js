@@ -72,10 +72,17 @@ function readInteger(values, name, fallback, { min, max }) {
  * run number»; the model is not in that pair. Two models writing into one journal would therefore
  * make the second run pay for nothing and report that everything was already done — so a run that
  * names its model lands in a file of its own without anybody having to remember `--out`.
+ *
+ * The prompt version is in the name for exactly that reason too, and it is the sharper case: the
+ * prompt is edited precisely when its effect is about to be measured. `writing-v2` → `writing-v3`
+ * left 42 paid pairs in the old journal, and the very next run would have reported all of them as
+ * done and handed the owner the old prompt's metrics as a check of the new one. An edit of the
+ * prompt now moves the journal by itself. The version is a constant of `ai/writing.js`, not an
+ * argument, so it needs no name check — unlike `--model`, nothing outside this repository writes it.
  */
-export function defaultJournal(dataset, provider, model = null) {
+export function defaultJournal(dataset, provider, model = null, promptVersion = WRITING_PROMPT_VERSION) {
   const label = path.basename(dataset).replace(/\.json$/u, '');
-  return path.posix.join(RUNS_DIR, `${label}-${provider}${model ? `-${model}` : ''}.jsonl`);
+  return path.posix.join(RUNS_DIR, `${label}-${provider}${model ? `-${model}` : ''}-${promptVersion}.jsonl`);
 }
 
 /*
@@ -233,13 +240,15 @@ export async function readJournal(file) {
   try {
     text = await fs.readFile(file, 'utf8');
   } catch (error) {
-    if (error.code === 'ENOENT') return { done: new Set(), damaged: 0, models: new Set() };
+    if (error.code === 'ENOENT') return { done: new Set(), damaged: 0, models: new Set(), promptVersions: new Set(), unversioned: 0 };
     throw error;
   }
 
   const done = new Set();
   const models = new Set();
+  const promptVersions = new Set();
   let damaged = 0;
+  let unversioned = 0;
   for (const line of text.split(/\r?\n/u)) {
     if (!line.trim()) continue;
     try {
@@ -249,12 +258,18 @@ export async function readJournal(file) {
         // Which models the journal already holds: resuming counts a pair «work + run number» as
         // paid for, and it must not count an answer of another model as this model's answer.
         if (typeof entry.model === 'string' && entry.model) models.add(entry.model);
+        /* And by which prompt, for the same reason. A line written before the runner stamped the
+         * version says nothing about the prompt behind it: it is counted apart rather than assumed
+         * to be the current one — an assumption here would be the exact silent forgery this guard
+         * exists to prevent — and it stops nothing, because such a journal is readable evidence. */
+        if (typeof entry.promptVersion === 'string' && entry.promptVersion) promptVersions.add(entry.promptVersion);
+        else unversioned += 1;
       } else damaged += 1;
     } catch {
       damaged += 1;
     }
   }
-  return { done, damaged, models };
+  return { done, damaged, models, promptVersions, unversioned };
 }
 
 /*
@@ -387,7 +402,7 @@ export async function runQuality({
   const cases = JSON.parse(await fs.readFile(dataset, 'utf8'));
   const { work, skipped } = planWork(cases, { only });
 
-  const { done, damaged, models } = await readJournal(journalFile);
+  const { done, damaged, models, promptVersions, unversioned } = await readJournal(journalFile);
   /*
    * A journal of another model is not this run's journal. Resuming recognises a pair «work + run
    * number» and would report those pairs as already paid for, so the run would quietly do nothing
@@ -398,6 +413,26 @@ export async function runQuality({
     throw new Error(
       `журнал ${journalFile} уже содержит ответы модели ${foreign.join(', ')}, а прогон идёт моделью ${pinned[0].model}: `
       + 'назовите модель ключом --model=<id> — тогда журнал будет свой — либо укажите --out=<файл>',
+    );
+  }
+
+  /*
+   * A journal of another prompt is not this run's journal either, and the failure it prevents is
+   * the sharper one. The prompt is edited exactly when its effect is about to be measured: after
+   * `writing-v2` → `writing-v3` all 42 pairs of the old journal were already there, the run would
+   * have made no call at all, reported everything as done, and the owner would have merged the old
+   * prompt's answers and read them as a check of the new prompt. Nothing about that looks wrong
+   * afterwards, which is why it is stopped here rather than noticed later.
+   */
+  const otherPrompts = [...promptVersions].filter((version) => version !== WRITING_PROMPT_VERSION);
+  if (otherPrompts.length) {
+    const suggested = defaultJournal(dataset, provider, model);
+    throw new Error(
+      `журнал ${journalFile} записан промптом ${otherPrompts.join(', ')}, а прогон идёт промптом ${WRITING_PROMPT_VERSION}: `
+      + 'возобновление опознаёт пару «работа + номер прогона», версия промпта в неё не входит — ответы старого промпта были бы засчитаны этому прогону. '
+      + (suggested === journalFile
+        ? 'Укажите --out=<файл> для нового журнала; записанный журнал переносить и переименовывать не нужно.'
+        : `Запустите ту же команду без --out — журнал будет ${suggested}; записанный журнал переносить и переименовывать не нужно.`),
     );
   }
   await fs.mkdir(path.dirname(journalFile), { recursive: true });
@@ -412,6 +447,13 @@ export async function runQuality({
 
   log(`Набор: ${dataset} — работ к прогону ${work.length}, пропущено ${skipped.length}.`);
   log(`Журнал: ${journalFile} — уже записано ${done.size} пар «работа + прогон»${damaged ? `, нечитаемых строк ${damaged}` : ''}.`);
+  if (unversioned) {
+    /* Said out loud, not folded into the current version: these lines were written before the
+     * runner stamped the prompt, and which prompt produced them is unknown. They are paid answers
+     * and stay counted as done, but a report that calls them a measurement of `writing-v3` would
+     * be claiming something nobody can check. */
+    log(`  Строк без версии промпта: ${unversioned} — журнал старее, чем отметка версии. Прогоном ${WRITING_PROMPT_VERSION} они не считаются.`);
+  }
   log(`Провайдер: ${pinned[0].name}, модель ${pinned[0].model} (${model ? 'ключ --model' : 'из .env'}). Вызовов осталось: ${pending.length}.`);
   if (timeoutMs) {
     /* Compared against the budgets of the operations this run actually contains: task 37 and task
