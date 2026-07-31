@@ -1,6 +1,6 @@
 # 02 — Структурированные условия для набора ФИПИ
 
-Status: ready-for-agent
+Status: done
 Blocked by: —
 Spec: .scratch/ai-quality-runner/spec.md#что-мешает-прямо-сейчас
 
@@ -48,11 +48,11 @@ Spec: .scratch/ai-quality-runner/spec.md#что-мешает-прямо-сейч
 
 ## Definition of Done
 
-- [ ] 12 работ задания 37 и 6 табличных работ задания 38 имеют `assignmentData`, прошедшее схему.
-- [ ] Три работы с тегом `assignment-partial` имеют `assignmentData: null` и не считаются готовыми.
-- [ ] `npm run quality:assignments` повторно даёт тот же результат — на уже заполненном наборе
+- [x] 12 работ задания 37 и 6 табличных работ задания 38 имеют `assignmentData`, прошедшее схему.
+- [x] Три работы с тегом `assignment-partial` имеют `assignmentData: null` и не считаются готовыми.
+- [x] `npm run quality:assignments` повторно даёт тот же результат — на уже заполненном наборе
       ничего не меняется.
-- [ ] `test/quality-writing-stubs.test.js` проходит без правок.
-- [ ] `npm test` проходит.
-- [ ] `npm run lint` и `npm run check` проходят.
-- [ ] Один коммит на тикет.
+- [x] `test/quality-writing-stubs.test.js` проходит без правок.
+- [x] `npm test` проходит: 277 тестов, 276 проходят, 1 пропущен, 0 падают.
+- [x] `npm run lint` и `npm run check` проходят.
+- [x] Один коммит на тикет.
