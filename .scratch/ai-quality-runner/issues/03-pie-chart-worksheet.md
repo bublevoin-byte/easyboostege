@@ -1,6 +1,6 @@
 # 03 — Опросник по трём диаграммам и слияние данных
 
-Status: ready-for-agent
+Status: done
 Blocked by: 02
 Spec: .scratch/ai-quality-runner/spec.md#опросники-для-владельца
 
