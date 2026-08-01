@@ -438,5 +438,189 @@
     },
     "expectedCriticalErrors": [],
     "aiRuns": []
+  },
+  {
+    "id": "sp2-fipi-2022-fitness-centre-answer-1",
+    "operation": "speaking_2",
+    "tags": [
+      "weak",
+      "fipi-2022",
+      "official-expert-score",
+      "full-transcript",
+      "assignment-visually-reviewed"
+    ],
+    "assignment": {
+      "ad": "Join us in AUGUST & get 1 month FREE!",
+      "points": [
+        "location of the centre",
+        "opening hours",
+        "swimming pool availability",
+        "price for 3 months"
+      ]
+    },
+    "transcript": "Where is placed fitness centre? When fitness centre opens? Swimming pool is available, isn't it? How does it cost // price for three months?",
+    "human": {
+      "total": 1,
+      "criteria": {
+        "q1": 0,
+        "q2": 0,
+        "q3": 1,
+        "q4": 0
+      },
+      "max": 4,
+      "reviewer": "fipi-2022-expert-manual",
+      "notes": [
+        "Question 1 has incorrect word order.",
+        "Question 2 lacks an auxiliary verb and misinterprets opening hours.",
+        "Question 3 is accepted despite the missing article.",
+        "Question 4 has lexical and grammatical errors."
+      ]
+    },
+    "source": {
+      "document": "fipi-uch-2022.pdf",
+      "assignmentPage": 57,
+      "transcriptPage": 58,
+      "assignmentReview": "visual-pdf-review"
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "sp2-fipi-2022-fitness-centre-answer-2",
+    "operation": "speaking_2",
+    "tags": [
+      "weak",
+      "fipi-2022",
+      "official-expert-score",
+      "full-transcript",
+      "assignment-visually-reviewed"
+    ],
+    "assignment": {
+      "ad": "Join us in AUGUST & get 1 month FREE!",
+      "points": [
+        "location of the centre",
+        "opening hours",
+        "swimming pool availability",
+        "price for 3 months"
+      ]
+    },
+    "transcript": "Good morning, is it fitness centre? I want to join in your club. May I ask you some questions? Firstly, where that centre is? What time you are working on weekend? Do you have swimming pool? Also I want know the price for three months and is it different discounts for students?",
+    "human": {
+      "total": 1,
+      "criteria": {
+        "q1": 0,
+        "q2": 0,
+        "q3": 1,
+        "q4": 0
+      },
+      "max": 4,
+      "reviewer": "fipi-2022-expert-manual",
+      "notes": [
+        "Question 1 has direct statement word order.",
+        "Question 2 has direct statement word order.",
+        "Question 3 is accepted despite the missing article.",
+        "Question 4 is an incomplete indirect question and is not accepted."
+      ]
+    },
+    "source": {
+      "document": "fipi-uch-2022.pdf",
+      "assignmentPage": 57,
+      "transcriptPage": 58,
+      "assignmentReview": "visual-pdf-review"
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "sp2-fipi-2022-hotel-helsinki-answer-1",
+    "operation": "speaking_2",
+    "tags": [
+      "middle",
+      "fipi-2022",
+      "official-expert-score",
+      "full-transcript",
+      "assignment-visually-reviewed"
+    ],
+    "assignment": {
+      "ad": "Welcome to Holiday Inn, Helsinki",
+      "points": [
+        "location of the hotel",
+        "if breakfast is included",
+        "hotel facilities",
+        "price for a single room"
+      ]
+    },
+    "transcript": "Where’s the hotel situation? Breakfast is included, isn’t it? What is the main hotel facilities? What is the price of a single room?",
+    "human": {
+      "total": 2,
+      "criteria": {
+        "q1": 0,
+        "q2": 1,
+        "q3": 0,
+        "q4": 1
+      },
+      "max": 4,
+      "reviewer": "fipi-2022-expert-manual",
+      "notes": [
+        "Question 1 contains a meaning-blocking lexical and grammatical error.",
+        "Question 2 is accepted.",
+        "Question 3 has an incorrect direct-question form.",
+        "Question 4 is accepted."
+      ]
+    },
+    "source": {
+      "document": "fipi-uch-2022.pdf",
+      "assignmentPage": 59,
+      "transcriptPage": 60,
+      "assignmentReview": "visual-pdf-review"
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "sp2-fipi-2022-hotel-helsinki-answer-2",
+    "operation": "speaking_2",
+    "tags": [
+      "weak",
+      "fipi-2022",
+      "official-expert-score",
+      "full-transcript",
+      "assignment-visually-reviewed"
+    ],
+    "assignment": {
+      "ad": "Welcome to Holiday Inn, Helsinki",
+      "points": [
+        "location of the hotel",
+        "if breakfast is included",
+        "hotel facilities",
+        "price for a single room"
+      ]
+    },
+    "transcript": "Helsinki is a capital of Finland. It is a very attractive city. So… the main hotel of Helsinki is Holiday Inn and it is situated in the centre of the city… I think that it is a five-star hotel and I think that breakfast…is included. The hotel service service must clean our room… must clean the room and rooms. Price for a single room… I think price for a single room is very expensive because… it is a five-star hotel it… mustn’t be unexpensive. So discounts for groups are included but I think it is better to book the room for yourself only.",
+    "human": {
+      "total": 0,
+      "criteria": {
+        "q1": 0,
+        "q2": 0,
+        "q3": 0,
+        "q4": 0
+      },
+      "max": 4,
+      "reviewer": "fipi-2022-expert-manual",
+      "notes": [
+        "No direct question about location was asked.",
+        "No direct question about breakfast was asked.",
+        "No direct question about facilities was asked.",
+        "No direct question about the room price was asked; the student described the advertisement instead."
+      ]
+    },
+    "source": {
+      "document": "fipi-uch-2022.pdf",
+      "assignmentPage": 59,
+      "transcriptPage": 60,
+      "assignmentReview": "visual-pdf-review"
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
   }
 ]

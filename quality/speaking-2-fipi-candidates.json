@@ -1,0 +1,46 @@
+[
+  {
+    "id": "sp2-fipi-2022-driving-school-score-conflict-candidate",
+    "operation": "speaking_2",
+    "status": "excluded",
+    "reason": "The printed total is 3, while the manual accepts only questions 1 and 2; the later FIPI edition publishes the same response with total 2.",
+    "publishedHumanScore": {
+      "total": 3
+    },
+    "commentDerivedScore": {
+      "total": 2,
+      "criteria": {
+        "q1": 1,
+        "q2": 1,
+        "q3": 0,
+        "q4": 0
+      }
+    },
+    "source": {
+      "document": "fipi-uch-2022.pdf",
+      "transcriptPage": 57
+    }
+  },
+  {
+    "id": "sp2-fipi-2022-fitness-centre-answer-3-score-conflict-candidate",
+    "operation": "speaking_2",
+    "status": "excluded",
+    "reason": "The printed total is 3, while the manual explicitly rejects questions 1 and 2 and accepts questions 3 and 4.",
+    "publishedHumanScore": {
+      "total": 3
+    },
+    "commentDerivedScore": {
+      "total": 2,
+      "criteria": {
+        "q1": 0,
+        "q2": 0,
+        "q3": 1,
+        "q4": 1
+      }
+    },
+    "source": {
+      "document": "fipi-uch-2022.pdf",
+      "transcriptPage": 59
+    }
+  }
+]

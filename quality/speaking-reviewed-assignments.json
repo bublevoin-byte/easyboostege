@@ -69,6 +69,84 @@
       "ad": "The best driving school in the city!",
       "points": ["location", "morning classes", "minimum age for students", "tuition fee"],
       "source": { "year": 2025, "assignmentPage": 64 }
+    },
+    {
+      "key": "fitness-centre",
+      "match": "fitness centre",
+      "ad": "Join us in AUGUST & get 1 month FREE!",
+      "points": ["location of the centre", "opening hours", "swimming pool availability", "price for 3 months"],
+      "source": { "year": 2022, "assignmentPage": 57 }
+    },
+    {
+      "key": "hotel-helsinki",
+      "match": "hotel",
+      "ad": "Welcome to Holiday Inn, Helsinki",
+      "points": ["location of the hotel", "if breakfast is included", "hotel facilities", "price for a single room"],
+      "source": { "year": 2022, "assignmentPage": 59 }
+    }
+  ],
+  "speaking2Reviewed": [
+    {
+      "key": "fitness-centre-answer-1",
+      "assignmentKey": "fitness-centre",
+      "year": 2022,
+      "transcriptPage": 58,
+      "format": "numbered",
+      "transcriptStart": "Задание 2, вариант 1, ответ 1 (скрипт)",
+      "transcriptEnd": "Комментарии к выполненному участницей ЕГЭ заданию",
+      "publishedHumanScore": { "total": 1, "criteria": { "q1": 0, "q2": 0, "q3": 1, "q4": 0 } },
+      "notes": ["Question 1 has incorrect word order.", "Question 2 lacks an auxiliary verb and misinterprets opening hours.", "Question 3 is accepted despite the missing article.", "Question 4 has lexical and grammatical errors."]
+    },
+    {
+      "key": "fitness-centre-answer-2",
+      "assignmentKey": "fitness-centre",
+      "year": 2022,
+      "transcriptPage": 58,
+      "format": "prose",
+      "transcriptStart": "Задание 2, вариант 1, ответ 2 (скрипт)",
+      "transcriptEnd": "Комментарии к выполненному участницей ЕГЭ заданию 2.1.2",
+      "publishedHumanScore": { "total": 1, "criteria": { "q1": 0, "q2": 0, "q3": 1, "q4": 0 } },
+      "notes": ["Question 1 has direct statement word order.", "Question 2 has direct statement word order.", "Question 3 is accepted despite the missing article.", "Question 4 is an incomplete indirect question and is not accepted."]
+    },
+    {
+      "key": "hotel-helsinki-answer-1",
+      "assignmentKey": "hotel-helsinki",
+      "year": 2022,
+      "transcriptPage": 60,
+      "format": "numbered",
+      "transcriptStart": "Задание 2, вариант 2, ответ 1 (скрипт)",
+      "transcriptEnd": "Комментарии к выполненному участницей ЕГЭ заданию 2.2.1",
+      "publishedHumanScore": { "total": 2, "criteria": { "q1": 0, "q2": 1, "q3": 0, "q4": 1 } },
+      "notes": ["Question 1 contains a meaning-blocking lexical and grammatical error.", "Question 2 is accepted.", "Question 3 has an incorrect direct-question form.", "Question 4 is accepted."]
+    },
+    {
+      "key": "hotel-helsinki-answer-2",
+      "assignmentKey": "hotel-helsinki",
+      "year": 2022,
+      "transcriptPage": 60,
+      "format": "prose",
+      "transcriptStart": "Задание 2, вариант 2, ответ 2 (скрипт)",
+      "transcriptEnd": "Комментарии к выполненному участником ЕГЭ заданию 2.2.2",
+      "publishedHumanScore": { "total": 0, "criteria": { "q1": 0, "q2": 0, "q3": 0, "q4": 0 } },
+      "notes": ["No direct question about location was asked.", "No direct question about breakfast was asked.", "No direct question about facilities was asked.", "No direct question about the room price was asked; the student described the advertisement instead."]
+    }
+  ],
+  "speaking2Excluded": [
+    {
+      "key": "driving-school-score-conflict",
+      "year": 2022,
+      "transcriptPage": 57,
+      "reason": "The printed total is 3, while the manual accepts only questions 1 and 2; the later FIPI edition publishes the same response with total 2.",
+      "publishedHumanScore": { "total": 3 },
+      "commentDerivedScore": { "total": 2, "criteria": { "q1": 1, "q2": 1, "q3": 0, "q4": 0 } }
+    },
+    {
+      "key": "fitness-centre-answer-3-score-conflict",
+      "year": 2022,
+      "transcriptPage": 59,
+      "reason": "The printed total is 3, while the manual explicitly rejects questions 1 and 2 and accepts questions 3 and 4.",
+      "publishedHumanScore": { "total": 3 },
+      "commentDerivedScore": { "total": 2, "criteria": { "q1": 0, "q2": 0, "q3": 1, "q4": 1 } }
     }
   ],
   "speaking4": [
@@ -131,6 +209,36 @@
       "scoreDirection": "before",
       "plan": ["briefly describe the photos and note the differences", "mention advantages of the two types of children's leisure activities", "mention disadvantages of the two types of children's leisure activities", "say which leisure activity you preferred as a child and why"],
       "ph": ["Photo 1: children are playing together outdoors at a playground.", "Photo 2: a girl is sitting indoors with a stack of books."]
+    },
+    {
+      "key": "life-without-gadgets-answer-1",
+      "topic": "Life without gadgets",
+      "year": 2022,
+      "assignmentPage": 73,
+      "transcriptPage": 78,
+      "transcriptStart": "Hi! Have you seen my photos?",
+      "transcriptEnd": "That's all.",
+      "includeTranscriptEnd": true,
+      "scoreRegionEnd": "ЗАДАНИЕ 14",
+      "scoreEvidencePatterns": ["Итоговый\\s+балл 3 балла Коммуникативная", "Итоговый балл\\s+1 балл \\(нарушения", "Итоговый балл\\s+1 балл \\(6", "ИТОГОВЫЙ\\s+БАЛЛ ЗА ЗАДАНИЕ 3\\s+5 баллов"],
+      "publishedHumanScore": { "total": 5, "criteria": { "task": 3, "organisation": 1, "language": 1 } },
+      "plan": ["briefly describe the photos and justify their choice for the project", "say how the pictures are different and justify their choice for the project", "mention advantages and disadvantages of the two types of books", "say whether you would like to live without gadgets and why"],
+      "ph": ["Photo 1: a smiling woman is holding an open paper book in a library.", "Photo 2: a woman is sitting on a sofa at home and reading an e-book."]
+    },
+    {
+      "key": "life-without-gadgets-answer-2",
+      "topic": "Life without gadgets",
+      "year": 2022,
+      "assignmentPage": 73,
+      "transcriptPage": 81,
+      "transcriptStart": "Hello, I’ve got for you some photos related to our project “Life without gadgets”.",
+      "transcriptEnd": "That’s all I wanted to share with you withinLEX our project.",
+      "includeTranscriptEnd": true,
+      "scoreRegionEnd": "ЗАДАНИЕ 15",
+      "scoreEvidencePatterns": ["Итоговый\\s+балл 3 балла Коммуникативная", "Итоговый балл\\s+3 балла", "0\\s+баллов \\(8 неповторяющихся"],
+      "publishedHumanScore": { "total": 6, "criteria": { "task": 3, "organisation": 3, "language": 0 } },
+      "plan": ["briefly describe the photos and justify their choice for the project", "say how the pictures are different and justify their choice for the project", "mention advantages and disadvantages of the two types of books", "say whether you would like to live without gadgets and why"],
+      "ph": ["Photo 1: a smiling woman is holding an open paper book in a library.", "Photo 2: a woman is sitting on a sofa at home and reading an e-book."]
     }
   ],
   "speaking4Excluded": [

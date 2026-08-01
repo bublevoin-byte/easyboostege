@@ -7,10 +7,10 @@ import { validateQualityDataset } from '../ai/quality.js';
 const dataset = JSON.parse(await fs.readFile(new URL('../quality/speaking-4-fipi.json', import.meta.url), 'utf8'));
 const candidates = JSON.parse(await fs.readFile(new URL('../quality/speaking-4-fipi-candidates.json', import.meta.url), 'utf8'));
 
-test('speaking task 4 contains only the five complete unique FIPI transcripts', () => {
-  assert.equal(dataset.length, 5);
-  assert.equal(new Set(dataset.map((item) => item.assignment.topic)).size, dataset.length);
+test('speaking task 4 contains seven complete unique FIPI transcripts', () => {
+  assert.equal(dataset.length, 7);
   assert.equal(new Set(dataset.map((item) => item.id)).size, dataset.length);
+  assert.equal(dataset.filter((item) => item.assignment.topic === 'Life without gadgets').length, 2);
   for (const item of dataset) {
     assert.equal(item.operation, 'speaking_4');
     assert.ok(item.tags.includes('full-transcript'));
@@ -55,6 +55,6 @@ test('four fragmented task 4 works stay outside the golden dataset', () => {
 test('task 4 remains below the minimum and without paid AI runs', () => {
   const validation = validateQualityDataset(dataset, { release: false });
   assert.equal(validation.ok, false);
-  assert.equal(validation.counts.speaking_4, 5);
+  assert.equal(validation.counts.speaking_4, 7);
   assert.ok(validation.errors.every((error) => error.endsWith('scores are incomplete')));
 });

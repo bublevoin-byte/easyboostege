@@ -9,10 +9,11 @@ const qualityDirectory = path.join(__dirname, '..', 'quality');
 const sourcesDirectory = path.join(qualityDirectory, 'sources');
 const manifestFile = path.join(qualityDirectory, 'speaking-reviewed-assignments.json');
 const task2OutputFile = path.join(qualityDirectory, 'speaking-2-fipi.json');
+const task2CandidatesFile = path.join(qualityDirectory, 'speaking-2-fipi-candidates.json');
 const task4OutputFile = path.join(qualityDirectory, 'speaking-4-fipi.json');
 const task4CandidatesFile = path.join(qualityDirectory, 'speaking-4-fipi-candidates.json');
 
-const SOURCE_YEARS = [2026, 2025, 2024, 2023];
+const SOURCE_YEARS = [2026, 2025, 2024, 2023, 2022];
 const TASK2_MAX = 4;
 const TASK4_MAX = 10;
 const TASK2_SCRIPT = /^\s*Скрипт(?:\s+ответа)?(?:\s+\d+)?\s*$/u;
@@ -32,7 +33,8 @@ function stripExpertMarkup(value) {
   return value
     .replace(/\([^)]*[А-Яа-яЁё][^)]*\)/gu, ' ')
     .replace(/\[[^\]]*\]/gu, ' ')
-    .replace(/(?:GR-R|LOGIC|PHON|LEX|ART|GR|PH)/gu, ' ');
+    .replace(/(?:GR-R|LEX\/GR|LOGIC|LINKER|PHON|LEX|ART|GR|PH|РКЗ)/gu, ' ')
+    .replace(/\s*[–—-]\s*word order/giu, ' ');
 }
 
 function cleanEnglish(value) {
@@ -132,6 +134,61 @@ function parseTask2Source(text, year, assignments) {
   return entries;
 }
 
+function parseReviewedTask2Entry(text, item, assignment) {
+  const markerStart = text.indexOf(item.transcriptStart);
+  if (markerStart === -1) throw new Error(`${item.year}/${item.key}: transcript start is missing`);
+  const start = markerStart + item.transcriptStart.length;
+  const end = text.indexOf(item.transcriptEnd, start);
+  if (end === -1) throw new Error(`${item.year}/${item.key}: transcript end is missing`);
+
+  const body = text.slice(start, end);
+  let transcript;
+  if (item.format === 'numbered') {
+    const questions = collectNumbered(body.split(/\r?\n/u), 0, () => false);
+    if (questions.length !== TASK2_MAX) {
+      throw new Error(`${item.year}/${item.key}: expected four question attempts, found ${questions.length}`);
+    }
+    transcript = questions.map((entry) => cleanEnglish(entry.text)).join(' ');
+  } else {
+    transcript = cleanEnglish(body);
+  }
+  if (!transcript) throw new Error(`${item.year}/${item.key}: transcript is empty`);
+
+  const criteria = item.publishedHumanScore.criteria;
+  const calculated = Object.values(criteria).reduce((sum, score) => sum + score, 0);
+  if (calculated !== item.publishedHumanScore.total) {
+    throw new Error(`${item.year}/${item.key}: criteria do not match the published total`);
+  }
+  const nextTask = text.indexOf('ЗАДАНИЕ ', end + item.transcriptEnd.length);
+  const scoreRegion = text.slice(end, nextTask === -1 ? undefined : nextTask);
+  const publishedScore = scoreRegion.match(TASK2_SCORE);
+  if (!publishedScore || Number(publishedScore[1]) !== item.publishedHumanScore.total) {
+    throw new Error(`${item.year}/${item.key}: published total was not verified in the source`);
+  }
+
+  return {
+    id: `sp2-fipi-${item.year}-${item.key}`,
+    operation: 'speaking_2',
+    tags: [task2Difficulty(item.publishedHumanScore.total), `fipi-${item.year}`, 'official-expert-score', 'full-transcript', 'assignment-visually-reviewed'],
+    assignment: { ad: assignment.ad, points: assignment.points },
+    transcript,
+    human: {
+      ...item.publishedHumanScore,
+      max: TASK2_MAX,
+      reviewer: `fipi-${item.year}-expert-manual`,
+      notes: item.notes,
+    },
+    source: {
+      document: `fipi-uch-${item.year}.pdf`,
+      assignmentPage: assignment.source.assignmentPage,
+      transcriptPage: item.transcriptPage,
+      assignmentReview: 'visual-pdf-review',
+    },
+    expectedCriticalErrors: [],
+    aiRuns: [],
+  };
+}
+
 function findTask4Score(text, start, direction) {
   let region;
   if (direction === 'before') region = text.slice(Math.max(0, start - 18_000), start);
@@ -153,10 +210,22 @@ function parseTask4Entry(text, item) {
   if (start === -1) throw new Error(`${item.year}/${item.key}: transcript start is missing`);
   const endStart = text.indexOf(item.transcriptEnd, start + item.transcriptStart.length);
   if (endStart === -1) throw new Error(`${item.year}/${item.key}: transcript end is missing`);
-  const end = item.scoreDirection === 'before' ? endStart + item.transcriptEnd.length : endStart;
+  const end = item.includeTranscriptEnd || item.scoreDirection === 'before'
+    ? endStart + item.transcriptEnd.length
+    : endStart;
   const transcript = cleanEnglish(text.slice(start, end));
-  const human = findTask4Score(text, start, item.scoreDirection);
+  const human = item.publishedHumanScore ?? findTask4Score(text, start, item.scoreDirection);
   if (!human) throw new Error(`${item.year}/${item.key}: expert score is missing`);
+  if (item.scoreEvidencePatterns) {
+    const scoreRegionEnd = text.indexOf(item.scoreRegionEnd, end);
+    if (scoreRegionEnd === -1) throw new Error(`${item.year}/${item.key}: score region end is missing`);
+    const scoreRegion = text.slice(end, scoreRegionEnd);
+    for (const pattern of item.scoreEvidencePatterns) {
+      if (!new RegExp(pattern, 'u').test(scoreRegion)) {
+        throw new Error(`${item.year}/${item.key}: score evidence is missing: ${pattern}`);
+      }
+    }
+  }
   const calculated = Object.values(human.criteria).reduce((sum, score) => sum + score, 0);
   if (calculated !== human.total || human.total > TASK4_MAX) {
     throw new Error(`${item.year}/${item.key}: invalid published criteria total`);
@@ -199,9 +268,30 @@ async function main() {
     const found = parseTask2Source(sourceTexts.get(year), year, manifest.speaking2);
     for (const entry of found) if (!selectedTask2.has(entry.key)) selectedTask2.set(entry.key, entry);
   }
-  const missingTask2 = manifest.speaking2.filter((item) => !selectedTask2.has(item.key)).map((item) => item.key);
+  const reviewedTask2 = manifest.speaking2Reviewed.map((item) => {
+    const assignment = manifest.speaking2.find((candidate) => candidate.key === item.assignmentKey);
+    if (!assignment) throw new Error(`${item.year}/${item.key}: assignment is missing from the manifest`);
+    return parseReviewedTask2Entry(sourceTexts.get(item.year), item, assignment);
+  });
+  const reviewedAssignmentKeys = new Set(manifest.speaking2Reviewed.map((item) => item.assignmentKey));
+  const missingTask2 = manifest.speaking2
+    .filter((item) => !selectedTask2.has(item.key) && !reviewedAssignmentKeys.has(item.key))
+    .map((item) => item.key);
   if (missingTask2.length) throw new Error(`speaking_2 assignments not found: ${missingTask2.join(', ')}`);
-  const task2 = [...selectedTask2.values()].map(({ key: _, ...entry }) => entry);
+  const task2 = [
+    ...[...selectedTask2.values()].map(({ key: _, ...entry }) => entry),
+    ...reviewedTask2,
+  ];
+
+  const task2Candidates = manifest.speaking2Excluded.map((item) => ({
+    id: `sp2-fipi-${item.year}-${item.key}-candidate`,
+    operation: 'speaking_2',
+    status: 'excluded',
+    reason: item.reason,
+    publishedHumanScore: item.publishedHumanScore,
+    commentDerivedScore: item.commentDerivedScore,
+    source: { document: `fipi-uch-${item.year}.pdf`, transcriptPage: item.transcriptPage },
+  }));
 
   const task4 = manifest.speaking4.map((item) => parseTask4Entry(sourceTexts.get(item.year), item));
   const candidates = manifest.speaking4Excluded.map((item) => ({
@@ -216,10 +306,12 @@ async function main() {
 
   await Promise.all([
     fs.writeFile(task2OutputFile, `${JSON.stringify(task2, null, 2)}\n`, 'utf8'),
+    fs.writeFile(task2CandidatesFile, `${JSON.stringify(task2Candidates, null, 2)}\n`, 'utf8'),
     fs.writeFile(task4OutputFile, `${JSON.stringify(task4, null, 2)}\n`, 'utf8'),
     fs.writeFile(task4CandidatesFile, `${JSON.stringify(candidates, null, 2)}\n`, 'utf8'),
   ]);
   console.log(`speaking_2: ${task2.length} fully scored unique works (minimum: 10)`);
+  console.log(`speaking_2 candidates excluded for inconsistent published scores: ${task2Candidates.length}`);
   console.log(`speaking_4: ${task4.length} full transcripts (minimum: 10)`);
   console.log(`speaking_4 candidates excluded for incomplete transcripts: ${candidates.length}`);
 }

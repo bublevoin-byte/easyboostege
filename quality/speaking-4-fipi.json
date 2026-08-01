@@ -228,5 +228,97 @@
     },
     "expectedCriticalErrors": [],
     "aiRuns": []
+  },
+  {
+    "id": "sp4-fipi-2022-life-without-gadgets-answer-1",
+    "operation": "speaking_4",
+    "tags": [
+      "middle",
+      "fipi-2022",
+      "official-expert-score",
+      "full-transcript",
+      "photos-visually-reviewed"
+    ],
+    "assignment": {
+      "topic": "Life without gadgets",
+      "plan": [
+        "briefly describe the photos and justify their choice for the project",
+        "say how the pictures are different and justify their choice for the project",
+        "mention advantages and disadvantages of the two types of books",
+        "say whether you would like to live without gadgets and why"
+      ],
+      "ph": [
+        "Photo 1: a smiling woman is holding an open paper book in a library.",
+        "Photo 2: a woman is sitting on a sofa at home and reading an e-book."
+      ]
+    },
+    "transcript": "Hi! Have you seen my photos? In Picture 1, we can see a girl with a paper book in a library. She is smiling. While in the second photo, we can see a girl sitting at home on a sofa with an e-book in her hands. She is happy. I guess these pictures show different types of books. They are a nice choice for us because it is possible to live without gadgets but it is not convenient. The girl in Photo 1 is happy but she had to waste time to get to the library. But the girl who is at home is sitting in a comfortable place and is reading a book she need. There are some differences in these pictures. Photo 1 shows a public place, while in Picture 2, it’s a house. Secondly, on the left picture, there are people around the girl, whereas on the other picture, the girl enjoys reading. As for me, these pictures show different types of books. They have pros and cons. We like paper books because we can smell the paper. But making paper demands cutting out trees and energy. People who like paper books do not think about the protection of the environment. If we look at the E-books, they are good for the environment but bad for a student's eyes. Personally, I like gadgets. They help me much staying in touch with my relatives and friends and do my school tasks. That's all.",
+    "human": {
+      "total": 5,
+      "criteria": {
+        "task": 3,
+        "organisation": 1,
+        "language": 1
+      },
+      "max": 10,
+      "reviewer": "fipi-2022-expert-manual",
+      "notes": [
+        "The transcript and K1/K2/K3 score are published in the FIPI expert manual."
+      ]
+    },
+    "source": {
+      "document": "fipi-uch-2022.pdf",
+      "assignmentPage": 73,
+      "transcriptPage": 78,
+      "assignmentReview": "visual-pdf-review"
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "sp4-fipi-2022-life-without-gadgets-answer-2",
+    "operation": "speaking_4",
+    "tags": [
+      "middle",
+      "fipi-2022",
+      "official-expert-score",
+      "full-transcript",
+      "photos-visually-reviewed"
+    ],
+    "assignment": {
+      "topic": "Life without gadgets",
+      "plan": [
+        "briefly describe the photos and justify their choice for the project",
+        "say how the pictures are different and justify their choice for the project",
+        "mention advantages and disadvantages of the two types of books",
+        "say whether you would like to live without gadgets and why"
+      ],
+      "ph": [
+        "Photo 1: a smiling woman is holding an open paper book in a library.",
+        "Photo 2: a woman is sitting on a sofa at home and reading an e-book."
+      ]
+    },
+    "transcript": "Hello, I’ve got for you some photos related to our project “Life without gadgets”. In the first photo is captured a traditional library with endless bookshelves filled with different books and magazines. Moreover, in the central part of the photo you can see young lady holding a book in her hand and seemingly pointing out that traditional way of studying is the best we can get for today. The second photo introduces us to electronic book or so called – e-book. You can see in the picture young lady sitting on couch and holding an electronic device in her hands. The absence of bookshelves makes us clear that printed books are not required because all information is kept in the electronic gadget. Despite the fact that both images are linked with reading, they demonstrate different options in this area with their pros and cons. The main advantage of printed book demonstrated in the first picture is that it's quite simple way of reading, although it may be uncomfortable to carry in your bag because of weight and required space. One of the main benefits of electronic book is the endless number of stories you can get thanks to the Internet connection. However, e-books are quite vulnerable because they need to be charged on time. These pictures are definitely fit to the project “Life without gadgets” because they make us choose between the e-book and printed book which are in demand in spite of their differences. As for me, I would opt for living without gadgets because they are not able to put us inside that special atmosphere created by author whose story we are lucky to read on the printed pages. That’s all I wanted to share with you within our project.",
+    "human": {
+      "total": 6,
+      "criteria": {
+        "task": 3,
+        "organisation": 3,
+        "language": 0
+      },
+      "max": 10,
+      "reviewer": "fipi-2022-expert-manual",
+      "notes": [
+        "The transcript and K1/K2/K3 score are published in the FIPI expert manual."
+      ]
+    },
+    "source": {
+      "document": "fipi-uch-2022.pdf",
+      "assignmentPage": 73,
+      "transcriptPage": 81,
+      "assignmentReview": "visual-pdf-review"
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
   }
 ]

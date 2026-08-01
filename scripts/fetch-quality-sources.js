@@ -8,13 +8,16 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const targetDirectory = path.join(__dirname, '..', 'quality', 'sources');
 
-const YEARS = [2023, 2024, 2025, 2026];
+const YEARS = [2022, 2023, 2024, 2025, 2026];
 const PARTS = [
   { code: 'pch', label: 'письменная часть (задания 37 и 38)' },
   { code: 'uch', label: 'устная часть (задания 1–4)' },
 ];
 
 function documentUrl(year, code) {
+  if (year === 2022) {
+    return `https://doc.fipi.ru/ege/dlya-predmetnyh-komissiy-subektov-rf/2022/angliyskiy_${code}_mr_ege_2022.pdf`;
+  }
   return `https://doc.fipi.ru/ege/dlya-predmetnyh-komissiy-subektov-rf/${year}/angl_yaz_${code}_mr_ege_${year}.pdf`;
 }
 
