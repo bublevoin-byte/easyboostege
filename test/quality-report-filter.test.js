@@ -88,12 +88,12 @@ test('without a filter the set is passed through untouched', () => {
   assert.equal(selection.cases, cases);
 });
 
-test('run variants are the pairs of provider and model, and a missing field is its own pair', () => {
+test('run variants include the prompt version, and a missing field is its own origin', () => {
   assert.deepEqual(listRunVariants(twoModels()), [
-    { provider: 'grok', model: 'model-a' },
-    { provider: 'grok', model: 'model-b' },
+    { provider: 'grok', model: 'model-a', promptVersion: null },
+    { provider: 'grok', model: 'model-b', promptVersion: null },
   ]);
-  assert.deepEqual(listRunVariants([{ id: 'x', aiRuns: [{ valid: true, total: 1 }] }]), [{ provider: null, model: null }]);
+  assert.deepEqual(listRunVariants([{ id: 'x', aiRuns: [{ valid: true, total: 1 }] }]), [{ provider: null, model: null, promptVersion: null }]);
 });
 
 test('a filtered set no longer calls a disagreement between models an instability of one', () => {
@@ -140,6 +140,55 @@ test('a filter that still leaves two models warns just as loudly', () => {
   assert.equal(status, 0);
   assert.match(stderr, /ВНИМАНИЕ/u);
   assert.ok(JSON.parse(stdout).warning);
+});
+
+test('two prompt versions of one model are separate variants and require an explicit prompt filter', () => {
+  const cases = twoModels().map((item) => ({
+    ...item,
+    aiRuns: item.aiRuns
+      .filter((run) => run.model === 'model-a')
+      .flatMap((run) => [
+        { ...run, promptVersion: 'writing-v3' },
+        { ...run, promptVersion: 'writing-v4', total: run.total + 1 },
+      ]),
+  })).filter((item) => item.aiRuns.length);
+
+  assert.deepEqual(listRunVariants(cases), [
+    { provider: 'grok', model: 'model-a', promptVersion: 'writing-v3' },
+    { provider: 'grok', model: 'model-a', promptVersion: 'writing-v4' },
+  ]);
+  const selected = filterQualityRuns(cases, { model: 'model-a', promptVersion: 'writing-v4' });
+  assert.equal(selected.filtered, true);
+  assert.ok(selected.cases.every((item) => item.aiRuns.every((run) => run.promptVersion === 'writing-v4')));
+
+  const file = datasetFile(cases);
+  const mixed = report([file, '--model=model-a']);
+  assert.equal(mixed.status, 0);
+  assert.match(mixed.stderr, /ВНИМАНИЕ/u);
+  assert.match(mixed.stderr, /writing-v3/u);
+  assert.match(mixed.stderr, /--prompt-version=writing-v4/u);
+
+  const single = report([file, '--model=model-a', '--prompt-version=writing-v4']);
+  assert.equal(single.status, 0);
+  assert.equal(single.stderr, '');
+  assert.deepEqual(JSON.parse(single.stdout).filter, { model: 'model-a', promptVersion: 'writing-v4' });
+});
+
+test('an unversioned run stays unknown next to a named prompt instead of borrowing its version', () => {
+  const cases = [{
+    id: 'w37-unknown', operation: 'writing_37', human: { total: 4, criteria: { task: 2 }, reviewer: 'fixture' },
+    expectedCriticalErrors: [],
+    aiRuns: [aiRun('model-a', 4), aiRun('model-a', 5, { promptVersion: 'writing-v4' })],
+  }];
+  assert.deepEqual(listRunVariants(cases), [
+    { provider: 'grok', model: 'model-a', promptVersion: null },
+    { provider: 'grok', model: 'model-a', promptVersion: 'writing-v4' },
+  ]);
+
+  const { status, stderr } = report([datasetFile(cases), '--model=model-a']);
+  assert.equal(status, 0);
+  assert.match(stderr, /версия промпта не указана/u);
+  assert.match(stderr, /восстановите источник из журнала/u);
 });
 
 test('a filter matching no run at all stops instead of printing a report of nulls', () => {

@@ -18,19 +18,22 @@ export function validateQualityDataset(cases, { release = false } = {}) {
 }
 
 /*
- * Прогон опознаётся парой «провайдер + модель» — тем же способом, каким его опознаёт слияние
- * журналов (`runKey` в scripts/merge-quality-runs.js). Записи без этих полей — прогоны, сделанные
- * до того, как модель стали записывать; они образуют собственную пару и ни с какой названной
- * моделью не совпадают: «неизвестно чей прогон» и «прогон этой модели» — разные вещи.
+ * Происхождение прогона — «провайдер + модель + версия промпта», как в `runKey` слияния журналов.
+ * Отсутствующее поле образует собственную неизвестную группу: «неизвестно каким промптом получено»
+ * и «получено этим промптом» — разные утверждения.
  */
-const variantOf = (run) => ({ provider: run?.provider ?? null, model: run?.model ?? null });
+const variantOf = (run) => ({
+  provider: run?.provider ?? null,
+  model: run?.model ?? null,
+  promptVersion: run?.promptVersion ?? null,
+});
 
 export function listRunVariants(cases) {
   const seen = new Map();
   for (const item of Array.isArray(cases) ? cases : []) {
     for (const run of Array.isArray(item?.aiRuns) ? item.aiRuns : []) {
       const variant = variantOf(run);
-      const key = `${variant.provider}|${variant.model}`;
+      const key = JSON.stringify([variant.provider, variant.model, variant.promptVersion]);
       if (!seen.has(key)) seen.set(key, variant);
     }
   }
@@ -47,11 +50,14 @@ export function listRunVariants(cases) {
  * прогона: их идентификаторы едут в `emptied`, чтобы отчёт назвал их поимённо. Набор, измеренный
  * наполовину, не то же самое, что измеренный целиком, и молча укоротить его нельзя.
  */
-export function filterQualityRuns(cases, { provider = null, model = null } = {}) {
+export function filterQualityRuns(cases, { provider = null, model = null, promptVersion = null } = {}) {
   const list = Array.isArray(cases) ? cases : [];
-  if (provider === null && model === null) return { cases: list, filtered: false, matched: null, emptied: [] };
+  if (provider === null && model === null && promptVersion === null) {
+    return { cases: list, filtered: false, matched: null, emptied: [] };
+  }
   const matches = (run) => (provider === null || (run?.provider ?? null) === provider)
-    && (model === null || (run?.model ?? null) === model);
+    && (model === null || (run?.model ?? null) === model)
+    && (promptVersion === null || (run?.promptVersion ?? null) === promptVersion);
   const emptied = [];
   let matched = 0;
   const selected = list.map((item) => {

@@ -38,11 +38,15 @@ const squash = (value) => String(value ?? '').replace(/\s+/gu, ' ').trim();
 // Сопоставление по названию терпит разный пробел и регистр — но не разное название: расшифровки
 // критериев различаются словами, а не заглавной буквой, и подобрать не тот ключ так нельзя.
 const labelKey = (value) => squash(value).toLowerCase();
-/* Прогон опознаётся парой «провайдер + модель»: сравнивать между собой прогоны разных моделей
- * нельзя, и путать их тоже. Экспортируется, потому что слияние опросника разборов должно находить
- * запись aiRuns тем же способом, что и это слияние: два способа однажды разошлись бы, и разошлись
- * бы молча. */
-export const runKey = (run) => `${run?.provider ?? ''}|${run?.model ?? ''}`;
+/* Прогон опознаётся тройкой «провайдер + модель + версия промпта»: ответ той же модели на другом
+ * промпте — другой замер, а не свежая копия прежнего. Отсутствующая версия остаётся null и
+ * образует отдельную группу: приписать старому числу текущий промпт значило бы выдумать его
+ * происхождение. Экспортируется, потому что опросник должен находить запись тем же способом. */
+export const runKey = (run) => JSON.stringify([
+  run?.provider ?? null,
+  run?.model ?? null,
+  run?.promptVersion ?? null,
+]);
 
 /*
  * Чем был отказ: нарушением контракта или обрывом до ответа. Разница не косметическая, и делится
@@ -158,9 +162,9 @@ export function mapCriteria(stub, criteria) {
 
 /*
  * One line of the journal → one record of aiRuns, in the shape of quality/engineering-smoke.json.
- * `repaired`, `provider` and `model` come along because runs of different providers must not be
- * mistakable for one another; the rest of the line — the full review, the cost, the raw answer of
- * a rejected format — stays in the journal.
+ * `repaired`, `provider`, `model` and `promptVersion` come along because results of different
+ * origins must not be mistakable for one another; the rest of the line — the full review, the
+ * cost, the raw answer of a rejected format — stays in the journal.
  */
 export function toRun(stub, entry) {
   if (typeof entry?.valid !== 'boolean') throw new Error('в строке нет поля valid — понять, ответ это или отказ, не по чему');
@@ -173,9 +177,10 @@ export function toRun(stub, entry) {
   const repaired = entry.repaired === true;
   const provider = entry.provider ?? null;
   const model = entry.model ?? null;
+  const promptVersion = entry.promptVersion ?? null;
   /* Нарушение контракта попадает в набор наравне с ответом: модель ответила, ответ разобран и
    * отвергнут, а доля валидных ответов — метрика §11.2, и молча выброшенный провал её подделывает. */
-  if (!entry.valid) return { valid: false, repaired, provider, model };
+  if (!entry.valid) return { valid: false, repaired, provider, model, promptVersion };
 
   const review = entry.review;
   if (!Number.isInteger(review?.overall_got)) throw new Error('строка помечена valid, но разбора с общим баллом в ней нет');
@@ -193,14 +198,15 @@ export function toRun(stub, entry) {
     repaired,
     provider,
     model,
+    promptVersion,
   };
 }
 
 /*
  * Merging the same journal twice must not double aiRuns — and must not reshuffle them either. A
- * run is identified by «provider + model», and the n-th record of that pair is replaced by the
- * n-th line of the journal in place. Runs of another provider are left exactly where they were:
- * they cannot be compared with these, and there is no reason to lose them.
+ * run is identified by «provider + model + promptVersion», and the n-th record of that origin is
+ * replaced by the n-th line of the journal in place. Runs of another origin are left exactly
+ * where they were: they cannot be compared with these, and there is no reason to lose them.
  */
 export function mergeRuns(existing, incoming) {
   const queues = new Map();
@@ -218,7 +224,7 @@ export function mergeRuns(existing, incoming) {
     if (!queue) { merged.push(run); continue; }
     const position = taken.get(key) || 0;
     taken.set(key, position + 1);
-    // Журнал — источник правды для своей пары «провайдер + модель»: запись сверх того, что в нём
+    // Журнал — источник правды для своей тройки происхождения: запись сверх того, что в нём
     // есть, не остаётся висеть прогоном, которого больше нет.
     if (position < queue.length) merged.push(queue[position]);
   }

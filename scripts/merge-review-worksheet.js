@@ -15,8 +15,8 @@
  *     behalf: an unanswered line leaves the field exactly as it was, which after the journal merge
  *     is null — «не измерено». A substituted true would turn the methodical check into
  *     self-deception, which is worse than an unmeasured metric.
- *   - a run is identified the way scripts/merge-quality-runs.js identifies it — by the pair
- *     «provider + model» and the ordinal of the record inside that pair. That is why runKey is
+ *   - a run is identified the way scripts/merge-quality-runs.js identifies it — by the triple
+ *     «provider + model + promptVersion» and the ordinal inside that origin. That is why runKey is
  *     imported from there instead of being restated: two ways of matching a journal line to an
  *     aiRuns record would eventually disagree, and the disagreement would be silent.
  */
@@ -28,6 +28,14 @@ import { runKey } from './merge-quality-runs.js';
 
 export const DEFAULT_DATASET = 'quality/writing-fipi-stubs.json';
 export const DEFAULT_WORKSHEET = 'quality/review-worksheet.md';
+
+/* Ответ владельца принадлежит не только работе и номеру повтора, но и источнику разбора. Иначе
+ * пересборка листа для новой версии промпта молча перенесёт в него суждение о старом ответе. */
+export const worksheetRunKey = ({ caseId, run, provider, model, promptVersion = null }) => JSON.stringify([
+  caseId,
+  run,
+  runKey({ provider, model, promptVersion }),
+]);
 
 /*
  * The three questions, in the order they are printed. The wording is the key: the worksheet has no
@@ -46,11 +54,11 @@ export const ANSWERS = new Map([['да', true], ['нет', false], ['не зна
 export const ANSWER_WORDS = Object.freeze(new Map([[true, 'да'], [false, 'нет'], [null, 'не знаю']]));
 
 /*
- * The marker of a block. It carries the ordinal of the run inside its «provider + model» pair,
+ * The marker of a block. It carries the ordinal of the run inside its origin triple,
  * computed by the builder from the very journal the dataset was merged from, so the merge never
  * has to guess which record of aiRuns a block belongs to.
  */
-const BLOCK = /<!--\s*review\s+(\S+)\s+run=(\d+)\s+pos=(\d+)\s+provider=(\S+)\s+model=(.*?)\s*-->\s*```text\r?\n([\s\S]*?)```/gu;
+const BLOCK = /<!--\s*review\s+(\S+)\s+run=(\d+)\s+pos=(\d+)\s+provider=(\S+)(?:\s+prompt=(\S*))?\s+model=(.*?)\s*-->\s*```text\r?\n([\s\S]*?)```/gu;
 // «<пункт> | <ответ>». Двоеточие и тире принимаются наравне с чертой: владелец пишет ответ на
 // вопрос, и знак, которым он его отделил, ничего не меняет.
 const ROW = /^(.*?)\s*[|:—–-]\s*(.*)$/u;
@@ -67,18 +75,20 @@ const normalize = (value) => squash(value).toLowerCase().replace(/[.!]+$/u, '').
 export function parseWorksheet(markdown) {
   const blocks = new Map();
   for (const match of String(markdown ?? '').matchAll(BLOCK)) {
-    const lines = match[6]
+    const lines = match[7]
       .split(/\r?\n/u)
       .map((line) => line.trim())
       .filter((line) => line && !line.startsWith('#'));
-    blocks.set(`${match[1]}#${match[2]}`, {
+    const block = {
       caseId: match[1],
       run: Number(match[2]),
       position: Number(match[3]),
       provider: match[4],
-      model: match[5],
+      promptVersion: match[5] || null,
+      model: match[6],
       lines,
-    });
+    };
+    blocks.set(worksheetRunKey(block), block);
   }
   return blocks;
 }
@@ -120,15 +130,15 @@ export function parseAnswers(lines) {
  * up stops the merge: an answer written onto the wrong run is a wrong measurement that reads as a
  * right one.
  */
-export function locateRun(stub, { provider, model, position }) {
-  const wanted = runKey({ provider, model });
+export function locateRun(stub, { provider, model, promptVersion = null, position }) {
+  const wanted = runKey({ provider, model, promptVersion });
   const matching = (Array.isArray(stub?.aiRuns) ? stub.aiRuns : []).filter((run) => runKey(run) === wanted);
   const run = matching[position];
   if (!run) {
-    throw new Error(`в наборе нет прогона № ${position + 1} провайдера ${provider}/${model} (их там ${matching.length}) — сначала влейте журнал: npm run quality:merge-runs -- <журнал>`);
+    throw new Error(`в наборе нет прогона № ${position + 1} происхождения ${provider}/${model}/${promptVersion ?? 'промпт не указан'} (их там ${matching.length}) — сначала влейте журнал: npm run quality:merge-runs -- <журнал>`);
   }
   if (run.valid !== true) {
-    throw new Error(`прогон № ${position + 1} провайдера ${provider}/${model} записан отказом — разбора в нём нет, и судить нечего; опросник собран не по тому журналу`);
+    throw new Error(`прогон № ${position + 1} происхождения ${provider}/${model}/${promptVersion ?? 'промпт не указан'} записан отказом — разбора в нём нет, и судить нечего; опросник собран не по тому журналу`);
   }
   return run;
 }

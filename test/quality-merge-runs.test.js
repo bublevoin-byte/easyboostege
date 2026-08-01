@@ -72,14 +72,14 @@ function reviewOf(operation, got) {
   };
 }
 
-function validLine(caseId, run, { operation = 'writing_37', got = [2, 1, 1], provider = 'grok', model = 'grok-4.5', repaired = false, review = null } = {}) {
+function validLine(caseId, run, { operation = 'writing_37', got = [2, 1, 1], provider = 'grok', model = 'grok-4.5', promptVersion = 'writing-v2', repaired = false, review = null } = {}) {
   return {
     caseId,
     run,
     operation,
     provider,
     model,
-    promptVersion: 'writing-v2',
+    promptVersion,
     startedAt: '2026-07-31T10:00:00.000Z',
     durationMs: 8123,
     valid: true,
@@ -89,13 +89,14 @@ function validLine(caseId, run, { operation = 'writing_37', got = [2, 1, 1], pro
   };
 }
 
-function failedLine(caseId, run, { operation = 'writing_37', provider = 'grok', model = 'grok-4.5' } = {}) {
+function failedLine(caseId, run, { operation = 'writing_37', provider = 'grok', model = 'grok-4.5', promptVersion = 'writing-v2' } = {}) {
   return {
     caseId,
     run,
     operation,
     provider,
     model,
+    promptVersion,
     startedAt: '2026-07-31T10:00:00.000Z',
     durationMs: 900,
     valid: false,
@@ -212,7 +213,7 @@ test('три поля человеческого суждения записан
   assert.equal(metrics.promptInjectionResistance, null);
 });
 
-test('запись прогона повторяет форму engineering-smoke и несёт провайдера с моделью', () => {
+test('запись прогона повторяет форму engineering-smoke и несёт полное происхождение', () => {
   const cases = fixture();
   applyRuns(cases, [validLine('w38-merge-demo-001', 1, { operation: 'writing_38', got: [3, 2, 2, 1, 1], provider: 'groq', model: 'llama-4', repaired: true })]);
   const [run] = cases[2].aiRuns;
@@ -229,8 +230,25 @@ test('запись прогона повторяет форму engineering-smok
     repaired: true,
     provider: 'groq',
     model: 'llama-4',
+    promptVersion: 'writing-v2',
   });
   assert.deepEqual(Object.keys(run).slice(0, 7), ['valid', 'total', 'criteria', 'detectedErrors', 'explanationApproved', 'britishEnglishApproved', 'injectionResisted']);
+});
+
+test('версии промпта одной модели сохраняют происхождение и не затирают друг друга', () => {
+  const cases = fixture();
+
+  applyRuns(cases, [validLine('w37-merge-demo-001', 1, { promptVersion: 'writing-v3' })]);
+  applyRuns(cases, [validLine('w37-merge-demo-001', 1, { promptVersion: 'writing-v4', got: [1, 1, 1] })]);
+
+  assert.deepEqual(
+    cases[0].aiRuns.map(({ provider, model, promptVersion, total }) => ({ provider, model, promptVersion, total })),
+    [
+      { provider: 'grok', model: 'grok-4.5', promptVersion: 'writing-v3', total: 4 },
+      { provider: 'grok', model: 'grok-4.5', promptVersion: 'writing-v4', total: 3 },
+    ],
+    'замер новой версии промпта не имеет права вытеснить прежний или потерять свою версию',
+  );
 });
 
 test('работа total-only сливается без поля criteria и не роняет скрипт', () => {
@@ -254,7 +272,7 @@ test('неудачный вызов попадает в aiRuns отказом, �
   applyRuns(cases, [validLine('w37-merge-demo-001', 1), failedLine('w37-merge-demo-001', 2)]);
 
   assert.deepEqual(cases[0].aiRuns.map((run) => run.valid), [true, false]);
-  assert.deepEqual(cases[0].aiRuns[1], { valid: false, repaired: false, provider: 'grok', model: 'grok-4.5' });
+  assert.deepEqual(cases[0].aiRuns[1], { valid: false, repaired: false, provider: 'grok', model: 'grok-4.5', promptVersion: 'writing-v2' });
   /* Доля валидных ответов — метрика §11.2: выброшенный провал показал бы 100% вместо половины. */
   assert.equal(calculateQualityMetrics(cases.slice(0, 1)).schemaPassRate, 0.5);
 });
@@ -332,7 +350,7 @@ test('прогоны другого провайдера остаются на �
   assert.deepEqual(cases[0].aiRuns.map((run) => `${run.provider}/${run.model}`), ['groq/llama-4', 'grok/grok-4.5', 'grok/grok-4.5']);
 });
 
-test('журнал — источник правды для своей пары «провайдер + модель»', () => {
+test('журнал — источник правды для своей тройки происхождения', () => {
   const older = [{ valid: true, total: 4, provider: 'grok', model: 'grok-4.5' }, { valid: true, total: 5, provider: 'grok', model: 'grok-4.5' }];
   const shorter = mergeRuns(older, [{ valid: true, total: 6, provider: 'grok', model: 'grok-4.5' }]);
   assert.deepEqual(shorter, [{ valid: true, total: 6, provider: 'grok', model: 'grok-4.5' }], 'прогона, которого в журнале больше нет, не остаётся');

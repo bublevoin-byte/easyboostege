@@ -30,6 +30,7 @@ import {
   parseAnswers,
   parseWorksheet,
   QUESTIONS,
+  worksheetRunKey,
 } from './merge-review-worksheet.js';
 
 const TASK_NAMES = Object.freeze({
@@ -72,8 +73,8 @@ export function parseArgs(argv) {
 /*
  * Journal lines → blocks, in the order and with the ordinals scripts/merge-quality-runs.js gives
  * the very same lines: per work, deduplicated by run number, sorted by it, and numbered inside each
- * «provider + model» pair. That ordinal goes into the marker of the block, so the merge lands the
- * answer on the record of aiRuns this block was printed from, and on no other.
+ * «provider + model + promptVersion» origin. That ordinal goes into the marker of the block, so
+ * the merge lands the answer on the record of aiRuns this block was printed from, and no other.
  *
  * A transport failure is dropped here for exactly that reason: the merge does not carry it into
  * `aiRuns` — there is no answer in it — so a block printed for it would shift every ordinal after
@@ -152,7 +153,7 @@ function refusalBlock(index, stub, { caseId, run, entry }) {
   return [
     `## ${index}. ${caseId} — прогон ${run}: отказ`,
     '',
-    `- **Провайдер:** ${entry.provider}, модель ${entry.model}`,
+    `- **Провайдер:** ${entry.provider}, модель ${entry.model}, промпт ${entry.promptVersion ?? 'не указан'}`,
     `- **Задание:** ${TASK_NAMES[stub?.operation] || stub?.operation || '—'}`,
     `- **Код отказа:** ${squash(entry.errorCode) || 'не указан'}`,
     '',
@@ -170,7 +171,7 @@ export function block(index, stub, planned, existing) {
   return [
     `## ${index}. ${caseId} — прогон ${run}`,
     '',
-    `- **Провайдер:** ${entry.provider}, модель ${entry.model}`,
+    `- **Провайдер:** ${entry.provider}, модель ${entry.model}, промпт ${entry.promptVersion ?? 'не указан'}`,
     `- **Задание:** ${TASK_NAMES[stub?.operation] || stub?.operation || '—'}`,
     `- **Оценка эксперта:** ${expertScore(stub)}`,
     `- **Оценка ИИ:** ${aiScore(review)}`,
@@ -198,7 +199,7 @@ export function block(index, stub, planned, existing) {
     '',
     'Ответьте на три вопроса — `да`, `нет` или `не знаю`:',
     '',
-    `<!-- review ${caseId} run=${run} pos=${position} provider=${entry.provider} model=${entry.model} -->`,
+    `<!-- review ${caseId} run=${run} pos=${position} provider=${entry.provider} prompt=${entry.promptVersion ?? ''} model=${entry.model} -->`,
     '```text',
     ...answerLines(existing),
     '```',
@@ -281,12 +282,19 @@ export function buildWorksheet({ journal, dataset, entries, cases, previous = ne
     throw new Error(`в наборе ${dataset} нет работ ${missing.join(', ')} — журнал и набор разошлись, опросник по ним не собрать`);
   }
 
+  const previousFor = (item) => previous.get(worksheetRunKey({
+    caseId: item.caseId,
+    run: item.run,
+    provider: item.entry.provider,
+    model: item.entry.model,
+    promptVersion: item.entry.promptVersion ?? null,
+  }));
   const body = planned
-    .map((item, index) => block(index + 1, byId.get(item.caseId), item, previous.get(`${item.caseId}#${item.run}`)));
+    .map((item, index) => block(index + 1, byId.get(item.caseId), item, previousFor(item)));
 
   const withReview = planned.filter((item) => item.entry.valid);
   const answered = withReview.filter((item) => {
-    const existing = previous.get(`${item.caseId}#${item.run}`);
+    const existing = previousFor(item);
     if (!existing?.lines?.length) return false;
     try { return parseAnswers(existing.lines).size > 0; }
     catch { return false; }

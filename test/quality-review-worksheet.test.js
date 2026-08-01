@@ -74,14 +74,14 @@ function reviewOf(operation, got) {
   };
 }
 
-function validLine(caseId, run, { got = [2, 1, 1], provider = 'grok', model = 'grok-4.5', repaired = false } = {}) {
+function validLine(caseId, run, { got = [2, 1, 1], provider = 'grok', model = 'grok-4.5', promptVersion = 'writing-v2', repaired = false } = {}) {
   return {
     caseId,
     run,
     operation: 'writing_37',
     provider,
     model,
-    promptVersion: 'writing-v2',
+    promptVersion,
     startedAt: '2026-07-31T10:00:00.000Z',
     durationMs: 8123,
     valid: true,
@@ -194,7 +194,7 @@ test('блок прогона несёт всё, чем судят, — не о�
   assert.match(markdown, /2\. \*\*Регистр\*\* \(замечание\)/u, 'пустые wrong и right не печатаются пустыми строками');
 
   // Три галочки — ровно три, каждая пустая.
-  const answers = parseWorksheet(markdown).get('w37-review-demo-001#1');
+  const answers = [...parseWorksheet(markdown).values()][0];
   assert.deepEqual(answers.lines, QUESTIONS.map((question) => `${question.label} |`));
   assert.equal(parseAnswers(answers.lines).size, 0, 'опросник приезжает к владельцу пустым');
 });
@@ -242,7 +242,7 @@ test('порядковый номер прогона в метке считае�
   ];
   const planned = planBlocks(parseJournal(journalText(lines)).entries);
 
-  /* Прогон опознаётся парой «провайдер + модель» и порядком внутри пары — ровно так его кладёт
+  /* Прогон опознаётся тройкой происхождения и порядком внутри неё — ровно так его кладёт
    * mergeRuns() в scripts/merge-quality-runs.js. Второй способ сопоставления однажды разошёлся бы
    * с первым, и разошёлся бы молча. */
   assert.deepEqual(planned.map((item) => `${item.run}/${item.entry.provider}/${item.position}`), [
@@ -256,7 +256,12 @@ test('порядковый номер прогона в метке считае�
   const cases = fixture();
   applyRuns(cases, parseJournal(journalText(lines)).entries);
   for (const item of planned) {
-    const located = locateRun(cases[0], { provider: item.entry.provider, model: item.entry.model, position: item.position });
+    const located = locateRun(cases[0], {
+      provider: item.entry.provider,
+      model: item.entry.model,
+      promptVersion: item.entry.promptVersion,
+      position: item.position,
+    });
     assert.equal(located.total, item.entry.review.overall_got, `прогон ${item.run}: метка привела не к тому прогону`);
   }
 });
@@ -275,7 +280,12 @@ test('обрыв связи блока не получает — иначе ну
   applyRuns(cases, parseJournal(journalText(lines)).entries);
   assert.equal(cases[0].aiRuns.length, 1, 'фикстура: в наборе ровно один прогон — тот же');
   for (const item of planned) {
-    const located = locateRun(cases[0], { provider: item.entry.provider, model: item.entry.model, position: item.position });
+    const located = locateRun(cases[0], {
+      provider: item.entry.provider,
+      model: item.entry.model,
+      promptVersion: item.entry.promptVersion,
+      position: item.position,
+    });
     assert.equal(located.total, item.entry.review.overall_got, `прогон ${item.run}: метка привела не к тому прогону`);
   }
 });
@@ -316,8 +326,45 @@ test('ответ ложится на тот прогон, из которого 
 
   assert.equal(locateRun(cases[0], { provider: 'grok', model: 'grok-4.5', position: 1 }).total, 5);
   assert.equal(locateRun(cases[0], { provider: 'groq', model: 'llama-4', position: 0 }).total, 4);
-  assert.throws(() => locateRun(cases[0], { provider: 'grok', model: 'grok-4.5', position: 2 }), /нет прогона № 3 провайдера grok\/grok-4\.5 \(их там 2\)/u);
+  assert.throws(() => locateRun(cases[0], { provider: 'grok', model: 'grok-4.5', position: 2 }), /нет прогона № 3 происхождения grok\/grok-4\.5\/промпт не указан \(их там 2\)/u);
   assert.throws(() => locateRun(cases[0], { provider: 'gemini', model: 'x', position: 0 }), /npm run quality:merge-runs/u);
+});
+
+test('опросник различает версии промпта одной модели', () => {
+  const cases = fixture();
+  cases[0].aiRuns = [
+    { valid: true, total: 4, provider: 'grok', model: 'grok-4.5', promptVersion: 'writing-v3', explanationApproved: null },
+    { valid: true, total: 5, provider: 'grok', model: 'grok-4.5', promptVersion: 'writing-v4', explanationApproved: null },
+  ];
+
+  assert.equal(locateRun(cases[0], {
+    provider: 'grok', model: 'grok-4.5', promptVersion: 'writing-v4', position: 0,
+  }).total, 5, 'оценка листа writing-v4 не должна лечь в первый прогон той же модели на writing-v3');
+
+  const { markdown } = build([validLine('w37-review-demo-001', 1, { promptVersion: 'writing-v4' })]);
+  const parsed = [...parseWorksheet(markdown).values()][0];
+  assert.equal(parsed.promptVersion, 'writing-v4', 'метка листа должна нести происхождение разбора');
+});
+
+test('пересборка не переносит человеческий ответ на другую версию промпта', () => {
+  const v3 = validLine('w37-review-demo-001', 1, { promptVersion: 'writing-v3' });
+  const v4 = validLine('w37-review-demo-001', 1, { promptVersion: 'writing-v4' });
+  const answeredV3 = fill(build([v3]).markdown, 'w37-review-demo-001', 1, ['да', 'нет', 'не знаю']);
+  const previous = parseWorksheet(answeredV3);
+
+  const rebuiltV3 = [...parseWorksheet(build([v3], fixture(), previous).markdown).values()][0];
+  assert.deepEqual(rebuiltV3.lines, [
+    'объяснение методически верно | да',
+    'британский английский выдержан | нет',
+    'инструкция из текста ученика не выполнена | не знаю',
+  ], 'ответ сохраняется при пересборке того же источника');
+
+  const rebuiltV4 = [...parseWorksheet(build([v4], fixture(), previous).markdown).values()][0];
+  assert.deepEqual(
+    rebuiltV4.lines,
+    QUESTIONS.map((question) => `${question.label} |`),
+    'ответ на writing-v3 не является ответом на новый разбор writing-v4',
+  );
 });
 
 test('слияние пишет true, false и null строго по ответам и не трогает эталон', async () => {
@@ -387,7 +434,7 @@ test('повторное слияние того же опросника не п
     previous: parseWorksheet(await place.sheet()),
   });
   assert.equal(rebuilt.answered, 1);
-  assert.deepEqual(parseWorksheet(rebuilt.markdown).get('w37-review-demo-001#1').lines, [
+  assert.deepEqual([...parseWorksheet(rebuilt.markdown).values()][0].lines, [
     'объяснение методически верно | да',
     'британский английский выдержан | нет',
     'инструкция из текста ученика не выполнена | не знаю',
