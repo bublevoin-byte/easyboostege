@@ -26,8 +26,13 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { isFormatFailure } from '../ai/format-repair.js';
 import { createProviderClient } from '../ai/provider-client.js';
 import { estimateCostMicrousd } from '../ai/provider-control.js';
+/* Признак «чем был отказ» живёт рядом со слиянием и импортируется, а не переписывается: раннер его
+ * ставит, слияние по нему решает, ехать ли строке в набор, и два определения одного и того же
+ * однажды разошлись бы молча — ровно так же, как разошлись бы два способа опознать прогон. */
+import { FAILURE_CONTRACT, FAILURE_TRANSPORT, failureKindOf } from './merge-quality-runs.js';
 import {
   buildWritingPrompt,
   parseAndValidateWritingReview,
@@ -234,17 +239,24 @@ export function planWork(cases, { only = null } = {}) {
  * What is already paid for. A line that cannot be read is not counted as done — re-asking is
  * cheaper than pretending an unusable line is an answer — but it is reported, because a damaged
  * journal is worth knowing about before the run adds to it.
+ *
+ * A transport failure is not counted as done either, and for a stronger reason than readability:
+ * nothing was measured. The model never answered, so the pair «work + run number» has not been
+ * bought — it has been attempted. Counting it as done would mean the owner never gets that answer
+ * and `schemaPassRate` reads a network hiccup as a refusal of the model. A contract violation is
+ * the opposite case and stays done: it is a paid, parsed, rejected answer.
  */
 export async function readJournal(file) {
   let text;
   try {
     text = await fs.readFile(file, 'utf8');
   } catch (error) {
-    if (error.code === 'ENOENT') return { done: new Set(), damaged: 0, models: new Set(), promptVersions: new Set(), unversioned: 0 };
+    if (error.code === 'ENOENT') return { done: new Set(), damaged: 0, models: new Set(), promptVersions: new Set(), unversioned: 0, transport: 0 };
     throw error;
   }
 
   const done = new Set();
+  const retry = new Set();
   const models = new Set();
   const promptVersions = new Set();
   let damaged = 0;
@@ -254,7 +266,8 @@ export async function readJournal(file) {
     try {
       const entry = JSON.parse(line);
       if (entry && typeof entry.caseId === 'string' && Number.isInteger(entry.run)) {
-        done.add(key(entry.caseId, entry.run));
+        if (failureKindOf(entry) === FAILURE_TRANSPORT) retry.add(key(entry.caseId, entry.run));
+        else done.add(key(entry.caseId, entry.run));
         // Which models the journal already holds: resuming counts a pair «work + run number» as
         // paid for, and it must not count an answer of another model as this model's answer.
         if (typeof entry.model === 'string' && entry.model) models.add(entry.model);
@@ -269,7 +282,10 @@ export async function readJournal(file) {
       damaged += 1;
     }
   }
-  return { done, damaged, models, promptVersions, unversioned };
+  /* Оборванный вызов, переспрошенный последующим запуском, уже не ждёт повтора: в шапке называется
+   * то, что действительно будет переспрошено, а не история журнала. */
+  for (const pair of done) retry.delete(pair);
+  return { done, damaged, models, promptVersions, unversioned, transport: retry.size };
 }
 
 /*
@@ -314,7 +330,10 @@ export function formatProgress({ position, total, caseId, run, entry, human }) {
     // A cut-off is called by its name while the run is still going: five refusals in a row mean
     // «this model does not fit the budget», and that is worth knowing before paying for the rest.
     const timedOut = entry.failure?.timedOut ? ` — таймаут${entry.failure.timeoutMs ? ` ${entry.failure.timeoutMs} мс` : ''}` : '';
-    return `${head} отказ ${entry.errorCode}${timedOut}`;
+    /* И сразу же — чем этот отказ был. Строка прогресса читается на ходу, а «модель ответила плохо»
+     * и «ответа не было» требуют от владельца разных действий. */
+    const transport = failureKindOf(entry) === FAILURE_TRANSPORT ? ' — обрыв до ответа, не измерение: будет повторён' : '';
+    return `${head} отказ ${entry.errorCode}${timedOut}${transport}`;
   }
   const expert = Number.isFinite(human?.total) ? ` (эксперт ${human.total})` : '';
   const schema = entry.repaired ? 'схема ok после починки' : 'схема ok';
@@ -402,7 +421,7 @@ export async function runQuality({
   const cases = JSON.parse(await fs.readFile(dataset, 'utf8'));
   const { work, skipped } = planWork(cases, { only });
 
-  const { done, damaged, models, promptVersions, unversioned } = await readJournal(journalFile);
+  const { done, damaged, models, promptVersions, unversioned, transport: pendingTransport } = await readJournal(journalFile);
   /*
    * A journal of another model is not this run's journal. Resuming recognises a pair «work + run
    * number» and would report those pairs as already paid for, so the run would quietly do nothing
@@ -447,6 +466,11 @@ export async function runQuality({
 
   log(`Набор: ${dataset} — работ к прогону ${work.length}, пропущено ${skipped.length}.`);
   log(`Журнал: ${journalFile} — уже записано ${done.size} пар «работа + прогон»${damaged ? `, нечитаемых строк ${damaged}` : ''}.`);
+  if (pendingTransport) {
+    /* Сделанными парами они не считаются и уже вошли в `pending` — сказано вслух, чтобы число
+     * оставшихся вызовов не выглядело расхождением с числом строк в журнале. */
+    log(`  Обрывов связи в журнале: ${pendingTransport} — ответа модели в них нет, сделанными парами они не считаются и будут переспрошены.`);
+  }
   if (unversioned) {
     /* Said out loud, not folded into the current version: these lines were written before the
      * runner stamped the prompt, and which prompt produced them is unknown. They are paid answers
@@ -467,7 +491,7 @@ export async function runQuality({
     for (const line of formatTimeoutNotice(timeoutMs, budgets)) log(line);
   }
 
-  const totals = { calls: 0, valid: 0, invalid: 0, promptTokens: 0, completionTokens: 0, estimatedCostMicrousd: 0 };
+  const totals = { calls: 0, valid: 0, invalid: 0, transport: 0, promptTokens: 0, completionTokens: 0, estimatedCostMicrousd: 0 };
   let interrupted = false;
   let position = 0;
 
@@ -527,6 +551,8 @@ export async function runQuality({
       }
     } catch (error) {
       const errorCode = String(error?.message || 'AI_UNAVAILABLE');
+      /* `AI_NOT_CONFIGURED` — тоже отсутствие данных, и обрабатывается сильнее прочих: прогон
+       * падает целиком, ни одной строки не записав. Записывать нечего — вызова не было. */
       if (errorCode === 'AI_NOT_CONFIGURED') throw error;
       entry = {
         ...head,
@@ -536,6 +562,18 @@ export async function runQuality({
         valid: false,
         repaired: false,
         errorCode,
+        /*
+         * Чем был отказ: нарушением контракта или обрывом до ответа. Выводится из природы ошибки
+         * — `isFormatFailure` тот же, по которому цепочка вызова решает, давать ли попытку починки
+         * формата, — а не из подстроки в сообщении.
+         *
+         * Первое означает «модель ответила, и ответ отвергнут»: это данные, доля валидных ответов
+         * §11.2 измеряет именно их. Второе означает «ответа не было»: 1 августа 2026 года первый
+         * вызов прогона отказал с `TypeError: fetch failed` за 10,7 с при бюджете 300 с, а связь
+         * через минуту отвечала за 250 мс. Записать такое провалом модели значит выдать «не
+         * измерено» за «не пройдено» и подвинуть `schemaPassRate` на 2,4 % при пороге §11.3 в 95 %.
+         */
+        failureKind: isFormatFailure(error) ? FAILURE_CONTRACT : FAILURE_TRANSPORT,
         /* `AI_UNAVAILABLE` names the wrapper, not the failure. What actually happened, and under
          * which budget, goes here — a run that refuses everything must be diagnosable from its
          * journal alone. */
@@ -552,6 +590,8 @@ export async function runQuality({
 
     totals.calls += 1;
     totals[entry.valid ? 'valid' : 'invalid'] += 1;
+    // Подмножество отказов, а не третья корзина: `invalid` остаётся числом вызовов без разбора.
+    if (entry.failureKind === FAILURE_TRANSPORT) totals.transport += 1;
     for (const usage of [entry.usage, entry.repair?.usage]) {
       if (!usage) continue;
       totals.promptTokens += usage.promptTokens || 0;
@@ -575,6 +615,8 @@ export async function runQuality({
     calls: totals.calls,
     valid: totals.valid,
     invalid: totals.invalid,
+    // Сколько из отказов были обрывом до ответа: измерением они не являются и будут переспрошены.
+    transport: totals.transport,
     remaining: pending.length - totals.calls,
     interrupted,
     resumedFrom: done.size,
@@ -588,6 +630,11 @@ export async function runQuality({
   // The model stands next to the figures it produced: a number of calls and a cost belong to the
   // model that was asked, and §11.2 compares models by exactly these numbers.
   log(`Вызовов сделано: ${summary.calls} — валидных ${summary.valid}, отказов ${summary.invalid}. Провайдер: ${summary.provider}, модель ${summary.model}.`);
+  if (summary.transport) {
+    /* Отдельной строкой, потому что это не результат модели: ответа не было, в набор эти вызовы не
+     * попадут ни как валидные, ни как отказ схемы, и следующий запуск той же команды их переспросит. */
+    log(`Из них обрывов связи: ${summary.transport} — ответа модели не было. Измерением они не считаются, в набор не попадут и будут повторены при следующем запуске той же команды.`);
+  }
   log(`Токены: ${summary.promptTokens} на вход, ${summary.completionTokens} на выход. Оценка стоимости: ${summary.estimatedCostMicrousd} микро-USD по тарифу провайдера ${summary.provider}.`);
   if (summary.timeoutMs) {
     // Итог читают отдельно от шапки, и цифры не должны уехать из-под условия, при котором получены.

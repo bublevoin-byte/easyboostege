@@ -22,7 +22,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { parseJournal, runKey } from './merge-quality-runs.js';
+import { FAILURE_TRANSPORT, failureKindOf, parseJournal, runKey } from './merge-quality-runs.js';
 import {
   ANSWER_WORDS,
   DEFAULT_DATASET,
@@ -74,10 +74,15 @@ export function parseArgs(argv) {
  * the very same lines: per work, deduplicated by run number, sorted by it, and numbered inside each
  * «provider + model» pair. That ordinal goes into the marker of the block, so the merge lands the
  * answer on the record of aiRuns this block was printed from, and on no other.
+ *
+ * A transport failure is dropped here for exactly that reason: the merge does not carry it into
+ * `aiRuns` — there is no answer in it — so a block printed for it would shift every ordinal after
+ * it, and the owner's judgement would land on somebody else's run.
  */
 export function planBlocks(entries) {
   const byCase = new Map();
   for (const entry of Array.isArray(entries) ? entries : []) {
+    if (failureKindOf(entry) === FAILURE_TRANSPORT) continue;
     if (!byCase.has(entry.caseId)) byCase.set(entry.caseId, new Map());
     // Позже записанная строка вытесняет раннюю — как и при слиянии журнала.
     byCase.get(entry.caseId).set(entry.run, entry);

@@ -261,6 +261,25 @@ test('порядковый номер прогона в метке считае�
   }
 });
 
+test('обрыв связи блока не получает — иначе нумерация уехала бы от набора', () => {
+  /* Слияние не переносит обрыв до ответа в aiRuns: разбора в нём нет. Блок, напечатанный для него,
+   * сдвинул бы порядковый номер каждого следующего прогона, и суждение владельца легло бы на чужую
+   * запись — тихо и необратимо. */
+  const broken = { ...failedLine('w37-review-demo-001', 1), errorCode: 'AI_UNAVAILABLE', failureKind: 'transport' };
+  const lines = [broken, validLine('w37-review-demo-001', 2, { got: [2, 2, 1] })];
+  const planned = planBlocks(parseJournal(journalText(lines)).entries);
+
+  assert.deepEqual(planned.map((item) => `${item.run}/${item.position}`), ['2/0'], 'обрыва в опроснике нет вовсе');
+
+  const cases = fixture();
+  applyRuns(cases, parseJournal(journalText(lines)).entries);
+  assert.equal(cases[0].aiRuns.length, 1, 'фикстура: в наборе ровно один прогон — тот же');
+  for (const item of planned) {
+    const located = locateRun(cases[0], { provider: item.entry.provider, model: item.entry.model, position: item.position });
+    assert.equal(located.total, item.entry.review.overall_got, `прогон ${item.run}: метка привела не к тому прогону`);
+  }
+});
+
 test('«да», «нет» и «не знаю» разбираются в true, false и null', () => {
   const answers = parseAnswers([
     'объяснение методически верно | да',

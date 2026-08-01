@@ -285,6 +285,82 @@ test('отказ несёт причину и применённый бюдже�
   assert.ok(!/authorization/iu.test(written), 'заголовки запроса в журнал не попадают');
 });
 
+test('обрыв до ответа не считается сделанной парой, а нарушение контракта считается', async () => {
+  /* Делится по природе ошибки, а не по тексту сообщения. «Модель ответила, и ответ отвергнут» —
+   * это данные §11.2: оплачено, измерено, переспрашивать нечего. «Ответа не было» — их отсутствие:
+   * посчитанное провалом модели, оно двигает schemaPassRate при пороге §11.3 в 95 %. */
+  const { dataset, out } = await workspace();
+
+  // Ровно так отказал первый вызов прогона 1 августа 2026 года: сетевая икота до модели.
+  let attempts = 0;
+  globalThis.fetch = async () => { attempts += 1; throw new TypeError('fetch failed'); };
+  const broken = await runner.runQuality({ provider: 'grok', runs: 1, delayMs: 0, dataset, out, log: () => {} });
+
+  assert.equal(attempts, 1);
+  assert.equal(broken.transport, 1, 'обрыв назван в итоге прогона отдельным числом');
+  assert.equal(broken.valid, 0);
+  const [failed] = await journalLines(out);
+  assert.equal(failed.valid, false);
+  assert.equal(failed.errorCode, 'AI_UNAVAILABLE', 'обёртка остаётся кодом отказа');
+  assert.equal(failed.failureKind, 'transport', 'а природа отказа читается из записи, а не угадывается');
+  assert.match(
+    runner.formatProgress({ position: 1, total: 1, caseId: 'w37-stub-ready', run: 1, entry: failed, human: null }),
+    /обрыв до ответа/u,
+  );
+
+  const answered = stubFetch((call) => validReview(call.user));
+  const resumed = await runner.runQuality({ provider: 'grok', runs: 1, delayMs: 0, dataset, out, log: () => {} });
+
+  assert.equal(answered.length, 1, 'оборванный вызов переспрошен, а не засчитан провалом модели');
+  assert.equal(resumed.resumedFrom, 0, 'сделанных пар в журнале не было: измерения не произошло');
+  const lines = await journalLines(out);
+  assert.equal(lines.length, 2, 'записанная строка обрыва не тронута — журнал только дописывается');
+  assert.equal(lines[1].valid, true);
+
+  // А отвергнутый ответ второй раз не оплачивается: он и есть то, что метрика §11.2 измеряет.
+  const rejected = await workspace();
+  stubFetch(() => 'не JSON и после починки тоже');
+  const contract = await runner.runQuality({ provider: 'grok', runs: 1, delayMs: 0, dataset: rejected.dataset, out: rejected.out, log: () => {} });
+  assert.equal(contract.invalid, 1);
+  assert.equal(contract.transport, 0);
+  assert.equal((await journalLines(rejected.out))[0].failureKind, 'contract');
+
+  const again = stubFetch(() => 'не JSON и после починки тоже');
+  const second = await runner.runQuality({ provider: 'grok', runs: 1, delayMs: 0, dataset: rejected.dataset, out: rejected.out, log: () => {} });
+  assert.equal(again.length, 0, 'нарушение контракта оплачено и измерено — переспрашивать его нельзя');
+  assert.equal(second.resumedFrom, 1);
+});
+
+test('журнал, записанный до появления признака, переспрашивает обрыв сам', async () => {
+  /* Записанное задним числом не переписывается: признак выводится из кода ошибки — того самого
+   * error.message, который раннер в errorCode и положил, — поэтому журнал прогона, идущего прямо
+   * сейчас, дочитается по новым правилам без единой правки руками. */
+  const cases = threeReadyCases();
+  const ids = runner.planWork(cases).work.map((item) => item.id);
+  const { dataset, out } = await workspace(cases);
+  await fs.mkdir(path.dirname(out), { recursive: true });
+
+  const head = { provider: 'grok', model: 'stub-grok', promptVersion: WRITING_PROMPT_VERSION, valid: false, repaired: false };
+  await fs.writeFile(out, [
+    JSON.stringify({ ...head, caseId: ids[0], run: 1, errorCode: 'AI_UNAVAILABLE', failure: { cause: 'TypeError: fetch failed', status: 502, timedOut: false } }),
+    JSON.stringify({ ...head, caseId: ids[1], run: 1, errorCode: 'AI_RESPONSE_INVALID_SCHEMA', raw: 'не тот JSON' }),
+    '',
+  ].join('\n'), 'utf8');
+
+  const calls = stubFetch((call) => validReview(call.user));
+  const printed = [];
+  const summary = await runner.runQuality({ provider: 'grok', runs: 1, delayMs: 0, dataset, out, log: (line) => printed.push(line) });
+
+  assert.equal(calls.length, 2, 'переспрошены обрыв и нетронутая работа — отвергнутый ответ не переспрошен');
+  assert.equal(summary.resumedFrom, 1, 'сделанной парой считается только нарушение контракта');
+  assert.match(printed.join('\n'), /Обрывов связи в журнале: 1/u);
+
+  const lines = await journalLines(out);
+  assert.equal(lines.length, 4, 'старые строки на месте, дописаны две новые');
+  assert.deepEqual(lines.slice(2).map((line) => line.caseId), [ids[0], ids[2]]);
+  assert.deepEqual(lines.slice(2).map((line) => line.valid), [true, true]);
+});
+
 test('ответ нормализуется ровно так же, как в приложении', () => {
   const stub = sampleCases()[0];
   const normalized = runner.normalizeAnswer(stub);

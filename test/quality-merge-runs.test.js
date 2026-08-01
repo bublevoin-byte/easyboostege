@@ -106,6 +106,27 @@ function failedLine(caseId, run, { operation = 'writing_37', provider = 'grok', 
   };
 }
 
+/* Обрыв до ответа: так выглядела строка первого вызова прогона 1 августа 2026 года — сетевая икота,
+ * ответ до модели не дошёл. Разбора в ней нет и быть не может, поэтому и записи прогона тоже. */
+function transportLine(caseId, run, { operation = 'writing_37', provider = 'grok', model = 'grok-4.5' } = {}) {
+  return {
+    caseId,
+    run,
+    operation,
+    provider,
+    model,
+    startedAt: '2026-08-01T09:31:54.673Z',
+    durationMs: 10703,
+    valid: false,
+    repaired: false,
+    errorCode: 'AI_UNAVAILABLE',
+    failureKind: 'transport',
+    failure: { cause: 'TypeError: fetch failed', causeCode: null, status: 502, timedOut: false, timeoutMs: 300_000 },
+    raw: '',
+    usage: { promptTokens: null, completionTokens: null, estimatedCostMicrousd: null },
+  };
+}
+
 const journalText = (lines) => lines.map((line) => JSON.stringify(line)).join('\n') + '\n';
 
 async function workspace(cases = fixture(), lines = []) {
@@ -236,6 +257,59 @@ test('неудачный вызов попадает в aiRuns отказом, �
   assert.deepEqual(cases[0].aiRuns[1], { valid: false, repaired: false, provider: 'grok', model: 'grok-4.5' });
   /* Доля валидных ответов — метрика §11.2: выброшенный провал показал бы 100% вместо половины. */
   assert.equal(calculateQualityMetrics(cases.slice(0, 1)).schemaPassRate, 0.5);
+});
+
+test('обрыв связи в набор не едет вовсе, а нарушение контракта едет', () => {
+  const cases = fixture();
+  const { problems, transport, runs } = applyRuns(cases, [
+    validLine('w37-merge-demo-001', 1),
+    transportLine('w37-merge-demo-001', 2),
+    failedLine('w37-merge-demo-001', 3),
+  ]);
+
+  assert.deepEqual(problems, []);
+  assert.equal(transport, 1, 'число обрывов называется, а не прячется');
+  assert.equal(runs, 2, 'в набор перенесены ответ и отвергнутый ответ — и ничего больше');
+  assert.deepEqual(cases[0].aiRuns.map((run) => run.valid), [true, false]);
+
+  /* Главное: 1 из 2, а не 1 из 3. Модель ответила дважды, и провал схемы у неё один; обрыв связи
+   * измерением не является, а посчитанный провалом двигал бы долю валидных ответов вниз при пороге
+   * §11.3 в 95 % — «не измерено» выдавалось бы за «не пройдено». */
+  assert.equal(calculateQualityMetrics(cases.slice(0, 1)).schemaPassRate, 0.5);
+});
+
+test('обрыв опознаётся и в журнале, записанном до появления признака', () => {
+  /* Записанные журналы задним числом не правятся. Признак выводится из кода ошибки — того самого
+   * error.message, который раннер положил в errorCode, — поэтому строка без поля failureKind
+   * читается тем же правилом, что и новая. */
+  const legacy = transportLine('w37-merge-demo-001', 1);
+  delete legacy.failureKind;
+
+  const cases = fixture();
+  const { transport, runs } = applyRuns(cases, [legacy, validLine('w37-merge-demo-001', 2)]);
+  assert.equal(transport, 1);
+  assert.equal(runs, 1);
+  assert.deepEqual(cases[0].aiRuns.map((run) => run.valid), [true]);
+
+  // И тот же запрет держится на уровне записи: обрыв не превращается в отказ ни у какого вызывающего.
+  assert.throws(() => toRun(cases[0], legacy), /обрыв до ответа/u);
+  assert.throws(() => toRun(cases[0], transportLine('w37-merge-demo-001', 1)), /обрыв до ответа/u);
+});
+
+test('слияние называет число обрывов и не переносит их в набор', async () => {
+  const { dataset, journal, read } = await workspace(fixture(), [
+    validLine('w37-merge-demo-001', 1),
+    transportLine('w37-merge-demo-001', 2),
+  ]);
+  const printed = [];
+
+  const summary = await mergeJournal({ journal, dataset, log: (line) => printed.push(line) });
+
+  assert.equal(summary.transport, 1);
+  assert.equal(summary.runs, 1);
+  assert.match(printed.join('\n'), /Обрывов связи: 1/u);
+  assert.match(printed.join('\n'), /quality:run/u, 'сказано, что их переспросит повторный запуск');
+  assert.deepEqual((await read())[0].aiRuns.map((run) => run.valid), [true]);
 });
 
 test('повторное слияние того же журнала не удваивает aiRuns и не переставляет их', () => {

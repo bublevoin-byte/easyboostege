@@ -19,6 +19,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { isFormatFailure } from '../ai/format-repair.js';
+
 export const DEFAULT_DATASET = 'quality/writing-fipi-stubs.json';
 
 /*
@@ -41,6 +43,38 @@ const labelKey = (value) => squash(value).toLowerCase();
  * запись aiRuns тем же способом, что и это слияние: два способа однажды разошлись бы, и разошлись
  * бы молча. */
 export const runKey = (run) => `${run?.provider ?? ''}|${run?.model ?? ''}`;
+
+/*
+ * Чем был отказ: нарушением контракта или обрывом до ответа. Разница не косметическая, и делится
+ * она по природе ошибки, а не по тексту сообщения.
+ *
+ * `AI_RESPONSE_INVALID_*` — это **данные**. Модель ответила, ответ разобран и отвергнут; доля
+ * валидных ответов §11.2 измеряет ровно это, и молча выброшенная такая строка подделала бы метрику
+ * вверх. Она попадает в набор как `valid: false` и повторному прогону не подлежит: она оплачена и
+ * измерена.
+ *
+ * `AI_UNAVAILABLE` — обёртка `runProviderFallback` над ошибкой, из-за которой ответа не было
+ * вовсе: оборванное соединение, отсечка по таймауту, отказ провайдера ещё до модели. Это
+ * **отсутствие данных**. Записать его провалом схемы значит выдать «не измерено» за «не пройдено»
+ * — та же подмена, которую тикет 04 убрал из метрик человеческого суждения. Тиха она тем, что
+ * выглядит измерением: одна сетевая икота на 42 вызова сдвигает `schemaPassRate` на 2,4 % при
+ * пороге §11.3 в 95 %.
+ *
+ * Признак берётся из `isFormatFailure` — того самого предиката, по которому `ai/provider-client.js`
+ * решает, давать ли попытку починки формата. Второе определение «что такое нарушение контракта»
+ * однажды разошлось бы с первым, и разошлось бы молча. Раннер пишет в `errorCode` ровно
+ * `error.message`, который этот предикат и читает, поэтому строки журналов, записанных **до**
+ * появления поля `failureKind`, распознаются тем же правилом и переспрашиваются сами — задним
+ * числом переписывать журнал не нужно и нельзя.
+ */
+export const FAILURE_CONTRACT = 'contract';
+export const FAILURE_TRANSPORT = 'transport';
+
+export function failureKindOf(entry) {
+  if (entry?.valid !== false) return null;
+  if (entry.failureKind === FAILURE_CONTRACT || entry.failureKind === FAILURE_TRANSPORT) return entry.failureKind;
+  return isFormatFailure({ message: entry.errorCode }) ? FAILURE_CONTRACT : FAILURE_TRANSPORT;
+}
 
 export function parseArgs(argv) {
   const values = new Map();
@@ -130,11 +164,17 @@ export function mapCriteria(stub, criteria) {
  */
 export function toRun(stub, entry) {
   if (typeof entry?.valid !== 'boolean') throw new Error('в строке нет поля valid — понять, ответ это или отказ, не по чему');
+  /* Обрыву до ответа записи прогона не соответствует вовсе — ни `valid`, ни `valid: false`.
+   * applyRuns отсеивает такие строки раньше, а этот отказ держит инвариант на случай другого
+   * вызывающего: молча превращённый в отказ обрыв — ровно тот подлог, ради которого всё это. */
+  if (failureKindOf(entry) === FAILURE_TRANSPORT) {
+    throw new Error('обрыв до ответа: ответа модели в строке нет, и записью прогона она не является');
+  }
   const repaired = entry.repaired === true;
   const provider = entry.provider ?? null;
   const model = entry.model ?? null;
-  /* Отказ провайдера попадает в набор наравне с ответом: доля валидных ответов — метрика §11.2,
-   * и молча выброшенный провал её подделывает. */
+  /* Нарушение контракта попадает в набор наравне с ответом: модель ответила, ответ разобран и
+   * отвергнут, а доля валидных ответов — метрика §11.2, и молча выброшенный провал её подделывает. */
   if (!entry.valid) return { valid: false, repaired, provider, model };
 
   const review = entry.review;
@@ -196,8 +236,13 @@ export function applyRuns(cases, entries) {
   const converted = new Map();
   const problems = [];
   let repeated = 0;
+  let transport = 0;
 
   for (const entry of entries) {
+    /* Обрыв до ответа в набор не едет вовсе: ответа модели в нём нет, и любая запись — хоть
+     * `valid: false`, хоть пропуск с молчанием — соврала бы. Его число называется в сводке, а
+     * переспросит его следующий запуск прогона: в журнале такая строка сделанной парой не считается. */
+    if (failureKindOf(entry) === FAILURE_TRANSPORT) { transport += 1; continue; }
     const stub = byId.get(entry.caseId);
     if (!stub) { problems.push(`${entry.caseId}: такой работы нет в наборе — журнал и набор разошлись`); continue; }
     try {
@@ -211,7 +256,7 @@ export function applyRuns(cases, entries) {
       problems.push(`${entry.caseId}, прогон ${entry.run}: ${error.message}`);
     }
   }
-  if (problems.length) return { applied: [], problems, repeated, runs: 0, valid: 0 };
+  if (problems.length) return { applied: [], problems, repeated, transport, runs: 0, valid: 0 };
 
   const applied = [];
   let runs = 0;
@@ -224,7 +269,7 @@ export function applyRuns(cases, entries) {
     runs += incoming.length;
     valid += incoming.filter((run) => run.valid).length;
   }
-  return { applied, problems, repeated, runs, valid };
+  return { applied, problems, repeated, transport, runs, valid };
 }
 
 export async function mergeJournal({ journal, dataset = DEFAULT_DATASET, log = console.log } = {}) {
@@ -239,7 +284,7 @@ export async function mergeJournal({ journal, dataset = DEFAULT_DATASET, log = c
   }
   if (!entries.length) throw new Error(`в ${journal} нет ни одной строки прогона`);
 
-  const { applied, problems, repeated, runs, valid } = applyRuns(cases, entries);
+  const { applied, problems, repeated, transport, runs, valid } = applyRuns(cases, entries);
   if (problems.length) {
     // Набор не переписывается вовсе — ни одной работой.
     console.error('Прогоны не перенесены, набор не изменён:');
@@ -251,6 +296,10 @@ export async function mergeJournal({ journal, dataset = DEFAULT_DATASET, log = c
 
   log(`Журнал: ${journal} — строк ${entries.length}${repeated ? `, повторных пар «работа + прогон» ${repeated}` : ''}.`);
   log(`Перенесено работ: ${applied.length}, прогонов ${runs} — валидных ${valid}, отказов ${runs - valid}.`);
+  if (transport) {
+    log(`Обрывов связи: ${transport} — в набор не перенесены. Ответа модели в них нет, и провалом схемы`);
+    log('  они не являются; повторный запуск npm run quality:run переспросит эти вызовы.');
+  }
   for (const caseId of applied) {
     const stub = cases.find((item) => item.id === caseId);
     const scores = stub.aiRuns.map((run) => (run.valid ? run.total : 'отказ')).join(', ');
@@ -264,7 +313,7 @@ export async function mergeJournal({ journal, dataset = DEFAULT_DATASET, log = c
   log('Их ставит владелец по опроснику; подставленное true превратило бы проверку в самообман.');
   log(`Набор: ${dataset}. Метрики: npm run quality:check ${dataset}`);
 
-  return { journal, dataset, applied, runs, valid, repeated, empty };
+  return { journal, dataset, applied, runs, valid, repeated, transport, empty };
 }
 
 async function main() {
