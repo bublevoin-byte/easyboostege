@@ -6,6 +6,7 @@
  *
  *   npm run tz:readiness -- "../../ТЗ_подготовка_Easy_Boost_к_продакшену.md"
  *   npm run tz:readiness -- "<путь>" --open     # ещё и перечислить открытые пункты
+ *   npm run tz:readiness -- "<путь>" --profile experimental
  *
  * Правило взято из самого документа, раздел «Статус выполнения»:
  *
@@ -32,12 +33,18 @@ const COUNTED_SECTIONS = ['4', '5', '6', '7', '8', '9', '10', '11', '12', '13',
 const DONE_MARK = '✅';
 const TOP_LEVEL_HEADING = /^##\s+(\d+)\.\s/;
 const LIST_ITEM = /^\s*(?:[-*+]|\d+\.)\s+\S/;
+const PROFILES = new Set(['strict', 'experimental']);
 
-function parse(text) {
+function profileMark(profile, state) {
+  return `<!-- release-profile:${profile}=${state} -->`;
+}
+
+function parse(text, profile) {
   const lines = text.split(/\r?\n/);
   const counted = new Set(COUNTED_SECTIONS);
   const sections = new Map();
   let section = null;
+  let sectionExcluded = false;
   let paragraphRequirements = 0;
 
   for (let index = 0; index < lines.length; index += 1) {
@@ -46,8 +53,9 @@ function parse(text) {
     const heading = TOP_LEVEL_HEADING.exec(line);
     if (heading) {
       section = counted.has(heading[1]) ? heading[1] : null;
+      sectionExcluded = profile !== 'strict' && line.includes(profileMark(profile, 'exclude'));
       if (section && !sections.has(section)) {
-        sections.set(section, { done: 0, open: 0, openItems: [] });
+        sections.set(section, { done: 0, open: 0, excluded: 0, openItems: [] });
       }
       continue;
     }
@@ -63,7 +71,12 @@ function parse(text) {
       continue;
     }
 
-    if (marked) {
+    if (sectionExcluded || (profile !== 'strict' && line.includes(profileMark(profile, 'exclude')))) {
+      stats.excluded += 1;
+      continue;
+    }
+
+    if (marked || (profile !== 'strict' && line.includes(profileMark(profile, 'done')))) {
       stats.done += 1;
     } else {
       stats.open += 1;
@@ -74,12 +87,44 @@ function parse(text) {
   return { sections, paragraphRequirements };
 }
 
-function main() {
-  const target = argv[2];
-  if (!target || target.startsWith('--')) {
-    stdout.write('Использование: node scripts/tz-readiness.js <путь к ТЗ.md> [--open]\n');
-    exit(2);
+function usage(message) {
+  if (message) stdout.write(`${message}\n`);
+  stdout.write('Использование: node scripts/tz-readiness.js <путь к ТЗ.md> [--open] [--profile strict|experimental]\n');
+  exit(2);
+}
+
+function argumentsFrom(commandLine) {
+  let target = null;
+  let profile = 'strict';
+  let showOpen = false;
+
+  for (let index = 0; index < commandLine.length; index += 1) {
+    const argument = commandLine[index];
+    if (argument === '--open') {
+      showOpen = true;
+    } else if (argument === '--profile') {
+      const value = commandLine[index + 1];
+      if (!value || value.startsWith('--')) usage('Для --profile нужно указать strict или experimental.');
+      profile = value;
+      index += 1;
+    } else if (argument.startsWith('--profile=')) {
+      profile = argument.slice('--profile='.length);
+    } else if (argument.startsWith('--')) {
+      usage(`Неизвестный аргумент: ${argument}`);
+    } else if (target) {
+      usage(`Лишний аргумент: ${argument}`);
+    } else {
+      target = argument;
+    }
   }
+
+  if (!target) usage();
+  if (!PROFILES.has(profile)) usage(`Неизвестный профиль: ${profile}`);
+  return { target, profile, showOpen };
+}
+
+function main() {
+  const { target, profile, showOpen } = argumentsFrom(argv.slice(2));
 
   let text;
   try {
@@ -89,7 +134,7 @@ function main() {
     exit(2);
   }
 
-  const { sections, paragraphRequirements } = parse(text);
+  const { sections, paragraphRequirements } = parse(text, profile);
   const missing = COUNTED_SECTIONS.filter((section) => !sections.has(section));
   if (missing.length) {
     stdout.write(`В документе не найдены разделы: ${missing.join(', ')}. Это другой документ или изменилась разметка заголовков.\n`);
@@ -98,15 +143,18 @@ function main() {
 
   let done = 0;
   let open = 0;
+  let excluded = 0;
 
-  stdout.write('Раздел  Выполнено  Открыто  Готовность\n');
+  stdout.write(`Профиль: ${profile}\n`);
+  stdout.write('Раздел  Выполнено  Открыто  Исключено  Готовность\n');
   for (const section of COUNTED_SECTIONS) {
     const stats = sections.get(section);
     done += stats.done;
     open += stats.open;
+    excluded += stats.excluded;
     const sectionTotal = stats.done + stats.open;
     const sectionPercent = sectionTotal === 0 ? 0 : (stats.done / sectionTotal) * 100;
-    stdout.write(`${section.padStart(6)}  ${String(stats.done).padStart(9)}  ${String(stats.open).padStart(7)}  ${`${sectionPercent.toFixed(0)}%`.padStart(10)}\n`);
+    stdout.write(`${section.padStart(6)}  ${String(stats.done).padStart(9)}  ${String(stats.open).padStart(7)}  ${String(stats.excluded).padStart(9)}  ${`${sectionPercent.toFixed(0)}%`.padStart(10)}\n`);
   }
 
   const total = done + open;
@@ -116,10 +164,11 @@ function main() {
   stdout.write(`Выполнено:  ${done}\n`);
   stdout.write(`Открыто:    ${open}\n`);
   stdout.write(`Всего:      ${total}\n`);
+  stdout.write(`Исключено:  ${excluded}\n`);
   stdout.write(`Готовность: ${percent.toFixed(1)}% (${done} из ${total})\n`);
   stdout.write(`Вне подсчёта: ${paragraphRequirements} требований-абзацев, все отмечены выполненными — счёт скорее занижает готовность, чем завышает.\n`);
 
-  if (argv.includes('--open')) {
+  if (showOpen) {
     stdout.write('\nОткрытые пункты:\n');
     for (const section of COUNTED_SECTIONS) {
       for (const item of sections.get(section).openItems) {
