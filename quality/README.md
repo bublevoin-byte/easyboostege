@@ -220,8 +220,8 @@ npm run quality:run -- --provider=grok --runs=2
 | `--timeout=` | бюджет операции из `ai/operations.js` | дать вызовам прогона другое время в миллисекундах. **Разведочный ключ**: см. «Если модель не укладывается в бюджет» ниже |
 
 Где оседает результат: журнал `quality/runs/<набор>-<провайдер>[-<модель>]-<версия промпта>.jsonl` —
-по строке на вызов. Без `--model` это `quality/runs/writing-fipi-stubs-grok-writing-v4.jsonl`, с
-`--model=grok-4.3` — `quality/runs/writing-fipi-stubs-grok-grok-4.3-writing-v4.jsonl`. Точное имя
+по строке на вызов. Без `--model` это `quality/runs/writing-fipi-stubs-grok-writing-v5.jsonl`, с
+`--model=grok-4.3` — `quality/runs/writing-fipi-stubs-grok-grok-4.3-writing-v5.jsonl`. Точное имя
 команда печатает в первых строках и в конце — берите его оттуда, а не отсюда: версия промпта
 меняется вместе с промптом.
 В строке лежит **полный разбор ИИ целиком**, а не выжимка: прогон платный, и всё, что понадобится
@@ -251,23 +251,23 @@ npm run quality:run -- --provider=grok --model=grok-4.20-non-reasoning --runs=2
 «провайдер + модель + версия промпта», и записи одного происхождения не вытесняют записи другого:
 
 ```
-npm run quality:merge-runs -- quality/runs/writing-fipi-stubs-grok-grok-4.3-writing-v4.jsonl
-npm run quality:merge-runs -- quality/runs/writing-fipi-stubs-grok-grok-4.20-non-reasoning-writing-v4.jsonl
+npm run quality:merge-runs -- quality/runs/writing-fipi-stubs-grok-grok-4.3-writing-v5.jsonl
+npm run quality:merge-runs -- quality/runs/writing-fipi-stubs-grok-grok-4.20-non-reasoning-writing-v5.jsonl
 ```
 
 После этого у каждой работы лежат четыре прогона — два от одной модели, два от другой. **Метрики
 по ним всем сразу измерением не являются**, поэтому отчёт считается по каждому происхождению отдельно:
 
 ```
-npm run quality:check -- quality/writing-fipi-stubs.json --model=grok-4.3 --prompt-version=writing-v4
-npm run quality:check -- quality/writing-fipi-stubs.json --model=grok-4.20-non-reasoning --prompt-version=writing-v4
+npm run quality:check -- quality/writing-fipi-stubs.json --model=grok-4.3 --prompt-version=writing-v5
+npm run quality:check -- quality/writing-fipi-stubs.json --model=grok-4.20-non-reasoning --prompt-version=writing-v5
 ```
 
 Полученные два отчёта и сравниваются. Что смотреть в каждом — таблица полей в шаге 7.
 
 ### Если промпт правили
 
-Версия промпта (`WRITING_PROMPT_VERSION` в `ai/writing.js`, сейчас `writing-v4`) входит в имя
+Версия промпта (`WRITING_PROMPT_VERSION` в `ai/writing.js`, сейчас `writing-v5`) входит в имя
 журнала по той же причине, что и модель: возобновление опознаёт пару «работа + номер прогона», и
 версия промпта в неё не входит. Журнал прогона на прежнем промпте выглядел бы для новой правки
 полностью сделанным — команда не сделала бы **ни одного вызова**, отчиталась бы «всё сделано», а
@@ -399,7 +399,7 @@ npm run quality:run -- --provider=grok --model=grok-4.5 --runs=2 --timeout=18000
 ### Шаг 5 — влить журнал в набор
 
 ```
-npm run quality:merge-runs -- quality/runs/writing-fipi-stubs-grok-writing-v4.jsonl
+npm run quality:merge-runs -- quality/runs/writing-fipi-stubs-grok-writing-v5.jsonl
 ```
 
 Путь журнала здесь и на шаге 6 — тот, который напечатал шаг 4: с ключом `--model` в имени файла

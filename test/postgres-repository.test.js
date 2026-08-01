@@ -30,6 +30,7 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
       '017_ai_fallback_reason.sql',
       '018_task_bank.sql',
       '019_attempt_models.sql',
+      '020_writing_evaluated_answer.sql',
     ]);
 
     const username = await repository.createTelegramUser(telegramId, `Integration ${suffix}`);
@@ -65,7 +66,8 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     assert.equal(await repository.consumeTelegramAuthCode(code), null);
 
     const attemptId = await repository.createWritingAttempt(username, {
-      taskType: 'writing_37', assignment: { prompt: 'Integration' }, answer: 'Test answer',
+      taskType: 'writing_37', assignment: { prompt: 'Integration' }, answer: 'Test full answer',
+      evaluatedAnswer: 'Test evaluated answer',
     }, 'integration-v1');
     await repository.finishWritingAttempt(attemptId, {
       status: 'failed', provider: 'test', model: 'integration-writing-model', errorCode: 'EXPECTED_TEST_ERROR',
@@ -92,8 +94,10 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     });
     await repository.healthCheck();
 
-    const attempt = await client.query('SELECT status, provider, model, prompt_version, error_code FROM writing_attempts WHERE id = $1', [attemptId]);
+    const attempt = await client.query('SELECT answer, evaluated_answer, status, provider, model, prompt_version, error_code FROM writing_attempts WHERE id = $1', [attemptId]);
     assert.deepEqual(attempt.rows[0], {
+      answer: 'Test full answer',
+      evaluated_answer: 'Test evaluated answer',
       status: 'failed',
       provider: 'test',
       model: 'integration-writing-model',
@@ -113,6 +117,8 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     assert.equal(exported.speaking_attempts.length, 1);
     assert.equal(exported.writing_attempts[0].model, 'integration-writing-model');
     assert.equal(exported.writing_attempts[0].error_code, 'EXPECTED_TEST_ERROR');
+    assert.equal(exported.writing_attempts[0].answer, 'Test full answer');
+    assert.equal(exported.writing_attempts[0].evaluated_answer, 'Test evaluated answer');
     assert.equal(exported.speaking_attempts[0].model, 'integration-speaking-model');
     assert.equal(exported.generated_tasks.length, 1);
     assert.equal(exported.module_attempts.length, 1);

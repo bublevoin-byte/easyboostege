@@ -227,11 +227,12 @@ paths:
           application/json:
             schema:
               type: object
-              required: [taskType, answer, assignment]
+              required: [taskType, taskId, answer]
               properties:
                 taskType: { type: string, enum: [writing_37, writing_38] }
+                taskId: { type: string, maxLength: 120 }
                 answer: { type: string }
-                assignment: { type: object, additionalProperties: true }
+              additionalProperties: false
       responses:
         '200':
           description: Validated review with explicit experimental assessment metadata
@@ -239,12 +240,13 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [review, provider, attemptId, assessment]
+                required: [review, provider, attemptId, assessment, evaluationScope]
                 properties:
                   review: { type: object }
                   provider: { type: string }
                   attemptId: { type: integer }
                   assessment: { $ref: '#/components/schemas/ExperimentalAssessment' }
+                  evaluationScope: { $ref: '#/components/schemas/WritingEvaluationScope' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '429': { $ref: '#/components/responses/RateLimited' }
@@ -364,6 +366,14 @@ components:
         mode: { type: string, enum: [experimental] }
         scoreKind: { type: string, enum: [approximate] }
         warning: { type: string }
+    WritingEvaluationScope:
+      type: object
+      required: [fullWords, evaluatedWords, truncated, evaluatedLimit]
+      properties:
+        fullWords: { type: integer, minimum: 0 }
+        evaluatedWords: { type: integer, minimum: 0 }
+        truncated: { type: boolean }
+        evaluatedLimit: { type: integer, enum: [140, 250] }
   responses:
     BadRequest: { description: Invalid request }
     Unauthorized: { description: Missing or expired session }

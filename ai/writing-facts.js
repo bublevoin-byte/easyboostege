@@ -29,6 +29,16 @@ export function countWords(text) {
   return value ? value.split(/\s+/u).filter(Boolean).length : 0;
 }
 
+// Uses the same whitespace-delimited word boundary as countWords while retaining the student's
+// punctuation and line breaks up to the last word that may be evaluated.
+export function takeFirstWords(text, limit) {
+  const value = String(text ?? '').trim();
+  const matches = [...value.matchAll(/\S+/gu)];
+  if (matches.length <= limit) return value;
+  const last = matches[limit - 1];
+  return value.slice(0, last.index + last[0].length);
+}
+
 // Two shapes are possible: real blank-line paragraphs, or a single block with line breaks.
 // Both are reported, because a contenteditable editor produces either depending on the student.
 export function countBlocks(text) {

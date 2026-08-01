@@ -6,6 +6,13 @@ function normalizeAttemptModels(attempts) {
   return attempts.map((attempt) => ({ ...attempt, model: attempt.model ?? null }));
 }
 
+function normalizeWritingAttempts(attempts) {
+  return normalizeAttemptModels(attempts).map((attempt) => ({
+    ...attempt,
+    evaluated_answer: attempt.evaluated_answer ?? attempt.answer ?? null,
+  }));
+}
+
 export function createFileRepository(filePath) {
   let loaded = false;
   let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, payment_requests: {}, subscription_events: [] };
@@ -22,7 +29,7 @@ export function createFileRepository(filePath) {
           progress: parsed.progress && typeof parsed.progress === 'object' ? parsed.progress : {},
           progress_summary: parsed.progress_summary && typeof parsed.progress_summary === 'object' ? parsed.progress_summary : {},
           auth_codes: parsed.auth_codes && typeof parsed.auth_codes === 'object' ? parsed.auth_codes : {},
-          writing_attempts: Array.isArray(parsed.writing_attempts) ? normalizeAttemptModels(parsed.writing_attempts) : [],
+          writing_attempts: Array.isArray(parsed.writing_attempts) ? normalizeWritingAttempts(parsed.writing_attempts) : [],
           speaking_attempts: Array.isArray(parsed.speaking_attempts) ? normalizeAttemptModels(parsed.speaking_attempts) : [],
           generated_tasks: Array.isArray(parsed.generated_tasks) ? parsed.generated_tasks : [],
           task_bank: Array.isArray(parsed.task_bank) ? parsed.task_bank : [],
@@ -288,6 +295,7 @@ export function createFileRepository(filePath) {
       task_type: input.taskType,
       assignment: structuredClone(input.assignment),
       answer: input.answer,
+      evaluated_answer: input.evaluatedAnswer ?? input.answer,
       prompt_version: promptVersion,
       model: null,
       status: 'pending',

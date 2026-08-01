@@ -4,8 +4,8 @@
 
 | Операция | Endpoint | Валидация | Fallback |
 |---|---|---|---|
-| Проверка задания 37 | `/api/v1/ai/evaluate-writing` | Zod request + server score validation | локальная проверка объёма |
-| Проверка задания 38 | `/api/v1/ai/evaluate-writing` | Zod request + критерии/итоговый балл | локальная проверка объёма |
+| Проверка задания 37 | `/api/v1/ai/evaluate-writing` | Zod request + server score validation; с 155 слов оцениваются первые 140 | локальная проверка объёма |
+| Проверка задания 38 | `/api/v1/ai/evaluate-writing` | Zod request + критерии/итоговый балл; с 276 слов оцениваются первые 250 | локальная проверка объёма |
 | Словарная справка | `/api/v1/ai/generate-content` (`dictionary_lookup`) | Zod request + строгий JSON output | мини-словарь |
 | Тест по грамматике | `/api/v1/ai/generate-content` (`grammar_quiz`) | Zod request + ровно 5 валидированных заданий | встроенный банк заданий |
 | Диалог для аудирования | `/api/v1/ai/generate-content` (`listening_dialog`) | Zod request + вопросы и допустимые индексы ответов | встроенное задание |
@@ -21,6 +21,12 @@
 | STT | `/api/v1/stt` | auth, subscription, rate limit, 20 MB body limit | повтор записи |
 
 Версия prompt для письменной проверки задаётся `WRITING_PROMPT_VERSION` в `ai/writing.js`, для устной части — `SPEAKING_PROMPT_VERSION`, для генерации контента — `CONTENT_PROMPT_VERSION`. Версия вместе с операцией, провайдером, моделью, длительностью и результатом записывается в `ai_requests`. Универсального AI proxy в production API нет.
+
+Для `writing-v5` сервер считает полный объём до вызова провайдера. На 154/275 словах ответ не
+усекается; начиная с 155/276 провайдер и программные факты получают только первые 140/250 слов.
+`review.words` и `review.in_range` продолжают описывать полный ответ. Пользовательская попытка
+хранит полный `answer` и отдельный `evaluated_answer`; технический `ai_requests` не хранит ни один
+из этих текстов.
 
 Дневной проектный бюджет задаётся `AI_DAILY_REQUEST_BUDGET` и считается по устойчивому журналу `ai_requests` с начала UTC-суток. При исчерпании API возвращает `AI_BUDGET_EXHAUSTED`. Провайдеры можно аварийно отключить независимо через `XAI_ENABLED=false` или `GROQ_ENABLED=false`, не удаляя ключи.
 

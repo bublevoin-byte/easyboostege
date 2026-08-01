@@ -20,12 +20,15 @@ const SEG_ON='flex:1;border:0;font-family:inherit;text-align:center;padding:8px 
 const SEG_OFF='flex:1;border:0;font-family:inherit;text-align:center;padding:8px 0;font-weight:700;font-size:13px;color:rgba(255,255,255,.92);background:transparent;cursor:pointer;';
 function countWords(){const st=writingModule.wordCountStatus(document.getElementById('w_editor').innerText,curTask);
   const e=document.getElementById('w_count');e.textContent=st.count+' / '+st.range+' слов · '+st.hint;e.style.color=st.ok?'#1D7F4A':(st.state==='over'?'#B94A37':'#6A6E75')}
-function renderReview(d){
+function renderReview(d,evaluationScope){
   const safe=ui.escapeHtml;
   const totals=writingModule.reviewTotals(d);const got=totals.got,mx=totals.max;
   document.getElementById('rv_score').textContent=got;
   document.getElementById('rv_max').textContent='из '+mx;
   document.getElementById('ai_disclaimer').textContent=ui.AI_DISCLAIMER;
+  const scopeNotice=document.getElementById('rv_scope_notice');
+  const scopeText=writingModule.evaluationNotice(evaluationScope);
+  scopeNotice.textContent=scopeText;scopeNotice.hidden=!scopeText;
   document.getElementById('rv_ring').setAttribute('stroke-dashoffset',String(226-226*(mx?got/mx:0)));
   document.getElementById('rv_verdict').textContent=d.verdict||'Готово!';
   document.getElementById('rv_sub').textContent=d.sub||'';
@@ -130,7 +133,7 @@ async function checkWriting(){
     var d=response&&response.review;
     if(!d||!d.criteria)throw new Error('bad');
     wrStore(d,n,task);
-    renderReview(d);S.essays=(S.essays||0)+1;save();showScreen('scr12');HIST.push('scr8');
+    renderReview(d,response.evaluationScope);S.essays=(S.essays||0)+1;save();showScreen('scr12');HIST.push('scr8');
   }catch(e){renderReview(localReview(n,task,e.message));showScreen('scr12');HIST.push('scr8')}}
 function wrStore(d,n,task){
   S.works=writingModule.appendWork(S.works,{t:task,g:+d.overall_got||0,m:+d.overall_max||writingModule.limits(task).maxScore,n:n,ts:Date.now()});

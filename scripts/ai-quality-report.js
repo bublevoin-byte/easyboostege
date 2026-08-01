@@ -3,7 +3,7 @@
  * Печатает состав набора, метрики §11.2 и решение гейта §11.3 по готовым `aiRuns`. К ИИ не
  * обращается вовсе.
  *
- *   npm run quality:check -- quality/writing-fipi-stubs.json [--provider=grok] [--model=grok-4.3] [--prompt-version=writing-v4]
+ *   npm run quality:check -- quality/writing-fipi-stubs.json [--provider=grok] [--model=grok-4.3] [--prompt-version=writing-v5]
  *
  * Ключи `--provider`, `--model` и `--prompt-version` выбирают, по каким прогонам считать. После
  * слияния журналов у каждой работы могут лежать разные модели или версии промпта, и метрики по ним

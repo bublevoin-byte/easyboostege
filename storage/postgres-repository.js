@@ -312,10 +312,11 @@ export function createPostgresRepository(connectionString) {
   async function createWritingAttempt(username, input, promptVersion) {
     const result = await pool.query(
       `INSERT INTO writing_attempts
-       (username, task_type, assignment, answer, prompt_version, status)
-       VALUES ($1, $2, $3::jsonb, $4, $5, 'pending')
+       (username, task_type, assignment, answer, evaluated_answer, prompt_version, status)
+       VALUES ($1, $2, $3::jsonb, $4, $5, $6, 'pending')
        RETURNING id`,
-      [username, input.taskType, JSON.stringify(input.assignment), input.answer, promptVersion],
+      [username, input.taskType, JSON.stringify(input.assignment), input.answer,
+        input.evaluatedAnswer ?? input.answer, promptVersion],
     );
     return Number(result.rows[0].id);
   }
@@ -618,7 +619,7 @@ export function createPostgresRepository(connectionString) {
       pool.query('SELECT text_processing, voice_processing, policy_version, text_consented_at, voice_consented_at, updated_at FROM privacy_consents WHERE username = $1', [username]),
       pool.query('SELECT id, event_type, days, metadata, created_at FROM subscription_events WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, status, actor_telegram_id, result, created_at, resolved_at FROM payment_requests WHERE username = $1 ORDER BY created_at', [username]),
-      pool.query('SELECT id, task_type, assignment, answer, review, provider, model, prompt_version, status, error_code, created_at, evaluated_at FROM writing_attempts WHERE username = $1 ORDER BY created_at', [username]),
+      pool.query('SELECT id, task_type, assignment, answer, evaluated_answer, review, provider, model, prompt_version, status, error_code, created_at, evaluated_at FROM writing_attempts WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, task_type, assignment, transcript, review, provider, model, prompt_version, status, error_code, created_at, evaluated_at FROM speaking_attempts WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, operation, request, result, provider, prompt_version, created_at FROM generated_tasks WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, module, activity, score, max_score, duration_ms, metadata, created_at FROM module_attempts WHERE username = $1 ORDER BY created_at', [username]),

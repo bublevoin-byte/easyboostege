@@ -51,6 +51,25 @@ function validReview(words) {
   };
 }
 
+function validTask38Review(words) {
+  return {
+    words,
+    in_range: words >= 200 && words <= 250,
+    overall_got: 8,
+    overall_max: 14,
+    verdict: 'Хорошая основа проекта',
+    sub: 'Уточни сравнения',
+    criteria: [
+      { name: 'Решение коммуникативной задачи', got: 2, max: 3 },
+      { name: 'Организация текста', got: 2, max: 3 },
+      { name: 'Лексика', got: 2, max: 3 },
+      { name: 'Грамматика', got: 1, max: 3 },
+      { name: 'Орфография и пунктуация', got: 1, max: 2 },
+    ],
+    errors: [],
+  };
+}
+
 function validSpeakingReview() {
   return {
     got: 4,
@@ -160,7 +179,7 @@ async function startStack({ replies }) {
         speaking: stored.speaking_attempts || [],
       };
     },
-    async evaluateWriting(answer) {
+    async evaluateWriting(answer, taskType = 'writing_37', taskId = 'builtin:writing_37:emily-new-flat') {
       const response = await fetch(`${baseUrl}/api/v1/ai/evaluate-writing`, {
         method: 'POST',
         headers: {
@@ -168,8 +187,8 @@ async function startStack({ replies }) {
           Authorization: `Bearer ${jwt.sign({ u: 'student' }, JWT_SECRET)}`,
         },
         body: JSON.stringify({
-          taskType: 'writing_37',
-          taskId: 'builtin:writing_37:emily-new-flat',
+          taskType,
+          taskId,
           answer,
         }),
       });
@@ -261,7 +280,7 @@ test('a second malformed answer ends the request instead of retrying forever', {
         status: 'failed',
         provider: 'grok',
         model: 'route-provenance-model',
-        promptVersion: 'writing-v4',
+        promptVersion: 'writing-v5',
         errorCode: 'AI_RESPONSE_INVALID',
       },
     );
@@ -277,6 +296,104 @@ test('a valid answer is not repaired and costs exactly one call', { timeout: 40_
 
     assert.equal(status, 200);
     assert.equal(stack.providerCalls.length, 1, 'корректный ответ не должен вызывать лишний платный запрос');
+  } finally {
+    await stack.stop();
+  }
+});
+
+test('an overlength writing route evaluates only the allowed fragment and preserves both texts', { timeout: 40_000 }, async () => {
+  const answer = Array.from({ length: 155 }, (_, index) => `word${String(index + 1).padStart(3, '0')}`).join(' ');
+  const evaluatedAnswer = Array.from({ length: 140 }, (_, index) => `word${String(index + 1).padStart(3, '0')}`).join(' ');
+  const stack = await startStack({ replies: [JSON.stringify(validReview(155))] });
+  try {
+    const { status, body } = await stack.evaluateWriting(answer);
+
+    assert.equal(status, 200);
+    assert.equal(Number.isInteger(body.review.overall_got), true);
+    assert.deepEqual(body.evaluationScope, {
+      fullWords: 155,
+      evaluatedWords: 140,
+      truncated: true,
+      evaluatedLimit: 140,
+    });
+    assert.match(body.assessment.warning, /Балл ориентировочный/u);
+    assert.match(stack.providerCalls[0].user, /word140/u);
+    assert.doesNotMatch(stack.providerCalls[0].user, /word141/u);
+
+    const attempts = await stack.attemptLog();
+    assert.equal(attempts.writing[0].answer, answer);
+    assert.equal(attempts.writing[0].evaluated_answer, evaluatedAnswer);
+  } finally {
+    await stack.stop();
+  }
+});
+
+test('an overlength task 38 route evaluates exactly the first 250 words', { timeout: 40_000 }, async () => {
+  const answer = Array.from({ length: 276 }, (_, index) => `essay${String(index + 1).padStart(3, '0')}`).join(' ');
+  const evaluatedAnswer = Array.from({ length: 250 }, (_, index) => `essay${String(index + 1).padStart(3, '0')}`).join(' ');
+  const stack = await startStack({ replies: [JSON.stringify(validTask38Review(276))] });
+  try {
+    const { status, body } = await stack.evaluateWriting(
+      answer,
+      'writing_38',
+      'builtin:writing_38:teen-sport',
+    );
+
+    assert.equal(status, 200);
+    assert.deepEqual(body.evaluationScope, {
+      fullWords: 276,
+      evaluatedWords: 250,
+      truncated: true,
+      evaluatedLimit: 250,
+    });
+    assert.match(stack.providerCalls[0].user, /essay250/u);
+    assert.doesNotMatch(stack.providerCalls[0].user, /essay251/u);
+    const attempts = await stack.attemptLog();
+    assert.equal(attempts.writing[0].answer, answer);
+    assert.equal(attempts.writing[0].evaluated_answer, evaluatedAnswer);
+  } finally {
+    await stack.stop();
+  }
+});
+
+test('the last tolerated words of tasks 37 and 38 reach the provider without truncation', { timeout: 40_000 }, async () => {
+  const answer37 = Array.from({ length: 154 }, (_, index) => `letter${String(index + 1).padStart(3, '0')}`).join(' ');
+  const answer38 = Array.from({ length: 275 }, (_, index) => `project${String(index + 1).padStart(3, '0')}`).join(' ');
+  const stack = await startStack({
+    replies: [JSON.stringify(validReview(154)), JSON.stringify(validTask38Review(275))],
+  });
+  try {
+    const task37Result = await stack.evaluateWriting(answer37);
+    const task38Result = await stack.evaluateWriting(
+      answer38,
+      'writing_38',
+      'builtin:writing_38:teen-sport',
+    );
+
+    assert.equal(task37Result.status, 200);
+    assert.deepEqual(task37Result.body.evaluationScope, {
+      fullWords: 154, evaluatedWords: 154, truncated: false, evaluatedLimit: 140,
+    });
+    assert.equal(task37Result.body.review.words, 154);
+    assert.equal(task37Result.body.review.in_range, false);
+    assert.match(stack.providerCalls[0].user, /letter154/u);
+
+    assert.equal(task38Result.status, 200);
+    assert.deepEqual(task38Result.body.evaluationScope, {
+      fullWords: 275, evaluatedWords: 275, truncated: false, evaluatedLimit: 250,
+    });
+    assert.equal(task38Result.body.review.words, 275);
+    assert.equal(task38Result.body.review.in_range, false);
+    assert.match(stack.providerCalls[1].user, /project275/u);
+
+    const attempts = await stack.attemptLog();
+    assert.deepEqual(
+      attempts.writing.map(({ answer, evaluated_answer: evaluatedAnswer }) => ({ answer, evaluatedAnswer })),
+      [
+        { answer: answer37, evaluatedAnswer: answer37 },
+        { answer: answer38, evaluatedAnswer: answer38 },
+      ],
+    );
   } finally {
     await stack.stop();
   }
@@ -300,7 +417,7 @@ test('successful free-answer APIs identify the integer score as experimental and
     const attempts = await stack.attemptLog();
     assert.deepEqual(
       attempts.writing.map(({ provider, model, prompt_version: promptVersion }) => ({ provider, model, promptVersion })),
-      [{ provider: 'grok', model: 'route-provenance-model', promptVersion: 'writing-v4' }],
+      [{ provider: 'grok', model: 'route-provenance-model', promptVersion: 'writing-v5' }],
     );
     assert.deepEqual(
       attempts.speaking.map(({ provider, model, prompt_version: promptVersion }) => ({ provider, model, promptVersion })),
@@ -358,8 +475,8 @@ test('both calls of a repaired request are reported, so the budget stays truthfu
     assert.match(rejected.fallbackReason, /format repair requested/u);
     assert.ok(rejected.completionTokens > 0, 'потраченные токены не должны потеряться');
     assert.ok(accepted, 'принятый разбор тоже записывается');
-    // Version string only: v4 adds the angle-bracket ban and the K1 aspect scheme (issue 15).
-    assert.equal(accepted.promptVersion, 'writing-v4');
+    // Version string only: v5 means overlength answers are scoped before the provider call.
+    assert.equal(accepted.promptVersion, 'writing-v5');
   } finally {
     await stack.stop();
   }

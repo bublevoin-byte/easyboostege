@@ -6,6 +6,7 @@ import {
   countWords,
   getWritingRules,
   parseAndValidateWritingReview,
+  prepareWritingEvaluation,
   writingRequestSchema,
 } from '../ai/writing.js';
 
@@ -46,6 +47,35 @@ test('prompt treats the student answer as untrusted JSON data', () => {
 
 test('countWords counts whitespace-separated words', () => {
   assert.equal(countWords(' one  two\nthree '), 3);
+});
+
+test('overlength evaluation starts only after the literal FIPI thresholds', () => {
+  const answer = (words) => Array.from({ length: words }, (_, index) => `word${index + 1}`).join(' ');
+
+  assert.deepEqual(prepareWritingEvaluation({ ...task37, answer: answer(154) }).scope, {
+    fullWords: 154, evaluatedWords: 154, truncated: false, evaluatedLimit: 140,
+  });
+  assert.deepEqual(prepareWritingEvaluation({ ...task37, answer: answer(155) }).scope, {
+    fullWords: 155, evaluatedWords: 140, truncated: true, evaluatedLimit: 140,
+  });
+  assert.deepEqual(prepareWritingEvaluation({ ...task38, answer: answer(275) }).scope, {
+    fullWords: 275, evaluatedWords: 275, truncated: false, evaluatedLimit: 250,
+  });
+  assert.deepEqual(prepareWritingEvaluation({ ...task38, answer: answer(276) }).scope, {
+    fullWords: 276, evaluatedWords: 250, truncated: true, evaluatedLimit: 250,
+  });
+});
+
+test('an overlength prompt demonstrates the full word count and range state consistently', () => {
+  const fullInput = { ...task37, answer: Array.from({ length: 155 }, (_, index) => `word${index + 1}`).join(' ') };
+  const evaluation = prepareWritingEvaluation(fullInput);
+  const prompt = buildWritingPrompt({
+    ...fullInput,
+    answer: evaluation.evaluatedAnswer,
+    evaluationScope: evaluation.scope,
+  });
+
+  assert.match(prompt.user, /"words":155,"in_range":false/u);
 });
 
 test('validated review must match server score rules', () => {

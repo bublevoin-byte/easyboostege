@@ -1,6 +1,8 @@
 import { z } from 'zod';
 
-import { analyzeWriting, countWords as countAnswerWords, describeFacts } from './writing-facts.js';
+import {
+  analyzeWriting, countWords as countAnswerWords, describeFacts, takeFirstWords,
+} from './writing-facts.js';
 import { sanitizeStudentText } from '../validation/student-text.js';
 
 // The answer is normalised at the boundary, so the prompt, the pre-checks and the stored attempt
@@ -16,7 +18,8 @@ const studentAnswer = (max) => z.string().trim().min(20).max(max)
 // comparison sign, and section 10.4 rejected every such review. It also gives the communicative
 // criterion its FIPI aspect scheme — v3 gave the model the consequence of a zero but never the
 // countable sign by which a zero is awarded.
-export const WRITING_PROMPT_VERSION = 'writing-v4';
+// v5 means the server, rather than the model, limits an overlength answer to the evaluated fragment.
+export const WRITING_PROMPT_VERSION = 'writing-v5';
 
 const task37AssignmentSchema = z.object({
   from: z.string().trim().min(1).max(40),
@@ -120,6 +123,35 @@ const TASK_RULES = Object.freeze({
 
 export const countWords = countAnswerWords;
 
+export function prepareWritingEvaluation(input) {
+  const rules = TASK_RULES[input.taskType];
+  const fullWords = countWords(input.answer);
+  const evaluatedLimit = rules.maxWords;
+  const truncated = fullWords > Math.round(evaluatedLimit * 1.1);
+  const evaluatedAnswer = truncated ? takeFirstWords(input.answer, evaluatedLimit) : input.answer;
+  return {
+    evaluatedAnswer,
+    scope: {
+      fullWords,
+      evaluatedWords: countWords(evaluatedAnswer),
+      truncated,
+      evaluatedLimit,
+    },
+  };
+}
+
+export function prepareWritingPrompt(input) {
+  const evaluation = prepareWritingEvaluation(input);
+  return {
+    ...evaluation,
+    prompt: buildWritingPrompt({
+      ...input,
+      answer: evaluation.evaluatedAnswer,
+      evaluationScope: evaluation.scope,
+    }),
+  };
+}
+
 export function buildWritingPrompt(input) {
   const rules = TASK_RULES[input.taskType];
   const system = [
@@ -135,9 +167,10 @@ export function buildWritingPrompt(input) {
     : `Тема проекта: ${JSON.stringify(input.assignment.topic)}. Данные таблицы: ${input.assignment.rows.map((row) => `${row.label} — ${row.percent}%`).join('; ')}. План: вступление о цели проекта; 2–3 факта из таблицы; 1–2 сравнения; проблема и решение; вывод с мнением.`;
 
   const criteria = rules.criteria.map(([name, max]) => `${name}: максимум ${max}`).join('; ');
+  const promptWords = input.evaluationScope?.fullWords ?? countWords(input.answer);
   const responseShape = {
-    words: 0,
-    in_range: true,
+    words: promptWords,
+    in_range: promptWords >= rules.minWords && promptWords <= rules.maxWords,
     overall_got: 0,
     overall_max: rules.overallMax,
     verdict: 'краткий итог',
@@ -202,12 +235,16 @@ export function buildWritingPrompt(input) {
   ].join('\n');
 
   const facts = analyzeWriting(input);
+  if (input.evaluationScope) facts.words = input.evaluationScope.fullWords;
   const user = [
     `Тип задания: ${input.taskType}. Допустимый объём: ${rules.minWords}–${rules.maxWords} слов.`,
     assignment,
     `Критерии: ${criteria}. Общий максимум: ${rules.overallMax}.`,
     aspectScheme,
     zeroRules,
+    input.evaluationScope
+      ? `Сервер определил полный объём: ${input.evaluationScope.fullWords} слов. Для оценивания передан фрагмент из ${input.evaluationScope.evaluatedWords} слов.`
+      : '',
     describeFacts(facts, input.taskType),
     `Верни JSON следующей формы: ${JSON.stringify(responseShape)}.`,
     // Section 10.4 rejects a review that carries an angle bracket, and v3 taught the model to write

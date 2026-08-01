@@ -76,6 +76,11 @@
     return { got, max, percent: max ? Math.round(got / max * 100) : 0 };
   }
 
+  function evaluationNotice(scope) {
+    if (!scope || scope.truncated !== true) return '';
+    return 'Из-за превышения объёма оценены первые ' + Number(scope.evaluatedLimit) + ' слов.';
+  }
+
   /*
    * Section 10.1: the request carries the identifier of the task, the type of work and the answer.
    * The assignment itself lives on the server, so nothing here can change what the answer is
@@ -145,6 +150,7 @@
     appendWork,
     summary,
     reviewTotals,
+    evaluationNotice,
     buildPayload,
     normalizeGenerated,
     localReview,

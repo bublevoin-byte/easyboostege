@@ -11,7 +11,7 @@
 | `payment_requests` | ручные заявки на оплату | status, administrator, result and resolution time |
 | `user_progress` | JSONB-прогресс пользователя | `username`, `data`, `updated_at` |
 | `telegram_auth_codes` | одноразовые коды входа | hash кода, expiry, consumed state |
-| `writing_attempts` | журнал пользовательских прогонов заданий 37/38 | assignment, answer, review, provider, model, prompt_version, status, error_code |
+| `writing_attempts` | журнал пользовательских прогонов заданий 37/38 | assignment, answer, evaluated_answer, review, provider, model, prompt_version, status, error_code |
 | `speaking_attempts` | журнал пользовательских прогонов устной части | assignment, transcript, review, provider, model, prompt_version, status, error_code; audio is not stored |
 | `generated_tasks` | валидированные результаты генерации | operation, versioned request hash, request/result and provider |
 | `module_attempts` | нормализованная история учебных результатов | module, activity, score, duration and bounded metadata |
@@ -29,3 +29,8 @@
 Миграция `019_attempt_models.sql` добавляет nullable-поле `model`, поэтому прежние строки остаются
 валидными с неизвестной моделью (`NULL`), а новые завершённые прогоны сохраняют полную тройку
 `provider`, `model`, `prompt_version`.
+
+Миграция `020_writing_evaluated_answer.sql` добавляет обязательный `evaluated_answer`. Для прежних
+строк он заполняется полным `answer`; в новых попытках `answer` хранит весь очищенный ответ, а
+`evaluated_answer` — ровно тот фрагмент, который получил провайдер. Оба поля входят в экспорт и
+удаляются каскадно вместе с аккаунтом.

@@ -78,7 +78,8 @@ function answerFromPrompt(user) {
 function validReview(user) {
   const taskType = /Тип задания: (\w+)\./u.exec(user)[1];
   const rules = getWritingRules(taskType);
-  const words = countWords(answerFromPrompt(user));
+  const words = Number(/Сервер определил полный объём: (\d+) слов/u.exec(user)?.[1])
+    || countWords(answerFromPrompt(user));
   const criteria = rules.criteria.map(([name, max]) => ({ name, got: 1, max }));
   return JSON.stringify({
     words,
@@ -374,6 +375,23 @@ test('ответ нормализуется ровно так же, как в п
 
   const tooShort = { id: 'x', operation: 'writing_37', answer: 'hi' };
   assert.throws(() => runner.normalizeAnswer(tooShort), /нормализацию/u);
+});
+
+test('overlength quality work uses the same evaluated fragment as a student request', async () => {
+  const cases = sampleCases().slice(0, 1);
+  cases[0].answer = Array.from({ length: 155 }, (_, index) => `quality${index + 1}`).join(' ');
+  const { dataset, out } = await workspace(cases);
+  const calls = stubFetch((call) => validReview(call.user));
+
+  const summary = await runner.runQuality({
+    provider: 'grok', runs: 1, delayMs: 0, dataset, out, log: () => {},
+  });
+
+  assert.equal(summary.valid, 1);
+  assert.equal(countWords(answerFromPrompt(calls[0].user)), 140);
+  assert.match(calls[0].user, /quality140/u);
+  assert.doesNotMatch(calls[0].user, /quality141/u);
+  assert.equal((await journalLines(out))[0].review.words, 155);
 });
 
 test('работа без разобранного условия пропускается с причиной, а не роняет прогон', () => {

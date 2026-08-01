@@ -76,6 +76,18 @@ test('writing module derives review totals from criteria when overall score is a
   );
 });
 
+test('writing module reports the evaluated word limit only when the server truncated the answer', () => {
+  const writing = createWritingModule();
+
+  assert.equal(writing.evaluationNotice({
+    fullWords: 155, evaluatedWords: 140, truncated: true, evaluatedLimit: 140,
+  }), 'Из-за превышения объёма оценены первые 140 слов.');
+  assert.equal(writing.evaluationNotice({
+    fullWords: 154, evaluatedWords: 154, truncated: false, evaluatedLimit: 140,
+  }), '');
+  assert.equal(writing.evaluationNotice(null), '');
+});
+
 /* Section 10.1: the payload names the task, it does not describe it. */
 test('writing module sends the task identifier instead of the assignment', () => {
   const writing = createWritingModule();

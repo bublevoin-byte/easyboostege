@@ -34,8 +34,8 @@ import { estimateCostMicrousd } from '../ai/provider-control.js';
  * однажды разошлись бы молча — ровно так же, как разошлись бы два способа опознать прогон. */
 import { FAILURE_CONTRACT, FAILURE_TRANSPORT, failureKindOf } from './merge-quality-runs.js';
 import {
-  buildWritingPrompt,
   parseAndValidateWritingReview,
+  prepareWritingPrompt,
   WRITING_PROMPT_VERSION,
   writingAssignmentSchema,
   writingRequestSchema,
@@ -514,7 +514,7 @@ export async function runQuality({
     let entry;
     let first = null;
     try {
-      const prompt = buildWritingPrompt(item.input);
+      const { prompt } = prepareWritingPrompt(item.input);
       first = await chain.askWithFallback(prompt.system, prompt.user, item.input.taskType);
       /* Section 10.3: exactly one corrected attempt, the same as routes/ai.js gives a student.
        * §11.3 counts the schema as passed with that attempt included, so the fact of a repair is

@@ -46,6 +46,13 @@ test('the written review screen shows the disclaimer', () => {
   );
 });
 
+test('the written review screen shows the server evaluation scope without replacing the disclaimer', () => {
+  assert.match(html, /id="rv_scope_notice" hidden/u);
+  assert.match(app, /writingModule\.evaluationNotice\(evaluationScope\)/u);
+  assert.match(app, /renderReview\(d,response\.evaluationScope\)/u);
+  assert.match(app, /getElementById\('ai_disclaimer'\)\.textContent=ui\.AI_DISCLAIMER/u);
+});
+
 test('the speaking review shows the same disclaimer from the shared constant', () => {
   assert.match(app, /ui\.escapeHtml\(ui\.AI_DISCLAIMER\)/u);
   assert.match(app, /class="ai-disclaimer"/u);

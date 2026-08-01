@@ -5,7 +5,9 @@ import { fileURLToPath } from 'url';
 import express from 'express';
 
 import { config } from '../config.js';
-import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from '../ai/writing.js';
+import {
+  parseAndValidateWritingReview, prepareWritingPrompt, WRITING_PROMPT_VERSION, writingRequestSchema,
+} from '../ai/writing.js';
 import { buildContentPrompt, CONTENT_PROMPT_VERSION, contentRequestSchema, parseContentResponse } from '../ai/content.js';
 import { buildSpeakingPrompt, buildSpeakingSamplePrompt, parseSpeakingReview, parseSpeakingSample, SPEAKING_PROMPT_VERSION, speakingRequestSchema, speakingSampleRequestSchema } from '../ai/speaking.js';
 import { assignmentFor, OPERATION_FOR_TASK_TYPE } from '../ai/task-bank.js';
@@ -133,8 +135,12 @@ export function createAiRoutes({ authentication, access, db }) {
     let promptTokens = null;
     let completionTokens = null;
     try {
-      attemptId = await createWritingAttempt(req.user, input, WRITING_PROMPT_VERSION);
-      const prompt = buildWritingPrompt(input);
+      const evaluation = prepareWritingPrompt(input);
+      attemptId = await createWritingAttempt(req.user, {
+        ...input,
+        evaluatedAnswer: evaluation.evaluatedAnswer,
+      }, WRITING_PROMPT_VERSION);
+      const { prompt } = evaluation;
       const result = await askWithFallback(prompt.system, prompt.user, input.taskType);
       recordDependencyEvent('ai', 'success');
       if (result.attempts > 1) recordDependencyEvent('ai', 'fallback');
@@ -174,7 +180,13 @@ export function createAiRoutes({ authentication, access, db }) {
         completionTokens: accepted.completionTokens,
         estimatedCostMicrousd: estimateCostMicrousd(accepted, aiProviders().find((item) => item.name === provider)),
       });
-      res.json({ review, provider, attemptId, assessment: EXPERIMENTAL_ASSESSMENT });
+      res.json({
+        review,
+        provider,
+        attemptId,
+        assessment: EXPERIMENTAL_ASSESSMENT,
+        evaluationScope: evaluation.scope,
+      });
     } catch (error) {
       recordDependencyEvent('ai', 'error');
       if (!attemptId) return next(error);

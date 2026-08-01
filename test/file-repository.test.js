@@ -129,6 +129,7 @@ test('writing attempt and AI metadata are persisted without prompt text in the A
       taskType: 'writing_37',
       assignment: { from: 'Ben', stimulus: 'Three questions from a friend.', questionsTopic: 'his dog' },
       answer: 'Student answer text',
+      evaluatedAnswer: 'Student answer',
     }, 'writing-v1');
     await repository.finishWritingAttempt(attemptId, {
       status: 'failed',
@@ -161,8 +162,11 @@ test('writing attempt and AI metadata are persisted without prompt text in the A
     assert.equal(stored.writing_attempts[0].model, 'test-model');
     assert.equal(stored.writing_attempts[0].prompt_version, 'writing-v1');
     assert.equal(stored.writing_attempts[0].error_code, 'AI_UNAVAILABLE');
+    assert.equal(stored.writing_attempts[0].answer, 'Student answer text');
+    assert.equal(stored.writing_attempts[0].evaluated_answer, 'Student answer');
     const exported = await repository.exportUserData(username);
     assert.equal(exported.writing_attempts[0].model, 'test-model');
+    assert.equal(exported.writing_attempts[0].evaluated_answer, 'Student answer');
     assert.equal(stored.ai_requests[0].durationMs, 123);
     assert.equal(stored.ai_requests[0].promptTokens, 42);
     assert.equal(stored.ai_requests[0].completionTokens, 17);
@@ -198,13 +202,14 @@ test('attempts saved before model provenance export an explicit unknown model', 
   const file = path.join(directory, 'data.json');
   await fs.writeFile(file, JSON.stringify({
     users: { legacy: { created: Date.now() } },
-    writing_attempts: [{ id: 1, username: 'legacy', prompt_version: 'writing-v3', status: 'completed' }],
+    writing_attempts: [{ id: 1, username: 'legacy', answer: 'Legacy full answer', prompt_version: 'writing-v3', status: 'completed' }],
     speaking_attempts: [{ id: 1, username: 'legacy', prompt_version: 'speaking-eval-v1', status: 'failed' }],
   }));
   const repository = createFileRepository(file);
   try {
     const exported = await repository.exportUserData('legacy');
     assert.equal(exported.writing_attempts[0].model, null);
+    assert.equal(exported.writing_attempts[0].evaluated_answer, 'Legacy full answer');
     assert.equal(exported.speaking_attempts[0].model, null);
   } finally {
     await repository.close();
@@ -285,6 +290,7 @@ test('user data can be exported and deleted with all related records', async () 
       taskType: 'writing_37',
       assignment: { from: 'Ben', stimulus: 'Questions', questionsTopic: 'school' },
       answer: 'Private answer',
+      evaluatedAnswer: 'Private evaluated answer',
     }, 'writing-v1');
     await repository.finishWritingAttempt(attemptId, { status: 'failed', errorCode: 'TEST' });
     await repository.logAiRequest({ username, operation: 'writing_37', status: 'failed' });
@@ -294,6 +300,8 @@ test('user data can be exported and deleted with all related records', async () 
     assert.equal(exported.account.telegram_id, 5001);
     assert.deepEqual(exported.progress, { words: { learned: 7 } });
     assert.equal(exported.writing_attempts.length, 1);
+    assert.equal(exported.writing_attempts[0].answer, 'Private answer');
+    assert.equal(exported.writing_attempts[0].evaluated_answer, 'Private evaluated answer');
     assert.equal(exported.ai_requests.length, 1);
     assert.equal(exported.privacy_consent.policy_version, 'test-v1');
     assert.equal('hash' in exported.account, false);
