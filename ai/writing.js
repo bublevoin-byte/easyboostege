@@ -246,15 +246,23 @@ export function parseAndValidateWritingReview(raw, input) {
   if (review.criteria.length !== rules.criteria.length) throw new Error('AI_RESPONSE_INVALID_CRITERIA');
 
   let total = 0;
+  const seenCriteria = new Set();
   for (const criterion of review.criteria) {
     const expectedMax = expectedCriteria.get(criterion.name);
-    if (expectedMax == null || criterion.max !== expectedMax || criterion.got > criterion.max) {
+    if (expectedMax == null || seenCriteria.has(criterion.name)
+      || criterion.max !== expectedMax || criterion.got > criterion.max) {
       throw new Error('AI_RESPONSE_INVALID_CRITERIA');
     }
+    seenCriteria.add(criterion.name);
     total += criterion.got;
   }
   if (review.overall_got !== total || total > rules.overallMax) {
     throw new Error('AI_RESPONSE_INVALID_TOTAL');
+  }
+
+  if (actualWords < Math.round(rules.minWords * 0.9)) {
+    review.overall_got = 0;
+    for (const criterion of review.criteria) criterion.got = 0;
   }
 
   return review;

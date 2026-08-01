@@ -49,10 +49,11 @@ test('countWords counts whitespace-separated words', () => {
 });
 
 test('validated review must match server score rules', () => {
-  const words = countWords(task37.answer);
+  const input = { ...task37, answer: Array.from({ length: 100 }, (_, index) => `word${index + 1}`).join(' ') };
+  const words = countWords(input.answer);
   const raw = JSON.stringify({
     words,
-    in_range: words >= 100 && words <= 140,
+    in_range: true,
     overall_got: 4,
     overall_max: 6,
     verdict: 'Нужно дополнить письмо',
@@ -64,7 +65,7 @@ test('validated review must match server score rules', () => {
     ],
     errors: [],
   });
-  assert.equal(parseAndValidateWritingReview(raw, task37).overall_got, 4);
+  assert.equal(parseAndValidateWritingReview(raw, input).overall_got, 4);
 });
 
 test('review with an impossible total is rejected', () => {
@@ -84,6 +85,97 @@ test('review with an impossible total is rejected', () => {
     errors: [],
   });
   assert.throws(() => parseAndValidateWritingReview(raw, task37), /AI_RESPONSE_INVALID_TOTAL/);
+});
+
+test('task 37 below 90 percent of the lower word bound receives zero despite the model score', () => {
+  const input = { ...task37, answer: Array.from({ length: 89 }, (_, index) => `word${index + 1}`).join(' ') };
+  const raw = JSON.stringify({
+    words: 89,
+    in_range: false,
+    overall_got: 6,
+    overall_max: 6,
+    verdict: 'Модель предложила полный балл.',
+    sub: 'Проверка объёма выполняется сервером.',
+    criteria: [
+      { name: 'Решение коммуникативной задачи', got: 2, max: 2 },
+      { name: 'Организация текста', got: 2, max: 2 },
+      { name: 'Языковое оформление', got: 2, max: 2 },
+    ],
+    errors: [],
+  });
+
+  const review = parseAndValidateWritingReview(raw, input);
+
+  assert.equal(review.words, 89);
+  assert.equal(review.in_range, false);
+  assert.equal(review.overall_got, 0);
+  assert.deepEqual(review.criteria.map(({ got }) => got), [0, 0, 0]);
+});
+
+test('task 38 below 90 percent of the lower word bound receives zero despite the model score', () => {
+  const input = { ...task38, answer: Array.from({ length: 179 }, (_, index) => `word${index + 1}`).join(' ') };
+  const raw = JSON.stringify({
+    words: 179,
+    in_range: false,
+    overall_got: 14,
+    overall_max: 14,
+    verdict: 'Модель предложила полный балл.',
+    sub: 'Проверка объёма выполняется сервером.',
+    criteria: [
+      { name: 'Решение коммуникативной задачи', got: 3, max: 3 },
+      { name: 'Организация текста', got: 3, max: 3 },
+      { name: 'Лексика', got: 3, max: 3 },
+      { name: 'Грамматика', got: 3, max: 3 },
+      { name: 'Орфография и пунктуация', got: 2, max: 2 },
+    ],
+    errors: [],
+  });
+
+  const review = parseAndValidateWritingReview(raw, input);
+
+  assert.equal(review.words, 179);
+  assert.equal(review.in_range, false);
+  assert.equal(review.overall_got, 0);
+  assert.deepEqual(review.criteria.map(({ got }) => got), [0, 0, 0, 0, 0]);
+});
+
+test('the short-answer score guard does not hide an invalid model contract', () => {
+  const input = { ...task37, answer: Array.from({ length: 89 }, (_, index) => `word${index + 1}`).join(' ') };
+  const valid = {
+    words: 89,
+    in_range: false,
+    overall_got: 6,
+    overall_max: 6,
+    verdict: 'Модель предложила полный балл.',
+    sub: 'Проверка объёма выполняется сервером.',
+    criteria: [
+      { name: 'Решение коммуникативной задачи', got: 2, max: 2 },
+      { name: 'Организация текста', got: 2, max: 2 },
+      { name: 'Языковое оформление', got: 2, max: 2 },
+    ],
+    errors: [],
+  };
+
+  const invalidSchema = structuredClone(valid);
+  invalidSchema.overall_got = 5.5;
+  assert.throws(
+    () => parseAndValidateWritingReview(JSON.stringify(invalidSchema), input),
+    /AI_RESPONSE_INVALID_SCHEMA/u,
+  );
+
+  const invalidCriteria = structuredClone(valid);
+  invalidCriteria.criteria[0].name = 'Организация текста';
+  assert.throws(
+    () => parseAndValidateWritingReview(JSON.stringify(invalidCriteria), input),
+    /AI_RESPONSE_INVALID_CRITERIA/u,
+  );
+
+  const invalidMaximum = structuredClone(valid);
+  invalidMaximum.overall_max = 7;
+  assert.throws(
+    () => parseAndValidateWritingReview(JSON.stringify(invalidMaximum), input),
+    /AI_RESPONSE_INVALID_MAX_SCORE/u,
+  );
 });
 
 /*
@@ -200,4 +292,3 @@ test('the K1 bands are the maximum from TASK_RULES counted down, not invented nu
   assert.match(buildWritingPrompt(task38).user, /(?:^|\n)1 — 1 не раскрыт и 2–3 раскрыты/u);
   assert.doesNotMatch(buildWritingPrompt(task37).user, /(?:^|\n)1 — 1 не раскрыт и 2–3 раскрыты/u);
 });
-
