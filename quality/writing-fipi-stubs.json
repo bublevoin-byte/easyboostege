@@ -94,6 +94,38 @@
         "repaired": false,
         "provider": "grok",
         "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": true,
+        "total": 2,
+        "criteria": {
+          "k1": 1,
+          "k2": 1,
+          "k3": 0
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
+      },
+      {
+        "valid": true,
+        "total": 2,
+        "criteria": {
+          "k1": 1,
+          "k2": 1,
+          "k3": 0
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
       }
     ]
   },
@@ -178,6 +210,28 @@
         "repaired": false,
         "provider": "grok",
         "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": true,
+        "total": 5,
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
+      },
+      {
+        "valid": true,
+        "total": 2,
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
       }
     ]
   },
@@ -248,6 +302,28 @@
         "repaired": false,
         "provider": "grok",
         "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": true,
+        "total": 4,
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
+      },
+      {
+        "valid": true,
+        "total": 4,
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
       }
     ]
   },
@@ -323,6 +399,28 @@
         "repaired": false,
         "provider": "grok",
         "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": true,
+        "total": 4,
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
+      },
+      {
+        "valid": true,
+        "total": 4,
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
       }
     ]
   },
@@ -434,6 +532,42 @@
         "repaired": false,
         "provider": "grok",
         "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": true,
+        "total": 9,
+        "criteria": {
+          "k1": 2,
+          "k2": 3,
+          "k3": 2,
+          "k4": 2,
+          "k5": 0
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
+      },
+      {
+        "valid": true,
+        "total": 7,
+        "criteria": {
+          "k1": 2,
+          "k2": 2,
+          "k3": 2,
+          "k4": 1,
+          "k5": 0
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
       }
     ]
   },
@@ -527,6 +661,28 @@
         "repaired": false,
         "provider": "grok",
         "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": true,
+        "total": 10,
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
+      },
+      {
+        "valid": true,
+        "total": 9,
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
       }
     ]
   },
@@ -620,6 +776,38 @@
         "repaired": false,
         "provider": "grok",
         "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": true,
+        "total": 2,
+        "criteria": {
+          "k1": 1,
+          "k2": 1,
+          "k3": 0
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
+      },
+      {
+        "valid": true,
+        "total": 2,
+        "criteria": {
+          "k1": 1,
+          "k2": 1,
+          "k3": 0
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
       }
     ]
   },
@@ -706,6 +894,38 @@
         "repaired": false,
         "provider": "grok",
         "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": true,
+        "total": 5,
+        "criteria": {
+          "k1": 2,
+          "k2": 2,
+          "k3": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
+      },
+      {
+        "valid": true,
+        "total": 5,
+        "criteria": {
+          "k1": 2,
+          "k2": 2,
+          "k3": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
       }
     ]
   },
@@ -844,6 +1064,30 @@
         "repaired": false,
         "provider": "grok",
         "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": true,
+        "total": 9,
+        "criteria": {
+          "k1": 2,
+          "k2": 2,
+          "k3": 2,
+          "k4": 2,
+          "k5": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
+      },
+      {
+        "valid": false,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
       }
     ]
   },
@@ -949,6 +1193,28 @@
         "repaired": false,
         "provider": "grok",
         "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": true,
+        "total": 5,
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
+      },
+      {
+        "valid": true,
+        "total": 7,
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
       }
     ]
   },
@@ -1055,6 +1321,18 @@
         "repaired": false,
         "provider": "grok",
         "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": false,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
+      },
+      {
+        "valid": false,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
       }
     ]
   },
@@ -1141,6 +1419,38 @@
         "repaired": false,
         "provider": "grok",
         "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": true,
+        "total": 5,
+        "criteria": {
+          "k1": 2,
+          "k2": 2,
+          "k3": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
+      },
+      {
+        "valid": true,
+        "total": 5,
+        "criteria": {
+          "k1": 2,
+          "k2": 2,
+          "k3": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
       }
     ]
   },
@@ -1244,6 +1554,38 @@
         "repaired": false,
         "provider": "grok",
         "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": true,
+        "total": 4,
+        "criteria": {
+          "k1": 2,
+          "k2": 1,
+          "k3": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
+      },
+      {
+        "valid": true,
+        "total": 3,
+        "criteria": {
+          "k1": 2,
+          "k2": 1,
+          "k3": 0
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
       }
     ]
   },
@@ -1355,6 +1697,30 @@
         "repaired": false,
         "provider": "grok",
         "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": true,
+        "total": 10,
+        "criteria": {
+          "k1": 2,
+          "k2": 3,
+          "k3": 2,
+          "k4": 2,
+          "k5": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
+      },
+      {
+        "valid": false,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
       }
     ]
   },
@@ -1490,6 +1856,42 @@
         "repaired": false,
         "provider": "grok",
         "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": true,
+        "total": 8,
+        "criteria": {
+          "k1": 3,
+          "k2": 2,
+          "k3": 2,
+          "k4": 1,
+          "k5": 0
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
+      },
+      {
+        "valid": true,
+        "total": 8,
+        "criteria": {
+          "k1": 2,
+          "k2": 3,
+          "k3": 2,
+          "k4": 1,
+          "k5": 0
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
       }
     ]
   },
@@ -1593,6 +1995,38 @@
         "repaired": false,
         "provider": "grok",
         "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": true,
+        "total": 0,
+        "criteria": {
+          "k1": 0,
+          "k2": 0,
+          "k3": 0
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
+      },
+      {
+        "valid": true,
+        "total": 0,
+        "criteria": {
+          "k1": 0,
+          "k2": 0,
+          "k3": 0
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
       }
     ]
   },
@@ -1696,6 +2130,38 @@
         "repaired": false,
         "provider": "grok",
         "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": true,
+        "total": 4,
+        "criteria": {
+          "k1": 2,
+          "k2": 1,
+          "k3": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
+      },
+      {
+        "valid": true,
+        "total": 3,
+        "criteria": {
+          "k1": 1,
+          "k2": 1,
+          "k3": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
       }
     ]
   },
@@ -1789,6 +2255,38 @@
         "repaired": false,
         "provider": "grok",
         "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": true,
+        "total": 3,
+        "criteria": {
+          "k1": 1,
+          "k2": 2,
+          "k3": 0
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
+      },
+      {
+        "valid": true,
+        "total": 2,
+        "criteria": {
+          "k1": 1,
+          "k2": 1,
+          "k3": 0
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
       }
     ]
   },
@@ -1913,6 +2411,42 @@
         "repaired": false,
         "provider": "grok",
         "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": true,
+        "total": 9,
+        "criteria": {
+          "k1": 2,
+          "k2": 2,
+          "k3": 2,
+          "k4": 1,
+          "k5": 2
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
+      },
+      {
+        "valid": true,
+        "total": 9,
+        "criteria": {
+          "k1": 2,
+          "k2": 2,
+          "k3": 2,
+          "k4": 1,
+          "k5": 2
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
       }
     ]
   },
@@ -2049,6 +2583,42 @@
         "repaired": false,
         "provider": "grok",
         "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": true,
+        "total": 10,
+        "criteria": {
+          "k1": 2,
+          "k2": 3,
+          "k3": 2,
+          "k4": 1,
+          "k5": 2
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
+      },
+      {
+        "valid": true,
+        "total": 9,
+        "criteria": {
+          "k1": 2,
+          "k2": 3,
+          "k3": 2,
+          "k4": 1,
+          "k5": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
       }
     ]
   },
@@ -2184,6 +2754,42 @@
         "repaired": false,
         "provider": "grok",
         "model": "grok-4.20-non-reasoning"
+      },
+      {
+        "valid": true,
+        "total": 8,
+        "criteria": {
+          "k1": 3,
+          "k2": 2,
+          "k3": 2,
+          "k4": 1,
+          "k5": 0
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
+      },
+      {
+        "valid": true,
+        "total": 8,
+        "criteria": {
+          "k1": 3,
+          "k2": 2,
+          "k3": 2,
+          "k4": 1,
+          "k5": 0
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": false,
+        "provider": "grok",
+        "model": "grok-4.5"
       }
     ]
   }
