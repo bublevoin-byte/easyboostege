@@ -114,6 +114,7 @@ export const config = Object.freeze({
     sttTimeoutMs: readInteger('STT_TIMEOUT_MS', 30_000, { min: 1_000, max: 120_000 }),
     sttMaxBytes: readInteger('STT_MAX_BYTES', 20 * 1024 * 1024, { min: 1024, max: 50 * 1024 * 1024 }),
     ttsTimeoutMs: readInteger('TTS_TIMEOUT_MS', 20_000, { min: 1_000, max: 120_000 }),
+    ttsMaxBytes: readInteger('TTS_MAX_BYTES', 5 * 1024 * 1024, { min: 1024, max: 50 * 1024 * 1024 }),
     ttsCacheMaxAgeMs: readInteger('TTS_CACHE_MAX_AGE_MS', 7 * 86_400_000, { min: 60_000, max: 30 * 86_400_000 }),
     ttsCacheMaxBytes: readInteger('TTS_CACHE_MAX_BYTES', 256 * 1024 * 1024, { min: 1024 * 1024, max: 2 * 1024 * 1024 * 1024 }),
     dailyRequestBudget: readInteger('AI_DAILY_REQUEST_BUDGET', 1000, { min: 1, max: 1_000_000 }),
