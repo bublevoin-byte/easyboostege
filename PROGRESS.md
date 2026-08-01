@@ -626,7 +626,7 @@ SHA-256 набора до и после.
 | 02 | Локальный релизный аудит с доказательствами по критериям §24 | done |
 | 03 | Строгие server-owned контракты ответов STT/TTS-провайдеров | done |
 | 04 | Disposable PostgreSQL integration с миграциями, изоляцией и cleanup | done |
-| 05 | Повторный локальный аудит и конкретный чек-лист оставшихся ворот | pending |
+| 05 | Повторный локальный аудит и конкретный чек-лист оставшихся ворот | done |
 
 Работа не включает push, deploy, ротацию секретов и платные ИИ-вызовы. Экспериментальный профиль
 исключает методическую валидацию из области обещаний запуска, но не объявляет её выполненной.
@@ -662,3 +662,18 @@ PostgreSQL 17 на случайном loopback-порту, ждёт healthcheck,
 остаётся Docker-независимым: 424 из 425 тестов проходят при одном защитном PostgreSQL skip;
 lint/check зелёные. §24.4 не закрывался — это решение оставлено полному аудиту тикета 05.
 Двухосевой review: Standards — 1 P2, Spec — 1 P1; оба замечания устранены.
+
+Тикет 05 провёл повторный аудит application candidate `661a98974aac7bbc69dc321a876eacee65ec9819`.
+Прошли lint/check, 425-test suite (424 pass, 1 защитный PostgreSQL skip), обязательный disposable
+PostgreSQL `1/1` pass без skip с миграциями `001`–`020` и cleanup, Chromium до и после build,
+Firefox/Android/iPhone-WebKit
+E2E, performance, frontend build, оба secret scan, `58/58` строгих AI/media tests и quality engineering
+smoke. §24.4 и §24.10 закрыты в обоих профилях; §24.1 засчитан только для experimental.
+Strict остаётся открыт из-за §11 `0/28`; §24.12 strict-open/experimental-excluded. Итоги CLI: strict
+`439/477 = 92.0%`, 38 open; experimental `440/448 = 98.2%`, 8 open, 29 excluded. Внешнее ТЗ обновлено вне Git.
+Подробный аудит — в [`docs/EXPERIMENTAL_RELEASE_AUDIT.md`](docs/EXPERIMENTAL_RELEASE_AUDIT.md), а owner-approved
+manual gates — в [`docs/EXPERIMENTAL_RELEASE_OPERATIONS_CHECKLIST.md`](docs/EXPERIMENTAL_RELEASE_OPERATIONS_CHECKLIST.md).
+Push/deploy, ротация, физические устройства, soak, PWA install, external alert delivery и recovery на втором
+сервере не выполнялись. Двухосевой review относительно `661a989`: Standards — 3 замечания, Spec — 2;
+все устранены. Post-build `dist/public` E2E прошёл, rollback использует root-owned helper, recovery не получает
+production credentials, три доказанных P0 отмечены во внешнем ТЗ; итог сохранён одним amended commit.

@@ -1,8 +1,8 @@
 # Профиль готовности экспериментального запуска
 
-Status: in_progress
+Status: done
 
-Progress: tickets 01–03 done; tickets 04–05 pending
+Progress: tickets 01–05 done
 
 ## Problem Statement
 

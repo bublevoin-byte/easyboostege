@@ -320,13 +320,13 @@ editor /opt/easyboost-staging/.env.staging
 ```bash
 git archive --format=tar.gz --output=easyboost-staging-release.tar.gz HEAD
 sha256sum easyboost-staging-release.tar.gz
-sudo scripts/staging-deploy.sh easyboost-staging-release.tar.gz <sha256>
+sudo /usr/local/sbin/easyboost-staging-deploy easyboost-staging-release.tar.gz <sha256>
 ```
 
 Скрипт сверяет checksum, перед обновлением создаёт PostgreSQL backup и архив кода для rollback, пересобирает контейнеры и ждёт readiness. Откат к последнему сохранённому коду:
 
 ```bash
-sudo /opt/easyboost-staging/scripts/staging-rollback.sh
+sudo /usr/local/sbin/easyboost-staging-rollback
 ```
 
 Workflow `.github/workflows/deploy-staging.yml` запускается вручную или при push в `main`/`production-hardening`. Для GitHub environment `staging` нужны secrets:
@@ -336,13 +336,17 @@ Workflow `.github/workflows/deploy-staging.yml` запускается вруч�
 - `STAGING_SSH_PRIVATE_KEY`;
 - `STAGING_SSH_HOST_KEY` — полная закреплённая строка из `ssh-keyscan`, проверенная владельцем сервера.
 
-На VPS должна быть установлена root-owned копия deploy script:
+На VPS должны быть установлены отдельно проверенные root-owned копии deploy и rollback scripts. Скрипты
+из обновляемого release-каталога `/opt/easyboost-staging/scripts/` через `sudo` не запускаются:
 
 ```bash
 install -o root -g root -m 755 scripts/staging-deploy.sh /usr/local/sbin/easyboost-staging-deploy
+install -o root -g root -m 755 scripts/staging-rollback.sh /usr/local/sbin/easyboost-staging-rollback
 ```
 
-Отдельному SSH-пользователю разрешается через `sudo` запускать только `/usr/local/sbin/easyboost-staging-deploy`; workflow загружает архив, но не исполняемый root-скрипт. Staging URL публикуется отдельным Cloudflare Tunnel route на `http://127.0.0.1:3001`; production route и контейнеры не изменяются.
+Отдельному SSH-пользователю workflow разрешается через `sudo` запускать только `/usr/local/sbin/easyboost-staging-deploy`;
+rollback выполняет owner/operator с отдельным правом ровно на `/usr/local/sbin/easyboost-staging-rollback`.
+Workflow загружает архив, но не исполняемые root-скрипты. Staging URL публикуется отдельным Cloudflare Tunnel route на `http://127.0.0.1:3001`; production route и контейнеры не изменяются.
 
 ### Нагрузочная и длительная проверка staging
 
