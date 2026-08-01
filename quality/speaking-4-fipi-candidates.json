@@ -1,0 +1,106 @@
+[
+  {
+    "id": "sp4-fipi-2025-summer-holidays-candidate",
+    "operation": "speaking_4",
+    "status": "excluded",
+    "reason": "The FIPI manual publishes only fragments inside the expert commentary, not a complete student transcript.",
+    "assignment": {
+      "topic": "Summer holidays",
+      "ph": [
+        "Photo 1: a mother and daughter are gardening in the countryside.",
+        "Photo 2: a father and son are building a sandcastle on a beach."
+      ]
+    },
+    "publishedHumanScore": {
+      "total": 9,
+      "criteria": {
+        "task": 4,
+        "organisation": 3,
+        "language": 2
+      }
+    },
+    "source": {
+      "document": "fipi-uch-2025.pdf",
+      "assignmentPage": 90,
+      "assignmentReview": "visual-pdf-review"
+    }
+  },
+  {
+    "id": "sp4-fipi-2025-volunteering-candidate",
+    "operation": "speaking_4",
+    "status": "excluded",
+    "reason": "The FIPI manual publishes only fragments inside the expert commentary, not a complete student transcript.",
+    "assignment": {
+      "topic": "Volunteering",
+      "ph": [
+        "Photo 1: volunteers are collecting litter outdoors.",
+        "Photo 2: a woman is caring for a dog at an animal shelter."
+      ]
+    },
+    "publishedHumanScore": {
+      "total": 3,
+      "criteria": {
+        "task": 1,
+        "organisation": 2,
+        "language": 0
+      }
+    },
+    "source": {
+      "document": "fipi-uch-2025.pdf",
+      "assignmentPage": 93,
+      "assignmentReview": "visual-pdf-review"
+    }
+  },
+  {
+    "id": "sp4-fipi-2025-sports-candidate",
+    "operation": "speaking_4",
+    "status": "excluded",
+    "reason": "The FIPI manual publishes only fragments inside the expert commentary, not a complete student transcript.",
+    "assignment": {
+      "topic": "Sports",
+      "ph": [
+        "Photo 1: people are playing volleyball outdoors.",
+        "Photo 2: people are playing ice hockey outdoors."
+      ]
+    },
+    "publishedHumanScore": {
+      "total": 4,
+      "criteria": {
+        "task": 2,
+        "organisation": 2,
+        "language": 0
+      }
+    },
+    "source": {
+      "document": "fipi-uch-2025.pdf",
+      "assignmentPage": 96,
+      "assignmentReview": "visual-pdf-review"
+    }
+  },
+  {
+    "id": "sp4-fipi-2025-family-pastime-candidate",
+    "operation": "speaking_4",
+    "status": "excluded",
+    "reason": "The FIPI manual publishes only fragments inside the expert commentary, not a complete student transcript.",
+    "assignment": {
+      "topic": "Family pastime",
+      "ph": [
+        "Photo 1: a family is walking together in an autumn park.",
+        "Photo 2: family members are using phones and a tablet at home."
+      ]
+    },
+    "publishedHumanScore": {
+      "total": 0,
+      "criteria": {
+        "task": 0,
+        "organisation": 0,
+        "language": 0
+      }
+    },
+    "source": {
+      "document": "fipi-uch-2025.pdf",
+      "assignmentPage": 99,
+      "assignmentReview": "visual-pdf-review"
+    }
+  }
+]

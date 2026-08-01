@@ -1,0 +1,170 @@
+{
+  "speaking2": [
+    {
+      "key": "grocery-store",
+      "match": "grocery store located",
+      "ad": "Freshness you can taste!",
+      "points": ["location", "opening hours", "kinds of fruit sold", "delivery service"],
+      "source": { "year": 2026, "assignmentPage": 63 }
+    },
+    {
+      "key": "clinic",
+      "match": "location of the clinic",
+      "ad": "The best clinic in town!",
+      "points": ["location", "public transport", "dentist", "family discounts"],
+      "source": { "year": 2026, "assignmentPage": 64 }
+    },
+    {
+      "key": "flower-shop",
+      "match": "flower shop located",
+      "ad": "All the flowers of the world!",
+      "points": ["location", "cost of delivery", "special occasion decorations", "potted flowers"],
+      "source": { "year": 2026, "assignmentPage": 65 }
+    },
+    {
+      "key": "volleyball-club",
+      "match": "volleyball club located",
+      "ad": "Join our volleyball club!",
+      "points": ["location", "special clothes", "opportunity to play inside", "coach for beginners"],
+      "source": { "year": 2026, "assignmentPage": 66 }
+    },
+    {
+      "key": "hockey-club",
+      "match": "hockey club located",
+      "ad": "Join our hockey club!",
+      "points": ["location", "minimum age", "type of ice rink", "special equipment needed"],
+      "source": { "year": 2026, "assignmentPage": 67 }
+    },
+    {
+      "key": "motorcycle-club",
+      "match": "motorcycle club located",
+      "ad": "Welcome to our motorcycle club!",
+      "points": ["location", "special clothes", "coach", "competitions"],
+      "source": { "year": 2026, "assignmentPage": 68 }
+    },
+    {
+      "key": "photo-studio",
+      "match": "studio located",
+      "ad": "A professional photographer for you!",
+      "points": ["location of the studio", "historical costumes", "professional make-up", "cost of an hour's work"],
+      "source": { "year": 2026, "assignmentPage": 68 }
+    },
+    {
+      "key": "ice-rink",
+      "match": "ice rink located",
+      "ad": "Visit our new ice rink!",
+      "points": ["location", "opening hours", "discounts for students", "coach for beginners"],
+      "source": { "year": 2025, "assignmentPage": 62 }
+    },
+    {
+      "key": "family-weekend",
+      "match": "place for family weekend",
+      "ad": "Family weekend on the lake!",
+      "points": ["location", "accommodation", "price for a family of three", "fishing equipment rental"],
+      "source": { "year": 2025, "assignmentPage": 63 }
+    },
+    {
+      "key": "driving-school",
+      "match": "driving school located",
+      "ad": "The best driving school in the city!",
+      "points": ["location", "morning classes", "minimum age for students", "tuition fee"],
+      "source": { "year": 2025, "assignmentPage": 64 }
+    }
+  ],
+  "speaking4": [
+    {
+      "key": "games-people-like",
+      "topic": "The games people like",
+      "year": 2026,
+      "assignmentPage": 94,
+      "transcriptPage": 95,
+      "transcriptStart": "Hi Max, as for our school project ‘The games people like’",
+      "transcriptEnd": "Анализ выполнения задания 4 “The games people like”",
+      "scoreDirection": "after",
+      "plan": ["briefly describe the photos and note the differences", "mention advantages of the two types of games", "mention disadvantages of the two types of games", "say which type of games you prefer and why"],
+      "ph": ["Photo 1: a girl is playing a computer game alone.", "Photo 2: a woman and a girl are playing chess at home."]
+    },
+    {
+      "key": "ideal-weekend",
+      "topic": "Ideal weekend",
+      "year": 2026,
+      "assignmentPage": 96,
+      "transcriptPage": 97,
+      "transcriptStart": "Hello mate, I've found some photos for our school project ‘Ideal weekend’",
+      "transcriptEnd": "Анализ выполнения задания 4 “Ideal weekend”",
+      "scoreDirection": "after",
+      "plan": ["briefly describe the photos and note the differences", "mention advantages of the two ways to spend the weekend", "mention disadvantages of the two ways to spend the weekend", "say which way to spend the weekend you prefer and why"],
+      "ph": ["Photo 1: a woman is listening to music on a sofa with a cat beside her.", "Photo 2: three women are cycling outdoors."]
+    },
+    {
+      "key": "grandparents",
+      "topic": "The best moments with grandparents",
+      "year": 2026,
+      "assignmentPage": 100,
+      "transcriptPage": 101,
+      "transcriptStart": "Hi, Timur, it’s Kamila. How’s everything been going?",
+      "transcriptEnd": "Анализ выполнения задания 4 “The best moments with grandparents”",
+      "scoreDirection": "after",
+      "plan": ["briefly describe the photos and note the differences", "mention advantages of the two types of spending time with grandparents", "mention disadvantages of the two types of spending time with grandparents", "say which type of spending time with grandparents you prefer and why"],
+      "ph": ["Photo 1: grandparents and their grandchildren are playing a board game at home.", "Photo 2: grandparents and two grandchildren are taking a selfie in snowy mountains."]
+    },
+    {
+      "key": "hobbies",
+      "topic": "Hobbies",
+      "year": 2026,
+      "assignmentPage": 104,
+      "transcriptPage": 105,
+      "transcriptStart": "Hi Kate, I’ve found two photos for our project Hobbies",
+      "transcriptEnd": "Анализ выполнения задания 4 “Hobbies”",
+      "scoreDirection": "after",
+      "plan": ["briefly describe the photos and note the differences", "mention advantages of the two hobbies", "mention disadvantages of the two hobbies", "say which hobby you prefer and why"],
+      "ph": ["Photo 1: a woman is gardening and planting outdoors.", "Photo 2: a man is filming a cooking video in a kitchen."]
+    },
+    {
+      "key": "happy-childhood",
+      "topic": "Happy childhood",
+      "year": 2025,
+      "assignmentPage": 104,
+      "transcriptPage": 106,
+      "transcriptStart": "Hello! I’ve just found two photos for our project",
+      "transcriptEnd": "Please let me know whether you like the choice of two photos for our project.",
+      "scoreDirection": "before",
+      "plan": ["briefly describe the photos and note the differences", "mention advantages of the two types of children's leisure activities", "mention disadvantages of the two types of children's leisure activities", "say which leisure activity you preferred as a child and why"],
+      "ph": ["Photo 1: children are playing together outdoors at a playground.", "Photo 2: a girl is sitting indoors with a stack of books."]
+    }
+  ],
+  "speaking4Excluded": [
+    {
+      "key": "summer-holidays",
+      "topic": "Summer holidays",
+      "year": 2025,
+      "assignmentPage": 90,
+      "publishedHumanScore": { "total": 9, "criteria": { "task": 4, "organisation": 3, "language": 2 } },
+      "ph": ["Photo 1: a mother and daughter are gardening in the countryside.", "Photo 2: a father and son are building a sandcastle on a beach."]
+    },
+    {
+      "key": "volunteering",
+      "topic": "Volunteering",
+      "year": 2025,
+      "assignmentPage": 93,
+      "publishedHumanScore": { "total": 3, "criteria": { "task": 1, "organisation": 2, "language": 0 } },
+      "ph": ["Photo 1: volunteers are collecting litter outdoors.", "Photo 2: a woman is caring for a dog at an animal shelter."]
+    },
+    {
+      "key": "sports",
+      "topic": "Sports",
+      "year": 2025,
+      "assignmentPage": 96,
+      "publishedHumanScore": { "total": 4, "criteria": { "task": 2, "organisation": 2, "language": 0 } },
+      "ph": ["Photo 1: people are playing volleyball outdoors.", "Photo 2: people are playing ice hockey outdoors."]
+    },
+    {
+      "key": "family-pastime",
+      "topic": "Family pastime",
+      "year": 2025,
+      "assignmentPage": 99,
+      "publishedHumanScore": { "total": 0, "criteria": { "task": 0, "organisation": 0, "language": 0 } },
+      "ph": ["Photo 1: a family is walking together in an autumn park.", "Photo 2: family members are using phones and a tablet at home."]
+    }
+  ]
+}

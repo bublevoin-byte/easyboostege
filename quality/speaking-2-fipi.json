@@ -1,0 +1,442 @@
+[
+  {
+    "id": "sp2-fipi-2026-grocery-store",
+    "operation": "speaking_2",
+    "tags": [
+      "middle",
+      "fipi-2026",
+      "official-expert-score",
+      "assignment-visually-reviewed"
+    ],
+    "assignment": {
+      "ad": "Freshness you can taste!",
+      "points": [
+        "location",
+        "opening hours",
+        "kinds of fruit sold",
+        "delivery service"
+      ]
+    },
+    "transcript": "Where is a grocery store located? When does it open and close? What kinds of fruits are sold? Do you have delivery service?",
+    "human": {
+      "total": 3,
+      "max": 4,
+      "criteria": {
+        "q1": 0,
+        "q2": 1,
+        "q3": 1,
+        "q4": 1
+      },
+      "reviewer": "fipi-2026-expert-manual",
+      "notes": [
+        "Вопрос 1 не принимается: ошибка в артикле ведёт к сбою коммуникации. Из-за использования неопределённого артикля вместо определённого вопрос по содержанию не отвечает поставленной задаче.",
+        "Вопрос 2 принимается. Вопрос по содержанию отвечает поставленной задаче, имеет правильную грамматическую форму прямого вопроса, фонетические и лексические погрешности не затрудняют восприятия. В процессе обучения рекомендуется в данной ситуации использовать другую форму вопроса (What are the opening hours?), однако предложенный вариант не ведёт к сбою коммуникации.",
+        "Вопрос 3 принимается. Вопрос по содержанию отвечает поставленной задаче, имеет правильную грамматическую форму прямого вопроса, фонетические и лексические погрешности не затрудняют восприятия.",
+        "Вопрос 4 принимается. Вопрос по содержанию отвечает поставленной задаче, имеет правильную грамматическую форму прямого вопроса, фонетические и лексические погрешности не затрудняют восприятия."
+      ]
+    },
+    "source": {
+      "document": "fipi-uch-2026.pdf",
+      "assignmentPage": 63,
+      "assignmentReview": "visual-pdf-review"
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "sp2-fipi-2026-clinic",
+    "operation": "speaking_2",
+    "tags": [
+      "strong",
+      "fipi-2026",
+      "official-expert-score",
+      "assignment-visually-reviewed"
+    ],
+    "assignment": {
+      "ad": "The best clinic in town!",
+      "points": [
+        "location",
+        "public transport",
+        "dentist",
+        "family discounts"
+      ]
+    },
+    "transcript": "What’s the location of the clinic? Can I use public transport to get to the clinic? Are there any dentists available in the clinic? Do you offer family discounts?",
+    "human": {
+      "total": 4,
+      "max": 4,
+      "criteria": {
+        "q1": 1,
+        "q2": 1,
+        "q3": 1,
+        "q4": 1
+      },
+      "reviewer": "fipi-2026-expert-manual",
+      "notes": [
+        "Вопрос 1 принимается. Вопрос по содержанию отвечает поставленной задаче, имеет правильную грамматическую форму прямого вопроса, фонетические и лексические погрешности не затрудняют восприятия.",
+        "Вопрос 2 принимается. Вопрос по содержанию отвечает поставленной задаче, имеет правильную грамматическую форму прямого вопроса, фонетические и лексические погрешности не затрудняют восприятия.",
+        "Вопрос 3 принимается. Вопрос по содержанию отвечает поставленной задаче, имеет правильную грамматическую форму прямого вопроса, фонетические и лексические погрешности не затрудняют восприятия.",
+        "Вопрос 4 принимается. Вопрос по содержанию отвечает поставленной задаче, имеет правильную грамматическую форму прямого вопроса, фонетические и лексические погрешности не затрудняют восприятия."
+      ]
+    },
+    "source": {
+      "document": "fipi-uch-2026.pdf",
+      "assignmentPage": 64,
+      "assignmentReview": "visual-pdf-review"
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "sp2-fipi-2026-flower-shop",
+    "operation": "speaking_2",
+    "tags": [
+      "middle",
+      "fipi-2026",
+      "official-expert-score",
+      "assignment-visually-reviewed"
+    ],
+    "assignment": {
+      "ad": "All the flowers of the world!",
+      "points": [
+        "location",
+        "cost of delivery",
+        "special occasion decorations",
+        "potted flowers"
+      ]
+    },
+    "transcript": "Where is shop… flower shop located? Where is…? What is the cost of delivery? Do you offer some special occasion decorations? What kind of potted flowers do you offer?",
+    "human": {
+      "total": 3,
+      "max": 4,
+      "criteria": {
+        "q1": 0,
+        "q2": 1,
+        "q3": 1,
+        "q4": 1
+      },
+      "reviewer": "fipi-2026-expert-manual",
+      "notes": [
+        "Вопрос 1 не принимается. Эксперт оценивает последний вопрос, заданный участником. В данном случае вопрос не закончен и не может быть принят. Первая произнесённая версия также не могла бы быть принята: ошибка в артикле влияет на смысл и ведёт к сбою в коммуникации.",
+        "Вопрос 2 принимается. Вопрос по содержанию отвечает поставленной задаче, имеет правильную грамматическую форму прямого вопроса, фонетические и лексические погрешности не затрудняют восприятия.",
+        "Вопрос 3 принимается. Вопрос по содержанию отвечает поставленной задаче, имеет правильную грамматическую форму прямого вопроса, фонетические и лексические погрешности не затрудняют восприятия.",
+        "Вопрос 4 принимается. Вопрос по содержанию отвечает поставленной задаче, имеет правильную грамматическую форму прямого вопроса, фонетические и лексические погрешности не затрудняют восприятия."
+      ]
+    },
+    "source": {
+      "document": "fipi-uch-2026.pdf",
+      "assignmentPage": 65,
+      "assignmentReview": "visual-pdf-review"
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "sp2-fipi-2026-volleyball-club",
+    "operation": "speaking_2",
+    "tags": [
+      "middle",
+      "fipi-2026",
+      "official-expert-score",
+      "assignment-visually-reviewed"
+    ],
+    "assignment": {
+      "ad": "Join our volleyball club!",
+      "points": [
+        "location",
+        "special clothes",
+        "opportunity to play inside",
+        "coach for beginners"
+      ]
+    },
+    "transcript": "Where is the volleyball club located? Do I need any special clothes? Do you have opportunity to play inside? Can I employ a coach for beginners?",
+    "human": {
+      "total": 3,
+      "max": 4,
+      "criteria": {
+        "q1": 1,
+        "q2": 1,
+        "q3": 1,
+        "q4": 0
+      },
+      "reviewer": "fipi-2026-expert-manual",
+      "notes": [
+        "Вопрос 1 по содержанию отвечает поставленной задаче (объект, о котором задаётся вопрос, назван), имеет правильную грамматическую форму прямого вопроса, фонетические и лексические погрешности не затрудняют восприятия. Вопрос принимается.",
+        "Вопрос 2 по содержанию отвечает поставленной задаче, имеет правильную грамматическую форму прямого вопроса, фонетические и лексические погрешности не затрудняют восприятия. Вопрос принимается.",
+        "Вопрос 3 по содержанию отвечает поставленной задаче, имеет правильную грамматическую форму прямого вопроса, фонетические и лексические погрешности не затрудняют восприятия. Вопрос принимается.",
+        "Вопрос 4 по содержанию не отвечает поставленной задаче из-за лексической ошибки. Вопрос не принимается."
+      ]
+    },
+    "source": {
+      "document": "fipi-uch-2026.pdf",
+      "assignmentPage": 66,
+      "assignmentReview": "visual-pdf-review"
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "sp2-fipi-2026-hockey-club",
+    "operation": "speaking_2",
+    "tags": [
+      "strong",
+      "fipi-2026",
+      "official-expert-score",
+      "assignment-visually-reviewed"
+    ],
+    "assignment": {
+      "ad": "Join our hockey club!",
+      "points": [
+        "location",
+        "minimum age",
+        "type of ice rink",
+        "special equipment needed"
+      ]
+    },
+    "transcript": "Where is your hockey club located? What is the minimum age to join hockey club? What type of ice rink do you have? Do I need any special equipment?",
+    "human": {
+      "total": 4,
+      "max": 4,
+      "criteria": {
+        "q1": 1,
+        "q2": 1,
+        "q3": 1,
+        "q4": 1
+      },
+      "reviewer": "fipi-2026-expert-manual",
+      "notes": [
+        "Вопрос 1 по содержанию отвечает поставленной задаче (объект, о котором задаётся вопрос, назван), имеет правильную грамматическую форму прямого вопроса, фонетические и лексические погрешности не затрудняют восприятия. Вопрос принимается.",
+        "Вопрос 2 по содержанию отвечает поставленной задаче, имеет правильную грамматическую форму прямого вопроса, фонетические и лексические погрешности не затрудняют восприятия. Вопрос принимается.",
+        "Вопрос 3 по содержанию отвечает поставленной задаче, имеет правильную грамматическую форму прямого вопроса, фонетические и лексические погрешности не затрудняют восприятия. Вопрос принимается.",
+        "Вопрос 3 по содержанию отвечает поставленной задаче, имеет правильную грамматическую форму прямого вопроса, фонетические и лексические погрешности не затрудняют восприятия. Вопрос принимается."
+      ]
+    },
+    "source": {
+      "document": "fipi-uch-2026.pdf",
+      "assignmentPage": 67,
+      "assignmentReview": "visual-pdf-review"
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "sp2-fipi-2026-motorcycle-club",
+    "operation": "speaking_2",
+    "tags": [
+      "middle",
+      "fipi-2026",
+      "official-expert-score",
+      "assignment-visually-reviewed"
+    ],
+    "assignment": {
+      "ad": "Welcome to our motorcycle club!",
+      "points": [
+        "location",
+        "special clothes",
+        "coach",
+        "competitions"
+      ]
+    },
+    "transcript": "Where is your motorcycle club located? Do I need to have any special clothes to ride a motorcycle? Do you have any coach in that motorcycle club? Do you have any competitions in the motorcycle club?",
+    "human": {
+      "total": 3,
+      "max": 4,
+      "criteria": {
+        "q1": 1,
+        "q2": 1,
+        "q3": 0,
+        "q4": 1
+      },
+      "reviewer": "fipi-2026-expert-manual",
+      "notes": [
+        "Вопрос 1 по содержанию отвечает поставленной задаче (объект, о котором задаётся вопрос, назван), имеет правильную грамматическую форму прямого вопроса, фонетические и лексические погрешности не затрудняют восприятия. Вопрос принимается.",
+        "Вопрос 2 по содержанию отвечает поставленной задаче, имеет правильную грамматическую форму прямого вопроса, фонетические и лексические погрешности не затрудняют восприятия. Вопрос принимается.",
+        "Вопрос 3 по содержанию непонятен: почему говорящий задаёт вопрос о каком-то другом мотоклубе (that motorcycle club)? Наблюдается сбой коммуникации. Вопрос не принимается.",
+        "Вопрос 4 по содержанию отвечает поставленной задаче, имеет правильную грамматическую форму прямого вопроса, фонетические и лексические погрешности не затрудняют восприятия. Вопрос принимается."
+      ]
+    },
+    "source": {
+      "document": "fipi-uch-2026.pdf",
+      "assignmentPage": 68,
+      "assignmentReview": "visual-pdf-review"
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "sp2-fipi-2026-photo-studio",
+    "operation": "speaking_2",
+    "tags": [
+      "middle",
+      "fipi-2026",
+      "official-expert-score",
+      "assignment-visually-reviewed"
+    ],
+    "assignment": {
+      "ad": "A professional photographer for you!",
+      "points": [
+        "location of the studio",
+        "historical costumes",
+        "professional make-up",
+        "cost of an hour's work"
+      ]
+    },
+    "transcript": "Where is your studio located? There are historical costumes? What professional make-up do you offer? How much does the cost of an hour’s work?",
+    "human": {
+      "total": 2,
+      "max": 4,
+      "criteria": {
+        "q1": 1,
+        "q2": 0,
+        "q3": 1,
+        "q4": 0
+      },
+      "reviewer": "fipi-2026-expert-manual",
+      "notes": [
+        "Вопрос 1 по содержанию отвечает поставленной задаче (объект, о котором задаётся вопрос, назван – your studio), имеет правильную грамматическую форму прямого вопроса (Where is your studio located?), фонетические и лексические погрешности не затрудняют восприятия. Вопрос принимается.",
+        "Вопрос 2 (There are historical costumes?) не принимается, так как нарушена грамматическая структура прямого вопроса. Надо: “Are there…”.",
+        "Вопрос 3 по содержанию отвечает поставленной задаче, имеет правильную грамматическую форму прямого вопроса, фонетические и лексические погрешности не затрудняют восприятия. Вопрос принимается.",
+        "Вопрос 4 по содержанию отвечает поставленной задаче, но не имеет правильной грамматической формы прямого вопроса. Надо: How much does an hour’s work cost? или What’s the cost of an hour’s work? Вопрос не принимается."
+      ]
+    },
+    "source": {
+      "document": "fipi-uch-2026.pdf",
+      "assignmentPage": 68,
+      "assignmentReview": "visual-pdf-review"
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "sp2-fipi-2025-ice-rink",
+    "operation": "speaking_2",
+    "tags": [
+      "strong",
+      "fipi-2025",
+      "official-expert-score",
+      "assignment-visually-reviewed"
+    ],
+    "assignment": {
+      "ad": "Visit our new ice rink!",
+      "points": [
+        "location",
+        "opening hours",
+        "discounts for students",
+        "coach for beginners"
+      ]
+    },
+    "transcript": "Where is the ice rink located? What are the opening hours of the ice rink? Do you have any discounts for students? Is there an opportunity to hire a coach for beginners?",
+    "human": {
+      "total": 4,
+      "max": 4,
+      "criteria": {
+        "q1": 1,
+        "q2": 1,
+        "q3": 1,
+        "q4": 1
+      },
+      "reviewer": "fipi-2025-expert-manual",
+      "notes": [
+        "Вопрос 1 по содержанию отвечает поставленной задаче (объект, о котором задаётся вопрос, назван (the ice-rink); имеет правильную грамматическую форму прямого вопроса; фонетические и лексические погрешности не затрудняют восприятия. Вопрос принимается.",
+        "Вопрос 2 по содержанию отвечает поставленной задаче; имеет правильную грамматическую форму прямого вопроса; фонетические и лексические погрешности не затрудняют восприятия. Вопрос принимается.",
+        "Вопрос 3 по содержанию отвечает поставленной задаче; имеет правильную грамматическую форму прямого вопроса; фонетические и лексические погрешности не затрудняют восприятия. Вопрос принимается.",
+        "Вопрос 4 по содержанию отвечает поставленной задаче; имеет правильную грамматическую форму прямого вопроса; фонетические и лексические погрешности не затрудняют восприятия. Вопрос принимается."
+      ]
+    },
+    "source": {
+      "document": "fipi-uch-2025.pdf",
+      "assignmentPage": 62,
+      "assignmentReview": "visual-pdf-review"
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "sp2-fipi-2025-family-weekend",
+    "operation": "speaking_2",
+    "tags": [
+      "middle",
+      "fipi-2025",
+      "official-expert-score",
+      "assignment-visually-reviewed"
+    ],
+    "assignment": {
+      "ad": "Family weekend on the lake!",
+      "points": [
+        "location",
+        "accommodation",
+        "price for a family of three",
+        "fishing equipment rental"
+      ]
+    },
+    "transcript": "Where is the place for family weekend located? Which accommodation do you offer? What is the price for the weekend for a family of three? Can I rent the fishing equipment?",
+    "human": {
+      "total": 3,
+      "max": 4,
+      "criteria": {
+        "q1": 1,
+        "q2": 0,
+        "q3": 1,
+        "q4": 1
+      },
+      "reviewer": "fipi-2025-expert-manual",
+      "notes": [
+        "Вопрос 1 по содержанию отвечает поставленной задаче (объект, о котором задаётся вопрос, назван: the place for family weekend); имеет правильную грамматическую форму прямого вопроса; фонетические и лексические погрешности не затрудняют восприятия. Вопрос принимается.",
+        "Вопрос 2 начинается с неправильного вопросительного слова: надо what accommodation / what kind of accommodation. Вопрос не принимается.",
+        "Вопрос 3 по содержанию отвечает поставленной задаче; имеет правильную грамматическую форму прямого вопроса; фонетические и лексические погрешности не затрудняют восприятия. Вопрос принимается.",
+        "Вопрос 4 по содержанию отвечает поставленной задаче; имеет правильную грамматическую форму прямого вопроса; фонетические и лексические погрешности не затрудняют восприятия. Вопрос принимается."
+      ]
+    },
+    "source": {
+      "document": "fipi-uch-2025.pdf",
+      "assignmentPage": 63,
+      "assignmentReview": "visual-pdf-review"
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "sp2-fipi-2025-driving-school",
+    "operation": "speaking_2",
+    "tags": [
+      "middle",
+      "fipi-2025",
+      "official-expert-score",
+      "assignment-visually-reviewed"
+    ],
+    "assignment": {
+      "ad": "The best driving school in the city!",
+      "points": [
+        "location",
+        "morning classes",
+        "minimum age for students",
+        "tuition fee"
+      ]
+    },
+    "transcript": "Where is your driving school located? Do you have morning classes? What is minimum age for students? What is tutation fee?",
+    "human": {
+      "total": 2,
+      "max": 4,
+      "criteria": {
+        "q1": 1,
+        "q2": 1,
+        "q3": 0,
+        "q4": 0
+      },
+      "reviewer": "fipi-2025-expert-manual",
+      "notes": [
+        "Вопрос 1 по содержанию отвечает поставленной задаче (объект, о котором задаётся вопрос, назван: your driving school); имеет правильную грамматическую форму прямого вопроса; фонетические и лексические погрешности не затрудняют восприятия. Вопрос принимается.",
+        "Вопрос 2 по содержанию отвечает поставленной задаче; имеет правильную грамматическую форму прямого вопроса; фонетические и лексические погрешности не затрудняют восприятия. Вопрос принимается.",
+        "Вопрос 3 не принимается из-за отсутствия артикля – в этом случае отсутствие артикля меняет смысл вопроса.",
+        "Вопрос 4 не принимается из-за отсутствия артикля – в этом случае отсутствие артикля меняет смысл вопроса, – а также из-за фонетической ошибки, препятствующей коммуникации (tutation). Одной этой фонетической ошибки было бы достаточно для выставления 0 баллов за этот вопрос."
+      ]
+    },
+    "source": {
+      "document": "fipi-uch-2025.pdf",
+      "assignmentPage": 64,
+      "assignmentReview": "visual-pdf-review"
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  }
+]

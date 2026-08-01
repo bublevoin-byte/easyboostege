@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 import { sanitizeStudentText } from '../validation/student-text.js';
 
-export const SPEAKING_PROMPT_VERSION = 'speaking-eval-v1';
+export const SPEAKING_PROMPT_VERSION = 'speaking-eval-v2';
 const text = (max) => z.string().trim().min(1).max(max);
 // The transcript comes back from an external STT service, so it is untrusted just like typed text.
 const transcript = (max) => text(max)
@@ -34,10 +34,10 @@ const reviewSchema = z.object({
   criteria: z.array(criterion).min(1).max(5), good: z.array(generatedText(400)).max(3), fix: z.array(correction).max(4),
 }).strict();
 const taskRules = {
-  1: { max: 1, criteria: 'one criterion "Чтение вслух" with max 1; compare completeness and substitutions, but do not assess pronunciation from text' },
-  2: { max: 4, criteria: 'four criteria with max 1 each; award only grammatically correct direct questions matching the four information points' },
-  3: { max: 5, criteria: 'five criteria with max 1 each; each relevant answer needs at least two sentences' },
-  4: { max: 10, criteria: 'exactly three criteria: "Решение коммуникативной задачи" max 3, "Организация" max 3, "Языковое оформление" max 4' },
+  1: { max: 1, criterionMaxima: [1], criteria: 'one criterion "Чтение вслух" with max 1; compare completeness and substitutions, but do not assess pronunciation from text' },
+  2: { max: 4, criterionMaxima: [1, 1, 1, 1], criteria: 'four criteria with max 1 each; award only grammatically correct direct questions matching the four information points' },
+  3: { max: 5, criterionMaxima: [1, 1, 1, 1, 1], criteria: 'five criteria with max 1 each; each relevant answer needs at least two sentences' },
+  4: { max: 10, criterionMaxima: [4, 3, 3], criteria: 'exactly three criteria in this order: "Решение коммуникативной задачи" max 4, "Организация" max 3, "Языковое оформление" max 3; if the first criterion is 0, all criteria and the overall score must be 0' },
 };
 export function buildSpeakingPrompt(input) {
   const rule = taskRules[input.taskType];
@@ -51,10 +51,17 @@ export function parseSpeakingReview(taskType, raw) {
   try { parsed = JSON.parse(String(raw).replace(/^```(?:json)?\s*|\s*```$/giu, '').trim()); }
   catch { throw Object.assign(new Error('AI_RESPONSE_INVALID'), { code: 'AI_RESPONSE_INVALID' }); }
   const result = reviewSchema.safeParse(parsed);
-  const expectedMax = taskRules[taskType].max;
+  const rule = taskRules[taskType];
+  const expectedMax = rule.max;
+  const maxima = result.success ? result.data.criteria.map((item) => item.max) : [];
+  const task4ZeroRuleBroken = result.success && taskType === 4 && result.data.criteria[0]?.got === 0
+    && (result.data.got !== 0 || result.data.criteria.some((item) => item.got !== 0));
   if (!result.success || result.data.max !== expectedMax || result.data.got > expectedMax
+    || maxima.length !== rule.criterionMaxima.length
+    || maxima.some((maximum, index) => maximum !== rule.criterionMaxima[index])
     || result.data.criteria.reduce((sum, item) => sum + item.max, 0) !== expectedMax
-    || result.data.criteria.reduce((sum, item) => sum + item.got, 0) !== result.data.got) {
+    || result.data.criteria.reduce((sum, item) => sum + item.got, 0) !== result.data.got
+    || task4ZeroRuleBroken) {
     throw Object.assign(new Error('AI_RESPONSE_INVALID'), { code: 'AI_RESPONSE_INVALID' });
   }
   return result.data;

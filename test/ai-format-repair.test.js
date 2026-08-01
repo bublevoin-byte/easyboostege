@@ -304,7 +304,7 @@ test('successful free-answer APIs identify the integer score as experimental and
     );
     assert.deepEqual(
       attempts.speaking.map(({ provider, model, prompt_version: promptVersion }) => ({ provider, model, promptVersion })),
-      [{ provider: 'grok', model: 'route-provenance-model', promptVersion: 'speaking-eval-v1' }],
+      [{ provider: 'grok', model: 'route-provenance-model', promptVersion: 'speaking-eval-v2' }],
     );
   } finally {
     await stack.stop();
@@ -331,7 +331,7 @@ test('a failed speaking evaluation keeps the last known provider and model', { t
         attemptStatus: 'failed',
         provider: 'grok',
         model: 'route-provenance-model',
-        promptVersion: 'speaking-eval-v1',
+        promptVersion: 'speaking-eval-v2',
         errorCode: 'AI_RESPONSE_INVALID',
       }],
     );

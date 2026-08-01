@@ -30,6 +30,39 @@ test('speaking review validates task maximum and criterion totals', () => {
   assert.throws(() => parseSpeakingReview(2, JSON.stringify(review)), /AI_RESPONSE_INVALID/u);
 });
 
+test('speaking task 4 enforces the FIPI 4/3/3 rubric and the zero-content rule', () => {
+  const task4Request = speakingRequestSchema.parse({
+    taskType: 4,
+    transcript: 'I have chosen two photos for our project and will compare them.',
+    assignment: { topic: 'Hobbies', plan: ['photos', 'advantages', 'disadvantages', 'opinion'], ph: ['gardening', 'cooking'] },
+  });
+  const prompt = buildSpeakingPrompt(task4Request);
+  assert.match(prompt.system, /max 4.*max 3.*max 3/u);
+  assert.match(prompt.system, /first criterion is 0.*overall score must be 0/u);
+
+  const review = {
+    got: 6,
+    max: 10,
+    verdict: 'Задание выполнено частично.',
+    criteria: [
+      { name: 'Решение коммуникативной задачи', got: 2, max: 4 },
+      { name: 'Организация', got: 2, max: 3 },
+      { name: 'Языковое оформление', got: 2, max: 3 },
+    ],
+    good: [],
+    fix: [],
+  };
+  assert.equal(parseSpeakingReview(4, JSON.stringify(review)).got, 6);
+  assert.throws(
+    () => parseSpeakingReview(4, JSON.stringify({ ...review, criteria: review.criteria.map((item, index) => ({ ...item, max: [3, 3, 4][index] })) })),
+    /AI_RESPONSE_INVALID/u,
+  );
+  assert.throws(
+    () => parseSpeakingReview(4, JSON.stringify({ ...review, got: 2, criteria: review.criteria.map((item, index) => ({ ...item, got: index === 1 ? 2 : 0 })) })),
+    /AI_RESPONSE_INVALID/u,
+  );
+});
+
 test('speaking sample uses typed assignment and validates output', () => {
   const sampleRequest = speakingSampleRequestSchema.parse({ taskType: 2, assignment: request.assignment });
   const prompt = buildSpeakingSamplePrompt(sampleRequest);
