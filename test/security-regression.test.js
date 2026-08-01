@@ -360,18 +360,22 @@ test('production documentation covers local setup, API, database and operations'
     assert.match(documents[1], new RegExp(route.replaceAll('/', '\\/'), 'u'));
   }
   assert.match(documents[2], /user_progress/u);
+  assert.match(documents[2], /журнал пользовательских прогонов/u);
+  assert.match(documents[2], /provider, model, prompt_version/u);
   assert.match(documents[3], /WRITING_PROMPT_VERSION/u);
   assert.match(documents[4], /JWT_SECRET/u);
   assert.match(documents[5], /requestId/u);
   assert.match(documents[6], /Известные ограничения/u);
   assert.match(documents[7], /TELEGRAM_BOT_TOKEN/u);
   assert.match(documents[8], /quality:release/u);
+  assert.match(documents[8], /не импортируется автоматически в золотой набор/u);
 });
 
 test('privacy UI separates text and voice consent and explains external processing', async () => {
-  const [script, policy] = await Promise.all([
+  const [script, policy, retention] = await Promise.all([
     fs.readFile(new URL('../public/privacy.js', import.meta.url), 'utf8'),
     fs.readFile(new URL('../public/privacy.html', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../docs/DATA_RETENTION.md', import.meta.url), 'utf8'),
   ]);
   assert.match(script, /id="privacyText" type="checkbox"/u);
   assert.match(script, /id="privacyVoice" type="checkbox"/u);
@@ -381,6 +385,11 @@ test('privacy UI separates text and voice consent and explains external processi
   assert.match(policy, /не является экспертным заключением/u);
   assert.match(policy, /не является официальн/u);
   assert.match(policy, /Сроки хранения/u);
+  assert.match(policy, /не считаются анонимными/u);
+  assert.match(policy, /не попадают автоматически в золотой набор/u);
+  assert.match(retention, /псевдонимизац/u);
+  assert.match(retention, /очистк[аи] свободного текста/u);
+  assert.match(retention, /отдельн.*человеческ.*размет/u);
 });
 
 test('demo mode is isolated from persistence and paid AI calls', async () => {

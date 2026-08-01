@@ -133,6 +133,7 @@ test('writing attempt and AI metadata are persisted without prompt text in the A
     await repository.finishWritingAttempt(attemptId, {
       status: 'failed',
       provider: 'groq',
+      model: 'test-model',
       errorCode: 'AI_UNAVAILABLE',
     });
     await repository.logAiRequest({
@@ -156,7 +157,12 @@ test('writing attempt and AI metadata are persisted without prompt text in the A
 
     const stored = JSON.parse(await fs.readFile(file, 'utf8'));
     assert.equal(stored.writing_attempts[0].status, 'failed');
+    assert.equal(stored.writing_attempts[0].provider, 'groq');
+    assert.equal(stored.writing_attempts[0].model, 'test-model');
+    assert.equal(stored.writing_attempts[0].prompt_version, 'writing-v1');
     assert.equal(stored.writing_attempts[0].error_code, 'AI_UNAVAILABLE');
+    const exported = await repository.exportUserData(username);
+    assert.equal(exported.writing_attempts[0].model, 'test-model');
     assert.equal(stored.ai_requests[0].durationMs, 123);
     assert.equal(stored.ai_requests[0].promptTokens, 42);
     assert.equal(stored.ai_requests[0].completionTokens, 17);
@@ -173,13 +179,37 @@ test('speaking attempts persist transcript review metadata but never audio', asy
       assignment: { ad: 'Ask about a course.', points: ['price', 'place', 'time', 'equipment'] },
       transcript: 'How much does it cost?',
     }, 'speaking-eval-v1');
-    await repository.finishSpeakingAttempt(attemptId, { status: 'completed', provider: 'test', review: { got: 1, max: 4 } });
+    await repository.finishSpeakingAttempt(attemptId, {
+      status: 'completed', provider: 'test', model: 'speaking-test-model', review: { got: 1, max: 4 },
+    });
     const exported = await repository.exportUserData(username);
     assert.equal(exported.speaking_attempts[0].transcript, 'How much does it cost?');
     assert.equal(exported.speaking_attempts[0].review.got, 1);
+    assert.equal(exported.speaking_attempts[0].provider, 'test');
+    assert.equal(exported.speaking_attempts[0].model, 'speaking-test-model');
+    assert.equal(exported.speaking_attempts[0].prompt_version, 'speaking-eval-v1');
     const stored = JSON.parse(await fs.readFile(file, 'utf8'));
     assert.equal(JSON.stringify(stored.speaking_attempts).includes('audio'), false);
   });
+});
+
+test('attempts saved before model provenance export an explicit unknown model', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-legacy-attempts-'));
+  const file = path.join(directory, 'data.json');
+  await fs.writeFile(file, JSON.stringify({
+    users: { legacy: { created: Date.now() } },
+    writing_attempts: [{ id: 1, username: 'legacy', prompt_version: 'writing-v3', status: 'completed' }],
+    speaking_attempts: [{ id: 1, username: 'legacy', prompt_version: 'speaking-eval-v1', status: 'failed' }],
+  }));
+  const repository = createFileRepository(file);
+  try {
+    const exported = await repository.exportUserData('legacy');
+    assert.equal(exported.writing_attempts[0].model, null);
+    assert.equal(exported.speaking_attempts[0].model, null);
+  } finally {
+    await repository.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
 });
 
 test('generated tasks are reused by request hash and exported without internal hashes', async () => {

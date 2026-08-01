@@ -323,11 +323,12 @@ export function createPostgresRepository(connectionString) {
   async function finishWritingAttempt(id, result) {
     const updated = await pool.query(
       `UPDATE writing_attempts
-       SET status = $2, review = $3::jsonb, provider = $4,
-           error_code = $5, evaluated_at = NOW()
+       SET status = $2, review = $3::jsonb, provider = $4, model = $5,
+           error_code = $6, evaluated_at = NOW()
        WHERE id = $1
        RETURNING id`,
-      [id, result.status, result.review ? JSON.stringify(result.review) : null, result.provider || null, result.errorCode || null],
+      [id, result.status, result.review ? JSON.stringify(result.review) : null, result.provider || null,
+        result.model || null, result.errorCode || null],
     );
     if (!updated.rowCount) throw new Error('WRITING_ATTEMPT_NOT_FOUND');
   }
@@ -343,10 +344,10 @@ export function createPostgresRepository(connectionString) {
 
   async function finishSpeakingAttempt(id, result) {
     const updated = await pool.query(
-      `UPDATE speaking_attempts SET status = $2, review = $3::jsonb, provider = $4,
-         error_code = $5, evaluated_at = NOW() WHERE id = $1 RETURNING id`,
+      `UPDATE speaking_attempts SET status = $2, review = $3::jsonb, provider = $4, model = $5,
+         error_code = $6, evaluated_at = NOW() WHERE id = $1 RETURNING id`,
       [id, result.status, result.review ? JSON.stringify(result.review) : null,
-        result.provider || null, result.errorCode || null],
+        result.provider || null, result.model || null, result.errorCode || null],
     );
     if (!updated.rowCount) throw new Error('SPEAKING_ATTEMPT_NOT_FOUND');
   }
@@ -617,8 +618,8 @@ export function createPostgresRepository(connectionString) {
       pool.query('SELECT text_processing, voice_processing, policy_version, text_consented_at, voice_consented_at, updated_at FROM privacy_consents WHERE username = $1', [username]),
       pool.query('SELECT id, event_type, days, metadata, created_at FROM subscription_events WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, status, actor_telegram_id, result, created_at, resolved_at FROM payment_requests WHERE username = $1 ORDER BY created_at', [username]),
-      pool.query('SELECT id, task_type, assignment, answer, review, provider, prompt_version, status, created_at, evaluated_at FROM writing_attempts WHERE username = $1 ORDER BY created_at', [username]),
-      pool.query('SELECT id, task_type, assignment, transcript, review, provider, prompt_version, status, error_code, created_at, evaluated_at FROM speaking_attempts WHERE username = $1 ORDER BY created_at', [username]),
+      pool.query('SELECT id, task_type, assignment, answer, review, provider, model, prompt_version, status, error_code, created_at, evaluated_at FROM writing_attempts WHERE username = $1 ORDER BY created_at', [username]),
+      pool.query('SELECT id, task_type, assignment, transcript, review, provider, model, prompt_version, status, error_code, created_at, evaluated_at FROM speaking_attempts WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, operation, request, result, provider, prompt_version, created_at FROM generated_tasks WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, module, activity, score, max_score, duration_ms, metadata, created_at FROM module_attempts WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT module, attempt_count, best_score, best_max_score, total_duration_ms, last_attempt_at, updated_at FROM progress_summary WHERE username = $1 ORDER BY module', [username]),

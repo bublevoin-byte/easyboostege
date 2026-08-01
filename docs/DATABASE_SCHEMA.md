@@ -11,8 +11,8 @@
 | `payment_requests` | ручные заявки на оплату | status, administrator, result and resolution time |
 | `user_progress` | JSONB-прогресс пользователя | `username`, `data`, `updated_at` |
 | `telegram_auth_codes` | одноразовые коды входа | hash кода, expiry, consumed state |
-| `writing_attempts` | попытки заданий 37/38 | assignment, answer, review, provider status |
-| `speaking_attempts` | текстовые результаты устной части | assignment, transcript, review, provider status; audio is not stored |
+| `writing_attempts` | журнал пользовательских прогонов заданий 37/38 | assignment, answer, review, provider, model, prompt_version, status, error_code |
+| `speaking_attempts` | журнал пользовательских прогонов устной части | assignment, transcript, review, provider, model, prompt_version, status, error_code; audio is not stored |
 | `generated_tasks` | валидированные результаты генерации | operation, versioned request hash, request/result and provider |
 | `module_attempts` | нормализованная история учебных результатов | module, activity, score, duration and bounded metadata |
 | `progress_summary` | серверная агрегированная сводка прогресса | attempts, best normalized score, total duration and last attempt |
@@ -22,3 +22,10 @@
 | `ai_requests` | технический журнал ИИ | operation, provider, model, duration, status, error code, tokens, estimated cost |
 
 Связи привязаны к `users.username`; API всегда определяет пользователя из HttpOnly-сессии. Изменения схемы добавляются новой нумерованной миграцией и проверяются `npm run db:migrate`.
+
+`writing_attempts` и `speaking_attempts` — пользовательские данные, а не эталонная выборка:
+запись в этих таблицах не даёт ответу экспертной оценки и не создаёт пути автоматического импорта
+в `quality/`. Они включаются в экспорт аккаунта и удаляются каскадно вместе с пользователем.
+Миграция `019_attempt_models.sql` добавляет nullable-поле `model`, поэтому прежние строки остаются
+валидными с неизвестной моделью (`NULL`), а новые завершённые прогоны сохраняют полную тройку
+`provider`, `model`, `prompt_version`.

@@ -27,6 +27,9 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
       '014_error_bank.sql',
       '015_audit_log.sql',
       '016_progress_summary.sql',
+      '017_ai_fallback_reason.sql',
+      '018_task_bank.sql',
+      '019_attempt_models.sql',
     ]);
 
     const username = await repository.createTelegramUser(telegramId, `Integration ${suffix}`);
@@ -65,12 +68,14 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
       taskType: 'writing_37', assignment: { prompt: 'Integration' }, answer: 'Test answer',
     }, 'integration-v1');
     await repository.finishWritingAttempt(attemptId, {
-      status: 'failed', provider: 'test', errorCode: 'EXPECTED_TEST_ERROR',
+      status: 'failed', provider: 'test', model: 'integration-writing-model', errorCode: 'EXPECTED_TEST_ERROR',
     });
     const speakingAttemptId = await repository.createSpeakingAttempt(username, {
       taskType: 2, assignment: { ad: 'Integration', points: ['a', 'b', 'c', 'd'] }, transcript: 'Four questions.',
     }, 'integration-speaking-v1');
-    await repository.finishSpeakingAttempt(speakingAttemptId, { status: 'failed', provider: 'test', errorCode: 'EXPECTED_TEST_ERROR' });
+    await repository.finishSpeakingAttempt(speakingAttemptId, {
+      status: 'failed', provider: 'test', model: 'integration-speaking-model', errorCode: 'EXPECTED_TEST_ERROR',
+    });
     const taskHash = crypto.createHash('sha256').update(suffix).digest('hex');
     await repository.saveGeneratedTask(username, { operation: 'grammar_quiz', requestHash: taskHash, request: { operation: 'grammar_quiz' }, result: [{ q: suffix }], provider: 'test', promptVersion: 'content-v1' });
     assert.equal((await repository.getGeneratedTask(username, taskHash)).result[0].q, suffix);
@@ -87,8 +92,14 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     });
     await repository.healthCheck();
 
-    const attempt = await client.query('SELECT status, error_code FROM writing_attempts WHERE id = $1', [attemptId]);
-    assert.deepEqual(attempt.rows[0], { status: 'failed', error_code: 'EXPECTED_TEST_ERROR' });
+    const attempt = await client.query('SELECT status, provider, model, prompt_version, error_code FROM writing_attempts WHERE id = $1', [attemptId]);
+    assert.deepEqual(attempt.rows[0], {
+      status: 'failed',
+      provider: 'test',
+      model: 'integration-writing-model',
+      prompt_version: 'integration-v1',
+      error_code: 'EXPECTED_TEST_ERROR',
+    });
     const aiLog = await client.query('SELECT operation, status FROM ai_requests WHERE username = $1', [username]);
     assert.deepEqual(aiLog.rows[0], { operation: 'integration', status: 'completed' });
     const aiUsage = await repository.getAiUsageMetrics(24);
@@ -100,6 +111,9 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     assert.deepEqual(exported.progress, { learned: 12, prog: { words: 44 }, marker: suffix, extra: true });
     assert.equal(exported.writing_attempts.length, 1);
     assert.equal(exported.speaking_attempts.length, 1);
+    assert.equal(exported.writing_attempts[0].model, 'integration-writing-model');
+    assert.equal(exported.writing_attempts[0].error_code, 'EXPECTED_TEST_ERROR');
+    assert.equal(exported.speaking_attempts[0].model, 'integration-speaking-model');
     assert.equal(exported.generated_tasks.length, 1);
     assert.equal(exported.module_attempts.length, 1);
     assert.equal(exported.progress_summary[0].attempt_count, 1);
@@ -113,6 +127,7 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     assert.equal(await repository.deleteUserData(username), true);
     assert.equal(await repository.getUser(username), null);
     assert.equal((await client.query('SELECT 1 FROM writing_attempts WHERE username = $1', [username])).rowCount, 0);
+    assert.equal((await client.query('SELECT 1 FROM speaking_attempts WHERE username = $1', [username])).rowCount, 0);
     assert.equal((await client.query('SELECT 1 FROM ai_requests WHERE username = $1', [username])).rowCount, 0);
     const retainedAudit = await client.query('SELECT metadata FROM audit_log WHERE target_id = $1', [paymentRequest.id]);
     assert.equal(retainedAudit.rows[0].metadata.username, undefined);

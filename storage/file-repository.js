@@ -2,6 +2,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { hashAuthCode, normalizeUsername, subscriptionView } from './shared.js';
 
+function normalizeAttemptModels(attempts) {
+  return attempts.map((attempt) => ({ ...attempt, model: attempt.model ?? null }));
+}
+
 export function createFileRepository(filePath) {
   let loaded = false;
   let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, payment_requests: {}, subscription_events: [] };
@@ -18,8 +22,8 @@ export function createFileRepository(filePath) {
           progress: parsed.progress && typeof parsed.progress === 'object' ? parsed.progress : {},
           progress_summary: parsed.progress_summary && typeof parsed.progress_summary === 'object' ? parsed.progress_summary : {},
           auth_codes: parsed.auth_codes && typeof parsed.auth_codes === 'object' ? parsed.auth_codes : {},
-          writing_attempts: Array.isArray(parsed.writing_attempts) ? parsed.writing_attempts : [],
-          speaking_attempts: Array.isArray(parsed.speaking_attempts) ? parsed.speaking_attempts : [],
+          writing_attempts: Array.isArray(parsed.writing_attempts) ? normalizeAttemptModels(parsed.writing_attempts) : [],
+          speaking_attempts: Array.isArray(parsed.speaking_attempts) ? normalizeAttemptModels(parsed.speaking_attempts) : [],
           generated_tasks: Array.isArray(parsed.generated_tasks) ? parsed.generated_tasks : [],
           task_bank: Array.isArray(parsed.task_bank) ? parsed.task_bank : [],
           task_deliveries: Array.isArray(parsed.task_deliveries) ? parsed.task_deliveries : [],
@@ -285,6 +289,7 @@ export function createFileRepository(filePath) {
       assignment: structuredClone(input.assignment),
       answer: input.answer,
       prompt_version: promptVersion,
+      model: null,
       status: 'pending',
       created_at: Date.now(),
     });
@@ -299,6 +304,7 @@ export function createFileRepository(filePath) {
     attempt.status = result.status;
     attempt.review = result.review ? structuredClone(result.review) : null;
     attempt.provider = result.provider || null;
+    attempt.model = result.model || null;
     attempt.error_code = result.errorCode || null;
     attempt.evaluated_at = Date.now();
     await persist();
@@ -307,7 +313,7 @@ export function createFileRepository(filePath) {
   async function createSpeakingAttempt(username, input, promptVersion) {
     await load();
     const id = (state.speaking_attempts.at(-1)?.id || 0) + 1;
-    state.speaking_attempts.push({ id, username, task_type: input.taskType, assignment: structuredClone(input.assignment), transcript: input.transcript, prompt_version: promptVersion, status: 'pending', created_at: Date.now() });
+    state.speaking_attempts.push({ id, username, task_type: input.taskType, assignment: structuredClone(input.assignment), transcript: input.transcript, prompt_version: promptVersion, model: null, status: 'pending', created_at: Date.now() });
     await persist();
     return id;
   }
@@ -319,6 +325,7 @@ export function createFileRepository(filePath) {
     attempt.status = result.status;
     attempt.review = result.review ? structuredClone(result.review) : null;
     attempt.provider = result.provider || null;
+    attempt.model = result.model || null;
     attempt.error_code = result.errorCode || null;
     attempt.evaluated_at = Date.now();
     await persist();

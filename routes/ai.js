@@ -160,7 +160,7 @@ export function createAiRoutes({ authentication, access, db }) {
         completionTokens = outcome.repair.usage.completionTokens;
       }
       const accepted = outcome.repair ? outcome.repair.usage : result;
-      await finishWritingAttempt(attemptId, { status: 'completed', review, provider });
+      await finishWritingAttempt(attemptId, { status: 'completed', review, provider, model });
       await logAiRequest({
         username: req.user,
         operation: input.taskType,
@@ -199,7 +199,9 @@ export function createAiRoutes({ authentication, access, db }) {
         completionTokens,
         estimatedCostMicrousd: estimateCostMicrousd({ promptTokens, completionTokens }, aiProviders().find((item) => item.name === provider)),
       })];
-      if (attemptId) writes.push(finishWritingAttempt(attemptId, { status: 'failed', provider, errorCode: code }));
+      if (attemptId) writes.push(finishWritingAttempt(attemptId, {
+        status: 'failed', provider, model, errorCode: code,
+      }));
       await Promise.allSettled(writes);
       const message = code === 'AI_NOT_CONFIGURED'
         ? 'ИИ не настроен на сервере.'
@@ -325,7 +327,9 @@ export function createAiRoutes({ authentication, access, db }) {
         }
         await Promise.all([
           logAiRequest({ username: req.user, operation: `evaluate_speaking_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt, fallbackReason, ...aiUsage(provider, usage) }),
-          finishSpeakingAttempt(attemptId, { status: 'completed', review, provider: provider.name }),
+          finishSpeakingAttempt(attemptId, {
+            status: 'completed', review, provider: provider.name, model: provider.model,
+          }),
         ]);
         recordDependencyEvent('ai', 'success');
         if (providerIndex > 0) recordDependencyEvent('ai', 'fallback');
@@ -339,7 +343,13 @@ export function createAiRoutes({ authentication, access, db }) {
         await logAiRequest({ username: req.user, operation: `evaluate_speaking_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'failed', durationMs: Date.now() - startedAt, errorCode: lastCode, fallbackReason: describeFallback(provider, lastCode, error, providerIndex, providers.length), ...aiUsage(provider, usage) });
       }
     }
-    await finishSpeakingAttempt(attemptId, { status: 'failed', errorCode: lastCode });
+    const lastProvider = providers.at(-1);
+    await finishSpeakingAttempt(attemptId, {
+      status: 'failed',
+      provider: lastProvider?.name,
+      model: lastProvider?.model,
+      errorCode: lastCode,
+    });
     res.status(lastCode === 'AI_RESPONSE_INVALID' ? 502 : 503).json({ error: { code: lastCode, message: 'Не удалось корректно оценить устный ответ.' } });
   });
 

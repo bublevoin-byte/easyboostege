@@ -125,6 +125,7 @@ async function startStack({ replies }) {
       TELEGRAM_BOT_TOKEN: '',
       XAI_API_KEY: 'xai-test-key',
       XAI_API_URL: `http://127.0.0.1:${providerPort}/xai`,
+      XAI_MODEL: 'route-provenance-model',
       GROQ_ENABLED: 'false',
       GROQ_API_KEY: '',
     },
@@ -151,6 +152,13 @@ async function startStack({ replies }) {
     async aiRequestLog() {
       const stored = JSON.parse(await fs.readFile(dataFile, 'utf8'));
       return stored.ai_requests || [];
+    },
+    async attemptLog() {
+      const stored = JSON.parse(await fs.readFile(dataFile, 'utf8'));
+      return {
+        writing: stored.writing_attempts || [],
+        speaking: stored.speaking_attempts || [],
+      };
     },
     async evaluateWriting(answer) {
       const response = await fetch(`${baseUrl}/api/v1/ai/evaluate-writing`, {
@@ -240,6 +248,23 @@ test('a second malformed answer ends the request instead of retrying forever', {
       2,
       'после второй неудачи попыток больше нет — третий валидный ответ в очереди остался невостребованным',
     );
+    const attempts = await stack.attemptLog();
+    assert.deepEqual(
+      {
+        status: attempts.writing[0].status,
+        provider: attempts.writing[0].provider,
+        model: attempts.writing[0].model,
+        promptVersion: attempts.writing[0].prompt_version,
+        errorCode: attempts.writing[0].error_code,
+      },
+      {
+        status: 'failed',
+        provider: 'grok',
+        model: 'route-provenance-model',
+        promptVersion: 'writing-v4',
+        errorCode: 'AI_RESPONSE_INVALID',
+      },
+    );
   } finally {
     await stack.stop();
   }
@@ -272,6 +297,44 @@ test('successful free-answer APIs identify the integer score as experimental and
     assert.equal(Number.isInteger(speaking.body.review.got), true);
     assert.deepEqual(writing.body.assessment, { mode: 'experimental', scoreKind: 'approximate', warning });
     assert.deepEqual(speaking.body.assessment, { mode: 'experimental', scoreKind: 'approximate', warning });
+    const attempts = await stack.attemptLog();
+    assert.deepEqual(
+      attempts.writing.map(({ provider, model, prompt_version: promptVersion }) => ({ provider, model, promptVersion })),
+      [{ provider: 'grok', model: 'route-provenance-model', promptVersion: 'writing-v4' }],
+    );
+    assert.deepEqual(
+      attempts.speaking.map(({ provider, model, prompt_version: promptVersion }) => ({ provider, model, promptVersion })),
+      [{ provider: 'grok', model: 'route-provenance-model', promptVersion: 'speaking-eval-v1' }],
+    );
+  } finally {
+    await stack.stop();
+  }
+});
+
+test('a failed speaking evaluation keeps the last known provider and model', { timeout: 40_000 }, async () => {
+  const stack = await startStack({ replies: ['not json', 'still not json'] });
+  try {
+    const { status, body } = await stack.evaluateSpeaking();
+
+    assert.equal(status, 502);
+    assert.equal(body.error.code, 'AI_RESPONSE_INVALID');
+    const attempts = await stack.attemptLog();
+    assert.deepEqual(
+      attempts.speaking.map(({
+        status: attemptStatus,
+        provider,
+        model,
+        prompt_version: promptVersion,
+        error_code: errorCode,
+      }) => ({ attemptStatus, provider, model, promptVersion, errorCode })),
+      [{
+        attemptStatus: 'failed',
+        provider: 'grok',
+        model: 'route-provenance-model',
+        promptVersion: 'speaking-eval-v1',
+        errorCode: 'AI_RESPONSE_INVALID',
+      }],
+    );
   } finally {
     await stack.stop();
   }

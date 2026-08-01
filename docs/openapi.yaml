@@ -70,7 +70,7 @@ paths:
     get:
       summary: Export the authenticated user's account, progress and attempt data
       responses:
-        '200': { description: User data export as JSON attachment }
+        '200': { description: JSON export including attempt provider, model, prompt version, status and error code }
         '401': { $ref: '#/components/responses/Unauthorized' }
   /api/v1/account:
     delete:
