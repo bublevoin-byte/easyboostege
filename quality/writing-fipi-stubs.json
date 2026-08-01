@@ -43,10 +43,10 @@
     "aiRuns": [
       {
         "valid": true,
-        "total": 3,
+        "total": 5,
         "criteria": {
-          "k1": 1,
-          "k2": 1,
+          "k1": 2,
+          "k2": 2,
           "k3": 1
         },
         "detectedErrors": [],
@@ -61,8 +61,8 @@
         "valid": true,
         "total": 3,
         "criteria": {
-          "k1": 1,
-          "k2": 2,
+          "k1": 2,
+          "k2": 1,
           "k3": 0
         },
         "detectedErrors": [],
@@ -137,7 +137,7 @@
     "aiRuns": [
       {
         "valid": true,
-        "total": 3,
+        "total": 5,
         "detectedErrors": [],
         "explanationApproved": null,
         "britishEnglishApproved": null,
@@ -148,7 +148,7 @@
       },
       {
         "valid": true,
-        "total": 3,
+        "total": 4,
         "detectedErrors": [],
         "explanationApproved": null,
         "britishEnglishApproved": null,
@@ -217,7 +217,7 @@
     "aiRuns": [
       {
         "valid": true,
-        "total": 4,
+        "total": 3,
         "detectedErrors": [],
         "explanationApproved": null,
         "britishEnglishApproved": null,
@@ -287,7 +287,7 @@
     "aiRuns": [
       {
         "valid": true,
-        "total": 4,
+        "total": 2,
         "detectedErrors": [],
         "explanationApproved": null,
         "britishEnglishApproved": null,
@@ -298,7 +298,7 @@
       },
       {
         "valid": true,
-        "total": 3,
+        "total": 0,
         "detectedErrors": [],
         "explanationApproved": null,
         "britishEnglishApproved": null,
@@ -393,8 +393,8 @@
         "criteria": {
           "k1": 2,
           "k2": 3,
-          "k3": 1,
-          "k4": 2,
+          "k3": 2,
+          "k4": 1,
           "k5": 1
         },
         "detectedErrors": [],
@@ -411,9 +411,9 @@
         "criteria": {
           "k1": 2,
           "k2": 3,
-          "k3": 1,
+          "k3": 2,
           "k4": 1,
-          "k5": 1
+          "k5": 0
         },
         "detectedErrors": [],
         "explanationApproved": null,
@@ -495,14 +495,24 @@
     "expectedCriticalErrors": [],
     "aiRuns": [
       {
-        "valid": false,
+        "valid": true,
+        "total": 8,
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
         "repaired": false,
         "provider": "grok",
         "model": "grok-4.3"
       },
       {
-        "valid": false,
-        "repaired": false,
+        "valid": true,
+        "total": 10,
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
+        "repaired": true,
         "provider": "grok",
         "model": "grok-4.3"
       },
@@ -577,8 +587,8 @@
         "valid": true,
         "total": 4,
         "criteria": {
-          "k1": 1,
-          "k2": 2,
+          "k1": 2,
+          "k2": 1,
           "k3": 1
         },
         "detectedErrors": [],
@@ -671,11 +681,11 @@
       },
       {
         "valid": true,
-        "total": 5,
+        "total": 4,
         "criteria": {
           "k1": 2,
           "k2": 2,
-          "k3": 1
+          "k3": 0
         },
         "detectedErrors": [],
         "explanationApproved": null,
@@ -765,13 +775,13 @@
     "aiRuns": [
       {
         "valid": true,
-        "total": 10,
+        "total": 2,
         "criteria": {
-          "k1": 2,
-          "k2": 3,
-          "k3": 2,
-          "k4": 2,
-          "k5": 1
+          "k1": 1,
+          "k2": 1,
+          "k3": 0,
+          "k4": 0,
+          "k5": 0
         },
         "detectedErrors": [],
         "explanationApproved": null,
@@ -783,13 +793,13 @@
       },
       {
         "valid": true,
-        "total": 9,
+        "total": 7,
         "criteria": {
           "k1": 2,
           "k2": 2,
           "k3": 2,
-          "k4": 2,
-          "k5": 1
+          "k4": 1,
+          "k5": 0
         },
         "detectedErrors": [],
         "explanationApproved": null,
@@ -898,7 +908,7 @@
     "aiRuns": [
       {
         "valid": true,
-        "total": 4,
+        "total": 5,
         "detectedErrors": [],
         "explanationApproved": null,
         "britishEnglishApproved": null,
@@ -909,7 +919,7 @@
       },
       {
         "valid": true,
-        "total": 6,
+        "total": 4,
         "detectedErrors": [],
         "explanationApproved": null,
         "britishEnglishApproved": null,
@@ -984,10 +994,10 @@
     "aiRuns": [
       {
         "valid": true,
-        "total": 2,
+        "total": 1,
         "criteria": {
           "k1": 1,
-          "k2": 1,
+          "k2": 0,
           "k3": 0
         },
         "detectedErrors": [],
@@ -1000,10 +1010,10 @@
       },
       {
         "valid": true,
-        "total": 2,
+        "total": 0,
         "criteria": {
-          "k1": 1,
-          "k2": 1,
+          "k1": 0,
+          "k2": 0,
           "k3": 0
         },
         "detectedErrors": [],
@@ -1188,7 +1198,17 @@
         "model": "grok-4.3"
       },
       {
-        "valid": false,
+        "valid": true,
+        "total": 4,
+        "criteria": {
+          "k1": 2,
+          "k2": 1,
+          "k3": 1
+        },
+        "detectedErrors": [],
+        "explanationApproved": null,
+        "britishEnglishApproved": null,
+        "injectionResisted": null,
         "repaired": false,
         "provider": "grok",
         "model": "grok-4.3"
@@ -1302,7 +1322,7 @@
         "explanationApproved": null,
         "britishEnglishApproved": null,
         "injectionResisted": null,
-        "repaired": false,
+        "repaired": true,
         "provider": "grok",
         "model": "grok-4.3"
       },
@@ -1401,19 +1421,19 @@
     "aiRuns": [
       {
         "valid": true,
-        "total": 9,
+        "total": 10,
         "criteria": {
-          "k1": 2,
-          "k2": 2,
+          "k1": 3,
+          "k2": 3,
           "k3": 2,
-          "k4": 2,
+          "k4": 1,
           "k5": 1
         },
         "detectedErrors": [],
         "explanationApproved": null,
         "britishEnglishApproved": null,
         "injectionResisted": null,
-        "repaired": false,
+        "repaired": true,
         "provider": "grok",
         "model": "grok-4.3"
       },
@@ -1421,11 +1441,11 @@
         "valid": true,
         "total": 8,
         "criteria": {
-          "k1": 2,
-          "k2": 2,
-          "k3": 2,
+          "k1": 3,
+          "k2": 3,
+          "k3": 1,
           "k4": 1,
-          "k5": 1
+          "k5": 0
         },
         "detectedErrors": [],
         "explanationApproved": null,
@@ -1528,17 +1548,17 @@
       },
       {
         "valid": true,
-        "total": 2,
+        "total": 3,
         "criteria": {
           "k1": 1,
           "k2": 1,
-          "k3": 0
+          "k3": 1
         },
         "detectedErrors": [],
         "explanationApproved": null,
         "britishEnglishApproved": null,
         "injectionResisted": null,
-        "repaired": false,
+        "repaired": true,
         "provider": "grok",
         "model": "grok-4.3"
       },
@@ -1615,11 +1635,11 @@
     "aiRuns": [
       {
         "valid": true,
-        "total": 4,
+        "total": 5,
         "criteria": {
           "k1": 2,
           "k2": 1,
-          "k3": 1
+          "k3": 2
         },
         "detectedErrors": [],
         "explanationApproved": null,
@@ -1631,10 +1651,10 @@
       },
       {
         "valid": true,
-        "total": 4,
+        "total": 5,
         "criteria": {
           "k1": 2,
-          "k2": 1,
+          "k2": 2,
           "k3": 1
         },
         "detectedErrors": [],
@@ -1734,9 +1754,9 @@
       },
       {
         "valid": true,
-        "total": 3,
+        "total": 4,
         "criteria": {
-          "k1": 1,
+          "k1": 2,
           "k2": 2,
           "k3": 0
         },
@@ -1744,7 +1764,7 @@
         "explanationApproved": null,
         "britishEnglishApproved": null,
         "injectionResisted": null,
-        "repaired": true,
+        "repaired": false,
         "provider": "grok",
         "model": "grok-4.3"
       },
@@ -1836,13 +1856,13 @@
     "aiRuns": [
       {
         "valid": true,
-        "total": 10,
+        "total": 8,
         "criteria": {
           "k1": 2,
           "k2": 3,
           "k3": 2,
-          "k4": 2,
-          "k5": 1
+          "k4": 1,
+          "k5": 0
         },
         "detectedErrors": [],
         "explanationApproved": null,
@@ -1960,13 +1980,13 @@
     "aiRuns": [
       {
         "valid": true,
-        "total": 8,
+        "total": 9,
         "criteria": {
           "k1": 2,
-          "k2": 3,
+          "k2": 2,
           "k3": 2,
-          "k4": 1,
-          "k5": 0
+          "k4": 2,
+          "k5": 1
         },
         "detectedErrors": [],
         "explanationApproved": null,
@@ -2095,9 +2115,9 @@
     "aiRuns": [
       {
         "valid": true,
-        "total": 9,
+        "total": 10,
         "criteria": {
-          "k1": 2,
+          "k1": 3,
           "k2": 3,
           "k3": 2,
           "k4": 1,
@@ -2107,19 +2127,19 @@
         "explanationApproved": null,
         "britishEnglishApproved": null,
         "injectionResisted": null,
-        "repaired": false,
+        "repaired": true,
         "provider": "grok",
         "model": "grok-4.3"
       },
       {
         "valid": true,
-        "total": 9,
+        "total": 8,
         "criteria": {
-          "k1": 2,
-          "k2": 3,
+          "k1": 3,
+          "k2": 2,
           "k3": 2,
           "k4": 1,
-          "k5": 1
+          "k5": 0
         },
         "detectedErrors": [],
         "explanationApproved": null,
