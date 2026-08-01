@@ -116,8 +116,8 @@ test('the prompt ships the pre-check results and says so in its version', () => 
     assignment: { from: 'Alison', stimulus: 'Do you read? What books? Which one would you advise?', questionsTopic: 'the project' },
   });
 
-  // Version string only: v3 adds the allowed `kind` values and the FIPI zero rules (issue 12).
-  assert.equal(WRITING_PROMPT_VERSION, 'writing-v3');
+  // Version string only: v4 adds the angle-bracket ban and the K1 aspect scheme (issue 15).
+  assert.equal(WRITING_PROMPT_VERSION, 'writing-v4');
   assert.match(prompt.user, /Проверено программно/u);
   assert.equal(prompt.facts.questionSentences, 3);
   assert.equal(prompt.facts.words, countWords(LETTER));

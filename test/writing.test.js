@@ -143,3 +143,61 @@ test('the zero thresholds are derived from TASK_RULES, not a second set of const
   assert.doesNotMatch(source, /\b275\b/u);
 });
 
+/*
+ * Section 10.4 rejects a review carrying `<` or `>`. The v3 line «Больше 154 слов» taught the model
+ * to answer with the sign — «(277>275)», «>154» — and that was every schema rejection of the
+ * grok-4.5 measurement. The guard stays; the prompt now says the sign is not allowed.
+ */
+test('prompt forbids angle brackets in the text of a review', () => {
+  for (const input of [task37, task38]) {
+    const { user } = buildWritingPrompt(input);
+    assert.match(user, /Ни в одном текстовом поле не ставь угловые скобки/u, input.taskType);
+    assert.match(user, /Сравнения пиши словами/u, input.taskType);
+  }
+  // And the prompt itself must not show the signs it forbids.
+  assert.doesNotMatch(buildWritingPrompt(task37).user.replace(JSON.stringify(task37.answer), ''), /[<>]/u);
+});
+
+/*
+ * The model was given the consequence of a zero on the communicative criterion in v3 but never the
+ * sign by which FIPI awards one: it counts aspects. Six aspects in both tasks, but the bands differ
+ * because the criterion caps at a different score, so each task carries its own scale.
+ */
+test('prompt makes the communicative criterion a count of six aspects', () => {
+  for (const input of [task37, task38]) {
+    const { user } = buildWritingPrompt(input);
+    assert.match(user, /выставляется подсчётом 6 аспектов, а не на глаз/u, input.taskType);
+    assert.match(user, /раскрыт, раскрыт неполно\/неточно, не раскрыт/u, input.taskType);
+    for (let number = 1; number <= 6; number += 1) {
+      assert.match(user, new RegExp(`Аспект[ыа]? [^\\n]*\\b${number}\\b`, 'u'), `${input.taskType} аспект ${number}`);
+    }
+  }
+
+  const prompt37 = buildWritingPrompt(task37).user;
+  const prompt38 = buildWritingPrompt(task38).user;
+  // Aspect lists are task-specific: the letter has questions, the essay has a table and a plan.
+  assert.match(prompt37, /нормы вежливости/u);
+  assert.match(prompt38, /нейтральный стиль/u);
+  assert.doesNotMatch(prompt37, /нейтральный стиль/u);
+  assert.doesNotMatch(prompt38, /нормы вежливости/u);
+});
+
+test('the K1 bands are the maximum from TASK_RULES counted down, not invented numbers', () => {
+  for (const input of [task37, task38]) {
+    const [, communicativeMax] = getWritingRules(input.taskType).criteria[0];
+    const { user } = buildWritingPrompt(input);
+
+    // Top band is exactly the maximum the server accepts for that criterion.
+    assert.match(user, new RegExp(`Балл: ${communicativeMax} — все аспекты раскрыты`, 'u'), input.taskType);
+    // Every band from the maximum down to zero is named, and no band above the maximum exists.
+    for (let band = communicativeMax; band >= 0; band -= 1) {
+      assert.match(user, new RegExp(`(?:^|\\n)${band} — |Балл: ${band} — `, 'u'), `${input.taskType} балл ${band}`);
+    }
+    assert.doesNotMatch(user, new RegExp(`(?:^|\\n)${communicativeMax + 1} — `, 'u'), input.taskType);
+  }
+
+  // The scales are genuinely different: task 37 has no middle band that task 38 has.
+  assert.match(buildWritingPrompt(task38).user, /(?:^|\n)1 — 1 не раскрыт и 2–3 раскрыты/u);
+  assert.doesNotMatch(buildWritingPrompt(task37).user, /(?:^|\n)1 — 1 не раскрыт и 2–3 раскрыты/u);
+});
+

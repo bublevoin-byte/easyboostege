@@ -12,7 +12,11 @@ const studentAnswer = (max) => z.string().trim().min(20).max(max)
 // v2 adds the deterministic pre-check block to the prompt (section 10.5).
 // v3 names the allowed `kind` values and the three FIPI rules that force a zero. The first
 // measurement showed the model inventing a third `kind` and never reaching zero on its own.
-export const WRITING_PROMPT_VERSION = 'writing-v3';
+// v4 bans the angle brackets v3 taught the model to write: it echoed the word-limit rule back as a
+// comparison sign, and section 10.4 rejected every such review. It also gives the communicative
+// criterion its FIPI aspect scheme — v3 gave the model the consequence of a zero but never the
+// countable sign by which a zero is awarded.
+export const WRITING_PROMPT_VERSION = 'writing-v4';
 
 const task37AssignmentSchema = z.object({
   from: z.string().trim().min(1).max(40),
@@ -145,7 +149,7 @@ export function buildWritingPrompt(input) {
   // The three FIPI rules that force a zero. Their thresholds are derived from the same TASK_RULES
   // the criteria and the range come from: a second set of constants would drift on the first edit
   // and the prompt would start stating rules the server does not hold.
-  const [communicativeCriterion] = rules.criteria[0];
+  const [communicativeCriterion, communicativeMax] = rules.criteria[0];
   const zeroBelowWords = Math.round(rules.minWords * 0.9);
   const cutOffAboveWords = Math.round(rules.maxWords * 1.1);
   const zeroRules = [
@@ -160,14 +164,56 @@ export function buildWritingPrompt(input) {
     'При этом поле words — всегда полный объём всего ответа, а не оценённой части; in_range считай тоже по полному объёму.',
   ].join('\n');
 
+  /*
+   * The aspect scheme behind the communicative criterion. Both tasks have exactly six aspects, but
+   * the bands are different because the criterion caps at a different score, so each task carries
+   * its own scale and neither is derived from the other. Sources, all in
+   * quality/sources/fipi-pch-2026.txt: task 37 — table 1.9 and the additional marking scheme 1.10;
+   * task 38 — the additional marking scheme 1.12 and the summary of the criterion in prose.
+   * The band labels come from TASK_RULES for the same reason the word thresholds do: a literal
+   * here would keep stating the old maximum the day the criterion changes.
+   */
+  const aspectCount = 6;
+  const aspects = input.taskType === 'writing_37'
+    ? [
+      'Аспекты 1, 2, 3 — ответ на первый, второй и третий вопрос письма, по аспекту на вопрос.',
+      'Аспект 4 — заданы три вопроса по указанной теме.',
+      'Аспект 5 — нормы вежливости: благодарность за письмо или радость от его получения и надежда на последующие контакты.',
+      'Аспект 6 — стилевое оформление: обращение, завершающая фраза, подпись в неофициальном стиле.',
+      `Балл: ${communicativeMax} — все аспекты раскрыты, допускается 1 неполный или неточный;`,
+      '0 — 3 и более аспекта не раскрыты, ИЛИ все 6 раскрыты неполно/неточно, ИЛИ 1 не раскрыт и 4–5 раскрыты неполно/неточно, ИЛИ 2 не раскрыты и 2–4 раскрыты неполно/неточно, ИЛИ объём не соответствует требуемому;',
+      `${communicativeMax - 1} — все прочие случаи.`,
+    ]
+    : [
+      'Аспект 1 — вступление соответствует теме проектной работы.',
+      'Аспект 2 — приведены 2–3 факта из таблицы.',
+      'Аспект 3 — даны и прокомментированы 1–2 существенных сравнения.',
+      'Аспект 4 — обозначена возможная проблема и предложено её решение.',
+      'Аспект 5 — в заключении выражено и обосновано мнение автора.',
+      'Аспект 6 — стилевое оформление: соблюдается нейтральный стиль.',
+      `Балл: ${communicativeMax} — все аспекты раскрыты полно и точно, допускается 1 неполный/неточный аспект и 1 нарушение нейтрального стиля;`,
+      `${communicativeMax - 1} — 1 аспект не раскрыт, ИЛИ 1 не раскрыт и 1 раскрыт неполно/неточно, ИЛИ 2–3 раскрыты неполно/неточно (допускаются 2–3 нарушения стиля);`,
+      `${communicativeMax - 2} — 1 не раскрыт и 2–3 раскрыты неполно/неточно, ИЛИ 2 не раскрыты, ИЛИ 2 не раскрыты и 1 раскрыт неполно/неточно, ИЛИ 4–5 раскрыты неполно/неточно (допускаются 4 нарушения стиля);`,
+      '0 — все прочие случаи, ИЛИ объём не соответствует требуемому.',
+    ];
+  const aspectScheme = [
+    `Балл по критерию «${communicativeCriterion}» выставляется подсчётом ${aspectCount} аспектов, а не на глаз. Каждому аспекту поставь ровно одну пометку: раскрыт, раскрыт неполно/неточно, не раскрыт. Затем посчитай пометки и выбери балл.`,
+    ...aspects,
+  ].join('\n');
+
   const facts = analyzeWriting(input);
   const user = [
     `Тип задания: ${input.taskType}. Допустимый объём: ${rules.minWords}–${rules.maxWords} слов.`,
     assignment,
     `Критерии: ${criteria}. Общий максимум: ${rules.overallMax}.`,
+    aspectScheme,
     zeroRules,
     describeFacts(facts, input.taskType),
     `Верни JSON следующей формы: ${JSON.stringify(responseShape)}.`,
+    // Section 10.4 rejects a review that carries an angle bracket, and v3 taught the model to write
+    // one: it echoed the word-limit rule back as a comparison. The guard is right, so the prompt
+    // states the ban instead of leaving the model to trip over it.
+    'Ни в одном текстовом поле не ставь угловые скобки — знаки «больше» и «меньше». Сравнения пиши словами: «объём превышен», «больше половины». Разбор с такими знаками отвергается целиком.',
     'Укажи не более пяти самых важных ошибок. Не придумывай фрагменты, которых нет в ответе.',
     'Поле kind принимает ровно два значения: "err" — нарушение, снижающее балл; "warn" — недочёт, балл за который не снижается. Третьего значения нет. Невыполненный пункт плана, неотвеченный вопрос и нарушение объёма — это kind: "err".',
     `Ответ ученика: ${JSON.stringify(input.answer)}`,

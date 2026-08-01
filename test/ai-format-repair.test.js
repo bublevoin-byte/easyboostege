@@ -242,8 +242,8 @@ test('both calls of a repaired request are reported, so the budget stays truthfu
     assert.match(rejected.fallbackReason, /format repair requested/u);
     assert.ok(rejected.completionTokens > 0, 'потраченные токены не должны потеряться');
     assert.ok(accepted, 'принятый разбор тоже записывается');
-    // Version string only: v3 adds the allowed `kind` values and the FIPI zero rules (issue 12).
-    assert.equal(accepted.promptVersion, 'writing-v3');
+    // Version string only: v4 adds the angle-bracket ban and the K1 aspect scheme (issue 15).
+    assert.equal(accepted.promptVersion, 'writing-v4');
   } finally {
     await stack.stop();
   }
