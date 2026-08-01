@@ -22,8 +22,19 @@ npm start
 
 ```bash
 npm run db:migrate
-npm test
 ```
+
+Repository integration запускается отдельно и не требует локального `.env`:
+
+```bash
+npm run test:postgres
+```
+
+Команда использует `compose.test.yml`: поднимает отдельную PostgreSQL 17 на случайном loopback-порту,
+ждёт healthcheck, применяет все миграции, запускает только `test/postgres-repository.test.js` без
+skip и в любом исходе удаляет test-контейнер, сеть и volume. Для защиты от случайного обращения к
+production/staging она сама задаёт test-only URL и использует уникальный Compose project; образ
+`postgres:17-alpine` автоматически загружается Docker только если его ещё нет локально.
 
 Production-развёртывание, backup, restore и rollback описаны в [README_DEPLOY.md](./README_DEPLOY.md). API — в [docs/openapi.yaml](./docs/openapi.yaml).
 

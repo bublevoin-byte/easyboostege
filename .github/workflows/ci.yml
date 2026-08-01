@@ -11,24 +11,6 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    services:
-      postgres:
-        image: postgres:17-alpine
-        env:
-          POSTGRES_DB: easyboost_test
-          POSTGRES_USER: easyboost_test
-          POSTGRES_PASSWORD: integration_test_password
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U easyboost_test -d easyboost_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      DATABASE_PROVIDER: postgres
-      DATABASE_URL: postgresql://easyboost_test:integration_test_password@127.0.0.1:5432/easyboost_test
-      TEST_DATABASE_URL: postgresql://easyboost_test:integration_test_password@127.0.0.1:5432/easyboost_test
     steps:
       - uses: actions/checkout@v4
         with:
@@ -52,7 +34,8 @@ jobs:
           bash -n scripts/staging-deploy.sh scripts/staging-rollback.sh
           cp .env.staging.example .env.staging
           docker compose -f compose.staging.yml --env-file .env.staging config --quiet
-      - run: npm run db:migrate
+      - name: PostgreSQL repository integration
+        run: npm run test:postgres
       # Сервер отдаёт dist/public, если сборка есть, и public/ иначе. Оба пути должны быть зелёными,
       # поэтому первый прогон идёт по исходникам, а всё, что после сборки, — по собранной версии,
       # то есть ровно по той, которая уезжает в production.

@@ -34,3 +34,21 @@
 строк он заполняется полным `answer`; в новых попытках `answer` хранит весь очищенный ответ, а
 `evaluated_answer` — ровно тот фрагмент, который получил провайдер. Оба поля входят в экспорт и
 удаляются каскадно вместе с аккаунтом.
+
+## Проверка миграций и repository
+
+```bash
+npm run test:postgres
+```
+
+Команда создаёт уникальный Compose project из `compose.test.yml` с базой
+`easyboost_repository_test`, применяет каждый файл из `migrations/` через `scripts/migrate.js` и
+проверяет публичный `createPostgresRepository` на реальной PostgreSQL 17. Порт публикуется только на
+loopback и выбирается автоматически. Переданный извне `DATABASE_URL` не используется: runner задаёт
+test-only URL сам. В блоке `finally` выполняется `docker compose down --volumes --remove-orphans`,
+поэтому повторный прогон начинает с пустого volume и не зависит от прежних данных.
+
+Обычный `npm test` сохраняет защитный skip этого integration-теста, если `TEST_DATABASE_URL` не
+задан: он остаётся доступен в окружениях без Docker. Обязательный PostgreSQL gate локально и в CI —
+именно `npm run test:postgres`: Docker использует локальный `postgres:17-alpine` или автоматически
+загружает его на чистой машине.

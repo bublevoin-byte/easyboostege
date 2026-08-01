@@ -37,6 +37,7 @@
 npm ci
 npm run check
 npm test
+npm run test:postgres
 npm run test:e2e
 npm run build:frontend
 npm run test:e2e

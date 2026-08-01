@@ -270,6 +270,7 @@ docker compose -f compose.production.yml run --rm app npm run db:import-json -- 
 npm ci
 npm run check
 npm test
+npm run test:postgres
 npm run test:e2e
 npm run build:frontend
 npm run test:e2e
@@ -280,7 +281,11 @@ docker compose -f compose.production.yml config
 `dist/public`. Оба пути должны быть зелёными; в production уезжает второй. CI устроен так же.
 
 CI выполняет чистую установку, синтаксическую проверку и тесты на Node.js 22.
-PostgreSQL integration-тест запускается при наличии `TEST_DATABASE_URL`; CI поднимает для него отдельный PostgreSQL 17 и сначала применяет все миграции.
+Локально и в CI PostgreSQL integration запускается одной командой `npm run test:postgres`. Она
+использует отдельный `compose.test.yml`, ждёт healthcheck PostgreSQL 17, применяет все миграции,
+выполняет repository integration без skip и затем удаляет test-контейнер, сеть и volume. Compose
+использует локальный образ или загружает `postgres:17-alpine`, если его ещё нет; отдельный CI-путь
+для миграций не нужен.
 Chromium E2E использует установленный Chrome/Edge/Chromium; нестандартный путь можно передать через `CHROME_PATH`. Firefox E2E запускается командой `npm run test:e2e:firefox`. Мобильные профили запускаются командами `npm run test:e2e:android` (Pixel/Chromium с touch и мобильным user-agent) и `npm run test:e2e:iphone-webkit` (iPhone/WebKit). Firefox и WebKit runtime устанавливаются через `npx playwright install firefox webkit`.
 
 Мобильные профили являются автоматической проверкой движка и адаптивного интерфейса, но не заменяют финальный приёмочный прогон на физическом iPhone Safari и Android Chrome.
