@@ -2,9 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import test from 'node:test';
 
-const REQUIRED = 'Оценка сформирована искусственным интеллектом и является ориентировочной.'
-  + ' Официальным источником требований являются актуальные критерии ФИПИ.'
-  + ' Для спорных случаев обратитесь к преподавателю.';
+const REQUIRED = 'Экспериментальная ИИ-оценка. Балл ориентировочный, может содержать ошибки и не является экспертным заключением.';
 
 /*
  * Код предметных экранов приезжает отдельными чанками, поэтому «приложение» — это оболочка
@@ -39,13 +37,24 @@ test('the wording required by section 10.9 is defined once and used verbatim', (
 });
 
 test('the written review screen shows the disclaimer', () => {
-  assert.match(normalize(html), new RegExp(REQUIRED.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'));
   assert.match(html, /id="ai_disclaimer"/u);
+  assert.match(app, /getElementById\('ai_disclaimer'\)\.textContent=ui\.AI_DISCLAIMER/u);
+  assert.match(
+    normalize(html),
+    /id="rv_score"[\s\S]{0,1200}id="ai_disclaimer"/u,
+    'the warning must be part of the score banner, not below the whole review',
+  );
 });
 
 test('the speaking review shows the same disclaimer from the shared constant', () => {
   assert.match(app, /ui\.escapeHtml\(ui\.AI_DISCLAIMER\)/u);
   assert.match(app, /class="ai-disclaimer"/u);
+  assert.match(app, /speakingModule\.isExperimentalTask\(SP\.t\)/u, 'only free-response speaking tasks 3–4 carry the experimental warning');
+  assert.match(
+    normalize(app),
+    /d\.got\+' из '\+d\.max[\s\S]{0,1200}class="ai-disclaimer"/u,
+    'the warning must be rendered immediately with the speaking score',
+  );
   // Nobody may paste a second, drifting copy of the sentence into the application code.
-  assert.doesNotMatch(app, /Оценка сформирована искусственным интеллектом/u);
+  assert.doesNotMatch(app, /Экспериментальная ИИ-оценка/u);
 });

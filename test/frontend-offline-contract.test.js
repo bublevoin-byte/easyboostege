@@ -308,6 +308,17 @@ test('the app shell still comes from the cache offline, so the previous test is 
   assert.equal((await navigation.responded).fromCache, true);
 });
 
+test('a successful navigation refreshes the cached shell for the next offline start', async () => {
+  const stale = { ok: true, status: 200, fromCache: true };
+  const worker = createWorker({ cached: { '/': stale }, networkFails: false });
+
+  const navigation = dispatchFetch(worker, { method: 'GET', url: `${ORIGIN}/`, mode: 'navigate' });
+  assert.equal((await navigation.responded).fromNetwork, true);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(worker.store.get('/').fromNetwork, true, 'следующий офлайн-запуск должен получить свежую разметку');
+});
+
 test('a write to an online-only endpoint is never intercepted, cached or replayed', async () => {
   const worker = createWorker({ networkFails: true });
 

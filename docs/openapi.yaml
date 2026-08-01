@@ -233,7 +233,18 @@ paths:
                 answer: { type: string }
                 assignment: { type: object, additionalProperties: true }
       responses:
-        '200': { description: Validated review and metadata }
+        '200':
+          description: Validated review with explicit experimental assessment metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [review, provider, attemptId, assessment]
+                properties:
+                  review: { type: object }
+                  provider: { type: string }
+                  attemptId: { type: integer }
+                  assessment: { $ref: '#/components/schemas/ExperimentalAssessment' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '429': { $ref: '#/components/responses/RateLimited' }
@@ -280,7 +291,18 @@ paths:
                 assignment: { type: object }
               additionalProperties: false
       responses:
-        '200': { description: Schema-validated speaking review }
+        '200':
+          description: Schema-validated speaking review; tasks 3–4 include experimental assessment metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [review, provider, promptVersion]
+                properties:
+                  review: { type: object }
+                  provider: { type: string }
+                  promptVersion: { type: string }
+                  assessment: { $ref: '#/components/schemas/ExperimentalAssessment' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '429': { $ref: '#/components/responses/RateLimited' }
@@ -335,6 +357,13 @@ components:
     Progress:
       type: object
       additionalProperties: true
+    ExperimentalAssessment:
+      type: object
+      required: [mode, scoreKind, warning]
+      properties:
+        mode: { type: string, enum: [experimental] }
+        scoreKind: { type: string, enum: [approximate] }
+        warning: { type: string }
   responses:
     BadRequest: { description: Invalid request }
     Unauthorized: { description: Missing or expired session }

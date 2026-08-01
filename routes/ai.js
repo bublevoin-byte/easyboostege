@@ -16,6 +16,16 @@ import { recordDependencyEvent } from '../observability/metrics.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+const EXPERIMENTAL_ASSESSMENT = Object.freeze({
+  mode: 'experimental',
+  scoreKind: 'approximate',
+  warning: 'Экспериментальная ИИ-оценка. Балл ориентировочный, может содержать ошибки и не является экспертным заключением.',
+});
+
+function isExperimentalSpeakingTask(taskType) {
+  return taskType === 3 || taskType === 4;
+}
+
 // A single line an operator can grep: which provider gave up, on what, and whether a spare was left.
 function describeFallback(provider, code, error, index, total) {
   const reason = error?.message && error.message !== code ? `${code}: ${String(error.message).slice(0, 120)}` : code;
@@ -164,7 +174,7 @@ export function createAiRoutes({ authentication, access, db }) {
         completionTokens: accepted.completionTokens,
         estimatedCostMicrousd: estimateCostMicrousd(accepted, aiProviders().find((item) => item.name === provider)),
       });
-      res.json({ review, provider, attemptId });
+      res.json({ review, provider, attemptId, assessment: EXPERIMENTAL_ASSESSMENT });
     } catch (error) {
       recordDependencyEvent('ai', 'error');
       if (!attemptId) return next(error);
@@ -319,7 +329,9 @@ export function createAiRoutes({ authentication, access, db }) {
         ]);
         recordDependencyEvent('ai', 'success');
         if (providerIndex > 0) recordDependencyEvent('ai', 'fallback');
-        return res.json({ review, provider: provider.name, promptVersion: SPEAKING_PROMPT_VERSION });
+        const payload = { review, provider: provider.name, promptVersion: SPEAKING_PROMPT_VERSION };
+        if (isExperimentalSpeakingTask(input.taskType)) payload.assessment = EXPERIMENTAL_ASSESSMENT;
+        return res.json(payload);
       } catch (error) {
         recordDependencyEvent('ai', 'error');
         fallbackReason = describeFallback(provider, lastCode, error, providerIndex, providers.length);

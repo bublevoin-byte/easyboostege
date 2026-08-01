@@ -3,10 +3,8 @@
 
   let notificationTimer = null;
 
-  // Section 10.9: every AI grade shown to a student carries this wording verbatim.
-  const AI_DISCLAIMER = 'Оценка сформирована искусственным интеллектом и является ориентировочной.'
-    + ' Официальным источником требований являются актуальные критерии ФИПИ.'
-    + ' Для спорных случаев обратитесь к преподавателю.';
+  // Sections 10.9 and 11.3: every free-response AI grade carries this wording verbatim.
+  const AI_DISCLAIMER = 'Экспериментальная ИИ-оценка. Балл ориентировочный, может содержать ошибки и не является экспертным заключением.';
 
   function byId(id) {
     return global.document.getElementById(id);

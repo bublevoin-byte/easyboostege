@@ -578,3 +578,16 @@ SHA-256 набора до и после.
   показывает `git log origin/production-hardening..HEAD`.
 - Масштаб запуска — **не менее 100 пользователей** (уточнено 30 июля 2026 года; более ранняя
   редакция про 1–5 человек снята).
+
+---
+
+# Экспериментальная ИИ-оценка свободных ответов
+
+Спека: [.scratch/experimental-ai-assessment/spec.md](.scratch/experimental-ai-assessment/spec.md)
+Тикеты: [.scratch/experimental-ai-assessment/issues/](.scratch/experimental-ai-assessment/issues/)
+
+| № | Что даёт | Статус |
+|---|---|---|
+| 01 | Явный экспериментальный статус результата в API, интерфейсе и ТЗ | done |
+| 02 | Объективный ноль для слишком короткой письменной работы | pending |
+| 03 | Полное происхождение каждого сохранённого прогона | pending |

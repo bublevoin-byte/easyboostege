@@ -377,6 +377,8 @@ test('privacy UI separates text and voice consent and explains external processi
   assert.match(script, /id="privacyVoice" type="checkbox"/u);
   assert.match(script, /xAI[\s\S]*Groq/u);
   assert.match(script, /\/api\/v1\/privacy\/consent/u);
+  assert.match(policy, /экспериментальном режиме/u);
+  assert.match(policy, /не является экспертным заключением/u);
   assert.match(policy, /не является официальн/u);
   assert.match(policy, /Сроки хранения/u);
 });

@@ -241,6 +241,7 @@ function spShowEval(d,tr){var box=document.getElementById('sp_evalbox');if(!box)
   var h='<div class="clayCard" style="position:relative;overflow:hidden;padding:18px;margin-top:12px;animation:wflip .5s cubic-bezier(.25,.75,.35,1) both;">'
     +'<div style="text-align:center;">'
     +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:30px;color:'+col+';">'+d.got+' из '+d.max+'</div>'
+    +(speakingModule.isExperimentalTask(SP.t)?'<div class="ai-disclaimer" style="margin-top:6px;font-weight:600;font-size:11.5px;color:#777163;line-height:1.5;">'+ui.escapeHtml(ui.AI_DISCLAIMER)+'</div>':'')
     +'<div style="font-weight:700;font-size:13.5px;color:#2B2B2B;margin-top:4px;">'+safe(d.verdict||'')+'</div></div>';
   if(Array.isArray(d.criteria)&&d.criteria.length)
     h+='<div style="margin-top:12px;">'+d.criteria.map(function(c){
@@ -255,7 +256,6 @@ function spShowEval(d,tr){var box=document.getElementById('sp_evalbox');if(!box)
       +d.fix.map(function(f){return '<div style="margin-top:7px;font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.5;">'
         +(f.wrong?'<s style="color:#A83226;">'+safe(f.wrong)+'</s> → ':'')+(f.right?'<b style="color:#1D7F4A;">'+safe(f.right)+'</b><br>':'')+safe(f.note||'')+'</div>'}).join('')+'</div>';
   h+='<div style="margin-top:10px;font-weight:600;font-size:11.5px;color:#777163;line-height:1.5;">ИИ проверил текст ответа. Произношение, интонация, паузы и беглость не оценивались.</div>';
-  h+='<div class="ai-disclaimer" style="margin-top:8px;font-weight:600;font-size:11.5px;color:#777163;line-height:1.5;">'+ui.escapeHtml(ui.AI_DISCLAIMER)+'</div>';
   h+='<details style="margin-top:12px;"><summary style="font-weight:700;font-size:12px;color:#777163;cursor:pointer;">Расшифровка твоей речи</summary>'
     +'<div style="margin-top:8px;font-weight:500;font-size:12.5px;color:#4A453E;line-height:1.6;font-style:italic;">'+safe(tr)+'</div><button class="sq" onclick="spFlagTranscript()" style="margin-top:8px;border:0;background:#F4EFE9;padding:7px 10px;border-radius:10px;font-weight:700;font-size:11px;">Расшифровка неточная</button></details>'
     +'</div>';
@@ -400,6 +400,7 @@ async function speFinish(){if(!SPE)return;clearInterval(SPE.tm);try{lStop()}catc
   var rows=[1,2,3,4].map(function(t){var d=results[t];
     return '<div style="padding:9px 2px;border-bottom:1px solid #F4EFE9;">'
       +'<div style="display:flex;justify-content:space-between;gap:10px;font-weight:700;font-size:13px;color:#2B2B2B;"><span>'+SP_CONF[t].name+'</span><b style="flex:none;color:'+(d.got/SP_CONF[t].max>=0.7?'#1F8A50':(d.got>0?'#C77400':'#C0392B'))+';">'+d.got+' / '+SP_CONF[t].max+'</b></div>'
+      +(speakingModule.isExperimentalTask(t)?'<div class="ai-disclaimer" style="font-weight:600;font-size:11.5px;color:#777163;line-height:1.5;margin-top:4px;">'+ui.escapeHtml(ui.AI_DISCLAIMER)+'</div>':'')
       +(d.verdict?'<div style="font-weight:600;font-size:12px;color:#777163;margin-top:3px;">'+d.verdict+'</div>':'')
       +(d.fix||[]).map(function(f){return '<div style="font-weight:600;font-size:12px;color:#4A453E;margin-top:4px;line-height:1.5;">'+(f.wrong?'<s style="color:#A83226;">'+f.wrong+'</s> → ':'')+(f.right?'<b style="color:#1D7F4A;">'+f.right+'</b> ':'')+(f.note||'')+'</div>'}).join('')
       +'</div>'}).join('');

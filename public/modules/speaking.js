@@ -21,6 +21,10 @@
     return CONFIG[task] || CONFIG[1];
   }
 
+  function isExperimentalTask(task) {
+    return task === 3 || task === 4;
+  }
+
   function normalizeState(state) {
     const target = state && typeof state === 'object' ? state : {};
     TASKS.forEach((task) => {
@@ -146,6 +150,7 @@
 
   global.EasyBoostSpeaking = Object.freeze({
     config,
+    isExperimentalTask,
     normalizeState,
     trainingTotal,
     summary,

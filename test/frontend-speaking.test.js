@@ -24,6 +24,10 @@ test('speaking module exposes exam timings and a 20-point maximum', () => {
   assert.deepEqual(plain(speaking.config(1)), { name: 'Чтение вслух', prep: 90, rec: 90, max: 1, sub: 'задание 1 · 1 балл' });
   assert.equal(speaking.config(3).prep, 0);
   assert.equal(speaking.config(4).rec, 150);
+  assert.equal(speaking.isExperimentalTask(1), false);
+  assert.equal(speaking.isExperimentalTask(2), false);
+  assert.equal(speaking.isExperimentalTask(3), true);
+  assert.equal(speaking.isExperimentalTask(4), true);
   assert.equal(speaking.formatTime(150), '2:30');
   assert.equal(speaking.formatTime(-5), '0:00');
   assert.equal(speaking.formatTime(9), '0:09');

@@ -25,6 +25,7 @@ function renderReview(d){
   const totals=writingModule.reviewTotals(d);const got=totals.got,mx=totals.max;
   document.getElementById('rv_score').textContent=got;
   document.getElementById('rv_max').textContent='из '+mx;
+  document.getElementById('ai_disclaimer').textContent=ui.AI_DISCLAIMER;
   document.getElementById('rv_ring').setAttribute('stroke-dashoffset',String(226-226*(mx?got/mx:0)));
   document.getElementById('rv_verdict').textContent=d.verdict||'Готово!';
   document.getElementById('rv_sub').textContent=d.sub||'';

@@ -51,6 +51,21 @@ function validReview(words) {
   };
 }
 
+function validSpeakingReview() {
+  return {
+    got: 4,
+    max: 5,
+    verdict: 'Ответ по теме',
+    criteria: Array.from({ length: 5 }, (_, index) => ({
+      name: `Ответ ${index + 1}`,
+      got: index === 4 ? 0 : 1,
+      max: 1,
+    })),
+    good: ['Ответы развёрнуты'],
+    fix: [{ wrong: 'I like', right: 'I enjoy it', note: 'Добавь подробность' }],
+  };
+}
+
 async function startStack({ replies }) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-repair-'));
   const dataFile = path.join(directory, 'data.json');
@@ -152,6 +167,24 @@ async function startStack({ replies }) {
       });
       return { status: response.status, body: await response.json() };
     },
+    async evaluateSpeaking() {
+      const response = await fetch(`${baseUrl}/api/v1/ai/evaluate-speaking`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${jwt.sign({ u: 'student' }, JWT_SECRET)}`,
+        },
+        body: JSON.stringify({
+          taskType: 3,
+          transcript: 'I enjoy reading because books help me relax and learn new things.',
+          assignment: {
+            topic: 'Hobbies',
+            qs: ['What is your hobby?', 'When did you start?', 'How often?', 'Why?', 'Who with?'],
+          },
+        }),
+      });
+      return { status: response.status, body: await response.json() };
+    },
     async stop() {
       child.kill('SIGTERM');
       await Promise.race([
@@ -219,6 +252,26 @@ test('a valid answer is not repaired and costs exactly one call', { timeout: 40_
 
     assert.equal(status, 200);
     assert.equal(stack.providerCalls.length, 1, 'корректный ответ не должен вызывать лишний платный запрос');
+  } finally {
+    await stack.stop();
+  }
+});
+
+test('successful free-answer APIs identify the integer score as experimental and approximate', { timeout: 40_000 }, async () => {
+  const warning = 'Экспериментальная ИИ-оценка. Балл ориентировочный, может содержать ошибки и не является экспертным заключением.';
+  const stack = await startStack({
+    replies: [JSON.stringify(validReview(WORDS)), JSON.stringify(validSpeakingReview())],
+  });
+  try {
+    const writing = await stack.evaluateWriting(ANSWER);
+    const speaking = await stack.evaluateSpeaking();
+
+    assert.equal(writing.status, 200);
+    assert.equal(speaking.status, 200);
+    assert.equal(Number.isInteger(writing.body.review.overall_got), true);
+    assert.equal(Number.isInteger(speaking.body.review.got), true);
+    assert.deepEqual(writing.body.assessment, { mode: 'experimental', scoreKind: 'approximate', warning });
+    assert.deepEqual(speaking.body.assessment, { mode: 'experimental', scoreKind: 'approximate', warning });
   } finally {
     await stack.stop();
   }
