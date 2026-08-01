@@ -1,8 +1,8 @@
 # Профиль готовности экспериментального запуска
 
-Status: in-progress
+Status: completed
 
-Progress: ticket 01 done; ticket 02 ready-for-agent
+Progress: tickets 01–02 done
 
 ## Problem Statement
 
