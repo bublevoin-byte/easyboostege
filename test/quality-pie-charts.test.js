@@ -35,7 +35,10 @@ test('the worksheet has a filled-in block for every work whose chart is a pictur
    * Считать надо оба тега, иначе тест начнёт краснеть ровно в тот момент, когда владелец сделает
    * то, о чём его просили, а перенос данных не должен выглядеть как поломка сборки.
    */
-  const partial = stubs.filter((item) => item.tags.some((tag) => tag === 'assignment-partial' || tag === 'assignment-typed'));
+  // The reviewed 2022 smartphone chart was transcribed through its versioned manifest, not this
+  // legacy pie-chart worksheet. Keep this worksheet's exact three-way correspondence intact.
+  const partial = stubs.filter((item) => !item.source.answerReview
+    && item.tags.some((tag) => tag === 'assignment-partial' || tag === 'assignment-typed'));
   assert.equal(partial.length, 3, `работ с диаграммой ${partial.length}, а не 3`);
   const blocks = parseWorksheet(worksheet);
   for (const item of partial) {

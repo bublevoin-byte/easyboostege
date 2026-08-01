@@ -52,8 +52,8 @@ test('only the works whose data is a picture are left without an assignment', ()
   assert.ok(partial.length <= 3, `работ с диаграммой ${partial.length}, а было не больше 3`);
 
   const ready = (operation) => stubs.filter((item) => item.operation === operation && item.assignmentData).length;
-  assert.ok(ready('writing_37') >= 12, `задание 37 разбирается механически, готовых работ ${ready('writing_37')} из 12`);
-  assert.ok(ready('writing_38') >= 6, `таблицы задания 38: готовых работ ${ready('writing_38')}, а было 6`);
+  assert.ok(ready('writing_37') >= 15, `задание 37 разбирается механически, готовых работ ${ready('writing_37')} из 15`);
+  assert.ok(ready('writing_38') >= 12, `таблицы задания 38: готовых работ ${ready('writing_38')}, а было 12`);
 });
 
 test('the structured assignment reaches the prompt the student would get', () => {
@@ -95,5 +95,5 @@ test('task 38 percentages are the ones printed in the manual', { skip: withoutMa
     }
     assert.deepEqual(parseTableRows(page), item.assignmentData.rows, `${item.id}: таблица разошлась с методичкой`);
   }
-  assert.ok(checked >= 30, `сверено строк таблиц ${checked}, ожидалось не меньше 30`);
+  assert.ok(checked >= 40, `сверено строк таблиц ${checked}, ожидалось не меньше 40`);
 });

@@ -1,7 +1,6 @@
 #!/usr/bin/env node
-// Builds writing 37/38 dataset stubs from the FIPI expert manuals.
-// The student answers are scans of handwritten answer sheets, so only the assignment, the work
-// number and the expert scores can be extracted. `answer` stays empty for a human to type in.
+// Builds the writing 37/38 dataset from the FIPI expert manuals. Most recent answers are scans and
+// remain stubs; the complete reviewed answers published in the 2022 manual are imported as text.
 //
 // Пересборка сливается с тем, что уже лежит в наборе, а не пишет его поверх. Когда скрипт писали,
 // файла не существовало и перезапись была верна; с тех пор в набор легло то, чего в методичках нет
@@ -12,9 +11,12 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { countWords, writingAssignmentSchema } from '../ai/writing.js';
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const sourcesDirectory = path.join(__dirname, '..', 'quality', 'sources');
 const outputFile = path.join(__dirname, '..', 'quality', 'writing-fipi-stubs.json');
+const reviewed2022File = path.join(__dirname, '..', 'quality', 'writing-reviewed-2022.json');
 
 const YEARS = [2023, 2024, 2025, 2026];
 
@@ -182,6 +184,70 @@ function extract(text, year) {
   return { stubs, problems };
 }
 
+function buildReviewed2022(manifest, text) {
+  const ids = new Set();
+  return manifest.works.map((item) => {
+    if (ids.has(item.id)) throw new Error(`2022: duplicate reviewed id ${item.id}`);
+    ids.add(item.id);
+
+    const taskNumber = item.operation === 'writing_37' ? 37 : item.operation === 'writing_38' ? 38 : null;
+    const task = TASKS[taskNumber];
+    if (!task) throw new Error(`${item.id}: unknown operation ${item.operation}`);
+
+    const criteria = item.humanScore.criteria;
+    const criterionNames = Object.keys(criteria);
+    if (JSON.stringify(criterionNames) !== JSON.stringify(task.criteria)) {
+      throw new Error(`${item.id}: criteria do not match ${item.operation}`);
+    }
+    const total = task.criteria.reduce((sum, name) => sum + criteria[name], 0);
+    if (total !== item.humanScore.total) throw new Error(`${item.id}: criteria total ${total} != ${item.humanScore.total}`);
+    const overflow = task.criteria.find((name) => criteria[name] < 0 || criteria[name] > task.maxima[name]);
+    if (overflow) throw new Error(`${item.id}: ${overflow} is outside the official maximum`);
+
+    const assignment = writingAssignmentSchema.safeParse({ taskType: item.operation, assignment: item.assignmentData });
+    if (!assignment.success) {
+      const details = assignment.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; ');
+      throw new Error(`${item.id}: invalid structured assignment — ${details}`);
+    }
+    const appWordCount = countWords(item.answer);
+    const countedStart = item.countedAnswerStart ? item.answer.indexOf(item.countedAnswerStart) : 0;
+    if (countedStart === -1) throw new Error(`${item.id}: counted-answer marker is missing`);
+    const words = countWords(item.answer.slice(countedStart));
+    const wordCountDelta = Math.abs(words - item.source.wordCount);
+    const wordCountTolerance = Math.max(3, Math.ceil(item.source.wordCount * 0.05));
+    if (wordCountDelta > wordCountTolerance) {
+      throw new Error(`${item.id}: transcript has ${words} words, FIPI reports ${item.source.wordCount}`);
+    }
+    for (const pattern of item.evidencePatterns) {
+      if (!new RegExp(pattern, 'u').test(text)) throw new Error(`${item.id}: source evidence is missing: ${pattern}`);
+    }
+
+    return {
+      id: item.id,
+      operation: item.operation,
+      tags: item.tags,
+      assignment: item.assignment,
+      assignmentData: assignment.data.assignment,
+      answer: item.answer,
+      human: {
+        total,
+        max: task.max,
+        criteria,
+        criteriaLabels: task.labels,
+        reviewer: 'fipi-2022-expert-manual',
+      },
+      source: {
+        manual: 'fipi-pch-2022.pdf',
+        ...item.source,
+        ...(appWordCount === item.source.wordCount ? {} : { appWordCount }),
+        ...(appWordCount === words ? {} : { wordCountScope: `from ${item.countedAnswerStart}` }),
+      },
+      expectedCriticalErrors: [],
+      aiRuns: [],
+    };
+  });
+}
+
 // The manuals reprint the same discussed works year after year. Without the answer text the
 // signature is the assignment plus the scores plus the word count the expert counted.
 function signature(stub) {
@@ -220,14 +286,19 @@ function dedupe(stubs) {
 }
 
 /*
- * Поля, которые целиком приходят из методички: их пересборка обновляет. Всё остальное в записи —
- * `answer`, `assignmentData`, `aiRuns`, `expectedCriticalErrors` — в PDF отсутствует, поэтому
- * слияние их не касается вовсе: они переезжают из старой записи как есть.
+ * Поля, которые целиком приходят из методички: их пересборка обновляет. У обычных сканов всё
+ * остальное — `answer`, `assignmentData`, `aiRuns`, `expectedCriticalErrors` — в PDF отсутствует,
+ * поэтому слияние переносит это из старой записи. Проверенный манифест 2022 года является
+ * версионированным источником ответа и условия; для него исключение задано в mergeStub ниже.
  */
 const FROM_PDF = ['assignment', 'human', 'source'];
 
 // Теги, которые выводит из методички extract(). Любой другой тег в наборе поставлен человеком.
-const DERIVED_TAGS = new Set(['needs-answer-text', 'total-only', 'assignment-partial']);
+const DERIVED_TAGS = new Set([
+  'needs-answer-text', 'total-only', 'assignment-partial',
+  'official-expert-score', 'full-answer', 'answer-visually-reviewed', 'answer-visually-transcribed',
+  'criteria-2022', 'assignment-plan-2022', 'legacy-task-39', 'legacy-task-40',
+]);
 const YEAR_TAG = /^fipi-20\d\d$/u;
 export const isDerivedTag = (tag) => DERIVED_TAGS.has(tag) || YEAR_TAG.test(tag);
 
@@ -287,7 +358,10 @@ function differences(before, after, field) {
 function mergeStub(kept, fresh) {
   const merged = { ...kept };
   const changes = [];
-  for (const field of FROM_PDF) {
+  const sourceFields = fresh.source?.answerReview
+    ? [...FROM_PDF, 'answer', 'assignmentData']
+    : FROM_PDF;
+  for (const field of sourceFields) {
     changes.push(...differences(kept[field], fresh[field], field));
     merged[field] = fresh[field];
   }
@@ -345,6 +419,21 @@ async function main() {
     report.push(`${year}: задание 37 — ${count('writing_37')}, задание 38 — ${count('writing_38')}, пропущено ${result.problems.length}`);
   }
 
+  try {
+    const [manifestText, sourceText] = await Promise.all([
+      fs.readFile(reviewed2022File, 'utf8'),
+      fs.readFile(path.join(sourcesDirectory, 'fipi-pch-2022.txt'), 'utf8'),
+    ]);
+    const reviewed = buildReviewed2022(JSON.parse(manifestText), sourceText);
+    stubs.push(...reviewed);
+    const count = (operation) => reviewed.filter((item) => item.operation === operation).length;
+    report.push(`2022: полных проверенных ответов — задание 37: ${count('writing_37')}, задание 38: ${count('writing_38')}`);
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      report.push('2022: нет writing-reviewed-2022.json или fipi-pch-2022.txt — выполните npm run quality:sources');
+    } else throw error;
+  }
+
   const unique = dedupe(stubs);
   let existing = null;
   try { existing = await fs.readFile(outputFile, 'utf8'); }
@@ -383,7 +472,8 @@ async function main() {
     console.log('  ни у одной работы не тронуты: answer, assignmentData, aiRuns, expectedCriticalErrors.');
   }
   if (merge.added.length) {
-    console.log('\nУ добавленных заготовок поле answer пустое: текст работы набирается со скана вручную.');
+    const emptyAdded = merge.stubs.filter((item) => merge.added.includes(item.id) && !item.answer).length;
+    console.log(`\nДобавлено полных ответов: ${merge.added.length - emptyAdded}; пустых заготовок: ${emptyAdded}.`);
   }
   console.log(rewritten ? `\nФайл: ${outputFile}` : `\nФайл не изменился: ${outputFile}`);
 }

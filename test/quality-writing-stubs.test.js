@@ -20,14 +20,35 @@ test('the stub file keeps the works extracted from the manuals', () => {
    * loss, not the target. Task 37 stood at 13 until work 4798 turned out to be one work printed
    * by two manuals: the 2025 heading is set in capitals, the extractor read only the capitalised
    * form it expected, and a work without a number could not be recognised as a reprint. Twelve is
-   * therefore the corrected count, not a work lost — lowering this floor again needs the same
-   * kind of evidence.
+   * therefore the corrected pre-2022 count, not a work lost. The reviewed 2022 import then added
+   * three full works to each operation; lowering either new floor needs the same kind of evidence.
    */
-  assert.ok(count('writing_37') >= 12, `task 37 stubs dropped to ${count('writing_37')}`);
-  assert.ok(count('writing_38') >= 9, `task 38 stubs dropped to ${count('writing_38')}`);
+  assert.ok(count('writing_37') >= 15, `task 37 stubs dropped to ${count('writing_37')}`);
+  assert.ok(count('writing_38') >= 12, `task 38 stubs dropped to ${count('writing_38')}`);
   // Two records of one work is the failure that cost this correction; catch it by number.
   const numbered = stubs.filter((item) => item.source.work).map((item) => `${item.operation}|${item.source.work}|${item.human.total}`);
   assert.equal(new Set(numbered).size, numbered.length, 'the same work appears twice under one number and score');
+});
+
+test('the six reviewed 2022 works are complete, sourced and have no AI runs', () => {
+  const reviewed = stubs.filter((item) => item.tags.includes('fipi-2022'));
+  assert.equal(reviewed.length, 6);
+  assert.equal(reviewed.filter((item) => item.operation === 'writing_37').length, 3);
+  assert.equal(reviewed.filter((item) => item.operation === 'writing_38').length, 3);
+
+  for (const item of reviewed) {
+    assert.ok(item.answer.length > 100, `${item.id}: reviewed answer is missing`);
+    assert.ok(item.assignmentData, `${item.id}: structured assignment is missing`);
+    assert.ok(item.tags.includes('full-answer'), `${item.id}: full-answer provenance is missing`);
+    assert.ok(item.tags.includes('official-expert-score'), `${item.id}: expert provenance is missing`);
+    assert.ok(item.source.answerReview, `${item.id}: answer review method is missing`);
+    assert.equal(item.source.originalTask, item.operation === 'writing_37' ? 39 : 40);
+    assert.deepEqual(item.aiRuns, [], `${item.id}: the import must not launch or invent an AI run`);
+  }
+
+  const zeroRule = reviewed.find((item) => item.id === 'w38-fipi-2022-literary-genres-7611');
+  assert.equal(zeroRule.human.total, 0);
+  assert.deepEqual(zeroRule.human.criteria, { k1: 0, k2: 0, k3: 0, k4: 0, k5: 0 });
 });
 
 test('expert scores stay inside the official maxima and add up', () => {
@@ -74,21 +95,27 @@ test('a stub without the answer text is marked as unfinished', () => {
  * Ниже — то, что пересборка обязана оставить в покое. `rebuilt` изображает свежую заготовку из
  * PDF: та же работа, но без всего набранного руками и с вернувшимися тегами «не сделано».
  */
-const rebuilt = (item) => ({
-  id: item.id,
-  operation: item.operation,
-  tags: [
-    ...item.tags.filter((tag) => isDerivedTag(tag) && tag !== 'needs-answer-text'),
-    'needs-answer-text',
-    ...(item.tags.includes('assignment-typed') ? ['assignment-partial'] : []),
-  ],
-  assignment: item.assignment,
-  answer: '',
-  human: item.human,
-  source: item.source,
-  expectedCriticalErrors: [],
-  aiRuns: [],
-});
+const rebuilt = (item) => {
+  // The 2022 manifest is itself the reviewed source: unlike an ordinary scan stub it can and must
+  // reproduce the answer and the visually checked table on a clean checkout.
+  const reviewed = Boolean(item.source.answerReview);
+  return {
+    id: item.id,
+    operation: item.operation,
+    tags: reviewed ? item.tags : [
+      ...item.tags.filter((tag) => isDerivedTag(tag) && tag !== 'needs-answer-text'),
+      'needs-answer-text',
+      ...(item.tags.includes('assignment-typed') ? ['assignment-partial'] : []),
+    ],
+    assignment: item.assignment,
+    ...(reviewed ? { assignmentData: item.assignmentData } : {}),
+    answer: reviewed ? item.answer : '',
+    human: item.human,
+    source: item.source,
+    expectedCriticalErrors: [],
+    aiRuns: [],
+  };
+};
 
 test('a rebuild from the manuals merges into the dataset instead of overwriting it', () => {
   const merged = mergeStubs(stubs, stubs.map(rebuilt));

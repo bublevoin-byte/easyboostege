@@ -6,13 +6,16 @@ import { applyAnswers, countWords, parseWorksheet } from '../scripts/merge-trans
 
 const worksheet = await fs.readFile(new URL('../quality/transcription-worksheet.md', import.meta.url), 'utf8');
 const stubs = JSON.parse(await fs.readFile(new URL('../quality/writing-fipi-stubs.json', import.meta.url), 'utf8'));
+// Reviewed 2022 answers have their own versioned manifest and were never transcribed through this
+// legacy worksheet. Its two-way invariant applies only to the scan stubs it was built to manage.
+const worksheetStubs = stubs.filter((item) => !item.source.answerReview);
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
 test('the worksheet has a labelled slot for every work in the set', () => {
-  for (const item of stubs) {
+  for (const item of worksheetStubs) {
     assert.ok(worksheet.includes(`<!-- ${item.id} -->`), `${item.id}: no slot in the worksheet`);
     assert.ok(worksheet.includes(`страница **${item.source.page}**`), `${item.id}: no page reference`);
   }
@@ -26,12 +29,12 @@ test('the worksheet has a labelled slot for every work in the set', () => {
  */
 test('every typed slot belongs to the set, and every work in the set was typed', () => {
   const answers = parseWorksheet(worksheet);
-  const ids = new Set(stubs.map((item) => item.id));
+  const ids = new Set(worksheetStubs.map((item) => item.id));
   for (const id of answers.keys()) assert.ok(ids.has(id), `${id}: typed under an id the set does not have`);
-  for (const item of stubs) {
+  for (const item of worksheetStubs) {
     if (item.answer) assert.ok(answers.has(item.id), `${item.id}: the set has an answer the worksheet does not`);
   }
-  assert.equal(answers.size, stubs.filter((item) => item.answer).length);
+  assert.equal(answers.size, worksheetStubs.filter((item) => item.answer).length);
 });
 
 test('a filled slot is read back under its own id', () => {

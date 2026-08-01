@@ -15,14 +15,14 @@ const sourcesDirectory = path.join(__dirname, '..', 'quality', 'sources');
 // Task 37 conditions are printed to one template across all four manuals.
 const FROM = /From:\s*(\S+)\s+To:/u;
 const STIMULUS = /(Subject:\s*[\s\S]*?)\s*Write an email to/u;
-const QUESTIONS_TOPIC = /ask questions about\s+([^.;]+?)\s*[.;]/u;
+const QUESTIONS_TOPIC = /ask(?:\s+\d+)? questions about\s+([^.;]+?)\s*[.;]/u;
 const PROJECT_TOPIC = /doing a project on\s+([\s\S]*?)\.\s*You have found/u;
 
-const TABLE_HEADER = /Number of respondents\s*\(%\)/u;
+const TABLE_HEADER = /Number of (?:respondents|readers)\s*\(%\)/u;
 const TABLE_END = /^\s*Write \d{3}\s*[–-]\s*\d{3} words/u;
-// pdftotext -layout keeps the two table columns apart by a run of spaces, so a row is
-// "<label><spaces><percent>" and nothing else on the line.
-const TABLE_ROW = /^\s*(.*\S)\s{2,}(\d{1,3})\s*$/u;
+// pdftotext -layout normally keeps the columns apart by several spaces. A long 2022 label reaches
+// the percentage column, however, and leaves only one space, so the trailing number is the anchor.
+const TABLE_ROW = /^\s*(.*\S)\s+(\d{1,3})\s*$/u;
 const MAX_TABLE_LINES = 40;
 
 const squash = (value) => String(value).replace(/\s+/gu, ' ').trim();
@@ -107,6 +107,9 @@ export function buildAssignmentData(stub, sources) {
    * и тегом assignment-partial, а цифры переносит владелец по опроснику.
    */
   if (stub.tags.includes('assignment-partial')) return null;
+  // A chart that exists only as a picture has already been transcribed and schema-checked. Rereading
+  // it from the text layer is impossible and must not erase a completed visual review.
+  if (stub.tags.includes('assignment-typed') && stub.assignmentData) return stub.assignmentData;
 
   const assignment = stub.assignment || '';
   const parsed = stub.operation === 'writing_37'

@@ -6077,5 +6077,358 @@
         "promptVersion": "writing-v4"
       }
     ]
+  },
+  {
+    "id": "w37-fipi-2022-summer-1",
+    "operation": "writing_37",
+    "tags": [
+      "fipi-2022",
+      "official-expert-score",
+      "full-answer",
+      "answer-visually-reviewed",
+      "criteria-2022",
+      "legacy-task-39"
+    ],
+    "assignment": "You have received an email message from your English-speaking pen-friend Ronny: From: Ronny@mail.uk To: Russian_friend@ege.ru Subject: Summer …I am so happy that summer has come and we are going to have a long holiday. What’s the weather like in Russia in summer? What is your favourite season and why this one? What are your plans for the summer? My uncle Keith is coming to visit us next week... Write an email to Ronny. In your message: – answer his questions; – ask 3 questions about his uncle. Write 100–140 words. Remember the rules of email writing.",
+    "assignmentData": {
+      "from": "Ronny@mail.uk",
+      "stimulus": "Subject: Summer …I am so happy that summer has come and we are going to have a long holiday. What’s the weather like in Russia in summer? What is your favourite season and why this one? What are your plans for the summer? My uncle Keith is coming to visit us next week...",
+      "questionsTopic": "his uncle"
+    },
+    "answer": "Moscow\n15 october\n\nHi!\nThanks you for you recent email message.\n\nFirstly, summer is quiet warm here. But some time it rains. The hottest month is July. Secondly, my favourite season is winter because i enjoy to ski. I can skate too. Every day I go skating. Finally, in summer i often visit another countries. It's grate to learn new counties and meet new peoples.\n\nGreat news! What's his name? Where is he from? Does he like visiting another countries?\n\nSorry, must feed my dog.\nHope hear you soon.\nSee you soon.\nMark.",
+    "human": {
+      "total": 1,
+      "max": 6,
+      "criteria": {
+        "k1": 1,
+        "k2": 0,
+        "k3": 0
+      },
+      "criteriaLabels": {
+        "k1": "Решение коммуникативной задачи",
+        "k2": "Организация текста",
+        "k3": "Языковое оформление"
+      },
+      "reviewer": "fipi-2022-expert-manual"
+    },
+    "source": {
+      "manual": "fipi-pch-2022.pdf",
+      "originalTask": 39,
+      "wordCount": 90,
+      "page": 66,
+      "assignmentPage": 66,
+      "scorePage": 69,
+      "answerReview": "text-layer-and-visual-pdf-review",
+      "appWordCount": 93,
+      "wordCountScope": "from Hi!"
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "w37-fipi-2022-summer-2",
+    "operation": "writing_37",
+    "tags": [
+      "fipi-2022",
+      "official-expert-score",
+      "full-answer",
+      "answer-visually-reviewed",
+      "criteria-2022",
+      "legacy-task-39"
+    ],
+    "assignment": "You have received an email message from your English-speaking pen-friend Ronny: From: Ronny@mail.uk To: Russian_friend@ege.ru Subject: Summer …I am so happy that summer has come and we are going to have a long holiday. What’s the weather like in Russia in summer? What is your favourite season and why this one? What are your plans for the summer? My uncle Keith is coming to visit us next week... Write an email to Ronny. In your message: – answer his questions; – ask 3 questions about his uncle. Write 100–140 words. Remember the rules of email writing.",
+    "assignmentData": {
+      "from": "Ronny@mail.uk",
+      "stimulus": "Subject: Summer …I am so happy that summer has come and we are going to have a long holiday. What’s the weather like in Russia in summer? What is your favourite season and why this one? What are your plans for the summer? My uncle Keith is coming to visit us next week...",
+      "questionsTopic": "his uncle"
+    },
+    "answer": "Dear Ronny,\n\nI was glad to hear from you again.\n\nActually, summer in Russia is quite hot and dry, though it depends on certain region. To be honest, my favourite season is winter because this time is associated with Christmas and New Year. If my parents allowed me to visit Australia I would be happy to spend my next summer in this exotic country.\n\nHaving written about the upcoming visit of your uncle, you made me curios. What is the profession of your uncle? Has he got any hobbies? Is he going to visit some museums or theatres within his staying, or not?\n\nRegretfully, I’ve got to finish my letter.\nLooking forward to hearing from you soon.\nBest wishes,\nDenis",
+    "human": {
+      "total": 5,
+      "max": 6,
+      "criteria": {
+        "k1": 1,
+        "k2": 2,
+        "k3": 2
+      },
+      "criteriaLabels": {
+        "k1": "Решение коммуникативной задачи",
+        "k2": "Организация текста",
+        "k3": "Языковое оформление"
+      },
+      "reviewer": "fipi-2022-expert-manual"
+    },
+    "source": {
+      "manual": "fipi-pch-2022.pdf",
+      "originalTask": 39,
+      "wordCount": 126,
+      "page": 69,
+      "assignmentPage": 66,
+      "scorePage": 70,
+      "answerReview": "text-layer-and-visual-pdf-review",
+      "appWordCount": 120
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "w37-fipi-2022-cooking-1",
+    "operation": "writing_37",
+    "tags": [
+      "fipi-2022",
+      "official-expert-score",
+      "full-answer",
+      "answer-visually-reviewed",
+      "criteria-2022",
+      "legacy-task-39"
+    ],
+    "assignment": "You have received an email message from your English-speaking pen-friend Mary who writes: From: Mary@mail.uk To: Russian_friend@ege.ru Subject: Cooking …I am learning to cook from my mother now. But I prefer eating out. There are so many cafés around, why should one cook at home? What about you – what are your preferences and why? Do you ever cook for yourself or for the family? I am learning Russian now and I’ve started reading a very interesting book in Russian… Write an email to Mary. In your message: – answer her questions; – ask 3 questions about the book. Write 100–140 words. Remember the rules of email writing.",
+    "assignmentData": {
+      "from": "Mary@mail.uk",
+      "stimulus": "Subject: Cooking …I am learning to cook from my mother now. But I prefer eating out. There are so many cafés around, why should one cook at home? What about you – what are your preferences and why? Do you ever cook for yourself or for the family? I am learning Russian now and I’ve started reading a very interesting book in Russian…",
+      "questionsTopic": "the book"
+    },
+    "answer": "Dear Mary,\n\nThanks for your message. It was great to hear from you again! Sorry, I haven’t answered earlier, but I was really busy. I’m glad you are OK!\n\nWell, I think that one should cook at home because it’s cheaper than eating out. As for me, I like to cook at home and it makes me happy. Actually, I often cook for my family because they like my dishes.\n\nBy the way, tell me about your learning Russian. When did you start it? Do you practice it? What’s the name of that book?\n\nActually, I’d go better now because my mother wants me to help me with shopping. Take care and write me soon!\n\nBest wishes,\nVeronika",
+    "human": {
+      "total": 5,
+      "max": 6,
+      "criteria": {
+        "k1": 1,
+        "k2": 2,
+        "k3": 2
+      },
+      "criteriaLabels": {
+        "k1": "Решение коммуникативной задачи",
+        "k2": "Организация текста",
+        "k3": "Языковое оформление"
+      },
+      "reviewer": "fipi-2022-expert-manual"
+    },
+    "source": {
+      "manual": "fipi-pch-2022.pdf",
+      "originalTask": 39,
+      "wordCount": 118,
+      "page": 71,
+      "assignmentPage": 71,
+      "scorePage": 73,
+      "answerReview": "text-layer-and-visual-pdf-review"
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "w38-fipi-2022-smartphones",
+    "operation": "writing_38",
+    "tags": [
+      "fipi-2022",
+      "official-expert-score",
+      "full-answer",
+      "answer-visually-reviewed",
+      "assignment-typed",
+      "assignment-plan-2022",
+      "legacy-task-40"
+    ],
+    "assignment": "Imagine that you are doing a project on what people use their smartphones for in Zetland. You have found some data on the subject – the results of the opinion polls (see the diagram below). Comment on the data in the diagram and give your opinion on the subject of the project. What people use their smartphones for: Email — 79%; Making phone calls — 78%; Surfing the Internet — 58%; Playing games — 48%; Paying for purchases — 15%. Write 200–250 words. Use the following plan: make an opening statement on the subject of the project; select and report 2–3 facts; make 1–2 comparisons where relevant; outline a problem that can arise with using smartphones and suggest a way of solving it; conclude by giving your opinion on the role of smartphones in our life.",
+    "assignmentData": {
+      "topic": "what people use their smartphones for in Zetland",
+      "rows": [
+        {
+          "label": "Email",
+          "percent": 79
+        },
+        {
+          "label": "Making phone calls",
+          "percent": 78
+        },
+        {
+          "label": "Surfing the Internet",
+          "percent": 58
+        },
+        {
+          "label": "Playing games",
+          "percent": 48
+        },
+        {
+          "label": "Paying for purchases",
+          "percent": 15
+        }
+      ]
+    },
+    "answer": "Today we all live in the age of technology. Smartphones have become an indispensable part of people’s lives. People in Zetland use their smartphones for different purposes. My project, which I am still working on, is aimed at finding out the ways of using smartphones. I have found some data on this issue presented in the bar chart.\n\nIt becomes clear from the diagram that people mostly use smartphones for sending emails (79%) and making phone calls (78%). At the same time the use of smartphones for purchases is the lowest (15%).\n\nIt is worth mentioning that the difference between the percentage of people who are mostly playing games (48%) and surfing the Internet (58%) is small, only 10 percents.\n\nThe statistics of the bar chart, in my opinion, reveal an important problem. We can see that nobody is reading e-books on their smartphones, therefore they are missing an opportunity of reading books anywhere and at any time.\n\nI would like to say that the role of smartphones in today’s life can hardly be overestimated. With the help of smartphones people can communicate quickly and efficiently, they can use them to find any information on the Internet quickly, and smartphone apps allow people to have access to many documents or photos.",
+    "human": {
+      "total": 12,
+      "max": 14,
+      "criteria": {
+        "k1": 2,
+        "k2": 3,
+        "k3": 3,
+        "k4": 2,
+        "k5": 2
+      },
+      "criteriaLabels": {
+        "k1": "Решение коммуникативной задачи",
+        "k2": "Организация текста",
+        "k3": "Лексика",
+        "k4": "Грамматика",
+        "k5": "Орфография и пунктуация"
+      },
+      "reviewer": "fipi-2022-expert-manual"
+    },
+    "source": {
+      "manual": "fipi-pch-2022.pdf",
+      "originalTask": 40,
+      "wordCount": 214,
+      "page": 92,
+      "assignmentPage": 91,
+      "scorePage": 94,
+      "answerReview": "text-layer-and-visual-pdf-review",
+      "assignmentReview": "visual-pdf-review",
+      "appWordCount": 211
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "w38-fipi-2022-literary-genres-7611",
+    "operation": "writing_38",
+    "tags": [
+      "fipi-2022",
+      "official-expert-score",
+      "full-answer",
+      "answer-visually-transcribed",
+      "assignment-plan-2022",
+      "legacy-task-40"
+    ],
+    "assignment": "Imagine that you are doing a project on what literary genres are popular among university students in Zetland. You have found some data on the subject – the results of the opinion polls (see the table below). Comment on the data in the table and give your opinion on the subject of the project. Literary genre — Number of readers (%): Fantasy — 30%; Science fiction — 25%; Detective/war/spy stories/thrillers — 20%; Other modern literature — 15%; Classical literature — 10%. Write 200–250 words. Use the following plan: make an opening statement on the subject of the project; select and report 2–3 facts; make 1–2 comparisons where relevant; outline a problem that can arise with reading and suggest a way of solving it; conclude by giving your opinion on the importance of reading for university students.",
+    "assignmentData": {
+      "topic": "what literary genres are popular among university students in Zetland",
+      "rows": [
+        {
+          "label": "Fantasy",
+          "percent": 30
+        },
+        {
+          "label": "Science fiction",
+          "percent": 25
+        },
+        {
+          "label": "Detective/war/spy stories/thrillers",
+          "percent": 20
+        },
+        {
+          "label": "Other modern literature",
+          "percent": 15
+        },
+        {
+          "label": "Classical literature",
+          "percent": 10
+        }
+      ]
+    },
+    "answer": "Nowadays, it’s popular among students to read different kinds of literary genres. There are number of examples.\n\nFirstly, most students (25–30%) choose to read fantasy or science fiction. They pick these genres in order to expand their imagination or escape everyday routine. Teens can devote time to themselves and such books are a good opportunity to get to know about science, technology or universe and space exploration.\n\nSecondly, less students (20%) choose to read such genres as war/thrillers. Not so many people are interested in such kind of books. Some people find books about a war boring and even tedious. Some of them find thrillers terrific and shocking. That’s why they are afraid to read them.\n\nOn the other hand, it can be very hard to get books. Because some of them become outdated and it’s very difficult to find shops where students can buy them. The solution is quite simple. They can buy these books online. That is much easier than trying to find them in every shop. Also the price on an online book is less than the cost of a paper book.\n\nTo sum up, even though some difficulties can arise with reading, giving it up isn’t the way out. Books can help with projects at school or they can just help people to forget about everyday problems.",
+    "human": {
+      "total": 0,
+      "max": 14,
+      "criteria": {
+        "k1": 0,
+        "k2": 0,
+        "k3": 0,
+        "k4": 0,
+        "k5": 0
+      },
+      "criteriaLabels": {
+        "k1": "Решение коммуникативной задачи",
+        "k2": "Организация текста",
+        "k3": "Лексика",
+        "k4": "Грамматика",
+        "k5": "Орфография и пунктуация"
+      },
+      "reviewer": "fipi-2022-expert-manual"
+    },
+    "source": {
+      "manual": "fipi-pch-2022.pdf",
+      "originalTask": 40,
+      "work": "7611",
+      "wordCount": 222,
+      "page": 95,
+      "assignmentPage": 94,
+      "scorePage": 97,
+      "answerReview": "visual-pdf-transcription",
+      "assignmentReview": "visual-pdf-review",
+      "appWordCount": 221
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
+  },
+  {
+    "id": "w38-fipi-2022-literary-genres-2",
+    "operation": "writing_38",
+    "tags": [
+      "fipi-2022",
+      "official-expert-score",
+      "full-answer",
+      "answer-visually-transcribed",
+      "assignment-plan-2022",
+      "legacy-task-40"
+    ],
+    "assignment": "Imagine that you are doing a project on what literary genres are popular among university students in Zetland. You have found some data on the subject – the results of the opinion polls (see the table below). Comment on the data in the table and give your opinion on the subject of the project. Literary genre — Number of readers (%): Fantasy — 30%; Science fiction — 25%; Detective/war/spy stories/thrillers — 20%; Other modern literature — 15%; Classical literature — 10%. Write 200–250 words. Use the following plan: make an opening statement on the subject of the project; select and report 2–3 facts; make 1–2 comparisons where relevant; outline a problem that can arise with reading and suggest a way of solving it; conclude by giving your opinion on the importance of reading for university students.",
+    "assignmentData": {
+      "topic": "what literary genres are popular among university students in Zetland",
+      "rows": [
+        {
+          "label": "Fantasy",
+          "percent": 30
+        },
+        {
+          "label": "Science fiction",
+          "percent": 25
+        },
+        {
+          "label": "Detective/war/spy stories/thrillers",
+          "percent": 20
+        },
+        {
+          "label": "Other modern literature",
+          "percent": 15
+        },
+        {
+          "label": "Classical literature",
+          "percent": 10
+        }
+      ]
+    },
+    "answer": "In the table we can see information about the different genres of literature that Zetland universities’ students prefer to read.\n\nAccording to the table, the most popular literary genre among students is fantasy, almost the third of respondants has chosen this answer. Another interesting fact is that the least popular answer was classical literature, only one out of ten respondants has marked this variant.\n\nComparing different points of view, we can see that the difference between two most popular literary genres isn t very big – it is only 5 percents of students. There is the same situation with two least popular answers. There is only 5 percent’s difference between other modern literature and classical literature.\n\nThe problem that can arise with reading is loosing the real life communication skills. One can enjoy the story or information inside the book so much, that he won’t do anything except reading. To solve problem people should spend a lot of time outside with their friends, doing some socialising activities, as visiting museums or exhibitions.\n\nMy opinion about the importance of reading for university students is simple. I’m sure that reading books isn’t only a good way of searching important information for studying, but also is a wonderful hobby that can make your free time really interesting. That’s why I can say that reading is very important for university students.",
+    "human": {
+      "total": 8,
+      "max": 14,
+      "criteria": {
+        "k1": 2,
+        "k2": 2,
+        "k3": 2,
+        "k4": 0,
+        "k5": 2
+      },
+      "criteriaLabels": {
+        "k1": "Решение коммуникативной задачи",
+        "k2": "Организация текста",
+        "k3": "Лексика",
+        "k4": "Грамматика",
+        "k5": "Орфография и пунктуация"
+      },
+      "reviewer": "fipi-2022-expert-manual"
+    },
+    "source": {
+      "manual": "fipi-pch-2022.pdf",
+      "originalTask": 40,
+      "wordCount": 216,
+      "page": 97,
+      "assignmentPage": 94,
+      "scorePage": 99,
+      "answerReview": "visual-pdf-transcription",
+      "assignmentReview": "visual-pdf-review",
+      "appWordCount": 227
+    },
+    "expectedCriticalErrors": [],
+    "aiRuns": []
   }
 ]
