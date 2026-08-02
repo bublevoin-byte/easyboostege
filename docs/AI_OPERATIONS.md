@@ -19,6 +19,13 @@
 | Экзаменационная грамматика, чтение и аудирование | `/api/v1/ai/generate-content` | восемь отдельных операций со строгими структурными проверками | встроенные банки заданий |
 | TTS | `/api/v1/tts` | auth, subscription, rate limit, voice allowlist; provider `audio/mpeg`, 1 byte–5 MiB | Web Speech API |
 | STT | `/api/v1/stt` | auth, subscription, rate limit, 20 MiB upload; strict provider JSON | повтор записи |
+| Voice Error Tutor | `/api/v1/voice-tutor/context-attempts`, `/api/v1/voice-tutor/sessions` | reading/listening сначала сверяют полный завершённый canonical set; capsule получает только фрагмент ошибочного пункта до 600 символов | тот же capsule через AI-text или canonical-local rule |
+
+Ответы `reading_questions` и `listening_interview` получают server-issued `voice_tutor.set_id` и
+четыре `item_ids`, производные от request hash и digest сохранённого typed result. Shared cache
+перед выдачей копируется в owner-bound строку `generated_tasks`. Поэтому встроенные и
+динамически сгенерированные результаты проходят один и тот же полный set-level check; устаревшие
+локальные наборы без серверного идентификатора исключаются из ротации.
 
 ## Контракты media-провайдеров
 
@@ -44,7 +51,7 @@
 операций без платных вызовов. Они не закрывают §24.10 сами по себе: окончательное решение остаётся
 за повторным аудитом всех ИИ-операций в отдельном тикете.
 
-Версия prompt для письменной проверки задаётся `WRITING_PROMPT_VERSION` в `ai/writing.js`, для устной части — `SPEAKING_PROMPT_VERSION`, для генерации контента — `CONTENT_PROMPT_VERSION`. Версия вместе с операцией, провайдером, моделью, длительностью и результатом записывается в `ai_requests`. Универсального AI proxy в production API нет.
+Версия prompt для письменной проверки задаётся `WRITING_PROMPT_VERSION` в `ai/writing.js`, для устной части — `SPEAKING_PROMPT_VERSION`, для генерации контента — `CONTENT_PROMPT_VERSION`, для Voice Error Tutor — `VOICE_TUTOR_PROMPT_VERSION`. Версия вместе с операцией, провайдером, моделью, длительностью и результатом записывается в `ai_requests`. Универсального AI proxy в production API нет.
 
 Для `writing-v5` сервер считает полный объём до вызова провайдера. На 154/275 словах ответ не
 усекается; начиная с 155/276 провайдер и программные факты получают только первые 140/250 слов.

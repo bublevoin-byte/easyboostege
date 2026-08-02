@@ -5,6 +5,7 @@
  * оболочки, что и экран слов, — и открытие чтения не тянет за собой чанк слов.
  */
 import {registerRouteHook} from '../router.js';
+import {prepareVoiceTutorContextResult,registerVoiceTutorContextResult} from '../voice-tutor.js';
 import {
   EGE_WORDS,S,SRV,TOKEN,WBTN,examModule,gExamFmt,generateAiContent,lastWord,readingModule,rEsc,
   rSt,rSync,rWordsHtml,registerScreenGenerator,save,setTxt,toast,ui,wBase,wDeco,wSync,
@@ -38,7 +39,7 @@ const R_HL=[
 const R_QS=[
 {tx:'Many British students take a gap year before university. During this year they travel, work or volunteer in other countries. Supporters say that a gap year helps young people become independent and understand what they really want to study. However, some parents are afraid that after a long break their children will not want to return to studying. Universities report that gap-year students usually get better marks in the first year, because they are more motivated and organised. Experts advise planning the year carefully: a person who just stays at home often wastes time and loses study habits.',
  qs:[
- {q:'What do many British students do before university?',o:['They take exams again','They take a year off','They start full-time careers','They move abroad for good'],a:1,ev:'Many British students take a gap year before university.',e:'gap year — это год перерыва между школой и университетом.'},
+ {q:'What do many British students do before university?',o:['They take exams again','They take a year off','They start full-time careers','They move abroad for good'],a:1,ev:'Many British students take a gap year before university.',e:'gap year — это год перерыва между школой и университетом.',voice:{id:'reading.gap-year.before-university',revision:1}},
  {q:'What are some parents afraid of?',o:['Money problems','Danger during travel','That children will not return to study','Bad school marks'],a:2,ev:'…some parents are afraid that after a long break their children will not want to return to studying.',e:'Страх родителей — что ребёнок не захочет вернуться к учёбе.'},
  {q:'According to universities, gap-year students usually…',o:['get better first-year marks','miss more lessons','choose easier subjects','leave university earlier'],a:0,ev:'Universities report that gap-year students usually get better marks in the first year…',e:'better marks in the first year — лучшие оценки на первом курсе.'},
  {q:'What do experts advise?',o:['To stay at home','To plan the year carefully','To avoid working','To skip the gap year'],a:1,ev:'Experts advise planning the year carefully…',e:'Главный совет экспертов — тщательно планировать год.'}]},
@@ -55,6 +56,15 @@ const R_QS=[
  {q:'How can volunteering help in the future?',o:['It guarantees any job','Universities and companies value it','It pays very well','It replaces school exams'],a:1,ev:'…universities pay attention to social activity, and some companies prefer candidates with volunteer experience.',e:'Вузы и работодатели ценят волонтёрский опыт — но не «гарантируют работу».'},
  {q:'What do you need to become a volunteer?',o:['Money','Special skills','Free time and the wish to help','A special diploma'],a:2,ev:'…you do not need money or special skills — only free time and the wish to help.',e:'Нужны только свободное время и желание помогать.'}]}
 ];
+const R_VOICE_RESULT_SETS=[
+  {id:'reading.exam.questions.gap-year',items:['reading.gap-year.before-university','reading.gap-year.parents-fear','reading.gap-year.first-year-marks','reading.gap-year.expert-advice']},
+  {id:'reading.exam.questions.smartphones',items:['reading.smartphones.after-ban','reading.smartphones.parent-concern','reading.smartphones.study-tools','reading.smartphones.compromise']},
+  {id:'reading.exam.questions.volunteering',items:['reading.volunteering.activities','reading.volunteering.benefits','reading.volunteering.future-value','reading.volunteering.requirements']},
+];
+R_VOICE_RESULT_SETS.forEach(function(resultSet,setIndex){
+  R_QS[setIndex].voice={id:resultSet.id,revision:1};
+  resultSet.items.forEach(function(itemId,itemIndex){R_QS[setIndex].qs[itemIndex].voice={id:itemId,revision:1}});
+});
 const R_GAPS=[
 {tx:['Our school library is more than just a room with books. Students come here ',' or to prepare for lessons. Last year the library bought new computers, ',' much faster. Teachers say that students ',' now spend more time reading than before.'],
  fr:['to do their homework in silence','which made the search for information','who visit the library regularly','that was built ten years ago'],
@@ -162,7 +172,7 @@ function rHlCheck(){if(RH.done)return;RH.done=true;var set=RH.set,L='ABCDE',r=rS
   try{d.scrollIntoView({behavior:'smooth',block:'start'})}catch(e){};rGen()}
 /* ---- Задания 12-18: полное понимание ---- */
 function rQs(){S.readIdxQ=(S.readIdxQ||0);var pool=rPool('q',R_QS);var set=pool[S.readIdxQ%pool.length];S.readIdxQ++;
-  RQ={set:set,i:-1,ok:0,showTx:false};rQsRender()}
+  RQ={set:set,i:-1,ok:0,showTx:false,ans:set.qs.map(function(){return null}),voiceRegistered:false};rQsRender()}
 function rQsRender(){var area=document.getElementById('r_area');var set=RQ.set;
   if(RQ.i<0){
     area.innerHTML='<div id="r_card" class="clayCard" style="position:relative;overflow:hidden;padding:18px;margin-bottom:12px;">'+wDeco()
@@ -172,14 +182,17 @@ function rQsRender(){var area=document.getElementById('r_area');var set=RQ.set;
       +'<button class="sq" style="'+WBTN+'color:#B54E2F;margin-top:10px;" onclick="rHub()">← К чтению</button>';
     rAnim('win','.32s');setTxt('r_today','читаем текст');return}
   var q=set.qs[RQ.i];
-  if(!q){var r=rSt();r.texts++;rSync();save();
+  if(!q){var r=rSt();r.texts++;rSync();save();var voiceSlots='';
+    var voiceResult=prepareVoiceTutorContextResult({module:'reading',set:set,selections:RQ.ans});
+    set.qs.forEach(function(item,i){if(voiceResult)voiceSlots+=voiceResult.resultSlot(item,i)});
     area.innerHTML='<div id="r_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;text-align:center;">'+wDeco()
       +'<div style="font-size:42px;">'+(RQ.ok===set.qs.length?'🏆':(RQ.ok>=2?'💪':'📚'))+'</div>'
       +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:21px;color:#2B2B2B;margin-top:8px;">'+RQ.ok+' из '+set.qs.length+'</div>'
-      +'<div style="font-weight:600;font-size:13px;color:#777163;margin-top:4px;">Точность в этом тренажёре: '+(rSt().q.tot?Math.round(rSt().q.ok/rSt().q.tot*100):0)+'%</div></div>'
+      +'<div style="font-weight:600;font-size:13px;color:#777163;margin-top:4px;">Точность в этом тренажёре: '+(rSt().q.tot?Math.round(rSt().q.ok/rSt().q.tot*100):0)+'%</div>'+voiceSlots+'</div>'
       +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
       +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="rQs()">Ещё текст</button>'
       +'<button class="sq" style="'+WBTN+'color:#B54E2F;" onclick="rHub()">К чтению</button></div>';
+    if(voiceResult&&!RQ.voiceRegistered){RQ.voiceRegistered=true;registerVoiceTutorContextResult(voiceResult).catch(function(){})}
     rAnim('win','.32s');return}
   area.innerHTML=(RQ.showTx?('<div class="clayCard" style="padding:15px 16px;margin-bottom:12px;"><div style="font-weight:500;font-size:13px;line-height:1.65;color:#2B2B2B;">'+rWordsHtml(set.tx)+'</div></div>'):'')
     +'<div id="r_card" class="clayCard" style="position:relative;overflow:hidden;padding:18px;margin-bottom:12px;">'+wDeco()
@@ -191,6 +204,7 @@ function rQsRender(){var area=document.getElementById('r_area');var set=RQ.set;
     +q.o.map(function(o,i){return '<button class="sq" style="'+WBTN+'text-align:left;" onclick="rQsPick(this,'+i+')">'+o+'</button>'}).join('')+'</div>';
   rAnim('win','.32s');setTxt('r_today',(RQ.i+1)+' / '+set.qs.length)}
 function rQsPick(btn,i){var q=RQ.set.qs[RQ.i];if(!q||btn.dataset.done)return;
+  RQ.ans[RQ.i]=i;
   var all=btn.parentElement.querySelectorAll('button');all.forEach(function(b){b.dataset.done=1});
   var ok=i===q.a,r=rSt();r.q.tot++;if(ok){r.q.ok++;RQ.ok++}
   if(ok){ui.markAnswer(btn,'correct');rAnim('wpop','.35s');
@@ -334,6 +348,7 @@ function rExamRender(){var area=document.getElementById('r_area');if(!area||!RE)
 function rExamDedup(field,idx,val){RE[field]=readingModule.selectUnique(RE[field],idx,val)}
 function rExamFinish(){if(!RE)return;clearInterval(RE.iv);
   var sec=examModule.elapsedSeconds(RE.t0,Date.now()),L='ABCDE',r=rSt();
+  var voiceResult=prepareVoiceTutorContextResult({module:'reading',set:RE.q,selections:RE.ansQ});
   var okH=0;RE.h.txts.forEach(function(tx,ti){r.h.tot++;if(RE.selH[ti]===tx.a){okH++;r.h.ok++}});
   var okG=0;[0,1,2].forEach(function(gi){r.g.tot++;if(RE.selG[gi]===RE.g.a[gi]){okG++;r.g.ok++}});
   var okQ=0;RE.q.qs.forEach(function(q,i){r.q.tot++;if(RE.ansQ[i]===q.a){okQ++;r.q.ok++}});
@@ -344,8 +359,9 @@ function rExamFinish(){if(!RE)return;clearInterval(RE.iv);
     rows+='<div style="padding:9px 2px;border-bottom:1px solid #F4EFE9;"><div style="font-weight:800;font-size:12.5px;color:#A83226;">Заголовки · текст '+(ti+1)+' → '+L[tx.a]+'. '+rEsc(RE.h.hl[tx.a])+'</div><div style="font-weight:600;font-size:12px;color:#777163;margin-top:3px;">'+tx.k+'</div></div>'});
   [0,1,2].forEach(function(gi){if(RE.selG[gi]!==RE.g.a[gi])
     rows+='<div style="padding:9px 2px;border-bottom:1px solid #F4EFE9;"><div style="font-weight:800;font-size:12.5px;color:#A83226;">Пропуск '+(gi+1)+' → '+'ABCD'[RE.g.a[gi]]+'. '+rEsc(RE.g.fr[RE.g.a[gi]])+'</div><div style="font-weight:600;font-size:12px;color:#777163;margin-top:3px;">'+RE.g.k[gi]+'</div></div>'});
-  RE.q.qs.forEach(function(q,i){if(RE.ansQ[i]!==q.a)
-    rows+='<div style="padding:9px 2px;border-bottom:1px solid #F4EFE9;"><div style="font-weight:800;font-size:12.5px;color:#A83226;">Вопрос '+(i+1)+' → '+rEsc(q.o[q.a])+'</div><div style="font-weight:600;font-size:12px;color:#777163;margin-top:3px;">«'+rEsc(q.ev)+'»</div></div>'});
+  RE.q.qs.forEach(function(q,i){if(RE.ansQ[i]!==q.a){var voiceSlot='';
+    if(voiceResult)voiceSlot=voiceResult.resultSlot(q,i);
+    rows+='<div style="padding:9px 2px;border-bottom:1px solid #F4EFE9;"><div style="font-weight:800;font-size:12.5px;color:#A83226;">Вопрос '+(i+1)+' → '+rEsc(q.o[q.a])+'</div><div style="font-weight:600;font-size:12px;color:#777163;margin-top:3px;">«'+rEsc(q.ev)+'»</div>'+voiceSlot+'</div>'}});
   RE=null;rSync();save();
   var parts=[['Заголовки',okH,4],['Пропуски',okG,3],['Вопросы',okQ,4]];
   var max=examModule.maxScore(parts),weak=examModule.weakestSection(parts);
@@ -359,9 +375,12 @@ function rExamFinish(){if(!RE)return;clearInterval(RE.iv);
     +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
     +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="rExamStart()">Ещё раз</button>'
     +'<button class="sq" style="'+WBTN+'color:#B54E2F;" onclick="rHub()">К чтению</button></div>';
+  if(voiceResult)registerVoiceTutorContextResult(voiceResult).catch(function(){});
   rAnim('win','.32s');rGen()}
 /* ---- фоновая ИИ-генерация комплектов чтения ---- */
-function rPool(kind,base){var ai=(S&&S.readAi&&S.readAi[kind])||[];return readingModule.pool(base,ai)}
+function rPool(kind,base){var ai=(S&&S.readAi&&S.readAi[kind])||[];
+  if(kind==='q')ai=ai.filter(function(set){return set&&set.voice&&set.qs&&set.qs.every(function(q){return q.voice})});
+  return readingModule.pool(base,ai)}
 var R_GEN=false;
 async function rGen(){
   if(R_GEN)return;if(typeof SRV==='undefined'||!SRV||!TOKEN)return;
@@ -383,7 +402,8 @@ async function rGen(){
       d=await generateAiContent('reading_questions');
       if(d&&d.tx&&Array.isArray(d.qs)&&d.qs.length===4
         &&d.qs.every(function(q){return q&&q.q&&Array.isArray(q.o)&&q.o.length===4&&q.a>=0&&q.a<4&&q.ev&&q.e})){
-        item={tx:String(d.tx),qs:d.qs.map(function(q){return{q:String(q.q),o:q.o.map(String),a:+q.a,ev:String(q.ev),e:String(q.e)}})}}
+        var voice=d.voice_tutor,hasVoice=voice&&voice.set_id&&voice.revision===1&&Array.isArray(voice.item_ids)&&voice.item_ids.length===4;
+        if(hasVoice)item={tx:String(d.tx),voice:{id:String(voice.set_id),revision:1},qs:d.qs.map(function(q,i){return{q:String(q.q),o:q.o.map(String),a:+q.a,ev:String(q.ev),e:String(q.e),voice:{id:String(voice.item_ids[i]),revision:1}}})}}
     }else{
       d=await generateAiContent('reading_gaps');
       if(d&&Array.isArray(d.tx)&&d.tx.length===4&&Array.isArray(d.fr)&&d.fr.length===4

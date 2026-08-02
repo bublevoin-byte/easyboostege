@@ -1,6 +1,9 @@
 import crypto from 'node:crypto';
 import express from 'express';
-import { buildGrammarLexiconCapsule, createGrammarLexiconErrorAttempt, persistedVoiceTutorCapsule, publicVoiceTutorCapsule } from '../voice-tutor/capsule.js';
+import { parseContentResponse } from '../ai/content.js';
+import { buildVoiceTutorCapsule, createGrammarLexiconErrorAttempt, createVoiceTutorContextResult, persistedVoiceTutorCapsule, publicVoiceTutorCapsule } from '../voice-tutor/capsule.js';
+import { buildGeneratedVoiceTutorDefinitions, parseGeneratedVoiceTutorSetId } from '../voice-tutor/generated-items.js';
+import { isContextVoiceTutorModule, isDirectVoiceTutorModule } from '../voice-tutor/modules.js';
 
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9._:-]{8,100}$/u;
 const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -22,6 +25,9 @@ const PUBLIC_ERRORS = Object.freeze({
   VOICE_TUTOR_LEARNER_ANSWER_INVALID: { status: 422, message: 'В попытке нет ответа для разбора.' },
   VOICE_TUTOR_ANSWER_NOT_INCORRECT: { status: 422, message: 'Этот ответ не является ошибкой для выбранной ревизии задания.' },
   VOICE_TUTOR_CAPSULE_TOO_LARGE: { status: 422, message: 'Контекст разбора превышает безопасный размер.' },
+  VOICE_TUTOR_CONTEXT_INVALID: { status: 422, message: 'Проверенный фрагмент для разбора недоступен.' },
+  VOICE_TUTOR_CONTEXT_RESULT_INVALID: { status: 422, message: 'Завершённый результат не соответствует проверенному заданию.' },
+  VOICE_TUTOR_CONTEXT_RESULT_CONFLICT: { status: 409, message: 'Этот результат уже сохранён с другими ответами.' },
   VOICE_TUTOR_NONCE_REPLAYED: { status: 409, message: 'Команда этой сессии уже использована.' },
   VOICE_TUTOR_TRANSITION_INVALID: { status: 409, message: 'Этот шаг разбора сейчас недоступен.' },
   PRIVACY_CONSENT_REQUIRED: { status: 403, message: 'Подтвердите обработку голоса в настройках приватности.' },
@@ -50,9 +56,20 @@ function parseErrorRequest(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
   const keys = Object.keys(body);
   if (keys.length !== 5 || keys.some((key) => !['attemptId', 'module', 'itemId', 'revision', 'learnerAnswer'].includes(key))) return null;
-  if (!ATTEMPT_ID.test(String(body.attemptId || '')) || !['grammar', 'vocabulary'].includes(body.module)
+  if (!ATTEMPT_ID.test(String(body.attemptId || '')) || !isDirectVoiceTutorModule(body.module)
     || !/^[a-z0-9.-]{4,120}$/u.test(String(body.itemId || '')) || !Number.isInteger(body.revision)
     || typeof body.learnerAnswer !== 'string' || body.learnerAnswer.length > 200) return null;
+  return body;
+}
+
+function parseContextAttemptRequest(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+  const keys = Object.keys(body);
+  if (keys.length !== 5 || keys.some((key) => !['attemptId', 'module', 'setId', 'revision', 'answers'].includes(key))) return null;
+  if (!ATTEMPT_ID.test(String(body.attemptId || '')) || !isContextVoiceTutorModule(body.module)
+    || !/^[a-z0-9.-]{4,120}$/u.test(String(body.setId || '')) || !Number.isInteger(body.revision)
+    || !Array.isArray(body.answers) || body.answers.length < 1 || body.answers.length > 20
+    || body.answers.some((answer) => typeof answer !== 'string' || answer.length < 1 || answer.length > 200)) return null;
   return body;
 }
 
@@ -79,12 +96,37 @@ function tracerResponse(result, capsule, extra = {}) {
   };
 }
 
+async function generatedDefinitionsFor(db, username, setId, module) {
+  const generated = parseGeneratedVoiceTutorSetId(setId, module);
+  if (!generated) return null;
+  const stored = await db.getGeneratedTask(username, generated.requestHash);
+  if (!stored) throw Object.assign(new Error('VOICE_TUTOR_ITEM_NOT_FOUND'), { code: 'VOICE_TUTOR_ITEM_NOT_FOUND' });
+  try {
+    const data = parseContentResponse(generated.operation, JSON.stringify(stored.result));
+    const definitions = buildGeneratedVoiceTutorDefinitions(generated.operation, generated.requestHash, data);
+    if (!definitions || definitions.resultSet.id !== setId) throw new Error('generated definitions invalid');
+    return definitions;
+  } catch {
+    throw Object.assign(new Error('VOICE_TUTOR_ITEM_NOT_FOUND'), { code: 'VOICE_TUTOR_ITEM_NOT_FOUND' });
+  }
+}
+
+async function buildSourceCapsule(db, username, attempt, expectedRevision) {
+  const setId = attempt?.metadata?.context_set_id;
+  const generated = setId ? await generatedDefinitionsFor(db, username, setId, attempt.module) : null;
+  return buildVoiceTutorCapsule({
+    attempt,
+    expectedRevision,
+    ...(generated ? { getItem: generated.getItem } : {}),
+  });
+}
+
 async function rebuildSourceCapsule(db, username, storedCapsule) {
   const attemptId = storedCapsule?.source?.attempt_id;
   const revision = Number(storedCapsule?.source?.item_revision);
   const attempt = attemptId ? await db.getModuleAttempt(username, attemptId) : null;
   if (!attempt) throw Object.assign(new Error('VOICE_TUTOR_ATTEMPT_NOT_FOUND'), { code: 'VOICE_TUTOR_ATTEMPT_NOT_FOUND' });
-  const capsule = buildGrammarLexiconCapsule({ attempt, expectedRevision: revision });
+  const capsule = await buildSourceCapsule(db, username, attempt, revision);
   if (capsule.id !== storedCapsule.id || capsule.version !== storedCapsule.version) {
     throw Object.assign(new Error('VOICE_TUTOR_REVISION_MISMATCH'), { code: 'VOICE_TUTOR_REVISION_MISMATCH' });
   }
@@ -131,6 +173,49 @@ export function createVoiceTutorRoutes({
     }
   });
 
+  router.post('/api/v1/voice-tutor/context-attempts', auth, async (req, res, next) => {
+    const parsed = parseContextAttemptRequest(req.body);
+    if (!parsed) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректный завершённый результат.' } });
+    try {
+      const access = await db.getVoiceTutorAccess(req.user, limits, now());
+      if (!access.entitlements.voice_tutor) return sendVoiceTutorError({ code: 'VOICE_TUTOR_PREMIUM_REQUIRED' }, res, next);
+      const generated = await generatedDefinitionsFor(db, req.user, parsed.setId, parsed.module);
+      const result = createVoiceTutorContextResult({
+        id: parsed.attemptId,
+        module: parsed.module,
+        setId: parsed.setId,
+        revision: parsed.revision,
+        answers: parsed.answers,
+      }, generated ? {
+        getItem: generated.getItem,
+        getResultSet: (setId) => setId === generated.resultSet.id ? generated.resultSet : null,
+      } : {});
+      const recorded = await db.recordModuleAttempt(req.user, result.attempt);
+      if (!recorded.created) {
+        const existing = await db.getModuleAttempt(req.user, result.attempt.id);
+        const expected = result.attempt.metadata;
+        if (!existing || existing.activity !== result.attempt.activity || existing.module !== result.attempt.module
+          || existing.metadata?.set_id !== expected.set_id || Number(existing.metadata?.set_revision) !== expected.set_revision
+          || existing.metadata?.answers_hash !== expected.answers_hash) {
+          return sendVoiceTutorError({ code: 'VOICE_TUTOR_CONTEXT_RESULT_CONFLICT' }, res, next);
+        }
+      }
+      for (const errorAttempt of result.errors) await db.recordModuleAttempt(req.user, errorAttempt);
+      return res.status(recorded.created ? 201 : 200).json({
+        id: result.attempt.id,
+        created: recorded.created,
+        revision: parsed.revision,
+        errors: result.errors.map((attempt) => ({
+          attempt_id: attempt.id,
+          item_id: attempt.metadata.item_id,
+          revision: attempt.metadata.item_revision,
+        })),
+      });
+    } catch (error) {
+      return sendVoiceTutorError(error, res, next);
+    }
+  });
+
   router.post('/api/v1/voice-tutor/sessions', auth, async (req, res, next) => {
     const idempotencyKey = String(req.headers['idempotency-key'] || '');
     if (!IDEMPOTENCY_KEY.test(idempotencyKey)) {
@@ -148,7 +233,7 @@ export function createVoiceTutorRoutes({
         }
         const attempt = await db.getModuleAttempt(req.user, tracer.attemptId);
         if (!attempt) return sendVoiceTutorError({ code: 'VOICE_TUTOR_ATTEMPT_NOT_FOUND' }, res, next);
-        const capsule = buildGrammarLexiconCapsule({ attempt, expectedRevision: tracer.revision });
+        const capsule = await buildSourceCapsule(db, req.user, attempt, tracer.revision);
         const nonce = newNonce();
         const result = await db.reserveVoiceTutorSession(req.user, {
           id: newSessionId(),
@@ -262,14 +347,15 @@ export function createVoiceTutorRoutes({
         now: now(),
         errorCode: 'VOICE_TUTOR_MICROPHONE_UNAVAILABLE',
       });
+      const capsule = await rebuildSourceCapsule(db, req.user, switched.capsule);
       if (textTutor && await hasCurrentTextConsent(db, req.user, privacyPolicyVersion)) {
         try {
-          const textTurn = await textTutor.createTurn({ capsule: switched.capsule, state: switched.session.state, username: req.user });
-          return res.json(tracerResponse({ ...switched, created: false }, switched.capsule, { mode: 'text', nonce, text_turn: textTurn }));
+          const textTurn = await textTutor.createTurn({ capsule, state: switched.session.state, username: req.user });
+          return res.json(tracerResponse({ ...switched, created: false }, capsule, { mode: 'text', nonce, text_turn: textTurn }));
         } catch {}
       }
       await db.setVoiceTutorSessionDelivery(req.user, req.params.sessionId, { mode: 'local', errorCode: 'VOICE_TUTOR_TEXT_UNAVAILABLE' });
-      return res.json(tracerResponse({ ...switched, created: false }, switched.capsule, { mode: 'local', nonce, local_rule: switched.capsule.rule }));
+      return res.json(tracerResponse({ ...switched, created: false }, capsule, { mode: 'local', nonce, local_rule: capsule.rule }));
     } catch (error) {
       return sendVoiceTutorError(error, res, next);
     }

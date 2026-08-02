@@ -58,6 +58,50 @@ export async function registerVoiceTutorError({ module, itemId, revision, learne
   return { attemptId, revision };
 }
 
+function voiceTutorSlotId(itemId) {
+  const value = String(itemId || '');
+  if (!/^[a-z0-9.-]{4,120}$/u.test(value)) return '';
+  return `voice_tutor_result_${value.replaceAll('.', '_')}`;
+}
+
+export function voiceTutorResultSlot(itemId) {
+  const id = voiceTutorSlotId(itemId);
+  return id ? `<div id="${id}"></div>` : '';
+}
+
+export function prepareVoiceTutorContextResult({ module, set, selections } = {}) {
+  const questions = set?.qs;
+  if (!set?.voice || !Array.isArray(questions) || !Array.isArray(selections)
+    || questions.length !== selections.length) return null;
+  const answers = questions.map((question, index) => question?.o?.[selections[index]]);
+  if (answers.some((answer) => typeof answer !== 'string' || !answer)) return null;
+  return {
+    module,
+    setId: set.voice.id,
+    revision: set.voice.revision,
+    answers,
+    resultSlot(question, index) {
+      return question?.voice && selections[index] !== question.a ? voiceTutorResultSlot(question.voice.id) : '';
+    },
+  };
+}
+
+export async function registerVoiceTutorContextResult({ module, setId, revision, answers } = {}) {
+  if (!canStartVoiceTutor() || !browser.crypto?.randomUUID) return null;
+  const result = await api().post('/api/v1/voice-tutor/context-attempts', {
+    attemptId: browser.crypto.randomUUID(),
+    module,
+    setId,
+    revision,
+    answers,
+  });
+  for (const error of result?.errors || []) {
+    const slot = browser.document?.getElementById(voiceTutorSlotId(error.item_id));
+    if (slot) slot.innerHTML = voiceTutorButton({ attemptId: error.attempt_id, revision: error.revision });
+  }
+  return result;
+}
+
 function ensureSheet() {
   const document = browser.document;
   if (!document || document.getElementById('voiceTutorSheet')) return;
@@ -69,7 +113,7 @@ function ensureSheet() {
     #voiceTutorSheet .vtPanel{position:absolute;left:50%;bottom:0;transform:translateX(-50%);width:min(100%,430px);max-height:92dvh;overflow:auto;box-sizing:border-box;background:#FFFDFC;border-radius:28px 28px 0 0;padding:16px 18px calc(20px + env(safe-area-inset-bottom));box-shadow:0 -18px 55px rgba(20,20,30,.28)}
     .vtGrip{width:42px;height:5px;border-radius:9px;background:#D9D5D0;margin:0 auto 12px}.vtHead{display:flex;align-items:flex-start;gap:12px}.vtHeadCopy{flex:1}.vtHead h2{margin:0;color:#2B2B2B;font:900 20px Nunito,Manrope,sans-serif}.vtHead p{margin:4px 0 0;color:#6A665F;font:600 12px/1.45 Manrope,sans-serif}.vtClose{width:40px;height:40px;border:0;border-radius:13px;background:#F1F2F4;font-size:22px;cursor:pointer}
     .vtMeta{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.vtPill{padding:5px 9px;border-radius:12px;background:#F1F2F4;color:#545960;font:800 11px Manrope,sans-serif}.vtWarn{background:#FFF1DF;color:#935300}
-    .vtCapsule{margin-top:12px;padding:13px;border:1px solid #EEE8E1;border-radius:17px;background:#fff}.vtCapsule b{display:block;color:#2B2B2B;font:800 13px Manrope,sans-serif}.vtCapsule span{display:block;margin-top:5px;color:#666158;font:600 12px/1.5 Manrope,sans-serif}
+    .vtCapsule{margin-top:12px;padding:13px;border:1px solid #EEE8E1;border-radius:17px;background:#fff}.vtCapsule b{display:block;color:#2B2B2B;font:800 13px Manrope,sans-serif}.vtCapsule span{display:block;margin-top:5px;color:#666158;font:600 12px/1.5 Manrope,sans-serif}.vtContext{padding:9px 10px;border-radius:12px;background:#F7F4EF;color:#4A453E!important}.vtContext[hidden]{display:none}
     .vtCaptions{min-height:82px;max-height:150px;overflow:auto;margin-top:12px;padding:13px;border-radius:17px;background:#272B31;color:#fff;font:600 13px/1.55 Manrope,sans-serif}.vtCaptions:empty:before{content:'Временные субтитры появятся здесь';color:#BFC4CC}
     .vtControls{display:flex;align-items:center;justify-content:center;gap:10px;margin-top:12px}.vtMic{width:58px;height:58px;border:0;border-radius:50%;background:#F2683F;color:#fff;font-size:24px;cursor:pointer;box-shadow:0 10px 24px rgba(242,104,63,.3)}.vtMic[aria-pressed="true"]{background:#1F8A50}.vtState{flex:1;color:#4F545B;font:800 12px/1.35 Manrope,sans-serif}
     .vtAnswer{display:flex;gap:8px;margin-top:12px}.vtAnswer input{min-width:0;flex:1;height:48px;border:1px solid #DDD7D0;border-radius:15px;padding:0 13px;font:700 14px Manrope,sans-serif}.vtAnswer button,.vtFinish{min-height:48px;border:0;border-radius:15px;padding:0 15px;font:800 13px Manrope,sans-serif;cursor:pointer}.vtAnswer button{background:#F2683F;color:#fff}.vtFinish{width:100%;margin-top:10px;background:#F1F2F4;color:#3F444B}
@@ -83,7 +127,7 @@ function ensureSheet() {
   sheet.innerHTML = `<div class="vtBackdrop"></div><section class="vtPanel"><div class="vtGrip"></div>
     <div class="vtHead"><div class="vtHeadCopy"><h2 id="voiceTutorTitle">Разбор ошибки с ИИ</h2><p>Голос обрабатывается внешним провайдером в реальном времени; аудио и полный transcript не сохраняются.</p></div><button id="voiceTutorClose" class="vtClose" type="button" aria-label="Завершить разбор и вернуться в упражнение">×</button></div>
     <div class="vtMeta"><span id="voiceTutorTimer" class="vtPill" role="timer">0:00</span><span id="voiceTutorQuota" class="vtPill">Остаток уточняется…</span><span class="vtPill">ИИ · не официальный балл ЕГЭ</span></div>
-    <div class="vtCapsule"><b id="voiceTutorSkill">Готовим контекст…</b><span id="voiceTutorPrompt"></span></div>
+    <div class="vtCapsule"><b id="voiceTutorSkill">Готовим контекст…</b><span id="voiceTutorPrompt"></span><span id="voiceTutorContext" class="vtContext" hidden></span></div>
     <div id="voiceTutorCaptions" class="vtCaptions" aria-live="polite" aria-atomic="false"></div>
     <div class="vtControls"><button id="voiceTutorMic" class="vtMic" type="button" aria-label="Включить или выключить микрофон" aria-pressed="false">🎙️</button><div id="voiceTutorState" class="vtState" role="status" aria-live="polite">Подключаем репетитора…</div></div>
     <form id="voiceTutorAnswer" class="vtAnswer"><input id="voiceTutorInput" maxlength="200" aria-label="Ответ репетитору" autocomplete="off"><button type="submit">Продолжить</button></form>
@@ -131,6 +175,12 @@ function renderSession(result) {
   currentSession = { ...currentSession, ...result, session: result.session || currentSession?.session, capsule: result.capsule || currentSession?.capsule };
   text('voiceTutorSkill', currentSession.capsule.skill.label);
   text('voiceTutorPrompt', currentSession.capsule.item.prompt);
+  const context = currentSession.capsule.item.context;
+  const contextElement = browser.document.getElementById('voiceTutorContext');
+  if (contextElement) {
+    contextElement.hidden = !context;
+    contextElement.textContent = context ? `${context.label}: “${context.text}”` : '';
+  }
   text('voiceTutorQuota', quotaText(currentSession.voice_tutor));
   const message = result.text_turn?.message || (result.mode === 'local' ? result.local_rule?.explanation : statePrompt(currentSession.session));
   text('voiceTutorState', message);

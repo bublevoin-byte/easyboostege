@@ -197,7 +197,7 @@ test('text fallback uses the registered provider operation, budget, rate count a
   assert.equal(calls[0].operation, 'voice_tutor_text');
   assert.match(calls[0].system, /diagnose/u);
   assert.equal(logs[0].operation, 'voice_tutor_text');
-  assert.equal(logs[0].promptVersion, 'voice-tutor-grammar-lexicon-v1');
+  assert.equal(logs[0].promptVersion, 'voice-tutor-error-v2');
   assert.equal(logs[0].status, 'completed');
   assert.match(textTurnRequest(capsule, 'fallback'), /заверши разбор/u);
   assert.doesNotMatch(textTurnRequest(capsule, 'fallback'), /диагност/u);

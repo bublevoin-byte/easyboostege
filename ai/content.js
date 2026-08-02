@@ -135,7 +135,8 @@ const outputs = {
     .refine((value) => new Set(value.a).size === 4, { message: 'matching answers must be unique' }),
   listening_true_false: z.object({ d: z.array(dialogueLine).min(6).max(8), st: z.array(z.object({ t: shortText(300), a: z.number().int().min(0).max(2), ev: shortText(500), e: shortText(600) }).strict()).length(5) }).strict()
     .refine((value) => value.st.some((item) => item.a === 2), { message: 'true/false set requires a not stated answer' }),
-  listening_interview: z.object({ d: z.array(dialogueLine).min(7).max(9), qs: z.array(examQuestion(3)).length(4) }).strict(),
+  listening_interview: z.object({ d: z.array(dialogueLine).min(7).max(9), qs: z.array(examQuestion(3)).length(4) }).strict()
+    .refine((value) => value.qs.every((item) => value.d.some((line) => line.t.includes(item.ev))), { message: 'listening evidence must be an exact transcript quote' }),
   vocabulary_cards: z.array(vocabularyCard).min(1).max(30),
 };
 
@@ -157,7 +158,7 @@ const instructions = {
   reading_gaps: 'Create EGE reading task 11 with exactly four passage fragments, four phrases, three gaps and one unused phrase. Return {tx,fr,a,k}; answer indices are unique and k contains Russian explanations.',
   listening_matching: 'Create EGE listening task 1 for speech synthesis: five statements and four 2-3 sentence monologues. Return {st,sp:[{t}],a,k}; answer indices are unique and k is Russian.',
   listening_true_false: 'Create EGE listening task 2: a 6-8 line two-person dialogue and five True/False/Not stated statements, including at least one Not stated. Return {d:[{s,t}],st:[{t,a,ev,e}]}.',
-  listening_interview: 'Create EGE listening tasks 3-9: a 7-9 line interview and exactly four questions with three options. Return {d:[{s,t}],qs:[{q,o,a,ev,e}]}.',
+  listening_interview: 'Create EGE listening tasks 3-9: a 7-9 line interview and exactly four questions with three options. Return {d:[{s,t}],qs:[{q,o,a,ev,e}]}; every ev must be an exact quote from one d.t transcript line.',
   vocabulary_cards: 'Create useful British English B1-B2 EGE vocabulary cards. Return a JSON array with w, p (n|v|adj|adv|ph|id), short Russian tr and example ex using the base form.',
 };
 

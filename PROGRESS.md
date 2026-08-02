@@ -692,7 +692,7 @@ production credentials, три доказанных P0 отмечены во в�
 |---|---|---|
 | 01 | Premium-доступ, дневные/месячные минуты и защита от параллельных сессий | done |
 | 02 | Полный голосовой разбор ошибок грамматики и лексики с fallback | done |
-| 03 | Контекстный голосовой разбор чтения и аудирования | pending |
+| 03 | Контекстный голосовой разбор чтения и аудирования | done |
 | 04 | Контекстный голосовой разбор письма и устной части | pending |
 | 05 | Поиск отсутствующих правил по доверенным источникам и очередь проверки | pending |
 | 06 | Карта освоенных ошибок и возвращённых потенциальных баллов | pending |
@@ -709,3 +709,12 @@ production credentials, три доказанных P0 отмечены во в�
 без повторного списания voice quota. Каждый text-шаг заново собирает точный capsule по source attempt;
 ошибка text AI атомарно переключает текущую сессию на canonical-local режим. Перед каждым AI-text
 turn заново проверяется актуальный `text_processing` consent; voice consent его не заменяет.
+
+Тикет 03 закрыт: reading/listening result flow сначала отправляет полный завершённый canonical set,
+а сервер создаёт отдельные детерминированные error attempts только после проверки всех вариантов.
+Это работает во встроенных и динамически сгенерированных practice/exam наборах: shared AI result
+копируется в owner-bound `generated_tasks`, set/item IDs связывают request hash и content digest,
+а listening evidence обязано быть точной цитатой из transcript. Общий bottom-sheet adapter монтирует
+кнопки только после завершения; fallback заново собирает тот же bounded capsule. Replay результата
+сверяется по answer hash. Целевые тесты 32/32, полный набор 455 (454 pass, 1 PostgreSQL skip),
+`lint`, `check` и frontend build проходят; оба финальных review не нашли нарушений.

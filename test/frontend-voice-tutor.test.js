@@ -5,6 +5,8 @@ import test from 'node:test';
 import { canStartVoiceTutor, eventForVoiceTutorState, voiceTutorButton } from '../public/voice-tutor.js';
 
 const source = await fs.readFile(new URL('../public/voice-tutor.js', import.meta.url), 'utf8');
+const readingSource = await fs.readFile(new URL('../public/screens/reading.js', import.meta.url), 'utf8');
+const listeningSource = await fs.readFile(new URL('../public/screens/listening.js', import.meta.url), 'utf8');
 
 test('voice tutor trigger is a Premium-only real button with bounded data attributes', () => {
   assert.equal(canStartVoiceTutor({ entitlements: { voice_tutor: false } }), false);
@@ -36,6 +38,7 @@ test('shared voice tutor sheet exposes microphone, transient captions, quota, ti
   assert.match(source, /aria-live="polite"/u);
   assert.match(source, /voiceTutorTimer/u);
   assert.match(source, /voiceTutorQuota/u);
+  assert.match(source, /voiceTutorContext/u);
   assert.match(source, /getUserMedia/u);
   assert.match(source, /browserRealtimeTransport/u);
   assert.match(source, /onPedagogicalEvent/u);
@@ -43,4 +46,24 @@ test('shared voice tutor sheet exposes microphone, transient captions, quota, ti
   assert.match(source, /returnFocus/u);
   assert.match(source, /transientCaptions\.length = 0/u);
   assert.match(source, /const sessionId = currentSession\?\.session\?\.id;\s+closeSheet\(\);\s+if \(sessionId\)/u);
+});
+
+test('reading and listening result screens register completed canonical sets before mounting the shared bottom-sheet trigger', () => {
+  assert.match(readingSource, /import \{prepareVoiceTutorContextResult,registerVoiceTutorContextResult\} from '\.\.\/voice-tutor\.js'/u);
+  assert.match(readingSource, /reading\.gap-year\.before-university/u);
+  assert.match(readingSource, /reading\.exam\.questions\.gap-year/u);
+  assert.match(readingSource, /generateAiContent\('reading_questions'\)[\s\S]*d\.voice_tutor[\s\S]*voice:\{id:String\(voice\.item_ids\[i\]\),revision:1\}/u);
+  assert.match(readingSource, /function rExamFinish\(\)[\s\S]*prepareVoiceTutorContextResult[\s\S]*registerVoiceTutorContextResult\(voiceResult\)/u);
+  assert.match(readingSource, /function rQsRender\(\)[\s\S]*prepareVoiceTutorContextResult[\s\S]*registerVoiceTutorContextResult\(voiceResult\)/u);
+
+  assert.match(listeningSource, /import \{prepareVoiceTutorContextResult,registerVoiceTutorContextResult\} from '\.\.\/voice-tutor\.js'/u);
+  assert.match(listeningSource, /listening\.alex-swimming\.reason/u);
+  assert.match(listeningSource, /listening\.exam\.interview\.alex/u);
+  assert.match(listeningSource, /generateAiContent\('listening_interview'\)[\s\S]*d\.voice_tutor[\s\S]*voice:\{id:String\(voice\.item_ids\[i\]\),revision:1\}/u);
+  assert.match(listeningSource, /function lExamFinish\(\)[\s\S]*prepareVoiceTutorContextResult[\s\S]*registerVoiceTutorContextResult\(voiceResult\)/u);
+  assert.match(listeningSource, /function lIqCheck\(\)[\s\S]*prepareVoiceTutorContextResult[\s\S]*registerVoiceTutorContextResult\(voiceResult\)/u);
+
+  for (const screenSource of [readingSource, listeningSource]) {
+    assert.doesNotMatch(screenSource, /sourceExcerpt|transcriptSegment|reference:/u);
+  }
 });

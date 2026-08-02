@@ -117,4 +117,6 @@ test('listening operations validate dialogue and answer invariants', () => {
   assert.throws(() => parseContentResponse('listening_true_false', JSON.stringify(tf)), /AI_RESPONSE_INVALID/u);
   const interview = { d, qs: Array.from({ length: 4 }, (_, index) => ({ q: `Question ${index}?`, o: ['A', 'B', 'C'], a: index % 3, ev: `Line ${index}`, e: 'Объяснение.' })) };
   assert.equal(parseContentResponse('listening_interview', JSON.stringify(interview)).qs.length, 4);
+  interview.qs[0].ev = 'Hallucinated transcript quote';
+  assert.throws(() => parseContentResponse('listening_interview', JSON.stringify(interview)), /AI_RESPONSE_INVALID/u);
 });

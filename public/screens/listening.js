@@ -6,6 +6,7 @@
  */
 import {registerRouteHook} from '../router.js';
 import {lPlayRaw,lStop} from '../tts.js';
+import {prepareVoiceTutorContextResult,registerVoiceTutorContextResult} from '../voice-tutor.js';
 import {
   LSLOW,L_PLAYSVG,S,SRV,TOKEN,WBTN,examModule,gExamFmt,generateAiContent,lSetSlow,lSt,
   lSync,listeningModule,registerScreenGenerator,rWordsHtml,save,setTxt,toast,ui,wDeco,
@@ -79,7 +80,7 @@ const L_IN=[
  {s:1,t:'And what are your plans?'},
  {s:0,t:'I dream of the national team, but first I want to win the city cup in May.'}],
  qs:[
- {q:'Why did Alex start swimming?',o:['Doctors recommended sport','His friends invited him','He watched it on TV'],a:0,ev:'…I was often ill, and doctors advised sport.',e:'Причина — совет врачей из-за частых болезней.'},
+  {q:'Why did Alex start swimming?',o:['Doctors recommended sport','His friends invited him','He watched it on TV'],a:0,ev:'…I was often ill, and doctors advised sport.',e:'Причина — совет врачей из-за частых болезней.',voice:{id:'listening.alex-swimming.reason',revision:1}},
  {q:'How often does Alex train?',o:['Every day','Five times a week','Only at weekends'],a:1,ev:'Five times a week, early in the morning before school.',e:'Пять раз в неделю, воскресенье — отдых.'},
  {q:'What happened to Alex last year?',o:['He left his team','He broke his arm','He lost the championship'],a:1,ev:'Last year I broke my arm and missed four months.',e:'Сломал руку и пропустил четыре месяца.'},
  {q:'What does Alex want to do first?',o:['Join the national team','Win the city cup','Become a coach'],a:1,ev:'…but first I want to win the city cup in May.',e:'Сначала — кубок города, сборная — мечта на потом.'}]},
@@ -98,6 +99,14 @@ const L_IN=[
  {q:'What problem did the blog cause?',o:['She lost her friends','Her marks got worse','She stopped sleeping'],a:1,ev:'…my marks went down a little last term…',e:'Оценки немного снизились — пришлось планировать время.'},
  {q:'What does Lena advise beginners?',o:['To buy a good camera','To copy popular bloggers','To be honest'],a:2,ev:'…honesty works better than expensive equipment.',e:'Главный совет — честность, а не дорогая техника.'}]}
 ];
+const L_VOICE_RESULT_SETS=[
+  {id:'listening.exam.interview.alex',items:['listening.alex-swimming.reason','listening.alex-swimming.frequency','listening.alex-swimming.injury','listening.alex-swimming.first-plan']},
+  {id:'listening.exam.interview.lena',items:['listening.lena-blog.started','listening.lena-blog.helpers','listening.lena-blog.problem','listening.lena-blog.advice']},
+];
+L_VOICE_RESULT_SETS.forEach(function(resultSet,setIndex){
+  L_IN[setIndex].voice={id:resultSet.id,revision:1};
+  resultSet.items.forEach(function(itemId,itemIndex){L_IN[setIndex].qs[itemIndex].voice={id:itemId,revision:1}});
+});
 function lAnim(name,dur){ui.animate('l_card',name,dur)}
 function lPlay(lines){LPLAYS++;lPlaysUi();lPlayRaw(lines)}
 function lPlaysUi(){var el=document.getElementById('l_plays');if(!el)return;
@@ -259,12 +268,14 @@ function lIqRender(){var area=document.getElementById('l_area');var set=LI.set;
   area.innerHTML=h;lPlaysUi();setTxt('l_today',LI.sel.filter(function(x){return x!==null}).length+' / '+set.qs.length+' отвечено')}
 function lIqPick(i,oi){if(LI.done)return;LI.sel[i]=oi;lIqRender()}
 function lIqCheck(){if(LI.done)return;LI.done=true;lStop();var set=LI.set,r=lSt(),okn=0;
+  var voiceResult=prepareVoiceTutorContextResult({module:'listening',set:set,selections:LI.sel});
   set.qs.forEach(function(q,i){var ok=LI.sel[i]===q.a;if(ok)okn++;
     r.iq.tot++;if(ok)r.iq.ok++;
     var el=document.getElementById('liq_res_'+i);
+    var voiceSlot=voiceResult?voiceResult.resultSlot(q,i):'';
     if(el)el.innerHTML='<div style="margin-top:9px;padding:10px 12px;border-radius:12px;background:'+(ok?'#EAF7F0':'#FDEDEA')+';">'
       +'<div style="font-weight:800;font-size:12.5px;color:'+(ok?'#1F8A50':'#C0392B')+';">'+(ok?'Верно':'Правильно: '+q.o[q.a])+'</div>'
-      +'<div style="font-weight:600;font-size:12px;color:#4A453E;margin-top:4px;line-height:1.5;"><b>В записи:</b> «'+q.ev+'» — '+q.e+'</div></div>';
+      +'<div style="font-weight:600;font-size:12px;color:#4A453E;margin-top:4px;line-height:1.5;"><b>В записи:</b> «'+q.ev+'» — '+q.e+'</div>'+voiceSlot+'</div>';
     var row=document.getElementById('liq_row_'+i);if(row)row.style.pointerEvents='none'});
   r.done++;lSync();save();
   var area=document.getElementById('l_area');
@@ -275,6 +286,7 @@ function lIqCheck(){if(LI.done)return;LI.done=true;lStop();var set=LI.set,r=lSt(
     +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);margin-top:12px;" onclick="lIq()">Ещё подход</button></div>'
     +lTranscript(set.d,set.qs.map(function(q){return q.ev}));
   area.insertBefore(d,area.firstChild);
+  if(voiceResult)registerVoiceTutorContextResult(voiceResult).catch(function(){});
   try{d.scrollIntoView({behavior:'smooth',block:'start'})}catch(e){};lGen()}
 /* ---- экзамен по аудированию: 1 + 2 + 3-9 ---- */
 let LE=null;
@@ -356,6 +368,7 @@ function lExamRender(){var area=document.getElementById('l_area');if(!area||!LE)
 function lExamDedup(field,idx,val){LE[field]=listeningModule.selectUnique(LE[field],idx,val)}
 function lExamFinish(){if(!LE)return;clearInterval(LE.iv);lStop();
   var sec=examModule.elapsedSeconds(LE.t0,Date.now()),r=lSt(),LBL=['Верно','Неверно','Не сказано'];
+  var voiceResult=prepareVoiceTutorContextResult({module:'listening',set:LE.iq,selections:LE.selI});
   var okM=0;LE.m.a.forEach(function(a,si){r.m.tot++;if(LE.selM[si]===a){okM++;r.m.ok++}});
   var okT=0;LE.tf.st.forEach(function(x,i){r.tf.tot++;if(LE.selT[i]===x.a){okT++;r.tf.ok++}});
   var okI=0;LE.iq.qs.forEach(function(q,i){r.iq.tot++;if(LE.selI[i]===q.a){okI++;r.iq.ok++}});
@@ -366,8 +379,9 @@ function lExamFinish(){if(!LE)return;clearInterval(LE.iv);lStop();
     rows+='<div style="padding:9px 2px;border-bottom:1px solid #F4EFE9;"><div style="font-weight:800;font-size:12.5px;color:#A83226;">Говорящий '+'ABCD'[si]+' → '+(a+1)+'. '+LE.m.st[a]+'</div><div style="font-weight:600;font-size:12px;color:#777163;margin-top:3px;">'+LE.m.k[si]+'</div></div>'});
   LE.tf.st.forEach(function(x,i){if(LE.selT[i]!==x.a)
     rows+='<div style="padding:9px 2px;border-bottom:1px solid #F4EFE9;"><div style="font-weight:800;font-size:12.5px;color:#A83226;">Утверждение '+(i+1)+' → '+LBL[x.a]+'</div><div style="font-weight:600;font-size:12px;color:#777163;margin-top:3px;">«'+x.ev+'» — '+x.e+'</div></div>'});
-  LE.iq.qs.forEach(function(q,i){if(LE.selI[i]!==q.a)
-    rows+='<div style="padding:9px 2px;border-bottom:1px solid #F4EFE9;"><div style="font-weight:800;font-size:12.5px;color:#A83226;">Вопрос '+(i+1)+' → '+q.o[q.a]+'</div><div style="font-weight:600;font-size:12px;color:#777163;margin-top:3px;">«'+q.ev+'»</div></div>'});
+  LE.iq.qs.forEach(function(q,i){if(LE.selI[i]!==q.a){var voiceSlot='';
+    if(voiceResult)voiceSlot=voiceResult.resultSlot(q,i);
+    rows+='<div style="padding:9px 2px;border-bottom:1px solid #F4EFE9;"><div style="font-weight:800;font-size:12.5px;color:#A83226;">Вопрос '+(i+1)+' → '+q.o[q.a]+'</div><div style="font-weight:600;font-size:12px;color:#777163;margin-top:3px;">«'+q.ev+'»</div>'+voiceSlot+'</div>'}});
   var tr1=lTranscript(LE.m.sp.map(function(sp,i){return{s:i%2,t:'Speaker '+'ABCD'[i]+'. '+sp.t}}),[]);
   var tr2=lTranscript(LE.tf.d,LE.tf.st.map(function(x){return x.ev}));
   var tr3=lTranscript(LE.iq.d,LE.iq.qs.map(function(q){return q.ev}));
@@ -385,9 +399,12 @@ function lExamFinish(){if(!LE)return;clearInterval(LE.iv);lStop();
     +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="lExamStart()">Ещё раз</button>'
     +'<button class="sq" style="'+WBTN+'color:#B54E2F;" onclick="lHub()">К аудированию</button></div>'
     +tr1+tr2+tr3;
+  if(voiceResult)registerVoiceTutorContextResult(voiceResult).catch(function(){});
   lAnim('win','.32s');lGen()}
 /* ---- фоновая ИИ-генерация комплектов аудирования ---- */
-function lPool(kind,base){var ai=(S&&S.lisAi&&S.lisAi[kind])||[];return listeningModule.pool(base,ai)}
+function lPool(kind,base){var ai=(S&&S.lisAi&&S.lisAi[kind])||[];
+  if(kind==='iq')ai=ai.filter(function(set){return set&&set.voice&&set.qs&&set.qs.every(function(q){return q.voice})});
+  return listeningModule.pool(base,ai)}
 var L_GEN=false;
 async function lGen(){
   if(L_GEN)return;if(typeof SRV==='undefined'||!SRV||!TOKEN)return;
@@ -417,7 +434,8 @@ async function lGen(){
       if(d&&Array.isArray(d.d)&&d.d.length>=6&&d.d.every(function(x){return x&&x.t&&(x.s===0||x.s===1)})
         &&Array.isArray(d.qs)&&d.qs.length===4
         &&d.qs.every(function(q){return q&&q.q&&Array.isArray(q.o)&&q.o.length===3&&q.a>=0&&q.a<3&&q.ev&&q.e})){
-        item={d:d.d.map(function(x){return{s:+x.s,t:String(x.t)}}),qs:d.qs.map(function(q){return{q:String(q.q),o:q.o.map(String),a:+q.a,ev:String(q.ev),e:String(q.e)}})}}
+        var voice=d.voice_tutor,hasVoice=voice&&voice.set_id&&voice.revision===1&&Array.isArray(voice.item_ids)&&voice.item_ids.length===4;
+        if(hasVoice)item={d:d.d.map(function(x){return{s:+x.s,t:String(x.t)}}),voice:{id:String(voice.set_id),revision:1},qs:d.qs.map(function(q,i){return{q:String(q.q),o:q.o.map(String),a:+q.a,ev:String(q.ev),e:String(q.e),voice:{id:String(voice.item_ids[i]),revision:1}}})}}
     }
     if(item){S.lisAi[kind]=(S.lisAi[kind]||[]).concat([item]);save()}
   }catch(e){}

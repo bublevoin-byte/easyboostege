@@ -15,6 +15,7 @@ import { estimateCostMicrousd, TtlCache } from '../ai/provider-control.js';
 import { createProviderClient } from '../ai/provider-client.js';
 import { providersFor } from '../ai/operations.js';
 import { recordDependencyEvent } from '../observability/metrics.js';
+import { decorateGeneratedVoiceTutorContent } from '../voice-tutor/generated-items.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -233,8 +234,20 @@ export function createAiRoutes({ authentication, access, db }) {
     const requestHash = crypto.createHash('sha256').update(JSON.stringify({ promptVersion: CONTENT_PROMPT_VERSION, input })).digest('hex');
     // Own copy first, then anyone's: the same input always produces the same exercise, so a
     // second student must not cost a second paid call.
-    const stored = await getGeneratedTask(username, requestHash) || await getSharedGeneratedTask(requestHash);
-    if (stored) return { data: stored.result, provider: 'cache', sourceProvider: stored.provider, promptVersion: stored.prompt_version, cached: true };
+    const stored = await getGeneratedTask(username, requestHash);
+    const shared = stored ? null : await getSharedGeneratedTask(requestHash);
+    if (shared) {
+      await saveGeneratedTask(username, {
+        operation: input.operation,
+        requestHash,
+        request: input,
+        result: shared.result,
+        provider: shared.provider,
+        promptVersion: shared.prompt_version,
+      });
+    }
+    const reusable = stored || (shared ? await getGeneratedTask(username, requestHash) : null);
+    if (reusable) return { data: decorateGeneratedVoiceTutorContent(input.operation, requestHash, reusable.result), provider: 'cache', sourceProvider: reusable.provider, promptVersion: reusable.prompt_version, cached: true };
     if (!await hasAiBudget()) throw Object.assign(new Error('Дневной лимит ИИ исчерпан. Попробуйте завтра.'), { status: 503, code: 'AI_BUDGET_EXHAUSTED' });
     const prompt = buildContentPrompt(input);
     const startedAt = Date.now();
@@ -276,7 +289,7 @@ export function createAiRoutes({ authentication, access, db }) {
         ]);
         recordDependencyEvent('ai', 'success');
         if (providerIndex > 0) recordDependencyEvent('ai', 'fallback');
-        return { data, provider: provider.name, promptVersion: CONTENT_PROMPT_VERSION, cached: false };
+        return { data: decorateGeneratedVoiceTutorContent(input.operation, requestHash, data), provider: provider.name, promptVersion: CONTENT_PROMPT_VERSION, cached: false };
       } catch (error) {
         if (error.status && error.code) throw error;
         recordDependencyEvent('ai', 'error');

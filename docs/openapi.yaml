@@ -77,9 +77,37 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { description: The current subscription has no voice_tutor entitlement }
         '422': { description: Answer is correct, item is unsupported, or revision is stale }
+  /api/v1/voice-tutor/context-attempts:
+    post:
+      summary: Validate a completed canonical reading or listening set and record its incorrect answers
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [attemptId, module, setId, revision, answers]
+              properties:
+                attemptId: { type: string, format: uuid }
+                module: { type: string, enum: [reading, listening] }
+                setId: { type: string, minLength: 4, maxLength: 120 }
+                revision: { type: integer, minimum: 1, maximum: 10000 }
+                answers:
+                  type: array
+                  minItems: 1
+                  maxItems: 20
+                  items: { type: string, minLength: 1, maxLength: 200 }
+              additionalProperties: false
+      responses:
+        '201': { description: Canonical result and deterministic child error attempts recorded }
+        '200': { description: Existing idempotent result returned with the same child error attempt ids }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { description: The current subscription has no voice_tutor entitlement }
+        '409': { description: Canonical set revision is stale, or the result UUID was already bound to different answers }
+        '422': { description: Set, answer count, or an answer option does not match server-owned content }
   /api/v1/voice-tutor/sessions:
     post:
-      summary: Reserve Voice Tutor quota and build a server-owned grammar or lexicon capsule
+      summary: Reserve Voice Tutor quota and build a server-owned supported-module capsule
       parameters:
         - in: header
           name: Idempotency-Key
@@ -103,7 +131,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { description: The current subscription has no voice_tutor entitlement }
         '409': { description: Another Voice Tutor session is active }
-        '422': { description: Attempt or canonical grammar/lexicon item is not supported }
+        '422': { description: Attempt, canonical item, or bounded reading/listening context is not supported }
         '429': { description: Daily or monthly voice quota is exhausted }
   /api/v1/voice-tutor/sessions/{sessionId}/events:
     post:
