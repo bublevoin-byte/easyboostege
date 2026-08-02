@@ -62,11 +62,16 @@ export function normalizeVoiceTutorDeliveryMetadata({ provider = null, model = n
   return normalized;
 }
 
-export function ensureVoiceTutorReservationAllowed(access, reservedSeconds) {
+export function voiceTutorReservationSeconds(access, sessionSeconds) {
+  const requested = Number(sessionSeconds);
+  if (!Number.isInteger(requested) || requested <= 0) throw new VoiceTutorError('VOICE_TUTOR_USAGE_INVALID');
   if (!access.entitlements.voice_tutor) throw new VoiceTutorError('VOICE_TUTOR_PREMIUM_REQUIRED');
   if (access.voice_tutor.active_session) throw new VoiceTutorError('VOICE_TUTOR_SESSION_ACTIVE');
-  if (access.voice_tutor.daily_remaining_seconds < reservedSeconds) throw new VoiceTutorError('VOICE_TUTOR_DAILY_QUOTA_EXHAUSTED');
-  if (access.voice_tutor.monthly_remaining_seconds < reservedSeconds) throw new VoiceTutorError('VOICE_TUTOR_MONTHLY_QUOTA_EXHAUSTED');
+  const dailyRemaining = Math.max(0, Number(access.voice_tutor.daily_remaining_seconds) || 0);
+  const monthlyRemaining = Math.max(0, Number(access.voice_tutor.monthly_remaining_seconds) || 0);
+  if (dailyRemaining === 0) throw new VoiceTutorError('VOICE_TUTOR_DAILY_QUOTA_EXHAUSTED');
+  if (monthlyRemaining === 0) throw new VoiceTutorError('VOICE_TUTOR_MONTHLY_QUOTA_EXHAUSTED');
+  return Math.min(requested, dailyRemaining, monthlyRemaining);
 }
 
 export function voiceTutorBillableSeconds(session, now, confirmedBillableSeconds = null) {

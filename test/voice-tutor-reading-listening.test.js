@@ -310,6 +310,64 @@ for (const example of generatedContextExamples) {
   });
 }
 
+test('generated grammar error is verified and rebuilt only from the user server task', async () => {
+  await withVoiceTutorApp(async ({ repository, request, username }) => {
+    const requestHash = 'c'.repeat(64);
+    const result = {
+      c: Array.from({ length: 3 }, (_, index) => ({
+        t: [`Generated ${index} `, ' today.'], o: ['wrong', 'right', 'other', 'last'], a: 1, e: 'Server explanation.',
+      })),
+      f: Array.from({ length: 3 }, (_, index) => ({
+        s: `Generated ${index} _____ (GO).`, b: 'GO', ans: ['went'], e: 'Server explanation.',
+      })),
+    };
+    await repository.saveGeneratedTask(username, {
+      operation: 'grammar_topic_set', requestHash,
+      request: { operation: 'grammar_topic_set', topicId: 2, topic: 'Past Simple' },
+      result, provider: 'test', promptVersion: 'content-test-v1',
+    });
+    const generated = decorateGeneratedVoiceTutorContent('grammar_topic_set', requestHash, result);
+    const itemId = generated.c[0].voice.id;
+
+    const correct = await request('/api/v1/voice-tutor/errors', {
+      method: 'POST',
+      body: JSON.stringify({
+        attemptId: 'a1c46e01-d7bd-45bd-bdb5-538f934341eb', module: 'grammar', itemId, revision: 1,
+        learnerAnswer: 'right', reference: 'wrong',
+      }),
+    });
+    assert.equal(correct.status, 400, 'extra client reference must fail the strict request contract');
+
+    const accepted = await request('/api/v1/voice-tutor/errors', {
+      method: 'POST',
+      body: JSON.stringify({
+        attemptId: 'a1c46e01-d7bd-45bd-bdb5-538f934341eb', module: 'grammar', itemId, revision: 1,
+        learnerAnswer: 'wrong',
+      }),
+    });
+    assert.equal(accepted.status, 201);
+
+    const serverCorrect = await request('/api/v1/voice-tutor/errors', {
+      method: 'POST',
+      body: JSON.stringify({
+        attemptId: 'b1c46e01-d7bd-45bd-bdb5-538f934341eb', module: 'grammar', itemId, revision: 1,
+        learnerAnswer: 'right',
+      }),
+    });
+    assert.equal(serverCorrect.status, 422);
+    assert.equal((await serverCorrect.json()).error.code, 'VOICE_TUTOR_ANSWER_NOT_INCORRECT');
+
+    const sessionResponse = await request('/api/v1/voice-tutor/sessions', {
+      method: 'POST', headers: { 'Idempotency-Key': 'generated-grammar-001' },
+      body: JSON.stringify({ attemptId: 'a1c46e01-d7bd-45bd-bdb5-538f934341eb', revision: 1 }),
+    });
+    assert.equal(sessionResponse.status, 201);
+    const session = await sessionResponse.json();
+    assert.equal(session.capsule.item.id, itemId);
+    assert.equal(session.capsule.item.prompt, 'Generated 0 _____ today.');
+  });
+});
+
 for (const example of [
   {
     module: 'reading',

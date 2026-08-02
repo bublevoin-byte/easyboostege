@@ -54,6 +54,91 @@ paths:
       responses:
         '200': { description: User profile }
         '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/payments/requests:
+    post:
+      summary: Create or return the current user's pending Premium Voice payment request
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [product]
+              properties:
+                product: { type: string, enum: [premium_voice] }
+              additionalProperties: false
+      responses:
+        '201': { description: New request created; no subscription or entitlement is self-granted }
+        '200': { description: Existing pending request returned idempotently }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    get:
+      summary: Read the current user's latest Premium Voice payment request and entitlement status
+      parameters:
+        - in: query
+          name: product
+          required: true
+          schema: { type: string, enum: [premium_voice] }
+      responses:
+        '200': { description: Latest request or null plus current entitlement_active flag }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/admin/payment-requests/{requestId}/resolve:
+    post:
+      summary: Idempotently approve or reject a payment request as an administrator
+      parameters:
+        - in: path
+          name: requestId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [approved, rejected] }
+              additionalProperties: false
+      responses:
+        '200': { description: Terminal request result. Premium approval atomically grants or extends the base subscription and bounded voice_tutor entitlement to the same end time; rejection grants nothing. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { description: Administrator role required; students cannot self-grant and administrators cannot approve their own request }
+        '404': { description: Payment request not found }
+  /api/v1/admin/payment-requests:
+    get:
+      summary: List the actionable Premium Voice payment queue for an administrator
+      parameters:
+        - in: query
+          name: product
+          required: true
+          schema: { type: string, enum: [premium_voice] }
+        - in: query
+          name: status
+          required: true
+          schema: { type: string, enum: [new] }
+      responses:
+        '200': { description: Bounded request UUID, username, product and status rows used to resolve verified payments }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { description: Administrator role required }
+  /api/v1/admin/users/{username}/entitlements/voice_tutor/revoke:
+    post:
+      summary: Idempotently revoke the active Voice Tutor entitlement without rewriting base subscription history
+      parameters:
+        - in: path
+          name: username
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false }
+      responses:
+        '200': { description: Whether an active entitlement was revoked }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { description: Administrator role required }
   /api/v1/voice-tutor/errors:
     post:
       summary: Server-check and record a supported grammar or vocabulary error before tutoring
@@ -667,6 +752,14 @@ components:
       in: cookie
       name: eb_token
   schemas:
+    PaymentRequest:
+      type: object
+      required: [id, product, status]
+      properties:
+        id: { type: string, format: uuid }
+        product: { type: string, enum: [base, premium_voice] }
+        status: { type: string, enum: [new, approved, rejected] }
+      additionalProperties: false
     Progress:
       type: object
       additionalProperties: true

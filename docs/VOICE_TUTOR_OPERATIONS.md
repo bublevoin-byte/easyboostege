@@ -28,7 +28,11 @@ secret store:
 - `XAI_VOICE_REALTIME_URL`
 
 Versioned voice model/revision обязателен для production; плавающий alias не проходит release
-gate. `XAI_VOICE_NAME` содержит lowercase voice id из provider roster. Credential endpoint должен
+gate. Production startup принимает только immutable xAI voice id вида `grok-voice-…-1.0` или
+`grok-voice-…-YYYY-MM-DD`, отклоняет blank/unversioned, а также сегменты
+`alias/current/latest/preview/stable` ещё до provider call;
+development сохраняет возможность использовать явную fake/test
+revision. `XAI_VOICE_NAME` содержит lowercase voice id из provider roster. Credential endpoint должен
 принимать только `expires_after.seconds`, а browser E2E обязан подтвердить model query,
 `xai-client-secret` subprotocol и первый `session.update`. ZDR attestation означает ручную проверку настроек аккаунта и договорных условий провайдера,
 а не только изменение environment flag. Юридический текст обработки голоса несовершеннолетних и
@@ -84,6 +88,39 @@ credential endpoint, consent version и provider/ZDR status. Основной ke
 Повторное включение допускается после устранения причины, полного fake-provider E2E и нового
 human approval. Feature flag можно оставить выключенным без удаления конфигурации и учебных
 данных.
+
+## Premium commerce
+
+Paywall вызывает `POST /api/v1/payments/requests` с единственным продуктом `premium_voice`, а
+статус читает через `GET /api/v1/payments/requests?product=premium_voice`. Эти endpoints никогда
+не выдают доступ сами. Ученик видит bounded первые 8 символов request id и явный статус.
+Оператор получает UUID из admin-only очереди
+`GET /api/v1/admin/payment-requests?product=premium_voice&status=new`, сверяет оплату вне
+приложения и затем под admin-сессией вызывает `POST /api/v1/admin/payment-requests/{id}/resolve`
+с `approved` или `rejected`.
+
+При `approved` repository запрещает администратору подтверждать заявку своего Telegram-аккаунта.
+Для независимого плательщика сервер атомарно продлевает базовую подписку на 30 дней от более поздней даты
+`now/sub_until` и выдаёт `voice_tutor` ровно до нового `sub_until`. Повторный запрос решения
+идемпотентен. `rejected` не меняет подписку. Для аварийного отзыва используется
+`POST /api/v1/admin/users/{username}/entitlements/voice_tutor/revoke` с пустым JSON-объектом;
+базовая подписка при этом сохраняется. Истечение определяется по bounded `ends_at` без ручной
+операции. После каждого действия оператор проверяет `/api/v1/me`, `subscription_events` и
+`audit_log`, не копируя username или request id в публичный release evidence.
+
+## Квота и каталог упражнений
+
+Каждая новая сессия резервирует меньшее из session limit и положительного остатка суточной и
+месячной квоты. Поэтому последние неполные минуты (включая все 600/7200 секунд стандартного
+тарифа) доступны, а транзакционная блокировка, idempotency key и уникальная active-session защита
+не допускают отрицательных остатков или двойного резерва.
+
+Перед релизом после любого изменения `EGE_WORDS`, `G_BANK` или `G_EXAMS` выполняются
+`node scripts/build-core-voice-catalog.js` и затем
+`node scripts/build-core-voice-catalog.js --check`. Каталог содержит server-owned reference,
+правило и два отличающихся проверочных задания для каждого встроенного ошибочного пути.
+Grammar/vocabulary content, полученный от AI, получает opaque pointer только после typed schema
+validation и сохранения в `generated_tasks`; браузер не передаёт reference или правило обратно.
 
 ## Release evidence
 

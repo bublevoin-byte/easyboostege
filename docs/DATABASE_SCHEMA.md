@@ -8,13 +8,14 @@
 | `users` | аккаунты Telegram/legacy и роли | `username`, `telegram_id`, `role`, subscription fields |
 | `sessions` | серверные пользовательские сессии | `id`, `username`, expiry, revoke timestamp |
 | `subscriptions` | текущее состояние доступа | `username`, status, source, start/end timestamps |
+| `subscription_events` | неизменяемая история выдачи и изменения тарифа | username, event type, bounded metadata and timestamp |
 | `subscription_entitlements` | отдельные тарифные права Premium | `username`, entitlement, start/end timestamps |
 | `voice_tutor_sessions` | голосовая квота и структурированный ход разбора без аудио и полного transcript | bounded capsule, delivery/state/outcome, micro-check/transfer flags, reserved/billable seconds and timestamps |
 | `voice_tutor_recoveries` | server-validated результат педагогического FSM по навыку | session/skill/rule ids, bounded state flags, module, potential-points mapping and timestamp; no learner text |
 | `voice_tutor_repeats` | server-owned интервалы переноса навыка | distinct task id, UTC day-1/day-7 due/window and supersession state |
 | `voice_tutor_repeat_attempts` | одна проверенная попытка нового аналога | opaque attempt/repeat/task ids, pass flag, idempotency hash and timestamp; no submitted answer |
 | `trusted_rule_cards` | очередь найденных правил и проверенный canonical слой | bounded rule, skill/exam year, source URL/content hashes, status, discrepancies and review audit; полных страниц нет |
-| `payment_requests` | ручные заявки на оплату | status, administrator, result and resolution time |
+| `payment_requests` | ручные заявки на базовый или Premium Voice тариф | product, status, administrator, result and resolution time |
 | `user_progress` | JSONB-прогресс пользователя | `username`, `data`, `updated_at` |
 | `telegram_auth_codes` | одноразовые коды входа | hash кода, expiry, consumed state |
 | `writing_attempts` | журнал пользовательских прогонов заданий 37/38 | assignment, answer, evaluated_answer, review, provider, model, prompt_version, status, error_code |
@@ -91,6 +92,25 @@ Server-owned mapping ограничивает потенциал одного ep
 Та же миграция страхует связь rule card creator через `ON DELETE SET NULL`; repository до удаления
 аккаунта удаляет pending/rejected reports и отсоединяет approved canonical. Reviewer audit в
 оставшихся карточках становится обезличенным фактом решения.
+
+Миграция `026_premium_voice_commerce.sql` добавляет обязательный `product` (`base` или
+`premium_voice`) к заявке и не меняет смысл прежних строк: они получают `base`. Для одного
+пользователя допускается не более одной открытой заявки на каждый продукт. Решение Premium-заявки
+в одной repository-транзакции переводит её в terminal status, продлевает `subscriptions` и
+создаёт/продлевает `voice_tutor` до той же даты; повтор того же решения ничего не начисляет.
+Отклонение не выдаёт доступ. Actor с тем же Telegram ID, что и владелец заявки, не может одобрить
+её даже через repository API. Отзыв закрывает только уже начавшийся активный entitlement и
+идемпотентен; на точной границе `starts_at` он безопасно возвращает `false`, не создавая нулевой
+период, запрещённый SQL CHECK. Все
+решения и отзывы получают `subscription_events` и `audit_log`; ученический API умеет только
+создать заявку и прочитать её статус, поэтому self-grant отсутствует и в file, и в PostgreSQL
+реализации.
+
+Server-owned каталог grammar/word-formation/collocation/vocabulary генерируется из текущих
+встроенных UI-банков командой `node scripts/build-core-voice-catalog.js`. Команда с `--check`
+падает при рассинхронизации. Для сгенерированного ИИ-контента сервер связывает opaque item id с
+owner-bound `generated_tasks`, заново валидирует typed result и его digest при записи ошибки и при
+сборке capsule; reference/правило из запроса браузера не принимаются.
 
 Для reading/listening capsule сохраняет только server-owned фрагмент текущего пункта до 600
 символов (`source_excerpt` или `transcript_segment`), но не полный текст/транскрипт и не ответы

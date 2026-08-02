@@ -36,16 +36,16 @@
     const source = bank || {};
     const ai = generated || [];
     return {
-      c: (source.c || []).concat(ai.filter((item) => item.k === 'c').map((item) => item.q)),
-      f: (source.f || []).concat(ai.filter((item) => item.k === 'f').map((item) => item.q)),
+      c: (source.c || []).concat(ai.filter((item) => item.k === 'c').map((item) => ({ ...item.q, voice: item.voice || item.q?.voice || null }))),
+      f: (source.f || []).concat(ai.filter((item) => item.k === 'f').map((item) => ({ ...item.q, voice: item.voice || item.q?.voice || null }))),
       c2: (source.c2 || []).slice(),
     };
   }
 
   function levelTwo(bank, topic) {
-    if (bank.f.length) return bank.f.map((question) => ({ k: 'f', q: question, t: topic }));
-    if (bank.c2.length) return bank.c2.map((question) => ({ k: 'c2', q: question, t: topic }));
-    return bank.c.map((question) => ({ k: 'c2', q: question, t: topic }));
+    if (bank.f.length) return bank.f.map((question) => ({ k: 'f', q: question, t: topic, voice: question.voice || null }));
+    if (bank.c2.length) return bank.c2.map((question) => ({ k: 'c2', q: question, t: topic, voice: question.voice || null }));
+    return bank.c.map((question) => ({ k: 'c2', q: question, t: topic, voice: question.voice || null }));
   }
 
   function shuffled(values, random = Math.random) {
@@ -56,7 +56,7 @@
   }
 
   function buildTopicQueue(bank, topic, record, random = Math.random) {
-    const levelOne = bank.c.map((question) => ({ k: 'c', q: question, t: topic }));
+    const levelOne = bank.c.map((question) => ({ k: 'c', q: question, t: topic, voice: question.voice || null }));
     const advanced = levelTwo(bank, topic);
     if ((Number(record?.st) || 0) >= 1) {
       return shuffled(levelOne, random).slice(0, 2).concat(shuffled(advanced, random).slice(0, 6));

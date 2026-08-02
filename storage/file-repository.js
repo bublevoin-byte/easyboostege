@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { ensureVoiceTutorReservationAllowed, hashAuthCode, normalizeUsername, normalizeVoiceTutorDeliveryMetadata, subscriptionView, VoiceTutorError, voiceTutorAccessView, voiceTutorBillableSeconds, voiceTutorQuotaPeriods } from './shared.js';
+import { hashAuthCode, normalizeUsername, normalizeVoiceTutorDeliveryMetadata, subscriptionView, VoiceTutorError, voiceTutorAccessView, voiceTutorBillableSeconds, voiceTutorQuotaPeriods, voiceTutorReservationSeconds } from './shared.js';
 import { transitionPedagogicalState } from '../voice-tutor/state-machine.js';
 import { transitionRuleCardReview } from '../voice-tutor/rule-card.js';
 import { createRecoveryLedger, planRecoveryFromTransfer, planRepeatAttempt, publicRepeatAttempt, recoveryMap, recoveryMetrics } from '../voice-tutor/recovery.js';
@@ -21,6 +21,7 @@ export function createFileRepository(filePath) {
   let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, subscription_entitlements: {}, voice_tutor_sessions: [], voice_tutor_recoveries: [], voice_tutor_repeats: [], voice_tutor_repeat_attempts: [], rule_cards: [], payment_requests: {}, subscription_events: [] };
   let writeQueue = Promise.resolve();
   let voiceTutorQueue = Promise.resolve();
+  let paymentQueue = Promise.resolve();
   let ruleCardQueue = Promise.resolve();
 
   async function load() {
@@ -148,37 +149,120 @@ export function createFileRepository(filePath) {
     return { username, sub_until: user.sub_until };
   }
 
-  async function createPaymentRequest(id, telegramId, displayName) {
-    await load();
-    const username = await ensureTelegramUser(telegramId, displayName);
-    const existing = Object.values(state.payment_requests).find((request) => request.username === username && request.status === 'new');
-    if (existing) return structuredClone(existing);
-    const request = { id, username, status: 'new', created_at: Date.now() };
-    state.payment_requests[id] = request;
-    await persist();
-    return structuredClone(request);
+  function serializePaymentMutation(run) {
+    const result = paymentQueue.then(run, run);
+    paymentQueue = result.then(() => undefined, () => undefined);
+    return result;
   }
 
-  async function resolvePaymentRequest(id, decision, actorTelegramId, days) {
+  function paymentRequestView(request) {
+    return request ? { ...structuredClone(request), product: request.product || 'base' } : null;
+  }
+
+  async function createPaymentRequestForUser(id, username, product = 'base', { now = new Date() } = {}) {
+    return serializePaymentMutation(async () => {
+      await load();
+      if (!state.users[username]) throw new Error('USER_NOT_FOUND');
+      if (!['base', 'premium_voice'].includes(product)) throw new Error('INVALID_PAYMENT_PRODUCT');
+      const existing = Object.values(state.payment_requests).find((request) => request.username === username
+        && (request.product || 'base') === product && request.status === 'new');
+      if (existing) return paymentRequestView(existing);
+      if (state.payment_requests[id]) throw new Error('PAYMENT_REQUEST_ID_CONFLICT');
+      const request = { id, username, product, status: 'new', created_at: new Date(now).getTime() };
+      state.payment_requests[id] = request;
+      await persist();
+      return paymentRequestView(request);
+    });
+  }
+
+  async function createPaymentRequest(id, telegramId, displayName, options = {}) {
+    const username = await ensureTelegramUser(telegramId, displayName);
+    return createPaymentRequestForUser(id, username, options.product || 'base', options);
+  }
+
+  async function getPaymentRequestForUser(username, product = 'premium_voice') {
     await load();
-    if (!['approved', 'rejected', 'cancelled'].includes(decision)) throw new Error('INVALID_PAYMENT_DECISION');
-    const request = state.payment_requests[id];
-    if (!request) throw new Error('PAYMENT_REQUEST_NOT_FOUND');
-    const user = state.users[request.username];
-    if (request.status !== 'new') return { applied: false, status: request.status, username: request.username, telegram_id: user.telegram_id, sub_until: user.sub_until || 0 };
-    if (decision === 'approved') {
-      const now = Date.now();
-      user.sub_until = Math.max(now, Number(user.sub_until || 0)) + Number(days) * 86_400_000;
-      state.subscriptions[request.username] = { status: 'active', source: 'manual', starts_at: now, ends_at: user.sub_until, updated_at: now };
-      state.subscription_events.push({ username: request.username, event_type: 'payment_approved', days: Number(days), actor_telegram_id: Number(actorTelegramId), metadata: { payment_request_id: id }, created_at: now });
+    const requests = Object.values(state.payment_requests).filter((request) => request.username === username
+      && (request.product || 'base') === product);
+    return paymentRequestView(requests.at(-1));
+  }
+
+  async function listPaymentRequests({ product = 'premium_voice', status = 'new' } = {}) {
+    await load();
+    if (!['base', 'premium_voice'].includes(product) || !['new', 'approved', 'rejected', 'cancelled'].includes(status)) {
+      throw new Error('INVALID_PAYMENT_FILTER');
     }
-    request.status = decision;
-    request.actor_telegram_id = Number(actorTelegramId);
-    request.result = decision;
-    request.resolved_at = Date.now();
-    state.audit_log.push({ id: (state.audit_log.at(-1)?.id || 0) + 1, actor_telegram_id: Number(actorTelegramId), action: 'payment.resolve', target_type: 'payment_request', target_id: id, result: decision, metadata: { username: request.username, days: decision === 'approved' ? Number(days) : 0 }, created_at: Date.now() });
-    await persist();
-    return { applied: true, status: decision, username: request.username, telegram_id: user.telegram_id, sub_until: user.sub_until || 0 };
+    return Object.values(state.payment_requests)
+      .filter((request) => (request.product || 'base') === product && request.status === status)
+      .sort((left, right) => Number(left.created_at) - Number(right.created_at))
+      .map(paymentRequestView);
+  }
+
+  async function resolvePaymentRequest(id, decision, actorTelegramId, days, { now = new Date() } = {}) {
+    return serializePaymentMutation(async () => {
+      await load();
+      if (!['approved', 'rejected', 'cancelled'].includes(decision)) throw new Error('INVALID_PAYMENT_DECISION');
+      const requestedDays = Number(days);
+      if (!Number.isInteger(requestedDays) || requestedDays < 1 || requestedDays > 365) throw new Error('INVALID_SUBSCRIPTION_PERIOD');
+      const request = state.payment_requests[id];
+      if (!request) throw new Error('PAYMENT_REQUEST_NOT_FOUND');
+      const user = state.users[request.username];
+      const product = request.product || 'base';
+      if (request.status !== 'new') return { applied: false, status: request.status, product, username: request.username, telegram_id: user.telegram_id, sub_until: user.sub_until || 0 };
+      if (decision === 'approved' && Number(actorTelegramId) === Number(user.telegram_id)) {
+        throw new Error('PAYMENT_SELF_APPROVAL_FORBIDDEN');
+      }
+      const instant = new Date(now).getTime();
+      if (!Number.isFinite(instant)) throw new Error('INVALID_PAYMENT_TIME');
+      if (decision === 'approved') {
+        user.sub_until = Math.max(instant, Number(user.sub_until || 0)) + requestedDays * 86_400_000;
+        state.subscriptions[request.username] = { status: 'active', source: 'manual', starts_at: instant, ends_at: user.sub_until, updated_at: instant };
+        if (product === 'premium_voice') {
+          const existing = state.subscription_entitlements[request.username]?.voice_tutor;
+          state.subscription_entitlements[request.username] ||= {};
+          state.subscription_entitlements[request.username].voice_tutor = {
+            starts_at: existing?.starts_at && new Date(existing.starts_at).getTime() < instant
+              ? existing.starts_at
+              : new Date(instant).toISOString(),
+            ends_at: new Date(user.sub_until).toISOString(),
+          };
+        }
+        state.subscription_events.push({
+          username: request.username,
+          event_type: product === 'premium_voice' ? 'premium_payment_approved' : 'payment_approved',
+          days: requestedDays,
+          actor_telegram_id: Number(actorTelegramId),
+          metadata: { payment_request_id: id, ...(product === 'premium_voice' ? { product } : {}) },
+          created_at: instant,
+        });
+      }
+      request.product = product;
+      request.status = decision;
+      request.actor_telegram_id = Number(actorTelegramId);
+      request.result = decision;
+      request.resolved_at = instant;
+      state.audit_log.push({ id: (state.audit_log.at(-1)?.id || 0) + 1, actor_telegram_id: Number(actorTelegramId), action: 'payment.resolve', target_type: 'payment_request', target_id: id, result: decision, metadata: { username: request.username, product, days: decision === 'approved' ? requestedDays : 0 }, created_at: instant });
+      await persist();
+      return { applied: true, status: decision, product, username: request.username, telegram_id: user.telegram_id, sub_until: user.sub_until || 0 };
+    });
+  }
+
+  async function revokeEntitlement(username, entitlement, actorTelegramId, { now = new Date() } = {}) {
+    return serializePaymentMutation(async () => {
+      await load();
+      if (entitlement !== 'voice_tutor') throw new Error('INVALID_ENTITLEMENT');
+      const period = state.subscription_entitlements[username]?.[entitlement];
+      const instant = new Date(now).getTime();
+      if (!state.users[username]) throw new Error('USER_NOT_FOUND');
+      const active = period && new Date(period.starts_at).getTime() < instant
+        && (period.ends_at == null || new Date(period.ends_at).getTime() > instant);
+      if (!active) return false;
+      period.ends_at = new Date(instant).toISOString();
+      state.subscription_events.push({ username, event_type: 'premium_revoked', days: 0, actor_telegram_id: Number(actorTelegramId), metadata: { entitlement }, created_at: instant });
+      state.audit_log.push({ id: (state.audit_log.at(-1)?.id || 0) + 1, actor_telegram_id: Number(actorTelegramId), action: 'entitlement.revoke', target_type: 'subscription_entitlement', target_id: entitlement, result: 'revoked', metadata: { username }, created_at: instant });
+      await persist();
+      return true;
+    });
   }
 
   async function markTrialUsed(telegramId, displayName) {
@@ -305,10 +389,9 @@ export function createFileRepository(filePath) {
         return { created: false, session: publicVoiceTutorSession(existing), ...await getVoiceTutorAccess(username, limits, now) };
       }
       const usage = voiceTutorUsage(username, now);
-      const reservedSeconds = Number(limits.sessionSeconds);
-      ensureVoiceTutorReservationAllowed(
+      const reservedSeconds = voiceTutorReservationSeconds(
         voiceTutorAccessView({ entitled: hasVoiceTutorEntitlement(username, new Date(now).getTime()), ...usage }, limits),
-        reservedSeconds,
+        limits.sessionSeconds,
       );
       const startedAt = new Date(now);
       const session = {
@@ -790,7 +873,7 @@ export function createFileRepository(filePath) {
   async function getGeneratedTask(username, requestHash) {
     await load();
     const task = state.generated_tasks.find((item) => item.username === username && item.request_hash === requestHash);
-    return task ? structuredClone({ result: task.result, provider: task.provider, prompt_version: task.prompt_version, created_at: task.created_at }) : null;
+    return task ? structuredClone({ operation: task.operation, request: task.request, result: task.result, provider: task.provider, prompt_version: task.prompt_version, created_at: task.created_at }) : null;
   }
 
   // Section 10.8: an identical task is reused whoever generated it first.
@@ -1112,7 +1195,11 @@ export function createFileRepository(filePath) {
     ensureTelegramUser,
     grantDays,
     createPaymentRequest,
+    createPaymentRequestForUser,
+    getPaymentRequestForUser,
+    listPaymentRequests,
     resolvePaymentRequest,
+    revokeEntitlement,
     markTrialUsed,
     activateTrial,
     getSub,

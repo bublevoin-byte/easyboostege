@@ -6,6 +6,7 @@
  */
 import {registerRouteHook,tab} from '../router.js';
 import {registerVoiceTutorError,voiceTutorButton} from '../voice-tutor.js';
+import {decorateCoreGrammar} from '../modules/core-voice-catalog.js';
 import {
   S,SRV,TOKEN,WBTN,apiPost,examModule,gExamFmt,gSync,generateAiContent,grammarModule,
   registerScreenGenerator,save,setTxt,ui,wDeco,
@@ -432,9 +433,11 @@ function gExplain(it,userWrong){var q=it.q,t=it.t||GS.t;
     +'<div style="margin-top:12px;background:#F2F8F4;border-radius:14px;padding:12px 14px;">'
     +'<div style="font-weight:800;font-size:10px;letter-spacing:1.2px;color:#1D7F4A;">ПРАВИЛО · '+G_TOPICS[t].n.toUpperCase()+'</div>'
     +'<div style="font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.6;margin-top:6px;">'+G_TOPICS[t].th+'</div></div>'
-    +'<div style="font-weight:600;font-size:11.5px;color:#75705F;margin-top:10px;text-align:center;">Вопрос вернётся в конце подхода</div></div>'
+    +'<div style="font-weight:600;font-size:11.5px;color:#75705F;margin-top:10px;text-align:center;">Вопрос вернётся в конце подхода</div><div id="voice_tutor_grammar_practice"></div></div>'
     +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
     +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="gAfterExplain()">Понятно, дальше</button></div>';
+  if(it.voice&&userWrong!=null)registerVoiceTutorError({module:'grammar',itemId:it.voice.id,revision:it.voice.revision,learnerAnswer:String(userWrong)})
+    .then(function(recorded){var slot=document.getElementById('voice_tutor_grammar_practice');if(slot&&recorded)slot.innerHTML=voiceTutorButton(recorded)}).catch(function(){});
   gAnim('wflip','.5s')}
 function gAfterExplain(){GS.i++;gSync();save();gRenderQ()}
 function gAnswer(ok,it){grammarModule.applyAnswer(gRec(it.t||GS.t),GS,it,ok)}
@@ -447,15 +450,15 @@ function gPick(btn,i){var it=GS.queue[GS.i];if(!it||btn.dataset.done)return;var 
   else{ui.markAnswer(btn,'wrong');
     all.forEach(function(b,bi){if(bi===q.a)ui.markAnswer(b,'correct')});
     gAnim('wshake','.42s');
-    setTimeout(function(){gExplain(it)},900)}}
+    setTimeout(function(){gExplain(it,q.o[i])},900)}}
 function gSubmit(){var it=GS.queue[GS.i];if(!it)return;var inp=document.getElementById('g_inp');if(!inp||inp.dataset.done)return;
-  var q=it.q,val=gNorm(inp.value);
+  var q=it.q,userWrong=inp.value,val=gNorm(userWrong);
   var ok=q.ans.some(function(a){return gNorm(a)===val});
   inp.dataset.done=1;
   inp.style.borderColor=ok?'#1F9E5A':'#E24B4A';inp.style.background=ok?'#EAF7F0':'#FDEDEA';
   gAnswer(ok,it);
   if(ok){gAnim('wpop','.35s');setTimeout(function(){GS.i++;gSync();save();gRenderQ()},600)}
-  else{inp.value=q.ans[0];gAnim('wshake','.42s');setTimeout(function(){gExplain(it)},900)}}
+  else{inp.value=q.ans[0];gAnim('wshake','.42s');setTimeout(function(){gExplain(it,userWrong)},900)}}
 function gFinish(){if(GS&&GS.mode==='rev'){gFinishRev();return}
   var area=document.getElementById('g_area');var r=gRec(GS.t),tp=G_TOPICS[GS.t];
   var closed=r.st===2;
@@ -509,6 +512,7 @@ const G_EXAMS=[
   {b:'THEY',ans:['them'],e:'each of them.',t:11},
   {b:'IT',ans:['its'],e:'Притяжательное its (без апострофа).',t:11}]}
 ];
+decorateCoreGrammar(G_BANK,G_EXAMS);
 let EX=null;
 function gExamPool(){var ai=(S&&S.examAi)||[];return G_EXAMS.concat(ai)}
 function gExam(){var area=document.getElementById('g_area');if(!area)return;
@@ -584,7 +588,7 @@ async function gExamGen(){
     var d=await generateAiContent('grammar_exam_19_24');
     if(d&&Array.isArray(d.tx)&&d.tx.length===7&&Array.isArray(d.gaps)&&d.gaps.length===6
        &&d.gaps.every(function(g){return g&&g.b&&Array.isArray(g.ans)&&g.ans.length})){
-      var ex={tx:d.tx.map(String),gaps:d.gaps.map(function(g){return{b:String(g.b),ans:g.ans.map(String),e:String(g.e||''),t:+g.t||0}})};
+      var ex={tx:d.tx.map(String),gaps:d.gaps.map(function(g){return{b:String(g.b),ans:g.ans.map(String),e:String(g.e||''),t:+g.t||0,voice:g.voice||null}})};
       S.examAi=(S.examAi||[]).concat([ex]);save()}
   }catch(e){}
   G_EXGEN=false}
@@ -597,8 +601,8 @@ async function gGen(t){
   try{
     var tp=G_TOPICS[t];
     var d=await generateAiContent('grammar_topic_set',{topicId:t,topic:tp.n});var add=[];
-    if(d&&Array.isArray(d.c))d.c.forEach(function(q){if(q&&Array.isArray(q.t)&&q.t.length>=2&&Array.isArray(q.o)&&q.o.length===4&&+q.a>=0&&+q.a<4)add.push({k:'c',q:{t:[String(q.t[0]),String(q.t[1])],o:q.o.map(String),a:+q.a,e:String(q.e||'')}})});
-    if(d&&Array.isArray(d.f))d.f.forEach(function(q){if(q&&q.s&&String(q.s).indexOf('_____')>=0&&Array.isArray(q.ans)&&q.ans.length)add.push({k:'f',q:{s:String(q.s),b:String(q.b||''),ans:q.ans.map(String),e:String(q.e||'')}})});
+    if(d&&Array.isArray(d.c))d.c.forEach(function(q){if(q&&Array.isArray(q.t)&&q.t.length>=2&&Array.isArray(q.o)&&q.o.length===4&&+q.a>=0&&+q.a<4)add.push({k:'c',q:{t:[String(q.t[0]),String(q.t[1])],o:q.o.map(String),a:+q.a,e:String(q.e||'')},voice:q.voice||null})});
+    if(d&&Array.isArray(d.f))d.f.forEach(function(q){if(q&&q.s&&String(q.s).indexOf('_____')>=0&&Array.isArray(q.ans)&&q.ans.length)add.push({k:'f',q:{s:String(q.s),b:String(q.b||''),ans:q.ans.map(String),e:String(q.e||'')},voice:q.voice||null})});
     if(add.length){S.gramAi=S.gramAi||{};S.gramAi[t]=((S.gramAi[t])||[]).concat(add);save()}
   }catch(e){}
   G_GEN=false}

@@ -1,5 +1,5 @@
 import pg from 'pg';
-import { ensureVoiceTutorReservationAllowed, hashAuthCode, normalizeUsername, normalizeVoiceTutorDeliveryMetadata, subscriptionView, VoiceTutorError, voiceTutorAccessView, voiceTutorBillableSeconds, voiceTutorQuotaPeriods } from './shared.js';
+import { hashAuthCode, normalizeUsername, normalizeVoiceTutorDeliveryMetadata, subscriptionView, VoiceTutorError, voiceTutorAccessView, voiceTutorBillableSeconds, voiceTutorQuotaPeriods, voiceTutorReservationSeconds } from './shared.js';
 import { transitionPedagogicalState } from '../voice-tutor/state-machine.js';
 import { transitionRuleCardReview } from '../voice-tutor/rule-card.js';
 import { createRecoveryLedger, planRecoveryFromTransfer, planRepeatAttempt, publicRepeatAttempt, recoveryMap, recoveryMetrics } from '../voice-tutor/recovery.js';
@@ -137,32 +137,66 @@ export function createPostgresRepository(connectionString) {
     return { username, sub_until: new Date(result.rows[0].subscription_until).getTime() };
   }
 
-  async function createPaymentRequest(id, telegramId, displayName) {
-    const username = await ensureTelegramUser(telegramId, displayName);
+  async function createPaymentRequestForUser(id, username, product = 'base', { now = new Date() } = {}) {
+    if (!['base', 'premium_voice'].includes(product)) throw new Error('INVALID_PAYMENT_PRODUCT');
+    const instant = new Date(now);
+    if (!Number.isFinite(instant.getTime())) throw new Error('INVALID_PAYMENT_TIME');
     try {
       const result = await pool.query(
-        `INSERT INTO payment_requests (id, username) VALUES ($1, $2)
-         RETURNING id, username, status`, [id, username],
+        `INSERT INTO payment_requests (id, username, product, created_at) VALUES ($1, $2, $3, $4)
+         RETURNING id, username, product, status`, [id, username, product, instant],
       );
       return result.rows[0];
     } catch (error) {
       if (error.code !== '23505') throw error;
       const existing = await pool.query(
-        `SELECT id, username, status FROM payment_requests
-         WHERE username = $1 AND status = 'new' ORDER BY created_at DESC LIMIT 1`, [username],
+        `SELECT id, username, product, status FROM payment_requests
+         WHERE username = $1 AND product = $2 AND status = 'new' ORDER BY created_at DESC LIMIT 1`, [username, product],
       );
       if (existing.rowCount) return existing.rows[0];
       throw error;
     }
   }
 
-  async function resolvePaymentRequest(id, decision, actorTelegramId, days) {
+  async function createPaymentRequest(id, telegramId, displayName, options = {}) {
+    const username = await ensureTelegramUser(telegramId, displayName);
+    return createPaymentRequestForUser(id, username, options.product || 'base', options);
+  }
+
+  async function getPaymentRequestForUser(username, product = 'premium_voice') {
+    const result = await pool.query(
+      `SELECT id, username, product, status, created_at, resolved_at
+       FROM payment_requests WHERE username = $1 AND product = $2
+       ORDER BY created_at DESC, id DESC LIMIT 1`,
+      [username, product],
+    );
+    return result.rows[0] || null;
+  }
+
+  async function listPaymentRequests({ product = 'premium_voice', status = 'new' } = {}) {
+    if (!['base', 'premium_voice'].includes(product) || !['new', 'approved', 'rejected', 'cancelled'].includes(status)) {
+      throw new Error('INVALID_PAYMENT_FILTER');
+    }
+    const result = await pool.query(
+      `SELECT id, username, product, status, created_at, resolved_at
+       FROM payment_requests WHERE product = $1 AND status = $2
+       ORDER BY created_at, id`,
+      [product, status],
+    );
+    return result.rows;
+  }
+
+  async function resolvePaymentRequest(id, decision, actorTelegramId, days, { now = new Date() } = {}) {
     if (!['approved', 'rejected', 'cancelled'].includes(decision)) throw new Error('INVALID_PAYMENT_DECISION');
+    const requestedDays = Number(days);
+    if (!Number.isInteger(requestedDays) || requestedDays < 1 || requestedDays > 365) throw new Error('INVALID_SUBSCRIPTION_PERIOD');
+    const instant = new Date(now);
+    if (!Number.isFinite(instant.getTime())) throw new Error('INVALID_PAYMENT_TIME');
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
       const locked = await client.query(
-        `SELECT pr.id, pr.username, pr.status, u.telegram_id, u.subscription_until
+        `SELECT pr.id, pr.username, pr.product, pr.status, u.telegram_id, u.subscription_until
          FROM payment_requests pr JOIN users u ON u.username = pr.username
          WHERE pr.id = $1 FOR UPDATE`, [id],
       );
@@ -170,38 +204,87 @@ export function createPostgresRepository(connectionString) {
       const request = locked.rows[0];
       if (request.status !== 'new') {
         await client.query('COMMIT');
-        return { applied: false, status: request.status, username: request.username, telegram_id: Number(request.telegram_id), sub_until: request.subscription_until ? new Date(request.subscription_until).getTime() : 0 };
+        return { applied: false, status: request.status, product: request.product || 'base', username: request.username, telegram_id: Number(request.telegram_id), sub_until: request.subscription_until ? new Date(request.subscription_until).getTime() : 0 };
+      }
+      if (decision === 'approved' && Number(actorTelegramId) === Number(request.telegram_id)) {
+        throw new Error('PAYMENT_SELF_APPROVAL_FORBIDDEN');
       }
       let subUntil = request.subscription_until;
       if (decision === 'approved') {
         const updated = await client.query(
-          `UPDATE users SET subscription_until = GREATEST(COALESCE(subscription_until, NOW()), NOW()) + ($2 * INTERVAL '1 day'), updated_at = NOW()
-           WHERE username = $1 RETURNING subscription_until`, [request.username, Number(days)],
+          `UPDATE users SET subscription_until = GREATEST(COALESCE(subscription_until, $3), $3) + ($2 * INTERVAL '1 day'), updated_at = $3
+           WHERE username = $1 RETURNING subscription_until`, [request.username, requestedDays, instant],
         );
         subUntil = updated.rows[0].subscription_until;
         await client.query(
           `INSERT INTO subscriptions (username, status, source, starts_at, ends_at)
-           VALUES ($1, 'active', 'manual', NOW(), $2)
+           VALUES ($1, 'active', 'manual', $3, $2)
            ON CONFLICT (username) DO UPDATE SET status = 'active', source = 'manual', ends_at = EXCLUDED.ends_at, updated_at = NOW()`,
-          [request.username, subUntil],
+          [request.username, subUntil, instant],
         );
+        if ((request.product || 'base') === 'premium_voice') {
+          await client.query(
+            `INSERT INTO subscription_entitlements (username, entitlement, starts_at, ends_at)
+             VALUES ($1, 'voice_tutor', $2, $3)
+             ON CONFLICT (username, entitlement) DO UPDATE SET
+               starts_at = LEAST(subscription_entitlements.starts_at, EXCLUDED.starts_at),
+               ends_at = EXCLUDED.ends_at, updated_at = $2`,
+            [request.username, instant, subUntil],
+          );
+        }
         await client.query(
           `INSERT INTO subscription_events (username, event_type, days, actor_telegram_id, metadata)
-           VALUES ($1, 'payment_approved', $2, $3, $4::jsonb)`,
-          [request.username, Number(days), String(actorTelegramId), JSON.stringify({ payment_request_id: id })],
+           VALUES ($1, $2, $3, $4, $5::jsonb)`,
+          [request.username, (request.product || 'base') === 'premium_voice' ? 'premium_payment_approved' : 'payment_approved',
+            requestedDays, String(actorTelegramId), JSON.stringify({ payment_request_id: id, ...((request.product || 'base') === 'premium_voice' ? { product: 'premium_voice' } : {}) })],
         );
       }
       await client.query(
-        `UPDATE payment_requests SET status = $2, actor_telegram_id = $3, result = $2, resolved_at = NOW() WHERE id = $1`,
-        [id, decision, String(actorTelegramId)],
+        `UPDATE payment_requests SET status = $2, actor_telegram_id = $3, result = $2, resolved_at = $4 WHERE id = $1`,
+        [id, decision, String(actorTelegramId), instant],
       );
       await client.query(
         `INSERT INTO audit_log (actor_telegram_id, action, target_type, target_id, result, metadata)
          VALUES ($1, 'payment.resolve', 'payment_request', $2, $3, $4::jsonb)`,
-        [String(actorTelegramId), id, decision, JSON.stringify({ username: request.username, days: decision === 'approved' ? Number(days) : 0 })],
+        [String(actorTelegramId), id, decision, JSON.stringify({ username: request.username, product: request.product || 'base', days: decision === 'approved' ? requestedDays : 0 })],
       );
       await client.query('COMMIT');
-      return { applied: true, status: decision, username: request.username, telegram_id: Number(request.telegram_id), sub_until: subUntil ? new Date(subUntil).getTime() : 0 };
+      return { applied: true, status: decision, product: request.product || 'base', username: request.username, telegram_id: Number(request.telegram_id), sub_until: subUntil ? new Date(subUntil).getTime() : 0 };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async function revokeEntitlement(username, entitlement, actorTelegramId, { now = new Date() } = {}) {
+    if (entitlement !== 'voice_tutor') throw new Error('INVALID_ENTITLEMENT');
+    const instant = new Date(now);
+    if (!Number.isFinite(instant.getTime())) throw new Error('INVALID_PAYMENT_TIME');
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const user = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+      if (!user.rowCount) throw new Error('USER_NOT_FOUND');
+      const updated = await client.query(
+        `UPDATE subscription_entitlements SET ends_at = $3, updated_at = $3
+         WHERE username = $1 AND entitlement = $2 AND starts_at < $3 AND (ends_at IS NULL OR ends_at > $3)
+         RETURNING entitlement`,
+        [username, entitlement, instant],
+      );
+      if (updated.rowCount) {
+        await client.query(
+          `INSERT INTO subscription_events (username, event_type, days, actor_telegram_id, metadata, created_at)
+           VALUES ($1, 'premium_revoked', 0, $2, $3::jsonb, $4)`,
+          [username, String(actorTelegramId), JSON.stringify({ entitlement }), instant],
+        );
+        await client.query(
+          `INSERT INTO audit_log (actor_telegram_id, action, target_type, target_id, result, metadata, created_at)
+           VALUES ($1, 'entitlement.revoke', 'subscription_entitlement', $2, 'revoked', $3::jsonb, $4)`,
+          [String(actorTelegramId), entitlement, JSON.stringify({ username }), instant],
+        );
+      }
+      await client.query('COMMIT');
+      return Boolean(updated.rowCount);
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -354,8 +437,7 @@ export function createPostgresRepository(connectionString) {
         return { created: false, session: mapVoiceTutorSession(existing.rows[0]), ...access };
       }
       const access = await readVoiceTutorAccess(client, username, limits, instant);
-      const reservedSeconds = Number(limits.sessionSeconds);
-      ensureVoiceTutorReservationAllowed(access, reservedSeconds);
+      const reservedSeconds = voiceTutorReservationSeconds(access, limits.sessionSeconds);
       const inserted = await client.query(
         `INSERT INTO voice_tutor_sessions
          (id, username, idempotency_key, status, reserved_seconds, started_at, expires_at,
@@ -947,7 +1029,7 @@ export function createPostgresRepository(connectionString) {
 
   async function getGeneratedTask(username, requestHash) {
     const result = await pool.query(
-      `SELECT result, provider, prompt_version, created_at FROM generated_tasks
+      `SELECT operation, request, result, provider, prompt_version, created_at FROM generated_tasks
        WHERE username = $1 AND request_hash = $2`, [username, requestHash],
     );
     return result.rows[0] || null;
@@ -1248,7 +1330,7 @@ export function createPostgresRepository(connectionString) {
                   JOIN voice_tutor_recoveries recovery ON recovery.id = repeat.recovery_id
                   WHERE recovery.username = $1 ORDER BY attempt.observed_at`, [username]),
       pool.query('SELECT * FROM trusted_rule_cards WHERE created_for_username = $1 ORDER BY created_at', [username]),
-      pool.query('SELECT id, status, actor_telegram_id, result, created_at, resolved_at FROM payment_requests WHERE username = $1 ORDER BY created_at', [username]),
+      pool.query('SELECT id, product, status, actor_telegram_id, result, created_at, resolved_at FROM payment_requests WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, task_type, assignment, answer, evaluated_answer, review, provider, model, prompt_version, status, error_code, created_at, evaluated_at FROM writing_attempts WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, task_type, assignment, transcript, review, provider, model, prompt_version, status, error_code, created_at, evaluated_at FROM speaking_attempts WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, operation, request, result, provider, prompt_version, created_at FROM generated_tasks WHERE username = $1 ORDER BY created_at', [username]),
@@ -1340,7 +1422,11 @@ export function createPostgresRepository(connectionString) {
     ensureTelegramUser,
     grantDays,
     createPaymentRequest,
+    createPaymentRequestForUser,
+    getPaymentRequestForUser,
+    listPaymentRequests,
     resolvePaymentRequest,
+    revokeEntitlement,
     markTrialUsed,
     activateTrial,
     getSub,

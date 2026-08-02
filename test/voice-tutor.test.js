@@ -179,9 +179,23 @@ test('voice session reservation enforces auth, Premium, one active session and a
     clock.now = new Date(NOW.getTime() + 420_000);
     await request(`/api/v1/voice-tutor/sessions/${second.session.id}/finish`, { method: 'POST' });
 
-    const exhausted = await request('/api/v1/voice-tutor/sessions', {
+    const remainderResponse = await request('/api/v1/voice-tutor/sessions', {
       method: 'POST',
       headers: { 'Idempotency-Key': 'a836331f-11ff-4532-924a-eb9b67e65435' },
+    });
+    assert.equal(remainderResponse.status, 201);
+    const remainder = await remainderResponse.json();
+    assert.equal((new Date(remainder.session.expires_at) - new Date(remainder.session.started_at)) / 1000, 180);
+    assert.equal(remainder.voice_tutor.daily_remaining_seconds, 0);
+    const remainderReplay = await request('/api/v1/voice-tutor/sessions', {
+      method: 'POST', headers: { 'Idempotency-Key': 'a836331f-11ff-4532-924a-eb9b67e65435' },
+    });
+    assert.equal(remainderReplay.status, 200);
+    assert.equal((await remainderReplay.json()).session.id, remainder.session.id);
+    clock.now = new Date(NOW.getTime() + 600_000);
+    await request(`/api/v1/voice-tutor/sessions/${remainder.session.id}/finish`, { method: 'POST' });
+    const exhausted = await request('/api/v1/voice-tutor/sessions', {
+      method: 'POST', headers: { 'Idempotency-Key': '2c490e97-20e1-45d8-a1b3-5dbda424983d' },
     });
     assert.equal(exhausted.status, 429);
     assert.equal((await exhausted.json()).error.code, 'VOICE_TUTOR_DAILY_QUOTA_EXHAUSTED');
@@ -201,8 +215,17 @@ test('voice session reservation enforces the monthly quota independently', async
     const session = (await first.json()).session;
     clock.now = new Date(NOW.getTime() + 120_000);
     await request(`/api/v1/voice-tutor/sessions/${session.id}/finish`, { method: 'POST' });
-    const exhausted = await request('/api/v1/voice-tutor/sessions', {
+    const remainderResponse = await request('/api/v1/voice-tutor/sessions', {
       method: 'POST', headers: { 'Idempotency-Key': '79004331-cbf3-47f0-964a-fc69156b6ea4' },
+    });
+    assert.equal(remainderResponse.status, 201);
+    const remainder = await remainderResponse.json();
+    assert.equal((new Date(remainder.session.expires_at) - new Date(remainder.session.started_at)) / 1000, 180);
+    assert.equal(remainder.voice_tutor.monthly_remaining_seconds, 0);
+    clock.now = new Date(NOW.getTime() + 300_000);
+    await request(`/api/v1/voice-tutor/sessions/${remainder.session.id}/finish`, { method: 'POST' });
+    const exhausted = await request('/api/v1/voice-tutor/sessions', {
+      method: 'POST', headers: { 'Idempotency-Key': '1cd66011-992c-4b14-86f3-79e39097c9aa' },
     });
     assert.equal(exhausted.status, 429);
     assert.equal((await exhausted.json()).error.code, 'VOICE_TUTOR_MONTHLY_QUOTA_EXHAUSTED');

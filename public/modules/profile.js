@@ -54,13 +54,21 @@
     };
   }
 
-  function voiceTutorStatus(session) {
+  function voiceTutorStatus(session, paymentRequest = null) {
     const entitled = Boolean(session && session.entitlements && session.entitlements.voice_tutor);
     if (!entitled) {
+      const pending = paymentRequest?.status === 'new';
+      const rejected = paymentRequest?.status === 'rejected';
+      const requestCode = paymentRequest?.id ? String(paymentRequest.id).slice(0, 8) : '';
       return {
-        state: 'paywall',
+        state: pending ? 'pending' : 'paywall',
         title: 'Voice Tutor · Premium',
-        text: 'Голосовой разбор ошибок доступен в Premium',
+        text: pending
+          ? `Заявка #${requestCode} · статус: ожидает подтверждения`
+          : rejected
+            ? `Заявка #${requestCode} · статус: отклонена`
+            : 'Голосовой разбор ошибок доступен в Premium',
+        actionLabel: pending ? '' : (rejected ? 'Отправить заявку снова' : 'Запросить Premium'),
         color: '#8A4B00',
         background: '#FFF4DE',
       };
@@ -72,6 +80,7 @@
       state: 'premium',
       title: 'Voice Tutor · Premium',
       text: 'Осталось ' + dailyMinutes + ' мин сегодня · ' + monthlyMinutes + ' мин в этом месяце',
+      actionLabel: '',
       color: '#1D7F4A',
       background: '#EAF7F0',
     };

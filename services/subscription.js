@@ -37,7 +37,13 @@ export function createSubscriptionService({
   // Idempotent by design: a second decision on the same request changes nothing.
   async function resolvePayment(requestId, decision, telegramId) {
     if (!isAdmin(telegramId)) return { applied: false, reason: 'forbidden' };
-    const result = await resolvePaymentRequest(requestId, decision, telegramId, subscriptionDays);
+    let result;
+    try {
+      result = await resolvePaymentRequest(requestId, decision, telegramId, subscriptionDays);
+    } catch (error) {
+      if (error?.message === 'PAYMENT_SELF_APPROVAL_FORBIDDEN') return { applied: false, reason: 'forbidden' };
+      throw error;
+    }
     if (!result.applied) return { applied: false, reason: 'already_resolved' };
     return {
       applied: true,

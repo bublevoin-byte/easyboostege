@@ -231,6 +231,22 @@ test('generated tasks are reused by request hash and exported without internal h
   });
 });
 
+test('concurrent generated-task writers converge on one canonical stored result', async () => {
+  await withRepository(async (repository) => {
+    const username = await repository.createTelegramUser(3021, 'Concurrent Generator');
+    const requestHash = 'b'.repeat(64);
+    const base = { operation: 'vocabulary_cards', requestHash, request: { operation: 'vocabulary_cards', count: 1, exclude: [] }, promptVersion: 'content-v1' };
+    const [firstId, secondId] = await Promise.all([
+      repository.saveGeneratedTask(username, { ...base, result: [{ w: 'first' }], provider: 'first' }),
+      repository.saveGeneratedTask(username, { ...base, result: [{ w: 'second' }], provider: 'second' }),
+    ]);
+    assert.equal(firstId, secondId);
+    const stored = await repository.getGeneratedTask(username, requestHash);
+    assert.ok(['first', 'second'].includes(stored.result[0].w));
+    assert.equal(stored.provider, stored.result[0].w);
+  });
+});
+
 test('module attempts are idempotent and included in user export', async () => {
   await withRepository(async (repository) => {
     const username = await repository.createTelegramUser(3030, 'Module Student');

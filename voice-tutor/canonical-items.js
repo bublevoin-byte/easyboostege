@@ -1,4 +1,5 @@
 import { voiceTutorModule } from './modules.js';
+import { CORE_VOICE_TUTOR_ITEMS } from './core-catalog.js';
 
 export function createContextVoiceTutorItem(definition) {
   const context = voiceTutorModule(definition.module)?.context;
@@ -114,7 +115,7 @@ const BASE_ITEMS = {
 const CONTEXT_ITEMS = Object.fromEntries(CONTEXT_SET_DEFINITIONS.flatMap((set) => (
   set.items.map((item) => [item.id, createContextVoiceTutorItem({ ...item, module: set.module })])
 )));
-const ITEMS = Object.freeze({ ...BASE_ITEMS, ...CONTEXT_ITEMS });
+const ITEMS = Object.freeze({ ...BASE_ITEMS, ...CORE_VOICE_TUTOR_ITEMS, ...CONTEXT_ITEMS });
 const RESULT_SETS = Object.freeze(Object.fromEntries(CONTEXT_SET_DEFINITIONS.map((set) => [set.id, Object.freeze({
   id: set.id,
   revision: set.revision,

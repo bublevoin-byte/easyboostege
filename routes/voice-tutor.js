@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import express from 'express';
 import { parseContentResponse } from '../ai/content.js';
 import { buildVoiceTutorCapsule, buildWritingSpeakingCapsule, createGrammarLexiconErrorAttempt, createVoiceTutorContextResult, persistedVoiceTutorCapsule, publicVoiceTutorCapsule } from '../voice-tutor/capsule.js';
-import { buildGeneratedVoiceTutorDefinitions, parseGeneratedVoiceTutorSetId } from '../voice-tutor/generated-items.js';
+import { buildGeneratedVoiceTutorDefinitions, parseGeneratedVoiceTutorItemId, parseGeneratedVoiceTutorSetId } from '../voice-tutor/generated-items.js';
 import { isContextVoiceTutorModule, isDirectVoiceTutorModule } from '../voice-tutor/modules.js';
 
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9._:-]{8,100}$/u;
@@ -212,6 +212,23 @@ async function generatedDefinitionsFor(db, username, setId, module) {
   }
 }
 
+async function generatedDefinitionsForItem(db, username, itemId, module) {
+  const generated = parseGeneratedVoiceTutorItemId(itemId, module);
+  if (!generated) return null;
+  const stored = await db.getGeneratedTask(username, generated.requestHash);
+  if (!stored || stored.operation !== generated.operation) {
+    throw Object.assign(new Error('VOICE_TUTOR_ITEM_NOT_FOUND'), { code: 'VOICE_TUTOR_ITEM_NOT_FOUND' });
+  }
+  try {
+    const data = parseContentResponse(generated.operation, JSON.stringify(stored.result));
+    const definitions = buildGeneratedVoiceTutorDefinitions(generated.operation, generated.requestHash, data);
+    if (!definitions?.getItem(itemId)) throw new Error('generated item invalid');
+    return definitions;
+  } catch {
+    throw Object.assign(new Error('VOICE_TUTOR_ITEM_NOT_FOUND'), { code: 'VOICE_TUTOR_ITEM_NOT_FOUND' });
+  }
+}
+
 function approvedCardRule(card) {
   if (!card?.id || !card.rule || !Array.isArray(card.rule.examples)) return null;
   return {
@@ -227,10 +244,13 @@ function approvedCardRule(card) {
 async function buildSourceCapsule(db, username, attempt, expectedRevision, referenceTime = new Date()) {
   const setId = attempt?.metadata?.context_set_id;
   const generated = setId ? await generatedDefinitionsFor(db, username, setId, attempt.module) : null;
+  const generatedItem = !setId
+    ? await generatedDefinitionsForItem(db, username, attempt?.metadata?.item_id, attempt?.module)
+    : null;
   const capsule = buildVoiceTutorCapsule({
     attempt,
     expectedRevision,
-    ...(generated ? { getItem: generated.getItem } : {}),
+    ...(generated || generatedItem ? { getItem: (generated || generatedItem).getItem } : {}),
   });
   if (!capsule.rule?.discovery_required) return capsule;
   const examYear = new Date(referenceTime).getUTCFullYear();
@@ -402,13 +422,14 @@ export function createVoiceTutorRoutes({
     try {
       const access = await db.getVoiceTutorAccess(req.user, limits, now());
       if (!access.entitlements.voice_tutor) return sendVoiceTutorError({ code: 'VOICE_TUTOR_PREMIUM_REQUIRED' }, res, next);
+      const generated = await generatedDefinitionsForItem(db, req.user, parsed.itemId, parsed.module);
       const attempt = createGrammarLexiconErrorAttempt({
         id: parsed.attemptId,
         module: parsed.module,
         itemId: parsed.itemId,
         revision: parsed.revision,
         learnerAnswer: parsed.learnerAnswer,
-      });
+      }, generated?.getItem);
       const result = await db.recordModuleAttempt(req.user, attempt);
       return res.status(result.created ? 201 : 200).json({ ...result, revision: parsed.revision });
     } catch (error) {

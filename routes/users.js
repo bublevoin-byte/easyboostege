@@ -16,6 +16,8 @@ export function createUserRoutes({
   db,
   voiceTutorLimits = {},
   now = () => new Date(),
+  newPaymentRequestId = () => crypto.randomUUID(),
+  premiumSubscriptionDays = 30,
 }) {
   const router = express.Router();
   const { auth, requireRole, monitoringAuth, issueToken, readCookie, setAuthCookie, clearAuthCookie } = authentication;
@@ -58,6 +60,89 @@ export function createUserRoutes({
       setAuthCookie(req, res, token);
       res.json({ authenticated: true, username: req.user, role: req.role, bot: botUsername(), ...await currentSubscription(req.user) });
     } catch (error) { next(error); }
+  });
+
+  function publicPaymentRequest(request) {
+    return request ? { id: request.id, product: request.product || 'base', status: request.status } : null;
+  }
+
+  router.post('/api/v1/payments/requests', auth, async (req, res, next) => {
+    if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)
+      || Object.keys(req.body).length !== 1 || req.body.product !== 'premium_voice') {
+      return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректный тариф заявки.' } });
+    }
+    try {
+      const id = newPaymentRequestId();
+      const request = await db.createPaymentRequestForUser(id, req.user, 'premium_voice', { now: now() });
+      return res.status(request.id === id ? 201 : 200).json({ request: publicPaymentRequest(request) });
+    } catch (error) { return next(error); }
+  });
+
+  router.get('/api/v1/payments/requests', auth, async (req, res, next) => {
+    if (String(req.query.product || '') !== 'premium_voice') {
+      return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректный тариф заявки.' } });
+    }
+    try {
+      const [request, access] = await Promise.all([
+        db.getPaymentRequestForUser(req.user, 'premium_voice'),
+        db.getVoiceTutorAccess(req.user, voiceTutorLimits, now()),
+      ]);
+      return res.json({ request: publicPaymentRequest(request), entitlement_active: access.entitlements.voice_tutor });
+    } catch (error) { return next(error); }
+  });
+
+  router.get('/api/v1/admin/payment-requests', auth, requireRole('admin'), async (req, res, next) => {
+    if (String(req.query.product || '') !== 'premium_voice' || String(req.query.status || '') !== 'new') {
+      return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректный фильтр заявок.' } });
+    }
+    try {
+      const requests = await db.listPaymentRequests({ product: 'premium_voice', status: 'new' });
+      return res.json({ requests: requests.map((request) => ({
+        id: request.id, username: request.username, product: request.product || 'base', status: request.status,
+      })) });
+    } catch (error) { return next(error); }
+  });
+
+  router.post('/api/v1/admin/payment-requests/:requestId/resolve', auth, requireRole('admin'), async (req, res, next) => {
+    const decision = req.body?.decision;
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(req.params.requestId)
+      || !req.body || typeof req.body !== 'object' || Array.isArray(req.body)
+      || Object.keys(req.body).length !== 1 || !['approved', 'rejected'].includes(decision)) {
+      return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректное решение по оплате.' } });
+    }
+    try {
+      const actor = await db.getUser(req.user);
+      if (actor?.telegram_id == null) return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Недостаточно прав.' } });
+      const result = await db.resolvePaymentRequest(
+        req.params.requestId, decision, actor.telegram_id, premiumSubscriptionDays, { now: now() },
+      );
+      return res.json({
+        applied: result.applied,
+        request: { id: req.params.requestId, product: result.product || 'base', status: result.status },
+        sub_until: result.sub_until,
+      });
+    } catch (error) {
+      if (error?.message === 'PAYMENT_REQUEST_NOT_FOUND') {
+        return res.status(404).json({ error: { code: 'PAYMENT_REQUEST_NOT_FOUND', message: 'Заявка не найдена.' } });
+      }
+      if (error?.message === 'PAYMENT_SELF_APPROVAL_FORBIDDEN') {
+        return res.status(403).json({ error: { code: 'PAYMENT_SELF_APPROVAL_FORBIDDEN', message: 'Нельзя подтверждать собственную заявку.' } });
+      }
+      return next(error);
+    }
+  });
+
+  router.post('/api/v1/admin/users/:username/entitlements/voice_tutor/revoke', auth, requireRole('admin'), async (req, res, next) => {
+    if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body) || Object.keys(req.body).length !== 0
+      || !/^[A-Za-zА-Яа-яЁё0-9_]{1,64}$/u.test(req.params.username)) {
+      return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректный запрос отзыва Premium.' } });
+    }
+    try {
+      const actor = await db.getUser(req.user);
+      if (actor?.telegram_id == null) return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Недостаточно прав.' } });
+      const revoked = await db.revokeEntitlement(req.params.username, 'voice_tutor', actor.telegram_id, { now: now() });
+      return res.json({ revoked });
+    } catch (error) { return next(error); }
   });
 
   router.get('/api/v1/admin/status', auth, requireRole('admin'), (req, res) => {

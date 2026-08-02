@@ -54,6 +54,7 @@ const voiceTutorDailySeconds = readInteger('VOICE_TUTOR_DAILY_SECONDS', 600, { m
 const voiceTutorMonthlySeconds = readInteger('VOICE_TUTOR_MONTHLY_SECONDS', 7_200, { min: 60, max: 2_678_400 });
 const voiceTutorSessionSeconds = readInteger('VOICE_TUTOR_SESSION_SECONDS', 300, { min: 60, max: 3_600 });
 const voiceTutorRealtimeUrl = process.env.XAI_VOICE_REALTIME_URL || 'wss://api.x.ai/v1/realtime';
+const voiceTutorModel = String(process.env.XAI_VOICE_MODEL || '').trim();
 if (!/^wss:\/\/[A-Za-z0-9.-]+(?::\d+)?(?:\/|$)/u.test(voiceTutorRealtimeUrl)) {
   throw new Error('XAI_VOICE_REALTIME_URL must use WSS');
 }
@@ -72,6 +73,12 @@ if (isProduction && databaseProvider !== 'postgres') {
 
 if (isProduction && process.env.MONITORING_TOKEN && process.env.MONITORING_TOKEN.length < 32) {
   throw new Error('MONITORING_TOKEN must contain at least 32 characters when configured');
+}
+
+const pinnedVoiceModel = /^grok-voice-[a-z0-9][a-z0-9.-]*-(?:\d{4}-\d{2}-\d{2}|\d+\.\d+)$/u.test(voiceTutorModel)
+  && !/(?:^|[-_.])(?:alias|current|latest|preview|stable)(?:$|[-_.])/iu.test(voiceTutorModel);
+if (isProduction && !pinnedVoiceModel) {
+  throw new Error('XAI_VOICE_MODEL must be a pinned immutable grok-voice semver/date revision in production; aliases are forbidden');
 }
 
 if (voiceTutorSessionSeconds > voiceTutorDailySeconds || voiceTutorSessionSeconds > voiceTutorMonthlySeconds) {
@@ -117,7 +124,7 @@ export const config = Object.freeze({
     credentialTtlSeconds: readInteger('XAI_VOICE_CREDENTIAL_TTL_SECONDS', 60, { min: 60, max: 60 }),
     credentialEndpoint: readProviderUrl('XAI_VOICE_CREDENTIAL_URL', 'https://api.x.ai/v1/realtime/client_secrets'),
     realtimeUrl: voiceTutorRealtimeUrl,
-    model: process.env.XAI_VOICE_MODEL || '',
+    model: voiceTutorModel,
     voice: process.env.XAI_VOICE_NAME || '',
     trustedRuleAllowlist: readJson('VOICE_TUTOR_RULE_ALLOWLIST_JSON', []),
     trustedRuleSources: readJson('VOICE_TUTOR_RULE_SOURCES_JSON', {}),

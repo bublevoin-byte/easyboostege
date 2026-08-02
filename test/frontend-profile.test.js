@@ -72,6 +72,14 @@ test('profile module shows a Premium paywall or the remaining voice minutes', ()
     voice_tutor: { daily_remaining_seconds: 0, monthly_remaining_seconds: 0, active_session: false },
   });
   assert.equal(base.state, 'paywall');
+  assert.equal(base.actionLabel, 'Запросить Premium');
+
+  const pending = profile.voiceTutorStatus({ entitlements: { voice_tutor: false } }, { id: '7ee5be14-d2b6-4f73-b5af-339131231985', status: 'new' });
+  assert.equal(pending.state, 'pending');
+  assert.equal(pending.actionLabel, '');
+  assert.match(pending.text, /Заявка/u);
+  assert.match(pending.text, /#7ee5be14/u);
+  assert.match(pending.text, /статус/u);
   assert.equal(base.title, 'Voice Tutor · Premium');
   assert.match(base.text, /доступен в Premium/u);
 
@@ -83,4 +91,13 @@ test('profile module shows a Premium paywall or the remaining voice minutes', ()
   assert.equal(premium.title, 'Voice Tutor · Premium');
   assert.equal(premium.text, 'Осталось 10 мин сегодня · 120 мин в этом месяце');
   assert.equal('daily_limit_seconds' in premium, false);
+  assert.equal(premium.actionLabel, '');
+});
+
+test('profile Premium paywall is wired to the authenticated payment request API', async () => {
+  const appSource = await fs.readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(appSource, /\/api\/v1\/payments\/requests\?product=premium_voice/u);
+  assert.match(appSource, /post\('\/api\/v1\/payments\/requests',\{product:'premium_voice'\}\)/u);
+  assert.match(appSource, /pf_voice_action/u);
+  assert.match(appSource, /aria-label/u);
 });

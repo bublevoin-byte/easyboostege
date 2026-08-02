@@ -8,7 +8,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { claimUnseenBankTask, getBankTask, getBankTaskByExternalId, listBankTaskContents, recordTaskDelivery, upsertBankTask, activateTrial, activateVoiceTutorSession, closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, countAiOperationRequestsSince, countAiRequestsSince, createPaymentRequest, createRuleCard, createSession, createSpeakingAttempt, createTelegramAuthCode, createWritingAttempt, deleteUserData, exportUserData, finishSpeakingAttempt, finishVoiceTutorSession, finishWritingAttempt, getAiUsageMetrics, getApprovedRuleCard, getGeneratedTask, getSharedGeneratedTask, getModuleAttempt, getPrivacyConsent, getProgress, getSpeakingAttempt, getUser, getVoiceTutorAccess, getVoiceTutorRecoveryMap, getVoiceTutorRecoveryMetrics, getVoiceTutorSession, getWritingAttempt, healthCheck, isSessionActive, listRuleCards, recordModuleAttempt, reserveVoiceTutorSession, resolvePaymentRequest, reviewRuleCard, revokeSession, saveGeneratedTask, saveProgress, setPrivacyConsent, setUserRole, submitVoiceTutorRepeat, upsertErrorBank, upsertWordProgress, mergeProgress, getUserByTelegram, createTelegramUser, logAiRequest, getSub, advanceVoiceTutorSession, setVoiceTutorSessionDelivery, switchVoiceTutorSessionDelivery } from './db.js';
+import { claimUnseenBankTask, getBankTask, getBankTaskByExternalId, listBankTaskContents, recordTaskDelivery, upsertBankTask, activateTrial, activateVoiceTutorSession, closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, countAiOperationRequestsSince, countAiRequestsSince, createPaymentRequest, createPaymentRequestForUser, createRuleCard, createSession, createSpeakingAttempt, createTelegramAuthCode, createWritingAttempt, deleteUserData, exportUserData, finishSpeakingAttempt, finishVoiceTutorSession, finishWritingAttempt, getAiUsageMetrics, getApprovedRuleCard, getGeneratedTask, getSharedGeneratedTask, getModuleAttempt, getPaymentRequestForUser, getPrivacyConsent, getProgress, getSpeakingAttempt, getUser, getVoiceTutorAccess, getVoiceTutorRecoveryMap, getVoiceTutorRecoveryMetrics, getVoiceTutorSession, getWritingAttempt, healthCheck, isSessionActive, listPaymentRequests, listRuleCards, recordModuleAttempt, reserveVoiceTutorSession, resolvePaymentRequest, reviewRuleCard, revokeEntitlement, revokeSession, saveGeneratedTask, saveProgress, setPrivacyConsent, setUserRole, submitVoiceTutorRepeat, upsertErrorBank, upsertWordProgress, mergeProgress, getUserByTelegram, createTelegramUser, logAiRequest, getSub, advanceVoiceTutorSession, setVoiceTutorSessionDelivery, switchVoiceTutorSessionDelivery } from './db.js';
 import { config } from './config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from './ai/writing.js';
 import { buildContentPrompt, CONTENT_PROMPT_VERSION, contentRequestSchema, parseContentResponse } from './ai/content.js';
@@ -173,7 +173,9 @@ const authentication = createAuthentication({
 const { issueToken, setAuthCookie } = authentication;
 // The routers receive the database as one object so each module lists only what it uses.
 const dbApi = {
+  getUser,
   createTelegramAuthCode, consumeTelegramAuthCode, getUserByTelegram, createTelegramUser, getSub,
+  createPaymentRequestForUser, getPaymentRequestForUser, listPaymentRequests, resolvePaymentRequest, revokeEntitlement,
   getVoiceTutorAccess, reserveVoiceTutorSession, finishVoiceTutorSession, getVoiceTutorSession, activateVoiceTutorSession,
   advanceVoiceTutorSession, setVoiceTutorSessionDelivery, switchVoiceTutorSessionDelivery,
   submitVoiceTutorRepeat, getVoiceTutorRecoveryMap, getVoiceTutorRecoveryMetrics,

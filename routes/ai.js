@@ -289,9 +289,15 @@ export function createAiRoutes({ authentication, access, db }) {
           logAiRequest({ username, operation: input.operation, provider: provider.name, model: provider.model, promptVersion: CONTENT_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt, fallbackReason, ...aiUsage(provider, usage) }),
           saveGeneratedTask(username, { operation: input.operation, requestHash, request: input, result: data, provider: provider.name, promptVersion: CONTENT_PROMPT_VERSION }),
         ]);
+        // Concurrent identical calls can both reach a provider, but the repository keeps only one
+        // canonical row. Always issue Voice Tutor pointers for that stored winner, never for a
+        // valid-but-losing provider result that cannot be rebuilt later.
+        const canonicalStored = await getGeneratedTask(username, requestHash);
+        if (!canonicalStored) throw Object.assign(new Error('AI_RESPONSE_INVALID'), { code: 'AI_RESPONSE_INVALID' });
+        const canonicalData = parseContentResponse(input.operation, JSON.stringify(canonicalStored.result));
         recordDependencyEvent('ai', 'success');
         if (providerIndex > 0) recordDependencyEvent('ai', 'fallback');
-        return { data: decorateGeneratedVoiceTutorContent(input.operation, requestHash, data), provider: provider.name, promptVersion: CONTENT_PROMPT_VERSION, cached: false };
+        return { data: decorateGeneratedVoiceTutorContent(input.operation, requestHash, canonicalData), provider: canonicalStored.provider, promptVersion: canonicalStored.prompt_version, cached: false };
       } catch (error) {
         if (error.status && error.code) throw error;
         recordDependencyEvent('ai', 'error');

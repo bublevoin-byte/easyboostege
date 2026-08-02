@@ -1,6 +1,7 @@
 ﻿/* legacy block 1 */
 import {back,cur,nav,prepareScreen,registerRouteHook,show,tab} from './router.js';
 import {configureTts,lStop} from './tts.js';
+import {decorateCoreVocabulary} from './modules/core-voice-catalog.js';
 /*
  * Оболочка не знает, что умеет экран: она знает только, что его код приезжает отдельным чанком.
  * Реестр чанков живёт в screens.js и подключается к маршрутизатору сам — здесь достаточно того,
@@ -389,12 +390,15 @@ async function tgClick(e){
         var copy=document.createElement('span');copy.setAttribute('style','flex:1;min-width:0;');
         var title=document.createElement('span');title.id='pf_voice_title';title.setAttribute('style','display:block;font-weight:700;font-size:14px;color:#2B2B2B;');
         var detail=document.createElement('span');detail.id='pf_voice_detail';detail.setAttribute('role','status');detail.setAttribute('style','display:inline-block;margin-top:4px;font-weight:700;font-size:11.5px;padding:4px 8px;border-radius:12px;line-height:1.35;');
-        copy.appendChild(title);copy.appendChild(detail);voiceRow.appendChild(icon);voiceRow.appendChild(copy);list.insertBefore(voiceRow,aiStatus.parentElement.nextSibling);}}
+        var action=document.createElement('button');action.id='pf_voice_action';action.type='button';action.setAttribute('aria-label','Запросить доступ к Voice Tutor Premium');action.setAttribute('style','display:none;min-height:44px;border:0;border-radius:14px;padding:8px 11px;background:#F2683F;color:#fff;font:700 11px Manrope,sans-serif;cursor:pointer;');
+        copy.appendChild(title);copy.appendChild(detail);voiceRow.appendChild(icon);voiceRow.appendChild(copy);voiceRow.appendChild(action);list.insertBefore(voiceRow,aiStatus.parentElement.nextSibling);}}
+    var paymentRequest=null;
     var renderProfileStatuses=function(profile){var subscriptionStatus=profileModule.subscriptionStatus(profile,Date.now());el.textContent=subscriptionStatus.text;el.style.color=subscriptionStatus.color;el.style.background=subscriptionStatus.background;
-      var voiceTutorStatus=profileModule.voiceTutorStatus(profile);var title=document.getElementById('pf_voice_title');var detail=document.getElementById('pf_voice_detail');
-      if(title)title.textContent=voiceTutorStatus.title;if(detail){detail.textContent=voiceTutorStatus.text;detail.style.color=voiceTutorStatus.color;detail.style.background=voiceTutorStatus.background}};
+      var voiceTutorStatus=profileModule.voiceTutorStatus(profile,paymentRequest);var title=document.getElementById('pf_voice_title');var detail=document.getElementById('pf_voice_detail');var action=document.getElementById('pf_voice_action');
+      if(title)title.textContent=voiceTutorStatus.title;if(detail){detail.textContent=voiceTutorStatus.text;detail.style.color=voiceTutorStatus.color;detail.style.background=voiceTutorStatus.background}
+      if(action){action.textContent=voiceTutorStatus.actionLabel;action.style.display=voiceTutorStatus.actionLabel?'block':'none';action.disabled=false;action.onclick=voiceTutorStatus.actionLabel?async function(){action.disabled=true;try{var result=await EasyBoostApi.post('/api/v1/payments/requests',{product:'premium_voice'});paymentRequest=result.request;renderProfileStatuses(profile)}catch(error){action.disabled=false;detail.textContent=EasyBoostApi.messageFor(error)}}:null}};
     if(window.__sub)renderProfileStatuses(window.__sub);
-    me().then(function(profile){if(profile){window.__sub=profile;renderProfileStatuses(profile)}});
+    Promise.all([me(),EasyBoostApi.get('/api/v1/payments/requests?product=premium_voice').catch(function(){return{request:null}})]).then(function(values){var profile=values[0];paymentRequest=values[1]&&values[1].request;if(profile){window.__sub=profile;renderProfileStatuses(profile)}});
   });
 })();
 
@@ -700,6 +704,7 @@ const EGE_WORDS=[
 {w:'to suit',t:10,p:'v',tr:'идти, быть к лицу',ex:'This colour suits you.'},
 {w:'window shopping',t:10,p:'n',tr:'разглядывание витрин',ex:'We went window shopping in the mall.'}
 ];
+decorateCoreVocabulary(EGE_WORDS);
 var W_SYNC={},W_SYNC_T=null;
 function wQueueServer(w){if(typeof SRV==='undefined'||!SRV||!TOKEN)return;var r=wRec(w);if(!r)return;
   W_SYNC[w]={word:w,stage:r.s||0,errorCount:r.e||0,reviewCount:r.n||0,dueAt:r.due||null};clearTimeout(W_SYNC_T);

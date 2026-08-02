@@ -12,6 +12,7 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
   const client = new pg.Client({ connectionString });
   const suffix = crypto.randomBytes(6).toString('hex');
   const telegramId = Number(`8${Date.now().toString().slice(-9)}`);
+  const independentActorTelegramId = telegramId + 1;
   await client.connect();
 
   try {
@@ -37,6 +38,7 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
       '023_trusted_rule_cards.sql',
       '024_voice_tutor_recovery_map.sql',
       '025_voice_tutor_hardening.sql',
+      '026_premium_voice_commerce.sql',
     ]);
 
     const username = await repository.createTelegramUser(telegramId, `Integration ${suffix}`);
@@ -77,9 +79,24 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     assert.equal((await repository.activateTrial(telegramId, 30, 'Integration User')).applied, false);
 
     const paymentRequest = await repository.createPaymentRequest(crypto.randomUUID(), telegramId, 'Integration User');
-    const approvedPayment = await repository.resolvePaymentRequest(paymentRequest.id, 'approved', telegramId, 30);
+    const approvedPayment = await repository.resolvePaymentRequest(paymentRequest.id, 'approved', independentActorTelegramId, 30);
     assert.equal(approvedPayment.applied, true);
-    assert.equal((await repository.resolvePaymentRequest(paymentRequest.id, 'approved', telegramId, 30)).applied, false);
+    assert.equal(approvedPayment.product, 'base');
+    assert.equal((await repository.resolvePaymentRequest(paymentRequest.id, 'approved', independentActorTelegramId, 30)).applied, false);
+
+    const premiumRequest = await repository.createPaymentRequestForUser(crypto.randomUUID(), username, 'premium_voice');
+    assert.equal((await repository.listPaymentRequests({ product: 'premium_voice', status: 'new' })).some((request) => request.id === premiumRequest.id), true);
+    await assert.rejects(
+      repository.resolvePaymentRequest(premiumRequest.id, 'approved', telegramId, 30),
+      /PAYMENT_SELF_APPROVAL_FORBIDDEN/u,
+    );
+    const premiumNow = new Date();
+    const premiumApproval = await repository.resolvePaymentRequest(premiumRequest.id, 'approved', independentActorTelegramId, 30, { now: premiumNow });
+    assert.equal(premiumApproval.product, 'premium_voice');
+    assert.equal((await repository.getVoiceTutorAccess(username, { dailySeconds: 600, monthlySeconds: 7_200, sessionSeconds: 300 }, premiumNow)).entitlements.voice_tutor, true);
+    assert.equal(await repository.revokeEntitlement(username, 'voice_tutor', independentActorTelegramId, { now: premiumNow }), false);
+    assert.equal(await repository.revokeEntitlement(username, 'voice_tutor', independentActorTelegramId, { now: new Date(premiumNow.getTime() + 1) }), true);
+    assert.equal(await repository.revokeEntitlement(username, 'voice_tutor', independentActorTelegramId, { now: new Date(premiumNow.getTime() + 1) }), false);
 
     const sessionId = crypto.randomUUID();
     await repository.createSession(sessionId, username, Date.now() + 60_000);
@@ -163,6 +180,16 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     const taskHash = crypto.createHash('sha256').update(suffix).digest('hex');
     await repository.saveGeneratedTask(username, { operation: 'grammar_quiz', requestHash: taskHash, request: { operation: 'grammar_quiz' }, result: [{ q: suffix }], provider: 'test', promptVersion: 'content-v1' });
     assert.equal((await repository.getGeneratedTask(username, taskHash)).result[0].q, suffix);
+    const concurrentHash = crypto.createHash('sha256').update(`${suffix}:concurrent`).digest('hex');
+    const generatedBase = { operation: 'vocabulary_cards', requestHash: concurrentHash, request: { operation: 'vocabulary_cards', count: 1, exclude: [] }, promptVersion: 'content-v1' };
+    const [generatedFirstId, generatedSecondId] = await Promise.all([
+      repository.saveGeneratedTask(username, { ...generatedBase, result: [{ w: 'first' }], provider: 'first' }),
+      repository.saveGeneratedTask(username, { ...generatedBase, result: [{ w: 'second' }], provider: 'second' }),
+    ]);
+    assert.equal(generatedFirstId, generatedSecondId);
+    const concurrentStored = await repository.getGeneratedTask(username, concurrentHash);
+    assert.ok(['first', 'second'].includes(concurrentStored.result[0].w));
+    assert.equal(concurrentStored.provider, concurrentStored.result[0].w);
     const moduleAttemptId = crypto.randomUUID();
     assert.equal((await repository.recordModuleAttempt(username, { id: moduleAttemptId, module: 'exam', activity: 'grammar_19_24', score: 5, maxScore: 6, durationMs: 50_000, metadata: {} })).created, true);
     assert.equal((await repository.recordModuleAttempt(username, { id: moduleAttemptId, module: 'exam', activity: 'grammar_19_24', score: 5, maxScore: 6, durationMs: 50_000, metadata: {} })).created, false);
@@ -306,7 +333,7 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     assert.equal(exported.writing_attempts[0].answer, 'Test full answer');
     assert.equal(exported.writing_attempts[0].evaluated_answer, 'Test evaluated answer');
     assert.equal(exported.speaking_attempts[0].model, 'integration-speaking-model');
-    assert.equal(exported.generated_tasks.length, 1);
+    assert.equal(exported.generated_tasks.length, 2);
     assert.equal(exported.module_attempts.length, 2);
     assert.equal(exported.voice_tutor_sessions.find((session) => session.id === tracerSessionId).delivery_mode, 'text');
     assert.equal(JSON.stringify(exported.voice_tutor_sessions).includes('nonce_hash'), false);

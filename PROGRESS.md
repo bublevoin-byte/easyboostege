@@ -697,6 +697,9 @@ production credentials, три доказанных P0 отмечены во в�
 | 05 | Поиск отсутствующих правил по доверенным источникам и очередь проверки | done |
 | 06 | Карта освоенных ошибок и возвращённых потенциальных баллов | done |
 | 07 | Приватность, безопасность, observability и сквозная проверка | done |
+| 08 | Premium commerce, честные квоты и полное grammar/lexicon-покрытие | done |
+| 09 | Полный discovery/text/barge-in/report педагогический цикл | pending |
+| 10 | Enforceable realtime proxy и финальная security parity | pending |
 
 Тикет 01 закрыт: base и Premium разделены правом `voice_tutor`; UTC-квоты 10/120 минут,
 идемпотентный резерв одной активной сессии, возврат остатка, экспорт/удаление и профильный UI готовы.
@@ -773,3 +776,14 @@ session.updated → runtime error → local fallback → micro-check → transfe
 Полный набор 486 (485 pass, 1 штатный PostgreSQL skip), targeted 48/48, disposable PostgreSQL 1/1,
 `lint`, `check`, frontend build, functional/performance E2E и оба secret scans проходят; платных
 вызовов и изменений staging/soak не было.
+
+Тикет 08 закрыт: базовый payment flow сохранён, Premium paywall создаёт идемпотентную заявку, а
+только admin approval в одной file/PostgreSQL mutation продлевает подписку и bounded
+`voice_tutor`; rejection/revoke/expiry видны через status и `/me`, решения имеют audit/event trail.
+Резерв сессии теперь равен минимуму session cap и положительных daily/monthly остатков, поэтому
+доступны все 600/7200 секунд без отрицательных значений. Production отклоняет blank/latest/
+unversioned `XAI_VOICE_MODEL` до provider call. Generated server catalog покрывает 218 текущих
+grammar/word-formation/collocation paths и 897 vocabulary paths; generated AI exercises связаны с
+owner-bound typed `generated_tasks`, client reference не принимается. Полный набор 494 (493 pass,
+1 штатный PostgreSQL skip), disposable PostgreSQL 1/1, `lint`, `check`, frontend build, functional
+E2E и оба secret scans проходят; платных вызовов, push, deploy и изменений staging не было.
