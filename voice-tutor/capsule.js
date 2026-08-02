@@ -450,6 +450,7 @@ export function publicVoiceTutorCapsule(capsule) {
     },
     error: { ...capsule.error },
     skill: { ...capsule.skill },
+    ...(capsule.rule_card_id ? { rule_card_id: capsule.rule_card_id } : {}),
     rule: { ...capsule.rule, examples: [...capsule.rule.examples] },
     checks: {
       micro_check: { id: capsule.checks.micro_check.id, prompt: capsule.checks.micro_check.prompt },
@@ -459,7 +460,13 @@ export function publicVoiceTutorCapsule(capsule) {
 }
 
 export function persistedVoiceTutorCapsule(capsule) {
-  const stored = structuredClone(capsule);
-  delete stored.learner_answer;
-  return stored;
+  return {
+    schema: 'voice-tutor-reference-v1',
+    id: capsule.id,
+    version: capsule.version,
+    source: structuredClone(capsule.source),
+    module: capsule.module,
+    skill_id: capsule.skill.id,
+    ...(capsule.rule_card_id ? { rule_card_id: capsule.rule_card_id } : {}),
+  };
 }

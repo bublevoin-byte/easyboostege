@@ -10,11 +10,12 @@
 | `subscriptions` | текущее состояние доступа | `username`, status, source, start/end timestamps |
 | `subscription_events` | неизменяемая история выдачи и изменения тарифа | username, event type, bounded metadata and timestamp |
 | `subscription_entitlements` | отдельные тарифные права Premium | `username`, entitlement, start/end timestamps |
-| `voice_tutor_sessions` | голосовая квота и структурированный ход разбора без аудио и полного transcript | bounded capsule, delivery/state/outcome, micro-check/transfer flags, reserved/billable seconds and timestamps |
+| `voice_tutor_sessions` | голосовая квота и структурированный ход разбора без аудио и полного transcript | minimized capsule reference, delivery/state/outcome, discovery claim, clarification/micro-check counters, reserved/billable seconds and timestamps |
 | `voice_tutor_recoveries` | server-validated результат педагогического FSM по навыку | session/skill/rule ids, bounded state flags, module, potential-points mapping and timestamp; no learner text |
 | `voice_tutor_repeats` | server-owned интервалы переноса навыка | distinct task id, UTC day-1/day-7 due/window and supersession state |
 | `voice_tutor_repeat_attempts` | одна проверенная попытка нового аналога | opaque attempt/repeat/task ids, pass flag, idempotency hash and timestamp; no submitted answer |
 | `trusted_rule_cards` | очередь найденных правил и проверенный canonical слой | bounded rule, skill/exam year, source URL/content hashes, status, discrepancies and review audit; полных страниц нет |
+| `voice_tutor_reports` | структурированная очередь сообщений ученика | owner/session/rule IDs, enum reason/status, timestamps and review audit; no learner text/audio/transcript |
 | `payment_requests` | ручные заявки на базовый или Premium Voice тариф | product, status, administrator, result and resolution time |
 | `user_progress` | JSONB-прогресс пользователя | `username`, `data`, `updated_at` |
 | `telegram_auth_codes` | одноразовые коды входа | hash кода, expiry, consumed state |
@@ -26,7 +27,7 @@
 | `word_progress` | состояние интервального повторения слов | word, stage, errors, reviews and due time |
 | `error_bank` | агрегированный банк учебных ошибок | module, item key, type, bounded details and occurrence count |
 | `audit_log` | неизменяемый журнал административных действий | actor, action, target, result and bounded metadata |
-| `ai_requests` | технический журнал ИИ | operation, provider, model, duration, status, error code, tokens, estimated cost |
+| `ai_requests` | технический журнал ИИ и durable paid-operation slots | operation, claim key/state, provider, model, duration, status, error code, tokens, estimated cost |
 
 Связи привязаны к `users.username`; API всегда определяет пользователя из HttpOnly-сессии. Изменения схемы добавляются новой нумерованной миграцией и проверяются `npm run db:migrate`.
 
@@ -141,3 +142,19 @@ test-only URL сам. В блоке `finally` выполняется `docker com
 задан: он остаётся доступен в окружениях без Docker. Обязательный PostgreSQL gate локально и в CI —
 именно `npm run test:postgres`: Docker использует локальный `postgres:17-alpine` или автоматически
 загружает его на чистой машине.
+
+Миграция `027_voice_tutor_pedagogical_loop.sql` заменяет прежний полный session capsule на
+`voice-tutor-reference-*` (IDs/version/source/skill/hash), добавляет bounded
+`clarification_turns` и `voice_tutor_reports`. Report содержит только owner/session/rule UUID,
+enum reason/status, timestamps и review audit. PostgreSQL create+bind provisional rule выполняет
+`SELECT ... FOR UPDATE`, insert card и update capsule/FSM в одной транзакции; file repository
+сериализует тот же участок двумя mutation queues. Source attempts остаются единственным местом
+учебного ответа, а canonical catalog/review заново строят transient capsule на каждом event.
+
+Миграция `028_voice_tutor_discovery_claims.sql` удаляет из всех прежних session capsules
+`content_hash`: persisted reference больше не содержит fingerprint, производный от ответа ученика.
+Она также добавляет owner-bound discovery claim/status и durable `ai_requests.claim_key`. Внешний
+поиск или extraction начинается только после атомарного `in_progress` slot; terminal
+`completed|failed` settlement идемпотентен, а неуспешный вызов остаётся наблюдаемым и консервативно
+учитывается в лимите. PostgreSQL mutations берут блокировки в порядке user → voice session/card,
+совпадающем с удалением аккаунта; file repository сериализует тот же контракт.

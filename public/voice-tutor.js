@@ -157,11 +157,20 @@ function ensureSheet() {
     <form id="voiceTutorAnswer" class="vtAnswer"><input id="voiceTutorInput" maxlength="200" aria-label="Ответ репетитору" autocomplete="off"><button type="submit">Продолжить</button></form>
     <button id="voiceTutorFinish" class="vtFinish" type="button">Завершить и вернуться в упражнение</button></section>`;
   document.body.appendChild(sheet);
+  style.textContent += '.vtQuick,.vtReport{display:flex;gap:8px;margin-top:9px}.vtQuick button,.vtReport button{min-height:44px;border:0;border-radius:15px;padding:0 12px;font-weight:800;cursor:pointer}.vtQuick button{flex:1;background:#FFF1E9;color:#9A431F}.vtReport select{min-width:0;flex:1;border:1px solid #DDD7D0;border-radius:15px;padding:0 10px}.vtReport button{background:#F1F2F4;color:#3F444B}';
+  const ticketActions = document.createElement('div');
+  ticketActions.innerHTML = `<div class="vtQuick"><button id="voiceTutorClarify" type="button">Уточнить вопросом</button><button id="voiceTutorExplainDifferently" type="button">Объясни иначе</button></div>
+    <div class="vtReport"><select id="voiceTutorReportReason" aria-label="Причина сообщения"><option value="incorrect_rule">Неверное правило</option><option value="unclear_explanation">Непонятное объяснение</option><option value="bad_example">Неудачный пример</option><option value="technical_issue">Техническая проблема</option></select><button id="voiceTutorReport" type="button">Сообщить</button></div>`;
+  const finishButton = document.getElementById('voiceTutorFinish');
+  finishButton?.parentNode?.insertBefore(ticketActions, finishButton);
   sheet.querySelector('.vtBackdrop').addEventListener('click', finishVoiceTutor);
   document.getElementById('voiceTutorClose').addEventListener('click', finishVoiceTutor);
   document.getElementById('voiceTutorFinish').addEventListener('click', finishVoiceTutor);
   document.getElementById('voiceTutorMic').addEventListener('click', toggleMicrophone);
   document.getElementById('voiceTutorAnswer').addEventListener('submit', submitTutorStep);
+  document.getElementById('voiceTutorClarify').addEventListener('click', submitClarification);
+  document.getElementById('voiceTutorExplainDifferently').addEventListener('click', explainDifferently);
+  document.getElementById('voiceTutorReport').addEventListener('click', submitTutorReport);
   sheet.addEventListener('keydown', trapSheetFocus);
 }
 
@@ -212,6 +221,8 @@ function renderSession(result) {
   const terminal = ['resolved', 'fallback', 'ended'].includes(currentSession.session.state);
   const form = browser.document.getElementById('voiceTutorAnswer');
   if (form) form.style.display = terminal ? 'none' : 'flex';
+  const quick = browser.document.querySelector?.('.vtQuick');
+  if (quick) quick.style.display = currentSession.mode === 'text' && ['diagnose', 'explain'].includes(currentSession.session.state) ? 'flex' : 'none';
 }
 
 function renderTrustedRuleDiscovery(result) {
@@ -245,7 +256,10 @@ function renderTrustedRuleDiscovery(result) {
 
 async function discoverMissingRule(result) {
   text('voiceTutorState', 'Ищем правило в доверенных источниках…');
-  const provisional = await api().post('/api/v1/voice-tutor/rule-discoveries', { session_id: result.session.id });
+  const provisional = await api().post('/api/v1/voice-tutor/rule-discoveries', {
+    session_id: result.session.id, nonce: result.nonce,
+  });
+  if (provisional.capsule) renderSession({ ...provisional, mode: currentSession.mode });
   renderTrustedRuleDiscovery(provisional);
   return provisional;
 }
@@ -344,6 +358,36 @@ async function submitTutorStep(event) {
   } catch (error) {
     text('voiceTutorState', api().messageFor(error));
   }
+}
+
+async function requestClarification(kind, message = '') {
+  if (!currentSession?.nonce) return;
+  const result = await api().post(`/api/v1/voice-tutor/sessions/${currentSession.session.id}/clarifications`, {
+    nonce: currentSession.nonce, kind, ...(message ? { message } : {}),
+  });
+  renderSession(result);
+}
+
+async function submitClarification() {
+  const input = browser.document.getElementById('voiceTutorInput');
+  const message = String(input?.value || '').trim();
+  if (!message) { text('voiceTutorState', 'Введите короткий вопрос по текущему правилу.'); return; }
+  try { await requestClarification('clarify', message); if (input) input.value = ''; }
+  catch (error) { text('voiceTutorState', api().messageFor(error)); }
+}
+
+async function explainDifferently() {
+  try { await requestClarification('explain_differently'); }
+  catch (error) { text('voiceTutorState', api().messageFor(error)); }
+}
+
+async function submitTutorReport() {
+  const reason = browser.document.getElementById('voiceTutorReportReason')?.value;
+  if (!currentSession?.session?.id || !reason) return;
+  try {
+    await api().post('/api/v1/voice-tutor/reports', { session_id: currentSession.session.id, reason });
+    text('voiceTutorState', 'Спасибо. Сообщение отправлено на проверку преподавателю.');
+  } catch (error) { text('voiceTutorState', api().messageFor(error)); }
 }
 
 async function advanceTutorSession(tutorEvent) {

@@ -95,6 +95,17 @@ test('a discovery-required session requests and renders provisional trusted sour
   assert.doesNotMatch(source, /sourceLink\.innerHTML/u);
 });
 
+test('the shared sheet exposes bounded transient clarification and structured learner reports only', () => {
+  assert.match(source, /\/clarifications/u);
+  assert.match(source, /explain_differently/u);
+  assert.match(source, /voiceTutorExplainDifferently/u);
+  assert.match(source, /\/api\/v1\/voice-tutor\/reports/u);
+  for (const reason of ['incorrect_rule', 'unclear_explanation', 'bad_example', 'technical_issue']) {
+    assert.match(source, new RegExp(reason, 'u'));
+  }
+  assert.doesNotMatch(source, /reports[\s\S]{0,180}(?:message|comment|details):/u);
+});
+
 test('reading and listening result screens register completed canonical sets before mounting the shared bottom-sheet trigger', () => {
   assert.match(readingSource, /import \{prepareVoiceTutorContextResult,registerVoiceTutorContextResult\} from '\.\.\/voice-tutor\.js'/u);
   assert.match(readingSource, /reading\.gap-year\.before-university/u);

@@ -37,6 +37,15 @@ function mapRuleCard(row) {
   };
 }
 
+function mapVoiceTutorReport(row) {
+  if (!row) return null;
+  return {
+    id: row.id, username: row.username, session_id: row.session_id, rule_card_id: row.rule_card_id || null,
+    reason: row.reason, status: row.status, review_audit: row.review_audit || [],
+    created_at: row.created_at, reviewed_at: row.reviewed_at,
+  };
+}
+
 export function createPostgresRepository(connectionString) {
   if (!connectionString) throw new Error('DATABASE_URL is required for PostgreSQL storage');
   const pool = new Pool({ connectionString });
@@ -522,7 +531,8 @@ export function createPostgresRepository(connectionString) {
     const result = await pool.query(
       `SELECT id, username, status, reserved_seconds, billable_seconds, capsule_id, capsule, nonce_hash,
               delivery_mode, pedagogical_state, micro_check_passed, micro_check_attempts, micro_check_passes,
-              transfer_passed, outcome, error_code, provider, model, prompt_version,
+              transfer_passed, outcome, clarification_turns, error_code, provider, model, prompt_version,
+              discovery_status, discovery_claim_id, discovery_error_code,
               started_at, voice_activated_at, expires_at, ended_at
        FROM voice_tutor_sessions WHERE username = $1 AND id = $2`,
       [username, sessionId],
@@ -566,7 +576,7 @@ export function createPostgresRepository(connectionString) {
     }
   }
 
-  async function advanceVoiceTutorSession(username, sessionId, { nonceHash, nextNonceHash, event, now = new Date() }) {
+  async function advanceVoiceTutorSession(username, sessionId, { nonceHash, nextNonceHash, event, capsule = null, now = new Date() }) {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -581,12 +591,16 @@ export function createPostgresRepository(connectionString) {
         throw new VoiceTutorError('VOICE_TUTOR_SESSION_EXPIRED');
       }
       if (!row.nonce_hash || row.nonce_hash !== nonceHash) throw new VoiceTutorError('VOICE_TUTOR_NONCE_REPLAYED');
+      const transientCapsule = capsule || row.capsule;
+      if (transientCapsule.id !== row.capsule.id || transientCapsule.version !== row.capsule.version) {
+        throw new VoiceTutorError('VOICE_TUTOR_REVISION_MISMATCH');
+      }
       const next = transitionPedagogicalState({
         state: row.pedagogical_state,
         micro_check_passed: row.micro_check_passed,
         transfer_passed: row.transfer_passed,
         outcome: row.outcome,
-      }, event, row.capsule);
+      }, event, transientCapsule);
       const updated = await client.query(
         `UPDATE voice_tutor_sessions SET pedagogical_state = $3, micro_check_passed = $4,
            transfer_passed = $5, outcome = $6, nonce_hash = $7, updated_at = $8,
@@ -602,7 +616,7 @@ export function createPostgresRepository(connectionString) {
           ledger: createRecoveryLedger(await readRecoveryRows(client, username)),
           username,
           sessionId,
-          capsule: row.capsule,
+          capsule: transientCapsule,
           pedagogicalState: next,
           observedAt: now,
         });
@@ -644,6 +658,41 @@ export function createPostgresRepository(connectionString) {
     } finally {
       client.release();
     }
+  }
+
+  async function clarifyVoiceTutorSession(username, sessionId, { nonceHash, nextNonceHash, now = new Date() }) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const selected = await client.query(
+        `SELECT capsule, nonce_hash, clarification_turns, delivery_mode, pedagogical_state
+         FROM voice_tutor_sessions WHERE username = $1 AND id = $2 FOR UPDATE`,
+        [username, sessionId],
+      );
+      const row = selected.rows[0];
+      if (!row?.capsule) throw new VoiceTutorError('VOICE_TUTOR_SESSION_NOT_FOUND');
+      if (row.delivery_mode !== 'text' || !['diagnose', 'explain'].includes(row.pedagogical_state)) {
+        throw new VoiceTutorError('VOICE_TUTOR_TRANSITION_INVALID');
+      }
+      if (!row.nonce_hash || row.nonce_hash !== nonceHash) throw new VoiceTutorError('VOICE_TUTOR_NONCE_REPLAYED');
+      if (Number(row.clarification_turns || 0) >= 3) throw new VoiceTutorError('VOICE_TUTOR_CLARIFICATION_LIMIT');
+      const updated = await client.query(
+        `UPDATE voice_tutor_sessions SET clarification_turns = clarification_turns + 1,
+           nonce_hash = $3, updated_at = $4
+         WHERE username = $1 AND id = $2
+         RETURNING id, status, pedagogical_state, micro_check_passed, transfer_passed, outcome,
+                   clarification_turns, started_at, expires_at, ended_at`,
+        [username, sessionId, nextNonceHash, new Date(now)],
+      );
+      await client.query('COMMIT');
+      return {
+        session: mapVoiceTutorSession(updated.rows[0]), capsule: row.capsule,
+        clarification_turns: Number(updated.rows[0].clarification_turns),
+      };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
   }
 
   function mapRecovery(row) {
@@ -853,6 +902,120 @@ export function createPostgresRepository(connectionString) {
     }
   }
 
+  async function claimVoiceTutorRuleDiscovery(username, sessionId, { claimId, nonceHash, now = new Date() }) {
+    const client = await pool.connect();
+    const instant = new Date(now);
+    try {
+      await client.query('BEGIN');
+      const owner = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+      if (!owner.rowCount) throw new Error('USER_NOT_FOUND');
+      const selected = await client.query(
+        `SELECT status, pedagogical_state, expires_at, capsule, nonce_hash,
+                discovery_status, discovery_claim_id
+         FROM voice_tutor_sessions WHERE username = $1 AND id = $2 FOR UPDATE`,
+        [username, sessionId],
+      );
+      const session = selected.rows[0];
+      if (!session?.capsule) throw new VoiceTutorError('VOICE_TUTOR_SESSION_NOT_FOUND');
+      if (session.discovery_status === 'in_progress') throw new VoiceTutorError('TRUSTED_RULE_DISCOVERY_IN_PROGRESS');
+      if (session.status !== 'active' || session.pedagogical_state !== 'diagnose'
+        || new Date(session.expires_at).getTime() <= instant.getTime() || session.capsule.rule_card_id) {
+        throw new VoiceTutorError('TRUSTED_RULE_DISCOVERY_NOT_REQUIRED');
+      }
+      if (!session.nonce_hash || session.nonce_hash !== nonceHash) throw new VoiceTutorError('VOICE_TUTOR_NONCE_REPLAYED');
+      await client.query(
+        `UPDATE voice_tutor_sessions
+         SET discovery_status = 'in_progress', discovery_claim_id = $3,
+             discovery_error_code = NULL, updated_at = $4
+         WHERE username = $1 AND id = $2`,
+        [username, sessionId, claimId, instant],
+      );
+      await client.query('COMMIT');
+      return { claim_id: claimId, capsule: session.capsule, state: session.pedagogical_state };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async function failVoiceTutorRuleDiscovery(username, sessionId, { claimId, errorCode, now = new Date() }) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const owner = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+      if (!owner.rowCount) {
+        await client.query('COMMIT');
+        return false;
+      }
+      const updated = await client.query(
+        `UPDATE voice_tutor_sessions
+         SET discovery_status = 'failed', discovery_claim_id = NULL,
+             discovery_error_code = $4, updated_at = $5
+         WHERE username = $1 AND id = $2
+           AND discovery_status = 'in_progress' AND discovery_claim_id = $3`,
+        [username, sessionId, claimId, String(errorCode || 'TRUSTED_RULE_SEARCH_FAILED').slice(0, 80), new Date(now)],
+      );
+      await client.query('COMMIT');
+      return Boolean(updated.rowCount);
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async function createRuleCardForVoiceTutorSession(username, sessionId, expectedCapsuleId, card, {
+    claimId, expectedNonceHash, nextNonceHash,
+  } = {}) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const owner = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+      if (!owner.rowCount) throw new Error('USER_NOT_FOUND');
+      const session = await client.query(
+        `SELECT status, pedagogical_state, capsule_id, capsule, nonce_hash,
+                discovery_status, discovery_claim_id
+         FROM voice_tutor_sessions
+         WHERE username = $1 AND id = $2 FOR UPDATE`,
+        [username, sessionId],
+      );
+      const stored = session.rows[0];
+      if (!stored?.capsule || stored.status !== 'active' || stored.pedagogical_state !== 'diagnose'
+        || stored.capsule_id !== expectedCapsuleId || stored.capsule.rule_card_id
+        || stored.capsule.skill_id !== card.skill.id || stored.discovery_status !== 'in_progress'
+        || stored.discovery_claim_id !== claimId || !stored.nonce_hash || stored.nonce_hash !== expectedNonceHash) {
+        throw new VoiceTutorError('TRUSTED_RULE_DISCOVERY_NOT_REQUIRED');
+      }
+      const result = await client.query(
+        `INSERT INTO trusted_rule_cards
+         (id, created_for_username, status, skill_id, skill_title, exam_year, rule_content,
+          agreement_hash, sources, discrepancies, created_at)
+         VALUES ($1, $2, 'pending_review', $3, $4, $5, $6::jsonb, $7, $8::jsonb, $9::jsonb, $10)
+         RETURNING *`,
+        [card.id, username, card.skill.id, card.skill.title, card.examYear, JSON.stringify(card.rule),
+          card.agreementHash, JSON.stringify(card.sources), JSON.stringify(card.discrepancies || []), card.createdAt],
+      );
+      await client.query(
+        `UPDATE voice_tutor_sessions
+         SET capsule = capsule || jsonb_build_object('rule_card_id', $3::text),
+             pedagogical_state = 'explain', nonce_hash = $4,
+             discovery_status = 'completed', discovery_claim_id = NULL,
+             discovery_error_code = NULL, updated_at = $5
+         WHERE username = $1 AND id = $2`,
+        [username, sessionId, card.id, nextNonceHash, card.createdAt],
+      );
+      await client.query('COMMIT');
+      return mapRuleCard(result.rows[0]);
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async function getRuleCard(cardId) {
+    const result = await pool.query('SELECT * FROM trusted_rule_cards WHERE id = $1', [cardId]);
+    return mapRuleCard(result.rows[0]);
+  }
+
   async function listRuleCards({ status = 'pending_review' } = {}) {
     const result = status
       ? await pool.query('SELECT * FROM trusted_rule_cards WHERE status = $1 ORDER BY created_at LIMIT 100', [status])
@@ -891,6 +1054,65 @@ export function createPostgresRepository(connectionString) {
       [skillId, Number(examYear)],
     );
     return mapRuleCard(result.rows[0]);
+  }
+
+  async function createVoiceTutorReport(username, report) {
+    const result = await pool.query(
+      `INSERT INTO voice_tutor_reports (id, username, session_id, rule_card_id, reason, created_at)
+       SELECT $1, session.username, session.id, NULLIF(session.capsule->>'rule_card_id', '')::uuid, $4, $5
+       FROM voice_tutor_sessions session
+       WHERE session.username = $2 AND session.id = $3 AND session.capsule IS NOT NULL
+       ON CONFLICT (username, session_id, reason) DO NOTHING
+       RETURNING *`,
+      [report.id, username, report.sessionId, report.reason, report.createdAt],
+    );
+    if (result.rowCount) return { created: true, report: mapVoiceTutorReport(result.rows[0]) };
+    const existing = await pool.query(
+      'SELECT * FROM voice_tutor_reports WHERE username = $1 AND session_id = $2 AND reason = $3',
+      [username, report.sessionId, report.reason],
+    );
+    if (!existing.rowCount) throw new VoiceTutorError('VOICE_TUTOR_SESSION_NOT_FOUND');
+    return { created: false, report: mapVoiceTutorReport(existing.rows[0]) };
+  }
+
+  async function listVoiceTutorReports({ status = 'pending' } = {}) {
+    const result = status
+      ? await pool.query('SELECT * FROM voice_tutor_reports WHERE status = $1 ORDER BY created_at LIMIT 100', [status])
+      : await pool.query('SELECT * FROM voice_tutor_reports ORDER BY created_at LIMIT 100');
+    return result.rows.map(mapVoiceTutorReport);
+  }
+
+  async function reviewVoiceTutorReport(reportId, { decision, reviewer, reviewedAt }) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const selected = await client.query('SELECT * FROM voice_tutor_reports WHERE id = $1 FOR UPDATE', [reportId]);
+      const report = mapVoiceTutorReport(selected.rows[0]);
+      if (!report) throw new VoiceTutorError('VOICE_TUTOR_REPORT_NOT_FOUND');
+      if (report.status !== 'pending') {
+        if (report.status !== decision) throw new VoiceTutorError('VOICE_TUTOR_REPORT_REVIEW_CONFLICT');
+        await client.query('COMMIT');
+        return { applied: false, report };
+      }
+      const audit = [...report.review_audit, { decision, reviewer, reviewed_at: new Date(reviewedAt).toISOString() }];
+      const updated = await client.query(
+        `UPDATE voice_tutor_reports SET status = $2, reviewed_at = $3, review_audit = $4::jsonb
+         WHERE id = $1 RETURNING *`,
+        [reportId, decision, reviewedAt, JSON.stringify(audit)],
+      );
+      await client.query(
+        `INSERT INTO audit_log (actor_telegram_id, action, target_type, target_id, result, metadata)
+         SELECT COALESCE(telegram_id::text, 'system'), 'voice_tutor.report.review',
+                'voice_tutor_report', $1, 'success', $2::jsonb
+         FROM users WHERE username = $3`,
+        [reportId, JSON.stringify({ reviewer, username: report.username }), reviewer],
+      );
+      await client.query('COMMIT');
+      return { applied: true, report: mapVoiceTutorReport(updated.rows[0]) };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
   }
 
   async function getPrivacyConsent(username) {
@@ -1243,6 +1465,91 @@ export function createPostgresRepository(connectionString) {
     return Number(result.rows[0].id);
   }
 
+  async function claimAiOperationSlot(username, {
+    claimId, operation, promptVersion, requestsPerHour, dailyLimit, now = new Date(),
+  }) {
+    const client = await pool.connect();
+    const instant = new Date(now);
+    const startOfDay = new Date(Date.UTC(instant.getUTCFullYear(), instant.getUTCMonth(), instant.getUTCDate()));
+    const startOfHour = new Date(instant.getTime() - 3_600_000);
+    try {
+      await client.query('BEGIN');
+      const owner = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+      if (!owner.rowCount) throw new Error('USER_NOT_FOUND');
+      const existing = await client.query(
+        'SELECT id, username, operation, status FROM ai_requests WHERE claim_key = $1',
+        [claimId],
+      );
+      if (existing.rowCount) {
+        const row = existing.rows[0];
+        if (row.username !== username || row.operation !== operation) throw new VoiceTutorError('AI_OPERATION_CLAIM_CONFLICT');
+        await client.query('COMMIT');
+        return { claim_id: claimId, id: Number(row.id), status: row.status };
+      }
+      if (!Number.isInteger(dailyLimit) || dailyLimit < 1 || !Number.isInteger(requestsPerHour) || requestsPerHour < 1) {
+        throw new VoiceTutorError('AI_OPERATION_CLAIM_INVALID');
+      }
+      await client.query('SELECT pg_advisory_xact_lock($1)', [824_209_028]);
+      const daily = await client.query('SELECT COUNT(*)::int AS count FROM ai_requests WHERE created_at >= $1', [startOfDay]);
+      if (Number(daily.rows[0].count) >= dailyLimit) throw new VoiceTutorError('AI_BUDGET_EXHAUSTED');
+      const hourly = await client.query(
+        'SELECT COUNT(*)::int AS count FROM ai_requests WHERE username = $1 AND operation = $2 AND created_at >= $3',
+        [username, operation, startOfHour],
+      );
+      if (Number(hourly.rows[0].count) >= requestsPerHour) throw new VoiceTutorError('RATE_LIMITED');
+      const inserted = await client.query(
+        `INSERT INTO ai_requests
+         (username, operation, prompt_version, status, claim_key, created_at)
+         VALUES ($1, $2, $3, 'in_progress', $4, $5)
+         RETURNING id, status`,
+        [username, operation, promptVersion || null, claimId, instant],
+      );
+      await client.query('COMMIT');
+      return { claim_id: claimId, id: Number(inserted.rows[0].id), status: inserted.rows[0].status };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async function settleAiOperationSlot(username, claimId, {
+    status, provider = null, model = null, durationMs = null, errorCode = null,
+    promptTokens = null, completionTokens = null, now = new Date(),
+  }) {
+    if (!['completed', 'failed'].includes(status)) throw new VoiceTutorError('AI_OPERATION_SETTLEMENT_INVALID');
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const owner = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+      if (!owner.rowCount) throw new Error('USER_NOT_FOUND');
+      const selected = await client.query(
+        'SELECT id, status FROM ai_requests WHERE username = $1 AND claim_key = $2 FOR UPDATE',
+        [username, claimId],
+      );
+      if (!selected.rowCount) throw new VoiceTutorError('AI_OPERATION_CLAIM_NOT_FOUND');
+      if (selected.rows[0].status !== 'in_progress') {
+        await client.query('COMMIT');
+        return { applied: false, status: selected.rows[0].status };
+      }
+      const updated = await client.query(
+        `UPDATE ai_requests
+         SET status = $3, provider = $4, model = $5, duration_ms = $6,
+             error_code = $7, prompt_tokens = $8, completion_tokens = $9, settled_at = $10
+         WHERE username = $1 AND claim_key = $2
+         RETURNING status`,
+        [username, claimId, status, provider, model,
+          Number.isFinite(durationMs) ? Math.max(0, Math.round(durationMs)) : null,
+          errorCode, Number.isFinite(promptTokens) ? Math.max(0, Math.round(promptTokens)) : null,
+          Number.isFinite(completionTokens) ? Math.max(0, Math.round(completionTokens)) : null, new Date(now)],
+      );
+      await client.query('COMMIT');
+      return { applied: true, status: updated.rows[0].status };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
   async function countAiRequestsSince(since) {
     const result = await pool.query('SELECT COUNT(*)::int AS count FROM ai_requests WHERE created_at >= $1', [since]);
     return Number(result.rows[0].count);
@@ -1304,7 +1611,7 @@ export function createPostgresRepository(connectionString) {
   }
 
   async function exportUserData(username) {
-    const [account, progress, privacyConsent, subscriptionEvents, subscriptionEntitlements, voiceTutorSessions, voiceTutorRecoveries, voiceTutorRepeats, voiceTutorRepeatAttempts, ruleCards, paymentRequests, writingAttempts, speakingAttempts, generatedTasks, moduleAttempts, progressSummary, wordProgress, errorBank, aiRequests, auditLog] = await Promise.all([
+    const [account, progress, privacyConsent, subscriptionEvents, subscriptionEntitlements, voiceTutorSessions, voiceTutorRecoveries, voiceTutorRepeats, voiceTutorRepeatAttempts, voiceTutorReports, ruleCards, paymentRequests, writingAttempts, speakingAttempts, generatedTasks, moduleAttempts, progressSummary, wordProgress, errorBank, aiRequests, auditLog] = await Promise.all([
       pool.query('SELECT username, telegram_id, role, trial_used, subscription_until, created_at, updated_at FROM users WHERE username = $1', [username]),
       pool.query('SELECT data, updated_at FROM user_progress WHERE username = $1', [username]),
       pool.query('SELECT text_processing, voice_processing, policy_version, text_consented_at, voice_consented_at, updated_at FROM privacy_consents WHERE username = $1', [username]),
@@ -1312,7 +1619,7 @@ export function createPostgresRepository(connectionString) {
       pool.query('SELECT entitlement, starts_at, ends_at, created_at, updated_at FROM subscription_entitlements WHERE username = $1 ORDER BY entitlement', [username]),
       pool.query(`SELECT id, status, reserved_seconds, billable_seconds, capsule_id, capsule, delivery_mode,
                          pedagogical_state, micro_check_passed, micro_check_attempts, micro_check_passes,
-                         transfer_passed, outcome, error_code, provider, model, prompt_version,
+                         transfer_passed, outcome, clarification_turns, error_code, provider, model, prompt_version,
                          started_at, voice_activated_at, expires_at, ended_at, updated_at
                   FROM voice_tutor_sessions WHERE username = $1 ORDER BY started_at`, [username]),
       pool.query(`SELECT id, session_id, skill_id, skill_label, module, rule_id, origin_item_id,
@@ -1329,6 +1636,8 @@ export function createPostgresRepository(connectionString) {
                   JOIN voice_tutor_repeats repeat ON repeat.id = attempt.repeat_id
                   JOIN voice_tutor_recoveries recovery ON recovery.id = repeat.recovery_id
                   WHERE recovery.username = $1 ORDER BY attempt.observed_at`, [username]),
+      pool.query(`SELECT id, session_id, rule_card_id, reason, status, review_audit, created_at, reviewed_at
+                  FROM voice_tutor_reports WHERE username = $1 ORDER BY created_at`, [username]),
       pool.query('SELECT * FROM trusted_rule_cards WHERE created_for_username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, product, status, actor_telegram_id, result, created_at, resolved_at FROM payment_requests WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, task_type, assignment, answer, evaluated_answer, review, provider, model, prompt_version, status, error_code, created_at, evaluated_at FROM writing_attempts WHERE username = $1 ORDER BY created_at', [username]),
@@ -1353,6 +1662,7 @@ export function createPostgresRepository(connectionString) {
       voice_tutor_recoveries: voiceTutorRecoveries.rows,
       voice_tutor_repeats: voiceTutorRepeats.rows,
       voice_tutor_repeat_attempts: voiceTutorRepeatAttempts.rows,
+      voice_tutor_reports: voiceTutorReports.rows,
       rule_cards: ruleCards.rows.map(mapRuleCard),
       payment_requests: paymentRequests.rows,
       writing_attempts: writingAttempts.rows,
@@ -1389,10 +1699,23 @@ export function createPostgresRepository(connectionString) {
           : entry);
         await client.query('UPDATE trusted_rule_cards SET review_audit = $2::jsonb WHERE id = $1', [card.id, JSON.stringify(audit)]);
       }
+      const reviewedReports = await client.query("SELECT id, review_audit FROM voice_tutor_reports WHERE review_audit @> $1::jsonb", [JSON.stringify([{ reviewer: username }])]);
+      for (const report of reviewedReports.rows) {
+        const audit = report.review_audit.map((entry) => entry.reviewer === username
+          ? { ...entry, reviewer: null, account_deleted: true }
+          : entry);
+        await client.query('UPDATE voice_tutor_reports SET review_audit = $2::jsonb WHERE id = $1', [report.id, JSON.stringify(audit)]);
+      }
       await client.query(
         `UPDATE audit_log
          SET metadata = (metadata - 'username') || '{"account_deleted":true}'::jsonb
          WHERE metadata->>'username' = $1`,
+        [username],
+      );
+      await client.query(
+        `UPDATE audit_log
+         SET metadata = (metadata - 'reviewer') || '{"reviewer_account_deleted":true}'::jsonb
+         WHERE metadata->>'reviewer' = $1`,
         [username],
       );
       const deleted = await client.query('DELETE FROM users WHERE username = $1 RETURNING username', [username]);
@@ -1437,15 +1760,23 @@ export function createPostgresRepository(connectionString) {
     getVoiceTutorSession,
     activateVoiceTutorSession,
     advanceVoiceTutorSession,
+    clarifyVoiceTutorSession,
     setVoiceTutorSessionDelivery,
     switchVoiceTutorSessionDelivery,
     submitVoiceTutorRepeat,
     getVoiceTutorRecoveryMap,
     getVoiceTutorRecoveryMetrics,
     createRuleCard,
+    claimVoiceTutorRuleDiscovery,
+    failVoiceTutorRuleDiscovery,
+    createRuleCardForVoiceTutorSession,
+    getRuleCard,
     listRuleCards,
     reviewRuleCard,
     getApprovedRuleCard,
+    createVoiceTutorReport,
+    listVoiceTutorReports,
+    reviewVoiceTutorReport,
     setUserRole,
     getPrivacyConsent,
     setPrivacyConsent,
@@ -1472,6 +1803,8 @@ export function createPostgresRepository(connectionString) {
     upsertWordProgress,
     upsertErrorBank,
     logAiRequest,
+    claimAiOperationSlot,
+    settleAiOperationSlot,
     countAiRequestsSince,
     countAiOperationRequestsSince,
     getAiUsageMetrics,

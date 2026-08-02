@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { hashAuthCode, normalizeUsername, normalizeVoiceTutorDeliveryMetadata, subscriptionView, VoiceTutorError, voiceTutorAccessView, voiceTutorBillableSeconds, voiceTutorQuotaPeriods, voiceTutorReservationSeconds } from './shared.js';
@@ -16,9 +17,27 @@ function normalizeWritingAttempts(attempts) {
   }));
 }
 
+function minimizeLegacyVoiceTutorCapsule(capsule) {
+  if (!capsule || typeof capsule !== 'object' || Array.isArray(capsule)) return capsule;
+  const referenceSchema = ['voice-tutor-reference-v1', 'voice-tutor-reference-legacy-v1'].includes(capsule.schema)
+    ? capsule.schema
+    : 'voice-tutor-reference-legacy-v1';
+  const ruleId = capsule.rule_id ?? capsule.rule?.id;
+  return {
+    schema: referenceSchema,
+    id: capsule.id,
+    version: capsule.version,
+    source: structuredClone(capsule.source),
+    module: capsule.module,
+    skill_id: capsule.skill_id ?? capsule.skill?.id,
+    ...(ruleId ? { rule_id: ruleId } : {}),
+    ...(capsule.rule_card_id ? { rule_card_id: capsule.rule_card_id } : {}),
+  };
+}
+
 export function createFileRepository(filePath) {
   let loaded = false;
-  let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, subscription_entitlements: {}, voice_tutor_sessions: [], voice_tutor_recoveries: [], voice_tutor_repeats: [], voice_tutor_repeat_attempts: [], rule_cards: [], payment_requests: {}, subscription_events: [] };
+  let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, subscription_entitlements: {}, voice_tutor_sessions: [], voice_tutor_recoveries: [], voice_tutor_repeats: [], voice_tutor_repeat_attempts: [], voice_tutor_reports: [], rule_cards: [], payment_requests: {}, subscription_events: [] };
   let writeQueue = Promise.resolve();
   let voiceTutorQueue = Promise.resolve();
   let paymentQueue = Promise.resolve();
@@ -30,6 +49,7 @@ export function createFileRepository(filePath) {
     try {
       const parsed = JSON.parse(await fs.readFile(filePath, 'utf8'));
       if (parsed && typeof parsed === 'object') {
+        let minimizedLegacyCapsule = false;
         state = {
           users: parsed.users && typeof parsed.users === 'object' ? parsed.users : {},
           progress: parsed.progress && typeof parsed.progress === 'object' ? parsed.progress : {},
@@ -48,19 +68,29 @@ export function createFileRepository(filePath) {
           sessions: parsed.sessions && typeof parsed.sessions === 'object' ? parsed.sessions : {},
           subscriptions: parsed.subscriptions && typeof parsed.subscriptions === 'object' ? parsed.subscriptions : {},
           subscription_entitlements: parsed.subscription_entitlements && typeof parsed.subscription_entitlements === 'object' ? parsed.subscription_entitlements : {},
-          voice_tutor_sessions: Array.isArray(parsed.voice_tutor_sessions) ? parsed.voice_tutor_sessions.map((session) => ({
-            ...session,
-            voice_activated_at: session.voice_activated_at ?? null,
-            micro_check_attempts: Number(session.micro_check_attempts || 0),
-            micro_check_passes: Number(session.micro_check_passes || 0),
-          })) : [],
+          voice_tutor_sessions: Array.isArray(parsed.voice_tutor_sessions) ? parsed.voice_tutor_sessions.map((session) => {
+            const capsule = minimizeLegacyVoiceTutorCapsule(session.capsule);
+            if (capsule !== session.capsule) minimizedLegacyCapsule = true;
+            return {
+              ...session, capsule,
+              voice_activated_at: session.voice_activated_at ?? null,
+              micro_check_attempts: Number(session.micro_check_attempts || 0),
+              micro_check_passes: Number(session.micro_check_passes || 0),
+              clarification_turns: Number(session.clarification_turns || 0),
+              discovery_status: session.discovery_status ?? null,
+              discovery_claim_id: session.discovery_claim_id ?? null,
+              discovery_error_code: session.discovery_error_code ?? null,
+            };
+          }) : [],
           voice_tutor_recoveries: Array.isArray(parsed.voice_tutor_recoveries) ? parsed.voice_tutor_recoveries : [],
           voice_tutor_repeats: Array.isArray(parsed.voice_tutor_repeats) ? parsed.voice_tutor_repeats : [],
           voice_tutor_repeat_attempts: Array.isArray(parsed.voice_tutor_repeat_attempts) ? parsed.voice_tutor_repeat_attempts : [],
+          voice_tutor_reports: Array.isArray(parsed.voice_tutor_reports) ? parsed.voice_tutor_reports : [],
           rule_cards: Array.isArray(parsed.rule_cards) ? parsed.rule_cards : [],
           payment_requests: parsed.payment_requests && typeof parsed.payment_requests === 'object' ? parsed.payment_requests : {},
           subscription_events: Array.isArray(parsed.subscription_events) ? parsed.subscription_events : [],
         };
+        if (minimizedLegacyCapsule) await persist();
       }
     } catch (error) {
       if (error.code !== 'ENOENT') throw error;
@@ -417,6 +447,7 @@ export function createFileRepository(filePath) {
           micro_check_passed: null,
           micro_check_attempts: 0,
           micro_check_passes: 0,
+          clarification_turns: 0,
           transfer_passed: null,
           outcome: null,
         } : {}),
@@ -454,7 +485,7 @@ export function createFileRepository(filePath) {
     });
   }
 
-  async function advanceVoiceTutorSession(username, sessionId, { nonceHash, nextNonceHash, event, now = new Date() }) {
+  async function advanceVoiceTutorSession(username, sessionId, { nonceHash, nextNonceHash, event, capsule = null, now = new Date() }) {
     return serializeVoiceTutorMutation(async () => {
       await load();
       const session = state.voice_tutor_sessions.find((entry) => entry.username === username && entry.id === sessionId);
@@ -463,13 +494,17 @@ export function createFileRepository(filePath) {
         throw new VoiceTutorError('VOICE_TUTOR_SESSION_EXPIRED');
       }
       if (!session.nonce_hash || session.nonce_hash !== nonceHash) throw new VoiceTutorError('VOICE_TUTOR_NONCE_REPLAYED');
+      const transientCapsule = capsule || session.capsule;
+      if (transientCapsule.id !== session.capsule_id || transientCapsule.version !== session.capsule.version) {
+        throw new VoiceTutorError('VOICE_TUTOR_REVISION_MISMATCH');
+      }
       const evaluatedMicroCheck = session.pedagogical_state === 'micro_check' && event?.type === 'check_answer';
       const next = transitionPedagogicalState({
         state: session.pedagogical_state,
         micro_check_passed: session.micro_check_passed,
         transfer_passed: session.transfer_passed,
         outcome: session.outcome,
-      }, event, session.capsule);
+      }, event, transientCapsule);
       session.pedagogical_state = next.state;
       session.micro_check_passed = next.micro_check_passed;
       session.transfer_passed = next.transfer_passed;
@@ -492,7 +527,7 @@ export function createFileRepository(filePath) {
           }),
           username,
           sessionId: session.id,
-          capsule: session.capsule,
+          capsule: transientCapsule,
           pedagogicalState: next,
           observedAt: now,
         });
@@ -507,6 +542,24 @@ export function createFileRepository(filePath) {
       }
       await persist();
       return { session: publicVoiceTutorSession(session), capsule: structuredClone(session.capsule) };
+    });
+  }
+
+  async function clarifyVoiceTutorSession(username, sessionId, { nonceHash, nextNonceHash, now = new Date() }) {
+    return serializeVoiceTutorMutation(async () => {
+      await load();
+      const session = state.voice_tutor_sessions.find((entry) => entry.username === username && entry.id === sessionId);
+      if (!session?.capsule) throw new VoiceTutorError('VOICE_TUTOR_SESSION_NOT_FOUND');
+      if (session.delivery_mode !== 'text' || !['diagnose', 'explain'].includes(session.pedagogical_state)) {
+        throw new VoiceTutorError('VOICE_TUTOR_TRANSITION_INVALID');
+      }
+      if (!session.nonce_hash || session.nonce_hash !== nonceHash) throw new VoiceTutorError('VOICE_TUTOR_NONCE_REPLAYED');
+      if (Number(session.clarification_turns || 0) >= 3) throw new VoiceTutorError('VOICE_TUTOR_CLARIFICATION_LIMIT');
+      session.clarification_turns = Number(session.clarification_turns || 0) + 1;
+      session.nonce_hash = nextNonceHash;
+      session.updated_at = new Date(now).toISOString();
+      await persist();
+      return { session: publicVoiceTutorSession(session), capsule: structuredClone(session.capsule), clarification_turns: session.clarification_turns };
     });
   }
 
@@ -687,6 +740,122 @@ export function createFileRepository(filePath) {
       state.rule_cards.push(stored);
       await persist();
       return structuredClone(stored);
+    });
+  }
+
+  async function claimVoiceTutorRuleDiscovery(username, sessionId, { claimId, nonceHash, now = new Date() }) {
+    return serializeVoiceTutorMutation(async () => {
+      await load();
+      const session = state.voice_tutor_sessions.find((entry) => entry.username === username && entry.id === sessionId);
+      if (!session?.capsule) throw new VoiceTutorError('VOICE_TUTOR_SESSION_NOT_FOUND');
+      if (session.discovery_status === 'in_progress') throw new VoiceTutorError('TRUSTED_RULE_DISCOVERY_IN_PROGRESS');
+      if (session.status !== 'active' || ['resolved', 'fallback', 'ended'].includes(session.pedagogical_state)
+        || session.pedagogical_state !== 'diagnose' || new Date(session.expires_at).getTime() <= new Date(now).getTime()
+        || session.capsule.rule_card_id) throw new VoiceTutorError('TRUSTED_RULE_DISCOVERY_NOT_REQUIRED');
+      if (!session.nonce_hash || session.nonce_hash !== nonceHash) throw new VoiceTutorError('VOICE_TUTOR_NONCE_REPLAYED');
+      session.discovery_status = 'in_progress';
+      session.discovery_claim_id = claimId;
+      session.discovery_error_code = null;
+      session.updated_at = new Date(now).toISOString();
+      await persist();
+      return { claim_id: claimId, capsule: structuredClone(session.capsule), state: session.pedagogical_state };
+    });
+  }
+
+  async function failVoiceTutorRuleDiscovery(username, sessionId, { claimId, errorCode, now = new Date() }) {
+    return serializeVoiceTutorMutation(async () => {
+      await load();
+      const session = state.voice_tutor_sessions.find((entry) => entry.username === username && entry.id === sessionId);
+      if (!session?.capsule || session.discovery_status !== 'in_progress' || session.discovery_claim_id !== claimId) return false;
+      session.discovery_status = 'failed';
+      session.discovery_claim_id = null;
+      session.discovery_error_code = String(errorCode || 'TRUSTED_RULE_SEARCH_FAILED').slice(0, 80);
+      session.updated_at = new Date(now).toISOString();
+      await persist();
+      return true;
+    });
+  }
+
+  async function createRuleCardForVoiceTutorSession(username, sessionId, expectedCapsuleId, card, {
+    claimId, expectedNonceHash, nextNonceHash,
+  } = {}) {
+    return serializeVoiceTutorMutation(() => withRuleCardLock(async () => {
+      await load();
+      const session = state.voice_tutor_sessions.find((entry) => entry.username === username && entry.id === sessionId);
+      if (!session?.capsule || session.status !== 'active' || session.pedagogical_state !== 'diagnose'
+        || session.capsule_id !== expectedCapsuleId || session.capsule.rule_card_id
+        || session.capsule.skill_id !== card.skill?.id || session.discovery_status !== 'in_progress'
+        || session.discovery_claim_id !== claimId || !session.nonce_hash || session.nonce_hash !== expectedNonceHash) {
+        throw new VoiceTutorError('TRUSTED_RULE_DISCOVERY_NOT_REQUIRED');
+      }
+      if (state.rule_cards.some((item) => item.id === card.id)) throw new Error('RULE_CARD_EXISTS');
+      const stored = {
+        id: card.id, created_for_username: username, status: 'pending_review',
+        skill: structuredClone(card.skill), exam_year: Number(card.examYear), rule: structuredClone(card.rule),
+        agreement_hash: card.agreementHash, sources: structuredClone(card.sources),
+        discrepancies: structuredClone(card.discrepancies || []), review_audit: [],
+        created_at: new Date(card.createdAt).toISOString(), reviewed_at: null,
+      };
+      state.rule_cards.push(stored);
+      session.capsule.rule_card_id = stored.id;
+      session.pedagogical_state = 'explain';
+      session.nonce_hash = nextNonceHash;
+      session.discovery_status = 'completed';
+      session.discovery_claim_id = null;
+      session.discovery_error_code = null;
+      session.updated_at = new Date(card.createdAt).toISOString();
+      await persist();
+      return structuredClone(stored);
+    }));
+  }
+
+  async function getRuleCard(cardId) {
+    await load();
+    const card = state.rule_cards.find((entry) => entry.id === cardId);
+    return card ? structuredClone(card) : null;
+  }
+
+  async function createVoiceTutorReport(username, report) {
+    return serializeVoiceTutorMutation(async () => {
+      await load();
+      const session = state.voice_tutor_sessions.find((entry) => entry.username === username && entry.id === report.sessionId);
+      if (!session?.capsule) throw new VoiceTutorError('VOICE_TUTOR_SESSION_NOT_FOUND');
+      const existing = state.voice_tutor_reports.find((entry) => entry.username === username
+        && entry.session_id === report.sessionId && entry.reason === report.reason);
+      if (existing) return { created: false, report: structuredClone(existing) };
+      const stored = {
+        id: report.id, username, session_id: report.sessionId, rule_card_id: session.capsule.rule_card_id || null,
+        reason: report.reason, status: 'pending', review_audit: [],
+        created_at: new Date(report.createdAt).toISOString(), reviewed_at: null,
+      };
+      state.voice_tutor_reports.push(stored);
+      await persist();
+      return { created: true, report: structuredClone(stored) };
+    });
+  }
+
+  async function listVoiceTutorReports({ status = 'pending' } = {}) {
+    await load();
+    return state.voice_tutor_reports.filter((entry) => !status || entry.status === status)
+      .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at))).slice(0, 100)
+      .map((entry) => structuredClone(entry));
+  }
+
+  async function reviewVoiceTutorReport(reportId, { decision, reviewer, reviewedAt }) {
+    return serializeVoiceTutorMutation(async () => {
+      await load();
+      const report = state.voice_tutor_reports.find((entry) => entry.id === reportId);
+      if (!report) throw new VoiceTutorError('VOICE_TUTOR_REPORT_NOT_FOUND');
+      if (report.status !== 'pending') {
+        if (report.status !== decision) throw new VoiceTutorError('VOICE_TUTOR_REPORT_REVIEW_CONFLICT');
+        return { applied: false, report: structuredClone(report) };
+      }
+      report.status = decision;
+      report.reviewed_at = new Date(reviewedAt).toISOString();
+      report.review_audit.push({ decision, reviewer, reviewed_at: report.reviewed_at });
+      state.audit_log.push({ action: 'voice_tutor.report.review', at: report.reviewed_at, metadata: { report_id: report.id, username: report.username, reviewer } });
+      await persist();
+      return { applied: true, report: structuredClone(report) };
     });
   }
 
@@ -1022,6 +1191,63 @@ export function createFileRepository(filePath) {
     return id;
   }
 
+  async function claimAiOperationSlot(username, {
+    claimId, operation, promptVersion, requestsPerHour, dailyLimit, now = new Date(),
+  }) {
+    return serializeVoiceTutorMutation(async () => {
+      await load();
+      if (!state.users[username]) throw new Error('USER_NOT_FOUND');
+      const existing = state.ai_requests.find((entry) => entry.claim_key === claimId);
+      if (existing) {
+        if (existing.username !== username || existing.operation !== operation) throw new VoiceTutorError('AI_OPERATION_CLAIM_CONFLICT');
+        return { claim_id: claimId, id: existing.id, status: existing.status };
+      }
+      const instant = new Date(now);
+      const startOfDay = Date.UTC(instant.getUTCFullYear(), instant.getUTCMonth(), instant.getUTCDate());
+      const startOfHour = instant.getTime() - 3_600_000;
+      if (!Number.isInteger(dailyLimit) || dailyLimit < 1
+        || state.ai_requests.filter((entry) => Number(entry.created_at) >= startOfDay).length >= dailyLimit) {
+        throw new VoiceTutorError('AI_BUDGET_EXHAUSTED');
+      }
+      if (!Number.isInteger(requestsPerHour) || requestsPerHour < 1
+        || state.ai_requests.filter((entry) => entry.username === username && entry.operation === operation
+          && Number(entry.created_at) >= startOfHour).length >= requestsPerHour) {
+        throw new VoiceTutorError('RATE_LIMITED');
+      }
+      const id = (state.ai_requests.at(-1)?.id || 0) + 1;
+      state.ai_requests.push({
+        id, username, operation, provider: null, model: null, promptVersion: promptVersion || null,
+        status: 'in_progress', durationMs: null, errorCode: null, promptTokens: null,
+        completionTokens: null, claim_key: claimId, created_at: instant.getTime(), settled_at: null,
+      });
+      await persist();
+      return { claim_id: claimId, id, status: 'in_progress' };
+    });
+  }
+
+  async function settleAiOperationSlot(username, claimId, {
+    status, provider = null, model = null, durationMs = null, errorCode = null,
+    promptTokens = null, completionTokens = null, now = new Date(),
+  }) {
+    return serializeVoiceTutorMutation(async () => {
+      await load();
+      if (!['completed', 'failed'].includes(status)) throw new VoiceTutorError('AI_OPERATION_SETTLEMENT_INVALID');
+      const entry = state.ai_requests.find((item) => item.claim_key === claimId && item.username === username);
+      if (!entry) throw new VoiceTutorError('AI_OPERATION_CLAIM_NOT_FOUND');
+      if (entry.status !== 'in_progress') return { applied: false, status: entry.status };
+      entry.status = status;
+      entry.provider = provider;
+      entry.model = model;
+      entry.durationMs = Number.isFinite(durationMs) ? Math.max(0, Math.round(durationMs)) : null;
+      entry.errorCode = errorCode;
+      entry.promptTokens = Number.isFinite(promptTokens) ? Math.max(0, Math.round(promptTokens)) : null;
+      entry.completionTokens = Number.isFinite(completionTokens) ? Math.max(0, Math.round(completionTokens)) : null;
+      entry.settled_at = new Date(now).getTime();
+      await persist();
+      return { applied: true, status: entry.status };
+    });
+  }
+
   async function countAiRequestsSince(since) {
     await load();
     const timestamp = since instanceof Date ? since.getTime() : Number(since);
@@ -1109,6 +1335,8 @@ export function createFileRepository(filePath) {
         .filter((item) => state.voice_tutor_repeats.some((repeat) => repeat.id === item.repeat_id
           && state.voice_tutor_recoveries.some((recovery) => recovery.username === username && recovery.id === repeat.recovery_id)))
         .map(({ fingerprint, ...item }) => item),
+      voice_tutor_reports: state.voice_tutor_reports.filter((item) => item.username === username)
+        .map(({ username: owner, ...item }) => item),
       rule_cards: state.rule_cards.filter((item) => item.created_for_username === username),
       payment_requests: Object.values(state.payment_requests).filter((item) => item.username === username),
       writing_attempts: state.writing_attempts.filter((item) => item.username === username),
@@ -1134,6 +1362,10 @@ export function createFileRepository(filePath) {
           delete entry.metadata.username;
           entry.metadata.account_deleted = true;
         }
+        if (entry.metadata?.reviewer === username) {
+          delete entry.metadata.reviewer;
+          entry.metadata.reviewer_account_deleted = true;
+        }
       }
       delete state.users[username];
       delete state.progress[username];
@@ -1153,6 +1385,15 @@ export function createFileRepository(filePath) {
       state.voice_tutor_repeat_attempts = state.voice_tutor_repeat_attempts.filter((item) => !repeatIds.has(item.repeat_id));
       state.voice_tutor_repeats = state.voice_tutor_repeats.filter((item) => !recoveryIds.has(item.recovery_id));
       state.voice_tutor_recoveries = state.voice_tutor_recoveries.filter((item) => item.username !== username);
+      state.voice_tutor_reports = state.voice_tutor_reports.filter((item) => item.username !== username);
+      for (const report of state.voice_tutor_reports) {
+        for (const audit of report.review_audit || []) {
+          if (audit.reviewer === username) {
+            audit.reviewer = null;
+            audit.account_deleted = true;
+          }
+        }
+      }
       state.rule_cards = state.rule_cards.filter((card) => card.created_for_username !== username || card.status === 'approved');
       for (const card of state.rule_cards) {
         if (card.created_for_username === username) card.created_for_username = null;
@@ -1210,15 +1451,23 @@ export function createFileRepository(filePath) {
     getVoiceTutorSession,
     activateVoiceTutorSession,
     advanceVoiceTutorSession,
+    clarifyVoiceTutorSession,
     setVoiceTutorSessionDelivery,
     switchVoiceTutorSessionDelivery,
     submitVoiceTutorRepeat,
     getVoiceTutorRecoveryMap,
     getVoiceTutorRecoveryMetrics,
     createRuleCard,
+    claimVoiceTutorRuleDiscovery,
+    failVoiceTutorRuleDiscovery,
+    createRuleCardForVoiceTutorSession,
+    getRuleCard,
     listRuleCards,
     reviewRuleCard,
     getApprovedRuleCard,
+    createVoiceTutorReport,
+    listVoiceTutorReports,
+    reviewVoiceTutorReport,
     setUserRole,
     getPrivacyConsent,
     setPrivacyConsent,
@@ -1245,6 +1494,8 @@ export function createFileRepository(filePath) {
     upsertWordProgress,
     upsertErrorBank,
     logAiRequest,
+    claimAiOperationSlot,
+    settleAiOperationSlot,
     countAiRequestsSince,
     countAiOperationRequestsSince,
     getAiUsageMetrics,

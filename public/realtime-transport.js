@@ -9,6 +9,14 @@ const PEDAGOGICAL_EVENTS = new Set(['diagnosis_complete', 'explanation_complete'
 const SAFE_CALL_ID = /^[A-Za-z0-9._:-]{1,128}$/u;
 const SAFE_CREDENTIAL = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]{1,2048}$/u;
 const SAFE_VOICE = /^[a-z][a-z0-9_-]{0,63}$/u;
+const MAX_TOOL_CALLS_PER_RESPONSE = 4;
+const PASSIVE_SERVER_EVENTS = new Set([
+  'session.created', 'conversation.created', 'conversation.item.created',
+  'input_audio_buffer.committed', 'input_audio_buffer.cleared', 'input_audio_buffer.speech_stopped',
+  'rate_limits.updated', 'response.content_part.added', 'response.content_part.done',
+  'response.audio.done', 'response.output_audio.done',
+  'response.audio_transcript.done', 'response.output_audio_transcript.done',
+]);
 const INVALID_STREAM_MESSAGE = 'Voice API прислал недопустимый поток. Переключаемся на безопасный режим.';
 
 function bytesToBase64(bytes) {
@@ -105,6 +113,10 @@ export function createBrowserRealtimeTransport({
       let closed = false;
       let playbackAt = 0;
       let responseOpen = false;
+      let activeResponseId = null;
+      let activeAssistantItemId = null;
+      let responseAudioStartedAt = null;
+      let activeResponse = null;
       let sessionAcknowledged = false;
       let sessionConfigured = false;
       let intentionalClose = false;
@@ -114,7 +126,11 @@ export function createBrowserRealtimeTransport({
       let ackTimer = null;
       let eventWindowStartedAt = now();
       let eventCount = 0;
-      const handledCallIds = new Set();
+      const seenResponseIds = new Set();
+      const seenItemIds = new Set();
+      const seenCallIds = new Set();
+      const interruptedResponseIds = new Set();
+      const activeOutputs = new Set();
       const connected = new Promise((resolve, reject) => {
         resolveConnect = resolve;
         rejectConnect = reject;
@@ -132,6 +148,11 @@ export function createBrowserRealtimeTransport({
         processor?.disconnect?.();
         source?.disconnect?.();
         silentGain?.disconnect?.();
+        for (const output of activeOutputs) {
+          try { output.stop(); } catch {}
+          try { output.disconnect?.(); } catch {}
+        }
+        activeOutputs.clear();
         try { socket.close(); } catch {}
         try {
           const closing = audioContext?.close?.();
@@ -177,7 +198,7 @@ export function createBrowserRealtimeTransport({
       }
 
       function playPcm(value) {
-        if (!value || typeof browser.atob !== 'function' || typeof audioContext.createBuffer !== 'function') return;
+        if (!responseOpen || !value || typeof browser.atob !== 'function' || typeof audioContext.createBuffer !== 'function') return;
         let binary;
         try { binary = browser.atob(value); } catch { return; }
         const sampleCount = Math.floor(binary.length / 2);
@@ -193,47 +214,79 @@ export function createBrowserRealtimeTransport({
         output.buffer = buffer;
         output.connect(audioContext.destination);
         playbackAt = Math.max(audioContext.currentTime || 0, playbackAt);
+        if (responseAudioStartedAt == null) responseAudioStartedAt = audioContext.currentTime || 0;
         output.start(playbackAt);
         playbackAt += buffer.duration;
+        activeOutputs.add(output);
+        output.onended = () => activeOutputs.delete(output);
       }
 
-      async function handleToolCall(message) {
-        const callId = String(message.call_id || '');
-        if (!SAFE_CALL_ID.test(callId) || callId.length > MAX_TOOL_CALL_ID_CHARS || handledCallIds.has(callId)) return;
-        handledCallIds.add(callId);
-        if (!responseOpen || message.name !== 'advance_pedagogy' || typeof onPedagogicalEvent !== 'function') {
+      function interruptAssistant() {
+        if (!responseOpen || !activeResponseId || activeResponse?.phase !== 'streaming'
+          || interruptedResponseIds.has(activeResponseId)) return;
+        interruptedResponseIds.add(activeResponseId);
+        for (const output of activeOutputs) {
+          try { output.stop(); } catch {}
+          try { output.disconnect?.(); } catch {}
+        }
+        activeOutputs.clear();
+        playbackAt = audioContext?.currentTime || 0;
+        send({ type: 'response.cancel' });
+        if (activeAssistantItemId) {
+          const elapsed = Math.max(0, Math.min(60_000, Math.round(((audioContext?.currentTime || 0) - (responseAudioStartedAt || 0)) * 1_000)));
+          send({
+            type: 'conversation.item.truncate', item_id: activeAssistantItemId,
+            content_index: 0, audio_end_ms: elapsed,
+          });
+        }
+        responseOpen = false;
+        activeResponse.phase = 'awaiting_cancel';
+        activeAssistantItemId = null;
+        responseAudioStartedAt = null;
+      }
+
+      async function completeToolResponse(response) {
+        const outputs = [];
+        for (const call of response.calls) {
+          let output;
+          try {
+            const result = await onPedagogicalEvent(call.event);
+            output = JSON.stringify({ state: result?.session?.state || null, accepted: true });
+          } catch {
+            output = JSON.stringify({ accepted: false });
+          }
+          outputs.push({ callId: call.callId, output });
+        }
+        if (closed || activeResponse !== response || response.phase !== 'processing') return;
+        for (const result of outputs) {
           send({
             type: 'conversation.item.create',
-            item: { type: 'function_call_output', call_id: callId, output: JSON.stringify({ accepted: false }) },
+            item: { type: 'function_call_output', call_id: result.callId, output: result.output },
           });
-          send({ type: 'response.create' });
-          return;
         }
-        const event = parsePedagogicalToolEvent(message.arguments);
-        if (!event) return;
-        try {
-          const result = await onPedagogicalEvent(event);
-          const output = JSON.stringify({ state: result?.session?.state || null, accepted: true });
-          send({ type: 'conversation.item.create', item: { type: 'function_call_output', call_id: callId, output } });
-          send({ type: 'response.create' });
-        } catch {
-          send({
-            type: 'conversation.item.create',
-            item: { type: 'function_call_output', call_id: callId, output: JSON.stringify({ accepted: false }) },
-          });
-          send({ type: 'response.create' });
-        }
+        if (closed || activeResponse !== response) return;
+        response.phase = 'awaiting_continuation';
+        send({ type: 'response.create' });
+      }
+
+      function lifecycleId(message, field = 'response_id') {
+        const value = message[field];
+        return typeof value === 'string' && SAFE_CALL_ID.test(value) ? value : null;
+      }
+
+      function matchesActiveResponse(message) {
+        return activeResponse && lifecycleId(message) === activeResponse.id;
       }
 
       socket.onmessage = (event) => {
         const raw = typeof event.data === 'string' ? event.data : '';
         if (!acceptsEvent(raw)) return;
         let message;
-        try { message = JSON.parse(raw); } catch { return; }
+        try { message = JSON.parse(raw); } catch { return closeInvalidStream(); }
         if (!message || typeof message !== 'object' || Array.isArray(message) || Object.keys(message).length > 20
-          || typeof message.type !== 'string' || message.type.length > 100) return;
+          || typeof message.type !== 'string' || message.type.length > 100) return closeInvalidStream();
         if (message.type === 'session.updated') {
-          if (sessionAcknowledged) return;
+          if (sessionAcknowledged) return closeInvalidStream();
           if (ackTimer != null) clearTimeoutImpl(ackTimer);
           ackTimer = null;
           sessionAcknowledged = true;
@@ -248,28 +301,122 @@ export function createBrowserRealtimeTransport({
           fail();
           return;
         }
-        if (!sessionConfigured) return;
+        if (!sessionConfigured) {
+          if (message.type === 'session.created') return;
+          return closeInvalidStream();
+        }
         if (message.type === 'response.created') {
           const responseId = message.response_id ?? message.response?.id;
-          if (typeof responseId === 'string' && SAFE_CALL_ID.test(responseId)) responseOpen = true;
+          if (typeof responseId !== 'string' || !SAFE_CALL_ID.test(responseId)
+            || responseOpen || seenResponseIds.has(responseId) || interruptedResponseIds.has(responseId)
+            || (activeResponse && activeResponse.phase !== 'awaiting_continuation')) return closeInvalidStream();
+          seenResponseIds.add(responseId);
+          activeResponse = {
+            id: responseId, phase: 'streaming', items: new Map(), calls: [], callById: new Map(),
+          };
+          activeResponseId = responseId;
+          activeAssistantItemId = null;
+          responseAudioStartedAt = null;
+          responseOpen = true;
           return;
         }
-        if (message.type === 'response.done' || message.type === 'response.cancelled') {
+        if (message.type === 'response.output_item.added') {
+          const item = message.item;
+          if (!responseOpen || activeResponse?.phase !== 'streaming' || !matchesActiveResponse(message)
+            || typeof item?.id !== 'string' || !SAFE_CALL_ID.test(item.id) || seenItemIds.has(item.id)) {
+            return closeInvalidStream();
+          }
+          seenItemIds.add(item.id);
+          if (item.type === 'function_call') {
+            if (item.name !== 'advance_pedagogy' || typeof item.call_id !== 'string'
+              || !SAFE_CALL_ID.test(item.call_id) || item.call_id.length > MAX_TOOL_CALL_ID_CHARS
+              || seenCallIds.has(item.call_id) || activeResponse.calls.length >= MAX_TOOL_CALLS_PER_RESPONSE
+              || typeof onPedagogicalEvent !== 'function') return closeInvalidStream();
+            seenCallIds.add(item.call_id);
+            const call = { itemId: item.id, callId: item.call_id, name: item.name, event: null, itemDone: false };
+            activeResponse.items.set(item.id, { type: item.type, done: false, callId: item.call_id });
+            activeResponse.calls.push(call);
+            activeResponse.callById.set(item.call_id, call);
+            return;
+          }
+          if (item.type !== 'message' || item.role !== 'assistant') return closeInvalidStream();
+          activeResponse.items.set(item.id, { type: item.type, done: false });
+          activeAssistantItemId = item.id;
+          return;
+        }
+        if (message.type === 'input_audio_buffer.speech_started') {
+          if (responseOpen) interruptAssistant();
+          return;
+        }
+        if (message.type === 'response.output_item.done') {
+          const itemId = lifecycleId(message, 'item_id');
+          const item = activeResponse?.items.get(itemId);
+          if (!responseOpen || activeResponse?.phase !== 'streaming' || !matchesActiveResponse(message)
+            || !item || item.done) return closeInvalidStream();
+          item.done = true;
+          const call = item.callId ? activeResponse.callById.get(item.callId) : null;
+          if (call) call.itemDone = true;
+          return;
+        }
+        if (message.type === 'response.function_call_arguments.delta') {
+          const callId = lifecycleId(message, 'call_id');
+          const itemId = lifecycleId(message, 'item_id');
+          const call = activeResponse?.callById.get(callId);
+          if (!responseOpen || activeResponse?.phase !== 'streaming' || !matchesActiveResponse(message)
+            || !call || call.itemId !== itemId || call.event || typeof message.delta !== 'string'
+            || message.delta.length > MAX_TOOL_ARGUMENT_CHARS) return closeInvalidStream();
+          return;
+        }
+        if (message.type === 'response.function_call_arguments.done') {
+          const callId = lifecycleId(message, 'call_id');
+          const itemId = lifecycleId(message, 'item_id');
+          const call = activeResponse?.callById.get(callId);
+          const eventValue = parsePedagogicalToolEvent(message.arguments);
+          if (!responseOpen || activeResponse?.phase !== 'streaming' || !matchesActiveResponse(message)
+            || !call || call.itemId !== itemId || call.event
+            || (message.name != null && message.name !== call.name) || !eventValue) return closeInvalidStream();
+          call.event = eventValue;
+          return;
+        }
+        if (message.type === 'response.done') {
+          if (!responseOpen || activeResponse?.phase !== 'streaming' || !matchesActiveResponse(message)
+            || activeResponse.calls.some((call) => !call.event)) return closeInvalidStream();
           responseOpen = false;
+          activeResponseId = null;
+          activeAssistantItemId = null;
+          responseAudioStartedAt = null;
+          if (activeResponse.calls.length) {
+            activeResponse.phase = 'processing';
+            void completeToolResponse(activeResponse);
+          } else {
+            activeResponse = null;
+          }
+          return;
+        }
+        if (message.type === 'response.cancelled') {
+          if (activeResponse?.phase !== 'awaiting_cancel' || !matchesActiveResponse(message)) return closeInvalidStream();
+          activeResponse = null;
+          activeResponseId = null;
           return;
         }
         if (['response.audio_transcript.delta', 'response.output_audio_transcript.delta', 'conversation.item.input_audio_transcription.completed'].includes(message.type)) {
+          if (message.type !== 'conversation.item.input_audio_transcription.completed'
+            && (!responseOpen || !matchesActiveResponse(message))) return closeInvalidStream();
           const rawCaption = message.delta || message.transcript || '';
-          if (typeof rawCaption !== 'string' || new TextEncoder().encode(rawCaption).byteLength > 4_096) return;
+          if (typeof rawCaption !== 'string' || new TextEncoder().encode(rawCaption).byteLength > 4_096) return closeInvalidStream();
           const caption = rawCaption.slice(0, 1_000);
           if (caption) onSubtitle(caption);
+          return;
         }
         if (message.type === 'response.audio.delta' || message.type === 'response.output_audio.delta') {
+          if (!responseOpen || !matchesActiveResponse(message)) return closeInvalidStream();
           if (typeof message.delta === 'string' && message.delta.length <= MAX_AUDIO_DELTA_CHARS && /^[A-Za-z0-9+/]*={0,2}$/u.test(message.delta)) {
             playPcm(message.delta);
-          }
+          } else return closeInvalidStream();
+          return;
         }
-        if (message.type === 'response.function_call_arguments.done') void handleToolCall(message);
+        if (PASSIVE_SERVER_EVENTS.has(message.type)) return;
+        return closeInvalidStream();
       };
 
       socket.onerror = () => fail();

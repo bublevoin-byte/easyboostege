@@ -402,58 +402,90 @@ function fakeAudioContext() {
 }
 
 test('browser realtime bounds bytes/rate/order and rejects replayed or off-scope tool events', async () => {
-  const sockets = [];
-  const statuses = [];
-  const subtitles = [];
-  const pedagogy = [];
   let clock = 1_000;
-  const transport = createBrowserRealtimeTransport({
-    now: () => clock,
-    maxEventsPerSecond: 8,
-    webSocketFactory() {
-      const socket = {
-        readyState: 0,
-        sent: [],
-        closed: false,
-        send(value) { this.sent.push(JSON.parse(value)); },
-        close() { this.closed = true; },
-      };
-      sockets.push(socket);
-      return socket;
-    },
-    audioContextFactory: fakeAudioContext,
-  });
-  const pending = transport.connect({
-    stream: {}, credential: 'ephemeral-only', url: 'wss://fake.invalid/realtime',
-    session: BOUNDED_REALTIME_SESSION,
-    onStatus: (value) => statuses.push(value),
-    onSubtitle: (value) => subtitles.push(value),
-    onPedagogicalEvent: async (event) => { pedagogy.push(event); return { session: { state: 'explain' } }; },
-  });
-  const socket = sockets[0];
-  socket.readyState = 1;
-  socket.onopen();
-  socket.onmessage({ data: JSON.stringify({ type: 'response.function_call_arguments.done', call_id: 'too-early', name: 'advance_pedagogy', arguments: '{"type":"diagnosis_complete"}' }) });
-  socket.onmessage({ data: JSON.stringify({ type: 'session.updated' }) });
-  const connection = await pending;
-  connection.activate();
-  socket.onmessage({ data: JSON.stringify({ type: 'response.created', response: { id: 'response-1' } }) });
-  socket.onmessage({ data: JSON.stringify({ type: 'response.function_call_arguments.done', call_id: 'call-1', name: 'browse_web', arguments: '{"query":"secrets"}' }) });
-  socket.onmessage({ data: JSON.stringify({ type: 'response.function_call_arguments.done', call_id: 'call-2', name: 'advance_pedagogy', arguments: '{"type":"diagnosis_complete"}' }) });
-  await new Promise((resolve) => setImmediate(resolve));
-  socket.onmessage({ data: JSON.stringify({ type: 'response.function_call_arguments.done', call_id: 'call-2', name: 'advance_pedagogy', arguments: '{"type":"diagnosis_complete"}' }) });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(pedagogy, [{ type: 'diagnosis_complete' }]);
+  async function openTransport({ maxEventsPerSecond = 120 } = {}) {
+    const statuses = [];
+    const subtitles = [];
+    const pedagogy = [];
+    const socket = {
+      readyState: 0,
+      sent: [],
+      closed: false,
+      send(value) { this.sent.push(JSON.parse(value)); },
+      close() { this.closed = true; },
+    };
+    const transport = createBrowserRealtimeTransport({
+      now: () => clock,
+      maxEventsPerSecond,
+      webSocketFactory: () => socket,
+      audioContextFactory: fakeAudioContext,
+    });
+    const pending = transport.connect({
+      stream: {}, credential: 'ephemeral-only', url: 'wss://fake.invalid/realtime',
+      session: BOUNDED_REALTIME_SESSION,
+      onStatus: (value) => statuses.push(value),
+      onSubtitle: (value) => subtitles.push(value),
+      onPedagogicalEvent: async (event) => { pedagogy.push(event); return { session: { state: 'explain' } }; },
+    });
+    socket.readyState = 1;
+    socket.onopen();
+    socket.onmessage({ data: JSON.stringify({ type: 'session.updated' }) });
+    const connection = await pending;
+    connection.activate();
+    return { socket, statuses, subtitles, pedagogy };
+  }
 
-  socket.onmessage({ data: JSON.stringify({ type: 'response.audio_transcript.delta', delta: 'ж'.repeat(150_000) }) });
-  assert.deepEqual(subtitles, []);
+  const valid = await openTransport();
+  valid.socket.onmessage({ data: JSON.stringify({ type: 'response.created', response: { id: 'response-1' } }) });
+  valid.socket.onmessage({ data: JSON.stringify({
+    type: 'response.output_item.added', response_id: 'response-1',
+    item: { id: 'item-1', type: 'function_call', call_id: 'call-1', name: 'advance_pedagogy' },
+  }) });
+  const completedCall = {
+    type: 'response.function_call_arguments.done', response_id: 'response-1', item_id: 'item-1',
+    call_id: 'call-1', name: 'advance_pedagogy', arguments: '{"type":"diagnosis_complete"}',
+  };
+  valid.socket.onmessage({ data: JSON.stringify(completedCall) });
+  valid.socket.onmessage({ data: JSON.stringify({ type: 'response.done', response_id: 'response-1' }) });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(valid.pedagogy, [{ type: 'diagnosis_complete' }]);
+  assert.equal(valid.socket.sent.filter((event) => event.type === 'response.create').length, 1);
+  valid.socket.onmessage({ data: JSON.stringify(completedCall) });
+  assert.equal(valid.socket.closed, true);
+
+  const oversized = await openTransport();
+  oversized.socket.onmessage({ data: JSON.stringify({
+    type: 'response.audio_transcript.delta', response_id: 'response-2', delta: 'ж'.repeat(150_000),
+  }) });
+  assert.equal(oversized.socket.closed, true);
+  assert.deepEqual(oversized.subtitles, []);
 
   clock += 2_000;
-  for (let index = 0; index < 9; index += 1) {
-    socket.onmessage({ data: JSON.stringify({ type: 'error', event_id: `safe-${index}` }) });
+  const rateLimited = await openTransport({ maxEventsPerSecond: 8 });
+  for (let index = 0; index < 8; index += 1) {
+    rateLimited.socket.onmessage({ data: JSON.stringify({ type: 'rate_limits.updated', event_id: `safe-${index}` }) });
   }
-  assert.equal(socket.closed, true);
-  assert.ok(statuses.includes('Voice API прислал недопустимый поток. Переключаемся на безопасный режим.'));
+  assert.equal(rateLimited.socket.closed, true);
+
+  const outOfOrder = await openTransport();
+  outOfOrder.socket.onmessage({ data: JSON.stringify({ type: 'response.created', response: { id: 'response-3' } }) });
+  outOfOrder.socket.onmessage({ data: JSON.stringify({
+    type: 'response.function_call_arguments.done', response_id: 'response-3', item_id: 'item-3',
+    call_id: 'call-3', name: 'advance_pedagogy', arguments: '{"type":"diagnosis_complete"}',
+  }) });
+  assert.equal(outOfOrder.socket.closed, true);
+
+  const offScope = await openTransport();
+  offScope.socket.onmessage({ data: JSON.stringify({ type: 'response.created', response: { id: 'response-4' } }) });
+  offScope.socket.onmessage({ data: JSON.stringify({
+    type: 'response.output_item.added', response_id: 'response-4',
+    item: { id: 'item-4', type: 'function_call', call_id: 'call-4', name: 'browse_web' },
+  }) });
+  assert.equal(offScope.socket.closed, true);
+
+  for (const scenario of [valid, oversized, rateLimited, outOfOrder, offScope]) {
+    assert.ok(scenario.statuses.includes('Voice API прислал недопустимый поток. Переключаемся на безопасный режим.'));
+  }
 });
 
 test('account deletion cascades Voice Tutor summaries, reservations, recovery data and creator rule reports', async () => {

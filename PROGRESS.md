@@ -698,8 +698,8 @@ production credentials, три доказанных P0 отмечены во в�
 | 06 | Карта освоенных ошибок и возвращённых потенциальных баллов | done |
 | 07 | Приватность, безопасность, observability и сквозная проверка | done |
 | 08 | Premium commerce, честные квоты и полное grammar/lexicon-покрытие | done |
-| 09 | Полный discovery/text/barge-in/report педагогический цикл | pending |
-| 10 | Enforceable realtime proxy и финальная security parity | pending |
+| 09 | Полный discovery/text/barge-in/report педагогический цикл | done |
+| 10 | Enforceable realtime proxy и финальная security parity | ready-for-agent |
 
 Тикет 01 закрыт: base и Premium разделены правом `voice_tutor`; UTC-квоты 10/120 минут,
 идемпотентный резерв одной активной сессии, возврат остатка, экспорт/удаление и профильный UI готовы.
@@ -787,3 +787,16 @@ grammar/word-formation/collocation paths и 897 vocabulary paths; generated AI e
 owner-bound typed `generated_tasks`, client reference не принимается. Полный набор 494 (493 pass,
 1 штатный PostgreSQL skip), disposable PostgreSQL 1/1, `lint`, `check`, frontend build, functional
 E2E и оба secret scans проходят; платных вызовов, push, deploy и изменений staging не было.
+
+Тикет 09 закрыт: production discovery получает кандидаты через server-only xAI Responses web search
+с allowlist и принимает только structured URL citations; каждый источник затем проходит прежние
+SSRF/DNS/MIME/size проверки, а provisional rule атомарно связывается только с текущей owner-bound
+session. Текстовый режим поддерживает до трёх transient уточнений без сохранения реплик и без обхода
+FSM. Browser Realtime останавливает queued audio на server-VAD speech-start и отправляет bounded
+cancel/truncate; replay и события вне порядка fail closed. Structured learner reports не принимают
+свободный текст, имеют admin review/audit и file/PostgreSQL/export/delete parity. Persisted capsule
+сведена к IDs, versions и hash, полный контекст реконструируется server-side. Playwright E2E начинает
+разбор с настоящей grammar error card и проходит fake realtime tool cycle до recovery map. Полный
+набор 502 (501 pass, 1 штатный PostgreSQL skip), targeted 25/25, disposable PostgreSQL 1/1, `lint`,
+`check`, frontend build, functional/performance E2E и оба secret scans проходят; платных вызовов,
+push, deploy и изменений staging не было.

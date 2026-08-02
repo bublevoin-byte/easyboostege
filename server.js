@@ -8,7 +8,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { claimUnseenBankTask, getBankTask, getBankTaskByExternalId, listBankTaskContents, recordTaskDelivery, upsertBankTask, activateTrial, activateVoiceTutorSession, closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, countAiOperationRequestsSince, countAiRequestsSince, createPaymentRequest, createPaymentRequestForUser, createRuleCard, createSession, createSpeakingAttempt, createTelegramAuthCode, createWritingAttempt, deleteUserData, exportUserData, finishSpeakingAttempt, finishVoiceTutorSession, finishWritingAttempt, getAiUsageMetrics, getApprovedRuleCard, getGeneratedTask, getSharedGeneratedTask, getModuleAttempt, getPaymentRequestForUser, getPrivacyConsent, getProgress, getSpeakingAttempt, getUser, getVoiceTutorAccess, getVoiceTutorRecoveryMap, getVoiceTutorRecoveryMetrics, getVoiceTutorSession, getWritingAttempt, healthCheck, isSessionActive, listPaymentRequests, listRuleCards, recordModuleAttempt, reserveVoiceTutorSession, resolvePaymentRequest, reviewRuleCard, revokeEntitlement, revokeSession, saveGeneratedTask, saveProgress, setPrivacyConsent, setUserRole, submitVoiceTutorRepeat, upsertErrorBank, upsertWordProgress, mergeProgress, getUserByTelegram, createTelegramUser, logAiRequest, getSub, advanceVoiceTutorSession, setVoiceTutorSessionDelivery, switchVoiceTutorSessionDelivery } from './db.js';
+import { claimAiOperationSlot, claimUnseenBankTask, claimVoiceTutorRuleDiscovery, failVoiceTutorRuleDiscovery, getBankTask, getBankTaskByExternalId, listBankTaskContents, recordTaskDelivery, settleAiOperationSlot, upsertBankTask, activateTrial, activateVoiceTutorSession, closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, countAiOperationRequestsSince, countAiRequestsSince, createPaymentRequest, createPaymentRequestForUser, createRuleCardForVoiceTutorSession, createSession, createSpeakingAttempt, createTelegramAuthCode, createVoiceTutorReport, createWritingAttempt, deleteUserData, exportUserData, finishSpeakingAttempt, finishVoiceTutorSession, finishWritingAttempt, getAiUsageMetrics, getApprovedRuleCard, getGeneratedTask, getRuleCard, getSharedGeneratedTask, getModuleAttempt, getPaymentRequestForUser, getPrivacyConsent, getProgress, getSpeakingAttempt, getUser, getVoiceTutorAccess, getVoiceTutorRecoveryMap, getVoiceTutorRecoveryMetrics, getVoiceTutorSession, getWritingAttempt, healthCheck, isSessionActive, listPaymentRequests, listRuleCards, listVoiceTutorReports, recordModuleAttempt, reserveVoiceTutorSession, resolvePaymentRequest, reviewRuleCard, reviewVoiceTutorReport, revokeEntitlement, revokeSession, saveGeneratedTask, saveProgress, setPrivacyConsent, setUserRole, submitVoiceTutorRepeat, upsertErrorBank, upsertWordProgress, mergeProgress, getUserByTelegram, createTelegramUser, logAiRequest, getSub, advanceVoiceTutorSession, clarifyVoiceTutorSession, setVoiceTutorSessionDelivery, switchVoiceTutorSessionDelivery } from './db.js';
 import { config } from './config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from './ai/writing.js';
 import { buildContentPrompt, CONTENT_PROMPT_VERSION, contentRequestSchema, parseContentResponse } from './ai/content.js';
@@ -41,6 +41,7 @@ import { createProviderClient } from './ai/provider-client.js';
 import { createTrustedRuleDiscovery } from './voice-tutor/trusted-rule-discovery.js';
 import { createTrustedRuleFetcher } from './voice-tutor/trusted-rule-fetch.js';
 import { createConfiguredRuleSearchProvider } from './voice-tutor/trusted-rule-catalog.js';
+import { canUseXaiRuleSearch, createXaiRuleSearchProvider } from './voice-tutor/rule-search.js';
 import { createAiRuleEvidenceExtractor } from './voice-tutor/rule-evidence-extractor.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -177,13 +178,15 @@ const dbApi = {
   createTelegramAuthCode, consumeTelegramAuthCode, getUserByTelegram, createTelegramUser, getSub,
   createPaymentRequestForUser, getPaymentRequestForUser, listPaymentRequests, resolvePaymentRequest, revokeEntitlement,
   getVoiceTutorAccess, reserveVoiceTutorSession, finishVoiceTutorSession, getVoiceTutorSession, activateVoiceTutorSession,
-  advanceVoiceTutorSession, setVoiceTutorSessionDelivery, switchVoiceTutorSessionDelivery,
+  advanceVoiceTutorSession, clarifyVoiceTutorSession, setVoiceTutorSessionDelivery, switchVoiceTutorSessionDelivery,
   submitVoiceTutorRepeat, getVoiceTutorRecoveryMap, getVoiceTutorRecoveryMetrics,
-  createRuleCard, listRuleCards, reviewRuleCard, getApprovedRuleCard,
+  claimVoiceTutorRuleDiscovery, failVoiceTutorRuleDiscovery,
+  createRuleCardForVoiceTutorSession, getRuleCard, listRuleCards, reviewRuleCard, getApprovedRuleCard,
+  createVoiceTutorReport, listVoiceTutorReports, reviewVoiceTutorReport,
   revokeSession, exportUserData, deleteUserData, getPrivacyConsent, setPrivacyConsent,
   getProgress, saveProgress, mergeProgress, recordModuleAttempt, getModuleAttempt, upsertWordProgress, upsertErrorBank,
   createWritingAttempt, finishWritingAttempt, getWritingAttempt, createSpeakingAttempt, finishSpeakingAttempt, getSpeakingAttempt,
-  getGeneratedTask, getSharedGeneratedTask, saveGeneratedTask, logAiRequest,
+  getGeneratedTask, getSharedGeneratedTask, saveGeneratedTask, logAiRequest, claimAiOperationSlot, settleAiOperationSlot,
   upsertBankTask, getBankTask, getBankTaskByExternalId, claimUnseenBankTask, recordTaskDelivery, listBankTaskContents,
 };
 async function promoteConfiguredAdmin(username, telegramId) {
@@ -277,23 +280,46 @@ const access = {
   createOperationLimiter, ttsLimiter, sttLimiter, hasAiBudget,
   requireAiBudget, requireActiveSubscription, requirePrivacyConsent,
 };
+const claimVoiceTutorAiOperation = ({ username, ...slot }) => claimAiOperationSlot(username, {
+  ...slot, dailyLimit: config.ai.dailyRequestBudget,
+});
 const voiceTutorTextTutor = createAiTextTutor({
   providerClient: createProviderClient(),
   hasAiBudget,
   countAiOperationRequestsSince,
   logAiRequest,
 });
+const externalRuleSearchEnabled = canUseXaiRuleSearch({
+  enabled: config.voiceTutor.ruleSearchEnabled, xaiEnabled: config.ai.xaiEnabled, apiKey: config.ai.xaiKey,
+});
+const ruleSearchProvider = externalRuleSearchEnabled
+  ? createXaiRuleSearchProvider({
+    apiKey: config.ai.xaiKey,
+    endpoint: config.voiceTutor.ruleSearchEndpoint,
+    model: config.voiceTutor.ruleSearchModel,
+    allowlist: config.voiceTutor.trustedRuleAllowlist,
+    timeoutMs: config.voiceTutor.ruleSearchTimeoutMs,
+    claimAiOperation: claimVoiceTutorAiOperation,
+    settleAiOperation: settleAiOperationSlot,
+  })
+  : config.voiceTutor.trustedRuleSources && Object.keys(config.voiceTutor.trustedRuleSources).length
+    ? createConfiguredRuleSearchProvider(config.voiceTutor.trustedRuleSources)
+    : null;
 const trustedRuleDiscovery = Array.isArray(config.voiceTutor.trustedRuleAllowlist)
   && config.voiceTutor.trustedRuleAllowlist.length >= 2
-  && config.voiceTutor.trustedRuleSources && Object.keys(config.voiceTutor.trustedRuleSources).length
+  && ruleSearchProvider
   ? createTrustedRuleDiscovery({
     allowlist: config.voiceTutor.trustedRuleAllowlist,
-    searchProvider: createConfiguredRuleSearchProvider(config.voiceTutor.trustedRuleSources),
+    searchProvider: ruleSearchProvider,
     fetchDocument: createTrustedRuleFetcher({ allowlist: config.voiceTutor.trustedRuleAllowlist }),
     evidenceExtractor: createAiRuleEvidenceExtractor({
-      providerClient: createProviderClient(), hasAiBudget, countAiOperationRequestsSince, logAiRequest,
+      providerClient: createProviderClient(),
+      claimAiOperation: claimVoiceTutorAiOperation,
+      settleAiOperation: settleAiOperationSlot,
     }),
-    createRuleCard,
+    createRuleCard: (card) => createRuleCardForVoiceTutorSession(
+      card.createdForUsername, card.sessionId, card.capsuleId, card, card.discovery,
+    ),
   })
   : null;
 app.use(createVoiceTutorRoutes({

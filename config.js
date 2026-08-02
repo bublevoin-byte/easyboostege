@@ -128,6 +128,10 @@ export const config = Object.freeze({
     voice: process.env.XAI_VOICE_NAME || '',
     trustedRuleAllowlist: readJson('VOICE_TUTOR_RULE_ALLOWLIST_JSON', []),
     trustedRuleSources: readJson('VOICE_TUTOR_RULE_SOURCES_JSON', {}),
+    ruleSearchEnabled: readBoolean('VOICE_TUTOR_RULE_SEARCH_ENABLED', false),
+    ruleSearchEndpoint: readProviderUrl('XAI_RULE_SEARCH_URL', 'https://api.x.ai/v1/responses'),
+    ruleSearchModel: process.env.XAI_RULE_SEARCH_MODEL || process.env.XAI_MODEL || 'grok-4.5',
+    ruleSearchTimeoutMs: readInteger('XAI_RULE_SEARCH_TIMEOUT_MS', 15_000, { min: 1_000, max: 60_000 }),
   }),
   telegram: Object.freeze({
     token: process.env.TELEGRAM_BOT_TOKEN || '',

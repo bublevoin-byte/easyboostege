@@ -52,6 +52,9 @@ const PUBLIC_ERRORS = Object.freeze({
   TRUSTED_RULE_RESPONSE_TOO_LARGE: { status: 422, message: 'Материал источника превышает безопасный размер.' },
   TRUSTED_RULE_EVIDENCE_INVALID: { status: 422, message: 'Материал источника не удалось подтвердить.' },
   TRUSTED_RULE_DISCOVERY_NOT_REQUIRED: { status: 409, message: 'Для текущего разбора уже есть проверенное правило.' },
+  TRUSTED_RULE_DISCOVERY_IN_PROGRESS: { status: 409, message: 'Поиск правила для этого разбора уже выполняется.' },
+  AI_BUDGET_EXHAUSTED: { status: 503, message: 'Дневной лимит поиска правил исчерпан. Попробуйте позже.' },
+  RATE_LIMITED: { status: 429, message: 'Слишком много запросов поиска правила. Попробуйте позже.' },
   RULE_CARD_CANONICAL_EXISTS: { status: 409, message: 'Для этого навыка уже одобрено каноническое правило.' },
   RULE_CARD_NOT_FOUND: { status: 404, message: 'Карточка правила не найдена.' },
   RULE_CARD_REVIEW_CONFLICT: { status: 409, message: 'Карточка уже получила другое решение.' },
@@ -65,8 +68,17 @@ const PUBLIC_ERRORS = Object.freeze({
   VOICE_TUTOR_REPEAT_ANSWER_INVALID: { status: 422, message: 'Ответ повтора некорректен.' },
 });
 
+const TICKET_09_PUBLIC_ERRORS = Object.freeze({
+  VOICE_TUTOR_CLARIFICATION_INVALID: { status: 400, message: 'Некорректное короткое уточнение.' },
+  VOICE_TUTOR_CLARIFICATION_LIMIT: { status: 429, message: 'Лимит уточнений для этого разбора исчерпан.' },
+  TRUSTED_RULE_SEARCH_FAILED: { status: 503, message: 'Поиск доверенных источников временно недоступен.' },
+  TRUSTED_RULE_SEARCH_TIMEOUT: { status: 503, message: 'Поиск доверенных источников превысил лимит времени.' },
+  VOICE_TUTOR_REPORT_NOT_FOUND: { status: 404, message: 'Сообщение о проблеме не найдено.' },
+  VOICE_TUTOR_REPORT_REVIEW_CONFLICT: { status: 409, message: 'Сообщение уже проверено с другим решением.' },
+});
+
 function sendVoiceTutorError(error, res, next) {
-  const known = PUBLIC_ERRORS[error?.code];
+  const known = PUBLIC_ERRORS[error?.code] || TICKET_09_PUBLIC_ERRORS[error?.code];
   if (!known) return next(error);
   return res.status(known.status).json({ error: { code: error.code, message: known.message } });
 }
@@ -154,9 +166,27 @@ function parsePedagogicalEvent(body) {
 }
 
 function parseRuleDiscovery(body) {
-  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length !== 1
-    || !SESSION_ID.test(String(body.session_id || ''))) return null;
-  return { sessionId: String(body.session_id) };
+  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length !== 2
+    || !SESSION_ID.test(String(body.session_id || '')) || !NONCE.test(String(body.nonce || ''))) return null;
+  return { sessionId: String(body.session_id), nonce: String(body.nonce) };
+}
+
+function parseClarification(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)
+    || Object.keys(body).some((key) => !['nonce', 'kind', 'message'].includes(key))) return null;
+  const kind = String(body.kind || '');
+  const message = String(body.message || '').replace(/\s+/gu, ' ').trim();
+  if (!NONCE.test(String(body.nonce || '')) || !['clarify', 'explain_differently'].includes(kind)
+    || (kind === 'clarify' && !message) || message.length > 200 || /[<>]/u.test(message)) return null;
+  return { nonce: String(body.nonce), kind, message };
+}
+
+const REPORT_REASONS = new Set(['incorrect_rule', 'unclear_explanation', 'bad_example', 'technical_issue']);
+
+function parseReport(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length !== 2
+    || !SESSION_ID.test(String(body.session_id || '')) || !REPORT_REASONS.has(body.reason)) return null;
+  return { sessionId: String(body.session_id), reason: body.reason };
 }
 
 function parseRepeatAttempt(body) {
@@ -194,6 +224,15 @@ function tracerResponse(result, capsule, extra = {}) {
     entitlements: result.entitlements,
     voice_tutor: result.voice_tutor,
     ...extra,
+  };
+}
+
+function publicStoredSession(session) {
+  return {
+    id: session.id, status: session.status, state: session.pedagogical_state || null,
+    micro_check_passed: session.micro_check_passed ?? null,
+    transfer_passed: session.transfer_passed ?? null, outcome: session.outcome ?? null,
+    started_at: session.started_at, expires_at: session.expires_at, ended_at: session.ended_at,
   };
 }
 
@@ -254,8 +293,9 @@ async function buildSourceCapsule(db, username, attempt, expectedRevision, refer
   });
   if (!capsule.rule?.discovery_required) return capsule;
   const examYear = new Date(referenceTime).getUTCFullYear();
-  const approvedRule = approvedCardRule(await db.getApprovedRuleCard(capsule.skill.id, examYear));
-  return approvedRule ? { ...capsule, rule: approvedRule } : capsule;
+  const approvedCard = await db.getApprovedRuleCard(capsule.skill.id, examYear);
+  const approvedRule = approvedCardRule(approvedCard);
+  return approvedRule ? { ...capsule, rule_card_id: approvedCard.id, rule: approvedRule } : capsule;
 }
 
 async function rebuildSourceCapsule(db, username, storedCapsule, referenceTime = new Date()) {
@@ -275,7 +315,7 @@ async function rebuildSourceCapsule(db, username, storedCapsule, referenceTime =
     if (capsule.id !== storedCapsule.id || capsule.version !== storedCapsule.version) {
       throw Object.assign(new Error('VOICE_TUTOR_REVISION_MISMATCH'), { code: 'VOICE_TUTOR_REVISION_MISMATCH' });
     }
-    return capsule;
+    return applySessionRuleCard(db, username, storedCapsule, capsule);
   }
   const attempt = attemptId ? await db.getModuleAttempt(username, attemptId) : null;
   if (!attempt) throw Object.assign(new Error('VOICE_TUTOR_ATTEMPT_NOT_FOUND'), { code: 'VOICE_TUTOR_ATTEMPT_NOT_FOUND' });
@@ -283,7 +323,23 @@ async function rebuildSourceCapsule(db, username, storedCapsule, referenceTime =
   if (capsule.id !== storedCapsule.id || capsule.version !== storedCapsule.version) {
     throw Object.assign(new Error('VOICE_TUTOR_REVISION_MISMATCH'), { code: 'VOICE_TUTOR_REVISION_MISMATCH' });
   }
-  return capsule;
+  return applySessionRuleCard(db, username, storedCapsule, capsule);
+}
+
+async function applySessionRuleCard(db, username, storedCapsule, capsule) {
+  const cardId = storedCapsule?.rule_card_id;
+  if (!cardId || typeof db.getRuleCard !== 'function') return capsule;
+  const card = await db.getRuleCard(cardId);
+  if (!card || card.skill?.id !== capsule.skill.id
+    || (card.status === 'pending_review' && card.created_for_username !== username)
+    || !['pending_review', 'approved'].includes(card.status)) return capsule;
+  const rule = approvedCardRule(card);
+  if (!rule) return capsule;
+  return {
+    ...capsule,
+    rule_card_id: card.id,
+    rule: { ...rule, provisional: card.status === 'pending_review' },
+  };
 }
 
 async function hasCurrentTextConsent(db, username, privacyPolicyVersion) {
@@ -360,27 +416,53 @@ export function createVoiceTutorRoutes({
   router.post('/api/v1/voice-tutor/rule-discoveries', auth, async (req, res, next) => {
     const parsed = parseRuleDiscovery(req.body);
     if (!parsed) return sendVoiceTutorError({ code: 'TRUSTED_RULE_REQUEST_INVALID' }, res, next);
+    const claimId = crypto.randomUUID();
+    const nextNonce = newNonce();
+    let claimed = false;
     try {
       const access = await db.getVoiceTutorAccess(req.user, limits, now());
       if (!access.entitlements.voice_tutor) return sendVoiceTutorError({ code: 'VOICE_TUTOR_PREMIUM_REQUIRED' }, res, next);
       if (!trustedRuleDiscovery) return sendVoiceTutorError({ code: 'TRUSTED_RULE_DISCOVERY_UNAVAILABLE' }, res, next);
       const session = await db.getVoiceTutorSession(req.user, parsed.sessionId);
       if (!session?.capsule) return sendVoiceTutorError({ code: 'VOICE_TUTOR_SESSION_NOT_FOUND' }, res, next);
-      const skillId = String(session.capsule.skill?.id || '');
-      const skillTitle = String(session.capsule.skill?.label || session.capsule.skill?.title || '');
-      if (!SKILL_ID.test(skillId) || !skillTitle || skillTitle.length > 160
-        || session.capsule.rule?.discovery_required !== true) {
+      const capsule = await rebuildSourceCapsule(db, req.user, session.capsule, now());
+      const skillId = String(capsule.skill?.id || '');
+      const skillTitle = String(capsule.skill?.label || capsule.skill?.title || '');
+      if (!SKILL_ID.test(skillId) || !skillTitle || skillTitle.length > 160) {
         return sendVoiceTutorError({ code: 'TRUSTED_RULE_DISCOVERY_NOT_REQUIRED' }, res, next);
       }
       const examYear = new Date(now()).getUTCFullYear();
       if (await db.getApprovedRuleCard(skillId, examYear)) {
         return sendVoiceTutorError({ code: 'RULE_CARD_CANONICAL_EXISTS' }, res, next);
       }
-      const result = await trustedRuleDiscovery.discover({
-        username: req.user, skill: { id: skillId, title: skillTitle }, examYear,
+      if (capsule.rule?.discovery_required !== true) {
+        return sendVoiceTutorError({ code: 'TRUSTED_RULE_DISCOVERY_NOT_REQUIRED' }, res, next);
+      }
+      await db.claimVoiceTutorRuleDiscovery(req.user, parsed.sessionId, {
+        claimId, nonceHash: nonceHash(parsed.nonce), now: now(),
       });
-      return res.status(201).json({ ...result, session_id: parsed.sessionId });
-    } catch (error) { return sendVoiceTutorError(error, res, next); }
+      claimed = true;
+      const result = await trustedRuleDiscovery.discover({
+        username: req.user, sessionId: parsed.sessionId, capsuleId: capsule.id,
+        skill: { id: skillId, title: skillTitle }, examYear,
+        discovery: {
+          claimId, expectedNonceHash: nonceHash(parsed.nonce), nextNonceHash: nonceHash(nextNonce),
+        },
+      });
+      const updated = await db.getVoiceTutorSession(req.user, parsed.sessionId);
+      const provisionalCapsule = await rebuildSourceCapsule(db, req.user, updated.capsule, now());
+      return res.status(201).json({
+        ...result, session_id: parsed.sessionId, nonce: nextNonce, capsule: publicVoiceTutorCapsule(provisionalCapsule),
+        session: publicStoredSession(updated), next_step: 'explain',
+      });
+    } catch (error) {
+      if (claimed) {
+        await db.failVoiceTutorRuleDiscovery(req.user, parsed.sessionId, {
+          claimId, errorCode: error?.code || 'TRUSTED_RULE_SEARCH_FAILED', now: now(),
+        }).catch(() => {});
+      }
+      return sendVoiceTutorError(error, res, next);
+    }
   });
 
   router.get('/api/v1/voice-tutor/rules/:skillId', auth, async (req, res, next) => {
@@ -522,19 +604,17 @@ export function createVoiceTutorRoutes({
           if (!existing?.capsule || existing.capsule.id !== capsule.id) {
             return res.status(409).json({ error: { code: 'IDEMPOTENCY_CONFLICT', message: 'Idempotency-Key уже связан с другим разбором.' } });
           }
-          return res.json(tracerResponse(result, existing.capsule, {
+          const existingCapsule = await rebuildSourceCapsule(db, req.user, existing.capsule, now());
+          return res.json(tracerResponse(result, existingCapsule, {
             mode: existing.delivery_mode || 'voice',
-            ...(existing.capsule.rule?.discovery_required ? { discovery_required: true } : {}),
+            ...(existingCapsule.rule?.discovery_required ? { discovery_required: true } : {}),
           }));
         }
         if (capsule.rule?.discovery_required) {
-          const released = await db.finishVoiceTutorSession(req.user, result.session.id, {
-            limits, now: now(), confirmedBillableSeconds: 0, preservePedagogicalState: true,
-          });
           const delivered = await db.setVoiceTutorSessionDelivery(req.user, result.session.id, {
             mode: 'local', errorCode: 'TRUSTED_RULE_DISCOVERY_REQUIRED',
           });
-          return res.status(201).json(tracerResponse({ ...released, created: true, session: delivered.session }, capsule, {
+          return res.status(201).json(tracerResponse({ ...result, created: true, session: delivered.session }, capsule, {
             mode: 'local', nonce, local_rule: capsule.rule, discovery_required: true,
           }));
         }
@@ -595,15 +675,18 @@ export function createVoiceTutorRoutes({
     if (!parsed) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректное событие голосового разбора.' } });
     const nonce = newNonce();
     try {
+      const storedBefore = await db.getVoiceTutorSession(req.user, req.params.sessionId);
+      if (!storedBefore?.capsule) return sendVoiceTutorError({ code: 'VOICE_TUTOR_SESSION_NOT_FOUND' }, res, next);
+      const capsule = await rebuildSourceCapsule(db, req.user, storedBefore.capsule, now());
       const result = await db.advanceVoiceTutorSession(req.user, req.params.sessionId, {
         nonceHash: nonceHash(parsed.nonce),
         nextNonceHash: nonceHash(nonce),
         event: parsed.event,
+        capsule,
         now: now(),
       });
       const stored = await db.getVoiceTutorSession(req.user, req.params.sessionId);
       if (stored?.delivery_mode === 'text') {
-        const capsule = await rebuildSourceCapsule(db, req.user, result.capsule, now());
         if (textTutor && await hasCurrentTextConsent(db, req.user, privacyPolicyVersion)) {
           try {
             const textTurn = await textTutor.createTurn({ capsule, state: result.session.state, username: req.user });
@@ -625,14 +708,80 @@ export function createVoiceTutorRoutes({
         }));
       }
       if (stored?.delivery_mode === 'local') {
-        return res.json(tracerResponse({ ...result, created: false }, result.capsule, {
-          mode: 'local', nonce, local_rule: result.capsule.rule,
+        return res.json(tracerResponse({ ...result, created: false }, capsule, {
+          mode: 'local', nonce, local_rule: capsule.rule,
         }));
       }
-      return res.json(tracerResponse({ ...result, created: false }, result.capsule, { mode: 'voice', nonce }));
+      return res.json(tracerResponse({ ...result, created: false }, capsule, { mode: 'voice', nonce }));
     } catch (error) {
       return sendVoiceTutorError(error, res, next);
     }
+  });
+
+  router.post('/api/v1/voice-tutor/sessions/:sessionId/clarifications', auth, async (req, res, next) => {
+    if (!SESSION_ID.test(req.params.sessionId)) return res.status(400).json({ error: { code: 'VALIDATION_ERROR' } });
+    const parsed = parseClarification(req.body);
+    if (!parsed) return sendVoiceTutorError({ code: 'VOICE_TUTOR_CLARIFICATION_INVALID' }, res, next);
+    const nonce = newNonce();
+    try {
+      if (!textTutor || !await hasCurrentTextConsent(db, req.user, privacyPolicyVersion)) {
+        return sendVoiceTutorError({ code: 'PRIVACY_CONSENT_REQUIRED' }, res, next);
+      }
+      const stored = await db.getVoiceTutorSession(req.user, req.params.sessionId);
+      if (!stored?.capsule) return sendVoiceTutorError({ code: 'VOICE_TUTOR_SESSION_NOT_FOUND' }, res, next);
+      if (stored.delivery_mode !== 'text' || !['diagnose', 'explain'].includes(stored.pedagogical_state)) {
+        return sendVoiceTutorError({ code: 'VOICE_TUTOR_TRANSITION_INVALID' }, res, next);
+      }
+      const capsule = await rebuildSourceCapsule(db, req.user, stored.capsule, now());
+      const recorded = await db.clarifyVoiceTutorSession(req.user, req.params.sessionId, {
+        nonceHash: nonceHash(parsed.nonce), nextNonceHash: nonceHash(nonce), now: now(),
+      });
+      try {
+        const textTurn = await textTutor.createClarification({
+          capsule, state: stored.pedagogical_state, username: req.user, kind: parsed.kind, message: parsed.message,
+        });
+        return res.json(tracerResponse({ ...recorded, created: false }, capsule, {
+          mode: 'text', nonce, text_turn: textTurn, clarification_turns: recorded.clarification_turns,
+        }));
+      } catch (textError) {
+        const delivered = await db.setVoiceTutorSessionDelivery(req.user, req.params.sessionId, {
+          mode: 'local', errorCode: textError?.code || 'VOICE_TUTOR_TEXT_UNAVAILABLE',
+        });
+        return res.json(tracerResponse({ ...recorded, session: delivered.session, created: false }, capsule, {
+          mode: 'local', nonce, local_rule: capsule.rule, clarification_turns: recorded.clarification_turns,
+        }));
+      }
+    } catch (error) { return sendVoiceTutorError(error, res, next); }
+  });
+
+  router.post('/api/v1/voice-tutor/reports', auth, async (req, res, next) => {
+    const parsed = parseReport(req.body);
+    if (!parsed) return res.status(400).json({ error: { code: 'VALIDATION_ERROR' } });
+    try {
+      const result = await db.createVoiceTutorReport(req.user, {
+        id: newSessionId(), sessionId: parsed.sessionId, reason: parsed.reason, createdAt: now(),
+      });
+      const report = structuredClone(result.report);
+      delete report.username;
+      return res.status(result.created ? 201 : 200).json({ created: result.created, report });
+    } catch (error) { return sendVoiceTutorError(error, res, next); }
+  });
+
+  router.get('/api/v1/voice-tutor/reports', auth, requireAdmin, async (req, res, next) => {
+    const status = String(req.query.status || 'pending');
+    if (!['pending', 'confirmed', 'dismissed'].includes(status)) return res.status(400).json({ error: { code: 'VALIDATION_ERROR' } });
+    try { return res.json({ reports: await db.listVoiceTutorReports({ status }) }); } catch (error) { return next(error); }
+  });
+
+  router.post('/api/v1/voice-tutor/reports/:reportId/review', auth, requireAdmin, async (req, res, next) => {
+    const decision = req.body?.decision;
+    if (!SESSION_ID.test(String(req.params.reportId || '')) || !req.body || typeof req.body !== 'object'
+      || Array.isArray(req.body) || Object.keys(req.body).length !== 1 || !['confirmed', 'dismissed'].includes(decision)) {
+      return res.status(400).json({ error: { code: 'VALIDATION_ERROR' } });
+    }
+    try {
+      return res.json(await db.reviewVoiceTutorReport(req.params.reportId, { decision, reviewer: req.user, reviewedAt: now() }));
+    } catch (error) { return sendVoiceTutorError(error, res, next); }
   });
 
   router.post('/api/v1/voice-tutor/sessions/:sessionId/activate', auth, async (req, res, next) => {

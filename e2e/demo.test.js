@@ -403,24 +403,20 @@ async function runE2E() {
           },
         },
       });
-      const pointer = await window.registerVoiceTutorError({
-        module: 'grammar',
-        itemId: 'grammar.past-simple.last-summer',
-        revision: 1,
-        learnerAnswer: 'go-ed-private-e2e',
-      });
-      const host = document.createElement('div');
-      host.id = 'voiceTutorE2EError';
-      host.innerHTML = window.voiceTutorButton(pointer);
-      document.body.appendChild(host);
+      window.tab('scr3');
+      window.S.examIdx = 0;
+      window.gExam();
+      window.gExamStart();
+      const answers = ['go-ed-private-e2e', 'first', 'was founded', 'more beautiful', 'is planning', 'her'];
+      answers.forEach((answer, index) => { document.getElementById(`g_ex_${index}`).value = answer; });
+      window.gExamCheck();
     });
-    const voiceButton = authenticatedPage.getByRole('button', { name: '🎙️ Разобрать голосом' });
+    const voiceButton = authenticatedPage.locator('#voice_tutor_grammar_0 .voiceTutorTrigger');
+    await voiceButton.waitFor({ state: 'visible', timeout: 5_000 });
     await voiceButton.click();
     const voiceSheet = authenticatedPage.getByRole('dialog', { name: 'Разбор ошибки с ИИ' });
     await voiceSheet.waitFor({ state: 'visible', timeout: 5_000 });
     await voiceSheet.getByText('Голосовой репетитор подключён.').waitFor({ state: 'visible', timeout: 5_000 });
-    const tutorInput = voiceSheet.getByRole('textbox', { name: 'Ответ репетитору' });
-    const continueButton = voiceSheet.getByRole('button', { name: 'Продолжить' });
     const tutorState = voiceSheet.locator('#voiceTutorState');
     await authenticatedPage.evaluate(async () => {
       await fetch('/api/v1/privacy/consent', {
@@ -428,26 +424,48 @@ async function runE2E() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text_processing: false, voice_processing: true }),
       });
-      window.__voiceRealtimeSocket.onmessage({ data: JSON.stringify({ type: 'error' }) });
     });
+    const emitTutorTool = async (callId, event) => authenticatedPage.evaluate(({ id, payload }) => {
+      const responseId = `response-${id}`;
+      const itemId = `item-${id}`;
+      window.__voiceRealtimeSocket.onmessage({ data: JSON.stringify({ type: 'response.created', response_id: responseId }) });
+      window.__voiceRealtimeSocket.onmessage({ data: JSON.stringify({
+        type: 'response.output_item.added', response_id: responseId,
+        item: { type: 'function_call', id: itemId, name: 'advance_pedagogy', call_id: id },
+      }) });
+      window.__voiceRealtimeSocket.onmessage({ data: JSON.stringify({
+        type: 'response.function_call_arguments.done', response_id: responseId, item_id: itemId,
+        name: 'advance_pedagogy', call_id: id, arguments: JSON.stringify(payload),
+      }) });
+      window.__voiceRealtimeSocket.onmessage({ data: JSON.stringify({ type: 'response.done', response_id: responseId }) });
+    }, { id: callId, payload: event });
+    await emitTutorTool('e2e-call-diagnose', { type: 'diagnosis_complete' });
     await authenticatedPage.waitForFunction(
-      (fragment) => document.querySelector('#voiceTutorState')?.textContent?.includes(fragment),
-      'Сначала уточним, почему выбран этот ответ',
+      (callId) => window.__voiceRealtimeEvidence.sent.some((event) => event.item?.call_id === callId),
+      'e2e-call-diagnose',
     );
-    await continueButton.click();
-    await authenticatedPage.waitForFunction((fragment) => document.querySelector('#voiceTutorState')?.textContent?.includes(fragment), 'После last summer нужен Past Simple');
-    assert.match(await tutorState.innerText(), /После last summer нужен Past Simple/u);
-    await continueButton.click();
-    await authenticatedPage.waitForFunction((fragment) => document.querySelector('#voiceTutorState')?.textContent?.includes(fragment), 'Yesterday my sister');
-    assert.match(await tutorState.innerText(), /Yesterday my sister/u);
-    await tutorInput.fill('went');
-    await continueButton.click();
-    await authenticatedPage.waitForFunction((fragment) => document.querySelector('#voiceTutorState')?.textContent?.includes(fragment), 'Last week we');
-    assert.match(await tutorState.innerText(), /Last week we/u);
-    await tutorInput.fill('bought');
-    await continueButton.click();
+    const diagnosisOutput = await authenticatedPage.evaluate(() => window.__voiceRealtimeEvidence.sent
+      .find((event) => event.item?.call_id === 'e2e-call-diagnose')?.item?.output);
+    assert.equal(JSON.parse(diagnosisOutput).accepted, true);
+    assert.equal(JSON.parse(diagnosisOutput).state, 'explain');
+    await authenticatedPage.waitForFunction((fragment) => document.querySelector('#voiceTutorState')?.textContent?.includes(fragment), 'Past Simple — завершённое действие', { timeout: 5_000 });
+    assert.match(await tutorState.innerText(), /Past Simple — завершённое действие/u);
+    await emitTutorTool('e2e-call-explain', { type: 'explanation_complete' });
+    await authenticatedPage.waitForFunction((fragment) => document.querySelector('#voiceTutorState')?.textContent?.includes(fragment), 'I _____ him yesterday');
+    assert.match(await tutorState.innerText(), /I _____ him yesterday/u);
+    await emitTutorTool('e2e-call-micro', { type: 'check_answer', answer: 'saw' });
+    await authenticatedPage.waitForFunction((fragment) => document.querySelector('#voiceTutorState')?.textContent?.includes(fragment), 'While I _____ dinner');
+    assert.match(await tutorState.innerText(), /While I _____ dinner/u);
+    await emitTutorTool('e2e-call-transfer', { type: 'transfer_answer', answer: 'was cooking' });
     await authenticatedPage.waitForFunction((fragment) => document.querySelector('#voiceTutorState')?.textContent?.includes(fragment), 'правило проверено на новом примере');
     assert.match(await tutorState.innerText(), /правило проверено на новом примере/u);
+    await authenticatedPage.evaluate(() => {
+      window.__voiceRealtimeSocket.onmessage({ data: JSON.stringify({ type: 'error' }) });
+    });
+    await authenticatedPage.waitForFunction(async () => {
+      const exported = await (await fetch('/api/v1/account/export')).json();
+      return exported.voice_tutor_sessions?.[0]?.delivery_mode === 'local';
+    });
     const voiceEvidence = await authenticatedPage.evaluate(async () => {
       const recovery = await (await fetch('/api/v1/voice-tutor/recovery-map')).json();
       const exported = await (await fetch('/api/v1/account/export')).json();
@@ -465,6 +483,7 @@ async function runE2E() {
     assert.equal(voiceEvidence.realtime.sent[0].type, 'session.update');
     assert.equal(voiceEvidence.realtime.sent[0].session.voice, 'ara');
     assert.equal(voiceEvidence.realtime.sent[0].session.tools[0].name, 'advance_pedagogy');
+    assert.equal(voiceEvidence.realtime.sent.filter((event) => event.type === 'conversation.item.create').length, 4);
     assert.match(voiceEvidence.realtime.sent[0].session.instructions, /diagnose → explain → micro_check → transfer_task/u);
     assert.match(voiceEvidence.realtime.sent[0].session.instructions, /"learner_answer":"go-ed-private-e2e"/u);
     assert.doesNotMatch(voiceEvidence.realtime.sent[0].session.instructions, /"reference":|"answers":/u);
@@ -482,8 +501,8 @@ async function runE2E() {
     await voiceSheet.getByRole('button', { name: 'Завершить и вернуться в упражнение' }).click();
     console.log('e2e: Voice Error Tutor fake-provider recovery loop passed without paid network');
 
-    await authenticatedPage.getByRole('button', { name: 'Исправить' }).click();
-    await authenticatedPage.getByRole('button', { name: 'Главная' }).click();
+    await authenticatedPage.evaluate(() => window.tab('scr1'));
+    await authenticatedPage.locator('#scr1.on').waitFor({ state: 'visible', timeout: 5_000 });
     await authenticatedPage.evaluate(() => {
       window.__e2eMicrophoneMode = 'success';
       Object.defineProperty(navigator, 'mediaDevices', {

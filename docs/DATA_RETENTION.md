@@ -10,12 +10,27 @@
 | Premium-entitlements, исходная bounded-ошибка и структурированные результаты Voice Tutor | пока существует аккаунт; нормализованный ошибочный ответ входит в учебный журнал исходных попыток, а evaluated writing text/speaking transcript остаются только в уже существующих журналах evaluation; ни один из них не копируется в Voice Tutor session или её export; аудио и временные субтитры отсутствуют | удаляются вместе с аккаунтом |
 | Карта восстановления Voice Tutor и day-1/day-7 повторы | пока существует аккаунт; только skill/rule/session/task ids, pass flags, UTC timestamps, bounded potential points и SHA-256 idempotency fingerprint; отправленный ответ, аудио и transcript не сохраняются | экспортируется владельцу без fingerprint и каскадно удаляется вместе с аккаунтом |
 | Найденные rule cards | bounded нормализованное правило, skill/год, URL, retrieval time, content hashes, status и review audit; fetched страницы не сохраняются | созданные владельцем pending/rejected reports удаляются вместе с аккаунтом; approved canonical сохраняется без creator identity, а identity удаляемого reviewer обезличивается в оставшихся карточках |
+| Сообщения ученика о Voice Tutor | session/rule IDs, одна из четырёх причин, status и admin review audit; свободный текст, audio и transcript не принимаются | экспортируются владельцу и каскадно удаляются вместе с аккаунтом |
 | Административный аудит | сохраняется как история решения | при удалении аккаунта `username` удаляется из metadata, остаётся только обезличенный факт действия |
 | Резервные копии | 14 дней локально, 30 дней во внешнем хранилище | удаляются заданиями retention |
 
 Удаление аккаунта выполняется транзакционно; file storage также сериализует удаление с Voice Tutor
 и rule-card mutations и запрещает новые creator-owned reports после удаления owner. Новые категории персональных данных нельзя
 добавлять без обновления экспорта, удаления, этой таблицы и соответствующих тестов.
+
+Persisted `voice_tutor_sessions.capsule` — только reference schema: capsule/source/module/skill IDs,
+revision/version и, при необходимости, `rule_card_id`. Prompt, reference,
+learner answer, rubrics и answer arrays каждый раз реконструируются из owner-bound source attempt
+и canonical server catalog. Миграция 027 минимизирует старые capsule без копирования их текста,
+а миграция 028 удаляет прежний `content_hash`, чтобы не хранить fingerprint ответа ученика.
+`clarification_turns` хранит только число 0–3. `voice_tutor_reports` хранит UUID session/rule,
+structured reason/status и admin audit; learner free text не принимается. Обе категории входят в
+экспорт владельца и каскадно удаляются вместе с аккаунтом.
+
+Discovery state хранит только UUID claim, status и timestamps/error code, без найденной страницы,
+prompt или ответа ученика. Durable AI slot в `ai_requests` хранит bounded operation/provider/model,
+claim key, terminal status и технические usage/cost fields; failed slots сохраняются как
+наблюдаемые технические попытки и не содержат prompt, document body или learner answer.
 
 Realtime Voice Tutor обрабатывает аудио потоково у внешнего processor только после актуального
 `voice_processing` consent и server-owned `voice_activated_at`, выставленного после provider ACK.

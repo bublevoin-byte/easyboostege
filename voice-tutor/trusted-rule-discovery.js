@@ -78,10 +78,10 @@ export function createTrustedRuleDiscovery({
     throw new Error('TRUSTED_RULE_DISCOVERY_CONFIG_INVALID');
   }
   return Object.freeze({
-    async discover({ username, skill: inputSkill, examYear }) {
+    async discover({ username, sessionId = null, capsuleId = null, skill: inputSkill, examYear, discovery = null }) {
       const skill = normalizedSkill(inputSkill);
       if (!Number.isInteger(examYear) || examYear < 2020 || examYear > 2100) fail('TRUSTED_RULE_REQUEST_INVALID');
-      const rawResults = await searchProvider.search({ skill: structuredClone(skill), examYear, allowlist: structuredClone(allowlist) });
+      const rawResults = await searchProvider.search({ username, skill: structuredClone(skill), examYear, allowlist: structuredClone(allowlist) });
       if (!Array.isArray(rawResults) || rawResults.length < 1 || rawResults.length > 12) fail('TRUSTED_RULE_INSUFFICIENT_SOURCES');
       let trusted;
       try {
@@ -146,6 +146,9 @@ export function createTrustedRuleDiscovery({
         })),
         discrepancies,
         createdAt: now(),
+        sessionId,
+        capsuleId,
+        discovery,
       });
       return {
         card_id: card.id,

@@ -106,9 +106,10 @@ voice-cost metrics even when final delivery mode is text/local. Provider/model/p
 is preserved when delivery subsequently downgrades to text or local.
 
 Browser realtime transport принимает только bounded JSON events, ограничивает bytes и частоту,
-требует `session.updated` и `response.created` до педагогического tool call, принимает документированный
-top-level `response_id` и совместимый `response.id`, разрешает только server-known tool names
-и одноразовый bounded `call_id`. Повтор, неверный порядок, oversized payload и off-scope tool не
+требует `session.updated`, затем связанный lifecycle `response.created → response.output_item.added
+→ response.function_call_arguments.done → response.done`; response/item/call IDs и tool name
+должны совпасть. Несколько объявленных calls обрабатываются в детерминированном порядке, все
+function outputs отправляются до ровно одного continuation `response.create`. Повтор, неверный порядок, oversized payload и off-scope tool не
 продвигают педагогический FSM; нарушение закрывает поток безопасным фиксированным сообщением.
 Capsule и learner-controlled поля помечены в prompt как недоверенные данные, а успех
 micro-check/transfer подтверждает только HTTP endpoint с rotating nonce.
@@ -125,7 +126,7 @@ fake credential provider и локальный fake WebSocket при выпол�
 хранит полный `answer` и отдельный `evaluated_answer`; технический `ai_requests` не хранит ни один
 из этих текстов.
 
-Дневной проектный бюджет задаётся `AI_DAILY_REQUEST_BUDGET` и считается по устойчивому журналу `ai_requests` с начала UTC-суток. При исчерпании API возвращает `AI_BUDGET_EXHAUSTED`. Провайдеры можно аварийно отключить независимо через `XAI_ENABLED=false` или `GROQ_ENABLED=false`, не удаляя ключи.
+Дневной проектный бюджет задаётся `AI_DAILY_REQUEST_BUDGET` и считается по устойчивому журналу `ai_requests` с начала UTC-суток. Trusted-rule search/extract atomically claim an `in_progress` row before provider transport; global/day and user/operation/hour limits include in-progress and failed attempts, and idempotent settlement records `completed|failed`. При исчерпании API возвращает `AI_BUDGET_EXHAUSTED`. Провайдеры можно аварийно отключить независимо через `XAI_ENABLED=false` или `GROQ_ENABLED=false`, не удаляя ключи.
 
 Если провайдер возвращает usage-метаданные, `prompt_tokens` и `completion_tokens` сохраняются в `ai_requests`. Это позволяет рассчитать стоимость после фиксации моделей и актуальных тарифов без сохранения пользовательских промптов.
 
@@ -145,6 +146,24 @@ fake credential provider и локальный fake WebSocket при выпол�
 3. Сгенерированное задание сохраняется в банк и становится доступно всем остальным ученикам.
 
 Из-за третьего шага стоимость растёт по числу различных заданий, а не по числу учеников.
+
+## Voice Tutor rule search and clarifications
+
+`voice_tutor_rule_search` вызывает xAI Responses только за structured `url_citation` annotations:
+`store:false`, server-owned skill/year, 2–5 allowlisted domains, 15-second deadline and 64 KiB JSON
+cap. Из любого большего набора citations сервер выбирает не более пяти URL, сначала по одному на
+независимую configured authority, поэтому один search не может исчерпать лимит extract-операций.
+Текст ответа модели и URL из prose не используются. Затем `voice_tutor_rule_extract`
+обрабатывает bounded fetched documents как untrusted data; две authority обязаны дать одинаковые
+claims. Search и extract имеют отдельные per-user rate/budget/log records.
+Discovery transport starts only after the owner session atomically claims its active diagnose state
+with the current nonce. Card creation rechecks the same claim and nonce, binds the pending card,
+rotates the nonce and enters explain in one mutation; finish/delete wins safely and cannot leave an
+orphan card. A non-streaming HTTP body is rejected before buffering.
+
+`voice_tutor_text` также обслуживает максимум три transient clarification turns. Learner message
+не передаётся repository/log/export, не меняет FSM и ограничен 200 символами; server mutation
+вращает nonce и увеличивает только `clarification_turns` до provider call.
 
 Встроенные задания живут в `public/task-bank.json`. Файл читается сервером при старте
 (идемпотентный посев по содержанию) и отдаётся клиенту как часть офлайн-оболочки, поэтому

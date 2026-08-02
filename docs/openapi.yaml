@@ -271,17 +271,19 @@ paths:
           application/json:
             schema:
               type: object
-              required: [session_id]
+              required: [session_id, nonce]
               properties:
                 session_id: { type: string, format: uuid }
+                nonce: { type: string, minLength: 16, maxLength: 200 }
               additionalProperties: false
       responses:
-        '201': { description: Explicitly provisional pending_review rule with at least two source URLs }
+        '201': { description: Explicitly provisional pending_review rule with at least two source URLs, atomically bound to the still-active owner session; includes the next one-time nonce for the explain state }
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { description: Premium voice_tutor entitlement required }
-        '409': { description: Session does not require discovery, or an approved canonical card already exists }
+        '409': { description: Session is inactive or no longer requires discovery, nonce was replayed, another discovery owns the session claim, or an approved canonical card already exists }
         '422': { description: One source, conflict, blocked URL or invalid evidence; no fact/card is created }
-        '503': { description: Discovery is not configured or a bounded dependency failed }
+        '429': { description: Per-user trusted-rule search or extraction rate limit is exhausted }
+        '503': { description: Discovery is not configured, the UTC AI budget is exhausted, or a bounded dependency failed }
   /api/v1/voice-tutor/rules/{skillId}:
     get:
       summary: Retrieve only an approved canonical rule card
@@ -381,6 +383,83 @@ paths:
         '200': { description: Same capsule through the budgeted text AI operation when current text_processing consent exists, otherwise through its local canonical rule; seconds since server activation remain billable, an unactivated session bills zero, and no second reservation is created }
         '400': { $ref: '#/components/responses/BadRequest' }
         '409': { description: Replayed nonce }
+  /api/v1/voice-tutor/sessions/{sessionId}/clarifications:
+    post:
+      summary: Ask one bounded transient clarification without changing the pedagogical state
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nonce, kind]
+              properties:
+                nonce: { type: string, minLength: 16, maxLength: 200 }
+                kind: { type: string, enum: [clarify, explain_differently] }
+                message: { type: string, minLength: 1, maxLength: 200, description: Transient provider input; never persisted or logged }
+              additionalProperties: false
+      responses:
+        '200': { description: Same FSM state, rotated nonce, bounded clarification count and transient text turn }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { description: Current text-processing consent required }
+        '409': { description: Replayed nonce }
+        '429': { description: Three-turn clarification limit reached }
+  /api/v1/voice-tutor/reports:
+    post:
+      summary: Submit a structured learner report without free text
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session_id, reason]
+              properties:
+                session_id: { type: string, format: uuid }
+                reason: { type: string, enum: [incorrect_rule, unclear_explanation, bad_example, technical_issue] }
+              additionalProperties: false
+      responses:
+        '201': { description: Owner-bound report queued with session/rule identifiers only }
+        '200': { description: Idempotent existing report }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { description: Session does not belong to current user }
+    get:
+      summary: List the administrator learner-report review queue
+      parameters:
+        - in: query
+          name: status
+          schema: { type: string, enum: [pending, confirmed, dismissed], default: pending }
+      responses:
+        '200': { description: Structured queue and review audit without audio, transcript or learner text }
+        '403': { description: Administrator role required }
+  /api/v1/voice-tutor/reports/{reportId}/review:
+    post:
+      summary: Idempotently confirm or dismiss a structured learner report
+      parameters:
+        - in: path
+          name: reportId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [confirmed, dismissed] }
+              additionalProperties: false
+      responses:
+        '200': { description: First audited review or idempotent replay }
+        '403': { description: Administrator role required }
+        '404': { description: Report not found }
+        '409': { description: Report already has the opposite decision }
   /api/v1/voice-tutor/sessions/{sessionId}/activate:
     post:
       summary: Idempotently start server-owned voice billing after the provider acknowledges session.update

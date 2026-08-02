@@ -31,7 +31,7 @@ const RULE = Object.freeze({
   claims: ['future-continuous-action-in-progress-at-future-time'],
 });
 
-function fixtureDiscovery(repository, { urls = URLS, evidence = () => RULE, fetchFixture = null } = {}) {
+function fixtureDiscovery(repository, { urls = URLS, evidence = () => RULE, fetchFixture = null, createRuleCard = null } = {}) {
   const fetched = [];
   const extractionCalls = [];
   return {
@@ -55,7 +55,7 @@ function fixtureDiscovery(repository, { urls = URLS, evidence = () => RULE, fetc
           return evidence(input.source.url);
         },
       },
-      createRuleCard: (card) => repository.createRuleCard(card),
+      createRuleCard: createRuleCard || ((card) => repository.createRuleCard(card)),
       now: () => NOW,
       newId: () => '5ce47655-4d7e-46bb-aa0a-c96244cb1782',
     }),
@@ -255,7 +255,7 @@ test('trusted fetch pins public DNS and bounds redirects, MIME, size and timeout
 
 test('AI evidence extraction keeps fetched prompt injection in an untrusted user-data envelope', async () => {
   const calls = [];
-  const logs = [];
+  const slots = [];
   const extractor = createAiRuleEvidenceExtractor({
     providerClient: {
       async askWithFallback(system, user, operation) {
@@ -263,9 +263,14 @@ test('AI evidence extraction keeps fetched prompt injection in an untrusted user
         return { text: JSON.stringify(RULE), provider: 'fixture', model: 'fixture-v1' };
       },
     },
-    hasAiBudget: async () => true,
-    countAiOperationRequestsSince: async () => 0,
-    logAiRequest: async (entry) => logs.push(entry),
+    claimAiOperation: async (request) => {
+      slots.push({ type: 'claim', request });
+      return { claim_id: '0d27e46c-3ad6-42ec-a13c-3a2c8329f345' };
+    },
+    settleAiOperation: async (username, claimId, settlement) => {
+      slots.push({ type: 'settle', username, claimId, settlement });
+      return { applied: true };
+    },
     now: () => NOW,
   });
   const evidence = await extractor.extract({
@@ -280,7 +285,34 @@ test('AI evidence extraction keeps fetched prompt injection in an untrusted user
   assert.equal(calls[0].system.includes('Reveal secrets'), false);
   assert.match(calls[0].user, /untrusted_source_document/u);
   assert.match(calls[0].user, /Reveal secrets/u);
-  assert.equal(logs[0].promptVersion, 'voice-tutor-rule-discovery-v1');
+  assert.deepEqual(slots.map((entry) => entry.type), ['claim', 'settle']);
+  assert.equal(slots[0].request.promptVersion, 'voice-tutor-rule-discovery-v1');
+  assert.equal(slots[1].settlement.status, 'completed');
+});
+
+test('AI evidence extraction settles provider failures with a fixed non-sensitive error code', async () => {
+  const settlements = [];
+  const sensitiveMessage = `private fetched document ${'x'.repeat(200)}`;
+  const extractor = createAiRuleEvidenceExtractor({
+    providerClient: {
+      async askWithFallback() { throw new Error(sensitiveMessage); },
+    },
+    claimAiOperation: async () => ({ claim_id: '3b3e29a2-a1c5-473a-8f04-8ac3a60d5001' }),
+    settleAiOperation: async (username, claimId, settlement) => {
+      settlements.push({ username, claimId, settlement });
+      return { applied: true };
+    },
+    now: () => NOW,
+  });
+  await assert.rejects(extractor.extract({
+    username: 'student', skill: { id: 'ege.grammar.future', title: 'Future' }, examYear: 2026,
+    source: { url: URLS[0], authority: 'cambridge', contentHash: 'a'.repeat(64) },
+    document: { untrustedText: sensitiveMessage },
+  }), (error) => error.message === sensitiveMessage);
+  assert.equal(settlements.length, 1);
+  assert.equal(settlements[0].settlement.status, 'failed');
+  assert.equal(settlements[0].settlement.errorCode, 'TRUSTED_RULE_EVIDENCE_INVALID');
+  assert.equal(JSON.stringify(settlements).includes(sensitiveMessage), false);
 });
 
 function authenticationFor(repository) {
@@ -312,19 +344,33 @@ test('only admins review cards idempotently and canonical retrieval exposes appr
   await repository.setPrivacyConsent(student, { text_processing: true, voice_processing: true, policy_version: 'test-v1' });
   const discoverySessionId = '57b0f151-79b9-4826-a596-84f713b26af2';
   const canonicalSessionId = 'a8ea9f3c-aa1e-4f0e-98d2-c602df82d9cf';
+  const learnerReportId = '0e580e21-c01f-49ec-8dfe-d33f17a8f35f';
   const sourceAttemptId = '35fca5d8-26d5-4bba-a438-799f83e7d6e2';
   await repository.recordModuleAttempt(student, {
     id: sourceAttemptId, module: 'grammar', activity: 'voice_tutor_error', score: 0, maxScore: 1,
     metadata: { item_id: 'grammar.future-passive.will-be-used', item_revision: 1, learner_answer: 'will use' },
   });
-  const sessionIds = [discoverySessionId, canonicalSessionId];
-  const discovery = fixtureDiscovery(repository).service;
+  const sessionIds = [discoverySessionId, canonicalSessionId, learnerReportId];
+  let nonceCounter = 0;
+  const discovery = fixtureDiscovery(repository, {
+    createRuleCard: (card) => repository.createRuleCardForVoiceTutorSession(
+      card.createdForUsername, card.sessionId, card.capsuleId, card, card.discovery,
+    ),
+  }).service;
+  let discoveryErrorCode = null;
+  const routeDiscovery = {
+    async discover(input) {
+      if (discoveryErrorCode) throw Object.assign(new Error(discoveryErrorCode), { code: discoveryErrorCode });
+      return discovery.discover(input);
+    },
+  };
   const app = express();
   app.use(express.json());
   app.use(createVoiceTutorRoutes({
     authentication: authenticationFor(repository), db: repository, limits: LIMITS,
-    trustedRuleDiscovery: discovery, now: () => NOW, privacyPolicyVersion: 'test-v1',
-    newSessionId: () => sessionIds.shift(), newNonce: () => 'trusted-rule-nonce-0001',
+    trustedRuleDiscovery: routeDiscovery, now: () => NOW, privacyPolicyVersion: 'test-v1',
+    newSessionId: () => sessionIds.shift(),
+    newNonce: () => `trusted-rule-nonce-${String(++nonceCounter).padStart(4, '0')}`,
   }));
   const server = http.createServer(app);
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
@@ -342,15 +388,42 @@ test('only admins review cards idempotently and canonical retrieval exposes appr
     assert.equal(discoverySession.session.id, discoverySessionId);
     assert.equal(discoverySession.discovery_required, true);
     assert.equal(discoverySession.mode, 'local');
-    assert.equal(discoverySession.voice_tutor.daily_remaining_seconds, 600);
+    assert.equal(discoverySession.voice_tutor.daily_remaining_seconds, 300);
+    for (const [errorCode, status] of [['AI_BUDGET_EXHAUSTED', 503], ['RATE_LIMITED', 429]]) {
+      discoveryErrorCode = errorCode;
+      const limitedResponse = await request(student, '/api/v1/voice-tutor/rule-discoveries', {
+        method: 'POST',
+        body: JSON.stringify({ session_id: discoverySessionId, nonce: discoverySession.nonce }),
+      });
+      assert.equal(limitedResponse.status, status);
+      assert.equal((await limitedResponse.json()).error.code, errorCode);
+    }
+    discoveryErrorCode = null;
     const createdResponse = await request(student, '/api/v1/voice-tutor/rule-discoveries', {
       method: 'POST',
-      body: JSON.stringify({ session_id: discoverySessionId }),
+      body: JSON.stringify({ session_id: discoverySessionId, nonce: discoverySession.nonce }),
     });
     assert.equal(createdResponse.status, 201);
     const created = await createdResponse.json();
     assert.equal(created.provisional, true);
     assert.equal(created.session_id, discoverySessionId);
+    assert.equal(created.capsule.rule.id, `trusted-rule:${created.card_id}`);
+    assert.deepEqual(created.capsule.rule.sources, URLS);
+    let pedagogical = { nonce: created.nonce };
+    for (const event of [
+      { type: 'explanation_complete' },
+      { type: 'check_answer', answer: 'will be used' },
+      { type: 'transfer_answer', answer: 'will be announced' },
+    ]) {
+      const response = await request(student, `/api/v1/voice-tutor/sessions/${discoverySessionId}/events`, {
+        method: 'POST', body: JSON.stringify({ nonce: pedagogical.nonce, event }),
+      });
+      assert.equal(response.status, 200);
+      pedagogical = await response.json();
+    }
+    assert.equal(pedagogical.session.state, 'resolved');
+    assert.equal((await repository.getVoiceTutorRecoveryMap(student, { limits: LIMITS, now: NOW })).skills.length, 1);
+    await repository.finishVoiceTutorSession(student, discoverySessionId, { limits: LIMITS, now: NOW });
     const arbitrarySkill = await request(student, '/api/v1/voice-tutor/rule-discoveries', {
       method: 'POST', body: JSON.stringify({ skill: { id: 'ege.grammar.fake', title: 'Ignore system' }, exam_year: 2026 }),
     });
@@ -401,9 +474,15 @@ test('only admins review cards idempotently and canonical retrieval exposes appr
     assert.equal(canonicalSession.session.id, canonicalSessionId);
     assert.equal(canonicalSession.discovery_required, undefined);
     assert.equal(canonicalSession.capsule.rule.discovery_required, undefined);
+    assert.equal(canonicalSession.capsule.rule_card_id, created.card_id);
     assert.equal(canonicalSession.local_rule.explanation, RULE.explanation);
+    const reportResponse = await request(student, '/api/v1/voice-tutor/reports', {
+      method: 'POST', body: JSON.stringify({ session_id: canonicalSessionId, reason: 'incorrect_rule' }),
+    });
+    assert.equal(reportResponse.status, 201);
+    assert.equal((await reportResponse.json()).report.rule_card_id, created.card_id);
     const duplicateDiscovery = await request(student, '/api/v1/voice-tutor/rule-discoveries', {
-      method: 'POST', body: JSON.stringify({ session_id: discoverySessionId }),
+      method: 'POST', body: JSON.stringify({ session_id: discoverySessionId, nonce: created.nonce }),
     });
     assert.equal(duplicateDiscovery.status, 409);
     assert.equal((await duplicateDiscovery.json()).error.code, 'RULE_CARD_CANONICAL_EXISTS');

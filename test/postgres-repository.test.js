@@ -39,6 +39,8 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
       '024_voice_tutor_recovery_map.sql',
       '025_voice_tutor_hardening.sql',
       '026_premium_voice_commerce.sql',
+      '027_voice_tutor_pedagogical_loop.sql',
+      '028_voice_tutor_discovery_claims.sql',
     ]);
 
     const username = await repository.createTelegramUser(telegramId, `Integration ${suffix}`);
@@ -229,25 +231,25 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
       mode: 'voice', provider: 'xai', model: 'grok-voice-integration-v1', promptVersion: 'voice-tutor-error-v2',
     });
     assert.equal((await repository.advanceVoiceTutorSession(username, tracerSessionId, {
-      nonceHash: 'a'.repeat(64), nextNonceHash: 'b'.repeat(64), event: { type: 'diagnosis_complete' }, now: voiceFinishedAt,
+      nonceHash: 'a'.repeat(64), nextNonceHash: 'b'.repeat(64), event: { type: 'diagnosis_complete' }, capsule: tracerCapsule, now: voiceFinishedAt,
     })).session.state, 'explain');
     await assert.rejects(
       repository.advanceVoiceTutorSession(username, tracerSessionId, {
-        nonceHash: 'a'.repeat(64), nextNonceHash: 'c'.repeat(64), event: { type: 'explanation_complete' }, now: voiceFinishedAt,
+        nonceHash: 'a'.repeat(64), nextNonceHash: 'c'.repeat(64), event: { type: 'explanation_complete' }, capsule: tracerCapsule, now: voiceFinishedAt,
       }),
       /VOICE_TUTOR_NONCE_REPLAYED/u,
     );
     assert.equal((await repository.advanceVoiceTutorSession(username, tracerSessionId, {
-      nonceHash: 'b'.repeat(64), nextNonceHash: 'c'.repeat(64), event: { type: 'explanation_complete' }, now: voiceFinishedAt,
+      nonceHash: 'b'.repeat(64), nextNonceHash: 'c'.repeat(64), event: { type: 'explanation_complete' }, capsule: tracerCapsule, now: voiceFinishedAt,
     })).session.state, 'micro_check');
     assert.equal((await repository.advanceVoiceTutorSession(username, tracerSessionId, {
-      nonceHash: 'c'.repeat(64), nextNonceHash: 'd'.repeat(64), event: { type: 'check_answer', answer: 'wrong' }, now: voiceFinishedAt,
+      nonceHash: 'c'.repeat(64), nextNonceHash: 'd'.repeat(64), event: { type: 'check_answer', answer: 'wrong' }, capsule: tracerCapsule, now: voiceFinishedAt,
     })).session.state, 'explain');
     assert.equal((await repository.advanceVoiceTutorSession(username, tracerSessionId, {
-      nonceHash: 'd'.repeat(64), nextNonceHash: 'e'.repeat(64), event: { type: 'explanation_complete' }, now: voiceFinishedAt,
+      nonceHash: 'd'.repeat(64), nextNonceHash: 'e'.repeat(64), event: { type: 'explanation_complete' }, capsule: tracerCapsule, now: voiceFinishedAt,
     })).session.state, 'micro_check');
     assert.equal((await repository.advanceVoiceTutorSession(username, tracerSessionId, {
-      nonceHash: 'e'.repeat(64), nextNonceHash: 'f'.repeat(64), event: { type: 'check_answer', answer: 'went' }, now: voiceFinishedAt,
+      nonceHash: 'e'.repeat(64), nextNonceHash: 'f'.repeat(64), event: { type: 'check_answer', answer: 'went' }, capsule: tracerCapsule, now: voiceFinishedAt,
     })).session.state, 'transfer_task');
     const tracerFallback = await repository.switchVoiceTutorSessionDelivery(username, tracerSessionId, {
       nonceHash: 'f'.repeat(64), nextNonceHash: 'g'.repeat(64), mode: 'text', limits: voiceLimits, now: voiceFinishedAt,
@@ -255,10 +257,10 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     assert.equal(tracerFallback.session.status, 'completed');
     assert.equal(tracerFallback.voice_tutor.daily_remaining_seconds, 480);
     assert.equal((await repository.advanceVoiceTutorSession(username, tracerSessionId, {
-      nonceHash: 'g'.repeat(64), nextNonceHash: 'h'.repeat(64), event: { type: 'transfer_answer', answer: 'bought' }, now: voiceFinishedAt,
+      nonceHash: 'g'.repeat(64), nextNonceHash: 'h'.repeat(64), event: { type: 'transfer_answer', answer: 'bought' }, capsule: tracerCapsule, now: voiceFinishedAt,
     })).session.state, 'resolved');
     assert.equal((await repository.advanceVoiceTutorSession(username, tracerSessionId, {
-      nonceHash: 'h'.repeat(64), nextNonceHash: 'i'.repeat(64), event: { type: 'check_answer', answer: 'wrong' }, now: voiceFinishedAt,
+      nonceHash: 'h'.repeat(64), nextNonceHash: 'i'.repeat(64), event: { type: 'check_answer', answer: 'wrong' }, capsule: tracerCapsule, now: voiceFinishedAt,
     })).session.state, 'resolved');
     const storedTracerSession = await repository.getVoiceTutorSession(username, tracerSessionId);
     assert.equal(storedTracerSession.micro_check_attempts, 2);
@@ -323,6 +325,16 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     assert.ok(aiUsage.requests >= 1);
     assert.equal(typeof aiUsage.estimatedCostMicrousd, 'number');
 
+    const reportId = crypto.randomUUID();
+    const report = await repository.createVoiceTutorReport(username, {
+      id: reportId, sessionId: tracerSessionId, reason: 'technical_issue', createdAt: voiceFinishedAt,
+    });
+    assert.equal(report.created, true);
+    assert.equal((await repository.listVoiceTutorReports({ status: 'pending' })).some((entry) => entry.id === reportId), true);
+    assert.equal((await repository.reviewVoiceTutorReport(reportId, {
+      decision: 'confirmed', reviewer: username, reviewedAt: voiceFinishedAt,
+    })).applied, true);
+
     const exported = await repository.exportUserData(username);
     assert.equal(exported.account.username, username);
     assert.deepEqual(exported.progress, { learned: 12, prog: { words: 44 }, marker: suffix, extra: true });
@@ -349,6 +361,7 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     assert.equal(exported.voice_tutor_recoveries.length, 1);
     assert.equal(exported.voice_tutor_repeats.length, 2);
     assert.equal(exported.voice_tutor_repeat_attempts.length, 2);
+    assert.equal(exported.voice_tutor_reports[0].reason, 'technical_issue');
     assert.equal(exported.rule_cards.length, 2);
     const originalVoiceSession = exported.voice_tutor_sessions.find((session) => session.id === firstVoiceReservation.session.id);
     assert.equal(originalVoiceSession.billable_seconds, 120);
@@ -406,6 +419,112 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     const retainedAudit = await client.query('SELECT metadata FROM audit_log WHERE target_id = $1', [paymentRequest.id]);
     assert.equal(retainedAudit.rows[0].metadata.username, undefined);
     assert.equal(retainedAudit.rows[0].metadata.account_deleted, true);
+  } finally {
+    await repository.close();
+    await client.end();
+  }
+});
+
+test('PostgreSQL discovery and paid-operation claims are atomic across finish/delete races', { skip: !connectionString }, async () => {
+  const repository = createPostgresRepository(connectionString);
+  const client = new pg.Client({ connectionString });
+  const suffix = crypto.randomBytes(6).toString('hex');
+  const baseTelegramId = Number(`7${Date.now().toString().slice(-9)}`);
+  const limits = { dailySeconds: 600, monthlySeconds: 7_200, sessionSeconds: 300 };
+  const now = new Date();
+
+  function pointer(id, skillId) {
+    return {
+      schema: 'voice-tutor-reference-v1', id, version: 'grammar-lexicon-v1',
+      source: { attempt_id: crypto.randomUUID(), item_revision: 1 }, module: 'grammar', skill_id: skillId,
+    };
+  }
+
+  function card(id, skillId) {
+    return {
+      id, skill: { id: skillId, title: 'Race-safe rule' }, examYear: 2026,
+      rule: { title: 'Rule', explanation: 'A bounded race-safe explanation.', examples: ['It works.'] },
+      agreementHash: 'a'.repeat(64), sources: [], discrepancies: [], createdAt: now,
+    };
+  }
+
+  await client.connect();
+  try {
+    const finishUser = await repository.createTelegramUser(baseTelegramId, `Discovery finish ${suffix}`);
+    await repository.grantDays(baseTelegramId, 30, `Discovery finish ${suffix}`);
+    await repository.setEntitlement(finishUser, 'voice_tutor', { startsAt: now, endsAt: new Date(now.getTime() + 86_400_000) });
+    const finishSessionId = crypto.randomUUID();
+    const finishCapsule = pointer(`voice-capsule:finish:${suffix}`, `ege.grammar.finish.${suffix}`);
+    await repository.reserveVoiceTutorSession(finishUser, {
+      id: finishSessionId, idempotencyKey: crypto.randomUUID(), limits, now,
+      context: { capsule: finishCapsule, nonceHash: '1'.repeat(64) },
+    });
+    const finishClaimId = crypto.randomUUID();
+    await repository.claimVoiceTutorRuleDiscovery(finishUser, finishSessionId, {
+      claimId: finishClaimId, nonceHash: '1'.repeat(64), now,
+    });
+    await repository.finishVoiceTutorSession(finishUser, finishSessionId, { limits, now });
+    const finishCardId = crypto.randomUUID();
+    await assert.rejects(
+      repository.createRuleCardForVoiceTutorSession(
+        finishUser, finishSessionId, finishCapsule.id, card(finishCardId, finishCapsule.skill_id),
+        { claimId: finishClaimId, expectedNonceHash: '1'.repeat(64), nextNonceHash: '2'.repeat(64) },
+      ),
+      /TRUSTED_RULE_DISCOVERY_NOT_REQUIRED/u,
+    );
+    assert.equal((await client.query('SELECT 1 FROM trusted_rule_cards WHERE id = $1', [finishCardId])).rowCount, 0);
+    await repository.deleteUserData(finishUser);
+
+    const deleteUser = await repository.createTelegramUser(baseTelegramId + 1, `Discovery delete ${suffix}`);
+    await repository.grantDays(baseTelegramId + 1, 30, `Discovery delete ${suffix}`);
+    await repository.setEntitlement(deleteUser, 'voice_tutor', { startsAt: now, endsAt: new Date(now.getTime() + 86_400_000) });
+    const deleteSessionId = crypto.randomUUID();
+    const deleteCapsule = pointer(`voice-capsule:delete:${suffix}`, `ege.grammar.delete.${suffix}`);
+    await repository.reserveVoiceTutorSession(deleteUser, {
+      id: deleteSessionId, idempotencyKey: crypto.randomUUID(), limits, now,
+      context: { capsule: deleteCapsule, nonceHash: '3'.repeat(64) },
+    });
+    const deleteClaimId = crypto.randomUUID();
+    await repository.claimVoiceTutorRuleDiscovery(deleteUser, deleteSessionId, {
+      claimId: deleteClaimId, nonceHash: '3'.repeat(64), now,
+    });
+    const deleteCardId = crypto.randomUUID();
+    const raced = await Promise.allSettled([
+      repository.deleteUserData(deleteUser),
+      repository.createRuleCardForVoiceTutorSession(
+        deleteUser, deleteSessionId, deleteCapsule.id, card(deleteCardId, deleteCapsule.skill_id),
+        { claimId: deleteClaimId, expectedNonceHash: '3'.repeat(64), nextNonceHash: '4'.repeat(64) },
+      ),
+    ]);
+    assert.equal(raced[0].status, 'fulfilled');
+    assert.equal(await repository.getUser(deleteUser), null);
+    assert.equal((await client.query('SELECT 1 FROM trusted_rule_cards WHERE id = $1', [deleteCardId])).rowCount, 0);
+
+    const slotUser = await repository.createTelegramUser(baseTelegramId + 2, `AI slot ${suffix}`);
+    const slotClaims = await Promise.allSettled([
+      repository.claimAiOperationSlot(slotUser, {
+        claimId: crypto.randomUUID(), operation: 'voice_tutor_rule_search', promptVersion: 'voice-tutor-rule-search-v1',
+        requestsPerHour: 1, dailyLimit: 1_000_000, now,
+      }),
+      repository.claimAiOperationSlot(slotUser, {
+        claimId: crypto.randomUUID(), operation: 'voice_tutor_rule_search', promptVersion: 'voice-tutor-rule-search-v1',
+        requestsPerHour: 1, dailyLimit: 1_000_000, now,
+      }),
+    ]);
+    assert.equal(slotClaims.filter((result) => result.status === 'fulfilled').length, 1);
+    assert.equal(slotClaims.filter((result) => result.status === 'rejected').length, 1);
+    const slot = slotClaims.find((result) => result.status === 'fulfilled').value;
+    assert.equal((await repository.settleAiOperationSlot(slotUser, slot.claim_id, {
+      status: 'failed', provider: 'xai', model: 'fixture-v1', errorCode: 'TRUSTED_RULE_SEARCH_FAILED', now,
+    })).applied, true);
+    assert.equal((await repository.settleAiOperationSlot(slotUser, slot.claim_id, {
+      status: 'failed', errorCode: 'TRUSTED_RULE_SEARCH_FAILED', now,
+    })).applied, false);
+    const storedSlot = await client.query('SELECT status, error_code, settled_at FROM ai_requests WHERE claim_key = $1', [slot.claim_id]);
+    assert.equal(storedSlot.rows[0].status, 'failed');
+    assert.equal(storedSlot.rows[0].error_code, 'TRUSTED_RULE_SEARCH_FAILED');
+    assert.ok(storedSlot.rows[0].settled_at);
+    await repository.deleteUserData(slotUser);
   } finally {
     await repository.close();
     await client.end();

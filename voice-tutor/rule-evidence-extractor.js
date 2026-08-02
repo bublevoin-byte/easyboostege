@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { operationLimits } from '../ai/operations.js';
 
 const OPERATION = 'voice_tutor_rule_extract';
@@ -16,39 +17,42 @@ function parseEvidence(value) {
 
 export function createAiRuleEvidenceExtractor({
   providerClient,
-  hasAiBudget,
-  countAiOperationRequestsSince,
-  logAiRequest,
+  claimAiOperation,
+  settleAiOperation,
+  newId = () => crypto.randomUUID(),
   now = () => new Date(),
 }) {
+  if (!providerClient?.askWithFallback || typeof claimAiOperation !== 'function' || typeof settleAiOperation !== 'function') {
+    throw new Error('VOICE_TUTOR_RULE_EXTRACT_CONFIG_INVALID');
+  }
   const limits = operationLimits(OPERATION);
   return Object.freeze({
     async extract({ username, skill, examYear, source, document }) {
       const startedAt = Date.now();
+      let claim = null;
+      let settled = false;
       try {
-        if (!await hasAiBudget(now())) throw Object.assign(new Error('AI_BUDGET_EXHAUSTED'), { code: 'AI_BUDGET_EXHAUSTED' });
-        if (await countAiOperationRequestsSince(username, OPERATION, new Date(now().getTime() - 3_600_000)) >= limits.requestsPerHour) {
-          throw Object.assign(new Error('RATE_LIMITED'), { code: 'RATE_LIMITED' });
-        }
+        claim = await claimAiOperation({
+          claimId: newId(), username, operation: OPERATION, promptVersion: limits.promptVersion,
+          requestsPerHour: limits.requestsPerHour, now: now(),
+        });
         const response = await providerClient.askWithFallback(SYSTEM, JSON.stringify({
           skill, exam_year: examYear,
           source: { url: source.url, authority: source.authority, content_hash: source.contentHash },
           untrusted_source_document: document.untrustedText,
         }), OPERATION);
         const evidence = parseEvidence(response.text);
-        await logAiRequest({
-          username, operation: OPERATION, provider: response.provider, model: response.model,
-          promptVersion: limits.promptVersion, status: 'completed', durationMs: Date.now() - startedAt,
+        await settleAiOperation(username, claim.claim_id, {
+          status: 'completed', provider: response.provider, model: response.model, durationMs: Date.now() - startedAt,
           promptTokens: response.promptTokens, completionTokens: response.completionTokens,
-          fallbackReason: response.fallbackReason || null,
         });
+        settled = true;
         return evidence;
       } catch (error) {
-        await logAiRequest({
-          username, operation: OPERATION, provider: error?.provider || null, model: error?.model || null,
-          promptVersion: limits.promptVersion, status: 'failed', durationMs: Date.now() - startedAt,
-          errorCode: error?.code || error?.message || 'TRUSTED_RULE_EVIDENCE_INVALID',
-          fallbackReason: error?.fallbackReason || null,
+        if (claim && !settled) await settleAiOperation(username, claim.claim_id, {
+          status: 'failed', provider: error?.provider || null, model: error?.model || null,
+          durationMs: Date.now() - startedAt,
+          errorCode: 'TRUSTED_RULE_EVIDENCE_INVALID',
         }).catch(() => {});
         throw error;
       }

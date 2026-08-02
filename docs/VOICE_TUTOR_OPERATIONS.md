@@ -124,6 +124,36 @@ validation и сохранения в `generated_tasks`; браузер не п�
 
 ## Release evidence
 
+## Complete pedagogical loop
+
+`VOICE_TUTOR_RULE_SEARCH_ENABLED=true` включает production seam xAI Responses `web_search`.
+Запрос всегда `store:false`, содержит только server-owned skill/year и 2–5 доменов из
+`VOICE_TUTOR_RULE_ALLOWLIST_JSON`. Приложение принимает URL только из structured citation
+annotations; из большого ответа выбирается максимум пять ссылок с приоритетом разных configured
+authority. Затем повторно применяется HTTPS/domain/path/DNS/redirect/MIME/size policy и требуется
+согласия двух независимых authority. Реальные provider-вызовы не входят в автоматические тесты.
+
+Discovery POST принимает owner-bound `session_id` и текущий одноразовый `nonce`. Repository до
+любого DNS/provider/fetch atomically переводит активную `diagnose` session в `in_progress` claim.
+Параллельный запрос получает bounded conflict; finish/delete делает поздний результат непригодным.
+Provisional card создаётся, привязывается и вращает nonce только одной repository-транзакцией,
+которая повторно проверяет owner, active state, claim и исходный nonce. Failure получает
+наблюдаемый `failed` status; orphan card не создаётся. FSM затем переходит в `explain`, но карточка
+остаётся `pending_review` и недоступна другим ученикам. Три `clarify|explain_differently` turn меняют только счётчик и nonce: текст живёт лишь
+в provider request. Server-VAD `speech_started` останавливает все queued browser audio sources и
+отправляет `response.cancel`/`conversation.item.truncate`; повторный/off-order audio закрывает
+transport и запускает существующий fallback.
+
+Learner feedback принимает только четыре structured reason. Администратор проверяет очередь
+`GET /api/v1/voice-tutor/reports?status=pending` и фиксирует `confirmed|dismissed`; свободный текст,
+аудио и transcript в report отсутствуют. Перед включением search проверяются feature flag,
+allowlist, AI budget/rate metrics и очередь pending rule/report cards.
+
+Каждый платный `voice_tutor_rule_search`/`voice_tutor_rule_extract` сначала атомарно занимает
+durable `ai_requests` slot с idempotent claim key. Global UTC budget и per-user/hour limit считают
+также `in_progress` и failed attempts, поэтому параллельность не усиливает расход. Provider
+вызывается только после успешного claim; settlement `completed|failed` идемпотентен.
+
 Evidence может содержать commit SHA, время, список выполненных команд, их exit code, версии
 миграции/schema, bounded public error code и агрегированные PII-free metrics. Evidence не должно
 содержать environment values, provider keys/credential, headers, raw provider payload, username,
