@@ -677,3 +677,23 @@ Push/deploy, ротация, физические устройства, soak, PW
 сервере не выполнялись. Двухосевой review относительно `661a989`: Standards — 3 замечания, Spec — 2;
 все устранены. Post-build `dist/public` E2E прошёл, rollback использует root-owned helper, recovery не получает
 production credentials, три доказанных P0 отмечены во внешнем ТЗ; итог сохранён одним amended commit.
+
+---
+
+# Voice Error Tutor для ЕГЭ
+
+Спека: [.scratch/voice-ege-tutor/spec.md](.scratch/voice-ege-tutor/spec.md)
+Исследование: [.scratch/voice-ege-tutor/competitive-research.md](.scratch/voice-ege-tutor/competitive-research.md)
+Тикеты: [.scratch/voice-ege-tutor/issues/](.scratch/voice-ege-tutor/issues/)
+
+Ветка: `feature/voice-ege-tutor`. Текущий staging candidate и его семидневный soak не изменяются.
+
+| № | Что даёт | Статус |
+|---|---|---|
+| 01 | Premium-доступ, дневные/месячные минуты и защита от параллельных сессий | pending |
+| 02 | Полный голосовой разбор ошибок грамматики и лексики с fallback | pending |
+| 03 | Контекстный голосовой разбор чтения и аудирования | pending |
+| 04 | Контекстный голосовой разбор письма и устной части | pending |
+| 05 | Поиск отсутствующих правил по доверенным источникам и очередь проверки | pending |
+| 06 | Карта освоенных ошибок и возвращённых потенциальных баллов | pending |
+| 07 | Приватность, безопасность, observability и сквозная проверка | pending |
