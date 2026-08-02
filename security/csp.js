@@ -9,14 +9,29 @@ export function inlineScriptHashes(html) {
   });
 }
 
-export function contentSecurityPolicy(html, isProduction) {
+function realtimeWebSocketOrigin(realtimeUrl) {
+  if (!realtimeUrl) return null;
+  let url;
+  try {
+    url = new URL(realtimeUrl);
+  } catch {
+    throw new Error('realtime WebSocket URL must use WSS');
+  }
+  if (url.protocol !== 'wss:' || url.username || url.password) {
+    throw new Error('realtime WebSocket URL must use WSS');
+  }
+  return url.origin;
+}
+
+export function contentSecurityPolicy(html, isProduction, realtimeUrl = '') {
   const scriptHashes = inlineScriptHashes(html);
+  const realtimeOrigin = realtimeWebSocketOrigin(realtimeUrl);
   return {
     useDefaults: false,
     directives: {
       defaultSrc: ["'self'"],
       baseUri: ["'self'"],
-      connectSrc: ["'self'"],
+      connectSrc: ["'self'", ...(realtimeOrigin ? [realtimeOrigin] : [])],
       fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
       formAction: ["'self'"],
       frameAncestors: ["'none'"],

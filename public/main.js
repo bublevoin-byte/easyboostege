@@ -31,6 +31,7 @@ import './modules/exam.js';
 import './modules/progress.js';
 import './modules/profile.js';
 import * as app from './app.js';
+import * as voiceTutor from './voice-tutor.js';
 /*
  * Три экрана раздела 6.1 ТЗ грузятся сразу, а не чанком: без сети должны работать словарные
  * карточки, интервальное повторение, встроенные грамматические тесты и просмотр сохранённого
@@ -57,6 +58,7 @@ import './pwa.js';
 exposeGlobals(router);
 exposeGlobals(tts);
 exposeGlobals(app);
+exposeGlobals(voiceTutor);
 exposeGlobals(wordsScreen);
 exposeGlobals(grammarScreen);
 exposeGlobals(progressScreen);

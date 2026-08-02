@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { ensureVoiceTutorReservationAllowed, hashAuthCode, normalizeUsername, subscriptionView, VoiceTutorError, voiceTutorAccessView, voiceTutorBillableSeconds, voiceTutorQuotaPeriods } from './shared.js';
+import { transitionPedagogicalState } from '../voice-tutor/state-machine.js';
 
 function normalizeAttemptModels(attempts) {
   return attempts.map((attempt) => ({ ...attempt, model: attempt.model ?? null }));
@@ -243,6 +244,13 @@ export function createFileRepository(filePath) {
       session.status = 'expired';
       session.billable_seconds = session.reserved_seconds;
       session.ended_at = session.expires_at;
+      if (session.capsule) {
+        if (!['resolved', 'fallback', 'ended'].includes(session.pedagogical_state)) {
+          session.pedagogical_state = 'ended';
+          session.outcome = 'ended';
+        }
+        session.nonce_hash = null;
+      }
       changed = true;
     }
     return changed;
@@ -258,6 +266,10 @@ export function createFileRepository(filePath) {
     return {
       id: session.id,
       status: session.status,
+      state: session.pedagogical_state || null,
+      micro_check_passed: session.micro_check_passed ?? null,
+      transfer_passed: session.transfer_passed ?? null,
+      outcome: session.outcome ?? null,
       started_at: session.started_at,
       expires_at: session.expires_at,
       ended_at: session.ended_at,
@@ -270,7 +282,7 @@ export function createFileRepository(filePath) {
     return voiceTutorAccessView({ entitled: hasVoiceTutorEntitlement(username, nowMs), ...voiceTutorUsage(username, now) }, limits);
   }
 
-  async function reserveVoiceTutorSession(username, { id, idempotencyKey, limits, now = new Date() }) {
+  async function reserveVoiceTutorSession(username, { id, idempotencyKey, limits, now = new Date(), context = null }) {
     return serializeVoiceTutorMutation(async () => {
       await load();
       if (!state.users[username]) throw new Error('USER_NOT_FOUND');
@@ -297,6 +309,16 @@ export function createFileRepository(filePath) {
         started_at: startedAt.toISOString(),
         expires_at: new Date(startedAt.getTime() + reservedSeconds * 1000).toISOString(),
         ended_at: null,
+        ...(context ? {
+          capsule: structuredClone(context.capsule),
+          capsule_id: context.capsule.id,
+          nonce_hash: context.nonceHash,
+          delivery_mode: 'voice',
+          pedagogical_state: 'diagnose',
+          micro_check_passed: null,
+          transfer_passed: null,
+          outcome: null,
+        } : {}),
       };
       state.voice_tutor_sessions.push(session);
       await persist();
@@ -304,19 +326,95 @@ export function createFileRepository(filePath) {
     });
   }
 
-  async function finishVoiceTutorSession(username, sessionId, { limits, now = new Date(), confirmedBillableSeconds = null }) {
+  async function getVoiceTutorSession(username, sessionId) {
+    await load();
+    const session = state.voice_tutor_sessions.find((entry) => entry.username === username && entry.id === sessionId);
+    return session ? structuredClone(session) : null;
+  }
+
+  async function advanceVoiceTutorSession(username, sessionId, { nonceHash, nextNonceHash, event, now = new Date() }) {
+    return serializeVoiceTutorMutation(async () => {
+      await load();
+      const session = state.voice_tutor_sessions.find((entry) => entry.username === username && entry.id === sessionId);
+      if (!session || !session.capsule) throw new VoiceTutorError('VOICE_TUTOR_SESSION_NOT_FOUND');
+      if (session.delivery_mode === 'voice' && new Date(session.expires_at).getTime() <= new Date(now).getTime()) {
+        throw new VoiceTutorError('VOICE_TUTOR_SESSION_EXPIRED');
+      }
+      if (!session.nonce_hash || session.nonce_hash !== nonceHash) throw new VoiceTutorError('VOICE_TUTOR_NONCE_REPLAYED');
+      const next = transitionPedagogicalState({
+        state: session.pedagogical_state,
+        micro_check_passed: session.micro_check_passed,
+        transfer_passed: session.transfer_passed,
+        outcome: session.outcome,
+      }, event, session.capsule);
+      session.pedagogical_state = next.state;
+      session.micro_check_passed = next.micro_check_passed;
+      session.transfer_passed = next.transfer_passed;
+      session.outcome = next.outcome;
+      session.nonce_hash = nextNonceHash;
+      session.updated_at = new Date(now).toISOString();
+      await persist();
+      return { session: publicVoiceTutorSession(session), capsule: structuredClone(session.capsule) };
+    });
+  }
+
+  async function setVoiceTutorSessionDelivery(username, sessionId, { mode, errorCode = null }) {
+    return serializeVoiceTutorMutation(async () => {
+      await load();
+      if (!['voice', 'text', 'local'].includes(mode)) throw new VoiceTutorError('VOICE_TUTOR_DELIVERY_INVALID');
+      const session = state.voice_tutor_sessions.find((entry) => entry.username === username && entry.id === sessionId);
+      if (!session || !session.capsule) throw new VoiceTutorError('VOICE_TUTOR_SESSION_NOT_FOUND');
+      session.delivery_mode = mode;
+      session.error_code = errorCode;
+      await persist();
+      return { session: publicVoiceTutorSession(session), capsule: structuredClone(session.capsule) };
+    });
+  }
+
+  async function switchVoiceTutorSessionDelivery(username, sessionId, { nonceHash, nextNonceHash, mode, limits, now = new Date(), errorCode = null }) {
+    return serializeVoiceTutorMutation(async () => {
+      await load();
+      if (!['text', 'local'].includes(mode)) throw new VoiceTutorError('VOICE_TUTOR_DELIVERY_INVALID');
+      const session = state.voice_tutor_sessions.find((entry) => entry.username === username && entry.id === sessionId);
+      if (!session || !session.capsule) throw new VoiceTutorError('VOICE_TUTOR_SESSION_NOT_FOUND');
+      if (!session.nonce_hash || session.nonce_hash !== nonceHash) throw new VoiceTutorError('VOICE_TUTOR_NONCE_REPLAYED');
+      if (session.status === 'active') {
+        session.status = 'completed';
+        session.billable_seconds = 0;
+        session.ended_at = new Date(now).toISOString();
+      }
+      session.delivery_mode = mode;
+      session.error_code = errorCode;
+      session.nonce_hash = nextNonceHash;
+      await persist();
+      const access = await getVoiceTutorAccess(username, limits, now);
+      return { session: publicVoiceTutorSession(session), capsule: structuredClone(session.capsule), ...access };
+    });
+  }
+
+  async function finishVoiceTutorSession(username, sessionId, { limits, now = new Date(), confirmedBillableSeconds = null, preservePedagogicalState = false }) {
     return serializeVoiceTutorMutation(async () => {
       await load();
       const expired = expireVoiceTutorSessions(username, now);
       const session = state.voice_tutor_sessions.find((entry) => entry.username === username && entry.id === sessionId);
       if (!session) throw new VoiceTutorError('VOICE_TUTOR_SESSION_NOT_FOUND');
       const finished = session.status === 'active';
+      let pedagogicalEnded = false;
       if (finished) {
         session.status = 'completed';
         session.billable_seconds = voiceTutorBillableSeconds(session, now, confirmedBillableSeconds);
         session.ended_at = new Date(now).toISOString();
       }
-      if (finished || expired) await persist();
+      if (session.capsule && !preservePedagogicalState) {
+        if (!['resolved', 'fallback', 'ended'].includes(session.pedagogical_state)) {
+          session.pedagogical_state = 'ended';
+          session.outcome = 'ended';
+          pedagogicalEnded = true;
+        }
+        if (session.nonce_hash) pedagogicalEnded = true;
+        session.nonce_hash = null;
+      }
+      if (finished || expired || pedagogicalEnded) await persist();
       return { finished, session: publicVoiceTutorSession(session), ...await getVoiceTutorAccess(username, limits, now) };
     });
   }
@@ -579,6 +677,12 @@ export function createFileRepository(filePath) {
     return { id: attempt.id, created: true };
   }
 
+  async function getModuleAttempt(username, attemptId) {
+    await load();
+    const attempt = state.module_attempts.find((item) => item.username === username && item.id === attemptId);
+    return attempt ? structuredClone(attempt) : null;
+  }
+
   async function upsertWordProgress(username, words) {
     await load();
     state.word_progress[username] ||= {};
@@ -619,6 +723,12 @@ export function createFileRepository(filePath) {
     await load();
     const timestamp = since instanceof Date ? since.getTime() : Number(since);
     return state.ai_requests.filter((item) => Number(item.created_at) >= timestamp).length;
+  }
+
+  async function countAiOperationRequestsSince(username, operation, since) {
+    await load();
+    const timestamp = since instanceof Date ? since.getTime() : Number(since);
+    return state.ai_requests.filter((item) => item.username === username && item.operation === operation && Number(item.created_at) >= timestamp).length;
   }
 
   async function getAiUsageMetrics(hours = 24) {
@@ -683,7 +793,9 @@ export function createFileRepository(filePath) {
       privacy_consent: await getPrivacyConsent(username),
       subscription_events: state.subscription_events.filter((item) => item.username === username),
       subscription_entitlements: Object.entries(state.subscription_entitlements[username] || {}).map(([entitlement, period]) => ({ entitlement, ...period })),
-      voice_tutor_sessions: state.voice_tutor_sessions.filter((item) => item.username === username).map(({ username: owner, idempotency_key, ...item }) => item),
+      voice_tutor_sessions: state.voice_tutor_sessions
+        .filter((item) => item.username === username)
+        .map(({ username: owner, idempotency_key, nonce_hash, ...item }) => item),
       payment_requests: Object.values(state.payment_requests).filter((item) => item.username === username),
       writing_attempts: state.writing_attempts.filter((item) => item.username === username),
       speaking_attempts: state.speaking_attempts.filter((item) => item.username === username),
@@ -760,6 +872,10 @@ export function createFileRepository(filePath) {
     getVoiceTutorAccess,
     reserveVoiceTutorSession,
     finishVoiceTutorSession,
+    getVoiceTutorSession,
+    advanceVoiceTutorSession,
+    setVoiceTutorSessionDelivery,
+    switchVoiceTutorSessionDelivery,
     setUserRole,
     getPrivacyConsent,
     setPrivacyConsent,
@@ -780,10 +896,12 @@ export function createFileRepository(filePath) {
     recordTaskDelivery,
     listBankTaskContents,
     recordModuleAttempt,
+    getModuleAttempt,
     upsertWordProgress,
     upsertErrorBank,
     logAiRequest,
     countAiRequestsSince,
+    countAiOperationRequestsSince,
     getAiUsageMetrics,
     createSession,
     isSessionActive,

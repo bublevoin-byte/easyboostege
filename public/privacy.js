@@ -31,7 +31,7 @@ import {DEMO_MODE, SRV, registerProfileHook, registerStartHook} from './app.js';
       <p>Обычные задания работают без передачи данных ИИ. Для дополнительных функций выберите, что разрешаете отправлять внешним провайдерам.</p>
       <ul><li>Текст ответа — для проверки через настроенного провайдера xAI или Groq.</li><li>Аудиозапись — только для распознавания речи через xAI.</li><li>ИИ-оценка ориентировочная и не является официальной.</li></ul>
       <label class="privacyChoice"><input id="privacyText" type="checkbox"><span><b>Обработка текста</b><span>Разрешить отправку текста учебного ответа AI-провайдеру.</span></span></label>
-      <label class="privacyChoice"><input id="privacyVoice" type="checkbox"><span><b>Обработка голоса</b><span>Разрешить отправку записи внешнему STT-провайдеру. Сохранение исходного аудио не предусмотрено.</span></span></label>
+      <label class="privacyChoice"><input id="privacyVoice" type="checkbox"><span><b>Потоковая обработка голоса</b><span>Разрешить realtime speech-to-speech через внешнего AI-провайдера. Исходное аудио и полный transcript не сохраняются.</span></span></label>
       <a class="privacyLink" href="/privacy.html" target="_blank" rel="noopener">Открыть политику конфиденциальности</a>
       <div id="privacyStatus" class="privacyStatus" role="status" aria-live="polite"></div>
       <div class="privacyActions"><button id="privacyClose" class="privacyBtn privacySecondary" type="button">Позже</button><button id="privacySave" class="privacyBtn privacyPrimary" type="button">Сохранить выбор</button></div></section>`;
@@ -66,7 +66,7 @@ import {DEMO_MODE, SRV, registerProfileHook, registerStartHook} from './app.js';
   }
   async function loadPrivacy(showIfNew) {
     if (!SRV || DEMO_MODE) return;
-    try { current = await api.get('/api/v1/privacy/consent'); updateProfile(); if (showIfNew && !current.policy_version) openPrivacy(); } catch (_) {}
+    try { current = await api.get('/api/v1/privacy/consent'); updateProfile(); if (showIfNew && current.policy_version !== current.current_policy_version) openPrivacy(); } catch (_) {}
   }
   function addProfileControls() {
     const label = document.getElementById('pf_ai'); const card = label?.closest('div[style*="display:flex"]')?.parentElement;

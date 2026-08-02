@@ -7,6 +7,7 @@
  */
 import {registerRouteHook,nav} from '../router.js';
 import {wSpeak} from '../tts.js';
+import {registerVoiceTutorError,voiceTutorButton} from '../voice-tutor.js';
 import {
   EGE_WORDS,S,SRV,TOKEN,WBTN,generateAiContent,registerScreenGenerator,save,srsFail,srsOk,
   todayStr,ui,wBase,wDeco,wMergeAi,wMigrate,wRec,wStats,wSync,wordModule,
@@ -65,7 +66,7 @@ function wRender(){var card=document.getElementById('w_card'),opts=document.getE
     +'onkeydown="if(event.key===\'Enter\')wSubmit()">'
     +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="wSubmit()">Проверить</button>'}
 /* карточка-переворот после ошибки */
-function wFlip(x){var card=document.getElementById('w_card'),opts=document.getElementById('w_opts');
+function wFlip(x,learnerAnswer){var card=document.getElementById('w_card'),opts=document.getElementById('w_opts');
   if(!card||!opts)return;
   wAnim('wflip','.5s');
   card.innerHTML=wDeco()+wBadge(x)
@@ -76,6 +77,8 @@ function wFlip(x){var card=document.getElementById('w_card'),opts=document.getEl
     +'<div style="font-weight:500;font-size:13.5px;color:#777163;margin-top:12px;font-style:italic;line-height:1.5;background:#FAF6F1;border-radius:14px;padding:10px 14px;">'+(x.ex||'')+'</div>'
     +'<div style="font-weight:600;font-size:11.5px;color:#75705F;margin-top:10px;">Запомни — слово вернётся позже</div></div>';
   opts.innerHTML='<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="wNext()">Понятно, дальше</button>';
+  if(x.voice)registerVoiceTutorError({module:'vocabulary',itemId:x.voice.id,revision:x.voice.revision,learnerAnswer:learnerAnswer})
+    .then(function(recorded){if(recorded&&WQ[WI]===x&&opts.isConnected)opts.insertAdjacentHTML('afterbegin',voiceTutorButton(recorded))}).catch(function(){});
   wSpeak(x.w)}
 /* список выученных */
 function wShowKnown(){var card=document.getElementById('w_card'),opts=document.getElementById('w_opts');
@@ -105,14 +108,14 @@ function wPick(btn,vEnc,rightEnc){var x=WQ[WI];if(!x||btn.dataset.done)return;
   else{ui.markAnswer(btn,'wrong');wAnim('wshake','.42s');
     all.forEach(function(b){if(b.textContent===right)ui.markAnswer(b,'correct')});
     srsFail(x.w);WDONE++;WQ.push(x);
-    setTimeout(function(){wFlip(x)},900)}}
+    setTimeout(function(){wFlip(x,v)},900)}}
 function wSubmit(){var x=WQ[WI];if(!x)return;var inp=document.getElementById('w_inp');if(!inp||inp.dataset.done)return;
   var val=(inp.value||'').toLowerCase().trim().replace(/^to /,'');
   var ok=val===wBase(x.w);inp.dataset.done=1;
   inp.style.borderColor=ok?'#1F9E5A':'#E24B4A';inp.style.background=ok?'#EAF7F0':'#FDEDEA';
   if(!ok){inp.value=wBase(x.w);srsFail(x.w);WQ.push(x)}else srsOk(x.w);
   WDONE++;if(ok){wSpeak(x.w);wAnim('wpop','.35s')}else wAnim('wshake','.42s');
-  setTimeout(ok?wNext:function(){wFlip(x)},ok?650:900)}
+  setTimeout(ok?wNext:function(){wFlip(x,val)},ok?650:900)}
 function wExtra(){wMergeAi();
   var fresh=EGE_WORDS.filter(function(x){var r=wRec(x.w);return !r||!r.s});
   WQ=fresh.slice(0,30);WI=0;WDONE=0;wRender();

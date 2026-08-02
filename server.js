@@ -8,7 +8,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { claimUnseenBankTask, getBankTask, getBankTaskByExternalId, listBankTaskContents, recordTaskDelivery, upsertBankTask, activateTrial, closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, countAiRequestsSince, createPaymentRequest, createSession, createSpeakingAttempt, createTelegramAuthCode, createWritingAttempt, deleteUserData, exportUserData, finishSpeakingAttempt, finishVoiceTutorSession, finishWritingAttempt, getAiUsageMetrics, getGeneratedTask, getSharedGeneratedTask, getPrivacyConsent, getProgress, getUser, getVoiceTutorAccess, healthCheck, isSessionActive, recordModuleAttempt, reserveVoiceTutorSession, resolvePaymentRequest, revokeSession, saveGeneratedTask, saveProgress, setPrivacyConsent, setUserRole, upsertErrorBank, upsertWordProgress, mergeProgress, getUserByTelegram, createTelegramUser, logAiRequest, getSub } from './db.js';
+import { claimUnseenBankTask, getBankTask, getBankTaskByExternalId, listBankTaskContents, recordTaskDelivery, upsertBankTask, activateTrial, closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, countAiOperationRequestsSince, countAiRequestsSince, createPaymentRequest, createSession, createSpeakingAttempt, createTelegramAuthCode, createWritingAttempt, deleteUserData, exportUserData, finishSpeakingAttempt, finishVoiceTutorSession, finishWritingAttempt, getAiUsageMetrics, getGeneratedTask, getSharedGeneratedTask, getModuleAttempt, getPrivacyConsent, getProgress, getUser, getVoiceTutorAccess, getVoiceTutorSession, healthCheck, isSessionActive, recordModuleAttempt, reserveVoiceTutorSession, resolvePaymentRequest, revokeSession, saveGeneratedTask, saveProgress, setPrivacyConsent, setUserRole, upsertErrorBank, upsertWordProgress, mergeProgress, getUserByTelegram, createTelegramUser, logAiRequest, getSub, advanceVoiceTutorSession, setVoiceTutorSessionDelivery, switchVoiceTutorSessionDelivery } from './db.js';
 import { config } from './config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from './ai/writing.js';
 import { buildContentPrompt, CONTENT_PROMPT_VERSION, contentRequestSchema, parseContentResponse } from './ai/content.js';
@@ -35,6 +35,9 @@ import { createAiRoutes } from './routes/ai.js';
 import { createMediaRoutes } from './routes/media.js';
 import { createTaskRoutes, seedBuiltinTasks } from './routes/tasks.js';
 import { createVoiceTutorRoutes } from './routes/voice-tutor.js';
+import { createAiTextTutor } from './voice-tutor/text-fallback.js';
+import { createXaiRealtimeCredentialAdapter } from './voice-tutor/xai-realtime.js';
+import { createProviderClient } from './ai/provider-client.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /* Собранный frontend предпочтительнее исходников, но не обязателен: на чистом клоне и в разработке
@@ -51,7 +54,7 @@ const frontendHtml = fs.readFileSync(frontendIndex, 'utf8');
 
 const SECRET = config.jwtSecret;
 const PORT = config.port;
-const PRIVACY_POLICY_VERSION = '2026-07-20';
+const PRIVACY_POLICY_VERSION = '2026-08-02';
 const logUserId = (username) => username
   ? crypto.createHmac('sha256', SECRET).update(String(username)).digest('hex').slice(0, 20)
   : null;
@@ -74,7 +77,11 @@ const app = express();
 if (config.isProduction) app.set('trust proxy', 1);
 app.disable('x-powered-by');
 app.use(helmet({
-  contentSecurityPolicy: contentSecurityPolicy(frontendHtml, config.isProduction),
+  contentSecurityPolicy: contentSecurityPolicy(
+    frontendHtml,
+    config.isProduction,
+    config.voiceTutor.enabled ? config.voiceTutor.realtimeUrl : '',
+  ),
   crossOriginEmbedderPolicy: false,
   hsts: config.isProduction ? { maxAge: 31_536_000, includeSubDomains: true } : false,
   referrerPolicy: { policy: 'no-referrer' },
@@ -163,9 +170,10 @@ const { issueToken, setAuthCookie } = authentication;
 // The routers receive the database as one object so each module lists only what it uses.
 const dbApi = {
   createTelegramAuthCode, consumeTelegramAuthCode, getUserByTelegram, createTelegramUser, getSub,
-  getVoiceTutorAccess, reserveVoiceTutorSession, finishVoiceTutorSession,
+  getVoiceTutorAccess, reserveVoiceTutorSession, finishVoiceTutorSession, getVoiceTutorSession,
+  advanceVoiceTutorSession, setVoiceTutorSessionDelivery, switchVoiceTutorSessionDelivery,
   revokeSession, exportUserData, deleteUserData, getPrivacyConsent, setPrivacyConsent,
-  getProgress, saveProgress, mergeProgress, recordModuleAttempt, upsertWordProgress, upsertErrorBank,
+  getProgress, saveProgress, mergeProgress, recordModuleAttempt, getModuleAttempt, upsertWordProgress, upsertErrorBank,
   createWritingAttempt, finishWritingAttempt, createSpeakingAttempt, finishSpeakingAttempt,
   getGeneratedTask, getSharedGeneratedTask, saveGeneratedTask, logAiRequest,
   upsertBankTask, getBankTask, getBankTaskByExternalId, claimUnseenBankTask, recordTaskDelivery, listBankTaskContents,
@@ -231,8 +239,14 @@ app.use(createUserRoutes({
   voiceTutorLimits: config.voiceTutor,
 }));
 app.use(createProgressRoutes({ authentication, db: dbApi }));
-app.use(createVoiceTutorRoutes({ authentication, db: dbApi, limits: config.voiceTutor }));
-
+const voiceTutorCredentialProvider = createXaiRealtimeCredentialAdapter({
+  apiKey: config.voiceTutor.enabled ? config.ai.xaiKey : '',
+  endpoint: config.voiceTutor.credentialEndpoint,
+  realtimeUrl: config.voiceTutor.realtimeUrl,
+  model: config.voiceTutor.model,
+  voice: config.voiceTutor.voice,
+  ttlSeconds: config.voiceTutor.credentialTtlSeconds,
+});
 const {
   createOperationLimiter, ttsLimiter, sttLimiter, hasAiBudget,
   requireAiBudget, requireActiveSubscription, requirePrivacyConsent,
@@ -249,6 +263,20 @@ const access = {
   createOperationLimiter, ttsLimiter, sttLimiter, hasAiBudget,
   requireAiBudget, requireActiveSubscription, requirePrivacyConsent,
 };
+const voiceTutorTextTutor = createAiTextTutor({
+  providerClient: createProviderClient(),
+  hasAiBudget,
+  countAiOperationRequestsSince,
+  logAiRequest,
+});
+app.use(createVoiceTutorRoutes({
+  authentication,
+  db: dbApi,
+  limits: config.voiceTutor,
+  credentialProvider: voiceTutorCredentialProvider,
+  textTutor: voiceTutorTextTutor,
+  privacyPolicyVersion: PRIVACY_POLICY_VERSION,
+}));
 const aiRoutes = createAiRoutes({ authentication, access, db: dbApi });
 app.use(aiRoutes.router);
 app.use(createTaskRoutes({

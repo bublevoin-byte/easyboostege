@@ -13,7 +13,7 @@ const frontendAuthPath = new URL('../public/auth.js', import.meta.url);
  * Чанки экранов идут следом: в точку входа они не подключены, но это тот же код приложения,
  * и требования к нему не меняются от того, что он приезжает позже.
  */
-const frontendScriptNames = ['main.js', 'globals.js', 'auth.js', 'sync.js', 'store.js', 'components.js', 'router.js', 'learning.js', 'modules/words.js', 'modules/grammar.js', 'modules/reading.js', 'modules/listening.js', 'modules/writing.js', 'modules/speaking.js', 'modules/exam.js', 'modules/progress.js', 'modules/profile.js', 'app.js', 'screens.js', 'screens/words.js', 'screens/grammar.js', 'screens/reading.js', 'screens/listening.js', 'screens/writing.js', 'screens/speaking.js', 'screens/progress.js', 'screens/profile.js', 'privacy.js', 'tts.js', 'pwa.js'];
+const frontendScriptNames = ['main.js', 'globals.js', 'auth.js', 'sync.js', 'store.js', 'components.js', 'router.js', 'learning.js', 'modules/words.js', 'modules/grammar.js', 'modules/reading.js', 'modules/listening.js', 'modules/writing.js', 'modules/speaking.js', 'modules/exam.js', 'modules/progress.js', 'modules/profile.js', 'app.js', 'voice-tutor.js', 'realtime-transport.js', 'screens.js', 'screens/words.js', 'screens/grammar.js', 'screens/reading.js', 'screens/listening.js', 'screens/writing.js', 'screens/speaking.js', 'screens/progress.js', 'screens/profile.js', 'privacy.js', 'tts.js', 'pwa.js'];
 const frontendScriptPaths = frontendScriptNames.map((name) => new URL(`../public/${name}`, import.meta.url));
 const serverPath = new URL('../server.js', import.meta.url);
 const usersRoutePath = new URL('../routes/users.js', import.meta.url);
@@ -93,7 +93,7 @@ test('frontend loads through a single module entry point that keeps the previous
     'globals.js', 'api.js', 'auth.js', 'sync.js', 'store.js', 'components.js', 'router.js',
     'learning.js', 'modules/words.js', 'modules/grammar.js', 'modules/reading.js',
     'modules/listening.js', 'modules/writing.js', 'modules/speaking.js', 'modules/exam.js',
-    'modules/progress.js', 'modules/profile.js', 'app.js',
+    'modules/progress.js', 'modules/profile.js', 'app.js', 'voice-tutor.js',
     'screens/words.js', 'screens/grammar.js', 'screens/progress.js',
     'privacy.js', 'tts.js', 'pwa.js',
   ]);

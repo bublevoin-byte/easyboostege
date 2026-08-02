@@ -8,6 +8,7 @@
 import { CONTENT_PROMPT_VERSION } from './content.js';
 import { SPEAKING_PROMPT_VERSION } from './speaking.js';
 import { WRITING_PROMPT_VERSION } from './writing.js';
+import { VOICE_TUTOR_PROMPT_VERSION } from '../voice-tutor/prompt.js';
 
 const GENERATION_DEFAULTS = { fallback: 'secondary', promptVersion: CONTENT_PROMPT_VERSION };
 
@@ -33,6 +34,8 @@ export const AI_OPERATIONS = Object.freeze({
   evaluate_speaking: { maxTokens: 1600, timeoutMs: 45_000, requestsPerHour: 20, fallback: 'secondary', promptVersion: SPEAKING_PROMPT_VERSION },
   // A sample answer is a convenience, not a grade: one failed provider is enough to give up.
   speaking_sample: { maxTokens: 900, timeoutMs: 25_000, requestsPerHour: 20, fallback: 'none', promptVersion: SPEAKING_PROMPT_VERSION },
+  voice_tutor_realtime: { maxTokens: 500, timeoutMs: 10_000, requestsPerHour: 20, fallback: 'none', promptVersion: VOICE_TUTOR_PROMPT_VERSION },
+  voice_tutor_text: { maxTokens: 500, timeoutMs: 20_000, requestsPerHour: 20, fallback: 'secondary', promptVersion: VOICE_TUTOR_PROMPT_VERSION },
 });
 
 const FALLBACK_DEFAULT = Object.freeze({

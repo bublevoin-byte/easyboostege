@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import test from 'node:test';
 import pg from 'pg';
 import { createPostgresRepository } from '../storage/postgres-repository.js';
+import { buildGrammarLexiconCapsule, createGrammarLexiconErrorAttempt, persistedVoiceTutorCapsule } from '../voice-tutor/capsule.js';
 
 const connectionString = process.env.TEST_DATABASE_URL;
 
@@ -32,6 +33,7 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
       '019_attempt_models.sql',
       '020_writing_evaluated_answer.sql',
       '021_voice_tutor_entitlements_and_quotas.sql',
+      '022_voice_tutor_tracer.sql',
     ]);
 
     const username = await repository.createTelegramUser(telegramId, `Integration ${suffix}`);
@@ -107,6 +109,44 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     const moduleAttemptId = crypto.randomUUID();
     assert.equal((await repository.recordModuleAttempt(username, { id: moduleAttemptId, module: 'exam', activity: 'grammar_19_24', score: 5, maxScore: 6, durationMs: 50_000, metadata: {} })).created, true);
     assert.equal((await repository.recordModuleAttempt(username, { id: moduleAttemptId, module: 'exam', activity: 'grammar_19_24', score: 5, maxScore: 6, durationMs: 50_000, metadata: {} })).created, false);
+    const tracerAttemptId = crypto.randomUUID();
+    const tracerAttempt = createGrammarLexiconErrorAttempt({
+      id: tracerAttemptId, module: 'grammar', itemId: 'grammar.past-simple.last-summer', revision: 1, learnerAnswer: 'goed',
+    });
+    assert.equal((await repository.recordModuleAttempt(username, tracerAttempt)).created, true);
+    const storedTracerAttempt = await repository.getModuleAttempt(username, tracerAttemptId);
+    assert.equal(storedTracerAttempt.metadata.learner_answer, 'goed');
+    const tracerCapsule = buildGrammarLexiconCapsule({ attempt: storedTracerAttempt, expectedRevision: 1 });
+    const tracerSessionId = crypto.randomUUID();
+    const tracerReservation = await repository.reserveVoiceTutorSession(username, {
+      id: tracerSessionId,
+      idempotencyKey: crypto.randomUUID(),
+      limits: voiceLimits,
+      now: voiceFinishedAt,
+      context: { capsule: persistedVoiceTutorCapsule(tracerCapsule), nonceHash: 'a'.repeat(64) },
+    });
+    assert.equal(tracerReservation.created, true);
+    assert.equal(tracerReservation.session.state, 'diagnose');
+    assert.equal((await repository.advanceVoiceTutorSession(username, tracerSessionId, {
+      nonceHash: 'a'.repeat(64), nextNonceHash: 'b'.repeat(64), event: { type: 'diagnosis_complete' }, now: voiceFinishedAt,
+    })).session.state, 'explain');
+    await assert.rejects(
+      repository.advanceVoiceTutorSession(username, tracerSessionId, {
+        nonceHash: 'a'.repeat(64), nextNonceHash: 'c'.repeat(64), event: { type: 'explanation_complete' }, now: voiceFinishedAt,
+      }),
+      /VOICE_TUTOR_NONCE_REPLAYED/u,
+    );
+    assert.equal((await repository.advanceVoiceTutorSession(username, tracerSessionId, {
+      nonceHash: 'b'.repeat(64), nextNonceHash: 'c'.repeat(64), event: { type: 'explanation_complete' }, now: voiceFinishedAt,
+    })).session.state, 'micro_check');
+    assert.equal((await repository.advanceVoiceTutorSession(username, tracerSessionId, {
+      nonceHash: 'c'.repeat(64), nextNonceHash: 'd'.repeat(64), event: { type: 'check_answer', answer: 'went' }, now: voiceFinishedAt,
+    })).session.state, 'transfer_task');
+    const tracerFallback = await repository.switchVoiceTutorSessionDelivery(username, tracerSessionId, {
+      nonceHash: 'd'.repeat(64), nextNonceHash: 'e'.repeat(64), mode: 'text', limits: voiceLimits, now: voiceFinishedAt,
+    });
+    assert.equal(tracerFallback.session.status, 'completed');
+    assert.equal(tracerFallback.daily_remaining_seconds, 480);
     await repository.upsertWordProgress(username, [{ word: 'Achievement', stage: 2, errorCount: 1, reviewCount: 3, dueAt: Date.now() + 60_000 }]);
     const learningError = { module: 'grammar', itemKey: `grammar_19_24:${suffix}`, errorType: 'incorrect_form', details: { expected: 'went' } };
     await repository.upsertErrorBank(username, [learningError]);
@@ -144,7 +184,9 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     assert.equal(exported.writing_attempts[0].evaluated_answer, 'Test evaluated answer');
     assert.equal(exported.speaking_attempts[0].model, 'integration-speaking-model');
     assert.equal(exported.generated_tasks.length, 1);
-    assert.equal(exported.module_attempts.length, 1);
+    assert.equal(exported.module_attempts.length, 2);
+    assert.equal(exported.voice_tutor_sessions.find((session) => session.id === tracerSessionId).delivery_mode, 'text');
+    assert.equal(JSON.stringify(exported.voice_tutor_sessions).includes('nonce_hash'), false);
     assert.equal(exported.progress_summary[0].attempt_count, 1);
     assert.equal(exported.progress_summary[0].best_score, 5);
     assert.equal(exported.word_progress[0].word, 'achievement');
@@ -153,8 +195,12 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     assert.equal(exported.audit_log[0].action, 'payment.resolve');
     assert.equal(exported.ai_requests.length, 1);
     assert.equal(exported.subscription_entitlements[0].entitlement, 'voice_tutor');
-    assert.equal(exported.voice_tutor_sessions.length, 1);
-    assert.equal(exported.voice_tutor_sessions[0].billable_seconds, 120);
+    assert.equal(exported.voice_tutor_sessions.length, 2);
+    const originalVoiceSession = exported.voice_tutor_sessions.find((session) => session.id === firstVoiceReservation.session.id);
+    assert.equal(originalVoiceSession.billable_seconds, 120);
+    const exportedTracerSession = exported.voice_tutor_sessions.find((session) => session.id === tracerSessionId);
+    assert.equal(exportedTracerSession.delivery_mode, 'text');
+    assert.equal(exportedTracerSession.billable_seconds, 0);
 
     assert.equal(await repository.deleteUserData(username), true);
     assert.equal(await repository.getUser(username), null);

@@ -400,7 +400,7 @@ async function tgClick(e){
 
 /* legacy block 5 */
 const EGE_WORDS=[
-{w:'relationship',t:1,p:'n',tr:'отношения',ex:'They have a close relationship.'},
+{w:'relationship',t:1,p:'n',tr:'отношения',ex:'They have a close relationship.',voice:{id:'vocabulary.relationship.meaning',revision:1}},
 {w:'sibling',t:1,p:'n',tr:'брат или сестра',ex:'I have one sibling, a younger brother.'},
 {w:'upbringing',t:1,p:'n',tr:'воспитание',ex:'She had a strict upbringing.'},
 {w:'to bring up',t:1,p:'ph',tr:'воспитывать',ex:'It is hard to bring up children alone.'},

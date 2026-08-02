@@ -9,7 +9,7 @@
 | `sessions` | серверные пользовательские сессии | `id`, `username`, expiry, revoke timestamp |
 | `subscriptions` | текущее состояние доступа | `username`, status, source, start/end timestamps |
 | `subscription_entitlements` | отдельные тарифные права Premium | `username`, entitlement, start/end timestamps |
-| `voice_tutor_sessions` | резервирование голосовой квоты без аудио и полного transcript | status, reserved/billable seconds, start/expiry/end timestamps |
+| `voice_tutor_sessions` | голосовая квота и структурированный ход разбора без аудио и полного transcript | bounded capsule, delivery/state/outcome, micro-check/transfer flags, reserved/billable seconds and timestamps |
 | `payment_requests` | ручные заявки на оплату | status, administrator, result and resolution time |
 | `user_progress` | JSONB-прогресс пользователя | `username`, `data`, `updated_at` |
 | `telegram_auth_codes` | одноразовые коды входа | hash кода, expiry, consumed state |
@@ -42,6 +42,14 @@ Premium: без отдельной строки `voice_tutor` пользоват
 и единственная активная сессия защищены транзакционной блокировкой пользователя и уникальным
 частичным индексом. Записи входят в экспорт и удаляются каскадно вместе с аккаунтом; аудио и
 свободный transcript в таблице отсутствуют.
+
+Миграция `022_voice_tutor_tracer.sql` добавляет bounded server-owned capsule, hash одноразового
+nonce, способ доставки и конечное педагогическое состояние. Исходный ответ проверяется сервером до
+создания capsule и в нормализованном bounded-виде остаётся только в metadata исходной
+`module_attempt`: так каждый следующий AI-text turn может заново собрать точный контекст по
+server-owned attempt id. В `voice_tutor_sessions`, её capsule и экспорт этой таблицы ответ не
+копируется. В записи сессии остаются только результаты micro-check/transfer и технический outcome;
+аудио и временные субтитры не записываются.
 
 ## Проверка миграций и repository
 

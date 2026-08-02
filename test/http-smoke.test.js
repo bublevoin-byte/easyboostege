@@ -85,7 +85,7 @@ test('application starts and serves health, security headers and PWA assets', { 
   await fs.writeFile(dataFile, JSON.stringify({
     users: {
       expired: { created: Date.now(), sub_until: Date.now() - 60_000 },
-      active: { created: Date.now(), sub_until: Date.now() + 60_000, privacy_consent: { text_processing: true, voice_processing: true, policy_version: '2026-07-20', updated_at: new Date().toISOString() } },
+      active: { created: Date.now(), sub_until: Date.now() + 60_000, privacy_consent: { text_processing: true, voice_processing: true, policy_version: '2026-08-02', updated_at: new Date().toISOString() } },
       sessionuser: { created: Date.now(), sub_until: Date.now() + 60_000 },
       admin: { created: Date.now(), sub_until: Date.now() + 60_000, role: 'admin' },
     },

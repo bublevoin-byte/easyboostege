@@ -5,6 +5,7 @@
  * чтения и аудирования.
  */
 import {registerRouteHook,tab} from '../router.js';
+import {registerVoiceTutorError,voiceTutorButton} from '../voice-tutor.js';
 import {
   S,SRV,TOKEN,WBTN,apiPost,examModule,gExamFmt,gSync,generateAiContent,grammarModule,
   registerScreenGenerator,save,setTxt,ui,wDeco,
@@ -487,7 +488,7 @@ function gFinishRev(){var area=document.getElementById('g_area');var rows='';
 /* ===== ЭКЗАМЕН: задания 19–24 (текст с 6 пропусками) ===== */
 const G_EXAMS=[
 {tx:['Last summer Kate and her brother ',' to St Petersburg. It was their ',' visit to the city. The Hermitage ',' in 1764. Kate thought the real palaces were much ',' than in photos. Now she ',' a new trip together with ',' best friend.'],
- gaps:[{b:'GO',ans:['went'],e:'last summer → Past Simple: went.',t:2},
+ gaps:[{b:'GO',ans:['went'],e:'last summer → Past Simple: went.',t:2,voice:{id:'grammar.past-simple.last-summer',revision:1}},
   {b:'ONE',ans:['first'],e:'Порядковое: one → first.',t:12},
   {b:'FOUND',ans:['was founded'],e:'Музей основали → пассив прошлого: was founded.',t:5},
   {b:'BEAUTIFUL',ans:['more beautiful'],e:'Длинное прилагательное → more beautiful.',t:10},
@@ -542,19 +543,21 @@ function gExamStart(){var pool=gExamPool();
   gAnim('win','.32s')}
 function gExamCheck(){if(!EX)return;var ex=EX.ex;
   clearInterval(EX.iv);var sec=examModule.elapsedSeconds(EX.t0,Date.now());
-  var score=0,rows='',bank=[];
-  ex.gaps.forEach(function(g,i){var inp=document.getElementById('g_ex_'+i);var val=gNorm(inp?inp.value:'');
+  var score=0,rows='',bank=[],voiceErrors=[];
+  ex.gaps.forEach(function(g,i){var inp=document.getElementById('g_ex_'+i);var learnerAnswer=inp?inp.value:'';var val=gNorm(learnerAnswer);
     var ok=g.ans.some(function(a){return gNorm(a)===val});
     if(ok)score++;
     else{if(g.t){var r=gRec(g.t);r.err++;if(r.st===2)r.due=Date.now()}
       bank.push({module:'grammar',itemKey:'grammar_19_24:'+String(g.b).toLowerCase(),errorType:'incorrect_form',details:{expected:String(g.ans[0])}})}
+    var voiceSlot='';
+    if(!ok&&g.voice){var slotId='voice_tutor_grammar_'+i;voiceSlot='<div id="'+slotId+'"></div>';voiceErrors.push({slotId:slotId,module:'grammar',itemId:g.voice.id,revision:g.voice.revision,learnerAnswer:learnerAnswer})}
     rows+='<div style="padding:10px 2px;border-bottom:1px solid #F4EFE9;">'
       +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'
       +'<span style="font-weight:800;font-size:13px;color:'+(ok?'#1F8A50':'#C0392B')+';">'+(19+i)+' · '+g.b+' → '+g.ans[0]+'</span>'
       +(ok?'<span style="font-weight:800;font-size:10px;color:#1D7F4A;background:#EAF7F0;padding:4px 9px;border-radius:20px;">ВЕРНО</span>'
           :'<span style="font-weight:800;font-size:10px;color:#A83226;background:#FDEDEA;padding:4px 9px;border-radius:20px;">'+((document.getElementById('g_ex_'+i)||{}).value||'—')+'</span>')
       +'</div>'
-      +(ok?'':'<div style="font-weight:600;font-size:12px;color:#777163;margin-top:4px;">'+g.e+'</div>')
+      +(ok?'':'<div style="font-weight:600;font-size:12px;color:#777163;margin-top:4px;">'+g.e+'</div>'+voiceSlot)
       +'</div>'});
   S.exam19=examModule.record(S.exam19,score);
   if(typeof SRV!=='undefined'&&SRV&&TOKEN&&typeof crypto!=='undefined'&&crypto.randomUUID){
@@ -570,6 +573,7 @@ function gExamCheck(){if(!EX)return;var ex=EX.ex;
     +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
     +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="gExamStart()">Ещё текст</button>'
     +'<button class="sq" style="'+WBTN+'color:#B54E2F;" onclick="gMap()">К темам</button></div>';
+  voiceErrors.forEach(function(details){registerVoiceTutorError(details).then(function(recorded){var slot=document.getElementById(details.slotId);if(slot&&recorded)slot.innerHTML=voiceTutorButton(recorded)}).catch(function(){})});
   gAnim('win','.32s');gExamGen()}
 /* фоновая генерация новых экзаменационных текстов */
 var G_EXGEN=false;

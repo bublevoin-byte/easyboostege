@@ -1,5 +1,6 @@
 import pg from 'pg';
 import { ensureVoiceTutorReservationAllowed, hashAuthCode, normalizeUsername, subscriptionView, VoiceTutorError, voiceTutorAccessView, voiceTutorBillableSeconds, voiceTutorQuotaPeriods } from './shared.js';
+import { transitionPedagogicalState } from '../voice-tutor/state-machine.js';
 
 const { Pool } = pg;
 
@@ -286,13 +287,17 @@ export function createPostgresRepository(connectionString) {
     return {
       id: row.id,
       status: row.status,
+      state: row.pedagogical_state || null,
+      micro_check_passed: row.micro_check_passed ?? null,
+      transfer_passed: row.transfer_passed ?? null,
+      outcome: row.outcome ?? null,
       started_at: row.started_at,
       expires_at: row.expires_at,
       ended_at: row.ended_at,
     };
   }
 
-  async function reserveVoiceTutorSession(username, { id, idempotencyKey, limits, now = new Date() }) {
+  async function reserveVoiceTutorSession(username, { id, idempotencyKey, limits, now = new Date(), context = null }) {
     const client = await pool.connect();
     const instant = new Date(now);
     try {
@@ -300,12 +305,15 @@ export function createPostgresRepository(connectionString) {
       const user = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
       if (!user.rowCount) throw new Error('USER_NOT_FOUND');
       await client.query(
-        `UPDATE voice_tutor_sessions SET status = 'expired', billable_seconds = reserved_seconds, ended_at = expires_at
+        `UPDATE voice_tutor_sessions SET status = 'expired', billable_seconds = reserved_seconds, ended_at = expires_at,
+           pedagogical_state = CASE WHEN capsule_id IS NOT NULL AND pedagogical_state NOT IN ('resolved', 'fallback', 'ended') THEN 'ended' ELSE pedagogical_state END,
+           outcome = CASE WHEN capsule_id IS NOT NULL AND pedagogical_state NOT IN ('resolved', 'fallback', 'ended') THEN 'ended' ELSE outcome END,
+           nonce_hash = CASE WHEN capsule_id IS NOT NULL THEN NULL ELSE nonce_hash END
          WHERE username = $1 AND status = 'active' AND expires_at <= $2`,
         [username, instant],
       );
       const existing = await client.query(
-        `SELECT id, status, started_at, expires_at, ended_at FROM voice_tutor_sessions
+        `SELECT id, status, pedagogical_state, micro_check_passed, transfer_passed, outcome, started_at, expires_at, ended_at FROM voice_tutor_sessions
          WHERE username = $1 AND idempotency_key = $2`,
         [username, idempotencyKey],
       );
@@ -319,10 +327,13 @@ export function createPostgresRepository(connectionString) {
       ensureVoiceTutorReservationAllowed(access, reservedSeconds);
       const inserted = await client.query(
         `INSERT INTO voice_tutor_sessions
-         (id, username, idempotency_key, status, reserved_seconds, started_at, expires_at)
-         VALUES ($1, $2, $3, 'active', $4, $5, $6)
-         RETURNING id, status, started_at, expires_at, ended_at`,
-        [id, username, idempotencyKey, reservedSeconds, instant, new Date(instant.getTime() + reservedSeconds * 1000)],
+         (id, username, idempotency_key, status, reserved_seconds, started_at, expires_at,
+          capsule_id, capsule, nonce_hash, delivery_mode, pedagogical_state, micro_check_passed, transfer_passed, outcome)
+         VALUES ($1, $2, $3, 'active', $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, $13, $14)
+         RETURNING id, status, pedagogical_state, micro_check_passed, transfer_passed, outcome, started_at, expires_at, ended_at`,
+        [id, username, idempotencyKey, reservedSeconds, instant, new Date(instant.getTime() + reservedSeconds * 1000),
+          context?.capsule?.id || null, context?.capsule ? JSON.stringify(context.capsule) : null, context?.nonceHash || null,
+          context ? 'voice' : null, context ? 'diagnose' : null, null, null, null],
       );
       const updatedAccess = await readVoiceTutorAccess(client, username, limits, instant);
       await client.query('COMMIT');
@@ -335,7 +346,7 @@ export function createPostgresRepository(connectionString) {
     }
   }
 
-  async function finishVoiceTutorSession(username, sessionId, { limits, now = new Date(), confirmedBillableSeconds = null }) {
+  async function finishVoiceTutorSession(username, sessionId, { limits, now = new Date(), confirmedBillableSeconds = null, preservePedagogicalState = false }) {
     const client = await pool.connect();
     const instant = new Date(now);
     try {
@@ -343,32 +354,137 @@ export function createPostgresRepository(connectionString) {
       const user = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
       if (!user.rowCount) throw new Error('USER_NOT_FOUND');
       await client.query(
-        `UPDATE voice_tutor_sessions SET status = 'expired', billable_seconds = reserved_seconds, ended_at = expires_at
+        `UPDATE voice_tutor_sessions SET status = 'expired', billable_seconds = reserved_seconds, ended_at = expires_at,
+           pedagogical_state = CASE WHEN capsule_id IS NOT NULL AND pedagogical_state NOT IN ('resolved', 'fallback', 'ended') THEN 'ended' ELSE pedagogical_state END,
+           outcome = CASE WHEN capsule_id IS NOT NULL AND pedagogical_state NOT IN ('resolved', 'fallback', 'ended') THEN 'ended' ELSE outcome END,
+           nonce_hash = CASE WHEN capsule_id IS NOT NULL THEN NULL ELSE nonce_hash END
          WHERE username = $1 AND status = 'active' AND expires_at <= $2`,
         [username, instant],
       );
       const selected = await client.query(
-        `SELECT id, status, reserved_seconds, started_at, expires_at, ended_at FROM voice_tutor_sessions
+        `SELECT id, status, reserved_seconds, capsule_id, nonce_hash, pedagogical_state, micro_check_passed, transfer_passed, outcome, started_at, expires_at, ended_at FROM voice_tutor_sessions
          WHERE username = $1 AND id = $2 FOR UPDATE`,
         [username, sessionId],
       );
       if (!selected.rowCount) throw new VoiceTutorError('VOICE_TUTOR_SESSION_NOT_FOUND');
       const finished = selected.rows[0].status === 'active';
-      let row = selected.rows[0];
-      if (finished) {
-        const billableSeconds = voiceTutorBillableSeconds(row, instant, confirmedBillableSeconds);
+      const current = selected.rows[0];
+      let row = current;
+      const pedagogicalEnded = !preservePedagogicalState && current.capsule_id && !['resolved', 'fallback', 'ended'].includes(current.pedagogical_state);
+      if (finished || pedagogicalEnded || (!preservePedagogicalState && current.capsule_id && current.nonce_hash)) {
+        const billableSeconds = finished ? voiceTutorBillableSeconds(current, instant, confirmedBillableSeconds) : null;
         const updated = await client.query(
           `UPDATE voice_tutor_sessions
-           SET status = 'completed', billable_seconds = $4, ended_at = $3
+           SET status = CASE WHEN status = 'active' THEN 'completed' ELSE status END,
+               billable_seconds = CASE WHEN status = 'active' THEN $4 ELSE billable_seconds END,
+               ended_at = CASE WHEN status = 'active' THEN $3 ELSE ended_at END,
+               pedagogical_state = CASE WHEN capsule_id IS NOT NULL AND NOT $5 AND pedagogical_state NOT IN ('resolved', 'fallback', 'ended') THEN 'ended' ELSE pedagogical_state END,
+               outcome = CASE WHEN capsule_id IS NOT NULL AND NOT $5 AND pedagogical_state NOT IN ('resolved', 'fallback', 'ended') THEN 'ended' ELSE outcome END,
+               nonce_hash = CASE WHEN capsule_id IS NOT NULL AND NOT $5 THEN NULL ELSE nonce_hash END,
+               updated_at = CASE WHEN capsule_id IS NOT NULL THEN $3 ELSE updated_at END
            WHERE username = $1 AND id = $2
-           RETURNING id, status, started_at, expires_at, ended_at`,
-          [username, sessionId, instant, billableSeconds],
+           RETURNING id, status, pedagogical_state, micro_check_passed, transfer_passed, outcome, started_at, expires_at, ended_at`,
+          [username, sessionId, instant, billableSeconds, preservePedagogicalState],
         );
         row = updated.rows[0];
       }
       const access = await readVoiceTutorAccess(client, username, limits, instant);
       await client.query('COMMIT');
       return { finished, session: mapVoiceTutorSession(row), ...access };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async function getVoiceTutorSession(username, sessionId) {
+    const result = await pool.query(
+      `SELECT id, username, status, reserved_seconds, billable_seconds, capsule_id, capsule, nonce_hash,
+              delivery_mode, pedagogical_state, micro_check_passed, transfer_passed, outcome, error_code,
+              started_at, expires_at, ended_at
+       FROM voice_tutor_sessions WHERE username = $1 AND id = $2`,
+      [username, sessionId],
+    );
+    return result.rows[0] || null;
+  }
+
+  async function advanceVoiceTutorSession(username, sessionId, { nonceHash, nextNonceHash, event, now = new Date() }) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const selected = await client.query(
+        `SELECT capsule, nonce_hash, delivery_mode, expires_at, pedagogical_state, micro_check_passed, transfer_passed, outcome
+         FROM voice_tutor_sessions WHERE username = $1 AND id = $2 FOR UPDATE`,
+        [username, sessionId],
+      );
+      const row = selected.rows[0];
+      if (!row?.capsule) throw new VoiceTutorError('VOICE_TUTOR_SESSION_NOT_FOUND');
+      if (row.delivery_mode === 'voice' && new Date(row.expires_at).getTime() <= new Date(now).getTime()) {
+        throw new VoiceTutorError('VOICE_TUTOR_SESSION_EXPIRED');
+      }
+      if (!row.nonce_hash || row.nonce_hash !== nonceHash) throw new VoiceTutorError('VOICE_TUTOR_NONCE_REPLAYED');
+      const next = transitionPedagogicalState({
+        state: row.pedagogical_state,
+        micro_check_passed: row.micro_check_passed,
+        transfer_passed: row.transfer_passed,
+        outcome: row.outcome,
+      }, event, row.capsule);
+      const updated = await client.query(
+        `UPDATE voice_tutor_sessions SET pedagogical_state = $3, micro_check_passed = $4,
+           transfer_passed = $5, outcome = $6, nonce_hash = $7, updated_at = $8
+         WHERE username = $1 AND id = $2
+         RETURNING id, status, pedagogical_state, micro_check_passed, transfer_passed, outcome, started_at, expires_at, ended_at`,
+        [username, sessionId, next.state, next.micro_check_passed, next.transfer_passed, next.outcome, nextNonceHash, new Date(now)],
+      );
+      await client.query('COMMIT');
+      return { session: mapVoiceTutorSession(updated.rows[0]), capsule: row.capsule };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async function setVoiceTutorSessionDelivery(username, sessionId, { mode, errorCode = null }) {
+    if (!['voice', 'text', 'local'].includes(mode)) throw new VoiceTutorError('VOICE_TUTOR_DELIVERY_INVALID');
+    const result = await pool.query(
+      `UPDATE voice_tutor_sessions SET delivery_mode = $3, error_code = $4, updated_at = NOW()
+       WHERE username = $1 AND id = $2 AND capsule IS NOT NULL
+       RETURNING id, status, pedagogical_state, micro_check_passed, transfer_passed, outcome, started_at, expires_at, ended_at, capsule`,
+      [username, sessionId, mode, errorCode],
+    );
+    if (!result.rowCount) throw new VoiceTutorError('VOICE_TUTOR_SESSION_NOT_FOUND');
+    return { session: mapVoiceTutorSession(result.rows[0]), capsule: result.rows[0].capsule };
+  }
+
+  async function switchVoiceTutorSessionDelivery(username, sessionId, { nonceHash, nextNonceHash, mode, limits, now = new Date(), errorCode = null }) {
+    if (!['text', 'local'].includes(mode)) throw new VoiceTutorError('VOICE_TUTOR_DELIVERY_INVALID');
+    const client = await pool.connect();
+    const instant = new Date(now);
+    try {
+      await client.query('BEGIN');
+      const selected = await client.query(
+        `SELECT capsule, nonce_hash FROM voice_tutor_sessions WHERE username = $1 AND id = $2 FOR UPDATE`,
+        [username, sessionId],
+      );
+      const row = selected.rows[0];
+      if (!row?.capsule) throw new VoiceTutorError('VOICE_TUTOR_SESSION_NOT_FOUND');
+      if (!row.nonce_hash || row.nonce_hash !== nonceHash) throw new VoiceTutorError('VOICE_TUTOR_NONCE_REPLAYED');
+      const updated = await client.query(
+        `UPDATE voice_tutor_sessions SET delivery_mode = $3, error_code = $4, nonce_hash = $5,
+           status = CASE WHEN status = 'active' THEN 'completed' ELSE status END,
+           billable_seconds = CASE WHEN status = 'active' THEN 0 ELSE billable_seconds END,
+           ended_at = CASE WHEN status = 'active' THEN $6 ELSE ended_at END, updated_at = $6
+         WHERE username = $1 AND id = $2
+         RETURNING id, status, pedagogical_state, micro_check_passed, transfer_passed, outcome, started_at, expires_at, ended_at`,
+        [username, sessionId, mode, errorCode, nextNonceHash, instant],
+      );
+      const access = await readVoiceTutorAccess(client, username, limits, instant);
+      await client.query('COMMIT');
+      return { session: mapVoiceTutorSession(updated.rows[0]), capsule: row.capsule, ...access };
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -650,6 +766,15 @@ export function createPostgresRepository(connectionString) {
     } finally { client.release(); }
   }
 
+  async function getModuleAttempt(username, attemptId) {
+    const result = await pool.query(
+      `SELECT id, username, module, activity, score, max_score, duration_ms, metadata, created_at
+       FROM module_attempts WHERE username = $1 AND id = $2`,
+      [username, attemptId],
+    );
+    return result.rows[0] || null;
+  }
+
   async function upsertWordProgress(username, words) {
     const client = await pool.connect();
     try {
@@ -713,6 +838,14 @@ export function createPostgresRepository(connectionString) {
     return Number(result.rows[0].count);
   }
 
+  async function countAiOperationRequestsSince(username, operation, since) {
+    const result = await pool.query(
+      'SELECT COUNT(*)::int AS count FROM ai_requests WHERE username = $1 AND operation = $2 AND created_at >= $3',
+      [username, operation, since],
+    );
+    return Number(result.rows[0].count);
+  }
+
   async function getAiUsageMetrics(hours = 24) {
     const safeHours = Math.max(1, Math.min(Number(hours) || 24, 168));
     const result = await pool.query(
@@ -767,7 +900,10 @@ export function createPostgresRepository(connectionString) {
       pool.query('SELECT text_processing, voice_processing, policy_version, text_consented_at, voice_consented_at, updated_at FROM privacy_consents WHERE username = $1', [username]),
       pool.query('SELECT id, event_type, days, metadata, created_at FROM subscription_events WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT entitlement, starts_at, ends_at, created_at, updated_at FROM subscription_entitlements WHERE username = $1 ORDER BY entitlement', [username]),
-      pool.query('SELECT id, status, reserved_seconds, billable_seconds, started_at, expires_at, ended_at FROM voice_tutor_sessions WHERE username = $1 ORDER BY started_at', [username]),
+      pool.query(`SELECT id, status, reserved_seconds, billable_seconds, capsule_id, capsule, delivery_mode,
+                         pedagogical_state, micro_check_passed, transfer_passed, outcome, error_code,
+                         started_at, expires_at, ended_at, updated_at
+                  FROM voice_tutor_sessions WHERE username = $1 ORDER BY started_at`, [username]),
       pool.query('SELECT id, status, actor_telegram_id, result, created_at, resolved_at FROM payment_requests WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, task_type, assignment, answer, evaluated_answer, review, provider, model, prompt_version, status, error_code, created_at, evaluated_at FROM writing_attempts WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, task_type, assignment, transcript, review, provider, model, prompt_version, status, error_code, created_at, evaluated_at FROM speaking_attempts WHERE username = $1 ORDER BY created_at', [username]),
@@ -848,6 +984,10 @@ export function createPostgresRepository(connectionString) {
     getVoiceTutorAccess,
     reserveVoiceTutorSession,
     finishVoiceTutorSession,
+    getVoiceTutorSession,
+    advanceVoiceTutorSession,
+    setVoiceTutorSessionDelivery,
+    switchVoiceTutorSessionDelivery,
     setUserRole,
     getPrivacyConsent,
     setPrivacyConsent,
@@ -868,10 +1008,12 @@ export function createPostgresRepository(connectionString) {
     recordTaskDelivery,
     listBankTaskContents,
     recordModuleAttempt,
+    getModuleAttempt,
     upsertWordProgress,
     upsertErrorBank,
     logAiRequest,
     countAiRequestsSince,
+    countAiOperationRequestsSince,
     getAiUsageMetrics,
     createSession,
     isSessionActive,

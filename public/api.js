@@ -63,6 +63,16 @@
     return parseResponse(response);
   }
 
+  async function postIdempotent(path, body, idempotencyKey) {
+    const response = await request(baseUrl + path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': String(idempotencyKey || '') },
+      credentials: 'same-origin',
+      body: JSON.stringify(body || {}),
+    });
+    return parseResponse(response);
+  }
+
   async function put(path, body) {
     const response = await request(baseUrl + path, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(body || {}),
@@ -101,5 +111,5 @@
     return result.data;
   }
 
-  global.EasyBoostApi = Object.freeze({ ApiError, get, post, put, remove, getBlob, postBinary, generateContent, messageFor });
+  global.EasyBoostApi = Object.freeze({ ApiError, get, post, postIdempotent, put, remove, getBlob, postBinary, generateContent, messageFor });
 })(window);

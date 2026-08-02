@@ -57,6 +57,9 @@ export function createProgressRoutes({ authentication, db }) {
     try {
       const parsed = moduleAttemptSchema.safeParse(req.body);
       if (!parsed.success) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректные данные попытки.' } });
+      if (parsed.data.activity === 'voice_tutor_error') {
+        return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Voice Tutor error создаётся только проверенным серверным маршрутом.' } });
+      }
       const result = await db.recordModuleAttempt(req.user, parsed.data);
       res.status(result.created ? 201 : 200).json(result);
     } catch (error) { next(error); }

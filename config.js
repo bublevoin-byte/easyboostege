@@ -46,6 +46,10 @@ const databaseProvider = process.env.DATABASE_PROVIDER || (process.env.DATABASE_
 const voiceTutorDailySeconds = readInteger('VOICE_TUTOR_DAILY_SECONDS', 600, { min: 60, max: 86_400 });
 const voiceTutorMonthlySeconds = readInteger('VOICE_TUTOR_MONTHLY_SECONDS', 7_200, { min: 60, max: 2_678_400 });
 const voiceTutorSessionSeconds = readInteger('VOICE_TUTOR_SESSION_SECONDS', 300, { min: 60, max: 3_600 });
+const voiceTutorRealtimeUrl = process.env.XAI_VOICE_REALTIME_URL || 'wss://api.x.ai/v1/realtime';
+if (!/^wss:\/\/[A-Za-z0-9.-]+(?::\d+)?(?:\/|$)/u.test(voiceTutorRealtimeUrl)) {
+  throw new Error('XAI_VOICE_REALTIME_URL must use WSS');
+}
 
 if (!['file', 'postgres'].includes(databaseProvider)) {
   throw new Error('DATABASE_PROVIDER must be either file or postgres');
@@ -97,6 +101,12 @@ export const config = Object.freeze({
     dailySeconds: voiceTutorDailySeconds,
     monthlySeconds: voiceTutorMonthlySeconds,
     sessionSeconds: voiceTutorSessionSeconds,
+    enabled: readBoolean('VOICE_TUTOR_ENABLED', true),
+    credentialTtlSeconds: readInteger('XAI_VOICE_CREDENTIAL_TTL_SECONDS', 300, { min: 60, max: 600 }),
+    credentialEndpoint: readProviderUrl('XAI_VOICE_CREDENTIAL_URL', 'https://api.x.ai/v1/realtime/client_secrets'),
+    realtimeUrl: voiceTutorRealtimeUrl,
+    model: process.env.XAI_VOICE_MODEL || '',
+    voice: process.env.XAI_VOICE_NAME || '',
   }),
   telegram: Object.freeze({
     token: process.env.TELEGRAM_BOT_TOKEN || '',
