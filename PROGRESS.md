@@ -693,7 +693,7 @@ production credentials, три доказанных P0 отмечены во в�
 | 01 | Premium-доступ, дневные/месячные минуты и защита от параллельных сессий | done |
 | 02 | Полный голосовой разбор ошибок грамматики и лексики с fallback | done |
 | 03 | Контекстный голосовой разбор чтения и аудирования | done |
-| 04 | Контекстный голосовой разбор письма и устной части | pending |
+| 04 | Контекстный голосовой разбор письма и устной части | done |
 | 05 | Поиск отсутствующих правил по доверенным источникам и очередь проверки | pending |
 | 06 | Карта освоенных ошибок и возвращённых потенциальных баллов | pending |
 | 07 | Приватность, безопасность, observability и сквозная проверка | pending |
@@ -718,3 +718,11 @@ turn заново проверяется актуальный `text_processing` 
 кнопки только после завершения; fallback заново собирает тот же bounded capsule. Replay результата
 сверяется по answer hash. Целевые тесты 32/32, полный набор 455 (454 pass, 1 PostgreSQL skip),
 `lint`, `check` и frontend build проходят; оба финальных review не нашли нарушений.
+
+Тикет 04 закрыт: writing/speaking evaluation API возвращает только server-issued pointer на уже
+сохранённую попытку. Voice Tutor заново загружает owner-bound completed attempt, валидирует assignment
+и review, а evaluated writing text/speaking transcript использует только в transient capsule для
+провайдера. Полный ответ не попадает в публичный или сохранённый Voice Tutor session/export, tutor не
+меняет score и не вызывает evaluation повторно. Общий bottom sheet подключён к результатам практики и
+устного пробника; targeted tests 8/8, полный набор 459 (458 pass, 1 PostgreSQL skip), `lint`, `check` и
+frontend build проходят.

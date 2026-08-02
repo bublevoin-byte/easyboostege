@@ -4,12 +4,11 @@
 
 **Blocked by:** 02 — Голосовой разбор грамматики и лексики.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Capsule использует только сохранённую попытку, evaluated text/transcript, assignment и валидированный review текущего пользователя.
-- [ ] Полный ответ не попадает в технические логи и не подменяется клиентом.
-- [ ] Tutor mode явно отделён от экспериментальной оценки и не меняет выставленный балл.
-- [ ] Writing и speaking UI запускают общий компонент и корректно возвращаются к попытке.
-- [ ] Повторный voice-разбор не запускает новую evaluation provider call.
-- [ ] Targeted tests, `npm run lint`, `npm run check` и `npm test` проходят.
-
+- [x] Capsule использует только сохранённую попытку, evaluated text/transcript, assignment и валидированный review текущего пользователя.
+- [x] Полный ответ не попадает в технические логи и не подменяется клиентом.
+- [x] Tutor mode явно отделён от экспериментальной оценки и не меняет выставленный балл.
+- [x] Writing и speaking UI запускают общий компонент и корректно возвращаются к попытке.
+- [x] Повторный voice-разбор не запускает новую evaluation provider call.
+- [x] Targeted tests, `npm run lint`, `npm run check` и `npm test` проходят.

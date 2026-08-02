@@ -32,6 +32,15 @@
 валидными с неизвестной моделью (`NULL`), а новые завершённые прогоны сохраняют полную тройку
 `provider`, `model`, `prompt_version`.
 
+Voice Tutor обращается к этим журналам только через owner-bound lookup по `(username, id)`. Для
+`writing` допускается лишь `status=completed`, валидные assignment/review и ровно сохранённый
+`evaluated_answer`; для `speaking` — лишь completed attempt, сохранённые assignment/transcript и
+повторно провалидированный review. Эти данные передаются только в transient provider capsule и не
+копируются в `voice_tutor_sessions`, её публичный ответ или раздел этой таблицы в account export.
+Сервер выдаёт bounded-названия и индексы критериев с потерями, а при создании отдельной сессии
+повторно проверяет выбранный индекс по сохранённому review. Tutor session не обновляет review/score и не
+запускает evaluation operation повторно.
+
 Миграция `020_writing_evaluated_answer.sql` добавляет обязательный `evaluated_answer`. Для прежних
 строк он заполняется полным `answer`; в новых попытках `answer` хранит весь очищенный ответ, а
 `evaluated_answer` — ровно тот фрагмент, который получил провайдер. Оба поля входят в экспорт и

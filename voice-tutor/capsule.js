@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import { parseSpeakingReview, speakingRequestSchema } from '../ai/speaking.js';
+import { parseAndValidateWritingReview, writingAssignmentSchema } from '../ai/writing.js';
 import { getCanonicalVoiceTutorItem, getCanonicalVoiceTutorResultSet } from './canonical-items.js';
 import {
   GRAMMAR_LEXICON_CAPSULE_VERSION,
@@ -6,11 +8,12 @@ import {
   isDirectVoiceTutorModule,
   READING_LISTENING_CAPSULE_VERSION,
   voiceTutorModule,
+  WRITING_SPEAKING_CAPSULE_VERSION,
 } from './modules.js';
 import { normalizeTutorAnswer } from './state-machine.js';
 
 export const VOICE_CAPSULE_VERSION = GRAMMAR_LEXICON_CAPSULE_VERSION;
-export { GRAMMAR_LEXICON_CAPSULE_VERSION, READING_LISTENING_CAPSULE_VERSION };
+export { GRAMMAR_LEXICON_CAPSULE_VERSION, READING_LISTENING_CAPSULE_VERSION, WRITING_SPEAKING_CAPSULE_VERSION };
 
 export class VoiceTutorCapsuleError extends Error {
   constructor(code) {
@@ -195,6 +198,229 @@ export function buildVoiceTutorCapsule({ attempt, expectedRevision, getItem = ge
 export function buildGrammarLexiconCapsule(input) {
   if (!isDirectVoiceTutorModule(input?.attempt?.module)) throw new VoiceTutorCapsuleError('VOICE_TUTOR_ATTEMPT_NOT_SUPPORTED');
   return buildVoiceTutorCapsule(input);
+}
+
+function validatedReviewAttempt(source, attempt) {
+  if (!attempt || attempt.status !== 'completed' || !attempt.review || !attempt.assignment) {
+    throw new VoiceTutorCapsuleError('VOICE_TUTOR_ATTEMPT_NOT_SUPPORTED');
+  }
+  try {
+    if (source === 'writing') {
+      const taskType = String(attempt.task_type || '');
+      const assignment = writingAssignmentSchema.safeParse({ taskType, assignment: attempt.assignment });
+      if (!assignment.success) throw new Error('assignment invalid');
+      const answer = boundedString(attempt.answer, 20_000, 'VOICE_TUTOR_REVIEW_INVALID');
+      const evaluatedAnswer = boundedString(attempt.evaluated_answer, 8_000, 'VOICE_TUTOR_CAPSULE_TOO_LARGE');
+      const review = parseAndValidateWritingReview(JSON.stringify(attempt.review), { taskType, answer, assignment: attempt.assignment });
+      return { taskType, assignment: assignment.data.assignment, learnerAnswer: evaluatedAnswer, review };
+    }
+    if (source === 'speaking') {
+      const taskType = Number(attempt.task_type);
+      const parsedInput = speakingRequestSchema.safeParse({ taskType, transcript: attempt.transcript, assignment: attempt.assignment });
+      if (!parsedInput.success) throw new Error('speaking attempt invalid');
+      const learnerAnswer = boundedString(parsedInput.data.transcript, 8_000, 'VOICE_TUTOR_CAPSULE_TOO_LARGE');
+      const review = parseSpeakingReview(taskType, JSON.stringify(attempt.review));
+      return { taskType, assignment: structuredClone(parsedInput.data.assignment), learnerAnswer, review };
+    }
+  } catch (error) {
+    if (error instanceof VoiceTutorCapsuleError) throw error;
+    throw new VoiceTutorCapsuleError('VOICE_TUTOR_REVIEW_INVALID');
+  }
+  throw new VoiceTutorCapsuleError('VOICE_TUTOR_ATTEMPT_NOT_SUPPORTED');
+}
+
+export function reviewVoiceTutorCriterionChoices(review) {
+  const criteria = Array.isArray(review.criteria) ? review.criteria : [];
+  return criteria.flatMap((criterion, criterionIndex) => (
+    Number.isFinite(Number(criterion?.got)) && Number.isFinite(Number(criterion?.max))
+      && Number(criterion.got) < Number(criterion.max)
+      ? [{ index: criterionIndex, label: boundedString(criterion.name, 160, 'VOICE_TUTOR_REVIEW_INVALID') }]
+      : []
+  ));
+}
+
+function reviewLosses(source, review) {
+  const criteria = Array.isArray(review.criteria) ? review.criteria : [];
+  const losses = reviewVoiceTutorCriterionChoices(review).map(({ index: criterionIndex, label: name }) => {
+    const criterion = criteria[criterionIndex];
+    return {
+      criterionIndex,
+      name,
+      got: Number(criterion.got),
+      max: Number(criterion.max),
+      lostPoints: Number(criterion.max) - Number(criterion.got),
+    };
+  });
+  if (!losses.length) throw new VoiceTutorCapsuleError('VOICE_TUTOR_ANSWER_NOT_INCORRECT');
+  const corrections = source === 'writing' ? review.errors : review.fix;
+  const boundedCorrections = (Array.isArray(corrections) ? corrections : [])
+    .filter((item) => item && (item.note || item.right))
+    .slice(0, 8)
+    .map((item) => ({
+      ...(String(item.note || '').trim() ? { note: boundedString(item.note, 1_000, 'VOICE_TUTOR_REVIEW_INVALID') } : {}),
+      ...(String(item.right || '').trim() ? { example: boundedString(item.right, 300, 'VOICE_TUTOR_REVIEW_INVALID') } : {}),
+    }));
+  return { losses, corrections: boundedCorrections };
+}
+
+function practice(microPrompt, microAnswers, transferPrompt, transferAnswers) {
+  return Object.freeze({
+    microCheck: Object.freeze({ prompt: microPrompt, answers: Object.freeze(microAnswers) }),
+    transferTask: Object.freeze({ prompt: transferPrompt, answers: Object.freeze(transferAnswers) }),
+  });
+}
+
+const WRITING_COMMUNICATIVE = practice(
+  'Какой ответ полностью раскрывает причину выбора: A — «I chose the club» или B — «I chose the club because I enjoy teamwork»?',
+  ['b', 'вариант b'],
+  'Новый пример: вставь связку — «I chose the science club ___ I enjoy experiments.»',
+  ['because'],
+);
+const SPEAKING_COMMUNICATIVE = practice(
+  'Какой ответ полностью обосновывает выбор: A — «I prefer photo one» или B — «I prefer photo one because it shows teamwork»?',
+  ['b', 'вариант b'],
+  'Новый пример: вставь связку — «I prefer the second picture ___ the people look relaxed.»',
+  ['because'],
+);
+const ORGANIZATION = practice(
+  'Какое средство связи показывает противопоставление: however или because?',
+  ['however'],
+  'Новый пример: заверши план ответа — «First, describe the situation. ___, give your opinion.»',
+  ['finally'],
+);
+const LANGUAGE = practice(
+  'Выбери грамматически верную форму после three: book или books?',
+  ['books'],
+  'Новый пример: вставь верную форму — «There are five ___ in the classroom» (student).',
+  ['students'],
+);
+const LEXICON = practice(
+  'Какая фраза является верным словосочетанием: make a decision или do a decision?',
+  ['make a decision'],
+  'Новый пример: вставь слово — «This activity ___ an important role in our lives.»',
+  ['plays'],
+);
+const GRAMMAR = practice(
+  'Выбери верную форму: «Yesterday she go to school» или «Yesterday she went to school»?',
+  ['went', 'yesterday she went to school'],
+  'Новый пример: вставь форму — «If I ___ more time, I would join the club.» (have).',
+  ['had'],
+);
+const SPELLING = practice(
+  'Какое написание верно: environment или enviroment?',
+  ['environment'],
+  'Новый пример: напиши верно слово по подсказке — «необходимый» (necessary).',
+  ['necessary'],
+);
+const READING_COMPLETENESS = practice(
+  'Какой вариант сохраняет все слова: A — «The train leaves at nine» или B — «The train at nine»?',
+  ['a', 'вариант a'],
+  'Новый пример: произнеси или введи без пропусков — «The museum opens at ten on Sundays.»',
+  ['the museum opens at ten on sundays'],
+);
+const EXTENDED_ANSWER = practice(
+  'Какой ответ достаточно развёрнут: A — одно короткое утверждение или B — утверждение и объясняющая причина?',
+  ['b', 'вариант b'],
+  'Новый пример: дополни второй фразой — «I enjoy learning English. I practise every day ___ I want to speak confidently.»',
+  ['because'],
+);
+const DIRECT_QUESTIONS = Object.freeze([
+  practice('Какой прямой вопрос построен верно: A — «How much does it cost?» или B — «How much it costs?»', ['a', 'вариант a'], 'Новый аналог: задай грамматически верный прямой вопрос о цене.', ['how much does it cost']),
+  practice('Какой порядок слов верен: «Where is the hotel located?» или «Where the hotel is located?»', ['where is the hotel located'], 'Новый аналог: задай прямой вопрос о расположении отеля.', ['where is the hotel located']),
+  practice('Какой вопрос верен: «Is breakfast included?» или «Breakfast is included?»', ['is breakfast included'], 'Новый аналог: задай прямой вопрос о включённом завтраке.', ['is breakfast included']),
+  practice('Какой вопрос верен: «Is there a car park?» или «There is a car park?»', ['is there a car park'], 'Новый аналог: задай прямой вопрос о парковке.', ['is there a car park']),
+]);
+
+const REVIEW_PRACTICES = Object.freeze({
+  'writing:writing_37:0': WRITING_COMMUNICATIVE,
+  'writing:writing_37:1': ORGANIZATION,
+  'writing:writing_37:2': LANGUAGE,
+  'writing:writing_38:0': WRITING_COMMUNICATIVE,
+  'writing:writing_38:1': ORGANIZATION,
+  'writing:writing_38:2': LEXICON,
+  'writing:writing_38:3': GRAMMAR,
+  'writing:writing_38:4': SPELLING,
+  'speaking:1:0': READING_COMPLETENESS,
+  'speaking:2:0': DIRECT_QUESTIONS[0],
+  'speaking:2:1': DIRECT_QUESTIONS[1],
+  'speaking:2:2': DIRECT_QUESTIONS[2],
+  'speaking:2:3': DIRECT_QUESTIONS[3],
+  'speaking:3:0': EXTENDED_ANSWER,
+  'speaking:3:1': EXTENDED_ANSWER,
+  'speaking:3:2': EXTENDED_ANSWER,
+  'speaking:3:3': EXTENDED_ANSWER,
+  'speaking:3:4': EXTENDED_ANSWER,
+  'speaking:4:0': SPEAKING_COMMUNICATIVE,
+  'speaking:4:1': ORGANIZATION,
+  'speaking:4:2': LANGUAGE,
+});
+
+function reviewPractice(source, taskType, criterionIndex) {
+  const result = REVIEW_PRACTICES[`${source}:${taskType}:${criterionIndex}`];
+  if (!result) throw new VoiceTutorCapsuleError('VOICE_TUTOR_CRITERION_NOT_FOUND');
+  return result;
+}
+
+function assignmentPrompt(source, taskType, assignment) {
+  const label = source === 'writing' ? `Письменное задание ${String(taskType).replace('writing_', '')}` : `Устное задание ${taskType}`;
+  return `${label}: ${boundedString(JSON.stringify(assignment), 2_500, 'VOICE_TUTOR_CAPSULE_TOO_LARGE')}`;
+}
+
+export function buildWritingSpeakingCapsule({ source, attempt, expectedRevision, criterionIndex }) {
+  if (source !== 'writing' && source !== 'speaking') throw new VoiceTutorCapsuleError('VOICE_TUTOR_ATTEMPT_NOT_SUPPORTED');
+  if (!Number.isInteger(Number(attempt?.id)) || Number(attempt.id) < 1) throw new VoiceTutorCapsuleError('VOICE_TUTOR_ATTEMPT_NOT_FOUND');
+  if (Number(expectedRevision) !== 1) throw new VoiceTutorCapsuleError('VOICE_TUTOR_REVISION_MISMATCH');
+  if (!Number.isInteger(criterionIndex) || criterionIndex < 0 || criterionIndex > 20) {
+    throw new VoiceTutorCapsuleError('VOICE_TUTOR_CRITERION_NOT_FOUND');
+  }
+  const validated = validatedReviewAttempt(source, attempt);
+  const { losses, corrections } = reviewLosses(source, validated.review);
+  const selected = losses.find((loss) => loss.criterionIndex === criterionIndex);
+  if (!selected) throw new VoiceTutorCapsuleError('VOICE_TUTOR_CRITERION_NOT_FOUND');
+  const fallbackNote = boundedString(validated.review.sub || validated.review.verdict, 1_000, 'VOICE_TUTOR_REVIEW_INVALID');
+  const correctionNote = corrections[0]?.note || fallbackNote;
+  const selectedPractice = reviewPractice(source, validated.taskType, criterionIndex);
+  const sourceId = Number(attempt.id);
+  const capsule = {
+    id: `voice-capsule:${source}:${sourceId}:criterion:${criterionIndex + 1}`,
+    version: WRITING_SPEAKING_CAPSULE_VERSION,
+    source: { attempt_type: source, attempt_id: sourceId, item_revision: 1, criterion_index: criterionIndex },
+    module: source,
+    item: {
+      id: `${source}.${validated.taskType}.criterion.${criterionIndex + 1}`,
+      prompt: assignmentPrompt(source, validated.taskType, validated.assignment),
+      reference: {
+        selectedCriterionIndex: criterionIndex,
+        criteria: losses,
+        review: {
+          verdict: boundedString(validated.review.verdict, 1_000, 'VOICE_TUTOR_REVIEW_INVALID'),
+          note: correctionNote,
+          corrections,
+        },
+      },
+    },
+    learner_answer: validated.learnerAnswer,
+    error: { type: `${source}_criterion_loss`, lost_points: selected.lostPoints },
+    skill: { id: `ege.${source}.${validated.taskType}.criterion.${criterionIndex + 1}`, label: `${source === 'writing' ? 'Письмо' : 'Устная часть'}: ${selected.name}` },
+    rule: {
+      id: `${source}.${validated.taskType}.criterion.${criterionIndex + 1}.review-v1`,
+      title: `Критерий «${selected.name}»`,
+      explanation: `${losses.map((loss) => `«${loss.name}»: потеряно ${loss.lostPoints} из ${loss.max}`).join('; ')}. Сейчас разбираем «${selected.name}». ${correctionNote}`,
+      examples: corrections.flatMap((correction) => correction.example ? [correction.example] : []),
+    },
+    checks: {
+      micro_check: {
+        id: `${source}.${sourceId}.criterion.${criterionIndex + 1}.check`,
+        ...selectedPractice.microCheck,
+      },
+      transfer_task: {
+        id: `${source}.${sourceId}.criterion.${criterionIndex + 1}.transfer`,
+        ...selectedPractice.transferTask,
+      },
+    },
+  };
+  if (JSON.stringify(capsule).length > 12_000) throw new VoiceTutorCapsuleError('VOICE_TUTOR_CAPSULE_TOO_LARGE');
+  return capsule;
 }
 
 export function publicVoiceTutorCapsule(capsule) {

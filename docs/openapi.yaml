@@ -114,16 +114,25 @@ paths:
           required: true
           schema: { type: string, minLength: 8, maxLength: 100 }
       requestBody:
-        description: Omit the body for the legacy quota-only reservation; tracer clients send only an existing attempt id and expected canonical revision.
+        description: Omit the body for the legacy quota-only reservation. Grammar/lexicon/reading/listening send a UUID attempt pointer; writing/speaking send a server-issued numeric review pointer, source and one server-issued lost-criterion index. No answer, transcript, assignment or review is accepted here.
         content:
           application/json:
             schema:
-              type: object
-              required: [attemptId, revision]
-              properties:
-                attemptId: { type: string, format: uuid }
-                revision: { type: integer, minimum: 1, maximum: 10000 }
-              additionalProperties: false
+              oneOf:
+                - type: object
+                  required: [attemptId, revision]
+                  properties:
+                    attemptId: { type: string, format: uuid }
+                    revision: { type: integer, minimum: 1, maximum: 10000 }
+                  additionalProperties: false
+                - type: object
+                  required: [source, attemptId, revision, criterionIndex]
+                  properties:
+                    source: { type: string, enum: [writing, speaking] }
+                    attemptId: { type: integer, minimum: 1 }
+                    revision: { type: integer, minimum: 1, maximum: 10000 }
+                    criterionIndex: { type: integer, minimum: 0, maximum: 20 }
+                  additionalProperties: false
       responses:
         '201': { description: Capsule created; initial response may include one ephemeral realtime credential and one-time nonce, never XAI_API_KEY }
         '200': { description: Existing idempotent result without a second credential or nonce }
@@ -131,7 +140,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { description: The current subscription has no voice_tutor entitlement }
         '409': { description: Another Voice Tutor session is active }
-        '422': { description: Attempt, canonical item, or bounded reading/listening context is not supported }
+        '422': { description: Attempt, canonical item/context, or completed validated writing/speaking review is not supported }
         '429': { description: Daily or monthly voice quota is exhausted }
   /api/v1/voice-tutor/sessions/{sessionId}/events:
     post:
@@ -382,11 +391,27 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [review, provider, attemptId, assessment, evaluationScope]
+                required: [review, provider, attemptId, voiceTutor, assessment, evaluationScope]
                 properties:
                   review: { type: object }
                   provider: { type: string }
                   attemptId: { type: integer }
+                  voiceTutor:
+                    type: object
+                    required: [source, attemptId, revision, criterionChoices]
+                    properties:
+                      source: { type: string, enum: [writing] }
+                      attemptId: { type: integer }
+                      revision: { type: integer, enum: [1] }
+                      criterionChoices:
+                        type: array
+                        items:
+                          type: object
+                          required: [index, label]
+                          properties:
+                            index: { type: integer, minimum: 0, maximum: 20 }
+                            label: { type: string, minLength: 1, maxLength: 160 }
+                          additionalProperties: false
                   assessment: { $ref: '#/components/schemas/ExperimentalAssessment' }
                   evaluationScope: { $ref: '#/components/schemas/WritingEvaluationScope' }
         '400': { $ref: '#/components/responses/BadRequest' }
@@ -441,11 +466,28 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [review, provider, promptVersion]
+                required: [review, provider, promptVersion, attemptId, voiceTutor]
                 properties:
                   review: { type: object }
                   provider: { type: string }
                   promptVersion: { type: string }
+                  attemptId: { type: integer }
+                  voiceTutor:
+                    type: object
+                    required: [source, attemptId, revision, criterionChoices]
+                    properties:
+                      source: { type: string, enum: [speaking] }
+                      attemptId: { type: integer }
+                      revision: { type: integer, enum: [1] }
+                      criterionChoices:
+                        type: array
+                        items:
+                          type: object
+                          required: [index, label]
+                          properties:
+                            index: { type: integer, minimum: 0, maximum: 20 }
+                            label: { type: string, minLength: 1, maxLength: 160 }
+                          additionalProperties: false
                   assessment: { $ref: '#/components/schemas/ExperimentalAssessment' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }

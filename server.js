@@ -8,7 +8,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { claimUnseenBankTask, getBankTask, getBankTaskByExternalId, listBankTaskContents, recordTaskDelivery, upsertBankTask, activateTrial, closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, countAiOperationRequestsSince, countAiRequestsSince, createPaymentRequest, createSession, createSpeakingAttempt, createTelegramAuthCode, createWritingAttempt, deleteUserData, exportUserData, finishSpeakingAttempt, finishVoiceTutorSession, finishWritingAttempt, getAiUsageMetrics, getGeneratedTask, getSharedGeneratedTask, getModuleAttempt, getPrivacyConsent, getProgress, getUser, getVoiceTutorAccess, getVoiceTutorSession, healthCheck, isSessionActive, recordModuleAttempt, reserveVoiceTutorSession, resolvePaymentRequest, revokeSession, saveGeneratedTask, saveProgress, setPrivacyConsent, setUserRole, upsertErrorBank, upsertWordProgress, mergeProgress, getUserByTelegram, createTelegramUser, logAiRequest, getSub, advanceVoiceTutorSession, setVoiceTutorSessionDelivery, switchVoiceTutorSessionDelivery } from './db.js';
+import { claimUnseenBankTask, getBankTask, getBankTaskByExternalId, listBankTaskContents, recordTaskDelivery, upsertBankTask, activateTrial, closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, countAiOperationRequestsSince, countAiRequestsSince, createPaymentRequest, createSession, createSpeakingAttempt, createTelegramAuthCode, createWritingAttempt, deleteUserData, exportUserData, finishSpeakingAttempt, finishVoiceTutorSession, finishWritingAttempt, getAiUsageMetrics, getGeneratedTask, getSharedGeneratedTask, getModuleAttempt, getPrivacyConsent, getProgress, getSpeakingAttempt, getUser, getVoiceTutorAccess, getVoiceTutorSession, getWritingAttempt, healthCheck, isSessionActive, recordModuleAttempt, reserveVoiceTutorSession, resolvePaymentRequest, revokeSession, saveGeneratedTask, saveProgress, setPrivacyConsent, setUserRole, upsertErrorBank, upsertWordProgress, mergeProgress, getUserByTelegram, createTelegramUser, logAiRequest, getSub, advanceVoiceTutorSession, setVoiceTutorSessionDelivery, switchVoiceTutorSessionDelivery } from './db.js';
 import { config } from './config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from './ai/writing.js';
 import { buildContentPrompt, CONTENT_PROMPT_VERSION, contentRequestSchema, parseContentResponse } from './ai/content.js';
@@ -174,7 +174,7 @@ const dbApi = {
   advanceVoiceTutorSession, setVoiceTutorSessionDelivery, switchVoiceTutorSessionDelivery,
   revokeSession, exportUserData, deleteUserData, getPrivacyConsent, setPrivacyConsent,
   getProgress, saveProgress, mergeProgress, recordModuleAttempt, getModuleAttempt, upsertWordProgress, upsertErrorBank,
-  createWritingAttempt, finishWritingAttempt, createSpeakingAttempt, finishSpeakingAttempt,
+  createWritingAttempt, finishWritingAttempt, getWritingAttempt, createSpeakingAttempt, finishSpeakingAttempt, getSpeakingAttempt,
   getGeneratedTask, getSharedGeneratedTask, saveGeneratedTask, logAiRequest,
   upsertBankTask, getBankTask, getBankTaskByExternalId, claimUnseenBankTask, recordTaskDelivery, listBankTaskContents,
 };

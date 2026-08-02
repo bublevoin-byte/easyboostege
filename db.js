@@ -36,8 +36,10 @@ export const confirmTelegramAuthCode = (...args) => repository.confirmTelegramAu
 export const consumeTelegramAuthCode = (...args) => repository.consumeTelegramAuthCode(...args);
 export const createWritingAttempt = (...args) => repository.createWritingAttempt(...args);
 export const finishWritingAttempt = (...args) => repository.finishWritingAttempt(...args);
+export const getWritingAttempt = (...args) => repository.getWritingAttempt(...args);
 export const createSpeakingAttempt = (...args) => repository.createSpeakingAttempt(...args);
 export const finishSpeakingAttempt = (...args) => repository.finishSpeakingAttempt(...args);
+export const getSpeakingAttempt = (...args) => repository.getSpeakingAttempt(...args);
 export const getGeneratedTask = (...args) => repository.getGeneratedTask(...args);
 export const getSharedGeneratedTask = (...args) => repository.getSharedGeneratedTask(...args);
 export const saveGeneratedTask = (...args) => repository.saveGeneratedTask(...args);

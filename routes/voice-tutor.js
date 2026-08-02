@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import express from 'express';
 import { parseContentResponse } from '../ai/content.js';
-import { buildVoiceTutorCapsule, createGrammarLexiconErrorAttempt, createVoiceTutorContextResult, persistedVoiceTutorCapsule, publicVoiceTutorCapsule } from '../voice-tutor/capsule.js';
+import { buildVoiceTutorCapsule, buildWritingSpeakingCapsule, createGrammarLexiconErrorAttempt, createVoiceTutorContextResult, persistedVoiceTutorCapsule, publicVoiceTutorCapsule } from '../voice-tutor/capsule.js';
 import { buildGeneratedVoiceTutorDefinitions, parseGeneratedVoiceTutorSetId } from '../voice-tutor/generated-items.js';
 import { isContextVoiceTutorModule, isDirectVoiceTutorModule } from '../voice-tutor/modules.js';
 
@@ -28,6 +28,8 @@ const PUBLIC_ERRORS = Object.freeze({
   VOICE_TUTOR_CONTEXT_INVALID: { status: 422, message: 'Проверенный фрагмент для разбора недоступен.' },
   VOICE_TUTOR_CONTEXT_RESULT_INVALID: { status: 422, message: 'Завершённый результат не соответствует проверенному заданию.' },
   VOICE_TUTOR_CONTEXT_RESULT_CONFLICT: { status: 409, message: 'Этот результат уже сохранён с другими ответами.' },
+  VOICE_TUTOR_REVIEW_INVALID: { status: 422, message: 'Сохранённый разбор не прошёл проверку и не может использоваться голосовым репетитором.' },
+  VOICE_TUTOR_CRITERION_NOT_FOUND: { status: 422, message: 'Выбранный критерий не содержит потери баллов в этом разборе.' },
   VOICE_TUTOR_NONCE_REPLAYED: { status: 409, message: 'Команда этой сессии уже использована.' },
   VOICE_TUTOR_TRANSITION_INVALID: { status: 409, message: 'Этот шаг разбора сейчас недоступен.' },
   PRIVACY_CONSENT_REQUIRED: { status: 403, message: 'Подтвердите обработку голоса в настройках приватности.' },
@@ -47,6 +49,14 @@ function parseTracerRequest(body) {
   const value = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
   const keys = Object.keys(value);
   if (keys.length === 0) return null;
+  if (keys.length === 4 && keys.every((key) => ['source', 'attemptId', 'revision', 'criterionIndex'].includes(key))) {
+    const source = value.source;
+    const attemptId = value.attemptId;
+    if (!['writing', 'speaking'].includes(source) || !Number.isSafeInteger(attemptId) || attemptId < 1
+      || !Number.isInteger(value.revision) || value.revision < 1 || value.revision > 10_000
+      || !Number.isInteger(value.criterionIndex) || value.criterionIndex < 0 || value.criterionIndex > 20) return false;
+    return { source, attemptId, revision: value.revision, criterionIndex: value.criterionIndex };
+  }
   if (keys.length !== 2 || !keys.includes('attemptId') || !keys.includes('revision')) return false;
   if (!ATTEMPT_ID.test(String(value.attemptId || '')) || !Number.isInteger(value.revision) || value.revision < 1 || value.revision > 10_000) return false;
   return { attemptId: String(value.attemptId), revision: value.revision };
@@ -124,6 +134,22 @@ async function buildSourceCapsule(db, username, attempt, expectedRevision) {
 async function rebuildSourceCapsule(db, username, storedCapsule) {
   const attemptId = storedCapsule?.source?.attempt_id;
   const revision = Number(storedCapsule?.source?.item_revision);
+  const attemptType = storedCapsule?.source?.attempt_type;
+  if (attemptType === 'writing' || attemptType === 'speaking') {
+    const getter = attemptType === 'writing' ? db.getWritingAttempt : db.getSpeakingAttempt;
+    const attempt = attemptId ? await getter(username, attemptId) : null;
+    if (!attempt) throw Object.assign(new Error('VOICE_TUTOR_ATTEMPT_NOT_FOUND'), { code: 'VOICE_TUTOR_ATTEMPT_NOT_FOUND' });
+    const capsule = buildWritingSpeakingCapsule({
+      source: attemptType,
+      attempt,
+      expectedRevision: revision,
+      criterionIndex: Number(storedCapsule.source.criterion_index),
+    });
+    if (capsule.id !== storedCapsule.id || capsule.version !== storedCapsule.version) {
+      throw Object.assign(new Error('VOICE_TUTOR_REVISION_MISMATCH'), { code: 'VOICE_TUTOR_REVISION_MISMATCH' });
+    }
+    return capsule;
+  }
   const attempt = attemptId ? await db.getModuleAttempt(username, attemptId) : null;
   if (!attempt) throw Object.assign(new Error('VOICE_TUTOR_ATTEMPT_NOT_FOUND'), { code: 'VOICE_TUTOR_ATTEMPT_NOT_FOUND' });
   const capsule = await buildSourceCapsule(db, username, attempt, revision);
@@ -224,16 +250,27 @@ export function createVoiceTutorRoutes({
     try {
       const tracer = parseTracerRequest(req.body);
       if (tracer === false) {
-        return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Передайте только attemptId и revision.' } });
+        return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Передайте только server-issued pointer разбора.' } });
       }
       if (tracer) {
         const consent = await db.getPrivacyConsent(req.user);
         if (!consent?.voice_processing || (privacyPolicyVersion && consent.policy_version !== privacyPolicyVersion)) {
           return sendVoiceTutorError({ code: 'PRIVACY_CONSENT_REQUIRED' }, res, next);
         }
-        const attempt = await db.getModuleAttempt(req.user, tracer.attemptId);
+        const attempt = tracer.source === 'writing'
+          ? await db.getWritingAttempt(req.user, tracer.attemptId)
+          : tracer.source === 'speaking'
+            ? await db.getSpeakingAttempt(req.user, tracer.attemptId)
+            : await db.getModuleAttempt(req.user, tracer.attemptId);
         if (!attempt) return sendVoiceTutorError({ code: 'VOICE_TUTOR_ATTEMPT_NOT_FOUND' }, res, next);
-        const capsule = await buildSourceCapsule(db, req.user, attempt, tracer.revision);
+        const capsule = tracer.source
+          ? buildWritingSpeakingCapsule({
+            source: tracer.source,
+            attempt,
+            expectedRevision: tracer.revision,
+            criterionIndex: tracer.criterionIndex,
+          })
+          : await buildSourceCapsule(db, req.user, attempt, tracer.revision);
         const nonce = newNonce();
         const result = await db.reserveVoiceTutorSession(req.user, {
           id: newSessionId(),

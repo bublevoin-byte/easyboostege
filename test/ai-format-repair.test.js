@@ -412,6 +412,17 @@ test('successful free-answer APIs identify the integer score as experimental and
     assert.equal(speaking.status, 200);
     assert.equal(Number.isInteger(writing.body.review.overall_got), true);
     assert.equal(Number.isInteger(speaking.body.review.got), true);
+    assert.deepEqual(writing.body.voiceTutor, {
+      source: 'writing', attemptId: writing.body.attemptId, revision: 1,
+      criterionChoices: [
+        { index: 1, label: 'Организация текста' },
+        { index: 2, label: 'Языковое оформление' },
+      ],
+    });
+    assert.deepEqual(speaking.body.voiceTutor, {
+      source: 'speaking', attemptId: speaking.body.attemptId, revision: 1,
+      criterionChoices: [{ index: 4, label: 'Ответ 5' }],
+    });
     assert.deepEqual(writing.body.assessment, { mode: 'experimental', scoreKind: 'approximate', warning });
     assert.deepEqual(speaking.body.assessment, { mode: 'experimental', scoreKind: 'approximate', warning });
     const attempts = await stack.attemptLog();

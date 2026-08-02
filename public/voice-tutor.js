@@ -39,10 +39,31 @@ export function eventForVoiceTutorState(state, answer = '') {
   return null;
 }
 
-export function voiceTutorButton({ profile = browser.__sub, attemptId, revision } = {}) {
+function escapedButtonLabel(value) {
+  return String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+}
+
+export function voiceTutorButton({ profile = browser.__sub, source = '', attemptId, revision, criterionChoices } = {}) {
   if (!canStartVoiceTutor(profile)) return '';
-  if (!/^[0-9a-f-]{36}$/iu.test(String(attemptId || '')) || !Number.isInteger(revision)) return '';
-  return `<button type="button" class="voiceTutorTrigger" data-attempt="${attemptId}" data-revision="${revision}" onclick="openVoiceTutorError(this)">🎙️ Разобрать голосом</button>`;
+  const reviewSource = source === 'writing' || source === 'speaking' ? source : '';
+  const validAttempt = reviewSource
+    ? Number.isSafeInteger(Number(attemptId)) && Number(attemptId) > 0
+    : /^[0-9a-f-]{36}$/iu.test(String(attemptId || ''));
+  if (!validAttempt || !Number.isInteger(revision) || revision < 1 || revision > 10_000) return '';
+  const sourceAttribute = reviewSource ? ` data-source="${reviewSource}"` : '';
+  const safeAttemptId = reviewSource ? Number(attemptId) : String(attemptId);
+  if (!reviewSource) {
+    return `<button type="button" class="voiceTutorTrigger" data-attempt="${safeAttemptId}" data-revision="${revision}" onclick="openVoiceTutorError(this)">🎙️ Разобрать голосом</button>`;
+  }
+  const seen = new Set();
+  const choices = (Array.isArray(criterionChoices) ? criterionChoices : []).filter((choice) => {
+    const label = typeof choice?.label === 'string' ? choice.label.trim() : '';
+    if (!Number.isInteger(choice?.index) || choice.index < 0 || choice.index > 20
+      || !label || label.length > 160 || seen.has(choice.index)) return false;
+    seen.add(choice.index);
+    return true;
+  });
+  return choices.map(({ index, label }) => `<button type="button" class="voiceTutorTrigger"${sourceAttribute} data-attempt="${safeAttemptId}" data-revision="${revision}" data-criterion-index="${index}" onclick="openVoiceTutorError(this)">🎙️ Разобрать: ${escapedButtonLabel(label.trim())}</button>`).join('');
 }
 
 export async function registerVoiceTutorError({ module, itemId, revision, learnerAnswer } = {}) {
@@ -314,8 +335,10 @@ export async function finishVoiceTutor() {
 export async function openVoiceTutorError(buttonOrDetails) {
   ensureSheet();
   const details = buttonOrDetails?.dataset ? {
+    source: buttonOrDetails.dataset.source || '',
     attemptId: buttonOrDetails.dataset.attempt,
     revision: Number(buttonOrDetails.dataset.revision),
+    criterionIndex: buttonOrDetails.dataset.source ? Number(buttonOrDetails.dataset.criterionIndex) : undefined,
   } : buttonOrDetails;
   if (!canStartVoiceTutor() || !details) return;
   returnFocus = buttonOrDetails?.focus ? buttonOrDetails : browser.document.activeElement;
@@ -325,7 +348,13 @@ export async function openVoiceTutorError(buttonOrDetails) {
   text('voiceTutorState', 'Собираем проверенный контекст ошибки…');
   browser.document.getElementById('voiceTutorClose')?.focus();
   try {
-    const result = await api().postIdempotent('/api/v1/voice-tutor/sessions', { attemptId: details.attemptId, revision: details.revision }, browser.crypto.randomUUID());
+    const attemptId = details.source ? Number(details.attemptId) : details.attemptId;
+    const body = {
+      ...(details.source ? { source: details.source, criterionIndex: details.criterionIndex } : {}),
+      attemptId,
+      revision: details.revision,
+    };
+    const result = await api().postIdempotent('/api/v1/voice-tutor/sessions', body, browser.crypto.randomUUID());
     renderSession(result);
     startTimer();
     if (result.mode === 'voice') await startMicrophone();

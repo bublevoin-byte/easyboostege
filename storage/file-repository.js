@@ -546,6 +546,12 @@ export function createFileRepository(filePath) {
     await persist();
   }
 
+  async function getWritingAttempt(username, id) {
+    await load();
+    const attempt = state.writing_attempts.find((item) => item.username === username && item.id === Number(id));
+    return attempt ? structuredClone(attempt) : null;
+  }
+
   async function createSpeakingAttempt(username, input, promptVersion) {
     await load();
     const id = (state.speaking_attempts.at(-1)?.id || 0) + 1;
@@ -565,6 +571,12 @@ export function createFileRepository(filePath) {
     attempt.error_code = result.errorCode || null;
     attempt.evaluated_at = Date.now();
     await persist();
+  }
+
+  async function getSpeakingAttempt(username, id) {
+    await load();
+    const attempt = state.speaking_attempts.find((item) => item.username === username && item.id === Number(id));
+    return attempt ? structuredClone(attempt) : null;
   }
 
   async function getGeneratedTask(username, requestHash) {
@@ -884,8 +896,10 @@ export function createFileRepository(filePath) {
     consumeTelegramAuthCode,
     createWritingAttempt,
     finishWritingAttempt,
+    getWritingAttempt,
     createSpeakingAttempt,
     finishSpeakingAttempt,
+    getSpeakingAttempt,
     getGeneratedTask,
     getSharedGeneratedTask,
     saveGeneratedTask,

@@ -7,6 +7,8 @@ import { canStartVoiceTutor, eventForVoiceTutorState, voiceTutorButton } from '.
 const source = await fs.readFile(new URL('../public/voice-tutor.js', import.meta.url), 'utf8');
 const readingSource = await fs.readFile(new URL('../public/screens/reading.js', import.meta.url), 'utf8');
 const listeningSource = await fs.readFile(new URL('../public/screens/listening.js', import.meta.url), 'utf8');
+const writingSource = await fs.readFile(new URL('../public/screens/writing.js', import.meta.url), 'utf8');
+const speakingSource = await fs.readFile(new URL('../public/screens/speaking.js', import.meta.url), 'utf8');
 
 test('voice tutor trigger is a Premium-only real button with bounded data attributes', () => {
   assert.equal(canStartVoiceTutor({ entitlements: { voice_tutor: false } }), false);
@@ -20,6 +22,37 @@ test('voice tutor trigger is a Premium-only real button with bounded data attrib
   assert.match(markup, /Разобрать голосом/u);
   assert.match(markup, /data-attempt="0c0d11fd-8acd-4622-99a2-8b185bd0086b"/u);
   assert.equal(markup.includes('data-learner'), false);
+
+  const reviewMarkup = voiceTutorButton({
+    profile: { entitlements: { voice_tutor: true } }, source: 'writing', attemptId: 42, revision: 1,
+    criterionChoices: [
+      { index: 0, label: 'Решение коммуникативной задачи' },
+      { index: 1, label: 'Организация текста' },
+    ],
+  });
+  assert.match(reviewMarkup, /data-source="writing"/u);
+  assert.match(reviewMarkup, /data-attempt="42"/u);
+  assert.match(reviewMarkup, /data-criterion-index="0"/u);
+  assert.match(reviewMarkup, /data-criterion-index="1"/u);
+  assert.match(reviewMarkup, /Разобрать: Решение коммуникативной задачи/u);
+  assert.match(reviewMarkup, /Разобрать: Организация текста/u);
+  assert.equal((reviewMarkup.match(/voiceTutorTrigger/gu) || []).length, 2);
+  assert.equal(reviewMarkup.includes('answer'), false);
+});
+
+test('writing and speaking reviews mount the shared tutor and keep only server-issued pointers in the DOM', () => {
+  assert.match(writingSource, /import \{voiceTutorButton\} from '\.\.\/voice-tutor\.js'/u);
+  assert.match(writingSource, /renderReview\(d,response\.evaluationScope,response\.voiceTutor\)/u);
+  assert.match(writingSource, /voiceTutorButton\(voiceTutor\)/u);
+
+  assert.match(speakingSource, /import \{voiceTutorButton\} from '\.\.\/voice-tutor\.js'/u);
+  assert.match(speakingSource, /spShowEval\(d,tr,response\.voiceTutor\)/u);
+  assert.match(speakingSource, /voiceTutorButton\(voiceTutor\)/u);
+  assert.match(speakingSource, /voiceTutor:response\.voiceTutor/u);
+
+  for (const screenSource of [writingSource, speakingSource]) {
+    assert.doesNotMatch(screenSource, /voiceTutorButton\([^)]*(?:answer|transcript|review)/u);
+  }
 });
 
 test('voice tutor controls drive the finite pedagogical states', () => {

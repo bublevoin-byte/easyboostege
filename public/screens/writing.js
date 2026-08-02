@@ -7,6 +7,7 @@ import {HIST,registerRouteHook,showScreen,tab} from '../router.js';
 import {
   DEMO_MODE,S,SRV,TOKEN,W37,W38,apiPost,ringOff,save,setTxt,ui,writingModule,
 } from '../app.js';
+import {voiceTutorButton} from '../voice-tutor.js';
 
 const WRITE={
  37:{label:'ЗАДАНИЕ 37 · ПИСЬМО ДРУГУ',range:'100–140',min:100,max:140,table:false,
@@ -20,7 +21,7 @@ const SEG_ON='flex:1;border:0;font-family:inherit;text-align:center;padding:8px 
 const SEG_OFF='flex:1;border:0;font-family:inherit;text-align:center;padding:8px 0;font-weight:700;font-size:13px;color:rgba(255,255,255,.92);background:transparent;cursor:pointer;';
 function countWords(){const st=writingModule.wordCountStatus(document.getElementById('w_editor').innerText,curTask);
   const e=document.getElementById('w_count');e.textContent=st.count+' / '+st.range+' слов · '+st.hint;e.style.color=st.ok?'#1D7F4A':(st.state==='over'?'#B94A37':'#6A6E75')}
-function renderReview(d,evaluationScope){
+function renderReview(d,evaluationScope,voiceTutor){
   const safe=ui.escapeHtml;
   const totals=writingModule.reviewTotals(d);const got=totals.got,mx=totals.max;
   document.getElementById('rv_score').textContent=got;
@@ -42,6 +43,7 @@ function renderReview(d,evaluationScope){
     const body=warn?safe(e.note||''):'<span style="text-decoration:line-through;color:#B94A37;">'+safe(e.wrong||'')+'</span> → <span style="color:#1D7F4A;font-weight:700;">'+safe(e.right||'')+'</span>'+(e.note?'<br>'+safe(e.note):'');
     if(idx)eb.insertAdjacentHTML('beforeend','<div style="height:1px;background:#F4F5F6;margin:13px 0;"></div>');
     eb.insertAdjacentHTML('beforeend','<div style="display:flex;gap:11px;"><span style="width:26px;height:26px;flex:none;border-radius:9px;background:'+(warn?'#FFF4DE':'#FCEEEC')+';display:grid;place-items:center;">'+icon+'</span><div style="flex:1;"><div style="font-weight:700;font-size:13.5px;color:#2B2B2B;">'+safe(e.title||'Ошибка')+'</div><div style="margin-top:4px;font-weight:500;font-size:12.5px;color:#6A6E75;line-height:1.45;">'+body+'</div></div></div>')});
+  if(voiceTutor&&got<mx)eb.insertAdjacentHTML('beforeend',voiceTutorButton(voiceTutor));
 }
 function localReview(n,task,msg){return writingModule.localReview(n,task,msg)}
 /* ===== WRITING v2: банк тем, стимулы как на ЕГЭ, шпаргалки, черновики, история ===== */
@@ -133,7 +135,7 @@ async function checkWriting(){
     var d=response&&response.review;
     if(!d||!d.criteria)throw new Error('bad');
     wrStore(d,n,task);
-    renderReview(d,response.evaluationScope);S.essays=(S.essays||0)+1;save();showScreen('scr12');HIST.push('scr8');
+    renderReview(d,response.evaluationScope,response.voiceTutor);S.essays=(S.essays||0)+1;save();showScreen('scr12');HIST.push('scr8');
   }catch(e){renderReview(localReview(n,task,e.message));showScreen('scr12');HIST.push('scr8')}}
 function wrStore(d,n,task){
   S.works=writingModule.appendWork(S.works,{t:task,g:+d.overall_got||0,m:+d.overall_max||writingModule.limits(task).maxScore,n:n,ts:Date.now()});

@@ -16,6 +16,7 @@ import { createProviderClient } from '../ai/provider-client.js';
 import { providersFor } from '../ai/operations.js';
 import { recordDependencyEvent } from '../observability/metrics.js';
 import { decorateGeneratedVoiceTutorContent } from '../voice-tutor/generated-items.js';
+import { reviewVoiceTutorCriterionChoices } from '../voice-tutor/capsule.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -185,6 +186,7 @@ export function createAiRoutes({ authentication, access, db }) {
         review,
         provider,
         attemptId,
+        voiceTutor: { source: 'writing', attemptId, revision: 1, criterionChoices: reviewVoiceTutorCriterionChoices(review) },
         assessment: EXPERIMENTAL_ASSESSMENT,
         evaluationScope: evaluation.scope,
       });
@@ -358,7 +360,13 @@ export function createAiRoutes({ authentication, access, db }) {
         ]);
         recordDependencyEvent('ai', 'success');
         if (providerIndex > 0) recordDependencyEvent('ai', 'fallback');
-        const payload = { review, provider: provider.name, promptVersion: SPEAKING_PROMPT_VERSION };
+        const payload = {
+          review,
+          provider: provider.name,
+          promptVersion: SPEAKING_PROMPT_VERSION,
+          attemptId,
+          voiceTutor: { source: 'speaking', attemptId, revision: 1, criterionChoices: reviewVoiceTutorCriterionChoices(review) },
+        };
         if (isExperimentalSpeakingTask(input.taskType)) payload.assessment = EXPERIMENTAL_ASSESSMENT;
         return res.json(payload);
       } catch (error) {

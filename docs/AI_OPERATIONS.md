@@ -19,7 +19,7 @@
 | Экзаменационная грамматика, чтение и аудирование | `/api/v1/ai/generate-content` | восемь отдельных операций со строгими структурными проверками | встроенные банки заданий |
 | TTS | `/api/v1/tts` | auth, subscription, rate limit, voice allowlist; provider `audio/mpeg`, 1 byte–5 MiB | Web Speech API |
 | STT | `/api/v1/stt` | auth, subscription, rate limit, 20 MiB upload; strict provider JSON | повтор записи |
-| Voice Error Tutor | `/api/v1/voice-tutor/context-attempts`, `/api/v1/voice-tutor/sessions` | reading/listening сначала сверяют полный завершённый canonical set; capsule получает только фрагмент ошибочного пункта до 600 символов | тот же capsule через AI-text или canonical-local rule |
+| Voice Error Tutor | `/api/v1/voice-tutor/context-attempts`, `/api/v1/voice-tutor/sessions` | reading/listening сначала сверяют полный завершённый canonical set; writing/speaking возвращают bounded названия и индексы потерянных критериев, затем заново загружают owner-bound completed attempt и валидируют выбранный индекс; transient capsule перечисляет все потери, но одна сессия тренирует один критерий по fail-closed матрице заданий | тот же capsule через AI-text или canonical-local rule; повторная evaluation работы не вызывается |
 
 Ответы `reading_questions` и `listening_interview` получают server-issued `voice_tutor.set_id` и
 четыре `item_ids`, производные от request hash и digest сохранённого typed result. Shared cache

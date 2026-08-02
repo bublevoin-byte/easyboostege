@@ -9,6 +9,7 @@ import {
   S,SRV,TOKEN,WBTN,apiMessage,apiPost,apiPostBinary,examModule,generateAiContent,save,
   setTxt,spSt,spSync,speakingModule,toast,ui,wDeco,
 } from '../app.js';
+import {voiceTutorButton} from '../voice-tutor.js';
 
 /* ===== SPEAKING v2: устная часть ЕГЭ, 4 задания ===== */
 const SP1=[
@@ -229,11 +230,11 @@ async function spEval(btn){
     S.spkScores=speakingModule.appendScore(S.spkScores,{t:SP.t,g:d.got,m:d.max,ts:Date.now()});
     spSync();save();
     if(btn){btn.style.display='none'}
-    spShowEval(d,tr);
+    spShowEval(d,tr,response.voiceTutor);
   }catch(e){
     if(btn){btn.textContent='✨ Оценить с ИИ · повторить';btn.style.pointerEvents='';delete btn.dataset.busy}
     try{toast(apiMessage(e,'stt'))}catch(_){}}}
-function spShowEval(d,tr){var box=document.getElementById('sp_evalbox');if(!box)return;
+function spShowEval(d,tr,voiceTutor){var box=document.getElementById('sp_evalbox');if(!box)return;
   /* всё, что пришло от модели или STT, попадает в DOM только экранированным */
   var safe=ui.escapeHtml;
   var pct=d.got/(d.max||1);
@@ -258,6 +259,7 @@ function spShowEval(d,tr){var box=document.getElementById('sp_evalbox');if(!box)
   h+='<div style="margin-top:10px;font-weight:600;font-size:11.5px;color:#777163;line-height:1.5;">ИИ проверил текст ответа. Произношение, интонация, паузы и беглость не оценивались.</div>';
   h+='<details style="margin-top:12px;"><summary style="font-weight:700;font-size:12px;color:#777163;cursor:pointer;">Расшифровка твоей речи</summary>'
     +'<div style="margin-top:8px;font-weight:500;font-size:12.5px;color:#4A453E;line-height:1.6;font-style:italic;">'+safe(tr)+'</div><button class="sq" onclick="spFlagTranscript()" style="margin-top:8px;border:0;background:#F4EFE9;padding:7px 10px;border-radius:10px;font-weight:700;font-size:11px;">Расшифровка неточная</button></details>'
+    +(voiceTutor&&d.got<d.max?voiceTutorButton(voiceTutor):'')
     +'</div>';
   box.innerHTML=h;
   try{box.scrollIntoView({behavior:'smooth',block:'start'})}catch(e){}}
@@ -386,7 +388,7 @@ async function speFinish(){if(!SPE)return;clearInterval(SPE.tm);try{lStop()}catc
       if(speakingModule.isTranscriptUsable(tr)){
         var response=await apiPost('/api/v1/ai/evaluate-speaking',{taskType:t,transcript:tr,assignment:spAssignment(t,SPE.sets[t])},true);
         var p=response.review;
-        if(p&&typeof p.got!=='undefined')d={got:speakingModule.clampScore(p,t).got,verdict:String(p.verdict||''),fix:Array.isArray(p.fix)?p.fix:[]}}
+        if(p&&typeof p.got!=='undefined')d={got:speakingModule.clampScore(p,t).got,verdict:String(p.verdict||''),fix:Array.isArray(p.fix)?p.fix:[],voiceTutor:response.voiceTutor}}
     }catch(e){}}
     if(!d)d={got:0,verdict:bl?'не удалось оценить запись':'записи нет',fix:[]};
     results[t]=d;
@@ -403,6 +405,7 @@ async function speFinish(){if(!SPE)return;clearInterval(SPE.tm);try{lStop()}catc
       +(speakingModule.isExperimentalTask(t)?'<div class="ai-disclaimer" style="font-weight:600;font-size:11.5px;color:#777163;line-height:1.5;margin-top:4px;">'+ui.escapeHtml(ui.AI_DISCLAIMER)+'</div>':'')
       +(d.verdict?'<div style="font-weight:600;font-size:12px;color:#777163;margin-top:3px;">'+d.verdict+'</div>':'')
       +(d.fix||[]).map(function(f){return '<div style="font-weight:600;font-size:12px;color:#4A453E;margin-top:4px;line-height:1.5;">'+(f.wrong?'<s style="color:#A83226;">'+f.wrong+'</s> → ':'')+(f.right?'<b style="color:#1D7F4A;">'+f.right+'</b> ':'')+(f.note||'')+'</div>'}).join('')
+      +(d.voiceTutor&&d.got<SP_CONF[t].max?voiceTutorButton(d.voiceTutor):'')
       +'</div>'}).join('');
   SPE=null;
   area.innerHTML='<div id="s9_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;">'+wDeco()

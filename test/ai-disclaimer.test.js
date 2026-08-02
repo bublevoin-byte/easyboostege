@@ -49,7 +49,7 @@ test('the written review screen shows the disclaimer', () => {
 test('the written review screen shows the server evaluation scope without replacing the disclaimer', () => {
   assert.match(html, /id="rv_scope_notice" hidden/u);
   assert.match(app, /writingModule\.evaluationNotice\(evaluationScope\)/u);
-  assert.match(app, /renderReview\(d,response\.evaluationScope\)/u);
+  assert.match(app, /renderReview\(d,response\.evaluationScope,response\.voiceTutor\)/u);
   assert.match(app, /getElementById\('ai_disclaimer'\)\.textContent=ui\.AI_DISCLAIMER/u);
 });
 

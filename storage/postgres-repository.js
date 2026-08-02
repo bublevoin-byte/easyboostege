@@ -598,6 +598,16 @@ export function createPostgresRepository(connectionString) {
     if (!updated.rowCount) throw new Error('WRITING_ATTEMPT_NOT_FOUND');
   }
 
+  async function getWritingAttempt(username, id) {
+    const result = await pool.query(
+      `SELECT id, username, task_type, assignment, answer, evaluated_answer, review, provider, model,
+              prompt_version, status, error_code, created_at, evaluated_at
+       FROM writing_attempts WHERE username = $1 AND id = $2`,
+      [username, id],
+    );
+    return result.rows[0] || null;
+  }
+
   async function createSpeakingAttempt(username, input, promptVersion) {
     const result = await pool.query(
       `INSERT INTO speaking_attempts (username, task_type, assignment, transcript, prompt_version, status)
@@ -615,6 +625,16 @@ export function createPostgresRepository(connectionString) {
         result.provider || null, result.model || null, result.errorCode || null],
     );
     if (!updated.rowCount) throw new Error('SPEAKING_ATTEMPT_NOT_FOUND');
+  }
+
+  async function getSpeakingAttempt(username, id) {
+    const result = await pool.query(
+      `SELECT id, username, task_type, assignment, transcript, review, provider, model,
+              prompt_version, status, error_code, created_at, evaluated_at
+       FROM speaking_attempts WHERE username = $1 AND id = $2`,
+      [username, id],
+    );
+    return result.rows[0] || null;
   }
 
   async function getGeneratedTask(username, requestHash) {
@@ -996,8 +1016,10 @@ export function createPostgresRepository(connectionString) {
     consumeTelegramAuthCode,
     createWritingAttempt,
     finishWritingAttempt,
+    getWritingAttempt,
     createSpeakingAttempt,
     finishSpeakingAttempt,
+    getSpeakingAttempt,
     getGeneratedTask,
     getSharedGeneratedTask,
     saveGeneratedTask,

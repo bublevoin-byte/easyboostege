@@ -1,5 +1,6 @@
 export const GRAMMAR_LEXICON_CAPSULE_VERSION = 'grammar-lexicon-v1';
 export const READING_LISTENING_CAPSULE_VERSION = 'reading-listening-v1';
+export const WRITING_SPEAKING_CAPSULE_VERSION = 'writing-speaking-v1';
 
 const READING_CONTEXT = Object.freeze({
   kind: 'source_excerpt',
@@ -44,6 +45,8 @@ const MODULES = Object.freeze({
   vocabulary: Object.freeze({ directError: true, capsuleVersion: GRAMMAR_LEXICON_CAPSULE_VERSION, contextKind: null }),
   reading: Object.freeze({ directError: false, capsuleVersion: READING_LISTENING_CAPSULE_VERSION, contextKind: READING_CONTEXT.kind, context: READING_CONTEXT }),
   listening: Object.freeze({ directError: false, capsuleVersion: READING_LISTENING_CAPSULE_VERSION, contextKind: LISTENING_CONTEXT.kind, context: LISTENING_CONTEXT }),
+  writing: Object.freeze({ directError: false, capsuleVersion: WRITING_SPEAKING_CAPSULE_VERSION, contextKind: null }),
+  speaking: Object.freeze({ directError: false, capsuleVersion: WRITING_SPEAKING_CAPSULE_VERSION, contextKind: null }),
 });
 
 export function voiceTutorModule(module) {
@@ -56,5 +59,5 @@ export function isDirectVoiceTutorModule(module) {
 
 export function isContextVoiceTutorModule(module) {
   const descriptor = voiceTutorModule(module);
-  return Boolean(descriptor && !descriptor.directError);
+  return Boolean(descriptor?.contextKind);
 }
