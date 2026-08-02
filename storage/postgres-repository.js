@@ -1,6 +1,7 @@
 import pg from 'pg';
 import { ensureVoiceTutorReservationAllowed, hashAuthCode, normalizeUsername, subscriptionView, VoiceTutorError, voiceTutorAccessView, voiceTutorBillableSeconds, voiceTutorQuotaPeriods } from './shared.js';
 import { transitionPedagogicalState } from '../voice-tutor/state-machine.js';
+import { transitionRuleCardReview } from '../voice-tutor/rule-card.js';
 
 const { Pool } = pg;
 
@@ -14,6 +15,24 @@ function mapUser(row) {
     sub_until: row.subscription_until ? new Date(row.subscription_until).getTime() : 0,
     trial_used: row.trial_used,
     role: row.role || 'student',
+  };
+}
+
+function mapRuleCard(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    created_for_username: row.created_for_username || null,
+    status: row.status,
+    skill: { id: row.skill_id, title: row.skill_title },
+    exam_year: Number(row.exam_year),
+    rule: row.rule_content,
+    agreement_hash: row.agreement_hash,
+    sources: row.sources,
+    discrepancies: row.discrepancies,
+    review_audit: row.review_audit,
+    created_at: row.created_at,
+    reviewed_at: row.reviewed_at,
   };
 }
 
@@ -503,6 +522,60 @@ export function createPostgresRepository(connectionString) {
     return result.rows[0].role;
   }
 
+  async function createRuleCard(card) {
+    const result = await pool.query(
+      `INSERT INTO trusted_rule_cards
+       (id, created_for_username, status, skill_id, skill_title, exam_year, rule_content,
+        agreement_hash, sources, discrepancies, created_at)
+       VALUES ($1, $2, 'pending_review', $3, $4, $5, $6::jsonb, $7, $8::jsonb, $9::jsonb, $10)
+       RETURNING *`,
+      [card.id, card.createdForUsername || null, card.skill.id, card.skill.title, card.examYear,
+        JSON.stringify(card.rule), card.agreementHash, JSON.stringify(card.sources),
+        JSON.stringify(card.discrepancies || []), card.createdAt],
+    );
+    return mapRuleCard(result.rows[0]);
+  }
+
+  async function listRuleCards({ status = 'pending_review' } = {}) {
+    const result = status
+      ? await pool.query('SELECT * FROM trusted_rule_cards WHERE status = $1 ORDER BY created_at LIMIT 100', [status])
+      : await pool.query('SELECT * FROM trusted_rule_cards ORDER BY created_at LIMIT 100');
+    return result.rows.map(mapRuleCard);
+  }
+
+  async function reviewRuleCard(cardId, { decision, reviewer, reviewedAt }) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const found = await client.query('SELECT * FROM trusted_rule_cards WHERE id = $1 FOR UPDATE', [cardId]);
+      const transition = transitionRuleCardReview(mapRuleCard(found.rows[0]), { decision, reviewer, reviewedAt });
+      if (!transition.applied) {
+        await client.query('COMMIT');
+        return transition;
+      }
+      const updated = await client.query(
+        `UPDATE trusted_rule_cards SET status = $2, reviewed_at = $3, review_audit = $4::jsonb
+         WHERE id = $1 RETURNING *`,
+        [cardId, transition.card.status, transition.card.reviewed_at, JSON.stringify(transition.card.review_audit)],
+      );
+      await client.query('COMMIT');
+      return { applied: true, card: mapRuleCard(updated.rows[0]) };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async function getApprovedRuleCard(skillId, examYear) {
+    const result = await pool.query(
+      `SELECT * FROM trusted_rule_cards
+       WHERE skill_id = $1 AND exam_year = $2 AND status = 'approved'
+       ORDER BY reviewed_at DESC, created_at DESC LIMIT 1`,
+      [skillId, Number(examYear)],
+    );
+    return mapRuleCard(result.rows[0]);
+  }
+
   async function getPrivacyConsent(username) {
     const result = await pool.query(
       'SELECT text_processing, voice_processing, policy_version, updated_at FROM privacy_consents WHERE username = $1',
@@ -914,7 +987,7 @@ export function createPostgresRepository(connectionString) {
   }
 
   async function exportUserData(username) {
-    const [account, progress, privacyConsent, subscriptionEvents, subscriptionEntitlements, voiceTutorSessions, paymentRequests, writingAttempts, speakingAttempts, generatedTasks, moduleAttempts, progressSummary, wordProgress, errorBank, aiRequests, auditLog] = await Promise.all([
+    const [account, progress, privacyConsent, subscriptionEvents, subscriptionEntitlements, voiceTutorSessions, ruleCards, paymentRequests, writingAttempts, speakingAttempts, generatedTasks, moduleAttempts, progressSummary, wordProgress, errorBank, aiRequests, auditLog] = await Promise.all([
       pool.query('SELECT username, telegram_id, role, trial_used, subscription_until, created_at, updated_at FROM users WHERE username = $1', [username]),
       pool.query('SELECT data, updated_at FROM user_progress WHERE username = $1', [username]),
       pool.query('SELECT text_processing, voice_processing, policy_version, text_consented_at, voice_consented_at, updated_at FROM privacy_consents WHERE username = $1', [username]),
@@ -924,6 +997,7 @@ export function createPostgresRepository(connectionString) {
                          pedagogical_state, micro_check_passed, transfer_passed, outcome, error_code,
                          started_at, expires_at, ended_at, updated_at
                   FROM voice_tutor_sessions WHERE username = $1 ORDER BY started_at`, [username]),
+      pool.query('SELECT * FROM trusted_rule_cards WHERE created_for_username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, status, actor_telegram_id, result, created_at, resolved_at FROM payment_requests WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, task_type, assignment, answer, evaluated_answer, review, provider, model, prompt_version, status, error_code, created_at, evaluated_at FROM writing_attempts WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, task_type, assignment, transcript, review, provider, model, prompt_version, status, error_code, created_at, evaluated_at FROM speaking_attempts WHERE username = $1 ORDER BY created_at', [username]),
@@ -944,6 +1018,7 @@ export function createPostgresRepository(connectionString) {
       subscription_events: subscriptionEvents.rows,
       subscription_entitlements: subscriptionEntitlements.rows,
       voice_tutor_sessions: voiceTutorSessions.rows,
+      rule_cards: ruleCards.rows.map(mapRuleCard),
       payment_requests: paymentRequests.rows,
       writing_attempts: writingAttempts.rows,
       speaking_attempts: speakingAttempts.rows,
@@ -963,6 +1038,14 @@ export function createPostgresRepository(connectionString) {
       await client.query('BEGIN');
       await client.query('DELETE FROM telegram_auth_codes WHERE telegram_id = (SELECT telegram_id FROM users WHERE username = $1)', [username]);
       await client.query('DELETE FROM ai_requests WHERE username = $1', [username]);
+      await client.query('UPDATE trusted_rule_cards SET created_for_username = NULL WHERE created_for_username = $1', [username]);
+      const reviewedCards = await client.query("SELECT id, review_audit FROM trusted_rule_cards WHERE review_audit @> $1::jsonb", [JSON.stringify([{ reviewer: username }])]);
+      for (const card of reviewedCards.rows) {
+        const audit = card.review_audit.map((entry) => entry.reviewer === username
+          ? { ...entry, reviewer: null, account_deleted: true }
+          : entry);
+        await client.query('UPDATE trusted_rule_cards SET review_audit = $2::jsonb WHERE id = $1', [card.id, JSON.stringify(audit)]);
+      }
       await client.query(
         `UPDATE audit_log
          SET metadata = (metadata - 'username') || '{"account_deleted":true}'::jsonb
@@ -1008,6 +1091,10 @@ export function createPostgresRepository(connectionString) {
     advanceVoiceTutorSession,
     setVoiceTutorSessionDelivery,
     switchVoiceTutorSessionDelivery,
+    createRuleCard,
+    listRuleCards,
+    reviewRuleCard,
+    getApprovedRuleCard,
     setUserRole,
     getPrivacyConsent,
     setPrivacyConsent,

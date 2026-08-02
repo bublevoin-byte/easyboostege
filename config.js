@@ -21,6 +21,13 @@ function readBoolean(name, fallback = true) {
   throw new Error(`${name} must be true, false, 1 or 0`);
 }
 
+function readJson(name, fallback) {
+  const raw = process.env[name];
+  if (raw == null || raw === '') return fallback;
+  if (raw.length > 50_000) throw new Error(`${name} is too large`);
+  try { return JSON.parse(raw); } catch { throw new Error(`${name} must be valid JSON`); }
+}
+
 const nodeEnv = process.env.NODE_ENV || 'development';
 const isProduction = nodeEnv === 'production';
 
@@ -107,6 +114,8 @@ export const config = Object.freeze({
     realtimeUrl: voiceTutorRealtimeUrl,
     model: process.env.XAI_VOICE_MODEL || '',
     voice: process.env.XAI_VOICE_NAME || '',
+    trustedRuleAllowlist: readJson('VOICE_TUTOR_RULE_ALLOWLIST_JSON', []),
+    trustedRuleSources: readJson('VOICE_TUTOR_RULE_SOURCES_JSON', {}),
   }),
   telegram: Object.freeze({
     token: process.env.TELEGRAM_BOT_TOKEN || '',

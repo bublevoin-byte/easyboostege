@@ -36,6 +36,7 @@ export const AI_OPERATIONS = Object.freeze({
   speaking_sample: { maxTokens: 900, timeoutMs: 25_000, requestsPerHour: 20, fallback: 'none', promptVersion: SPEAKING_PROMPT_VERSION },
   voice_tutor_realtime: { maxTokens: 500, timeoutMs: 10_000, requestsPerHour: 20, fallback: 'none', promptVersion: VOICE_TUTOR_PROMPT_VERSION },
   voice_tutor_text: { maxTokens: 500, timeoutMs: 20_000, requestsPerHour: 20, fallback: 'secondary', promptVersion: VOICE_TUTOR_PROMPT_VERSION },
+  voice_tutor_rule_extract: { maxTokens: 700, timeoutMs: 25_000, requestsPerHour: 10, fallback: 'secondary', promptVersion: 'voice-tutor-rule-discovery-v1' },
 });
 
 const FALLBACK_DEFAULT = Object.freeze({

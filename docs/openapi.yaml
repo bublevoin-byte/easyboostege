@@ -107,7 +107,7 @@ paths:
         '422': { description: Set, answer count, or an answer option does not match server-owned content }
   /api/v1/voice-tutor/sessions:
     post:
-      summary: Reserve Voice Tutor quota and build a server-owned supported-module capsule
+      summary: Reserve Voice Tutor quota and build a server-owned supported-module capsule (or mark trusted discovery required)
       parameters:
         - in: header
           name: Idempotency-Key
@@ -142,6 +142,74 @@ paths:
         '409': { description: Another Voice Tutor session is active }
         '422': { description: Attempt, canonical item/context, or completed validated writing/speaking review is not supported }
         '429': { description: Daily or monthly voice quota is exhausted }
+  /api/v1/voice-tutor/rule-discoveries:
+    post:
+      summary: Discover a provisional EGE rule from server-allowlisted sources
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session_id]
+              properties:
+                session_id: { type: string, format: uuid }
+              additionalProperties: false
+      responses:
+        '201': { description: Explicitly provisional pending_review rule with at least two source URLs }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { description: Premium voice_tutor entitlement required }
+        '409': { description: Session does not require discovery, or an approved canonical card already exists }
+        '422': { description: One source, conflict, blocked URL or invalid evidence; no fact/card is created }
+        '503': { description: Discovery is not configured or a bounded dependency failed }
+  /api/v1/voice-tutor/rules/{skillId}:
+    get:
+      summary: Retrieve only an approved canonical rule card
+      parameters:
+        - in: path
+          name: skillId
+          required: true
+          schema: { type: string, maxLength: 120 }
+        - in: query
+          name: exam_year
+          required: true
+          schema: { type: integer, minimum: 2020, maximum: 2100 }
+      responses:
+        '200': { description: Approved bounded rule and source URLs }
+        '404': { description: No approved rule exists; pending/rejected cards are hidden }
+  /api/v1/voice-tutor/rule-cards:
+    get:
+      summary: List rule cards for an administrator review queue
+      parameters:
+        - in: query
+          name: status
+          schema: { type: string, enum: [pending_review, approved, rejected], default: pending_review }
+      responses:
+        '200': { description: Bounded cards with source URL/hash metadata and review audit }
+        '403': { description: Administrator role required }
+  /api/v1/voice-tutor/rule-cards/{cardId}/review:
+    post:
+      summary: Idempotently approve or reject one pending rule card as an administrator
+      parameters:
+        - in: path
+          name: cardId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [approved, rejected] }
+              additionalProperties: false
+      responses:
+        '200': { description: First transition or idempotent replay of the same decision }
+        '403': { description: Administrator role required }
+        '404': { description: Rule card not found }
+        '409': { description: Card already has the opposite terminal decision }
   /api/v1/voice-tutor/sessions/{sessionId}/events:
     post:
       summary: Advance diagnose, explain, micro-check and transfer with a rotating nonce

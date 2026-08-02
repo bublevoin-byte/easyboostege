@@ -20,12 +20,28 @@
 | TTS | `/api/v1/tts` | auth, subscription, rate limit, voice allowlist; provider `audio/mpeg`, 1 byte–5 MiB | Web Speech API |
 | STT | `/api/v1/stt` | auth, subscription, rate limit, 20 MiB upload; strict provider JSON | повтор записи |
 | Voice Error Tutor | `/api/v1/voice-tutor/context-attempts`, `/api/v1/voice-tutor/sessions` | reading/listening сначала сверяют полный завершённый canonical set; writing/speaking возвращают bounded названия и индексы потерянных критериев, затем заново загружают owner-bound completed attempt и валидируют выбранный индекс; transient capsule перечисляет все потери, но одна сессия тренирует один критерий по fail-closed матрице заданий | тот же capsule через AI-text или canonical-local rule; повторная evaluation работы не вызывается |
+| Trusted rule evidence | `/api/v1/voice-tutor/rule-discoveries` (`voice_tutor_rule_extract`) | Запрос принимает только owner-bound `session_id` с серверным `rule.discovery_required`; URL только из server allowlist; pinned public DNS address, HTTPS, path, redirects, общий deadline, MIME и bytes ограничены; fetched text передаётся как `untrusted_source_document`, output проходит bounded contract и должен совпасть у двух независимых authority/domain после redirects | один источник, конфликт, blocked URL, уже существующий approved canonical или ошибка fetch/extraction дают fail-closed без новой rule card |
 
 Ответы `reading_questions` и `listening_interview` получают server-issued `voice_tutor.set_id` и
 четыре `item_ids`, производные от request hash и digest сохранённого typed result. Shared cache
 перед выдачей копируется в owner-bound строку `generated_tasks`. Поэтому встроенные и
 динамически сгенерированные результаты проходят один и тот же полный set-level check; устаревшие
 локальные наборы без серверного идентификатора исключаются из ротации.
+
+Trusted-rule discovery не даёт браузеру open-web/X search, connectors или произвольный URL.
+`VOICE_TUTOR_RULE_ALLOWLIST_JSON` задаёт server-only authority/domain/path policy, а
+`VOICE_TUTOR_RULE_SOURCES_JSON` — curated URL для конкретных skill IDs. HTTP redirect не может
+выйти из allowlist; DNS проверяется на private/reserved ranges, а разрешённый адрес pin-ится в
+HTTPS-запросе. Независимость источников повторно проверяется по конечным URL, authority и domain после
+redirects, а единый абсолютный deadline охватывает DNS, redirects и чтение body. Полная страница не
+сохраняется. Evidence extractor получает неизменяемые системные
+инструкции отдельно от недоверенного документа; результат не исполняет команды и не публикуется
+автоматически. Только два согласующихся независимых authority создают `pending_review`, а общий
+canonical retrieval видит только `approved`. Расхождения в формулировках согласующихся evidence
+сохраняются для reviewer; learner не может передать произвольные skill/title/exam year. Для встроенного
+задания без локального правила session response возвращает `discovery_required`; браузер запрашивает
+provisional card по owner-bound `session_id` и показывает её маркировку и HTTPS-ссылки в том же разборе.
+После одобрения карточка подставляется в новые session capsules как canonical rule без повторного поиска.
 
 ## Контракты media-провайдеров
 
@@ -51,7 +67,7 @@
 операций без платных вызовов. Они не закрывают §24.10 сами по себе: окончательное решение остаётся
 за повторным аудитом всех ИИ-операций в отдельном тикете.
 
-Версия prompt для письменной проверки задаётся `WRITING_PROMPT_VERSION` в `ai/writing.js`, для устной части — `SPEAKING_PROMPT_VERSION`, для генерации контента — `CONTENT_PROMPT_VERSION`, для Voice Error Tutor — `VOICE_TUTOR_PROMPT_VERSION`. Версия вместе с операцией, провайдером, моделью, длительностью и результатом записывается в `ai_requests`. Универсального AI proxy в production API нет.
+Версия prompt для письменной проверки задаётся `WRITING_PROMPT_VERSION` в `ai/writing.js`, для устной части — `SPEAKING_PROMPT_VERSION`, для генерации контента — `CONTENT_PROMPT_VERSION`, для Voice Error Tutor — `VOICE_TUTOR_PROMPT_VERSION`, а для извлечения trusted-rule evidence — полем `promptVersion` операции `voice_tutor_rule_extract`. Версия вместе с операцией, провайдером, моделью, длительностью и результатом записывается в `ai_requests`. Универсального AI proxy в production API нет.
 
 Для `writing-v5` сервер считает полный объём до вызова провайдера. На 154/275 словах ответ не
 усекается; начиная с 155/276 провайдер и программные факты получают только первые 140/250 слов.

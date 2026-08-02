@@ -25,6 +25,10 @@ export const getVoiceTutorSession = (...args) => repository.getVoiceTutorSession
 export const advanceVoiceTutorSession = (...args) => repository.advanceVoiceTutorSession(...args);
 export const setVoiceTutorSessionDelivery = (...args) => repository.setVoiceTutorSessionDelivery(...args);
 export const switchVoiceTutorSessionDelivery = (...args) => repository.switchVoiceTutorSessionDelivery(...args);
+export const createRuleCard = (...args) => repository.createRuleCard(...args);
+export const listRuleCards = (...args) => repository.listRuleCards(...args);
+export const reviewRuleCard = (...args) => repository.reviewRuleCard(...args);
+export const getApprovedRuleCard = (...args) => repository.getApprovedRuleCard(...args);
 export const setUserRole = (...args) => repository.setUserRole(...args);
 export const createPaymentRequest = (...args) => repository.createPaymentRequest(...args);
 export const resolvePaymentRequest = (...args) => repository.resolvePaymentRequest(...args);

@@ -34,12 +34,29 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
       '020_writing_evaluated_answer.sql',
       '021_voice_tutor_entitlements_and_quotas.sql',
       '022_voice_tutor_tracer.sql',
+      '023_trusted_rule_cards.sql',
     ]);
 
     const username = await repository.createTelegramUser(telegramId, `Integration ${suffix}`);
     assert.equal((await repository.getUser(username)).telegram_id, telegramId);
     assert.equal(await repository.setUserRole(username, 'admin'), 'admin');
     assert.equal((await repository.getUser(username)).role, 'admin');
+    const ruleCardId = crypto.randomUUID();
+    await repository.createRuleCard({
+      id: ruleCardId, createdForUsername: username, status: 'pending_review',
+      skill: { id: `ege.grammar.integration.${suffix}`, title: 'Integration rule' }, examYear: 2026,
+      rule: { title: 'Integration rule', explanation: 'A bounded explanation.', examples: ['It works.'] },
+      agreementHash: 'a'.repeat(64),
+      sources: [
+        { authority: 'one', url: 'https://one.example/rule', retrieved_at: new Date().toISOString(), content_hash: 'b'.repeat(64) },
+        { authority: 'two', url: 'https://two.example/rule', retrieved_at: new Date().toISOString(), content_hash: 'c'.repeat(64) },
+      ],
+      discrepancies: [], createdAt: new Date(),
+    });
+    assert.equal((await repository.getApprovedRuleCard(`ege.grammar.integration.${suffix}`, 2026)), null);
+    assert.equal((await repository.reviewRuleCard(ruleCardId, { decision: 'approved', reviewer: username, reviewedAt: new Date() })).applied, true);
+    assert.equal((await repository.reviewRuleCard(ruleCardId, { decision: 'approved', reviewer: username, reviewedAt: new Date() })).applied, false);
+    assert.equal((await repository.getApprovedRuleCard(`ege.grammar.integration.${suffix}`, 2026)).status, 'approved');
 
     const trial = await repository.activateTrial(telegramId, 30, 'Integration User');
     assert.equal(trial.applied, true);
@@ -146,7 +163,7 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
       nonceHash: 'd'.repeat(64), nextNonceHash: 'e'.repeat(64), mode: 'text', limits: voiceLimits, now: voiceFinishedAt,
     });
     assert.equal(tracerFallback.session.status, 'completed');
-    assert.equal(tracerFallback.daily_remaining_seconds, 480);
+    assert.equal(tracerFallback.voice_tutor.daily_remaining_seconds, 480);
     await repository.upsertWordProgress(username, [{ word: 'Achievement', stage: 2, errorCount: 1, reviewCount: 3, dueAt: Date.now() + 60_000 }]);
     const learningError = { module: 'grammar', itemKey: `grammar_19_24:${suffix}`, errorType: 'incorrect_form', details: { expected: 'went' } };
     await repository.upsertErrorBank(username, [learningError]);
@@ -196,6 +213,7 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     assert.equal(exported.ai_requests.length, 1);
     assert.equal(exported.subscription_entitlements[0].entitlement, 'voice_tutor');
     assert.equal(exported.voice_tutor_sessions.length, 2);
+    assert.equal(exported.rule_cards.length, 1);
     const originalVoiceSession = exported.voice_tutor_sessions.find((session) => session.id === firstVoiceReservation.session.id);
     assert.equal(originalVoiceSession.billable_seconds, 120);
     const exportedTracerSession = exported.voice_tutor_sessions.find((session) => session.id === tracerSessionId);
@@ -209,6 +227,10 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     assert.equal((await client.query('SELECT 1 FROM ai_requests WHERE username = $1', [username])).rowCount, 0);
     assert.equal((await client.query('SELECT 1 FROM subscription_entitlements WHERE username = $1', [username])).rowCount, 0);
     assert.equal((await client.query('SELECT 1 FROM voice_tutor_sessions WHERE username = $1', [username])).rowCount, 0);
+    const retainedRuleCard = await client.query('SELECT created_for_username, review_audit FROM trusted_rule_cards WHERE id = $1', [ruleCardId]);
+    assert.equal(retainedRuleCard.rows[0].created_for_username, null);
+    assert.equal(retainedRuleCard.rows[0].review_audit[0].reviewer, null);
+    assert.equal(retainedRuleCard.rows[0].review_audit[0].account_deleted, true);
     const retainedAudit = await client.query('SELECT metadata FROM audit_log WHERE target_id = $1', [paymentRequest.id]);
     assert.equal(retainedAudit.rows[0].metadata.username, undefined);
     assert.equal(retainedAudit.rows[0].metadata.account_deleted, true);

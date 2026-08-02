@@ -54,6 +54,20 @@ function boundedItemContext(item) {
   };
 }
 
+function itemRule(item) {
+  if (item.rule && typeof item.rule === 'object' && Array.isArray(item.rule.examples)) {
+    return { ...item.rule, examples: [...item.rule.examples] };
+  }
+  return {
+    id: `missing:${item.skill.id}`,
+    revision: 0,
+    title: 'Правило пока не найдено',
+    explanation: 'Easy Boost ищет объяснение только в доверенных источниках.',
+    examples: [],
+    discovery_required: true,
+  };
+}
+
 export function createVoiceTutorErrorAttempt({ id, resultAttemptId, module, itemId, revision, learnerAnswer }, getItem = getCanonicalVoiceTutorItem) {
   const item = itemForError({ module, itemId, revision, getItem });
   const answer = boundedString(learnerAnswer, 200, 'VOICE_TUTOR_LEARNER_ANSWER_INVALID');
@@ -185,7 +199,7 @@ export function buildVoiceTutorCapsule({ attempt, expectedRevision, getItem = ge
     learner_answer: learnerAnswer,
     error: { type: item.errorType },
     skill: { ...item.skill },
-    rule: { ...item.rule, examples: [...item.rule.examples] },
+    rule: itemRule(item),
     checks: {
       micro_check: { ...item.microCheck, answers: [...item.microCheck.answers] },
       transfer_task: { ...item.transferTask, answers: [...item.transferTask.answers] },

@@ -92,6 +92,15 @@ const BASE_ITEMS = {
     microCheck: Object.freeze({ id: 'grammar.past-simple.micro.v1', prompt: 'Yesterday my sister _____ to the library. (GO)', answers: Object.freeze(['went']) }),
     transferTask: Object.freeze({ id: 'grammar.past-simple.transfer.v1', prompt: 'Last week we _____ new books for class. (BUY)', answers: Object.freeze(['bought']) }),
   }),
+  'grammar.future-passive.will-be-used': Object.freeze({
+    id: 'grammar.future-passive.will-be-used', revision: 1, module: 'grammar',
+    prompt: 'Tom believes that in the future robots _____ everywhere. (USE)',
+    reference: Object.freeze(['will be used']), errorType: 'incorrect_form',
+    skill: Object.freeze({ id: 'ege.grammar.future_passive', label: 'Future Simple Passive' }),
+    rule: null,
+    microCheck: Object.freeze({ id: 'grammar.future-passive.micro.v1', prompt: 'New technology _____ in every school. (USE)', answers: Object.freeze(['will be used']) }),
+    transferTask: Object.freeze({ id: 'grammar.future-passive.transfer.v1', prompt: 'The results _____ tomorrow. (ANNOUNCE)', answers: Object.freeze(['will be announced']) }),
+  }),
   'vocabulary.relationship.meaning': Object.freeze({
     id: 'vocabulary.relationship.meaning', revision: 1, module: 'vocabulary',
     prompt: 'Выбери точное значение слова relationship.', reference: Object.freeze(['отношения']), errorType: 'incorrect_meaning',

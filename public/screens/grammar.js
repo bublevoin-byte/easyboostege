@@ -500,7 +500,7 @@ const G_EXAMS=[
   {b:'BE',ans:['were'],e:'Косвенная речь: сдвиг are → were.',t:7},
   {b:'WIN',ans:['wins'],e:'1 тип условия: после if — Present Simple.',t:6},
   {b:'THREE',ans:['third'],e:'three → third.',t:12},
-  {b:'USE',ans:['will be used'],e:'Будущее в пассиве → will be used.',t:5}]},
+  {b:'USE',ans:['will be used'],e:'Будущее в пассиве → will be used.',t:5,voice:{id:'grammar.future-passive.will-be-used',revision:1}}]},
 {tx:['My granny lives in the country. Her house ',' by my great-grandfather. It is much ',' than our flat. When I visited her last month, she ',' jam. She said she ',' me a jar. Granny keeps three cats, and each of ',' has ',' own bowl.'],
  gaps:[{b:'BUILD',ans:['was built'],e:'Дом построили → пассив: was built.',t:5},
   {b:'OLD',ans:['older'],e:'Сравнение: older than.',t:10},

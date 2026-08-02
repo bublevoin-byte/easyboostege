@@ -694,7 +694,7 @@ production credentials, три доказанных P0 отмечены во в�
 | 02 | Полный голосовой разбор ошибок грамматики и лексики с fallback | done |
 | 03 | Контекстный голосовой разбор чтения и аудирования | done |
 | 04 | Контекстный голосовой разбор письма и устной части | done |
-| 05 | Поиск отсутствующих правил по доверенным источникам и очередь проверки | pending |
+| 05 | Поиск отсутствующих правил по доверенным источникам и очередь проверки | done |
 | 06 | Карта освоенных ошибок и возвращённых потенциальных баллов | pending |
 | 07 | Приватность, безопасность, observability и сквозная проверка | pending |
 
@@ -726,3 +726,15 @@ turn заново проверяется актуальный `text_processing` 
 меняет score и не вызывает evaluation повторно. Общий bottom sheet подключён к результатам практики и
 устного пробника; targeted tests 8/8, полный набор 459 (458 pass, 1 PostgreSQL skip), `lint`, `check` и
 frontend build проходят.
+
+Тикет 05 закрыт: server-only trusted-rule workflow получает только curated URL из настраиваемого
+allowlist, проверяет HTTPS/domain/path, публичный DNS с pinning, redirects, абсолютный deadline, MIME и bytes.
+Fetched текст остаётся недоверенными данными fixed-system evidence operation и не сохраняется;
+rule card содержит bounded правило, skill/год, URL, retrieval time и content hashes. Только два
+согласующихся независимых authority/domain дают явно предварительный результат `pending_review`.
+Admin-only approve/reject идемпотентны, а общий canonical lookup видит только `approved`.
+Реальное встроенное задание без локального правила создаёт owner-bound discovery session; браузер
+показывает provisional explanation и HTTPS-ссылки в том же разборе, а одобренная карточка входит в
+следующий session capsule без повторного поиска. File/PostgreSQL/export/delete parity подтверждены:
+targeted workflow 6/6, frontend 6/6, disposable PostgreSQL 1/1, полный набор 466
+(465 pass, 1 штатный PostgreSQL skip), `lint`, `check`, frontend build и secret scans проходят.

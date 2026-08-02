@@ -8,7 +8,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { claimUnseenBankTask, getBankTask, getBankTaskByExternalId, listBankTaskContents, recordTaskDelivery, upsertBankTask, activateTrial, closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, countAiOperationRequestsSince, countAiRequestsSince, createPaymentRequest, createSession, createSpeakingAttempt, createTelegramAuthCode, createWritingAttempt, deleteUserData, exportUserData, finishSpeakingAttempt, finishVoiceTutorSession, finishWritingAttempt, getAiUsageMetrics, getGeneratedTask, getSharedGeneratedTask, getModuleAttempt, getPrivacyConsent, getProgress, getSpeakingAttempt, getUser, getVoiceTutorAccess, getVoiceTutorSession, getWritingAttempt, healthCheck, isSessionActive, recordModuleAttempt, reserveVoiceTutorSession, resolvePaymentRequest, revokeSession, saveGeneratedTask, saveProgress, setPrivacyConsent, setUserRole, upsertErrorBank, upsertWordProgress, mergeProgress, getUserByTelegram, createTelegramUser, logAiRequest, getSub, advanceVoiceTutorSession, setVoiceTutorSessionDelivery, switchVoiceTutorSessionDelivery } from './db.js';
+import { claimUnseenBankTask, getBankTask, getBankTaskByExternalId, listBankTaskContents, recordTaskDelivery, upsertBankTask, activateTrial, closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, countAiOperationRequestsSince, countAiRequestsSince, createPaymentRequest, createRuleCard, createSession, createSpeakingAttempt, createTelegramAuthCode, createWritingAttempt, deleteUserData, exportUserData, finishSpeakingAttempt, finishVoiceTutorSession, finishWritingAttempt, getAiUsageMetrics, getApprovedRuleCard, getGeneratedTask, getSharedGeneratedTask, getModuleAttempt, getPrivacyConsent, getProgress, getSpeakingAttempt, getUser, getVoiceTutorAccess, getVoiceTutorSession, getWritingAttempt, healthCheck, isSessionActive, listRuleCards, recordModuleAttempt, reserveVoiceTutorSession, resolvePaymentRequest, reviewRuleCard, revokeSession, saveGeneratedTask, saveProgress, setPrivacyConsent, setUserRole, upsertErrorBank, upsertWordProgress, mergeProgress, getUserByTelegram, createTelegramUser, logAiRequest, getSub, advanceVoiceTutorSession, setVoiceTutorSessionDelivery, switchVoiceTutorSessionDelivery } from './db.js';
 import { config } from './config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from './ai/writing.js';
 import { buildContentPrompt, CONTENT_PROMPT_VERSION, contentRequestSchema, parseContentResponse } from './ai/content.js';
@@ -38,6 +38,10 @@ import { createVoiceTutorRoutes } from './routes/voice-tutor.js';
 import { createAiTextTutor } from './voice-tutor/text-fallback.js';
 import { createXaiRealtimeCredentialAdapter } from './voice-tutor/xai-realtime.js';
 import { createProviderClient } from './ai/provider-client.js';
+import { createTrustedRuleDiscovery } from './voice-tutor/trusted-rule-discovery.js';
+import { createTrustedRuleFetcher } from './voice-tutor/trusted-rule-fetch.js';
+import { createConfiguredRuleSearchProvider } from './voice-tutor/trusted-rule-catalog.js';
+import { createAiRuleEvidenceExtractor } from './voice-tutor/rule-evidence-extractor.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /* Собранный frontend предпочтительнее исходников, но не обязателен: на чистом клоне и в разработке
@@ -172,6 +176,7 @@ const dbApi = {
   createTelegramAuthCode, consumeTelegramAuthCode, getUserByTelegram, createTelegramUser, getSub,
   getVoiceTutorAccess, reserveVoiceTutorSession, finishVoiceTutorSession, getVoiceTutorSession,
   advanceVoiceTutorSession, setVoiceTutorSessionDelivery, switchVoiceTutorSessionDelivery,
+  createRuleCard, listRuleCards, reviewRuleCard, getApprovedRuleCard,
   revokeSession, exportUserData, deleteUserData, getPrivacyConsent, setPrivacyConsent,
   getProgress, saveProgress, mergeProgress, recordModuleAttempt, getModuleAttempt, upsertWordProgress, upsertErrorBank,
   createWritingAttempt, finishWritingAttempt, getWritingAttempt, createSpeakingAttempt, finishSpeakingAttempt, getSpeakingAttempt,
@@ -269,12 +274,26 @@ const voiceTutorTextTutor = createAiTextTutor({
   countAiOperationRequestsSince,
   logAiRequest,
 });
+const trustedRuleDiscovery = Array.isArray(config.voiceTutor.trustedRuleAllowlist)
+  && config.voiceTutor.trustedRuleAllowlist.length >= 2
+  && config.voiceTutor.trustedRuleSources && Object.keys(config.voiceTutor.trustedRuleSources).length
+  ? createTrustedRuleDiscovery({
+    allowlist: config.voiceTutor.trustedRuleAllowlist,
+    searchProvider: createConfiguredRuleSearchProvider(config.voiceTutor.trustedRuleSources),
+    fetchDocument: createTrustedRuleFetcher({ allowlist: config.voiceTutor.trustedRuleAllowlist }),
+    evidenceExtractor: createAiRuleEvidenceExtractor({
+      providerClient: createProviderClient(), hasAiBudget, countAiOperationRequestsSince, logAiRequest,
+    }),
+    createRuleCard,
+  })
+  : null;
 app.use(createVoiceTutorRoutes({
   authentication,
   db: dbApi,
   limits: config.voiceTutor,
   credentialProvider: voiceTutorCredentialProvider,
   textTutor: voiceTutorTextTutor,
+  trustedRuleDiscovery,
   privacyPolicyVersion: PRIVACY_POLICY_VERSION,
 }));
 const aiRoutes = createAiRoutes({ authentication, access, db: dbApi });

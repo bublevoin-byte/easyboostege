@@ -10,6 +10,7 @@
 | `subscriptions` | текущее состояние доступа | `username`, status, source, start/end timestamps |
 | `subscription_entitlements` | отдельные тарифные права Premium | `username`, entitlement, start/end timestamps |
 | `voice_tutor_sessions` | голосовая квота и структурированный ход разбора без аудио и полного transcript | bounded capsule, delivery/state/outcome, micro-check/transfer flags, reserved/billable seconds and timestamps |
+| `trusted_rule_cards` | очередь найденных правил и проверенный canonical слой | bounded rule, skill/exam year, source URL/content hashes, status, discrepancies and review audit; полных страниц нет |
 | `payment_requests` | ручные заявки на оплату | status, administrator, result and resolution time |
 | `user_progress` | JSONB-прогресс пользователя | `username`, `data`, `updated_at` |
 | `telegram_auth_codes` | одноразовые коды входа | hash кода, expiry, consumed state |
@@ -59,6 +60,13 @@ nonce, способ доставки и конечное педагогичес�
 server-owned attempt id. В `voice_tutor_sessions`, её capsule и экспорт этой таблицы ответ не
 копируется. В записи сессии остаются только результаты micro-check/transfer и технический outcome;
 аудио и временные субтитры не записываются.
+
+Миграция `023_trusted_rule_cards.sql` вводит переходы `pending_review → approved|rejected`.
+Решение рецензента идемпотентно и записывается в bounded `review_audit`; сменить уже принятое
+решение через API нельзя. Canonical lookup фильтрует `status = 'approved'`. Карточка, созданная для
+текущего разбора, входит в экспорт ученика; при удалении аккаунта creator очищается, а совпавший
+reviewer в сохранённом административном аудите обезличивается. Source records содержат только URL,
+retrieval time и SHA-256 страницы, но не HTML/текст страницы.
 Для reading/listening capsule сохраняет только server-owned фрагмент текущего пункта до 600
 символов (`source_excerpt` или `transcript_segment`), но не полный текст/транскрипт и не ответы
 соседних пунктов попытки. Такие ошибки нельзя создать по одному присланному варианту: endpoint

@@ -81,6 +81,16 @@ test('shared voice tutor sheet exposes microphone, transient captions, quota, ti
   assert.match(source, /const sessionId = currentSession\?\.session\?\.id;\s+closeSheet\(\);\s+if \(sessionId\)/u);
 });
 
+test('a discovery-required session requests and renders provisional trusted sources in the same sheet', () => {
+  assert.match(source, /if \(result\.discovery_required\) await discoverMissingRule\(result\)/u);
+  assert.match(source, /discoverMissingRule[\s\S]*\/api\/v1\/voice-tutor\/rule-discoveries/u);
+  assert.match(source, /session_id:\s*result\.session\.id/u);
+  assert.match(source, /voiceTutorSources/u);
+  assert.match(source, /result\?\.provisional/u);
+  assert.match(source, /sourceLink\.textContent/u);
+  assert.doesNotMatch(source, /sourceLink\.innerHTML/u);
+});
+
 test('reading and listening result screens register completed canonical sets before mounting the shared bottom-sheet trigger', () => {
   assert.match(readingSource, /import \{prepareVoiceTutorContextResult,registerVoiceTutorContextResult\} from '\.\.\/voice-tutor\.js'/u);
   assert.match(readingSource, /reading\.gap-year\.before-university/u);

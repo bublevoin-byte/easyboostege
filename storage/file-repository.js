@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { ensureVoiceTutorReservationAllowed, hashAuthCode, normalizeUsername, subscriptionView, VoiceTutorError, voiceTutorAccessView, voiceTutorBillableSeconds, voiceTutorQuotaPeriods } from './shared.js';
 import { transitionPedagogicalState } from '../voice-tutor/state-machine.js';
+import { transitionRuleCardReview } from '../voice-tutor/rule-card.js';
 
 function normalizeAttemptModels(attempts) {
   return attempts.map((attempt) => ({ ...attempt, model: attempt.model ?? null }));
@@ -16,9 +17,10 @@ function normalizeWritingAttempts(attempts) {
 
 export function createFileRepository(filePath) {
   let loaded = false;
-  let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, subscription_entitlements: {}, voice_tutor_sessions: [], payment_requests: {}, subscription_events: [] };
+  let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, subscription_entitlements: {}, voice_tutor_sessions: [], rule_cards: [], payment_requests: {}, subscription_events: [] };
   let writeQueue = Promise.resolve();
   let voiceTutorQueue = Promise.resolve();
+  let ruleCardQueue = Promise.resolve();
 
   async function load() {
     if (loaded) return;
@@ -45,6 +47,7 @@ export function createFileRepository(filePath) {
           subscriptions: parsed.subscriptions && typeof parsed.subscriptions === 'object' ? parsed.subscriptions : {},
           subscription_entitlements: parsed.subscription_entitlements && typeof parsed.subscription_entitlements === 'object' ? parsed.subscription_entitlements : {},
           voice_tutor_sessions: Array.isArray(parsed.voice_tutor_sessions) ? parsed.voice_tutor_sessions : [],
+          rule_cards: Array.isArray(parsed.rule_cards) ? parsed.rule_cards : [],
           payment_requests: parsed.payment_requests && typeof parsed.payment_requests === 'object' ? parsed.payment_requests : {},
           subscription_events: Array.isArray(parsed.subscription_events) ? parsed.subscription_events : [],
         };
@@ -428,6 +431,65 @@ export function createFileRepository(filePath) {
     return role;
   }
 
+  function withRuleCardLock(operation) {
+    const result = ruleCardQueue.then(operation, operation);
+    ruleCardQueue = result.catch(() => {});
+    return result;
+  }
+
+  async function createRuleCard(card) {
+    return withRuleCardLock(async () => {
+      await load();
+      if (state.rule_cards.some((item) => item.id === card.id)) throw new Error('RULE_CARD_EXISTS');
+      const stored = {
+        id: card.id,
+        created_for_username: card.createdForUsername || null,
+        status: 'pending_review',
+        skill: structuredClone(card.skill),
+        exam_year: Number(card.examYear),
+        rule: structuredClone(card.rule),
+        agreement_hash: card.agreementHash,
+        sources: structuredClone(card.sources),
+        discrepancies: structuredClone(card.discrepancies || []),
+        review_audit: [],
+        created_at: new Date(card.createdAt).toISOString(),
+        reviewed_at: null,
+      };
+      state.rule_cards.push(stored);
+      await persist();
+      return structuredClone(stored);
+    });
+  }
+
+  async function listRuleCards({ status = 'pending_review' } = {}) {
+    await load();
+    return state.rule_cards
+      .filter((card) => !status || card.status === status)
+      .sort((first, second) => String(first.created_at).localeCompare(String(second.created_at)))
+      .slice(0, 100)
+      .map((card) => structuredClone(card));
+  }
+
+  async function reviewRuleCard(cardId, { decision, reviewer, reviewedAt }) {
+    return withRuleCardLock(async () => {
+      await load();
+      const card = state.rule_cards.find((item) => item.id === cardId);
+      const transition = transitionRuleCardReview(card, { decision, reviewer, reviewedAt });
+      if (!transition.applied) return { applied: false, card: structuredClone(card) };
+      Object.assign(card, transition.card);
+      await persist();
+      return { applied: true, card: structuredClone(card) };
+    });
+  }
+
+  async function getApprovedRuleCard(skillId, examYear) {
+    await load();
+    const cards = state.rule_cards.filter((card) => card.status === 'approved'
+      && card.skill?.id === skillId && card.exam_year === Number(examYear));
+    const card = cards.sort((first, second) => String(second.reviewed_at).localeCompare(String(first.reviewed_at)))[0];
+    return card ? structuredClone(card) : null;
+  }
+
   async function getPrivacyConsent(username) {
     await load();
     const consent = state.users[username]?.privacy_consent || {};
@@ -808,6 +870,7 @@ export function createFileRepository(filePath) {
       voice_tutor_sessions: state.voice_tutor_sessions
         .filter((item) => item.username === username)
         .map(({ username: owner, idempotency_key, nonce_hash, ...item }) => item),
+      rule_cards: state.rule_cards.filter((item) => item.created_for_username === username),
       payment_requests: Object.values(state.payment_requests).filter((item) => item.username === username),
       writing_attempts: state.writing_attempts.filter((item) => item.username === username),
       speaking_attempts: state.speaking_attempts.filter((item) => item.username === username),
@@ -845,6 +908,15 @@ export function createFileRepository(filePath) {
     delete state.subscriptions[username];
     delete state.subscription_entitlements[username];
     state.voice_tutor_sessions = state.voice_tutor_sessions.filter((item) => item.username !== username);
+    for (const card of state.rule_cards) {
+      if (card.created_for_username === username) card.created_for_username = null;
+      for (const audit of card.review_audit || []) {
+        if (audit.reviewer === username) {
+          audit.reviewer = null;
+          audit.account_deleted = true;
+        }
+      }
+    }
     state.subscription_events = state.subscription_events.filter((item) => item.username !== username);
     for (const [id, request] of Object.entries(state.payment_requests)) if (request.username === username) delete state.payment_requests[id];
     for (const [id, session] of Object.entries(state.sessions)) {
@@ -888,6 +960,10 @@ export function createFileRepository(filePath) {
     advanceVoiceTutorSession,
     setVoiceTutorSessionDelivery,
     switchVoiceTutorSessionDelivery,
+    createRuleCard,
+    listRuleCards,
+    reviewRuleCard,
+    getApprovedRuleCard,
     setUserRole,
     getPrivacyConsent,
     setPrivacyConsent,
