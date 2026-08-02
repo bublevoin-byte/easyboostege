@@ -49,6 +49,7 @@ async function withVoiceTutorApp(run) {
         return { credential: 'ephemeral-only', expires_at: 1_785_662_700, realtime_url: 'wss://example.test/realtime' };
       },
     },
+    realtimePolicy: { unboundCredentialRiskAccepted: true },
     privacyPolicyVersion: 'test-v1',
   }));
   const server = http.createServer(app);

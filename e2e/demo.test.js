@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
+import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -108,6 +109,7 @@ async function runE2E() {
   let temporaryDirectory;
   let child;
   let browser;
+  let fakeProviderServer;
   try {
     browser = await launchBrowser();
     const context = await browser.newContext(contextOptions());
@@ -117,6 +119,27 @@ async function runE2E() {
     const baseUrl = `http://127.0.0.1:${port}`;
     const dataFile = path.join(temporaryDirectory, 'data.json');
     const jwtSecret = 'e2e-test-secret-with-at-least-32-characters';
+    const fakeProviderPort = await findAvailablePort();
+    const fakeProviderCalls = [];
+    fakeProviderServer = http.createServer((request, response) => {
+      if (request.method !== 'POST' || request.url !== '/voice-credentials') {
+        response.writeHead(404).end();
+        return;
+      }
+      let body = '';
+      request.setEncoding('utf8');
+      request.on('data', (chunk) => { body += chunk; });
+      request.on('end', () => {
+        const parsed = JSON.parse(body);
+        fakeProviderCalls.push(parsed);
+        response.writeHead(200, { 'Content-Type': 'application/json' });
+        response.end(JSON.stringify({ value: 'e2e-ephemeral-only', expires_at: 1_900_000_000 }));
+      });
+    });
+    await new Promise((resolve, reject) => {
+      fakeProviderServer.once('error', reject);
+      fakeProviderServer.listen(fakeProviderPort, '127.0.0.1', resolve);
+    });
     await fs.writeFile(dataFile, JSON.stringify({
       users: {
         e2euser: {
@@ -125,7 +148,7 @@ async function runE2E() {
           privacy_consent: {
             text_processing: true,
             voice_processing: true,
-            policy_version: '2026-07-20',
+            policy_version: '2026-08-02-voice-v1',
             updated_at: Date.now(),
           },
         },
@@ -134,6 +157,14 @@ async function runE2E() {
       progress: {
         e2euser: { words: { known: 0 } },
         expireduser: {},
+      },
+      subscription_entitlements: {
+        e2euser: {
+          voice_tutor: {
+            starts_at: new Date(Date.now() - 60_000).toISOString(),
+            ends_at: new Date(Date.now() + 86_400_000).toISOString(),
+          },
+        },
       },
     }));
     const output = [];
@@ -149,7 +180,17 @@ async function runE2E() {
         JWT_SECRET: jwtSecret,
         TELEGRAM_BOT_TOKEN: '',
         ADMIN_TELEGRAM_ID: '',
-        XAI_API_KEY: '',
+        XAI_API_KEY: 'e2e-provider-boundary-key',
+        XAI_ENABLED: 'true',
+        XAI_VOICE_MODEL: 'grok-voice-e2e-v1',
+        XAI_VOICE_NAME: 'ara',
+        XAI_VOICE_CREDENTIAL_URL: `http://127.0.0.1:${fakeProviderPort}/voice-credentials`,
+        XAI_VOICE_REALTIME_URL: 'wss://fake.invalid/realtime',
+        VOICE_TUTOR_ENABLED: 'true',
+        VOICE_TUTOR_COST_KILL_SWITCH: 'false',
+        VOICE_TUTOR_REQUIRE_ZDR: 'true',
+        VOICE_TUTOR_UNBOUND_CREDENTIAL_RISK_ACCEPTED: 'true',
+        XAI_VOICE_ZDR_ATTESTED: 'true',
         GROQ_API_KEY: '',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -320,6 +361,127 @@ async function runE2E() {
     assert.deepEqual(evaluatedWritingTasks, ['writing_37', 'writing_38']);
     console.log('e2e: writing tasks 37 and 38 received structured reviews');
 
+    await authenticatedPage.evaluate(async () => {
+      window.__e2eMicrophoneMode = 'success';
+      window.__voiceRealtimeEvidence = { url: null, protocols: null, sent: [] };
+      class FakeRealtimeSocket {
+        constructor(url, protocols) {
+          this.readyState = 0;
+          window.__voiceRealtimeSocket = this;
+          window.__voiceRealtimeEvidence.url = url;
+          window.__voiceRealtimeEvidence.protocols = protocols;
+          queueMicrotask(() => {
+            this.readyState = 1;
+            this.onopen?.();
+          });
+        }
+        send(value) {
+          const event = JSON.parse(value);
+          window.__voiceRealtimeEvidence.sent.push(event);
+          if (event.type === 'session.update') {
+            queueMicrotask(() => this.onmessage?.({ data: JSON.stringify({ type: 'session.updated' }) }));
+          }
+        }
+        close() { this.readyState = 3; }
+      }
+      class FakeAudioContext {
+        constructor() {
+          this.currentTime = 0;
+          this.destination = {};
+        }
+        createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
+        createScriptProcessor() { return { connect() {}, disconnect() {}, onaudioprocess: null }; }
+        createGain() { return { gain: { value: 0 }, connect() {}, disconnect() {} }; }
+        async close() {}
+      }
+      Object.defineProperty(window, 'WebSocket', { configurable: true, writable: true, value: FakeRealtimeSocket });
+      Object.defineProperty(window, 'AudioContext', { configurable: true, writable: true, value: FakeAudioContext });
+      window.configureVoiceTutor({
+        mediaDevices: {
+          async getUserMedia() {
+            return { getTracks: () => [{ stop() {} }] };
+          },
+        },
+      });
+      const pointer = await window.registerVoiceTutorError({
+        module: 'grammar',
+        itemId: 'grammar.past-simple.last-summer',
+        revision: 1,
+        learnerAnswer: 'go-ed-private-e2e',
+      });
+      const host = document.createElement('div');
+      host.id = 'voiceTutorE2EError';
+      host.innerHTML = window.voiceTutorButton(pointer);
+      document.body.appendChild(host);
+    });
+    const voiceButton = authenticatedPage.getByRole('button', { name: '🎙️ Разобрать голосом' });
+    await voiceButton.click();
+    const voiceSheet = authenticatedPage.getByRole('dialog', { name: 'Разбор ошибки с ИИ' });
+    await voiceSheet.waitFor({ state: 'visible', timeout: 5_000 });
+    await voiceSheet.getByText('Голосовой репетитор подключён.').waitFor({ state: 'visible', timeout: 5_000 });
+    const tutorInput = voiceSheet.getByRole('textbox', { name: 'Ответ репетитору' });
+    const continueButton = voiceSheet.getByRole('button', { name: 'Продолжить' });
+    const tutorState = voiceSheet.locator('#voiceTutorState');
+    await authenticatedPage.evaluate(async () => {
+      await fetch('/api/v1/privacy/consent', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text_processing: false, voice_processing: true }),
+      });
+      window.__voiceRealtimeSocket.onmessage({ data: JSON.stringify({ type: 'error' }) });
+    });
+    await authenticatedPage.waitForFunction(
+      (fragment) => document.querySelector('#voiceTutorState')?.textContent?.includes(fragment),
+      'Сначала уточним, почему выбран этот ответ',
+    );
+    await continueButton.click();
+    await authenticatedPage.waitForFunction((fragment) => document.querySelector('#voiceTutorState')?.textContent?.includes(fragment), 'После last summer нужен Past Simple');
+    assert.match(await tutorState.innerText(), /После last summer нужен Past Simple/u);
+    await continueButton.click();
+    await authenticatedPage.waitForFunction((fragment) => document.querySelector('#voiceTutorState')?.textContent?.includes(fragment), 'Yesterday my sister');
+    assert.match(await tutorState.innerText(), /Yesterday my sister/u);
+    await tutorInput.fill('went');
+    await continueButton.click();
+    await authenticatedPage.waitForFunction((fragment) => document.querySelector('#voiceTutorState')?.textContent?.includes(fragment), 'Last week we');
+    assert.match(await tutorState.innerText(), /Last week we/u);
+    await tutorInput.fill('bought');
+    await continueButton.click();
+    await authenticatedPage.waitForFunction((fragment) => document.querySelector('#voiceTutorState')?.textContent?.includes(fragment), 'правило проверено на новом примере');
+    assert.match(await tutorState.innerText(), /правило проверено на новом примере/u);
+    const voiceEvidence = await authenticatedPage.evaluate(async () => {
+      const recovery = await (await fetch('/api/v1/voice-tutor/recovery-map')).json();
+      const exported = await (await fetch('/api/v1/account/export')).json();
+      return {
+        recovery,
+        voiceExport: exported.voice_tutor_sessions,
+        recoveriesExport: exported.voice_tutor_recoveries,
+        realtime: window.__voiceRealtimeEvidence,
+      };
+    });
+    assert.equal(fakeProviderCalls.length, 1);
+    assert.deepEqual(fakeProviderCalls[0], { expires_after: { seconds: 60 } });
+    assert.equal(voiceEvidence.realtime.url, 'wss://fake.invalid/realtime?model=grok-voice-e2e-v1');
+    assert.deepEqual(voiceEvidence.realtime.protocols, ['xai-client-secret.e2e-ephemeral-only']);
+    assert.equal(voiceEvidence.realtime.sent[0].type, 'session.update');
+    assert.equal(voiceEvidence.realtime.sent[0].session.voice, 'ara');
+    assert.equal(voiceEvidence.realtime.sent[0].session.tools[0].name, 'advance_pedagogy');
+    assert.match(voiceEvidence.realtime.sent[0].session.instructions, /diagnose → explain → micro_check → transfer_task/u);
+    assert.match(voiceEvidence.realtime.sent[0].session.instructions, /"learner_answer":"go-ed-private-e2e"/u);
+    assert.doesNotMatch(voiceEvidence.realtime.sent[0].session.instructions, /"reference":|"answers":/u);
+    assert.equal(voiceEvidence.recovery.skills[0].state, 'open');
+    assert.equal(voiceEvidence.recovery.skills[0].initial_micro_check_passed, true);
+    assert.equal(voiceEvidence.recovery.skills[0].initial_transfer_passed, true);
+    assert.equal(voiceEvidence.voiceExport[0].delivery_mode, 'local');
+    assert.equal(voiceEvidence.voiceExport[0].error_code, 'VOICE_TUTOR_PROVIDER_UNAVAILABLE');
+    assert.equal(voiceEvidence.voiceExport[0].provider, 'xai');
+    assert.equal(voiceEvidence.voiceExport[0].model, 'grok-voice-e2e-v1');
+    assert.equal(voiceEvidence.voiceExport[0].prompt_version, 'voice-tutor-error-v3');
+    assert.ok(Number.isFinite(new Date(voiceEvidence.voiceExport[0].voice_activated_at).getTime()));
+    assert.doesNotMatch(JSON.stringify(voiceEvidence.voiceExport), /go-ed-private-e2e|raw_audio|full_transcript|utterance/iu);
+    assert.doesNotMatch(JSON.stringify(voiceEvidence.recoveriesExport), /go-ed-private-e2e|raw_audio|full_transcript|utterance/iu);
+    await voiceSheet.getByRole('button', { name: 'Завершить и вернуться в упражнение' }).click();
+    console.log('e2e: Voice Error Tutor fake-provider recovery loop passed without paid network');
+
     await authenticatedPage.getByRole('button', { name: 'Исправить' }).click();
     await authenticatedPage.getByRole('button', { name: 'Главная' }).click();
     await authenticatedPage.evaluate(() => {
@@ -482,6 +644,7 @@ async function runE2E() {
   } finally {
     if (browser) await browser.close();
     if (child) await stopProcess(child);
+    if (fakeProviderServer) await new Promise((resolve) => fakeProviderServer.close(resolve));
     if (temporaryDirectory) await fs.rm(temporaryDirectory, { recursive: true, force: true });
   }
 }

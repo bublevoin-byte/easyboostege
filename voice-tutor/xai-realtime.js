@@ -1,7 +1,44 @@
 import { operationLimits } from '../ai/operations.js';
-import { buildVoiceTutorInstructions, VOICE_TUTOR_PROMPT_VERSION } from './prompt.js';
+import { buildVoiceTutorRealtimeInstructions, VOICE_TUTOR_PROMPT_VERSION } from './prompt.js';
 
 const MAX_PROVIDER_RESPONSE_BYTES = 16_384;
+const MAX_BROWSER_SESSION_BYTES = 81_920;
+const SAFE_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$/u;
+const SAFE_VOICE = /^[a-z][a-z0-9_-]{0,63}$/u;
+const SAFE_CREDENTIAL = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]{1,2048}$/u;
+
+function realtimeUrlForModel(realtimeUrl, model) {
+  try {
+    const url = new URL(realtimeUrl);
+    if (url.protocol !== 'wss:') throw new Error('invalid protocol');
+    url.searchParams.set('model', model);
+    return url.toString();
+  } catch {
+    throw new VoiceTutorProviderError('VOICE_TUTOR_PROVIDER_NOT_CONFIGURED');
+  }
+}
+
+function browserSessionConfig(capsule, voice) {
+  return {
+    voice,
+    instructions: buildVoiceTutorRealtimeInstructions(capsule),
+    tools: [{
+      type: 'function',
+      name: 'advance_pedagogy',
+      description: 'Передать серверу завершение шага или ответ ученика для canonical проверки.',
+      parameters: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', enum: ['diagnosis_complete', 'explanation_complete', 'check_answer', 'transfer_answer'] },
+          answer: { type: 'string', maxLength: 200 },
+        },
+        required: ['type'],
+        additionalProperties: false,
+      },
+    }],
+    turn_detection: { type: 'server_vad' },
+  };
+}
 
 export class VoiceTutorProviderError extends Error {
   constructor(code = 'VOICE_TUTOR_PROVIDER_UNAVAILABLE') {
@@ -59,7 +96,9 @@ export function createXaiRealtimeCredentialAdapter({
   realtimeUrl = 'wss://api.x.ai/v1/realtime',
   model,
   voice,
-  ttlSeconds = 300,
+  ttlSeconds = 60,
+  requireZdr = false,
+  zdrAttested = false,
   transport = null,
 } = {}) {
   const operation = operationLimits('voice_tutor_realtime');
@@ -69,49 +108,45 @@ export function createXaiRealtimeCredentialAdapter({
   const selectedVoice = String(voice || '');
   const ttl = Number(ttlSeconds);
 
-  async function createCredential({ sessionId, capsule }) {
-    if (!mainKey || !pinnedModel || !selectedVoice || !Number.isInteger(ttl) || ttl < 60 || ttl > 600) {
+  async function createCredential({ capsule }) {
+    if (requireZdr && !zdrAttested) {
+      throw new VoiceTutorProviderError('VOICE_TUTOR_ZDR_NOT_CONFIRMED');
+    }
+    if (!mainKey || !SAFE_MODEL.test(pinnedModel) || !SAFE_VOICE.test(selectedVoice)
+      || !Number.isInteger(ttl) || ttl !== 60) {
       throw new VoiceTutorProviderError('VOICE_TUTOR_PROVIDER_NOT_CONFIGURED');
+    }
+    const session = browserSessionConfig(capsule, selectedVoice);
+    if (new TextEncoder().encode(JSON.stringify(session)).byteLength > MAX_BROWSER_SESSION_BYTES) {
+      throw new VoiceTutorProviderError('VOICE_TUTOR_PROVIDER_CONTRACT_INVALID');
     }
     const response = await providerTransport({
       url: endpoint,
       method: 'POST',
       headers: { Authorization: `Bearer ${mainKey}` },
       body: {
-        expires_after: { anchor: 'created_at', seconds: ttl },
-        session: {
-          type: 'realtime',
-          model: pinnedModel,
-          voice: selectedVoice,
-          metadata: { easy_boost_session_id: String(sessionId), prompt_version: VOICE_TUTOR_PROMPT_VERSION },
-          instructions: buildVoiceTutorInstructions(capsule),
-          tools: [{
-            type: 'function',
-            name: 'advance_pedagogy',
-            description: 'Передать серверу завершение шага или ответ ученика для canonical проверки.',
-            parameters: {
-              type: 'object',
-              properties: {
-                type: { type: 'string', enum: ['diagnosis_complete', 'explanation_complete', 'check_answer', 'transfer_answer'] },
-                answer: { type: 'string', maxLength: 200 },
-              },
-              required: ['type'],
-              additionalProperties: false,
-            },
-          }],
-          tool_choice: 'auto',
-        },
+        expires_after: { seconds: ttl },
       },
     });
     const payload = await readProviderPayload(response);
     const secret = payload.client_secret || payload;
     const credential = String(secret?.value || '');
     const expiresAt = Number(secret?.expires_at);
-    if (!credential || credential.length > 2_048 || credential === mainKey || !Number.isFinite(expiresAt)) {
+    if (!SAFE_CREDENTIAL.test(credential) || credential === mainKey || !Number.isFinite(expiresAt)) {
       throw new VoiceTutorProviderError('VOICE_TUTOR_PROVIDER_CONTRACT_INVALID');
     }
-    return { credential, expires_at: expiresAt, realtime_url: realtimeUrl };
+    return {
+      credential,
+      expires_at: expiresAt,
+      realtime_url: realtimeUrlForModel(realtimeUrl, pinnedModel),
+      session,
+    };
   }
 
-  return Object.freeze({ createCredential });
+  return Object.freeze({
+    createCredential,
+    provider: 'xai',
+    model: pinnedModel,
+    promptVersion: VOICE_TUTOR_PROMPT_VERSION,
+  });
 }

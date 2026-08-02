@@ -168,7 +168,7 @@ paths:
                     criterionIndex: { type: integer, minimum: 0, maximum: 20 }
                   additionalProperties: false
       responses:
-        '201': { description: Capsule created; initial response may include one ephemeral realtime credential and one-time nonce, never XAI_API_KEY }
+        '201': { description: Capsule created. Voice mode exposes only credential, expires_at, model-pinned realtime_url and bounded server-issued session config plus a one-time nonce. The client sends that config verbatim as session.update after authenticating with the xai-client-secret subprotocol. If voice is blocked or unavailable, the same capsule returns text/local mode with a bounded voice_unavailable code and no provider diagnostic details. }
         '200': { description: Existing idempotent result without a second credential or nonce }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
@@ -176,6 +176,7 @@ paths:
         '409': { description: Another Voice Tutor session is active }
         '422': { description: Attempt, canonical item/context, or completed validated writing/speaking review is not supported }
         '429': { description: Daily or monthly voice quota is exhausted }
+        '503': { description: New quota-only voice reservation is disabled by the feature flag, cost kill switch, required-but-unconfirmed ZDR policy or unaccepted direct-credential risk; tracer requests continue with text/local fallback in a 201 response }
   /api/v1/voice-tutor/rule-discoveries:
     post:
       summary: Discover a provisional EGE rule from server-allowlisted sources
@@ -274,7 +275,30 @@ paths:
         '409': { description: Invalid transition or replayed nonce }
   /api/v1/voice-tutor/sessions/{sessionId}/fallback:
     post:
-      summary: Release unused voice quota and continue the same capsule in text or local mode
+      summary: Charge elapsed activated voice time, release the unused reservation and continue the same capsule in text or local mode
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nonce]
+              properties:
+                nonce: { type: string, minLength: 16, maxLength: 200 }
+                reason: { type: string, enum: [microphone_unavailable, provider_unavailable, session_timeout], default: microphone_unavailable }
+              additionalProperties: false
+      responses:
+        '200': { description: Same capsule through the budgeted text AI operation when current text_processing consent exists, otherwise through its local canonical rule; seconds since server activation remain billable, an unactivated session bills zero, and no second reservation is created }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { description: Replayed nonce }
+  /api/v1/voice-tutor/sessions/{sessionId}/activate:
+    post:
+      summary: Idempotently start server-owned voice billing after the provider acknowledges session.update
       parameters:
         - in: path
           name: sessionId
@@ -291,9 +315,10 @@ paths:
                 nonce: { type: string, minLength: 16, maxLength: 200 }
               additionalProperties: false
       responses:
-        '200': { description: Same capsule through the budgeted text AI operation when current text_processing consent exists, otherwise through its local canonical rule; no second quota charge }
+        '200': { description: First activation or idempotent replay with the current nonce; voice_activated_at is server-owned and audio capture starts only after this response }
         '400': { $ref: '#/components/responses/BadRequest' }
-        '409': { description: Replayed nonce }
+        '404': { description: Session does not belong to the current user or is no longer an active voice delivery }
+        '409': { description: Replayed nonce or expired session }
   /api/v1/voice-tutor/sessions/{sessionId}/finish:
     post:
       summary: Idempotently finish a reserved Voice Tutor session
@@ -323,7 +348,7 @@ paths:
     get:
       summary: Export the authenticated user's account, progress and attempt data
       responses:
-        '200': { description: JSON export including attempt provider, model, prompt version, status and error code }
+        '200': { description: JSON export including structured Voice Tutor sessions, recovery/repeat outcomes and bounded provider/model/prompt metadata; no raw audio, temporary captions, full Voice Tutor transcript, nonce hash or repeat answer }
         '401': { $ref: '#/components/responses/Unauthorized' }
   /api/v1/account:
     delete:
@@ -338,17 +363,17 @@ paths:
               properties:
                 confirmation: { type: string, enum: [DELETE] }
       responses:
-        '200': { description: Account deleted and cookie cleared }
+        '200': { description: Account, Voice Tutor sessions/recoveries/repeats and pending/rejected rule reports are deleted; approved canonical cards survive without creator identity, and reviewer identity on retained cards is anonymized }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
   /api/v1/privacy/consent:
     get:
-      summary: Read the user's text and voice processing choices
+      summary: Read the user's text and realtime speech-to-speech processing choices and current policy version
       responses:
         '200': { description: Consent state and current policy version }
         '401': { $ref: '#/components/responses/Unauthorized' }
     put:
-      summary: Grant or withdraw text and voice processing consent
+      summary: Grant or withdraw text and realtime speech-to-speech processing consent; an outdated policy version does not authorize a Voice Tutor credential
       requestBody:
         required: true
         content:

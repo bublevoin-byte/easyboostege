@@ -48,6 +48,20 @@ export class VoiceTutorError extends Error {
   }
 }
 
+const VOICE_TUTOR_DELIVERY_FIELD = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$/u;
+
+export function normalizeVoiceTutorDeliveryMetadata({ provider = null, model = null, promptVersion = null } = {}) {
+  const normalized = {
+    provider: provider == null || provider === '' ? null : String(provider),
+    model: model == null || model === '' ? null : String(model),
+    prompt_version: promptVersion == null || promptVersion === '' ? null : String(promptVersion),
+  };
+  if (Object.values(normalized).some((value) => value != null && !VOICE_TUTOR_DELIVERY_FIELD.test(value))) {
+    throw new VoiceTutorError('VOICE_TUTOR_PROVIDER_CONTRACT_INVALID');
+  }
+  return normalized;
+}
+
 export function ensureVoiceTutorReservationAllowed(access, reservedSeconds) {
   if (!access.entitlements.voice_tutor) throw new VoiceTutorError('VOICE_TUTOR_PREMIUM_REQUIRED');
   if (access.voice_tutor.active_session) throw new VoiceTutorError('VOICE_TUTOR_SESSION_ACTIVE');
@@ -64,7 +78,10 @@ export function voiceTutorBillableSeconds(session, now, confirmedBillableSeconds
     }
     return confirmed;
   }
-  const elapsedSeconds = Math.ceil(Math.max(0, new Date(now).getTime() - new Date(session.started_at).getTime()) / 1000);
+  const requiresActivation = Boolean(session.capsule_id || session.capsule);
+  if (requiresActivation && !session.voice_activated_at) return 0;
+  const billingStartedAt = session.voice_activated_at || session.started_at;
+  const elapsedSeconds = Math.ceil(Math.max(0, new Date(now).getTime() - new Date(billingStartedAt).getTime()) / 1000);
   return Math.min(reservedSeconds, elapsedSeconds);
 }
 

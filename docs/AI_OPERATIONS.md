@@ -69,6 +69,56 @@ provisional card по owner-bound `session_id` и показывает её ма
 
 Версия prompt для письменной проверки задаётся `WRITING_PROMPT_VERSION` в `ai/writing.js`, для устной части — `SPEAKING_PROMPT_VERSION`, для генерации контента — `CONTENT_PROMPT_VERSION`, для Voice Error Tutor — `VOICE_TUTOR_PROMPT_VERSION`, а для извлечения trusted-rule evidence — полем `promptVersion` операции `voice_tutor_rule_extract`. Версия вместе с операцией, провайдером, моделью, длительностью и результатом записывается в `ai_requests`. Универсального AI proxy в production API нет.
 
+## Realtime Voice Tutor boundary
+
+Credential выдаётся только после auth, Premium entitlement, актуального `voice_processing`
+consent, quota reservation и server-owned capsule validation. Основной provider key остаётся на
+сервере; публичный realtime-объект содержит только короткоживущие `credential`, `expires_at`,
+`realtime_url` и bounded server-issued `session` config. Provider/model/prompt version сохраняются отдельно как bounded техническое
+происхождение результата и не доверяются браузеру.
+
+Сервер запрашивает xAI ephemeral token только с `expires_after.seconds`: credential endpoint не
+поддерживает `session` и `expires_after.anchor`. Versioned model передаётся query-параметром
+`realtime_url`; браузер аутентифицируется единственным subprotocol `xai-client-secret.<token>`,
+после открытия отправляет выданный сервером `session.update` и не передаёт аудио до
+`session.updated`. После этого browser вызывает authenticated idempotent `/activate`; backend
+однократно ставит `voice_activated_at`, и только после успешного ответа browser создаёт audio graph
+и начинает передавать микрофон. Session config содержит только lowercase voice id, bounded instructions,
+`server_vad` и единственную функцию `advance_pedagogy`; встроенные search/MCP tools запрещены.
+Browser-visible instructions содержат правило, исходный ответ ученика и только prompts будущих
+проверок; server-owned `reference` и массивы правильных ответов остаются на backend.
+
+`VOICE_TUTOR_ENABLED` и `VOICE_TUTOR_COST_KILL_SWITCH` запрещают новые voice подключения, но
+tracer сохраняет тот же capsule и атомарно продолжает его через text/local fallback. До открытия
+voice расход равен нулю; ACK/activation failure списывает ноль, а runtime fallback сохраняет только
+секунды после server-owned activation. При `VOICE_TUTOR_REQUIRE_ZDR` отсутствие отдельной human/provider attestation в
+`XAI_VOICE_ZDR_ATTESTED` блокирует передачу голоса до transport call. Internal provider body,
+headers и exception message никогда не становятся публичной ошибкой.
+
+The direct xAI client secret has a fixed 60-second connection window and is not persisted or
+logged. Because xAI cannot currently bind or revoke an issued client secret, production remains
+fail closed until `VOICE_TUTOR_UNBOUND_CREDENTIAL_RISK_ACCEPTED=true` is explicitly approved.
+Feature/cost switches stop new issuance only; they cannot terminate a bearer already issued.
+Runtime provider error, close or missing `session.updated` acknowledgement automatically closes
+media and continues the same capsule through text/local fallback. A missing acknowledgement or
+activation bills zero; after activation, elapsed voice seconds remain billable and included in
+voice-cost metrics even when final delivery mode is text/local. Provider/model/prompt provenance
+is preserved when delivery subsequently downgrades to text or local.
+
+Browser realtime transport принимает только bounded JSON events, ограничивает bytes и частоту,
+требует `session.updated` и `response.created` до педагогического tool call, принимает документированный
+top-level `response_id` и совместимый `response.id`, разрешает только server-known tool names
+и одноразовый bounded `call_id`. Повтор, неверный порядок, oversized payload и off-scope tool не
+продвигают педагогический FSM; нарушение закрывает поток безопасным фиксированным сообщением.
+Capsule и learner-controlled поля помечены в prompt как недоверенные данные, а успех
+micro-check/transfer подтверждает только HTTP endpoint с rotating nonce.
+
+Raw audio, полная расшифровка, свободные реплики и временные субтитры не записываются в БД,
+account export, application logs, metrics или release evidence. Тесты используют только локальный
+fake credential provider и локальный fake WebSocket при выполнении настоящего browser transport; paid smoke разрешён лишь владельцу отдельным
+решением вне автоматических gates. Операторский процесс описан в
+`docs/VOICE_TUTOR_OPERATIONS.md`.
+
 Для `writing-v5` сервер считает полный объём до вызова провайдера. На 154/275 словах ответ не
 усекается; начиная с 155/276 провайдер и программные факты получают только первые 140/250 слов.
 `review.words` и `review.in_range` продолжают описывать полный ответ. Пользовательская попытка

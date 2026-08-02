@@ -126,6 +126,7 @@ async function withReviewApp(run) {
         return { credential: 'ephemeral-review-credential', expires_at: 1_785_662_700, realtime_url: 'wss://fake.invalid/realtime' };
       },
     },
+    realtimePolicy: { unboundCredentialRiskAccepted: true },
   }));
   const server = http.createServer(app);
   await new Promise((resolve, reject) => {

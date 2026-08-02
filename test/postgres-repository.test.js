@@ -36,6 +36,7 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
       '022_voice_tutor_tracer.sql',
       '023_trusted_rule_cards.sql',
       '024_voice_tutor_recovery_map.sql',
+      '025_voice_tutor_hardening.sql',
     ]);
 
     const username = await repository.createTelegramUser(telegramId, `Integration ${suffix}`);
@@ -58,6 +59,18 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     assert.equal((await repository.reviewRuleCard(ruleCardId, { decision: 'approved', reviewer: username, reviewedAt: new Date() })).applied, true);
     assert.equal((await repository.reviewRuleCard(ruleCardId, { decision: 'approved', reviewer: username, reviewedAt: new Date() })).applied, false);
     assert.equal((await repository.getApprovedRuleCard(`ege.grammar.integration.${suffix}`, 2026)).status, 'approved');
+    const ruleReportId = crypto.randomUUID();
+    await repository.createRuleCard({
+      id: ruleReportId, createdForUsername: username, status: 'pending_review',
+      skill: { id: `ege.grammar.report.${suffix}`, title: 'Integration report' }, examYear: 2026,
+      rule: { title: 'Integration report', explanation: 'Pending bounded evidence.', examples: ['It may work.'] },
+      agreementHash: 'd'.repeat(64),
+      sources: [
+        { authority: 'one', url: 'https://one.example/report', retrieved_at: new Date().toISOString(), content_hash: 'e'.repeat(64) },
+        { authority: 'two', url: 'https://two.example/report', retrieved_at: new Date().toISOString(), content_hash: 'f'.repeat(64) },
+      ],
+      discrepancies: [], createdAt: new Date(),
+    });
 
     const trial = await repository.activateTrial(telegramId, 30, 'Integration User');
     assert.equal(trial.applied, true);
@@ -95,6 +108,32 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     const voiceFinishedAt = new Date(voiceNow.getTime() + 120_000);
     assert.equal((await repository.finishVoiceTutorSession(username, firstVoiceReservation.session.id, { limits: voiceLimits, now: voiceFinishedAt })).finished, true);
     assert.equal((await repository.finishVoiceTutorSession(username, firstVoiceReservation.session.id, { limits: voiceLimits, now: voiceFinishedAt })).finished, false);
+
+    const unactivatedFinishId = crypto.randomUUID();
+    await repository.reserveVoiceTutorSession(username, {
+      id: unactivatedFinishId, idempotencyKey: crypto.randomUUID(), limits: voiceLimits, now: voiceFinishedAt,
+      context: { capsule: { id: 'integration.unactivated.finish' }, nonceHash: '7'.repeat(64) },
+    });
+    await repository.finishVoiceTutorSession(username, unactivatedFinishId, {
+      limits: voiceLimits, now: new Date(voiceFinishedAt.getTime() + 10_000),
+    });
+    assert.equal((await repository.getVoiceTutorSession(username, unactivatedFinishId)).billable_seconds, 0);
+    await client.query('DELETE FROM voice_tutor_sessions WHERE id = $1', [unactivatedFinishId]);
+
+    const unactivatedExpiryId = crypto.randomUUID();
+    const unactivatedExpiryStart = new Date(voiceFinishedAt.getTime() + 20_000);
+    await repository.reserveVoiceTutorSession(username, {
+      id: unactivatedExpiryId, idempotencyKey: crypto.randomUUID(), limits: voiceLimits, now: unactivatedExpiryStart,
+      context: { capsule: { id: 'integration.unactivated.expiry' }, nonceHash: '8'.repeat(64) },
+    });
+    const expired = await repository.finishVoiceTutorSession(username, unactivatedExpiryId, {
+      limits: voiceLimits, now: new Date(unactivatedExpiryStart.getTime() + 310_000),
+    });
+    assert.equal(expired.finished, false);
+    const expiredStored = await repository.getVoiceTutorSession(username, unactivatedExpiryId);
+    assert.equal(expiredStored.status, 'expired');
+    assert.equal(expiredStored.billable_seconds, 0);
+    await client.query('DELETE FROM voice_tutor_sessions WHERE id = $1', [unactivatedExpiryId]);
 
     const progress = { learned: 12, prog: { words: 33 }, marker: suffix };
     await repository.saveProgress(username, progress);
@@ -145,6 +184,23 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     });
     assert.equal(tracerReservation.created, true);
     assert.equal(tracerReservation.session.state, 'diagnose');
+    await assert.rejects(
+      repository.activateVoiceTutorSession(username, tracerSessionId, {
+        nonceHash: '9'.repeat(64), now: voiceFinishedAt,
+      }),
+      /VOICE_TUTOR_NONCE_REPLAYED/u,
+    );
+    const firstActivation = await repository.activateVoiceTutorSession(username, tracerSessionId, {
+      nonceHash: 'a'.repeat(64), now: voiceFinishedAt,
+    });
+    const replayedActivation = await repository.activateVoiceTutorSession(username, tracerSessionId, {
+      nonceHash: 'a'.repeat(64), now: new Date(voiceFinishedAt.getTime() + 1_000),
+    });
+    assert.equal(firstActivation.session.id, tracerSessionId);
+    assert.equal(replayedActivation.session.id, tracerSessionId);
+    await repository.setVoiceTutorSessionDelivery(username, tracerSessionId, {
+      mode: 'voice', provider: 'xai', model: 'grok-voice-integration-v1', promptVersion: 'voice-tutor-error-v2',
+    });
     assert.equal((await repository.advanceVoiceTutorSession(username, tracerSessionId, {
       nonceHash: 'a'.repeat(64), nextNonceHash: 'b'.repeat(64), event: { type: 'diagnosis_complete' }, now: voiceFinishedAt,
     })).session.state, 'explain');
@@ -200,15 +256,19 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     const inactiveRecoveryMap = await repository.getVoiceTutorRecoveryMap(username, { limits: voiceLimits, now: recoveredAt });
     assert.equal(inactiveRecoveryMap.voice_minutes.used_monthly, 2);
     assert.equal(inactiveRecoveryMap.voice_minutes.remaining_monthly, 0);
-    assert.deepEqual(await repository.getVoiceTutorRecoveryMetrics(recoveredAt), {
+    assert.deepEqual(await repository.getVoiceTutorRecoveryMetrics(recoveredAt, { costMicrousdPerMinute: 50_000 }), {
       open: 0, recovered: 1, relapsed: 0, numerator: 1, denominator: 1, error_recovery_rate: 1,
-      due_repeats: 0, overdue_repeats: 0, sessions: 2, voice_minutes: 2,
+      due_repeats: 0, overdue_repeats: 0, sessions: 2, voice_minutes: 0,
       micro_check: { passed: 1, observed: 2, rate: 0.5 },
       initial_transfer: { passed: 1, observed: 1, rate: 1 },
       repeat_passes: {
         day_1: { passed: 1, observed: 1, rate: 1 },
         day_7: { passed: 1, observed: 1, rate: 1 },
       },
+      delivery: { voice: 0, text: 1, local: 0 },
+      fallback_rate: 1,
+      provider_errors: 0,
+      estimated_cost_microusd: 0,
     });
     await repository.upsertWordProgress(username, [{ word: 'Achievement', stage: 2, errorCount: 1, reviewCount: 3, dueAt: Date.now() + 60_000 }]);
     const learningError = { module: 'grammar', itemKey: `grammar_19_24:${suffix}`, errorType: 'incorrect_form', details: { expected: 'went' } };
@@ -262,7 +322,7 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     assert.equal(exported.voice_tutor_recoveries.length, 1);
     assert.equal(exported.voice_tutor_repeats.length, 2);
     assert.equal(exported.voice_tutor_repeat_attempts.length, 2);
-    assert.equal(exported.rule_cards.length, 1);
+    assert.equal(exported.rule_cards.length, 2);
     const originalVoiceSession = exported.voice_tutor_sessions.find((session) => session.id === firstVoiceReservation.session.id);
     assert.equal(originalVoiceSession.billable_seconds, 120);
     const exportedTracerSession = exported.voice_tutor_sessions.find((session) => session.id === tracerSessionId);
@@ -270,6 +330,38 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     assert.equal(exportedTracerSession.billable_seconds, 0);
     assert.equal(exportedTracerSession.micro_check_attempts, 2);
     assert.equal(exportedTracerSession.micro_check_passes, 1);
+    assert.equal(exportedTracerSession.provider, 'xai');
+    assert.equal(exportedTracerSession.model, 'grok-voice-integration-v1');
+    assert.equal(exportedTracerSession.prompt_version, 'voice-tutor-error-v2');
+    assert.equal(new Date(exportedTracerSession.voice_activated_at).getTime(), voiceFinishedAt.getTime());
+
+    for (let index = 0; index < 8; index += 1) {
+      const raceUsername = await repository.createTelegramUser(telegramId + index + 1, `Delete race ${suffix} ${index}`);
+      const raceCardId = crypto.randomUUID();
+      const [deleted, created] = await Promise.allSettled([
+        repository.deleteUserData(raceUsername),
+        repository.createRuleCard({
+          id: raceCardId, createdForUsername: raceUsername, status: 'pending_review',
+          skill: { id: `ege.grammar.delete_race.${suffix}.${index}`, title: 'Delete race' }, examYear: 2026,
+          rule: { title: 'Delete race', explanation: 'Concurrent owner deletion must not leave this card.', examples: ['Safe.'] },
+          agreementHash: '1'.repeat(64),
+          sources: [
+            { authority: 'one', url: 'https://one.example/delete-race', retrieved_at: new Date().toISOString(), content_hash: '2'.repeat(64) },
+            { authority: 'two', url: 'https://two.example/delete-race', retrieved_at: new Date().toISOString(), content_hash: '3'.repeat(64) },
+          ],
+          discrepancies: [], createdAt: new Date(),
+        }),
+      ]);
+      assert.equal(deleted.status, 'fulfilled');
+      assert.equal(deleted.value, true);
+      if (created.status === 'rejected') assert.match(String(created.reason?.message), /USER_NOT_FOUND/u);
+      assert.equal(await repository.getUser(raceUsername), null);
+      assert.equal((await client.query('SELECT 1 FROM trusted_rule_cards WHERE id = $1', [raceCardId])).rowCount, 0);
+      assert.equal((await client.query(
+        "SELECT 1 FROM trusted_rule_cards WHERE created_for_username = $1 AND status <> 'approved'",
+        [raceUsername],
+      )).rowCount, 0);
+    }
 
     assert.equal(await repository.deleteUserData(username), true);
     assert.equal(await repository.getUser(username), null);
@@ -283,6 +375,7 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     assert.equal(retainedRuleCard.rows[0].created_for_username, null);
     assert.equal(retainedRuleCard.rows[0].review_audit[0].reviewer, null);
     assert.equal(retainedRuleCard.rows[0].review_audit[0].account_deleted, true);
+    assert.equal((await client.query('SELECT 1 FROM trusted_rule_cards WHERE id = $1', [ruleReportId])).rowCount, 0);
     const retainedAudit = await client.query('SELECT metadata FROM audit_log WHERE target_id = $1', [paymentRequest.id]);
     assert.equal(retainedAudit.rows[0].metadata.username, undefined);
     assert.equal(retainedAudit.rows[0].metadata.account_deleted, true);

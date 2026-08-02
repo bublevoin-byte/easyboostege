@@ -49,6 +49,7 @@ async function withTracerApp(run, { credentialProvider, textTutor, textProcessin
     newNonce: () => nonces.shift(),
     credentialProvider,
     textTutor,
+    realtimePolicy: { unboundCredentialRiskAccepted: true },
     privacyPolicyVersion: 'test-v1',
   }));
   const server = http.createServer(app);
@@ -103,20 +104,20 @@ test('grammar error preserves the server-checked answer only in its source attem
   );
 });
 
-test('xAI realtime adapter uses injected transport and returns only an ephemeral credential', async () => {
+test('xAI realtime adapter requests only an ephemeral credential and returns bounded browser session config', async () => {
   const calls = [];
   const adapter = createXaiRealtimeCredentialAdapter({
     apiKey: 'server-main-secret',
     endpoint: 'https://api.x.ai/v1/realtime/client_secrets',
     model: 'grok-voice-agent-2026-08-01',
-    voice: 'Ara',
-    ttlSeconds: 300,
+    voice: 'ara',
+    ttlSeconds: 60,
     transport: async (request) => {
       calls.push(request);
       return {
         ok: true,
         status: 200,
-        json: async () => ({ client_secret: { value: 'ephemeral-session-only', expires_at: 1_785_662_700 } }),
+        json: async () => ({ value: 'ephemeral-session-only', expires_at: 1_785_662_700 }),
       };
     },
   });
@@ -130,17 +131,18 @@ test('xAI realtime adapter uses injected transport and returns only an ephemeral
 
   const credential = await adapter.createCredential({ sessionId: '04c142b3-3ac2-45f3-b51b-cc9fecfaa844', capsule });
 
-  assert.deepEqual(credential, {
-    credential: 'ephemeral-session-only',
-    expires_at: 1_785_662_700,
-    realtime_url: 'wss://api.x.ai/v1/realtime',
-  });
+  assert.equal(credential.credential, 'ephemeral-session-only');
+  assert.equal(credential.expires_at, 1_785_662_700);
+  assert.equal(credential.realtime_url, 'wss://api.x.ai/v1/realtime?model=grok-voice-agent-2026-08-01');
+  assert.equal(credential.session.voice, 'ara');
+  assert.match(credential.session.instructions, /diagnose → explain → micro_check → transfer_task/u);
+  assert.match(credential.session.instructions, /"learner_answer":"goed"/u);
+  assert.doesNotMatch(credential.session.instructions, /"reference":|"answers":/u);
+  assert.equal(credential.session.tools[0].name, 'advance_pedagogy');
+  assert.deepEqual(credential.session.turn_detection, { type: 'server_vad' });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].headers.Authorization, 'Bearer server-main-secret');
-  assert.equal(calls[0].body.session.model, 'grok-voice-agent-2026-08-01');
-  assert.equal(calls[0].body.session.voice, 'Ara');
-  assert.match(calls[0].body.session.instructions, /diagnose → explain → micro_check → transfer_task/u);
-  assert.match(calls[0].body.session.instructions, /"learner_answer":"goed"/u);
+  assert.deepEqual(calls[0].body, { expires_after: { seconds: 60 } });
   assert.equal(JSON.stringify(credential).includes('server-main-secret'), false);
 });
 
@@ -148,7 +150,7 @@ test('xAI realtime adapter rejects an oversized provider envelope before exposin
   const adapter = createXaiRealtimeCredentialAdapter({
     apiKey: 'server-main-secret',
     model: 'grok-voice-agent-2026-08-01',
-    voice: 'Ara',
+    voice: 'ara',
     transport: async () => ({
       ok: true,
       headers: { get: () => String(20_000) },
@@ -167,6 +169,22 @@ test('xAI realtime adapter rejects an oversized provider envelope before exposin
     adapter.createCredential({ sessionId: '04c142b3-3ac2-45f3-b51b-cc9fecfaa844', capsule }),
     (error) => error.code === 'VOICE_TUTOR_PROVIDER_CONTRACT_INVALID',
   );
+});
+
+test('xAI realtime adapter refuses credentials longer than the 60-second connection window', async () => {
+  let transportCalls = 0;
+  const adapter = createXaiRealtimeCredentialAdapter({
+    apiKey: 'server-main-secret',
+    model: 'grok-voice-agent-2026-08-01',
+    voice: 'ara',
+    ttlSeconds: 300,
+    transport: async () => { transportCalls += 1; },
+  });
+  await assert.rejects(
+    adapter.createCredential({ capsule: {} }),
+    (error) => error.code === 'VOICE_TUTOR_PROVIDER_NOT_CONFIGURED',
+  );
+  assert.equal(transportCalls, 0);
 });
 
 test('text fallback uses the registered provider operation, budget, rate count and versioned log', async () => {
@@ -197,7 +215,7 @@ test('text fallback uses the registered provider operation, budget, rate count a
   assert.equal(calls[0].operation, 'voice_tutor_text');
   assert.match(calls[0].system, /diagnose/u);
   assert.equal(logs[0].operation, 'voice_tutor_text');
-  assert.equal(logs[0].promptVersion, 'voice-tutor-error-v2');
+  assert.equal(logs[0].promptVersion, 'voice-tutor-error-v3');
   assert.equal(logs[0].status, 'completed');
   assert.match(textTurnRequest(capsule, 'fallback'), /заверши разбор/u);
   assert.doesNotMatch(textTurnRequest(capsule, 'fallback'), /диагност/u);

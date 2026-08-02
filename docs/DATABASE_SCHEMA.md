@@ -67,8 +67,9 @@ server-owned attempt id. В `voice_tutor_sessions`, её capsule и экспор
 Миграция `023_trusted_rule_cards.sql` вводит переходы `pending_review → approved|rejected`.
 Решение рецензента идемпотентно и записывается в bounded `review_audit`; сменить уже принятое
 решение через API нельзя. Canonical lookup фильтрует `status = 'approved'`. Карточка, созданная для
-текущего разбора, входит в экспорт ученика; при удалении аккаунта creator очищается, а совпавший
-reviewer в сохранённом административном аудите обезличивается. Source records содержат только URL,
+текущего разбора, входит в экспорт ученика; pending/rejected report удаляется вместе с аккаунтом,
+а approved canonical сохраняется без creator identity. Совпавший reviewer обезличивается только в
+оставшихся карточках. Source records содержат только URL,
 retrieval time и SHA-256 страницы, но не HTML/текст страницы.
 
 Миграция `024_voice_tutor_recovery_map.sql` добавляет в Voice Tutor session bounded-счётчики
@@ -83,6 +84,13 @@ retrieval time и SHA-256 страницы, но не HTML/текст стран
 Server-owned mapping ограничивает потенциал одного episode: grammar/vocabulary/reading/listening —
 до 1 учебного балла, writing/speaking — до 2 и не выше сохранённой потери критерия. Сумма в UI —
 приоритет обучения Easy Boost, а не прогноз или официальный пересчёт первичных/тестовых баллов ЕГЭ.
+
+Миграция `025_voice_tutor_hardening.sql` добавляет bounded `provider`, `model` и
+`prompt_version` к `voice_tutor_sessions`. Они входят в account export как техническое
+происхождение структурированного результата, но ephemeral credential и nonce hash не входят.
+Та же миграция страхует связь rule card creator через `ON DELETE SET NULL`; repository до удаления
+аккаунта удаляет pending/rejected reports и отсоединяет approved canonical. Reviewer audit в
+оставшихся карточках становится обезличенным фактом решения.
 
 Для reading/listening capsule сохраняет только server-owned фрагмент текущего пункта до 600
 символов (`source_excerpt` или `transcript_segment`), но не полный текст/транскрипт и не ответы

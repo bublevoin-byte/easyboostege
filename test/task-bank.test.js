@@ -90,7 +90,7 @@ async function startStack({ replies = [], students = ['anna', 'boris'] } = {}) {
     users[name] = {
       created: Date.now(),
       sub_until: Date.now() + 3_600_000,
-      privacy_consent: { text_processing: true, voice_processing: true, policy_version: '2026-08-02', updated_at: new Date().toISOString() },
+      privacy_consent: { text_processing: true, voice_processing: true, policy_version: '2026-08-02-voice-v1', updated_at: new Date().toISOString() },
     };
   }
   await fs.writeFile(dataFile, JSON.stringify({ users }));

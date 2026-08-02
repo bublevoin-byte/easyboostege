@@ -236,7 +236,7 @@ async function run() {
         perfuser: {
           created: Date.now(),
           sub_until: Date.now() + 86_400_000,
-          privacy_consent: { text_processing: true, voice_processing: true, policy_version: '2026-07-20', updated_at: Date.now() },
+          privacy_consent: { text_processing: true, voice_processing: true, policy_version: '2026-08-02-voice-v1', updated_at: Date.now() },
         },
       },
     }), 'utf8');

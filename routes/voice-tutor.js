@@ -34,6 +34,13 @@ const PUBLIC_ERRORS = Object.freeze({
   VOICE_TUTOR_CRITERION_NOT_FOUND: { status: 422, message: 'Выбранный критерий не содержит потери баллов в этом разборе.' },
   VOICE_TUTOR_NONCE_REPLAYED: { status: 409, message: 'Команда этой сессии уже использована.' },
   VOICE_TUTOR_TRANSITION_INVALID: { status: 409, message: 'Этот шаг разбора сейчас недоступен.' },
+  VOICE_TUTOR_DISABLED: { status: 503, message: 'Голосовой режим временно отключён. Продолжите разбор текстом.' },
+  VOICE_TUTOR_COST_KILL_SWITCH: { status: 503, message: 'Новые голосовые подключения временно остановлены. Продолжите разбор текстом.' },
+  VOICE_TUTOR_ZDR_NOT_CONFIRMED: { status: 503, message: 'Безопасный режим хранения провайдера не подтверждён. Голос не передан.' },
+  VOICE_TUTOR_UNBOUND_CREDENTIAL_RISK_NOT_ACCEPTED: { status: 503, message: 'Прямое голосовое подключение ожидает подтверждения владельца. Продолжите разбор текстом.' },
+  VOICE_TUTOR_PROVIDER_NOT_CONFIGURED: { status: 503, message: 'Голосовой режим пока не настроен. Продолжите разбор текстом.' },
+  VOICE_TUTOR_PROVIDER_CONTRACT_INVALID: { status: 503, message: 'Голосовой провайдер вернул неподдерживаемый ответ. Продолжите текстом.' },
+  VOICE_TUTOR_PROVIDER_UNAVAILABLE: { status: 503, message: 'Голосовой провайдер временно недоступен. Продолжите текстом.' },
   PRIVACY_CONSENT_REQUIRED: { status: 403, message: 'Подтвердите обработку голоса в настройках приватности.' },
   TRUSTED_RULE_DISCOVERY_UNAVAILABLE: { status: 503, message: 'Поиск доверенного правила временно недоступен.' },
   TRUSTED_RULE_REQUEST_INVALID: { status: 400, message: 'Некорректный запрос правила.' },
@@ -62,6 +69,34 @@ function sendVoiceTutorError(error, res, next) {
   const known = PUBLIC_ERRORS[error?.code];
   if (!known) return next(error);
   return res.status(known.status).json({ error: { code: error.code, message: known.message } });
+}
+
+const SAFE_REALTIME_ERROR_CODES = new Set([
+  'VOICE_TUTOR_DISABLED',
+  'VOICE_TUTOR_COST_KILL_SWITCH',
+  'VOICE_TUTOR_ZDR_NOT_CONFIRMED',
+  'VOICE_TUTOR_UNBOUND_CREDENTIAL_RISK_NOT_ACCEPTED',
+  'VOICE_TUTOR_PROVIDER_NOT_CONFIGURED',
+  'VOICE_TUTOR_PROVIDER_CONTRACT_INVALID',
+  'VOICE_TUTOR_PROVIDER_UNAVAILABLE',
+]);
+
+function safeRealtimeErrorCode(value) {
+  const code = String(value || '');
+  return SAFE_REALTIME_ERROR_CODES.has(code) ? code : 'VOICE_TUTOR_PROVIDER_UNAVAILABLE';
+}
+
+function realtimePolicyBlock(policy = {}) {
+  if (policy.enabled === false) return 'VOICE_TUTOR_DISABLED';
+  if (policy.costKillSwitch === true) return 'VOICE_TUTOR_COST_KILL_SWITCH';
+  if (policy.requireZdr === true && policy.zdrAttested !== true) return 'VOICE_TUTOR_ZDR_NOT_CONFIRMED';
+  if (policy.unboundCredentialRiskAccepted !== true) return 'VOICE_TUTOR_UNBOUND_CREDENTIAL_RISK_NOT_ACCEPTED';
+  return null;
+}
+
+function publicVoiceUnavailable(code) {
+  const safeCode = safeRealtimeErrorCode(code);
+  return { code: safeCode, message: PUBLIC_ERRORS[safeCode].message };
 }
 
 function nonceHash(value) {
@@ -248,9 +283,34 @@ export function createVoiceTutorRoutes({
   textTutor = null,
   trustedRuleDiscovery = null,
   privacyPolicyVersion = '',
+  realtimePolicy = null,
 }) {
   const router = express.Router();
   const { auth } = authentication;
+
+  async function deliverWithoutRealtime({ username, result, capsule, nonce, code }) {
+    const safeCode = safeRealtimeErrorCode(code);
+    const released = await db.finishVoiceTutorSession(username, result.session.id, {
+      limits, now: now(), confirmedBillableSeconds: 0, preservePedagogicalState: true,
+    });
+    if (textTutor && await hasCurrentTextConsent(db, username, privacyPolicyVersion)) {
+      try {
+        const textTurn = await textTutor.createTurn({ capsule, state: result.session.state, username });
+        const delivered = await db.setVoiceTutorSessionDelivery(username, result.session.id, {
+          mode: 'text', errorCode: safeCode,
+        });
+        return tracerResponse({ ...released, created: true, session: delivered.session }, capsule, {
+          mode: 'text', nonce, text_turn: textTurn, voice_unavailable: publicVoiceUnavailable(safeCode),
+        });
+      } catch {}
+    }
+    const delivered = await db.setVoiceTutorSessionDelivery(username, result.session.id, {
+      mode: 'local', errorCode: safeCode,
+    });
+    return tracerResponse({ ...released, created: true, session: delivered.session }, capsule, {
+      mode: 'local', nonce, local_rule: capsule.rule, voice_unavailable: publicVoiceUnavailable(safeCode),
+    });
+  }
 
   router.get('/api/v1/voice-tutor/recovery-map', auth, async (req, res, next) => {
     try {
@@ -457,27 +517,43 @@ export function createVoiceTutorRoutes({
             mode: 'local', nonce, local_rule: capsule.rule, discovery_required: true,
           }));
         }
-        if (!credentialProvider) {
-          const released = await db.finishVoiceTutorSession(req.user, result.session.id, { limits, now: now(), confirmedBillableSeconds: 0, preservePedagogicalState: true });
-          const delivered = await db.setVoiceTutorSessionDelivery(req.user, result.session.id, { mode: 'local', errorCode: 'VOICE_TUTOR_PROVIDER_NOT_CONFIGURED' });
-          return res.status(201).json(tracerResponse({ ...released, created: true, session: delivered.session }, capsule, { mode: 'local', nonce, local_rule: capsule.rule }));
+        const policyBlock = realtimePolicyBlock(realtimePolicy || {});
+        if (policyBlock || !credentialProvider) {
+          return res.status(201).json(await deliverWithoutRealtime({
+            username: req.user,
+            result,
+            capsule,
+            nonce,
+            code: policyBlock || 'VOICE_TUTOR_PROVIDER_NOT_CONFIGURED',
+          }));
         }
         try {
-          const realtime = await credentialProvider.createCredential({ sessionId: result.session.id, capsule });
-          return res.status(201).json(tracerResponse(result, capsule, { mode: 'voice', nonce, realtime }));
+          const issued = await credentialProvider.createCredential({ sessionId: result.session.id, capsule });
+          const realtime = {
+            credential: issued.credential,
+            expires_at: issued.expires_at,
+            realtime_url: issued.realtime_url,
+            session: issued.session,
+          };
+          const delivered = await db.setVoiceTutorSessionDelivery(req.user, result.session.id, {
+            mode: 'voice',
+            provider: issued.provider || credentialProvider.provider,
+            model: issued.model || credentialProvider.model,
+            promptVersion: issued.prompt_version || credentialProvider.promptVersion,
+          });
+          return res.status(201).json(tracerResponse({ ...result, session: delivered.session }, capsule, { mode: 'voice', nonce, realtime }));
         } catch (providerError) {
-          const released = await db.finishVoiceTutorSession(req.user, result.session.id, { limits, now: now(), confirmedBillableSeconds: 0, preservePedagogicalState: true });
-          if (textTutor && await hasCurrentTextConsent(db, req.user, privacyPolicyVersion)) {
-            try {
-              const textTurn = await textTutor.createTurn({ capsule, state: result.session.state, username: req.user });
-              const delivered = await db.setVoiceTutorSessionDelivery(req.user, result.session.id, { mode: 'text', errorCode: providerError?.code || 'VOICE_TUTOR_PROVIDER_UNAVAILABLE' });
-              return res.status(201).json(tracerResponse({ ...released, created: true, session: delivered.session }, capsule, { mode: 'text', nonce, text_turn: textTurn }));
-            } catch {}
-          }
-          const delivered = await db.setVoiceTutorSessionDelivery(req.user, result.session.id, { mode: 'local', errorCode: providerError?.code || 'VOICE_TUTOR_PROVIDER_UNAVAILABLE' });
-          return res.status(201).json(tracerResponse({ ...released, created: true, session: delivered.session }, capsule, { mode: 'local', nonce, local_rule: capsule.rule }));
+          return res.status(201).json(await deliverWithoutRealtime({
+            username: req.user,
+            result,
+            capsule,
+            nonce,
+            code: safeRealtimeErrorCode(providerError?.code),
+          }));
         }
       }
+      const policyBlock = realtimePolicyBlock(realtimePolicy || {});
+      if (policyBlock) return sendVoiceTutorError({ code: policyBlock }, res, next);
       const result = await db.reserveVoiceTutorSession(req.user, {
         id: newSessionId(),
         idempotencyKey,
@@ -538,13 +614,42 @@ export function createVoiceTutorRoutes({
     }
   });
 
+  router.post('/api/v1/voice-tutor/sessions/:sessionId/activate', auth, async (req, res, next) => {
+    if (!SESSION_ID.test(req.params.sessionId)) {
+      return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректный идентификатор голосового разбора.' } });
+    }
+    const keys = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? Object.keys(req.body) : [];
+    if (keys.length !== 1 || keys[0] !== 'nonce' || !NONCE.test(String(req.body?.nonce || ''))) {
+      return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Передайте одноразовый nonce голосового разбора.' } });
+    }
+    try {
+      const activated = await db.activateVoiceTutorSession(req.user, req.params.sessionId, {
+        nonceHash: nonceHash(String(req.body.nonce)),
+        now: now(),
+      });
+      return res.json({ session: activated.session });
+    } catch (error) {
+      return sendVoiceTutorError(error, res, next);
+    }
+  });
+
   router.post('/api/v1/voice-tutor/sessions/:sessionId/fallback', auth, async (req, res, next) => {
     if (!SESSION_ID.test(req.params.sessionId)) {
       return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректный идентификатор голосового разбора.' } });
     }
-    if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body) || Object.keys(req.body).length !== 1 || !NONCE.test(String(req.body.nonce || ''))) {
+    const fallbackReasons = new Set(['microphone_unavailable', 'provider_unavailable', 'session_timeout']);
+    const keys = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? Object.keys(req.body) : [];
+    const reason = req.body?.reason == null ? 'microphone_unavailable' : String(req.body.reason);
+    if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)
+      || keys.some((key) => !['nonce', 'reason'].includes(key)) || keys.length < 1 || keys.length > 2
+      || !NONCE.test(String(req.body.nonce || '')) || !fallbackReasons.has(reason)) {
       return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Передайте одноразовый nonce голосового разбора.' } });
     }
+    const fallbackErrorCodes = {
+      microphone_unavailable: 'VOICE_TUTOR_MICROPHONE_UNAVAILABLE',
+      provider_unavailable: 'VOICE_TUTOR_PROVIDER_UNAVAILABLE',
+      session_timeout: 'VOICE_TUTOR_SESSION_LIMIT_REACHED',
+    };
     const nonce = newNonce();
     try {
       const switched = await db.switchVoiceTutorSessionDelivery(req.user, req.params.sessionId, {
@@ -553,7 +658,7 @@ export function createVoiceTutorRoutes({
         mode: 'text',
         limits,
         now: now(),
-        errorCode: 'VOICE_TUTOR_MICROPHONE_UNAVAILABLE',
+        errorCode: fallbackErrorCodes[reason],
       });
       const capsule = await rebuildSourceCapsule(db, req.user, switched.capsule, now());
       if (textTutor && await hasCurrentTextConsent(db, req.user, privacyPolicyVersion)) {
@@ -562,7 +667,10 @@ export function createVoiceTutorRoutes({
           return res.json(tracerResponse({ ...switched, created: false }, capsule, { mode: 'text', nonce, text_turn: textTurn }));
         } catch {}
       }
-      await db.setVoiceTutorSessionDelivery(req.user, req.params.sessionId, { mode: 'local', errorCode: 'VOICE_TUTOR_TEXT_UNAVAILABLE' });
+      await db.setVoiceTutorSessionDelivery(req.user, req.params.sessionId, {
+        mode: 'local',
+        errorCode: reason === 'provider_unavailable' ? fallbackErrorCodes[reason] : 'VOICE_TUTOR_TEXT_UNAVAILABLE',
+      });
       return res.json(tracerResponse({ ...switched, created: false }, capsule, { mode: 'local', nonce, local_rule: capsule.rule }));
     } catch (error) {
       return sendVoiceTutorError(error, res, next);

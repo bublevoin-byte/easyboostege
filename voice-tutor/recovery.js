@@ -415,7 +415,17 @@ export function recoveryMap({ ledger, access, monthlyUsedSeconds = 0, now }) {
   };
 }
 
-export function recoveryMetrics({ ledger, now, billableSeconds = 0, sessionCount = 0, microCheckPasses = 0, microCheckAttempts = 0 }) {
+export function recoveryMetrics({
+  ledger,
+  now,
+  billableSeconds = 0,
+  sessionCount = 0,
+  microCheckPasses = 0,
+  microCheckAttempts = 0,
+  delivery = {},
+  providerErrors = 0,
+  costMicrousdPerMinute = 0,
+}) {
   const views = ledger.recoveries.map((recovery) => recoveryView(recovery, ledger, now));
   const rate = recoveryRate(views);
   const passMetric = (passed, observed) => ({ passed, observed, rate: observed ? passed / observed : 0 });
@@ -425,6 +435,16 @@ export function recoveryMetrics({ ledger, now, billableSeconds = 0, sessionCount
       .filter((repeat) => repeat.stage === stage && repeat.attempt);
     return passMetric(stageAttempts.filter((repeat) => repeat.attempt.passed).length, stageAttempts.length);
   };
+  const deliveryCounts = {
+    voice: Math.max(0, Number(delivery.voice) || 0),
+    text: Math.max(0, Number(delivery.text) || 0),
+    local: Math.max(0, Number(delivery.local) || 0),
+  };
+  const fallbackCount = deliveryCounts.text + deliveryCounts.local;
+  const deliveredSessionCount = deliveryCounts.voice + fallbackCount;
+  const safeSessionCount = Math.max(0, Number(sessionCount) || 0);
+  const safeBillableSeconds = Math.max(0, Number(billableSeconds) || 0);
+  const safeRate = Math.max(0, Number(costMicrousdPerMinute) || 0);
   return {
     open: views.filter((view) => view.state === 'open').length,
     recovered: views.filter((view) => view.state === 'recovered').length,
@@ -437,8 +457,12 @@ export function recoveryMetrics({ ledger, now, billableSeconds = 0, sessionCount
     micro_check: passMetric(Math.max(0, Number(microCheckPasses) || 0), Math.max(0, Number(microCheckAttempts) || 0)),
     initial_transfer: passMetric(initialTransferPassed, ledger.recoveries.length),
     repeat_passes: { day_1: repeatPassMetric('day_1'), day_7: repeatPassMetric('day_7') },
-    sessions: Math.max(0, Number(sessionCount) || 0),
-    voice_minutes: Math.round((Math.max(0, Number(billableSeconds) || 0) / 60) * 100) / 100,
+    sessions: safeSessionCount,
+    voice_minutes: Math.round((safeBillableSeconds / 60) * 100) / 100,
+    delivery: deliveryCounts,
+    fallback_rate: deliveredSessionCount ? fallbackCount / deliveredSessionCount : 0,
+    provider_errors: Math.max(0, Number(providerErrors) || 0),
+    estimated_cost_microusd: Math.round((safeBillableSeconds / 60) * safeRate),
   };
 }
 

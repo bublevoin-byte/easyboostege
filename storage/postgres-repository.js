@@ -1,5 +1,5 @@
 import pg from 'pg';
-import { ensureVoiceTutorReservationAllowed, hashAuthCode, normalizeUsername, subscriptionView, VoiceTutorError, voiceTutorAccessView, voiceTutorBillableSeconds, voiceTutorQuotaPeriods } from './shared.js';
+import { ensureVoiceTutorReservationAllowed, hashAuthCode, normalizeUsername, normalizeVoiceTutorDeliveryMetadata, subscriptionView, VoiceTutorError, voiceTutorAccessView, voiceTutorBillableSeconds, voiceTutorQuotaPeriods } from './shared.js';
 import { transitionPedagogicalState } from '../voice-tutor/state-machine.js';
 import { transitionRuleCardReview } from '../voice-tutor/rule-card.js';
 import { createRecoveryLedger, planRecoveryFromTransfer, planRepeatAttempt, publicRepeatAttempt, recoveryMap, recoveryMetrics } from '../voice-tutor/recovery.js';
@@ -330,7 +330,13 @@ export function createPostgresRepository(connectionString) {
       const user = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
       if (!user.rowCount) throw new Error('USER_NOT_FOUND');
       await client.query(
-        `UPDATE voice_tutor_sessions SET status = 'expired', billable_seconds = reserved_seconds, ended_at = expires_at,
+        `UPDATE voice_tutor_sessions SET status = 'expired',
+           billable_seconds = CASE
+             WHEN capsule_id IS NOT NULL AND voice_activated_at IS NULL THEN 0
+             WHEN capsule_id IS NOT NULL THEN LEAST(reserved_seconds, GREATEST(0, CEIL(EXTRACT(EPOCH FROM (expires_at - voice_activated_at)))::int))
+             ELSE reserved_seconds
+           END,
+           ended_at = expires_at,
            pedagogical_state = CASE WHEN capsule_id IS NOT NULL AND pedagogical_state NOT IN ('resolved', 'fallback', 'ended') THEN 'ended' ELSE pedagogical_state END,
            outcome = CASE WHEN capsule_id IS NOT NULL AND pedagogical_state NOT IN ('resolved', 'fallback', 'ended') THEN 'ended' ELSE outcome END,
            nonce_hash = CASE WHEN capsule_id IS NOT NULL THEN NULL ELSE nonce_hash END
@@ -338,7 +344,7 @@ export function createPostgresRepository(connectionString) {
         [username, instant],
       );
       const existing = await client.query(
-        `SELECT id, status, pedagogical_state, micro_check_passed, transfer_passed, outcome, started_at, expires_at, ended_at FROM voice_tutor_sessions
+        `SELECT id, status, pedagogical_state, micro_check_passed, transfer_passed, outcome, started_at, voice_activated_at, expires_at, ended_at FROM voice_tutor_sessions
          WHERE username = $1 AND idempotency_key = $2`,
         [username, idempotencyKey],
       );
@@ -355,7 +361,7 @@ export function createPostgresRepository(connectionString) {
          (id, username, idempotency_key, status, reserved_seconds, started_at, expires_at,
           capsule_id, capsule, nonce_hash, delivery_mode, pedagogical_state, micro_check_passed, transfer_passed, outcome)
          VALUES ($1, $2, $3, 'active', $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, $13, $14)
-         RETURNING id, status, pedagogical_state, micro_check_passed, transfer_passed, outcome, started_at, expires_at, ended_at`,
+         RETURNING id, status, pedagogical_state, micro_check_passed, transfer_passed, outcome, started_at, voice_activated_at, expires_at, ended_at`,
         [id, username, idempotencyKey, reservedSeconds, instant, new Date(instant.getTime() + reservedSeconds * 1000),
           context?.capsule?.id || null, context?.capsule ? JSON.stringify(context.capsule) : null, context?.nonceHash || null,
           context ? 'voice' : null, context ? 'diagnose' : null, null, null, null],
@@ -379,7 +385,13 @@ export function createPostgresRepository(connectionString) {
       const user = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
       if (!user.rowCount) throw new Error('USER_NOT_FOUND');
       await client.query(
-        `UPDATE voice_tutor_sessions SET status = 'expired', billable_seconds = reserved_seconds, ended_at = expires_at,
+        `UPDATE voice_tutor_sessions SET status = 'expired',
+           billable_seconds = CASE
+             WHEN capsule_id IS NOT NULL AND voice_activated_at IS NULL THEN 0
+             WHEN capsule_id IS NOT NULL THEN LEAST(reserved_seconds, GREATEST(0, CEIL(EXTRACT(EPOCH FROM (expires_at - voice_activated_at)))::int))
+             ELSE reserved_seconds
+           END,
+           ended_at = expires_at,
            pedagogical_state = CASE WHEN capsule_id IS NOT NULL AND pedagogical_state NOT IN ('resolved', 'fallback', 'ended') THEN 'ended' ELSE pedagogical_state END,
            outcome = CASE WHEN capsule_id IS NOT NULL AND pedagogical_state NOT IN ('resolved', 'fallback', 'ended') THEN 'ended' ELSE outcome END,
            nonce_hash = CASE WHEN capsule_id IS NOT NULL THEN NULL ELSE nonce_hash END
@@ -387,7 +399,7 @@ export function createPostgresRepository(connectionString) {
         [username, instant],
       );
       const selected = await client.query(
-        `SELECT id, status, reserved_seconds, capsule_id, nonce_hash, pedagogical_state, micro_check_passed, transfer_passed, outcome, started_at, expires_at, ended_at FROM voice_tutor_sessions
+        `SELECT id, status, reserved_seconds, capsule_id, nonce_hash, pedagogical_state, micro_check_passed, transfer_passed, outcome, started_at, voice_activated_at, expires_at, ended_at FROM voice_tutor_sessions
          WHERE username = $1 AND id = $2 FOR UPDATE`,
         [username, sessionId],
       );
@@ -408,7 +420,7 @@ export function createPostgresRepository(connectionString) {
                nonce_hash = CASE WHEN capsule_id IS NOT NULL AND NOT $5 THEN NULL ELSE nonce_hash END,
                updated_at = CASE WHEN capsule_id IS NOT NULL THEN $3 ELSE updated_at END
            WHERE username = $1 AND id = $2
-           RETURNING id, status, pedagogical_state, micro_check_passed, transfer_passed, outcome, started_at, expires_at, ended_at`,
+           RETURNING id, status, pedagogical_state, micro_check_passed, transfer_passed, outcome, started_at, voice_activated_at, expires_at, ended_at`,
           [username, sessionId, instant, billableSeconds, preservePedagogicalState],
         );
         row = updated.rows[0];
@@ -428,12 +440,48 @@ export function createPostgresRepository(connectionString) {
     const result = await pool.query(
       `SELECT id, username, status, reserved_seconds, billable_seconds, capsule_id, capsule, nonce_hash,
               delivery_mode, pedagogical_state, micro_check_passed, micro_check_attempts, micro_check_passes,
-              transfer_passed, outcome, error_code,
-              started_at, expires_at, ended_at
+              transfer_passed, outcome, error_code, provider, model, prompt_version,
+              started_at, voice_activated_at, expires_at, ended_at
        FROM voice_tutor_sessions WHERE username = $1 AND id = $2`,
       [username, sessionId],
     );
     return result.rows[0] || null;
+  }
+
+  async function activateVoiceTutorSession(username, sessionId, { nonceHash, now = new Date() }) {
+    const client = await pool.connect();
+    const instant = new Date(now);
+    try {
+      await client.query('BEGIN');
+      const selected = await client.query(
+        `SELECT capsule, nonce_hash, delivery_mode, status, started_at, expires_at, voice_activated_at
+         FROM voice_tutor_sessions WHERE username = $1 AND id = $2 FOR UPDATE`,
+        [username, sessionId],
+      );
+      const row = selected.rows[0];
+      if (!row?.capsule || row.delivery_mode !== 'voice' || row.status !== 'active') {
+        throw new VoiceTutorError('VOICE_TUTOR_SESSION_NOT_FOUND');
+      }
+      if (!row.nonce_hash || row.nonce_hash !== nonceHash) throw new VoiceTutorError('VOICE_TUTOR_NONCE_REPLAYED');
+      if (instant.getTime() < new Date(row.started_at).getTime()
+        || new Date(row.expires_at).getTime() <= instant.getTime()) throw new VoiceTutorError('VOICE_TUTOR_SESSION_EXPIRED');
+      const updated = await client.query(
+        `UPDATE voice_tutor_sessions
+         SET voice_activated_at = COALESCE(voice_activated_at, $3),
+             updated_at = CASE WHEN voice_activated_at IS NULL THEN $3 ELSE updated_at END
+         WHERE username = $1 AND id = $2
+         RETURNING id, status, pedagogical_state, micro_check_passed, transfer_passed, outcome,
+                   started_at, voice_activated_at, expires_at, ended_at`,
+        [username, sessionId, instant],
+      );
+      await client.query('COMMIT');
+      return { session: mapVoiceTutorSession(updated.rows[0]), capsule: row.capsule };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async function advanceVoiceTutorSession(username, sessionId, { nonceHash, nextNonceHash, event, now = new Date() }) {
@@ -598,12 +646,16 @@ export function createPostgresRepository(connectionString) {
     return recoveryMap({ ledger: createRecoveryLedger(rows), access, monthlyUsedSeconds: usage.monthlyUsedSeconds, now });
   }
 
-  async function getVoiceTutorRecoveryMetrics(now = new Date()) {
+  async function getVoiceTutorRecoveryMetrics(now = new Date(), { costMicrousdPerMinute = 0 } = {}) {
     const usage = await pool.query(
       `SELECT COUNT(*)::int AS sessions,
-              COALESCE(SUM(billable_seconds), 0)::bigint AS billable_seconds,
+              COALESCE(SUM(billable_seconds) FILTER (WHERE delivery_mode = 'voice' OR provider IS NOT NULL), 0)::bigint AS billable_seconds,
               COALESCE(SUM(micro_check_passes), 0)::bigint AS micro_check_passes,
-              COALESCE(SUM(micro_check_attempts), 0)::bigint AS micro_check_attempts
+              COALESCE(SUM(micro_check_attempts), 0)::bigint AS micro_check_attempts,
+              COUNT(*) FILTER (WHERE delivery_mode = 'voice')::int AS delivery_voice,
+              COUNT(*) FILTER (WHERE delivery_mode = 'text')::int AS delivery_text,
+              COUNT(*) FILTER (WHERE delivery_mode = 'local')::int AS delivery_local,
+              COUNT(*) FILTER (WHERE error_code IN ('VOICE_TUTOR_PROVIDER_UNAVAILABLE', 'VOICE_TUTOR_PROVIDER_CONTRACT_INVALID'))::int AS provider_errors
        FROM voice_tutor_sessions`,
     );
     return recoveryMetrics({
@@ -613,16 +665,31 @@ export function createPostgresRepository(connectionString) {
       billableSeconds: Number(usage.rows[0].billable_seconds),
       microCheckPasses: Number(usage.rows[0].micro_check_passes),
       microCheckAttempts: Number(usage.rows[0].micro_check_attempts),
+      delivery: {
+        voice: Number(usage.rows[0].delivery_voice),
+        text: Number(usage.rows[0].delivery_text),
+        local: Number(usage.rows[0].delivery_local),
+      },
+      providerErrors: Number(usage.rows[0].provider_errors),
+      costMicrousdPerMinute,
     });
   }
 
-  async function setVoiceTutorSessionDelivery(username, sessionId, { mode, errorCode = null }) {
+  async function setVoiceTutorSessionDelivery(username, sessionId, {
+    mode, errorCode = null, provider, model, promptVersion,
+  }) {
     if (!['voice', 'text', 'local'].includes(mode)) throw new VoiceTutorError('VOICE_TUTOR_DELIVERY_INVALID');
+    const metadataProvided = provider !== undefined || model !== undefined || promptVersion !== undefined;
+    const metadata = metadataProvided ? normalizeVoiceTutorDeliveryMetadata({ provider, model, promptVersion }) : null;
     const result = await pool.query(
-      `UPDATE voice_tutor_sessions SET delivery_mode = $3, error_code = $4, updated_at = NOW()
+      `UPDATE voice_tutor_sessions SET delivery_mode = $3, error_code = $4,
+         provider = CASE WHEN $8 THEN $5 ELSE provider END,
+         model = CASE WHEN $8 THEN $6 ELSE model END,
+         prompt_version = CASE WHEN $8 THEN $7 ELSE prompt_version END,
+         updated_at = NOW()
        WHERE username = $1 AND id = $2 AND capsule IS NOT NULL
        RETURNING id, status, pedagogical_state, micro_check_passed, transfer_passed, outcome, started_at, expires_at, ended_at, capsule`,
-      [username, sessionId, mode, errorCode],
+      [username, sessionId, mode, errorCode, metadata?.provider ?? null, metadata?.model ?? null, metadata?.prompt_version ?? null, metadataProvided],
     );
     if (!result.rowCount) throw new VoiceTutorError('VOICE_TUTOR_SESSION_NOT_FOUND');
     return { session: mapVoiceTutorSession(result.rows[0]), capsule: result.rows[0].capsule };
@@ -635,20 +702,22 @@ export function createPostgresRepository(connectionString) {
     try {
       await client.query('BEGIN');
       const selected = await client.query(
-        `SELECT capsule, nonce_hash FROM voice_tutor_sessions WHERE username = $1 AND id = $2 FOR UPDATE`,
+        `SELECT status, reserved_seconds, started_at, voice_activated_at, expires_at, capsule_id, capsule, nonce_hash
+         FROM voice_tutor_sessions WHERE username = $1 AND id = $2 FOR UPDATE`,
         [username, sessionId],
       );
       const row = selected.rows[0];
       if (!row?.capsule) throw new VoiceTutorError('VOICE_TUTOR_SESSION_NOT_FOUND');
       if (!row.nonce_hash || row.nonce_hash !== nonceHash) throw new VoiceTutorError('VOICE_TUTOR_NONCE_REPLAYED');
+      const billableSeconds = row.status === 'active' ? voiceTutorBillableSeconds(row, instant) : null;
       const updated = await client.query(
         `UPDATE voice_tutor_sessions SET delivery_mode = $3, error_code = $4, nonce_hash = $5,
            status = CASE WHEN status = 'active' THEN 'completed' ELSE status END,
-           billable_seconds = CASE WHEN status = 'active' THEN 0 ELSE billable_seconds END,
+           billable_seconds = CASE WHEN status = 'active' THEN $7 ELSE billable_seconds END,
            ended_at = CASE WHEN status = 'active' THEN $6 ELSE ended_at END, updated_at = $6
          WHERE username = $1 AND id = $2
          RETURNING id, status, pedagogical_state, micro_check_passed, transfer_passed, outcome, started_at, expires_at, ended_at`,
-        [username, sessionId, mode, errorCode, nextNonceHash, instant],
+        [username, sessionId, mode, errorCode, nextNonceHash, instant, billableSeconds],
       );
       const access = await readVoiceTutorAccess(client, username, limits, instant);
       await client.query('COMMIT');
@@ -672,17 +741,34 @@ export function createPostgresRepository(connectionString) {
   }
 
   async function createRuleCard(card) {
-    const result = await pool.query(
-      `INSERT INTO trusted_rule_cards
-       (id, created_for_username, status, skill_id, skill_title, exam_year, rule_content,
-        agreement_hash, sources, discrepancies, created_at)
-       VALUES ($1, $2, 'pending_review', $3, $4, $5, $6::jsonb, $7, $8::jsonb, $9::jsonb, $10)
-       RETURNING *`,
-      [card.id, card.createdForUsername || null, card.skill.id, card.skill.title, card.examYear,
-        JSON.stringify(card.rule), card.agreementHash, JSON.stringify(card.sources),
-        JSON.stringify(card.discrepancies || []), card.createdAt],
-    );
-    return mapRuleCard(result.rows[0]);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      if (card.createdForUsername) {
+        const owner = await client.query(
+          'SELECT username FROM users WHERE username = $1 FOR KEY SHARE',
+          [card.createdForUsername],
+        );
+        if (!owner.rowCount) throw new Error('USER_NOT_FOUND');
+      }
+      const result = await client.query(
+        `INSERT INTO trusted_rule_cards
+         (id, created_for_username, status, skill_id, skill_title, exam_year, rule_content,
+          agreement_hash, sources, discrepancies, created_at)
+         VALUES ($1, $2, 'pending_review', $3, $4, $5, $6::jsonb, $7, $8::jsonb, $9::jsonb, $10)
+         RETURNING *`,
+        [card.id, card.createdForUsername || null, card.skill.id, card.skill.title, card.examYear,
+          JSON.stringify(card.rule), card.agreementHash, JSON.stringify(card.sources),
+          JSON.stringify(card.discrepancies || []), card.createdAt],
+      );
+      await client.query('COMMIT');
+      return mapRuleCard(result.rows[0]);
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async function listRuleCards({ status = 'pending_review' } = {}) {
@@ -1144,8 +1230,8 @@ export function createPostgresRepository(connectionString) {
       pool.query('SELECT entitlement, starts_at, ends_at, created_at, updated_at FROM subscription_entitlements WHERE username = $1 ORDER BY entitlement', [username]),
       pool.query(`SELECT id, status, reserved_seconds, billable_seconds, capsule_id, capsule, delivery_mode,
                          pedagogical_state, micro_check_passed, micro_check_attempts, micro_check_passes,
-                         transfer_passed, outcome, error_code,
-                         started_at, expires_at, ended_at, updated_at
+                         transfer_passed, outcome, error_code, provider, model, prompt_version,
+                         started_at, voice_activated_at, expires_at, ended_at, updated_at
                   FROM voice_tutor_sessions WHERE username = $1 ORDER BY started_at`, [username]),
       pool.query(`SELECT id, session_id, skill_id, skill_label, module, rule_id, origin_item_id,
                          origin_transfer_task_id, initial_micro_check_passed, initial_transfer_passed,
@@ -1203,9 +1289,17 @@ export function createPostgresRepository(connectionString) {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      await client.query('DELETE FROM telegram_auth_codes WHERE telegram_id = (SELECT telegram_id FROM users WHERE username = $1)', [username]);
+      const owner = await client.query('SELECT telegram_id FROM users WHERE username = $1 FOR UPDATE', [username]);
+      if (!owner.rowCount) {
+        await client.query('COMMIT');
+        return false;
+      }
+      if (owner.rows[0].telegram_id != null) {
+        await client.query('DELETE FROM telegram_auth_codes WHERE telegram_id = $1', [owner.rows[0].telegram_id]);
+      }
       await client.query('DELETE FROM ai_requests WHERE username = $1', [username]);
-      await client.query('UPDATE trusted_rule_cards SET created_for_username = NULL WHERE created_for_username = $1', [username]);
+      await client.query("DELETE FROM trusted_rule_cards WHERE created_for_username = $1 AND status <> 'approved'", [username]);
+      await client.query("UPDATE trusted_rule_cards SET created_for_username = NULL WHERE created_for_username = $1 AND status = 'approved'", [username]);
       const reviewedCards = await client.query("SELECT id, review_audit FROM trusted_rule_cards WHERE review_audit @> $1::jsonb", [JSON.stringify([{ reviewer: username }])]);
       for (const card of reviewedCards.rows) {
         const audit = card.review_audit.map((entry) => entry.reviewer === username
@@ -1255,6 +1349,7 @@ export function createPostgresRepository(connectionString) {
     reserveVoiceTutorSession,
     finishVoiceTutorSession,
     getVoiceTutorSession,
+    activateVoiceTutorSession,
     advanceVoiceTutorSession,
     setVoiceTutorSessionDelivery,
     switchVoiceTutorSessionDelivery,

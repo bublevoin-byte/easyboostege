@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { ensureVoiceTutorReservationAllowed, hashAuthCode, normalizeUsername, subscriptionView, VoiceTutorError, voiceTutorAccessView, voiceTutorBillableSeconds, voiceTutorQuotaPeriods } from './shared.js';
+import { ensureVoiceTutorReservationAllowed, hashAuthCode, normalizeUsername, normalizeVoiceTutorDeliveryMetadata, subscriptionView, VoiceTutorError, voiceTutorAccessView, voiceTutorBillableSeconds, voiceTutorQuotaPeriods } from './shared.js';
 import { transitionPedagogicalState } from '../voice-tutor/state-machine.js';
 import { transitionRuleCardReview } from '../voice-tutor/rule-card.js';
 import { createRecoveryLedger, planRecoveryFromTransfer, planRepeatAttempt, publicRepeatAttempt, recoveryMap, recoveryMetrics } from '../voice-tutor/recovery.js';
@@ -49,6 +49,7 @@ export function createFileRepository(filePath) {
           subscription_entitlements: parsed.subscription_entitlements && typeof parsed.subscription_entitlements === 'object' ? parsed.subscription_entitlements : {},
           voice_tutor_sessions: Array.isArray(parsed.voice_tutor_sessions) ? parsed.voice_tutor_sessions.map((session) => ({
             ...session,
+            voice_activated_at: session.voice_activated_at ?? null,
             micro_check_attempts: Number(session.micro_check_attempts || 0),
             micro_check_passes: Number(session.micro_check_passes || 0),
           })) : [],
@@ -253,7 +254,7 @@ export function createFileRepository(filePath) {
     for (const session of state.voice_tutor_sessions) {
       if (session.username !== username || session.status !== 'active' || new Date(session.expires_at).getTime() > nowMs) continue;
       session.status = 'expired';
-      session.billable_seconds = session.reserved_seconds;
+      session.billable_seconds = voiceTutorBillableSeconds(session, session.expires_at);
       session.ended_at = session.expires_at;
       if (session.capsule) {
         if (!['resolved', 'fallback', 'ended'].includes(session.pedagogical_state)) {
@@ -325,6 +326,10 @@ export function createFileRepository(filePath) {
           capsule_id: context.capsule.id,
           nonce_hash: context.nonceHash,
           delivery_mode: 'voice',
+          voice_activated_at: null,
+          provider: null,
+          model: null,
+          prompt_version: null,
           pedagogical_state: 'diagnose',
           micro_check_passed: null,
           micro_check_attempts: 0,
@@ -343,6 +348,27 @@ export function createFileRepository(filePath) {
     await load();
     const session = state.voice_tutor_sessions.find((entry) => entry.username === username && entry.id === sessionId);
     return session ? structuredClone(session) : null;
+  }
+
+  async function activateVoiceTutorSession(username, sessionId, { nonceHash, now = new Date() }) {
+    return serializeVoiceTutorMutation(async () => {
+      await load();
+      const session = state.voice_tutor_sessions.find((entry) => entry.username === username && entry.id === sessionId);
+      if (!session || !session.capsule || session.delivery_mode !== 'voice' || session.status !== 'active') {
+        throw new VoiceTutorError('VOICE_TUTOR_SESSION_NOT_FOUND');
+      }
+      if (!session.nonce_hash || session.nonce_hash !== nonceHash) throw new VoiceTutorError('VOICE_TUTOR_NONCE_REPLAYED');
+      const nowMs = new Date(now).getTime();
+      if (nowMs < new Date(session.started_at).getTime() || new Date(session.expires_at).getTime() <= nowMs) {
+        throw new VoiceTutorError('VOICE_TUTOR_SESSION_EXPIRED');
+      }
+      if (!session.voice_activated_at) {
+        session.voice_activated_at = new Date(now).toISOString();
+        session.updated_at = session.voice_activated_at;
+        await persist();
+      }
+      return { session: publicVoiceTutorSession(session), capsule: structuredClone(session.capsule) };
+    });
   }
 
   async function advanceVoiceTutorSession(username, sessionId, { nonceHash, nextNonceHash, event, now = new Date() }) {
@@ -441,30 +467,53 @@ export function createFileRepository(filePath) {
     });
   }
 
-  async function getVoiceTutorRecoveryMetrics(now = new Date()) {
+  async function getVoiceTutorRecoveryMetrics(now = new Date(), { costMicrousdPerMinute = 0 } = {}) {
     await load();
+    const delivery = { voice: 0, text: 0, local: 0 };
+    for (const session of state.voice_tutor_sessions) {
+      if (Object.hasOwn(delivery, session.delivery_mode)) delivery[session.delivery_mode] += 1;
+    }
     return recoveryMetrics({
       ledger: createRecoveryLedger({
         recoveries: state.voice_tutor_recoveries,
         repeats: state.voice_tutor_repeats,
         attempts: state.voice_tutor_repeat_attempts,
       }),
-      billableSeconds: state.voice_tutor_sessions.reduce((sum, session) => sum + Number(session.billable_seconds || 0), 0),
+      billableSeconds: state.voice_tutor_sessions.reduce((sum, session) => (
+        session.delivery_mode === 'voice' || session.provider
+          ? sum + Number(session.billable_seconds || 0)
+          : sum
+      ), 0),
       sessionCount: state.voice_tutor_sessions.length,
       microCheckPasses: state.voice_tutor_sessions.reduce((sum, session) => sum + Number(session.micro_check_passes || 0), 0),
       microCheckAttempts: state.voice_tutor_sessions.reduce((sum, session) => sum + Number(session.micro_check_attempts || 0), 0),
+      delivery,
+      providerErrors: state.voice_tutor_sessions.filter((session) => (
+        session.error_code === 'VOICE_TUTOR_PROVIDER_UNAVAILABLE'
+        || session.error_code === 'VOICE_TUTOR_PROVIDER_CONTRACT_INVALID'
+      )).length,
+      costMicrousdPerMinute,
       now,
     });
   }
 
-  async function setVoiceTutorSessionDelivery(username, sessionId, { mode, errorCode = null }) {
+  async function setVoiceTutorSessionDelivery(username, sessionId, {
+    mode, errorCode = null, provider, model, promptVersion,
+  }) {
     return serializeVoiceTutorMutation(async () => {
       await load();
       if (!['voice', 'text', 'local'].includes(mode)) throw new VoiceTutorError('VOICE_TUTOR_DELIVERY_INVALID');
       const session = state.voice_tutor_sessions.find((entry) => entry.username === username && entry.id === sessionId);
       if (!session || !session.capsule) throw new VoiceTutorError('VOICE_TUTOR_SESSION_NOT_FOUND');
+      const metadataProvided = provider !== undefined || model !== undefined || promptVersion !== undefined;
+      const metadata = metadataProvided ? normalizeVoiceTutorDeliveryMetadata({ provider, model, promptVersion }) : null;
       session.delivery_mode = mode;
       session.error_code = errorCode;
+      if (metadata) {
+        session.provider = metadata.provider;
+        session.model = metadata.model;
+        session.prompt_version = metadata.prompt_version;
+      }
       await persist();
       return { session: publicVoiceTutorSession(session), capsule: structuredClone(session.capsule) };
     });
@@ -479,7 +528,7 @@ export function createFileRepository(filePath) {
       if (!session.nonce_hash || session.nonce_hash !== nonceHash) throw new VoiceTutorError('VOICE_TUTOR_NONCE_REPLAYED');
       if (session.status === 'active') {
         session.status = 'completed';
-        session.billable_seconds = 0;
+        session.billable_seconds = voiceTutorBillableSeconds(session, now);
         session.ended_at = new Date(now).toISOString();
       }
       session.delivery_mode = mode;
@@ -537,6 +586,7 @@ export function createFileRepository(filePath) {
     return withRuleCardLock(async () => {
       await load();
       if (state.rule_cards.some((item) => item.id === card.id)) throw new Error('RULE_CARD_EXISTS');
+      if (card.createdForUsername && !state.users[card.createdForUsername]) throw new Error('USER_NOT_FOUND');
       const stored = {
         id: card.id,
         created_for_username: card.createdForUsername || null,
@@ -991,55 +1041,58 @@ export function createFileRepository(filePath) {
   }
 
   async function deleteUserData(username) {
-    await load();
-    const user = state.users[username];
-    if (!user) return false;
-    const telegramId = user.telegram_id == null ? null : String(user.telegram_id);
-    for (const entry of state.audit_log) {
-      if (entry.metadata?.username === username) {
-        delete entry.metadata.username;
-        entry.metadata.account_deleted = true;
-      }
-    }
-    delete state.users[username];
-    delete state.progress[username];
-    state.writing_attempts = state.writing_attempts.filter((item) => item.username !== username);
-    state.speaking_attempts = state.speaking_attempts.filter((item) => item.username !== username);
-    state.generated_tasks = state.generated_tasks.filter((item) => item.username !== username);
-    state.module_attempts = state.module_attempts.filter((item) => item.username !== username);
-    delete state.progress_summary[username];
-    delete state.word_progress[username];
-    state.error_bank = state.error_bank.filter((item) => item.username !== username);
-    state.ai_requests = state.ai_requests.filter((item) => item.username !== username);
-    delete state.subscriptions[username];
-    delete state.subscription_entitlements[username];
-    state.voice_tutor_sessions = state.voice_tutor_sessions.filter((item) => item.username !== username);
-    const recoveryIds = new Set(state.voice_tutor_recoveries.filter((item) => item.username === username).map((item) => item.id));
-    const repeatIds = new Set(state.voice_tutor_repeats.filter((item) => recoveryIds.has(item.recovery_id)).map((item) => item.id));
-    state.voice_tutor_repeat_attempts = state.voice_tutor_repeat_attempts.filter((item) => !repeatIds.has(item.repeat_id));
-    state.voice_tutor_repeats = state.voice_tutor_repeats.filter((item) => !recoveryIds.has(item.recovery_id));
-    state.voice_tutor_recoveries = state.voice_tutor_recoveries.filter((item) => item.username !== username);
-    for (const card of state.rule_cards) {
-      if (card.created_for_username === username) card.created_for_username = null;
-      for (const audit of card.review_audit || []) {
-        if (audit.reviewer === username) {
-          audit.reviewer = null;
-          audit.account_deleted = true;
+    return serializeVoiceTutorMutation(() => withRuleCardLock(async () => {
+      await load();
+      const user = state.users[username];
+      if (!user) return false;
+      const telegramId = user.telegram_id == null ? null : String(user.telegram_id);
+      for (const entry of state.audit_log) {
+        if (entry.metadata?.username === username) {
+          delete entry.metadata.username;
+          entry.metadata.account_deleted = true;
         }
       }
-    }
-    state.subscription_events = state.subscription_events.filter((item) => item.username !== username);
-    for (const [id, request] of Object.entries(state.payment_requests)) if (request.username === username) delete state.payment_requests[id];
-    for (const [id, session] of Object.entries(state.sessions)) {
-      if (session.username === username) delete state.sessions[id];
-    }
-    if (telegramId) {
-      for (const [codeHash, entry] of Object.entries(state.auth_codes)) {
-        if (String(entry.telegram_id) === telegramId) delete state.auth_codes[codeHash];
+      delete state.users[username];
+      delete state.progress[username];
+      state.writing_attempts = state.writing_attempts.filter((item) => item.username !== username);
+      state.speaking_attempts = state.speaking_attempts.filter((item) => item.username !== username);
+      state.generated_tasks = state.generated_tasks.filter((item) => item.username !== username);
+      state.module_attempts = state.module_attempts.filter((item) => item.username !== username);
+      delete state.progress_summary[username];
+      delete state.word_progress[username];
+      state.error_bank = state.error_bank.filter((item) => item.username !== username);
+      state.ai_requests = state.ai_requests.filter((item) => item.username !== username);
+      delete state.subscriptions[username];
+      delete state.subscription_entitlements[username];
+      state.voice_tutor_sessions = state.voice_tutor_sessions.filter((item) => item.username !== username);
+      const recoveryIds = new Set(state.voice_tutor_recoveries.filter((item) => item.username === username).map((item) => item.id));
+      const repeatIds = new Set(state.voice_tutor_repeats.filter((item) => recoveryIds.has(item.recovery_id)).map((item) => item.id));
+      state.voice_tutor_repeat_attempts = state.voice_tutor_repeat_attempts.filter((item) => !repeatIds.has(item.repeat_id));
+      state.voice_tutor_repeats = state.voice_tutor_repeats.filter((item) => !recoveryIds.has(item.recovery_id));
+      state.voice_tutor_recoveries = state.voice_tutor_recoveries.filter((item) => item.username !== username);
+      state.rule_cards = state.rule_cards.filter((card) => card.created_for_username !== username || card.status === 'approved');
+      for (const card of state.rule_cards) {
+        if (card.created_for_username === username) card.created_for_username = null;
+        for (const audit of card.review_audit || []) {
+          if (audit.reviewer === username) {
+            audit.reviewer = null;
+            audit.account_deleted = true;
+          }
+        }
       }
-    }
-    await persist();
-    return true;
+      state.subscription_events = state.subscription_events.filter((item) => item.username !== username);
+      for (const [id, request] of Object.entries(state.payment_requests)) if (request.username === username) delete state.payment_requests[id];
+      for (const [id, session] of Object.entries(state.sessions)) {
+        if (session.username === username) delete state.sessions[id];
+      }
+      if (telegramId) {
+        for (const [codeHash, entry] of Object.entries(state.auth_codes)) {
+          if (String(entry.telegram_id) === telegramId) delete state.auth_codes[codeHash];
+        }
+      }
+      await persist();
+      return true;
+    }));
   }
 
   async function healthCheck() {
@@ -1068,6 +1121,7 @@ export function createFileRepository(filePath) {
     reserveVoiceTutorSession,
     finishVoiceTutorSession,
     getVoiceTutorSession,
+    activateVoiceTutorSession,
     advanceVoiceTutorSession,
     setVoiceTutorSessionDelivery,
     switchVoiceTutorSessionDelivery,

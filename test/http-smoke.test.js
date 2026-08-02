@@ -85,7 +85,7 @@ test('application starts and serves health, security headers and PWA assets', { 
   await fs.writeFile(dataFile, JSON.stringify({
     users: {
       expired: { created: Date.now(), sub_until: Date.now() - 60_000 },
-      active: { created: Date.now(), sub_until: Date.now() + 60_000, privacy_consent: { text_processing: true, voice_processing: true, policy_version: '2026-08-02', updated_at: new Date().toISOString() } },
+      active: { created: Date.now(), sub_until: Date.now() + 60_000, privacy_consent: { text_processing: true, voice_processing: true, policy_version: '2026-08-02-voice-v1', updated_at: new Date().toISOString() } },
       sessionuser: { created: Date.now(), sub_until: Date.now() + 60_000 },
       admin: { created: Date.now(), sub_until: Date.now() + 60_000, role: 'admin' },
     },
@@ -256,6 +256,8 @@ test('application starts and serves health, security headers and PWA assets', { 
     assert.deepEqual(metrics.voiceTutorRecovery, {
       open: 0, recovered: 0, relapsed: 0, numerator: 0, denominator: 0, error_recovery_rate: 0,
       due_repeats: 0, overdue_repeats: 0, sessions: 0, voice_minutes: 0,
+      delivery: { voice: 0, text: 0, local: 0 }, fallback_rate: 0,
+      provider_errors: 0, estimated_cost_microusd: 0,
       micro_check: { passed: 0, observed: 0, rate: 0 },
       initial_transfer: { passed: 0, observed: 0, rate: 0 },
       repeat_passes: {

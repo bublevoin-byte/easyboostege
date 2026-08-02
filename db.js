@@ -22,6 +22,7 @@ export const getVoiceTutorAccess = (...args) => repository.getVoiceTutorAccess(.
 export const reserveVoiceTutorSession = (...args) => repository.reserveVoiceTutorSession(...args);
 export const finishVoiceTutorSession = (...args) => repository.finishVoiceTutorSession(...args);
 export const getVoiceTutorSession = (...args) => repository.getVoiceTutorSession(...args);
+export const activateVoiceTutorSession = (...args) => repository.activateVoiceTutorSession(...args);
 export const advanceVoiceTutorSession = (...args) => repository.advanceVoiceTutorSession(...args);
 export const setVoiceTutorSessionDelivery = (...args) => repository.setVoiceTutorSessionDelivery(...args);
 export const switchVoiceTutorSessionDelivery = (...args) => repository.switchVoiceTutorSessionDelivery(...args);

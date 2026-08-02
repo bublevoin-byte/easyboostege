@@ -12,6 +12,7 @@
 - число AI-запросов, prompt/completion tokens и оценочную стоимость за последние 24 часа.
 - вызовы `voice_tutor_rule_extract` видны в том же AI-журнале без fetched page text; HTTP-метрики отдельно показывают fail-closed 422/503 на discovery route;
 - агрегат Voice Tutor recovery без PII: `open`, `recovered`, `relapsed`, due/overdue, session count, billable voice minutes, numerator/denominator и `error_recovery_rate`;
+- экономика и доставка Voice Tutor: счётчики `delivery.voice|text|local`, `fallback_rate`, `provider_errors` и `estimated_cost_microusd` по фактически billable voice-секундам; стоимость сохраняется и после voice→text/local fallback благодаря сохранённому `provider` provenance;
 - использование диска в байтах и процентах;
 - имя, размер, возраст и свежесть последней резервной копии (порог 36 часов).
 
@@ -27,6 +28,19 @@ denominator. Для пустой наблюдаемой когорты API яв�
 Агрегаты `micro_check`, `initial_transfer` и `repeat_passes.day_1/day_7` публикуют только
 `passed`, `observed` и вычисленный rate. Идентификаторы ученика, задания, попытки и свободный ответ в метрики не входят;
 для пустой выборки каждый счётчик и rate равен `0`.
+
+Voice Tutor metrics не содержат username, capsule, skill/rule/task/session ids, реплики, аудио,
+субтитры, transcript, credential или ключи. `provider_errors` считает только заранее ограниченные
+контрактные/transport-коды; внутренний текст ошибки провайдера не публикуется. Оценка стоимости
+использует операторский тариф из `VOICE_TUTOR_COST_MICROUSD_PER_MINUTE`, а не provider invoice.
+`fallback_rate = (delivery.text + delivery.local) / (delivery.voice + delivery.text + delivery.local)`;
+legacy quota-only строки без delivery mode остаются в `sessions` и квотном учёте, но не искажают
+долю fallback, voice minutes или оценку provider cost.
+
+При всплеске `provider_errors` или `fallback_rate` оператор включает
+`VOICE_TUTOR_COST_KILL_SWITCH`, проверяет ZDR/configuration и оставляет text/local fallback
+доступным. Возврат voice разрешён только после bounded fake-provider E2E и human release gate;
+сырые payload провайдера и пользовательские реплики в evidence не копируются.
 
 Этот endpoint предназначен для диагностики и подключения внешнего сборщика. Он не
 заменяет внешний uptime-monitor и оповещения: они должны проверять `/health/ready`

@@ -53,7 +53,10 @@ async function withCurrentUserApp(run, { limits = LIMITS } = {}) {
     voiceTutorLimits: limits,
     now: () => clock.now,
   }));
-  app.use(createVoiceTutorRoutes({ authentication, db: repository, limits, now: () => clock.now }));
+  app.use(createVoiceTutorRoutes({
+    authentication, db: repository, limits, now: () => clock.now,
+    realtimePolicy: { unboundCredentialRiskAccepted: true },
+  }));
   const server = http.createServer(app);
   await new Promise((resolve, reject) => {
     server.once('error', reject);

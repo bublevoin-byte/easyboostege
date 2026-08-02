@@ -75,6 +75,10 @@ test('shared voice tutor sheet exposes microphone, transient captions, quota, ti
   assert.match(source, /getUserMedia/u);
   assert.match(source, /browserRealtimeTransport/u);
   assert.match(source, /onPedagogicalEvent/u);
+  assert.match(source, /onFailure/u);
+  assert.match(source, /provider_unavailable/u);
+  assert.match(source, /session_timeout/u);
+  assert.match(source, /\/activate/u);
   assert.match(source, /\/fallback/u);
   assert.match(source, /returnFocus/u);
   assert.match(source, /transientCaptions\.length = 0/u);

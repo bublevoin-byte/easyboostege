@@ -123,7 +123,7 @@ async function startStack({ replies }) {
         privacy_consent: {
           text_processing: true,
           voice_processing: true,
-          policy_version: '2026-08-02',
+          policy_version: '2026-08-02-voice-v1',
           updated_at: new Date().toISOString(),
         },
       },

@@ -696,7 +696,7 @@ production credentials, три доказанных P0 отмечены во в�
 | 04 | Контекстный голосовой разбор письма и устной части | done |
 | 05 | Поиск отсутствующих правил по доверенным источникам и очередь проверки | done |
 | 06 | Карта освоенных ошибок и возвращённых потенциальных баллов | done |
-| 07 | Приватность, безопасность, observability и сквозная проверка | pending |
+| 07 | Приватность, безопасность, observability и сквозная проверка | done |
 
 Тикет 01 закрыт: base и Premium разделены правом `voice_tutor`; UTC-квоты 10/120 минут,
 идемпотентный резерв одной активной сессии, возврат остатка, экспорт/удаление и профильный UI готовы.
@@ -748,3 +748,28 @@ targeted workflow 6/6, frontend 6/6, disposable PostgreSQL 1/1, полный н�
 potential; admin metrics содержат только агрегаты. File/PostgreSQL/export/delete parity подтверждены:
 targeted tests 18/18, полный набор 473 (472 pass, 1 штатный PostgreSQL skip), disposable PostgreSQL
 1/1, `lint`, `check`, frontend build и оба secret scans проходят.
+
+Тикет 07 закрыт: credential выдаётся только после актуального voice consent, Premium/quota,
+server-owned capsule checks и явного owner gate для риска unbound bearer; feature flag, cost kill
+switch и обязательный неподтверждённый ZDR fail closed до provider transport, сохраняя тот же разбор
+в text/local fallback. xAI handshake соответствует официальному ephemeral-token контракту: только
+`expires_after.seconds` с фиксированным окном подключения 60 секунд, versioned model в URL,
+`xai-client-secret` и bounded server-issued `session.update` без server-owned reference и массивов
+ответов будущих проверок. Browser realtime ждёт ACK, затем вызывает authenticated idempotent
+`/activate`; backend однократно ставит `voice_activated_at`, и browser создаёт audio graph только
+после успешного ответа. Transport ограничивает bytes/rate/order/tool calls и replay, принимает обе
+совместимые формы `response.created`, а runtime error/close/ACK timeout автоматически закрывает media
+и продолжает тот же capsule через text/local. Provider diagnostics, raw audio, полный
+transcript, реплики и временные субтитры не попадают в persistence/export/logs/metrics/evidence.
+До activation списание равно нулю; после него elapsed voice seconds не возвращаются при runtime
+fallback и остаются в provider cost metrics даже при финальном text/local delivery. Provider/model/
+prompt provenance не теряется при text/local downgrade; legacy quota-only строки исключены.
+File/PostgreSQL export/delete
+parity, owner locks против concurrent orphan rule report и миграция 025 проверены на disposable
+PostgreSQL. Pending/rejected rule reports удаляются с аккаунтом, approved canonical остаётся без
+creator/reviewer identity. Бесплатный Playwright E2E прошёл настоящий browser transport и полный
+session.updated → runtime error → local fallback → micro-check → transfer → recovery-map loop через
+локальные fake HTTP/WebSocket. Ограничение direct xAI bearer и replacement trigger зафиксированы в ADR.
+Полный набор 486 (485 pass, 1 штатный PostgreSQL skip), targeted 48/48, disposable PostgreSQL 1/1,
+`lint`, `check`, frontend build, functional/performance E2E и оба secret scans проходят; платных
+вызовов и изменений staging/soak не было.

@@ -79,6 +79,7 @@ async function withRecoveryApp(run) {
     newSessionId: () => sessionIds.shift(),
     newNonce: () => nonces.shift(),
     credentialProvider: { async createCredential() { return { credential: 'ephemeral-test', expires_at: 1_800_000_000, realtime_url: 'wss://fake.invalid' }; } },
+    realtimePolicy: { unboundCredentialRiskAccepted: true },
     privacyPolicyVersion: 'test-v1',
   }));
   const server = http.createServer(app);
@@ -117,6 +118,10 @@ async function createResolvedGrammarSession({ repository, owner, request }, {
   assert.equal(started.status, 201);
   const created = await started.json();
   let nonce = created.nonce;
+  const activated = await request(owner, `/api/v1/voice-tutor/sessions/${created.session.id}/activate`, {
+    method: 'POST', body: JSON.stringify({ nonce }),
+  });
+  assert.equal(activated.status, 200);
   const events = [{ type: 'diagnosis_complete' }, { type: 'explanation_complete' }];
   microAnswers.forEach((answer, index) => {
     events.push({ type: 'check_answer', answer });
@@ -354,6 +359,8 @@ test('only observed server-checked repeat failures relapse; overdue stays open a
     assert.deepEqual(await repository.getVoiceTutorRecoveryMetrics(new Date('2026-08-10T12:00:00.000Z')), {
       open: 0, recovered: 0, relapsed: 1, numerator: 0, denominator: 1, error_recovery_rate: 0,
       due_repeats: 0, overdue_repeats: 1, sessions: 1, voice_minutes: 0,
+      delivery: { voice: 1, text: 0, local: 0 }, fallback_rate: 0,
+      provider_errors: 0, estimated_cost_microusd: 0,
       micro_check: { passed: 1, observed: 1, rate: 1 },
       initial_transfer: { passed: 1, observed: 1, rate: 1 },
       repeat_passes: {
@@ -367,6 +374,8 @@ test('only observed server-checked repeat failures relapse; overdue stays open a
     assert.deepEqual(await repository.getVoiceTutorRecoveryMetrics(new Date('2026-08-10T12:00:00.000Z')), {
       open: 0, recovered: 0, relapsed: 0, numerator: 0, denominator: 0, error_recovery_rate: 0,
       due_repeats: 0, overdue_repeats: 0, sessions: 0, voice_minutes: 0,
+      delivery: { voice: 0, text: 0, local: 0 }, fallback_rate: 0,
+      provider_errors: 0, estimated_cost_microusd: 0,
       micro_check: { passed: 0, observed: 0, rate: 0 },
       initial_transfer: { passed: 0, observed: 0, rate: 0 },
       repeat_passes: {

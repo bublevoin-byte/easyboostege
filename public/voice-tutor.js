@@ -7,6 +7,7 @@ let returnFocus = null;
 let timerId = null;
 let mediaStream = null;
 let realtimeConnection = null;
+let fallbackPending = false;
 const transientCaptions = [];
 let runtime = {
   api: null,
@@ -205,7 +206,7 @@ function renderSession(result) {
     contextElement.textContent = context ? `${context.label}: “${context.text}”` : '';
   }
   text('voiceTutorQuota', quotaText(currentSession.voice_tutor));
-  const message = result.text_turn?.message || (result.mode === 'local' ? result.local_rule?.explanation : statePrompt(currentSession.session));
+  const message = result.text_turn?.message || statePrompt(currentSession.session);
   text('voiceTutorState', message);
   addCaption(message);
   const terminal = ['resolved', 'fallback', 'ended'].includes(currentSession.session.state);
@@ -259,7 +260,7 @@ function updateTimer() {
   text('voiceTutorTimer', `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}`);
   const timer = browser.document.getElementById('voiceTutorTimer');
   if (timer) timer.classList.toggle('vtWarn', remaining > 0 && remaining <= 60);
-  if (remaining === 0 && currentSession.mode === 'voice') switchToFallback();
+  if (remaining === 0 && currentSession.mode === 'voice') void switchToFallback('session_timeout');
 }
 
 function startTimer() {
@@ -280,20 +281,29 @@ function stopMedia() {
 async function startMicrophone() {
   try {
     mediaStream = await mediaDevices().getUserMedia({ audio: true });
+  } catch {
+    await switchToFallback('microphone_unavailable');
+    return;
+  }
+  try {
     const connector = runtime.realtime || browserRealtimeTransport;
     if (!connector?.connect) throw new Error('realtime transport unavailable');
     realtimeConnection = await connector.connect({
       stream: mediaStream,
       credential: currentSession.realtime.credential,
       url: currentSession.realtime.realtime_url,
+      session: currentSession.realtime.session,
       onSubtitle: addCaption,
       onStatus: (status) => text('voiceTutorState', status),
       onPedagogicalEvent: advanceTutorSession,
+      onFailure: () => { void switchToFallback('provider_unavailable'); },
     });
+    await api().post(`/api/v1/voice-tutor/sessions/${currentSession.session.id}/activate`, { nonce: currentSession.nonce });
+    realtimeConnection.activate();
     browser.document.getElementById('voiceTutorMic')?.setAttribute('aria-pressed', 'true');
   } catch {
     stopMedia();
-    await switchToFallback();
+    await switchToFallback('provider_unavailable');
   }
 }
 
@@ -306,14 +316,19 @@ async function toggleMicrophone() {
   }
 }
 
-async function switchToFallback() {
-  if (!currentSession?.nonce || currentSession.mode !== 'voice') return;
+async function switchToFallback(reason = 'microphone_unavailable') {
+  if (fallbackPending || !currentSession?.nonce || currentSession.mode !== 'voice') return;
+  fallbackPending = true;
+  const sessionId = currentSession.session.id;
+  const nonce = currentSession.nonce;
   stopMedia();
   try {
-    const result = await api().post(`/api/v1/voice-tutor/sessions/${currentSession.session.id}/fallback`, { nonce: currentSession.nonce });
+    const result = await api().post(`/api/v1/voice-tutor/sessions/${sessionId}/fallback`, { nonce, reason });
     renderSession(result);
   } catch (error) {
     text('voiceTutorState', api().messageFor(error));
+  } finally {
+    fallbackPending = false;
   }
 }
 
@@ -360,6 +375,7 @@ function closeSheet() {
   browser.document?.getElementById('voiceTutorSheet')?.classList.remove('open');
   const focus = returnFocus;
   currentSession = null;
+  fallbackPending = false;
   returnFocus = null;
   focus?.focus?.();
 }
