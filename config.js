@@ -43,6 +43,9 @@ function readProviderUrl(name, fallback) {
 
 const jwtSecret = process.env.JWT_SECRET || '';
 const databaseProvider = process.env.DATABASE_PROVIDER || (process.env.DATABASE_URL ? 'postgres' : 'file');
+const voiceTutorDailySeconds = readInteger('VOICE_TUTOR_DAILY_SECONDS', 600, { min: 60, max: 86_400 });
+const voiceTutorMonthlySeconds = readInteger('VOICE_TUTOR_MONTHLY_SECONDS', 7_200, { min: 60, max: 2_678_400 });
+const voiceTutorSessionSeconds = readInteger('VOICE_TUTOR_SESSION_SECONDS', 300, { min: 60, max: 3_600 });
 
 if (!['file', 'postgres'].includes(databaseProvider)) {
   throw new Error('DATABASE_PROVIDER must be either file or postgres');
@@ -58,6 +61,10 @@ if (isProduction && databaseProvider !== 'postgres') {
 
 if (isProduction && process.env.MONITORING_TOKEN && process.env.MONITORING_TOKEN.length < 32) {
   throw new Error('MONITORING_TOKEN must contain at least 32 characters when configured');
+}
+
+if (voiceTutorSessionSeconds > voiceTutorDailySeconds || voiceTutorSessionSeconds > voiceTutorMonthlySeconds) {
+  throw new Error('VOICE_TUTOR_SESSION_SECONDS must not exceed daily or monthly voice limits');
 }
 
 export const config = Object.freeze({
@@ -85,6 +92,11 @@ export const config = Object.freeze({
     provider: databaseProvider,
     url: process.env.DATABASE_URL || '',
     file: process.env.DATA_FILE || fileURLToPath(new URL('./data.json', import.meta.url)),
+  }),
+  voiceTutor: Object.freeze({
+    dailySeconds: voiceTutorDailySeconds,
+    monthlySeconds: voiceTutorMonthlySeconds,
+    sessionSeconds: voiceTutorSessionSeconds,
   }),
   telegram: Object.freeze({
     token: process.env.TELEGRAM_BOT_TOKEN || '',

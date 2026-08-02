@@ -17,6 +17,10 @@ export const ensureTelegramUser = (...args) => repository.ensureTelegramUser(...
 export const grantDays = (...args) => repository.grantDays(...args);
 export const markTrialUsed = (...args) => repository.markTrialUsed(...args);
 export const getSub = (...args) => repository.getSub(...args);
+export const setEntitlement = (...args) => repository.setEntitlement(...args);
+export const getVoiceTutorAccess = (...args) => repository.getVoiceTutorAccess(...args);
+export const reserveVoiceTutorSession = (...args) => repository.reserveVoiceTutorSession(...args);
+export const finishVoiceTutorSession = (...args) => repository.finishVoiceTutorSession(...args);
 export const setUserRole = (...args) => repository.setUserRole(...args);
 export const createPaymentRequest = (...args) => repository.createPaymentRequest(...args);
 export const resolvePaymentRequest = (...args) => repository.resolvePaymentRequest(...args);

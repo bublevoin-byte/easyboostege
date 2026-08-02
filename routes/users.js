@@ -14,9 +14,19 @@ export function createUserRoutes({
   buildMonitoringSnapshot,
   promoteConfiguredAdmin,
   db,
+  voiceTutorLimits = {},
+  now = () => new Date(),
 }) {
   const router = express.Router();
   const { auth, requireRole, monitoringAuth, issueToken, readCookie, setAuthCookie, clearAuthCookie } = authentication;
+
+  async function currentSubscription(username) {
+    const subscription = await db.getSub(username);
+    const voiceTutor = typeof db.getVoiceTutorAccess === 'function'
+      ? await db.getVoiceTutorAccess(username, voiceTutorLimits, now())
+      : { entitlements: { voice_tutor: false }, voice_tutor: { daily_remaining_seconds: 0, monthly_remaining_seconds: 0, active_session: false } };
+    return { ...subscription, ...voiceTutor };
+  }
 
   router.post('/api/v1/tg/start', limiters.telegramStart, async (req, res, next) => {
     try {
@@ -38,7 +48,7 @@ export function createUserRoutes({
       const username = existing ? existing.username : await db.createTelegramUser(confirmed.telegram_id, confirmed.name);
       await promoteConfiguredAdmin(username, confirmed.telegram_id);
       setAuthCookie(req, res, await issueToken(username));
-      res.json({ authenticated: true, username, ...await db.getSub(username), bot: botUsername() });
+      res.json({ authenticated: true, username, ...await currentSubscription(username), bot: botUsername() });
     } catch (error) { next(error); }
   });
 
@@ -46,7 +56,7 @@ export function createUserRoutes({
     try {
       const token = req.sessionId ? req.authToken : await issueToken(req.user);
       setAuthCookie(req, res, token);
-      res.json({ authenticated: true, username: req.user, role: req.role, bot: botUsername(), ...await db.getSub(req.user) });
+      res.json({ authenticated: true, username: req.user, role: req.role, bot: botUsername(), ...await currentSubscription(req.user) });
     } catch (error) { next(error); }
   });
 

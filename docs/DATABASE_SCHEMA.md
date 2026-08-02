@@ -8,6 +8,8 @@
 | `users` | аккаунты Telegram/legacy и роли | `username`, `telegram_id`, `role`, subscription fields |
 | `sessions` | серверные пользовательские сессии | `id`, `username`, expiry, revoke timestamp |
 | `subscriptions` | текущее состояние доступа | `username`, status, source, start/end timestamps |
+| `subscription_entitlements` | отдельные тарифные права Premium | `username`, entitlement, start/end timestamps |
+| `voice_tutor_sessions` | резервирование голосовой квоты без аудио и полного transcript | status, reserved/billable seconds, start/expiry/end timestamps |
 | `payment_requests` | ручные заявки на оплату | status, administrator, result and resolution time |
 | `user_progress` | JSONB-прогресс пользователя | `username`, `data`, `updated_at` |
 | `telegram_auth_codes` | одноразовые коды входа | hash кода, expiry, consumed state |
@@ -34,6 +36,12 @@
 строк он заполняется полным `answer`; в новых попытках `answer` хранит весь очищенный ответ, а
 `evaluated_answer` — ровно тот фрагмент, который получил провайдер. Оба поля входят в экспорт и
 удаляются каскадно вместе с аккаунтом.
+
+Миграция `021_voice_tutor_entitlements_and_quotas.sql` не повышает существующие подписки до
+Premium: без отдельной строки `voice_tutor` пользователь остаётся на базовом тарифе. Резерв квоты
+и единственная активная сессия защищены транзакционной блокировкой пользователя и уникальным
+частичным индексом. Записи входят в экспорт и удаляются каскадно вместе с аккаунтом; аудио и
+свободный transcript в таблице отсутствуют.
 
 ## Проверка миграций и repository
 

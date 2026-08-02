@@ -50,10 +50,39 @@ paths:
         '429': { $ref: '#/components/responses/RateLimited' }
   /api/v1/me:
     get:
-      summary: Current user and subscription
+      summary: Current user, base subscription, Premium entitlements and remaining voice minutes
       responses:
         '200': { description: User profile }
         '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/voice-tutor/sessions:
+    post:
+      summary: Atomically reserve the configured Voice Tutor session allowance
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, minLength: 8, maxLength: 100 }
+      responses:
+        '201': { description: Premium quota reserved and one active session created }
+        '200': { description: The existing result for this idempotency key }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: The current subscription has no voice_tutor entitlement }
+        '409': { description: Another Voice Tutor session is active }
+        '429': { description: Daily or monthly voice quota is exhausted }
+  /api/v1/voice-tutor/sessions/{sessionId}/finish:
+    post:
+      summary: Idempotently finish a reserved Voice Tutor session
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: Session finished, or the previous finish result returned }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { description: Session does not belong to the current user }
   /api/v1/admin/status:
     get:
       summary: Verify administrator access

@@ -54,12 +54,36 @@
     };
   }
 
+  function voiceTutorStatus(session) {
+    const entitled = Boolean(session && session.entitlements && session.entitlements.voice_tutor);
+    if (!entitled) {
+      return {
+        state: 'paywall',
+        title: 'Voice Tutor · Premium',
+        text: 'Голосовой разбор ошибок доступен в Premium',
+        color: '#8A4B00',
+        background: '#FFF4DE',
+      };
+    }
+    const voice = session.voice_tutor || {};
+    const dailyMinutes = Math.ceil(Math.max(0, Number(voice.daily_remaining_seconds) || 0) / 60);
+    const monthlyMinutes = Math.ceil(Math.max(0, Number(voice.monthly_remaining_seconds) || 0) / 60);
+    return {
+      state: 'premium',
+      title: 'Voice Tutor · Premium',
+      text: 'Осталось ' + dailyMinutes + ' мин сегодня · ' + monthlyMinutes + ' мин в этом месяце',
+      color: '#1D7F4A',
+      background: '#EAF7F0',
+    };
+  }
+
   global.EasyBoostProfile = Object.freeze({
     displayName,
     greeting,
     initial,
     formatDate,
     subscriptionStatus,
+    voiceTutorStatus,
     GUEST,
   });
 })(window);

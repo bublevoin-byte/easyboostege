@@ -64,3 +64,23 @@ test('profile module reports an expired subscription without a countdown', () =>
   assert.equal(status.color, '#A83226');
   assert.equal(status.background, '#FDEDEA');
 });
+
+test('profile module shows a Premium paywall or the remaining voice minutes', () => {
+  const profile = createProfileModule();
+  const base = profile.voiceTutorStatus({
+    entitlements: { voice_tutor: false },
+    voice_tutor: { daily_remaining_seconds: 0, monthly_remaining_seconds: 0, active_session: false },
+  });
+  assert.equal(base.state, 'paywall');
+  assert.equal(base.title, 'Voice Tutor · Premium');
+  assert.match(base.text, /доступен в Premium/u);
+
+  const premium = profile.voiceTutorStatus({
+    entitlements: { voice_tutor: true },
+    voice_tutor: { daily_remaining_seconds: 600, monthly_remaining_seconds: 7_200, active_session: false },
+  });
+  assert.equal(premium.state, 'premium');
+  assert.equal(premium.title, 'Voice Tutor · Premium');
+  assert.equal(premium.text, 'Осталось 10 мин сегодня · 120 мин в этом месяце');
+  assert.equal('daily_limit_seconds' in premium, false);
+});

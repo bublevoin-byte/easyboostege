@@ -31,6 +31,7 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
       '018_task_bank.sql',
       '019_attempt_models.sql',
       '020_writing_evaluated_answer.sql',
+      '021_voice_tutor_entitlements_and_quotas.sql',
     ]);
 
     const username = await repository.createTelegramUser(telegramId, `Integration ${suffix}`);
@@ -52,6 +53,28 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     assert.equal(await repository.isSessionActive(sessionId, username), true);
     assert.equal(await repository.revokeSession(sessionId, username), true);
     assert.equal(await repository.isSessionActive(sessionId, username), false);
+
+    const voiceNow = new Date();
+    const voiceLimits = { dailySeconds: 600, monthlySeconds: 7_200, sessionSeconds: 300 };
+    assert.equal((await repository.getVoiceTutorAccess(username, voiceLimits, voiceNow)).entitlements.voice_tutor, false);
+    await repository.setEntitlement(username, 'voice_tutor', {
+      startsAt: voiceNow,
+      endsAt: new Date(voiceNow.getTime() + 30 * 86_400_000),
+    });
+    const voiceKey = crypto.randomUUID();
+    const [firstVoiceReservation, repeatedVoiceReservation] = await Promise.all([
+      repository.reserveVoiceTutorSession(username, { id: crypto.randomUUID(), idempotencyKey: voiceKey, limits: voiceLimits, now: voiceNow }),
+      repository.reserveVoiceTutorSession(username, { id: crypto.randomUUID(), idempotencyKey: voiceKey, limits: voiceLimits, now: voiceNow }),
+    ]);
+    assert.deepEqual([firstVoiceReservation.created, repeatedVoiceReservation.created].sort(), [false, true]);
+    assert.equal(firstVoiceReservation.session.id, repeatedVoiceReservation.session.id);
+    await assert.rejects(
+      repository.reserveVoiceTutorSession(username, { id: crypto.randomUUID(), idempotencyKey: crypto.randomUUID(), limits: voiceLimits, now: voiceNow }),
+      /VOICE_TUTOR_SESSION_ACTIVE/u,
+    );
+    const voiceFinishedAt = new Date(voiceNow.getTime() + 120_000);
+    assert.equal((await repository.finishVoiceTutorSession(username, firstVoiceReservation.session.id, { limits: voiceLimits, now: voiceFinishedAt })).finished, true);
+    assert.equal((await repository.finishVoiceTutorSession(username, firstVoiceReservation.session.id, { limits: voiceLimits, now: voiceFinishedAt })).finished, false);
 
     const progress = { learned: 12, prog: { words: 33 }, marker: suffix };
     await repository.saveProgress(username, progress);
@@ -129,12 +152,17 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     assert.equal(exported.error_bank[0].occurrence_count, 2);
     assert.equal(exported.audit_log[0].action, 'payment.resolve');
     assert.equal(exported.ai_requests.length, 1);
+    assert.equal(exported.subscription_entitlements[0].entitlement, 'voice_tutor');
+    assert.equal(exported.voice_tutor_sessions.length, 1);
+    assert.equal(exported.voice_tutor_sessions[0].billable_seconds, 120);
 
     assert.equal(await repository.deleteUserData(username), true);
     assert.equal(await repository.getUser(username), null);
     assert.equal((await client.query('SELECT 1 FROM writing_attempts WHERE username = $1', [username])).rowCount, 0);
     assert.equal((await client.query('SELECT 1 FROM speaking_attempts WHERE username = $1', [username])).rowCount, 0);
     assert.equal((await client.query('SELECT 1 FROM ai_requests WHERE username = $1', [username])).rowCount, 0);
+    assert.equal((await client.query('SELECT 1 FROM subscription_entitlements WHERE username = $1', [username])).rowCount, 0);
+    assert.equal((await client.query('SELECT 1 FROM voice_tutor_sessions WHERE username = $1', [username])).rowCount, 0);
     const retainedAudit = await client.query('SELECT metadata FROM audit_log WHERE target_id = $1', [paymentRequest.id]);
     assert.equal(retainedAudit.rows[0].metadata.username, undefined);
     assert.equal(retainedAudit.rows[0].metadata.account_deleted, true);

@@ -1,5 +1,5 @@
 import pg from 'pg';
-import { hashAuthCode, normalizeUsername, subscriptionView } from './shared.js';
+import { ensureVoiceTutorReservationAllowed, hashAuthCode, normalizeUsername, subscriptionView, VoiceTutorError, voiceTutorAccessView, voiceTutorBillableSeconds, voiceTutorQuotaPeriods } from './shared.js';
 
 const { Pool } = pg;
 
@@ -227,6 +227,154 @@ export function createPostgresRepository(connectionString) {
 
   async function getSub(username) {
     return subscriptionView(await getUser(username));
+  }
+
+  async function setEntitlement(username, entitlement, { startsAt = new Date(), endsAt = null } = {}) {
+    if (!/^[a-z0-9_]{1,64}$/u.test(entitlement)) throw new Error('INVALID_ENTITLEMENT');
+    const startsAtDate = new Date(startsAt);
+    const endsAtDate = endsAt == null ? null : new Date(endsAt);
+    if (!Number.isFinite(startsAtDate.getTime()) || (endsAtDate && (!Number.isFinite(endsAtDate.getTime()) || endsAtDate <= startsAtDate))) {
+      throw new Error('INVALID_ENTITLEMENT_PERIOD');
+    }
+    const result = await pool.query(
+      `INSERT INTO subscription_entitlements (username, entitlement, starts_at, ends_at)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (username, entitlement) DO UPDATE SET
+         starts_at = EXCLUDED.starts_at, ends_at = EXCLUDED.ends_at, updated_at = NOW()
+       RETURNING entitlement`,
+      [username, entitlement, startsAtDate, endsAtDate],
+    );
+    return result.rows[0].entitlement;
+  }
+
+  async function readVoiceTutorAccess(queryable, username, limits, now = new Date()) {
+    const instant = new Date(now);
+    const { dayStart, monthStart } = voiceTutorQuotaPeriods(instant);
+    const [entitlement, usage] = await Promise.all([
+      queryable.query(
+        `SELECT EXISTS (
+           SELECT 1 FROM subscription_entitlements e
+           JOIN users u ON u.username = e.username
+           WHERE e.username = $1 AND e.entitlement = 'voice_tutor'
+             AND u.subscription_until > $2
+             AND e.starts_at <= $2 AND (e.ends_at IS NULL OR e.ends_at > $2)
+         ) AS entitled`,
+        [username, instant],
+      ),
+      queryable.query(
+        `SELECT
+           COALESCE(SUM(COALESCE(billable_seconds, reserved_seconds)) FILTER (WHERE started_at >= $2), 0) AS daily_used_seconds,
+           COALESCE(SUM(COALESCE(billable_seconds, reserved_seconds)) FILTER (WHERE started_at >= $3), 0) AS monthly_used_seconds,
+           COALESCE(BOOL_OR(status = 'active' AND expires_at > $4), FALSE) AS active_session
+         FROM voice_tutor_sessions WHERE username = $1`,
+        [username, dayStart, monthStart, instant],
+      ),
+    ]);
+    return voiceTutorAccessView({
+      entitled: entitlement.rows[0].entitled,
+      dailyUsedSeconds: Number(usage.rows[0].daily_used_seconds),
+      monthlyUsedSeconds: Number(usage.rows[0].monthly_used_seconds),
+      activeSession: usage.rows[0].active_session,
+    }, limits);
+  }
+
+  async function getVoiceTutorAccess(username, limits, now = new Date()) {
+    return readVoiceTutorAccess(pool, username, limits, now);
+  }
+
+  function mapVoiceTutorSession(row) {
+    return {
+      id: row.id,
+      status: row.status,
+      started_at: row.started_at,
+      expires_at: row.expires_at,
+      ended_at: row.ended_at,
+    };
+  }
+
+  async function reserveVoiceTutorSession(username, { id, idempotencyKey, limits, now = new Date() }) {
+    const client = await pool.connect();
+    const instant = new Date(now);
+    try {
+      await client.query('BEGIN');
+      const user = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+      if (!user.rowCount) throw new Error('USER_NOT_FOUND');
+      await client.query(
+        `UPDATE voice_tutor_sessions SET status = 'expired', billable_seconds = reserved_seconds, ended_at = expires_at
+         WHERE username = $1 AND status = 'active' AND expires_at <= $2`,
+        [username, instant],
+      );
+      const existing = await client.query(
+        `SELECT id, status, started_at, expires_at, ended_at FROM voice_tutor_sessions
+         WHERE username = $1 AND idempotency_key = $2`,
+        [username, idempotencyKey],
+      );
+      if (existing.rowCount) {
+        const access = await readVoiceTutorAccess(client, username, limits, instant);
+        await client.query('COMMIT');
+        return { created: false, session: mapVoiceTutorSession(existing.rows[0]), ...access };
+      }
+      const access = await readVoiceTutorAccess(client, username, limits, instant);
+      const reservedSeconds = Number(limits.sessionSeconds);
+      ensureVoiceTutorReservationAllowed(access, reservedSeconds);
+      const inserted = await client.query(
+        `INSERT INTO voice_tutor_sessions
+         (id, username, idempotency_key, status, reserved_seconds, started_at, expires_at)
+         VALUES ($1, $2, $3, 'active', $4, $5, $6)
+         RETURNING id, status, started_at, expires_at, ended_at`,
+        [id, username, idempotencyKey, reservedSeconds, instant, new Date(instant.getTime() + reservedSeconds * 1000)],
+      );
+      const updatedAccess = await readVoiceTutorAccess(client, username, limits, instant);
+      await client.query('COMMIT');
+      return { created: true, session: mapVoiceTutorSession(inserted.rows[0]), ...updatedAccess };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async function finishVoiceTutorSession(username, sessionId, { limits, now = new Date(), confirmedBillableSeconds = null }) {
+    const client = await pool.connect();
+    const instant = new Date(now);
+    try {
+      await client.query('BEGIN');
+      const user = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+      if (!user.rowCount) throw new Error('USER_NOT_FOUND');
+      await client.query(
+        `UPDATE voice_tutor_sessions SET status = 'expired', billable_seconds = reserved_seconds, ended_at = expires_at
+         WHERE username = $1 AND status = 'active' AND expires_at <= $2`,
+        [username, instant],
+      );
+      const selected = await client.query(
+        `SELECT id, status, reserved_seconds, started_at, expires_at, ended_at FROM voice_tutor_sessions
+         WHERE username = $1 AND id = $2 FOR UPDATE`,
+        [username, sessionId],
+      );
+      if (!selected.rowCount) throw new VoiceTutorError('VOICE_TUTOR_SESSION_NOT_FOUND');
+      const finished = selected.rows[0].status === 'active';
+      let row = selected.rows[0];
+      if (finished) {
+        const billableSeconds = voiceTutorBillableSeconds(row, instant, confirmedBillableSeconds);
+        const updated = await client.query(
+          `UPDATE voice_tutor_sessions
+           SET status = 'completed', billable_seconds = $4, ended_at = $3
+           WHERE username = $1 AND id = $2
+           RETURNING id, status, started_at, expires_at, ended_at`,
+          [username, sessionId, instant, billableSeconds],
+        );
+        row = updated.rows[0];
+      }
+      const access = await readVoiceTutorAccess(client, username, limits, instant);
+      await client.query('COMMIT');
+      return { finished, session: mapVoiceTutorSession(row), ...access };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async function setUserRole(username, role) {
@@ -613,11 +761,13 @@ export function createPostgresRepository(connectionString) {
   }
 
   async function exportUserData(username) {
-    const [account, progress, privacyConsent, subscriptionEvents, paymentRequests, writingAttempts, speakingAttempts, generatedTasks, moduleAttempts, progressSummary, wordProgress, errorBank, aiRequests, auditLog] = await Promise.all([
+    const [account, progress, privacyConsent, subscriptionEvents, subscriptionEntitlements, voiceTutorSessions, paymentRequests, writingAttempts, speakingAttempts, generatedTasks, moduleAttempts, progressSummary, wordProgress, errorBank, aiRequests, auditLog] = await Promise.all([
       pool.query('SELECT username, telegram_id, role, trial_used, subscription_until, created_at, updated_at FROM users WHERE username = $1', [username]),
       pool.query('SELECT data, updated_at FROM user_progress WHERE username = $1', [username]),
       pool.query('SELECT text_processing, voice_processing, policy_version, text_consented_at, voice_consented_at, updated_at FROM privacy_consents WHERE username = $1', [username]),
       pool.query('SELECT id, event_type, days, metadata, created_at FROM subscription_events WHERE username = $1 ORDER BY created_at', [username]),
+      pool.query('SELECT entitlement, starts_at, ends_at, created_at, updated_at FROM subscription_entitlements WHERE username = $1 ORDER BY entitlement', [username]),
+      pool.query('SELECT id, status, reserved_seconds, billable_seconds, started_at, expires_at, ended_at FROM voice_tutor_sessions WHERE username = $1 ORDER BY started_at', [username]),
       pool.query('SELECT id, status, actor_telegram_id, result, created_at, resolved_at FROM payment_requests WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, task_type, assignment, answer, evaluated_answer, review, provider, model, prompt_version, status, error_code, created_at, evaluated_at FROM writing_attempts WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, task_type, assignment, transcript, review, provider, model, prompt_version, status, error_code, created_at, evaluated_at FROM speaking_attempts WHERE username = $1 ORDER BY created_at', [username]),
@@ -636,6 +786,8 @@ export function createPostgresRepository(connectionString) {
       progress: progress.rows[0]?.data || {},
       privacy_consent: privacyConsent.rows[0] || null,
       subscription_events: subscriptionEvents.rows,
+      subscription_entitlements: subscriptionEntitlements.rows,
+      voice_tutor_sessions: voiceTutorSessions.rows,
       payment_requests: paymentRequests.rows,
       writing_attempts: writingAttempts.rows,
       speaking_attempts: speakingAttempts.rows,
@@ -692,6 +844,10 @@ export function createPostgresRepository(connectionString) {
     markTrialUsed,
     activateTrial,
     getSub,
+    setEntitlement,
+    getVoiceTutorAccess,
+    reserveVoiceTutorSession,
+    finishVoiceTutorSession,
     setUserRole,
     getPrivacyConsent,
     setPrivacyConsent,

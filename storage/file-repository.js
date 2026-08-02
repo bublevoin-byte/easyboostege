@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { hashAuthCode, normalizeUsername, subscriptionView } from './shared.js';
+import { ensureVoiceTutorReservationAllowed, hashAuthCode, normalizeUsername, subscriptionView, VoiceTutorError, voiceTutorAccessView, voiceTutorBillableSeconds, voiceTutorQuotaPeriods } from './shared.js';
 
 function normalizeAttemptModels(attempts) {
   return attempts.map((attempt) => ({ ...attempt, model: attempt.model ?? null }));
@@ -15,8 +15,9 @@ function normalizeWritingAttempts(attempts) {
 
 export function createFileRepository(filePath) {
   let loaded = false;
-  let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, payment_requests: {}, subscription_events: [] };
+  let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, subscription_entitlements: {}, voice_tutor_sessions: [], payment_requests: {}, subscription_events: [] };
   let writeQueue = Promise.resolve();
+  let voiceTutorQueue = Promise.resolve();
 
   async function load() {
     if (loaded) return;
@@ -41,6 +42,8 @@ export function createFileRepository(filePath) {
           audit_log: Array.isArray(parsed.audit_log) ? parsed.audit_log : [],
           sessions: parsed.sessions && typeof parsed.sessions === 'object' ? parsed.sessions : {},
           subscriptions: parsed.subscriptions && typeof parsed.subscriptions === 'object' ? parsed.subscriptions : {},
+          subscription_entitlements: parsed.subscription_entitlements && typeof parsed.subscription_entitlements === 'object' ? parsed.subscription_entitlements : {},
+          voice_tutor_sessions: Array.isArray(parsed.voice_tutor_sessions) ? parsed.voice_tutor_sessions : [],
           payment_requests: parsed.payment_requests && typeof parsed.payment_requests === 'object' ? parsed.payment_requests : {},
           subscription_events: Array.isArray(parsed.subscription_events) ? parsed.subscription_events : [],
         };
@@ -189,6 +192,133 @@ export function createFileRepository(filePath) {
 
   async function getSub(username) {
     return subscriptionView(await getUser(username));
+  }
+
+  async function setEntitlement(username, entitlement, { startsAt = new Date(), endsAt = null } = {}) {
+    await load();
+    if (!state.users[username]) throw new Error('USER_NOT_FOUND');
+    if (!/^[a-z0-9_]{1,64}$/u.test(entitlement)) throw new Error('INVALID_ENTITLEMENT');
+    const startsAtMs = new Date(startsAt).getTime();
+    const endsAtMs = endsAt == null ? null : new Date(endsAt).getTime();
+    if (!Number.isFinite(startsAtMs) || (endsAtMs != null && (!Number.isFinite(endsAtMs) || endsAtMs <= startsAtMs))) {
+      throw new Error('INVALID_ENTITLEMENT_PERIOD');
+    }
+    state.subscription_entitlements[username] ||= {};
+    state.subscription_entitlements[username][entitlement] = {
+      starts_at: new Date(startsAtMs).toISOString(),
+      ends_at: endsAtMs == null ? null : new Date(endsAtMs).toISOString(),
+    };
+    await persist();
+  }
+
+  function hasVoiceTutorEntitlement(username, nowMs) {
+    const entitlement = state.subscription_entitlements[username]?.voice_tutor;
+    return Number(state.users[username]?.sub_until || 0) > nowMs
+      && Boolean(entitlement)
+      && new Date(entitlement.starts_at).getTime() <= nowMs
+      && (entitlement.ends_at == null || new Date(entitlement.ends_at).getTime() > nowMs);
+  }
+
+  function voiceTutorUsage(username, now) {
+    const nowMs = new Date(now).getTime();
+    const { dayStart, monthStart } = voiceTutorQuotaPeriods(now);
+    const sessions = state.voice_tutor_sessions.filter((session) => session.username === username);
+    const billableSeconds = (session) => Number(session.billable_seconds ?? session.reserved_seconds ?? 0);
+    return {
+      dailyUsedSeconds: sessions
+        .filter((session) => new Date(session.started_at).getTime() >= dayStart.getTime())
+        .reduce((total, session) => total + billableSeconds(session), 0),
+      monthlyUsedSeconds: sessions
+        .filter((session) => new Date(session.started_at).getTime() >= monthStart.getTime())
+        .reduce((total, session) => total + billableSeconds(session), 0),
+      activeSession: sessions.some((session) => session.status === 'active' && new Date(session.expires_at).getTime() > nowMs),
+    };
+  }
+
+  function expireVoiceTutorSessions(username, now) {
+    const nowMs = new Date(now).getTime();
+    let changed = false;
+    for (const session of state.voice_tutor_sessions) {
+      if (session.username !== username || session.status !== 'active' || new Date(session.expires_at).getTime() > nowMs) continue;
+      session.status = 'expired';
+      session.billable_seconds = session.reserved_seconds;
+      session.ended_at = session.expires_at;
+      changed = true;
+    }
+    return changed;
+  }
+
+  function serializeVoiceTutorMutation(run) {
+    const result = voiceTutorQueue.then(run, run);
+    voiceTutorQueue = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
+  function publicVoiceTutorSession(session) {
+    return {
+      id: session.id,
+      status: session.status,
+      started_at: session.started_at,
+      expires_at: session.expires_at,
+      ended_at: session.ended_at,
+    };
+  }
+
+  async function getVoiceTutorAccess(username, limits, now = new Date()) {
+    await load();
+    const nowMs = new Date(now).getTime();
+    return voiceTutorAccessView({ entitled: hasVoiceTutorEntitlement(username, nowMs), ...voiceTutorUsage(username, now) }, limits);
+  }
+
+  async function reserveVoiceTutorSession(username, { id, idempotencyKey, limits, now = new Date() }) {
+    return serializeVoiceTutorMutation(async () => {
+      await load();
+      if (!state.users[username]) throw new Error('USER_NOT_FOUND');
+      const expired = expireVoiceTutorSessions(username, now);
+      const existing = state.voice_tutor_sessions.find((session) => session.username === username && session.idempotency_key === idempotencyKey);
+      if (existing) {
+        if (expired) await persist();
+        return { created: false, session: publicVoiceTutorSession(existing), ...await getVoiceTutorAccess(username, limits, now) };
+      }
+      const usage = voiceTutorUsage(username, now);
+      const reservedSeconds = Number(limits.sessionSeconds);
+      ensureVoiceTutorReservationAllowed(
+        voiceTutorAccessView({ entitled: hasVoiceTutorEntitlement(username, new Date(now).getTime()), ...usage }, limits),
+        reservedSeconds,
+      );
+      const startedAt = new Date(now);
+      const session = {
+        id,
+        username,
+        idempotency_key: idempotencyKey,
+        status: 'active',
+        reserved_seconds: reservedSeconds,
+        billable_seconds: null,
+        started_at: startedAt.toISOString(),
+        expires_at: new Date(startedAt.getTime() + reservedSeconds * 1000).toISOString(),
+        ended_at: null,
+      };
+      state.voice_tutor_sessions.push(session);
+      await persist();
+      return { created: true, session: publicVoiceTutorSession(session), ...await getVoiceTutorAccess(username, limits, now) };
+    });
+  }
+
+  async function finishVoiceTutorSession(username, sessionId, { limits, now = new Date(), confirmedBillableSeconds = null }) {
+    return serializeVoiceTutorMutation(async () => {
+      await load();
+      const expired = expireVoiceTutorSessions(username, now);
+      const session = state.voice_tutor_sessions.find((entry) => entry.username === username && entry.id === sessionId);
+      if (!session) throw new VoiceTutorError('VOICE_TUTOR_SESSION_NOT_FOUND');
+      const finished = session.status === 'active';
+      if (finished) {
+        session.status = 'completed';
+        session.billable_seconds = voiceTutorBillableSeconds(session, now, confirmedBillableSeconds);
+        session.ended_at = new Date(now).toISOString();
+      }
+      if (finished || expired) await persist();
+      return { finished, session: publicVoiceTutorSession(session), ...await getVoiceTutorAccess(username, limits, now) };
+    });
   }
 
   async function setUserRole(username, role) {
@@ -552,6 +682,8 @@ export function createFileRepository(filePath) {
       progress: state.progress[username] || {},
       privacy_consent: await getPrivacyConsent(username),
       subscription_events: state.subscription_events.filter((item) => item.username === username),
+      subscription_entitlements: Object.entries(state.subscription_entitlements[username] || {}).map(([entitlement, period]) => ({ entitlement, ...period })),
+      voice_tutor_sessions: state.voice_tutor_sessions.filter((item) => item.username === username).map(({ username: owner, idempotency_key, ...item }) => item),
       payment_requests: Object.values(state.payment_requests).filter((item) => item.username === username),
       writing_attempts: state.writing_attempts.filter((item) => item.username === username),
       speaking_attempts: state.speaking_attempts.filter((item) => item.username === username),
@@ -587,6 +719,8 @@ export function createFileRepository(filePath) {
     state.error_bank = state.error_bank.filter((item) => item.username !== username);
     state.ai_requests = state.ai_requests.filter((item) => item.username !== username);
     delete state.subscriptions[username];
+    delete state.subscription_entitlements[username];
+    state.voice_tutor_sessions = state.voice_tutor_sessions.filter((item) => item.username !== username);
     state.subscription_events = state.subscription_events.filter((item) => item.username !== username);
     for (const [id, request] of Object.entries(state.payment_requests)) if (request.username === username) delete state.payment_requests[id];
     for (const [id, session] of Object.entries(state.sessions)) {
@@ -622,6 +756,10 @@ export function createFileRepository(filePath) {
     markTrialUsed,
     activateTrial,
     getSub,
+    setEntitlement,
+    getVoiceTutorAccess,
+    reserveVoiceTutorSession,
+    finishVoiceTutorSession,
     setUserRole,
     getPrivacyConsent,
     setPrivacyConsent,

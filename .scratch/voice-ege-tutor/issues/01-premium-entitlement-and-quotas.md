@@ -4,12 +4,14 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Существующие активные подписки остаются базовыми и не получают voice entitlement автоматически.
-- [ ] Premium entitlement доступен в current-user contract и имеет совместимую миграцию файлового/PostgreSQL-хранилища.
-- [ ] Daily/monthly quota и active-session reservation проверяются сервером и идемпотентны.
-- [ ] UI показывает Premium/paywall и оставшиеся минуты без раскрытия операторской конфигурации.
-- [ ] Экспорт/удаление аккаунта корректно обрабатывают новые структурированные записи.
-- [ ] Targeted tests, `npm run lint`, `npm run check` и `npm test` проходят.
+- [x] Существующие активные подписки остаются базовыми и не получают voice entitlement автоматически.
+- [x] Premium entitlement доступен в current-user contract и имеет совместимую миграцию файлового/PostgreSQL-хранилища.
+- [x] Daily/monthly quota и active-session reservation проверяются сервером и идемпотентны.
+- [x] UI показывает Premium/paywall и оставшиеся минуты без раскрытия операторской конфигурации.
+- [x] Экспорт/удаление аккаунта корректно обрабатывают новые структурированные записи.
+- [x] Targeted tests, `npm run lint`, `npm run check` и `npm test` проходят.
 
+**Result:** base-подписки не повышаются автоматически; `voice_tutor`, остатки 10/120 минут,
+атомарный резерв одной сессии и возврат неиспользованных секунд работают в file/PostgreSQL seams.
