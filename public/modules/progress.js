@@ -53,6 +53,33 @@
     };
   }
 
+  function recoveryOverview(payload) {
+    const value = payload && typeof payload === 'object' ? payload : {};
+    const summary = value.summary && typeof value.summary === 'object' ? value.summary : {};
+    const metric = value.error_recovery_rate && typeof value.error_recovery_rate === 'object' ? value.error_recovery_rate : {};
+    const voice = value.voice_minutes && typeof value.voice_minutes === 'object' ? value.voice_minutes : {};
+    const due = Array.isArray(value.due_repeats) ? value.due_repeats.length : 0;
+    const numerator = Math.max(0, Number(metric.numerator) || 0);
+    const denominator = Math.max(0, Number(metric.denominator) || 0);
+    const used = Math.max(0, Number(voice.used_monthly) || 0);
+    const remaining = Math.max(0, Number(voice.remaining_monthly) || 0);
+    const monthlyLimit = Math.round((used + remaining) * 100) / 100;
+    const potential = Math.max(0, Number(summary.potential_ege_points) || 0);
+    return {
+      counts: {
+        open: Math.max(0, Number(summary.open) || 0),
+        recovered: Math.max(0, Number(summary.recovered) || 0),
+        relapsed: Math.max(0, Number(summary.relapsed) || 0),
+      },
+      rateLabel: denominator ? Math.round(numerator / denominator * 100) + '% подтверждено' : 'Пока нет проверенных переносов',
+      voiceLabel: (Number.isInteger(used) ? used : used.toFixed(1)) + ' из ' + (Number.isInteger(monthlyLimit) ? monthlyLimit : monthlyLimit.toFixed(1)) + ' мин использовано',
+      dueLabel: due + (due === 1 ? ' повтор готов' : ' повторов готово'),
+      potentialLabel: 'до ' + potential + ' учебных баллов потенциала*',
+      notice: value.potential_points_notice || 'Оценка Easy Boost — не официальный балл ЕГЭ.',
+      nextBest: value.next_best_review || null,
+    };
+  }
+
   global.EasyBoostProgress = Object.freeze({
     daysLeft,
     percent,
@@ -61,6 +88,7 @@
     learnedLabel,
     streakLabel,
     overview,
+    recoveryOverview,
     EXAM_DATE,
     MODULES,
     DAILY_GOAL_MINUTES,

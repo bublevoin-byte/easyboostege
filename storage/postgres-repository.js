@@ -2,6 +2,7 @@ import pg from 'pg';
 import { ensureVoiceTutorReservationAllowed, hashAuthCode, normalizeUsername, subscriptionView, VoiceTutorError, voiceTutorAccessView, voiceTutorBillableSeconds, voiceTutorQuotaPeriods } from './shared.js';
 import { transitionPedagogicalState } from '../voice-tutor/state-machine.js';
 import { transitionRuleCardReview } from '../voice-tutor/rule-card.js';
+import { createRecoveryLedger, planRecoveryFromTransfer, planRepeatAttempt, publicRepeatAttempt, recoveryMap, recoveryMetrics } from '../voice-tutor/recovery.js';
 
 const { Pool } = pg;
 
@@ -267,7 +268,7 @@ export function createPostgresRepository(connectionString) {
     return result.rows[0].entitlement;
   }
 
-  async function readVoiceTutorAccess(queryable, username, limits, now = new Date()) {
+  async function readVoiceTutorAccessState(queryable, username, limits, now = new Date()) {
     const instant = new Date(now);
     const { dayStart, monthStart } = voiceTutorQuotaPeriods(instant);
     const [entitlement, usage] = await Promise.all([
@@ -290,12 +291,17 @@ export function createPostgresRepository(connectionString) {
         [username, dayStart, monthStart, instant],
       ),
     ]);
-    return voiceTutorAccessView({
+    const usageState = {
       entitled: entitlement.rows[0].entitled,
       dailyUsedSeconds: Number(usage.rows[0].daily_used_seconds),
       monthlyUsedSeconds: Number(usage.rows[0].monthly_used_seconds),
       activeSession: usage.rows[0].active_session,
-    }, limits);
+    };
+    return { access: voiceTutorAccessView(usageState, limits), usage: usageState };
+  }
+
+  async function readVoiceTutorAccess(queryable, username, limits, now = new Date()) {
+    return (await readVoiceTutorAccessState(queryable, username, limits, now)).access;
   }
 
   async function getVoiceTutorAccess(username, limits, now = new Date()) {
@@ -421,7 +427,8 @@ export function createPostgresRepository(connectionString) {
   async function getVoiceTutorSession(username, sessionId) {
     const result = await pool.query(
       `SELECT id, username, status, reserved_seconds, billable_seconds, capsule_id, capsule, nonce_hash,
-              delivery_mode, pedagogical_state, micro_check_passed, transfer_passed, outcome, error_code,
+              delivery_mode, pedagogical_state, micro_check_passed, micro_check_attempts, micro_check_passes,
+              transfer_passed, outcome, error_code,
               started_at, expires_at, ended_at
        FROM voice_tutor_sessions WHERE username = $1 AND id = $2`,
       [username, sessionId],
@@ -452,11 +459,53 @@ export function createPostgresRepository(connectionString) {
       }, event, row.capsule);
       const updated = await client.query(
         `UPDATE voice_tutor_sessions SET pedagogical_state = $3, micro_check_passed = $4,
-           transfer_passed = $5, outcome = $6, nonce_hash = $7, updated_at = $8
+           transfer_passed = $5, outcome = $6, nonce_hash = $7, updated_at = $8,
+           micro_check_attempts = micro_check_attempts + CASE WHEN $9 AND micro_check_attempts < 100 THEN 1 ELSE 0 END,
+           micro_check_passes = micro_check_passes + CASE WHEN $9 AND $4 AND micro_check_attempts < 100 THEN 1 ELSE 0 END
          WHERE username = $1 AND id = $2
          RETURNING id, status, pedagogical_state, micro_check_passed, transfer_passed, outcome, started_at, expires_at, ended_at`,
-        [username, sessionId, next.state, next.micro_check_passed, next.transfer_passed, next.outcome, nextNonceHash, new Date(now)],
+        [username, sessionId, next.state, next.micro_check_passed, next.transfer_passed, next.outcome, nextNonceHash,
+          new Date(now), row.pedagogical_state === 'micro_check' && event?.type === 'check_answer'],
       );
+      if (event?.type === 'transfer_answer') {
+        const plan = planRecoveryFromTransfer({
+          ledger: createRecoveryLedger(await readRecoveryRows(client, username)),
+          username,
+          sessionId,
+          capsule: row.capsule,
+          pedagogicalState: next,
+          observedAt: now,
+        });
+        if (plan) {
+          const recovery = plan.recovery;
+          await client.query(
+          `INSERT INTO voice_tutor_recoveries
+           (id, username, session_id, skill_id, skill_label, module, rule_id, origin_item_id,
+            origin_transfer_task_id, initial_micro_check_passed, initial_transfer_passed,
+            terminal_outcome, potential_ege_points, observed_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+           ON CONFLICT (session_id) DO NOTHING`,
+          [recovery.id, username, recovery.session_id, recovery.skill_id, recovery.skill_label, recovery.module,
+            recovery.rule_id, recovery.origin_item_id, recovery.origin_transfer_task_id,
+            recovery.initial_micro_check_passed, recovery.initial_transfer_passed, recovery.terminal_outcome,
+            recovery.potential_ege_points, recovery.observed_at],
+        );
+          if (plan.supersededRepeatIds.length) {
+            await client.query(
+              'UPDATE voice_tutor_repeats SET superseded_at = $2 WHERE id = ANY($1::uuid[])',
+              [plan.supersededRepeatIds, new Date(now)],
+            );
+          }
+          for (const repeat of plan.repeats) {
+            await client.query(
+              `INSERT INTO voice_tutor_repeats
+               (id, recovery_id, stage, task_id, due_at, window_ends_at, superseded_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+              [repeat.id, repeat.recovery_id, repeat.stage, repeat.task_id, repeat.due_at, repeat.window_ends_at, repeat.superseded_at],
+            );
+          }
+        }
+      }
       await client.query('COMMIT');
       return { session: mapVoiceTutorSession(updated.rows[0]), capsule: row.capsule };
     } catch (error) {
@@ -465,6 +514,106 @@ export function createPostgresRepository(connectionString) {
     } finally {
       client.release();
     }
+  }
+
+  function mapRecovery(row) {
+    return {
+      ...row,
+      potential_ege_points: Number(row.potential_ege_points),
+      observed_at: new Date(row.observed_at).toISOString(),
+    };
+  }
+
+  function mapRepeat(row) {
+    return {
+      ...row,
+      due_at: new Date(row.due_at).toISOString(),
+      window_ends_at: new Date(row.window_ends_at).toISOString(),
+      superseded_at: row.superseded_at ? new Date(row.superseded_at).toISOString() : null,
+    };
+  }
+
+  function mapRepeatAttempt(row) {
+    return {
+      ...row,
+      passed: Boolean(row.passed),
+      observed_at: new Date(row.observed_at).toISOString(),
+    };
+  }
+
+  async function submitVoiceTutorRepeat(username, repeatId, { attemptId, taskId, answer, now = new Date() }) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT id FROM voice_tutor_repeats WHERE id = $1 FOR UPDATE', [repeatId]);
+      const plan = planRepeatAttempt({
+        ledger: createRecoveryLedger(await readRecoveryRows(client, username)),
+        username, repeatId, attemptId, taskId, answer, now,
+      });
+      if (!plan.created) {
+        await client.query('COMMIT');
+        return { created: false, attempt: publicRepeatAttempt(plan.attempt) };
+      }
+      const inserted = await client.query(
+        `INSERT INTO voice_tutor_repeat_attempts (id, repeat_id, task_id, passed, fingerprint, observed_at)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+        [plan.attempt.id, plan.attempt.repeat_id, plan.attempt.task_id, plan.attempt.passed,
+          plan.attempt.fingerprint, new Date(plan.attempt.observed_at)],
+      );
+      if (plan.daySevenReschedule) {
+        await client.query(
+          `UPDATE voice_tutor_repeats
+           SET due_at = $2, window_ends_at = $3 WHERE id = $1`,
+          [plan.daySevenReschedule.repeatId, new Date(plan.daySevenReschedule.dueAt), new Date(plan.daySevenReschedule.windowEndsAt)],
+        );
+      }
+      await client.query('COMMIT');
+      return { created: true, attempt: publicRepeatAttempt(inserted.rows[0]) };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async function readRecoveryRows(client, username = null) {
+    const where = username == null ? '' : 'WHERE username = $1';
+    const params = username == null ? [] : [username];
+    const recoveriesResult = await client.query(`SELECT * FROM voice_tutor_recoveries ${where} ORDER BY observed_at, id`, params);
+    const recoveries = recoveriesResult.rows.map(mapRecovery);
+    if (!recoveries.length) return { recoveries, repeats: [], attempts: [] };
+    const recoveryIds = recoveries.map((entry) => entry.id);
+    const repeatsResult = await client.query('SELECT * FROM voice_tutor_repeats WHERE recovery_id = ANY($1::uuid[]) ORDER BY due_at, id', [recoveryIds]);
+    const repeats = repeatsResult.rows.map(mapRepeat);
+    const attemptsResult = repeats.length
+      ? await client.query('SELECT * FROM voice_tutor_repeat_attempts WHERE repeat_id = ANY($1::uuid[]) ORDER BY observed_at, id', [repeats.map((entry) => entry.id)])
+      : { rows: [] };
+    return { recoveries, repeats, attempts: attemptsResult.rows.map(mapRepeatAttempt) };
+  }
+
+  async function getVoiceTutorRecoveryMap(username, { limits, now = new Date() }) {
+    const rows = await readRecoveryRows(pool, username);
+    const { access, usage } = await readVoiceTutorAccessState(pool, username, limits, now);
+    return recoveryMap({ ledger: createRecoveryLedger(rows), access, monthlyUsedSeconds: usage.monthlyUsedSeconds, now });
+  }
+
+  async function getVoiceTutorRecoveryMetrics(now = new Date()) {
+    const usage = await pool.query(
+      `SELECT COUNT(*)::int AS sessions,
+              COALESCE(SUM(billable_seconds), 0)::bigint AS billable_seconds,
+              COALESCE(SUM(micro_check_passes), 0)::bigint AS micro_check_passes,
+              COALESCE(SUM(micro_check_attempts), 0)::bigint AS micro_check_attempts
+       FROM voice_tutor_sessions`,
+    );
+    return recoveryMetrics({
+      ledger: createRecoveryLedger(await readRecoveryRows(pool)),
+      now,
+      sessionCount: Number(usage.rows[0].sessions),
+      billableSeconds: Number(usage.rows[0].billable_seconds),
+      microCheckPasses: Number(usage.rows[0].micro_check_passes),
+      microCheckAttempts: Number(usage.rows[0].micro_check_attempts),
+    });
   }
 
   async function setVoiceTutorSessionDelivery(username, sessionId, { mode, errorCode = null }) {
@@ -987,16 +1136,31 @@ export function createPostgresRepository(connectionString) {
   }
 
   async function exportUserData(username) {
-    const [account, progress, privacyConsent, subscriptionEvents, subscriptionEntitlements, voiceTutorSessions, ruleCards, paymentRequests, writingAttempts, speakingAttempts, generatedTasks, moduleAttempts, progressSummary, wordProgress, errorBank, aiRequests, auditLog] = await Promise.all([
+    const [account, progress, privacyConsent, subscriptionEvents, subscriptionEntitlements, voiceTutorSessions, voiceTutorRecoveries, voiceTutorRepeats, voiceTutorRepeatAttempts, ruleCards, paymentRequests, writingAttempts, speakingAttempts, generatedTasks, moduleAttempts, progressSummary, wordProgress, errorBank, aiRequests, auditLog] = await Promise.all([
       pool.query('SELECT username, telegram_id, role, trial_used, subscription_until, created_at, updated_at FROM users WHERE username = $1', [username]),
       pool.query('SELECT data, updated_at FROM user_progress WHERE username = $1', [username]),
       pool.query('SELECT text_processing, voice_processing, policy_version, text_consented_at, voice_consented_at, updated_at FROM privacy_consents WHERE username = $1', [username]),
       pool.query('SELECT id, event_type, days, metadata, created_at FROM subscription_events WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT entitlement, starts_at, ends_at, created_at, updated_at FROM subscription_entitlements WHERE username = $1 ORDER BY entitlement', [username]),
       pool.query(`SELECT id, status, reserved_seconds, billable_seconds, capsule_id, capsule, delivery_mode,
-                         pedagogical_state, micro_check_passed, transfer_passed, outcome, error_code,
+                         pedagogical_state, micro_check_passed, micro_check_attempts, micro_check_passes,
+                         transfer_passed, outcome, error_code,
                          started_at, expires_at, ended_at, updated_at
                   FROM voice_tutor_sessions WHERE username = $1 ORDER BY started_at`, [username]),
+      pool.query(`SELECT id, session_id, skill_id, skill_label, module, rule_id, origin_item_id,
+                         origin_transfer_task_id, initial_micro_check_passed, initial_transfer_passed,
+                         terminal_outcome, potential_ege_points, observed_at
+                  FROM voice_tutor_recoveries WHERE username = $1 ORDER BY observed_at`, [username]),
+      pool.query(`SELECT repeat.id, repeat.recovery_id, repeat.stage, repeat.task_id, repeat.due_at,
+                         repeat.window_ends_at, repeat.superseded_at
+                  FROM voice_tutor_repeats repeat
+                  JOIN voice_tutor_recoveries recovery ON recovery.id = repeat.recovery_id
+                  WHERE recovery.username = $1 ORDER BY repeat.due_at`, [username]),
+      pool.query(`SELECT attempt.id, attempt.repeat_id, attempt.task_id, attempt.passed, attempt.observed_at
+                  FROM voice_tutor_repeat_attempts attempt
+                  JOIN voice_tutor_repeats repeat ON repeat.id = attempt.repeat_id
+                  JOIN voice_tutor_recoveries recovery ON recovery.id = repeat.recovery_id
+                  WHERE recovery.username = $1 ORDER BY attempt.observed_at`, [username]),
       pool.query('SELECT * FROM trusted_rule_cards WHERE created_for_username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, status, actor_telegram_id, result, created_at, resolved_at FROM payment_requests WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, task_type, assignment, answer, evaluated_answer, review, provider, model, prompt_version, status, error_code, created_at, evaluated_at FROM writing_attempts WHERE username = $1 ORDER BY created_at', [username]),
@@ -1018,6 +1182,9 @@ export function createPostgresRepository(connectionString) {
       subscription_events: subscriptionEvents.rows,
       subscription_entitlements: subscriptionEntitlements.rows,
       voice_tutor_sessions: voiceTutorSessions.rows,
+      voice_tutor_recoveries: voiceTutorRecoveries.rows,
+      voice_tutor_repeats: voiceTutorRepeats.rows,
+      voice_tutor_repeat_attempts: voiceTutorRepeatAttempts.rows,
       rule_cards: ruleCards.rows.map(mapRuleCard),
       payment_requests: paymentRequests.rows,
       writing_attempts: writingAttempts.rows,
@@ -1091,6 +1258,9 @@ export function createPostgresRepository(connectionString) {
     advanceVoiceTutorSession,
     setVoiceTutorSessionDelivery,
     switchVoiceTutorSessionDelivery,
+    submitVoiceTutorRepeat,
+    getVoiceTutorRecoveryMap,
+    getVoiceTutorRecoveryMetrics,
     createRuleCard,
     listRuleCards,
     reviewRuleCard,

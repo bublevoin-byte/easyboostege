@@ -4,12 +4,11 @@
 
 **Blocked by:** 03 — Чтение/аудирование; 04 — Письмо/устная часть; 05 — Trusted rules.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Session outcome хранит только структурированные поля без raw audio/full transcript.
-- [ ] Повтор через 1 и 7 дней привязан к skill и не считается пройденным по исходному примеру.
-- [ ] API карты отдаёт server-owned aggregates текущего пользователя и не раскрывает чужие данные.
-- [ ] UI показывает recovered/open/relapsed skills, voice minutes и следующий полезный разбор.
-- [ ] `error_recovery_rate` вычисляется детерминированно и доступен в metrics без PII.
-- [ ] Targeted tests, `npm run lint`, `npm run check` и `npm test` проходят.
-
+- [x] Session outcome хранит только структурированные поля без raw audio/full transcript.
+- [x] Повтор через 1 и 7 дней привязан к skill и не считается пройденным по исходному примеру.
+- [x] API карты отдаёт server-owned aggregates текущего пользователя и не раскрывает чужие данные.
+- [x] UI показывает recovered/open/relapsed skills, voice minutes и следующий полезный разбор.
+- [x] `error_recovery_rate` вычисляется детерминированно и доступен в metrics без PII.
+- [x] Targeted tests, `npm run lint`, `npm run check` и `npm test` проходят.

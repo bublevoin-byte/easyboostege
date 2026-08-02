@@ -253,6 +253,16 @@ test('application starts and serves health, security headers and PWA assets', { 
     assert.deepEqual(metrics.aiUsage, {
       windowHours: 24, requests: 2, promptTokens: 0, completionTokens: 0, estimatedCostMicrousd: 0,
     });
+    assert.deepEqual(metrics.voiceTutorRecovery, {
+      open: 0, recovered: 0, relapsed: 0, numerator: 0, denominator: 0, error_recovery_rate: 0,
+      due_repeats: 0, overdue_repeats: 0, sessions: 0, voice_minutes: 0,
+      micro_check: { passed: 0, observed: 0, rate: 0 },
+      initial_transfer: { passed: 0, observed: 0, rate: 0 },
+      repeat_passes: {
+        day_1: { passed: 0, observed: 0, rate: 0 },
+        day_7: { passed: 0, observed: 0, rate: 0 },
+      },
+    });
     assert.ok(metrics.system.disk.totalBytes > 0);
     assert.equal(metrics.system.backup.fresh, false);
     const unauthorizedMetrics = await fetch(`${baseUrl}/internal/metrics`);

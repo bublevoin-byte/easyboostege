@@ -889,7 +889,7 @@ export {DEMO_MODE,SRV,registerProfileHook,registerStartHook,toast};
  */
 export {
   EGE_WORDS,LSLOW,L_PLAYSVG,S,TOKEN,W37,W38,WBTN,
-  apiMessage,apiPost,apiPostBinary,currentUser,examModule,gExamFmt,gSync,generateAiContent,
+  apiGet,apiMessage,apiPost,apiPostBinary,currentUser,examModule,gExamFmt,gSync,generateAiContent,
   grammarModule,lSetSlow,lSt,lSync,listeningModule,profileModule,progressModule,readingModule,
   rEsc,rSt,rWordsHtml,registerScreenGenerator,ringOff,runProfileHooks,setTxt,setW,spSt,spSync,
   speakingModule,srsFail,srsOk,todayStr,ui,wBase,wDeco,wMergeAi,wMigrate,wRec,wStats,wSync,

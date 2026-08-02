@@ -48,6 +48,14 @@ const PUBLIC_ERRORS = Object.freeze({
   RULE_CARD_CANONICAL_EXISTS: { status: 409, message: 'Для этого навыка уже одобрено каноническое правило.' },
   RULE_CARD_NOT_FOUND: { status: 404, message: 'Карточка правила не найдена.' },
   RULE_CARD_REVIEW_CONFLICT: { status: 409, message: 'Карточка уже получила другое решение.' },
+  VOICE_TUTOR_REPEAT_NOT_FOUND: { status: 404, message: 'Повтор навыка не найден.' },
+  VOICE_TUTOR_REPEAT_NOT_DUE: { status: 409, message: 'Повтор навыка ещё не доступен.' },
+  VOICE_TUTOR_REPEAT_EXPIRED: { status: 409, message: 'Этот повтор заменён более новым разбором.' },
+  VOICE_TUTOR_REPEAT_OUT_OF_ORDER: { status: 409, message: 'Сначала пройдите повтор через один день.' },
+  VOICE_TUTOR_REPEAT_TASK_MISMATCH: { status: 422, message: 'Задание повтора не соответствует серверной карте.' },
+  VOICE_TUTOR_REPEAT_ALREADY_ATTEMPTED: { status: 409, message: 'Для этого повтора уже сохранена проверенная попытка.' },
+  VOICE_TUTOR_REPEAT_ATTEMPT_CONFLICT: { status: 409, message: 'Идентификатор попытки уже использован.' },
+  VOICE_TUTOR_REPEAT_ANSWER_INVALID: { status: 422, message: 'Ответ повтора некорректен.' },
 });
 
 function sendVoiceTutorError(error, res, next) {
@@ -114,6 +122,16 @@ function parseRuleDiscovery(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length !== 1
     || !SESSION_ID.test(String(body.session_id || ''))) return null;
   return { sessionId: String(body.session_id) };
+}
+
+function parseRepeatAttempt(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)
+    || Object.keys(body).length !== 3
+    || Object.keys(body).some((key) => !['attemptId', 'taskId', 'answer'].includes(key))) return null;
+  if (!ATTEMPT_ID.test(String(body.attemptId || ''))
+    || !/^[a-z0-9][a-z0-9._:-]{3,179}$/u.test(String(body.taskId || ''))
+    || typeof body.answer !== 'string' || body.answer.length < 1 || body.answer.length > 200) return null;
+  return { attemptId: String(body.attemptId), taskId: String(body.taskId), answer: body.answer };
 }
 
 function publicRuleCard(card) {
@@ -233,6 +251,28 @@ export function createVoiceTutorRoutes({
 }) {
   const router = express.Router();
   const { auth } = authentication;
+
+  router.get('/api/v1/voice-tutor/recovery-map', auth, async (req, res, next) => {
+    try {
+      return res.json(await db.getVoiceTutorRecoveryMap(req.user, { limits, now: now() }));
+    } catch (error) {
+      return sendVoiceTutorError(error, res, next);
+    }
+  });
+
+  router.post('/api/v1/voice-tutor/repeats/:repeatId/attempts', auth, async (req, res, next) => {
+    if (!ATTEMPT_ID.test(req.params.repeatId)) {
+      return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректный идентификатор повтора.' } });
+    }
+    const parsed = parseRepeatAttempt(req.body);
+    if (!parsed) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректная попытка повтора.' } });
+    try {
+      const result = await db.submitVoiceTutorRepeat(req.user, req.params.repeatId, { ...parsed, now: now() });
+      return res.status(result.created ? 201 : 200).json(result);
+    } catch (error) {
+      return sendVoiceTutorError(error, res, next);
+    }
+  });
   const requireAdmin = authentication.requireRole
     ? authentication.requireRole('admin')
     : (req, res) => res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Недостаточно прав.' } });

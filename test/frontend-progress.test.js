@@ -70,3 +70,40 @@ test('progress module treats a missing state as a zero starting point', () => {
   assert.equal(view.daily.percent, 0);
   assert.deepEqual(plain(view.modules), { words: 0, gram: 0, read: 0, listen: 0, write: 0, speak: 0 });
 });
+
+test('progress module turns the recovery map into adaptive, non-official learning labels', () => {
+  const progress = createProgressModule();
+  const view = progress.recoveryOverview({
+    summary: { open: 2, recovered: 3, relapsed: 1, potential_ege_points: 4 },
+    error_recovery_rate: { numerator: 3, denominator: 4, rate: 0.75 },
+    voice_minutes: { used_monthly: 12.5, remaining_daily: 7, remaining_monthly: 107.5 },
+    due_repeats: [{ id: 'repeat-1', stage: 'day_1', status: 'due' }],
+    next_best_review: { type: 'repeat', repeat_id: 'repeat-1', skill_id: 'ege.grammar.past_simple', skill_label: 'Past Simple', potential_ege_points: 1 },
+  });
+
+  assert.deepEqual(plain(view.counts), { open: 2, recovered: 3, relapsed: 1 });
+  assert.equal(view.nextBest.skill_label, 'Past Simple');
+  assert.equal(view.rateLabel, '75% подтверждено');
+  assert.equal(view.voiceLabel, '12.5 из 120 мин использовано');
+  assert.equal(view.dueLabel, '1 повтор готов');
+  assert.equal(view.potentialLabel, 'до 4 учебных баллов потенциала*');
+  assert.match(view.notice, /не официальный балл ЕГЭ/u);
+  assert.equal(progress.recoveryOverview(null).rateLabel, 'Пока нет проверенных переносов');
+});
+
+test('progress screen exposes an accessible recovery card and a server-owned repeat form', async () => {
+  const [markup, screen] = await Promise.all([
+    fs.readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../public/screens/progress.js', import.meta.url), 'utf8'),
+  ]);
+
+  assert.match(markup, /id="voice_recovery_map"[^>]*aria-label="Карта освоенных ошибок"[^>]*aria-live="polite"/u);
+  assert.match(screen, /apiGet\('\/api\/v1\/voice-tutor\/recovery-map'\)/u);
+  assert.match(screen, /repeat\.task_id/u);
+  assert.match(screen, /apiPost\('\/api\/v1\/voice-tutor\/repeats\/'/u);
+  assert.match(screen, /input\.maxLength=200/u);
+  assert.match(screen, /initial_micro_check_passed/u);
+  assert.match(screen, /view\.nextBest/u);
+  assert.doesNotMatch(screen, /skills\.slice\(0,\s*4\)/u);
+  assert.match(source, /не официальный балл ЕГЭ/u);
+});

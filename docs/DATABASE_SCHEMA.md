@@ -10,6 +10,9 @@
 | `subscriptions` | текущее состояние доступа | `username`, status, source, start/end timestamps |
 | `subscription_entitlements` | отдельные тарифные права Premium | `username`, entitlement, start/end timestamps |
 | `voice_tutor_sessions` | голосовая квота и структурированный ход разбора без аудио и полного transcript | bounded capsule, delivery/state/outcome, micro-check/transfer flags, reserved/billable seconds and timestamps |
+| `voice_tutor_recoveries` | server-validated результат педагогического FSM по навыку | session/skill/rule ids, bounded state flags, module, potential-points mapping and timestamp; no learner text |
+| `voice_tutor_repeats` | server-owned интервалы переноса навыка | distinct task id, UTC day-1/day-7 due/window and supersession state |
+| `voice_tutor_repeat_attempts` | одна проверенная попытка нового аналога | opaque attempt/repeat/task ids, pass flag, idempotency hash and timestamp; no submitted answer |
 | `trusted_rule_cards` | очередь найденных правил и проверенный canonical слой | bounded rule, skill/exam year, source URL/content hashes, status, discrepancies and review audit; полных страниц нет |
 | `payment_requests` | ручные заявки на оплату | status, administrator, result and resolution time |
 | `user_progress` | JSONB-прогресс пользователя | `username`, `data`, `updated_at` |
@@ -67,6 +70,20 @@ server-owned attempt id. В `voice_tutor_sessions`, её capsule и экспор
 текущего разбора, входит в экспорт ученика; при удалении аккаунта creator очищается, а совпавший
 reviewer в сохранённом административном аудите обезличивается. Source records содержат только URL,
 retrieval time и SHA-256 страницы, но не HTML/текст страницы.
+
+Миграция `024_voice_tutor_recovery_map.sql` добавляет в Voice Tutor session bounded-счётчики
+`micro_check_attempts`/`micro_check_passes` (без ответов ученика) и создаёт карту только из проверенного события
+`transfer_answer` существующего Voice Tutor FSM. Клиент не может записать outcome, skill, rule или
+потенциальные баллы. Повторы получают новый server-owned `task_id` и отдельный UUID попытки, поэтому
+исходное задание и transfer-пример сессии не засчитываются повторно. `day_1` открывается через 24 часа,
+`day_7` — не раньше семи суток от outcome и не раньше шести суток после позднего day-1 pass. Окно
+24 часа используется как UX-метка: overdue остаётся доступным. Непроверенная просрочка остаётся
+`open`, а `relapsed` возникает только после неверного ответа на новый серверный аналог. Новая
+сессия того же skill заменяет только старые непредъявленные повторы; завершённая история сохраняется.
+Server-owned mapping ограничивает потенциал одного episode: grammar/vocabulary/reading/listening —
+до 1 учебного балла, writing/speaking — до 2 и не выше сохранённой потери критерия. Сумма в UI —
+приоритет обучения Easy Boost, а не прогноз или официальный пересчёт первичных/тестовых баллов ЕГЭ.
+
 Для reading/listening capsule сохраняет только server-owned фрагмент текущего пункта до 600
 символов (`source_excerpt` или `transcript_segment`), но не полный текст/транскрипт и не ответы
 соседних пунктов попытки. Такие ошибки нельзя создать по одному присланному варианту: endpoint

@@ -850,7 +850,7 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
         <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3" stroke="#2B2B2B" opacity=".4"/><rect x="2.4" y="2.4" width="15" height="7.2" rx="1.6" fill="#2B2B2B"/><rect x="23" y="4" width="2" height="4" rx="1" fill="#2B2B2B"/></svg>
       </div>
     </div>
-    <div style="position:absolute;top:52px;left:0;right:0;bottom:86px;padding:8px 20px 14px;z-index:5;overflow:hidden;">
+    <div style="position:absolute;top:52px;left:0;right:0;bottom:86px;padding:8px 20px 14px;z-index:5;overflow-y:auto;overflow-x:hidden;">
       <div style="font-weight:800;font-size:22px;color:#2B2B2B;letter-spacing:-.3px;">Мой прогресс</div>
       <!-- big number row -->
       <div style="margin-top:16px;display:flex;gap:12px;">
@@ -863,6 +863,10 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
           <div style="background:#fff;border-radius:16px;padding:12px 14px;box-shadow:0 8px 20px rgba(20,20,30,.05);"><div id="p_words" style="font-weight:800;font-size:22px;color:#2B2B2B;">320</div><div style="font-weight:600;font-size:11px;color:#6A6E75;margin-top:1px;">слов выучено</div></div>
         </div>
       </div>
+      <section id="voice_recovery_map" aria-label="Карта освоенных ошибок" aria-live="polite" style="margin-top:14px;background:#fff;border-radius:20px;padding:16px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
+        <div style="font-weight:700;font-size:13px;color:#2B2B2B;">Карта освоенных ошибок</div>
+        <div style="font-weight:600;font-size:12px;color:#6A6E75;margin-top:8px;">Загружаем проверенные переносы навыков…</div>
+      </section>
       <!-- line chart -->
       <div style="margin-top:14px;background:#fff;border-radius:20px;padding:16px 16px 12px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
         <div style="display:flex;align-items:center;justify-content:space-between;">

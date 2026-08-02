@@ -25,6 +25,9 @@ export const getVoiceTutorSession = (...args) => repository.getVoiceTutorSession
 export const advanceVoiceTutorSession = (...args) => repository.advanceVoiceTutorSession(...args);
 export const setVoiceTutorSessionDelivery = (...args) => repository.setVoiceTutorSessionDelivery(...args);
 export const switchVoiceTutorSessionDelivery = (...args) => repository.switchVoiceTutorSessionDelivery(...args);
+export const submitVoiceTutorRepeat = (...args) => repository.submitVoiceTutorRepeat(...args);
+export const getVoiceTutorRecoveryMap = (...args) => repository.getVoiceTutorRecoveryMap(...args);
+export const getVoiceTutorRecoveryMetrics = (...args) => repository.getVoiceTutorRecoveryMetrics(...args);
 export const createRuleCard = (...args) => repository.createRuleCard(...args);
 export const listRuleCards = (...args) => repository.listRuleCards(...args);
 export const reviewRuleCard = (...args) => repository.reviewRuleCard(...args);

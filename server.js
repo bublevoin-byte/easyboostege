@@ -8,7 +8,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { claimUnseenBankTask, getBankTask, getBankTaskByExternalId, listBankTaskContents, recordTaskDelivery, upsertBankTask, activateTrial, closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, countAiOperationRequestsSince, countAiRequestsSince, createPaymentRequest, createRuleCard, createSession, createSpeakingAttempt, createTelegramAuthCode, createWritingAttempt, deleteUserData, exportUserData, finishSpeakingAttempt, finishVoiceTutorSession, finishWritingAttempt, getAiUsageMetrics, getApprovedRuleCard, getGeneratedTask, getSharedGeneratedTask, getModuleAttempt, getPrivacyConsent, getProgress, getSpeakingAttempt, getUser, getVoiceTutorAccess, getVoiceTutorSession, getWritingAttempt, healthCheck, isSessionActive, listRuleCards, recordModuleAttempt, reserveVoiceTutorSession, resolvePaymentRequest, reviewRuleCard, revokeSession, saveGeneratedTask, saveProgress, setPrivacyConsent, setUserRole, upsertErrorBank, upsertWordProgress, mergeProgress, getUserByTelegram, createTelegramUser, logAiRequest, getSub, advanceVoiceTutorSession, setVoiceTutorSessionDelivery, switchVoiceTutorSessionDelivery } from './db.js';
+import { claimUnseenBankTask, getBankTask, getBankTaskByExternalId, listBankTaskContents, recordTaskDelivery, upsertBankTask, activateTrial, closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, countAiOperationRequestsSince, countAiRequestsSince, createPaymentRequest, createRuleCard, createSession, createSpeakingAttempt, createTelegramAuthCode, createWritingAttempt, deleteUserData, exportUserData, finishSpeakingAttempt, finishVoiceTutorSession, finishWritingAttempt, getAiUsageMetrics, getApprovedRuleCard, getGeneratedTask, getSharedGeneratedTask, getModuleAttempt, getPrivacyConsent, getProgress, getSpeakingAttempt, getUser, getVoiceTutorAccess, getVoiceTutorRecoveryMap, getVoiceTutorRecoveryMetrics, getVoiceTutorSession, getWritingAttempt, healthCheck, isSessionActive, listRuleCards, recordModuleAttempt, reserveVoiceTutorSession, resolvePaymentRequest, reviewRuleCard, revokeSession, saveGeneratedTask, saveProgress, setPrivacyConsent, setUserRole, submitVoiceTutorRepeat, upsertErrorBank, upsertWordProgress, mergeProgress, getUserByTelegram, createTelegramUser, logAiRequest, getSub, advanceVoiceTutorSession, setVoiceTutorSessionDelivery, switchVoiceTutorSessionDelivery } from './db.js';
 import { config } from './config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from './ai/writing.js';
 import { buildContentPrompt, CONTENT_PROMPT_VERSION, contentRequestSchema, parseContentResponse } from './ai/content.js';
@@ -176,6 +176,7 @@ const dbApi = {
   createTelegramAuthCode, consumeTelegramAuthCode, getUserByTelegram, createTelegramUser, getSub,
   getVoiceTutorAccess, reserveVoiceTutorSession, finishVoiceTutorSession, getVoiceTutorSession,
   advanceVoiceTutorSession, setVoiceTutorSessionDelivery, switchVoiceTutorSessionDelivery,
+  submitVoiceTutorRepeat, getVoiceTutorRecoveryMap, getVoiceTutorRecoveryMetrics,
   createRuleCard, listRuleCards, reviewRuleCard, getApprovedRuleCard,
   revokeSession, exportUserData, deleteUserData, getPrivacyConsent, setPrivacyConsent,
   getProgress, saveProgress, mergeProgress, recordModuleAttempt, getModuleAttempt, upsertWordProgress, upsertErrorBank,
@@ -188,8 +189,10 @@ async function promoteConfiguredAdmin(username, telegramId) {
 }
 
 async function buildMonitoringSnapshot() {
-  const [aiUsage, system] = await Promise.all([getAiUsageMetrics(24), collectSystemMetrics(__dirname)]);
-  return { ...metricsSnapshot(), aiUsage, system };
+  const [aiUsage, voiceTutorRecovery, system] = await Promise.all([
+    getAiUsageMetrics(24), getVoiceTutorRecoveryMetrics(new Date()), collectSystemMetrics(__dirname),
+  ]);
+  return { ...metricsSnapshot(), aiUsage, voiceTutorRecovery, system };
 }
 
 // ---- Telegram bot ----

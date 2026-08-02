@@ -695,7 +695,7 @@ production credentials, три доказанных P0 отмечены во в�
 | 03 | Контекстный голосовой разбор чтения и аудирования | done |
 | 04 | Контекстный голосовой разбор письма и устной части | done |
 | 05 | Поиск отсутствующих правил по доверенным источникам и очередь проверки | done |
-| 06 | Карта освоенных ошибок и возвращённых потенциальных баллов | pending |
+| 06 | Карта освоенных ошибок и возвращённых потенциальных баллов | done |
 | 07 | Приватность, безопасность, observability и сквозная проверка | pending |
 
 Тикет 01 закрыт: base и Premium разделены правом `voice_tutor`; UTC-квоты 10/120 минут,
@@ -738,3 +738,13 @@ Admin-only approve/reject идемпотентны, а общий canonical look
 следующий session capsule без повторного поиска. File/PostgreSQL/export/delete parity подтверждены:
 targeted workflow 6/6, frontend 6/6, disposable PostgreSQL 1/1, полный набор 466
 (465 pass, 1 штатный PostgreSQL skip), `lint`, `check`, frontend build и secret scans проходят.
+
+Тикет 06 закрыт: только проверенный `transfer_answer` FSM создаёт bounded recovery outcome и два
+новых server-owned аналога day-1/day-7, привязанных к нормализованным skill/rule. Исходное задание,
+сессионный transfer и клиентские skill/points не засчитываются; отправленный repeat-ответ не
+сохраняется. Overdue остаётся доступным, поздний day-1 сохраняет шестидневный интервал до day-7,
+а `relapsed` возникает только после проверенной ошибки, не из-за бездействия. Current-user API и
+адаптивная карта показывают open/recovered/relapsed, due repeats, минуты и явно неофициальный
+potential; admin metrics содержат только агрегаты. File/PostgreSQL/export/delete parity подтверждены:
+targeted tests 18/18, полный набор 473 (472 pass, 1 штатный PostgreSQL skip), disposable PostgreSQL
+1/1, `lint`, `check`, frontend build и оба secret scans проходят.

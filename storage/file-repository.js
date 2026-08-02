@@ -3,6 +3,7 @@ import path from 'node:path';
 import { ensureVoiceTutorReservationAllowed, hashAuthCode, normalizeUsername, subscriptionView, VoiceTutorError, voiceTutorAccessView, voiceTutorBillableSeconds, voiceTutorQuotaPeriods } from './shared.js';
 import { transitionPedagogicalState } from '../voice-tutor/state-machine.js';
 import { transitionRuleCardReview } from '../voice-tutor/rule-card.js';
+import { createRecoveryLedger, planRecoveryFromTransfer, planRepeatAttempt, publicRepeatAttempt, recoveryMap, recoveryMetrics } from '../voice-tutor/recovery.js';
 
 function normalizeAttemptModels(attempts) {
   return attempts.map((attempt) => ({ ...attempt, model: attempt.model ?? null }));
@@ -17,7 +18,7 @@ function normalizeWritingAttempts(attempts) {
 
 export function createFileRepository(filePath) {
   let loaded = false;
-  let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, subscription_entitlements: {}, voice_tutor_sessions: [], rule_cards: [], payment_requests: {}, subscription_events: [] };
+  let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, subscription_entitlements: {}, voice_tutor_sessions: [], voice_tutor_recoveries: [], voice_tutor_repeats: [], voice_tutor_repeat_attempts: [], rule_cards: [], payment_requests: {}, subscription_events: [] };
   let writeQueue = Promise.resolve();
   let voiceTutorQueue = Promise.resolve();
   let ruleCardQueue = Promise.resolve();
@@ -46,7 +47,14 @@ export function createFileRepository(filePath) {
           sessions: parsed.sessions && typeof parsed.sessions === 'object' ? parsed.sessions : {},
           subscriptions: parsed.subscriptions && typeof parsed.subscriptions === 'object' ? parsed.subscriptions : {},
           subscription_entitlements: parsed.subscription_entitlements && typeof parsed.subscription_entitlements === 'object' ? parsed.subscription_entitlements : {},
-          voice_tutor_sessions: Array.isArray(parsed.voice_tutor_sessions) ? parsed.voice_tutor_sessions : [],
+          voice_tutor_sessions: Array.isArray(parsed.voice_tutor_sessions) ? parsed.voice_tutor_sessions.map((session) => ({
+            ...session,
+            micro_check_attempts: Number(session.micro_check_attempts || 0),
+            micro_check_passes: Number(session.micro_check_passes || 0),
+          })) : [],
+          voice_tutor_recoveries: Array.isArray(parsed.voice_tutor_recoveries) ? parsed.voice_tutor_recoveries : [],
+          voice_tutor_repeats: Array.isArray(parsed.voice_tutor_repeats) ? parsed.voice_tutor_repeats : [],
+          voice_tutor_repeat_attempts: Array.isArray(parsed.voice_tutor_repeat_attempts) ? parsed.voice_tutor_repeat_attempts : [],
           rule_cards: Array.isArray(parsed.rule_cards) ? parsed.rule_cards : [],
           payment_requests: parsed.payment_requests && typeof parsed.payment_requests === 'object' ? parsed.payment_requests : {},
           subscription_events: Array.isArray(parsed.subscription_events) ? parsed.subscription_events : [],
@@ -319,6 +327,8 @@ export function createFileRepository(filePath) {
           delivery_mode: 'voice',
           pedagogical_state: 'diagnose',
           micro_check_passed: null,
+          micro_check_attempts: 0,
+          micro_check_passes: 0,
           transfer_passed: null,
           outcome: null,
         } : {}),
@@ -344,6 +354,7 @@ export function createFileRepository(filePath) {
         throw new VoiceTutorError('VOICE_TUTOR_SESSION_EXPIRED');
       }
       if (!session.nonce_hash || session.nonce_hash !== nonceHash) throw new VoiceTutorError('VOICE_TUTOR_NONCE_REPLAYED');
+      const evaluatedMicroCheck = session.pedagogical_state === 'micro_check' && event?.type === 'check_answer';
       const next = transitionPedagogicalState({
         state: session.pedagogical_state,
         micro_check_passed: session.micro_check_passed,
@@ -354,10 +365,95 @@ export function createFileRepository(filePath) {
       session.micro_check_passed = next.micro_check_passed;
       session.transfer_passed = next.transfer_passed;
       session.outcome = next.outcome;
+      if (evaluatedMicroCheck) {
+        const attempts = Number(session.micro_check_attempts || 0);
+        if (attempts < 100) {
+          session.micro_check_attempts = attempts + 1;
+          if (next.micro_check_passed) session.micro_check_passes = Number(session.micro_check_passes || 0) + 1;
+        }
+      }
       session.nonce_hash = nextNonceHash;
       session.updated_at = new Date(now).toISOString();
+      if (event?.type === 'transfer_answer') {
+        const plan = planRecoveryFromTransfer({
+          ledger: createRecoveryLedger({
+            recoveries: state.voice_tutor_recoveries,
+            repeats: state.voice_tutor_repeats,
+            attempts: state.voice_tutor_repeat_attempts,
+          }),
+          username,
+          sessionId: session.id,
+          capsule: session.capsule,
+          pedagogicalState: next,
+          observedAt: now,
+        });
+        if (plan) {
+          const superseded = new Set(plan.supersededRepeatIds);
+          for (const repeat of state.voice_tutor_repeats) {
+            if (superseded.has(repeat.id)) repeat.superseded_at = new Date(now).toISOString();
+          }
+          state.voice_tutor_recoveries.push({ ...plan.recovery });
+          state.voice_tutor_repeats.push(...plan.repeats.map((repeat) => ({ ...repeat })));
+        }
+      }
       await persist();
       return { session: publicVoiceTutorSession(session), capsule: structuredClone(session.capsule) };
+    });
+  }
+
+  async function submitVoiceTutorRepeat(username, repeatId, { attemptId, taskId, answer, now = new Date() }) {
+    return serializeVoiceTutorMutation(async () => {
+      await load();
+      const plan = planRepeatAttempt({
+        ledger: createRecoveryLedger({
+          recoveries: state.voice_tutor_recoveries,
+          repeats: state.voice_tutor_repeats,
+          attempts: state.voice_tutor_repeat_attempts,
+        }),
+        username, repeatId, attemptId, taskId, answer, now,
+      });
+      if (!plan.created) return { created: false, attempt: publicRepeatAttempt(plan.attempt) };
+      state.voice_tutor_repeat_attempts.push({ ...plan.attempt });
+      if (plan.daySevenReschedule) {
+        const daySeven = state.voice_tutor_repeats.find((entry) => entry.id === plan.daySevenReschedule.repeatId);
+        daySeven.due_at = plan.daySevenReschedule.dueAt;
+        daySeven.window_ends_at = plan.daySevenReschedule.windowEndsAt;
+      }
+      await persist();
+      return { created: true, attempt: publicRepeatAttempt(plan.attempt) };
+    });
+  }
+
+  async function getVoiceTutorRecoveryMap(username, { limits, now = new Date() }) {
+    await load();
+    const recoveries = state.voice_tutor_recoveries.filter((entry) => entry.username === username);
+    const recoveryIds = new Set(recoveries.map((entry) => entry.id));
+    const repeats = state.voice_tutor_repeats.filter((entry) => recoveryIds.has(entry.recovery_id));
+    const repeatIds = new Set(repeats.map((entry) => entry.id));
+    const attempts = state.voice_tutor_repeat_attempts.filter((entry) => repeatIds.has(entry.repeat_id));
+    const usage = voiceTutorUsage(username, now);
+    const access = await getVoiceTutorAccess(username, limits, now);
+    return recoveryMap({
+      ledger: createRecoveryLedger({ recoveries, repeats, attempts }),
+      access,
+      monthlyUsedSeconds: usage.monthlyUsedSeconds,
+      now,
+    });
+  }
+
+  async function getVoiceTutorRecoveryMetrics(now = new Date()) {
+    await load();
+    return recoveryMetrics({
+      ledger: createRecoveryLedger({
+        recoveries: state.voice_tutor_recoveries,
+        repeats: state.voice_tutor_repeats,
+        attempts: state.voice_tutor_repeat_attempts,
+      }),
+      billableSeconds: state.voice_tutor_sessions.reduce((sum, session) => sum + Number(session.billable_seconds || 0), 0),
+      sessionCount: state.voice_tutor_sessions.length,
+      microCheckPasses: state.voice_tutor_sessions.reduce((sum, session) => sum + Number(session.micro_check_passes || 0), 0),
+      microCheckAttempts: state.voice_tutor_sessions.reduce((sum, session) => sum + Number(session.micro_check_attempts || 0), 0),
+      now,
     });
   }
 
@@ -870,6 +966,16 @@ export function createFileRepository(filePath) {
       voice_tutor_sessions: state.voice_tutor_sessions
         .filter((item) => item.username === username)
         .map(({ username: owner, idempotency_key, nonce_hash, ...item }) => item),
+      voice_tutor_recoveries: state.voice_tutor_recoveries
+        .filter((item) => item.username === username)
+        .map(({ username: owner, ...item }) => item),
+      voice_tutor_repeats: state.voice_tutor_repeats.filter((item) => (
+        state.voice_tutor_recoveries.some((recovery) => recovery.username === username && recovery.id === item.recovery_id)
+      )),
+      voice_tutor_repeat_attempts: state.voice_tutor_repeat_attempts
+        .filter((item) => state.voice_tutor_repeats.some((repeat) => repeat.id === item.repeat_id
+          && state.voice_tutor_recoveries.some((recovery) => recovery.username === username && recovery.id === repeat.recovery_id)))
+        .map(({ fingerprint, ...item }) => item),
       rule_cards: state.rule_cards.filter((item) => item.created_for_username === username),
       payment_requests: Object.values(state.payment_requests).filter((item) => item.username === username),
       writing_attempts: state.writing_attempts.filter((item) => item.username === username),
@@ -908,6 +1014,11 @@ export function createFileRepository(filePath) {
     delete state.subscriptions[username];
     delete state.subscription_entitlements[username];
     state.voice_tutor_sessions = state.voice_tutor_sessions.filter((item) => item.username !== username);
+    const recoveryIds = new Set(state.voice_tutor_recoveries.filter((item) => item.username === username).map((item) => item.id));
+    const repeatIds = new Set(state.voice_tutor_repeats.filter((item) => recoveryIds.has(item.recovery_id)).map((item) => item.id));
+    state.voice_tutor_repeat_attempts = state.voice_tutor_repeat_attempts.filter((item) => !repeatIds.has(item.repeat_id));
+    state.voice_tutor_repeats = state.voice_tutor_repeats.filter((item) => !recoveryIds.has(item.recovery_id));
+    state.voice_tutor_recoveries = state.voice_tutor_recoveries.filter((item) => item.username !== username);
     for (const card of state.rule_cards) {
       if (card.created_for_username === username) card.created_for_username = null;
       for (const audit of card.review_audit || []) {
@@ -960,6 +1071,9 @@ export function createFileRepository(filePath) {
     advanceVoiceTutorSession,
     setVoiceTutorSessionDelivery,
     switchVoiceTutorSessionDelivery,
+    submitVoiceTutorRepeat,
+    getVoiceTutorRecoveryMap,
+    getVoiceTutorRecoveryMetrics,
     createRuleCard,
     listRuleCards,
     reviewRuleCard,

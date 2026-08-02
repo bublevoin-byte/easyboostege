@@ -10,7 +10,7 @@ security:
 paths:
   /api/v1/admin/metrics:
     get:
-      summary: Read process uptime and bounded HTTP metrics
+      summary: Read process uptime, bounded HTTP and PII-free Voice Tutor recovery, micro-check and day-1/day-7 pass metrics
       responses:
         '200': { description: Metrics snapshot for an administrator }
         '401': { $ref: '#/components/responses/Unauthorized' }
@@ -77,6 +77,40 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { description: The current subscription has no voice_tutor entitlement }
         '422': { description: Answer is correct, item is unsupported, or revision is stale }
+  /api/v1/voice-tutor/recovery-map:
+    get:
+      summary: Read the current user's server-owned error recovery map
+      responses:
+        '200':
+          description: Bounded open/recovered/relapsed skills with initial micro-check result, voice minutes, due repeats, next useful review and non-official potential-points estimate
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/voice-tutor/repeats/{repeatId}/attempts:
+    post:
+      summary: Submit one answer to a due server-owned day-1/day-7 analog
+      parameters:
+        - in: path
+          name: repeatId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [attemptId, taskId, answer]
+              properties:
+                attemptId: { type: string, format: uuid }
+                taskId: { type: string, minLength: 4, maxLength: 180 }
+                answer: { type: string, minLength: 1, maxLength: 200, description: Checked transiently and never persisted }
+              additionalProperties: false
+      responses:
+        '201': { description: New bounded pass/fail outcome; answer text is absent }
+        '200': { description: Idempotent replay of the same attempt UUID and payload }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { description: Repeat does not belong to the current user }
+        '409': { description: Future, superseded, out-of-order, already attempted or conflicting replay }
+        '422': { description: Task identity mismatch or invalid answer }
   /api/v1/voice-tutor/context-attempts:
     post:
       summary: Validate a completed canonical reading or listening set and record its incorrect answers
