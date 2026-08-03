@@ -1,11 +1,251 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import test from 'node:test';
 import pg from 'pg';
 import { createPostgresRepository } from '../storage/postgres-repository.js';
 import { buildGrammarLexiconCapsule, createGrammarLexiconErrorAttempt, persistedVoiceTutorCapsule } from '../voice-tutor/capsule.js';
+import { buildAdaptiveLearningProfile } from '../adaptive-learning/profile.js';
+import {
+  assertAdaptiveProfileAppendOnlyOrdering,
+  assertAdaptiveProfileRejectsStale,
+  assertAdaptiveProfileRepositoryContract,
+} from './support/adaptive-profile-contract.js';
+import { assertAdaptiveGoalRepositoryContract } from './support/adaptive-goal-contract.js';
 
 const connectionString = process.env.TEST_DATABASE_URL;
+
+test('PostgreSQL adaptive profile save does not exhaust the primary pool before reading its result', { skip: !connectionString }, () => {
+  const script = `
+    const { createPostgresRepository } = await import('./storage/postgres-repository.js');
+    const { buildAdaptiveLearningProfile } = await import('./adaptive-learning/profile.js');
+    const repository = createPostgresRepository(process.env.TEST_DATABASE_URL);
+    const stamp = Date.now();
+    const users = await Promise.all(Array.from({ length: 10 }, (_, index) =>
+      repository.createTelegramUser(Number('7' + String(stamp + index).slice(-9)), 'Pool ' + stamp + ' ' + index)));
+    const profile = buildAdaptiveLearningProfile();
+    await Promise.all(users.map((username) => repository.saveAdaptiveLearningProfile(username, profile)));
+    await repository.close();
+  `;
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+    cwd: process.cwd(),
+    env: { ...process.env, TEST_DATABASE_URL: connectionString },
+    encoding: 'utf8',
+    timeout: 5_000,
+  });
+  assert.equal(result.error?.code || null, null, result.error?.message || result.stderr);
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test('PostgreSQL adaptive save returns one transaction snapshot and blocks a newer writer until capture', { skip: !connectionString }, async () => {
+  let releaseSnapshot;
+  let reportSnapshotReached;
+  let paused = false;
+  const snapshotRelease = new Promise((resolve) => { releaseSnapshot = resolve; });
+  const snapshotReached = new Promise((resolve) => { reportSnapshotReached = resolve; });
+  const repository = createPostgresRepository(connectionString, {
+    onAdaptiveProfileSnapshot: async ({ profile }) => {
+      if (!paused && Number(profile.evidence_source_count) === 1) {
+        paused = true;
+        reportSnapshotReached();
+        await snapshotRelease;
+      }
+    },
+  });
+  const stamp = Date.now();
+  const username = await repository.createTelegramUser(Number(`6${String(stamp).slice(-9)}`), `Atomic ${stamp}`);
+  const attempt = (id, createdAt, score) => ({
+    id, module: 'grammar', activity: 'grammar_19_24', score, max_score: 10,
+    evidence_quality: 'server_verified_unassisted', created_at: createdAt,
+  });
+  const first = attempt(crypto.randomUUID(), '2026-08-04T05:00:00.000Z', 2);
+  const second = attempt(crypto.randomUUID(), '2026-08-04T06:00:00.000Z', 10);
+
+  try {
+    const olderSave = repository.saveAdaptiveLearningProfile(
+      username,
+      buildAdaptiveLearningProfile({ attempts: [first] }),
+      { now: new Date('2026-08-04T07:00:00.000Z') },
+    );
+    await Promise.race([
+      snapshotReached,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('ATOMIC_SNAPSHOT_HOOK_NOT_REACHED')), 1_000)),
+    ]);
+    let newerFinished = false;
+    const newerSave = repository.saveAdaptiveLearningProfile(
+      username,
+      buildAdaptiveLearningProfile({ attempts: [first, second] }),
+      { now: new Date('2026-08-04T07:01:00.000Z') },
+    ).then((result) => { newerFinished = true; return result; });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(newerFinished, false, 'newer writer waits while the older transaction captures its DTO');
+    releaseSnapshot();
+    const [olderResult, newerResult] = await Promise.all([olderSave, newerSave]);
+    assert.equal(olderResult.evidence_source_count, 1);
+    assert.equal(newerResult.evidence_source_count, 2);
+    for (const result of [olderResult, newerResult]) {
+      assert.ok(result.estimates.every((estimate) => estimate.updated_at === result.updated_at));
+    }
+  } finally {
+    releaseSnapshot?.();
+    await repository.close();
+  }
+});
+
+test('PostgreSQL adaptive get returns profile and estimates from one MVCC snapshot', { skip: !connectionString }, async () => {
+  let releaseSnapshot;
+  let reportSnapshotReached;
+  const snapshotRelease = new Promise((resolve) => { releaseSnapshot = resolve; });
+  const snapshotReached = new Promise((resolve) => { reportSnapshotReached = resolve; });
+  const writer = createPostgresRepository(connectionString);
+  const reader = createPostgresRepository(connectionString, {
+    onAdaptiveProfileSnapshot: async () => {
+      reportSnapshotReached();
+      await snapshotRelease;
+    },
+  });
+  const stamp = Date.now();
+  const username = await writer.createTelegramUser(Number(`5${String(stamp).slice(-9)}`), `Profile read ${stamp}`);
+  const attempt = (createdAt) => ({
+    id: crypto.randomUUID(), module: 'grammar', activity: 'grammar_19_24', score: 8, max_score: 10,
+    evidence_quality: 'server_verified_unassisted', created_at: createdAt,
+  });
+  const first = attempt('2026-08-04T05:00:00.000Z');
+  const second = attempt('2026-08-04T06:00:00.000Z');
+
+  try {
+    await writer.saveAdaptiveLearningProfile(username, buildAdaptiveLearningProfile({ attempts: [first] }), {
+      now: new Date('2026-08-04T07:00:00.000Z'),
+    });
+    const reading = reader.getAdaptiveLearningProfile(username);
+    await Promise.race([
+      snapshotReached,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('PROFILE_READ_SNAPSHOT_HOOK_NOT_REACHED')), 1_000)),
+    ]);
+    await writer.saveAdaptiveLearningProfile(username, buildAdaptiveLearningProfile({ attempts: [first, second] }), {
+      now: new Date('2026-08-04T07:01:00.000Z'),
+    });
+    releaseSnapshot();
+    const result = await reading;
+    assert.equal(result.evidence_source_count, 1);
+    assert.ok(result.estimates.every((estimate) => estimate.updated_at === result.updated_at));
+  } finally {
+    releaseSnapshot?.();
+    await Promise.all([reader.close(), writer.close()]);
+  }
+});
+
+test('PostgreSQL adaptive export captures profile and estimates atomically', { skip: !connectionString }, async () => {
+  let releaseSnapshot;
+  let reportSnapshotReached;
+  const snapshotRelease = new Promise((resolve) => { releaseSnapshot = resolve; });
+  const snapshotReached = new Promise((resolve) => { reportSnapshotReached = resolve; });
+  const writer = createPostgresRepository(connectionString);
+  const reader = createPostgresRepository(connectionString, {
+    onAdaptiveProfileSnapshot: async () => {
+      reportSnapshotReached();
+      await snapshotRelease;
+    },
+  });
+  const stamp = Date.now() + 1;
+  const username = await writer.createTelegramUser(Number(`5${String(stamp).slice(-9)}`), `Profile export ${stamp}`);
+  const attempt = (createdAt) => ({
+    id: crypto.randomUUID(), module: 'grammar', activity: 'grammar_19_24', score: 8, max_score: 10,
+    evidence_quality: 'server_verified_unassisted', created_at: createdAt,
+  });
+  const first = attempt('2026-08-04T05:00:00.000Z');
+  const second = attempt('2026-08-04T06:00:00.000Z');
+
+  try {
+    await writer.saveAdaptiveLearningProfile(username, buildAdaptiveLearningProfile({ attempts: [first] }), {
+      now: new Date('2026-08-04T07:00:00.000Z'),
+    });
+    const exporting = reader.exportUserData(username);
+    await Promise.race([
+      snapshotReached,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('PROFILE_EXPORT_SNAPSHOT_HOOK_NOT_REACHED')), 1_000)),
+    ]);
+    await writer.saveAdaptiveLearningProfile(username, buildAdaptiveLearningProfile({ attempts: [first, second] }), {
+      now: new Date('2026-08-04T07:01:00.000Z'),
+    });
+    releaseSnapshot();
+    const result = await exporting;
+    assert.equal(result.adaptive_learning_profile.evidence_source_count, 1);
+    assert.ok(result.adaptive_learning_skill_estimates.every((estimate) => (
+      estimate.updated_at === result.adaptive_learning_profile.updated_at
+    )));
+  } finally {
+    releaseSnapshot?.();
+    await Promise.all([reader.close(), writer.close()]);
+  }
+});
+
+test('PostgreSQL adaptive evidence sources come from one MVCC snapshot without orphan repeats', { skip: !connectionString }, async () => {
+  let releaseSnapshot;
+  let reportSnapshotReached;
+  const snapshotRelease = new Promise((resolve) => { releaseSnapshot = resolve; });
+  const snapshotReached = new Promise((resolve) => { reportSnapshotReached = resolve; });
+  const repository = createPostgresRepository(connectionString, {
+    onAdaptiveEvidenceSnapshot: async () => {
+      reportSnapshotReached();
+      await snapshotRelease;
+    },
+  });
+  const client = new pg.Client({ connectionString });
+  const stamp = Date.now() + 2;
+  const username = await repository.createTelegramUser(Number(`5${String(stamp).slice(-9)}`), `Evidence read ${stamp}`);
+  const sessionId = crypto.randomUUID();
+  const recoveryId = crypto.randomUUID();
+  const repeatId = crypto.randomUUID();
+  const repeatAttemptId = crypto.randomUUID();
+  await client.connect();
+
+  try {
+    const reading = repository.getAdaptiveLearningEvidenceSources(username);
+    await Promise.race([
+      snapshotReached,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('EVIDENCE_SNAPSHOT_HOOK_NOT_REACHED')), 1_000)),
+    ]);
+    await client.query('BEGIN');
+    await client.query(
+      `INSERT INTO voice_tutor_sessions
+       (id, username, idempotency_key, status, reserved_seconds, billable_seconds, started_at, expires_at, ended_at)
+       VALUES ($1, $2, $3, 'completed', 1, 0, $4, $5, $5)`,
+      [sessionId, username, crypto.randomUUID(), new Date('2026-08-04T08:00:00.000Z'), new Date('2026-08-04T08:05:00.000Z')],
+    );
+    await client.query(
+      `INSERT INTO voice_tutor_recoveries
+       (id, username, session_id, skill_id, skill_label, module, rule_id, origin_item_id,
+        origin_transfer_task_id, initial_micro_check_passed, initial_transfer_passed,
+        terminal_outcome, potential_ege_points, observed_at)
+       VALUES ($1, $2, $3, 'ege.grammar.forms', 'Forms', 'grammar', 'rule', 'item',
+               'transfer', TRUE, TRUE, 'resolved', 1, $4)`,
+      [recoveryId, username, sessionId, new Date('2026-08-04T08:04:00.000Z')],
+    );
+    await client.query(
+      `INSERT INTO voice_tutor_repeats
+       (id, recovery_id, stage, task_id, due_at, window_ends_at)
+       VALUES ($1, $2, 'day_1', 'task', $3, $4)`,
+      [repeatId, recoveryId, new Date('2026-08-05T08:00:00.000Z'), new Date('2026-08-06T08:00:00.000Z')],
+    );
+    await client.query(
+      `INSERT INTO voice_tutor_repeat_attempts (id, repeat_id, task_id, passed, fingerprint, observed_at)
+       VALUES ($1, $2, 'task', TRUE, $3, $4)`,
+      [repeatAttemptId, repeatId, 'b'.repeat(64), new Date('2026-08-05T09:00:00.000Z')],
+    );
+    await client.query('COMMIT');
+    releaseSnapshot();
+    const result = await reading;
+    assert.deepEqual(result.recoveries, []);
+    assert.deepEqual(result.repeatAttempts, []);
+  } finally {
+    releaseSnapshot?.();
+    await client.query('ROLLBACK').catch(() => {});
+    await client.end();
+    await repository.deleteUserData(username).catch(() => {});
+    await repository.close();
+  }
+});
 
 test('PostgreSQL repository persists the production data flow', { skip: !connectionString }, async () => {
   const repository = createPostgresRepository(connectionString);
@@ -43,6 +283,7 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
       '028_voice_tutor_discovery_claims.sql',
       '029_voice_tutor_realtime_proxy.sql',
       '030_voice_tutor_fallback_and_recovery_tasks.sql',
+      '031_adaptive_learning_goal_profile.sql',
     ]);
 
     const username = await repository.createTelegramUser(telegramId, `Integration ${suffix}`);
@@ -197,13 +438,17 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     const moduleAttemptId = crypto.randomUUID();
     assert.equal((await repository.recordModuleAttempt(username, { id: moduleAttemptId, module: 'exam', activity: 'grammar_19_24', score: 5, maxScore: 6, durationMs: 50_000, metadata: {} })).created, true);
     assert.equal((await repository.recordModuleAttempt(username, { id: moduleAttemptId, module: 'exam', activity: 'grammar_19_24', score: 5, maxScore: 6, durationMs: 50_000, metadata: {} })).created, false);
+    assert.equal((await repository.getModuleAttempt(username, moduleAttemptId)).evidence_quality, 'client_reported');
     const tracerAttemptId = crypto.randomUUID();
     const tracerAttempt = createGrammarLexiconErrorAttempt({
       id: tracerAttemptId, module: 'grammar', itemId: 'grammar.past-simple.last-summer', revision: 1, learnerAnswer: 'goed',
     });
-    assert.equal((await repository.recordModuleAttempt(username, tracerAttempt)).created, true);
+    assert.equal((await repository.recordModuleAttempt(username, tracerAttempt, {
+      evidenceQuality: 'server_verified_assisted',
+    })).created, true);
     const storedTracerAttempt = await repository.getModuleAttempt(username, tracerAttemptId);
     assert.equal(storedTracerAttempt.metadata.learner_answer, 'goed');
+    assert.equal(storedTracerAttempt.evidence_quality, 'server_verified_assisted');
     const tracerCapsule = buildGrammarLexiconCapsule({ attempt: storedTracerAttempt, expectedRevision: 1 });
     const tracerSessionId = crypto.randomUUID();
     const tracerReservation = await repository.reserveVoiceTutorSession(username, {
@@ -337,6 +582,43 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
       decision: 'confirmed', reviewer: username, reviewedAt: voiceFinishedAt,
     })).applied, true);
 
+    const adaptiveGoalKey = crypto.randomUUID();
+    const adaptiveGoalHash = crypto.createHash('sha256').update(`${suffix}:adaptive-goal`).digest('hex');
+    const adaptiveGoal = {
+      id: crypto.randomUUID(), idempotencyKey: adaptiveGoalKey, requestHash: adaptiveGoalHash,
+      targetExam: 'ege_english', targetScore: 85, examDate: '2027-06-01', weeklyMinutes: 300,
+      now: voiceFinishedAt,
+    };
+    await assertAdaptiveGoalRepositoryContract(assert, repository, username, adaptiveGoal);
+    await assert.rejects(
+      repository.saveAdaptiveLearningGoal(username, { ...adaptiveGoal, requestHash: '0'.repeat(64) }),
+      /ADAPTIVE_GOAL_IDEMPOTENCY_CONFLICT/u,
+    );
+    assert.equal((await repository.getAdaptiveLearningGoal(username)).revision, 1);
+    const adaptiveSources = await repository.getAdaptiveLearningEvidenceSources(username);
+    assert.equal(adaptiveSources.attempts.some((entry) => entry.id === tracerAttemptId), true);
+    const adaptiveProfile = buildAdaptiveLearningProfile(adaptiveSources);
+    await assertAdaptiveProfileRepositoryContract(
+      assert, repository, username, adaptiveProfile, voiceFinishedAt,
+    );
+    const raceAttempt = (createdAt) => ({
+      id: crypto.randomUUID(), module: 'grammar', activity: 'grammar_19_24', score: 8, max_score: 10,
+      evidence_quality: 'server_verified_unassisted', created_at: createdAt,
+    });
+    const raceFirst = raceAttempt('2026-08-04T05:00:00.000Z');
+    const raceLatest = raceAttempt('2026-08-04T06:00:00.000Z');
+    const raceBackfill = raceAttempt('2026-08-04T04:00:00.000Z');
+    const raceUsername = await repository.createTelegramUser(telegramId + 2, `Adaptive race ${suffix}`);
+    await assertAdaptiveProfileRejectsStale(assert, repository, raceUsername, {
+      older: buildAdaptiveLearningProfile({ attempts: [raceFirst] }),
+      newer: buildAdaptiveLearningProfile({ attempts: [raceFirst, raceLatest] }),
+      backfilled: buildAdaptiveLearningProfile({ attempts: [raceBackfill, raceFirst, raceLatest] }),
+    });
+    const orderingUsername = await repository.createTelegramUser(telegramId + 3, `Adaptive ordering ${suffix}`);
+    await assertAdaptiveProfileAppendOnlyOrdering(
+      assert, repository, orderingUsername, buildAdaptiveLearningProfile,
+    );
+
     const exported = await repository.exportUserData(username);
     assert.equal(exported.account.username, username);
     assert.deepEqual(exported.progress, { learned: 12, prog: { words: 44 }, marker: suffix, extra: true });
@@ -365,6 +647,10 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     assert.equal(exported.voice_tutor_repeat_attempts.length, 2);
     assert.equal(exported.voice_tutor_reports[0].reason, 'technical_issue');
     assert.equal(exported.rule_cards.length, 2);
+    assert.equal(exported.adaptive_learning_goals[0].target_score, 85);
+    assert.equal(exported.adaptive_learning_profile.taxonomy_version, 'ege-en-v1');
+    assert.equal(Number(exported.adaptive_learning_profile.independent_evidence_count), adaptiveProfile.independentEvidenceCount);
+    assert.equal(exported.adaptive_learning_skill_estimates.length, 12);
     const originalVoiceSession = exported.voice_tutor_sessions.find((session) => session.id === firstVoiceReservation.session.id);
     assert.equal(originalVoiceSession.billable_seconds, 120);
     const exportedTracerSession = exported.voice_tutor_sessions.find((session) => session.id === tracerSessionId);
@@ -413,6 +699,9 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     assert.equal((await client.query('SELECT 1 FROM subscription_entitlements WHERE username = $1', [username])).rowCount, 0);
     assert.equal((await client.query('SELECT 1 FROM voice_tutor_sessions WHERE username = $1', [username])).rowCount, 0);
     assert.equal((await client.query('SELECT 1 FROM voice_tutor_recoveries WHERE username = $1', [username])).rowCount, 0);
+    assert.equal((await client.query('SELECT 1 FROM adaptive_learning_goals WHERE username = $1', [username])).rowCount, 0);
+    assert.equal((await client.query('SELECT 1 FROM adaptive_learning_profiles WHERE username = $1', [username])).rowCount, 0);
+    assert.equal((await client.query('SELECT 1 FROM adaptive_learning_skill_estimates WHERE username = $1', [username])).rowCount, 0);
     const retainedRuleCard = await client.query('SELECT created_for_username, review_audit FROM trusted_rule_cards WHERE id = $1', [ruleCardId]);
     assert.equal(retainedRuleCard.rows[0].created_for_username, null);
     assert.equal(retainedRuleCard.rows[0].review_audit[0].reviewer, null);

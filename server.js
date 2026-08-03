@@ -8,7 +8,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { claimAiOperationSlot, claimUnseenBankTask, claimVoiceTutorRuleDiscovery, failVoiceTutorRuleDiscovery, getBankTask, getBankTaskByExternalId, listBankTaskContents, recordTaskDelivery, settleAiOperationSlot, upsertBankTask, activateTrial, activateVoiceTutorProxySession, closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, consumeVoiceTutorProxyTicket, countAiRequestsSince, createPaymentRequest, createPaymentRequestForUser, createRuleCardForVoiceTutorSession, createSession, createSpeakingAttempt, createTelegramAuthCode, createVoiceTutorReport, createWritingAttempt, deleteUserData, exportUserData, finalizeVoiceTutorProxySession, finishSpeakingAttempt, finishVoiceTutorSession, finishWritingAttempt, getAiUsageMetrics, getApprovedRuleCard, getGeneratedTask, getRuleCard, getSharedGeneratedTask, getModuleAttempt, getPaymentRequestForUser, getPrivacyConsent, getProgress, getSpeakingAttempt, getUser, getVoiceTutorAccess, getVoiceTutorRecoveryMap, getVoiceTutorRecoveryMetrics, getVoiceTutorSession, getWritingAttempt, healthCheck, isSessionActive, issueVoiceTutorProxyTicket, reissueVoiceTutorFallbackNonce, listPaymentRequests, listRuleCards, listVoiceTutorReports, recordModuleAttempt, reserveVoiceTutorSession, resolvePaymentRequest, reviewRuleCard, reviewVoiceTutorReport, revokeEntitlement, revokeSession, saveGeneratedTask, saveProgress, setPrivacyConsent, setUserRole, submitVoiceTutorRepeat, upsertErrorBank, upsertWordProgress, mergeProgress, getUserByTelegram, createTelegramUser, logAiRequest, getSub, advanceVoiceTutorSession, clarifyVoiceTutorSession, setVoiceTutorSessionDelivery, switchVoiceTutorSessionDelivery } from './db.js';
+import { claimAiOperationSlot, claimUnseenBankTask, claimVoiceTutorRuleDiscovery, failVoiceTutorRuleDiscovery, getBankTask, getBankTaskByExternalId, listBankTaskContents, recordTaskDelivery, settleAiOperationSlot, upsertBankTask, activateTrial, activateVoiceTutorProxySession, closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, consumeVoiceTutorProxyTicket, countAiRequestsSince, createPaymentRequest, createPaymentRequestForUser, createRuleCardForVoiceTutorSession, createSession, createSpeakingAttempt, createTelegramAuthCode, createVoiceTutorReport, createWritingAttempt, deleteUserData, exportUserData, finalizeVoiceTutorProxySession, finishSpeakingAttempt, finishVoiceTutorSession, finishWritingAttempt, getAdaptiveLearningEvidenceSources, getAdaptiveLearningGoal, getAdaptiveLearningProfile, getAiUsageMetrics, getApprovedRuleCard, getGeneratedTask, getRuleCard, getSharedGeneratedTask, getModuleAttempt, getPaymentRequestForUser, getPrivacyConsent, getProgress, getSpeakingAttempt, getUser, getVoiceTutorAccess, getVoiceTutorRecoveryMap, getVoiceTutorRecoveryMetrics, getVoiceTutorSession, getWritingAttempt, healthCheck, isSessionActive, issueVoiceTutorProxyTicket, reissueVoiceTutorFallbackNonce, listPaymentRequests, listRuleCards, listVoiceTutorReports, recordModuleAttempt, reserveVoiceTutorSession, resolvePaymentRequest, reviewRuleCard, reviewVoiceTutorReport, revokeEntitlement, revokeSession, saveAdaptiveLearningGoal, saveAdaptiveLearningProfile, saveGeneratedTask, saveProgress, setPrivacyConsent, setUserRole, submitVoiceTutorRepeat, upsertErrorBank, upsertWordProgress, mergeProgress, getUserByTelegram, createTelegramUser, logAiRequest, getSub, advanceVoiceTutorSession, clarifyVoiceTutorSession, setVoiceTutorSessionDelivery, switchVoiceTutorSessionDelivery } from './db.js';
 import { config } from './config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from './ai/writing.js';
 import { buildContentPrompt, CONTENT_PROMPT_VERSION, contentRequestSchema, parseContentResponse } from './ai/content.js';
@@ -31,6 +31,7 @@ import { createSubscriptionService } from './services/subscription.js';
 import { createTelegramService } from './services/telegram.js';
 import { createUserRoutes } from './routes/users.js';
 import { createProgressRoutes } from './routes/progress.js';
+import { createAdaptiveLearningRoutes } from './routes/adaptive-learning.js';
 import { createAiRoutes } from './routes/ai.js';
 import { createMediaRoutes } from './routes/media.js';
 import { createTaskRoutes, seedBuiltinTasks } from './routes/tasks.js';
@@ -186,6 +187,8 @@ const dbApi = {
   createVoiceTutorReport, listVoiceTutorReports, reviewVoiceTutorReport,
   revokeSession, exportUserData, deleteUserData, getPrivacyConsent, setPrivacyConsent,
   getProgress, saveProgress, mergeProgress, recordModuleAttempt, getModuleAttempt, upsertWordProgress, upsertErrorBank,
+  saveAdaptiveLearningGoal, getAdaptiveLearningGoal, getAdaptiveLearningEvidenceSources,
+  saveAdaptiveLearningProfile, getAdaptiveLearningProfile,
   createWritingAttempt, finishWritingAttempt, getWritingAttempt, createSpeakingAttempt, finishSpeakingAttempt, getSpeakingAttempt,
   getGeneratedTask, getSharedGeneratedTask, saveGeneratedTask, logAiRequest, claimAiOperationSlot, settleAiOperationSlot,
   upsertBankTask, getBankTask, getBankTaskByExternalId, claimUnseenBankTask, recordTaskDelivery, listBankTaskContents,
@@ -253,8 +256,12 @@ app.use(createUserRoutes({
   promoteConfiguredAdmin,
   db: dbApi,
   voiceTutorLimits: config.voiceTutor,
+  featureFlags: { adaptiveLearning: config.adaptiveLearning.enabled },
 }));
 app.use(createProgressRoutes({ authentication, db: dbApi }));
+app.use(createAdaptiveLearningRoutes({
+  authentication, db: dbApi, enabled: config.adaptiveLearning.enabled,
+}));
 const realtimePolicy = () => ({
   enabled: config.voiceTutor.enabled,
   costKillSwitch: config.voiceTutor.costKillSwitch,

@@ -73,9 +73,9 @@
     return parseResponse(response);
   }
 
-  async function put(path, body) {
+  async function put(path, body, headers = {}) {
     const response = await request(baseUrl + path, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(body || {}),
+      method: 'PUT', headers: { 'Content-Type': 'application/json', ...headers }, credentials: 'same-origin', body: JSON.stringify(body || {}),
     });
     return parseResponse(response);
   }

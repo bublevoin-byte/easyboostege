@@ -232,14 +232,14 @@ async function doLogin(){
   const u=gv('lg_user'),p=gv('lg_pass');if(!u||!p){lgMsg('Введите имя и пароль');return}
   lgMsg('Вход…');
   try{const d=await auth.login(u,p);TOKEN=d.authenticated?'cookie':'';
-    currentUser=d.username;localStorage.setItem('eb_current',currentUser);lgMsg('');startApp()}
+    window.__sub=d;currentUser=d.username;localStorage.setItem('eb_current',currentUser);lgMsg('');startApp()}
   catch(e){lgMsg(apiMessage(e,'auth'))}}
 async function doRegister(){
   if(!SRV){const u=gv('lg_user')||'Аня';currentUser=u;localStorage.setItem('eb_current',currentUser);show('scr6');document.getElementById('tabbar').style.display='none';return}
   const u=gv('lg_user'),p=gv('lg_pass');if(!u||!p){lgMsg('Введите имя и пароль');return}
   lgMsg('Создаём аккаунт…');
   try{const d=await auth.register(u,p);TOKEN=d.authenticated?'cookie':'';
-    currentUser=d.username;localStorage.setItem('eb_current',currentUser);lgMsg('');show('scr6');document.getElementById('tabbar').style.display='none'}
+    window.__sub=d;currentUser=d.username;localStorage.setItem('eb_current',currentUser);lgMsg('');show('scr6');document.getElementById('tabbar').style.display='none'}
   catch(e){lgMsg(apiMessage(e,'auth'))}}
 async function logout(){
   try{if(SRV)await auth.logout()}catch(_){}
@@ -285,7 +285,7 @@ function tgPoll(){
   TG_IV=setInterval(async()=>{tries++;
     try{const c=await auth.checkTelegramLogin(TG_CODE);
       if(c&&c.authenticated){clearInterval(TG_IV);TOKEN='cookie';
-        currentUser=c.username;localStorage.setItem('eb_current',currentUser);lgMsg('');startApp();}
+        window.__sub=c;currentUser=c.username;localStorage.setItem('eb_current',currentUser);lgMsg('');startApp();}
     }catch(e){}
     if(tries>300){clearInterval(TG_IV)}
   },2000);
@@ -894,7 +894,7 @@ export {DEMO_MODE,SRV,registerProfileHook,registerStartHook,toast};
  */
 export {
   EGE_WORDS,LSLOW,L_PLAYSVG,S,TOKEN,W37,W38,WBTN,
-  apiGet,apiMessage,apiPost,apiPostBinary,currentUser,examModule,gExamFmt,gSync,generateAiContent,
+  apiGet,apiMessage,apiPost,apiPostBinary,apiPut,currentUser,examModule,gExamFmt,gSync,generateAiContent,
   grammarModule,lSetSlow,lSt,lSync,listeningModule,profileModule,progressModule,readingModule,
   rEsc,rSt,rWordsHtml,registerScreenGenerator,ringOff,runProfileHooks,setTxt,setW,spSt,spSync,
   speakingModule,srsFail,srsOk,todayStr,ui,wBase,wDeco,wMergeAi,wMigrate,wRec,wStats,wSync,

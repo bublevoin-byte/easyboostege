@@ -122,6 +122,9 @@ export const config = Object.freeze({
     url: process.env.DATABASE_URL || '',
     file: process.env.DATA_FILE || fileURLToPath(new URL('./data.json', import.meta.url)),
   }),
+  adaptiveLearning: Object.freeze({
+    enabled: readBoolean('ADAPTIVE_LEARNING_ENABLED', false),
+  }),
   voiceTutor: Object.freeze({
     dailySeconds: voiceTutorDailySeconds,
     monthlySeconds: voiceTutorMonthlySeconds,

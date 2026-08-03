@@ -1,4 +1,11 @@
 import pg from 'pg';
+import { requireModuleAttemptEvidenceQuality } from '../adaptive-learning/evidence-quality.js';
+import { compareAdaptiveEvidenceWatermarks } from '../adaptive-learning/evidence-watermark.js';
+import { adaptiveLearningGoalRepositoryDto } from '../adaptive-learning/goal-dto.js';
+import {
+  adaptiveLearningProfileExportDto,
+  adaptiveLearningProfileRepositoryDto,
+} from '../adaptive-learning/repository-dto.js';
 import { hashAuthCode, normalizeUsername, normalizeVoiceTutorDeliveryMetadata, normalizeVoiceTutorProxyHash, subscriptionView, VoiceTutorError, voiceTutorAccessView, voiceTutorBillableSeconds, voiceTutorProxyUsage, voiceTutorQuotaPeriods, voiceTutorReservationSeconds } from './shared.js';
 import { transitionPedagogicalState } from '../voice-tutor/state-machine.js';
 import { transitionRuleCardReview } from '../voice-tutor/rule-card.js';
@@ -50,6 +57,8 @@ export function createPostgresRepository(connectionString, {
   onOperationalError = (event) => console.error(JSON.stringify({
     timestamp: new Date().toISOString(), level: 'error', type: 'postgres_pool_error', ...event,
   })),
+  onAdaptiveProfileSnapshot = async () => {},
+  onAdaptiveEvidenceSnapshot = async () => {},
 } = {}) {
   if (!connectionString) throw new Error('DATABASE_URL is required for PostgreSQL storage');
   const pool = new Pool({ connectionString, application_name: 'easyboost_repository' });
@@ -1784,16 +1793,202 @@ export function createPostgresRepository(connectionString, {
     return result.rows.map((row) => row.content);
   }
 
-  async function recordModuleAttempt(username, attempt) {
+  async function saveAdaptiveLearningGoal(username, goal) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const owner = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+      if (!owner.rowCount) throw new Error('USER_NOT_FOUND');
+      const duplicate = await client.query(
+        'SELECT * FROM adaptive_learning_goals WHERE username = $1 AND idempotency_key = $2',
+        [username, goal.idempotencyKey],
+      );
+      if (duplicate.rowCount) {
+        if (duplicate.rows[0].request_hash !== goal.requestHash) throw new Error('ADAPTIVE_GOAL_IDEMPOTENCY_CONFLICT');
+        await client.query('COMMIT');
+        return { created: false, goal: adaptiveLearningGoalRepositoryDto(duplicate.rows[0]) };
+      }
+      const revision = await client.query(
+        'SELECT COALESCE(MAX(revision), 0)::integer + 1 AS revision FROM adaptive_learning_goals WHERE username = $1',
+        [username],
+      );
+      await client.query('UPDATE adaptive_learning_goals SET current = FALSE WHERE username = $1 AND current', [username]);
+      const inserted = await client.query(
+        `INSERT INTO adaptive_learning_goals
+         (id, username, target_exam, target_score, exam_date, weekly_minutes, revision,
+          idempotency_key, request_hash, current, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5::date, $6, $7, $8, $9, TRUE, $10, $10)
+         RETURNING *`,
+        [goal.id, username, goal.targetExam, goal.targetScore, goal.examDate, goal.weeklyMinutes,
+          revision.rows[0].revision, goal.idempotencyKey, goal.requestHash, goal.now],
+      );
+      await client.query('COMMIT');
+      return { created: true, goal: adaptiveLearningGoalRepositoryDto(inserted.rows[0]) };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async function getAdaptiveLearningGoal(username) {
+    const result = await pool.query(
+      'SELECT * FROM adaptive_learning_goals WHERE username = $1 AND current ORDER BY revision DESC LIMIT 1',
+      [username],
+    );
+    return adaptiveLearningGoalRepositoryDto(result.rows[0]);
+  }
+
+  async function getAdaptiveLearningEvidenceSources(username) {
+    const result = await pool.query(
+      `SELECT
+         COALESCE((
+           SELECT jsonb_agg(to_jsonb(source_attempt) ORDER BY source_attempt.created_at, source_attempt.id)
+           FROM (
+             SELECT id, module, activity, score, max_score, duration_ms, metadata, evidence_quality, created_at
+             FROM module_attempts WHERE username = $1
+           ) source_attempt
+         ), '[]'::jsonb) AS attempts,
+         COALESCE((
+           SELECT jsonb_agg(to_jsonb(source_recovery) ORDER BY source_recovery.observed_at, source_recovery.id)
+           FROM (
+             SELECT id, skill_id, module, initial_micro_check_passed, initial_transfer_passed,
+                    terminal_outcome, observed_at
+             FROM voice_tutor_recoveries WHERE username = $1
+           ) source_recovery
+         ), '[]'::jsonb) AS recoveries,
+         COALESCE((
+           SELECT jsonb_agg(to_jsonb(source_repeat) ORDER BY source_repeat.observed_at, source_repeat.id)
+           FROM (
+             SELECT attempt.id, attempt.passed, attempt.observed_at, recovery.skill_id, recovery.module
+             FROM voice_tutor_repeat_attempts attempt
+             JOIN voice_tutor_repeats repeat ON repeat.id = attempt.repeat_id
+             JOIN voice_tutor_recoveries recovery ON recovery.id = repeat.recovery_id
+             WHERE recovery.username = $1
+           ) source_repeat
+         ), '[]'::jsonb) AS repeat_attempts`,
+      [username],
+    );
+    const sources = {
+      attempts: result.rows[0].attempts,
+      recoveries: result.rows[0].recoveries,
+      repeatAttempts: result.rows[0].repeat_attempts,
+    };
+    await onAdaptiveEvidenceSnapshot({ username, sources });
+    return sources;
+  }
+
+  async function saveAdaptiveLearningProfile(username, profile, { now = new Date() } = {}) {
+    const client = await pool.connect();
+    let inTransaction = false;
+    try {
+      await client.query('BEGIN');
+      inTransaction = true;
+      const owner = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+      if (!owner.rowCount) throw new Error('USER_NOT_FOUND');
+      const persisted = await client.query(
+        `SELECT profile_calculation_revision, evidence_watermark_version,
+                evidence_observed_at, evidence_source_count
+         FROM adaptive_learning_profiles WHERE username = $1`,
+        [username],
+      );
+      if (persisted.rowCount && compareAdaptiveEvidenceWatermarks(profile, persisted.rows[0]) <= 0) {
+        const currentSnapshot = await readAdaptiveLearningProfile(client, username, { onAdaptiveProfileSnapshot });
+        await client.query('COMMIT');
+        inTransaction = false;
+        return currentSnapshot;
+      }
+      await client.query(
+        `INSERT INTO adaptive_learning_profiles
+         (username, taxonomy_version, weighting_version, status, preliminary, confidence, evidence_count,
+          independent_evidence_count, assisted_evidence_count, client_reported_evidence_count,
+          independent_module_count, established_skill_count, profile_calculation_revision,
+          evidence_watermark_version, evidence_observed_at, evidence_source_count,
+          needs_diagnostic, explanation_codes, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18::jsonb, $19)
+         ON CONFLICT (username) DO UPDATE SET
+           taxonomy_version = EXCLUDED.taxonomy_version,
+           weighting_version = EXCLUDED.weighting_version,
+           status = EXCLUDED.status,
+           preliminary = EXCLUDED.preliminary,
+           confidence = EXCLUDED.confidence,
+           evidence_count = EXCLUDED.evidence_count,
+           independent_evidence_count = EXCLUDED.independent_evidence_count,
+           assisted_evidence_count = EXCLUDED.assisted_evidence_count,
+           client_reported_evidence_count = EXCLUDED.client_reported_evidence_count,
+           independent_module_count = EXCLUDED.independent_module_count,
+           established_skill_count = EXCLUDED.established_skill_count,
+           profile_calculation_revision = EXCLUDED.profile_calculation_revision,
+           evidence_watermark_version = EXCLUDED.evidence_watermark_version,
+           evidence_observed_at = EXCLUDED.evidence_observed_at,
+           evidence_source_count = EXCLUDED.evidence_source_count,
+           needs_diagnostic = EXCLUDED.needs_diagnostic,
+           explanation_codes = EXCLUDED.explanation_codes,
+           updated_at = EXCLUDED.updated_at`,
+        [username, profile.taxonomyVersion, profile.weightingVersion, profile.status, profile.preliminary,
+          profile.confidence, profile.evidenceCount, profile.independentEvidenceCount,
+          profile.assistedEvidenceCount, profile.clientReportedEvidenceCount, profile.independentModuleCount,
+          profile.establishedSkillCount, profile.profileCalculationRevision, profile.evidenceWatermarkVersion,
+          profile.evidenceObservedAt, profile.evidenceSourceCount, profile.needsDiagnostic,
+          JSON.stringify(profile.explanationCodes), now],
+      );
+      await client.query('DELETE FROM adaptive_learning_skill_estimates WHERE username = $1', [username]);
+      for (const skill of profile.skills) {
+        await client.query(
+          `INSERT INTO adaptive_learning_skill_estimates
+           (username, taxonomy_version, skill_id, module, mastery, uncertainty, evidence_count,
+            effective_evidence_count, independent_evidence_count, evidence_quality, status,
+            last_observed_at, due_state, explanation_code, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+          [username, profile.taxonomyVersion, skill.id, skill.module, skill.mastery, skill.uncertainty,
+            skill.evidenceCount, skill.effectiveEvidenceCount, skill.independentEvidenceCount,
+            skill.evidenceQuality, skill.status, skill.lastObservedAt, skill.dueState, skill.explanationCode, now],
+        );
+      }
+      const savedSnapshot = await readAdaptiveLearningProfile(client, username, { onAdaptiveProfileSnapshot });
+      await client.query('COMMIT');
+      inTransaction = false;
+      return savedSnapshot;
+    } catch (error) {
+      if (inTransaction) await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async function readAdaptiveLearningProfile(queryable, username, { onAdaptiveProfileSnapshot: afterProfileRead } = {}) {
+    const snapshot = await queryable.query(
+      `SELECT profile.*,
+              COALESCE((
+                SELECT jsonb_agg(to_jsonb(estimate) - 'username' ORDER BY estimate.skill_id)
+                FROM adaptive_learning_skill_estimates estimate
+                WHERE estimate.username = profile.username
+              ), '[]'::jsonb) AS estimates
+       FROM adaptive_learning_profiles profile
+       WHERE profile.username = $1`,
+      [username],
+    );
+    if (snapshot.rowCount && afterProfileRead) {
+      await afterProfileRead({ username, profile: snapshot.rows[0] });
+    }
+    return snapshot.rowCount
+      ? adaptiveLearningProfileRepositoryDto(snapshot.rows[0], snapshot.rows[0].estimates)
+      : null;
+  }
+
+  async function getAdaptiveLearningProfile(username) {
+    return readAdaptiveLearningProfile(pool, username, { onAdaptiveProfileSnapshot });
+  }
+
+  async function recordModuleAttempt(username, attempt, { evidenceQuality = 'client_reported' } = {}) {
+    const trustedEvidenceQuality = requireModuleAttemptEvidenceQuality(evidenceQuality);
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
       const result = await client.query(
-        `INSERT INTO module_attempts (id, username, module, activity, score, max_score, duration_ms, metadata)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+        `INSERT INTO module_attempts (id, username, module, activity, score, max_score, duration_ms, metadata, evidence_quality)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
          ON CONFLICT (id) DO NOTHING RETURNING id, created_at`,
         [attempt.id, username, attempt.module, attempt.activity, attempt.score, attempt.maxScore,
-          attempt.durationMs ?? null, JSON.stringify(attempt.metadata || {})],
+          attempt.durationMs ?? null, JSON.stringify(attempt.metadata || {}), trustedEvidenceQuality],
       );
       if (result.rowCount === 1) {
         await client.query(
@@ -1825,7 +2020,7 @@ export function createPostgresRepository(connectionString, {
 
   async function getModuleAttempt(username, attemptId) {
     const result = await pool.query(
-      `SELECT id, username, module, activity, score, max_score, duration_ms, metadata, created_at
+      `SELECT id, username, module, activity, score, max_score, duration_ms, metadata, evidence_quality, created_at
        FROM module_attempts WHERE username = $1 AND id = $2`,
       [username, attemptId],
     );
@@ -2036,7 +2231,7 @@ export function createPostgresRepository(connectionString, {
   }
 
   async function exportUserData(username) {
-    const [account, progress, privacyConsent, subscriptionEvents, subscriptionEntitlements, voiceTutorSessions, voiceTutorRecoveries, voiceTutorRepeats, voiceTutorRepeatAttempts, voiceTutorReports, ruleCards, paymentRequests, writingAttempts, speakingAttempts, generatedTasks, moduleAttempts, progressSummary, wordProgress, errorBank, aiRequests, auditLog] = await Promise.all([
+    const [account, progress, privacyConsent, subscriptionEvents, subscriptionEntitlements, voiceTutorSessions, voiceTutorRecoveries, voiceTutorRepeats, voiceTutorRepeatAttempts, voiceTutorReports, ruleCards, paymentRequests, writingAttempts, speakingAttempts, generatedTasks, moduleAttempts, progressSummary, wordProgress, errorBank, adaptiveGoals, adaptiveSnapshot, aiRequests, auditLog] = await Promise.all([
       pool.query('SELECT username, telegram_id, role, trial_used, subscription_until, created_at, updated_at FROM users WHERE username = $1', [username]),
       pool.query('SELECT data, updated_at FROM user_progress WHERE username = $1', [username]),
       pool.query('SELECT text_processing, voice_processing, policy_version, text_consented_at, voice_consented_at, updated_at FROM privacy_consents WHERE username = $1', [username]),
@@ -2070,14 +2265,21 @@ export function createPostgresRepository(connectionString, {
       pool.query('SELECT id, task_type, assignment, answer, evaluated_answer, review, provider, model, prompt_version, status, error_code, created_at, evaluated_at FROM writing_attempts WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, task_type, assignment, transcript, review, provider, model, prompt_version, status, error_code, created_at, evaluated_at FROM speaking_attempts WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, operation, request, result, provider, prompt_version, created_at FROM generated_tasks WHERE username = $1 ORDER BY created_at', [username]),
-      pool.query('SELECT id, module, activity, score, max_score, duration_ms, metadata, created_at FROM module_attempts WHERE username = $1 ORDER BY created_at', [username]),
+      pool.query('SELECT id, module, activity, score, max_score, duration_ms, metadata, evidence_quality, created_at FROM module_attempts WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT module, attempt_count, best_score, best_max_score, total_duration_ms, last_attempt_at, updated_at FROM progress_summary WHERE username = $1 ORDER BY module', [username]),
       pool.query('SELECT word, stage, error_count, review_count, due_at, updated_at FROM word_progress WHERE username = $1 ORDER BY word', [username]),
       pool.query('SELECT id, module, item_key, error_type, details, occurrence_count, first_seen_at, last_seen_at, resolved_at FROM error_bank WHERE username = $1 ORDER BY last_seen_at DESC', [username]),
+      pool.query(`SELECT id, target_exam, target_score, exam_date, weekly_minutes, revision, created_at, updated_at
+                  FROM adaptive_learning_goals WHERE username = $1 ORDER BY revision`, [username]),
+      readAdaptiveLearningProfile(pool, username, { onAdaptiveProfileSnapshot }),
       pool.query('SELECT id, operation, provider, model, prompt_version, status, duration_ms, error_code, prompt_tokens, completion_tokens, estimated_cost_microusd, created_at FROM ai_requests WHERE username = $1 ORDER BY created_at', [username]),
       pool.query("SELECT id, actor_telegram_id, action, target_type, target_id, result, metadata, created_at FROM audit_log WHERE metadata->>'username' = $1 ORDER BY created_at", [username]),
     ]);
     if (!account.rowCount) return null;
+    const adaptiveExport = adaptiveLearningProfileExportDto(
+      adaptiveSnapshot,
+      adaptiveSnapshot?.estimates || [],
+    );
     return {
       exported_at: new Date().toISOString(),
       account: account.rows[0],
@@ -2099,6 +2301,9 @@ export function createPostgresRepository(connectionString, {
       progress_summary: progressSummary.rows,
       word_progress: wordProgress.rows,
       error_bank: errorBank.rows,
+      adaptive_learning_goals: adaptiveGoals.rows.map(adaptiveLearningGoalRepositoryDto),
+      adaptive_learning_profile: adaptiveExport.profile,
+      adaptive_learning_skill_estimates: adaptiveExport.estimates,
       ai_requests: aiRequests.rows,
       audit_log: auditLog.rows,
     };
@@ -2230,6 +2435,11 @@ export function createPostgresRepository(connectionString, {
     claimUnseenBankTask,
     recordTaskDelivery,
     listBankTaskContents,
+    saveAdaptiveLearningGoal,
+    getAdaptiveLearningGoal,
+    getAdaptiveLearningEvidenceSources,
+    saveAdaptiveLearningProfile,
+    getAdaptiveLearningProfile,
     recordModuleAttempt,
     getModuleAttempt,
     upsertWordProgress,

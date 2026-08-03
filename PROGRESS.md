@@ -848,7 +848,7 @@ Agreed product contract: target EGE score/date is primary; a short diagnostic or
 
 Implementation tracker:
 
-- [ ] 01 Goal and evidence-backed profile tracer
+- [x] 01 Goal and evidence-backed profile tracer
 - [ ] 02 Short adaptive diagnostic
 - [ ] 03 Honest forecast and stable weekly allocation
 - [ ] 04 Duration-aware learning session composer
@@ -858,3 +858,35 @@ Implementation tracker:
 - [ ] 08 Hardening, E2E and release evidence
 
 Detailed source of truth: `.scratch/adaptive-learning-plan/spec.md` and `.scratch/adaptive-learning-plan/issues/`.
+
+Ticket 01 complete: the authenticated tracer now stores revisioned EGE goals and builds a
+confidence-labelled profile from owner-bound attempts plus validated Voice Tutor recovery/retention
+evidence. It includes the versioned six-module taxonomy and weighting policy, explicit
+client-reported/assisted/independent provenance and per-skill trust states. Exact aliases cover all
+12 skills; `voice-tutor-skill-compat-v1` maps all current production Voice skill families, including
+nested IDs and grammar-origin word-formation/collocation evidence, to the intended skill. Known
+families with a wrong module are rejected instead of falling through to an unrelated default;
+unknown recovery/repeat IDs are uncredited. Speaking task 1 is deliberately uncredited because
+`ege-en-v1` has no reading-aloud skill, while tasks 2–4 keep their intended mappings. Service
+`voice_tutor_*` attempts are ignored by the adaptive scorer because their exact recovery/repeat
+ledger is authoritative, preventing double credit into a module default.
+Assisted/client-only evidence is scoring-bounded, cannot reduce uncertainty, exceed 49
+mastery or establish a skill; forged high-volume public history remains preliminary guidance. The
+whole profile is established only at 12/12 independently confirmed skills. Migration 031 has
+file/PostgreSQL and export/delete parity. A separate monotonic calculation revision permits a newer
+algorithm to recompute the same evidence but blocks every older algorithm; the append-only watermark
+never lets a lower source count replace a higher one and accepts larger backfills even with an older
+latest timestamp. PostgreSQL reads all evidence sources in one SQL snapshot and profile plus estimates
+in one snapshot for get/export. Concurrent saves capture the same snapshot on the transaction client
+before commit, so they create neither orphan repeats nor mixed revisions and do not exhaust the pool.
+Overview uses the authoritative save result, including when a stale calculation is rejected. OpenAPI 3.0 nullable references
+and UI wording explicitly expose preliminary versus confirmed data. File/PostgreSQL profile save/get
+share one allowlisted DTO with nested sorted estimates, ISO/null timestamps and no owner/internal
+fields; adaptive exports reuse the same mapper. Adaptive goals use a second shared allowlisted mapper
+for file/PostgreSQL save/get/API/export with identical ISO/null created/updated timestamps.
+`ADAPTIVE_LEARNING_ENABLED=false`
+still fails closed across the unregistered API, `/me` projection and hidden/no-fetch UI entry.
+Verification: adaptive regressions plus file repository contracts 35/35, shared file/PostgreSQL DTO
+contracts, full suite 551 pass with 8 expected no-URL PostgreSQL skips, disposable PostgreSQL 8/8,
+lint/check, frontend build and both secret scans; no paid calls, push,
+deploy or staging changes.

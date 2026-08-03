@@ -30,7 +30,7 @@ function authenticationFor(username) {
   };
 }
 
-async function withCurrentUserApp(run, { limits = LIMITS, sessionStartLimiter } = {}) {
+async function withCurrentUserApp(run, { limits = LIMITS, sessionStartLimiter, featureFlags = {} } = {}) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-voice-user-'));
   const repository = createFileRepository(path.join(directory, 'data.json'));
   const username = await repository.createTelegramUser(6101, 'Voice Student');
@@ -51,6 +51,7 @@ async function withCurrentUserApp(run, { limits = LIMITS, sessionStartLimiter } 
     promoteConfiguredAdmin: async () => {},
     db: repository,
     voiceTutorLimits: limits,
+    featureFlags,
     now: () => clock.now,
   }));
   app.use(createVoiceTutorRoutes({
@@ -87,6 +88,7 @@ test('current user keeps a base subscription until voice_tutor is granted explic
     assert.equal(baseResponse.status, 200);
     const base = await baseResponse.json();
     assert.equal(base.active, true);
+    assert.deepEqual(base.features, { adaptive_learning: true });
     assert.deepEqual(base.entitlements, { voice_tutor: false });
     assert.deepEqual(base.voice_tutor, {
       daily_remaining_seconds: 0,
@@ -109,7 +111,7 @@ test('current user keeps a base subscription until voice_tutor is granted explic
     });
     assert.equal('daily_limit_seconds' in premium.voice_tutor, false);
     assert.equal('session_limit_seconds' in premium.voice_tutor, false);
-  });
+  }, { featureFlags: { adaptiveLearning: true } });
 });
 
 test('voice session reservation enforces auth, Premium, one active session and an idempotent daily quota', async () => {

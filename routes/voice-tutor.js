@@ -576,7 +576,7 @@ export function createVoiceTutorRoutes({
         revision: parsed.revision,
         learnerAnswer: parsed.learnerAnswer,
       }, generated?.getItem);
-      const result = await db.recordModuleAttempt(req.user, attempt);
+      const result = await db.recordModuleAttempt(req.user, attempt, { evidenceQuality: 'server_verified_assisted' });
       return res.status(result.created ? 201 : 200).json({ ...result, revision: parsed.revision });
     } catch (error) {
       return sendVoiceTutorError(error, res, next);
@@ -600,7 +600,7 @@ export function createVoiceTutorRoutes({
         getItem: generated.getItem,
         getResultSet: (setId) => setId === generated.resultSet.id ? generated.resultSet : null,
       } : {});
-      const recorded = await db.recordModuleAttempt(req.user, result.attempt);
+      const recorded = await db.recordModuleAttempt(req.user, result.attempt, { evidenceQuality: 'server_verified_assisted' });
       if (!recorded.created) {
         const existing = await db.getModuleAttempt(req.user, result.attempt.id);
         const expected = result.attempt.metadata;
@@ -610,7 +610,9 @@ export function createVoiceTutorRoutes({
           return sendVoiceTutorError({ code: 'VOICE_TUTOR_CONTEXT_RESULT_CONFLICT' }, res, next);
         }
       }
-      for (const errorAttempt of result.errors) await db.recordModuleAttempt(req.user, errorAttempt);
+      for (const errorAttempt of result.errors) {
+        await db.recordModuleAttempt(req.user, errorAttempt, { evidenceQuality: 'server_verified_assisted' });
+      }
       return res.status(recorded.created ? 201 : 200).json({
         id: result.attempt.id,
         created: recorded.created,

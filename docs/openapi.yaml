@@ -50,9 +50,9 @@ paths:
         '429': { $ref: '#/components/responses/RateLimited' }
   /api/v1/me:
     get:
-      summary: Current user, base subscription, Premium entitlements and remaining voice minutes
+      summary: Current user, base subscription, Premium entitlements, remaining voice minutes and server-projected feature flags
       responses:
-        '200': { description: User profile }
+        '200': { description: User profile; `features.adaptive_learning` is true only when the server rollout flag is enabled }
         '401': { $ref: '#/components/responses/Unauthorized' }
   /api/v1/payments/requests:
     post:
@@ -518,11 +518,67 @@ paths:
       summary: Clear authentication cookie
       responses:
         '200': { description: Logged out }
+  /api/v1/adaptive-learning/goal:
+    get:
+      summary: Read the authenticated learner's current EGE goal
+      responses:
+        '200':
+          description: Current goal or null
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [goal]
+                properties:
+                  goal:
+                    allOf:
+                      - $ref: '#/components/schemas/AdaptiveGoal'
+                    nullable: true
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { description: Adaptive Learning rollout is disabled; the route is not registered }
+    put:
+      summary: Idempotently save a current EGE target and refresh the evidence-backed preliminary profile
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, minLength: 16, maxLength: 120 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [targetExam, targetScore, examDate, weeklyMinutes]
+              properties:
+                targetExam: { type: string, enum: [ege_english] }
+                targetScore: { type: integer, minimum: 0, maximum: 100 }
+                examDate: { type: string, format: date, description: Must be later than the current UTC date. }
+                weeklyMinutes: { type: integer, minimum: 30, maximum: 2520, multipleOf: 5 }
+              additionalProperties: false
+      responses:
+        '201': { description: Goal revision created and current profile returned }
+        '200': { description: Exact idempotent replay; prior goal revision and current profile returned }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { description: Idempotency key was already used with a different goal payload }
+        '404': { description: Adaptive Learning rollout is disabled; the route is not registered }
+  /api/v1/adaptive-learning/overview:
+    get:
+      summary: Read the current goal and an owner-bound profile bootstrapped from persisted attempts and Voice Tutor recoveries
+      responses:
+        '200':
+          description: Goal plus transparent preliminary or established profile; no raw answer, essay, transcript or audio is copied
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdaptiveOverview' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { description: Adaptive Learning rollout is disabled; the route is not registered }
   /api/v1/account/export:
     get:
       summary: Export the authenticated user's account, progress and attempt data
       responses:
-        '200': { description: JSON export including structured Voice Tutor sessions, recovery/repeat outcomes and bounded provider/model/prompt metadata; no raw audio, temporary captions, full Voice Tutor transcript, nonce hash or repeat answer }
+        '200': { description: JSON export including adaptive goals/structured estimates, Voice Tutor sessions, recovery/repeat outcomes and bounded provider/model/prompt metadata; no raw audio, temporary captions, full Voice Tutor transcript, nonce hash or repeat answer }
         '401': { $ref: '#/components/responses/Unauthorized' }
   /api/v1/account:
     delete:
@@ -868,6 +924,99 @@ components:
       in: cookie
       name: eb_token
   schemas:
+    AdaptiveGoal:
+      type: object
+      required: [id, targetExam, targetScore, examDate, weeklyMinutes, revision, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        targetExam: { type: string, enum: [ege_english] }
+        targetScore: { type: integer, minimum: 0, maximum: 100 }
+        examDate: { type: string, format: date }
+        weeklyMinutes: { type: integer, minimum: 30, maximum: 2520, multipleOf: 5 }
+        revision: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      additionalProperties: false
+    AdaptiveSkillEstimate:
+      type: object
+      required: [id, label, module, mastery, uncertainty, status, evidenceCount, effectiveEvidenceCount, independentEvidenceCount, evidenceQuality, lastObservedAt, dueState, explanationCode]
+      properties:
+        id: { type: string, maxLength: 120 }
+        label: { type: string, maxLength: 160 }
+        module: { type: string, enum: [grammar, vocabulary, reading, listening, writing, speaking] }
+        mastery:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Conservative estimate; without independent evidence it cannot exceed 49.
+        uncertainty:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Reduced only by independent unassisted or retention evidence.
+        status:
+          type: string
+          enum: [unobserved, preliminary, established]
+          description: A skill is established only after at least two independent observations.
+        evidenceCount: { type: integer, minimum: 0 }
+        effectiveEvidenceCount:
+          type: integer
+          minimum: 0
+          description: Observations used in scoring after trust ceilings; raw evidenceCount remains auditable.
+        independentEvidenceCount: { type: integer, minimum: 0 }
+        evidenceQuality: { type: string, enum: [none, client_reported, assisted, independent, mixed] }
+        lastObservedAt: { type: string, format: date-time, nullable: true }
+        dueState: { type: string, enum: [not_due, due, overdue] }
+        explanationCode: { type: string, maxLength: 40 }
+      additionalProperties: false
+    AdaptiveProfile:
+      type: object
+      required: [taxonomyVersion, weightingVersion, profileCalculationRevision, evidenceWatermarkVersion, evidenceObservedAt, evidenceSourceCount, preliminary, status, confidence, evidenceCount, independentEvidenceCount, assistedEvidenceCount, clientReportedEvidenceCount, independentModuleCount, establishedSkillCount, needsDiagnostic, explanationCodes, skills, modules]
+      properties:
+        taxonomyVersion: { type: string, enum: [ege-en-v1] }
+        weightingVersion: { type: string, enum: [adaptive-evidence-v1] }
+        profileCalculationRevision:
+          type: integer
+          minimum: 1
+          description: Monotonic profile algorithm revision; an older calculation can never replace a newer one, while no revision may reduce evidenceSourceCount.
+        evidenceWatermarkVersion: { type: string, enum: [adaptive-evidence-watermark-v1] }
+        evidenceObservedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Latest valid source-event timestamp used as the equal-count ordering tie-breaker.
+        evidenceSourceCount:
+          type: integer
+          minimum: 0
+          description: Append-only raw source-event count; lower counts never replace higher counts within one calculation revision and may include safely uncredited events.
+        preliminary: { type: boolean }
+        status: { type: string, enum: [preliminary, established] }
+        confidence: { type: integer, minimum: 0, maximum: 100 }
+        evidenceCount: { type: integer, minimum: 0 }
+        independentEvidenceCount: { type: integer, minimum: 0 }
+        assistedEvidenceCount: { type: integer, minimum: 0 }
+        clientReportedEvidenceCount: { type: integer, minimum: 0 }
+        independentModuleCount: { type: integer, minimum: 0, maximum: 6 }
+        establishedSkillCount:
+          type: integer
+          minimum: 0
+          maximum: 12
+          description: Number of independently established taxonomy skills; the whole profile stays preliminary below 12.
+        needsDiagnostic: { type: boolean }
+        explanationCodes: { type: array, items: { type: string } }
+        skills: { type: array, items: { $ref: '#/components/schemas/AdaptiveSkillEstimate' } }
+        modules: { type: array, items: { type: object } }
+      additionalProperties: false
+    AdaptiveOverview:
+      type: object
+      required: [goal, profile]
+      properties:
+        goal:
+          allOf:
+            - $ref: '#/components/schemas/AdaptiveGoal'
+          nullable: true
+        profile: { $ref: '#/components/schemas/AdaptiveProfile' }
+      additionalProperties: false
     PaymentRequest:
       type: object
       required: [id, product, status]

@@ -15,6 +15,7 @@ export function createUserRoutes({
   promoteConfiguredAdmin,
   db,
   voiceTutorLimits = {},
+  featureFlags = {},
   now = () => new Date(),
   newPaymentRequestId = () => crypto.randomUUID(),
   premiumSubscriptionDays = 30,
@@ -27,7 +28,11 @@ export function createUserRoutes({
     const voiceTutor = typeof db.getVoiceTutorAccess === 'function'
       ? await db.getVoiceTutorAccess(username, voiceTutorLimits, now())
       : { entitlements: { voice_tutor: false }, voice_tutor: { daily_remaining_seconds: 0, monthly_remaining_seconds: 0, active_session: false } };
-    return { ...subscription, ...voiceTutor };
+    return {
+      ...subscription,
+      ...voiceTutor,
+      features: { adaptive_learning: featureFlags.adaptiveLearning === true },
+    };
   }
 
   router.post('/api/v1/tg/start', limiters.telegramStart, async (req, res, next) => {

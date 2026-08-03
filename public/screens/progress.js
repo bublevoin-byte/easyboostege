@@ -4,16 +4,45 @@
  * Числа он берёт из того же состояния, что и плитки главного экрана, — считать заново нечего.
  */
 import {registerRouteHook} from '../router.js';
-import {S,apiGet,apiMessage,apiPost,progressModule,setTxt,setW} from '../app.js';
+import {S,apiGet,apiMessage,apiPost,apiPut,progressModule,setTxt,setW} from '../app.js';
 
 const BAR_IDS={words:'pb_words',gram:'pb_gram',read:'pb_read',listen:'pb_listen',speak:'pb_speak'};
 function renderProgress(){if(!S)return;const view=progressModule.overview(S,Date.now());
   setTxt('p_streak',progressModule.streakLabel(view.streak));setTxt('p_words',view.learned);
-  Object.keys(BAR_IDS).forEach(function(name){setW(BAR_IDS[name],view.modules[name])});renderRecoveryMap()}
+  Object.keys(BAR_IDS).forEach(function(name){setW(BAR_IDS[name],view.modules[name])});renderAdaptivePlan();renderRecoveryMap()}
 
 function text(tag,value,style){const node=document.createElement(tag);node.textContent=value;if(style)node.setAttribute('style',style);return node}
 function recoveryStateLabel(state){return state==='recovered'?'Восстановлено':state==='relapsed'?'Ошибка проявилась снова':'В работе'}
 function repeatAttemptId(){return globalThis.crypto&&typeof globalThis.crypto.randomUUID==='function'?globalThis.crypto.randomUUID():('00000000-0000-4000-8000-'+Date.now().toString(16).padStart(12,'0').slice(-12))}
+function goalIdempotencyKey(){return globalThis.crypto&&typeof globalThis.crypto.randomUUID==='function'?globalThis.crypto.randomUUID():('adaptive-goal-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2))}
+
+function drawAdaptivePlan(payload){
+  const root=document.getElementById('adaptive_plan');const summary=document.getElementById('adaptive_plan_summary');if(!root||!summary)return;
+  const goal=payload&&payload.goal;const profile=payload&&payload.profile?payload.profile:{};
+  if(goal){document.getElementById('adaptive_target_score').value=goal.targetScore;document.getElementById('adaptive_exam_date').value=goal.examDate;document.getElementById('adaptive_weekly_minutes').value=goal.weeklyMinutes}
+  const observed=Math.max(0,Number(profile.evidenceCount)||0);const confidence=Math.max(0,Number(profile.confidence)||0);
+  const establishedSkillCount=Math.max(0,Math.min(12,Number(profile.establishedSkillCount)||0));
+  const modules=Array.isArray(profile.modules)?profile.modules.filter(function(module){return module.evidenceCount>0}).sort(function(first,second){return first.mastery-second.mastery}):[];
+  const weakest=modules[0];const state=establishedSkillCount===12&&!profile.preliminary?'Профиль подтверждён':'Профиль предварительный';
+  const diagnostic=profile.needsDiagnostic?' Нужна короткая диагностика для уточнения.':'';
+  const assisted=Number(profile.assistedEvidenceCount)>0&&establishedSkillCount<12?' Результаты с подсказкой не подтверждают владение навыком.':'';
+  summary.textContent=state+' · подтверждено навыков: '+establishedSkillCount+' из 12 · уверенность '+confidence+'% · данных: '+observed+'.'+(weakest?' Сейчас важнее всего: '+weakest.id+' ('+weakest.mastery+'%).':'')+assisted+diagnostic;
+}
+
+async function renderAdaptivePlan(){
+  const root=document.getElementById('adaptive_plan');const form=document.getElementById('adaptive_goal_form');const notice=document.getElementById('adaptive_goal_notice');if(!root||!form||!notice)return;
+  root.hidden=!(window.__sub?.features?.adaptive_learning===true);if(root.hidden)return;
+  if(!form.dataset.bound){
+    form.dataset.bound='true';form.addEventListener('input',function(){delete form.dataset.pendingKey});
+    form.addEventListener('submit',async function(event){event.preventDefault();const button=form.querySelector('button[type="submit"]');button.disabled=true;notice.textContent='Сохраняем цель…';
+      const payload={targetExam:'ege_english',targetScore:Number(document.getElementById('adaptive_target_score').value),examDate:document.getElementById('adaptive_exam_date').value,weeklyMinutes:Number(document.getElementById('adaptive_weekly_minutes').value)};
+      const key=form.dataset.pendingKey||goalIdempotencyKey();form.dataset.pendingKey=key;
+      try{const saved=await apiPut('/api/v1/adaptive-learning/goal',payload,{'Idempotency-Key':key});delete form.dataset.pendingKey;drawAdaptivePlan(saved);notice.textContent='Цель сохранена.'}
+      catch(error){notice.textContent=apiMessage(error,'request')}finally{button.disabled=false}
+    });
+  }
+  try{drawAdaptivePlan(await apiGet('/api/v1/adaptive-learning/overview'));notice.textContent=''}catch(error){notice.textContent='План сейчас недоступен онлайн. Сохранённый прогресс остаётся на устройстве.'}
+}
 
 async function submitRepeat(repeat,input,button,notice){
   const answer=String(input.value||'').trim();if(!answer){notice.textContent='Введите ответ.';input.focus();return}
@@ -45,4 +74,4 @@ async function renderRecoveryMap(){const root=document.getElementById('voice_rec
 
 registerRouteHook(function(id){if(id==='scr10')renderProgress()});
 
-export {drawRecoveryMap,renderProgress,renderRecoveryMap};
+export {drawAdaptivePlan,drawRecoveryMap,renderAdaptivePlan,renderProgress,renderRecoveryMap};

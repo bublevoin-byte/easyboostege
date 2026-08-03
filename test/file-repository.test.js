@@ -3,7 +3,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { buildAdaptiveLearningProfile } from '../adaptive-learning/profile.js';
 import { createFileRepository } from '../storage/file-repository.js';
+import {
+  assertAdaptiveProfileAppendOnlyOrdering,
+  assertAdaptiveProfileRejectsStale,
+  assertAdaptiveProfileRepositoryContract,
+} from './support/adaptive-profile-contract.js';
+import { assertAdaptiveGoalRepositoryContract } from './support/adaptive-goal-contract.js';
 
 async function withRepository(run) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-db-'));
@@ -26,6 +33,62 @@ test('file repository persists progress atomically', async () => {
     ]);
     const parsed = JSON.parse(await fs.readFile(file, 'utf8'));
     assert.equal(parsed.progress[username].value, 2);
+  });
+});
+
+test('file adaptive profile save/get expose the shared allowlisted repository DTO', async () => {
+  await withRepository(async (repository) => {
+    const username = await repository.createTelegramUser(1099, 'Adaptive DTO');
+    await assertAdaptiveProfileRepositoryContract(
+      assert,
+      repository,
+      username,
+      buildAdaptiveLearningProfile(),
+      new Date('2026-08-04T06:00:00.000Z'),
+    );
+  });
+});
+
+test('file adaptive profile watermark rejects reverse-order and same-time stale saves', async () => {
+  await withRepository(async (repository) => {
+    const username = await repository.createTelegramUser(1100, 'Adaptive Race');
+    const attempt = (id, createdAt) => ({
+      id, module: 'grammar', activity: 'grammar_19_24', score: 8, max_score: 10,
+      evidence_quality: 'server_verified_unassisted', created_at: createdAt,
+    });
+    const first = attempt('10000000-0000-4000-8000-000000000001', '2026-08-04T05:00:00.000Z');
+    const latest = attempt('10000000-0000-4000-8000-000000000002', '2026-08-04T06:00:00.000Z');
+    const backfill = attempt('10000000-0000-4000-8000-000000000003', '2026-08-04T04:00:00.000Z');
+    await assertAdaptiveProfileRejectsStale(assert, repository, username, {
+      older: buildAdaptiveLearningProfile({ attempts: [first] }),
+      newer: buildAdaptiveLearningProfile({ attempts: [first, latest] }),
+      backfilled: buildAdaptiveLearningProfile({ attempts: [backfill, first, latest] }),
+    });
+  });
+});
+
+test('file adaptive profile ordering is append-only and calculation-revision aware', async () => {
+  await withRepository(async (repository) => {
+    const username = await repository.createTelegramUser(1101, 'Adaptive Ordering');
+    await assertAdaptiveProfileAppendOnlyOrdering(
+      assert, repository, username, buildAdaptiveLearningProfile,
+    );
+  });
+});
+
+test('file adaptive goal uses the shared allowlisted ISO timestamp DTO', async () => {
+  await withRepository(async (repository) => {
+    const username = await repository.createTelegramUser(1102, 'Adaptive Goal DTO');
+    await assertAdaptiveGoalRepositoryContract(assert, repository, username, {
+      id: '30000000-0000-4000-8000-000000000001',
+      idempotencyKey: 'file-goal-contract-0001',
+      requestHash: 'a'.repeat(64),
+      targetExam: 'ege_english',
+      targetScore: 85,
+      examDate: '2027-06-01',
+      weeklyMinutes: 300,
+      now: new Date('2026-08-04T08:00:00.000Z'),
+    });
   });
 });
 
@@ -253,11 +316,18 @@ test('module attempts are idempotent and included in user export', async () => {
     const attempt = { id: '222b90b8-0f21-481c-b606-5211b2c65754', module: 'exam', activity: 'grammar_19_24', score: 4, maxScore: 6, durationMs: 60_000, metadata: { source: 'builtin' } };
     assert.equal((await repository.recordModuleAttempt(username, attempt)).created, true);
     assert.equal((await repository.recordModuleAttempt(username, attempt)).created, false);
+    assert.equal((await repository.getModuleAttempt(username, attempt.id)).evidence_quality, 'client_reported');
+    const verified = { ...attempt, id: '4ec99215-2354-4c05-b68a-07910f8e898a', activity: 'grammar_25_29' };
+    assert.equal((await repository.recordModuleAttempt(username, verified, {
+      evidenceQuality: 'server_verified_unassisted',
+    })).created, true);
+    assert.equal((await repository.getModuleAttempt(username, verified.id)).evidence_quality, 'server_verified_unassisted');
     const exported = await repository.exportUserData(username);
-    assert.equal(exported.module_attempts.length, 1);
+    assert.equal(exported.module_attempts.length, 2);
     assert.equal(exported.module_attempts[0].score, 4);
+    assert.equal(exported.module_attempts[0].evidence_quality, 'client_reported');
     assert.equal(exported.progress_summary.length, 1);
-    assert.equal(exported.progress_summary[0].attempt_count, 1);
+    assert.equal(exported.progress_summary[0].attempt_count, 2);
     assert.equal(exported.progress_summary[0].best_score, 4);
   });
 });

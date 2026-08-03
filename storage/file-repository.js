@@ -5,6 +5,13 @@ import { hashAuthCode, normalizeUsername, normalizeVoiceTutorDeliveryMetadata, n
 import { transitionPedagogicalState } from '../voice-tutor/state-machine.js';
 import { transitionRuleCardReview } from '../voice-tutor/rule-card.js';
 import { createRecoveryLedger, planRecoveryFromTransfer, planRepeatAttempt, publicRepeatAttempt, recoveryMap, recoveryMetrics } from '../voice-tutor/recovery.js';
+import { requireModuleAttemptEvidenceQuality } from '../adaptive-learning/evidence-quality.js';
+import { compareAdaptiveEvidenceWatermarks } from '../adaptive-learning/evidence-watermark.js';
+import { adaptiveLearningGoalRepositoryDto } from '../adaptive-learning/goal-dto.js';
+import {
+  adaptiveLearningProfileExportDto,
+  adaptiveLearningProfileRepositoryDto,
+} from '../adaptive-learning/repository-dto.js';
 
 function normalizeAttemptModels(attempts) {
   return attempts.map((attempt) => ({ ...attempt, model: attempt.model ?? null }));
@@ -69,9 +76,9 @@ function reconcileLegacyApprovedRuleCards(cards) {
 
 export function createFileRepository(filePath) {
   let loaded = false;
-  let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, subscription_entitlements: {}, voice_tutor_sessions: [], voice_tutor_recoveries: [], voice_tutor_repeats: [], voice_tutor_repeat_attempts: [], voice_tutor_reports: [], rule_cards: [], payment_requests: {}, subscription_events: [] };
+  let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, subscription_entitlements: {}, voice_tutor_sessions: [], voice_tutor_recoveries: [], voice_tutor_repeats: [], voice_tutor_repeat_attempts: [], voice_tutor_reports: [], rule_cards: [], payment_requests: {}, subscription_events: [], adaptive_learning_goals: [], adaptive_learning_profiles: {}, adaptive_learning_skill_estimates: {} };
   let writeQueue = Promise.resolve();
-  let voiceTutorQueue = Promise.resolve();
+  let coordinatedMutationQueue = Promise.resolve();
   let paymentQueue = Promise.resolve();
   let ruleCardQueue = Promise.resolve();
 
@@ -122,6 +129,9 @@ export function createFileRepository(filePath) {
           rule_cards: Array.isArray(parsed.rule_cards) ? parsed.rule_cards : [],
           payment_requests: parsed.payment_requests && typeof parsed.payment_requests === 'object' ? parsed.payment_requests : {},
           subscription_events: Array.isArray(parsed.subscription_events) ? parsed.subscription_events : [],
+          adaptive_learning_goals: Array.isArray(parsed.adaptive_learning_goals) ? parsed.adaptive_learning_goals : [],
+          adaptive_learning_profiles: parsed.adaptive_learning_profiles && typeof parsed.adaptive_learning_profiles === 'object' ? parsed.adaptive_learning_profiles : {},
+          adaptive_learning_skill_estimates: parsed.adaptive_learning_skill_estimates && typeof parsed.adaptive_learning_skill_estimates === 'object' ? parsed.adaptive_learning_skill_estimates : {},
         };
         const reconciledLegacyCanonical = reconcileLegacyApprovedRuleCards(state.rule_cards);
         if (minimizedLegacyCapsule || reconciledLegacyCanonical) await persist();
@@ -432,11 +442,13 @@ export function createFileRepository(filePath) {
     return changed;
   }
 
-  function serializeVoiceTutorMutation(run) {
-    const result = voiceTutorQueue.then(run, run);
-    voiceTutorQueue = result.then(() => undefined, () => undefined);
+  function serializeCoordinatedMutation(run) {
+    const result = coordinatedMutationQueue.then(run, run);
+    coordinatedMutationQueue = result.then(() => undefined, () => undefined);
     return result;
   }
+
+  function serializeVoiceTutorMutation(run) { return serializeCoordinatedMutation(run); }
 
   function publicVoiceTutorSession(session) {
     return {
@@ -1430,10 +1442,142 @@ export function createFileRepository(filePath) {
       .map((item) => structuredClone(item.content));
   }
 
-  async function recordModuleAttempt(username, attempt) {
+  async function saveAdaptiveLearningGoal(username, goal) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      if (!state.users[username]) throw new Error('USER_NOT_FOUND');
+      const duplicate = state.adaptive_learning_goals.find((entry) => (
+        entry.username === username && entry.idempotency_key === goal.idempotencyKey
+      ));
+      if (duplicate) {
+        if (duplicate.request_hash !== goal.requestHash) throw new Error('ADAPTIVE_GOAL_IDEMPOTENCY_CONFLICT');
+        return { created: false, goal: adaptiveLearningGoalRepositoryDto(duplicate) };
+      }
+      const current = state.adaptive_learning_goals.filter((entry) => entry.username === username && entry.current);
+      for (const entry of current) entry.current = false;
+      const stored = {
+        id: goal.id,
+        username,
+        target_exam: goal.targetExam,
+        target_score: goal.targetScore,
+        exam_date: goal.examDate,
+        weekly_minutes: goal.weeklyMinutes,
+        revision: Math.max(0, ...state.adaptive_learning_goals
+          .filter((entry) => entry.username === username)
+          .map((entry) => Number(entry.revision) || 0)) + 1,
+        idempotency_key: goal.idempotencyKey,
+        request_hash: goal.requestHash,
+        current: true,
+        created_at: new Date(goal.now).getTime(),
+        updated_at: new Date(goal.now).getTime(),
+      };
+      state.adaptive_learning_goals.push(stored);
+      await persist();
+      return { created: true, goal: adaptiveLearningGoalRepositoryDto(stored) };
+    });
+  }
+
+  async function getAdaptiveLearningGoal(username) {
     await load();
+    const goals = state.adaptive_learning_goals
+      .filter((entry) => entry.username === username && entry.current)
+      .sort((first, second) => Number(second.revision) - Number(first.revision));
+    return adaptiveLearningGoalRepositoryDto(goals[0]);
+  }
+
+  async function getAdaptiveLearningEvidenceSources(username) {
+    await load();
+    const recoveries = state.voice_tutor_recoveries.filter((entry) => entry.username === username);
+    const recoveryById = new Map(recoveries.map((entry) => [entry.id, entry]));
+    const repeatById = new Map(state.voice_tutor_repeats
+      .filter((entry) => recoveryById.has(entry.recovery_id))
+      .map((entry) => [entry.id, entry]));
+    return structuredClone({
+      attempts: state.module_attempts
+        .filter((entry) => entry.username === username)
+        .map((entry) => ({ ...entry, evidence_quality: entry.evidence_quality || 'client_reported' })),
+      recoveries,
+      repeatAttempts: state.voice_tutor_repeat_attempts
+        .filter((entry) => repeatById.has(entry.repeat_id))
+        .map((entry) => {
+          const recovery = recoveryById.get(repeatById.get(entry.repeat_id).recovery_id);
+          return { ...entry, skill_id: recovery.skill_id, module: recovery.module };
+        }),
+    });
+  }
+
+  async function saveAdaptiveLearningProfile(username, profile, { now = new Date() } = {}) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      if (!state.users[username]) throw new Error('USER_NOT_FOUND');
+      const persistedProfile = state.adaptive_learning_profiles[username];
+      if (persistedProfile && compareAdaptiveEvidenceWatermarks(profile, persistedProfile) <= 0) {
+        return adaptiveLearningProfileRepositoryDto(
+          persistedProfile,
+          state.adaptive_learning_skill_estimates[username] || [],
+        );
+      }
+      const updatedAt = new Date(now).getTime();
+      state.adaptive_learning_profiles[username] = {
+        taxonomy_version: profile.taxonomyVersion,
+        weighting_version: profile.weightingVersion,
+        status: profile.status,
+        preliminary: Boolean(profile.preliminary),
+        confidence: profile.confidence,
+        evidence_count: profile.evidenceCount,
+        independent_evidence_count: profile.independentEvidenceCount,
+        assisted_evidence_count: profile.assistedEvidenceCount,
+        client_reported_evidence_count: profile.clientReportedEvidenceCount,
+        independent_module_count: profile.independentModuleCount,
+        established_skill_count: profile.establishedSkillCount,
+        profile_calculation_revision: profile.profileCalculationRevision,
+        evidence_watermark_version: profile.evidenceWatermarkVersion,
+        evidence_observed_at: profile.evidenceObservedAt,
+        evidence_source_count: profile.evidenceSourceCount,
+        needs_diagnostic: Boolean(profile.needsDiagnostic),
+        explanation_codes: structuredClone(profile.explanationCodes),
+        updated_at: updatedAt,
+      };
+      state.adaptive_learning_skill_estimates[username] = profile.skills.map((skill) => ({
+        username,
+        taxonomy_version: profile.taxonomyVersion,
+        skill_id: skill.id,
+        module: skill.module,
+        mastery: skill.mastery,
+        uncertainty: skill.uncertainty,
+        evidence_count: skill.evidenceCount,
+        effective_evidence_count: skill.effectiveEvidenceCount,
+        independent_evidence_count: skill.independentEvidenceCount,
+        evidence_quality: skill.evidenceQuality,
+        status: skill.status,
+        last_observed_at: skill.lastObservedAt,
+        due_state: skill.dueState,
+        explanation_code: skill.explanationCode,
+        updated_at: updatedAt,
+      }));
+      await persist();
+      return adaptiveLearningProfileRepositoryDto(
+        state.adaptive_learning_profiles[username],
+        state.adaptive_learning_skill_estimates[username],
+      );
+    });
+  }
+
+  async function getAdaptiveLearningProfile(username) {
+    await load();
+    const profile = state.adaptive_learning_profiles[username];
+    if (!profile) return null;
+    return adaptiveLearningProfileRepositoryDto(
+      profile,
+      state.adaptive_learning_skill_estimates[username] || [],
+    );
+  }
+
+  async function recordModuleAttempt(username, attempt, { evidenceQuality = 'client_reported' } = {}) {
+    await load();
+    const trustedEvidenceQuality = requireModuleAttemptEvidenceQuality(evidenceQuality);
     if (state.module_attempts.some((item) => item.id === attempt.id)) return { id: attempt.id, created: false };
-    state.module_attempts.push({ id: attempt.id, username, module: attempt.module, activity: attempt.activity, score: attempt.score, max_score: attempt.maxScore, duration_ms: attempt.durationMs ?? null, metadata: structuredClone(attempt.metadata || {}), created_at: Date.now() });
+    state.module_attempts.push({ id: attempt.id, username, module: attempt.module, activity: attempt.activity, score: attempt.score, max_score: attempt.maxScore, duration_ms: attempt.durationMs ?? null, metadata: structuredClone(attempt.metadata || {}), evidence_quality: trustedEvidenceQuality, created_at: Date.now() });
     state.progress_summary[username] ||= {};
     const summary = state.progress_summary[username][attempt.module] ||= { module: attempt.module, attempt_count: 0, best_score: 0, best_max_score: 1, total_duration_ms: 0, last_attempt_at: null, updated_at: null };
     summary.attempt_count += 1;
@@ -1607,6 +1751,10 @@ export function createFileRepository(filePath) {
     await load();
     const user = state.users[username];
     if (!user) return null;
+    const adaptiveExport = adaptiveLearningProfileExportDto(
+      state.adaptive_learning_profiles[username] || null,
+      state.adaptive_learning_skill_estimates[username] || [],
+    );
     return structuredClone({
       exported_at: new Date().toISOString(),
       account: {
@@ -1652,6 +1800,11 @@ export function createFileRepository(filePath) {
       error_bank: state.error_bank.filter((item) => item.username === username),
       ai_requests: state.ai_requests.filter((item) => item.username === username),
       audit_log: state.audit_log.filter((item) => item.metadata?.username === username),
+      adaptive_learning_goals: state.adaptive_learning_goals
+        .filter((item) => item.username === username)
+        .map(adaptiveLearningGoalRepositoryDto),
+      adaptive_learning_profile: adaptiveExport.profile,
+      adaptive_learning_skill_estimates: adaptiveExport.estimates,
     });
   }
 
@@ -1683,6 +1836,9 @@ export function createFileRepository(filePath) {
       state.ai_requests = state.ai_requests.filter((item) => item.username !== username);
       delete state.subscriptions[username];
       delete state.subscription_entitlements[username];
+      state.adaptive_learning_goals = state.adaptive_learning_goals.filter((item) => item.username !== username);
+      delete state.adaptive_learning_profiles[username];
+      delete state.adaptive_learning_skill_estimates[username];
       state.voice_tutor_sessions = state.voice_tutor_sessions.filter((item) => item.username !== username);
       const recoveryIds = new Set(state.voice_tutor_recoveries.filter((item) => item.username === username).map((item) => item.id));
       const repeatIds = new Set(state.voice_tutor_repeats.filter((item) => recoveryIds.has(item.recovery_id)).map((item) => item.id));
@@ -1798,6 +1954,11 @@ export function createFileRepository(filePath) {
     claimUnseenBankTask,
     recordTaskDelivery,
     listBankTaskContents,
+    saveAdaptiveLearningGoal,
+    getAdaptiveLearningGoal,
+    getAdaptiveLearningEvidenceSources,
+    saveAdaptiveLearningProfile,
+    getAdaptiveLearningProfile,
     recordModuleAttempt,
     getModuleAttempt,
     upsertWordProgress,

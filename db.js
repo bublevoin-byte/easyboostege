@@ -74,6 +74,11 @@ export const getBankTaskByExternalId = (...args) => repository.getBankTaskByExte
 export const claimUnseenBankTask = (...args) => repository.claimUnseenBankTask(...args);
 export const recordTaskDelivery = (...args) => repository.recordTaskDelivery(...args);
 export const listBankTaskContents = (...args) => repository.listBankTaskContents(...args);
+export const saveAdaptiveLearningGoal = (...args) => repository.saveAdaptiveLearningGoal(...args);
+export const getAdaptiveLearningGoal = (...args) => repository.getAdaptiveLearningGoal(...args);
+export const getAdaptiveLearningEvidenceSources = (...args) => repository.getAdaptiveLearningEvidenceSources(...args);
+export const saveAdaptiveLearningProfile = (...args) => repository.saveAdaptiveLearningProfile(...args);
+export const getAdaptiveLearningProfile = (...args) => repository.getAdaptiveLearningProfile(...args);
 export const recordModuleAttempt = (...args) => repository.recordModuleAttempt(...args);
 export const getModuleAttempt = (...args) => repository.getModuleAttempt(...args);
 export const upsertWordProgress = (...args) => repository.upsertWordProgress(...args);
