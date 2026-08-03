@@ -49,7 +49,7 @@ test('session endpoints do not expose JWT in JSON', async () => {
   assert.doesNotMatch(server, /req\.query\.t(?:\W|$)/u);
   assert.match(authentication, /const user = await getUser\(username\);[\s\S]{0,80}if \(!user\)/u);
   assert.match(authentication, /isSessionActive\(claims\.sid, username\)/u);
-  assert.match(authentication, /req\.user = username/u);
+  assert.match(authentication, /req\.user = authenticated\.username/u);
   // The session cookie stays HttpOnly and the token never reaches a response body.
   assert.match(authentication, /HttpOnly; SameSite=Lax/u);
   assert.doesNotMatch(authentication, /res\.json\([^)]*token/u);

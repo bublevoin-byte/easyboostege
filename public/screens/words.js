@@ -130,7 +130,7 @@ async function wTopUp(){
   if(fresh>=40)return;W_GEN=true;
   try{
     var have=EGE_WORDS.map(function(x){return x.w}).slice(0,500);
-    var d=await generateAiContent('vocabulary_cards',{count:30,exclude:have});
+    var d=await generateAiContent('vocabulary_cards',{count:8,exclude:have});
     if(Array.isArray(d)&&d.length){var have2={};EGE_WORDS.forEach(function(x){have2[x.w]=1});
       var added=[];
       d.forEach(function(x){if(x.w&&x.tr&&!have2[x.w]&&(x.ex||'').toLowerCase().indexOf(x.w.replace(/^to /,'').toLowerCase())>=0){var it={w:x.w,p:x.p||'n',t:0,tr:x.tr,ex:x.ex||'',voice_tutor:x.voice_tutor||null};EGE_WORDS.push(it);added.push(it);have2[x.w]=1}});

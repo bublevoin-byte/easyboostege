@@ -10,6 +10,8 @@ import {
   voiceTutorModule,
   WRITING_SPEAKING_CAPSULE_VERSION,
 } from './modules.js';
+import { practicePromptKey } from './practice.js';
+import { reviewRecoveryTasks } from './recovery.js';
 import { normalizeTutorAnswer } from './state-machine.js';
 
 export const VOICE_CAPSULE_VERSION = GRAMMAR_LEXICON_CAPSULE_VERSION;
@@ -65,6 +67,35 @@ function itemRule(item) {
     explanation: 'Easy Boost ищет объяснение только в доверенных источниках.',
     examples: [],
     discovery_required: true,
+  };
+}
+
+function recoveryTask(task, skillId, excludedPrompts) {
+  if (!task || (task.skillId && task.skillId !== skillId) || !Array.isArray(task.answers)
+    || task.answers.length < 1 || task.answers.length > 10) {
+    throw new VoiceTutorCapsuleError('VOICE_TUTOR_REPEAT_TASK_UNAVAILABLE');
+  }
+  const prompt = boundedString(task.prompt, 1_000, 'VOICE_TUTOR_REPEAT_TASK_UNAVAILABLE');
+  const normalized = practicePromptKey(prompt);
+  if (!normalized || excludedPrompts.has(normalized)) {
+    throw new VoiceTutorCapsuleError('VOICE_TUTOR_REPEAT_TASK_UNAVAILABLE');
+  }
+  excludedPrompts.add(normalized);
+  return {
+    ...(task.id ? { id: boundedString(task.id, 180, 'VOICE_TUTOR_REPEAT_TASK_UNAVAILABLE') } : {}),
+    skillId,
+    prompt,
+    answers: task.answers.map((answer) => boundedString(answer, 200, 'VOICE_TUTOR_REPEAT_TASK_UNAVAILABLE')),
+  };
+}
+
+function itemRecoveryTasks(item) {
+  const excludedPrompts = new Set([
+    item.prompt, item.microCheck?.prompt, item.transferTask?.prompt,
+  ].map(practicePromptKey).filter(Boolean));
+  return {
+    day_1: recoveryTask(item.recoveryTasks?.day1, item.skill.id, excludedPrompts),
+    day_7: recoveryTask(item.recoveryTasks?.day7, item.skill.id, excludedPrompts),
   };
 }
 
@@ -204,6 +235,7 @@ export function buildVoiceTutorCapsule({ attempt, expectedRevision, getItem = ge
       micro_check: { ...item.microCheck, answers: [...item.microCheck.answers] },
       transfer_task: { ...item.transferTask, answers: [...item.transferTask.answers] },
     },
+    recovery_tasks: itemRecoveryTasks(item),
   };
   if (JSON.stringify(capsule).length > 12_000) throw new VoiceTutorCapsuleError('VOICE_TUTOR_CAPSULE_TOO_LARGE');
   return capsule;
@@ -271,6 +303,7 @@ function reviewLosses(source, review) {
     .filter((item) => item && (item.note || item.right))
     .slice(0, 8)
     .map((item) => ({
+      ...(String(item.title || '').trim() ? { title: boundedString(item.title, 300, 'VOICE_TUTOR_REVIEW_INVALID') } : {}),
       ...(String(item.note || '').trim() ? { note: boundedString(item.note, 1_000, 'VOICE_TUTOR_REVIEW_INVALID') } : {}),
       ...(String(item.right || '').trim() ? { example: boundedString(item.right, 300, 'VOICE_TUTOR_REVIEW_INVALID') } : {}),
     }));
@@ -375,6 +408,43 @@ function reviewPractice(source, taskType, criterionIndex) {
   return result;
 }
 
+function reviewCriterionFamily(source, taskType, criterionIndex) {
+  if (source === 'writing') {
+    if (criterionIndex === 0) return 'communicative';
+    if (criterionIndex === 1) return 'organization';
+    if (taskType === 'writing_37') return 'language';
+    return ['lexicon', 'grammar', 'spelling'][criterionIndex - 2] || null;
+  }
+  if (taskType === 1) return 'reading_aloud';
+  if (taskType === 2) return 'direct_questions';
+  if (taskType === 3) return 'extended_answer';
+  return ['communicative', 'organization', 'language'][criterionIndex] || null;
+}
+
+const CORRECTION_FAMILY_PATTERNS = Object.freeze({
+  communicative: /аспект|содержан|полност|причин|коммуник|content|reason/iu,
+  organization: /организац|структур|абзац|связк|логик|organization|paragraph|linking|structure/iu,
+  language: /язык|лексик|граммат|орфограф|пунктуац|множествен|врем|форм|vocab|grammar|spelling|plural|tense/iu,
+  lexicon: /лексик|словосочет|collocat|vocab/iu,
+  grammar: /граммат|множествен|врем|форм|порядок слов|grammar|plural|tense|word order/iu,
+  spelling: /орфограф|пунктуац|написан|spelling|punctuat/iu,
+  reading_aloud: /пропуск|без пропуск|omission/iu,
+  direct_questions: /прям.{0,20}вопрос|порядок слов|direct question|word order/iu,
+  extended_answer: /план|раскры|обосн|пример|extended|plan|example/iu,
+});
+
+function correctionsForCriterion(source, taskType, criterionIndex, losses, corrections) {
+  if (losses.length === 1) return corrections;
+  const selectedFamily = reviewCriterionFamily(source, taskType, criterionIndex);
+  const lossFamilies = losses.map((loss) => reviewCriterionFamily(source, taskType, loss.criterionIndex));
+  if (!selectedFamily || lossFamilies.filter((family) => family === selectedFamily).length !== 1) return [];
+  return corrections.filter((correction) => {
+    const evidence = `${correction.title || ''} ${correction.note || ''}`;
+    const matched = [...new Set(lossFamilies.filter((family) => CORRECTION_FAMILY_PATTERNS[family]?.test(evidence)))];
+    return matched.length === 1 && matched[0] === selectedFamily;
+  });
+}
+
 function assignmentPrompt(source, taskType, assignment) {
   const label = source === 'writing' ? `Письменное задание ${String(taskType).replace('writing_', '')}` : `Устное задание ${taskType}`;
   return `${label}: ${boundedString(JSON.stringify(assignment), 2_500, 'VOICE_TUTOR_CAPSULE_TOO_LARGE')}`;
@@ -391,10 +461,21 @@ export function buildWritingSpeakingCapsule({ source, attempt, expectedRevision,
   const { losses, corrections } = reviewLosses(source, validated.review);
   const selected = losses.find((loss) => loss.criterionIndex === criterionIndex);
   if (!selected) throw new VoiceTutorCapsuleError('VOICE_TUTOR_CRITERION_NOT_FOUND');
-  const fallbackNote = boundedString(validated.review.sub || validated.review.verdict, 1_000, 'VOICE_TUTOR_REVIEW_INVALID');
-  const correctionNote = corrections[0]?.note || fallbackNote;
   const selectedPractice = reviewPractice(source, validated.taskType, criterionIndex);
+  const selectedCorrections = correctionsForCriterion(
+    source, validated.taskType, criterionIndex, losses, corrections,
+  );
+  const correctionNote = selectedCorrections[0]?.note
+    || `По критерию «${selected.name}» потеряно ${selected.lostPoints} из ${selected.max}. Разберём этот критерий на отдельном примере.`;
   const sourceId = Number(attempt.id);
+  const skillId = `ege.${source}.${validated.taskType}.criterion.${criterionIndex + 1}`;
+  const recoveryTasks = reviewRecoveryTasks(skillId);
+  if (!recoveryTasks) throw new VoiceTutorCapsuleError('VOICE_TUTOR_REPEAT_TASK_UNAVAILABLE');
+  const excludedPrompts = new Set([
+    assignmentPrompt(source, validated.taskType, validated.assignment),
+    selectedPractice.microCheck.prompt,
+    selectedPractice.transferTask.prompt,
+  ].map(practicePromptKey).filter(Boolean));
   const capsule = {
     id: `voice-capsule:${source}:${sourceId}:criterion:${criterionIndex + 1}`,
     version: WRITING_SPEAKING_CAPSULE_VERSION,
@@ -409,18 +490,18 @@ export function buildWritingSpeakingCapsule({ source, attempt, expectedRevision,
         review: {
           verdict: boundedString(validated.review.verdict, 1_000, 'VOICE_TUTOR_REVIEW_INVALID'),
           note: correctionNote,
-          corrections,
+          corrections: selectedCorrections,
         },
       },
     },
     learner_answer: validated.learnerAnswer,
     error: { type: `${source}_criterion_loss`, lost_points: selected.lostPoints },
-    skill: { id: `ege.${source}.${validated.taskType}.criterion.${criterionIndex + 1}`, label: `${source === 'writing' ? 'Письмо' : 'Устная часть'}: ${selected.name}` },
+    skill: { id: skillId, label: `${source === 'writing' ? 'Письмо' : 'Устная часть'}: ${selected.name}` },
     rule: {
       id: `${source}.${validated.taskType}.criterion.${criterionIndex + 1}.review-v1`,
       title: `Критерий «${selected.name}»`,
       explanation: `${losses.map((loss) => `«${loss.name}»: потеряно ${loss.lostPoints} из ${loss.max}`).join('; ')}. Сейчас разбираем «${selected.name}». ${correctionNote}`,
-      examples: corrections.flatMap((correction) => correction.example ? [correction.example] : []),
+      examples: selectedCorrections.flatMap((correction) => correction.example ? [correction.example] : []),
     },
     checks: {
       micro_check: {
@@ -431,6 +512,10 @@ export function buildWritingSpeakingCapsule({ source, attempt, expectedRevision,
         id: `${source}.${sourceId}.criterion.${criterionIndex + 1}.transfer`,
         ...selectedPractice.transferTask,
       },
+    },
+    recovery_tasks: {
+      day_1: recoveryTask(recoveryTasks.day_1, skillId, excludedPrompts),
+      day_7: recoveryTask(recoveryTasks.day_7, skillId, excludedPrompts),
     },
   };
   if (JSON.stringify(capsule).length > 12_000) throw new VoiceTutorCapsuleError('VOICE_TUTOR_CAPSULE_TOO_LARGE');

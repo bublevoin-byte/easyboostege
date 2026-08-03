@@ -19,6 +19,16 @@ const READING_CONTEXT = Object.freeze({
     prompt: 'Фрагмент: “Mia postponed university for twelve months to volunteer abroad.” Что сделала Mia?',
     answers: Object.freeze(['She took a year off', 'Mia took a year off']),
   }),
+  recoveryTasks: Object.freeze({
+    day1: Object.freeze({
+      prompt: 'Текст: “The museum closes at five on Saturdays.” Когда музей закрывается по субботам?',
+      answers: Object.freeze(['At five', 'Five']),
+    }),
+    day7: Object.freeze({
+      prompt: 'Текст: “Rain was forecast, so Maya moved the picnic indoors.” Почему Maya перенесла пикник в помещение?',
+      answers: Object.freeze(['Because rain was forecast', 'Rain was forecast']),
+    }),
+  }),
 });
 
 const LISTENING_CONTEXT = Object.freeze({
@@ -37,6 +47,16 @@ const LISTENING_CONTEXT = Object.freeze({
   transferTask: Object.freeze({
     prompt: 'Фрагмент: “Ben began running because it was raining and the bus was late.” Почему Ben начал бегать?',
     answers: Object.freeze(['Because it was raining and the bus was late', 'It was raining and the bus was late']),
+  }),
+  recoveryTasks: Object.freeze({
+    day1: Object.freeze({
+      prompt: 'Транскрипт: “Our lesson begins at half past ten.” Когда начинается урок?',
+      answers: Object.freeze(['At half past ten', 'Half past ten', '10:30']),
+    }),
+    day7: Object.freeze({
+      prompt: 'Транскрипт: “Leo walked home because the last bus had left.” Почему Leo пошёл домой пешком?',
+      answers: Object.freeze(['Because the last bus had left', 'The last bus had left']),
+    }),
   }),
 });
 

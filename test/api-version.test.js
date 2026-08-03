@@ -8,6 +8,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { createApiVersionRewrite, isApiPath, isVersionedApiPath, VERSIONED_API_PREFIX } from '../middleware/api-version.js';
+import { contentRequestSchema } from '../ai/content.js';
 
 /*
  * Section 13.1: the API is versioned as /api/v1/...
@@ -258,6 +259,24 @@ test('with the compatibility layer disabled the legacy path is a plain 404', { t
     assert.doesNotMatch(server.output.join(''), /api_legacy_path/u);
   } finally {
     await server.stop();
+  }
+});
+
+test('the OpenAPI vocabulary batch bounds match the runtime contract', async () => {
+  const specification = await fs.readFile(new URL('../docs/openapi.yaml', import.meta.url), 'utf8');
+  const start = specification.indexOf('  /api/v1/ai/generate-content:');
+  const tail = start < 0 ? '' : specification.slice(start);
+  const nextPath = tail.indexOf('\n  /api/v1/', 1);
+  const operation = nextPath < 0 ? tail : tail.slice(0, nextPath);
+
+  assert.match(operation, /required: \[operation, count\]/u);
+  assert.match(operation || '', /count: \{ type: integer, minimum: 4, maximum: 8 \}/u);
+  assert.equal(contentRequestSchema.safeParse({ operation: 'vocabulary_cards' }).success, false);
+  for (const count of [4, 8]) {
+    assert.equal(contentRequestSchema.safeParse({ operation: 'vocabulary_cards', count }).success, true);
+  }
+  for (const count of [1, 3, 9, 30]) {
+    assert.equal(contentRequestSchema.safeParse({ operation: 'vocabulary_cards', count }).success, false);
   }
 });
 

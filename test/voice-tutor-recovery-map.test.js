@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
@@ -23,7 +24,14 @@ test('repeat bank maps every current module skill to two distinct server-owned a
     ['speaking', 'ege.speaking.2.criterion.4'],
     ['speaking', 'ege.speaking.3.criterion.5'],
     ['speaking', 'ege.speaking.4.criterion.3'],
-  ].map(([module, skill_id], index) => ({ id: `recovery-${index}`, module, skill_id, origin_item_id: 'source.item', origin_transfer_task_id: 'session.transfer' }));
+  ].map(([module, skill_id], index) => ({
+    id: `recovery-${index}`, module, skill_id,
+    origin_item_id: 'source.item', origin_transfer_task_id: 'session.transfer',
+    repeat_tasks: {
+      day_1: { prompt: `${skill_id} day one`, answers: [`answer-${index}-one`] },
+      day_7: { prompt: `${skill_id} day seven`, answers: [`answer-${index}-seven`] },
+    },
+  }));
 
   for (const recovery of recoveries) {
     const dayOne = repeatTaskFor(recovery, 'day_1');
@@ -37,9 +45,8 @@ test('repeat bank maps every current module skill to two distinct server-owned a
   }
   const vocabulary = recoveries.find((recovery) => recovery.module === 'vocabulary');
   const reading = recoveries.find((recovery) => recovery.module === 'reading');
-  assert.equal(repeatTaskFor(vocabulary, 'day_1').answers.includes('relationship'), false);
-  assert.equal(repeatTaskFor(vocabulary, 'day_7').answers.includes('relationship'), false);
-  assert.equal(repeatTaskFor(reading, 'day_7').answers.some((answer) => answer.includes('year off')), false);
+  assert.match(repeatTaskFor(vocabulary, 'day_1').prompt, new RegExp(vocabulary.skill_id, 'u'));
+  assert.match(repeatTaskFor(reading, 'day_7').prompt, new RegExp(reading.skill_id, 'u'));
 });
 
 function authentication() {
@@ -78,8 +85,13 @@ async function withRecoveryApp(run) {
     now: () => clock,
     newSessionId: () => sessionIds.shift(),
     newNonce: () => nonces.shift(),
-    credentialProvider: { async createCredential() { return { credential: 'ephemeral-test', expires_at: 1_800_000_000, realtime_url: 'wss://fake.invalid' }; } },
-    realtimePolicy: { unboundCredentialRiskAccepted: true },
+    realtimeProxy: {
+      proxyPath: '/api/v1/voice-tutor/realtime', ticketTtlSeconds: 30,
+      claimPedagogyCall() { return true; },
+      completePedagogyCall() { return true; },
+      failPedagogyCall() { return true; },
+    },
+    realtimePolicy: { enabled: true, requireZdr: true, zdrAttested: true },
     privacyPolicyVersion: 'test-v1',
   }));
   const server = http.createServer(app);
@@ -118,19 +130,18 @@ async function createResolvedGrammarSession({ repository, owner, request }, {
   assert.equal(started.status, 201);
   const created = await started.json();
   let nonce = created.nonce;
-  const activated = await request(owner, `/api/v1/voice-tutor/sessions/${created.session.id}/activate`, {
-    method: 'POST', body: JSON.stringify({ nonce }),
-  });
-  assert.equal(activated.status, 200);
   const events = [{ type: 'diagnosis_complete' }, { type: 'explanation_complete' }];
   microAnswers.forEach((answer, index) => {
     events.push({ type: 'check_answer', answer });
     if (index < microAnswers.length - 1) events.push({ type: 'explanation_complete' });
   });
   events.push({ type: 'transfer_answer', answer: 'bought' });
+  let providerCall = 0;
   for (const event of events) {
     const response = await request(owner, `/api/v1/voice-tutor/sessions/${created.session.id}/events`, {
-      method: 'POST', body: JSON.stringify({ nonce, event }),
+      method: 'POST', body: JSON.stringify({
+        nonce, event, provider_call_id: `recovery-call-${++providerCall}`,
+      }),
     });
     assert.equal(response.status, 200);
     nonce = (await response.json()).nonce;
@@ -144,7 +155,9 @@ test('micro-check metrics count every checked try without retaining answers', as
   await withRecoveryApp(async (context) => {
     const created = await createResolvedGrammarSession(context, { microAnswers: ['wrong', 'went'] });
     const terminalReplay = await context.request(context.owner, `/api/v1/voice-tutor/sessions/${created.session.id}/events`, {
-      method: 'POST', body: JSON.stringify({ nonce: created.nonce, event: { type: 'check_answer', answer: 'wrong' } }),
+      method: 'POST', body: JSON.stringify({
+        nonce: created.nonce, event: { type: 'check_answer', answer: 'wrong' }, provider_call_id: 'recovery-call-terminal',
+      }),
     });
     assert.equal(terminalReplay.status, 200);
     const metrics = await context.repository.getVoiceTutorRecoveryMetrics(new Date('2026-08-02T12:00:00.000Z'));
@@ -160,6 +173,18 @@ test('server-validated transfer creates bounded 1-day/7-day recovery repeats and
   await withRecoveryApp(async (context) => {
     const { repository, owner, stranger, request, setClock } = context;
     const created = await createResolvedGrammarSession(context);
+    await repository.consumeVoiceTutorProxyTicket(owner, {
+      ticketHash: crypto.createHash('sha256').update(created.realtime.ticket).digest('hex'),
+      now: new Date('2026-08-02T12:00:00.000Z'),
+      provider: 'xai', model: 'grok-voice-think-fast-1.0', promptVersion: 'voice-tutor-error-v2',
+    });
+    await repository.activateVoiceTutorProxySession(owner, created.session.id, {
+      now: new Date('2026-08-02T12:00:00.000Z'),
+    });
+    await repository.finalizeVoiceTutorProxySession(owner, created.session.id, {
+      inputAudioBytes: 120 * 48_000, outputAudioBytes: 0, confirmed: true, reason: 'completed',
+      limits: LIMITS, now: new Date('2026-08-02T12:02:00.000Z'),
+    });
     await repository.finishVoiceTutorSession(owner, created.session.id, {
       limits: LIMITS,
       now: new Date('2026-08-02T12:02:00.000Z'),
@@ -180,7 +205,13 @@ test('server-validated transfer creates bounded 1-day/7-day recovery repeats and
     assert.equal(initial.skills[0].repeats[0].status, 'upcoming');
     assert.notEqual(initial.skills[0].repeats[0].task_id, created.capsule.item.id);
     assert.notEqual(initial.skills[0].repeats[0].task_id, created.capsule.checks.transfer_task.id);
+    assert.notEqual(initial.skills[0].repeats[0].prompt, created.capsule.item.prompt);
+    assert.notEqual(initial.skills[0].repeats[0].prompt, created.capsule.checks.micro_check.prompt);
     assert.notEqual(initial.skills[0].repeats[0].prompt, created.capsule.checks.transfer_task.prompt);
+    assert.notEqual(initial.skills[0].repeats[1].prompt, created.capsule.item.prompt);
+    assert.notEqual(initial.skills[0].repeats[1].prompt, created.capsule.checks.micro_check.prompt);
+    assert.notEqual(initial.skills[0].repeats[1].prompt, created.capsule.checks.transfer_task.prompt);
+    assert.notEqual(initial.skills[0].repeats[1].prompt, initial.skills[0].repeats[0].prompt);
     assert.equal(initial.next_best_review.type, 'skill');
     assert.equal(JSON.stringify(initial).includes('goed'), false);
     assert.equal(JSON.stringify(initial).includes('bought'), false);
@@ -244,7 +275,7 @@ test('server-validated transfer creates bounded 1-day/7-day recovery repeats and
     const exported = await repository.exportUserData(owner);
     assert.equal(exported.voice_tutor_recoveries.length, 1);
     assert.equal(exported.voice_tutor_repeat_attempts.length, 1);
-    assert.equal(JSON.stringify(exported.voice_tutor_repeat_attempts).includes('came'), false);
+    assert.equal(JSON.stringify(exported.voice_tutor_repeat_attempts).includes('went'), false);
     assert.equal(JSON.stringify(exported.voice_tutor_repeat_attempts).includes('bought'), false);
   });
 });

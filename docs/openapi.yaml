@@ -253,15 +253,15 @@ paths:
                     criterionIndex: { type: integer, minimum: 0, maximum: 20 }
                   additionalProperties: false
       responses:
-        '201': { description: Capsule created. Voice mode exposes only credential, expires_at, model-pinned realtime_url and bounded server-issued session config plus a one-time nonce. The client sends that config verbatim as session.update after authenticating with the xai-client-secret subprotocol. If voice is blocked or unavailable, the same capsule returns text/local mode with a bounded voice_unavailable code and no provider diagnostic details. }
-        '200': { description: Existing idempotent result without a second credential or nonce }
+        '201': { description: Capsule created. Voice mode exposes only a random one-use application ticket, expires_at clamped to the reserved session deadline, same-origin proxy_url and pedagogy nonce. Provider credentials, URL, prompt, model and tools remain server-only. If voice is blocked or unavailable, the same capsule returns text/local mode with a bounded voice_unavailable code. }
+        '200': { description: Existing idempotent result. A lost voice 201 returns realtime.status=reissue_required and a bounded realtime.reissue_url, never the original ticket or nonce. A provisional voice reservation with no issued ticket atomically receives its first ticket plus a replacement nonce, or becomes zero-billable local mode when realtime is unavailable. A lost text/local 201 atomically rotates and returns one replacement pedagogy nonce without repeating the AI call. A legacy or partially committed null delivery is atomically completed as zero-billable local mode. Any recovery is allowed exactly once. }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { description: The current subscription has no voice_tutor entitlement }
         '409': { description: Another Voice Tutor session is active }
         '422': { description: Attempt, canonical item/context, or completed validated writing/speaking review is not supported }
         '429': { description: Daily or monthly voice quota is exhausted }
-        '503': { description: New quota-only voice reservation is disabled by the feature flag, cost kill switch, required-but-unconfirmed ZDR policy or unaccepted direct-credential risk; tracer requests continue with text/local fallback in a 201 response }
+        '503': { description: New quota-only voice reservation is disabled by the feature flag, cost kill switch or required-but-unconfirmed ZDR policy; tracer requests continue with text/local fallback in a 201 response }
   /api/v1/voice-tutor/rule-discoveries:
     post:
       summary: Discover a provisional EGE rule from server-allowlisted sources
@@ -349,6 +349,12 @@ paths:
               required: [nonce, event]
               properties:
                 nonce: { type: string, minLength: 16, maxLength: 200 }
+                provider_call_id:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                  pattern: '^[A-Za-z0-9._:-]+$'
+                  description: Required in voice delivery and accepted only for the matching outstanding advance_pedagogy call; omitted only in text/local delivery
                 event:
                   type: object
                   required: [type]
@@ -357,12 +363,13 @@ paths:
                     answer: { type: string, maxLength: 200 }
               additionalProperties: false
       responses:
-        '200': { description: Server-validated state and next one-time nonce; with current text_processing consent, text delivery also returns the next bounded AI turn, otherwise it atomically downgrades to the canonical local rule }
+        '200': { description: Server-validated state and next one-time nonce; a provider_call_id must match the outstanding call and authorizes exactly one strict accepted/state function output after the nonce transition; with current text_processing consent, text delivery also returns the next bounded AI turn, otherwise it atomically downgrades to the canonical local rule }
         '400': { $ref: '#/components/responses/BadRequest' }
         '409': { description: Invalid transition or replayed nonce }
+        '503': { description: Voice delivery omitted or failed exact provider call correlation }
   /api/v1/voice-tutor/sessions/{sessionId}/fallback:
     post:
-      summary: Charge elapsed activated voice time, release the unused reservation and continue the same capsule in text or local mode
+      summary: Continue the server-finalized proxy capsule in text or local mode without accepting client usage or wall-clock evidence
       parameters:
         - in: path
           name: sessionId
@@ -380,7 +387,7 @@ paths:
                 reason: { type: string, enum: [microphone_unavailable, provider_unavailable, session_timeout], default: microphone_unavailable }
               additionalProperties: false
       responses:
-        '200': { description: Same capsule through the budgeted text AI operation when current text_processing consent exists, otherwise through its local canonical rule; seconds since server activation remain billable, an unactivated session bills zero, and no second reservation is created }
+        '200': { description: Same capsule through the budgeted text AI operation when current text_processing consent exists, otherwise through its local canonical rule. A ticket not consumed by the proxy bills zero; a consumed abnormal proxy session retains its full reservation; a clean provider-confirmed session uses server-observed input plus output PCM bytes. No client time or second reservation is accepted. }
         '400': { $ref: '#/components/responses/BadRequest' }
         '409': { description: Replayed nonce }
   /api/v1/voice-tutor/sessions/{sessionId}/clarifications:
@@ -460,32 +467,35 @@ paths:
         '403': { description: Administrator role required }
         '404': { description: Report not found }
         '409': { description: Report already has the opposite decision }
-  /api/v1/voice-tutor/sessions/{sessionId}/activate:
+  /api/v1/voice-tutor/sessions/{sessionId}/realtime-ticket:
     post:
-      summary: Idempotently start server-owned voice billing after the provider acknowledges session.update
+      summary: Recover one lost session-creation response by rotating the one-use app ticket and pedagogy nonce
       parameters:
         - in: path
           name: sessionId
           required: true
           schema: { type: string, format: uuid }
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, minLength: 8, maxLength: 100 }
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [nonce]
-              properties:
-                nonce: { type: string, minLength: 16, maxLength: 200 }
               additionalProperties: false
       responses:
-        '200': { description: First activation or idempotent replay with the current nonce; voice_activated_at is server-owned and audio capture starts only after this response }
+        '200': { description: If the single replacement response was also lost, the same key atomically completes the unactivated reservation as zero-bill local mode and returns one fallback nonce; no provider connection or charge remains possible. }
+        '201': { description: Exactly one replacement ticket and nonce. The original ticket is invalidated atomically. }
         '400': { $ref: '#/components/responses/BadRequest' }
-        '404': { description: Session does not belong to the current user or is no longer an active voice delivery }
-        '409': { description: Replayed nonce or expired session }
+        '403': { description: Current voice-processing consent and Premium voice_tutor entitlement are rechecked before any ticket or nonce rotation }
+        '404': { description: Session does not belong to the current user }
+        '409': { description: Ticket already consumed, session expired, Idempotency-Key mismatch or replacement limit reached }
   /api/v1/voice-tutor/sessions/{sessionId}/finish:
     post:
-      summary: Idempotently finish a reserved Voice Tutor session
+      summary: Idempotently finish an unused reservation; consumed proxy sessions remain governed by server-owned exact or conservative finalization
       parameters:
         - in: path
           name: sessionId
@@ -537,7 +547,7 @@ paths:
         '200': { description: Consent state and current policy version }
         '401': { $ref: '#/components/responses/Unauthorized' }
     put:
-      summary: Grant or withdraw text and realtime speech-to-speech processing consent; an outdated policy version does not authorize a Voice Tutor credential
+      summary: Grant or withdraw text and realtime speech-to-speech processing consent; an outdated policy version does not authorize a Voice Tutor connection
       requestBody:
         required: true
         content:
@@ -716,19 +726,46 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [operation]
-              properties:
-                operation:
-                  type: string
-                  enum: [dictionary_lookup, grammar_quiz, listening_dialog, reading_text, vocabulary_cards, writing_task_37, writing_task_38, speaking_task_1, speaking_task_2, speaking_task_3, speaking_task_4, grammar_exam_19_24, grammar_topic_set, reading_headings, reading_questions, reading_gaps, listening_matching, listening_true_false, listening_interview]
-                word: { type: string, maxLength: 80 }
-                count: { type: integer, minimum: 1, maximum: 30 }
-                exclude:
-                  type: array
-                  maxItems: 500
-                  items: { type: string, maxLength: 120 }
-              additionalProperties: false
+              oneOf:
+                - type: object
+                  required: [operation, word]
+                  properties:
+                    operation: { type: string, enum: [dictionary_lookup] }
+                    word: { type: string, minLength: 1, maxLength: 80 }
+                  additionalProperties: false
+                - type: object
+                  required: [operation]
+                  properties:
+                    operation:
+                      type: string
+                      enum: [grammar_quiz, listening_dialog, reading_text, speaking_task_1, speaking_task_2, speaking_task_3, speaking_task_4, grammar_exam_19_24, reading_headings, reading_questions, reading_gaps, listening_matching, listening_true_false, listening_interview]
+                  additionalProperties: false
+                - type: object
+                  required: [operation]
+                  properties:
+                    operation: { type: string, enum: [writing_task_37, writing_task_38] }
+                    exclude:
+                      type: array
+                      maxItems: 200
+                      items: { type: string, minLength: 1, maxLength: 200 }
+                  additionalProperties: false
+                - type: object
+                  required: [operation, topicId, topic]
+                  properties:
+                    operation: { type: string, enum: [grammar_topic_set] }
+                    topicId: { type: integer, minimum: 1, maximum: 20 }
+                    topic: { type: string, minLength: 1, maxLength: 100 }
+                  additionalProperties: false
+                - type: object
+                  required: [operation, count]
+                  properties:
+                    operation: { type: string, enum: [vocabulary_cards] }
+                    count: { type: integer, minimum: 4, maximum: 8 }
+                    exclude:
+                      type: array
+                      maxItems: 500
+                      items: { type: string, minLength: 1, maxLength: 120 }
+                  additionalProperties: false
       responses:
         '200': { description: Schema-validated content and prompt metadata }
         '400': { $ref: '#/components/responses/BadRequest' }

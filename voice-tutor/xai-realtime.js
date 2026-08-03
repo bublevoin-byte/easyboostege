@@ -1,6 +1,10 @@
 import { operationLimits } from '../ai/operations.js';
 import { buildVoiceTutorRealtimeInstructions, VOICE_TUTOR_PROMPT_VERSION } from './prompt.js';
 
+// Deprecated compatibility seam retained for historical contract tests only. Ticket 10 removed
+// every production import, config value and browser/API path for direct xAI credentials. New code
+// must use realtime-proxy.js; delete this module when the legacy contract tests are retired.
+
 const MAX_PROVIDER_RESPONSE_BYTES = 16_384;
 const MAX_BROWSER_SESSION_BYTES = 81_920;
 const SAFE_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$/u;

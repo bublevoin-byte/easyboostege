@@ -1,6 +1,9 @@
 # ADR-001: Direct xAI ephemeral connection
 
-Status: accepted for the approved Voice Tutor architecture, production-blocked pending owner risk acceptance.
+Status: superseded by ADR-002 on 2026-08-03. Direct browser credentials are not used by the application.
+
+ADR-002 replaced this boundary with a server-owned same-origin realtime proxy. This document is
+retained only as historical decision context and must not be used as an implementation runbook.
 
 ## Context
 

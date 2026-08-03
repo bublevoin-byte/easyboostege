@@ -232,24 +232,61 @@ export function createAiRoutes({ authentication, access, db }) {
    * the same work without an HTTP request in front of it. Failures come back as errors carrying a
    * status and a public code, so both callers can answer without re-deriving them.
    */
+  function invalidContentResponse() {
+    return Object.assign(new Error('AI_RESPONSE_INVALID'), { code: 'AI_RESPONSE_INVALID' });
+  }
+
+  function validatedContentData(input, raw) {
+    const data = parseContentResponse(input.operation, typeof raw === 'string' ? raw : JSON.stringify(raw));
+    if (input.operation === 'vocabulary_cards' && data.length !== input.count) throw invalidContentResponse();
+    return data;
+  }
+
+  function decoratedContentData(input, requestHash, data) {
+    const decorated = decorateGeneratedVoiceTutorContent(input.operation, requestHash, data);
+    if (input.operation === 'vocabulary_cards'
+      && (!Array.isArray(decorated) || decorated.some((card) => !card.voice_tutor))) {
+      throw invalidContentResponse();
+    }
+    return decorated;
+  }
+
   async function runContentGeneration({ username, input }) {
     const requestHash = crypto.createHash('sha256').update(JSON.stringify({ promptVersion: CONTENT_PROMPT_VERSION, input })).digest('hex');
     // Own copy first, then anyone's: the same input always produces the same exercise, so a
     // second student must not cost a second paid call.
     const stored = await getGeneratedTask(username, requestHash);
-    const shared = stored ? null : await getSharedGeneratedTask(requestHash);
+    let shared = stored ? null : await getSharedGeneratedTask(requestHash);
+    let sharedData = null;
+    if (shared) {
+      try {
+        sharedData = validatedContentData(input, shared.result);
+        decoratedContentData(input, requestHash, sharedData);
+      } catch (error) {
+        if (error.code !== 'AI_RESPONSE_INVALID') throw error;
+        shared = null;
+      }
+    }
     if (shared) {
       await saveGeneratedTask(username, {
         operation: input.operation,
         requestHash,
         request: input,
-        result: shared.result,
+        result: sharedData,
         provider: shared.provider,
         promptVersion: shared.prompt_version,
       });
     }
     const reusable = stored || (shared ? await getGeneratedTask(username, requestHash) : null);
-    if (reusable) return { data: decorateGeneratedVoiceTutorContent(input.operation, requestHash, reusable.result), provider: 'cache', sourceProvider: reusable.provider, promptVersion: reusable.prompt_version, cached: true };
+    if (reusable) {
+      try {
+        const reusableData = validatedContentData(input, reusable.result);
+        return { data: decoratedContentData(input, requestHash, reusableData), provider: 'cache', sourceProvider: reusable.provider, promptVersion: reusable.prompt_version, cached: true };
+      } catch (error) {
+        if (error.code !== 'AI_RESPONSE_INVALID') throw error;
+        throw Object.assign(error, { status: 502 });
+      }
+    }
     if (!await hasAiBudget()) throw Object.assign(new Error('Дневной лимит ИИ исчерпан. Попробуйте завтра.'), { status: 503, code: 'AI_BUDGET_EXHAUSTED' });
     const prompt = buildContentPrompt(input);
     const startedAt = Date.now();
@@ -266,12 +303,7 @@ export function createAiRoutes({ authentication, access, db }) {
           provider,
           text: response.text,
           parse: (text) => {
-            const candidate = parseContentResponse(input.operation, text);
-            /* A short vocabulary set is a contract violation like any other, so it is repairable. */
-            if (input.operation === 'vocabulary_cards' && candidate.length !== input.count) {
-              throw Object.assign(new Error('AI_RESPONSE_INVALID'), { code: 'AI_RESPONSE_INVALID' });
-            }
-            return candidate;
+            return validatedContentData(input, text);
           },
           system: prompt.system,
           user: prompt.user,
@@ -284,6 +316,7 @@ export function createAiRoutes({ authentication, access, db }) {
             username, operation: input.operation, promptVersion: CONTENT_PROMPT_VERSION, repair: outcome.repair, model: provider.model,
           });
         }
+        decoratedContentData(input, requestHash, data);
         if (input.operation === 'dictionary_lookup') dictionaryCache.set(input.word.toLocaleLowerCase('en'), data);
         await Promise.all([
           logAiRequest({ username, operation: input.operation, provider: provider.name, model: provider.model, promptVersion: CONTENT_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt, fallbackReason, ...aiUsage(provider, usage) }),
@@ -294,10 +327,10 @@ export function createAiRoutes({ authentication, access, db }) {
         // valid-but-losing provider result that cannot be rebuilt later.
         const canonicalStored = await getGeneratedTask(username, requestHash);
         if (!canonicalStored) throw Object.assign(new Error('AI_RESPONSE_INVALID'), { code: 'AI_RESPONSE_INVALID' });
-        const canonicalData = parseContentResponse(input.operation, JSON.stringify(canonicalStored.result));
+        const canonicalData = validatedContentData(input, canonicalStored.result);
         recordDependencyEvent('ai', 'success');
         if (providerIndex > 0) recordDependencyEvent('ai', 'fallback');
-        return { data: decorateGeneratedVoiceTutorContent(input.operation, requestHash, canonicalData), provider: canonicalStored.provider, promptVersion: canonicalStored.prompt_version, cached: false };
+        return { data: decoratedContentData(input, requestHash, canonicalData), provider: canonicalStored.provider, promptVersion: canonicalStored.prompt_version, cached: false };
       } catch (error) {
         if (error.status && error.code) throw error;
         recordDependencyEvent('ai', 'error');

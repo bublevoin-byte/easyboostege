@@ -3,25 +3,8 @@ import test from 'node:test';
 
 import { createBrowserRealtimeTransport } from '../public/realtime-transport.js';
 
-const SERVER_SESSION = Object.freeze({
-  voice: 'ara',
-  instructions: 'Follow the server-owned Voice Tutor state machine.',
-  tools: [{
-    type: 'function',
-    name: 'advance_pedagogy',
-    description: 'Advance one bounded pedagogy step.',
-    parameters: {
-      type: 'object',
-      properties: {
-        type: { type: 'string', enum: ['diagnosis_complete', 'explanation_complete', 'check_answer', 'transfer_answer'] },
-        answer: { type: 'string', maxLength: 200 },
-      },
-      required: ['type'],
-      additionalProperties: false,
-    },
-  }],
-  turn_detection: { type: 'server_vad' },
-});
+const APP_TICKET = 't'.repeat(43);
+const PROXY_URL = '/api/v1/voice-tutor/realtime';
 
 test('browser realtime transport streams bounded tool events through the injected fake socket', async () => {
   let socket;
@@ -56,23 +39,21 @@ test('browser realtime transport streams bounded tool events through the injecte
 
   let connected = false;
   const pending = transport.connect({
-    stream: {},
-    credential: 'ephemeral-only',
-    url: 'wss://fake.invalid/realtime',
-    session: SERVER_SESSION,
+    ticket: APP_TICKET,
+    url: PROXY_URL,
     onSubtitle: (value) => captions.push(value),
-    onPedagogicalEvent: async (event) => {
-      events.push(event);
+    onPedagogicalEvent: async (event, context) => {
+      events.push({ event, context });
       return { session: { state: 'explain' }, nonce: 'rotated-nonce-0002' };
     },
   });
   pending.then(() => { connected = true; });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(connected, false);
-  socket.emit({ type: 'session.updated' });
+  socket.emit({ type: 'easyboost.ready' });
   const connection = await pending;
   assert.equal(audioContextCreations, 0);
-  connection.activate();
+  connection.activate({});
   assert.equal(audioContextCreations, 1);
   socket.emit({ type: 'response.created', response_id: 'response-1' });
   socket.emit({ type: 'response.audio_transcript.delta', response_id: 'response-1', delta: 'Разберём правило.' });
@@ -94,24 +75,42 @@ test('browser realtime transport streams bounded tool events through the injecte
   socket.emit({ type: 'response.done', response_id: 'response-1' });
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.deepEqual(events, [{ type: 'diagnosis_complete' }]);
+  assert.deepEqual(events, [{ event: { type: 'diagnosis_complete' }, context: { callId: 'call-1' } }]);
   assert.deepEqual(captions, ['Разберём правило.']);
-  assert.deepEqual(socket.protocols, ['xai-client-secret.ephemeral-only']);
-  assert.deepEqual(socket.sent[0], { type: 'session.update', session: SERVER_SESSION });
-  assert.ok(socket.sent.some((entry) => entry.type === 'conversation.item.create' && entry.item.call_id === 'call-1'));
+  assert.deepEqual(socket.protocols, [`easyboost-voice-ticket.${APP_TICKET}`]);
+  assert.equal(socket.sent.some((entry) => entry.type === 'session.update'), false);
+  assert.ok(socket.sent.some((entry) => entry.type === 'conversation.item.create'
+    && entry.item.call_id === 'call-1'
+    && entry.item.output === JSON.stringify({ accepted: true, state: 'explain' })));
   assert.ok(socket.sent.some((entry) => entry.type === 'response.create'));
   socket.emit({ type: 'response.created', response_id: 'response-2' });
   socket.emit({ type: 'response.done', response_id: 'response-2' });
-  connection.close();
+  socket.emit({ type: 'input_audio_buffer.speech_started' });
+  socket.emit({ type: 'response.created', response_id: 'response-3' });
+  socket.emit({
+    type: 'response.output_item.added', response_id: 'response-3',
+    item: { type: 'function_call', id: 'tool-item-2', name: 'advance_pedagogy', call_id: 'call-2' },
+  });
+  socket.emit({
+    type: 'response.function_call_arguments.done', response_id: 'response-3', item_id: 'tool-item-2',
+    name: 'advance_pedagogy', call_id: 'call-2',
+    arguments: JSON.stringify({ type: 'explanation_complete' }),
+  });
+  socket.emit({ type: 'response.done', response_id: 'response-3' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(events.map(({ event }) => event.type), ['diagnosis_complete', 'explanation_complete']);
+  const closing = connection.close();
+  assert.equal(socket.sent.at(-1).type, 'easyboost.close');
+  assert.equal(socket.readyState, 1);
+  socket.close();
+  await closing;
   assert.equal(socket.readyState, 3);
 });
 
-test('browser realtime transport binds parallel calls to one response and continues exactly once after all results', async () => {
+test('browser realtime transport requires a new learner turn before the next pedagogy call', async () => {
   let socket;
   const failures = [];
   const observed = [];
-  let releaseFirst;
-  const firstResult = new Promise((resolve) => { releaseFirst = resolve; });
   const transport = createBrowserRealtimeTransport({
     webSocketFactory: () => {
       socket = {
@@ -129,47 +128,39 @@ test('browser realtime transport binds parallel calls to one response and contin
     }),
   });
   const pending = transport.connect({
-    stream: {}, credential: 'ephemeral-only', url: 'wss://fake.invalid/realtime', session: SERVER_SESSION,
+    ticket: APP_TICKET, url: PROXY_URL,
     onFailure: (code) => failures.push(code),
-    onPedagogicalEvent: async (event) => {
-      observed.push(event.type);
-      if (event.type === 'diagnosis_complete') await firstResult;
+    onPedagogicalEvent: async (event, context) => {
+      observed.push(`${event.type}:${context.callId}`);
       return { session: { state: event.type === 'diagnosis_complete' ? 'explain' : 'micro_check' } };
     },
   });
-  socket.onmessage({ data: JSON.stringify({ type: 'session.updated' }) });
+  socket.onmessage({ data: JSON.stringify({ type: 'easyboost.ready' }) });
   const connection = await pending;
-  connection.activate();
+  connection.activate({});
   const emit = (value) => socket.onmessage({ data: JSON.stringify(value) });
   emit({ type: 'response.created', response_id: 'response-parallel' });
   emit({ type: 'response.output_item.added', response_id: 'response-parallel', item: {
     type: 'function_call', id: 'tool-item-a', name: 'advance_pedagogy', call_id: 'call-a',
   } });
-  emit({ type: 'response.output_item.added', response_id: 'response-parallel', item: {
-    type: 'function_call', id: 'tool-item-b', name: 'advance_pedagogy', call_id: 'call-b',
-  } });
-  emit({
-    type: 'response.function_call_arguments.done', response_id: 'response-parallel', item_id: 'tool-item-b',
-    call_id: 'call-b', name: 'advance_pedagogy', arguments: JSON.stringify({ type: 'explanation_complete' }),
-  });
   emit({
     type: 'response.function_call_arguments.done', response_id: 'response-parallel', item_id: 'tool-item-a',
     call_id: 'call-a', name: 'advance_pedagogy', arguments: JSON.stringify({ type: 'diagnosis_complete' }),
   });
   emit({ type: 'response.done', response_id: 'response-parallel' });
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(observed, ['diagnosis_complete']);
-  assert.equal(socket.sent.some((entry) => entry.type === 'conversation.item.create'), false);
-  releaseFirst();
-  await new Promise((resolve) => setImmediate(resolve));
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(observed, ['diagnosis_complete', 'explanation_complete']);
-  assert.deepEqual(socket.sent.filter((entry) => entry.type === 'conversation.item.create').map((entry) => entry.item.call_id), ['call-a', 'call-b']);
+  assert.deepEqual(observed, ['diagnosis_complete:call-a']);
   assert.equal(socket.sent.filter((entry) => entry.type === 'response.create').length, 1);
   emit({ type: 'response.created', response_id: 'response-continuation' });
-  emit({ type: 'response.done', response_id: 'response-continuation' });
-  assert.deepEqual(failures, []);
-  connection.close();
+  emit({ type: 'response.output_item.added', response_id: 'response-continuation', item: {
+    type: 'function_call', id: 'tool-item-b', name: 'advance_pedagogy', call_id: 'call-b',
+  } });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(failures, ['VOICE_TUTOR_PROVIDER_UNAVAILABLE']);
+  assert.deepEqual(observed, ['diagnosis_complete:call-a']);
+  assert.deepEqual(socket.sent.filter((entry) => entry.type === 'conversation.item.create')
+    .map((entry) => entry.item.call_id), ['call-a']);
+  connection.close({ clean: false });
 });
 
 test('browser realtime transport fails closed on orphan, mismatched, duplicate, replay and unsupported lifecycle events', async () => {
@@ -189,12 +180,12 @@ test('browser realtime transport fails closed on orphan, mismatched, duplicate, 
       }),
     });
     const pending = transport.connect({
-      stream: {}, credential: 'ephemeral-only', url: 'wss://fake.invalid/realtime', session: SERVER_SESSION,
+      ticket: APP_TICKET, url: PROXY_URL,
       onFailure: (code) => failures.push(code), onPedagogicalEvent: async () => ({ session: { state: 'explain' } }),
     });
-    socket.onmessage({ data: JSON.stringify({ type: 'session.updated' }) });
+    socket.onmessage({ data: JSON.stringify({ type: 'easyboost.ready' }) });
     const connection = await pending;
-    connection.activate();
+    connection.activate({});
     for (const event of sequence) socket.onmessage({ data: JSON.stringify(event) });
     await new Promise((resolve) => setImmediate(resolve));
     assert.deepEqual(failures, ['VOICE_TUTOR_PROVIDER_UNAVAILABLE']);
@@ -209,6 +200,11 @@ test('browser realtime transport fails closed on orphan, mismatched, duplicate, 
   await rejects([{ type: 'response.function_call_arguments.done', response_id: 'orphan', item_id: 'missing', call_id: 'missing', arguments: '{}' }]);
   await rejects([...announced, { type: 'response.function_call_arguments.done', response_id: 'response-invalid', item_id: 'tool-invalid', call_id: 'other-call', arguments: '{}' }]);
   await rejects([...announced, announced[1]]);
+  await rejects([...announced, {
+    type: 'response.output_item.added', response_id: 'response-invalid', item: {
+      type: 'function_call', id: 'tool-invalid-2', name: 'advance_pedagogy', call_id: 'call-invalid-2',
+    },
+  }]);
   await rejects([...announced, {
     type: 'response.function_call_arguments.done', response_id: 'response-invalid', item_id: 'tool-invalid',
     call_id: 'call-invalid', arguments: JSON.stringify({ type: 'diagnosis_complete' }),
@@ -239,13 +235,12 @@ test('browser realtime transport rejects oversized or off-scope tool calls', asy
   });
   let calls = 0;
   const pending = transport.connect({
-    stream: {}, credential: 'ephemeral-only', url: 'wss://fake.invalid/realtime',
-    session: SERVER_SESSION,
+    ticket: APP_TICKET, url: PROXY_URL,
     onPedagogicalEvent: async () => { calls += 1; },
   });
-  socket.onmessage({ data: JSON.stringify({ type: 'session.updated' }) });
+  socket.onmessage({ data: JSON.stringify({ type: 'easyboost.ready' }) });
   const connection = await pending;
-  connection.activate();
+  connection.activate({});
   socket.onmessage({ data: JSON.stringify({
     type: 'response.created', response_id: 'response-bad',
   }) });
@@ -257,15 +252,18 @@ test('browser realtime transport rejects oversized or off-scope tool calls', asy
   assert.equal(calls, 0);
 });
 
-test('browser realtime transport rejects browser-authored or off-scope session configuration', async () => {
+test('browser realtime transport rejects direct provider URLs and missing app tickets', async () => {
   const transport = createBrowserRealtimeTransport({
     webSocketFactory: () => { throw new Error('socket must not open'); },
   });
   await assert.rejects(
     transport.connect({
-      stream: {}, credential: 'ephemeral-only', url: 'wss://fake.invalid/realtime',
-      session: { ...SERVER_SESSION, tools: [{ type: 'function', name: 'browse_web', parameters: {} }] },
+      ticket: APP_TICKET, url: 'wss://api.x.ai/v1/realtime',
     }),
+    /VOICE_TUTOR_REALTIME_INVALID/u,
+  );
+  await assert.rejects(
+    transport.connect({ url: PROXY_URL }),
     /VOICE_TUTOR_REALTIME_INVALID/u,
   );
 });
@@ -297,22 +295,21 @@ test('browser realtime transport requires session acknowledgement and reports ru
   });
 
   const pending = transport.connect({
-    stream: {}, credential: 'ephemeral-only', url: 'wss://fake.invalid/realtime',
-    session: SERVER_SESSION,
+    ticket: APP_TICKET, url: PROXY_URL,
     onFailure: (code) => failures.push(code),
   });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(typeof ackTimeout, 'function');
-  socket.onmessage({ data: JSON.stringify({ type: 'session.updated' }) });
+  socket.onmessage({ data: JSON.stringify({ type: 'easyboost.ready' }) });
   const connection = await pending;
-  connection.activate();
+  connection.activate({});
   assert.equal(clearedTimeout, true);
 
   socket.onmessage({ data: JSON.stringify({ type: 'error' }) });
   socket.onclose?.();
   socket.onerror?.();
   assert.deepEqual(failures, ['VOICE_TUTOR_PROVIDER_UNAVAILABLE']);
-  connection.close();
+  connection.close({ clean: false });
 });
 
 test('browser realtime transport rejects when session acknowledgement times out', async () => {
@@ -333,7 +330,7 @@ test('browser realtime transport rejects when session acknowledgement times out'
     audioContextFactory: () => ({ close: async () => {} }),
   });
   const pending = transport.connect({
-    stream: {}, credential: 'ephemeral-only', url: 'wss://fake.invalid/realtime', session: SERVER_SESSION,
+    ticket: APP_TICKET, url: PROXY_URL,
   });
   await new Promise((resolve) => setImmediate(resolve));
   ackTimeout();
@@ -371,13 +368,13 @@ test('server VAD barge-in stops queued audio, cancels and truncates once, then f
     audioContextFactory: () => audioContext,
   });
   const pending = transport.connect({
-    stream: {}, credential: 'ephemeral-only', url: 'wss://fake.invalid/realtime', session: SERVER_SESSION,
+    ticket: APP_TICKET, url: PROXY_URL,
     onFailure: (code) => failures.push(code),
   });
   await new Promise((resolve) => setImmediate(resolve));
-  socket.onmessage({ data: JSON.stringify({ type: 'session.updated' }) });
+  socket.onmessage({ data: JSON.stringify({ type: 'easyboost.ready' }) });
   const connection = await pending;
-  connection.activate();
+  connection.activate({});
   socket.onmessage({ data: JSON.stringify({ type: 'response.created', response_id: 'response-1' }) });
   socket.onmessage({ data: JSON.stringify({
     type: 'response.output_item.added', response_id: 'response-1',

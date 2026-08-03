@@ -1,6 +1,8 @@
 import { z } from 'zod';
 
-export const CONTENT_PROMPT_VERSION = 'content-v1';
+import { practicePromptKey, vocabularyTargetCandidates } from '../voice-tutor/practice.js';
+
+export const CONTENT_PROMPT_VERSION = 'content-v2';
 
 const wordSchema = z.string().trim().min(1).max(80).regex(/^[\p{L}\p{M}' -]+$/u);
 const shortText = (max) => z.string().trim().min(1).max(max)
@@ -30,7 +32,7 @@ const requests = {
   listening_interview: z.object({ operation: z.literal('listening_interview') }).strict(),
   vocabulary_cards: z.object({
     operation: z.literal('vocabulary_cards'),
-    count: z.number().int().min(1).max(30),
+    count: z.number().int().min(4).max(8),
     exclude: z.array(shortText(120)).max(500).default([]),
   }).strict(),
 };
@@ -43,12 +45,29 @@ const optionQuestion = z.object({
   a: z.number().int().min(0).max(3),
 }).strict().refine((value) => value.a < value.o.length, { message: 'answer index is outside options' });
 
+function normalizedExample(value) {
+  return String(value).normalize('NFKC').toLocaleLowerCase('en').replace(/[.!?]+$/gu, '').replace(/\s+/gu, ' ').trim();
+}
+
+function containsHeadword(example, headword) {
+  const base = String(headword).replace(/^to\s+/iu, '');
+  const escaped = base.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'iu').test(String(example));
+}
+
 const vocabularyCard = z.object({
   w: wordSchema,
   p: z.enum(['n', 'v', 'adj', 'adv', 'ph', 'id']),
   tr: shortText(160),
   ex: shortText(300),
-}).strict();
+  practice: z.array(shortText(300)).length(4),
+}).strict().refine(
+  (value) => [value.ex, ...value.practice].every((example) => containsHeadword(example, value.w)),
+  { message: 'every vocabulary example must use the exact base headword' },
+).refine(
+  (value) => new Set([value.ex, ...value.practice].map(normalizedExample)).size === 5,
+  { message: 'vocabulary source and practice examples must be distinct' },
+);
 
 const writingTask37 = z.object({
   from: shortText(80),
@@ -137,7 +156,16 @@ const outputs = {
     .refine((value) => value.st.some((item) => item.a === 2), { message: 'true/false set requires a not stated answer' }),
   listening_interview: z.object({ d: z.array(dialogueLine).min(7).max(9), qs: z.array(examQuestion(3)).length(4) }).strict()
     .refine((value) => value.qs.every((item) => value.d.some((line) => line.t.includes(item.ev))), { message: 'listening evidence must be an exact transcript quote' }),
-  vocabulary_cards: z.array(vocabularyCard).min(1).max(30),
+  vocabulary_cards: z.array(vocabularyCard).min(4).max(8)
+    .refine((cards) => new Set(cards.map((card) => practicePromptKey(card.w))).size === cards.length, {
+      message: 'vocabulary headwords must be unique',
+    })
+    .refine((cards) => new Set(cards.map((card) => practicePromptKey(card.tr))).size === cards.length, {
+      message: 'vocabulary translations must be unique',
+    })
+    .refine((cards) => cards.every((card) => vocabularyTargetCandidates(cards, card, card.practice, 4).length === 4), {
+      message: 'vocabulary cards must provide four tracer-ready target contexts',
+    }),
 };
 
 const instructions = {
@@ -159,7 +187,7 @@ const instructions = {
   listening_matching: 'Create EGE listening task 1 for speech synthesis: five statements and four 2-3 sentence monologues. Return {st,sp:[{t}],a,k}; answer indices are unique and k is Russian.',
   listening_true_false: 'Create EGE listening task 2: a 6-8 line two-person dialogue and five True/False/Not stated statements, including at least one Not stated. Return {d:[{s,t}],st:[{t,a,ev,e}]}.',
   listening_interview: 'Create EGE listening tasks 3-9: a 7-9 line interview and exactly four questions with three options. Return {d:[{s,t}],qs:[{q,o,a,ev,e}]}; every ev must be an exact quote from one d.t transcript line.',
-  vocabulary_cards: 'Create useful British English B1-B2 EGE vocabulary cards. Return a JSON array with w, p (n|v|adj|adv|ph|id), short Russian tr and example ex using the base form.',
+  vocabulary_cards: 'Create useful British English B1-B2 EGE vocabulary cards. Return a JSON array with w, p (n|v|adj|adv|ph|id), short Russian tr, example ex, and exactly four additional distinct practice examples. ex and every practice example must be natural, have a different situation, and use the exact base headword (without leading "to" for verbs).',
 };
 
 export function buildContentPrompt(input) {

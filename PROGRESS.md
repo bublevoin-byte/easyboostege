@@ -699,7 +699,7 @@ production credentials, три доказанных P0 отмечены во в�
 | 07 | Приватность, безопасность, observability и сквозная проверка | done |
 | 08 | Premium commerce, честные квоты и полное grammar/lexicon-покрытие | done |
 | 09 | Полный discovery/text/barge-in/report педагогический цикл | done |
-| 10 | Enforceable realtime proxy и финальная security parity | ready-for-agent |
+| 10 | Enforceable realtime proxy и финальная security parity | done |
 
 Тикет 01 закрыт: base и Premium разделены правом `voice_tutor`; UTC-квоты 10/120 минут,
 идемпотентный резерв одной активной сессии, возврат остатка, экспорт/удаление и профильный UI готовы.
@@ -800,3 +800,43 @@ cancel/truncate; replay и события вне порядка fail closed. Str
 набор 502 (501 pass, 1 штатный PostgreSQL skip), targeted 25/25, disposable PostgreSQL 1/1, `lint`,
 `check`, frontend build, functional/performance E2E и оба secret scans проходят; платных вызовов,
 push, deploy и изменений staging не было.
+
+Тикет 10 закрыт: browser больше не получает xAI bearer или ephemeral credential — same-origin
+WebSocket принимает только короткий одноразовый owner-bound app ticket, а server-owned proxy сам
+открывает pinned `grok-voice-think-fast-1.0`, отправляет bounded конфигурацию PCM16 24 kHz mono и
+пропускает только разрешённые lifecycle/audio/tool frames. Provider ACK атомарно активирует резерв;
+повтор ticket и события вне порядка fail closed. Hard deadline, feature/cost/ZDR switch, отзыв
+актуального voice consent и потеря Premium завершают уже активный канал. При чистом завершении
+учитываются точно наблюдённые input+output PCM bytes, при любой неоднозначности сохраняется полный
+резерв; клиентское время не является источником биллинга. Lost `201` имеет один идемпотентный
+reissue без второго резерва. File/PostgreSQL сериализуют consume/finalize, review/delete и допускают
+один approved canonical на skill/year; миграции 029–030 проверены на disposable PostgreSQL. Реальный
+локальный fake HTTP+WebSocket E2E подтверждает server-only основной ключ, конфигурацию, audio,
+barge-in, runtime fallback, quota/recovery/privacy и отсутствие learner answer/audio/transcript в
+export. Upgrade budgets и pending-handshake ceilings защищают proxy до consume; provider call ID
+проходит точную server-side correlation только через успешный nonce transition. Finalization имеет
+bounded retry/PII-free telemetry, shutdown ограничен по времени, а закрытие sheet отменяет поздний
+create/reissue/discovery/microphone без скрытого захвата аудио. One-trusted-proxy IP budgets очищают
+expired identities, provider handshake slots удерживаются до ACK/timeout, voice FSM требует exact
+call ID, а потерянный text/local 201 один раз получает новый nonce без повторного AI call. Rate-map
+хранит process-local HMAC identities и независимо очищает TTL; единый deadline покрывает
+auth/repository/capsule/provider ACK, каждая finalization attempt ограничена по времени, а partial
+`delivery_mode=null` атомарно завершается как local с нулевым billable time. Raw provider JSON не
+пересылается: browser получает только server-built allowlisted projections; PostgreSQL завершает или
+разрывает timed-out finalization до следующего retry. Provisional voice без ticket/activation получает
+согласованную пару first ticket + rotated nonce либо zero-billable local. Ticket expiry всегда ограничен
+session deadline, а оба PostgreSQL pool обрабатывают idle-client failure
+фиксированной PII-free telemetry. Полный набор 532
+(529 pass, 3 штатных PostgreSQL skip), расширенный targeted 92/92, disposable
+PostgreSQL 3/3, `lint`, `check`, frontend build, два последовательных functional E2E, performance и
+оба secret scans проходят; платных вызовов, push, deploy и изменений staging не было.
+Whole-feature аудит дополнительно закрыл атомарный budget/rate claim для `voice_tutor_text` и
+сохранил text/local-разбор при нулевом остатке голосовых минут через zero-billable reservation.
+Type-mode vocabulary больше не показывает accepted word в контексте; конкретные слова и сочетания
+получают отдельный `skill_id`, а micro-check, transfer и два recovery-аналога всегда относятся к нему.
+Лексические аналоги используют четыре других авторских контекста и разные позиции верного варианта,
+поэтому исходный перевод или одно нажатие нельзя повторить; при нехватке контекстов tracer fail closed.
+Все четыре задания нормализованно отличны от исходного и друг от друга.
+Доказательства письма/говорения фильтруются
+по выбранному критерию и не подставляют несвязанное первое исправление. Добавлена additive
+миграция 030 с file/PostgreSQL parity.

@@ -41,6 +41,8 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
       '026_premium_voice_commerce.sql',
       '027_voice_tutor_pedagogical_loop.sql',
       '028_voice_tutor_discovery_claims.sql',
+      '029_voice_tutor_realtime_proxy.sql',
+      '030_voice_tutor_fallback_and_recovery_tasks.sql',
     ]);
 
     const username = await repository.createTelegramUser(telegramId, `Integration ${suffix}`);
@@ -525,7 +527,351 @@ test('PostgreSQL discovery and paid-operation claims are atomic across finish/de
     assert.equal(storedSlot.rows[0].error_code, 'TRUSTED_RULE_SEARCH_FAILED');
     assert.ok(storedSlot.rows[0].settled_at);
     await repository.deleteUserData(slotUser);
+
+    const fallbackTelegramId = baseTelegramId + 3;
+    const fallbackUser = await repository.createTelegramUser(fallbackTelegramId, `Quota fallback ${suffix}`);
+    await repository.grantDays(fallbackTelegramId, 30, `Quota fallback ${suffix}`);
+    await repository.setEntitlement(fallbackUser, 'voice_tutor', {
+      startsAt: now, endsAt: new Date(now.getTime() + 86_400_000),
+    });
+    for (let index = 0; index < 2; index += 1) {
+      const spentSessionId = crypto.randomUUID();
+      await repository.reserveVoiceTutorSession(fallbackUser, {
+        id: spentSessionId, idempotencyKey: crypto.randomUUID(), limits, now,
+      });
+      await repository.finishVoiceTutorSession(fallbackUser, spentSessionId, {
+        limits, now: new Date(now.getTime() + 300_000), confirmedBillableSeconds: 300,
+      });
+    }
+    const fallbackSessionId = crypto.randomUUID();
+    const fallbackReservation = await repository.reserveVoiceTutorSession(fallbackUser, {
+      id: fallbackSessionId, idempotencyKey: crypto.randomUUID(), limits, now,
+      context: { capsule: pointer(`voice-capsule:fallback:${suffix}`, `ege.grammar.fallback.${suffix}`), nonceHash: '5'.repeat(64) },
+      allowFallbackOnly: true,
+    });
+    assert.equal(fallbackReservation.fallback_only, true);
+    const fallbackStored = await repository.getVoiceTutorSession(fallbackUser, fallbackSessionId);
+    assert.equal(fallbackStored.reserved_seconds, 0);
+    assert.equal(fallbackStored.delivery_mode, 'local');
+    assert.equal((await repository.getVoiceTutorAccess(fallbackUser, limits, now)).voice_tutor.daily_remaining_seconds, 0);
+    await repository.finishVoiceTutorSession(fallbackUser, fallbackSessionId, {
+      limits, now, confirmedBillableSeconds: 0,
+    });
+    await repository.deleteUserData(fallbackUser);
   } finally {
+    await repository.close();
+    await client.end();
+  }
+});
+
+test('PostgreSQL proxy tickets, usage settlement and canonical review are atomic', { skip: !connectionString }, async () => {
+  const operationalErrors = [];
+  const repository = createPostgresRepository(connectionString, {
+    onOperationalError: (event) => operationalErrors.push(event),
+  });
+  const client = new pg.Client({ connectionString });
+  const suffix = crypto.randomBytes(6).toString('hex');
+  const telegramId = Number(`6${Date.now().toString().slice(-9)}`);
+  const now = new Date('2026-08-03T10:00:00.000Z');
+  const limits = { dailySeconds: 600, monthlySeconds: 7_200, sessionSeconds: 300 };
+  await client.connect();
+
+  async function prepareSession(idOffset) {
+    const id = telegramId + idOffset;
+    const username = await repository.createTelegramUser(id, `Proxy ${suffix} ${idOffset}`);
+    await repository.grantDays(id, 30, `Proxy ${suffix} ${idOffset}`);
+    await repository.setEntitlement(username, 'voice_tutor', {
+      startsAt: now, endsAt: new Date(now.getTime() + 86_400_000),
+    });
+    const sessionId = crypto.randomUUID();
+    const idempotencyKey = crypto.randomUUID();
+    await repository.reserveVoiceTutorSession(username, {
+      id: sessionId, idempotencyKey, limits, now,
+      context: {
+        capsule: {
+          schema: 'voice-tutor-reference-v1', id: `voice-capsule:${sessionId}`, version: 'grammar-lexicon-v1',
+          source: { attempt_id: crypto.randomUUID(), item_revision: 1 }, module: 'grammar', skill_id: `ege.grammar.proxy.${suffix}`,
+        },
+        nonceHash: '1'.repeat(64),
+      },
+    });
+    return { username, sessionId, idempotencyKey };
+  }
+
+  function card(username, skillId) {
+    return {
+      id: crypto.randomUUID(), createdForUsername: username,
+      skill: { id: skillId, title: 'Atomic canonical' }, examYear: 2026,
+      rule: { title: 'Atomic canonical', explanation: 'Only one approved rule may exist.', examples: ['It works.'] },
+      agreementHash: crypto.createHash('sha256').update(crypto.randomUUID()).digest('hex'),
+      sources: [], discrepancies: [], createdAt: now,
+    };
+  }
+
+  try {
+    const exact = await prepareSession(0);
+    const ticketExpiresAt = new Date(now.getTime() + 60_000);
+    const firstHash = 'a'.repeat(64);
+    const replacementHash = 'b'.repeat(64);
+    assert.equal((await repository.issueVoiceTutorProxyTicket(exact.username, exact.sessionId, {
+      ticketHash: firstHash, idempotencyKey: exact.idempotencyKey, expiresAt: ticketExpiresAt, now,
+    })).issued, true);
+    assert.equal((await repository.issueVoiceTutorProxyTicket(exact.username, exact.sessionId, {
+      ticketHash: firstHash, idempotencyKey: exact.idempotencyKey, expiresAt: ticketExpiresAt, now,
+    })).issued, false);
+    assert.equal((await repository.issueVoiceTutorProxyTicket(exact.username, exact.sessionId, {
+      ticketHash: replacementHash, idempotencyKey: exact.idempotencyKey, expiresAt: ticketExpiresAt, now,
+      reissue: true, nextNonceHash: '2'.repeat(64),
+    })).reissued, true);
+    await assert.rejects(
+      repository.issueVoiceTutorProxyTicket(exact.username, exact.sessionId, {
+        ticketHash: '9'.repeat(64), idempotencyKey: exact.idempotencyKey, expiresAt: ticketExpiresAt, now,
+        reissue: true, nextNonceHash: '3'.repeat(64),
+      }),
+      (error) => error.code === 'VOICE_TUTOR_PROXY_TICKET_REISSUE_LIMIT',
+    );
+    assert.equal((await repository.getVoiceTutorSession(exact.username, exact.sessionId)).proxy_ticket_reissue_count, 1);
+    const consumed = await Promise.allSettled([
+      repository.consumeVoiceTutorProxyTicket(exact.username, { ticketHash: replacementHash }, {
+        now, provider: 'xai', model: 'grok-voice-v1', promptVersion: 'voice-tutor-error-v4',
+      }),
+      repository.consumeVoiceTutorProxyTicket(exact.username, { ticketHash: replacementHash }, {
+        now, provider: 'xai', model: 'grok-voice-v1', promptVersion: 'voice-tutor-error-v4',
+      }),
+    ]);
+    assert.equal(consumed.filter((result) => result.status === 'fulfilled').length, 1);
+    assert.match(consumed.find((result) => result.status === 'rejected').reason.message, /VOICE_TUTOR_PROXY_TICKET_REPLAYED/u);
+    assert.equal((await repository.activateVoiceTutorProxySession(exact.username, exact.sessionId, { now })).activated, true);
+    assert.equal((await repository.activateVoiceTutorProxySession(exact.username, exact.sessionId, { now })).activated, false);
+    const exactFinalization = await repository.finalizeVoiceTutorProxySession(exact.username, exact.sessionId, {
+      inputAudioBytes: 48_000, outputAudioBytes: 1, confirmed: true, reason: 'completed',
+      now: new Date(now.getTime() + 20_000), limits,
+    });
+    assert.equal(exactFinalization.usage.billable_seconds, 2);
+    assert.equal(exactFinalization.usage.exact, true);
+    const idempotentFinalization = await repository.finalizeVoiceTutorProxySession(exact.username, exact.sessionId, {
+      inputAudioBytes: 999_999, outputAudioBytes: 999_999, confirmed: false, reason: 'provider_error',
+      now: new Date(now.getTime() + 30_000), limits,
+    });
+    assert.equal(idempotentFinalization.finalized, false);
+    assert.deepEqual(idempotentFinalization.usage, exactFinalization.usage);
+    const storedExact = await client.query(
+      `SELECT billable_seconds, proxy_input_audio_bytes, proxy_output_audio_bytes,
+              proxy_usage_confirmed, proxy_finalization_reason
+       FROM voice_tutor_sessions WHERE id = $1`,
+      [exact.sessionId],
+    );
+    assert.deepEqual(storedExact.rows[0], {
+      billable_seconds: 2,
+      proxy_input_audio_bytes: '48000',
+      proxy_output_audio_bytes: '1',
+      proxy_usage_confirmed: true,
+      proxy_finalization_reason: 'completed',
+    });
+
+    const bounded = await prepareSession(10);
+    await repository.issueVoiceTutorProxyTicket(bounded.username, bounded.sessionId, {
+      ticketHash: '6'.repeat(64), idempotencyKey: bounded.idempotencyKey, expiresAt: ticketExpiresAt, now,
+    });
+    await repository.consumeVoiceTutorProxyTicket(bounded.username, { ticketHash: '6'.repeat(64) }, { now });
+    await client.query('BEGIN');
+    await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [bounded.username]);
+    const timeoutStartedAt = Date.now();
+    await assert.rejects(
+      repository.finalizeVoiceTutorProxySession(bounded.username, bounded.sessionId, {
+        inputAudioBytes: 1, outputAudioBytes: 1, confirmed: true, reason: 'completed',
+        now: new Date(now.getTime() + 10_000), limits, attemptTimeoutMs: 50,
+      }),
+      /finalization attempt timeout/iu,
+    );
+    assert.ok(Date.now() - timeoutStartedAt < 500);
+    await client.query('ROLLBACK');
+    assert.equal((await repository.finalizeVoiceTutorProxySession(bounded.username, bounded.sessionId, {
+      inputAudioBytes: 1, outputAudioBytes: 1, confirmed: true, reason: 'completed',
+      now: new Date(now.getTime() + 10_000), limits, attemptTimeoutMs: 500,
+    })).finalized, true);
+
+    const partialTicket = await prepareSession(11);
+    assert.equal((await repository.issueVoiceTutorProxyTicket(partialTicket.username, partialTicket.sessionId, {
+      ticketHash: '5'.repeat(64), idempotencyKey: partialTicket.idempotencyKey,
+      expiresAt: ticketExpiresAt, now, nextNonceHash: '4'.repeat(64),
+    })).issued, true);
+    const partialTicketStored = await repository.getVoiceTutorSession(partialTicket.username, partialTicket.sessionId);
+    assert.equal(partialTicketStored.nonce_hash, '4'.repeat(64));
+    assert.equal(partialTicketStored.proxy_ticket_reissue_count, 1);
+
+    const partialLocal = await prepareSession(12);
+    const partialLocalRecovered = await repository.reissueVoiceTutorFallbackNonce(
+      partialLocal.username,
+      partialLocal.sessionId,
+      { idempotencyKey: partialLocal.idempotencyKey, nextNonceHash: '3'.repeat(64), now },
+    );
+    assert.equal(partialLocalRecovered.session.status, 'completed');
+    const partialLocalStored = await repository.getVoiceTutorSession(partialLocal.username, partialLocal.sessionId);
+    assert.equal(partialLocalStored.delivery_mode, 'local');
+    assert.equal(partialLocalStored.billable_seconds, 0);
+
+    const lostRealtime = await prepareSession(13);
+    await repository.setVoiceTutorSessionDelivery(lostRealtime.username, lostRealtime.sessionId, { mode: 'voice' });
+    await repository.issueVoiceTutorProxyTicket(lostRealtime.username, lostRealtime.sessionId, {
+      ticketHash: '0'.repeat(64), idempotencyKey: lostRealtime.idempotencyKey, expiresAt: ticketExpiresAt, now,
+    });
+    await repository.issueVoiceTutorProxyTicket(lostRealtime.username, lostRealtime.sessionId, {
+      ticketHash: '1'.repeat(64), idempotencyKey: lostRealtime.idempotencyKey, expiresAt: ticketExpiresAt, now,
+      reissue: true, nextNonceHash: '5'.repeat(64),
+    });
+    await repository.reissueVoiceTutorFallbackNonce(lostRealtime.username, lostRealtime.sessionId, {
+      idempotencyKey: lostRealtime.idempotencyKey, nextNonceHash: '6'.repeat(64), now,
+      recoverLostRealtime: true,
+    });
+    const lostRealtimeStored = await repository.getVoiceTutorSession(lostRealtime.username, lostRealtime.sessionId);
+    assert.equal(lostRealtimeStored.delivery_mode, 'local');
+    assert.equal(lostRealtimeStored.status, 'completed');
+    assert.equal(lostRealtimeStored.billable_seconds, 0);
+    assert.equal(lostRealtimeStored.proxy_ticket_hash, null);
+    assert.equal(lostRealtimeStored.proxy_ticket_issued_at, null);
+    assert.equal(lostRealtimeStored.proxy_ticket_expires_at, null);
+    assert.equal(lostRealtimeStored.proxy_ticket_consumed_at, null);
+    const exported = await repository.exportUserData(exact.username);
+    assert.equal(JSON.stringify(exported).includes(replacementHash), false);
+    assert.equal(Number(exported.voice_tutor_sessions[0].proxy_input_audio_bytes), 48_000);
+
+    const conservative = await prepareSession(1);
+    await repository.issueVoiceTutorProxyTicket(conservative.username, conservative.sessionId, {
+      ticketHash: 'c'.repeat(64), idempotencyKey: conservative.idempotencyKey, expiresAt: ticketExpiresAt, now,
+    });
+    await repository.consumeVoiceTutorProxyTicket(conservative.username, { ticketHash: 'c'.repeat(64) }, { now });
+    const conservativeFinalization = await repository.finalizeVoiceTutorProxySession(conservative.username, conservative.sessionId, {
+      inputAudioBytes: 0, outputAudioBytes: 0, confirmed: false, reason: 'provider_error',
+      now: new Date(now.getTime() + 1_000), limits,
+    });
+    assert.equal(conservativeFinalization.usage.exact, false);
+    assert.equal(conservativeFinalization.usage.billable_seconds, 300);
+
+    const lostFallback = await prepareSession(8);
+    await client.query('UPDATE voice_tutor_sessions SET delivery_mode = NULL WHERE id = $1', [lostFallback.sessionId]);
+    const recoveredNonces = await Promise.allSettled([
+      repository.reissueVoiceTutorFallbackNonce(lostFallback.username, lostFallback.sessionId, {
+        idempotencyKey: lostFallback.idempotencyKey, nextNonceHash: '8'.repeat(64), now,
+      }),
+      repository.reissueVoiceTutorFallbackNonce(lostFallback.username, lostFallback.sessionId, {
+        idempotencyKey: lostFallback.idempotencyKey, nextNonceHash: '9'.repeat(64), now,
+      }),
+    ]);
+    assert.equal(recoveredNonces.filter((result) => result.status === 'fulfilled').length, 1);
+    assert.equal(recoveredNonces.find((result) => result.status === 'rejected').reason.code,
+      'VOICE_TUTOR_PROXY_TICKET_REISSUE_LIMIT');
+    const recoveredFallback = await repository.getVoiceTutorSession(lostFallback.username, lostFallback.sessionId);
+    assert.equal(recoveredFallback.proxy_ticket_reissue_count, 1);
+    assert.equal(recoveredFallback.delivery_mode, 'local');
+    assert.equal(recoveredFallback.status, 'completed');
+    assert.equal(recoveredFallback.billable_seconds, 0);
+
+    const legacyFinish = await prepareSession(4);
+    await repository.issueVoiceTutorProxyTicket(legacyFinish.username, legacyFinish.sessionId, {
+      ticketHash: 'd'.repeat(64), idempotencyKey: legacyFinish.idempotencyKey, expiresAt: ticketExpiresAt, now,
+    });
+    await repository.consumeVoiceTutorProxyTicket(legacyFinish.username, { ticketHash: 'd'.repeat(64), now });
+    await repository.activateVoiceTutorProxySession(legacyFinish.username, legacyFinish.sessionId, { now });
+    await repository.finishVoiceTutorSession(legacyFinish.username, legacyFinish.sessionId, {
+      confirmedBillableSeconds: 0, now: new Date(now.getTime() + 1_000), limits,
+    });
+    const legacyStored = await repository.getVoiceTutorSession(legacyFinish.username, legacyFinish.sessionId);
+    assert.equal(legacyStored.billable_seconds, 300);
+    assert.equal(legacyStored.proxy_usage_confirmed, false);
+    assert.equal(legacyStored.proxy_finalization_reason, 'server_finish');
+
+    const fallback = await prepareSession(7);
+    await repository.issueVoiceTutorProxyTicket(fallback.username, fallback.sessionId, {
+      ticketHash: '7'.repeat(64), idempotencyKey: fallback.idempotencyKey, expiresAt: ticketExpiresAt, now,
+    });
+    await repository.consumeVoiceTutorProxyTicket(fallback.username, { ticketHash: '7'.repeat(64), now });
+    await repository.switchVoiceTutorSessionDelivery(fallback.username, fallback.sessionId, {
+      nonceHash: '1'.repeat(64), nextNonceHash: '2'.repeat(64), mode: 'local',
+      errorCode: 'VOICE_TUTOR_PROVIDER_UNAVAILABLE', limits, now: new Date(now.getTime() + 1_000),
+    });
+    const fallbackStored = await repository.getVoiceTutorSession(fallback.username, fallback.sessionId);
+    assert.equal(fallbackStored.billable_seconds, 300);
+    assert.equal(fallbackStored.proxy_usage_confirmed, false);
+    assert.equal(fallbackStored.proxy_finalization_reason, 'runtime_fallback');
+    assert.equal((await repository.finalizeVoiceTutorProxySession(fallback.username, fallback.sessionId, {
+      inputAudioBytes: 48_000, outputAudioBytes: 48_000, confirmed: true, reason: 'completed',
+      now: new Date(now.getTime() + 2_000), limits,
+    })).finalized, false);
+
+    const timeout = await prepareSession(5);
+    await repository.issueVoiceTutorProxyTicket(timeout.username, timeout.sessionId, {
+      ticketHash: 'e'.repeat(64), idempotencyKey: timeout.idempotencyKey, expiresAt: ticketExpiresAt, now,
+    });
+    await repository.consumeVoiceTutorProxyTicket(timeout.username, { ticketHash: 'e'.repeat(64), now });
+    await repository.activateVoiceTutorProxySession(timeout.username, timeout.sessionId, { now });
+    await repository.finishVoiceTutorSession(timeout.username, timeout.sessionId, {
+      now: new Date(now.getTime() + 301_000), limits,
+    });
+    const timeoutStored = await repository.getVoiceTutorSession(timeout.username, timeout.sessionId);
+    assert.equal(timeoutStored.status, 'expired');
+    assert.equal(timeoutStored.billable_seconds, 300);
+    assert.equal(timeoutStored.proxy_finalization_reason, 'timeout');
+
+    const finalizationBackends = await client.query(
+      "SELECT pid FROM pg_stat_activity WHERE application_name = 'easyboost_voice_finalization' AND state = 'idle'",
+    );
+    assert.ok(finalizationBackends.rowCount >= 1);
+    await client.query('SELECT pg_terminate_backend($1)', [finalizationBackends.rows[0].pid]);
+    for (let attempt = 0; attempt < 50 && operationalErrors.length === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.deepEqual(operationalErrors, [{ code: 'POSTGRES_IDLE_CLIENT_ERROR', pool: 'voice_finalization' }]);
+
+    const canonicalSkill = `ege.grammar.canonical.${suffix}`;
+    const firstCard = card(exact.username, canonicalSkill);
+    const secondCard = card(exact.username, canonicalSkill);
+    await repository.createRuleCard(firstCard);
+    await repository.createRuleCard(secondCard);
+    const canonicalRace = await Promise.allSettled([
+      repository.reviewRuleCard(firstCard.id, { decision: 'approved', reviewer: exact.username, reviewedAt: now }),
+      repository.reviewRuleCard(secondCard.id, { decision: 'approved', reviewer: exact.username, reviewedAt: now }),
+    ]);
+    assert.equal(canonicalRace.filter((result) => result.status === 'fulfilled').length, 1);
+    assert.equal(canonicalRace.find((result) => result.status === 'rejected').reason.code, 'RULE_CARD_CANONICAL_EXISTS');
+    assert.equal((await client.query(
+      "SELECT id FROM trusted_rule_cards WHERE skill_id = $1 AND exam_year = 2026 AND status = 'approved'",
+      [canonicalSkill],
+    )).rowCount, 1);
+
+    const owner = await repository.createTelegramUser(telegramId + 2, `Review owner ${suffix}`);
+    const reviewer = await repository.createTelegramUser(telegramId + 3, `Review actor ${suffix}`);
+    const racedCard = card(owner, `ege.grammar.review_delete.${suffix}`);
+    await repository.createRuleCard(racedCard);
+    const reviewDeleteRace = await Promise.allSettled([
+      repository.deleteUserData(reviewer),
+      repository.reviewRuleCard(racedCard.id, { decision: 'approved', reviewer, reviewedAt: now }),
+    ]);
+    assert.equal(reviewDeleteRace[0].status, 'fulfilled');
+    assert.equal(await repository.getUser(reviewer), null);
+    if (reviewDeleteRace[1].status === 'fulfilled') {
+      assert.equal((await repository.getRuleCard(racedCard.id)).review_audit[0].reviewer, null);
+    } else {
+      assert.match(reviewDeleteRace[1].reason.message, /USER_NOT_FOUND/u);
+    }
+
+    const privacyUser = await repository.createTelegramUser(telegramId + 6, `Privacy race ${suffix}`);
+    const privacyDeleteRace = await Promise.allSettled([
+      repository.deleteUserData(privacyUser),
+      repository.setPrivacyConsent(privacyUser, {
+        text_processing: true, voice_processing: true, policy_version: 'ticket-10-v1',
+      }),
+    ]);
+    assert.equal(privacyDeleteRace[0].status, 'fulfilled');
+    assert.equal(await repository.getUser(privacyUser), null);
+    if (privacyDeleteRace[1].status === 'rejected') assert.match(privacyDeleteRace[1].reason.message, /USER_NOT_FOUND/u);
+  } finally {
+    await repository.deleteUserData((await repository.getUserByTelegram(telegramId))?.username).catch(() => {});
+    await repository.deleteUserData((await repository.getUserByTelegram(telegramId + 1))?.username).catch(() => {});
+    await repository.deleteUserData((await repository.getUserByTelegram(telegramId + 2))?.username).catch(() => {});
+    await repository.deleteUserData((await repository.getUserByTelegram(telegramId + 4))?.username).catch(() => {});
+    await repository.deleteUserData((await repository.getUserByTelegram(telegramId + 5))?.username).catch(() => {});
+    await repository.deleteUserData((await repository.getUserByTelegram(telegramId + 7))?.username).catch(() => {});
     await repository.close();
     await client.end();
   }

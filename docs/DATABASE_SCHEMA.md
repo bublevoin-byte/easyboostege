@@ -89,10 +89,29 @@ Server-owned mapping ограничивает потенциал одного ep
 
 Миграция `025_voice_tutor_hardening.sql` добавляет bounded `provider`, `model` и
 `prompt_version` к `voice_tutor_sessions`. Они входят в account export как техническое
-происхождение структурированного результата, но ephemeral credential и nonce hash не входят.
+происхождение структурированного результата, но provider credential и nonce hash не входят.
 Та же миграция страхует связь rule card creator через `ON DELETE SET NULL`; repository до удаления
 аккаунта удаляет pending/rejected reports и отсоединяет approved canonical. Reviewer audit в
 оставшихся карточках становится обезличенным фактом решения.
+
+Миграция `029_voice_tutor_realtime_proxy.sql` добавляет SHA-256 one-use app ticket, время его
+выдачи/истечения/consume, bounded reissue counter, input/output PCM bytes, usage confirmation,
+finalization reason и time. Raw ticket, API key, audio и transcript в БД не записываются. Ticket
+hash и reissue counter исключены из account export; bounded byte/finalization evidence входит.
+Первая потерянная выдача может быть атомарно заменена один раз, consume допускает ровно одного
+победителя. Clean confirmed usage считает секунды по 48 000 PCM16 bytes/s; любой abnormal или
+неподтверждённый исход сохраняет полную reservation. File и PostgreSQL mutations сериализуют
+finish/delete/review/proxy races; partial unique index разрешает не более одной approved canonical
+карточки для пары `(skill_id, exam_year)`. Перед созданием индекса миграция детерминированно
+сохраняет прежний canonical с самым поздним `reviewed_at/created_at/id`, а legacy-дубликаты переводит
+в `rejected` с системной audit-причиной; file repository выполняет ту же reconciliation при load.
+
+Миграция `030_voice_tutor_fallback_and_recovery_tasks.sql` разрешает нулевой резерв только для
+контекстного text/local-разбора после исчерпания голосовой квоты: такая сессия не может списать
+голосовые секунды. Она также добавляет `repeat_tasks` к recovery-событию. Новые day-1/day-7
+повторы берутся из двух отдельных server-owned аналогов того же skill, связанных с исходной capsule.
+Они не совпадают с исходным заданием, сессионными micro-check/transfer или друг с другом;
+module-wide задания для другого навыка больше не используются.
 
 Миграция `026_premium_voice_commerce.sql` добавляет обязательный `product` (`base` или
 `premium_voice`) к заявке и не меняет смысл прежних строк: они получают `base`. Для одного

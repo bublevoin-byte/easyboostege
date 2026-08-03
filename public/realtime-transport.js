@@ -3,13 +3,10 @@ const MAX_EVENT_BYTES = 262_144;
 const MAX_AUDIO_DELTA_CHARS = 131_072;
 const MAX_TOOL_ARGUMENT_CHARS = 512;
 const MAX_TOOL_CALL_ID_CHARS = 128;
-const MAX_SESSION_BYTES = 81_920;
-const MAX_INSTRUCTION_BYTES = 65_536;
 const PEDAGOGICAL_EVENTS = new Set(['diagnosis_complete', 'explanation_complete', 'check_answer', 'transfer_answer']);
 const SAFE_CALL_ID = /^[A-Za-z0-9._:-]{1,128}$/u;
-const SAFE_CREDENTIAL = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]{1,2048}$/u;
-const SAFE_VOICE = /^[a-z][a-z0-9_-]{0,63}$/u;
-const MAX_TOOL_CALLS_PER_RESPONSE = 4;
+const SAFE_TICKET = /^[A-Za-z0-9_-]{32,128}$/u;
+const MAX_TOOL_CALLS_PER_RESPONSE = 1;
 const PASSIVE_SERVER_EVENTS = new Set([
   'session.created', 'conversation.created', 'conversation.item.created',
   'input_audio_buffer.committed', 'input_audio_buffer.cleared', 'input_audio_buffer.speech_stopped',
@@ -49,40 +46,15 @@ function parsePedagogicalToolEvent(value) {
   return { type: parsed.type, ...(requiresAnswer ? { answer: parsed.answer } : {}) };
 }
 
-function boundedSessionConfig(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const allowedKeys = ['voice', 'instructions', 'tools', 'turn_detection'];
-  const keys = Object.keys(value);
-  if (keys.length !== allowedKeys.length || keys.some((key) => !allowedKeys.includes(key))) return null;
-  if (!SAFE_VOICE.test(value.voice) || typeof value.instructions !== 'string' || !value.instructions) return null;
-  const instructionBytes = new TextEncoder().encode(value.instructions).byteLength;
-  if (instructionBytes > MAX_INSTRUCTION_BYTES || !Array.isArray(value.tools) || value.tools.length !== 1
-    || !value.turn_detection || typeof value.turn_detection !== 'object' || Array.isArray(value.turn_detection)
-    || value.turn_detection.type !== 'server_vad' || Object.keys(value.turn_detection).length !== 1) return null;
-  const tool = value.tools[0];
-  if (!tool || typeof tool !== 'object' || Array.isArray(tool)
-    || Object.keys(tool).length !== 4
-    || Object.keys(tool).some((key) => !['type', 'name', 'description', 'parameters'].includes(key))
-    || tool.type !== 'function' || tool.name !== 'advance_pedagogy'
-    || typeof tool.description !== 'string' || !tool.description || tool.description.length > 500
-    || !tool.parameters || typeof tool.parameters !== 'object' || Array.isArray(tool.parameters)) return null;
-  const parameters = tool.parameters;
-  const properties = parameters.properties;
-  const typeSchema = properties?.type;
-  const answerSchema = properties?.answer;
-  if (Object.keys(parameters).length !== 4 || parameters.type !== 'object'
-    || !properties || typeof properties !== 'object' || Array.isArray(properties)
-    || Object.keys(properties).length !== 2 || !typeSchema || !answerSchema
-    || typeSchema.type !== 'string' || !Array.isArray(typeSchema.enum)
-    || typeSchema.enum.length !== PEDAGOGICAL_EVENTS.size
-    || typeSchema.enum.some((eventType) => !PEDAGOGICAL_EVENTS.has(eventType))
-    || answerSchema.type !== 'string' || answerSchema.maxLength !== 200
-    || !Array.isArray(parameters.required) || parameters.required.length !== 1 || parameters.required[0] !== 'type'
-    || parameters.additionalProperties !== false) return null;
-  let encoded;
-  try { encoded = JSON.stringify(value); } catch { return null; }
-  if (!encoded || new TextEncoder().encode(encoded).byteLength > MAX_SESSION_BYTES) return null;
-  return JSON.parse(encoded);
+function proxyWebSocketUrl(value) {
+  try {
+    const origin = browser.location?.origin || 'http://localhost';
+    const url = new URL(String(value || ''), origin);
+    const expected = new URL(origin);
+    if (url.origin !== expected.origin || url.pathname !== '/api/v1/voice-tutor/realtime' || url.search || url.hash) return null;
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    return url.toString();
+  } catch { return null; }
 }
 
 export function createBrowserRealtimeTransport({
@@ -96,16 +68,16 @@ export function createBrowserRealtimeTransport({
 } = {}) {
   return Object.freeze({
     async connect({
-      stream, credential, url, session, onSubtitle = () => {}, onStatus = () => {},
+      ticket, url, onSubtitle = () => {}, onStatus = () => {},
       onPedagogicalEvent = null, onFailure = () => {},
     }) {
-      const sessionCredential = String(credential || '');
-      const configuredSession = boundedSessionConfig(session);
-      if (!stream || !/^wss:\/\//u.test(String(url || '')) || !SAFE_CREDENTIAL.test(sessionCredential) || !configuredSession
+      const appTicket = String(ticket || '');
+      const proxyUrl = proxyWebSocketUrl(url);
+      if (!proxyUrl || !SAFE_TICKET.test(appTicket)
         || !Number.isInteger(ackTimeoutMs) || ackTimeoutMs < 1 || ackTimeoutMs > 30_000) {
         throw new Error('VOICE_TUTOR_REALTIME_INVALID');
       }
-      const socket = webSocketFactory(String(url), [`xai-client-secret.${sessionCredential}`]);
+      const socket = webSocketFactory(proxyUrl, [`easyboost-voice-ticket.${appTicket}`]);
       let audioContext = null;
       let source = null;
       let processor = null;
@@ -117,13 +89,16 @@ export function createBrowserRealtimeTransport({
       let activeAssistantItemId = null;
       let responseAudioStartedAt = null;
       let activeResponse = null;
+      let learnerTurnRequired = false;
       let sessionAcknowledged = false;
       let sessionConfigured = false;
       let intentionalClose = false;
       let connectSettled = false;
       let resolveConnect;
       let rejectConnect;
+      let resolveClosed;
       let ackTimer = null;
+      let cleanCloseTimer = null;
       let eventWindowStartedAt = now();
       let eventCount = 0;
       const seenResponseIds = new Set();
@@ -135,16 +110,21 @@ export function createBrowserRealtimeTransport({
         resolveConnect = resolve;
         rejectConnect = reject;
       });
+      const socketClosed = new Promise((resolve) => { resolveClosed = resolve; });
 
       function send(value) {
         if (socket.readyState === 1 && !closed) socket.send(JSON.stringify(value));
       }
 
-      function cleanup() {
+      function cleanup({ closeSocket = true } = {}) {
         if (closed) return;
         closed = true;
         if (ackTimer != null) clearTimeoutImpl(ackTimer);
+        if (cleanCloseTimer != null) clearTimeoutImpl(cleanCloseTimer);
         ackTimer = null;
+        cleanCloseTimer = null;
+        sessionConfigured = false;
+        if (processor) processor.onaudioprocess = null;
         processor?.disconnect?.();
         source?.disconnect?.();
         silentGain?.disconnect?.();
@@ -153,11 +133,14 @@ export function createBrowserRealtimeTransport({
           try { output.disconnect?.(); } catch {}
         }
         activeOutputs.clear();
-        try { socket.close(); } catch {}
+        if (closeSocket) {
+          try { socket.close(); } catch {}
+        }
         try {
           const closing = audioContext?.close?.();
           closing?.catch?.(() => {});
         } catch {}
+        resolveClosed();
       }
 
       function fail() {
@@ -250,8 +233,8 @@ export function createBrowserRealtimeTransport({
         for (const call of response.calls) {
           let output;
           try {
-            const result = await onPedagogicalEvent(call.event);
-            output = JSON.stringify({ state: result?.session?.state || null, accepted: true });
+            const result = await onPedagogicalEvent(call.event, { callId: call.callId });
+            output = JSON.stringify({ accepted: true, state: result?.session?.state || null });
           } catch {
             output = JSON.stringify({ accepted: false });
           }
@@ -285,7 +268,7 @@ export function createBrowserRealtimeTransport({
         try { message = JSON.parse(raw); } catch { return closeInvalidStream(); }
         if (!message || typeof message !== 'object' || Array.isArray(message) || Object.keys(message).length > 20
           || typeof message.type !== 'string' || message.type.length > 100) return closeInvalidStream();
-        if (message.type === 'session.updated') {
+        if (message.type === 'easyboost.ready') {
           if (sessionAcknowledged) return closeInvalidStream();
           if (ackTimer != null) clearTimeoutImpl(ackTimer);
           ackTimer = null;
@@ -302,7 +285,7 @@ export function createBrowserRealtimeTransport({
           return;
         }
         if (!sessionConfigured) {
-          if (message.type === 'session.created') return;
+          if (message.type === 'session.created' || message.type === 'conversation.created') return;
           return closeInvalidStream();
         }
         if (message.type === 'response.created') {
@@ -331,8 +314,9 @@ export function createBrowserRealtimeTransport({
             if (item.name !== 'advance_pedagogy' || typeof item.call_id !== 'string'
               || !SAFE_CALL_ID.test(item.call_id) || item.call_id.length > MAX_TOOL_CALL_ID_CHARS
               || seenCallIds.has(item.call_id) || activeResponse.calls.length >= MAX_TOOL_CALLS_PER_RESPONSE
-              || typeof onPedagogicalEvent !== 'function') return closeInvalidStream();
+              || learnerTurnRequired || typeof onPedagogicalEvent !== 'function') return closeInvalidStream();
             seenCallIds.add(item.call_id);
+            learnerTurnRequired = true;
             const call = { itemId: item.id, callId: item.call_id, name: item.name, event: null, itemDone: false };
             activeResponse.items.set(item.id, { type: item.type, done: false, callId: item.call_id });
             activeResponse.calls.push(call);
@@ -345,6 +329,7 @@ export function createBrowserRealtimeTransport({
           return;
         }
         if (message.type === 'input_audio_buffer.speech_started') {
+          learnerTurnRequired = false;
           if (responseOpen) interruptAssistant();
           return;
         }
@@ -419,19 +404,22 @@ export function createBrowserRealtimeTransport({
         return closeInvalidStream();
       };
 
-      socket.onerror = () => fail();
-      socket.onclose = () => fail();
+      socket.onerror = () => { if (!intentionalClose) fail(); };
+      socket.onclose = () => {
+        if (intentionalClose) cleanup({ closeSocket: false });
+        else fail();
+      };
       socket.onopen = () => {
         ackTimer = setTimeoutImpl(() => fail(), ackTimeoutMs);
-        send({ type: 'session.update', session: configuredSession });
       };
 
       await connected;
 
       return Object.freeze({
-        activate() {
+        activate(stream) {
           if (closed || !sessionAcknowledged) throw new Error('VOICE_TUTOR_REALTIME_UNAVAILABLE');
           if (sessionConfigured) return;
+          if (!stream) throw new Error('VOICE_TUTOR_REALTIME_INVALID');
           try {
             audioContext = audioContextFactory();
             source = audioContext.createMediaStreamSource(stream);
@@ -452,10 +440,21 @@ export function createBrowserRealtimeTransport({
             throw new Error('VOICE_TUTOR_REALTIME_UNAVAILABLE');
           }
         },
-        close() {
-          if (closed) return;
+        close({ clean = true } = {}) {
+          if (closed) return socketClosed;
           intentionalClose = true;
+          if (clean && socket.readyState === 1) {
+            send({ type: 'easyboost.close' });
+            sessionConfigured = false;
+            if (processor) processor.onaudioprocess = null;
+            processor?.disconnect?.();
+            source?.disconnect?.();
+            silentGain?.disconnect?.();
+            cleanCloseTimer = setTimeoutImpl(() => cleanup(), 2_000);
+            return socketClosed;
+          }
           cleanup();
+          return socketClosed;
         },
       });
     },

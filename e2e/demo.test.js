@@ -8,6 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import jwt from 'jsonwebtoken';
 import { chromium, devices, firefox, webkit } from 'playwright';
+import { WebSocketServer } from 'ws';
 
 const projectDirectory = fileURLToPath(new URL('..', import.meta.url));
 const serverPath = fileURLToPath(new URL('../server.js', import.meta.url));
@@ -109,7 +110,8 @@ async function runE2E() {
   let temporaryDirectory;
   let child;
   let browser;
-  let fakeProviderServer;
+    let fakeProviderServer;
+    let fakeProviderWss;
   try {
     browser = await launchBrowser();
     const context = await browser.newContext(contextOptions());
@@ -120,20 +122,71 @@ async function runE2E() {
     const dataFile = path.join(temporaryDirectory, 'data.json');
     const jwtSecret = 'e2e-test-secret-with-at-least-32-characters';
     const fakeProviderPort = await findAvailablePort();
-    const fakeProviderCalls = [];
-    fakeProviderServer = http.createServer((request, response) => {
-      if (request.method !== 'POST' || request.url !== '/voice-credentials') {
-        response.writeHead(404).end();
-        return;
-      }
-      let body = '';
-      request.setEncoding('utf8');
-      request.on('data', (chunk) => { body += chunk; });
-      request.on('end', () => {
-        const parsed = JSON.parse(body);
-        fakeProviderCalls.push(parsed);
-        response.writeHead(200, { 'Content-Type': 'application/json' });
-        response.end(JSON.stringify({ value: 'e2e-ephemeral-only', expires_at: 1_900_000_000 }));
+    const fakeProviderEvidence = { connections: 0, headers: null, received: [], bargeIn: [] };
+    const tutorEvents = [
+      { id: 'e2e-call-diagnose', payload: { type: 'diagnosis_complete' } },
+      { id: 'e2e-call-explain', payload: { type: 'explanation_complete' } },
+      { id: 'e2e-call-micro', payload: { type: 'check_answer', answer: 'saw' } },
+      { id: 'e2e-call-transfer', payload: { type: 'transfer_answer', answer: 'was cooking' } },
+    ];
+    let tutorEventIndex = 0;
+    fakeProviderServer = http.createServer((_request, response) => response.writeHead(404).end());
+    fakeProviderWss = new WebSocketServer({ server: fakeProviderServer, maxPayload: 262_144 });
+    fakeProviderWss.on('connection', (socket, request) => {
+      fakeProviderEvidence.connections += 1;
+      const connectionNumber = fakeProviderEvidence.connections;
+      fakeProviderEvidence.headers = request.headers;
+      socket.send(JSON.stringify({ type: 'session.created' }));
+      socket.send(JSON.stringify({ type: 'conversation.created' }));
+      const emitTool = () => {
+        const tool = tutorEvents[tutorEventIndex];
+        if (!tool) { socket.send(JSON.stringify({ type: 'error', error: { code: 'e2e_runtime_failure' } })); return; }
+        const responseId = `response-${tool.id}`;
+        const itemId = `item-${tool.id}`;
+        socket.send(JSON.stringify({ type: 'response.created', response_id: responseId }));
+        socket.send(JSON.stringify({
+          type: 'response.output_item.added', response_id: responseId,
+          item: { type: 'function_call', id: itemId, name: 'advance_pedagogy', call_id: tool.id },
+        }));
+        socket.send(JSON.stringify({
+          type: 'response.function_call_arguments.done', response_id: responseId, item_id: itemId,
+          name: 'advance_pedagogy', call_id: tool.id, arguments: JSON.stringify(tool.payload),
+        }));
+        socket.send(JSON.stringify({ type: 'response.done', response_id: responseId, response: { usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } } }));
+      };
+      socket.on('message', (data) => {
+        const event = JSON.parse(data.toString());
+        fakeProviderEvidence.received.push(event);
+        if (event.type === 'session.update') {
+          socket.send(JSON.stringify({ type: 'session.updated' }));
+          if (connectionNumber === 1) {
+            setTimeout(() => {
+              socket.send(JSON.stringify({ type: 'response.created', response_id: 'response-barge' }));
+              socket.send(JSON.stringify({
+                type: 'response.output_item.added', response_id: 'response-barge',
+                item: { type: 'message', role: 'assistant', id: 'assistant-barge' },
+              }));
+              socket.send(JSON.stringify({
+                type: 'response.output_audio.delta', response_id: 'response-barge',
+                delta: Buffer.alloc(2_400).toString('base64'),
+              }));
+              socket.send(JSON.stringify({ type: 'input_audio_buffer.speech_started' }));
+            }, 50);
+          }
+        }
+        if (event.type === 'response.cancel') fakeProviderEvidence.bargeIn.push('cancel');
+        if (event.type === 'conversation.item.truncate') {
+          fakeProviderEvidence.bargeIn.push('truncate');
+          socket.send(JSON.stringify({ type: 'response.cancelled', response_id: 'response-barge' }));
+          emitTool();
+        }
+        if (event.type === 'conversation.item.create' && event.item?.type === 'function_call_output') {
+          tutorEventIndex += 1;
+          if (tutorEvents[tutorEventIndex]) {
+            socket.send(JSON.stringify({ type: 'input_audio_buffer.speech_started' }));
+          }
+        }
+        if (event.type === 'response.create') setTimeout(emitTool, 10);
       });
     });
     await new Promise((resolve, reject) => {
@@ -182,14 +235,12 @@ async function runE2E() {
         ADMIN_TELEGRAM_ID: '',
         XAI_API_KEY: 'e2e-provider-boundary-key',
         XAI_ENABLED: 'true',
-        XAI_VOICE_MODEL: 'grok-voice-e2e-v1',
+        XAI_VOICE_MODEL: 'grok-voice-think-fast-1.0',
         XAI_VOICE_NAME: 'ara',
-        XAI_VOICE_CREDENTIAL_URL: `http://127.0.0.1:${fakeProviderPort}/voice-credentials`,
-        XAI_VOICE_REALTIME_URL: 'wss://fake.invalid/realtime',
+        XAI_VOICE_REALTIME_URL: `ws://127.0.0.1:${fakeProviderPort}/v1/realtime`,
         VOICE_TUTOR_ENABLED: 'true',
         VOICE_TUTOR_COST_KILL_SWITCH: 'false',
         VOICE_TUTOR_REQUIRE_ZDR: 'true',
-        VOICE_TUTOR_UNBOUND_CREDENTIAL_RISK_ACCEPTED: 'true',
         XAI_VOICE_ZDR_ATTESTED: 'true',
         GROQ_API_KEY: '',
       },
@@ -363,27 +414,6 @@ async function runE2E() {
 
     await authenticatedPage.evaluate(async () => {
       window.__e2eMicrophoneMode = 'success';
-      window.__voiceRealtimeEvidence = { url: null, protocols: null, sent: [] };
-      class FakeRealtimeSocket {
-        constructor(url, protocols) {
-          this.readyState = 0;
-          window.__voiceRealtimeSocket = this;
-          window.__voiceRealtimeEvidence.url = url;
-          window.__voiceRealtimeEvidence.protocols = protocols;
-          queueMicrotask(() => {
-            this.readyState = 1;
-            this.onopen?.();
-          });
-        }
-        send(value) {
-          const event = JSON.parse(value);
-          window.__voiceRealtimeEvidence.sent.push(event);
-          if (event.type === 'session.update') {
-            queueMicrotask(() => this.onmessage?.({ data: JSON.stringify({ type: 'session.updated' }) }));
-          }
-        }
-        close() { this.readyState = 3; }
-      }
       class FakeAudioContext {
         constructor() {
           this.currentTime = 0;
@@ -394,7 +424,6 @@ async function runE2E() {
         createGain() { return { gain: { value: 0 }, connect() {}, disconnect() {} }; }
         async close() {}
       }
-      Object.defineProperty(window, 'WebSocket', { configurable: true, writable: true, value: FakeRealtimeSocket });
       Object.defineProperty(window, 'AudioContext', { configurable: true, writable: true, value: FakeAudioContext });
       window.configureVoiceTutor({
         mediaDevices: {
@@ -413,6 +442,11 @@ async function runE2E() {
     });
     const voiceButton = authenticatedPage.locator('#voice_tutor_grammar_0 .voiceTutorTrigger');
     await voiceButton.waitFor({ state: 'visible', timeout: 5_000 });
+    const providerFallbackResponsePromise = authenticatedPage.waitForResponse((response) => (
+      response.request().method() === 'POST'
+        && response.url().includes('/voice-tutor/sessions/')
+        && response.url().endsWith('/fallback')
+    ));
     await voiceButton.click();
     const voiceSheet = authenticatedPage.getByRole('dialog', { name: 'Разбор ошибки с ИИ' });
     await voiceSheet.waitFor({ state: 'visible', timeout: 5_000 });
@@ -425,46 +459,21 @@ async function runE2E() {
         body: JSON.stringify({ text_processing: false, voice_processing: true }),
       });
     });
-    const emitTutorTool = async (callId, event) => authenticatedPage.evaluate(({ id, payload }) => {
-      const responseId = `response-${id}`;
-      const itemId = `item-${id}`;
-      window.__voiceRealtimeSocket.onmessage({ data: JSON.stringify({ type: 'response.created', response_id: responseId }) });
-      window.__voiceRealtimeSocket.onmessage({ data: JSON.stringify({
-        type: 'response.output_item.added', response_id: responseId,
-        item: { type: 'function_call', id: itemId, name: 'advance_pedagogy', call_id: id },
-      }) });
-      window.__voiceRealtimeSocket.onmessage({ data: JSON.stringify({
-        type: 'response.function_call_arguments.done', response_id: responseId, item_id: itemId,
-        name: 'advance_pedagogy', call_id: id, arguments: JSON.stringify(payload),
-      }) });
-      window.__voiceRealtimeSocket.onmessage({ data: JSON.stringify({ type: 'response.done', response_id: responseId }) });
-    }, { id: callId, payload: event });
-    await emitTutorTool('e2e-call-diagnose', { type: 'diagnosis_complete' });
-    await authenticatedPage.waitForFunction(
-      (callId) => window.__voiceRealtimeEvidence.sent.some((event) => event.item?.call_id === callId),
-      'e2e-call-diagnose',
-    );
-    const diagnosisOutput = await authenticatedPage.evaluate(() => window.__voiceRealtimeEvidence.sent
-      .find((event) => event.item?.call_id === 'e2e-call-diagnose')?.item?.output);
-    assert.equal(JSON.parse(diagnosisOutput).accepted, true);
-    assert.equal(JSON.parse(diagnosisOutput).state, 'explain');
     await authenticatedPage.waitForFunction((fragment) => document.querySelector('#voiceTutorState')?.textContent?.includes(fragment), 'Past Simple — завершённое действие', { timeout: 5_000 });
     assert.match(await tutorState.innerText(), /Past Simple — завершённое действие/u);
-    await emitTutorTool('e2e-call-explain', { type: 'explanation_complete' });
     await authenticatedPage.waitForFunction((fragment) => document.querySelector('#voiceTutorState')?.textContent?.includes(fragment), 'I _____ him yesterday');
     assert.match(await tutorState.innerText(), /I _____ him yesterday/u);
-    await emitTutorTool('e2e-call-micro', { type: 'check_answer', answer: 'saw' });
     await authenticatedPage.waitForFunction((fragment) => document.querySelector('#voiceTutorState')?.textContent?.includes(fragment), 'While I _____ dinner');
     assert.match(await tutorState.innerText(), /While I _____ dinner/u);
-    await emitTutorTool('e2e-call-transfer', { type: 'transfer_answer', answer: 'was cooking' });
     await authenticatedPage.waitForFunction((fragment) => document.querySelector('#voiceTutorState')?.textContent?.includes(fragment), 'правило проверено на новом примере');
     assert.match(await tutorState.innerText(), /правило проверено на новом примере/u);
-    await authenticatedPage.evaluate(() => {
-      window.__voiceRealtimeSocket.onmessage({ data: JSON.stringify({ type: 'error' }) });
-    });
+    const providerFallbackResponse = await providerFallbackResponsePromise;
+    assert.equal(providerFallbackResponse.status(), 200);
+    assert.equal((await providerFallbackResponse.json()).mode, 'local');
     await authenticatedPage.waitForFunction(async () => {
       const exported = await (await fetch('/api/v1/account/export')).json();
-      return exported.voice_tutor_sessions?.[0]?.delivery_mode === 'local';
+      const session = exported.voice_tutor_sessions?.[0];
+      return session?.delivery_mode === 'local';
     });
     const voiceEvidence = await authenticatedPage.evaluate(async () => {
       const recovery = await (await fetch('/api/v1/voice-tutor/recovery-map')).json();
@@ -473,32 +482,174 @@ async function runE2E() {
         recovery,
         voiceExport: exported.voice_tutor_sessions,
         recoveriesExport: exported.voice_tutor_recoveries,
-        realtime: window.__voiceRealtimeEvidence,
       };
     });
-    assert.equal(fakeProviderCalls.length, 1);
-    assert.deepEqual(fakeProviderCalls[0], { expires_after: { seconds: 60 } });
-    assert.equal(voiceEvidence.realtime.url, 'wss://fake.invalid/realtime?model=grok-voice-e2e-v1');
-    assert.deepEqual(voiceEvidence.realtime.protocols, ['xai-client-secret.e2e-ephemeral-only']);
-    assert.equal(voiceEvidence.realtime.sent[0].type, 'session.update');
-    assert.equal(voiceEvidence.realtime.sent[0].session.voice, 'ara');
-    assert.equal(voiceEvidence.realtime.sent[0].session.tools[0].name, 'advance_pedagogy');
-    assert.equal(voiceEvidence.realtime.sent.filter((event) => event.type === 'conversation.item.create').length, 4);
-    assert.match(voiceEvidence.realtime.sent[0].session.instructions, /diagnose → explain → micro_check → transfer_task/u);
-    assert.match(voiceEvidence.realtime.sent[0].session.instructions, /"learner_answer":"go-ed-private-e2e"/u);
-    assert.doesNotMatch(voiceEvidence.realtime.sent[0].session.instructions, /"reference":|"answers":/u);
+    const settledVoiceSession = voiceEvidence.voiceExport.find((session) => session.delivery_mode === 'local');
+    assert.equal(fakeProviderEvidence.connections, 1);
+    assert.equal(fakeProviderEvidence.headers.authorization, 'Bearer e2e-provider-boundary-key');
+    assert.deepEqual(fakeProviderEvidence.bargeIn, ['cancel', 'truncate']);
+    const providerSession = fakeProviderEvidence.received.find((event) => event.type === 'session.update');
+    assert.equal(providerSession.session.model, 'grok-voice-think-fast-1.0');
+    assert.equal(providerSession.session.voice, 'ara');
+    assert.equal(providerSession.session.tools[0].name, 'advance_pedagogy');
+    assert.match(providerSession.session.instructions, /diagnose → explain → micro_check → transfer_task/u);
+    assert.match(providerSession.session.instructions, /"learner_answer":"go-ed-private-e2e"/u);
+    assert.doesNotMatch(providerSession.session.instructions, /"reference":|"answers":/u);
     assert.equal(voiceEvidence.recovery.skills[0].state, 'open');
     assert.equal(voiceEvidence.recovery.skills[0].initial_micro_check_passed, true);
     assert.equal(voiceEvidence.recovery.skills[0].initial_transfer_passed, true);
-    assert.equal(voiceEvidence.voiceExport[0].delivery_mode, 'local');
-    assert.equal(voiceEvidence.voiceExport[0].error_code, 'VOICE_TUTOR_PROVIDER_UNAVAILABLE');
-    assert.equal(voiceEvidence.voiceExport[0].provider, 'xai');
-    assert.equal(voiceEvidence.voiceExport[0].model, 'grok-voice-e2e-v1');
-    assert.equal(voiceEvidence.voiceExport[0].prompt_version, 'voice-tutor-error-v3');
-    assert.ok(Number.isFinite(new Date(voiceEvidence.voiceExport[0].voice_activated_at).getTime()));
+    assert.equal(settledVoiceSession.delivery_mode, 'local');
+    assert.equal(settledVoiceSession.error_code, 'VOICE_TUTOR_PROVIDER_UNAVAILABLE');
+    assert.equal(settledVoiceSession.provider, 'xai');
+    assert.equal(settledVoiceSession.model, 'grok-voice-think-fast-1.0');
+    assert.equal(settledVoiceSession.prompt_version, 'voice-tutor-error-v4');
+    assert.equal(Number(settledVoiceSession.proxy_input_audio_bytes), 0);
+    assert.equal(
+      Number(settledVoiceSession.proxy_output_audio_bytes),
+      2_400,
+      `unexpected provider usage settlement: ${JSON.stringify({
+        status: settledVoiceSession.status,
+        delivery_mode: settledVoiceSession.delivery_mode,
+        billable_seconds: Number(settledVoiceSession.billable_seconds),
+        proxy_usage_confirmed: settledVoiceSession.proxy_usage_confirmed,
+        proxy_finalization_reason: settledVoiceSession.proxy_finalization_reason,
+        bargeIn: fakeProviderEvidence.bargeIn,
+      })}`,
+    );
+    assert.equal(settledVoiceSession.proxy_usage_confirmed, false);
+    assert.equal(Number(settledVoiceSession.billable_seconds), 300);
+    assert.equal(voiceEvidence.recovery.voice_minutes.remaining_daily, 5);
+    assert.equal(voiceEvidence.recovery.voice_minutes.remaining_monthly, 115);
+    assert.ok(Number.isFinite(new Date(settledVoiceSession.voice_activated_at).getTime()));
     assert.doesNotMatch(JSON.stringify(voiceEvidence.voiceExport), /go-ed-private-e2e|raw_audio|full_transcript|utterance/iu);
     assert.doesNotMatch(JSON.stringify(voiceEvidence.recoveriesExport), /go-ed-private-e2e|raw_audio|full_transcript|utterance/iu);
     await voiceSheet.getByRole('button', { name: 'Завершить и вернуться в упражнение' }).click();
+
+    await voiceButton.click();
+    await voiceSheet.waitFor({ state: 'visible', timeout: 5_000 });
+    try {
+      await voiceSheet.getByText('Голосовой репетитор подключён.').waitFor({ state: 'visible', timeout: 5_000 });
+    } catch (error) {
+      throw new Error(`second voice connection failed: connections=${fakeProviderEvidence.connections}; state=${await voiceSheet.locator('#voiceTutorState').innerText()}`, { cause: error });
+    }
+    await voiceSheet.getByRole('button', { name: 'Завершить и вернуться в упражнение' }).click();
+    await voiceSheet.waitFor({ state: 'hidden', timeout: 5_000 });
+    await authenticatedPage.waitForFunction(async () => {
+      const exported = await (await fetch('/api/v1/account/export')).json();
+      return exported.voice_tutor_sessions?.some((session) => session.proxy_finalization_reason === 'completed');
+    });
+    const cleanVoiceEvidence = await authenticatedPage.evaluate(async () => {
+      const recovery = await (await fetch('/api/v1/voice-tutor/recovery-map')).json();
+      const exported = await (await fetch('/api/v1/account/export')).json();
+      return { recovery, sessions: exported.voice_tutor_sessions };
+    });
+    const cleanVoiceSession = cleanVoiceEvidence.sessions.find((session) => session.proxy_finalization_reason === 'completed');
+    assert.equal(fakeProviderEvidence.connections, 2);
+    assert.equal(Number(cleanVoiceSession.proxy_input_audio_bytes), 0);
+    assert.equal(Number(cleanVoiceSession.proxy_output_audio_bytes), 0);
+    assert.equal(cleanVoiceSession.proxy_usage_confirmed, true);
+    assert.equal(Number(cleanVoiceSession.billable_seconds), 0);
+    assert.equal(cleanVoiceEvidence.recovery.voice_minutes.remaining_daily, 5);
+    assert.equal(cleanVoiceEvidence.recovery.voice_minutes.remaining_monthly, 115);
+
+    await authenticatedPage.evaluate(() => {
+      window.configureVoiceTutor({
+        mediaDevices: {
+          async getUserMedia() { throw new DOMException('Permission denied', 'NotAllowedError'); },
+        },
+      });
+    });
+    const priorVoiceSessionIds = await authenticatedPage.evaluate(async () => {
+      const exported = await (await fetch('/api/v1/account/export')).json();
+      return exported.voice_tutor_sessions.map((session) => session.id);
+    });
+    const microphoneFallbackResponsePromise = authenticatedPage.waitForResponse((response) => (
+      response.request().method() === 'POST'
+        && response.url().includes('/voice-tutor/sessions/')
+        && response.url().endsWith('/fallback')
+    ));
+    await voiceButton.click();
+    await voiceSheet.waitFor({ state: 'visible', timeout: 5_000 });
+    const microphoneFallbackResponse = await microphoneFallbackResponsePromise;
+    assert.equal(microphoneFallbackResponse.status(), 200);
+    assert.equal((await microphoneFallbackResponse.json()).mode, 'local');
+    await authenticatedPage.waitForFunction(async (priorIds) => {
+      const exported = await (await fetch('/api/v1/account/export')).json();
+      const session = exported.voice_tutor_sessions?.find((entry) => !priorIds.includes(entry.id));
+      return session?.delivery_mode === 'local'
+        && session?.proxy_finalization_reason === 'completed'
+        && session?.status === 'completed';
+    }, priorVoiceSessionIds);
+    const deniedVoiceEvidence = await authenticatedPage.evaluate(async (priorIds) => {
+      const recovery = await (await fetch('/api/v1/voice-tutor/recovery-map')).json();
+      const exported = await (await fetch('/api/v1/account/export')).json();
+      return {
+        recovery,
+        session: exported.voice_tutor_sessions.find((entry) => !priorIds.includes(entry.id)),
+        sessions: exported.voice_tutor_sessions.map((session) => ({
+          ...session,
+          is_new_session: !priorIds.includes(session.id),
+        })),
+      };
+    }, priorVoiceSessionIds);
+    assert.equal(fakeProviderEvidence.connections, 3);
+    assert.equal(Number(deniedVoiceEvidence.session.proxy_input_audio_bytes), 0);
+    assert.equal(Number(deniedVoiceEvidence.session.proxy_output_audio_bytes), 0);
+    assert.equal(deniedVoiceEvidence.session.proxy_usage_confirmed, true);
+    assert.equal(Number(deniedVoiceEvidence.session.billable_seconds), 0);
+    const quotaEvidence = deniedVoiceEvidence.sessions.map((session) => ({
+      is_new_session: session.is_new_session,
+      started_at: session.started_at,
+      status: session.status,
+      delivery_mode: session.delivery_mode,
+      billable_seconds: Number(session.billable_seconds),
+      reserved_seconds: Number(session.reserved_seconds),
+      proxy_usage_confirmed: session.proxy_usage_confirmed,
+      proxy_finalization_reason: session.proxy_finalization_reason,
+    }));
+    assert.equal(
+      deniedVoiceEvidence.session.delivery_mode,
+      'local',
+      `denied session delivery reverted: ${JSON.stringify(quotaEvidence)}`,
+    );
+    assert.equal(
+      deniedVoiceEvidence.recovery.voice_minutes.remaining_daily,
+      5,
+      `unexpected post-denial quota: ${JSON.stringify(quotaEvidence)}`,
+    );
+    await voiceSheet.getByRole('button', { name: 'Завершить и вернуться в упражнение' }).click();
+    const beforeCancelledOpen = await authenticatedPage.evaluate(async () => {
+      const exported = await (await fetch('/api/v1/account/export')).json();
+      return exported.voice_tutor_sessions.map((session) => session.id);
+    });
+    await authenticatedPage.evaluate(() => {
+      const originalApi = window.EasyBoostApi;
+      window.__releaseCancelledVoiceOpen = null;
+      const delayedApi = {
+        post: (...args) => originalApi.post(...args),
+        messageFor: (...args) => originalApi.messageFor(...args),
+        async postIdempotent(...args) {
+          await new Promise((resolve) => { window.__releaseCancelledVoiceOpen = resolve; });
+          return originalApi.postIdempotent(...args);
+        },
+      };
+      window.configureVoiceTutor({ api: delayedApi });
+    });
+    await voiceButton.click();
+    await voiceSheet.waitFor({ state: 'visible', timeout: 5_000 });
+    await authenticatedPage.waitForFunction(() => typeof window.__releaseCancelledVoiceOpen === 'function');
+    await voiceSheet.locator('#voiceTutorFinish').click();
+    await voiceSheet.waitFor({ state: 'hidden', timeout: 5_000 });
+    await authenticatedPage.evaluate(() => window.__releaseCancelledVoiceOpen());
+    await authenticatedPage.waitForFunction(async (priorIds) => {
+      const exported = await (await fetch('/api/v1/account/export')).json();
+      const session = exported.voice_tutor_sessions.find((entry) => !priorIds.includes(entry.id));
+      return session?.status === 'completed' && Number(session.billable_seconds) === 0;
+    }, beforeCancelledOpen);
+    assert.equal(fakeProviderEvidence.connections, 3);
+    assert.equal(await voiceSheet.isHidden(), true);
+    await authenticatedPage.evaluate(() => window.configureVoiceTutor({ api: window.EasyBoostApi }));
+    console.log('e2e: cancelled pending Voice Tutor open releases its reservation without starting media');
     console.log('e2e: Voice Error Tutor fake-provider recovery loop passed without paid network');
 
     await authenticatedPage.evaluate(() => window.tab('scr1'));
@@ -663,6 +814,7 @@ async function runE2E() {
   } finally {
     if (browser) await browser.close();
     if (child) await stopProcess(child);
+    if (fakeProviderWss) await new Promise((resolve) => fakeProviderWss.close(resolve));
     if (fakeProviderServer) await new Promise((resolve) => fakeProviderServer.close(resolve));
     if (temporaryDirectory) await fs.rm(temporaryDirectory, { recursive: true, force: true });
   }

@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import express from 'express';
 
-import { createVoiceTutorRoutes } from '../routes/voice-tutor.js';
+import { createVoiceTutorRoutes, rebuildSourceCapsule } from '../routes/voice-tutor.js';
 import { createFileRepository } from '../storage/file-repository.js';
 import {
   buildVoiceTutorCapsule,
@@ -28,7 +28,6 @@ async function withVoiceTutorApp(run) {
   await repository.setEntitlement(username, 'voice_tutor', { startsAt: NOW, endsAt: new Date('2026-09-02T12:00:00.000Z') });
   await repository.setPrivacyConsent(username, { text_processing: true, voice_processing: true, policy_version: 'test-v1' });
   const nonces = Array.from({ length: 10 }, (_, index) => `bounded-nonce-${String(index + 1).padStart(4, '0')}`);
-  const providerCalls = [];
   const app = express();
   app.use(express.json());
   app.use(createVoiceTutorRoutes({
@@ -43,13 +42,14 @@ async function withVoiceTutorApp(run) {
     now: () => NOW,
     newSessionId: () => 'd56058ca-86de-4640-814f-5e76d6929948',
     newNonce: () => nonces.shift(),
-    credentialProvider: {
-      async createCredential(input) {
-        providerCalls.push(input);
-        return { credential: 'ephemeral-only', expires_at: 1_785_662_700, realtime_url: 'wss://example.test/realtime' };
-      },
+    realtimeProxy: {
+      proxyPath: '/api/v1/voice-tutor/realtime',
+      ticketTtlSeconds: 30,
+      claimPedagogyCall() { return true; },
+      completePedagogyCall() { return true; },
+      failPedagogyCall() { return true; },
     },
-    realtimePolicy: { unboundCredentialRiskAccepted: true },
+    realtimePolicy: { enabled: true, requireZdr: true, zdrAttested: true },
     privacyPolicyVersion: 'test-v1',
   }));
   const server = http.createServer(app);
@@ -62,7 +62,7 @@ async function withVoiceTutorApp(run) {
     headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
   });
   try {
-    await run({ providerCalls, repository, request, username });
+    await run({ repository, request, username });
   } finally {
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     await repository.close();
@@ -72,8 +72,11 @@ async function withVoiceTutorApp(run) {
 
 async function advanceResolved(request, created, { microAnswer, transferAnswer }) {
   const endpoint = `/api/v1/voice-tutor/sessions/${created.session.id}/events`;
+  let providerCall = 0;
   const step = async (nonce, event) => {
-    const response = await request(endpoint, { method: 'POST', body: JSON.stringify({ nonce, event }) });
+    const response = await request(endpoint, {
+      method: 'POST', body: JSON.stringify({ nonce, event, provider_call_id: `bounded-call-${++providerCall}` }),
+    });
     assert.equal(response.status, 200);
     return response.json();
   };
@@ -395,7 +398,7 @@ for (const example of [
   },
 ]) {
   test(`${example.module} API binds a server-validated incorrect attempt and server-checks micro-check and transfer`, async () => {
-    await withVoiceTutorApp(async ({ providerCalls, repository, request, username }) => {
+    await withVoiceTutorApp(async ({ repository, request, username }) => {
       const directErrorResponse = await request('/api/v1/voice-tutor/errors', {
         method: 'POST',
         body: JSON.stringify({
@@ -456,7 +459,9 @@ for (const example of [
       assert.equal(created.capsule.module, example.module);
       assert.equal(created.capsule.item.context.kind, example.contextKind);
       assert.equal(created.capsule.item.reference, undefined);
-      assert.equal(providerCalls[0].capsule.learner_answer, example.learnerAnswer.toLowerCase());
+      const stored = await repository.getVoiceTutorSession(username, created.session.id);
+      const rebuilt = await rebuildSourceCapsule(repository, username, stored.capsule, NOW);
+      assert.equal(rebuilt.learner_answer, example.learnerAnswer.toLowerCase());
 
       const resolved = await advanceResolved(request, created, example);
       assert.equal(resolved.session.state, 'resolved');

@@ -99,7 +99,7 @@ async function startStack({ replies }) {
     request.on('data', (chunk) => chunks.push(chunk));
     request.on('end', () => {
       const body = JSON.parse(Buffer.concat(chunks).toString() || '{}');
-      providerCalls.push({ url: request.url, user: body.messages?.at(-1)?.content || '' });
+      providerCalls.push({ url: request.url, user: body.messages?.at(-1)?.content || '', maxTokens: body.max_tokens });
       const reply = queue.shift();
       if (!reply) {
         response.writeHead(503, { 'Content-Type': 'application/json' });
@@ -179,6 +179,21 @@ async function startStack({ replies }) {
         speaking: stored.speaking_attempts || [],
       };
     },
+    async generatedTasks() {
+      const stored = JSON.parse(await fs.readFile(dataFile, 'utf8'));
+      return stored.generated_tasks || [];
+    },
+    async generateVocabulary(count = 8) {
+      const response = await fetch(`${baseUrl}/api/v1/ai/generate-content`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${jwt.sign({ u: 'student' }, JWT_SECRET)}`,
+        },
+        body: JSON.stringify({ operation: 'vocabulary_cards', count, exclude: [] }),
+      });
+      return { status: response.status, body: await response.json() };
+    },
     async evaluateWriting(answer, taskType = 'writing_37', taskId = 'builtin:writing_37:emily-new-flat') {
       const response = await fetch(`${baseUrl}/api/v1/ai/evaluate-writing`, {
         method: 'POST',
@@ -226,6 +241,46 @@ async function startStack({ replies }) {
 
 const ANSWER = Array.from({ length: 110 }, (_, index) => `word${index}`).join(' ');
 const WORDS = 110;
+
+function vocabularySet() {
+  const entries = [
+    ['achievement', 'достижение'], ['success', 'успех'], ['progress', 'прогресс'], ['result', 'результат'],
+    ['decision', 'решение'], ['method', 'метод'], ['effort', 'усилие'], ['practice', 'практика'],
+  ];
+  return entries.map(([word, tr]) => ({
+    w: word,
+    p: 'n',
+    tr,
+    ex: `The lesson introduces ${word} clearly.`,
+    practice: [
+      `The article discusses ${word} in detail.`,
+      `The report gives an example of ${word}.`,
+      `Students asked a question about ${word}.`,
+      `The project highlights ${word} for readers.`,
+    ],
+  }));
+}
+
+test('tracer-incompatible vocabulary is repaired before storage and the bounded eight-card call reaches the provider', { timeout: 40_000 }, async () => {
+  const invalid = vocabularySet();
+  invalid[1].tr = invalid[0].tr;
+  const valid = vocabularySet();
+  const stack = await startStack({ replies: [JSON.stringify(invalid), JSON.stringify(valid)] });
+  try {
+    const { status, body } = await stack.generateVocabulary();
+    assert.equal(status, 200);
+    assert.equal(stack.providerCalls.length, 2, 'invalid tracer set gets exactly one format repair');
+    assert.equal(stack.providerCalls[0].maxTokens, 1200, 'eight cards stay inside the vocabulary provider budget');
+    assert.deepEqual(JSON.parse(stack.providerCalls[0].user).data.count, 8);
+    assert.equal(body.data.length, 8);
+    assert.ok(body.data.every((card) => card.voice_tutor?.type?.revision === 1));
+    const stored = await stack.generatedTasks();
+    assert.equal(stored.length, 1);
+    assert.deepEqual(stored[0].result, valid, 'only the repaired tracer-ready set is persisted');
+  } finally {
+    await stack.stop();
+  }
+});
 
 test('a malformed answer is repaired on the second attempt and the student sees a review', { timeout: 40_000 }, async () => {
   const stack = await startStack({

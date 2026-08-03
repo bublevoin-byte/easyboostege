@@ -8,7 +8,10 @@ let timerId = null;
 let mediaStream = null;
 let realtimeConnection = null;
 let fallbackPending = false;
+let sessionOperation = 0;
+let lastMinuteAnnounced = false;
 const transientCaptions = [];
+const pendingSessionKeys = new Map();
 let runtime = {
   api: null,
   mediaDevices: null,
@@ -24,6 +27,41 @@ function mediaDevices() {
   return runtime.mediaDevices || browser.navigator?.mediaDevices;
 }
 
+function operationActive(operation) {
+  return operation === sessionOperation
+    && Boolean(browser.document?.getElementById('voiceTutorSheet')?.classList.contains('open'));
+}
+
+function creationFingerprint(body) {
+  return JSON.stringify(body);
+}
+
+function idempotencyKeyFor(body) {
+  const fingerprint = creationFingerprint(body);
+  if (!pendingSessionKeys.has(fingerprint)) {
+    if (pendingSessionKeys.size >= 8) pendingSessionKeys.delete(pendingSessionKeys.keys().next().value);
+    pendingSessionKeys.set(fingerprint, browser.crypto.randomUUID());
+  }
+  return { fingerprint, key: pendingSessionKeys.get(fingerprint) };
+}
+
+async function postIdempotentWithNetworkRetry(path, body, key, operation) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try { return await api().postIdempotent(path, body, key); }
+    catch (error) {
+      if (error?.code !== 'NETWORK_ERROR' || attempt > 0 || !operationActive(operation)) throw error;
+      text('voiceTutorState', 'Восстанавливаем созданный разбор без повторного списания…');
+    }
+  }
+  throw new Error('NETWORK_ERROR');
+}
+
+async function finishCancelledSession(result) {
+  const sessionId = result?.session?.id;
+  if (!sessionId) return;
+  try { updateProfileAccess(await api().post(`/api/v1/voice-tutor/sessions/${sessionId}/finish`, {})); } catch {}
+}
+
 export function configureVoiceTutor(options = {}) {
   runtime = { ...runtime, ...options };
 }
@@ -33,7 +71,7 @@ export function canStartVoiceTutor(profile = browser.__sub) {
 }
 
 export function eventForVoiceTutorState(state, answer = '') {
-  if (state === 'diagnose') return { type: 'diagnosis_complete' };
+  if (state === 'diagnose') return { type: 'diagnosis_complete', answer: String(answer) };
   if (state === 'explain') return { type: 'explanation_complete' };
   if (state === 'micro_check') return { type: 'check_answer', answer: String(answer) };
   if (state === 'transfer_task') return { type: 'transfer_answer', answer: String(answer) };
@@ -134,7 +172,7 @@ function ensureSheet() {
     #voiceTutorSheet .vtBackdrop{position:absolute;inset:0;background:rgba(20,20,30,.58)}
     #voiceTutorSheet .vtPanel{position:absolute;left:50%;bottom:0;transform:translateX(-50%);width:min(100%,430px);max-height:92dvh;overflow:auto;box-sizing:border-box;background:#FFFDFC;border-radius:28px 28px 0 0;padding:16px 18px calc(20px + env(safe-area-inset-bottom));box-shadow:0 -18px 55px rgba(20,20,30,.28)}
     .vtGrip{width:42px;height:5px;border-radius:9px;background:#D9D5D0;margin:0 auto 12px}.vtHead{display:flex;align-items:flex-start;gap:12px}.vtHeadCopy{flex:1}.vtHead h2{margin:0;color:#2B2B2B;font:900 20px Nunito,Manrope,sans-serif}.vtHead p{margin:4px 0 0;color:#6A665F;font:600 12px/1.45 Manrope,sans-serif}.vtClose{width:40px;height:40px;border:0;border-radius:13px;background:#F1F2F4;font-size:22px;cursor:pointer}
-    .vtMeta{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.vtPill{padding:5px 9px;border-radius:12px;background:#F1F2F4;color:#545960;font:800 11px Manrope,sans-serif}.vtWarn{background:#FFF1DF;color:#935300}
+    .vtMeta{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.vtPill{padding:5px 9px;border-radius:12px;background:#F1F2F4;color:#545960;font:800 11px Manrope,sans-serif}.vtWarn,.vtTimeWarning{background:#FFF1DF;color:#935300}.vtTimeWarning{flex-basis:100%;padding:7px 9px;border-radius:12px;font:800 12px Manrope,sans-serif}.vtTimeWarning[hidden]{display:none}
     .vtCapsule{margin-top:12px;padding:13px;border:1px solid #EEE8E1;border-radius:17px;background:#fff}.vtCapsule b{display:block;color:#2B2B2B;font:800 13px Manrope,sans-serif}.vtCapsule span{display:block;margin-top:5px;color:#666158;font:600 12px/1.5 Manrope,sans-serif}.vtContext{padding:9px 10px;border-radius:12px;background:#F7F4EF;color:#4A453E!important}.vtContext[hidden]{display:none}
     .vtSources{margin-top:10px;padding:11px 13px;border-radius:15px;background:#EEF7F1;color:#285C3C;font:700 12px/1.5 Manrope,sans-serif}.vtSources[hidden]{display:none}.vtSources b{display:block;margin-bottom:4px}.vtSources a{display:block;color:#176B3A;overflow-wrap:anywhere}
     .vtCaptions{min-height:82px;max-height:150px;overflow:auto;margin-top:12px;padding:13px;border-radius:17px;background:#272B31;color:#fff;font:600 13px/1.55 Manrope,sans-serif}.vtCaptions:empty:before{content:'Временные субтитры появятся здесь';color:#BFC4CC}
@@ -149,7 +187,7 @@ function ensureSheet() {
   sheet.setAttribute('aria-labelledby', 'voiceTutorTitle');
   sheet.innerHTML = `<div class="vtBackdrop"></div><section class="vtPanel"><div class="vtGrip"></div>
     <div class="vtHead"><div class="vtHeadCopy"><h2 id="voiceTutorTitle">Разбор ошибки с ИИ</h2><p>Голос обрабатывается внешним провайдером в реальном времени; аудио и полный transcript не сохраняются.</p></div><button id="voiceTutorClose" class="vtClose" type="button" aria-label="Завершить разбор и вернуться в упражнение">×</button></div>
-    <div class="vtMeta"><span id="voiceTutorTimer" class="vtPill" role="timer">0:00</span><span id="voiceTutorQuota" class="vtPill">Остаток уточняется…</span><span class="vtPill">ИИ · не официальный балл ЕГЭ</span></div>
+    <div class="vtMeta"><span id="voiceTutorTimer" class="vtPill" role="timer">Осталось 0:00</span><span id="voiceTutorQuota" class="vtPill">Остаток уточняется…</span><span class="vtPill">ИИ · не официальный балл ЕГЭ</span><span id="voiceTutorTimeWarning" class="vtTimeWarning" role="status" aria-live="polite" hidden></span></div>
     <div class="vtCapsule"><b id="voiceTutorSkill">Готовим контекст…</b><span id="voiceTutorPrompt"></span><span id="voiceTutorContext" class="vtContext" hidden></span></div>
     <div id="voiceTutorSources" class="vtSources" hidden></div>
     <div id="voiceTutorCaptions" class="vtCaptions" aria-live="polite" aria-atomic="false"></div>
@@ -193,6 +231,11 @@ function quotaText(access) {
   return `Осталось ${daily} мин сегодня · ${monthly} мин в месяце`;
 }
 
+function updateProfileAccess(result) {
+  if (!result?.voice_tutor || !browser.__sub) return;
+  browser.__sub = { ...browser.__sub, voice_tutor: { ...result.voice_tutor } };
+}
+
 function statePrompt(session) {
   if (!session) return '';
   if (session.state === 'diagnose') return 'Сначала уточним, почему выбран этот ответ.';
@@ -215,12 +258,16 @@ function renderSession(result) {
     contextElement.textContent = context ? `${context.label}: “${context.text}”` : '';
   }
   text('voiceTutorQuota', quotaText(currentSession.voice_tutor));
+  updateProfileAccess(currentSession);
   const message = result.text_turn?.message || statePrompt(currentSession.session);
   text('voiceTutorState', message);
   addCaption(message);
   const terminal = ['resolved', 'fallback', 'ended'].includes(currentSession.session.state);
   const form = browser.document.getElementById('voiceTutorAnswer');
-  if (form) form.style.display = terminal ? 'none' : 'flex';
+  if (form) {
+    if (currentSession.mode === 'voice') form.style.display = 'none';
+    else form.style.display = terminal ? 'none' : 'flex';
+  }
   const quick = browser.document.querySelector?.('.vtQuick');
   if (quick) quick.style.display = currentSession.mode === 'text' && ['diagnose', 'explain'].includes(currentSession.session.state) ? 'flex' : 'none';
 }
@@ -254,11 +301,12 @@ function renderTrustedRuleDiscovery(result) {
   sources.hidden = sources.childElementCount < 2;
 }
 
-async function discoverMissingRule(result) {
+async function discoverMissingRule(result, operation) {
   text('voiceTutorState', 'Ищем правило в доверенных источниках…');
   const provisional = await api().post('/api/v1/voice-tutor/rule-discoveries', {
     session_id: result.session.id, nonce: result.nonce,
   });
+  if (!operationActive(operation)) return provisional;
   if (provisional.capsule) renderSession({ ...provisional, mode: currentSession.mode });
   renderTrustedRuleDiscovery(provisional);
   return provisional;
@@ -267,64 +315,88 @@ async function discoverMissingRule(result) {
 function updateTimer() {
   if (!currentSession?.session) return;
   const end = new Date(currentSession.session.expires_at).getTime();
-  const start = new Date(currentSession.session.started_at).getTime();
   const now = runtime.now();
-  const elapsed = Math.max(0, Math.floor((now - start) / 1000));
   const remaining = Math.max(0, Math.ceil((end - now) / 1000));
-  text('voiceTutorTimer', `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}`);
+  const remainingText = `Осталось ${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}`;
+  text('voiceTutorTimer', remainingText);
   const timer = browser.document.getElementById('voiceTutorTimer');
-  if (timer) timer.classList.toggle('vtWarn', remaining > 0 && remaining <= 60);
+  const lastMinute = remaining > 0 && remaining <= 60;
+  if (timer) {
+    timer.classList.toggle('vtWarn', lastMinute);
+    timer.setAttribute('aria-label', remainingText);
+  }
+  const warning = browser.document.getElementById('voiceTutorTimeWarning');
+  if (warning && lastMinute && !lastMinuteAnnounced) {
+    warning.hidden = false;
+    warning.textContent = 'Осталась последняя минута голосового разбора.';
+    lastMinuteAnnounced = true;
+  }
   if (remaining === 0 && currentSession.mode === 'voice') void switchToFallback('session_timeout');
 }
 
 function startTimer() {
   browser.clearInterval(timerId);
+  lastMinuteAnnounced = false;
+  const warning = browser.document?.getElementById('voiceTutorTimeWarning');
+  if (warning) { warning.hidden = true; warning.textContent = ''; }
   updateTimer();
   timerId = browser.setInterval(updateTimer, 1_000);
 }
 
-function stopMedia() {
+function stopMedia({ clean = false } = {}) {
   mediaStream?.getTracks?.().forEach((track) => track.stop());
   mediaStream = null;
-  realtimeConnection?.close?.();
+  const closing = realtimeConnection?.close?.({ clean });
   realtimeConnection = null;
   const mic = browser.document?.getElementById('voiceTutorMic');
   if (mic) mic.setAttribute('aria-pressed', 'false');
+  return Promise.resolve(closing);
 }
 
-async function startMicrophone() {
-  try {
-    mediaStream = await mediaDevices().getUserMedia({ audio: true });
-  } catch {
-    await switchToFallback('microphone_unavailable');
-    return;
-  }
+async function startMicrophone(operation = sessionOperation) {
+  let connection = null;
+  let stream = null;
   try {
     const connector = runtime.realtime || browserRealtimeTransport;
     if (!connector?.connect) throw new Error('realtime transport unavailable');
-    realtimeConnection = await connector.connect({
-      stream: mediaStream,
-      credential: currentSession.realtime.credential,
-      url: currentSession.realtime.realtime_url,
-      session: currentSession.realtime.session,
+    connection = await connector.connect({
+      ticket: currentSession.realtime.ticket,
+      url: currentSession.realtime.proxy_url,
       onSubtitle: addCaption,
       onStatus: (status) => text('voiceTutorState', status),
       onPedagogicalEvent: advanceTutorSession,
-      onFailure: () => { void switchToFallback('provider_unavailable'); },
+      onFailure: () => {
+        if (operationActive(operation)) void switchToFallback('provider_unavailable');
+      },
     });
-    await api().post(`/api/v1/voice-tutor/sessions/${currentSession.session.id}/activate`, { nonce: currentSession.nonce });
-    realtimeConnection.activate();
+    if (!operationActive(operation)) {
+      await connection.close?.({ clean: true });
+      return;
+    }
+    realtimeConnection = connection;
+    stream = await mediaDevices().getUserMedia({ audio: true });
+    if (!operationActive(operation) || realtimeConnection !== connection) {
+      stream?.getTracks?.().forEach((track) => track.stop());
+      await connection.close?.({ clean: true });
+      return;
+    }
+    mediaStream = stream;
+    connection.activate(stream);
     browser.document.getElementById('voiceTutorMic')?.setAttribute('aria-pressed', 'true');
   } catch {
-    stopMedia();
-    await switchToFallback('provider_unavailable');
+    if (!operationActive(operation)) {
+      stream?.getTracks?.().forEach((track) => track.stop());
+      if (realtimeConnection === connection) realtimeConnection = null;
+      await connection?.close?.({ clean: true });
+      return;
+    }
+    await switchToFallback(realtimeConnection ? 'microphone_unavailable' : 'provider_unavailable');
   }
 }
 
 async function toggleMicrophone() {
   if (mediaStream) {
-    stopMedia();
-    text('voiceTutorState', 'Микрофон выключен.');
+    await switchToFallback('microphone_unavailable');
   } else if (currentSession?.mode === 'voice') {
     await startMicrophone();
   }
@@ -335,7 +407,7 @@ async function switchToFallback(reason = 'microphone_unavailable') {
   fallbackPending = true;
   const sessionId = currentSession.session.id;
   const nonce = currentSession.nonce;
-  stopMedia();
+  await stopMedia({ clean: reason === 'microphone_unavailable' });
   try {
     const result = await api().post(`/api/v1/voice-tutor/sessions/${sessionId}/fallback`, { nonce, reason });
     renderSession(result);
@@ -352,6 +424,10 @@ async function submitTutorStep(event) {
   const input = browser.document.getElementById('voiceTutorInput');
   const tutorEvent = eventForVoiceTutorState(currentSession.session.state, input?.value || '');
   if (!tutorEvent) return;
+  if (currentSession.session.state === 'diagnose' && !String(tutorEvent.answer || '').trim()) {
+    text('voiceTutorState', 'Коротко напишите, почему вы выбрали этот ответ.');
+    return;
+  }
   try {
     await advanceTutorSession(tutorEvent);
     if (input) input.value = '';
@@ -390,9 +466,13 @@ async function submitTutorReport() {
   } catch (error) { text('voiceTutorState', api().messageFor(error)); }
 }
 
-async function advanceTutorSession(tutorEvent) {
+async function advanceTutorSession(tutorEvent, { callId = null } = {}) {
   if (!currentSession?.nonce || !tutorEvent) throw new Error('VOICE_TUTOR_EVENT_INVALID');
-  const result = await api().post(`/api/v1/voice-tutor/sessions/${currentSession.session.id}/events`, { nonce: currentSession.nonce, event: tutorEvent });
+  const result = await api().post(`/api/v1/voice-tutor/sessions/${currentSession.session.id}/events`, {
+    nonce: currentSession.nonce,
+    event: tutorEvent,
+    ...(callId ? { provider_call_id: callId } : {}),
+  });
   renderSession(result);
   return result;
 }
@@ -408,10 +488,11 @@ function trapSheetFocus(event) {
   else if (!event.shiftKey && browser.document.activeElement === last) { event.preventDefault(); first.focus(); }
 }
 
-function closeSheet() {
+function closeSheet({ clean = false } = {}) {
+  sessionOperation += 1;
   browser.clearInterval(timerId);
   timerId = null;
-  stopMedia();
+  const closing = stopMedia({ clean });
   transientCaptions.length = 0;
   text('voiceTutorCaptions', '');
   const sources = browser.document?.getElementById('voiceTutorSources');
@@ -420,15 +501,17 @@ function closeSheet() {
   const focus = returnFocus;
   currentSession = null;
   fallbackPending = false;
+  lastMinuteAnnounced = false;
   returnFocus = null;
   focus?.focus?.();
+  return closing;
 }
 
 export async function finishVoiceTutor() {
   const sessionId = currentSession?.session?.id;
-  closeSheet();
+  await closeSheet({ clean: true });
   if (sessionId) {
-    try { await api().post(`/api/v1/voice-tutor/sessions/${sessionId}/finish`, {}); } catch {}
+    try { updateProfileAccess(await api().post(`/api/v1/voice-tutor/sessions/${sessionId}/finish`, {})); } catch {}
   }
 }
 
@@ -441,12 +524,14 @@ export async function openVoiceTutorError(buttonOrDetails) {
     criterionIndex: buttonOrDetails.dataset.source ? Number(buttonOrDetails.dataset.criterionIndex) : undefined,
   } : buttonOrDetails;
   if (!canStartVoiceTutor() || !details) return;
+  const operation = ++sessionOperation;
   returnFocus = buttonOrDetails?.focus ? buttonOrDetails : browser.document.activeElement;
   const sheet = browser.document.getElementById('voiceTutorSheet');
   sheet.classList.add('open');
   transientCaptions.length = 0;
   text('voiceTutorState', 'Собираем проверенный контекст ошибки…');
   browser.document.getElementById('voiceTutorClose')?.focus();
+  let fingerprint = '';
   try {
     const attemptId = details.source ? Number(details.attemptId) : details.attemptId;
     const body = {
@@ -454,13 +539,32 @@ export async function openVoiceTutorError(buttonOrDetails) {
       attemptId,
       revision: details.revision,
     };
-    const result = await api().postIdempotent('/api/v1/voice-tutor/sessions', body, browser.crypto.randomUUID());
+    const pending = idempotencyKeyFor(body);
+    fingerprint = pending.fingerprint;
+    const createKey = pending.key;
+    let result = await postIdempotentWithNetworkRetry('/api/v1/voice-tutor/sessions', body, createKey, operation);
+    if (!operationActive(operation)) {
+      await finishCancelledSession(result);
+      return;
+    }
+    if (result.mode === 'voice' && !result.realtime?.ticket && result.realtime?.reissue_url) {
+      const recovered = await postIdempotentWithNetworkRetry(result.realtime.reissue_url, {}, createKey, operation);
+      result = recovered.mode === 'local'
+        ? { ...result, ...recovered, realtime: null, local_rule: result.capsule.rule }
+        : { ...result, nonce: recovered.nonce, realtime: recovered.realtime };
+      if (!operationActive(operation)) {
+        await finishCancelledSession(result);
+        return;
+      }
+    }
+    pendingSessionKeys.delete(fingerprint);
     renderSession(result);
     startTimer();
-    if (result.discovery_required) await discoverMissingRule(result);
-    else if (result.mode === 'voice') await startMicrophone();
+    if (result.discovery_required) await discoverMissingRule(result, operation);
+    else if (result.mode === 'voice') await startMicrophone(operation);
   } catch (error) {
-    text('voiceTutorState', api().messageFor(error));
+    if (fingerprint && error?.code !== 'NETWORK_ERROR') pendingSessionKeys.delete(fingerprint);
+    if (operationActive(operation)) text('voiceTutorState', api().messageFor(error));
   }
 }
 

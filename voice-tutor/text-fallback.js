@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { operationLimits } from '../ai/operations.js';
 import { buildVoiceTutorInstructions, clarificationTurnRequest, textTurnRequest, VOICE_TUTOR_PROMPT_VERSION } from './prompt.js';
 
@@ -22,38 +23,45 @@ function boundedTutorMessage(value) {
   return message;
 }
 
-export function createAiTextTutor({ providerClient, hasAiBudget, countAiOperationRequestsSince, logAiRequest, now = () => new Date() }) {
+export function createAiTextTutor({
+  providerClient,
+  claimAiOperation,
+  settleAiOperation,
+  newId = () => crypto.randomUUID(),
+  now = () => new Date(),
+}) {
+  if (!providerClient?.askWithFallback || typeof claimAiOperation !== 'function' || typeof settleAiOperation !== 'function') {
+    throw new Error('VOICE_TUTOR_TEXT_CONFIG_INVALID');
+  }
   const limits = operationLimits(OPERATION);
   async function run({ capsule, state, username, request, kind = null }) {
     const startedAt = Date.now();
+    let claim = null;
+    let settled = false;
     try {
-      if (!await hasAiBudget(now())) throw Object.assign(new Error('AI_BUDGET_EXHAUSTED'), { code: 'AI_BUDGET_EXHAUSTED' });
-      const since = new Date(now().getTime() - 3_600_000);
-      if (await countAiOperationRequestsSince(username, OPERATION, since) >= limits.requestsPerHour) {
-        throw Object.assign(new Error('RATE_LIMITED'), { code: 'RATE_LIMITED' });
-      }
+      claim = await claimAiOperation({
+        claimId: newId(), username, operation: OPERATION, promptVersion: VOICE_TUTOR_PROMPT_VERSION,
+        requestsPerHour: limits.requestsPerHour, now: now(),
+      });
       const response = await providerClient.askWithFallback(buildVoiceTutorInstructions(capsule), request, OPERATION);
       const message = boundedTutorMessage(response.text);
-      await logAiRequest({
-        username, operation: OPERATION, provider: response.provider, model: response.model,
-        promptVersion: VOICE_TUTOR_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt,
+      await settleAiOperation(username, claim.claim_id, {
+        status: 'completed', provider: response.provider, model: response.model, durationMs: Date.now() - startedAt,
         promptTokens: response.promptTokens, completionTokens: response.completionTokens,
-        fallbackReason: null,
       });
+      settled = true;
       return { capsule_id: capsule.id, state, ...(kind ? { kind } : {}), message, prompt_version: VOICE_TUTOR_PROMPT_VERSION };
     } catch (error) {
-      await logAiRequest({
-        username, operation: OPERATION, provider: error?.provider || null, model: error?.model || null,
-        promptVersion: VOICE_TUTOR_PROMPT_VERSION, status: 'failed', durationMs: Date.now() - startedAt,
-        errorCode: safeTextErrorCode(error),
-        fallbackReason: null,
+      if (claim && !settled) await settleAiOperation(username, claim.claim_id, {
+        status: 'failed', provider: error?.provider || null, model: error?.model || null,
+        durationMs: Date.now() - startedAt, errorCode: safeTextErrorCode(error),
       }).catch(() => {});
       throw error;
     }
   }
   return Object.freeze({
-    async createTurn({ capsule, state = 'diagnose', username }) {
-      return run({ capsule, state, username, request: textTurnRequest(capsule, state) });
+    async createTurn({ capsule, state = 'diagnose', username, diagnosticReply = '' }) {
+      return run({ capsule, state, username, request: textTurnRequest(capsule, state, { diagnosticReply }) });
     },
     async createClarification({ capsule, state = 'explain', username, kind, message = '' }) {
       return run({ capsule, state, username, kind, request: clarificationTurnRequest(capsule, state, kind, message) });

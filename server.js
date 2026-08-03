@@ -8,7 +8,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { claimAiOperationSlot, claimUnseenBankTask, claimVoiceTutorRuleDiscovery, failVoiceTutorRuleDiscovery, getBankTask, getBankTaskByExternalId, listBankTaskContents, recordTaskDelivery, settleAiOperationSlot, upsertBankTask, activateTrial, activateVoiceTutorSession, closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, countAiOperationRequestsSince, countAiRequestsSince, createPaymentRequest, createPaymentRequestForUser, createRuleCardForVoiceTutorSession, createSession, createSpeakingAttempt, createTelegramAuthCode, createVoiceTutorReport, createWritingAttempt, deleteUserData, exportUserData, finishSpeakingAttempt, finishVoiceTutorSession, finishWritingAttempt, getAiUsageMetrics, getApprovedRuleCard, getGeneratedTask, getRuleCard, getSharedGeneratedTask, getModuleAttempt, getPaymentRequestForUser, getPrivacyConsent, getProgress, getSpeakingAttempt, getUser, getVoiceTutorAccess, getVoiceTutorRecoveryMap, getVoiceTutorRecoveryMetrics, getVoiceTutorSession, getWritingAttempt, healthCheck, isSessionActive, listPaymentRequests, listRuleCards, listVoiceTutorReports, recordModuleAttempt, reserveVoiceTutorSession, resolvePaymentRequest, reviewRuleCard, reviewVoiceTutorReport, revokeEntitlement, revokeSession, saveGeneratedTask, saveProgress, setPrivacyConsent, setUserRole, submitVoiceTutorRepeat, upsertErrorBank, upsertWordProgress, mergeProgress, getUserByTelegram, createTelegramUser, logAiRequest, getSub, advanceVoiceTutorSession, clarifyVoiceTutorSession, setVoiceTutorSessionDelivery, switchVoiceTutorSessionDelivery } from './db.js';
+import { claimAiOperationSlot, claimUnseenBankTask, claimVoiceTutorRuleDiscovery, failVoiceTutorRuleDiscovery, getBankTask, getBankTaskByExternalId, listBankTaskContents, recordTaskDelivery, settleAiOperationSlot, upsertBankTask, activateTrial, activateVoiceTutorProxySession, closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, consumeVoiceTutorProxyTicket, countAiRequestsSince, createPaymentRequest, createPaymentRequestForUser, createRuleCardForVoiceTutorSession, createSession, createSpeakingAttempt, createTelegramAuthCode, createVoiceTutorReport, createWritingAttempt, deleteUserData, exportUserData, finalizeVoiceTutorProxySession, finishSpeakingAttempt, finishVoiceTutorSession, finishWritingAttempt, getAiUsageMetrics, getApprovedRuleCard, getGeneratedTask, getRuleCard, getSharedGeneratedTask, getModuleAttempt, getPaymentRequestForUser, getPrivacyConsent, getProgress, getSpeakingAttempt, getUser, getVoiceTutorAccess, getVoiceTutorRecoveryMap, getVoiceTutorRecoveryMetrics, getVoiceTutorSession, getWritingAttempt, healthCheck, isSessionActive, issueVoiceTutorProxyTicket, reissueVoiceTutorFallbackNonce, listPaymentRequests, listRuleCards, listVoiceTutorReports, recordModuleAttempt, reserveVoiceTutorSession, resolvePaymentRequest, reviewRuleCard, reviewVoiceTutorReport, revokeEntitlement, revokeSession, saveGeneratedTask, saveProgress, setPrivacyConsent, setUserRole, submitVoiceTutorRepeat, upsertErrorBank, upsertWordProgress, mergeProgress, getUserByTelegram, createTelegramUser, logAiRequest, getSub, advanceVoiceTutorSession, clarifyVoiceTutorSession, setVoiceTutorSessionDelivery, switchVoiceTutorSessionDelivery } from './db.js';
 import { config } from './config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from './ai/writing.js';
 import { buildContentPrompt, CONTENT_PROMPT_VERSION, contentRequestSchema, parseContentResponse } from './ai/content.js';
@@ -34,9 +34,9 @@ import { createProgressRoutes } from './routes/progress.js';
 import { createAiRoutes } from './routes/ai.js';
 import { createMediaRoutes } from './routes/media.js';
 import { createTaskRoutes, seedBuiltinTasks } from './routes/tasks.js';
-import { createVoiceTutorRoutes } from './routes/voice-tutor.js';
+import { createVoiceTutorRoutes, rebuildSourceCapsule } from './routes/voice-tutor.js';
 import { createAiTextTutor } from './voice-tutor/text-fallback.js';
-import { createXaiRealtimeCredentialAdapter } from './voice-tutor/xai-realtime.js';
+import { createVoiceTutorRealtimeProxy } from './voice-tutor/realtime-proxy.js';
 import { createProviderClient } from './ai/provider-client.js';
 import { createTrustedRuleDiscovery } from './voice-tutor/trusted-rule-discovery.js';
 import { createTrustedRuleFetcher } from './voice-tutor/trusted-rule-fetch.js';
@@ -85,7 +85,7 @@ app.use(helmet({
   contentSecurityPolicy: contentSecurityPolicy(
     frontendHtml,
     config.isProduction,
-    config.voiceTutor.enabled && !config.voiceTutor.costKillSwitch ? config.voiceTutor.realtimeUrl : '',
+    '',
   ),
   crossOriginEmbedderPolicy: false,
   hsts: config.isProduction ? { maxAge: 31_536_000, includeSubDomains: true } : false,
@@ -177,7 +177,8 @@ const dbApi = {
   getUser,
   createTelegramAuthCode, consumeTelegramAuthCode, getUserByTelegram, createTelegramUser, getSub,
   createPaymentRequestForUser, getPaymentRequestForUser, listPaymentRequests, resolvePaymentRequest, revokeEntitlement,
-  getVoiceTutorAccess, reserveVoiceTutorSession, finishVoiceTutorSession, getVoiceTutorSession, activateVoiceTutorSession,
+  getVoiceTutorAccess, reserveVoiceTutorSession, finishVoiceTutorSession, getVoiceTutorSession,
+  issueVoiceTutorProxyTicket, reissueVoiceTutorFallbackNonce, consumeVoiceTutorProxyTicket, activateVoiceTutorProxySession, finalizeVoiceTutorProxySession,
   advanceVoiceTutorSession, clarifyVoiceTutorSession, setVoiceTutorSessionDelivery, switchVoiceTutorSessionDelivery,
   submitVoiceTutorRepeat, getVoiceTutorRecoveryMap, getVoiceTutorRecoveryMetrics,
   claimVoiceTutorRuleDiscovery, failVoiceTutorRuleDiscovery,
@@ -254,18 +255,17 @@ app.use(createUserRoutes({
   voiceTutorLimits: config.voiceTutor,
 }));
 app.use(createProgressRoutes({ authentication, db: dbApi }));
-const voiceTutorCredentialProvider = createXaiRealtimeCredentialAdapter({
-  apiKey: config.voiceTutor.enabled && !config.voiceTutor.costKillSwitch && config.ai.xaiEnabled ? config.ai.xaiKey : '',
-  endpoint: config.voiceTutor.credentialEndpoint,
-  realtimeUrl: config.voiceTutor.realtimeUrl,
-  model: config.voiceTutor.model,
-  voice: config.voiceTutor.voice,
-  ttlSeconds: config.voiceTutor.credentialTtlSeconds,
+const realtimePolicy = () => ({
+  enabled: config.voiceTutor.enabled,
+  costKillSwitch: config.voiceTutor.costKillSwitch,
   requireZdr: config.voiceTutor.requireZdr,
   zdrAttested: config.voiceTutor.zdrAttested,
 });
+const voiceTutorProxyConfigured = Boolean(
+  config.ai.xaiEnabled && config.ai.xaiKey && config.voiceTutor.model && config.voiceTutor.voice,
+);
 const {
-  createOperationLimiter, ttsLimiter, sttLimiter, hasAiBudget,
+  createUserRateLimiter, createOperationLimiter, ttsLimiter, sttLimiter, hasAiBudget,
   requireAiBudget, requireActiveSubscription, requirePrivacyConsent,
 } = createAccessControl({
   ai: config.ai,
@@ -274,6 +274,7 @@ const {
   getSub,
   getPrivacyConsent,
 });
+const voiceTutorSessionStartLimiter = createUserRateLimiter(config.voiceTutor.sessionStartsPerHour);
 
 
 const access = {
@@ -285,9 +286,8 @@ const claimVoiceTutorAiOperation = ({ username, ...slot }) => claimAiOperationSl
 });
 const voiceTutorTextTutor = createAiTextTutor({
   providerClient: createProviderClient(),
-  hasAiBudget,
-  countAiOperationRequestsSince,
-  logAiRequest,
+  claimAiOperation: claimVoiceTutorAiOperation,
+  settleAiOperation: settleAiOperationSlot,
 });
 const externalRuleSearchEnabled = canUseXaiRuleSearch({
   enabled: config.voiceTutor.ruleSearchEnabled, xaiEnabled: config.ai.xaiEnabled, apiKey: config.ai.xaiKey,
@@ -326,17 +326,19 @@ app.use(createVoiceTutorRoutes({
   authentication,
   db: dbApi,
   limits: config.voiceTutor,
-  credentialProvider: voiceTutorCredentialProvider,
+  realtimeProxy: voiceTutorProxyConfigured ? {
+    proxyPath: '/api/v1/voice-tutor/realtime',
+    ticketTtlSeconds: config.voiceTutor.proxyTicketTtlSeconds,
+    waitForSettlement: (...args) => voiceTutorRealtimeProxy.waitForSettlement(...args),
+    claimPedagogyCall: (...args) => voiceTutorRealtimeProxy.claimPedagogyCall(...args),
+    completePedagogyCall: (...args) => voiceTutorRealtimeProxy.completePedagogyCall(...args),
+    failPedagogyCall: (...args) => voiceTutorRealtimeProxy.failPedagogyCall(...args),
+  } : null,
   textTutor: voiceTutorTextTutor,
   trustedRuleDiscovery,
   privacyPolicyVersion: PRIVACY_POLICY_VERSION,
-  realtimePolicy: {
-    enabled: config.voiceTutor.enabled,
-    costKillSwitch: config.voiceTutor.costKillSwitch,
-    requireZdr: config.voiceTutor.requireZdr,
-    zdrAttested: config.voiceTutor.zdrAttested,
-    unboundCredentialRiskAccepted: config.voiceTutor.unboundCredentialRiskAccepted,
-  },
+  realtimePolicy,
+  sessionStartLimiter: voiceTutorSessionStartLimiter,
 }));
 const aiRoutes = createAiRoutes({ authentication, access, db: dbApi });
 app.use(aiRoutes.router);
@@ -393,6 +395,29 @@ const server = app.listen(PORT, () => console.log(
   'Easy Boost server on http://localhost:' + PORT
   + ' (frontend: ' + (frontendDirectory === buildDirectory ? 'dist/public' : 'public') + ')',
 ));
+const voiceTutorRealtimeProxy = createVoiceTutorRealtimeProxy({
+  authentication,
+  db: dbApi,
+  providerEndpoint: config.voiceTutor.realtimeUrl,
+  apiKey: voiceTutorProxyConfigured ? config.ai.xaiKey : '',
+  model: config.voiceTutor.model,
+  voice: config.voiceTutor.voice,
+  policy: realtimePolicy,
+  authorize: async (username) => {
+    const [consent, accessResult] = await Promise.all([
+      getPrivacyConsent(username),
+      getVoiceTutorAccess(username, config.voiceTutor, new Date()),
+    ]);
+    return Boolean(consent?.voice_processing)
+      && consent.policy_version === PRIVACY_POLICY_VERSION
+      && Boolean(accessResult?.entitlements?.voice_tutor);
+  },
+  resolveCapsule: (username, capsule) => rebuildSourceCapsule(dbApi, username, capsule, new Date()),
+  providerHandshakeTimeoutMs: config.voiceTutor.providerHandshakeTimeoutMs,
+  allowInsecureProvider: config.nodeEnv === 'test',
+  trustedProxyHops: config.isProduction ? 1 : 0,
+});
+const detachVoiceTutorRealtimeProxy = voiceTutorRealtimeProxy.attach(server);
 startTelegram();
 
 /* Section 10.1: built-in tasks need rows in the bank, otherwise they have no identifier a client
@@ -407,13 +432,24 @@ seedBuiltinTasks(dbApi).catch((error) => {
   }));
 });
 
+let shuttingDown = false;
 async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
   console.log(signal + ': shutting down');
-  server.close(async () => {
-    try { await closeDatabase(); } finally { process.exit(0); }
-  });
-  setTimeout(() => process.exit(1), 10_000).unref();
+  const forceExitTimer = setTimeout(() => process.exit(1), 10_000);
+  forceExitTimer.unref();
+  detachVoiceTutorRealtimeProxy();
+  const serverClosed = new Promise((resolve) => server.close(() => resolve()));
+  await Promise.allSettled([
+    voiceTutorRealtimeProxy.close({ timeoutMs: 2_500 }),
+    serverClosed,
+  ]);
+  try { await closeDatabase(); } finally {
+    clearTimeout(forceExitTimer);
+    process.exit(0);
+  }
 }
 
-process.once('SIGTERM', () => shutdown('SIGTERM'));
-process.once('SIGINT', () => shutdown('SIGINT'));
+process.once('SIGTERM', () => { void shutdown('SIGTERM'); });
+process.once('SIGINT', () => { void shutdown('SIGINT'); });

@@ -55,8 +55,14 @@ const voiceTutorMonthlySeconds = readInteger('VOICE_TUTOR_MONTHLY_SECONDS', 7_20
 const voiceTutorSessionSeconds = readInteger('VOICE_TUTOR_SESSION_SECONDS', 300, { min: 60, max: 3_600 });
 const voiceTutorRealtimeUrl = process.env.XAI_VOICE_REALTIME_URL || 'wss://api.x.ai/v1/realtime';
 const voiceTutorModel = String(process.env.XAI_VOICE_MODEL || '').trim();
-if (!/^wss:\/\/[A-Za-z0-9.-]+(?::\d+)?(?:\/|$)/u.test(voiceTutorRealtimeUrl)) {
-  throw new Error('XAI_VOICE_REALTIME_URL must use WSS');
+const voiceTutorVoice = String(process.env.XAI_VOICE_NAME || '').trim();
+let parsedVoiceTutorRealtimeUrl;
+try { parsedVoiceTutorRealtimeUrl = new URL(voiceTutorRealtimeUrl); } catch { throw new Error('XAI_VOICE_REALTIME_URL must be an absolute WebSocket URL'); }
+const testLoopbackRealtime = nodeEnv === 'test' && parsedVoiceTutorRealtimeUrl.protocol === 'ws:'
+  && ['127.0.0.1', 'localhost', '::1'].includes(parsedVoiceTutorRealtimeUrl.hostname);
+if ((parsedVoiceTutorRealtimeUrl.protocol !== 'wss:' && !testLoopbackRealtime)
+  || parsedVoiceTutorRealtimeUrl.username || parsedVoiceTutorRealtimeUrl.password) {
+  throw new Error('XAI_VOICE_REALTIME_URL must use WSS (loopback WS is allowed only in tests)');
 }
 
 if (!['file', 'postgres'].includes(databaseProvider)) {
@@ -79,6 +85,11 @@ const pinnedVoiceModel = /^grok-voice-[a-z0-9][a-z0-9.-]*-(?:\d{4}-\d{2}-\d{2}|\
   && !/(?:^|[-_.])(?:alias|current|latest|preview|stable)(?:$|[-_.])/iu.test(voiceTutorModel);
 if (isProduction && !pinnedVoiceModel) {
   throw new Error('XAI_VOICE_MODEL must be a pinned immutable grok-voice semver/date revision in production; aliases are forbidden');
+}
+
+const validVoiceTutorVoice = /^[a-z][a-z0-9_-]{0,63}$/u.test(voiceTutorVoice);
+if ((isProduction || voiceTutorVoice) && !validVoiceTutorVoice) {
+  throw new Error('XAI_VOICE_NAME must be a lowercase provider voice id up to 64 characters');
 }
 
 if (voiceTutorSessionSeconds > voiceTutorDailySeconds || voiceTutorSessionSeconds > voiceTutorMonthlySeconds) {
@@ -115,17 +126,17 @@ export const config = Object.freeze({
     dailySeconds: voiceTutorDailySeconds,
     monthlySeconds: voiceTutorMonthlySeconds,
     sessionSeconds: voiceTutorSessionSeconds,
+    sessionStartsPerHour: readInteger('VOICE_TUTOR_SESSION_STARTS_PER_HOUR', 30, { min: 1, max: 300 }),
     enabled: readBoolean('VOICE_TUTOR_ENABLED', false),
     costKillSwitch: readBoolean('VOICE_TUTOR_COST_KILL_SWITCH', false),
     requireZdr: readBoolean('VOICE_TUTOR_REQUIRE_ZDR', false),
     zdrAttested: readBoolean('XAI_VOICE_ZDR_ATTESTED', false),
-    unboundCredentialRiskAccepted: readBoolean('VOICE_TUTOR_UNBOUND_CREDENTIAL_RISK_ACCEPTED', false),
     costMicrousdPerMinute: readInteger('VOICE_TUTOR_COST_MICROUSD_PER_MINUTE', 50_000, { min: 0, max: 10_000_000 }),
-    credentialTtlSeconds: readInteger('XAI_VOICE_CREDENTIAL_TTL_SECONDS', 60, { min: 60, max: 60 }),
-    credentialEndpoint: readProviderUrl('XAI_VOICE_CREDENTIAL_URL', 'https://api.x.ai/v1/realtime/client_secrets'),
+    proxyTicketTtlSeconds: readInteger('VOICE_TUTOR_PROXY_TICKET_TTL_SECONDS', 30, { min: 5, max: 60 }),
+    providerHandshakeTimeoutMs: readInteger('XAI_VOICE_HANDSHAKE_TIMEOUT_MS', 10_000, { min: 1_000, max: 30_000 }),
     realtimeUrl: voiceTutorRealtimeUrl,
     model: voiceTutorModel,
-    voice: process.env.XAI_VOICE_NAME || '',
+    voice: voiceTutorVoice,
     trustedRuleAllowlist: readJson('VOICE_TUTOR_RULE_ALLOWLIST_JSON', []),
     trustedRuleSources: readJson('VOICE_TUTOR_RULE_SOURCES_JSON', {}),
     ruleSearchEnabled: readBoolean('VOICE_TUTOR_RULE_SEARCH_ENABLED', false),

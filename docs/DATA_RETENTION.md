@@ -32,12 +32,13 @@ prompt или ответа ученика. Durable AI slot в `ai_requests` хр
 claim key, terminal status и технические usage/cost fields; failed slots сохраняются как
 наблюдаемые технические попытки и не содержат prompt, document body или learner answer.
 
-Realtime Voice Tutor обрабатывает аудио потоково у внешнего processor только после актуального
-`voice_processing` consent и server-owned `voice_activated_at`, выставленного после provider ACK.
-Этот технический timestamp входит в структурированный session export; до него quota не списывается.
+Realtime Voice Tutor обрабатывает аудио потоково через server-owned proxy только после актуального
+`voice_processing` consent и `voice_activated_at`, выставленного proxy после provider ACK.
+Этот timestamp и bounded PCM byte/finalization evidence входят в структурированный session export;
+до ACK browser не запрашивает микрофон и quota не списывается.
 Сервис не пишет raw audio, полную расшифровку или временные субтитры
 в БД, экспорт, application logs, метрики и release evidence. Отзыв согласия запрещает выдачу новых
-credential; удаление аккаунта транзакционно удаляет структурированные session/recovery/repeat
+app tickets и завершает активный proxy; удаление аккаунта транзакционно удаляет структурированные session/recovery/repeat
 записи и неутверждённые rule reports; approved canonical остаётся только как неперсональная база знаний.
 
 Журнал прогонов не является анонимным: свободный ответ или транскрипт сам может содержать имя,

@@ -4,6 +4,7 @@ import test from 'node:test';
 import vm from 'node:vm';
 
 const source = await fs.readFile(new URL('../public/modules/words.js', import.meta.url), 'utf8');
+const screenSource = await fs.readFile(new URL('../public/screens/words.js', import.meta.url), 'utf8');
 
 function createWordsModule() {
   const window = {};
@@ -63,4 +64,9 @@ test('words module returns unique distractors and merges valid generated words o
   assert.equal(new Set(distractors).size, 3);
   assert.deepEqual(Array.from(added, (item) => item.w), ['epsilon']);
   assert.equal(mutableCatalog.filter((item) => item.w === 'epsilon').length, 1);
+});
+
+test('background vocabulary top-up requests a provider-safe tracer batch', () => {
+  assert.match(screenSource, /generateAiContent\('vocabulary_cards',\{count:8,exclude:have\}\)/u);
+  assert.doesNotMatch(screenSource, /vocabulary_cards',\{count:30/u);
 });

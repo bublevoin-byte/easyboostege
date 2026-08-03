@@ -90,6 +90,47 @@ export function voiceTutorBillableSeconds(session, now, confirmedBillableSeconds
   return Math.min(reservedSeconds, elapsedSeconds);
 }
 
+const VOICE_TUTOR_PROXY_HASH = /^[a-f0-9]{64}$/u;
+const VOICE_TUTOR_PROXY_REASON = /^[a-z][a-z0-9_]{0,63}$/u;
+
+export function normalizeVoiceTutorProxyHash(value) {
+  const hash = String(value || '').toLowerCase();
+  if (!VOICE_TUTOR_PROXY_HASH.test(hash)) throw new VoiceTutorError('VOICE_TUTOR_PROXY_TICKET_INVALID');
+  return hash;
+}
+
+export function voiceTutorProxyUsage(session, {
+  inputAudioBytes,
+  outputAudioBytes,
+  confirmed,
+  reason,
+  now,
+}) {
+  const input = Number(inputAudioBytes);
+  const output = Number(outputAudioBytes);
+  const normalizedReason = String(reason || '');
+  const finalizedAt = new Date(now);
+  if (!Number.isSafeInteger(input) || input < 0 || !Number.isSafeInteger(output) || output < 0
+    || typeof confirmed !== 'boolean' || !VOICE_TUTOR_PROXY_REASON.test(normalizedReason)
+    || !Number.isFinite(finalizedAt.getTime())) {
+    throw new VoiceTutorError('VOICE_TUTOR_USAGE_INVALID');
+  }
+  const exact = confirmed && normalizedReason === 'completed';
+  const reservedSeconds = Number(session.reserved_seconds);
+  const billableSeconds = exact
+    ? Math.min(reservedSeconds, Math.ceil((input + output) / 48_000))
+    : reservedSeconds;
+  return {
+    input_audio_bytes: input,
+    output_audio_bytes: output,
+    confirmed,
+    exact,
+    billable_seconds: billableSeconds,
+    reason: normalizedReason,
+    finalized_at: finalizedAt.toISOString(),
+  };
+}
+
 export function hashAuthCode(code) {
   return crypto.createHash('sha256').update(String(code)).digest('hex');
 }

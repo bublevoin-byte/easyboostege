@@ -189,6 +189,7 @@ test('production starts only with an explicit pinned voice model', () => {
     DATABASE_PROVIDER: 'postgres',
     DATABASE_URL: 'postgres://unused.invalid/easyboost',
     JWT_SECRET: 'production-test-secret-with-at-least-32-characters',
+    XAI_VOICE_NAME: 'ara',
   };
   const run = (model) => spawnSync(process.execPath, ['--input-type=module', '-e', "await import('./config.js')"], {
     cwd: fileURLToPath(new URL('..', import.meta.url)),
@@ -203,6 +204,15 @@ test('production starts only with an explicit pinned voice model', () => {
   }
   assert.equal(run('grok-voice-agent-2026-08-01').status, 0);
   assert.equal(run('grok-voice-think-fast-1.0').status, 0);
+
+  for (const voice of ['', 'ARA', 'bad voice', `a${'b'.repeat(64)}`]) {
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', "await import('./config.js')"], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      env: { ...baseEnvironment, XAI_VOICE_MODEL: 'grok-voice-think-fast-1.0', XAI_VOICE_NAME: voice }, encoding: 'utf8',
+    });
+    assert.notEqual(result.status, 0, `production accepted voice ${JSON.stringify(voice)}`);
+    assert.match(result.stderr, /XAI_VOICE_NAME.*lowercase/u);
+  }
 
   const development = spawnSync(process.execPath, ['--input-type=module', '-e', "await import('./config.js')"], {
     cwd: fileURLToPath(new URL('..', import.meta.url)),

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
@@ -15,24 +16,6 @@ import { createXaiRealtimeCredentialAdapter } from '../voice-tutor/xai-realtime.
 
 const NOW = new Date('2026-08-02T12:00:00.000Z');
 const LIMITS = Object.freeze({ dailySeconds: 600, monthlySeconds: 7_200, sessionSeconds: 300 });
-const BOUNDED_REALTIME_SESSION = Object.freeze({
-  voice: 'ara',
-  instructions: 'Follow the server-owned Voice Tutor state machine.',
-  tools: [{
-    type: 'function', name: 'advance_pedagogy', description: 'Advance one bounded pedagogy step.',
-    parameters: {
-      type: 'object',
-      properties: {
-        type: { type: 'string', enum: ['diagnosis_complete', 'explanation_complete', 'check_answer', 'transfer_answer'] },
-        answer: { type: 'string', maxLength: 200 },
-      },
-      required: ['type'],
-      additionalProperties: false,
-    },
-  }],
-  turn_detection: { type: 'server_vad' },
-});
-
 function authenticationFor(username) {
   return {
     auth(req, res, next) {
@@ -64,9 +47,7 @@ async function withHardeningApp(run, options = {}) {
     costKillSwitch: false,
     requireZdr: true,
     zdrAttested: true,
-    unboundCredentialRiskAccepted: true,
   };
-  const credentialCalls = [];
   const sessionIds = [
     '83f8b995-4e2b-460d-a393-5dc2b8a2ca71',
     'f46f8559-93ae-420a-b93f-d0629e4d49a0',
@@ -89,19 +70,12 @@ async function withHardeningApp(run, options = {}) {
     newNonce: () => nonces.shift(),
     realtimePolicy,
     privacyPolicyVersion: 'current-policy',
-    credentialProvider: {
-      async createCredential(input) {
-        credentialCalls.push(input);
-        return {
-          credential: 'ephemeral-hardening-only',
-          expires_at: 1_800_000_000,
-          realtime_url: 'wss://fake.invalid/realtime',
-          session: BOUNDED_REALTIME_SESSION,
-          provider: 'fake-realtime',
-          model: 'fake-realtime-v1',
-          prompt_version: 'voice-tutor-error-v2',
-        };
-      },
+    realtimeProxy: {
+      proxyPath: '/api/v1/voice-tutor/realtime',
+      ticketTtlSeconds: 30,
+      claimPedagogyCall() { return true; },
+      completePedagogyCall() { return true; },
+      failPedagogyCall() { return true; },
     },
     textTutor: Object.hasOwn(options, 'textTutor') ? options.textTutor : {
       async createTurn({ capsule, state }) {
@@ -119,7 +93,7 @@ async function withHardeningApp(run, options = {}) {
     headers: { Authorization: 'Bearer test', 'Content-Type': 'application/json', ...(options.headers || {}) },
   });
   try {
-    await run({ dataFile, repository, username, realtimePolicy, credentialCalls, request });
+    await run({ dataFile, repository, username, realtimePolicy, request });
   } finally {
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     await repository.close();
@@ -153,13 +127,12 @@ async function startSession(request, attemptId, key) {
   });
 }
 
-test('current consent is checked before credential and realtime controls fail closed into the same text context', async () => {
-  await withHardeningApp(async ({ repository, username, realtimePolicy, credentialCalls, request }) => {
+test('current consent is checked before proxy tickets and realtime controls fail closed into the same text context', async () => {
+  await withHardeningApp(async ({ repository, username, realtimePolicy, request }) => {
     const attemptId = await recordError(request);
     const stale = await startSession(request, attemptId, 'hardening-stale-consent-0001');
     assert.equal(stale.status, 403);
     assert.equal((await stale.json()).error.code, 'PRIVACY_CONSENT_REQUIRED');
-    assert.equal(credentialCalls.length, 0);
 
     await repository.setPrivacyConsent(username, {
       text_processing: true,
@@ -170,7 +143,6 @@ test('current consent is checked before credential and realtime controls fail cl
       [{ enabled: false, costKillSwitch: false, requireZdr: true, zdrAttested: true }, 'VOICE_TUTOR_DISABLED'],
       [{ enabled: true, costKillSwitch: true, requireZdr: true, zdrAttested: true }, 'VOICE_TUTOR_COST_KILL_SWITCH'],
       [{ enabled: true, costKillSwitch: false, requireZdr: true, zdrAttested: false }, 'VOICE_TUTOR_ZDR_NOT_CONFIRMED'],
-      [{ enabled: true, costKillSwitch: false, requireZdr: true, zdrAttested: true, unboundCredentialRiskAccepted: false }, 'VOICE_TUTOR_UNBOUND_CREDENTIAL_RISK_NOT_ACCEPTED'],
     ];
     for (const [policy, code] of cases) {
       Object.assign(realtimePolicy, policy);
@@ -181,30 +153,29 @@ test('current consent is checked before credential and realtime controls fail cl
       assert.equal(result.voice_unavailable.code, code);
       assert.equal(result.text_turn.capsule_id, result.capsule.id);
       assert.equal(result.voice_tutor.daily_remaining_seconds, 600);
-      assert.equal(credentialCalls.length, 0);
     }
 
-    Object.assign(realtimePolicy, { enabled: true, costKillSwitch: false, requireZdr: true, zdrAttested: true, unboundCredentialRiskAccepted: true });
+    Object.assign(realtimePolicy, { enabled: true, costKillSwitch: false, requireZdr: true, zdrAttested: true });
     const allowed = await startSession(request, attemptId, 'hardening-realtime-allowed-0001');
     assert.equal(allowed.status, 201);
     const result = await allowed.json();
     assert.equal(result.mode, 'voice');
-    assert.equal(result.realtime.credential, 'ephemeral-hardening-only');
-    assert.deepEqual(result.realtime.session, BOUNDED_REALTIME_SESSION);
+    assert.match(result.realtime.ticket, /^[A-Za-z0-9_-]{43}$/u);
+    assert.equal(result.realtime.proxy_url, '/api/v1/voice-tutor/realtime');
     assert.equal(result.realtime.provider, undefined);
     assert.equal(result.realtime.model, undefined);
     assert.equal(result.realtime.prompt_version, undefined);
-    assert.equal(credentialCalls.length, 1);
+    await repository.consumeVoiceTutorProxyTicket(username, {
+      ticketHash: crypto.createHash('sha256').update(result.realtime.ticket).digest('hex'),
+      now: NOW, provider: 'fake-realtime', model: 'fake-realtime-v1', promptVersion: 'voice-tutor-error-v2',
+    });
+    await repository.activateVoiceTutorProxySession(username, result.session.id, { now: NOW });
     const stored = await repository.getVoiceTutorSession(username, result.session.id);
     assert.equal(stored.provider, 'fake-realtime');
     assert.equal(stored.model, 'fake-realtime-v1');
     assert.equal(stored.prompt_version, 'voice-tutor-error-v2');
-    const activationResponse = await request(`/api/v1/voice-tutor/sessions/${result.session.id}/activate`, {
-      method: 'POST', body: JSON.stringify({ nonce: result.nonce }),
-    });
-    assert.equal(activationResponse.status, 200, await activationResponse.text());
-    await repository.finishVoiceTutorSession(username, result.session.id, {
-      limits: LIMITS,
+    await repository.finalizeVoiceTutorProxySession(username, result.session.id, {
+      inputAudioBytes: 120 * 48_000, outputAudioBytes: 0, confirmed: true, reason: 'completed', limits: LIMITS,
       now: new Date(NOW.getTime() + 120_000),
     });
     const legacyQuotaOnly = await repository.reserveVoiceTutorSession(username, {
@@ -218,16 +189,16 @@ test('current consent is checked before credential and realtime controls fail cl
       now: new Date(NOW.getTime() + 120_000),
     });
     const metrics = await repository.getVoiceTutorRecoveryMetrics(NOW, { costMicrousdPerMinute: 50_000 });
-    assert.equal(metrics.sessions, 6);
-    assert.deepEqual(metrics.delivery, { voice: 1, text: 4, local: 0 });
-    assert.equal(metrics.fallback_rate, 0.8);
+    assert.equal(metrics.sessions, 5);
+    assert.deepEqual(metrics.delivery, { voice: 1, text: 3, local: 0 });
+    assert.equal(metrics.fallback_rate, 0.75);
     assert.equal(metrics.provider_errors, 0);
     assert.equal(metrics.estimated_cost_microusd, 100_000);
     assert.doesNotMatch(JSON.stringify(metrics), /Hardening Student|hardening-nonce|goed/u);
   });
 });
 
-test('runtime provider fallback charges elapsed voice time and preserves provider cost evidence', async () => {
+test('runtime provider fallback conservatively charges the reservation and preserves provider cost evidence', async () => {
   let observedNow = NOW;
   await withHardeningApp(async ({ repository, username, request }) => {
     await repository.setPrivacyConsent(username, {
@@ -238,20 +209,22 @@ test('runtime provider fallback charges elapsed voice time and preserves provide
     const attemptId = await recordError(request, { attemptId: '82dc7163-65e7-4694-b825-70ba2eedbd4e' });
     const started = await (await startSession(request, attemptId, 'hardening-runtime-fallback-0001')).json();
     assert.equal(started.mode, 'voice');
-    const rejectedActivation = await request(`/api/v1/voice-tutor/sessions/${started.session.id}/activate`, {
-      method: 'POST', body: JSON.stringify({ nonce: 'wrong-activation-nonce-0001' }),
+    await assert.rejects(
+      repository.activateVoiceTutorProxySession(username, started.session.id, { now: NOW }),
+      /VOICE_TUTOR_PROXY_TICKET_INVALID/u,
+    );
+    await repository.consumeVoiceTutorProxyTicket(username, {
+      ticketHash: crypto.createHash('sha256').update(started.realtime.ticket).digest('hex'),
+      now: NOW, provider: 'fake-realtime', model: 'fake-realtime-v1', promptVersion: 'voice-tutor-error-v2',
     });
-    assert.equal(rejectedActivation.status, 409);
-    assert.equal((await rejectedActivation.json()).error.code, 'VOICE_TUTOR_NONCE_REPLAYED');
-    const activated = await request(`/api/v1/voice-tutor/sessions/${started.session.id}/activate`, {
-      method: 'POST', body: JSON.stringify({ nonce: started.nonce }),
-    });
-    assert.equal(activated.status, 200);
-    assert.equal((await request(`/api/v1/voice-tutor/sessions/${started.session.id}/activate`, {
-      method: 'POST', body: JSON.stringify({ nonce: started.nonce }),
-    })).status, 200);
+    assert.equal((await repository.activateVoiceTutorProxySession(username, started.session.id, { now: NOW })).activated, true);
+    assert.equal((await repository.activateVoiceTutorProxySession(username, started.session.id, { now: NOW })).activated, false);
 
     observedNow = new Date(NOW.getTime() + 120_000);
+    await repository.finalizeVoiceTutorProxySession(username, started.session.id, {
+      inputAudioBytes: 48_000, outputAudioBytes: 48_000, confirmed: false,
+      reason: 'provider_error', now: observedNow, limits: LIMITS,
+    });
     const fallbackResponse = await request(`/api/v1/voice-tutor/sessions/${started.session.id}/fallback`, {
       method: 'POST',
       body: JSON.stringify({ nonce: started.nonce, reason: 'provider_unavailable' }),
@@ -259,11 +232,11 @@ test('runtime provider fallback charges elapsed voice time and preserves provide
     assert.equal(fallbackResponse.status, 200);
     const fallback = await fallbackResponse.json();
     assert.equal(fallback.mode, 'local');
-    assert.equal(fallback.voice_tutor.daily_remaining_seconds, 480);
+    assert.equal(fallback.voice_tutor.daily_remaining_seconds, 300);
 
     const stored = await repository.getVoiceTutorSession(username, started.session.id);
     assert.equal(stored.delivery_mode, 'local');
-    assert.equal(stored.billable_seconds, 120);
+    assert.equal(stored.billable_seconds, 300);
     assert.equal(stored.error_code, 'VOICE_TUTOR_PROVIDER_UNAVAILABLE');
     assert.equal(stored.provider, 'fake-realtime');
     assert.equal(stored.model, 'fake-realtime-v1');
@@ -272,9 +245,9 @@ test('runtime provider fallback charges elapsed voice time and preserves provide
     const exported = await repository.exportUserData(username);
     assert.equal(exported.voice_tutor_sessions.find((session) => session.id === started.session.id).voice_activated_at, NOW.toISOString());
     const metrics = await repository.getVoiceTutorRecoveryMetrics(observedNow, { costMicrousdPerMinute: 50_000 });
-    assert.equal(metrics.voice_minutes, 2);
+    assert.equal(metrics.voice_minutes, 5);
     assert.equal(metrics.provider_errors, 1);
-    assert.equal(metrics.estimated_cost_microusd, 100_000);
+    assert.equal(metrics.estimated_cost_microusd, 250_000);
   }, { clock: () => observedNow, textTutor: null });
 });
 
@@ -370,14 +343,17 @@ test('learner prompt injection remains untrusted data and cannot pass server-own
     });
     const created = await (await startSession(request, attemptId, 'hardening-injection-0001')).json();
     let nonce = created.nonce;
+    let providerCall = 0;
     for (const event of [{ type: 'diagnosis_complete' }, { type: 'explanation_complete' }]) {
       const response = await request(`/api/v1/voice-tutor/sessions/${created.session.id}/events`, {
-        method: 'POST', body: JSON.stringify({ nonce, event }),
+        method: 'POST', body: JSON.stringify({ nonce, event, provider_call_id: `hardening-call-${++providerCall}` }),
       });
       nonce = (await response.json()).nonce;
     }
     const rejected = await request(`/api/v1/voice-tutor/sessions/${created.session.id}/events`, {
-      method: 'POST', body: JSON.stringify({ nonce, event: { type: 'check_answer', answer: injection } }),
+      method: 'POST', body: JSON.stringify({
+        nonce, event: { type: 'check_answer', answer: injection }, provider_call_id: `hardening-call-${++providerCall}`,
+      }),
     });
     assert.equal(rejected.status, 200);
     assert.equal((await rejected.json()).session.state, 'explain');
@@ -421,17 +397,16 @@ test('browser realtime bounds bytes/rate/order and rejects replayed or off-scope
       audioContextFactory: fakeAudioContext,
     });
     const pending = transport.connect({
-      stream: {}, credential: 'ephemeral-only', url: 'wss://fake.invalid/realtime',
-      session: BOUNDED_REALTIME_SESSION,
+      ticket: 't'.repeat(43), url: '/api/v1/voice-tutor/realtime',
       onStatus: (value) => statuses.push(value),
       onSubtitle: (value) => subtitles.push(value),
       onPedagogicalEvent: async (event) => { pedagogy.push(event); return { session: { state: 'explain' } }; },
     });
     socket.readyState = 1;
     socket.onopen();
-    socket.onmessage({ data: JSON.stringify({ type: 'session.updated' }) });
+    socket.onmessage({ data: JSON.stringify({ type: 'easyboost.ready' }) });
     const connection = await pending;
-    connection.activate();
+    connection.activate({});
     return { socket, statuses, subtitles, pedagogy };
   }
 

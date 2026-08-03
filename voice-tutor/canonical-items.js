@@ -37,6 +37,10 @@ export function createContextVoiceTutorItem(definition) {
       prompt: context.transferTask.prompt,
       answers: context.transferTask.answers,
     }),
+    recoveryTasks: Object.freeze({
+      day1: Object.freeze({ id: `${definition.id}.recovery.day1.v1`, ...context.recoveryTasks.day1 }),
+      day7: Object.freeze({ id: `${definition.id}.recovery.day7.v1`, ...context.recoveryTasks.day7 }),
+    }),
   });
 }
 
@@ -92,6 +96,10 @@ const BASE_ITEMS = {
     rule: Object.freeze({ id: 'grammar.past-simple.v1', revision: 1, title: 'Past Simple с маркером законченного прошлого', explanation: 'После last summer нужен Past Simple. У неправильного глагола go форма прошедшего времени — went.', examples: Object.freeze(['I went to school yesterday.', 'We bought the tickets last week.']) }),
     microCheck: Object.freeze({ id: 'grammar.past-simple.micro.v1', prompt: 'Yesterday my sister _____ to the library. (GO)', answers: Object.freeze(['went']) }),
     transferTask: Object.freeze({ id: 'grammar.past-simple.transfer.v1', prompt: 'Last week we _____ new books for class. (BUY)', answers: Object.freeze(['bought']) }),
+    recoveryTasks: Object.freeze({
+      day1: Object.freeze({ id: 'grammar.past-simple.recovery.day1.v1', prompt: 'Two days ago, Maria _____ home early. (COME)', answers: Object.freeze(['came']) }),
+      day7: Object.freeze({ id: 'grammar.past-simple.recovery.day7.v1', prompt: 'Last month, they _____ their new teacher. (MEET)', answers: Object.freeze(['met']) }),
+    }),
   }),
   'grammar.future-passive.will-be-used': Object.freeze({
     id: 'grammar.future-passive.will-be-used', revision: 1, module: 'grammar',
@@ -101,6 +109,10 @@ const BASE_ITEMS = {
     rule: null,
     microCheck: Object.freeze({ id: 'grammar.future-passive.micro.v1', prompt: 'New technology _____ in every school. (USE)', answers: Object.freeze(['will be used']) }),
     transferTask: Object.freeze({ id: 'grammar.future-passive.transfer.v1', prompt: 'The results _____ tomorrow. (ANNOUNCE)', answers: Object.freeze(['will be announced']) }),
+    recoveryTasks: Object.freeze({
+      day1: Object.freeze({ id: 'grammar.future-passive.recovery.day1.v1', prompt: 'The test results _____ tomorrow. (PUBLISH)', answers: Object.freeze(['will be published']) }),
+      day7: Object.freeze({ id: 'grammar.future-passive.recovery.day7.v1', prompt: 'The new rules _____ next September. (INTRODUCE)', answers: Object.freeze(['will be introduced']) }),
+    }),
   }),
   'vocabulary.relationship.meaning': Object.freeze({
     id: 'vocabulary.relationship.meaning', revision: 1, module: 'vocabulary',
@@ -109,6 +121,10 @@ const BASE_ITEMS = {
     rule: Object.freeze({ id: 'vocabulary.relationship.v1', revision: 1, title: 'Relationship — отношения или связь', explanation: 'Relationship называет отношения или связь между людьми и понятиями; это не отдельный родственник.', examples: Object.freeze(['They have a close relationship.', 'There is a clear relationship between sleep and memory.']) }),
     microCheck: Object.freeze({ id: 'vocabulary.relationship.micro.v1', prompt: 'Как перевести relationship в сочетании a close relationship?', answers: Object.freeze(['отношения', 'близкие отношения']) }),
     transferTask: Object.freeze({ id: 'vocabulary.relationship.transfer.v1', prompt: 'Complete: Trust is important in every _____.', answers: Object.freeze(['relationship']) }),
+    recoveryTasks: Object.freeze({
+      day1: Object.freeze({ id: 'vocabulary.relationship.recovery.day1.v1', prompt: 'Complete: A healthy _____ needs trust and honest communication.', answers: Object.freeze(['relationship']) }),
+      day7: Object.freeze({ id: 'vocabulary.relationship.recovery.day7.v1', prompt: 'Translate in context: Their working relationship improved.', answers: Object.freeze(['отношения', 'рабочие отношения']) }),
+    }),
   }),
 };
 

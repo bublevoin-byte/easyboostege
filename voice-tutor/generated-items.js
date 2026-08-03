@@ -1,5 +1,7 @@
 import crypto from 'node:crypto';
 import { createContextVoiceTutorItem } from './canonical-items.js';
+import { corePracticeCandidatesForSkill } from './core-catalog.js';
+import { maskAcceptedAnswers, practicePromptKey, vocabularyTargetCandidates } from './practice.js';
 
 const GENERATED_OPERATIONS = Object.freeze({
   reading_questions: Object.freeze({ module: 'reading', kind: 'context' }),
@@ -65,6 +67,12 @@ export function decorateGeneratedVoiceTutorContent(operation, requestHash, data)
   if (context) return { ...data, voice_tutor: context };
   const pointers = directPointers(operation, requestHash, data);
   if (!pointers) return data;
+  try {
+    if (!buildDirectDefinitions(operation, requestHash, data)) return data;
+  } catch (error) {
+    if (error instanceof GeneratedVoiceTutorDefinitionError) return data;
+    throw error;
+  }
   if (operation === 'grammar_topic_set') {
     return {
       ...data,
@@ -92,11 +100,16 @@ export function parseGeneratedVoiceTutorItemId(itemId, module) {
   return { operation, requestHash: match[3], resultDigest: match[4] };
 }
 
-function directPractice(id, candidate, suffix) {
-  return Object.freeze({ id: `${id}.${suffix}.v1`, prompt: candidate.prompt, answers: Object.freeze([...candidate.reference]) });
+function directPractice(id, candidate, suffix, skillId) {
+  return Object.freeze({ id: `${id}.${suffix}.v1`, skillId, prompt: candidate.prompt, answers: Object.freeze([...candidate.reference]) });
 }
 
 function directItem({ id, module, prompt, reference, errorType, skill, explanation, practice }) {
+  if (!Array.isArray(practice) || practice.length !== 4
+    || new Set([prompt, ...practice.map((candidate) => candidate.prompt)].map(practicePromptKey)).size !== 5
+    || practice.some((candidate) => candidate.skillId !== skill.id)) {
+    throw new GeneratedVoiceTutorDefinitionError();
+  }
   return Object.freeze({
     id, revision: 1, module, prompt, reference: Object.freeze([...reference]), errorType,
     skill: Object.freeze(skill),
@@ -104,9 +117,45 @@ function directItem({ id, module, prompt, reference, errorType, skill, explanati
       id: `${id}.rule.v1`, revision: 1, title: skill.label,
       explanation, examples: Object.freeze([prompt]),
     }) : null,
-    microCheck: directPractice(id, practice[0], 'micro'),
-    transferTask: directPractice(id, practice[1], 'transfer'),
+    microCheck: directPractice(id, practice[0], 'micro', skill.id),
+    transferTask: directPractice(id, practice[1], 'transfer', skill.id),
+    recoveryTasks: Object.freeze({
+      day1: directPractice(id, practice[2], 'recovery.day1', skill.id),
+      day7: directPractice(id, practice[3], 'recovery.day7', skill.id),
+    }),
   });
+}
+
+class GeneratedVoiceTutorDefinitionError extends Error {
+  constructor() {
+    super('VOICE_TUTOR_ANALOGS_UNAVAILABLE');
+    this.code = 'VOICE_TUTOR_ANALOGS_UNAVAILABLE';
+  }
+}
+
+function sameSkillPractice(candidates, index, fallback = []) {
+  const source = candidates[index];
+  const seen = new Set([practicePromptKey(source.prompt)]);
+  const practice = [];
+  for (const candidate of [
+    ...candidates.filter((entry, candidateIndex) => candidateIndex !== index && entry.skillId === source.skillId),
+    ...fallback,
+  ]) {
+    const key = practicePromptKey(candidate?.prompt);
+    if (!candidate || candidate.skillId !== source.skillId || !key || seen.has(key)) continue;
+    seen.add(key);
+    practice.push(candidate);
+    if (practice.length === 4) return practice;
+  }
+  throw new GeneratedVoiceTutorDefinitionError();
+}
+
+function grammarSkillId(topic) {
+  const numeric = Number(topic);
+  const domain = [16, 17, 20].includes(numeric)
+    ? 'word_formation'
+    : [15, 19].includes(numeric) ? 'collocation' : 'grammar';
+  return `ege.${domain}.topic_${numeric}`;
 }
 
 function grammarCandidate(question, kind) {
@@ -120,7 +169,20 @@ function vocabularyCandidate(word, mode) {
   const reference = [...new Set([String(word.w), String(word.w).replace(/^to\s+/iu, '')])];
   return mode === 'c2'
     ? { prompt: `Выбери английское слово для значения «${word.tr}».`, reference }
-    : { prompt: `Впиши слово со значением «${word.tr}» в контекст: ${word.ex}`, reference };
+    : { prompt: `Впиши слово со значением «${word.tr}» в контекст: ${maskAcceptedAnswers(word.ex, reference)}`, reference };
+}
+
+function vocabularySkillId(word) {
+  const domain = ['ph', 'id'].includes(word.p) ? 'collocation' : 'vocabulary';
+  return `ege.${domain}.generated_${resultDigest({ word: String(word.w), translation: String(word.tr) }).slice(0, 16)}`;
+}
+
+function vocabularyPracticeCandidates(words, word, sourceMode, skillId) {
+  if (!Array.isArray(word.practice) || word.practice.length !== 4) return [];
+  const sourceKey = practicePromptKey(vocabularyCandidate(word, sourceMode).prompt);
+  return vocabularyTargetCandidates(words, word, word.practice, 4)
+    .filter((candidate) => practicePromptKey(candidate.prompt) !== sourceKey)
+    .map((candidate) => ({ ...candidate, skillId }));
 }
 
 function buildDirectDefinitions(operation, requestHash, data) {
@@ -128,9 +190,10 @@ function buildDirectDefinitions(operation, requestHash, data) {
   if (!pointers) return null;
   const items = new Map();
   if (operation === 'grammar_topic_set') {
+    const skillId = `ege.grammar.generated_${requestHash.slice(0, 16)}`;
     const candidates = [
-      ...data.c.map((question) => ({ ...grammarCandidate(question, 'c'), kind: 'c' })),
-      ...data.f.map((question) => ({ ...grammarCandidate(question, 'f'), kind: 'f' })),
+      ...data.c.map((question) => ({ ...grammarCandidate(question, 'c'), kind: 'c', skillId })),
+      ...data.f.map((question) => ({ ...grammarCandidate(question, 'f'), kind: 'f', skillId })),
     ];
     candidates.forEach((candidate, index) => {
       const withinKind = index < data.c.length ? index : index - data.c.length;
@@ -138,38 +201,41 @@ function buildDirectDefinitions(operation, requestHash, data) {
       items.set(id, directItem({
         id, module: 'grammar', prompt: candidate.prompt, reference: candidate.reference,
         errorType: candidate.kind === 'f' ? 'incorrect_word_formation' : 'incorrect_form',
-        skill: { id: 'ege.grammar.generated', label: 'Сгенерированная грамматическая практика' },
+        skill: { id: skillId, label: 'Сгенерированная грамматическая практика' },
         explanation: candidate.explanation,
-        practice: [candidates[(index + 1) % candidates.length], candidates[(index + 2) % candidates.length]],
+        practice: sameSkillPractice(candidates, index),
       }));
     });
   } else if (operation === 'grammar_exam_19_24') {
     const candidates = data.gaps.map((gap, index) => ({
       prompt: `${data.tx[index]}_____ (${gap.b})${data.tx[index + 1]}`,
       reference: gap.ans.map(String), explanation: String(gap.e), topic: Number(gap.t),
+      skillId: grammarSkillId(gap.t),
     }));
     candidates.forEach((candidate, index) => {
       const id = pointers.gaps[index].id;
       items.set(id, directItem({
         id, module: 'grammar', prompt: candidate.prompt, reference: candidate.reference,
         errorType: [16, 17, 20].includes(candidate.topic) ? 'incorrect_word_formation' : 'incorrect_form',
-        skill: { id: `ege.grammar.topic_${candidate.topic}`, label: `ЕГЭ 19–24: тема ${candidate.topic}` },
+        skill: { id: candidate.skillId, label: `ЕГЭ 19–24: тема ${candidate.topic}` },
         explanation: candidate.explanation,
-        practice: [candidates[(index + 1) % candidates.length], candidates[(index + 2) % candidates.length]],
+        practice: sameSkillPractice(candidates, index, corePracticeCandidatesForSkill(
+          candidate.skillId, [candidate.prompt], 4,
+        )),
       }));
     });
   } else {
     for (const mode of ['c1', 'c2', 'type']) {
-      const candidates = data.map((word) => vocabularyCandidate(word, mode));
+      const candidates = data.map((word) => ({ ...vocabularyCandidate(word, mode), skillId: vocabularySkillId(word) }));
       candidates.forEach((candidate, index) => {
         const id = pointers[index][mode].id;
         const word = data[index];
         items.set(id, directItem({
           id, module: 'vocabulary', prompt: candidate.prompt, reference: candidate.reference,
           errorType: ['ph', 'id'].includes(word.p) ? 'incorrect_collocation' : 'incorrect_meaning',
-          skill: { id: `ege.vocabulary.generated.${word.p}`, label: `${word.w} — ${word.tr}` },
+          skill: { id: candidate.skillId, label: `${word.w} — ${word.tr}` },
           explanation: `Сервер сохранил значение «${word.tr}» и пример: ${word.ex}`,
-          practice: [candidates[(index + 1) % candidates.length], candidates[(index + 2) % candidates.length]],
+          practice: sameSkillPractice(candidates, index, vocabularyPracticeCandidates(data, word, mode, candidate.skillId)),
         }));
       });
     }
@@ -182,7 +248,14 @@ function buildDirectDefinitions(operation, requestHash, data) {
 
 export function buildGeneratedVoiceTutorDefinitions(operation, requestHash, data) {
   const descriptor = GENERATED_OPERATIONS[operation];
-  if (descriptor?.kind === 'direct') return buildDirectDefinitions(operation, requestHash, data);
+  if (descriptor?.kind === 'direct') {
+    try {
+      return buildDirectDefinitions(operation, requestHash, data);
+    } catch (error) {
+      if (error instanceof GeneratedVoiceTutorDefinitionError) return null;
+      throw error;
+    }
+  }
   const metadata = contextMetadata(operation, requestHash, data);
   if (!descriptor || !metadata || !Array.isArray(data?.qs) || data.qs.length !== metadata.item_ids.length) return null;
   const items = new Map(data.qs.map((question, index) => {

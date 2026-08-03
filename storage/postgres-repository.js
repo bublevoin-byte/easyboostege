@@ -1,5 +1,5 @@
 import pg from 'pg';
-import { hashAuthCode, normalizeUsername, normalizeVoiceTutorDeliveryMetadata, subscriptionView, VoiceTutorError, voiceTutorAccessView, voiceTutorBillableSeconds, voiceTutorQuotaPeriods, voiceTutorReservationSeconds } from './shared.js';
+import { hashAuthCode, normalizeUsername, normalizeVoiceTutorDeliveryMetadata, normalizeVoiceTutorProxyHash, subscriptionView, VoiceTutorError, voiceTutorAccessView, voiceTutorBillableSeconds, voiceTutorProxyUsage, voiceTutorQuotaPeriods, voiceTutorReservationSeconds } from './shared.js';
 import { transitionPedagogicalState } from '../voice-tutor/state-machine.js';
 import { transitionRuleCardReview } from '../voice-tutor/rule-card.js';
 import { createRecoveryLedger, planRecoveryFromTransfer, planRepeatAttempt, publicRepeatAttempt, recoveryMap, recoveryMetrics } from '../voice-tutor/recovery.js';
@@ -46,9 +46,21 @@ function mapVoiceTutorReport(row) {
   };
 }
 
-export function createPostgresRepository(connectionString) {
+export function createPostgresRepository(connectionString, {
+  onOperationalError = (event) => console.error(JSON.stringify({
+    timestamp: new Date().toISOString(), level: 'error', type: 'postgres_pool_error', ...event,
+  })),
+} = {}) {
   if (!connectionString) throw new Error('DATABASE_URL is required for PostgreSQL storage');
-  const pool = new Pool({ connectionString });
+  const pool = new Pool({ connectionString, application_name: 'easyboost_repository' });
+  const finalizationPool = new Pool({
+    connectionString, application_name: 'easyboost_voice_finalization', max: 4, connectionTimeoutMillis: 1_000,
+  });
+  const reportIdleClientError = (poolName) => {
+    try { onOperationalError({ code: 'POSTGRES_IDLE_CLIENT_ERROR', pool: poolName }); } catch {}
+  };
+  pool.on('error', () => reportIdleClientError('primary'));
+  finalizationPool.on('error', () => reportIdleClientError('voice_finalization'));
 
   async function getUser(username) {
     const result = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
@@ -414,7 +426,9 @@ export function createPostgresRepository(connectionString) {
     };
   }
 
-  async function reserveVoiceTutorSession(username, { id, idempotencyKey, limits, now = new Date(), context = null }) {
+  async function reserveVoiceTutorSession(username, {
+    id, idempotencyKey, limits, now = new Date(), context = null, allowFallbackOnly = false,
+  }) {
     const client = await pool.connect();
     const instant = new Date(now);
     try {
@@ -424,10 +438,16 @@ export function createPostgresRepository(connectionString) {
       await client.query(
         `UPDATE voice_tutor_sessions SET status = 'expired',
            billable_seconds = CASE
+             WHEN proxy_ticket_consumed_at IS NOT NULL AND proxy_finalized_at IS NULL THEN reserved_seconds
              WHEN capsule_id IS NOT NULL AND voice_activated_at IS NULL THEN 0
              WHEN capsule_id IS NOT NULL THEN LEAST(reserved_seconds, GREATEST(0, CEIL(EXTRACT(EPOCH FROM (expires_at - voice_activated_at)))::int))
              ELSE reserved_seconds
            END,
+           proxy_input_audio_bytes = CASE WHEN proxy_ticket_consumed_at IS NOT NULL AND proxy_finalized_at IS NULL THEN COALESCE(proxy_input_audio_bytes, 0) ELSE proxy_input_audio_bytes END,
+           proxy_output_audio_bytes = CASE WHEN proxy_ticket_consumed_at IS NOT NULL AND proxy_finalized_at IS NULL THEN COALESCE(proxy_output_audio_bytes, 0) ELSE proxy_output_audio_bytes END,
+           proxy_usage_confirmed = CASE WHEN proxy_ticket_consumed_at IS NOT NULL AND proxy_finalized_at IS NULL THEN FALSE ELSE proxy_usage_confirmed END,
+           proxy_finalization_reason = CASE WHEN proxy_ticket_consumed_at IS NOT NULL AND proxy_finalized_at IS NULL THEN 'timeout' ELSE proxy_finalization_reason END,
+           proxy_finalized_at = CASE WHEN proxy_ticket_consumed_at IS NOT NULL AND proxy_finalized_at IS NULL THEN expires_at ELSE proxy_finalized_at END,
            ended_at = expires_at,
            pedagogical_state = CASE WHEN capsule_id IS NOT NULL AND pedagogical_state NOT IN ('resolved', 'fallback', 'ended') THEN 'ended' ELSE pedagogical_state END,
            outcome = CASE WHEN capsule_id IS NOT NULL AND pedagogical_state NOT IN ('resolved', 'fallback', 'ended') THEN 'ended' ELSE outcome END,
@@ -446,20 +466,29 @@ export function createPostgresRepository(connectionString) {
         return { created: false, session: mapVoiceTutorSession(existing.rows[0]), ...access };
       }
       const access = await readVoiceTutorAccess(client, username, limits, instant);
-      const reservedSeconds = voiceTutorReservationSeconds(access, limits.sessionSeconds);
+      let reservedSeconds;
+      let fallbackOnly = false;
+      try {
+        reservedSeconds = voiceTutorReservationSeconds(access, limits.sessionSeconds);
+      } catch (error) {
+        if (!context || !allowFallbackOnly || !['VOICE_TUTOR_DAILY_QUOTA_EXHAUSTED', 'VOICE_TUTOR_MONTHLY_QUOTA_EXHAUSTED'].includes(error?.code)) throw error;
+        reservedSeconds = 0;
+        fallbackOnly = true;
+      }
       const inserted = await client.query(
         `INSERT INTO voice_tutor_sessions
          (id, username, idempotency_key, status, reserved_seconds, started_at, expires_at,
           capsule_id, capsule, nonce_hash, delivery_mode, pedagogical_state, micro_check_passed, transfer_passed, outcome)
          VALUES ($1, $2, $3, 'active', $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, $13, $14)
          RETURNING id, status, pedagogical_state, micro_check_passed, transfer_passed, outcome, started_at, voice_activated_at, expires_at, ended_at`,
-        [id, username, idempotencyKey, reservedSeconds, instant, new Date(instant.getTime() + reservedSeconds * 1000),
+        [id, username, idempotencyKey, reservedSeconds, instant,
+          new Date(instant.getTime() + (fallbackOnly ? limits.sessionSeconds : reservedSeconds) * 1000),
           context?.capsule?.id || null, context?.capsule ? JSON.stringify(context.capsule) : null, context?.nonceHash || null,
-          context ? 'voice' : null, context ? 'diagnose' : null, null, null, null],
+          context ? (fallbackOnly ? 'local' : 'voice') : null, context ? 'diagnose' : null, null, null, null],
       );
       const updatedAccess = await readVoiceTutorAccess(client, username, limits, instant);
       await client.query('COMMIT');
-      return { created: true, session: mapVoiceTutorSession(inserted.rows[0]), ...updatedAccess };
+      return { created: true, fallback_only: fallbackOnly, session: mapVoiceTutorSession(inserted.rows[0]), ...updatedAccess };
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -478,10 +507,16 @@ export function createPostgresRepository(connectionString) {
       await client.query(
         `UPDATE voice_tutor_sessions SET status = 'expired',
            billable_seconds = CASE
+             WHEN proxy_ticket_consumed_at IS NOT NULL AND proxy_finalized_at IS NULL THEN reserved_seconds
              WHEN capsule_id IS NOT NULL AND voice_activated_at IS NULL THEN 0
              WHEN capsule_id IS NOT NULL THEN LEAST(reserved_seconds, GREATEST(0, CEIL(EXTRACT(EPOCH FROM (expires_at - voice_activated_at)))::int))
              ELSE reserved_seconds
            END,
+           proxy_input_audio_bytes = CASE WHEN proxy_ticket_consumed_at IS NOT NULL AND proxy_finalized_at IS NULL THEN COALESCE(proxy_input_audio_bytes, 0) ELSE proxy_input_audio_bytes END,
+           proxy_output_audio_bytes = CASE WHEN proxy_ticket_consumed_at IS NOT NULL AND proxy_finalized_at IS NULL THEN COALESCE(proxy_output_audio_bytes, 0) ELSE proxy_output_audio_bytes END,
+           proxy_usage_confirmed = CASE WHEN proxy_ticket_consumed_at IS NOT NULL AND proxy_finalized_at IS NULL THEN FALSE ELSE proxy_usage_confirmed END,
+           proxy_finalization_reason = CASE WHEN proxy_ticket_consumed_at IS NOT NULL AND proxy_finalized_at IS NULL THEN 'timeout' ELSE proxy_finalization_reason END,
+           proxy_finalized_at = CASE WHEN proxy_ticket_consumed_at IS NOT NULL AND proxy_finalized_at IS NULL THEN expires_at ELSE proxy_finalized_at END,
            ended_at = expires_at,
            pedagogical_state = CASE WHEN capsule_id IS NOT NULL AND pedagogical_state NOT IN ('resolved', 'fallback', 'ended') THEN 'ended' ELSE pedagogical_state END,
            outcome = CASE WHEN capsule_id IS NOT NULL AND pedagogical_state NOT IN ('resolved', 'fallback', 'ended') THEN 'ended' ELSE outcome END,
@@ -490,7 +525,11 @@ export function createPostgresRepository(connectionString) {
         [username, instant],
       );
       const selected = await client.query(
-        `SELECT id, status, reserved_seconds, capsule_id, nonce_hash, pedagogical_state, micro_check_passed, transfer_passed, outcome, started_at, voice_activated_at, expires_at, ended_at FROM voice_tutor_sessions
+        `SELECT id, status, reserved_seconds, capsule_id, nonce_hash, pedagogical_state, micro_check_passed, transfer_passed, outcome,
+                started_at, voice_activated_at, expires_at, ended_at,
+                proxy_ticket_consumed_at, proxy_input_audio_bytes, proxy_output_audio_bytes,
+                proxy_usage_confirmed, proxy_finalization_reason, proxy_finalized_at
+         FROM voice_tutor_sessions
          WHERE username = $1 AND id = $2 FOR UPDATE`,
         [username, sessionId],
       );
@@ -500,7 +539,18 @@ export function createPostgresRepository(connectionString) {
       let row = current;
       const pedagogicalEnded = !preservePedagogicalState && current.capsule_id && !['resolved', 'fallback', 'ended'].includes(current.pedagogical_state);
       if (finished || pedagogicalEnded || (!preservePedagogicalState && current.capsule_id && current.nonce_hash)) {
-        const billableSeconds = finished ? voiceTutorBillableSeconds(current, instant, confirmedBillableSeconds) : null;
+        const proxyUsage = finished && current.proxy_ticket_consumed_at && !current.proxy_finalized_at
+          ? voiceTutorProxyUsage(current, {
+            inputAudioBytes: Number(current.proxy_input_audio_bytes || 0),
+            outputAudioBytes: Number(current.proxy_output_audio_bytes || 0),
+            confirmed: false,
+            reason: 'server_finish',
+            now: instant,
+          })
+          : null;
+        const billableSeconds = finished
+          ? proxyUsage?.billable_seconds ?? voiceTutorBillableSeconds(current, instant, confirmedBillableSeconds)
+          : null;
         const updated = await client.query(
           `UPDATE voice_tutor_sessions
            SET status = CASE WHEN status = 'active' THEN 'completed' ELSE status END,
@@ -509,10 +559,17 @@ export function createPostgresRepository(connectionString) {
                pedagogical_state = CASE WHEN capsule_id IS NOT NULL AND NOT $5 AND pedagogical_state NOT IN ('resolved', 'fallback', 'ended') THEN 'ended' ELSE pedagogical_state END,
                outcome = CASE WHEN capsule_id IS NOT NULL AND NOT $5 AND pedagogical_state NOT IN ('resolved', 'fallback', 'ended') THEN 'ended' ELSE outcome END,
                nonce_hash = CASE WHEN capsule_id IS NOT NULL AND NOT $5 THEN NULL ELSE nonce_hash END,
+               proxy_input_audio_bytes = CASE WHEN $6 THEN $7 ELSE proxy_input_audio_bytes END,
+               proxy_output_audio_bytes = CASE WHEN $6 THEN $8 ELSE proxy_output_audio_bytes END,
+               proxy_usage_confirmed = CASE WHEN $6 THEN FALSE ELSE proxy_usage_confirmed END,
+               proxy_finalization_reason = CASE WHEN $6 THEN 'server_finish' ELSE proxy_finalization_reason END,
+               proxy_finalized_at = CASE WHEN $6 THEN $3 ELSE proxy_finalized_at END,
                updated_at = CASE WHEN capsule_id IS NOT NULL THEN $3 ELSE updated_at END
            WHERE username = $1 AND id = $2
-           RETURNING id, status, pedagogical_state, micro_check_passed, transfer_passed, outcome, started_at, voice_activated_at, expires_at, ended_at`,
-          [username, sessionId, instant, billableSeconds, preservePedagogicalState],
+           RETURNING id, status, pedagogical_state, micro_check_passed, transfer_passed, outcome,
+                     started_at, voice_activated_at, expires_at, ended_at`,
+          [username, sessionId, instant, billableSeconds, preservePedagogicalState, Boolean(proxyUsage),
+            proxyUsage?.input_audio_bytes ?? null, proxyUsage?.output_audio_bytes ?? null],
         );
         row = updated.rows[0];
       }
@@ -533,6 +590,10 @@ export function createPostgresRepository(connectionString) {
               delivery_mode, pedagogical_state, micro_check_passed, micro_check_attempts, micro_check_passes,
               transfer_passed, outcome, clarification_turns, error_code, provider, model, prompt_version,
               discovery_status, discovery_claim_id, discovery_error_code,
+              proxy_ticket_hash, proxy_ticket_issued_at, proxy_ticket_expires_at, proxy_ticket_consumed_at,
+              proxy_ticket_reissue_count,
+              proxy_input_audio_bytes, proxy_output_audio_bytes, proxy_usage_confirmed,
+              proxy_finalization_reason, proxy_finalized_at,
               started_at, voice_activated_at, expires_at, ended_at
        FROM voice_tutor_sessions WHERE username = $1 AND id = $2`,
       [username, sessionId],
@@ -573,6 +634,334 @@ export function createPostgresRepository(connectionString) {
       throw error;
     } finally {
       client.release();
+    }
+  }
+
+  function proxyTicketView(row) {
+    return {
+      session_id: row.id,
+      expires_at: new Date(row.proxy_ticket_expires_at).toISOString(),
+      consumed_at: row.proxy_ticket_consumed_at ? new Date(row.proxy_ticket_consumed_at).toISOString() : null,
+    };
+  }
+
+  async function issueVoiceTutorProxyTicket(username, sessionId, {
+    ticketHash, idempotencyKey, expiresAt, now = new Date(), reissue = false, nextNonceHash,
+  }) {
+    const client = await pool.connect();
+    const instant = new Date(now);
+    const ticketExpiresAt = new Date(expiresAt);
+    const hash = normalizeVoiceTutorProxyHash(ticketHash);
+    try {
+      await client.query('BEGIN');
+      const owner = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+      if (!owner.rowCount) throw new Error('USER_NOT_FOUND');
+      const selected = await client.query(
+        `SELECT id, idempotency_key, status, capsule, nonce_hash, expires_at,
+                proxy_ticket_hash, proxy_ticket_expires_at, proxy_ticket_consumed_at,
+                proxy_ticket_reissue_count
+         FROM voice_tutor_sessions WHERE username = $1 AND id = $2 FOR UPDATE`,
+        [username, sessionId],
+      );
+      const session = selected.rows[0];
+      if (!session?.capsule) throw new VoiceTutorError('VOICE_TUTOR_SESSION_NOT_FOUND');
+      if (session.idempotency_key !== idempotencyKey) throw new VoiceTutorError('VOICE_TUTOR_PROXY_TICKET_INVALID');
+      if (session.status !== 'active' || !Number.isFinite(instant.getTime())
+        || new Date(session.expires_at).getTime() <= instant.getTime()) {
+        throw new VoiceTutorError('VOICE_TUTOR_SESSION_EXPIRED');
+      }
+      if (!Number.isFinite(ticketExpiresAt.getTime()) || ticketExpiresAt.getTime() <= instant.getTime()
+        || ticketExpiresAt.getTime() > new Date(session.expires_at).getTime()) {
+        throw new VoiceTutorError('VOICE_TUTOR_PROXY_TICKET_INVALID');
+      }
+      if (session.proxy_ticket_hash === hash) {
+        await client.query('COMMIT');
+        return { issued: false, reissued: false, ticket: proxyTicketView(session) };
+      }
+      const replacing = Boolean(session.proxy_ticket_hash);
+      const rotatingNonce = nextNonceHash != null;
+      if (replacing && !reissue) throw new VoiceTutorError('VOICE_TUTOR_PROXY_TICKET_ALREADY_ISSUED');
+      if (replacing && session.proxy_ticket_consumed_at) throw new VoiceTutorError('VOICE_TUTOR_PROXY_TICKET_REPLAYED');
+      if ((replacing || rotatingNonce) && Number(session.proxy_ticket_reissue_count) >= 1) {
+        throw new VoiceTutorError('VOICE_TUTOR_PROXY_TICKET_REISSUE_LIMIT');
+      }
+      const nonceHash = rotatingNonce
+        ? normalizeVoiceTutorProxyHash(nextNonceHash)
+        : session.nonce_hash;
+      const updated = await client.query(
+        `UPDATE voice_tutor_sessions
+         SET proxy_ticket_hash = $3, proxy_ticket_issued_at = $4, proxy_ticket_expires_at = $5,
+             proxy_ticket_consumed_at = NULL, nonce_hash = $6,
+             proxy_ticket_reissue_count = proxy_ticket_reissue_count + $7, updated_at = $4
+         WHERE username = $1 AND id = $2
+         RETURNING id, proxy_ticket_expires_at, proxy_ticket_consumed_at`,
+        [username, sessionId, hash, instant, ticketExpiresAt, nonceHash, replacing || rotatingNonce ? 1 : 0],
+      );
+      await client.query('COMMIT');
+      return { issued: true, reissued: replacing, ticket: proxyTicketView(updated.rows[0]) };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      if (error.code === '23505') throw new VoiceTutorError('VOICE_TUTOR_PROXY_TICKET_INVALID');
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async function reissueVoiceTutorFallbackNonce(username, sessionId, {
+    idempotencyKey, nextNonceHash, now = new Date(), recoverLostRealtime = false,
+  }) {
+    const client = await pool.connect();
+    const instant = new Date(now);
+    const nonceHash = normalizeVoiceTutorProxyHash(nextNonceHash);
+    try {
+      await client.query('BEGIN');
+      const selected = await client.query(
+        `SELECT id, capsule, idempotency_key, delivery_mode, status, voice_activated_at,
+                proxy_ticket_hash, proxy_ticket_consumed_at, proxy_ticket_reissue_count
+         FROM voice_tutor_sessions WHERE username = $1 AND id = $2 FOR UPDATE`,
+        [username, sessionId],
+      );
+      const session = selected.rows[0];
+      const provisionalVoice = session?.delivery_mode === 'voice' && !session.proxy_ticket_hash && !session.voice_activated_at;
+      const lostRealtime = recoverLostRealtime && session?.delivery_mode === 'voice'
+        && Boolean(session.proxy_ticket_hash) && !session.proxy_ticket_consumed_at && !session.voice_activated_at
+        && Number(session.proxy_ticket_reissue_count) === 1 && session.status === 'active';
+      if (!session?.capsule || (!provisionalVoice && !lostRealtime && ![null, 'text', 'local'].includes(session.delivery_mode))) {
+        throw new VoiceTutorError('VOICE_TUTOR_SESSION_NOT_FOUND');
+      }
+      if (session.idempotency_key !== idempotencyKey) throw new VoiceTutorError('VOICE_TUTOR_PROXY_TICKET_INVALID');
+      if (!lostRealtime && Number(session.proxy_ticket_reissue_count) >= 1) {
+        throw new VoiceTutorError('VOICE_TUTOR_PROXY_TICKET_REISSUE_LIMIT');
+      }
+      const updated = await client.query(
+        `UPDATE voice_tutor_sessions
+         SET nonce_hash = $3,
+             proxy_ticket_reissue_count = proxy_ticket_reissue_count + CASE WHEN $6 THEN 0 ELSE 1 END,
+             proxy_ticket_hash = CASE WHEN $6 THEN NULL ELSE proxy_ticket_hash END,
+             proxy_ticket_issued_at = CASE WHEN $6 THEN NULL ELSE proxy_ticket_issued_at END,
+             proxy_ticket_expires_at = CASE WHEN $6 THEN NULL ELSE proxy_ticket_expires_at END,
+             proxy_ticket_consumed_at = CASE WHEN $6 THEN NULL ELSE proxy_ticket_consumed_at END,
+             delivery_mode = CASE WHEN $5 OR $6 THEN 'local' ELSE delivery_mode END,
+             status = CASE WHEN $5 OR $6 THEN 'completed' ELSE status END,
+             billable_seconds = CASE WHEN $5 OR $6 THEN 0 ELSE billable_seconds END,
+             ended_at = CASE WHEN $5 OR $6 THEN $4 ELSE ended_at END,
+             error_code = CASE WHEN $5 OR $6 THEN 'VOICE_TUTOR_PROVIDER_UNAVAILABLE' ELSE error_code END,
+             updated_at = $4
+         WHERE username = $1 AND id = $2
+         RETURNING id, status, pedagogical_state, micro_check_passed, transfer_passed, outcome,
+                   started_at, voice_activated_at, expires_at, ended_at`,
+        [username, sessionId, nonceHash, instant, session.delivery_mode == null || provisionalVoice, lostRealtime],
+      );
+      await client.query('COMMIT');
+      return { reissued: true, session: mapVoiceTutorSession(updated.rows[0]) };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async function consumeVoiceTutorProxyTicket(username, input, options = {}) {
+    const { ticketHash, now = new Date(), provider, model, promptVersion } = { ...input, ...options };
+    const client = await pool.connect();
+    const instant = new Date(now);
+    const hash = normalizeVoiceTutorProxyHash(ticketHash);
+    const metadata = normalizeVoiceTutorDeliveryMetadata({ provider, model, promptVersion });
+    try {
+      await client.query('BEGIN');
+      const owner = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+      if (!owner.rowCount) throw new VoiceTutorError('VOICE_TUTOR_PROXY_TICKET_INVALID');
+      const selected = await client.query(
+        `SELECT id, status, reserved_seconds, capsule, expires_at,
+                proxy_ticket_expires_at, proxy_ticket_consumed_at
+         FROM voice_tutor_sessions
+         WHERE username = $1 AND proxy_ticket_hash = $2 FOR UPDATE`,
+        [username, hash],
+      );
+      const session = selected.rows[0];
+      if (!session) throw new VoiceTutorError('VOICE_TUTOR_PROXY_TICKET_INVALID');
+      if (session.proxy_ticket_consumed_at) throw new VoiceTutorError('VOICE_TUTOR_PROXY_TICKET_REPLAYED');
+      if (!Number.isFinite(instant.getTime())
+        || new Date(session.proxy_ticket_expires_at).getTime() <= instant.getTime()) {
+        throw new VoiceTutorError('VOICE_TUTOR_PROXY_TICKET_EXPIRED');
+      }
+      if (session.status !== 'active' || new Date(session.expires_at).getTime() <= instant.getTime()) {
+        throw new VoiceTutorError('VOICE_TUTOR_SESSION_EXPIRED');
+      }
+      await client.query(
+        `UPDATE voice_tutor_sessions
+         SET proxy_ticket_consumed_at = $3, provider = $4, model = $5, prompt_version = $6, updated_at = $3
+         WHERE username = $1 AND id = $2`,
+        [username, session.id, instant, metadata.provider, metadata.model, metadata.prompt_version],
+      );
+      await client.query('COMMIT');
+      return {
+        session: {
+          id: session.id,
+          reserved_seconds: Number(session.reserved_seconds),
+          expires_at: new Date(session.expires_at).toISOString(),
+        },
+        capsule: session.capsule,
+      };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async function activateVoiceTutorProxySession(username, sessionId, { now = new Date() } = {}) {
+    const client = await pool.connect();
+    const instant = new Date(now);
+    try {
+      await client.query('BEGIN');
+      const owner = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+      if (!owner.rowCount) throw new Error('USER_NOT_FOUND');
+      const selected = await client.query(
+        `SELECT id, status, reserved_seconds, capsule, started_at, expires_at, voice_activated_at,
+                proxy_ticket_consumed_at, proxy_finalized_at
+         FROM voice_tutor_sessions WHERE username = $1 AND id = $2 FOR UPDATE`,
+        [username, sessionId],
+      );
+      const session = selected.rows[0];
+      if (!session?.capsule) throw new VoiceTutorError('VOICE_TUTOR_SESSION_NOT_FOUND');
+      if (!session.proxy_ticket_consumed_at || session.proxy_finalized_at) {
+        throw new VoiceTutorError('VOICE_TUTOR_PROXY_TICKET_INVALID');
+      }
+      if (session.status !== 'active' || !Number.isFinite(instant.getTime())
+        || instant.getTime() < new Date(session.started_at).getTime()
+        || new Date(session.expires_at).getTime() <= instant.getTime()) {
+        throw new VoiceTutorError('VOICE_TUTOR_SESSION_EXPIRED');
+      }
+      const activated = !session.voice_activated_at;
+      if (activated) {
+        await client.query(
+          `UPDATE voice_tutor_sessions SET voice_activated_at = $3, updated_at = $3
+           WHERE username = $1 AND id = $2`,
+          [username, sessionId, instant],
+        );
+      }
+      await client.query('COMMIT');
+      return {
+        activated,
+        session: {
+          id: session.id,
+          reserved_seconds: Number(session.reserved_seconds),
+          expires_at: new Date(session.expires_at).toISOString(),
+        },
+        capsule: session.capsule,
+      };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
+  function proxyUsageView(row) {
+    return {
+      input_audio_bytes: Number(row.proxy_input_audio_bytes || 0),
+      output_audio_bytes: Number(row.proxy_output_audio_bytes || 0),
+      confirmed: Boolean(row.proxy_usage_confirmed),
+      exact: Boolean(row.proxy_usage_confirmed) && row.proxy_finalization_reason === 'completed',
+      billable_seconds: Number(row.billable_seconds),
+      reason: row.proxy_finalization_reason,
+      finalized_at: new Date(row.proxy_finalized_at).toISOString(),
+    };
+  }
+
+  async function finalizeVoiceTutorProxySession(username, sessionId, {
+    inputAudioBytes, outputAudioBytes, confirmed, reason, now = new Date(), limits,
+    attemptTimeoutMs = 1_000,
+  }) {
+    const attemptTimeout = Math.max(25, Math.min(5_000, Number(attemptTimeoutMs) || 1_000));
+    const client = await finalizationPool.connect();
+    const instant = new Date(now);
+    const timeoutError = Object.assign(new Error('Voice Tutor finalization attempt timeout'), {
+      code: 'VOICE_TUTOR_PROXY_FINALIZATION_TIMEOUT',
+    });
+    let released = false;
+    let transactionStarted = false;
+    let timedOut = false;
+    let resolveTermination;
+    const terminated = new Promise((resolve) => { resolveTermination = resolve; });
+    const onClientEnd = () => resolveTermination();
+    client.once('end', onClientEnd);
+    let deadlineTimer;
+    const deadline = new Promise((_, reject) => {
+      deadlineTimer = setTimeout(() => {
+        timedOut = true;
+        if (!released) {
+          released = true;
+          client.release(timeoutError);
+        }
+        void terminated.then(() => reject(timeoutError));
+      }, attemptTimeout);
+      deadlineTimer.unref?.();
+    });
+    const transaction = (async () => {
+      try {
+        await client.query('BEGIN');
+        transactionStarted = true;
+        await client.query(
+          "SELECT set_config('statement_timeout', $1, true), set_config('lock_timeout', $1, true)",
+          [`${attemptTimeout}ms`],
+        );
+        const owner = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+        if (!owner.rowCount) throw new Error('USER_NOT_FOUND');
+        const selected = await client.query(
+          `SELECT id, status, reserved_seconds, pedagogical_state, micro_check_passed, transfer_passed, outcome,
+                  started_at, expires_at, ended_at, proxy_ticket_consumed_at,
+                  proxy_input_audio_bytes, proxy_output_audio_bytes, proxy_usage_confirmed,
+                  proxy_finalization_reason, proxy_finalized_at, billable_seconds
+           FROM voice_tutor_sessions WHERE username = $1 AND id = $2 FOR UPDATE`,
+          [username, sessionId],
+        );
+        const session = selected.rows[0];
+        if (!session) throw new VoiceTutorError('VOICE_TUTOR_SESSION_NOT_FOUND');
+        if (!session.proxy_ticket_consumed_at) throw new VoiceTutorError('VOICE_TUTOR_PROXY_TICKET_INVALID');
+        if (session.proxy_finalized_at) {
+          const access = await readVoiceTutorAccess(client, username, limits, instant);
+          await client.query('COMMIT');
+          transactionStarted = false;
+          return { finalized: false, session: mapVoiceTutorSession(session), usage: proxyUsageView(session), ...access };
+        }
+        const usage = voiceTutorProxyUsage(session, { inputAudioBytes, outputAudioBytes, confirmed, reason, now: instant });
+        const updated = await client.query(
+          `UPDATE voice_tutor_sessions
+           SET status = 'completed', billable_seconds = $3, ended_at = $4,
+               proxy_input_audio_bytes = $5, proxy_output_audio_bytes = $6,
+               proxy_usage_confirmed = $7, proxy_finalization_reason = $8,
+               proxy_finalized_at = $4, updated_at = $4
+           WHERE username = $1 AND id = $2
+           RETURNING id, status, reserved_seconds, billable_seconds, pedagogical_state,
+                     micro_check_passed, transfer_passed, outcome, started_at, expires_at, ended_at,
+                     proxy_input_audio_bytes, proxy_output_audio_bytes, proxy_usage_confirmed,
+                     proxy_finalization_reason, proxy_finalized_at`,
+          [username, sessionId, usage.billable_seconds, instant, usage.input_audio_bytes,
+            usage.output_audio_bytes, usage.confirmed, usage.reason],
+        );
+        const access = await readVoiceTutorAccess(client, username, limits, instant);
+        await client.query('COMMIT');
+        transactionStarted = false;
+        return { finalized: true, session: mapVoiceTutorSession(updated.rows[0]), usage, ...access };
+      } catch (error) {
+        if (timedOut) {
+          await terminated;
+          throw timeoutError;
+        }
+        const databaseDeadline = error?.code === '57014' || error?.code === '55P03';
+        if (transactionStarted) await client.query('ROLLBACK');
+        transactionStarted = false;
+        if (databaseDeadline) throw timeoutError;
+        throw error;
+      }
+    })();
+    try {
+      return await Promise.race([transaction, deadline]);
+    } finally {
+      clearTimeout(deadlineTimer);
+      if (!released) {
+        client.off('end', onClientEnd);
+        released = true;
+        client.release();
+      }
     }
   }
 
@@ -626,13 +1015,13 @@ export function createPostgresRepository(connectionString) {
           `INSERT INTO voice_tutor_recoveries
            (id, username, session_id, skill_id, skill_label, module, rule_id, origin_item_id,
             origin_transfer_task_id, initial_micro_check_passed, initial_transfer_passed,
-            terminal_outcome, potential_ege_points, observed_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            terminal_outcome, potential_ege_points, repeat_tasks, observed_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb, $15)
            ON CONFLICT (session_id) DO NOTHING`,
           [recovery.id, username, recovery.session_id, recovery.skill_id, recovery.skill_label, recovery.module,
             recovery.rule_id, recovery.origin_item_id, recovery.origin_transfer_task_id,
             recovery.initial_micro_check_passed, recovery.initial_transfer_passed, recovery.terminal_outcome,
-            recovery.potential_ege_points, recovery.observed_at],
+            recovery.potential_ege_points, JSON.stringify(recovery.repeat_tasks), recovery.observed_at],
         );
           if (plan.supersededRepeatIds.length) {
             await client.query(
@@ -833,22 +1222,41 @@ export function createPostgresRepository(connectionString) {
     try {
       await client.query('BEGIN');
       const selected = await client.query(
-        `SELECT status, reserved_seconds, started_at, voice_activated_at, expires_at, capsule_id, capsule, nonce_hash
+        `SELECT status, reserved_seconds, started_at, voice_activated_at, expires_at, capsule_id, capsule, nonce_hash,
+                proxy_ticket_consumed_at, proxy_input_audio_bytes, proxy_output_audio_bytes, proxy_finalized_at
          FROM voice_tutor_sessions WHERE username = $1 AND id = $2 FOR UPDATE`,
         [username, sessionId],
       );
       const row = selected.rows[0];
       if (!row?.capsule) throw new VoiceTutorError('VOICE_TUTOR_SESSION_NOT_FOUND');
       if (!row.nonce_hash || row.nonce_hash !== nonceHash) throw new VoiceTutorError('VOICE_TUTOR_NONCE_REPLAYED');
-      const billableSeconds = row.status === 'active' ? voiceTutorBillableSeconds(row, instant) : null;
+      const proxyUsage = row.status === 'active' && row.proxy_ticket_consumed_at && !row.proxy_finalized_at
+        ? voiceTutorProxyUsage(row, {
+          inputAudioBytes: Number(row.proxy_input_audio_bytes || 0),
+          outputAudioBytes: Number(row.proxy_output_audio_bytes || 0),
+          confirmed: false,
+          reason: 'runtime_fallback',
+          now: instant,
+        })
+        : null;
+      const billableSeconds = row.status === 'active'
+        ? proxyUsage?.billable_seconds ?? voiceTutorBillableSeconds(row, instant)
+        : null;
       const updated = await client.query(
         `UPDATE voice_tutor_sessions SET delivery_mode = $3, error_code = $4, nonce_hash = $5,
            status = CASE WHEN status = 'active' THEN 'completed' ELSE status END,
            billable_seconds = CASE WHEN status = 'active' THEN $7 ELSE billable_seconds END,
-           ended_at = CASE WHEN status = 'active' THEN $6 ELSE ended_at END, updated_at = $6
+           ended_at = CASE WHEN status = 'active' THEN $6 ELSE ended_at END,
+           proxy_input_audio_bytes = CASE WHEN $8 THEN $9 ELSE proxy_input_audio_bytes END,
+           proxy_output_audio_bytes = CASE WHEN $8 THEN $10 ELSE proxy_output_audio_bytes END,
+           proxy_usage_confirmed = CASE WHEN $8 THEN FALSE ELSE proxy_usage_confirmed END,
+           proxy_finalization_reason = CASE WHEN $8 THEN 'runtime_fallback' ELSE proxy_finalization_reason END,
+           proxy_finalized_at = CASE WHEN $8 THEN $6 ELSE proxy_finalized_at END,
+           updated_at = $6
          WHERE username = $1 AND id = $2
          RETURNING id, status, pedagogical_state, micro_check_passed, transfer_passed, outcome, started_at, expires_at, ended_at`,
-        [username, sessionId, mode, errorCode, nextNonceHash, instant, billableSeconds],
+        [username, sessionId, mode, errorCode, nextNonceHash, instant, billableSeconds, Boolean(proxyUsage),
+          proxyUsage?.input_audio_bytes ?? null, proxyUsage?.output_audio_bytes ?? null],
       );
       const access = await readVoiceTutorAccess(client, username, limits, instant);
       await client.query('COMMIT');
@@ -1027,6 +1435,8 @@ export function createPostgresRepository(connectionString) {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      const reviewerAccount = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [reviewer]);
+      if (!reviewerAccount.rowCount) throw new Error('USER_NOT_FOUND');
       const found = await client.query('SELECT * FROM trusted_rule_cards WHERE id = $1 FOR UPDATE', [cardId]);
       const transition = transitionRuleCardReview(mapRuleCard(found.rows[0]), { decision, reviewer, reviewedAt });
       if (!transition.applied) {
@@ -1042,6 +1452,9 @@ export function createPostgresRepository(connectionString) {
       return { applied: true, card: mapRuleCard(updated.rows[0]) };
     } catch (error) {
       await client.query('ROLLBACK');
+      if (error.code === '23505' && error.constraint === 'trusted_rule_cards_one_approved_per_skill_year') {
+        throw new VoiceTutorError('RULE_CARD_CANONICAL_EXISTS');
+      }
       throw error;
     } finally { client.release(); }
   }
@@ -1086,6 +1499,8 @@ export function createPostgresRepository(connectionString) {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      const reviewerAccount = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [reviewer]);
+      if (!reviewerAccount.rowCount) throw new Error('USER_NOT_FOUND');
       const selected = await client.query('SELECT * FROM voice_tutor_reports WHERE id = $1 FOR UPDATE', [reportId]);
       const report = mapVoiceTutorReport(selected.rows[0]);
       if (!report) throw new VoiceTutorError('VOICE_TUTOR_REPORT_NOT_FOUND');
@@ -1124,21 +1539,31 @@ export function createPostgresRepository(connectionString) {
   }
 
   async function setPrivacyConsent(username, consent) {
-    const result = await pool.query(
-      `INSERT INTO privacy_consents
-       (username, text_processing, voice_processing, policy_version, text_consented_at, voice_consented_at)
-       VALUES ($1, $2, $3, $4, CASE WHEN $2 THEN NOW() END, CASE WHEN $3 THEN NOW() END)
-       ON CONFLICT (username) DO UPDATE SET
-         text_processing = EXCLUDED.text_processing,
-         voice_processing = EXCLUDED.voice_processing,
-         policy_version = EXCLUDED.policy_version,
-         text_consented_at = CASE WHEN EXCLUDED.text_processing THEN COALESCE(privacy_consents.text_consented_at, NOW()) END,
-         voice_consented_at = CASE WHEN EXCLUDED.voice_processing THEN COALESCE(privacy_consents.voice_consented_at, NOW()) END,
-         updated_at = NOW()
-       RETURNING text_processing, voice_processing, policy_version, updated_at`,
-      [username, consent.text_processing, consent.voice_processing, consent.policy_version],
-    );
-    return result.rows[0];
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const owner = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+      if (!owner.rowCount) throw new Error('USER_NOT_FOUND');
+      const result = await client.query(
+        `INSERT INTO privacy_consents
+         (username, text_processing, voice_processing, policy_version, text_consented_at, voice_consented_at)
+         VALUES ($1, $2, $3, $4, CASE WHEN $2 THEN NOW() END, CASE WHEN $3 THEN NOW() END)
+         ON CONFLICT (username) DO UPDATE SET
+           text_processing = EXCLUDED.text_processing,
+           voice_processing = EXCLUDED.voice_processing,
+           policy_version = EXCLUDED.policy_version,
+           text_consented_at = CASE WHEN EXCLUDED.text_processing THEN COALESCE(privacy_consents.text_consented_at, NOW()) END,
+           voice_consented_at = CASE WHEN EXCLUDED.voice_processing THEN COALESCE(privacy_consents.voice_consented_at, NOW()) END,
+           updated_at = NOW()
+         RETURNING text_processing, voice_processing, policy_version, updated_at`,
+        [username, consent.text_processing, consent.voice_processing, consent.policy_version],
+      );
+      await client.query('COMMIT');
+      return result.rows[0];
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
   }
 
   async function createTelegramAuthCode(code, expiresAt) {
@@ -1620,6 +2045,8 @@ export function createPostgresRepository(connectionString) {
       pool.query(`SELECT id, status, reserved_seconds, billable_seconds, capsule_id, capsule, delivery_mode,
                          pedagogical_state, micro_check_passed, micro_check_attempts, micro_check_passes,
                          transfer_passed, outcome, clarification_turns, error_code, provider, model, prompt_version,
+                         proxy_input_audio_bytes, proxy_output_audio_bytes, proxy_usage_confirmed,
+                         proxy_finalization_reason, proxy_finalized_at,
                          started_at, voice_activated_at, expires_at, ended_at, updated_at
                   FROM voice_tutor_sessions WHERE username = $1 ORDER BY started_at`, [username]),
       pool.query(`SELECT id, session_id, skill_id, skill_label, module, rule_id, origin_item_id,
@@ -1756,6 +2183,11 @@ export function createPostgresRepository(connectionString) {
     setEntitlement,
     getVoiceTutorAccess,
     reserveVoiceTutorSession,
+    issueVoiceTutorProxyTicket,
+    reissueVoiceTutorFallbackNonce,
+    consumeVoiceTutorProxyTicket,
+    activateVoiceTutorProxySession,
+    finalizeVoiceTutorProxySession,
     finishVoiceTutorSession,
     getVoiceTutorSession,
     activateVoiceTutorSession,
@@ -1814,6 +2246,6 @@ export function createPostgresRepository(connectionString) {
     exportUserData,
     deleteUserData,
     healthCheck,
-    close: () => pool.end(),
+    close: () => Promise.all([pool.end(), finalizationPool.end()]),
   };
 }

@@ -241,7 +241,7 @@ test('xAI Responses search aborts a chunked body as soon as it exceeds 64 KiB', 
 
 test('clarification text reaches the provider transiently without changing the requested FSM state', async () => {
   const calls = [];
-  const logs = [];
+  const slotEvents = [];
   const tutor = createAiTextTutor({
     providerClient: {
       async askWithFallback(system, user, operation) {
@@ -249,8 +249,7 @@ test('clarification text reaches the provider transiently without changing the r
         return { text: 'Короткое объяснение другими словами.', provider: 'fake', model: 'fake-v1' };
       },
     },
-    hasAiBudget: async () => true, countAiOperationRequestsSince: async () => 0,
-    logAiRequest: async (entry) => logs.push(entry), now: () => NOW,
+    ...aiSlotFixture(slotEvents), now: () => NOW,
   });
   const result = await tutor.createClarification({
     capsule: fullCapsule(), state: 'explain', username: 'student',
@@ -260,26 +259,25 @@ test('clarification text reaches the provider transiently without changing the r
   assert.equal(result.kind, 'clarify');
   assert.match(calls[0].user, /Почему здесь Past Simple/u);
   assert.match(calls[0].user, /недоверенные данные/u);
-  assert.equal(JSON.stringify(logs).includes('Почему здесь Past Simple'), false);
+  assert.equal(JSON.stringify(slotEvents).includes('Почему здесь Past Simple'), false);
   await assert.rejects(
     tutor.createClarification({ capsule: fullCapsule(), state: 'explain', username: 'student', kind: 'clarify', message: '<script>' }),
     (error) => error.code === 'VOICE_TUTOR_CLARIFICATION_INVALID',
   );
 
-  const failureLogs = [];
+  const failureEvents = [];
   const failingTutor = createAiTextTutor({
     providerClient: { async askWithFallback() {
       throw Object.assign(new Error('Почему здесь Past Simple?'), { fallbackReason: 'fake: Почему здесь Past Simple?' });
     } },
-    hasAiBudget: async () => true, countAiOperationRequestsSince: async () => 0,
-    logAiRequest: async (entry) => failureLogs.push(entry), now: () => NOW,
+    ...aiSlotFixture(failureEvents), now: () => NOW,
   });
   await assert.rejects(failingTutor.createClarification({
     capsule: fullCapsule(), state: 'explain', username: 'student', kind: 'clarify', message: 'Почему здесь Past Simple?',
   }));
-  assert.equal(failureLogs[0].errorCode, 'VOICE_TUTOR_TEXT_UNAVAILABLE');
-  assert.equal(failureLogs[0].fallbackReason, null);
-  assert.equal(JSON.stringify(failureLogs).includes('Почему здесь Past Simple'), false);
+  const failedSettlement = failureEvents.find((event) => event.type === 'settle').settlement;
+  assert.equal(failedSettlement.errorCode, 'VOICE_TUTOR_TEXT_UNAVAILABLE');
+  assert.equal(JSON.stringify(failureEvents).includes('Почему здесь Past Simple'), false);
 });
 
 test('file storage atomically binds provisional rules, bounds clarifications and supports structured report review/privacy', async () => {

@@ -3,6 +3,9 @@ import path from 'node:path';
 import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 
+import { CORE_VOCABULARY_PRACTICE } from '../voice-tutor/core-vocabulary-practice.js';
+import { maskAcceptedAnswers, practicePromptKey } from '../voice-tutor/practice.js';
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 function expressionBetween(source, startMarker, endMarker) {
@@ -19,11 +22,26 @@ function literal(source, startMarker, endMarker) {
 export function buildCoreVoiceCatalogSource() {
   const grammarSource = fs.readFileSync(path.join(root, 'public/screens/grammar.js'), 'utf8');
   const appSource = fs.readFileSync(path.join(root, 'public/app.js'), 'utf8');
+  const vocabulary = literal(appSource, 'const EGE_WORDS=', '\ndecorateCoreVocabulary(EGE_WORDS);')
+    .map((word) => {
+      const practice = CORE_VOCABULARY_PRACTICE[word.w];
+      if (!Array.isArray(practice) || practice.length !== 4) {
+        throw new Error(`Four reviewed vocabulary contexts are required for: ${word.w}`);
+      }
+      const reference = [...new Set([String(word.w), String(word.w).replace(/^to\s+/iu, '')])];
+      const sourceKey = practicePromptKey(maskAcceptedAnswers(word.ex, reference));
+      const masked = practice.map((example) => maskAcceptedAnswers(example, reference));
+      if (masked.some((example) => !example.includes('_____'))
+        || new Set([sourceKey, ...masked.map(practicePromptKey)]).size !== 5) {
+        throw new Error(`Vocabulary contexts must be target-bearing, distinct and new: ${word.w}`);
+      }
+      return { ...word, practice: [...practice] };
+    });
   return {
     topics: literal(grammarSource, 'const G_TOPICS=', '\nconst G_BANK='),
     grammar: literal(grammarSource, 'const G_BANK=', '\nconst G_RINT='),
     exams: literal(grammarSource, 'const G_EXAMS=', '\ndecorateCoreGrammar(G_BANK,G_EXAMS);'),
-    vocabulary: literal(appSource, 'const EGE_WORDS=', '\ndecorateCoreVocabulary(EGE_WORDS);'),
+    vocabulary,
   };
 }
 

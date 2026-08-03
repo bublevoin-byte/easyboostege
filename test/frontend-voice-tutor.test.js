@@ -56,7 +56,7 @@ test('writing and speaking reviews mount the shared tutor and keep only server-i
 });
 
 test('voice tutor controls drive the finite pedagogical states', () => {
-  assert.deepEqual(eventForVoiceTutorState('diagnose'), { type: 'diagnosis_complete' });
+  assert.deepEqual(eventForVoiceTutorState('diagnose', 'because'), { type: 'diagnosis_complete', answer: 'because' });
   assert.deepEqual(eventForVoiceTutorState('explain'), { type: 'explanation_complete' });
   assert.deepEqual(eventForVoiceTutorState('micro_check', 'went'), { type: 'check_answer', answer: 'went' });
   assert.deepEqual(eventForVoiceTutorState('transfer_task', 'bought'), { type: 'transfer_answer', answer: 'bought' });
@@ -70,6 +70,10 @@ test('shared voice tutor sheet exposes microphone, transient captions, quota, ti
   assert.match(source, /voiceTutorCaptions/u);
   assert.match(source, /aria-live="polite"/u);
   assert.match(source, /voiceTutorTimer/u);
+  assert.match(source, /Осталось \$\{Math\.floor\(remaining \/ 60\)\}/u);
+  assert.match(source, /voiceTutorTimeWarning/u);
+  assert.match(source, /Осталась последняя минута голосового разбора/u);
+  assert.match(source, /tutorEvent\.answer/u);
   assert.match(source, /voiceTutorQuota/u);
   assert.match(source, /voiceTutorContext/u);
   assert.match(source, /getUserMedia/u);
@@ -78,15 +82,27 @@ test('shared voice tutor sheet exposes microphone, transient captions, quota, ti
   assert.match(source, /onFailure/u);
   assert.match(source, /provider_unavailable/u);
   assert.match(source, /session_timeout/u);
-  assert.match(source, /\/activate/u);
+  assert.match(source, /realtime\.ticket/u);
+  assert.match(source, /realtime\.reissue_url/u);
+  assert.doesNotMatch(source, /\/activate/u);
   assert.match(source, /\/fallback/u);
   assert.match(source, /returnFocus/u);
   assert.match(source, /transientCaptions\.length = 0/u);
-  assert.match(source, /const sessionId = currentSession\?\.session\?\.id;\s+closeSheet\(\);\s+if \(sessionId\)/u);
+  assert.match(source, /const sessionId = currentSession\?\.session\?\.id;\s+await closeSheet\(\{ clean: true \}\);\s+if \(sessionId\)/u);
+  assert.match(source, /switchToFallback\(realtimeConnection \? 'microphone_unavailable' : 'provider_unavailable'\)/u);
+  assert.match(source, /sessionOperation/u);
+  assert.match(source, /operationActive\(operation\)/u);
+  assert.match(source, /pendingSessionKeys/u);
+  assert.match(source, /postIdempotentWithNetworkRetry/u);
+  assert.match(source, /error\?\.code !== 'NETWORK_ERROR'/u);
+  assert.match(source, /finishCancelledSession\(result\)/u);
+  assert.match(source, /updateProfileAccess\(await api\(\)\.post/u);
+  assert.match(source, /stream\?\.getTracks\?\.\(\)\.forEach/u);
+  assert.match(source, /currentSession\.mode === 'voice'[\s\S]{0,120}form\.style\.display = 'none'/u);
 });
 
 test('a discovery-required session requests and renders provisional trusted sources in the same sheet', () => {
-  assert.match(source, /if \(result\.discovery_required\) await discoverMissingRule\(result\)/u);
+  assert.match(source, /if \(result\.discovery_required\) await discoverMissingRule\(result, operation\)/u);
   assert.match(source, /discoverMissingRule[\s\S]*\/api\/v1\/voice-tutor\/rule-discoveries/u);
   assert.match(source, /session_id:\s*result\.session\.id/u);
   assert.match(source, /voiceTutorSources/u);

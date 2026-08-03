@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 
+import { practicePromptKey } from './practice.js';
 import { normalizeTutorAnswer } from './state-machine.js';
 
 export const RECOVERY_DAY_MS = 86_400_000;
@@ -13,25 +14,6 @@ const POINT_CAPS = Object.freeze({
   listening: 1,
   writing: 2,
   speaking: 2,
-});
-
-const MODULE_REPEAT_TASKS = Object.freeze({
-  grammar: Object.freeze({
-    day_1: Object.freeze({ prompt: 'Two days ago, Maria _____ home early. (COME)', answers: Object.freeze(['came']) }),
-    day_7: Object.freeze({ prompt: 'Last month, they _____ their new teacher. (MEET)', answers: Object.freeze(['met']) }),
-  }),
-  vocabulary: Object.freeze({
-    day_1: Object.freeze({ prompt: 'Complete: The course gave me practical _____ I can use at work.', answers: Object.freeze(['experience']) }),
-    day_7: Object.freeze({ prompt: 'Complete: Her calm response made a positive _____ on the team.', answers: Object.freeze(['impression']) }),
-  }),
-  reading: Object.freeze({
-    day_1: Object.freeze({ prompt: 'Text: “The museum closes at five on Saturdays.” When does it close on Saturdays?', answers: Object.freeze(['at five', 'five']) }),
-    day_7: Object.freeze({ prompt: 'Text: “Rain was forecast, so Maya moved the picnic indoors.” Why did Maya move it indoors?', answers: Object.freeze(['because rain was forecast', 'rain was forecast']) }),
-  }),
-  listening: Object.freeze({
-    day_1: Object.freeze({ prompt: 'Transcript: “Our lesson begins at half past ten.” When does the lesson begin?', answers: Object.freeze(['at half past ten', 'half past ten', '10:30']) }),
-    day_7: Object.freeze({ prompt: 'Transcript: “Leo walked home because the last bus had left.” Why did Leo walk home?', answers: Object.freeze(['because the last bus had left', 'the last bus had left']) }),
-  }),
 });
 
 const SKILL_REPEAT_TASKS = Object.freeze({
@@ -108,6 +90,16 @@ function reviewTaskFamily(skillId) {
   return REVIEW_SKILL_FAMILIES[skillId] || null;
 }
 
+export function reviewRecoveryTasks(skillId) {
+  const family = reviewTaskFamily(skillId);
+  const source = family ? REVIEW_REPEAT_TASKS[family] : null;
+  if (!source) return null;
+  return Object.freeze({
+    day_1: Object.freeze({ skillId, prompt: source.day_1.prompt, answers: Object.freeze([...source.day_1.answers]) }),
+    day_7: Object.freeze({ skillId, prompt: source.day_7.prompt, answers: Object.freeze([...source.day_7.answers]) }),
+  });
+}
+
 export class VoiceTutorRecoveryError extends Error {
   constructor(code) {
     super(code);
@@ -142,6 +134,23 @@ export function recoveryPotentialPoints(capsule) {
   return Math.max(0, Math.min(cap, Number.isFinite(loss) && loss > 0 ? Math.ceil(loss) : cap));
 }
 
+function recoveryRepeatTask(check, skillId, excludedPrompts) {
+  if (!check || (check.skillId && check.skillId !== skillId) || !Array.isArray(check.answers)
+    || check.answers.length < 1 || check.answers.length > 10) {
+    throw new VoiceTutorRecoveryError('VOICE_TUTOR_REPEAT_TASK_UNAVAILABLE');
+  }
+  const prompt = bounded(check.prompt, 1_000);
+  const normalized = practicePromptKey(prompt);
+  if (!normalized || excludedPrompts.has(normalized)) {
+    throw new VoiceTutorRecoveryError('VOICE_TUTOR_REPEAT_TASK_UNAVAILABLE');
+  }
+  excludedPrompts.add(normalized);
+  return Object.freeze({
+    prompt,
+    answers: Object.freeze(check.answers.map((answer) => bounded(answer, 200))),
+  });
+}
+
 export function createRecoveryOutcome({ sessionId, capsule, pedagogicalState, observedAt }) {
   if (!capsule || !pedagogicalState || pedagogicalState.transfer_passed == null) {
     throw new VoiceTutorRecoveryError('VOICE_TUTOR_RECOVERY_EVENT_INVALID');
@@ -152,6 +161,15 @@ export function createRecoveryOutcome({ sessionId, capsule, pedagogicalState, ob
   if (!Object.hasOwn(POINT_CAPS, module)) throw new VoiceTutorRecoveryError('VOICE_TUTOR_RECOVERY_INVALID');
   const observed = iso(observedAt);
   const id = deterministicUuid(`voice-recovery:${sessionId}`);
+  const excludedPrompts = new Set([
+    capsule.item?.prompt,
+    capsule.checks?.micro_check?.prompt,
+    capsule.checks?.transfer_task?.prompt,
+  ].map(practicePromptKey).filter(Boolean));
+  const repeatTasks = Object.freeze({
+    day_1: recoveryRepeatTask(capsule.recovery_tasks?.day_1, skillId, excludedPrompts),
+    day_7: recoveryRepeatTask(capsule.recovery_tasks?.day_7, skillId, excludedPrompts),
+  });
   return Object.freeze({
     id,
     session_id: bounded(sessionId, 64),
@@ -165,6 +183,7 @@ export function createRecoveryOutcome({ sessionId, capsule, pedagogicalState, ob
     initial_transfer_passed: pedagogicalState.transfer_passed === true,
     terminal_outcome: pedagogicalState.outcome === 'resolved' ? 'resolved' : 'fallback',
     potential_ege_points: recoveryPotentialPoints(capsule),
+    repeat_tasks: repeatTasks,
     observed_at: observed,
   });
 }
@@ -172,9 +191,9 @@ export function createRecoveryOutcome({ sessionId, capsule, pedagogicalState, ob
 export function repeatTaskFor(recovery, stage) {
   if (!RECOVERY_STAGES.includes(stage)) throw new VoiceTutorRecoveryError('VOICE_TUTOR_REPEAT_INVALID');
   const family = reviewTaskFamily(recovery.skill_id);
-  const source = SKILL_REPEAT_TASKS[recovery.skill_id]?.[stage]
-    || (family ? REVIEW_REPEAT_TASKS[family]?.[stage] : null)
-    || (!['writing', 'speaking'].includes(recovery.module) ? MODULE_REPEAT_TASKS[recovery.module]?.[stage] : null);
+  const source = recovery.repeat_tasks?.[stage]
+    || SKILL_REPEAT_TASKS[recovery.skill_id]?.[stage]
+    || (family ? REVIEW_REPEAT_TASKS[family]?.[stage] : null);
   if (!source) throw new VoiceTutorRecoveryError('VOICE_TUTOR_REPEAT_TASK_UNAVAILABLE');
   const taskId = `voice-repeat.${bounded(recovery.id, 64, 'VOICE_TUTOR_REPEAT_INVALID')}.${stage}.v1`;
   if (taskId === recovery.origin_item_id || taskId === recovery.origin_transfer_task_id) {

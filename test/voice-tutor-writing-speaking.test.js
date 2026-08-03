@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import express from 'express';
 
-import { createVoiceTutorRoutes } from '../routes/voice-tutor.js';
+import { createVoiceTutorRoutes, rebuildSourceCapsule } from '../routes/voice-tutor.js';
 import { createFileRepository } from '../storage/file-repository.js';
 import {
   buildWritingSpeakingCapsule,
@@ -101,7 +101,6 @@ async function withReviewApp(run) {
     await repository.setPrivacyConsent(username, { text_processing: true, voice_processing: true, policy_version: 'test-v1' });
   }
   const source = await seedCompletedReviews(repository, owner);
-  const credentialCalls = [];
   const sessionIds = [
     '940f8ef2-15d4-4534-b679-8c0ca8105220',
     '38fbc440-42e9-4e6d-a704-8ed0cae9d4c7',
@@ -120,13 +119,14 @@ async function withReviewApp(run) {
     newSessionId: () => sessionIds.shift(),
     newNonce: () => nonces.shift(),
     privacyPolicyVersion: 'test-v1',
-    credentialProvider: {
-      async createCredential(input) {
-        credentialCalls.push(input);
-        return { credential: 'ephemeral-review-credential', expires_at: 1_785_662_700, realtime_url: 'wss://fake.invalid/realtime' };
-      },
+    realtimeProxy: {
+      proxyPath: '/api/v1/voice-tutor/realtime',
+      ticketTtlSeconds: 30,
+      claimPedagogyCall() { return true; },
+      completePedagogyCall() { return true; },
+      failPedagogyCall() { return true; },
     },
-    realtimePolicy: { unboundCredentialRiskAccepted: true },
+    realtimePolicy: { enabled: true, requireZdr: true, zdrAttested: true },
   }));
   const server = http.createServer(app);
   await new Promise((resolve, reject) => {
@@ -138,7 +138,7 @@ async function withReviewApp(run) {
     headers: { Authorization: `Bearer ${username}`, 'Content-Type': 'application/json', ...(options.headers || {}) },
   });
   try {
-    await run({ repository, owner, stranger, source, credentialCalls, request });
+    await run({ repository, owner, stranger, source, request });
   } finally {
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     await repository.close();
@@ -175,8 +175,12 @@ test('writing and speaking capsules use only completed validated server-owned re
     });
     assert.equal(writingOrganization.checks.micro_check.answers[0], 'however');
     assert.equal(writingOrganization.checks.transfer_task.answers[0], 'finally');
+    assert.deepEqual(writingOrganization.item.reference.review.corrections, []);
+    assert.equal(writingOrganization.rule.examples.includes('I like sport because it helps me stay healthy.'), false);
     assert.equal(publicVoiceTutorCapsule(writing).learner_answer, undefined);
+    assert.equal(publicVoiceTutorCapsule(writing).recovery_tasks, undefined);
     assert.equal(persistedVoiceTutorCapsule(writing).learner_answer, undefined);
+    assert.equal(persistedVoiceTutorCapsule(writing).recovery_tasks, undefined);
 
     const speaking = buildWritingSpeakingCapsule({
       source: 'speaking', attempt: await repository.getSpeakingAttempt(username, speakingId), expectedRevision: 1, criterionIndex: 0,
@@ -193,6 +197,8 @@ test('writing and speaking capsules use only completed validated server-owned re
     assert.notEqual(speakingLanguage.id, speaking.id);
     assert.match(speakingLanguage.rule.title, /Языковое оформление/u);
     assert.equal(speakingLanguage.checks.transfer_task.answers[0], 'students');
+    assert.equal(speaking.item.reference.review.corrections.length, 0);
+    assert.equal(speakingLanguage.item.reference.review.corrections[0].example, 'There are two photos.');
 
     const writing38Answer = Array.from({ length: 200 }, (_, index) => `word${index + 1}`).join(' ');
     const writing38 = {
@@ -234,6 +240,10 @@ test('writing and speaking capsules use only completed validated server-owned re
       [0, 1, 2, 3].map((index) => buildWritingSpeakingCapsule({ source: 'speaking', attempt: speaking2, expectedRevision: 1, criterionIndex: index }).checks.transfer_task.answers[0]),
       ['how much does it cost', 'where is the hotel located', 'is breakfast included', 'is there a car park'],
     );
+    assert.deepEqual(
+      [0, 1, 2, 3].map((index) => buildWritingSpeakingCapsule({ source: 'speaking', attempt: speaking2, expectedRevision: 1, criterionIndex: index }).item.reference.review.corrections),
+      [[], [], [], []],
+    );
     assert.throws(
       () => buildWritingSpeakingCapsule({ source: 'writing', attempt: { ...storedWriting, review: { forged: true } }, expectedRevision: 1, criterionIndex: 0 }),
       (error) => error.code === 'VOICE_TUTOR_REVIEW_INVALID',
@@ -249,7 +259,7 @@ test('writing and speaking capsules use only completed validated server-owned re
 });
 
 test('review tracer is owner-bound, rejects client context and never exposes the full response', async () => {
-  await withReviewApp(async ({ repository, owner, stranger, source, credentialCalls, request }) => {
+  await withReviewApp(async ({ repository, owner, stranger, source, request }) => {
     const forged = await request(owner, '/api/v1/voice-tutor/sessions', {
       method: 'POST', headers: { 'Idempotency-Key': 'review-forged-context-001' },
       body: JSON.stringify({ source: 'writing', attemptId: source.writingId, revision: 1, criterionIndex: 0, answer: 'forged' }),
@@ -272,17 +282,17 @@ test('review tracer is owner-bound, rejects client context and never exposes the
     assert.equal(created.capsule.source.attempt_type, 'writing');
     assert.equal(created.capsule.learner_answer, undefined);
     assert.equal(JSON.stringify(created).includes(WRITING_SECRET), false);
-    assert.equal(credentialCalls.length, 1);
-    assert.equal(credentialCalls[0].capsule.learner_answer, WRITING_ANSWER);
+    const stored = await repository.getVoiceTutorSession(owner, created.session.id);
+    const rebuilt = await rebuildSourceCapsule(repository, owner, stored.capsule, NOW);
+    assert.equal(rebuilt.learner_answer, WRITING_ANSWER);
 
     const replayResponse = await request(owner, '/api/v1/voice-tutor/sessions', {
       method: 'POST', headers: { 'Idempotency-Key': 'review-writing-create-01' },
       body: JSON.stringify({ source: 'writing', attemptId: source.writingId, revision: 1, criterionIndex: 0 }),
     });
     assert.equal(replayResponse.status, 200);
-    assert.equal(credentialCalls.length, 1, 'replaying a tutor session must not call any provider again');
+    assert.equal((await replayResponse.json()).realtime.status, 'reissue_required');
 
-    const stored = await repository.getVoiceTutorSession(owner, created.session.id);
     assert.equal(JSON.stringify(stored).includes(WRITING_SECRET), false);
     const exported = await repository.exportUserData(owner);
     assert.equal(JSON.stringify(exported.voice_tutor_sessions).includes(WRITING_SECRET), false);
@@ -290,6 +300,7 @@ test('review tracer is owner-bound, rejects client context and never exposes the
     assert.equal(before.review.overall_got, 4);
 
     let state = created;
+    let providerCall = 0;
     for (const event of [
       { type: 'diagnosis_complete' },
       { type: 'explanation_complete' },
@@ -297,7 +308,9 @@ test('review tracer is owner-bound, rejects client context and never exposes the
       { type: 'transfer_answer', answer: 'because' },
     ]) {
       const advanced = await request(owner, `/api/v1/voice-tutor/sessions/${created.session.id}/events`, {
-        method: 'POST', body: JSON.stringify({ nonce: state.nonce, event }),
+        method: 'POST', body: JSON.stringify({
+          nonce: state.nonce, event, provider_call_id: `review-call-${++providerCall}`,
+        }),
       });
       assert.equal(advanced.status, 200);
       state = await advanced.json();
@@ -309,7 +322,7 @@ test('review tracer is owner-bound, rejects client context and never exposes the
 });
 
 test('speaking review tracer uses the stored transcript and rejects stale or incomplete attempts', async () => {
-  await withReviewApp(async ({ repository, owner, source, credentialCalls, request }) => {
+  await withReviewApp(async ({ repository, owner, source, request }) => {
     const stale = await request(owner, '/api/v1/voice-tutor/sessions', {
       method: 'POST', headers: { 'Idempotency-Key': 'review-speaking-stale-01' },
       body: JSON.stringify({ source: 'speaking', attemptId: source.speakingId, revision: 2, criterionIndex: 0 }),
@@ -335,6 +348,8 @@ test('speaking review tracer uses the stored transcript and rejects stale or inc
     const created = await createdResponse.json();
     assert.equal(created.capsule.module, 'speaking');
     assert.equal(JSON.stringify(created).includes(SPEAKING_SECRET), false);
-    assert.equal(credentialCalls.at(-1).capsule.learner_answer, SPEAKING_SECRET);
+    const stored = await repository.getVoiceTutorSession(owner, created.session.id);
+    const rebuilt = await rebuildSourceCapsule(repository, owner, stored.capsule, NOW);
+    assert.equal(rebuilt.learner_answer, SPEAKING_SECRET);
   });
 });

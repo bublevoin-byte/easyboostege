@@ -10,7 +10,7 @@
 | Тест по грамматике | `/api/v1/ai/generate-content` (`grammar_quiz`) | Zod request + ровно 5 валидированных заданий | встроенный банк заданий |
 | Диалог для аудирования | `/api/v1/ai/generate-content` (`listening_dialog`) | Zod request + вопросы и допустимые индексы ответов | встроенное задание |
 | Текст для чтения | `/api/v1/ai/generate-content` (`reading_text`) | Zod request + строгий JSON и 45–70 слов | встроенный текст |
-| Словарные карточки | `/api/v1/ai/generate-content` (`vocabulary_cards`) | Zod request + строгая схема карточек и точное количество | встроенный словарь |
+| Словарные карточки | `/api/v1/ai/generate-content` (`vocabulary_cards`) | 4–8 карточек за вызов; точное запрошенное количество; для каждой — исходный и 4 уникальных tracer-ready контекста с точной base-form лексемой | встроенный словарь |
 | Генерация задания 37 | `/api/v1/ai/generate-content` (`writing_task_37`) | 40–60 слов, минимум 3 вопроса, тема 2–4 слова | встроенный банк тем |
 | Генерация задания 38 | `/api/v1/ai/generate-content` (`writing_task_38`) | 4–5 уникальных строк, целые проценты в сумме 100 | встроенный банк тем |
 | Генерация устных заданий 1–4 | `/api/v1/ai/generate-content` (`speaking_task_1`…`speaking_task_4`) | отдельная строгая схема каждого типа, контроль количества слов и элементов | встроенный банк заданий |
@@ -27,6 +27,16 @@
 перед выдачей копируется в owner-bound строку `generated_tasks`. Поэтому встроенные и
 динамически сгенерированные результаты проходят один и тот же полный set-level check; устаревшие
 локальные наборы без серверного идентификатора исключаются из ротации.
+
+Встроенный словарный каталог содержит четыре отдельные teacher-reviewed английские usage-ситуации
+для каждой из 299 лексем; сборщик маскирует целевую лексему и отклоняет пропуск, повтор исходного
+примера или post-mask duplicate. Словарный Voice Tutor принимает только наборы, где у каждой AI-карточки есть четыре отдельных
+валидированных примера употребления изучаемой лексемы. В micro-check, transfer, day-1 и day-7
+правильной остаётся эта же лексема; три близких слова служат только distractors, а позиция правильного
+варианта детерминированно меняется для каждой карточки. Ответ принимается и буквой, и самой лексемой.
+Top-up запрашивает не более 8 карточек, чтобы пять предложений на карточку помещались в provider
+budget 1200 output tokens. Короткий или неполный результат считается `AI_RESPONSE_INVALID`, проходит единственную format-repair/
+provider fallback попытку и не сохраняется/не показывается как упражнение без Voice Tutor tracer.
 
 Trusted-rule discovery не даёт браузеру open-web/X search, connectors или произвольный URL.
 `VOICE_TUTOR_RULE_ALLOWLIST_JSON` задаёт server-only authority/domain/path policy, а
@@ -71,42 +81,35 @@ provisional card по owner-bound `session_id` и показывает её ма
 
 ## Realtime Voice Tutor boundary
 
-Credential выдаётся только после auth, Premium entitlement, актуального `voice_processing`
-consent, quota reservation и server-owned capsule validation. Основной provider key остаётся на
-сервере; публичный realtime-объект содержит только короткоживущие `credential`, `expires_at`,
-`realtime_url` и bounded server-issued `session` config. Provider/model/prompt version сохраняются отдельно как bounded техническое
-происхождение результата и не доверяются браузеру.
+После auth, Premium entitlement, актуального `voice_processing` consent, quota reservation и
+server-owned capsule validation HTTP API выдаёт только одноразовый app ticket, его `expires_at` и
+same-origin `proxy_url`. В хранилище остаётся только SHA-256 ticket; idempotent replay предлагает
+однократный reissue с тем же Idempotency-Key. Основной xAI key, provider URL, модель, prompt и tools
+никогда не передаются браузеру.
+Expiry любого initial/recovery/reissue app ticket ограничен `session.expires_at`, включая последнюю
+часть сессии, которая короче настроенного ticket TTL.
+Provider frames также не пересылаются как raw JSON: proxy удаляет session/config payloads, переводит
+ошибки в фиксированный app code и собирает разрешённые lifecycle/audio/caption events только из
+явно проверенных полей.
 
-Сервер запрашивает xAI ephemeral token только с `expires_after.seconds`: credential endpoint не
-поддерживает `session` и `expires_after.anchor`. Versioned model передаётся query-параметром
-`realtime_url`; браузер аутентифицируется единственным subprotocol `xai-client-secret.<token>`,
-после открытия отправляет выданный сервером `session.update` и не передаёт аудио до
-`session.updated`. После этого browser вызывает authenticated idempotent `/activate`; backend
-однократно ставит `voice_activated_at`, и только после успешного ответа browser создаёт audio graph
-и начинает передавать микрофон. Session config содержит только lowercase voice id, bounded instructions,
-`server_vad` и единственную функцию `advance_pedagogy`; встроенные search/MCP tools запрещены.
-Browser-visible instructions содержат правило, исходный ответ ученика и только prompts будущих
-проверок; server-owned `reference` и массивы правильных ответов остаются на backend.
+Same-origin WebSocket proxy атомарно consume-ит ticket, заново строит owner-bound capsule и сам
+открывает xAI с `Authorization: Bearer XAI_API_KEY`. Только сервер отправляет pinned immutable model,
+lowercase voice id, PCM16 little-endian 24 kHz mono JSON transport, `server_vad`, bounded instructions
+и единственную функцию `advance_pedagogy`; search/MCP tools запрещены. После provider
+`session.updated` proxy ставит `voice_activated_at` и отправляет browser `easyboost.ready`. Только
+после этого browser запрашивает микрофон и создаёт audio graph.
 
-`VOICE_TUTOR_ENABLED` и `VOICE_TUTOR_COST_KILL_SWITCH` запрещают новые voice подключения, но
-tracer сохраняет тот же capsule и атомарно продолжает его через text/local fallback. До открытия
-voice расход равен нулю; ACK/activation failure списывает ноль, а runtime fallback сохраняет только
-секунды после server-owned activation. При `VOICE_TUTOR_REQUIRE_ZDR` отсутствие отдельной human/provider attestation в
-`XAI_VOICE_ZDR_ATTESTED` блокирует передачу голоса до transport call. Internal provider body,
-headers и exception message никогда не становятся публичной ошибкой.
-
-The direct xAI client secret has a fixed 60-second connection window and is not persisted or
-logged. Because xAI cannot currently bind or revoke an issued client secret, production remains
-fail closed until `VOICE_TUTOR_UNBOUND_CREDENTIAL_RISK_ACCEPTED=true` is explicitly approved.
-Feature/cost switches stop new issuance only; they cannot terminate a bearer already issued.
-Runtime provider error, close or missing `session.updated` acknowledgement automatically closes
-media and continues the same capsule through text/local fallback. A missing acknowledgement or
-activation bills zero; after activation, elapsed voice seconds remain billable and included in
-voice-cost metrics even when final delivery mode is text/local. Provider/model/prompt provenance
-is preserved when delivery subsequently downgrades to text or local.
+Proxy ограничивает handshake/body/frame, JSON/base64 audio, tool output, rate и lifecycle и во время
+соединения повторно проверяет feature/cost/ZDR switches, актуальный voice consent, Premium entitlement
+и hard deadline. Clean usage считается точно
+по наблюдаемым PCM bytes: `ceil((input+output)/48000)`, не выше reservation. Официальный realtime
+usage xAI содержит tokens, но не длительность аудио, поэтому abnormal disconnect, timeout, malformed
+usage и kill switch консервативно списывают всю reservation. Audio, captions и full transcript не
+сохраняются и не логируются; provider/model/prompt и bounded byte/finalization evidence доступны в
+account export. Provider error продолжает тот же capsule через text/local fallback.
 
 Browser realtime transport принимает только bounded JSON events, ограничивает bytes и частоту,
-требует `session.updated`, затем связанный lifecycle `response.created → response.output_item.added
+требует proxy `easyboost.ready`, затем связанный lifecycle `response.created → response.output_item.added
 → response.function_call_arguments.done → response.done`; response/item/call IDs и tool name
 должны совпасть. Несколько объявленных calls обрабатываются в детерминированном порядке, все
 function outputs отправляются до ровно одного continuation `response.create`. Повтор, неверный порядок, oversized payload и off-scope tool не
@@ -114,9 +117,23 @@ function outputs отправляются до ровно одного continuat
 Capsule и learner-controlled поля помечены в prompt как недоверенные данные, а успех
 micro-check/transfer подтверждает только HTTP endpoint с rotating nonce.
 
+Production WebSocket upgrades используют правый валидный `X-Forwarded-For` hop при том же
+one-trusted-proxy policy, что Express; minute windows хранят process-local HMAC identities и очищаются
+по TTL независимо от capacity. Единый deadline покрывает auth/repository/capsule/provider pipeline;
+global/per-user handshake slots удерживаются до repository-backed provider ACK/failure/timeout. Каждая
+finalization storage attempt также имеет timeout; PostgreSQL statement/lock deadline завершает или
+разрывает текущую попытку до следующего retry, поэтому запросы не перекрываются. В режиме voice каждый
+FSM transition требует точный provider call ID; только text/local допускают ручной переход без call.
+Потерянный text/local 201 один раз атомарно перевыпускает nonce без повторного AI вызова; partial null
+delivery в той же мутации закрывается как zero-billable local. Provisional voice без ticket/activation
+либо получает первый ticket вместе с новым nonce, либо при недоступном realtime атомарно становится
+zero-billable local.
+Primary и bounded finalization PostgreSQL pools имеют PII-free idle-client error handlers: наружу
+выходят только фиксированные `code` и `pool`, без raw error, DSN или user data.
+
 Raw audio, полная расшифровка, свободные реплики и временные субтитры не записываются в БД,
 account export, application logs, metrics или release evidence. Тесты используют только локальный
-fake credential provider и локальный fake WebSocket при выполнении настоящего browser transport; paid smoke разрешён лишь владельцу отдельным
+fake HTTP+WebSocket provider при выполнении настоящего app/proxy/browser transport; paid smoke разрешён лишь владельцу отдельным
 решением вне автоматических gates. Операторский процесс описан в
 `docs/VOICE_TUTOR_OPERATIONS.md`.
 
@@ -164,6 +181,9 @@ orphan card. A non-streaming HTTP body is rejected before buffering.
 `voice_tutor_text` также обслуживает максимум три transient clarification turns. Learner message
 не передаётся repository/log/export, не меняет FSM и ограничен 200 символами; server mutation
 вращает nonce и увеличивает только `clarification_turns` до provider call.
+До любого provider call операция атомарно создаёт durable `ai_requests` claim, который одновременно
+проверяет общий дневной бюджет и персональный часовой лимит. Завершение или ошибка только settle-ит
+этот claim; параллельные запросы не могут потратить деньги до учёта слота.
 
 Встроенные задания живут в `public/task-bank.json`. Файл читается сервером при старте
 (идемпотентный посев по содержанию) и отдаётся клиенту как часть офлайн-оболочки, поэтому

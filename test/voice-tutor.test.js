@@ -30,7 +30,7 @@ function authenticationFor(username) {
   };
 }
 
-async function withCurrentUserApp(run, { limits = LIMITS } = {}) {
+async function withCurrentUserApp(run, { limits = LIMITS, sessionStartLimiter } = {}) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-voice-user-'));
   const repository = createFileRepository(path.join(directory, 'data.json'));
   const username = await repository.createTelegramUser(6101, 'Voice Student');
@@ -56,6 +56,7 @@ async function withCurrentUserApp(run, { limits = LIMITS } = {}) {
   app.use(createVoiceTutorRoutes({
     authentication, db: repository, limits, now: () => clock.now,
     realtimePolicy: { unboundCredentialRiskAccepted: true },
+    ...(sessionStartLimiter ? { sessionStartLimiter } : {}),
   }));
   const server = http.createServer(app);
   await new Promise((resolve, reject) => {
@@ -230,6 +231,39 @@ test('voice session reservation enforces the monthly quota independently', async
     assert.equal(exhausted.status, 429);
     assert.equal((await exhausted.json()).error.code, 'VOICE_TUTOR_MONTHLY_QUOTA_EXHAUSTED');
   }, { limits: { dailySeconds: 600, monthlySeconds: 300, sessionSeconds: 300 } });
+});
+
+test('authenticated session creation is bounded even when every session bills zero', async () => {
+  const starts = new Map();
+  const sessionStartLimiter = (req, res, next) => {
+    const used = starts.get(req.user) || 0;
+    if (used >= 2) return res.status(429).json({ error: { code: 'RATE_LIMITED' } });
+    starts.set(req.user, used + 1);
+    return next();
+  };
+  await withCurrentUserApp(async ({ repository, username, request }) => {
+    await repository.setEntitlement(username, 'voice_tutor', {
+      startsAt: NOW,
+      endsAt: new Date('2026-09-02T10:00:00.000Z'),
+    });
+    for (const idempotencyKey of ['zero-bill-start-0001', 'zero-bill-start-0002']) {
+      const created = await request('/api/v1/voice-tutor/sessions', {
+        method: 'POST', headers: { 'Idempotency-Key': idempotencyKey },
+      });
+      assert.equal(created.status, 201);
+      const session = (await created.json()).session;
+      const finished = await request(`/api/v1/voice-tutor/sessions/${session.id}/finish`, { method: 'POST' });
+      assert.equal(finished.status, 200);
+      const stored = await repository.getVoiceTutorSession(username, session.id);
+      assert.equal(stored.billable_seconds, 0);
+    }
+    const blocked = await request('/api/v1/voice-tutor/sessions', {
+      method: 'POST', headers: { 'Idempotency-Key': 'zero-bill-start-0003' },
+    });
+    assert.equal(blocked.status, 429);
+    assert.equal((await blocked.json()).error.code, 'RATE_LIMITED');
+    assert.equal(starts.get(username), 2);
+  }, { sessionStartLimiter });
 });
 
 test('legacy file data migrates to base access and account export/delete covers voice records', async () => {

@@ -29,21 +29,32 @@ export function createAuthentication({ secret, sessionDays, monitoringToken, cre
     res.setHeader('Set-Cookie', 'eb_token=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax' + cookieSuffix(req));
   }
 
-  async function auth(req, res, next) {
+  async function authenticateRequest(req) {
     const header = req.headers.authorization || '';
     const token = (header.startsWith('Bearer ') ? header.slice(7) : '') || readCookie(req, 'eb_token');
+    const claims = jwt.verify(token, secret);
+    const username = claims.u;
+    const user = await getUser(username);
+    if (!user) return null;
+    if (claims.sid && !await isSessionActive(claims.sid, username)) return null;
+    return {
+      username,
+      role: user.role || 'student',
+      sessionId: claims.sid || null,
+      token,
+    };
+  }
+
+  async function auth(req, res, next) {
     try {
-      const claims = jwt.verify(token, secret);
-      const username = claims.u;
-      const user = await getUser(username);
-      if (!user) return res.status(401).json({ error: 'Требуется вход' });
-      if (claims.sid && !await isSessionActive(claims.sid, username)) {
+      const authenticated = await authenticateRequest(req);
+      if (!authenticated) {
         return res.status(401).json({ error: { code: 'SESSION_REVOKED', message: 'Сессия завершена. Войдите снова.' } });
       }
-      req.user = username;
-      req.role = user.role || 'student';
-      req.sessionId = claims.sid || null;
-      req.authToken = token;
+      req.user = authenticated.username;
+      req.role = authenticated.role;
+      req.sessionId = authenticated.sessionId;
+      req.authToken = authenticated.token;
       next();
     } catch (error) {
       res.status(401).json({ error: 'Требуется вход' });
@@ -68,5 +79,5 @@ export function createAuthentication({ secret, sessionDays, monitoringToken, cre
     next();
   }
 
-  return { issueToken, readCookie, setAuthCookie, clearAuthCookie, auth, requireRole, monitoringAuth };
+  return { issueToken, readCookie, setAuthCookie, clearAuthCookie, authenticateRequest, auth, requireRole, monitoringAuth };
 }
