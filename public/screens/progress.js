@@ -4,7 +4,7 @@
  * Числа он берёт из того же состояния, что и плитки главного экрана, — считать заново нечего.
  */
 import {registerRouteHook} from '../router.js';
-import {S,apiGet,apiMessage,apiPost,apiPut,progressModule,setTxt,setW} from '../app.js';
+import {S,apiGet,apiMessage,apiPost,apiPostIdempotent,apiPut,progressModule,setTxt,setW} from '../app.js';
 
 const BAR_IDS={words:'pb_words',gram:'pb_gram',read:'pb_read',listen:'pb_listen',speak:'pb_speak'};
 function renderProgress(){if(!S)return;const view=progressModule.overview(S,Date.now());
@@ -15,6 +15,7 @@ function text(tag,value,style){const node=document.createElement(tag);node.textC
 function recoveryStateLabel(state){return state==='recovered'?'Восстановлено':state==='relapsed'?'Ошибка проявилась снова':'В работе'}
 function repeatAttemptId(){return globalThis.crypto&&typeof globalThis.crypto.randomUUID==='function'?globalThis.crypto.randomUUID():('00000000-0000-4000-8000-'+Date.now().toString(16).padStart(12,'0').slice(-12))}
 function goalIdempotencyKey(){return globalThis.crypto&&typeof globalThis.crypto.randomUUID==='function'?globalThis.crypto.randomUUID():('adaptive-goal-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2))}
+function diagnosticIdempotencyKey(kind){return globalThis.crypto&&typeof globalThis.crypto.randomUUID==='function'?globalThis.crypto.randomUUID():('adaptive-'+kind+'-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2))}
 
 function drawAdaptivePlan(payload){
   const root=document.getElementById('adaptive_plan');const summary=document.getElementById('adaptive_plan_summary');if(!root||!summary)return;
@@ -27,11 +28,45 @@ function drawAdaptivePlan(payload){
   const diagnostic=profile.needsDiagnostic?' Нужна короткая диагностика для уточнения.':'';
   const assisted=Number(profile.assistedEvidenceCount)>0&&establishedSkillCount<12?' Результаты с подсказкой не подтверждают владение навыком.':'';
   summary.textContent=state+' · подтверждено навыков: '+establishedSkillCount+' из 12 · уверенность '+confidence+'% · данных: '+observed+'.'+(weakest?' Сейчас важнее всего: '+weakest.id+' ('+weakest.mastery+'%).':'')+assisted+diagnostic;
+  const start=document.getElementById('adaptive_diagnostic_start');if(start)start.hidden=!profile.needsDiagnostic;
 }
+
+function drawAdaptiveDiagnostic(payload){
+  const section=document.getElementById('adaptive_diagnostic');const start=document.getElementById('adaptive_diagnostic_start');const form=document.getElementById('adaptive_diagnostic_form');const fieldset=document.getElementById('adaptive_diagnostic_question');const prompt=document.getElementById('adaptive_diagnostic_prompt');const choices=document.getElementById('adaptive_diagnostic_choices');const audio=document.getElementById('adaptive_diagnostic_audio');const complete=document.getElementById('adaptive_diagnostic_complete');const notice=document.getElementById('adaptive_diagnostic_notice');const progress=document.getElementById('adaptive_diagnostic_progress');const label=document.getElementById('adaptive_diagnostic_progress_label');const timing=document.getElementById('adaptive_diagnostic_timing');
+  if(!section||!start||!form||!fieldset||!prompt||!choices||!audio||!complete||!notice||!progress||!label||!timing)return;
+  const diagnostic=payload&&payload.diagnostic;const item=payload&&payload.item;
+  if(!diagnostic){section.hidden=true;return}
+  section.hidden=false;section.dataset.diagnosticId=diagnostic.id;section.dataset.itemId=item&&item.id||'';
+  const maxItems=Math.max(1,Number(diagnostic.maxItems)||1);const estimatedMinutes=Math.max(1,Number(diagnostic.estimatedMinutes)||1);const deadlineMinutes=Math.max(1,Number(diagnostic.deadlineMinutes)||1);
+  progress.max=maxItems;progress.value=Math.max(0,Math.min(maxItems,Number(diagnostic.answeredItems)||0));label.textContent=progress.value+' из '+maxItems;
+  timing.textContent='Около '+estimatedMinutes+' минут · ответы сохраняются. Вернуться нужно в течение '+deadlineMinutes+' минут после старта.';
+  const expired=diagnostic.status==='expired';start.hidden=!expired;start.textContent=expired?'Начать диагностику заново · около '+estimatedMinutes+' минут':'Начать диагностику · около '+estimatedMinutes+' минут';
+  complete.hidden=!diagnostic.canComplete;form.hidden=!item||diagnostic.status!=='in_progress';fieldset.disabled=form.hidden;
+  if(expired){notice.textContent='Время этой попытки истекло. Начните новую — незавершённые ответы не считаются результатом.';choices.replaceChildren();audio.hidden=true;return}
+  if(diagnostic.status==='completed'){notice.textContent='Диагностика завершена. Профиль пока предварительный и будет уточняться по занятиям.';choices.replaceChildren();audio.hidden=true;return}
+  if(diagnostic.canComplete){notice.textContent='Данных достаточно для предварительного результата.';choices.replaceChildren();audio.hidden=true;return}
+  if(!item){notice.textContent='Загружаем следующий вопрос…';return}
+  prompt.textContent=item.prompt;choices.replaceChildren();
+  item.choices.forEach(function(choice,index){const option=document.createElement('label');option.setAttribute('style','display:flex;align-items:flex-start;gap:8px;border:1px solid #E5E1DA;border-radius:11px;padding:9px 10px;font-weight:650;font-size:11px;line-height:1.4;color:#3E4248;cursor:pointer;');const input=document.createElement('input');input.type='radio';input.name='adaptive_diagnostic_choice';input.value=choice.id;input.required=true;if(index===0)input.setAttribute('aria-describedby','adaptive_diagnostic_prompt');option.appendChild(input);option.appendChild(document.createTextNode(choice.label));choices.appendChild(option)});
+  audio.hidden=item.presentation!=='audio'||!item.speechText;audio.dataset.speechText=item.speechText||'';notice.textContent=(item.measurementNotice?item.measurementNotice+' ':'')+'Выберите один ответ. Подсказок и повторной попытки в диагностике нет.';
+}
+
+function bindAdaptiveDiagnostic(){
+  const section=document.getElementById('adaptive_diagnostic');const start=document.getElementById('adaptive_diagnostic_start');const form=document.getElementById('adaptive_diagnostic_form');const complete=document.getElementById('adaptive_diagnostic_complete');const audio=document.getElementById('adaptive_diagnostic_audio');const notice=document.getElementById('adaptive_diagnostic_notice');if(!section||!start||!form||!complete||!audio||!notice||section.dataset.bound)return;
+  section.dataset.bound='true';
+  start.addEventListener('click',async function(){start.disabled=true;notice.textContent='Начинаем диагностику…';const key=start.dataset.pendingKey||diagnosticIdempotencyKey('start');start.dataset.pendingKey=key;try{const result=await apiPostIdempotent('/api/v1/adaptive-learning/diagnostics/start',{},key);delete start.dataset.pendingKey;drawAdaptiveDiagnostic(result)}catch(error){notice.textContent=apiMessage(error,'request')}finally{start.disabled=false}});
+  form.addEventListener('change',function(){delete form.dataset.pendingKey});
+  form.addEventListener('submit',async function(event){event.preventDefault();const selected=form.querySelector('input[name="adaptive_diagnostic_choice"]:checked');if(!selected){notice.textContent='Выберите один ответ.';return}const button=form.querySelector('button[type="submit"]');button.disabled=true;notice.textContent='Сохраняем ответ…';const key=form.dataset.pendingKey||diagnosticIdempotencyKey('answer');form.dataset.pendingKey=key;try{const result=await apiPostIdempotent('/api/v1/adaptive-learning/diagnostics/'+encodeURIComponent(section.dataset.diagnosticId)+'/answers',{itemId:section.dataset.itemId,choiceId:selected.value},key);delete form.dataset.pendingKey;drawAdaptiveDiagnostic(result)}catch(error){notice.textContent=apiMessage(error,'request')}finally{button.disabled=false}});
+  complete.addEventListener('click',async function(){complete.disabled=true;notice.textContent='Собираем предварительный профиль…';const key=complete.dataset.pendingKey||diagnosticIdempotencyKey('complete');complete.dataset.pendingKey=key;try{const result=await apiPostIdempotent('/api/v1/adaptive-learning/diagnostics/'+encodeURIComponent(section.dataset.diagnosticId)+'/complete',{},key);delete complete.dataset.pendingKey;drawAdaptivePlan(result);drawAdaptiveDiagnostic(result)}catch(error){notice.textContent=apiMessage(error,'request')}finally{complete.disabled=false}});
+  audio.addEventListener('click',function(){if(!audio.dataset.speechText||!window.speechSynthesis||!window.SpeechSynthesisUtterance){notice.textContent='Озвучка недоступна в этом браузере.';return}window.speechSynthesis.cancel();const utterance=new window.SpeechSynthesisUtterance(audio.dataset.speechText);utterance.lang='en-US';window.speechSynthesis.speak(utterance)});
+}
+
+async function resumeAdaptiveDiagnostic(){try{drawAdaptiveDiagnostic(await apiGet('/api/v1/adaptive-learning/diagnostics/current'))}catch(error){const notice=document.getElementById('adaptive_diagnostic_notice');if(notice)notice.textContent='Не удалось восстановить диагностику. Проверьте сеть и повторите попытку.'}}
 
 async function renderAdaptivePlan(){
   const root=document.getElementById('adaptive_plan');const form=document.getElementById('adaptive_goal_form');const notice=document.getElementById('adaptive_goal_notice');if(!root||!form||!notice)return;
   root.hidden=!(window.__sub?.features?.adaptive_learning===true);if(root.hidden)return;
+  bindAdaptiveDiagnostic();
   if(!form.dataset.bound){
     form.dataset.bound='true';form.addEventListener('input',function(){delete form.dataset.pendingKey});
     form.addEventListener('submit',async function(event){event.preventDefault();const button=form.querySelector('button[type="submit"]');button.disabled=true;notice.textContent='Сохраняем цель…';
@@ -41,7 +76,7 @@ async function renderAdaptivePlan(){
       catch(error){notice.textContent=apiMessage(error,'request')}finally{button.disabled=false}
     });
   }
-  try{drawAdaptivePlan(await apiGet('/api/v1/adaptive-learning/overview'));notice.textContent=''}catch(error){notice.textContent='План сейчас недоступен онлайн. Сохранённый прогресс остаётся на устройстве.'}
+  try{const payload=await apiGet('/api/v1/adaptive-learning/overview');drawAdaptivePlan(payload);notice.textContent='';if(payload.profile&&payload.profile.needsDiagnostic)await resumeAdaptiveDiagnostic();else drawAdaptiveDiagnostic(null)}catch(error){notice.textContent='План сейчас недоступен онлайн. Сохранённый прогресс остаётся на устройстве.'}
 }
 
 async function submitRepeat(repeat,input,button,notice){
@@ -74,4 +109,4 @@ async function renderRecoveryMap(){const root=document.getElementById('voice_rec
 
 registerRouteHook(function(id){if(id==='scr10')renderProgress()});
 
-export {drawAdaptivePlan,drawRecoveryMap,renderAdaptivePlan,renderProgress,renderRecoveryMap};
+export {drawAdaptiveDiagnostic,drawAdaptivePlan,drawRecoveryMap,renderAdaptivePlan,renderProgress,renderRecoveryMap};

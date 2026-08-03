@@ -2,9 +2,9 @@
 
 **What to build:** Convert the goal and evidence profile into an explained forecast range, required weekly time, feasibility choices and a rolling weekly allocation across modules/micro-skills.
 
-**Blocked by:** 01; diagnostic evidence from 02 is consumed when present.
+**Blocked by:** 01 and 02 are complete; diagnostic evidence from 02 is consumed when present.
 
-**Status:** blocked
+**Status:** ready-for-agent
 
 - [ ] Write failing deterministic and API/UI tests first.
 - [ ] Prioritize target gap, EGE impact, due retention, deadline and uncertainty.
@@ -14,4 +14,3 @@
 - [ ] Explain every major allocation and create diagnostic probes for high uncertainty.
 - [ ] Persist plan revisions and cover export/delete/file/PostgreSQL parity.
 - [ ] Pass targeted tests and independent Standards + Spec review with zero P0–P2.
-

@@ -108,3 +108,51 @@ export function adaptiveLearningProfilePublicDto(profile) {
     modules,
   };
 }
+
+export function adaptiveLearningProfileSnapshotDto(profile) {
+  if (!profile) return null;
+  return {
+    taxonomyVersion: profile.taxonomyVersion,
+    weightingVersion: profile.weightingVersion,
+    profileCalculationRevision: Number(profile.profileCalculationRevision),
+    evidenceWatermarkVersion: profile.evidenceWatermarkVersion,
+    evidenceObservedAt: timestamp(profile.evidenceObservedAt),
+    evidenceSourceCount: Number(profile.evidenceSourceCount),
+    preliminary: Boolean(profile.preliminary),
+    status: profile.status,
+    confidence: Number(profile.confidence),
+    evidenceCount: Number(profile.evidenceCount),
+    independentEvidenceCount: Number(profile.independentEvidenceCount),
+    assistedEvidenceCount: Number(profile.assistedEvidenceCount),
+    clientReportedEvidenceCount: Number(profile.clientReportedEvidenceCount),
+    independentModuleCount: Number(profile.independentModuleCount),
+    establishedSkillCount: Number(profile.establishedSkillCount),
+    needsDiagnostic: Boolean(profile.needsDiagnostic),
+    explanationCodes: Array.isArray(profile.explanationCodes)
+      ? structuredClone(profile.explanationCodes)
+      : [],
+    skills: Array.isArray(profile.skills) ? profile.skills.map((skill) => ({
+      id: skill.id,
+      label: SKILL_LABELS.get(skill.id) || skill.id,
+      module: skill.module,
+      mastery: Number(skill.mastery),
+      uncertainty: Number(skill.uncertainty),
+      status: skill.status,
+      evidenceCount: Number(skill.evidenceCount),
+      effectiveEvidenceCount: Number(skill.effectiveEvidenceCount),
+      independentEvidenceCount: Number(skill.independentEvidenceCount),
+      evidenceQuality: skill.evidenceQuality,
+      lastObservedAt: timestamp(skill.lastObservedAt),
+      dueState: skill.dueState,
+      explanationCode: skill.explanationCode,
+    })) : [],
+    modules: Array.isArray(profile.modules) ? profile.modules.map((module) => ({
+      id: module.id,
+      mastery: Number(module.mastery),
+      uncertainty: Number(module.uncertainty),
+      status: module.status,
+      evidenceCount: Number(module.evidenceCount),
+      independentEvidenceCount: Number(module.independentEvidenceCount),
+    })) : [],
+  };
+}

@@ -12,6 +12,18 @@ import {
   adaptiveLearningProfileExportDto,
   adaptiveLearningProfileRepositoryDto,
 } from '../adaptive-learning/repository-dto.js';
+import {
+  adaptiveDiagnosticAnswerClaimRepositoryDto,
+  adaptiveDiagnosticCompletionSnapshotDto,
+  adaptiveDiagnosticExportDto,
+  adaptiveDiagnosticRepositoryDto,
+  adaptiveDiagnosticResponseExportDto,
+  adaptiveDiagnosticStartClaimRepositoryDto,
+} from '../adaptive-learning/diagnostic-dto.js';
+import {
+  ADAPTIVE_DIAGNOSTIC_START_CLAIM_LIMIT,
+  adaptiveDiagnosticClaimExpiresAt,
+} from '../adaptive-learning/diagnostic-claims.js';
 
 function normalizeAttemptModels(attempts) {
   return attempts.map((attempt) => ({ ...attempt, model: attempt.model ?? null }));
@@ -76,7 +88,7 @@ function reconcileLegacyApprovedRuleCards(cards) {
 
 export function createFileRepository(filePath) {
   let loaded = false;
-  let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, subscription_entitlements: {}, voice_tutor_sessions: [], voice_tutor_recoveries: [], voice_tutor_repeats: [], voice_tutor_repeat_attempts: [], voice_tutor_reports: [], rule_cards: [], payment_requests: {}, subscription_events: [], adaptive_learning_goals: [], adaptive_learning_profiles: {}, adaptive_learning_skill_estimates: {} };
+  let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, subscription_entitlements: {}, voice_tutor_sessions: [], voice_tutor_recoveries: [], voice_tutor_repeats: [], voice_tutor_repeat_attempts: [], voice_tutor_reports: [], rule_cards: [], payment_requests: {}, subscription_events: [], adaptive_learning_goals: [], adaptive_learning_profiles: {}, adaptive_learning_skill_estimates: {}, adaptive_diagnostic_sessions: [], adaptive_diagnostic_start_claims: [], adaptive_diagnostic_responses: [] };
   let writeQueue = Promise.resolve();
   let coordinatedMutationQueue = Promise.resolve();
   let paymentQueue = Promise.resolve();
@@ -132,6 +144,9 @@ export function createFileRepository(filePath) {
           adaptive_learning_goals: Array.isArray(parsed.adaptive_learning_goals) ? parsed.adaptive_learning_goals : [],
           adaptive_learning_profiles: parsed.adaptive_learning_profiles && typeof parsed.adaptive_learning_profiles === 'object' ? parsed.adaptive_learning_profiles : {},
           adaptive_learning_skill_estimates: parsed.adaptive_learning_skill_estimates && typeof parsed.adaptive_learning_skill_estimates === 'object' ? parsed.adaptive_learning_skill_estimates : {},
+          adaptive_diagnostic_sessions: Array.isArray(parsed.adaptive_diagnostic_sessions) ? parsed.adaptive_diagnostic_sessions : [],
+          adaptive_diagnostic_start_claims: Array.isArray(parsed.adaptive_diagnostic_start_claims) ? parsed.adaptive_diagnostic_start_claims : [],
+          adaptive_diagnostic_responses: Array.isArray(parsed.adaptive_diagnostic_responses) ? parsed.adaptive_diagnostic_responses : [],
         };
         const reconciledLegacyCanonical = reconcileLegacyApprovedRuleCards(state.rule_cards);
         if (minimizedLegacyCapsule || reconciledLegacyCanonical) await persist();
@@ -1492,6 +1507,14 @@ export function createFileRepository(filePath) {
     const repeatById = new Map(state.voice_tutor_repeats
       .filter((entry) => recoveryById.has(entry.recovery_id))
       .map((entry) => [entry.id, entry]));
+    const diagnostics = state.adaptive_diagnostic_sessions.filter((entry) => entry.username === username);
+    const diagnosticById = new Map(diagnostics.map((entry) => [entry.id, entry]));
+    const completedDiagnosticIds = new Set(diagnostics
+      .filter((entry) => entry.status === 'completed')
+      .map((entry) => entry.id));
+    const diagnosticCompletions = diagnostics
+      .filter((entry) => entry.status === 'completed' && entry.completed_at)
+      .map((entry) => ({ catalog_version: entry.catalog_version, completed_at: entry.completed_at }));
     return structuredClone({
       attempts: state.module_attempts
         .filter((entry) => entry.username === username)
@@ -1503,6 +1526,20 @@ export function createFileRepository(filePath) {
           const recovery = recoveryById.get(repeatById.get(entry.repeat_id).recovery_id);
           return { ...entry, skill_id: recovery.skill_id, module: recovery.module };
         }),
+      diagnosticResponses: state.adaptive_diagnostic_responses
+        .filter((entry) => completedDiagnosticIds.has(entry.diagnostic_id))
+        .map((entry) => ({
+          id: entry.id,
+          diagnostic_id: entry.diagnostic_id,
+          item_id: entry.item_id,
+          catalog_version: diagnosticById.get(entry.diagnostic_id).catalog_version,
+          skill_id: entry.skill_id,
+          module: entry.module,
+          evidence_quality: entry.evidence_quality,
+          correct: Boolean(entry.correct),
+          answered_at: entry.answered_at,
+        })),
+      diagnosticCompletions,
     });
   }
 
@@ -1571,6 +1608,261 @@ export function createFileRepository(filePath) {
       profile,
       state.adaptive_learning_skill_estimates[username] || [],
     );
+  }
+
+  async function startAdaptiveDiagnostic(username, diagnostic) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      if (!state.users[username]) throw new Error('USER_NOT_FOUND');
+      const instant = new Date(diagnostic.now).getTime();
+      state.adaptive_diagnostic_start_claims = state.adaptive_diagnostic_start_claims
+        .filter((entry) => Number(entry.claim_expires_at) > instant);
+      const duplicate = state.adaptive_diagnostic_start_claims.find((entry) => (
+        entry.username === username && entry.idempotency_key === diagnostic.idempotencyKey
+      ));
+      if (duplicate) {
+        if (duplicate.request_hash !== diagnostic.requestHash) throw new Error('ADAPTIVE_DIAGNOSTIC_IDEMPOTENCY_CONFLICT');
+        return { created: false, diagnostic: adaptiveDiagnosticStartClaimRepositoryDto(duplicate) };
+      }
+      const ownerClaimCount = state.adaptive_diagnostic_start_claims
+        .filter((entry) => entry.username === username).length;
+      if (ownerClaimCount >= ADAPTIVE_DIAGNOSTIC_START_CLAIM_LIMIT) {
+        throw new Error('ADAPTIVE_DIAGNOSTIC_START_LIMIT');
+      }
+      for (const entry of state.adaptive_diagnostic_sessions) {
+        if (entry.username === username && ['in_progress', 'ready'].includes(entry.status)
+          && Number(entry.expires_at) <= instant) {
+          entry.status = 'expired';
+          entry.current_item_id = null;
+          entry.stop_reason = 'maximum_time';
+          entry.updated_at = instant;
+        }
+      }
+      let active = state.adaptive_diagnostic_sessions.find((entry) => (
+        entry.username === username && ['in_progress', 'ready'].includes(entry.status)
+      ));
+      const created = !active;
+      if (!active) {
+        active = {
+          id: diagnostic.id,
+          username,
+          catalog_version: diagnostic.catalogVersion,
+          status: 'in_progress',
+          current_item_id: diagnostic.currentItemId,
+          answered_items: 0,
+          correct_items: 0,
+          stop_reason: null,
+          idempotency_key: diagnostic.idempotencyKey,
+          request_hash: diagnostic.requestHash,
+          started_at: instant,
+          expires_at: new Date(diagnostic.expiresAt).getTime(),
+          completed_at: null,
+          updated_at: instant,
+        };
+        state.adaptive_diagnostic_sessions.push(active);
+      }
+      const claim = {
+        username,
+        idempotency_key: diagnostic.idempotencyKey,
+        request_hash: diagnostic.requestHash,
+        diagnostic_id: active.id,
+        catalog_version: active.catalog_version,
+        status: active.status,
+        current_item_id: active.current_item_id,
+        answered_items: active.answered_items,
+        correct_items: active.correct_items,
+        stop_reason: active.stop_reason,
+        started_at: active.started_at,
+        expires_at: active.expires_at,
+        completed_at: active.completed_at,
+        updated_at: active.updated_at,
+        claimed_at: instant,
+        claim_expires_at: adaptiveDiagnosticClaimExpiresAt(diagnostic.now).getTime(),
+      };
+      state.adaptive_diagnostic_start_claims.push(claim);
+      await persist();
+      return { created, diagnostic: adaptiveDiagnosticStartClaimRepositoryDto(claim) };
+    });
+  }
+
+  async function getAdaptiveDiagnosticStartClaim(username, claim) {
+    await load();
+    const instant = new Date(claim.now ?? Date.now()).getTime();
+    const stored = state.adaptive_diagnostic_start_claims.find((entry) => (
+      entry.username === username && entry.idempotency_key === claim.idempotencyKey
+        && Number(entry.claim_expires_at) > instant
+    ));
+    if (!stored) return null;
+    if (stored.request_hash !== claim.requestHash) throw new Error('ADAPTIVE_DIAGNOSTIC_IDEMPOTENCY_CONFLICT');
+    return adaptiveDiagnosticStartClaimRepositoryDto(stored);
+  }
+
+  async function getCurrentAdaptiveDiagnostic(username) {
+    await load();
+    const session = state.adaptive_diagnostic_sessions
+      .filter((entry) => entry.username === username)
+      .sort((left, right) => Number(right.started_at) - Number(left.started_at))[0];
+    if (!session || session.status === 'completed') return null;
+    const responses = state.adaptive_diagnostic_responses.filter((entry) => entry.diagnostic_id === session.id);
+    return adaptiveDiagnosticRepositoryDto(session, responses);
+  }
+
+  async function getAdaptiveDiagnostic(username, diagnosticId) {
+    await load();
+    const session = state.adaptive_diagnostic_sessions.find((entry) => (
+      entry.username === username && entry.id === diagnosticId
+    ));
+    if (!session) return null;
+    const responses = state.adaptive_diagnostic_responses.filter((entry) => entry.diagnostic_id === session.id);
+    return adaptiveDiagnosticRepositoryDto(session, responses);
+  }
+
+  async function getAdaptiveDiagnosticCompletionReplay(username, completion) {
+    await load();
+    const session = state.adaptive_diagnostic_sessions.find((entry) => (
+      entry.id === completion.diagnosticId && entry.username === username
+    ));
+    if (!session || session.status !== 'completed') return null;
+    if (session.completion_idempotency_key === completion.idempotencyKey
+      && session.completion_request_hash !== completion.requestHash) {
+      throw new Error('ADAPTIVE_DIAGNOSTIC_IDEMPOTENCY_CONFLICT');
+    }
+    const responseSnapshot = adaptiveDiagnosticCompletionSnapshotDto(
+      session.completion_response_snapshot,
+    );
+    if (!responseSnapshot) throw new Error('ADAPTIVE_DIAGNOSTIC_COMPLETION_SNAPSHOT_MISSING');
+    return responseSnapshot;
+  }
+
+  async function answerAdaptiveDiagnostic(username, answer) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      const session = state.adaptive_diagnostic_sessions.find((entry) => (
+        entry.id === answer.diagnosticId && entry.username === username
+      ));
+      if (!session) throw new Error('ADAPTIVE_DIAGNOSTIC_NOT_FOUND');
+      const responses = state.adaptive_diagnostic_responses.filter((entry) => entry.diagnostic_id === session.id);
+      const duplicate = responses.find((entry) => entry.idempotency_key === answer.idempotencyKey);
+      if (duplicate) {
+        if (duplicate.request_hash !== answer.requestHash) throw new Error('ADAPTIVE_DIAGNOSTIC_IDEMPOTENCY_CONFLICT');
+        return { created: false, diagnostic: adaptiveDiagnosticAnswerClaimRepositoryDto(duplicate) };
+      }
+      if (session.status === 'expired' && session.stop_reason === 'maximum_time') {
+        throw new Error('ADAPTIVE_DIAGNOSTIC_TIME_EXPIRED');
+      }
+      if (['in_progress', 'ready'].includes(session.status)
+        && Number(session.expires_at) <= new Date(answer.now).getTime()) {
+        session.status = 'expired';
+        session.current_item_id = null;
+        session.stop_reason = 'maximum_time';
+        session.updated_at = new Date(answer.now).getTime();
+        await persist();
+        throw new Error('ADAPTIVE_DIAGNOSTIC_TIME_EXPIRED');
+      }
+      if (responses.some((entry) => entry.item_id === answer.itemId)) {
+        throw new Error('ADAPTIVE_DIAGNOSTIC_ITEM_ALREADY_ANSWERED');
+      }
+      if (session.status !== 'in_progress' || session.current_item_id !== answer.itemId) {
+        throw new Error('ADAPTIVE_DIAGNOSTIC_ITEM_NOT_CURRENT');
+      }
+      const stored = {
+        id: answer.id,
+        diagnostic_id: session.id,
+        item_id: answer.itemId,
+        skill_id: answer.skillId,
+        module: answer.module,
+        evidence_quality: answer.evidenceQuality,
+        choice_id: answer.choiceId,
+        correct: Boolean(answer.correct),
+        response_ms: answer.responseMs,
+        idempotency_key: answer.idempotencyKey,
+        request_hash: answer.requestHash,
+        answered_at: new Date(answer.now).getTime(),
+      };
+      state.adaptive_diagnostic_responses.push(stored);
+      const updatedResponses = [...responses, stored];
+      session.current_item_id = answer.nextItemId;
+      session.status = answer.status || 'in_progress';
+      session.stop_reason = answer.stopReason || null;
+      session.answered_items = updatedResponses.length;
+      session.correct_items = updatedResponses.filter((entry) => entry.correct).length;
+      session.updated_at = new Date(answer.now).getTime();
+      Object.assign(stored, {
+        replay_catalog_version: session.catalog_version,
+        replay_status: session.status,
+        replay_current_item_id: session.current_item_id,
+        replay_answered_items: session.answered_items,
+        replay_correct_items: session.correct_items,
+        replay_stop_reason: session.stop_reason,
+        replay_started_at: session.started_at,
+        replay_expires_at: session.expires_at,
+        replay_completed_at: session.completed_at,
+        replay_updated_at: session.updated_at,
+      });
+      await persist();
+      return { created: true, diagnostic: adaptiveDiagnosticRepositoryDto(session, updatedResponses) };
+    });
+  }
+
+  async function completeAdaptiveDiagnostic(username, completion) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      const session = state.adaptive_diagnostic_sessions.find((entry) => (
+        entry.id === completion.diagnosticId && entry.username === username
+      ));
+      if (!session) throw new Error('ADAPTIVE_DIAGNOSTIC_NOT_FOUND');
+      const responses = state.adaptive_diagnostic_responses.filter((entry) => entry.diagnostic_id === session.id);
+      if (session.status === 'completed') {
+        if (session.completion_idempotency_key === completion.idempotencyKey
+          && session.completion_request_hash !== completion.requestHash) {
+          throw new Error('ADAPTIVE_DIAGNOSTIC_IDEMPOTENCY_CONFLICT');
+        }
+        const responseSnapshot = adaptiveDiagnosticCompletionSnapshotDto(
+          session.completion_response_snapshot,
+        );
+        if (!responseSnapshot) throw new Error('ADAPTIVE_DIAGNOSTIC_COMPLETION_SNAPSHOT_MISSING');
+        return {
+          created: false,
+          diagnostic: adaptiveDiagnosticRepositoryDto(session, responses),
+          responseSnapshot,
+        };
+      }
+      if (session.status === 'expired' && session.stop_reason === 'maximum_time') {
+        throw new Error('ADAPTIVE_DIAGNOSTIC_TIME_EXPIRED');
+      }
+      if (session.status === 'ready'
+        && Number(session.expires_at) <= new Date(completion.now).getTime()) {
+        session.status = 'expired';
+        session.current_item_id = null;
+        session.stop_reason = 'maximum_time';
+        session.updated_at = new Date(completion.now).getTime();
+        await persist();
+        throw new Error('ADAPTIVE_DIAGNOSTIC_TIME_EXPIRED');
+      }
+      if (session.status !== 'ready') throw new Error('ADAPTIVE_DIAGNOSTIC_NOT_READY');
+      const responseSnapshot = adaptiveDiagnosticCompletionSnapshotDto(completion.responseSnapshot);
+      if (!responseSnapshot
+        || responseSnapshot.diagnostic.id !== session.id
+        || responseSnapshot.diagnostic.catalogVersion !== session.catalog_version
+        || responseSnapshot.diagnostic.status !== 'completed'
+        || responseSnapshot.diagnostic.answeredItems !== Number(session.answered_items)
+        || responseSnapshot.result.correctItems !== Number(session.correct_items)) {
+        throw new Error('ADAPTIVE_DIAGNOSTIC_COMPLETION_SNAPSHOT_INVALID');
+      }
+      session.status = 'completed';
+      session.current_item_id = null;
+      session.completion_idempotency_key = completion.idempotencyKey;
+      session.completion_request_hash = completion.requestHash;
+      session.completion_response_snapshot = responseSnapshot;
+      session.completed_at = new Date(completion.now).getTime();
+      session.updated_at = session.completed_at;
+      await persist();
+      return {
+        created: true,
+        diagnostic: adaptiveDiagnosticRepositoryDto(session, responses),
+        responseSnapshot: structuredClone(responseSnapshot),
+      };
+    });
   }
 
   async function recordModuleAttempt(username, attempt, { evidenceQuality = 'client_reported' } = {}) {
@@ -1805,6 +2097,14 @@ export function createFileRepository(filePath) {
         .map(adaptiveLearningGoalRepositoryDto),
       adaptive_learning_profile: adaptiveExport.profile,
       adaptive_learning_skill_estimates: adaptiveExport.estimates,
+      adaptive_diagnostic_sessions: state.adaptive_diagnostic_sessions
+        .filter((item) => item.username === username)
+        .map(adaptiveDiagnosticExportDto),
+      adaptive_diagnostic_responses: state.adaptive_diagnostic_responses
+        .filter((item) => state.adaptive_diagnostic_sessions.some((session) => (
+          session.username === username && session.id === item.diagnostic_id
+        )))
+        .map(adaptiveDiagnosticResponseExportDto),
     });
   }
 
@@ -1839,6 +2139,14 @@ export function createFileRepository(filePath) {
       state.adaptive_learning_goals = state.adaptive_learning_goals.filter((item) => item.username !== username);
       delete state.adaptive_learning_profiles[username];
       delete state.adaptive_learning_skill_estimates[username];
+      const diagnosticIds = new Set(state.adaptive_diagnostic_sessions
+        .filter((item) => item.username === username).map((item) => item.id));
+      state.adaptive_diagnostic_responses = state.adaptive_diagnostic_responses
+        .filter((item) => !diagnosticIds.has(item.diagnostic_id));
+      state.adaptive_diagnostic_start_claims = state.adaptive_diagnostic_start_claims
+        .filter((item) => item.username !== username);
+      state.adaptive_diagnostic_sessions = state.adaptive_diagnostic_sessions
+        .filter((item) => item.username !== username);
       state.voice_tutor_sessions = state.voice_tutor_sessions.filter((item) => item.username !== username);
       const recoveryIds = new Set(state.voice_tutor_recoveries.filter((item) => item.username === username).map((item) => item.id));
       const repeatIds = new Set(state.voice_tutor_repeats.filter((item) => recoveryIds.has(item.recovery_id)).map((item) => item.id));
@@ -1959,6 +2267,13 @@ export function createFileRepository(filePath) {
     getAdaptiveLearningEvidenceSources,
     saveAdaptiveLearningProfile,
     getAdaptiveLearningProfile,
+    startAdaptiveDiagnostic,
+    getAdaptiveDiagnosticStartClaim,
+    getCurrentAdaptiveDiagnostic,
+    getAdaptiveDiagnostic,
+    getAdaptiveDiagnosticCompletionReplay,
+    answerAdaptiveDiagnostic,
+    completeAdaptiveDiagnostic,
     recordModuleAttempt,
     getModuleAttempt,
     upsertWordProgress,

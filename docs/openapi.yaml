@@ -574,11 +574,98 @@ paths:
               schema: { $ref: '#/components/schemas/AdaptiveOverview' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { description: Adaptive Learning rollout is disabled; the route is not registered }
+  /api/v1/adaptive-learning/diagnostics/start:
+    post:
+      summary: Start or resume the authenticated learner's bounded short diagnostic with a durable owner-bound replay claim
+      description: New sessions use the current catalog and its paired policy; every resumed session uses the stored catalog version's policy. A successful key owns its exact start snapshot for the 24-hour start-claim retention window. New keys are bounded by a per-user hourly rate and by a finite live-claim budget.
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, minLength: 16, maxLength: 120 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false }
+      responses:
+        '201': { description: New diagnostic started, content: { application/json: { schema: { $ref: '#/components/schemas/AdaptiveDiagnosticStartResult' } } } }
+        '200': { description: Active run resumed, immutable claimed snapshot replayed within its retention window even after expiry/completion, or adequate existing evidence means no diagnostic is required, content: { application/json: { schema: { $ref: '#/components/schemas/AdaptiveDiagnosticStartResult' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { description: Idempotency key conflict or the claimed stored catalog version is unsupported }
+        '429': { description: New start keys exceeded the hourly DIAGNOSTIC_START_RATE_LIMIT or the finite retained-claim DIAGNOSTIC_START_LIMIT }
+        '404': { description: Adaptive Learning rollout is disabled; the route is not registered }
+  /api/v1/adaptive-learning/diagnostics/current:
+    get:
+      summary: Resume the latest current or expired diagnostic without exposing an answer key
+      description: Both in-progress and ready states share the stored catalog policy's deadline (the v1 policy has a 20-minute deadline); at or after it the session is expired and cannot create evidence. The response projects maxItems, estimatedMinutes, deadlineMinutes and expiresAt from that stored policy for browser copy and progress.
+      responses:
+        '200': { description: Current diagnostic state or nulls when none is active, content: { application/json: { schema: { $ref: '#/components/schemas/AdaptiveDiagnosticState' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { description: The stored diagnostic catalog version is unsupported; the server fails closed instead of applying a newer mapping }
+        '404': { description: Adaptive Learning rollout is disabled; the route is not registered }
+  /api/v1/adaptive-learning/diagnostics/{diagnosticId}/answers:
+    post:
+      summary: Idempotently answer the server-selected current diagnostic item
+      description: Selection adapts privately from accepted responses using the stored catalog version's policy. Both in-progress and ready states share that policy's deadline (20 minutes for v1).
+      parameters:
+        - in: path
+          name: diagnosticId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, minLength: 16, maxLength: 120 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [itemId, choiceId]
+              properties:
+                itemId: { type: string, minLength: 1, maxLength: 100 }
+                choiceId: { type: string, minLength: 1, maxLength: 20 }
+              additionalProperties: false
+      responses:
+        '201': { description: Answer accepted and the next safe state returned }
+        '200': { description: The exact originally observed answer snapshot is returned, even after later answers or completion }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { description: Diagnostic does not belong to the authenticated learner }
+        '409': { description: Item was already answered, is not current, time expired, the key conflicts, or the stored catalog version is unsupported }
+  /api/v1/adaptive-learning/diagnostics/{diagnosticId}/complete:
+    post:
+      summary: Complete a ready diagnostic and return an explicitly preliminary profile result
+      description: Ready does not pause time; ready sessions retain the stored policy deadline and cannot be completed after it. The first success atomically binds an allowlisted immutable completion response snapshot and preliminary profile to its idempotency key. Exact lost-response/concurrent retries replay it before any live profile calculation; a different completion key returns the same canonical snapshot without replacing the original claim.
+      parameters:
+        - in: path
+          name: diagnosticId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, minLength: 16, maxLength: 120 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false }
+      responses:
+        '201': { description: Diagnostic completed and its immutable completion response snapshot returned, content: { application/json: { schema: { $ref: '#/components/schemas/AdaptiveDiagnosticCompletionResult' } } } }
+        '200': { description: Exact canonical completion snapshot replay returned without live profile recomputation, content: { application/json: { schema: { $ref: '#/components/schemas/AdaptiveDiagnosticCompletionResult' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { description: Diagnostic does not belong to the authenticated learner }
+        '409': { description: Diagnostic is not ready, time expired, the idempotency key conflicts, or the stored catalog version is unsupported }
   /api/v1/account/export:
     get:
       summary: Export the authenticated user's account, progress and attempt data
       responses:
-        '200': { description: JSON export including adaptive goals/structured estimates, Voice Tutor sessions, recovery/repeat outcomes and bounded provider/model/prompt metadata; no raw audio, temporary captions, full Voice Tutor transcript, nonce hash or repeat answer }
+        '200': { description: JSON export including adaptive goals/structured estimates/diagnostic sessions and bounded responses, Voice Tutor sessions, recovery/repeat outcomes and bounded provider/model/prompt metadata; no raw audio, temporary captions, full Voice Tutor transcript, nonce hash or answer key }
         '401': { $ref: '#/components/responses/Unauthorized' }
   /api/v1/account:
     delete:
@@ -1015,6 +1102,101 @@ components:
           allOf:
             - $ref: '#/components/schemas/AdaptiveGoal'
           nullable: true
+        profile: { $ref: '#/components/schemas/AdaptiveProfile' }
+      additionalProperties: false
+    AdaptiveDiagnosticChoice:
+      type: object
+      required: [id, label]
+      properties:
+        id: { type: string, minLength: 1, maxLength: 20 }
+        label: { type: string, minLength: 1, maxLength: 300 }
+      additionalProperties: false
+    AdaptiveDiagnosticItem:
+      type: object
+      description: Safe item projection that never exposes the answer key or skill mapping; both stay server-owned. A replayable local browser speech listening item is assisted evidence, never independent mastery evidence.
+      required: [id, prompt, choices, estimatedSeconds]
+      properties:
+        id: { type: string, minLength: 1, maxLength: 100 }
+        prompt: { type: string, minLength: 1, maxLength: 1000 }
+        choices:
+          type: array
+          minItems: 2
+          maxItems: 5
+          items: { $ref: '#/components/schemas/AdaptiveDiagnosticChoice' }
+        estimatedSeconds: { type: integer, minimum: 30, maximum: 300 }
+        presentation: { type: string, enum: [audio] }
+        speechText: { type: string, minLength: 1, maxLength: 1000, description: Local browser speech stimulus; not an answer or transcript uploaded by the learner. }
+        measurementNotice: { type: string, minLength: 1, maxLength: 1000, description: Learner-facing disclosure of a replayable listening probe's assisted measurement limits. }
+      additionalProperties: false
+    AdaptiveDiagnosticSession:
+      type: object
+      required: [id, catalogVersion, status, estimatedMinutes, deadlineMinutes, answeredItems, maxItems, progressPercent, canComplete, stopReason, startedAt, expiresAt, completedAt]
+      properties:
+        id: { type: string, format: uuid }
+        catalogVersion: { type: string, minLength: 1, maxLength: 40, description: Stored catalog-policy registry version; `ege-short-diagnostic-v1` remains supported. }
+        status: { type: string, enum: [in_progress, ready, completed, expired] }
+        estimatedMinutes: { type: integer, minimum: 1, maximum: 120 }
+        deadlineMinutes: { type: integer, minimum: 1, maximum: 120, description: Display duration derived from the stored policy's hard maximumSeconds; expiresAt is authoritative. }
+        answeredItems: { type: integer, minimum: 0, maximum: 12 }
+        maxItems: { type: integer, minimum: 1, maximum: 12 }
+        progressPercent: { type: integer, minimum: 0, maximum: 100 }
+        canComplete: { type: boolean }
+        stopReason: { type: string, nullable: true, enum: [maximum_items, target_coverage, maximum_time, target_time, catalog_exhausted] }
+        startedAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time, nullable: true }
+      additionalProperties: false
+    AdaptiveDiagnosticState:
+      type: object
+      required: [diagnostic, item]
+      properties:
+        diagnostic:
+          allOf:
+            - $ref: '#/components/schemas/AdaptiveDiagnosticSession'
+          nullable: true
+        item:
+          allOf:
+            - $ref: '#/components/schemas/AdaptiveDiagnosticItem'
+          nullable: true
+      additionalProperties: false
+    AdaptiveDiagnosticStartResult:
+      type: object
+      required: [required, diagnostic, item]
+      properties:
+        required: { type: boolean }
+        diagnostic:
+          allOf:
+            - $ref: '#/components/schemas/AdaptiveDiagnosticSession'
+          nullable: true
+        item:
+          allOf:
+            - $ref: '#/components/schemas/AdaptiveDiagnosticItem'
+          nullable: true
+        profile: { $ref: '#/components/schemas/AdaptiveProfile' }
+      additionalProperties: false
+    AdaptiveDiagnosticCompletionSummary:
+      type: object
+      required: [preliminary, confidence, answeredItems, correctItems, explanationCodes]
+      properties:
+        preliminary: { type: boolean }
+        confidence: { type: integer, minimum: 0, maximum: 100 }
+        answeredItems: { type: integer, minimum: 0, maximum: 12 }
+        correctItems: { type: integer, minimum: 0, maximum: 12 }
+        explanationCodes:
+          type: array
+          items: { type: string, minLength: 1, maxLength: 80 }
+      additionalProperties: false
+    AdaptiveDiagnosticCompletionResult:
+      type: object
+      required: [completed, diagnostic, item, result, profile]
+      properties:
+        completed: { type: boolean, enum: [true] }
+        diagnostic: { $ref: '#/components/schemas/AdaptiveDiagnosticSession' }
+        item:
+          allOf:
+            - $ref: '#/components/schemas/AdaptiveDiagnosticItem'
+          nullable: true
+        result: { $ref: '#/components/schemas/AdaptiveDiagnosticCompletionSummary' }
         profile: { $ref: '#/components/schemas/AdaptiveProfile' }
       additionalProperties: false
     PaymentRequest:

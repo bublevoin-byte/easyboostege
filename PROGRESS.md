@@ -849,7 +849,7 @@ Agreed product contract: target EGE score/date is primary; a short diagnostic or
 Implementation tracker:
 
 - [x] 01 Goal and evidence-backed profile tracer
-- [ ] 02 Short adaptive diagnostic
+- [x] 02 Short adaptive diagnostic
 - [ ] 03 Honest forecast and stable weekly allocation
 - [ ] 04 Duration-aware learning session composer
 - [ ] 05 Real module execution and evidence feedback
@@ -890,3 +890,31 @@ Verification: adaptive regressions plus file repository contracts 35/35, shared 
 contracts, full suite 551 pass with 8 expected no-URL PostgreSQL skips, disposable PostgreSQL 8/8,
 lint/check, frontend build and both secret scans; no paid calls, push,
 deploy or staging changes.
+
+Ticket 02 complete: a new learner can start and resume one owner-bound short diagnostic from a
+registry that versions `ege-short-diagnostic-v1` together with its progress, stop and expiry policy.
+The server owns prompts, answers and skill mappings. Accepted answers privately adapt the next
+uncertain/high-impact probe, but no diagnostic response becomes profile evidence before successful
+completion. The public item projection never exposes an answer key or skill mapping, and the browser
+submits only item/choice IDs. The run targets 10 items/about 15 minutes, stops no later than 12 items
+or 20 minutes, and the same deadline covers both in-progress and ready states. It has no hint/retry
+path and uses local browser speech without paid calls. Replayable listening is explicitly assisted
+with explanation code `assisted_local_tts_diagnostic`: it cannot establish independent mastery or
+reduce uncertainty, and the learner sees the measurement limitation.
+
+New start keys are bounded before overview calculation by a finite per-user hourly rate. Durable
+owner claims retain exact start snapshots for at most 24 hours, are capped at 16 live claims and are
+pruned; exact retained keys bypass new-key throttling. Each accepted answer stores a separate safe
+allowlisted replay snapshot, so its retry returns the originally observed state even after later
+answers or completion. Internal claim fingerprints and replay snapshots are not exported. File and
+PostgreSQL implementations share concurrency, expiry, retention, export and deletion contracts.
+All reads, progress, selection, stopping, expiry and scoring use the session's stored catalog-policy
+pair; v1 remains available while unknown versions fail closed.
+
+Migration 032, OpenAPI/schema/retention documentation and the accessible progress-card flow share
+the same bounded contract. A dedicated real Chromium tracer covers keyboard start/choice/submit,
+reload/current identity, exact answer replay after later answers and completion, fake local speech
+and completion with all providers disabled. Verification: targeted diagnostic/adaptive/file tests
+53/53, full suite 569 pass with 9 expected no-URL PostgreSQL skips, disposable PostgreSQL 9/9, real
+Chromium E2E, lint/check, frontend build and both secret scans; no paid calls, push, deploy or staging
+changes.

@@ -12,6 +12,12 @@ function sourceEvents(sources = {}) {
     ...(Array.isArray(sources.repeatAttempts) ? sources.repeatAttempts.map((event) => ({
       event, timestamp: event.observed_at ?? event.observedAt,
     })) : []),
+    ...(Array.isArray(sources.diagnosticResponses) ? sources.diagnosticResponses.map((event) => ({
+      event, timestamp: event.answered_at ?? event.answeredAt,
+    })) : []),
+    ...(sources.diagnosticCompletedAt ? [{
+      event: { kind: 'diagnostic_completion' }, timestamp: sources.diagnosticCompletedAt,
+    }] : []),
   ];
 }
 

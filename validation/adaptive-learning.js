@@ -7,6 +7,13 @@ export const adaptiveGoalSchema = z.object({
   weeklyMinutes: z.number().int().min(30).max(2_520).multipleOf(5),
 }).strict();
 
+export const adaptiveDiagnosticStartSchema = z.object({}).strict();
+
+export const adaptiveDiagnosticAnswerSchema = z.object({
+  itemId: z.string().min(1).max(100),
+  choiceId: z.string().min(1).max(20),
+}).strict();
+
 export function isFutureExamDate(value, now = new Date()) {
   const parsed = new Date(`${value}T00:00:00.000Z`);
   if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) return false;

@@ -4,6 +4,11 @@ import {
   buildAdaptiveEvidenceWatermark,
 } from './evidence-watermark.js';
 import { resolveVoiceTutorAdaptiveSkill, VOICE_TUTOR_SKILL_COMPATIBILITY } from './skill-compatibility.js';
+import {
+  DIAGNOSTIC_REGISTRY,
+  getDiagnosticCatalog,
+  getDiagnosticItem,
+} from './diagnostic-catalog.js';
 
 const TAXONOMY_VERSION = 'ege-en-v1';
 const WEIGHTING_VERSION = 'adaptive-evidence-v1';
@@ -13,6 +18,7 @@ export const ADAPTIVE_EVIDENCE_WEIGHTS = Object.freeze({
   clientReportedAttempt: 0.1,
   assistedRecovery: 0.2,
   retentionCheck: 0.9,
+  diagnosticAnswer: 1,
 });
 
 const MIN_INDEPENDENT_EVIDENCE = 12;
@@ -143,6 +149,31 @@ function repeatObservation(attempt) {
   };
 }
 
+function diagnosticObservation(response, diagnosticRegistry) {
+  const item = getDiagnosticItem(
+    response.catalog_version ?? response.catalogVersion,
+    response.item_id ?? response.itemId,
+    diagnosticRegistry,
+  );
+  const skill = SKILL_BY_ID.get(response.skill_id ?? response.skillId);
+  if (!item || !skill || item.skillId !== skill.id || item.module !== response.module
+    || typeof response.correct !== 'boolean') return null;
+  const storedEvidenceQuality = response.evidence_quality ?? response.evidenceQuality ?? item.evidenceQuality;
+  if (storedEvidenceQuality !== item.evidenceQuality) return null;
+  const assisted = item.evidenceQuality === 'assisted';
+  return {
+    skillId: skill.id,
+    score: response.correct ? 100 : 0,
+    weight: assisted
+      ? ADAPTIVE_EVIDENCE_WEIGHTS.assistedRecovery
+      : ADAPTIVE_EVIDENCE_WEIGHTS.diagnosticAnswer,
+    kind: assisted ? 'diagnostic_listening_assisted' : 'diagnostic_answer',
+    quality: assisted ? 'assisted' : 'independent',
+    independent: !assisted,
+    observedAt: iso(response.answered_at ?? response.answeredAt),
+  };
+}
+
 function evidenceQualityFor(observations) {
   if (!observations.length) return 'none';
   const qualities = new Set(observations.map((item) => item.quality));
@@ -154,17 +185,36 @@ function explanationFor(observations) {
   if (!observations.length) return 'no_evidence';
   const kinds = new Set(observations.map((item) => item.kind));
   if (kinds.has('retention_check')) return 'retention_evidence';
+  if (kinds.has('diagnostic_listening_assisted')) return 'assisted_local_tts_diagnostic';
+  if (kinds.has('diagnostic_answer')) return 'diagnostic_evidence';
   if (kinds.has('assisted_recovery') && kinds.size > 1) return 'mixed_with_assistance';
   if (kinds.has('assisted_recovery')) return 'assisted_recovery_only';
   return 'attempt_evidence';
 }
 
-export function buildAdaptiveLearningProfile({ attempts = [], recoveries = [], repeatAttempts = [] } = {}) {
-  const watermark = buildAdaptiveEvidenceWatermark({ attempts, recoveries, repeatAttempts });
+export function buildAdaptiveLearningProfile({
+  attempts = [], recoveries = [], repeatAttempts = [], diagnosticResponses = [],
+  diagnosticCompletions = [], diagnosticCompletedAt = null,
+} = {}, { diagnosticRegistry = DIAGNOSTIC_REGISTRY } = {}) {
+  const supportedDiagnosticCompletedAt = [
+    ...diagnosticCompletions
+      .filter((completion) => getDiagnosticCatalog(
+        completion.catalog_version ?? completion.catalogVersion,
+        diagnosticRegistry,
+      ))
+      .map((completion) => iso(completion.completed_at ?? completion.completedAt))
+      .filter(Boolean),
+    ...(diagnosticCompletedAt ? [iso(diagnosticCompletedAt)].filter(Boolean) : []),
+  ].sort().at(-1) || null;
+  const watermark = buildAdaptiveEvidenceWatermark({
+    attempts, recoveries, repeatAttempts, diagnosticResponses,
+    diagnosticCompletedAt: supportedDiagnosticCompletedAt,
+  });
   const observations = [
     ...attempts.map(attemptObservation),
     ...recoveries.map(recoveryObservation),
     ...repeatAttempts.map(repeatObservation),
+    ...diagnosticResponses.map((response) => diagnosticObservation(response, diagnosticRegistry)),
   ].filter(Boolean);
 
   const skills = SKILLS.map((skill) => {
@@ -232,6 +282,7 @@ export function buildAdaptiveLearningProfile({ attempts = [], recoveries = [], r
   if (sparseEvidence) explanationCodes.push('sparse_evidence');
   if (insufficientIndependentEvidence) explanationCodes.push('insufficient_independent_evidence');
   if (unconfirmedSkills) explanationCodes.push('unconfirmed_skills');
+  if (supportedDiagnosticCompletedAt) explanationCodes.push('short_diagnostic_complete');
   if (!preliminary) explanationCodes.push('evidence_backed');
 
   return {
@@ -250,7 +301,7 @@ export function buildAdaptiveLearningProfile({ attempts = [], recoveries = [], r
     clientReportedEvidenceCount,
     independentModuleCount,
     establishedSkillCount,
-    needsDiagnostic: preliminary,
+    needsDiagnostic: preliminary && !supportedDiagnosticCompletedAt,
     explanationCodes,
     skills,
     modules,

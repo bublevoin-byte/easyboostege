@@ -79,6 +79,13 @@ export const getAdaptiveLearningGoal = (...args) => repository.getAdaptiveLearni
 export const getAdaptiveLearningEvidenceSources = (...args) => repository.getAdaptiveLearningEvidenceSources(...args);
 export const saveAdaptiveLearningProfile = (...args) => repository.saveAdaptiveLearningProfile(...args);
 export const getAdaptiveLearningProfile = (...args) => repository.getAdaptiveLearningProfile(...args);
+export const startAdaptiveDiagnostic = (...args) => repository.startAdaptiveDiagnostic(...args);
+export const getAdaptiveDiagnosticStartClaim = (...args) => repository.getAdaptiveDiagnosticStartClaim(...args);
+export const getCurrentAdaptiveDiagnostic = (...args) => repository.getCurrentAdaptiveDiagnostic(...args);
+export const getAdaptiveDiagnostic = (...args) => repository.getAdaptiveDiagnostic(...args);
+export const getAdaptiveDiagnosticCompletionReplay = (...args) => repository.getAdaptiveDiagnosticCompletionReplay(...args);
+export const answerAdaptiveDiagnostic = (...args) => repository.answerAdaptiveDiagnostic(...args);
+export const completeAdaptiveDiagnostic = (...args) => repository.completeAdaptiveDiagnostic(...args);
 export const recordModuleAttempt = (...args) => repository.recordModuleAttempt(...args);
 export const getModuleAttempt = (...args) => repository.getModuleAttempt(...args);
 export const upsertWordProgress = (...args) => repository.upsertWordProgress(...args);

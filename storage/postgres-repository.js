@@ -6,6 +6,18 @@ import {
   adaptiveLearningProfileExportDto,
   adaptiveLearningProfileRepositoryDto,
 } from '../adaptive-learning/repository-dto.js';
+import {
+  adaptiveDiagnosticAnswerClaimRepositoryDto,
+  adaptiveDiagnosticCompletionSnapshotDto,
+  adaptiveDiagnosticExportDto,
+  adaptiveDiagnosticRepositoryDto,
+  adaptiveDiagnosticResponseExportDto,
+  adaptiveDiagnosticStartClaimRepositoryDto,
+} from '../adaptive-learning/diagnostic-dto.js';
+import {
+  ADAPTIVE_DIAGNOSTIC_START_CLAIM_LIMIT,
+  adaptiveDiagnosticClaimExpiresAt,
+} from '../adaptive-learning/diagnostic-claims.js';
 import { hashAuthCode, normalizeUsername, normalizeVoiceTutorDeliveryMetadata, normalizeVoiceTutorProxyHash, subscriptionView, VoiceTutorError, voiceTutorAccessView, voiceTutorBillableSeconds, voiceTutorProxyUsage, voiceTutorQuotaPeriods, voiceTutorReservationSeconds } from './shared.js';
 import { transitionPedagogicalState } from '../voice-tutor/state-machine.js';
 import { transitionRuleCardReview } from '../voice-tutor/rule-card.js';
@@ -1865,13 +1877,34 @@ export function createPostgresRepository(connectionString, {
              JOIN voice_tutor_recoveries recovery ON recovery.id = repeat.recovery_id
              WHERE recovery.username = $1
            ) source_repeat
-         ), '[]'::jsonb) AS repeat_attempts`,
+         ), '[]'::jsonb) AS repeat_attempts,
+         COALESCE((
+           SELECT jsonb_agg(to_jsonb(source_response) ORDER BY source_response.answered_at, source_response.id)
+           FROM (
+             SELECT response.id, response.diagnostic_id, diagnostic.catalog_version,
+                    response.item_id, response.skill_id, response.module, response.evidence_quality,
+                    response.correct, response.answered_at
+             FROM adaptive_diagnostic_responses response
+             JOIN adaptive_diagnostic_sessions diagnostic ON diagnostic.id = response.diagnostic_id
+             WHERE diagnostic.username = $1 AND diagnostic.status = 'completed'
+           ) source_response
+         ), '[]'::jsonb) AS diagnostic_responses,
+         COALESCE((
+           SELECT jsonb_agg(jsonb_build_object(
+             'catalog_version', catalog_version,
+             'completed_at', completed_at
+           ) ORDER BY completed_at)
+           FROM adaptive_diagnostic_sessions
+           WHERE username = $1 AND status = 'completed'
+         ), '[]'::jsonb) AS diagnostic_completions`,
       [username],
     );
     const sources = {
       attempts: result.rows[0].attempts,
       recoveries: result.rows[0].recoveries,
       repeatAttempts: result.rows[0].repeat_attempts,
+      diagnosticResponses: result.rows[0].diagnostic_responses,
+      diagnosticCompletions: result.rows[0].diagnostic_completions,
     };
     await onAdaptiveEvidenceSnapshot({ username, sources });
     return sources;
@@ -1976,6 +2009,293 @@ export function createPostgresRepository(connectionString, {
 
   async function getAdaptiveLearningProfile(username) {
     return readAdaptiveLearningProfile(pool, username, { onAdaptiveProfileSnapshot });
+  }
+
+  async function readAdaptiveDiagnostic(queryable, username, diagnosticId = null) {
+    const result = await queryable.query(
+      `SELECT diagnostic.*,
+              COALESCE((
+                SELECT jsonb_agg(to_jsonb(response) - 'diagnostic_id' - 'idempotency_key' - 'request_hash'
+                                 ORDER BY response.answered_at, response.id)
+                FROM adaptive_diagnostic_responses response
+                WHERE response.diagnostic_id = diagnostic.id
+              ), '[]'::jsonb) AS responses
+       FROM adaptive_diagnostic_sessions diagnostic
+       WHERE diagnostic.username = $1 AND ($2::uuid IS NULL OR diagnostic.id = $2::uuid)
+       ORDER BY diagnostic.started_at DESC LIMIT 1`,
+      [username, diagnosticId],
+    );
+    return result.rowCount
+      ? adaptiveDiagnosticRepositoryDto(result.rows[0], result.rows[0].responses)
+      : null;
+  }
+
+  async function startAdaptiveDiagnostic(username, diagnostic) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const owner = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+      if (!owner.rowCount) throw new Error('USER_NOT_FOUND');
+      await client.query(
+        'DELETE FROM adaptive_diagnostic_start_claims WHERE claim_expires_at <= $1',
+        [diagnostic.now],
+      );
+      const duplicate = await client.query(
+        'SELECT * FROM adaptive_diagnostic_start_claims WHERE username = $1 AND idempotency_key = $2',
+        [username, diagnostic.idempotencyKey],
+      );
+      if (duplicate.rowCount) {
+        if (duplicate.rows[0].request_hash !== diagnostic.requestHash) {
+          throw new Error('ADAPTIVE_DIAGNOSTIC_IDEMPOTENCY_CONFLICT');
+        }
+        await client.query('COMMIT');
+        return {
+          created: false,
+          diagnostic: adaptiveDiagnosticStartClaimRepositoryDto(duplicate.rows[0]),
+        };
+      }
+      const ownerClaimCount = await client.query(
+        'SELECT COUNT(*)::integer AS count FROM adaptive_diagnostic_start_claims WHERE username = $1',
+        [username],
+      );
+      if (ownerClaimCount.rows[0].count >= ADAPTIVE_DIAGNOSTIC_START_CLAIM_LIMIT) {
+        throw new Error('ADAPTIVE_DIAGNOSTIC_START_LIMIT');
+      }
+      await client.query(
+        `UPDATE adaptive_diagnostic_sessions
+         SET status = 'expired', current_item_id = NULL, stop_reason = 'maximum_time', updated_at = $2
+         WHERE username = $1 AND status IN ('in_progress', 'ready') AND expires_at <= $2`,
+        [username, diagnostic.now],
+      );
+      const active = await client.query(
+        `SELECT id FROM adaptive_diagnostic_sessions
+         WHERE username = $1 AND status IN ('in_progress', 'ready') ORDER BY started_at DESC LIMIT 1`,
+        [username],
+      );
+      const created = !active.rowCount;
+      let snapshot;
+      if (active.rowCount) {
+        snapshot = await readAdaptiveDiagnostic(client, username, active.rows[0].id);
+      } else {
+        await client.query(
+          `INSERT INTO adaptive_diagnostic_sessions
+           (id, username, catalog_version, status, current_item_id, idempotency_key, request_hash,
+            started_at, expires_at, updated_at)
+           VALUES ($1, $2, $3, 'in_progress', $4, $5, $6, $7, $8, $7)`,
+          [diagnostic.id, username, diagnostic.catalogVersion, diagnostic.currentItemId,
+            diagnostic.idempotencyKey, diagnostic.requestHash, diagnostic.now, diagnostic.expiresAt],
+        );
+        snapshot = await readAdaptiveDiagnostic(client, username, diagnostic.id);
+      }
+      await client.query(
+        `INSERT INTO adaptive_diagnostic_start_claims
+         (username, idempotency_key, request_hash, diagnostic_id, catalog_version, status,
+          current_item_id, answered_items, correct_items, stop_reason, started_at, expires_at,
+          completed_at, updated_at, claimed_at, claim_expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+        [username, diagnostic.idempotencyKey, diagnostic.requestHash, snapshot.id,
+          snapshot.catalog_version, snapshot.status, snapshot.current_item_id,
+          snapshot.answered_items, snapshot.correct_items, snapshot.stop_reason,
+          snapshot.started_at, snapshot.expires_at, snapshot.completed_at, snapshot.updated_at,
+          diagnostic.now, adaptiveDiagnosticClaimExpiresAt(diagnostic.now)],
+      );
+      await client.query('COMMIT');
+      return { created, diagnostic: snapshot };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async function getAdaptiveDiagnosticStartClaim(username, claim) {
+    const result = await pool.query(
+      `SELECT * FROM adaptive_diagnostic_start_claims
+       WHERE username = $1 AND idempotency_key = $2 AND claim_expires_at > $3`,
+      [username, claim.idempotencyKey, claim.now ?? new Date()],
+    );
+    if (!result.rowCount) return null;
+    if (result.rows[0].request_hash !== claim.requestHash) {
+      throw new Error('ADAPTIVE_DIAGNOSTIC_IDEMPOTENCY_CONFLICT');
+    }
+    return adaptiveDiagnosticStartClaimRepositoryDto(result.rows[0]);
+  }
+
+  async function getCurrentAdaptiveDiagnostic(username) {
+    const diagnostic = await readAdaptiveDiagnostic(pool, username);
+    return diagnostic?.status === 'completed' ? null : diagnostic;
+  }
+
+  async function getAdaptiveDiagnostic(username, diagnosticId) {
+    return readAdaptiveDiagnostic(pool, username, diagnosticId);
+  }
+
+  async function getAdaptiveDiagnosticCompletionReplay(username, completion) {
+    const result = await pool.query(
+      `SELECT status, completion_idempotency_key, completion_request_hash,
+              completion_response_snapshot
+       FROM adaptive_diagnostic_sessions WHERE id = $1 AND username = $2`,
+      [completion.diagnosticId, username],
+    );
+    if (!result.rowCount || result.rows[0].status !== 'completed') return null;
+    const session = result.rows[0];
+    if (session.completion_idempotency_key === completion.idempotencyKey
+      && session.completion_request_hash !== completion.requestHash) {
+      throw new Error('ADAPTIVE_DIAGNOSTIC_IDEMPOTENCY_CONFLICT');
+    }
+    const responseSnapshot = adaptiveDiagnosticCompletionSnapshotDto(
+      session.completion_response_snapshot,
+    );
+    if (!responseSnapshot) throw new Error('ADAPTIVE_DIAGNOSTIC_COMPLETION_SNAPSHOT_MISSING');
+    return responseSnapshot;
+  }
+
+  async function answerAdaptiveDiagnostic(username, answer) {
+    const client = await pool.connect();
+    let inTransaction = false;
+    try {
+      await client.query('BEGIN');
+      inTransaction = true;
+      const selected = await client.query(
+        'SELECT * FROM adaptive_diagnostic_sessions WHERE id = $1 AND username = $2 FOR UPDATE',
+        [answer.diagnosticId, username],
+      );
+      if (!selected.rowCount) throw new Error('ADAPTIVE_DIAGNOSTIC_NOT_FOUND');
+      const session = selected.rows[0];
+      const duplicate = await client.query(
+        'SELECT * FROM adaptive_diagnostic_responses WHERE diagnostic_id = $1 AND idempotency_key = $2',
+        [session.id, answer.idempotencyKey],
+      );
+      if (duplicate.rowCount) {
+        if (duplicate.rows[0].request_hash !== answer.requestHash) {
+          throw new Error('ADAPTIVE_DIAGNOSTIC_IDEMPOTENCY_CONFLICT');
+        }
+        await client.query('COMMIT');
+        inTransaction = false;
+        return {
+          created: false,
+          diagnostic: adaptiveDiagnosticAnswerClaimRepositoryDto(duplicate.rows[0]),
+        };
+      }
+      if (session.status === 'expired' && session.stop_reason === 'maximum_time') {
+        throw new Error('ADAPTIVE_DIAGNOSTIC_TIME_EXPIRED');
+      }
+      if (['in_progress', 'ready'].includes(session.status)
+        && new Date(session.expires_at).getTime() <= new Date(answer.now).getTime()) {
+        await client.query(
+          `UPDATE adaptive_diagnostic_sessions SET status = 'expired', current_item_id = NULL,
+           stop_reason = 'maximum_time', updated_at = $2 WHERE id = $1`,
+          [session.id, answer.now],
+        );
+        await client.query('COMMIT');
+        inTransaction = false;
+        throw new Error('ADAPTIVE_DIAGNOSTIC_TIME_EXPIRED');
+      }
+      const answered = await client.query(
+        'SELECT 1 FROM adaptive_diagnostic_responses WHERE diagnostic_id = $1 AND item_id = $2',
+        [session.id, answer.itemId],
+      );
+      if (answered.rowCount) throw new Error('ADAPTIVE_DIAGNOSTIC_ITEM_ALREADY_ANSWERED');
+      if (session.status !== 'in_progress' || session.current_item_id !== answer.itemId) {
+        throw new Error('ADAPTIVE_DIAGNOSTIC_ITEM_NOT_CURRENT');
+      }
+      await client.query(
+        `INSERT INTO adaptive_diagnostic_responses
+         (id, diagnostic_id, item_id, skill_id, module, evidence_quality, choice_id, correct, response_ms,
+          idempotency_key, request_hash, replay_catalog_version, replay_status, replay_current_item_id,
+          replay_answered_items, replay_correct_items, replay_stop_reason, replay_started_at,
+          replay_expires_at, replay_completed_at, replay_updated_at, answered_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+          $16, $17, $18, $19, $20, $21, $22)`,
+        [answer.id, session.id, answer.itemId, answer.skillId, answer.module, answer.evidenceQuality,
+          answer.choiceId, answer.correct, answer.responseMs, answer.idempotencyKey,
+          answer.requestHash, session.catalog_version, answer.status, answer.nextItemId,
+          Number(session.answered_items) + 1,
+          Number(session.correct_items) + (answer.correct ? 1 : 0), answer.stopReason,
+          session.started_at, session.expires_at, session.completed_at, answer.now, answer.now],
+      );
+      await client.query(
+        `UPDATE adaptive_diagnostic_sessions SET current_item_id = $2, status = $3,
+         stop_reason = $4, answered_items = answered_items + 1,
+         correct_items = correct_items + CASE WHEN $5::boolean THEN 1 ELSE 0 END, updated_at = $6
+         WHERE id = $1`,
+        [session.id, answer.nextItemId, answer.status, answer.stopReason, answer.correct, answer.now],
+      );
+      const snapshot = await readAdaptiveDiagnostic(client, username, session.id);
+      await client.query('COMMIT');
+      inTransaction = false;
+      return { created: true, diagnostic: snapshot };
+    } catch (error) {
+      if (inTransaction) await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async function completeAdaptiveDiagnostic(username, completion) {
+    const client = await pool.connect();
+    let inTransaction = false;
+    try {
+      await client.query('BEGIN');
+      inTransaction = true;
+      const selected = await client.query(
+        'SELECT * FROM adaptive_diagnostic_sessions WHERE id = $1 AND username = $2 FOR UPDATE',
+        [completion.diagnosticId, username],
+      );
+      if (!selected.rowCount) throw new Error('ADAPTIVE_DIAGNOSTIC_NOT_FOUND');
+      const session = selected.rows[0];
+      if (session.status === 'completed') {
+        if (session.completion_idempotency_key === completion.idempotencyKey
+          && session.completion_request_hash !== completion.requestHash) {
+          throw new Error('ADAPTIVE_DIAGNOSTIC_IDEMPOTENCY_CONFLICT');
+        }
+        const snapshot = await readAdaptiveDiagnostic(client, username, session.id);
+        const responseSnapshot = adaptiveDiagnosticCompletionSnapshotDto(
+          session.completion_response_snapshot,
+        );
+        if (!responseSnapshot) throw new Error('ADAPTIVE_DIAGNOSTIC_COMPLETION_SNAPSHOT_MISSING');
+        await client.query('COMMIT');
+        inTransaction = false;
+        return { created: false, diagnostic: snapshot, responseSnapshot };
+      }
+      if (session.status === 'expired' && session.stop_reason === 'maximum_time') {
+        throw new Error('ADAPTIVE_DIAGNOSTIC_TIME_EXPIRED');
+      }
+      if (session.status === 'ready'
+        && new Date(session.expires_at).getTime() <= new Date(completion.now).getTime()) {
+        await client.query(
+          `UPDATE adaptive_diagnostic_sessions SET status = 'expired', current_item_id = NULL,
+           stop_reason = 'maximum_time', updated_at = $2 WHERE id = $1`,
+          [session.id, completion.now],
+        );
+        await client.query('COMMIT');
+        inTransaction = false;
+        throw new Error('ADAPTIVE_DIAGNOSTIC_TIME_EXPIRED');
+      }
+      if (session.status !== 'ready') throw new Error('ADAPTIVE_DIAGNOSTIC_NOT_READY');
+      const responseSnapshot = adaptiveDiagnosticCompletionSnapshotDto(completion.responseSnapshot);
+      if (!responseSnapshot
+        || responseSnapshot.diagnostic.id !== session.id
+        || responseSnapshot.diagnostic.catalogVersion !== session.catalog_version
+        || responseSnapshot.diagnostic.status !== 'completed'
+        || responseSnapshot.diagnostic.answeredItems !== Number(session.answered_items)
+        || responseSnapshot.result.correctItems !== Number(session.correct_items)) {
+        throw new Error('ADAPTIVE_DIAGNOSTIC_COMPLETION_SNAPSHOT_INVALID');
+      }
+      await client.query(
+        `UPDATE adaptive_diagnostic_sessions SET status = 'completed', current_item_id = NULL,
+         completion_idempotency_key = $2, completion_request_hash = $3,
+         completion_response_snapshot = $5::jsonb,
+         completed_at = $4, updated_at = $4 WHERE id = $1`,
+        [session.id, completion.idempotencyKey, completion.requestHash, completion.now,
+          JSON.stringify(responseSnapshot)],
+      );
+      const snapshot = await readAdaptiveDiagnostic(client, username, session.id);
+      await client.query('COMMIT');
+      inTransaction = false;
+      return { created: true, diagnostic: snapshot, responseSnapshot };
+    } catch (error) {
+      if (inTransaction) await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
   }
 
   async function recordModuleAttempt(username, attempt, { evidenceQuality = 'client_reported' } = {}) {
@@ -2231,7 +2551,7 @@ export function createPostgresRepository(connectionString, {
   }
 
   async function exportUserData(username) {
-    const [account, progress, privacyConsent, subscriptionEvents, subscriptionEntitlements, voiceTutorSessions, voiceTutorRecoveries, voiceTutorRepeats, voiceTutorRepeatAttempts, voiceTutorReports, ruleCards, paymentRequests, writingAttempts, speakingAttempts, generatedTasks, moduleAttempts, progressSummary, wordProgress, errorBank, adaptiveGoals, adaptiveSnapshot, aiRequests, auditLog] = await Promise.all([
+    const [account, progress, privacyConsent, subscriptionEvents, subscriptionEntitlements, voiceTutorSessions, voiceTutorRecoveries, voiceTutorRepeats, voiceTutorRepeatAttempts, voiceTutorReports, ruleCards, paymentRequests, writingAttempts, speakingAttempts, generatedTasks, moduleAttempts, progressSummary, wordProgress, errorBank, adaptiveGoals, adaptiveSnapshot, adaptiveDiagnosticSessions, adaptiveDiagnosticResponses, aiRequests, auditLog] = await Promise.all([
       pool.query('SELECT username, telegram_id, role, trial_used, subscription_until, created_at, updated_at FROM users WHERE username = $1', [username]),
       pool.query('SELECT data, updated_at FROM user_progress WHERE username = $1', [username]),
       pool.query('SELECT text_processing, voice_processing, policy_version, text_consented_at, voice_consented_at, updated_at FROM privacy_consents WHERE username = $1', [username]),
@@ -2272,6 +2592,16 @@ export function createPostgresRepository(connectionString, {
       pool.query(`SELECT id, target_exam, target_score, exam_date, weekly_minutes, revision, created_at, updated_at
                   FROM adaptive_learning_goals WHERE username = $1 ORDER BY revision`, [username]),
       readAdaptiveLearningProfile(pool, username, { onAdaptiveProfileSnapshot }),
+      pool.query(`SELECT id, catalog_version, status, current_item_id, answered_items, correct_items,
+                         stop_reason, started_at, expires_at, completed_at, updated_at
+                  FROM adaptive_diagnostic_sessions WHERE username = $1 ORDER BY started_at`, [username]),
+      pool.query(`SELECT response.id, response.diagnostic_id, response.item_id, response.skill_id,
+                         response.module, response.evidence_quality, response.choice_id,
+                         response.correct, response.response_ms,
+                         response.answered_at
+                  FROM adaptive_diagnostic_responses response
+                  JOIN adaptive_diagnostic_sessions diagnostic ON diagnostic.id = response.diagnostic_id
+                  WHERE diagnostic.username = $1 ORDER BY response.answered_at`, [username]),
       pool.query('SELECT id, operation, provider, model, prompt_version, status, duration_ms, error_code, prompt_tokens, completion_tokens, estimated_cost_microusd, created_at FROM ai_requests WHERE username = $1 ORDER BY created_at', [username]),
       pool.query("SELECT id, actor_telegram_id, action, target_type, target_id, result, metadata, created_at FROM audit_log WHERE metadata->>'username' = $1 ORDER BY created_at", [username]),
     ]);
@@ -2304,6 +2634,8 @@ export function createPostgresRepository(connectionString, {
       adaptive_learning_goals: adaptiveGoals.rows.map(adaptiveLearningGoalRepositoryDto),
       adaptive_learning_profile: adaptiveExport.profile,
       adaptive_learning_skill_estimates: adaptiveExport.estimates,
+      adaptive_diagnostic_sessions: adaptiveDiagnosticSessions.rows.map(adaptiveDiagnosticExportDto),
+      adaptive_diagnostic_responses: adaptiveDiagnosticResponses.rows.map(adaptiveDiagnosticResponseExportDto),
       ai_requests: aiRequests.rows,
       audit_log: auditLog.rows,
     };
@@ -2440,6 +2772,13 @@ export function createPostgresRepository(connectionString, {
     getAdaptiveLearningEvidenceSources,
     saveAdaptiveLearningProfile,
     getAdaptiveLearningProfile,
+    startAdaptiveDiagnostic,
+    getAdaptiveDiagnosticStartClaim,
+    getCurrentAdaptiveDiagnostic,
+    getAdaptiveDiagnostic,
+    getAdaptiveDiagnosticCompletionReplay,
+    answerAdaptiveDiagnostic,
+    completeAdaptiveDiagnostic,
     recordModuleAttempt,
     getModuleAttempt,
     upsertWordProgress,

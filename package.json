@@ -13,6 +13,7 @@
     "test": "node --test \"test/*.test.js\"",
     "test:postgres": "node scripts/test-postgres.js",
     "test:e2e": "node e2e/demo.test.js",
+    "test:e2e:adaptive": "npm run build:frontend && node e2e/adaptive-diagnostic.test.js",
     "test:e2e:firefox": "cross-env E2E_BROWSER=firefox node e2e/demo.test.js",
     "test:e2e:android": "cross-env E2E_BROWSER=chromium E2E_PROFILE=android node e2e/demo.test.js",
     "test:e2e:iphone-webkit": "cross-env E2E_BROWSER=webkit E2E_PROFILE=iphone node e2e/demo.test.js",

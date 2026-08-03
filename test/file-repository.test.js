@@ -11,6 +11,7 @@ import {
   assertAdaptiveProfileRepositoryContract,
 } from './support/adaptive-profile-contract.js';
 import { assertAdaptiveGoalRepositoryContract } from './support/adaptive-goal-contract.js';
+import { assertAdaptiveDiagnosticRepositoryContract } from './support/adaptive-diagnostic-contract.js';
 
 async function withRepository(run) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-db-'));
@@ -89,6 +90,15 @@ test('file adaptive goal uses the shared allowlisted ISO timestamp DTO', async (
       weeklyMinutes: 300,
       now: new Date('2026-08-04T08:00:00.000Z'),
     });
+  });
+});
+
+test('file adaptive diagnostic uses the shared owner-bound persistence and export contract', async () => {
+  await withRepository(async (repository) => {
+    const username = await repository.createTelegramUser(1103, 'Adaptive Diagnostic DTO');
+    await assertAdaptiveDiagnosticRepositoryContract(assert, repository, username);
+    assert.equal(await repository.deleteUserData(username), true);
+    assert.equal(await repository.exportUserData(username), null);
   });
 });
 
