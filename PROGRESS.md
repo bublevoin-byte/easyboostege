@@ -840,3 +840,21 @@ Type-mode vocabulary больше не показывает accepted word в к�
 Доказательства письма/говорения фильтруются
 по выбранному критерию и не подставляют несвязанное первое исправление. Добавлена additive
 миграция 030 с file/PostgreSQL parity.
+## Adaptive EGE Learning Plan (implementation started 2026-08-04)
+
+Status: specification and eight vertical tickets are ready on `feature/adaptive-learning-plan`. The feature is stacked on the completed Voice Tutor branch and will not be pushed, merged or deployed without a separate owner decision.
+
+Agreed product contract: target EGE score/date is primary; a short diagnostic or existing evidence builds a confidence-labelled micro-skill profile; an honest forecast and stable weekly budget feed 15–120 minute executable sessions; real module outcomes update the living plan; free/base/Premium boundaries are server-enforced. CEFR/IELTS is secondary and approximate, not an official IELTS result.
+
+Implementation tracker:
+
+- [ ] 01 Goal and evidence-backed profile tracer
+- [ ] 02 Short adaptive diagnostic
+- [ ] 03 Honest forecast and stable weekly allocation
+- [ ] 04 Duration-aware learning session composer
+- [ ] 05 Real module execution and evidence feedback
+- [ ] 06 Retention loop and Premium depth
+- [ ] 07 Commercial boundaries, complete UI and reports
+- [ ] 08 Hardening, E2E and release evidence
+
+Detailed source of truth: `.scratch/adaptive-learning-plan/spec.md` and `.scratch/adaptive-learning-plan/issues/`.
