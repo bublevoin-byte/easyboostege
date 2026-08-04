@@ -13,13 +13,16 @@ export const ADAPTIVE_CONTENT_REGISTRY_VERSION = 'adaptive-content-v1';
 
 const BREAK_MINUTES = 10;
 const MAX_LEARNING_BLOCK_MINUTES = 30;
-const REPLACEMENT_REASONS = Object.freeze(['too_difficult', 'too_easy', 'not_relevant', 'accessibility']);
+const REPLACEMENT_REASONS = Object.freeze([
+  'too_difficult', 'too_easy', 'not_relevant', 'accessibility', 'excluded',
+]);
 const SESSION_STATUSES = new Set(['created', 'in_progress', 'completed', 'abandoned']);
 const SKILL_BY_ID = new Map(EGE_SKILL_TAXONOMY.skills.map((skill) => [skill.id, skill]));
 const PREREQUISITE_POLICY_VERSION = 'adaptive-prerequisite-v1';
 const SESSION_REASON_CODES = new Set([
   'due_review', 'prerequisite_support', 'weekly_budget_deficit', 'high_uncertainty_probe',
   'target_gap', 'plan_priority', 'content_coverage_fallback', 'learner_replacement',
+  'learner_exclusion',
   ...REPLACEMENT_REASONS.map((reason) => `replacement_${reason}`),
 ]);
 
@@ -608,7 +611,7 @@ function replacementCandidates(session, plan, target, reason, registry, access, 
         && activity.requiresAudio === false
         && activity.requiresMicrophone === false
       ))
-      && (reason !== 'not_relevant' || activity.skillId !== target.skillId))
+      && (!['not_relevant', 'excluded'].includes(reason) || activity.skillId !== target.skillId))
     .sort((left, right) => {
       if (reason === 'too_difficult') return right.difficulty - left.difficulty
         || serviceScore(right) - serviceScore(left)
@@ -667,7 +670,8 @@ export function buildAdaptiveSessionReplacement({
       requiresMicrophone: replacement.requiresMicrophone,
       launch: structuredClone(replacement.launch),
       reasonCodes: [
-        'learner_replacement', `replacement_${reason}`,
+        reason === 'excluded' ? 'learner_exclusion' : 'learner_replacement',
+        `replacement_${reason}`,
         ...(remainingDeficit(replacement, replacementBudget, replacementUsage) > 0
           ? ['weekly_budget_deficit'] : []),
         ...((replacementPriority.fallbackMinutes.get(replacement.skillId) || 0) > 0
@@ -713,9 +717,17 @@ export function buildAdaptiveSessionReplacement({
 }
 
 export function assertAdaptiveSessionCreateCandidate(candidate) {
-  if (!exactKeys(candidate, [
+  const requiredKeys = [
     'idempotencyKey', 'now', 'planId', 'planRevision', 'previewFingerprint', 'requestHash', 'session',
-  ]) || !/^[A-Za-z0-9][A-Za-z0-9._:-]{15,119}$/u.test(candidate.idempotencyKey)
+  ];
+  const allowedKeys = new Set([...requiredKeys, 'commercialMode', 'commercialScope']);
+  const candidateKeys = candidate && typeof candidate === 'object' ? Object.keys(candidate) : [];
+  if (requiredKeys.some((key) => !Object.hasOwn(candidate || {}, key))
+    || candidateKeys.some((key) => !allowedKeys.has(key))
+    || (candidate.commercialMode !== undefined && candidate.commercialMode !== 'free_demo')
+    || (candidate.commercialScope !== undefined
+      && !['free_demo', 'base', 'premium'].includes(candidate.commercialScope))
+    || !/^[A-Za-z0-9][A-Za-z0-9._:-]{15,119}$/u.test(candidate.idempotencyKey)
     || !/^[0-9a-f]{64}$/u.test(candidate.requestHash)
     || !/^[0-9a-f]{64}$/u.test(candidate.previewFingerprint)
     || candidate.session?.previewFingerprint !== candidate.previewFingerprint
@@ -784,14 +796,16 @@ export function assertAdaptiveSessionReplacementTransition(previousValue, candid
     || next.replacement?.replacedActivityId !== before.activityId
     || next.replacement?.replacedContentRef !== before.contentRef
     || next.replacement?.replacedAt !== next.updatedAt
-    || !after.reasonCodes.includes('learner_replacement')
+    || !after.reasonCodes.includes(candidate.reason === 'excluded'
+      ? 'learner_exclusion' : 'learner_replacement')
     || !after.reasonCodes.includes(`replacement_${candidate.reason}`)
     || (candidate.reason === 'too_difficult' && !(after.difficulty < before.difficulty))
     || (candidate.reason === 'too_easy' && !(after.difficulty > before.difficulty))
     || (candidate.reason === 'accessibility' && !(
       after.modality !== before.modality && !after.requiresAudio && !after.requiresMicrophone
     ))
-    || (candidate.reason === 'not_relevant' && after.skillId === before.skillId)) {
+    || (['not_relevant', 'excluded'].includes(candidate.reason)
+      && after.skillId === before.skillId)) {
     throw new Error('ADAPTIVE_SESSION_INVALID');
   }
   const previousBudget = previous.weeklyBudgetSnapshot;

@@ -1,11 +1,23 @@
 export const SHORT_DIAGNOSTIC_POLICY = Object.freeze({
   catalogVersion: 'ege-short-diagnostic-v1',
+  depth: 'short',
   estimatedMinutes: 15,
   minimumItems: 8,
   targetItems: 10,
   maximumItems: 12,
   targetSeconds: 900,
   maximumSeconds: 1_200,
+});
+
+export const DEEP_DIAGNOSTIC_POLICY = Object.freeze({
+  catalogVersion: 'ege-deep-diagnostic-v1',
+  depth: 'deep',
+  estimatedMinutes: 35,
+  minimumItems: 16,
+  targetItems: 20,
+  maximumItems: 24,
+  targetSeconds: 2_100,
+  maximumSeconds: 2_700,
 });
 
 const ITEMS = [
@@ -197,9 +209,60 @@ const ITEMS = [
   },
 ];
 
+const DEEP_ITEMS = [
+  ['grammar-forms-conditionals-2', 'ege.grammar.forms', 'grammar', 1,
+    'Choose the correct form: If I ___ about the change, I would have arrived earlier.',
+    ['had known', 'knew', 'have known'], 'a'],
+  ['grammar-transformations-unless-2', 'ege.grammar.transformations', 'grammar', 0.9,
+    'Choose the closest meaning: You will miss the deadline if you do not start now.',
+    ['Unless you start now, you will miss the deadline.', 'Unless you miss the deadline, start now.', 'Start now because you missed the deadline.'], 'a'],
+  ['vocabulary-lexical-choice-raise-2', 'ege.vocabulary.lexical_choice', 'vocabulary', 0.8,
+    'Choose the natural phrase: The campaign hopes to ___ awareness of recycling.',
+    ['raise', 'rise', 'grow up'], 'a'],
+  ['vocabulary-word-formation-rely-2', 'ege.vocabulary.word_formation', 'vocabulary', 0.8,
+    'Choose the correct form of RELY: This source is generally ___.',
+    ['reliable', 'reliably', 'reliance'], 'a'],
+  ['reading-gist-volunteering-2', 'ege.reading.gist', 'reading', 0.8,
+    'A student group began delivering books to people who could not visit the library. The project later expanded to three districts. What is the main idea?',
+    ['A small volunteer service grew after meeting a local need.', 'Libraries stopped lending books.', 'Students moved to another district.'], 'a'],
+  ['reading-detail-research-2', 'ege.reading.detail', 'reading', 1,
+    'The researchers repeated the experiment in winter to check whether temperature caused the earlier result. Why was it repeated?',
+    ['To test the effect of temperature.', 'To recruit more researchers.', 'To shorten the experiment.'], 'a'],
+  ['listening-gist-course-2', 'ege.listening.gist', 'listening', 0.8,
+    'What is the speaker mainly doing?',
+    ['Explaining a change to a course timetable.', 'Advertising a sports centre.', 'Describing a holiday.'], 'a'],
+  ['listening-detail-flight-2', 'ege.listening.detail', 'listening', 1,
+    'Which detail should a listener record from a travel announcement?',
+    ['The revised departure gate and time.', 'The colour of the aircraft.', 'The pilot’s favourite destination.'], 'a'],
+  ['writing-email-register-2', 'ege.writing.email', 'writing', 0.8,
+    'Which opening is most suitable for an informal email to an English-speaking friend?',
+    ['Hi Sam, thanks for your message!', 'To whom it may concern:', 'Hereby I declare the following.'], 'a'],
+  ['writing-essay-data-2', 'ege.writing.essay', 'writing', 1,
+    'Which sentence reports chart data most precisely?',
+    ['Nearly half chose cycling, compared with about one in ten who chose running.', 'Cycling was nice and running was small.', 'Everyone preferred cycling.'], 'a'],
+  ['speaking-interaction-clarify-2', 'ege.speaking.interaction', 'speaking', 0.9,
+    'Which question best asks for a missing practical detail?',
+    ['Could you tell me whether the fee includes equipment?', 'Equipment is good, isn’t it.', 'I like the fee.'], 'a'],
+  ['speaking-monologue-example-2', 'ege.speaking.monologue', 'speaking', 1,
+    'Which response best develops a monologue point?',
+    ['State the idea, explain why it matters and give a relevant example.', 'List unrelated nouns.', 'Repeat the task wording.'], 'a'],
+].map(([id, skillId, module, egeImpact, prompt, labels, correctChoiceId]) => ({
+  id, skillId, module, egeImpact, evidenceQuality: 'independent', prompt,
+  choices: labels.map((label, index) => ({ id: String.fromCharCode(97 + index), label })),
+  correctChoiceId, estimatedSeconds: 90,
+}));
+
 export const SHORT_DIAGNOSTIC_CATALOG = Object.freeze({
   version: SHORT_DIAGNOSTIC_POLICY.catalogVersion,
   items: Object.freeze(ITEMS.map((item) => Object.freeze({
+    ...item,
+    choices: Object.freeze(item.choices.map((choice) => Object.freeze({ ...choice }))),
+  }))),
+});
+
+export const DEEP_DIAGNOSTIC_CATALOG = Object.freeze({
+  version: DEEP_DIAGNOSTIC_POLICY.catalogVersion,
+  items: Object.freeze([...ITEMS, ...DEEP_ITEMS].map((item) => Object.freeze({
     ...item,
     choices: Object.freeze(item.choices.map((choice) => Object.freeze({ ...choice }))),
   }))),
@@ -217,14 +280,17 @@ export function createDiagnosticRegistry(definitions, { currentVersion } = {}) {
     })];
   }));
   if (!entries.has(currentVersion)) throw new Error('DIAGNOSTIC_CURRENT_VERSION_UNSUPPORTED');
+  const versionByDepth = new Map(definitions.map(({ policy }) => [policy.depth || 'short', policy.catalogVersion]));
   return Object.freeze({
     currentVersion,
     get(version) { return entries.get(version) || null; },
+    versionForDepth(depth) { return versionByDepth.get(depth) || null; },
   });
 }
 
 export const DIAGNOSTIC_REGISTRY = createDiagnosticRegistry([
   { catalog: SHORT_DIAGNOSTIC_CATALOG, policy: SHORT_DIAGNOSTIC_POLICY },
+  { catalog: DEEP_DIAGNOSTIC_CATALOG, policy: DEEP_DIAGNOSTIC_POLICY },
 ], { currentVersion: SHORT_DIAGNOSTIC_POLICY.catalogVersion });
 
 export function getDiagnosticCatalog(catalogVersion, registry = DIAGNOSTIC_REGISTRY) {

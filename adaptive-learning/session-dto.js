@@ -68,5 +68,8 @@ export function adaptiveLearningSessionRepositoryDto(value) {
     replacement: session.replacement == null ? null : structuredClone(session.replacement),
     created_at: session.createdAt,
     updated_at: session.updatedAt,
+    commercial_scope: ['free_demo', 'base', 'premium'].includes(
+      value?.commercial_scope ?? value?.commercialScope,
+    ) ? (value.commercial_scope ?? value.commercialScope) : 'base',
   };
 }

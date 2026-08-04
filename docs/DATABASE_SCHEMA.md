@@ -14,7 +14,8 @@
 | `adaptive_learning_profiles` | версия и уверенность объяснимого профиля ученика | taxonomy/weighting/watermark versions, monotonic calculation revision, latest source timestamp/count, preliminary/status flags, confidence, independent/assisted/client-reported counts, established skill count and reason codes |
 | `adaptive_learning_skill_estimates` | структурированные оценки микроскиллов без копий ответов | skill/module, mastery, uncertainty, raw/effective/independent counts, evidence quality, per-skill status, due state, server-derived critical retention expiry and explanation code |
 | `adaptive_learning_plan_revisions` | owner-bound история объяснимых прогнозов и недельных распределений | exact base/goal/profile revisions, evidence watermark/count, UTC daily calculation bucket, bounded forecast/allocation/stability JSON, internal input fingerprint and current marker; deterministic `calculatedAt` is derived as bucket start while `created_at`/`updated_at` remain receipt timestamps; duplicate replay additionally requires an exact normalized outer-vector and plan-semantic match, ignoring only regenerated ID and receipt timestamps |
-| `adaptive_diagnostic_sessions` | ограниченный по времени запуск короткой адаптивной диагностики | owner, UUID, версия server-owned catalog-policy, статус/current item/счётчики/timestamps и внутренний allowlisted `completion_response_snapshot`, атомарно связанный с completion key/hash; без prompt и answer key |
+| `adaptive_learning_sessions` | исполнимые owner-bound занятия и их коммерческий scope | неизменяемая ревизия плана, 15–120 минут, server-owned blocks/launch, status/completion summary и `commercial_scope=free_demo|base|premium`; legacy rows считаются `base` |
+| `adaptive_diagnostic_sessions` | ограниченный по времени запуск короткой или Premium deep адаптивной диагностики | owner, UUID, версия server-owned catalog-policy, статус/current item/счётчики/timestamps и внутренний allowlisted `completion_response_snapshot`, атомарно связанный с completion key/hash; без prompt и answer key |
 | `adaptive_diagnostic_start_claims` | immutable start claim для каждого успешного owner-bound idempotency key | request hash, точный снимок возвращённой session state и `claim_expires_at`; окно 24 часа и максимум 16 живых claims на владельца, внутренние key/hash не экспортируются |
 | `adaptive_diagnostic_responses` | проверенные сервером ответы диагностики с явным уровнем доверия | session/item/skill/module IDs, `evidence_quality`, choice/correct/time и внутренний allowlisted replay snapshot (`replay_status` и остальные безопасные поля состояния); без prompt, answer key, audio и transcript |
 | `voice_tutor_sessions` | голосовая квота и структурированный ход разбора без аудио и полного transcript | minimized capsule reference, delivery/state/outcome, discovery claim, clarification/micro-check counters, reserved/billable seconds and timestamps |
@@ -290,3 +291,19 @@ Day-7 не попадает в executable retention projection, пока в то
 если обе даты просрочены, session composer сначала выдаёт day-1 и не создаёт заведомо отклоняемый блок.
 Deep Writing/Speaking остаются server-gated правом `voice_tutor`; day-1/day-7 обязательство,
 созданное ранее, можно завершить после истечения Premium без нового AI/Voice вызова.
+
+## Коммерческий scope и отчёты (миграция 038)
+
+Миграция `038_adaptive_commercial_scope.sql` добавляет обязательный `commercial_scope` к
+`adaptive_learning_sessions`. Новая Free-сессия получает `free_demo`, Base — `base`, Premium —
+`premium`; прежние строки безопасно считаются `base`, поэтому истёкшую платную сессию нельзя принять
+за одноразовое Free-демо. Репозитории атомарно запрещают вторую Free-сессию и повторную завершённую
+Free short-диагностику, а маршруты повторно проверяют текущий тариф на preview/create/current/replace/
+start/bind/advance/finish и на каждом шаге deep-диагностики. Уже выданный точный Voice Tutor repeat
+остаётся завершаемым после истечения Premium только в ранее определённом узком recovery-сценарии.
+
+Подробный Premium-отчёт не создаёт новую таблицу и не копирует учебный контент: он строится на чтении
+не более 12 последних `completed` session rows и их bounded `completion_summary`. Экспорт содержит
+отдельную производную `adaptive_learning_reports` с `session_id`, `completed_at` и тем же allowlisted
+summary; ответы, эссе, transcript, audio, prompt и model output туда не попадают. Удаление владельца
+каскадно удаляет исходные сессии, поэтому производный отчёт также исчезает в file и PostgreSQL.

@@ -7,7 +7,11 @@ export const adaptiveGoalSchema = z.object({
   weeklyMinutes: z.number().int().min(30).max(2_520).multipleOf(5),
 }).strict();
 
-export const adaptiveDiagnosticStartSchema = z.object({}).strict();
+export const adaptiveDiagnosticStartSchema = z.object({
+  depth: z.enum(['short', 'deep']).optional().default('short'),
+}).strict();
+
+export const adaptiveDiagnosticCompleteSchema = z.object({}).strict();
 
 export const adaptiveDiagnosticAnswerSchema = z.object({
   itemId: z.string().min(1).max(100),
@@ -25,7 +29,7 @@ export const adaptiveSessionCreateSchema = z.object({
 
 export const adaptiveSessionReplacementSchema = z.object({
   blockId: z.string().regex(/^asb_[0-9a-f]{16}_[0-9]{2}$/u),
-  reason: z.enum(['too_difficult', 'too_easy', 'not_relevant', 'accessibility']),
+  reason: z.enum(['too_difficult', 'too_easy', 'not_relevant', 'accessibility', 'excluded']),
 }).strict();
 
 export const adaptiveSessionStartSchema = z.object({

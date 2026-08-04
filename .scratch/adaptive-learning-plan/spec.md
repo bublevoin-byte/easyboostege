@@ -1,6 +1,6 @@
 # Adaptive EGE Learning Plan — Specification
 
-Status: implementation in progress (Tickets 01–06 complete)
+Status: implementation in progress (Tickets 01–07 complete)
 Date: 2026-08-04
 Base branch: `feature/voice-ege-tutor` (`cfce08b`)
 
@@ -43,6 +43,15 @@ The learner chooses a target EGE score, exam date and realistic weekly study tim
 - EGE target planning is primary. CEFR is a secondary, explicitly approximate language profile; this release does not market the diagnostic as an official IELTS score.
 
 All commercial boundaries are enforced server-side. UI-only locks are insufficient.
+
+Ticket 07 completion contract: Free receives one short diagnostic and one persisted 15-minute demo
+session; Base receives the continuous plan and arbitrary valid session durations; Premium adds deep
+diagnostics, detailed evidence reports and explicitly approximate, non-official CEFR/IELTS orientation.
+The dashboard/profile entries, goal editor, forecast, allocation, session controls, paywalls and report
+states form one keyboard-accessible responsive flow. A learner may use one shared replacement-or-exclusion
+allowance per unstarted session; either action keeps the selected duration and substitutes an eligible
+server-owned activity. Every entitlement, replay and continuation boundary is enforced by the API and
+persisted commercial scope, not inferred from browser state.
 
 ## Domain Model
 
@@ -164,7 +173,7 @@ Metrics must not label an assisted answer as mastery.
 - An existing learner receives a bootstrapped profile from server-owned history without repeating a mandatory full diagnostic.
 - A learner can set a target and receive an honest forecast/allocation with stability guards.
 - A 15–120 minute request produces a valid, explainable session; sessions over 60 minutes include a break.
-- One block can be replaced and only once; the new plan remains duration-valid.
+- One block can be replaced or excluded through one shared allowance; the new plan remains duration-valid.
 - Completing real activities updates evidence and the next plan without trusting client-submitted mastery.
 - Free/base/Premium capabilities are enforced by the server.
 - File and PostgreSQL stores have equivalent owner isolation, idempotency, export and deletion behaviour.

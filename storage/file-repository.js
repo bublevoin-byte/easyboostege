@@ -1953,6 +1953,11 @@ export function createFileRepository(filePath) {
           session: adaptiveLearningSessionPublicDto(duplicate.created_response_snapshot),
         };
       }
+      if (candidate.commercialMode === 'free_demo' && state.adaptive_learning_sessions.some((entry) => (
+        entry.username === username
+      ))) {
+        throw new Error('ADAPTIVE_FREE_DEMO_USED');
+      }
       const currentPlan = state.adaptive_learning_plan_revisions.find((entry) => (
         entry.username === username && entry.current
       ));
@@ -1966,6 +1971,7 @@ export function createFileRepository(filePath) {
       if (active) throw new Error('ADAPTIVE_SESSION_ALREADY_CURRENT');
       const row = {
         ...adaptiveLearningSessionRepositoryDto(candidate.session),
+        commercial_scope: candidate.commercialScope || 'base',
         username,
         create_idempotency_key: candidate.idempotencyKey,
         create_request_hash: candidate.requestHash,
@@ -1990,6 +1996,14 @@ export function createFileRepository(filePath) {
       .filter((entry) => entry.username === username && ['created', 'in_progress'].includes(entry.status))
       .sort((left, right) => new Date(right.created_at) - new Date(left.created_at))[0];
     return adaptiveLearningSessionPublicDto(row);
+  }
+
+  async function getAdaptiveLearningSessionCommercialScope(username, sessionId) {
+    await load();
+    const row = state.adaptive_learning_sessions.find((entry) => (
+      entry.username === username && entry.id === sessionId
+    ));
+    return row?.commercial_scope || (row ? 'base' : null);
   }
 
   async function getAdaptiveLearningSessionReplacementReplay(username, sessionId, candidate) {
@@ -2396,6 +2410,37 @@ export function createFileRepository(filePath) {
     return [...totals.values()].sort((left, right) => left.skillId.localeCompare(right.skillId));
   }
 
+  async function getAdaptiveLearningCommercialUsage(username) {
+    await load();
+    const sessions = state.adaptive_learning_sessions.filter((entry) => entry.username === username);
+    const diagnostics = state.adaptive_diagnostic_sessions.filter((entry) => entry.username === username);
+    return {
+      shortDiagnosticsCompleted: diagnostics.filter((entry) => (
+        entry.status === 'completed' && entry.catalog_version === 'ege-short-diagnostic-v1'
+      )).length,
+      deepDiagnosticsCompleted: diagnostics.filter((entry) => (
+        entry.status === 'completed' && entry.catalog_version === 'ege-deep-diagnostic-v1'
+      )).length,
+      sessionsCreated: sessions.length,
+      sessionsCompleted: sessions.filter((entry) => entry.status === 'completed').length,
+    };
+  }
+
+  async function getAdaptiveLearningCompletedSessionReports(username, { limit = 12 } = {}) {
+    await load();
+    return state.adaptive_learning_sessions
+      .filter((entry) => entry.username === username && entry.status === 'completed' && entry.completion_summary)
+      .sort((left, right) => Number(right.completed_at) - Number(left.completed_at))
+      .slice(0, Math.max(1, Math.min(12, Number(limit) || 12)))
+      .map((entry) => ({
+        session: {
+          ...adaptiveLearningSessionPublicDto(entry),
+          completedAt: new Date(entry.completed_at).toISOString(),
+        },
+        summary: structuredClone(entry.completion_summary),
+      }));
+  }
+
   async function startAdaptiveDiagnostic(username, diagnostic) {
     return serializeCoordinatedMutation(async () => {
       await load();
@@ -2409,6 +2454,12 @@ export function createFileRepository(filePath) {
       if (duplicate) {
         if (duplicate.request_hash !== diagnostic.requestHash) throw new Error('ADAPTIVE_DIAGNOSTIC_IDEMPOTENCY_CONFLICT');
         return { created: false, diagnostic: adaptiveDiagnosticStartClaimRepositoryDto(duplicate) };
+      }
+      if (diagnostic.commercialMode === 'free_short' && state.adaptive_diagnostic_sessions.some((entry) => (
+        entry.username === username && entry.status === 'completed'
+          && entry.catalog_version === 'ege-short-diagnostic-v1'
+      ))) {
+        throw new Error('ADAPTIVE_FREE_DIAGNOSTIC_USED');
       }
       const ownerClaimCount = state.adaptive_diagnostic_start_claims
         .filter((entry) => entry.username === username).length;
@@ -2427,6 +2478,9 @@ export function createFileRepository(filePath) {
       let active = state.adaptive_diagnostic_sessions.find((entry) => (
         entry.username === username && ['in_progress', 'ready'].includes(entry.status)
       ));
+      if (active && active.catalog_version !== diagnostic.catalogVersion) {
+        throw new Error('ADAPTIVE_DIAGNOSTIC_ALREADY_CURRENT');
+      }
       const created = !active;
       if (!active) {
         active = {
@@ -3032,6 +3086,14 @@ export function createFileRepository(filePath) {
         .filter((item) => item.username === username)
         .sort((left, right) => new Date(left.created_at) - new Date(right.created_at))
         .map(adaptiveLearningSessionRepositoryDto),
+      adaptive_learning_reports: state.adaptive_learning_sessions
+        .filter((item) => item.username === username && item.status === 'completed' && item.completion_summary)
+        .sort((left, right) => new Date(left.completed_at) - new Date(right.completed_at))
+        .map((item) => ({
+          session_id: item.id,
+          completed_at: new Date(item.completed_at).toISOString(),
+          summary: structuredClone(item.completion_summary),
+        })),
       adaptive_learning_session_events: state.adaptive_learning_session_events
         .filter((item) => item.username === username)
         .sort((left, right) => Number(left.sequence) - Number(right.sequence))
@@ -3222,6 +3284,7 @@ export function createFileRepository(filePath) {
     getAdaptiveLearningSessionCreateReplay,
     createAdaptiveLearningSession,
     getCurrentAdaptiveLearningSession,
+    getAdaptiveLearningSessionCommercialScope,
     getAdaptiveLearningSessionReplacementReplay,
     replaceAdaptiveLearningSessionBlock,
     getAdaptiveLearningSessionMutationReplay,
@@ -3232,6 +3295,8 @@ export function createFileRepository(filePath) {
     getAdaptiveLearningSessionFinishContext,
     finishAdaptiveLearningSession,
     getAdaptiveLearningWeekUsage,
+    getAdaptiveLearningCommercialUsage,
+    getAdaptiveLearningCompletedSessionReports,
     startAdaptiveDiagnostic,
     getAdaptiveDiagnosticStartClaim,
     getCurrentAdaptiveDiagnostic,

@@ -78,6 +78,7 @@ export function adaptiveDiagnosticCompletionSnapshotDto(snapshot) {
     diagnostic: {
       id: diagnostic.id,
       catalogVersion: diagnostic.catalogVersion,
+      ...(diagnostic.depth === 'deep' ? { depth: 'deep' } : {}),
       status: diagnostic.status,
       estimatedMinutes: Number(diagnostic.estimatedMinutes),
       deadlineMinutes: Number(diagnostic.deadlineMinutes),
@@ -113,6 +114,7 @@ export function adaptiveDiagnosticPublicDto(session, item, suppliedPolicy = null
     diagnostic: {
       id: session.id,
       catalogVersion: session.catalog_version,
+      ...(policy.depth === 'deep' ? { depth: 'deep' } : {}),
       status: session.status,
       estimatedMinutes: policy.estimatedMinutes,
       deadlineMinutes: Math.ceil(policy.maximumSeconds / 60),

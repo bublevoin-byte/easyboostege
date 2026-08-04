@@ -90,12 +90,42 @@ async function replayPublicRequest(page, pathName, key, body) {
   }, { requestPath: pathName, idempotencyKey: key, payload: body });
 }
 
+async function browserApiRequest(page, pathName, { method = 'GET', key = null, body = null } = {}) {
+  return page.evaluate(async ({ requestPath, requestMethod, idempotencyKey, payload }) => {
+    const headers = {};
+    if (payload !== null) headers['Content-Type'] = 'application/json';
+    if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
+    const response = await fetch(requestPath, {
+      method: requestMethod,
+      credentials: 'same-origin',
+      headers,
+      ...(payload === null ? {} : { body: JSON.stringify(payload) }),
+    });
+    return { status: response.status, body: await response.json() };
+  }, {
+    requestPath: pathName, requestMethod: method, idempotencyKey: key, payload: body,
+  });
+}
+
+function rgbContrast(foreground, background) {
+  const luminance = (rgb) => {
+    const channels = rgb.match(/\d+(?:\.\d+)?/gu).slice(0, 3).map((part) => Number(part) / 255)
+      .map((value) => value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+  };
+  const first = luminance(foreground);
+  const second = luminance(background);
+  return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
+}
+
 async function runAdaptiveDiagnosticE2E() {
   let browser;
   let child;
   let context;
   let examContext;
   let writerContext;
+  let commercialContext;
+  let adjustmentContext;
   let providerServer;
   let temporaryDirectory;
   try {
@@ -167,10 +197,24 @@ async function runAdaptiveDiagnosticE2E() {
     }
     await fs.writeFile(dataFile, JSON.stringify({
       users: {
+        adaptivefree: {
+          created: Date.now(),
+          privacy_consent: {
+            text_processing: true, voice_processing: false,
+            policy_version: '2026-08-02-voice-v1', updated_at: new Date().toISOString(),
+          },
+        },
         adaptivee2e: {
           created: Date.now(), sub_until: Date.now() + 86_400_000,
           privacy_consent: {
             text_processing: true, voice_processing: true,
+            policy_version: '2026-08-02-voice-v1', updated_at: new Date().toISOString(),
+          },
+        },
+        adaptiveadjust: {
+          created: Date.now(), sub_until: Date.now() + 86_400_000,
+          privacy_consent: {
+            text_processing: true, voice_processing: false,
             policy_version: '2026-08-02-voice-v1', updated_at: new Date().toISOString(),
           },
         },
@@ -189,7 +233,9 @@ async function runAdaptiveDiagnosticE2E() {
           },
         },
       },
-      progress: { adaptivee2e: {}, adaptiveexam: {}, adaptivewriter: {} },
+      progress: {
+        adaptivefree: {}, adaptivee2e: {}, adaptiveadjust: {}, adaptiveexam: {}, adaptivewriter: {},
+      },
       subscription_entitlements: {
         adaptivewriter: {
           voice_tutor: {
@@ -266,7 +312,258 @@ async function runAdaptiveDiagnosticE2E() {
     });
     const page = await context.newPage();
     await page.goto(baseUrl, { waitUntil: 'networkidle' });
-    await openProgress(page);
+    const primaryHomeEntry = page.locator('#home_adaptive_plan');
+    await primaryHomeEntry.waitFor({ state: 'visible', timeout: 5_000 });
+    assert.ok((await primaryHomeEntry.boundingBox()).height >= 44);
+    await primaryHomeEntry.focus();
+    await primaryHomeEntry.press('Enter');
+    await page.locator('#scr10.on').waitFor({ state: 'visible', timeout: 5_000 });
+    await page.locator('#adaptive_plan:not([hidden])').waitFor({ state: 'visible', timeout: 5_000 });
+    await page.waitForFunction(() => document.activeElement?.id === 'adaptive_plan_title');
+    await page.locator('#adaptive_access[data-tier="base"]').waitFor({ state: 'visible', timeout: 5_000 });
+    await page.evaluate(() => window.tab('scr11'));
+    const profileEntry = page.locator('#profile_adaptive_plan');
+    await profileEntry.waitFor({ state: 'visible', timeout: 5_000 });
+    await profileEntry.focus();
+    await profileEntry.press('Enter');
+    await page.waitForFunction(() => document.activeElement?.id === 'adaptive_plan_title');
+
+    commercialContext = await browser.newContext({
+      serviceWorkers: 'block', viewport: { width: 375, height: 812 }, reducedMotion: 'reduce',
+    });
+    await commercialContext.route('https://**', (route) => route.abort('blockedbyclient'));
+    await commercialContext.addCookies([{
+      name: 'eb_token',
+      value: jwt.sign({ u: 'adaptivefree' }, jwtSecret, { expiresIn: '1h' }),
+      url: baseUrl,
+      httpOnly: true,
+      sameSite: 'Lax',
+    }]);
+    const commercialPage = await commercialContext.newPage();
+    await commercialPage.goto(baseUrl, { waitUntil: 'networkidle' });
+    const homeEntry = commercialPage.locator('#home_adaptive_plan');
+    await homeEntry.focus();
+    assert.notEqual(await homeEntry.evaluate((element) => getComputedStyle(element).outlineStyle), 'none');
+    await homeEntry.press('Enter');
+    await commercialPage.locator('#adaptive_plan:not([hidden])').waitFor({ state: 'visible', timeout: 5_000 });
+    await commercialPage.waitForFunction(() => document.activeElement?.id === 'adaptive_plan_title');
+    await commercialPage.locator('#adaptive_access[data-tier="free"]').waitFor({ state: 'visible', timeout: 5_000 });
+    assert.equal(await commercialPage.getByRole('heading', { name: 'Мой план подготовки' }).count(), 1);
+    assert.match(await commercialPage.locator('#adaptive_access').innerText(), /Free/u);
+    assert.equal(await commercialPage.locator('input[name="adaptive_session_duration"][value="15"]').isEnabled(), true);
+    assert.equal(await commercialPage.locator('input[name="adaptive_session_duration"][value="30"]').isDisabled(), true);
+    assert.equal(await commercialPage.locator('#adaptive_session_custom').isDisabled(), true);
+    const responsiveState = await commercialPage.evaluate(() => ({
+      viewport: window.innerWidth,
+      documentWidth: document.documentElement.scrollWidth,
+      screenWidth: document.getElementById('scr10').scrollWidth,
+      screenClientWidth: document.getElementById('scr10').clientWidth,
+      animationDuration: getComputedStyle(document.querySelector('.heroFloat')).animationDuration,
+    }));
+    assert.deepEqual({
+      viewport: responsiveState.viewport,
+      documentWidth: responsiveState.documentWidth,
+      screenWidth: responsiveState.screenWidth,
+      screenClientWidth: responsiveState.screenClientWidth,
+    }, { viewport: 375, documentWidth: 375, screenWidth: 375, screenClientWidth: 375 });
+    assert.ok(
+      ['0s', '0.01ms', '0.00001s', '1e-05s'].includes(responsiveState.animationDuration),
+      `reduced motion must remove or minimize animation, got ${responsiveState.animationDuration}`,
+    );
+    const contrastSamples = await commercialPage.evaluate(() => {
+      function effectiveBackground(element) {
+        for (let current = element; current; current = current.parentElement) {
+          const color = getComputedStyle(current).backgroundColor;
+          if (color && color !== 'rgba(0, 0, 0, 0)' && color !== 'transparent') return color;
+        }
+        return 'rgb(255, 255, 255)';
+      }
+      return ['adaptive_forecast_disclaimer', 'adaptive_session_duration_help'].map((id) => {
+        const element = document.getElementById(id);
+        return {
+          id,
+          color: getComputedStyle(element).color,
+          background: effectiveBackground(element),
+        };
+      });
+    });
+    for (const sample of contrastSamples) {
+      assert.ok(
+        rgbContrast(sample.color, sample.background) >= 4.5,
+        `${sample.id} contrast is below 4.5:1 (${sample.color} on ${sample.background})`,
+      );
+    }
+    const lockedReportPromise = commercialPage.waitForResponse((response) => (
+      response.url().endsWith('/api/v1/adaptive-learning/reports/detailed')
+    ));
+    await commercialPage.locator('#adaptive_detailed_report').press('Enter');
+    assert.equal((await lockedReportPromise).status(), 403);
+    await commercialPage.locator('#adaptive_paywall:not([hidden])').waitFor({ state: 'visible' });
+    assert.match(await commercialPage.locator('#adaptive_report_notice').innerText(), /Premium/u);
+
+    await commercialPage.locator('#adaptive_target_score').fill('75');
+    await commercialPage.locator('#adaptive_exam_date').fill('2027-06-01');
+    await commercialPage.locator('#adaptive_weekly_minutes').fill('180');
+    const freeGoalPromise = commercialPage.waitForResponse((response) => (
+      response.request().method() === 'PUT'
+        && response.url().endsWith('/api/v1/adaptive-learning/goal')
+    ));
+    await commercialPage.locator('#adaptive_goal_form button[type="submit"]').press('Enter');
+    assert.equal((await freeGoalPromise).status(), 201);
+    const freePreview = await browserApiRequest(
+      commercialPage,
+      '/api/v1/adaptive-learning/sessions/preview',
+      { method: 'POST', body: { durationMinutes: 15 } },
+    );
+    assert.equal(freePreview.status, 200);
+    assert.equal(freePreview.body.preview.durationMinutes, 15);
+    assert.equal(freePreview.body.preview.blocks.length, 1);
+    const freeCreateBody = {
+      durationMinutes: 15,
+      previewFingerprint: freePreview.body.preview.previewFingerprint,
+    };
+    const freeCreateKey = 'adaptive-free-demo-create-0001';
+    const freeCreated = await browserApiRequest(
+      commercialPage,
+      '/api/v1/adaptive-learning/sessions',
+      { method: 'POST', key: freeCreateKey, body: freeCreateBody },
+    );
+    assert.equal(freeCreated.status, 201);
+    const freeCreateReplay = await browserApiRequest(
+      commercialPage,
+      '/api/v1/adaptive-learning/sessions',
+      { method: 'POST', key: freeCreateKey, body: freeCreateBody },
+    );
+    assert.equal(freeCreateReplay.status, 200);
+    assert.equal(freeCreateReplay.body.session.id, freeCreated.body.session.id);
+    const freeCurrent = await browserApiRequest(
+      commercialPage,
+      '/api/v1/adaptive-learning/sessions/current',
+    );
+    assert.equal(freeCurrent.status, 200);
+    assert.equal(freeCurrent.body.session.id, freeCreated.body.session.id);
+    const freeBlock = freeCreated.body.session.blocks[0];
+    const freeStartBody = { blockId: freeBlock.id, expectedRevision: 0 };
+    const freeStartKey = 'adaptive-free-demo-start-0001';
+    const freeStarted = await browserApiRequest(
+      commercialPage,
+      `/api/v1/adaptive-learning/sessions/${freeCreated.body.session.id}/start`,
+      { method: 'POST', key: freeStartKey, body: freeStartBody },
+    );
+    assert.equal(freeStarted.status, 201);
+    const freeStartReplay = await browserApiRequest(
+      commercialPage,
+      `/api/v1/adaptive-learning/sessions/${freeCreated.body.session.id}/start`,
+      { method: 'POST', key: freeStartKey, body: freeStartBody },
+    );
+    assert.equal(freeStartReplay.status, 200);
+    assert.equal(freeStartReplay.body.executionClaim, freeStarted.body.executionClaim);
+    const freeAttemptId = '50000000-0000-4000-8000-000000000001';
+    const freeAttempt = await browserApiRequest(commercialPage, '/api/v1/module-attempts', {
+      method: 'POST',
+      body: {
+        id: freeAttemptId,
+        module: freeBlock.module,
+        activity: freeBlock.activityId,
+        score: 1,
+        maxScore: 1,
+        durationMs: 1,
+        adaptiveExecutionClaim: freeStarted.body.executionClaim,
+      },
+    });
+    assert.equal(freeAttempt.status, 201);
+    const freeAdvanced = await browserApiRequest(
+      commercialPage,
+      `/api/v1/adaptive-learning/sessions/${freeCreated.body.session.id}/advance`,
+      {
+        method: 'POST', key: 'adaptive-free-demo-advance-001',
+        body: {
+          blockId: freeBlock.id,
+          expectedRevision: freeStarted.body.execution.revision,
+          attempt: { type: 'module', id: freeAttemptId },
+        },
+      },
+    );
+    assert.equal(freeAdvanced.status, 200);
+    assert.equal(freeAdvanced.body.execution.readyToFinish, true);
+    const freeFinished = await browserApiRequest(
+      commercialPage,
+      `/api/v1/adaptive-learning/sessions/${freeCreated.body.session.id}/finish`,
+      {
+        method: 'POST', key: 'adaptive-free-demo-finish-0001',
+        body: { expectedRevision: freeAdvanced.body.execution.revision },
+      },
+    );
+    assert.equal(freeFinished.status, 200);
+    assert.equal(freeFinished.body.session.status, 'completed');
+    const secondFreePreview = await browserApiRequest(
+      commercialPage,
+      '/api/v1/adaptive-learning/sessions/preview',
+      { method: 'POST', body: { durationMinutes: 15 } },
+    );
+    assert.equal(secondFreePreview.status, 403);
+    assert.equal(secondFreePreview.body.error.code, 'ADAPTIVE_FREE_DEMO_USED');
+
+    adjustmentContext = await browser.newContext({ serviceWorkers: 'block' });
+    await adjustmentContext.route('https://**', async (route) => {
+      blockedExternalUrls.push(route.request().url());
+      await route.abort('blockedbyclient');
+    });
+    await adjustmentContext.addCookies([{
+      name: 'eb_token',
+      value: jwt.sign({ u: 'adaptiveadjust' }, jwtSecret, { expiresIn: '1h' }),
+      url: baseUrl,
+      httpOnly: true,
+      sameSite: 'Lax',
+    }]);
+    const adjustmentPage = await adjustmentContext.newPage();
+    await adjustmentPage.goto(baseUrl, { waitUntil: 'networkidle' });
+    assert.equal((await browserApiRequest(
+      adjustmentPage,
+      '/api/v1/adaptive-learning/goal',
+      {
+        method: 'PUT', key: 'adaptive-adjust-goal-0001',
+        body: {
+          targetExam: 'ege_english', targetScore: 85,
+          examDate: '2027-06-01', weeklyMinutes: 300,
+        },
+      },
+    )).status, 201);
+    const adjustmentPreview = await browserApiRequest(
+      adjustmentPage,
+      '/api/v1/adaptive-learning/sessions/preview',
+      { method: 'POST', body: { durationMinutes: 15 } },
+    );
+    assert.equal(adjustmentPreview.status, 200);
+    const adjustmentCreate = await browserApiRequest(
+      adjustmentPage,
+      '/api/v1/adaptive-learning/sessions',
+      {
+        method: 'POST', key: 'adaptive-adjust-create-0001',
+        body: {
+          durationMinutes: 15,
+          previewFingerprint: adjustmentPreview.body.preview.previewFingerprint,
+        },
+      },
+    );
+    assert.equal(adjustmentCreate.status, 201);
+    const adjustmentHomeEntry = adjustmentPage.locator('#home_adaptive_plan');
+    await adjustmentHomeEntry.press('Enter');
+    await adjustmentPage.locator('#adaptive_session_start').waitFor({ state: 'visible', timeout: 5_000 });
+    assert.equal(await adjustmentPage.getByText('Почему изменить блок?', { exact: true }).count(), 1);
+    const replacementSelect = adjustmentPage.getByLabel('Почему изменить блок?', { exact: true });
+    await replacementSelect.selectOption('not_relevant');
+    const replacementResponsePromise = adjustmentPage.waitForResponse((response) => (
+      response.request().method() === 'POST'
+        && response.url().endsWith(`/api/v1/adaptive-learning/sessions/${adjustmentCreate.body.session.id}/replace`)
+        && response.request().postDataJSON().reason === 'not_relevant'
+    ));
+    await adjustmentPage.getByRole('button', { name: 'Заменить', exact: true }).press('Enter');
+    const replacementResponse = await replacementResponsePromise;
+    assert.equal(replacementResponse.status(), 200);
+    assert.equal((await replacementResponse.json()).session.replacement.reason, 'not_relevant');
+    await adjustmentPage.waitForFunction(() => document.activeElement?.id === 'adaptive_session_start');
+    assert.equal(await adjustmentPage.getByText('Почему изменить блок?', { exact: true }).count(), 0);
 
     await page.locator('#adaptive_target_score').fill('85');
     await page.locator('#adaptive_exam_date').fill('2027-06-01');
@@ -300,6 +597,9 @@ async function runAdaptiveDiagnosticE2E() {
     const startKey = startResponse.request().headers()['idempotency-key'];
     assert.ok(startKey);
     await page.locator('#adaptive_diagnostic_form').waitFor({ state: 'visible', timeout: 5_000 });
+    await page.waitForFunction(() => (
+      document.activeElement?.matches('input[name="adaptive_diagnostic_choice"]')
+    ));
     assert.match(await page.locator('#adaptive_diagnostic_timing').innerText(), /20 минут после старта/u);
     assert.equal(await page.locator('#adaptive_diagnostic_progress').getAttribute('max'), '12');
     assert.equal(await page.locator('#adaptive_diagnostic_progress_label').innerText(), '0 из 12');
@@ -390,6 +690,11 @@ async function runAdaptiveDiagnosticE2E() {
         return Number(progress?.value) === expectedAnswered
           && (diagnostic?.dataset.itemId !== itemId || expectedAnswered === 10);
       }, { itemId: priorItemId, expectedAnswered: answered + 1 }, { timeout: 5_000 });
+      await page.waitForFunction((lastAnswer) => (
+        lastAnswer
+          ? document.activeElement?.id === 'adaptive_diagnostic_complete'
+          : document.activeElement?.matches('input[name="adaptive_diagnostic_choice"]')
+      ), answered === 9);
     }
 
     assert.equal(audioWasPlayed, true);
@@ -419,6 +724,7 @@ async function runAdaptiveDiagnosticE2E() {
     assert.equal(replayedAfterCompletion.status, 200);
     assert.deepEqual(replayedAfterCompletion.body, firstAnswerReplay.expected);
     await page.getByText(/Диагностика завершена/u).waitFor({ state: 'visible', timeout: 5_000 });
+    await page.waitForFunction(() => document.activeElement?.id === 'adaptive_diagnostic_title');
     assert.equal(await page.locator('#adaptive_diagnostic_form').isHidden(), true);
     assert.equal(await startButton.isHidden(), true);
 
@@ -653,6 +959,38 @@ async function runAdaptiveDiagnosticE2E() {
       (await fetch('/api/v1/adaptive-learning/sessions/current')).status
     ));
     assert.equal(currentSessionAfterFinish, 404);
+
+    await duration15.focus();
+    await duration15.press('Space');
+    const exclusionPreviewPromise = page.waitForResponse((response) => (
+      response.request().method() === 'POST'
+        && response.url().endsWith('/api/v1/adaptive-learning/sessions/preview')
+    ));
+    await previewButton.press('Enter');
+    assert.equal((await exclusionPreviewPromise).status(), 200);
+    const exclusionCreatePromise = page.waitForResponse((response) => (
+      response.request().method() === 'POST'
+        && response.url().endsWith('/api/v1/adaptive-learning/sessions')
+    ));
+    await createSessionButton.press('Enter');
+    const exclusionCreateResponse = await exclusionCreatePromise;
+    assert.equal(exclusionCreateResponse.status(), 201);
+    const exclusionSession = (await exclusionCreateResponse.json()).session;
+    await page.getByText('Почему изменить блок?', { exact: true }).waitFor({
+      state: 'visible', timeout: 5_000,
+    });
+    assert.equal(await page.getByText('Почему изменить блок?', { exact: true }).count(), 1);
+    const exclusionResponsePromise = page.waitForResponse((response) => (
+      response.request().method() === 'POST'
+        && response.url().endsWith(`/api/v1/adaptive-learning/sessions/${exclusionSession.id}/replace`)
+        && response.request().postDataJSON().reason === 'excluded'
+    ));
+    await page.getByRole('button', { name: 'Исключить этот блок', exact: true }).press('Enter');
+    const exclusionResponse = await exclusionResponsePromise;
+    assert.equal(exclusionResponse.status(), 200);
+    assert.equal((await exclusionResponse.json()).session.replacement.reason, 'excluded');
+    await page.waitForFunction(() => document.activeElement?.id === 'adaptive_session_start');
+
     const examLaunch = await page.evaluate(() => new Promise((resolve) => {
       window.nav('scr3', () => resolve(
         window.launchGrammarExam('builtin:exam:grammar:19-24:v1'),
@@ -678,6 +1016,7 @@ async function runAdaptiveDiagnosticE2E() {
     const examPage = await examContext.newPage();
     await examPage.goto(baseUrl, { waitUntil: 'networkidle' });
     await openProgress(examPage);
+    await examPage.locator('#adaptive_access[data-tier="base"]').waitFor({ state: 'visible', timeout: 5_000 });
     await examPage.locator('#adaptive_target_score').fill('85');
     await examPage.locator('#adaptive_exam_date').fill('2027-06-01');
     await examPage.locator('#adaptive_weekly_minutes').fill('300');
@@ -706,6 +1045,7 @@ async function runAdaptiveDiagnosticE2E() {
     assert.equal(examCreateResponse.status(), 201);
     const examSession = (await examCreateResponse.json()).session;
     const examBlock = examSession.blocks[0];
+    await examPage.locator('#adaptive_session_start').waitFor({ state: 'visible', timeout: 5_000 });
     const examStartPromise = examPage.waitForResponse((response) => (
       response.request().method() === 'POST' && response.url().endsWith('/start')
     ));
@@ -760,6 +1100,7 @@ async function runAdaptiveDiagnosticE2E() {
     const writerPage = await writerContext.newPage();
     await writerPage.goto(baseUrl, { waitUntil: 'networkidle' });
     await openProgress(writerPage);
+    await writerPage.locator('#adaptive_access[data-tier="premium"]').waitFor({ state: 'visible', timeout: 5_000 });
     await writerPage.locator('#adaptive_target_score').fill('85');
     await writerPage.locator('#adaptive_exam_date').fill('2027-06-01');
     await writerPage.locator('#adaptive_weekly_minutes').fill('300');
@@ -793,6 +1134,7 @@ async function runAdaptiveDiagnosticE2E() {
     const writingBlock = writerSession.blocks[0];
     assert.equal(writingBlock.contentRef, 'builtin:writing_37:emily-new-flat');
 
+    await writerPage.locator('#adaptive_session_start').waitFor({ state: 'visible', timeout: 5_000 });
     const writerStartPromise = writerPage.waitForResponse((response) => (
       response.request().method() === 'POST' && response.url().endsWith('/start')
     ));
@@ -846,10 +1188,54 @@ async function runAdaptiveDiagnosticE2E() {
     const writerFinish = await writerFinishResponse.json();
     assert.equal(writerFinish.summary.completedWork[0].evidenceQuality, 'server_verified_assisted');
     assert.equal(writerFinish.summary.completedWork[0].evidenceContext, 'ai_assisted_review');
+    await writerPage.locator('#adaptive_deep_diagnostic_start').waitFor({ state: 'visible' });
+    await writerPage.evaluate(() => {
+      const section = document.getElementById('adaptive_diagnostic');
+      const title = document.getElementById('adaptive_diagnostic_title');
+      const restart = document.getElementById('adaptive_diagnostic_start');
+      section.hidden = false;
+      title.textContent = 'Глубокая диагностика';
+      restart.hidden = false;
+      restart.dataset.diagnosticDepth = 'deep';
+    });
+    assert.match(await writerPage.locator('#adaptive_diagnostic_title').innerText(), /Глубокая/u);
+    const deepRestartResponsePromise = writerPage.waitForResponse((response) => (
+      response.request().method() === 'POST'
+        && response.url().endsWith('/api/v1/adaptive-learning/diagnostics/start')
+    ));
+    await writerPage.evaluate(() => {
+      const restart = document.getElementById('adaptive_diagnostic_start');
+      restart.dataset.diagnosticDepth = 'deep';
+      restart.focus();
+      restart.click();
+    });
+    const deepRestartResponse = await deepRestartResponsePromise;
+    assert.equal(deepRestartResponse.request().postDataJSON().depth, 'deep');
+    assert.equal(deepRestartResponse.status(), 201);
+    assert.equal((await deepRestartResponse.json()).diagnostic.depth, 'deep');
+    await writerPage.waitForFunction(() => (
+      document.activeElement?.matches('input[name="adaptive_diagnostic_choice"]')
+    ));
+    const reportResponsePromise = writerPage.waitForResponse((response) => (
+      response.url().endsWith('/api/v1/adaptive-learning/reports/detailed')
+    ));
+    await writerPage.locator('#adaptive_detailed_report').press('Enter');
+    const reportResponse = await reportResponsePromise;
+    assert.equal(
+      reportResponse.status(),
+      200,
+      `detailed report failed: ${await reportResponse.text()}\n${output.join('')}`,
+    );
+    await writerPage.locator('#adaptive_report:not([hidden])').waitFor({ state: 'visible' });
+    assert.ok(await writerPage.locator('#adaptive_report_rows tr').count() >= 1);
+    assert.match(await writerPage.locator('#adaptive_orientation').innerText(), /Примерный ориентир/u);
+    assert.match(await writerPage.locator('#adaptive_report_disclaimer').innerText(), /не является официальным/u);
     assert.ok(providerCalls.length >= 1);
     assert.equal(blockedExternalUrls.some((url) => /x\.ai|groq|openai/u.test(url)), false);
     console.log('adaptive e2e: diagnostic plus client module, exam launch and exact writing execution passed');
   } finally {
+    if (adjustmentContext) await adjustmentContext.close();
+    if (commercialContext) await commercialContext.close();
     if (writerContext) await writerContext.close();
     if (examContext) await examContext.close();
     if (context) await context.close();

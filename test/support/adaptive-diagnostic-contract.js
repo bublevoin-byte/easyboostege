@@ -223,6 +223,16 @@ export async function assertAdaptiveDiagnosticRepositoryContract(assert, reposit
   assert.equal(answerReplayAfterCompletion.diagnostic.answered_items, 1);
   assert.equal(answerReplayAfterCompletion.diagnostic.current_item_id, null);
 
+  assert.equal((await repository.getAdaptiveLearningCommercialUsage(username)).shortDiagnosticsCompleted, 1);
+  await assert.rejects(repository.startAdaptiveDiagnostic(username, {
+    ...start,
+    id: '51000000-0000-4000-8000-000000000019',
+    idempotencyKey: 'diagnostic-contract-free-repeat',
+    requestHash: '1'.repeat(64),
+    commercialMode: 'free_short',
+    now: new Date('2026-08-04T09:02:00.000Z'),
+  }), /ADAPTIVE_FREE_DIAGNOSTIC_USED/u);
+
   const replayedResume = await repository.startAdaptiveDiagnostic(username, {
     ...start,
     id: '51000000-0000-4000-8000-000000000009',

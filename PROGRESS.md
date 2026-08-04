@@ -842,7 +842,7 @@ Type-mode vocabulary больше не показывает accepted word в к�
 миграция 030 с file/PostgreSQL parity.
 ## Adaptive EGE Learning Plan (implementation started 2026-08-04)
 
-Status: tickets 01–06 are complete on `feature/adaptive-learning-plan`; Tickets 07–08 remain. The feature is stacked on the completed Voice Tutor branch and will not be pushed, merged or deployed without a separate owner decision.
+Status: tickets 01–07 are complete on `feature/adaptive-learning-plan`; Ticket 08 remains. The feature is stacked on the completed Voice Tutor branch and will not be pushed, merged or deployed without a separate owner decision.
 
 Agreed product contract: target EGE score/date is primary; a short diagnostic or existing evidence builds a confidence-labelled micro-skill profile; an honest forecast and stable weekly budget feed 15–120 minute executable sessions; real module outcomes update the living plan; free/base/Premium boundaries are server-enforced. CEFR/IELTS is secondary and approximate, not an official IELTS result.
 
@@ -854,7 +854,7 @@ Implementation tracker:
 - [x] 04 Duration-aware learning session composer
 - [x] 05 Real module execution and evidence feedback
 - [x] 06 Retention loop and Premium depth
-- [ ] 07 Commercial boundaries, complete UI and reports
+- [x] 07 Commercial boundaries, complete UI and reports
 - [ ] 08 Hardening, E2E and release evidence
 
 Detailed source of truth: `.scratch/adaptive-learning-plan/spec.md` and `.scratch/adaptive-learning-plan/issues/`.
@@ -1066,3 +1066,28 @@ isolated rerun after one initial response-wait timeout, with no product-code cha
 frontend build, 409-file secret scan, 254-commit history scan and `git diff --check` pass. Independent
 Standards and Spec final reviews both passed with zero P0–P2. No paid provider call, push, merge, deploy or
 staging mutation.
+
+Ticket 07 implementation complete: the public adaptive experience now has dashboard/profile entry,
+goal editing, confidence-labelled forecast and weekly allocation, understandable feasibility choices,
+15–120 minute session controls and a completion summary. Free receives one persisted 15-minute demo
+session and one short diagnostic; Base receives the continuous plan and arbitrary valid durations;
+Premium adds deep diagnostics, detailed evidence reports, Writing/Speaking depth and explicitly
+approximate, non-official CEFR/IELTS orientation. Migration 038 persists immutable
+`commercial_scope=free_demo|base|premium`, and every preview/create/current/replace/start/advance/finish,
+diagnostic and report boundary is enforced server-side with file/PostgreSQL parity. A previously created
+Free demo remains completable after usage is recorded, while a second preview/create is denied.
+
+The unstarted-session control exposes one shared replacement-or-exclusion allowance. Both operations
+preserve duration and block identity, choose another eligible server-owned activity, persist an explicit
+bounded reason and remain idempotent under races. The UI has a visible associated reason label, restores
+focus after replacement/exclusion, focuses the next diagnostic answer or result heading, preserves deep
+diagnostic depth on an expired Premium restart, meets computed contrast against inherited backgrounds and
+honours reduced motion. Real Chromium covers both actions, keyboard navigation, diagnostic completion,
+deep restart, production-wired Free create/current/start/advance/finish and denial of a second demo.
+
+Final gates: Ticket 07 focused tests 34/34; full suite 665/665; disposable PostgreSQL 12/12 with migrations
+001–038 and cleanup; adaptive Chromium E2E; lint/check; 17-asset frontend build; 413-file secret scan;
+255-commit history scan; and `git diff --check`. Independent Standards and Spec final reviews both passed
+with zero P0–P2. The local PostgreSQL runner printed `postgres Pulling`/`postgres Pulled` for its disposable
+`postgres:17-alpine` test image; no application provider or paid API was called. No push, merge, deploy or
+staging mutation was performed.

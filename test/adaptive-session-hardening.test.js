@@ -160,6 +160,7 @@ test('replacement reasons enforce difficulty, accessibility and relevance semant
     ['too_easy', 'ege.grammar.forms', 'ege.grammar.transformations'],
     ['accessibility', 'ege.listening.gist', 'ege.grammar.forms'],
     ['not_relevant', 'ege.grammar.forms', 'ege.grammar.transformations'],
+    ['excluded', 'ege.grammar.forms', 'ege.grammar.transformations'],
   ];
   for (const [reason, targetSkillId, alternativeSkillId] of cases) {
     const { currentPlan, session } = oneBlockSession(targetSkillId, alternativeSkillId);
@@ -175,7 +176,12 @@ test('replacement reasons enforce difficulty, accessibility and relevance semant
       assert.equal(next.requiresAudio, false);
       assert.equal(next.requiresMicrophone, false);
     }
-    if (reason === 'not_relevant') assert.notEqual(next.skillId, target.skillId);
+    if (['not_relevant', 'excluded'].includes(reason)) assert.notEqual(next.skillId, target.skillId);
+    if (reason === 'excluded') {
+      assert.ok(next.reasonCodes.includes('learner_exclusion'));
+      assert.equal(replaced.durationMinutes, session.durationMinutes);
+      assert.equal(replaced.blocks.reduce((sum, block) => sum + block.plannedMinutes, 0), session.durationMinutes);
+    }
   }
 });
 
@@ -204,6 +210,8 @@ test('OpenAPI documents the exact strict launch descriptor union and block metad
   assert.match(openapi, /required: \[version, kind, screenId, skillId, module, repeatId, taskId, stage, status, dueAt, windowEndsAt\]/u);
   assert.match(openapi, /required: \[weeklyAvailableMinutes, coverageGaps, prerequisiteEvidence, skills\]/u);
   assert.match(openapi, /content_coverage_fallback/u);
+  assert.match(openapi, /too_difficult, too_easy, not_relevant, accessibility, excluded/u);
+  assert.match(openapi, /replacement_excluded/u);
   assert.doesNotMatch(openapi, /matching lazy-loaded activity screen/u);
   assert.match(openapi, /required: \[id, position, kind, module, skillId, skillLabel, activityId, activityLabel/u);
 });

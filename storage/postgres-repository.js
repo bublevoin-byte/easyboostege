@@ -2313,6 +2313,13 @@ export function createPostgresRepository(connectionString, {
           session: adaptiveLearningSessionPublicDto(duplicate.rows[0].created_response_snapshot),
         };
       }
+      if (candidate.commercialMode === 'free_demo') {
+        const used = await client.query(
+          'SELECT 1 FROM adaptive_learning_sessions WHERE username = $1 LIMIT 1',
+          [username],
+        );
+        if (used.rowCount) throw new Error('ADAPTIVE_FREE_DEMO_USED');
+      }
       const currentPlan = await client.query(
         `SELECT id, revision FROM adaptive_learning_plan_revisions
          WHERE username = $1 AND current`, [username],
@@ -2330,14 +2337,14 @@ export function createPostgresRepository(connectionString, {
       const inserted = await client.query(
         `INSERT INTO adaptive_learning_sessions
          (id, username, session_version, revision, plan_id, plan_revision, preview_fingerprint,
-          composer_policy_version, content_registry_version, taxonomy_version, week_start,
-          duration_minutes, learning_minutes, break_minutes, weekly_budget_snapshot, blocks,
-          status, current_block_id, completed_learning_minutes, replacement,
-          create_idempotency_key, create_request_hash, created_response_snapshot,
-          created_at, updated_at)
+           composer_policy_version, content_registry_version, taxonomy_version, week_start,
+           duration_minutes, learning_minutes, break_minutes, weekly_budget_snapshot, blocks,
+           status, current_block_id, completed_learning_minutes, replacement,
+           create_idempotency_key, create_request_hash, created_response_snapshot,
+           created_at, updated_at, commercial_scope)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
                  $15::jsonb, $16::jsonb, $17, $18, $19, $20::jsonb, $21, $22,
-                 $23::jsonb, $24, $25)
+                  $23::jsonb, $24, $25, $26)
          RETURNING *`,
         [session.id, username, session.session_version, session.revision, session.plan_id,
           session.plan_revision, session.preview_fingerprint, session.composer_policy_version,
@@ -2347,7 +2354,7 @@ export function createPostgresRepository(connectionString, {
           session.current_block_id, session.completed_learning_minutes,
           session.replacement == null ? null : JSON.stringify(session.replacement),
           candidate.idempotencyKey, candidate.requestHash, JSON.stringify(candidate.session),
-          session.created_at, session.updated_at],
+          session.created_at, session.updated_at, candidate.commercialScope || 'base'],
       );
       await client.query('COMMIT');
       return { created: true, replayed: false, session: adaptiveLearningSessionPublicDto(inserted.rows[0]) };
@@ -2364,6 +2371,14 @@ export function createPostgresRepository(connectionString, {
        ORDER BY created_at DESC LIMIT 1`, [username],
     );
     return adaptiveLearningSessionPublicDto(result.rows[0]);
+  }
+
+  async function getAdaptiveLearningSessionCommercialScope(username, sessionId) {
+    const result = await pool.query(
+      'SELECT commercial_scope FROM adaptive_learning_sessions WHERE username = $1 AND id = $2',
+      [username, sessionId],
+    );
+    return result.rows[0]?.commercial_scope || null;
   }
 
   async function getAdaptiveLearningSessionReplacementReplay(username, sessionId, candidate) {
@@ -2907,6 +2922,48 @@ export function createPostgresRepository(connectionString, {
     return [...totals.values()].sort((left, right) => left.skillId.localeCompare(right.skillId));
   }
 
+  async function getAdaptiveLearningCommercialUsage(username) {
+    const result = await pool.query(
+      `SELECT
+         (SELECT COUNT(*)::integer FROM adaptive_diagnostic_sessions
+           WHERE username = $1 AND status = 'completed'
+             AND catalog_version = 'ege-short-diagnostic-v1') AS short_diagnostics_completed,
+         (SELECT COUNT(*)::integer FROM adaptive_diagnostic_sessions
+           WHERE username = $1 AND status = 'completed'
+             AND catalog_version = 'ege-deep-diagnostic-v1') AS deep_diagnostics_completed,
+         (SELECT COUNT(*)::integer FROM adaptive_learning_sessions
+           WHERE username = $1) AS sessions_created,
+         (SELECT COUNT(*)::integer FROM adaptive_learning_sessions
+           WHERE username = $1 AND status = 'completed') AS sessions_completed`,
+      [username],
+    );
+    const row = result.rows[0];
+    return {
+      shortDiagnosticsCompleted: Number(row.short_diagnostics_completed),
+      deepDiagnosticsCompleted: Number(row.deep_diagnostics_completed),
+      sessionsCreated: Number(row.sessions_created),
+      sessionsCompleted: Number(row.sessions_completed),
+    };
+  }
+
+  async function getAdaptiveLearningCompletedSessionReports(username, { limit = 12 } = {}) {
+    return adaptiveRepeatableRead(async (client) => {
+      const result = await client.query(
+        `SELECT * FROM adaptive_learning_sessions
+         WHERE username = $1 AND status = 'completed' AND completion_summary IS NOT NULL
+         ORDER BY completed_at DESC LIMIT $2`,
+        [username, Math.max(1, Math.min(12, Number(limit) || 12))],
+      );
+      return result.rows.map((row) => ({
+        session: {
+          ...adaptiveLearningSessionPublicDto(row),
+          completedAt: new Date(row.completed_at).toISOString(),
+        },
+        summary: structuredClone(row.completion_summary),
+      }));
+    });
+  }
+
   async function readAdaptiveDiagnostic(queryable, username, diagnosticId = null) {
     const result = await queryable.query(
       `SELECT diagnostic.*,
@@ -2950,6 +3007,15 @@ export function createPostgresRepository(connectionString, {
           diagnostic: adaptiveDiagnosticStartClaimRepositoryDto(duplicate.rows[0]),
         };
       }
+      if (diagnostic.commercialMode === 'free_short') {
+        const used = await client.query(
+          `SELECT 1 FROM adaptive_diagnostic_sessions
+           WHERE username = $1 AND status = 'completed'
+             AND catalog_version = 'ege-short-diagnostic-v1' LIMIT 1`,
+          [username],
+        );
+        if (used.rowCount) throw new Error('ADAPTIVE_FREE_DIAGNOSTIC_USED');
+      }
       const ownerClaimCount = await client.query(
         'SELECT COUNT(*)::integer AS count FROM adaptive_diagnostic_start_claims WHERE username = $1',
         [username],
@@ -2964,10 +3030,13 @@ export function createPostgresRepository(connectionString, {
         [username, diagnostic.now],
       );
       const active = await client.query(
-        `SELECT id FROM adaptive_diagnostic_sessions
+        `SELECT id, catalog_version FROM adaptive_diagnostic_sessions
          WHERE username = $1 AND status IN ('in_progress', 'ready') ORDER BY started_at DESC LIMIT 1`,
         [username],
       );
+      if (active.rowCount && active.rows[0].catalog_version !== diagnostic.catalogVersion) {
+        throw new Error('ADAPTIVE_DIAGNOSTIC_ALREADY_CURRENT');
+      }
       const created = !active.rowCount;
       let snapshot;
       if (active.rowCount) {
@@ -3773,6 +3842,13 @@ export function createPostgresRepository(connectionString, {
       adaptive_learning_skill_estimates: adaptiveExport.estimates,
       adaptive_learning_plan_revisions: adaptivePlanRevisions.rows.map(adaptiveLearningPlanRepositoryDto),
       adaptive_learning_sessions: adaptiveSessions.rows.map(adaptiveLearningSessionRepositoryDto),
+      adaptive_learning_reports: adaptiveSessions.rows
+        .filter((row) => row.status === 'completed' && row.completion_summary)
+        .map((row) => ({
+          session_id: row.id,
+          completed_at: row.completed_at,
+          summary: structuredClone(row.completion_summary),
+        })),
       adaptive_learning_session_events: adaptiveSessionExecutionEvents.rows
         .map(adaptiveExecutionEventExportDto),
       adaptive_diagnostic_sessions: adaptiveDiagnosticSessions.rows.map(adaptiveDiagnosticExportDto),
@@ -3919,6 +3995,7 @@ export function createPostgresRepository(connectionString, {
     getAdaptiveLearningSessionCreateReplay,
     createAdaptiveLearningSession,
     getCurrentAdaptiveLearningSession,
+    getAdaptiveLearningSessionCommercialScope,
     getAdaptiveLearningSessionReplacementReplay,
     replaceAdaptiveLearningSessionBlock,
     getAdaptiveLearningSessionMutationReplay,
@@ -3929,6 +4006,8 @@ export function createPostgresRepository(connectionString, {
     getAdaptiveLearningSessionFinishContext,
     finishAdaptiveLearningSession,
     getAdaptiveLearningWeekUsage,
+    getAdaptiveLearningCommercialUsage,
+    getAdaptiveLearningCompletedSessionReports,
     startAdaptiveDiagnostic,
     getAdaptiveDiagnosticStartClaim,
     getCurrentAdaptiveDiagnostic,

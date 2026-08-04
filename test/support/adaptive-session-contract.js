@@ -132,6 +132,23 @@ export async function assertAdaptiveSessionRepositoryContract(assert, repository
   assert.equal([first.created, duplicate.created].filter(Boolean).length, 1);
   const createdSnapshot = first.created ? first.session : duplicate.session;
   assert.deepEqual(first.session, duplicate.session);
+  assert.equal(
+    await repository.getAdaptiveLearningSessionCommercialScope(username, createdSnapshot.id),
+    'base',
+  );
+  assert.deepEqual(await repository.getAdaptiveLearningCommercialUsage(username), {
+    shortDiagnosticsCompleted: 0,
+    deepDiagnosticsCompleted: 0,
+    sessionsCreated: 1,
+    sessionsCompleted: 0,
+  });
+  await assert.rejects(repository.createAdaptiveLearningSession(username, {
+    ...createCandidate,
+    idempotencyKey: 'session-contract-free-demo-reuse',
+    requestHash: '2'.repeat(64),
+    commercialMode: 'free_demo',
+    commercialScope: 'free_demo',
+  }), /ADAPTIVE_FREE_DEMO_USED/u);
   await assert.rejects(
     repository.createAdaptiveLearningSession(username, { ...createCandidate, requestHash: '8'.repeat(64) }),
     /ADAPTIVE_SESSION_IDEMPOTENCY_CONFLICT/u,
@@ -150,7 +167,7 @@ export async function assertAdaptiveSessionRepositoryContract(assert, repository
         session: createdSnapshot, plan: publicPlan, blockId: block.id, reason: 'too_difficult', now: instant,
       });
       const different = buildAdaptiveSessionReplacement({
-        session: createdSnapshot, plan: publicPlan, blockId: block.id, reason: 'not_relevant', now: instant,
+        session: createdSnapshot, plan: publicPlan, blockId: block.id, reason: 'excluded', now: instant,
       });
       firstBlock = block;
       replacementSession = easier;
@@ -178,8 +195,8 @@ export async function assertAdaptiveSessionRepositoryContract(assert, repository
   const competing = {
     ...replacementCandidate,
     idempotencyKey: 'session-contract-replace-02',
-    requestHash: crypto.createHash('sha256').update(JSON.stringify([firstBlock.id, 'not_relevant'])).digest('hex'),
-    reason: 'not_relevant',
+    requestHash: crypto.createHash('sha256').update(JSON.stringify([firstBlock.id, 'excluded'])).digest('hex'),
+    reason: 'excluded',
     session: alternateReplacement,
   };
   const race = await Promise.allSettled([
@@ -190,6 +207,10 @@ export async function assertAdaptiveSessionRepositoryContract(assert, repository
   assert.equal(race.filter((result) => result.status === 'rejected').length, 1);
   const replaced = race.find((result) => result.status === 'fulfilled').value;
   assert.equal(replaced.replaced, true);
+  if (replaced.session.replacement.reason === 'excluded') {
+    assert.ok(replaced.session.blocks.find((block) => block.id === firstBlock.id)
+      .reasonCodes.includes('learner_exclusion'));
+  }
   const winningCandidate = replaced.session.replacement.reason === replacementCandidate.reason
     ? replacementCandidate : competing;
   const replay = await repository.replaceAdaptiveLearningSessionBlock(username, winningCandidate);
@@ -202,7 +223,7 @@ export async function assertAdaptiveSessionRepositoryContract(assert, repository
   const exported = await repository.exportUserData(username);
   assert.equal(exported.adaptive_learning_sessions.length, 1);
   assert.deepEqual(Object.keys(exported.adaptive_learning_sessions[0]).sort(), [
-    'blocks', 'break_minutes', 'completed_learning_minutes', 'composer_policy_version',
+    'blocks', 'break_minutes', 'commercial_scope', 'completed_learning_minutes', 'composer_policy_version',
     'content_registry_version', 'created_at', 'current_block_id', 'duration_minutes', 'id',
     'learning_minutes', 'plan_id', 'plan_revision', 'preview_fingerprint', 'replacement',
     'revision', 'session_version', 'status', 'taxonomy_version', 'updated_at', 'week_start',
@@ -407,8 +428,17 @@ export async function assertAdaptiveSessionRepositoryContract(assert, repository
   assert.equal(finishReplay.replayed, true);
   assert.deepEqual(finishReplay.responseSnapshot, finishSnapshot);
 
+  const commercialUsage = await repository.getAdaptiveLearningCommercialUsage(username);
+  assert.equal(commercialUsage.sessionsCreated, 1);
+  assert.equal(commercialUsage.sessionsCompleted, 1);
+  const reports = await repository.getAdaptiveLearningCompletedSessionReports(username, { limit: 12 });
+  assert.equal(reports.length, 1);
+  assert.equal(reports[0].session.id, replaced.session.id);
+  assert.deepEqual(reports[0].summary, summary);
+
   const executionExport = await repository.exportUserData(username);
   assert.equal(executionExport.adaptive_learning_session_events.length, replaced.session.blocks.length + 1);
+  assert.equal(executionExport.adaptive_learning_reports.length, 1);
   assert.equal(JSON.stringify(executionExport).includes('shared_execution_claim_'), false);
   assert.equal(JSON.stringify(executionExport).includes('request_hash'), false);
 }

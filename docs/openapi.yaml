@@ -624,6 +624,25 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { description: ADAPTIVE_PREMIUM_REQUIRED }
         '404': { description: Adaptive Learning rollout is disabled; the route is not registered }
+  /api/v1/adaptive-learning/reports/detailed:
+    get:
+      summary: Read a Premium-only bounded report from completed adaptive session summaries
+      description: Includes at most 12 recent completed sessions, aggregated module evidence and a secondary approximate CEFR/IELTS orientation. It never returns learner answers, essays, transcripts, audio, prompts or model responses and is not an official IELTS result.
+      responses:
+        '200':
+          description: Detailed bounded report and current Premium access projection
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [access, report]
+                properties:
+                  access: { $ref: '#/components/schemas/AdaptiveAccess' }
+                  report: { $ref: '#/components/schemas/AdaptiveDetailedReport' }
+                additionalProperties: false
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: ADAPTIVE_PREMIUM_REQUIRED }
+        '404': { description: Adaptive Learning rollout is disabled; the route is not registered }
   /api/v1/adaptive-learning/sessions/preview:
     post:
       summary: Deterministically preview an adaptive session against the current plan and rolling UTC-week budget
@@ -652,6 +671,7 @@ paths:
                 additionalProperties: false
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: ADAPTIVE_BASE_REQUIRED when Free requests more than the one 15-minute demo, or ADAPTIVE_FREE_DEMO_USED after that demo is created }
         '409': { description: ADAPTIVE_GOAL_REQUIRED, ADAPTIVE_SESSION_NO_CONTENT, or ADAPTIVE_SESSION_COVERAGE_GAP when no exact meaningful sequence can be composed from justified registered activities; an unsupported individual skill is surfaced in coverageGaps and uses explicit fallback instead of blocking by itself }
         '404': { description: Adaptive Learning rollout is disabled; the route is not registered }
   /api/v1/adaptive-learning/sessions:
@@ -678,6 +698,7 @@ paths:
         '200': { description: Exact immutable create response replayed, content: { application/json: { schema: { $ref: '#/components/schemas/AdaptiveSessionMutationResult' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: ADAPTIVE_BASE_REQUIRED or ADAPTIVE_FREE_DEMO_USED; exact Free-demo replay remains available only for its server-marked free_demo session }
         '409': { description: Stale preview/plan, another current session, ADAPTIVE_SESSION_COVERAGE_GAP, unavailable content or idempotency conflict }
         '404': { description: Adaptive Learning rollout is disabled; the route is not registered }
   /api/v1/adaptive-learning/sessions/current:
@@ -703,8 +724,8 @@ paths:
         '404': { description: No current session belongs to the authenticated learner, or rollout is disabled }
   /api/v1/adaptive-learning/sessions/{sessionId}/replace:
     post:
-      summary: Replace one learning block once while preserving the session duration and block identities
-      description: The alternative is selected from the same server-owned content registry and persisted plan revision. A session permits one replacement total; exact retries return the retained response snapshot.
+      summary: Replace or exclude one learning block once while preserving duration and block identities
+      description: The alternative is selected from the same server-owned content registry and persisted plan revision. `excluded` removes the named block from this session and fills the same minutes with another useful skill, so the selected duration remains truthful. A session permits one replacement-or-exclusion total; exact retries return the retained response snapshot.
       parameters:
         - in: path
           name: sessionId
@@ -723,14 +744,14 @@ paths:
               required: [blockId, reason]
               properties:
                 blockId: { type: string, pattern: '^asb_[0-9a-f]{16}_[0-9]{2}$' }
-                reason: { type: string, enum: [too_difficult, too_easy, not_relevant, accessibility] }
+                reason: { type: string, enum: [too_difficult, too_easy, not_relevant, accessibility, excluded] }
               additionalProperties: false
       responses:
-        '200': { description: Replacement applied or its exact response replayed, content: { application/json: { schema: { $ref: '#/components/schemas/AdaptiveSessionReplacementResult' } } } }
+        '200': { description: Replacement or exclusion applied, or its exact response replayed, content: { application/json: { schema: { $ref: '#/components/schemas/AdaptiveSessionReplacementResult' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { description: Session or block does not belong to the authenticated learner }
-        '409': { description: Replacement was already used, no safe alternative exists, plan is unavailable, revision changed or key conflicts }
+        '409': { description: The shared replacement-or-exclusion allowance was already used, no safe alternative exists, plan is unavailable, revision changed or key conflicts }
   /api/v1/adaptive-learning/sessions/{sessionId}/start:
     post:
       summary: Atomically start the exact current learning block and issue a short-lived opaque execution claim
@@ -878,8 +899,8 @@ paths:
         '409': { description: Session is not ready, revision is stale or idempotency key conflicts }
   /api/v1/adaptive-learning/diagnostics/start:
     post:
-      summary: Start or resume the authenticated learner's bounded short diagnostic with a durable owner-bound replay claim
-      description: New sessions use the current catalog and its paired policy; every resumed session uses the stored catalog version's policy. A successful key owns its exact start snapshot for the 24-hour start-claim retention window. New keys are bounded by a per-user hourly rate and by a finite live-claim budget.
+      summary: Start or resume a bounded short or Premium deep diagnostic with a durable owner-bound replay claim
+      description: Short is the default for backward compatibility. Deep selects the separate ege-deep-diagnostic-v1 catalog-policy and requires current Premium throughout the run. A Free learner may complete one short diagnostic. Every resumed session uses its stored catalog version's policy. A successful key owns its exact start snapshot for the 24-hour start-claim retention window. New keys are bounded by a per-user hourly rate and by a finite live-claim budget.
       parameters:
         - in: header
           name: Idempotency-Key
@@ -889,12 +910,17 @@ paths:
         required: true
         content:
           application/json:
-            schema: { type: object, additionalProperties: false }
+            schema:
+              type: object
+              properties:
+                depth: { type: string, enum: [short, deep], default: short }
+              additionalProperties: false
       responses:
         '201': { description: New diagnostic started, content: { application/json: { schema: { $ref: '#/components/schemas/AdaptiveDiagnosticStartResult' } } } }
         '200': { description: Active run resumed, immutable claimed snapshot replayed within its retention window even after expiry/completion, or adequate existing evidence means no diagnostic is required, content: { application/json: { schema: { $ref: '#/components/schemas/AdaptiveDiagnosticStartResult' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: ADAPTIVE_PREMIUM_REQUIRED for deep or ADAPTIVE_FREE_DIAGNOSTIC_USED after the one Free short diagnostic }
         '409': { description: Idempotency key conflict or the claimed stored catalog version is unsupported }
         '429': { description: New start keys exceeded the hourly DIAGNOSTIC_START_RATE_LIMIT or the finite retained-claim DIAGNOSTIC_START_LIMIT }
         '404': { description: Adaptive Learning rollout is disabled; the route is not registered }
@@ -1419,18 +1445,41 @@ components:
       additionalProperties: false
     AdaptiveAccess:
       type: object
-      required: [tier, capabilities]
+      required: [tier, capabilities, usage, limits]
       properties:
         tier: { type: string, enum: [free, base, premium] }
         capabilities:
           type: object
-          required: [adaptivePlan, premiumDepth, writingSpeakingDepth, voiceTutorHandoff, languageOrientation]
+          required: [resultSummary, shortDiagnostic, deepDiagnostic, demoSession, continuousPlan, arbitrarySessions, adaptivePlan, premiumDepth, writingSpeakingDepth, voiceTutorHandoff, languageOrientation, detailedReports]
           properties:
+            resultSummary: { type: boolean }
+            shortDiagnostic: { type: boolean }
+            deepDiagnostic: { type: boolean }
+            demoSession: { type: boolean }
+            continuousPlan: { type: boolean }
+            arbitrarySessions: { type: boolean }
             adaptivePlan: { type: boolean }
             premiumDepth: { type: boolean }
             writingSpeakingDepth: { type: boolean }
             voiceTutorHandoff: { type: boolean }
             languageOrientation: { type: boolean }
+            detailedReports: { type: boolean }
+          additionalProperties: false
+        usage:
+          type: object
+          required: [shortDiagnosticCompleted, deepDiagnosticsCompleted, demoSessionUsed, sessionsCreated, sessionsCompleted]
+          properties:
+            shortDiagnosticCompleted: { type: boolean }
+            deepDiagnosticsCompleted: { type: integer, minimum: 0 }
+            demoSessionUsed: { type: boolean }
+            sessionsCreated: { type: integer, minimum: 0 }
+            sessionsCompleted: { type: integer, minimum: 0 }
+          additionalProperties: false
+        limits:
+          type: object
+          required: [freeDemoDurationMinutes]
+          properties:
+            freeDemoDurationMinutes: { type: integer, enum: [15] }
           additionalProperties: false
       additionalProperties: false
     AdaptiveRetentionCheck:
@@ -1496,6 +1545,47 @@ components:
             confidence: { type: integer, minimum: 0, maximum: 100 }
             assistedEvidenceDoesNotEstablishLevel: { type: boolean, enum: [true] }
           additionalProperties: false
+      additionalProperties: false
+    AdaptiveDetailedReportModule:
+      type: object
+      required: [module, completedBlocks, plannedMinutes, actualMinutes, actualMinutesComplete, independentEvidence, assistedEvidence, clientReportedEvidence]
+      properties:
+        module: { type: string, enum: [vocabulary, grammar, reading, listening, writing, speaking] }
+        completedBlocks: { type: integer, minimum: 0 }
+        plannedMinutes: { type: integer, minimum: 0 }
+        actualMinutes: { type: integer, minimum: 0 }
+        actualMinutesComplete: { type: boolean }
+        independentEvidence: { type: integer, minimum: 0 }
+        assistedEvidence: { type: integer, minimum: 0 }
+        clientReportedEvidence: { type: integer, minimum: 0 }
+      additionalProperties: false
+    AdaptiveDetailedReport:
+      type: object
+      required: [version, generatedAt, scope, totals, profile, forecast, modules, sessions, secondaryOrientation]
+      properties:
+        version: { type: string, enum: [adaptive-detailed-report-v1] }
+        generatedAt: { type: string, format: date-time }
+        scope:
+          type: object
+          required: [maximumSessions, includedSessions]
+          properties:
+            maximumSessions: { type: integer, enum: [12] }
+            includedSessions: { type: integer, minimum: 0, maximum: 12 }
+          additionalProperties: false
+        totals:
+          type: object
+          required: [completedSessions, completedLearningBlocks, plannedLearningMinutes, actualLearningMinutes]
+          properties:
+            completedSessions: { type: integer, minimum: 0, maximum: 12 }
+            completedLearningBlocks: { type: integer, minimum: 0 }
+            plannedLearningMinutes: { type: integer, minimum: 0 }
+            actualLearningMinutes: { type: integer, minimum: 0, nullable: true }
+          additionalProperties: false
+        profile: { type: object, additionalProperties: true }
+        forecast: { type: object, nullable: true, additionalProperties: true }
+        modules: { type: array, maxItems: 6, items: { $ref: '#/components/schemas/AdaptiveDetailedReportModule' } }
+        sessions: { type: array, maxItems: 12, items: { type: object, additionalProperties: true } }
+        secondaryOrientation: { $ref: '#/components/schemas/AdaptiveLanguageOrientation' }
       additionalProperties: false
     AdaptiveGoalMutationResponse:
       type: object
@@ -1620,12 +1710,13 @@ components:
       required: [id, catalogVersion, status, estimatedMinutes, deadlineMinutes, answeredItems, maxItems, progressPercent, canComplete, stopReason, startedAt, expiresAt, completedAt]
       properties:
         id: { type: string, format: uuid }
-        catalogVersion: { type: string, minLength: 1, maxLength: 40, description: Stored catalog-policy registry version; `ege-short-diagnostic-v1` remains supported. }
+        catalogVersion: { type: string, minLength: 1, maxLength: 40, description: Stored catalog-policy registry version; ege-short-diagnostic-v1 and Premium ege-deep-diagnostic-v1 are supported. }
+        depth: { type: string, enum: [deep], description: Present only for the explicit Premium deep diagnostic; omitted for backward-compatible short responses. }
         status: { type: string, enum: [in_progress, ready, completed, expired] }
         estimatedMinutes: { type: integer, minimum: 1, maximum: 120 }
         deadlineMinutes: { type: integer, minimum: 1, maximum: 120, description: Display duration derived from the stored policy's hard maximumSeconds; expiresAt is authoritative. }
-        answeredItems: { type: integer, minimum: 0, maximum: 12 }
-        maxItems: { type: integer, minimum: 1, maximum: 12 }
+        answeredItems: { type: integer, minimum: 0, maximum: 24 }
+        maxItems: { type: integer, minimum: 1, maximum: 24 }
         progressPercent: { type: integer, minimum: 0, maximum: 100 }
         canComplete: { type: boolean }
         stopReason: { type: string, nullable: true, enum: [maximum_items, target_coverage, maximum_time, target_time, catalog_exhausted] }
@@ -1667,8 +1758,8 @@ components:
       properties:
         preliminary: { type: boolean }
         confidence: { type: integer, minimum: 0, maximum: 100 }
-        answeredItems: { type: integer, minimum: 0, maximum: 12 }
-        correctItems: { type: integer, minimum: 0, maximum: 12 }
+        answeredItems: { type: integer, minimum: 0, maximum: 24 }
+        correctItems: { type: integer, minimum: 0, maximum: 24 }
         explanationCodes:
           type: array
           items: { type: string, minLength: 1, maxLength: 80 }
@@ -1798,7 +1889,7 @@ components:
           uniqueItems: true
           items:
             type: string
-            enum: [due_review, prerequisite_support, weekly_budget_deficit, content_coverage_fallback, high_uncertainty_probe, target_gap, plan_priority, learner_replacement, replacement_too_difficult, replacement_too_easy, replacement_not_relevant, replacement_accessibility, scheduled_break]
+            enum: [due_review, prerequisite_support, weekly_budget_deficit, content_coverage_fallback, high_uncertainty_probe, target_gap, plan_priority, learner_replacement, learner_exclusion, replacement_too_difficult, replacement_too_easy, replacement_not_relevant, replacement_accessibility, replacement_excluded, scheduled_break]
       additionalProperties: false
     AdaptiveSessionBudgetSkill:
       type: object
@@ -1855,7 +1946,7 @@ components:
       required: [blockId, reason, replacedSkillId, replacedActivityId, replacedContentRef, replacedAt]
       properties:
         blockId: { type: string }
-        reason: { type: string, enum: [too_difficult, too_easy, not_relevant, accessibility] }
+        reason: { type: string, enum: [too_difficult, too_easy, not_relevant, accessibility, excluded] }
         replacedSkillId: { type: string }
         replacedActivityId: { type: string }
         replacedContentRef: { type: string }

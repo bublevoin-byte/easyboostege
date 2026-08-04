@@ -41,6 +41,7 @@ async function withDiagnosticApp(run, { enabled = true, diagnosticRegistry } = {
   const repository = createFileRepository(file);
   const owner = await repository.createTelegramUser(9201, 'Diagnostic Owner');
   const stranger = await repository.createTelegramUser(9202, 'Diagnostic Stranger');
+  await repository.grantDays(9201, 30, owner);
   let currentTime = new Date(STARTED_AT);
   const app = express();
   app.use(express.json());
@@ -96,6 +97,7 @@ function renderDiagnosticDom(screenSource, payload) {
   });
   const elements = {
     adaptive_diagnostic: element(),
+    adaptive_diagnostic_title: element(),
     adaptive_diagnostic_start: element(),
     adaptive_diagnostic_form: element({ querySelector() { return null; } }),
     adaptive_diagnostic_question: element(),
@@ -905,6 +907,29 @@ test('browser renders progress and timing from the stored diagnostic policy proj
   assert.match(elements.adaptive_diagnostic_start.textContent, /около 40 минут/u);
 });
 
+test('browser preserves deep depth when an expired Premium diagnostic is restarted', async () => {
+  const screen = await fs.readFile(new URL('../public/screens/progress.js', import.meta.url), 'utf8');
+  const elements = renderDiagnosticDom(screen, {
+    diagnostic: {
+      id: '51000000-0000-4000-8000-000000000100',
+      catalogVersion: 'ege-deep-diagnostic-v1',
+      depth: 'deep',
+      status: 'expired',
+      estimatedMinutes: 40,
+      deadlineMinutes: 40,
+      answeredItems: 3,
+      maxItems: 30,
+      canComplete: false,
+    },
+    item: null,
+  });
+
+  assert.equal(elements.adaptive_diagnostic_start.hidden, false);
+  assert.equal(elements.adaptive_diagnostic_start.dataset.diagnosticDepth, 'deep');
+  assert.match(elements.adaptive_diagnostic_start.textContent, /заново/u);
+  assert.match(elements.adaptive_diagnostic_title.textContent, /Глубокая/u);
+});
+
 test('browser presents a scheduled re-diagnostic when cadence is due and no run is active', async () => {
   const screen = await fs.readFile(new URL('../public/screens/progress.js', import.meta.url), 'utf8');
   const elements = renderDiagnosticDom(screen, {
@@ -922,6 +947,7 @@ test('browser presents a scheduled re-diagnostic when cadence is due and no run 
 
   assert.equal(elements.adaptive_diagnostic.hidden, false);
   assert.equal(elements.adaptive_diagnostic_start.hidden, false);
+  assert.equal(elements.adaptive_diagnostic_start.dataset.diagnosticDepth, 'short');
   assert.match(elements.adaptive_diagnostic_notice.textContent, /уточнить профиль/u);
 });
 
@@ -950,6 +976,8 @@ test('plan card exposes an accessible start, progress, audio and resumable diagn
   assert.match(screen, /diagnostic\.estimatedMinutes/u);
   assert.match(screen, /diagnostic\.deadlineMinutes/u);
   assert.match(screen, /measurementNotice/u);
+  assert.match(screen, /start\.dataset\.diagnosticDepth/u);
+  assert.match(screen, /await renderAdaptivePlan\(\);drawAdaptiveDiagnostic\(result\);focusAdaptiveDiagnosticStep\(\)/u);
   assert.match(screen, /textContent/u);
   assert.doesNotMatch(screen, /innerHTML/u);
   assert.match(appSource, /apiPostIdempotent/u);

@@ -4,13 +4,12 @@
 
 **Blocked by:** 02–06
 
-**Status:** blocked
+**Status:** done
 
-- [ ] Write failing entitlement, accessibility and responsive frontend tests first.
-- [ ] Add dashboard/profile entry, goal editor, confidence/forecast, weekly allocation and duration controls.
-- [ ] Make replacement, paywall and unrealistic-goal choices understandable without manual percentage editing.
-- [ ] Ensure keyboard/focus/screen-reader semantics and reduced-motion support.
-- [ ] Keep CEFR/IELTS labels secondary, approximate and non-official.
-- [ ] Verify free demo cannot be replayed indefinitely and all gates are server-side.
-- [ ] Pass targeted tests and independent Standards + Spec review with zero P0–P2.
-
+- [x] Write failing entitlement, accessibility and responsive frontend tests first.
+- [x] Add dashboard/profile entry, goal editor, confidence/forecast, weekly allocation and duration controls.
+- [x] Make replacement, paywall and unrealistic-goal choices understandable without manual percentage editing.
+- [x] Ensure keyboard/focus/screen-reader semantics and reduced-motion support.
+- [x] Keep CEFR/IELTS labels secondary, approximate and non-official.
+- [x] Verify free demo cannot be replayed indefinitely and all gates are server-side.
+- [x] Pass targeted tests and independent Standards + Spec review with zero P0–P2.

@@ -103,6 +103,7 @@ async function withApp(run, { registry } = {}) {
   const repository = createFileRepository(path.join(directory, 'data.json'));
   const owner = await repository.createTelegramUser(9401, 'Session Owner');
   const stranger = await repository.createTelegramUser(9402, 'Session Stranger');
+  await repository.grantDays(9401, 30, owner);
   const app = express();
   app.use(express.json());
   app.use(createAdaptiveLearningRoutes({
@@ -201,10 +202,10 @@ test('authenticated session API previews, creates, restores and replaces exactly
       .sort((left, right) => right.difficulty - left.difficulty)[0];
     const replacementKey = 'adaptive-session-replace-0001';
     const replacementPath = `/api/v1/adaptive-learning/sessions/${created.session.id}/replace`;
-    const replacementBody = { blockId: learningBlock.id, reason: 'too_difficult' };
+    const replacementBody = { blockId: learningBlock.id, reason: 'excluded' };
     assert.equal((await request(owner, replacementPath, {
       method: 'POST', headers: { 'Idempotency-Key': 'adaptive-session-replace-tamper-01' },
-      body: JSON.stringify({ blockId: 'asb_0000000000000000_99', reason: 'too_difficult' }),
+      body: JSON.stringify({ blockId: 'asb_0000000000000000_99', reason: 'excluded' }),
     })).status, 404);
     assert.equal((await request(owner, '/api/v1/adaptive-learning/sessions/not-a-session/replace', {
       method: 'POST', headers: { 'Idempotency-Key': 'adaptive-session-replace-tamper-02' },
@@ -216,7 +217,9 @@ test('authenticated session API previews, creates, restores and replaces exactly
     assert.equal(replacedResponse.status, 200);
     const replaced = await replacedResponse.json();
     assert.equal(replaced.replaced, true);
-    assert.equal(replaced.session.replacement.reason, 'too_difficult');
+    assert.equal(replaced.session.replacement.reason, 'excluded');
+    assert.ok(replaced.session.blocks.find((block) => block.id === learningBlock.id)
+      .reasonCodes.includes('learner_exclusion'));
     assert.equal(replaced.session.blocks.reduce((sum, block) => sum + block.plannedMinutes, 0), 90);
     assert.deepEqual(replaced.session.blocks.map((block) => block.id), created.session.blocks.map((block) => block.id));
     assert.notEqual(replaced.session.blocks.find((block) => block.id === learningBlock.id).contentRef,
@@ -279,7 +282,12 @@ test('progress screen exposes accessible duration, preview, replacement and real
   assert.match(html, /id="adaptive_session_preview"/u);
   assert.match(html, /id="adaptive_session_blocks"[^>]*aria-live="polite"/u);
   assert.match(source, /adaptive-learning\/sessions\/preview/u);
-  assert.match(source, /adaptive-learning\/sessions\/'\+encodeURIComponent\(session\.id\)\+'\/replace/u);
+    assert.match(source, /adaptive-learning\/sessions\/'\+encodeURIComponent\(session\.id\)\+'\/replace/u);
+    assert.match(source, /reason:'excluded'/u);
+    assert.match(source, /Исключить этот блок/u);
+    assert.match(source, /Почему изменить блок\?/u);
+    assert.match(source, /reasonLabel\.htmlFor=reason\.id/u);
+    assert.match(source, /focusAdaptiveSessionAfterAdjustment\(\)/u);
   assert.match(source, /beginAdaptiveBlock\(session,block,execution\)/u);
   assert.match(source, /advanceAdaptiveBreak\(session,block,execution\)/u);
   assert.match(source, /finishAdaptiveSession\(session,execution\)/u);
