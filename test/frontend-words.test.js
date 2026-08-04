@@ -169,6 +169,22 @@ test('Words screen wires an accessible home, persistent library and read-only de
   assert.match(indexSource, /@media\(prefers-reduced-motion:reduce\).*\.vocab/u);
 });
 
+test('ordinary vocabulary completion posts one stable bounded session summary', () => {
+  assert.match(screenSource, /buildVocabularyModuleAttempt/u);
+  assert.match(screenSource, /W_SESSION_ATTEMPT_ID/u);
+  assert.match(screenSource, /W_MODULE_ATTEMPT_REPORTED/u);
+  assert.match(screenSource, /apiPost\('\/api\/v1\/module-attempts',attempt\)/u);
+  assert.match(screenSource, /completeAdaptiveModuleActivity\(\{module:'vocabulary',activityId:W_ADAPTIVE_ACTIVITY,score:attempt\.score,maxScore:attempt\.maxScore/u);
+});
+
+test('adaptive vocabulary launch uses the full trainer for topic and evidence mode', () => {
+  assert.match(screenSource, /english_production.*vocabulary_productive/su);
+  assert.match(screenSource, /contextual_production.*vocabulary_context/su);
+  assert.match(screenSource, /listening.*vocabulary_listening/su);
+  assert.match(screenSource, /composeVocabularySession\(items,\{progressByWord:progressByWord,forcedMode:forcedMode\}\)/u);
+  assert.doesNotMatch(screenSource, /mode!==['"]lexical_choice['"]\|\|!\[1,6\]\.includes\(topicId\)/u);
+});
+
 test('words module migrates legacy progress and selects the exercise mode', () => {
   const words = createWordsModule();
   const records = words.migrateLegacy(catalog, { alpha: 7, beta: 2 }, {}, 123);

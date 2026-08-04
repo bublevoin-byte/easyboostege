@@ -34,6 +34,7 @@ import { assertAdaptivePlanRepositoryContract } from './support/adaptive-plan-co
 import { assertAdaptiveSessionRepositoryContract } from './support/adaptive-session-contract.js';
 import { assertWordProgressRepositoryContract } from './support/word-progress-contract.js';
 import { assertPersonalWordsProgressRepositoryContract } from './support/personal-words-progress-contract.js';
+import { assertVocabularyAttemptRepositoryContract } from './support/vocabulary-attempt-contract.js';
 
 const connectionString = process.env.TEST_DATABASE_URL;
 
@@ -58,6 +59,20 @@ test('PostgreSQL personal words match the shared persistence, export and deletio
   const other = await repository.createTelegramUser(Number(`9${stamp}`), `Personal words other ${stamp}`);
   try {
     await assertPersonalWordsProgressRepositoryContract(assert, repository, owner, other);
+  } finally {
+    await repository.deleteUserData(owner).catch(() => {});
+    await repository.deleteUserData(other).catch(() => {});
+    await repository.close();
+  }
+});
+
+test('PostgreSQL vocabulary summaries match the shared idempotency and ownership contract', { skip: !connectionString }, async () => {
+  const repository = createPostgresRepository(connectionString);
+  const stamp = String(Date.now()).slice(-9);
+  const owner = await repository.createTelegramUser(Number(`4${stamp}`), `Vocabulary owner ${stamp}`);
+  const other = await repository.createTelegramUser(Number(`5${stamp}`), `Vocabulary other ${stamp}`);
+  try {
+    await assertVocabularyAttemptRepositoryContract(assert, repository, owner, other);
   } finally {
     await repository.deleteUserData(owner).catch(() => {});
     await repository.deleteUserData(other).catch(() => {});

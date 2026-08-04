@@ -924,10 +924,30 @@ async function runAdaptiveDiagnosticE2E() {
       response.request().method() === 'POST' && response.url().endsWith('/advance')
     ), { timeout: 5_000 }).catch(() => null);
     if (firstActivity.launch.kind === 'vocabulary_practice') {
-      assert.match(await page.locator('#w_card').innerText(), /ВЫБЕРИ ПЕРЕВОД/u);
-      await page.evaluate(() => window.WQ.splice(1));
-      const correctTranslation = await page.evaluate(() => window.WQ[window.WI].tr);
-      await page.locator('#w_opts button').filter({ hasText: correctTranslation }).click();
+      const practice = await page.evaluate(() => {
+        const task = window.WQ.find((candidate) => candidate.mode !== 'introduction');
+        window.WQ.splice(0, window.WQ.length, task);
+        window.wRender();
+        const item = window.EGE_WORDS.find((candidate) => (
+          String(candidate.w || '').replace(/\*/gu, '').trim().toLowerCase() === task.word
+        ));
+        return {
+          answer: String(item.w).replace(/\*/gu, '').trim(),
+          mode: task.mode,
+          translation: item.tr,
+        };
+      });
+      const expectedMode = firstActivity.launch.mode === 'lexical_choice'
+        ? 'receptive_meaning'
+        : firstActivity.launch.mode;
+      assert.equal(practice.mode, expectedMode);
+      if (practice.mode === 'receptive_meaning') {
+        await page.locator('#w_opts button').filter({ hasText: practice.translation }).click();
+      } else {
+        await page.locator('#w_session_input').fill(practice.answer);
+        await page.getByRole('button', { name: /Проверить/u }).click();
+      }
+      await page.getByRole('button', { name: /Дальше/u }).click();
     } else if (firstActivity.launch.mode === 'matching') {
       for (let row = 0; row < 4; row += 1) {
         await page.locator(`#lmt_row_${row} button`).nth(row).click();
@@ -1136,6 +1156,7 @@ async function runAdaptiveDiagnosticE2E() {
     const examFinish = await examFinishResponse.json();
     assert.equal(examFinish.summary.completedWork[0].evidenceContext, 'exam_practice');
 
+    await page.waitForLoadState('networkidle');
     const providerCallsBeforeAdaptiveWriter = providerCalls.length;
     writerContext = await browser.newContext({ serviceWorkers: 'block' });
     await writerContext.route('https://**', async (route) => {
@@ -1165,7 +1186,7 @@ async function runAdaptiveDiagnosticE2E() {
     await writerPage.locator('#adaptive_goal_form button[type="submit"]').press('Enter');
     assert.equal((await writerGoalPromise).status(), 201);
     assert.equal(providerCalls.length, providerCallsBeforeAdaptiveWriter,
-      'opening an adaptive plan and saving its goal must not call AI');
+      `opening an adaptive plan and saving its goal must not call AI: ${JSON.stringify(providerCalls.slice(providerCallsBeforeAdaptiveWriter))}`);
 
     await writerPage.locator('#adaptive_session_custom').fill('25');
     const writerPreviewPromise = writerPage.waitForResponse((response) => (

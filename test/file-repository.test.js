@@ -15,6 +15,7 @@ import { assertAdaptiveDiagnosticRepositoryContract } from './support/adaptive-d
 import { assertAdaptivePlanRepositoryContract } from './support/adaptive-plan-contract.js';
 import { assertWordProgressRepositoryContract } from './support/word-progress-contract.js';
 import { assertPersonalWordsProgressRepositoryContract } from './support/personal-words-progress-contract.js';
+import { assertVocabularyAttemptRepositoryContract } from './support/vocabulary-attempt-contract.js';
 
 async function withRepository(run) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-db-'));
@@ -414,6 +415,14 @@ test('module attempts are idempotent and included in user export', async () => {
     assert.equal(exported.progress_summary.length, 1);
     assert.equal(exported.progress_summary[0].attempt_count, 2);
     assert.equal(exported.progress_summary[0].best_score, 4);
+  });
+});
+
+test('file vocabulary summaries match the shared idempotency and ownership contract', async () => {
+  await withRepository(async (repository) => {
+    const owner = await repository.createTelegramUser(3031, 'Vocabulary owner');
+    const other = await repository.createTelegramUser(3032, 'Vocabulary other');
+    await assertVocabularyAttemptRepositoryContract(assert, repository, owner, other);
   });
 });
 

@@ -1084,11 +1084,17 @@ paths:
               properties:
                 id: { type: string, format: uuid }
                 module: { type: string, enum: [grammar, vocabulary, reading, listening, writing, speaking, exam] }
-                activity: { type: string, maxLength: 80 }
+                activity:
+                  type: string
+                  maxLength: 80
+                  description: vocabulary_active_recall_session uses the bounded per-mode summary metadata contract.
                 score: { type: integer, minimum: 0 }
                 maxScore: { type: integer, minimum: 1 }
                 durationMs: { type: integer, minimum: 0, maximum: 14400000 }
-                metadata: { type: object, additionalProperties: true }
+                metadata:
+                  type: object
+                  description: For vocabulary_active_recall_session this is a strict flat summary with separate objective, guided and self-reported counters; raw words and answers are never accepted.
+                  additionalProperties: true
       responses:
         '201': { description: Attempt created }
         '200': { description: Duplicate event accepted without creating another attempt }
@@ -1915,8 +1921,8 @@ components:
             version: { type: string, enum: [adaptive-launch-v1] }
             kind: { type: string, enum: [vocabulary_practice] }
             screenId: { type: string, enum: [scr2] }
-            mode: { type: string, enum: [lexical_choice] }
-            topicId: { type: integer, enum: [1, 6] }
+            mode: { type: string, enum: [lexical_choice, english_production, contextual_production, listening] }
+            topicId: { type: integer, minimum: 1, maximum: 10 }
           additionalProperties: false
         - type: object
           required: [version, kind, screenId, topicId]

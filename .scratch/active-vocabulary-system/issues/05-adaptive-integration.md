@@ -1,6 +1,6 @@
 # 05 — Результаты слов в индивидуальном плане
 
-Status: ready-for-agent
+Status: done
 Blocked by: 03 — Умная тренировка активного вспоминания; 04 — Личные слова из чтения без противоречий
 Spec: `.scratch/active-vocabulary-system/spec.md#implementation-decisions`
 
@@ -15,10 +15,10 @@ Spec: `.scratch/active-vocabulary-system/spec.md#implementation-decisions`
 
 ## Definition of Done
 
-- [ ] Обычная сессия создаёт не более одной идемпотентной попытки с bounded metadata.
-- [ ] Objective и self-reported режимы не смешиваются в одну сильную оценку.
-- [ ] План может запускать несколько тематик и productive/context/listening practice, если контент доступен.
-- [ ] Base получает весь тренажёр; Premium остаётся границей Voice Tutor и deep reports.
-- [ ] Повреждённый или повторный клиентский результат не повышает доверенное mastery.
-- [ ] `npm run lint`, `npm run check` и целевые тесты проходят.
-- [ ] Один коммит на тикет.
+- [x] Обычная сессия создаёт не более одной идемпотентной попытки с bounded metadata.
+- [x] Objective и self-reported режимы не смешиваются в одну сильную оценку.
+- [x] План может запускать несколько тематик и productive/context/listening practice, если контент доступен.
+- [x] Base получает весь тренажёр; Premium остаётся границей Voice Tutor и deep reports.
+- [x] Повреждённый или повторный клиентский результат не повышает доверенное mastery.
+- [x] `npm run lint`, `npm run check` и целевые тесты проходят.
+- [x] Один коммит на тикет.

@@ -316,6 +316,25 @@ function candidateScore(activity, planSkill, budget, usage, prerequisiteSkillIds
     + (planSkill.activityType === 'diagnostic_probe' ? 1 : 0);
 }
 
+const VOCABULARY_PRACTICE_MODE_ORDER = [
+  'english_production', 'contextual_production', 'listening', 'lexical_choice',
+];
+
+function vocabularyPracticeRotationRank(activity, usage) {
+  if (activity?.launch?.kind !== 'vocabulary_practice') return 0;
+  const planned = usage.get(activity.skillId)?.plannedMinutes || 0;
+  const step = Math.floor(planned / 15);
+  const desiredMode = VOCABULARY_PRACTICE_MODE_ORDER[step % VOCABULARY_PRACTICE_MODE_ORDER.length];
+  const desiredTopic = Math.floor(step / VOCABULARY_PRACTICE_MODE_ORDER.length) % 10 + 1;
+  const modeIndex = VOCABULARY_PRACTICE_MODE_ORDER.indexOf(activity.launch.mode);
+  const modeDistance = modeIndex < 0
+    ? VOCABULARY_PRACTICE_MODE_ORDER.length
+    : (modeIndex - VOCABULARY_PRACTICE_MODE_ORDER.indexOf(desiredMode)
+      + VOCABULARY_PRACTICE_MODE_ORDER.length) % VOCABULARY_PRACTICE_MODE_ORDER.length;
+  const topicDistance = (Number(activity.launch.topicId) - desiredTopic + 10) % 10;
+  return modeDistance * 100 + topicDistance;
+}
+
 function reasonsFor(activity, planSkill, budget, usage, prerequisiteSkillIds, scheduledSkills,
   priority, plannedMinutes) {
   const reasons = [];
@@ -369,6 +388,8 @@ function composeLearningBlocks({
         - candidateScore(left, planBySkill.get(left.skillId), budget, currentUsage,
           prerequisiteSkillIds, scheduledSkills, priority)
       || Number(right.module !== previous?.module) - Number(left.module !== previous?.module)
+      || vocabularyPracticeRotationRank(left, currentUsage)
+        - vocabularyPracticeRotationRank(right, currentUsage)
       || left.skillId.localeCompare(right.skillId)
       || left.contentRef.localeCompare(right.contentRef)
     ));

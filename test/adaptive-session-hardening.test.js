@@ -349,6 +349,48 @@ test('vocabulary has a truthful executable consumer and cannot silently starve i
   assert.equal(sawFallback, true);
 });
 
+test('Base registry schedules every available vocabulary topic and distinct practice evidence mode', async () => {
+  const vocabulary = ADAPTIVE_ACTIVITY_REGISTRY.activities.filter((activity) => (
+    activity.launch.kind === 'vocabulary_practice'
+  ));
+  const expectedModes = [
+    'lexical_choice', 'english_production', 'contextual_production', 'listening',
+  ];
+  for (let topicId = 1; topicId <= 10; topicId += 1) {
+    for (const mode of expectedModes) {
+      const matches = vocabulary.filter((activity) => (
+        activity.launch.topicId === topicId && activity.launch.mode === mode
+      ));
+      assert.equal(matches.length, 1, `${topicId}:${mode}`);
+      assert.equal(matches[0].module, 'vocabulary');
+      assert.equal(matches[0].skillId, 'ege.vocabulary.lexical_choice');
+      assert.equal((await import('../public/adaptive-activity-contract.js'))
+        .isAdaptiveLaunchDescriptor(matches[0].launch), true);
+    }
+  }
+  assert.equal(new Set(vocabulary.map((activity) => activity.contentRef)).size, 40);
+
+  const vocabularyOnly = plan({ 'ege.vocabulary.lexical_choice': 100 });
+  const preview = buildAdaptiveSessionPreview({
+    plan: vocabularyOnly, goal: { weekly_minutes: 300 }, profile: profile(),
+    access: { capabilities: { premiumDepth: false } },
+    weekUsage: [], durationMinutes: 60, now: NOW,
+  });
+  assert.deepEqual(preview.blocks.map((block) => block.launch.mode), [
+    'english_production', 'contextual_production', 'listening', 'lexical_choice',
+  ]);
+  assert.ok(preview.blocks.every((block) => block.reasonCodes.length > 0));
+
+  const extended = buildAdaptiveSessionPreview({
+    plan: vocabularyOnly, goal: { weekly_minutes: 300 }, profile: profile(),
+    access: { capabilities: { premiumDepth: false } },
+    weekUsage: [], durationMinutes: 90, now: NOW,
+  });
+  assert.ok(new Set(extended.blocks
+    .filter((block) => block.kind === 'learning')
+    .map((block) => block.launch.topicId)).size >= 2);
+});
+
 test('create candidate recomputes the canonical preview fingerprint and deterministic block ids', () => {
   assert.equal(typeof adaptiveSessionModule.adaptiveSessionPreviewFingerprint, 'function');
   const currentPlan = uniformEligiblePlan();

@@ -118,6 +118,56 @@ const activityDefinitions = [
   },
 ];
 
+const vocabularyTopics = [
+  [1, 'семья и отношения'],
+  [2, 'образование'],
+  [3, 'работа и карьера'],
+  [4, 'путешествия'],
+  [5, 'природа и экология'],
+  [6, 'наука и технологии'],
+  [7, 'здоровье и спорт'],
+  [8, 'культура и досуг'],
+  [9, 'общество и СМИ'],
+  [10, 'город и покупки'],
+];
+const vocabularyPractices = [
+  {
+    mode: 'lexical_choice', id: 'lexical_choice', ref: 'srs', suffix: 'lexical-choice',
+    label: 'выбрать перевод', difficulty: 2, modality: 'visual_text', requiresAudio: false,
+  },
+  {
+    mode: 'english_production', id: 'productive', ref: 'active-recall', suffix: 'productive',
+    label: 'вспомнить и написать слово', difficulty: 3, modality: 'written', requiresAudio: false,
+  },
+  {
+    mode: 'contextual_production', id: 'context', ref: 'active-recall', suffix: 'context',
+    label: 'вставить слово в контекст', difficulty: 4, modality: 'written', requiresAudio: false,
+  },
+  {
+    mode: 'listening', id: 'listening', ref: 'active-recall', suffix: 'listening',
+    label: 'распознать слово на слух', difficulty: 4, modality: 'audio', requiresAudio: true,
+  },
+];
+const existingVocabularyActivities = new Set(activityDefinitions.map((activity) => activity.activityId));
+for (const [topicId, topicLabel] of vocabularyTopics) {
+  for (const practice of vocabularyPractices) {
+    const activityId = `vocabulary_${practice.id}_topic_${topicId}`;
+    if (existingVocabularyActivities.has(activityId)) continue;
+    activityDefinitions.push({
+      skillId: 'ege.vocabulary.lexical_choice', activityId,
+      activityLabel: `Лексика: ${practice.label} — ${topicLabel}`,
+      contentRef: `builtin:vocabulary:${practice.ref}:topic:${topicId}:${practice.suffix}:v1`,
+      minimumMinutes: 15, recommendedMinutes: 15,
+      difficulty: practice.difficulty, modality: practice.modality,
+      requiresAudio: practice.requiresAudio, requiresMicrophone: false,
+      launch: {
+        version: ADAPTIVE_LAUNCH_CONTRACT_VERSION, kind: 'vocabulary_practice', screenId: 'scr2',
+        mode: practice.mode, topicId,
+      },
+    });
+  }
+}
+
 const retentionSkills = [
   ['ege.vocabulary.lexical_choice', 'Лексический выбор', 'vocabulary'],
   ['ege.vocabulary.word_formation', 'Словообразование', 'vocabulary'],
@@ -170,8 +220,9 @@ export function isAdaptiveLaunchDescriptor(value) {
   if (!value || value.version !== ADAPTIVE_LAUNCH_CONTRACT_VERSION) return false;
   if (value.kind === 'vocabulary_practice') {
     return exactKeys(value, ['kind', 'mode', 'screenId', 'topicId', 'version'])
-      && value.screenId === 'scr2' && value.mode === 'lexical_choice'
-      && [1, 6].includes(value.topicId);
+      && value.screenId === 'scr2'
+      && ['lexical_choice', 'english_production', 'contextual_production', 'listening'].includes(value.mode)
+      && Number.isInteger(value.topicId) && value.topicId >= 1 && value.topicId <= 10;
   }
   if (value.kind === 'grammar_practice') {
     return exactKeys(value, ['kind', 'screenId', 'topicId', 'version'])

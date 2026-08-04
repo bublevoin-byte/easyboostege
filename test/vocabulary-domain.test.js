@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   applyVocabularyOutcome,
   appendVocabularySessionHistory,
+  buildVocabularyModuleAttempt,
   buildVocabularyRecognitionOptions,
   buildVocabularyTrend,
   composeVocabularySession,
@@ -19,6 +20,52 @@ import {
   personalVocabularyCardId,
   reinsertVocabularyFailure,
 } from '../public/vocabulary-domain.js';
+
+test('ordinary vocabulary attempt keeps objective, guided and self-reported results separate', () => {
+  const attempt = buildVocabularyModuleAttempt([
+    { word: 'alpha', mode: 'introduction', introduced: true },
+    { word: 'alpha', mode: 'receptive_meaning', outcome: 'correct', independentSuccess: false },
+    { word: 'beta', mode: 'russian_reveal', outcome: 'knew', independentSuccess: false },
+    { word: 'gamma', mode: 'english_production', outcome: 'correct', independentSuccess: true },
+    { word: 'delta', mode: 'contextual_production', outcome: 'almost', independentSuccess: false },
+    { word: 'epsilon', mode: 'listening', outcome: 'correct', independentSuccess: true },
+  ], {
+    id: '10000000-0000-4000-8000-000000000005',
+    durationMs: 93_000,
+  });
+
+  assert.deepEqual(attempt, {
+    id: '10000000-0000-4000-8000-000000000005',
+    module: 'vocabulary',
+    activity: 'vocabulary_active_recall_session',
+    score: 2,
+    maxScore: 3,
+    durationMs: 93_000,
+    metadata: {
+      summaryVersion: 'vocabulary-session-summary-v1',
+      objectiveEvidence: 'objective',
+      objectiveAttempts: 3,
+      objectiveCorrect: 2,
+      guidedEvidence: 'guided',
+      guidedAttempts: 1,
+      guidedCorrect: 1,
+      selfReportedEvidence: 'self_reported',
+      selfReportedAttempts: 1,
+      selfReportedKnown: 1,
+      receptiveAttempts: 1,
+      receptiveCorrect: 1,
+      productionAttempts: 1,
+      productionCorrect: 1,
+      contextAttempts: 1,
+      contextCorrect: 0,
+      listeningAttempts: 1,
+      listeningCorrect: 1,
+      errors: 1,
+    },
+  });
+  assert.equal(JSON.stringify(attempt).includes('alpha'), false);
+  assert.equal(JSON.stringify(attempt).includes('epsilon'), false);
+});
 
 test('personal vocabulary cards use a stable identity and merge only honest bounded reading context', () => {
   const first = mergePersonalVocabularyCard(null, {
@@ -143,6 +190,23 @@ test('mixed vocabulary session introduces new words before the deterministic rec
     { word: 'learning context', mode: 'contextual_production', introduced: false, reviewed: true },
     { word: 'learning listening', mode: 'listening', introduced: false, reviewed: true },
   ]);
+});
+
+test('adaptive topic practice can force one honest mode without skipping first instruction', () => {
+  const tasks = composeVocabularySession([
+    { w: 'alpha' }, { w: 'beta' },
+  ], {
+    forcedMode: 'listening',
+    progressByWord: {
+      beta: { word: 'beta', stage: 2, reviewCount: 2, dueAt: 0 },
+    },
+  });
+  assert.deepEqual(tasks.map((task) => [task.word, task.mode]), [
+    ['alpha', 'introduction'], ['alpha', 'listening'], ['beta', 'listening'],
+  ]);
+  assert.throws(() => composeVocabularySession([{ w: 'alpha' }], {
+    forcedMode: 'server_verified_unassisted',
+  }), /Unsupported vocabulary session mode/u);
 });
 
 test('successful evidence advances a new word through every recall mode without stalling', () => {

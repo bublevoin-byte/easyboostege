@@ -1,5 +1,6 @@
 export const VOCABULARY_MASTERY_VERSION = 1;
 export const PERSONAL_VOCABULARY_CARD_VERSION = 1;
+export const VOCABULARY_SESSION_SUMMARY_VERSION = 'vocabulary-session-summary-v1';
 
 export const VOCABULARY_DIMENSIONS = Object.freeze([
   'meaning', 'spelling', 'context', 'listening',
@@ -509,7 +510,10 @@ function sessionModeFor(progress) {
   ))[0][1];
 }
 
-export function composeVocabularySession(items, { progressByWord = {} } = {}) {
+export function composeVocabularySession(items, { progressByWord = {}, forcedMode = null } = {}) {
+  if (forcedMode != null && !Object.hasOwn(MODE_RULES, forcedMode)) {
+    throw new TypeError('Unsupported vocabulary session mode');
+  }
   const records = new Map(Object.entries(
     progressByWord && typeof progressByWord === 'object' ? progressByWord : {},
   ).map(([word, progress]) => [normalizeVocabularyWord(progress?.word || word), progress]));
@@ -522,7 +526,7 @@ export function composeVocabularySession(items, { progressByWord = {} } = {}) {
     if (isNew) {
       tasks.push({ id: `${word}:introduction`, word, mode: 'introduction', introduced: true, reviewed: false });
     }
-    const mode = sessionModeFor(progress);
+    const mode = forcedMode || sessionModeFor(progress);
     tasks.push({
       id: `${word}:${mode}`,
       word,
@@ -590,6 +594,78 @@ export function summarizeVocabularySession(events) {
     assisted,
     errors,
     difficultWords,
+  };
+}
+
+export function buildVocabularyModuleAttempt(events, {
+  id, durationMs = 0, activity = 'vocabulary_active_recall_session',
+} = {}) {
+  const counters = {
+    objectiveAttempts: 0, objectiveCorrect: 0,
+    guidedAttempts: 0, guidedCorrect: 0,
+    selfReportedAttempts: 0, selfReportedKnown: 0,
+    receptiveAttempts: 0, receptiveCorrect: 0,
+    productionAttempts: 0, productionCorrect: 0,
+    contextAttempts: 0, contextCorrect: 0,
+    listeningAttempts: 0, listeningCorrect: 0,
+    errors: 0,
+  };
+  const rows = (Array.isArray(events) ? events : []).slice(0, 1_000);
+  for (const event of rows) {
+    const mode = event?.mode;
+    const outcome = event?.outcome;
+    if (!Object.hasOwn(MODE_RULES, mode) || !VOCABULARY_OUTCOME_SET.has(outcome)) continue;
+    const correct = outcome === 'correct';
+    if (mode === 'receptive_meaning') {
+      counters.guidedAttempts += 1;
+      counters.receptiveAttempts += 1;
+      if (correct) {
+        counters.guidedCorrect += 1;
+        counters.receptiveCorrect += 1;
+      }
+    } else if (mode === 'russian_reveal') {
+      counters.selfReportedAttempts += 1;
+      if (outcome === 'knew') counters.selfReportedKnown += 1;
+    } else {
+      counters.objectiveAttempts += 1;
+      const prefix = mode === 'english_production'
+        ? 'production' : mode === 'contextual_production' ? 'context' : 'listening';
+      counters[`${prefix}Attempts`] += 1;
+      if (correct) {
+        counters.objectiveCorrect += 1;
+        counters[`${prefix}Correct`] += 1;
+      }
+    }
+    if (FAILURE_OUTCOMES.has(outcome)) counters.errors += 1;
+  }
+  return {
+    id: String(id || ''),
+    module: 'vocabulary',
+    activity: String(activity || 'vocabulary_active_recall_session'),
+    score: counters.objectiveCorrect,
+    maxScore: Math.max(1, counters.objectiveAttempts),
+    durationMs: boundedInteger(durationMs, 0, 14_400_000),
+    metadata: {
+      summaryVersion: VOCABULARY_SESSION_SUMMARY_VERSION,
+      objectiveEvidence: 'objective',
+      objectiveAttempts: counters.objectiveAttempts,
+      objectiveCorrect: counters.objectiveCorrect,
+      guidedEvidence: 'guided',
+      guidedAttempts: counters.guidedAttempts,
+      guidedCorrect: counters.guidedCorrect,
+      selfReportedEvidence: 'self_reported',
+      selfReportedAttempts: counters.selfReportedAttempts,
+      selfReportedKnown: counters.selfReportedKnown,
+      receptiveAttempts: counters.receptiveAttempts,
+      receptiveCorrect: counters.receptiveCorrect,
+      productionAttempts: counters.productionAttempts,
+      productionCorrect: counters.productionCorrect,
+      contextAttempts: counters.contextAttempts,
+      contextCorrect: counters.contextCorrect,
+      listeningAttempts: counters.listeningAttempts,
+      listeningCorrect: counters.listeningCorrect,
+      errors: counters.errors,
+    },
   };
 }
 

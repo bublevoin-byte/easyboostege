@@ -12,13 +12,13 @@ import {coreVocabularyVoice} from '../modules/core-voice-catalog.js';
 import {completeAdaptiveModuleActivity} from '../adaptive-session-runtime.js';
 import {createVocabularySessionView} from '../vocabulary-session-view.js';
 import {
-  appendVocabularySessionHistory,buildVocabularyQueue,buildVocabularyRecognitionOptions,
+  appendVocabularySessionHistory,buildVocabularyModuleAttempt,buildVocabularyQueue,buildVocabularyRecognitionOptions,
   buildVocabularyTrend,composeVocabularySession,deriveVocabularyState,gradeVocabularyAnswer,
   migrateVocabularyProgress,normalizeVocabularyWord,personalVocabularyCardId,reinsertVocabularyFailure,
   summarizeVocabularySession,
 } from '../vocabulary-domain.js';
 import {
-  EGE_WORDS,S,SRV,TOKEN,WBTN,generateAiContent,registerScreenGenerator,save,srsFail,srsOk,
+  EGE_WORDS,S,SRV,TOKEN,WBTN,apiPost,generateAiContent,registerScreenGenerator,save,srsFail,srsOk,
   srsRecordVocabularyOutcome,toast,todayStr,ui,wBase,wDeco,wMergeAi,wMigrate,wStats,wSync,wordModule,
 } from '../app.js';
 
@@ -30,7 +30,10 @@ const W_PROVENANCE_LABELS={core:'Проверенная база',personal:'Ли
 let WQ=[],WI=0,WDONE=0,WCORRECT=0,W_ADAPTIVE_MODE=null,W_ADAPTIVE_ACTIVITY=null,W_ADAPTIVE_REPORTED=false;
 let W_VIEW='home',W_LIBRARY_SCROLL=0,W_DETAIL_RETURN_WORD='';
 let W_EVENTS=[],W_REPEAT_COUNTS={},W_PENDING_ANSWER='',W_SUMMARY_SAVED=false,W_LAST_SUMMARY=null;
+let W_SESSION_ATTEMPT_ID='',W_SESSION_STARTED_AT=0,W_MODULE_ATTEMPT_REPORTED=false;
 let W_SESSION_VIEW=null;
+function wAttemptId(){return globalThis.crypto&&typeof globalThis.crypto.randomUUID==='function'
+  ?globalThis.crypto.randomUUID():('00000000-0000-4000-8000-'+Date.now().toString(16).padStart(12,'0').slice(-12))}
 function wArea(){return document.getElementById('w_area')}
 function wResetToday(){if(S.wday!==todayStr()){S.wday=todayStr();S.wnewUsed=0}}
 function wStoredProgress(word){
@@ -107,17 +110,25 @@ function initWords(){if(!S)return;W_ADAPTIVE_MODE=null;W_ADAPTIVE_ACTIVITY=null;
     wSync();if(W_VIEW==='loading')wShowHome()}).catch(function(error){console.error('Vocabulary screen failed',error);wRenderFailure()})}
 function wModeFor(w){return W_ADAPTIVE_MODE==='lexical_choice'?'c1':wordModule.modeFor(wStoredProgress(w))}
 function launchVocabularyPractice(mode,topicId){
-  if(mode!=='lexical_choice'||![1,6].includes(topicId)||!S)return false;
+  var modes={
+    lexical_choice:{forcedMode:'receptive_meaning',activity:'vocabulary_lexical_choice'},
+    english_production:{forcedMode:'english_production',activity:'vocabulary_productive'},
+    contextual_production:{forcedMode:'contextual_production',activity:'vocabulary_context'},
+    listening:{forcedMode:'listening',activity:'vocabulary_listening'},
+  },config=modes[mode];
+  if(!config||!Number.isInteger(topicId)||topicId<1||topicId>10||!S)return false;
   wMigrate();wMergeAi();
   if(S.wday!==todayStr()){S.wday=todayStr();S.wnewUsed=0}
-  var pool=EGE_WORDS.filter(function(word){return Number(word.t)===topicId});
+  var pool=EGE_WORDS.filter(function(word){if(Number(word.t)!==topicId)return false;
+    if(config.forcedMode==='contextual_production')return Boolean(String(word.ex||'').trim());
+    return Boolean(String(word.w||'').trim()&&String(word.tr||'').trim())});
   if(!pool.length)return false;
-  W_ADAPTIVE_MODE='lexical_choice';
-  W_ADAPTIVE_ACTIVITY='vocabulary_lexical_choice_topic_'+topicId;
-  WQ=wordModule.buildDailyQueue(pool,S.srs,{newLimit:30});
-  if(!WQ.length)WQ=pool.slice(0,30);
-  WI=0;WDONE=0;WCORRECT=0;W_ADAPTIVE_REPORTED=false;wSync();wRender();
-  return Boolean(WQ[0]&&wModeFor(WQ[0].w)==='c1');
+  var items=wordModule.buildDailyQueue(pool,S.srs,{newLimit:12}).slice(0,12);
+  if(!items.length)items=pool.slice(0,12);
+  W_ADAPTIVE_MODE=config.forcedMode;
+  W_ADAPTIVE_ACTIVITY=config.activity+'_topic_'+topicId;
+  W_ADAPTIVE_REPORTED=false;wBeginSession(items,config.forcedMode);wSync();
+  return true;
 }
 function wBadge(x){var pos=W_POS[x.p]||x.pos||'СЛОВО';var top=W_TOPICS[x.t]||'';
   return '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'
@@ -169,12 +180,14 @@ function wSetBudget(value){
   S.vocabularyNewBudget=wordModule.normalizeNewWordBudget(value);save();wShowHome();
   var selected=document.getElementById('w_budget_'+S.vocabularyNewBudget);if(selected)selected.focus()}
 function wStartPractice(){
+  W_ADAPTIVE_MODE=null;W_ADAPTIVE_ACTIVITY=null;W_ADAPTIVE_REPORTED=false;
   var plan=wPlan();wBeginSession(plan.items);
 }
-function wBeginSession(items){
+function wBeginSession(items,forcedMode){
   var progressByWord={};items.forEach(function(item){var progress=wStoredProgress(item.w);if(progress)progressByWord[item.w]=progress});
-  WQ=composeVocabularySession(items,{progressByWord:progressByWord});WI=0;WDONE=0;WCORRECT=0;
+  WQ=composeVocabularySession(items,{progressByWord:progressByWord,forcedMode:forcedMode});WI=0;WDONE=0;WCORRECT=0;
   W_EVENTS=[];W_REPEAT_COUNTS={};W_PENDING_ANSWER='';W_SUMMARY_SAVED=false;W_LAST_SUMMARY=null;W_VIEW='practice';
+  W_SESSION_ATTEMPT_ID=wAttemptId();W_SESSION_STARTED_AT=Date.now();W_MODULE_ATTEMPT_REPORTED=false;
   var area=wArea();if(!area)return;
   area.innerHTML='<div id="w_card" class="vocab-practice-card"></div><div id="w_opts" class="vocab-practice-options"></div>';
   wHeading('Тренировка');wRender()}
@@ -352,10 +365,21 @@ function wNotKnown(){var task=WQ[WI],item=task&&wSessionItem(task);if(!task||!it
     selfRating:task.mode==='russian_reveal'?'not_known':null,notKnown:true});
   wRecordSessionOutcome(task,item,result)}
 function wSessionNext(){WI++;W_PENDING_ANSWER='';wRender()}
+function wReportSessionAttempt(){if(W_MODULE_ATTEMPT_REPORTED||!W_SESSION_ATTEMPT_ID)return;
+  var attempt=buildVocabularyModuleAttempt(W_EVENTS,{id:W_SESSION_ATTEMPT_ID,durationMs:Date.now()-W_SESSION_STARTED_AT,
+    activity:W_ADAPTIVE_ACTIVITY||'vocabulary_active_recall_session'});
+  if(W_ADAPTIVE_ACTIVITY){W_MODULE_ATTEMPT_REPORTED=true;W_ADAPTIVE_REPORTED=true;
+    Promise.resolve(completeAdaptiveModuleActivity({module:'vocabulary',activityId:W_ADAPTIVE_ACTIVITY,score:attempt.score,maxScore:attempt.maxScore,durationMs:attempt.durationMs}))
+      .then(function(result){if(!result){W_MODULE_ATTEMPT_REPORTED=false;W_ADAPTIVE_REPORTED=false}})
+      .catch(function(){W_MODULE_ATTEMPT_REPORTED=false;W_ADAPTIVE_REPORTED=false});return}
+  if(typeof SRV==='undefined'||!SRV||!TOKEN)return;W_MODULE_ATTEMPT_REPORTED=true;
+  apiPost('/api/v1/module-attempts',attempt).catch(function(){W_MODULE_ATTEMPT_REPORTED=false})}
 function wRenderSummary(card,opts){var summary=summarizeVocabularySession(W_EVENTS);W_LAST_SUMMARY=summary;
   if(!W_SUMMARY_SAVED){W_SUMMARY_SAVED=true;S.vocabularyHistory=appendVocabularySessionHistory(S.vocabularyHistory,summary);save();wSync()}
+  wReportSessionAttempt();
   wSessionView().renderSummary(card,opts,summary)}
-function wPracticeDifficult(){if(!W_LAST_SUMMARY)return;var difficult=new Set(W_LAST_SUMMARY.difficultWords.map(function(item){return item.word}));
+function wPracticeDifficult(){if(!W_LAST_SUMMARY)return;W_ADAPTIVE_MODE=null;W_ADAPTIVE_ACTIVITY=null;W_ADAPTIVE_REPORTED=false;
+  var difficult=new Set(W_LAST_SUMMARY.difficultWords.map(function(item){return item.word}));
   var items=wPracticeCatalog().filter(function(item){return difficult.has(normalizeVocabularyWord(item.w))});if(items.length)wBeginSession(items)}
 function wRenderSession(){var card=document.getElementById('w_card'),opts=document.getElementById('w_opts');if(!card||!opts)return;
   wProgress();var task=WQ[WI];if(!task){wRenderSummary(card,opts);return}var item=wSessionItem(task);if(!item){wSessionNext();return}
@@ -363,7 +387,7 @@ function wRenderSession(){var card=document.getElementById('w_card'),opts=docume
     choices:task.mode==='receptive_meaning'?buildVocabularyRecognitionOptions(wPracticeCatalog(),item):[],
     contextPrompt:task.mode==='contextual_production'?wContextBlank(item):''});
   if(task.mode==='listening')wSpeak(item.w)}
-function wRender(){if(W_ADAPTIVE_MODE)return wRenderLegacy();wRenderSession()}
+function wRender(){wRenderSession()}
 function wRenderLegacy(){var card=document.getElementById('w_card'),opts=document.getElementById('w_opts');
   if(!card||!opts)return;wProgress();
   wAnim('win','.32s');
