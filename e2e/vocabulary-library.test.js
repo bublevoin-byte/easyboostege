@@ -109,6 +109,37 @@ try {
   page.on('pageerror', (error) => pageErrors.push(error.message));
   await page.goto(baseUrl, { waitUntil: 'networkidle' });
   await page.getByRole('button', { name: 'Попробовать демо' }).click();
+  await page.getByRole('button', { name: 'Чтение', exact: true }).press('Enter');
+  await page.locator('#scr7.on').waitFor();
+  await page.getByRole('button', { name: 'Полное понимание' }).press('Enter');
+  const manyInReading = page.locator('#r_area button[data-w="many"]').first();
+  await manyInReading.press('Enter');
+  await page.locator('#r_tr').getByText(/many|многие/u).waitFor();
+  await page.getByRole('button', { name: '+ Учить', exact: true }).press('Enter');
+  await manyInReading.press('Enter');
+  await page.getByRole('button', { name: '+ Учить', exact: true }).press('Enter');
+  await manyInReading.press('Enter');
+  await page.locator('#r_pop button[onclick="r_add(\'know\')"]').press('Enter');
+
+  const volunteerInReading = page.locator('#r_area button[data-w="volunteer"]').first();
+  await volunteerInReading.press('Enter');
+  await page.locator('#r_pop').waitFor();
+  await page.locator('#r_pop button[onclick="r_add(\'know\')"]').press('Enter');
+  await volunteerInReading.press('Enter');
+  await page.locator('#r_pop button[onclick="r_add(\'know\')"]').press('Enter');
+  const readingCards = await page.evaluate(() => ({
+    cards: window.S.personalWords,
+    progress: window.S.srs.volunteer,
+  }));
+  assert.equal(readingCards.cards.length, 2);
+  assert.equal(readingCards.cards.find((card) => card.id === 'personal:many').contexts.length, 1);
+  assert.equal(readingCards.cards.find((card) => card.id === 'personal:many').partOfSpeech, null);
+  assert.equal(readingCards.cards.find((card) => card.id === 'personal:volunteer').partOfSpeech, 'v');
+  assert.equal(readingCards.progress.dimensions.meaning.evidence, 'self_reported');
+  assert.equal(readingCards.progress.dimensions.meaning.attempts, 1);
+  assert.equal(readingCards.progress.dimensions.meaning.independentSuccesses, 0);
+  assert.equal(readingCards.progress.lastMode, 'russian_reveal');
+  await page.getByRole('button', { name: 'Главная', exact: true }).last().press('Enter');
   await page.getByRole('button', { name: 'Слова', exact: true }).press('Enter');
   await page.locator('#scr2.on').waitFor();
   await page.getByRole('heading', { name: 'Сегодня' }).waitFor();
@@ -151,7 +182,7 @@ try {
   await page.getByRole('button', { name: 'Открыть библиотеку слов' }).press('Enter');
   await page.getByRole('heading', { name: 'Библиотека' }).waitFor();
   assert.equal(await page.evaluate(() => document.activeElement?.id), 'w_library_title');
-  assert.equal(await page.locator('.vocab-source-personal').count(), 2);
+  assert.equal(await page.locator('.vocab-source-personal').count(), 4);
   assert.equal(await page.locator('.vocab-source-generated').count(), 1);
   assert.equal(await page.locator('.vocab-source-unknown').filter({ hasText: 'To Orphan Started' }).count(), 1);
   assert.match(await page.locator('.vocab-source-personal').filter({ hasText: 'known only' }).innerText(), /Изучаю/u);
@@ -196,6 +227,63 @@ try {
   assert.equal(await page.getByLabel('Новое').isChecked(), true);
   assert.equal(await page.getByLabel('Проверенная база').isChecked(), true);
   assert.equal(await page.locator('#w_library_status').getAttribute('aria-live'), 'polite');
+
+  await page.evaluate(() => window.wClearLibraryFilters());
+  await page.getByRole('searchbox', { name: 'Поиск по слову или переводу' }).fill('gap year before university');
+  const contextualPersonal = page.locator('.vocab-source-personal').filter({ hasText: 'many' });
+  assert.equal(await contextualPersonal.count(), 1);
+  await contextualPersonal.locator('.vocab-word-open').press('Enter');
+  await page.getByRole('heading', { name: 'many' }).waitFor();
+  assert.equal(await page.getByText('Часть речи не указана').count(), 1);
+  assert.equal(await page.locator('.vocab-example p[lang="en"]', {
+    hasText: 'Many British students take a gap year before university.',
+  }).count(), 1);
+  assert.equal(await page.getByRole('button', { name: 'Удалить личную карточку' }).count(), 1);
+  const progressBeforeManyDelete = await page.evaluate(() => JSON.stringify(window.S.srs.many));
+  page.once('dialog', (dialog) => dialog.dismiss());
+  await page.getByRole('button', { name: 'Удалить личную карточку' }).press('Enter');
+  assert.equal(await page.getByRole('heading', { name: 'many' }).count(), 1);
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: 'Удалить личную карточку' }).press('Enter');
+  await page.getByRole('heading', { name: 'Библиотека' }).waitFor();
+  await page.getByRole('searchbox', { name: 'Поиск по слову или переводу' }).fill('many');
+  assert.equal(await page.locator('.vocab-source-personal').filter({ hasText: 'many' }).count(), 0);
+  assert.equal(await page.locator('.vocab-source-unknown').filter({ hasText: 'many' }).count(), 1);
+  assert.equal(await page.evaluate(() => JSON.stringify(window.S.srs.many)), progressBeforeManyDelete);
+  await page.getByRole('searchbox', { name: 'Поиск по слову или переводу' }).fill('volunteer');
+  const personalVolunteer = page.locator('.vocab-source-personal').filter({ hasText: 'volunteer' });
+  const coreVolunteer = page.locator('.vocab-source-core').filter({ hasText: 'to volunteer' });
+  assert.equal(await personalVolunteer.count(), 1);
+  assert.equal(await coreVolunteer.count(), 1);
+  await personalVolunteer.locator('.vocab-word-open').press('Enter');
+  const progressBeforePersonalDelete = await page.evaluate(() => JSON.stringify(window.S.srs.volunteer));
+  page.once('dialog', (dialog) => dialog.dismiss());
+  await page.getByRole('button', { name: 'Удалить личную карточку' }).press('Enter');
+  assert.equal(await page.getByRole('heading', { name: 'volunteer' }).count(), 1);
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: 'Удалить личную карточку' }).press('Enter');
+  await page.getByRole('heading', { name: 'Библиотека' }).waitFor();
+  assert.equal(await page.locator('.vocab-source-personal').filter({ hasText: 'volunteer' }).count(), 0);
+  assert.equal(await page.locator('.vocab-source-core').filter({ hasText: 'to volunteer' }).count(), 1);
+  assert.equal(await page.evaluate(() => JSON.stringify(window.S.srs.volunteer)), progressBeforePersonalDelete);
+
+  await page.evaluate(() => {
+    const coreVolunteer = window.EGE_WORDS.find((item) => window.wBase(item.w) === 'volunteer'
+      && Number(item.t) >= 1);
+    window.EGE_WORDS.splice(0, window.EGE_WORDS.length, coreVolunteer);
+    window.S.srs = { volunteer: window.S.srs.volunteer };
+    window.S.personalWords = [];
+    window.S.wstatus = {};
+    window.wShowHome();
+  });
+  await page.getByRole('button', { name: /^Начать ·/u }).press('Enter');
+  await page.getByRole('heading', { name: 'Напиши слово' }).waitFor();
+  await page.getByLabel('Ответ по-английски').fill('volunteer');
+  await page.getByRole('button', { name: 'Проверить' }).press('Enter');
+  assert.equal(await page.evaluate(() => Boolean(window.S.srs['to volunteer'])), false);
+  assert.equal(await page.evaluate(() => window.S.srs.volunteer.dimensions.spelling.attempts), 1);
+  await page.evaluate(() => window.wShowLibrary());
+  await page.getByRole('heading', { name: 'Библиотека' }).waitFor();
 
   const layout = await page.evaluate(() => {
     const area = document.getElementById('w_area');
@@ -257,6 +345,15 @@ try {
       ...record, word, masteryVersion: 1, s: record.stage, errorCount: 0, e: 0,
       reviewCount: record.stage, n: record.stage, dueAt: now + index, due: now + index,
     }]));
+    window.S.personalWords = [{
+      cardVersion: 1, id: 'personal:meaning', canonicalWord: 'meaning', word: 'meaning',
+      provenance: 'personal', meanings: ['скрытое личное значение'], pronunciation: null,
+      partOfSpeech: null, level: null,
+      contexts: [{ text: 'A deleted personal context.', source: 'reading' }],
+      createdAt: now, updatedAt: now,
+    }];
+    window.S.personalWordTombstones = ['personal:meaning'];
+    window.S.wstatus = {};
     window.S.vocabularyNewBudget = 10;
     window.S.vocabularyHistory = [];
     window.wShowHome();

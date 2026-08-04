@@ -1,4 +1,5 @@
 export const VOCABULARY_MASTERY_VERSION = 1;
+export const PERSONAL_VOCABULARY_CARD_VERSION = 1;
 
 export const VOCABULARY_DIMENSIONS = Object.freeze([
   'meaning', 'spelling', 'context', 'listening',
@@ -31,6 +32,8 @@ const MODE_RULES = Object.freeze({
   listening: Object.freeze({ dimension: 'listening', evidence: 'objective', correctDelta: 20 }),
 });
 const FAILURE_OUTCOMES = new Set(['almost', 'incorrect', 'not_known']);
+const PERSONAL_WORD_PARTS_OF_SPEECH = new Set(['n', 'v', 'adj', 'adv', 'ph', 'id']);
+const PERSONAL_WORD_CONTEXT_LIMIT = 8;
 
 function boundedInteger(value, minimum, maximum, fallback = minimum) {
   const number = Number(value);
@@ -51,6 +54,116 @@ export function normalizeVocabularyWord(value) {
     .replace(/\s+/gu, ' ')
     .replace(/^to\s+/iu, '')
     .toLocaleLowerCase('en');
+}
+
+function normalizedPersonalText(value, maximumLength) {
+  const text = String(value ?? '').normalize('NFKC').trim().replace(/\s+/gu, ' ');
+  return text ? text.slice(0, maximumLength) : null;
+}
+
+export function personalVocabularyCardId(word) {
+  const canonicalWord = normalizeVocabularyWord(word);
+  return canonicalWord ? `personal:${canonicalWord}` : '';
+}
+
+function personalMeanings(input) {
+  const values = (Array.isArray(input?.meanings) ? input.meanings : [])
+    .concat(input?.translation ?? input?.tr ?? []);
+  const seen = new Set();
+  return values.map((value) => normalizedPersonalText(value, 240)).filter((value) => {
+    if (!value) return false;
+    const key = value.toLocaleLowerCase('ru');
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 8);
+}
+
+function personalContexts(input) {
+  const values = (Array.isArray(input?.contexts) ? input.contexts : [])
+    .concat(input?.context ?? []);
+  const seen = new Set();
+  return values.map((value) => {
+    const context = typeof value === 'string' ? { text: value } : value;
+    const text = normalizedPersonalText(context?.text, 600);
+    if (!text) return null;
+    const source = 'reading';
+    return { text, source };
+  }).filter((value) => {
+    if (!value) return false;
+    const key = value.text.toLocaleLowerCase('en');
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, PERSONAL_WORD_CONTEXT_LIMIT);
+}
+
+export function mergePersonalVocabularyCard(existing, input, { now = Date.now() } = {}) {
+  const canonicalWord = normalizeVocabularyWord(input?.word ?? input?.w);
+  const id = personalVocabularyCardId(canonicalWord);
+  const timestamp = nullableTimestamp(now);
+  if (!id || canonicalWord.length > 120 || timestamp == null) {
+    throw new TypeError('Invalid personal vocabulary card');
+  }
+  const current = existing?.id === id && existing?.provenance === 'personal' ? existing : {};
+  const meanings = personalMeanings(current).concat(personalMeanings(input));
+  const contexts = personalContexts(current).concat(personalContexts(input));
+  const distinctMeanings = personalMeanings({ meanings });
+  const distinctContexts = personalContexts({ contexts });
+  const incomingPartOfSpeech = PERSONAL_WORD_PARTS_OF_SPEECH.has(input?.partOfSpeech ?? input?.p)
+    ? (input.partOfSpeech ?? input.p)
+    : null;
+  const retainedPartOfSpeech = PERSONAL_WORD_PARTS_OF_SPEECH.has(current?.partOfSpeech)
+    ? current.partOfSpeech
+    : null;
+  const updatedAt = Math.max(
+    nullableTimestamp(current?.updatedAt) ?? 0,
+    nullableTimestamp(input?.updatedAt) ?? 0,
+    timestamp,
+  );
+  const createdAt = Math.min(
+    nullableTimestamp(current?.createdAt) ?? updatedAt,
+    nullableTimestamp(input?.createdAt) ?? updatedAt,
+    updatedAt,
+  );
+  return {
+    cardVersion: PERSONAL_VOCABULARY_CARD_VERSION,
+    id,
+    canonicalWord,
+    word: canonicalWord,
+    provenance: 'personal',
+    meanings: distinctMeanings,
+    pronunciation: normalizedPersonalText(input?.pronunciation ?? input?.ipa, 120)
+      ?? normalizedPersonalText(current?.pronunciation, 120),
+    partOfSpeech: incomingPartOfSpeech ?? retainedPartOfSpeech,
+    level: normalizedPersonalText(input?.level ?? input?.cefr, 24)
+      ?? normalizedPersonalText(current?.level, 24),
+    contexts: distinctContexts,
+    createdAt,
+    updatedAt,
+  };
+}
+
+export function normalizePersonalVocabularyCards(input, { now = Date.now(), limit = 500 } = {}) {
+  const maximum = boundedInteger(limit, 1, 500, 500);
+  const cardsById = new Map();
+  for (const candidate of (Array.isArray(input) ? input : []).slice(0, maximum)) {
+    try {
+      const candidateTimestamp = nullableTimestamp(candidate?.updatedAt) ?? nullableTimestamp(now);
+      const id = personalVocabularyCardId(candidate?.word ?? candidate?.canonicalWord ?? candidate?.w);
+      if (!id || candidateTimestamp == null) continue;
+      const merged = mergePersonalVocabularyCard(cardsById.get(id) || null, {
+        ...candidate,
+        word: candidate?.word ?? candidate?.canonicalWord ?? candidate?.w,
+      }, { now: candidateTimestamp });
+      cardsById.set(id, merged);
+    } catch {
+      // Malformed legacy/local cards are ignored instead of poisoning the whole library.
+    }
+  }
+  return Array.from(cardsById.values())
+    .filter((card) => card.contexts.length > 0)
+    .sort((left, right) => left.id.localeCompare(right.id, 'en'));
 }
 
 export function normalizeEnglishAnswer(value) {

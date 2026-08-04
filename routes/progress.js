@@ -5,8 +5,26 @@ import { validateProgress } from '../validation/api-input.js';
 import { moduleAttemptSchema } from '../validation/module-attempt.js';
 import { wordProgressBatchSchema } from '../validation/word-progress.js';
 import { errorBankBatchSchema } from '../validation/error-bank.js';
+import {
+  personalVocabularyCardsSchema,
+  personalVocabularyTombstonesSchema,
+} from '../validation/personal-words.js';
 
 const MAX_MODULES_PER_REQUEST = 64;
+
+function parsePersonalWordsProgress(progress) {
+  const data = { ...(progress || {}) };
+  for (const [key, schema] of [
+    ['personalWords', personalVocabularyCardsSchema],
+    ['personalWordTombstones', personalVocabularyTombstonesSchema],
+  ]) {
+    if (!Object.hasOwn(data, key)) continue;
+    const parsed = schema.safeParse(data[key]);
+    if (!parsed.success) return { ok: false, code: 'INVALID_PERSONAL_WORDS' };
+    data[key] = parsed.data;
+  }
+  return { ok: true, data };
+}
 
 function perUserLimiter(limit, message) {
   return rateLimit({
@@ -31,10 +49,11 @@ export function createProgressRoutes({ authentication, db, now = () => new Date(
   router.post('/api/v1/progress', auth, async (req, res, next) => {
     try {
       const parsed = validateProgress(req.body);
-      if (!parsed.ok) {
-        return res.status(400).json({ error: { code: 'INVALID_PROGRESS', message: 'Некорректные данные прогресса.', reason: parsed.code } });
+      const personal = parsed.ok ? parsePersonalWordsProgress(parsed.data) : { ok: false };
+      if (!parsed.ok || !personal.ok) {
+        return res.status(400).json({ error: { code: 'INVALID_PROGRESS', message: 'Некорректные данные прогресса.', reason: parsed.code || personal.code } });
       }
-      await db.saveProgress(req.user, parsed.data);
+      await db.saveProgress(req.user, personal.data);
       res.json({ ok: true });
     } catch (error) { next(error); }
   });
@@ -45,10 +64,11 @@ export function createProgressRoutes({ authentication, db, now = () => new Date(
       const modules = req.body?.modules;
       const parsed = validateProgress(modules);
       const count = Object.keys(parsed.data || {}).length;
-      if (!parsed.ok || count === 0 || count > MAX_MODULES_PER_REQUEST) {
-        return res.status(400).json({ error: { code: 'INVALID_PROGRESS_MODULES', message: 'Некорректные модули прогресса.', reason: parsed.code || 'INVALID_MODULE_COUNT' } });
+      const personal = parsed.ok ? parsePersonalWordsProgress(parsed.data) : { ok: false };
+      if (!parsed.ok || count === 0 || count > MAX_MODULES_PER_REQUEST || !personal.ok) {
+        return res.status(400).json({ error: { code: 'INVALID_PROGRESS_MODULES', message: 'Некорректные модули прогресса.', reason: parsed.code || personal.code || 'INVALID_MODULE_COUNT' } });
       }
-      const progress = await db.mergeProgress(req.user, parsed.data);
+      const progress = await db.mergeProgress(req.user, personal.data);
       res.json({ ok: true, progress });
     } catch (error) { next(error); }
   });

@@ -19,6 +19,9 @@
     state.essays = state.essays || 0;
     state.speak = state.speak || 0;
     state.srs = state.srs || {};
+    state.personalWords = Array.isArray(state.personalWords) ? state.personalWords : [];
+    state.personalWordTombstones = Array.isArray(state.personalWordTombstones)
+      ? state.personalWordTombstones : [];
     state.prog = state.prog || { words: 0, gram: 0, read: 0, listen: 0, write: 0, speak: 0 };
     return state;
   }

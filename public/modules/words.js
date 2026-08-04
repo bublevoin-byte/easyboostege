@@ -36,8 +36,15 @@
       const state = deriveState(record, item);
       return {
         item,
+        id: String(item.id || `${provenance}:${baseForm(item.w)}`),
         word: String(item.w || ''),
         translation: String(item.tr || ''),
+        searchText: [item.w, item.tr]
+          .concat(Array.isArray(item.meanings) ? item.meanings : [])
+          .concat((Array.isArray(item.examples) ? item.examples : []).map((example) => (
+            typeof example === 'string' ? example : example?.text
+          )))
+          .filter(Boolean).join(' '),
         topicIds: topicIdsFor(item),
         state: ['new', 'learning', 'review', 'strong'].includes(state) ? state : 'new',
         provenance,
@@ -56,7 +63,8 @@
     const states = selectedValues(filters.states);
     const provenances = selectedValues(filters.provenances);
     return (entries || []).filter((entry) => {
-      const searchable = `${entry.word} ${entry.translation}`.toLocaleLowerCase('ru');
+      const searchable = String(entry.searchText || `${entry.word} ${entry.translation}`)
+        .toLocaleLowerCase('ru');
       if (query && !searchable.includes(query)) return false;
       if (topics.size && !entry.topicIds.some((topic) => topics.has(topic))) return false;
       if (states.size && !states.has(entry.state)) return false;
@@ -93,8 +101,46 @@
     };
   }
 
+  function personalCardItem(card = {}) {
+    const meanings = Array.isArray(card.meanings) ? card.meanings.filter(Boolean) : [];
+    const contexts = Array.isArray(card.contexts) ? card.contexts : [];
+    return {
+      id: String(card.id || ''),
+      w: String(card.word || card.canonicalWord || ''),
+      tr: String(meanings[0] || ''),
+      meanings: meanings.slice(),
+      ipa: card.pronunciation || null,
+      p: card.partOfSpeech || null,
+      level: card.level || null,
+      ex: String(contexts[0]?.text || ''),
+      examples: contexts.map((context) => ({
+        text: String(context?.text || ''), source: context?.source || 'reading',
+      })).filter((context) => context.text),
+      source: 'Из чтения',
+      provenance: 'personal',
+    };
+  }
+
   function baseForm(word) {
-    return String(word || '').replace(/^to /u, '').toLowerCase().trim();
+    return String(word || '').normalize('NFKC').trim().replace(/\s+/gu, ' ')
+      .replace(/^to\s+/iu, '').toLocaleLowerCase('en');
+  }
+
+  function progressEntry(records, word) {
+    if (!records || typeof records !== 'object') return null;
+    if (Object.hasOwn(records, word)) return [word, records[word]];
+    const identity = baseForm(word);
+    return Object.entries(records).find(([key, record]) => (
+      baseForm(record?.word || key) === identity
+    )) || null;
+  }
+
+  function progressRecord(records, word) {
+    return progressEntry(records, word)?.[1] || null;
+  }
+
+  function progressStorageKey(records, word) {
+    return progressEntry(records, word)?.[0] || word;
   }
 
   function modeFor(record) {
@@ -107,13 +153,17 @@
   function calculateStats(catalog, records) {
     let learned = 0;
     let learning = 0;
-    for (const item of catalog || []) {
-      const stage = Math.max(0, Number(records?.[item.w]?.s) || 0);
+    const verifiedCatalog = (catalog || []).filter((item) => (
+      item?.provenance === 'core'
+      || (!item?.provenance && Number(item?.t) !== 0)
+    ));
+    for (const item of verifiedCatalog) {
+      const stage = Math.max(0, Number(progressRecord(records, item.w)?.s) || 0);
       if (!stage) continue;
       if (stage >= 5) learned += 1;
       else learning += 1;
     }
-    const total = (catalog || []).length;
+    const total = verifiedCatalog.length;
     return { learned, learning, fresh: total - learned - learning, total };
   }
 
@@ -123,14 +173,17 @@
     const due = [];
     const fresh = [];
     for (const item of catalog || []) {
-      const record = records?.[item.w];
+      const record = progressRecord(records, item.w);
       if (record && Number(record.s) > 0) {
         if ((Number(record.due) || 0) <= now) due.push(item);
       } else {
         fresh.push(item);
       }
     }
-    due.sort((left, right) => (Number(records[left.w]?.due) || 0) - (Number(records[right.w]?.due) || 0));
+    due.sort((left, right) => (
+      (Number(progressRecord(records, left.w)?.due) || 0)
+      - (Number(progressRecord(records, right.w)?.due) || 0)
+    ));
     return due.concat(fresh.slice(0, newLimit));
   }
 
@@ -181,7 +234,10 @@
     buildLibraryEntries,
     filterLibraryEntries,
     wordDetails,
+    personalCardItem,
     baseForm,
+    progressRecord,
+    progressStorageKey,
     modeFor,
     calculateStats,
     buildDailyQueue,

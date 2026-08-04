@@ -117,3 +117,51 @@ test('authenticated word-progress API migrates legacy payloads and isolates rich
     assert.equal(invalid.status, 400);
   });
 });
+
+test('personal cards use bounded progress persistence with owner, export and deletion parity', async () => {
+  await withServer(async (baseUrl, repository) => {
+    const card = {
+      cardVersion: 1, id: 'personal:volunteer', canonicalWord: 'volunteer', word: 'volunteer',
+      provenance: 'personal', meanings: ['волонтёр'], pronunciation: null,
+      partOfSpeech: null, level: null,
+      contexts: [{ text: 'They volunteer in other countries.', source: 'reading' }],
+      createdAt: 1_000, updatedAt: 2_000,
+    };
+    const requestCard = { ...card, contexts: [{
+      text: '  They volunteer in other countries.  ', source: 'reading',
+    }] };
+    const stored = await fetch(`${baseUrl}/api/v1/progress/modules`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-test-user': 'owner' },
+      body: JSON.stringify({ modules: {
+        personalWords: [requestCard], personalWordTombstones: ['personal:volunteer'],
+      } }),
+    });
+    assert.equal(stored.status, 200);
+    assert.deepEqual((await stored.json()).progress.personalWords, [card]);
+
+    const other = await fetch(`${baseUrl}/api/v1/progress`, { headers: { 'x-test-user': 'other' } });
+    assert.deepEqual(await other.json(), {});
+    assert.deepEqual((await repository.exportUserData('owner')).progress.personalWords, [card]);
+    assert.deepEqual((await repository.getProgress('owner')).personalWordTombstones, ['personal:volunteer']);
+
+    const malformed = await fetch(`${baseUrl}/api/v1/progress/modules`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-test-user': 'owner' },
+      body: JSON.stringify({ modules: { personalWords: [{ ...card, provenance: 'core' }] } }),
+    });
+    assert.equal(malformed.status, 400);
+    assert.deepEqual((await repository.getProgress('owner')).personalWords, [card]);
+
+    const malformedTombstone = await fetch(`${baseUrl}/api/v1/progress/modules`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-test-user': 'owner' },
+      body: JSON.stringify({ modules: { personalWordTombstones: ['core:volunteer'] } }),
+    });
+    assert.equal(malformedTombstone.status, 400);
+    assert.deepEqual((await repository.getProgress('owner')).personalWordTombstones, ['personal:volunteer']);
+
+    assert.equal(await repository.deleteUserData('owner'), true);
+    assert.equal(await repository.exportUserData('owner'), null);
+  });
+});

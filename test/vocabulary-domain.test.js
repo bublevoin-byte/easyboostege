@@ -11,11 +11,95 @@ import {
   deriveVocabularyState,
   gradeVocabularyAnswer,
   localVocabularyProgress,
+  mergePersonalVocabularyCard,
   mergeLegacyVocabularyProgress,
   migrateVocabularyProgress,
   migrateLocalVocabularyProgress,
+  normalizePersonalVocabularyCards,
+  personalVocabularyCardId,
   reinsertVocabularyFailure,
 } from '../public/vocabulary-domain.js';
+
+test('personal vocabulary cards use a stable identity and merge only honest bounded reading context', () => {
+  const first = mergePersonalVocabularyCard(null, {
+    word: '  To   Volunteer ',
+    translation: 'работать волонтёром',
+    pronunciation: '/ˌvɒlənˈtɪə/',
+    context: 'Many students travel, work or do volunteering.',
+    source: 'reading',
+  }, { now: 1_000 });
+
+  assert.equal(personalVocabularyCardId('VOLUNTEER'), 'personal:volunteer');
+  assert.deepEqual(first, {
+    cardVersion: 1,
+    id: 'personal:volunteer',
+    canonicalWord: 'volunteer',
+    word: 'volunteer',
+    provenance: 'personal',
+    meanings: ['работать волонтёром'],
+    pronunciation: '/ˌvɒlənˈtɪə/',
+    partOfSpeech: null,
+    level: null,
+    contexts: [{ text: 'Many students travel, work or do volunteering.', source: 'reading' }],
+    createdAt: 1_000,
+    updatedAt: 1_000,
+  });
+
+  const repeated = mergePersonalVocabularyCard(first, {
+    word: 'volunteer',
+    partOfSpeech: 'v',
+    context: 'They volunteer in other countries.',
+    source: 'reading',
+  }, { now: 2_000 });
+  const deduped = mergePersonalVocabularyCard(repeated, {
+    word: 'volunteer', context: 'They  volunteer in other countries.', source: 'reading',
+  }, { now: 3_000 });
+
+  assert.equal(repeated.id, first.id);
+  assert.equal(repeated.partOfSpeech, 'v');
+  assert.deepEqual(deduped.contexts, [
+    { text: 'Many students travel, work or do volunteering.', source: 'reading' },
+    { text: 'They volunteer in other countries.', source: 'reading' },
+  ]);
+  assert.equal(deduped.updatedAt, 3_000);
+});
+
+test('persisted personal card collections are bounded, canonical and deduplicated', () => {
+  const cards = normalizePersonalVocabularyCards([
+    {
+      word: '  Volunteer ', meanings: ['волонтёр'], provenance: 'personal',
+      contexts: [{ text: 'First sentence.', source: 'reading' }], createdAt: 100, updatedAt: 200,
+    },
+    {
+      word: 'VOLUNTEER', meanings: ['доброволец'], provenance: 'personal',
+      contexts: [{ text: 'Second sentence.', source: 'reading' }], createdAt: 150, updatedAt: 300,
+    },
+    { word: '   ', meanings: ['не карточка'], provenance: 'personal' },
+  ], { now: 999 });
+
+  assert.equal(cards.length, 1);
+  assert.equal(cards[0].id, 'personal:volunteer');
+  assert.equal(cards[0].createdAt, 100);
+  assert.equal(cards[0].updatedAt, 300);
+  assert.deepEqual(cards[0].meanings, ['волонтёр', 'доброволец']);
+  assert.equal(cards[0].contexts.length, 2);
+
+  const reversed = normalizePersonalVocabularyCards([
+    {
+      word: 'VOLUNTEER', provenance: 'personal', createdAt: 150, updatedAt: 300,
+      contexts: [{ text: 'Second sentence.', source: 'reading' }],
+    },
+    {
+      word: 'volunteer', provenance: 'personal', createdAt: 100, updatedAt: 200,
+      contexts: [{ text: 'First sentence.', source: 'reading' }],
+    },
+    { word: 'contextless', provenance: 'personal', createdAt: 100, updatedAt: 200 },
+  ], { now: 999 });
+  assert.equal(reversed.length, 1);
+  assert.equal(reversed[0].createdAt, 100);
+  assert.equal(reversed[0].updatedAt, 300);
+  assert.equal(reversed[0].contexts.length, 2);
+});
 
 test('mixed vocabulary session introduces new words before the deterministic recall ladder', () => {
   const items = [

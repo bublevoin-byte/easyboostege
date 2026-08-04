@@ -10,6 +10,7 @@ import {
   mergeLegacyVocabularyProgress,
   migrateLocalVocabularyProgress,
   migrateVocabularyProgress,
+  normalizePersonalVocabularyCards,
 } from './vocabulary-domain.js';
 /*
  * Оболочка не знает, что умеет экран: она знает только, что его код приезжает отдельным чанком.
@@ -72,7 +73,7 @@ S=store.loadLocal(currentUser);
 /* ===== READING ===== */
 /* Последнее слово, по которому кликнули в тексте: его показывает всплывающая карточка перевода
    и озвучивает кнопка из разметки, поэтому имя живёт в оболочке, а не в чанке чтения. */
-let lastWord="";
+let lastWord="",lastWordContext="";
 
 /* ===== ROBUSTNESS + DEMO FALLBACK (overrides) ===== */
 const DICT={
@@ -86,7 +87,7 @@ const DICT={
  experience_:{}
 };
 /* translate: AI first, else offline dictionary */
-async function trWord(w){lastWord=w;const pop=document.getElementById('r_pop');
+async function trWord(w,encodedContext=''){lastWord=w;try{lastWordContext=decodeURIComponent(encodedContext||'')}catch(_){lastWordContext=''};const pop=document.getElementById('r_pop');
   document.getElementById('r_word').textContent=w;document.getElementById('r_ipa').textContent='';document.getElementById('r_tr').textContent='перевод…';pop.style.display='block';
   try{const d=await generateAiContent('dictionary_lookup',{word:w});
     document.getElementById('r_ipa').textContent=d.ipa||'';document.getElementById('r_tr').textContent=d.tr}
@@ -738,7 +739,11 @@ function wSync(){var st=wStats();S.learned=st.learned;S.prog=S.prog||{};S.prog.w
   var bar=document.getElementById('w_bar');if(bar)bar.style.width=Math.max(2,Math.round(st.learned/st.total*100))+'%';
   setTxt('sub_words','учу · '+st.learned+' / '+st.total)}
 function wMigrate(){if(!S.srsMig){S.srsMig=1;S.srs=wordModule.migrateLegacy(EGE_WORDS,S.box,S.srs||{})}
-  S.srs=migrateLocalVocabularyProgress(S.srs||{});S.srsMasteryVersion=1;store.saveLocal(currentUser,S)}
+  S.srs=migrateLocalVocabularyProgress(S.srs||{});S.srsMasteryVersion=1;
+  S.personalWords=normalizePersonalVocabularyCards(S.personalWords||[]);
+  S.personalWordTombstones=Array.from(new Set((Array.isArray(S.personalWordTombstones)?S.personalWordTombstones:[])
+    .map(String).filter(function(id){return id.startsWith('personal:')}))).slice(-500);
+  store.saveLocal(currentUser,S)}
 function wSpeakFallback(txt){try{var u=new SpeechSynthesisUtterance(txt.replace(/^to /,''));u.lang='en-GB';u.rate=.9;speechSynthesis.cancel();speechSynthesis.speak(u)}catch(e){}}
 function wDeco(){return '<svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;" viewBox="0 0 346 280" preserveAspectRatio="xMidYMid slice">'
   +'<circle cx="330" cy="8" r="64" fill="rgba(255,200,97,.16)"/>'
@@ -779,13 +784,16 @@ function rSync(){if(!S)return;var r=rSt();var stats=readingModule.summary(r),acc
   setTxt('r_sumline',r.texts?('Прочитано '+r.texts+' · точность '+acc+'%'):'Два тренажёра — как на экзамене');
   var bar=document.getElementById('r_bar');if(bar)bar.style.width=Math.max(2,acc)+'%'}
 function rEsc(w){return ui.escapeHtml(w)}
-function rWordsHtml(text){return text.split(/(\s+)/).map(function(tok){
-  if(/^\s+$/.test(tok))return tok;
-  var m=tok.match(/[A-Za-z][A-Za-z'-]*/);if(!m)return rEsc(tok);
-  var clean=m[0].toLowerCase();
-  var st=S.wstatus&&S.wstatus[clean];
-  var bg=st==='learn'?'background:#FFEDE4;border-radius:5px;':(st==='know'?'background:#EAF7F0;border-radius:5px;':'');
-  return '<button type="button" class="clk iconbtn" data-w="'+clean+'" onclick="trWord(this.dataset.w)" style="cursor:pointer;'+bg+'">'+rEsc(tok)+'</button>'}).join('')}
+function rWordsHtml(text){var sentences=String(text||'').match(/[^.!?]+(?:[.!?]+(?=\s|$)|$)\s*/gu)||[String(text||'')];
+  return sentences.map(function(sentence){var context=sentence.trim(),encoded=encodeURIComponent(context).replace(/'/g,'%27');
+    return sentence.split(/(\s+)/).map(function(tok){
+      if(/^\s+$/.test(tok))return tok;
+      var m=tok.match(/[A-Za-z][A-Za-z'-]*/);if(!m)return rEsc(tok);
+      var clean=m[0].toLowerCase();
+      var st=S.wstatus&&S.wstatus[clean];
+      var bg=st==='learn'?'background:#FFEDE4;border-radius:5px;':(st==='know'?'background:#EAF7F0;border-radius:5px;':'');
+      return '<button type="button" class="clk iconbtn" data-w="'+clean+'" data-context="'+encoded+'" onclick="trWord(this.dataset.w,this.dataset.context)" style="cursor:pointer;'+bg+'">'+rEsc(tok)+'</button>'}).join('')
+  }).join('')}
 /* FAB прячем и на чтении; синк при старте */
 registerRouteHook(function(id){if(id==='scr7'){var f=document.getElementById('genfab');if(f)f.style.display='none'}});
 registerStartHook(function(){return rSync()});
@@ -894,7 +902,7 @@ configureTts({
  * Имена экранов сюда не входят: они приезжают со своим чанком и попадают на window тогда же.
  */
 export {
-  lastWord,
+  lastWord,lastWordContext,
   closeLearn,learnGo,logout,lToggleSlow,openLearn,pwCheck,rSync,save,startApp,startDemo,
   tgClick,trWord,
 };

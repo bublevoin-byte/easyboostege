@@ -14,6 +14,7 @@ import { assertAdaptiveGoalRepositoryContract } from './support/adaptive-goal-co
 import { assertAdaptiveDiagnosticRepositoryContract } from './support/adaptive-diagnostic-contract.js';
 import { assertAdaptivePlanRepositoryContract } from './support/adaptive-plan-contract.js';
 import { assertWordProgressRepositoryContract } from './support/word-progress-contract.js';
+import { assertPersonalWordsProgressRepositoryContract } from './support/personal-words-progress-contract.js';
 
 async function withRepository(run) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-db-'));
@@ -433,6 +434,14 @@ test('file word mastery matches the shared persistence, export and deletion cont
     const owner = await repository.createTelegramUser(3041, 'Mastery Owner');
     const other = await repository.createTelegramUser(3042, 'Mastery Other');
     await assertWordProgressRepositoryContract(assert, repository, owner, other);
+  });
+});
+
+test('file personal words match the shared persistence, export and deletion contract', async () => {
+  await withRepository(async (repository) => {
+    const owner = await repository.createTelegramUser(3043, 'Personal words owner');
+    const other = await repository.createTelegramUser(3044, 'Personal words other');
+    await assertPersonalWordsProgressRepositoryContract(assert, repository, owner, other);
   });
 });
 

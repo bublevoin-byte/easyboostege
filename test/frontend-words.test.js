@@ -39,6 +39,36 @@ test('words module calculates SRS statistics and a due-first daily queue', () =>
   );
 });
 
+test('verified EGE statistics exclude personal and generated cards', () => {
+  const words = createWordsModule();
+  const mixed = [
+    { w: 'core one', t: 2, provenance: 'core' },
+    { w: 'personal one', provenance: 'personal' },
+    { w: 'generated one', t: 0, provenance: 'generated' },
+  ];
+  const records = {
+    'core one': { s: 5 }, 'personal one': { s: 5 }, 'generated one': { s: 5 },
+  };
+
+  assert.deepEqual({ ...words.calculateStats(mixed, records) }, {
+    learned: 1, learning: 0, fresh: 0, total: 1,
+  });
+});
+
+test('core display spelling reuses the canonical personal mastery identity everywhere', () => {
+  const words = createWordsModule();
+  const core = [{ w: 'to volunteer', t: 2, provenance: 'core' }];
+  const records = { volunteer: { word: 'volunteer', s: 5, due: 100 } };
+
+  assert.equal(words.progressStorageKey(records, 'to volunteer'), 'volunteer');
+  assert.deepEqual({ ...words.calculateStats(core, records) }, {
+    learned: 1, learning: 0, fresh: 0, total: 1,
+  });
+  assert.deepEqual(Array.from(words.buildDailyQueue(core, records, {
+    now: 200, newLimit: 1,
+  }), (item) => item.w), ['to volunteer']);
+});
+
 test('words home keeps the four daily choices and estimates the visible workload', () => {
   const words = createWordsModule();
 
@@ -76,6 +106,31 @@ test('vocabulary library supports search and multi-select topic, status and prov
     }), (entry) => entry.word),
     ['to volunteer', 'headline'],
   );
+  assert.deepEqual(
+    Array.from(words.filterLibraryEntries(words.buildLibraryEntries([{
+      w: 'volunteer', tr: 'волонтёр', provenance: 'personal',
+      examples: [{ text: 'They volunteer in other countries.' }],
+    }], {}), { query: 'other countries' }), (entry) => entry.word),
+    ['volunteer'],
+  );
+});
+
+test('a persisted personal card becomes a truthful library item without inventing metadata', () => {
+  const words = createWordsModule();
+  const item = words.personalCardItem({
+    id: 'personal:volunteer', canonicalWord: 'volunteer', word: 'volunteer',
+    provenance: 'personal', meanings: ['работать волонтёром'],
+    pronunciation: '/ˌvɒlənˈtɪə/', partOfSpeech: null, level: null,
+    contexts: [{ text: 'They volunteer in other countries.', source: 'reading' }],
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(item)), {
+    id: 'personal:volunteer', w: 'volunteer', tr: 'работать волонтёром',
+    meanings: ['работать волонтёром'], ipa: '/ˌvɒlənˈtɪə/', p: null, level: null,
+    ex: 'They volunteer in other countries.',
+    examples: [{ text: 'They volunteer in other countries.', source: 'reading' }],
+    source: 'Из чтения', provenance: 'personal',
+  });
 });
 
 test('word details preserve available enrichment and keep missing metadata explicit', () => {

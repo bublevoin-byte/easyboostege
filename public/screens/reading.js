@@ -7,10 +7,13 @@
 import {registerRouteHook} from '../router.js';
 import {prepareVoiceTutorContextResult,registerVoiceTutorContextResult} from '../voice-tutor.js';
 import {
-  EGE_WORDS,S,SRV,TOKEN,WBTN,examModule,gExamFmt,generateAiContent,lastWord,readingModule,rEsc,
-  rSt,rSync,rWordsHtml,registerScreenGenerator,save,setTxt,toast,ui,wBase,wDeco,wSync,
+  EGE_WORDS,S,SRV,TOKEN,WBTN,examModule,gExamFmt,generateAiContent,lastWord,lastWordContext,readingModule,rEsc,
+  rSt,rSync,rWordsHtml,registerScreenGenerator,save,setTxt,srsRecordVocabularyOutcome,toast,ui,wBase,wDeco,wSync,
 } from '../app.js';
 import {completeAdaptiveModuleActivity} from '../adaptive-session-runtime.js';
+import {
+  mergePersonalVocabularyCard,normalizeVocabularyWord,personalVocabularyCardId,
+} from '../vocabulary-domain.js';
 
 const READ_TXT="Many students take a gap year before university. They travel, work or do volunteering. It can be a valuable experience that helps them become more independent and confident.";
 let RTXT=READ_TXT;
@@ -274,15 +277,27 @@ function rGpCheck(){if(RG.done)return;RG.done=true;var set=RG.set,L='ABCD',r=rSt
   try{d.scrollIntoView({behavior:'smooth',block:'start'})}catch(e){};rGen()}
 /* ---- слово из текста → в модуль Слова ---- */
 function r_add(st){if(!lastWord)return;
-  S.wstatus=S.wstatus||{};S.wstatus[lastWord]=st;
-  if(st==='learn'){
-    var tr=(document.getElementById('r_tr')||{}).textContent||'';
-    if(tr&&tr.indexOf('перевод')<0&&tr.indexOf('офлайн, слова нет')<0&&tr.length<60){
-      var have=EGE_WORDS.some(function(x){return wBase(x.w)===lastWord});
-      if(!have){var it={w:lastWord,p:'n',t:0,tr:tr.replace(' · офлайн-словарь','').trim(),ex:''};
-        EGE_WORDS.push(it);S.aiWords=(S.aiWords||[]).concat([it]);
-        try{toast('Добавлено в «Слова» ✓')}catch(e){}}
-      else{try{toast('Это слово уже в изучении')}catch(e){}}}}
+  if(!['learn','know'].includes(st))return;
+  var word=normalizeVocabularyWord(lastWord),id=personalVocabularyCardId(word);if(!id)return;
+  var previousStatus=S.wstatus&&S.wstatus[word],tr=(document.getElementById('r_tr')||{}).textContent||'';
+  tr=tr.replace(' · офлайн-словарь','').trim();
+  if(!tr||tr.indexOf('перевод')>=0||tr.indexOf('офлайн, слова нет')>=0||tr.length>240)tr='';
+  var ipa=((document.getElementById('r_ipa')||{}).textContent||'').trim();
+  var known=EGE_WORDS.find(function(item){return wBase(item.w)===word
+    &&(item.provenance==='core'||(!item.provenance&&Number(item.t)!==0))});
+  var context=lastWordContext||String(((document.getElementById('r_card')||{}).textContent)||'').trim().slice(0,600);
+  var cards=Array.isArray(S.personalWords)?S.personalWords:[],existing=cards.find(function(card){return card.id===id});
+  var card=mergePersonalVocabularyCard(existing,{word:word,translation:tr||null,
+    pronunciation:ipa||known&&known.ipa||null,partOfSpeech:known&&known.p||null,
+    level:known&&known.level||null,context:context,source:'reading'});
+  S.personalWords=cards.filter(function(item){return item.id!==id}).concat([card]);
+  S.personalWordTombstones=(Array.isArray(S.personalWordTombstones)?S.personalWordTombstones:[])
+    .filter(function(value){return value!==id});
+  S.wstatus=S.wstatus||{};S.wstatus[word]=previousStatus==='know'?'know':st;
+  if(st==='know'&&previousStatus!=='know'){
+    srsRecordVocabularyOutcome(word,{mode:'russian_reveal',outcome:'knew',now:Date.now()});
+  }
+  try{toast(st==='know'?'Отмечено как знакомое · самооценка':'Личная карточка добавлена в «Слова»')}catch(e){}
   save();var p=document.getElementById('r_pop');if(p)p.style.display='none';
   try{wSync()}catch(e){}}
 /* ---- экзамен по чтению: 10 + 11 + 12-18 ---- */
