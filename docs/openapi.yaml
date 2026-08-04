@@ -705,7 +705,7 @@ paths:
   /api/v1/adaptive-learning/sessions/{sessionId}/start:
     post:
       summary: Atomically start the exact current learning block and issue a short-lived opaque execution claim
-      description: The claim is owner/session/block/launch/revision-bound, expires after two hours, is returned only once through this owner-bound response and is never exported. Exact Idempotency-Key replay returns the retained response; another live claim or stale compare-and-set revision fails closed.
+      description: The claim is owner/session/block/launch/revision-bound and expires after two hours. Its plaintext value is reconstructed by a domain-separated server HMAC for an exact Idempotency-Key replay, is never stored in a mutation snapshot or claim row, and is never exported. Another live unconsumed claim and a stale compare-and-set revision fail closed; an expired unconsumed claim may be replaced. If a claim was already consumed by an exact persisted attempt but its advance response was lost, the 200 response returns that attempt for a durable exact advance and never issues a second claim.
       parameters:
         - in: path
           name: sessionId
@@ -728,7 +728,7 @@ paths:
               additionalProperties: false
       responses:
         '201': { description: Current block started and claim issued, content: { application/json: { schema: { $ref: '#/components/schemas/AdaptiveSessionStartResult' } } } }
-        '200': { description: Exact immutable start response replayed, content: { application/json: { schema: { $ref: '#/components/schemas/AdaptiveSessionStartResult' } } } }
+        '200': { description: Exact immutable start response replayed, or a consumed exact attempt returned for durable recovery without a new claim, content: { application/json: { schema: { $ref: '#/components/schemas/AdaptiveSessionStartResult' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { description: Owner-bound session or block was not found }
@@ -1584,6 +1584,14 @@ components:
             topicId: { type: integer, enum: [3, 4, 18] }
           additionalProperties: false
         - type: object
+          required: [version, kind, screenId, section]
+          properties:
+            version: { type: string, enum: [adaptive-launch-v1] }
+            kind: { type: string, enum: [exam_workflow] }
+            screenId: { type: string, enum: [scr3] }
+            section: { type: string, enum: [grammar_19_24] }
+          additionalProperties: false
+        - type: object
           required: [version, kind, screenId, mode]
           properties:
             version: { type: string, enum: [adaptive-launch-v1] }
@@ -1775,7 +1783,7 @@ components:
       additionalProperties: false
     AdaptiveSessionEvent:
       type: object
-      required: [id, session_id, event_type, block_id, block_kind, module, skill_id, activity_id, source_type, source_ref, evidence_quality, planned_minutes, actual_minutes, created_at]
+      required: [id, session_id, event_type, block_id, block_kind, module, skill_id, activity_id, source_type, source_ref, evidence_quality, evidence_context, planned_minutes, actual_minutes, created_at]
       properties:
         id: { type: string, format: uuid }
         session_id: { type: string, format: uuid }
@@ -1788,13 +1796,14 @@ components:
         source_type: { type: string, enum: [module, writing, speaking], nullable: true }
         source_ref: { type: string, nullable: true }
         evidence_quality: { type: string, enum: [client_reported, server_verified_unassisted, server_verified_assisted], nullable: true }
+        evidence_context: { type: string, enum: [exam_practice, planned_practice, scheduled_review, ai_assisted_review], nullable: true }
         planned_minutes: { type: integer, minimum: 0 }
         actual_minutes: { type: integer, minimum: 0, nullable: true }
         created_at: { type: string, format: date-time }
       additionalProperties: false
     AdaptiveSessionCompletedBlock:
       type: object
-      required: [blockId, kind, module, skillId, activityId, plannedMinutes, actualMinutes, attempt, evidenceQuality]
+      required: [blockId, kind, module, skillId, activityId, plannedMinutes, actualMinutes, attempt, evidenceQuality, evidenceContext]
       properties:
         blockId: { type: string }
         kind: { type: string, enum: [learning, break] }
@@ -1805,6 +1814,7 @@ components:
         actualMinutes: { type: integer, minimum: 0, nullable: true }
         attempt: { type: object, nullable: true, additionalProperties: true }
         evidenceQuality: { type: string, enum: [client_reported, server_verified_unassisted, server_verified_assisted], nullable: true }
+        evidenceContext: { type: string, enum: [exam_practice, planned_practice, scheduled_review, ai_assisted_review], nullable: true }
       additionalProperties: false
     AdaptiveSessionNextAction:
       type: object
@@ -1817,7 +1827,7 @@ components:
       additionalProperties: false
     AdaptiveSessionSummary:
       type: object
-      required: [completedBlocks, completedLearningBlocks, plannedLearningMinutes, actualLearningMinutes, actualMinutesComplete, evidenceByQuality, nextRecommendedAction]
+      required: [completedBlocks, completedLearningBlocks, plannedLearningMinutes, actualLearningMinutes, actualMinutesComplete, evidenceByQuality, evidenceByContext, completedWork, planChange, nextRecommendedAction]
       properties:
         completedBlocks: { type: integer, minimum: 0 }
         completedLearningBlocks: { type: integer, minimum: 0 }
@@ -1825,11 +1835,40 @@ components:
         actualLearningMinutes: { type: integer, minimum: 0 }
         actualMinutesComplete: { type: boolean }
         evidenceByQuality: { type: object, additionalProperties: { type: integer, minimum: 0 } }
+        evidenceByContext: { type: object, additionalProperties: { type: integer, minimum: 0 } }
+        completedWork:
+          type: array
+          items:
+            type: object
+            required: [blockId, module, skillId, activityId, activityLabel, plannedMinutes, actualMinutes, evidenceQuality, evidenceContext]
+            properties:
+              blockId: { type: string }
+              module: { type: string }
+              skillId: { type: string }
+              activityId: { type: string }
+              activityLabel: { type: string }
+              plannedMinutes: { type: integer, minimum: 0 }
+              actualMinutes: { type: integer, minimum: 0, nullable: true }
+              evidenceQuality: { type: string, enum: [client_reported, server_verified_unassisted, server_verified_assisted], nullable: true }
+              evidenceContext: { type: string, enum: [exam_practice, planned_practice, scheduled_review, ai_assisted_review], nullable: true }
+            additionalProperties: false
+        planChange:
+          type: object
+          required: [planRevisionBefore, planRevisionAfter, changed]
+          properties:
+            planRevisionBefore: { type: integer, minimum: 0 }
+            planRevisionAfter: { type: integer, minimum: 0 }
+            changed: { type: boolean }
+          additionalProperties: false
         nextRecommendedAction: { $ref: '#/components/schemas/AdaptiveSessionNextAction' }
       additionalProperties: false
     AdaptiveSessionStartResult:
+      oneOf:
+        - $ref: '#/components/schemas/AdaptiveSessionClaimStartResult'
+        - $ref: '#/components/schemas/AdaptiveSessionRecoveryStartResult'
+    AdaptiveSessionClaimStartResult:
       type: object
-      required: [session, execution, block, launch, executionClaim, claimExpiresAt]
+      required: [session, execution, block, launch, executionClaim, claimExpiresAt, evidenceContext]
       properties:
         session: { $ref: '#/components/schemas/AdaptiveLearningSession' }
         execution: { $ref: '#/components/schemas/AdaptiveSessionExecution' }
@@ -1837,6 +1876,31 @@ components:
         launch: { type: object, additionalProperties: true }
         executionClaim: { type: string, minLength: 32, maxLength: 200 }
         claimExpiresAt: { type: string, format: date-time }
+        evidenceContext: { type: string, enum: [exam_practice, planned_practice, scheduled_review, ai_assisted_review] }
+      additionalProperties: false
+    AdaptiveSessionRecoveryStartResult:
+      type: object
+      required: [session, execution, block, launch, evidenceContext, recoveryAttempt]
+      properties:
+        session: { $ref: '#/components/schemas/AdaptiveLearningSession' }
+        execution: { $ref: '#/components/schemas/AdaptiveSessionExecution' }
+        block: { $ref: '#/components/schemas/AdaptiveSessionBlock' }
+        launch: { type: object, additionalProperties: true }
+        evidenceContext: { type: string, enum: [exam_practice, planned_practice, scheduled_review, ai_assisted_review] }
+        recoveryAttempt:
+          oneOf:
+            - type: object
+              required: [type, id]
+              properties:
+                type: { type: string, enum: [module] }
+                id: { type: string, format: uuid }
+              additionalProperties: false
+            - type: object
+              required: [type, id]
+              properties:
+                type: { type: string, enum: [writing, speaking] }
+                id: { type: integer, minimum: 1 }
+              additionalProperties: false
       additionalProperties: false
     AdaptiveSessionAdvanceResult:
       type: object

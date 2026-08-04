@@ -30,7 +30,7 @@ const MAX_ASSISTED_OBSERVATIONS_PER_SKILL = 3;
 const SKILLS = [
   { id: 'ege.vocabulary.lexical_choice', label: 'Лексический выбор', module: 'vocabulary', egeWeight: 0.8, recommendedBlockMinutes: 10, activityIds: ['lexical_choice', 'vocabulary_choice', 'vocabulary', 'vocabulary_lexical_choice_topic_1', 'vocabulary_lexical_choice_topic_6'] },
   { id: 'ege.vocabulary.word_formation', label: 'Словообразование', module: 'vocabulary', egeWeight: 0.8, recommendedBlockMinutes: 10, activityIds: ['word_formation', 'vocabulary_word_formation'] },
-  { id: 'ege.grammar.forms', label: 'Грамматические формы', module: 'grammar', egeWeight: 1, recommendedBlockMinutes: 15, activityIds: ['grammar_19_24', 'grammar_forms', 'grammar_forms_topic_3', 'grammar_forms_topic_4'] },
+  { id: 'ege.grammar.forms', label: 'Грамматические формы', module: 'grammar', egeWeight: 1, recommendedBlockMinutes: 15, activityIds: ['grammar_19_24', 'grammar_forms', 'grammar_forms_topic_3', 'grammar_forms_topic_4', 'grammar_forms_exam_19_24'] },
   { id: 'ege.grammar.transformations', label: 'Грамматические преобразования', module: 'grammar', egeWeight: 0.9, recommendedBlockMinutes: 15, activityIds: ['grammar_25_29', 'grammar_transformations', 'grammar_transformations_topic_18'] },
   { id: 'ege.reading.gist', label: 'Основная мысль текста', module: 'reading', egeWeight: 0.8, recommendedBlockMinutes: 15, activityIds: ['reading_gist', 'reading_headings'] },
   { id: 'ege.reading.detail', label: 'Детальное понимание текста', module: 'reading', egeWeight: 1, recommendedBlockMinutes: 20, activityIds: ['reading_detail', 'reading'] },

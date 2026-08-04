@@ -25,6 +25,7 @@ import {
   adaptiveDiagnosticClaimExpiresAt,
 } from '../adaptive-learning/diagnostic-claims.js';
 import { adaptiveLearningPlanRepositoryDto } from '../adaptive-learning/plan-dto.js';
+import { adaptiveSpeakingTask } from '../public/adaptive-speaking-tasks.js';
 import {
   adaptiveLearningSessionPublicDto,
   adaptiveLearningSessionRepositoryDto,
@@ -35,7 +36,9 @@ import {
 } from '../adaptive-learning/session.js';
 import {
   adaptiveCompletedBlockDto,
+  adaptiveConsumedClaimAttempt,
   adaptiveExecutionEventExportDto,
+  adaptiveExecutionRequestHash,
   adaptiveExecutionSummary,
   adaptiveExecutionTokenHash,
   adaptiveExecutionView,
@@ -110,6 +113,57 @@ function reconcileLegacyApprovedRuleCards(cards) {
   return changed;
 }
 
+function validAdaptiveRecoverySnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object'
+    || Object.hasOwn(snapshot, 'executionClaim') || Object.hasOwn(snapshot, 'executionClaimId')
+    || !snapshot.session || !snapshot.execution || !snapshot.block || !snapshot.launch
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu
+      .test(String(snapshot.session.id || ''))
+    || !/^asb_[0-9a-f]{16}_[0-9]{2}$/u.test(String(snapshot.block.id || ''))
+    || !Number.isInteger(Number(snapshot.execution.revision)) || Number(snapshot.execution.revision) < 0
+    || !['exam_practice', 'planned_practice', 'scheduled_review', 'ai_assisted_review']
+      .includes(snapshot.evidenceContext)) return false;
+  const attempt = snapshot.recoveryAttempt;
+  if (!attempt || typeof attempt !== 'object' || Object.keys(attempt).sort().join(',') !== 'id,type') {
+    return false;
+  }
+  if (attempt.type === 'module') {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu
+      .test(String(attempt.id || ''));
+  }
+  return ['writing', 'speaking'].includes(attempt.type)
+    && Number.isSafeInteger(Number(attempt.id)) && Number(attempt.id) > 0;
+}
+
+function sanitizeLegacyAdaptiveExecution(state, now = Date.now()) {
+  let changed = false;
+  const hmacClaimIds = new Set(state.adaptive_learning_session_mutations
+    .filter((mutation) => mutation?.operation === 'start'
+      && !Object.hasOwn(mutation.response_snapshot || {}, 'executionClaim')
+      && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu
+        .test(String(mutation.response_snapshot?.executionClaimId || '')))
+    .map((mutation) => mutation.response_snapshot.executionClaimId));
+  for (const claim of state.adaptive_learning_execution_claims) {
+    if (claim && !claim.revoked_at && !hmacClaimIds.has(claim.id)) {
+      claim.consumed_at = null;
+      claim.attempt_type = null;
+      claim.attempt_ref = null;
+      claim.revoked_at = now;
+      changed = true;
+    }
+  }
+  const safeMutations = state.adaptive_learning_session_mutations.filter((mutation) => (
+    mutation?.operation !== 'start'
+      || hmacClaimIds.has(mutation.response_snapshot?.executionClaimId)
+      || validAdaptiveRecoverySnapshot(mutation.response_snapshot)
+  ));
+  if (safeMutations.length !== state.adaptive_learning_session_mutations.length) {
+    state.adaptive_learning_session_mutations = safeMutations;
+    changed = true;
+  }
+  return changed;
+}
+
 export function createFileRepository(filePath) {
   let loaded = false;
   let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, subscription_entitlements: {}, voice_tutor_sessions: [], voice_tutor_recoveries: [], voice_tutor_repeats: [], voice_tutor_repeat_attempts: [], voice_tutor_reports: [], rule_cards: [], payment_requests: {}, subscription_events: [], adaptive_learning_goals: [], adaptive_learning_profiles: {}, adaptive_learning_skill_estimates: {}, adaptive_learning_plan_revisions: [], adaptive_learning_sessions: [], adaptive_learning_execution_claims: [], adaptive_learning_session_events: [], adaptive_learning_session_mutations: [], adaptive_diagnostic_sessions: [], adaptive_diagnostic_start_claims: [], adaptive_diagnostic_responses: [] };
@@ -178,7 +232,10 @@ export function createFileRepository(filePath) {
           adaptive_diagnostic_responses: Array.isArray(parsed.adaptive_diagnostic_responses) ? parsed.adaptive_diagnostic_responses : [],
         };
         const reconciledLegacyCanonical = reconcileLegacyApprovedRuleCards(state.rule_cards);
-        if (minimizedLegacyCapsule || reconciledLegacyCanonical) await persist();
+        const sanitizedLegacyAdaptiveExecution = sanitizeLegacyAdaptiveExecution(state);
+        if (minimizedLegacyCapsule || reconciledLegacyCanonical || sanitizedLegacyAdaptiveExecution) {
+          await persist();
+        }
       }
     } catch (error) {
       if (error.code !== 'ENOENT') throw error;
@@ -1336,6 +1393,7 @@ export function createFileRepository(filePath) {
       id,
       username,
       task_type: input.taskType,
+      source_task_ref: input.sourceTaskRef || null,
       assignment: structuredClone(input.assignment),
       answer: input.answer,
       evaluated_answer: input.evaluatedAnswer ?? input.answer,
@@ -1370,7 +1428,7 @@ export function createFileRepository(filePath) {
   async function createSpeakingAttempt(username, input, promptVersion) {
     await load();
     const id = (state.speaking_attempts.at(-1)?.id || 0) + 1;
-    state.speaking_attempts.push({ id, username, task_type: input.taskType, assignment: structuredClone(input.assignment), transcript: input.transcript, prompt_version: promptVersion, model: null, status: 'pending', created_at: Date.now() });
+    state.speaking_attempts.push({ id, username, task_type: input.taskType, assignment: structuredClone(input.assignment), assignment_fingerprint: adaptiveExecutionRequestHash(input.assignment), transcript: input.transcript, prompt_version: promptVersion, model: null, status: 'pending', created_at: Date.now() });
     await persist();
     return id;
   }
@@ -1950,16 +2008,44 @@ export function createFileRepository(filePath) {
       const block = row.blocks.find((item) => item.id === candidate.blockId);
       if (!block || block.kind !== 'learning') throw new Error('ADAPTIVE_SESSION_BLOCK_NOT_LAUNCHABLE');
       const instant = new Date(candidate.now).getTime();
+      let consumedClaim = null;
       for (const claim of state.adaptive_learning_execution_claims) {
-        if (claim.username === username && claim.session_id === row.id && !claim.consumed_at && !claim.revoked_at) {
-          if (Number(claim.expires_at) > instant) throw new Error('ADAPTIVE_SESSION_BLOCK_ALREADY_STARTED');
-          claim.revoked_at = instant;
+        if (claim.username !== username || claim.session_id !== row.id || claim.block_id !== block.id
+          || claim.revoked_at) continue;
+        if (claim.consumed_at) {
+          if (consumedClaim) throw new Error('ADAPTIVE_SESSION_BLOCK_ALREADY_STARTED');
+          consumedClaim = claim;
+          continue;
         }
+        if (Number(claim.expires_at) > instant) {
+          throw new Error('ADAPTIVE_SESSION_BLOCK_ALREADY_STARTED');
+        }
+        claim.revoked_at = instant;
+      }
+      if (consumedClaim) {
+        const recoveryAttempt = adaptiveConsumedClaimAttempt(consumedClaim);
+        if (!recoveryAttempt
+          || candidate.recoveryResponseSnapshot?.execution?.revision !== Number(row.execution_revision || 0)
+          || candidate.recoveryResponseSnapshot?.block?.id !== block.id
+          || 'executionClaim' in (candidate.recoveryResponseSnapshot || {})
+          || 'executionClaimId' in (candidate.recoveryResponseSnapshot || {})) {
+          throw new Error('ADAPTIVE_SESSION_EXECUTION_SNAPSHOT_INVALID');
+        }
+        const recoverySnapshot = {
+          ...structuredClone(candidate.recoveryResponseSnapshot), recoveryAttempt,
+        };
+        addAdaptiveMutation(username, { ...candidate, operation: 'start' }, recoverySnapshot);
+        await persist();
+        return {
+          created: false, replayed: false, recovered: true,
+          responseSnapshot: structuredClone(recoverySnapshot),
+        };
       }
       const nextRevision = Number(row.execution_revision || 0) + 1;
       if (candidate.responseSnapshot?.execution?.revision !== nextRevision
         || candidate.responseSnapshot?.block?.id !== block.id
-        || candidate.responseSnapshot?.executionClaim !== candidate.token
+        || candidate.responseSnapshot?.executionClaimId !== candidate.claimId
+        || JSON.stringify(candidate.responseSnapshot).includes(candidate.token)
         || adaptiveExecutionTokenHash(candidate.token) !== candidate.tokenHash
         || candidate.responseSnapshot?.claimExpiresAt !== new Date(candidate.expiresAt).toISOString()) {
         throw new Error('ADAPTIVE_SESSION_EXECUTION_SNAPSHOT_INVALID');
@@ -1972,6 +2058,7 @@ export function createFileRepository(filePath) {
         session_execution_revision: nextRevision,
         token_hash: candidate.tokenHash,
         launch_fingerprint: adaptiveLaunchFingerprint(block),
+        evidence_context: candidate.evidenceContext,
         issued_at: instant,
         expires_at: new Date(candidate.expiresAt).getTime(),
         consumed_at: null,
@@ -2006,7 +2093,8 @@ export function createFileRepository(filePath) {
     if (block.kind === 'break') {
       if (attempt != null) throw new Error('ADAPTIVE_SESSION_BREAK_ATTEMPT_FORBIDDEN');
       return {
-        source_type: null, source_ref: null, evidence_quality: null, actual_minutes: null,
+        source_type: null, source_ref: null, evidence_quality: null, evidence_context: null,
+        actual_minutes: null,
       };
     }
     if (!attempt) throw new Error('ADAPTIVE_SESSION_ATTEMPT_REQUIRED');
@@ -2016,7 +2104,8 @@ export function createFileRepository(filePath) {
       && entry.consumed_at && !entry.revoked_at
     ));
     if (!claim) throw new Error('ADAPTIVE_SESSION_ATTEMPT_NOT_BOUND');
-    if (claim.launch_fingerprint !== adaptiveLaunchFingerprint(block)) {
+    if (claim.launch_fingerprint !== adaptiveLaunchFingerprint(block)
+      || Number(claim.session_execution_revision) !== Number(row.execution_revision || 0)) {
       throw new Error('ADAPTIVE_SESSION_ATTEMPT_MISMATCH');
     }
     if (attempt.type === 'module') {
@@ -2031,19 +2120,26 @@ export function createFileRepository(filePath) {
       }
       return {
         source_type: 'module', source_ref: source.id,
-        evidence_quality: source.evidence_quality,
+        evidence_quality: source.evidence_quality, evidence_context: claim.evidence_context,
         actual_minutes: source.duration_ms == null ? null : Math.max(0, Math.round(source.duration_ms / 60_000)),
       };
     }
     const source = attempt.type === 'writing'
       ? state.writing_attempts.find((item) => item.username === username && Number(item.id) === Number(attempt.id))
       : state.speaking_attempts.find((item) => item.username === username && Number(item.id) === Number(attempt.id));
-    if (!source || source.status !== 'completed' || Number(source.created_at) < Number(claim.issued_at)) {
+    const expectedSpeaking = attempt.type === 'speaking' ? adaptiveSpeakingTask(block.contentRef) : null;
+    const exactTask = attempt.type === 'writing'
+      ? source?.source_task_ref === block.launch?.taskId
+      : expectedSpeaking?.taskNumber === Number(source?.task_type)
+        && source?.assignment_fingerprint === adaptiveExecutionRequestHash(expectedSpeaking.assignment);
+    if (!source || source.status !== 'completed' || Number(source.created_at) < Number(claim.issued_at)
+      || !exactTask) {
       throw new Error('ADAPTIVE_SESSION_ATTEMPT_MISMATCH');
     }
     return {
       source_type: attempt.type, source_ref: String(source.id),
-      evidence_quality: 'server_verified_assisted', actual_minutes: null,
+      evidence_quality: 'server_verified_assisted', evidence_context: claim.evidence_context,
+      actual_minutes: null,
     };
   }
 
@@ -2100,6 +2196,7 @@ export function createFileRepository(filePath) {
         source_type: source.source_type,
         source_ref: source.source_ref,
         evidence_quality: source.evidence_quality,
+        evidence_context: source.evidence_context,
         planned_minutes: block.plannedMinutes,
         actual_minutes: source.actual_minutes,
         created_at: instant,
@@ -2153,7 +2250,9 @@ export function createFileRepository(filePath) {
         throw new Error('ADAPTIVE_SESSION_NOT_READY_TO_FINISH');
       }
       const nextRevision = Number(row.execution_revision || 0) + 1;
-      const summary = adaptiveExecutionSummary(row, events, candidate.nextRecommendedAction);
+      const summary = adaptiveExecutionSummary(row, events, candidate.nextRecommendedAction, {
+        planRevisionAfter: candidate.planRevisionAfter,
+      });
       if (candidate.responseSnapshot?.execution?.revision !== nextRevision
         || candidate.responseSnapshot?.session?.status !== 'completed'
         || JSON.stringify(candidate.responseSnapshot?.summary) !== JSON.stringify(summary)) {
@@ -2169,7 +2268,8 @@ export function createFileRepository(filePath) {
         id: candidate.eventId, username, session_id: row.id, sequence: events.length + 1,
         event_type: 'session_finished', block_id: null, block_kind: null, module: null,
         skill_id: null, activity_id: null, source_type: null, source_ref: null,
-        evidence_quality: null, planned_minutes: 0, actual_minutes: null, created_at: instant,
+        evidence_quality: null, evidence_context: null, planned_minutes: 0, actual_minutes: null,
+        created_at: instant,
       });
       addAdaptiveMutation(username, { ...candidate, operation: 'finish' }, candidate.responseSnapshot);
       await persist();
@@ -2484,6 +2584,9 @@ export function createFileRepository(filePath) {
           ? 'ADAPTIVE_EXECUTION_CLAIM_EXPIRED' : 'ADAPTIVE_EXECUTION_CLAIM_INVALID');
       }
       const existing = state.module_attempts.find((item) => item.id === attempt.id);
+      if (['writing', 'speaking'].includes(block.module)) {
+        throw new Error('ADAPTIVE_EXECUTION_ATTEMPT_MISMATCH');
+      }
       if (claim.consumed_at) {
         if (claim.attempt_type !== 'module' || claim.attempt_ref !== attempt.id || !existing
           || existing.username !== username || existing.module !== attempt.module
@@ -2576,8 +2679,13 @@ export function createFileRepository(filePath) {
       const expectedActivity = attempt.type === 'writing'
         ? String(source?.task_type || '')
         : `speaking_${source?.task_type}`;
+      const expectedSpeaking = attempt.type === 'speaking' ? adaptiveSpeakingTask(block.contentRef) : null;
+      const exactTask = attempt.type === 'writing'
+        ? source?.source_task_ref === block.launch?.taskId
+        : expectedSpeaking?.taskNumber === Number(source?.task_type)
+          && source?.assignment_fingerprint === adaptiveExecutionRequestHash(expectedSpeaking.assignment);
       if (!source || source.status !== 'completed' || Number(source.created_at) < Number(claim.issued_at)
-        || block.module !== attempt.type || block.activityId !== expectedActivity) {
+        || block.module !== attempt.type || block.activityId !== expectedActivity || !exactTask) {
         throw new Error('ADAPTIVE_EXECUTION_ATTEMPT_MISMATCH');
       }
       claim.consumed_at = instant;

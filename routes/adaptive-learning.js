@@ -24,6 +24,7 @@ import { adaptiveLearningSessionPublicDto } from '../adaptive-learning/session-d
 import {
   ADAPTIVE_EXECUTION_CLAIM_TTL_MS,
   adaptiveCompletedBlockDto,
+  adaptiveEvidenceContext,
   adaptiveExecutionRequestHash,
   adaptiveExecutionSummary,
   adaptiveExecutionToken,
@@ -105,16 +106,45 @@ function unsupportedDiagnosticCatalog(res) {
   return res.status(409).json({ error: { code: 'DIAGNOSTIC_CATALOG_UNSUPPORTED' } });
 }
 
+function adaptiveStartPublicSnapshot(snapshot, executionTokenSecret) {
+  if (snapshot?.recoveryAttempt) {
+    const attempt = snapshot.recoveryAttempt;
+    const validAttempt = attempt?.type === 'module'
+      ? DIAGNOSTIC_ID.test(String(attempt.id || ''))
+      : ['writing', 'speaking'].includes(attempt?.type)
+        && Number.isSafeInteger(Number(attempt.id)) && Number(attempt.id) > 0;
+    if (!validAttempt || Object.hasOwn(snapshot, 'executionClaimId')
+      || Object.hasOwn(snapshot, 'executionClaim')
+      || !snapshot.block || !snapshot.execution) {
+      throw new Error('ADAPTIVE_SESSION_EXECUTION_SNAPSHOT_INVALID');
+    }
+    return snapshot;
+  }
+  const claimId = snapshot?.executionClaimId;
+  if (!DIAGNOSTIC_ID.test(String(claimId || ''))) {
+    throw new Error('ADAPTIVE_SESSION_EXECUTION_SNAPSHOT_INVALID');
+  }
+  const { executionClaimId, ...publicSnapshot } = snapshot;
+  return {
+    ...publicSnapshot,
+    executionClaim: adaptiveExecutionToken(executionClaimId, executionTokenSecret),
+  };
+}
+
 export function createAdaptiveLearningRoutes({
   authentication,
   db,
   now = () => new Date(),
   enabled = false,
+  executionTokenSecret,
   diagnosticRegistry = DIAGNOSTIC_REGISTRY,
   activityRegistry = ADAPTIVE_ACTIVITY_REGISTRY,
 }) {
   const router = express.Router();
   if (!enabled) return router;
+  if (typeof executionTokenSecret !== 'string' || executionTokenSecret.length < 32) {
+    throw new Error('ADAPTIVE_EXECUTION_TOKEN_CONFIG_INVALID');
+  }
   const { auth } = authentication;
   const diagnosticStartRateGate = createDiagnosticStartRateGate();
 
@@ -430,7 +460,7 @@ export function createAdaptiveLearningRoutes({
       const replay = await db.getAdaptiveLearningSessionMutationReplay(req.user, {
         operation: 'start', sessionId: req.params.sessionId, idempotencyKey, requestHash,
       });
-      if (replay) return res.json(replay);
+      if (replay) return res.json(adaptiveStartPublicSnapshot(replay, executionTokenSecret));
       const current = await db.getAdaptiveLearningSessionExecution(req.user, req.params.sessionId);
       if (!current) throw new Error('ADAPTIVE_SESSION_NOT_FOUND');
       const block = current.session.blocks.find((item) => item.id === parsed.data.blockId);
@@ -439,7 +469,8 @@ export function createAdaptiveLearningRoutes({
       }
       if (block.kind !== 'learning') throw new Error('ADAPTIVE_SESSION_BLOCK_NOT_LAUNCHABLE');
       const instant = now();
-      const token = adaptiveExecutionToken();
+      const claimId = crypto.randomUUID();
+      const token = adaptiveExecutionToken(claimId, executionTokenSecret);
       const expiresAt = new Date(instant.getTime() + ADAPTIVE_EXECUTION_CLAIM_TTL_MS);
       const execution = {
         ...current.execution,
@@ -453,17 +484,27 @@ export function createAdaptiveLearningRoutes({
         execution,
         block,
         launch: block.launch,
-        executionClaim: token,
+        executionClaimId: claimId,
         claimExpiresAt: expiresAt.toISOString(),
+        evidenceContext: adaptiveEvidenceContext(block),
+      };
+      const recoveryResponseSnapshot = {
+        session: current.session,
+        execution: current.execution,
+        block,
+        launch: block.launch,
+        evidenceContext: adaptiveEvidenceContext(block),
       };
       const saved = await db.startAdaptiveLearningSessionBlock(req.user, {
         operation: 'start', sessionId: req.params.sessionId,
         blockId: parsed.data.blockId, expectedRevision: parsed.data.expectedRevision,
-        idempotencyKey, requestHash, claimId: crypto.randomUUID(), token,
+        idempotencyKey, requestHash, claimId, token,
         tokenHash: adaptiveExecutionTokenHash(token), expiresAt, now: instant,
-        responseSnapshot,
+        evidenceContext: responseSnapshot.evidenceContext,
+        responseSnapshot, recoveryResponseSnapshot,
       });
-      return res.status(saved.created ? 201 : 200).json(saved.responseSnapshot);
+      return res.status(saved.created ? 201 : 200)
+        .json(adaptiveStartPublicSnapshot(saved.responseSnapshot, executionTokenSecret));
     } catch (error) {
       if (sessionError(res, error)) return undefined;
       return next(error);
@@ -506,6 +547,7 @@ export function createAdaptiveLearningRoutes({
         source_type: context.source.source_type,
         source_ref: context.source.source_ref,
         evidence_quality: context.source.evidence_quality,
+        evidence_context: context.source.evidence_context,
         planned_minutes: context.block.plannedMinutes,
         actual_minutes: context.source.actual_minutes,
       };
@@ -585,7 +627,11 @@ export function createAdaptiveLearningRoutes({
         sessionId: req.params.sessionId, ...parsed.data,
       });
       if (!context) throw new Error('ADAPTIVE_SESSION_NOT_FOUND');
-      const nextRecommendedAction = { type: 'create_personal_session', suggestedMinutes: 30 };
+      const currentPlan = await db.getCurrentAdaptiveLearningPlan(req.user);
+      const nextRecommendedAction = {
+        type: 'create_personal_session',
+        suggestedMinutes: Math.min(60, Math.max(15, Number(context.session.durationMinutes || 30))),
+      };
       const session = {
         ...context.session, status: 'completed', currentBlockId: null, updatedAt: instant.toISOString(),
       };
@@ -594,13 +640,16 @@ export function createAdaptiveLearningRoutes({
         status: 'completed', currentBlockId: null, readyToFinish: false,
         completedAt: instant.toISOString(),
       };
-      const summary = adaptiveExecutionSummary(context.session, context.events, nextRecommendedAction);
+      const planRevisionAfter = Number(currentPlan?.revision || context.session.planRevision || 0);
+      const summary = adaptiveExecutionSummary(context.session, context.events, nextRecommendedAction, {
+        planRevisionAfter,
+      });
       const responseSnapshot = { session, execution, summary, nextAction: nextRecommendedAction };
       const saved = await db.finishAdaptiveLearningSession(req.user, {
         operation: 'finish', sessionId: req.params.sessionId,
         expectedRevision: parsed.data.expectedRevision,
         idempotencyKey, requestHash, eventId: crypto.randomUUID(), now: instant,
-        nextRecommendedAction, responseSnapshot,
+        nextRecommendedAction, planRevisionAfter, responseSnapshot,
       });
       return res.json(saved.responseSnapshot);
     } catch (error) {

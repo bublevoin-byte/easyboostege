@@ -184,6 +184,7 @@ test('frontend dispatcher consumes the shared descriptor vocabulary without eval
   assert.match(source, /isAdaptiveLaunchDescriptor/u);
   assert.match(source, /case 'vocabulary_practice'/u);
   assert.match(source, /case 'grammar_practice'/u);
+  assert.match(source, /case 'exam_workflow'/u);
   assert.match(source, /case 'writing_task'/u);
   assert.doesNotMatch(source, /eval\(|new Function|window\[[^\]]+\]/u);
 });
@@ -191,7 +192,7 @@ test('frontend dispatcher consumes the shared descriptor vocabulary without eval
 test('OpenAPI documents the exact strict launch descriptor union and block metadata', async () => {
   const openapi = await fs.readFile(new URL('../docs/openapi.yaml', import.meta.url), 'utf8');
   assert.match(openapi, /AdaptiveActivityLaunch:/u);
-  for (const kind of ['vocabulary_practice', 'grammar_practice', 'reading_mode', 'listening_mode', 'writing_task', 'speaking_task']) {
+  for (const kind of ['vocabulary_practice', 'grammar_practice', 'exam_workflow', 'reading_mode', 'listening_mode', 'writing_task', 'speaking_task']) {
     assert.match(openapi, new RegExp(`kind: \\{ type: string, enum: \\[${kind}\\]`, 'u'));
   }
   assert.match(openapi, /required: \[version, kind, screenId/u);
@@ -199,6 +200,39 @@ test('OpenAPI documents the exact strict launch descriptor union and block metad
   assert.match(openapi, /content_coverage_fallback/u);
   assert.doesNotMatch(openapi, /matching lazy-loaded activity screen/u);
   assert.match(openapi, /required: \[id, position, kind, module, skillId, skillLabel, activityId, activityLabel/u);
+});
+
+test('the grammar exam launches fixed built-in content and reports through the adaptive claim', async () => {
+  const contract = await fs.readFile(new URL('../public/adaptive-activity-contract.js', import.meta.url), 'utf8');
+  const grammar = await fs.readFile(new URL('../public/screens/grammar.js', import.meta.url), 'utf8');
+  assert.match(contract, /activityId: 'grammar_forms_exam_19_24'/u);
+  assert.match(contract, /contentRef: 'builtin:exam:grammar:19-24:v1'/u);
+  assert.match(grammar, /adaptive\?G_EXAMS\[0\]/u);
+  assert.match(grammar, /completeAdaptiveModuleActivity\(\{module:'grammar',activityId:'grammar_forms_exam_19_24'/u);
+  assert.match(grammar, /function launchGrammarExam\(contentRef\)/u);
+});
+
+test('adaptive Speaking keeps the exact assignment locked through recording and review', async () => {
+  const speaking = await fs.readFile(new URL('../public/screens/speaking.js', import.meta.url), 'utf8');
+  assert.match(speaking, /function adaptiveSpeakingLock\(\)/u);
+  assert.match(speaking, /if\(!SP\.adaptiveContentRef\)spNextSet\(SP\.t\)/u);
+  assert.match(speaking, /function spRestartAdaptive\(\).*SP\.evaluating.*launchSpeakingTask\(taskNumber,contentRef\)/u);
+  assert.match(speaking, /id="adaptive_speaking_retry"/u);
+  assert.match(speaking, /if\(retry\)retry\.style\.display='none'/u);
+  assert.match(speaking, /SP\.evaluating=true;if\(adaptiveRetry\)adaptiveRetry\.disabled=true/u);
+  assert.match(speaking, /\(SP\.adaptiveContentRef\s*\n\s*\?'.*adaptive_speaking_retry/su);
+  assert.match(speaking, /:\s*'<div style="height:10px;"><\/div>'\+spBtn\('Ещё раз'/u);
+});
+
+test('execution hardening migrates legacy plaintext starts and keeps context labels factual', async () => {
+  const migration = await fs.readFile(new URL('../migrations/036_adaptive_execution_hardening.sql', import.meta.url), 'utf8');
+  const execution = await fs.readFile(new URL('../adaptive-learning/session-execution.js', import.meta.url), 'utf8');
+  assert.match(migration, /UPDATE adaptive_learning_execution_claims claim\s+SET consumed_at = NULL,[\s\S]+revoked_at = NOW\(\)/u);
+  assert.match(migration, /legacy claim, consumed or not/u);
+  assert.match(migration, /response_snapshot \? 'recoveryAttempt'/u);
+  assert.match(migration, /DELETE FROM adaptive_learning_session_mutations\s+WHERE operation = 'start'/u);
+  assert.match(migration, /exam_practice.*planned_practice.*scheduled_review.*ai_assisted_review/su);
+  assert.doesNotMatch(execution, /timed_unassisted|ordinary_unassisted|hinted_or_repeated/u);
 });
 
 function randomizedEligiblePlan(seed) {
@@ -322,10 +356,9 @@ test('create candidate recomputes the canonical preview fingerprint and determin
   const registeredTamper = structuredClone(session);
   const block = registeredTamper.blocks.find((item) => (
     item.kind === 'learning' && item.skillId === 'ege.grammar.forms'
-      && item.activityId === 'grammar_forms_topic_3'
   ));
   const alternative = ADAPTIVE_ACTIVITY_REGISTRY.activities.find((item) => (
-    item.activityId === 'grammar_forms_topic_4'
+    item.skillId === 'ege.grammar.forms' && item.activityId !== block.activityId
   ));
   for (const key of [
     'activityId', 'activityLabel', 'contentRef', 'difficulty', 'modality', 'requiresAudio',

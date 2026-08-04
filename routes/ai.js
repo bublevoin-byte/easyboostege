@@ -105,7 +105,13 @@ export function createAiRoutes({ authentication, access, db }) {
     if (record.operation !== operation) {
       throw Object.assign(new Error('Идентификатор задания не соответствует типу работы.'), { status: 400, code: 'TASK_TYPE_MISMATCH' });
     }
-    return { taskType, answer, taskId: String(record.id), assignment: assignmentFor(operation, record.content) };
+    return {
+      taskType,
+      answer,
+      taskId: String(record.id),
+      sourceTaskRef: record.externalId || String(record.id),
+      assignment: assignmentFor(operation, record.content),
+    };
   }
 
   router.post('/api/v1/ai/evaluate-writing', auth, requireActiveSubscription, requirePrivacyConsent('text_processing'), requireAiBudget, writingLimiter, async (req, res, next) => {

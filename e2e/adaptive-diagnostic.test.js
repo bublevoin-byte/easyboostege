@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
+import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -93,6 +94,9 @@ async function runAdaptiveDiagnosticE2E() {
   let browser;
   let child;
   let context;
+  let examContext;
+  let writerContext;
+  let providerServer;
   let temporaryDirectory;
   try {
     temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-adaptive-e2e-'));
@@ -100,11 +104,93 @@ async function runAdaptiveDiagnosticE2E() {
     const baseUrl = `http://127.0.0.1:${port}`;
     const dataFile = path.join(temporaryDirectory, 'data.json');
     const jwtSecret = 'adaptive-e2e-secret-with-at-least-32-characters';
+    const providerPort = await findAvailablePort();
+    const providerCalls = [];
+    providerServer = http.createServer((request, response) => {
+      const chunks = [];
+      request.on('data', (chunk) => chunks.push(chunk));
+      request.on('end', () => {
+        providerCalls.push(request.url);
+        const review = {
+          words: 110, in_range: true, overall_got: 4, overall_max: 6,
+          verdict: 'Изолированный браузерный разбор готов', sub: 'Проверь связность абзацев',
+          criteria: [
+            { name: 'Решение коммуникативной задачи', got: 2, max: 2 },
+            { name: 'Организация текста', got: 1, max: 2 },
+            { name: 'Языковое оформление', got: 1, max: 2 },
+          ],
+          errors: [],
+        };
+        response.writeHead(200, { 'Content-Type': 'application/json' });
+        response.end(JSON.stringify({
+          choices: [{ message: { content: JSON.stringify(review) } }],
+          usage: { prompt_tokens: 90, completion_tokens: 40 },
+        }));
+      });
+    });
+    await new Promise((resolve, reject) => {
+      providerServer.once('error', reject);
+      providerServer.listen(providerPort, '127.0.0.1', resolve);
+    });
+    const writerAttempts = [];
+    const writerActivities = [
+      ['vocabulary', 'vocabulary_lexical_choice_topic_1', 1],
+      ['vocabulary', 'vocabulary_word_formation', 1],
+      ['grammar', 'grammar_forms_topic_3', 1],
+      ['grammar', 'grammar_transformations_topic_18', 1],
+      ['reading', 'reading_headings', 1], ['reading', 'reading_detail', 1],
+      ['listening', 'listening_matching', 1], ['listening', 'listening_interview', 1],
+      ['writing', 'writing_37', 0], ['writing', 'writing_38', 0],
+      ['speaking', 'speaking_2', 1], ['speaking', 'speaking_4', 1],
+    ];
+    let writerAttemptIndex = 0;
+    for (const [module, activity, score] of writerActivities) for (let repeat = 0; repeat < 2; repeat += 1) {
+      writerAttemptIndex += 1;
+      writerAttempts.push({
+        id: `30000000-0000-4000-8000-${String(writerAttemptIndex).padStart(12, '0')}`,
+        username: 'adaptivewriter', module, activity, score, max_score: 1,
+        evidence_quality: 'server_verified_unassisted', created_at: Date.now() - repeat * 60_000,
+      });
+    }
+    const examAttempts = [];
+    const examActivities = writerActivities.map(([module, activity]) => [
+      module, activity, activity === 'grammar_forms_topic_3' ? 0 : 1,
+    ]);
+    let examAttemptIndex = 0;
+    for (const [module, activity, score] of examActivities) for (let repeat = 0; repeat < 2; repeat += 1) {
+      examAttemptIndex += 1;
+      examAttempts.push({
+        id: `40000000-0000-4000-8000-${String(examAttemptIndex).padStart(12, '0')}`,
+        username: 'adaptiveexam', module, activity, score, max_score: 1,
+        evidence_quality: 'server_verified_unassisted', created_at: Date.now() - repeat * 60_000,
+      });
+    }
     await fs.writeFile(dataFile, JSON.stringify({
       users: {
-        adaptivee2e: { created: Date.now(), sub_until: Date.now() + 86_400_000 },
+        adaptivee2e: {
+          created: Date.now(), sub_until: Date.now() + 86_400_000,
+          privacy_consent: {
+            text_processing: true, voice_processing: true,
+            policy_version: '2026-08-02-voice-v1', updated_at: new Date().toISOString(),
+          },
+        },
+        adaptiveexam: {
+          created: Date.now(), sub_until: Date.now() + 86_400_000,
+          privacy_consent: {
+            text_processing: true, voice_processing: true,
+            policy_version: '2026-08-02-voice-v1', updated_at: new Date().toISOString(),
+          },
+        },
+        adaptivewriter: {
+          created: Date.now(), sub_until: Date.now() + 86_400_000,
+          privacy_consent: {
+            text_processing: true, voice_processing: true,
+            policy_version: '2026-08-02-voice-v1', updated_at: new Date().toISOString(),
+          },
+        },
       },
-      progress: { adaptivee2e: {} },
+      progress: { adaptivee2e: {}, adaptiveexam: {}, adaptivewriter: {} },
+      module_attempts: [...writerAttempts, ...examAttempts],
     }));
 
     const output = [];
@@ -121,9 +207,11 @@ async function runAdaptiveDiagnosticE2E() {
         TELEGRAM_BOT_TOKEN: '',
         ADMIN_TELEGRAM_ID: '',
         ADAPTIVE_LEARNING_ENABLED: 'true',
-        XAI_ENABLED: 'false',
-        XAI_API_KEY: '',
+        XAI_ENABLED: 'true',
+        XAI_API_KEY: 'adaptive-local-e2e-key',
+        XAI_API_URL: `http://127.0.0.1:${providerPort}/xai`,
         GROQ_API_KEY: '',
+        GROQ_ENABLED: 'false',
         VOICE_TUTOR_ENABLED: 'false',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -541,19 +629,225 @@ async function runAdaptiveDiagnosticE2E() {
     const finishResult = await finishResponse.json();
     assert.equal(finishResult.session.status, 'completed');
     assert.equal(finishResult.summary.completedLearningBlocks, 1);
+    assert.equal(finishResult.summary.completedWork.length, 1);
+    assert.equal(finishResult.summary.completedWork[0].activityId, firstActivity.activityId);
+    assert.equal(finishResult.summary.completedWork[0].evidenceQuality, 'client_reported');
+    assert.ok(['planned_practice', 'scheduled_review'].includes(
+      finishResult.summary.completedWork[0].evidenceContext,
+    ));
     await page.getByText(/Занятие завершено: 1 учебных блоков/u).waitFor({
       state: 'visible', timeout: 5_000,
     });
+    assert.match(await page.locator('#adaptive_session_blocks').innerText(), new RegExp(
+      firstActivity.activityLabel.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u',
+    ));
     const currentSessionAfterFinish = await page.evaluate(async () => (
       (await fetch('/api/v1/adaptive-learning/sessions/current')).status
     ));
     assert.equal(currentSessionAfterFinish, 404);
+    const examLaunch = await page.evaluate(() => new Promise((resolve) => {
+      window.nav('scr3', () => resolve(
+        window.launchGrammarExam('builtin:exam:grammar:19-24:v1'),
+      ));
+    }));
+    assert.equal(examLaunch, true);
+    await page.locator('#scr3.on').waitFor({ state: 'visible', timeout: 5_000 });
+    assert.match(await page.locator('#g_card').innerText(), /ЗАДАНИЯ 19–24/u);
+    assert.equal(await page.locator('[id^="g_ex_"]').count(), 6);
+
+    examContext = await browser.newContext({ serviceWorkers: 'block' });
+    await examContext.route('https://**', async (route) => {
+      blockedExternalUrls.push(route.request().url());
+      await route.abort('blockedbyclient');
+    });
+    await examContext.addCookies([{
+      name: 'eb_token',
+      value: jwt.sign({ u: 'adaptiveexam' }, jwtSecret, { expiresIn: '1h' }),
+      url: baseUrl,
+      httpOnly: true,
+      sameSite: 'Lax',
+    }]);
+    const examPage = await examContext.newPage();
+    await examPage.goto(baseUrl, { waitUntil: 'networkidle' });
+    await openProgress(examPage);
+    await examPage.locator('#adaptive_target_score').fill('85');
+    await examPage.locator('#adaptive_exam_date').fill('2027-06-01');
+    await examPage.locator('#adaptive_weekly_minutes').fill('300');
+    const examGoalPromise = examPage.waitForResponse((response) => (
+      response.request().method() === 'PUT'
+        && response.url().endsWith('/api/v1/adaptive-learning/goal')
+    ));
+    await examPage.locator('#adaptive_goal_form button[type="submit"]').press('Enter');
+    assert.equal((await examGoalPromise).status(), 201);
+    await examPage.locator('#adaptive_session_custom').fill('20');
+    const examPreviewPromise = examPage.waitForResponse((response) => (
+      response.request().method() === 'POST'
+        && response.url().endsWith('/api/v1/adaptive-learning/sessions/preview')
+    ));
+    await examPage.locator('#adaptive_session_preview').press('Enter');
+    const examPreviewResponse = await examPreviewPromise;
+    assert.equal(examPreviewResponse.status(), 200);
+    const examPreview = (await examPreviewResponse.json()).preview;
+    assert.equal(examPreview.blocks[0].activityId, 'grammar_forms_exam_19_24');
+    const examCreatePromise = examPage.waitForResponse((response) => (
+      response.request().method() === 'POST'
+        && response.url().endsWith('/api/v1/adaptive-learning/sessions')
+    ));
+    await examPage.locator('#adaptive_session_create').press('Enter');
+    const examCreateResponse = await examCreatePromise;
+    assert.equal(examCreateResponse.status(), 201);
+    const examSession = (await examCreateResponse.json()).session;
+    const examBlock = examSession.blocks[0];
+    const examStartPromise = examPage.waitForResponse((response) => (
+      response.request().method() === 'POST' && response.url().endsWith('/start')
+    ));
+    await examPage.locator('#adaptive_session_start').press('Enter');
+    assert.equal((await examStartPromise).status(), 201);
+    await examPage.locator('#scr3.on').waitFor({ state: 'visible', timeout: 5_000 });
+    assert.equal(await examPage.locator('[id^="g_ex_"]').count(), 6);
+    for (let index = 0; index < 6; index += 1) await examPage.locator(`#g_ex_${index}`).fill('wrong');
+    const examAttemptPromise = examPage.waitForResponse((response) => (
+      response.request().method() === 'POST'
+        && response.url().endsWith('/api/v1/module-attempts')
+        && response.request().postDataJSON().adaptiveExecutionClaim
+    ));
+    const examAdvancePromise = examPage.waitForResponse((response) => (
+      response.request().method() === 'POST' && response.url().endsWith('/advance')
+    ));
+    await examPage.getByRole('button', { name: 'Проверить', exact: true }).press('Enter');
+    assert.equal((await examAttemptPromise).status(), 201);
+    const examAdvanceResponse = await examAdvancePromise;
+    assert.equal(examAdvanceResponse.status(), 200);
+    const examAdvance = await examAdvanceResponse.json();
+    assert.equal(examAdvance.completedBlock.activityId, examBlock.activityId);
+    assert.equal(examAdvance.completedBlock.evidenceQuality, 'client_reported');
+    assert.equal(examAdvance.completedBlock.evidenceContext, 'exam_practice');
+    await examPage.locator('#scr10.on').waitFor({ state: 'visible', timeout: 5_000 });
+    await examPage.waitForFunction(() => {
+      const button = document.getElementById('adaptive_session_start');
+      return button && !button.hidden && !button.disabled
+        && button.textContent === 'Завершить занятие';
+    });
+    const examFinishPromise = examPage.waitForResponse((response) => (
+      response.request().method() === 'POST' && response.url().endsWith('/finish')
+    ));
+    await examPage.locator('#adaptive_session_start').press('Enter');
+    const examFinishResponse = await examFinishPromise;
+    assert.equal(examFinishResponse.status(), 200);
+    const examFinish = await examFinishResponse.json();
+    assert.equal(examFinish.summary.completedWork[0].evidenceContext, 'exam_practice');
+
+    writerContext = await browser.newContext({ serviceWorkers: 'block' });
+    await writerContext.route('https://**', async (route) => {
+      blockedExternalUrls.push(route.request().url());
+      await route.abort('blockedbyclient');
+    });
+    await writerContext.addCookies([{
+      name: 'eb_token',
+      value: jwt.sign({ u: 'adaptivewriter' }, jwtSecret, { expiresIn: '1h' }),
+      url: baseUrl,
+      httpOnly: true,
+      sameSite: 'Lax',
+    }]);
+    const writerPage = await writerContext.newPage();
+    await writerPage.goto(baseUrl, { waitUntil: 'networkidle' });
+    await openProgress(writerPage);
+    await writerPage.locator('#adaptive_target_score').fill('85');
+    await writerPage.locator('#adaptive_exam_date').fill('2027-06-01');
+    await writerPage.locator('#adaptive_weekly_minutes').fill('300');
+    const writerGoalPromise = writerPage.waitForResponse((response) => (
+      response.request().method() === 'PUT'
+        && response.url().endsWith('/api/v1/adaptive-learning/goal')
+    ));
+    await writerPage.locator('#adaptive_goal_form button[type="submit"]').press('Enter');
+    assert.equal((await writerGoalPromise).status(), 201);
+
+    await writerPage.locator('#adaptive_session_custom').fill('25');
+    const writerPreviewPromise = writerPage.waitForResponse((response) => (
+      response.request().method() === 'POST'
+        && response.url().endsWith('/api/v1/adaptive-learning/sessions/preview')
+    ));
+    await writerPage.locator('#adaptive_session_preview').press('Enter');
+    const writerPreviewResponse = await writerPreviewPromise;
+    assert.equal(writerPreviewResponse.status(), 200);
+    const writerPreview = (await writerPreviewResponse.json()).preview;
+    assert.equal(writerPreview.blocks.length, 1);
+    assert.equal(writerPreview.blocks[0].activityId, 'writing_37');
+
+    const writerCreatePromise = writerPage.waitForResponse((response) => (
+      response.request().method() === 'POST'
+        && response.url().endsWith('/api/v1/adaptive-learning/sessions')
+    ));
+    await writerPage.locator('#adaptive_session_create').press('Enter');
+    const writerCreateResponse = await writerCreatePromise;
+    assert.equal(writerCreateResponse.status(), 201);
+    const writerSession = (await writerCreateResponse.json()).session;
+    const writingBlock = writerSession.blocks[0];
+    assert.equal(writingBlock.contentRef, 'builtin:writing_37:emily-new-flat');
+
+    const writerStartPromise = writerPage.waitForResponse((response) => (
+      response.request().method() === 'POST' && response.url().endsWith('/start')
+    ));
+    await writerPage.locator('#adaptive_session_start').press('Enter');
+    assert.equal((await writerStartPromise).status(), 201);
+    await writerPage.locator('#scr8.on').waitFor({ state: 'visible', timeout: 5_000 });
+    assert.equal(await writerPage.getByRole('button', { name: 'Новая тема' }).count(), 0);
+    assert.equal(await writerPage.locator('#w_seg37').isDisabled(), true);
+    const lockedWritingTask = await writerPage.evaluate(() => ({
+      changed: window.wrNext(),
+      contentRef: document.getElementById('scr8').dataset.adaptiveLaunchContentRef,
+    }));
+    assert.equal(lockedWritingTask.changed, false);
+    assert.equal(lockedWritingTask.contentRef, writingBlock.contentRef);
+
+    const writingAnswer = Array.from({ length: 110 }, (_, index) => `word${index}`).join(' ');
+    await writerPage.locator('#w_editor').fill(writingAnswer);
+    const writingEvaluationPromise = writerPage.waitForResponse((response) => (
+      response.request().method() === 'POST'
+        && response.url().endsWith('/api/v1/ai/evaluate-writing')
+    ));
+    const writingAdvancePromise = writerPage.waitForResponse((response) => (
+      response.request().method() === 'POST' && response.url().endsWith('/advance')
+    ));
+    await writerPage.getByRole('button', { name: 'Проверить с ИИ' }).press('Enter');
+    assert.equal((await writingEvaluationPromise).status(), 200);
+    const writingAdvance = await writingAdvancePromise;
+    assert.equal(writingAdvance.status(), 200);
+    const writingAdvanceResult = await writingAdvance.json();
+    assert.equal(writingAdvanceResult.completedBlock.evidenceQuality, 'server_verified_assisted');
+    assert.equal(writingAdvanceResult.completedBlock.evidenceContext, 'ai_assisted_review');
+    await writerPage.locator('#scr12.on').waitFor({ state: 'visible', timeout: 5_000 });
+    await writerPage.getByText('Изолированный браузерный разбор готов').waitFor({ state: 'visible' });
+    const returnFromWriting = writerPage.locator('#adaptive_writing_return');
+    await returnFromWriting.waitFor({ state: 'visible', timeout: 5_000 });
+    assert.equal(await writerPage.locator('#scr10.on').count(), 0);
+    await returnFromWriting.press('Enter');
+    await writerPage.locator('#scr10.on').waitFor({ state: 'visible', timeout: 5_000 });
+    await writerPage.waitForFunction(() => {
+      const button = document.getElementById('adaptive_session_start');
+      return button && !button.hidden && !button.disabled
+        && button.textContent === 'Завершить занятие';
+    });
+
+    const writerFinishPromise = writerPage.waitForResponse((response) => (
+      response.request().method() === 'POST' && response.url().endsWith('/finish')
+    ));
+    await writerPage.locator('#adaptive_session_start').press('Enter');
+    const writerFinishResponse = await writerFinishPromise;
+    assert.equal(writerFinishResponse.status(), 200);
+    const writerFinish = await writerFinishResponse.json();
+    assert.equal(writerFinish.summary.completedWork[0].evidenceQuality, 'server_verified_assisted');
+    assert.equal(writerFinish.summary.completedWork[0].evidenceContext, 'ai_assisted_review');
+    assert.ok(providerCalls.length >= 1);
     assert.equal(blockedExternalUrls.some((url) => /x\.ai|groq|openai/u.test(url)), false);
-    console.log('adaptive e2e: diagnostic plus plan/start/activity/attempt/return/finish passed');
+    console.log('adaptive e2e: diagnostic plus client module, exam launch and exact writing execution passed');
   } finally {
+    if (writerContext) await writerContext.close();
+    if (examContext) await examContext.close();
     if (context) await context.close();
     if (browser) await browser.close();
     if (child) await stopProcess(child);
+    if (providerServer) await new Promise((resolve) => providerServer.close(resolve));
     if (temporaryDirectory) await fs.rm(temporaryDirectory, { recursive: true, force: true });
   }
 }

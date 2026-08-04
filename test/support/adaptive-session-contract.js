@@ -13,8 +13,11 @@ import {
   adaptiveCompletedBlockDto,
   adaptiveExecutionRequestHash,
   adaptiveExecutionSummary,
+  adaptiveExecutionToken,
   adaptiveExecutionTokenHash,
+  adaptiveEvidenceContext,
 } from '../../adaptive-learning/session-execution.js';
+import { adaptiveSpeakingTask } from '../../public/adaptive-speaking-tasks.js';
 
 function reverseObjectKeys(value) {
   if (Array.isArray(value)) return value.map(reverseObjectKeys);
@@ -25,7 +28,8 @@ function reverseObjectKeys(value) {
 }
 
 export async function assertAdaptiveSessionRepositoryContract(assert, repository, username) {
-  const instant = new Date('2026-08-05T09:30:00.000Z');
+  const executionTokenSecret = 'adaptive-contract-secret-32-characters';
+  const instant = new Date(Date.now() - 2 * 60 * 60_000);
   const goal = (await repository.saveAdaptiveLearningGoal(username, {
     id: crypto.randomUUID(), idempotencyKey: 'session-contract-goal-01', requestHash: '7'.repeat(64),
     targetExam: 'ege_english', targetScore: 85, examDate: '2027-06-01', weeklyMinutes: 300,
@@ -207,13 +211,15 @@ export async function assertAdaptiveSessionRepositoryContract(assert, repository
 
   let executionRevision = 0;
   let minute = 1;
+  const executionBase = instant;
   for (const block of replaced.session.blocks) {
-    const stepTime = new Date(instant.getTime() + minute * 60_000);
+    const stepTime = new Date(executionBase.getTime() + minute * 60_000);
     minute += 1;
     let attempt = null;
     if (block.kind === 'learning') {
       const current = await repository.getAdaptiveLearningSessionExecution(username, replaced.session.id);
-      const token = `shared_execution_claim_${crypto.randomBytes(24).toString('base64url')}`;
+      const claimId = crypto.randomUUID();
+      const token = adaptiveExecutionToken(claimId, executionTokenSecret);
       const expiresAt = new Date(stepTime.getTime() + 2 * 60 * 60_000);
       const startBody = { blockId: block.id, expectedRevision: executionRevision };
       const startSnapshot = {
@@ -222,13 +228,15 @@ export async function assertAdaptiveSessionRepositoryContract(assert, repository
           ...current.execution, revision: executionRevision + 1, status: 'in_progress',
           currentBlockId: block.id, startedAt: current.execution.startedAt || stepTime.toISOString(),
         },
-        block, launch: block.launch, executionClaim: token, claimExpiresAt: expiresAt.toISOString(),
+        block, launch: block.launch, executionClaimId: claimId,
+        claimExpiresAt: expiresAt.toISOString(), evidenceContext: adaptiveEvidenceContext(block),
       };
       const startCandidate = {
         operation: 'start', sessionId: replaced.session.id, ...startBody,
         idempotencyKey: `shared-execution-start-${String(block.position).padStart(2, '0')}`,
-        requestHash: adaptiveExecutionRequestHash(startBody), claimId: crypto.randomUUID(),
+        requestHash: adaptiveExecutionRequestHash(startBody), claimId,
         token, tokenHash: adaptiveExecutionTokenHash(token), expiresAt, now: stepTime,
+        evidenceContext: adaptiveEvidenceContext(block),
         responseSnapshot: startSnapshot,
       };
       const started = await repository.startAdaptiveLearningSessionBlock(username, startCandidate);
@@ -239,20 +247,73 @@ export async function assertAdaptiveSessionRepositoryContract(assert, repository
       assert.deepEqual(startReplay.responseSnapshot, startSnapshot);
       executionRevision += 1;
 
-      const attemptId = crypto.randomUUID();
-      const recorded = await repository.recordModuleAttemptWithAdaptiveClaim(username, {
-        id: attemptId, module: block.module, activity: block.activityId,
-        score: 1, maxScore: 1, durationMs: 60_000, metadata: { forged: true },
-      }, { executionClaim: token, now: new Date(stepTime.getTime() + 1_000) });
-      assert.equal(recorded.created, true);
-      assert.equal(recorded.evidenceQuality, 'client_reported');
-      assert.equal(recorded.adaptiveExecution.sessionId, replaced.session.id);
-      const claimReplay = await repository.recordModuleAttemptWithAdaptiveClaim(username, {
-        id: attemptId, module: block.module, activity: block.activityId,
-        score: 1, maxScore: 1, durationMs: 60_000, metadata: { forged: true },
-      }, { executionClaim: token, now: new Date(stepTime.getTime() + 2_000) });
-      assert.equal(claimReplay.created, false);
-      attempt = { type: 'module', id: attemptId };
+      if (block.module === 'writing') {
+        const attemptId = await repository.createWritingAttempt(username, {
+          taskType: block.activityId, sourceTaskRef: block.launch.taskId,
+          assignment: {}, answer: 'A sufficiently long contract answer.',
+        }, 'contract-writing-v1');
+        await repository.finishWritingAttempt(attemptId, {
+          status: 'completed', review: { overall_got: 1, overall_max: 6 },
+        });
+        attempt = { type: 'writing', id: attemptId };
+      } else if (block.module === 'speaking') {
+        const speaking = adaptiveSpeakingTask(block.contentRef);
+        const attemptId = await repository.createSpeakingAttempt(username, {
+          taskType: speaking.taskNumber, assignment: speaking.assignment,
+          transcript: 'A contract transcript.',
+        }, 'contract-speaking-v1');
+        await repository.finishSpeakingAttempt(attemptId, {
+          status: 'completed', review: { got: 1, max: 4 },
+        });
+        attempt = { type: 'speaking', id: attemptId };
+      } else {
+        const attemptId = crypto.randomUUID();
+        const recorded = await repository.recordModuleAttemptWithAdaptiveClaim(username, {
+          id: attemptId, module: block.module, activity: block.activityId,
+          score: 1, maxScore: 1, durationMs: 60_000, metadata: { forged: true },
+        }, { executionClaim: token, now: new Date(stepTime.getTime() + 1_000) });
+        assert.equal(recorded.created, true);
+        assert.equal(recorded.evidenceQuality, 'client_reported');
+        assert.equal(recorded.adaptiveExecution.sessionId, replaced.session.id);
+        const claimReplay = await repository.recordModuleAttemptWithAdaptiveClaim(username, {
+          id: attemptId, module: block.module, activity: block.activityId,
+          score: 1, maxScore: 1, durationMs: 60_000, metadata: { forged: true },
+        }, { executionClaim: token, now: new Date(stepTime.getTime() + 2_000) });
+        assert.equal(claimReplay.created, false);
+        attempt = { type: 'module', id: attemptId };
+      }
+      if (attempt.type !== 'module') {
+        const bound = await repository.bindAdaptiveLearningServerAttempt(username, {
+          sessionId: replaced.session.id, executionClaim: token, attempt,
+          now: new Date(stepTime.getTime() + 1_000),
+        });
+        assert.equal(bound.created, true);
+        assert.equal(bound.evidenceQuality, 'server_verified_assisted');
+      }
+      const recoveryCurrent = await repository.getAdaptiveLearningSessionExecution(
+        username, replaced.session.id,
+      );
+      const recoveryBody = { blockId: block.id, expectedRevision: executionRevision };
+      const recoveryCandidate = {
+        ...startCandidate,
+        ...recoveryBody,
+        idempotencyKey: `shared-execution-recover-${String(block.position).padStart(2, '0')}`,
+        requestHash: adaptiveExecutionRequestHash(recoveryBody),
+        recoveryResponseSnapshot: {
+          session: recoveryCurrent.session,
+          execution: recoveryCurrent.execution,
+          block,
+          launch: block.launch,
+          evidenceContext: adaptiveEvidenceContext(block),
+        },
+      };
+      const recovered = await repository.startAdaptiveLearningSessionBlock(username, recoveryCandidate);
+      assert.equal(recovered.recovered, true);
+      assert.deepEqual(recovered.responseSnapshot.recoveryAttempt, attempt);
+      assert.equal(Object.hasOwn(recovered.responseSnapshot, 'executionClaimId'), false);
+      const recoveryReplay = await repository.startAdaptiveLearningSessionBlock(username, recoveryCandidate);
+      assert.equal(recoveryReplay.replayed, true);
+      assert.deepEqual(recoveryReplay.responseSnapshot, recovered.responseSnapshot);
     }
 
     await assert.rejects(repository.getAdaptiveLearningSessionAdvanceContext(username, {
@@ -268,6 +329,7 @@ export async function assertAdaptiveSessionRepositoryContract(assert, repository
       skill_id: block.skillId, activity_id: block.activityId,
       source_type: context.source.source_type, source_ref: context.source.source_ref,
       evidence_quality: context.source.evidence_quality, planned_minutes: block.plannedMinutes,
+      evidence_context: context.source.evidence_context,
       actual_minutes: context.source.actual_minutes,
     };
     const nextBlockId = context.nextBlock?.id || null;
@@ -307,7 +369,7 @@ export async function assertAdaptiveSessionRepositoryContract(assert, repository
     executionRevision += 1;
   }
 
-  const finishTime = new Date(instant.getTime() + minute * 60_000);
+  const finishTime = new Date(executionBase.getTime() + minute * 60_000);
   const finishContext = await repository.getAdaptiveLearningSessionFinishContext(username, {
     sessionId: replaced.session.id, expectedRevision: executionRevision,
   });

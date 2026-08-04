@@ -5,9 +5,9 @@
  */
 import {HIST,registerRouteHook,showScreen,tab} from '../router.js';
 import {
-  DEMO_MODE,S,SRV,TOKEN,W37,W38,apiPost,ringOff,save,setTxt,ui,writingModule,
+  DEMO_MODE,S,SRV,TOKEN,W37,W38,apiMessage,apiPost,ringOff,save,setTxt,toast,ui,writingModule,
 } from '../app.js';
-import {completeAdaptiveServerAttempt} from '../adaptive-session-runtime.js';
+import {adaptiveRuntimeSnapshot,completeAdaptiveServerAttempt,openAdaptivePlan} from '../adaptive-session-runtime.js';
 import {voiceTutorButton} from '../voice-tutor.js';
 
 const WRITE={
@@ -59,6 +59,7 @@ function wrPool(t){var ai=(S&&S.writeAi&&S.writeAi['t'+t])||[];return writingMod
 function wrIdx(t){return (t===37?(S.wIdx37||0):(S.wIdx38||0))}
 function wrCur(){return writingModule.current(wrPool(curTask),wrIdx(curTask))}
 function wrKey(){return writingModule.draftKey(curTask,wrIdx(curTask))}
+function adaptiveWritingLock(){var active=adaptiveRuntimeSnapshot().active;return active&&active.module==='writing'?active:null}
 function launchWritingTask(taskType,taskId){
   if(![37,38].includes(taskType)||typeof taskId!=='string')return false;
   var pool=wrPool(taskType),index=pool.findIndex(function(task){return task&&task.id===taskId});
@@ -67,7 +68,7 @@ function launchWritingTask(taskType,taskId){
   curTask=taskType;W_SHEET=false;save();setTask(taskType);
   return Boolean(wrCur()&&wrCur().id===taskId);
 }
-function wrNext(){if(curTask===37)S.wIdx37=(S.wIdx37||0)+1;else S.wIdx38=(S.wIdx38||0)+1;
+function wrNext(){if(adaptiveWritingLock()){try{toast('В персональном занятии закреплена эта тема. Сначала заверши её.')}catch(_){}return false}if(curTask===37)S.wIdx37=(S.wIdx37||0)+1;else S.wIdx38=(S.wIdx38||0)+1;
   W_SHEET=false;save();setTask(curTask);wrGen()}
 function wrSheet(){W_SHEET=!W_SHEET;setTask(curTask)}
 function wrHistHtml(){var ws=(S.works||[]).slice(-3).reverse();
@@ -101,10 +102,10 @@ const W_SHEET38='<div style="font-weight:800;font-size:10px;letter-spacing:1.2px
  +'<b>5. Вывод + твоё мнение:</b> <i>In conclusion, I strongly believe that sport plays an important role in teenagers\u0027 lives.</i><br><br>'
  +'<b>Перед отправкой проверь:</b> 200–250 слов · мнение только во вступлении и выводе · пять абзацев на месте.</div>';
 /* — перерисовка карточки задания — */
-function setTask(n){curTask=n;var d=WRITE[n],tp=wrCur();
+function setTask(n){var lock=adaptiveWritingLock();if(lock){n=lock.activityId==='writing_37'?37:38;var exact=wrPool(n).findIndex(function(task){return task&&task.id===lock.contentRef});if(exact>=0){if(n===37)S.wIdx37=exact;else S.wIdx38=exact}}curTask=n;var d=WRITE[n],tp=wrCur();
   var s37=document.getElementById('w_seg37'),s38=document.getElementById('w_seg38');
-  if(s37)s37.setAttribute('style',n===37?SEG_ON:SEG_OFF);
-  if(s38)s38.setAttribute('style',n===38?SEG_ON:SEG_OFF);
+  if(s37){s37.disabled=Boolean(lock);s37.setAttribute('style',(n===37?SEG_ON:SEG_OFF)+(lock?'pointer-events:none;opacity:.72;':''))}
+  if(s38){s38.disabled=Boolean(lock);s38.setAttribute('style',(n===38?SEG_ON:SEG_OFF)+(lock?'pointer-events:none;opacity:.72;':''))}
   setTxt('w_tasklabel',n===37?'ЗАДАНИЕ 37 · ПИСЬМО ДРУГУ':'ЗАДАНИЕ 38 · ПРОЕКТ С ДАННЫМИ');
   var th=document.getElementById('w_tablehint');if(th)th.style.display='none';
   var p=document.getElementById('w_prompt');
@@ -118,7 +119,7 @@ function setTask(n){curTask=n;var d=WRITE[n],tp=wrCur();
         +tp.rows.map(function(r){return '<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #F0E9E0;font-weight:600;font-size:12.5px;color:#4A453E;"><span>'+r[0]+'</span><b style="color:#C2421B;">'+r[1]+'%</b></div>'}).join('')+'</div>';
     }
     h+='<div style="margin-top:11px;display:flex;gap:8px;">'
-      +'<button type="button" class="clk sq iconbtn" onclick="wrNext()" style="flex:1;text-align:center;background:#FFEDE4;border-radius:13px;padding:9px 0;font-weight:800;font-size:12px;color:#C2421B;cursor:pointer;">Новая тема</button>'
+      +(lock?'':'<button type="button" class="clk sq iconbtn" onclick="wrNext()" style="flex:1;text-align:center;background:#FFEDE4;border-radius:13px;padding:9px 0;font-weight:800;font-size:12px;color:#C2421B;cursor:pointer;">Новая тема</button>')
       +'<button type="button" class="clk sq iconbtn" onclick="wrSheet()" style="flex:1;text-align:center;background:#EAF7F0;border-radius:13px;padding:9px 0;font-weight:800;font-size:12px;color:#1D7F4A;cursor:pointer;">'+(W_SHEET?'Скрыть шпаргалку':'Шпаргалка')+'</button></div>';
     if(W_SHEET)h+='<div style="margin-top:11px;background:#F2F8F4;border-radius:14px;padding:11px 13px;">'+(n===37?W_SHEET37:W_SHEET38)+'</div>';
     h+=wrHistHtml();
@@ -144,8 +145,9 @@ async function checkWriting(){
     var d=response&&response.review;
     if(!d||!d.criteria)throw new Error('bad');
     wrStore(d,n,task);
-    await completeAdaptiveServerAttempt('writing',response.attemptId);
     renderReview(d,response.evaluationScope,response.voiceTutor);S.essays=(S.essays||0)+1;save();showScreen('scr12');HIST.push('scr8');
+    completeAdaptiveServerAttempt('writing',response.attemptId).then(function(result){if(result)showAdaptiveWritingReturn()}).catch(function(error){
+      try{toast('Работа проверена и сохранена, но план пока не обновлён: '+apiMessage(error,'request'))}catch(_){}});
   }catch(e){renderReview(localReview(n,task,e.message));showScreen('scr12');HIST.push('scr8')}}
 function wrStore(d,n,task){
   S.works=writingModule.appendWork(S.works,{t:task,g:+d.overall_got||0,m:+d.overall_max||writingModule.limits(task).maxScore,n:n,ts:Date.now()});
@@ -153,6 +155,7 @@ function wrStore(d,n,task){
   S.prog=S.prog||{};S.prog.write=avg;
   setTxt('sub_write','работ: '+sum.count+' · средний '+avg+'%');
   try{setTxt('m_write',avg);ringOff('ring_write',113.1,avg)}catch(e){}}
+function showAdaptiveWritingReturn(){var host=document.getElementById('rv_err');if(!host||document.getElementById('adaptive_writing_return'))return;var button=document.createElement('button');button.id='adaptive_writing_return';button.type='button';button.className='sq';button.textContent='Вернуться к персональному плану';button.setAttribute('style','width:100%;margin-top:14px;border:0;border-radius:14px;padding:12px;background:#EAF7F0;color:#1D7F4A;font-weight:800;cursor:pointer;');button.addEventListener('click',openAdaptivePlan);host.appendChild(button)}
 /* — фоновая ИИ-генерация тем — */
 var WR_GEN=false;
 async function wrGen(){

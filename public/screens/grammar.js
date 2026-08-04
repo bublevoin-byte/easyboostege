@@ -529,10 +529,10 @@ function gExam(){var area=document.getElementById('g_area');if(!area)return;
     +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="gExamStart()">Начать</button>'
     +'<button class="sq" style="'+WBTN+'color:#B54E2F;" onclick="gMap()">← К темам</button></div>';
   gAnim('win','.32s');gExamGen()}
-function gExamStart(){var pool=gExamPool();
-  S.examIdx=(S.examIdx||0);var ex=pool[S.examIdx%pool.length];S.examIdx++;
+function gExamStart(contentRef){var adaptive=contentRef==='builtin:exam:grammar:19-24:v1';var pool=adaptive?G_EXAMS:gExamPool();
+  S.examIdx=(S.examIdx||0);var ex=adaptive?G_EXAMS[0]:pool[S.examIdx%pool.length];if(!adaptive)S.examIdx++;
   if(EX&&EX.iv)clearInterval(EX.iv);
-  EX={ex:ex,t0:Date.now(),iv:setInterval(function(){setTxt('g_today',gExamFmt(Math.floor((Date.now()-EX.t0)/1000)))},1000)};
+  EX={ex:ex,t0:Date.now(),adaptive:adaptive,iv:setInterval(function(){setTxt('g_today',gExamFmt(Math.floor((Date.now()-EX.t0)/1000)))},1000)};
   var area=document.getElementById('g_area');
   var txt='';
   ex.tx.forEach(function(seg,i){txt+=seg;
@@ -547,7 +547,7 @@ function gExamStart(){var pool=gExamPool();
     +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:9px;">'+inputs
     +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);margin-top:3px;" onclick="gExamCheck()">Проверить</button></div>';
   gAnim('win','.32s')}
-function gExamCheck(){if(!EX)return;var ex=EX.ex;
+function gExamCheck(){if(!EX)return;var ex=EX.ex,adaptive=EX.adaptive===true;
   clearInterval(EX.iv);var sec=examModule.elapsedSeconds(EX.t0,Date.now());
   var score=0,rows='',bank=[],voiceErrors=[];
   ex.gaps.forEach(function(g,i){var inp=document.getElementById('g_ex_'+i);var learnerAnswer=inp?inp.value:'';var val=gNorm(learnerAnswer);
@@ -566,7 +566,8 @@ function gExamCheck(){if(!EX)return;var ex=EX.ex;
       +(ok?'':'<div style="font-weight:600;font-size:12px;color:#777163;margin-top:4px;">'+g.e+'</div>'+voiceSlot)
       +'</div>'});
   S.exam19=examModule.record(S.exam19,score);
-  if(typeof SRV!=='undefined'&&SRV&&TOKEN&&typeof crypto!=='undefined'&&crypto.randomUUID){
+  if(adaptive){completeAdaptiveModuleActivity({module:'grammar',activityId:'grammar_forms_exam_19_24',score:score,maxScore:6,durationMs:sec*1000}).catch(function(){})}
+  else if(typeof SRV!=='undefined'&&SRV&&TOKEN&&typeof crypto!=='undefined'&&crypto.randomUUID){
     apiPost('/api/v1/module-attempts',examModule.attempt(crypto.randomUUID(),{module:'exam',activity:'grammar_19_24',score:score,maxScore:6,durationMs:sec*1000})).catch(function(){})}
   if(bank.length&&typeof SRV!=='undefined'&&SRV&&TOKEN){apiPost('/api/v1/error-bank',{errors:bank}).catch(function(){})}
   EX=null;save();gSync();
@@ -581,6 +582,7 @@ function gExamCheck(){if(!EX)return;var ex=EX.ex;
     +'<button class="sq" style="'+WBTN+'color:#B54E2F;" onclick="gMap()">К темам</button></div>';
   voiceErrors.forEach(function(details){registerVoiceTutorError(details).then(function(recorded){var slot=document.getElementById(details.slotId);if(slot&&recorded)slot.innerHTML=voiceTutorButton(recorded)}).catch(function(){})});
   gAnim('win','.32s');gExamGen()}
+function launchGrammarExam(contentRef){if(contentRef!=='builtin:exam:grammar:19-24:v1')return false;gExamStart(contentRef);return true}
 /* фоновая генерация новых экзаменационных текстов */
 var G_EXGEN=false;
 async function gExamGen(){
@@ -615,6 +617,6 @@ registerScreenGenerator('scr3',genGrammar);
 
 /* Имена для обработчиков этого экрана: загрузчик кладёт их на window вместе с чанком. */
 export {
-  gAfterExplain,gExam,gExamCheck,gExamStart,gMap,gOpen,gPick,gResume,gReview,gStart,gSubmit,
+  gAfterExplain,gExam,gExamCheck,gExamStart,gMap,gOpen,gPick,gResume,gReview,gStart,gSubmit,launchGrammarExam,
   gTheory,gToThemes,
 };

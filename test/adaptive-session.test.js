@@ -107,6 +107,7 @@ async function withApp(run, { registry } = {}) {
   app.use(express.json());
   app.use(createAdaptiveLearningRoutes({
     authentication: authentication(), db: repository, enabled: true, now: () => new Date(NOW),
+    executionTokenSecret: 'adaptive-test-token-secret-32-characters',
     activityRegistry: registry,
   }));
   app.use((error, req, res, next) => res.status(500).json({ error: { code: error.message } }));
@@ -282,6 +283,9 @@ test('progress screen exposes accessible duration, preview, replacement and real
   assert.match(source, /beginAdaptiveBlock\(session,block,execution\)/u);
   assert.match(source, /advanceAdaptiveBreak\(session,block,execution\)/u);
   assert.match(source, /finishAdaptiveSession\(session,execution\)/u);
+  assert.match(source, /summary\.completedWork/u);
+  assert.match(source, /adaptiveEvidenceContextLabels/u);
+  assert.match(source, /summary\.planChange\.planRevisionBefore/u);
   assert.match(source, /нет точного встроенного задания/u);
   assert.match(apiSource, /ADAPTIVE_SESSION_COVERAGE_GAP/u);
   assert.match(apiSource, /нельзя составить занятие выбранной длительности/u);
@@ -306,13 +310,14 @@ test('session API, storage and retention contracts are documented', async () => 
   assert.match(openapi, /AdaptiveLearningSession:/u);
   assert.match(schema, /034_adaptive_learning_sessions\.sql/u);
   assert.match(schema, /035_adaptive_session_execution\.sql/u);
+  assert.match(schema, /036_adaptive_execution_hardening\.sql/u);
   assert.match(schema, /adaptive_learning_sessions/u);
   assert.match(schema, /adaptive_learning_execution_claims/u);
   assert.match(schema, /adaptive_learning_session_events/u);
-  assert.match(schema, /vocabulary_practice\|grammar_practice/u);
+  assert.match(schema, /vocabulary_practice\|grammar_practice\|exam_workflow/u);
   assert.match(schema, /content_coverage_fallback/u);
   assert.match(retention, /Адаптивные учебные сессии и события исполнения/u);
   assert.match(retention, /не более 2 часов/u);
-  assert.match(retention, /20 КБ/u);
+  assert.match(retention, /30 КБ/u);
   assert.match(retention, /без исходных ответов, эссе, transcript и audio/u);
 });

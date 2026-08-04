@@ -208,7 +208,7 @@ enum reason/status, timestamps и review audit. PostgreSQL create+bind provision
 `adaptive_learning_plan_revisions`, хранит версии composer/content/taxonomy, начало UTC-недели,
 точную длительность, структурированный снимок недельного бюджета и только opaque server-owned
 activity/content references с проверенным `adaptive-launch-v1` descriptor. Descriptor — строгий union
-`vocabulary_practice|grammar_practice|reading_mode|listening_mode|writing_task|speaking_task`: он содержит
+`vocabulary_practice|grammar_practice|exam_workflow|reading_mode|listening_mode|writing_task|speaking_task`: он содержит
 только allowlisted screen/mode/topic/task identity и вызывается соответствующим экраном задания.
 `vocabulary_practice` открывает реальную очередь `scr2` из `EGE_WORDS`/SRS в режиме lexical choice;
 word formation не выдаётся за готовый consumer и остаётся явным `coverageGaps`. Его доля получает
@@ -239,10 +239,13 @@ mutation queue. Повтор key для другой сессии владель
 
 `adaptive_learning_execution_claims` хранит только SHA-256 от короткоживущего opaque token,
 owner/session/block/revision, fingerprint точного launch descriptor, срок действия и одно связанное
-attempt reference. Сам token не хранится в claim row; exact start replay остаётся только во внутреннем
-mutation response snapshot и не попадает в журнал, экспорт или release evidence. Claim нельзя
+attempt reference. Сам token не хранится ни в claim row, ни во внутреннем mutation response snapshot:
+snapshot содержит только UUID claim, а exact start replay реконструирует тот же bearer через
+domain-separated HMAC серверного секрета. Bearer не попадает в журнал, экспорт или release evidence. Claim нельзя
 перенести между владельцами, блоками, активностями или ревизиями; истёкший/отозванный claim не создаёт
-доказательство. Для server-owned writing/speaking repository дополнительно проверяет completed status,
+доказательство. Если claim уже связан с точной попыткой, но ответ `advance` потерян, повторный `start`
+возвращает эту же attempt reference без нового claim; browser сохраняет durable recovery-control до вызова `advance`.
+Для server-owned writing/speaking repository дополнительно проверяет completed status,
 task identity и создание попытки после выдачи claim.
 
 `adaptive_learning_session_events` — append-only allowlisted журнал `block_completed|session_finished`:
@@ -253,3 +256,15 @@ model response. Уникальности `(session_id, sequence)` и `(session_i
 snapshot для `start|advance|finish`; они внутренние и не экспортируются. PostgreSQL owner lock и
 file mutation queue обеспечивают одинаковый CAS/replay contract. Все три таблицы удаляются каскадно
 вместе с владельцем; экспорт включает только session events.
+
+Миграция `036_adaptive_execution_hardening.sql` добавляет фактический педагогический контекст
+`exam_practice|planned_practice|scheduled_review|ai_assisted_review` в claim и событие. Контекст не
+утверждает, что работа была новой, на время или без подсказок, и не повышает качество клиентской
+самопроверки. Миграция отвязывает attempt reference и отзывает все legacy bearer claims, включая consumed,
+затем удаляет только legacy start snapshots с открытм bearer. Так старая Writing/Speaking-привязка без exact-task полей не блокирует
+сессию: блок можно безопасно запустить заново. Повторный запуск миграции сохраняет новые HMAC claims по claim-id-only snapshot.
+Она также фиксирует точную server-owned привязку: writing
+attempt хранит `source_task_ref`, speaking attempt — fingerprint канонического assignment. Поэтому
+completed ответ того же типа, но к другой карточке, не может завершить блок. PostgreSQL читает
+current/advance/finish контексты в `REPEATABLE READ`, а конкурирующие mutations придерживаются порядка
+блокировок owner → session/claim, чтобы не смешивать ревизии и не создавать deadlock с удалением владельца.

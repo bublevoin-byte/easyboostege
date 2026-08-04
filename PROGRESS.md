@@ -842,7 +842,7 @@ Type-mode vocabulary больше не показывает accepted word в к�
 миграция 030 с file/PostgreSQL parity.
 ## Adaptive EGE Learning Plan (implementation started 2026-08-04)
 
-Status: tickets 01–05 are complete on `feature/adaptive-learning-plan`. The feature is stacked on the completed Voice Tutor branch and will not be pushed, merged or deployed without a separate owner decision.
+Status: tickets 01–05 are complete on `feature/adaptive-learning-plan`; Tickets 06–08 remain. The feature is stacked on the completed Voice Tutor branch and will not be pushed, merged or deployed without a separate owner decision.
 
 Agreed product contract: target EGE score/date is primary; a short diagnostic or existing evidence builds a confidence-labelled micro-skill profile; an honest forecast and stable weekly budget feed 15–120 minute executable sessions; real module outcomes update the living plan; free/base/Premium boundaries are server-enforced. CEFR/IELTS is secondary and approximate, not an official IELTS result.
 
@@ -1009,25 +1009,28 @@ disposable PostgreSQL 11/11, Chromium E2E, lint/check, frontend build, both secr
 `git diff --check`; no paid calls, push, deploy or staging changes.
 
 Ticket 05 implementation complete: a learner now starts the persisted session through a server-issued,
-two-hour opaque execution claim tied to the exact current block. Grammar, vocabulary, reading, listening,
-writing and speaking consumers receive only the allowlisted launch context and report completion through
-their existing persisted attempts. Client-supplied module metadata cannot mint trusted evidence; writing
-and speaking bind only completed server-owned reviews. Breaks advance without an attempt, while every
-learning block requires a matching owner-bound attempt before a compare-and-swap advance. Start, bind,
-advance and finish are idempotent, reject stale claims and block order changes, and use the same contract
-in file and PostgreSQL repositories. Explicit finish is available only after every block event is stored.
+two-hour opaque execution claim tied to the exact current block. The bearer is reconstructed by a
+domain-separated HMAC and is absent from claim rows, mutation snapshots, export and evidence. Grammar,
+vocabulary, reading, listening, writing, speaking and the fixed grammar exam consumer receive only an
+allowlisted launch context and report completion through an existing persisted attempt. Browser-scored
+module evidence remains `client_reported`; factual `exam_practice`, `planned_practice`, `scheduled_review`
+or `ai_assisted_review` context is stored on a separate axis and never claims unseen, timed, unassisted or
+retention work. Writing/Speaking accept only a completed server-owned review of the exact canonical task.
 
-After each learning block the server recomputes the evidence-backed profile and stable plan, then returns
-the completed block, evidence quality, profile change, plan change and next action. The progress screen
-restores authoritative execution state, marks current/completed work and shows those changes. A bounded
-local execution envelope supports lossless offline retry of the exact attempt/bind/advance request; it
-never fabricates server completion or navigates back before confirmation, and invalid/tampered envelopes
-fail closed. Migration 035 stores hashed claims, immutable block events and idempotency mutations without
-copying answers, essays, transcripts, audio or plaintext claims; export includes allowlisted events, while
-account deletion removes all execution state.
+Start, advance and finish use owner-global immutable idempotency replays and CAS in both repositories.
+The owner-bound, three-hour browser runtime durably preserves start/break/finish, the exact
+attempt → bind → advance queue and a consumed-attempt recovery operation. If the attempt committed but
+the response was lost, a later start returns that same attempt for an exact durable advance without
+minting a second claim or attempt. Migration 036 revokes and detaches every legacy plaintext claim,
+including consumed Writing/Speaking rows that lack new exact-task fields, while an idempotent rerun keeps
+post-upgrade HMAC claims. Writing and Speaking cannot switch topic/assignment while a personal block is
+active; the paid review remains on screen until an explicit return to the plan. The final screen lists
+completed work, actual/planned time, evidence quality/context, plan revision change and next action.
 
-Real Chromium verifies diagnostic → plan → start → real listening activity → persisted attempt → return
-to the updated plan → explicit finish with provider access disabled. Final verification: targeted execution
-and runtime tests 16/16; full suite 624 pass with 11 expected no-URL PostgreSQL skips (635 total);
-disposable PostgreSQL 11/11; real Chromium E2E; lint/check, frontend build, both secret scans and
-`git diff --check`. No paid provider call, push, deploy or staging mutation.
+Real Chromium now covers diagnostic and keyboard flow, a real client module, direct fixed exam launch,
+the full persisted exam block, and exact Writing launch → local fake AI review → explicit return → finish.
+Every external HTTPS provider is blocked during the run. Final gates: targeted execution/runtime
+16/16; full suite 636 pass plus 11 expected no-URL PostgreSQL skips (647 total); disposable PostgreSQL
+11/11; real Chromium E2E; lint/check, 17-asset frontend build, 407-file secret scan, 253-commit history
+scan and `git diff --check`. Independent Standards and Spec re-reviews both passed with zero P0–P2.
+No paid provider call, push, merge, deploy or staging mutation.

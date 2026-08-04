@@ -3,12 +3,33 @@ import crypto from 'node:crypto';
 export const ADAPTIVE_EXECUTION_VERSION = 'adaptive-execution-v1';
 export const ADAPTIVE_EXECUTION_CLAIM_TTL_MS = 2 * 60 * 60 * 1000;
 
-export function adaptiveExecutionToken() {
-  return crypto.randomBytes(32).toString('base64url');
+export function adaptiveExecutionToken(claimId, secret) {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(String(claimId || ''))
+    || typeof secret !== 'string' || secret.length < 32) {
+    throw new Error('ADAPTIVE_EXECUTION_TOKEN_CONFIG_INVALID');
+  }
+  return crypto.createHmac('sha256', secret)
+    .update(`easyboost:adaptive-execution:v1:${claimId}`)
+    .digest('base64url');
 }
 
 export function adaptiveExecutionTokenHash(token) {
   return crypto.createHash('sha256').update(String(token)).digest('hex');
+}
+
+export function adaptiveConsumedClaimAttempt(claim) {
+  if (!claim?.consumed_at || claim.revoked_at) return null;
+  const type = String(claim.attempt_type || '');
+  const reference = String(claim.attempt_ref || '');
+  if (type === 'module'
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(reference)) {
+    return { type, id: reference };
+  }
+  if (['writing', 'speaking'].includes(type)
+    && /^\d+$/u.test(reference) && Number.isSafeInteger(Number(reference)) && Number(reference) > 0) {
+    return { type, id: Number(reference) };
+  }
+  return null;
 }
 
 export function adaptiveExecutionRequestHash(value) {
@@ -28,6 +49,14 @@ export function adaptiveLaunchFingerprint(block) {
     contentRef: block.contentRef,
     launch: block.launch,
   });
+}
+
+export function adaptiveEvidenceContext(block) {
+  if (!block || block.kind !== 'learning') return null;
+  if (['writing', 'speaking'].includes(block.module)) return 'ai_assisted_review';
+  if (block.launch?.kind === 'exam_workflow') return 'exam_practice';
+  if ((block.reasonCodes || []).includes('due_review')) return 'scheduled_review';
+  return 'planned_practice';
 }
 
 export function adaptiveExecutionView(session, events = []) {
@@ -60,22 +89,46 @@ export function adaptiveExecutionEventExportDto(event) {
     source_type: event.source_type ?? null,
     source_ref: event.source_ref ?? null,
     evidence_quality: event.evidence_quality ?? null,
+    evidence_context: event.evidence_context ?? null,
     planned_minutes: Number(event.planned_minutes || 0),
     actual_minutes: event.actual_minutes == null ? null : Number(event.actual_minutes),
     created_at: timestamp(event.created_at),
   };
 }
 
-export function adaptiveExecutionSummary(session, events, nextRecommendedAction) {
+export function adaptiveExecutionSummary(session, events, nextRecommendedAction, {
+  planRevisionAfter = null,
+} = {}) {
   const completed = events.filter((event) => event.event_type === 'block_completed');
   const learning = completed.filter((event) => event.block_kind === 'learning');
   const actual = learning.filter((event) => event.actual_minutes != null);
   const evidenceByQuality = {};
+  const evidenceByContext = {};
   for (const event of learning) {
     if (event.evidence_quality) {
       evidenceByQuality[event.evidence_quality] = (evidenceByQuality[event.evidence_quality] || 0) + 1;
     }
+    if (event.evidence_context) {
+      evidenceByContext[event.evidence_context] = (evidenceByContext[event.evidence_context] || 0) + 1;
+    }
   }
+  const blockById = new Map((session.blocks || []).map((block) => [block.id, block]));
+  const completedWork = learning.map((event) => {
+    const block = blockById.get(event.block_id);
+    return {
+      blockId: event.block_id,
+      module: event.module,
+      skillId: event.skill_id,
+      activityId: event.activity_id,
+      activityLabel: block?.activityLabel || event.activity_id,
+      plannedMinutes: Number(event.planned_minutes || 0),
+      actualMinutes: event.actual_minutes == null ? null : Number(event.actual_minutes),
+      evidenceQuality: event.evidence_quality,
+      evidenceContext: event.evidence_context,
+    };
+  });
+  const planRevisionBefore = Number(session.plan_revision ?? session.planRevision ?? 0);
+  const finalPlanRevision = Number(planRevisionAfter ?? planRevisionBefore);
   return {
     completedBlocks: completed.length,
     completedLearningBlocks: learning.length,
@@ -83,6 +136,13 @@ export function adaptiveExecutionSummary(session, events, nextRecommendedAction)
     actualLearningMinutes: actual.reduce((sum, event) => sum + Number(event.actual_minutes), 0),
     actualMinutesComplete: actual.length === learning.length,
     evidenceByQuality,
+    evidenceByContext,
+    completedWork,
+    planChange: {
+      planRevisionBefore,
+      planRevisionAfter: finalPlanRevision,
+      changed: finalPlanRevision > planRevisionBefore,
+    },
     nextRecommendedAction,
   };
 }
@@ -126,6 +186,7 @@ export function adaptiveCompletedBlockDto(event) {
       ? { type: event.source_type, id: String(event.source_ref) }
       : null,
     evidenceQuality: event.evidence_quality ?? null,
+    evidenceContext: event.evidence_context ?? null,
   };
 }
 

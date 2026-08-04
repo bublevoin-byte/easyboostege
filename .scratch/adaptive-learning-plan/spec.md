@@ -1,6 +1,6 @@
 # Adaptive EGE Learning Plan — Specification
 
-Status: ready-for-agent
+Status: implementation in progress (Tickets 01–05 complete)
 Date: 2026-08-04
 Base branch: `feature/voice-ege-tutor` (`cfce08b`)
 
@@ -66,6 +66,14 @@ Evidence quality is ordered:
 - repeated or hinted work: weaker;
 - assisted/Voice Tutor work: useful for selecting instruction, but not proof of mastery.
 
+Trust quality and pedagogical context are separate axes. A session may record that work was planned
+practice, exam practice, a scheduled review or an AI-assisted review, but those labels do not prove
+that it was unseen, timed, unassisted or a successful retention transfer. Only a server-verifiable
+assessment protocol may assign those stronger qualities. Phase-one module scores submitted by the
+browser therefore remain low-weight `client_reported` evidence; Writing/Speaking reviews are
+server-owned but assisted. A `due_review` planning reason becomes strong retention evidence only
+after the dedicated server-owned day-1/day-7 transfer check is completed.
+
 ### Skill Estimate
 
 Each estimate exposes mastery 0–100, uncertainty 0–100, evidence count, last observed time, due state and an explanation code. With sparse evidence it is explicitly preliminary. The first implementation is transparent and rule-based; it does not claim calibrated IRT accuracy.
@@ -80,7 +88,7 @@ Visible weekly allocation changes by at most 10 percentage points per skill/modu
 
 A persisted session is generated from one plan revision and duration. It consists of ordered blocks with module, skill, activity/content reference, planned minutes and reason. Durations over 60 minutes include a break. Blocks have pedagogically meaningful minimum sizes and avoid long monotony. The learner may replace one block; the server records the replacement reason and prevents further replacements for that session.
 
-Session completion consumes actual existing module-attempt evidence; the client cannot assert mastery, score or completion without a server-owned attempt/reference.
+Session completion consumes actual existing module-attempt evidence; the client cannot assert mastery, score or completion without a server-owned attempt/reference. A short-lived owner/block/launch-bound execution claim binds that attempt. If an attempt was persisted but the final advance response was lost, start recovers the exact attempt reference and durably replays advance instead of issuing a second claim. Writing and Speaking keep the exact canonical task locked until the paid review is confirmed; their review remains visible until the learner explicitly returns to the plan.
 
 ## API and Integration Boundaries
 
@@ -91,7 +99,7 @@ The feature exposes owner-bound contracts for:
 - current goal and overview;
 - diagnostic start/current/answer/complete;
 - current profile, forecast and weekly allocation;
-- session preview/create/current/replace/advance/finish.
+- session preview/create/current/replace/start/bind-attempt/advance/finish.
 
 Exact payloads are defined ticket-by-ticket with strict Zod schemas, bounded lengths and idempotency keys for mutations. Server time and server-owned task references are authoritative.
 
@@ -103,7 +111,7 @@ The browser UI uses the current frameworkless modular/Vite architecture and can 
 - Unrealistic target: return a forecast range and concrete choices; do not guarantee success.
 - No eligible content for a block: fail closed or compose from another justified eligible skill; never invent a broken route.
 - Offline/network loss: retain the last read-only overview and queued existing attempt sync, but do not fabricate a new server plan.
-- Duplicate requests: goal, answer, session create/replace/advance/finish mutations are idempotent.
+- Duplicate requests: goal, answer, session create/replace/start/advance/finish mutations are idempotent; a consumed exact attempt is recovered without creating another attempt or claim.
 - Tampered attempt/task/session identifiers or cross-user access: reject without leaking existence.
 - Paid or external AI: never required by automated tests; provider boundaries use fakes. No paid calls in implementation.
 
@@ -168,4 +176,3 @@ Feature exposure must be controlled by configuration until content coverage, mig
 - FIPI official demos/specifications/codifiers: https://fipi.ru/ege/demoversii-specifikacii-kodifikatory
 - IES/WWC guidance on spacing and retrieval practice: https://ies.ed.gov/ncee/wwc/PracticeGuide/1
 - Council of Europe CEFR global scale: https://www.coe.int/en/web/common-European-framework-reference-languages/table-1-cefr-3.3-common-reference-levels-global-scale
-

@@ -47,6 +47,7 @@ async function withDiagnosticApp(run, { enabled = true, diagnosticRegistry } = {
   app.use(createAdaptiveLearningRoutes({
     authentication: testAuthentication(),
     db: repository,
+    executionTokenSecret: 'adaptive-test-token-secret-32-characters',
     now: () => new Date(currentTime),
     enabled,
     ...(diagnosticRegistry ? { diagnosticRegistry } : {}),

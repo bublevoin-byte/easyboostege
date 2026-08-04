@@ -38,6 +38,69 @@ test('file repository persists progress atomically', async () => {
   });
 });
 
+test('file repository upgrade revokes legacy adaptive bearers and removes plaintext start replay', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-legacy-adaptive-'));
+  const file = path.join(directory, 'data.json');
+  const claimId = '10000000-0000-4000-8000-000000000001';
+  const hmacClaimId = '10000000-0000-4000-8000-000000000002';
+  const legacyBearer = 'legacy-plaintext-adaptive-execution-bearer';
+  await fs.writeFile(file, JSON.stringify({
+    users: { legacy: { created: Date.now() } },
+    adaptive_learning_execution_claims: [{
+      id: claimId, username: 'legacy', session_id: '20000000-0000-4000-8000-000000000001',
+      block_id: 'asb_aaaaaaaaaaaaaaaa_01', consumed_at: Date.now(), revoked_at: null,
+      attempt_type: 'speaking', attempt_ref: '41',
+    }, {
+      id: hmacClaimId, username: 'legacy', session_id: '20000000-0000-4000-8000-000000000002',
+      block_id: 'asb_bbbbbbbbbbbbbbbb_01', consumed_at: null, revoked_at: null,
+    }],
+    adaptive_learning_session_mutations: [{
+      username: 'legacy', operation: 'start', idempotency_key: 'legacy-start-key',
+      response_snapshot: { executionClaim: legacyBearer },
+    }, {
+      username: 'legacy', operation: 'start', idempotency_key: 'hmac-start-key',
+      response_snapshot: { executionClaimId: hmacClaimId },
+    }, {
+      username: 'legacy', operation: 'start', idempotency_key: 'recovery-start-key',
+      session_id: '20000000-0000-4000-8000-000000000002', request_hash: 'b'.repeat(64),
+      response_snapshot: {
+        session: { id: '20000000-0000-4000-8000-000000000002' },
+        execution: { revision: 1 }, block: { id: 'asb_bbbbbbbbbbbbbbbb_01' },
+        launch: { kind: 'grammar_practice' }, evidenceContext: 'planned_practice',
+        recoveryAttempt: { type: 'module', id: '30000000-0000-4000-8000-000000000003' },
+      },
+    }],
+  }), 'utf8');
+  const repository = createFileRepository(file);
+  try {
+    assert.equal((await repository.getUser('legacy')).username, 'legacy');
+    const upgradedText = await fs.readFile(file, 'utf8');
+    const upgraded = JSON.parse(upgradedText);
+    assert.equal(upgradedText.includes(legacyBearer), false);
+    assert.ok(upgraded.adaptive_learning_execution_claims[0].revoked_at);
+    assert.equal(upgraded.adaptive_learning_execution_claims[0].consumed_at, null);
+    assert.equal(upgraded.adaptive_learning_execution_claims[0].attempt_type, null);
+    assert.equal(upgraded.adaptive_learning_execution_claims[0].attempt_ref, null);
+    assert.equal(upgraded.adaptive_learning_execution_claims[1].revoked_at, null);
+    assert.equal(upgraded.adaptive_learning_session_mutations.length, 2);
+    assert.equal(upgraded.adaptive_learning_session_mutations[0].idempotency_key, 'hmac-start-key');
+    assert.equal(upgraded.adaptive_learning_session_mutations[1].idempotency_key, 'recovery-start-key');
+    assert.deepEqual(upgraded.adaptive_learning_session_mutations[1].response_snapshot.recoveryAttempt, {
+      type: 'module', id: '30000000-0000-4000-8000-000000000003',
+    });
+    const recoveryReplay = await repository.getAdaptiveLearningSessionMutationReplay('legacy', {
+      operation: 'start', sessionId: '20000000-0000-4000-8000-000000000002',
+      idempotencyKey: 'recovery-start-key', requestHash: 'b'.repeat(64),
+    });
+    assert.deepEqual(recoveryReplay.recoveryAttempt, {
+      type: 'module', id: '30000000-0000-4000-8000-000000000003',
+    });
+  } finally {
+    await repository.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('file adaptive profile save/get expose the shared allowlisted repository DTO', async () => {
   await withRepository(async (repository) => {
     const username = await repository.createTelegramUser(1099, 'Adaptive DTO');

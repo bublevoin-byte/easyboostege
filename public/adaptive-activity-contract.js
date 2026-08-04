@@ -38,6 +38,16 @@ const activityDefinitions = [
     launch: { version: ADAPTIVE_LAUNCH_CONTRACT_VERSION, kind: 'grammar_practice', screenId: 'scr3', topicId: 4 },
   },
   {
+    skillId: 'ege.grammar.forms', activityId: 'grammar_forms_exam_19_24',
+    activityLabel: 'Экзаменационная практика: задания 19–24',
+    contentRef: 'builtin:exam:grammar:19-24:v1', minimumMinutes: 20, recommendedMinutes: 20,
+    difficulty: 4, modality: 'visual_text', requiresAudio: false, requiresMicrophone: false,
+    launch: {
+      version: ADAPTIVE_LAUNCH_CONTRACT_VERSION, kind: 'exam_workflow', screenId: 'scr3',
+      section: 'grammar_19_24',
+    },
+  },
+  {
     skillId: 'ege.grammar.transformations', activityId: 'grammar_transformations_topic_18',
     activityLabel: 'Практика грамматических преобразований: вопросы',
     contentRef: 'builtin:grammar:topic:18', minimumMinutes: 15, recommendedMinutes: 15,
@@ -123,6 +133,10 @@ export function isAdaptiveLaunchDescriptor(value) {
   if (value.kind === 'grammar_practice') {
     return exactKeys(value, ['kind', 'screenId', 'topicId', 'version'])
       && value.screenId === 'scr3' && [3, 4, 18].includes(value.topicId);
+  }
+  if (value.kind === 'exam_workflow') {
+    return exactKeys(value, ['kind', 'screenId', 'section', 'version'])
+      && value.screenId === 'scr3' && value.section === 'grammar_19_24';
   }
   if (value.kind === 'reading_mode') {
     return exactKeys(value, ['kind', 'mode', 'screenId', 'version'])

@@ -58,6 +58,7 @@ async function withAdaptiveApp(run, { enabled = true } = {}) {
   app.use(createAdaptiveLearningRoutes({
     authentication: testAuthentication(),
     db: repository,
+    executionTokenSecret: 'adaptive-test-token-secret-32-characters',
     now: () => NOW,
     enabled,
   }));

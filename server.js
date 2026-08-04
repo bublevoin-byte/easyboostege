@@ -274,6 +274,7 @@ app.use(createUserRoutes({
 app.use(createProgressRoutes({ authentication, db: dbApi }));
 app.use(createAdaptiveLearningRoutes({
   authentication, db: dbApi, enabled: config.adaptiveLearning.enabled,
+  executionTokenSecret: SECRET,
 }));
 const realtimePolicy = () => ({
   enabled: config.voiceTutor.enabled,

@@ -413,6 +413,7 @@ async function withPlanApp(run, { decorateDb } = {}) {
   app.use(createAdaptiveLearningRoutes({
     authentication: testAuthentication(), db: decorateDb ? decorateDb(repository) : repository, enabled: true,
     now: () => new Date(currentTime),
+    executionTokenSecret: 'adaptive-test-token-secret-32-characters',
   }));
   app.use((error, req, res, next) => res.status(500).json({ error: { code: error.message } }));
   const server = http.createServer(app);

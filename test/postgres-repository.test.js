@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
 import test from 'node:test';
 import pg from 'pg';
 import { createPostgresRepository } from '../storage/postgres-repository.js';
@@ -19,14 +20,119 @@ import { assertAdaptiveSessionRepositoryContract } from './support/adaptive-sess
 const connectionString = process.env.TEST_DATABASE_URL;
 
 test('PostgreSQL adaptive sessions match the shared replay, race, export and deletion contract', { skip: !connectionString }, async () => {
-  const repository = createPostgresRepository(connectionString);
+  let raceEnabled = false;
+  let releaseSnapshot;
+  let reportSnapshotReached;
+  const snapshotRelease = new Promise((resolve) => { releaseSnapshot = resolve; });
+  const snapshotReached = new Promise((resolve) => { reportSnapshotReached = resolve; });
+  const repository = createPostgresRepository(connectionString, {
+    onAdaptiveSessionSnapshot: async ({ operation }) => {
+      if (raceEnabled && operation === 'current') {
+        reportSnapshotReached();
+        await snapshotRelease;
+      }
+    },
+  });
+  const client = new pg.Client({ connectionString });
   const stamp = Date.now() + 5;
   const username = await repository.createTelegramUser(Number(`3${String(stamp).slice(-9)}`), `Session ${stamp}`);
+  await client.connect();
   try {
     await assertAdaptiveSessionRepositoryContract(assert, repository, username);
+    const recoveryReplayCount = Number((await client.query(
+      `SELECT COUNT(*)::int AS count FROM adaptive_learning_session_mutations
+       WHERE username = $1 AND operation = 'start' AND response_snapshot ? 'recoveryAttempt'`,
+      [username],
+    )).rows[0].count);
+    assert.ok(recoveryReplayCount > 0);
+    const legacyClaim = (await client.query(
+      `SELECT claim.id, claim.session_id, mutation.idempotency_key
+       FROM adaptive_learning_execution_claims claim
+       JOIN adaptive_learning_session_mutations mutation
+         ON mutation.username = claim.username
+        AND mutation.session_id = claim.session_id
+        AND mutation.operation = 'start'
+        AND mutation.response_snapshot->>'executionClaimId' = claim.id::text
+       WHERE claim.username = $1 ORDER BY claim.issued_at LIMIT 1`,
+      [username],
+    )).rows[0];
+    assert.ok(legacyClaim);
+    const legacyBearer = 'legacy-postgres-plaintext-execution-bearer';
+    await client.query(
+      `UPDATE adaptive_learning_execution_claims
+       SET consumed_at = NOW(), attempt_type = 'speaking', attempt_ref = '999999', revoked_at = NULL
+       WHERE id = $1`,
+      [legacyClaim.id],
+    );
+    await client.query(
+      `UPDATE adaptive_learning_session_mutations
+       SET response_snapshot = (response_snapshot - 'executionClaimId')
+         || jsonb_build_object('executionClaim', $2::text)
+       WHERE username = $1 AND idempotency_key = $3 AND operation = 'start'`,
+      [username, legacyBearer, legacyClaim.idempotency_key],
+    );
+    const hardeningMigration = await fs.readFile(
+      new URL('../migrations/036_adaptive_execution_hardening.sql', import.meta.url), 'utf8',
+    );
+    await client.query(hardeningMigration);
+    const migratedClaim = (await client.query(
+      'SELECT revoked_at FROM adaptive_learning_execution_claims WHERE id = $1', [legacyClaim.id],
+    )).rows[0];
+    assert.ok(migratedClaim.revoked_at, 'legacy consumed Speaking claim must be revoked during upgrade');
+    assert.equal((await client.query(
+      "SELECT 1 FROM adaptive_learning_session_mutations WHERE username = $1 AND idempotency_key = $2 AND operation = 'start'",
+      [username, legacyClaim.idempotency_key],
+    )).rowCount, 0);
+    assert.ok((await client.query(
+      `SELECT 1 FROM adaptive_learning_session_mutations
+       WHERE username = $1 AND operation = 'start' AND response_snapshot ? 'executionClaimId'`,
+      [username],
+    )).rowCount > 0, 'post-upgrade HMAC starts survive an idempotent migration rerun');
+    assert.equal(Number((await client.query(
+      `SELECT COUNT(*)::int AS count FROM adaptive_learning_session_mutations
+       WHERE username = $1 AND operation = 'start' AND response_snapshot ? 'recoveryAttempt'`,
+      [username],
+    )).rows[0].count), recoveryReplayCount, 'durable recovery starts survive a migration rerun');
+    assert.equal((await client.query(
+      'SELECT 1 FROM adaptive_learning_session_mutations WHERE response_snapshot::text LIKE $1',
+      [`%${legacyBearer}%`],
+    )).rowCount, 0);
+    const before = (await client.query(
+      `SELECT session.id, session.completion_summary,
+              (SELECT COUNT(*)::int FROM adaptive_learning_session_events event
+               WHERE event.session_id = session.id) AS event_count
+       FROM adaptive_learning_sessions session WHERE session.username = $1`,
+      [username],
+    )).rows[0];
+    raceEnabled = true;
+    const reading = repository.getAdaptiveLearningSessionExecution(username, before.id);
+    await Promise.race([
+      snapshotReached,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('SESSION_READ_SNAPSHOT_HOOK_NOT_REACHED')), 1_000)),
+    ]);
+    await client.query('BEGIN');
+    await client.query(
+      `INSERT INTO adaptive_learning_session_events
+       (id, username, session_id, sequence, event_type, planned_minutes, created_at)
+       VALUES ($1, $2, $3, $4, 'session_finished', 0, NOW())`,
+      [crypto.randomUUID(), username, before.id, before.event_count + 1],
+    );
+    await client.query(
+      `UPDATE adaptive_learning_sessions SET completion_summary = '{"race":true}'::jsonb WHERE id = $1`,
+      [before.id],
+    );
+    await client.query('COMMIT');
+    releaseSnapshot();
+    const consistent = await reading;
+    assert.deepEqual(consistent.summary, before.completion_summary);
+    assert.equal(consistent.events.length, before.event_count,
+      'session and events must come from the same MVCC snapshot');
     assert.equal(await repository.deleteUserData(username), true);
     assert.equal(await repository.getCurrentAdaptiveLearningSession(username), null);
   } finally {
+    releaseSnapshot?.();
+    await client.query('ROLLBACK').catch(() => {});
+    await client.end();
     await repository.deleteUserData(username).catch(() => {});
     await repository.close();
   }
@@ -334,6 +440,7 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
       '033_adaptive_learning_plan.sql',
       '034_adaptive_learning_sessions.sql',
       '035_adaptive_session_execution.sql',
+      '036_adaptive_execution_hardening.sql',
     ]);
 
     const username = await repository.createTelegramUser(telegramId, `Integration ${suffix}`);

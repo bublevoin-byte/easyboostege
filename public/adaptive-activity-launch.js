@@ -1,7 +1,7 @@
 import { isAdaptiveLaunchDescriptor } from './adaptive-activity-contract.js';
 import { nav } from './router.js';
 
-function consumeDescriptor(launch) {
+function consumeDescriptor(launch, contentRef) {
   switch (launch.kind) {
     case 'vocabulary_practice':
       return typeof window.launchVocabularyPractice === 'function'
@@ -10,6 +10,9 @@ function consumeDescriptor(launch) {
       if (typeof window.gStart !== 'function') return false;
       window.gStart(launch.topicId);
       return true;
+    case 'exam_workflow':
+      return typeof window.launchGrammarExam === 'function'
+        && window.launchGrammarExam(contentRef) === true;
     case 'reading_mode':
       if (launch.mode === 'headings' && typeof window.rHl === 'function') window.rHl();
       else if (launch.mode === 'detail' && typeof window.rQs === 'function') window.rQs();
@@ -24,9 +27,8 @@ function consumeDescriptor(launch) {
       return typeof window.launchWritingTask === 'function'
         && window.launchWritingTask(launch.taskType, launch.taskId) === true;
     case 'speaking_task':
-      if (typeof window.spOpen !== 'function') return false;
-      window.spOpen(launch.taskNumber);
-      return true;
+      return typeof window.launchSpeakingTask === 'function'
+        && window.launchSpeakingTask(launch.taskNumber, contentRef) === true;
     default:
       return false;
   }
@@ -46,7 +48,7 @@ export function launchAdaptiveActivity(launch, contentRef) {
     }, 8_000);
     nav(launch.screenId, () => {
       let launched = false;
-      try { launched = consumeDescriptor(launch); } catch { launched = false; }
+      try { launched = consumeDescriptor(launch, contentRef); } catch { launched = false; }
       if (launched) {
         const screen = document.getElementById(launch.screenId);
         if (screen) {

@@ -9,16 +9,18 @@ import {
   S,SRV,TOKEN,WBTN,apiMessage,apiPost,apiPostBinary,examModule,generateAiContent,save,
   setTxt,spSt,spSync,speakingModule,toast,ui,wDeco,
 } from '../app.js';
-import {completeAdaptiveServerAttempt} from '../adaptive-session-runtime.js';
+import {adaptiveRuntimeSnapshot,completeAdaptiveServerAttempt,openAdaptivePlan} from '../adaptive-session-runtime.js';
+import {adaptiveSpeakingTask} from '../adaptive-speaking-tasks.js';
 import {voiceTutorButton} from '../voice-tutor.js';
 
 /* ===== SPEAKING v2: устная часть ЕГЭ, 4 задания ===== */
 const SP1=[
 {tx:'Libraries are changing fast. Twenty years ago they were quiet places with paper books only. Today a modern library offers computers, online courses and clubs for different hobbies. People come here not only to read, but also to meet friends, work on projects or listen to interesting lectures. Many libraries stay open late in the evening, so students often do their homework there. Scientists say that such places help people of all ages to keep learning through the whole life.'},
 {tx:'Walking is the easiest kind of sport. You do not need special equipment, a gym or a trainer — only comfortable shoes. Doctors say that thirty minutes of walking a day make the heart stronger, improve sleep and even help the brain to work better. Walking with friends is also a great way to spend time together. Some schools now organise walking clubs, where students discover interesting places in their city and learn to notice the beauty around them.'}];
+const ADAPTIVE_SP2=adaptiveSpeakingTask('builtin:speaking:task:2:v1').assignment;
+const ADAPTIVE_SP4=adaptiveSpeakingTask('builtin:speaking:task:4:v1').assignment;
 const SP2=[
-{ad:'Language Summer Camp «Sunny Hills». English every day with native speakers, sports and new friends! Join us this summer!',
- points:['dates of the course','price','number of lessons a day','accommodation'],
+{...ADAPTIVE_SP2,
  exq:['When does the course start?','How much does the course cost?','How many lessons a day are there?','Where will the students live?']},
 {ad:'New Fitness Club «Energy» is open in your district! Modern gym, swimming pool and yoga classes for teenagers.',
  points:['opening hours','monthly fee','age requirements','personal trainer availability'],
@@ -27,8 +29,7 @@ const SP3=[
 {topic:'Хобби и свободное время',qs:['What do you usually do in your free time?','Why do teenagers need hobbies?','What new hobby would you like to try and why?','Do you prefer spending free time alone or with friends? Why?','What can a hobby teach a person?']},
 {topic:'Школьная жизнь',qs:['What is your favourite school subject and why?','How much time do you usually spend on homework?','What would you like to change in your school?','Why is it important to get a good education?','What are you going to do after leaving school?']}];
 const SP4=[
-{topic:'Зимние каникулы',ph:['Фото 1: семья катается на лыжах в горах в солнечный день','Фото 2: девушка читает книгу у камина дома'],
- plan:['кратко опиши обе фотографии — что на них происходит','скажи, что общего у этих фотографий','скажи, чем они различаются','скажи, какой отдых ближе тебе, и объясни почему']},
+{...ADAPTIVE_SP4},
 {topic:'Еда дома и в кафе',ph:['Фото 1: мама с сыном вместе готовят ужин на кухне','Фото 2: друзья едят пиццу в кафе'],
  plan:['кратко опиши обе фотографии','скажи, что общего у фотографий','скажи, чем они различаются','скажи, что предпочитаешь ты, и объясни почему']}];
 const SP_CONF={1:speakingModule.config(1),2:speakingModule.config(2),3:speakingModule.config(3),4:speakingModule.config(4)};
@@ -45,8 +46,11 @@ function spStopAll(){clearInterval(SP_tm);SP_tm=null;
   if(SP_rec&&SP_rec.state!=='inactive'){try{SP_rec.stop()}catch(e){}}
   try{lStop()}catch(e){}}
 function spReleaseRecording(){if(SP&&SP.url)try{URL.revokeObjectURL(SP.url)}catch(e){}if(SP){SP.url=null;SP.blob=null}SP_chunks=[]}
-function initSpeaking(){if(!S)return;spStopAll();spReleaseRecording();SP=null;spSync();spHub()}
+function adaptiveSpeakingLock(){try{var active=adaptiveRuntimeSnapshot().active;return active&&active.module==='speaking'?active:null}catch(_){return null}}
+function launchAdaptiveSpeakingLock(lock){var task=lock&&adaptiveSpeakingTask(lock.contentRef);return Boolean(task&&launchSpeakingTask(task.taskNumber,lock.contentRef))}
+function initSpeaking(){if(!S)return;var lock=adaptiveSpeakingLock();spStopAll();spReleaseRecording();SP=null;spSync();if(lock&&launchAdaptiveSpeakingLock(lock))return;spHub()}
 function spHub(){var area=document.getElementById('s9_area');if(!area)return;
+  var lock=adaptiveSpeakingLock();if(lock&&launchAdaptiveSpeakingLock(lock))return;
   var r=spSt();var GA=0;function ga(){return 'animation:win .34s '+((GA++)*0.06)+'s cubic-bezier(.25,.75,.35,1) both;'}
   var se=S.spkExam||{};
   var exCard='<button type="button" class="sq clk" onclick="spExam()" style="'+ga()+'position:relative;overflow:hidden;width:100%;border:0;text-align:left;font:inherit;border-radius:24px;padding:16px 18px;margin-bottom:12px;cursor:pointer;background:linear-gradient(150deg,#3A3532,#2B2B2B);box-shadow:0 14px 28px rgba(43,35,30,.32),inset 0 2px 3px rgba(255,255,255,.14),inset 0 -5px 10px rgba(0,0,0,.35);">'
@@ -76,8 +80,13 @@ function spHub(){var area=document.getElementById('s9_area');if(!area)return;
   setTxt('s9_today','4 задания');spGen()}
 function spPool(t){var ai=(S&&S.spkAi&&S.spkAi['p'+t])||[];return speakingModule.pool([SP1,SP2,SP3,SP4][t-1],ai)}
 function spSet(t){var k='spIdx'+t;S[k]=(S[k]||0);return speakingModule.select(spPool(t),S[k])}
-function spNextSet(t){S['spIdx'+t]=(S['spIdx'+t]||0)+1;save()}
-function spOpen(t){spReleaseRecording();SP={t:t,set:spSet(t),phase:'intro',qi:0,url:null};SP_sheet=false;spRender()}
+function spNextSet(t){if((SP&&SP.adaptiveContentRef)||adaptiveSpeakingLock()){try{toast('В персональном занятии закреплён точный вариант задания')}catch(_){}return false}S['spIdx'+t]=(S['spIdx'+t]||0)+1;save();return true}
+function spOpen(t){var lock=adaptiveSpeakingLock();if(lock)return launchAdaptiveSpeakingLock(lock);spReleaseRecording();SP={t:t,set:spSet(t),phase:'intro',qi:0,url:null};SP_sheet=false;spRender();return true}
+function launchSpeakingTask(taskNumber,contentRef){
+  var task=adaptiveSpeakingTask(contentRef);if(!task||task.taskNumber!==taskNumber)return false;
+  var set=taskNumber===2?{...task.assignment,exq:SP2[0].exq}:task.assignment;
+  spReleaseRecording();SP={t:taskNumber,set:set,phase:'intro',qi:0,url:null,adaptiveContentRef:contentRef};SP_sheet=false;spRender();return true}
+function spRestartAdaptive(){if(!SP||!SP.adaptiveContentRef||SP.evaluating)return false;var taskNumber=SP.t,contentRef=SP.adaptiveContentRef;spStopAll();return launchSpeakingTask(taskNumber,contentRef)}
 function spBtn(label,fn,solid){return '<button class="sq" style="'+WBTN+(solid?'background:linear-gradient(135deg,#FFA570,#F2683F);color:#fff;border:none;box-shadow:0 12px 24px rgba(242,104,63,.32);':'color:#B54E2F;')+'" onclick="'+fn+'">'+label+'</button>'}
 function spTimerChip(){return '<div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-top:12px;">'
   +'<span id="s9_timer" style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:34px;color:#2B2B2B;">'+spFmt(SP.left)+'</span></div>'
@@ -104,7 +113,7 @@ function spRender(){var area=document.getElementById('s9_area');if(!area||!SP)re
       +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:19px;color:#2B2B2B;margin-top:10px;">'+c.name+'</div>'
       +'<div style="margin-top:8px;">'+body+'</div>'
       +'<div style="margin-top:11px;display:flex;gap:8px;">'
-      +'<button type="button" class="clk sq iconbtn" onclick="spNextSet(SP.t);spOpen(SP.t)" style="flex:1;text-align:center;background:#FFEDE4;border-radius:13px;padding:9px 0;font-weight:800;font-size:12px;color:#C2421B;cursor:pointer;">Другой вариант</button>'
+      +(SP.adaptiveContentRef?'':'<button type="button" class="clk sq iconbtn" onclick="spNextSet(SP.t);spOpen(SP.t)" style="flex:1;text-align:center;background:#FFEDE4;border-radius:13px;padding:9px 0;font-weight:800;font-size:12px;color:#C2421B;cursor:pointer;">Другой вариант</button>')
       +'<button type="button" class="clk sq iconbtn" onclick="spToggleSheet()" style="flex:1;text-align:center;background:#EAF7F0;border-radius:13px;padding:9px 0;font-weight:800;font-size:12px;color:#1D7F4A;cursor:pointer;">'+(SP_sheet?'Скрыть шпаргалку':'Шпаргалка')+'</button></div>'
       +(SP_sheet?'<div style="margin-top:11px;background:#F2F8F4;border-radius:14px;padding:11px 13px;font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.65;">'+SP_SHEET[t]+'</div>':'')
       +'</div>'
@@ -157,8 +166,10 @@ function spRender(){var area=document.getElementById('s9_area');if(!area||!SP)re
       +(SP.t>1?'<div style="height:10px;"></div>'+spBtn('Образец ответа от ИИ','spSample(this)'):'')
       +'<div id="sp_evalbox"></div>'
       +extra
-      +'<div style="height:10px;"></div>'+spBtn('Ещё раз','spNextSet(SP.t);spOpen(SP.t)')
-      +'<div style="height:10px;"></div>'+spBtn('К заданиям','spStopAll();initSpeaking()');
+      +(SP.adaptiveContentRef
+        ?'<div style="height:10px;"></div><div style="text-align:center;font-weight:700;font-size:12.5px;color:#777163;line-height:1.5;">В персональном занятии закреплено это задание. Оцени ответ или перезапиши тот же вариант.</div><div style="height:10px;"></div><button id="adaptive_speaking_retry" class="sq" style="'+WBTN+'" onclick="spRestartAdaptive()">Записать этот вариант ещё раз</button>'
+        :'<div style="height:10px;"></div>'+spBtn('Ещё раз','spNextSet(SP.t);spOpen(SP.t)')
+          +'<div style="height:10px;"></div>'+spBtn('К заданиям','spStopAll();initSpeaking()'));
     spAnim('win','.32s');setTxt('s9_today',SP_CONF[t].name);return}}
 function spTaskBody(){var t=SP.t,set=SP.set;
   if(t===1)return '<div style="font-weight:500;font-size:13.5px;line-height:1.7;color:#2B2B2B;margin-top:10px;">'+set.tx+'</div>';
@@ -196,7 +207,7 @@ function spNextQ(){if(!SP)return;
   try{lPlayRaw([{s:1,t:SP.set.qs[SP.qi]}])}catch(e){}
   spTick(SP_CONF[3].rec,function(){SP.qi>=4?spFinish():spNextQ()})}
 function spFinish(){if(!SP)return;clearInterval(SP_tm);try{lStop()}catch(e){}
-  var r=spSt();r['t'+SP.t].n++;spNextSet(SP.t);
+  var r=spSt();r['t'+SP.t].n++;if(!SP.adaptiveContentRef)spNextSet(SP.t);
   SP.phase='done';
   if(SP_rec&&SP_rec.state!=='inactive'){try{SP_rec.stop()}catch(e){}}
   spSync();save();spRender()}
@@ -219,6 +230,7 @@ async function spSTT(blob){
 function spAssignment(t,set){return speakingModule.assignment(t,set)}
 async function spEval(btn){
   if(!SP||!SP.blob)return;
+  var adaptiveRetry=document.getElementById('adaptive_speaking_retry');SP.evaluating=true;if(adaptiveRetry)adaptiveRetry.disabled=true;
   if(btn){if(btn.dataset.busy)return;btn.dataset.busy=1;btn.textContent='Расшифровываю запись…';btn.style.pointerEvents='none'}
   try{
     var tr=await spSTT(SP.blob);
@@ -230,10 +242,12 @@ async function spEval(btn){
     var score=speakingModule.clampScore(d,SP.t);d.got=score.got;d.max=score.max;
     S.spkScores=speakingModule.appendScore(S.spkScores,{t:SP.t,g:d.got,m:d.max,ts:Date.now()});
     spSync();save();
-    await completeAdaptiveServerAttempt('speaking',response.attemptId);
     if(btn){btn.style.display='none'}
     spShowEval(d,tr,response.voiceTutor);
+    completeAdaptiveServerAttempt('speaking',response.attemptId).then(function(result){if(result)showAdaptiveSpeakingReturn()}).catch(function(error){
+      try{toast('Оценка сохранена, но план пока не обновлён: '+apiMessage(error,'request'))}catch(_){}});
   }catch(e){
+    if(SP)SP.evaluating=false;if(adaptiveRetry)adaptiveRetry.disabled=false;
     if(btn){btn.textContent='✨ Оценить с ИИ · повторить';btn.style.pointerEvents='';delete btn.dataset.busy}
     try{toast(apiMessage(e,'stt'))}catch(_){}}}
 function spShowEval(d,tr,voiceTutor){var box=document.getElementById('sp_evalbox');if(!box)return;
@@ -265,6 +279,7 @@ function spShowEval(d,tr,voiceTutor){var box=document.getElementById('sp_evalbox
     +'</div>';
   box.innerHTML=h;
   try{box.scrollIntoView({behavior:'smooth',block:'start'})}catch(e){}}
+function showAdaptiveSpeakingReturn(){var box=document.getElementById('sp_evalbox');if(!box||document.getElementById('adaptive_speaking_return'))return;var retry=document.getElementById('adaptive_speaking_retry');if(retry)retry.style.display='none';var button=document.createElement('button');button.id='adaptive_speaking_return';button.type='button';button.className='sq';button.textContent='Вернуться к персональному плану';button.setAttribute('style','width:100%;margin-top:12px;border:0;border-radius:14px;padding:12px;background:#EAF7F0;color:#1D7F4A;font-weight:800;cursor:pointer;');button.addEventListener('click',openAdaptivePlan);box.appendChild(button)}
 function spFlagTranscript(){S.sttFeedback=(S.sttFeedback||0)+1;save();try{toast('Спасибо, отметка сохранена')}catch(e){}}
 async function spSample(btn){
   if(!SP)return;var t=SP.t,set=SP.set;
@@ -289,6 +304,7 @@ function spVoiceSample(){if(!SP||!SP.sample)return;
 /* ---- этап 3: экзамен устной части целиком ---- */
 let SPE=null;
 function spExam(){var area=document.getElementById('s9_area');if(!area)return;spStopAll();SP=null;
+  var lock=adaptiveSpeakingLock();if(lock){launchAdaptiveSpeakingLock(lock);return}
   var st=S.spkExam||{};
   area.innerHTML='<div id="s9_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;">'+wDeco()
     +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#B54E2F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">КАК НА ЕГЭ</span>'
@@ -447,6 +463,6 @@ registerRouteHook(function(id){if(id==='scr9')initSpeaking()});
 export {
   SP,SPE,
   initSpeaking,spDeleteRecording,spEtalon,spEval,spExam,spFinish,spFlagTranscript,spNextQ,
-  spNextSet,spOpen,spPlay,spPrep,spRec,spSample,spStopAll,spToggleSheet,spVoiceSample,
+  launchSpeakingTask,spNextSet,spOpen,spPlay,spPrep,spRec,spRestartAdaptive,spSample,spStopAll,spToggleSheet,spVoiceSample,
   speEndStage,speNextQ,speRec,speStart,
 };

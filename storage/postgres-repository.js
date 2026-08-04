@@ -19,6 +19,7 @@ import {
   adaptiveDiagnosticClaimExpiresAt,
 } from '../adaptive-learning/diagnostic-claims.js';
 import { adaptiveLearningPlanRepositoryDto } from '../adaptive-learning/plan-dto.js';
+import { adaptiveSpeakingTask } from '../public/adaptive-speaking-tasks.js';
 import {
   adaptiveLearningSessionPublicDto,
   adaptiveLearningSessionRepositoryDto,
@@ -28,7 +29,9 @@ import {
   assertAdaptiveSessionReplacementTransition,
 } from '../adaptive-learning/session.js';
 import {
+  adaptiveConsumedClaimAttempt,
   adaptiveExecutionEventExportDto,
+  adaptiveExecutionRequestHash,
   adaptiveExecutionSummary,
   adaptiveExecutionTokenHash,
   adaptiveExecutionView,
@@ -94,6 +97,7 @@ export function createPostgresRepository(connectionString, {
   })),
   onAdaptiveProfileSnapshot = async () => {},
   onAdaptiveEvidenceSnapshot = async () => {},
+  onAdaptiveSessionSnapshot = async () => {},
 } = {}) {
   if (!connectionString) throw new Error('DATABASE_URL is required for PostgreSQL storage');
   const pool = new Pool({ connectionString, application_name: 'easyboost_repository' });
@@ -1657,11 +1661,11 @@ export function createPostgresRepository(connectionString, {
   async function createWritingAttempt(username, input, promptVersion) {
     const result = await pool.query(
       `INSERT INTO writing_attempts
-       (username, task_type, assignment, answer, evaluated_answer, prompt_version, status)
-       VALUES ($1, $2, $3::jsonb, $4, $5, $6, 'pending')
+       (username, task_type, assignment, answer, evaluated_answer, source_task_ref, prompt_version, status)
+       VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, 'pending')
        RETURNING id`,
       [username, input.taskType, JSON.stringify(input.assignment), input.answer,
-        input.evaluatedAnswer ?? input.answer, promptVersion],
+        input.evaluatedAnswer ?? input.answer, input.sourceTaskRef || null, promptVersion],
     );
     return Number(result.rows[0].id);
   }
@@ -1681,7 +1685,7 @@ export function createPostgresRepository(connectionString, {
 
   async function getWritingAttempt(username, id) {
     const result = await pool.query(
-      `SELECT id, username, task_type, assignment, answer, evaluated_answer, review, provider, model,
+      `SELECT id, username, task_type, assignment, answer, evaluated_answer, source_task_ref, review, provider, model,
               prompt_version, status, error_code, created_at, evaluated_at
        FROM writing_attempts WHERE username = $1 AND id = $2`,
       [username, id],
@@ -1691,9 +1695,11 @@ export function createPostgresRepository(connectionString, {
 
   async function createSpeakingAttempt(username, input, promptVersion) {
     const result = await pool.query(
-      `INSERT INTO speaking_attempts (username, task_type, assignment, transcript, prompt_version, status)
-       VALUES ($1, $2, $3::jsonb, $4, $5, 'pending') RETURNING id`,
-      [username, input.taskType, JSON.stringify(input.assignment), input.transcript, promptVersion],
+      `INSERT INTO speaking_attempts
+       (username, task_type, assignment, assignment_fingerprint, transcript, prompt_version, status)
+       VALUES ($1, $2, $3::jsonb, $4, $5, $6, 'pending') RETURNING id`,
+      [username, input.taskType, JSON.stringify(input.assignment),
+        adaptiveExecutionRequestHash(input.assignment), input.transcript, promptVersion],
     );
     return Number(result.rows[0].id);
   }
@@ -1710,7 +1716,7 @@ export function createPostgresRepository(connectionString, {
 
   async function getSpeakingAttempt(username, id) {
     const result = await pool.query(
-      `SELECT id, username, task_type, assignment, transcript, review, provider, model,
+      `SELECT id, username, task_type, assignment, assignment_fingerprint, transcript, review, provider, model,
               prompt_version, status, error_code, created_at, evaluated_at
        FROM speaking_attempts WHERE username = $1 AND id = $2`,
       [username, id],
@@ -2375,6 +2381,21 @@ export function createPostgresRepository(connectionString, {
     return result.rows;
   }
 
+  async function adaptiveRepeatableRead(read) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      const value = await read(client);
+      await client.query('COMMIT');
+      return value;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async function getAdaptiveLearningSessionMutationReplay(username, candidate) {
     return adaptiveMutationReplay(pool, username, candidate);
   }
@@ -2404,12 +2425,41 @@ export function createPostgresRepository(connectionString, {
       const block = row.blocks.find((item) => item.id === candidate.blockId);
       if (!block || block.kind !== 'learning') throw new Error('ADAPTIVE_SESSION_BLOCK_NOT_LAUNCHABLE');
       const active = await client.query(
-        `SELECT id, expires_at FROM adaptive_learning_execution_claims
-         WHERE username = $1 AND session_id = $2 AND consumed_at IS NULL AND revoked_at IS NULL FOR UPDATE`,
-        [username, row.id],
+        `SELECT id, expires_at, consumed_at, revoked_at, attempt_type, attempt_ref
+         FROM adaptive_learning_execution_claims
+         WHERE username = $1 AND session_id = $2 AND block_id = $3 AND revoked_at IS NULL FOR UPDATE`,
+        [username, row.id, block.id],
       );
-      if (active.rows.some((claim) => new Date(claim.expires_at) > new Date(candidate.now))) {
+      const consumedClaims = active.rows.filter((claim) => claim.consumed_at);
+      if (consumedClaims.length > 1
+        || active.rows.some((claim) => !claim.consumed_at
+          && new Date(claim.expires_at) > new Date(candidate.now))) {
         throw new Error('ADAPTIVE_SESSION_BLOCK_ALREADY_STARTED');
+      }
+      if (consumedClaims.length === 1) {
+        const recoveryAttempt = adaptiveConsumedClaimAttempt(consumedClaims[0]);
+        if (!recoveryAttempt
+          || candidate.recoveryResponseSnapshot?.execution?.revision !== Number(row.execution_revision)
+          || candidate.recoveryResponseSnapshot?.block?.id !== block.id
+          || 'executionClaim' in (candidate.recoveryResponseSnapshot || {})
+          || 'executionClaimId' in (candidate.recoveryResponseSnapshot || {})) {
+          throw new Error('ADAPTIVE_SESSION_EXECUTION_SNAPSHOT_INVALID');
+        }
+        const recoverySnapshot = {
+          ...structuredClone(candidate.recoveryResponseSnapshot), recoveryAttempt,
+        };
+        await client.query(
+          `INSERT INTO adaptive_learning_session_mutations
+           (username, idempotency_key, operation, session_id, request_hash, response_snapshot, created_at)
+           VALUES ($1, $2, 'start', $3, $4, $5::jsonb, $6)`,
+          [username, candidate.idempotencyKey, row.id, candidate.requestHash,
+            JSON.stringify(recoverySnapshot), candidate.now],
+        );
+        await client.query('COMMIT');
+        return {
+          created: false, replayed: false, recovered: true,
+          responseSnapshot: recoverySnapshot,
+        };
       }
       await client.query(
         `UPDATE adaptive_learning_execution_claims SET revoked_at = $3
@@ -2419,18 +2469,19 @@ export function createPostgresRepository(connectionString, {
       const nextRevision = Number(row.execution_revision) + 1;
       if (candidate.responseSnapshot?.execution?.revision !== nextRevision
         || candidate.responseSnapshot?.block?.id !== block.id
-        || candidate.responseSnapshot?.executionClaim !== candidate.token
+        || candidate.responseSnapshot?.executionClaimId !== candidate.claimId
+        || JSON.stringify(candidate.responseSnapshot).includes(candidate.token)
         || adaptiveExecutionTokenHash(candidate.token) !== candidate.tokenHash
         || candidate.responseSnapshot?.claimExpiresAt !== new Date(candidate.expiresAt).toISOString()) {
         throw new Error('ADAPTIVE_SESSION_EXECUTION_SNAPSHOT_INVALID');
       }
       await client.query(
         `INSERT INTO adaptive_learning_execution_claims
-         (id, username, session_id, block_id, session_execution_revision, token_hash,
-          launch_fingerprint, issued_at, expires_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          (id, username, session_id, block_id, session_execution_revision, token_hash,
+           launch_fingerprint, evidence_context, issued_at, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
         [candidate.claimId, username, row.id, block.id, nextRevision, candidate.tokenHash,
-          adaptiveLaunchFingerprint(block), candidate.now, candidate.expiresAt],
+          adaptiveLaunchFingerprint(block), candidate.evidenceContext, candidate.now, candidate.expiresAt],
       );
       await client.query(
         `UPDATE adaptive_learning_sessions
@@ -2454,24 +2505,32 @@ export function createPostgresRepository(connectionString, {
   }
 
   async function getAdaptiveLearningSessionExecution(username, sessionId) {
-    const result = await pool.query(
-      'SELECT * FROM adaptive_learning_sessions WHERE username = $1 AND id = $2',
-      [username, sessionId],
-    );
-    if (!result.rowCount) return null;
-    const events = await adaptiveSessionEvents(pool, username, sessionId);
-    return {
-      session: adaptiveLearningSessionPublicDto(result.rows[0]),
-      execution: adaptiveExecutionView(result.rows[0], events),
-      events: events.map(adaptiveExecutionEventExportDto),
-      summary: result.rows[0].completion_summary || null,
-    };
+    return adaptiveRepeatableRead(async (client) => {
+      const result = await client.query(
+        'SELECT * FROM adaptive_learning_sessions WHERE username = $1 AND id = $2',
+        [username, sessionId],
+      );
+      if (!result.rowCount) return null;
+      await onAdaptiveSessionSnapshot({
+        operation: 'current', username, sessionId, session: result.rows[0],
+      });
+      const events = await adaptiveSessionEvents(client, username, sessionId);
+      return {
+        session: adaptiveLearningSessionPublicDto(result.rows[0]),
+        execution: adaptiveExecutionView(result.rows[0], events),
+        events: events.map(adaptiveExecutionEventExportDto),
+        summary: result.rows[0].completion_summary || null,
+      };
+    });
   }
 
   async function adaptiveAdvanceSource(queryable, username, row, block, attempt) {
     if (block.kind === 'break') {
       if (attempt != null) throw new Error('ADAPTIVE_SESSION_BREAK_ATTEMPT_FORBIDDEN');
-      return { source_type: null, source_ref: null, evidence_quality: null, actual_minutes: null };
+      return {
+        source_type: null, source_ref: null, evidence_quality: null, evidence_context: null,
+        actual_minutes: null,
+      };
     }
     if (!attempt) throw new Error('ADAPTIVE_SESSION_ATTEMPT_REQUIRED');
     const claimResult = await queryable.query(
@@ -2482,7 +2541,8 @@ export function createPostgresRepository(connectionString, {
     );
     if (!claimResult.rowCount) throw new Error('ADAPTIVE_SESSION_ATTEMPT_NOT_BOUND');
     const claim = claimResult.rows[0];
-    if (claim.launch_fingerprint !== adaptiveLaunchFingerprint(block)) {
+    if (claim.launch_fingerprint !== adaptiveLaunchFingerprint(block)
+      || Number(claim.session_execution_revision) !== Number(row.execution_revision)) {
       throw new Error('ADAPTIVE_SESSION_ATTEMPT_MISMATCH');
     }
     if (attempt.type === 'module') {
@@ -2498,45 +2558,62 @@ export function createPostgresRepository(connectionString, {
       return {
         source_type: 'module', source_ref: source.rows[0].id,
         evidence_quality: source.rows[0].evidence_quality,
+        evidence_context: claim.evidence_context,
         actual_minutes: source.rows[0].duration_ms == null
           ? null : Math.max(0, Math.round(Number(source.rows[0].duration_ms) / 60_000)),
       };
     }
     const table = attempt.type === 'writing' ? 'writing_attempts' : 'speaking_attempts';
+    const exactTaskColumns = attempt.type === 'writing'
+      ? 'source_task_ref, NULL::text AS assignment_fingerprint'
+      : 'NULL::text AS source_task_ref, assignment_fingerprint';
     const source = await queryable.query(
-      `SELECT id, status, created_at FROM ${table} WHERE username = $1 AND id = $2`,
+      `SELECT id, task_type, ${exactTaskColumns}, status, created_at
+       FROM ${table} WHERE username = $1 AND id = $2`,
       [username, attempt.id],
     );
-    if (!source.rowCount || source.rows[0].status !== 'completed'
-      || new Date(source.rows[0].created_at) < new Date(claim.issued_at)) {
+    const sourceRow = source.rows[0];
+    const expectedSpeaking = attempt.type === 'speaking' ? adaptiveSpeakingTask(block.contentRef) : null;
+    const exactTask = attempt.type === 'writing'
+      ? sourceRow?.source_task_ref === block.launch?.taskId
+      : expectedSpeaking?.taskNumber === Number(sourceRow?.task_type)
+        && sourceRow?.assignment_fingerprint === adaptiveExecutionRequestHash(expectedSpeaking.assignment);
+    if (!source.rowCount || sourceRow.status !== 'completed'
+      || new Date(sourceRow.created_at) < new Date(claim.issued_at) || !exactTask) {
       throw new Error('ADAPTIVE_SESSION_ATTEMPT_MISMATCH');
     }
     return {
       source_type: attempt.type, source_ref: String(source.rows[0].id),
-      evidence_quality: 'server_verified_assisted', actual_minutes: null,
+      evidence_quality: 'server_verified_assisted', evidence_context: claim.evidence_context,
+      actual_minutes: null,
     };
   }
 
   async function getAdaptiveLearningSessionAdvanceContext(username, candidate) {
-    const result = await pool.query(
-      'SELECT * FROM adaptive_learning_sessions WHERE username = $1 AND id = $2',
-      [username, candidate.sessionId],
-    );
-    if (!result.rowCount) return null;
-    const row = result.rows[0];
-    if (Number(row.execution_revision) !== Number(candidate.expectedRevision)) {
-      throw new Error('ADAPTIVE_SESSION_REVISION_CONFLICT');
-    }
-    if (row.current_block_id !== candidate.blockId) throw new Error('ADAPTIVE_SESSION_BLOCK_NOT_CURRENT');
-    const block = row.blocks.find((item) => item.id === candidate.blockId);
-    if (!block) throw new Error('ADAPTIVE_SESSION_BLOCK_NOT_CURRENT');
-    const source = await adaptiveAdvanceSource(pool, username, row, block, candidate.attempt);
-    const events = await adaptiveSessionEvents(pool, username, row.id);
-    const nextBlock = row.blocks.find((item) => item.position === block.position + 1) || null;
-    return {
-      session: adaptiveLearningSessionPublicDto(row), execution: adaptiveExecutionView(row, events),
-      block: structuredClone(block), source, nextBlock: nextBlock ? structuredClone(nextBlock) : null,
-    };
+    return adaptiveRepeatableRead(async (client) => {
+      const result = await client.query(
+        'SELECT * FROM adaptive_learning_sessions WHERE username = $1 AND id = $2',
+        [username, candidate.sessionId],
+      );
+      if (!result.rowCount) return null;
+      const row = result.rows[0];
+      if (Number(row.execution_revision) !== Number(candidate.expectedRevision)) {
+        throw new Error('ADAPTIVE_SESSION_REVISION_CONFLICT');
+      }
+      if (row.current_block_id !== candidate.blockId) throw new Error('ADAPTIVE_SESSION_BLOCK_NOT_CURRENT');
+      const block = row.blocks.find((item) => item.id === candidate.blockId);
+      if (!block) throw new Error('ADAPTIVE_SESSION_BLOCK_NOT_CURRENT');
+      await onAdaptiveSessionSnapshot({
+        operation: 'advance', username, sessionId: candidate.sessionId, session: row,
+      });
+      const source = await adaptiveAdvanceSource(client, username, row, block, candidate.attempt);
+      const events = await adaptiveSessionEvents(client, username, row.id);
+      const nextBlock = row.blocks.find((item) => item.position === block.position + 1) || null;
+      return {
+        session: adaptiveLearningSessionPublicDto(row), execution: adaptiveExecutionView(row, events),
+        block: structuredClone(block), source, nextBlock: nextBlock ? structuredClone(nextBlock) : null,
+      };
+    });
   }
 
   async function advanceAdaptiveLearningSession(username, candidate) {
@@ -2573,14 +2650,15 @@ export function createPostgresRepository(connectionString, {
       }
       const inserted = await client.query(
         `INSERT INTO adaptive_learning_session_events
-         (id, username, session_id, sequence, event_type, block_id, block_kind, module,
-          skill_id, activity_id, source_type, source_ref, evidence_quality, planned_minutes,
-          actual_minutes, created_at)
+          (id, username, session_id, sequence, event_type, block_id, block_kind, module,
+           skill_id, activity_id, source_type, source_ref, evidence_quality, evidence_context,
+           planned_minutes, actual_minutes, created_at)
          VALUES ($1, $2, $3, $4, 'block_completed', $5, $6, $7, $8, $9, $10, $11,
-                 $12, $13, $14, $15) RETURNING *`,
+                 $12, $13, $14, $15, $16) RETURNING *`,
         [candidate.eventId, username, row.id, events.length + 1, block.id, block.kind,
           block.module, block.skillId, block.activityId, source.source_type, source.source_ref,
-          source.evidence_quality, block.plannedMinutes, source.actual_minutes, candidate.now],
+          source.evidence_quality, source.evidence_context, block.plannedMinutes,
+          source.actual_minutes, candidate.now],
       );
       await client.query(
         `UPDATE adaptive_learning_sessions
@@ -2610,17 +2688,22 @@ export function createPostgresRepository(connectionString, {
   }
 
   async function getAdaptiveLearningSessionFinishContext(username, candidate) {
-    const result = await pool.query(
-      'SELECT * FROM adaptive_learning_sessions WHERE username = $1 AND id = $2',
-      [username, candidate.sessionId],
-    );
-    if (!result.rowCount) return null;
-    const events = await adaptiveSessionEvents(pool, username, candidate.sessionId);
-    return {
-      session: adaptiveLearningSessionPublicDto(result.rows[0]),
-      execution: adaptiveExecutionView(result.rows[0], events),
-      events: events.map(adaptiveExecutionEventExportDto),
-    };
+    return adaptiveRepeatableRead(async (client) => {
+      const result = await client.query(
+        'SELECT * FROM adaptive_learning_sessions WHERE username = $1 AND id = $2',
+        [username, candidate.sessionId],
+      );
+      if (!result.rowCount) return null;
+      await onAdaptiveSessionSnapshot({
+        operation: 'finish', username, sessionId: candidate.sessionId, session: result.rows[0],
+      });
+      const events = await adaptiveSessionEvents(client, username, candidate.sessionId);
+      return {
+        session: adaptiveLearningSessionPublicDto(result.rows[0]),
+        execution: adaptiveExecutionView(result.rows[0], events),
+        events: events.map(adaptiveExecutionEventExportDto),
+      };
+    });
   }
 
   async function finishAdaptiveLearningSession(username, candidate) {
@@ -2648,7 +2731,9 @@ export function createPostgresRepository(connectionString, {
         throw new Error('ADAPTIVE_SESSION_NOT_READY_TO_FINISH');
       }
       const nextRevision = Number(row.execution_revision) + 1;
-      const summary = adaptiveExecutionSummary(row, events, candidate.nextRecommendedAction);
+      const summary = adaptiveExecutionSummary(row, events, candidate.nextRecommendedAction, {
+        planRevisionAfter: candidate.planRevisionAfter,
+      });
       if (candidate.responseSnapshot?.execution?.revision !== nextRevision
         || candidate.responseSnapshot?.session?.status !== 'completed'
         || JSON.stringify(candidate.responseSnapshot?.summary) !== JSON.stringify(summary)) {
@@ -3031,6 +3116,8 @@ export function createPostgresRepository(connectionString, {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      const owner = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+      if (!owner.rowCount) throw new Error('ADAPTIVE_EXECUTION_CLAIM_INVALID');
       const tokenHash = adaptiveExecutionTokenHash(executionClaim);
       const claimed = await client.query(
         `SELECT claim.*, session.status AS session_status,
@@ -3053,6 +3140,9 @@ export function createPostgresRepository(connectionString, {
           ? 'ADAPTIVE_EXECUTION_CLAIM_EXPIRED' : 'ADAPTIVE_EXECUTION_CLAIM_INVALID');
       }
       const existing = await client.query('SELECT * FROM module_attempts WHERE id = $1', [attempt.id]);
+      if (['writing', 'speaking'].includes(block.module)) {
+        throw new Error('ADAPTIVE_EXECUTION_ATTEMPT_MISMATCH');
+      }
       if (claim.consumed_at) {
         const row = existing.rows[0];
         if (claim.attempt_type !== 'module' || claim.attempt_ref !== attempt.id || !row
@@ -3128,6 +3218,8 @@ export function createPostgresRepository(connectionString, {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      const owner = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+      if (!owner.rowCount) throw new Error('ADAPTIVE_EXECUTION_CLAIM_INVALID');
       const claimed = await client.query(
         `SELECT claim.*, session.status AS session_status, session.current_block_id,
                 session.execution_revision, session.blocks
@@ -3162,17 +3254,25 @@ export function createPostgresRepository(connectionString, {
         };
       }
       const table = attempt.type === 'writing' ? 'writing_attempts' : 'speaking_attempts';
+      const exactTaskColumns = attempt.type === 'writing'
+        ? 'source_task_ref, NULL::text AS assignment_fingerprint'
+        : 'NULL::text AS source_task_ref, assignment_fingerprint';
       const source = await client.query(
-        `SELECT id, username, task_type, status, created_at FROM ${table}
+        `SELECT id, username, task_type, ${exactTaskColumns}, status, created_at FROM ${table}
          WHERE username = $1 AND id = $2`,
         [username, attempt.id],
       );
       const sourceRow = source.rows[0];
       const expectedActivity = attempt.type === 'writing'
         ? String(sourceRow?.task_type || '') : `speaking_${sourceRow?.task_type}`;
+      const expectedSpeaking = attempt.type === 'speaking' ? adaptiveSpeakingTask(block.contentRef) : null;
+      const exactTask = attempt.type === 'writing'
+        ? sourceRow?.source_task_ref === block.launch?.taskId
+        : expectedSpeaking?.taskNumber === Number(sourceRow?.task_type)
+          && sourceRow?.assignment_fingerprint === adaptiveExecutionRequestHash(expectedSpeaking.assignment);
       if (!sourceRow || sourceRow.status !== 'completed'
         || new Date(sourceRow.created_at) < new Date(claim.issued_at)
-        || block.module !== attempt.type || block.activityId !== expectedActivity) {
+        || block.module !== attempt.type || block.activityId !== expectedActivity || !exactTask) {
         throw new Error('ADAPTIVE_EXECUTION_ATTEMPT_MISMATCH');
       }
       await client.query(
