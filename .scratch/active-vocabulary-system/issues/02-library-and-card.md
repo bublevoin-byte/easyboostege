@@ -1,6 +1,6 @@
 # 02 — Библиотека, темы и подробная карточка
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01 — Освоение слова и мягкая миграция
 Spec: `.scratch/active-vocabulary-system/spec.md#solution`
 
@@ -15,10 +15,10 @@ Spec: `.scratch/active-vocabulary-system/spec.md#solution`
 
 ## Definition of Done
 
-- [ ] Ученик видит due/new/time до старта и может выбрать 5/10/15/20 новых слов.
-- [ ] Все начатые слова доступны сразу; фильтры и поиск сохраняются при возврате.
-- [ ] Карточка не изменяет mastery и не выдумывает отсутствующие метаданные.
-- [ ] Core и personal/generated визуально и семантически различаются.
-- [ ] Клавиатура, screen reader, 375px и reduced motion покрыты тестами.
-- [ ] `npm run lint`, `npm run check` и целевые тесты проходят.
-- [ ] Один коммит на тикет.
+- [x] Ученик видит due/new/time до старта и может выбрать 5/10/15/20 новых слов.
+- [x] Все начатые слова доступны сразу; фильтры и поиск сохраняются при возврате.
+- [x] Карточка не изменяет mastery и не выдумывает отсутствующие метаданные.
+- [x] Core и personal/generated визуально и семантически различаются.
+- [x] Клавиатура, screen reader, 375px и reduced motion покрыты тестами.
+- [x] `npm run lint`, `npm run check` и целевые тесты проходят.
+- [x] Один коммит на тикет.

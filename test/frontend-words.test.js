@@ -5,6 +5,7 @@ import vm from 'node:vm';
 
 const source = await fs.readFile(new URL('../public/modules/words.js', import.meta.url), 'utf8');
 const screenSource = await fs.readFile(new URL('../public/screens/words.js', import.meta.url), 'utf8');
+const indexSource = await fs.readFile(new URL('../public/index.html', import.meta.url), 'utf8');
 
 function createWordsModule() {
   const window = {};
@@ -36,6 +37,81 @@ test('words module calculates SRS statistics and a due-first daily queue', () =>
     Array.from(words.buildDailyQueue(catalog, records, { now: 600, newLimit: 1 }), (item) => item.w),
     ['beta', 'alpha', 'delta'],
   );
+});
+
+test('words home keeps the four daily choices and estimates the visible workload', () => {
+  const words = createWordsModule();
+
+  assert.deepEqual(Array.from(words.newWordBudgets), [5, 10, 15, 20]);
+  assert.equal(words.normalizeNewWordBudget(20), 20);
+  assert.equal(words.normalizeNewWordBudget(7), 10);
+  assert.equal(words.estimateSessionMinutes({ due: 2, weak: 1, fresh: 5 }), 7);
+  assert.equal(words.estimateSessionMinutes({ due: 0, weak: 0, fresh: 0 }), 0);
+});
+
+test('vocabulary library supports search and multi-select topic, status and provenance filters', () => {
+  const words = createWordsModule();
+  const entries = words.buildLibraryEntries([
+    { w: 'achievement', tr: 'достижение', t: 2, tags: [6], provenance: 'core' },
+    { w: 'to volunteer', tr: 'работать волонтёром', t: 9, provenance: 'personal' },
+    { w: 'headline', tr: 'заголовок', topics: [8, 9], provenance: 'generated' },
+  ], {
+    achievement: { state: 'review' },
+    'to volunteer': { state: 'learning' },
+  }, {
+    stateFor: (record) => record?.state || 'new',
+  });
+
+  assert.deepEqual(Array.from(entries[0].topicIds), ['2', '6']);
+  assert.equal(entries[2].state, 'new');
+  assert.deepEqual(
+    Array.from(words.filterLibraryEntries(entries, {
+      query: 'достиж', topics: ['6', '9'], states: ['review', 'strong'], provenances: ['core'],
+    }), (entry) => entry.word),
+    ['achievement'],
+  );
+  assert.deepEqual(
+    Array.from(words.filterLibraryEntries(entries, {
+      query: '', topics: ['9'], states: ['learning', 'new'], provenances: ['personal', 'generated'],
+    }), (entry) => entry.word),
+    ['to volunteer', 'headline'],
+  );
+});
+
+test('word details preserve available enrichment and keep missing metadata explicit', () => {
+  const words = createWordsModule();
+  const original = { w: 'achievement', p: 'n', tr: 'достижение', ex: 'It was an achievement.' };
+
+  assert.deepEqual(JSON.parse(JSON.stringify(words.wordDetails(original))), {
+    word: 'achievement', pronunciation: null, partOfSpeech: 'n', level: null,
+    meanings: ['достижение'],
+    examples: [{ text: 'It was an achievement.', translation: null }],
+    source: null,
+  });
+  assert.deepEqual(original, {
+    w: 'achievement', p: 'n', tr: 'достижение', ex: 'It was an achievement.',
+  });
+});
+
+test('Words screen wires an accessible home, persistent library and read-only detail card', () => {
+  assert.match(screenSource, /buildVocabularyQueue/u);
+  assert.match(screenSource, /deriveVocabularyState/u);
+  assert.match(screenSource, /aria-live="polite"/u);
+  assert.match(screenSource, /type="search"/u);
+  assert.match(screenSource, /type="checkbox"/u);
+  assert.match(screenSource, /Транскрипция пока не добавлена/u);
+  assert.match(screenSource, /Перевод примера пока не добавлен/u);
+  assert.match(screenSource, /wSpeakLibraryValue/u);
+  assert.match(screenSource, /function wPracticeCatalog/u);
+  assert.match(screenSource, /var catalog=wPracticeCatalog\(\)/u);
+  assert.match(screenSource, /function wHonestDetailItem/u);
+  assert.match(screenSource, /id="w_detail_title" tabindex="-1"/u);
+  const detailStart = screenSource.indexOf('function wShowWord(');
+  const detailEnd = screenSource.indexOf('\nfunction ', detailStart + 1);
+  const detailSource = screenSource.slice(detailStart, detailEnd);
+  assert.doesNotMatch(detailSource, /srsOk|srsFail|applyVocabularyOutcome/u);
+  assert.match(indexSource, /@media\(max-width:375px\).*\.vocab/u);
+  assert.match(indexSource, /@media\(prefers-reduced-motion:reduce\).*\.vocab/u);
 });
 
 test('words module migrates legacy progress and selects the exercise mode', () => {

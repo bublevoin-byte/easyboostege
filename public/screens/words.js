@@ -5,11 +5,14 @@
  * Словарь ЕГЭ, SRS-бухгалтерия и сводка для плитки главного экрана остались в оболочке: их числа
  * нужны сразу после входа, когда этот чанк ещё не загружен. Здесь — только сам экран.
  */
-import {registerRouteHook,nav} from '../router.js';
+import {registerRouteHook} from '../router.js';
 import {wSpeak} from '../tts.js';
 import {registerVoiceTutorError,voiceTutorButton} from '../voice-tutor.js';
 import {coreVocabularyVoice} from '../modules/core-voice-catalog.js';
 import {completeAdaptiveModuleActivity} from '../adaptive-session-runtime.js';
+import {
+  buildVocabularyQueue,deriveVocabularyState,migrateVocabularyProgress,normalizeVocabularyWord,
+} from '../vocabulary-domain.js';
 import {
   EGE_WORDS,S,SRV,TOKEN,WBTN,generateAiContent,registerScreenGenerator,save,srsFail,srsOk,
   todayStr,ui,wBase,wDeco,wMergeAi,wMigrate,wRec,wStats,wSync,wordModule,
@@ -18,12 +21,73 @@ import {
 /* ===== WORDS v2: SRS-словарь ЕГЭ ===== */
 const W_TOPICS={0:'ИИ-набор',1:'Семья и отношения',2:'Образование',3:'Работа и карьера',4:'Путешествия',5:'Природа и экология',6:'Наука и технологии',7:'Здоровье и спорт',8:'Культура и досуг',9:'Общество и СМИ',10:'Город и покупки'};
 const W_POS={n:'СУЩЕСТВИТЕЛЬНОЕ',v:'ГЛАГОЛ',adj:'ПРИЛАГАТЕЛЬНОЕ',adv:'НАРЕЧИЕ',ph:'ФРАЗОВЫЙ ГЛАГОЛ',id:'ВЫРАЖЕНИЕ'};
+const W_STATE_LABELS={new:'Новое',learning:'Изучаю',review:'Повторяю',strong:'Уверенно'};
+const W_PROVENANCE_LABELS={core:'Проверенная база',personal:'Личное слово',generated:'Сгенерированное',unknown:'Источник не указан'};
 let WQ=[],WI=0,WDONE=0,WCORRECT=0,W_ADAPTIVE_MODE=null,W_ADAPTIVE_ACTIVITY=null,W_ADAPTIVE_REPORTED=false;
-function initWords(){if(!S)return;W_ADAPTIVE_MODE=null;W_ADAPTIVE_ACTIVITY=null;W_ADAPTIVE_REPORTED=false;wMigrate();wMergeAi();
-  if(S.wday!==todayStr()){S.wday=todayStr();S.wnewUsed=0}
-  var lim=Math.max(0,(S.wnew||30)-(S.wnewUsed||0));
-  WQ=wordModule.buildDailyQueue(EGE_WORDS,S.srs,{newLimit:lim});WI=0;WDONE=0;
-  wSync();wRender();wTopUp()}
+let W_VIEW='home',W_LIBRARY_SCROLL=0,W_DETAIL_RETURN_WORD='';
+function wArea(){return document.getElementById('w_area')}
+function wResetToday(){if(S.wday!==todayStr()){S.wday=todayStr();S.wnewUsed=0}}
+function wStoredProgress(word){
+  var direct=wRec(word);if(direct)return direct;var normalized=normalizeVocabularyWord(word);
+  var entries=Object.entries(S.srs||{});for(var index=0;index<entries.length;index++){
+    var entry=entries[index],record=entry[1];
+    if(normalizeVocabularyWord((record&&record.word)||entry[0])===normalized)return record;
+  }
+  return null;
+}
+function wStatusFor(word){
+  var normalized=normalizeVocabularyWord(word),statuses=S.wstatus||{};
+  if(statuses[word]||statuses[normalized])return statuses[word]||statuses[normalized];
+  var key=Object.keys(statuses).find(function(value){return normalizeVocabularyWord(value)===normalized});
+  return key?statuses[key]:null;
+}
+function wProgressFor(item){return migrateVocabularyProgress(wStoredProgress(item.w)||{word:item.w,stage:0,errorCount:0,reviewCount:0,dueAt:null})}
+function wProvenance(item){
+  if(['core','personal','generated','unknown'].includes(item.provenance))return item.provenance;
+  if(wStatusFor(item.w))return'personal';
+  return Number(item.t)===0?'generated':'core';
+}
+function wStarted(item){return Boolean(wStoredProgress(item.w)||wStatusFor(item.w))}
+function wLibraryCatalog(){
+  var items=EGE_WORDS.slice(),seen=new Set(items.map(function(item){return normalizeVocabularyWord(item.w)}));
+  Object.entries(S.srs||{}).forEach(function(entry){
+    var record=entry[1],displayWord=String((record&&record.word)||entry[0]||'').trim(),word=normalizeVocabularyWord(displayWord);
+    if(word&&!seen.has(word)){items.push({w:displayWord,provenance:'unknown'});seen.add(word)}
+  });
+  Object.keys(S.wstatus||{}).forEach(function(key){
+    var displayWord=String(key||'').trim(),word=normalizeVocabularyWord(displayWord);
+    if(word&&!seen.has(word)){items.push({w:displayWord,provenance:'personal'});seen.add(word)}
+  });
+  return items.filter(function(item){return wProvenance(item)==='core'||wStarted(item)});
+}
+function wPracticeCatalog(){return EGE_WORDS.filter(function(item){return wProvenance(item)==='core'||wStarted(item)})}
+function wLibraryEntries(){
+  var catalog=wLibraryCatalog().map(function(item){return Object.assign({},item,{provenance:wProvenance(item)})});
+  return wordModule.buildLibraryEntries(catalog,S.srs,{stateFor:function(record,item){
+    if(!record&&wStatusFor(item.w))return'learning';
+    return deriveVocabularyState(record?migrateVocabularyProgress(Object.assign({},record,{word:item.w})):wProgressFor(item))}});
+}
+function wPlan(){
+  var catalog=wPracticeCatalog(),byWord=new Map();
+  catalog.forEach(function(item){byWord.set(normalizeVocabularyWord(item.w),item)});
+  var budget=wordModule.normalizeNewWordBudget(S.vocabularyNewBudget);
+  var queue=buildVocabularyQueue(catalog.map(wProgressFor),{newWordBudget:budget,reviewLimit:20});
+  function items(records){return records.map(function(record){return byWord.get(record.word)}).filter(Boolean)}
+  var due=items(queue.due),weak=items(queue.weak),fresh=items(queue.new);
+  return {due:due,weak:weak,fresh:fresh,items:due.concat(weak,fresh),
+    minutes:wordModule.estimateSessionMinutes({due:due.length,weak:weak.length,fresh:fresh.length})};
+}
+function wRenderFailure(){
+  var area=wArea();if(!area)return;
+  ui.renderState(area,{kind:'error',title:'Словарь не открылся',
+    description:'Попробуй ещё раз — сохранённые слова не потерялись.',
+    actionLabel:'Повторить',onAction:initWords});
+}
+function initWords(){if(!S)return;W_ADAPTIVE_MODE=null;W_ADAPTIVE_ACTIVITY=null;W_ADAPTIVE_REPORTED=false;
+  W_VIEW='loading';var area=wArea();if(area)ui.renderState(area,{kind:'loading',title:'Готовим словарь',description:'Считаем повторения и новые слова'});
+  Promise.resolve().then(function(){wMigrate();wMergeAi();wResetToday();
+    S.vocabularyNewBudget=wordModule.normalizeNewWordBudget(S.vocabularyNewBudget);
+    wSync();if(W_VIEW==='loading')wShowHome()}).catch(function(error){console.error('Vocabulary screen failed',error);wRenderFailure()})}
 function wModeFor(w){return W_ADAPTIVE_MODE==='lexical_choice'?'c1':wordModule.modeFor(wRec(w))}
 function launchVocabularyPractice(mode,topicId){
   if(mode!=='lexical_choice'||![1,6].includes(topicId)||!S)return false;
@@ -47,6 +111,158 @@ function wBadge(x){var pos=W_POS[x.p]||x.pos||'СЛОВО';var top=W_TOPICS[x.t]
 function wAnim(name,dur){ui.animate('w_card',name,dur)}
 function wProgress(){var t=document.getElementById('w_today');if(t)t.textContent=WDONE+' / '+WQ.length+' сегодня'}
 function wDistract(x,field){return wordModule.distractors(EGE_WORDS,x,field)}
+function wHeading(title){var heading=document.getElementById('w_header_title');if(heading)heading.textContent=title}
+function wHandlerValue(value){return encodeURIComponent(value).replace(/'/g,'%27')}
+function wSpeaker(label,value){
+  return '<button type="button" class="vocab-icon-btn" aria-label="'+ui.escapeHtml(label)+'" onclick="wSpeakLibraryValue(\''+wHandlerValue(value)+'\')">'
+    +'<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18 6a8.5 8.5 0 0 1 0 12"/></svg></button>';
+}
+function wSpeakLibraryValue(encoded){wSpeak(decodeURIComponent(encoded||''))}
+function wShowHome(){
+  var area=wArea();if(!area)return;W_VIEW='home';wHeading('Слова');
+  var plan=wPlan(),budget=wordModule.normalizeNewWordBudget(S.vocabularyNewBudget);
+  var total=plan.items.length,entries=wLibraryEntries(),topicCounts={};
+  entries.forEach(function(entry){entry.topicIds.forEach(function(id){if(W_TOPICS[id])topicCounts[id]=(topicCounts[id]||0)+1})});
+  var topicOverview=Object.keys(topicCounts).sort(function(left,right){return topicCounts[right]-topicCounts[left]}).slice(0,3);
+  area.innerHTML='<section class="vocab vocab-home" aria-labelledby="w_home_title">'
+    +'<p class="vocab-kicker">АКТИВНЫЙ СЛОВАРЬ</p><h1 id="w_home_title">Сегодня</h1>'
+    +'<div class="vocab-stats" aria-label="План на сегодня">'
+    +'<article><strong>'+plan.due.length+'</strong><span>к сроку</span></article>'
+    +'<article><strong>'+plan.fresh.length+'</strong><span>новых</span></article>'
+    +'<article><strong>'+plan.minutes+'</strong><span>минут</span></article></div>'
+    +(plan.weak.length?'<p class="vocab-note">Ещё '+plan.weak.length+' '+(plan.weak.length===1?'слово требует':'слова требуют')+' внимания — они уже учтены во времени.</p>':'')
+    +'<fieldset class="vocab-budget"><legend>Новых слов за день</legend><div class="vocab-budget-options" role="group" aria-label="Количество новых слов">'
+    +wordModule.newWordBudgets.map(function(value){var selected=value===budget;
+      return '<button type="button" id="w_budget_'+value+'" class="vocab-budget-btn'+(selected?' is-selected':'')+'" aria-pressed="'+selected+'" onclick="wSetBudget('+value+')">'+value+'</button>'}).join('')
+    +'</div><p id="w_budget_note" role="status" aria-live="polite">Если накопились повторения, новых слов будет меньше.</p></fieldset>'
+    +'<button type="button" class="vocab-primary sq" onclick="wStartPractice()"'+(total?'':' disabled')+'>'+(total?'Начать · '+total:'На сегодня всё')+'</button>'
+    +'<button type="button" class="vocab-library-link" onclick="wShowLibrary()">'
+    +'<span><strong>Библиотека</strong><small>Проверенная база и все начатые слова</small></span><span aria-hidden="true">'+entries.length+' ›</span></button>'
+    +(topicOverview.length?'<section class="vocab-topic-overview" aria-labelledby="w_topic_overview_title"><h2 id="w_topic_overview_title">Темы библиотеки</h2><div>'
+      +topicOverview.map(function(id){return'<span>'+ui.escapeHtml(W_TOPICS[id])+' · '+topicCounts[id]+'</span>'}).join('')+'</div></section>':'')
+    +'</section>';
+  var start=area.querySelector('.vocab-primary');if(start&&start.disabled)start.setAttribute('aria-label','На сегодня нет запланированных слов')}
+function wSetBudget(value){
+  S.vocabularyNewBudget=wordModule.normalizeNewWordBudget(value);save();wShowHome();
+  var selected=document.getElementById('w_budget_'+S.vocabularyNewBudget);if(selected)selected.focus()}
+function wStartPractice(){
+  var plan=wPlan();WQ=plan.items;WI=0;WDONE=0;WCORRECT=0;W_VIEW='practice';
+  var area=wArea();if(!area)return;
+  area.innerHTML='<div id="w_card" class="vocab-practice-card"></div><div id="w_opts" class="vocab-practice-options"></div>';
+  wHeading('Тренировка');wRender()}
+function wFilters(){
+  var value=S.vocabularyLibraryFilters;
+  if(!value||typeof value!=='object')value={};
+  return {
+    query:String(value.query||''),
+    topics:Array.isArray(value.topics)?value.topics.map(String):[],
+    states:Array.isArray(value.states)?value.states.map(String):[],
+    provenances:Array.isArray(value.provenances)?value.provenances.map(String):[],
+  };
+}
+function wStoreFilters(filters){S.vocabularyLibraryFilters=filters;save()}
+function wFilterCheckbox(kind,value,label,selected){
+  return '<label class="vocab-filter-chip"><input type="checkbox" aria-label="'+ui.escapeHtml(label)+'" value="'+ui.escapeHtml(value)+'" '+(selected?'checked ':'')
+    +'onchange="wSetLibraryFilter(\''+kind+'\',this.value,this.checked)"><span>'+ui.escapeHtml(label)+'</span></label>';
+}
+function wAvailableTopics(entries){
+  var ids=new Set();entries.forEach(function(entry){entry.topicIds.forEach(function(id){ids.add(id)})});
+  return Array.from(ids).sort(function(left,right){return Number(left)-Number(right)})
+}
+function wShowLibrary(){
+  var area=wArea();if(!area)return;var returnWord=W_VIEW==='detail'?W_DETAIL_RETURN_WORD:'';
+  var announceLibrary=W_VIEW!=='library';W_VIEW='library';wHeading('Библиотека');
+  var entries=wLibraryEntries(),filters=wFilters(),topics=wAvailableTopics(entries);
+  area.innerHTML='<section class="vocab vocab-library" aria-labelledby="w_library_title">'
+    +'<div class="vocab-view-head"><button type="button" class="vocab-back" onclick="wShowHome()" aria-label="Вернуться на главную словаря">←</button>'
+    +'<div><p class="vocab-kicker">ВСЕ СЛОВА</p><h1 id="w_library_title" tabindex="-1">Библиотека</h1></div></div>'
+    +'<label id="w_library_search_label" class="vocab-search-label" for="w_library_search">Поиск по слову или переводу</label>'
+    +'<input id="w_library_search" class="vocab-search" type="search" aria-labelledby="w_library_search_label" value="'+ui.escapeHtml(filters.query)+'" autocomplete="off" placeholder="Например, achievement" oninput="wSetLibrarySearch(this.value)">'
+    +'<details class="vocab-filters"><summary>Фильтры</summary>'
+    +'<fieldset><legend>Темы</legend><div class="vocab-filter-grid">'
+    +topics.map(function(id){return wFilterCheckbox('topics',id,W_TOPICS[id]||('Тег '+id),filters.topics.includes(id))}).join('')+'</div></fieldset>'
+    +'<fieldset><legend>Статусы</legend><div class="vocab-filter-grid">'
+    +Object.keys(W_STATE_LABELS).map(function(id){return wFilterCheckbox('states',id,W_STATE_LABELS[id],filters.states.includes(id))}).join('')+'</div></fieldset>'
+    +'<fieldset><legend>Источник</legend><div class="vocab-filter-grid">'
+    +Object.keys(W_PROVENANCE_LABELS).map(function(id){return wFilterCheckbox('provenances',id,W_PROVENANCE_LABELS[id],filters.provenances.includes(id))}).join('')+'</div></fieldset>'
+    +'<button type="button" class="vocab-clear" onclick="wClearLibraryFilters()">Сбросить фильтры</button></details>'
+    +'<p id="w_library_status" class="vocab-results-status" role="status" aria-live="polite" aria-atomic="true"></p>'
+    +'<div id="w_library_results"></div></section>';
+  wRenderLibraryResults();requestAnimationFrame(function(){area.scrollTop=W_LIBRARY_SCROLL;
+    if(returnWord){var buttons=Array.from(area.querySelectorAll('.vocab-word-open'));
+      var target=buttons.find(function(button){return button.dataset.vocabWord===returnWord})||document.getElementById('w_library_title');
+      if(target)target.focus()}
+    else if(announceLibrary){var heading=document.getElementById('w_library_title');if(heading)heading.focus()}})}
+function wSetLibrarySearch(value){var filters=wFilters();filters.query=String(value||'');wStoreFilters(filters);wRenderLibraryResults()}
+function wSetLibraryFilter(kind,value,checked){
+  if(!['topics','states','provenances'].includes(kind))return;
+  var filters=wFilters(),selected=new Set(filters[kind]);if(checked)selected.add(String(value));else selected.delete(String(value));
+  filters[kind]=Array.from(selected);wStoreFilters(filters);wRenderLibraryResults()}
+function wClearLibraryFilters(){
+  wStoreFilters({query:'',topics:[],states:[],provenances:[]});W_LIBRARY_SCROLL=0;wShowLibrary();
+  var search=document.getElementById('w_library_search');if(search)search.focus()}
+function wRenderLibraryResults(){
+  var host=document.getElementById('w_library_results'),status=document.getElementById('w_library_status');if(!host)return;
+  try{
+    var visible=wordModule.filterLibraryEntries(wLibraryEntries(),wFilters());
+    if(status)status.textContent='Найдено слов: '+visible.length;
+    if(!visible.length){ui.renderState(host,{kind:'empty',title:'Пока пусто',
+      description:'Измени запрос или сбрось один из фильтров.',actionLabel:'Сбросить фильтры',onAction:wClearLibraryFilters});return}
+    host.innerHTML='<ul class="vocab-word-list">'+visible.map(function(entry){
+      var word=ui.escapeHtml(entry.word),translation=entry.translation?ui.escapeHtml(entry.translation):'Перевод пока не добавлен';
+      var topics=entry.topicIds.map(function(id){return '<span>'+ui.escapeHtml(W_TOPICS[id]||('Тег '+id))+'</span>'}).join('');
+      return '<li class="vocab-word-row vocab-source-'+entry.provenance+'">'
+        +'<button type="button" class="vocab-word-open" data-vocab-word="'+wHandlerValue(entry.word)+'" onclick="wShowWord(\''+wHandlerValue(entry.word)+'\')">'
+        +'<span class="vocab-word-main"><strong>'+word+'</strong><small>'+translation+'</small></span>'
+        +'<span class="vocab-word-meta"><span class="vocab-state">'+W_STATE_LABELS[entry.state]+'</span>'
+        +'<span class="vocab-provenance">'+W_PROVENANCE_LABELS[entry.provenance]+'</span></span>'
+        +(topics?'<span class="vocab-topic-tags">'+topics+'</span>':'')+'</button>'
+        +wSpeaker('Озвучить слово '+entry.word,entry.word)+'</li>'}).join('')+'</ul>';
+  }catch(error){console.error('Vocabulary library failed',error);if(status)status.textContent='';
+    ui.renderState(host,{kind:'error',title:'Слова не показались',description:'Повтори загрузку списка.',
+      actionLabel:'Повторить',onAction:wRenderLibraryResults})}}
+function wFindWord(encoded){
+  var word=normalizeVocabularyWord(decodeURIComponent(encoded||''));
+  return wLibraryCatalog().find(function(item){return normalizeVocabularyWord(item.w)===word})||null}
+function wMetadata(label,value,missing){
+  return '<div><dt>'+label+'</dt><dd class="'+(value?'':'is-missing')+'">'+ui.escapeHtml(value||missing)+'</dd></div>'}
+function wHonestDetailItem(item){
+  var legacyPersonal=wProvenance(item)==='personal'&&Number(item.t)===0&&!item.provenance
+    &&!String(item.ex||'').trim()&&!(Array.isArray(item.examples)&&item.examples.length);
+  return legacyPersonal?Object.assign({},item,{p:null,pos:null}):item;
+}
+function wShowWord(encoded){
+  var area=wArea();if(!area)return;W_LIBRARY_SCROLL=area.scrollTop;var item=wFindWord(encoded);
+  if(!item){ui.renderState(area,{kind:'error',title:'Карточка не найдена',description:'Вернись в библиотеку и выбери слово снова.',
+    actionLabel:'В библиотеку',onAction:wShowLibrary});return}
+  W_DETAIL_RETURN_WORD=wHandlerValue(item.w);W_VIEW='detail';wHeading('Карточка');
+  var details=wordModule.wordDetails(wHonestDetailItem(item)),provenance=wProvenance(item);
+  var meanings=details.meanings.length
+    ?'<ul class="vocab-meanings">'+details.meanings.map(function(value){return'<li>'+ui.escapeHtml(value)+'</li>'}).join('')+'</ul>'
+    :'<p class="vocab-missing">Перевод пока не добавлен</p>';
+  var examples=details.examples.length?details.examples.map(function(example,index){
+    var translation=example.translation||'Перевод примера пока не добавлен';
+    return '<li class="vocab-example"><div><p lang="en">'+ui.escapeHtml(example.text)+'</p>'
+      +wSpeaker('Озвучить пример '+(index+1),example.text)+'</div>'
+      +'<button type="button" class="vocab-example-toggle" aria-expanded="false" aria-controls="w_example_translation_'+index+'" onclick="wToggleExampleTranslation('+index+',this)">Показать перевод</button>'
+      +'<p id="w_example_translation_'+index+'" class="'+(example.translation?'':'is-missing')+'" hidden>'+ui.escapeHtml(translation)+'</p></li>'}).join('')
+    :'<li class="vocab-missing">Примеры пока не добавлены</li>';
+  area.innerHTML='<article class="vocab vocab-detail" aria-labelledby="w_detail_title">'
+    +'<div class="vocab-view-head"><button id="w_detail_back" type="button" class="vocab-back" onclick="wShowLibrary()" aria-label="Вернуться в библиотеку">←</button>'
+    +'<div><p class="vocab-kicker">'+W_PROVENANCE_LABELS[provenance]+'</p><h1 id="w_detail_title" tabindex="-1" lang="en">'+ui.escapeHtml(details.word)+'</h1></div>'
+    +wSpeaker('Озвучить слово '+details.word,details.word)+'</div>'
+    +'<dl class="vocab-metadata">'+wMetadata('Произношение',details.pronunciation,'Транскрипция пока не добавлена')
+    +wMetadata('Часть речи',W_POS[details.partOfSpeech]||details.partOfSpeech,'Часть речи не указана')
+    +wMetadata('Уровень',details.level,'Уровень пока не указан')
+    +wMetadata('Источник карточки',details.source,'Источник пока не указан')+'</dl>'
+    +'<section class="vocab-detail-section"><h2>Значения</h2>'+meanings+'</section>'
+    +'<section class="vocab-detail-section"><h2>Примеры в контексте</h2><ul class="vocab-examples">'+examples+'</ul></section>'
+    +'<p class="vocab-readonly-note">Просмотр и озвучка не меняют прогресс слова.</p></article>';
+  var detailHeading=document.getElementById('w_detail_title');if(detailHeading)detailHeading.focus()}
+function wToggleExampleTranslation(index,button){
+  var translation=document.getElementById('w_example_translation_'+index);if(!translation||!button)return;
+  var expanded=button.getAttribute('aria-expanded')==='true';translation.hidden=expanded;
+  button.setAttribute('aria-expanded',String(!expanded));button.textContent=expanded?'Показать перевод':'Скрыть перевод'}
 function wRender(){var card=document.getElementById('w_card'),opts=document.getElementById('w_opts');
   if(!card||!opts)return;wProgress();
   wAnim('win','.32s');
@@ -57,8 +273,8 @@ function wRender(){var card=document.getElementById('w_card'),opts=document.getE
       +'<div style="font-size:44px;">🎉</div>'
       +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:22px;color:#2B2B2B;margin-top:10px;">'+(n>0?'Ура! Сегодня +'+n+' новых слов':'На сегодня всё!')+'</div>'
       +'<div style="font-weight:600;font-size:13.5px;color:#777163;margin-top:8px;line-height:1.5;">Выучено полностью: '+st.learned+' из '+st.total+'<br>Слова вернутся на повторение в свой срок</div></div>';
-    opts.innerHTML='<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="wExtra()">Хочу ещё 30 слов</button>'
-      +'<button class="sq" style="'+WBTN+'color:#B54E2F;" onclick="nav(\'scr1\')">На главную</button>';
+    opts.innerHTML='<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="wShowHome()">К плану на сегодня</button>'
+      +'<button class="sq" style="'+WBTN+'color:#B54E2F;" onclick="wShowLibrary()">Открыть библиотеку</button>';
     return}
   var mode=wModeFor(x.w);
   if(mode==='c1'||mode==='c2'){
@@ -97,23 +313,8 @@ function wFlip(x,learnerAnswer,mode){var card=document.getElementById('w_card'),
   if(voice)registerVoiceTutorError({module:'vocabulary',itemId:voice.id,revision:voice.revision,learnerAnswer:learnerAnswer})
     .then(function(recorded){if(recorded&&WQ[WI]===x&&opts.isConnected)opts.insertAdjacentHTML('afterbegin',voiceTutorButton(recorded))}).catch(function(){});
   wSpeak(x.w)}
-/* список выученных */
-function wShowKnown(){var card=document.getElementById('w_card'),opts=document.getElementById('w_opts');
-  if(!card||!opts)return;
-  var list=EGE_WORDS.filter(function(x){var r=wRec(x.w);return r&&r.s>=5});
-  var rows=list.map(function(x){
-    return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 2px;border-bottom:1px solid #F4EFE9;">'
-      +'<div style="min-width:0;"><div style="font-weight:800;font-size:15px;color:#2B2B2B;">'+x.w+'</div>'
-      +'<div style="font-weight:600;font-size:12px;color:#777163;margin-top:1px;">'+x.tr+'</div></div>'
-      +'<button type="button" class="iconbtn clk" aria-label="Озвучить слово '+ui.escapeHtml(x.w)+'" onclick="wSpeak(\''+x.w.replace(/'/g,'')+'\')" style="cursor:pointer;flex:none;display:grid;place-items:center;width:32px;height:32px;border-radius:11px;background:#FFF4DE;">'
-      +'<svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#E8730A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg></button></div>'}).join('');
-  card.innerHTML='<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:18px;color:#2B2B2B;">Выученные слова · '+list.length+'</div>'
-    +'<div id="w_known_body" style="margin-top:10px;"></div>';
-  if(list.length)document.getElementById('w_known_body').innerHTML=rows;
-  else ui.renderState('w_known_body',{kind:'empty',title:'Пока пусто',
-    description:'Слово попадает сюда, когда ты подтвердишь его на всех повторениях',
-    actionLabel:'Начать занятие',onAction:wRender});
-  opts.innerHTML='<button class="sq" style="'+WBTN+'color:#B54E2F;" onclick="wRender()">← Вернуться к занятию</button>'}
+/* Старая ссылка из профиля теперь открывает ту же постоянную библиотеку, уже с фильтром Strong. */
+function wShowKnown(){W_LIBRARY_SCROLL=0;wStoreFilters({query:'',topics:[],states:['strong'],provenances:[]});wShowLibrary()}
 function wNext(){WI++;wSync();save();wRender()}
 function wPick(btn,vEnc,rightEnc){var x=WQ[WI];if(!x||btn.dataset.done)return;
   var v=decodeURIComponent(vEnc),right=decodeURIComponent(rightEnc),mode=wModeFor(x.w);
@@ -161,6 +362,15 @@ async function genWords(){
 
 registerRouteHook(function(id){if(id==='scr2')initWords()});
 registerScreenGenerator('scr2',genWords);
+document.addEventListener('keydown',function(event){
+  var screen=document.getElementById('scr2');
+  if(event.key==='Escape'&&W_VIEW==='detail'&&screen&&screen.classList.contains('on')){
+    event.preventDefault();wShowLibrary()}
+});
 
 /* Имена для обработчиков этого экрана: загрузчик кладёт их на window вместе с чанком. */
-export {WI,WQ,launchVocabularyPractice,wExtra,wNext,wPick,wRender,wShowKnown,wSubmit};
+export {
+  WI,WQ,initWords,launchVocabularyPractice,wClearLibraryFilters,wExtra,wNext,wPick,wRender,
+  wSetBudget,wSetLibraryFilter,wSetLibrarySearch,wShowHome,wShowKnown,wShowLibrary,wShowWord,
+  wSpeakLibraryValue,wStartPractice,wSubmit,wToggleExampleTranslation,
+};
