@@ -81,6 +81,13 @@ export const saveAdaptiveLearningProfile = (...args) => repository.saveAdaptiveL
 export const getAdaptiveLearningProfile = (...args) => repository.getAdaptiveLearningProfile(...args);
 export const saveAdaptiveLearningPlan = (...args) => repository.saveAdaptiveLearningPlan(...args);
 export const getCurrentAdaptiveLearningPlan = (...args) => repository.getCurrentAdaptiveLearningPlan(...args);
+export const getAdaptiveLearningPlanRevision = (...args) => repository.getAdaptiveLearningPlanRevision(...args);
+export const getAdaptiveLearningSessionCreateReplay = (...args) => repository.getAdaptiveLearningSessionCreateReplay(...args);
+export const createAdaptiveLearningSession = (...args) => repository.createAdaptiveLearningSession(...args);
+export const getCurrentAdaptiveLearningSession = (...args) => repository.getCurrentAdaptiveLearningSession(...args);
+export const getAdaptiveLearningSessionReplacementReplay = (...args) => repository.getAdaptiveLearningSessionReplacementReplay(...args);
+export const replaceAdaptiveLearningSessionBlock = (...args) => repository.replaceAdaptiveLearningSessionBlock(...args);
+export const getAdaptiveLearningWeekUsage = (...args) => repository.getAdaptiveLearningWeekUsage(...args);
 export const startAdaptiveDiagnostic = (...args) => repository.startAdaptiveDiagnostic(...args);
 export const getAdaptiveDiagnosticStartClaim = (...args) => repository.getAdaptiveDiagnosticStartClaim(...args);
 export const getCurrentAdaptiveDiagnostic = (...args) => repository.getCurrentAdaptiveDiagnostic(...args);

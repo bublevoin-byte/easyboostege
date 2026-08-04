@@ -17,13 +17,25 @@ import {
 /* ===== WORDS v2: SRS-словарь ЕГЭ ===== */
 const W_TOPICS={0:'ИИ-набор',1:'Семья и отношения',2:'Образование',3:'Работа и карьера',4:'Путешествия',5:'Природа и экология',6:'Наука и технологии',7:'Здоровье и спорт',8:'Культура и досуг',9:'Общество и СМИ',10:'Город и покупки'};
 const W_POS={n:'СУЩЕСТВИТЕЛЬНОЕ',v:'ГЛАГОЛ',adj:'ПРИЛАГАТЕЛЬНОЕ',adv:'НАРЕЧИЕ',ph:'ФРАЗОВЫЙ ГЛАГОЛ',id:'ВЫРАЖЕНИЕ'};
-let WQ=[],WI=0,WDONE=0;
-function initWords(){if(!S)return;wMigrate();wMergeAi();
+let WQ=[],WI=0,WDONE=0,W_ADAPTIVE_MODE=null;
+function initWords(){if(!S)return;W_ADAPTIVE_MODE=null;wMigrate();wMergeAi();
   if(S.wday!==todayStr()){S.wday=todayStr();S.wnewUsed=0}
   var lim=Math.max(0,(S.wnew||30)-(S.wnewUsed||0));
   WQ=wordModule.buildDailyQueue(EGE_WORDS,S.srs,{newLimit:lim});WI=0;WDONE=0;
   wSync();wRender();wTopUp()}
-function wModeFor(w){return wordModule.modeFor(wRec(w))}
+function wModeFor(w){return W_ADAPTIVE_MODE==='lexical_choice'?'c1':wordModule.modeFor(wRec(w))}
+function launchVocabularyPractice(mode,topicId){
+  if(mode!=='lexical_choice'||![1,6].includes(topicId)||!S)return false;
+  wMigrate();wMergeAi();
+  if(S.wday!==todayStr()){S.wday=todayStr();S.wnewUsed=0}
+  var pool=EGE_WORDS.filter(function(word){return Number(word.t)===topicId});
+  if(!pool.length)return false;
+  W_ADAPTIVE_MODE='lexical_choice';
+  WQ=wordModule.buildDailyQueue(pool,S.srs,{newLimit:30});
+  if(!WQ.length)WQ=pool.slice(0,30);
+  WI=0;WDONE=0;wSync();wRender();
+  return Boolean(WQ[0]&&wModeFor(WQ[0].w)==='c1');
+}
 function wBadge(x){var pos=W_POS[x.p]||x.pos||'СЛОВО';var top=W_TOPICS[x.t]||'';
   return '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'
   +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#B54E2F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">'+pos+'</span>'
@@ -148,4 +160,4 @@ registerRouteHook(function(id){if(id==='scr2')initWords()});
 registerScreenGenerator('scr2',genWords);
 
 /* Имена для обработчиков этого экрана: загрузчик кладёт их на window вместе с чанком. */
-export {WI,WQ,wExtra,wNext,wPick,wRender,wShowKnown,wSubmit};
+export {WI,WQ,launchVocabularyPractice,wExtra,wNext,wPick,wRender,wShowKnown,wSubmit};

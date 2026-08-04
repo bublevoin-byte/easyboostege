@@ -23,6 +23,7 @@
     const status = Number(error && error.status) || 0;
     const code = String((error && error.code) || 'REQUEST_FAILED');
     if (code === 'PRIVACY_CONSENT_REQUIRED') return 'Подтвердите согласие на обработку данных в профиле.';
+    if (code === 'ADAPTIVE_SESSION_COVERAGE_GAP') return 'Из доступных встроенных заданий нельзя составить занятие выбранной длительности. Выберите другое время или обновите план.';
     if (code === 'NETWORK_ERROR' || status === 0) return 'Нет подключения к интернету. Проверьте сеть и повторите попытку.';
     if (status === 401) return 'Сессия истекла. Войдите снова.';
     if (status === 402 || status === 403) return 'Доступ неактивен. Проверьте подписку в Telegram-боте.';

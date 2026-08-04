@@ -340,8 +340,103 @@ async function runAdaptiveDiagnosticE2E() {
     assert.equal(currentPlan.body.plan.revision, 2);
     assert.ok(currentPlan.body.plan.profileEvidenceSourceCount >= 10);
     assert.equal(await page.locator('#adaptive_forecast').isVisible(), true);
+    const lowBudgetGoal = await page.evaluate(async () => {
+      const response = await fetch('/api/v1/adaptive-learning/goal', {
+        method: 'PUT',
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'adaptive-e2e-low-budget-goal-01',
+        },
+        body: JSON.stringify({
+          targetExam: 'ege_english', targetScore: 85, examDate: '2027-06-01', weeklyMinutes: 30,
+        }),
+      });
+      return { status: response.status, body: await response.json() };
+    });
+    assert.equal(lowBudgetGoal.status, 201);
+    assert.equal(lowBudgetGoal.body.goal.weeklyMinutes, 30);
+    assert.equal(lowBudgetGoal.body.plan.revision, 3);
+
+    const duration90 = page.locator('input[name="adaptive_session_duration"][value="90"]');
+    await duration90.focus();
+    await duration90.press('Space');
+    const previewResponsePromise = page.waitForResponse((response) => (
+      response.request().method() === 'POST'
+        && response.url().endsWith('/api/v1/adaptive-learning/sessions/preview')
+    ));
+    const previewButton = page.locator('#adaptive_session_preview');
+    await previewButton.focus();
+    await previewButton.press('Enter');
+    const previewResponse = await previewResponsePromise;
+    assert.equal(previewResponse.status(), 200);
+    const previewResult = await previewResponse.json();
+    assert.equal(previewResult.preview.durationMinutes, 90);
+    assert.equal(previewResult.preview.weeklyBudgetSnapshot.weeklyAvailableMinutes, 30);
+    assert.ok(previewResult.preview.weeklyBudgetSnapshot.coverageGaps
+      .includes('ege.vocabulary.word_formation'));
+    assert.equal(previewResult.preview.blocks.some((block) => block.kind === 'break'), true);
+    await page.getByText(/Перерыв · 10 мин/u).waitFor({ state: 'visible', timeout: 5_000 });
+
+    const createSessionResponsePromise = page.waitForResponse((response) => (
+      response.request().method() === 'POST'
+        && response.url().endsWith('/api/v1/adaptive-learning/sessions')
+    ));
+    const createSessionButton = page.locator('#adaptive_session_create');
+    await createSessionButton.focus();
+    await createSessionButton.press('Enter');
+    const createSessionResponse = await createSessionResponsePromise;
+    assert.equal(createSessionResponse.status(), 201);
+    const createSessionResult = await createSessionResponse.json();
+    assert.equal(createSessionResult.session.status, 'created');
+    assert.equal(await page.locator('#adaptive_session_start').isVisible(), true);
+
+    const learningBlocks = createSessionResult.session.blocks.filter((block) => block.kind === 'learning');
+    const replacementTarget = learningBlocks.slice().sort((left, right) => right.difficulty - left.difficulty)[0];
+    const replacementIndex = learningBlocks.findIndex((block) => block.id === replacementTarget.id);
+    const replacementButton = page.getByRole('button', { name: 'Заменить' }).nth(replacementIndex);
+    const replacementResponsePromise = page.waitForResponse((response) => (
+      response.request().method() === 'POST' && response.url().endsWith('/replace')
+    ));
+    await replacementButton.focus();
+    await replacementButton.press('Enter');
+    const replacementResponse = await replacementResponsePromise;
+    assert.equal(replacementResponse.status(), 200);
+    const replacementResult = await replacementResponse.json();
+    assert.equal(replacementResult.session.revision, 2);
+    assert.deepEqual(
+      replacementResult.session.blocks.map((block) => block.id),
+      createSessionResult.session.blocks.map((block) => block.id),
+    );
+    assert.equal(await page.getByRole('button', { name: 'Заменить' }).count(), 0);
+
+    const firstActivity = replacementResult.session.blocks.find((block) => block.kind === 'learning');
+    assert.match(await page.locator('#adaptive_session_blocks').innerText(), new RegExp(
+      `${firstActivity.skillLabel} — ${firstActivity.activityLabel}`.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'),
+      'u',
+    ));
+    const startSessionButton = page.locator('#adaptive_session_start');
+    await startSessionButton.focus();
+    await startSessionButton.press('Enter');
+    await page.locator(`#${firstActivity.launch.screenId}.on`).waitFor({ state: 'visible', timeout: 5_000 });
+    await page.waitForFunction(({ screenId, kind, contentRef }) => {
+      const screen = document.getElementById(screenId);
+      return screen?.dataset.adaptiveLaunchKind === kind
+        && screen?.dataset.adaptiveLaunchContentRef === contentRef;
+    }, {
+      screenId: firstActivity.launch.screenId,
+      kind: firstActivity.launch.kind,
+      contentRef: firstActivity.contentRef,
+    }, { timeout: 5_000 });
+    await page.evaluate(() => window.tab('scr2'));
+    await page.locator('#scr2.on').waitFor({ state: 'visible', timeout: 5_000 });
+    await page.waitForFunction(() => typeof window.launchVocabularyPractice === 'function', null, {
+      timeout: 5_000,
+    });
+    assert.equal(await page.evaluate(() => window.launchVocabularyPractice('lexical_choice', 1)), true);
+    assert.match(await page.locator('#w_card').innerText(), /ВЫБЕРИ ПЕРЕВОД/u);
     assert.equal(blockedExternalUrls.some((url) => /x\.ai|groq|openai/u.test(url)), false);
-    console.log('adaptive diagnostic e2e: keyboard, reload, retries, audio and completion passed');
+    console.log('adaptive e2e: diagnostic plus session/replacement/vocabulary handoff passed');
   } finally {
     if (context) await context.close();
     if (browser) await browser.close();

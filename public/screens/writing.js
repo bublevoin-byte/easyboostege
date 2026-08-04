@@ -58,6 +58,14 @@ function wrPool(t){var ai=(S&&S.writeAi&&S.writeAi['t'+t])||[];return writingMod
 function wrIdx(t){return (t===37?(S.wIdx37||0):(S.wIdx38||0))}
 function wrCur(){return writingModule.current(wrPool(curTask),wrIdx(curTask))}
 function wrKey(){return writingModule.draftKey(curTask,wrIdx(curTask))}
+function launchWritingTask(taskType,taskId){
+  if(![37,38].includes(taskType)||typeof taskId!=='string')return false;
+  var pool=wrPool(taskType),index=pool.findIndex(function(task){return task&&task.id===taskId});
+  if(index<0)return false;
+  if(taskType===37)S.wIdx37=index;else S.wIdx38=index;
+  curTask=taskType;W_SHEET=false;save();setTask(taskType);
+  return Boolean(wrCur()&&wrCur().id===taskId);
+}
 function wrNext(){if(curTask===37)S.wIdx37=(S.wIdx37||0)+1;else S.wIdx38=(S.wIdx38||0)+1;
   W_SHEET=false;save();setTask(curTask);wrGen()}
 function wrSheet(){W_SHEET=!W_SHEET;setTask(curTask)}
@@ -163,4 +171,4 @@ async function wrGen(){
 /* — запуск генерации при входе, синк плитки при старте — */
 registerRouteHook(function(id){if(id==='scr8'){setTask(curTask);wrGen()}});
 /* Имена для обработчиков этого экрана: загрузчик кладёт их на window вместе с чанком. */
-export {checkWriting,countWords,setTask,wrNext,wrSheet};
+export {checkWriting,countWords,launchWritingTask,setTask,wrNext,wrSheet};

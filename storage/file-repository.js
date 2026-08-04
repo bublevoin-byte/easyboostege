@@ -26,6 +26,14 @@ import {
 } from '../adaptive-learning/diagnostic-claims.js';
 import { adaptiveLearningPlanRepositoryDto } from '../adaptive-learning/plan-dto.js';
 import {
+  adaptiveLearningSessionPublicDto,
+  adaptiveLearningSessionRepositoryDto,
+} from '../adaptive-learning/session-dto.js';
+import {
+  assertAdaptiveSessionCreateCandidate,
+  assertAdaptiveSessionReplacementTransition,
+} from '../adaptive-learning/session.js';
+import {
   assertAdaptivePlanAuthoritativeCandidate,
   assertAdaptivePlanDuplicateReplay,
   assertAdaptivePlanPersistenceCandidate,
@@ -96,7 +104,7 @@ function reconcileLegacyApprovedRuleCards(cards) {
 
 export function createFileRepository(filePath) {
   let loaded = false;
-  let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, subscription_entitlements: {}, voice_tutor_sessions: [], voice_tutor_recoveries: [], voice_tutor_repeats: [], voice_tutor_repeat_attempts: [], voice_tutor_reports: [], rule_cards: [], payment_requests: {}, subscription_events: [], adaptive_learning_goals: [], adaptive_learning_profiles: {}, adaptive_learning_skill_estimates: {}, adaptive_learning_plan_revisions: [], adaptive_diagnostic_sessions: [], adaptive_diagnostic_start_claims: [], adaptive_diagnostic_responses: [] };
+  let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, subscription_entitlements: {}, voice_tutor_sessions: [], voice_tutor_recoveries: [], voice_tutor_repeats: [], voice_tutor_repeat_attempts: [], voice_tutor_reports: [], rule_cards: [], payment_requests: {}, subscription_events: [], adaptive_learning_goals: [], adaptive_learning_profiles: {}, adaptive_learning_skill_estimates: {}, adaptive_learning_plan_revisions: [], adaptive_learning_sessions: [], adaptive_diagnostic_sessions: [], adaptive_diagnostic_start_claims: [], adaptive_diagnostic_responses: [] };
   let writeQueue = Promise.resolve();
   let coordinatedMutationQueue = Promise.resolve();
   let paymentQueue = Promise.resolve();
@@ -153,6 +161,7 @@ export function createFileRepository(filePath) {
           adaptive_learning_profiles: parsed.adaptive_learning_profiles && typeof parsed.adaptive_learning_profiles === 'object' ? parsed.adaptive_learning_profiles : {},
           adaptive_learning_skill_estimates: parsed.adaptive_learning_skill_estimates && typeof parsed.adaptive_learning_skill_estimates === 'object' ? parsed.adaptive_learning_skill_estimates : {},
           adaptive_learning_plan_revisions: Array.isArray(parsed.adaptive_learning_plan_revisions) ? parsed.adaptive_learning_plan_revisions : [],
+          adaptive_learning_sessions: Array.isArray(parsed.adaptive_learning_sessions) ? parsed.adaptive_learning_sessions : [],
           adaptive_diagnostic_sessions: Array.isArray(parsed.adaptive_diagnostic_sessions) ? parsed.adaptive_diagnostic_sessions : [],
           adaptive_diagnostic_start_claims: Array.isArray(parsed.adaptive_diagnostic_start_claims) ? parsed.adaptive_diagnostic_start_claims : [],
           adaptive_diagnostic_responses: Array.isArray(parsed.adaptive_diagnostic_responses) ? parsed.adaptive_diagnostic_responses : [],
@@ -1733,6 +1742,140 @@ export function createFileRepository(filePath) {
     return adaptiveLearningPlanRepositoryDto(plan);
   }
 
+  async function getAdaptiveLearningPlanRevision(username, revision) {
+    await load();
+    const plan = state.adaptive_learning_plan_revisions.find((entry) => (
+      entry.username === username && Number(entry.revision) === Number(revision)
+    ));
+    return adaptiveLearningPlanRepositoryDto(plan);
+  }
+
+  async function getAdaptiveLearningSessionCreateReplay(username, candidate) {
+    await load();
+    const duplicate = state.adaptive_learning_sessions.find((entry) => (
+      entry.username === username && entry.create_idempotency_key === candidate.idempotencyKey
+    ));
+    if (!duplicate) return null;
+    if (duplicate.create_request_hash !== candidate.requestHash) {
+      throw new Error('ADAPTIVE_SESSION_IDEMPOTENCY_CONFLICT');
+    }
+    return adaptiveLearningSessionPublicDto(duplicate.created_response_snapshot);
+  }
+
+  async function createAdaptiveLearningSession(username, candidate) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      if (!state.users[username]) throw new Error('USER_NOT_FOUND');
+      assertAdaptiveSessionCreateCandidate(candidate);
+      const duplicate = state.adaptive_learning_sessions.find((entry) => (
+        entry.username === username && entry.create_idempotency_key === candidate.idempotencyKey
+      ));
+      if (duplicate) {
+        if (duplicate.create_request_hash !== candidate.requestHash) {
+          throw new Error('ADAPTIVE_SESSION_IDEMPOTENCY_CONFLICT');
+        }
+        return {
+          created: false, replayed: true,
+          session: adaptiveLearningSessionPublicDto(duplicate.created_response_snapshot),
+        };
+      }
+      const currentPlan = state.adaptive_learning_plan_revisions.find((entry) => (
+        entry.username === username && entry.current
+      ));
+      if (!currentPlan || currentPlan.id !== candidate.planId
+        || Number(currentPlan.revision) !== Number(candidate.planRevision)) {
+        throw new Error('ADAPTIVE_SESSION_PLAN_STALE');
+      }
+      const active = state.adaptive_learning_sessions.find((entry) => (
+        entry.username === username && ['created', 'in_progress'].includes(entry.status)
+      ));
+      if (active) throw new Error('ADAPTIVE_SESSION_ALREADY_CURRENT');
+      const row = {
+        ...adaptiveLearningSessionRepositoryDto(candidate.session),
+        username,
+        create_idempotency_key: candidate.idempotencyKey,
+        create_request_hash: candidate.requestHash,
+        created_response_snapshot: structuredClone(candidate.session),
+        replacement_idempotency_key: null,
+        replacement_request_hash: null,
+        replacement_response_snapshot: null,
+      };
+      state.adaptive_learning_sessions.push(row);
+      await persist();
+      return { created: true, replayed: false, session: adaptiveLearningSessionPublicDto(row) };
+    });
+  }
+
+  async function getCurrentAdaptiveLearningSession(username) {
+    await load();
+    const row = state.adaptive_learning_sessions
+      .filter((entry) => entry.username === username && ['created', 'in_progress'].includes(entry.status))
+      .sort((left, right) => new Date(right.created_at) - new Date(left.created_at))[0];
+    return adaptiveLearningSessionPublicDto(row);
+  }
+
+  async function getAdaptiveLearningSessionReplacementReplay(username, sessionId, candidate) {
+    await load();
+    const row = state.adaptive_learning_sessions.find((entry) => (
+      entry.username === username && entry.replacement_idempotency_key === candidate.idempotencyKey
+    ));
+    if (!row) return null;
+    if (row.id !== sessionId || row.replacement_request_hash !== candidate.requestHash) {
+      throw new Error('ADAPTIVE_SESSION_IDEMPOTENCY_CONFLICT');
+    }
+    return adaptiveLearningSessionPublicDto(row.replacement_response_snapshot);
+  }
+
+  async function replaceAdaptiveLearningSessionBlock(username, candidate) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      const replay = state.adaptive_learning_sessions.find((entry) => (
+        entry.username === username && entry.replacement_idempotency_key === candidate.idempotencyKey
+      ));
+      if (replay) {
+        if (replay.id !== candidate.sessionId || replay.replacement_request_hash !== candidate.requestHash) {
+          throw new Error('ADAPTIVE_SESSION_IDEMPOTENCY_CONFLICT');
+        }
+        return {
+          replaced: false, replayed: true,
+          session: adaptiveLearningSessionPublicDto(replay.replacement_response_snapshot),
+        };
+      }
+      const row = state.adaptive_learning_sessions.find((entry) => (
+        entry.username === username && entry.id === candidate.sessionId
+      ));
+      if (!row) throw new Error('ADAPTIVE_SESSION_NOT_FOUND');
+      if (row.replacement_idempotency_key || row.replacement) {
+        throw new Error('ADAPTIVE_SESSION_REPLACEMENT_ALREADY_USED');
+      }
+      if (Number(row.revision) !== Number(candidate.expectedRevision)) {
+        throw new Error('ADAPTIVE_SESSION_REVISION_CONFLICT');
+      }
+      assertAdaptiveSessionReplacementTransition(adaptiveLearningSessionPublicDto(row), candidate);
+      const updated = adaptiveLearningSessionRepositoryDto(candidate.session);
+      for (const [key, value] of Object.entries(updated)) row[key] = structuredClone(value);
+      row.replacement_idempotency_key = candidate.idempotencyKey;
+      row.replacement_request_hash = candidate.requestHash;
+      row.replacement_response_snapshot = structuredClone(candidate.session);
+      await persist();
+      return { replaced: true, replayed: false, session: adaptiveLearningSessionPublicDto(row) };
+    });
+  }
+
+  async function getAdaptiveLearningWeekUsage(username, weekStart) {
+    await load();
+    const totals = new Map();
+    for (const row of state.adaptive_learning_sessions) {
+      if (row.username !== username || row.week_start !== weekStart || row.status === 'abandoned') continue;
+      for (const block of row.blocks.filter((item) => item.kind === 'learning')) {
+        const current = totals.get(block.skillId) || { skillId: block.skillId, plannedMinutes: 0, completedMinutes: 0 };
+        current.plannedMinutes += block.plannedMinutes;
+        totals.set(block.skillId, current);
+      }
+    }
+    return [...totals.values()].sort((left, right) => left.skillId.localeCompare(right.skillId));
+  }
+
   async function startAdaptiveDiagnostic(username, diagnostic) {
     return serializeCoordinatedMutation(async () => {
       await load();
@@ -2224,6 +2367,10 @@ export function createFileRepository(filePath) {
         .filter((item) => item.username === username)
         .sort((left, right) => Number(left.revision) - Number(right.revision))
         .map(adaptiveLearningPlanRepositoryDto),
+      adaptive_learning_sessions: state.adaptive_learning_sessions
+        .filter((item) => item.username === username)
+        .sort((left, right) => new Date(left.created_at) - new Date(right.created_at))
+        .map(adaptiveLearningSessionRepositoryDto),
       adaptive_diagnostic_sessions: state.adaptive_diagnostic_sessions
         .filter((item) => item.username === username)
         .map(adaptiveDiagnosticExportDto),
@@ -2267,6 +2414,8 @@ export function createFileRepository(filePath) {
       delete state.adaptive_learning_profiles[username];
       delete state.adaptive_learning_skill_estimates[username];
       state.adaptive_learning_plan_revisions = state.adaptive_learning_plan_revisions
+        .filter((item) => item.username !== username);
+      state.adaptive_learning_sessions = state.adaptive_learning_sessions
         .filter((item) => item.username !== username);
       const diagnosticIds = new Set(state.adaptive_diagnostic_sessions
         .filter((item) => item.username === username).map((item) => item.id));
@@ -2398,6 +2547,13 @@ export function createFileRepository(filePath) {
     getAdaptiveLearningProfile,
     saveAdaptiveLearningPlan,
     getCurrentAdaptiveLearningPlan,
+    getAdaptiveLearningPlanRevision,
+    getAdaptiveLearningSessionCreateReplay,
+    createAdaptiveLearningSession,
+    getCurrentAdaptiveLearningSession,
+    getAdaptiveLearningSessionReplacementReplay,
+    replaceAdaptiveLearningSessionBlock,
+    getAdaptiveLearningWeekUsage,
     startAdaptiveDiagnostic,
     getAdaptiveDiagnosticStartClaim,
     getCurrentAdaptiveDiagnostic,

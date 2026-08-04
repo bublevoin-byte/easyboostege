@@ -14,6 +14,14 @@ import {
 } from '../adaptive-learning/plan.js';
 import { adaptiveLearningPlanPublicDto } from '../adaptive-learning/plan-dto.js';
 import {
+  ADAPTIVE_ACTIVITY_REGISTRY,
+  adaptiveSessionWeekStart,
+  buildAdaptiveSessionPreview,
+  buildAdaptiveSessionReplacement,
+  createAdaptiveLearningSessionFromPreview,
+} from '../adaptive-learning/session.js';
+import { adaptiveLearningSessionPublicDto } from '../adaptive-learning/session-dto.js';
+import {
   DIAGNOSTIC_REGISTRY,
   getDiagnosticItem,
   getDiagnosticPolicy,
@@ -23,11 +31,15 @@ import {
   adaptiveDiagnosticAnswerSchema,
   adaptiveDiagnosticStartSchema,
   adaptiveGoalSchema,
+  adaptiveSessionCreateSchema,
+  adaptiveSessionPreviewSchema,
+  adaptiveSessionReplacementSchema,
   isFutureExamDate,
 } from '../validation/adaptive-learning.js';
 
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9][A-Za-z0-9._:-]{15,119}$/u;
 const DIAGNOSTIC_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const SESSION_ID = DIAGNOSTIC_ID;
 const DIAGNOSTIC_START_RATE_LIMIT = 12;
 const DIAGNOSTIC_START_RATE_WINDOW_MS = 60 * 60 * 1_000;
 const DIAGNOSTIC_START_RATE_MAX_USERS = 10_000;
@@ -85,6 +97,7 @@ export function createAdaptiveLearningRoutes({
   now = () => new Date(),
   enabled = false,
   diagnosticRegistry = DIAGNOSTIC_REGISTRY,
+  activityRegistry = ADAPTIVE_ACTIVITY_REGISTRY,
 }) {
   const router = express.Router();
   if (!enabled) return router;
@@ -221,6 +234,160 @@ export function createAdaptiveLearningRoutes({
       }
       return res.json(result);
     } catch (error) { return next(error); }
+  });
+
+  function sessionRequestHash(value) {
+    return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
+  }
+
+  async function sessionPreview(username, durationMinutes, instant = now()) {
+    const result = await overview(username);
+    if (!result.goal || !result.plan) {
+      throw Object.assign(new Error('ADAPTIVE_GOAL_REQUIRED'), { status: 409, code: 'ADAPTIVE_GOAL_REQUIRED' });
+    }
+    const weekStart = adaptiveSessionWeekStart(instant);
+    const weekUsage = await db.getAdaptiveLearningWeekUsage(username, weekStart);
+    return buildAdaptiveSessionPreview({
+      plan: result.plan,
+      goal: result.goal,
+      profile: result.profile,
+      weekUsage,
+      durationMinutes,
+      now: instant,
+      registry: activityRegistry,
+    });
+  }
+
+  function sessionError(res, error) {
+    const known = {
+      ADAPTIVE_GOAL_REQUIRED: [409, 'ADAPTIVE_GOAL_REQUIRED'],
+      ADAPTIVE_SESSION_COVERAGE_GAP: [409, 'ADAPTIVE_SESSION_COVERAGE_GAP'],
+      ADAPTIVE_SESSION_NO_CONTENT: [409, 'ADAPTIVE_SESSION_NO_CONTENT'],
+      ADAPTIVE_SESSION_NO_REPLACEMENT: [409, 'ADAPTIVE_SESSION_NO_REPLACEMENT'],
+      ADAPTIVE_SESSION_PREVIEW_STALE: [409, 'ADAPTIVE_SESSION_PREVIEW_STALE'],
+      ADAPTIVE_SESSION_PLAN_STALE: [409, 'ADAPTIVE_SESSION_PLAN_STALE'],
+      ADAPTIVE_SESSION_ALREADY_CURRENT: [409, 'ADAPTIVE_SESSION_ALREADY_CURRENT'],
+      ADAPTIVE_SESSION_REPLACEMENT_ALREADY_USED: [409, 'ADAPTIVE_SESSION_REPLACEMENT_ALREADY_USED'],
+      ADAPTIVE_SESSION_REVISION_CONFLICT: [409, 'ADAPTIVE_SESSION_REVISION_CONFLICT'],
+      ADAPTIVE_SESSION_IDEMPOTENCY_CONFLICT: [409, 'IDEMPOTENCY_CONFLICT'],
+      ADAPTIVE_SESSION_BLOCK_NOT_FOUND: [404, 'ADAPTIVE_SESSION_NOT_FOUND'],
+      ADAPTIVE_SESSION_NOT_FOUND: [404, 'ADAPTIVE_SESSION_NOT_FOUND'],
+    }[error?.message || error?.code];
+    if (!known) return false;
+    res.status(known[0]).json({ error: { code: known[1] } });
+    return true;
+  }
+
+  router.post('/api/v1/adaptive-learning/sessions/preview', auth, async (req, res, next) => {
+    const parsed = adaptiveSessionPreviewSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: { code: 'VALIDATION_ERROR' } });
+    try {
+      const instant = now();
+      const preview = await sessionPreview(req.user, parsed.data.durationMinutes, instant);
+      res.setHeader('Cache-Control', 'no-store');
+      return res.json({ serverTime: instant.toISOString(), preview });
+    } catch (error) {
+      if (sessionError(res, error)) return undefined;
+      return next(error);
+    }
+  });
+
+  router.post('/api/v1/adaptive-learning/sessions', auth, async (req, res, next) => {
+    const parsed = adaptiveSessionCreateSchema.safeParse(req.body);
+    const idempotencyKey = String(req.headers['idempotency-key'] || '');
+    if (!parsed.success || !IDEMPOTENCY_KEY.test(idempotencyKey)) {
+      return res.status(400).json({ error: { code: 'VALIDATION_ERROR' } });
+    }
+    const hash = sessionRequestHash([parsed.data.durationMinutes, parsed.data.previewFingerprint]);
+    try {
+      const replay = await db.getAdaptiveLearningSessionCreateReplay(req.user, {
+        idempotencyKey, requestHash: hash,
+      });
+      if (replay) return res.json({ created: false, replayed: true, session: replay });
+      const instant = now();
+      const preview = await sessionPreview(req.user, parsed.data.durationMinutes, instant);
+      if (preview.previewFingerprint !== parsed.data.previewFingerprint) {
+        throw new Error('ADAPTIVE_SESSION_PREVIEW_STALE');
+      }
+      const session = createAdaptiveLearningSessionFromPreview(preview, {
+        id: crypto.randomUUID(), now: instant,
+      });
+      const saved = await db.createAdaptiveLearningSession(req.user, {
+        idempotencyKey,
+        requestHash: hash,
+        planId: preview.planId,
+        planRevision: preview.planRevision,
+        previewFingerprint: preview.previewFingerprint,
+        session,
+        now: instant,
+      });
+      return res.status(saved.created ? 201 : 200).json({
+        created: saved.created,
+        replayed: saved.replayed,
+        session: adaptiveLearningSessionPublicDto(saved.session),
+      });
+    } catch (error) {
+      if (sessionError(res, error)) return undefined;
+      return next(error);
+    }
+  });
+
+  router.get('/api/v1/adaptive-learning/sessions/current', auth, async (req, res, next) => {
+    try {
+      res.setHeader('Cache-Control', 'no-store');
+      const session = await db.getCurrentAdaptiveLearningSession(req.user);
+      if (!session) return res.status(404).json({ error: { code: 'ADAPTIVE_SESSION_NOT_FOUND' } });
+      return res.json({ session: adaptiveLearningSessionPublicDto(session) });
+    } catch (error) { return next(error); }
+  });
+
+  router.post('/api/v1/adaptive-learning/sessions/:sessionId/replace', auth, async (req, res, next) => {
+    const parsed = adaptiveSessionReplacementSchema.safeParse(req.body);
+    const idempotencyKey = String(req.headers['idempotency-key'] || '');
+    if (!parsed.success || !IDEMPOTENCY_KEY.test(idempotencyKey)
+      || !SESSION_ID.test(req.params.sessionId)) {
+      return res.status(400).json({ error: { code: 'VALIDATION_ERROR' } });
+    }
+    const hash = sessionRequestHash([parsed.data.blockId, parsed.data.reason]);
+    try {
+      const replay = await db.getAdaptiveLearningSessionReplacementReplay(
+        req.user,
+        req.params.sessionId,
+        { idempotencyKey, requestHash: hash },
+      );
+      if (replay) return res.json({ replaced: false, replayed: true, session: replay });
+      const current = await db.getCurrentAdaptiveLearningSession(req.user);
+      if (!current || current.id !== req.params.sessionId) throw new Error('ADAPTIVE_SESSION_NOT_FOUND');
+      const storedPlan = await db.getAdaptiveLearningPlanRevision(req.user, current.planRevision);
+      if (!storedPlan || storedPlan.id !== current.planId) throw new Error('ADAPTIVE_SESSION_PLAN_STALE');
+      const instant = now();
+      const session = buildAdaptiveSessionReplacement({
+        session: current,
+        plan: adaptiveLearningPlanPublicDto(storedPlan),
+        blockId: parsed.data.blockId,
+        reason: parsed.data.reason,
+        now: instant,
+        registry: activityRegistry,
+      });
+      const saved = await db.replaceAdaptiveLearningSessionBlock(req.user, {
+        sessionId: current.id,
+        expectedRevision: current.revision,
+        blockId: parsed.data.blockId,
+        reason: parsed.data.reason,
+        idempotencyKey,
+        requestHash: hash,
+        session,
+        now: instant,
+      });
+      return res.json({
+        replaced: saved.replaced,
+        replayed: saved.replayed,
+        session: adaptiveLearningSessionPublicDto(saved.session),
+      });
+    } catch (error) {
+      if (sessionError(res, error)) return undefined;
+      return next(error);
+    }
   });
 
   router.post('/api/v1/adaptive-learning/diagnostics/start', auth, async (req, res, next) => {

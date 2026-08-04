@@ -20,6 +20,14 @@ import {
 } from '../adaptive-learning/diagnostic-claims.js';
 import { adaptiveLearningPlanRepositoryDto } from '../adaptive-learning/plan-dto.js';
 import {
+  adaptiveLearningSessionPublicDto,
+  adaptiveLearningSessionRepositoryDto,
+} from '../adaptive-learning/session-dto.js';
+import {
+  assertAdaptiveSessionCreateCandidate,
+  assertAdaptiveSessionReplacementTransition,
+} from '../adaptive-learning/session.js';
+import {
   assertAdaptivePlanAuthoritativeCandidate,
   assertAdaptivePlanDuplicateReplay,
   assertAdaptivePlanPersistenceCandidate,
@@ -2146,6 +2154,191 @@ export function createPostgresRepository(connectionString, {
     return adaptiveLearningPlanRepositoryDto(result.rows[0]);
   }
 
+  async function getAdaptiveLearningPlanRevision(username, revision) {
+    const result = await pool.query(
+      `SELECT * FROM adaptive_learning_plan_revisions
+       WHERE username = $1 AND revision = $2`, [username, revision],
+    );
+    return adaptiveLearningPlanRepositoryDto(result.rows[0]);
+  }
+
+  async function getAdaptiveLearningSessionCreateReplay(username, candidate) {
+    const result = await pool.query(
+      `SELECT create_request_hash, created_response_snapshot
+       FROM adaptive_learning_sessions WHERE username = $1 AND create_idempotency_key = $2`,
+      [username, candidate.idempotencyKey],
+    );
+    if (!result.rowCount) return null;
+    if (result.rows[0].create_request_hash !== candidate.requestHash) {
+      throw new Error('ADAPTIVE_SESSION_IDEMPOTENCY_CONFLICT');
+    }
+    return adaptiveLearningSessionPublicDto(result.rows[0].created_response_snapshot);
+  }
+
+  async function createAdaptiveLearningSession(username, candidate) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const owner = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+      if (!owner.rowCount) throw new Error('USER_NOT_FOUND');
+      assertAdaptiveSessionCreateCandidate(candidate);
+      const duplicate = await client.query(
+        `SELECT create_request_hash, created_response_snapshot
+         FROM adaptive_learning_sessions WHERE username = $1 AND create_idempotency_key = $2`,
+        [username, candidate.idempotencyKey],
+      );
+      if (duplicate.rowCount) {
+        if (duplicate.rows[0].create_request_hash !== candidate.requestHash) {
+          throw new Error('ADAPTIVE_SESSION_IDEMPOTENCY_CONFLICT');
+        }
+        await client.query('COMMIT');
+        return {
+          created: false, replayed: true,
+          session: adaptiveLearningSessionPublicDto(duplicate.rows[0].created_response_snapshot),
+        };
+      }
+      const currentPlan = await client.query(
+        `SELECT id, revision FROM adaptive_learning_plan_revisions
+         WHERE username = $1 AND current`, [username],
+      );
+      if (!currentPlan.rowCount || currentPlan.rows[0].id !== candidate.planId
+        || Number(currentPlan.rows[0].revision) !== Number(candidate.planRevision)) {
+        throw new Error('ADAPTIVE_SESSION_PLAN_STALE');
+      }
+      const active = await client.query(
+        `SELECT id FROM adaptive_learning_sessions
+         WHERE username = $1 AND status IN ('created', 'in_progress')`, [username],
+      );
+      if (active.rowCount) throw new Error('ADAPTIVE_SESSION_ALREADY_CURRENT');
+      const session = adaptiveLearningSessionRepositoryDto(candidate.session);
+      const inserted = await client.query(
+        `INSERT INTO adaptive_learning_sessions
+         (id, username, session_version, revision, plan_id, plan_revision, preview_fingerprint,
+          composer_policy_version, content_registry_version, taxonomy_version, week_start,
+          duration_minutes, learning_minutes, break_minutes, weekly_budget_snapshot, blocks,
+          status, current_block_id, completed_learning_minutes, replacement,
+          create_idempotency_key, create_request_hash, created_response_snapshot,
+          created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+                 $15::jsonb, $16::jsonb, $17, $18, $19, $20::jsonb, $21, $22,
+                 $23::jsonb, $24, $25)
+         RETURNING *`,
+        [session.id, username, session.session_version, session.revision, session.plan_id,
+          session.plan_revision, session.preview_fingerprint, session.composer_policy_version,
+          session.content_registry_version, session.taxonomy_version, session.week_start,
+          session.duration_minutes, session.learning_minutes, session.break_minutes,
+          JSON.stringify(session.weekly_budget_snapshot), JSON.stringify(session.blocks), session.status,
+          session.current_block_id, session.completed_learning_minutes,
+          session.replacement == null ? null : JSON.stringify(session.replacement),
+          candidate.idempotencyKey, candidate.requestHash, JSON.stringify(candidate.session),
+          session.created_at, session.updated_at],
+      );
+      await client.query('COMMIT');
+      return { created: true, replayed: false, session: adaptiveLearningSessionPublicDto(inserted.rows[0]) };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async function getCurrentAdaptiveLearningSession(username) {
+    const result = await pool.query(
+      `SELECT * FROM adaptive_learning_sessions
+       WHERE username = $1 AND status IN ('created', 'in_progress')
+       ORDER BY created_at DESC LIMIT 1`, [username],
+    );
+    return adaptiveLearningSessionPublicDto(result.rows[0]);
+  }
+
+  async function getAdaptiveLearningSessionReplacementReplay(username, sessionId, candidate) {
+    const result = await pool.query(
+      `SELECT id, replacement_request_hash, replacement_response_snapshot
+       FROM adaptive_learning_sessions WHERE username = $1 AND replacement_idempotency_key = $2`,
+      [username, candidate.idempotencyKey],
+    );
+    if (!result.rowCount) return null;
+    if (result.rows[0].id !== sessionId
+      || result.rows[0].replacement_request_hash !== candidate.requestHash) {
+      throw new Error('ADAPTIVE_SESSION_IDEMPOTENCY_CONFLICT');
+    }
+    return adaptiveLearningSessionPublicDto(result.rows[0].replacement_response_snapshot);
+  }
+
+  async function replaceAdaptiveLearningSessionBlock(username, candidate) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const owner = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+      if (!owner.rowCount) throw new Error('ADAPTIVE_SESSION_NOT_FOUND');
+      const replay = await client.query(
+        `SELECT id, replacement_request_hash, replacement_response_snapshot
+         FROM adaptive_learning_sessions
+         WHERE username = $1 AND replacement_idempotency_key = $2 FOR UPDATE`,
+        [username, candidate.idempotencyKey],
+      );
+      if (replay.rowCount) {
+        if (replay.rows[0].id !== candidate.sessionId
+          || replay.rows[0].replacement_request_hash !== candidate.requestHash) {
+          throw new Error('ADAPTIVE_SESSION_IDEMPOTENCY_CONFLICT');
+        }
+        await client.query('COMMIT');
+        return {
+          replaced: false, replayed: true,
+          session: adaptiveLearningSessionPublicDto(replay.rows[0].replacement_response_snapshot),
+        };
+      }
+      const existing = await client.query(
+        'SELECT * FROM adaptive_learning_sessions WHERE username = $1 AND id = $2 FOR UPDATE',
+        [username, candidate.sessionId],
+      );
+      if (!existing.rowCount) throw new Error('ADAPTIVE_SESSION_NOT_FOUND');
+      const row = existing.rows[0];
+      if (row.replacement_idempotency_key || row.replacement) {
+        throw new Error('ADAPTIVE_SESSION_REPLACEMENT_ALREADY_USED');
+      }
+      if (Number(row.revision) !== Number(candidate.expectedRevision)) {
+        throw new Error('ADAPTIVE_SESSION_REVISION_CONFLICT');
+      }
+      assertAdaptiveSessionReplacementTransition(adaptiveLearningSessionPublicDto(row), candidate);
+      const session = adaptiveLearningSessionRepositoryDto(candidate.session);
+      const updated = await client.query(
+        `UPDATE adaptive_learning_sessions
+         SET revision = $3, weekly_budget_snapshot = $4::jsonb, blocks = $5::jsonb,
+             replacement = $6::jsonb, replacement_idempotency_key = $7,
+             replacement_request_hash = $8, replacement_response_snapshot = $9::jsonb,
+             updated_at = $10
+         WHERE username = $1 AND id = $2
+         RETURNING *`,
+        [username, candidate.sessionId, session.revision,
+          JSON.stringify(session.weekly_budget_snapshot), JSON.stringify(session.blocks),
+          JSON.stringify(session.replacement), candidate.idempotencyKey, candidate.requestHash,
+          JSON.stringify(candidate.session), session.updated_at],
+      );
+      await client.query('COMMIT');
+      return { replaced: true, replayed: false, session: adaptiveLearningSessionPublicDto(updated.rows[0]) };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async function getAdaptiveLearningWeekUsage(username, weekStart) {
+    const result = await pool.query(
+      `SELECT blocks FROM adaptive_learning_sessions
+       WHERE username = $1 AND week_start = $2 AND status <> 'abandoned'`,
+      [username, weekStart],
+    );
+    const totals = new Map();
+    for (const row of result.rows) {
+      for (const block of row.blocks.filter((item) => item.kind === 'learning')) {
+        const current = totals.get(block.skillId) || { skillId: block.skillId, plannedMinutes: 0, completedMinutes: 0 };
+        current.plannedMinutes += block.plannedMinutes;
+        totals.set(block.skillId, current);
+      }
+    }
+    return [...totals.values()].sort((left, right) => left.skillId.localeCompare(right.skillId));
+  }
+
   async function readAdaptiveDiagnostic(queryable, username, diagnosticId = null) {
     const result = await queryable.query(
       `SELECT diagnostic.*,
@@ -2686,7 +2879,7 @@ export function createPostgresRepository(connectionString, {
   }
 
   async function exportUserData(username) {
-    const [account, progress, privacyConsent, subscriptionEvents, subscriptionEntitlements, voiceTutorSessions, voiceTutorRecoveries, voiceTutorRepeats, voiceTutorRepeatAttempts, voiceTutorReports, ruleCards, paymentRequests, writingAttempts, speakingAttempts, generatedTasks, moduleAttempts, progressSummary, wordProgress, errorBank, adaptiveGoals, adaptiveSnapshot, adaptivePlanRevisions, adaptiveDiagnosticSessions, adaptiveDiagnosticResponses, aiRequests, auditLog] = await Promise.all([
+    const [account, progress, privacyConsent, subscriptionEvents, subscriptionEntitlements, voiceTutorSessions, voiceTutorRecoveries, voiceTutorRepeats, voiceTutorRepeatAttempts, voiceTutorReports, ruleCards, paymentRequests, writingAttempts, speakingAttempts, generatedTasks, moduleAttempts, progressSummary, wordProgress, errorBank, adaptiveGoals, adaptiveSnapshot, adaptivePlanRevisions, adaptiveSessions, adaptiveDiagnosticSessions, adaptiveDiagnosticResponses, aiRequests, auditLog] = await Promise.all([
       pool.query('SELECT username, telegram_id, role, trial_used, subscription_until, created_at, updated_at FROM users WHERE username = $1', [username]),
       pool.query('SELECT data, updated_at FROM user_progress WHERE username = $1', [username]),
       pool.query('SELECT text_processing, voice_processing, policy_version, text_consented_at, voice_consented_at, updated_at FROM privacy_consents WHERE username = $1', [username]),
@@ -2729,6 +2922,8 @@ export function createPostgresRepository(connectionString, {
       readAdaptiveLearningProfile(pool, username, { onAdaptiveProfileSnapshot }),
       pool.query(`SELECT * FROM adaptive_learning_plan_revisions
                   WHERE username = $1 ORDER BY revision`, [username]),
+      pool.query(`SELECT * FROM adaptive_learning_sessions
+                  WHERE username = $1 ORDER BY created_at`, [username]),
       pool.query(`SELECT id, catalog_version, status, current_item_id, answered_items, correct_items,
                          stop_reason, started_at, expires_at, completed_at, updated_at
                   FROM adaptive_diagnostic_sessions WHERE username = $1 ORDER BY started_at`, [username]),
@@ -2772,6 +2967,7 @@ export function createPostgresRepository(connectionString, {
       adaptive_learning_profile: adaptiveExport.profile,
       adaptive_learning_skill_estimates: adaptiveExport.estimates,
       adaptive_learning_plan_revisions: adaptivePlanRevisions.rows.map(adaptiveLearningPlanRepositoryDto),
+      adaptive_learning_sessions: adaptiveSessions.rows.map(adaptiveLearningSessionRepositoryDto),
       adaptive_diagnostic_sessions: adaptiveDiagnosticSessions.rows.map(adaptiveDiagnosticExportDto),
       adaptive_diagnostic_responses: adaptiveDiagnosticResponses.rows.map(adaptiveDiagnosticResponseExportDto),
       ai_requests: aiRequests.rows,
@@ -2912,6 +3108,13 @@ export function createPostgresRepository(connectionString, {
     getAdaptiveLearningProfile,
     saveAdaptiveLearningPlan,
     getCurrentAdaptiveLearningPlan,
+    getAdaptiveLearningPlanRevision,
+    getAdaptiveLearningSessionCreateReplay,
+    createAdaptiveLearningSession,
+    getCurrentAdaptiveLearningSession,
+    getAdaptiveLearningSessionReplacementReplay,
+    replaceAdaptiveLearningSessionBlock,
+    getAdaptiveLearningWeekUsage,
     startAdaptiveDiagnostic,
     getAdaptiveDiagnosticStartClaim,
     getCurrentAdaptiveDiagnostic,

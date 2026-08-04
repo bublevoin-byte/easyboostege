@@ -4,6 +4,7 @@
  * Числа он берёт из того же состояния, что и плитки главного экрана, — считать заново нечего.
  */
 import {registerRouteHook} from '../router.js';
+import {launchAdaptiveActivity} from '../adaptive-activity-launch.js';
 import {S,apiGet,apiMessage,apiPost,apiPostIdempotent,apiPut,progressModule,setTxt,setW} from '../app.js';
 
 const BAR_IDS={words:'pb_words',gram:'pb_gram',read:'pb_read',listen:'pb_listen',speak:'pb_speak'};
@@ -16,6 +17,7 @@ function recoveryStateLabel(state){return state==='recovered'?'Восстано�
 function repeatAttemptId(){return globalThis.crypto&&typeof globalThis.crypto.randomUUID==='function'?globalThis.crypto.randomUUID():('00000000-0000-4000-8000-'+Date.now().toString(16).padStart(12,'0').slice(-12))}
 function goalIdempotencyKey(){return globalThis.crypto&&typeof globalThis.crypto.randomUUID==='function'?globalThis.crypto.randomUUID():('adaptive-goal-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2))}
 function diagnosticIdempotencyKey(kind){return globalThis.crypto&&typeof globalThis.crypto.randomUUID==='function'?globalThis.crypto.randomUUID():('adaptive-'+kind+'-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2))}
+function sessionIdempotencyKey(kind){return globalThis.crypto&&typeof globalThis.crypto.randomUUID==='function'?globalThis.crypto.randomUUID():('adaptive-session-'+kind+'-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2))}
 
 const adaptiveModuleLabels={vocabulary:'Лексика',grammar:'Грамматика',reading:'Чтение',listening:'Аудирование',writing:'Письмо',speaking:'Говорение'};
 const adaptiveReasonLabels={high_uncertainty:'нужно уточнить уровень',due_review:'пора проверить сохранение навыка',critical_retention_expiry:'срочное повторение скоро потеряет актуальность',target_gap:'есть разрыв до цели',high_ege_impact:'сильно влияет на ЕГЭ',deadline_pressure:'экзамен уже близко',maintenance:'поддерживаем навык'};
@@ -44,6 +46,31 @@ function drawAdaptivePlan(payload){
   drawAdaptiveForecast(payload&&payload.plan);
   const start=document.getElementById('adaptive_diagnostic_start');if(start)start.hidden=!profile.needsDiagnostic;
 }
+
+let adaptiveSessionPreview=null;
+let adaptiveCurrentSession=null;
+const adaptiveSessionReasonLabels={due_review:'пора повторить',prerequisite_support:'укрепляет основу',weekly_budget_deficit:'закрывает недельный дефицит',content_coverage_fallback:'замещает недоступный навык ближайшей практикой',high_uncertainty_probe:'уточняет уровень',target_gap:'приближает к цели',plan_priority:'приоритет плана',learner_replacement:'замена по вашему выбору',replacement_too_difficult:'подобрано проще',replacement_too_easy:'подобрано сложнее',replacement_not_relevant:'подобрана другая тема',replacement_accessibility:'подобран доступный формат'};
+function adaptiveSessionDuration(){const custom=document.getElementById('adaptive_session_custom');const customValue=Number(custom&&custom.value);if(custom&&custom.value!=='')return customValue;const selected=document.querySelector('input[name="adaptive_session_duration"]:checked');return Number(selected&&selected.value)}
+function validAdaptiveSessionDuration(value){return Number.isInteger(value)&&value>=15&&value<=120&&value%5===0}
+function adaptiveSessionBlockTitle(block){if(block.kind==='break')return 'Перерыв · '+block.plannedMinutes+' мин';return block.skillLabel+' — '+block.activityLabel+' · '+block.plannedMinutes+' мин'}
+function drawAdaptiveSession(session,{preview=false}={}){
+  const list=document.getElementById('adaptive_session_blocks');const notice=document.getElementById('adaptive_session_notice');const create=document.getElementById('adaptive_session_create');const start=document.getElementById('adaptive_session_start');const previewButton=document.getElementById('adaptive_session_preview');const custom=document.getElementById('adaptive_session_custom');if(!list||!notice||!create||!start||!previewButton||!custom)return;
+  list.replaceChildren();create.hidden=!preview;start.hidden=preview||!session;
+  if(!session){adaptiveSessionPreview=null;adaptiveCurrentSession=null;previewButton.disabled=false;custom.disabled=false;document.querySelectorAll('input[name="adaptive_session_duration"]').forEach(function(input){input.disabled=false});notice.textContent='Выберите время, чтобы составить занятие.';return}
+  if(preview){adaptiveSessionPreview=session;adaptiveCurrentSession=null;const gaps=session.weeklyBudgetSnapshot&&session.weeklyBudgetSnapshot.coverageGaps||[];notice.textContent='Предпросмотр: '+session.learningMinutes+' мин учёбы'+(session.breakMinutes?' и '+session.breakMinutes+' мин перерыва.':'.')+(gaps.length?' Для '+gaps.length+' навыков пока нет точного встроенного задания; их доля явно отмечена и направлена в ближайшую доступную практику, прежде всего того же раздела.':'')}else{adaptiveCurrentSession=session;adaptiveSessionPreview=null;notice.textContent='Занятие сохранено. Можно начать с первого задания.'}
+  previewButton.disabled=!preview;custom.disabled=!preview;document.querySelectorAll('input[name="adaptive_session_duration"]').forEach(function(input){input.disabled=!preview});
+  (session.blocks||[]).forEach(function(block){const item=document.createElement('li');item.setAttribute('style','border:1px solid #E7E2DA;border-radius:12px;padding:9px 10px;background:'+(block.kind==='break'?'#F6F3EE':'#fff')+';');item.appendChild(text('div',adaptiveSessionBlockTitle(block),'font-weight:750;font-size:11.5px;color:#2B2B2B;'));if(block.kind==='learning'){item.dataset.contentRef=block.contentRef;item.dataset.launchKind=block.launch.kind;const reasons=(block.reasonCodes||[]).map(function(code){return adaptiveSessionReasonLabels[code]||code}).join(' · ');item.appendChild(text('div',reasons,'margin-top:3px;font-weight:600;font-size:9.5px;line-height:1.35;color:#6A6E75;'));if(!preview&&!session.replacement){const controls=document.createElement('div');controls.setAttribute('style','display:flex;gap:6px;margin-top:7px;');const reason=document.createElement('select');reason.setAttribute('aria-label','Причина замены блока');[['too_difficult','Слишком сложно'],['too_easy','Слишком легко'],['not_relevant','Не подходит тема'],['accessibility','Нужен другой формат']].forEach(function(option){const node=document.createElement('option');node.value=option[0];node.textContent=option[1];reason.appendChild(node)});const replace=document.createElement('button');replace.type='button';replace.textContent='Заменить';replace.setAttribute('style','border:1px solid #D8D1C7;border-radius:9px;background:#fff;padding:6px 8px;font:700 10px Manrope;color:#52565E;cursor:pointer;');replace.addEventListener('click',async function(){replace.disabled=true;notice.textContent='Подбираем другой блок…';const key=replace.dataset.pendingKey||sessionIdempotencyKey('replace');replace.dataset.pendingKey=key;try{const result=await apiPostIdempotent('/api/v1/adaptive-learning/sessions/'+encodeURIComponent(session.id)+'/replace',{blockId:block.id,reason:reason.value},key);delete replace.dataset.pendingKey;drawAdaptiveSession(result.session)}catch(error){notice.textContent=apiMessage(error,'request')}finally{replace.disabled=false}});controls.appendChild(reason);controls.appendChild(replace);item.appendChild(controls)}}list.appendChild(item)});
+}
+
+function bindAdaptiveSessionComposer(){
+  const previewButton=document.getElementById('adaptive_session_preview');const createButton=document.getElementById('adaptive_session_create');const startButton=document.getElementById('adaptive_session_start');const custom=document.getElementById('adaptive_session_custom');const notice=document.getElementById('adaptive_session_notice');if(!previewButton||!createButton||!startButton||!custom||!notice||previewButton.dataset.bound)return;previewButton.dataset.bound='true';
+  document.querySelectorAll('input[name="adaptive_session_duration"]').forEach(function(input){input.addEventListener('change',function(){custom.value='';adaptiveSessionPreview=null;createButton.hidden=true})});custom.addEventListener('input',function(){if(custom.value!=='')document.querySelectorAll('input[name="adaptive_session_duration"]').forEach(function(input){input.checked=false});adaptiveSessionPreview=null;createButton.hidden=true});
+  previewButton.addEventListener('click',async function(){const duration=adaptiveSessionDuration();if(!validAdaptiveSessionDuration(duration)){notice.textContent='Выберите от 15 до 120 минут с шагом 5 минут.';custom.focus();return}previewButton.disabled=true;notice.textContent='Составляем занятие по недельному плану…';try{const result=await apiPost('/api/v1/adaptive-learning/sessions/preview',{durationMinutes:duration});drawAdaptiveSession(result.preview,{preview:true})}catch(error){drawAdaptiveSession(null);notice.textContent=apiMessage(error,'request')}finally{previewButton.disabled=false}});
+  createButton.addEventListener('click',async function(){if(!adaptiveSessionPreview)return;createButton.disabled=true;notice.textContent='Сохраняем занятие…';const key=createButton.dataset.pendingKey||sessionIdempotencyKey('create');createButton.dataset.pendingKey=key;try{const result=await apiPostIdempotent('/api/v1/adaptive-learning/sessions',{durationMinutes:adaptiveSessionPreview.durationMinutes,previewFingerprint:adaptiveSessionPreview.previewFingerprint},key);delete createButton.dataset.pendingKey;drawAdaptiveSession(result.session)}catch(error){notice.textContent=apiMessage(error,'request')}finally{createButton.disabled=false}});
+  startButton.addEventListener('click',async function(){const session=adaptiveCurrentSession;if(!session)return;const first=(session.blocks||[]).find(function(block){return block.kind==='learning'});if(!first)return;startButton.disabled=true;notice.textContent='Открываем точное задание…';try{if(!await launchAdaptiveActivity(first.launch,first.contentRef))throw new Error('ADAPTIVE_ACTIVITY_LAUNCH_FAILED')}catch(error){notice.textContent='Не удалось открыть это задание. Обновите занятие и попробуйте снова.'}finally{startButton.disabled=false}});
+}
+
+async function resumeAdaptiveSession(){try{const result=await apiGet('/api/v1/adaptive-learning/sessions/current');drawAdaptiveSession(result.session)}catch(error){if(Number(error&&error.status)===404)drawAdaptiveSession(null);else{const notice=document.getElementById('adaptive_session_notice');if(notice)notice.textContent=apiMessage(error,'request')}}}
 
 function drawAdaptiveDiagnostic(payload){
   const section=document.getElementById('adaptive_diagnostic');const start=document.getElementById('adaptive_diagnostic_start');const form=document.getElementById('adaptive_diagnostic_form');const fieldset=document.getElementById('adaptive_diagnostic_question');const prompt=document.getElementById('adaptive_diagnostic_prompt');const choices=document.getElementById('adaptive_diagnostic_choices');const audio=document.getElementById('adaptive_diagnostic_audio');const complete=document.getElementById('adaptive_diagnostic_complete');const notice=document.getElementById('adaptive_diagnostic_notice');const progress=document.getElementById('adaptive_diagnostic_progress');const label=document.getElementById('adaptive_diagnostic_progress_label');const timing=document.getElementById('adaptive_diagnostic_timing');
@@ -81,6 +108,7 @@ async function renderAdaptivePlan(){
   const root=document.getElementById('adaptive_plan');const form=document.getElementById('adaptive_goal_form');const notice=document.getElementById('adaptive_goal_notice');if(!root||!form||!notice)return;
   root.hidden=!(window.__sub?.features?.adaptive_learning===true);if(root.hidden)return;
   bindAdaptiveDiagnostic();
+  bindAdaptiveSessionComposer();
   if(!form.dataset.bound){
     form.dataset.bound='true';form.addEventListener('input',function(){delete form.dataset.pendingKey});
     form.addEventListener('submit',async function(event){event.preventDefault();const button=form.querySelector('button[type="submit"]');button.disabled=true;notice.textContent='Сохраняем цель…';
@@ -90,7 +118,7 @@ async function renderAdaptivePlan(){
       catch(error){notice.textContent=apiMessage(error,'request')}finally{button.disabled=false}
     });
   }
-  try{const payload=await apiGet('/api/v1/adaptive-learning/overview');drawAdaptivePlan(payload);notice.textContent='';if(payload.profile&&payload.profile.needsDiagnostic)await resumeAdaptiveDiagnostic();else drawAdaptiveDiagnostic(null)}catch(error){notice.textContent='План сейчас недоступен онлайн. Сохранённый прогресс остаётся на устройстве.'}
+  try{const payload=await apiGet('/api/v1/adaptive-learning/overview');drawAdaptivePlan(payload);notice.textContent='';if(payload.goal)await resumeAdaptiveSession();else drawAdaptiveSession(null);if(payload.profile&&payload.profile.needsDiagnostic)await resumeAdaptiveDiagnostic();else drawAdaptiveDiagnostic(null)}catch(error){notice.textContent='План сейчас недоступен онлайн. Сохранённый прогресс остаётся на устройстве.'}
 }
 
 async function submitRepeat(repeat,input,button,notice){
@@ -123,4 +151,4 @@ async function renderRecoveryMap(){const root=document.getElementById('voice_rec
 
 registerRouteHook(function(id){if(id==='scr10')renderProgress()});
 
-export {drawAdaptiveDiagnostic,drawAdaptiveForecast,drawAdaptivePlan,drawRecoveryMap,renderAdaptivePlan,renderProgress,renderRecoveryMap};
+export {drawAdaptiveDiagnostic,drawAdaptiveForecast,drawAdaptivePlan,drawAdaptiveSession,drawRecoveryMap,renderAdaptivePlan,renderProgress,renderRecoveryMap};

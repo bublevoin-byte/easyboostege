@@ -890,6 +890,28 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
           <div id="adaptive_plan_choices" aria-label="Варианты корректировки цели" style="display:grid;gap:6px;margin-top:9px;"></div>
           <div style="margin-top:8px;font-weight:550;font-size:9.5px;line-height:1.4;color:#73767A;">Диапазон рассчитан по текущим данным и не является гарантией результата ЕГЭ.</div>
         </section>
+        <section id="adaptive_session_composer" aria-labelledby="adaptive_session_title" style="margin-top:12px;border-top:1px solid #F0EEE9;padding-top:12px;">
+          <div id="adaptive_session_title" style="font-weight:800;font-size:13px;color:#2B2B2B;">Занятие на сегодня</div>
+          <div style="margin-top:4px;font-weight:600;font-size:10.5px;line-height:1.4;color:#6A6E75;">Выберите доступное время. Недельный фокус учитывается гибко — каждое занятие остаётся удобным.</div>
+          <fieldset id="adaptive_session_durations" style="border:0;padding:0;margin:9px 0 0;">
+            <legend style="font-weight:700;font-size:10.5px;color:#52565E;">Продолжительность</legend>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;">
+              <label><input type="radio" name="adaptive_session_duration" value="15" aria-label="15 минут"> 15 мин</label>
+              <label><input type="radio" name="adaptive_session_duration" value="30" aria-label="30 минут"> 30 мин</label>
+              <label><input type="radio" name="adaptive_session_duration" value="45" aria-label="45 минут" checked> 45 мин</label>
+              <label><input type="radio" name="adaptive_session_duration" value="60" aria-label="60 минут"> 60 мин</label>
+              <label><input type="radio" name="adaptive_session_duration" value="90" aria-label="90 минут"> 90 мин</label>
+            </div>
+          </fieldset>
+          <label for="adaptive_session_custom" style="display:block;margin-top:7px;font-weight:700;font-size:10.5px;color:#52565E;">Или своё время, минут</label>
+              <input id="adaptive_session_custom" min="15" max="120" step="5" type="number" inputmode="numeric" aria-label="Своя длительность сессии в минутах" aria-describedby="adaptive_session_duration_help" style="width:100%;margin-top:4px;border:1px solid #DDD8CF;border-radius:11px;padding:8px 9px;font:650 12px Manrope;background:#fff;">
+          <div id="adaptive_session_duration_help" style="margin-top:3px;font-weight:550;font-size:9.5px;color:#73767A;">От 15 до 120 минут, шаг 5 минут.</div>
+          <button id="adaptive_session_preview" type="button" style="width:100%;margin-top:9px;border:1.5px solid #F2683F;border-radius:12px;background:#FFF7F3;color:#B54E2F;padding:10px 12px;font:750 12px Manrope;cursor:pointer;">Показать план занятия</button>
+          <div id="adaptive_session_notice" role="status" aria-live="polite" style="min-height:16px;margin-top:7px;font-weight:600;font-size:10.5px;line-height:1.4;color:#6A6E75;"></div>
+          <ol id="adaptive_session_blocks" aria-live="polite" aria-label="План занятия по шагам" style="display:grid;gap:7px;margin:7px 0 0;padding:0;list-style:none;"></ol>
+          <button id="adaptive_session_create" type="button" hidden style="width:100%;margin-top:9px;border:0;border-radius:12px;background:#F2683F;color:#fff;padding:10px 12px;font:750 12px Manrope;cursor:pointer;">Создать занятие</button>
+          <button id="adaptive_session_start" type="button" hidden style="width:100%;margin-top:9px;border:0;border-radius:12px;background:#1F7A48;color:#fff;padding:10px 12px;font:750 12px Manrope;cursor:pointer;">Начать первое задание</button>
+        </section>
         <div style="margin-top:8px;font-weight:650;font-size:10.5px;line-height:1.4;color:#6A6E75;">Короткая диагностика подстроится под ответы. Точное время и предел заданий появятся после старта.</div>
         <button id="adaptive_diagnostic_start" type="button" aria-controls="adaptive_diagnostic" hidden style="width:100%;margin-top:10px;border:1.5px solid #F2683F;border-radius:12px;background:#FFF7F3;color:#B54E2F;padding:10px 12px;font:750 12px Manrope;cursor:pointer;">Начать короткую диагностику</button>
         <section id="adaptive_diagnostic" hidden aria-labelledby="adaptive_diagnostic_title" style="margin-top:12px;border-top:1px solid #F0EEE9;padding-top:12px;">

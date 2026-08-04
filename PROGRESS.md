@@ -842,7 +842,7 @@ Type-mode vocabulary больше не показывает accepted word в к�
 миграция 030 с file/PostgreSQL parity.
 ## Adaptive EGE Learning Plan (implementation started 2026-08-04)
 
-Status: tickets 01–03 are implemented on `feature/adaptive-learning-plan`; ticket 04 is ready for implementation. The feature is stacked on the completed Voice Tutor branch and will not be pushed, merged or deployed without a separate owner decision.
+Status: tickets 01–03 are complete on `feature/adaptive-learning-plan`; ticket 04 implementation and all local gates are complete, with independent Standards + Spec review next. The feature is stacked on the completed Voice Tutor branch and will not be pushed, merged or deployed without a separate owner decision.
 
 Agreed product contract: target EGE score/date is primary; a short diagnostic or existing evidence builds a confidence-labelled micro-skill profile; an honest forecast and stable weekly budget feed 15–120 minute executable sessions; real module outcomes update the living plan; free/base/Premium boundaries are server-enforced. CEFR/IELTS is secondary and approximate, not an official IELTS result.
 
@@ -851,7 +851,7 @@ Implementation tracker:
 - [x] 01 Goal and evidence-backed profile tracer
 - [x] 02 Short adaptive diagnostic
 - [x] 03 Honest forecast and stable weekly allocation
-- [ ] 04 Duration-aware learning session composer
+- [ ] 04 Duration-aware learning session composer — audit blockers repaired, final review confirmation pending
 - [ ] 05 Real module execution and evidence feedback
 - [ ] 06 Retention loop and Premium depth
 - [ ] 07 Commercial boundaries, complete UI and reports
@@ -967,3 +967,43 @@ evidence creates the next plan revision without provider calls. Verification: ta
 adaptive/file regressions 81/81, full suite 597 pass with 10 expected no-URL PostgreSQL skips (607 total),
 disposable PostgreSQL 10/10, real Chromium E2E, lint/check, frontend build and both secret scans;
 no paid calls, push, deploy or staging changes.
+
+Ticket 04 implementation complete: `adaptive-composer-v1` turns one persisted plan revision and a
+15–120 minute request into a deterministic, explainable session over the rolling Monday-UTC weekly
+budget. Every five-minute duration in the range composes exactly; sessions over 60 minutes reserve one
+exact 10-minute break. Learning blocks obey their real consumer minimums—15 minutes for vocabulary,
+grammar, gist listening/reading and speaking interaction; 20 for detail listening/reading and speaking
+monologue; 25 for writing email; 30 for writing essay—and never exceed 30 minutes. Adjacent modules are
+diversified when content permits. Due reviews, prerequisite support, weekly deficits, uncertainty probes
+and target gaps have bounded reason codes. The versioned `adaptive-content-v1` registry points only at
+real built-in module screens and canonical built-in Writing tasks. Vocabulary lexical choice launches the
+existing `scr2` EGE word/SRS outcome. Word formation is not falsely advertised: its unsupported allocation
+is reported in `coverageGaps`. Its priority is explicitly assigned to lexical practice in the same module
+with `content_coverage_fallback`; only a module with no consumer may fall back outside the module. Weekly
+allocations are rolling priorities rather than hard caps: a meaningful 15–30 minute block may overshoot a
+2–3 minute target, and persisted planned/selected overshoot lowers that skill and module's signed priority
+in later sessions. `ADAPTIVE_SESSION_COVERAGE_GAP` is returned only when no exact meaningful sequence can
+be made from any justified registered activities, not because one skill is unsupported or below a block minimum.
+
+Authenticated preview/create/current/replace routes use strict schemas, server time, current/historical
+owner-bound plan revisions and immutable idempotency response snapshots. One canonical fingerprint binds
+the plan, registry, weekly snapshot and ID-free block payload; deterministic block IDs are revalidated
+inside the serialized file mutation or PostgreSQL owner lock. The browser submits only
+duration, preview fingerprint, block id and a bounded replacement reason; it cannot supply activities,
+routes, scores or completion. One replacement preserves duration and block identity, updates the weekly
+snapshot, skips the break when checking adjacent learning content and permanently consumes the replacement
+allowance. Cross-owner lookups, stale fingerprints, malformed or repointed IDs, registered-activity swaps,
+budget tampering, conflicting keys and tampered repository content are rejected without leaking existence.
+Migration 034 and file/PostgreSQL repositories share owner locking, current-session uniqueness, CAS,
+rolling week usage, allowlisted export and cascade deletion. Stored sessions contain opaque references
+and structured counters only—no copied answer, essay, transcript or audio.
+
+The accessible progress card supports presets, custom five-minute increments, a reasoned preview,
+creation/current restore, one replacement and a real first-screen handoff; an existing current session is
+resumed instead of allowing a second one. Real Chromium covers a 90-minute preview against a real
+30-minute weekly plan, exact break, create,
+replace and handoff with external providers blocked; the same run opens the real vocabulary SRS consumer
+in forced lexical-choice mode and observes its rendered outcome. Final-repair verification: Ticket 04
+targeted session tests 19/19, full suite 616 pass with 11 expected no-URL PostgreSQL skips (627 total),
+disposable PostgreSQL 11/11, Chromium E2E, lint/check, frontend build, both secret scans and
+`git diff --check`; no paid calls, push, deploy or staging changes.

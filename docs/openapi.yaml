@@ -595,6 +595,108 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '409': { description: ADAPTIVE_GOAL_REQUIRED; the learner must save an EGE goal before a plan can be calculated }
         '404': { description: Adaptive Learning rollout is disabled; the route is not registered }
+  /api/v1/adaptive-learning/sessions/preview:
+    post:
+      summary: Deterministically preview an adaptive session against the current plan and rolling UTC-week budget
+      description: The server selects only registered built-in activities. Durations are 15–120 minutes in five-minute increments; sessions longer than 60 minutes include one exact 10-minute break. The returned fingerprint binds the current plan revision, content registry, weekly budget snapshot and block sequence.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [durationMinutes]
+              properties:
+                durationMinutes: { type: integer, minimum: 15, maximum: 120, multipleOf: 5 }
+              additionalProperties: false
+      responses:
+        '200':
+          description: Server-time-stamped non-persisted preview
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [serverTime, preview]
+                properties:
+                  serverTime: { type: string, format: date-time }
+                  preview: { $ref: '#/components/schemas/AdaptiveSessionPreview' }
+                additionalProperties: false
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { description: ADAPTIVE_GOAL_REQUIRED, ADAPTIVE_SESSION_NO_CONTENT, or ADAPTIVE_SESSION_COVERAGE_GAP when no exact meaningful sequence can be composed from justified registered activities; an unsupported individual skill is surfaced in coverageGaps and uses explicit fallback instead of blocking by itself }
+        '404': { description: Adaptive Learning rollout is disabled; the route is not registered }
+  /api/v1/adaptive-learning/sessions:
+    post:
+      summary: Persist one owner-bound adaptive session from an exact current preview
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, minLength: 16, maxLength: 120 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [durationMinutes, previewFingerprint]
+              properties:
+                durationMinutes: { type: integer, minimum: 15, maximum: 120, multipleOf: 5 }
+                previewFingerprint: { type: string, pattern: '^[0-9a-f]{64}$' }
+              additionalProperties: false
+      responses:
+        '201': { description: New session persisted, content: { application/json: { schema: { $ref: '#/components/schemas/AdaptiveSessionMutationResult' } } } }
+        '200': { description: Exact immutable create response replayed, content: { application/json: { schema: { $ref: '#/components/schemas/AdaptiveSessionMutationResult' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { description: Stale preview/plan, another current session, ADAPTIVE_SESSION_COVERAGE_GAP, unavailable content or idempotency conflict }
+        '404': { description: Adaptive Learning rollout is disabled; the route is not registered }
+  /api/v1/adaptive-learning/sessions/current:
+    get:
+      summary: Restore the authenticated learner's current created or in-progress adaptive session
+      responses:
+        '200':
+          description: Current owner-bound session
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [session]
+                properties:
+                  session: { $ref: '#/components/schemas/AdaptiveLearningSession' }
+                additionalProperties: false
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { description: No current session belongs to the authenticated learner, or rollout is disabled }
+  /api/v1/adaptive-learning/sessions/{sessionId}/replace:
+    post:
+      summary: Replace one learning block once while preserving the session duration and block identities
+      description: The alternative is selected from the same server-owned content registry and persisted plan revision. A session permits one replacement total; exact retries return the retained response snapshot.
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, minLength: 16, maxLength: 120 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [blockId, reason]
+              properties:
+                blockId: { type: string, pattern: '^asb_[0-9a-f]{16}_[0-9]{2}$' }
+                reason: { type: string, enum: [too_difficult, too_easy, not_relevant, accessibility] }
+              additionalProperties: false
+      responses:
+        '200': { description: Replacement applied or its exact response replayed, content: { application/json: { schema: { $ref: '#/components/schemas/AdaptiveSessionReplacementResult' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { description: Session or block does not belong to the authenticated learner }
+        '409': { description: Replacement was already used, no safe alternative exists, plan is unavailable, revision changed or key conflicts }
   /api/v1/adaptive-learning/diagnostics/start:
     post:
       summary: Start or resume the authenticated learner's bounded short diagnostic with a durable owner-bound replay claim
@@ -686,7 +788,7 @@ paths:
     get:
       summary: Export the authenticated user's account, progress and attempt data
       responses:
-        '200': { description: JSON export including adaptive goals/structured estimates/diagnostic sessions and bounded responses, Voice Tutor sessions, recovery/repeat outcomes and bounded provider/model/prompt metadata; no raw audio, temporary captions, full Voice Tutor transcript, nonce hash or answer key }
+        '200': { description: JSON export including adaptive goals/structured estimates/plan revisions/learning sessions/diagnostic sessions and bounded responses, Voice Tutor sessions, recovery/repeat outcomes and bounded provider/model/prompt metadata; no raw audio, temporary captions, full Voice Tutor transcript, nonce hash, idempotency replay snapshots or answer key }
         '401': { $ref: '#/components/responses/Unauthorized' }
   /api/v1/account:
     delete:
@@ -1317,6 +1419,203 @@ components:
           nullable: true
         result: { $ref: '#/components/schemas/AdaptiveDiagnosticCompletionSummary' }
         profile: { $ref: '#/components/schemas/AdaptiveProfile' }
+      additionalProperties: false
+    AdaptiveActivityLaunch:
+      description: Strict server-owned descriptor consumed by the matching activity screen.
+      oneOf:
+        - type: object
+          required: [version, kind, screenId, mode, topicId]
+          properties:
+            version: { type: string, enum: [adaptive-launch-v1] }
+            kind: { type: string, enum: [vocabulary_practice] }
+            screenId: { type: string, enum: [scr2] }
+            mode: { type: string, enum: [lexical_choice] }
+            topicId: { type: integer, enum: [1, 6] }
+          additionalProperties: false
+        - type: object
+          required: [version, kind, screenId, topicId]
+          properties:
+            version: { type: string, enum: [adaptive-launch-v1] }
+            kind: { type: string, enum: [grammar_practice] }
+            screenId: { type: string, enum: [scr3] }
+            topicId: { type: integer, enum: [3, 4, 18] }
+          additionalProperties: false
+        - type: object
+          required: [version, kind, screenId, mode]
+          properties:
+            version: { type: string, enum: [adaptive-launch-v1] }
+            kind: { type: string, enum: [reading_mode] }
+            screenId: { type: string, enum: [scr7] }
+            mode: { type: string, enum: [headings, detail] }
+          additionalProperties: false
+        - type: object
+          required: [version, kind, screenId, mode]
+          properties:
+            version: { type: string, enum: [adaptive-launch-v1] }
+            kind: { type: string, enum: [listening_mode] }
+            screenId: { type: string, enum: [scr4] }
+            mode: { type: string, enum: [matching, interview] }
+          additionalProperties: false
+        - type: object
+          required: [version, kind, screenId, taskType, taskId]
+          properties:
+            version: { type: string, enum: [adaptive-launch-v1] }
+            kind: { type: string, enum: [writing_task] }
+            screenId: { type: string, enum: [scr8] }
+            taskType: { type: integer, enum: [37] }
+            taskId: { type: string, enum: ['builtin:writing_37:emily-new-flat'] }
+          additionalProperties: false
+        - type: object
+          required: [version, kind, screenId, taskType, taskId]
+          properties:
+            version: { type: string, enum: [adaptive-launch-v1] }
+            kind: { type: string, enum: [writing_task] }
+            screenId: { type: string, enum: [scr8] }
+            taskType: { type: integer, enum: [38] }
+            taskId: { type: string, enum: ['builtin:writing_38:teen-sport'] }
+          additionalProperties: false
+        - type: object
+          required: [version, kind, screenId, taskNumber]
+          properties:
+            version: { type: string, enum: [adaptive-launch-v1] }
+            kind: { type: string, enum: [speaking_task] }
+            screenId: { type: string, enum: [scr9] }
+            taskNumber: { type: integer, enum: [2, 4] }
+          additionalProperties: false
+    AdaptiveSessionBlock:
+      type: object
+      required: [id, position, kind, module, skillId, skillLabel, activityId, activityLabel, contentRef, difficulty, modality, requiresAudio, requiresMicrophone, launch, plannedMinutes, reasonCodes]
+      properties:
+        id: { type: string, pattern: '^asb_[0-9a-f]{16}_[0-9]{2}$' }
+        position: { type: integer, minimum: 1 }
+        kind: { type: string, enum: [learning, break] }
+        module: { type: string, nullable: true, enum: [grammar, vocabulary, reading, listening, writing, speaking] }
+        skillId: { type: string, nullable: true, maxLength: 120 }
+        skillLabel: { type: string, nullable: true, maxLength: 200 }
+        activityId: { type: string, nullable: true, maxLength: 120 }
+        activityLabel: { type: string, nullable: true, maxLength: 240 }
+        contentRef: { type: string, nullable: true, maxLength: 200, description: Opaque server-owned built-in content reference; learner content is never embedded. }
+        difficulty: { type: integer, nullable: true, minimum: 1, maximum: 5 }
+        modality: { type: string, nullable: true, enum: [visual_text, audio, written, microphone] }
+        requiresAudio: { type: boolean, nullable: true }
+        requiresMicrophone: { type: boolean, nullable: true }
+        launch:
+          allOf:
+            - $ref: '#/components/schemas/AdaptiveActivityLaunch'
+          nullable: true
+        plannedMinutes: { type: integer, minimum: 5, maximum: 30 }
+        reasonCodes:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            enum: [due_review, prerequisite_support, weekly_budget_deficit, content_coverage_fallback, high_uncertainty_probe, target_gap, plan_priority, learner_replacement, replacement_too_difficult, replacement_too_easy, replacement_not_relevant, replacement_accessibility, scheduled_break]
+      additionalProperties: false
+    AdaptiveSessionBudgetSkill:
+      type: object
+      required: [skillId, targetMinutes, plannedBeforeMinutes, completedBeforeMinutes, deficitBeforeMinutes, selectedMinutes]
+      properties:
+        skillId: { type: string, maxLength: 120 }
+        targetMinutes: { type: integer, minimum: 0 }
+        plannedBeforeMinutes: { type: integer, minimum: 0 }
+        completedBeforeMinutes: { type: integer, minimum: 0 }
+        deficitBeforeMinutes: { type: integer, minimum: 0 }
+        selectedMinutes: { type: integer, minimum: 0 }
+      additionalProperties: false
+    AdaptiveSessionWeeklyBudget:
+      type: object
+      required: [weeklyAvailableMinutes, coverageGaps, prerequisiteEvidence, skills]
+      properties:
+        weeklyAvailableMinutes: { type: integer, minimum: 30, maximum: 2520 }
+        coverageGaps:
+          type: array
+          uniqueItems: true
+          description: Sorted allocated skill IDs with no truthful executable activity. Their priority is reassigned explicitly with content_coverage_fallback, preferring an executable skill in the same module; a small target below an activity minimum is not itself a coverage gap.
+          items: { type: string, maxLength: 120 }
+        prerequisiteEvidence:
+          type: object
+          required: [policyVersion, profileFingerprint, supported, skillIds]
+          properties:
+            policyVersion: { type: string, enum: [adaptive-prerequisite-v1] }
+            profileFingerprint: { type: string, nullable: true, pattern: '^[0-9a-f]{64}$' }
+            supported: { type: boolean }
+            skillIds: { type: array, uniqueItems: true, items: { type: string, maxLength: 120 } }
+          additionalProperties: false
+        skills: { type: array, minItems: 12, maxItems: 12, items: { $ref: '#/components/schemas/AdaptiveSessionBudgetSkill' } }
+      additionalProperties: false
+    AdaptiveSessionPreview:
+      type: object
+      required: [version, composerPolicyVersion, contentRegistryVersion, taxonomyVersion, previewFingerprint, planId, planRevision, weekStart, durationMinutes, learningMinutes, breakMinutes, weeklyBudgetSnapshot, blocks]
+      properties:
+        version: { type: string, enum: [adaptive-session-v1] }
+        composerPolicyVersion: { type: string, enum: [adaptive-composer-v1] }
+        contentRegistryVersion: { type: string, enum: [adaptive-content-v1] }
+        taxonomyVersion: { type: string, enum: [ege-en-v1] }
+        previewFingerprint: { type: string, pattern: '^[0-9a-f]{64}$' }
+        planId: { type: string, format: uuid }
+        planRevision: { type: integer, minimum: 1 }
+        weekStart: { type: string, format: date-time }
+        durationMinutes: { type: integer, minimum: 15, maximum: 120, multipleOf: 5 }
+        learningMinutes: { type: integer, minimum: 5, maximum: 120 }
+        breakMinutes: { type: integer, enum: [0, 10] }
+        weeklyBudgetSnapshot: { $ref: '#/components/schemas/AdaptiveSessionWeeklyBudget' }
+        blocks: { type: array, minItems: 1, items: { $ref: '#/components/schemas/AdaptiveSessionBlock' } }
+      additionalProperties: false
+    AdaptiveSessionReplacement:
+      type: object
+      required: [blockId, reason, replacedSkillId, replacedActivityId, replacedContentRef, replacedAt]
+      properties:
+        blockId: { type: string }
+        reason: { type: string, enum: [too_difficult, too_easy, not_relevant, accessibility] }
+        replacedSkillId: { type: string }
+        replacedActivityId: { type: string }
+        replacedContentRef: { type: string }
+        replacedAt: { type: string, format: date-time }
+      additionalProperties: false
+    AdaptiveLearningSession:
+      type: object
+      required: [id, sessionVersion, revision, planId, planRevision, previewFingerprint, composerPolicyVersion, contentRegistryVersion, taxonomyVersion, weekStart, durationMinutes, learningMinutes, breakMinutes, weeklyBudgetSnapshot, blocks, status, currentBlockId, completedLearningMinutes, replacement, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        sessionVersion: { type: string, enum: [adaptive-session-v1] }
+        revision: { type: integer, minimum: 1, maximum: 2 }
+        planId: { type: string, format: uuid }
+        planRevision: { type: integer, minimum: 1 }
+        previewFingerprint: { type: string, pattern: '^[0-9a-f]{64}$' }
+        composerPolicyVersion: { type: string, enum: [adaptive-composer-v1] }
+        contentRegistryVersion: { type: string, enum: [adaptive-content-v1] }
+        taxonomyVersion: { type: string, enum: [ege-en-v1] }
+        weekStart: { type: string, format: date-time }
+        durationMinutes: { type: integer, minimum: 15, maximum: 120, multipleOf: 5 }
+        learningMinutes: { type: integer, minimum: 5, maximum: 120 }
+        breakMinutes: { type: integer, enum: [0, 10] }
+        weeklyBudgetSnapshot: { $ref: '#/components/schemas/AdaptiveSessionWeeklyBudget' }
+        blocks: { type: array, minItems: 1, items: { $ref: '#/components/schemas/AdaptiveSessionBlock' } }
+        status: { type: string, enum: [created, in_progress, completed, abandoned] }
+        currentBlockId: { type: string }
+        completedLearningMinutes: { type: integer, minimum: 0, maximum: 120 }
+        replacement:
+          allOf:
+            - $ref: '#/components/schemas/AdaptiveSessionReplacement'
+          nullable: true
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      additionalProperties: false
+    AdaptiveSessionMutationResult:
+      type: object
+      required: [created, replayed, session]
+      properties:
+        created: { type: boolean }
+        replayed: { type: boolean }
+        session: { $ref: '#/components/schemas/AdaptiveLearningSession' }
+      additionalProperties: false
+    AdaptiveSessionReplacementResult:
+      type: object
+      required: [replaced, replayed, session]
+      properties:
+        replaced: { type: boolean }
+        replayed: { type: boolean }
+        session: { $ref: '#/components/schemas/AdaptiveLearningSession' }
       additionalProperties: false
     PaymentRequest:
       type: object

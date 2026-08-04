@@ -200,3 +200,32 @@ enum reason/status, timestamps и review audit. PostgreSQL create+bind provision
 `completed|failed` settlement идемпотентен, а неуспешный вызов остаётся наблюдаемым и консервативно
 учитывается в лимите. PostgreSQL mutations берут блокировки в порядке user → voice session/card,
 совпадающем с удалением аккаунта; file repository сериализует тот же контракт.
+
+## Адаптивные учебные сессии (миграция 034)
+
+Миграция `034_adaptive_learning_sessions.sql` добавляет owner-bound таблицу
+`adaptive_learning_sessions`. Каждая строка связывается с неизменяемой ревизией
+`adaptive_learning_plan_revisions`, хранит версии composer/content/taxonomy, начало UTC-недели,
+точную длительность, структурированный снимок недельного бюджета и только opaque server-owned
+activity/content references с проверенным `adaptive-launch-v1` descriptor. Descriptor — строгий union
+`vocabulary_practice|grammar_practice|reading_mode|listening_mode|writing_task|speaking_task`: он содержит
+только allowlisted screen/mode/topic/task identity и вызывается соответствующим экраном задания.
+`vocabulary_practice` открывает реальную очередь `scr2` из `EGE_WORDS`/SRS в режиме lexical choice;
+word formation не выдаётся за готовый consumer и остаётся явным `coverageGaps`. Его доля получает
+`content_coverage_fallback` и в первую очередь направляется в исполнимую лексическую практику того же
+модуля. Общий маршрут без точного activity consumer не сохраняется. Исходные ответы, эссе, transcript
+и audio в сессию не копируются.
+
+SQL CHECK фиксирует диапазон 15–120 минут с шагом 5, ровно один 10-минутный перерыв для сессии
+дольше 60 минут, равенство общей/учебной/перерывной длительности, допустимые статусы и единственную
+ревизию замены. Partial unique index разрешает только одну текущую `created|in_progress` сессию на
+владельца. Недельный snapshot хранит rolling priority: target, фактические planned/selected minutes
+(включая неизбежный overshoot малого target полноценным блоком), компенсирующий deficit и
+версионированное prerequisite evidence:
+только fingerprint полного структурированного профиля и список доказанно слабых prerequisite skills,
+без исходного evidence. Создание и единственная замена хранят owner-global request key/hash и точный
+allowlisted response snapshot для lost-response/concurrent replay; эти внутренние поля не входят в
+экспорт. Оба backend используют общий exact create validator и общий immutable transition validator.
+PostgreSQL вызывает их под owner lock и CAS по revision, а file repository — внутри сериализованной
+mutation queue. Повтор key для другой сессии владельца является конфликтом. `ON DELETE CASCADE`
+удаляет сессии вместе с аккаунтом.
