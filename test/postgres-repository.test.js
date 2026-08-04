@@ -13,8 +13,23 @@ import {
 } from './support/adaptive-profile-contract.js';
 import { assertAdaptiveGoalRepositoryContract } from './support/adaptive-goal-contract.js';
 import { assertAdaptiveDiagnosticRepositoryContract } from './support/adaptive-diagnostic-contract.js';
+import { assertAdaptivePlanRepositoryContract } from './support/adaptive-plan-contract.js';
 
 const connectionString = process.env.TEST_DATABASE_URL;
+
+test('PostgreSQL adaptive plan revisions match the shared persistence and export contract', { skip: !connectionString }, async () => {
+  const repository = createPostgresRepository(connectionString);
+  const stamp = Date.now() + 4;
+  const username = await repository.createTelegramUser(Number(`4${String(stamp).slice(-9)}`), `Plan ${stamp}`);
+  try {
+    await assertAdaptivePlanRepositoryContract(assert, repository, username);
+    assert.equal(await repository.deleteUserData(username), true);
+    assert.equal(await repository.getCurrentAdaptiveLearningPlan(username), null);
+  } finally {
+    await repository.deleteUserData(username).catch(() => {});
+    await repository.close();
+  }
+});
 
 test('PostgreSQL adaptive diagnostic matches the shared persistence and export contract', { skip: !connectionString }, async () => {
   const repository = createPostgresRepository(connectionString);
@@ -301,6 +316,7 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
       '030_voice_tutor_fallback_and_recovery_tasks.sql',
       '031_adaptive_learning_goal_profile.sql',
       '032_adaptive_short_diagnostic.sql',
+      '033_adaptive_learning_plan.sql',
     ]);
 
     const username = await repository.createTelegramUser(telegramId, `Integration ${suffix}`);

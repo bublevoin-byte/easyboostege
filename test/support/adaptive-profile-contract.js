@@ -126,22 +126,23 @@ export async function assertAdaptiveProfileAppendOnlyOrdering(assert, repository
     ...laterButSmaller,
     profileCalculationRevision: laterButSmaller.profileCalculationRevision + 1,
   };
-  const rejectedNewerAlgorithmButSmaller = await repository.saveAdaptiveLearningProfile(
+  const acceptedNewerAlgorithmButSmaller = await repository.saveAdaptiveLearningProfile(
     username,
     newerAlgorithmButSmaller,
     { now: new Date('2026-08-04T10:03:30.000Z') },
   );
   assert.equal(
-    rejectedNewerAlgorithmButSmaller.evidence_source_count,
-    100,
-    'no calculation revision may reduce the append-only source count',
+    acceptedNewerAlgorithmButSmaller.evidence_source_count,
+    2,
+    'a newer calculation revision may intentionally filter sources under a new algorithm',
   );
-  assert.equal(rejectedNewerAlgorithmButSmaller.profile_calculation_revision, 1);
+  assert.equal(acceptedNewerAlgorithmButSmaller.profile_calculation_revision, 2);
 
   const acceptedBackfill = await repository.saveAdaptiveLearningProfile(username, moreButOlder, {
     now: new Date('2026-08-04T10:04:00.000Z'),
   });
-  assert.equal(acceptedBackfill.evidence_source_count, 101, 'a larger backfill wins even with an older latest time');
+  assert.equal(acceptedBackfill.evidence_source_count, 2,
+    'an older calculation revision cannot overwrite a newer revision even with a larger backfill');
 
   const higherCalculationRevision = {
     ...moreButOlder,
@@ -150,7 +151,9 @@ export async function assertAdaptiveProfileAppendOnlyOrdering(assert, repository
   const recomputed = await repository.saveAdaptiveLearningProfile(username, higherCalculationRevision, {
     now: new Date('2026-08-04T10:05:00.000Z'),
   });
-  assert.equal(recomputed.profile_calculation_revision, 2, 'a newer algorithm may recompute the same evidence');
+  assert.equal(recomputed.profile_calculation_revision, 2, 'the current algorithm revision remains authoritative');
+  assert.equal(recomputed.evidence_source_count, 101,
+    'a larger append-only backfill is accepted inside the same calculation revision');
 
   const olderAlgorithmWithLaterEvidence = {
     ...buildProfile({ attempts: attempts(102, '2026-08-04T10:06:00.000Z') }),

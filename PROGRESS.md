@@ -842,7 +842,7 @@ Type-mode vocabulary больше не показывает accepted word в к�
 миграция 030 с file/PostgreSQL parity.
 ## Adaptive EGE Learning Plan (implementation started 2026-08-04)
 
-Status: specification and eight vertical tickets are ready on `feature/adaptive-learning-plan`. The feature is stacked on the completed Voice Tutor branch and will not be pushed, merged or deployed without a separate owner decision.
+Status: tickets 01–03 are implemented on `feature/adaptive-learning-plan`; ticket 04 is ready for implementation. The feature is stacked on the completed Voice Tutor branch and will not be pushed, merged or deployed without a separate owner decision.
 
 Agreed product contract: target EGE score/date is primary; a short diagnostic or existing evidence builds a confidence-labelled micro-skill profile; an honest forecast and stable weekly budget feed 15–120 minute executable sessions; real module outcomes update the living plan; free/base/Premium boundaries are server-enforced. CEFR/IELTS is secondary and approximate, not an official IELTS result.
 
@@ -850,7 +850,7 @@ Implementation tracker:
 
 - [x] 01 Goal and evidence-backed profile tracer
 - [x] 02 Short adaptive diagnostic
-- [ ] 03 Honest forecast and stable weekly allocation
+- [x] 03 Honest forecast and stable weekly allocation
 - [ ] 04 Duration-aware learning session composer
 - [ ] 05 Real module execution and evidence feedback
 - [ ] 06 Retention loop and Premium depth
@@ -918,3 +918,52 @@ and completion with all providers disabled. Verification: targeted diagnostic/ad
 53/53, full suite 569 pass with 9 expected no-URL PostgreSQL skips, disposable PostgreSQL 9/9, real
 Chromium E2E, lint/check, frontend build and both secret scans; no paid calls, push, deploy or staging
 changes.
+
+Ticket 03 complete: `adaptive-plan-v1` turns the learner's current EGE goal and authoritative
+evidence profile into an honest rule-based score range with confidence, explicit assumptions,
+required weekly minutes and concrete increase-time/adjust-target choices. It makes no score promise.
+Required time is the upward five-minute rounding of the exact inverse capacity equation, including
+uncertainty and the same 0.75 effectiveness factor used by the range. An increase-time choice is always
+strictly above current time, never exceeds the savable 2520-minute maximum and truthfully reports whether
+it is sufficient. When the learner is already at the maximum, the plan offers only valid alternatives.
+The weekly priority combines target gap, EGE impact, due/overdue retention, deadline pressure and
+uncertainty. Every skill and module has reason codes; high uncertainty schedules a diagnostic probe
+instead of claiming mastery. Integer allocations across all 12 micro-skills and six modules each
+total exactly 100%, and an ordinary recalculation moves no visible share by more than 10 percentage
+points. Deadline pressure changes relative high-impact/large-gap priorities. Ordinary overdue work
+and `critical_due` work both remain bounded; only a goal revision change resets the allocation.
+`critical_retention_expiry` remains a visible priority reason, but its persistence bypass is disabled
+until Ticket 06 supplies owner/profile-bound persisted expiry that the repository itself can derive.
+The first revision is already checked for exact canonical 6-module/12-skill membership, 100% totals
+and matching module sums. The UTC start of `recalculationBucket` is the shared deterministic calculation
+instant for forecast weeks, deadline/critical priority, allocation and `calculatedAt`, so morning and
+23:59 inputs with one fingerprint produce one exact plan. The bucket before the exam retains `1/7` week;
+the exam-date bucket is expired. Actual persistence receipt timestamps remain separate.
+One SQL-calendar normalizer is shared by goal and plan DTOs (and retained-plan comparison), preserving
+the local calendar components returned for PostgreSQL `DATE` instead of applying a UTC-day shift.
+
+The authenticated overview, goal response and dedicated plan endpoint return the authoritative
+owner-bound revision. A daily/evidence fingerprint includes the exact `base_plan_revision`; file
+serialization and a PostgreSQL owner lock resolve current, enforce CAS and reject stale writes under
+concurrency. One shared strict validator rejects malformed candidate/forecast/allocation/stability JSON,
+outer/inner mismatches and a fingerprint that does not match the complete supplied metadata before any
+duplicate lookup. A retained duplicate fingerprint replays only after an exact normalized comparison of
+the candidate envelope and all plan semantics; only regenerated identity and actual receipt timestamps
+are ignored. A complete historical candidate returns current before current-goal/profile checks, but a
+bare captured hash or changed confidence/allocation/reason cannot replay. For every new candidate, the repository rebuilds the expected
+plan under the same owner mutation/transaction from the full persisted goal, full profile with all 12
+skill estimates and current plan; synthetic goal values, skill states, forecasts or allocations reject.
+Historical fingerprints return current before those authoritative-current checks, while
+the route boundedly recomputes a CAS loser against the winning plan. The repository independently
+checks the ±10 transition. Calculation revision precedes append-only count/time/version ordering,
+so a newer algorithm may intentionally filter sources and an older one can never overwrite it.
+Exact old-goal fingerprints still return current after a goal change, but unknown stale fingerprints
+fail closed. Goal PUT returns one matching current goal/profile/plan snapshot with explicit
+created/replayed/superseded metadata even under old-key replay and concurrency. Migration 033,
+shared allowlisted DTOs, export/deletion and retention/schema/OpenAPI documentation have file/PG
+parity. The progress screen exposes the range, confidence caveat, explained weekly focus and
+feasibility choices, and the real Chromium diagnostic flow verifies that completed diagnostic
+evidence creates the next plan revision without provider calls. Verification: targeted plan 25/25,
+adaptive/file regressions 81/81, full suite 597 pass with 10 expected no-URL PostgreSQL skips (607 total),
+disposable PostgreSQL 10/10, real Chromium E2E, lint/check, frontend build and both secret scans;
+no paid calls, push, deploy or staging changes.

@@ -15,9 +15,9 @@ function sourceEvents(sources = {}) {
     ...(Array.isArray(sources.diagnosticResponses) ? sources.diagnosticResponses.map((event) => ({
       event, timestamp: event.answered_at ?? event.answeredAt,
     })) : []),
-    ...(sources.diagnosticCompletedAt ? [{
-      event: { kind: 'diagnostic_completion' }, timestamp: sources.diagnosticCompletedAt,
-    }] : []),
+    ...(Array.isArray(sources.diagnosticCompletions) ? sources.diagnosticCompletions.map((event) => ({
+      event, timestamp: event.completed_at ?? event.completedAt,
+    })) : []),
   ];
 }
 
@@ -50,15 +50,14 @@ export function compareAdaptiveEvidenceWatermarks(candidate, persisted) {
   const next = normalizeWatermark(candidate);
   const current = normalizeWatermark(persisted);
   if (next.calculationRevision < current.calculationRevision) return -1;
-  if (next.sourceCount < current.sourceCount) return -1;
   if (next.calculationRevision > current.calculationRevision) return 1;
+  if (next.sourceCount !== current.sourceCount) return next.sourceCount > current.sourceCount ? 1 : -1;
+  const nextTime = next.observedAt ? new Date(next.observedAt).getTime() : Number.NEGATIVE_INFINITY;
+  const currentTime = current.observedAt ? new Date(current.observedAt).getTime() : Number.NEGATIVE_INFINITY;
+  if (nextTime !== currentTime) return nextTime > currentTime ? 1 : -1;
   if (!current.version) return 1;
   if (next.version !== current.version) {
     return next.version === ADAPTIVE_EVIDENCE_WATERMARK_VERSION ? 1 : -1;
   }
-  if (next.sourceCount !== current.sourceCount) return 1;
-  const nextTime = next.observedAt ? new Date(next.observedAt).getTime() : Number.NEGATIVE_INFINITY;
-  const currentTime = current.observedAt ? new Date(current.observedAt).getTime() : Number.NEGATIVE_INFINITY;
-  if (nextTime !== currentTime) return nextTime > currentTime ? 1 : -1;
   return 0;
 }

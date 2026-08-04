@@ -550,6 +550,9 @@ test('progress screen contains an accessible current-plan form and renders the s
   assert.match(openapi, /evidenceWatermarkVersion/u);
   assert.match(openapi, /adaptive-evidence-watermark-v1/u);
   assert.match(openapi, /profileCalculationRevision/u);
+  assert.match(openapi, /Higher profileCalculationRevision wins first/u);
+  assert.match(openapi, /Within the same calculation revision, evidenceSourceCount is monotonic/u);
+  assert.doesNotMatch(openapi, /no revision may reduce evidenceSourceCount/u);
   assert.doesNotMatch(openapi, /goal: \{ \$ref: '#\/components\/schemas\/AdaptiveGoal', nullable: true \}/u);
   assert.equal([...openapi.matchAll(/goal:\s*\n\s+allOf:\s*\n\s+- \$ref: '#\/components\/schemas\/AdaptiveGoal'\s*\n\s+nullable: true/gu)].length, 2);
 });

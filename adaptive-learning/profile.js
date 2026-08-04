@@ -194,21 +194,21 @@ function explanationFor(observations) {
 
 export function buildAdaptiveLearningProfile({
   attempts = [], recoveries = [], repeatAttempts = [], diagnosticResponses = [],
-  diagnosticCompletions = [], diagnosticCompletedAt = null,
+  diagnosticCompletions = [],
 } = {}, { diagnosticRegistry = DIAGNOSTIC_REGISTRY } = {}) {
-  const supportedDiagnosticCompletedAt = [
-    ...diagnosticCompletions
-      .filter((completion) => getDiagnosticCatalog(
-        completion.catalog_version ?? completion.catalogVersion,
-        diagnosticRegistry,
-      ))
-      .map((completion) => iso(completion.completed_at ?? completion.completedAt))
-      .filter(Boolean),
-    ...(diagnosticCompletedAt ? [iso(diagnosticCompletedAt)].filter(Boolean) : []),
-  ].sort().at(-1) || null;
+  const supportedDiagnosticCompletions = diagnosticCompletions
+    .filter((completion) => getDiagnosticCatalog(
+      completion.catalog_version ?? completion.catalogVersion,
+      diagnosticRegistry,
+    ))
+    .map((completion) => ({
+      catalog_version: completion.catalog_version ?? completion.catalogVersion,
+      completed_at: iso(completion.completed_at ?? completion.completedAt),
+    }))
+    .filter((completion) => completion.completed_at);
   const watermark = buildAdaptiveEvidenceWatermark({
     attempts, recoveries, repeatAttempts, diagnosticResponses,
-    diagnosticCompletedAt: supportedDiagnosticCompletedAt,
+    diagnosticCompletions: supportedDiagnosticCompletions,
   });
   const observations = [
     ...attempts.map(attemptObservation),
@@ -282,7 +282,7 @@ export function buildAdaptiveLearningProfile({
   if (sparseEvidence) explanationCodes.push('sparse_evidence');
   if (insufficientIndependentEvidence) explanationCodes.push('insufficient_independent_evidence');
   if (unconfirmedSkills) explanationCodes.push('unconfirmed_skills');
-  if (supportedDiagnosticCompletedAt) explanationCodes.push('short_diagnostic_complete');
+  if (supportedDiagnosticCompletions.length) explanationCodes.push('short_diagnostic_complete');
   if (!preliminary) explanationCodes.push('evidence_backed');
 
   return {
@@ -301,7 +301,7 @@ export function buildAdaptiveLearningProfile({
     clientReportedEvidenceCount,
     independentModuleCount,
     establishedSkillCount,
-    needsDiagnostic: preliminary && !supportedDiagnosticCompletedAt,
+    needsDiagnostic: preliminary && !supportedDiagnosticCompletions.length,
     explanationCodes,
     skills,
     modules,

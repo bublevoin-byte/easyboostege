@@ -12,6 +12,7 @@ import {
 } from './support/adaptive-profile-contract.js';
 import { assertAdaptiveGoalRepositoryContract } from './support/adaptive-goal-contract.js';
 import { assertAdaptiveDiagnosticRepositoryContract } from './support/adaptive-diagnostic-contract.js';
+import { assertAdaptivePlanRepositoryContract } from './support/adaptive-plan-contract.js';
 
 async function withRepository(run) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-db-'));
@@ -99,6 +100,15 @@ test('file adaptive diagnostic uses the shared owner-bound persistence and expor
     await assertAdaptiveDiagnosticRepositoryContract(assert, repository, username);
     assert.equal(await repository.deleteUserData(username), true);
     assert.equal(await repository.exportUserData(username), null);
+  });
+});
+
+test('file adaptive plan revisions use the shared owner-bound persistence and export contract', async () => {
+  await withRepository(async (repository) => {
+    const username = await repository.createTelegramUser(1104, 'Adaptive Plan DTO');
+    await assertAdaptivePlanRepositoryContract(assert, repository, username);
+    assert.equal(await repository.deleteUserData(username), true);
+    assert.equal(await repository.getCurrentAdaptiveLearningPlan(username), null);
   });
 });
 

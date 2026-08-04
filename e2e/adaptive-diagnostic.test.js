@@ -172,6 +172,23 @@ async function runAdaptiveDiagnosticE2E() {
     await page.goto(baseUrl, { waitUntil: 'networkidle' });
     await openProgress(page);
 
+    await page.locator('#adaptive_target_score').fill('85');
+    await page.locator('#adaptive_exam_date').fill('2027-06-01');
+    await page.locator('#adaptive_weekly_minutes').fill('300');
+    const goalResponsePromise = page.waitForResponse((response) => (
+      response.request().method() === 'PUT'
+        && response.url().endsWith('/api/v1/adaptive-learning/goal')
+    ));
+    await page.locator('#adaptive_goal_form button[type="submit"]').press('Enter');
+    const goalResponse = await goalResponsePromise;
+    assert.equal(goalResponse.status(), 201);
+    const goalResult = await goalResponse.json();
+    assert.equal(goalResult.plan.revision, 1);
+    await page.locator('#adaptive_forecast:not([hidden])').waitFor({ state: 'visible', timeout: 5_000 });
+    assert.match(await page.locator('#adaptive_forecast_range').innerText(), /Ориентир: \d+–\d+ баллов/u);
+    assert.match(await page.locator('#adaptive_forecast_confidence').innerText(), /не обещание результата/u);
+    assert.equal(await page.locator('#adaptive_weekly_allocation > div').count(), 6);
+
     const startButton = page.locator('#adaptive_diagnostic_start');
     await startButton.waitFor({ state: 'visible', timeout: 5_000 });
     assert.match(await page.locator('#adaptive_plan').innerText(), /Точное время и предел заданий появятся после старта/u);
@@ -315,6 +332,14 @@ async function runAdaptiveDiagnosticE2E() {
     });
     assert.equal(current.status, 200);
     assert.deepEqual(current.body, { diagnostic: null, item: null });
+    const currentPlan = await page.evaluate(async () => {
+      const response = await fetch('/api/v1/adaptive-learning/plan');
+      return { status: response.status, body: await response.json() };
+    });
+    assert.equal(currentPlan.status, 200);
+    assert.equal(currentPlan.body.plan.revision, 2);
+    assert.ok(currentPlan.body.plan.profileEvidenceSourceCount >= 10);
+    assert.equal(await page.locator('#adaptive_forecast').isVisible(), true);
     assert.equal(blockedExternalUrls.some((url) => /x\.ai|groq|openai/u.test(url)), false);
     console.log('adaptive diagnostic e2e: keyboard, reload, retries, audio and completion passed');
   } finally {

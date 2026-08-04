@@ -9,6 +9,11 @@ import {
 } from '../adaptive-learning/repository-dto.js';
 import { adaptiveDiagnosticPublicDto } from '../adaptive-learning/diagnostic-dto.js';
 import {
+  adaptivePlanInputFingerprint,
+  buildAdaptiveLearningPlan,
+} from '../adaptive-learning/plan.js';
+import { adaptiveLearningPlanPublicDto } from '../adaptive-learning/plan-dto.js';
+import {
   DIAGNOSTIC_REGISTRY,
   getDiagnosticItem,
   getDiagnosticPolicy,
@@ -86,16 +91,68 @@ export function createAdaptiveLearningRoutes({
   const { auth } = authentication;
   const diagnosticStartRateGate = createDiagnosticStartRateGate();
 
-  async function overview(username) {
+  async function overview(username, { remainingPlanRetries = 2 } = {}) {
     const [goal, sources] = await Promise.all([
       db.getAdaptiveLearningGoal(username),
       db.getAdaptiveLearningEvidenceSources(username),
     ]);
     const profile = buildAdaptiveLearningProfile(sources, { diagnosticRegistry });
     const authoritativeProfile = await db.saveAdaptiveLearningProfile(username, profile, { now: now() });
+    const publicProfile = adaptiveLearningProfilePublicDto(authoritativeProfile);
+    let plan = null;
+    if (goal) {
+      const previousPlan = await db.getCurrentAdaptiveLearningPlan(username);
+      const basePlanRevision = previousPlan?.revision ?? null;
+      const instant = now();
+      const calculated = buildAdaptiveLearningPlan({
+        goal,
+        profile: publicProfile,
+        previousPlan,
+        now: instant,
+      });
+      try {
+        const saved = await db.saveAdaptiveLearningPlan(username, {
+          id: crypto.randomUUID(),
+          inputFingerprint: adaptivePlanInputFingerprint({
+            goal, profile: publicProfile, basePlanRevision, now: instant,
+          }),
+          basePlanRevision,
+          goalId: goal.id,
+          goalRevision: goal.revision,
+          taxonomyVersion: publicProfile.taxonomyVersion,
+          profileCalculationRevision: publicProfile.profileCalculationRevision,
+          profileEvidenceWatermarkVersion: publicProfile.evidenceWatermarkVersion,
+          profileEvidenceObservedAt: publicProfile.evidenceObservedAt,
+          profileEvidenceSourceCount: publicProfile.evidenceSourceCount,
+          recalculationBucket: calculated.recalculationBucket,
+          plan: calculated,
+          now: instant,
+        });
+        if (saved.conflict) {
+          if (remainingPlanRetries > 0) {
+            return overview(username, { remainingPlanRetries: remainingPlanRetries - 1 });
+          }
+          throw new Error('ADAPTIVE_PLAN_RECALCULATION_CONFLICT');
+        }
+        if (Number(saved.plan?.goal_revision) !== Number(goal.revision)) {
+          if (remainingPlanRetries > 0) {
+            return overview(username, { remainingPlanRetries: remainingPlanRetries - 1 });
+          }
+          throw new Error('ADAPTIVE_PLAN_RECALCULATION_CONFLICT');
+        }
+        plan = adaptiveLearningPlanPublicDto(saved.plan);
+      } catch (error) {
+        if (['ADAPTIVE_PLAN_GOAL_STALE', 'ADAPTIVE_PLAN_PROFILE_STALE'].includes(error?.message)
+          && remainingPlanRetries > 0) {
+          return overview(username, { remainingPlanRetries: remainingPlanRetries - 1 });
+        }
+        throw error;
+      }
+    }
     return {
       goal: adaptiveLearningGoalPublicDto(goal),
-      profile: adaptiveLearningProfilePublicDto(authoritativeProfile),
+      profile: publicProfile,
+      plan,
     };
   }
 
@@ -127,10 +184,16 @@ export function createAdaptiveLearningRoutes({
         now: now(),
       });
       const result = await overview(req.user);
-      return res.status(saved.created ? 201 : 200).json({
-        created: saved.created,
-        goal: adaptiveLearningGoalPublicDto(saved.goal),
+      const savedIsCurrent = result.goal?.id === saved.goal?.id
+        && Number(result.goal?.revision) === Number(saved.goal?.revision);
+      const responseCreated = Boolean(saved.created && savedIsCurrent);
+      return res.status(responseCreated ? 201 : 200).json({
+        created: responseCreated,
+        replayed: !saved.created,
+        superseded: !savedIsCurrent,
+        goal: result.goal,
         profile: result.profile,
+        plan: result.plan,
       });
     } catch (error) {
       if (error?.message === 'ADAPTIVE_GOAL_IDEMPOTENCY_CONFLICT') {
@@ -147,6 +210,17 @@ export function createAdaptiveLearningRoutes({
       res.setHeader('Cache-Control', 'no-store');
       res.json(await overview(req.user));
     } catch (error) { next(error); }
+  });
+
+  router.get('/api/v1/adaptive-learning/plan', auth, async (req, res, next) => {
+    try {
+      res.setHeader('Cache-Control', 'no-store');
+      const result = await overview(req.user);
+      if (!result.goal || !result.plan) {
+        return res.status(409).json({ error: { code: 'ADAPTIVE_GOAL_REQUIRED' } });
+      }
+      return res.json(result);
+    } catch (error) { return next(error); }
   });
 
   router.post('/api/v1/adaptive-learning/diagnostics/start', auth, async (req, res, next) => {

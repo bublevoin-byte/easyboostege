@@ -882,6 +882,14 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
           <button type="submit" style="grid-column:1 / -1;border:0;border-radius:12px;background:#F2683F;color:#fff;padding:10px 12px;font:750 12px Manrope;cursor:pointer;">Сохранить цель</button>
         </form>
         <div id="adaptive_goal_notice" role="status" style="min-height:16px;margin-top:7px;font-weight:600;font-size:10.5px;color:#6A6E75;"></div>
+        <section id="adaptive_forecast" hidden aria-labelledby="adaptive_forecast_title" style="margin-top:10px;border-radius:15px;background:#F8F7F4;padding:12px;">
+          <div id="adaptive_forecast_title" style="font-weight:800;font-size:13px;color:#2B2B2B;">Прогноз и недельный фокус</div>
+          <div id="adaptive_forecast_range" style="margin-top:6px;font-weight:750;font-size:12px;line-height:1.45;color:#3E4248;"></div>
+          <div id="adaptive_forecast_confidence" style="margin-top:4px;font-weight:600;font-size:10.5px;line-height:1.4;color:#6A6E75;"></div>
+          <div id="adaptive_weekly_allocation" aria-label="Распределение учебного времени на неделю" style="display:grid;gap:6px;margin-top:10px;"></div>
+          <div id="adaptive_plan_choices" aria-label="Варианты корректировки цели" style="display:grid;gap:6px;margin-top:9px;"></div>
+          <div style="margin-top:8px;font-weight:550;font-size:9.5px;line-height:1.4;color:#73767A;">Диапазон рассчитан по текущим данным и не является гарантией результата ЕГЭ.</div>
+        </section>
         <div style="margin-top:8px;font-weight:650;font-size:10.5px;line-height:1.4;color:#6A6E75;">Короткая диагностика подстроится под ответы. Точное время и предел заданий появятся после старта.</div>
         <button id="adaptive_diagnostic_start" type="button" aria-controls="adaptive_diagnostic" hidden style="width:100%;margin-top:10px;border:1.5px solid #F2683F;border-radius:12px;background:#FFF7F3;color:#B54E2F;padding:10px 12px;font:750 12px Manrope;cursor:pointer;">Начать короткую диагностику</button>
         <section id="adaptive_diagnostic" hidden aria-labelledby="adaptive_diagnostic_title" style="margin-top:12px;border-top:1px solid #F0EEE9;padding-top:12px;">

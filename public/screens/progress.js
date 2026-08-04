@@ -17,6 +17,19 @@ function repeatAttemptId(){return globalThis.crypto&&typeof globalThis.crypto.ra
 function goalIdempotencyKey(){return globalThis.crypto&&typeof globalThis.crypto.randomUUID==='function'?globalThis.crypto.randomUUID():('adaptive-goal-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2))}
 function diagnosticIdempotencyKey(kind){return globalThis.crypto&&typeof globalThis.crypto.randomUUID==='function'?globalThis.crypto.randomUUID():('adaptive-'+kind+'-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2))}
 
+const adaptiveModuleLabels={vocabulary:'Лексика',grammar:'Грамматика',reading:'Чтение',listening:'Аудирование',writing:'Письмо',speaking:'Говорение'};
+const adaptiveReasonLabels={high_uncertainty:'нужно уточнить уровень',due_review:'пора проверить сохранение навыка',critical_retention_expiry:'срочное повторение скоро потеряет актуальность',target_gap:'есть разрыв до цели',high_ege_impact:'сильно влияет на ЕГЭ',deadline_pressure:'экзамен уже близко',maintenance:'поддерживаем навык'};
+function drawAdaptiveForecast(plan){
+  const section=document.getElementById('adaptive_forecast');const range=document.getElementById('adaptive_forecast_range');const confidence=document.getElementById('adaptive_forecast_confidence');const allocation=document.getElementById('adaptive_weekly_allocation');const choices=document.getElementById('adaptive_plan_choices');if(!section||!range||!confidence||!allocation||!choices)return;
+  if(!plan||!plan.forecast||!plan.allocation){section.hidden=true;allocation.replaceChildren();choices.replaceChildren();return}
+  section.hidden=false;const forecast=plan.forecast;
+  if(forecast.status==='exam_date_expired'){range.textContent='Дата экзамена уже наступила. Обновите дату цели, чтобы построить новый прогноз.';confidence.textContent='Прогноз баллов и недельное распределение не рассчитываются для прошедшей даты.';allocation.replaceChildren();choices.replaceChildren();choices.appendChild(text('div','Обновить дату экзамена в цели','border-left:3px solid #F2683F;padding-left:8px;font-weight:700;font-size:10.5px;line-height:1.4;color:#3E4248;'));return}
+  range.textContent='Ориентир: '+plan.forecast.lowScore+'–'+plan.forecast.highScore+' баллов. Для цели нужно около '+forecast.requiredWeeklyMinutes+' минут в неделю.';
+  confidence.textContent='Уверенность прогноза '+forecast.confidence+'%. Это диапазон, а не обещание результата; расчёт уточняется по новым самостоятельным ответам.';
+  allocation.replaceChildren();(plan.allocation.modules||[]).slice().sort(function(first,second){return second.percentage-first.percentage}).forEach(function(module){const reasons=Array.isArray(module.reasonCodes)?module.reasonCodes.map(function(code){return adaptiveReasonLabels[code]||code}).slice(0,2):[];const row=document.createElement('div');row.setAttribute('style','display:flex;justify-content:space-between;gap:10px;border-top:1px solid #E9E5DE;padding-top:6px;');row.appendChild(text('span',(adaptiveModuleLabels[module.id]||module.id)+(reasons.length?' — '+reasons.join(', '):''),'font-weight:650;font-size:10.5px;line-height:1.35;color:#52565E;'));row.appendChild(text('strong',module.percentage+'%','flex:none;font-weight:800;font-size:11px;color:#B54E2F;'));allocation.appendChild(row)});
+  choices.replaceChildren();(forecast.choices||[]).forEach(function(choice){let label='';if(choice.type==='increase_weekly_time')label=choice.constraintCode==='maximum_supported_weekly_time'?'Максимум поддерживаемого времени — '+choice.weeklyMinutes+' минут в неделю, но этого всё ещё меньше расчётной потребности. Цель нужно скорректировать.':'Увеличить время до '+choice.weeklyMinutes+' минут в неделю';else if(choice.type==='adjust_target_score')label='Скорректировать цель до '+choice.targetScore+' баллов';else if(choice.type==='update_exam_date')label='Обновить дату экзамена в цели';if(label)choices.appendChild(text('div',label,'border-left:3px solid #F2683F;padding-left:8px;font-weight:700;font-size:10.5px;line-height:1.4;color:#3E4248;'))});
+}
+
 function drawAdaptivePlan(payload){
   const root=document.getElementById('adaptive_plan');const summary=document.getElementById('adaptive_plan_summary');if(!root||!summary)return;
   const goal=payload&&payload.goal;const profile=payload&&payload.profile?payload.profile:{};
@@ -28,6 +41,7 @@ function drawAdaptivePlan(payload){
   const diagnostic=profile.needsDiagnostic?' Нужна короткая диагностика для уточнения.':'';
   const assisted=Number(profile.assistedEvidenceCount)>0&&establishedSkillCount<12?' Результаты с подсказкой не подтверждают владение навыком.':'';
   summary.textContent=state+' · подтверждено навыков: '+establishedSkillCount+' из 12 · уверенность '+confidence+'% · данных: '+observed+'.'+(weakest?' Сейчас важнее всего: '+weakest.id+' ('+weakest.mastery+'%).':'')+assisted+diagnostic;
+  drawAdaptiveForecast(payload&&payload.plan);
   const start=document.getElementById('adaptive_diagnostic_start');if(start)start.hidden=!profile.needsDiagnostic;
 }
 
@@ -57,7 +71,7 @@ function bindAdaptiveDiagnostic(){
   start.addEventListener('click',async function(){start.disabled=true;notice.textContent='Начинаем диагностику…';const key=start.dataset.pendingKey||diagnosticIdempotencyKey('start');start.dataset.pendingKey=key;try{const result=await apiPostIdempotent('/api/v1/adaptive-learning/diagnostics/start',{},key);delete start.dataset.pendingKey;drawAdaptiveDiagnostic(result)}catch(error){notice.textContent=apiMessage(error,'request')}finally{start.disabled=false}});
   form.addEventListener('change',function(){delete form.dataset.pendingKey});
   form.addEventListener('submit',async function(event){event.preventDefault();const selected=form.querySelector('input[name="adaptive_diagnostic_choice"]:checked');if(!selected){notice.textContent='Выберите один ответ.';return}const button=form.querySelector('button[type="submit"]');button.disabled=true;notice.textContent='Сохраняем ответ…';const key=form.dataset.pendingKey||diagnosticIdempotencyKey('answer');form.dataset.pendingKey=key;try{const result=await apiPostIdempotent('/api/v1/adaptive-learning/diagnostics/'+encodeURIComponent(section.dataset.diagnosticId)+'/answers',{itemId:section.dataset.itemId,choiceId:selected.value},key);delete form.dataset.pendingKey;drawAdaptiveDiagnostic(result)}catch(error){notice.textContent=apiMessage(error,'request')}finally{button.disabled=false}});
-  complete.addEventListener('click',async function(){complete.disabled=true;notice.textContent='Собираем предварительный профиль…';const key=complete.dataset.pendingKey||diagnosticIdempotencyKey('complete');complete.dataset.pendingKey=key;try{const result=await apiPostIdempotent('/api/v1/adaptive-learning/diagnostics/'+encodeURIComponent(section.dataset.diagnosticId)+'/complete',{},key);delete complete.dataset.pendingKey;drawAdaptivePlan(result);drawAdaptiveDiagnostic(result)}catch(error){notice.textContent=apiMessage(error,'request')}finally{complete.disabled=false}});
+  complete.addEventListener('click',async function(){complete.disabled=true;notice.textContent='Собираем предварительный профиль…';const key=complete.dataset.pendingKey||diagnosticIdempotencyKey('complete');complete.dataset.pendingKey=key;try{const result=await apiPostIdempotent('/api/v1/adaptive-learning/diagnostics/'+encodeURIComponent(section.dataset.diagnosticId)+'/complete',{},key);delete complete.dataset.pendingKey;await renderAdaptivePlan();drawAdaptiveDiagnostic(result)}catch(error){notice.textContent=apiMessage(error,'request')}finally{complete.disabled=false}});
   audio.addEventListener('click',function(){if(!audio.dataset.speechText||!window.speechSynthesis||!window.SpeechSynthesisUtterance){notice.textContent='Озвучка недоступна в этом браузере.';return}window.speechSynthesis.cancel();const utterance=new window.SpeechSynthesisUtterance(audio.dataset.speechText);utterance.lang='en-US';window.speechSynthesis.speak(utterance)});
 }
 
@@ -109,4 +123,4 @@ async function renderRecoveryMap(){const root=document.getElementById('voice_rec
 
 registerRouteHook(function(id){if(id==='scr10')renderProgress()});
 
-export {drawAdaptiveDiagnostic,drawAdaptivePlan,drawRecoveryMap,renderAdaptivePlan,renderProgress,renderRecoveryMap};
+export {drawAdaptiveDiagnostic,drawAdaptiveForecast,drawAdaptivePlan,drawRecoveryMap,renderAdaptivePlan,renderProgress,renderRecoveryMap};

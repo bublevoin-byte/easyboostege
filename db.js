@@ -79,6 +79,8 @@ export const getAdaptiveLearningGoal = (...args) => repository.getAdaptiveLearni
 export const getAdaptiveLearningEvidenceSources = (...args) => repository.getAdaptiveLearningEvidenceSources(...args);
 export const saveAdaptiveLearningProfile = (...args) => repository.saveAdaptiveLearningProfile(...args);
 export const getAdaptiveLearningProfile = (...args) => repository.getAdaptiveLearningProfile(...args);
+export const saveAdaptiveLearningPlan = (...args) => repository.saveAdaptiveLearningPlan(...args);
+export const getCurrentAdaptiveLearningPlan = (...args) => repository.getCurrentAdaptiveLearningPlan(...args);
 export const startAdaptiveDiagnostic = (...args) => repository.startAdaptiveDiagnostic(...args);
 export const getAdaptiveDiagnosticStartClaim = (...args) => repository.getAdaptiveDiagnosticStartClaim(...args);
 export const getCurrentAdaptiveDiagnostic = (...args) => repository.getCurrentAdaptiveDiagnostic(...args);

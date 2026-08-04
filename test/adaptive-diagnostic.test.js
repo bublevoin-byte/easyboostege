@@ -413,7 +413,10 @@ test('replayable browser listening probes stay assisted and cannot create indepe
         answered_at: '2026-08-04T09:02:30.000Z',
       },
     ],
-    diagnosticCompletedAt: '2026-08-04T09:03:00.000Z',
+    diagnosticCompletions: [{
+      catalog_version: 'ege-short-diagnostic-v1',
+      completed_at: '2026-08-04T09:03:00.000Z',
+    }],
   });
   const listening = profile.skills.find((skill) => skill.id === 'ege.listening.detail');
   const grammar = profile.skills.find((skill) => skill.id === 'ege.grammar.forms');

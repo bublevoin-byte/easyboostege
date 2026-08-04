@@ -18,6 +18,14 @@ import {
   ADAPTIVE_DIAGNOSTIC_START_CLAIM_LIMIT,
   adaptiveDiagnosticClaimExpiresAt,
 } from '../adaptive-learning/diagnostic-claims.js';
+import { adaptiveLearningPlanRepositoryDto } from '../adaptive-learning/plan-dto.js';
+import {
+  assertAdaptivePlanAuthoritativeCandidate,
+  assertAdaptivePlanDuplicateReplay,
+  assertAdaptivePlanPersistenceCandidate,
+  assertAdaptivePlanStabilityTransition,
+  compareAdaptivePlanInputs,
+} from '../adaptive-learning/plan.js';
 import { hashAuthCode, normalizeUsername, normalizeVoiceTutorDeliveryMetadata, normalizeVoiceTutorProxyHash, subscriptionView, VoiceTutorError, voiceTutorAccessView, voiceTutorBillableSeconds, voiceTutorProxyUsage, voiceTutorQuotaPeriods, voiceTutorReservationSeconds } from './shared.js';
 import { transitionPedagogicalState } from '../voice-tutor/state-machine.js';
 import { transitionRuleCardReview } from '../voice-tutor/rule-card.js';
@@ -2011,6 +2019,133 @@ export function createPostgresRepository(connectionString, {
     return readAdaptiveLearningProfile(pool, username, { onAdaptiveProfileSnapshot });
   }
 
+  async function saveAdaptiveLearningPlan(username, candidate) {
+    const client = await pool.connect();
+    let inTransaction = false;
+    try {
+      await client.query('BEGIN');
+      inTransaction = true;
+      const owner = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+      if (!owner.rowCount) throw new Error('USER_NOT_FOUND');
+      const currentResult = await client.query(
+        `SELECT * FROM adaptive_learning_plan_revisions
+         WHERE username = $1 AND current ORDER BY revision DESC LIMIT 1`, [username],
+      );
+      const current = currentResult.rows[0] || null;
+      assertAdaptivePlanPersistenceCandidate(candidate);
+      const duplicate = await client.query(
+        'SELECT * FROM adaptive_learning_plan_revisions WHERE username = $1 AND input_fingerprint = $2',
+        [username, candidate.inputFingerprint],
+      );
+      if (duplicate.rowCount) {
+        assertAdaptivePlanDuplicateReplay(candidate, duplicate.rows[0]);
+        const historical = Boolean(current) && duplicate.rows[0].id !== current.id;
+        await client.query('COMMIT');
+        inTransaction = false;
+        return {
+          created: false,
+          stale: historical,
+          replayed: true,
+          conflict: false,
+          reason: historical ? 'historical_fingerprint' : 'current_fingerprint',
+          plan: adaptiveLearningPlanRepositoryDto(current || duplicate.rows[0]),
+        };
+      }
+      const goal = await client.query(
+        'SELECT * FROM adaptive_learning_goals WHERE username = $1 AND current', [username],
+      );
+      if (!goal.rowCount || goal.rows[0].id !== candidate.goalId
+        || Number(goal.rows[0].revision) !== Number(candidate.goalRevision)) {
+        throw new Error('ADAPTIVE_PLAN_GOAL_STALE');
+      }
+      const authoritativeProfile = await readAdaptiveLearningProfile(client, username);
+      assertAdaptivePlanPersistenceCandidate(candidate, {
+        authoritativeProfile,
+      });
+      const currentRevision = current ? Number(current.revision) : null;
+      const basePlanRevision = candidate.basePlanRevision == null ? null : Number(candidate.basePlanRevision);
+      if (basePlanRevision !== currentRevision) {
+        await client.query('COMMIT');
+        inTransaction = false;
+        return {
+          created: false,
+          stale: true,
+          replayed: false,
+          conflict: true,
+          reason: 'base_plan_revision_mismatch',
+          plan: adaptiveLearningPlanRepositoryDto(current),
+        };
+      }
+      if (current && compareAdaptivePlanInputs(candidate, current) <= 0) {
+        await client.query('COMMIT');
+        inTransaction = false;
+        return {
+          created: false,
+          stale: true,
+          replayed: false,
+          conflict: false,
+          reason: 'evidence_or_bucket_stale',
+          plan: adaptiveLearningPlanRepositoryDto(current),
+        };
+      }
+      assertAdaptivePlanAuthoritativeCandidate(candidate, {
+        authoritativeGoal: adaptiveLearningGoalRepositoryDto(goal.rows[0]),
+        authoritativeProfile,
+        currentPlan: adaptiveLearningPlanRepositoryDto(current),
+      });
+      if (Number(candidate.plan?.goalRevision) !== Number(candidate.goalRevision)) {
+        throw new Error('ADAPTIVE_PLAN_STABILITY_VIOLATION');
+      }
+      assertAdaptivePlanStabilityTransition(current, candidate.plan);
+      const revisionResult = await client.query(
+        `SELECT COALESCE(MAX(revision), 0)::integer + 1 AS revision
+         FROM adaptive_learning_plan_revisions WHERE username = $1`, [username],
+      );
+      await client.query(
+        'UPDATE adaptive_learning_plan_revisions SET current = FALSE WHERE username = $1 AND current',
+        [username],
+      );
+      const inserted = await client.query(
+        `INSERT INTO adaptive_learning_plan_revisions
+         (id, username, plan_version, revision, base_plan_revision, goal_id, goal_revision, taxonomy_version,
+          profile_calculation_revision, profile_evidence_watermark_version,
+          profile_evidence_observed_at, profile_evidence_source_count, recalculation_bucket,
+          input_fingerprint, forecast, allocation, stability, current, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::date, $14,
+                 $15::jsonb, $16::jsonb, $17::jsonb, TRUE, $18, $18)
+         RETURNING *`,
+        [candidate.id, username, candidate.plan.version, revisionResult.rows[0].revision,
+          basePlanRevision, candidate.goalId, candidate.goalRevision, candidate.taxonomyVersion,
+          candidate.profileCalculationRevision, candidate.profileEvidenceWatermarkVersion,
+          candidate.profileEvidenceObservedAt, candidate.profileEvidenceSourceCount,
+          candidate.recalculationBucket, candidate.inputFingerprint,
+          JSON.stringify(candidate.plan.forecast), JSON.stringify(candidate.plan.allocation),
+          JSON.stringify(candidate.plan.stability), candidate.now],
+      );
+      await client.query('COMMIT');
+      inTransaction = false;
+      return {
+        created: true,
+        stale: false,
+        replayed: false,
+        conflict: false,
+        reason: null,
+        plan: adaptiveLearningPlanRepositoryDto(inserted.rows[0]),
+      };
+    } catch (error) {
+      if (inTransaction) await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async function getCurrentAdaptiveLearningPlan(username) {
+    const result = await pool.query(
+      `SELECT * FROM adaptive_learning_plan_revisions
+       WHERE username = $1 AND current ORDER BY revision DESC LIMIT 1`, [username],
+    );
+    return adaptiveLearningPlanRepositoryDto(result.rows[0]);
+  }
+
   async function readAdaptiveDiagnostic(queryable, username, diagnosticId = null) {
     const result = await queryable.query(
       `SELECT diagnostic.*,
@@ -2551,7 +2686,7 @@ export function createPostgresRepository(connectionString, {
   }
 
   async function exportUserData(username) {
-    const [account, progress, privacyConsent, subscriptionEvents, subscriptionEntitlements, voiceTutorSessions, voiceTutorRecoveries, voiceTutorRepeats, voiceTutorRepeatAttempts, voiceTutorReports, ruleCards, paymentRequests, writingAttempts, speakingAttempts, generatedTasks, moduleAttempts, progressSummary, wordProgress, errorBank, adaptiveGoals, adaptiveSnapshot, adaptiveDiagnosticSessions, adaptiveDiagnosticResponses, aiRequests, auditLog] = await Promise.all([
+    const [account, progress, privacyConsent, subscriptionEvents, subscriptionEntitlements, voiceTutorSessions, voiceTutorRecoveries, voiceTutorRepeats, voiceTutorRepeatAttempts, voiceTutorReports, ruleCards, paymentRequests, writingAttempts, speakingAttempts, generatedTasks, moduleAttempts, progressSummary, wordProgress, errorBank, adaptiveGoals, adaptiveSnapshot, adaptivePlanRevisions, adaptiveDiagnosticSessions, adaptiveDiagnosticResponses, aiRequests, auditLog] = await Promise.all([
       pool.query('SELECT username, telegram_id, role, trial_used, subscription_until, created_at, updated_at FROM users WHERE username = $1', [username]),
       pool.query('SELECT data, updated_at FROM user_progress WHERE username = $1', [username]),
       pool.query('SELECT text_processing, voice_processing, policy_version, text_consented_at, voice_consented_at, updated_at FROM privacy_consents WHERE username = $1', [username]),
@@ -2592,6 +2727,8 @@ export function createPostgresRepository(connectionString, {
       pool.query(`SELECT id, target_exam, target_score, exam_date, weekly_minutes, revision, created_at, updated_at
                   FROM adaptive_learning_goals WHERE username = $1 ORDER BY revision`, [username]),
       readAdaptiveLearningProfile(pool, username, { onAdaptiveProfileSnapshot }),
+      pool.query(`SELECT * FROM adaptive_learning_plan_revisions
+                  WHERE username = $1 ORDER BY revision`, [username]),
       pool.query(`SELECT id, catalog_version, status, current_item_id, answered_items, correct_items,
                          stop_reason, started_at, expires_at, completed_at, updated_at
                   FROM adaptive_diagnostic_sessions WHERE username = $1 ORDER BY started_at`, [username]),
@@ -2634,6 +2771,7 @@ export function createPostgresRepository(connectionString, {
       adaptive_learning_goals: adaptiveGoals.rows.map(adaptiveLearningGoalRepositoryDto),
       adaptive_learning_profile: adaptiveExport.profile,
       adaptive_learning_skill_estimates: adaptiveExport.estimates,
+      adaptive_learning_plan_revisions: adaptivePlanRevisions.rows.map(adaptiveLearningPlanRepositoryDto),
       adaptive_diagnostic_sessions: adaptiveDiagnosticSessions.rows.map(adaptiveDiagnosticExportDto),
       adaptive_diagnostic_responses: adaptiveDiagnosticResponses.rows.map(adaptiveDiagnosticResponseExportDto),
       ai_requests: aiRequests.rows,
@@ -2772,6 +2910,8 @@ export function createPostgresRepository(connectionString, {
     getAdaptiveLearningEvidenceSources,
     saveAdaptiveLearningProfile,
     getAdaptiveLearningProfile,
+    saveAdaptiveLearningPlan,
+    getCurrentAdaptiveLearningPlan,
     startAdaptiveDiagnostic,
     getAdaptiveDiagnosticStartClaim,
     getCurrentAdaptiveDiagnostic,

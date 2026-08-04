@@ -22,6 +22,7 @@ export async function assertAdaptiveGoalRepositoryContract(assert, repository, u
   assert.deepEqual(saved.goal, duplicate.goal);
   assert.deepEqual(saved.goal, loaded);
   assert.deepEqual(Object.keys(loaded).sort(), [...GOAL_KEYS]);
+  assert.equal(loaded.exam_date, goal.examDate, 'file and PostgreSQL preserve the same calendar exam date');
   assert.equal(loaded.created_at, goal.now.toISOString());
   assert.equal(loaded.updated_at, goal.now.toISOString());
   assert.deepEqual(exported.adaptive_learning_goals, [loaded]);

@@ -557,8 +557,16 @@ paths:
                 weeklyMinutes: { type: integer, minimum: 30, maximum: 2520, multipleOf: 5 }
               additionalProperties: false
       responses:
-        '201': { description: Goal revision created and current profile returned }
-        '200': { description: Exact idempotent replay; prior goal revision and current profile returned }
+        '201':
+          description: Goal revision created and returned as one current goal/profile/plan snapshot
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdaptiveGoalMutationResponse' }
+        '200':
+          description: Exact idempotent replay or a request superseded by a newer concurrent goal; response still contains one authoritative current snapshot
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdaptiveGoalMutationResponse' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '409': { description: Idempotency key was already used with a different goal payload }
@@ -573,6 +581,19 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/AdaptiveOverview' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { description: Adaptive Learning rollout is disabled; the route is not registered }
+  /api/v1/adaptive-learning/plan:
+    get:
+      summary: Read or idempotently refresh the authenticated learner's honest EGE forecast and weekly allocation
+      description: Uses a transparent rule-based model, not calibrated IRT. The active score range is not a guarantee. The UTC start of recalculationBucket is the deterministic instant for forecast weeks, deadline/critical priority, allocation and calculatedAt; actual createdAt/updatedAt remain receipt timestamps. The preceding bucket keeps exactly 1/7 week before the exam-date bucket becomes action-required. A daily/evidence/base-revision fingerprint replays only after the complete normalized candidate envelope and plan semantics exactly match the retained revision, including exact retained old-goal candidates; regenerated identity and receipt timestamps are ignored. Unknown stale-goal fingerprints fail closed. New candidates are strictly validated and must match the current persisted profile vector under the owner lock. Compare-and-set retries concurrent recalculations against their actual winning base. Ordinary allocation changes, including critical_due priority work, are limited to 10 percentage points per visible skill and module; only a goal revision change resets allocation until Ticket 06 provides repository-derived persisted expiry.
+      responses:
+        '200':
+          description: Current owner-bound goal, evidence profile and authoritative persisted plan revision
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdaptiveOverview' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { description: ADAPTIVE_GOAL_REQUIRED; the learner must save an EGE goal before a plan can be calculated }
         '404': { description: Adaptive Learning rollout is disabled; the route is not registered }
   /api/v1/adaptive-learning/diagnostics/start:
     post:
@@ -1065,7 +1086,7 @@ components:
         profileCalculationRevision:
           type: integer
           minimum: 1
-          description: Monotonic profile algorithm revision; an older calculation can never replace a newer one, while no revision may reduce evidenceSourceCount.
+          description: Higher profileCalculationRevision wins first, so a newer algorithm may intentionally filter sources. Within the same calculation revision, evidenceSourceCount is monotonic; equal counts are ordered by evidenceObservedAt and then evidenceWatermarkVersion.
         evidenceWatermarkVersion: { type: string, enum: [adaptive-evidence-watermark-v1] }
         evidenceObservedAt:
           type: string
@@ -1096,13 +1117,111 @@ components:
       additionalProperties: false
     AdaptiveOverview:
       type: object
-      required: [goal, profile]
+      required: [goal, profile, plan]
       properties:
         goal:
           allOf:
             - $ref: '#/components/schemas/AdaptiveGoal'
           nullable: true
         profile: { $ref: '#/components/schemas/AdaptiveProfile' }
+        plan:
+          allOf:
+            - $ref: '#/components/schemas/AdaptivePlan'
+          nullable: true
+      additionalProperties: false
+    AdaptiveGoalMutationResponse:
+      type: object
+      required: [created, replayed, superseded, goal, profile, plan]
+      properties:
+        created: { type: boolean, description: True only when this request created the goal revision that is still current in this response. }
+        replayed: { type: boolean, description: True when the exact retained owner-bound idempotency claim was replayed. }
+        superseded: { type: boolean, description: True when the request's saved or replayed goal is older than the authoritative current snapshot returned. }
+        goal: { $ref: '#/components/schemas/AdaptiveGoal' }
+        profile: { $ref: '#/components/schemas/AdaptiveProfile' }
+        plan: { $ref: '#/components/schemas/AdaptivePlan' }
+      additionalProperties: false
+    AdaptiveForecastChoice:
+      type: object
+      required: [type, reasonCode]
+      properties:
+        type: { type: string, enum: [increase_weekly_time, adjust_target_score, update_exam_date] }
+        weeklyMinutes: { type: integer, minimum: 30, maximum: 2520, multipleOf: 5, description: Present only when it strictly exceeds availableWeeklyMinutes; capped at 2520. }
+        targetScore: { type: integer, minimum: 0, maximum: 100, description: For an active unlikely forecast, lies between currentEstimatedScore and highScore. }
+        sufficientForEstimatedRequirement: { type: boolean, description: Present for increase_weekly_time. False means the supported 2520-minute maximum remains below the truthful requiredWeeklyMinutes. }
+        constraintCode: { type: string, nullable: true, enum: [maximum_supported_weekly_time] }
+        reasonCode: { type: string, enum: [time_below_estimated_requirement, target_outside_current_forecast, exam_date_reached] }
+      additionalProperties: false
+    AdaptiveForecast:
+      type: object
+      description: Active honest estimated range or an action-required expired-date state from adaptive-plan-v1. Required weekly time is the five-minute upward rounding of the exact inverse of the range capacity equation, including uncertainty and its 0.75 effectiveness factor. The active range is explicitly rule-based, not calibrated and never a guaranteed EGE score. An unlikely active forecast always offers a valid target adjustment and offers increase_weekly_time only when it can strictly increase the current time; a learner already at 2520 minutes is never told to increase to the same or a smaller value.
+      required: [kind, status, actionCode, currentEstimatedScore, lowScore, highScore, confidence, requiredWeeklyMinutes, availableWeeklyMinutes, weeksRemaining, feasibility, assumptionCodes, choices]
+      properties:
+        kind: { type: string, enum: [estimated_range, action_required] }
+        status: { type: string, enum: [active, exam_date_expired] }
+        actionCode: { type: string, nullable: true, enum: [update_exam_date] }
+        currentEstimatedScore: { type: integer, minimum: 0, maximum: 100, nullable: true }
+        lowScore: { type: integer, minimum: 0, maximum: 100, nullable: true }
+        highScore: { type: integer, minimum: 0, maximum: 100, nullable: true }
+        confidence: { type: integer, minimum: 0, maximum: 100, nullable: true }
+        requiredWeeklyMinutes: { type: integer, minimum: 0, multipleOf: 5, nullable: true }
+        availableWeeklyMinutes: { type: integer, minimum: 30, maximum: 2520 }
+        weeksRemaining: { type: number, minimum: 0, description: Real fractional weeks for an active goal; exactly zero after the exam date. }
+        feasibility: { type: string, enum: [feasible_with_consistent_study, unlikely_with_current_time, update_exam_date_required] }
+        assumptionCodes:
+          type: array
+          items: { type: string, enum: [rule_based_not_calibrated, study_time_completed_as_planned, preliminary_profile, short_deadline, exam_date_reached] }
+        choices: { type: array, maxItems: 2, description: Empty when feasible; update-date only when expired; otherwise a target adjustment plus an optional strictly actionable time increase., items: { $ref: '#/components/schemas/AdaptiveForecastChoice' } }
+      additionalProperties: false
+    AdaptiveAllocationItem:
+      type: object
+      required: [id, percentage, reasonCodes]
+      properties:
+        id: { type: string, minLength: 1, maxLength: 120 }
+        label: { type: string, minLength: 1, maxLength: 160 }
+        module: { type: string, enum: [vocabulary, grammar, reading, listening, writing, speaking] }
+        percentage: { type: integer, minimum: 0, maximum: 100 }
+        activityType: { type: string, enum: [diagnostic_probe, retention_review, practice] }
+        reasonCodes:
+          type: array
+          minItems: 1
+          items: { type: string, enum: [high_uncertainty, due_review, critical_retention_expiry, target_gap, high_ege_impact, deadline_pressure, maintenance] }
+      additionalProperties: false
+    AdaptivePlan:
+      type: object
+      required: [id, version, revision, basePlanRevision, goalRevision, taxonomyVersion, profileCalculationRevision, profileEvidenceWatermarkVersion, profileEvidenceObservedAt, profileEvidenceSourceCount, recalculationBucket, calculatedAt, forecast, allocation, stability, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        version: { type: string, enum: [adaptive-plan-v1] }
+        revision: { type: integer, minimum: 1 }
+        basePlanRevision: { type: integer, minimum: 1, nullable: true, description: Exact current plan revision used to calculate this revision; null only for the first plan. }
+        goalRevision: { type: integer, minimum: 1 }
+        taxonomyVersion: { type: string, enum: [ege-en-v1] }
+        profileCalculationRevision: { type: integer, minimum: 1 }
+        profileEvidenceWatermarkVersion: { type: string, enum: [adaptive-evidence-watermark-v1] }
+        profileEvidenceObservedAt: { type: string, format: date-time, nullable: true }
+        profileEvidenceSourceCount: { type: integer, minimum: 0 }
+        recalculationBucket: { type: string, format: date }
+        calculatedAt: { type: string, format: date-time, description: Deterministic UTC start of recalculationBucket used by every time-dependent plan calculation. }
+        forecast: { $ref: '#/components/schemas/AdaptiveForecast' }
+        allocation:
+          type: object
+          required: [modules, skills]
+          properties:
+            modules: { type: array, minItems: 6, maxItems: 6, items: { $ref: '#/components/schemas/AdaptiveAllocationItem' }, description: Integer percentages total exactly 100. }
+            skills: { type: array, minItems: 12, maxItems: 12, items: { $ref: '#/components/schemas/AdaptiveAllocationItem' }, description: Integer percentages total exactly 100; high uncertainty creates diagnostic_probe work. }
+          additionalProperties: false
+        stability:
+          type: object
+          required: [applied, maximumChangePercentagePoints, bypassReason, bypassedSkillIds, bypassedModuleIds]
+          properties:
+            applied: { type: boolean }
+            maximumChangePercentagePoints: { type: integer, enum: [10] }
+            bypassReason: { type: string, nullable: true, enum: [goal_changed] }
+            bypassedSkillIds: { type: array, maxItems: 0, items: { type: string }, description: Reserved and empty until Ticket 06 adds repository-derived persisted critical expiry. }
+            bypassedModuleIds: { type: array, maxItems: 0, items: { type: string, enum: [vocabulary, grammar, reading, listening, writing, speaking] }, description: Reserved and empty until Ticket 06 adds repository-derived persisted critical expiry. }
+          additionalProperties: false
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
       additionalProperties: false
     AdaptiveDiagnosticChoice:
       type: object
