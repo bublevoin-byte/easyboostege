@@ -7,6 +7,7 @@ import {HIST,registerRouteHook,showScreen,tab} from '../router.js';
 import {
   DEMO_MODE,S,SRV,TOKEN,W37,W38,apiPost,ringOff,save,setTxt,ui,writingModule,
 } from '../app.js';
+import {completeAdaptiveServerAttempt} from '../adaptive-session-runtime.js';
 import {voiceTutorButton} from '../voice-tutor.js';
 
 const WRITE={
@@ -143,6 +144,7 @@ async function checkWriting(){
     var d=response&&response.review;
     if(!d||!d.criteria)throw new Error('bad');
     wrStore(d,n,task);
+    await completeAdaptiveServerAttempt('writing',response.attemptId);
     renderReview(d,response.evaluationScope,response.voiceTutor);S.essays=(S.essays||0)+1;save();showScreen('scr12');HIST.push('scr8');
   }catch(e){renderReview(localReview(n,task,e.message));showScreen('scr12');HIST.push('scr8')}}
 function wrStore(d,n,task){

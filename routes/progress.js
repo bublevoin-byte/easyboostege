@@ -20,7 +20,7 @@ function perUserLimiter(limit, message) {
 }
 
 // Progress, module attempts, word cards and the error bank — everything a student generates.
-export function createProgressRoutes({ authentication, db }) {
+export function createProgressRoutes({ authentication, db, now = () => new Date() }) {
   const router = express.Router();
   const { auth } = authentication;
 
@@ -60,9 +60,23 @@ export function createProgressRoutes({ authentication, db }) {
       if (['voice_tutor_error', 'voice_tutor_context_result'].includes(parsed.data.activity)) {
         return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Voice Tutor error создаётся только проверенным серверным маршрутом.' } });
       }
-      const result = await db.recordModuleAttempt(req.user, parsed.data);
+      const { adaptiveExecutionClaim, ...attempt } = parsed.data;
+      const result = adaptiveExecutionClaim
+        ? await db.recordModuleAttemptWithAdaptiveClaim(req.user, attempt, {
+          executionClaim: adaptiveExecutionClaim, now: now(),
+        })
+        : await db.recordModuleAttempt(req.user, attempt);
       res.status(result.created ? 201 : 200).json(result);
-    } catch (error) { next(error); }
+    } catch (error) {
+      const known = {
+        ADAPTIVE_EXECUTION_CLAIM_INVALID: [409, 'ADAPTIVE_EXECUTION_CLAIM_INVALID'],
+        ADAPTIVE_EXECUTION_CLAIM_EXPIRED: [410, 'ADAPTIVE_EXECUTION_CLAIM_EXPIRED'],
+        ADAPTIVE_EXECUTION_CLAIM_CONSUMED: [409, 'ADAPTIVE_EXECUTION_CLAIM_CONSUMED'],
+        ADAPTIVE_EXECUTION_ATTEMPT_MISMATCH: [409, 'ADAPTIVE_EXECUTION_ATTEMPT_MISMATCH'],
+      }[error?.message];
+      if (known) return res.status(known[0]).json({ error: { code: known[1] } });
+      return next(error);
+    }
   });
 
   router.put('/api/v1/word-progress', auth, perUserLimiter(120, 'Слишком много обновлений словаря.'), async (req, res, next) => {

@@ -9,6 +9,7 @@ import {
   S,SRV,TOKEN,WBTN,apiMessage,apiPost,apiPostBinary,examModule,generateAiContent,save,
   setTxt,spSt,spSync,speakingModule,toast,ui,wDeco,
 } from '../app.js';
+import {completeAdaptiveServerAttempt} from '../adaptive-session-runtime.js';
 import {voiceTutorButton} from '../voice-tutor.js';
 
 /* ===== SPEAKING v2: устная часть ЕГЭ, 4 задания ===== */
@@ -229,6 +230,7 @@ async function spEval(btn){
     var score=speakingModule.clampScore(d,SP.t);d.got=score.got;d.max=score.max;
     S.spkScores=speakingModule.appendScore(S.spkScores,{t:SP.t,g:d.got,m:d.max,ts:Date.now()});
     spSync();save();
+    await completeAdaptiveServerAttempt('speaking',response.attemptId);
     if(btn){btn.style.display='none'}
     spShowEval(d,tr,response.voiceTutor);
   }catch(e){

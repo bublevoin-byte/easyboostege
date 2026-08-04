@@ -11,6 +11,7 @@ import {
   S,SRV,TOKEN,WBTN,apiPost,examModule,gExamFmt,gSync,generateAiContent,grammarModule,
   registerScreenGenerator,save,setTxt,ui,wDeco,
 } from '../app.js';
+import {completeAdaptiveModuleActivity} from '../adaptive-session-runtime.js';
 
 const GRAM_Q=[
  {t:['She ','_____',' already finished her homework.'],o:['have','has','had','is'],a:1,e:'<b>She/he/it</b> — третье лицо, поэтому <b>has</b>.'},
@@ -460,6 +461,7 @@ function gSubmit(){var it=GS.queue[GS.i];if(!it)return;var inp=document.getEleme
   if(ok){gAnim('wpop','.35s');setTimeout(function(){GS.i++;gSync();save();gRenderQ()},600)}
   else{inp.value=q.ans[0];gAnim('wshake','.42s');setTimeout(function(){gExplain(it,userWrong)},900)}}
 function gFinish(){if(GS&&GS.mode==='rev'){gFinishRev();return}
+  if(GS&&!GS.adaptiveReported){GS.adaptiveReported=true;completeAdaptiveModuleActivity({module:'grammar',activityId:GS.t===18?'grammar_transformations_topic_18':'grammar_forms_topic_'+GS.t,score:GS.ok,maxScore:Math.max(1,GS.done)}).catch(function(){if(GS)GS.adaptiveReported=false})}
   var area=document.getElementById('g_area');var r=gRec(GS.t),tp=G_TOPICS[GS.t];
   var closed=r.st===2;
   area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:24px;">'+wDeco()

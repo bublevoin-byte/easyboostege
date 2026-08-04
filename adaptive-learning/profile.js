@@ -28,14 +28,14 @@ const MAX_CLIENT_REPORTED_OBSERVATIONS_PER_SKILL = 3;
 const MAX_ASSISTED_OBSERVATIONS_PER_SKILL = 3;
 
 const SKILLS = [
-  { id: 'ege.vocabulary.lexical_choice', label: 'Лексический выбор', module: 'vocabulary', egeWeight: 0.8, recommendedBlockMinutes: 10, activityIds: ['lexical_choice', 'vocabulary_choice', 'vocabulary'] },
+  { id: 'ege.vocabulary.lexical_choice', label: 'Лексический выбор', module: 'vocabulary', egeWeight: 0.8, recommendedBlockMinutes: 10, activityIds: ['lexical_choice', 'vocabulary_choice', 'vocabulary', 'vocabulary_lexical_choice_topic_1', 'vocabulary_lexical_choice_topic_6'] },
   { id: 'ege.vocabulary.word_formation', label: 'Словообразование', module: 'vocabulary', egeWeight: 0.8, recommendedBlockMinutes: 10, activityIds: ['word_formation', 'vocabulary_word_formation'] },
-  { id: 'ege.grammar.forms', label: 'Грамматические формы', module: 'grammar', egeWeight: 1, recommendedBlockMinutes: 15, activityIds: ['grammar_19_24', 'grammar_forms'] },
-  { id: 'ege.grammar.transformations', label: 'Грамматические преобразования', module: 'grammar', egeWeight: 0.9, recommendedBlockMinutes: 15, activityIds: ['grammar_25_29', 'grammar_transformations'] },
+  { id: 'ege.grammar.forms', label: 'Грамматические формы', module: 'grammar', egeWeight: 1, recommendedBlockMinutes: 15, activityIds: ['grammar_19_24', 'grammar_forms', 'grammar_forms_topic_3', 'grammar_forms_topic_4'] },
+  { id: 'ege.grammar.transformations', label: 'Грамматические преобразования', module: 'grammar', egeWeight: 0.9, recommendedBlockMinutes: 15, activityIds: ['grammar_25_29', 'grammar_transformations', 'grammar_transformations_topic_18'] },
   { id: 'ege.reading.gist', label: 'Основная мысль текста', module: 'reading', egeWeight: 0.8, recommendedBlockMinutes: 15, activityIds: ['reading_gist', 'reading_headings'] },
   { id: 'ege.reading.detail', label: 'Детальное понимание текста', module: 'reading', egeWeight: 1, recommendedBlockMinutes: 20, activityIds: ['reading_detail', 'reading'] },
   { id: 'ege.listening.gist', label: 'Основная мысль аудио', module: 'listening', egeWeight: 0.8, recommendedBlockMinutes: 15, activityIds: ['listening_gist', 'listening_matching'] },
-  { id: 'ege.listening.detail', label: 'Детальное понимание аудио', module: 'listening', egeWeight: 1, recommendedBlockMinutes: 20, activityIds: ['listening_detail', 'listening'] },
+  { id: 'ege.listening.detail', label: 'Детальное понимание аудио', module: 'listening', egeWeight: 1, recommendedBlockMinutes: 20, activityIds: ['listening_detail', 'listening', 'listening_interview'] },
   { id: 'ege.writing.email', label: 'Электронное письмо', module: 'writing', egeWeight: 0.8, recommendedBlockMinutes: 25, premiumDeepAssessment: true, activityIds: ['writing_37', 'email'] },
   { id: 'ege.writing.essay', label: 'Развёрнутое письменное высказывание', module: 'writing', egeWeight: 1, recommendedBlockMinutes: 30, premiumDeepAssessment: true, activityIds: ['writing_38', 'essay'] },
   { id: 'ege.speaking.interaction', label: 'Устное взаимодействие', module: 'speaking', egeWeight: 0.9, recommendedBlockMinutes: 15, premiumDeepAssessment: true, activityIds: ['speaking_2', 'speaking_3', 'speaking_interaction'] },

@@ -879,7 +879,11 @@ export function assertAdaptiveLearningSession(session) {
       throw new Error('ADAPTIVE_SESSION_INVALID');
     }
   }
-  if (!session.blocks.some((block) => block.id === session.currentBlockId && block.kind === 'learning')) {
+  const hasCurrentBlock = session.currentBlockId !== null
+    && session.blocks.some((block) => block.id === session.currentBlockId);
+  if ((session.currentBlockId !== null && !hasCurrentBlock)
+    || (session.status === 'created' && session.currentBlockId === null)
+    || (session.status === 'completed' && session.currentBlockId !== null)) {
     throw new Error('ADAPTIVE_SESSION_INVALID');
   }
   if ((session.revision === 1) !== (session.replacement === null)) throw new Error('ADAPTIVE_SESSION_INVALID');

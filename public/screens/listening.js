@@ -11,6 +11,7 @@ import {
   LSLOW,L_PLAYSVG,S,SRV,TOKEN,WBTN,examModule,gExamFmt,generateAiContent,lSetSlow,lSt,
   lSync,listeningModule,registerScreenGenerator,rWordsHtml,save,setTxt,toast,ui,wDeco,
 } from '../app.js';
+import {completeAdaptiveModuleActivity} from '../adaptive-session-runtime.js';
 
 /* ===== LISTENING ===== */
 const LISTEN={dialog:"— Hi, can I get a coffee and a croissant, please?  — Sure, that's four pounds fifty. Anything else?  — No, that's all, thanks.",
@@ -196,7 +197,7 @@ function lMtCheck(){if(LM.done)return;LM.done=true;lStop();var set=LM.set,r=lSt(
     var row=document.getElementById('lmt_row_'+si);if(row)row.style.pointerEvents='none'});
   var used={};set.a.forEach(function(x){used[x]=1});
   var extra=[0,1,2,3,4].find(function(i){return !used[i]});
-  r.done++;lSync();save();
+  r.done++;lSync();save();completeAdaptiveModuleActivity({module:'listening',activityId:'listening_matching',score:okn,maxScore:4}).catch(function(){});
   var area=document.getElementById('l_area');
   var d=document.createElement('div');
   d.innerHTML='<div class="clayCard" style="padding:16px 18px;margin-bottom:12px;text-align:center;animation:win .35s both;">'
@@ -277,7 +278,7 @@ function lIqCheck(){if(LI.done)return;LI.done=true;lStop();var set=LI.set,r=lSt(
       +'<div style="font-weight:800;font-size:12.5px;color:'+(ok?'#1F8A50':'#C0392B')+';">'+(ok?'Верно':'Правильно: '+q.o[q.a])+'</div>'
       +'<div style="font-weight:600;font-size:12px;color:#4A453E;margin-top:4px;line-height:1.5;"><b>В записи:</b> «'+q.ev+'» — '+q.e+'</div>'+voiceSlot+'</div>';
     var row=document.getElementById('liq_row_'+i);if(row)row.style.pointerEvents='none'});
-  r.done++;lSync();save();
+  r.done++;lSync();save();completeAdaptiveModuleActivity({module:'listening',activityId:'listening_interview',score:okn,maxScore:set.qs.length}).catch(function(){});
   var area=document.getElementById('l_area');
   var d=document.createElement('div');
   d.innerHTML='<div class="clayCard" style="padding:16px 18px;margin-bottom:12px;text-align:center;animation:win .35s both;">'

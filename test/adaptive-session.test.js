@@ -279,7 +279,9 @@ test('progress screen exposes accessible duration, preview, replacement and real
   assert.match(html, /id="adaptive_session_blocks"[^>]*aria-live="polite"/u);
   assert.match(source, /adaptive-learning\/sessions\/preview/u);
   assert.match(source, /adaptive-learning\/sessions\/'\+encodeURIComponent\(session\.id\)\+'\/replace/u);
-  assert.match(source, /launchAdaptiveActivity\(first\.launch,first\.contentRef\)/u);
+  assert.match(source, /beginAdaptiveBlock\(session,block,execution\)/u);
+  assert.match(source, /advanceAdaptiveBreak\(session,block,execution\)/u);
+  assert.match(source, /finishAdaptiveSession\(session,execution\)/u);
   assert.match(source, /нет точного встроенного задания/u);
   assert.match(apiSource, /ADAPTIVE_SESSION_COVERAGE_GAP/u);
   assert.match(apiSource, /нельзя составить занятие выбранной длительности/u);
@@ -296,12 +298,21 @@ test('session API, storage and retention contracts are documented', async () => 
     '/api/v1/adaptive-learning/sessions:',
     '/api/v1/adaptive-learning/sessions/current:',
     '/api/v1/adaptive-learning/sessions/{sessionId}/replace:',
+    '/api/v1/adaptive-learning/sessions/{sessionId}/start:',
+    '/api/v1/adaptive-learning/sessions/{sessionId}/bind-attempt:',
+    '/api/v1/adaptive-learning/sessions/{sessionId}/advance:',
+    '/api/v1/adaptive-learning/sessions/{sessionId}/finish:',
   ]) assert.match(openapi, new RegExp(endpoint.replace(/[{}]/gu, '\\$&'), 'u'));
   assert.match(openapi, /AdaptiveLearningSession:/u);
   assert.match(schema, /034_adaptive_learning_sessions\.sql/u);
+  assert.match(schema, /035_adaptive_session_execution\.sql/u);
   assert.match(schema, /adaptive_learning_sessions/u);
+  assert.match(schema, /adaptive_learning_execution_claims/u);
+  assert.match(schema, /adaptive_learning_session_events/u);
   assert.match(schema, /vocabulary_practice\|grammar_practice/u);
   assert.match(schema, /content_coverage_fallback/u);
-  assert.match(retention, /Адаптивные учебные сессии/u);
+  assert.match(retention, /Адаптивные учебные сессии и события исполнения/u);
+  assert.match(retention, /не более 2 часов/u);
+  assert.match(retention, /20 КБ/u);
   assert.match(retention, /без исходных ответов, эссе, transcript и audio/u);
 });

@@ -9,6 +9,12 @@ import {
   buildAdaptiveSessionReplacement,
   createAdaptiveLearningSessionFromPreview,
 } from '../../adaptive-learning/session.js';
+import {
+  adaptiveCompletedBlockDto,
+  adaptiveExecutionRequestHash,
+  adaptiveExecutionSummary,
+  adaptiveExecutionTokenHash,
+} from '../../adaptive-learning/session-execution.js';
 
 function reverseObjectKeys(value) {
   if (Array.isArray(value)) return value.map(reverseObjectKeys);
@@ -198,4 +204,149 @@ export async function assertAdaptiveSessionRepositoryContract(assert, repository
     'revision', 'session_version', 'status', 'taxonomy_version', 'updated_at', 'week_start',
     'weekly_budget_snapshot',
   ]);
+
+  let executionRevision = 0;
+  let minute = 1;
+  for (const block of replaced.session.blocks) {
+    const stepTime = new Date(instant.getTime() + minute * 60_000);
+    minute += 1;
+    let attempt = null;
+    if (block.kind === 'learning') {
+      const current = await repository.getAdaptiveLearningSessionExecution(username, replaced.session.id);
+      const token = `shared_execution_claim_${crypto.randomBytes(24).toString('base64url')}`;
+      const expiresAt = new Date(stepTime.getTime() + 2 * 60 * 60_000);
+      const startBody = { blockId: block.id, expectedRevision: executionRevision };
+      const startSnapshot = {
+        session: { ...current.session, status: 'in_progress', updatedAt: stepTime.toISOString() },
+        execution: {
+          ...current.execution, revision: executionRevision + 1, status: 'in_progress',
+          currentBlockId: block.id, startedAt: current.execution.startedAt || stepTime.toISOString(),
+        },
+        block, launch: block.launch, executionClaim: token, claimExpiresAt: expiresAt.toISOString(),
+      };
+      const startCandidate = {
+        operation: 'start', sessionId: replaced.session.id, ...startBody,
+        idempotencyKey: `shared-execution-start-${String(block.position).padStart(2, '0')}`,
+        requestHash: adaptiveExecutionRequestHash(startBody), claimId: crypto.randomUUID(),
+        token, tokenHash: adaptiveExecutionTokenHash(token), expiresAt, now: stepTime,
+        responseSnapshot: startSnapshot,
+      };
+      const started = await repository.startAdaptiveLearningSessionBlock(username, startCandidate);
+      assert.equal(started.created, true);
+      assert.deepEqual(started.responseSnapshot, startSnapshot);
+      const startReplay = await repository.startAdaptiveLearningSessionBlock(username, startCandidate);
+      assert.equal(startReplay.replayed, true);
+      assert.deepEqual(startReplay.responseSnapshot, startSnapshot);
+      executionRevision += 1;
+
+      const attemptId = crypto.randomUUID();
+      const recorded = await repository.recordModuleAttemptWithAdaptiveClaim(username, {
+        id: attemptId, module: block.module, activity: block.activityId,
+        score: 1, maxScore: 1, durationMs: 60_000, metadata: { forged: true },
+      }, { executionClaim: token, now: new Date(stepTime.getTime() + 1_000) });
+      assert.equal(recorded.created, true);
+      assert.equal(recorded.evidenceQuality, 'client_reported');
+      assert.equal(recorded.adaptiveExecution.sessionId, replaced.session.id);
+      const claimReplay = await repository.recordModuleAttemptWithAdaptiveClaim(username, {
+        id: attemptId, module: block.module, activity: block.activityId,
+        score: 1, maxScore: 1, durationMs: 60_000, metadata: { forged: true },
+      }, { executionClaim: token, now: new Date(stepTime.getTime() + 2_000) });
+      assert.equal(claimReplay.created, false);
+      attempt = { type: 'module', id: attemptId };
+    }
+
+    await assert.rejects(repository.getAdaptiveLearningSessionAdvanceContext(username, {
+      sessionId: replaced.session.id, blockId: block.id,
+      expectedRevision: executionRevision + 1, attempt, now: stepTime,
+    }), /ADAPTIVE_SESSION_REVISION_CONFLICT/u);
+    const context = await repository.getAdaptiveLearningSessionAdvanceContext(username, {
+      sessionId: replaced.session.id, blockId: block.id,
+      expectedRevision: executionRevision, attempt, now: stepTime,
+    });
+    const eventShape = {
+      block_id: block.id, block_kind: block.kind, module: block.module,
+      skill_id: block.skillId, activity_id: block.activityId,
+      source_type: context.source.source_type, source_ref: context.source.source_ref,
+      evidence_quality: context.source.evidence_quality, planned_minutes: block.plannedMinutes,
+      actual_minutes: context.source.actual_minutes,
+    };
+    const nextBlockId = context.nextBlock?.id || null;
+    const advanceSnapshot = {
+      session: {
+        ...context.session, status: 'in_progress', currentBlockId: nextBlockId,
+        completedLearningMinutes: context.session.completedLearningMinutes
+          + (block.kind === 'learning' ? block.plannedMinutes : 0),
+        updatedAt: stepTime.toISOString(),
+      },
+      execution: {
+        ...context.execution, revision: executionRevision + 1, status: 'in_progress',
+        currentBlockId: nextBlockId,
+        completedBlockIds: [...context.execution.completedBlockIds, block.id],
+        readyToFinish: nextBlockId === null,
+      },
+      completedBlock: adaptiveCompletedBlockDto(eventShape),
+    };
+    const advanceBody = { blockId: block.id, expectedRevision: executionRevision, attempt };
+    const advanceCandidate = {
+      operation: 'advance', sessionId: replaced.session.id, ...advanceBody,
+      idempotencyKey: `shared-execution-advance-${String(block.position).padStart(2, '0')}`,
+      requestHash: adaptiveExecutionRequestHash(advanceBody), eventId: crypto.randomUUID(),
+      now: stepTime, responseSnapshot: advanceSnapshot,
+    };
+    const advanced = await repository.advanceAdaptiveLearningSession(username, advanceCandidate);
+    assert.equal(advanced.advanced, true);
+    assert.deepEqual(advanced.responseSnapshot, advanceSnapshot);
+    const advanceReplay = await repository.advanceAdaptiveLearningSession(username, advanceCandidate);
+    assert.equal(advanceReplay.replayed, true);
+    assert.deepEqual(advanceReplay.responseSnapshot, advanceSnapshot);
+    await assert.rejects(repository.advanceAdaptiveLearningSession(username, {
+      ...advanceCandidate,
+      idempotencyKey: `${advanceCandidate.idempotencyKey}-cas`,
+      eventId: crypto.randomUUID(),
+    }), /ADAPTIVE_SESSION_REVISION_CONFLICT/u);
+    executionRevision += 1;
+  }
+
+  const finishTime = new Date(instant.getTime() + minute * 60_000);
+  const finishContext = await repository.getAdaptiveLearningSessionFinishContext(username, {
+    sessionId: replaced.session.id, expectedRevision: executionRevision,
+  });
+  const nextRecommendedAction = { type: 'create_personal_session', suggestedMinutes: 30 };
+  const summary = adaptiveExecutionSummary(
+    finishContext.session, finishContext.events, nextRecommendedAction,
+  );
+  const finishBody = { expectedRevision: executionRevision };
+  const finishSnapshot = {
+    session: {
+      ...finishContext.session, status: 'completed', currentBlockId: null,
+      updatedAt: finishTime.toISOString(),
+    },
+    execution: {
+      ...finishContext.execution, revision: executionRevision + 1, status: 'completed',
+      currentBlockId: null, readyToFinish: false, completedAt: finishTime.toISOString(),
+    },
+    summary, nextAction: nextRecommendedAction,
+  };
+  const finishCandidate = {
+    operation: 'finish', sessionId: replaced.session.id, expectedRevision: executionRevision,
+    idempotencyKey: 'shared-execution-finish-01', requestHash: adaptiveExecutionRequestHash(finishBody),
+    eventId: crypto.randomUUID(), now: finishTime, nextRecommendedAction,
+    responseSnapshot: finishSnapshot,
+  };
+  await assert.rejects(repository.finishAdaptiveLearningSession(username, {
+    ...finishCandidate, expectedRevision: executionRevision + 1,
+    idempotencyKey: 'shared-execution-finish-cas',
+    requestHash: adaptiveExecutionRequestHash({ expectedRevision: executionRevision + 1 }),
+  }), /ADAPTIVE_SESSION_REVISION_CONFLICT/u);
+  const finished = await repository.finishAdaptiveLearningSession(username, finishCandidate);
+  assert.equal(finished.finished, true);
+  assert.deepEqual(finished.responseSnapshot, finishSnapshot);
+  const finishReplay = await repository.finishAdaptiveLearningSession(username, finishCandidate);
+  assert.equal(finishReplay.replayed, true);
+  assert.deepEqual(finishReplay.responseSnapshot, finishSnapshot);
+
+  const executionExport = await repository.exportUserData(username);
+  assert.equal(executionExport.adaptive_learning_session_events.length, replaced.session.blocks.length + 1);
+  assert.equal(JSON.stringify(executionExport).includes('shared_execution_claim_'), false);
+  assert.equal(JSON.stringify(executionExport).includes('request_hash'), false);
 }

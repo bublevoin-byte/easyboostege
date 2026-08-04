@@ -238,6 +238,20 @@ test('activity mapping is exact, most-specific and covers every versioned taxono
     assert.equal(profile.skills.find((item) => item.id === skill.id).evidenceCount, 1, skill.id);
   }
 
+  const executableActivities = [
+    ['vocabulary', 'vocabulary_lexical_choice_topic_1', 'ege.vocabulary.lexical_choice'],
+    ['grammar', 'grammar_forms_topic_4', 'ege.grammar.forms'],
+    ['grammar', 'grammar_transformations_topic_18', 'ege.grammar.transformations'],
+    ['listening', 'listening_interview', 'ege.listening.detail'],
+  ];
+  for (const [module, activity, expectedSkill] of executableActivities) {
+    const executableProfile = buildAdaptiveLearningProfile({ attempts: [{
+      id: crypto.randomUUID(), module, activity, score: 1, max_score: 1,
+      evidence_quality: 'client_reported', created_at: NOW.toISOString(),
+    }] });
+    assert.equal(executableProfile.skills.find((item) => item.id === expectedSkill).evidenceCount, 1);
+  }
+
   const fallback = buildAdaptiveLearningProfile({ attempts: [
     { id: crypto.randomUUID(), module: 'grammar', activity: 'legacy_unknown', score: 1, max_score: 1 },
     { id: crypto.randomUUID(), module: 'exam', activity: 'legacy_unknown', score: 1, max_score: 1 },

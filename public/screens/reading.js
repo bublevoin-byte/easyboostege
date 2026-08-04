@@ -10,6 +10,7 @@ import {
   EGE_WORDS,S,SRV,TOKEN,WBTN,examModule,gExamFmt,generateAiContent,lastWord,readingModule,rEsc,
   rSt,rSync,rWordsHtml,registerScreenGenerator,save,setTxt,toast,ui,wBase,wDeco,wSync,
 } from '../app.js';
+import {completeAdaptiveModuleActivity} from '../adaptive-session-runtime.js';
 
 const READ_TXT="Many students take a gap year before university. They travel, work or do volunteering. It can be a valuable experience that helps them become more independent and confident.";
 let RTXT=READ_TXT;
@@ -160,7 +161,7 @@ function rHlCheck(){if(RH.done)return;RH.done=true;var set=RH.set,L='ABCDE',r=rS
     var row=document.getElementById('rhl_row_'+ti);if(row)row.style.pointerEvents='none'});
   var used={};set.txts.forEach(function(t){used[t.a]=1});
   var extra=[0,1,2,3,4].find(function(i){return !used[i]});
-  r.texts++;rSync();save();
+  r.texts++;rSync();save();completeAdaptiveModuleActivity({module:'reading',activityId:'reading_headings',score:okn,maxScore:4}).catch(function(){});
   var area=document.getElementById('r_area');
   var d=document.createElement('div');
   d.innerHTML='<div class="clayCard" style="padding:16px 18px;margin-bottom:12px;text-align:center;animation:win .35s both;">'
@@ -182,7 +183,7 @@ function rQsRender(){var area=document.getElementById('r_area');var set=RQ.set;
       +'<button class="sq" style="'+WBTN+'color:#B54E2F;margin-top:10px;" onclick="rHub()">← К чтению</button>';
     rAnim('win','.32s');setTxt('r_today','читаем текст');return}
   var q=set.qs[RQ.i];
-  if(!q){var r=rSt();r.texts++;rSync();save();var voiceSlots='';
+  if(!q){var r=rSt();r.texts++;rSync();save();completeAdaptiveModuleActivity({module:'reading',activityId:'reading_detail',score:RQ.ok,maxScore:set.qs.length}).catch(function(){});var voiceSlots='';
     var voiceResult=prepareVoiceTutorContextResult({module:'reading',set:set,selections:RQ.ans});
     set.qs.forEach(function(item,i){if(voiceResult)voiceSlots+=voiceResult.resultSlot(item,i)});
     area.innerHTML='<div id="r_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;text-align:center;">'+wDeco()

@@ -4,7 +4,7 @@
 
 **Blocked by:** 03 is complete.
 
-**Status:** implementation-complete — audit blockers repaired; final review confirmation pending
+**Status:** done
 
 - [x] Write failing invariant, API and preview UI tests first.
 - [x] Enforce five-minute increments, meaningful block minimums, exact duration accounting and breaks over 60 minutes.
@@ -12,7 +12,7 @@
 - [x] Prefer due reviews/prerequisites, avoid long monotony and fail closed when content is missing.
 - [x] Persist idempotent session creation/current state and one replacement with reason.
 - [x] Reject cross-user/tampered content, attempts and session IDs.
-- [ ] Pass targeted tests and independent Standards + Spec review with zero P0–P2.
+- [x] Pass targeted tests and independent Standards + Spec review with zero P0–P2.
 
 Post-audit implementation truth:
 

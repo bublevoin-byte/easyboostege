@@ -229,3 +229,27 @@ allowlisted response snapshot для lost-response/concurrent replay; эти в�
 PostgreSQL вызывает их под owner lock и CAS по revision, а file repository — внутри сериализованной
 mutation queue. Повтор key для другой сессии владельца является конфликтом. `ON DELETE CASCADE`
 удаляет сессии вместе с аккаунтом.
+
+## Исполнение адаптивных сессий (миграция 035)
+
+Миграция `035_adaptive_session_execution.sql` добавляет к `adaptive_learning_sessions`
+независимую `execution_revision`, server timestamps старта/завершения и минимизированный итог.
+`current_block_id` становится nullable только тогда, когда все block-completion events уже записаны
+и сессия готова к явному `finish`.
+
+`adaptive_learning_execution_claims` хранит только SHA-256 от короткоживущего opaque token,
+owner/session/block/revision, fingerprint точного launch descriptor, срок действия и одно связанное
+attempt reference. Сам token не хранится в claim row; exact start replay остаётся только во внутреннем
+mutation response snapshot и не попадает в журнал, экспорт или release evidence. Claim нельзя
+перенести между владельцами, блоками, активностями или ревизиями; истёкший/отозванный claim не создаёт
+доказательство. Для server-owned writing/speaking repository дополнительно проверяет completed status,
+task identity и создание попытки после выдачи claim.
+
+`adaptive_learning_session_events` — append-only allowlisted журнал `block_completed|session_finished`:
+идентификаторы блока/skill/activity/source, класс происхождения evidence, плановые и доступные
+фактические минуты и timestamp. Там нет score, learner answer, essay, transcript, audio, prompt или
+model response. Уникальности `(session_id, sequence)` и `(session_id, block_id)` запрещают двойное
+завершение. `adaptive_learning_session_mutations` хранит owner-global key/hash и точный response
+snapshot для `start|advance|finish`; они внутренние и не экспортируются. PostgreSQL owner lock и
+file mutation queue обеспечивают одинаковый CAS/replay contract. Все три таблицы удаляются каскадно
+вместе с владельцем; экспорт включает только session events.

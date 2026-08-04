@@ -87,6 +87,13 @@ export const createAdaptiveLearningSession = (...args) => repository.createAdapt
 export const getCurrentAdaptiveLearningSession = (...args) => repository.getCurrentAdaptiveLearningSession(...args);
 export const getAdaptiveLearningSessionReplacementReplay = (...args) => repository.getAdaptiveLearningSessionReplacementReplay(...args);
 export const replaceAdaptiveLearningSessionBlock = (...args) => repository.replaceAdaptiveLearningSessionBlock(...args);
+export const getAdaptiveLearningSessionMutationReplay = (...args) => repository.getAdaptiveLearningSessionMutationReplay(...args);
+export const startAdaptiveLearningSessionBlock = (...args) => repository.startAdaptiveLearningSessionBlock(...args);
+export const getAdaptiveLearningSessionExecution = (...args) => repository.getAdaptiveLearningSessionExecution(...args);
+export const getAdaptiveLearningSessionAdvanceContext = (...args) => repository.getAdaptiveLearningSessionAdvanceContext(...args);
+export const advanceAdaptiveLearningSession = (...args) => repository.advanceAdaptiveLearningSession(...args);
+export const getAdaptiveLearningSessionFinishContext = (...args) => repository.getAdaptiveLearningSessionFinishContext(...args);
+export const finishAdaptiveLearningSession = (...args) => repository.finishAdaptiveLearningSession(...args);
 export const getAdaptiveLearningWeekUsage = (...args) => repository.getAdaptiveLearningWeekUsage(...args);
 export const startAdaptiveDiagnostic = (...args) => repository.startAdaptiveDiagnostic(...args);
 export const getAdaptiveDiagnosticStartClaim = (...args) => repository.getAdaptiveDiagnosticStartClaim(...args);
@@ -96,6 +103,8 @@ export const getAdaptiveDiagnosticCompletionReplay = (...args) => repository.get
 export const answerAdaptiveDiagnostic = (...args) => repository.answerAdaptiveDiagnostic(...args);
 export const completeAdaptiveDiagnostic = (...args) => repository.completeAdaptiveDiagnostic(...args);
 export const recordModuleAttempt = (...args) => repository.recordModuleAttempt(...args);
+export const recordModuleAttemptWithAdaptiveClaim = (...args) => repository.recordModuleAttemptWithAdaptiveClaim(...args);
+export const bindAdaptiveLearningServerAttempt = (...args) => repository.bindAdaptiveLearningServerAttempt(...args);
 export const getModuleAttempt = (...args) => repository.getModuleAttempt(...args);
 export const upsertWordProgress = (...args) => repository.upsertWordProgress(...args);
 export const upsertErrorBank = (...args) => repository.upsertErrorBank(...args);

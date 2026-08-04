@@ -9,6 +9,7 @@ import {registerRouteHook,nav} from '../router.js';
 import {wSpeak} from '../tts.js';
 import {registerVoiceTutorError,voiceTutorButton} from '../voice-tutor.js';
 import {coreVocabularyVoice} from '../modules/core-voice-catalog.js';
+import {completeAdaptiveModuleActivity} from '../adaptive-session-runtime.js';
 import {
   EGE_WORDS,S,SRV,TOKEN,WBTN,generateAiContent,registerScreenGenerator,save,srsFail,srsOk,
   todayStr,ui,wBase,wDeco,wMergeAi,wMigrate,wRec,wStats,wSync,wordModule,
@@ -17,8 +18,8 @@ import {
 /* ===== WORDS v2: SRS-словарь ЕГЭ ===== */
 const W_TOPICS={0:'ИИ-набор',1:'Семья и отношения',2:'Образование',3:'Работа и карьера',4:'Путешествия',5:'Природа и экология',6:'Наука и технологии',7:'Здоровье и спорт',8:'Культура и досуг',9:'Общество и СМИ',10:'Город и покупки'};
 const W_POS={n:'СУЩЕСТВИТЕЛЬНОЕ',v:'ГЛАГОЛ',adj:'ПРИЛАГАТЕЛЬНОЕ',adv:'НАРЕЧИЕ',ph:'ФРАЗОВЫЙ ГЛАГОЛ',id:'ВЫРАЖЕНИЕ'};
-let WQ=[],WI=0,WDONE=0,W_ADAPTIVE_MODE=null;
-function initWords(){if(!S)return;W_ADAPTIVE_MODE=null;wMigrate();wMergeAi();
+let WQ=[],WI=0,WDONE=0,WCORRECT=0,W_ADAPTIVE_MODE=null,W_ADAPTIVE_ACTIVITY=null,W_ADAPTIVE_REPORTED=false;
+function initWords(){if(!S)return;W_ADAPTIVE_MODE=null;W_ADAPTIVE_ACTIVITY=null;W_ADAPTIVE_REPORTED=false;wMigrate();wMergeAi();
   if(S.wday!==todayStr()){S.wday=todayStr();S.wnewUsed=0}
   var lim=Math.max(0,(S.wnew||30)-(S.wnewUsed||0));
   WQ=wordModule.buildDailyQueue(EGE_WORDS,S.srs,{newLimit:lim});WI=0;WDONE=0;
@@ -31,9 +32,10 @@ function launchVocabularyPractice(mode,topicId){
   var pool=EGE_WORDS.filter(function(word){return Number(word.t)===topicId});
   if(!pool.length)return false;
   W_ADAPTIVE_MODE='lexical_choice';
+  W_ADAPTIVE_ACTIVITY='vocabulary_lexical_choice_topic_'+topicId;
   WQ=wordModule.buildDailyQueue(pool,S.srs,{newLimit:30});
   if(!WQ.length)WQ=pool.slice(0,30);
-  WI=0;WDONE=0;wSync();wRender();
+  WI=0;WDONE=0;WCORRECT=0;W_ADAPTIVE_REPORTED=false;wSync();wRender();
   return Boolean(WQ[0]&&wModeFor(WQ[0].w)==='c1');
 }
 function wBadge(x){var pos=W_POS[x.p]||x.pos||'СЛОВО';var top=W_TOPICS[x.t]||'';
@@ -50,6 +52,7 @@ function wRender(){var card=document.getElementById('w_card'),opts=document.getE
   wAnim('win','.32s');
   var x=WQ[WI];
   if(!x){var st=wStats(),n=S.wnewUsed||0;
+    if(W_ADAPTIVE_MODE&&!W_ADAPTIVE_REPORTED){W_ADAPTIVE_REPORTED=true;completeAdaptiveModuleActivity({module:'vocabulary',activityId:W_ADAPTIVE_ACTIVITY,score:WCORRECT,maxScore:Math.max(1,WDONE)}).catch(function(){W_ADAPTIVE_REPORTED=false})}
     card.innerHTML=wDeco()+'<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:22px 0;">'
       +'<div style="font-size:44px;">🎉</div>'
       +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:22px;color:#2B2B2B;margin-top:10px;">'+(n>0?'Ура! Сегодня +'+n+' новых слов':'На сегодня всё!')+'</div>'
@@ -117,7 +120,7 @@ function wPick(btn,vEnc,rightEnc){var x=WQ[WI];if(!x||btn.dataset.done)return;
   var all=btn.parentElement.querySelectorAll('button');all.forEach(function(b){b.dataset.done=1});
   var r0=wRec(x.w),isNew=!r0||!r0.s;
   if(isNew)S.wnewUsed=(S.wnewUsed||0)+1;
-  if(v===right){ui.markAnswer(btn,'correct');srsOk(x.w);WDONE++;wAnim('wpop','.35s');
+  if(v===right){ui.markAnswer(btn,'correct');srsOk(x.w);WDONE++;WCORRECT++;wAnim('wpop','.35s');
     setTimeout(wNext,650)}
   else{ui.markAnswer(btn,'wrong');wAnim('wshake','.42s');
     all.forEach(function(b){if(b.textContent===right)ui.markAnswer(b,'correct')});
@@ -128,7 +131,7 @@ function wSubmit(){var x=WQ[WI];if(!x)return;var inp=document.getElementById('w_
   var ok=val===wBase(x.w);inp.dataset.done=1;
   inp.style.borderColor=ok?'#1F9E5A':'#E24B4A';inp.style.background=ok?'#EAF7F0':'#FDEDEA';
   if(!ok){inp.value=wBase(x.w);srsFail(x.w);WQ.push(x)}else srsOk(x.w);
-  WDONE++;if(ok){wSpeak(x.w);wAnim('wpop','.35s')}else wAnim('wshake','.42s');
+  WDONE++;if(ok){WCORRECT++;wSpeak(x.w);wAnim('wpop','.35s')}else wAnim('wshake','.42s');
   setTimeout(ok?wNext:function(){wFlip(x,val,'type')},ok?650:900)}
 function wExtra(){wMergeAi();
   var fresh=EGE_WORDS.filter(function(x){var r=wRec(x.w);return !r||!r.s});

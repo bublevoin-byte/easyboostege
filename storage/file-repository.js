@@ -34,6 +34,14 @@ import {
   assertAdaptiveSessionReplacementTransition,
 } from '../adaptive-learning/session.js';
 import {
+  adaptiveCompletedBlockDto,
+  adaptiveExecutionEventExportDto,
+  adaptiveExecutionSummary,
+  adaptiveExecutionTokenHash,
+  adaptiveExecutionView,
+  adaptiveLaunchFingerprint,
+} from '../adaptive-learning/session-execution.js';
+import {
   assertAdaptivePlanAuthoritativeCandidate,
   assertAdaptivePlanDuplicateReplay,
   assertAdaptivePlanPersistenceCandidate,
@@ -104,7 +112,7 @@ function reconcileLegacyApprovedRuleCards(cards) {
 
 export function createFileRepository(filePath) {
   let loaded = false;
-  let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, subscription_entitlements: {}, voice_tutor_sessions: [], voice_tutor_recoveries: [], voice_tutor_repeats: [], voice_tutor_repeat_attempts: [], voice_tutor_reports: [], rule_cards: [], payment_requests: {}, subscription_events: [], adaptive_learning_goals: [], adaptive_learning_profiles: {}, adaptive_learning_skill_estimates: {}, adaptive_learning_plan_revisions: [], adaptive_learning_sessions: [], adaptive_diagnostic_sessions: [], adaptive_diagnostic_start_claims: [], adaptive_diagnostic_responses: [] };
+  let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, subscription_entitlements: {}, voice_tutor_sessions: [], voice_tutor_recoveries: [], voice_tutor_repeats: [], voice_tutor_repeat_attempts: [], voice_tutor_reports: [], rule_cards: [], payment_requests: {}, subscription_events: [], adaptive_learning_goals: [], adaptive_learning_profiles: {}, adaptive_learning_skill_estimates: {}, adaptive_learning_plan_revisions: [], adaptive_learning_sessions: [], adaptive_learning_execution_claims: [], adaptive_learning_session_events: [], adaptive_learning_session_mutations: [], adaptive_diagnostic_sessions: [], adaptive_diagnostic_start_claims: [], adaptive_diagnostic_responses: [] };
   let writeQueue = Promise.resolve();
   let coordinatedMutationQueue = Promise.resolve();
   let paymentQueue = Promise.resolve();
@@ -162,6 +170,9 @@ export function createFileRepository(filePath) {
           adaptive_learning_skill_estimates: parsed.adaptive_learning_skill_estimates && typeof parsed.adaptive_learning_skill_estimates === 'object' ? parsed.adaptive_learning_skill_estimates : {},
           adaptive_learning_plan_revisions: Array.isArray(parsed.adaptive_learning_plan_revisions) ? parsed.adaptive_learning_plan_revisions : [],
           adaptive_learning_sessions: Array.isArray(parsed.adaptive_learning_sessions) ? parsed.adaptive_learning_sessions : [],
+          adaptive_learning_execution_claims: Array.isArray(parsed.adaptive_learning_execution_claims) ? parsed.adaptive_learning_execution_claims : [],
+          adaptive_learning_session_events: Array.isArray(parsed.adaptive_learning_session_events) ? parsed.adaptive_learning_session_events : [],
+          adaptive_learning_session_mutations: Array.isArray(parsed.adaptive_learning_session_mutations) ? parsed.adaptive_learning_session_mutations : [],
           adaptive_diagnostic_sessions: Array.isArray(parsed.adaptive_diagnostic_sessions) ? parsed.adaptive_diagnostic_sessions : [],
           adaptive_diagnostic_start_claims: Array.isArray(parsed.adaptive_diagnostic_start_claims) ? parsed.adaptive_diagnostic_start_claims : [],
           adaptive_diagnostic_responses: Array.isArray(parsed.adaptive_diagnostic_responses) ? parsed.adaptive_diagnostic_responses : [],
@@ -1533,10 +1544,27 @@ export function createFileRepository(filePath) {
     const diagnosticCompletions = diagnostics
       .filter((entry) => entry.status === 'completed' && entry.completed_at)
       .map((entry) => ({ catalog_version: entry.catalog_version, completed_at: entry.completed_at }));
+    const assessedAttempts = [
+      ...state.writing_attempts
+        .filter((entry) => entry.username === username && entry.status === 'completed')
+        .map((entry) => ({ entry, module: 'writing', activity: String(entry.task_type), score: Number(entry.review?.overall_got), maxScore: Number(entry.review?.overall_max) })),
+      ...state.speaking_attempts
+        .filter((entry) => entry.username === username && entry.status === 'completed')
+        .map((entry) => ({ entry, module: 'speaking', activity: `speaking_${entry.task_type}`, score: Number(entry.review?.got), maxScore: Number(entry.review?.max) })),
+    ].filter((item) => Number.isFinite(item.score) && Number.isFinite(item.maxScore) && item.maxScore > 0)
+      .map((item) => ({
+        id: `${item.module}:${item.entry.id}`, module: item.module, activity: item.activity,
+        score: Math.max(0, Math.min(item.maxScore, item.score)), max_score: item.maxScore,
+        duration_ms: null, metadata: {}, evidence_quality: 'server_verified_assisted',
+        created_at: item.entry.evaluated_at || item.entry.created_at,
+      }));
     return structuredClone({
-      attempts: state.module_attempts
-        .filter((entry) => entry.username === username)
-        .map((entry) => ({ ...entry, evidence_quality: entry.evidence_quality || 'client_reported' })),
+      attempts: [
+        ...state.module_attempts
+          .filter((entry) => entry.username === username)
+          .map((entry) => ({ ...entry, evidence_quality: entry.evidence_quality || 'client_reported' })),
+        ...assessedAttempts,
+      ],
       recoveries,
       repeatAttempts: state.voice_tutor_repeat_attempts
         .filter((entry) => repeatById.has(entry.repeat_id))
@@ -1799,6 +1827,10 @@ export function createFileRepository(filePath) {
         replacement_idempotency_key: null,
         replacement_request_hash: null,
         replacement_response_snapshot: null,
+        execution_revision: 0,
+        started_at: null,
+        completed_at: null,
+        completion_summary: null,
       };
       state.adaptive_learning_sessions.push(row);
       await persist();
@@ -1859,6 +1891,289 @@ export function createFileRepository(filePath) {
       row.replacement_response_snapshot = structuredClone(candidate.session);
       await persist();
       return { replaced: true, replayed: false, session: adaptiveLearningSessionPublicDto(row) };
+    });
+  }
+
+  function adaptiveSessionRow(username, sessionId) {
+    return state.adaptive_learning_sessions.find((entry) => (
+      entry.username === username && entry.id === sessionId
+    ));
+  }
+
+  function adaptiveSessionEvents(username, sessionId) {
+    return state.adaptive_learning_session_events
+      .filter((entry) => entry.username === username && entry.session_id === sessionId)
+      .sort((left, right) => Number(left.sequence) - Number(right.sequence));
+  }
+
+  function adaptiveMutationReplay(username, candidate) {
+    const replay = state.adaptive_learning_session_mutations.find((entry) => (
+      entry.username === username && entry.idempotency_key === candidate.idempotencyKey
+    ));
+    if (!replay) return null;
+    if (replay.operation !== candidate.operation || replay.session_id !== candidate.sessionId
+      || replay.request_hash !== candidate.requestHash) {
+      throw new Error('ADAPTIVE_SESSION_IDEMPOTENCY_CONFLICT');
+    }
+    return structuredClone(replay.response_snapshot);
+  }
+
+  function addAdaptiveMutation(username, candidate, responseSnapshot) {
+    state.adaptive_learning_session_mutations.push({
+      username,
+      idempotency_key: candidate.idempotencyKey,
+      operation: candidate.operation,
+      session_id: candidate.sessionId,
+      request_hash: candidate.requestHash,
+      response_snapshot: structuredClone(responseSnapshot),
+      created_at: new Date(candidate.now).getTime(),
+    });
+  }
+
+  async function getAdaptiveLearningSessionMutationReplay(username, candidate) {
+    await load();
+    return adaptiveMutationReplay(username, candidate);
+  }
+
+  async function startAdaptiveLearningSessionBlock(username, candidate) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      const replay = adaptiveMutationReplay(username, { ...candidate, operation: 'start' });
+      if (replay) return { created: false, replayed: true, responseSnapshot: replay };
+      const row = adaptiveSessionRow(username, candidate.sessionId);
+      if (!row) throw new Error('ADAPTIVE_SESSION_NOT_FOUND');
+      if (!['created', 'in_progress'].includes(row.status)) throw new Error('ADAPTIVE_SESSION_STATE_CONFLICT');
+      if (Number(row.execution_revision || 0) !== Number(candidate.expectedRevision)) {
+        throw new Error('ADAPTIVE_SESSION_REVISION_CONFLICT');
+      }
+      if (row.current_block_id !== candidate.blockId) throw new Error('ADAPTIVE_SESSION_BLOCK_NOT_CURRENT');
+      const block = row.blocks.find((item) => item.id === candidate.blockId);
+      if (!block || block.kind !== 'learning') throw new Error('ADAPTIVE_SESSION_BLOCK_NOT_LAUNCHABLE');
+      const instant = new Date(candidate.now).getTime();
+      for (const claim of state.adaptive_learning_execution_claims) {
+        if (claim.username === username && claim.session_id === row.id && !claim.consumed_at && !claim.revoked_at) {
+          if (Number(claim.expires_at) > instant) throw new Error('ADAPTIVE_SESSION_BLOCK_ALREADY_STARTED');
+          claim.revoked_at = instant;
+        }
+      }
+      const nextRevision = Number(row.execution_revision || 0) + 1;
+      if (candidate.responseSnapshot?.execution?.revision !== nextRevision
+        || candidate.responseSnapshot?.block?.id !== block.id
+        || candidate.responseSnapshot?.executionClaim !== candidate.token
+        || adaptiveExecutionTokenHash(candidate.token) !== candidate.tokenHash
+        || candidate.responseSnapshot?.claimExpiresAt !== new Date(candidate.expiresAt).toISOString()) {
+        throw new Error('ADAPTIVE_SESSION_EXECUTION_SNAPSHOT_INVALID');
+      }
+      state.adaptive_learning_execution_claims.push({
+        id: candidate.claimId,
+        username,
+        session_id: row.id,
+        block_id: block.id,
+        session_execution_revision: nextRevision,
+        token_hash: candidate.tokenHash,
+        launch_fingerprint: adaptiveLaunchFingerprint(block),
+        issued_at: instant,
+        expires_at: new Date(candidate.expiresAt).getTime(),
+        consumed_at: null,
+        revoked_at: null,
+        attempt_type: null,
+        attempt_ref: null,
+      });
+      row.execution_revision = nextRevision;
+      row.status = 'in_progress';
+      row.started_at ||= instant;
+      row.updated_at = instant;
+      addAdaptiveMutation(username, { ...candidate, operation: 'start' }, candidate.responseSnapshot);
+      await persist();
+      return { created: true, replayed: false, responseSnapshot: structuredClone(candidate.responseSnapshot) };
+    });
+  }
+
+  async function getAdaptiveLearningSessionExecution(username, sessionId) {
+    await load();
+    const row = adaptiveSessionRow(username, sessionId);
+    if (!row) return null;
+    const events = adaptiveSessionEvents(username, sessionId);
+    return {
+      session: adaptiveLearningSessionPublicDto(row),
+      execution: adaptiveExecutionView(row, events),
+      events: events.map(adaptiveExecutionEventExportDto),
+      summary: row.completion_summary ? structuredClone(row.completion_summary) : null,
+    };
+  }
+
+  function sourceEventForAdvance(username, row, block, attempt, now) {
+    if (block.kind === 'break') {
+      if (attempt != null) throw new Error('ADAPTIVE_SESSION_BREAK_ATTEMPT_FORBIDDEN');
+      return {
+        source_type: null, source_ref: null, evidence_quality: null, actual_minutes: null,
+      };
+    }
+    if (!attempt) throw new Error('ADAPTIVE_SESSION_ATTEMPT_REQUIRED');
+    const claim = state.adaptive_learning_execution_claims.find((entry) => (
+      entry.username === username && entry.session_id === row.id && entry.block_id === block.id
+      && entry.attempt_type === attempt.type && String(entry.attempt_ref) === String(attempt.id)
+      && entry.consumed_at && !entry.revoked_at
+    ));
+    if (!claim) throw new Error('ADAPTIVE_SESSION_ATTEMPT_NOT_BOUND');
+    if (claim.launch_fingerprint !== adaptiveLaunchFingerprint(block)) {
+      throw new Error('ADAPTIVE_SESSION_ATTEMPT_MISMATCH');
+    }
+    if (attempt.type === 'module') {
+      const source = state.module_attempts.find((item) => (
+        item.username === username && item.id === attempt.id
+      ));
+      if (!source || source.module !== block.module || source.activity !== block.activityId
+        || source.metadata?.adaptive_session_id !== row.id
+        || source.metadata?.adaptive_block_id !== block.id
+        || Number(source.created_at) < Number(claim.issued_at)) {
+        throw new Error('ADAPTIVE_SESSION_ATTEMPT_MISMATCH');
+      }
+      return {
+        source_type: 'module', source_ref: source.id,
+        evidence_quality: source.evidence_quality,
+        actual_minutes: source.duration_ms == null ? null : Math.max(0, Math.round(source.duration_ms / 60_000)),
+      };
+    }
+    const source = attempt.type === 'writing'
+      ? state.writing_attempts.find((item) => item.username === username && Number(item.id) === Number(attempt.id))
+      : state.speaking_attempts.find((item) => item.username === username && Number(item.id) === Number(attempt.id));
+    if (!source || source.status !== 'completed' || Number(source.created_at) < Number(claim.issued_at)) {
+      throw new Error('ADAPTIVE_SESSION_ATTEMPT_MISMATCH');
+    }
+    return {
+      source_type: attempt.type, source_ref: String(source.id),
+      evidence_quality: 'server_verified_assisted', actual_minutes: null,
+    };
+  }
+
+  async function getAdaptiveLearningSessionAdvanceContext(username, candidate) {
+    await load();
+    const row = adaptiveSessionRow(username, candidate.sessionId);
+    if (!row) return null;
+    if (Number(row.execution_revision || 0) !== Number(candidate.expectedRevision)) {
+      throw new Error('ADAPTIVE_SESSION_REVISION_CONFLICT');
+    }
+    if (row.current_block_id !== candidate.blockId) throw new Error('ADAPTIVE_SESSION_BLOCK_NOT_CURRENT');
+    const block = row.blocks.find((item) => item.id === candidate.blockId);
+    if (!block) throw new Error('ADAPTIVE_SESSION_BLOCK_NOT_CURRENT');
+    const source = sourceEventForAdvance(username, row, block, candidate.attempt, candidate.now);
+    const nextBlock = row.blocks.find((item) => item.position === block.position + 1) || null;
+    return {
+      session: adaptiveLearningSessionPublicDto(row),
+      execution: adaptiveExecutionView(row, adaptiveSessionEvents(username, row.id)),
+      block: structuredClone(block),
+      source,
+      nextBlock: nextBlock ? structuredClone(nextBlock) : null,
+    };
+  }
+
+  async function advanceAdaptiveLearningSession(username, candidate) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      const replay = adaptiveMutationReplay(username, { ...candidate, operation: 'advance' });
+      if (replay) return { advanced: false, replayed: true, responseSnapshot: replay };
+      const row = adaptiveSessionRow(username, candidate.sessionId);
+      if (!row) throw new Error('ADAPTIVE_SESSION_NOT_FOUND');
+      if (Number(row.execution_revision || 0) !== Number(candidate.expectedRevision)) {
+        throw new Error('ADAPTIVE_SESSION_REVISION_CONFLICT');
+      }
+      if (row.current_block_id !== candidate.blockId) throw new Error('ADAPTIVE_SESSION_BLOCK_NOT_CURRENT');
+      const block = row.blocks.find((item) => item.id === candidate.blockId);
+      const source = sourceEventForAdvance(username, row, block, candidate.attempt, candidate.now);
+      if (adaptiveSessionEvents(username, row.id).some((event) => event.block_id === block.id)) {
+        throw new Error('ADAPTIVE_SESSION_BLOCK_ALREADY_COMPLETED');
+      }
+      const nextBlock = row.blocks.find((item) => item.position === block.position + 1) || null;
+      const instant = new Date(candidate.now).getTime();
+      const event = {
+        id: candidate.eventId,
+        username,
+        session_id: row.id,
+        sequence: adaptiveSessionEvents(username, row.id).length + 1,
+        event_type: 'block_completed',
+        block_id: block.id,
+        block_kind: block.kind,
+        module: block.module,
+        skill_id: block.skillId,
+        activity_id: block.activityId,
+        source_type: source.source_type,
+        source_ref: source.source_ref,
+        evidence_quality: source.evidence_quality,
+        planned_minutes: block.plannedMinutes,
+        actual_minutes: source.actual_minutes,
+        created_at: instant,
+      };
+      const nextRevision = Number(row.execution_revision || 0) + 1;
+      if (candidate.responseSnapshot?.execution?.revision !== nextRevision
+        || candidate.responseSnapshot?.completedBlock?.blockId !== block.id
+        || candidate.responseSnapshot?.session?.currentBlockId !== (nextBlock?.id || null)) {
+        throw new Error('ADAPTIVE_SESSION_EXECUTION_SNAPSHOT_INVALID');
+      }
+      state.adaptive_learning_session_events.push(event);
+      row.execution_revision = nextRevision;
+      row.current_block_id = nextBlock?.id || null;
+      if (block.kind === 'learning') {
+        row.completed_learning_minutes = Number(row.completed_learning_minutes || 0) + block.plannedMinutes;
+      }
+      row.updated_at = instant;
+      addAdaptiveMutation(username, { ...candidate, operation: 'advance' }, candidate.responseSnapshot);
+      await persist();
+      return { advanced: true, replayed: false, event: adaptiveExecutionEventExportDto(event), responseSnapshot: structuredClone(candidate.responseSnapshot) };
+    });
+  }
+
+  async function getAdaptiveLearningSessionFinishContext(username, candidate) {
+    await load();
+    const row = adaptiveSessionRow(username, candidate.sessionId);
+    if (!row) return null;
+    const events = adaptiveSessionEvents(username, row.id);
+    return {
+      session: adaptiveLearningSessionPublicDto(row),
+      execution: adaptiveExecutionView(row, events),
+      events: events.map(adaptiveExecutionEventExportDto),
+    };
+  }
+
+  async function finishAdaptiveLearningSession(username, candidate) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      const replay = adaptiveMutationReplay(username, { ...candidate, operation: 'finish' });
+      if (replay) return { finished: false, replayed: true, responseSnapshot: replay };
+      const row = adaptiveSessionRow(username, candidate.sessionId);
+      if (!row) throw new Error('ADAPTIVE_SESSION_NOT_FOUND');
+      if (Number(row.execution_revision || 0) !== Number(candidate.expectedRevision)) {
+        throw new Error('ADAPTIVE_SESSION_REVISION_CONFLICT');
+      }
+      if (row.status !== 'in_progress' || row.current_block_id !== null) {
+        throw new Error('ADAPTIVE_SESSION_NOT_READY_TO_FINISH');
+      }
+      const events = adaptiveSessionEvents(username, row.id);
+      if (events.filter((event) => event.event_type === 'block_completed').length !== row.blocks.length) {
+        throw new Error('ADAPTIVE_SESSION_NOT_READY_TO_FINISH');
+      }
+      const nextRevision = Number(row.execution_revision || 0) + 1;
+      const summary = adaptiveExecutionSummary(row, events, candidate.nextRecommendedAction);
+      if (candidate.responseSnapshot?.execution?.revision !== nextRevision
+        || candidate.responseSnapshot?.session?.status !== 'completed'
+        || JSON.stringify(candidate.responseSnapshot?.summary) !== JSON.stringify(summary)) {
+        throw new Error('ADAPTIVE_SESSION_EXECUTION_SNAPSHOT_INVALID');
+      }
+      const instant = new Date(candidate.now).getTime();
+      row.execution_revision = nextRevision;
+      row.status = 'completed';
+      row.completed_at = instant;
+      row.completion_summary = structuredClone(summary);
+      row.updated_at = instant;
+      state.adaptive_learning_session_events.push({
+        id: candidate.eventId, username, session_id: row.id, sequence: events.length + 1,
+        event_type: 'session_finished', block_id: null, block_kind: null, module: null,
+        skill_id: null, activity_id: null, source_type: null, source_ref: null,
+        evidence_quality: null, planned_minutes: 0, actual_minutes: null, created_at: instant,
+      });
+      addAdaptiveMutation(username, { ...candidate, operation: 'finish' }, candidate.responseSnapshot);
+      await persist();
+      return { finished: true, replayed: false, responseSnapshot: structuredClone(candidate.responseSnapshot) };
     });
   }
 
@@ -2150,6 +2465,135 @@ export function createFileRepository(filePath) {
     return { id: attempt.id, created: true };
   }
 
+  async function recordModuleAttemptWithAdaptiveClaim(username, attempt, {
+    executionClaim, now = new Date(),
+  }) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      const tokenHash = adaptiveExecutionTokenHash(executionClaim);
+      const claim = state.adaptive_learning_execution_claims.find((entry) => entry.token_hash === tokenHash);
+      const instant = new Date(now).getTime();
+      if (!claim || claim.username !== username) throw new Error('ADAPTIVE_EXECUTION_CLAIM_INVALID');
+      const row = adaptiveSessionRow(username, claim.session_id);
+      const block = row?.blocks.find((item) => item.id === claim.block_id);
+      if (!row || !block || row.current_block_id !== block.id || row.status !== 'in_progress'
+        || Number(row.execution_revision || 0) !== Number(claim.session_execution_revision)
+        || claim.revoked_at || Number(claim.expires_at) <= instant
+        || claim.launch_fingerprint !== adaptiveLaunchFingerprint(block)) {
+        throw new Error(Number(claim.expires_at) <= instant
+          ? 'ADAPTIVE_EXECUTION_CLAIM_EXPIRED' : 'ADAPTIVE_EXECUTION_CLAIM_INVALID');
+      }
+      const existing = state.module_attempts.find((item) => item.id === attempt.id);
+      if (claim.consumed_at) {
+        if (claim.attempt_type !== 'module' || claim.attempt_ref !== attempt.id || !existing
+          || existing.username !== username || existing.module !== attempt.module
+          || existing.activity !== attempt.activity || existing.score !== attempt.score
+          || existing.max_score !== attempt.maxScore || existing.duration_ms !== (attempt.durationMs ?? null)) {
+          throw new Error('ADAPTIVE_EXECUTION_CLAIM_CONSUMED');
+        }
+        return {
+          id: attempt.id, created: false, evidenceQuality: existing.evidence_quality,
+          adaptiveExecution: {
+            sessionId: row.id, blockId: block.id, attemptType: 'module', attemptId: attempt.id,
+          },
+        };
+      }
+      if (existing || attempt.module !== block.module || attempt.activity !== block.activityId) {
+        throw new Error('ADAPTIVE_EXECUTION_ATTEMPT_MISMATCH');
+      }
+      const metadata = {
+        adaptive_session_id: row.id,
+        adaptive_block_id: block.id,
+        adaptive_content_ref: block.contentRef,
+      };
+      state.module_attempts.push({
+        id: attempt.id, username, module: attempt.module, activity: attempt.activity,
+        score: attempt.score, max_score: attempt.maxScore, duration_ms: attempt.durationMs ?? null,
+        metadata, evidence_quality: 'client_reported', created_at: instant,
+      });
+      state.progress_summary[username] ||= {};
+      const summary = state.progress_summary[username][attempt.module] ||= {
+        module: attempt.module, attempt_count: 0, best_score: 0, best_max_score: 1,
+        total_duration_ms: 0, last_attempt_at: null, updated_at: null,
+      };
+      summary.attempt_count += 1;
+      if (attempt.score / attempt.maxScore > summary.best_score / summary.best_max_score) {
+        summary.best_score = attempt.score;
+        summary.best_max_score = attempt.maxScore;
+      }
+      summary.total_duration_ms += attempt.durationMs ?? 0;
+      summary.last_attempt_at = instant;
+      summary.updated_at = instant;
+      claim.consumed_at = instant;
+      claim.attempt_type = 'module';
+      claim.attempt_ref = attempt.id;
+      await persist();
+      return {
+        id: attempt.id, created: true, evidenceQuality: 'client_reported',
+        adaptiveExecution: {
+          sessionId: row.id, blockId: block.id, attemptType: 'module', attemptId: attempt.id,
+        },
+      };
+    });
+  }
+
+  async function bindAdaptiveLearningServerAttempt(username, {
+    sessionId, executionClaim, attempt, now = new Date(),
+  }) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      const instant = new Date(now).getTime();
+      const claim = state.adaptive_learning_execution_claims.find((entry) => (
+        entry.token_hash === adaptiveExecutionTokenHash(executionClaim)
+      ));
+      if (!claim || claim.username !== username || claim.session_id !== sessionId) {
+        throw new Error('ADAPTIVE_EXECUTION_CLAIM_INVALID');
+      }
+      const row = adaptiveSessionRow(username, sessionId);
+      const block = row?.blocks.find((item) => item.id === claim.block_id);
+      if (!row || !block || row.status !== 'in_progress' || row.current_block_id !== block.id
+        || Number(row.execution_revision || 0) !== Number(claim.session_execution_revision)
+        || claim.revoked_at || Number(claim.expires_at) <= instant
+        || claim.launch_fingerprint !== adaptiveLaunchFingerprint(block)) {
+        throw new Error(Number(claim.expires_at) <= instant
+          ? 'ADAPTIVE_EXECUTION_CLAIM_EXPIRED' : 'ADAPTIVE_EXECUTION_CLAIM_INVALID');
+      }
+      if (claim.consumed_at) {
+        if (claim.attempt_type !== attempt.type || String(claim.attempt_ref) !== String(attempt.id)) {
+          throw new Error('ADAPTIVE_EXECUTION_CLAIM_CONSUMED');
+        }
+        return {
+          created: false, evidenceQuality: 'server_verified_assisted',
+          adaptiveExecution: {
+            sessionId: row.id, blockId: block.id,
+            attemptType: attempt.type, attemptId: Number(attempt.id),
+          },
+        };
+      }
+      const source = attempt.type === 'writing'
+        ? state.writing_attempts.find((item) => item.username === username && Number(item.id) === Number(attempt.id))
+        : state.speaking_attempts.find((item) => item.username === username && Number(item.id) === Number(attempt.id));
+      const expectedActivity = attempt.type === 'writing'
+        ? String(source?.task_type || '')
+        : `speaking_${source?.task_type}`;
+      if (!source || source.status !== 'completed' || Number(source.created_at) < Number(claim.issued_at)
+        || block.module !== attempt.type || block.activityId !== expectedActivity) {
+        throw new Error('ADAPTIVE_EXECUTION_ATTEMPT_MISMATCH');
+      }
+      claim.consumed_at = instant;
+      claim.attempt_type = attempt.type;
+      claim.attempt_ref = String(attempt.id);
+      await persist();
+      return {
+        created: true, evidenceQuality: 'server_verified_assisted',
+        adaptiveExecution: {
+          sessionId: row.id, blockId: block.id,
+          attemptType: attempt.type, attemptId: Number(attempt.id),
+        },
+      };
+    });
+  }
+
   async function getModuleAttempt(username, attemptId) {
     await load();
     const attempt = state.module_attempts.find((item) => item.username === username && item.id === attemptId);
@@ -2371,6 +2815,10 @@ export function createFileRepository(filePath) {
         .filter((item) => item.username === username)
         .sort((left, right) => new Date(left.created_at) - new Date(right.created_at))
         .map(adaptiveLearningSessionRepositoryDto),
+      adaptive_learning_session_events: state.adaptive_learning_session_events
+        .filter((item) => item.username === username)
+        .sort((left, right) => Number(left.sequence) - Number(right.sequence))
+        .map(adaptiveExecutionEventExportDto),
       adaptive_diagnostic_sessions: state.adaptive_diagnostic_sessions
         .filter((item) => item.username === username)
         .map(adaptiveDiagnosticExportDto),
@@ -2416,6 +2864,12 @@ export function createFileRepository(filePath) {
       state.adaptive_learning_plan_revisions = state.adaptive_learning_plan_revisions
         .filter((item) => item.username !== username);
       state.adaptive_learning_sessions = state.adaptive_learning_sessions
+        .filter((item) => item.username !== username);
+      state.adaptive_learning_execution_claims = state.adaptive_learning_execution_claims
+        .filter((item) => item.username !== username);
+      state.adaptive_learning_session_events = state.adaptive_learning_session_events
+        .filter((item) => item.username !== username);
+      state.adaptive_learning_session_mutations = state.adaptive_learning_session_mutations
         .filter((item) => item.username !== username);
       const diagnosticIds = new Set(state.adaptive_diagnostic_sessions
         .filter((item) => item.username === username).map((item) => item.id));
@@ -2553,6 +3007,13 @@ export function createFileRepository(filePath) {
     getCurrentAdaptiveLearningSession,
     getAdaptiveLearningSessionReplacementReplay,
     replaceAdaptiveLearningSessionBlock,
+    getAdaptiveLearningSessionMutationReplay,
+    startAdaptiveLearningSessionBlock,
+    getAdaptiveLearningSessionExecution,
+    getAdaptiveLearningSessionAdvanceContext,
+    advanceAdaptiveLearningSession,
+    getAdaptiveLearningSessionFinishContext,
+    finishAdaptiveLearningSession,
     getAdaptiveLearningWeekUsage,
     startAdaptiveDiagnostic,
     getAdaptiveDiagnosticStartClaim,
@@ -2562,6 +3023,8 @@ export function createFileRepository(filePath) {
     answerAdaptiveDiagnostic,
     completeAdaptiveDiagnostic,
     recordModuleAttempt,
+    recordModuleAttemptWithAdaptiveClaim,
+    bindAdaptiveLearningServerAttempt,
     getModuleAttempt,
     upsertWordProgress,
     upsertErrorBank,

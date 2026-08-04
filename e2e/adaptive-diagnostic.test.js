@@ -357,6 +357,49 @@ async function runAdaptiveDiagnosticE2E() {
     assert.equal(lowBudgetGoal.status, 201);
     assert.equal(lowBudgetGoal.body.goal.weeklyMinutes, 30);
     assert.equal(lowBudgetGoal.body.plan.revision, 3);
+    const vocabularyGap = await page.evaluate(async () => {
+      const responses = [];
+      const activities = [
+        ['vocabulary', 'vocabulary_lexical_choice_topic_1', 0],
+        ['grammar', 'grammar_forms_topic_3', 1],
+        ['grammar', 'grammar_transformations_topic_18', 1],
+        ['reading', 'reading_headings', 1], ['reading', 'reading_detail', 1],
+        ['listening', 'listening_matching', 1], ['listening', 'listening_interview', 1],
+        ['writing', 'writing_37', 1], ['writing', 'writing_38', 1],
+        ['speaking', 'speaking_2', 1], ['speaking', 'speaking_4', 1],
+      ];
+      for (const [module, activity, score] of activities) for (let index = 0; index < 3; index += 1) {
+        const response = await fetch('/api/v1/module-attempts', {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: crypto.randomUUID(), module, activity, score, maxScore: 1,
+          }),
+        });
+        responses.push(response.status);
+      }
+      const plan = await fetch('/api/v1/adaptive-learning/plan', { credentials: 'same-origin' });
+      return { responses, status: plan.status, body: await plan.json() };
+    });
+    assert.equal(vocabularyGap.responses.length, 33);
+    assert.equal(vocabularyGap.responses.every((status) => status === 201), true);
+    assert.equal(vocabularyGap.status, 200);
+    assert.equal(vocabularyGap.body.plan.revision, 4);
+    const resetAllocation = await page.evaluate(async () => {
+      const response = await fetch('/api/v1/adaptive-learning/goal', {
+        method: 'PUT', credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'adaptive-e2e-evidence-reset-goal-01',
+        },
+        body: JSON.stringify({
+          targetExam: 'ege_english', targetScore: 85, examDate: '2027-06-01', weeklyMinutes: 35,
+        }),
+      });
+      return { status: response.status, body: await response.json() };
+    });
+    assert.equal(resetAllocation.status, 201);
+    assert.equal(resetAllocation.body.plan.revision, 5);
 
     const duration90 = page.locator('input[name="adaptive_session_duration"][value="90"]');
     await duration90.focus();
@@ -372,11 +415,27 @@ async function runAdaptiveDiagnosticE2E() {
     assert.equal(previewResponse.status(), 200);
     const previewResult = await previewResponse.json();
     assert.equal(previewResult.preview.durationMinutes, 90);
-    assert.equal(previewResult.preview.weeklyBudgetSnapshot.weeklyAvailableMinutes, 30);
+    assert.equal(previewResult.preview.weeklyBudgetSnapshot.weeklyAvailableMinutes, 35);
     assert.ok(previewResult.preview.weeklyBudgetSnapshot.coverageGaps
       .includes('ege.vocabulary.word_formation'));
     assert.equal(previewResult.preview.blocks.some((block) => block.kind === 'break'), true);
     await page.getByText(/Перерыв · 10 мин/u).waitFor({ state: 'visible', timeout: 5_000 });
+
+    const duration15 = page.locator('input[name="adaptive_session_duration"][value="15"]');
+    await duration15.focus();
+    await duration15.press('Space');
+    const executablePreviewPromise = page.waitForResponse((response) => (
+      response.request().method() === 'POST'
+        && response.url().endsWith('/api/v1/adaptive-learning/sessions/preview')
+    ));
+    await previewButton.focus();
+    await previewButton.press('Enter');
+    const executablePreviewResponse = await executablePreviewPromise;
+    assert.equal(executablePreviewResponse.status(), 200);
+    const executablePreview = (await executablePreviewResponse.json()).preview;
+    assert.equal(executablePreview.durationMinutes, 15);
+    assert.equal(executablePreview.blocks.length, 1);
+    assert.ok(['vocabulary', 'listening'].includes(executablePreview.blocks[0].module));
 
     const createSessionResponsePromise = page.waitForResponse((response) => (
       response.request().method() === 'POST'
@@ -389,35 +448,22 @@ async function runAdaptiveDiagnosticE2E() {
     assert.equal(createSessionResponse.status(), 201);
     const createSessionResult = await createSessionResponse.json();
     assert.equal(createSessionResult.session.status, 'created');
-    assert.equal(await page.locator('#adaptive_session_start').isVisible(), true);
+    await page.locator('#adaptive_session_start').waitFor({ state: 'visible', timeout: 5_000 });
 
-    const learningBlocks = createSessionResult.session.blocks.filter((block) => block.kind === 'learning');
-    const replacementTarget = learningBlocks.slice().sort((left, right) => right.difficulty - left.difficulty)[0];
-    const replacementIndex = learningBlocks.findIndex((block) => block.id === replacementTarget.id);
-    const replacementButton = page.getByRole('button', { name: 'Заменить' }).nth(replacementIndex);
-    const replacementResponsePromise = page.waitForResponse((response) => (
-      response.request().method() === 'POST' && response.url().endsWith('/replace')
-    ));
-    await replacementButton.focus();
-    await replacementButton.press('Enter');
-    const replacementResponse = await replacementResponsePromise;
-    assert.equal(replacementResponse.status(), 200);
-    const replacementResult = await replacementResponse.json();
-    assert.equal(replacementResult.session.revision, 2);
-    assert.deepEqual(
-      replacementResult.session.blocks.map((block) => block.id),
-      createSessionResult.session.blocks.map((block) => block.id),
-    );
-    assert.equal(await page.getByRole('button', { name: 'Заменить' }).count(), 0);
-
-    const firstActivity = replacementResult.session.blocks.find((block) => block.kind === 'learning');
+    const firstActivity = createSessionResult.session.blocks.find((block) => block.kind === 'learning');
+    assert.ok(['vocabulary', 'listening'].includes(firstActivity.module));
     assert.match(await page.locator('#adaptive_session_blocks').innerText(), new RegExp(
       `${firstActivity.skillLabel} — ${firstActivity.activityLabel}`.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'),
       'u',
     ));
     const startSessionButton = page.locator('#adaptive_session_start');
+    const startBlockResponsePromise = page.waitForResponse((response) => (
+      response.request().method() === 'POST' && response.url().endsWith('/start')
+    ));
     await startSessionButton.focus();
     await startSessionButton.press('Enter');
+    const startBlockResponse = await startBlockResponsePromise;
+    assert.equal(startBlockResponse.status(), 201);
     await page.locator(`#${firstActivity.launch.screenId}.on`).waitFor({ state: 'visible', timeout: 5_000 });
     await page.waitForFunction(({ screenId, kind, contentRef }) => {
       const screen = document.getElementById(screenId);
@@ -428,15 +474,82 @@ async function runAdaptiveDiagnosticE2E() {
       kind: firstActivity.launch.kind,
       contentRef: firstActivity.contentRef,
     }, { timeout: 5_000 });
-    await page.evaluate(() => window.tab('scr2'));
-    await page.locator('#scr2.on').waitFor({ state: 'visible', timeout: 5_000 });
-    await page.waitForFunction(() => typeof window.launchVocabularyPractice === 'function', null, {
-      timeout: 5_000,
+    const activeHandoff = await page.evaluate(() => (
+      JSON.parse(localStorage.getItem('easyboost.adaptive.execution.v1')).active
+    ));
+    assert.equal(activeHandoff.module, firstActivity.module);
+    assert.equal(activeHandoff.activityId, firstActivity.activityId);
+    assert.equal(activeHandoff.pending, null);
+    const privacyLater = page.getByRole('button', { name: 'Позже', exact: true });
+    if (await privacyLater.isVisible()) await privacyLater.click();
+    const attemptResponsePromise = page.waitForResponse((response) => (
+      response.request().method() === 'POST'
+        && response.url().endsWith('/api/v1/module-attempts')
+        && Boolean(response.request().postDataJSON().adaptiveExecutionClaim)
+    ), { timeout: 5_000 }).catch(() => null);
+    const advanceResponsePromise = page.waitForResponse((response) => (
+      response.request().method() === 'POST' && response.url().endsWith('/advance')
+    ), { timeout: 5_000 }).catch(() => null);
+    if (firstActivity.launch.kind === 'vocabulary_practice') {
+      assert.match(await page.locator('#w_card').innerText(), /ВЫБЕРИ ПЕРЕВОД/u);
+      await page.evaluate(() => window.WQ.splice(1));
+      const correctTranslation = await page.evaluate(() => window.WQ[window.WI].tr);
+      await page.locator('#w_opts button').filter({ hasText: correctTranslation }).click();
+    } else if (firstActivity.launch.mode === 'matching') {
+      for (let row = 0; row < 4; row += 1) {
+        await page.locator(`#lmt_row_${row} button`).nth(row).click();
+      }
+      await page.getByRole('button', { name: 'Проверить', exact: true }).click();
+    } else {
+      const questionCount = await page.locator('[id^="liq_row_"]').count();
+      for (let row = 0; row < questionCount; row += 1) {
+        await page.locator(`#liq_row_${row} button`).first().click();
+      }
+      await page.getByRole('button', { name: 'Проверить', exact: true }).click();
+    }
+    const attemptResponse = await attemptResponsePromise;
+    if (!attemptResponse) {
+      const probe = await page.evaluate(async () => {
+        const raw = localStorage.getItem('easyboost.adaptive.execution.v1');
+        const current = await fetch('/api/v1/adaptive-learning/sessions/current');
+        return { raw, currentStatus: current.status, current: await current.json() };
+      });
+      assert.fail(`adaptive attempt was not sent: ${JSON.stringify({ firstActivity, probe })}`);
+    }
+    assert.equal(attemptResponse.status(), 201);
+    const advanceResponse = await advanceResponsePromise;
+    assert.ok(advanceResponse, 'adaptive advance response was not observed');
+    assert.equal(advanceResponse.status(), 200);
+    const advanceResult = await advanceResponse.json();
+    assert.equal(advanceResult.execution.readyToFinish, true);
+    assert.equal(advanceResult.completedBlock.evidenceQuality, 'client_reported');
+    await page.locator('#scr10.on').waitFor({ state: 'visible', timeout: 5_000 });
+    await page.locator('#adaptive_session_blocks li[data-state="completed"]').waitFor({
+      state: 'visible', timeout: 5_000,
     });
-    assert.equal(await page.evaluate(() => window.launchVocabularyPractice('lexical_choice', 1)), true);
-    assert.match(await page.locator('#w_card').innerText(), /ВЫБЕРИ ПЕРЕВОД/u);
+    assert.match(await page.locator('#adaptive_session_notice').innerText(), /новых доказательств: 1/u);
+    assert.equal(await page.evaluate(() => (
+      JSON.parse(localStorage.getItem('easyboost.adaptive.execution.v1')).active
+    )), null);
+
+    const finishResponsePromise = page.waitForResponse((response) => (
+      response.request().method() === 'POST' && response.url().endsWith('/finish')
+    ));
+    await page.locator('#adaptive_session_start').press('Enter');
+    const finishResponse = await finishResponsePromise;
+    assert.equal(finishResponse.status(), 200);
+    const finishResult = await finishResponse.json();
+    assert.equal(finishResult.session.status, 'completed');
+    assert.equal(finishResult.summary.completedLearningBlocks, 1);
+    await page.getByText(/Занятие завершено: 1 учебных блоков/u).waitFor({
+      state: 'visible', timeout: 5_000,
+    });
+    const currentSessionAfterFinish = await page.evaluate(async () => (
+      (await fetch('/api/v1/adaptive-learning/sessions/current')).status
+    ));
+    assert.equal(currentSessionAfterFinish, 404);
     assert.equal(blockedExternalUrls.some((url) => /x\.ai|groq|openai/u.test(url)), false);
-    console.log('adaptive e2e: diagnostic plus session/replacement/vocabulary handoff passed');
+    console.log('adaptive e2e: diagnostic plus plan/start/activity/attempt/return/finish passed');
   } finally {
     if (context) await context.close();
     if (browser) await browser.close();

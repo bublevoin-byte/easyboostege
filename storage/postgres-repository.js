@@ -28,6 +28,13 @@ import {
   assertAdaptiveSessionReplacementTransition,
 } from '../adaptive-learning/session.js';
 import {
+  adaptiveExecutionEventExportDto,
+  adaptiveExecutionSummary,
+  adaptiveExecutionTokenHash,
+  adaptiveExecutionView,
+  adaptiveLaunchFingerprint,
+} from '../adaptive-learning/session-execution.js';
+import {
   assertAdaptivePlanAuthoritativeCandidate,
   assertAdaptivePlanDuplicateReplay,
   assertAdaptivePlanPersistenceCandidate,
@@ -1872,8 +1879,29 @@ export function createPostgresRepository(connectionString, {
          COALESCE((
            SELECT jsonb_agg(to_jsonb(source_attempt) ORDER BY source_attempt.created_at, source_attempt.id)
            FROM (
-             SELECT id, module, activity, score, max_score, duration_ms, metadata, evidence_quality, created_at
+             SELECT id::text AS id, module, activity, score, max_score, duration_ms,
+                    metadata, evidence_quality, created_at
              FROM module_attempts WHERE username = $1
+             UNION ALL
+             SELECT 'writing:' || id::text, 'writing', task_type,
+                    GREATEST(0, LEAST((review->>'overall_max')::numeric, (review->>'overall_got')::numeric)),
+                    (review->>'overall_max')::numeric, NULL::integer, '{}'::jsonb,
+                    'server_verified_assisted', COALESCE(evaluated_at, created_at)
+             FROM writing_attempts
+             WHERE username = $1 AND status = 'completed'
+               AND jsonb_typeof(review->'overall_got') = 'number'
+               AND jsonb_typeof(review->'overall_max') = 'number'
+               AND (review->>'overall_max')::numeric > 0
+             UNION ALL
+             SELECT 'speaking:' || id::text, 'speaking', 'speaking_' || task_type::text,
+                    GREATEST(0, LEAST((review->>'max')::numeric, (review->>'got')::numeric)),
+                    (review->>'max')::numeric, NULL::integer, '{}'::jsonb,
+                    'server_verified_assisted', COALESCE(evaluated_at, created_at)
+             FROM speaking_attempts
+             WHERE username = $1 AND status = 'completed'
+               AND jsonb_typeof(review->'got') = 'number'
+               AND jsonb_typeof(review->'max') = 'number'
+               AND (review->>'max')::numeric > 0
            ) source_attempt
          ), '[]'::jsonb) AS attempts,
          COALESCE((
@@ -2322,6 +2350,337 @@ export function createPostgresRepository(connectionString, {
     } finally { client.release(); }
   }
 
+  async function adaptiveMutationReplay(queryable, username, candidate, lock = false) {
+    const result = await queryable.query(
+      `SELECT operation, session_id, request_hash, response_snapshot
+       FROM adaptive_learning_session_mutations
+       WHERE username = $1 AND idempotency_key = $2${lock ? ' FOR UPDATE' : ''}`,
+      [username, candidate.idempotencyKey],
+    );
+    if (!result.rowCount) return null;
+    const row = result.rows[0];
+    if (row.operation !== candidate.operation || row.session_id !== candidate.sessionId
+      || row.request_hash !== candidate.requestHash) {
+      throw new Error('ADAPTIVE_SESSION_IDEMPOTENCY_CONFLICT');
+    }
+    return structuredClone(row.response_snapshot);
+  }
+
+  async function adaptiveSessionEvents(queryable, username, sessionId) {
+    const result = await queryable.query(
+      `SELECT * FROM adaptive_learning_session_events
+       WHERE username = $1 AND session_id = $2 ORDER BY sequence`,
+      [username, sessionId],
+    );
+    return result.rows;
+  }
+
+  async function getAdaptiveLearningSessionMutationReplay(username, candidate) {
+    return adaptiveMutationReplay(pool, username, candidate);
+  }
+
+  async function startAdaptiveLearningSessionBlock(username, candidate) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const owner = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+      if (!owner.rowCount) throw new Error('ADAPTIVE_SESSION_NOT_FOUND');
+      const replay = await adaptiveMutationReplay(client, username, { ...candidate, operation: 'start' }, true);
+      if (replay) {
+        await client.query('COMMIT');
+        return { created: false, replayed: true, responseSnapshot: replay };
+      }
+      const existing = await client.query(
+        'SELECT * FROM adaptive_learning_sessions WHERE username = $1 AND id = $2 FOR UPDATE',
+        [username, candidate.sessionId],
+      );
+      if (!existing.rowCount) throw new Error('ADAPTIVE_SESSION_NOT_FOUND');
+      const row = existing.rows[0];
+      if (!['created', 'in_progress'].includes(row.status)) throw new Error('ADAPTIVE_SESSION_STATE_CONFLICT');
+      if (Number(row.execution_revision) !== Number(candidate.expectedRevision)) {
+        throw new Error('ADAPTIVE_SESSION_REVISION_CONFLICT');
+      }
+      if (row.current_block_id !== candidate.blockId) throw new Error('ADAPTIVE_SESSION_BLOCK_NOT_CURRENT');
+      const block = row.blocks.find((item) => item.id === candidate.blockId);
+      if (!block || block.kind !== 'learning') throw new Error('ADAPTIVE_SESSION_BLOCK_NOT_LAUNCHABLE');
+      const active = await client.query(
+        `SELECT id, expires_at FROM adaptive_learning_execution_claims
+         WHERE username = $1 AND session_id = $2 AND consumed_at IS NULL AND revoked_at IS NULL FOR UPDATE`,
+        [username, row.id],
+      );
+      if (active.rows.some((claim) => new Date(claim.expires_at) > new Date(candidate.now))) {
+        throw new Error('ADAPTIVE_SESSION_BLOCK_ALREADY_STARTED');
+      }
+      await client.query(
+        `UPDATE adaptive_learning_execution_claims SET revoked_at = $3
+         WHERE username = $1 AND session_id = $2 AND consumed_at IS NULL AND revoked_at IS NULL`,
+        [username, row.id, candidate.now],
+      );
+      const nextRevision = Number(row.execution_revision) + 1;
+      if (candidate.responseSnapshot?.execution?.revision !== nextRevision
+        || candidate.responseSnapshot?.block?.id !== block.id
+        || candidate.responseSnapshot?.executionClaim !== candidate.token
+        || adaptiveExecutionTokenHash(candidate.token) !== candidate.tokenHash
+        || candidate.responseSnapshot?.claimExpiresAt !== new Date(candidate.expiresAt).toISOString()) {
+        throw new Error('ADAPTIVE_SESSION_EXECUTION_SNAPSHOT_INVALID');
+      }
+      await client.query(
+        `INSERT INTO adaptive_learning_execution_claims
+         (id, username, session_id, block_id, session_execution_revision, token_hash,
+          launch_fingerprint, issued_at, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [candidate.claimId, username, row.id, block.id, nextRevision, candidate.tokenHash,
+          adaptiveLaunchFingerprint(block), candidate.now, candidate.expiresAt],
+      );
+      await client.query(
+        `UPDATE adaptive_learning_sessions
+         SET execution_revision = $3, status = 'in_progress', started_at = COALESCE(started_at, $4), updated_at = $4
+         WHERE username = $1 AND id = $2`,
+        [username, row.id, nextRevision, candidate.now],
+      );
+      await client.query(
+        `INSERT INTO adaptive_learning_session_mutations
+         (username, idempotency_key, operation, session_id, request_hash, response_snapshot, created_at)
+         VALUES ($1, $2, 'start', $3, $4, $5::jsonb, $6)`,
+        [username, candidate.idempotencyKey, row.id, candidate.requestHash,
+          JSON.stringify(candidate.responseSnapshot), candidate.now],
+      );
+      await client.query('COMMIT');
+      return { created: true, replayed: false, responseSnapshot: structuredClone(candidate.responseSnapshot) };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async function getAdaptiveLearningSessionExecution(username, sessionId) {
+    const result = await pool.query(
+      'SELECT * FROM adaptive_learning_sessions WHERE username = $1 AND id = $2',
+      [username, sessionId],
+    );
+    if (!result.rowCount) return null;
+    const events = await adaptiveSessionEvents(pool, username, sessionId);
+    return {
+      session: adaptiveLearningSessionPublicDto(result.rows[0]),
+      execution: adaptiveExecutionView(result.rows[0], events),
+      events: events.map(adaptiveExecutionEventExportDto),
+      summary: result.rows[0].completion_summary || null,
+    };
+  }
+
+  async function adaptiveAdvanceSource(queryable, username, row, block, attempt) {
+    if (block.kind === 'break') {
+      if (attempt != null) throw new Error('ADAPTIVE_SESSION_BREAK_ATTEMPT_FORBIDDEN');
+      return { source_type: null, source_ref: null, evidence_quality: null, actual_minutes: null };
+    }
+    if (!attempt) throw new Error('ADAPTIVE_SESSION_ATTEMPT_REQUIRED');
+    const claimResult = await queryable.query(
+      `SELECT * FROM adaptive_learning_execution_claims
+       WHERE username = $1 AND session_id = $2 AND block_id = $3
+         AND attempt_type = $4 AND attempt_ref = $5 AND consumed_at IS NOT NULL AND revoked_at IS NULL`,
+      [username, row.id, block.id, attempt.type, String(attempt.id)],
+    );
+    if (!claimResult.rowCount) throw new Error('ADAPTIVE_SESSION_ATTEMPT_NOT_BOUND');
+    const claim = claimResult.rows[0];
+    if (claim.launch_fingerprint !== adaptiveLaunchFingerprint(block)) {
+      throw new Error('ADAPTIVE_SESSION_ATTEMPT_MISMATCH');
+    }
+    if (attempt.type === 'module') {
+      const source = await queryable.query(
+        `SELECT * FROM module_attempts WHERE username = $1 AND id = $2
+         AND module = $3 AND activity = $4
+         AND metadata->>'adaptive_session_id' = $5 AND metadata->>'adaptive_block_id' = $6`,
+        [username, attempt.id, block.module, block.activityId, row.id, block.id],
+      );
+      if (!source.rowCount || new Date(source.rows[0].created_at) < new Date(claim.issued_at)) {
+        throw new Error('ADAPTIVE_SESSION_ATTEMPT_MISMATCH');
+      }
+      return {
+        source_type: 'module', source_ref: source.rows[0].id,
+        evidence_quality: source.rows[0].evidence_quality,
+        actual_minutes: source.rows[0].duration_ms == null
+          ? null : Math.max(0, Math.round(Number(source.rows[0].duration_ms) / 60_000)),
+      };
+    }
+    const table = attempt.type === 'writing' ? 'writing_attempts' : 'speaking_attempts';
+    const source = await queryable.query(
+      `SELECT id, status, created_at FROM ${table} WHERE username = $1 AND id = $2`,
+      [username, attempt.id],
+    );
+    if (!source.rowCount || source.rows[0].status !== 'completed'
+      || new Date(source.rows[0].created_at) < new Date(claim.issued_at)) {
+      throw new Error('ADAPTIVE_SESSION_ATTEMPT_MISMATCH');
+    }
+    return {
+      source_type: attempt.type, source_ref: String(source.rows[0].id),
+      evidence_quality: 'server_verified_assisted', actual_minutes: null,
+    };
+  }
+
+  async function getAdaptiveLearningSessionAdvanceContext(username, candidate) {
+    const result = await pool.query(
+      'SELECT * FROM adaptive_learning_sessions WHERE username = $1 AND id = $2',
+      [username, candidate.sessionId],
+    );
+    if (!result.rowCount) return null;
+    const row = result.rows[0];
+    if (Number(row.execution_revision) !== Number(candidate.expectedRevision)) {
+      throw new Error('ADAPTIVE_SESSION_REVISION_CONFLICT');
+    }
+    if (row.current_block_id !== candidate.blockId) throw new Error('ADAPTIVE_SESSION_BLOCK_NOT_CURRENT');
+    const block = row.blocks.find((item) => item.id === candidate.blockId);
+    if (!block) throw new Error('ADAPTIVE_SESSION_BLOCK_NOT_CURRENT');
+    const source = await adaptiveAdvanceSource(pool, username, row, block, candidate.attempt);
+    const events = await adaptiveSessionEvents(pool, username, row.id);
+    const nextBlock = row.blocks.find((item) => item.position === block.position + 1) || null;
+    return {
+      session: adaptiveLearningSessionPublicDto(row), execution: adaptiveExecutionView(row, events),
+      block: structuredClone(block), source, nextBlock: nextBlock ? structuredClone(nextBlock) : null,
+    };
+  }
+
+  async function advanceAdaptiveLearningSession(username, candidate) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+      const replay = await adaptiveMutationReplay(client, username, { ...candidate, operation: 'advance' }, true);
+      if (replay) {
+        await client.query('COMMIT');
+        return { advanced: false, replayed: true, responseSnapshot: replay };
+      }
+      const existing = await client.query(
+        'SELECT * FROM adaptive_learning_sessions WHERE username = $1 AND id = $2 FOR UPDATE',
+        [username, candidate.sessionId],
+      );
+      if (!existing.rowCount) throw new Error('ADAPTIVE_SESSION_NOT_FOUND');
+      const row = existing.rows[0];
+      if (Number(row.execution_revision) !== Number(candidate.expectedRevision)) {
+        throw new Error('ADAPTIVE_SESSION_REVISION_CONFLICT');
+      }
+      if (row.current_block_id !== candidate.blockId) throw new Error('ADAPTIVE_SESSION_BLOCK_NOT_CURRENT');
+      const block = row.blocks.find((item) => item.id === candidate.blockId);
+      if (!block) throw new Error('ADAPTIVE_SESSION_BLOCK_NOT_CURRENT');
+      const source = await adaptiveAdvanceSource(client, username, row, block, candidate.attempt);
+      const nextBlock = row.blocks.find((item) => item.position === block.position + 1) || null;
+      const events = await adaptiveSessionEvents(client, username, row.id);
+      if (events.some((event) => event.block_id === block.id)) throw new Error('ADAPTIVE_SESSION_BLOCK_ALREADY_COMPLETED');
+      const nextRevision = Number(row.execution_revision) + 1;
+      if (candidate.responseSnapshot?.execution?.revision !== nextRevision
+        || candidate.responseSnapshot?.completedBlock?.blockId !== block.id
+        || candidate.responseSnapshot?.session?.currentBlockId !== (nextBlock?.id || null)) {
+        throw new Error('ADAPTIVE_SESSION_EXECUTION_SNAPSHOT_INVALID');
+      }
+      const inserted = await client.query(
+        `INSERT INTO adaptive_learning_session_events
+         (id, username, session_id, sequence, event_type, block_id, block_kind, module,
+          skill_id, activity_id, source_type, source_ref, evidence_quality, planned_minutes,
+          actual_minutes, created_at)
+         VALUES ($1, $2, $3, $4, 'block_completed', $5, $6, $7, $8, $9, $10, $11,
+                 $12, $13, $14, $15) RETURNING *`,
+        [candidate.eventId, username, row.id, events.length + 1, block.id, block.kind,
+          block.module, block.skillId, block.activityId, source.source_type, source.source_ref,
+          source.evidence_quality, block.plannedMinutes, source.actual_minutes, candidate.now],
+      );
+      await client.query(
+        `UPDATE adaptive_learning_sessions
+         SET execution_revision = $3, current_block_id = $4,
+             completed_learning_minutes = completed_learning_minutes + $5, updated_at = $6
+         WHERE username = $1 AND id = $2`,
+        [username, row.id, nextRevision, nextBlock?.id || null,
+          block.kind === 'learning' ? block.plannedMinutes : 0, candidate.now],
+      );
+      await client.query(
+        `INSERT INTO adaptive_learning_session_mutations
+         (username, idempotency_key, operation, session_id, request_hash, response_snapshot, created_at)
+         VALUES ($1, $2, 'advance', $3, $4, $5::jsonb, $6)`,
+        [username, candidate.idempotencyKey, row.id, candidate.requestHash,
+          JSON.stringify(candidate.responseSnapshot), candidate.now],
+      );
+      await client.query('COMMIT');
+      return {
+        advanced: true, replayed: false,
+        event: adaptiveExecutionEventExportDto(inserted.rows[0]),
+        responseSnapshot: structuredClone(candidate.responseSnapshot),
+      };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async function getAdaptiveLearningSessionFinishContext(username, candidate) {
+    const result = await pool.query(
+      'SELECT * FROM adaptive_learning_sessions WHERE username = $1 AND id = $2',
+      [username, candidate.sessionId],
+    );
+    if (!result.rowCount) return null;
+    const events = await adaptiveSessionEvents(pool, username, candidate.sessionId);
+    return {
+      session: adaptiveLearningSessionPublicDto(result.rows[0]),
+      execution: adaptiveExecutionView(result.rows[0], events),
+      events: events.map(adaptiveExecutionEventExportDto),
+    };
+  }
+
+  async function finishAdaptiveLearningSession(username, candidate) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+      const replay = await adaptiveMutationReplay(client, username, { ...candidate, operation: 'finish' }, true);
+      if (replay) {
+        await client.query('COMMIT');
+        return { finished: false, replayed: true, responseSnapshot: replay };
+      }
+      const existing = await client.query(
+        'SELECT * FROM adaptive_learning_sessions WHERE username = $1 AND id = $2 FOR UPDATE',
+        [username, candidate.sessionId],
+      );
+      if (!existing.rowCount) throw new Error('ADAPTIVE_SESSION_NOT_FOUND');
+      const row = existing.rows[0];
+      if (Number(row.execution_revision) !== Number(candidate.expectedRevision)) {
+        throw new Error('ADAPTIVE_SESSION_REVISION_CONFLICT');
+      }
+      const events = await adaptiveSessionEvents(client, username, row.id);
+      if (row.status !== 'in_progress' || row.current_block_id !== null
+        || events.filter((event) => event.event_type === 'block_completed').length !== row.blocks.length) {
+        throw new Error('ADAPTIVE_SESSION_NOT_READY_TO_FINISH');
+      }
+      const nextRevision = Number(row.execution_revision) + 1;
+      const summary = adaptiveExecutionSummary(row, events, candidate.nextRecommendedAction);
+      if (candidate.responseSnapshot?.execution?.revision !== nextRevision
+        || candidate.responseSnapshot?.session?.status !== 'completed'
+        || JSON.stringify(candidate.responseSnapshot?.summary) !== JSON.stringify(summary)) {
+        throw new Error('ADAPTIVE_SESSION_EXECUTION_SNAPSHOT_INVALID');
+      }
+      await client.query(
+        `INSERT INTO adaptive_learning_session_events
+         (id, username, session_id, sequence, event_type, planned_minutes, created_at)
+         VALUES ($1, $2, $3, $4, 'session_finished', 0, $5)`,
+        [candidate.eventId, username, row.id, events.length + 1, candidate.now],
+      );
+      await client.query(
+        `UPDATE adaptive_learning_sessions SET execution_revision = $3, status = 'completed',
+         completed_at = $4, completion_summary = $5::jsonb, updated_at = $4
+         WHERE username = $1 AND id = $2`,
+        [username, row.id, nextRevision, candidate.now, JSON.stringify(summary)],
+      );
+      await client.query(
+        `INSERT INTO adaptive_learning_session_mutations
+         (username, idempotency_key, operation, session_id, request_hash, response_snapshot, created_at)
+         VALUES ($1, $2, 'finish', $3, $4, $5::jsonb, $6)`,
+        [username, candidate.idempotencyKey, row.id, candidate.requestHash,
+          JSON.stringify(candidate.responseSnapshot), candidate.now],
+      );
+      await client.query('COMMIT');
+      return { finished: true, replayed: false, responseSnapshot: structuredClone(candidate.responseSnapshot) };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
   async function getAdaptiveLearningWeekUsage(username, weekStart) {
     const result = await pool.query(
       `SELECT blocks FROM adaptive_learning_sessions
@@ -2666,6 +3025,174 @@ export function createPostgresRepository(connectionString, {
     } finally { client.release(); }
   }
 
+  async function recordModuleAttemptWithAdaptiveClaim(username, attempt, {
+    executionClaim, now = new Date(),
+  }) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const tokenHash = adaptiveExecutionTokenHash(executionClaim);
+      const claimed = await client.query(
+        `SELECT claim.*, session.status AS session_status,
+                session.current_block_id, session.execution_revision, session.blocks
+         FROM adaptive_learning_execution_claims claim
+         JOIN adaptive_learning_sessions session ON session.id = claim.session_id
+         WHERE claim.token_hash = $1 FOR UPDATE OF claim, session`,
+        [tokenHash],
+      );
+      if (!claimed.rowCount || claimed.rows[0].username !== username) {
+        throw new Error('ADAPTIVE_EXECUTION_CLAIM_INVALID');
+      }
+      const claim = claimed.rows[0];
+      const block = claim.blocks.find((item) => item.id === claim.block_id);
+      if (!block || claim.current_block_id !== block.id || claim.session_status !== 'in_progress'
+        || Number(claim.execution_revision) !== Number(claim.session_execution_revision)
+        || claim.revoked_at || new Date(claim.expires_at) <= new Date(now)
+        || claim.launch_fingerprint !== adaptiveLaunchFingerprint(block)) {
+        throw new Error(new Date(claim.expires_at) <= new Date(now)
+          ? 'ADAPTIVE_EXECUTION_CLAIM_EXPIRED' : 'ADAPTIVE_EXECUTION_CLAIM_INVALID');
+      }
+      const existing = await client.query('SELECT * FROM module_attempts WHERE id = $1', [attempt.id]);
+      if (claim.consumed_at) {
+        const row = existing.rows[0];
+        if (claim.attempt_type !== 'module' || claim.attempt_ref !== attempt.id || !row
+          || row.username !== username || row.module !== attempt.module || row.activity !== attempt.activity
+          || Number(row.score) !== Number(attempt.score) || Number(row.max_score) !== Number(attempt.maxScore)
+          || (row.duration_ms == null ? null : Number(row.duration_ms)) !== (attempt.durationMs ?? null)) {
+          throw new Error('ADAPTIVE_EXECUTION_CLAIM_CONSUMED');
+        }
+        await client.query('COMMIT');
+        return {
+          id: attempt.id, created: false, evidenceQuality: row.evidence_quality,
+          adaptiveExecution: {
+            sessionId: claim.session_id, blockId: block.id,
+            attemptType: 'module', attemptId: attempt.id,
+          },
+        };
+      }
+      if (existing.rowCount || attempt.module !== block.module || attempt.activity !== block.activityId) {
+        throw new Error('ADAPTIVE_EXECUTION_ATTEMPT_MISMATCH');
+      }
+      const metadata = {
+        adaptive_session_id: claim.session_id,
+        adaptive_block_id: block.id,
+        adaptive_content_ref: block.contentRef,
+      };
+      const inserted = await client.query(
+        `INSERT INTO module_attempts
+         (id, username, module, activity, score, max_score, duration_ms, metadata, evidence_quality, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, 'client_reported', $9)
+         RETURNING created_at`,
+        [attempt.id, username, attempt.module, attempt.activity, attempt.score, attempt.maxScore,
+          attempt.durationMs ?? null, JSON.stringify(metadata), now],
+      );
+      await client.query(
+        `INSERT INTO progress_summary
+         (username, module, attempt_count, best_score, best_max_score, total_duration_ms, last_attempt_at)
+         VALUES ($1, $2, 1, $3, $4, $5, $6)
+         ON CONFLICT (username, module) DO UPDATE SET
+           attempt_count = progress_summary.attempt_count + 1,
+           best_score = CASE WHEN EXCLUDED.best_score::numeric / EXCLUDED.best_max_score >
+             progress_summary.best_score::numeric / progress_summary.best_max_score
+             THEN EXCLUDED.best_score ELSE progress_summary.best_score END,
+           best_max_score = CASE WHEN EXCLUDED.best_score::numeric / EXCLUDED.best_max_score >
+             progress_summary.best_score::numeric / progress_summary.best_max_score
+             THEN EXCLUDED.best_max_score ELSE progress_summary.best_max_score END,
+           total_duration_ms = progress_summary.total_duration_ms + EXCLUDED.total_duration_ms,
+           last_attempt_at = EXCLUDED.last_attempt_at, updated_at = $6`,
+        [username, attempt.module, attempt.score, attempt.maxScore, attempt.durationMs ?? 0,
+          inserted.rows[0].created_at],
+      );
+      await client.query(
+        `UPDATE adaptive_learning_execution_claims
+         SET consumed_at = $2, attempt_type = 'module', attempt_ref = $3 WHERE id = $1`,
+        [claim.id, now, attempt.id],
+      );
+      await client.query('COMMIT');
+      return {
+        id: attempt.id, created: true, evidenceQuality: 'client_reported',
+        adaptiveExecution: {
+          sessionId: claim.session_id, blockId: block.id,
+          attemptType: 'module', attemptId: attempt.id,
+        },
+      };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async function bindAdaptiveLearningServerAttempt(username, {
+    sessionId, executionClaim, attempt, now = new Date(),
+  }) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const claimed = await client.query(
+        `SELECT claim.*, session.status AS session_status, session.current_block_id,
+                session.execution_revision, session.blocks
+         FROM adaptive_learning_execution_claims claim
+         JOIN adaptive_learning_sessions session ON session.id = claim.session_id
+         WHERE claim.token_hash = $1 FOR UPDATE OF claim, session`,
+        [adaptiveExecutionTokenHash(executionClaim)],
+      );
+      if (!claimed.rowCount || claimed.rows[0].username !== username
+        || claimed.rows[0].session_id !== sessionId) {
+        throw new Error('ADAPTIVE_EXECUTION_CLAIM_INVALID');
+      }
+      const claim = claimed.rows[0];
+      const block = claim.blocks.find((item) => item.id === claim.block_id);
+      if (!block || claim.session_status !== 'in_progress' || claim.current_block_id !== block.id
+        || Number(claim.execution_revision) !== Number(claim.session_execution_revision)
+        || claim.revoked_at || new Date(claim.expires_at) <= new Date(now)
+        || claim.launch_fingerprint !== adaptiveLaunchFingerprint(block)) {
+        throw new Error(new Date(claim.expires_at) <= new Date(now)
+          ? 'ADAPTIVE_EXECUTION_CLAIM_EXPIRED' : 'ADAPTIVE_EXECUTION_CLAIM_INVALID');
+      }
+      if (claim.consumed_at) {
+        if (claim.attempt_type !== attempt.type || String(claim.attempt_ref) !== String(attempt.id)) {
+          throw new Error('ADAPTIVE_EXECUTION_CLAIM_CONSUMED');
+        }
+        await client.query('COMMIT');
+        return {
+          created: false, evidenceQuality: 'server_verified_assisted',
+          adaptiveExecution: {
+            sessionId, blockId: block.id, attemptType: attempt.type, attemptId: Number(attempt.id),
+          },
+        };
+      }
+      const table = attempt.type === 'writing' ? 'writing_attempts' : 'speaking_attempts';
+      const source = await client.query(
+        `SELECT id, username, task_type, status, created_at FROM ${table}
+         WHERE username = $1 AND id = $2`,
+        [username, attempt.id],
+      );
+      const sourceRow = source.rows[0];
+      const expectedActivity = attempt.type === 'writing'
+        ? String(sourceRow?.task_type || '') : `speaking_${sourceRow?.task_type}`;
+      if (!sourceRow || sourceRow.status !== 'completed'
+        || new Date(sourceRow.created_at) < new Date(claim.issued_at)
+        || block.module !== attempt.type || block.activityId !== expectedActivity) {
+        throw new Error('ADAPTIVE_EXECUTION_ATTEMPT_MISMATCH');
+      }
+      await client.query(
+        `UPDATE adaptive_learning_execution_claims
+         SET consumed_at = $2, attempt_type = $3, attempt_ref = $4 WHERE id = $1`,
+        [claim.id, now, attempt.type, String(attempt.id)],
+      );
+      await client.query('COMMIT');
+      return {
+        created: true, evidenceQuality: 'server_verified_assisted',
+        adaptiveExecution: {
+          sessionId, blockId: block.id, attemptType: attempt.type, attemptId: Number(attempt.id),
+        },
+      };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
   async function getModuleAttempt(username, attemptId) {
     const result = await pool.query(
       `SELECT id, username, module, activity, score, max_score, duration_ms, metadata, evidence_quality, created_at
@@ -2879,7 +3406,7 @@ export function createPostgresRepository(connectionString, {
   }
 
   async function exportUserData(username) {
-    const [account, progress, privacyConsent, subscriptionEvents, subscriptionEntitlements, voiceTutorSessions, voiceTutorRecoveries, voiceTutorRepeats, voiceTutorRepeatAttempts, voiceTutorReports, ruleCards, paymentRequests, writingAttempts, speakingAttempts, generatedTasks, moduleAttempts, progressSummary, wordProgress, errorBank, adaptiveGoals, adaptiveSnapshot, adaptivePlanRevisions, adaptiveSessions, adaptiveDiagnosticSessions, adaptiveDiagnosticResponses, aiRequests, auditLog] = await Promise.all([
+    const [account, progress, privacyConsent, subscriptionEvents, subscriptionEntitlements, voiceTutorSessions, voiceTutorRecoveries, voiceTutorRepeats, voiceTutorRepeatAttempts, voiceTutorReports, ruleCards, paymentRequests, writingAttempts, speakingAttempts, generatedTasks, moduleAttempts, progressSummary, wordProgress, errorBank, adaptiveGoals, adaptiveSnapshot, adaptivePlanRevisions, adaptiveSessions, adaptiveSessionExecutionEvents, adaptiveDiagnosticSessions, adaptiveDiagnosticResponses, aiRequests, auditLog] = await Promise.all([
       pool.query('SELECT username, telegram_id, role, trial_used, subscription_until, created_at, updated_at FROM users WHERE username = $1', [username]),
       pool.query('SELECT data, updated_at FROM user_progress WHERE username = $1', [username]),
       pool.query('SELECT text_processing, voice_processing, policy_version, text_consented_at, voice_consented_at, updated_at FROM privacy_consents WHERE username = $1', [username]),
@@ -2924,6 +3451,8 @@ export function createPostgresRepository(connectionString, {
                   WHERE username = $1 ORDER BY revision`, [username]),
       pool.query(`SELECT * FROM adaptive_learning_sessions
                   WHERE username = $1 ORDER BY created_at`, [username]),
+      pool.query(`SELECT * FROM adaptive_learning_session_events
+                  WHERE username = $1 ORDER BY created_at, sequence`, [username]),
       pool.query(`SELECT id, catalog_version, status, current_item_id, answered_items, correct_items,
                          stop_reason, started_at, expires_at, completed_at, updated_at
                   FROM adaptive_diagnostic_sessions WHERE username = $1 ORDER BY started_at`, [username]),
@@ -2968,6 +3497,8 @@ export function createPostgresRepository(connectionString, {
       adaptive_learning_skill_estimates: adaptiveExport.estimates,
       adaptive_learning_plan_revisions: adaptivePlanRevisions.rows.map(adaptiveLearningPlanRepositoryDto),
       adaptive_learning_sessions: adaptiveSessions.rows.map(adaptiveLearningSessionRepositoryDto),
+      adaptive_learning_session_events: adaptiveSessionExecutionEvents.rows
+        .map(adaptiveExecutionEventExportDto),
       adaptive_diagnostic_sessions: adaptiveDiagnosticSessions.rows.map(adaptiveDiagnosticExportDto),
       adaptive_diagnostic_responses: adaptiveDiagnosticResponses.rows.map(adaptiveDiagnosticResponseExportDto),
       ai_requests: aiRequests.rows,
@@ -3114,6 +3645,13 @@ export function createPostgresRepository(connectionString, {
     getCurrentAdaptiveLearningSession,
     getAdaptiveLearningSessionReplacementReplay,
     replaceAdaptiveLearningSessionBlock,
+    getAdaptiveLearningSessionMutationReplay,
+    startAdaptiveLearningSessionBlock,
+    getAdaptiveLearningSessionExecution,
+    getAdaptiveLearningSessionAdvanceContext,
+    advanceAdaptiveLearningSession,
+    getAdaptiveLearningSessionFinishContext,
+    finishAdaptiveLearningSession,
     getAdaptiveLearningWeekUsage,
     startAdaptiveDiagnostic,
     getAdaptiveDiagnosticStartClaim,
@@ -3123,6 +3661,8 @@ export function createPostgresRepository(connectionString, {
     answerAdaptiveDiagnostic,
     completeAdaptiveDiagnostic,
     recordModuleAttempt,
+    recordModuleAttemptWithAdaptiveClaim,
+    bindAdaptiveLearningServerAttempt,
     getModuleAttempt,
     upsertWordProgress,
     upsertErrorBank,

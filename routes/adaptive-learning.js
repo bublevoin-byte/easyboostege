@@ -22,6 +22,16 @@ import {
 } from '../adaptive-learning/session.js';
 import { adaptiveLearningSessionPublicDto } from '../adaptive-learning/session-dto.js';
 import {
+  ADAPTIVE_EXECUTION_CLAIM_TTL_MS,
+  adaptiveCompletedBlockDto,
+  adaptiveExecutionRequestHash,
+  adaptiveExecutionSummary,
+  adaptiveExecutionToken,
+  adaptiveExecutionTokenHash,
+  adaptivePlanDelta,
+  adaptiveProfileDelta,
+} from '../adaptive-learning/session-execution.js';
+import {
   DIAGNOSTIC_REGISTRY,
   getDiagnosticItem,
   getDiagnosticPolicy,
@@ -32,8 +42,12 @@ import {
   adaptiveDiagnosticStartSchema,
   adaptiveGoalSchema,
   adaptiveSessionCreateSchema,
+  adaptiveSessionAdvanceSchema,
+  adaptiveSessionAttemptBindSchema,
+  adaptiveSessionFinishSchema,
   adaptiveSessionPreviewSchema,
   adaptiveSessionReplacementSchema,
+  adaptiveSessionStartSchema,
   isFutureExamDate,
 } from '../validation/adaptive-learning.js';
 
@@ -270,6 +284,20 @@ export function createAdaptiveLearningRoutes({
       ADAPTIVE_SESSION_REPLACEMENT_ALREADY_USED: [409, 'ADAPTIVE_SESSION_REPLACEMENT_ALREADY_USED'],
       ADAPTIVE_SESSION_REVISION_CONFLICT: [409, 'ADAPTIVE_SESSION_REVISION_CONFLICT'],
       ADAPTIVE_SESSION_IDEMPOTENCY_CONFLICT: [409, 'IDEMPOTENCY_CONFLICT'],
+      ADAPTIVE_SESSION_STATE_CONFLICT: [409, 'ADAPTIVE_SESSION_STATE_CONFLICT'],
+      ADAPTIVE_SESSION_BLOCK_NOT_CURRENT: [409, 'ADAPTIVE_SESSION_BLOCK_NOT_CURRENT'],
+      ADAPTIVE_SESSION_BLOCK_NOT_LAUNCHABLE: [409, 'ADAPTIVE_SESSION_BLOCK_NOT_LAUNCHABLE'],
+      ADAPTIVE_SESSION_BLOCK_ALREADY_STARTED: [409, 'ADAPTIVE_SESSION_BLOCK_ALREADY_STARTED'],
+      ADAPTIVE_SESSION_BLOCK_ALREADY_COMPLETED: [409, 'ADAPTIVE_SESSION_BLOCK_ALREADY_COMPLETED'],
+      ADAPTIVE_SESSION_ATTEMPT_REQUIRED: [409, 'ADAPTIVE_SESSION_ATTEMPT_REQUIRED'],
+      ADAPTIVE_SESSION_ATTEMPT_NOT_BOUND: [409, 'ADAPTIVE_SESSION_ATTEMPT_NOT_BOUND'],
+      ADAPTIVE_SESSION_ATTEMPT_MISMATCH: [409, 'ADAPTIVE_SESSION_ATTEMPT_MISMATCH'],
+      ADAPTIVE_SESSION_BREAK_ATTEMPT_FORBIDDEN: [409, 'ADAPTIVE_SESSION_BREAK_ATTEMPT_FORBIDDEN'],
+      ADAPTIVE_SESSION_NOT_READY_TO_FINISH: [409, 'ADAPTIVE_SESSION_NOT_READY_TO_FINISH'],
+      ADAPTIVE_EXECUTION_CLAIM_INVALID: [409, 'ADAPTIVE_EXECUTION_CLAIM_INVALID'],
+      ADAPTIVE_EXECUTION_CLAIM_EXPIRED: [410, 'ADAPTIVE_EXECUTION_CLAIM_EXPIRED'],
+      ADAPTIVE_EXECUTION_CLAIM_CONSUMED: [409, 'ADAPTIVE_EXECUTION_CLAIM_CONSUMED'],
+      ADAPTIVE_EXECUTION_ATTEMPT_MISMATCH: [409, 'ADAPTIVE_EXECUTION_ATTEMPT_MISMATCH'],
       ADAPTIVE_SESSION_BLOCK_NOT_FOUND: [404, 'ADAPTIVE_SESSION_NOT_FOUND'],
       ADAPTIVE_SESSION_NOT_FOUND: [404, 'ADAPTIVE_SESSION_NOT_FOUND'],
     }[error?.message || error?.code];
@@ -337,7 +365,7 @@ export function createAdaptiveLearningRoutes({
       res.setHeader('Cache-Control', 'no-store');
       const session = await db.getCurrentAdaptiveLearningSession(req.user);
       if (!session) return res.status(404).json({ error: { code: 'ADAPTIVE_SESSION_NOT_FOUND' } });
-      return res.json({ session: adaptiveLearningSessionPublicDto(session) });
+      return res.json(await db.getAdaptiveLearningSessionExecution(req.user, session.id));
     } catch (error) { return next(error); }
   });
 
@@ -384,6 +412,197 @@ export function createAdaptiveLearningRoutes({
         replayed: saved.replayed,
         session: adaptiveLearningSessionPublicDto(saved.session),
       });
+    } catch (error) {
+      if (sessionError(res, error)) return undefined;
+      return next(error);
+    }
+  });
+
+  router.post('/api/v1/adaptive-learning/sessions/:sessionId/start', auth, async (req, res, next) => {
+    const parsed = adaptiveSessionStartSchema.safeParse(req.body);
+    const idempotencyKey = String(req.headers['idempotency-key'] || '');
+    if (!parsed.success || !IDEMPOTENCY_KEY.test(idempotencyKey)
+      || !SESSION_ID.test(req.params.sessionId)) {
+      return res.status(400).json({ error: { code: 'VALIDATION_ERROR' } });
+    }
+    const requestHash = adaptiveExecutionRequestHash(parsed.data);
+    try {
+      const replay = await db.getAdaptiveLearningSessionMutationReplay(req.user, {
+        operation: 'start', sessionId: req.params.sessionId, idempotencyKey, requestHash,
+      });
+      if (replay) return res.json(replay);
+      const current = await db.getAdaptiveLearningSessionExecution(req.user, req.params.sessionId);
+      if (!current) throw new Error('ADAPTIVE_SESSION_NOT_FOUND');
+      const block = current.session.blocks.find((item) => item.id === parsed.data.blockId);
+      if (!block || current.session.currentBlockId !== block.id) {
+        throw new Error('ADAPTIVE_SESSION_BLOCK_NOT_CURRENT');
+      }
+      if (block.kind !== 'learning') throw new Error('ADAPTIVE_SESSION_BLOCK_NOT_LAUNCHABLE');
+      const instant = now();
+      const token = adaptiveExecutionToken();
+      const expiresAt = new Date(instant.getTime() + ADAPTIVE_EXECUTION_CLAIM_TTL_MS);
+      const execution = {
+        ...current.execution,
+        revision: current.execution.revision + 1,
+        status: 'in_progress',
+        currentBlockId: block.id,
+        startedAt: current.execution.startedAt || instant.toISOString(),
+      };
+      const responseSnapshot = {
+        session: { ...current.session, status: 'in_progress', updatedAt: instant.toISOString() },
+        execution,
+        block,
+        launch: block.launch,
+        executionClaim: token,
+        claimExpiresAt: expiresAt.toISOString(),
+      };
+      const saved = await db.startAdaptiveLearningSessionBlock(req.user, {
+        operation: 'start', sessionId: req.params.sessionId,
+        blockId: parsed.data.blockId, expectedRevision: parsed.data.expectedRevision,
+        idempotencyKey, requestHash, claimId: crypto.randomUUID(), token,
+        tokenHash: adaptiveExecutionTokenHash(token), expiresAt, now: instant,
+        responseSnapshot,
+      });
+      return res.status(saved.created ? 201 : 200).json(saved.responseSnapshot);
+    } catch (error) {
+      if (sessionError(res, error)) return undefined;
+      return next(error);
+    }
+  });
+
+  router.post('/api/v1/adaptive-learning/sessions/:sessionId/advance', auth, async (req, res, next) => {
+    const parsed = adaptiveSessionAdvanceSchema.safeParse(req.body);
+    const idempotencyKey = String(req.headers['idempotency-key'] || '');
+    if (!parsed.success || !IDEMPOTENCY_KEY.test(idempotencyKey)
+      || !SESSION_ID.test(req.params.sessionId)) {
+      return res.status(400).json({ error: { code: 'VALIDATION_ERROR' } });
+    }
+    const requestHash = adaptiveExecutionRequestHash(parsed.data);
+    try {
+      const replay = await db.getAdaptiveLearningSessionMutationReplay(req.user, {
+        operation: 'advance', sessionId: req.params.sessionId, idempotencyKey, requestHash,
+      });
+      if (replay) return res.json(replay);
+      const instant = now();
+      const context = await db.getAdaptiveLearningSessionAdvanceContext(req.user, {
+        sessionId: req.params.sessionId, ...parsed.data, now: instant,
+      });
+      if (!context) throw new Error('ADAPTIVE_SESSION_NOT_FOUND');
+      const storedProfile = await db.getAdaptiveLearningProfile(req.user);
+      const storedPlan = await db.getCurrentAdaptiveLearningPlan(req.user);
+      const profileBefore = adaptiveLearningProfilePublicDto(storedProfile);
+      const planBefore = storedPlan ? adaptiveLearningPlanPublicDto(storedPlan) : null;
+      const refreshed = context.block.kind === 'learning'
+        ? await overview(req.user)
+        : { profile: profileBefore, plan: planBefore };
+      const profileAfter = refreshed.profile;
+      const planAfter = refreshed.plan;
+      const completedEvent = {
+        block_id: context.block.id,
+        block_kind: context.block.kind,
+        module: context.block.module,
+        skill_id: context.block.skillId,
+        activity_id: context.block.activityId,
+        source_type: context.source.source_type,
+        source_ref: context.source.source_ref,
+        evidence_quality: context.source.evidence_quality,
+        planned_minutes: context.block.plannedMinutes,
+        actual_minutes: context.source.actual_minutes,
+      };
+      const nextCurrentBlockId = context.nextBlock?.id || null;
+      const session = {
+        ...context.session,
+        status: 'in_progress',
+        currentBlockId: nextCurrentBlockId,
+        completedLearningMinutes: context.session.completedLearningMinutes
+          + (context.block.kind === 'learning' ? context.block.plannedMinutes : 0),
+        updatedAt: instant.toISOString(),
+      };
+      const execution = {
+        ...context.execution,
+        revision: context.execution.revision + 1,
+        status: 'in_progress',
+        currentBlockId: nextCurrentBlockId,
+        completedBlockIds: [...context.execution.completedBlockIds, context.block.id],
+        readyToFinish: nextCurrentBlockId === null,
+      };
+      const completedBlock = adaptiveCompletedBlockDto(completedEvent);
+      const planChange = context.block.kind === 'learning'
+        ? adaptivePlanDelta(planBefore, planAfter)
+        : { reasonCode: 'scheduled_break_completed', planRevisionBefore: Number(planBefore?.revision || 0), planRevisionAfter: Number(planAfter?.revision || 0), modulePercentageChanges: [] };
+      const nextAction = context.nextBlock
+        ? { type: context.nextBlock.kind === 'break' ? 'take_break' : 'start_block', blockId: context.nextBlock.id }
+        : { type: 'finish_session', sessionId: context.session.id };
+      const responseSnapshot = {
+        session, execution, completedBlock,
+        profileBefore, profileAfter,
+        profileChange: adaptiveProfileDelta(profileBefore, profileAfter),
+        planBefore, planAfter, planChange, nextAction,
+      };
+      const saved = await db.advanceAdaptiveLearningSession(req.user, {
+        operation: 'advance', sessionId: req.params.sessionId, ...parsed.data,
+        idempotencyKey, requestHash, eventId: crypto.randomUUID(), now: instant,
+        responseSnapshot,
+      });
+      return res.json(saved.responseSnapshot);
+    } catch (error) {
+      if (sessionError(res, error)) return undefined;
+      return next(error);
+    }
+  });
+
+  router.post('/api/v1/adaptive-learning/sessions/:sessionId/bind-attempt', auth, async (req, res, next) => {
+    const parsed = adaptiveSessionAttemptBindSchema.safeParse(req.body);
+    if (!parsed.success || !SESSION_ID.test(req.params.sessionId)) {
+      return res.status(400).json({ error: { code: 'VALIDATION_ERROR' } });
+    }
+    try {
+      const result = await db.bindAdaptiveLearningServerAttempt(req.user, {
+        sessionId: req.params.sessionId, ...parsed.data, now: now(),
+      });
+      return res.status(result.created ? 201 : 200).json(result);
+    } catch (error) {
+      if (sessionError(res, error)) return undefined;
+      return next(error);
+    }
+  });
+
+  router.post('/api/v1/adaptive-learning/sessions/:sessionId/finish', auth, async (req, res, next) => {
+    const parsed = adaptiveSessionFinishSchema.safeParse(req.body);
+    const idempotencyKey = String(req.headers['idempotency-key'] || '');
+    if (!parsed.success || !IDEMPOTENCY_KEY.test(idempotencyKey)
+      || !SESSION_ID.test(req.params.sessionId)) {
+      return res.status(400).json({ error: { code: 'VALIDATION_ERROR' } });
+    }
+    const requestHash = adaptiveExecutionRequestHash(parsed.data);
+    try {
+      const replay = await db.getAdaptiveLearningSessionMutationReplay(req.user, {
+        operation: 'finish', sessionId: req.params.sessionId, idempotencyKey, requestHash,
+      });
+      if (replay) return res.json(replay);
+      const instant = now();
+      const context = await db.getAdaptiveLearningSessionFinishContext(req.user, {
+        sessionId: req.params.sessionId, ...parsed.data,
+      });
+      if (!context) throw new Error('ADAPTIVE_SESSION_NOT_FOUND');
+      const nextRecommendedAction = { type: 'create_personal_session', suggestedMinutes: 30 };
+      const session = {
+        ...context.session, status: 'completed', currentBlockId: null, updatedAt: instant.toISOString(),
+      };
+      const execution = {
+        ...context.execution, revision: context.execution.revision + 1,
+        status: 'completed', currentBlockId: null, readyToFinish: false,
+        completedAt: instant.toISOString(),
+      };
+      const summary = adaptiveExecutionSummary(context.session, context.events, nextRecommendedAction);
+      const responseSnapshot = { session, execution, summary, nextAction: nextRecommendedAction };
+      const saved = await db.finishAdaptiveLearningSession(req.user, {
+        operation: 'finish', sessionId: req.params.sessionId,
+        expectedRevision: parsed.data.expectedRevision,
+        idempotencyKey, requestHash, eventId: crypto.randomUUID(), now: instant,
+        nextRecommendedAction, responseSnapshot,
+      });
+      return res.json(saved.responseSnapshot);
     } catch (error) {
       if (sessionError(res, error)) return undefined;
       return next(error);

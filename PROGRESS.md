@@ -842,7 +842,7 @@ Type-mode vocabulary больше не показывает accepted word в к�
 миграция 030 с file/PostgreSQL parity.
 ## Adaptive EGE Learning Plan (implementation started 2026-08-04)
 
-Status: tickets 01–03 are complete on `feature/adaptive-learning-plan`; ticket 04 implementation and all local gates are complete, with independent Standards + Spec review next. The feature is stacked on the completed Voice Tutor branch and will not be pushed, merged or deployed without a separate owner decision.
+Status: tickets 01–05 are complete on `feature/adaptive-learning-plan`. The feature is stacked on the completed Voice Tutor branch and will not be pushed, merged or deployed without a separate owner decision.
 
 Agreed product contract: target EGE score/date is primary; a short diagnostic or existing evidence builds a confidence-labelled micro-skill profile; an honest forecast and stable weekly budget feed 15–120 minute executable sessions; real module outcomes update the living plan; free/base/Premium boundaries are server-enforced. CEFR/IELTS is secondary and approximate, not an official IELTS result.
 
@@ -851,8 +851,8 @@ Implementation tracker:
 - [x] 01 Goal and evidence-backed profile tracer
 - [x] 02 Short adaptive diagnostic
 - [x] 03 Honest forecast and stable weekly allocation
-- [ ] 04 Duration-aware learning session composer — audit blockers repaired, final review confirmation pending
-- [ ] 05 Real module execution and evidence feedback
+- [x] 04 Duration-aware learning session composer
+- [x] 05 Real module execution and evidence feedback
 - [ ] 06 Retention loop and Premium depth
 - [ ] 07 Commercial boundaries, complete UI and reports
 - [ ] 08 Hardening, E2E and release evidence
@@ -1007,3 +1007,27 @@ in forced lexical-choice mode and observes its rendered outcome. Final-repair ve
 targeted session tests 19/19, full suite 616 pass with 11 expected no-URL PostgreSQL skips (627 total),
 disposable PostgreSQL 11/11, Chromium E2E, lint/check, frontend build, both secret scans and
 `git diff --check`; no paid calls, push, deploy or staging changes.
+
+Ticket 05 implementation complete: a learner now starts the persisted session through a server-issued,
+two-hour opaque execution claim tied to the exact current block. Grammar, vocabulary, reading, listening,
+writing and speaking consumers receive only the allowlisted launch context and report completion through
+their existing persisted attempts. Client-supplied module metadata cannot mint trusted evidence; writing
+and speaking bind only completed server-owned reviews. Breaks advance without an attempt, while every
+learning block requires a matching owner-bound attempt before a compare-and-swap advance. Start, bind,
+advance and finish are idempotent, reject stale claims and block order changes, and use the same contract
+in file and PostgreSQL repositories. Explicit finish is available only after every block event is stored.
+
+After each learning block the server recomputes the evidence-backed profile and stable plan, then returns
+the completed block, evidence quality, profile change, plan change and next action. The progress screen
+restores authoritative execution state, marks current/completed work and shows those changes. A bounded
+local execution envelope supports lossless offline retry of the exact attempt/bind/advance request; it
+never fabricates server completion or navigates back before confirmation, and invalid/tampered envelopes
+fail closed. Migration 035 stores hashed claims, immutable block events and idempotency mutations without
+copying answers, essays, transcripts, audio or plaintext claims; export includes allowlisted events, while
+account deletion removes all execution state.
+
+Real Chromium verifies diagnostic → plan → start → real listening activity → persisted attempt → return
+to the updated plan → explicit finish with provider access disabled. Final verification: targeted execution
+and runtime tests 16/16; full suite 624 pass with 11 expected no-URL PostgreSQL skips (635 total);
+disposable PostgreSQL 11/11; real Chromium E2E; lint/check, frontend build, both secret scans and
+`git diff --check`. No paid provider call, push, deploy or staging mutation.
