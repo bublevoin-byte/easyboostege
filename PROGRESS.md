@@ -842,7 +842,7 @@ Type-mode vocabulary больше не показывает accepted word в к�
 миграция 030 с file/PostgreSQL parity.
 ## Adaptive EGE Learning Plan (implementation started 2026-08-04)
 
-Status: tickets 01–07 are complete on `feature/adaptive-learning-plan`; Ticket 08 remains. The feature is stacked on the completed Voice Tutor branch and will not be pushed, merged or deployed without a separate owner decision.
+Status: tickets 01–08 are complete on `feature/adaptive-learning-plan`. The feature is stacked on the completed Voice Tutor branch and will not be pushed, merged or deployed without a separate owner decision.
 
 Agreed product contract: target EGE score/date is primary; a short diagnostic or existing evidence builds a confidence-labelled micro-skill profile; an honest forecast and stable weekly budget feed 15–120 minute executable sessions; real module outcomes update the living plan; free/base/Premium boundaries are server-enforced. CEFR/IELTS is secondary and approximate, not an official IELTS result.
 
@@ -855,7 +855,7 @@ Implementation tracker:
 - [x] 05 Real module execution and evidence feedback
 - [x] 06 Retention loop and Premium depth
 - [x] 07 Commercial boundaries, complete UI and reports
-- [ ] 08 Hardening, E2E and release evidence
+- [x] 08 Hardening, E2E and release evidence
 
 Detailed source of truth: `.scratch/adaptive-learning-plan/spec.md` and `.scratch/adaptive-learning-plan/issues/`.
 
@@ -1091,3 +1091,25 @@ Final gates: Ticket 07 focused tests 34/34; full suite 665/665; disposable Postg
 with zero P0–P2. The local PostgreSQL runner printed `postgres Pulling`/`postgres Pulled` for its disposable
 `postgres:17-alpine` test image; no application provider or paid API was called. No push, merge, deploy or
 staging mutation was performed.
+
+Ticket 08 implementation complete: the whole adaptive feature now has a reproducible local release
+tracer for new and existing learners, unrealistic-goal choices, one replacement or exclusion,
+Free/Base/Premium boundaries, real task handoff and completion, updated profile/plan/report and an
+owner-bound 24-hour offline overview that is strictly read-only. The rollout flag hides both entry
+points and the plan by default. Initial diagnostic insufficiency blocks first-session creation on the
+server, while the 28/35/42-day refresh remains a non-blocking recommendation. Diagnostic evidence is
+deduplicated across short/deep catalogs by stable task family; repeated and surrogate no-audio or
+non-productive probes remain assisted and cannot establish mastery.
+
+`adaptive-metrics-v1` exposes fixed-cardinality, PII-free aggregates over an explicit rolling 90-day
+window. File and PostgreSQL stores share the same denominators; PostgreSQL uses bounded aggregate SQL
+with time predicates and migration 039 indexes instead of materializing lifetime rows. Sample-gated
+alerts, the adaptive operations runbook and the local release-evidence file record rollout, rollback,
+incident and owner-only gates.
+
+Final frozen-result gates: adaptive 121/121; full suite 677 total (665 pass, 12 expected skips, 0 fail);
+PostgreSQL 12/12 with migrations 001–039 and cleanup; adaptive Chromium E2E; two consecutive generic
+Chromium E2E runs; performance LCP 160 ms, CLS 0, INP 112 ms, first-load JS 82.3 KB, overview 119 ms
+and preview 61 ms; lint/check; 17-asset frontend build; staged 423-file secret scan; 256-commit history
+scan; and staged diff check. Independent whole-feature Standards and Spec final reviews passed with
+zero P0–P2. No paid provider call, push, merge, deploy or staging mutation was performed.

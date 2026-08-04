@@ -102,3 +102,9 @@ history через public API, но не имитирует многолетню
 материализует полную owner-bound evidence history при пересчёте. Ограниченный rollout должен наблюдать
 latency на старых аккаунтах. Локальные fake-provider/browser проверки по-прежнему не доказывают
 production billing, Telegram delivery, physical-device PWA behavior или learner efficacy.
+
+После локального Ticket 08 commit корневая handoff-проверка обнаружила, что заголовки `spec.md` и
+`PROGRESS.md` всё ещё называли завершёнными только Tickets 01–07, а issue использовал `complete` вместо
+разрешённого tracker-статуса `done`. Это исправлено отдельным documentation-only commit: product-код,
+staged candidate и результаты ворот выше не менялись. Исходный commit намеренно не amend-ился, потому
+что переписывание Git-истории остаётся отдельным owner gate.

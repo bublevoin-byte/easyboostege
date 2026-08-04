@@ -4,7 +4,7 @@
 
 **Blocked by:** 01–07
 
-**Status:** complete
+**Status:** done
 
 - [x] Add Playwright tracer: new learner → diagnostic → target → session preview → real task handoff → completion → updated plan.
 - [x] Cover existing-user bootstrap, unrealistic goal, one replacement, offline/read-only fallback and free/base/Premium gates.

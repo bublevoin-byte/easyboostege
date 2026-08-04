@@ -1,6 +1,6 @@
 # Adaptive EGE Learning Plan — Specification
 
-Status: implementation in progress (Tickets 01–07 complete)
+Status: implementation complete (Tickets 01–08 complete)
 Date: 2026-08-04
 Base branch: `feature/voice-ege-tutor` (`cfce08b`)
 
