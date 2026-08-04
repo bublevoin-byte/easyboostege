@@ -56,6 +56,12 @@ import { hashAuthCode, normalizeUsername, normalizeVoiceTutorDeliveryMetadata, n
 import { transitionPedagogicalState } from '../voice-tutor/state-machine.js';
 import { transitionRuleCardReview } from '../voice-tutor/rule-card.js';
 import { createRecoveryLedger, planRecoveryFromTransfer, planRepeatAttempt, publicRepeatAttempt, recoveryMap, recoveryMetrics } from '../voice-tutor/recovery.js';
+import {
+  wordProgressApiDto,
+  wordProgressExportDto,
+  wordProgressPersistenceCandidate,
+  wordProgressStorageDto,
+} from './word-progress-dto.js';
 
 const { Pool } = pg;
 
@@ -3683,13 +3689,31 @@ export function createPostgresRepository(connectionString, {
     try {
       await client.query('BEGIN');
       for (const item of words) {
+        const normalized = wordProgressApiDto(item);
+        const selected = await client.query(
+          `SELECT word, stage, error_count, review_count, due_at, updated_at,
+                  mastery_version, dimensions, last_mode, last_outcome
+           FROM word_progress WHERE username = $1 AND word = $2 FOR UPDATE`,
+          [username, normalized.word],
+        );
+        const candidate = wordProgressPersistenceCandidate(selected.rows[0], item);
+        const stored = wordProgressStorageDto(candidate);
         await client.query(
-          `INSERT INTO word_progress (username, word, stage, error_count, review_count, due_at)
-           VALUES ($1, $2, $3, $4, $5, $6)
+          `INSERT INTO word_progress (
+             username, word, stage, error_count, review_count, due_at,
+             mastery_version, dimensions, last_mode, last_outcome
+           )
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10)
            ON CONFLICT (username, word) DO UPDATE SET stage = EXCLUDED.stage,
              error_count = EXCLUDED.error_count, review_count = EXCLUDED.review_count,
-             due_at = EXCLUDED.due_at, updated_at = NOW()`,
-          [username, item.word.toLocaleLowerCase('en'), item.stage, item.errorCount, item.reviewCount, item.dueAt == null ? null : new Date(item.dueAt)],
+             due_at = EXCLUDED.due_at, mastery_version = EXCLUDED.mastery_version,
+             dimensions = EXCLUDED.dimensions, last_mode = EXCLUDED.last_mode,
+             last_outcome = EXCLUDED.last_outcome, updated_at = NOW()`,
+          [
+            username, stored.word, stored.stage, stored.error_count, stored.review_count,
+            stored.due_at == null ? null : new Date(stored.due_at), stored.mastery_version,
+            JSON.stringify(stored.dimensions), stored.last_mode, stored.last_outcome,
+          ],
         );
       }
       await client.query('COMMIT');
@@ -3697,6 +3721,16 @@ export function createPostgresRepository(connectionString, {
     } catch (error) {
       await client.query('ROLLBACK'); throw error;
     } finally { client.release(); }
+  }
+
+  async function getWordProgress(username) {
+    const result = await pool.query(
+      `SELECT word, stage, error_count, review_count, due_at, updated_at,
+              mastery_version, dimensions, last_mode, last_outcome
+       FROM word_progress WHERE username = $1 ORDER BY word`,
+      [username],
+    );
+    return result.rows.map(wordProgressApiDto);
   }
 
   async function upsertErrorBank(username, errors) {
@@ -3918,7 +3952,9 @@ export function createPostgresRepository(connectionString, {
       pool.query('SELECT id, operation, request, result, provider, prompt_version, created_at FROM generated_tasks WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, module, activity, score, max_score, duration_ms, metadata, evidence_quality, created_at FROM module_attempts WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT module, attempt_count, best_score, best_max_score, total_duration_ms, last_attempt_at, updated_at FROM progress_summary WHERE username = $1 ORDER BY module', [username]),
-      pool.query('SELECT word, stage, error_count, review_count, due_at, updated_at FROM word_progress WHERE username = $1 ORDER BY word', [username]),
+      pool.query(`SELECT word, stage, error_count, review_count, due_at, updated_at,
+                         mastery_version, dimensions, last_mode, last_outcome
+                  FROM word_progress WHERE username = $1 ORDER BY word`, [username]),
       pool.query('SELECT id, module, item_key, error_type, details, occurrence_count, first_seen_at, last_seen_at, resolved_at FROM error_bank WHERE username = $1 ORDER BY last_seen_at DESC', [username]),
       pool.query(`SELECT id, target_exam, target_score, exam_date, weekly_minutes, revision, created_at, updated_at
                   FROM adaptive_learning_goals WHERE username = $1 ORDER BY revision`, [username]),
@@ -3966,7 +4002,7 @@ export function createPostgresRepository(connectionString, {
       generated_tasks: generatedTasks.rows,
       module_attempts: moduleAttempts.rows,
       progress_summary: progressSummary.rows,
-      word_progress: wordProgress.rows,
+      word_progress: wordProgress.rows.map(wordProgressExportDto),
       error_bank: errorBank.rows,
       adaptive_learning_goals: adaptiveGoals.rows.map(adaptiveLearningGoalRepositoryDto),
       adaptive_learning_profile: adaptiveExport.profile,
@@ -4152,6 +4188,7 @@ export function createPostgresRepository(connectionString, {
     bindAdaptiveLearningServerAttempt,
     getModuleAttempt,
     upsertWordProgress,
+    getWordProgress,
     upsertErrorBank,
     logAiRequest,
     claimAiOperationSlot,

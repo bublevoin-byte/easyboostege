@@ -4,6 +4,12 @@ import {configureTts,lStop} from './tts.js';
 import {decorateCoreVocabulary} from './modules/core-voice-catalog.js';
 import {clearAdaptiveOverviewCache} from './adaptive-overview-cache.js';
 import {clearAdaptiveRuntime} from './adaptive-session-runtime.js';
+import {
+  localVocabularyProgress,
+  mergeLegacyVocabularyProgress,
+  migrateLocalVocabularyProgress,
+  migrateVocabularyProgress,
+} from './vocabulary-domain.js';
 /*
  * Оболочка не знает, что умеет экран: она знает только, что его код приезжает отдельным чанком.
  * Реестр чанков живёт в screens.js и подключается к маршрутизатору сам — здесь достаточно того,
@@ -712,13 +718,14 @@ const EGE_WORDS=[
 decorateCoreVocabulary(EGE_WORDS);
 var W_SYNC={},W_SYNC_T=null;
 function wQueueServer(w){if(typeof SRV==='undefined'||!SRV||!TOKEN)return;var r=wRec(w);if(!r)return;
-  W_SYNC[w]={word:w,stage:r.s||0,errorCount:r.e||0,reviewCount:r.n||0,dueAt:r.due||null};clearTimeout(W_SYNC_T);
+  W_SYNC[w]=migrateVocabularyProgress({...r,word:w});clearTimeout(W_SYNC_T);
   W_SYNC_T=setTimeout(function(){var pending=W_SYNC;W_SYNC={};apiPut('/api/v1/word-progress',{words:Object.keys(pending).map(function(k){return pending[k]})}).catch(function(){Object.keys(pending).forEach(function(k){W_SYNC[k]=pending[k]})})},900)}
 function wToday0(){var d=new Date();d.setHours(0,0,0,0);return d.getTime()}
 function wRec(w){S.srs=S.srs||{};return S.srs[w]}
-function wSet(w){S.srs=S.srs||{};return S.srs[w]||(S.srs[w]={s:0,e:0,n:0,due:0})}
+function wSet(w){S.srs=S.srs||{};return S.srs[w]||(S.srs[w]=localVocabularyProgress(w,{s:0,e:0,n:0,due:0}))}
 function wBase(w){return wordModule.baseForm(w)}
-function srsApply(w,ok){S.srs=S.srs||{};S.srs[w]=EasyBoostLearning.reviewWord(wSet(w),ok);wQueueServer(w)}
+function srsApply(w,ok){S.srs=S.srs||{};var current=wSet(w),legacy=EasyBoostLearning.reviewWord(current,ok);
+  S.srs[w]=localVocabularyProgress(w,mergeLegacyVocabularyProgress(current,{word:w,...legacy}));wQueueServer(w)}
 function srsOk(w){srsApply(w,true)}
 function srsFail(w){srsApply(w,false)}
 function wStats(){return wordModule.calculateStats(EGE_WORDS,S.srs)}
@@ -726,7 +733,8 @@ function wSync(){var st=wStats();S.learned=st.learned;S.prog=S.prog||{};S.prog.w
   setTxt('w_know_n','Знаю '+st.learned);setTxt('pf_known_n',String(st.learned));setTxt('w_sumline','Выучено '+st.learned+' из '+st.total+' слов');
   var bar=document.getElementById('w_bar');if(bar)bar.style.width=Math.max(2,Math.round(st.learned/st.total*100))+'%';
   setTxt('sub_words','учу · '+st.learned+' / '+st.total)}
-function wMigrate(){if(S.srsMig)return;S.srsMig=1;S.srs=wordModule.migrateLegacy(EGE_WORDS,S.box,S.srs||{})}
+function wMigrate(){if(!S.srsMig){S.srsMig=1;S.srs=wordModule.migrateLegacy(EGE_WORDS,S.box,S.srs||{})}
+  S.srs=migrateLocalVocabularyProgress(S.srs||{});S.srsMasteryVersion=1;store.saveLocal(currentUser,S)}
 function wSpeakFallback(txt){try{var u=new SpeechSynthesisUtterance(txt.replace(/^to /,''));u.lang='en-GB';u.rate=.9;speechSynthesis.cancel();speechSynthesis.speak(u)}catch(e){}}
 function wDeco(){return '<svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;" viewBox="0 0 346 280" preserveAspectRatio="xMidYMid slice">'
   +'<circle cx="330" cy="8" r="64" fill="rgba(255,200,97,.16)"/>'

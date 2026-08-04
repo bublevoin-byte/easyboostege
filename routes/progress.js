@@ -87,6 +87,10 @@ export function createProgressRoutes({ authentication, db, now = () => new Date(
     } catch (error) { next(error); }
   });
 
+  router.get('/api/v1/word-progress', auth, async (req, res, next) => {
+    try { res.json({ words: await db.getWordProgress(req.user) }); } catch (error) { next(error); }
+  });
+
   router.post('/api/v1/error-bank', auth, perUserLimiter(120, 'Слишком много обновлений банка ошибок.'), async (req, res, next) => {
     try {
       const parsed = errorBankBatchSchema.safeParse(req.body);

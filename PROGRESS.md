@@ -1,3 +1,20 @@
+# Прогресс — активное изучение слов
+
+Спека: [.scratch/active-vocabulary-system/spec.md](.scratch/active-vocabulary-system/spec.md)
+Тикеты: [.scratch/active-vocabulary-system/issues/](.scratch/active-vocabulary-system/issues/)
+Ветка: `feature/adaptive-learning-plan`
+
+| № | Что даёт | Статус |
+|---|---|---|
+| 01 | Освоение слова и мягкая миграция | done |
+| 02 | Библиотека, темы и подробная карточка | ready-for-agent |
+| 03 | Умная тренировка активного вспоминания | ready-for-agent |
+| 04 | Личные слова из чтения без противоречий | ready-for-agent |
+| 05 | Результаты слов в индивидуальном плане | ready-for-agent |
+| 06 | Мобильная проверка и выпускной контур | ready-for-agent |
+
+---
+
 # Прогресс — раннер методической проверки ИИ
 
 Спека: [.scratch/ai-quality-runner/spec.md](.scratch/ai-quality-runner/spec.md)

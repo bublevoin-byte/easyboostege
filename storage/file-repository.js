@@ -54,6 +54,13 @@ import {
   assertAdaptivePlanStabilityTransition,
   compareAdaptivePlanInputs,
 } from '../adaptive-learning/plan.js';
+import {
+  migrateFileWordProgress,
+  wordProgressApiDto,
+  wordProgressExportDto,
+  wordProgressPersistenceCandidate,
+  wordProgressStorageDto,
+} from './word-progress-dto.js';
 
 function normalizeAttemptModels(attempts) {
   return attempts.map((attempt) => ({ ...attempt, model: attempt.model ?? null }));
@@ -236,7 +243,10 @@ export function createFileRepository(filePath) {
         };
         const reconciledLegacyCanonical = reconcileLegacyApprovedRuleCards(state.rule_cards);
         const sanitizedLegacyAdaptiveExecution = sanitizeLegacyAdaptiveExecution(state);
-        if (minimizedLegacyCapsule || reconciledLegacyCanonical || sanitizedLegacyAdaptiveExecution) {
+        const migratedWordProgress = migrateFileWordProgress(state.word_progress);
+        state.word_progress = migratedWordProgress.wordProgress;
+        if (minimizedLegacyCapsule || reconciledLegacyCanonical || sanitizedLegacyAdaptiveExecution
+          || migratedWordProgress.changed) {
           await persist();
         }
       }
@@ -2894,9 +2904,24 @@ export function createFileRepository(filePath) {
     await load();
     state.word_progress[username] ||= {};
     const now = Date.now();
-    for (const item of words) state.word_progress[username][item.word.toLocaleLowerCase('en')] = { word: item.word.toLocaleLowerCase('en'), stage: item.stage, error_count: item.errorCount, review_count: item.reviewCount, due_at: item.dueAt, updated_at: now };
+    for (const item of words) {
+      const normalized = wordProgressApiDto(item);
+      const candidate = wordProgressPersistenceCandidate(
+        state.word_progress[username][normalized.word],
+        item,
+      );
+      const stored = wordProgressStorageDto(candidate, now);
+      state.word_progress[username][stored.word] = stored;
+    }
     await persist();
     return { updated: words.length };
+  }
+
+  async function getWordProgress(username) {
+    await load();
+    return Object.values(state.word_progress[username] || {})
+      .map(wordProgressApiDto)
+      .sort((left, right) => left.word.localeCompare(right.word, 'en'));
   }
 
   async function upsertErrorBank(username, errors) {
@@ -3088,7 +3113,9 @@ export function createFileRepository(filePath) {
       generated_tasks: state.generated_tasks.filter((item) => item.username === username).map(({ request_hash, username: owner, ...item }) => item),
       module_attempts: state.module_attempts.filter((item) => item.username === username),
       progress_summary: Object.values(state.progress_summary[username] || {}),
-      word_progress: Object.values(state.word_progress[username] || {}),
+      word_progress: Object.values(state.word_progress[username] || {})
+        .map(wordProgressExportDto)
+        .sort((left, right) => left.word.localeCompare(right.word, 'en')),
       error_bank: state.error_bank.filter((item) => item.username === username),
       ai_requests: state.ai_requests.filter((item) => item.username === username),
       audit_log: state.audit_log.filter((item) => item.metadata?.username === username),
@@ -3329,6 +3356,7 @@ export function createFileRepository(filePath) {
     bindAdaptiveLearningServerAttempt,
     getModuleAttempt,
     upsertWordProgress,
+    getWordProgress,
     upsertErrorBank,
     logAiRequest,
     claimAiOperationSlot,

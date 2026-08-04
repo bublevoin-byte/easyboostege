@@ -1095,8 +1095,23 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '429': { $ref: '#/components/responses/RateLimited' }
   /api/v1/word-progress:
+    get:
+      summary: List the authenticated learner's versioned vocabulary mastery
+      responses:
+        '200':
+          description: Owner-scoped word mastery, including conservative legacy migration
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [words]
+                properties:
+                  words:
+                    type: array
+                    items: { $ref: '#/components/schemas/WordMastery' }
+                additionalProperties: false
     put:
-      summary: Upsert a bounded batch of spaced-repetition word states
+      summary: Upsert a bounded batch of legacy SRS or versioned word-mastery states
       requestBody:
         required: true
         content:
@@ -1110,14 +1125,10 @@ paths:
                   minItems: 1
                   maxItems: 500
                   items:
-                    type: object
-                    required: [word, stage, errorCount, reviewCount, dueAt]
-                    properties:
-                      word: { type: string, maxLength: 120 }
-                      stage: { type: integer, minimum: 0, maximum: 5 }
-                      errorCount: { type: integer, minimum: 0 }
-                      reviewCount: { type: integer, minimum: 0 }
-                      dueAt: { type: integer, nullable: true }
+                    oneOf:
+                      - { $ref: '#/components/schemas/LegacyWordProgress' }
+                      - { $ref: '#/components/schemas/WordMastery' }
+              additionalProperties: false
       responses:
         '200': { description: Word states updated }
         '400': { $ref: '#/components/responses/BadRequest' }
@@ -1347,6 +1358,54 @@ components:
       in: cookie
       name: eb_token
   schemas:
+    WordMasteryDimension:
+      type: object
+      required: [score, attempts, independentSuccesses, evidence, lastPracticedAt]
+      properties:
+        score: { type: integer, minimum: 0, maximum: 100 }
+        attempts: { type: integer, minimum: 0, maximum: 1000000 }
+        independentSuccesses: { type: integer, minimum: 0, maximum: 1000000 }
+        evidence: { type: string, enum: [none, preliminary, guided, self_reported, objective] }
+        lastPracticedAt: { type: integer, nullable: true }
+      additionalProperties: false
+    LegacyWordProgress:
+      type: object
+      required: [word, stage, errorCount, reviewCount, dueAt]
+      properties:
+        word: { type: string, minLength: 1, maxLength: 120 }
+        stage: { type: integer, minimum: 0, maximum: 5 }
+        errorCount: { type: integer, minimum: 0, maximum: 1000000 }
+        reviewCount: { type: integer, minimum: 0, maximum: 1000000 }
+        dueAt: { type: integer, nullable: true }
+      additionalProperties: false
+    WordMastery:
+      type: object
+      required: [word, stage, errorCount, reviewCount, dueAt, masteryVersion, dimensions, lastMode, lastOutcome]
+      properties:
+        word: { type: string, minLength: 1, maxLength: 120 }
+        stage: { type: integer, minimum: 0, maximum: 5 }
+        errorCount: { type: integer, minimum: 0, maximum: 1000000 }
+        reviewCount: { type: integer, minimum: 0, maximum: 1000000 }
+        dueAt: { type: integer, nullable: true }
+        masteryVersion: { type: integer, enum: [1] }
+        dimensions:
+          type: object
+          required: [meaning, spelling, context, listening]
+          properties:
+            meaning: { $ref: '#/components/schemas/WordMasteryDimension' }
+            spelling: { $ref: '#/components/schemas/WordMasteryDimension' }
+            context: { $ref: '#/components/schemas/WordMasteryDimension' }
+            listening: { $ref: '#/components/schemas/WordMasteryDimension' }
+          additionalProperties: false
+        lastMode:
+          type: string
+          nullable: true
+          enum: [receptive_meaning, russian_reveal, english_production, contextual_production, listening]
+        lastOutcome:
+          type: string
+          nullable: true
+          enum: [correct, knew, almost, incorrect, not_known]
+      additionalProperties: false
     AdaptiveLearningMetrics:
       type: object
       required: [version, window, sessions, adjustments, evidence, retention, diagnostics, commercialScopes, profile]

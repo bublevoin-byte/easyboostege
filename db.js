@@ -111,6 +111,7 @@ export const recordModuleAttemptWithAdaptiveClaim = (...args) => repository.reco
 export const bindAdaptiveLearningServerAttempt = (...args) => repository.bindAdaptiveLearningServerAttempt(...args);
 export const getModuleAttempt = (...args) => repository.getModuleAttempt(...args);
 export const upsertWordProgress = (...args) => repository.upsertWordProgress(...args);
+export const getWordProgress = (...args) => repository.getWordProgress(...args);
 export const upsertErrorBank = (...args) => repository.upsertErrorBank(...args);
 export const logAiRequest = (...args) => repository.logAiRequest(...args);
 export const claimAiOperationSlot = (...args) => repository.claimAiOperationSlot(...args);

@@ -13,6 +13,7 @@ import {
 import { assertAdaptiveGoalRepositoryContract } from './support/adaptive-goal-contract.js';
 import { assertAdaptiveDiagnosticRepositoryContract } from './support/adaptive-diagnostic-contract.js';
 import { assertAdaptivePlanRepositoryContract } from './support/adaptive-plan-contract.js';
+import { assertWordProgressRepositoryContract } from './support/word-progress-contract.js';
 
 async function withRepository(run) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-db-'));
@@ -425,6 +426,45 @@ test('word progress upserts normalized SRS state', async () => {
     assert.equal(exported.word_progress[0].word, 'achievement');
     assert.equal(exported.word_progress[0].stage, 3);
   });
+});
+
+test('file word mastery matches the shared persistence, export and deletion contract', async () => {
+  await withRepository(async (repository) => {
+    const owner = await repository.createTelegramUser(3041, 'Mastery Owner');
+    const other = await repository.createTelegramUser(3042, 'Mastery Other');
+    await assertWordProgressRepositoryContract(assert, repository, owner, other);
+  });
+});
+
+test('file storage rewrites legacy word progress once without inventing independent evidence', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-legacy-words-'));
+  const file = path.join(directory, 'data.json');
+  await fs.writeFile(file, JSON.stringify({
+    users: { legacy: { created: 1 } },
+    word_progress: {
+      legacy: {
+        achievement: {
+          word: 'Achievement', stage: 5, error_count: 1, review_count: 8,
+          due_at: 2_000, updated_at: 1_000,
+        },
+      },
+    },
+  }), 'utf8');
+
+  const firstRepository = createFileRepository(file);
+  const first = await firstRepository.getWordProgress('legacy');
+  await firstRepository.close();
+  assert.equal(first[0].stage, 5);
+  assert.equal(first[0].dimensions.meaning.evidence, 'preliminary');
+  assert.equal(first[0].dimensions.context.independentSuccesses, 0);
+  const migratedText = await fs.readFile(file, 'utf8');
+  assert.equal(JSON.parse(migratedText).word_progress.legacy.achievement.mastery_version, 1);
+
+  const secondRepository = createFileRepository(file);
+  assert.deepEqual(await secondRepository.getWordProgress('legacy'), first);
+  await secondRepository.close();
+  assert.equal(await fs.readFile(file, 'utf8'), migratedText);
+  await fs.rm(directory, { recursive: true, force: true });
 });
 
 test('error bank aggregates repeated learning errors', async () => {

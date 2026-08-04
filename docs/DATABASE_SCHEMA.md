@@ -32,12 +32,22 @@
 | `generated_tasks` | валидированные результаты генерации | operation, versioned request hash, request/result and provider |
 | `module_attempts` | нормализованная история учебных результатов | module, activity, score, duration, bounded metadata and server-owned `evidence_quality`; legacy/public writes are `client_reported` |
 | `progress_summary` | серверная агрегированная сводка прогресса | attempts, best normalized score, total duration and last attempt |
-| `word_progress` | состояние интервального повторения слов | word, stage, errors, reviews and due time |
+| `word_progress` | версионированное многомерное освоение слов с совместимым SRS | word, legacy stage/errors/reviews/due time, meaning/spelling/context/listening dimensions, evidence provenance and last answer mode/outcome |
 | `error_bank` | агрегированный банк учебных ошибок | module, item key, type, bounded details and occurrence count |
 | `audit_log` | неизменяемый журнал административных действий | actor, action, target, result and bounded metadata |
 | `ai_requests` | технический журнал ИИ и durable paid-operation slots | operation, claim key/state, provider, model, duration, status, error code, tokens, estimated cost |
 
 Связи привязаны к `users.username`; API всегда определяет пользователя из HttpOnly-сессии. Изменения схемы добавляются новой нумерованной миграцией и проверяются `npm run db:migrate`.
+
+Миграция `040_word_mastery.sql` сохраняет прежние `stage`, счётчики и срок повторения, но добавляет
+`mastery_version=1` и четыре измерения. Старые оценки переносятся только как `preliminary`, с нулём
+независимых успехов, поэтому даже legacy stage 5 не становится состоянием Strong. File storage
+выполняет тот же идемпотентный mapper при первом чтении. `/api/v1/word-progress` принимает старый
+payload и строгий v1 payload, а GET, file/PostgreSQL persistence и account export используют одну
+owner-scoped DTO-проекцию без `username` и backend-only полей; удаление остаётся каскадным/полным.
+Изоморфный доменный модуль намеренно находится в `public/`: браузер импортирует его для
+офлайн-снимка, а validation/storage на сервере — для той же нормализации и мягкого merge старого
+payload без второй реализации алгоритма.
 
 Миграция `031_adaptive_learning_goal_profile.sql` хранит только цель и производные структурированные оценки. Профиль пересчитывается из owner-bound `module_attempts` и проверенных Voice Tutor recovery/repeat записей; тексты ответов, эссе, transcript и audio в adaptive-таблицы не копируются. Клиентский `/module-attempts` не может назначить доверенное происхождение: такие и все прежние строки считаются `client_reported`, дают только слабую предварительную подсказку и не подтверждают mastery. Для расчёта одного навыка учитываются все независимые наблюдения, но не более трёх последних `client_reported` и трёх assisted-наблюдений; без независимого подтверждения mastery ограничен 49, а uncertainty не уменьшается. Навык получает `established` только после двух независимых unassisted/retention наблюдений. Весь профиль получает `established`, только когда подтверждены все 12 навыков, набрано минимум 12 независимых наблюдений минимум в трёх модулях и пройдены общие пороги покрытия/уверенности. Активности сопоставляются с версионированной таксономией только по точным ID/alias; неизвестная обычная активность получает явный fallback своего модуля, а неизвестная агрегатная `exam`-активность игнорируется. Служебные `voice_tutor_*` module attempts не становятся adaptive-наблюдениями: конкретный навык учитывается только из recovery/repeat ledger и поэтому не дублируется в module default. Эти три профильные adaptive-таблицы входят в экспорт владельца и каскадно удаляются вместе с `users`.
 

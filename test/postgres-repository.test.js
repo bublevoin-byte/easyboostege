@@ -32,8 +32,23 @@ import { assertAdaptiveGoalRepositoryContract } from './support/adaptive-goal-co
 import { assertAdaptiveDiagnosticRepositoryContract } from './support/adaptive-diagnostic-contract.js';
 import { assertAdaptivePlanRepositoryContract } from './support/adaptive-plan-contract.js';
 import { assertAdaptiveSessionRepositoryContract } from './support/adaptive-session-contract.js';
+import { assertWordProgressRepositoryContract } from './support/word-progress-contract.js';
 
 const connectionString = process.env.TEST_DATABASE_URL;
+
+test('PostgreSQL word mastery matches the shared persistence, export and deletion contract', { skip: !connectionString }, async () => {
+  const repository = createPostgresRepository(connectionString);
+  const stamp = String(Date.now()).slice(-9);
+  const owner = await repository.createTelegramUser(Number(`6${stamp}`), `Mastery owner ${stamp}`);
+  const other = await repository.createTelegramUser(Number(`7${stamp}`), `Mastery other ${stamp}`);
+  try {
+    await assertWordProgressRepositoryContract(assert, repository, owner, other);
+  } finally {
+    await repository.deleteUserData(owner).catch(() => {});
+    await repository.deleteUserData(other).catch(() => {});
+    await repository.close();
+  }
+});
 
 test('PostgreSQL adaptive sessions match the shared replay, race, export and deletion contract', { skip: !connectionString }, async () => {
   let raceEnabled = false;
@@ -613,6 +628,7 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
       '037_adaptive_retention_premium.sql',
       '038_adaptive_commercial_scope.sql',
       '039_adaptive_metrics_window_indexes.sql',
+      '040_word_mastery.sql',
     ]);
 
     const username = await repository.createTelegramUser(telegramId, `Integration ${suffix}`);
