@@ -5,6 +5,7 @@ import {decorateCoreVocabulary} from './modules/core-voice-catalog.js';
 import {clearAdaptiveOverviewCache} from './adaptive-overview-cache.js';
 import {clearAdaptiveRuntime} from './adaptive-session-runtime.js';
 import {
+  applyVocabularyOutcome,
   localVocabularyProgress,
   mergeLegacyVocabularyProgress,
   migrateLocalVocabularyProgress,
@@ -728,6 +729,9 @@ function srsApply(w,ok){S.srs=S.srs||{};var current=wSet(w),legacy=EasyBoostLear
   S.srs[w]=localVocabularyProgress(w,mergeLegacyVocabularyProgress(current,{word:w,...legacy}));wQueueServer(w)}
 function srsOk(w){srsApply(w,true)}
 function srsFail(w){srsApply(w,false)}
+function srsRecordVocabularyOutcome(w,attempt){S.srs=S.srs||{};var current=wSet(w);
+  var next=applyVocabularyOutcome({...current,word:w},attempt);
+  S.srs[w]=localVocabularyProgress(w,next);wQueueServer(w);return S.srs[w]}
 function wStats(){return wordModule.calculateStats(EGE_WORDS,S.srs)}
 function wSync(){var st=wStats();S.learned=st.learned;S.prog=S.prog||{};S.prog.words=EasyBoostLearning.calculateProgress(st.learned,st.total);
   setTxt('w_know_n','Знаю '+st.learned);setTxt('pf_known_n',String(st.learned));setTxt('w_sumline','Выучено '+st.learned+' из '+st.total+' слов');
@@ -910,6 +914,6 @@ export {
   apiGet,apiMessage,apiPost,apiPostBinary,apiPostIdempotent,apiPut,currentUser,examModule,gExamFmt,gSync,generateAiContent,
   grammarModule,lSetSlow,lSt,lSync,listeningModule,profileModule,progressModule,readingModule,
   rEsc,rSt,rWordsHtml,registerScreenGenerator,ringOff,runProfileHooks,setTxt,setW,spSt,spSync,
-  speakingModule,srsFail,srsOk,todayStr,ui,wBase,wDeco,wMergeAi,wMigrate,wRec,wStats,wSync,
+  speakingModule,srsFail,srsOk,srsRecordVocabularyOutcome,todayStr,ui,wBase,wDeco,wMergeAi,wMigrate,wRec,wStats,wSync,
   wordModule,writingModule,
 };

@@ -10,12 +10,15 @@ import {wSpeak} from '../tts.js';
 import {registerVoiceTutorError,voiceTutorButton} from '../voice-tutor.js';
 import {coreVocabularyVoice} from '../modules/core-voice-catalog.js';
 import {completeAdaptiveModuleActivity} from '../adaptive-session-runtime.js';
+import {createVocabularySessionView} from '../vocabulary-session-view.js';
 import {
-  buildVocabularyQueue,deriveVocabularyState,migrateVocabularyProgress,normalizeVocabularyWord,
+  appendVocabularySessionHistory,buildVocabularyQueue,buildVocabularyRecognitionOptions,
+  buildVocabularyTrend,composeVocabularySession,deriveVocabularyState,gradeVocabularyAnswer,
+  migrateVocabularyProgress,normalizeVocabularyWord,reinsertVocabularyFailure,summarizeVocabularySession,
 } from '../vocabulary-domain.js';
 import {
   EGE_WORDS,S,SRV,TOKEN,WBTN,generateAiContent,registerScreenGenerator,save,srsFail,srsOk,
-  todayStr,ui,wBase,wDeco,wMergeAi,wMigrate,wRec,wStats,wSync,wordModule,
+  srsRecordVocabularyOutcome,todayStr,ui,wBase,wDeco,wMergeAi,wMigrate,wRec,wStats,wSync,wordModule,
 } from '../app.js';
 
 /* ===== WORDS v2: SRS-словарь ЕГЭ ===== */
@@ -25,6 +28,8 @@ const W_STATE_LABELS={new:'Новое',learning:'Изучаю',review:'Повт�
 const W_PROVENANCE_LABELS={core:'Проверенная база',personal:'Личное слово',generated:'Сгенерированное',unknown:'Источник не указан'};
 let WQ=[],WI=0,WDONE=0,WCORRECT=0,W_ADAPTIVE_MODE=null,W_ADAPTIVE_ACTIVITY=null,W_ADAPTIVE_REPORTED=false;
 let W_VIEW='home',W_LIBRARY_SCROLL=0,W_DETAIL_RETURN_WORD='';
+let W_EVENTS=[],W_REPEAT_COUNTS={},W_PENDING_ANSWER='',W_SUMMARY_SAVED=false,W_LAST_SUMMARY=null;
+let W_SESSION_VIEW=null;
 function wArea(){return document.getElementById('w_area')}
 function wResetToday(){if(S.wday!==todayStr()){S.wday=todayStr();S.wnewUsed=0}}
 function wStoredProgress(word){
@@ -117,11 +122,16 @@ function wSpeaker(label,value){
   return '<button type="button" class="vocab-icon-btn" aria-label="'+ui.escapeHtml(label)+'" onclick="wSpeakLibraryValue(\''+wHandlerValue(value)+'\')">'
     +'<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18 6a8.5 8.5 0 0 1 0 12"/></svg></button>';
 }
+function wSessionView(){if(!W_SESSION_VIEW)W_SESSION_VIEW=createVocabularySessionView({
+  escapeHtml:ui.escapeHtml,decoration:wDeco,badge:wBadge,speaker:wSpeaker,handlerValue:wHandlerValue,
+  requestFrame:function(callback){requestAnimationFrame(callback)},
+});return W_SESSION_VIEW}
 function wSpeakLibraryValue(encoded){wSpeak(decodeURIComponent(encoded||''))}
 function wShowHome(){
   var area=wArea();if(!area)return;W_VIEW='home';wHeading('Слова');
   var plan=wPlan(),budget=wordModule.normalizeNewWordBudget(S.vocabularyNewBudget);
   var total=plan.items.length,entries=wLibraryEntries(),topicCounts={};
+  var trend7=buildVocabularyTrend(S.vocabularyHistory,{days:7}),trend30=buildVocabularyTrend(S.vocabularyHistory,{days:30});
   entries.forEach(function(entry){entry.topicIds.forEach(function(id){if(W_TOPICS[id])topicCounts[id]=(topicCounts[id]||0)+1})});
   var topicOverview=Object.keys(topicCounts).sort(function(left,right){return topicCounts[right]-topicCounts[left]}).slice(0,3);
   area.innerHTML='<section class="vocab vocab-home" aria-labelledby="w_home_title">'
@@ -136,6 +146,7 @@ function wShowHome(){
       return '<button type="button" id="w_budget_'+value+'" class="vocab-budget-btn'+(selected?' is-selected':'')+'" aria-pressed="'+selected+'" onclick="wSetBudget('+value+')">'+value+'</button>'}).join('')
     +'</div><p id="w_budget_note" role="status" aria-live="polite">Если накопились повторения, новых слов будет меньше.</p></fieldset>'
     +'<button type="button" class="vocab-primary sq" onclick="wStartPractice()"'+(total?'':' disabled')+'>'+(total?'Начать · '+total:'На сегодня всё')+'</button>'
+    +wSessionView().trendMarkup(trend7,trend30)
     +'<button type="button" class="vocab-library-link" onclick="wShowLibrary()">'
     +'<span><strong>Библиотека</strong><small>Проверенная база и все начатые слова</small></span><span aria-hidden="true">'+entries.length+' ›</span></button>'
     +(topicOverview.length?'<section class="vocab-topic-overview" aria-labelledby="w_topic_overview_title"><h2 id="w_topic_overview_title">Темы библиотеки</h2><div>'
@@ -146,7 +157,12 @@ function wSetBudget(value){
   S.vocabularyNewBudget=wordModule.normalizeNewWordBudget(value);save();wShowHome();
   var selected=document.getElementById('w_budget_'+S.vocabularyNewBudget);if(selected)selected.focus()}
 function wStartPractice(){
-  var plan=wPlan();WQ=plan.items;WI=0;WDONE=0;WCORRECT=0;W_VIEW='practice';
+  var plan=wPlan();wBeginSession(plan.items);
+}
+function wBeginSession(items){
+  var progressByWord={};items.forEach(function(item){var progress=wStoredProgress(item.w);if(progress)progressByWord[item.w]=progress});
+  WQ=composeVocabularySession(items,{progressByWord:progressByWord});WI=0;WDONE=0;WCORRECT=0;
+  W_EVENTS=[];W_REPEAT_COUNTS={};W_PENDING_ANSWER='';W_SUMMARY_SAVED=false;W_LAST_SUMMARY=null;W_VIEW='practice';
   var area=wArea();if(!area)return;
   area.innerHTML='<div id="w_card" class="vocab-practice-card"></div><div id="w_opts" class="vocab-practice-options"></div>';
   wHeading('Тренировка');wRender()}
@@ -263,7 +279,67 @@ function wToggleExampleTranslation(index,button){
   var translation=document.getElementById('w_example_translation_'+index);if(!translation||!button)return;
   var expanded=button.getAttribute('aria-expanded')==='true';translation.hidden=expanded;
   button.setAttribute('aria-expanded',String(!expanded));button.textContent=expanded?'Показать перевод':'Скрыть перевод'}
-function wRender(){var card=document.getElementById('w_card'),opts=document.getElementById('w_opts');
+function wSessionItem(task){return wPracticeCatalog().find(function(item){return normalizeVocabularyWord(item.w)===task.word})||null}
+function wAcceptedEnglish(item){return Array.from(new Set([wBase(item.w)].concat(Array.isArray(item.acceptedAnswers)?item.acceptedAnswers:[]).filter(Boolean)))}
+function wContextBlank(item){var base=wBase(item.w),escaped=base.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+  return String(item.ex||'').replace(new RegExp(escaped,'iu'),'_____')}
+function wBridgeCandidates(failedWord){var seen=new Set([normalizeVocabularyWord(failedWord)]),candidates=[];
+  function add(word){var normalized=normalizeVocabularyWord(word);if(!normalized||seen.has(normalized))return;
+    seen.add(normalized);candidates.push({id:normalized+':bridge',word:normalized,mode:'bridge',introduced:false,reviewed:false})}
+  WQ.slice(0,WI).forEach(function(task){if(task.mode!=='introduction')add(task.word)});
+  wPracticeCatalog().forEach(function(item){add(item.w)});return candidates}
+function wShowFeedback(task,item,result){var card=document.getElementById('w_card'),opts=document.getElementById('w_opts');if(!card||!opts)return;
+  wSessionView().renderFeedback(card,opts,task,item,result)}
+function wRecordSessionOutcome(task,item,result){
+  srsRecordVocabularyOutcome(item.w,{mode:task.mode,outcome:result.outcome,now:Date.now()});
+  W_EVENTS.push({word:task.word,mode:task.mode,outcome:result.outcome,
+    independentSuccess:result.independentSuccess,introduced:false,reviewed:task.reviewed});
+  WDONE++;if(result.independentSuccess)WCORRECT++;
+  if(['almost','incorrect','not_known'].includes(result.outcome)){
+    var repeated=reinsertVocabularyFailure(WQ,task,{afterIndex:WI,minInterveningItems:2,
+      repeatCounts:W_REPEAT_COUNTS,maxRepeatsPerWord:2,
+      fallbackItems:wBridgeCandidates(task.word)});
+    WQ=repeated.items;W_REPEAT_COUNTS=repeated.repeatCounts;
+  }
+  save();wSync();wShowFeedback(task,item,result)}
+function wCompleteIntroduction(){var task=WQ[WI],item=task&&wSessionItem(task);if(!task||!item||task.mode!=='introduction')return;
+  W_EVENTS.push({word:task.word,mode:'introduction',introduced:true,reviewed:false});
+  S.wnewUsed=(S.wnewUsed||0)+1;save();wSessionNext()}
+function wCompleteBridge(){var task=WQ[WI];if(!task||!task.bridge)return;wSessionNext()}
+function wChooseRecognition(encoded){var task=WQ[WI],item=task&&wSessionItem(task);if(!task||!item||task.mode!=='receptive_meaning')return;
+  var answer=decodeURIComponent(encoded||'');var result=gradeVocabularyAnswer({mode:task.mode,answer:answer,acceptedAnswers:[item.tr]});
+  wRecordSessionOutcome(task,item,result)}
+function wRevealRussian(){var task=WQ[WI],item=task&&wSessionItem(task),input=document.getElementById('w_session_input');
+  if(!task||!item||task.mode!=='russian_reveal'||!input)return;W_PENDING_ANSWER=input.value||'';
+  var card=document.getElementById('w_card'),opts=document.getElementById('w_opts');
+  wSessionView().renderRussianReveal(card,opts,item)}
+function wRateRussian(rating){var task=WQ[WI],item=task&&wSessionItem(task);if(!task||!item||task.mode!=='russian_reveal')return;
+  var result=gradeVocabularyAnswer({mode:task.mode,answer:W_PENDING_ANSWER,acceptedAnswers:[item.tr],selfRating:rating});
+  wRecordSessionOutcome(task,item,result)}
+function wSubmitSession(){var task=WQ[WI],item=task&&wSessionItem(task),input=document.getElementById('w_session_input');
+  if(!task||!item||!input||input.dataset.done)return;
+  if(task.mode==='russian_reveal'){wRevealRussian();return}
+  input.dataset.done='true';var result=gradeVocabularyAnswer({mode:task.mode,answer:input.value,acceptedAnswers:wAcceptedEnglish(item)});
+  wRecordSessionOutcome(task,item,result)}
+function wNotKnown(){var task=WQ[WI],item=task&&wSessionItem(task);if(!task||!item||task.mode==='introduction')return;
+  var input=document.getElementById('w_session_input'),answer=input?input.value:'';
+  var result=gradeVocabularyAnswer({mode:task.mode,answer:answer,acceptedAnswers:task.mode==='receptive_meaning'?[item.tr]:wAcceptedEnglish(item),
+    selfRating:task.mode==='russian_reveal'?'not_known':null,notKnown:true});
+  wRecordSessionOutcome(task,item,result)}
+function wSessionNext(){WI++;W_PENDING_ANSWER='';wRender()}
+function wRenderSummary(card,opts){var summary=summarizeVocabularySession(W_EVENTS);W_LAST_SUMMARY=summary;
+  if(!W_SUMMARY_SAVED){W_SUMMARY_SAVED=true;S.vocabularyHistory=appendVocabularySessionHistory(S.vocabularyHistory,summary);save();wSync()}
+  wSessionView().renderSummary(card,opts,summary)}
+function wPracticeDifficult(){if(!W_LAST_SUMMARY)return;var difficult=new Set(W_LAST_SUMMARY.difficultWords.map(function(item){return item.word}));
+  var items=wPracticeCatalog().filter(function(item){return difficult.has(normalizeVocabularyWord(item.w))});if(items.length)wBeginSession(items)}
+function wRenderSession(){var card=document.getElementById('w_card'),opts=document.getElementById('w_opts');if(!card||!opts)return;
+  wProgress();var task=WQ[WI];if(!task){wRenderSummary(card,opts);return}var item=wSessionItem(task);if(!item){wSessionNext();return}
+  wAnim('win','.32s');wSessionView().renderTask(card,opts,{task:task,item:item,
+    choices:task.mode==='receptive_meaning'?buildVocabularyRecognitionOptions(wPracticeCatalog(),item):[],
+    contextPrompt:task.mode==='contextual_production'?wContextBlank(item):''});
+  if(task.mode==='listening')wSpeak(item.w)}
+function wRender(){if(W_ADAPTIVE_MODE)return wRenderLegacy();wRenderSession()}
+function wRenderLegacy(){var card=document.getElementById('w_card'),opts=document.getElementById('w_opts');
   if(!card||!opts)return;wProgress();
   wAnim('win','.32s');
   var x=WQ[WI];
@@ -315,7 +391,7 @@ function wFlip(x,learnerAnswer,mode){var card=document.getElementById('w_card'),
   wSpeak(x.w)}
 /* Старая ссылка из профиля теперь открывает ту же постоянную библиотеку, уже с фильтром Strong. */
 function wShowKnown(){W_LIBRARY_SCROLL=0;wStoreFilters({query:'',topics:[],states:['strong'],provenances:[]});wShowLibrary()}
-function wNext(){WI++;wSync();save();wRender()}
+function wNext(){if(!W_ADAPTIVE_MODE)return wSessionNext();WI++;wSync();save();wRender()}
 function wPick(btn,vEnc,rightEnc){var x=WQ[WI];if(!x||btn.dataset.done)return;
   var v=decodeURIComponent(vEnc),right=decodeURIComponent(rightEnc),mode=wModeFor(x.w);
   var all=btn.parentElement.querySelectorAll('button');all.forEach(function(b){b.dataset.done=1});
@@ -336,7 +412,7 @@ function wSubmit(){var x=WQ[WI];if(!x)return;var inp=document.getElementById('w_
   setTimeout(ok?wNext:function(){wFlip(x,val,'type')},ok?650:900)}
 function wExtra(){wMergeAi();
   var fresh=EGE_WORDS.filter(function(x){var r=wRec(x.w);return !r||!r.s});
-  WQ=fresh.slice(0,30);WI=0;WDONE=0;wRender();
+  wBeginSession(fresh.slice(0,30));
   if(fresh.length<40)wTopUp()}
 /* фоновая генерация: база сама пополняется, сверяясь с уже известными словами */
 var W_GEN=false;
@@ -370,7 +446,8 @@ document.addEventListener('keydown',function(event){
 
 /* Имена для обработчиков этого экрана: загрузчик кладёт их на window вместе с чанком. */
 export {
-  WI,WQ,initWords,launchVocabularyPractice,wClearLibraryFilters,wExtra,wNext,wPick,wRender,
-  wSetBudget,wSetLibraryFilter,wSetLibrarySearch,wShowHome,wShowKnown,wShowLibrary,wShowWord,
-  wSpeakLibraryValue,wStartPractice,wSubmit,wToggleExampleTranslation,
+  WI,WQ,initWords,launchVocabularyPractice,wChooseRecognition,wClearLibraryFilters,
+  wCompleteBridge,wCompleteIntroduction,wExtra,wNext,wNotKnown,wPick,wPracticeDifficult,wRateRussian,wRender,
+  wRevealRussian,wSessionNext,wSetBudget,wSetLibraryFilter,wSetLibrarySearch,wShowHome,wShowKnown,
+  wShowLibrary,wShowWord,wSpeakLibraryValue,wStartPractice,wSubmit,wSubmitSession,wToggleExampleTranslation,
 };

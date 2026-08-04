@@ -1,6 +1,6 @@
 # 03 — Умная тренировка активного вспоминания
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01 — Освоение слова и мягкая миграция; 02 — Библиотека, темы и подробная карточка
 Spec: `.scratch/active-vocabulary-system/spec.md#solution`
 
@@ -15,11 +15,11 @@ Spec: `.scratch/active-vocabulary-system/spec.md#solution`
 
 ## Definition of Done
 
-- [ ] Recognition не может самостоятельно дать статус Strong.
-- [ ] Русский ввод использует reveal/self-rating; английские задания проверяются детерминированно.
-- [ ] Ошибка возвращается после других карточек, а не мгновенно и не бесконечно.
-- [ ] После ответа доступны правильная форма, звук и контекст; сильные ответы не тормозятся полным экраном.
-- [ ] Итог разделяет unique words, attempts, introduced, reviewed, independent, assisted и errors.
-- [ ] Основной сценарий работает offline без AI.
-- [ ] `npm run lint`, `npm run check` и целевые тесты проходят.
-- [ ] Один коммит на тикет.
+- [x] Recognition не может самостоятельно дать статус Strong.
+- [x] Русский ввод использует reveal/self-rating; английские задания проверяются детерминированно.
+- [x] Ошибка возвращается после других карточек, а не мгновенно и не бесконечно.
+- [x] После ответа доступны правильная форма, звук и контекст; сильные ответы не тормозятся полным экраном.
+- [x] Итог разделяет unique words, attempts, introduced, reviewed, independent, assisted и errors.
+- [x] Основной сценарий работает offline без AI.
+- [x] `npm run lint`, `npm run check` и целевые тесты проходят.
+- [x] Один коммит на тикет.

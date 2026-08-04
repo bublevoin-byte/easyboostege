@@ -251,6 +251,8 @@ function intervalAfterSuccess(progress, evidence) {
 }
 
 function evidenceAfterAttempt(previous, next) {
+  if (next === 'self_reported' && previous !== 'objective') return next;
+  if (previous === 'self_reported' && next === 'guided') return previous;
   return EVIDENCE_RANK[next] > EVIDENCE_RANK[previous] ? next : previous;
 }
 
@@ -368,22 +370,223 @@ export function buildVocabularyQueue(inputs, {
   };
 }
 
+function sessionModeFor(progress) {
+  if (progress.stage <= 0) return 'receptive_meaning';
+  if (progress.lastMode === 'receptive_meaning'
+    && FAILURE_OUTCOMES.has(progress.lastOutcome)) return 'receptive_meaning';
+  if (['none', 'preliminary', 'guided'].includes(progress.dimensions.meaning.evidence)) {
+    return 'russian_reveal';
+  }
+  if (progress.lastMode === 'russian_reveal'
+    && FAILURE_OUTCOMES.has(progress.lastOutcome)) return 'russian_reveal';
+  const objectiveModes = [
+    ['spelling', 'english_production'],
+    ['context', 'contextual_production'],
+    ['listening', 'listening'],
+  ];
+  const untested = objectiveModes.find(([dimension]) => (
+    progress.dimensions[dimension].evidence !== 'objective'
+      || progress.dimensions[dimension].attempts === 0
+  ));
+  if (untested) return untested[1];
+  const practiceModes = [['meaning', 'russian_reveal'], ...objectiveModes];
+  return practiceModes.sort(([left], [right]) => (
+    progress.dimensions[left].score - progress.dimensions[right].score
+      || progress.dimensions[left].attempts - progress.dimensions[right].attempts
+  ))[0][1];
+}
+
+export function composeVocabularySession(items, { progressByWord = {} } = {}) {
+  const records = new Map(Object.entries(
+    progressByWord && typeof progressByWord === 'object' ? progressByWord : {},
+  ).map(([word, progress]) => [normalizeVocabularyWord(progress?.word || word), progress]));
+  const tasks = [];
+  for (const item of Array.isArray(items) ? items : []) {
+    const word = normalizeVocabularyWord(item?.w ?? item?.word);
+    if (!word) continue;
+    const progress = migrateVocabularyProgress(records.get(word) || { word });
+    const isNew = deriveVocabularyState(progress) === 'new';
+    if (isNew) {
+      tasks.push({ id: `${word}:introduction`, word, mode: 'introduction', introduced: true, reviewed: false });
+    }
+    const mode = sessionModeFor(progress);
+    tasks.push({
+      id: `${word}:${mode}`,
+      word,
+      mode,
+      introduced: false,
+      reviewed: !isNew,
+    });
+  }
+  return tasks;
+}
+
+export function buildVocabularyRecognitionOptions(catalog, target, { limit = 4 } = {}) {
+  const answer = normalizeFreeText(target?.tr);
+  if (!answer) return [];
+  const maximum = boundedInteger(limit, 2, 8, 4);
+  const distractors = Array.from(new Set((Array.isArray(catalog) ? catalog : [])
+    .map((item) => normalizeFreeText(item?.tr))
+    .filter((value) => value && value !== answer)))
+    .sort((left, right) => left.localeCompare(right, 'ru'))
+    .slice(0, maximum - 1);
+  return [answer, ...distractors].sort((left, right) => left.localeCompare(right, 'ru'));
+}
+
+export function summarizeVocabularySession(events) {
+  const rows = Array.isArray(events) ? events : [];
+  const words = new Set();
+  const introduced = new Set();
+  const reviewed = new Set();
+  const attemptsByWord = new Map();
+  const errorsByWord = new Map();
+  let attempts = 0;
+  let independent = 0;
+  let assisted = 0;
+  let errors = 0;
+  for (const event of rows) {
+    const word = normalizeVocabularyWord(event?.word);
+    if (!word) continue;
+    words.add(word);
+    if (event.introduced || event.mode === 'introduction') introduced.add(word);
+    if (event.reviewed) reviewed.add(word);
+    if (event.mode === 'introduction' || !VOCABULARY_OUTCOME_SET.has(event.outcome)) continue;
+    attempts += 1;
+    attemptsByWord.set(word, (attemptsByWord.get(word) || 0) + 1);
+    const successful = event.outcome === 'correct' || event.outcome === 'knew';
+    if (successful && event.independentSuccess) independent += 1;
+    else if (successful) assisted += 1;
+    if (FAILURE_OUTCOMES.has(event.outcome)) {
+      errors += 1;
+      errorsByWord.set(word, (errorsByWord.get(word) || 0) + 1);
+    }
+  }
+  const difficultWords = Array.from(errorsByWord, ([word, wordErrors]) => ({
+    word,
+    attempts: attemptsByWord.get(word) || 0,
+    errors: wordErrors,
+  })).sort((left, right) => (
+    right.errors - left.errors || right.attempts - left.attempts || left.word.localeCompare(right.word, 'en')
+  ));
+  return {
+    uniqueWords: words.size,
+    attempts,
+    introduced: introduced.size,
+    reviewed: reviewed.size,
+    independent,
+    assisted,
+    errors,
+    difficultWords,
+  };
+}
+
+export function appendVocabularySessionHistory(history, summary, {
+  completedAt = Date.now(), maxEntries = 90,
+} = {}) {
+  const timestamp = nullableTimestamp(completedAt);
+  if (timestamp == null) throw new TypeError('Invalid vocabulary session completion time');
+  const entry = {
+    completedAt: timestamp,
+    uniqueWords: boundedInteger(summary?.uniqueWords, 0, 10_000),
+    attempts: boundedInteger(summary?.attempts, 0, 10_000),
+    independent: boundedInteger(summary?.independent, 0, 10_000),
+    errors: boundedInteger(summary?.errors, 0, 10_000),
+  };
+  const limit = boundedInteger(maxEntries, 1, 365, 90);
+  return [...(Array.isArray(history) ? history : []), entry]
+    .filter((item) => nullableTimestamp(item?.completedAt) != null)
+    .sort((left, right) => Number(left.completedAt) - Number(right.completedAt))
+    .slice(-limit);
+}
+
+function localCalendarDay(timestamp, timezoneOffsetMinutes) {
+  if (timezoneOffsetMinutes != null && timezoneOffsetMinutes !== ''
+    && Number.isFinite(Number(timezoneOffsetMinutes))) {
+    const offset = boundedInteger(timezoneOffsetMinutes, -840, 840);
+    return new Date(timestamp - offset * 60_000).toISOString().slice(0, 10);
+  }
+  const date = new Date(timestamp);
+  return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')]
+    .join('-');
+}
+
+export function buildVocabularyTrend(history, {
+  days = 7, now = Date.now(), timezoneOffsetMinutes = null,
+} = {}) {
+  const period = boundedInteger(days, 1, 365, 7);
+  const timestamp = nullableTimestamp(now) ?? Date.now();
+  const threshold = timestamp - period * 86_400_000;
+  const entries = (Array.isArray(history) ? history : [])
+    .filter((entry) => {
+      const completedAt = nullableTimestamp(entry?.completedAt);
+      return completedAt != null && completedAt > threshold && completedAt <= timestamp;
+    });
+  const totals = entries.reduce((result, entry) => ({
+    attempts: result.attempts + boundedInteger(entry.attempts, 0, 10_000),
+    independent: result.independent + boundedInteger(entry.independent, 0, 10_000),
+    errors: result.errors + boundedInteger(entry.errors, 0, 10_000),
+  }), { attempts: 0, independent: 0, errors: 0 });
+  const byDay = new Map();
+  for (const entry of entries) {
+    const day = localCalendarDay(Number(entry.completedAt), timezoneOffsetMinutes);
+    const point = byDay.get(day) || { day, attempts: 0, independent: 0, errors: 0 };
+    point.attempts += boundedInteger(entry.attempts, 0, 10_000);
+    point.independent += boundedInteger(entry.independent, 0, 10_000);
+    point.errors += boundedInteger(entry.errors, 0, 10_000);
+    byDay.set(day, point);
+  }
+  const rate = (independentCount, attemptCount) => (
+    attemptCount ? Math.min(100, Math.round(independentCount * 100 / attemptCount)) : 0
+  );
+  const points = Array.from(byDay.values()).sort((left, right) => left.day.localeCompare(right.day))
+    .map((point) => ({
+      ...point,
+      independentRate: rate(point.independent, point.attempts),
+    }));
+  return {
+    days: period,
+    sessions: entries.length,
+    ...totals,
+    independentRate: rate(totals.independent, totals.attempts),
+    points,
+  };
+}
+
 export function reinsertVocabularyFailure(items, failedItem, {
   afterIndex,
   minInterveningItems = 2,
   repeatCounts = {},
   maxRepeatsPerWord = 2,
+  fallbackItems = [],
 } = {}) {
   const queue = Array.isArray(items) ? [...items] : [];
   const word = normalizeVocabularyWord(failedItem?.word);
   const counts = { ...repeatCounts };
   const count = boundedInteger(counts[word], 0, 1_000_000);
   const cap = boundedInteger(maxRepeatsPerWord, 0, 20, 2);
-  if (!word || count >= cap) return { items: queue, repeatCounts: counts, insertedAt: null };
+  if (!word || count >= cap) return {
+    items: queue, repeatCounts: counts, insertedAt: null, interveningAdded: 0,
+  };
   const currentIndex = boundedInteger(afterIndex, 0, Math.max(0, queue.length - 1));
   const separation = boundedInteger(minInterveningItems, 0, 100, 2);
-  const insertedAt = Math.min(queue.length, currentIndex + separation + 1);
+  const needed = Math.max(0, separation - (queue.length - currentIndex - 1));
+  const bridges = [];
+  const bridgeWords = new Set();
+  if (needed > 0) {
+    for (const candidate of Array.isArray(fallbackItems) ? fallbackItems : []) {
+      const candidateWord = normalizeVocabularyWord(candidate?.word);
+      if (!candidateWord || candidateWord === word || bridgeWords.has(candidateWord)) continue;
+      bridges.push({ ...candidate, bridge: true });
+      bridgeWords.add(candidateWord);
+      if (bridges.length === needed) break;
+    }
+  }
+  if (bridges.length < needed) {
+    return { items: queue, repeatCounts: counts, insertedAt: null, interveningAdded: 0 };
+  }
+  queue.push(...bridges);
+  const insertedAt = currentIndex + separation + 1;
   queue.splice(insertedAt, 0, { ...failedItem, word, relearn: true });
   counts[word] = count + 1;
-  return { items: queue, repeatCounts: counts, insertedAt };
+  return { items: queue, repeatCounts: counts, insertedAt, interveningAdded: bridges.length };
 }

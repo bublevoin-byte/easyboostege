@@ -262,7 +262,10 @@ async function runE2E() {
 
     await page.locator('#scr2.on').waitFor({ state: 'visible', timeout: 5_000 });
     await page.getByRole('button', { name: /^Начать ·/u }).click();
-    const options = page.locator('#w_opts button');
+    await page.getByRole('heading', { name: 'Познакомься со словом' }).waitFor();
+    await page.getByRole('button', { name: 'Начать вспоминать' }).click();
+    await page.getByRole('heading', { name: 'Выбери значение' }).waitFor();
+    const options = page.locator('#w_opts .vocab-choice');
     const optionCount = await options.count();
     console.log(`e2e: ${optionCount} answer options found`);
     assert.ok(optionCount >= 4);
@@ -374,7 +377,10 @@ async function runE2E() {
     await authenticatedPage.getByRole('button', { name: 'Слова', exact: true }).press('Enter');
     await authenticatedPage.locator('#scr2.on').waitFor({ state: 'visible', timeout: 5_000 });
     await authenticatedPage.getByRole('button', { name: /^Начать ·/u }).click();
-    assert.ok(await authenticatedPage.locator('#w_opts button').count() >= 2);
+    await authenticatedPage.getByRole('heading', { name: 'Познакомься со словом' }).waitFor();
+    await authenticatedPage.getByRole('button', { name: 'Начать вспоминать' }).click();
+    await authenticatedPage.getByRole('heading', { name: 'Выбери значение' }).waitFor();
+    assert.ok(await authenticatedPage.locator('#w_opts .vocab-choice').count() >= 2);
     await authenticatedPage.evaluate(() => window.tab('scr1'));
     await authenticatedPage.locator('#scr1.on').waitFor({ state: 'visible', timeout: 5_000 });
     await authenticatedPage.getByRole('button', { name: 'Грамматика', exact: true }).press('Enter');

@@ -213,6 +213,131 @@ try {
   await page.getByRole('alert').waitFor();
   assert.match(await page.getByRole('alert').innerText(), /Карточка не найдена/u);
 
+  await page.evaluate(() => {
+    const now = Date.now() - 1_000;
+    window.EGE_WORDS.splice(0, window.EGE_WORDS.length,
+      { w: 'new word', p: 'n', t: 2, tr: 'новое слово', ex: 'A new word appears.' },
+      { w: 'meaning', p: 'n', t: 2, tr: 'смысл', ex: 'The meaning is clear.' },
+      { w: 'spelling', p: 'n', t: 2, tr: 'написание', ex: 'Check the spelling.' },
+      { w: 'context', p: 'n', t: 2, tr: 'контекст', ex: 'Use context to learn.' },
+      { w: 'listening', p: 'n', t: 2, tr: 'аудирование', ex: 'Listening takes practice.' });
+    const dimension = (score = 0, evidence = 'none', attempts = 0) => ({
+      score, attempts, independentSuccesses: evidence === 'objective' ? attempts : 0,
+      evidence, lastPracticedAt: attempts ? now : null,
+    });
+    const records = {
+      meaning: {
+        stage: 1, lastMode: 'receptive_meaning', lastOutcome: 'correct',
+        dimensions: {
+          meaning: dimension(20, 'guided', 1), spelling: dimension(), context: dimension(), listening: dimension(),
+        },
+      },
+      spelling: {
+        stage: 2, lastMode: 'russian_reveal', lastOutcome: 'knew',
+        dimensions: {
+          meaning: dimension(30, 'self_reported', 2), spelling: dimension(), context: dimension(), listening: dimension(),
+        },
+      },
+      context: {
+        stage: 3, lastMode: 'english_production', lastOutcome: 'correct',
+        dimensions: {
+          meaning: dimension(30, 'self_reported', 2), spelling: dimension(35, 'objective', 1),
+          context: dimension(), listening: dimension(),
+        },
+      },
+      listening: {
+        stage: 4, lastMode: 'contextual_production', lastOutcome: 'correct',
+        dimensions: {
+          meaning: dimension(30, 'self_reported', 2), spelling: dimension(35, 'objective', 1),
+          context: dimension(35, 'objective', 1), listening: dimension(),
+        },
+      },
+    };
+    window.S.srs = Object.fromEntries(Object.entries(records).map(([word, record], index) => [word, {
+      ...record, word, masteryVersion: 1, s: record.stage, errorCount: 0, e: 0,
+      reviewCount: record.stage, n: record.stage, dueAt: now + index, due: now + index,
+    }]));
+    window.S.vocabularyNewBudget = 10;
+    window.S.vocabularyHistory = [];
+    window.wShowHome();
+  });
+  await context.setOffline(true);
+  await page.getByRole('button', { name: /^Начать ·/u }).press('Enter');
+
+  await page.getByRole('heading', { name: 'Вспомни значение' }).waitFor();
+  await page.getByLabel('Твой вариант значения по-русски').fill('значение');
+  await page.getByRole('button', { name: 'Показать ответ' }).press('Enter');
+  await page.getByText('смысл', { exact: true }).waitFor();
+  assert.equal(await page.getByRole('status', { name: 'смысл' }).getAttribute('aria-live'), 'polite');
+  await page.waitForFunction(() => document.activeElement?.id === 'w_session_title');
+  await page.getByRole('button', { name: 'Знал(а)', exact: true }).press('Enter');
+  await page.getByRole('button', { name: 'Дальше' }).press('Enter');
+
+  await page.getByRole('heading', { name: 'Напиши слово' }).waitFor();
+  await page.getByLabel('Ответ по-английски').fill('speling');
+  await page.getByRole('button', { name: 'Проверить' }).press('Enter');
+  await page.getByText('Почти — небольшая опечатка').waitFor();
+  await page.getByText('spelling', { exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: 'Озвучить слово spelling' }).count(), 1);
+  await page.getByRole('button', { name: 'Дальше' }).press('Enter');
+
+  await page.getByRole('heading', { name: 'Заполни пропуск' }).waitFor();
+  await page.getByLabel('Ответ по-английски').fill('context');
+  await page.getByRole('button', { name: 'Проверить' }).press('Enter');
+  await page.getByRole('button', { name: 'Дальше' }).press('Enter');
+  await page.getByRole('heading', { name: 'Напиши на слух' }).waitFor();
+  await page.getByRole('button', { name: 'Прослушать ещё раз' }).press('Enter');
+  await page.getByLabel('Ответ по-английски').fill('listening');
+  await page.getByRole('button', { name: 'Проверить' }).press('Enter');
+  await page.getByRole('button', { name: 'Дальше' }).press('Enter');
+
+  await page.getByRole('heading', { name: 'Напиши слово' }).waitFor();
+  await page.getByLabel('Ответ по-английски').fill('spelling');
+  await page.getByRole('button', { name: 'Проверить' }).press('Enter');
+  await page.getByRole('button', { name: 'Дальше' }).press('Enter');
+  await page.getByRole('heading', { name: 'Познакомься со словом' }).waitFor();
+  await page.getByRole('button', { name: 'Начать вспоминать' }).press('Enter');
+  await page.getByRole('heading', { name: 'Выбери значение' }).waitFor();
+  await page.waitForFunction(() => document.activeElement?.id === 'w_session_title');
+  await page.getByRole('button', { name: 'Не знаю' }).press('Enter');
+  await page.getByRole('button', { name: 'Дальше' }).press('Enter');
+
+  await page.getByRole('heading', { name: 'Короткая пауза' }).waitFor({ timeout: 5_000 });
+  await page.getByRole('button', { name: 'Продолжить' }).press('Enter');
+  await page.getByRole('heading', { name: 'Короткая пауза' }).waitFor();
+  await page.getByRole('button', { name: 'Продолжить' }).press('Enter');
+  await page.getByRole('heading', { name: 'Выбери значение' }).waitFor();
+  await page.getByRole('button', { name: 'новое слово' }).press('Enter');
+  await page.getByRole('button', { name: 'Дальше' }).press('Enter');
+
+  await page.getByRole('heading', { name: 'Итоги тренировки' }).waitFor();
+  const sessionSummary = page.getByLabel('Итоги сессии');
+  assert.match(await sessionSummary.innerText(), /5\s+слов/u);
+  assert.match(await sessionSummary.innerText(), /7\s+попыток/u);
+  assert.match(await sessionSummary.innerText(), /1\s+знакомство/u);
+  assert.match(await sessionSummary.innerText(), /4\s+повторено/u);
+  assert.match(await sessionSummary.innerText(), /3\s+самостоятельно/u);
+  assert.match(await sessionSummary.innerText(), /2\s+с подсказкой/u);
+  assert.match(await sessionSummary.innerText(), /2\s+ошибки/u);
+  assert.match(await page.getByLabel('Сложные слова').innerText(), /spelling/u);
+  assert.match(await page.getByLabel('Сложные слова').innerText(), /new word/u);
+  assert.equal(await page.getByRole('button', { name: 'Потренировать сложные слова' }).count(), 1);
+  assert.equal(await page.evaluate(() => Array.isArray(window.S.vocabularyHistory)
+    && window.S.vocabularyHistory.length === 1), true);
+  assert.equal(await page.evaluate(() => {
+    const area = document.getElementById('w_area');
+    return matchMedia('(prefers-reduced-motion: reduce)').matches
+      && area.scrollWidth <= area.clientWidth;
+  }), true);
+  await context.setOffline(false);
+
+  await page.getByRole('button', { name: 'К плану на сегодня' }).press('Enter');
+  await page.getByRole('heading', { name: 'Сегодня' }).waitFor();
+  const trend = page.getByRole('region', { name: 'Самостоятельное вспоминание' });
+  assert.match(await trend.innerText(), /7 дней/u);
+  assert.match(await trend.innerText(), /30 дней/u);
+  assert.match(await page.getByText(/Нужно ещё 3 дня/u).innerText(), /тренд/u);
+
   assert.deepEqual(pageErrors, []);
 
   await context.close();

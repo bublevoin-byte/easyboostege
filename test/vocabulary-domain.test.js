@@ -2,7 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   applyVocabularyOutcome,
+  appendVocabularySessionHistory,
+  buildVocabularyRecognitionOptions,
+  buildVocabularyTrend,
+  composeVocabularySession,
   buildVocabularyQueue,
+  summarizeVocabularySession,
   deriveVocabularyState,
   gradeVocabularyAnswer,
   localVocabularyProgress,
@@ -11,6 +16,186 @@ import {
   migrateLocalVocabularyProgress,
   reinsertVocabularyFailure,
 } from '../public/vocabulary-domain.js';
+
+test('mixed vocabulary session introduces new words before the deterministic recall ladder', () => {
+  const items = [
+    { w: 'new word' },
+    { w: 'learning meaning' },
+    { w: 'learning spelling' },
+    { w: 'learning context' },
+    { w: 'learning listening' },
+  ];
+  let progress = migrateVocabularyProgress({ word: 'template' });
+  progress = applyVocabularyOutcome(progress, {
+    mode: 'receptive_meaning', outcome: 'correct', now: 1_000,
+  });
+  const meaningProgress = progress;
+  progress = applyVocabularyOutcome(progress, {
+    mode: 'russian_reveal', outcome: 'knew', now: 2_000,
+  });
+  const spellingProgress = progress;
+  progress = applyVocabularyOutcome(progress, {
+    mode: 'english_production', outcome: 'correct', now: 3_000,
+  });
+  const contextProgress = progress;
+  progress = applyVocabularyOutcome(progress, {
+    mode: 'contextual_production', outcome: 'correct', now: 4_000,
+  });
+  const listeningProgress = progress;
+  const progressByWord = Object.fromEntries([
+    [items[1], meaningProgress], [items[2], spellingProgress],
+    [items[3], contextProgress], [items[4], listeningProgress],
+  ].map(([item, record]) => [item.w, { ...record, word: item.w }]));
+
+  const session = composeVocabularySession(items, { progressByWord });
+
+  assert.deepEqual(session.map(({ word, mode, introduced, reviewed }) => ({
+    word, mode, introduced, reviewed,
+  })), [
+    { word: 'new word', mode: 'introduction', introduced: true, reviewed: false },
+    { word: 'new word', mode: 'receptive_meaning', introduced: false, reviewed: false },
+    { word: 'learning meaning', mode: 'russian_reveal', introduced: false, reviewed: true },
+    { word: 'learning spelling', mode: 'english_production', introduced: false, reviewed: true },
+    { word: 'learning context', mode: 'contextual_production', introduced: false, reviewed: true },
+    { word: 'learning listening', mode: 'listening', introduced: false, reviewed: true },
+  ]);
+});
+
+test('successful evidence advances a new word through every recall mode without stalling', () => {
+  const item = { w: 'advance' };
+  let progress = migrateVocabularyProgress({ word: item.w });
+  progress = applyVocabularyOutcome(progress, {
+    mode: 'receptive_meaning', outcome: 'correct', now: 1_000,
+  });
+  assert.equal(composeVocabularySession([item], {
+    progressByWord: { advance: progress },
+  })[0].mode, 'russian_reveal');
+
+  progress = applyVocabularyOutcome(progress, {
+    mode: 'russian_reveal', outcome: 'knew', now: 2_000,
+  });
+  assert.equal(progress.dimensions.meaning.evidence, 'self_reported');
+  assert.equal(composeVocabularySession([item], {
+    progressByWord: { advance: progress },
+  })[0].mode, 'english_production');
+
+  progress = applyVocabularyOutcome(progress, {
+    mode: 'english_production', outcome: 'correct', now: 3_000,
+  });
+  assert.equal(composeVocabularySession([item], {
+    progressByWord: { advance: progress },
+  })[0].mode, 'contextual_production');
+
+  progress = applyVocabularyOutcome(progress, {
+    mode: 'contextual_production', outcome: 'correct', now: 4_000,
+  });
+  assert.equal(composeVocabularySession([item], {
+    progressByWord: { advance: progress },
+  })[0].mode, 'listening');
+
+  progress = applyVocabularyOutcome(progress, {
+    mode: 'listening', outcome: 'correct', now: 5_000,
+  });
+  assert.equal(composeVocabularySession([item], {
+    progressByWord: { advance: progress },
+  })[0].mode, 'russian_reveal');
+
+  for (let attempt = 0; attempt < 40 && deriveVocabularyState(progress) !== 'strong'; attempt += 1) {
+    const mode = composeVocabularySession([item], {
+      progressByWord: { advance: progress },
+    })[0].mode;
+    progress = applyVocabularyOutcome(progress, {
+      mode, outcome: mode === 'russian_reveal' ? 'knew' : 'correct', now: 6_000 + attempt,
+    });
+  }
+  assert.equal(deriveVocabularyState(progress), 'strong');
+});
+
+test('recognition options are stable, unique and include the accepted meaning', () => {
+  const catalog = [
+    { w: 'beta', tr: 'бета' },
+    { w: 'alpha', tr: 'альфа' },
+    { w: 'gamma', tr: 'гамма' },
+    { w: 'delta', tr: 'дельта' },
+    { w: 'duplicate', tr: 'бета' },
+  ];
+
+  assert.deepEqual(buildVocabularyRecognitionOptions(catalog, catalog[0]), [
+    'альфа', 'бета', 'гамма', 'дельта',
+  ]);
+  assert.deepEqual(buildVocabularyRecognitionOptions(catalog, catalog[0]), [
+    'альфа', 'бета', 'гамма', 'дельта',
+  ]);
+});
+
+test('session summary separates unique words from attempts and keeps difficult words actionable', () => {
+  const summary = summarizeVocabularySession([
+    { word: 'alpha', mode: 'introduction', introduced: true },
+    { word: 'alpha', mode: 'receptive_meaning', outcome: 'correct', independentSuccess: false },
+    { word: 'beta', mode: 'english_production', outcome: 'correct', independentSuccess: true, reviewed: true },
+    { word: 'beta', mode: 'contextual_production', outcome: 'almost', independentSuccess: false, reviewed: true },
+    { word: 'gamma', mode: 'listening', outcome: 'not_known', independentSuccess: false, reviewed: true },
+  ]);
+
+  assert.deepEqual(summary, {
+    uniqueWords: 3,
+    attempts: 4,
+    introduced: 1,
+    reviewed: 2,
+    independent: 1,
+    assisted: 1,
+    errors: 2,
+    difficultWords: [
+      { word: 'beta', attempts: 2, errors: 1 },
+      { word: 'gamma', attempts: 1, errors: 1 },
+    ],
+  });
+});
+
+test('local vocabulary history exposes deterministic 7 and 30 day independent-recall trends', () => {
+  const august4 = Date.parse('2026-08-04T12:00:00.000Z');
+  const older = appendVocabularySessionHistory([], {
+    attempts: 4, independent: 1, errors: 2, uniqueWords: 3,
+  }, { completedAt: august4 - 8 * 86_400_000 });
+  const recent = appendVocabularySessionHistory(older, {
+    attempts: 5, independent: 3, errors: 1, uniqueWords: 4,
+  }, { completedAt: august4 - 2 * 86_400_000 });
+  const history = appendVocabularySessionHistory(recent, {
+    attempts: 4, independent: 3, errors: 0, uniqueWords: 3,
+  }, { completedAt: august4 });
+
+  assert.deepEqual(buildVocabularyTrend(history, { days: 7, now: august4 }), {
+    days: 7,
+    sessions: 2,
+    attempts: 9,
+    independent: 6,
+    errors: 1,
+    independentRate: 67,
+    points: [
+      { day: '2026-08-02', attempts: 5, independent: 3, errors: 1, independentRate: 60 },
+      { day: '2026-08-04', attempts: 4, independent: 3, errors: 0, independentRate: 75 },
+    ],
+  });
+  assert.equal(buildVocabularyTrend(history, { days: 30, now: august4 }).sessions, 3);
+  assert.equal(buildVocabularyTrend([{
+    completedAt: august4, attempts: 1, independent: 99, errors: 0,
+  }], { days: 7, now: august4 }).independentRate, 100);
+  const timezoneBoundary = Date.parse('2026-08-03T19:30:00.000Z');
+  assert.equal(buildVocabularyTrend([{
+    completedAt: timezoneBoundary,
+    attempts: 1, independent: 1, errors: 0,
+  }], {
+    days: 7, now: august4, timezoneOffsetMinutes: -360,
+  }).points[0].day, '2026-08-04');
+  const localBoundary = new Date(timezoneBoundary);
+  const localDay = [
+    localBoundary.getFullYear(), String(localBoundary.getMonth() + 1).padStart(2, '0'),
+    String(localBoundary.getDate()).padStart(2, '0'),
+  ].join('-');
+  assert.equal(buildVocabularyTrend([{
+    completedAt: timezoneBoundary, attempts: 1, independent: 1, errors: 0,
+  }], { days: 7, now: august4 }).points[0].day, localDay);
+});
 
 test('legacy SRS progress migrates once into preliminary multidimensional mastery', () => {
   const legacy = {
@@ -109,8 +294,10 @@ test('failed words return only after intervening items and stop at the session c
 
   const repeated = reinsertVocabularyFailure(items, items[0], {
     afterIndex: 0, minInterveningItems: 2, repeatCounts: {}, maxRepeatsPerWord: 1,
+    fallbackItems: items,
   });
   assert.equal(repeated.insertedAt, 3);
+  assert.equal(repeated.interveningAdded, 0);
   assert.deepEqual(repeated.items.map((item) => item.word), ['alpha', 'beta', 'gamma', 'alpha', 'delta']);
   assert.deepEqual(repeated.repeatCounts, { alpha: 1 });
 
@@ -119,6 +306,17 @@ test('failed words return only after intervening items and stop at the session c
   });
   assert.equal(capped.insertedAt, null);
   assert.deepEqual(capped.items, repeated.items);
+
+  const lateRetry = reinsertVocabularyFailure(items.slice(0, 1), items[0], {
+    afterIndex: 0, minInterveningItems: 2, repeatCounts: {}, maxRepeatsPerWord: 2,
+    fallbackItems: items.slice(1, 3).map((item) => ({ ...item, mode: 'bridge' })),
+  });
+  assert.equal(lateRetry.insertedAt, 3);
+  assert.equal(lateRetry.interveningAdded, 2);
+  assert.deepEqual(lateRetry.items.map((item) => item.word), [
+    'alpha', 'beta', 'gamma', 'alpha',
+  ]);
+  assert.deepEqual(lateRetry.items.slice(1, 3).map((item) => item.bridge), [true, true]);
 });
 
 test('English grading normalizes optional to while Russian recall requires self-rating', () => {
