@@ -1,6 +1,6 @@
 # Adaptive EGE Learning Plan — Specification
 
-Status: implementation in progress (Tickets 01–05 complete)
+Status: implementation in progress (Tickets 01–06 complete)
 Date: 2026-08-04
 Base branch: `feature/voice-ege-tutor` (`cfce08b`)
 
@@ -90,6 +90,32 @@ A persisted session is generated from one plan revision and duration. It consist
 
 Session completion consumes actual existing module-attempt evidence; the client cannot assert mastery, score or completion without a server-owned attempt/reference. A short-lived owner/block/launch-bound execution claim binds that attempt. If an attempt was persisted but the final advance response was lost, start recovers the exact attempt reference and durably replays advance instead of issuing a second claim. Writing and Speaking keep the exact canonical task locked until the paid review is confirmed; their review remains visible until the learner explicitly returns to the plan.
 
+### Retention and Premium Depth
+
+Existing Voice Tutor day-1/day-7 repeats are surfaced as high-priority exact activities only while the
+server-owned repeat is due, regardless of other same-skill minutes already planned that week. The adaptive
+overview and session bind the exact repeat/task identifiers and UTC due/window metadata, never a copied
+prompt or learner answer. Repeat submission and claim consumption commit in one repository mutation or
+PostgreSQL transaction, so a mismatched advertised repeat leaves no orphan attempt. A successful repeat is
+bound to the same execution claim and
+becomes independent `scheduled_review` evidence; Voice Tutor instruction itself remains assisted and cannot
+establish mastery. A repeat already owed to the learner remains completable after Premium expiry because it
+requires no new paid AI or voice session.
+
+Day-7 is executable only after the same recovery chain has a passed day-1 attempt. If both timestamps are
+already overdue, the composer surfaces day-1 first and does not advertise the server-rejected day-7 action.
+
+The short diagnostic is scheduled again every 28, 35 or 42 days according to confidence and independently
+established skill coverage. Fresh adequate independent evidence may establish the first schedule anchor;
+missing/sparse evidence still requires the initial diagnostic. Deep Writing/Speaking consumers, live Voice
+Tutor handoff and the secondary CEFR/IELTS orientation require current Premium on the server. Orientation
+uses only independently established skills, returns insufficient evidence when coverage is too sparse and
+always states that it is approximate and not an official IELTS/CEFR result.
+
+An expiring retention window is persisted as a nullable per-skill timestamp derived from the owner-bound
+recovery ledger. Only that repository-verified skill/module scope may bypass the ordinary 10-point plan
+stability limit; unrelated skills and modules remain bounded.
+
 ## API and Integration Boundaries
 
 All public endpoints live below `/api/v1/adaptive-learning/` and require authentication except no new anonymous API is introduced.
@@ -99,7 +125,8 @@ The feature exposes owner-bound contracts for:
 - current goal and overview;
 - diagnostic start/current/answer/complete;
 - current profile, forecast and weekly allocation;
-- session preview/create/current/replace/start/bind-attempt/advance/finish.
+- session preview/create/current/replace/start/bind-attempt/advance/finish;
+- Premium-only approximate CEFR/IELTS orientation plus explicit access and retention projections.
 
 Exact payloads are defined ticket-by-ticket with strict Zod schemas, bounded lengths and idempotency keys for mutations. Server time and server-owned task references are authoritative.
 

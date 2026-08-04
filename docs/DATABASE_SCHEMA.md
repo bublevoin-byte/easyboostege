@@ -12,7 +12,7 @@
 | `subscription_entitlements` | отдельные тарифные права Premium | `username`, entitlement, start/end timestamps |
 | `adaptive_learning_goals` | история целей ЕГЭ с одной текущей ревизией | target score, exam date, weekly minutes, revision, bounded idempotency fields and created/updated timestamps |
 | `adaptive_learning_profiles` | версия и уверенность объяснимого профиля ученика | taxonomy/weighting/watermark versions, monotonic calculation revision, latest source timestamp/count, preliminary/status flags, confidence, independent/assisted/client-reported counts, established skill count and reason codes |
-| `adaptive_learning_skill_estimates` | структурированные оценки микроскиллов без копий ответов | skill/module, mastery, uncertainty, raw/effective/independent counts, evidence quality, per-skill status, due state and explanation code |
+| `adaptive_learning_skill_estimates` | структурированные оценки микроскиллов без копий ответов | skill/module, mastery, uncertainty, raw/effective/independent counts, evidence quality, per-skill status, due state, server-derived critical retention expiry and explanation code |
 | `adaptive_learning_plan_revisions` | owner-bound история объяснимых прогнозов и недельных распределений | exact base/goal/profile revisions, evidence watermark/count, UTC daily calculation bucket, bounded forecast/allocation/stability JSON, internal input fingerprint and current marker; deterministic `calculatedAt` is derived as bucket start while `created_at`/`updated_at` remain receipt timestamps; duplicate replay additionally requires an exact normalized outer-vector and plan-semantic match, ignoring only regenerated ID and receipt timestamps |
 | `adaptive_diagnostic_sessions` | ограниченный по времени запуск короткой адаптивной диагностики | owner, UUID, версия server-owned catalog-policy, статус/current item/счётчики/timestamps и внутренний allowlisted `completion_response_snapshot`, атомарно связанный с completion key/hash; без prompt и answer key |
 | `adaptive_diagnostic_start_claims` | immutable start claim для каждого успешного owner-bound idempotency key | request hash, точный снимок возвращённой session state и `claim_expires_at`; окно 24 часа и максимум 16 живых claims на владельца, внутренние key/hash не экспортируются |
@@ -208,7 +208,7 @@ enum reason/status, timestamps и review audit. PostgreSQL create+bind provision
 `adaptive_learning_plan_revisions`, хранит версии composer/content/taxonomy, начало UTC-недели,
 точную длительность, структурированный снимок недельного бюджета и только opaque server-owned
 activity/content references с проверенным `adaptive-launch-v1` descriptor. Descriptor — строгий union
-`vocabulary_practice|grammar_practice|exam_workflow|reading_mode|listening_mode|writing_task|speaking_task`: он содержит
+`vocabulary_practice|grammar_practice|exam_workflow|reading_mode|listening_mode|writing_task|speaking_task|voice_tutor_recovery`: он содержит
 только allowlisted screen/mode/topic/task identity и вызывается соответствующим экраном задания.
 `vocabulary_practice` открывает реальную очередь `scr2` из `EGE_WORDS`/SRS в режиме lexical choice;
 word formation не выдаётся за готовый consumer и остаётся явным `coverageGaps`. Его доля получает
@@ -268,3 +268,25 @@ attempt хранит `source_task_ref`, speaking attempt — fingerprint кан�
 completed ответ того же типа, но к другой карточке, не может завершить блок. PostgreSQL читает
 current/advance/finish контексты в `REPEATABLE READ`, а конкурирующие mutations придерживаются порядка
 блокировок owner → session/claim, чтобы не смешивать ревизии и не создавать deadlock с удалением владельца.
+
+Миграция `037_adaptive_retention_premium.sql` добавляет к skill estimate nullable
+`critical_retention_expires_at` и разрешает существующему execution claim/event ссылаться на
+`voice_tutor_repeat`. Значение expiry не принимается от клиента: overview строит его из owner-bound
+day-1/day-7 recovery map, а repository разрешает одинаковому evidence watermark только монотонный
+переход `not_due → due → critical_due` и точный неизменный critical expiry. Это даёт
+`adaptive-plan-v1` узкую authority для stability bypass только expiring skill/module; repository
+повторно строит кандидат из сохранённого профиля и отклоняет придуманный scope.
+
+Retention-блок хранит только точные repeat/task/skill/module identifiers и UTC due/window, но не prompt или
+ответ. Привязка попытки проверяет owner, session/block/claim, объявленные в launch repeat/task/window,
+skill/module и время
+создания после claim; событие получает `source_type=voice_tutor_repeat`,
+`evidence_quality=server_verified_unassisted` и фактический `scheduled_review`. Сам ответ по-прежнему
+проверяется транзитно существующим Voice Tutor repeat ledger и не попадает в adaptive storage.
+Repeat attempt и consumption claim записываются в одной file mutation или PostgreSQL transaction;
+ошибка exact binding не оставляет orphan attempt. Один shared validator используется при submit, bind
+и advance в обоих backend.
+Day-7 не попадает в executable retention projection, пока в той же recovery chain нет passed day-1 attempt;
+если обе даты просрочены, session composer сначала выдаёт day-1 и не создаёт заведомо отклоняемый блок.
+Deep Writing/Speaking остаются server-gated правом `voice_tutor`; day-1/day-7 обязательство,
+созданное ранее, можно завершить после истечения Premium без нового AI/Voice вызова.

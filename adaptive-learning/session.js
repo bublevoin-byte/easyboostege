@@ -120,14 +120,45 @@ function normalizeUsage(weekUsage = []) {
   return result;
 }
 
-function eligibleActivities(registry, plan) {
+export function adaptiveActivityRequiresPremiumDepth(activity) {
+  return ['writing', 'speaking'].includes(activity?.module)
+    && activity?.launch?.kind !== 'voice_tutor_recovery';
+}
+
+function materializedActivities(registry, retention) {
+  const dueChecks = Array.isArray(retention?.dueChecks) ? retention.dueChecks : [];
+  return registry.activities.flatMap((activity) => {
+    if (activity.launch?.kind !== 'voice_tutor_recovery') return [activity];
+    return dueChecks
+      .filter((check) => check?.skillId === activity.skillId && check?.module === activity.module)
+      .map((check) => ({
+        ...activity,
+        contentRef: `voice-tutor-repeat:${check.repeatId}`,
+        launch: {
+          ...activity.launch,
+          repeatId: check.repeatId,
+          taskId: check.taskId,
+          stage: check.stage,
+          status: check.status,
+          dueAt: check.dueAt,
+          windowEndsAt: check.windowEndsAt,
+        },
+      }));
+  });
+}
+
+function eligibleActivities(registry, plan, { profile = null, access = null, retention = null } = {}) {
   if (!registry || registry.version !== ADAPTIVE_CONTENT_REGISTRY_VERSION
     || registry.taxonomyVersion !== field(plan, 'taxonomyVersion', 'taxonomy_version')
     || registry.launchContractVersion !== ADAPTIVE_LAUNCH_CONTRACT_VERSION
     || !Array.isArray(registry.activities)) return [];
   const allocated = new Set((plan?.allocation?.skills || []).filter((skill) => Number(skill.percentage) > 0)
     .map((skill) => skill.id));
-  return registry.activities.filter((activity) => (
+  const dueSkills = new Set((profile?.skills || [])
+    .filter((skill) => ['due', 'overdue', 'critical_due'].includes(skill.dueState))
+    .map((skill) => skill.id));
+  const premiumDepth = access?.capabilities?.premiumDepth !== false;
+  return materializedActivities(registry, retention).filter((activity) => (
     allocated.has(activity.skillId)
     && SKILL_BY_ID.get(activity.skillId)?.module === activity.module
     && SKILL_BY_ID.get(activity.skillId)?.label === activity.skillLabel
@@ -143,6 +174,9 @@ function eligibleActivities(registry, plan) {
     && typeof activity.activityId === 'string'
     && typeof activity.activityLabel === 'string'
     && typeof activity.contentRef === 'string'
+    && (premiumDepth || !adaptiveActivityRequiresPremiumDepth(activity))
+    && (activity.launch.kind !== 'voice_tutor_recovery'
+      || dueSkills.has(activity.skillId))
   ));
 }
 
@@ -261,13 +295,20 @@ function servicePriorityScore(activity, budget, usage, priority) {
 
 function candidateScore(activity, planSkill, budget, usage, prerequisiteSkillIds, scheduledSkills, priority) {
   const alreadyPlanned = usage.get(activity.skillId)?.plannedMinutes || 0;
-  const due = (planSkill.reasonCodes || []).includes('due_review')
-    && alreadyPlanned === 0 && !scheduledSkills.has(activity.skillId) ? 1 : 0;
+  const exactRetention = activity.launch.kind === 'voice_tutor_recovery';
+  const due = exactRetention || ((planSkill.reasonCodes || []).includes('due_review')
+    && alreadyPlanned === 0 && !scheduledSkills.has(activity.skillId))
+    ? 1 : 0;
   const effectiveTarget = (budget.get(activity.skillId) || 0)
     + (priority.fallbackMinutes.get(activity.skillId) || 0);
   const prerequisite = prerequisiteSkillIds.has(activity.skillId)
     && alreadyPlanned < effectiveTarget && !scheduledSkills.has(activity.skillId) ? 1 : 0;
+  const retentionUrgency = exactRetention
+    ? Number(activity.launch.status === 'critical_due') * 2 + Number(activity.launch.stage === 'day_1')
+    : 0;
+  if (exactRetention) return 10_000_000 + retentionUrgency * 100_000;
   return prerequisite * 2_000_000 + due * 1_000_000
+    + retentionUrgency * 100_000
     + servicePriorityScore(activity, budget, usage, priority) + Number(planSkill.percentage || 0)
     + (planSkill.activityType === 'diagnostic_probe' ? 1 : 0);
 }
@@ -276,8 +317,9 @@ function reasonsFor(activity, planSkill, budget, usage, prerequisiteSkillIds, sc
   priority, plannedMinutes) {
   const reasons = [];
   const alreadyPlanned = usage.get(activity.skillId)?.plannedMinutes || 0;
-  if ((planSkill.reasonCodes || []).includes('due_review')
-    && alreadyPlanned === 0 && !scheduledSkills.has(activity.skillId)) reasons.push('due_review');
+  if (activity.launch.kind === 'voice_tutor_recovery'
+    || ((planSkill.reasonCodes || []).includes('due_review')
+      && alreadyPlanned === 0 && !scheduledSkills.has(activity.skillId))) reasons.push('due_review');
   const deficit = remainingDeficit(activity, budget, usage);
   const effectiveTarget = (budget.get(activity.skillId) || 0)
     + (priority.fallbackMinutes.get(activity.skillId) || 0);
@@ -300,12 +342,13 @@ function composeLearningBlocks({
   const planBySkill = new Map(plan.allocation.skills.map((skill) => [skill.id, skill]));
   const priority = priorityContext(plan, available, budget);
   const failedStates = new Set();
-  const search = (remaining, currentUsage, scheduledSkills, previous) => {
+  const search = (remaining, currentUsage, scheduledSkills, scheduledRetentionRefs, previous) => {
     if (remaining === 0) return [];
     const stateKey = JSON.stringify([
       remaining,
       previous?.contentRef || null,
       [...scheduledSkills].sort(),
+      [...scheduledRetentionRefs].sort(),
       [...new Set(available.map((activity) => activity.skillId))].sort().map((skillId) => {
         const activity = available.find((item) => item.skillId === skillId);
         return [skillId, currentUsage.get(activity.skillId)?.plannedMinutes || 0];
@@ -314,6 +357,8 @@ function composeLearningBlocks({
     if (failedStates.has(stateKey)) return null;
     const candidates = available.filter((activity) => (
       activity.contentRef !== previous?.contentRef
+      && (activity.launch.kind !== 'voice_tutor_recovery'
+        || !scheduledRetentionRefs.has(activity.contentRef))
       && activity.minimumMinutes <= remaining
     )).sort((left, right) => (
       candidateScore(right, planBySkill.get(right.skillId), budget, currentUsage,
@@ -342,7 +387,11 @@ function composeLearningBlocks({
           && activity.minimumMinutes <= nextRemaining
         ))) continue;
         const nextScheduled = new Set(scheduledSkills).add(chosen.skillId);
-        const tail = search(nextRemaining, nextUsage, nextScheduled, chosen);
+        const nextRetentionRefs = new Set(scheduledRetentionRefs);
+        if (chosen.launch.kind === 'voice_tutor_recovery') {
+          nextRetentionRefs.add(chosen.contentRef);
+        }
+        const tail = search(nextRemaining, nextUsage, nextScheduled, nextRetentionRefs, chosen);
         if (tail) return [{
           kind: 'learning', module: chosen.module, skillId: chosen.skillId,
           skillLabel: chosen.skillLabel, activityId: chosen.activityId,
@@ -359,7 +408,7 @@ function composeLearningBlocks({
     return null;
   };
   const initialUsage = new Map([...usage].map(([skillId, value]) => [skillId, { ...value }]));
-  const blocks = search(learningMinutes, initialUsage, new Set(), null);
+  const blocks = search(learningMinutes, initialUsage, new Set(), new Set(), null);
   if (!blocks) throw coverageError(plan, available);
   return blocks;
 }
@@ -436,6 +485,8 @@ export function buildAdaptiveSessionPreview({
   durationMinutes,
   now,
   registry = ADAPTIVE_ACTIVITY_REGISTRY,
+  access = null,
+  retention = null,
 }) {
   if (!isAdaptiveSessionDuration(durationMinutes)) {
     throw Object.assign(new Error('ADAPTIVE_SESSION_DURATION_INVALID'), {
@@ -451,7 +502,7 @@ export function buildAdaptiveSessionPreview({
     || !Number.isInteger(weeklyMinutes) || weeklyMinutes < 30) {
     throw new Error('ADAPTIVE_SESSION_PLAN_INVALID');
   }
-  const available = eligibleActivities(registry, plan);
+  const available = eligibleActivities(registry, plan, { profile, access, retention });
   const breakMinutes = durationMinutes > 60 ? BREAK_MINUTES : 0;
   const learningMinutes = durationMinutes - breakMinutes;
   const budget = apportionWeeklyBudget(plan, weeklyMinutes);
@@ -527,13 +578,13 @@ export function createAdaptiveLearningSessionFromPreview(preview, { id, now }) {
   return session;
 }
 
-function replacementCandidates(session, plan, target, reason, registry) {
+function replacementCandidates(session, plan, target, reason, registry, access, profile, retention) {
   const targetIndex = session.blocks.findIndex((block) => block.id === target.id);
   const previous = session.blocks.slice(0, targetIndex).reverse()
     .find((block) => block.kind === 'learning');
   const next = session.blocks.slice(targetIndex + 1)
     .find((block) => block.kind === 'learning');
-  const available = eligibleActivities(registry, plan);
+  const available = eligibleActivities(registry, plan, { access, profile, retention });
   const budget = new Map(session.weeklyBudgetSnapshot.skills.map((skill) => (
     [skill.skillId, skill.targetMinutes]
   )));
@@ -577,13 +628,16 @@ export function buildAdaptiveSessionReplacement({
   reason,
   now,
   registry = ADAPTIVE_ACTIVITY_REGISTRY,
+  access = null,
+  profile = null,
+  retention = null,
 }) {
   assertAdaptiveLearningSession(session);
   if (session.replacement || Number(session.revision) !== 1) throw new Error('ADAPTIVE_SESSION_REPLACEMENT_ALREADY_USED');
   if (!isAdaptiveSessionReplacementReason(reason)) throw new Error('ADAPTIVE_SESSION_REPLACEMENT_REASON_INVALID');
   const target = session.blocks.find((block) => block.id === blockId);
   if (!target || target.kind !== 'learning') throw new Error('ADAPTIVE_SESSION_BLOCK_NOT_FOUND');
-  const available = eligibleActivities(registry, plan);
+  const available = eligibleActivities(registry, plan, { profile, access, retention });
   const replacementBudget = new Map(session.weeklyBudgetSnapshot.skills.map((skill) => (
     [skill.skillId, skill.targetMinutes]
   )));
@@ -594,7 +648,9 @@ export function buildAdaptiveSessionReplacement({
     }]
   )));
   const replacementPriority = priorityContext(plan, available, replacementBudget);
-  for (const replacement of replacementCandidates(session, plan, target, reason, registry)) {
+  for (const replacement of replacementCandidates(
+    session, plan, target, reason, registry, access, profile, retention,
+  )) {
     const next = structuredClone(session);
     const targetIndex = next.blocks.findIndex((block) => block.id === blockId);
     next.blocks[targetIndex] = {
@@ -867,10 +923,17 @@ export function assertAdaptiveLearningSession(session) {
     const activity = ADAPTIVE_ACTIVITY_REGISTRY.activities.find((item) => (
       item.skillId === block.skillId && item.module === block.module && item.activityId === block.activityId
       && item.skillLabel === block.skillLabel && item.activityLabel === block.activityLabel
-      && item.contentRef === block.contentRef && item.difficulty === block.difficulty
+      && (item.launch.kind === 'voice_tutor_recovery'
+        ? block.launch?.kind === 'voice_tutor_recovery'
+          && block.contentRef === `voice-tutor-repeat:${block.launch.repeatId}`
+          && item.launch.skillId === block.launch.skillId
+          && item.launch.module === block.launch.module
+          && item.launch.screenId === block.launch.screenId
+          && item.launch.version === block.launch.version
+        : item.contentRef === block.contentRef && equalValue(item.launch, block.launch))
+      && item.difficulty === block.difficulty
       && item.modality === block.modality && item.requiresAudio === block.requiresAudio
       && item.requiresMicrophone === block.requiresMicrophone
-      && equalValue(item.launch, block.launch)
     ));
     if (block.kind !== 'learning' || !activity || block.plannedMinutes < activity.minimumMinutes
       || block.plannedMinutes > MAX_LEARNING_BLOCK_MINUTES

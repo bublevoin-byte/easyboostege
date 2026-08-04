@@ -80,13 +80,14 @@ function largestRemainder(items, total, minimum = 0) {
   return new Map(allocations.map((item) => [item.id, item.value]));
 }
 
-function stableApportion(items, total, previousById, minimum = 0) {
+function stableApportion(items, total, previousById, minimum = 0, bypassIds = new Set()) {
   const desired = largestRemainder(items, total, minimum);
   if (!previousById || !items.every((item) => previousById.has(item.id))) return desired;
   const entries = items.map((item) => {
     const previous = previousById.get(item.id);
-    const lower = Math.max(minimum, previous - ORDINARY_CHANGE_LIMIT);
-    const upper = previous + ORDINARY_CHANGE_LIMIT;
+    const bypassed = bypassIds.has(item.id);
+    const lower = bypassed ? minimum : Math.max(minimum, previous - ORDINARY_CHANGE_LIMIT);
+    const upper = bypassed ? total : previous + ORDINARY_CHANGE_LIMIT;
     return {
       id: item.id,
       desired: desired.get(item.id),
@@ -466,7 +467,7 @@ function validateStability(stability, { basePlanRevision }) {
   ])
     || typeof stability.applied !== 'boolean'
     || stability.maximumChangePercentagePoints !== ORDINARY_CHANGE_LIMIT
-    || ![null, 'goal_changed'].includes(stability.bypassReason)
+    || ![null, 'goal_changed', 'critical_retention_expiry'].includes(stability.bypassReason)
     || !hasUniqueAllowedStrings(stability.bypassedSkillIds, new Set(CANONICAL_SKILL_BY_ID.keys()))
     || !hasUniqueAllowedStrings(stability.bypassedModuleIds, new Set(CANONICAL_MODULE_IDS))) {
     persistenceInvalid();
@@ -475,6 +476,10 @@ function validateStability(stability, { basePlanRevision }) {
     && (stability.bypassedSkillIds.length || stability.bypassedModuleIds.length)) persistenceInvalid();
   if (stability.bypassReason === 'goal_changed'
     && (stability.applied || stability.bypassedSkillIds.length || stability.bypassedModuleIds.length)) {
+    persistenceInvalid();
+  }
+  if (stability.bypassReason === 'critical_retention_expiry'
+    && (!stability.applied || !stability.bypassedSkillIds.length || !stability.bypassedModuleIds.length)) {
     persistenceInvalid();
   }
   if ((basePlanRevision === null && (stability.applied || stability.bypassReason !== null))
@@ -717,20 +722,25 @@ export function assertAdaptivePlanStabilityTransition(current, candidate) {
     return;
   }
   if (reason === 'goal_changed') throw new Error('ADAPTIVE_PLAN_STABILITY_VIOLATION');
-  if (reason) throw new Error('ADAPTIVE_PLAN_STABILITY_VIOLATION');
+  if (reason && reason !== 'critical_retention_expiry') throw new Error('ADAPTIVE_PLAN_STABILITY_VIOLATION');
   const declaredSkillIds = Array.isArray(stability.bypassedSkillIds) ? stability.bypassedSkillIds : [];
   const declaredModuleIds = Array.isArray(stability.bypassedModuleIds) ? stability.bypassedModuleIds : [];
-  if (declaredSkillIds.length || declaredModuleIds.length) {
+  if (reason === null && (declaredSkillIds.length || declaredModuleIds.length)) {
     throw new Error('ADAPTIVE_PLAN_STABILITY_VIOLATION');
   }
-  for (const kind of ['modules', 'skills']) {
+  if (reason === 'critical_retention_expiry'
+    && (!declaredSkillIds.length || !declaredModuleIds.length || stability.applied !== true)) {
+    throw new Error('ADAPTIVE_PLAN_STABILITY_VIOLATION');
+  }
+  for (const [kind, bypassedIds] of [['modules', declaredModuleIds], ['skills', declaredSkillIds]]) {
     const before = allocationById(current.allocation[kind]);
     const after = allocationById(candidate.allocation[kind]);
     if (before.size !== after.size || [...before.keys()].some((id) => !after.has(id))) {
       throw new Error('ADAPTIVE_PLAN_STABILITY_VIOLATION');
     }
     for (const [id, item] of after) {
-      if (Math.abs(number(item.percentage) - number(before.get(id).percentage)) > ORDINARY_CHANGE_LIMIT) {
+      if (!bypassedIds.includes(id)
+        && Math.abs(number(item.percentage) - number(before.get(id).percentage)) > ORDINARY_CHANGE_LIMIT) {
         throw new Error('ADAPTIVE_PLAN_STABILITY_VIOLATION');
       }
     }
@@ -761,17 +771,25 @@ export function buildAdaptiveLearningPlan({ goal, profile, previousPlan = null, 
   const goalChanged = Boolean(previousPlan) && previousGoalRevision !== goalRevision;
   const criticalScope = criticalRetentionScope(profile, instant);
   const criticalSignalSkillIds = new Set(criticalScope.skillIds);
+  const criticalSignalModuleIds = new Set(criticalScope.moduleIds);
   const stabilityApplied = Boolean(previousPlan) && !goalChanged;
+  const criticalBypass = stabilityApplied && criticalScope.skillIds.length > 0;
   const previousModules = stabilityApplied ? new Map((previousPlan.allocation?.modules || [])
     .map((module) => [module.id, number(module.percentage)])) : null;
-  const moduleShares = stableApportion(weightedModules, 100, previousModules, 2);
+  const moduleShares = stableApportion(
+    weightedModules, 100, previousModules, 2,
+    criticalBypass ? criticalSignalModuleIds : new Set(),
+  );
   const previousSkills = stabilityApplied ? new Map((previousPlan.allocation?.skills || [])
     .map((skill) => [skill.id, number(skill.percentage)])) : null;
   const skillShares = new Map();
   for (const module of weightedModules) {
     const moduleSkills = weightedSkills.filter((skill) => skill.module === module.id);
     const modulePrevious = previousSkills && new Map(moduleSkills.map((skill) => [skill.id, previousSkills.get(skill.id)]));
-    const shares = stableApportion(moduleSkills, moduleShares.get(module.id), modulePrevious, 1);
+    const shares = stableApportion(
+      moduleSkills, moduleShares.get(module.id), modulePrevious, 1,
+      criticalBypass ? criticalSignalSkillIds : new Set(),
+    );
     for (const [skillId, percentage] of shares) skillShares.set(skillId, percentage);
   }
   const allocationSkills = EGE_SKILL_TAXONOMY.skills.map((skill) => {
@@ -816,9 +834,9 @@ export function buildAdaptiveLearningPlan({ goal, profile, previousPlan = null, 
     stability: {
       applied: stabilityApplied,
       maximumChangePercentagePoints: ORDINARY_CHANGE_LIMIT,
-      bypassReason: goalChanged ? 'goal_changed' : null,
-      bypassedSkillIds: [],
-      bypassedModuleIds: [],
+      bypassReason: goalChanged ? 'goal_changed' : criticalBypass ? 'critical_retention_expiry' : null,
+      bypassedSkillIds: criticalBypass ? criticalScope.skillIds : [],
+      bypassedModuleIds: criticalBypass ? criticalScope.moduleIds : [],
     },
     forecast: buildForecast(goal, profile, instant),
     allocation: { modules: allocationModules, skills: allocationSkills },

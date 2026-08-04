@@ -4,12 +4,11 @@
 
 **Blocked by:** 05 and local Voice Tutor implementation.
 
-**Status:** blocked
+**Status:** done
 
-- [ ] Write failing retention and entitlement tests first.
-- [ ] Surface due Voice Tutor recovery checks as high-priority eligible blocks.
-- [ ] Schedule short re-diagnostic probes every 4–6 weeks based on confidence/coverage.
-- [ ] Add server-enforced Premium gates for deep Writing/Speaking, Voice Tutor and CEFR/IELTS orientation.
-- [ ] Reuse existing attempts/recoveries instead of duplicating raw learner content.
-- [ ] Pass targeted tests and independent Standards + Spec review with zero P0–P2.
-
+- [x] Write failing retention and entitlement tests first.
+- [x] Surface due Voice Tutor recovery checks as high-priority eligible blocks.
+- [x] Schedule short re-diagnostic probes every 4–6 weeks based on confidence/coverage.
+- [x] Add server-enforced Premium gates for deep Writing/Speaking, Voice Tutor and CEFR/IELTS orientation.
+- [x] Reuse existing attempts/recoveries instead of duplicating raw learner content.
+- [x] Pass targeted tests and independent Standards + Spec review with zero P0–P2.

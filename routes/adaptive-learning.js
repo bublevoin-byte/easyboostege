@@ -15,12 +15,18 @@ import {
 import { adaptiveLearningPlanPublicDto } from '../adaptive-learning/plan-dto.js';
 import {
   ADAPTIVE_ACTIVITY_REGISTRY,
+  adaptiveActivityRequiresPremiumDepth,
   adaptiveSessionWeekStart,
   buildAdaptiveSessionPreview,
   buildAdaptiveSessionReplacement,
   createAdaptiveLearningSessionFromPreview,
 } from '../adaptive-learning/session.js';
 import { adaptiveLearningSessionPublicDto } from '../adaptive-learning/session-dto.js';
+import {
+  applyAdaptiveRetentionState,
+  buildAdaptiveLanguageOrientation,
+  buildAdaptiveRetentionState,
+} from '../adaptive-learning/retention.js';
 import {
   ADAPTIVE_EXECUTION_CLAIM_TTL_MS,
   adaptiveCompletedBlockDto,
@@ -109,7 +115,7 @@ function unsupportedDiagnosticCatalog(res) {
 function adaptiveStartPublicSnapshot(snapshot, executionTokenSecret) {
   if (snapshot?.recoveryAttempt) {
     const attempt = snapshot.recoveryAttempt;
-    const validAttempt = attempt?.type === 'module'
+    const validAttempt = ['module', 'voice_tutor_repeat'].includes(attempt?.type)
       ? DIAGNOSTIC_ID.test(String(attempt.id || ''))
       : ['writing', 'speaking'].includes(attempt?.type)
         && Number.isSafeInteger(Number(attempt.id)) && Number(attempt.id) > 0;
@@ -139,6 +145,7 @@ export function createAdaptiveLearningRoutes({
   executionTokenSecret,
   diagnosticRegistry = DIAGNOSTIC_REGISTRY,
   activityRegistry = ADAPTIVE_ACTIVITY_REGISTRY,
+  voiceTutorLimits = {},
 }) {
   const router = express.Router();
   if (!enabled) return router;
@@ -148,12 +155,53 @@ export function createAdaptiveLearningRoutes({
   const { auth } = authentication;
   const diagnosticStartRateGate = createDiagnosticStartRateGate();
 
+  async function adaptiveAccess(username) {
+    const [subscription, voice] = await Promise.all([
+      typeof db.getSub === 'function' ? db.getSub(username) : { active: false },
+      typeof db.getVoiceTutorAccess === 'function'
+        ? db.getVoiceTutorAccess(username, voiceTutorLimits, now())
+        : { entitlements: { voice_tutor: false } },
+    ]);
+    const premium = voice?.entitlements?.voice_tutor === true;
+    return {
+      tier: premium ? 'premium' : subscription?.active ? 'base' : 'free',
+      capabilities: {
+        adaptivePlan: subscription?.active === true || premium,
+        premiumDepth: premium,
+        writingSpeakingDepth: premium,
+        voiceTutorHandoff: premium,
+        languageOrientation: premium,
+      },
+    };
+  }
+
+  async function requireCurrentPremiumDepth(username, block) {
+    if (!adaptiveActivityRequiresPremiumDepth(block)) return;
+    const access = await adaptiveAccess(username);
+    if (!access.capabilities.premiumDepth) throw new Error('ADAPTIVE_PREMIUM_REQUIRED');
+  }
+
+  async function retentionState(username, profile, sources) {
+    const recoveryMap = typeof db.getVoiceTutorRecoveryMap === 'function'
+      ? await db.getVoiceTutorRecoveryMap(username, { limits: voiceTutorLimits, now: now() })
+      : {};
+    return buildAdaptiveRetentionState({
+      profile,
+      recoveryMap,
+      diagnosticCompletions: sources?.diagnosticCompletions || [],
+      now: now(),
+    });
+  }
+
   async function overview(username, { remainingPlanRetries = 2 } = {}) {
-    const [goal, sources] = await Promise.all([
+    const [goal, sources, access] = await Promise.all([
       db.getAdaptiveLearningGoal(username),
       db.getAdaptiveLearningEvidenceSources(username),
+      adaptiveAccess(username),
     ]);
-    const profile = buildAdaptiveLearningProfile(sources, { diagnosticRegistry });
+    const baseProfile = buildAdaptiveLearningProfile(sources, { diagnosticRegistry });
+    const retention = await retentionState(username, baseProfile, sources);
+    const profile = applyAdaptiveRetentionState(baseProfile, retention);
     const authoritativeProfile = await db.saveAdaptiveLearningProfile(username, profile, { now: now() });
     const publicProfile = adaptiveLearningProfilePublicDto(authoritativeProfile);
     let plan = null;
@@ -210,6 +258,8 @@ export function createAdaptiveLearningRoutes({
       goal: adaptiveLearningGoalPublicDto(goal),
       profile: publicProfile,
       plan,
+      retention,
+      access,
     };
   }
 
@@ -280,6 +330,18 @@ export function createAdaptiveLearningRoutes({
     } catch (error) { return next(error); }
   });
 
+  router.get('/api/v1/adaptive-learning/orientation', auth, async (req, res, next) => {
+    try {
+      res.setHeader('Cache-Control', 'no-store');
+      const access = await adaptiveAccess(req.user);
+      if (!access.capabilities.languageOrientation) {
+        return res.status(403).json({ error: { code: 'ADAPTIVE_PREMIUM_REQUIRED' } });
+      }
+      const result = await overview(req.user);
+      return res.json({ access, orientation: buildAdaptiveLanguageOrientation(result.profile) });
+    } catch (error) { return next(error); }
+  });
+
   function sessionRequestHash(value) {
     return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
   }
@@ -299,6 +361,8 @@ export function createAdaptiveLearningRoutes({
       durationMinutes,
       now: instant,
       registry: activityRegistry,
+      access: result.access,
+      retention: result.retention,
     });
   }
 
@@ -330,6 +394,7 @@ export function createAdaptiveLearningRoutes({
       ADAPTIVE_EXECUTION_ATTEMPT_MISMATCH: [409, 'ADAPTIVE_EXECUTION_ATTEMPT_MISMATCH'],
       ADAPTIVE_SESSION_BLOCK_NOT_FOUND: [404, 'ADAPTIVE_SESSION_NOT_FOUND'],
       ADAPTIVE_SESSION_NOT_FOUND: [404, 'ADAPTIVE_SESSION_NOT_FOUND'],
+      ADAPTIVE_PREMIUM_REQUIRED: [403, 'ADAPTIVE_PREMIUM_REQUIRED'],
     }[error?.message || error?.code];
     if (!known) return false;
     res.status(known[0]).json({ error: { code: known[1] } });
@@ -419,6 +484,7 @@ export function createAdaptiveLearningRoutes({
       const storedPlan = await db.getAdaptiveLearningPlanRevision(req.user, current.planRevision);
       if (!storedPlan || storedPlan.id !== current.planId) throw new Error('ADAPTIVE_SESSION_PLAN_STALE');
       const instant = now();
+      const currentOverview = await overview(req.user);
       const session = buildAdaptiveSessionReplacement({
         session: current,
         plan: adaptiveLearningPlanPublicDto(storedPlan),
@@ -426,6 +492,9 @@ export function createAdaptiveLearningRoutes({
         reason: parsed.data.reason,
         now: instant,
         registry: activityRegistry,
+        access: currentOverview.access,
+        profile: currentOverview.profile,
+        retention: currentOverview.retention,
       });
       const saved = await db.replaceAdaptiveLearningSessionBlock(req.user, {
         sessionId: current.id,
@@ -460,7 +529,10 @@ export function createAdaptiveLearningRoutes({
       const replay = await db.getAdaptiveLearningSessionMutationReplay(req.user, {
         operation: 'start', sessionId: req.params.sessionId, idempotencyKey, requestHash,
       });
-      if (replay) return res.json(adaptiveStartPublicSnapshot(replay, executionTokenSecret));
+      if (replay) {
+        await requireCurrentPremiumDepth(req.user, replay.block);
+        return res.json(adaptiveStartPublicSnapshot(replay, executionTokenSecret));
+      }
       const current = await db.getAdaptiveLearningSessionExecution(req.user, req.params.sessionId);
       if (!current) throw new Error('ADAPTIVE_SESSION_NOT_FOUND');
       const block = current.session.blocks.find((item) => item.id === parsed.data.blockId);
@@ -468,6 +540,7 @@ export function createAdaptiveLearningRoutes({
         throw new Error('ADAPTIVE_SESSION_BLOCK_NOT_CURRENT');
       }
       if (block.kind !== 'learning') throw new Error('ADAPTIVE_SESSION_BLOCK_NOT_LAUNCHABLE');
+      await requireCurrentPremiumDepth(req.user, block);
       const instant = now();
       const claimId = crypto.randomUUID();
       const token = adaptiveExecutionToken(claimId, executionTokenSecret);
@@ -529,6 +602,7 @@ export function createAdaptiveLearningRoutes({
         sessionId: req.params.sessionId, ...parsed.data, now: instant,
       });
       if (!context) throw new Error('ADAPTIVE_SESSION_NOT_FOUND');
+      await requireCurrentPremiumDepth(req.user, context.block);
       const storedProfile = await db.getAdaptiveLearningProfile(req.user);
       const storedPlan = await db.getCurrentAdaptiveLearningPlan(req.user);
       const profileBefore = adaptiveLearningProfilePublicDto(storedProfile);
@@ -599,6 +673,11 @@ export function createAdaptiveLearningRoutes({
       return res.status(400).json({ error: { code: 'VALIDATION_ERROR' } });
     }
     try {
+      const current = await db.getAdaptiveLearningSessionExecution(req.user, req.params.sessionId);
+      const block = current?.session?.blocks?.find((item) => (
+        item.id === current.execution?.currentBlockId
+      ));
+      await requireCurrentPremiumDepth(req.user, block);
       const result = await db.bindAdaptiveLearningServerAttempt(req.user, {
         sessionId: req.params.sessionId, ...parsed.data, now: now(),
       });

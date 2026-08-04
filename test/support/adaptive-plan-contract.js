@@ -617,7 +617,7 @@ export async function assertAdaptivePlanRepositoryContract(assert, repository, u
       basePlanRevision: 6,
       now: new Date('2026-08-11T07:30:00.000Z'),
     }), { stabilityContext: { profile: criticalProfile, owner: username } }),
-    /ADAPTIVE_PLAN_INVALID/u,
+    /ADAPTIVE_PLAN_AUTHORITY_MISMATCH/u,
     'a caller-supplied synthetic profile/context cannot authorize a critical bypass',
   );
 

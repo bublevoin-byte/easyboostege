@@ -20,6 +20,8 @@ import {
 } from '../adaptive-learning/diagnostic-claims.js';
 import { adaptiveLearningPlanRepositoryDto } from '../adaptive-learning/plan-dto.js';
 import { adaptiveSpeakingTask } from '../public/adaptive-speaking-tasks.js';
+import { isMonotonicAdaptiveRetentionRefresh } from '../adaptive-learning/retention.js';
+import { adaptiveRepeatExecutionMatches } from '../adaptive-learning/repeat-execution.js';
 import {
   adaptiveLearningSessionPublicDto,
   adaptiveLearningSessionRepositoryDto,
@@ -1157,34 +1159,106 @@ export function createPostgresRepository(connectionString, {
     };
   }
 
-  async function submitVoiceTutorRepeat(username, repeatId, { attemptId, taskId, answer, now = new Date() }) {
+  async function submitVoiceTutorRepeat(username, repeatId, {
+    attemptId,
+    taskId,
+    answer,
+    adaptiveExecutionClaim = null,
+    adaptiveSessionId = null,
+    now = new Date(),
+  }) {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
       await client.query('SELECT id FROM voice_tutor_repeats WHERE id = $1 FOR UPDATE', [repeatId]);
+      const recoveryRows = await readRecoveryRows(client, username);
       const plan = planRepeatAttempt({
-        ledger: createRecoveryLedger(await readRecoveryRows(client, username)),
+        ledger: createRecoveryLedger(recoveryRows),
         username, repeatId, attemptId, taskId, answer, now,
       });
-      if (!plan.created) {
-        await client.query('COMMIT');
-        return { created: false, attempt: publicRepeatAttempt(plan.attempt) };
+      let adaptiveExecution = null;
+      let claim = null;
+      let block = null;
+      let bindingCreated = false;
+      if (adaptiveExecutionClaim) {
+        const claimed = await client.query(
+          `SELECT claim.*, session.status AS session_status, session.current_block_id,
+                  session.execution_revision, session.blocks
+           FROM adaptive_learning_execution_claims claim
+           JOIN adaptive_learning_sessions session ON session.id = claim.session_id
+           WHERE claim.token_hash = $1 FOR UPDATE OF claim, session`,
+          [adaptiveExecutionTokenHash(adaptiveExecutionClaim)],
+        );
+        if (!claimed.rowCount || claimed.rows[0].username !== username
+          || claimed.rows[0].session_id !== adaptiveSessionId) {
+          throw new Error('ADAPTIVE_EXECUTION_CLAIM_INVALID');
+        }
+        claim = claimed.rows[0];
+        block = claim.blocks.find((item) => item.id === claim.block_id);
+        if (!block || claim.session_status !== 'in_progress' || claim.current_block_id !== block.id
+          || Number(claim.execution_revision) !== Number(claim.session_execution_revision)
+          || claim.revoked_at || new Date(claim.expires_at) <= new Date(now)
+          || claim.launch_fingerprint !== adaptiveLaunchFingerprint(block)) {
+          throw new Error(new Date(claim.expires_at) <= new Date(now)
+            ? 'ADAPTIVE_EXECUTION_CLAIM_EXPIRED' : 'ADAPTIVE_EXECUTION_CLAIM_INVALID');
+        }
+        if (claim.consumed_at) {
+          if (claim.attempt_type !== 'voice_tutor_repeat'
+            || String(claim.attempt_ref) !== String(plan.attempt.id)) {
+            throw new Error('ADAPTIVE_EXECUTION_CLAIM_CONSUMED');
+          }
+        } else {
+          const repeat = recoveryRows.repeats.find((item) => item.id === repeatId);
+          const recovery = recoveryRows.recoveries.find((item) => item.id === repeat?.recovery_id);
+          if (!adaptiveRepeatExecutionMatches({
+            username, block, repeat, recovery, attempt: plan.attempt,
+            claimIssuedAt: claim.issued_at,
+          })) {
+            throw new Error('ADAPTIVE_EXECUTION_ATTEMPT_MISMATCH');
+          }
+          bindingCreated = true;
+        }
+        adaptiveExecution = {
+          created: bindingCreated,
+          evidenceQuality: 'server_verified_unassisted',
+          adaptiveExecution: {
+            sessionId: adaptiveSessionId,
+            blockId: block.id,
+            attemptType: 'voice_tutor_repeat',
+            attemptId: String(plan.attempt.id),
+          },
+        };
       }
-      const inserted = await client.query(
-        `INSERT INTO voice_tutor_repeat_attempts (id, repeat_id, task_id, passed, fingerprint, observed_at)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-        [plan.attempt.id, plan.attempt.repeat_id, plan.attempt.task_id, plan.attempt.passed,
-          plan.attempt.fingerprint, new Date(plan.attempt.observed_at)],
-      );
-      if (plan.daySevenReschedule) {
+      let persistedAttempt = plan.attempt;
+      if (plan.created) {
+        const inserted = await client.query(
+          `INSERT INTO voice_tutor_repeat_attempts (id, repeat_id, task_id, passed, fingerprint, observed_at)
+           VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+          [plan.attempt.id, plan.attempt.repeat_id, plan.attempt.task_id, plan.attempt.passed,
+            plan.attempt.fingerprint, new Date(plan.attempt.observed_at)],
+        );
+        persistedAttempt = inserted.rows[0];
+        if (plan.daySevenReschedule) {
+          await client.query(
+            `UPDATE voice_tutor_repeats
+             SET due_at = $2, window_ends_at = $3 WHERE id = $1`,
+            [plan.daySevenReschedule.repeatId, new Date(plan.daySevenReschedule.dueAt), new Date(plan.daySevenReschedule.windowEndsAt)],
+          );
+        }
+      }
+      if (bindingCreated) {
         await client.query(
-          `UPDATE voice_tutor_repeats
-           SET due_at = $2, window_ends_at = $3 WHERE id = $1`,
-          [plan.daySevenReschedule.repeatId, new Date(plan.daySevenReschedule.dueAt), new Date(plan.daySevenReschedule.windowEndsAt)],
+          `UPDATE adaptive_learning_execution_claims
+           SET consumed_at = $2, attempt_type = 'voice_tutor_repeat', attempt_ref = $3 WHERE id = $1`,
+          [claim.id, now, String(plan.attempt.id)],
         );
       }
       await client.query('COMMIT');
-      return { created: true, attempt: publicRepeatAttempt(inserted.rows[0]) };
+      return {
+        created: plan.created,
+        attempt: publicRepeatAttempt(persistedAttempt),
+        ...(adaptiveExecution ? { adaptiveExecution } : {}),
+      };
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -1974,11 +2048,18 @@ export function createPostgresRepository(connectionString, {
          FROM adaptive_learning_profiles WHERE username = $1`,
         [username],
       );
-      if (persisted.rowCount && compareAdaptiveEvidenceWatermarks(profile, persisted.rows[0]) <= 0) {
-        const currentSnapshot = await readAdaptiveLearningProfile(client, username, { onAdaptiveProfileSnapshot });
-        await client.query('COMMIT');
-        inTransaction = false;
-        return currentSnapshot;
+      if (persisted.rowCount) {
+        const evidenceOrder = compareAdaptiveEvidenceWatermarks(profile, persisted.rows[0]);
+        if (evidenceOrder <= 0) {
+          const currentSnapshot = await readAdaptiveLearningProfile(client, username, { onAdaptiveProfileSnapshot });
+          if (evidenceOrder < 0 || !isMonotonicAdaptiveRetentionRefresh(
+            profile, currentSnapshot, currentSnapshot.estimates,
+          )) {
+            await client.query('COMMIT');
+            inTransaction = false;
+            return currentSnapshot;
+          }
+        }
       }
       await client.query(
         `INSERT INTO adaptive_learning_profiles
@@ -2020,11 +2101,12 @@ export function createPostgresRepository(connectionString, {
           `INSERT INTO adaptive_learning_skill_estimates
            (username, taxonomy_version, skill_id, module, mastery, uncertainty, evidence_count,
             effective_evidence_count, independent_evidence_count, evidence_quality, status,
-            last_observed_at, due_state, explanation_code, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+            last_observed_at, due_state, critical_retention_expires_at, explanation_code, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
           [username, profile.taxonomyVersion, skill.id, skill.module, skill.mastery, skill.uncertainty,
             skill.evidenceCount, skill.effectiveEvidenceCount, skill.independentEvidenceCount,
-            skill.evidenceQuality, skill.status, skill.lastObservedAt, skill.dueState, skill.explanationCode, now],
+            skill.evidenceQuality, skill.status, skill.lastObservedAt, skill.dueState,
+            skill.criticalRetentionExpiresAt, skill.explanationCode, now],
         );
       }
       const savedSnapshot = await readAdaptiveLearningProfile(client, username, { onAdaptiveProfileSnapshot });
@@ -2544,6 +2626,48 @@ export function createPostgresRepository(connectionString, {
     if (claim.launch_fingerprint !== adaptiveLaunchFingerprint(block)
       || Number(claim.session_execution_revision) !== Number(row.execution_revision)) {
       throw new Error('ADAPTIVE_SESSION_ATTEMPT_MISMATCH');
+    }
+    if (attempt.type === 'voice_tutor_repeat') {
+      const source = await queryable.query(
+        `SELECT attempt.id, attempt.repeat_id, attempt.task_id, attempt.observed_at,
+                repeat.task_id AS repeat_task_id, repeat.stage AS repeat_stage,
+                repeat.due_at AS repeat_due_at, repeat.window_ends_at AS repeat_window_ends_at,
+                repeat.recovery_id, recovery.username AS recovery_username,
+                recovery.skill_id, recovery.module
+         FROM voice_tutor_repeat_attempts attempt
+         JOIN voice_tutor_repeats repeat ON repeat.id = attempt.repeat_id
+         JOIN voice_tutor_recoveries recovery ON recovery.id = repeat.recovery_id
+         WHERE attempt.id = $1 AND recovery.username = $2 AND attempt.task_id = repeat.task_id`,
+        [attempt.id, username],
+      );
+      const sourceRow = source.rows[0];
+      if (!sourceRow || !adaptiveRepeatExecutionMatches({
+        username,
+        block,
+        attempt: sourceRow,
+        repeat: {
+          id: sourceRow.repeat_id,
+          task_id: sourceRow.repeat_task_id,
+          stage: sourceRow.repeat_stage,
+          due_at: sourceRow.repeat_due_at,
+          window_ends_at: sourceRow.repeat_window_ends_at,
+          recovery_id: sourceRow.recovery_id,
+        },
+        recovery: {
+          id: sourceRow.recovery_id,
+          username: sourceRow.recovery_username,
+          skill_id: sourceRow.skill_id,
+          module: sourceRow.module,
+        },
+        claimIssuedAt: claim.issued_at,
+      })) {
+        throw new Error('ADAPTIVE_SESSION_ATTEMPT_MISMATCH');
+      }
+      return {
+        source_type: 'voice_tutor_repeat', source_ref: String(sourceRow.id),
+        evidence_quality: 'server_verified_unassisted', evidence_context: claim.evidence_context,
+        actual_minutes: null,
+      };
     }
     if (attempt.type === 'module') {
       const source = await queryable.query(
@@ -3247,9 +3371,61 @@ export function createPostgresRepository(connectionString, {
         }
         await client.query('COMMIT');
         return {
-          created: false, evidenceQuality: 'server_verified_assisted',
+          created: false,
+          evidenceQuality: attempt.type === 'voice_tutor_repeat'
+            ? 'server_verified_unassisted' : 'server_verified_assisted',
           adaptiveExecution: {
-            sessionId, blockId: block.id, attemptType: attempt.type, attemptId: Number(attempt.id),
+            sessionId, blockId: block.id, attemptType: attempt.type,
+            attemptId: attempt.type === 'voice_tutor_repeat' ? String(attempt.id) : Number(attempt.id),
+          },
+        };
+      }
+      if (attempt.type === 'voice_tutor_repeat') {
+        const source = await client.query(
+          `SELECT attempt.id, attempt.repeat_id, attempt.task_id, attempt.observed_at,
+                  repeat.task_id AS repeat_task_id, repeat.stage AS repeat_stage,
+                  repeat.due_at AS repeat_due_at, repeat.window_ends_at AS repeat_window_ends_at,
+                  repeat.recovery_id, recovery.username AS recovery_username,
+                  recovery.skill_id, recovery.module
+           FROM voice_tutor_repeat_attempts attempt
+           JOIN voice_tutor_repeats repeat ON repeat.id = attempt.repeat_id
+           JOIN voice_tutor_recoveries recovery ON recovery.id = repeat.recovery_id
+           WHERE attempt.id = $1 AND recovery.username = $2 AND attempt.task_id = repeat.task_id`,
+          [attempt.id, username],
+        );
+        const sourceRow = source.rows[0];
+        if (!sourceRow || !adaptiveRepeatExecutionMatches({
+          username,
+          block,
+          attempt: sourceRow,
+          repeat: {
+            id: sourceRow.repeat_id,
+            task_id: sourceRow.repeat_task_id,
+            stage: sourceRow.repeat_stage,
+            due_at: sourceRow.repeat_due_at,
+            window_ends_at: sourceRow.repeat_window_ends_at,
+            recovery_id: sourceRow.recovery_id,
+          },
+          recovery: {
+            id: sourceRow.recovery_id,
+            username: sourceRow.recovery_username,
+            skill_id: sourceRow.skill_id,
+            module: sourceRow.module,
+          },
+          claimIssuedAt: claim.issued_at,
+        })) {
+          throw new Error('ADAPTIVE_EXECUTION_ATTEMPT_MISMATCH');
+        }
+        await client.query(
+          `UPDATE adaptive_learning_execution_claims
+           SET consumed_at = $2, attempt_type = $3, attempt_ref = $4 WHERE id = $1`,
+          [claim.id, now, attempt.type, String(attempt.id)],
+        );
+        await client.query('COMMIT');
+        return {
+          created: true, evidenceQuality: 'server_verified_unassisted',
+          adaptiveExecution: {
+            sessionId, blockId: block.id, attemptType: attempt.type, attemptId: String(attempt.id),
           },
         };
       }

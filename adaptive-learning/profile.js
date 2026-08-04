@@ -248,6 +248,7 @@ export function buildAdaptiveLearningProfile({
       evidenceQuality: evidenceQualityFor(relevant),
       lastObservedAt: timestamps.at(-1) || null,
       dueState: 'not_due',
+      criticalRetentionExpiresAt: null,
       explanationCode: explanationFor(relevant),
     };
   });

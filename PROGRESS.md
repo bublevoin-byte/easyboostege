@@ -842,7 +842,7 @@ Type-mode vocabulary больше не показывает accepted word в к�
 миграция 030 с file/PostgreSQL parity.
 ## Adaptive EGE Learning Plan (implementation started 2026-08-04)
 
-Status: tickets 01–05 are complete on `feature/adaptive-learning-plan`; Tickets 06–08 remain. The feature is stacked on the completed Voice Tutor branch and will not be pushed, merged or deployed without a separate owner decision.
+Status: tickets 01–06 are complete on `feature/adaptive-learning-plan`; Tickets 07–08 remain. The feature is stacked on the completed Voice Tutor branch and will not be pushed, merged or deployed without a separate owner decision.
 
 Agreed product contract: target EGE score/date is primary; a short diagnostic or existing evidence builds a confidence-labelled micro-skill profile; an honest forecast and stable weekly budget feed 15–120 minute executable sessions; real module outcomes update the living plan; free/base/Premium boundaries are server-enforced. CEFR/IELTS is secondary and approximate, not an official IELTS result.
 
@@ -853,7 +853,7 @@ Implementation tracker:
 - [x] 03 Honest forecast and stable weekly allocation
 - [x] 04 Duration-aware learning session composer
 - [x] 05 Real module execution and evidence feedback
-- [ ] 06 Retention loop and Premium depth
+- [x] 06 Retention loop and Premium depth
 - [ ] 07 Commercial boundaries, complete UI and reports
 - [ ] 08 Hardening, E2E and release evidence
 
@@ -1034,3 +1034,35 @@ Every external HTTPS provider is blocked during the run. Final gates: targeted e
 11/11; real Chromium E2E; lint/check, 17-asset frontend build, 407-file secret scan, 253-commit history
 scan and `git diff --check`. Independent Standards and Spec re-reviews both passed with zero P0–P2.
 No paid provider call, push, merge, deploy or staging mutation.
+
+Ticket 06 implementation complete: overview now derives `adaptive-retention-v1` from the existing
+owner-bound Voice Tutor recovery ledger. Due day-1/day-7 checks are reference-only and become the highest
+eligible exact session block even after other same-skill weekly planning; no prompt, answer, essay,
+transcript or audio is copied. The block and browser launch bind the exact repeat/task IDs and UTC window.
+Locked day-7 work is excluded until the same recovery chain has a passed day-1 attempt, including when both
+timestamps are already overdue; every exact repeat can occupy at most one block in a composed session.
+Their existing repeat POST saves the UUID and consumes the adaptive execution claim in one file mutation or
+PostgreSQL transaction, so a same-skill mismatch leaves no orphan attempt. Advance records independent
+`scheduled_review` evidence only after one shared validator checks owner, block, launch, exact repeat/task/
+window, skill/module and claim timing. The same exact attempt is recoverable after a lost response. An already owed repeat remains
+available after Premium expires because it makes no new Voice/AI call.
+
+The profile persists a server-derived critical-window expiry. Equal evidence watermarks may only advance
+due state monotonically; an expiring owner/profile-bound window grants a narrow plan-stability bypass to its
+exact skill/module, while unrelated allocations stay within ten points and repository reconstruction rejects
+invented scope. Re-diagnostic scheduling uses 28/35/42-day cadence from confidence and independent coverage;
+the progress screen presents the scheduled short refresh even when no run is active, while fresh adequate
+independent evidence is not forced through an immediate diagnostic.
+
+Access is explicit as free/base/Premium. Preview, replacement, start/replay, bind and advance enforce current
+Premium for deep Writing/Speaking; the existing Voice Tutor session boundary continues to enforce Premium for live handoff.
+The new Premium-only orientation uses only independently established skills, returns insufficient evidence
+when coverage is sparse and is labelled approximate and non-official for both CEFR and IELTS. Migration 037,
+OpenAPI/schema/retention documentation and file/PostgreSQL persistence share the same minimized contract.
+
+Final frozen-result gates: full suite 647 pass plus 12 expected no-URL PostgreSQL skips (659 total);
+disposable PostgreSQL 12/12 with migrations 001–037 and cleanup; adaptive Chromium E2E passed on an
+isolated rerun after one initial response-wait timeout, with no product-code change; lint/check, 17-asset
+frontend build, 409-file secret scan, 254-commit history scan and `git diff --check` pass. Independent
+Standards and Spec final reviews both passed with zero P0–P2. No paid provider call, push, merge, deploy or
+staging mutation.

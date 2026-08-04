@@ -4,7 +4,7 @@
  * Числа он берёт из того же состояния, что и плитки главного экрана, — считать заново нечего.
  */
 import {registerRouteHook} from '../router.js';
-import {adaptiveRuntimeSnapshot,advanceAdaptiveBreak,beginAdaptiveBlock,finishAdaptiveSession,resumeAdaptiveExecution} from '../adaptive-session-runtime.js';
+import {adaptiveRuntimeSnapshot,advanceAdaptiveBreak,beginAdaptiveBlock,completeAdaptiveVoiceTutorRepeat,finishAdaptiveSession,resumeAdaptiveExecution} from '../adaptive-session-runtime.js';
 import {S,apiGet,apiMessage,apiPost,apiPostIdempotent,apiPut,progressModule,setTxt,setW} from '../app.js';
 
 const BAR_IDS={words:'pb_words',gram:'pb_gram',read:'pb_read',listen:'pb_listen',speak:'pb_speak'};
@@ -89,9 +89,10 @@ function drawAdaptiveDiagnostic(payload){
   const maxItems=Math.max(1,Number(diagnostic.maxItems)||1);const estimatedMinutes=Math.max(1,Number(diagnostic.estimatedMinutes)||1);const deadlineMinutes=Math.max(1,Number(diagnostic.deadlineMinutes)||1);
   progress.max=maxItems;progress.value=Math.max(0,Math.min(maxItems,Number(diagnostic.answeredItems)||0));label.textContent=progress.value+' из '+maxItems;
   timing.textContent='Около '+estimatedMinutes+' минут · ответы сохраняются. Вернуться нужно в течение '+deadlineMinutes+' минут после старта.';
-  const expired=diagnostic.status==='expired';start.hidden=!expired;start.textContent=expired?'Начать диагностику заново · около '+estimatedMinutes+' минут':'Начать диагностику · около '+estimatedMinutes+' минут';
+  const expired=diagnostic.status==='expired';const scheduled=diagnostic.status==='scheduled';start.hidden=!(expired||scheduled);start.textContent=expired?'Начать диагностику заново · около '+estimatedMinutes+' минут':'Начать диагностику · около '+estimatedMinutes+' минут';
   complete.hidden=!diagnostic.canComplete;form.hidden=!item||diagnostic.status!=='in_progress';fieldset.disabled=form.hidden;
   if(expired){notice.textContent='Время этой попытки истекло. Начните новую — незавершённые ответы не считаются результатом.';choices.replaceChildren();audio.hidden=true;return}
+  if(scheduled){notice.textContent='Пора коротко уточнить профиль: результат прошлого этапа устаревает через 4–6 недель.';choices.replaceChildren();audio.hidden=true;return}
   if(diagnostic.status==='completed'){notice.textContent='Диагностика завершена. Профиль пока предварительный и будет уточняться по занятиям.';choices.replaceChildren();audio.hidden=true;return}
   if(diagnostic.canComplete){notice.textContent='Данных достаточно для предварительного результата.';choices.replaceChildren();audio.hidden=true;return}
   if(!item){notice.textContent='Загружаем следующий вопрос…';return}
@@ -110,7 +111,7 @@ function bindAdaptiveDiagnostic(){
   audio.addEventListener('click',function(){if(!audio.dataset.speechText||!window.speechSynthesis||!window.SpeechSynthesisUtterance){notice.textContent='Озвучка недоступна в этом браузере.';return}window.speechSynthesis.cancel();const utterance=new window.SpeechSynthesisUtterance(audio.dataset.speechText);utterance.lang='en-US';window.speechSynthesis.speak(utterance)});
 }
 
-async function resumeAdaptiveDiagnostic(){try{drawAdaptiveDiagnostic(await apiGet('/api/v1/adaptive-learning/diagnostics/current'))}catch(error){const notice=document.getElementById('adaptive_diagnostic_notice');if(notice)notice.textContent='Не удалось восстановить диагностику. Проверьте сеть и повторите попытку.'}}
+async function resumeAdaptiveDiagnostic(retention){try{const current=await apiGet('/api/v1/adaptive-learning/diagnostics/current');if(!current.diagnostic&&retention&&retention.rediagnostic&&retention.rediagnostic.due){drawAdaptiveDiagnostic({diagnostic:{id:'scheduled',status:'scheduled',estimatedMinutes:15,deadlineMinutes:20,answeredItems:0,maxItems:12,canComplete:false},item:null});return}drawAdaptiveDiagnostic(current)}catch(error){const notice=document.getElementById('adaptive_diagnostic_notice');if(notice)notice.textContent='Не удалось восстановить диагностику. Проверьте сеть и повторите попытку.'}}
 
 async function renderAdaptivePlan(){
   const root=document.getElementById('adaptive_plan');const form=document.getElementById('adaptive_goal_form');const notice=document.getElementById('adaptive_goal_notice');if(!root||!form||!notice)return;
@@ -126,14 +127,19 @@ async function renderAdaptivePlan(){
       catch(error){notice.textContent=apiMessage(error,'request')}finally{button.disabled=false}
     });
   }
-  try{const payload=await apiGet('/api/v1/adaptive-learning/overview');drawAdaptivePlan(payload);notice.textContent='';if(payload.goal)await resumeAdaptiveSession();else drawAdaptiveSession(null);if(payload.profile&&payload.profile.needsDiagnostic)await resumeAdaptiveDiagnostic();else drawAdaptiveDiagnostic(null)}catch(error){notice.textContent='План сейчас недоступен онлайн. Сохранённый прогресс остаётся на устройстве.'}
+  try{const payload=await apiGet('/api/v1/adaptive-learning/overview');drawAdaptivePlan(payload);notice.textContent='';if(payload.goal)await resumeAdaptiveSession();else drawAdaptiveSession(null);if(payload.profile&&payload.profile.needsDiagnostic)await resumeAdaptiveDiagnostic(payload.retention);else drawAdaptiveDiagnostic(null)}catch(error){notice.textContent='План сейчас недоступен онлайн. Сохранённый прогресс остаётся на устройстве.'}
 }
 
 async function submitRepeat(repeat,input,button,notice){
   const answer=String(input.value||'').trim();if(!answer){notice.textContent='Введите ответ.';input.focus();return}
   button.disabled=true;notice.textContent='Проверяем новый пример…';
   try{
-    const result=await apiPost('/api/v1/voice-tutor/repeats/'+encodeURIComponent(repeat.id)+'/attempts',{attemptId:repeatAttemptId(),taskId:repeat.task_id,answer:answer});
+    const active=adaptiveRuntimeSnapshot().active;const adaptive=active&&active.activityId==='voice_tutor_recovery';const attemptId=button.dataset.attemptId||repeatAttemptId();button.dataset.attemptId=attemptId;
+    const result=adaptive
+      ?await completeAdaptiveVoiceTutorRepeat({repeatId:repeat.id,taskId:repeat.task_id,answer:answer,attemptId:attemptId})
+      :await apiPost('/api/v1/voice-tutor/repeats/'+encodeURIComponent(repeat.id)+'/attempts',{attemptId:attemptId,taskId:repeat.task_id,answer:answer});
+    delete button.dataset.attemptId;
+    if(result&&result.queued){input.value='';notice.textContent='Ответ сохранён. Завершим блок после восстановления сети.';return}
     input.value='';notice.textContent=result.attempt&&result.attempt.passed?'Верно — перенос подтверждён.':'Навык нужно повторить ещё раз.';await renderRecoveryMap();
   }catch(error){notice.textContent=apiMessage(error,'request')}finally{button.disabled=false}
 }
@@ -150,7 +156,8 @@ function drawRecoveryMap(payload){
   skills.forEach(function(skill){const row=document.createElement('div');row.setAttribute('style','display:flex;justify-content:space-between;gap:10px;margin-top:11px;padding-top:11px;border-top:1px solid #F0EEE9;');const copy=document.createElement('div');copy.appendChild(text('div',skill.skill_label,'font-weight:750;font-size:12px;color:#2B2B2B;'));copy.appendChild(text('div','Потенциал: '+skill.potential_ege_points+' · '+recoveryStateLabel(skill.state),'font-weight:600;font-size:10.5px;color:#73767A;margin-top:3px;'));row.appendChild(copy);row.appendChild(text('span',recoveryStateLabel(skill.state),'align-self:flex-start;border-radius:999px;background:'+(skill.state==='recovered'?'#E5F4EC':skill.state==='relapsed'?'#FFE8E4':'#FFF4DE')+';padding:5px 8px;font-weight:750;font-size:9.5px;color:#4D4D4D;'));root.appendChild(row)});
   if(skills.length){const micro=text('div','Микропроверка: '+skills.map(function(skill){return skill.skill_label+' — '+(skill.initial_micro_check_passed?'пройдена':'нужна работа')}).join(' · '),'margin-top:11px;font-weight:650;font-size:10.5px;line-height:1.45;color:#52565E;');root.appendChild(micro)}
   if(view.nextBest){const nextLabel=view.nextBest.skill_label||view.nextBest.skill_id;const nextAction=view.nextBest.type==='repeat'?'готовый повтор':'разбор навыка';root.appendChild(text('div','Следующий полезный разбор: '+nextLabel+' · '+nextAction,'margin-top:11px;border-left:3px solid #F2683F;padding-left:9px;font-weight:750;font-size:11px;line-height:1.4;color:#3E4248;'))}
-  const repeat=Array.isArray(payload&&payload.due_repeats)?payload.due_repeats.find(function(item){return item.status==='due'||item.status==='overdue'}):null;
+  const recoveryScreen=document.getElementById('scr10');const requestedSkill=recoveryScreen?.dataset.adaptiveRecoverySkillId||'';const requestedRepeat=recoveryScreen?.dataset.adaptiveRecoveryRepeatId||'';const requestedTask=recoveryScreen?.dataset.adaptiveRecoveryTaskId||'';
+  const repeat=Array.isArray(payload&&payload.due_repeats)?payload.due_repeats.find(function(item){return (item.status==='due'||item.status==='overdue')&&(!requestedRepeat||item.id===requestedRepeat)&&(!requestedTask||item.task_id===requestedTask)&&(!requestedSkill||item.skill_id===requestedSkill)}):null;
   if(repeat){const form=document.createElement('form');form.setAttribute('style','margin-top:13px;padding:12px;border-radius:15px;background:#F8F7F4;');form.appendChild(text('div','Следующий полезный повтор · '+(repeat.stage==='day_1'?'через 1 день':'через 7 дней'),'font-weight:800;font-size:11px;color:#B54E2F;'));form.appendChild(text('div',repeat.prompt,'margin-top:6px;font-weight:650;font-size:12px;line-height:1.45;color:#2B2B2B;'));const input=document.createElement('input');input.type='text';input.maxLength=200;input.autocomplete='off';input.setAttribute('aria-label','Ответ на новый пример');input.setAttribute('style','width:100%;margin-top:9px;border:1px solid #DDD8CF;border-radius:11px;padding:9px 10px;font:600 12px Manrope;background:#fff;');form.appendChild(input);const button=document.createElement('button');button.type='submit';button.textContent='Проверить новый пример';button.setAttribute('style','margin-top:8px;border:0;border-radius:11px;background:#F2683F;color:#fff;padding:9px 11px;font:750 11px Manrope;cursor:pointer;');form.appendChild(button);const notice=text('div','','min-height:16px;margin-top:6px;font-weight:600;font-size:10.5px;color:#6A6E75;');form.appendChild(notice);form.addEventListener('submit',function(event){event.preventDefault();submitRepeat(repeat,input,button,notice)});root.appendChild(form)}
   root.appendChild(text('div',view.notice,'margin-top:10px;font-weight:550;font-size:9.5px;line-height:1.35;color:#6A6E75;'));
 }
@@ -158,5 +165,6 @@ function drawRecoveryMap(payload){
 async function renderRecoveryMap(){const root=document.getElementById('voice_recovery_map');if(!root)return;try{drawRecoveryMap(await apiGet('/api/v1/voice-tutor/recovery-map'))}catch(error){root.replaceChildren(text('div','Карта освоенных ошибок','font-weight:800;font-size:15px;color:#2B2B2B;'),text('div',apiMessage(error,'request'),'margin-top:8px;font-weight:600;font-size:12px;color:#6A6E75;'))}}
 
 registerRouteHook(function(id){if(id==='scr10')renderProgress()});
+window.addEventListener('adaptive-recovery-launch',function(){renderRecoveryMap()});
 
 export {drawAdaptiveDiagnostic,drawAdaptiveForecast,drawAdaptivePlan,drawAdaptiveSession,drawRecoveryMap,renderAdaptivePlan,renderProgress,renderRecoveryMap};

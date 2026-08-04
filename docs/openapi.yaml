@@ -182,13 +182,23 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [attemptId, taskId, answer]
-              properties:
-                attemptId: { type: string, format: uuid }
-                taskId: { type: string, minLength: 4, maxLength: 180 }
-                answer: { type: string, minLength: 1, maxLength: 200, description: Checked transiently and never persisted }
-              additionalProperties: false
+              oneOf:
+                - type: object
+                  required: [attemptId, taskId, answer]
+                  properties:
+                    attemptId: { type: string, format: uuid }
+                    taskId: { type: string, minLength: 4, maxLength: 180 }
+                    answer: { type: string, minLength: 1, maxLength: 200, description: Checked transiently and never persisted }
+                  additionalProperties: false
+                - type: object
+                  required: [attemptId, taskId, answer, adaptiveExecutionClaim, adaptiveSessionId]
+                  properties:
+                    attemptId: { type: string, format: uuid }
+                    taskId: { type: string, minLength: 4, maxLength: 180 }
+                    answer: { type: string, minLength: 1, maxLength: 200, description: Checked transiently and never persisted }
+                    adaptiveExecutionClaim: { type: string, minLength: 32, maxLength: 200, description: Binds this exact existing repeat attempt to the active adaptive retention block. }
+                    adaptiveSessionId: { type: string, format: uuid }
+                  additionalProperties: false
       responses:
         '201': { description: New bounded pass/fail outcome; answer text is absent }
         '200': { description: Idempotent replay of the same attempt UUID and payload }
@@ -585,7 +595,7 @@ paths:
   /api/v1/adaptive-learning/plan:
     get:
       summary: Read or idempotently refresh the authenticated learner's honest EGE forecast and weekly allocation
-      description: Uses a transparent rule-based model, not calibrated IRT. The active score range is not a guarantee. The UTC start of recalculationBucket is the deterministic instant for forecast weeks, deadline/critical priority, allocation and calculatedAt; actual createdAt/updatedAt remain receipt timestamps. The preceding bucket keeps exactly 1/7 week before the exam-date bucket becomes action-required. A daily/evidence/base-revision fingerprint replays only after the complete normalized candidate envelope and plan semantics exactly match the retained revision, including exact retained old-goal candidates; regenerated identity and receipt timestamps are ignored. Unknown stale-goal fingerprints fail closed. New candidates are strictly validated and must match the current persisted profile vector under the owner lock. Compare-and-set retries concurrent recalculations against their actual winning base. Ordinary allocation changes, including critical_due priority work, are limited to 10 percentage points per visible skill and module; only a goal revision change resets allocation until Ticket 06 provides repository-derived persisted expiry.
+      description: Uses a transparent rule-based model, not calibrated IRT. The active score range is not a guarantee. The UTC start of recalculationBucket is the deterministic instant for forecast weeks, deadline/critical priority, allocation and calculatedAt; actual createdAt/updatedAt remain receipt timestamps. The preceding bucket keeps exactly 1/7 week before the exam-date bucket becomes action-required. A daily/evidence/base-revision fingerprint replays only after the complete normalized candidate envelope and plan semantics exactly match the retained revision, including exact retained old-goal candidates; regenerated identity and receipt timestamps are ignored. Unknown stale-goal fingerprints fail closed. New candidates are strictly validated and must match the current persisted profile vector under the owner lock. Compare-and-set retries concurrent recalculations against their actual winning base. Ordinary allocation changes are limited to 10 percentage points per visible skill and module. Only a goal revision reset or an owner/profile-bound critical retention window expiring within 24 hours may bypass the limit; the repository reconstructs the candidate from the authoritative persisted expiry and rejects invented scope.
       responses:
         '200':
           description: Current owner-bound goal, evidence profile and authoritative persisted plan revision
@@ -594,6 +604,25 @@ paths:
               schema: { $ref: '#/components/schemas/AdaptiveOverview' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '409': { description: ADAPTIVE_GOAL_REQUIRED; the learner must save an EGE goal before a plan can be calculated }
+        '404': { description: Adaptive Learning rollout is disabled; the route is not registered }
+  /api/v1/adaptive-learning/orientation:
+    get:
+      summary: Read a Premium-only approximate CEFR/IELTS orientation from independently established skills
+      description: Secondary orientation only. It is based on EGE evidence, refuses assisted-only mastery and is not an official IELTS result or CEFR certificate.
+      responses:
+        '200':
+          description: Approximate orientation or an explicit insufficient-evidence result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [access, orientation]
+                properties:
+                  access: { $ref: '#/components/schemas/AdaptiveAccess' }
+                  orientation: { $ref: '#/components/schemas/AdaptiveLanguageOrientation' }
+                additionalProperties: false
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: ADAPTIVE_PREMIUM_REQUIRED }
         '404': { description: Adaptive Learning rollout is disabled; the route is not registered }
   /api/v1/adaptive-learning/sessions/preview:
     post:
@@ -735,8 +764,8 @@ paths:
         '409': { description: Stale revision, wrong/current state, active claim or idempotency conflict }
   /api/v1/adaptive-learning/sessions/{sessionId}/bind-attempt:
     post:
-      summary: Bind a completed server-owned writing or speaking evaluation to the active execution claim
-      description: The browser supplies no score. The repository verifies owner, task/activity identity, completed status, creation after claim issuance and exact claim launch fingerprint. Exact binding replay is safe.
+      summary: Bind a completed server-owned writing, speaking or day-1/day-7 repeat attempt to the active execution claim
+      description: The browser supplies no score. The repository verifies owner, task/activity identity, completed status, creation after claim issuance and exact claim launch fingerprint. Repeat binding additionally verifies the exact owner recovery, repeat task, skill and module. Exact binding replay is safe.
       parameters:
         - in: path
           name: sessionId
@@ -752,12 +781,19 @@ paths:
               properties:
                 executionClaim: { type: string, minLength: 32, maxLength: 200, pattern: '^[A-Za-z0-9_-]+$' }
                 attempt:
-                  type: object
-                  required: [type, id]
-                  properties:
-                    type: { type: string, enum: [writing, speaking] }
-                    id: { type: integer, minimum: 1 }
-                  additionalProperties: false
+                  oneOf:
+                    - type: object
+                      required: [type, id]
+                      properties:
+                        type: { type: string, enum: [voice_tutor_repeat] }
+                        id: { type: string, format: uuid }
+                      additionalProperties: false
+                    - type: object
+                      required: [type, id]
+                      properties:
+                        type: { type: string, enum: [writing, speaking] }
+                        id: { type: integer, minimum: 1 }
+                      additionalProperties: false
               additionalProperties: false
       responses:
         '201': { description: Server-owned attempt bound to the claim }
@@ -770,7 +806,7 @@ paths:
   /api/v1/adaptive-learning/sessions/{sessionId}/advance:
     post:
       summary: Complete the exact current block from persisted evidence and recalculate the learner profile and plan
-      description: Learning blocks require a claim-bound persisted module, writing or speaking attempt. Breaks require null. The response contains an allowlisted evidence summary, profile/plan delta and next action; it never accepts a client-supplied completion or score. Compare-and-set and owner-global idempotency make concurrent/exact retries safe.
+      description: Learning blocks require a claim-bound persisted module, writing, speaking or exact Voice Tutor day-1/day-7 repeat attempt. Breaks require null. The response contains an allowlisted evidence summary, profile/plan delta and next action; it never accepts a client-supplied completion or score. Compare-and-set and owner-global idempotency make concurrent/exact retries safe.
       parameters:
         - in: path
           name: sessionId
@@ -795,7 +831,7 @@ paths:
                     - type: object
                       required: [type, id]
                       properties:
-                        type: { type: string, enum: [module] }
+                        type: { type: string, enum: [module, voice_tutor_repeat] }
                         id: { type: string, format: uuid }
                       additionalProperties: false
                     - type: object
@@ -1292,7 +1328,7 @@ components:
       additionalProperties: false
     AdaptiveSkillEstimate:
       type: object
-      required: [id, label, module, mastery, uncertainty, status, evidenceCount, effectiveEvidenceCount, independentEvidenceCount, evidenceQuality, lastObservedAt, dueState, explanationCode]
+      required: [id, label, module, mastery, uncertainty, status, evidenceCount, effectiveEvidenceCount, independentEvidenceCount, evidenceQuality, lastObservedAt, dueState, criticalRetentionExpiresAt, explanationCode]
       properties:
         id: { type: string, maxLength: 120 }
         label: { type: string, maxLength: 160 }
@@ -1319,7 +1355,12 @@ components:
         independentEvidenceCount: { type: integer, minimum: 0 }
         evidenceQuality: { type: string, enum: [none, client_reported, assisted, independent, mixed] }
         lastObservedAt: { type: string, format: date-time, nullable: true }
-        dueState: { type: string, enum: [not_due, due, overdue] }
+        dueState: { type: string, enum: [not_due, due, overdue, critical_due] }
+        criticalRetentionExpiresAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Server-derived end of an expiring day-1/day-7 review window; never accepted as learner evidence.
         explanationCode: { type: string, maxLength: 40 }
       additionalProperties: false
     AdaptiveProfile:
@@ -1362,7 +1403,7 @@ components:
       additionalProperties: false
     AdaptiveOverview:
       type: object
-      required: [goal, profile, plan]
+      required: [goal, profile, plan, retention, access]
       properties:
         goal:
           allOf:
@@ -1373,6 +1414,88 @@ components:
           allOf:
             - $ref: '#/components/schemas/AdaptivePlan'
           nullable: true
+        retention: { $ref: '#/components/schemas/AdaptiveRetention' }
+        access: { $ref: '#/components/schemas/AdaptiveAccess' }
+      additionalProperties: false
+    AdaptiveAccess:
+      type: object
+      required: [tier, capabilities]
+      properties:
+        tier: { type: string, enum: [free, base, premium] }
+        capabilities:
+          type: object
+          required: [adaptivePlan, premiumDepth, writingSpeakingDepth, voiceTutorHandoff, languageOrientation]
+          properties:
+            adaptivePlan: { type: boolean }
+            premiumDepth: { type: boolean }
+            writingSpeakingDepth: { type: boolean }
+            voiceTutorHandoff: { type: boolean }
+            languageOrientation: { type: boolean }
+          additionalProperties: false
+      additionalProperties: false
+    AdaptiveRetentionCheck:
+      type: object
+      required: [repeatId, taskId, skillId, module, stage, status, dueAt, windowEndsAt]
+      properties:
+        repeatId: { type: string, format: uuid }
+        taskId: { type: string, minLength: 4, maxLength: 180 }
+        skillId: { type: string, maxLength: 120 }
+        module: { type: string, enum: [grammar, vocabulary, reading, listening, writing, speaking] }
+        stage: { type: string, enum: [day_1, day_7] }
+        status: { type: string, enum: [due, critical_due] }
+        dueAt: { type: string, format: date-time }
+        windowEndsAt: { type: string, format: date-time }
+      additionalProperties: false
+    AdaptiveRetention:
+      type: object
+      required: [version, calculatedAt, dueChecks, rediagnostic]
+      properties:
+        version: { type: string, enum: [adaptive-retention-v1] }
+        calculatedAt: { type: string, format: date-time }
+        dueChecks: { type: array, items: { $ref: '#/components/schemas/AdaptiveRetentionCheck' } }
+        rediagnostic:
+          type: object
+          required: [cadenceDays, confidenceBand, lastCompletedAt, nextDueAt, due, reasonCode]
+          properties:
+            cadenceDays: { type: integer, enum: [28, 35, 42] }
+            confidenceBand: { type: string, enum: [low, medium, high] }
+            lastCompletedAt: { type: string, format: date-time, nullable: true }
+            nextDueAt: { type: string, format: date-time, nullable: true }
+            due: { type: boolean }
+            reasonCode: { type: string, enum: [low_confidence_or_coverage, partial_confidence_or_coverage, stable_profile_refresh] }
+          additionalProperties: false
+      additionalProperties: false
+    AdaptiveLanguageOrientation:
+      type: object
+      required: [version, approximate, officialIeltsResult, disclaimer, cefr, ielts, basis]
+      properties:
+        version: { type: string, enum: [adaptive-language-orientation-v1] }
+        approximate: { type: boolean, enum: [true] }
+        officialIeltsResult: { type: boolean, enum: [false] }
+        disclaimer: { type: string }
+        cefr:
+          type: object
+          required: [range, lower, upper]
+          properties:
+            range: { type: string, description: Broad A0–C2 range or insufficient_evidence. }
+            lower: { type: string, nullable: true, enum: [A0, A1, A2, B1, B2, C1, C2] }
+            upper: { type: string, nullable: true, enum: [A0, A1, A2, B1, B2, C1, C2] }
+          additionalProperties: false
+        ielts:
+          type: object
+          required: [range]
+          properties:
+            range: { type: string, description: Broad approximate range or insufficient_evidence. }
+          additionalProperties: false
+        basis:
+          type: object
+          required: [independentlyEstablishedSkills, totalSkills, confidence, assistedEvidenceDoesNotEstablishLevel]
+          properties:
+            independentlyEstablishedSkills: { type: integer, minimum: 0, maximum: 12 }
+            totalSkills: { type: integer, enum: [12] }
+            confidence: { type: integer, minimum: 0, maximum: 100 }
+            assistedEvidenceDoesNotEstablishLevel: { type: boolean, enum: [true] }
+          additionalProperties: false
       additionalProperties: false
     AdaptiveGoalMutationResponse:
       type: object
@@ -1461,7 +1584,7 @@ components:
           properties:
             applied: { type: boolean }
             maximumChangePercentagePoints: { type: integer, enum: [10] }
-            bypassReason: { type: string, nullable: true, enum: [goal_changed] }
+            bypassReason: { type: string, nullable: true, enum: [goal_changed, critical_retention_expiry] }
             bypassedSkillIds: { type: array, maxItems: 0, items: { type: string }, description: Reserved and empty until Ticket 06 adds repository-derived persisted critical expiry. }
             bypassedModuleIds: { type: array, maxItems: 0, items: { type: string, enum: [vocabulary, grammar, reading, listening, writing, speaking] }, description: Reserved and empty until Ticket 06 adds repository-derived persisted critical expiry. }
           additionalProperties: false
@@ -1633,6 +1756,21 @@ components:
             screenId: { type: string, enum: [scr9] }
             taskNumber: { type: integer, enum: [2, 4] }
           additionalProperties: false
+        - type: object
+          required: [version, kind, screenId, skillId, module, repeatId, taskId, stage, status, dueAt, windowEndsAt]
+          properties:
+            version: { type: string, enum: [adaptive-launch-v1] }
+            kind: { type: string, enum: [voice_tutor_recovery] }
+            screenId: { type: string, enum: [scr10] }
+            skillId: { type: string, maxLength: 120 }
+            module: { type: string, enum: [grammar, vocabulary, reading, listening, writing, speaking] }
+            repeatId: { type: string, format: uuid }
+            taskId: { type: string, minLength: 4, maxLength: 180 }
+            stage: { type: string, enum: [day_1, day_7] }
+            status: { type: string, enum: [due, critical_due] }
+            dueAt: { type: string, format: date-time }
+            windowEndsAt: { type: string, format: date-time }
+          additionalProperties: false
     AdaptiveSessionBlock:
       type: object
       required: [id, position, kind, module, skillId, skillLabel, activityId, activityLabel, contentRef, difficulty, modality, requiresAudio, requiresMicrophone, launch, plannedMinutes, reasonCodes]
@@ -1793,7 +1931,7 @@ components:
         module: { type: string, nullable: true }
         skill_id: { type: string, nullable: true }
         activity_id: { type: string, nullable: true }
-        source_type: { type: string, enum: [module, writing, speaking], nullable: true }
+        source_type: { type: string, enum: [module, writing, speaking, voice_tutor_repeat], nullable: true }
         source_ref: { type: string, nullable: true }
         evidence_quality: { type: string, enum: [client_reported, server_verified_unassisted, server_verified_assisted], nullable: true }
         evidence_context: { type: string, enum: [exam_practice, planned_practice, scheduled_review, ai_assisted_review], nullable: true }
@@ -1892,7 +2030,7 @@ components:
             - type: object
               required: [type, id]
               properties:
-                type: { type: string, enum: [module] }
+                type: { type: string, enum: [module, voice_tutor_repeat] }
                 id: { type: string, format: uuid }
               additionalProperties: false
             - type: object

@@ -35,6 +35,7 @@ export const adaptiveSessionStartSchema = z.object({
 
 export const adaptiveAttemptReferenceSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('module'), id: z.string().uuid() }).strict(),
+  z.object({ type: z.literal('voice_tutor_repeat'), id: z.string().uuid() }).strict(),
   z.object({ type: z.literal('writing'), id: z.number().int().positive() }).strict(),
   z.object({ type: z.literal('speaking'), id: z.number().int().positive() }).strict(),
 ]);
@@ -52,6 +53,7 @@ export const adaptiveSessionFinishSchema = z.object({
 export const adaptiveSessionAttemptBindSchema = z.object({
   executionClaim: z.string().regex(/^[A-Za-z0-9_-]{32,200}$/u),
   attempt: z.discriminatedUnion('type', [
+    z.object({ type: z.literal('voice_tutor_repeat'), id: z.string().uuid() }).strict(),
     z.object({ type: z.literal('writing'), id: z.number().int().positive() }).strict(),
     z.object({ type: z.literal('speaking'), id: z.number().int().positive() }).strict(),
   ]),

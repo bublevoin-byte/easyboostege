@@ -190,6 +190,14 @@ async function runAdaptiveDiagnosticE2E() {
         },
       },
       progress: { adaptivee2e: {}, adaptiveexam: {}, adaptivewriter: {} },
+      subscription_entitlements: {
+        adaptivewriter: {
+          voice_tutor: {
+            starts_at: new Date(Date.now() - 60_000).toISOString(),
+            ends_at: new Date(Date.now() + 86_400_000).toISOString(),
+          },
+        },
+      },
       module_attempts: [...writerAttempts, ...examAttempts],
     }));
 

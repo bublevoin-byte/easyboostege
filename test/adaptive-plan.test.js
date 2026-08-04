@@ -20,7 +20,7 @@ import { createFileRepository } from '../storage/file-repository.js';
 
 const NOW = new Date('2026-08-04T09:00:00.000Z');
 
-test('persistence callers cannot mint critical-retention bypass authority before Ticket 06', () => {
+test('persistence callers cannot mint critical-retention bypass authority outside repository verification', () => {
   assert.equal(adaptivePlanModule.createTrustedAdaptivePlanStabilityContext, undefined);
 });
 
@@ -217,7 +217,7 @@ test('near deadline changes relative priorities instead of multiplying every ski
   assert.ok(near.forecast.assumptionCodes.includes('short_deadline'));
 });
 
-test('critical retention remains a priority reason but cannot bypass ordinary stability before Ticket 06', () => {
+test('persisted critical retention can bypass stability only for its expiring skill and module', () => {
   const initial = buildAdaptiveLearningPlan({ goal: goal(), profile: profile(), now: NOW });
   const criticalProfile = profile({ evidenceSourceCount: 13, evidenceObservedAt: NOW.toISOString() });
   criticalProfile.skills = criticalProfile.skills.map((skill) => skill.id === 'ege.listening.detail'
@@ -233,19 +233,22 @@ test('critical retention remains a priority reason but cannot bypass ordinary st
     goal: goal(), profile: criticalProfile, previousPlan: initial, now: NOW,
   });
   assert.equal(changed.stability.applied, true);
-  assert.equal(changed.stability.bypassReason, null);
-  assert.deepEqual(changed.stability.bypassedSkillIds, []);
-  assert.deepEqual(changed.stability.bypassedModuleIds, []);
+  assert.equal(changed.stability.bypassReason, 'critical_retention_expiry');
+  assert.deepEqual(changed.stability.bypassedSkillIds, ['ege.listening.detail']);
+  assert.deepEqual(changed.stability.bypassedModuleIds, ['listening']);
   const critical = changed.allocation.skills.find((item) => item.id === 'ege.listening.detail');
   assert.ok(critical.reasonCodes.includes('critical_retention_expiry'));
+  assert.ok(Math.abs(critical.percentage - initial.allocation.skills
+    .find((item) => item.id === critical.id).percentage) > 10);
   for (const next of changed.allocation.skills) {
     const before = initial.allocation.skills.find((item) => item.id === next.id);
-    assert.ok(Math.abs(next.percentage - before.percentage) <= 10, next.id);
+    if (next.id !== critical.id) assert.ok(Math.abs(next.percentage - before.percentage) <= 10, next.id);
   }
   for (const next of changed.allocation.modules) {
     const before = initial.allocation.modules.find((item) => item.id === next.id);
-    assert.ok(Math.abs(next.percentage - before.percentage) <= 10, next.id);
+    if (next.id !== 'listening') assert.ok(Math.abs(next.percentage - before.percentage) <= 10, next.id);
   }
+  assert.doesNotThrow(() => assertAdaptivePlanStabilityTransition(initial, changed));
 });
 
 test('increase-time choice is always savable and discloses when the supported maximum is insufficient', () => {

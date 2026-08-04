@@ -7,6 +7,22 @@ import pg from 'pg';
 import { createPostgresRepository } from '../storage/postgres-repository.js';
 import { buildGrammarLexiconCapsule, createGrammarLexiconErrorAttempt, persistedVoiceTutorCapsule } from '../voice-tutor/capsule.js';
 import { buildAdaptiveLearningProfile } from '../adaptive-learning/profile.js';
+import { adaptivePlanInputFingerprint, buildAdaptiveLearningPlan } from '../adaptive-learning/plan.js';
+import { adaptiveLearningProfilePublicDto } from '../adaptive-learning/repository-dto.js';
+import {
+  applyAdaptiveRetentionState,
+  buildAdaptiveRetentionState,
+} from '../adaptive-learning/retention.js';
+import {
+  buildAdaptiveSessionPreview,
+  createAdaptiveLearningSessionFromPreview,
+} from '../adaptive-learning/session.js';
+import {
+  adaptiveEvidenceContext,
+  adaptiveExecutionRequestHash,
+  adaptiveExecutionToken,
+  adaptiveExecutionTokenHash,
+} from '../adaptive-learning/session-execution.js';
 import {
   assertAdaptiveProfileAppendOnlyOrdering,
   assertAdaptiveProfileRejectsStale,
@@ -399,6 +415,158 @@ test('PostgreSQL adaptive evidence sources come from one MVCC snapshot without o
   }
 });
 
+test('PostgreSQL binds an exact Voice Tutor repeat to an adaptive retention claim without copied content', { skip: !connectionString }, async () => {
+  const repository = createPostgresRepository(connectionString);
+  const client = new pg.Client({ connectionString });
+  const stamp = Date.now() + 8;
+  const username = await repository.createTelegramUser(Number(`6${String(stamp).slice(-9)}`), `Retention ${stamp}`);
+  const instant = new Date('2026-08-10T12:00:00.000Z');
+  const voiceSessionId = crypto.randomUUID();
+  const olderVoiceSessionId = crypto.randomUUID();
+  const recoveryId = crypto.randomUUID();
+  const olderRecoveryId = crypto.randomUUID();
+  const repeatId = crypto.randomUUID();
+  const olderRepeatId = crypto.randomUUID();
+  const daySevenId = crypto.randomUUID();
+  const repeatTaskId = `voice-repeat.${recoveryId}.day_1.v1`;
+  const olderRepeatTaskId = `voice-repeat.${olderRecoveryId}.day_1.v1`;
+  await client.connect();
+  try {
+    await client.query(
+      `INSERT INTO voice_tutor_sessions
+       (id, username, idempotency_key, status, reserved_seconds, billable_seconds, started_at, expires_at, ended_at)
+       VALUES ($1, $2, $3, 'completed', 1, 0, $4, $5, $5),
+              ($6, $2, $7, 'completed', 1, 0, $8, $9, $9)`,
+      [voiceSessionId, username, crypto.randomUUID(), new Date('2026-08-09T08:00:00.000Z'),
+        new Date('2026-08-09T08:05:00.000Z'), olderVoiceSessionId, crypto.randomUUID(),
+        new Date('2026-08-08T08:00:00.000Z'), new Date('2026-08-08T08:05:00.000Z')],
+    );
+    await client.query(
+      `INSERT INTO voice_tutor_recoveries
+       (id, username, session_id, skill_id, skill_label, module, rule_id, origin_item_id,
+        origin_transfer_task_id, initial_micro_check_passed, initial_transfer_passed,
+        terminal_outcome, potential_ege_points, repeat_tasks, observed_at)
+       VALUES ($1, $2, $3, 'ege.grammar.forms', 'Forms', 'grammar', 'rule', 'item',
+               'transfer', TRUE, TRUE, 'resolved', 1, $4::jsonb, $5),
+              ($6, $2, $7, 'ege.grammar.forms', 'Forms', 'grammar', 'rule', 'item',
+               'transfer', TRUE, TRUE, 'resolved', 1, $4::jsonb, $8)`,
+      [recoveryId, username, voiceSessionId, JSON.stringify({
+        day_1: { prompt: 'This prompt must stay in Voice Tutor.', answers: ['was built'] },
+        day_7: { prompt: 'Another private prompt.', answers: ['were built'] },
+      }), new Date('2026-08-09T08:04:00.000Z'), olderRecoveryId, olderVoiceSessionId,
+        new Date('2026-08-08T08:04:00.000Z')],
+    );
+    await client.query(
+      `INSERT INTO voice_tutor_repeats
+       (id, recovery_id, stage, task_id, due_at, window_ends_at)
+       VALUES ($1, $2, 'day_1', $3, $4, $5),
+              ($6, $2, 'day_7', $7, $8, $9),
+              ($10, $11, 'day_1', $12, $13, $14)`,
+      [repeatId, recoveryId, repeatTaskId, new Date('2026-08-10T11:00:00.000Z'),
+        new Date('2026-08-10T16:00:00.000Z'), daySevenId,
+        `voice-repeat.${recoveryId}.day_7.v1`, new Date('2026-08-16T08:00:00.000Z'),
+        new Date('2026-08-17T08:00:00.000Z'), olderRepeatId, olderRecoveryId,
+        olderRepeatTaskId, new Date('2026-08-10T10:00:00.000Z'),
+        new Date('2026-08-10T17:00:00.000Z')],
+    );
+
+    const goal = (await repository.saveAdaptiveLearningGoal(username, {
+      id: crypto.randomUUID(), idempotencyKey: 'postgres-retention-goal-01', requestHash: '6'.repeat(64),
+      targetExam: 'ege_english', targetScore: 85, examDate: '2027-06-01', weeklyMinutes: 300,
+      now: instant,
+    })).goal;
+    const sources = await repository.getAdaptiveLearningEvidenceSources(username);
+    const baseProfile = buildAdaptiveLearningProfile(sources);
+    const recoveryMap = await repository.getVoiceTutorRecoveryMap(username, { now: instant });
+    const retention = buildAdaptiveRetentionState({
+      profile: baseProfile, recoveryMap, diagnosticCompletions: [], now: instant,
+    });
+    const calculatedProfile = applyAdaptiveRetentionState(baseProfile, retention);
+    const storedProfile = await repository.saveAdaptiveLearningProfile(username, calculatedProfile, { now: instant });
+    const profile = adaptiveLearningProfilePublicDto(storedProfile);
+    const calculatedPlan = buildAdaptiveLearningPlan({ goal, profile, now: instant });
+    const storedPlan = (await repository.saveAdaptiveLearningPlan(username, {
+      id: crypto.randomUUID(),
+      inputFingerprint: adaptivePlanInputFingerprint({ goal, profile, basePlanRevision: null, now: instant }),
+      basePlanRevision: null, goalId: goal.id, goalRevision: goal.revision,
+      taxonomyVersion: profile.taxonomyVersion,
+      profileCalculationRevision: profile.profileCalculationRevision,
+      profileEvidenceWatermarkVersion: profile.evidenceWatermarkVersion,
+      profileEvidenceObservedAt: profile.evidenceObservedAt,
+      profileEvidenceSourceCount: profile.evidenceSourceCount,
+      recalculationBucket: calculatedPlan.recalculationBucket, plan: calculatedPlan, now: instant,
+    })).plan;
+    const publicPlan = {
+      id: storedPlan.id, revision: storedPlan.revision, version: storedPlan.plan_version,
+      taxonomyVersion: storedPlan.taxonomy_version, allocation: storedPlan.allocation,
+    };
+    const preview = buildAdaptiveSessionPreview({
+      plan: publicPlan, goal, profile, retention, weekUsage: [], durationMinutes: 15, now: instant,
+      access: { tier: 'base', capabilities: { premiumDepth: false } },
+    });
+    assert.equal(preview.blocks[0].activityId, 'voice_tutor_recovery');
+    assert.equal(preview.blocks[0].launch.repeatId, repeatId);
+    assert.equal(preview.blocks[0].launch.taskId, repeatTaskId);
+    assert.equal(JSON.stringify(preview).includes('This prompt must stay'), false);
+    const session = createAdaptiveLearningSessionFromPreview(preview, { id: crypto.randomUUID(), now: instant });
+    const created = await repository.createAdaptiveLearningSession(username, {
+      idempotencyKey: 'postgres-retention-create-1',
+      requestHash: crypto.createHash('sha256').update(JSON.stringify([15, preview.previewFingerprint])).digest('hex'),
+      planId: publicPlan.id, planRevision: publicPlan.revision,
+      previewFingerprint: preview.previewFingerprint, session, now: instant,
+    });
+    const block = created.session.blocks[0];
+    const claimId = crypto.randomUUID();
+    const token = adaptiveExecutionToken(claimId, 'postgres-retention-secret-32-characters');
+    const startBody = { blockId: block.id, expectedRevision: 0 };
+    await repository.startAdaptiveLearningSessionBlock(username, {
+      operation: 'start', sessionId: created.session.id, ...startBody,
+      idempotencyKey: 'postgres-retention-start-01', requestHash: adaptiveExecutionRequestHash(startBody),
+      claimId, token, tokenHash: adaptiveExecutionTokenHash(token),
+      expiresAt: new Date('2026-08-10T14:01:00.000Z'), now: new Date('2026-08-10T12:01:00.000Z'),
+      evidenceContext: adaptiveEvidenceContext(block),
+      responseSnapshot: {
+        session: { ...created.session, status: 'in_progress', updatedAt: '2026-08-10T12:01:00.000Z' },
+        execution: {
+          version: 'adaptive-execution-v1', revision: 1, status: 'in_progress', currentBlockId: block.id,
+          completedBlockIds: [], readyToFinish: false, startedAt: '2026-08-10T12:01:00.000Z', completedAt: null,
+        },
+        block, launch: block.launch, executionClaimId: claimId,
+        claimExpiresAt: '2026-08-10T14:01:00.000Z', evidenceContext: adaptiveEvidenceContext(block),
+      },
+    });
+    const mismatchedAttemptId = crypto.randomUUID();
+    await assert.rejects(repository.submitVoiceTutorRepeat(username, olderRepeatId, {
+      attemptId: mismatchedAttemptId, taskId: olderRepeatTaskId, answer: 'was built',
+      adaptiveExecutionClaim: token, adaptiveSessionId: created.session.id,
+      now: new Date('2026-08-10T12:01:30.000Z'),
+    }), /ADAPTIVE_EXECUTION_ATTEMPT_MISMATCH/u);
+    const mismatchedStored = await client.query(
+      'SELECT id FROM voice_tutor_repeat_attempts WHERE id = $1', [mismatchedAttemptId],
+    );
+    assert.equal(mismatchedStored.rowCount, 0,
+      'PostgreSQL must roll back repeat persistence when exact adaptive binding fails');
+    const attempt = await repository.submitVoiceTutorRepeat(username, repeatId, {
+      attemptId: crypto.randomUUID(), taskId: repeatTaskId, answer: 'was built',
+      adaptiveExecutionClaim: token, adaptiveSessionId: created.session.id,
+      now: new Date('2026-08-10T12:02:00.000Z'),
+    });
+    assert.equal(attempt.adaptiveExecution.evidenceQuality, 'server_verified_unassisted');
+    const context = await repository.getAdaptiveLearningSessionAdvanceContext(username, {
+      sessionId: created.session.id, blockId: block.id, expectedRevision: 1,
+      attempt: { type: 'voice_tutor_repeat', id: attempt.attempt.id },
+      now: new Date('2026-08-10T12:03:00.000Z'),
+    });
+    assert.equal(context.source.source_type, 'voice_tutor_repeat');
+    assert.equal(context.source.evidence_quality, 'server_verified_unassisted');
+    assert.equal(context.source.evidence_context, 'scheduled_review');
+  } finally {
+    await client.end();
+    await repository.deleteUserData(username).catch(() => {});
+    await repository.close();
+  }
+});
+
 test('PostgreSQL repository persists the production data flow', { skip: !connectionString }, async () => {
   const repository = createPostgresRepository(connectionString);
   const client = new pg.Client({ connectionString });
@@ -441,6 +609,7 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
       '034_adaptive_learning_sessions.sql',
       '035_adaptive_session_execution.sql',
       '036_adaptive_execution_hardening.sql',
+      '037_adaptive_retention_premium.sql',
     ]);
 
     const username = await repository.createTelegramUser(telegramId, `Integration ${suffix}`);

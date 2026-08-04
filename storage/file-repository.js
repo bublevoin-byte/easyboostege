@@ -26,6 +26,8 @@ import {
 } from '../adaptive-learning/diagnostic-claims.js';
 import { adaptiveLearningPlanRepositoryDto } from '../adaptive-learning/plan-dto.js';
 import { adaptiveSpeakingTask } from '../public/adaptive-speaking-tasks.js';
+import { isMonotonicAdaptiveRetentionRefresh } from '../adaptive-learning/retention.js';
+import { adaptiveRepeatExecutionMatches } from '../adaptive-learning/repeat-execution.js';
 import {
   adaptiveLearningSessionPublicDto,
   adaptiveLearningSessionRepositoryDto,
@@ -127,7 +129,7 @@ function validAdaptiveRecoverySnapshot(snapshot) {
   if (!attempt || typeof attempt !== 'object' || Object.keys(attempt).sort().join(',') !== 'id,type') {
     return false;
   }
-  if (attempt.type === 'module') {
+  if (['module', 'voice_tutor_repeat'].includes(attempt.type)) {
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu
       .test(String(attempt.id || ''));
   }
@@ -932,7 +934,64 @@ export function createFileRepository(filePath) {
     });
   }
 
-  async function submitVoiceTutorRepeat(username, repeatId, { attemptId, taskId, answer, now = new Date() }) {
+  function adaptiveClaimMutationContext(username, sessionId, executionClaim, now) {
+    const instant = new Date(now).getTime();
+    const claim = state.adaptive_learning_execution_claims.find((entry) => (
+      entry.token_hash === adaptiveExecutionTokenHash(executionClaim)
+    ));
+    if (!claim || claim.username !== username || claim.session_id !== sessionId) {
+      throw new Error('ADAPTIVE_EXECUTION_CLAIM_INVALID');
+    }
+    const row = adaptiveSessionRow(username, sessionId);
+    const block = row?.blocks.find((item) => item.id === claim.block_id);
+    if (!row || !block || row.status !== 'in_progress' || row.current_block_id !== block.id
+      || Number(row.execution_revision || 0) !== Number(claim.session_execution_revision)
+      || claim.revoked_at || Number(claim.expires_at) <= instant
+      || claim.launch_fingerprint !== adaptiveLaunchFingerprint(block)) {
+      throw new Error(Number(claim.expires_at) <= instant
+        ? 'ADAPTIVE_EXECUTION_CLAIM_EXPIRED' : 'ADAPTIVE_EXECUTION_CLAIM_INVALID');
+    }
+    return { instant, claim, row, block };
+  }
+
+  function adaptiveRepeatBindingPlan(username, context, source, repeat, recovery) {
+    const { instant, claim, row, block } = context;
+    if (claim.consumed_at) {
+      if (claim.attempt_type !== 'voice_tutor_repeat'
+        || String(claim.attempt_ref) !== String(source?.id)) {
+        throw new Error('ADAPTIVE_EXECUTION_CLAIM_CONSUMED');
+      }
+      return { created: false, instant, claim, row, block };
+    }
+    if (!adaptiveRepeatExecutionMatches({
+      username, block, repeat, recovery, attempt: source, claimIssuedAt: claim.issued_at,
+    })) {
+      throw new Error('ADAPTIVE_EXECUTION_ATTEMPT_MISMATCH');
+    }
+    return { created: true, instant, claim, row, block };
+  }
+
+  function adaptiveRepeatBindingResult(plan, attemptId) {
+    return {
+      created: plan.created,
+      evidenceQuality: 'server_verified_unassisted',
+      adaptiveExecution: {
+        sessionId: plan.row.id,
+        blockId: plan.block.id,
+        attemptType: 'voice_tutor_repeat',
+        attemptId: String(attemptId),
+      },
+    };
+  }
+
+  async function submitVoiceTutorRepeat(username, repeatId, {
+    attemptId,
+    taskId,
+    answer,
+    adaptiveExecutionClaim = null,
+    adaptiveSessionId = null,
+    now = new Date(),
+  }) {
     return serializeVoiceTutorMutation(async () => {
       await load();
       const plan = planRepeatAttempt({
@@ -943,15 +1002,36 @@ export function createFileRepository(filePath) {
         }),
         username, repeatId, attemptId, taskId, answer, now,
       });
-      if (!plan.created) return { created: false, attempt: publicRepeatAttempt(plan.attempt) };
-      state.voice_tutor_repeat_attempts.push({ ...plan.attempt });
-      if (plan.daySevenReschedule) {
-        const daySeven = state.voice_tutor_repeats.find((entry) => entry.id === plan.daySevenReschedule.repeatId);
-        daySeven.due_at = plan.daySevenReschedule.dueAt;
-        daySeven.window_ends_at = plan.daySevenReschedule.windowEndsAt;
+      let binding = null;
+      if (adaptiveExecutionClaim) {
+        const context = adaptiveClaimMutationContext(
+          username, adaptiveSessionId, adaptiveExecutionClaim, now,
+        );
+        const repeat = state.voice_tutor_repeats.find((item) => item.id === repeatId);
+        const recovery = state.voice_tutor_recoveries.find((item) => (
+          item.id === repeat?.recovery_id && item.username === username
+        ));
+        binding = adaptiveRepeatBindingPlan(username, context, plan.attempt, repeat, recovery);
       }
-      await persist();
-      return { created: true, attempt: publicRepeatAttempt(plan.attempt) };
+      if (plan.created) {
+        state.voice_tutor_repeat_attempts.push({ ...plan.attempt });
+        if (plan.daySevenReschedule) {
+          const daySeven = state.voice_tutor_repeats.find((entry) => entry.id === plan.daySevenReschedule.repeatId);
+          daySeven.due_at = plan.daySevenReschedule.dueAt;
+          daySeven.window_ends_at = plan.daySevenReschedule.windowEndsAt;
+        }
+      }
+      if (binding?.created) {
+        binding.claim.consumed_at = binding.instant;
+        binding.claim.attempt_type = 'voice_tutor_repeat';
+        binding.claim.attempt_ref = String(plan.attempt.id);
+      }
+      if (plan.created || binding?.created) await persist();
+      return {
+        created: plan.created,
+        attempt: publicRepeatAttempt(plan.attempt),
+        ...(binding ? { adaptiveExecution: adaptiveRepeatBindingResult(binding, plan.attempt.id) } : {}),
+      };
     });
   }
 
@@ -1652,10 +1732,17 @@ export function createFileRepository(filePath) {
       await load();
       if (!state.users[username]) throw new Error('USER_NOT_FOUND');
       const persistedProfile = state.adaptive_learning_profiles[username];
-      if (persistedProfile && compareAdaptiveEvidenceWatermarks(profile, persistedProfile) <= 0) {
+      const evidenceOrder = persistedProfile
+        ? compareAdaptiveEvidenceWatermarks(profile, persistedProfile)
+        : 1;
+      const retainedEstimates = state.adaptive_learning_skill_estimates[username] || [];
+      if (persistedProfile && (evidenceOrder < 0
+        || (evidenceOrder === 0 && !isMonotonicAdaptiveRetentionRefresh(
+          profile, persistedProfile, retainedEstimates,
+        )))) {
         return adaptiveLearningProfileRepositoryDto(
           persistedProfile,
-          state.adaptive_learning_skill_estimates[username] || [],
+          retainedEstimates,
         );
       }
       const updatedAt = new Date(now).getTime();
@@ -1693,6 +1780,7 @@ export function createFileRepository(filePath) {
         status: skill.status,
         last_observed_at: skill.lastObservedAt,
         due_state: skill.dueState,
+        critical_retention_expires_at: skill.criticalRetentionExpiresAt,
         explanation_code: skill.explanationCode,
         updated_at: updatedAt,
       }));
@@ -2107,6 +2195,23 @@ export function createFileRepository(filePath) {
     if (claim.launch_fingerprint !== adaptiveLaunchFingerprint(block)
       || Number(claim.session_execution_revision) !== Number(row.execution_revision || 0)) {
       throw new Error('ADAPTIVE_SESSION_ATTEMPT_MISMATCH');
+    }
+    if (attempt.type === 'voice_tutor_repeat') {
+      const source = state.voice_tutor_repeat_attempts.find((item) => item.id === attempt.id);
+      const repeat = state.voice_tutor_repeats.find((item) => item.id === source?.repeat_id);
+      const recovery = state.voice_tutor_recoveries.find((item) => (
+        item.id === repeat?.recovery_id && item.username === username
+      ));
+      if (!adaptiveRepeatExecutionMatches({
+        username, block, repeat, recovery, attempt: source, claimIssuedAt: claim.issued_at,
+      })) {
+        throw new Error('ADAPTIVE_SESSION_ATTEMPT_MISMATCH');
+      }
+      return {
+        source_type: 'voice_tutor_repeat', source_ref: source.id,
+        evidence_quality: 'server_verified_unassisted', evidence_context: claim.evidence_context,
+        actual_minutes: null,
+      };
     }
     if (attempt.type === 'module') {
       const source = state.module_attempts.find((item) => (
@@ -2645,31 +2750,35 @@ export function createFileRepository(filePath) {
   }) {
     return serializeCoordinatedMutation(async () => {
       await load();
-      const instant = new Date(now).getTime();
-      const claim = state.adaptive_learning_execution_claims.find((entry) => (
-        entry.token_hash === adaptiveExecutionTokenHash(executionClaim)
-      ));
-      if (!claim || claim.username !== username || claim.session_id !== sessionId) {
-        throw new Error('ADAPTIVE_EXECUTION_CLAIM_INVALID');
-      }
-      const row = adaptiveSessionRow(username, sessionId);
-      const block = row?.blocks.find((item) => item.id === claim.block_id);
-      if (!row || !block || row.status !== 'in_progress' || row.current_block_id !== block.id
-        || Number(row.execution_revision || 0) !== Number(claim.session_execution_revision)
-        || claim.revoked_at || Number(claim.expires_at) <= instant
-        || claim.launch_fingerprint !== adaptiveLaunchFingerprint(block)) {
-        throw new Error(Number(claim.expires_at) <= instant
-          ? 'ADAPTIVE_EXECUTION_CLAIM_EXPIRED' : 'ADAPTIVE_EXECUTION_CLAIM_INVALID');
+      const context = adaptiveClaimMutationContext(username, sessionId, executionClaim, now);
+      const { instant, claim, row, block } = context;
+      if (attempt.type === 'voice_tutor_repeat') {
+        const source = state.voice_tutor_repeat_attempts.find((item) => item.id === attempt.id);
+        const repeat = state.voice_tutor_repeats.find((item) => item.id === source?.repeat_id);
+        const recovery = state.voice_tutor_recoveries.find((item) => (
+          item.id === repeat?.recovery_id && item.username === username
+        ));
+        const binding = adaptiveRepeatBindingPlan(username, context, source, repeat, recovery);
+        if (binding.created) {
+          claim.consumed_at = instant;
+          claim.attempt_type = attempt.type;
+          claim.attempt_ref = String(attempt.id);
+          await persist();
+        }
+        return adaptiveRepeatBindingResult(binding, attempt.id);
       }
       if (claim.consumed_at) {
         if (claim.attempt_type !== attempt.type || String(claim.attempt_ref) !== String(attempt.id)) {
           throw new Error('ADAPTIVE_EXECUTION_CLAIM_CONSUMED');
         }
         return {
-          created: false, evidenceQuality: 'server_verified_assisted',
+          created: false,
+          evidenceQuality: attempt.type === 'voice_tutor_repeat'
+            ? 'server_verified_unassisted' : 'server_verified_assisted',
           adaptiveExecution: {
             sessionId: row.id, blockId: block.id,
-            attemptType: attempt.type, attemptId: Number(attempt.id),
+            attemptType: attempt.type,
+            attemptId: attempt.type === 'voice_tutor_repeat' ? String(attempt.id) : Number(attempt.id),
           },
         };
       }

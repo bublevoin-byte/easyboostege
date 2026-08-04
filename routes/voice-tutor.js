@@ -69,6 +69,10 @@ const PUBLIC_ERRORS = Object.freeze({
   VOICE_TUTOR_REPEAT_ALREADY_ATTEMPTED: { status: 409, message: 'Для этого повтора уже сохранена проверенная попытка.' },
   VOICE_TUTOR_REPEAT_ATTEMPT_CONFLICT: { status: 409, message: 'Идентификатор попытки уже использован.' },
   VOICE_TUTOR_REPEAT_ANSWER_INVALID: { status: 422, message: 'Ответ повтора некорректен.' },
+  ADAPTIVE_EXECUTION_CLAIM_INVALID: { status: 409, message: 'Персональный блок больше не активен.' },
+  ADAPTIVE_EXECUTION_CLAIM_EXPIRED: { status: 410, message: 'Время персонального блока истекло.' },
+  ADAPTIVE_EXECUTION_CLAIM_CONSUMED: { status: 409, message: 'Персональный блок уже получил другую попытку.' },
+  ADAPTIVE_EXECUTION_ATTEMPT_MISMATCH: { status: 409, message: 'Повтор не соответствует персональному блоку.' },
 });
 
 const TICKET_09_PUBLIC_ERRORS = Object.freeze({
@@ -81,9 +85,10 @@ const TICKET_09_PUBLIC_ERRORS = Object.freeze({
 });
 
 function sendVoiceTutorError(error, res, next) {
-  const known = PUBLIC_ERRORS[error?.code] || TICKET_09_PUBLIC_ERRORS[error?.code];
+  const code = error?.code || error?.message;
+  const known = PUBLIC_ERRORS[code] || TICKET_09_PUBLIC_ERRORS[code];
   if (!known) return next(error);
-  return res.status(known.status).json({ error: { code: error.code, message: known.message } });
+  return res.status(known.status).json({ error: { code, message: known.message } });
 }
 
 const SAFE_REALTIME_ERROR_CODES = new Set([
@@ -222,12 +227,24 @@ function parseReport(body) {
 
 function parseRepeatAttempt(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)
-    || Object.keys(body).length !== 3
-    || Object.keys(body).some((key) => !['attemptId', 'taskId', 'answer'].includes(key))) return null;
+    || ![3, 5].includes(Object.keys(body).length)
+    || Object.keys(body).some((key) => ![
+      'attemptId', 'taskId', 'answer', 'adaptiveExecutionClaim', 'adaptiveSessionId',
+    ].includes(key))) return null;
+  const hasAdaptiveClaim = Object.hasOwn(body, 'adaptiveExecutionClaim')
+    || Object.hasOwn(body, 'adaptiveSessionId');
   if (!ATTEMPT_ID.test(String(body.attemptId || ''))
     || !/^[a-z0-9][a-z0-9._:-]{3,179}$/u.test(String(body.taskId || ''))
-    || typeof body.answer !== 'string' || body.answer.length < 1 || body.answer.length > 200) return null;
-  return { attemptId: String(body.attemptId), taskId: String(body.taskId), answer: body.answer };
+    || typeof body.answer !== 'string' || body.answer.length < 1 || body.answer.length > 200
+    || (hasAdaptiveClaim && (!NONCE.test(String(body.adaptiveExecutionClaim || ''))
+      || !SESSION_ID.test(String(body.adaptiveSessionId || ''))))) return null;
+  return {
+    attemptId: String(body.attemptId), taskId: String(body.taskId), answer: body.answer,
+    ...(hasAdaptiveClaim ? {
+      adaptiveExecutionClaim: String(body.adaptiveExecutionClaim),
+      adaptiveSessionId: String(body.adaptiveSessionId),
+    } : {}),
+  };
 }
 
 function publicRuleCard(card) {

@@ -119,7 +119,7 @@ function renderDiagnosticDom(screenSource, payload) {
       createElement() { return element({ setAttribute() {}, appendChild() {} }); },
       createTextNode(value) { return { textContent: value }; },
     },
-    window: {},
+    window: { addEventListener() {} },
     console,
   };
   vm.runInNewContext(executable, context);
@@ -903,6 +903,26 @@ test('browser renders progress and timing from the stored diagnostic policy proj
   assert.match(elements.adaptive_diagnostic_timing.textContent, /40 минут/u);
   assert.match(elements.adaptive_diagnostic_timing.textContent, /40 минут после старта/u);
   assert.match(elements.adaptive_diagnostic_start.textContent, /около 40 минут/u);
+});
+
+test('browser presents a scheduled re-diagnostic when cadence is due and no run is active', async () => {
+  const screen = await fs.readFile(new URL('../public/screens/progress.js', import.meta.url), 'utf8');
+  const elements = renderDiagnosticDom(screen, {
+    diagnostic: {
+      id: 'scheduled',
+      status: 'scheduled',
+      estimatedMinutes: 15,
+      deadlineMinutes: 20,
+      answeredItems: 0,
+      maxItems: 12,
+      canComplete: false,
+    },
+    item: null,
+  });
+
+  assert.equal(elements.adaptive_diagnostic.hidden, false);
+  assert.equal(elements.adaptive_diagnostic_start.hidden, false);
+  assert.match(elements.adaptive_diagnostic_notice.textContent, /уточнить профиль/u);
 });
 
 test('plan card exposes an accessible start, progress, audio and resumable diagnostic workflow', async () => {

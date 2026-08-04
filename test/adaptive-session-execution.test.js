@@ -11,6 +11,7 @@ import { createAdaptiveLearningRoutes } from '../routes/adaptive-learning.js';
 import { createProgressRoutes } from '../routes/progress.js';
 import { createFileRepository } from '../storage/file-repository.js';
 import { adaptiveSpeakingTask } from '../public/adaptive-speaking-tasks.js';
+import { ADAPTIVE_ACTIVITY_REGISTRY } from '../adaptive-learning/session.js';
 
 const START = new Date(Date.now() - 2 * 60 * 60_000);
 
@@ -23,12 +24,19 @@ function authentication() {
   } };
 }
 
-async function withExecutionApp(run) {
+async function withExecutionApp(run, { activityRegistry = ADAPTIVE_ACTIVITY_REGISTRY } = {}) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-execution-api-'));
   const dataPath = path.join(directory, 'data.json');
   const repository = createFileRepository(dataPath);
   const owner = await repository.createTelegramUser(9501, 'Execution Owner');
   const stranger = await repository.createTelegramUser(9502, 'Execution Stranger');
+  for (const [telegramId, username] of [[9501, owner], [9502, stranger]]) {
+    await repository.grantDays(telegramId, 30, username);
+    await repository.setEntitlement(username, 'voice_tutor', {
+      startsAt: new Date(START.getTime() - 60_000),
+      endsAt: new Date(START.getTime() + 24 * 60 * 60_000),
+    });
+  }
   let current = new Date(START);
   const now = () => new Date(current);
   const app = express();
@@ -37,6 +45,7 @@ async function withExecutionApp(run) {
   app.use(createAdaptiveLearningRoutes({
     authentication: authentication(), db: repository, enabled: true, now,
     executionTokenSecret: 'adaptive-test-token-secret-32-characters',
+    activityRegistry,
   }));
   app.use((error, req, res, next) => res.status(500).json({ error: { code: error.message } }));
   const server = http.createServer(app);
@@ -219,6 +228,8 @@ test('server-owned writing or speaking completion binds to the claim without a c
         }, { evidenceQuality: 'server_verified_unassisted' });
       }
     }
+    const accessOverview = await (await request(owner, '/api/v1/adaptive-learning/overview')).json();
+    assert.equal(accessOverview.access.tier, 'premium');
     const session = await createSession(request, owner, 120);
     assert.ok(session.blocks.some((block) => ['writing', 'speaking'].includes(block.module)),
       'seeded non-speaking mastery must make a server-owned block deterministic');
@@ -339,6 +350,68 @@ test('server-owned writing or speaking completion binds to the claim without a c
     }
     assert.equal(serverOwnedSeen, true, 'the full registry must exercise a writing or speaking handoff');
   });
+});
+
+test('deep Writing/Speaking execution rechecks current Premium access on claim replay, bind, and advance', async () => {
+  const writingRegistry = {
+    ...ADAPTIVE_ACTIVITY_REGISTRY,
+    activities: ADAPTIVE_ACTIVITY_REGISTRY.activities.filter((activity) => (
+      activity.module === 'writing' && activity.launch.kind === 'writing_task'
+    )),
+  };
+  await withExecutionApp(async ({ owner, repository, request, setTime }) => {
+    const session = await createSession(request, owner, 30);
+    const block = session.blocks[0];
+    assert.equal(block.module, 'writing');
+    assert.equal(block.launch.kind, 'writing_task');
+
+    const startBody = { blockId: block.id, expectedRevision: 0 };
+    const startedResponse = await request(owner, `/api/v1/adaptive-learning/sessions/${session.id}/start`, {
+      method: 'POST', headers: { 'Idempotency-Key': 'execution-premium-start-0001' },
+      body: JSON.stringify(startBody),
+    });
+    assert.equal(startedResponse.status, 201);
+    const started = await startedResponse.json();
+    const attemptId = await repository.createWritingAttempt(owner, {
+      taskType: block.activityId, sourceTaskRef: block.launch.taskId, assignment: {},
+      answer: 'A sufficiently long student answer for the persisted attempt.',
+    }, 'test-writing-v1');
+    await repository.finishWritingAttempt(attemptId, {
+      status: 'completed', review: { overall_got: 1, overall_max: 6 },
+    });
+    const attempt = { type: 'writing', id: attemptId };
+
+    const revokedAt = new Date(START.getTime() + 60_000);
+    setTime(revokedAt);
+    assert.equal(await repository.revokeEntitlement(owner, 'voice_tutor', 9501, { now: revokedAt }), true);
+    const deniedReplay = await request(owner, `/api/v1/adaptive-learning/sessions/${session.id}/start`, {
+      method: 'POST', headers: { 'Idempotency-Key': 'execution-premium-start-0001' },
+      body: JSON.stringify(startBody),
+    });
+    assert.equal(deniedReplay.status, 403);
+    const deniedBind = await request(owner, `/api/v1/adaptive-learning/sessions/${session.id}/bind-attempt`, {
+      method: 'POST', body: JSON.stringify({ executionClaim: started.executionClaim, attempt }),
+    });
+    assert.equal(deniedBind.status, 403);
+
+    await repository.setEntitlement(owner, 'voice_tutor', {
+      startsAt: new Date(revokedAt.getTime() - 1_000),
+      endsAt: new Date(revokedAt.getTime() + 60 * 60_000),
+    });
+    const bound = await request(owner, `/api/v1/adaptive-learning/sessions/${session.id}/bind-attempt`, {
+      method: 'POST', body: JSON.stringify({ executionClaim: started.executionClaim, attempt }),
+    });
+    assert.equal(bound.status, 201);
+
+    const secondRevocation = new Date(revokedAt.getTime() + 60_000);
+    setTime(secondRevocation);
+    assert.equal(await repository.revokeEntitlement(owner, 'voice_tutor', 9501, { now: secondRevocation }), true);
+    const deniedAdvance = await request(owner, `/api/v1/adaptive-learning/sessions/${session.id}/advance`, {
+      method: 'POST', headers: { 'Idempotency-Key': 'execution-premium-advance-01' },
+      body: JSON.stringify({ blockId: block.id, expectedRevision: 1, attempt }),
+    });
+    assert.equal(deniedAdvance.status, 403);
+  }, { activityRegistry: writingRegistry });
 });
 
 test('claim ownership and compare-and-set prevent forged or concurrent completion', async () => {

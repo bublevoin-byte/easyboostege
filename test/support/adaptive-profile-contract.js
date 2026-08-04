@@ -21,6 +21,7 @@ const PROFILE_KEYS = Object.freeze([
 ]);
 
 const ESTIMATE_KEYS = Object.freeze([
+  'critical_retention_expires_at',
   'due_state',
   'effective_evidence_count',
   'evidence_count',

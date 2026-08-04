@@ -21,7 +21,7 @@ export function adaptiveConsumedClaimAttempt(claim) {
   if (!claim?.consumed_at || claim.revoked_at) return null;
   const type = String(claim.attempt_type || '');
   const reference = String(claim.attempt_ref || '');
-  if (type === 'module'
+  if (['module', 'voice_tutor_repeat'].includes(type)
     && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(reference)) {
     return { type, id: reference };
   }
@@ -53,9 +53,10 @@ export function adaptiveLaunchFingerprint(block) {
 
 export function adaptiveEvidenceContext(block) {
   if (!block || block.kind !== 'learning') return null;
+  if (block.launch?.kind === 'voice_tutor_recovery'
+    || (block.reasonCodes || []).includes('due_review')) return 'scheduled_review';
   if (['writing', 'speaking'].includes(block.module)) return 'ai_assisted_review';
   if (block.launch?.kind === 'exam_workflow') return 'exam_practice';
-  if ((block.reasonCodes || []).includes('due_review')) return 'scheduled_review';
   return 'planned_practice';
 }
 

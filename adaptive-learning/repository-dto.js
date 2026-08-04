@@ -11,7 +11,7 @@ const PROFILE_FIELDS = Object.freeze([
 const ESTIMATE_FIELDS = Object.freeze([
   'taxonomy_version', 'skill_id', 'module', 'mastery', 'uncertainty', 'evidence_count',
   'effective_evidence_count', 'independent_evidence_count', 'evidence_quality', 'status',
-  'last_observed_at', 'due_state', 'explanation_code',
+  'last_observed_at', 'due_state', 'critical_retention_expires_at', 'explanation_code',
 ]);
 
 const SKILL_LABELS = new Map(EGE_SKILL_TAXONOMY.skills.map((skill) => [skill.id, skill.label]));
@@ -38,6 +38,7 @@ export function adaptiveLearningProfileRepositoryDto(profile, estimates = []) {
       .map((estimate) => ({
         ...allowlist(estimate, ESTIMATE_FIELDS),
         last_observed_at: timestamp(estimate.last_observed_at),
+        critical_retention_expires_at: timestamp(estimate.critical_retention_expires_at),
         updated_at: timestamp(estimate.updated_at),
       }))
       .sort((left, right) => String(left.skill_id).localeCompare(String(right.skill_id))),
@@ -66,6 +67,7 @@ export function adaptiveLearningProfilePublicDto(profile) {
     evidenceQuality: estimate.evidence_quality,
     lastObservedAt: estimate.last_observed_at,
     dueState: estimate.due_state,
+    criticalRetentionExpiresAt: estimate.critical_retention_expires_at,
     explanationCode: estimate.explanation_code,
   }));
   const modules = TAXONOMY_MODULES.map((module) => {
@@ -144,6 +146,7 @@ export function adaptiveLearningProfileSnapshotDto(profile) {
       evidenceQuality: skill.evidenceQuality,
       lastObservedAt: timestamp(skill.lastObservedAt),
       dueState: skill.dueState,
+      criticalRetentionExpiresAt: timestamp(skill.criticalRetentionExpiresAt),
       explanationCode: skill.explanationCode,
     })) : [],
     modules: Array.isArray(profile.modules) ? profile.modules.map((module) => ({

@@ -11,10 +11,11 @@ function blockIdValue(value){return /^asb_[0-9a-f]{16}_[0-9]{2}$/u.test(String(v
 function revisionValue(value){return Number.isInteger(Number(value))&&Number(value)>=0}
 function exactKeys(value,keys){return Boolean(value)&&typeof value==='object'&&!Array.isArray(value)&&JSON.stringify(Object.keys(value).sort())===JSON.stringify(keys.slice().sort())}
 function validAttemptReference(attempt){return Boolean(attempt&&exactKeys(attempt,['type','id'])
-  &&(attempt.type==='module'?uuidValue(attempt.id):
+  &&(['module','voice_tutor_repeat'].includes(attempt.type)?uuidValue(attempt.id):
     ['writing','speaking'].includes(attempt.type)&&Number.isInteger(Number(attempt.id))&&Number(attempt.id)>0))}
 function validAttempt(attempt,active){return Boolean(validAttemptReference(attempt)
-  &&(attempt.type==='module'?!['writing','speaking'].includes(active.module):attempt.type===active.module))}
+  &&(attempt.type==='module'?!['writing','speaking'].includes(active.module)
+    :attempt.type==='voice_tutor_repeat'?active.activityId==='voice_tutor_recovery':attempt.type===active.module))}
 function validPending(pending,active){if(!pending)return true;if(!pending||!['attempt','bind','advance'].includes(pending.phase)||!uuidValue(pending.advanceKey))return false;
   if(pending.phase==='attempt')return exactKeys(pending,['advanceKey','payload','phase'])&&exactKeys(pending.payload,['activity','adaptiveExecutionClaim','durationMs','id','maxScore','module','score'])
     &&uuidValue(pending.payload.id)&&pending.payload.module===active.module&&pending.payload.activity===active.activityId&&pending.payload.adaptiveExecutionClaim===active.executionClaim
@@ -27,7 +28,7 @@ function validActive(active,savedAt){return !active||Boolean(active&&exactKeys(a
   &&/^[A-Za-z0-9_-]{32,200}$/u.test(String(active.executionClaim||''))
   &&['vocabulary','grammar','reading','listening','writing','speaking','exam'].includes(active.module)
   &&/^[a-z0-9_]{1,100}$/u.test(String(active.activityId||''))
-  &&/^[A-Za-z0-9:_-]{1,240}$/u.test(String(active.contentRef||''))
+  &&/^[A-Za-z0-9:._-]{1,240}$/u.test(String(active.contentRef||''))
   &&['exam_practice','planned_practice','scheduled_review','ai_assisted_review'].includes(active.evidenceContext)
   &&revisionValue(active.expectedRevision)
   &&Number.isFinite(Number(active.claimExpiresAt))&&Number(active.claimExpiresAt)>Number(active.startedAt)
@@ -163,6 +164,19 @@ export async function completeAdaptiveServerAttempt(type,attemptId){
   write(state);
   if(!navigator.onLine)return {queued:true};
   try{return await sendPending(state)}catch(error){if(isNetworkError(error))return {queued:true};if(isTerminalError(error))clearTerminalState();throw error}
+}
+
+export async function completeAdaptiveVoiceTutorRepeat({repeatId,taskId,answer,attemptId}={}){
+  const state=read(),active=state&&state.active;
+  if(!active||active.pending||active.activityId!=='voice_tutor_recovery'||!uuidValue(repeatId)||!uuidValue(attemptId)
+    ||typeof taskId!=='string'||typeof answer!=='string'||!answer.trim())return false;
+  const result=await api().post('/api/v1/voice-tutor/repeats/'+encodeURIComponent(repeatId)+'/attempts',{
+    attemptId,taskId,answer:answer.trim(),adaptiveExecutionClaim:active.executionClaim,adaptiveSessionId:active.sessionId,
+  });
+  const reference={type:'voice_tutor_repeat',id:String(result&&result.attempt&&result.attempt.id||'')};
+  if(!validAttempt(reference,active))throw new Error('ADAPTIVE_REPEAT_RESPONSE_INVALID');
+  active.pending={phase:'advance',advanceKey:uuid(),attempt:reference};write(state);
+  try{const advanced=await sendPending(state);return {attempt:result.attempt,adaptive:true,advanced}}catch(error){if(isNetworkError(error))return {queued:true};if(isTerminalError(error))clearTerminalState();throw error}
 }
 
 export async function advanceAdaptiveBreak(session,block,execution){

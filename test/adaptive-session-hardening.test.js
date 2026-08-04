@@ -181,21 +181,27 @@ test('replacement reasons enforce difficulty, accessibility and relevance semant
 
 test('frontend dispatcher consumes the shared descriptor vocabulary without eval or arbitrary names', async () => {
   const source = await fs.readFile(new URL('../public/adaptive-activity-launch.js', import.meta.url), 'utf8');
+  const progress = await fs.readFile(new URL('../public/screens/progress.js', import.meta.url), 'utf8');
   assert.match(source, /isAdaptiveLaunchDescriptor/u);
   assert.match(source, /case 'vocabulary_practice'/u);
   assert.match(source, /case 'grammar_practice'/u);
   assert.match(source, /case 'exam_workflow'/u);
   assert.match(source, /case 'writing_task'/u);
+  assert.match(source, /adaptiveRecoveryRepeatId = launch\.repeatId/u);
+  assert.match(source, /adaptiveRecoveryTaskId = launch\.taskId/u);
+  assert.match(progress, /item\.id===requestedRepeat/u);
+  assert.match(progress, /item\.task_id===requestedTask/u);
   assert.doesNotMatch(source, /eval\(|new Function|window\[[^\]]+\]/u);
 });
 
 test('OpenAPI documents the exact strict launch descriptor union and block metadata', async () => {
   const openapi = await fs.readFile(new URL('../docs/openapi.yaml', import.meta.url), 'utf8');
   assert.match(openapi, /AdaptiveActivityLaunch:/u);
-  for (const kind of ['vocabulary_practice', 'grammar_practice', 'exam_workflow', 'reading_mode', 'listening_mode', 'writing_task', 'speaking_task']) {
+  for (const kind of ['vocabulary_practice', 'grammar_practice', 'exam_workflow', 'reading_mode', 'listening_mode', 'writing_task', 'speaking_task', 'voice_tutor_recovery']) {
     assert.match(openapi, new RegExp(`kind: \\{ type: string, enum: \\[${kind}\\]`, 'u'));
   }
   assert.match(openapi, /required: \[version, kind, screenId/u);
+  assert.match(openapi, /required: \[version, kind, screenId, skillId, module, repeatId, taskId, stage, status, dueAt, windowEndsAt\]/u);
   assert.match(openapi, /required: \[weeklyAvailableMinutes, coverageGaps, prerequisiteEvidence, skills\]/u);
   assert.match(openapi, /content_coverage_fallback/u);
   assert.doesNotMatch(openapi, /matching lazy-loaded activity screen/u);
@@ -430,6 +436,7 @@ test('actual low-budget plans remain rolling priorities across every duration an
       'grammar', 'listening', 'reading', 'speaking', 'vocabulary', 'writing',
     ]);
     assert.deepEqual([...servedSkills].sort(), [...new Set(ADAPTIVE_ACTIVITY_REGISTRY.activities
+      .filter((activity) => activity.launch.kind !== 'voice_tutor_recovery')
       .map((activity) => activity.skillId))].sort());
     const totalServed = [...servedModules.values()].reduce((sum, value) => sum + value, 0);
     const targetModules = new Map();

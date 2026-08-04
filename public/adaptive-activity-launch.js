@@ -29,6 +29,17 @@ function consumeDescriptor(launch, contentRef) {
     case 'speaking_task':
       return typeof window.launchSpeakingTask === 'function'
         && window.launchSpeakingTask(launch.taskNumber, contentRef) === true;
+    case 'voice_tutor_recovery': {
+      const screen = document.getElementById(launch.screenId);
+      if (!screen) return false;
+      screen.dataset.adaptiveRecoverySkillId = launch.skillId;
+      screen.dataset.adaptiveRecoveryRepeatId = launch.repeatId;
+      screen.dataset.adaptiveRecoveryTaskId = launch.taskId;
+      window.dispatchEvent(new CustomEvent('adaptive-recovery-launch', {
+        detail: { skillId: launch.skillId, repeatId: launch.repeatId, taskId: launch.taskId },
+      }));
+      return true;
+    }
     default:
       return false;
   }

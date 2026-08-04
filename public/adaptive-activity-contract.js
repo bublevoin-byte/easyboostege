@@ -118,9 +118,52 @@ const activityDefinitions = [
   },
 ];
 
+const retentionSkills = [
+  ['ege.vocabulary.lexical_choice', 'Лексический выбор', 'vocabulary'],
+  ['ege.vocabulary.word_formation', 'Словообразование', 'vocabulary'],
+  ['ege.grammar.forms', 'Грамматические формы', 'grammar'],
+  ['ege.grammar.transformations', 'Грамматические преобразования', 'grammar'],
+  ['ege.reading.gist', 'Основная мысль текста', 'reading'],
+  ['ege.reading.detail', 'Детальное понимание текста', 'reading'],
+  ['ege.listening.gist', 'Основная мысль аудио', 'listening'],
+  ['ege.listening.detail', 'Детальное понимание аудио', 'listening'],
+  ['ege.writing.email', 'Электронное письмо', 'writing'],
+  ['ege.writing.essay', 'Развёрнутое письменное высказывание', 'writing'],
+  ['ege.speaking.interaction', 'Устное взаимодействие', 'speaking'],
+  ['ege.speaking.monologue', 'Монологическое высказывание', 'speaking'],
+];
+
+for (const [skillId, label, module] of retentionSkills) {
+  activityDefinitions.push({
+    skillId,
+    activityId: 'voice_tutor_recovery',
+    activityLabel: `Проверка переноса: ${label}`,
+    contentRef: `builtin:voice-tutor-repeat:${skillId}:v1`,
+    minimumMinutes: 15,
+    recommendedMinutes: 15,
+    difficulty: 3,
+    modality: 'visual_text',
+    requiresAudio: false,
+    requiresMicrophone: false,
+    launch: {
+      version: ADAPTIVE_LAUNCH_CONTRACT_VERSION,
+      kind: 'voice_tutor_recovery',
+      screenId: 'scr10',
+      skillId,
+      module,
+    },
+  });
+}
+
 function exactKeys(value, expected) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
     && JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...expected].sort());
+}
+
+function exactIso(value) {
+  const parsed = new Date(value);
+  return typeof value === 'string' && Number.isFinite(parsed.getTime())
+    && parsed.toISOString() === value;
 }
 
 export function isAdaptiveLaunchDescriptor(value) {
@@ -155,6 +198,22 @@ export function isAdaptiveLaunchDescriptor(value) {
   if (value.kind === 'speaking_task') {
     return exactKeys(value, ['kind', 'screenId', 'taskNumber', 'version'])
       && value.screenId === 'scr9' && [2, 4].includes(value.taskNumber);
+  }
+  if (value.kind === 'voice_tutor_recovery') {
+    return exactKeys(value, [
+      'dueAt', 'kind', 'module', 'repeatId', 'screenId', 'skillId', 'stage',
+      'status', 'taskId', 'version', 'windowEndsAt',
+    ])
+      && value.screenId === 'scr10'
+      && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value.repeatId)
+      && /^[a-z0-9][a-z0-9._:-]{3,179}$/u.test(value.taskId)
+      && ['day_1', 'day_7'].includes(value.stage)
+      && ['due', 'critical_due'].includes(value.status)
+      && exactIso(value.dueAt) && exactIso(value.windowEndsAt)
+      && new Date(value.windowEndsAt) > new Date(value.dueAt)
+      && retentionSkills.some(([skillId, , module]) => (
+        value.skillId === skillId && value.module === module
+      ));
   }
   return false;
 }
