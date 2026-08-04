@@ -15,7 +15,10 @@ const projectDirectory = fileURLToPath(new URL('..', import.meta.url));
 const serverPath = fileURLToPath(new URL('../server.js', import.meta.url));
 
 // Thresholds straight from section 19; the first-load weight comes from the performance spec.
-const BUDGET = { lcpMs: 2500, cls: 0.1, inpMs: 200, firstLoadKb: 150 };
+const BUDGET = {
+  lcpMs: 2500, cls: 0.1, inpMs: 200, firstLoadKb: 150,
+  adaptiveOverviewMs: 1500, adaptivePreviewMs: 1500,
+};
 
 // Раздел 4.2 спеки: код этих экранов приезжает по требованию, при первом переходе на него, и не
 // имеет права участвовать в первой загрузке — на этом держится её вес.
@@ -191,6 +194,70 @@ async function measureAiLoadingState(browser, baseUrl, jwtSecret) {
     await probe;
     await page.locator('#scr1.on').waitFor({ state: 'visible', timeout: 15_000 });
 
+    const goal = await page.evaluate(async () => {
+      const response = await fetch('/api/v1/adaptive-learning/goal', {
+        method: 'PUT', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
+        body: JSON.stringify({
+          targetExam: 'ege_english', targetScore: 85,
+          examDate: '2027-06-01', weeklyMinutes: 300,
+        }),
+      });
+      return { status: response.status, body: await response.json() };
+    });
+    assert.ok([200, 201].includes(goal.status), `adaptive performance goal failed: ${JSON.stringify(goal.body)}`);
+    const diagnostic = await page.evaluate(async () => {
+      const request = async (pathName, body, key) => {
+        const response = await fetch(pathName, {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
+          body: JSON.stringify(body),
+        });
+        return { status: response.status, body: await response.json() };
+      };
+      let current = await request(
+        '/api/v1/adaptive-learning/diagnostics/start',
+        { depth: 'short' },
+        crypto.randomUUID(),
+      );
+      let answer = 0;
+      while (current.body.diagnostic.status === 'in_progress') {
+        answer += 1;
+        current = await request(
+          `/api/v1/adaptive-learning/diagnostics/${current.body.diagnostic.id}/answers`,
+          { itemId: current.body.item.id, choiceId: current.body.item.choices[0].id },
+          crypto.randomUUID(),
+        );
+        if (current.status !== 201) return current;
+      }
+      return request(
+        `/api/v1/adaptive-learning/diagnostics/${current.body.diagnostic.id}/complete`,
+        {},
+        crypto.randomUUID(),
+      );
+    });
+    assert.equal(diagnostic.status, 201, `adaptive performance diagnostic failed: ${JSON.stringify(diagnostic.body)}`);
+    const overviewStartedAt = Date.now();
+    await page.locator('#home_adaptive_plan').click();
+    await page.locator('#adaptive_forecast:not([hidden])').waitFor({ state: 'visible', timeout: 5_000 });
+    await page.waitForFunction(() => document.querySelectorAll('#adaptive_weekly_allocation > div').length === 6);
+    const adaptiveOverviewMs = Date.now() - overviewStartedAt;
+    await page.locator('input[name="adaptive_session_duration"][value="60"]').check({ force: true });
+    const previewStartedAt = Date.now();
+    const previewResponse = page.waitForResponse((response) => (
+      response.request().method() === 'POST'
+        && response.url().endsWith('/api/v1/adaptive-learning/sessions/preview')
+    ));
+    await page.locator('#adaptive_session_preview').click();
+    const previewHttpResponse = await previewResponse;
+    assert.equal(previewHttpResponse.status(), 200);
+    const preview = (await previewHttpResponse.json()).preview;
+    await page.locator('#adaptive_session_blocks li').first().waitFor({ state: 'visible', timeout: 5_000 });
+    const adaptivePreviewMs = Date.now() - previewStartedAt;
+    assert.equal(preview.blocks.reduce((sum, block) => sum + block.plannedMinutes, 0), 60);
+    await page.evaluate(() => window.tab('scr1'));
+    await page.locator('#scr1.on').waitFor({ state: 'visible', timeout: 5_000 });
+
     await page.getByRole('button', { name: 'Письмо', exact: true }).click();
     await page.locator('#scr8.on').waitFor({ state: 'visible', timeout: 5_000 });
     await page.getByRole('textbox', { name: 'Письменный ответ' })
@@ -199,7 +266,11 @@ async function measureAiLoadingState(browser, baseUrl, jwtSecret) {
     const clickedAt = Date.now();
     await page.getByRole('button', { name: 'Проверить с ИИ' }).click();
     await page.locator('#scr13.on').waitFor({ state: 'visible', timeout: 3_000 });
-    return Date.now() - clickedAt;
+    return {
+      loadingDelayMs: Date.now() - clickedAt,
+      adaptiveOverviewMs,
+      adaptivePreviewMs,
+    };
   } finally {
     await context.close();
   }
@@ -256,6 +327,7 @@ async function run() {
         ADMIN_TELEGRAM_ID: '',
         XAI_API_KEY: '',
         GROQ_API_KEY: '',
+        ADAPTIVE_LEARNING_ENABLED: 'true',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -316,8 +388,12 @@ async function run() {
     // Section 19 also requires the loading state to appear within 200 ms of the action. Demo mode
     // answers locally and never shows it, so this is measured on a real session whose AI call is
     // deliberately slow — exactly the case the requirement is about.
-    const loadingDelayMs = await measureAiLoadingState(browser, baseUrl, jwtSecret);
-    report('индикатор проверки ИИ', loadingDelayMs, 200, 'ms');
+    const measuredInteraction = await measureAiLoadingState(browser, baseUrl, jwtSecret);
+    report('индикатор проверки ИИ', measuredInteraction.loadingDelayMs, 200, 'ms');
+    report('отрисовка персонального плана', measuredInteraction.adaptiveOverviewMs,
+      BUDGET.adaptiveOverviewMs, 'ms');
+    report('предпросмотр персонального занятия', measuredInteraction.adaptivePreviewMs,
+      BUDGET.adaptivePreviewMs, 'ms');
 
     // A metric that was not collected is a broken measurement, not a pass.
     assert.ok(vitals.lcp > 0, 'LCP не измерен — наблюдатель не получил ни одной записи');

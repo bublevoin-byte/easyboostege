@@ -4,6 +4,7 @@
  * поэтому зависимости приходят импортом — импортированное имя остаётся живым и видит startDemo().
  */
 import {DEMO_MODE, SRV, registerProfileHook, registerStartHook} from './app.js';
+import {clearAdaptiveOverviewCache} from './adaptive-overview-cache.js';
 import {clearAdaptiveRuntime} from './adaptive-session-runtime.js';
 
 (function initializePrivacyControls(global) {
@@ -80,7 +81,7 @@ import {clearAdaptiveRuntime} from './adaptive-session-runtime.js';
   async function deleteAccount() {
     if (!global.confirm('Аккаунт, прогресс и ответы будут удалены без возможности восстановления. Продолжить?')) return;
     if (global.prompt('Для подтверждения введите DELETE') !== 'DELETE') return;
-    try { await api.remove('/api/v1/account', { confirmation: 'DELETE' }); clearAdaptiveRuntime(); global.localStorage.removeItem('eb_current'); global.location.reload(); }
+    try { await api.remove('/api/v1/account', { confirmation: 'DELETE' }); clearAdaptiveRuntime(); clearAdaptiveOverviewCache(global.localStorage); global.localStorage.removeItem('eb_current'); global.location.reload(); }
     catch (error) { global.alert(api.messageFor(error)); }
   }
   global.openPrivacy = openPrivacy;

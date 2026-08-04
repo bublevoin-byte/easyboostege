@@ -19,6 +19,12 @@ import {
   adaptiveDiagnosticClaimExpiresAt,
 } from '../adaptive-learning/diagnostic-claims.js';
 import { adaptiveLearningPlanRepositoryDto } from '../adaptive-learning/plan-dto.js';
+import {
+  ADAPTIVE_METRICS_HIGH_IMPACT_SKILLS,
+  adaptiveMetricsWindow,
+  emptyAdaptiveLearningMetricCounters,
+  finalizeAdaptiveLearningMetrics,
+} from '../adaptive-learning/metrics.js';
 import { adaptiveSpeakingTask } from '../public/adaptive-speaking-tasks.js';
 import { isMonotonicAdaptiveRetentionRefresh } from '../adaptive-learning/retention.js';
 import { adaptiveRepeatExecutionMatches } from '../adaptive-learning/repeat-execution.js';
@@ -2964,6 +2970,131 @@ export function createPostgresRepository(connectionString, {
     });
   }
 
+  async function getAdaptiveLearningMetrics({ now = new Date() } = {}) {
+    const window = adaptiveMetricsWindow(now);
+    const parameters = [new Date(window.from), new Date(window.to)];
+    return adaptiveRepeatableRead(async (client) => {
+      const sessions = await client.query(
+          `SELECT
+             COUNT(*)::integer AS created,
+             (COUNT(*) FILTER (WHERE started_at IS NOT NULL OR status IN ('in_progress', 'completed', 'abandoned')))::integer AS started,
+             (COUNT(*) FILTER (WHERE status = 'completed'))::integer AS completed,
+             COALESCE(SUM(learning_minutes), 0)::bigint AS planned_learning_minutes,
+             COALESCE(SUM(LEAST(learning_minutes, completed_learning_minutes)), 0)::bigint AS completed_planned_minutes,
+             (COUNT(*) FILTER (WHERE duration_minutes BETWEEN 15 AND 30))::integer AS duration_15_30_created,
+             (COUNT(*) FILTER (WHERE duration_minutes BETWEEN 15 AND 30 AND (started_at IS NOT NULL OR status IN ('in_progress', 'completed', 'abandoned'))))::integer AS duration_15_30_started,
+             (COUNT(*) FILTER (WHERE duration_minutes BETWEEN 15 AND 30 AND status = 'completed'))::integer AS duration_15_30_completed,
+             (COUNT(*) FILTER (WHERE duration_minutes BETWEEN 35 AND 60))::integer AS duration_35_60_created,
+             (COUNT(*) FILTER (WHERE duration_minutes BETWEEN 35 AND 60 AND (started_at IS NOT NULL OR status IN ('in_progress', 'completed', 'abandoned'))))::integer AS duration_35_60_started,
+             (COUNT(*) FILTER (WHERE duration_minutes BETWEEN 35 AND 60 AND status = 'completed'))::integer AS duration_35_60_completed,
+             (COUNT(*) FILTER (WHERE duration_minutes BETWEEN 65 AND 90))::integer AS duration_65_90_created,
+             (COUNT(*) FILTER (WHERE duration_minutes BETWEEN 65 AND 90 AND (started_at IS NOT NULL OR status IN ('in_progress', 'completed', 'abandoned'))))::integer AS duration_65_90_started,
+             (COUNT(*) FILTER (WHERE duration_minutes BETWEEN 65 AND 90 AND status = 'completed'))::integer AS duration_65_90_completed,
+             (COUNT(*) FILTER (WHERE duration_minutes BETWEEN 95 AND 120))::integer AS duration_95_120_created,
+             (COUNT(*) FILTER (WHERE duration_minutes BETWEEN 95 AND 120 AND (started_at IS NOT NULL OR status IN ('in_progress', 'completed', 'abandoned'))))::integer AS duration_95_120_started,
+             (COUNT(*) FILTER (WHERE duration_minutes BETWEEN 95 AND 120 AND status = 'completed'))::integer AS duration_95_120_completed,
+             (COUNT(*) FILTER (WHERE commercial_scope = 'free_demo'))::integer AS scope_free_demo,
+             (COUNT(*) FILTER (WHERE commercial_scope = 'base'))::integer AS scope_base,
+             (COUNT(*) FILTER (WHERE commercial_scope = 'premium'))::integer AS scope_premium,
+             (COUNT(*) FILTER (WHERE replacement->>'reason' IN ('too_difficult', 'too_easy', 'not_relevant', 'accessibility', 'excluded')))::integer AS adjusted,
+             (COUNT(*) FILTER (WHERE replacement->>'reason' = 'too_difficult'))::integer AS reason_too_difficult,
+             (COUNT(*) FILTER (WHERE replacement->>'reason' = 'too_easy'))::integer AS reason_too_easy,
+             (COUNT(*) FILTER (WHERE replacement->>'reason' = 'not_relevant'))::integer AS reason_not_relevant,
+             (COUNT(*) FILTER (WHERE replacement->>'reason' = 'accessibility'))::integer AS reason_accessibility,
+             (COUNT(*) FILTER (WHERE replacement->>'reason' = 'excluded'))::integer AS reason_excluded
+           FROM adaptive_learning_sessions session
+           WHERE session.created_at >= $1 AND session.created_at <= $2`,
+        parameters,
+      );
+      const events = await client.query(
+          `SELECT
+             COUNT(*)::integer AS learning_block_completions,
+             (COUNT(*) FILTER (WHERE event.evidence_quality = 'client_reported'))::integer AS quality_client_reported,
+             (COUNT(*) FILTER (WHERE event.evidence_quality = 'server_verified_assisted'))::integer AS quality_server_verified_assisted,
+             (COUNT(*) FILTER (WHERE event.evidence_quality = 'server_verified_unassisted'))::integer AS quality_server_verified_unassisted,
+             (COUNT(*) FILTER (WHERE event.evidence_context = 'exam_practice'))::integer AS context_exam_practice,
+             (COUNT(*) FILTER (WHERE event.evidence_context = 'planned_practice'))::integer AS context_planned_practice,
+             (COUNT(*) FILTER (WHERE event.evidence_context = 'scheduled_review'))::integer AS context_scheduled_review,
+             (COUNT(*) FILTER (WHERE event.evidence_context = 'ai_assisted_review'))::integer AS context_ai_assisted_review,
+             (COUNT(*) FILTER (WHERE repeat.stage IN ('day_1', 'day_7')))::integer AS retention_observed,
+             (COUNT(*) FILTER (WHERE repeat.stage IN ('day_1', 'day_7') AND attempt.passed))::integer AS retention_passed,
+             (COUNT(*) FILTER (WHERE repeat.stage = 'day_1'))::integer AS day_1_observed,
+             (COUNT(*) FILTER (WHERE repeat.stage = 'day_1' AND attempt.passed))::integer AS day_1_passed,
+             (COUNT(*) FILTER (WHERE repeat.stage = 'day_7'))::integer AS day_7_observed,
+             (COUNT(*) FILTER (WHERE repeat.stage = 'day_7' AND attempt.passed))::integer AS day_7_passed
+           FROM adaptive_learning_session_events event
+           LEFT JOIN voice_tutor_repeat_attempts attempt
+             ON event.source_type = 'voice_tutor_repeat' AND attempt.id::text = event.source_ref
+           LEFT JOIN voice_tutor_repeats repeat ON repeat.id = attempt.repeat_id
+           WHERE event.block_kind = 'learning'
+             AND event.created_at >= $1 AND event.created_at <= $2`,
+        parameters,
+      );
+      const diagnostics = await client.query(
+          `SELECT
+             (COUNT(*) FILTER (WHERE catalog_version = 'ege-short-diagnostic-v1'))::integer AS short_completed,
+             (COUNT(*) FILTER (WHERE catalog_version = 'ege-deep-diagnostic-v1'))::integer AS deep_completed
+           FROM adaptive_diagnostic_sessions diagnostic
+           WHERE diagnostic.status = 'completed'
+             AND diagnostic.completed_at >= $1 AND diagnostic.completed_at <= $2`,
+        parameters,
+      );
+      const estimates = await client.query(
+          `SELECT
+             COUNT(*)::integer AS skill_estimates,
+             (COUNT(*) FILTER (WHERE skill_id::text = ANY($3::text[]) AND uncertainty >= 70))::integer AS high_impact_high_uncertainty,
+             (COUNT(*) FILTER (WHERE status = 'established'))::integer AS established_skills
+           FROM adaptive_learning_skill_estimates estimate
+           WHERE estimate.updated_at >= $1 AND estimate.updated_at <= $2`,
+        [...parameters, ADAPTIVE_METRICS_HIGH_IMPACT_SKILLS],
+      );
+      const number = (row, name) => Number(row?.[name] || 0);
+      const counters = emptyAdaptiveLearningMetricCounters();
+      const session = sessions.rows[0];
+      counters.sessions.created = number(session, 'created');
+      counters.sessions.started = number(session, 'started');
+      counters.sessions.completed = number(session, 'completed');
+      counters.sessions.plannedLearningMinutes = number(session, 'planned_learning_minutes');
+      counters.sessions.completedPlannedMinutes = number(session, 'completed_planned_minutes');
+      for (const bucket of ['15_30', '35_60', '65_90', '95_120']) {
+        for (const state of ['created', 'started', 'completed']) {
+          counters.sessions.byDuration[bucket][state] = number(session, `duration_${bucket}_${state}`);
+        }
+      }
+      counters.commercialScopes.free_demo = number(session, 'scope_free_demo');
+      counters.commercialScopes.base = number(session, 'scope_base');
+      counters.commercialScopes.premium = number(session, 'scope_premium');
+      counters.adjustments.sessions = number(session, 'adjusted');
+      for (const reason of ['too_difficult', 'too_easy', 'not_relevant', 'accessibility', 'excluded']) {
+        counters.adjustments.reasons[reason] = number(session, `reason_${reason}`);
+      }
+
+      const event = events.rows[0];
+      counters.evidence.learningBlockCompletions = number(event, 'learning_block_completions');
+      for (const quality of ['client_reported', 'server_verified_assisted', 'server_verified_unassisted']) {
+        counters.evidence.byQuality[quality] = number(event, `quality_${quality}`);
+      }
+      for (const context of ['exam_practice', 'planned_practice', 'scheduled_review', 'ai_assisted_review']) {
+        counters.evidence.byContext[context] = number(event, `context_${context}`);
+      }
+      counters.retention.observed = number(event, 'retention_observed');
+      counters.retention.passed = number(event, 'retention_passed');
+      for (const stage of ['day_1', 'day_7']) {
+        counters.retention[stage].observed = number(event, `${stage}_observed`);
+        counters.retention[stage].passed = number(event, `${stage}_passed`);
+      }
+
+      const diagnostic = diagnostics.rows[0];
+      counters.diagnostics.shortCompleted = number(diagnostic, 'short_completed');
+      counters.diagnostics.deepCompleted = number(diagnostic, 'deep_completed');
+      const estimate = estimates.rows[0];
+      counters.profile.skillEstimates = number(estimate, 'skill_estimates');
+      counters.profile.highImpactHighUncertaintySkills = number(estimate, 'high_impact_high_uncertainty');
+      counters.profile.establishedSkills = number(estimate, 'established_skills');
+      return finalizeAdaptiveLearningMetrics(counters, { window });
+    });
+  }
+
   async function readAdaptiveDiagnostic(queryable, username, diagnosticId = null) {
     const result = await queryable.query(
       `SELECT diagnostic.*,
@@ -4008,6 +4139,7 @@ export function createPostgresRepository(connectionString, {
     getAdaptiveLearningWeekUsage,
     getAdaptiveLearningCommercialUsage,
     getAdaptiveLearningCompletedSessionReports,
+    getAdaptiveLearningMetrics,
     startAdaptiveDiagnostic,
     getAdaptiveDiagnosticStartClaim,
     getCurrentAdaptiveDiagnostic,

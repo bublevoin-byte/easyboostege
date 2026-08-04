@@ -465,6 +465,11 @@ export function createAdaptiveLearningRoutes({
       throw Object.assign(new Error('ADAPTIVE_GOAL_REQUIRED'), { status: 409, code: 'ADAPTIVE_GOAL_REQUIRED' });
     }
     requireSessionAccess(result.access, { durationMinutes });
+    if (result.profile.needsDiagnostic) {
+      throw Object.assign(new Error('ADAPTIVE_INITIAL_DIAGNOSTIC_REQUIRED'), {
+        status: 409, code: 'ADAPTIVE_INITIAL_DIAGNOSTIC_REQUIRED',
+      });
+    }
     const weekStart = adaptiveSessionWeekStart(instant);
     const weekUsage = await db.getAdaptiveLearningWeekUsage(username, weekStart);
     return buildAdaptiveSessionPreview({
@@ -483,6 +488,7 @@ export function createAdaptiveLearningRoutes({
   function sessionError(res, error) {
     const known = {
       ADAPTIVE_GOAL_REQUIRED: [409, 'ADAPTIVE_GOAL_REQUIRED'],
+      ADAPTIVE_INITIAL_DIAGNOSTIC_REQUIRED: [409, 'ADAPTIVE_INITIAL_DIAGNOSTIC_REQUIRED'],
       ADAPTIVE_SESSION_COVERAGE_GAP: [409, 'ADAPTIVE_SESSION_COVERAGE_GAP'],
       ADAPTIVE_SESSION_NO_CONTENT: [409, 'ADAPTIVE_SESSION_NO_CONTENT'],
       ADAPTIVE_SESSION_NO_REPLACEMENT: [409, 'ADAPTIVE_SESSION_NO_REPLACEMENT'],
@@ -546,6 +552,10 @@ export function createAdaptiveLearningRoutes({
       });
       if (replay) {
         await requireStoredSessionAccess(req.user, replay);
+        const replayOverview = await overview(req.user);
+        if (replayOverview.profile.needsDiagnostic) {
+          throw new Error('ADAPTIVE_INITIAL_DIAGNOSTIC_REQUIRED');
+        }
         return res.json({ created: false, replayed: true, session: replay });
       }
       requireSessionAccess(access, { durationMinutes: parsed.data.durationMinutes });
@@ -919,7 +929,9 @@ export function createAdaptiveLearningRoutes({
       }
       const access = await requireDiagnosticAccess(req.user, requestedPolicy);
       const currentOverview = await overview(req.user);
-      if (depth === 'short' && !currentOverview.profile.needsDiagnostic) {
+      const shortDiagnosticDue = currentOverview.profile.needsDiagnostic
+        || currentOverview.retention?.rediagnostic?.due;
+      if (depth === 'short' && !shortDiagnosticDue) {
         return res.json({ required: false, diagnostic: null, item: null, profile: currentOverview.profile });
       }
       const currentVersion = catalogVersion;

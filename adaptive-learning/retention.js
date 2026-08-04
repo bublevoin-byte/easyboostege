@@ -129,7 +129,6 @@ export function applyAdaptiveRetentionState(profile, retention) {
     };
   });
   if (retention?.rediagnostic?.due) {
-    next.needsDiagnostic = true;
     next.explanationCodes = [...new Set([...(next.explanationCodes || []), 'rediagnostic_due'])];
   }
   return next;
@@ -206,14 +205,13 @@ export function isMonotonicAdaptiveRetentionRefresh(candidate, persistedProfile,
       ? !sameNumber(candidate[camel], persistedProfile[snake])
       : candidate[camel] !== persistedProfile[snake]
   ))) return false;
-  const diagnosticProgressed = candidate.needsDiagnostic === true
-    && persistedProfile.needs_diagnostic !== true
-    && candidate.explanationCodes?.includes('rediagnostic_due');
   const persistedCodes = [...new Set(Array.isArray(persistedProfile.explanation_codes)
     ? persistedProfile.explanation_codes : [])].sort();
+  const rediagnosticProgressed = !persistedCodes.includes('rediagnostic_due')
+    && candidate.explanationCodes?.includes('rediagnostic_due');
   const expectedCodes = [...new Set([
     ...persistedCodes,
-    ...(diagnosticProgressed ? ['rediagnostic_due'] : []),
+    ...(rediagnosticProgressed ? ['rediagnostic_due'] : []),
   ])].sort();
   const candidateCodes = [...new Set(Array.isArray(candidate.explanationCodes)
     ? candidate.explanationCodes : [])].sort();
@@ -241,7 +239,6 @@ export function isMonotonicAdaptiveRetentionRefresh(candidate, persistedProfile,
     if (after === 3 && (!candidateExpiry || (before === 3 && candidateExpiry !== persistedExpiry))) return false;
     if (after < 3 && candidateExpiry !== persistedExpiry) return false;
   }
-  if (candidate.needsDiagnostic !== Boolean(persistedProfile.needs_diagnostic)
-    && !diagnosticProgressed) return false;
-  return progressed || diagnosticProgressed;
+  if (candidate.needsDiagnostic !== Boolean(persistedProfile.needs_diagnostic)) return false;
+  return progressed || rediagnosticProgressed;
 }

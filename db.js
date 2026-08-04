@@ -98,6 +98,7 @@ export const finishAdaptiveLearningSession = (...args) => repository.finishAdapt
 export const getAdaptiveLearningWeekUsage = (...args) => repository.getAdaptiveLearningWeekUsage(...args);
 export const getAdaptiveLearningCommercialUsage = (...args) => repository.getAdaptiveLearningCommercialUsage(...args);
 export const getAdaptiveLearningCompletedSessionReports = (...args) => repository.getAdaptiveLearningCompletedSessionReports(...args);
+export const getAdaptiveLearningMetrics = (...args) => repository.getAdaptiveLearningMetrics(...args);
 export const startAdaptiveDiagnostic = (...args) => repository.startAdaptiveDiagnostic(...args);
 export const getAdaptiveDiagnosticStartClaim = (...args) => repository.getAdaptiveDiagnosticStartClaim(...args);
 export const getCurrentAdaptiveDiagnostic = (...args) => repository.getCurrentAdaptiveDiagnostic(...args);

@@ -2,6 +2,7 @@
 import {back,cur,nav,prepareScreen,registerRouteHook,show,tab} from './router.js';
 import {configureTts,lStop} from './tts.js';
 import {decorateCoreVocabulary} from './modules/core-voice-catalog.js';
+import {clearAdaptiveOverviewCache} from './adaptive-overview-cache.js';
 import {clearAdaptiveRuntime} from './adaptive-session-runtime.js';
 /*
  * Оболочка не знает, что умеет экран: она знает только, что его код приезжает отдельным чанком.
@@ -247,6 +248,7 @@ async function logout(){
   try{if(SRV)await auth.logout()}catch(_){}
   TOKEN='';
   clearAdaptiveRuntime();
+  clearAdaptiveOverviewCache(localStorage);
   try{localStorage.removeItem('eb_current');localStorage.removeItem('eb_tg_code')}catch(_){}
   location.reload()
 }

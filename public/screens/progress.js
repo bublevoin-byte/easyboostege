@@ -4,13 +4,15 @@
  * Числа он берёт из того же состояния, что и плитки главного экрана, — считать заново нечего.
  */
 import {registerRouteHook} from '../router.js';
+import {readAdaptiveOverviewCache,writeAdaptiveOverviewCache} from '../adaptive-overview-cache.js';
 import {adaptiveRuntimeSnapshot,advanceAdaptiveBreak,beginAdaptiveBlock,completeAdaptiveVoiceTutorRepeat,finishAdaptiveSession,resumeAdaptiveExecution} from '../adaptive-session-runtime.js';
-import {S,apiGet,apiMessage,apiPost,apiPostIdempotent,apiPut,progressModule,setTxt,setW} from '../app.js';
+import {S,apiGet,apiMessage,apiPost,apiPostIdempotent,apiPut,progressModule,registerStartHook,setTxt,setW} from '../app.js';
 
 const BAR_IDS={words:'pb_words',gram:'pb_gram',read:'pb_read',listen:'pb_listen',speak:'pb_speak'};
-function bindAdaptivePlanEntries(){
+function syncAdaptivePlanEntries(){
+  const enabled=window.__sub?.features?.adaptive_learning===true;
   ['home_adaptive_plan','profile_adaptive_plan'].forEach(function(id){
-    const entry=document.getElementById(id);if(!entry||entry.dataset.bound)return;entry.dataset.bound='true';
+    const entry=document.getElementById(id);if(!entry)return;entry.hidden=!enabled;if(!enabled||entry.dataset.bound)return;entry.dataset.bound='true';
     entry.addEventListener('click',function(){window.tab('scr10');requestAnimationFrame(function(){const destination=document.getElementById('adaptive_plan_title');if(!destination||destination.closest('[hidden]'))return;destination.focus();destination.scrollIntoView({block:'start'})})});
   });
 }
@@ -28,6 +30,8 @@ function sessionIdempotencyKey(kind){return globalThis.crypto&&typeof globalThis
 const adaptiveModuleLabels={vocabulary:'Лексика',grammar:'Грамматика',reading:'Чтение',listening:'Аудирование',writing:'Письмо',speaking:'Говорение'};
 const adaptiveReasonLabels={high_uncertainty:'нужно уточнить уровень',due_review:'пора проверить сохранение навыка',critical_retention_expiry:'срочное повторение скоро потеряет актуальность',target_gap:'есть разрыв до цели',high_ege_impact:'сильно влияет на ЕГЭ',deadline_pressure:'экзамен уже близко',maintenance:'поддерживаем навык'};
 let adaptiveAccessState=null;
+function adaptiveOverviewOwner(){try{const owner=localStorage.getItem('eb_current');return typeof owner==='string'&&owner.length>0&&owner.length<=64?owner:null}catch(_){return null}}
+function setAdaptiveReadOnly(readOnly){const root=document.getElementById('adaptive_plan');if(!root)return;root.dataset.mode=readOnly?'offline_read_only':'online';if(!readOnly){root.querySelectorAll('[data-adaptive-readonly-disabled="true"]').forEach(function(control){control.disabled=false;delete control.dataset.adaptiveReadonlyDisabled});return}root.querySelectorAll('input,select,textarea,button').forEach(function(control){if(!control.disabled){control.disabled=true;control.dataset.adaptiveReadonlyDisabled='true'}})}
 function adaptiveCommercialMessage(error){const code=String(error&&error.code||'');if(code==='ADAPTIVE_FREE_DEMO_USED')return'Бесплатное пробное занятие уже использовано. Для следующих персональных занятий нужен Base.';if(code==='ADAPTIVE_BASE_REQUIRED')return'Постоянный учебный план и выбор длительности доступны с Base.';if(code==='ADAPTIVE_PREMIUM_REQUIRED')return'Глубокая диагностика и подробные отчёты доступны с Premium.';if(code==='ADAPTIVE_FREE_DIAGNOSTIC_USED')return'Бесплатная короткая диагностика уже пройдена. Продолжение доступно с Base.';return apiMessage(error,'request')}
 function showAdaptivePaywall(message){const paywall=document.getElementById('adaptive_paywall');const copy=document.getElementById('adaptive_paywall_copy');if(!paywall||!copy)return;paywall.hidden=false;if(message)copy.textContent=message}
 function applyAdaptiveDurationAccess(){const access=adaptiveAccessState;if(!access)return;const free=access.tier==='free';const used=Boolean(access.usage&&access.usage.demoSessionUsed);const locked=free&&used;const custom=document.getElementById('adaptive_session_custom');const preview=document.getElementById('adaptive_session_preview');document.querySelectorAll('input[name="adaptive_session_duration"]').forEach(function(input){if(free&&input.value==='15'&&!used)input.checked=true;else if(free)input.checked=false;input.disabled=locked||(free&&input.value!=='15')});if(custom){custom.disabled=free;custom.value=free?'':custom.value}if(preview)preview.disabled=locked}
@@ -43,6 +47,8 @@ function drawAdaptiveForecast(plan){
   choices.replaceChildren();(forecast.choices||[]).forEach(function(choice){let label='';if(choice.type==='increase_weekly_time')label=choice.constraintCode==='maximum_supported_weekly_time'?'Поставить '+choice.weeklyMinutes+' минут в неделю и скорректировать цель':'Увеличить время до '+choice.weeklyMinutes+' минут в неделю';else if(choice.type==='adjust_target_score')label='Скорректировать цель до '+choice.targetScore+' баллов';else if(choice.type==='update_exam_date')label='Выбрать новую дату экзамена';if(!label)return;const button=text('button',label);button.type='button';button.className='adaptive-action adaptive-action--quiet';button.addEventListener('click',function(){if(choice.type==='increase_weekly_time'){document.getElementById('adaptive_weekly_minutes').value=choice.weeklyMinutes;document.getElementById('adaptive_weekly_minutes').focus()}else if(choice.type==='adjust_target_score'){document.getElementById('adaptive_target_score').value=choice.targetScore;document.getElementById('adaptive_target_score').focus()}else document.getElementById('adaptive_exam_date').focus()});choices.appendChild(button)});
 }
 
+function adaptiveDiagnosticDue(payload){return Boolean(payload&&((payload.profile&&payload.profile.needsDiagnostic)||(payload.retention&&payload.retention.rediagnostic&&payload.retention.rediagnostic.due)))}
+
 function drawAdaptivePlan(payload){
   const root=document.getElementById('adaptive_plan');const summary=document.getElementById('adaptive_plan_summary');if(!root||!summary)return;
   const goal=payload&&payload.goal;const profile=payload&&payload.profile?payload.profile:{};
@@ -52,11 +58,11 @@ function drawAdaptivePlan(payload){
   const establishedSkillCount=Math.max(0,Math.min(12,Number(profile.establishedSkillCount)||0));
   const modules=Array.isArray(profile.modules)?profile.modules.filter(function(module){return module.evidenceCount>0}).sort(function(first,second){return first.mastery-second.mastery}):[];
   const weakest=modules[0];const state=establishedSkillCount===12&&!profile.preliminary?'Профиль подтверждён':'Профиль предварительный';
-  const diagnostic=profile.needsDiagnostic?' Нужна короткая диагностика для уточнения.':'';
+  const scheduled=Boolean(payload&&payload.retention&&payload.retention.rediagnostic&&payload.retention.rediagnostic.due&&!profile.needsDiagnostic);const diagnostic=profile.needsDiagnostic?' Нужна короткая диагностика для уточнения.':scheduled?' Пора обновить короткую диагностику; занятия остаются доступны.':'';
   const assisted=Number(profile.assistedEvidenceCount)>0&&establishedSkillCount<12?' Результаты с подсказкой не подтверждают владение навыком.':'';
   summary.textContent=state+' · подтверждено навыков: '+establishedSkillCount+' из 12 · уверенность '+confidence+'% · данных: '+observed+'.'+(weakest?' Сейчас важнее всего: '+weakest.id+' ('+weakest.mastery+'%).':'')+assisted+diagnostic;
   drawAdaptiveForecast(payload&&payload.plan);
-  const access=payload&&payload.access||adaptiveAccessState;const start=document.getElementById('adaptive_diagnostic_start');if(start)start.hidden=!profile.needsDiagnostic||!(access&&access.capabilities&&access.capabilities.shortDiagnostic);
+  const access=payload&&payload.access||adaptiveAccessState;const start=document.getElementById('adaptive_diagnostic_start');if(start)start.hidden=!adaptiveDiagnosticDue(payload)||!(access&&access.capabilities&&access.capabilities.shortDiagnostic);
 }
 
 let adaptiveSessionPreview=null;
@@ -174,11 +180,11 @@ async function renderAdaptivePlan(){
     form.addEventListener('submit',async function(event){event.preventDefault();if(!form.reportValidity()){errors.textContent='Проверьте целевой балл, дату экзамена и доступное время в неделю.';return}const button=form.querySelector('button[type="submit"]');button.disabled=true;errors.textContent='';notice.textContent='Сохраняем цель…';
       const payload={targetExam:'ege_english',targetScore:Number(document.getElementById('adaptive_target_score').value),examDate:document.getElementById('adaptive_exam_date').value,weeklyMinutes:Number(document.getElementById('adaptive_weekly_minutes').value)};
       const key=form.dataset.pendingKey||goalIdempotencyKey();form.dataset.pendingKey=key;
-      try{const saved=await apiPut('/api/v1/adaptive-learning/goal',payload,{'Idempotency-Key':key});delete form.dataset.pendingKey;drawAdaptivePlan(saved);notice.textContent='Цель сохранена.'}
+      try{const saved=await apiPut('/api/v1/adaptive-learning/goal',payload,{'Idempotency-Key':key});delete form.dataset.pendingKey;drawAdaptivePlan(saved);try{const refreshed=await apiGet('/api/v1/adaptive-learning/overview');drawAdaptivePlan(refreshed);writeAdaptiveOverviewCache(localStorage,adaptiveOverviewOwner(),refreshed)}catch(_){}notice.textContent='Цель сохранена.'}
       catch(error){errors.textContent=adaptiveCommercialMessage(error);notice.textContent='';if(['ADAPTIVE_FREE_DEMO_USED','ADAPTIVE_BASE_REQUIRED'].includes(String(error&&error.code)))showAdaptivePaywall(errors.textContent)}finally{button.disabled=Boolean(adaptiveAccessState&&adaptiveAccessState.tier==='free'&&adaptiveAccessState.usage&&adaptiveAccessState.usage.demoSessionUsed)}
     });
   }
-  try{const payload=await apiGet('/api/v1/adaptive-learning/overview');drawAdaptivePlan(payload);notice.textContent='';if(payload.goal)await resumeAdaptiveSession();else drawAdaptiveSession(null);if(payload.profile&&payload.profile.needsDiagnostic)await resumeAdaptiveDiagnostic(payload.retention);else drawAdaptiveDiagnostic(null)}catch(error){notice.textContent='План сейчас недоступен онлайн. Сохранённый прогресс остаётся на устройстве.'}
+  try{const payload=await apiGet('/api/v1/adaptive-learning/overview');setAdaptiveReadOnly(false);drawAdaptivePlan(payload);writeAdaptiveOverviewCache(localStorage,adaptiveOverviewOwner(),payload);notice.textContent='';if(payload.goal)await resumeAdaptiveSession();else drawAdaptiveSession(null);if(adaptiveDiagnosticDue(payload))await resumeAdaptiveDiagnostic(payload.retention);else drawAdaptiveDiagnostic(null)}catch(error){const cached=readAdaptiveOverviewCache(localStorage,adaptiveOverviewOwner());if(cached){drawAdaptivePlan(cached);drawAdaptiveSession(null);drawAdaptiveDiagnostic(null);setAdaptiveReadOnly(true);notice.textContent='Показан последний сохранённый план только для просмотра. Чтобы изменить цель или начать занятие, восстановите сеть.'}else notice.textContent='План сейчас недоступен онлайн. Сохранённого плана для просмотра нет.'}
 }
 
 async function submitRepeat(repeat,input,button,notice){
@@ -215,7 +221,8 @@ function drawRecoveryMap(payload){
 
 async function renderRecoveryMap(){const root=document.getElementById('voice_recovery_map');if(!root)return;try{drawRecoveryMap(await apiGet('/api/v1/voice-tutor/recovery-map'))}catch(error){root.replaceChildren(text('div','Карта освоенных ошибок','font-weight:800;font-size:15px;color:#2B2B2B;'),text('div',apiMessage(error,'request'),'margin-top:8px;font-weight:600;font-size:12px;color:#6A6E75;'))}}
 
-bindAdaptivePlanEntries();
+syncAdaptivePlanEntries();
+registerStartHook(syncAdaptivePlanEntries);
 registerRouteHook(function(id){if(id==='scr10')renderProgress()});
 window.addEventListener('adaptive-recovery-launch',function(){renderRecoveryMap()});
 

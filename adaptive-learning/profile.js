@@ -150,8 +150,9 @@ function repeatObservation(attempt) {
 }
 
 function diagnosticObservation(response, diagnosticRegistry) {
+  const catalogVersion = response.catalog_version ?? response.catalogVersion;
   const item = getDiagnosticItem(
-    response.catalog_version ?? response.catalogVersion,
+    catalogVersion,
     response.item_id ?? response.itemId,
     diagnosticRegistry,
   );
@@ -161,17 +162,46 @@ function diagnosticObservation(response, diagnosticRegistry) {
   const storedEvidenceQuality = response.evidence_quality ?? response.evidenceQuality ?? item.evidenceQuality;
   if (storedEvidenceQuality !== item.evidenceQuality) return null;
   const assisted = item.evidenceQuality === 'assisted';
+  const productiveChoiceOnly = assisted && ['writing', 'speaking'].includes(item.module);
   return {
     skillId: skill.id,
     score: response.correct ? 100 : 0,
     weight: assisted
       ? ADAPTIVE_EVIDENCE_WEIGHTS.assistedRecovery
       : ADAPTIVE_EVIDENCE_WEIGHTS.diagnosticAnswer,
-    kind: assisted ? 'diagnostic_listening_assisted' : 'diagnostic_answer',
+    kind: productiveChoiceOnly
+      ? 'diagnostic_productive_preliminary'
+      : assisted ? 'diagnostic_listening_assisted' : 'diagnostic_answer',
     quality: assisted ? 'assisted' : 'independent',
     independent: !assisted,
+    diagnosticFamily: `${item.skillId}:${item.id}`,
     observedAt: iso(response.answered_at ?? response.answeredAt),
   };
+}
+
+function downgradeRepeatedDiagnosticEvidence(observations) {
+  const seen = new Set();
+  const ordered = observations.map((observation, index) => ({ observation, index }))
+    .sort((left, right) => (
+      String(left.observation.observedAt || '').localeCompare(String(right.observation.observedAt || ''))
+      || left.index - right.index
+    ));
+  const replacements = new Map();
+  for (const { observation, index } of ordered) {
+    if (!observation.independent || !observation.diagnosticFamily) continue;
+    if (!seen.has(observation.diagnosticFamily)) {
+      seen.add(observation.diagnosticFamily);
+      continue;
+    }
+    replacements.set(index, {
+      ...observation,
+      weight: ADAPTIVE_EVIDENCE_WEIGHTS.assistedRecovery,
+      kind: 'diagnostic_repeat',
+      quality: 'assisted',
+      independent: false,
+    });
+  }
+  return observations.map((observation, index) => replacements.get(index) || observation);
 }
 
 function evidenceQualityFor(observations) {
@@ -185,6 +215,8 @@ function explanationFor(observations) {
   if (!observations.length) return 'no_evidence';
   const kinds = new Set(observations.map((item) => item.kind));
   if (kinds.has('retention_check')) return 'retention_evidence';
+  if (kinds.has('diagnostic_repeat')) return 'repeated_diagnostic_item';
+  if (kinds.has('diagnostic_productive_preliminary')) return 'productive_choice_only';
   if (kinds.has('diagnostic_listening_assisted')) return 'assisted_local_tts_diagnostic';
   if (kinds.has('diagnostic_answer')) return 'diagnostic_evidence';
   if (kinds.has('assisted_recovery') && kinds.size > 1) return 'mixed_with_assistance';
@@ -210,12 +242,12 @@ export function buildAdaptiveLearningProfile({
     attempts, recoveries, repeatAttempts, diagnosticResponses,
     diagnosticCompletions: supportedDiagnosticCompletions,
   });
-  const observations = [
+  const observations = downgradeRepeatedDiagnosticEvidence([
     ...attempts.map(attemptObservation),
     ...recoveries.map(recoveryObservation),
     ...repeatAttempts.map(repeatObservation),
     ...diagnosticResponses.map((response) => diagnosticObservation(response, diagnosticRegistry)),
-  ].filter(Boolean);
+  ].filter(Boolean));
 
   const skills = SKILLS.map((skill) => {
     const relevant = observations.filter((item) => item.skillId === skill.id);

@@ -233,6 +233,7 @@ async function runE2E() {
         JWT_SECRET: jwtSecret,
         TELEGRAM_BOT_TOKEN: '',
         ADMIN_TELEGRAM_ID: '',
+        ADAPTIVE_LEARNING_ENABLED: 'false',
         XAI_API_KEY: 'e2e-provider-boundary-key',
         XAI_ENABLED: 'true',
         XAI_VOICE_MODEL: 'grok-voice-think-fast-1.0',
@@ -329,6 +330,8 @@ async function runE2E() {
     });
     await authenticatedPage.goto(baseUrl, { waitUntil: 'networkidle' });
     await authenticatedPage.locator('#scr1.on').waitFor({ state: 'visible', timeout: 5_000 });
+    assert.equal(await authenticatedPage.locator('#home_adaptive_plan').isHidden(), true);
+    assert.equal(await authenticatedPage.locator('#profile_adaptive_plan').isHidden(), true);
     console.log('e2e: authenticated session restored');
 
     await authenticatedPage.evaluate(() => window.EasyBoostSync.setBaseline({ words: { known: 0 } }));
@@ -442,16 +445,23 @@ async function runE2E() {
     });
     const voiceButton = authenticatedPage.locator('#voice_tutor_grammar_0 .voiceTutorTrigger');
     await voiceButton.waitFor({ state: 'visible', timeout: 5_000 });
-    const providerFallbackResponsePromise = authenticatedPage.waitForResponse((response) => (
-      response.request().method() === 'POST'
-        && response.url().includes('/voice-tutor/sessions/')
-        && response.url().endsWith('/fallback')
-    ));
-    await voiceButton.click();
+    await authenticatedPage.evaluate(() => {
+      const state = document.getElementById('voiceTutorState');
+      window.__voiceTutorStateHistory = [];
+      const capture = () => window.__voiceTutorStateHistory.push(state.textContent || '');
+      capture();
+      new MutationObserver(capture).observe(state, { childList: true, subtree: true, characterData: true });
+    });
+    const [providerFallbackResponse] = await Promise.all([
+      authenticatedPage.waitForResponse((response) => (
+        response.request().method() === 'POST'
+          && response.url().includes('/voice-tutor/sessions/')
+          && response.url().endsWith('/fallback')
+      )),
+      voiceButton.click(),
+    ]);
     const voiceSheet = authenticatedPage.getByRole('dialog', { name: 'Разбор ошибки с ИИ' });
     await voiceSheet.waitFor({ state: 'visible', timeout: 5_000 });
-    await voiceSheet.getByText('Голосовой репетитор подключён.').waitFor({ state: 'visible', timeout: 5_000 });
-    const tutorState = voiceSheet.locator('#voiceTutorState');
     await authenticatedPage.evaluate(async () => {
       await fetch('/api/v1/privacy/consent', {
         method: 'PUT',
@@ -459,15 +469,19 @@ async function runE2E() {
         body: JSON.stringify({ text_processing: false, voice_processing: true }),
       });
     });
-    await authenticatedPage.waitForFunction((fragment) => document.querySelector('#voiceTutorState')?.textContent?.includes(fragment), 'Past Simple — завершённое действие', { timeout: 5_000 });
-    assert.match(await tutorState.innerText(), /Past Simple — завершённое действие/u);
-    await authenticatedPage.waitForFunction((fragment) => document.querySelector('#voiceTutorState')?.textContent?.includes(fragment), 'I _____ him yesterday');
-    assert.match(await tutorState.innerText(), /I _____ him yesterday/u);
-    await authenticatedPage.waitForFunction((fragment) => document.querySelector('#voiceTutorState')?.textContent?.includes(fragment), 'While I _____ dinner');
-    assert.match(await tutorState.innerText(), /While I _____ dinner/u);
-    await authenticatedPage.waitForFunction((fragment) => document.querySelector('#voiceTutorState')?.textContent?.includes(fragment), 'правило проверено на новом примере');
-    assert.match(await tutorState.innerText(), /правило проверено на новом примере/u);
-    const providerFallbackResponse = await providerFallbackResponsePromise;
+    const expectedTutorStates = [
+      'Past Simple — завершённое действие',
+      'I _____ him yesterday',
+      'While I _____ dinner',
+      'правило проверено на новом примере',
+    ];
+    await authenticatedPage.waitForFunction((fragments) => fragments.every((fragment) => (
+      window.__voiceTutorStateHistory.some((value) => value.includes(fragment))
+    )), expectedTutorStates, { timeout: 5_000 });
+    const tutorStateHistory = await authenticatedPage.evaluate(() => window.__voiceTutorStateHistory);
+    for (const fragment of expectedTutorStates) {
+      assert.ok(tutorStateHistory.some((value) => value.includes(fragment)), `missing tutor state: ${fragment}`);
+    }
     assert.equal(providerFallbackResponse.status(), 200);
     assert.equal((await providerFallbackResponse.json()).mode, 'local');
     await authenticatedPage.waitForFunction(async () => {

@@ -21,6 +21,7 @@ import {
   SHORT_DIAGNOSTIC_CATALOG,
 } from '../adaptive-learning/diagnostic-catalog.js';
 import { createFileRepository } from '../storage/file-repository.js';
+import { completeShortAdaptiveDiagnostic } from './support/adaptive-diagnostic-public.js';
 
 const STARTED_AT = new Date('2026-08-04T09:00:00.000Z');
 
@@ -122,6 +123,7 @@ function renderDiagnosticDom(screenSource, payload) {
       createTextNode(value) { return { textContent: value }; },
     },
     window: { addEventListener() {} },
+    registerStartHook() {},
     console,
   };
   vm.runInNewContext(executable, context);
@@ -684,8 +686,11 @@ test('bounded adaptive run stops, completes idempotently and yields an explicitl
     assert.ok(result.result.confidence > 0);
     assert.equal(result.profile.needsDiagnostic, false);
     assert.equal(result.profile.preliminary, true);
-    assert.ok(result.profile.independentEvidenceCount >= 8);
-    assert.ok(result.profile.assistedEvidenceCount >= 1);
+    assert.ok(result.profile.independentEvidenceCount >= 5);
+    assert.ok(result.profile.assistedEvidenceCount >= 5);
+    assert.ok(result.profile.skills
+      .filter((skill) => skill.module === 'writing' || skill.module === 'speaking')
+      .every((skill) => skill.independentEvidenceCount === 0));
 
     await repository.recordModuleAttempt(owner, {
       id: crypto.randomUUID(),
@@ -855,21 +860,9 @@ test('responses from an abandoned diagnostic do not become learning evidence', a
   });
 });
 
-test('learner with adequate independent evidence is not forced through the short diagnostic', async () => {
-  await withDiagnosticApp(async ({ repository, owner, request }) => {
-    for (const skill of EGE_SKILL_TAXONOMY.skills) {
-      for (let sample = 0; sample < 4; sample += 1) {
-        await repository.recordModuleAttempt(owner, {
-          id: crypto.randomUUID(),
-          module: skill.module,
-          activity: skill.id,
-          score: 8,
-          maxScore: 10,
-          durationMs: 60_000,
-          metadata: { source: 'builtin' },
-        }, { evidenceQuality: 'server_verified_unassisted' });
-      }
-    }
+test('learner with a completed public short diagnostic is not forced through it again', async () => {
+  await withDiagnosticApp(async ({ owner, request }) => {
+    await completeShortAdaptiveDiagnostic(request, owner, 'no-repeat-owner');
     const response = await request(owner, '/api/v1/adaptive-learning/diagnostics/start', {
       method: 'POST', headers: { 'Idempotency-Key': 'diagnostic-not-required-01' }, body: '{}',
     });
@@ -878,7 +871,7 @@ test('learner with adequate independent evidence is not forced through the short
     assert.equal(result.required, false);
     assert.equal(result.diagnostic, null);
     assert.equal(result.profile.needsDiagnostic, false);
-    assert.equal(result.profile.preliminary, false);
+    assert.equal(result.profile.preliminary, true);
   });
 });
 
@@ -997,6 +990,9 @@ test('public contract documents bounded diagnostic data, retention and server-ow
   assert.match(openapi, /never exposes the answer key or skill mapping/iu);
   assert.match(openapi, /measurementNotice/u);
   assert.match(openapi, /replayable local browser speech.*assisted/iu);
+  assert.match(openapi, /listening choices without actual audio.*assisted/iu);
+  assert.match(openapi, /identical server-owned skill\/item family.*across catalog versions/iu);
+  assert.match(openapi, /scheduled 28\/35\/42-day short refresh.*does not block/iu);
   assert.match(openapi, /DIAGNOSTIC_START_RATE_LIMIT/u);
   assert.match(openapi, /24-hour start-claim retention/iu);
   assert.match(openapi, /ready.*20-minute deadline/iu);
@@ -1014,6 +1010,7 @@ test('public contract documents bounded diagnostic data, retention and server-ow
   assert.match(schema, /evidence_quality/u);
   assert.match(schema, /immutable start claim/iu);
   assert.match(schema, /server-owned catalog/iu);
+  assert.match(schema, /needsDiagnostic.*только первоначальную/iu);
   assert.match(retention, /start claims/iu);
   assert.match(retention, /24 (?:hours|час)/iu);
   assert.match(retention, /answer replay snapshot/iu);

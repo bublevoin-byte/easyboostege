@@ -11,6 +11,7 @@ import { createAdaptiveLearningRoutes } from '../routes/adaptive-learning.js';
 import { createProgressRoutes } from '../routes/progress.js';
 import { createFileRepository } from '../storage/file-repository.js';
 import { buildAdaptiveDetailedReport } from '../adaptive-learning/report.js';
+import { completeShortAdaptiveDiagnostic } from './support/adaptive-diagnostic-public.js';
 
 const NOW = new Date('2026-08-12T09:00:00.000Z');
 
@@ -133,6 +134,16 @@ test('server enforces Free demo, Base continuous plan and Premium depth at every
       assert.equal((await saveGoal(request, username, suffix)).status, 201);
     }
 
+    for (const username of [free, base, premium]) {
+      const blocked = await request(username, '/api/v1/adaptive-learning/sessions/preview', {
+        method: 'POST', body: JSON.stringify({ durationMinutes: 15 }),
+      });
+      assert.equal(blocked.status, 409);
+      assert.equal((await blocked.json()).error.code, 'ADAPTIVE_INITIAL_DIAGNOSTIC_REQUIRED');
+    }
+    await completeShortAdaptiveDiagnostic(request, free, 'commercial-free');
+    await completeShortAdaptiveDiagnostic(request, base, 'commercial-base');
+
     const freeOverview = await (await request(free, '/api/v1/adaptive-learning/overview')).json();
     assert.deepEqual({
       tier: freeOverview.access.tier,
@@ -143,7 +154,7 @@ test('server enforces Free demo, Base continuous plan and Premium depth at every
       detailedReports: freeOverview.access.capabilities.detailedReports,
       demoSessionUsed: freeOverview.access.usage.demoSessionUsed,
     }, {
-      tier: 'free', shortDiagnostic: true, demoSession: true, continuousPlan: false,
+      tier: 'free', shortDiagnostic: false, demoSession: true, continuousPlan: false,
       arbitrarySessions: false, detailedReports: false, demoSessionUsed: false,
     });
     const freeLong = await request(free, '/api/v1/adaptive-learning/sessions/preview', {
@@ -205,6 +216,7 @@ test('server enforces Free demo, Base continuous plan and Premium depth at every
 test('concurrent Free creates persist one demo and preserve its exact replay', async () => {
   await withCommercialApp(async ({ repository, free, request }) => {
     assert.equal((await saveGoal(request, free, 'free-race')).status, 201);
+    await completeShortAdaptiveDiagnostic(request, free, 'commercial-free-race');
     const previewResponse = await request(free, '/api/v1/adaptive-learning/sessions/preview', {
       method: 'POST', body: JSON.stringify({ durationMinutes: 15 }),
     });
@@ -289,6 +301,12 @@ test('commercial plan UI has complete labelled controls, paywall, accessible rep
   assert.match(screen, /ADAPTIVE_FREE_DEMO_USED/u);
   assert.match(screen, /ADAPTIVE_BASE_REQUIRED/u);
   assert.match(screen, /\['home_adaptive_plan','profile_adaptive_plan'\]/u);
+  assert.match(markup, /id="home_adaptive_plan"[^>]*hidden/u);
+  assert.match(markup, /id="profile_adaptive_plan"[^>]*hidden/u);
+  assert.match(markup, /\.adaptive-entry\[hidden\],#profile_adaptive_plan\[hidden\]\{display:none!important\}/u);
+  assert.match(screen, /registerStartHook\(syncAdaptivePlanEntries\)/u);
+  assert.match(screen, /features\?\.adaptive_learning===true/u);
+  assert.doesNotMatch(screen, /writeAdaptiveOverviewCache\(localStorage,adaptiveOverviewOwner\(\),saved\)/u);
   assert.match(screen, /destination\.focus/u);
   assert.match(screen, /apiGet\('\/api\/v1\/adaptive-learning\/reports\/detailed'\)/u);
   assert.match(screen, /примерн/u);

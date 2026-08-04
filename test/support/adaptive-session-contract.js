@@ -441,4 +441,19 @@ export async function assertAdaptiveSessionRepositoryContract(assert, repository
   assert.equal(executionExport.adaptive_learning_reports.length, 1);
   assert.equal(JSON.stringify(executionExport).includes('shared_execution_claim_'), false);
   assert.equal(JSON.stringify(executionExport).includes('request_hash'), false);
+
+  const metrics = await repository.getAdaptiveLearningMetrics();
+  assert.equal(metrics.version, 'adaptive-metrics-v1');
+  assert.equal(metrics.window.days, 90);
+  assert.ok(Date.parse(metrics.window.from) < Date.parse(metrics.window.to));
+  assert.deepEqual({
+    created: metrics.sessions.created,
+    started: metrics.sessions.started,
+    completed: metrics.sessions.completed,
+  }, { created: 1, started: 1, completed: 1 });
+  assert.deepEqual(metrics.sessions.byDuration['65_90'], { created: 1, started: 1, completed: 1 });
+  assert.equal(metrics.adjustments.sessions, 1);
+  assert.equal(metrics.evidence.learningBlockCompletions,
+    replaced.session.blocks.filter((block) => block.kind === 'learning').length);
+  assert.equal(JSON.stringify(metrics).includes(username), false);
 }

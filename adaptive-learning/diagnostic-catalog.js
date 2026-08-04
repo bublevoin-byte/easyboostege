@@ -152,7 +152,8 @@ const ITEMS = [
     skillId: 'ege.writing.email',
     module: 'writing',
     egeImpact: 0.8,
-    evidenceQuality: 'independent',
+    evidenceQuality: 'assisted',
+    measurementNotice: 'Короткий тест проверяет выбор плана ответа, но не само письмо. Навык письма подтверждается только отдельной Premium-проверкой реальной работы.',
     prompt: 'An exam email asks three questions about your school trip. Which plan best answers the task?',
     choices: [
       { id: 'a', label: 'Answer all three questions and ask the required questions in a clear email.' },
@@ -167,7 +168,8 @@ const ITEMS = [
     skillId: 'ege.writing.essay',
     module: 'writing',
     egeImpact: 1,
-    evidenceQuality: 'independent',
+    evidenceQuality: 'assisted',
+    measurementNotice: 'Короткий тест проверяет распознавание связки, но не развёрнутое высказывание. Навык письма подтверждается только отдельной Premium-проверкой реальной работы.',
     prompt: 'Which option gives the clearest contrast between two chart findings?',
     choices: [
       { id: 'a', label: 'The chart is nice and has different numbers.' },
@@ -182,7 +184,8 @@ const ITEMS = [
     skillId: 'ege.speaking.interaction',
     module: 'speaking',
     egeImpact: 0.9,
-    evidenceQuality: 'independent',
+    evidenceQuality: 'assisted',
+    measurementNotice: 'Короткий тест проверяет выбор реплики, но не устную речь. Навык говорения подтверждается только отдельной Premium-проверкой реального ответа.',
     prompt: 'Which reply answers the question “How often do you practise English and why?” most fully?',
     choices: [
       { id: 'a', label: 'English.' },
@@ -197,7 +200,8 @@ const ITEMS = [
     skillId: 'ege.speaking.monologue',
     module: 'speaking',
     egeImpact: 1,
-    evidenceQuality: 'independent',
+    evidenceQuality: 'assisted',
+    measurementNotice: 'Короткий тест проверяет выбор структуры, но не устный монолог. Навык говорения подтверждается только отдельной Premium-проверкой реального ответа.',
     prompt: 'Which approach produces the clearest exam monologue?',
     choices: [
       { id: 'a', label: 'Cover every point in order, connect ideas and finish with a conclusion.' },
@@ -247,7 +251,17 @@ const DEEP_ITEMS = [
     'Which response best develops a monologue point?',
     ['State the idea, explain why it matters and give a relevant example.', 'List unrelated nouns.', 'Repeat the task wording.'], 'a'],
 ].map(([id, skillId, module, egeImpact, prompt, labels, correctChoiceId]) => ({
-  id, skillId, module, egeImpact, evidenceQuality: 'independent', prompt,
+  id,
+  skillId,
+  module,
+  egeImpact,
+  evidenceQuality: ['listening', 'writing', 'speaking'].includes(module) ? 'assisted' : 'independent',
+  measurementNotice: module === 'listening'
+    ? 'Это проверка понимания стратегии без аудиозаписи; результат ориентировочный.'
+    : ['writing', 'speaking'].includes(module)
+      ? 'Выбор варианта не подтверждает самостоятельное письмо или речь; результат ориентировочный.'
+      : undefined,
+  prompt,
   choices: labels.map((label, index) => ({ id: String.fromCharCode(97 + index), label })),
   correctChoiceId, estimatedSeconds: 90,
 }));

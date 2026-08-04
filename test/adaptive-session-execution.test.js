@@ -12,8 +12,15 @@ import { createProgressRoutes } from '../routes/progress.js';
 import { createFileRepository } from '../storage/file-repository.js';
 import { adaptiveSpeakingTask } from '../public/adaptive-speaking-tasks.js';
 import { ADAPTIVE_ACTIVITY_REGISTRY } from '../adaptive-learning/session.js';
+import { completeShortAdaptiveDiagnostic } from './support/adaptive-diagnostic-public.js';
 
 const START = new Date(Date.now() - 2 * 60 * 60_000);
+const MODULE_ACTIVITY_REGISTRY = {
+  ...ADAPTIVE_ACTIVITY_REGISTRY,
+  activities: ADAPTIVE_ACTIVITY_REGISTRY.activities.filter((activity) => (
+    !['writing', 'speaking'].includes(activity.module)
+  )),
+};
 
 function authentication() {
   return { auth(req, res, next) {
@@ -24,7 +31,7 @@ function authentication() {
   } };
 }
 
-async function withExecutionApp(run, { activityRegistry = ADAPTIVE_ACTIVITY_REGISTRY } = {}) {
+async function withExecutionApp(run, { activityRegistry = MODULE_ACTIVITY_REGISTRY } = {}) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-execution-api-'));
   const dataPath = path.join(directory, 'data.json');
   const repository = createFileRepository(dataPath);
@@ -61,6 +68,8 @@ async function withExecutionApp(run, { activityRegistry = ADAPTIVE_ACTIVITY_REGI
       ...(options.headers || {}),
     } },
   );
+  await completeShortAdaptiveDiagnostic(request, owner, 'execution-owner');
+  await completeShortAdaptiveDiagnostic(request, stranger, 'execution-stranger');
   try {
     await run({
       owner, stranger, repository, request, dataPath,
@@ -349,7 +358,7 @@ test('server-owned writing or speaking completion binds to the claim without a c
       }
     }
     assert.equal(serverOwnedSeen, true, 'the full registry must exercise a writing or speaking handoff');
-  });
+  }, { activityRegistry: ADAPTIVE_ACTIVITY_REGISTRY });
 });
 
 test('deep Writing/Speaking execution rechecks current Premium access on claim replay, bind, and advance', async () => {

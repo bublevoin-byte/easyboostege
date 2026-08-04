@@ -10,9 +10,17 @@ security:
 paths:
   /api/v1/admin/metrics:
     get:
-      summary: Read process uptime, bounded HTTP and PII-free Voice Tutor recovery, micro-check and day-1/day-7 pass metrics
+      summary: Read process uptime plus bounded PII-free HTTP, Voice Tutor and adaptive-learning metrics
+      description: The adaptiveLearning projection is versioned as adaptive-metrics-v1 and contains only fixed-cardinality aggregate counters/rates for its explicit rolling 90-day UTC window. It never contains username, owner/session/attempt/skill identifiers, answers, free text, transcript, audio, credentials or idempotency values. startRate uses created as denominator; completionRate uses started; plannedMinutesCompletionRate uses planned learning minutes; retention rates use observed verified repeat outcomes. Empty denominators produce rate 0. See docs/ADAPTIVE_LEARNING_OPERATIONS.md for sample gates and incident handling.
       responses:
-        '200': { description: Metrics snapshot for an administrator }
+        '200':
+          description: Metrics snapshot for an administrator, including adaptiveLearning when the repository supports it
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  adaptiveLearning: { $ref: '#/components/schemas/AdaptiveLearningMetrics' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
   /health/live:
@@ -672,7 +680,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { description: ADAPTIVE_BASE_REQUIRED when Free requests more than the one 15-minute demo, or ADAPTIVE_FREE_DEMO_USED after that demo is created }
-        '409': { description: ADAPTIVE_GOAL_REQUIRED, ADAPTIVE_SESSION_NO_CONTENT, or ADAPTIVE_SESSION_COVERAGE_GAP when no exact meaningful sequence can be composed from justified registered activities; an unsupported individual skill is surfaced in coverageGaps and uses explicit fallback instead of blocking by itself }
+        '409': { description: ADAPTIVE_GOAL_REQUIRED, ADAPTIVE_INITIAL_DIAGNOSTIC_REQUIRED for a new learner without sufficient genuine production evidence or a completed short diagnostic, ADAPTIVE_SESSION_NO_CONTENT, or ADAPTIVE_SESSION_COVERAGE_GAP when no exact meaningful sequence can be composed from justified registered activities; an unsupported individual skill is surfaced in coverageGaps and uses explicit fallback instead of blocking by itself }
         '404': { description: Adaptive Learning rollout is disabled; the route is not registered }
   /api/v1/adaptive-learning/sessions:
     post:
@@ -699,7 +707,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { description: ADAPTIVE_BASE_REQUIRED or ADAPTIVE_FREE_DEMO_USED; exact Free-demo replay remains available only for its server-marked free_demo session }
-        '409': { description: Stale preview/plan, another current session, ADAPTIVE_SESSION_COVERAGE_GAP, unavailable content or idempotency conflict }
+        '409': { description: ADAPTIVE_INITIAL_DIAGNOSTIC_REQUIRED for a new learner (including an attempted create replay before initial evidence is complete), stale preview/plan, another current session, ADAPTIVE_SESSION_COVERAGE_GAP, unavailable content or idempotency conflict }
         '404': { description: Adaptive Learning rollout is disabled; the route is not registered }
   /api/v1/adaptive-learning/sessions/current:
     get:
@@ -900,7 +908,7 @@ paths:
   /api/v1/adaptive-learning/diagnostics/start:
     post:
       summary: Start or resume a bounded short or Premium deep diagnostic with a durable owner-bound replay claim
-      description: Short is the default for backward compatibility. Deep selects the separate ege-deep-diagnostic-v1 catalog-policy and requires current Premium throughout the run. A Free learner may complete one short diagnostic. Every resumed session uses its stored catalog version's policy. A successful key owns its exact start snapshot for the 24-hour start-claim retention window. New keys are bounded by a per-user hourly rate and by a finite live-claim budget.
+      description: Short is the default for backward compatibility. Deep selects the separate ege-deep-diagnostic-v1 catalog-policy and requires current Premium throughout the run. A Free learner may complete one short diagnostic. A scheduled 28/35/42-day short refresh is offered through retention.rediagnostic.due but does not block ordinary learning sessions. Every resumed session uses its stored catalog version's policy. A successful key owns its exact start snapshot for the 24-hour start-claim retention window. New keys are bounded by a per-user hourly rate and by a finite live-claim budget.
       parameters:
         - in: header
           name: Idempotency-Key
@@ -1339,6 +1347,68 @@ components:
       in: cookie
       name: eb_token
   schemas:
+    AdaptiveLearningMetrics:
+      type: object
+      required: [version, window, sessions, adjustments, evidence, retention, diagnostics, commercialScopes, profile]
+      properties:
+        version: { type: string, enum: [adaptive-metrics-v1] }
+        window:
+          type: object
+          required: [days, from, to]
+          properties:
+            days: { type: integer, enum: [90] }
+            from: { type: string, format: date-time }
+            to: { type: string, format: date-time }
+          additionalProperties: false
+        sessions:
+          type: object
+          required: [created, started, completed, startRate, completionRate, plannedLearningMinutes, completedPlannedMinutes, plannedMinutesCompletionRate, byDuration]
+          properties:
+            created: { type: integer, minimum: 0 }
+            started: { type: integer, minimum: 0 }
+            completed: { type: integer, minimum: 0 }
+            startRate: { type: number, minimum: 0, maximum: 1 }
+            completionRate: { type: number, minimum: 0, maximum: 1 }
+            plannedLearningMinutes: { type: integer, minimum: 0 }
+            completedPlannedMinutes: { type: integer, minimum: 0 }
+            plannedMinutesCompletionRate: { type: number, minimum: 0, maximum: 1 }
+            byDuration:
+              type: object
+              description: Fixed keys 15_30, 35_60, 65_90 and 95_120; each value contains created/started/completed counters.
+          additionalProperties: false
+        adjustments:
+          type: object
+          description: Aggregate sessions/rate plus fixed reasons too_difficult, too_easy, not_relevant, accessibility and excluded.
+        evidence:
+          type: object
+          description: Aggregate learningBlockCompletions plus fixed evidence quality and context counters.
+        retention:
+          type: object
+          description: Aggregate observed/passed/rate plus day_1 and day_7 observed/passed/rate.
+        diagnostics:
+          type: object
+          required: [shortCompleted, deepCompleted]
+          properties:
+            shortCompleted: { type: integer, minimum: 0 }
+            deepCompleted: { type: integer, minimum: 0 }
+          additionalProperties: false
+        commercialScopes:
+          type: object
+          required: [free_demo, base, premium]
+          properties:
+            free_demo: { type: integer, minimum: 0 }
+            base: { type: integer, minimum: 0 }
+            premium: { type: integer, minimum: 0 }
+          additionalProperties: false
+        profile:
+          type: object
+          required: [skillEstimates, highImpactHighUncertaintySkills, establishedSkills]
+          properties:
+            skillEstimates: { type: integer, minimum: 0 }
+            highImpactHighUncertaintySkills: { type: integer, minimum: 0 }
+            establishedSkills: { type: integer, minimum: 0 }
+          additionalProperties: false
+      additionalProperties: false
     AdaptiveGoal:
       type: object
       required: [id, targetExam, targetScore, examDate, weeklyMinutes, revision, createdAt, updatedAt]
@@ -1422,7 +1492,7 @@ components:
           minimum: 0
           maximum: 12
           description: Number of independently established taxonomy skills; the whole profile stays preliminary below 12.
-        needsDiagnostic: { type: boolean }
+        needsDiagnostic: { type: boolean, description: True only while the initial diagnostic or sufficient genuine production evidence is missing; scheduled refresh is represented separately by retention.rediagnostic.due and never blocks sessions. }
         explanationCodes: { type: array, items: { type: string } }
         skills: { type: array, items: { $ref: '#/components/schemas/AdaptiveSkillEstimate' } }
         modules: { type: array, items: { type: object } }
@@ -1690,7 +1760,7 @@ components:
       additionalProperties: false
     AdaptiveDiagnosticItem:
       type: object
-      description: Safe item projection that never exposes the answer key or skill mapping; both stay server-owned. A replayable local browser speech listening item is assisted evidence, never independent mastery evidence.
+      description: Safe item projection that never exposes the answer key or skill mapping; both stay server-owned. Replayable local browser speech, listening choices without actual audio and Writing/Speaking recognition choices are assisted evidence, never independent mastery evidence. An identical server-owned skill/item family remains one strong observation across catalog versions.
       required: [id, prompt, choices, estimatedSeconds]
       properties:
         id: { type: string, minLength: 1, maxLength: 100 }

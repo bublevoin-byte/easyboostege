@@ -21,6 +21,7 @@ import { adaptiveEvidenceContext } from '../adaptive-learning/session-execution.
 import { createFileRepository } from '../storage/file-repository.js';
 import { createAdaptiveLearningRoutes } from '../routes/adaptive-learning.js';
 import { createVoiceTutorRoutes } from '../routes/voice-tutor.js';
+import { completeShortAdaptiveDiagnostic } from './support/adaptive-diagnostic-public.js';
 
 const NOW = new Date('2026-08-10T12:00:00.000Z');
 
@@ -98,7 +99,8 @@ test('day-1/day-7 retention state is reference-only, marks due skill and schedul
   const grammar = enriched.skills.find((skill) => skill.id === 'ege.grammar.forms');
   assert.equal(grammar.dueState, 'due');
   assert.ok(grammar.mastery <= 49, 'assisted recovery must not prove mastery');
-  assert.equal(enriched.needsDiagnostic, true);
+  assert.equal(enriched.needsDiagnostic, false, 'scheduled refresh must not become an initial gate');
+  assert.ok(enriched.explanationCodes.includes('rediagnostic_due'));
 });
 
 test('confidence and independent coverage choose a truthful 28/35/42-day cadence', () => {
@@ -411,6 +413,7 @@ test('due repeat executes end-to-end through the existing ledger and orientation
       }),
     });
     assert.equal(goal.status, 201);
+    await completeShortAdaptiveDiagnostic(request, owner, 'retention-owner');
     const overview = await (await request(owner, '/api/v1/adaptive-learning/overview')).json();
     assert.equal(overview.retention.dueChecks[0].repeatId, repeatId);
     assert.deepEqual(overview.retention.dueChecks.map((check) => check.stage), ['day_1']);

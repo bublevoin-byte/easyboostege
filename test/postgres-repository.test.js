@@ -145,6 +145,7 @@ test('PostgreSQL adaptive sessions match the shared replay, race, export and del
       'session and events must come from the same MVCC snapshot');
     assert.equal(await repository.deleteUserData(username), true);
     assert.equal(await repository.getCurrentAdaptiveLearningSession(username), null);
+    assert.equal((await repository.getAdaptiveLearningMetrics()).sessions.created, 0);
   } finally {
     releaseSnapshot?.();
     await client.query('ROLLBACK').catch(() => {});
@@ -611,6 +612,7 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
       '036_adaptive_execution_hardening.sql',
       '037_adaptive_retention_premium.sql',
       '038_adaptive_commercial_scope.sql',
+      '039_adaptive_metrics_window_indexes.sql',
     ]);
 
     const username = await repository.createTelegramUser(telegramId, `Integration ${suffix}`);

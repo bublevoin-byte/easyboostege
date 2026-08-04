@@ -25,6 +25,7 @@ import {
   adaptiveDiagnosticClaimExpiresAt,
 } from '../adaptive-learning/diagnostic-claims.js';
 import { adaptiveLearningPlanRepositoryDto } from '../adaptive-learning/plan-dto.js';
+import { buildAdaptiveLearningMetrics } from '../adaptive-learning/metrics.js';
 import { adaptiveSpeakingTask } from '../public/adaptive-speaking-tasks.js';
 import { isMonotonicAdaptiveRetentionRefresh } from '../adaptive-learning/retention.js';
 import { adaptiveRepeatExecutionMatches } from '../adaptive-learning/repeat-execution.js';
@@ -2441,6 +2442,24 @@ export function createFileRepository(filePath) {
       }));
   }
 
+  async function getAdaptiveLearningMetrics({ now = new Date() } = {}) {
+    await load();
+    const repeatStageById = new Map(state.voice_tutor_repeats.map((repeat) => [
+      String(repeat.id), String(repeat.stage || ''),
+    ]));
+    return buildAdaptiveLearningMetrics({
+      sessions: state.adaptive_learning_sessions,
+      events: state.adaptive_learning_session_events,
+      diagnosticSessions: state.adaptive_diagnostic_sessions,
+      skillEstimates: Object.values(state.adaptive_learning_skill_estimates).flat(),
+      repeatAttempts: state.voice_tutor_repeat_attempts.map((attempt) => ({
+        id: attempt.id,
+        stage: repeatStageById.get(String(attempt.repeat_id)) || '',
+        passed: attempt.passed === true,
+      })),
+    }, { now });
+  }
+
   async function startAdaptiveDiagnostic(username, diagnostic) {
     return serializeCoordinatedMutation(async () => {
       await load();
@@ -3297,6 +3316,7 @@ export function createFileRepository(filePath) {
     getAdaptiveLearningWeekUsage,
     getAdaptiveLearningCommercialUsage,
     getAdaptiveLearningCompletedSessionReports,
+    getAdaptiveLearningMetrics,
     startAdaptiveDiagnostic,
     getAdaptiveDiagnosticStartClaim,
     getCurrentAdaptiveDiagnostic,

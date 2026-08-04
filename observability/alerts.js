@@ -5,6 +5,13 @@ export function evaluateAlerts({ healthOk, metrics, thresholds = {} }) {
     p95DurationMs: thresholds.p95DurationMs ?? 3000,
     diskUsedPercent: thresholds.diskUsedPercent ?? 80,
     aiDailyRequests: thresholds.aiDailyRequests ?? 1000,
+    adaptiveMinimumCreated: thresholds.adaptiveMinimumCreated ?? 20,
+    adaptiveMinimumStarted: thresholds.adaptiveMinimumStarted ?? 10,
+    adaptiveMinimumDay7: thresholds.adaptiveMinimumDay7 ?? 10,
+    adaptiveStartRate: thresholds.adaptiveStartRate ?? 0.5,
+    adaptiveCompletionRate: thresholds.adaptiveCompletionRate ?? 0.5,
+    adaptivePlannedMinutesRate: thresholds.adaptivePlannedMinutesRate ?? 0.5,
+    adaptiveDay7RetentionRate: thresholds.adaptiveDay7RetentionRate ?? 0.5,
   };
   const alerts = {};
   if (!healthOk) {
@@ -32,6 +39,24 @@ export function evaluateAlerts({ healthOk, metrics, thresholds = {} }) {
   }
   if ((metrics.aiUsage?.requests || 0) >= limits.aiDailyRequests) {
     alerts.ai_budget = `🟠 AI-запросов за 24 часа: ${metrics.aiUsage.requests}, достигнут лимит ${limits.aiDailyRequests}.`;
+  }
+  const adaptiveSessions = metrics.adaptiveLearning?.sessions || {};
+  if ((adaptiveSessions.created || 0) >= limits.adaptiveMinimumCreated
+    && adaptiveSessions.startRate < limits.adaptiveStartRate) {
+    alerts.adaptive_start = `🟠 Персональные занятия начинаются в ${(adaptiveSessions.startRate * 100).toFixed(1)}% случаев.`;
+  }
+  if ((adaptiveSessions.started || 0) >= limits.adaptiveMinimumStarted
+    && adaptiveSessions.completionRate < limits.adaptiveCompletionRate) {
+    alerts.adaptive_completion = `🟠 Завершение начатых персональных занятий: ${(adaptiveSessions.completionRate * 100).toFixed(1)}%.`;
+  }
+  if ((adaptiveSessions.created || 0) >= limits.adaptiveMinimumCreated
+    && adaptiveSessions.plannedMinutesCompletionRate < limits.adaptivePlannedMinutesRate) {
+    alerts.adaptive_planned_minutes = `🟠 Выполнено ${(adaptiveSessions.plannedMinutesCompletionRate * 100).toFixed(1)}% запланированных минут.`;
+  }
+  const daySeven = metrics.adaptiveLearning?.retention?.day_7 || {};
+  if ((daySeven.observed || 0) >= limits.adaptiveMinimumDay7
+    && daySeven.rate < limits.adaptiveDay7RetentionRate) {
+    alerts.adaptive_day_7_retention = `🟠 Успешность проверок через 7 дней: ${(daySeven.rate * 100).toFixed(1)}%.`;
   }
   if ((metrics.system?.disk?.usedPercent || 0) >= limits.diskUsedPercent) {
     alerts.disk_full = `🔴 Диск заполнен на ${metrics.system.disk.usedPercent}%.`;

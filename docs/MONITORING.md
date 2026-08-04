@@ -72,3 +72,19 @@ Production cron запускается каждые пять минут:
 cd /opt/easyboost-next
 MONITORING_STATE_FILE=/var/lib/easyboost-monitor/state.json npm run monitor -- --test-alert
 ```
+
+## Персональный план обучения
+
+Оба защищённых metrics endpoint возвращают агрегат `adaptiveLearning` версии
+`adaptive-metrics-v1`. Его точные denominator, фиксированные duration/commercial/reason/evidence
+категории, минимальные выборки и incident procedure описаны в
+`docs/ADAPTIVE_LEARNING_OPERATIONS.md`. Агрегат не содержит идентификаторы владельца, сессии,
+попытки или навыка и не содержит учебные ответы, prompt, transcript, audio или credentials.
+Каждый snapshot содержит явное скользящее окно `window.days=90` с UTC `from/to`; алерты применяются
+к rates этого окна, поэтому lifetime-история не разбавляет свежую регрессию. PostgreSQL вычисляет
+фиксированные aggregate rows по timestamp predicates, не материализуя lifetime sessions/blocks/events.
+
+Host-monitor предупреждает о start rate ниже 50% после 20 созданных сессий, completion rate ниже
+50% после 10 стартовавших, выполнении менее 50% запланированных минут после 20 созданных и day-7
+retention ниже 50% после 10 наблюдаемых проверок. До достижения минимальной выборки сигнал не
+создаётся. Пустой denominator публикуется как rate `0` и не является доказательством деградации.

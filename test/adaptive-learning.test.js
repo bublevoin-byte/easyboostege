@@ -10,6 +10,10 @@ import express from 'express';
 import { createAdaptiveLearningRoutes } from '../routes/adaptive-learning.js';
 import { createProgressRoutes } from '../routes/progress.js';
 import { buildAdaptiveLearningProfile, EGE_SKILL_TAXONOMY } from '../adaptive-learning/profile.js';
+import {
+  DEEP_DIAGNOSTIC_CATALOG,
+  SHORT_DIAGNOSTIC_CATALOG,
+} from '../adaptive-learning/diagnostic-catalog.js';
 import { createFileRepository } from '../storage/file-repository.js';
 
 const NOW = new Date('2026-08-04T09:00:00.000Z');
@@ -173,6 +177,112 @@ test('assisted-only histories never establish mastery while genuine retention ev
   assert.equal(retentionBacked.assistedEvidenceCount, 0);
   assert.equal(retentionBacked.preliminary, false);
   assert.equal(retentionBacked.status, 'established');
+});
+
+test('short diagnostic productive choices stay preliminary and cannot create Free productive mastery', () => {
+  const productiveItems = SHORT_DIAGNOSTIC_CATALOG.items.filter((item) => (
+    item.module === 'writing' || item.module === 'speaking'
+  ));
+  assert.equal(productiveItems.length, 4);
+  assert.ok(productiveItems.every((item) => item.evidenceQuality === 'assisted'));
+  const profile = buildAdaptiveLearningProfile({
+    diagnosticResponses: productiveItems.map((item, index) => ({
+      catalog_version: SHORT_DIAGNOSTIC_CATALOG.version,
+      item_id: item.id,
+      skill_id: item.skillId,
+      module: item.module,
+      evidence_quality: item.evidenceQuality,
+      correct: true,
+      answered_at: new Date(NOW.getTime() + index * 1_000).toISOString(),
+    })),
+    diagnosticCompletions: [{
+      catalog_version: SHORT_DIAGNOSTIC_CATALOG.version,
+      completed_at: NOW.toISOString(),
+    }],
+  });
+  const productive = profile.skills.filter((skill) => (
+    skill.module === 'writing' || skill.module === 'speaking'
+  ));
+  assert.ok(productive.every((skill) => skill.independentEvidenceCount === 0));
+  assert.ok(productive.every((skill) => skill.status === 'preliminary'));
+  assert.equal(profile.independentEvidenceCount, 0);
+});
+
+test('deep diagnostic recognition without audio or productive work remains assisted', () => {
+  const indirectItems = DEEP_DIAGNOSTIC_CATALOG.items.filter((item) => (
+    ['listening', 'writing', 'speaking'].includes(item.module)
+  ));
+  assert.equal(indirectItems.length, 12);
+  assert.ok(indirectItems.every((item) => item.evidenceQuality === 'assisted'));
+  assert.ok(indirectItems.every((item) => item.measurementNotice));
+});
+
+test('repeating the same diagnostic item is useful but never adds a second strong observation', () => {
+  const item = SHORT_DIAGNOSTIC_CATALOG.items.find((candidate) => (
+    candidate.id === 'grammar-forms-present-perfect-1'
+  ));
+  const response = (answeredAt) => ({
+    catalog_version: SHORT_DIAGNOSTIC_CATALOG.version,
+    item_id: item.id,
+    skill_id: item.skillId,
+    module: item.module,
+    evidence_quality: item.evidenceQuality,
+    correct: true,
+    answered_at: answeredAt,
+  });
+  const profile = buildAdaptiveLearningProfile({
+    diagnosticResponses: [
+      response(NOW.toISOString()),
+      response(new Date(NOW.getTime() + 35 * 24 * 60 * 60_000).toISOString()),
+    ],
+    diagnosticCompletions: [
+      { catalog_version: SHORT_DIAGNOSTIC_CATALOG.version, completed_at: NOW.toISOString() },
+    ],
+  });
+  const grammar = profile.skills.find((skill) => skill.id === item.skillId);
+  assert.equal(grammar.evidenceCount, 2);
+  assert.equal(grammar.independentEvidenceCount, 1);
+  assert.equal(grammar.status, 'preliminary');
+  assert.equal(grammar.explanationCode, 'repeated_diagnostic_item');
+  assert.equal(profile.independentEvidenceCount, 1);
+});
+
+test('the same question copied into short and deep catalogs stays one strong observation', () => {
+  const shortItem = SHORT_DIAGNOSTIC_CATALOG.items.find((candidate) => (
+    candidate.id === 'grammar-forms-present-perfect-1'
+  ));
+  const deepItem = DEEP_DIAGNOSTIC_CATALOG.items.find((candidate) => candidate.id === shortItem.id);
+  const profile = buildAdaptiveLearningProfile({
+    diagnosticResponses: [
+      {
+        catalog_version: SHORT_DIAGNOSTIC_CATALOG.version,
+        item_id: shortItem.id,
+        skill_id: shortItem.skillId,
+        module: shortItem.module,
+        evidence_quality: shortItem.evidenceQuality,
+        correct: true,
+        answered_at: NOW.toISOString(),
+      },
+      {
+        catalog_version: DEEP_DIAGNOSTIC_CATALOG.version,
+        item_id: deepItem.id,
+        skill_id: deepItem.skillId,
+        module: deepItem.module,
+        evidence_quality: deepItem.evidenceQuality,
+        correct: true,
+        answered_at: new Date(NOW.getTime() + 60_000).toISOString(),
+      },
+    ],
+    diagnosticCompletions: [
+      { catalog_version: SHORT_DIAGNOSTIC_CATALOG.version, completed_at: NOW.toISOString() },
+      { catalog_version: DEEP_DIAGNOSTIC_CATALOG.version, completed_at: new Date(NOW.getTime() + 60_000).toISOString() },
+    ],
+  });
+  const grammar = profile.skills.find((skill) => skill.id === shortItem.skillId);
+  assert.equal(grammar.evidenceCount, 2);
+  assert.equal(grammar.independentEvidenceCount, 1);
+  assert.equal(grammar.status, 'preliminary');
+  assert.equal(grammar.explanationCode, 'repeated_diagnostic_item');
 });
 
 test('mixed trust never presents assisted-only skills or the whole profile as established', () => {

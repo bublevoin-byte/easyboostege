@@ -265,6 +265,12 @@ test('application starts and serves health, security headers and PWA assets', { 
         day_7: { passed: 0, observed: 0, rate: 0 },
       },
     });
+    assert.equal(metrics.adaptiveLearning.version, 'adaptive-metrics-v1');
+    assert.equal(metrics.adaptiveLearning.sessions.created, 0);
+    assert.equal(metrics.adaptiveLearning.sessions.startRate, 0);
+    assert.deepEqual(metrics.adaptiveLearning.adjustments.reasons, {
+      too_difficult: 0, too_easy: 0, not_relevant: 0, accessibility: 0, excluded: 0,
+    });
     assert.ok(metrics.system.disk.totalBytes > 0);
     assert.equal(metrics.system.backup.fresh, false);
     const unauthorizedMetrics = await fetch(`${baseUrl}/internal/metrics`);

@@ -8,6 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import jwt from 'jsonwebtoken';
 import { chromium } from 'playwright';
+import { getDiagnosticItem } from '../adaptive-learning/diagnostic-catalog.js';
 
 const projectDirectory = fileURLToPath(new URL('..', import.meta.url));
 const serverPath = fileURLToPath(new URL('../server.js', import.meta.url));
@@ -107,6 +108,40 @@ async function browserApiRequest(page, pathName, { method = 'GET', key = null, b
   });
 }
 
+async function completePublicShortDiagnostic(page, suffix, { incorrectModules = [] } = {}) {
+  let state = (await browserApiRequest(page, '/api/v1/adaptive-learning/diagnostics/start', {
+    method: 'POST', key: `adaptive-e2e-${suffix}-diagnostic-start`, body: { depth: 'short' },
+  })).body;
+  let answerIndex = 0;
+  while (state.diagnostic.status === 'in_progress') {
+    answerIndex += 1;
+    const item = getDiagnosticItem(state.diagnostic.catalogVersion, state.item.id);
+    const chooseIncorrect = incorrectModules.includes(item.module);
+    const choice = chooseIncorrect
+      ? item.choices.find((candidate) => candidate.id !== item.correctChoiceId)
+      : item.choices.find((candidate) => candidate.id === item.correctChoiceId);
+    const response = await browserApiRequest(
+      page,
+      `/api/v1/adaptive-learning/diagnostics/${state.diagnostic.id}/answers`,
+      {
+        method: 'POST', key: `adaptive-e2e-${suffix}-diagnostic-answer-${answerIndex}`,
+        body: { itemId: state.item.id, choiceId: choice.id },
+      },
+    );
+    assert.equal(response.status, 201);
+    state = response.body;
+  }
+  const completed = await browserApiRequest(
+    page,
+    `/api/v1/adaptive-learning/diagnostics/${state.diagnostic.id}/complete`,
+    {
+      method: 'POST', key: `adaptive-e2e-${suffix}-diagnostic-complete`, body: {},
+    },
+  );
+  assert.equal(completed.status, 201);
+  return completed.body;
+}
+
 function rgbContrast(foreground, background) {
   const luminance = (rgb) => {
     const channels = rgb.match(/\d+(?:\.\d+)?/gu).slice(0, 3).map((part) => Number(part) / 255)
@@ -162,39 +197,6 @@ async function runAdaptiveDiagnosticE2E() {
       providerServer.once('error', reject);
       providerServer.listen(providerPort, '127.0.0.1', resolve);
     });
-    const writerAttempts = [];
-    const writerActivities = [
-      ['vocabulary', 'vocabulary_lexical_choice_topic_1', 1],
-      ['vocabulary', 'vocabulary_word_formation', 1],
-      ['grammar', 'grammar_forms_topic_3', 1],
-      ['grammar', 'grammar_transformations_topic_18', 1],
-      ['reading', 'reading_headings', 1], ['reading', 'reading_detail', 1],
-      ['listening', 'listening_matching', 1], ['listening', 'listening_interview', 1],
-      ['writing', 'writing_37', 0], ['writing', 'writing_38', 0],
-      ['speaking', 'speaking_2', 1], ['speaking', 'speaking_4', 1],
-    ];
-    let writerAttemptIndex = 0;
-    for (const [module, activity, score] of writerActivities) for (let repeat = 0; repeat < 2; repeat += 1) {
-      writerAttemptIndex += 1;
-      writerAttempts.push({
-        id: `30000000-0000-4000-8000-${String(writerAttemptIndex).padStart(12, '0')}`,
-        username: 'adaptivewriter', module, activity, score, max_score: 1,
-        evidence_quality: 'server_verified_unassisted', created_at: Date.now() - repeat * 60_000,
-      });
-    }
-    const examAttempts = [];
-    const examActivities = writerActivities.map(([module, activity]) => [
-      module, activity, activity === 'grammar_forms_topic_3' ? 0 : 1,
-    ]);
-    let examAttemptIndex = 0;
-    for (const [module, activity, score] of examActivities) for (let repeat = 0; repeat < 2; repeat += 1) {
-      examAttemptIndex += 1;
-      examAttempts.push({
-        id: `40000000-0000-4000-8000-${String(examAttemptIndex).padStart(12, '0')}`,
-        username: 'adaptiveexam', module, activity, score, max_score: 1,
-        evidence_quality: 'server_verified_unassisted', created_at: Date.now() - repeat * 60_000,
-      });
-    }
     await fs.writeFile(dataFile, JSON.stringify({
       users: {
         adaptivefree: {
@@ -244,7 +246,6 @@ async function runAdaptiveDiagnosticE2E() {
           },
         },
       },
-      module_attempts: [...writerAttempts, ...examAttempts],
     }));
 
     const output = [];
@@ -415,12 +416,20 @@ async function runAdaptiveDiagnosticE2E() {
       '/api/v1/adaptive-learning/sessions/preview',
       { method: 'POST', body: { durationMinutes: 15 } },
     );
-    assert.equal(freePreview.status, 200);
-    assert.equal(freePreview.body.preview.durationMinutes, 15);
-    assert.equal(freePreview.body.preview.blocks.length, 1);
+    assert.equal(freePreview.status, 409);
+    assert.equal(freePreview.body.error.code, 'ADAPTIVE_INITIAL_DIAGNOSTIC_REQUIRED');
+    await completePublicShortDiagnostic(commercialPage, 'free-demo');
+    const diagnosedFreePreview = await browserApiRequest(
+      commercialPage,
+      '/api/v1/adaptive-learning/sessions/preview',
+      { method: 'POST', body: { durationMinutes: 15 } },
+    );
+    assert.equal(diagnosedFreePreview.status, 200);
+    assert.equal(diagnosedFreePreview.body.preview.durationMinutes, 15);
+    assert.equal(diagnosedFreePreview.body.preview.blocks.length, 1);
     const freeCreateBody = {
       durationMinutes: 15,
-      previewFingerprint: freePreview.body.preview.previewFingerprint,
+      previewFingerprint: diagnosedFreePreview.body.preview.previewFingerprint,
     };
     const freeCreateKey = 'adaptive-free-demo-create-0001';
     const freeCreated = await browserApiRequest(
@@ -529,6 +538,7 @@ async function runAdaptiveDiagnosticE2E() {
         },
       },
     )).status, 201);
+    await completePublicShortDiagnostic(adjustmentPage, 'adjustment');
     const adjustmentPreview = await browserApiRequest(
       adjustmentPage,
       '/api/v1/adaptive-learning/sessions/preview',
@@ -581,6 +591,20 @@ async function runAdaptiveDiagnosticE2E() {
     assert.match(await page.locator('#adaptive_forecast_range').innerText(), /Ориентир: \d+–\d+ баллов/u);
     assert.match(await page.locator('#adaptive_forecast_confidence').innerText(), /не обещание результата/u);
     assert.equal(await page.locator('#adaptive_weekly_allocation > div').count(), 6);
+
+    await context.setOffline(true);
+    await page.evaluate(() => { window.tab('scr1'); window.tab('scr10'); });
+    await page.locator('#adaptive_plan[data-mode="offline_read_only"]').waitFor({
+      state: 'visible', timeout: 5_000,
+    });
+    assert.match(await page.locator('#adaptive_goal_notice').innerText(), /только для просмотра/u);
+    assert.equal(await page.locator('#adaptive_goal_form input:enabled').count(), 0);
+    assert.equal(await page.locator('#adaptive_plan button:enabled').count(), 0);
+    assert.equal(await page.locator('#adaptive_forecast').isVisible(), true);
+    await context.setOffline(false);
+    await page.evaluate(() => { window.tab('scr1'); window.tab('scr10'); });
+    await page.locator('#adaptive_plan[data-mode="online"]').waitFor({ state: 'visible', timeout: 5_000 });
+    assert.equal(await page.locator('#adaptive_target_score').isEnabled(), true);
 
     const startButton = page.locator('#adaptive_diagnostic_start');
     await startButton.waitFor({ state: 'visible', timeout: 5_000 });
@@ -759,6 +783,13 @@ async function runAdaptiveDiagnosticE2E() {
     assert.equal(lowBudgetGoal.status, 201);
     assert.equal(lowBudgetGoal.body.goal.weeklyMinutes, 30);
     assert.equal(lowBudgetGoal.body.plan.revision, 3);
+    assert.equal(lowBudgetGoal.body.plan.forecast.feasibility, 'unlikely_with_current_time');
+    assert.equal(lowBudgetGoal.body.plan.forecast.choices.some((choice) => (
+      choice.type === 'increase_weekly_time'
+    )), true);
+    assert.equal(lowBudgetGoal.body.plan.forecast.choices.some((choice) => (
+      choice.type === 'adjust_target_score'
+    )), true);
     const vocabularyGap = await page.evaluate(async () => {
       const responses = [];
       const activities = [
@@ -925,6 +956,11 @@ async function runAdaptiveDiagnosticE2E() {
     const advanceResult = await advanceResponse.json();
     assert.equal(advanceResult.execution.readyToFinish, true);
     assert.equal(advanceResult.completedBlock.evidenceQuality, 'client_reported');
+    assert.equal(
+      advanceResult.profileChange.evidenceSourceCountAfter,
+      advanceResult.profileChange.evidenceSourceCountBefore + 1,
+    );
+    assert.ok(advanceResult.planChange.planRevisionAfter > advanceResult.planChange.planRevisionBefore);
     await page.locator('#scr10.on').waitFor({ state: 'visible', timeout: 5_000 });
     await page.locator('#adaptive_session_blocks li[data-state="completed"]').waitFor({
       state: 'visible', timeout: 5_000,
@@ -955,6 +991,13 @@ async function runAdaptiveDiagnosticE2E() {
     assert.match(await page.locator('#adaptive_session_blocks').innerText(), new RegExp(
       firstActivity.activityLabel.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u',
     ));
+    const updatedOverview = await browserApiRequest(page, '/api/v1/adaptive-learning/overview');
+    assert.equal(updatedOverview.status, 200);
+    assert.equal(updatedOverview.body.plan.revision, advanceResult.planAfter.revision);
+    assert.equal(
+      updatedOverview.body.profile.evidenceSourceCount,
+      advanceResult.profileChange.evidenceSourceCountAfter,
+    );
     const currentSessionAfterFinish = await page.evaluate(async () => (
       (await fetch('/api/v1/adaptive-learning/sessions/current')).status
     ));
@@ -1015,8 +1058,16 @@ async function runAdaptiveDiagnosticE2E() {
     }]);
     const examPage = await examContext.newPage();
     await examPage.goto(baseUrl, { waitUntil: 'networkidle' });
+    await completePublicShortDiagnostic(examPage, 'existing-exam', { incorrectModules: ['grammar'] });
+    await examPage.reload({ waitUntil: 'networkidle' });
     await openProgress(examPage);
     await examPage.locator('#adaptive_access[data-tier="base"]').waitFor({ state: 'visible', timeout: 5_000 });
+    const existingOverview = await browserApiRequest(examPage, '/api/v1/adaptive-learning/overview');
+    assert.equal(existingOverview.status, 200);
+    assert.equal(existingOverview.body.profile.needsDiagnostic, false);
+    assert.equal(existingOverview.body.profile.status, 'preliminary');
+    assert.ok(existingOverview.body.profile.explanationCodes.includes('short_diagnostic_complete'));
+    assert.equal(await examPage.locator('#adaptive_diagnostic_start').isHidden(), true);
     await examPage.locator('#adaptive_target_score').fill('85');
     await examPage.locator('#adaptive_exam_date').fill('2027-06-01');
     await examPage.locator('#adaptive_weekly_minutes').fill('300');
@@ -1085,6 +1136,7 @@ async function runAdaptiveDiagnosticE2E() {
     const examFinish = await examFinishResponse.json();
     assert.equal(examFinish.summary.completedWork[0].evidenceContext, 'exam_practice');
 
+    const providerCallsBeforeAdaptiveWriter = providerCalls.length;
     writerContext = await browser.newContext({ serviceWorkers: 'block' });
     await writerContext.route('https://**', async (route) => {
       blockedExternalUrls.push(route.request().url());
@@ -1099,6 +1151,8 @@ async function runAdaptiveDiagnosticE2E() {
     }]);
     const writerPage = await writerContext.newPage();
     await writerPage.goto(baseUrl, { waitUntil: 'networkidle' });
+    await completePublicShortDiagnostic(writerPage, 'existing-writer', { incorrectModules: ['writing'] });
+    await writerPage.reload({ waitUntil: 'networkidle' });
     await openProgress(writerPage);
     await writerPage.locator('#adaptive_access[data-tier="premium"]').waitFor({ state: 'visible', timeout: 5_000 });
     await writerPage.locator('#adaptive_target_score').fill('85');
@@ -1110,6 +1164,8 @@ async function runAdaptiveDiagnosticE2E() {
     ));
     await writerPage.locator('#adaptive_goal_form button[type="submit"]').press('Enter');
     assert.equal((await writerGoalPromise).status(), 201);
+    assert.equal(providerCalls.length, providerCallsBeforeAdaptiveWriter,
+      'opening an adaptive plan and saving its goal must not call AI');
 
     await writerPage.locator('#adaptive_session_custom').fill('25');
     const writerPreviewPromise = writerPage.waitForResponse((response) => (
@@ -1122,6 +1178,8 @@ async function runAdaptiveDiagnosticE2E() {
     const writerPreview = (await writerPreviewResponse.json()).preview;
     assert.equal(writerPreview.blocks.length, 1);
     assert.equal(writerPreview.blocks[0].activityId, 'writing_37');
+    assert.equal(providerCalls.length, providerCallsBeforeAdaptiveWriter,
+      'previewing an adaptive plan must not call AI');
 
     const writerCreatePromise = writerPage.waitForResponse((response) => (
       response.request().method() === 'POST'

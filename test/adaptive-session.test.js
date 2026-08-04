@@ -17,6 +17,7 @@ import { EGE_SKILL_TAXONOMY } from '../adaptive-learning/profile.js';
 import { createAdaptiveLearningRoutes } from '../routes/adaptive-learning.js';
 import { createFileRepository } from '../storage/file-repository.js';
 import { assertAdaptiveSessionRepositoryContract } from './support/adaptive-session-contract.js';
+import { completeShortAdaptiveDiagnostic } from './support/adaptive-diagnostic-public.js';
 
 const NOW = new Date('2026-08-05T09:30:00.000Z');
 
@@ -104,10 +105,11 @@ async function withApp(run, { registry } = {}) {
   const owner = await repository.createTelegramUser(9401, 'Session Owner');
   const stranger = await repository.createTelegramUser(9402, 'Session Stranger');
   await repository.grantDays(9401, 30, owner);
+  let currentNow = new Date(NOW);
   const app = express();
   app.use(express.json());
   app.use(createAdaptiveLearningRoutes({
-    authentication: authentication(), db: repository, enabled: true, now: () => new Date(NOW),
+    authentication: authentication(), db: repository, enabled: true, now: () => new Date(currentNow),
     executionTokenSecret: 'adaptive-test-token-secret-32-characters',
     activityRegistry: registry,
   }));
@@ -125,7 +127,9 @@ async function withApp(run, { registry } = {}) {
       ...(options.headers || {}),
     } },
   );
-  try { await run({ repository, owner, stranger, request }); }
+  await completeShortAdaptiveDiagnostic(request, owner, 'session-owner');
+  const setNow = (value) => { currentNow = new Date(value); };
+  try { await run({ repository, owner, stranger, request, setNow }); }
   finally {
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     await repository.close();
@@ -244,6 +248,45 @@ test('authenticated session API previews, creates, restores and replaces exactly
   });
 });
 
+test('scheduled rediagnostic is offered without blocking preview, create or replay', async () => {
+  await withApp(async ({ owner, request, setNow }) => {
+    setNow(new Date(NOW.getTime() + 29 * 24 * 60 * 60_000));
+    await saveGoal(request, owner);
+
+    const overviewResponse = await request(owner, '/api/v1/adaptive-learning/overview');
+    assert.equal(overviewResponse.status, 200);
+    const overview = await overviewResponse.json();
+    assert.equal(overview.retention.rediagnostic.due, true);
+    assert.equal(overview.profile.needsDiagnostic, false);
+    assert.ok(overview.profile.explanationCodes.includes('rediagnostic_due'));
+
+    const diagnosticResponse = await request(owner, '/api/v1/adaptive-learning/diagnostics/start', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': 'adaptive-session-scheduled-diagnostic-start' },
+      body: JSON.stringify({ depth: 'short' }),
+    });
+    assert.equal(diagnosticResponse.status, 201);
+    assert.equal((await diagnosticResponse.json()).required, true);
+
+    const previewResponse = await request(owner, '/api/v1/adaptive-learning/sessions/preview', {
+      method: 'POST', body: JSON.stringify({ durationMinutes: 30 }),
+    });
+    assert.equal(previewResponse.status, 200);
+    const preview = (await previewResponse.json()).preview;
+    const createBody = { durationMinutes: 30, previewFingerprint: preview.previewFingerprint };
+    const createKey = 'adaptive-session-scheduled-create';
+    const created = await request(owner, '/api/v1/adaptive-learning/sessions', {
+      method: 'POST', headers: { 'Idempotency-Key': createKey }, body: JSON.stringify(createBody),
+    });
+    assert.equal(created.status, 201);
+    const replay = await request(owner, '/api/v1/adaptive-learning/sessions', {
+      method: 'POST', headers: { 'Idempotency-Key': createKey }, body: JSON.stringify(createBody),
+    });
+    assert.equal(replay.status, 200);
+    assert.equal((await replay.json()).replayed, true);
+  });
+});
+
 test('session API returns a typed coverage response when no content can be composed', async () => {
   await withApp(async ({ owner, request }) => {
     await saveGoal(request, owner);
@@ -263,6 +306,7 @@ test('file repository matches the adaptive session replay, race, export and dele
     await assertAdaptiveSessionRepositoryContract(assert, repository, username);
     assert.equal(await repository.deleteUserData(username), true);
     assert.equal(await repository.getCurrentAdaptiveLearningSession(username), null);
+    assert.equal((await repository.getAdaptiveLearningMetrics()).sessions.created, 0);
   } finally {
     await repository.close();
     await fs.rm(directory, { recursive: true, force: true });
