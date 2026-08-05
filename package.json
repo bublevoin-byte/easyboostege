@@ -17,6 +17,8 @@
     "test:e2e:adaptive": "npm run build:frontend && node e2e/adaptive-diagnostic.test.js",
     "test:e2e:evidence": "npm run build:frontend && node e2e/reading-listening-evidence.test.js",
     "test:e2e:progress": "npm run build:frontend && node e2e/learning-progress.test.js",
+    "listening:audio:dry-run": "node scripts/listening-static-audio.js",
+    "listening:audio:generate": "node scripts/listening-static-audio.js --paid",
     "test:e2e:firefox": "cross-env E2E_BROWSER=firefox node e2e/demo.test.js",
     "test:e2e:android": "cross-env E2E_BROWSER=chromium E2E_PROFILE=android node e2e/demo.test.js",
     "test:e2e:iphone-webkit": "cross-env E2E_BROWSER=webkit E2E_PROFILE=iphone node e2e/demo.test.js",

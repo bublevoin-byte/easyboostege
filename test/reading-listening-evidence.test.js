@@ -94,6 +94,7 @@ function createSubjectHarness(subject, { offline = false, slow = false } = {}) {
   const adaptive = [];
   const posts = [];
   const voiceResults = [];
+  const staticPlays = [];
   const values = new Map();
   const navigator = { onLine: !offline };
   const localStorage = {
@@ -199,6 +200,7 @@ function createSubjectHarness(subject, { offline = false, slow = false } = {}) {
     lSync() {},
     lSetSlow() {},
     lPlayRaw() {},
+    lPlayListeningSet(set, lines) { staticPlays.push({ setId: set?.id || null, lines: lines.length }); },
     lStop() {},
     examModule: {
       elapsedSeconds: (startedAt, endedAt) => Math.floor((endedAt - startedAt) / 1_000),
@@ -290,6 +292,7 @@ function createSubjectHarness(subject, { offline = false, slow = false } = {}) {
     adaptive,
     posts,
     voiceResults,
+    staticPlays,
     values,
     navigator,
     sync: window.EasyBoostSync,
@@ -437,6 +440,19 @@ test('true-false screen renders seven statements and reveals auditable answers o
   assert.deepEqual(harness.ordinary.map(({ activity, score, maxScore }) => ({ activity, score, maxScore })), [
     { activity: 'listening_true_false', score: 7, maxScore: 7 },
   ]);
+});
+
+test('listening screen identifies the synthesized fallback and sends catalog sets to static playback', () => {
+  const harness = createSubjectHarness('listening');
+
+  harness.screen.startTrueFalse();
+  assert.match(harness.element('l_area').innerHTML, /Тренировочная синтезированная озвучка/u);
+  harness.screen.playTrueFalse();
+
+  assert.deepEqual(harness.staticPlays, [{
+    setId: LISTENING_TRUE_FALSE_SETS[0].id,
+    lines: LISTENING_TRUE_FALSE_SETS[0].script.length,
+  }]);
 });
 
 test('interview screen uses seven four-option questions and publishes wrong answers for voice tutor', async () => {

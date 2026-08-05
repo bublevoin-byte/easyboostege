@@ -853,6 +853,11 @@ function lPlayBtn(st){var b=document.getElementById('l_playbtn'),ic=document.get
       +[0,1,2,3].map(function(i){return '<span style="width:3.5px;height:18px;border-radius:2px;background:#fff;transform-origin:bottom;animation:leq '+(0.7+i*0.13)+'s ease-in-out infinite;"></span>'}).join('')+'</span>';
     tx.textContent='Играет'}
   else{b.style.animation='';b.style.pointerEvents='';ic.innerHTML=L_PLAYSVG;tx.textContent='Слушать'}}
+function lAudioStatus(status){var el=document.getElementById('l_audio_source');if(!el)return;
+  if(status==='static'){el.textContent='Готовая экзаменационная запись';el.style.color='#1D7F4A';return}
+  if(status==='assisted-slow'){el.textContent='Замедленная тренировочная синтезированная озвучка · с помощью';el.style.color='#A56000';return}
+  el.textContent=status==='fallback-error'?'Запись недоступна · тренировочная синтезированная озвучка':'Тренировочная синтезированная озвучка';
+  el.style.color='#A56000'}
 /* Переключение замедленной озвучки: переменную модуля ни разметка, ни чанк присвоить не могут. */
 function lToggleSlow(button){LSLOW=!LSLOW;button.style.background=LSLOW?'#FFEDE4':'#fff';button.style.color=LSLOW?'#C2421B':'#6A6E75'}
 function lSetSlow(value){LSLOW=Boolean(value)}
@@ -912,7 +917,9 @@ configureTts({
   lPlayRawFallback:lPlayRawFallback,
   wSpeakFallback:wSpeakFallback,
   serverAvailable:function(){return Boolean(SRV&&TOKEN)},
-  slow:function(){return LSLOW}
+  slow:function(){return LSLOW},
+  loadListeningManifest:function(){return EasyBoostApi.get('/audio/listening/listening-pilot-v1/manifest.json')},
+  listeningAudioStatus:lAudioStatus
 });
 
 /*

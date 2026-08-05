@@ -394,7 +394,7 @@ test('an in-flight progress response only clears the owner and values it actuall
 
 /* ---------- service worker ---------- */
 
-function createWorker({ cached = {}, networkFails = true } = {}) {
+function createWorker({ cached = {}, networkFails = true, networkResponses = {} } = {}) {
   const listeners = new Map();
   const store = new Map(Object.entries(cached));
   const keyOf = (request) => (typeof request === 'string' ? request : request.url);
@@ -422,11 +422,15 @@ function createWorker({ cached = {}, networkFails = true } = {}) {
   const sandbox = {
     self,
     caches,
+    Headers,
     URL,
     Promise,
+    Response,
     async fetch(request) {
       networkCalls.push(keyOf(request));
       if (networkFails) throw new TypeError('Failed to fetch');
+      const configured = networkResponses[keyOf(request)];
+      if (configured) return configured.clone();
       return { ok: true, status: 200, clone: () => ({ ok: true, fromNetwork: true }), fromNetwork: true };
     },
   };
@@ -437,13 +441,14 @@ function createWorker({ cached = {}, networkFails = true } = {}) {
 function dispatchFetch(worker, request) {
   let responded;
   let handled = false;
+  const waits = [];
   const event = {
     request,
     respondWith: (value) => { handled = true; responded = value; },
-    waitUntil: () => {},
+    waitUntil: (value) => { waits.push(Promise.resolve(value)); },
   };
   worker.listeners.get('fetch')(event);
-  return { handled, responded };
+  return { handled, responded, waits };
 }
 
 test('the service worker never answers an online-only API call from its cache', async () => {
@@ -498,6 +503,39 @@ test('a successful navigation refreshes the cached shell for the next offline st
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(worker.store.get('/').fromNetwork, true, 'следующий офлайн-запуск должен получить свежую разметку');
+});
+
+test('a ranged listening MP3 request caches the full asset and replays ranges offline', async () => {
+  const url = `${ORIGIN}/audio/listening/listening-pilot-v1/matching/sample-r1-s01-speaker-a-female-1.mp3`;
+  const bytes = Uint8Array.from({ length: 32 }, (_, index) => index);
+  const online = createWorker({
+    networkFails: false,
+    networkResponses: {
+      [url]: new Response(bytes, {
+        status: 200,
+        headers: { 'Content-Type': 'audio/mpeg', 'Content-Length': String(bytes.length) },
+      }),
+    },
+  });
+
+  const first = dispatchFetch(online, {
+    method: 'GET', url, mode: 'cors', headers: new Headers({ Range: 'bytes=4-11' }),
+  });
+  const firstResponse = await first.responded;
+  await new Promise((resolve) => setImmediate(resolve));
+  await Promise.all(first.waits);
+  assert.equal(firstResponse.status, 206);
+  assert.deepEqual(Array.from(new Uint8Array(await firstResponse.arrayBuffer())), Array.from(bytes.slice(4, 12)));
+  assert.equal(online.store.get(url).status, 200, 'the cache must contain a complete reusable MP3');
+
+  const offline = createWorker({ cached: Object.fromEntries(online.store), networkFails: true });
+  const replay = dispatchFetch(offline, {
+    method: 'GET', url, mode: 'cors', headers: new Headers({ Range: 'bytes=12-19' }),
+  });
+  const replayResponse = await replay.responded;
+  assert.equal(replayResponse.status, 206);
+  assert.equal(replayResponse.headers.get('Content-Range'), 'bytes 12-19/32');
+  assert.deepEqual(Array.from(new Uint8Array(await replayResponse.arrayBuffer())), Array.from(bytes.slice(12, 20)));
 });
 
 test('a write to an online-only endpoint is never intercepted, cached or replayed', async () => {

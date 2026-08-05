@@ -5,7 +5,7 @@
  * и говорение пользуется ими, ни разу не открыв аудирование.
  */
 import {registerRouteHook} from '../router.js';
-import {lPlayRaw,lStop} from '../tts.js';
+import {lPlayListeningSet,lStop} from '../tts.js';
 import {prepareVoiceTutorContextResult,registerVoiceTutorContextResult} from '../voice-tutor.js';
 import {
   LSLOW,L_PLAYSVG,S,SRV,TOKEN,WBTN,examModule,gExamFmt,generateAiContent,lSetSlow,lSt,
@@ -119,7 +119,7 @@ function lAnim(name,dur){ui.animate('l_card',name,dur)}
 function lPlay(lines){LPLAYS++;var session=LM&&!LM.done?LM:(LT&&!LT.done?LT:(LI&&!LI.done?LI:null));
   if(session&&session.evidence){if(LSLOW)session.evidence.helpUsed=true;session.evidence.hintsUsed=Math.max(0,LPLAYS-2);
     if(session.evidence.hintsUsed)session.evidence.helpUsed=true}
-  lPlaysUi();lPlayRaw(lines)}
+  lPlaysUi();lPlayListeningSet(session&&session.set,lines)}
 function lPlaysUi(){var el=document.getElementById('l_plays');if(!el)return;
   el.textContent=LPLAYS<=2?('прослушиваний: '+LPLAYS+' из 2'):(LPLAYS+'-е — на ЕГЭ так нельзя!');
   el.style.color=LPLAYS<=2?'#1D7F4A':'#A56000';el.style.background=LPLAYS<=2?'#EAF7F0':'#FFF4DE'}
@@ -129,7 +129,8 @@ function lCtl(fn){
     +'<span id="l_playic" style="display:grid;place-items:center;width:22px;">'+L_PLAYSVG+'</span><span id="l_playtx">Слушать</span></button>'
     +'<button type="button" class="sq" aria-label="Остановить воспроизведение" onclick="lStop()" style="flex:none;width:40px;height:40px;border-radius:14px;border:1px solid #F0EAE2;background:#fff;cursor:pointer;display:grid;place-items:center;"><svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="#8A8F98"><rect x="5" y="5" width="14" height="14" rx="2"/></svg></button>'
     +'<button class="sq" onclick="lToggleSlow(this)" style="flex:none;height:40px;border-radius:14px;border:1px solid #F0EAE2;background:'+(LSLOW?'#FFEDE4':'#fff')+';color:'+(LSLOW?'#E44E20':'#8A8F98')+';padding:0 13px;font-family:Manrope,sans-serif;font-weight:800;font-size:12px;cursor:pointer;">0.7×</button>'
-    +'<span id="l_plays" style="flex:none;font-weight:800;font-size:11px;padding:7px 11px;border-radius:14px;color:#6A6E75;background:#F1F2F4;">прослушиваний: 0 из 2</span></div>'}
+    +'<span id="l_plays" style="flex:none;font-weight:800;font-size:11px;padding:7px 11px;border-radius:14px;color:#6A6E75;background:#F1F2F4;">прослушиваний: 0 из 2</span>'
+    +'<span id="l_audio_source" role="status" aria-live="polite" style="flex-basis:100%;font-weight:700;font-size:11px;color:#A56000;">Тренировочная синтезированная озвучка</span></div>'}
 function lTranscript(lines,evs){
   return '<div class="clayCard" style="padding:15px 16px;margin-bottom:12px;">'
     +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#6A6E75;background:#F1F2F4;padding:5px 10px;border-radius:20px;">ТРАНСКРИПТ · тапни слово для перевода</span>'
@@ -380,8 +381,9 @@ function lExamStart(){
 function lExamPlay(){if(!LE)return;
   if(!listeningModule.registerPlay(LE.plays,LE.stage,2)){try{toast('На ЕГЭ запись звучит только дважды')}catch(e){}return}
   var evidence=LE.stage===0?LE.evidence.gist:LE.evidence.detail;if(LSLOW)evidence.helpUsed=true;
+  var set=LE.stage===0?LE.m:(LE.stage===1?LE.tf:LE.iq);
   var lines=LE.stage===0?LE.m.sp.map(function(sp,i){return{s:i%2,t:'Speaker '+lSpeakerLabel(i)+'. '+sp.t}}):(LE.stage===1?LE.tf.d:LE.iq.d);
-  lPlayRaw(lines);
+  lPlayListeningSet(set,lines);
   var el=document.getElementById('lex_plays');
   if(el){el.textContent='прослушиваний: '+LE.plays[LE.stage]+' из 2';
     el.style.color=LE.plays[LE.stage]>=2?'#A56000':'#1D7F4A';el.style.background=LE.plays[LE.stage]>=2?'#FFF4DE':'#EAF7F0'}}
@@ -390,7 +392,8 @@ function lExamCtl(){
     +'<button id="l_playbtn" class="sq" onclick="lExamPlay()" style="flex:1;min-width:160px;min-height:54px;display:inline-flex;align-items:center;justify-content:center;gap:10px;background:linear-gradient(135deg,#FFA570,#F2683F);border:none;border-radius:18px;padding:0 18px;font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:16px;color:#fff;cursor:pointer;box-shadow:0 12px 26px rgba(242,104,63,.35),inset 0 2px 3px rgba(255,255,255,.4),inset 0 -4px 8px rgba(190,55,18,.28);">'
     +'<span id="l_playic" style="display:grid;place-items:center;width:22px;">'+L_PLAYSVG+'</span><span id="l_playtx">Слушать</span></button>'
     +'<button type="button" class="sq" aria-label="Остановить воспроизведение" onclick="lStop()" style="flex:none;width:40px;height:40px;border-radius:14px;border:1px solid #F0EAE2;background:#fff;cursor:pointer;display:grid;place-items:center;"><svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="#8A8F98"><rect x="5" y="5" width="14" height="14" rx="2"/></svg></button>'
-    +'<span id="lex_plays" style="flex:none;font-weight:800;font-size:11px;padding:7px 11px;border-radius:14px;color:'+(LE.plays[LE.stage]>=2?'#C77400':'#1F8A50')+';background:'+(LE.plays[LE.stage]>=2?'#FFF4DE':'#EAF7F0')+';">прослушиваний: '+LE.plays[LE.stage]+' из 2</span></div>'}
+    +'<span id="lex_plays" style="flex:none;font-weight:800;font-size:11px;padding:7px 11px;border-radius:14px;color:'+(LE.plays[LE.stage]>=2?'#C77400':'#1F8A50')+';background:'+(LE.plays[LE.stage]>=2?'#FFF4DE':'#EAF7F0')+';">прослушиваний: '+LE.plays[LE.stage]+' из 2</span>'
+    +'<span id="l_audio_source" role="status" aria-live="polite" style="flex-basis:100%;font-weight:700;font-size:11px;color:#A56000;">Тренировочная синтезированная озвучка</span></div>'}
 function lExamNextBtn(ok,label,fn){
   return '<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);margin-top:4px;'+(ok?'':'opacity:.45;pointer-events:none;')+'" onclick="'+fn+'">'+label+'</button>'}
 function lExamRender(){var area=document.getElementById('l_area');if(!area||!LE)return;

@@ -91,6 +91,8 @@ try {
   await page.locator('#scr4.on').waitFor({ state: 'visible', timeout: 5_000 });
   await page.getByRole('button', { name: /Верно · Неверно · Не сказано/u }).press('Enter');
   await page.locator('#ltf_row_6').waitFor({ state: 'visible', timeout: 5_000 });
+  await page.getByText('Тренировочная синтезированная озвучка', { exact: true })
+    .waitFor({ state: 'visible', timeout: 5_000 });
   for (let index = 0; index < 7; index += 1) {
     await page.locator(`#ltf_row_${index} button`).first().press('Enter');
   }
