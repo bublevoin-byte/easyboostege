@@ -1,3 +1,5 @@
+import { learningActivityPool, learningActivitySource, readingActivityId, splitLearningActivityDuration } from '../learning-activity-contract.js';
+
 (function initializeReadingModule(global) {
   'use strict';
 
@@ -40,6 +42,7 @@
     return {
       hl: order.indexes.map((index) => set.hl[index]),
       txts: set.txts.map((text) => ({ ...text, a: order.inverse[text.a] })),
+      evidenceSource: set.evidenceSource,
     };
   }
 
@@ -50,6 +53,7 @@
       fr: order.indexes.map((index) => set.fr[index]),
       a: set.a.map((answer) => order.inverse[answer]),
       k: set.k.slice(),
+      evidenceSource: set.evidenceSource,
     };
   }
 
@@ -74,8 +78,19 @@
     return { headings, gaps, questions, total: headings + gaps + questions };
   }
 
-  function pool(base, generated) {
-    return (base || []).concat(generated || []);
+  function examEvidenceSlices(scores, durationMs) {
+    return splitLearningActivityDuration([
+      {
+        activityId: readingActivityId('headings'),
+        score: Number(scores?.headings) || 0,
+        maxScore: 4,
+      },
+      {
+        activityId: readingActivityId('detail'),
+        score: (Number(scores?.gaps) || 0) + (Number(scores?.questions) || 0),
+        maxScore: 7,
+      },
+    ], durationMs);
   }
 
   global.EasyBoostReading = Object.freeze({
@@ -88,6 +103,9 @@
     scoreSelections,
     scoreQuestions,
     scoreExam,
-    pool,
+    activityId: readingActivityId,
+    examEvidenceSlices,
+    sourceOf: learningActivitySource,
+    pool: learningActivityPool,
   });
 })(window);

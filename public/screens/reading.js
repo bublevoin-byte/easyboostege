@@ -10,7 +10,7 @@ import {
   EGE_WORDS,S,SRV,TOKEN,WBTN,examModule,gExamFmt,generateAiContent,lastWord,lastWordContext,readingModule,rEsc,
   rSt,rSync,rWordsHtml,registerScreenGenerator,save,setTxt,srsRecordVocabularyOutcome,toast,ui,wBase,wDeco,wSync,
 } from '../app.js';
-import {completeAdaptiveModuleActivity} from '../adaptive-session-runtime.js';
+import {createLearningActivityEvidence,recordLearningActivityEvidence} from '../learning-activity-recorder.js';
 import {
   mergePersonalVocabularyCard,normalizeVocabularyWord,personalVocabularyCardId,
 } from '../vocabulary-domain.js';
@@ -132,7 +132,8 @@ function rShufHl(set){return readingModule.shuffleHeadings(set)}
 function rShufGp(set){return readingModule.shuffleGaps(set)}
 /* ---- Задание 10: заголовки ---- */
 function rHl(){S.readIdxH=(S.readIdxH||0);var pool=rPool('h',R_HL);var set=rShufHl(pool[S.readIdxH%pool.length]);S.readIdxH++;
-  RH={set:set,sel:[null,null,null,null],done:false};rHlRender()}
+  RH={set:set,sel:[null,null,null,null],done:false,evidence:createLearningActivityEvidence({module:'reading',
+    activityId:readingModule.activityId('headings'),mode:'reading_headings',source:readingModule.sourceOf(set)})};rHlRender()}
 function rHlRender(){var area=document.getElementById('r_area');var set=RH.set;
   var L='ABCDE';
   var h='<div id="r_card" class="clayCard" style="position:relative;overflow:hidden;padding:16px 18px;margin-bottom:12px;">'+wDeco()
@@ -164,7 +165,7 @@ function rHlCheck(){if(RH.done)return;RH.done=true;var set=RH.set,L='ABCDE',r=rS
     var row=document.getElementById('rhl_row_'+ti);if(row)row.style.pointerEvents='none'});
   var used={};set.txts.forEach(function(t){used[t.a]=1});
   var extra=[0,1,2,3,4].find(function(i){return !used[i]});
-  r.texts++;rSync();save();completeAdaptiveModuleActivity({module:'reading',activityId:'reading_headings',score:okn,maxScore:4}).catch(function(){});
+  r.texts++;rSync();save();recordLearningActivityEvidence(RH.evidence,{score:okn,maxScore:4}).catch(function(){});
   var area=document.getElementById('r_area');
   var d=document.createElement('div');
   d.innerHTML='<div class="clayCard" style="padding:16px 18px;margin-bottom:12px;text-align:center;animation:win .35s both;">'
@@ -176,7 +177,9 @@ function rHlCheck(){if(RH.done)return;RH.done=true;var set=RH.set,L='ABCDE',r=rS
   try{d.scrollIntoView({behavior:'smooth',block:'start'})}catch(e){};rGen()}
 /* ---- Задания 12-18: полное понимание ---- */
 function rQs(){S.readIdxQ=(S.readIdxQ||0);var pool=rPool('q',R_QS);var set=pool[S.readIdxQ%pool.length];S.readIdxQ++;
-  RQ={set:set,i:-1,ok:0,showTx:false,ans:set.qs.map(function(){return null}),voiceRegistered:false};rQsRender()}
+  RQ={set:set,i:-1,ok:0,showTx:false,ans:set.qs.map(function(){return null}),voiceRegistered:false,
+    evidence:createLearningActivityEvidence({module:'reading',activityId:readingModule.activityId('questions'),
+      mode:'reading_detail',source:readingModule.sourceOf(set)})};rQsRender()}
 function rQsRender(){var area=document.getElementById('r_area');var set=RQ.set;
   if(RQ.i<0){
     area.innerHTML='<div id="r_card" class="clayCard" style="position:relative;overflow:hidden;padding:18px;margin-bottom:12px;">'+wDeco()
@@ -186,7 +189,7 @@ function rQsRender(){var area=document.getElementById('r_area');var set=RQ.set;
       +'<button class="sq" style="'+WBTN+'color:#B54E2F;margin-top:10px;" onclick="rHub()">← К чтению</button>';
     rAnim('win','.32s');setTxt('r_today','читаем текст');return}
   var q=set.qs[RQ.i];
-  if(!q){var r=rSt();r.texts++;rSync();save();completeAdaptiveModuleActivity({module:'reading',activityId:'reading_detail',score:RQ.ok,maxScore:set.qs.length}).catch(function(){});var voiceSlots='';
+  if(!q){var r=rSt();r.texts++;rSync();save();recordLearningActivityEvidence(RQ.evidence,{score:RQ.ok,maxScore:set.qs.length}).catch(function(){});var voiceSlots='';
     var voiceResult=prepareVoiceTutorContextResult({module:'reading',set:set,selections:RQ.ans});
     set.qs.forEach(function(item,i){if(voiceResult)voiceSlots+=voiceResult.resultSlot(item,i)});
     area.innerHTML='<div id="r_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;text-align:center;">'+wDeco()
@@ -202,11 +205,12 @@ function rQsRender(){var area=document.getElementById('r_area');var set=RQ.set;
     +'<div id="r_card" class="clayCard" style="position:relative;overflow:hidden;padding:18px;margin-bottom:12px;">'+wDeco()
     +'<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'
     +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#B54E2F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">ВОПРОС '+(RQ.i+1)+' ИЗ '+set.qs.length+'</span>'
-    +'<button type="button" class="clk iconbtn" onclick="RQ.showTx=!RQ.showTx;rQsRender()" style="font-weight:800;font-size:10px;letter-spacing:.6px;color:#1D7F4A;background:#EAF7F0;padding:5px 10px;border-radius:20px;cursor:pointer;">'+(RQ.showTx?'СКРЫТЬ ТЕКСТ':'ТЕКСТ')+'</button></div>'
+    +'<button type="button" class="clk iconbtn" onclick="rQsToggleText()" style="font-weight:800;font-size:10px;letter-spacing:.6px;color:#1D7F4A;background:#EAF7F0;padding:5px 10px;border-radius:20px;cursor:pointer;">'+(RQ.showTx?'СКРЫТЬ ТЕКСТ':'ТЕКСТ')+'</button></div>'
     +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:16.5px;color:#2B2B2B;line-height:1.45;margin-top:12px;">'+q.q+'</div></div>'
     +'<div style="display:flex;flex-direction:column;gap:10px;">'
     +q.o.map(function(o,i){return '<button class="sq" style="'+WBTN+'text-align:left;" onclick="rQsPick(this,'+i+')">'+o+'</button>'}).join('')+'</div>';
   rAnim('win','.32s');setTxt('r_today',(RQ.i+1)+' / '+set.qs.length)}
+function rQsToggleText(){if(!RQ)return;RQ.showTx=!RQ.showTx;if(RQ.showTx&&RQ.evidence)RQ.evidence.helpUsed=true;rQsRender()}
 function rQsPick(btn,i){var q=RQ.set.qs[RQ.i];if(!q||btn.dataset.done)return;
   RQ.ans[RQ.i]=i;
   var all=btn.parentElement.querySelectorAll('button');all.forEach(function(b){b.dataset.done=1});
@@ -218,6 +222,7 @@ function rQsPick(btn,i){var q=RQ.set.qs[RQ.i];if(!q||btn.dataset.done)return;
     rAnim('wshake','.42s');
     setTimeout(function(){rQsExplain(q)},900)}}
 function rQsExplain(q){var area=document.getElementById('r_area');
+  if(RQ&&RQ.evidence)RQ.evidence.helpUsed=true;
   area.innerHTML='<div id="r_card" class="clayCard" style="position:relative;overflow:hidden;padding:20px;">'+wDeco()
     +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#A83226;background:#FDEDEA;padding:5px 10px;border-radius:20px;">РАЗБОР ОШИБКИ</span>'
     +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:17px;color:#1D7F4A;margin-top:12px;">'+q.o[q.a]+'</div>'
@@ -227,7 +232,8 @@ function rQsExplain(q){var area=document.getElementById('r_area');
   rAnim('wflip','.5s')}
 /* ---- Задание 11: пропуски ---- */
 function rGp(){S.readIdxG=(S.readIdxG||0);var pool=rPool('g',R_GAPS);var set=rShufGp(pool[S.readIdxG%pool.length]);S.readIdxG++;
-  RG={set:set,sel:[null,null,null],done:false};rGpRender()}
+  RG={set:set,sel:[null,null,null],done:false,evidence:createLearningActivityEvidence({module:'reading',
+    activityId:readingModule.activityId('gaps'),mode:'reading_gaps',source:readingModule.sourceOf(set)})};rGpRender()}
 function rGpRender(){var area=document.getElementById('r_area');var set=RG.set,L='ABCD';
   var txt='';
   set.tx.forEach(function(seg,i){txt+=rWordsHtml(seg);
@@ -265,7 +271,7 @@ function rGpCheck(){if(RG.done)return;RG.done=true;var set=RG.set,L='ABCD',r=rSt
     var row=document.getElementById('rgp_row_'+gi);if(row)row.style.pointerEvents='none'});
   var used={};set.a.forEach(function(x){used[x]=1});
   var extra=[0,1,2,3].find(function(i){return !used[i]});
-  r.texts++;rSync();save();
+  r.texts++;rSync();save();recordLearningActivityEvidence(RG.evidence,{score:okn,maxScore:3}).catch(function(){});
   var area=document.getElementById('r_area');
   var d=document.createElement('div');
   d.innerHTML='<div class="clayCard" style="padding:16px 18px;margin-bottom:12px;text-align:center;animation:win .35s both;">'
@@ -317,8 +323,12 @@ function rExam(){var area=document.getElementById('r_area');if(!area)return;
 function rExamStart(){
   var ph=rPool('h',R_HL),pg=rPool('g',R_GAPS),pq=rPool('q',R_QS);
   S.reIdx=(S.reIdx||0);
-  RE={h:rShufHl(ph[S.reIdx%ph.length]),g:rShufGp(pg[S.reIdx%pg.length]),q:pq[S.reIdx%pq.length],
-      selH:[null,null,null,null],selG:[null,null,null],ansQ:[],stage:0,t0:Date.now()};
+  var startedAt=Date.now(),h=rShufHl(ph[S.reIdx%ph.length]),g=rShufGp(pg[S.reIdx%pg.length]),q=pq[S.reIdx%pq.length];
+  RE={h:h,g:g,q:q,selH:[null,null,null,null],selG:[null,null,null],ansQ:[],stage:0,t0:startedAt,
+      evidence:{gist:createLearningActivityEvidence({module:'reading',activityId:readingModule.activityId('headings'),
+        mode:'reading_exam',source:readingModule.sourceOf(h),startedAt:startedAt}),
+        detail:createLearningActivityEvidence({module:'reading',activityId:readingModule.activityId('detail'),
+          mode:'reading_exam',source:readingModule.sourceOf(g,q),startedAt:startedAt})}};
   S.reIdx++;
   RE.iv=setInterval(function(){if(RE)setTxt('r_today',gExamFmt(Math.floor((Date.now()-RE.t0)/1000)))},1000);
   rExamRender()}
@@ -363,12 +373,15 @@ function rExamRender(){var area=document.getElementById('r_area');if(!area||!RE)
     +q.o.map(function(o,i){return '<button class="sq" style="'+WBTN+'text-align:left;" onclick="RE.ansQ.push('+i+');rExamRender()">'+rEsc(o)+'</button>'}).join('')+'</div>'}
 function rExamDedup(field,idx,val){RE[field]=readingModule.selectUnique(RE[field],idx,val)}
 function rExamFinish(){if(!RE)return;clearInterval(RE.iv);
-  var sec=examModule.elapsedSeconds(RE.t0,Date.now()),L='ABCDE',r=rSt();
+  var endedAt=Date.now(),sec=examModule.elapsedSeconds(RE.t0,endedAt),L='ABCDE',r=rSt();
   var voiceResult=prepareVoiceTutorContextResult({module:'reading',set:RE.q,selections:RE.ansQ});
   var okH=0;RE.h.txts.forEach(function(tx,ti){r.h.tot++;if(RE.selH[ti]===tx.a){okH++;r.h.ok++}});
   var okG=0;[0,1,2].forEach(function(gi){r.g.tot++;if(RE.selG[gi]===RE.g.a[gi]){okG++;r.g.ok++}});
   var okQ=0;RE.q.qs.forEach(function(q,i){r.q.tot++;if(RE.ansQ[i]===q.a){okQ++;r.q.ok++}});
   var total=okH+okG+okQ;
+  readingModule.examEvidenceSlices({headings:okH,gaps:okG,questions:okQ},Math.max(0,endedAt-RE.t0))
+    .forEach(function(slice){var evidence=slice.activityId===readingModule.activityId('headings')?RE.evidence.gist:RE.evidence.detail;
+      recordLearningActivityEvidence(evidence,{score:slice.score,maxScore:slice.maxScore,durationMs:slice.durationMs}).catch(function(){})});
   S.readExam=examModule.record(S.readExam,total);
   var rows='';
   RE.h.txts.forEach(function(tx,ti){if(RE.selH[ti]!==tx.a)
@@ -442,5 +455,5 @@ registerScreenGenerator('scr7',genReading);
 export {
   RE,RQ,r_add,
   rExam,rExamDedup,rExamRender,rExamStart,rGp,rGpCheck,rGpPick,rHl,rHlCheck,rHlPick,rHub,
-  rQs,rQsPick,rQsRender,
+  rQs,rQsPick,rQsRender,rQsToggleText,
 };

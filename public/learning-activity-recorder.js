@@ -8,7 +8,8 @@ const ACTIVITY_ID = /^[a-z0-9_]{1,80}$/u;
 const CLIENT_REPORTED_MODULES = new Set(['grammar', 'reading', 'listening']);
 const ACTIVITY_MODES = new Set([
   'topic_practice', 'spaced_review', 'exam_19_24',
-  'reading_headings', 'reading_detail', 'listening_matching', 'listening_interview',
+  'reading_headings', 'reading_detail', 'reading_gaps', 'reading_exam',
+  'listening_matching', 'listening_true_false', 'listening_interview', 'listening_exam',
 ]);
 const ACTIVITY_SOURCES = new Set(['builtin', 'generated', 'mixed']);
 
@@ -45,6 +46,20 @@ function ordinaryAttempt(completion) {
   };
 }
 
+export function createLearningActivityEvidence({ module, activityId, mode, source, startedAt = Date.now() } = {}) {
+  return {
+    id: crypto.randomUUID(),
+    module,
+    activityId,
+    mode,
+    source,
+    startedAt,
+    reported: false,
+    helpUsed: false,
+    hintsUsed: 0,
+  };
+}
+
 export async function recordCompletedLearningActivity(completion = {}) {
   const attempt = ordinaryAttempt(completion);
   const active = adaptiveRuntimeSnapshot().active;
@@ -69,4 +84,28 @@ export async function recordCompletedLearningActivity(completion = {}) {
     saved: await window.EasyBoostSync.saveModuleAttempt(attempt),
     attempt,
   };
+}
+
+export async function recordLearningActivityEvidence(evidence, { score, maxScore, durationMs } = {}) {
+  if (!evidence || evidence.reported) return false;
+  evidence.reported = true;
+  try {
+    return await recordCompletedLearningActivity({
+      id: evidence.id,
+      module: evidence.module,
+      activityId: evidence.activityId,
+      score,
+      maxScore,
+      durationMs: durationMs == null ? Math.max(0, Date.now() - evidence.startedAt) : durationMs,
+      metadata: {
+        mode: evidence.mode,
+        source: evidence.source,
+        helpUsed: evidence.helpUsed,
+        hintsUsed: evidence.hintsUsed,
+      },
+    });
+  } catch (error) {
+    evidence.reported = false;
+    throw error;
+  }
 }

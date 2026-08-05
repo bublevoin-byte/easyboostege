@@ -6,6 +6,7 @@ import {
   GRAMMAR_FORMS_ACTIVITY_IDS,
   GRAMMAR_TRANSFORMATIONS_ACTIVITY_IDS,
   grammarActivityId,
+  splitLearningActivityDuration,
 } from '../public/learning-activity-contract.js';
 
 const source = (await fs.readFile(new URL('../public/modules/grammar.js', import.meta.url), 'utf8'))
@@ -13,7 +14,9 @@ const source = (await fs.readFile(new URL('../public/modules/grammar.js', import
 
 function createGrammarModule() {
   const window = {};
-  vm.runInNewContext(source, { window, grammarActivityId, Object, String, Number, Math, Date });
+  vm.runInNewContext(source, {
+    window, grammarActivityId, splitLearningActivityDuration, Object, String, Number, Math, Date,
+  });
   return window.EasyBoostGrammar;
 }
 

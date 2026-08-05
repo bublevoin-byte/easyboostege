@@ -2,12 +2,25 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
+import {
+  LISTENING_ACTIVITY_IDS,
+  LISTENING_DETAIL_ACTIVITY_IDS,
+  LISTENING_GIST_ACTIVITY_IDS,
+  learningActivityPool,
+  learningActivitySource,
+  listeningActivityId,
+  splitLearningActivityDuration,
+} from '../public/learning-activity-contract.js';
 
-const source = await fs.readFile(new URL('../public/modules/listening.js', import.meta.url), 'utf8');
+const source = (await fs.readFile(new URL('../public/modules/listening.js', import.meta.url), 'utf8'))
+  .replace(/^import .*;\r?\n/mu, '');
 
 function createListeningModule() {
   const window = {};
-  vm.runInNewContext(source, { window, Object, Number, Math, Array });
+  vm.runInNewContext(source, {
+    window, learningActivityPool, learningActivitySource, listeningActivityId, splitLearningActivityDuration,
+    Object, Number, Math, Array, Set, String,
+  });
   return window.EasyBoostListening;
 }
 
@@ -56,4 +69,26 @@ test('listening module scores an exam and enforces the playback limit', () => {
   assert.equal(listening.registerPlay(plays, 1), false);
   assert.deepEqual(plays, [0, 2, 0]);
   assert.deepEqual(Array.from(listening.pool([1], [2, 3])), [1, 2, 3]);
+});
+
+test('listening completion taxonomy maps every supported format to its exact skill slice', () => {
+  const listening = createListeningModule();
+
+  assert.equal(listening.activityId('matching'), LISTENING_ACTIVITY_IDS.matching);
+  assert.equal(listening.activityId('true_false'), LISTENING_ACTIVITY_IDS.trueFalse);
+  assert.equal(listening.activityId('interview'), LISTENING_ACTIVITY_IDS.interview);
+  assert.ok(LISTENING_GIST_ACTIVITY_IDS.includes(LISTENING_ACTIVITY_IDS.matching));
+  assert.ok(LISTENING_DETAIL_ACTIVITY_IDS.includes(LISTENING_ACTIVITY_IDS.trueFalse));
+  assert.ok(LISTENING_DETAIL_ACTIVITY_IDS.includes(LISTENING_ACTIVITY_IDS.interview));
+});
+
+test('listening exam emits one gist and one detail slice whose durations sum to the real session', () => {
+  const listening = createListeningModule();
+  const slices = listening.examEvidenceSlices({ matching: 3, trueFalse: 4, interview: 2 }, 1_001);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(slices)), [
+    { activityId: 'listening_matching', score: 3, maxScore: 4, durationMs: 308 },
+    { activityId: 'listening_detail', score: 6, maxScore: 9, durationMs: 693 },
+  ]);
+  assert.equal(slices.reduce((sum, slice) => sum + slice.durationMs, 0), 1_001);
 });

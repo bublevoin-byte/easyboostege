@@ -1,4 +1,4 @@
-import { grammarActivityId } from '../learning-activity-contract.js';
+import { grammarActivityId, splitLearningActivityDuration } from '../learning-activity-contract.js';
 
 (function initializeGrammarModule(global) {
   'use strict';
@@ -123,27 +123,11 @@ import { grammarActivityId } from '../learning-activity-contract.js';
   }
 
   function reviewEvidenceSlices(evidenceByActivity, durationMs) {
-    const duration = Math.max(0, Math.round(Number(durationMs) || 0));
     const slices = Object.keys(evidenceByActivity || {}).sort().map((activityId) => ({
       ...evidenceByActivity[activityId],
       activityId,
     }));
-    if (!slices.length) return [];
-    const total = slices.reduce((sum, slice) => sum + Math.max(1, Number(slice.maxScore) || 1), 0);
-    let allocated = 0;
-    const remainders = [];
-    slices.forEach((slice, index) => {
-      const exact = duration * Math.max(1, Number(slice.maxScore) || 1) / total;
-      slice.durationMs = Math.floor(exact);
-      allocated += slice.durationMs;
-      remainders.push({ index, fraction: exact - slice.durationMs, activityId: slice.activityId });
-    });
-    remainders.sort((left, right) => right.fraction - left.fraction
-      || left.activityId.localeCompare(right.activityId));
-    for (let remainder = duration - allocated, index = 0; remainder > 0; remainder -= 1, index += 1) {
-      slices[remainders[index % remainders.length].index].durationMs += 1;
-    }
-    return slices;
+    return splitLearningActivityDuration(slices, durationMs);
   }
 
   global.EasyBoostGrammar = Object.freeze({

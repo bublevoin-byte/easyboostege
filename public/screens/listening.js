@@ -11,7 +11,7 @@ import {
   LSLOW,L_PLAYSVG,S,SRV,TOKEN,WBTN,examModule,gExamFmt,generateAiContent,lSetSlow,lSt,
   lSync,listeningModule,registerScreenGenerator,rWordsHtml,save,setTxt,toast,ui,wDeco,
 } from '../app.js';
-import {completeAdaptiveModuleActivity} from '../adaptive-session-runtime.js';
+import {createLearningActivityEvidence,recordLearningActivityEvidence} from '../learning-activity-recorder.js';
 
 /* ===== LISTENING ===== */
 const LISTEN={dialog:"— Hi, can I get a coffee and a croissant, please?  — Sure, that's four pounds fifty. Anything else?  — No, that's all, thanks.",
@@ -109,7 +109,10 @@ L_VOICE_RESULT_SETS.forEach(function(resultSet,setIndex){
   resultSet.items.forEach(function(itemId,itemIndex){L_IN[setIndex].qs[itemIndex].voice={id:itemId,revision:1}});
 });
 function lAnim(name,dur){ui.animate('l_card',name,dur)}
-function lPlay(lines){LPLAYS++;lPlaysUi();lPlayRaw(lines)}
+function lPlay(lines){LPLAYS++;var session=LM&&!LM.done?LM:(LT&&!LT.done?LT:(LI&&!LI.done?LI:null));
+  if(session&&session.evidence){if(LSLOW)session.evidence.helpUsed=true;session.evidence.hintsUsed=Math.max(0,LPLAYS-2);
+    if(session.evidence.hintsUsed)session.evidence.helpUsed=true}
+  lPlaysUi();lPlayRaw(lines)}
 function lPlaysUi(){var el=document.getElementById('l_plays');if(!el)return;
   el.textContent=LPLAYS<=2?('прослушиваний: '+LPLAYS+' из 2'):(LPLAYS+'-е — на ЕГЭ так нельзя!');
   el.style.color=LPLAYS<=2?'#1D7F4A':'#A56000';el.style.background=LPLAYS<=2?'#EAF7F0':'#FFF4DE'}
@@ -164,7 +167,8 @@ function lHub(){var area=document.getElementById('l_area');if(!area)return;LM=nu
 function lShufM(set){return listeningModule.shuffleMatching(set)}
 /* ---- задание 1: соответствия ---- */
 function lMt(){S.lisIdxM=(S.lisIdxM||0);var pool=lPool('m',L_M);var set=lShufM(pool[S.lisIdxM%pool.length]);S.lisIdxM++;
-  LM={set:set,sel:[null,null,null,null],done:false};LPLAYS=0;lMtRender()}
+  LM={set:set,sel:[null,null,null,null],done:false,evidence:createLearningActivityEvidence({module:'listening',
+    activityId:listeningModule.activityId('matching'),mode:'listening_matching',source:listeningModule.sourceOf(set)})};LPLAYS=0;lMtRender()}
 function lMtLines(){return LM.set.sp.map(function(sp,i){return {s:i%2,t:'Speaker '+'ABCD'[i]+'. '+sp.t}})}
 function lMtRender(){var area=document.getElementById('l_area');var set=LM.set;
   var h='<div id="l_card" class="clayCard" style="position:relative;overflow:hidden;padding:16px 18px;margin-bottom:12px;">'+wDeco()
@@ -197,7 +201,7 @@ function lMtCheck(){if(LM.done)return;LM.done=true;lStop();var set=LM.set,r=lSt(
     var row=document.getElementById('lmt_row_'+si);if(row)row.style.pointerEvents='none'});
   var used={};set.a.forEach(function(x){used[x]=1});
   var extra=[0,1,2,3,4].find(function(i){return !used[i]});
-  r.done++;lSync();save();completeAdaptiveModuleActivity({module:'listening',activityId:'listening_matching',score:okn,maxScore:4}).catch(function(){});
+  r.done++;lSync();save();recordLearningActivityEvidence(LM.evidence,{score:okn,maxScore:4}).catch(function(){});
   var area=document.getElementById('l_area');
   var d=document.createElement('div');
   d.innerHTML='<div class="clayCard" style="padding:16px 18px;margin-bottom:12px;text-align:center;animation:win .35s both;">'
@@ -210,7 +214,8 @@ function lMtCheck(){if(LM.done)return;LM.done=true;lStop();var set=LM.set,r=lSt(
   try{d.scrollIntoView({behavior:'smooth',block:'start'})}catch(e){};lGen()}
 /* ---- задание 2: True/False/Not stated ---- */
 function lTf(){S.lisIdxT=(S.lisIdxT||0);var pool=lPool('tf',L_TF);var set=pool[S.lisIdxT%pool.length];S.lisIdxT++;
-  LT={set:set,sel:set.st.map(function(){return null}),done:false};LPLAYS=0;lTfRender()}
+  LT={set:set,sel:set.st.map(function(){return null}),done:false,evidence:createLearningActivityEvidence({module:'listening',
+    activityId:listeningModule.activityId('true_false'),mode:'listening_true_false',source:listeningModule.sourceOf(set)})};LPLAYS=0;lTfRender()}
 function lTfRender(){var area=document.getElementById('l_area');var set=LT.set;
   var LBL=['Верно','Неверно','Не сказано'];
   var h='<div id="l_card" class="clayCard" style="position:relative;overflow:hidden;padding:16px 18px;margin-bottom:12px;">'+wDeco()
@@ -238,7 +243,7 @@ function lTfCheck(){if(LT.done)return;LT.done=true;lStop();var set=LT.set,r=lSt(
       +'<div style="font-weight:800;font-size:12.5px;color:'+(ok?'#1F8A50':'#C0392B')+';">'+(ok?'Верно · ':'Неверно · правильно: ')+LBL[x.a]+'</div>'
       +'<div style="font-weight:600;font-size:12px;color:#4A453E;margin-top:4px;line-height:1.5;"><b>В записи:</b> «'+x.ev+'» — '+x.e+'</div></div>';
     var row=document.getElementById('ltf_row_'+i);if(row)row.style.pointerEvents='none'});
-  r.done++;lSync();save();
+  r.done++;lSync();save();recordLearningActivityEvidence(LT.evidence,{score:okn,maxScore:set.st.length}).catch(function(){});
   var area=document.getElementById('l_area');
   var d=document.createElement('div');
   d.innerHTML='<div class="clayCard" style="padding:16px 18px;margin-bottom:12px;text-align:center;animation:win .35s both;">'
@@ -250,7 +255,8 @@ function lTfCheck(){if(LT.done)return;LT.done=true;lStop();var set=LT.set,r=lSt(
   try{d.scrollIntoView({behavior:'smooth',block:'start'})}catch(e){};lGen()}
 /* ---- задания 3-9: интервью ---- */
 function lIq(){S.lisIdxI=(S.lisIdxI||0);var pool=lPool('iq',L_IN);var set=pool[S.lisIdxI%pool.length];S.lisIdxI++;
-  LI={set:set,sel:set.qs.map(function(){return null}),done:false};LPLAYS=0;lIqRender()}
+  LI={set:set,sel:set.qs.map(function(){return null}),done:false,evidence:createLearningActivityEvidence({module:'listening',
+    activityId:listeningModule.activityId('interview'),mode:'listening_interview',source:listeningModule.sourceOf(set)})};LPLAYS=0;lIqRender()}
 function lIqRender(){var area=document.getElementById('l_area');var set=LI.set;
   var h='<div id="l_card" class="clayCard" style="position:relative;overflow:hidden;padding:16px 18px;margin-bottom:12px;">'+wDeco()
     +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#1D7F4A;background:#EAF7F0;padding:5px 10px;border-radius:20px;">ЗАДАНИЯ 3–9 · ИНТЕРВЬЮ</span>'
@@ -278,7 +284,7 @@ function lIqCheck(){if(LI.done)return;LI.done=true;lStop();var set=LI.set,r=lSt(
       +'<div style="font-weight:800;font-size:12.5px;color:'+(ok?'#1F8A50':'#C0392B')+';">'+(ok?'Верно':'Правильно: '+q.o[q.a])+'</div>'
       +'<div style="font-weight:600;font-size:12px;color:#4A453E;margin-top:4px;line-height:1.5;"><b>В записи:</b> «'+q.ev+'» — '+q.e+'</div>'+voiceSlot+'</div>';
     var row=document.getElementById('liq_row_'+i);if(row)row.style.pointerEvents='none'});
-  r.done++;lSync();save();completeAdaptiveModuleActivity({module:'listening',activityId:'listening_interview',score:okn,maxScore:set.qs.length}).catch(function(){});
+  r.done++;lSync();save();recordLearningActivityEvidence(LI.evidence,{score:okn,maxScore:set.qs.length}).catch(function(){});
   var area=document.getElementById('l_area');
   var d=document.createElement('div');
   d.innerHTML='<div class="clayCard" style="padding:16px 18px;margin-bottom:12px;text-align:center;animation:win .35s both;">'
@@ -306,8 +312,12 @@ function lExam(){var area=document.getElementById('l_area');if(!area)return;lSto
 function lExamStart(){
   var pm=lPool('m',L_M),pt=lPool('tf',L_TF),pi=lPool('iq',L_IN);
   S.leIdx=(S.leIdx||0);
-  LE={m:lShufM(pm[S.leIdx%pm.length]),tf:pt[S.leIdx%pt.length],iq:pi[S.leIdx%pi.length],
-      stage:0,selM:[null,null,null,null],plays:[0,0,0],t0:Date.now()};
+  var startedAt=Date.now(),m=lShufM(pm[S.leIdx%pm.length]),tf=pt[S.leIdx%pt.length],iq=pi[S.leIdx%pi.length];
+  LE={m:m,tf:tf,iq:iq,stage:0,selM:[null,null,null,null],plays:[0,0,0],t0:startedAt,
+      evidence:{gist:createLearningActivityEvidence({module:'listening',activityId:listeningModule.activityId('matching'),
+        mode:'listening_exam',source:listeningModule.sourceOf(m),startedAt:startedAt}),
+        detail:createLearningActivityEvidence({module:'listening',activityId:listeningModule.activityId('detail'),
+          mode:'listening_exam',source:listeningModule.sourceOf(tf,iq),startedAt:startedAt})}};
   LE.selT=LE.tf.st.map(function(){return null});
   LE.selI=LE.iq.qs.map(function(){return null});
   S.leIdx++;lSetSlow(false);
@@ -315,6 +325,7 @@ function lExamStart(){
   lExamRender()}
 function lExamPlay(){if(!LE)return;
   if(!listeningModule.registerPlay(LE.plays,LE.stage,2)){try{toast('На ЕГЭ запись звучит только дважды')}catch(e){}return}
+  var evidence=LE.stage===0?LE.evidence.gist:LE.evidence.detail;if(LSLOW)evidence.helpUsed=true;
   var lines=LE.stage===0?LE.m.sp.map(function(sp,i){return{s:i%2,t:'Speaker '+'ABCD'[i]+'. '+sp.t}}):(LE.stage===1?LE.tf.d:LE.iq.d);
   lPlayRaw(lines);
   var el=document.getElementById('lex_plays');
@@ -368,12 +379,15 @@ function lExamRender(){var area=document.getElementById('l_area');if(!area||!LE)
   area.innerHTML=h}
 function lExamDedup(field,idx,val){LE[field]=listeningModule.selectUnique(LE[field],idx,val)}
 function lExamFinish(){if(!LE)return;clearInterval(LE.iv);lStop();
-  var sec=examModule.elapsedSeconds(LE.t0,Date.now()),r=lSt(),LBL=['Верно','Неверно','Не сказано'];
+  var endedAt=Date.now(),sec=examModule.elapsedSeconds(LE.t0,endedAt),r=lSt(),LBL=['Верно','Неверно','Не сказано'];
   var voiceResult=prepareVoiceTutorContextResult({module:'listening',set:LE.iq,selections:LE.selI});
   var okM=0;LE.m.a.forEach(function(a,si){r.m.tot++;if(LE.selM[si]===a){okM++;r.m.ok++}});
   var okT=0;LE.tf.st.forEach(function(x,i){r.tf.tot++;if(LE.selT[i]===x.a){okT++;r.tf.ok++}});
   var okI=0;LE.iq.qs.forEach(function(q,i){r.iq.tot++;if(LE.selI[i]===q.a){okI++;r.iq.ok++}});
   var total=okM+okT+okI;
+  listeningModule.examEvidenceSlices({matching:okM,trueFalse:okT,interview:okI},Math.max(0,endedAt-LE.t0))
+    .forEach(function(slice){var evidence=slice.activityId===listeningModule.activityId('matching')?LE.evidence.gist:LE.evidence.detail;
+      recordLearningActivityEvidence(evidence,{score:slice.score,maxScore:slice.maxScore,durationMs:slice.durationMs}).catch(function(){})});
   S.lisExam=examModule.record(S.lisExam,total);
   var rows='';
   LE.m.a.forEach(function(a,si){if(LE.selM[si]!==a)

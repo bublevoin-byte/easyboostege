@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
-import { grammarActivityId } from '../public/learning-activity-contract.js';
+import { grammarActivityId, splitLearningActivityDuration } from '../public/learning-activity-contract.js';
 
 const rawSource = await fs.readFile(new URL('../public/learning-activity-recorder.js', import.meta.url), 'utf8');
 const grammarScreenSource = await fs.readFile(new URL('../public/screens/grammar.js', import.meta.url), 'utf8');
@@ -10,7 +10,7 @@ const grammarModuleSource = (await fs.readFile(new URL('../public/modules/gramma
   .replace(/^import .*;\r?\n/mu, '');
 const source = rawSource
   .replace(/^import\s*\{[\s\S]*?\}\s*from\s*'\.\/adaptive-session-runtime\.js';\r?\n/mu, '')
-  .replace('export async function recordCompletedLearningActivity', 'async function recordCompletedLearningActivity')
+  .replace(/^export /gmu, '')
   .concat('\nwindow.__learningActivityRecorderTest={recordCompletedLearningActivity};');
 
 const ATTEMPT_ID = '10000000-0000-4000-8000-000000000031';
@@ -83,7 +83,7 @@ function grammarScreenHarness() {
   };
   const context = vm.createContext({
     window,
-    grammarActivityId,
+    grammarActivityId, splitLearningActivityDuration,
     adaptiveRuntimeSnapshot: () => ({ active }),
     completeAdaptiveModuleActivity: async (completion) => {
       adaptive.push(JSON.parse(JSON.stringify(completion)));

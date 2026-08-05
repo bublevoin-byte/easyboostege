@@ -1,3 +1,5 @@
+import { LISTENING_ACTIVITY_IDS, READING_ACTIVITY_IDS } from './learning-activity-contract.js';
+
 export const ADAPTIVE_LAUNCH_CONTRACT_VERSION = 'adaptive-launch-v1';
 
 const activityDefinitions = [
@@ -55,28 +57,28 @@ const activityDefinitions = [
     launch: { version: ADAPTIVE_LAUNCH_CONTRACT_VERSION, kind: 'grammar_practice', screenId: 'scr3', topicId: 18 },
   },
   {
-    skillId: 'ege.reading.gist', activityId: 'reading_headings',
+    skillId: 'ege.reading.gist', activityId: READING_ACTIVITY_IDS.headings,
     activityLabel: 'Чтение: подобрать заголовки',
     contentRef: 'builtin:reading:headings:v1', minimumMinutes: 15, recommendedMinutes: 15,
     difficulty: 2, modality: 'visual_text', requiresAudio: false, requiresMicrophone: false,
     launch: { version: ADAPTIVE_LAUNCH_CONTRACT_VERSION, kind: 'reading_mode', screenId: 'scr7', mode: 'headings' },
   },
   {
-    skillId: 'ege.reading.detail', activityId: 'reading_detail',
+    skillId: 'ege.reading.detail', activityId: READING_ACTIVITY_IDS.detail,
     activityLabel: 'Чтение: детальные вопросы по тексту',
     contentRef: 'builtin:reading:detail:v1', minimumMinutes: 20, recommendedMinutes: 20,
     difficulty: 3, modality: 'visual_text', requiresAudio: false, requiresMicrophone: false,
     launch: { version: ADAPTIVE_LAUNCH_CONTRACT_VERSION, kind: 'reading_mode', screenId: 'scr7', mode: 'detail' },
   },
   {
-    skillId: 'ege.listening.gist', activityId: 'listening_matching',
+    skillId: 'ege.listening.gist', activityId: LISTENING_ACTIVITY_IDS.matching,
     activityLabel: 'Аудирование: сопоставить говорящих',
     contentRef: 'builtin:listening:matching:v1', minimumMinutes: 15, recommendedMinutes: 15,
     difficulty: 2, modality: 'audio', requiresAudio: true, requiresMicrophone: false,
     launch: { version: ADAPTIVE_LAUNCH_CONTRACT_VERSION, kind: 'listening_mode', screenId: 'scr4', mode: 'matching' },
   },
   {
-    skillId: 'ege.listening.detail', activityId: 'listening_interview',
+    skillId: 'ege.listening.detail', activityId: LISTENING_ACTIVITY_IDS.interview,
     activityLabel: 'Аудирование: детальные вопросы к интервью',
     contentRef: 'builtin:listening:interview:v1', minimumMinutes: 20, recommendedMinutes: 20,
     difficulty: 3, modality: 'audio', requiresAudio: true, requiresMicrophone: false,

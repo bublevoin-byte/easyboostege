@@ -363,6 +363,11 @@ test('activity mapping is exact, most-specific and covers every versioned taxono
     ['vocabulary', 'vocabulary_lexical_choice_topic_1', 'ege.vocabulary.lexical_choice'],
     ['grammar', 'grammar_forms_topic_4', 'ege.grammar.forms'],
     ['grammar', 'grammar_transformations_topic_18', 'ege.grammar.transformations'],
+    ['reading', 'reading_headings', 'ege.reading.gist'],
+    ['reading', 'reading_gaps', 'ege.reading.detail'],
+    ['reading', 'reading_detail', 'ege.reading.detail'],
+    ['listening', 'listening_matching', 'ege.listening.gist'],
+    ['listening', 'listening_true_false', 'ege.listening.detail'],
     ['listening', 'listening_interview', 'ege.listening.detail'],
   ];
   for (const [module, activity, expectedSkill] of executableActivities) {

@@ -1,3 +1,5 @@
+import { learningActivityPool, learningActivitySource, listeningActivityId, splitLearningActivityDuration } from '../learning-activity-contract.js';
+
 (function initializeListeningModule(global) {
   'use strict';
 
@@ -42,6 +44,7 @@
       sp: set.sp.slice(),
       a: set.a.map((answer) => order.inverse[answer]),
       k: set.k.slice(),
+      evidenceSource: set.evidenceSource,
     };
   }
 
@@ -62,14 +65,25 @@
     return { matching, trueFalse, interview, total: matching + trueFalse + interview };
   }
 
+  function examEvidenceSlices(scores, durationMs) {
+    return splitLearningActivityDuration([
+      {
+        activityId: listeningActivityId('matching'),
+        score: Number(scores?.matching) || 0,
+        maxScore: 4,
+      },
+      {
+        activityId: listeningActivityId('detail'),
+        score: (Number(scores?.trueFalse) || 0) + (Number(scores?.interview) || 0),
+        maxScore: 9,
+      },
+    ], durationMs);
+  }
+
   function registerPlay(plays, stage, limit = 2) {
     if (!Array.isArray(plays) || plays[stage] >= limit) return false;
     plays[stage] = (Number(plays[stage]) || 0) + 1;
     return true;
-  }
-
-  function pool(base, generated) {
-    return (base || []).concat(generated || []);
   }
 
   global.EasyBoostListening = Object.freeze({
@@ -80,7 +94,10 @@
     selectUnique,
     scoreSelections,
     scoreExam,
+    activityId: listeningActivityId,
+    examEvidenceSlices,
+    sourceOf: learningActivitySource,
     registerPlay,
-    pool,
+    pool: learningActivityPool,
   });
 })(window);
