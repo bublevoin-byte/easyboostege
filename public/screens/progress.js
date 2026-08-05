@@ -6,9 +6,8 @@
 import {registerRouteHook} from '../router.js';
 import {readAdaptiveOverviewCache,writeAdaptiveOverviewCache} from '../adaptive-overview-cache.js';
 import {adaptiveRuntimeSnapshot,advanceAdaptiveBreak,beginAdaptiveBlock,completeAdaptiveVoiceTutorRepeat,finishAdaptiveSession,resumeAdaptiveExecution} from '../adaptive-session-runtime.js';
-import {S,apiGet,apiMessage,apiPost,apiPostIdempotent,apiPut,progressModule,registerStartHook,setTxt,setW} from '../app.js';
+import {S,apiGet,apiMessage,apiPost,apiPostIdempotent,apiPut,progressModule,registerStartHook,setTxt} from '../app.js';
 
-const BAR_IDS={words:'pb_words',gram:'pb_gram',read:'pb_read',listen:'pb_listen',speak:'pb_speak'};
 function syncAdaptivePlanEntries(){
   const enabled=window.__sub?.features?.adaptive_learning===true;
   ['home_adaptive_plan','profile_adaptive_plan'].forEach(function(id){
@@ -18,7 +17,7 @@ function syncAdaptivePlanEntries(){
 }
 function renderProgress(){if(!S)return;const view=progressModule.overview(S,Date.now());
   setTxt('p_streak',progressModule.streakLabel(view.streak));setTxt('p_words',view.learned);
-  Object.keys(BAR_IDS).forEach(function(name){setW(BAR_IDS[name],view.modules[name])});renderAdaptivePlan();renderRecoveryMap()}
+  renderAdaptivePlan();renderRecoveryMap()}
 
 function text(tag,value,style){const node=document.createElement(tag);node.textContent=value;if(style)node.setAttribute('style',style);return node}
 function recoveryStateLabel(state){return state==='recovered'?'Восстановлено':state==='relapsed'?'Ошибка проявилась снова':'В работе'}

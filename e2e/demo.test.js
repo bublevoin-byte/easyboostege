@@ -254,6 +254,30 @@ async function runE2E() {
     console.log('e2e: login screen loaded');
 
     await assert.doesNotReject(() => page.getByRole('button', { name: 'Попробовать демо' }).click());
+    const homeScreen = page.locator('#scr1.on');
+    await homeScreen.waitFor({ state: 'visible', timeout: 5_000 });
+    await homeScreen.getByRole('button', { name: /Продолжить занятие/u }).press('Enter');
+    const learnSheet = page.locator('#learnSheet.open');
+    await learnSheet.waitFor({ state: 'visible', timeout: 5_000 });
+    assert.equal(await learnSheet.getByRole('button', { name: /Достижения/u }).count(), 0);
+    await learnSheet.getByRole('button', { name: /Пробный ЕГЭ/u }).press('Enter');
+    const examScreen = page.locator('#scr16.on');
+    await examScreen.waitFor({ state: 'visible', timeout: 5_000 });
+    assert.match(await examScreen.innerText(), /в разработке/iu);
+    assert.doesNotMatch(await examScreen.innerText(), /1:42:30|14\s*\/\s*40|отвечено|далее ·|сейчас ·|завершено ·/iu);
+    await examScreen.getByRole('button', { name: 'Грамматика · задания 19–24' }).press('Enter');
+    await page.locator('#scr3.on').waitFor({ state: 'visible', timeout: 5_000 });
+    await page.getByText('Задания 19–24', { exact: true }).waitFor({ state: 'visible', timeout: 5_000 });
+
+    await page.evaluate(() => window.tab('scr10'));
+    const progressScreen = page.locator('#scr10.on');
+    await progressScreen.waitFor({ state: 'visible', timeout: 5_000 });
+    const progressText = await progressScreen.innerText();
+    assert.match(progressText, /Недостаточно данных/u);
+    assert.doesNotMatch(progressText, /Баллы по месяцам|\+18|ОБЩИЙ УРОВЕНЬ|\bA2\b|\bB1\b|\bB2\b/u);
+    console.log('e2e: unfinished product surfaces stay visible without invented progress');
+
+    await page.evaluate(() => window.tab('scr1'));
     const wordsCard = page.getByRole('button', { name: 'Слова', exact: true });
     await wordsCard.waitFor({ state: 'visible' });
     assert.equal(await wordsCard.getAttribute('tabindex'), '0');

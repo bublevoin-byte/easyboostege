@@ -28,7 +28,6 @@ const txt=ui.elementText;
 const makeInteractive=ui.makeInteractive;
 const bindText=ui.bindText;
 const setTxt=ui.setText;
-const setW=ui.setWidth;
 const ringOff=ui.setRingOffset;
 const toast=ui.notify;
 const wordModule=window.EasyBoostWords;
@@ -100,11 +99,10 @@ async function trWord(w,encodedContext=''){lastWord=w;try{lastWordContext=decode
 /* ===== DASHBOARD / PROGRESS / PROFILE (real data) ===== */
 const RING_IDS={words:'ring_words',gram:'ring_gram',read:'ring_read',listen:'ring_listen',write:'ring_write',speak:'ring_speak'};
 const METRIC_IDS={words:'m_words',gram:'m_gram',read:'m_read',listen:'m_listen',write:'m_write',speak:'m_speak'};
-const BAR_IDS={words:'pb_words',gram:'pb_gram',read:'pb_read',listen:'pb_listen',speak:'pb_speak'};
 function daysLeft(){return progressModule.daysLeft(Date.now())}
 function renderHome(){if(!S)return;const view=progressModule.overview(S,Date.now());
   setTxt('h_hello',profileModule.greeting(currentUser));
-  setTxt('h_days','До ЕГЭ — '+view.daysLeft+' дней · пробник в феврале');
+  setTxt('h_days','До ЕГЭ — '+view.daysLeft+' дней · полный пробник в разработке');
   setTxt('h_ava',profileModule.initial(currentUser||'друг'));
   setTxt('h_min',view.daily.minutes);setTxt('h_pct',view.daily.percent+'%');ringOff('h_ring',263.9,view.daily.percent);
   setTxt('h_streak',progressModule.streakLabel(view.streak,true));
@@ -126,9 +124,28 @@ const LEARN_MODS=[
  ['🎧','Аудирование','слушай и отвечай','scr4','linear-gradient(135deg,#5FB6C9,#3E93A8)'],
  ['✍️','Письмо','задания 37 / 38 + ИИ','scr8','linear-gradient(135deg,#FF9E8A,#E26A56)'],
  ['🎤','Говорение','таймер + запись','scr9','linear-gradient(135deg,#FFB07A,#F2683F)'],
- ['⏱','Пробный ЕГЭ','вариант на время','scr16','linear-gradient(135deg,#B6BBC2,#8A8F98)'],
- ['🏆','Достижения','бейджи и серии','scr17','linear-gradient(135deg,#FFC861,#F2683F)']
+ ['⏱','Пробный ЕГЭ','полный вариант · в разработке','scr16','linear-gradient(135deg,#B6BBC2,#8A8F98)']
 ];
+const EXAM_TRAININGS=[
+ {screen:'scr3',start:'gExam',icon:'✎',label:'Грамматика · задания 19–24',background:'#FFEDE4'},
+ {screen:'scr4',start:'lExam',icon:'🎧',label:'Аудирование · раздел целиком',background:'#E3F1F5'},
+ {screen:'scr7',start:'rExam',icon:'📖',label:'Чтение · раздел целиком',background:'#FFF4DE'},
+ {screen:'scr8',start:null,icon:'✍️',label:'Письмо · задания 37 и 38',background:'#FCEEEC'},
+ {screen:'scr9',start:'spExam',icon:'🎤',label:'Говорение · устная часть',background:'#EAF7F0'}
+];
+function buildExamTrainingLinks(){
+  const root=document.getElementById('exam_training_links');if(!root||root.childElementCount)return;
+  EXAM_TRAININGS.forEach(function(training){
+    const button=document.createElement('button');button.type='button';button.className='exam-training';
+    const icon=document.createElement('span');icon.className='exam-training__icon';icon.setAttribute('aria-hidden','true');icon.style.background=training.background;icon.textContent=training.icon;
+    const label=document.createElement('span');label.className='exam-training__label';label.textContent=training.label;
+    const chevron=document.createElement('span');chevron.className='exam-training__chevron';chevron.setAttribute('aria-hidden','true');chevron.textContent='›';
+    button.append(icon,label,chevron);button.addEventListener('click',function(){
+      if(!training.start){tab(training.screen);return}
+      tab(training.screen,function(){window[training.start]()});
+    });root.appendChild(button);
+  });
+}
 function buildLearnSheet(){
   if(document.getElementById('learnSheet'))return;
   const w=document.createElement('div');w.id='learnSheet';
@@ -153,8 +170,8 @@ function wireTabs(){
     });
   });
 }
-document.addEventListener('DOMContentLoaded',()=>{buildLearnSheet();wireTabs()});
-buildLearnSheet();wireTabs();
+document.addEventListener('DOMContentLoaded',()=>{buildLearnSheet();buildExamTrainingLinks();wireTabs()});
+buildLearnSheet();buildExamTrainingLinks();wireTabs();
 
 
 /* ===== AI CONTENT GENERATION ===== */
@@ -924,7 +941,7 @@ export {
   EGE_WORDS,LSLOW,L_PLAYSVG,S,TOKEN,W37,W38,WBTN,
   apiGet,apiMessage,apiPost,apiPostBinary,apiPostIdempotent,apiPut,currentUser,examModule,gExamFmt,gSync,generateAiContent,
   grammarModule,lSetSlow,lSt,lSync,listeningModule,profileModule,progressModule,readingModule,
-  rEsc,rSt,rWordsHtml,registerScreenGenerator,ringOff,runProfileHooks,setTxt,setW,spSt,spSync,
+  rEsc,rSt,rWordsHtml,registerScreenGenerator,ringOff,runProfileHooks,setTxt,spSt,spSync,
   speakingModule,srsFail,srsOk,srsRecordVocabularyOutcome,syncModuleAttempt,todayStr,ui,wBase,wDeco,wMergeAi,wMigrate,wRec,wStats,wSync,
   wordModule,writingModule,
 };
