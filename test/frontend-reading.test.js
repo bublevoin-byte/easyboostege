@@ -22,6 +22,7 @@ import {
   readingSetForLegacyScreen,
   readingSetReference,
 } from '../public/reading-catalog-contract.js';
+import { assembleReadingPilotCatalog, loadReadingTask10Shard } from '../public/reading-pilot-v1.js';
 
 const source = (await fs.readFile(new URL('../public/modules/reading.js', import.meta.url), 'utf8'))
   .replace(/^import[\s\S]*?from ['"][^'"]+['"];\r?\n/gmu, '');
@@ -32,7 +33,7 @@ function createReadingModule() {
     window, learningActivityPool, learningActivitySource, readingActivityId, splitLearningActivityDuration,
     assertReadingCatalog, loadReadingCatalog, readingSetForLegacyScreen,
     READING_CATALOG_ID, READING_KINDS, READING_KIND_RULES, assertReadingSet, readingSetReference,
-    adaptLegacyReadingFallback,
+    adaptLegacyReadingFallback, assembleReadingPilotCatalog, loadReadingTask10Shard,
     Object, Number, Math, Array, Set, String,
   });
   return window.EasyBoostReading;
@@ -173,6 +174,8 @@ test('Reading exposes one domain API for catalog validation/loading/adaptation',
   assert.equal(reading.loadCatalog, loadReadingCatalog);
   assert.equal(reading.adaptSet, readingSetForLegacyScreen);
   assert.equal(reading.adaptLegacyFallback, adaptLegacyReadingFallback);
+  assert.equal(reading.assembleCatalog, assembleReadingPilotCatalog);
+  assert.equal(reading.loadTask10Shard, loadReadingTask10Shard);
 });
 
 test('Reading history is owner-bound, bounded and contains metadata only', () => {
