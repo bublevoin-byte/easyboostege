@@ -18,6 +18,17 @@ import {
   trueFalseSetForLegacyScreen,
 } from '../public/listening-catalog-contract.js';
 import {
+  READING_CATALOG_ID,
+  READING_KINDS,
+  READING_KIND_RULES,
+  adaptLegacyReadingFallback,
+  assertReadingCatalog,
+  assertReadingSet,
+  loadReadingCatalog,
+  readingSetForLegacyScreen,
+  readingSetReference,
+} from '../public/reading-catalog-contract.js';
+import {
   LISTENING_INTERVIEW_SETS,
   LISTENING_MATCHING_SETS,
   LISTENING_TRUE_FALSE_SETS,
@@ -43,7 +54,7 @@ const recorderSource = recorderFile
   .replace(/^import\s*\{[\s\S]*?\}\s*from\s*'\.\/adaptive-session-runtime\.js';\r?\n/mu, '')
   .replace(/^export /gmu, '')
   .concat('\nwindow.__learningActivityRecorderTest={createLearningActivityEvidence,recordCompletedLearningActivity,recordLearningActivityEvidence};');
-const readingModuleSource = readingModuleFile.replace(/^import .*;\r?\n/mu, '');
+const readingModuleSource = readingModuleFile.replace(/^import[\s\S]*?from ['"][^'"]+['"];\r?\n/gmu, '');
 const listeningModuleSource = listeningModuleFile.replace(/^import .*;\r?\n/mu, '');
 
 function executableScreen(source, exposed) {
@@ -130,6 +141,15 @@ function createSubjectHarness(subject, { offline = false, slow = false, listenin
     learningActivityPool,
     learningActivitySource,
     splitLearningActivityDuration,
+    assertReadingCatalog,
+    loadReadingCatalog,
+    readingSetForLegacyScreen,
+    READING_CATALOG_ID,
+    READING_KINDS,
+    READING_KIND_RULES,
+    assertReadingSet,
+    readingSetReference,
+    adaptLegacyReadingFallback,
     LISTENING_MATCHING_SETS,
     LISTENING_INTERVIEW_SETS,
     LISTENING_TRUE_FALSE_SETS,
@@ -336,8 +356,8 @@ test('reading screen completions record headings, questions, gaps and distinct c
     { activity: 'reading_headings', score: 4, maxScore: 4, durationMs: 400 },
     { activity: 'reading_detail', score: 4, maxScore: 4, durationMs: 700 },
     { activity: 'reading_gaps', score: 3, maxScore: 3, durationMs: 300 },
-    { activity: 'reading_headings', score: 4, maxScore: 4, durationMs: 364 },
-    { activity: 'reading_detail', score: 7, maxScore: 7, durationMs: 637 },
+    { activity: 'reading_headings', score: 4, maxScore: 7, durationMs: 350 },
+    { activity: 'reading_detail', score: 7, maxScore: 13, durationMs: 651 },
   ]);
   assert.deepEqual(harness.ordinary.map((attempt) => attempt.metadata), [
     { mode: 'reading_headings', source: 'builtin', helpUsed: false, hintsUsed: 0 },
