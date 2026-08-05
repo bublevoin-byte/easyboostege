@@ -1,0 +1,72 @@
+import {
+  adaptiveRuntimeSnapshot,
+  completeAdaptiveModuleActivity,
+} from './adaptive-session-runtime.js';
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const ACTIVITY_ID = /^[a-z0-9_]{1,80}$/u;
+const CLIENT_REPORTED_MODULES = new Set(['grammar', 'reading', 'listening']);
+const ACTIVITY_MODES = new Set([
+  'topic_practice', 'spaced_review', 'exam_19_24',
+  'reading_headings', 'reading_detail', 'listening_matching', 'listening_interview',
+]);
+const ACTIVITY_SOURCES = new Set(['builtin', 'generated', 'mixed']);
+
+function boundedMetadata(value) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const metadata = {};
+  if (ACTIVITY_MODES.has(source.mode)) metadata.mode = source.mode;
+  if (ACTIVITY_SOURCES.has(source.source)) metadata.source = source.source;
+  if (typeof source.helpUsed === 'boolean') metadata.helpUsed = source.helpUsed;
+  if (Number.isInteger(source.hintsUsed) && source.hintsUsed >= 0 && source.hintsUsed <= 100) {
+    metadata.hintsUsed = source.hintsUsed;
+  }
+  return metadata;
+}
+
+function ordinaryAttempt(completion) {
+  if (!completion || typeof completion !== 'object'
+    || !UUID.test(String(completion.id || ''))
+    || !CLIENT_REPORTED_MODULES.has(completion.module)
+    || !ACTIVITY_ID.test(String(completion.activityId || ''))) {
+    throw new TypeError('LEARNING_ACTIVITY_INVALID');
+  }
+  const maximum = Math.min(1000, Math.max(1, Math.round(Number(completion.maxScore) || 1)));
+  const score = Math.min(maximum, Math.max(0, Math.round(Number(completion.score) || 0)));
+  const duration = Number(completion.durationMs);
+  return {
+    id: String(completion.id),
+    module: completion.module,
+    activity: String(completion.activityId),
+    score,
+    maxScore: maximum,
+    durationMs: Number.isFinite(duration) ? Math.min(14_400_000, Math.max(0, Math.round(duration))) : 0,
+    metadata: boundedMetadata(completion.metadata),
+  };
+}
+
+export async function recordCompletedLearningActivity(completion = {}) {
+  const attempt = ordinaryAttempt(completion);
+  const active = adaptiveRuntimeSnapshot().active;
+  if (active) {
+    if (active.module !== attempt.module || active.activityId !== attempt.activity) {
+      return { path: 'blocked', reason: 'adaptive_activity_mismatch', recorded: false };
+    }
+    const result = await completeAdaptiveModuleActivity({
+      module: attempt.module,
+      activityId: attempt.activity,
+      score: attempt.score,
+      maxScore: attempt.maxScore,
+      durationMs: attempt.durationMs,
+    });
+    return { path: 'adaptive', result };
+  }
+  if (!window.EasyBoostSync || typeof window.EasyBoostSync.saveModuleAttempt !== 'function') {
+    throw new Error('LEARNING_ACTIVITY_SYNC_UNAVAILABLE');
+  }
+  return {
+    path: 'ordinary',
+    saved: await window.EasyBoostSync.saveModuleAttempt(attempt),
+    attempt,
+  };
+}

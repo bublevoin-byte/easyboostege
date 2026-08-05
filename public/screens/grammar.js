@@ -11,7 +11,7 @@ import {
   S,SRV,TOKEN,WBTN,apiPost,examModule,gExamFmt,gSync,generateAiContent,grammarModule,
   registerScreenGenerator,save,setTxt,ui,wDeco,
 } from '../app.js';
-import {completeAdaptiveModuleActivity} from '../adaptive-session-runtime.js';
+import {recordCompletedLearningActivity} from '../learning-activity-recorder.js';
 
 const GRAM_Q=[
  {t:['She ','_____',' already finished her homework.'],o:['have','has','had','is'],a:1,e:'<b>She/he/it</b> — третье лицо, поэтому <b>has</b>.'},
@@ -317,6 +317,17 @@ f:[
 const G_RINT=[7,16,35];
 /* --- состояние: S.gram = {tid:{st,ok,err,sr,rs,due}} --- */
 let GS=null;
+function gEvidence(activityId,startedAt=Date.now()){return{id:crypto.randomUUID(),activityId:activityId,startedAt:startedAt,reported:false,score:0,maxScore:0,sources:{},helpUsed:false}}
+function gReportEvidence(evidence,metadata,durationMs){if(!evidence||evidence.reported)return;evidence.reported=true;
+  recordCompletedLearningActivity({id:evidence.id,module:'grammar',activityId:evidence.activityId,
+    score:evidence.score,maxScore:Math.max(1,evidence.maxScore),durationMs:Number.isFinite(durationMs)?Math.max(0,durationMs):Math.max(0,Date.now()-evidence.startedAt),metadata:metadata})
+    .catch(function(){evidence.reported=false})}
+function gEvidenceSource(evidence,fallback){var sources=Object.keys((evidence&&evidence.sources)||{});
+  if(sources.length>1)return'mixed';if(sources[0]==='generated')return'generated';if(sources[0]==='builtin')return'builtin';return fallback||'builtin'}
+function gTrackEvidenceSource(evidence,item){if(!evidence)return;var source=item&&item.source==='generated'?'generated':'builtin';evidence.sources[source]=true}
+function gMarkHelp(topic){if(!GS)return;GS.helpUsed=true;
+  if(GS.mode==='rev'){var activityId=grammarModule.activityId(topic,'spaced_review');GS.helpActivities[activityId]=true;
+    var evidence=GS.evidence[activityId];if(evidence)evidence.helpUsed=true}}
 function gRec(t){S.gram=S.gram||{};return S.gram[t]||(S.gram[t]={st:0,ok:0,err:0,sr:0})}
 function gAnim(name,dur){ui.animate('g_card',name,dur)}
 function gStatusChip(st,isDue){
@@ -367,7 +378,7 @@ function gMap(){var area=document.getElementById('g_area');if(!area)return;
   });
   area.innerHTML=h;setTxt('g_today','20 тем'+(due.length?' · '+due.length+' на повторение':''))}
 function gOpen(t){gTheory(t,true)}
-function gTheory(t,fromMap){var area=document.getElementById('g_area');if(!area)return;var tp=G_TOPICS[t];
+function gTheory(t,fromMap){var area=document.getElementById('g_area');if(!area)return;if(!fromMap)gMarkHelp(t);var tp=G_TOPICS[t];
   area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:20px;">'
     +wDeco()
     +'<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'
@@ -386,13 +397,14 @@ function gLvl2(t){return grammarModule.levelTwo(gBankEff(t),t)}
 function gDue(){return grammarModule.dueTopics(S.gram)}
 function gStart(t){var e=gBankEff(t),r=gRec(t);
   var queue=grammarModule.buildTopicQueue(e,t,r);
-  GS={t:t,queue:queue,i:0,ok:0,done:0};
+  GS={t:t,queue:queue,i:0,ok:0,done:0,source:grammarModule.queueSource(queue),helpUsed:false,evidence:gEvidence(grammarModule.activityId(t,'topic_practice'))};
   gRenderQ();gGen(t)}
 function gResume(){if(GS)gRenderQ();else gMap()}
 function gReview(){var due=gDue();if(!due.length){gMap();return}
   var items=[];
   due.forEach(function(t){items=items.concat(gShuffle(gLvl2(t)).slice(0,2))});
-  GS={mode:'rev',revT:due.slice(),queue:gShuffle(items),i:0,ok:0,done:0,errT:{}};
+  var queue=gShuffle(items);
+  GS={mode:'rev',revT:due.slice(),queue:queue,i:0,ok:0,done:0,errT:{},startedAt:Date.now(),source:grammarModule.queueSource(queue),helpUsed:false,helpActivities:{},evidence:{}};
   gRenderQ()}
 function gProgressLine(){setTxt('g_today',(GS.done)+' / '+GS.queue.length+' в подходе')}
 function gRenderQ(){var area=document.getElementById('g_area');if(!area||!GS)return;gProgressLine();
@@ -420,7 +432,7 @@ function gRenderQ(){var area=document.getElementById('g_area');if(!area||!GS)ret
       +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="gSubmit()">Проверить</button>'}
   gAnim('win','.32s')}
 function gNorm(v){return grammarModule.normalizeAnswer(v)}
-function gExplain(it,userWrong){var q=it.q,t=it.t||GS.t;
+function gExplain(it,userWrong){var q=it.q,t=it.t||GS.t;gMarkHelp(t);
   var right=it.k==='f'?q.ans[0]:q.o[q.a];
   var sent=it.k==='f'
     ? q.s.replace('_____','<b style="color:#1D7F4A;">'+right+'</b>').replace(/\((?:[A-Z ]+)\)/,'')
@@ -441,7 +453,10 @@ function gExplain(it,userWrong){var q=it.q,t=it.t||GS.t;
     .then(function(recorded){var slot=document.getElementById('voice_tutor_grammar_practice');if(slot&&recorded)slot.innerHTML=voiceTutorButton(recorded)}).catch(function(){});
   gAnim('wflip','.5s')}
 function gAfterExplain(){GS.i++;gSync();save();gRenderQ()}
-function gAnswer(ok,it){grammarModule.applyAnswer(gRec(it.t||GS.t),GS,it,ok)}
+function gAnswer(ok,it){var topic=it.t||GS.t;grammarModule.applyAnswer(gRec(topic),GS,it,ok);
+  if(GS.mode==='rev'){var activityId=grammarModule.activityId(topic,'spaced_review');var evidence=GS.evidence[activityId];
+    if(!evidence)evidence=GS.evidence[activityId]=gEvidence(activityId,GS.startedAt);
+    evidence.helpUsed=Boolean(GS.helpActivities[activityId]);gTrackEvidenceSource(evidence,it);evidence.maxScore++;if(ok)evidence.score++}}
 function gPick(btn,i){var it=GS.queue[GS.i];if(!it||btn.dataset.done)return;var q=it.q;
   var all=btn.parentElement.querySelectorAll('button');all.forEach(function(b){b.dataset.done=1});
   var ok=i===q.a;
@@ -461,7 +476,8 @@ function gSubmit(){var it=GS.queue[GS.i];if(!it)return;var inp=document.getEleme
   if(ok){gAnim('wpop','.35s');setTimeout(function(){GS.i++;gSync();save();gRenderQ()},600)}
   else{inp.value=q.ans[0];gAnim('wshake','.42s');setTimeout(function(){gExplain(it,userWrong)},900)}}
 function gFinish(){if(GS&&GS.mode==='rev'){gFinishRev();return}
-  if(GS&&!GS.adaptiveReported){GS.adaptiveReported=true;completeAdaptiveModuleActivity({module:'grammar',activityId:GS.t===18?'grammar_transformations_topic_18':'grammar_forms_topic_'+GS.t,score:GS.ok,maxScore:Math.max(1,GS.done)}).catch(function(){if(GS)GS.adaptiveReported=false})}
+  if(GS){GS.evidence.score=GS.ok;GS.evidence.maxScore=GS.done;
+    gReportEvidence(GS.evidence,{mode:'topic_practice',source:GS.source,helpUsed:GS.helpUsed,hintsUsed:0})}
   var area=document.getElementById('g_area');var r=gRec(GS.t),tp=G_TOPICS[GS.t];
   var closed=r.st===2;
   area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:24px;">'+wDeco()
@@ -474,6 +490,9 @@ function gFinish(){if(GS&&GS.mode==='rev'){gFinishRev();return}
     +'<button class="sq" style="'+WBTN+'color:#B54E2F;" onclick="gToThemes()">К темам</button></div>';
   gAnim('win','.32s');gSync();save()}
 function gFinishRev(){var area=document.getElementById('g_area');var rows='';
+  var durationMs=Math.max(0,Date.now()-GS.startedAt);
+  grammarModule.reviewEvidenceSlices(GS.evidence,durationMs).forEach(function(evidence){
+    gReportEvidence(evidence,{mode:'spaced_review',source:gEvidenceSource(evidence,GS.source),helpUsed:evidence.helpUsed,hintsUsed:0},evidence.durationMs)});
   GS.revT.forEach(function(t){var r=gRec(t);var bad=GS.errT[t];
     if(bad){r.st=1;r.sr=0;r.due=0}
     else{r.rs=Math.min(2,(r.rs||0)+1);r.due=Date.now()+G_RINT[r.rs]*86400000}
@@ -532,7 +551,8 @@ function gExam(){var area=document.getElementById('g_area');if(!area)return;
 function gExamStart(contentRef){var adaptive=contentRef==='builtin:exam:grammar:19-24:v1';var pool=adaptive?G_EXAMS:gExamPool();
   S.examIdx=(S.examIdx||0);var ex=adaptive?G_EXAMS[0]:pool[S.examIdx%pool.length];if(!adaptive)S.examIdx++;
   if(EX&&EX.iv)clearInterval(EX.iv);
-  EX={ex:ex,t0:Date.now(),adaptive:adaptive,iv:setInterval(function(){setTxt('g_today',gExamFmt(Math.floor((Date.now()-EX.t0)/1000)))},1000)};
+  var startedAt=Date.now();EX={ex:ex,t0:startedAt,adaptive:adaptive,source:adaptive||G_EXAMS.includes(ex)?'builtin':'generated',
+    evidence:gEvidence(grammarModule.activityId(null,'exam_19_24'),startedAt),iv:setInterval(function(){setTxt('g_today',gExamFmt(Math.floor((Date.now()-EX.t0)/1000)))},1000)};
   var area=document.getElementById('g_area');
   var txt='';
   ex.tx.forEach(function(seg,i){txt+=seg;
@@ -547,7 +567,7 @@ function gExamStart(contentRef){var adaptive=contentRef==='builtin:exam:grammar:
     +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:9px;">'+inputs
     +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);margin-top:3px;" onclick="gExamCheck()">Проверить</button></div>';
   gAnim('win','.32s')}
-function gExamCheck(){if(!EX)return;var ex=EX.ex,adaptive=EX.adaptive===true;
+function gExamCheck(){if(!EX)return;var ex=EX.ex,evidence=EX.evidence,source=EX.source;
   clearInterval(EX.iv);var sec=examModule.elapsedSeconds(EX.t0,Date.now());
   var score=0,rows='',bank=[],voiceErrors=[];
   ex.gaps.forEach(function(g,i){var inp=document.getElementById('g_ex_'+i);var learnerAnswer=inp?inp.value:'';var val=gNorm(learnerAnswer);
@@ -566,9 +586,8 @@ function gExamCheck(){if(!EX)return;var ex=EX.ex,adaptive=EX.adaptive===true;
       +(ok?'':'<div style="font-weight:600;font-size:12px;color:#777163;margin-top:4px;">'+g.e+'</div>'+voiceSlot)
       +'</div>'});
   S.exam19=examModule.record(S.exam19,score);
-  if(adaptive){completeAdaptiveModuleActivity({module:'grammar',activityId:'grammar_forms_exam_19_24',score:score,maxScore:6,durationMs:sec*1000}).catch(function(){})}
-  else if(typeof SRV!=='undefined'&&SRV&&TOKEN&&typeof crypto!=='undefined'&&crypto.randomUUID){
-    apiPost('/api/v1/module-attempts',examModule.attempt(crypto.randomUUID(),{module:'exam',activity:'grammar_19_24',score:score,maxScore:6,durationMs:sec*1000})).catch(function(){})}
+  evidence.score=score;evidence.maxScore=6;
+  gReportEvidence(evidence,{mode:'exam_19_24',source:source,helpUsed:false,hintsUsed:0});
   if(bank.length&&typeof SRV!=='undefined'&&SRV&&TOKEN){apiPost('/api/v1/error-bank',{errors:bank}).catch(function(){})}
   EX=null;save();gSync();
   var area=document.getElementById('g_area');

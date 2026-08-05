@@ -216,13 +216,14 @@ test('OpenAPI documents the exact strict launch descriptor union and block metad
   assert.match(openapi, /required: \[id, position, kind, module, skillId, skillLabel, activityId, activityLabel/u);
 });
 
-test('the grammar exam launches fixed built-in content and reports through the adaptive claim', async () => {
+test('the grammar exam launches fixed built-in content and reports through the shared exact-claim recorder', async () => {
   const contract = await fs.readFile(new URL('../public/adaptive-activity-contract.js', import.meta.url), 'utf8');
   const grammar = await fs.readFile(new URL('../public/screens/grammar.js', import.meta.url), 'utf8');
   assert.match(contract, /activityId: 'grammar_forms_exam_19_24'/u);
   assert.match(contract, /contentRef: 'builtin:exam:grammar:19-24:v1'/u);
   assert.match(grammar, /adaptive\?G_EXAMS\[0\]/u);
-  assert.match(grammar, /completeAdaptiveModuleActivity\(\{module:'grammar',activityId:'grammar_forms_exam_19_24'/u);
+  assert.match(grammar, /grammarModule\.activityId\(null,'exam_19_24'\)/u);
+  assert.match(grammar, /recordCompletedLearningActivity\(\{id:evidence\.id,module:'grammar'/u);
   assert.match(grammar, /function launchGrammarExam\(contentRef\)/u);
 });
 

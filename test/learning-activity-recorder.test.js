@@ -1,0 +1,298 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import test from 'node:test';
+import vm from 'node:vm';
+import { grammarActivityId } from '../public/learning-activity-contract.js';
+
+const rawSource = await fs.readFile(new URL('../public/learning-activity-recorder.js', import.meta.url), 'utf8');
+const grammarScreenSource = await fs.readFile(new URL('../public/screens/grammar.js', import.meta.url), 'utf8');
+const grammarModuleSource = (await fs.readFile(new URL('../public/modules/grammar.js', import.meta.url), 'utf8'))
+  .replace(/^import .*;\r?\n/mu, '');
+const source = rawSource
+  .replace(/^import\s*\{[\s\S]*?\}\s*from\s*'\.\/adaptive-session-runtime\.js';\r?\n/mu, '')
+  .replace('export async function recordCompletedLearningActivity', 'async function recordCompletedLearningActivity')
+  .concat('\nwindow.__learningActivityRecorderTest={recordCompletedLearningActivity};');
+
+const ATTEMPT_ID = '10000000-0000-4000-8000-000000000031';
+
+function recorderHarness(active = null) {
+  const adaptive = [];
+  const ordinary = [];
+  const window = {
+    EasyBoostSync: {
+      async saveModuleAttempt(attempt) {
+        ordinary.push(attempt);
+        return false;
+      },
+    },
+  };
+  vm.runInNewContext(source, {
+    window,
+    adaptiveRuntimeSnapshot: () => ({ active }),
+    completeAdaptiveModuleActivity: async (completion) => {
+      adaptive.push(completion);
+      return { execution: { revision: 2 } };
+    },
+    Object, Array, String, Number, Boolean, JSON, Math, Promise, RegExp, Error, TypeError,
+  });
+  return { recorder: window.__learningActivityRecorderTest, adaptive, ordinary };
+}
+
+function grammarScreenHarness() {
+  let now = 1_000;
+  let active = null;
+  let uuid = 40;
+  let random = 1;
+  const ordinary = [];
+  const adaptive = [];
+  const elements = new Map();
+  const element = (id) => {
+    if (!elements.has(id)) {
+      elements.set(id, {
+        id, innerHTML: '', textContent: '', value: '', style: {}, dataset: {}, children: [],
+        setAttribute() {}, querySelector() { return element(`${id}:child`); },
+        querySelectorAll() { return []; }, appendChild() {},
+      });
+    }
+    return elements.get(id);
+  };
+  class TestDate extends Date {
+    static now() { return now; }
+  }
+  const S = {
+    gram: {
+      3: { st: 2, ok: 0, err: 0, sr: 4, due: 1 },
+      18: { st: 2, ok: 0, err: 0, sr: 4, due: 1 },
+    },
+    gramAi: {
+      18: [
+        { k: 'f', q: { s: 'A _____ (ACT).', b: 'ACT', ans: ['action'], e: '' } },
+        { k: 'f', q: { s: 'B _____ (MOVE).', b: 'MOVE', ans: ['movement'], e: '' } },
+      ],
+    },
+  };
+  const testMath = Object.create(Math);
+  testMath.random = () => { random -= 0.01; return random; };
+  const window = {
+    EasyBoostSync: {
+      async saveModuleAttempt(attempt) {
+        ordinary.push(JSON.parse(JSON.stringify(attempt)));
+        return true;
+      },
+    },
+  };
+  const context = vm.createContext({
+    window,
+    grammarActivityId,
+    adaptiveRuntimeSnapshot: () => ({ active }),
+    completeAdaptiveModuleActivity: async (completion) => {
+      adaptive.push(JSON.parse(JSON.stringify(completion)));
+      return { execution: { revision: 2 } };
+    },
+    S, SRV: false, TOKEN: '', WBTN: 'background:#fff;color:#2B2B2B;border:1px solid #F0EAE2;',
+    apiPost: async () => ({}),
+    examModule: {
+      elapsedSeconds: (startedAt, endedAt) => Math.floor((endedAt - startedAt) / 1_000),
+      record: (record, score) => ({ ...(record || {}), n: Number(record?.n || 0) + 1, last: score, best: Math.max(Number(record?.best || 0), score) }),
+      badge: () => '',
+    },
+    gExamFmt: (seconds) => String(seconds),
+    gSync() {}, generateAiContent: async () => null,
+    registerScreenGenerator() {}, registerRouteHook() {},
+    registerVoiceTutorError: async () => null, voiceTutorButton: () => '',
+    save() {}, setTxt() {}, tab() {},
+    ui: { animate() {}, markAnswer() {} }, wDeco: () => '',
+    decorateCoreGrammar() {},
+    document: { getElementById: element, createElement: () => element(`created:${elements.size}`) },
+    crypto: { randomUUID: () => `10000000-0000-4000-8000-${String(++uuid).padStart(12, '0')}` },
+    Date: TestDate, Math: testMath,
+    setInterval: () => 1, clearInterval() {}, setTimeout: (callback) => callback(),
+    console,
+  });
+  vm.runInContext(grammarModuleSource, context);
+  context.grammarModule = window.EasyBoostGrammar;
+  vm.runInContext(source, context);
+  context.recordCompletedLearningActivity = window.__learningActivityRecorderTest.recordCompletedLearningActivity;
+  const executableScreen = grammarScreenSource
+    .replace(/^import(?:[\s\S]*?)from '[^']+';\r?\n/gmu, '')
+    .replace(/^export \{[\s\S]*?\};\r?\n?/mu, '')
+    .concat(`
+      window.__grammarScreenTest={
+        gStart:gStart,gReview:gReview,gTheory:gTheory,gResume:gResume,gExamStart:gExamStart,gExamCheck:gExamCheck,
+        currentItem:function(){var item=GS&&GS.queue[GS.i];return item?{topic:item.t||GS.t,kind:item.k}:null},
+        answerCurrent:function(correct){var item=GS&&GS.queue[GS.i];if(!item)return;
+          if(item.k==='f'){var input=document.getElementById('g_inp');input.dataset={};input.style={};
+            input.value=correct?item.q.ans[0]:'definitely wrong';gSubmit()}
+          else{var buttons=item.q.o.map(function(){return{dataset:{},style:{},setAttribute:function(){},
+            querySelector:function(){return{setAttribute:function(){},innerHTML:''}}}});
+            buttons.forEach(function(button){button.parentElement={querySelectorAll:function(){return buttons}}});
+            var choice=correct?item.q.a:(item.q.a+1)%item.q.o.length;gPick(buttons[choice],choice)}
+          if(!correct)gAfterExplain()}
+      };
+    `);
+  vm.runInContext(executableScreen, context);
+  return {
+    screen: window.__grammarScreenTest,
+    ordinary,
+    adaptive,
+    advance(milliseconds) { now += milliseconds; },
+    setActive(value) { active = value; },
+  };
+}
+
+test('ordinary completion creates one bounded owner-synced attempt with the supplied stable UUID', async () => {
+  const harness = recorderHarness();
+  const completion = {
+    id: ATTEMPT_ID,
+    module: 'grammar',
+    activityId: 'grammar_forms_topic_6',
+    score: 4,
+    maxScore: 5,
+    durationMs: 90_250,
+    metadata: {
+      mode: 'topic_practice', source: 'builtin', helpUsed: false, hintsUsed: 0,
+      question: 'private question text', answer: 'private learner answer', nested: { unsafe: true },
+      evidenceQuality: 'server_verified_unassisted', contentRef: 'private:question:1',
+    },
+  };
+
+  const first = await harness.recorder.recordCompletedLearningActivity(completion);
+  const replay = await harness.recorder.recordCompletedLearningActivity(completion);
+
+  assert.equal(first.path, 'ordinary');
+  assert.equal(first.saved, false, 'offline-compatible sync result remains honest');
+  assert.equal(replay.path, 'ordinary');
+  assert.equal(harness.adaptive.length, 0);
+  assert.equal(harness.ordinary.length, 2, 'a retry reaches the idempotent sync boundary');
+  assert.deepEqual(JSON.parse(JSON.stringify(harness.ordinary[0])), {
+    id: ATTEMPT_ID,
+    module: 'grammar',
+    activity: 'grammar_forms_topic_6',
+    score: 4,
+    maxScore: 5,
+    durationMs: 90_250,
+    metadata: { mode: 'topic_practice', source: 'builtin', helpUsed: false, hintsUsed: 0 },
+  });
+  assert.equal(harness.ordinary[1].id, ATTEMPT_ID, 'retry must preserve the exact UUID');
+});
+
+test('an exact active adaptive block uses only its execution-claim path', async () => {
+  const active = {
+    module: 'grammar', activityId: 'grammar_forms_topic_3', executionClaim: 'a'.repeat(43),
+  };
+  const harness = recorderHarness(active);
+
+  const result = await harness.recorder.recordCompletedLearningActivity({
+    id: ATTEMPT_ID,
+    module: 'grammar', activityId: 'grammar_forms_topic_3',
+    score: 3, maxScore: 4, durationMs: 45_000,
+    metadata: { mode: 'topic_practice' },
+  });
+
+  assert.equal(result.path, 'adaptive');
+  assert.deepEqual(JSON.parse(JSON.stringify(harness.adaptive)), [{
+    module: 'grammar', activityId: 'grammar_forms_topic_3',
+    score: 3, maxScore: 4, durationMs: 45_000,
+  }]);
+  assert.equal(harness.ordinary.length, 0, 'the same completion cannot create an ordinary duplicate');
+});
+
+test('metadata accepts only named modes, sources and bounded primitive help signals', async () => {
+  const harness = recorderHarness();
+
+  await harness.recorder.recordCompletedLearningActivity({
+    id: '10000000-0000-4000-8000-000000000032',
+    module: 'grammar', activityId: 'grammar_forms_topic_2',
+    score: 1, maxScore: 2, durationMs: 15_000,
+    metadata: {
+      mode: 'learner_answer', source: 'private_question', helpUsed: 'false', hintsUsed: 101,
+    },
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(harness.ordinary[0].metadata)), {});
+});
+
+test('a different active adaptive block fails closed without recording disguised ordinary evidence', async () => {
+  const active = {
+    module: 'grammar', activityId: 'grammar_transformations_topic_18', executionClaim: 'a'.repeat(43),
+  };
+  const harness = recorderHarness(active);
+
+  const result = await harness.recorder.recordCompletedLearningActivity({
+    id: ATTEMPT_ID,
+    module: 'grammar', activityId: 'grammar_forms_topic_4',
+    score: 4, maxScore: 4, durationMs: 30_000,
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+    path: 'blocked', reason: 'adaptive_activity_mismatch', recorded: false,
+  });
+  assert.equal(harness.adaptive.length, 0);
+  assert.equal(harness.ordinary.length, 0);
+});
+
+test('grammar topic, mixed review and exam completions emit observable owner-bound or adaptive calls', async () => {
+  assert.match(
+    grammarScreenSource,
+    /import \{recordCompletedLearningActivity\} from '\.\.\/learning-activity-recorder\.js';/u,
+  );
+  assert.doesNotMatch(grammarScreenSource, /completeAdaptiveModuleActivity/u);
+  assert.doesNotMatch(grammarScreenSource, /apiPost\('\/api\/v1\/module-attempts'/u);
+  const harness = grammarScreenHarness();
+
+  harness.screen.gStart(3);
+  harness.advance(500);
+  while (harness.screen.currentItem()) harness.screen.answerCurrent(true);
+  await Promise.resolve();
+  assert.equal(harness.ordinary.length, 1);
+  assert.equal(harness.ordinary[0].module, 'grammar');
+  assert.equal(harness.ordinary[0].activity, 'grammar_forms_topic_3');
+  assert.equal(harness.ordinary[0].score, harness.ordinary[0].maxScore);
+  assert.ok(harness.ordinary[0].maxScore > 0);
+  assert.equal(harness.ordinary[0].durationMs, 500);
+  assert.deepEqual(harness.ordinary[0].metadata, {
+    mode: 'topic_practice', source: 'builtin', helpUsed: false, hintsUsed: 0,
+  });
+
+  harness.screen.gReview();
+  harness.advance(1_001);
+  let transformationMistakeMade = false;
+  let transformationHelpOpened = false;
+  while (harness.screen.currentItem()) {
+    const item = harness.screen.currentItem();
+    if (item.topic === 18 && !transformationHelpOpened) {
+      harness.screen.gTheory(18);
+      harness.screen.gResume();
+      transformationHelpOpened = true;
+    }
+    const correct = item.topic !== 18 || transformationMistakeMade;
+    if (item.topic === 18 && !correct) transformationMistakeMade = true;
+    harness.screen.answerCurrent(correct);
+  }
+  await Promise.resolve();
+  assert.equal(harness.ordinary.length, 3, 'mixed review emits one distinct attempt per skill family');
+  const review = harness.ordinary.slice(1).sort((left, right) => left.activity.localeCompare(right.activity));
+  assert.deepEqual(review.map(({ activity, score, maxScore, metadata }) => ({ activity, score, maxScore, metadata })), [
+    {
+      activity: 'grammar_forms_review', score: 2, maxScore: 2,
+      metadata: { mode: 'spaced_review', source: 'builtin', helpUsed: false, hintsUsed: 0 },
+    },
+    {
+      activity: 'grammar_transformations_review', score: 2, maxScore: 3,
+      metadata: { mode: 'spaced_review', source: 'generated', helpUsed: true, hintsUsed: 0 },
+    },
+  ]);
+  assert.equal(review.reduce((sum, attempt) => sum + attempt.durationMs, 0), 1_001);
+
+  harness.setActive({
+    module: 'grammar', activityId: 'grammar_forms_exam_19_24', executionClaim: 'a'.repeat(43),
+  });
+  harness.screen.gExamStart('builtin:exam:grammar:19-24:v1');
+  harness.advance(2_000);
+  harness.screen.gExamCheck();
+  await Promise.resolve();
+  assert.equal(harness.ordinary.length, 3, 'adaptive exam does not emit an ordinary duplicate');
+  assert.deepEqual(harness.adaptive, [{
+    module: 'grammar', activityId: 'grammar_forms_exam_19_24', score: 0, maxScore: 6, durationMs: 2_000,
+  }]);
+});

@@ -1,3 +1,5 @@
+import { grammarActivityId } from '../learning-activity-contract.js';
+
 (function initializeGrammarModule(global) {
   'use strict';
 
@@ -36,16 +38,18 @@
     const source = bank || {};
     const ai = generated || [];
     return {
-      c: (source.c || []).concat(ai.filter((item) => item.k === 'c').map((item) => ({ ...item.q, voice: item.voice || item.q?.voice || null }))),
-      f: (source.f || []).concat(ai.filter((item) => item.k === 'f').map((item) => ({ ...item.q, voice: item.voice || item.q?.voice || null }))),
-      c2: (source.c2 || []).slice(),
+      c: (source.c || []).map((question) => ({ ...question, evidenceSource: 'builtin' }))
+        .concat(ai.filter((item) => item.k === 'c').map((item) => ({ ...item.q, voice: item.voice || item.q?.voice || null, evidenceSource: 'generated' }))),
+      f: (source.f || []).map((question) => ({ ...question, evidenceSource: 'builtin' }))
+        .concat(ai.filter((item) => item.k === 'f').map((item) => ({ ...item.q, voice: item.voice || item.q?.voice || null, evidenceSource: 'generated' }))),
+      c2: (source.c2 || []).map((question) => ({ ...question, evidenceSource: 'builtin' })),
     };
   }
 
   function levelTwo(bank, topic) {
-    if (bank.f.length) return bank.f.map((question) => ({ k: 'f', q: question, t: topic, voice: question.voice || null }));
-    if (bank.c2.length) return bank.c2.map((question) => ({ k: 'c2', q: question, t: topic, voice: question.voice || null }));
-    return bank.c.map((question) => ({ k: 'c2', q: question, t: topic, voice: question.voice || null }));
+    if (bank.f.length) return bank.f.map((question) => ({ k: 'f', q: question, t: topic, voice: question.voice || null, source: question.evidenceSource || 'builtin' }));
+    if (bank.c2.length) return bank.c2.map((question) => ({ k: 'c2', q: question, t: topic, voice: question.voice || null, source: question.evidenceSource || 'builtin' }));
+    return bank.c.map((question) => ({ k: 'c2', q: question, t: topic, voice: question.voice || null, source: question.evidenceSource || 'builtin' }));
   }
 
   function shuffled(values, random = Math.random) {
@@ -56,7 +60,7 @@
   }
 
   function buildTopicQueue(bank, topic, record, random = Math.random) {
-    const levelOne = bank.c.map((question) => ({ k: 'c', q: question, t: topic, voice: question.voice || null }));
+    const levelOne = bank.c.map((question) => ({ k: 'c', q: question, t: topic, voice: question.voice || null, source: question.evidenceSource || 'builtin' }));
     const advanced = levelTwo(bank, topic);
     if ((Number(record?.st) || 0) >= 1) {
       return shuffled(levelOne, random).slice(0, 2).concat(shuffled(advanced, random).slice(0, 6));
@@ -112,6 +116,36 @@
     return `${minutes}:${remainder < 10 ? '0' : ''}${remainder}`;
   }
 
+  function queueSource(queue) {
+    const sources = new Set((queue || []).map((item) => item?.source).filter((source) => source));
+    if (sources.size > 1) return 'mixed';
+    return sources.has('generated') ? 'generated' : 'builtin';
+  }
+
+  function reviewEvidenceSlices(evidenceByActivity, durationMs) {
+    const duration = Math.max(0, Math.round(Number(durationMs) || 0));
+    const slices = Object.keys(evidenceByActivity || {}).sort().map((activityId) => ({
+      ...evidenceByActivity[activityId],
+      activityId,
+    }));
+    if (!slices.length) return [];
+    const total = slices.reduce((sum, slice) => sum + Math.max(1, Number(slice.maxScore) || 1), 0);
+    let allocated = 0;
+    const remainders = [];
+    slices.forEach((slice, index) => {
+      const exact = duration * Math.max(1, Number(slice.maxScore) || 1) / total;
+      slice.durationMs = Math.floor(exact);
+      allocated += slice.durationMs;
+      remainders.push({ index, fraction: exact - slice.durationMs, activityId: slice.activityId });
+    });
+    remainders.sort((left, right) => right.fraction - left.fraction
+      || left.activityId.localeCompare(right.activityId));
+    for (let remainder = duration - allocated, index = 0; remainder > 0; remainder -= 1, index += 1) {
+      slices[remainders[index % remainders.length].index].durationMs += 1;
+    }
+    return slices;
+  }
+
   global.EasyBoostGrammar = Object.freeze({
     REVIEW_INTERVAL_DAYS,
     normalizeAnswer,
@@ -123,5 +157,8 @@
     buildTopicQueue,
     applyAnswer,
     formatDuration,
+    queueSource,
+    activityId: grammarActivityId,
+    reviewEvidenceSlices,
   });
 })(window);

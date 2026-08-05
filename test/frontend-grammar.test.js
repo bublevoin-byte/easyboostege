@@ -2,12 +2,18 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
+import {
+  GRAMMAR_FORMS_ACTIVITY_IDS,
+  GRAMMAR_TRANSFORMATIONS_ACTIVITY_IDS,
+  grammarActivityId,
+} from '../public/learning-activity-contract.js';
 
-const source = await fs.readFile(new URL('../public/modules/grammar.js', import.meta.url), 'utf8');
+const source = (await fs.readFile(new URL('../public/modules/grammar.js', import.meta.url), 'utf8'))
+  .replace(/^import .*;\r?\n/mu, '');
 
 function createGrammarModule() {
   const window = {};
-  vm.runInNewContext(source, { window, Object, String, Number, Math, Date });
+  vm.runInNewContext(source, { window, grammarActivityId, Object, String, Number, Math, Date });
   return window.EasyBoostGrammar;
 }
 
@@ -38,8 +44,11 @@ test('grammar module combines built-in and generated banks and builds level queu
 
   assert.equal(bank.c.length, 2);
   assert.equal(bank.f.length, 1);
+  assert.equal(bank.c[0].evidenceSource, 'builtin');
+  assert.equal(bank.c[1].evidenceSource, 'generated');
   assert.equal(initial.filter((item) => item.k === 'c').length, 2);
   assert.equal(initial.filter((item) => item.k === 'f').length, 1);
+  assert.equal(grammar.queueSource(initial), 'mixed');
   assert.equal(continuing.length, 3);
 });
 
@@ -61,4 +70,36 @@ test('grammar module applies learning and review answers with spaced repetition'
   assert.equal(reviewRecord.err, 1);
   assert.equal(review.errT[2], 1);
   assert.equal(review.queue.length, 2);
+});
+
+test('grammar completion taxonomy covers every topic, review family and exam 19–24 exactly', () => {
+  const grammar = createGrammarModule();
+
+  for (let topic = 1; topic <= 20; topic += 1) {
+    assert.equal(
+      grammar.activityId(topic, 'topic_practice'),
+      topic === 18 ? 'grammar_transformations_topic_18' : `grammar_forms_topic_${topic}`,
+    );
+  }
+  assert.equal(grammar.activityId(3, 'spaced_review'), 'grammar_forms_review');
+  assert.equal(grammar.activityId(18, 'spaced_review'), 'grammar_transformations_review');
+  assert.equal(grammar.activityId(null, 'exam_19_24'), 'grammar_forms_exam_19_24');
+  assert.ok(GRAMMAR_FORMS_ACTIVITY_IDS.includes('grammar_forms_topic_1'));
+  assert.ok(GRAMMAR_FORMS_ACTIVITY_IDS.includes('grammar_forms_review'));
+  assert.ok(GRAMMAR_TRANSFORMATIONS_ACTIVITY_IDS.includes('grammar_transformations_topic_18'));
+  assert.ok(GRAMMAR_TRANSFORMATIONS_ACTIVITY_IDS.includes('grammar_transformations_review'));
+});
+
+test('mixed grammar review splits duration by distinct skill score maxima without inventing time', () => {
+  const grammar = createGrammarModule();
+  const slices = grammar.reviewEvidenceSlices({
+    grammar_transformations_review: { id: 'transformations', score: 1, maxScore: 2 },
+    grammar_forms_review: { id: 'forms', score: 4, maxScore: 6 },
+  }, 1_001);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(slices)), [
+    { id: 'forms', score: 4, maxScore: 6, activityId: 'grammar_forms_review', durationMs: 751 },
+    { id: 'transformations', score: 1, maxScore: 2, activityId: 'grammar_transformations_review', durationMs: 250 },
+  ]);
+  assert.equal(slices.reduce((sum, slice) => sum + slice.durationMs, 0), 1_001);
 });

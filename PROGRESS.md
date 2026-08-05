@@ -1143,7 +1143,7 @@ zero P0–P2. No paid provider call, push, merge, deploy or staging mutation was
 |---|---|---|
 | 01 | Честный экран пробника, скрытые фиктивные достижения и очищенный legacy-прогресс | done |
 | 02 | Рабочие настройки класса, цели и обычной длительности занятия | done |
-| 03 | Единая запись учебной активности и подключённая грамматика | pending |
+| 03 | Единая запись учебной активности и подключённая грамматика | done |
 | 04 | Результаты чтения и аудирования в индивидуальном плане | pending |
 | 05 | Сводка прогресса из реальных учебных свидетельств и выпускной контур | pending |
 
@@ -1156,3 +1156,15 @@ server-authoritative лимит 15 минут, не теряя предпочт�
 admin/staging-контур и платёжный adapter с выбором Robokassa либо аналога перед реализацией. Целевые
 тесты 67/67, полный набор 728 (713 pass, 15 штатных skip), lint/check, 16-asset frontend build и adaptive
 Chromium E2E прошли; платных вызовов, OAuth/оплаты, новых секретов, push и deploy не было.
+
+Тикет 03 закрыт: единый клиентский recorder выбирает ровно один путь — точный active adaptive block
+завершается через прежний execution claim, отсутствие блока создаёт одну owner-bound offline module
+attempt, а несовпадающий active block блокирует ordinary evidence. Все 20 тематических подходов,
+раздельные повторения forms/transformations и экзамен 19–24 передают стабильный UUID, точный activity
+ID, score/max и duration. Смешанная review-сессия создаёт максимум по одному distinct skill slice для
+forms и transformations с раздельными score/max, фактическими source/help-сигналами и детерминированным
+делением duration, сумма которого равна времени сессии; metadata ограничены перечисленными примитивными
+mode/source/help-полями без учебного содержания. Обычные результаты остаются `client_reported`.
+Целевые recorder/grammar тесты 10/10 и расширенный регрессионный набор 98/98; полный набор 735
+(720 pass, 15 штатных skip), lint/check, 16-asset frontend build и adaptive Chromium E2E
+прошли; платных вызовов, push и deploy не было.

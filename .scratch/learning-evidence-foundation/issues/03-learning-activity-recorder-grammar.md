@@ -1,6 +1,6 @@
 # 03 — Единая запись активности и грамматика
 
-Status: ready-for-agent
+Status: done
 Blocked by: —
 Spec: .scratch/learning-evidence-foundation/spec.md#implementation-decisions
 
@@ -16,11 +16,12 @@ Spec: .scratch/learning-evidence-foundation/spec.md#implementation-decisions
 
 ## Definition of Done
 
-- [ ] Одно завершение выбирает ровно один путь: adaptive либо ordinary.
-- [ ] Обычная попытка имеет стабильный UUID, activity ID, балл, максимум и длительность.
-- [ ] Офлайн-попытка остаётся owner-bound и воспроизводится после возвращения сети.
-- [ ] Подсказки и client-reported результат не становятся независимым mastery.
-- [ ] Все поддерживаемые режимы грамматики создают корректное evidence.
-- [ ] Повтор запроса идемпотентен.
-- [ ] Целевые runtime/frontend/adaptive tests проходят.
-- [ ] Один коммит на тикет.
+- [x] Одно завершение выбирает ровно один путь: adaptive либо ordinary.
+- [x] Обычная попытка имеет стабильный UUID, activity ID, балл, максимум и длительность.
+- [x] Офлайн-попытка остаётся owner-bound и воспроизводится после возвращения сети.
+- [x] Подсказки и client-reported результат не становятся независимым mastery.
+- [x] Все поддерживаемые режимы грамматики создают корректное evidence.
+- [x] Смешанное повторение создаёт не более одного distinct skill slice для forms и transformations; score/max разделены, а сумма детерминированно распределённой длительности ровно равна длительности сессии.
+- [x] Повтор запроса идемпотентен.
+- [x] Целевые runtime/frontend/adaptive tests проходят.
+- [x] Один коммит на тикет.

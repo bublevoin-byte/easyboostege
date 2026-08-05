@@ -349,6 +349,16 @@ test('activity mapping is exact, most-specific and covers every versioned taxono
     assert.equal(profile.skills.find((item) => item.id === skill.id).evidenceCount, 1, skill.id);
   }
 
+  const grammarForms = EGE_SKILL_TAXONOMY.skills.find((skill) => skill.id === 'ege.grammar.forms');
+  const grammarTransformations = EGE_SKILL_TAXONOMY.skills.find((skill) => skill.id === 'ege.grammar.transformations');
+  for (let topic = 1; topic <= 20; topic += 1) {
+    const activity = topic === 18 ? 'grammar_transformations_topic_18' : `grammar_forms_topic_${topic}`;
+    const expected = topic === 18 ? grammarTransformations : grammarForms;
+    assert.ok(expected.activityIds.includes(activity), `${activity} must be explicitly taxonomized`);
+  }
+  assert.ok(grammarForms.activityIds.includes('grammar_forms_review'));
+  assert.ok(grammarTransformations.activityIds.includes('grammar_transformations_review'));
+
   const executableActivities = [
     ['vocabulary', 'vocabulary_lexical_choice_topic_1', 'ege.vocabulary.lexical_choice'],
     ['grammar', 'grammar_forms_topic_4', 'ege.grammar.forms'],
