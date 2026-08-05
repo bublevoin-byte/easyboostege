@@ -5,7 +5,7 @@
  */
 import {HIST,registerRouteHook,showScreen,tab} from '../router.js';
 import {
-  DEMO_MODE,S,SRV,TOKEN,W37,W38,apiMessage,apiPost,ringOff,save,setTxt,toast,ui,writingModule,
+  S,SRV,TOKEN,W37,W38,apiMessage,apiPost,ringOff,save,setTxt,toast,ui,writingModule,
 } from '../app.js';
 import {adaptiveRuntimeSnapshot,completeAdaptiveServerAttempt,openAdaptivePlan} from '../adaptive-session-runtime.js';
 import {voiceTutorButton} from '../voice-tutor.js';
@@ -137,7 +137,6 @@ async function checkWriting(){
   var n=writingModule.countWords(t);
   if(n<10){alert('Напиши хотя бы несколько предложений.');return}
   tab('scr13');var task=curTask,tp=wrCur();
-  if(DEMO_MODE){renderReview(localReview(n,task,'демо-режим'));showScreen('scr12');HIST.push('scr8');return}
   if(!tp||!tp.id){renderReview(localReview(n,task,'задание не определено'));showScreen('scr12');HIST.push('scr8');return}
   try{
     var payload=writingModule.buildPayload(task,tp,t);

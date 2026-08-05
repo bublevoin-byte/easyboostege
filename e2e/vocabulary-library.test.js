@@ -5,8 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
-import jwt from 'jsonwebtoken';
-import { availablePort, chromeExecutable, stopProcess, waitForReady } from './browser-server-harness.js';
+import { availablePort, chromeExecutable, createActiveSubscriptionPage, stopProcess, waitForReady } from './browser-server-harness.js';
 
 const projectDirectory = fileURLToPath(new URL('..', import.meta.url));
 const serverPath = fileURLToPath(new URL('../server.js', import.meta.url));
@@ -24,6 +23,12 @@ try {
       'vocabulary-sync-user': {
         created: Date.now(),
         sub_until: Date.now() + 86_400_000,
+        privacy_consent: {
+          text_processing: true,
+          voice_processing: false,
+          policy_version: '2026-08-02-voice-v1',
+          updated_at: Date.now(),
+        },
       },
     },
     progress: { 'vocabulary-sync-user': {} },
@@ -52,16 +57,16 @@ try {
   await waitForReady(baseUrl, child, output);
 
   browser = await chromium.launch({ headless: true, executablePath: await chromeExecutable() });
-  const context = await browser.newContext({
-    viewport: { width: 375, height: 812 },
-    reducedMotion: 'reduce',
-    serviceWorkers: 'block',
+  const activeHarness=await createActiveSubscriptionPage(browser,{
+    baseUrl,username:'vocabulary-sync-user',jwtSecret:'vocabulary-e2e-test-only-secret-32-characters',
+    contextOptions:{viewport:{width:375,height:812},reducedMotion:'reduce',serviceWorkers:'block'},
   });
-  const page = await context.newPage();
+  const context=activeHarness.context;
+  const page=activeHarness.page;
   const pageErrors = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
   await page.goto(baseUrl, { waitUntil: 'networkidle' });
-  await page.getByRole('button', { name: 'Попробовать демо' }).click();
+  await page.locator('#scr1.on').waitFor({state:'visible',timeout:5_000});
   await page.getByRole('button', { name: 'Чтение', exact: true }).press('Enter');
   await page.locator('#scr7.on').waitFor();
   await page.getByRole('button', { name: 'Полное понимание' }).press('Enter');
@@ -404,21 +409,12 @@ try {
 
   await context.close();
 
-  const authenticatedContext = await browser.newContext({
-    viewport: { width: 375, height: 812 },
-    reducedMotion: 'reduce',
-    serviceWorkers: 'block',
+  const authenticatedHarness=await createActiveSubscriptionPage(browser,{
+    baseUrl,username:'vocabulary-sync-user',jwtSecret:'vocabulary-e2e-test-only-secret-32-characters',
+    contextOptions:{viewport:{width:375,height:812},reducedMotion:'reduce',serviceWorkers:'block'},
   });
-  await authenticatedContext.addCookies([{
-    name: 'eb_token',
-    value: jwt.sign({ u: 'vocabulary-sync-user' }, 'vocabulary-e2e-test-only-secret-32-characters', {
-      expiresIn: '1h',
-    }),
-    url: baseUrl,
-    httpOnly: true,
-    sameSite: 'Lax',
-  }]);
-  const authenticatedPage = await authenticatedContext.newPage();
+  const authenticatedContext=authenticatedHarness.context;
+  const authenticatedPage=authenticatedHarness.page;
   await authenticatedPage.goto(baseUrl, { waitUntil: 'networkidle' });
   await authenticatedPage.locator('#scr1.on').waitFor({ state: 'visible', timeout: 5_000 });
   await authenticatedPage.getByRole('button', { name: 'Слова', exact: true }).press('Enter');

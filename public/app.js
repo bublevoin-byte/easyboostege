@@ -4,6 +4,7 @@ import {configureTts,lStop} from './tts.js';
 import {decorateCoreVocabulary} from './modules/core-voice-catalog.js';
 import {clearAdaptiveOverviewCache} from './adaptive-overview-cache.js';
 import {clearAdaptiveRuntime} from './adaptive-session-runtime.js';
+import {classifyLearningAccess,LEARNING_ACCESS_STATES} from './access.js';
 import {
   applyVocabularyOutcome,
   localVocabularyProgress,
@@ -21,7 +22,7 @@ import './screens.js';
 
 /* ---------- STATE ---------- */
 const todayStr=()=>new Date().toISOString().slice(0,10);
-let currentUser=localStorage.getItem('eb_current')||null,S=null,DEMO_MODE=false;
+let currentUser=localStorage.getItem('eb_current')||null,S=null;
 const store=window.EasyBoostStore;
 const ui=window.EasyBoostComponents;
 const txt=ui.elementText;
@@ -63,17 +64,16 @@ function wire(){
 /* ---------- AUTH ---------- */
 function inputVal(scr,ph){const el=document.querySelector('#'+scr+' input[placeholder*="'+ph+'"]');return el?el.value.trim():''}
 document.addEventListener('DOMContentLoaded',()=>{wire();
-  currentUser=currentUser||'Аня';localStorage.setItem('eb_current',currentUser);
 });
 wire();
-S=store.loadLocal(currentUser);
+S=currentUser?store.loadLocal(currentUser):null;
 
 /* ===== READING ===== */
 /* Последнее слово, по которому кликнули в тексте: его показывает всплывающая карточка перевода
    и озвучивает кнопка из разметки, поэтому имя живёт в оболочке, а не в чанке чтения. */
 let lastWord="",lastWordContext="";
 
-/* ===== ROBUSTNESS + DEMO FALLBACK (overrides) ===== */
+/* ===== ROBUSTNESS + OFFLINE FALLBACKS ===== */
 const DICT={
  many:{ipa:'/ˈmeni/',tr:'многие'},students:{ipa:'/ˈstjuːdnts/',tr:'студенты'},take:{ipa:'/teɪk/',tr:'брать, взять'},
  gap:{ipa:'/ɡæp/',tr:'промежуток, разрыв'},year:{ipa:'/jɪə/',tr:'год'},before:{ipa:'/bɪˈfɔː/',tr:'перед, до'},
@@ -224,82 +224,135 @@ const apiGet=EasyBoostApi.get;
 const apiGetBlob=EasyBoostApi.getBlob;
 const apiPostBinary=EasyBoostApi.postBinary;
 const apiMessage=EasyBoostApi.messageFor;
-const fillDefaults=store.normalize;
 function syncModuleAttempt(attempt){return store.sync.saveModuleAttempt(attempt)}
+let authTransition=Promise.resolve();
+function runAuthTransition(action){
+  const pending=authTransition.then(action,action);authTransition=pending.catch(function(){});return pending;
+}
+
+function hideLearningShell(){
+  const bar=document.getElementById('tabbar');if(bar)bar.style.display='none';
+}
+function setAccessBackgroundInert(inert){
+  document.querySelectorAll('.screen,#tabbar,#genfab,#learnSheet').forEach(function(element){element.inert=inert});
+}
+function closeAccessGate(focusLogin=false){
+  document.getElementById('access_gate')?.remove();setAccessBackgroundInert(false);
+  if(focusLogin)queueMicrotask(function(){document.querySelector('#scr5 input, #scr5 button, #scr5 a')?.focus()});
+}
+function accessGate(){
+  let gate=document.getElementById('access_gate');if(gate)return gate;
+  gate=document.createElement('section');gate.id='access_gate';gate.setAttribute('role','dialog');gate.setAttribute('aria-modal','true');gate.setAttribute('aria-labelledby','access_gate_title');gate.setAttribute('aria-describedby','access_gate_copy');
+  gate.setAttribute('style','position:fixed;inset:0;z-index:100000;background:linear-gradient(160deg,#FFA570,#F2683F);display:grid;place-items:center;padding:24px;font-family:Manrope,system-ui,sans-serif;');
+  const card=document.createElement('div');card.setAttribute('style','width:min(100%,390px);box-sizing:border-box;border-radius:28px;background:#fff;padding:28px 24px;text-align:center;box-shadow:0 20px 55px rgba(20,20,30,.22);');
+  const title=document.createElement('h1');title.id='access_gate_title';title.setAttribute('style','margin:0;color:#2B2B2B;font:800 23px Nunito,Manrope,sans-serif;');
+  const copy=document.createElement('p');copy.id='access_gate_copy';copy.setAttribute('style','margin:10px 0 20px;color:#5D6168;font:600 14px/1.55 Manrope,system-ui,sans-serif;');
+  const bot=document.createElement('a');bot.id='access_gate_bot';bot.target='_blank';bot.rel='noopener';bot.setAttribute('style','display:none;min-height:50px;box-sizing:border-box;border-radius:15px;background:#F2683F;color:#fff;padding:14px 16px;font:800 14px Manrope,sans-serif;text-decoration:none;');bot.textContent='Открыть Telegram-бот';
+  const retry=document.createElement('button');retry.id='access_gate_retry';retry.type='button';retry.setAttribute('style','width:100%;min-height:48px;margin-top:10px;border:1.5px solid #F3D2C8;border-radius:15px;background:#fff;color:#B54E2F;font:800 14px Manrope,sans-serif;cursor:pointer;');retry.textContent='Повторить проверку';retry.addEventListener('click',function(){pwCheck()});
+  card.append(title,copy,bot,retry);gate.appendChild(card);gate.addEventListener('keydown',function(event){
+    if(event.key!=='Tab')return;const controls=[bot,retry].filter(function(control){return control.offsetParent!==null});
+    if(!controls.length)return;const first=controls[0],last=controls[controls.length-1];
+    if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus()}
+    else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus()}
+  });document.body.appendChild(gate);return gate;
+}
+function applyLearningAccess(result){
+  const state=result.state;hideLearningShell();
+  if(state===LEARNING_ACCESS_STATES.ACTIVE){closeAccessGate();return}
+  if(state===LEARNING_ACCESS_STATES.NO_SESSION){
+    show('scr5');closeAccessGate(true);const login=document.getElementById('scr5');if(login)login.dataset.accessState=state;lgMsg('Войдите, чтобы проверить активный доступ.');return
+  }
+  show('scr5');const gate=accessGate();setAccessBackgroundInert(true);gate.dataset.state=state;
+  const title=document.getElementById('access_gate_title');const copy=document.getElementById('access_gate_copy');const bot=document.getElementById('access_gate_bot');
+  if(state===LEARNING_ACCESS_STATES.INACTIVE){
+    title.textContent='Нужен активный доступ';copy.textContent='Сессия подтверждена, но подписка неактивна или закончилась. Учебные разделы откроются после активации доступа.';
+    if(result.session&&result.session.bot){bot.href='https://t.me/'+result.session.bot;bot.style.display='block'}else bot.style.display='none';
+  }else{
+    title.textContent='Не удалось проверить доступ';copy.textContent='Сейчас нет связи с сервером, поэтому мы не можем подтвердить подписку. Учебные разделы не открыты. Проверьте сеть и повторите попытку.';bot.style.display='none';
+  }queueMicrotask(function(){document.getElementById('access_gate_retry')?.focus()})
+}
+function adoptServerSession(session){
+  TOKEN=session&&session.authenticated===true?'cookie':'';window.__sub=session||null;
+  if(session&&session.username){currentUser=session.username;localStorage.setItem('eb_current',currentUser)}
+}
+async function checkLearningAccess(session=null){
+  if(!SRV){const result=classifyLearningAccess(null,new Error('server mode required'));applyLearningAccess(result);return result}
+  try{
+    const current=session||await auth.currentSession();const result=classifyLearningAccess(current);
+    if(current&&current.authenticated===true)adoptServerSession(current);else TOKEN='';
+    applyLearningAccess(result);return result;
+  }catch(error){
+    const result=classifyLearningAccess(null,error);if(result.state===LEARNING_ACCESS_STATES.NO_SESSION)TOKEN='';applyLearningAccess(result);return result;
+  }
+}
 
 /* save/load через сервер (или локально) */
 let _saveT=null;
 const START_HOOKS=[];
 function registerStartHook(hook){START_HOOKS.push(hook)}
 function save(options={}){
-  if(DEMO_MODE)return;
   if(SRV&&!TOKEN)return;
   /* локальный снимок держит слова, SRS, грамматику и прогресс доступными без сети */
   store.saveLocal(currentUser,S);
   if(SRV){clearTimeout(_saveT);if(options.queueNow)store.sync.queueProgress(S);_saveT=setTimeout(()=>{store.sync.saveProgress(S)},600)}}
-async function startApp(){
+async function startLearningWithVerifiedSession(session){
+  const access=classifyLearningAccess(session);applyLearningAccess(access);
+  if(access.state!==LEARNING_ACCESS_STATES.ACTIVE)return false;adoptServerSession(session);
   /* Встроенные задания нужны до первого экрана письма и должны быть доступны офлайн,
      поэтому банк загружается из закэшированного /task-bank.json на старте. */
   await loadTaskBank();
-  store.sync.setOwner(DEMO_MODE?null:currentUser);
-  if(DEMO_MODE){tab('scr1');return}
-  if(SRV){if(!TOKEN){show('scr5');document.getElementById('tabbar').style.display='none';return}
+  store.sync.setOwner(currentUser);
+  if(SRV){
     var served=null;
     try{served=await apiGet('/api/v1/progress')}catch(e){served=null}
     S=store.restore(currentUser,served,store.sync.pendingModules());
     store.saveLocal(currentUser,S);
     if(!served)try{toast('Нет сети — показан сохранённый прогресс')}catch(e){}}
-  else{S=store.loadLocal(currentUser)}
   store.sync.setBaseline(S);
   tab('scr1');
   for(const hook of START_HOOKS){try{await hook()}catch(e){}}
+  return true;
+}
+async function startApp(){
+  return runAuthTransition(async function(){
+    const access=await checkLearningAccess();
+    if(access.state!==LEARNING_ACCESS_STATES.ACTIVE)return false;
+    return startLearningWithVerifiedSession(access.session);
+  });
 }
 
 /* вход/регистрация */
 async function doLogin(){
-  if(!SRV){const u=gv('lg_user')||'Аня';currentUser=u;localStorage.setItem('eb_current',currentUser);startApp();return}
+  if(!SRV){applyLearningAccess(classifyLearningAccess(null,new Error('server mode required')));return}
   const u=gv('lg_user'),p=gv('lg_pass');if(!u||!p){lgMsg('Введите имя и пароль');return}
   lgMsg('Вход…');
-  try{const d=await auth.login(u,p);TOKEN=d.authenticated?'cookie':'';
-    window.__sub=d;currentUser=d.username;localStorage.setItem('eb_current',currentUser);lgMsg('');startApp()}
+  try{await runAuthTransition(async function(){const d=await auth.login(u,p);adoptServerSession(d);lgMsg('');await startLearningWithVerifiedSession(d)})}
   catch(e){lgMsg(apiMessage(e,'auth'))}}
 async function doRegister(){
-  if(!SRV){const u=gv('lg_user')||'Аня';currentUser=u;localStorage.setItem('eb_current',currentUser);show('scr6');document.getElementById('tabbar').style.display='none';return}
+  if(!SRV){applyLearningAccess(classifyLearningAccess(null,new Error('server mode required')));return}
   const u=gv('lg_user'),p=gv('lg_pass');if(!u||!p){lgMsg('Введите имя и пароль');return}
   lgMsg('Создаём аккаунт…');
-  try{const d=await auth.register(u,p);TOKEN=d.authenticated?'cookie':'';
-    window.__sub=d;currentUser=d.username;localStorage.setItem('eb_current',currentUser);lgMsg('');show('scr6');document.getElementById('tabbar').style.display='none'}
+  try{await runAuthTransition(async function(){const d=await auth.register(u,p);adoptServerSession(d);lgMsg('');if(classifyLearningAccess(d).state===LEARNING_ACCESS_STATES.ACTIVE){show('scr6');hideLearningShell()}else applyLearningAccess(classifyLearningAccess(d))})}
   catch(e){lgMsg(apiMessage(e,'auth'))}}
 async function logout(){
-  try{if(SRV)await auth.logout()}catch(_){}
-  TOKEN='';
-  store.sync.setOwner(null);
-  clearAdaptiveRuntime();
-  clearAdaptiveOverviewCache(localStorage);
-  try{localStorage.removeItem('eb_current');localStorage.removeItem('eb_tg_code')}catch(_){}
-  location.reload()
+  return runAuthTransition(async function(){
+    try{if(SRV)await auth.logout()}catch(_){}
+    TOKEN='';store.sync.setOwner(null);clearAdaptiveRuntime();clearAdaptiveOverviewCache(localStorage);
+    try{localStorage.removeItem('eb_current');localStorage.removeItem('eb_tg_code')}catch(_){}
+    location.reload()
+  })
 }
 
-async function startDemo(){
-  DEMO_MODE=true;TOKEN='';currentUser='Демо';store.sync.setOwner(null);S=fillDefaults({demo:true});
-  var bar=document.getElementById('tabbar');if(bar)bar.style.display='flex';
-  var banner=document.getElementById('demo_banner');
-  if(!banner){banner=document.createElement('button');banner.id='demo_banner';banner.type='button';banner.textContent='Демо · войти для сохранения';banner.setAttribute('aria-label','Демонстрационный режим. Войти для сохранения прогресса');banner.setAttribute('style','position:fixed;z-index:9998;top:max(8px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);border:0;border-radius:18px;background:#2B2B2B;color:#fff;padding:8px 14px;font:700 11px Manrope;cursor:pointer;');banner.onclick=function(){location.reload()};document.body.appendChild(banner)}
-  tab('scr1');
-  for(const hook of START_HOOKS){try{await hook()}catch(e){}}
-}
-
-function generateAiContent(operation,payload){if(DEMO_MODE)return Promise.reject(new Error('ИИ недоступен в демо-режиме'));return EasyBoostApi.generateContent(operation,payload)}
+function generateAiContent(operation,payload){return EasyBoostApi.generateContent(operation,payload)}
 
 /* профиль: в серверном режиме ключ не нужен на клиенте */
 registerProfileHook(function(){var ai=document.getElementById('pf_ai');if(ai){ai.textContent='через сервер ✓';ai.style.color='#1D7F4A';ai.style.background='#EAF7F0'}})
 
-/* финальная инициализация под серверный режим */
-if(SRV){ if(TOKEN){ startApp(); } else { var tb=document.getElementById('tabbar'); if(tb)tb.style.display='none'; show('scr5'); } }
+/* До серверной проверки всегда виден только вход, а учебная оболочка скрыта. */
+hideLearningShell();show('scr5');
 /*
- * С экрана входа ученик уходит только на «Главную» — и входом, и «Попробовать демо». Готовим её
- * заранее: первая отрисовка этого экрана стоит около двухсот миллисекунд, и внутри клика она
- * целиком попадает в окно взаимодействия. См. prepareScreen в router.js.
+ * После подтверждённого входа ученик уходит на «Главную». Готовим её заранее: первая отрисовка
+ * стоит около двухсот миллисекунд. Подготовка не показывает экран и не даёт доступ к навигации.
  */
 prepareScreen('scr1');
 
@@ -314,13 +367,13 @@ async function tgInit(){
 }
 function tgPoll(){
   if(!TG_CODE)return;try{localStorage.setItem('eb_tg_code',TG_CODE)}catch(_){};let tries=0;clearInterval(TG_IV);
-  TG_IV=setInterval(async()=>{tries++;
+  TG_IV=setInterval(()=>{tries++;runAuthTransition(async function(){
     try{const c=await auth.checkTelegramLogin(TG_CODE);
       if(c&&c.authenticated){clearInterval(TG_IV);TOKEN='cookie';
-        window.__sub=c;currentUser=c.username;localStorage.setItem('eb_current',currentUser);lgMsg('');startApp();}
+        adoptServerSession(c);lgMsg('');await startLearningWithVerifiedSession(c);}
     }catch(e){}
     if(tries>300){clearInterval(TG_IV)}
-  },2000);
+  })},2000);
 }
 // Telegram-код создаётся только после явного действия пользователя.
 
@@ -331,33 +384,14 @@ try{clearInterval(TG_IV)}catch(e){}
 
 
 /* legacy block 2 */
-/* ===== ДОСТУП / ПОДПИСКА (paywall) ===== */
-function pwHide(){var o=document.getElementById('pw_ov');if(o)o.remove();}
-function pwShow(bot){
-  if(document.getElementById('pw_ov'))return;
-  var ov=document.createElement('div');ov.id='pw_ov';
-  ov.setAttribute('style','position:fixed;inset:0;z-index:99999;background:linear-gradient(160deg,#FFA570,#F2683F);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:28px;text-align:center;font-family:Manrope;color:#fff;');
-  var burl='https://t.me/'+(bot||'');
-  ov.innerHTML=
-    '<div style="font-size:46px;margin-bottom:10px;">🎓</div>'+
-    '<div style="font-weight:800;font-size:23px;margin-bottom:8px;">Easy Boost</div>'+
-    '<div style="font-weight:600;font-size:15px;line-height:1.55;max-width:300px;opacity:.96;margin-bottom:22px;">Чтобы заниматься, оформи доступ в нашем Telegram-боте — бесплатный месяц или подписку. Это займёт минуту.</div>'+
-    '<a href="'+burl+'" target="_blank" rel="noopener" style="display:block;width:100%;max-width:300px;box-sizing:border-box;height:54px;line-height:54px;background:#fff;color:#B54E2F;border-radius:16px;font-weight:800;font-size:16px;text-decoration:none;margin-bottom:12px;box-shadow:0 12px 24px rgba(20,20,30,.18);">Открыть Telegram-бот</a>'+
-    '<button onclick="pwCheck(true)" style="width:100%;max-width:300px;height:48px;background:rgba(255,255,255,.16);color:#fff;border:1.5px solid rgba(255,255,255,.6);border-radius:14px;font-family:Manrope;font-weight:700;font-size:15px;cursor:pointer;">Я оформил — обновить</button>';
-  document.body.appendChild(ov);
-}
 async function pwCheck(){
-  if(typeof SRV==='undefined'||!SRV||!TOKEN){pwHide();return true;}
-  try{
-    var me=await auth.currentSession();
-    if(me&&me.active){pwHide();return true;}
-    pwShow(me&&me.bot);
-    return false;
-  }catch(e){ pwHide(); return true; } // при ошибке сети не блокируем доступ
+  return runAuthTransition(async function(){
+    const access=await checkLearningAccess();
+    if(access.state!==LEARNING_ACCESS_STATES.ACTIVE)return false;
+    await startLearningWithVerifiedSession(access.session);return true;
+  });
 }
 window.checkSub=pwCheck;
-registerStartHook(function(){return pwCheck()});
-if(typeof SRV!=='undefined'&&SRV&&TOKEN){ setTimeout(function(){try{pwCheck();}catch(e){}},300); }
 
 /* legacy block 3 */
 /* ===== Вход по ссылке из бота (magic link) — без всплывающих окон ===== */
@@ -386,9 +420,7 @@ async function tgClick(e){
 /* legacy block 4 */
 /* ===== SESSION v2: постоянный вход, восстановление сессии, подписка ===== */
 (function(){
-  function saveTok(t,u){if(t||u)TOKEN='cookie';
-    if(u){currentUser=u;try{localStorage.setItem('eb_current',u)}catch(_){}}}
-  async function me(){try{return await auth.currentSession()}catch(e){return null}}
+  async function me(){return runAuthTransition(function(){return auth.currentSession()})}
   window.ebMe=me;
   /* вход через Telegram переживает перезагрузку страницы */
   try{
@@ -399,13 +431,10 @@ async function tgClick(e){
   /* восстановление сессии из cookie + продление токена при каждом заходе */
   (async function(){
     if(typeof SRV==='undefined'||!SRV)return;
-    var m=await me();
-    if(m&&m.username){
-      var had=!!TOKEN;
-      saveTok(m.authenticated,m.username);
-      window.__sub=m;
-      if(!had){try{localStorage.removeItem('eb_tg_code')}catch(_){};startApp();}
-    }
+    await runAuthTransition(async function(){
+      const access=await checkLearningAccess();
+      if(access.state===LEARNING_ACCESS_STATES.ACTIVE){try{localStorage.removeItem('eb_tg_code')}catch(_){};await startLearningWithVerifiedSession(access.session)}
+    });
   })();
   /* статус подписки в профиле */
   registerProfileHook(function(){
@@ -929,12 +958,12 @@ configureTts({
  */
 export {
   lastWord,lastWordContext,
-  closeLearn,learnGo,logout,lToggleSlow,openLearn,pwCheck,rSync,save,startApp,startDemo,
+  closeLearn,learnGo,logout,lToggleSlow,openLearn,pwCheck,rSync,save,startApp,
   tgClick,trWord,
 };
 
 /* Зависимости privacy.js и pwa.js, которые раньше находились через глобальную область. */
-export {DEMO_MODE,SRV,registerProfileHook,registerStartHook,toast};
+export {SRV,registerProfileHook,registerStartHook,toast};
 
 /*
  * Оболочка для чанков экранов. Экран не видит глобальной области: всё, чем он пользуется —

@@ -24,7 +24,7 @@
 
 | № | Что даёт | Статус |
 |---|---|---|
-| 01 | Удалённый демо-режим и честный активный доступ | ready-for-agent |
+| 01 | Удалённый демо-режим и честный активный доступ | done |
 | 02 | Глубокий доменный контракт Reading, история и умная ротация | ready-for-agent |
 | 03 | 20 оригинальных комплектов задания 10 | ready-for-agent |
 | 04 | 20 оригинальных комплектов задания 11 | ready-for-agent |
@@ -32,6 +32,13 @@
 | 06 | Три тренировки и полный раздел 10–18 | ready-for-agent |
 | 07 | Связь со словами, Voice context и индивидуальным планом | ready-for-agent |
 | 08 | Premium-отчёт, entitlement-gate и финальное укрепление | ready-for-agent |
+
+Тикет 01 завершён: клиентский учебный демо-вход и все его ветви хранения/ИИ удалены. Учебная
+оболочка открывается только после серверного подтверждения активной подписки; при восстановлении
+сессии это подтверждение приходит от `/api/v1/me` с `active: true`. Отсутствующая сессия,
+неактивная подписка и невозможность проверить доступ по сети имеют разные
+экраны. Локальный снимок прогресса не считается разрешением. Chromium E2E используют активную
+подписку, подтверждённую сервером, а не клиентский обход.
 
 Зафиксирован официальный формат ФИПИ-2026: 7 текстов и 8 заголовков в №10, 6 пропусков и
 7 фрагментов в №11, 7 вопросов по 4 варианта в №12–18. В разделе 9 официально учитываемых
@@ -1099,7 +1106,7 @@ invented scope. Re-diagnostic scheduling uses 28/35/42-day cadence from confiden
 the progress screen presents the scheduled short refresh even when no run is active, while fresh adequate
 independent evidence is not forced through an immediate diagnostic.
 
-Access is explicit as free/base/Premium. Preview, replacement, start/replay, bind and advance enforce current
+Historical access model (superseded by Reading 2.0 ticket 01): access was explicit as free/base/Premium. Preview, replacement, start/replay, bind and advance enforce current
 Premium for deep Writing/Speaking; the existing Voice Tutor session boundary continues to enforce Premium for live handoff.
 The new Premium-only orientation uses only independently established skills, returns insufficient evidence
 when coverage is sparse and is labelled approximate and non-official for both CEFR and IELTS. Migration 037,
@@ -1111,6 +1118,10 @@ isolated rerun after one initial response-wait timeout, with no product-code cha
 frontend build, 409-file secret scan, 254-commit history scan and `git diff --check` pass. Independent
 Standards and Spec final reviews both passed with zero P0–P2. No paid provider call, push, merge, deploy or
 staging mutation.
+
+The next Ticket 07 paragraphs are retained as implementation history. Their Free demo entry is no
+longer a current product promise: the learning shell now requires a server-confirmed active subscription.
+Legacy `commercial_scope=free_demo` values remain historical persistence data, not a client access bypass.
 
 Ticket 07 implementation complete: the public adaptive experience now has dashboard/profile entry,
 goal editing, confidence-labelled forecast and weekly allocation, understandable feasibility choices,

@@ -6,7 +6,7 @@
 import {registerRouteHook} from '../router.js';
 import {readAdaptiveOverviewCacheSnapshot,writeAdaptiveOverviewCache} from '../adaptive-overview-cache.js';
 import {adaptiveRuntimeSnapshot,advanceAdaptiveBreak,beginAdaptiveBlock,completeAdaptiveVoiceTutorRepeat,finishAdaptiveSession,resumeAdaptiveExecution} from '../adaptive-session-runtime.js';
-import {DEMO_MODE,S,apiGet,apiMessage,apiPost,apiPostIdempotent,apiPut,profileModule,progressModule,registerStartHook,setTxt} from '../app.js';
+import {S,apiGet,apiMessage,apiPost,apiPostIdempotent,apiPut,profileModule,progressModule,registerStartHook,setTxt} from '../app.js';
 
 function syncAdaptivePlanEntries(){
   const enabled=window.__sub?.features?.adaptive_learning===true;
@@ -189,7 +189,6 @@ function bindAdaptiveCommercial(){const button=document.getElementById('adaptive
 async function loadAdaptiveOverview(){
   const root=document.getElementById('adaptive_plan');const form=document.getElementById('adaptive_goal_form');const notice=document.getElementById('adaptive_goal_notice');const errors=document.getElementById('adaptive_goal_errors');if(!root||!form||!notice||!errors)return;
   const planEnabled=window.__sub?.features?.adaptive_learning===true;root.hidden=!planEnabled;
-  if(DEMO_MODE){drawEvidenceProgressSummary(null);const source=document.getElementById('evidence_progress_source');if(source)source.textContent='Недостаточно данных. Войдите, чтобы результаты сохранялись.';return}
   if(planEnabled){applyPreferredAdaptiveSessionDuration();bindAdaptiveDiagnostic();bindAdaptiveSessionComposer();bindAdaptiveCommercial()}
   if(planEnabled&&!form.dataset.bound){
     form.dataset.bound='true';form.addEventListener('input',function(){delete form.dataset.pendingKey;errors.textContent=''});

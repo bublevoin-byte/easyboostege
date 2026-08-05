@@ -4,7 +4,7 @@
  * поэтому экран только рисует шапку и зовёт хуки.
  */
 import {nav,registerRouteHook} from '../router.js';
-import {DEMO_MODE,SRV,S,TOKEN,apiGet,currentUser,profileModule,runProfileHooks,save,setTxt} from '../app.js';
+import {SRV,S,TOKEN,apiGet,currentUser,profileModule,runProfileHooks,save,setTxt} from '../app.js';
 
 let profileGoal=null;
 let profileGoalAvailable=true;
@@ -46,7 +46,7 @@ async function loadAdaptiveGoal(owner){
 function renderProfile(){
   const u=profileModule.displayName(currentUser);setTxt('pf_ava',profileModule.initial(u));setTxt('pf_name',u);setTxt('pf_ai','через сервер ✓');
   if(profileGoalOwner!==currentUser){profileGoalOwner=currentUser;profileGoal=null;profileGoalAvailable=true}
-  bindStudySettings();drawStudySettings();if(SRV&&TOKEN&&!DEMO_MODE)loadAdaptiveGoal(currentUser);runProfileHooks();
+  bindStudySettings();drawStudySettings();if(SRV&&TOKEN)loadAdaptiveGoal(currentUser);runProfileHooks();
 }
 
 registerRouteHook(function(id){if(id==='scr11')renderProfile()});

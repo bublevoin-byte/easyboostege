@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import net from 'node:net';
+import jwt from 'jsonwebtoken';
 
 async function availablePort() {
   const listener = net.createServer();
@@ -57,4 +58,22 @@ async function stopProcess(child) {
   if (child.exitCode === null) child.kill('SIGKILL');
 }
 
-export { availablePort, chromeExecutable, stopProcess, waitForReady };
+async function createActiveSubscriptionPage(browser,{baseUrl,username,jwtSecret,contextOptions={}}){
+  const context=await browser.newContext(contextOptions);
+  await context.addCookies([{
+    name:'eb_token',
+    value:jwt.sign({u:username},jwtSecret,{expiresIn:'1h'}),
+    url:baseUrl,
+    httpOnly:true,
+    sameSite:'Lax',
+  }]);
+  const response=await context.request.get(`${baseUrl}/api/v1/me`);
+  const session=await response.json().catch(()=>null);
+  if(!response.ok()||session?.authenticated!==true||session?.username!==username||session?.active!==true){
+    await context.close();
+    throw new Error(`Server did not confirm active learning access for ${username}.`);
+  }
+  return{context,page:await context.newPage(),session};
+}
+
+export { availablePort, chromeExecutable, createActiveSubscriptionPage, stopProcess, waitForReady };

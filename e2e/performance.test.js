@@ -1,5 +1,5 @@
-// Section 19: measures the Core Web Vitals the specification names, on the demo flow.
-// Kept apart from demo.test.js because timing is noisy: a slow machine must not fail the
+// Section 19: measures the Core Web Vitals the specification names on an active server session.
+// Kept apart from the functional E2E suite because timing is noisy: a slow machine must not fail the
 // functional suite, and this run reports numbers even when it passes.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -8,8 +8,8 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import jwt from 'jsonwebtoken';
 import { chromium } from 'playwright';
+import { createActiveSubscriptionPage } from './browser-server-harness.js';
 
 const projectDirectory = fileURLToPath(new URL('..', import.meta.url));
 const serverPath = fileURLToPath(new URL('../server.js', import.meta.url));
@@ -24,12 +24,12 @@ const BUDGET = {
 // имеет права участвовать в первой загрузке — на этом держится её вес.
 const LAZY_SCREENS = [
   'screens/listening.js', 'screens/reading.js',
-  'screens/writing.js', 'screens/speaking.js', 'screens/profile.js',
+  'screens/writing.js', 'screens/speaking.js',
 ];
 // А эти обязаны приехать сразу: раздел 6.1 ТЗ обещает словарные карточки, интервальное повторение,
 // встроенные грамматические тесты и просмотр сохранённого прогресса без сети. Ученик может уйти в
 // офлайн, ни разу их не открыв. Проверяются оба списка, чтобы ни один не съехал молча в свою сторону.
-const SHELL_SCREENS = ['screens/words.js', 'screens/grammar.js', 'screens/progress.js'];
+const SHELL_SCREENS = ['screens/words.js', 'screens/grammar.js', 'screens/progress.js', 'screens/profile.js'];
 
 /*
  * Сервер отдаёт `dist/public`, если сборка есть, и `public/` иначе — замер должен идти по тому же
@@ -180,11 +180,10 @@ async function measureFirstLoad(browser, baseUrl) {
 // Opens a real session, makes the review call take a second, and times how long the interface
 // waits before telling the student that something is happening.
 async function measureAiLoadingState(browser, baseUrl, jwtSecret) {
-  const context = await browser.newContext();
+  const harness=await createActiveSubscriptionPage(browser,{baseUrl,username:'perfuser',jwtSecret});
+  const context=harness.context;
   try {
-    const token = jwt.sign({ u: 'perfuser' }, jwtSecret, { expiresIn: '1h' });
-    await context.addCookies([{ name: 'eb_token', value: token, url: baseUrl }]);
-    const page = await context.newPage();
+    const page=harness.page;
     await page.route('**/api/v1/ai/evaluate-writing', async (route) => {
       await new Promise((resolve) => setTimeout(resolve, 1_000));
       await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'AI_UNAVAILABLE', message: 'stub' } }) });
@@ -294,9 +293,6 @@ async function run() {
   try {
     const executablePath = await chromeExecutable();
     browser = await chromium.launch({ headless: true, executablePath });
-    const context = await browser.newContext();
-    await context.addInitScript(COLLECTOR);
-    const page = await context.newPage();
 
     temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-perf-'));
     const port = await findAvailablePort();
@@ -335,21 +331,23 @@ async function run() {
     child.stderr.on('data', (chunk) => output.push(chunk.toString()));
     await waitForReady(baseUrl, child, output);
 
+    const harness=await createActiveSubscriptionPage(browser,{baseUrl,username:'perfuser',jwtSecret});
+    const context=harness.context;
+    const page=harness.page;
+    await page.addInitScript(COLLECTOR);
+
     // Первым делом — вес первой загрузки, на чистом контексте, пока ни один экран не открывали.
     const { files: screenFiles, built } = await servedScreenFiles();
     const firstLoad = await measureFirstLoad(browser, baseUrl);
     const screensAtStart = [...LAZY_SCREENS, ...SHELL_SCREENS]
       .filter((screen) => firstLoad.requestedScripts.has(screenFiles.get(screen)));
 
-    // Waiting for the session probe rather than for networkidle: the page pulls fonts from an
-    // external host, and an early click would be undone when the probe returns to the login screen.
-    const sessionProbe = page.waitForResponse((response) => response.url().endsWith('/api/v1/me'), { timeout: 15_000 })
-      .catch(() => null);
     await page.goto(baseUrl, { waitUntil: 'load' });
-    await sessionProbe;
-    await page.waitForTimeout(200);
-    await page.getByRole('button', { name: 'Попробовать демо' }).click();
     await page.locator('#scr1.on').waitFor({ state: 'visible', timeout: 15_000 });
+    // LCP collection ends on the first user input. Wait until Chromium has delivered the
+    // initial paint entry before the scripted screen walk starts, otherwise a fast click can
+    // close the reporting window while the observer callback is still queued.
+    await page.waitForFunction(() => window.__vitals.lcp > 0, null, { timeout: 5_000 });
 
     // Walk the screens a student opens first, so layout shifts and slow handlers show up.
     // The module tiles are cards made operable by the shared helper, hence role and label.
@@ -385,9 +383,8 @@ async function run() {
 
     console.log(`performance: взаимодействия по убыванию, мс: ${vitals.interactions.map((value) => value.toFixed(0)).join(', ')}`);
 
-    // Section 19 also requires the loading state to appear within 200 ms of the action. Demo mode
-    // answers locally and never shows it, so this is measured on a real session whose AI call is
-    // deliberately slow — exactly the case the requirement is about.
+    // Section 19 also requires the loading state to appear within 200 ms of the action. This is
+    // measured on a server-confirmed active session whose AI call is deliberately slow.
     const measuredInteraction = await measureAiLoadingState(browser, baseUrl, jwtSecret);
     report('индикатор проверки ИИ', measuredInteraction.loadingDelayMs, 200, 'ms');
     report('отрисовка персонального плана', measuredInteraction.adaptiveOverviewMs,

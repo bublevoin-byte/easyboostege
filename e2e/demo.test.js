@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import jwt from 'jsonwebtoken';
 import { chromium, devices, firefox, webkit } from 'playwright';
 import { WebSocketServer } from 'ws';
+import { createActiveSubscriptionPage } from './browser-server-harness.js';
 
 const projectDirectory = fileURLToPath(new URL('..', import.meta.url));
 const serverPath = fileURLToPath(new URL('../server.js', import.meta.url));
@@ -252,72 +253,91 @@ async function runE2E() {
     await waitForReady(baseUrl, child, output);
     await page.goto(baseUrl, { waitUntil: 'networkidle' });
     console.log('e2e: login screen loaded');
-
-    await assert.doesNotReject(() => page.getByRole('button', { name: 'Попробовать демо' }).click());
-    const homeScreen = page.locator('#scr1.on');
-    await homeScreen.waitFor({ state: 'visible', timeout: 5_000 });
-    await homeScreen.getByRole('button', { name: /Продолжить занятие/u }).press('Enter');
-    const learnSheet = page.locator('#learnSheet.open');
-    await learnSheet.waitFor({ state: 'visible', timeout: 5_000 });
-    assert.equal(await learnSheet.getByRole('button', { name: /Достижения/u }).count(), 0);
-    await learnSheet.getByRole('button', { name: /Пробный ЕГЭ/u }).press('Enter');
-    const examScreen = page.locator('#scr16.on');
-    await examScreen.waitFor({ state: 'visible', timeout: 5_000 });
-    assert.match(await examScreen.innerText(), /в разработке/iu);
-    assert.doesNotMatch(await examScreen.innerText(), /1:42:30|14\s*\/\s*40|отвечено|далее ·|сейчас ·|завершено ·/iu);
-    await examScreen.getByRole('button', { name: 'Грамматика · задания 19–24' }).press('Enter');
-    await page.locator('#scr3.on').waitFor({ state: 'visible', timeout: 5_000 });
-    await page.getByText('Задания 19–24', { exact: true }).waitFor({ state: 'visible', timeout: 5_000 });
-
-    await page.evaluate(() => window.tab('scr10'));
-    const progressScreen = page.locator('#scr10.on');
-    await progressScreen.waitFor({ state: 'visible', timeout: 5_000 });
-    const progressText = await progressScreen.innerText();
-    assert.match(progressText, /Недостаточно данных/u);
-    assert.doesNotMatch(progressText, /Баллы по месяцам|\+18|ОБЩИЙ УРОВЕНЬ|\bA2\b|\bB1\b|\bB2\b/u);
-    console.log('e2e: unfinished product surfaces stay visible without invented progress');
-
-    await page.evaluate(() => window.tab('scr1'));
-    const wordsCard = page.getByRole('button', { name: 'Слова', exact: true });
-    await wordsCard.waitFor({ state: 'visible' });
-    assert.equal(await wordsCard.getAttribute('tabindex'), '0');
-    await wordsCard.press('Enter');
-    console.log('e2e: words module opened by keyboard');
-
-    await page.locator('#scr2.on').waitFor({ state: 'visible', timeout: 5_000 });
-    await page.getByRole('button', { name: /^Начать ·/u }).click();
-    await page.getByRole('heading', { name: 'Познакомься со словом' }).waitFor();
-    await page.getByRole('button', { name: 'Начать вспоминать' }).click();
-    await page.getByRole('heading', { name: 'Выбери значение' }).waitFor();
-    const options = page.locator('#w_opts .vocab-choice');
-    const optionCount = await options.count();
-    console.log(`e2e: ${optionCount} answer options found`);
-    assert.ok(optionCount >= 4);
-    const promptBefore = await page.locator('#w_card').innerText();
-    console.log('e2e: prompt captured');
-    await options.nth(0).click({ timeout: 5_000 });
-    await page.waitForFunction((previous) => document.querySelector('#w_card')?.innerText !== previous, promptBefore, { timeout: 5_000 });
-    console.log('e2e: word task advanced');
-
-    const pwa = await page.evaluate(async (origin) => {
-      const manifest = document.querySelector('link[rel="manifest"]')?.getAttribute('href');
-      const registration = await navigator.serviceWorker.getRegistration();
-      return { manifest, scope: registration?.scope || null, expectedScope: `${origin}/` };
-    }, baseUrl);
-    assert.equal(pwa.manifest, '/manifest.json');
-    assert.equal(pwa.scope, pwa.expectedScope);
-
+    await page.locator('#scr5.on[data-access-state="no-session"]').waitFor({ state: 'visible', timeout: 5_000 });
+    assert.equal(await page.getByRole('button', { name: 'Попробовать демо' }).count(), 0);
+    assert.equal(await page.locator('#scr1.on').count(), 0);
+    console.log('e2e: no session stays outside the learning shell');
     await context.close();
 
-    const authenticatedContext = await browser.newContext(contextOptions({ serviceWorkers: 'block' }));
-    await authenticatedContext.addCookies([{
-      name: 'eb_token',
-      value: jwt.sign({ u: 'e2euser' }, jwtSecret, { expiresIn: '1h' }),
-      url: baseUrl,
-      httpOnly: true,
-      sameSite: 'Lax',
-    }]);
-    const authenticatedPage = await authenticatedContext.newPage();
+    const unknownContext=await browser.newContext(contextOptions({serviceWorkers:'block'}));
+    await unknownContext.route('**/api/v1/me',route=>route.abort('internetdisconnected'));
+    const unknownPage=await unknownContext.newPage();
+    await unknownPage.goto(baseUrl,{waitUntil:'networkidle'});
+    const unknownGate=unknownPage.locator('#access_gate[data-state="network-unknown"]');
+    await unknownGate.waitFor({state:'visible',timeout:5_000});
+    assert.match(await unknownGate.innerText(),/Не удалось проверить доступ/u);
+    assert.equal(await unknownPage.locator('#scr1.on').count(),0);
+    console.log('e2e: unknown network state is not presented as an inactive subscription');
+    await unknownContext.close();
+
+    // The initial cookie refresh and a newer identity transition must be ordered. Otherwise a
+    // delayed /me response can restore the old cookie after logout and reopen the shell.
+    const raceHarness=await createActiveSubscriptionPage(browser,{
+      baseUrl,username:'e2euser',jwtSecret,contextOptions:contextOptions({serviceWorkers:'block'}),
+    });
+    const raceContext=raceHarness.context;
+    const racePage=raceHarness.page;
+    let releaseInitialSession;
+    let initialSessionReached;
+    const initialSessionReady=new Promise(resolve=>{initialSessionReached=resolve});
+    const releaseInitialSessionResponse=new Promise(resolve=>{releaseInitialSession=resolve});
+    let delayedInitialSession=true;
+    await racePage.route('**/api/v1/me',async route=>{
+      if(!delayedInitialSession){await route.continue();return}
+      delayedInitialSession=false;
+      const response=await route.fetch();initialSessionReached();await releaseInitialSessionResponse;
+      await route.fulfill({response});
+    });
+    let logoutRequests=0;
+    racePage.on('request',request=>{if(request.url().endsWith('/api/v1/logout'))logoutRequests++});
+    await racePage.goto(baseUrl,{waitUntil:'load'});
+    await initialSessionReady;
+    const logoutFinished=racePage.evaluate(()=>window.logout()).catch(()=>null);
+    await racePage.waitForTimeout(150);
+    assert.equal(logoutRequests,0,'logout waits for the initial session refresh instead of racing it');
+    releaseInitialSession();
+    await racePage.waitForRequest(request=>request.url().endsWith('/api/v1/logout'),{timeout:5_000});
+    await logoutFinished;
+    await racePage.locator('#scr5.on[data-access-state="no-session"]').waitFor({state:'visible',timeout:5_000});
+    assert.equal(await racePage.locator('#scr1.on').count(),0);
+    console.log('e2e: auth transitions are serialized behind initial session restore');
+    await raceContext.close();
+
+    const profileRaceHarness=await createActiveSubscriptionPage(browser,{
+      baseUrl,username:'e2euser',jwtSecret,contextOptions:contextOptions({serviceWorkers:'block'}),
+    });
+    const profileRaceContext=profileRaceHarness.context;
+    const profileRacePage=profileRaceHarness.page;
+    await profileRacePage.goto(baseUrl,{waitUntil:'networkidle'});
+    await profileRacePage.locator('#scr1.on').waitFor({state:'visible',timeout:5_000});
+    let releaseProfileRefresh;
+    let profileRefreshReached;
+    const profileRefreshReady=new Promise(resolve=>{profileRefreshReached=resolve});
+    const releaseProfileRefreshResponse=new Promise(resolve=>{releaseProfileRefresh=resolve});
+    await profileRacePage.route('**/api/v1/me',async route=>{
+      const response=await route.fetch();profileRefreshReached();await releaseProfileRefreshResponse;
+      await route.fulfill({response});
+    });
+    let profileLogoutRequests=0;
+    profileRacePage.on('request',request=>{if(request.url().endsWith('/api/v1/logout'))profileLogoutRequests++});
+    const profileRefreshFinished=profileRacePage.evaluate(()=>window.ebMe()).catch(()=>null);
+    await profileRefreshReady;
+    const profileLogoutFinished=profileRacePage.evaluate(()=>window.logout()).catch(()=>null);
+    await profileRacePage.waitForTimeout(150);
+    assert.equal(profileLogoutRequests,0,'logout waits for an in-flight profile session refresh');
+    releaseProfileRefresh();
+    await profileRacePage.waitForRequest(request=>request.url().endsWith('/api/v1/logout'),{timeout:5_000});
+    await Promise.all([profileRefreshFinished,profileLogoutFinished]);
+    await profileRacePage.locator('#scr5.on[data-access-state="no-session"]').waitFor({state:'visible',timeout:5_000});
+    assert.equal(await profileRacePage.locator('#scr1.on').count(),0);
+    console.log('e2e: profile session refresh is serialized before logout');
+    await profileRaceContext.close();
+
+    const authenticatedHarness=await createActiveSubscriptionPage(browser,{
+      baseUrl,username:'e2euser',jwtSecret,contextOptions:contextOptions({serviceWorkers:'block'}),
+    });
+    const authenticatedContext=authenticatedHarness.context;
+    const authenticatedPage=authenticatedHarness.page;
     const evaluatedWritingTasks = [];
     await authenticatedPage.route('**/api/v1/ai/evaluate-writing', async (route) => {
       const request = route.request();
@@ -378,7 +398,8 @@ async function runE2E() {
     assert.equal(persisted.words.known, 1);
     console.log('e2e: progress persisted after reload');
 
-    // Section 6.1: built-in tasks and saved progress must survive a start without network.
+    // A local snapshot may support an already-open active session, but it is never permission to
+    // start the learning shell when the server cannot confirm access.
     const snapshot = await authenticatedPage.evaluate(() => {
       const user = localStorage.getItem('eb_current');
       const state = window.EasyBoostStore.loadLocal(user);
@@ -389,15 +410,19 @@ async function runE2E() {
       window.EasyBoostStore.saveLocal(user, state);
       return window.EasyBoostStore.loadLocal(user).learned;
     });
-    assert.equal(snapshot, 42, 'the running app keeps a local snapshot for offline starts');
+    assert.equal(snapshot, 42, 'the running app keeps a local snapshot for offline continuity');
     await authenticatedContext.setOffline(true);
     await authenticatedPage.evaluate(() => window.startApp());
-    await authenticatedPage.locator('#scr1.on').waitFor({ state: 'visible', timeout: 5_000 });
-    assert.equal(await authenticatedPage.locator('#m_words').textContent(), '63');
-    assert.equal(await authenticatedPage.locator('#m_read').textContent(), '55');
-    assert.match(await authenticatedPage.locator('#h_streak').textContent(), /7 дней подряд/u);
-    console.log('e2e: saved progress readable without network');
+    await authenticatedPage.locator('#access_gate[data-state="network-unknown"]').waitFor({ state: 'visible', timeout: 5_000 });
+    assert.equal(await authenticatedPage.locator('#scr1.on').count(), 0);
+    assert.equal(await authenticatedPage.evaluate(() => window.EasyBoostStore.loadLocal(localStorage.getItem('eb_current')).learned), 42);
+    console.log('e2e: saved progress is not treated as offline access permission');
 
+    await authenticatedContext.setOffline(false);
+    await authenticatedPage.evaluate(() => window.pwCheck());
+    await authenticatedPage.locator('#scr1.on').waitFor({ state: 'visible', timeout: 5_000 });
+
+    await authenticatedContext.setOffline(true);
     await authenticatedPage.getByRole('button', { name: 'Слова', exact: true }).press('Enter');
     await authenticatedPage.locator('#scr2.on').waitFor({ state: 'visible', timeout: 5_000 });
     await authenticatedPage.getByRole('button', { name: /^Начать ·/u }).click();
@@ -779,7 +804,8 @@ async function runE2E() {
       authenticatedPage.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15_000 }),
       logoutButton.click({ timeout: 5_000 }),
     ]);
-    await authenticatedPage.getByRole('button', { name: 'Попробовать демо' }).waitFor({ state: 'visible', timeout: 5_000 });
+    await authenticatedPage.locator('#scr5.on[data-access-state="no-session"]').waitFor({ state: 'visible', timeout: 5_000 });
+    assert.equal(await authenticatedPage.getByRole('button', { name: 'Попробовать демо' }).count(), 0);
     assert.equal((await authenticatedContext.cookies()).some((cookie) => cookie.name === 'eb_token'), false);
     await authenticatedContext.close();
 
@@ -793,11 +819,16 @@ async function runE2E() {
     }]);
     const expiredPage = await expiredContext.newPage();
     await expiredPage.goto(baseUrl, { waitUntil: 'networkidle' });
-    const paywall = expiredPage.locator('#pw_ov');
+    const paywall = expiredPage.locator('#access_gate[data-state="inactive"]');
     await paywall.waitFor({ state: 'visible', timeout: 5_000 });
-    assert.match(await paywall.innerText(), /Чтобы заниматься, оформи доступ/);
-    const botLink = paywall.getByRole('link', { name: 'Открыть Telegram-бот' });
-    assert.match(await botLink.getAttribute('href'), /^https:\/\/t\.me\//);
+    assert.equal(await expiredPage.locator('#scr5').evaluate(element=>element.inert),true);
+    assert.equal(await expiredPage.evaluate(()=>document.activeElement?.id),'access_gate_retry');
+    await expiredPage.keyboard.press('Tab');
+    assert.equal(await expiredPage.evaluate(()=>document.activeElement?.closest('#access_gate')?.id),'access_gate');
+    assert.match(await paywall.innerText(), /Нужен активный доступ/);
+    assert.equal(await expiredPage.locator('#scr1.on').count(), 0);
+    await paywall.getByRole('button', { name: 'Повторить проверку' }).waitFor({ state: 'visible' });
+    assert.equal(await paywall.getByRole('link', { name: 'Открыть Telegram-бот' }).count(), 0);
     console.log('e2e: expired subscription shows recovery path');
     await expiredContext.close();
 
@@ -811,10 +842,12 @@ async function runE2E() {
       { width: 1440, height: 900 },
     ];
     for (const viewport of viewportMatrix) {
-      const viewportContext = await browser.newContext(contextOptions({ viewport }));
-      const viewportPage = await viewportContext.newPage();
+      const viewportHarness=await createActiveSubscriptionPage(browser,{
+        baseUrl,username:'e2euser',jwtSecret,contextOptions:contextOptions({viewport}),
+      });
+      const viewportContext=viewportHarness.context;
+      const viewportPage=viewportHarness.page;
       await viewportPage.goto(baseUrl, { waitUntil: 'networkidle' });
-      await viewportPage.getByRole('button', { name: 'Попробовать демо' }).click();
       await viewportPage.locator('#scr1.on').waitFor({ state: 'visible', timeout: 5_000 });
       const layout = await viewportPage.evaluate(() => {
         const frame = document.querySelector('#frame').getBoundingClientRect();

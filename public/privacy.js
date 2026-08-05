@@ -1,9 +1,9 @@
 /*
  * Режим работы и точки подключения к профилю раньше искались в глобальной области.
  * В модуле их не видно, а `typeof SRV === 'undefined'` тихо отключил бы согласия целиком,
- * поэтому зависимости приходят импортом — импортированное имя остаётся живым и видит startDemo().
+ * поэтому зависимости приходят импортом и остаются живыми при смене серверной сессии.
  */
-import {DEMO_MODE, SRV, registerProfileHook, registerStartHook} from './app.js';
+import {SRV, registerProfileHook, registerStartHook} from './app.js';
 import {clearAdaptiveOverviewCache} from './adaptive-overview-cache.js';
 import {clearAdaptiveRuntime} from './adaptive-session-runtime.js';
 
@@ -67,7 +67,7 @@ import {clearAdaptiveRuntime} from './adaptive-session-runtime.js';
     if (label) { label.textContent = current?.text_processing ? 'согласие ✓' : 'выкл'; label.style.color = current?.text_processing ? '#1F8A50' : '#8A8F98'; }
   }
   async function loadPrivacy(showIfNew) {
-    if (!SRV || DEMO_MODE) return;
+    if (!SRV) return;
     try { current = await api.get('/api/v1/privacy/consent'); updateProfile(); if (showIfNew && current.policy_version !== current.current_policy_version) openPrivacy(); } catch (_) {}
   }
   function addProfileControls() {

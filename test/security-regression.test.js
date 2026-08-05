@@ -13,7 +13,7 @@ const frontendAuthPath = new URL('../public/auth.js', import.meta.url);
  * Чанки экранов идут следом: в точку входа они не подключены, но это тот же код приложения,
  * и требования к нему не меняются от того, что он приезжает позже.
  */
-const frontendScriptNames = ['main.js', 'globals.js', 'auth.js', 'sync.js', 'store.js', 'components.js', 'router.js', 'learning.js', 'vocabulary-domain.js', 'learning-activity-contract.js', 'learning-activity-recorder.js', 'listening-catalog-contract.js', 'listening-pilot-v1.js', 'listening-audio-contract.js', 'modules/words.js', 'modules/grammar.js', 'modules/reading.js', 'modules/listening.js', 'modules/writing.js', 'modules/speaking.js', 'modules/exam.js', 'modules/progress.js', 'modules/profile.js', 'app.js', 'voice-tutor.js', 'realtime-transport.js', 'screens.js', 'screens/words.js', 'screens/grammar.js', 'screens/reading.js', 'screens/listening.js', 'screens/writing.js', 'screens/speaking.js', 'screens/progress.js', 'screens/profile.js', 'privacy.js', 'tts.js', 'pwa.js'];
+const frontendScriptNames = ['main.js', 'globals.js', 'auth.js', 'access.js', 'sync.js', 'store.js', 'components.js', 'router.js', 'learning.js', 'vocabulary-domain.js', 'learning-activity-contract.js', 'learning-activity-recorder.js', 'listening-catalog-contract.js', 'listening-pilot-v1.js', 'listening-audio-contract.js', 'modules/words.js', 'modules/grammar.js', 'modules/reading.js', 'modules/listening.js', 'modules/writing.js', 'modules/speaking.js', 'modules/exam.js', 'modules/progress.js', 'modules/profile.js', 'app.js', 'voice-tutor.js', 'realtime-transport.js', 'screens.js', 'screens/words.js', 'screens/grammar.js', 'screens/reading.js', 'screens/listening.js', 'screens/writing.js', 'screens/speaking.js', 'screens/progress.js', 'screens/profile.js', 'privacy.js', 'tts.js', 'pwa.js'];
 const frontendScriptPaths = frontendScriptNames.map((name) => new URL(`../public/${name}`, import.meta.url));
 const serverPath = new URL('../server.js', import.meta.url);
 const usersRoutePath = new URL('../routes/users.js', import.meta.url);
@@ -399,11 +399,17 @@ test('privacy UI separates text and voice consent and explains external processi
   assert.match(retention, /отдельн.*человеческ.*размет/u);
 });
 
-test('demo mode is isolated from persistence and paid AI calls', async () => {
-  const { html, script } = await readFrontend();
-  assert.match(html, /id="demo_btn"[^>]*onclick="startDemo\(\)"/u);
-  assert.match(script, /function save\(options=\{\}\)\{\s*if\(DEMO_MODE\)return;/u);
-  assert.match(script, /function generateAiContent\(operation,payload\)\{if\(DEMO_MODE\)return Promise\.reject/u);
-  assert.match(script, /if\(DEMO_MODE\)\{renderReview\(localReview/u);
-  assert.match(script, /Демо · войти для сохранения/u);
+test('frontend has no learning demo entry point or demo-only persistence and AI branches', async () => {
+  const { combined } = await readFrontend();
+  assert.doesNotMatch(combined, /\bDEMO_MODE\b/u);
+  assert.doesNotMatch(combined, /\bstartDemo\b/u);
+  assert.doesNotMatch(combined, /\bdemo_btn\b/u);
+  assert.doesNotMatch(combined, /\bdemo_banner\b/u);
+  assert.doesNotMatch(combined, /Попробовать демо|Демо · войти|демо-режим/iu);
+});
+
+test('public startApp cannot accept a caller-supplied access decision', async () => {
+  const app = await fs.readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /async function startApp\(\)\{\s*return runAuthTransition\(async function\(\)\{\s*const access=await checkLearningAccess\(\)/u);
+  assert.doesNotMatch(app, /function startApp\([^)]*(?:session|access|profile)/iu);
 });
