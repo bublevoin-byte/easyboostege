@@ -84,11 +84,18 @@ test('listening completion taxonomy maps every supported format to its exact ski
 
 test('listening exam emits one gist and one detail slice whose durations sum to the real session', () => {
   const listening = createListeningModule();
-  const slices = listening.examEvidenceSlices({ matching: 3, trueFalse: 4, interview: 2 }, 1_001);
+  const slices = listening.examEvidenceSlices({
+    matching: 5,
+    matchingMax: 6,
+    trueFalse: 4,
+    trueFalseMax: 7,
+    interview: 5,
+    interviewMax: 7,
+  }, 1_001);
 
   assert.deepEqual(JSON.parse(JSON.stringify(slices)), [
-    { activityId: 'listening_matching', score: 3, maxScore: 4, durationMs: 308 },
-    { activityId: 'listening_detail', score: 6, maxScore: 9, durationMs: 693 },
+    { activityId: 'listening_matching', score: 5, maxScore: 6, durationMs: 300 },
+    { activityId: 'listening_detail', score: 9, maxScore: 14, durationMs: 701 },
   ]);
   assert.equal(slices.reduce((sum, slice) => sum + slice.durationMs, 0), 1_001);
 });

@@ -1193,3 +1193,20 @@ Focused проверки 69/69; полный набор 751 (736 pass, 15 шта
 frontend build, progress (дважды), reading/listening, vocabulary и adaptive Chromium E2E, оба secret scan
 и staged diff-check прошли. Финальные независимые Standards и Spec re-review завершились с нулём P0–P3;
 платных вызовов, push, deploy и изменения rollout flags не было.
+# Прогресс — «Аудирование 2.0», пилот из 60 записей
+
+Спека: [.scratch/listening-2-pilot/spec.md](.scratch/listening-2-pilot/spec.md)
+Тикеты: [.scratch/listening-2-pilot/issues/](.scratch/listening-2-pilot/issues/)
+Ветка: `feature/adaptive-learning-plan`
+
+| № | Что даёт | Статус |
+|---|---|---|
+| 01 | 20 экзаменационных комплектов сопоставления и контракт каталога | done |
+| 02 | 20 полноразмерных True/False/Not stated | ready-for-agent |
+| 03 | 20 интервью заданий 3–9 и полный каталог из 60 | ready-for-agent |
+| 04 | Статические MP3 и безопасный dry-run/генератор xAI TTS | ready-for-agent |
+| 05 | Умная ротация, связь с индивидуальным планом и выпускной контур | ready-for-agent |
+
+Фактический платный запуск xAI TTS, push и deploy остаются отдельными подтверждаемыми действиями.
+
+---

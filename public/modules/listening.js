@@ -40,11 +40,14 @@ import { learningActivityPool, learningActivitySource, listeningActivityId, spli
   function shuffleMatching(set, random = Math.random) {
     const order = permutation(set.st.length, random);
     return {
+      ...set,
       st: order.indexes.map((index) => set.st[index]),
       sp: set.sp.slice(),
       a: set.a.map((answer) => order.inverse[answer]),
       k: set.k.slice(),
-      evidenceSource: set.evidenceSource,
+      evidence: Array.isArray(set.evidence)
+        ? set.evidence.map((item) => ({ ...item, statementIndex: order.inverse[item.statementIndex] }))
+        : set.evidence,
     };
   }
 
@@ -66,16 +69,19 @@ import { learningActivityPool, learningActivitySource, listeningActivityId, spli
   }
 
   function examEvidenceSlices(scores, durationMs) {
+    const matchingMax = Math.max(1, Number(scores?.matchingMax) || 4);
+    const detailMax = Math.max(1,
+      (Number(scores?.trueFalseMax) || 5) + (Number(scores?.interviewMax) || 4));
     return splitLearningActivityDuration([
       {
         activityId: listeningActivityId('matching'),
         score: Number(scores?.matching) || 0,
-        maxScore: 4,
+        maxScore: matchingMax,
       },
       {
         activityId: listeningActivityId('detail'),
         score: (Number(scores?.trueFalse) || 0) + (Number(scores?.interview) || 0),
-        maxScore: 9,
+        maxScore: detailMax,
       },
     ], durationMs);
   }

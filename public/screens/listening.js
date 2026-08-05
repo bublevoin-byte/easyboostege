@@ -12,6 +12,7 @@ import {
   lSync,listeningModule,registerScreenGenerator,rWordsHtml,save,setTxt,toast,ui,wDeco,
 } from '../app.js';
 import {createLearningActivityEvidence,recordLearningActivityEvidence} from '../learning-activity-recorder.js';
+import {loadMatchingCatalog,matchingSetForLegacyScreen} from '../listening-catalog-contract.js';
 
 /* ===== LISTENING ===== */
 const LISTEN={dialog:"— Hi, can I get a coffee and a croissant, please?  — Sure, that's four pounds fifty. Anything else?  — No, that's all, thanks.",
@@ -100,6 +101,7 @@ const L_IN=[
  {q:'What problem did the blog cause?',o:['She lost her friends','Her marks got worse','She stopped sleeping'],a:1,ev:'…my marks went down a little last term…',e:'Оценки немного снизились — пришлось планировать время.'},
  {q:'What does Lena advise beginners?',o:['To buy a good camera','To copy popular bloggers','To be honest'],a:2,ev:'…honesty works better than expensive equipment.',e:'Главный совет — честность, а не дорогая техника.'}]}
 ];
+let L_MATCHING_CATALOG=[],L_MATCHING_CATALOG_LOAD=null;
 const L_VOICE_RESULT_SETS=[
   {id:'listening.exam.interview.alex',items:['listening.alex-swimming.reason','listening.alex-swimming.frequency','listening.alex-swimming.injury','listening.alex-swimming.first-plan']},
   {id:'listening.exam.interview.lena',items:['listening.lena-blog.started','listening.lena-blog.helpers','listening.lena-blog.problem','listening.lena-blog.advice']},
@@ -130,9 +132,18 @@ function lTranscript(lines,evs){
       var hl=(evs||[]).some(function(ev){return ev&&ln.t.indexOf(ev.replace(/^…/,'').replace(/…$/,'').replace(/\.$/,'').slice(0,25))>=0});
       return '<div style="margin-top:8px;font-weight:500;font-size:13px;line-height:1.6;color:#2B2B2B;'+(hl?'background:#FFF4DE;border-radius:8px;padding:5px 8px;':'')+'">'
         +'<b style="color:'+(ln.s?'#3E93A8':'#F2683F')+';">—</b> '+rWordsHtml(ln.t)+'</div>'}).join('')+'</div>'}
-function initListening(){if(!S)return;lSync();lHub()}
+function lLoadMatchingCatalog(){
+  if(L_MATCHING_CATALOG_LOAD)return L_MATCHING_CATALOG_LOAD;
+  L_MATCHING_CATALOG_LOAD=loadMatchingCatalog(function(){return import('../listening-pilot-v1.js')})
+    .then(lSetMatchingCatalog);
+  return L_MATCHING_CATALOG_LOAD}
+function lSetMatchingCatalog(sets){
+  L_MATCHING_CATALOG=sets.map(function(set){return set.st?set:matchingSetForLegacyScreen(set)});
+  return L_MATCHING_CATALOG}
+function initListening(){if(!S)return;lSync();lLoadMatchingCatalog().then(function(){lHub()})}
 function lHub(){var area=document.getElementById('l_area');if(!area)return;LM=null;LT=null;LI=null;lStop();
   var r=lSt();var GA=0;function ga(){return 'animation:win .34s '+((GA++)*0.06)+'s cubic-bezier(.25,.75,.35,1) both;'}
+  var examMax=lExamMaxScore();
   function acc(x){return x.tot?Math.round(x.ok/x.tot*100)+'%':'—'}
   function card(fn,title,sub,chip,color,bg){
     return '<button type="button" class="clayCard sq clk cardbtn" onclick="'+fn+'" style="'+ga()+'padding:16px 18px;margin-bottom:12px;cursor:pointer;">'
@@ -153,7 +164,7 @@ function lHub(){var area=document.getElementById('l_area');if(!area)return;LM=nu
     +'</g></svg>'
     +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'
     +'<div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:15.5px;color:#fff;">Экзамен · задания 1–9</div>'
-    +'<div style="font-weight:600;font-size:12px;color:rgba(255,255,255,.62);margin-top:2px;">'+(le.n?('лучший результат: '+le.best+' из 13'):'три задания подряд · запись дважды')+'</div></div>'
+    +'<div style="font-weight:600;font-size:12px;color:rgba(255,255,255,.62);margin-top:2px;">'+(le.n?('лучший результат: '+le.best+' из '+examMax):'три задания подряд · запись дважды')+'</div></div>'
     +'<span style="flex:none;background:linear-gradient(145deg,#FFC861,#F2683F);border-radius:14px;width:42px;height:42px;display:grid;place-items:center;box-shadow:0 6px 12px rgba(242,104,63,.4),inset 0 2px 3px rgba(255,255,255,.5);">'
     +'<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span></div></button>';
   area.innerHTML=exCard
@@ -165,18 +176,26 @@ function lHub(){var area=document.getElementById('l_area');if(!area)return;LM=nu
     +'<div style="font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.45;">Сначала прочитай вопросы, потом слушай — как на экзамене. Запись можно включить дважды</div></div>';
   setTxt('l_today','3 тренажёра');lGen()}
 function lShufM(set){return listeningModule.shuffleMatching(set)}
+function lSpeakerLabel(index){return String.fromCharCode(65+index)}
+function lMatchingPool(){
+  if(L_MATCHING_CATALOG.length)return listeningModule.pool(L_MATCHING_CATALOG,[]);
+  return lPool('m',L_M)}
+function lMatchingMax(set){return Math.max(1,Number(set&&set.maxScore)||((set&&set.a&&set.a.length)||1))}
+function lExamMaxScore(){
+  var m=lMatchingPool()[0],tf=lPool('tf',L_TF)[0],iq=lPool('iq',L_IN)[0];
+  return lMatchingMax(m)+(tf&&tf.st?tf.st.length:0)+(iq&&iq.qs?iq.qs.length:0)}
 /* ---- задание 1: соответствия ---- */
-function lMt(){S.lisIdxM=(S.lisIdxM||0);var pool=lPool('m',L_M);var set=lShufM(pool[S.lisIdxM%pool.length]);S.lisIdxM++;
-  LM={set:set,sel:[null,null,null,null],done:false,evidence:createLearningActivityEvidence({module:'listening',
+function lMt(){S.lisIdxM=(S.lisIdxM||0);var pool=lMatchingPool();var set=lShufM(pool[S.lisIdxM%pool.length]);S.lisIdxM++;
+  LM={set:set,sel:set.sp.map(function(){return null}),done:false,evidence:createLearningActivityEvidence({module:'listening',
     activityId:listeningModule.activityId('matching'),mode:'listening_matching',source:listeningModule.sourceOf(set)})};LPLAYS=0;lMtRender()}
-function lMtLines(){return LM.set.sp.map(function(sp,i){return {s:i%2,t:'Speaker '+'ABCD'[i]+'. '+sp.t}})}
+function lMtLines(){return LM.set.sp.map(function(sp,i){return {s:i%2,t:'Speaker '+lSpeakerLabel(i)+'. '+sp.t}})}
 function lMtRender(){var area=document.getElementById('l_area');var set=LM.set;
   var h='<div id="l_card" class="clayCard" style="position:relative;overflow:hidden;padding:16px 18px;margin-bottom:12px;">'+wDeco()
     +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#C2421B;background:#FFEDE4;padding:5px 10px;border-radius:20px;">ЗАДАНИЕ 1 · СООТВЕТСТВИЯ</span>'
-    +'<div style="font-weight:600;font-size:12px;color:#777163;margin-top:10px;">Прочитай утверждения, послушай четырёх говорящих и подбери соответствия. Одно утверждение лишнее.</div>'
+    +'<div style="font-weight:600;font-size:12px;color:#777163;margin-top:10px;">Прочитай утверждения, послушай шесть говорящих и подбери соответствия. Одно утверждение лишнее.</div>'
     +set.st.map(function(x,i){return '<div style="margin-top:8px;font-weight:700;font-size:13px;color:#2B2B2B;"><b style="color:#B54E2F;">'+(i+1)+'.</b> '+x+'</div>'}).join('')
     +lCtl('lPlay(lMtLines())')+'</div>';
-  'ABCD'.split('').forEach(function(L,si){
+  set.sp.forEach(function(_,si){var L=lSpeakerLabel(si);
     h+='<div class="clayCard" style="padding:12px 14px;margin-bottom:10px;">'
       +'<div style="display:flex;align-items:center;gap:8px;">'
       +'<span style="flex:none;font-weight:800;font-size:12px;color:#C2421B;width:82px;">Говорящий '+L+'</span>'
@@ -187,12 +206,12 @@ function lMtRender(){var area=document.getElementById('l_area');var set=LM.set;
   var all=LM.sel.every(function(x){return x!==null});
   h+='<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);'+(all?'':'opacity:.45;pointer-events:none;')+'" onclick="lMtCheck()">Проверить</button>'
     +'<button class="sq" style="'+WBTN+'color:#B54E2F;margin-top:10px;" onclick="lHub()">← К аудированию</button>';
-  area.innerHTML=h;lPlaysUi();setTxt('l_today',LM.sel.filter(function(x){return x!==null}).length+' / 4 выбрано')}
+  area.innerHTML=h;lPlaysUi();setTxt('l_today',LM.sel.filter(function(x){return x!==null}).length+' / '+set.sp.length+' выбрано')}
 function lMtPick(si,ti){if(LM.done)return;
   LM.sel=listeningModule.selectUnique(LM.sel,si,ti);
   lMtRender()}
 function lMtCheck(){if(LM.done)return;LM.done=true;lStop();var set=LM.set,r=lSt(),okn=0;
-  'ABCD'.split('').forEach(function(L,si){var ok=LM.sel[si]===set.a[si];if(ok)okn++;
+  set.sp.forEach(function(_,si){var L=lSpeakerLabel(si),ok=LM.sel[si]===set.a[si];if(ok)okn++;
     r.m.tot++;if(ok)r.m.ok++;
     var el=document.getElementById('lmt_res_'+si);
     if(el)el.innerHTML='<div style="margin-top:9px;padding:10px 12px;border-radius:12px;background:'+(ok?'#EAF7F0':'#FDEDEA')+';">'
@@ -200,13 +219,14 @@ function lMtCheck(){if(LM.done)return;LM.done=true;lStop();var set=LM.set,r=lSt(
       +'<div style="font-weight:600;font-size:12px;color:#4A453E;margin-top:4px;line-height:1.5;"><b>Ключ:</b> '+set.k[si]+'</div></div>';
     var row=document.getElementById('lmt_row_'+si);if(row)row.style.pointerEvents='none'});
   var used={};set.a.forEach(function(x){used[x]=1});
-  var extra=[0,1,2,3,4].find(function(i){return !used[i]});
-  r.done++;lSync();save();recordLearningActivityEvidence(LM.evidence,{score:okn,maxScore:4}).catch(function(){});
+  var extra=set.st.map(function(_,i){return i}).find(function(i){return !used[i]});
+  var maxScore=lMatchingMax(set);
+  r.done++;lSync();save();recordLearningActivityEvidence(LM.evidence,{score:okn,maxScore:maxScore}).catch(function(){});
   var area=document.getElementById('l_area');
   var d=document.createElement('div');
   d.innerHTML='<div class="clayCard" style="padding:16px 18px;margin-bottom:12px;text-align:center;animation:win .35s both;">'
-    +'<div style="font-size:36px;">'+(okn===4?'🏆':(okn>=2?'💪':'📚'))+'</div>'
-    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:19px;color:#2B2B2B;margin-top:6px;">'+okn+' из 4</div>'
+    +'<div style="font-size:36px;">'+(okn===maxScore?'🏆':(okn>=Math.ceil(maxScore/2)?'💪':'📚'))+'</div>'
+    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:19px;color:#2B2B2B;margin-top:6px;">'+okn+' из '+maxScore+'</div>'
     +'<div style="font-weight:600;font-size:12.5px;color:#777163;margin-top:4px;">Лишнее утверждение: '+(extra+1)+'. '+set.st[extra]+'</div>'
     +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);margin-top:12px;" onclick="lMt()">Ещё подход</button></div>'
     +lTranscript(lMtLines(),[]);
@@ -298,22 +318,22 @@ function lIqCheck(){if(LI.done)return;LI.done=true;lStop();var set=LI.set,r=lSt(
 /* ---- экзамен по аудированию: 1 + 2 + 3-9 ---- */
 let LE=null;
 function lExam(){var area=document.getElementById('l_area');if(!area)return;lStop();
-  var st=S.lisExam||{};
+  var st=S.lisExam||{},maxScore=lExamMaxScore();
   area.innerHTML='<div id="l_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;">'+wDeco()
     +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#B54E2F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">КАК НА ЕГЭ</span>'
     +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:19px;color:#2B2B2B;margin-top:12px;">Раздел «Аудирование» целиком</div>'
-    +'<div style="font-weight:600;font-size:13.5px;color:#4A453E;line-height:1.6;margin-top:8px;">Соответствия → верно/неверно/не сказано → интервью. Каждую запись можно включить только дважды, разбор — в конце. Максимум 13 баллов.</div>'
-    +(st.n?'<div style="margin-top:12px;font-weight:700;font-size:12.5px;color:#777163;">Попыток: '+st.n+' · последний: '+st.last+' из 13 · лучший: '+st.best+' из 13</div>':'')
+    +'<div style="font-weight:600;font-size:13.5px;color:#4A453E;line-height:1.6;margin-top:8px;">Соответствия → верно/неверно/не сказано → интервью. Каждую запись можно включить только дважды, разбор — в конце. Максимум '+maxScore+' баллов.</div>'
+    +(st.n?'<div style="margin-top:12px;font-weight:700;font-size:12.5px;color:#777163;">Попыток: '+st.n+' · последний: '+st.last+' из '+maxScore+' · лучший: '+st.best+' из '+maxScore+'</div>':'')
     +'</div>'
     +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
     +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="lExamStart()">Начать</button>'
     +'<button class="sq" style="'+WBTN+'color:#B54E2F;" onclick="lHub()">← К аудированию</button></div>';
   lAnim('win','.32s')}
 function lExamStart(){
-  var pm=lPool('m',L_M),pt=lPool('tf',L_TF),pi=lPool('iq',L_IN);
+  var pm=lMatchingPool(),pt=lPool('tf',L_TF),pi=lPool('iq',L_IN);
   S.leIdx=(S.leIdx||0);
   var startedAt=Date.now(),m=lShufM(pm[S.leIdx%pm.length]),tf=pt[S.leIdx%pt.length],iq=pi[S.leIdx%pi.length];
-  LE={m:m,tf:tf,iq:iq,stage:0,selM:[null,null,null,null],plays:[0,0,0],t0:startedAt,
+  LE={m:m,tf:tf,iq:iq,stage:0,selM:m.a.map(function(){return null}),plays:[0,0,0],t0:startedAt,
       evidence:{gist:createLearningActivityEvidence({module:'listening',activityId:listeningModule.activityId('matching'),
         mode:'listening_exam',source:listeningModule.sourceOf(m),startedAt:startedAt}),
         detail:createLearningActivityEvidence({module:'listening',activityId:listeningModule.activityId('detail'),
@@ -326,7 +346,7 @@ function lExamStart(){
 function lExamPlay(){if(!LE)return;
   if(!listeningModule.registerPlay(LE.plays,LE.stage,2)){try{toast('На ЕГЭ запись звучит только дважды')}catch(e){}return}
   var evidence=LE.stage===0?LE.evidence.gist:LE.evidence.detail;if(LSLOW)evidence.helpUsed=true;
-  var lines=LE.stage===0?LE.m.sp.map(function(sp,i){return{s:i%2,t:'Speaker '+'ABCD'[i]+'. '+sp.t}}):(LE.stage===1?LE.tf.d:LE.iq.d);
+  var lines=LE.stage===0?LE.m.sp.map(function(sp,i){return{s:i%2,t:'Speaker '+lSpeakerLabel(i)+'. '+sp.t}}):(LE.stage===1?LE.tf.d:LE.iq.d);
   lPlayRaw(lines);
   var el=document.getElementById('lex_plays');
   if(el){el.textContent='прослушиваний: '+LE.plays[LE.stage]+' из 2';
@@ -345,7 +365,7 @@ function lExamRender(){var area=document.getElementById('l_area');if(!area||!LE)
       +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#C2421B;background:#FFEDE4;padding:5px 10px;border-radius:20px;">ЭКЗАМЕН · 1 ИЗ 3 · СООТВЕТСТВИЯ</span>'
       +set.st.map(function(x,i){return '<div style="margin-top:8px;font-weight:700;font-size:13px;color:#2B2B2B;"><b style="color:#B54E2F;">'+(i+1)+'.</b> '+x+'</div>'}).join('')
       +lExamCtl()+'</div>';
-    'ABCD'.split('').forEach(function(L,si){
+    set.sp.forEach(function(_,si){var L=lSpeakerLabel(si);
       h+='<div class="clayCard" style="padding:12px 14px;margin-bottom:10px;display:flex;align-items:center;gap:8px;">'
         +'<span style="flex:none;font-weight:800;font-size:12px;color:#C2421B;width:82px;">Говорящий '+L+'</span>'
         +'<div style="flex:1;display:flex;gap:7px;">'
@@ -380,28 +400,30 @@ function lExamRender(){var area=document.getElementById('l_area');if(!area||!LE)
 function lExamDedup(field,idx,val){LE[field]=listeningModule.selectUnique(LE[field],idx,val)}
 function lExamFinish(){if(!LE)return;clearInterval(LE.iv);lStop();
   var endedAt=Date.now(),sec=examModule.elapsedSeconds(LE.t0,endedAt),r=lSt(),LBL=['Верно','Неверно','Не сказано'];
+  var matchingMax=lMatchingMax(LE.m),trueFalseMax=LE.tf.st.length,interviewMax=LE.iq.qs.length;
   var voiceResult=prepareVoiceTutorContextResult({module:'listening',set:LE.iq,selections:LE.selI});
   var okM=0;LE.m.a.forEach(function(a,si){r.m.tot++;if(LE.selM[si]===a){okM++;r.m.ok++}});
   var okT=0;LE.tf.st.forEach(function(x,i){r.tf.tot++;if(LE.selT[i]===x.a){okT++;r.tf.ok++}});
   var okI=0;LE.iq.qs.forEach(function(q,i){r.iq.tot++;if(LE.selI[i]===q.a){okI++;r.iq.ok++}});
   var total=okM+okT+okI;
-  listeningModule.examEvidenceSlices({matching:okM,trueFalse:okT,interview:okI},Math.max(0,endedAt-LE.t0))
+  listeningModule.examEvidenceSlices({matching:okM,matchingMax:matchingMax,trueFalse:okT,
+    trueFalseMax:trueFalseMax,interview:okI,interviewMax:interviewMax},Math.max(0,endedAt-LE.t0))
     .forEach(function(slice){var evidence=slice.activityId===listeningModule.activityId('matching')?LE.evidence.gist:LE.evidence.detail;
       recordLearningActivityEvidence(evidence,{score:slice.score,maxScore:slice.maxScore,durationMs:slice.durationMs}).catch(function(){})});
   S.lisExam=examModule.record(S.lisExam,total);
   var rows='';
   LE.m.a.forEach(function(a,si){if(LE.selM[si]!==a)
-    rows+='<div style="padding:9px 2px;border-bottom:1px solid #F4EFE9;"><div style="font-weight:800;font-size:12.5px;color:#A83226;">Говорящий '+'ABCD'[si]+' → '+(a+1)+'. '+LE.m.st[a]+'</div><div style="font-weight:600;font-size:12px;color:#777163;margin-top:3px;">'+LE.m.k[si]+'</div></div>'});
+    rows+='<div style="padding:9px 2px;border-bottom:1px solid #F4EFE9;"><div style="font-weight:800;font-size:12.5px;color:#A83226;">Говорящий '+lSpeakerLabel(si)+' → '+(a+1)+'. '+LE.m.st[a]+'</div><div style="font-weight:600;font-size:12px;color:#777163;margin-top:3px;">'+LE.m.k[si]+'</div></div>'});
   LE.tf.st.forEach(function(x,i){if(LE.selT[i]!==x.a)
     rows+='<div style="padding:9px 2px;border-bottom:1px solid #F4EFE9;"><div style="font-weight:800;font-size:12.5px;color:#A83226;">Утверждение '+(i+1)+' → '+LBL[x.a]+'</div><div style="font-weight:600;font-size:12px;color:#777163;margin-top:3px;">«'+x.ev+'» — '+x.e+'</div></div>'});
   LE.iq.qs.forEach(function(q,i){if(LE.selI[i]!==q.a){var voiceSlot='';
     if(voiceResult)voiceSlot=voiceResult.resultSlot(q,i);
     rows+='<div style="padding:9px 2px;border-bottom:1px solid #F4EFE9;"><div style="font-weight:800;font-size:12.5px;color:#A83226;">Вопрос '+(i+1)+' → '+q.o[q.a]+'</div><div style="font-weight:600;font-size:12px;color:#777163;margin-top:3px;">«'+q.ev+'»</div>'+voiceSlot+'</div>'}});
-  var tr1=lTranscript(LE.m.sp.map(function(sp,i){return{s:i%2,t:'Speaker '+'ABCD'[i]+'. '+sp.t}}),[]);
+  var tr1=lTranscript(LE.m.sp.map(function(sp,i){return{s:i%2,t:'Speaker '+lSpeakerLabel(i)+'. '+sp.t}}),[]);
   var tr2=lTranscript(LE.tf.d,LE.tf.st.map(function(x){return x.ev}));
   var tr3=lTranscript(LE.iq.d,LE.iq.qs.map(function(q){return q.ev}));
   LE=null;r.done++;lSync();save();
-  var parts=[['Соответствия',okM,4],['Верно/неверно',okT,5],['Интервью',okI,4]];
+  var parts=[['Соответствия',okM,matchingMax],['Верно/неверно',okT,trueFalseMax],['Интервью',okI,interviewMax]];
   var max=examModule.maxScore(parts),weak=examModule.weakestSection(parts);
   var area=document.getElementById('l_area');
   area.innerHTML='<div id="l_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;">'+wDeco()
@@ -425,7 +447,7 @@ async function lGen(){
   if(L_GEN)return;if(typeof SRV==='undefined'||!SRV||!TOKEN)return;
   S.lisAi=S.lisAi||{m:[],tf:[],iq:[]};
   var kind=null;
-  if(lPool('m',L_M).length<5)kind='m';
+  if(lMatchingPool().length<5)kind='m';
   else if(lPool('tf',L_TF).length<5)kind='tf';
   else if(lPool('iq',L_IN).length<5)kind='iq';
   if(!kind)return;L_GEN=true;
@@ -455,7 +477,7 @@ async function lGen(){
     if(item){S.lisAi[kind]=(S.lisAi[kind]||[]).concat([item]);save()}
   }catch(e){}
   L_GEN=false;
-  try{var need=lPool('m',L_M).length<5||lPool('tf',L_TF).length<5||lPool('iq',L_IN).length<5;
+  try{var need=lMatchingPool().length<5||lPool('tf',L_TF).length<5||lPool('iq',L_IN).length<5;
     if(need)setTimeout(lGen,4000)}catch(e){}}
 registerRouteHook(function(id){if(id==='scr4')initListening()});
 /* Экзамен по аудированию не должен тикать в фоне после ухода с экрана. */

@@ -9,6 +9,8 @@ import {
   readingActivityId,
   splitLearningActivityDuration,
 } from '../public/learning-activity-contract.js';
+import { loadMatchingCatalog, matchingSetForLegacyScreen } from '../public/listening-catalog-contract.js';
+import { LISTENING_MATCHING_SETS } from '../public/listening-pilot-v1.js';
 
 const [
   recorderFile,
@@ -115,6 +117,9 @@ function createSubjectHarness(subject, { offline = false, slow = false } = {}) {
     learningActivityPool,
     learningActivitySource,
     splitLearningActivityDuration,
+    LISTENING_MATCHING_SETS,
+    loadMatchingCatalog,
+    matchingSetForLegacyScreen,
     adaptiveRuntimeSnapshot: () => ({ active }),
     completeAdaptiveModuleActivity: async (completion) => {
       adaptive.push(JSON.parse(JSON.stringify(completion)));
@@ -229,6 +234,7 @@ function createSubjectHarness(subject, { offline = false, slow = false } = {}) {
     vm.runInContext(executableScreen(listeningScreenFile, `
       window.__subjectEvidenceTest={
         startMatching:lMt,
+        installMatchingCatalog:function(){lSetMatchingCatalog(LISTENING_MATCHING_SETS)},
         playMatching:function(){lPlay(lMtLines())},
         completeMatching:function(correct){LM.set.a.forEach(function(answer,index){lMtPick(index,correct===false?(answer+1)%LM.set.st.length:answer)});lMtCheck()},
         startTrueFalse:lTf,
@@ -242,10 +248,12 @@ function createSubjectHarness(subject, { offline = false, slow = false } = {}) {
           LE.tf.st.forEach(function(item,index){LE.selT[index]=item.a});LE.iq.qs.forEach(function(item,index){LE.selI[index]=item.a});lExamFinish()},
       };
     `), context);
+    window.__subjectEvidenceTest.installMatchingCatalog();
   }
 
   return {
     screen: window.__subjectEvidenceTest,
+    element,
     ordinary,
     adaptive,
     posts,
@@ -345,11 +353,11 @@ test('listening screen completions record matching, true-false, interview and di
   assert.deepEqual(harness.ordinary.map(({ activity, score, maxScore, durationMs }) => (
     { activity, score, maxScore, durationMs }
   )), [
-    { activity: 'listening_matching', score: 4, maxScore: 4, durationMs: 400 },
+    { activity: 'listening_matching', score: 6, maxScore: 6, durationMs: 400 },
     { activity: 'listening_true_false', score: 5, maxScore: 5, durationMs: 500 },
     { activity: 'listening_interview', score: 4, maxScore: 4, durationMs: 600 },
-    { activity: 'listening_matching', score: 4, maxScore: 4, durationMs: 308 },
-    { activity: 'listening_detail', score: 9, maxScore: 9, durationMs: 693 },
+    { activity: 'listening_matching', score: 6, maxScore: 6, durationMs: 400 },
+    { activity: 'listening_detail', score: 9, maxScore: 9, durationMs: 601 },
   ]);
   assert.deepEqual(harness.ordinary.map((attempt) => attempt.metadata.mode), [
     'listening_matching', 'listening_true_false', 'listening_interview',
@@ -358,6 +366,43 @@ test('listening screen completions record matching, true-false, interview and di
   assert.equal(harness.ordinary.every((attempt) => attempt.metadata.source === 'builtin'), true);
   assert.equal(harness.ordinary.every((attempt) => attempt.metadata.helpUsed === false), true);
   assert.equal(harness.ordinary.slice(-2).reduce((sum, attempt) => sum + attempt.durationMs, 0), 1_001);
+});
+
+test('matching screen renders six speakers and keeps the transcript and explanations behind checking', async () => {
+  const harness = createSubjectHarness('listening');
+
+  harness.screen.startMatching();
+  const exercise = harness.element('l_area').innerHTML;
+  assert.match(exercise, /послушай шесть говорящих/u);
+  assert.equal((exercise.match(/Говорящий [A-F]/gu) || []).length, 6);
+  assert.doesNotMatch(exercise, /ТРАНСКРИПТ|<b>Ключ:<\/b>/u);
+
+  harness.screen.completeMatching(true);
+  await settle();
+
+  assert.match(harness.element('created:1').innerHTML, /ТРАНСКРИПТ/u);
+  assert.match(harness.element('lmt_res_0').innerHTML, /<b>Ключ:<\/b>/u);
+  assert.deepEqual(harness.ordinary.map(({ activity, score, maxScore }) => ({ activity, score, maxScore })), [
+    { activity: 'listening_matching', score: 6, maxScore: 6 },
+  ]);
+});
+
+test('matching adaptive completion publishes one gist result and no duplicate ordinary attempt', async () => {
+  const harness = createSubjectHarness('listening');
+  harness.setActive({
+    module: 'listening', activityId: 'listening_matching', executionClaim: 'm'.repeat(43),
+  });
+
+  harness.screen.startMatching();
+  harness.advance(350);
+  harness.screen.completeMatching(true);
+  harness.screen.completeMatching(true);
+  await settle();
+
+  assert.deepEqual(harness.adaptive, [{
+    module: 'listening', activityId: 'listening_matching', score: 6, maxScore: 6, durationMs: 350,
+  }]);
+  assert.equal(harness.ordinary.length, 0);
 });
 
 test('listening exact adaptive completion is exclusive, mismatch is blocked and slow playback is disclosed', async () => {
