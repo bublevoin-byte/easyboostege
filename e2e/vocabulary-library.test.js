@@ -315,6 +315,7 @@ try {
   await page.getByRole('button', { name: /^Начать ·/u }).press('Enter');
 
   await page.getByRole('heading', { name: 'Вспомни значение' }).waitFor();
+  await page.waitForFunction(() => document.activeElement?.id === 'w_session_input');
   await page.getByLabel('Твой вариант значения по-русски').fill('значение');
   await page.getByRole('button', { name: 'Показать ответ' }).press('Enter');
   await page.getByText('смысл', { exact: true }).waitFor();
@@ -324,6 +325,7 @@ try {
   await page.getByRole('button', { name: 'Дальше' }).press('Enter');
 
   await page.getByRole('heading', { name: 'Напиши слово' }).waitFor();
+  await page.waitForFunction(() => document.activeElement?.id === 'w_session_input');
   await page.getByLabel('Ответ по-английски').fill('speling');
   await page.getByRole('button', { name: 'Проверить' }).press('Enter');
   await page.getByText('Почти — небольшая опечатка').waitFor();
@@ -332,20 +334,24 @@ try {
   await page.getByRole('button', { name: 'Дальше' }).press('Enter');
 
   await page.getByRole('heading', { name: 'Заполни пропуск' }).waitFor();
+  await page.waitForFunction(() => document.activeElement?.id === 'w_session_input');
   await page.getByLabel('Ответ по-английски').fill('context');
   await page.getByRole('button', { name: 'Проверить' }).press('Enter');
   await page.getByRole('button', { name: 'Дальше' }).press('Enter');
   await page.getByRole('heading', { name: 'Напиши на слух' }).waitFor();
+  await page.waitForFunction(() => document.activeElement?.id === 'w_session_input');
   await page.getByRole('button', { name: 'Прослушать ещё раз' }).press('Enter');
   await page.getByLabel('Ответ по-английски').fill('listening');
   await page.getByRole('button', { name: 'Проверить' }).press('Enter');
   await page.getByRole('button', { name: 'Дальше' }).press('Enter');
 
   await page.getByRole('heading', { name: 'Напиши слово' }).waitFor();
+  await page.waitForFunction(() => document.activeElement?.id === 'w_session_input');
   await page.getByLabel('Ответ по-английски').fill('spelling');
   await page.getByRole('button', { name: 'Проверить' }).press('Enter');
   await page.getByRole('button', { name: 'Дальше' }).press('Enter');
   await page.getByRole('heading', { name: 'Познакомься со словом' }).waitFor();
+  await page.waitForFunction(() => document.activeElement?.id === 'w_session_title');
   await page.getByRole('button', { name: 'Начать вспоминать' }).press('Enter');
   await page.getByRole('heading', { name: 'Выбери значение' }).waitFor();
   await page.waitForFunction(() => document.activeElement?.id === 'w_session_title');
@@ -447,6 +453,7 @@ try {
   await authenticatedContext.setOffline(true);
   await authenticatedPage.getByRole('button', { name: /^Начать ·/u }).press('Enter');
   await authenticatedPage.getByRole('heading', { name: 'Напиши слово' }).waitFor();
+  await authenticatedPage.waitForFunction(() => document.activeElement?.id === 'w_session_input');
   await authenticatedPage.getByLabel('Ответ по-английски').fill('syncword');
   await authenticatedPage.getByRole('button', { name: 'Проверить' }).press('Enter');
   await authenticatedPage.getByRole('button', { name: 'Дальше' }).press('Enter');
