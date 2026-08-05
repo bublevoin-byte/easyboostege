@@ -30,8 +30,10 @@ import {
 } from '../public/reading-catalog-contract.js';
 import {
   assembleReadingPilotCatalog,
+  loadReadingPilotCatalog,
   loadReadingTask10Shard,
   loadReadingTask11Shard,
+  loadReadingTask12Shard,
 } from '../public/reading-pilot-v1.js';
 import {
   LISTENING_INTERVIEW_SETS,
@@ -156,8 +158,10 @@ function createSubjectHarness(subject, { offline = false, slow = false, listenin
     readingSetReference,
     adaptLegacyReadingFallback,
     assembleReadingPilotCatalog,
+    loadReadingPilotCatalog,
     loadReadingTask10Shard,
     loadReadingTask11Shard,
+    loadReadingTask12Shard,
     LISTENING_MATCHING_SETS,
     LISTENING_INTERVIEW_SETS,
     LISTENING_TRUE_FALSE_SETS,

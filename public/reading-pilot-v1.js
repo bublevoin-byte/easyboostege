@@ -6,6 +6,7 @@ import {
 } from './reading-catalog-contract.js';
 
 const SHARD_KINDS = ['task10', 'task11', 'task12_18'];
+let catalogPromise;
 
 function completeShard(shards, kind) {
   const shard = shards?.[kind];
@@ -33,4 +34,24 @@ export async function loadReadingTask10Shard() {
 export async function loadReadingTask11Shard() {
   const { READING_TASK11_SETS } = await import('./content/reading/task11-v1.js');
   return READING_TASK11_SETS;
+}
+
+export async function loadReadingTask12Shard() {
+  const { READING_TASK12_18_SETS } = await import('./content/reading/task12-18-v1.js');
+  return READING_TASK12_18_SETS;
+}
+
+export function loadReadingPilotCatalog() {
+  if (!catalogPromise) {
+    catalogPromise = Promise.all([
+      loadReadingTask10Shard(),
+      loadReadingTask11Shard(),
+      loadReadingTask12Shard(),
+    ]).then(([task10, task11, task12_18]) => assembleReadingPilotCatalog({ task10, task11, task12_18 }))
+      .catch((error) => {
+        catalogPromise = undefined;
+        throw error;
+      });
+  }
+  return catalogPromise;
 }

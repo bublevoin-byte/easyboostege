@@ -4,11 +4,13 @@
  * Список файлов генерирует сборка. В `dist/public` имена хешированные, и держать их здесь руками
  * нельзя: `scripts/build-frontend.js` заменяет блок между маркерами содержимым манифеста Vite.
  * Версия ниже — для исходников, которые сервер отдаёт, когда сборки нет; тот же скрипт сверяет её
- * с графом статических импортов `main.js`, поэтому и она не разъезжается молча.
+ * с графом статических импортов `main.js`, поэтому и она не разъезжается молча. Reading content
+ * shards остаются динамическими ресурсами: после первой успешной загрузки общий fetch-контур
+ * сохраняет их для последующей офлайн-тренировки, но install приложения их не запрашивает.
  *
  * Сюда входят четыре экрана — «Слова», «Грамматика», «Прогресс» и «Профиль», — потому что main.js
  * импортирует их наравне с оболочкой; профиль нужен для первого офлайн-открытия настроек. Четыре
- * ленивых чанка здесь отсутствуют: страница не должна
+ * ленивых чанка и content shards здесь отсутствуют: страница не должна
  * просить их при первой загрузке. В кэш они попадают ниже, в обработчике fetch, когда ученик
  * впервые открывает свой экран, — поэтому офлайн-запуск открывает уже виденные экраны.
  */
@@ -46,4 +48,4 @@ async function fetchListeningMp3(request,event){
   catch(error){const cached=await cache.match(key);if(!cached)throw error;return responseForRange(cached,requestedRange)}
 }
 
-self.addEventListener('fetch',event=>{const request=event.request;if(request.method!=='GET')return;const url=new URL(request.url);if(url.origin!==self.location.origin||url.pathname.startsWith('/api/'))return;if(request.mode==='navigate'){event.respondWith(fetch(request).then(response=>{if(response.ok){const copy=response.clone();event.waitUntil(caches.open(CACHE_NAME).then(cache=>cache.put('/',copy)))}return response}).catch(()=>caches.match('/').then(shell=>shell||caches.match('/offline.html'))));return}if(listeningMp3Path(url.pathname)){event.respondWith(fetchListeningMp3(request,event));return}event.respondWith(fetch(request).then(response=>{if(response.ok){const copy=response.clone();caches.open(CACHE_NAME).then(cache=>cache.put(request,copy))}return response}).catch(()=>caches.match(request)))});
+self.addEventListener('fetch',event=>{const request=event.request;if(request.method!=='GET')return;const url=new URL(request.url);if(url.origin!==self.location.origin||url.pathname.startsWith('/api/'))return;if(request.mode==='navigate'){event.respondWith(fetch(request).then(response=>{if(response.ok){const copy=response.clone();event.waitUntil(caches.open(CACHE_NAME).then(cache=>cache.put('/',copy)))}return response}).catch(()=>caches.match('/').then(shell=>shell||caches.match('/offline.html'))));return}if(listeningMp3Path(url.pathname)){event.respondWith(fetchListeningMp3(request,event));return}event.respondWith(fetch(request).then(response=>{if(response.ok){const copy=response.clone();event.waitUntil(caches.open(CACHE_NAME).then(cache=>cache.put(request,copy)))}return response}).catch(()=>caches.match(request)))});

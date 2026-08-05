@@ -24,8 +24,10 @@ import {
 } from '../public/reading-catalog-contract.js';
 import {
   assembleReadingPilotCatalog,
+  loadReadingPilotCatalog,
   loadReadingTask10Shard,
   loadReadingTask11Shard,
+  loadReadingTask12Shard,
 } from '../public/reading-pilot-v1.js';
 
 const source = (await fs.readFile(new URL('../public/modules/reading.js', import.meta.url), 'utf8'))
@@ -37,11 +39,26 @@ function createReadingModule() {
     window, learningActivityPool, learningActivitySource, readingActivityId, splitLearningActivityDuration,
     assertReadingCatalog, loadReadingCatalog, readingSetForLegacyScreen,
     READING_CATALOG_ID, READING_KINDS, READING_KIND_RULES, assertReadingSet, readingSetReference,
-    adaptLegacyReadingFallback, assembleReadingPilotCatalog, loadReadingTask10Shard, loadReadingTask11Shard,
+    adaptLegacyReadingFallback, assembleReadingPilotCatalog, loadReadingPilotCatalog,
+    loadReadingTask10Shard, loadReadingTask11Shard, loadReadingTask12Shard,
     Object, Number, Math, Array, Set, String,
   });
   return window.EasyBoostReading;
 }
+
+test('public Reading API exposes the lazy strict 60-set production catalog', async () => {
+  const reading = createReadingModule();
+  assert.equal(reading.loadPilotCatalog, loadReadingPilotCatalog);
+  assert.equal(reading.loadTask12Shard, loadReadingTask12Shard);
+
+  const catalog = await reading.loadPilotCatalog();
+  assert.equal(reading.validateCatalog(catalog), catalog);
+  assert.equal(catalog.sets.length, 60);
+  assert.deepEqual(
+    Object.fromEntries(READING_KINDS.map((kind) => [kind, catalog.sets.filter((set) => set.kind === kind).length])),
+    { task10: 20, task11: 20, task12_18: 20 },
+  );
+});
 
 test('reading module normalizes state and calculates aggregate accuracy', () => {
   const reading = createReadingModule();

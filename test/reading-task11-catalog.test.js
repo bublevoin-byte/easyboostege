@@ -2,70 +2,31 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  READING_CATALOG_ID,
-  READING_CONTRACT_VERSION,
   assertReadingCatalog,
   assertReadingSet,
 } from '../public/reading-catalog-contract.js';
 import * as readingPilotModule from '../public/reading-pilot-v1.js';
 import { READING_TASK10_SETS } from '../public/content/reading/task10-v1.js';
 import { READING_TASK11_SETS } from '../public/content/reading/task11-v1.js';
+import {
+  READING_EXPECTED_CEFR_COUNTS,
+  READING_POSITION_LABELS,
+  cloneReadingFixture,
+  englishWordCount,
+  futureTask12Sets,
+  normalizedReadingText,
+  russianWordCount,
+} from './helpers/reading-catalog-fixtures.js';
 
-const POSITION_LABELS = ['A', 'B', 'C', 'D', 'E', 'F'];
-const EXPECTED_CEFR_COUNTS = { B1: 4, B2: 12, 'B2+/C1': 4 };
-
-function clone(value) {
-  return structuredClone(value);
-}
-
-function normalized(value) {
-  return value.trim().toLocaleLowerCase('en').replace(/\s+/gu, ' ');
-}
-
-function englishWordCount(value) {
-  return value.match(/[A-Za-z]+(?:[’'-][A-Za-z]+)*/gu)?.length || 0;
-}
-
-function russianWordCount(value) {
-  return value.match(/[А-Яа-яЁё]+(?:-[А-Яа-яЁё]+)*/gu)?.length || 0;
-}
+const POSITION_LABELS = READING_POSITION_LABELS.slice(0, 6);
+const EXPECTED_CEFR_COUNTS = READING_EXPECTED_CEFR_COUNTS;
+const clone = cloneReadingFixture;
+const normalized = normalizedReadingText;
 
 function restoreTask11Text(set) {
   return set.task.segments.map((segment, position) => (
     position < 6 ? `${segment}${set.task.fragments[set.task.answers[position]]}` : segment
   )).join(' ');
-}
-
-function futureTask12Set(index) {
-  const cefr = index < 4 ? 'B1' : (index < 16 ? 'B2' : 'B2+/C1');
-  const id = `${READING_CATALOG_ID}.task12_18.future-${String(index + 1).padStart(2, '0')}`;
-  const details = Array.from({ length: 7 }, (_, position) => (
-    `Future detail fixture ${index + 1}-${position + 1} records an independent fact for strict validation. `
-      + 'Its deliberately separate wording keeps this passage globally identifiable without modelling production content.'
-  ));
-  return {
-    id,
-    revision: 1,
-    kind: 'task12_18',
-    title: `Future detail fixture ${index + 1}`,
-    topic: `future-detail-${index + 1}`,
-    cefr,
-    provenance: 'original',
-    validation: { contract: READING_CONTRACT_VERSION },
-    task: {
-      text: details.join(' '),
-      questions: details.map((_, position) => ({
-        id: `${id}.q${position + 1}`,
-        prompt: `Which independent fact is tested by fixture ${index + 1}-${position + 1}?`,
-        options: Array.from({ length: 4 }, (__, option) => `Fixture option ${index + 1}-${position + 1}-${option + 1}`),
-        answer: position % 4,
-        evidence: {
-          quote: `Future detail fixture ${index + 1}-${position + 1} records an independent fact`,
-          explanationRu: `Тестовая цитата позиции ${position + 1} связывает вопрос с отдельным фактом будущего комплекта ${index + 1}.`,
-        },
-      })),
-    },
-  };
 }
 
 function assertTask11ContentPolicy(sets) {
@@ -196,7 +157,7 @@ test('assembler fails closed at 40 sets and publishes only a strict-valid frozen
   const catalog = readingPilotModule.assembleReadingPilotCatalog({
     task10: READING_TASK10_SETS,
     task11: READING_TASK11_SETS,
-    task12_18: Array.from({ length: 20 }, (_, index) => futureTask12Set(index)),
+    task12_18: futureTask12Sets(),
   });
   assert.equal(assertReadingCatalog(catalog), catalog);
   assert.equal(catalog.sets.length, 60);

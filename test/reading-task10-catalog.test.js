@@ -2,33 +2,27 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  READING_CATALOG_ID,
-  READING_CONTRACT_VERSION,
   assertReadingCatalog,
   assertReadingSet,
 } from '../public/reading-catalog-contract.js';
 import * as readingPilotModule from '../public/reading-pilot-v1.js';
 import { READING_TASK10_SETS } from '../public/content/reading/task10-v1.js';
+import {
+  READING_EXPECTED_CEFR_COUNTS,
+  READING_POSITION_LABELS,
+  cloneReadingFixture,
+  englishWordCount,
+  futureTask11Sets,
+  futureTask12Sets,
+  normalizedReadingText,
+  russianWordCount,
+} from './helpers/reading-catalog-fixtures.js';
 
 const { assembleReadingPilotCatalog } = readingPilotModule;
-const POSITION_LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
-const EXPECTED_CEFR_COUNTS = { B1: 4, B2: 12, 'B2+/C1': 4 };
-
-function clone(value) {
-  return structuredClone(value);
-}
-
-function normalized(value) {
-  return value.trim().toLocaleLowerCase('en').replace(/\s+/gu, ' ');
-}
-
-function englishWordCount(value) {
-  return value.match(/[A-Za-z]+(?:[’'-][A-Za-z]+)*/gu)?.length || 0;
-}
-
-function russianWordCount(value) {
-  return value.match(/[А-Яа-яЁё]+(?:-[А-Яа-яЁё]+)*/gu)?.length || 0;
-}
+const POSITION_LABELS = READING_POSITION_LABELS;
+const EXPECTED_CEFR_COUNTS = READING_EXPECTED_CEFR_COUNTS;
+const clone = cloneReadingFixture;
+const normalized = normalizedReadingText;
 
 function assertTask10ContentPolicy(sets) {
   assert.equal(sets.length, 20, 'the task 10 shard must contain exactly 20 sets');
@@ -100,75 +94,10 @@ function assertTask10ContentPolicy(sets) {
   assert.equal(normalizedExplanations.size, 140);
 }
 
-function futureEnvelope(kind, index) {
-  const cefr = index < 4 ? 'B1' : (index < 16 ? 'B2' : 'B2+/C1');
-  return {
-    id: `${READING_CATALOG_ID}.${kind}.future-${String(index + 1).padStart(2, '0')}`,
-    revision: 1,
-    kind,
-    title: `Future ${kind} fixture ${index + 1}`,
-    topic: `future-${kind}-${index + 1}`,
-    cefr,
-    provenance: 'original',
-    validation: { contract: READING_CONTRACT_VERSION },
-  };
-}
-
-function futureTask11Set(index) {
-  const set = futureEnvelope('task11', index);
-  const segments = Array.from({ length: 7 }, (_, position) => (
-    `Future gap fixture ${index + 1}, segment ${position + 1}, provides distinct surrounding context for strict catalog validation. `
-  ));
-  return {
-    ...set,
-    task: {
-      segments,
-      fragments: Array.from({ length: 7 }, (_, position) => (
-        `future fragment ${index + 1}-${position + 1} completes one grammatical connection`
-      )),
-      answers: [0, 1, 2, 3, 4, 5],
-      evidence: Array.from({ length: 6 }, (_, position) => ({
-        position: POSITION_LABELS[position],
-        answer: position,
-        leftContext: segments[position].trim(),
-        rightContext: segments[position + 1].trim(),
-        quote: `Future gap fixture ${index + 1}, segment ${position + 1}`,
-        explanationRu: `Тестовый контекст позиции ${position + 1} однозначно связывает соседние части будущего комплекта ${index + 1}.`,
-      })),
-    },
-  };
-}
-
-function futureTask12Set(index) {
-  const set = futureEnvelope('task12_18', index);
-  const details = Array.from({ length: 7 }, (_, position) => (
-    `Future detail fixture ${index + 1}-${position + 1} records an independent fact for strict validation. `
-      + `Its deliberately separate wording keeps the passage and question globally identifiable without modelling production content.`
-  ));
-  return {
-    ...set,
-    task: {
-      text: details.join(' '),
-      questions: details.map((_, position) => ({
-        id: `${set.id}.q${position + 1}`,
-        prompt: `Which independent fact is tested by future fixture ${index + 1}-${position + 1}?`,
-        options: Array.from({ length: 4 }, (__, option) => (
-          `Future option ${index + 1}-${position + 1}-${option + 1}`
-        )),
-        answer: position % 4,
-        evidence: {
-          quote: `Future detail fixture ${index + 1}-${position + 1} records an independent fact`,
-          explanationRu: `Тестовая цитата позиции ${position + 1} связывает вопрос с отдельным фактом будущего комплекта ${index + 1}.`,
-        },
-      })),
-    },
-  };
-}
-
 function futureShards() {
   return {
-    task11: Array.from({ length: 20 }, (_, index) => futureTask11Set(index)),
-    task12_18: Array.from({ length: 20 }, (_, index) => futureTask12Set(index)),
+    task11: futureTask11Sets(),
+    task12_18: futureTask12Sets(),
   };
 }
 

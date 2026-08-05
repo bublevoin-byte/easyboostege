@@ -12,8 +12,10 @@ import {
 } from '../reading-catalog-contract.js';
 import {
   assembleReadingPilotCatalog,
+  loadReadingPilotCatalog,
   loadReadingTask10Shard,
   loadReadingTask11Shard,
+  loadReadingTask12Shard,
 } from '../reading-pilot-v1.js';
 
 (function initializeReadingModule(global) {
@@ -643,8 +645,10 @@ import {
     adaptSet: readingSetForLegacyScreen,
     adaptLegacyFallback: adaptLegacyReadingFallback,
     assembleCatalog: assembleReadingPilotCatalog,
+    loadPilotCatalog: loadReadingPilotCatalog,
     loadTask10Shard: loadReadingTask10Shard,
     loadTask11Shard: loadReadingTask11Shard,
+    loadTask12Shard: loadReadingTask12Shard,
     normalizeHistory,
     recordAttempt,
     rememberSelection,

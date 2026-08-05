@@ -508,21 +508,31 @@ test('a loaded listening catalog joins the runtime cache and remains available o
   assert.equal((await replay.responded).fromNetwork, true);
 });
 
-test('the lazy task 11 shard stays out of the app shell and joins the runtime cache after loading', async () => {
-  const url = `${ORIGIN}/content/reading/task11-v1.js`;
+test('all lazy Reading content shards stay out of the app shell and join the runtime cache after loading', async () => {
+  const shardPaths = [
+    '/content/reading/task10-v1.js',
+    '/content/reading/task11-v1.js',
+    '/content/reading/task12-18-v1.js',
+  ];
   const shellDeclaration = workerSource.match(/const APP_SHELL=(\[[^\]]*\]);/u)?.[1] || '';
-  assert.match(readingPilotSource, /import\('\.\/content\/reading\/task11-v1\.js'\)/u);
-  assert.doesNotMatch(shellDeclaration, /task11-v1/u, 'the 20-set shard must not inflate initial JavaScript');
-
   const online = createWorker({ networkFails: false });
-  const first = dispatchFetch(online, { method: 'GET', url, mode: 'cors' });
-  assert.equal((await first.responded).fromNetwork, true);
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(online.store.get(url).fromNetwork, true);
 
-  const offline = createWorker({ cached: Object.fromEntries(online.store), networkFails: true });
-  const replay = dispatchFetch(offline, { method: 'GET', url, mode: 'cors' });
-  assert.equal((await replay.responded).fromNetwork, true);
+  for (const path of shardPaths) {
+    const filename = path.split('/').at(-1);
+    assert.equal(readingPilotSource.includes(`import('.${path}')`), true, `${filename} must use dynamic import`);
+    assert.equal(shellDeclaration.includes(filename), false, `${filename} must not inflate initial JavaScript`);
+
+    const url = ORIGIN + path;
+    const first = dispatchFetch(online, { method: 'GET', url, mode: 'cors' });
+    assert.equal((await first.responded).fromNetwork, true);
+    assert.equal(first.waits.length, 1, `${filename} runtime-cache write must extend the worker lifetime`);
+    await Promise.all(first.waits);
+    assert.equal(online.store.get(url).fromNetwork, true);
+
+    const offline = createWorker({ cached: Object.fromEntries(online.store), networkFails: true });
+    const replay = dispatchFetch(offline, { method: 'GET', url, mode: 'cors' });
+    assert.equal((await replay.responded).fromNetwork, true);
+  }
 });
 
 test('a successful navigation refreshes the cached shell for the next offline start', async () => {
