@@ -89,8 +89,25 @@ try {
 
   await page.evaluate(() => window.tab('scr4'));
   await page.locator('#scr4.on').waitFor({ state: 'visible', timeout: 5_000 });
-  await page.getByRole('button', { name: /Верно · Неверно · Не сказано/u }).press('Enter');
+  await page.locator('button[onclick="lMt()"]').first().press('Enter');
+  await page.locator('#lmt_row_5').waitFor({ state: 'visible', timeout: 5_000 });
+  const firstMatchingId = await page.evaluate(() => window.S.listeningPilotHistory.lastSelected.matching.id);
+  for (let index = 0; index < 6; index += 1) {
+    await page.locator(`#lmt_row_${index} button`).nth(index).press('Enter');
+  }
+  const matchingResponsePromise = page.waitForResponse((response) => (
+    response.request().method() === 'POST' && response.url().endsWith('/api/v1/module-attempts')
+  ));
+  await page.locator('button[onclick="lMtCheck()"]').press('Enter');
+  assert.equal((await matchingResponsePromise).status(), 201);
+  await page.locator('button[onclick="lMt()"]').first().press('Enter');
+  const secondMatchingId = await page.evaluate(() => window.S.listeningPilotHistory.lastSelected.matching.id);
+  assert.notEqual(secondMatchingId, firstMatchingId);
+  await page.locator('button[onclick="lHub()"]').last().press('Enter');
+
+  await page.locator('button[onclick="lTf()"]').first().press('Enter');
   await page.locator('#ltf_row_6').waitFor({ state: 'visible', timeout: 5_000 });
+  const firstTrueFalseId = await page.evaluate(() => window.S.listeningPilotHistory.lastSelected.true_false.id);
   await page.getByText('Тренировочная синтезированная озвучка', { exact: true })
     .waitFor({ state: 'visible', timeout: 5_000 });
   for (let index = 0; index < 7; index += 1) {
@@ -102,9 +119,13 @@ try {
   await page.getByRole('button', { name: 'Проверить', exact: true }).press('Enter');
   assert.equal((await responsePromise).status(), 201);
 
-  await page.getByRole('button', { name: '← К аудированию', exact: true }).press('Enter');
-  await page.getByRole('button', { name: /^Интервью/u }).press('Enter');
+  await page.locator('button[onclick="lTf()"]').first().press('Enter');
+  const secondTrueFalseId = await page.evaluate(() => window.S.listeningPilotHistory.lastSelected.true_false.id);
+  assert.notEqual(secondTrueFalseId, firstTrueFalseId);
+  await page.locator('button[onclick="lHub()"]').last().press('Enter');
+  await page.locator('button[onclick="lIq()"]').first().press('Enter');
   await page.locator('#liq_row_6').waitFor({ state: 'visible', timeout: 5_000 });
+  const firstInterviewId = await page.evaluate(() => window.S.listeningPilotHistory.lastSelected.interview.id);
   assert.equal(await page.locator('[id^="liq_row_"]').count(), 7);
   assert.deepEqual(await page.locator('[id^="liq_row_"]').evaluateAll((rows) => (
     rows.map((row) => row.previousElementSibling?.textContent?.trim().split('.')[0])
@@ -113,23 +134,46 @@ try {
     assert.equal(await page.locator(`#liq_row_${index} button`).count(), 4);
     await page.locator(`#liq_row_${index} button`).first().press('Enter');
   }
+  await page.locator('#l_playbtn').press('Enter');
   const interviewResponsePromise = page.waitForResponse((response) => (
     response.request().method() === 'POST' && response.url().endsWith('/api/v1/module-attempts')
   ));
   await page.getByRole('button', { name: 'Проверить', exact: true }).press('Enter');
   assert.equal((await interviewResponsePromise).status(), 201);
   await page.getByText('ТРАНСКРИПТ · тапни слово для перевода').waitFor({ state: 'visible', timeout: 5_000 });
+  await page.locator('button[onclick="lIq()"]').first().press('Enter');
+  const secondInterviewId = await page.evaluate(() => window.S.listeningPilotHistory.lastSelected.interview.id);
+  assert.notEqual(secondInterviewId, firstInterviewId);
+
+  const history = await page.evaluate(() => window.S.listeningPilotHistory);
+  assert.equal(history.version, 1);
+  assert.equal(Object.keys(history.items).length, 3);
+  assert.equal(Object.values(history.items).every((item) => item.transcriptExposed === true), true);
+  assert.doesNotMatch(JSON.stringify(history), /correct answer|audio\/listening|Speaker [A-F]/iu);
+
+  const adaptiveOverview = await page.evaluate(async () => {
+    const response = await fetch('/api/v1/adaptive-learning/overview', { credentials: 'same-origin' });
+    return { status: response.status, body: await response.json() };
+  });
+  assert.equal(adaptiveOverview.status, 200);
+  const listeningSkills = adaptiveOverview.body.profile.skills.filter((skill) => skill.module === 'listening');
+  assert.deepEqual(listeningSkills.map((skill) => skill.id).sort(), [
+    'ege.listening.detail', 'ege.listening.gist',
+  ]);
+  assert.equal(listeningSkills.every((skill) => skill.evidenceCount > 0), true);
 
   const attempts = await fs.readFile(dataFile, 'utf8').then((contents) => (
     JSON.parse(contents).module_attempts || []
   ));
   const learnerAttempts = attempts.filter((attempt) => attempt.username === 'evidence-user');
   assert.deepEqual(learnerAttempts.map((attempt) => attempt.activity).sort(), [
-    'listening_interview', 'listening_true_false', 'reading_headings',
+    'listening_interview', 'listening_matching', 'listening_true_false', 'reading_headings',
   ]);
   assert.equal(learnerAttempts.every((attempt) => attempt.evidence_quality === 'client_reported'), true);
   assert.equal(learnerAttempts.find((attempt) => attempt.activity === 'listening_true_false')?.max_score, 7);
   assert.equal(learnerAttempts.find((attempt) => attempt.activity === 'listening_interview')?.max_score, 7);
+  assert.equal(learnerAttempts.find((attempt) => attempt.activity === 'listening_matching')?.max_score, 6);
+  assert.equal(learnerAttempts.find((attempt) => attempt.activity === 'listening_interview')?.metadata.helpUsed, true);
   assert.deepEqual(pageErrors, []);
   await context.close();
   console.log('Reading/listening evidence Chromium E2E passed.');

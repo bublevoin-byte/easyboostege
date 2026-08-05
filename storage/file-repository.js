@@ -5,7 +5,7 @@ import { hashAuthCode, normalizeUsername, normalizeVoiceTutorDeliveryMetadata, n
 import { transitionPedagogicalState } from '../voice-tutor/state-machine.js';
 import { transitionRuleCardReview } from '../voice-tutor/rule-card.js';
 import { createRecoveryLedger, planRecoveryFromTransfer, planRepeatAttempt, publicRepeatAttempt, recoveryMap, recoveryMetrics } from '../voice-tutor/recovery.js';
-import { requireModuleAttemptEvidenceQuality } from '../adaptive-learning/evidence-quality.js';
+import { adaptiveAssistedMetadata, requireModuleAttemptEvidenceQuality } from '../adaptive-learning/evidence-quality.js';
 import { compareAdaptiveEvidenceWatermarks } from '../adaptive-learning/evidence-watermark.js';
 import { adaptiveLearningGoalRepositoryDto } from '../adaptive-learning/goal-dto.js';
 import {
@@ -2796,6 +2796,7 @@ export function createFileRepository(filePath) {
         adaptive_session_id: row.id,
         adaptive_block_id: block.id,
         adaptive_content_ref: block.contentRef,
+        ...adaptiveAssistedMetadata(attempt.metadata),
       };
       state.module_attempts.push({
         id: attempt.id, username, module: attempt.module, activity: attempt.activity,

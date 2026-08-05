@@ -11,6 +11,7 @@ import { createAdaptiveLearningRoutes } from '../routes/adaptive-learning.js';
 import { createProgressRoutes } from '../routes/progress.js';
 import { buildAdaptiveLearningProfile, EGE_SKILL_TAXONOMY } from '../adaptive-learning/profile.js';
 import { requiresServerAssessment, SERVER_ASSESSED_MODULES } from '../adaptive-learning/evidence-policy.js';
+import { adaptiveAssistedMetadata } from '../adaptive-learning/evidence-quality.js';
 import {
   DEEP_DIAGNOSTIC_CATALOG,
   SHORT_DIAGNOSTIC_CATALOG,
@@ -18,6 +19,16 @@ import {
 import { createFileRepository } from '../storage/file-repository.js';
 
 const NOW = new Date('2026-08-04T09:00:00.000Z');
+
+test('adaptive assisted metadata accepts only exact non-content mode and source values', () => {
+  assert.deepEqual(adaptiveAssistedMetadata({
+    helpUsed: true, mode: 'listening_exam', source: 'builtin', hintsUsed: 2,
+  }), { helpUsed: true, mode: 'listening_exam', source: 'builtin', hintsUsed: 2 });
+  assert.deepEqual(adaptiveAssistedMetadata({
+    helpUsed: true, mode: 'correct_answer_is_option_four',
+    source: 'transcript_says_the_answer', hintsUsed: 2,
+  }), { helpUsed: true, hintsUsed: 2 });
+});
 const OWNER_ATTEMPT_ID = '71563fb2-9d76-4de1-ae70-b9a014792ed1';
 const STRANGER_ATTEMPT_ID = '03a5be0c-f380-4a90-9ac3-daf7c578f80b';
 

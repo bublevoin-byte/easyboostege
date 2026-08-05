@@ -16,11 +16,20 @@ function validAttemptReference(attempt){return Boolean(attempt&&exactKeys(attemp
 function validAttempt(attempt,active){return Boolean(validAttemptReference(attempt)
   &&(attempt.type==='module'?!['writing','speaking'].includes(active.module)
     :attempt.type==='voice_tutor_repeat'?active.activityId==='voice_tutor_recovery':attempt.type===active.module))}
+function assistedMetadata(value){if(!value||typeof value!=='object'||Array.isArray(value)||value.helpUsed!==true)return null;
+  const result={helpUsed:true};
+  if(typeof value.mode==='string'&&/^[a-z0-9_]{3,80}$/u.test(value.mode))result.mode=value.mode;
+  if(typeof value.source==='string'&&/^[a-z0-9_]{3,80}$/u.test(value.source))result.source=value.source;
+  if(Number.isInteger(value.hintsUsed)&&value.hintsUsed>=0&&value.hintsUsed<=100)result.hintsUsed=value.hintsUsed;
+  return result}
 function validPending(pending,active){if(!pending)return true;if(!pending||!['attempt','bind','advance'].includes(pending.phase)||!uuidValue(pending.advanceKey))return false;
-  if(pending.phase==='attempt')return exactKeys(pending,['advanceKey','payload','phase'])&&exactKeys(pending.payload,['activity','adaptiveExecutionClaim','durationMs','id','maxScore','module','score'])
+  if(pending.phase==='attempt'){const payloadKeys=['activity','adaptiveExecutionClaim','durationMs','id','maxScore','module','score'];
+    const keysValid=exactKeys(pending.payload,payloadKeys)||exactKeys(pending.payload,payloadKeys.concat('metadata'));
+    return exactKeys(pending,['advanceKey','payload','phase'])&&keysValid
     &&uuidValue(pending.payload.id)&&pending.payload.module===active.module&&pending.payload.activity===active.activityId&&pending.payload.adaptiveExecutionClaim===active.executionClaim
     &&Number.isFinite(pending.payload.score)&&Number.isFinite(pending.payload.maxScore)&&pending.payload.maxScore>0&&pending.payload.score>=0&&pending.payload.score<=pending.payload.maxScore
-    &&Number.isInteger(pending.payload.durationMs)&&pending.payload.durationMs>=0;
+    &&Number.isInteger(pending.payload.durationMs)&&pending.payload.durationMs>=0
+    &&(!Object.hasOwn(pending.payload,'metadata')||Boolean(assistedMetadata(pending.payload.metadata)))}
   return exactKeys(pending,['advanceKey','attempt','phase'])&&validAttempt(pending.attempt,active)}
 function runtimeOwner(){try{const value=localStorage.getItem('eb_current');return typeof value==='string'&&value.length>0&&value.length<=64?value:null}catch(_){return null}}
 function validActive(active,savedAt){return !active||Boolean(active&&exactKeys(active,['activityId','blockId','claimExpiresAt','contentRef','evidenceContext','executionClaim','expectedRevision','module','pending','sessionId','startedAt'])
@@ -141,15 +150,16 @@ async function sendPending(state){
   return false;
 }
 
-export async function completeAdaptiveModuleActivity({module,activityId,score,maxScore,durationMs}={}){
+export async function completeAdaptiveModuleActivity({module,activityId,score,maxScore,durationMs,metadata}={}){
   const state=read(),active=state&&state.active;
   if(!active||active.pending||active.module!==module||active.activityId!==activityId||['writing','speaking'].includes(module))return false;
-  const id=uuid();const maximum=Math.max(1,Number(maxScore)||1);
+  const id=uuid();const maximum=Math.max(1,Number(maxScore)||1);const safeMetadata=assistedMetadata(metadata);
   active.pending={phase:'attempt',advanceKey:uuid(),payload:{
     id,module:active.module,activity:active.activityId,
     score:Math.min(maximum,Math.max(0,Number(score)||0)),maxScore:maximum,
     durationMs:Number.isFinite(durationMs)?Math.max(0,Math.round(durationMs)):Math.max(0,Date.now()-active.startedAt),
     adaptiveExecutionClaim:active.executionClaim,
+    ...(safeMetadata?{metadata:safeMetadata}:{}),
   }};
   write(state);
   if(!navigator.onLine)return {queued:true};

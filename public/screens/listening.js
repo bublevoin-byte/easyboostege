@@ -106,7 +106,7 @@ const L_IN=[
 ];
 let L_MATCHING_CATALOG=[],L_MATCHING_CATALOG_LOAD=null,L_TRUE_FALSE_CATALOG=[],L_TRUE_FALSE_CATALOG_LOAD=null;
 let L_INTERVIEW_CATALOG=[],L_INTERVIEW_CATALOG_LOAD=null;
-let L_TRUE_FALSE_CATALOG_READY=false,L_INTERVIEW_CATALOG_READY=false;
+let L_MATCHING_CATALOG_READY=false,L_TRUE_FALSE_CATALOG_READY=false,L_INTERVIEW_CATALOG_READY=false;
 const L_VOICE_RESULT_SETS=[
   {id:'listening.exam.interview.alex',items:['listening.alex-swimming.reason','listening.alex-swimming.frequency','listening.alex-swimming.injury','listening.alex-swimming.first-plan']},
   {id:'listening.exam.interview.lena',items:['listening.lena-blog.started','listening.lena-blog.helpers','listening.lena-blog.problem','listening.lena-blog.advice']},
@@ -116,10 +116,23 @@ L_VOICE_RESULT_SETS.forEach(function(resultSet,setIndex){
   resultSet.items.forEach(function(itemId,itemIndex){L_IN[setIndex].qs[itemIndex].voice={id:itemId,revision:1}});
 });
 function lAnim(name,dur){ui.animate('l_card',name,dur)}
+function lHistory(){S.listeningPilotHistory=listeningModule.normalizeHistory(S.listeningPilotHistory);return S.listeningPilotHistory}
+function lSelectCatalogSet(pool,format){var set=listeningModule.selectCatalogSet(pool,lHistory(),format,Date.now())||pool[0];
+  S.listeningPilotHistory=listeningModule.rememberCatalogSelection(S.listeningPilotHistory,format,set);save();return set}
+function lAttemptEvidence(format,set,startedAt){var evidence=createLearningActivityEvidence({module:'listening',
+  activityId:listeningModule.activityId(format),mode:'listening_'+format,source:listeningModule.sourceOf(set),startedAt:startedAt});
+  evidence.helpUsed=listeningModule.catalogAttemptIsAssisted(lHistory(),set);return evidence}
+function lHelp(){return{slowPlayback:false,additionalPlaybacks:0,synthFallback:false}}
+function lMarkPlaybackHelp(session,status){if(!session||!session.evidence||status==='static')return;
+  session.help.synthFallback=true;session.evidence.helpUsed=true}
+function lCompleteHistory(session,score,maxScore,attemptedAt){if(!session||!session.set)return;
+  S.listeningPilotHistory=listeningModule.recordCatalogAttempt(lHistory(),session.set,{score:score,maxScore:maxScore,
+    attemptedAt:attemptedAt||Date.now(),transcriptExposed:true,help:session.help});save()}
 function lPlay(lines){LPLAYS++;var session=LM&&!LM.done?LM:(LT&&!LT.done?LT:(LI&&!LI.done?LI:null));
-  if(session&&session.evidence){if(LSLOW)session.evidence.helpUsed=true;session.evidence.hintsUsed=Math.max(0,LPLAYS-2);
-    if(session.evidence.hintsUsed)session.evidence.helpUsed=true}
-  lPlaysUi();lPlayListeningSet(session&&session.set,lines)}
+  if(session&&session.evidence){if(LSLOW){session.help.slowPlayback=true;session.evidence.helpUsed=true}
+    session.help.additionalPlaybacks=Math.max(session.help.additionalPlaybacks,LPLAYS-2);
+    session.evidence.hintsUsed=Math.max(0,LPLAYS-2);if(session.evidence.hintsUsed)session.evidence.helpUsed=true}
+  lPlaysUi();lPlayListeningSet(session&&session.set,lines,function(status){lMarkPlaybackHelp(session,status)})}
 function lPlaysUi(){var el=document.getElementById('l_plays');if(!el)return;
   el.textContent=LPLAYS<=2?('прослушиваний: '+LPLAYS+' из 2'):(LPLAYS+'-е — на ЕГЭ так нельзя!');
   el.style.color=LPLAYS<=2?'#1D7F4A':'#A56000';el.style.background=LPLAYS<=2?'#EAF7F0':'#FFF4DE'}
@@ -145,6 +158,7 @@ function lLoadMatchingCatalog(){
   return L_MATCHING_CATALOG_LOAD}
 function lSetMatchingCatalog(sets){
   L_MATCHING_CATALOG=sets.map(function(set){return set.st?set:matchingSetForLegacyScreen(set)});
+  L_MATCHING_CATALOG_READY=true;
   return L_MATCHING_CATALOG}
 function lLoadTrueFalseCatalog(){
   if(L_TRUE_FALSE_CATALOG_LOAD)return L_TRUE_FALSE_CATALOG_LOAD;
@@ -166,7 +180,7 @@ function lSetInterviewCatalog(sets){
   return L_INTERVIEW_CATALOG}
 function initListening(){if(!S)return;lSync();Promise.all([
   lLoadMatchingCatalog(),lLoadTrueFalseCatalog(),lLoadInterviewCatalog(),
-]).then(function(){lHub()})}
+]).then(function(){if(!LM&&!LT&&!LI&&!LE)lHub()})}
 function lHub(){var area=document.getElementById('l_area');if(!area)return;LM=null;LT=null;LI=null;lStop();
   var r=lSt();var GA=0;function ga(){return 'animation:win .34s '+((GA++)*0.06)+'s cubic-bezier(.25,.75,.35,1) both;'}
   var examMax=lExamMaxScore();
@@ -218,9 +232,9 @@ function lExamMaxScore(){
   var m=lMatchingPool()[0],tf=lTrueFalsePool()[0],iq=lInterviewPool()[0];
   return lMatchingMax(m)+(tf&&tf.st?tf.st.length:0)+(iq&&iq.qs?iq.qs.length:0)}
 /* ---- задание 1: соответствия ---- */
-function lMt(){S.lisIdxM=(S.lisIdxM||0);var pool=lMatchingPool();var set=lShufM(pool[S.lisIdxM%pool.length]);S.lisIdxM++;
-  LM={set:set,sel:set.sp.map(function(){return null}),done:false,evidence:createLearningActivityEvidence({module:'listening',
-    activityId:listeningModule.activityId('matching'),mode:'listening_matching',source:listeningModule.sourceOf(set)})};LPLAYS=0;lMtRender()}
+function lMt(){if(!L_MATCHING_CATALOG_READY){lLoadMatchingCatalog().then(function(){lMt()});return}
+  var set=lShufM(lSelectCatalogSet(lMatchingPool(),'matching'));
+  LM={set:set,sel:set.sp.map(function(){return null}),done:false,help:lHelp(),evidence:lAttemptEvidence('matching',set)};LPLAYS=0;lMtRender()}
 function lMtLines(){return LM.set.sp.map(function(sp,i){return {s:i%2,t:'Speaker '+lSpeakerLabel(i)+'. '+sp.t}})}
 function lMtRender(){var area=document.getElementById('l_area');var set=LM.set;
   var h='<div id="l_card" class="clayCard" style="position:relative;overflow:hidden;padding:16px 18px;margin-bottom:12px;">'+wDeco()
@@ -254,7 +268,7 @@ function lMtCheck(){if(LM.done)return;LM.done=true;lStop();var set=LM.set,r=lSt(
   var used={};set.a.forEach(function(x){used[x]=1});
   var extra=set.st.map(function(_,i){return i}).find(function(i){return !used[i]});
   var maxScore=lMatchingMax(set);
-  r.done++;lSync();save();recordLearningActivityEvidence(LM.evidence,{score:okn,maxScore:maxScore}).catch(function(){});
+  r.done++;lSync();lCompleteHistory(LM,okn,maxScore);save();recordLearningActivityEvidence(LM.evidence,{score:okn,maxScore:maxScore}).catch(function(){});
   var area=document.getElementById('l_area');
   var d=document.createElement('div');
   d.innerHTML='<div class="clayCard" style="padding:16px 18px;margin-bottom:12px;text-align:center;animation:win .35s both;">'
@@ -267,9 +281,8 @@ function lMtCheck(){if(LM.done)return;LM.done=true;lStop();var set=LM.set,r=lSt(
   try{d.scrollIntoView({behavior:'smooth',block:'start'})}catch(e){};lGen()}
 /* ---- задание 2: True/False/Not stated ---- */
 function lTf(){if(!L_TRUE_FALSE_CATALOG_READY){lLoadTrueFalseCatalog().then(function(){lTf()});return}
-  S.lisIdxT=(S.lisIdxT||0);var pool=lTrueFalsePool();var set=pool[S.lisIdxT%pool.length];S.lisIdxT++;
-  LT={set:set,sel:set.st.map(function(){return null}),done:false,evidence:createLearningActivityEvidence({module:'listening',
-    activityId:listeningModule.activityId('true_false'),mode:'listening_true_false',source:listeningModule.sourceOf(set)})};LPLAYS=0;lTfRender()}
+  var set=lSelectCatalogSet(lTrueFalsePool(),'true_false');
+  LT={set:set,sel:set.st.map(function(){return null}),done:false,help:lHelp(),evidence:lAttemptEvidence('true_false',set)};LPLAYS=0;lTfRender()}
 function lTfRender(){var area=document.getElementById('l_area');var set=LT.set;
   var LBL=['Верно','Неверно','Не сказано'];
   var h='<div id="l_card" class="clayCard" style="position:relative;overflow:hidden;padding:16px 18px;margin-bottom:12px;">'+wDeco()
@@ -297,7 +310,7 @@ function lTfCheck(){if(LT.done)return;LT.done=true;lStop();var set=LT.set,r=lSt(
       +'<div style="font-weight:800;font-size:12.5px;color:'+(ok?'#1F8A50':'#C0392B')+';">'+(ok?'Верно · ':'Неверно · правильно: ')+LBL[x.a]+'</div>'
       +'<div style="font-weight:600;font-size:12px;color:#4A453E;margin-top:4px;line-height:1.5;"><b>В записи:</b> «'+x.ev+'» — '+x.e+'</div></div>';
     var row=document.getElementById('ltf_row_'+i);if(row)row.style.pointerEvents='none'});
-  r.done++;lSync();save();recordLearningActivityEvidence(LT.evidence,{score:okn,maxScore:set.st.length}).catch(function(){});
+  r.done++;lSync();lCompleteHistory(LT,okn,set.st.length);save();recordLearningActivityEvidence(LT.evidence,{score:okn,maxScore:set.st.length}).catch(function(){});
   var area=document.getElementById('l_area');
   var d=document.createElement('div');
   d.innerHTML='<div class="clayCard" style="padding:16px 18px;margin-bottom:12px;text-align:center;animation:win .35s both;">'
@@ -309,9 +322,8 @@ function lTfCheck(){if(LT.done)return;LT.done=true;lStop();var set=LT.set,r=lSt(
   try{d.scrollIntoView({behavior:'smooth',block:'start'})}catch(e){};lGen()}
 /* ---- задания 3-9: интервью ---- */
 function lIq(){if(!L_INTERVIEW_CATALOG_READY){lLoadInterviewCatalog().then(function(){lIq()});return}
-  S.lisIdxI=(S.lisIdxI||0);var pool=lInterviewPool();var set=pool[S.lisIdxI%pool.length];S.lisIdxI++;
-  LI={set:set,sel:set.qs.map(function(){return null}),done:false,evidence:createLearningActivityEvidence({module:'listening',
-    activityId:listeningModule.activityId('interview'),mode:'listening_interview',source:listeningModule.sourceOf(set)})};LPLAYS=0;lIqRender()}
+  var set=lSelectCatalogSet(lInterviewPool(),'interview');
+  LI={set:set,sel:set.qs.map(function(){return null}),done:false,help:lHelp(),evidence:lAttemptEvidence('interview',set)};LPLAYS=0;lIqRender()}
 function lIqRender(){var area=document.getElementById('l_area');var set=LI.set;
   var h='<div id="l_card" class="clayCard" style="position:relative;overflow:hidden;padding:16px 18px;margin-bottom:12px;">'+wDeco()
     +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#1D7F4A;background:#EAF7F0;padding:5px 10px;border-radius:20px;">ЗАДАНИЯ 3–9 · ИНТЕРВЬЮ</span>'
@@ -339,7 +351,7 @@ function lIqCheck(){if(LI.done)return;LI.done=true;lStop();var set=LI.set,r=lSt(
       +'<div style="font-weight:800;font-size:12.5px;color:'+(ok?'#1F8A50':'#C0392B')+';">'+(ok?'Верно':'Правильно: '+q.o[q.a])+'</div>'
       +'<div style="font-weight:600;font-size:12px;color:#4A453E;margin-top:4px;line-height:1.5;"><b>В записи:</b> «'+q.ev+'» — '+q.e+'</div>'+voiceSlot+'</div>';
     var row=document.getElementById('liq_row_'+i);if(row)row.style.pointerEvents='none'});
-  r.done++;lSync();save();recordLearningActivityEvidence(LI.evidence,{score:okn,maxScore:set.qs.length}).catch(function(){});
+  r.done++;lSync();lCompleteHistory(LI,okn,set.qs.length);save();recordLearningActivityEvidence(LI.evidence,{score:okn,maxScore:set.qs.length}).catch(function(){});
   var area=document.getElementById('l_area');
   var d=document.createElement('div');
   d.innerHTML='<div class="clayCard" style="padding:16px 18px;margin-bottom:12px;text-align:center;animation:win .35s both;">'
@@ -366,24 +378,29 @@ function lExam(){var area=document.getElementById('l_area');if(!area)return;lSto
   lAnim('win','.32s')}
 function lExamStart(){
   var pm=lMatchingPool(),pt=lTrueFalsePool(),pi=lInterviewPool();
-  S.leIdx=(S.leIdx||0);
-  var startedAt=Date.now(),m=lShufM(pm[S.leIdx%pm.length]),tf=pt[S.leIdx%pt.length],iq=pi[S.leIdx%pi.length];
+  var startedAt=Date.now(),m=lShufM(lSelectCatalogSet(pm,'matching')),
+      tf=lSelectCatalogSet(pt,'true_false'),iq=lSelectCatalogSet(pi,'interview');
   LE={m:m,tf:tf,iq:iq,stage:0,selM:m.a.map(function(){return null}),plays:[0,0,0],t0:startedAt,
-      evidence:{gist:createLearningActivityEvidence({module:'listening',activityId:listeningModule.activityId('matching'),
-        mode:'listening_exam',source:listeningModule.sourceOf(m),startedAt:startedAt}),
+      help:{matching:lHelp(),true_false:lHelp(),interview:lHelp()},
+      evidence:{gist:lAttemptEvidence('matching',m,startedAt),
         detail:createLearningActivityEvidence({module:'listening',activityId:listeningModule.activityId('detail'),
           mode:'listening_exam',source:listeningModule.sourceOf(tf,iq),startedAt:startedAt})}};
+  LE.evidence.gist.mode='listening_exam';
+  LE.evidence.detail.helpUsed=listeningModule.catalogAttemptIsAssisted(lHistory(),tf)
+    ||listeningModule.catalogAttemptIsAssisted(lHistory(),iq);
   LE.selT=LE.tf.st.map(function(){return null});
   LE.selI=LE.iq.qs.map(function(){return null});
-  S.leIdx++;lSetSlow(false);
+  lSetSlow(false);
   LE.iv=setInterval(function(){if(LE)setTxt('l_today',gExamFmt(Math.floor((Date.now()-LE.t0)/1000)))},1000);
   lExamRender()}
 function lExamPlay(){if(!LE)return;
   if(!listeningModule.registerPlay(LE.plays,LE.stage,2)){try{toast('На ЕГЭ запись звучит только дважды')}catch(e){}return}
-  var evidence=LE.stage===0?LE.evidence.gist:LE.evidence.detail;if(LSLOW)evidence.helpUsed=true;
+  var evidence=LE.stage===0?LE.evidence.gist:LE.evidence.detail;
+  var help=LE.stage===0?LE.help.matching:(LE.stage===1?LE.help.true_false:LE.help.interview);
+  if(LSLOW){help.slowPlayback=true;evidence.helpUsed=true}
   var set=LE.stage===0?LE.m:(LE.stage===1?LE.tf:LE.iq);
   var lines=LE.stage===0?LE.m.sp.map(function(sp,i){return{s:i%2,t:'Speaker '+lSpeakerLabel(i)+'. '+sp.t}}):(LE.stage===1?LE.tf.d:LE.iq.d);
-  lPlayListeningSet(set,lines);
+  lPlayListeningSet(set,lines,function(status){if(status!=='static'){help.synthFallback=true;evidence.helpUsed=true}});
   var el=document.getElementById('lex_plays');
   if(el){el.textContent='прослушиваний: '+LE.plays[LE.stage]+' из 2';
     el.style.color=LE.plays[LE.stage]>=2?'#A56000':'#1D7F4A';el.style.background=LE.plays[LE.stage]>=2?'#FFF4DE':'#EAF7F0'}}
@@ -443,6 +460,9 @@ function lExamFinish(){if(!LE)return;clearInterval(LE.iv);lStop();
   var okT=0;LE.tf.st.forEach(function(x,i){r.tf.tot++;if(LE.selT[i]===x.a){okT++;r.tf.ok++}});
   var okI=0;LE.iq.qs.forEach(function(q,i){r.iq.tot++;if(LE.selI[i]===q.a){okI++;r.iq.ok++}});
   var total=okM+okT+okI;
+  lCompleteHistory({set:LE.m,help:LE.help.matching},okM,matchingMax,endedAt);
+  lCompleteHistory({set:LE.tf,help:LE.help.true_false},okT,trueFalseMax,endedAt);
+  lCompleteHistory({set:LE.iq,help:LE.help.interview},okI,interviewMax,endedAt);
   listeningModule.examEvidenceSlices({matching:okM,matchingMax:matchingMax,trueFalse:okT,
     trueFalseMax:trueFalseMax,interview:okI,interviewMax:interviewMax},Math.max(0,endedAt-LE.t0))
     .forEach(function(slice){var evidence=slice.activityId===listeningModule.activityId('matching')?LE.evidence.gist:LE.evidence.detail;

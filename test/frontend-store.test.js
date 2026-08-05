@@ -27,6 +27,28 @@ test('frontend store normalizes and persists isolated user state', () => {
   assert.equal(store.loadLocal('student').learned, 4);
 });
 
+test('listening rotation history remains isolated in the existing per-user offline snapshots', () => {
+  const { store } = createStore();
+  const student = store.normalize({
+    listeningPilotHistory: {
+      version: 1,
+      items: {
+        'listening-pilot-v1.matching.sample@1': {
+          id: 'listening-pilot-v1.matching.sample', revision: 1, attempts: 1,
+          lastScore: 4, lastMaxScore: 6, lastAttemptAt: 100,
+          transcriptExposed: true,
+          help: { slowPlayback: false, additionalPlaybacks: 0, synthFallback: false },
+        },
+      },
+      lastSelected: { matching: { id: 'listening-pilot-v1.matching.sample', revision: 1 } },
+    },
+  });
+  assert.equal(store.saveLocal('student-a', student), true);
+
+  assert.equal(store.loadLocal('student-b').listeningPilotHistory, undefined);
+  assert.equal(Object.keys(store.loadLocal('student-a').listeningPilotHistory.items).length, 1);
+});
+
 test('frontend store exposes the offline synchronization layer', () => {
   const { store, sync } = createStore({ eb_data_broken: '{invalid' });
   assert.equal(store.sync, sync);

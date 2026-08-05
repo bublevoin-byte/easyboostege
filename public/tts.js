@@ -47,18 +47,19 @@ function listeningAssets(manifest,set,lineCount){if(!set||typeof set.id!=='strin
   var assets=manifest.assets.filter(function(asset){return asset.setId===set.id&&asset.revision===set.revision})
     .sort(function(left,right){return left.segmentIndex-right.segmentIndex});
   if(assets.length!==lineCount||assets.some(function(asset,index){return asset.segmentIndex!==index}))return[];return assets}
-function listeningFallback(lines,status){stopTtsAudio();TTS_DEPS.lStopFallback();try{TTS_DEPS.listeningAudioStatus(status)}catch(e){}lPlayRaw(lines);return false}
-async function lPlayListeningSet(set,lines){lines=Array.isArray(lines)?lines:[];
+function listeningStatus(status,onStatus){try{TTS_DEPS.listeningAudioStatus(status)}catch(e){}try{if(typeof onStatus==='function')onStatus(status)}catch(e){}}
+function listeningFallback(lines,status,onStatus){stopTtsAudio();TTS_DEPS.lStopFallback();listeningStatus(status,onStatus);lPlayRaw(lines);return false}
+async function lPlayListeningSet(set,lines,onStatus){lines=Array.isArray(lines)?lines:[];
   stopTtsAudio();TTS_DEPS.lStopFallback();var requestSequence=++TTS_SEQUENCE;
-  if(TTS_DEPS.slow())return listeningFallback(lines,'assisted-slow');
-  var manifest;try{manifest=await loadListeningManifest()}catch(e){if(requestSequence!==TTS_SEQUENCE)return false;return listeningFallback(lines,'fallback')}
+  if(TTS_DEPS.slow())return listeningFallback(lines,'assisted-slow',onStatus);
+  var manifest;try{manifest=await loadListeningManifest()}catch(e){if(requestSequence!==TTS_SEQUENCE)return false;return listeningFallback(lines,'fallback',onStatus)}
   if(requestSequence!==TTS_SEQUENCE)return false;
-  var assets=listeningAssets(manifest,set,lines.length);if(!assets.length)return listeningFallback(lines,'fallback');
+  var assets=listeningAssets(manifest,set,lines.length);if(!assets.length)return listeningFallback(lines,'fallback',onStatus);
   var index=0,fellBack=false;
-  function fallback(){if(fellBack||requestSequence!==TTS_SEQUENCE)return;fellBack=true;listeningFallback(lines,'fallback-error')}
+  function fallback(){if(fellBack||requestSequence!==TTS_SEQUENCE)return;fellBack=true;listeningFallback(lines,'fallback-error',onStatus)}
   async function playNext(){if(requestSequence!==TTS_SEQUENCE)return;
     if(index>=assets.length){TTS_CURRENT=null;try{TTS_DEPS.lPlayBtn('')}catch(e){}return}
-    var asset=assets[index++];if(index===1){try{TTS_DEPS.lPlayBtn('play')}catch(e){}try{TTS_DEPS.listeningAudioStatus('static')}catch(e){}}
+    var asset=assets[index++];if(index===1){try{TTS_DEPS.lPlayBtn('play')}catch(e){}listeningStatus('static',onStatus)}
     try{TTS_CURRENT=TTS_DEPS.createAudio(asset.path);TTS_CURRENT.onended=function(){playNext().catch(fallback)};TTS_CURRENT.onerror=fallback;
       await TTS_CURRENT.play()}catch(e){fallback()}}
   await playNext();return !fellBack}

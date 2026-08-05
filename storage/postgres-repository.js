@@ -1,5 +1,5 @@
 import pg from 'pg';
-import { requireModuleAttemptEvidenceQuality } from '../adaptive-learning/evidence-quality.js';
+import { adaptiveAssistedMetadata, requireModuleAttemptEvidenceQuality } from '../adaptive-learning/evidence-quality.js';
 import { compareAdaptiveEvidenceWatermarks } from '../adaptive-learning/evidence-watermark.js';
 import { adaptiveLearningGoalRepositoryDto } from '../adaptive-learning/goal-dto.js';
 import {
@@ -3497,6 +3497,7 @@ export function createPostgresRepository(connectionString, {
         adaptive_session_id: claim.session_id,
         adaptive_block_id: block.id,
         adaptive_content_ref: block.contentRef,
+        ...adaptiveAssistedMetadata(attempt.metadata),
       };
       const inserted = await client.query(
         `INSERT INTO module_attempts

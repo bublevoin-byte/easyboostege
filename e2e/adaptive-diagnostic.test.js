@@ -947,7 +947,7 @@ async function runAdaptiveDiagnosticE2E() {
       }
       await page.getByRole('button', { name: /Дальше/u }).click();
     } else if (firstActivity.launch.mode === 'matching') {
-      for (let row = 0; row < 4; row += 1) {
+      for (let row = 0; row < 6; row += 1) {
         await page.locator(`#lmt_row_${row} button`).nth(row).click();
       }
       await page.getByRole('button', { name: 'Проверить', exact: true }).click();

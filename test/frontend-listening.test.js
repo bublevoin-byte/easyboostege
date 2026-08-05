@@ -99,3 +99,117 @@ test('listening exam emits one gist and one detail slice whose durations sum to 
   ]);
   assert.equal(slices.reduce((sum, slice) => sum + slice.durationMs, 0), 1_001);
 });
+
+test('listening history keeps only bounded attempt metadata for a stable set revision', () => {
+  const listening = createListeningModule();
+  const set = { id: 'listening-pilot-v1.interview.city-gardens', revision: 2 };
+  const history = listening.recordCatalogAttempt(null, set, {
+    score: 4,
+    maxScore: 7,
+    attemptedAt: Date.parse('2026-08-05T10:00:00.000Z'),
+    transcriptExposed: true,
+    help: { slowPlayback: true, additionalPlaybacks: 2, synthFallback: true },
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(history)), {
+    version: 1,
+    items: {
+      'listening-pilot-v1.interview.city-gardens@2': {
+        id: 'listening-pilot-v1.interview.city-gardens',
+        revision: 2,
+        attempts: 1,
+        lastScore: 4,
+        lastMaxScore: 7,
+        lastAttemptAt: 1_785_924_000_000,
+        transcriptExposed: true,
+        help: { slowPlayback: true, additionalPlaybacks: 2, synthFallback: true },
+      },
+    },
+    presented: {},
+    lastSelected: {},
+  });
+  assert.doesNotMatch(JSON.stringify(history), /city gardens|correct answer|audio\/listening/iu);
+});
+
+test('listening history uses help from the latest attempt instead of permanently weakening a set', () => {
+  const listening = createListeningModule();
+  const set = { id: 'listening-pilot-v1.interview.latest-help', revision: 1 };
+  let history = listening.recordCatalogAttempt(null, set, {
+    score: 2, maxScore: 7, attemptedAt: 100, transcriptExposed: true,
+    help: { slowPlayback: true, additionalPlaybacks: 3, synthFallback: true },
+  });
+  history = listening.recordCatalogAttempt(history, set, {
+    score: 7, maxScore: 7, attemptedAt: 200, transcriptExposed: true,
+    help: { slowPlayback: false, additionalPlaybacks: 0, synthFallback: false },
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(history.items[`${set.id}@1`].help)), {
+    slowPlayback: false, additionalPlaybacks: 0, synthFallback: false,
+  });
+  assert.equal(history.items[`${set.id}@1`].attempts, 2);
+});
+
+test('listening selector prefers unseen sets and avoids the immediately previous id', () => {
+  const listening = createListeningModule();
+  const pool = [
+    { id: 'listening-pilot-v1.matching.alpha', revision: 1, type: 'matching' },
+    { id: 'listening-pilot-v1.matching.beta', revision: 1, type: 'matching' },
+    { id: 'listening-pilot-v1.matching.gamma', revision: 1, type: 'matching' },
+  ];
+  let history = listening.rememberCatalogSelection(null, 'matching', pool[0]);
+  history = listening.recordCatalogAttempt(history, pool[0], {
+    score: 6, maxScore: 6, attemptedAt: 100, transcriptExposed: true,
+  });
+
+  const first = listening.selectCatalogSet(pool, history, 'matching', 200);
+  assert.equal(first.id, pool[1].id);
+  history = listening.rememberCatalogSelection(history, 'matching', first);
+  history = listening.recordCatalogAttempt(history, first, {
+    score: 5, maxScore: 6, attemptedAt: 200, transcriptExposed: true,
+  });
+
+  const second = listening.selectCatalogSet(pool, history, 'matching', 300);
+  assert.equal(second.id, pool[2].id);
+});
+
+test('twenty abandoned listening launches present twenty unique sets before any repeat', () => {
+  const listening = createListeningModule();
+  const pool = Array.from({ length: 20 }, (_, index) => ({
+    id: `listening-pilot-v1.matching.set-${String(index + 1).padStart(2, '0')}`,
+    revision: 1, type: 'matching',
+  }));
+  let history = null;
+  const selected = [];
+  for (let index = 0; index < pool.length; index += 1) {
+    const set = listening.selectCatalogSet(pool, history, 'matching', 100 + index);
+    selected.push(set.id);
+    history = listening.rememberCatalogSelection(history, 'matching', set);
+  }
+  assert.deepEqual(selected, pool.map((set) => set.id));
+  assert.equal(Object.keys(history.presented).length, 20);
+});
+
+test('after unseen listening sets are exhausted selection is deterministic, due-first and weak-first', () => {
+  const listening = createListeningModule();
+  const now = Date.parse('2026-08-05T12:00:00.000Z');
+  const pool = [
+    { id: 'listening-pilot-v1.true-false.strong', revision: 1, type: 'true_false' },
+    { id: 'listening-pilot-v1.true-false.weak', revision: 1, type: 'true_false' },
+    { id: 'listening-pilot-v1.true-false.recent', revision: 1, type: 'true_false' },
+  ];
+  let history = null;
+  history = listening.recordCatalogAttempt(history, pool[0], {
+    score: 7, maxScore: 7, attemptedAt: now - 8 * 86_400_000, transcriptExposed: true,
+  });
+  history = listening.recordCatalogAttempt(history, pool[1], {
+    score: 2, maxScore: 7, attemptedAt: now - 2 * 86_400_000, transcriptExposed: true,
+  });
+  history = listening.recordCatalogAttempt(history, pool[2], {
+    score: 4, maxScore: 7, attemptedAt: now - 60_000, transcriptExposed: true,
+  });
+  history = listening.rememberCatalogSelection(history, 'true_false', pool[2]);
+
+  assert.equal(listening.selectCatalogSet(pool, history, 'true_false', now).id, pool[1].id);
+  assert.equal(listening.catalogAttemptIsAssisted(history, pool[1]), true);
+  assert.equal(listening.catalogAttemptIsAssisted(null, pool[1]), false);
+});

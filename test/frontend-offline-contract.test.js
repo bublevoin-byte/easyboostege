@@ -494,6 +494,19 @@ test('the app shell still comes from the cache offline, so the previous test is 
   assert.equal((await navigation.responded).fromCache, true);
 });
 
+test('a loaded listening catalog joins the runtime cache and remains available offline', async () => {
+  const url = `${ORIGIN}/listening-pilot-v1.js`;
+  const online = createWorker({ networkFails: false });
+  const first = dispatchFetch(online, { method: 'GET', url, mode: 'cors' });
+  assert.equal((await first.responded).fromNetwork, true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(online.store.get(url).fromNetwork, true);
+
+  const offline = createWorker({ cached: Object.fromEntries(online.store), networkFails: true });
+  const replay = dispatchFetch(offline, { method: 'GET', url, mode: 'cors' });
+  assert.equal((await replay.responded).fromNetwork, true);
+});
+
 test('a successful navigation refreshes the cached shell for the next offline start', async () => {
   const stale = { ok: true, status: 200, fromCache: true };
   const worker = createWorker({ cached: { '/': stale }, networkFails: false });

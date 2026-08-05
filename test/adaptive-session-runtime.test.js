@@ -124,11 +124,17 @@ test('offline completion stays pending and is never displayed as a completed ada
   }), false, 'a completion hook from another screen cannot consume the active claim');
   assert.equal(harness.runtime.adaptiveRuntimeSnapshot().active.pending, null);
   harness.setOnline(false);
-  const queued = await harness.runtime.completeAdaptiveModuleActivity({ module: 'grammar', activityId: 'grammar_forms_topic_3', score: 9, maxScore: 5 });
+  const queued = await harness.runtime.completeAdaptiveModuleActivity({
+    module: 'grammar', activityId: 'grammar_forms_topic_3', score: 9, maxScore: 5,
+    metadata: { mode: 'topic_practice', source: 'builtin', helpUsed: true, hintsUsed: 2 },
+  });
   assert.equal(queued.queued, true);
   const pending = harness.runtime.adaptiveRuntimeSnapshot();
   assert.equal(pending.active.pending.phase, 'attempt');
   assert.equal(pending.active.pending.payload.score, 5, 'client score is clamped to maxScore');
+  assert.deepEqual(pending.active.pending.payload.metadata, {
+    mode: 'topic_practice', source: 'builtin', helpUsed: true, hintsUsed: 2,
+  });
   assert.equal(pending.lastResult, null, 'offline work must not look server-completed');
   assert.equal(harness.navigations.length, 0, 'the learner stays in the activity until confirmation');
   assert.equal(harness.requests.filter((item) => item.path === '/api/v1/module-attempts').length, 0);
@@ -187,6 +193,39 @@ test('a superficially valid handoff with a cross-activity pending payload is dis
   assert.equal(harness.runtime.adaptiveRuntimeSnapshot().active, null);
   assert.equal(harness.values.has('easyboost.adaptive.execution.v1'), false);
   assert.equal(harness.requests.length, 0);
+});
+
+test('a valid older queued module attempt without assisted metadata still resumes', async () => {
+  const harness = runtimeHarness();
+  const savedAt = Date.now();
+  const attemptId = '10000000-0000-4000-8000-000000000033';
+  harness.values.set('easyboost.adaptive.execution.v1', JSON.stringify({
+    version: 3, owner: 'adaptive-owner', savedAt, active: {
+      sessionId: SESSION_ID,
+      blockId: BLOCK.id,
+      executionClaim: 'a'.repeat(43),
+      module: BLOCK.module,
+      activityId: BLOCK.activityId,
+      contentRef: BLOCK.contentRef,
+      expectedRevision: 1,
+      startedAt: savedAt - 1_000,
+      claimExpiresAt: savedAt + 60_000,
+      evidenceContext: 'planned_practice',
+      pending: {
+        phase: 'attempt', advanceKey: '10000000-0000-4000-8000-000000000034',
+        payload: {
+          id: attemptId, module: BLOCK.module, activity: BLOCK.activityId,
+          score: 4, maxScore: 5, durationMs: 1_000,
+          adaptiveExecutionClaim: 'a'.repeat(43),
+        },
+      },
+    }, control: null, lastResult: null,
+  }));
+
+  await harness.runtime.resumeAdaptiveExecution();
+  const attemptRequest = harness.requests.find((item) => item.path === '/api/v1/module-attempts');
+  assert.equal(attemptRequest.body.id, attemptId);
+  assert.equal(Object.hasOwn(attemptRequest.body, 'metadata'), false);
 });
 
 test('a lost start response is replayed with the exact idempotency key and body', async () => {

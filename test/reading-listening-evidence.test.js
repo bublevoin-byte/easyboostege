@@ -86,7 +86,7 @@ function elementStore() {
   };
 }
 
-function createSubjectHarness(subject, { offline = false, slow = false } = {}) {
+function createSubjectHarness(subject, { offline = false, slow = false, listeningAudioStatus = 'static' } = {}) {
   let now = 10_000;
   let active = null;
   let uuid = 100;
@@ -200,7 +200,11 @@ function createSubjectHarness(subject, { offline = false, slow = false } = {}) {
     lSync() {},
     lSetSlow() {},
     lPlayRaw() {},
-    lPlayListeningSet(set, lines) { staticPlays.push({ setId: set?.id || null, lines: lines.length }); },
+    lPlayListeningSet(set, lines, onStatus) {
+      staticPlays.push({ setId: set?.id || null, lines: lines.length });
+      if (typeof onStatus === 'function') onStatus(listeningAudioStatus);
+      return Promise.resolve(listeningAudioStatus === 'static');
+    },
     lStop() {},
     examModule: {
       elapsedSeconds: (startedAt, endedAt) => Math.floor((endedAt - startedAt) / 1_000),
@@ -262,9 +266,11 @@ function createSubjectHarness(subject, { offline = false, slow = false } = {}) {
     vm.runInContext(executableScreen(listeningScreenFile, `
       window.__subjectEvidenceTest={
         startMatching:lMt,
-        installMatchingCatalog:function(){lSetMatchingCatalog(LISTENING_MATCHING_SETS)},
-        installTrueFalseCatalog:function(){lSetTrueFalseCatalog(LISTENING_TRUE_FALSE_SETS)},
-        installInterviewCatalog:function(){lSetInterviewCatalog(LISTENING_INTERVIEW_SETS)},
+        installMatchingCatalog:function(sets){lSetMatchingCatalog(sets||LISTENING_MATCHING_SETS)},
+        installTrueFalseCatalog:function(sets){lSetTrueFalseCatalog(sets||LISTENING_TRUE_FALSE_SETS)},
+        installInterviewCatalog:function(sets){lSetInterviewCatalog(sets||LISTENING_INTERVIEW_SETS)},
+        currentSetIds:function(){return {matching:LM&&LM.set.id,trueFalse:LT&&LT.set.id,interview:LI&&LI.set.id,
+          exam:LE&&{matching:LE.m.id,trueFalse:LE.tf.id,interview:LE.iq.id}}},
         playMatching:function(){lPlay(lMtLines())},
         completeMatching:function(correct){LM.set.a.forEach(function(answer,index){lMtPick(index,correct===false?(answer+1)%LM.set.st.length:answer)});lMtCheck()},
         startTrueFalse:lTf,
@@ -296,6 +302,7 @@ function createSubjectHarness(subject, { offline = false, slow = false } = {}) {
     values,
     navigator,
     sync: window.EasyBoostSync,
+    state: S,
     advance(milliseconds) { now += milliseconds; },
     setActive(value) { active = value; },
   };
@@ -544,6 +551,83 @@ test('listening exact adaptive completion is exclusive, mismatch is blocked and 
   assert.deepEqual(assisted.ordinary[0].metadata, {
     mode: 'listening_true_false', source: 'builtin', helpUsed: true, hintsUsed: 0,
   });
+});
+
+test('ordinary and combined listening modes rotate through unseen catalog sets', async () => {
+  const ordinary = createSubjectHarness('listening');
+  ordinary.screen.startMatching();
+  const firstMatching = ordinary.screen.currentSetIds().matching;
+  ordinary.screen.completeMatching(true);
+  ordinary.screen.startMatching();
+  assert.notEqual(ordinary.screen.currentSetIds().matching, firstMatching);
+
+  ordinary.screen.startTrueFalse();
+  const firstTrueFalse = ordinary.screen.currentSetIds().trueFalse;
+  ordinary.screen.completeTrueFalse(true);
+  ordinary.screen.startTrueFalse();
+  assert.notEqual(ordinary.screen.currentSetIds().trueFalse, firstTrueFalse);
+
+  ordinary.screen.startInterview();
+  const firstInterview = ordinary.screen.currentSetIds().interview;
+  ordinary.screen.completeInterview(true);
+  ordinary.screen.startInterview();
+  assert.notEqual(ordinary.screen.currentSetIds().interview, firstInterview);
+
+  const combined = createSubjectHarness('listening');
+  combined.screen.startExam();
+  const firstExam = combined.screen.currentSetIds().exam;
+  combined.screen.completeExam(true);
+  combined.screen.startExam();
+  const secondExam = combined.screen.currentSetIds().exam;
+  assert.notEqual(secondExam.matching, firstExam.matching);
+  assert.notEqual(secondExam.trueFalse, firstExam.trueFalse);
+  assert.notEqual(secondExam.interview, firstExam.interview);
+});
+
+test('revealed transcript and synthesized fallback make later evidence assisted without storing content', async () => {
+  const transcript = createSubjectHarness('listening');
+  transcript.screen.installMatchingCatalog([LISTENING_MATCHING_SETS[0]]);
+  transcript.screen.startMatching();
+  transcript.screen.completeMatching(true);
+  transcript.screen.startMatching();
+  transcript.screen.completeMatching(true);
+  await settle();
+
+  assert.equal(transcript.ordinary[0].metadata.helpUsed, false);
+  assert.equal(transcript.ordinary[1].metadata.helpUsed, true);
+  assert.doesNotMatch(JSON.stringify(transcript.state.listeningPilotHistory), /Speaker|statement|audio\/listening/iu);
+
+  const fallback = createSubjectHarness('listening', { listeningAudioStatus: 'fallback' });
+  fallback.screen.startInterview();
+  fallback.screen.playInterview();
+  await settle();
+  fallback.screen.completeInterview(true);
+  await settle();
+
+  assert.equal(fallback.ordinary[0].metadata.helpUsed, true);
+  const record = Object.values(fallback.state.listeningPilotHistory.items)[0];
+  assert.equal(record.help.synthFallback, true);
+});
+
+test('a third ordinary playback is recorded as help while two static MP3 plays stay unassisted', async () => {
+  const independent = createSubjectHarness('listening');
+  independent.screen.startTrueFalse();
+  independent.screen.playTrueFalse();
+  independent.screen.playTrueFalse();
+  independent.screen.completeTrueFalse(true);
+  await settle();
+  assert.equal(independent.ordinary[0].metadata.helpUsed, false);
+
+  const assisted = createSubjectHarness('listening');
+  assisted.screen.startTrueFalse();
+  assisted.screen.playTrueFalse();
+  assisted.screen.playTrueFalse();
+  assisted.screen.playTrueFalse();
+  assisted.screen.completeTrueFalse(true);
+  await settle();
+  assert.equal(assisted.ordinary[0].metadata.helpUsed, true);
+  const record = Object.values(assisted.state.listeningPilotHistory.items)[0];
+  assert.equal(record.help.additionalPlaybacks, 1);
 });
 
 test('a reading screen completion stays in the production offline queue for its owner and flushes once', async () => {

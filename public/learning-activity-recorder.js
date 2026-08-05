@@ -73,6 +73,7 @@ export async function recordCompletedLearningActivity(completion = {}) {
       score: attempt.score,
       maxScore: attempt.maxScore,
       durationMs: attempt.durationMs,
+      ...(attempt.metadata.helpUsed === true ? { metadata: attempt.metadata } : {}),
     });
     return { path: 'adaptive', result };
   }

@@ -186,13 +186,14 @@ test('an exact active adaptive block uses only its execution-claim path', async 
     id: ATTEMPT_ID,
     module: 'grammar', activityId: 'grammar_forms_topic_3',
     score: 3, maxScore: 4, durationMs: 45_000,
-    metadata: { mode: 'topic_practice' },
+    metadata: { mode: 'topic_practice', source: 'builtin', helpUsed: true, hintsUsed: 1 },
   });
 
   assert.equal(result.path, 'adaptive');
   assert.deepEqual(JSON.parse(JSON.stringify(harness.adaptive)), [{
     module: 'grammar', activityId: 'grammar_forms_topic_3',
     score: 3, maxScore: 4, durationMs: 45_000,
+    metadata: { mode: 'topic_practice', source: 'builtin', helpUsed: true, hintsUsed: 1 },
   }]);
   assert.equal(harness.ordinary.length, 0, 'the same completion cannot create an ordinary duplicate');
 });
