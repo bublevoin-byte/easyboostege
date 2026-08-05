@@ -280,13 +280,20 @@ test('new production users start with zero real progress', async () => {
 
 test('progress sync queues the latest state and retries when connectivity returns', async () => {
   const sync = await fs.readFile(new URL('../public/sync.js', import.meta.url), 'utf8');
-  assert.match(sync, /easyboost_pending_modules_v2/u);
+  assert.match(sync, /easyboost_pending_modules_v3/u);
+  assert.match(sync, /LEGACY_STORAGE_KEY='easyboost_pending_modules_v2'/u);
+  assert.match(sync, /store\.owners\[ownerKey\]=\{modules:merged,queuedAt:Date\.now\(\)\}/u);
   assert.match(sync, /navigator\.onLine===false/u);
   assert.match(sync, /window\.addEventListener\('online',flush\)/u);
   assert.match(sync, /EasyBoostApi\.post\('\/api\/v1\/progress\/modules',\{modules:modules\},true\)/u);
   assert.match(sync, /error\.status>=500/u);
   assert.match(sync, /pending&&pending\.modules/u);
-  assert.doesNotMatch(sync, /push\(/u);
+  assert.match(sync, /easyboost_pending_module_attempts_v1/u);
+  assert.match(sync, /store\.owners\[owner\]=attempts\.slice\(-MAX_PENDING_ATTEMPTS\)/u);
+  assert.match(sync, /setOwner/u);
+  assert.match(sync, /MAX_ATTEMPT_BYTES=20_000/u);
+  const privacy = await fs.readFile(new URL('../public/privacy.js', import.meta.url), 'utf8');
+  assert.match(privacy, /EasyBoostSync\?\.clearOwner\(\)/u);
 });
 
 test('module progress endpoint merges validated keys instead of replacing the document', async () => {

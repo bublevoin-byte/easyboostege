@@ -18,8 +18,8 @@ import {
   summarizeVocabularySession,
 } from '../vocabulary-domain.js';
 import {
-  EGE_WORDS,S,SRV,TOKEN,WBTN,apiPost,generateAiContent,registerScreenGenerator,save,srsFail,srsOk,
-  srsRecordVocabularyOutcome,toast,todayStr,ui,wBase,wDeco,wMergeAi,wMigrate,wStats,wSync,wordModule,
+  EGE_WORDS,S,SRV,TOKEN,WBTN,generateAiContent,registerScreenGenerator,save,srsFail,srsOk,
+  srsRecordVocabularyOutcome,syncModuleAttempt,toast,todayStr,ui,wBase,wDeco,wMergeAi,wMigrate,wStats,wSync,wordModule,
 } from '../app.js';
 
 /* ===== WORDS v2: SRS-словарь ЕГЭ ===== */
@@ -373,7 +373,7 @@ function wReportSessionAttempt(){if(W_MODULE_ATTEMPT_REPORTED||!W_SESSION_ATTEMP
       .then(function(result){if(!result){W_MODULE_ATTEMPT_REPORTED=false;W_ADAPTIVE_REPORTED=false}})
       .catch(function(){W_MODULE_ATTEMPT_REPORTED=false;W_ADAPTIVE_REPORTED=false});return}
   if(typeof SRV==='undefined'||!SRV||!TOKEN)return;W_MODULE_ATTEMPT_REPORTED=true;
-  apiPost('/api/v1/module-attempts',attempt).catch(function(){W_MODULE_ATTEMPT_REPORTED=false})}
+  syncModuleAttempt(attempt)}
 function wRenderSummary(card,opts){var summary=summarizeVocabularySession(W_EVENTS);W_LAST_SUMMARY=summary;
   if(!W_SUMMARY_SAVED){W_SUMMARY_SAVED=true;S.vocabularyHistory=appendVocabularySessionHistory(S.vocabularyHistory,summary);save();wSync()}
   wReportSessionAttempt();

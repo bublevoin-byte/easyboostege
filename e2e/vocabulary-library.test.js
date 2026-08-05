@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import jwt from 'jsonwebtoken';
 
 const projectDirectory = fileURLToPath(new URL('..', import.meta.url));
 const serverPath = fileURLToPath(new URL('../server.js', import.meta.url));
@@ -74,7 +75,15 @@ try {
   const port = await availablePort();
   const baseUrl = 'http://127.0.0.1:' + port;
   const dataFile = path.join(temporaryDirectory, 'data.json');
-  await fs.writeFile(dataFile, '{}', 'utf8');
+  await fs.writeFile(dataFile, JSON.stringify({
+    users: {
+      'vocabulary-sync-user': {
+        created: Date.now(),
+        sub_until: Date.now() + 86_400_000,
+      },
+    },
+    progress: { 'vocabulary-sync-user': {} },
+  }), 'utf8');
   const output = [];
   child = spawn(process.execPath, [serverPath], {
     cwd: projectDirectory,
@@ -438,6 +447,82 @@ try {
   assert.deepEqual(pageErrors, []);
 
   await context.close();
+
+  const authenticatedContext = await browser.newContext({
+    viewport: { width: 375, height: 812 },
+    reducedMotion: 'reduce',
+    serviceWorkers: 'block',
+  });
+  await authenticatedContext.addCookies([{
+    name: 'eb_token',
+    value: jwt.sign({ u: 'vocabulary-sync-user' }, 'vocabulary-e2e-test-only-secret-32-characters', {
+      expiresIn: '1h',
+    }),
+    url: baseUrl,
+    httpOnly: true,
+    sameSite: 'Lax',
+  }]);
+  const authenticatedPage = await authenticatedContext.newPage();
+  await authenticatedPage.goto(baseUrl, { waitUntil: 'networkidle' });
+  await authenticatedPage.locator('#scr1.on').waitFor({ state: 'visible', timeout: 5_000 });
+  await authenticatedPage.getByRole('button', { name: 'Слова', exact: true }).press('Enter');
+  await authenticatedPage.locator('#scr2.on').waitFor();
+  await authenticatedPage.evaluate(() => {
+    const now = Date.now() - 1_000;
+    const dimension = (score = 0, evidence = 'none', attempts = 0) => ({
+      score, attempts, independentSuccesses: evidence === 'objective' ? attempts : 0,
+      evidence, lastPracticedAt: attempts ? now : null,
+    });
+    window.EGE_WORDS.splice(0, window.EGE_WORDS.length, {
+      w: 'syncword', p: 'n', t: 2, tr: 'слово для синхронизации', ex: 'Type the syncword now.',
+    });
+    window.S.srs = {
+      syncword: {
+        word: 'syncword', masteryVersion: 1, stage: 2, s: 2, errorCount: 0, e: 0,
+        reviewCount: 2, n: 2, dueAt: now, due: now,
+        lastMode: 'russian_reveal', lastOutcome: 'knew',
+        dimensions: {
+          meaning: dimension(30, 'self_reported', 2), spelling: dimension(),
+          context: dimension(), listening: dimension(),
+        },
+      },
+    };
+    window.S.personalWords = [];
+    window.S.personalWordTombstones = [];
+    window.S.wstatus = {};
+    window.S.vocabularyHistory = [];
+    window.S.vocabularyNewBudget = 5;
+    window.wShowHome();
+  });
+  await authenticatedContext.setOffline(true);
+  await authenticatedPage.getByRole('button', { name: /^Начать ·/u }).press('Enter');
+  await authenticatedPage.getByRole('heading', { name: 'Напиши слово' }).waitFor();
+  await authenticatedPage.getByLabel('Ответ по-английски').fill('syncword');
+  await authenticatedPage.getByRole('button', { name: 'Проверить' }).press('Enter');
+  await authenticatedPage.getByRole('button', { name: 'Дальше' }).press('Enter');
+  await authenticatedPage.getByRole('heading', { name: 'Итоги тренировки' }).waitFor();
+  const queuedAttempt = await authenticatedPage.evaluate(() => {
+    const attempts = window.EasyBoostSync.pendingModuleAttempts();
+    return { count: attempts.length, id: attempts[0]?.id || '', pending: window.EasyBoostSync.hasPending() };
+  });
+  assert.equal(queuedAttempt.count, 1);
+  assert.equal(queuedAttempt.pending, true);
+  assert.match(queuedAttempt.id, /^[0-9a-f-]{36}$/u);
+
+  await authenticatedContext.setOffline(false);
+  await authenticatedPage.waitForFunction(() => window.EasyBoostSync.pendingModuleAttempts().length === 0);
+  await authenticatedPage.evaluate(() => window.EasyBoostSync.flush());
+  const persistedAttempts = await fs.readFile(dataFile, 'utf8').then((contents) => {
+    const data = JSON.parse(contents);
+    return (data.module_attempts || []).filter((attempt) => (
+      attempt.username === 'vocabulary-sync-user' && attempt.id === queuedAttempt.id
+    ));
+  });
+  assert.equal(persistedAttempts.length, 1, 'offline completion must synchronize exactly once');
+  assert.equal(persistedAttempts[0].evidence_quality, 'client_reported');
+  assert.equal(persistedAttempts[0].module, 'vocabulary');
+  assert.equal(await authenticatedPage.evaluate(() => window.EasyBoostSync.hasPending()), false);
+  await authenticatedContext.close();
   console.log('vocabulary library e2e passed');
 } finally {
   if (browser) await browser.close();

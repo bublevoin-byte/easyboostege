@@ -166,11 +166,12 @@ function createSync({ online = false, failRequest = true } = {}) {
     Date,
     Promise,
   });
-  return { sync: window.EasyBoostSync, posts, values };
+  return { sync: window.EasyBoostSync, posts, values, window };
 }
 
 test('offline progress synchronization reports failure instead of a silent success', async () => {
   const { sync, posts } = createSync({ online: false });
+  sync.setOwner('learner-a');
   await sync.setBaseline({ words: { learned: 10 } });
 
   const result = await sync.saveProgress({ words: { learned: 14 } });
@@ -179,19 +180,25 @@ test('offline progress synchronization reports failure instead of a silent succe
   assert.equal(posts.length, 0, 'при navigator.onLine === false запрос не отправляется вовсе');
   assert.equal(sync.hasPending(), true, 'изменение обязано остаться в очереди, а не потеряться');
   assert.deepEqual(sync.pendingModules(), { words: { learned: 14 } });
+  sync.setOwner('learner-b');
+  assert.equal(Object.keys(sync.pendingModules()).length, 0, 'другой аккаунт не видит очередь прогресса');
+  sync.setOwner('learner-a');
+  assert.deepEqual(sync.pendingModules(), { words: { learned: 14 } });
 });
 
 test('a queued change survives until the network actually accepts it', async () => {
   const offline = createSync({ online: false });
+  offline.sync.setOwner('learner-a');
   await offline.sync.setBaseline({ words: { learned: 10 } });
   await offline.sync.saveProgress({ words: { learned: 14 } });
 
   /* The queue is shared through localStorage, so a later online session sees it. */
-  const queued = offline.values.get('easyboost_pending_modules_v2');
+  const queued = offline.values.get('easyboost_pending_modules_v3');
   assert.ok(queued, 'очередь синхронизации должна пережить перезапуск приложения');
 
   const online = createSync({ online: true, failRequest: false });
-  online.values.set('easyboost_pending_modules_v2', queued);
+  online.values.set('easyboost_pending_modules_v3', queued);
+  online.sync.setOwner('learner-a');
 
   const flushed = await online.sync.flush();
   assert.equal(flushed, true);
@@ -202,6 +209,7 @@ test('a queued change survives until the network actually accepts it', async () 
 
 test('a failed online attempt keeps the change queued rather than dropping it', async () => {
   const { sync, posts } = createSync({ online: true, failRequest: true });
+  sync.setOwner('learner-a');
   await sync.setBaseline({ words: { learned: 10 } });
 
   const result = await sync.saveProgress({ words: { learned: 14 } });
@@ -209,6 +217,128 @@ test('a failed online attempt keeps the change queued rather than dropping it', 
   assert.equal(result, false);
   assert.equal(posts.length, 1, 'при onLine === true попытка делается');
   assert.equal(sync.hasPending(), true, 'сорвавшийся запрос не должен стоить ученику прогресса');
+});
+
+test('an offline vocabulary attempt is owner-bound, durable and first-write-wins', async () => {
+  const { sync, posts } = createSync({ online: false });
+  sync.setOwner('learner-a');
+  const attempt = {
+    id: 'vocabulary-session-1', module: 'vocabulary', activity: 'vocabulary_active_recall_session',
+    score: 3, maxScore: 4, durationMs: 90_000, metadata: { evidence: 'objective' },
+  };
+
+  assert.equal(await sync.saveModuleAttempt(attempt), false);
+  assert.equal(await sync.saveModuleAttempt({ ...attempt, score: 4 }), false);
+  assert.equal(posts.length, 0);
+  assert.equal(sync.hasPending(), true);
+  assert.equal(sync.pendingModuleAttempts().length, 1);
+  assert.equal(sync.pendingModuleAttempts()[0].score, 3,
+    'conflicting replay must not replace the first durable result');
+
+  sync.setOwner('learner-b');
+  assert.equal(sync.pendingModuleAttempts().length, 0, 'another account cannot see the queued attempt');
+  sync.setOwner('learner-a');
+  assert.equal(sync.pendingModuleAttempts().length, 1);
+  assert.equal(sync.clearOwner(), true);
+  sync.setOwner('learner-a');
+  assert.equal(sync.pendingModuleAttempts().length, 0, 'account deletion must clear its local attempt queue');
+  assert.equal(await sync.saveModuleAttempt({ ...attempt, id: 'oversized', metadata: { value: 'x'.repeat(21_000) } }), false);
+  assert.equal(sync.pendingModuleAttempts().length, 0, 'oversized local attempts fail closed');
+});
+
+test('a queued vocabulary attempt syncs exactly once after the same owner returns online', async () => {
+  const attempt = {
+    id: 'vocabulary-session-2', module: 'vocabulary', activity: 'vocabulary_active_recall_session',
+    score: 2, maxScore: 3, durationMs: 60_000, metadata: { evidence: 'objective' },
+  };
+  const offline = createSync({ online: false });
+  offline.sync.setOwner('learner-a');
+  await offline.sync.saveModuleAttempt(attempt);
+  const queued = offline.values.get('easyboost_pending_module_attempts_v1');
+  assert.ok(queued, 'attempt queue must survive a reload');
+
+  const online = createSync({ online: true, failRequest: false });
+  online.values.set('easyboost_pending_module_attempts_v1', queued);
+  online.sync.setOwner('learner-b');
+  assert.equal(await online.sync.flush(), false);
+  assert.equal(online.posts.length, 0, 'a different owner must not upload the attempt');
+
+  online.sync.setOwner('learner-a');
+  assert.equal(await online.sync.flush(), true);
+  assert.equal(online.posts.length, 1);
+  assert.equal(online.posts[0].path, '/api/v1/module-attempts');
+  assert.equal(online.posts[0].body.id, attempt.id);
+  assert.equal(online.sync.pendingModuleAttempts().length, 0);
+  assert.equal(await online.sync.flush(), false);
+  assert.equal(online.posts.length, 1, 'a second flush must not duplicate the attempt');
+});
+
+test('switching accounts during an attempt flush cannot remove or upload the other owner queue', async () => {
+  const active = createSync({ online: true, failRequest: false });
+  let releaseFirst;
+  let firstStarted;
+  const started = new Promise((resolve) => { firstStarted = resolve; });
+  active.window.EasyBoostApi.post = async (path, body) => {
+    active.posts.push({ path, body });
+    if (body.id === 'owner-a-attempt') {
+      firstStarted();
+      await new Promise((resolve) => { releaseFirst = resolve; });
+    }
+    return { ok: true };
+  };
+
+  active.sync.setOwner('learner-a');
+  const first = active.sync.saveModuleAttempt({
+    id: 'owner-a-attempt', module: 'vocabulary', activity: 'vocabulary_active_recall_session',
+    score: 1, maxScore: 2, durationMs: 30_000, metadata: {},
+  });
+  await started;
+
+  active.sync.setOwner('learner-b');
+  const second = active.sync.saveModuleAttempt({
+    id: 'owner-b-attempt', module: 'vocabulary', activity: 'vocabulary_active_recall_session',
+    score: 2, maxScore: 2, durationMs: 30_000, metadata: {},
+  });
+  releaseFirst();
+  await Promise.all([first, second]);
+
+  assert.deepEqual(active.posts.map((entry) => entry.body.id), ['owner-a-attempt', 'owner-b-attempt']);
+  active.sync.setOwner('learner-a');
+  assert.equal(active.sync.pendingModuleAttempts().length, 0);
+  active.sync.setOwner('learner-b');
+  assert.equal(active.sync.pendingModuleAttempts().length, 0);
+});
+
+test('an in-flight progress response only clears the owner and values it actually sent', async () => {
+  const active = createSync({ online: true, failRequest: false });
+  let releaseFirst;
+  let firstStarted;
+  const started = new Promise((resolve) => { firstStarted = resolve; });
+  active.window.EasyBoostApi.post = async (path, body) => {
+    active.posts.push({ path, body });
+    if (body.modules && body.modules.words && body.modules.words.learned === 11) {
+      firstStarted();
+      await new Promise((resolve) => { releaseFirst = resolve; });
+    }
+    return { ok: true };
+  };
+
+  active.sync.setOwner('learner-a');
+  await active.sync.setBaseline({ words: { learned: 10 } });
+  const first = active.sync.saveProgress({ words: { learned: 11 } });
+  await started;
+
+  active.sync.setOwner('learner-b');
+  await active.sync.setBaseline({ words: { learned: 20 } });
+  active.window.navigator.onLine = false;
+  assert.equal(await active.sync.saveProgress({ words: { learned: 21 } }), false);
+  releaseFirst();
+  await first;
+
+  assert.deepEqual(active.sync.pendingModules(), { words: { learned: 21 } },
+    'owner A response must not clear owner B queued progress');
+  active.sync.setOwner('learner-a');
+  assert.equal(Object.keys(active.sync.pendingModules()).length, 0);
 });
 
 /* ---------- service worker ---------- */

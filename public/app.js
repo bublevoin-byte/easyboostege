@@ -209,6 +209,7 @@ const apiGetBlob=EasyBoostApi.getBlob;
 const apiPostBinary=EasyBoostApi.postBinary;
 const apiMessage=EasyBoostApi.messageFor;
 const fillDefaults=store.normalize;
+function syncModuleAttempt(attempt){return store.sync.saveModuleAttempt(attempt)}
 
 /* save/load через сервер (или локально) */
 let _saveT=null;
@@ -224,6 +225,7 @@ async function startApp(){
   /* Встроенные задания нужны до первого экрана письма и должны быть доступны офлайн,
      поэтому банк загружается из закэшированного /task-bank.json на старте. */
   await loadTaskBank();
+  store.sync.setOwner(DEMO_MODE?null:currentUser);
   if(DEMO_MODE){tab('scr1');return}
   if(SRV){if(!TOKEN){show('scr5');document.getElementById('tabbar').style.display='none';return}
     var served=null;
@@ -255,6 +257,7 @@ async function doRegister(){
 async function logout(){
   try{if(SRV)await auth.logout()}catch(_){}
   TOKEN='';
+  store.sync.setOwner(null);
   clearAdaptiveRuntime();
   clearAdaptiveOverviewCache(localStorage);
   try{localStorage.removeItem('eb_current');localStorage.removeItem('eb_tg_code')}catch(_){}
@@ -262,7 +265,7 @@ async function logout(){
 }
 
 async function startDemo(){
-  DEMO_MODE=true;TOKEN='';currentUser='Демо';S=fillDefaults({demo:true});
+  DEMO_MODE=true;TOKEN='';currentUser='Демо';store.sync.setOwner(null);S=fillDefaults({demo:true});
   var bar=document.getElementById('tabbar');if(bar)bar.style.display='flex';
   var banner=document.getElementById('demo_banner');
   if(!banner){banner=document.createElement('button');banner.id='demo_banner';banner.type='button';banner.textContent='Демо · войти для сохранения';banner.setAttribute('aria-label','Демонстрационный режим. Войти для сохранения прогресса');banner.setAttribute('style','position:fixed;z-index:9998;top:max(8px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);border:0;border-radius:18px;background:#2B2B2B;color:#fff;padding:8px 14px;font:700 11px Manrope;cursor:pointer;');banner.onclick=function(){location.reload()};document.body.appendChild(banner)}
@@ -922,6 +925,6 @@ export {
   apiGet,apiMessage,apiPost,apiPostBinary,apiPostIdempotent,apiPut,currentUser,examModule,gExamFmt,gSync,generateAiContent,
   grammarModule,lSetSlow,lSt,lSync,listeningModule,profileModule,progressModule,readingModule,
   rEsc,rSt,rWordsHtml,registerScreenGenerator,ringOff,runProfileHooks,setTxt,setW,spSt,spSync,
-  speakingModule,srsFail,srsOk,srsRecordVocabularyOutcome,todayStr,ui,wBase,wDeco,wMergeAi,wMigrate,wRec,wStats,wSync,
+  speakingModule,srsFail,srsOk,srsRecordVocabularyOutcome,syncModuleAttempt,todayStr,ui,wBase,wDeco,wMergeAi,wMigrate,wRec,wStats,wSync,
   wordModule,writingModule,
 };

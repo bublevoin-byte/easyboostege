@@ -1,6 +1,6 @@
 # Active Vocabulary System — Specification
 
-Status: ready-for-agent
+Status: done
 Date: 2026-08-04
 Base branch: `feature/adaptive-learning-plan`
 

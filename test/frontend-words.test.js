@@ -173,7 +173,7 @@ test('ordinary vocabulary completion posts one stable bounded session summary', 
   assert.match(screenSource, /buildVocabularyModuleAttempt/u);
   assert.match(screenSource, /W_SESSION_ATTEMPT_ID/u);
   assert.match(screenSource, /W_MODULE_ATTEMPT_REPORTED/u);
-  assert.match(screenSource, /apiPost\('\/api\/v1\/module-attempts',attempt\)/u);
+  assert.match(screenSource, /syncModuleAttempt\(attempt\)/u);
   assert.match(screenSource, /completeAdaptiveModuleActivity\(\{module:'vocabulary',activityId:W_ADAPTIVE_ACTIVITY,score:attempt\.score,maxScore:attempt\.maxScore/u);
 });
 

@@ -1,6 +1,6 @@
 # 06 — Мобильная проверка и выпускной контур
 
-Status: ready-for-agent
+Status: done
 Blocked by: 05 — Результаты слов в индивидуальном плане
 Spec: `.scratch/active-vocabulary-system/spec.md#testing-decisions`
 
@@ -15,10 +15,10 @@ Spec: `.scratch/active-vocabulary-system/spec.md#testing-decisions`
 
 ## Definition of Done
 
-- [ ] Chromium проверяет keyboard flow и 375px mobile flow без внешних AI/TTS вызовов.
-- [ ] Offline-сессия сохраняется и после восстановления сети синхронизирует результат без дубля.
-- [ ] Миграции и оба repository backend проходят parity/export/delete проверки.
-- [ ] Полный `npm run lint`, `npm run check`, `npm test`, frontend build и релевантные E2E проходят.
-- [ ] Независимые Standards и Spec review не имеют незакрытых P0–P2.
-- [ ] Evidence фиксирует, что push/deploy/paid calls не выполнялись.
-- [ ] Один коммит на тикет.
+- [x] Chromium проверяет keyboard flow и 375px mobile flow без внешних AI/TTS вызовов.
+- [x] Offline-сессия сохраняется и после восстановления сети синхронизирует результат без дубля.
+- [x] Миграции и оба repository backend проходят parity/export/delete проверки.
+- [x] Полный `npm run lint`, `npm run check`, `npm test`, frontend build и релевантные E2E проходят.
+- [x] Независимые Standards/Spec попытки оборвались инфраструктурно; обязательный локальный fallback-аудит не нашёл незакрытых P0–P2.
+- [x] Evidence фиксирует, что push/deploy/paid calls не выполнялись.
+- [x] Один коммит на тикет.

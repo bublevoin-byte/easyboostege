@@ -36,6 +36,17 @@ adaptive localStorage получает лишь UUID сохранённой по
 attempt-запись и consumption execution claim коммитятся атомарно; несовпадающий по launch
 repeat/task/window ответ не остаётся в ledger.
 
+Офлайн-очередь общего прогресса хранится отдельно для каждого локального owner. Небезопасная
+глобальная очередь версии 2 удаляется при определении владельца и не переносится автоматически;
+ответ незавершённой синхронизации может очистить только отправленные значения того же owner.
+
+Обычная завершённая словарная сессия без adaptive claim может временно хранить owner-bound очередь
+не более чем из 20 module-attempt summaries до восстановления сети. Одна запись ограничена 20 000
+символов, содержит UUID сессии, фиксированные mode/evidence counters и длительность, но не слова,
+ответы, prompt, transcript или audio. Первый payload для UUID имеет приоритет, повторная синхронизация
+идемпотентна; terminal 4xx удаляет непринимаемую запись. Очередь недоступна другому локальному owner
+и явно удаляется вместе с аккаунтом.
+
 Persisted `voice_tutor_sessions.capsule` — только reference schema: capsule/source/module/skill IDs,
 revision/version и, при необходимости, `rule_card_id`. Prompt, reference,
 learner answer, rubrics и answer arrays каждый раз реконструируются из owner-bound source attempt
