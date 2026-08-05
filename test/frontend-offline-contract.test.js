@@ -18,6 +18,7 @@ import vm from 'node:vm';
 const apiSource = await fs.readFile(new URL('../public/api.js', import.meta.url), 'utf8');
 const syncSource = await fs.readFile(new URL('../public/sync.js', import.meta.url), 'utf8');
 const workerSource = await fs.readFile(new URL('../public/service-worker.js', import.meta.url), 'utf8');
+const readingPilotSource = await fs.readFile(new URL('../public/reading-pilot-v1.js', import.meta.url), 'utf8');
 const entrySource = await fs.readFile(new URL('../public/main.js', import.meta.url), 'utf8');
 const screenLoaderSource = await fs.readFile(new URL('../public/screens.js', import.meta.url), 'utf8');
 
@@ -496,6 +497,23 @@ test('the app shell still comes from the cache offline, so the previous test is 
 
 test('a loaded listening catalog joins the runtime cache and remains available offline', async () => {
   const url = `${ORIGIN}/listening-pilot-v1.js`;
+  const online = createWorker({ networkFails: false });
+  const first = dispatchFetch(online, { method: 'GET', url, mode: 'cors' });
+  assert.equal((await first.responded).fromNetwork, true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(online.store.get(url).fromNetwork, true);
+
+  const offline = createWorker({ cached: Object.fromEntries(online.store), networkFails: true });
+  const replay = dispatchFetch(offline, { method: 'GET', url, mode: 'cors' });
+  assert.equal((await replay.responded).fromNetwork, true);
+});
+
+test('the lazy task 11 shard stays out of the app shell and joins the runtime cache after loading', async () => {
+  const url = `${ORIGIN}/content/reading/task11-v1.js`;
+  const shellDeclaration = workerSource.match(/const APP_SHELL=(\[[^\]]*\]);/u)?.[1] || '';
+  assert.match(readingPilotSource, /import\('\.\/content\/reading\/task11-v1\.js'\)/u);
+  assert.doesNotMatch(shellDeclaration, /task11-v1/u, 'the 20-set shard must not inflate initial JavaScript');
+
   const online = createWorker({ networkFails: false });
   const first = dispatchFetch(online, { method: 'GET', url, mode: 'cors' });
   assert.equal((await first.responded).fromNetwork, true);

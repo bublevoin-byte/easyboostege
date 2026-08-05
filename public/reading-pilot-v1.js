@@ -29,3 +29,8 @@ export async function loadReadingTask10Shard() {
   const { READING_TASK10_SETS } = await import('./content/reading/task10-v1.js');
   return READING_TASK10_SETS;
 }
+
+export async function loadReadingTask11Shard() {
+  const { READING_TASK11_SETS } = await import('./content/reading/task11-v1.js');
+  return READING_TASK11_SETS;
+}

@@ -10,7 +10,11 @@ import {
   readingSetForLegacyScreen,
   readingSetReference,
 } from '../reading-catalog-contract.js';
-import { assembleReadingPilotCatalog, loadReadingTask10Shard } from '../reading-pilot-v1.js';
+import {
+  assembleReadingPilotCatalog,
+  loadReadingTask10Shard,
+  loadReadingTask11Shard,
+} from '../reading-pilot-v1.js';
 
 (function initializeReadingModule(global) {
   'use strict';
@@ -640,6 +644,7 @@ import { assembleReadingPilotCatalog, loadReadingTask10Shard } from '../reading-
     adaptLegacyFallback: adaptLegacyReadingFallback,
     assembleCatalog: assembleReadingPilotCatalog,
     loadTask10Shard: loadReadingTask10Shard,
+    loadTask11Shard: loadReadingTask11Shard,
     normalizeHistory,
     recordAttempt,
     rememberSelection,
