@@ -13,7 +13,8 @@ import {
 } from '../app.js';
 import {createLearningActivityEvidence,recordLearningActivityEvidence} from '../learning-activity-recorder.js';
 import {
-  loadMatchingCatalog,loadTrueFalseCatalog,matchingSetForLegacyScreen,trueFalseSetForLegacyScreen,
+  interviewSetForLegacyScreen,loadInterviewCatalog,loadMatchingCatalog,loadTrueFalseCatalog,
+  matchingSetForLegacyScreen,trueFalseSetForLegacyScreen,
 } from '../listening-catalog-contract.js';
 
 /* ===== LISTENING ===== */
@@ -104,7 +105,8 @@ const L_IN=[
  {q:'What does Lena advise beginners?',o:['To buy a good camera','To copy popular bloggers','To be honest'],a:2,ev:'…honesty works better than expensive equipment.',e:'Главный совет — честность, а не дорогая техника.'}]}
 ];
 let L_MATCHING_CATALOG=[],L_MATCHING_CATALOG_LOAD=null,L_TRUE_FALSE_CATALOG=[],L_TRUE_FALSE_CATALOG_LOAD=null;
-let L_TRUE_FALSE_CATALOG_READY=false;
+let L_INTERVIEW_CATALOG=[],L_INTERVIEW_CATALOG_LOAD=null;
+let L_TRUE_FALSE_CATALOG_READY=false,L_INTERVIEW_CATALOG_READY=false;
 const L_VOICE_RESULT_SETS=[
   {id:'listening.exam.interview.alex',items:['listening.alex-swimming.reason','listening.alex-swimming.frequency','listening.alex-swimming.injury','listening.alex-swimming.first-plan']},
   {id:'listening.exam.interview.lena',items:['listening.lena-blog.started','listening.lena-blog.helpers','listening.lena-blog.problem','listening.lena-blog.advice']},
@@ -152,7 +154,18 @@ function lSetTrueFalseCatalog(sets){
   L_TRUE_FALSE_CATALOG=sets.map(function(set){return set.st?set:trueFalseSetForLegacyScreen(set)});
   L_TRUE_FALSE_CATALOG_READY=true;
   return L_TRUE_FALSE_CATALOG}
-function initListening(){if(!S)return;lSync();Promise.all([lLoadMatchingCatalog(),lLoadTrueFalseCatalog()]).then(function(){lHub()})}
+function lLoadInterviewCatalog(){
+  if(L_INTERVIEW_CATALOG_LOAD)return L_INTERVIEW_CATALOG_LOAD;
+  L_INTERVIEW_CATALOG_LOAD=loadInterviewCatalog(function(){return import('../listening-pilot-v1.js')})
+    .then(lSetInterviewCatalog);
+  return L_INTERVIEW_CATALOG_LOAD}
+function lSetInterviewCatalog(sets){
+  L_INTERVIEW_CATALOG=sets.map(function(set){return set.qs?set:interviewSetForLegacyScreen(set)});
+  L_INTERVIEW_CATALOG_READY=true;
+  return L_INTERVIEW_CATALOG}
+function initListening(){if(!S)return;lSync();Promise.all([
+  lLoadMatchingCatalog(),lLoadTrueFalseCatalog(),lLoadInterviewCatalog(),
+]).then(function(){lHub()})}
 function lHub(){var area=document.getElementById('l_area');if(!area)return;LM=null;LT=null;LI=null;lStop();
   var r=lSt();var GA=0;function ga(){return 'animation:win .34s '+((GA++)*0.06)+'s cubic-bezier(.25,.75,.35,1) both;'}
   var examMax=lExamMaxScore();
@@ -189,15 +202,19 @@ function lHub(){var area=document.getElementById('l_area');if(!area)return;LM=nu
   setTxt('l_today','3 тренажёра');lGen()}
 function lShufM(set){return listeningModule.shuffleMatching(set)}
 function lSpeakerLabel(index){return String.fromCharCode(65+index)}
+function lInterviewNumber(index){return index+3}
 function lMatchingPool(){
   if(L_MATCHING_CATALOG.length)return listeningModule.pool(L_MATCHING_CATALOG,[]);
   return lPool('m',L_M)}
 function lTrueFalsePool(){
   if(L_TRUE_FALSE_CATALOG.length)return listeningModule.pool(L_TRUE_FALSE_CATALOG,[]);
   return lPool('tf',L_TF)}
+function lInterviewPool(){
+  if(L_INTERVIEW_CATALOG.length)return listeningModule.pool(L_INTERVIEW_CATALOG,[]);
+  return lPool('iq',L_IN)}
 function lMatchingMax(set){return Math.max(1,Number(set&&set.maxScore)||((set&&set.a&&set.a.length)||1))}
 function lExamMaxScore(){
-  var m=lMatchingPool()[0],tf=lTrueFalsePool()[0],iq=lPool('iq',L_IN)[0];
+  var m=lMatchingPool()[0],tf=lTrueFalsePool()[0],iq=lInterviewPool()[0];
   return lMatchingMax(m)+(tf&&tf.st?tf.st.length:0)+(iq&&iq.qs?iq.qs.length:0)}
 /* ---- задание 1: соответствия ---- */
 function lMt(){S.lisIdxM=(S.lisIdxM||0);var pool=lMatchingPool();var set=lShufM(pool[S.lisIdxM%pool.length]);S.lisIdxM++;
@@ -290,7 +307,8 @@ function lTfCheck(){if(LT.done)return;LT.done=true;lStop();var set=LT.set,r=lSt(
   area.insertBefore(d,area.firstChild);
   try{d.scrollIntoView({behavior:'smooth',block:'start'})}catch(e){};lGen()}
 /* ---- задания 3-9: интервью ---- */
-function lIq(){S.lisIdxI=(S.lisIdxI||0);var pool=lPool('iq',L_IN);var set=pool[S.lisIdxI%pool.length];S.lisIdxI++;
+function lIq(){if(!L_INTERVIEW_CATALOG_READY){lLoadInterviewCatalog().then(function(){lIq()});return}
+  S.lisIdxI=(S.lisIdxI||0);var pool=lInterviewPool();var set=pool[S.lisIdxI%pool.length];S.lisIdxI++;
   LI={set:set,sel:set.qs.map(function(){return null}),done:false,evidence:createLearningActivityEvidence({module:'listening',
     activityId:listeningModule.activityId('interview'),mode:'listening_interview',source:listeningModule.sourceOf(set)})};LPLAYS=0;lIqRender()}
 function lIqRender(){var area=document.getElementById('l_area');var set=LI.set;
@@ -300,7 +318,7 @@ function lIqRender(){var area=document.getElementById('l_area');var set=LI.set;
     +lCtl('lPlay(LI.set.d)')+'</div>';
   set.qs.forEach(function(q,i){
     h+='<div class="clayCard" style="padding:13px 14px;margin-bottom:10px;">'
-      +'<div style="font-weight:700;font-size:13px;color:#2B2B2B;line-height:1.5;">'+(i+1)+'. '+q.q+'</div>'
+      +'<div style="font-weight:700;font-size:13px;color:#2B2B2B;line-height:1.5;">'+lInterviewNumber(i)+'. '+q.q+'</div>'
       +'<div style="margin-top:9px;display:flex;flex-direction:column;gap:7px;" id="liq_row_'+i+'">'
       +q.o.map(function(o,oi){var on=LI.sel[i]===oi;
         return '<button onclick="lIqPick('+i+','+oi+')" style="text-align:left;padding:10px 12px;border-radius:12px;border:1.5px solid '+(on?'#F2683F':'#F0EAE2')+';background:'+(on?'#FFEDE4':'#fff')+';font-family:Manrope,sans-serif;font-weight:700;font-size:12.5px;color:'+(on?'#E44E20':'#5b5f66')+';cursor:pointer;">'+o+'</button>'}).join('')
@@ -346,7 +364,7 @@ function lExam(){var area=document.getElementById('l_area');if(!area)return;lSto
     +'<button class="sq" style="'+WBTN+'color:#B54E2F;" onclick="lHub()">← К аудированию</button></div>';
   lAnim('win','.32s')}
 function lExamStart(){
-  var pm=lMatchingPool(),pt=lTrueFalsePool(),pi=lPool('iq',L_IN);
+  var pm=lMatchingPool(),pt=lTrueFalsePool(),pi=lInterviewPool();
   S.leIdx=(S.leIdx||0);
   var startedAt=Date.now(),m=lShufM(pm[S.leIdx%pm.length]),tf=pt[S.leIdx%pt.length],iq=pi[S.leIdx%pi.length];
   LE={m:m,tf:tf,iq:iq,stage:0,selM:m.a.map(function(){return null}),plays:[0,0,0],t0:startedAt,
@@ -407,7 +425,7 @@ function lExamRender(){var area=document.getElementById('l_area');if(!area||!LE)
     +lExamCtl()+'</div>';
   set.qs.forEach(function(q,i){
     h+='<div class="clayCard" style="padding:13px 14px;margin-bottom:10px;">'
-      +'<div style="font-weight:700;font-size:13px;color:#2B2B2B;line-height:1.5;">'+(i+1)+'. '+q.q+'</div>'
+      +'<div style="font-weight:700;font-size:13px;color:#2B2B2B;line-height:1.5;">'+lInterviewNumber(i)+'. '+q.q+'</div>'
       +'<div style="margin-top:9px;display:flex;flex-direction:column;gap:7px;">'
       +q.o.map(function(o,oi){var on=LE.selI[i]===oi;
         return '<button onclick="LE.selI['+i+']='+oi+';lExamRender()" style="text-align:left;padding:10px 12px;border-radius:12px;border:1.5px solid '+(on?'#F2683F':'#F0EAE2')+';background:'+(on?'#FFEDE4':'#fff')+';font-family:Manrope,sans-serif;font-weight:700;font-size:12.5px;color:'+(on?'#E44E20':'#5b5f66')+';cursor:pointer;">'+o+'</button>'}).join('')+'</div></div>'});
@@ -434,7 +452,7 @@ function lExamFinish(){if(!LE)return;clearInterval(LE.iv);lStop();
     rows+='<div style="padding:9px 2px;border-bottom:1px solid #F4EFE9;"><div style="font-weight:800;font-size:12.5px;color:#A83226;">Утверждение '+(i+1)+' → '+LBL[x.a]+'</div><div style="font-weight:600;font-size:12px;color:#777163;margin-top:3px;">«'+x.ev+'» — '+x.e+'</div></div>'});
   LE.iq.qs.forEach(function(q,i){if(LE.selI[i]!==q.a){var voiceSlot='';
     if(voiceResult)voiceSlot=voiceResult.resultSlot(q,i);
-    rows+='<div style="padding:9px 2px;border-bottom:1px solid #F4EFE9;"><div style="font-weight:800;font-size:12.5px;color:#A83226;">Вопрос '+(i+1)+' → '+q.o[q.a]+'</div><div style="font-weight:600;font-size:12px;color:#777163;margin-top:3px;">«'+q.ev+'»</div>'+voiceSlot+'</div>'}});
+    rows+='<div style="padding:9px 2px;border-bottom:1px solid #F4EFE9;"><div style="font-weight:800;font-size:12.5px;color:#A83226;">Вопрос '+lInterviewNumber(i)+' → '+q.o[q.a]+'</div><div style="font-weight:600;font-size:12px;color:#777163;margin-top:3px;">«'+q.ev+'» — '+q.e+'</div>'+voiceSlot+'</div>'}});
   var tr1=lTranscript(LE.m.sp.map(function(sp,i){return{s:i%2,t:'Speaker '+lSpeakerLabel(i)+'. '+sp.t}}),[]);
   var tr2=lTranscript(LE.tf.d,LE.tf.st.map(function(x){return x.ev}));
   var tr3=lTranscript(LE.iq.d,LE.iq.qs.map(function(q){return q.ev}));
@@ -465,7 +483,7 @@ async function lGen(){
   var kind=null;
   if(lMatchingPool().length<5)kind='m';
   else if(lTrueFalsePool().length<5)kind='tf';
-  else if(lPool('iq',L_IN).length<5)kind='iq';
+  else if(lInterviewPool().length<5)kind='iq';
   if(!kind)return;L_GEN=true;
   try{
     var d,item=null;
@@ -493,7 +511,7 @@ async function lGen(){
     if(item){S.lisAi[kind]=(S.lisAi[kind]||[]).concat([item]);save()}
   }catch(e){}
   L_GEN=false;
-  try{var need=lMatchingPool().length<5||lTrueFalsePool().length<5||lPool('iq',L_IN).length<5;
+  try{var need=lMatchingPool().length<5||lTrueFalsePool().length<5||lInterviewPool().length<5;
     if(need)setTimeout(lGen,4000)}catch(e){}}
 registerRouteHook(function(id){if(id==='scr4')initListening()});
 /* Экзамен по аудированию не должен тикать в фоне после ухода с экрана. */

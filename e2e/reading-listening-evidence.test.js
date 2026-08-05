@@ -100,15 +100,34 @@ try {
   await page.getByRole('button', { name: 'Проверить', exact: true }).press('Enter');
   assert.equal((await responsePromise).status(), 201);
 
+  await page.getByRole('button', { name: '← К аудированию', exact: true }).press('Enter');
+  await page.getByRole('button', { name: /^Интервью/u }).press('Enter');
+  await page.locator('#liq_row_6').waitFor({ state: 'visible', timeout: 5_000 });
+  assert.equal(await page.locator('[id^="liq_row_"]').count(), 7);
+  assert.deepEqual(await page.locator('[id^="liq_row_"]').evaluateAll((rows) => (
+    rows.map((row) => row.previousElementSibling?.textContent?.trim().split('.')[0])
+  )), ['3', '4', '5', '6', '7', '8', '9']);
+  for (let index = 0; index < 7; index += 1) {
+    assert.equal(await page.locator(`#liq_row_${index} button`).count(), 4);
+    await page.locator(`#liq_row_${index} button`).first().press('Enter');
+  }
+  const interviewResponsePromise = page.waitForResponse((response) => (
+    response.request().method() === 'POST' && response.url().endsWith('/api/v1/module-attempts')
+  ));
+  await page.getByRole('button', { name: 'Проверить', exact: true }).press('Enter');
+  assert.equal((await interviewResponsePromise).status(), 201);
+  await page.getByText('ТРАНСКРИПТ · тапни слово для перевода').waitFor({ state: 'visible', timeout: 5_000 });
+
   const attempts = await fs.readFile(dataFile, 'utf8').then((contents) => (
     JSON.parse(contents).module_attempts || []
   ));
   const learnerAttempts = attempts.filter((attempt) => attempt.username === 'evidence-user');
   assert.deepEqual(learnerAttempts.map((attempt) => attempt.activity).sort(), [
-    'listening_true_false', 'reading_headings',
+    'listening_interview', 'listening_true_false', 'reading_headings',
   ]);
   assert.equal(learnerAttempts.every((attempt) => attempt.evidence_quality === 'client_reported'), true);
   assert.equal(learnerAttempts.find((attempt) => attempt.activity === 'listening_true_false')?.max_score, 7);
+  assert.equal(learnerAttempts.find((attempt) => attempt.activity === 'listening_interview')?.max_score, 7);
   assert.deepEqual(pageErrors, []);
   await context.close();
   console.log('Reading/listening evidence Chromium E2E passed.');

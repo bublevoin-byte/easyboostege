@@ -10,6 +10,9 @@ const SAFE_TRUE_FALSE_ID = /^listening-pilot-v1\.true-false\.[a-z0-9]+(?:-[a-z0-
 const SAFE_TRUE_FALSE_AUDIO_PATH = /^\/audio\/listening\/listening-pilot-v1\/true-false\/[a-z0-9]+(?:-[a-z0-9]+)*-r[1-9]\d*\.mp3$/u;
 const TRUE_FALSE_ANSWERS = Object.freeze(['true', 'false', 'not_stated']);
 const TRUE_FALSE_ANSWER_INDEX = Object.freeze({ true: 0, false: 1, not_stated: 2 });
+const SAFE_INTERVIEW_ID = /^listening-pilot-v1\.interview\.[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+const SAFE_INTERVIEW_ITEM_ID = /^listening-pilot-v1\.interview\.[a-z0-9]+(?:-[a-z0-9]+)*\.q[1-7]$/u;
+const SAFE_INTERVIEW_AUDIO_PATH = /^\/audio\/listening\/listening-pilot-v1\/interview\/[a-z0-9]+(?:-[a-z0-9]+)*-r[1-9]\d*\.mp3$/u;
 
 function fail(location, message) {
   throw new TypeError(`${location}: ${message}`);
@@ -178,6 +181,75 @@ function assertTrueFalseSet(set, index) {
   });
 }
 
+function assertInterviewSet(set, index) {
+  const location = assertSetEnvelope(set, index, {
+    type: 'interview',
+    idPattern: SAFE_INTERVIEW_ID,
+    idDescription: 'listening-pilot-v1 interview',
+    idPrefix: 'listening-pilot-v1.interview.',
+    audioDirectory: 'interview',
+    audioPattern: SAFE_INTERVIEW_AUDIO_PATH,
+  });
+
+  if (!Array.isArray(set.script) || set.script.length < 2 || set.script.length > 20) {
+    fail(location, 'script must contain between 2 and 20 interview segments');
+  }
+  const roles = new Set();
+  const voiceByRole = new Map();
+  set.script.forEach((segment, segmentIndex) => {
+    const segmentLocation = `${location}.script[${segmentIndex}]`;
+    plainObject(segment, segmentLocation);
+    if (segment.role !== 'interviewer' && segment.role !== 'guest') {
+      fail(segmentLocation, 'role must be interviewer or guest');
+    }
+    if (segmentIndex > 0 && segment.role === set.script[segmentIndex - 1].role) {
+      fail(segmentLocation, 'interview roles must alternate');
+    }
+    roles.add(segment.role);
+    if (!SAFE_VOICE_SLOT.test(segment.voiceSlot || '')) fail(segmentLocation, 'voiceSlot is unknown');
+    if (voiceByRole.has(segment.role) && voiceByRole.get(segment.role) !== segment.voiceSlot) {
+      fail(segmentLocation, 'each role must keep one voiceSlot throughout the interview');
+    }
+    voiceByRole.set(segment.role, segment.voiceSlot);
+    nonEmptyString(segment.text, `${segmentLocation}.text`, { min: 20, max: 1_400 });
+  });
+  if (roles.size !== 2) fail(location, 'script must contain interviewer and guest');
+
+  plainObject(set.task, `${location}.task`);
+  const { questions } = set.task;
+  if (!Array.isArray(questions) || questions.length !== 7) {
+    fail(location, 'task.questions must contain exactly 7 questions');
+  }
+  const itemIds = new Set();
+  questions.forEach((question, questionIndex) => {
+    const questionLocation = `${location}.task.questions[${questionIndex}]`;
+    plainObject(question, questionLocation);
+    const expectedId = `${set.id}.q${questionIndex + 1}`;
+    if (!SAFE_INTERVIEW_ITEM_ID.test(question.id || '') || question.id !== expectedId) {
+      fail(questionLocation, 'id must be a stable voice-tutor item id ending in its q1-q7 position');
+    }
+    if (itemIds.has(question.id)) fail(location, 'question ids must be unique');
+    itemIds.add(question.id);
+    nonEmptyString(question.prompt, `${questionLocation}.prompt`, { min: 12, max: 220 });
+    if (!Array.isArray(question.options) || question.options.length !== 4) {
+      fail(questionLocation, 'options must contain exactly 4 answers');
+    }
+    question.options.forEach((option, optionIndex) => {
+      nonEmptyString(option, `${questionLocation}.options[${optionIndex}]`, { min: 2, max: 160 });
+    });
+    if (new Set(question.options.map((option) => option.trim().toLocaleLowerCase('en'))).size !== 4) {
+      fail(questionLocation, 'options must be unique');
+    }
+    if (!Number.isSafeInteger(question.answer) || question.answer < 0 || question.answer > 3) {
+      fail(questionLocation, 'answer must reference option indexes 0 through 3');
+    }
+    const quote = evidenceQuoteAndExplanation(question, questionLocation);
+    if (!set.script.some((segment) => segment.text.includes(quote))) {
+      fail(questionLocation, 'quote must occur verbatim in the interview script');
+    }
+  });
+}
+
 export function assertListeningCatalog(catalog, { expectedCounts = null, minimumTopics = 1 } = {}) {
   plainObject(catalog, 'catalog');
   if (catalog.id !== CATALOG_ID) fail('catalog', `id must be ${CATALOG_ID}`);
@@ -190,7 +262,8 @@ export function assertListeningCatalog(catalog, { expectedCounts = null, minimum
   catalog.sets.forEach((set, index) => {
     if (set?.type === 'matching') assertMatchingSet(set, index);
     else if (set?.type === 'true_false') assertTrueFalseSet(set, index);
-    else fail(typeof set?.id === 'string' ? set.id : `sets[${index}]`, 'type must be matching or true_false');
+    else if (set?.type === 'interview') assertInterviewSet(set, index);
+    else fail(typeof set?.id === 'string' ? set.id : `sets[${index}]`, 'type must be matching, true_false or interview');
     if (ids.has(set.id)) fail(set.id, 'id must be unique inside the catalog');
     ids.add(set.id);
     counts[set.type] = (counts[set.type] || 0) + 1;
@@ -266,6 +339,37 @@ export function trueFalseSetForLegacyScreen(set) {
   };
 }
 
+/* Изолированный перевод модели интервью в поля существующего экрана заданий 3–9. */
+export function interviewSetForLegacyScreen(set) {
+  assertInterviewSet(set, 0);
+  return {
+    id: set.id,
+    revision: set.revision,
+    title: set.title,
+    topic: set.topic,
+    cefr: set.cefr,
+    provenance: set.provenance,
+    audioPath: set.audio.path,
+    d: set.script.map((segment) => ({
+      role: segment.role,
+      voiceSlot: segment.voiceSlot,
+      s: segment.role === 'interviewer' ? 0 : 1,
+      t: segment.text,
+    })),
+    voice: { id: set.id, revision: set.revision },
+    qs: set.task.questions.map((question) => ({
+      q: question.prompt,
+      o: question.options.slice(),
+      a: question.answer,
+      ev: question.quote,
+      e: question.explanationRu,
+      voice: { id: question.id, revision: set.revision },
+    })),
+    maxScore: set.task.questions.length,
+    evidenceSource: 'builtin',
+  };
+}
+
 async function loadCatalogSets(loadCatalog, exportName, adapter) {
   try {
     if (typeof loadCatalog !== 'function') return [];
@@ -284,4 +388,8 @@ export async function loadMatchingCatalog(loadCatalog) {
 
 export async function loadTrueFalseCatalog(loadCatalog) {
   return loadCatalogSets(loadCatalog, 'LISTENING_TRUE_FALSE_SETS', trueFalseSetForLegacyScreen);
+}
+
+export async function loadInterviewCatalog(loadCatalog) {
+  return loadCatalogSets(loadCatalog, 'LISTENING_INTERVIEW_SETS', interviewSetForLegacyScreen);
 }

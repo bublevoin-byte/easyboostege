@@ -16,9 +16,31 @@ import {
 } from '../voice-tutor/capsule.js';
 import { buildVoiceTutorInstructions } from '../voice-tutor/prompt.js';
 import { decorateGeneratedVoiceTutorContent } from '../voice-tutor/generated-items.js';
+import { LISTENING_INTERVIEW_SETS } from '../public/listening-pilot-v1.js';
+import {
+  getCanonicalVoiceTutorItem,
+  getCanonicalVoiceTutorResultSet,
+} from '../voice-tutor/canonical-items.js';
 
 const NOW = new Date('2026-08-02T12:00:00.000Z');
 const LIMITS = Object.freeze({ dailySeconds: 600, monthlySeconds: 7_200, sessionSeconds: 300 });
+
+test('all pilot interview errors are available as canonical voice-tutor context', () => {
+  assert.equal(LISTENING_INTERVIEW_SETS.length, 20);
+  for (const set of LISTENING_INTERVIEW_SETS) {
+    const resultSet = getCanonicalVoiceTutorResultSet(set.id);
+    assert.ok(resultSet, set.id);
+    assert.equal(resultSet.module, 'listening');
+    assert.deepEqual([...resultSet.items], set.task.questions.map((question) => question.id));
+    for (const question of set.task.questions) {
+      const item = getCanonicalVoiceTutorItem(question.id);
+      assert.ok(item, question.id);
+      assert.equal(item.context.kind, 'transcript_segment');
+      assert.equal(item.context.text, question.quote);
+      assert.equal(item.prompt, question.prompt);
+    }
+  }
+});
 
 async function withVoiceTutorApp(run) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-reading-listening-'));

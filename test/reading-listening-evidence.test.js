@@ -10,12 +10,18 @@ import {
   splitLearningActivityDuration,
 } from '../public/learning-activity-contract.js';
 import {
+  interviewSetForLegacyScreen,
+  loadInterviewCatalog,
   loadMatchingCatalog,
   loadTrueFalseCatalog,
   matchingSetForLegacyScreen,
   trueFalseSetForLegacyScreen,
 } from '../public/listening-catalog-contract.js';
-import { LISTENING_MATCHING_SETS, LISTENING_TRUE_FALSE_SETS } from '../public/listening-pilot-v1.js';
+import {
+  LISTENING_INTERVIEW_SETS,
+  LISTENING_MATCHING_SETS,
+  LISTENING_TRUE_FALSE_SETS,
+} from '../public/listening-pilot-v1.js';
 
 const [
   recorderFile,
@@ -87,6 +93,7 @@ function createSubjectHarness(subject, { offline = false, slow = false } = {}) {
   const ordinary = [];
   const adaptive = [];
   const posts = [];
+  const voiceResults = [];
   const values = new Map();
   const navigator = { onLine: !offline };
   const localStorage = {
@@ -123,7 +130,10 @@ function createSubjectHarness(subject, { offline = false, slow = false } = {}) {
     learningActivitySource,
     splitLearningActivityDuration,
     LISTENING_MATCHING_SETS,
+    LISTENING_INTERVIEW_SETS,
     LISTENING_TRUE_FALSE_SETS,
+    interviewSetForLegacyScreen,
+    loadInterviewCatalog,
     loadMatchingCatalog,
     loadTrueFalseCatalog,
     matchingSetForLegacyScreen,
@@ -161,8 +171,16 @@ function createSubjectHarness(subject, { offline = false, slow = false } = {}) {
     setTimeout: (callback) => { callback(); return 1; },
     registerRouteHook() {},
     registerScreenGenerator() {},
-    prepareVoiceTutorContextResult: () => null,
-    registerVoiceTutorContextResult: async () => null,
+    prepareVoiceTutorContextResult: ({ module, set, selections }) => ({
+      module,
+      setId: set.voice.id,
+      revision: set.voice.revision,
+      answers: set.qs.map((question, index) => question.o[selections[index]]),
+      resultSlot(question, index) {
+        return selections[index] === question.a ? '' : `<div data-voice-item="${question.voice.id}"></div>`;
+      },
+    }),
+    registerVoiceTutorContextResult: async (result) => { voiceResults.push(result); return result; },
     generateAiContent: async () => null,
     save() {},
     setTxt() {},
@@ -244,6 +262,7 @@ function createSubjectHarness(subject, { offline = false, slow = false } = {}) {
         startMatching:lMt,
         installMatchingCatalog:function(){lSetMatchingCatalog(LISTENING_MATCHING_SETS)},
         installTrueFalseCatalog:function(){lSetTrueFalseCatalog(LISTENING_TRUE_FALSE_SETS)},
+        installInterviewCatalog:function(){lSetInterviewCatalog(LISTENING_INTERVIEW_SETS)},
         playMatching:function(){lPlay(lMtLines())},
         completeMatching:function(correct){LM.set.a.forEach(function(answer,index){lMtPick(index,correct===false?(answer+1)%LM.set.st.length:answer)});lMtCheck()},
         startTrueFalse:lTf,
@@ -253,12 +272,15 @@ function createSubjectHarness(subject, { offline = false, slow = false } = {}) {
         playInterview:function(){lPlay(LI.set.d)},
         completeInterview:function(correct){LI.set.qs.forEach(function(item,index){lIqPick(index,correct===false?(item.a+1)%item.o.length:item.a)});lIqCheck()},
         startExam:lExamStart,
-        completeExam:function(){LE.m.a.forEach(function(answer,index){LE.selM[index]=answer;lExamDedup('selM',index,answer)});
-          LE.tf.st.forEach(function(item,index){LE.selT[index]=item.a});LE.iq.qs.forEach(function(item,index){LE.selI[index]=item.a});lExamFinish()},
+        showExamInterview:function(){LE.stage=2;lExamRender()},
+        firstExamInterviewExplanation:function(){return LE.iq.qs[0].e},
+        completeExam:function(interviewCorrect){LE.m.a.forEach(function(answer,index){LE.selM[index]=answer;lExamDedup('selM',index,answer)});
+          LE.tf.st.forEach(function(item,index){LE.selT[index]=item.a});LE.iq.qs.forEach(function(item,index){LE.selI[index]=interviewCorrect===false?(item.a+1)%item.o.length:item.a});lExamFinish()},
       };
     `), context);
     window.__subjectEvidenceTest.installMatchingCatalog();
     window.__subjectEvidenceTest.installTrueFalseCatalog();
+    window.__subjectEvidenceTest.installInterviewCatalog();
   }
 
   return {
@@ -267,6 +289,7 @@ function createSubjectHarness(subject, { offline = false, slow = false } = {}) {
     ordinary,
     adaptive,
     posts,
+    voiceResults,
     values,
     navigator,
     sync: window.EasyBoostSync,
@@ -365,9 +388,9 @@ test('listening screen completions record matching, true-false, interview and di
   )), [
     { activity: 'listening_matching', score: 6, maxScore: 6, durationMs: 400 },
     { activity: 'listening_true_false', score: 7, maxScore: 7, durationMs: 500 },
-    { activity: 'listening_interview', score: 4, maxScore: 4, durationMs: 600 },
-    { activity: 'listening_matching', score: 6, maxScore: 6, durationMs: 353 },
-    { activity: 'listening_detail', score: 11, maxScore: 11, durationMs: 648 },
+    { activity: 'listening_interview', score: 7, maxScore: 7, durationMs: 600 },
+    { activity: 'listening_matching', score: 6, maxScore: 6, durationMs: 300 },
+    { activity: 'listening_detail', score: 14, maxScore: 14, durationMs: 701 },
   ]);
   assert.deepEqual(harness.ordinary.map((attempt) => attempt.metadata.mode), [
     'listening_matching', 'listening_true_false', 'listening_interview',
@@ -416,6 +439,47 @@ test('true-false screen renders seven statements and reveals auditable answers o
   ]);
 });
 
+test('interview screen uses seven four-option questions and publishes wrong answers for voice tutor', async () => {
+  const harness = createSubjectHarness('listening');
+
+  harness.screen.startInterview();
+  const exercise = harness.element('l_area').innerHTML;
+  assert.equal((exercise.match(/id="liq_row_\d+"/gu) || []).length, 7);
+  assert.equal((exercise.match(/onclick="lIqPick\(\d+,\d+\)"/gu) || []).length, 28);
+  assert.match(exercise, />3\./u);
+  assert.match(exercise, />9\./u);
+  assert.doesNotMatch(exercise, /ТРАНСКРИПТ|data-voice-item/iu);
+
+  harness.advance(750);
+  harness.screen.completeInterview(false);
+  await settle();
+
+  assert.match(harness.element('created:1').innerHTML, /ТРАНСКРИПТ/u);
+  assert.match(harness.element('liq_res_0').innerHTML, /data-voice-item="listening-pilot-v1\.interview\./u);
+  assert.equal(harness.voiceResults.length, 1);
+  assert.match(harness.voiceResults[0].setId, /^listening-pilot-v1\.interview\./u);
+  assert.equal(harness.voiceResults[0].answers.length, 7);
+  assert.deepEqual(harness.ordinary.map(({ activity, maxScore }) => ({ activity, maxScore })), [
+    { activity: 'listening_interview', maxScore: 7 },
+  ]);
+});
+
+test('combined exam numbers interview tasks 3–9 and keeps the Russian explanation in its review', async () => {
+  const harness = createSubjectHarness('listening');
+
+  harness.screen.startExam();
+  harness.screen.showExamInterview();
+  const exercise = harness.element('l_area').innerHTML;
+  assert.match(exercise, />3\./u);
+  assert.match(exercise, />9\./u);
+  const explanation = harness.screen.firstExamInterviewExplanation();
+
+  harness.screen.completeExam(false);
+  await settle();
+
+  assert.match(harness.element('l_area').innerHTML, new RegExp(explanation.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'));
+});
+
 test('matching adaptive completion publishes one gist result and no duplicate ordinary attempt', async () => {
   const harness = createSubjectHarness('listening');
   harness.setActive({
@@ -444,7 +508,7 @@ test('listening exact adaptive completion is exclusive, mismatch is blocked and 
   adaptive.screen.completeInterview(true);
   await settle();
   assert.deepEqual(adaptive.adaptive, [{
-    module: 'listening', activityId: 'listening_interview', score: 4, maxScore: 4, durationMs: 200,
+    module: 'listening', activityId: 'listening_interview', score: 7, maxScore: 7, durationMs: 200,
   }]);
   assert.equal(adaptive.ordinary.length, 0);
 

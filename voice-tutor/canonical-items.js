@@ -1,5 +1,6 @@
 import { voiceTutorModule } from './modules.js';
 import { CORE_VOICE_TUTOR_ITEMS } from './core-catalog.js';
+import { LISTENING_PILOT_INTERVIEW_DEFINITIONS } from '../public/listening-pilot-interviews-v1.js';
 
 export function createContextVoiceTutorItem(definition) {
   const context = voiceTutorModule(definition.module)?.context;
@@ -85,6 +86,19 @@ const CONTEXT_SET_DEFINITIONS = Object.freeze([
       { id: 'listening.lena-blog.advice', prompt: 'What does Lena advise beginners?', options: ['To buy a good camera', 'To copy popular bloggers', 'To be honest'], answer: 2, evidence: 'Do not copy others. Viewers feel when you are honest.', explanation: 'Главный совет — быть честным и не копировать других.' },
     ]),
   }),
+  ...LISTENING_PILOT_INTERVIEW_DEFINITIONS.map((set) => Object.freeze({
+    id: set.id,
+    revision: set.revision,
+    module: 'listening',
+    items: Object.freeze(set.task.questions.map((question) => Object.freeze({
+      id: question.id,
+      prompt: question.prompt,
+      options: question.options,
+      answer: question.answer,
+      evidence: question.quote,
+      explanation: question.explanationRu,
+    }))),
+  })),
 ]);
 
 const BASE_ITEMS = {

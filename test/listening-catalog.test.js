@@ -3,12 +3,15 @@ import test from 'node:test';
 
 import {
   assertListeningCatalog,
+  interviewSetForLegacyScreen,
+  loadInterviewCatalog,
   loadMatchingCatalog,
   loadTrueFalseCatalog,
   matchingSetForLegacyScreen,
   trueFalseSetForLegacyScreen,
 } from '../public/listening-catalog-contract.js';
 import {
+  LISTENING_INTERVIEW_SETS,
   LISTENING_MATCHING_SETS,
   LISTENING_PILOT_CATALOG,
   LISTENING_TRUE_FALSE_SETS,
@@ -56,6 +59,51 @@ function trueFalseFixture() {
   };
 }
 
+function interviewFixture() {
+  return {
+    id: 'listening-pilot-v1.interview.community-radio',
+    revision: 1,
+    type: 'interview',
+    title: 'Running a community radio show',
+    topic: 'media',
+    cefr: 'B2',
+    provenance: 'original',
+    audio: { path: '/audio/listening/listening-pilot-v1/interview/community-radio-r1.mp3' },
+    script: [
+      { role: 'interviewer', voiceSlot: 'female_1', text: 'When did you first become interested in radio?' },
+      { role: 'guest', voiceSlot: 'male_1', text: 'A teacher invited me to edit a five-minute school news programme. I enjoyed shaping the interviews more than speaking on air.' },
+    ],
+    task: {
+      questions: Array.from({ length: 7 }, (_, index) => ({
+        id: `listening-pilot-v1.interview.community-radio.q${index + 1}`,
+        prompt: `What detail does the guest give in answer ${index + 1}?`,
+        options: index === 0
+          ? ['A school news programme', 'A sports podcast', 'A music competition', 'A local newspaper']
+          : [`Correct detail ${index + 1}`, `Wrong detail A${index + 1}`, `Wrong detail B${index + 1}`, `Wrong detail C${index + 1}`],
+        answer: 0,
+        quote: index === 0 ? 'A teacher invited me to edit a five-minute school news programme' : 'I enjoyed shaping the interviews more than speaking on air',
+        explanationRu: index === 0
+          ? 'Интерес появился после приглашения сделать школьную новостную программу.'
+          : 'Цитата прямо подтверждает выбранную деталь и не поддерживает остальные варианты.',
+      })),
+    },
+  };
+}
+
+test('interview adapter exposes seven four-option questions and stable voice-tutor ids', () => {
+  const fixture = interviewFixture();
+  const catalog = { id: 'listening-pilot-v1', revision: 1, sets: [fixture] };
+
+  assert.doesNotThrow(() => assertListeningCatalog(catalog, { expectedCounts: { interview: 1 } }));
+  const exercise = interviewSetForLegacyScreen(fixture);
+  assert.equal(exercise.d.length, 2);
+  assert.equal(exercise.qs.length, 7);
+  assert.equal(exercise.qs.every((question) => question.o.length === 4), true);
+  assert.equal(exercise.maxScore, 7);
+  assert.deepEqual(exercise.voice, { id: fixture.id, revision: 1 });
+  assert.deepEqual(exercise.qs.map((question) => question.voice.id), fixture.task.questions.map((question) => question.id));
+});
+
 test('true-false catalog adapter validates all three answers and exposes seven legacy rows', () => {
   const fixture = trueFalseFixture();
   const catalog = { id: 'listening-pilot-v1', revision: 1, sets: [fixture] };
@@ -100,7 +148,7 @@ test('listening pilot exposes 20 original exam-sized matching sets', () => {
 });
 
 test('listening pilot exposes 20 original exam-sized true-false sets with auditable answers', () => {
-  assert.equal(LISTENING_PILOT_CATALOG.sets.length, 40);
+  assert.equal(LISTENING_PILOT_CATALOG.sets.length, 60);
   assert.equal(LISTENING_TRUE_FALSE_SETS.length, 20);
   assert.equal(new Set(LISTENING_TRUE_FALSE_SETS.map((set) => set.id)).size, 20);
   assert.ok(new Set(LISTENING_TRUE_FALSE_SETS.map((set) => set.topic)).size >= 15);
@@ -124,6 +172,32 @@ test('listening pilot exposes 20 original exam-sized true-false sets with audita
       assert.ok(set.script.some((segment) => segment.text.includes(evidence.quote)), `${set.id} quote ${index + 1}`);
       assert.match(evidence.explanationRu, /[А-Яа-яЁё]/u, set.id);
     });
+  }
+});
+
+test('listening pilot exposes exactly 60 original sets split 20/20/20 with reviewed interview keys', () => {
+  assert.equal(LISTENING_PILOT_CATALOG.sets.length, 60);
+  assert.equal(LISTENING_INTERVIEW_SETS.length, 20);
+  assert.equal(new Set(LISTENING_INTERVIEW_SETS.map((set) => set.id)).size, 20);
+  assert.equal(new Set(LISTENING_INTERVIEW_SETS.flatMap((set) => set.task.questions.map((question) => question.id))).size, 140);
+  assert.ok(new Set(LISTENING_INTERVIEW_SETS.map((set) => set.topic)).size >= 15);
+  assert.deepEqual(new Set(LISTENING_INTERVIEW_SETS.map((set) => set.cefr)), new Set(['B1', 'B2']));
+  assert.doesNotThrow(() => assertListeningCatalog(clone(LISTENING_PILOT_CATALOG), {
+    expectedCounts: { matching: 20, true_false: 20, interview: 20 }, minimumTopics: 20,
+  }));
+
+  for (const set of LISTENING_INTERVIEW_SETS) {
+    assert.equal(set.provenance, 'original', set.id);
+    assert.equal(set.task.questions.length, 7, set.id);
+    assert.equal(set.audio.path.startsWith('/audio/listening/listening-pilot-v1/interview/'), true, set.id);
+    assert.equal(Object.isFrozen(set), true, set.id);
+    for (const question of set.task.questions) {
+      assert.equal(question.options.length, 4, question.id);
+      assert.equal(Number.isInteger(question.answer) && question.answer >= 0 && question.answer < 4, true, question.id);
+      assert.equal(new Set(question.options.map((option) => option.toLocaleLowerCase('en'))).size, 4, question.id);
+      assert.ok(set.script.some((segment) => segment.text.includes(question.quote)), `${question.id}: verbatim quote`);
+      assert.match(question.explanationRu, /[А-Яа-яЁё]/u, question.id);
+    }
   }
 });
 
@@ -205,6 +279,28 @@ test('catalog validator rejects incomplete or unauditable true-false data', () =
   }
 });
 
+test('catalog validator rejects ambiguous or untraceable interview data', () => {
+  const cases = [
+    ['wrong question count', (set) => { set.task.questions.pop(); }, /questions.*7/iu],
+    ['wrong option count', (set) => { set.task.questions[0].options.pop(); }, /options.*4/iu],
+    ['duplicate option', (set) => { set.task.questions[0].options[1] = set.task.questions[0].options[0]; }, /options.*unique/iu],
+    ['invalid answer key', (set) => { set.task.questions[0].answer = 4; }, /answer.*0 through 3/iu],
+    ['duplicate item id', (set) => { set.task.questions[1].id = set.task.questions[0].id; }, /stable voice-tutor item id|question ids.*unique/iu],
+    ['unstable item id', (set) => { set.task.questions[0].id = 'question-one'; }, /stable voice-tutor item id/iu],
+    ['invented quote', (set) => { set.task.questions[0].quote = 'This quote is absent from the interview.'; }, /quote must occur verbatim/iu],
+  ];
+
+  for (const [name, mutate, expected] of cases) {
+    const damaged = interviewFixture();
+    mutate(damaged);
+    assert.throws(
+      () => assertListeningCatalog({ id: 'listening-pilot-v1', revision: 1, sets: [damaged] }),
+      expected,
+      name,
+    );
+  }
+});
+
 test('matching catalog adapter preserves identity, evidence and dynamic exam dimensions', () => {
   const source = LISTENING_MATCHING_SETS[0];
   const exercise = matchingSetForLegacyScreen(source);
@@ -232,4 +328,12 @@ test('true-false loader adapts the shared catalog and fails closed for invalid d
   const loaded = await loadTrueFalseCatalog(async () => ({ LISTENING_TRUE_FALSE_SETS }));
   assert.equal(loaded.length, 20);
   assert.equal(loaded.every((set) => set.st.length === 7 && set.maxScore === 7), true);
+});
+
+test('interview loader adapts the shared catalog and fails closed for invalid data', async () => {
+  assert.deepEqual(await loadInterviewCatalog(async () => { throw new Error('offline'); }), []);
+  assert.deepEqual(await loadInterviewCatalog(async () => ({ LISTENING_INTERVIEW_SETS: [{}] })), []);
+  const loaded = await loadInterviewCatalog(async () => ({ LISTENING_INTERVIEW_SETS }));
+  assert.equal(loaded.length, 20);
+  assert.equal(loaded.every((set) => set.qs.length === 7 && set.maxScore === 7), true);
 });

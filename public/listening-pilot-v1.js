@@ -1,4 +1,5 @@
 import { assertListeningCatalog, deepFreezeCatalog } from './listening-catalog-contract.js';
+import { LISTENING_PILOT_INTERVIEW_DEFINITIONS } from './listening-pilot-interviews-v1.js';
 
 const ROLES = ['speaker_a', 'speaker_b', 'speaker_c', 'speaker_d', 'speaker_e', 'speaker_f'];
 const VOICE_SLOTS = ['female_1', 'male_1', 'female_2', 'male_2', 'female_3', 'male_3'];
@@ -866,11 +867,15 @@ const trueFalseSets = [
 const catalog = {
   id: 'listening-pilot-v1',
   revision: 1,
-  sets: matchingSets.concat(trueFalseSets),
+  sets: matchingSets.concat(trueFalseSets, LISTENING_PILOT_INTERVIEW_DEFINITIONS),
 };
 
-assertListeningCatalog(catalog, { expectedCounts: { matching: 20, true_false: 20 }, minimumTopics: 20 });
+assertListeningCatalog(catalog, {
+  expectedCounts: { matching: 20, true_false: 20, interview: 20 },
+  minimumTopics: 20,
+});
 
 export const LISTENING_PILOT_CATALOG = deepFreezeCatalog(catalog);
 export const LISTENING_MATCHING_SETS = LISTENING_PILOT_CATALOG.sets.filter((set) => set.type === 'matching');
 export const LISTENING_TRUE_FALSE_SETS = LISTENING_PILOT_CATALOG.sets.filter((set) => set.type === 'true_false');
+export const LISTENING_INTERVIEW_SETS = LISTENING_PILOT_CATALOG.sets.filter((set) => set.type === 'interview');
