@@ -2300,7 +2300,17 @@ components:
       additionalProperties: false
     Progress:
       type: object
+      properties:
+        learnerPreferences: { $ref: '#/components/schemas/LearnerPreferences' }
       additionalProperties: true
+    LearnerPreferences:
+      type: object
+      required: [version, schoolGrade, preferredSessionMinutes]
+      properties:
+        version: { type: integer, enum: [1] }
+        schoolGrade: { type: integer, nullable: true, minimum: 8, maximum: 11 }
+        preferredSessionMinutes: { type: integer, minimum: 15, maximum: 120, multipleOf: 5, default: 30 }
+      additionalProperties: false
     ExperimentalAssessment:
       type: object
       required: [mode, scoreKind, warning]

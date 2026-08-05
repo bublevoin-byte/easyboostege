@@ -6,13 +6,14 @@
  * Версия ниже — для исходников, которые сервер отдаёт, когда сборки нет; тот же скрипт сверяет её
  * с графом статических импортов `main.js`, поэтому и она не разъезжается молча.
  *
- * Сюда входят три экрана раздела 6.1 — «Слова», «Грамматика», «Прогресс», — потому что main.js
- * импортирует их наравне с оболочкой. Пять ленивых чанков здесь отсутствуют: страница не должна
+ * Сюда входят четыре экрана — «Слова», «Грамматика», «Прогресс» и «Профиль», — потому что main.js
+ * импортирует их наравне с оболочкой; профиль нужен для первого офлайн-открытия настроек. Четыре
+ * ленивых чанка здесь отсутствуют: страница не должна
  * просить их при первой загрузке. В кэш они попадают ниже, в обработчике fetch, когда ученик
  * впервые открывает свой экран, — поэтому офлайн-запуск открывает уже виденные экраны.
  */
 /* build:app-shell */
-const APP_SHELL=['/','/offline.html','/privacy.html','/task-bank.json','/main.js','/globals.js','/api.js','/auth.js','/sync.js','/store.js','/components.js','/router.js','/learning.js','/vocabulary-domain.js','/vocabulary-session-view.js','/adaptive-activity-contract.js','/adaptive-activity-launch.js','/adaptive-overview-cache.js','/adaptive-session-runtime.js','/modules/words.js','/modules/grammar.js','/modules/reading.js','/modules/listening.js','/modules/writing.js','/modules/speaking.js','/modules/exam.js','/modules/progress.js','/modules/profile.js','/modules/core-voice-catalog.js','/app.js','/voice-tutor.js','/realtime-transport.js','/screens.js','/screens/words.js','/screens/grammar.js','/screens/progress.js','/privacy.js','/tts.js','/pwa.js','/manifest.json','/pwa-icon.svg','/icon-192.png','/icon-512.png','/icon-maskable-512.png'];
+const APP_SHELL=['/','/offline.html','/privacy.html','/task-bank.json','/main.js','/globals.js','/api.js','/auth.js','/sync.js','/store.js','/components.js','/router.js','/learning.js','/vocabulary-domain.js','/vocabulary-session-view.js','/adaptive-activity-contract.js','/adaptive-activity-launch.js','/adaptive-overview-cache.js','/adaptive-session-runtime.js','/modules/words.js','/modules/grammar.js','/modules/reading.js','/modules/listening.js','/modules/writing.js','/modules/speaking.js','/modules/exam.js','/modules/progress.js','/modules/profile.js','/modules/core-voice-catalog.js','/app.js','/voice-tutor.js','/realtime-transport.js','/screens.js','/screens/words.js','/screens/grammar.js','/screens/progress.js','/screens/profile.js','/privacy.js','/tts.js','/pwa.js','/manifest.json','/pwa-icon.svg','/icon-192.png','/icon-512.png','/icon-maskable-512.png'];
 /* end build:app-shell */
 /*
  * Имя кэша считается по самому списку, а не пишется руками. Прежний `easyboost-static-vNN` нужно

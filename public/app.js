@@ -232,12 +232,12 @@ function syncModuleAttempt(attempt){return store.sync.saveModuleAttempt(attempt)
 let _saveT=null;
 const START_HOOKS=[];
 function registerStartHook(hook){START_HOOKS.push(hook)}
-function save(){
+function save(options={}){
   if(DEMO_MODE)return;
   if(SRV&&!TOKEN)return;
   /* локальный снимок держит слова, SRS, грамматику и прогресс доступными без сети */
   store.saveLocal(currentUser,S);
-  if(SRV){clearTimeout(_saveT);_saveT=setTimeout(()=>{store.sync.saveProgress(S)},600)}}
+  if(SRV){clearTimeout(_saveT);if(options.queueNow)store.sync.queueProgress(S);_saveT=setTimeout(()=>{store.sync.saveProgress(S)},600)}}
 async function startApp(){
   /* Встроенные задания нужны до первого экрана письма и должны быть доступны офлайн,
      поэтому банк загружается из закэшированного /task-bank.json на старте. */

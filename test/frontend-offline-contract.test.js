@@ -18,6 +18,8 @@ import vm from 'node:vm';
 const apiSource = await fs.readFile(new URL('../public/api.js', import.meta.url), 'utf8');
 const syncSource = await fs.readFile(new URL('../public/sync.js', import.meta.url), 'utf8');
 const workerSource = await fs.readFile(new URL('../public/service-worker.js', import.meta.url), 'utf8');
+const entrySource = await fs.readFile(new URL('../public/main.js', import.meta.url), 'utf8');
+const screenLoaderSource = await fs.readFile(new URL('../public/screens.js', import.meta.url), 'utf8');
 
 const ORIGIN = 'https://app.easyboost.ru';
 
@@ -205,6 +207,55 @@ test('a queued change survives until the network actually accepts it', async () 
   assert.equal(online.posts.length, 1);
   assert.deepEqual(online.posts[0].body.modules, { words: { learned: 14 } });
   assert.equal(online.sync.hasPending(), false, 'после успешной отправки очередь очищается');
+});
+
+test('learner preferences changed offline replay only for the same owner', async () => {
+  const learnerPreferences = {
+    version: 1,
+    schoolGrade: 9,
+    preferredSessionMinutes: 35,
+  };
+  const offline = createSync({ online: false });
+  offline.sync.setOwner('learner-a');
+  await offline.sync.setBaseline({});
+
+  assert.equal(await offline.sync.saveProgress({ learnerPreferences }), false);
+  assert.deepEqual(offline.sync.pendingModules(), { learnerPreferences });
+
+  const queued = offline.values.get('easyboost_pending_modules_v3');
+  const online = createSync({ online: true, failRequest: false });
+  online.values.set('easyboost_pending_modules_v3', queued);
+  online.sync.setOwner('learner-b');
+  assert.equal(await online.sync.flush(), false);
+  assert.equal(online.posts.length, 0);
+
+  online.sync.setOwner('learner-a');
+  assert.equal(await online.sync.flush(), true);
+  assert.deepEqual(JSON.parse(JSON.stringify(online.posts)), [{
+    path: '/api/v1/progress/modules',
+    body: { modules: { learnerPreferences } },
+  }]);
+  assert.equal(online.sync.hasPending(), false);
+});
+
+test('profile submit can durably queue preferences before its deferred network flush', () => {
+  const { sync, posts } = createSync({ online: true, failRequest: false });
+  sync.setOwner('learner-a');
+  const learnerPreferences = {
+    version: 1,
+    schoolGrade: 11,
+    preferredSessionMinutes: 40,
+  };
+
+  assert.equal(sync.queueProgress({ learnerPreferences }), true);
+  assert.deepEqual(sync.pendingModules(), { learnerPreferences });
+  assert.equal(posts.length, 0, 'durable queueing must not itself start the deferred network flush');
+});
+
+test('the learner preferences screen is available on a first offline open', () => {
+  assert.match(entrySource, /import \* as profileScreen from '\.\/screens\/profile\.js'/u);
+  assert.doesNotMatch(screenLoaderSource, /import\('\.\/screens\/profile\.js'\)/u);
+  assert.match(workerSource, /'\/screens\/profile\.js'/u);
 });
 
 test('a failed online attempt keeps the change queued rather than dropping it', async () => {

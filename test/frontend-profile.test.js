@@ -23,6 +23,52 @@ test('profile module falls back to a guest name and initial', () => {
   assert.equal(profile.greeting(null), 'Привет, друг 👋');
 });
 
+test('profile presents honest learner preference defaults and the existing adaptive goal', () => {
+  const profile = createProfileModule();
+
+  assert.deepEqual(JSON.parse(JSON.stringify(profile.studyPreferences(null))), {
+    version: 1,
+    schoolGrade: null,
+    preferredSessionMinutes: 30,
+  });
+  assert.equal(profile.studySummary(null, null), 'Класс не указан · цель не настроена');
+
+  const preferences = profile.studyPreferences({
+    version: 1,
+    schoolGrade: 10,
+    preferredSessionMinutes: 55,
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(preferences)), {
+    version: 1,
+    schoolGrade: 10,
+    preferredSessionMinutes: 55,
+  });
+  assert.equal(
+    profile.studySummary(preferences, { targetScore: 92 }),
+    '10 класс · цель: 92+ баллов',
+  );
+  assert.deepEqual(JSON.parse(JSON.stringify(profile.studyPreferences({
+    version: 1,
+    schoolGrade: 7,
+    preferredSessionMinutes: 16,
+  }))), {
+    version: 1,
+    schoolGrade: null,
+    preferredSessionMinutes: 30,
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(profile.createStudyPreferences('', '30'))), {
+    version: 1,
+    schoolGrade: null,
+    preferredSessionMinutes: 30,
+  });
+  assert.equal(profile.createStudyPreferences('7', '30'), null);
+  assert.equal(profile.createStudyPreferences('11', '16'), null);
+  assert.equal(
+    profile.studySummary(preferences, null, false),
+    '10 класс · цель временно недоступна',
+  );
+});
+
 test('profile module formats subscription dates as dd.mm.yyyy', () => {
   const profile = createProfileModule();
 
@@ -100,4 +146,27 @@ test('profile Premium paywall is wired to the authenticated payment request API'
   assert.match(appSource, /post\('\/api\/v1\/payments\/requests',\{product:'premium_voice'\}\)/u);
   assert.match(appSource, /pf_voice_action/u);
   assert.match(appSource, /aria-label/u);
+});
+
+test('profile exposes working study controls and one adaptive goal editor without placeholders', async () => {
+  const [markup, screen] = await Promise.all([
+    fs.readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../public/screens/profile.js', import.meta.url), 'utf8'),
+  ]);
+
+  assert.match(markup, /id="pf_study_summary"/u);
+  assert.match(markup, /id="profile_preferences_form"/u);
+  assert.match(markup, /id="profile_school_grade"/u);
+  for (const grade of [8, 9, 10, 11]) {
+    assert.match(markup, new RegExp(`<option value="${grade}">${grade} класс<\/option>`, 'u'));
+  }
+  assert.match(markup, /id="profile_session_minutes"[^>]*min="15"[^>]*max="120"[^>]*step="5"/u);
+  assert.match(markup, /id="profile_goal_edit"/u);
+  assert.doesNotMatch(markup, /11 класс · цель: 85\+ баллов/u);
+  assert.doesNotMatch(markup, /Напоминания|Язык интерфейса/u);
+  assert.match(screen, /S\.learnerPreferences=/u);
+  assert.match(screen, /save\(\{queueNow:true\}\)/u);
+  assert.match(screen, /apiGet\('\/api\/v1\/adaptive-learning\/goal'\)/u);
+  assert.match(screen, /nav\('scr10'/u);
+  assert.match(screen, /adaptive-goal-edit/u);
 });

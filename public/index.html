@@ -998,8 +998,8 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
             <legend style="font-weight:700;font-size:10.5px;color:#52565E;">Продолжительность</legend>
             <div class="adaptive-duration-grid" style="margin-top:6px;">
               <label><input type="radio" name="adaptive_session_duration" value="15" aria-label="15 минут"> 15 мин</label>
-              <label><input type="radio" name="adaptive_session_duration" value="30" aria-label="30 минут"> 30 мин</label>
-              <label><input type="radio" name="adaptive_session_duration" value="45" aria-label="45 минут" checked> 45 мин</label>
+              <label><input type="radio" name="adaptive_session_duration" value="30" aria-label="30 минут" checked> 30 мин</label>
+              <label><input type="radio" name="adaptive_session_duration" value="45" aria-label="45 минут"> 45 мин</label>
               <label><input type="radio" name="adaptive_session_duration" value="60" aria-label="60 минут"> 60 мин</label>
               <label><input type="radio" name="adaptive_session_duration" value="90" aria-label="90 минут"> 90 мин</label>
             </div>
@@ -1093,7 +1093,7 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
       <div style="width:58px;height:58px;border-radius:18px;background:linear-gradient(135deg,#FFC861,#F2683F);display:grid;place-items:center;font-weight:800;font-size:24px;color:#fff;" id="pf_ava">А</div>
       <div style="flex:1;">
         <div id="pf_name" style="font-weight:800;font-size:17px;color:#2B2B2B;">Аня Соколова</div>
-        <div style="font-weight:600;font-size:12.5px;color:#6A6E75;margin-top:2px;">11 класс · цель: 85+ баллов</div>
+        <div id="pf_study_summary" style="font-weight:600;font-size:12.5px;color:#6A6E75;margin-top:2px;">Класс не указан · цель не настроена</div>
       </div>
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#C4C8CE" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
     </div>
@@ -1112,17 +1112,29 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
           <span id="pf_known_n" style="font-weight:600;font-size:13px;color:#6A6E75;">0</span>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#C4C8CE" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
         </button>
-        <div style="display:flex;align-items:center;gap:13px;padding:15px 16px;border-bottom:1px solid #F4F5F6;">
+        <form id="profile_preferences_form" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:15px 16px;border-bottom:1px solid #F4F5F6;">
+          <label for="profile_school_grade" style="font-weight:700;font-size:11px;color:#52565E;">Школьный класс
+            <select id="profile_school_grade" name="schoolGrade" style="width:100%;min-height:44px;margin-top:5px;border:1px solid #DDD8CF;border-radius:11px;padding:7px 9px;background:#fff;font:650 12px Manrope;color:#2B2B2B;">
+              <option value="">Не указан</option>
+              <option value="8">8 класс</option>
+              <option value="9">9 класс</option>
+              <option value="10">10 класс</option>
+              <option value="11">11 класс</option>
+            </select>
+          </label>
+          <label for="profile_session_minutes" style="font-weight:700;font-size:11px;color:#52565E;">Обычное занятие
+            <input id="profile_session_minutes" name="preferredSessionMinutes" type="number" min="15" max="120" step="5" value="30" inputmode="numeric" required aria-label="Обычная длительность занятия в минутах" aria-describedby="profile_preferences_help" style="width:100%;margin-top:5px;border:1px solid #DDD8CF;border-radius:11px;padding:7px 9px;background:#fff;font:650 12px Manrope;color:#2B2B2B;">
+          </label>
+          <div id="profile_preferences_help" style="grid-column:1/-1;font-weight:600;font-size:10.5px;line-height:1.4;color:#6A6E75;">От 15 до 120 минут, шаг 5 минут. Без сети сохраним и синхронизируем позже.</div>
+          <button type="submit" style="grid-column:1/-1;border:0;border-radius:12px;background:#F2683F;color:#fff;padding:9px 12px;font:750 12px Manrope;cursor:pointer;">Сохранить настройки</button>
+          <div id="profile_preferences_notice" role="status" aria-live="polite" style="grid-column:1/-1;min-height:15px;font-weight:600;font-size:10.5px;color:#6A6E75;"></div>
+        </form>
+        <button type="button" id="profile_goal_edit" class="clk cardbtn" style="display:flex;align-items:center;gap:13px;padding:15px 16px;cursor:pointer;">
           <span style="width:34px;height:34px;border-radius:11px;background:#FFEDE4;display:grid;place-items:center;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v2M12 19v2M5 12H3M21 12h-2M6 6 4.5 4.5M18 6l1.5-1.5"/><circle cx="12" cy="12" r="4"/></svg></span>
-          <span style="flex:1;font-weight:700;font-size:14px;color:#2B2B2B;">Цель в день</span>
-          <span style="font-weight:600;font-size:13px;color:#6A6E75;">30 мин</span>
+          <span style="flex:1;font-weight:700;font-size:14px;color:#2B2B2B;">Цель ЕГЭ</span>
+          <span id="pf_goal_value" style="font-weight:600;font-size:12px;color:#6A6E75;">Не настроена</span>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#C4C8CE" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
-        </div>
-        <div style="display:flex;align-items:center;gap:13px;padding:15px 16px;">
-          <span style="width:34px;height:34px;border-radius:11px;background:#FFF4DE;display:grid;place-items:center;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#C77400" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg></span>
-          <span style="flex:1;font-weight:700;font-size:14px;color:#2B2B2B;">Напоминания</span>
-          <div style="width:46px;height:27px;border-radius:20px;background:linear-gradient(135deg,#FFA570,#F2683F);position:relative;"><div style="position:absolute;top:3px;right:3px;width:21px;height:21px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.2);"></div></div>
-        </div>
+        </button>
       </div>
       <div style="font-weight:700;font-size:11px;letter-spacing:1.4px;color:#6A6E75;margin:18px 2px 10px;">ИИ И АККАУНТ</div>
       <div style="background:#fff;border-radius:18px;box-shadow:0 8px 22px rgba(20,20,30,.05);overflow:hidden;">
@@ -1130,12 +1142,6 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
           <span style="width:34px;height:34px;border-radius:11px;background:#E5F4EC;display:grid;place-items:center;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1F9E5A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 1.9 4.6L19 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"/></svg></span>
           <span style="flex:1;font-weight:700;font-size:14px;color:#2B2B2B;">Проверка эссе ИИ</span>
           <span id="pf_ai" style="font-weight:700;font-size:11.5px;color:#1D7F4A;background:#EAF7F0;padding:4px 10px;border-radius:20px;">вкл</span>
-        </div>
-        <div style="display:flex;align-items:center;gap:13px;padding:15px 16px;">
-          <span style="width:34px;height:34px;border-radius:11px;background:#E3F1F5;display:grid;place-items:center;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#3E93A8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3.5 9h17M3.5 15h17M12 3c2.5 3 2.5 15 0 18M12 3c-2.5 3-2.5 15 0 18"/></svg></span>
-          <span style="flex:1;font-weight:700;font-size:14px;color:#2B2B2B;">Язык интерфейса</span>
-          <span style="font-weight:600;font-size:13px;color:#6A6E75;">Русский</span>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#C4C8CE" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
         </div>
       </div>
       <!-- logout -->

@@ -136,11 +136,20 @@
     flushing=current;
     return flushing;
   }
-  function saveProgress(progress){
+  function progressModules(progress){
     const pending=readPending();
-    const modules={...((pending&&pending.modules)||{}),...changedModules(progress)};
+    return {...((pending&&pending.modules)||{}),...changedModules(progress)}
+  }
+  function queueProgress(progress){
+    const modules=progressModules(progress);
+    if(!Object.keys(modules).length)return false;
+    return queueModules(modules)
+  }
+  function saveProgress(progress){
+    const modules=progressModules(progress);
     if(!Object.keys(modules).length)return Promise.resolve(true);
-    if(typeof navigator!=='undefined'&&navigator.onLine===false){queueModules(modules);return Promise.resolve(false)}
+    queueModules(modules);
+    if(typeof navigator!=='undefined'&&navigator.onLine===false)return Promise.resolve(false);
     return sendModules(modules).catch(function(){return false});
   }
   function saveModuleAttempt(attempt){
@@ -154,7 +163,7 @@
   function pendingModules(){const pending=readPending();return (pending&&pending.modules)||{}}
   function pendingModuleAttempts(){return clone(ownerAttempts(readAttemptStore()))}
   global.EasyBoostSync=Object.freeze({
-    saveProgress:saveProgress,saveModuleAttempt:saveModuleAttempt,setBaseline:setBaseline,setOwner:setOwner,clearOwner:clearOwner,
+    queueProgress:queueProgress,saveProgress:saveProgress,saveModuleAttempt:saveModuleAttempt,setBaseline:setBaseline,setOwner:setOwner,clearOwner:clearOwner,
     flush:flush,pendingModules:pendingModules,pendingModuleAttempts:pendingModuleAttempts,
     hasPending:function(){return Boolean(readPending())||Boolean(ownerAttempts(readAttemptStore()).length)},
   });

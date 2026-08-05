@@ -313,6 +313,25 @@ test('commercial plan UI has complete labelled controls, paywall, accessible rep
   assert.match(screen, /неофициальн/u);
 });
 
+test('adaptive composer opens with the saved preferred duration and accepts goal-editor focus', async () => {
+  const [markup, screen] = await Promise.all([
+    fs.readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../public/screens/progress.js', import.meta.url), 'utf8'),
+  ]);
+
+  assert.match(markup, /name="adaptive_session_duration" value="30"[^>]*checked/u);
+  assert.doesNotMatch(markup, /name="adaptive_session_duration" value="45"[^>]*checked/u);
+  assert.match(screen, /function applyPreferredAdaptiveSessionDuration/u);
+  assert.match(screen, /profileModule\.studyPreferences\(S&&S\.learnerPreferences\)/u);
+  assert.match(screen, /matching\.checked=true/u);
+  assert.match(screen, /custom\.value=String\(preferred\)/u);
+  assert.match(screen, /Free-демо ограничено 15 минутами/u);
+  assert.match(screen, /Предпочтение .* мин сохранено/u);
+  assert.match(screen, /addEventListener\('adaptive-goal-edit'/u);
+  assert.match(screen, /adaptive_target_score/u);
+  assert.match(screen, /\.focus\(\)/u);
+});
+
 test('production facade wires every commercial repository boundary used by routes', async () => {
   const [facade, server] = await Promise.all([
     fs.readFile(new URL('../db.js', import.meta.url), 'utf8'),

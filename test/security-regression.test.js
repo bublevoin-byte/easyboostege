@@ -94,27 +94,27 @@ test('frontend loads through a single module entry point that keeps the previous
     'learning.js', 'modules/words.js', 'modules/grammar.js', 'modules/reading.js',
     'modules/listening.js', 'modules/writing.js', 'modules/speaking.js', 'modules/exam.js',
     'modules/progress.js', 'modules/profile.js', 'app.js', 'voice-tutor.js',
-    'screens/words.js', 'screens/grammar.js', 'screens/progress.js',
+    'screens/words.js', 'screens/grammar.js', 'screens/progress.js', 'screens/profile.js',
     'privacy.js', 'tts.js', 'pwa.js',
   ]);
 
   /*
    * Разделение экранов на статические и ленивые — требование, а не вкус. Раздел 6.1 ТЗ обещает без
-   * сети словарные карточки, интервальное повторение, встроенные грамматические тесты и просмотр
-   * сохранённого прогресса, поэтому эти три экрана обязаны быть в оболочке: обещание, отложенное до
+   * сети словарные карточки, интервальное повторение, встроенные грамматические тесты, просмотр
+   * сохранённого прогресса и изменение предпочтений, поэтому эти четыре экрана обязаны быть в оболочке: обещание, отложенное до
    * первого перехода, ученик, ушедший в офлайн раньше, не получит, а кэш service worker гарантией
    * быть не может — там, где service worker заблокирован, её просто нет.
    *
-   * Остальные пять экранов обязаны остаться ленивыми: на них держится бюджет раздела 19.
+   * Остальные четыре экрана обязаны остаться ленивыми: на них держится бюджет раздела 19.
    * Ни один список не должен молча съехать в другую сторону, поэтому проверяются оба.
    */
   const eagerScreens = imported.filter((name) => name.startsWith('screens/'));
-  assert.deepEqual(eagerScreens, ['screens/words.js', 'screens/grammar.js', 'screens/progress.js']);
+  assert.deepEqual(eagerScreens, ['screens/words.js', 'screens/grammar.js', 'screens/progress.js', 'screens/profile.js']);
   const loader = await fs.readFile(new URL('../public/screens.js', import.meta.url), 'utf8');
   const lazy = [...loader.matchAll(/import\(\s*'\.\/(screens\/[^']+)'\s*\)/gu)].map((match) => match[1]);
   assert.deepEqual(lazy, [
     'screens/listening.js', 'screens/reading.js',
-    'screens/writing.js', 'screens/speaking.js', 'screens/profile.js',
+    'screens/writing.js', 'screens/speaking.js',
   ]);
   for (const screen of eagerScreens) {
     assert.ok(!lazy.includes(screen), `${screen} не может быть одновременно в оболочке и чанком`);
@@ -402,7 +402,7 @@ test('privacy UI separates text and voice consent and explains external processi
 test('demo mode is isolated from persistence and paid AI calls', async () => {
   const { html, script } = await readFrontend();
   assert.match(html, /id="demo_btn"[^>]*onclick="startDemo\(\)"/u);
-  assert.match(script, /function save\(\)\{\s*if\(DEMO_MODE\)return;/u);
+  assert.match(script, /function save\(options=\{\}\)\{\s*if\(DEMO_MODE\)return;/u);
   assert.match(script, /function generateAiContent\(operation,payload\)\{if\(DEMO_MODE\)return Promise\.reject/u);
   assert.match(script, /if\(DEMO_MODE\)\{renderReview\(localReview/u);
   assert.match(script, /Демо · войти для сохранения/u);

@@ -1,12 +1,12 @@
 /*
  * Экран «Прогресс» (scr10). Раздел 6.1 ТЗ обещает просмотр сохранённого прогресса без сети,
- * поэтому этот экран, в отличие от пяти ленивых, входит в оболочку и грузится сразу.
+ * поэтому этот экран, в отличие от четырёх ленивых, входит в оболочку и грузится сразу.
  * Числа он берёт из того же состояния, что и плитки главного экрана, — считать заново нечего.
  */
 import {registerRouteHook} from '../router.js';
 import {readAdaptiveOverviewCache,writeAdaptiveOverviewCache} from '../adaptive-overview-cache.js';
 import {adaptiveRuntimeSnapshot,advanceAdaptiveBreak,beginAdaptiveBlock,completeAdaptiveVoiceTutorRepeat,finishAdaptiveSession,resumeAdaptiveExecution} from '../adaptive-session-runtime.js';
-import {S,apiGet,apiMessage,apiPost,apiPostIdempotent,apiPut,progressModule,registerStartHook,setTxt} from '../app.js';
+import {S,apiGet,apiMessage,apiPost,apiPostIdempotent,apiPut,profileModule,progressModule,registerStartHook,setTxt} from '../app.js';
 
 function syncAdaptivePlanEntries(){
   const enabled=window.__sub?.features?.adaptive_learning===true;
@@ -33,7 +33,16 @@ function adaptiveOverviewOwner(){try{const owner=localStorage.getItem('eb_curren
 function setAdaptiveReadOnly(readOnly){const root=document.getElementById('adaptive_plan');if(!root)return;root.dataset.mode=readOnly?'offline_read_only':'online';if(!readOnly){root.querySelectorAll('[data-adaptive-readonly-disabled="true"]').forEach(function(control){control.disabled=false;delete control.dataset.adaptiveReadonlyDisabled});return}root.querySelectorAll('input,select,textarea,button').forEach(function(control){if(!control.disabled){control.disabled=true;control.dataset.adaptiveReadonlyDisabled='true'}})}
 function adaptiveCommercialMessage(error){const code=String(error&&error.code||'');if(code==='ADAPTIVE_FREE_DEMO_USED')return'Бесплатное пробное занятие уже использовано. Для следующих персональных занятий нужен Base.';if(code==='ADAPTIVE_BASE_REQUIRED')return'Постоянный учебный план и выбор длительности доступны с Base.';if(code==='ADAPTIVE_PREMIUM_REQUIRED')return'Глубокая диагностика и подробные отчёты доступны с Premium.';if(code==='ADAPTIVE_FREE_DIAGNOSTIC_USED')return'Бесплатная короткая диагностика уже пройдена. Продолжение доступно с Base.';return apiMessage(error,'request')}
 function showAdaptivePaywall(message){const paywall=document.getElementById('adaptive_paywall');const copy=document.getElementById('adaptive_paywall_copy');if(!paywall||!copy)return;paywall.hidden=false;if(message)copy.textContent=message}
-function applyAdaptiveDurationAccess(){const access=adaptiveAccessState;if(!access)return;const free=access.tier==='free';const used=Boolean(access.usage&&access.usage.demoSessionUsed);const locked=free&&used;const custom=document.getElementById('adaptive_session_custom');const preview=document.getElementById('adaptive_session_preview');document.querySelectorAll('input[name="adaptive_session_duration"]').forEach(function(input){if(free&&input.value==='15'&&!used)input.checked=true;else if(free)input.checked=false;input.disabled=locked||(free&&input.value!=='15')});if(custom){custom.disabled=free;custom.value=free?'':custom.value}if(preview)preview.disabled=locked}
+function applyPreferredAdaptiveSessionDuration(){
+  const preferred=profileModule.studyPreferences(S&&S.learnerPreferences).preferredSessionMinutes;
+  const inputs=Array.from(document.querySelectorAll('input[name="adaptive_session_duration"]'));
+  const matching=inputs.find(function(input){return Number(input.value)===preferred});
+  const custom=document.getElementById('adaptive_session_custom');
+  inputs.forEach(function(input){input.checked=false});
+  if(matching){matching.checked=true;if(custom)custom.value=''}
+  else if(custom)custom.value=String(preferred);
+}
+function applyAdaptiveDurationAccess(){const access=adaptiveAccessState;if(!access)return;const free=access.tier==='free';const used=Boolean(access.usage&&access.usage.demoSessionUsed);const locked=free&&used;const preferred=profileModule.studyPreferences(S&&S.learnerPreferences).preferredSessionMinutes;const custom=document.getElementById('adaptive_session_custom');const preview=document.getElementById('adaptive_session_preview');const help=document.getElementById('adaptive_session_duration_help');document.querySelectorAll('input[name="adaptive_session_duration"]').forEach(function(input){if(free&&input.value==='15'&&!used)input.checked=true;else if(free)input.checked=false;input.disabled=locked||(free&&input.value!=='15')});if(custom){custom.disabled=free;custom.value=free?'':custom.value}if(help)help.textContent=free?'Free-демо ограничено 15 минутами. Предпочтение '+preferred+' мин сохранено и станет начальным для Base/Premium.':'От 15 до 120 минут, шаг 5 минут. Начальное значение — сохранённое предпочтение.';if(preview)preview.disabled=locked}
 function drawAdaptiveAccess(access){if(!access)return;adaptiveAccessState=access;const panel=document.getElementById('adaptive_access');const title=document.getElementById('adaptive_access_title');const copy=document.getElementById('adaptive_access_copy');const paywall=document.getElementById('adaptive_paywall');const deep=document.getElementById('adaptive_deep_diagnostic_start');const report=document.getElementById('adaptive_detailed_report');const form=document.getElementById('adaptive_goal_form');if(panel){panel.dataset.tier=access.tier}if(title)title.textContent=access.tier==='premium'?'Premium · полный персональный маршрут':access.tier==='base'?'Base · постоянный учебный план':'Free · знакомство с персональным планом';if(copy)copy.textContent=access.tier==='premium'?'Любая длительность, глубокая диагностика, подробные отчёты и примерный языковой ориентир.':access.tier==='base'?'Создавайте занятия на доступное время. Распределение автоматически меняется по вашим результатам.':access.usage&&access.usage.demoSessionUsed?'Пробное занятие завершено. Ваш результат сохранён; для продолжения нужен Base.':'Доступны короткая диагностика и одно пробное занятие на 15 минут.';if(deep)deep.hidden=!(access.capabilities&&access.capabilities.deepDiagnostic);if(report){report.dataset.locked=String(!(access.capabilities&&access.capabilities.detailedReports));report.textContent=access.capabilities&&access.capabilities.detailedReports?'Открыть подробный отчёт':'Подробный отчёт · Premium'}if(paywall)paywall.hidden=!(access.tier==='free'&&access.usage&&access.usage.demoSessionUsed);if(form){const locked=access.tier==='free'&&access.usage&&access.usage.demoSessionUsed;form.querySelectorAll('input,button').forEach(function(control){control.disabled=locked})}applyAdaptiveDurationAccess()}
 function drawAdaptiveForecast(plan){
   const section=document.getElementById('adaptive_forecast');const range=document.getElementById('adaptive_forecast_range');const confidence=document.getElementById('adaptive_forecast_confidence');const allocation=document.getElementById('adaptive_weekly_allocation');const choices=document.getElementById('adaptive_plan_choices');if(!section||!range||!confidence||!allocation||!choices)return;
@@ -171,6 +180,7 @@ function bindAdaptiveCommercial(){const button=document.getElementById('adaptive
 async function renderAdaptivePlan(){
   const root=document.getElementById('adaptive_plan');const form=document.getElementById('adaptive_goal_form');const notice=document.getElementById('adaptive_goal_notice');const errors=document.getElementById('adaptive_goal_errors');if(!root||!form||!notice||!errors)return;
   root.hidden=!(window.__sub?.features?.adaptive_learning===true);if(root.hidden)return;
+  applyPreferredAdaptiveSessionDuration();
   bindAdaptiveDiagnostic();
   bindAdaptiveSessionComposer();
   bindAdaptiveCommercial();
@@ -224,5 +234,6 @@ syncAdaptivePlanEntries();
 registerStartHook(syncAdaptivePlanEntries);
 registerRouteHook(function(id){if(id==='scr10')renderProgress()});
 window.addEventListener('adaptive-recovery-launch',function(){renderRecoveryMap()});
+window.addEventListener('adaptive-goal-edit',function(){requestAnimationFrame(function(){const input=document.getElementById('adaptive_target_score');if(!input||input.closest('[hidden]'))return;input.focus();input.scrollIntoView({block:'center'})})});
 
-export {drawAdaptiveDiagnostic,drawAdaptiveForecast,drawAdaptivePlan,drawAdaptiveSession,drawRecoveryMap,renderAdaptivePlan,renderProgress,renderRecoveryMap};
+export {applyPreferredAdaptiveSessionDuration,drawAdaptiveDiagnostic,drawAdaptiveForecast,drawAdaptivePlan,drawAdaptiveSession,drawRecoveryMap,renderAdaptivePlan,renderProgress,renderRecoveryMap};

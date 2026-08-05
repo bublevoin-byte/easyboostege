@@ -4,6 +4,48 @@
   const DAY_MS = 86400000;
   const GUEST = 'Гость';
   const GREETING_FALLBACK = 'друг';
+  const DEFAULT_SESSION_MINUTES = 30;
+
+  function validSchoolGrade(value) {
+    return Number.isInteger(value) && value >= 8 && value <= 11;
+  }
+
+  function validSessionMinutes(value) {
+    return Number.isInteger(value) && value >= 15 && value <= 120 && value % 5 === 0;
+  }
+
+  function studyPreferences(value) {
+    const source = value && typeof value === 'object' && value.version === 1 ? value : {};
+    return {
+      version: 1,
+      schoolGrade: validSchoolGrade(source.schoolGrade) ? source.schoolGrade : null,
+      preferredSessionMinutes: validSessionMinutes(source.preferredSessionMinutes)
+        ? source.preferredSessionMinutes : DEFAULT_SESSION_MINUTES,
+    };
+  }
+
+  function createStudyPreferences(schoolGrade, preferredSessionMinutes) {
+    const normalizedGrade = schoolGrade === '' || schoolGrade == null ? null : Number(schoolGrade);
+    const normalizedMinutes = Number(preferredSessionMinutes);
+    if (normalizedGrade !== null && !validSchoolGrade(normalizedGrade)) return null;
+    if (!validSessionMinutes(normalizedMinutes)) return null;
+    return {
+      version: 1,
+      schoolGrade: normalizedGrade,
+      preferredSessionMinutes: normalizedMinutes,
+    };
+  }
+
+  function studySummary(preferences, goal, goalAvailable = true) {
+    const normalized = studyPreferences(preferences);
+    const grade = normalized.schoolGrade == null
+      ? 'Класс не указан' : normalized.schoolGrade + ' класс';
+    if (!goalAvailable) return grade + ' · цель временно недоступна';
+    const targetScore = goal && Number.isInteger(goal.targetScore)
+      && goal.targetScore >= 0 && goal.targetScore <= 100 ? goal.targetScore : null;
+    return grade + ' · ' + (targetScore == null
+      ? 'цель не настроена' : 'цель: ' + targetScore + '+ баллов');
+  }
 
   // Text colours meet WCAG 2.1 AA (4.5:1) against their own tinted background.
   const SUBSCRIPTION_STYLES = {
@@ -93,6 +135,10 @@
     formatDate,
     subscriptionStatus,
     voiceTutorStatus,
+    studyPreferences,
+    createStudyPreferences,
+    studySummary,
+    DEFAULT_SESSION_MINUTES,
     GUEST,
   });
 })(window);
