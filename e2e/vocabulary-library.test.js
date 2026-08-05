@@ -353,8 +353,10 @@ try {
   await page.getByRole('button', { name: 'Дальше' }).press('Enter');
 
   await page.getByRole('heading', { name: 'Короткая пауза' }).waitFor({ timeout: 5_000 });
+  await page.waitForFunction(() => document.activeElement?.id === 'w_session_title');
   await page.getByRole('button', { name: 'Продолжить' }).press('Enter');
   await page.getByRole('heading', { name: 'Короткая пауза' }).waitFor();
+  await page.waitForFunction(() => document.activeElement?.id === 'w_session_title');
   await page.getByRole('button', { name: 'Продолжить' }).press('Enter');
   await page.getByRole('heading', { name: 'Выбери значение' }).waitFor();
   // The task view focuses its heading on the next animation frame. Wait for that
