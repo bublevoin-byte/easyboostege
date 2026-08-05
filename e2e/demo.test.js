@@ -775,7 +775,10 @@ async function runE2E() {
     }
     const logoutButton = authenticatedPage.locator('#scr11.on').getByRole('button', { name: 'Выйти', exact: true });
     await logoutButton.waitFor({ state: 'visible', timeout: 5_000 });
-    await logoutButton.click({ timeout: 5_000 });
+    await Promise.all([
+      authenticatedPage.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15_000 }),
+      logoutButton.click({ timeout: 5_000 }),
+    ]);
     await authenticatedPage.getByRole('button', { name: 'Попробовать демо' }).waitFor({ state: 'visible', timeout: 5_000 });
     assert.equal((await authenticatedContext.cookies()).some((cookie) => cookie.name === 'eb_token'), false);
     await authenticatedContext.close();

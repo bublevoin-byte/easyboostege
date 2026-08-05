@@ -57,7 +57,6 @@ function wire(){
   if(s1)s1.querySelectorAll('div,span').forEach(el=>{const t=txt(el);if(TILEROUTE[t]&&el.children.length===0){const card=el.closest('.clayCard')||el;makeInteractive(card,t,()=>nav(TILEROUTE[t]))}});
   bindText('scr5','Войти',()=>doLogin());bindText('scr5','Создать',()=>doRegister());
   bindText('scr6','Поехали',()=>startApp());bindText('scr6','Пропустить',()=>startApp());
-  bindText('scr11','Выйти',()=>logout());
   bindText('scr14','Повторить',()=>tab('scr8'));bindText('scr14','Учить офлайн',()=>tab('scr2'));
 }
 
