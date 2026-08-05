@@ -1252,6 +1252,15 @@ manifest; stop отменяет даже ожидающую загрузку, er
 lint/check, frontend build, reading/listening Chromium E2E, secret scan и diff-check прошли. Реальных
 сетевых/xAI/платных вызовов, push и deploy не было.
 
-Фактический платный запуск xAI TTS, push и deploy остаются отдельными подтверждаемыми действиями.
+Подтверждённый владельцем платный запуск xAI TTS выполнен 2026-08-05 из изолированного каталога на
+VPS без изменения работающего staging. Созданы все 400 MP3 для 60 комплектов (56 914 символов,
+расчётная стоимость $0.853710), manifest обновлён атомарно. Server-side и локальный dry-run после
+импорта дали `requests=0`, `missing_assets=0`; SHA-256 скачанного 52 MB архива совпал на обеих
+машинах. Локально полный набор остался зелёным: 795 тестов, 780 pass, 15 штатных PostgreSQL skip,
+0 fail. Финальная frontend-сборка содержит 419 проверенных assets, но 400 MP3 намеренно не входят
+в стартовый APP_SHELL: оболочка кеширует только manifest, а Range-aware runtime cache получает
+аудио по требованию. Lint/check и secret scan прошли; `XAI_API_KEY` не выводился и не сохранялся.
+До deploy остаются ручная проверка голосов, отдельный commit с бинарными assets и owner-approved
+push/deploy.
 
 ---

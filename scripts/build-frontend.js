@@ -110,6 +110,18 @@ if (orphaned.length) throw new Error(`Эти модули не подключе�
 /* Статика, которую никто не импортирует: разметку собирает Vite, остальное копируется как есть. */
 const staticAssets = sourceFiles.filter((name) => !name.endsWith('.js') && name !== 'index.html');
 
+/*
+ * Большие listening MP3 — runtime-данные, а не оболочка приложения. Их всё равно нужно положить в
+ * dist и включить в итоговый asset-manifest, но service worker получает их по требованию и хранит
+ * в отдельном Range-aware runtime cache. Предзагрузка всего каталога сделала бы первый install
+ * тяжелее примерно на 55 MB и сломала бы честную прогрессивную offline-модель. Сам небольшой
+ * listening manifest остаётся частью APP_SHELL.
+ */
+function runtimeManagedAsset(name) {
+  return name.startsWith('audio/listening/') && name.endsWith('.mp3');
+}
+const shellStaticAssets = staticAssets.filter((name) => !runtimeManagedAsset(name));
+
 /* ---------- сборка ---------- */
 
 /*
@@ -186,7 +198,7 @@ if (shellStart === -1 || shellEnd === -1) {
  * Чтобы он не разъехался с реальным графом импортов, сборка его сверяет: набор тот же, что в
  * dist, только без хешей.
  */
-const sourceShell = shellFrom([...shellModules, ...staticAssets]);
+const sourceShell = shellFrom([...shellModules, ...shellStaticAssets]);
 const declaredShell = JSON.parse(workerSource.slice(shellStart, shellEnd).match(/const APP_SHELL=(\[[^\]]*\]);/u)[1].replaceAll("'", '"'));
 const declaredSorted = [...declaredShell].sort();
 const expectedSorted = [...sourceShell].sort();
@@ -196,7 +208,7 @@ if (declaredSorted.join('\n') !== expectedSorted.join('\n')) {
   throw new Error(`APP_SHELL в public/service-worker.js разошёлся с графом импортов main.js.${missing.length ? `\n  не хватает: ${missing.join(', ')}` : ''}${extra.length ? `\n  лишнее: ${extra.join(', ')}` : ''}`);
 }
 
-const builtShell = shellFrom([...shellChunks, ...staticAssets]);
+const builtShell = shellFrom([...shellChunks, ...shellStaticAssets]);
 const workerBuilt = `${workerSource.slice(0, shellStart)}${SHELL_MARKER_START}\nconst APP_SHELL=${JSON.stringify(builtShell).replaceAll('"', "'")};\n${workerSource.slice(shellEnd)}`;
 await fs.writeFile(path.join(stagingDirectory, 'service-worker.js'), workerBuilt, 'utf8');
 
