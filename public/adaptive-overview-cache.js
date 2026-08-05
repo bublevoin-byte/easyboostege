@@ -45,7 +45,7 @@ export function writeAdaptiveOverviewCache(storage, owner, payload, now = Date.n
   }
 }
 
-export function readAdaptiveOverviewCache(storage, owner, now = Date.now()) {
+export function readAdaptiveOverviewCacheSnapshot(storage, owner, now = Date.now()) {
   try {
     if (!validOwner(owner) || !Number.isFinite(Number(now))) throw new Error('ADAPTIVE_OVERVIEW_CACHE_INVALID');
     const raw = storage?.getItem(STORAGE_KEY);
@@ -60,11 +60,15 @@ export function readAdaptiveOverviewCache(storage, owner, now = Date.now()) {
     }
     const projected = publicProjection(value.payload);
     if (!projected) throw new Error('ADAPTIVE_OVERVIEW_CACHE_INVALID');
-    return projected;
+    return { savedAt: Number(value.savedAt), payload: projected };
   } catch {
     remove(storage);
     return null;
   }
+}
+
+export function readAdaptiveOverviewCache(storage, owner, now = Date.now()) {
+  return readAdaptiveOverviewCacheSnapshot(storage, owner, now)?.payload || null;
 }
 
 export function clearAdaptiveOverviewCache(storage) {

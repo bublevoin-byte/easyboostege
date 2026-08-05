@@ -3,6 +3,7 @@ import { rateLimit } from 'express-rate-limit';
 
 import { validateProgress } from '../validation/api-input.js';
 import { moduleAttemptSchema } from '../validation/module-attempt.js';
+import { requiresServerAssessment } from '../adaptive-learning/evidence-policy.js';
 import { wordProgressBatchSchema } from '../validation/word-progress.js';
 import { errorBankBatchSchema } from '../validation/error-bank.js';
 import {
@@ -79,6 +80,12 @@ export function createProgressRoutes({ authentication, db, now = () => new Date(
     try {
       const parsed = moduleAttemptSchema.safeParse(req.body);
       if (!parsed.success) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректные данные попытки.' } });
+      if (requiresServerAssessment(parsed.data.module)) {
+        return res.status(400).json({ error: {
+          code: 'SERVER_ASSESSMENT_REQUIRED',
+          message: 'Письмо и говорение учитываются только после завершённой серверной проверки.',
+        } });
+      }
       if (['voice_tutor_error', 'voice_tutor_context_result'].includes(parsed.data.activity)) {
         return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Voice Tutor error создаётся только проверенным серверным маршрутом.' } });
       }

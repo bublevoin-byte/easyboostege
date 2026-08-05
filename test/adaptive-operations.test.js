@@ -6,6 +6,7 @@ import { buildAdaptiveLearningMetrics } from '../adaptive-learning/metrics.js';
 import {
   clearAdaptiveOverviewCache,
   readAdaptiveOverviewCache,
+  readAdaptiveOverviewCacheSnapshot,
   writeAdaptiveOverviewCache,
 } from '../public/adaptive-overview-cache.js';
 
@@ -47,6 +48,17 @@ test('offline overview cache is owner-bound, bounded and contains only the publi
 
   assert.equal(readAdaptiveOverviewCache(storage, 'learner-two', now + 60_000), null);
   assert.equal(readAdaptiveOverviewCache(storage, 'learner-one', now + 60_000), null);
+});
+
+test('offline overview cache exposes its saved timestamp without marking the payload fresh', () => {
+  const storage = memoryStorage();
+  const savedAt = Date.parse('2026-08-04T12:00:00.000Z');
+  assert.equal(writeAdaptiveOverviewCache(storage, 'learner-one', overview(), savedAt), true);
+
+  const snapshot = readAdaptiveOverviewCacheSnapshot(storage, 'learner-one', savedAt + 60_000);
+  assert.equal(snapshot.savedAt, savedAt);
+  assert.deepEqual(Object.keys(snapshot.payload).sort(), ['access', 'goal', 'plan', 'profile', 'retention']);
+  assert.equal(Object.hasOwn(snapshot.payload, 'fresh'), false);
 });
 
 test('offline overview cache expires, rejects oversized snapshots and can be cleared explicitly', () => {
@@ -204,7 +216,7 @@ test('PostgreSQL adaptive metrics use bounded fixed-shape aggregates instead of 
 });
 
 test('adaptive operations contract documents rollout, metrics, offline retention and local proof boundaries', async () => {
-  const [runbook, monitoring, performance, schema, retention, openapi, evidence] = await Promise.all([
+  const [runbook, monitoring, performance, schema, retention, openapi, evidence, progressEvidence, packageSource] = await Promise.all([
     fs.readFile(new URL('../docs/ADAPTIVE_LEARNING_OPERATIONS.md', import.meta.url), 'utf8'),
     fs.readFile(new URL('../docs/MONITORING.md', import.meta.url), 'utf8'),
     fs.readFile(new URL('../docs/PERFORMANCE_BASELINE.md', import.meta.url), 'utf8'),
@@ -212,6 +224,8 @@ test('adaptive operations contract documents rollout, metrics, offline retention
     fs.readFile(new URL('../docs/DATA_RETENTION.md', import.meta.url), 'utf8'),
     fs.readFile(new URL('../docs/openapi.yaml', import.meta.url), 'utf8'),
     fs.readFile(new URL('../.scratch/adaptive-learning-plan/evidence/ticket-08-local-release-evidence.md', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../.scratch/learning-evidence-foundation/evidence/ticket-05-local-release-evidence.md', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../package.json', import.meta.url), 'utf8'),
   ]);
 
   assert.match(runbook, /ADAPTIVE_LEARNING_ENABLED=false/u);
@@ -219,15 +233,22 @@ test('adaptive operations contract documents rollout, metrics, offline retention
   assert.match(runbook, /startRate=started\/created/u);
   assert.match(runbook, /completionRate=completed\/started/u);
   assert.match(runbook, /не более 24 часов и 120 000 символов/u);
+  assert.match(runbook, /overview.*остаётся доступен.*сводк/isu);
+  assert.match(runbook, /Сохранённая копия.*timestamp/isu);
   assert.match(runbook, /push, merge, миграции.*владельца/su);
   assert.match(monitoring, /adaptive-metrics-v1/u);
   assert.match(performance, /Отрисовка персонального плана.*1500 мс/su);
   assert.match(schema, /REPEATABLE READ/u);
   assert.match(retention, /offline snapshot персонального плана/iu);
+  assert.match(retention, /сводк.*timestamp/isu);
   assert.match(openapi, /AdaptiveLearningMetrics:/u);
+  assert.match(openapi, /overview remains available when the plan rollout is disabled/iu);
   assert.match(openapi, /required: \[version, window, sessions/u);
   assert.match(openapi, /never contains username, owner\/session\/attempt\/skill identifiers/iu);
   assert.match(evidence, /без push, merge, deploy/u);
   assert.match(evidence, /migrations 001–039/u);
   assert.match(evidence, /не разрешает production/u);
+  assert.match(progressEvidence, /ordinary completion.*owner-bound.*overview.*summary/isu);
+  assert.match(progressEvidence, /без push, deploy|no push or deploy/iu);
+  assert.match(packageSource, /"test:e2e:progress"/u);
 });

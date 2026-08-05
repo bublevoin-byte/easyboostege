@@ -1145,7 +1145,7 @@ zero P0–P2. No paid provider call, push, merge, deploy or staging mutation was
 | 02 | Рабочие настройки класса, цели и обычной длительности занятия | done |
 | 03 | Единая запись учебной активности и подключённая грамматика | done |
 | 04 | Результаты чтения и аудирования в индивидуальном плане | done |
-| 05 | Сводка прогресса из реальных учебных свидетельств и выпускной контур | pending |
+| 05 | Сводка прогресса из реальных учебных свидетельств и выпускной контур | done |
 
 Тикет 02 закрыт: owner-bound progress-модуль хранит класс 8–11 либо честное «не указан» и обычную
 длительность 15–120 минут с шагом 5; значение по умолчанию — 30 минут. Существующая офлайн-очередь
@@ -1180,3 +1180,16 @@ active adaptive block использует только execution claim, а не
 полный набор 744 (729 pass, 15 штатных skip), lint/check, 16-asset frontend build, релевантный Chromium
 E2E, оба secret scan и staged diff-check прошли. Независимые Standards и Spec re-review завершились с
 нулём P0–P3; платных вызовов, push и deploy не было.
+
+Тикет 05 закрыт: экран прогресса читает существующий owner-bound adaptive evidence profile и всегда
+показывает шесть разделов с честными unobserved/preliminary/established состояниями, внутренним
+«освоением», уверенностью, неопределённостью и числом свидетельств; CEFR/IELTS остаются только в прежнем
+Premium-отчёте. Authenticated overview доступен для read-only сводки независимо от rollout плана, но при
+выключенном флаге не возвращает goal/plan и не открывает коммерческие маршруты. Existing owner cache
+показывается offline только как сохранённая, возможно несвежая копия с timestamp. Ordinary API теперь
+отклоняет Writing/Speaking с `SERVER_ASSESSMENT_REQUIRED`, единая evidence policy и ревизия профиля 2
+исключают legacy client-reported productive строки, сохраняя existing server-assessed AI reviews.
+Focused проверки 69/69; полный набор 751 (736 pass, 15 штатных PostgreSQL skip), lint/check, 16-asset
+frontend build, progress (дважды), reading/listening, vocabulary и adaptive Chromium E2E, оба secret scan
+и staged diff-check прошли. Финальные независимые Standards и Spec re-review завершились с нулём P0–P3;
+платных вызовов, push, deploy и изменения rollout flags не было.

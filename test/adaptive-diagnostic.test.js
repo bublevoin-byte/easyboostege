@@ -970,7 +970,7 @@ test('plan card exposes an accessible start, progress, audio and resumable diagn
   assert.match(screen, /diagnostic\.deadlineMinutes/u);
   assert.match(screen, /measurementNotice/u);
   assert.match(screen, /start\.dataset\.diagnosticDepth/u);
-  assert.match(screen, /await renderAdaptivePlan\(\);drawAdaptiveDiagnostic\(result\);focusAdaptiveDiagnosticStep\(\)/u);
+  assert.match(screen, /await loadAdaptiveOverview\(\);drawAdaptiveDiagnostic\(result\);focusAdaptiveDiagnosticStep\(\)/u);
   assert.match(screen, /textContent/u);
   assert.doesNotMatch(screen, /innerHTML/u);
   assert.match(appSource, /apiPostIdempotent/u);

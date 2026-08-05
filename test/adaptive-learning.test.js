@@ -10,6 +10,7 @@ import express from 'express';
 import { createAdaptiveLearningRoutes } from '../routes/adaptive-learning.js';
 import { createProgressRoutes } from '../routes/progress.js';
 import { buildAdaptiveLearningProfile, EGE_SKILL_TAXONOMY } from '../adaptive-learning/profile.js';
+import { requiresServerAssessment, SERVER_ASSESSED_MODULES } from '../adaptive-learning/evidence-policy.js';
 import {
   DEEP_DIAGNOSTIC_CATALOG,
   SHORT_DIAGNOSTIC_CATALOG,
@@ -19,6 +20,13 @@ import { createFileRepository } from '../storage/file-repository.js';
 const NOW = new Date('2026-08-04T09:00:00.000Z');
 const OWNER_ATTEMPT_ID = '71563fb2-9d76-4de1-ae70-b9a014792ed1';
 const STRANGER_ATTEMPT_ID = '03a5be0c-f380-4a90-9ac3-daf7c578f80b';
+
+test('one evidence policy identifies modules that require server assessment', () => {
+  assert.deepEqual([...SERVER_ASSESSED_MODULES], ['writing', 'speaking']);
+  assert.equal(requiresServerAssessment('writing'), true);
+  assert.equal(requiresServerAssessment('speaking'), true);
+  assert.equal(requiresServerAssessment('reading'), false);
+});
 
 function testAuthentication() {
   return {
@@ -136,7 +144,7 @@ test('versioned EGE taxonomy covers six modules and assisted recovery is not mas
   assert.equal(profile.preliminary, true);
   assert.equal(profile.confidence, 1);
   assert.equal(profile.weightingVersion, 'adaptive-evidence-v1');
-  assert.equal(profile.profileCalculationRevision, 1);
+  assert.equal(profile.profileCalculationRevision, 2);
   assert.equal(profile.evidenceWatermarkVersion, 'adaptive-evidence-watermark-v1');
   assert.equal(profile.evidenceObservedAt, NOW.toISOString());
   assert.equal(profile.evidenceSourceCount, 2);
@@ -342,7 +350,10 @@ test('activity mapping is exact, most-specific and covers every versioned taxono
   ]);
   const attempts = [...activities].map(([skillId, [module, activity]]) => ({
     id: crypto.randomUUID(), module, activity, score: 1, max_score: 1,
-    evidence_quality: 'client_reported', created_at: NOW.toISOString(), skillId,
+    evidence_quality: ['writing', 'speaking'].includes(module)
+      ? 'server_verified_assisted'
+      : 'client_reported',
+    created_at: NOW.toISOString(), skillId,
   }));
   const profile = buildAdaptiveLearningProfile({ attempts });
   for (const skill of EGE_SKILL_TAXONOMY.skills) {
@@ -384,6 +395,49 @@ test('activity mapping is exact, most-specific and covers every versioned taxono
   ] });
   assert.equal(fallback.skills.find((skill) => skill.id === 'ege.grammar.forms').evidenceCount, 1);
   assert.equal(fallback.evidenceCount, 1, 'unknown exam activity is intentionally ignored');
+});
+
+test('legacy client-reported writing and speaking rows cannot influence the adaptive profile', () => {
+  const attempts = [
+    { id: crypto.randomUUID(), module: 'writing', activity: 'writing_37', score: 100, max_score: 100, evidence_quality: 'client_reported', created_at: '2026-08-04T08:00:00.000Z' },
+    { id: crypto.randomUUID(), module: 'speaking', activity: 'speaking_4', score: 100, max_score: 100, evidence_quality: 'client_reported', created_at: '2026-08-04T08:01:00.000Z' },
+    { id: crypto.randomUUID(), module: 'writing', activity: 'writing_37', score: 4, max_score: 5, evidence_quality: 'server_verified_assisted', created_at: '2026-08-04T08:02:00.000Z' },
+    { id: crypto.randomUUID(), module: 'speaking', activity: 'speaking_4', score: 3, max_score: 5, evidence_quality: 'server_verified_assisted', created_at: '2026-08-04T08:03:00.000Z' },
+    { id: crypto.randomUUID(), module: 'grammar', activity: 'grammar_19_24', score: 4, max_score: 5, evidence_quality: 'client_reported', created_at: '2026-08-04T08:04:00.000Z' },
+  ];
+
+  const profile = buildAdaptiveLearningProfile({ attempts });
+  assert.equal(profile.profileCalculationRevision, 2);
+  assert.equal(profile.evidenceSourceCount, 3);
+  assert.equal(profile.evidenceCount, 3);
+  assert.equal(profile.clientReportedEvidenceCount, 1);
+  assert.equal(profile.assistedEvidenceCount, 2);
+  assert.equal(profile.modules.find((module) => module.id === 'writing').evidenceCount, 1);
+  assert.equal(profile.modules.find((module) => module.id === 'speaking').evidenceCount, 1);
+});
+
+test('ordinary module-attempt API rejects productive client evidence for every owner', async () => {
+  await withAdaptiveApp(async ({ repository, owner, stranger, request }) => {
+    for (const [username, module, activity] of [
+      [owner, 'writing', 'writing_37'],
+      [stranger, 'speaking', 'speaking_4'],
+    ]) {
+      const response = await request(username, '/api/v1/module-attempts', {
+        method: 'POST',
+        body: JSON.stringify({
+          id: crypto.randomUUID(), module, activity, score: 100, maxScore: 100,
+          durationMs: 60_000, metadata: {},
+        }),
+      });
+      assert.equal(response.status, 400);
+      assert.equal((await response.json()).error.code, 'SERVER_ASSESSMENT_REQUIRED');
+    }
+
+    const ownerSources = await repository.getAdaptiveLearningEvidenceSources(owner);
+    const strangerSources = await repository.getAdaptiveLearningEvidenceSources(stranger);
+    assert.equal(ownerSources.attempts.some((attempt) => attempt.module === 'writing'), false);
+    assert.equal(strangerSources.attempts.some((attempt) => attempt.module === 'speaking'), false);
+  });
 });
 
 test('production Voice Tutor recovery skill families map to the intended adaptive skills', () => {
@@ -497,17 +551,20 @@ test('many forged public module attempts remain useful but cannot establish a pr
             metadata: { source: 'server_verified_unassisted' },
           }),
         });
-        assert.equal(response.status, 201);
+        assert.equal(response.status, ['writing', 'speaking'].includes(activity.module) ? 400 : 201);
+        if (['writing', 'speaking'].includes(activity.module)) {
+          assert.equal((await response.json()).error.code, 'SERVER_ASSESSMENT_REQUIRED');
+        }
       }
     }
 
     const sources = await repository.getAdaptiveLearningEvidenceSources(owner);
-    assert.equal(sources.attempts.filter((attempt) => attempt.evidence_quality === 'client_reported').length, 241);
+    assert.equal(sources.attempts.filter((attempt) => attempt.evidence_quality === 'client_reported').length, 161);
     assert.equal(sources.attempts.some((attempt) => attempt.evidence_quality === 'server_verified_unassisted'), false);
     const overview = await (await request(owner, '/api/v1/adaptive-learning/overview')).json();
-    assert.equal(overview.profile.clientReportedEvidenceCount, 241);
+    assert.equal(overview.profile.clientReportedEvidenceCount, 161);
     assert.equal(overview.profile.independentEvidenceCount, 0);
-    assert.equal(overview.profile.evidenceCount, 241);
+    assert.equal(overview.profile.evidenceCount, 161);
     assert.equal(overview.profile.preliminary, true);
     assert.equal(overview.profile.status, 'preliminary');
     assert.ok(overview.profile.confidence <= 15);
@@ -520,10 +577,22 @@ test('many forged public module attempts remain useful but cannot establish a pr
   });
 });
 
-test('adaptive API is absent unless rollout is explicitly enabled', async () => {
-  await withAdaptiveApp(async ({ owner, request }) => {
+test('disabled plan rollout keeps the owner-bound evidence overview but no plan or mutation routes', async () => {
+  await withAdaptiveApp(async ({ owner, stranger, request }) => {
     assert.equal((await request(owner, '/api/v1/adaptive-learning/goal')).status, 404);
-    assert.equal((await request(owner, '/api/v1/adaptive-learning/overview')).status, 404);
+    const response = await request(owner, '/api/v1/adaptive-learning/overview');
+    assert.equal(response.status, 200);
+    const ownerOverview = await response.json();
+    assert.equal(ownerOverview.goal, null);
+    assert.equal(ownerOverview.plan, null);
+    assert.equal(ownerOverview.profile.evidenceCount, 1);
+    assert.equal(ownerOverview.profile.modules.find((module) => module.id === 'grammar').evidenceCount, 1);
+    assert.equal(ownerOverview.profile.modules.find((module) => module.id === 'listening').evidenceCount, 0);
+
+    const strangerOverview = await (await request(stranger, '/api/v1/adaptive-learning/overview')).json();
+    assert.equal(strangerOverview.profile.evidenceCount, 1);
+    assert.equal(strangerOverview.profile.modules.find((module) => module.id === 'grammar').evidenceCount, 0);
+    assert.equal(strangerOverview.profile.modules.find((module) => module.id === 'listening').evidenceCount, 1);
   }, { enabled: false });
 });
 

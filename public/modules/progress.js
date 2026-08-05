@@ -6,6 +6,17 @@
   const DAILY_GOAL_MINUTES = 30;
   const WORD_TARGET = 500;
   const MODULES = ['words', 'gram', 'read', 'listen', 'write', 'speak'];
+  const EVIDENCE_MODULE_LABELS = Object.freeze({
+    vocabulary: 'Лексика',
+    grammar: 'Грамматика',
+    reading: 'Чтение',
+    listening: 'Аудирование',
+    writing: 'Письмо',
+    speaking: 'Говорение',
+  });
+  const EVIDENCE_MODULES = Object.freeze(Object.entries(EVIDENCE_MODULE_LABELS).map(([id, label]) => (
+    Object.freeze({ id, label })
+  )));
 
   function daysLeft(now, examDate) {
     const exam = new Date(examDate || EXAM_DATE).getTime();
@@ -53,6 +64,35 @@
     };
   }
 
+  function boundedPercent(value) {
+    return Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+  }
+
+  function evidenceSummary(profile) {
+    const source = Array.isArray(profile && profile.modules) ? profile.modules : [];
+    const byId = new Map(source.map((module) => [module && module.id, module]));
+    return EVIDENCE_MODULES.map(({ id, label }) => {
+      const module = byId.get(id) || {};
+      const evidenceCount = Math.max(0, Math.floor(Number(module.evidenceCount) || 0));
+      if (!evidenceCount) {
+        return {
+          id, label, state: 'unobserved', stateLabel: 'Недостаточно занятий для оценки',
+          mastery: null, confidence: null, uncertainty: null, evidenceCount: 0,
+        };
+      }
+      const uncertainty = boundedPercent(module.uncertainty);
+      const established = module.status === 'established';
+      return {
+        id, label, state: established ? 'established' : 'preliminary',
+        stateLabel: established ? 'Оценка подтверждена' : 'Предварительная оценка',
+        mastery: boundedPercent(module.mastery),
+        confidence: 100 - uncertainty,
+        uncertainty,
+        evidenceCount,
+      };
+    });
+  }
+
   function recoveryOverview(payload) {
     const value = payload && typeof payload === 'object' ? payload : {};
     const summary = value.summary && typeof value.summary === 'object' ? value.summary : {};
@@ -88,9 +128,12 @@
     learnedLabel,
     streakLabel,
     overview,
+    evidenceSummary,
     recoveryOverview,
     EXAM_DATE,
     MODULES,
+    EVIDENCE_MODULE_LABELS,
+    EVIDENCE_MODULES,
     DAILY_GOAL_MINUTES,
     WORD_TARGET,
   });

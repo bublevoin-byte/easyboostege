@@ -21,13 +21,22 @@ production-вызовы, не подтверждают тариф провайд
 
 ## Rollout и откат
 
-- По умолчанию `ADAPTIVE_LEARNING_ENABLED=false`: adaptive API не регистрируется, entry point скрыт.
+- По умолчанию `ADAPTIVE_LEARNING_ENABLED=false`: entry point, goal/plan, diagnostics, reports и
+  session mutations не регистрируются. Аутентифицированный owner-bound `GET /api/v1/adaptive-learning/overview`
+  остаётся доступен только для evidence-backed сводки прогресса; он возвращает `goal=null`, `plan=null`
+  и не открывает коммерческие plan/report/session возможности.
+- Ordinary `POST /api/v1/module-attempts` принимает только клиентские результаты vocabulary, grammar,
+  reading, listening и exam. Writing/Speaking возвращают `SERVER_ASSESSMENT_REQUIRED`: их evidence
+  поступает только из существующих completed server-assessed AI-review попыток. Ревизия профиля 2
+  также исключает из расчёта и watermark прежние `client_reported` writing/speaking строки, не затрагивая
+  `server_verified_assisted` результаты.
 - Сначала применить миграции 031–039 и проверить `/health/ready`, затем включить флаг на ограниченном
   окружении. Нельзя включать новый процесс поверх старой схемы.
 - После включения проверить новым, существующим, Free, Base и Premium аккаунтами: overview,
   диагностику, preview, start, handoff, advance, finish и обновлённые profile/plan/report.
 - Откат приложения: вернуть `ADAPTIVE_LEARNING_ENABLED=false` и перезапустить процесс. Это скрывает
-  UI и снимает маршруты, но не удаляет данные. Миграции назад автоматически не откатывать.
+  UI плана и снимает его маршруты, но не удаляет данные. Read-only сводка прогресса продолжает
+  перечитывать owner-bound evidence profile. Миграции назад автоматически не откатывать.
 - Если нарушены owner isolation, экспорт/удаление, idempotency либо evidence provenance — немедленно
   выключить флаг. При деградации completion/retention сначала остановить расширение rollout и
   исследовать агрегаты; не менять учебный профиль вручную.
@@ -77,6 +86,10 @@ duration buckets, commercial scope, replacement reasons и provider/HTTP health;
 ошибке экран показывает этот snapshot как `offline_read_only`: forecast и allocation видны, но goal,
 diagnostic, preview/create/start/replace/advance/finish недоступны. Offline-состояние никогда не
 считается выполнением и не создаёт evidence.
+
+Сводка шести учебных разделов использует тот же snapshot без отдельного profile/cache. Она явно
+помечает fallback как «Сохранённая копия · данные могут быть не свежими» и показывает timestamp
+сохранения. Только успешный online overview получает метку актуальных серверных данных.
 
 Сохранённый cache fail-closed удаляется при неизвестной версии, повреждении, превышении размера, истечении,
 будущем timestamp, owner mismatch, logout и удалении аккаунта. После восстановления сети экран

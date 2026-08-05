@@ -274,7 +274,8 @@ test('server-owned writing or speaking completion binds to the claim without a c
             score: 1, maxScore: 1, adaptiveExecutionClaim: started.executionClaim,
           }),
         });
-        assert.equal(bypass.status, 409, 'writing and speaking cannot bypass server-owned evaluation');
+        assert.equal(bypass.status, 400, 'writing and speaking cannot bypass server-owned evaluation');
+        assert.equal((await bypass.json()).error.code, 'SERVER_ASSESSMENT_REQUIRED');
       }
       if (block.module === 'writing') {
         const wrongId = await repository.createWritingAttempt(owner, {

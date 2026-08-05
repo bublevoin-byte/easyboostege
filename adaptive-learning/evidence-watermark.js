@@ -1,5 +1,5 @@
 export const ADAPTIVE_EVIDENCE_WATERMARK_VERSION = 'adaptive-evidence-watermark-v1';
-export const ADAPTIVE_PROFILE_CALCULATION_REVISION = 1;
+export const ADAPTIVE_PROFILE_CALCULATION_REVISION = 2;
 
 function sourceEvents(sources = {}) {
   return [

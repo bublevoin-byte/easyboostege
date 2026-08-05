@@ -47,6 +47,11 @@ repeat/task/window ответ не остаётся в ledger.
 идемпотентна; terminal 4xx удаляет непринимаемую запись. Очередь недоступна другому локальному owner
 и явно удаляется вместе с аккаунтом.
 
+Клиентские `module_attempts` не являются источником Writing/Speaking: ordinary API отклоняет эти модули,
+а расчёт профиля ревизии 2 не учитывает прежние `client_reported` writing/speaking строки даже в evidence
+watermark. Для этих разделов используются только уже существующие completed server-assessed writing и
+speaking reviews; тексты и transcript в сводку или её offline cache не копируются.
+
 Persisted `voice_tutor_sessions.capsule` — только reference schema: capsule/source/module/skill IDs,
 revision/version и, при необходимости, `rule_card_id`. Prompt, reference,
 learner answer, rubrics и answer arrays каждый раз реконструируются из owner-bound source attempt
@@ -84,6 +89,10 @@ app tickets и завершает активный proxy; удаление ак�
 используется только для read-only отображения при сетевой ошибке. Повреждённая, просроченная,
 слишком большая, будущая либо принадлежащая другому owner запись удаляется fail-closed. Logout и
 удаление аккаунта явно очищают snapshot.
+
+Экран прогресса читает из этого же snapshot сводку шести разделов, не создавая отдельную копию
+профиля. При fallback он показывает timestamp сохранения и явную метку, что это сохранённая,
+возможно не свежая копия; online-актуальность из cache не выводится.
 
 `adaptiveLearning` в технических метриках — вычисляемый PII-free aggregate, а не сохранённая копия
 learner data. Он содержит только фиксированные buckets/counters/rates; username и любые owner,

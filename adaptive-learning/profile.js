@@ -1,4 +1,5 @@
 import { normalizeModuleAttemptEvidenceQuality } from './evidence-quality.js';
+import { requiresServerAssessment } from './evidence-policy.js';
 import {
   ADAPTIVE_PROFILE_CALCULATION_REVISION,
   buildAdaptiveEvidenceWatermark,
@@ -125,6 +126,13 @@ function attemptObservation(attempt) {
   };
 }
 
+function isEligibleAdaptiveAttempt(attempt) {
+  if (!requiresServerAssessment(attempt?.module)) return true;
+  return normalizeModuleAttemptEvidenceQuality(
+    attempt.evidence_quality ?? attempt.evidenceQuality,
+  ) !== 'client_reported';
+}
+
 function recoveryObservation(recovery) {
   const skill = skillFor(recovery.module, '', recovery.skill_id ?? recovery.skillId, { allowModuleFallback: false });
   if (!skill) return null;
@@ -235,6 +243,7 @@ export function buildAdaptiveLearningProfile({
   attempts = [], recoveries = [], repeatAttempts = [], diagnosticResponses = [],
   diagnosticCompletions = [],
 } = {}, { diagnosticRegistry = DIAGNOSTIC_REGISTRY } = {}) {
+  const eligibleAttempts = attempts.filter(isEligibleAdaptiveAttempt);
   const supportedDiagnosticCompletions = diagnosticCompletions
     .filter((completion) => getDiagnosticCatalog(
       completion.catalog_version ?? completion.catalogVersion,
@@ -246,11 +255,11 @@ export function buildAdaptiveLearningProfile({
     }))
     .filter((completion) => completion.completed_at);
   const watermark = buildAdaptiveEvidenceWatermark({
-    attempts, recoveries, repeatAttempts, diagnosticResponses,
+    attempts: eligibleAttempts, recoveries, repeatAttempts, diagnosticResponses,
     diagnosticCompletions: supportedDiagnosticCompletions,
   });
   const observations = downgradeRepeatedDiagnosticEvidence([
-    ...attempts.map(attemptObservation),
+    ...eligibleAttempts.map(attemptObservation),
     ...recoveries.map(recoveryObservation),
     ...repeatAttempts.map(repeatObservation),
     ...diagnosticResponses.map((response) => diagnosticObservation(response, diagnosticRegistry)),

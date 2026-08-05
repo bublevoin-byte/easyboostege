@@ -798,8 +798,6 @@ async function runAdaptiveDiagnosticE2E() {
         ['grammar', 'grammar_transformations_topic_18', 1],
         ['reading', 'reading_headings', 1], ['reading', 'reading_detail', 1],
         ['listening', 'listening_matching', 1], ['listening', 'listening_interview', 1],
-        ['writing', 'writing_37', 1], ['writing', 'writing_38', 1],
-        ['speaking', 'speaking_2', 1], ['speaking', 'speaking_4', 1],
       ];
       for (const [module, activity, score] of activities) for (let index = 0; index < 3; index += 1) {
         const response = await fetch('/api/v1/module-attempts', {
@@ -814,7 +812,7 @@ async function runAdaptiveDiagnosticE2E() {
       const plan = await fetch('/api/v1/adaptive-learning/plan', { credentials: 'same-origin' });
       return { responses, status: plan.status, body: await plan.json() };
     });
-    assert.equal(vocabularyGap.responses.length, 33);
+    assert.equal(vocabularyGap.responses.length, 21);
     assert.equal(vocabularyGap.responses.every((status) => status === 201), true);
     assert.equal(vocabularyGap.status, 200);
     assert.equal(vocabularyGap.body.plan.revision, 4);

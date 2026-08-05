@@ -150,8 +150,7 @@ export function createAdaptiveLearningRoutes({
   voiceTutorLimits = {},
 }) {
   const router = express.Router();
-  if (!enabled) return router;
-  if (typeof executionTokenSecret !== 'string' || executionTokenSecret.length < 32) {
+  if (enabled && (typeof executionTokenSecret !== 'string' || executionTokenSecret.length < 32)) {
     throw new Error('ADAPTIVE_EXECUTION_TOKEN_CONFIG_INVALID');
   }
   const { auth } = authentication;
@@ -269,7 +268,7 @@ export function createAdaptiveLearningRoutes({
     });
   }
 
-  async function overview(username, { remainingPlanRetries = 2 } = {}) {
+  async function overview(username, { remainingPlanRetries = 2, includePlan = enabled } = {}) {
     const [goal, sources, access] = await Promise.all([
       db.getAdaptiveLearningGoal(username),
       db.getAdaptiveLearningEvidenceSources(username),
@@ -281,7 +280,7 @@ export function createAdaptiveLearningRoutes({
     const authoritativeProfile = await db.saveAdaptiveLearningProfile(username, profile, { now: now() });
     const publicProfile = adaptiveLearningProfilePublicDto(authoritativeProfile);
     let plan = null;
-    if (goal) {
+    if (goal && includePlan) {
       const previousPlan = await db.getCurrentAdaptiveLearningPlan(username);
       if (access.tier === 'free' && access.usage.demoSessionUsed && previousPlan) {
         return {
@@ -340,13 +339,22 @@ export function createAdaptiveLearningRoutes({
       }
     }
     return {
-      goal: adaptiveLearningGoalPublicDto(goal),
+      goal: includePlan ? adaptiveLearningGoalPublicDto(goal) : null,
       profile: publicProfile,
       plan,
       retention,
       access,
     };
   }
+
+  router.get('/api/v1/adaptive-learning/overview', auth, async (req, res, next) => {
+    try {
+      res.setHeader('Cache-Control', 'no-store');
+      res.json(await overview(req.user));
+    } catch (error) { next(error); }
+  });
+
+  if (!enabled) return router;
 
   router.get('/api/v1/adaptive-learning/goal', auth, async (req, res, next) => {
     try {
@@ -399,13 +407,6 @@ export function createAdaptiveLearningRoutes({
       }
       return next(error);
     }
-  });
-
-  router.get('/api/v1/adaptive-learning/overview', auth, async (req, res, next) => {
-    try {
-      res.setHeader('Cache-Control', 'no-store');
-      res.json(await overview(req.user));
-    } catch (error) { next(error); }
   });
 
   router.get('/api/v1/adaptive-learning/plan', auth, async (req, res, next) => {

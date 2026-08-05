@@ -127,6 +127,7 @@ export async function assertAdaptiveProfileAppendOnlyOrdering(assert, repository
     ...laterButSmaller,
     profileCalculationRevision: laterButSmaller.profileCalculationRevision + 1,
   };
+  const newerRevision = newerAlgorithmButSmaller.profileCalculationRevision;
   const acceptedNewerAlgorithmButSmaller = await repository.saveAdaptiveLearningProfile(
     username,
     newerAlgorithmButSmaller,
@@ -137,7 +138,7 @@ export async function assertAdaptiveProfileAppendOnlyOrdering(assert, repository
     2,
     'a newer calculation revision may intentionally filter sources under a new algorithm',
   );
-  assert.equal(acceptedNewerAlgorithmButSmaller.profile_calculation_revision, 2);
+  assert.equal(acceptedNewerAlgorithmButSmaller.profile_calculation_revision, newerRevision);
 
   const acceptedBackfill = await repository.saveAdaptiveLearningProfile(username, moreButOlder, {
     now: new Date('2026-08-04T10:04:00.000Z'),
@@ -152,17 +153,17 @@ export async function assertAdaptiveProfileAppendOnlyOrdering(assert, repository
   const recomputed = await repository.saveAdaptiveLearningProfile(username, higherCalculationRevision, {
     now: new Date('2026-08-04T10:05:00.000Z'),
   });
-  assert.equal(recomputed.profile_calculation_revision, 2, 'the current algorithm revision remains authoritative');
+  assert.equal(recomputed.profile_calculation_revision, newerRevision, 'the current algorithm revision remains authoritative');
   assert.equal(recomputed.evidence_source_count, 101,
     'a larger append-only backfill is accepted inside the same calculation revision');
 
   const olderAlgorithmWithLaterEvidence = {
     ...buildProfile({ attempts: attempts(102, '2026-08-04T10:06:00.000Z') }),
-    profileCalculationRevision: 1,
+    profileCalculationRevision: current.profileCalculationRevision,
   };
   const rejectedOldAlgorithm = await repository.saveAdaptiveLearningProfile(username, olderAlgorithmWithLaterEvidence, {
     now: new Date('2026-08-04T10:07:00.000Z'),
   });
-  assert.equal(rejectedOldAlgorithm.profile_calculation_revision, 2, 'an old algorithm never overwrites a newer revision');
+  assert.equal(rejectedOldAlgorithm.profile_calculation_revision, newerRevision, 'an old algorithm never overwrites a newer revision');
   assert.equal(rejectedOldAlgorithm.evidence_source_count, 101);
 }

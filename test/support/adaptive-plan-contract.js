@@ -394,7 +394,7 @@ export async function assertAdaptivePlanRepositoryContract(assert, repository, u
 
   const newAlgorithmProfile = {
     ...firstProfile,
-    profileCalculationRevision: 2,
+    profileCalculationRevision: firstProfile.profileCalculationRevision + 1,
     evidenceSourceCount: 0,
     evidenceObservedAt: null,
   };
@@ -416,12 +416,12 @@ export async function assertAdaptivePlanRepositoryContract(assert, repository, u
   }));
   assert.equal(newAlgorithm.created, true);
   assert.equal(newAlgorithm.plan.revision, 3);
-  assert.equal(newAlgorithm.plan.profile_calculation_revision, 2);
+  assert.equal(newAlgorithm.plan.profile_calculation_revision, newAlgorithmProfile.profileCalculationRevision);
   assert.equal(newAlgorithm.plan.profile_evidence_source_count, 0);
 
   const olderAlgorithmProfile = {
     ...nextProfile,
-    profileCalculationRevision: 1,
+    profileCalculationRevision: firstProfile.profileCalculationRevision,
     evidenceSourceCount: 100,
     evidenceObservedAt: '2026-08-07T08:00:00.000Z',
   };

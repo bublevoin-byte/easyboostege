@@ -71,6 +71,41 @@ test('progress module treats a missing state as a zero starting point', () => {
   assert.deepEqual(plain(view.modules), { words: 0, gram: 0, read: 0, listen: 0, write: 0, speak: 0 });
 });
 
+test('progress module presents all six evidence modules without turning missing evidence into a level', () => {
+  const progress = createProgressModule();
+  const summary = progress.evidenceSummary({
+    modules: [
+      { id: 'grammar', mastery: 49, uncertainty: 100, status: 'preliminary', evidenceCount: 3 },
+      { id: 'reading', mastery: 78, uncertainty: 35, status: 'established', evidenceCount: 8 },
+    ],
+  });
+
+  assert.deepEqual(plain(summary.map((module) => module.id)), [
+    'vocabulary', 'grammar', 'reading', 'listening', 'writing', 'speaking',
+  ]);
+  assert.deepEqual(plain(summary[0]), {
+    id: 'vocabulary', label: 'Лексика', state: 'unobserved',
+    stateLabel: 'Недостаточно занятий для оценки', mastery: null,
+    confidence: null, uncertainty: null, evidenceCount: 0,
+  });
+  assert.deepEqual(plain(summary[1]), {
+    id: 'grammar', label: 'Грамматика', state: 'preliminary',
+    stateLabel: 'Предварительная оценка', mastery: 49,
+    confidence: 0, uncertainty: 100, evidenceCount: 3,
+  });
+  assert.deepEqual(plain(summary[2]), {
+    id: 'reading', label: 'Чтение', state: 'established',
+    stateLabel: 'Оценка подтверждена', mastery: 78,
+    confidence: 65, uncertainty: 35, evidenceCount: 8,
+  });
+  assert.equal(JSON.stringify(summary).includes('CEFR'), false);
+  assert.equal(JSON.stringify(summary).includes('IELTS'), false);
+  assert.deepEqual(plain(progress.EVIDENCE_MODULE_LABELS), {
+    vocabulary: 'Лексика', grammar: 'Грамматика', reading: 'Чтение', listening: 'Аудирование',
+    writing: 'Письмо', speaking: 'Говорение',
+  });
+});
+
 test('progress module turns the recovery map into adaptive, non-official learning labels', () => {
   const progress = createProgressModule();
   const view = progress.recoveryOverview({
@@ -106,4 +141,41 @@ test('progress screen exposes an accessible recovery card and a server-owned rep
   assert.match(screen, /view\.nextBest/u);
   assert.doesNotMatch(screen, /skills\.slice\(0,\s*4\)/u);
   assert.match(source, /не официальный балл ЕГЭ/u);
+});
+
+test('progress screen owns an accessible evidence summary and labels cached data as an old snapshot', async () => {
+  const [markup, screen] = await Promise.all([
+    fs.readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../public/screens/progress.js', import.meta.url), 'utf8'),
+  ]);
+
+  assert.match(markup, /id="evidence_progress_summary"[^>]*aria-labelledby="evidence_progress_title"[^>]*aria-live="polite"/u);
+  assert.match(markup, /id="evidence_progress_modules"[^>]*aria-label="Прогресс по разделам"/u);
+  assert.doesNotMatch(markup, /id="legacy_progress_state"/u);
+  assert.match(screen, /progressModule\.evidenceSummary\(profile\)/u);
+  assert.match(screen, /progressModule\.EVIDENCE_MODULE_LABELS/u);
+  assert.doesNotMatch(screen, /const adaptiveModuleLabels=/u);
+  assert.match(screen, /async function loadAdaptiveOverview\(\)/u);
+  assert.doesNotMatch(screen, /async function renderAdaptivePlan\(\)/u);
+  assert.doesNotMatch(screen, /function renderProgress\(\)\{if\(!S\)return/u);
+  assert.match(screen, /readAdaptiveOverviewCacheSnapshot/u);
+  assert.match(screen, /Сохранённая копия/u);
+  assert.match(screen, /не свежими/u);
+  assert.match(screen, /savedAt/u);
+});
+
+test('browser evidence tracers share one server and Chromium harness', async () => {
+  const [progressTracer, readingTracer, vocabularyTracer] = await Promise.all([
+    fs.readFile(new URL('../e2e/learning-progress.test.js', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../e2e/reading-listening-evidence.test.js', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../e2e/vocabulary-library.test.js', import.meta.url), 'utf8'),
+  ]);
+
+  for (const tracer of [progressTracer, readingTracer, vocabularyTracer]) {
+    assert.match(tracer, /from '\.\/browser-server-harness\.js'/u);
+    assert.doesNotMatch(tracer, /async function availablePort\(/u);
+    assert.doesNotMatch(tracer, /async function chromeExecutable\(/u);
+    assert.doesNotMatch(tracer, /async function waitForReady\(/u);
+    assert.doesNotMatch(tracer, /async function stopProcess\(/u);
+  }
 });

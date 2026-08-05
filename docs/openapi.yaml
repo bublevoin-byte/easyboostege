@@ -592,6 +592,7 @@ paths:
   /api/v1/adaptive-learning/overview:
     get:
       summary: Read the current goal and an owner-bound profile bootstrapped from persisted attempts and Voice Tutor recoveries
+      description: The overview remains available when the plan rollout is disabled so the authenticated learner can read the six-module evidence summary. In that mode goal and plan are null, while all goal, plan, diagnostic, report and session routes stay unavailable. This read does not bypass commercial capabilities.
       responses:
         '200':
           description: Goal plus transparent preliminary or established profile; no raw answer, essay, transcript or audio is copied
@@ -599,7 +600,6 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/AdaptiveOverview' }
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { description: Adaptive Learning rollout is disabled; the route is not registered }
   /api/v1/adaptive-learning/plan:
     get:
       summary: Read or idempotently refresh the authenticated learner's honest EGE forecast and weekly allocation
@@ -1083,7 +1083,10 @@ paths:
               required: [id, module, activity, score, maxScore]
               properties:
                 id: { type: string, format: uuid }
-                module: { type: string, enum: [grammar, vocabulary, reading, listening, writing, speaking, exam] }
+                module:
+                  type: string
+                  enum: [grammar, vocabulary, reading, listening, exam]
+                  description: Writing and speaking evidence is produced only by the existing server-assessed AI-review flows; this ordinary client endpoint rejects those modules with SERVER_ASSESSMENT_REQUIRED.
                 activity:
                   type: string
                   maxLength: 80
@@ -1098,7 +1101,7 @@ paths:
       responses:
         '201': { description: Attempt created }
         '200': { description: Duplicate event accepted without creating another attempt }
-        '400': { $ref: '#/components/responses/BadRequest' }
+        '400': { description: Invalid input, or SERVER_ASSESSMENT_REQUIRED for client-submitted writing/speaking evidence. }
         '429': { $ref: '#/components/responses/RateLimited' }
   /api/v1/word-progress:
     get:
@@ -1533,7 +1536,7 @@ components:
         profileCalculationRevision:
           type: integer
           minimum: 1
-          description: Higher profileCalculationRevision wins first, so a newer algorithm may intentionally filter sources. Within the same calculation revision, evidenceSourceCount is monotonic; equal counts are ordered by evidenceObservedAt and then evidenceWatermarkVersion.
+          description: Higher profileCalculationRevision wins first, so a newer algorithm may intentionally filter sources. Revision 2 excludes legacy client_reported writing/speaking module attempts; only their server-assessed evidence remains eligible. Within the same calculation revision, evidenceSourceCount is monotonic; equal counts are ordered by evidenceObservedAt and then evidenceWatermarkVersion.
         evidenceWatermarkVersion: { type: string, enum: [adaptive-evidence-watermark-v1] }
         evidenceObservedAt:
           type: string
@@ -1560,7 +1563,18 @@ components:
         needsDiagnostic: { type: boolean, description: True only while the initial diagnostic or sufficient genuine production evidence is missing; scheduled refresh is represented separately by retention.rediagnostic.due and never blocks sessions. }
         explanationCodes: { type: array, items: { type: string } }
         skills: { type: array, items: { $ref: '#/components/schemas/AdaptiveSkillEstimate' } }
-        modules: { type: array, items: { type: object } }
+        modules: { type: array, items: { $ref: '#/components/schemas/AdaptiveModuleEvidence' } }
+      additionalProperties: false
+    AdaptiveModuleEvidence:
+      type: object
+      required: [id, mastery, uncertainty, status, evidenceCount, independentEvidenceCount]
+      properties:
+        id: { type: string, enum: [vocabulary, grammar, reading, listening, writing, speaking] }
+        mastery: { type: integer, minimum: 0, maximum: 100, description: Internal Easy Boost learning mastery; not a CEFR or IELTS level. Clients must suppress zero mastery when evidenceCount is zero. }
+        uncertainty: { type: integer, minimum: 0, maximum: 100 }
+        status: { type: string, enum: [preliminary, established] }
+        evidenceCount: { type: integer, minimum: 0 }
+        independentEvidenceCount: { type: integer, minimum: 0 }
       additionalProperties: false
     AdaptiveOverview:
       type: object
