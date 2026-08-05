@@ -1130,3 +1130,19 @@ Chromium E2E runs; performance LCP 160 ms, CLS 0, INP 112 ms, first-load JS 82.3
 and preview 61 ms; lint/check; 17-asset frontend build; staged 423-file secret scan; 256-commit history
 scan; and staged diff check. Independent whole-feature Standards and Spec final reviews passed with
 zero P0–P2. No paid provider call, push, merge, deploy or staging mutation was performed.
+
+---
+
+# Прогресс — честные экраны и единая история обучения
+
+Спека: [.scratch/learning-evidence-foundation/spec.md](.scratch/learning-evidence-foundation/spec.md)
+Тикеты: [.scratch/learning-evidence-foundation/issues/](.scratch/learning-evidence-foundation/issues/)
+Ветка: `feature/adaptive-learning-plan`
+
+| № | Что даёт | Статус |
+|---|---|---|
+| 01 | Честный экран пробника, скрытые фиктивные достижения и очищенный legacy-прогресс | pending |
+| 02 | Рабочие настройки класса, цели и обычной длительности занятия | pending |
+| 03 | Единая запись учебной активности и подключённая грамматика | pending |
+| 04 | Результаты чтения и аудирования в индивидуальном плане | pending |
+| 05 | Сводка прогресса из реальных учебных свидетельств и выпускной контур | pending |
