@@ -9,8 +9,13 @@ import {
   readingActivityId,
   splitLearningActivityDuration,
 } from '../public/learning-activity-contract.js';
-import { loadMatchingCatalog, matchingSetForLegacyScreen } from '../public/listening-catalog-contract.js';
-import { LISTENING_MATCHING_SETS } from '../public/listening-pilot-v1.js';
+import {
+  loadMatchingCatalog,
+  loadTrueFalseCatalog,
+  matchingSetForLegacyScreen,
+  trueFalseSetForLegacyScreen,
+} from '../public/listening-catalog-contract.js';
+import { LISTENING_MATCHING_SETS, LISTENING_TRUE_FALSE_SETS } from '../public/listening-pilot-v1.js';
 
 const [
   recorderFile,
@@ -118,8 +123,11 @@ function createSubjectHarness(subject, { offline = false, slow = false } = {}) {
     learningActivitySource,
     splitLearningActivityDuration,
     LISTENING_MATCHING_SETS,
+    LISTENING_TRUE_FALSE_SETS,
     loadMatchingCatalog,
+    loadTrueFalseCatalog,
     matchingSetForLegacyScreen,
+    trueFalseSetForLegacyScreen,
     adaptiveRuntimeSnapshot: () => ({ active }),
     completeAdaptiveModuleActivity: async (completion) => {
       adaptive.push(JSON.parse(JSON.stringify(completion)));
@@ -235,6 +243,7 @@ function createSubjectHarness(subject, { offline = false, slow = false } = {}) {
       window.__subjectEvidenceTest={
         startMatching:lMt,
         installMatchingCatalog:function(){lSetMatchingCatalog(LISTENING_MATCHING_SETS)},
+        installTrueFalseCatalog:function(){lSetTrueFalseCatalog(LISTENING_TRUE_FALSE_SETS)},
         playMatching:function(){lPlay(lMtLines())},
         completeMatching:function(correct){LM.set.a.forEach(function(answer,index){lMtPick(index,correct===false?(answer+1)%LM.set.st.length:answer)});lMtCheck()},
         startTrueFalse:lTf,
@@ -249,6 +258,7 @@ function createSubjectHarness(subject, { offline = false, slow = false } = {}) {
       };
     `), context);
     window.__subjectEvidenceTest.installMatchingCatalog();
+    window.__subjectEvidenceTest.installTrueFalseCatalog();
   }
 
   return {
@@ -354,10 +364,10 @@ test('listening screen completions record matching, true-false, interview and di
     { activity, score, maxScore, durationMs }
   )), [
     { activity: 'listening_matching', score: 6, maxScore: 6, durationMs: 400 },
-    { activity: 'listening_true_false', score: 5, maxScore: 5, durationMs: 500 },
+    { activity: 'listening_true_false', score: 7, maxScore: 7, durationMs: 500 },
     { activity: 'listening_interview', score: 4, maxScore: 4, durationMs: 600 },
-    { activity: 'listening_matching', score: 6, maxScore: 6, durationMs: 400 },
-    { activity: 'listening_detail', score: 9, maxScore: 9, durationMs: 601 },
+    { activity: 'listening_matching', score: 6, maxScore: 6, durationMs: 353 },
+    { activity: 'listening_detail', score: 11, maxScore: 11, durationMs: 648 },
   ]);
   assert.deepEqual(harness.ordinary.map((attempt) => attempt.metadata.mode), [
     'listening_matching', 'listening_true_false', 'listening_interview',
@@ -384,6 +394,25 @@ test('matching screen renders six speakers and keeps the transcript and explanat
   assert.match(harness.element('lmt_res_0').innerHTML, /<b>Ключ:<\/b>/u);
   assert.deepEqual(harness.ordinary.map(({ activity, score, maxScore }) => ({ activity, score, maxScore })), [
     { activity: 'listening_matching', score: 6, maxScore: 6 },
+  ]);
+});
+
+test('true-false screen renders seven statements and reveals auditable answers only after checking', async () => {
+  const harness = createSubjectHarness('listening');
+
+  harness.screen.startTrueFalse();
+  const exercise = harness.element('l_area').innerHTML;
+  assert.equal((exercise.match(/id="ltf_row_\d+"/gu) || []).length, 7);
+  assert.doesNotMatch(exercise, /ТРАНСКРИПТ|<b>В записи:<\/b>/u);
+
+  harness.advance(700);
+  harness.screen.completeTrueFalse(true);
+  await settle();
+
+  assert.match(harness.element('created:1').innerHTML, /ТРАНСКРИПТ/u);
+  assert.match(harness.element('ltf_res_0').innerHTML, /<b>В записи:<\/b>/u);
+  assert.deepEqual(harness.ordinary.map(({ activity, score, maxScore }) => ({ activity, score, maxScore })), [
+    { activity: 'listening_true_false', score: 7, maxScore: 7 },
   ]);
 });
 

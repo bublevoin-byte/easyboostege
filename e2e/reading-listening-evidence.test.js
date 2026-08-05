@@ -90,7 +90,8 @@ try {
   await page.evaluate(() => window.tab('scr4'));
   await page.locator('#scr4.on').waitFor({ state: 'visible', timeout: 5_000 });
   await page.getByRole('button', { name: /Верно · Неверно · Не сказано/u }).press('Enter');
-  for (let index = 0; index < 5; index += 1) {
+  await page.locator('#ltf_row_6').waitFor({ state: 'visible', timeout: 5_000 });
+  for (let index = 0; index < 7; index += 1) {
     await page.locator(`#ltf_row_${index} button`).first().press('Enter');
   }
   const responsePromise = page.waitForResponse((response) => (
@@ -107,6 +108,7 @@ try {
     'listening_true_false', 'reading_headings',
   ]);
   assert.equal(learnerAttempts.every((attempt) => attempt.evidence_quality === 'client_reported'), true);
+  assert.equal(learnerAttempts.find((attempt) => attempt.activity === 'listening_true_false')?.max_score, 7);
   assert.deepEqual(pageErrors, []);
   await context.close();
   console.log('Reading/listening evidence Chromium E2E passed.');

@@ -12,7 +12,9 @@ import {
   lSync,listeningModule,registerScreenGenerator,rWordsHtml,save,setTxt,toast,ui,wDeco,
 } from '../app.js';
 import {createLearningActivityEvidence,recordLearningActivityEvidence} from '../learning-activity-recorder.js';
-import {loadMatchingCatalog,matchingSetForLegacyScreen} from '../listening-catalog-contract.js';
+import {
+  loadMatchingCatalog,loadTrueFalseCatalog,matchingSetForLegacyScreen,trueFalseSetForLegacyScreen,
+} from '../listening-catalog-contract.js';
 
 /* ===== LISTENING ===== */
 const LISTEN={dialog:"— Hi, can I get a coffee and a croissant, please?  — Sure, that's four pounds fifty. Anything else?  — No, that's all, thanks.",
@@ -101,7 +103,8 @@ const L_IN=[
  {q:'What problem did the blog cause?',o:['She lost her friends','Her marks got worse','She stopped sleeping'],a:1,ev:'…my marks went down a little last term…',e:'Оценки немного снизились — пришлось планировать время.'},
  {q:'What does Lena advise beginners?',o:['To buy a good camera','To copy popular bloggers','To be honest'],a:2,ev:'…honesty works better than expensive equipment.',e:'Главный совет — честность, а не дорогая техника.'}]}
 ];
-let L_MATCHING_CATALOG=[],L_MATCHING_CATALOG_LOAD=null;
+let L_MATCHING_CATALOG=[],L_MATCHING_CATALOG_LOAD=null,L_TRUE_FALSE_CATALOG=[],L_TRUE_FALSE_CATALOG_LOAD=null;
+let L_TRUE_FALSE_CATALOG_READY=false;
 const L_VOICE_RESULT_SETS=[
   {id:'listening.exam.interview.alex',items:['listening.alex-swimming.reason','listening.alex-swimming.frequency','listening.alex-swimming.injury','listening.alex-swimming.first-plan']},
   {id:'listening.exam.interview.lena',items:['listening.lena-blog.started','listening.lena-blog.helpers','listening.lena-blog.problem','listening.lena-blog.advice']},
@@ -140,7 +143,16 @@ function lLoadMatchingCatalog(){
 function lSetMatchingCatalog(sets){
   L_MATCHING_CATALOG=sets.map(function(set){return set.st?set:matchingSetForLegacyScreen(set)});
   return L_MATCHING_CATALOG}
-function initListening(){if(!S)return;lSync();lLoadMatchingCatalog().then(function(){lHub()})}
+function lLoadTrueFalseCatalog(){
+  if(L_TRUE_FALSE_CATALOG_LOAD)return L_TRUE_FALSE_CATALOG_LOAD;
+  L_TRUE_FALSE_CATALOG_LOAD=loadTrueFalseCatalog(function(){return import('../listening-pilot-v1.js')})
+    .then(lSetTrueFalseCatalog);
+  return L_TRUE_FALSE_CATALOG_LOAD}
+function lSetTrueFalseCatalog(sets){
+  L_TRUE_FALSE_CATALOG=sets.map(function(set){return set.st?set:trueFalseSetForLegacyScreen(set)});
+  L_TRUE_FALSE_CATALOG_READY=true;
+  return L_TRUE_FALSE_CATALOG}
+function initListening(){if(!S)return;lSync();Promise.all([lLoadMatchingCatalog(),lLoadTrueFalseCatalog()]).then(function(){lHub()})}
 function lHub(){var area=document.getElementById('l_area');if(!area)return;LM=null;LT=null;LI=null;lStop();
   var r=lSt();var GA=0;function ga(){return 'animation:win .34s '+((GA++)*0.06)+'s cubic-bezier(.25,.75,.35,1) both;'}
   var examMax=lExamMaxScore();
@@ -180,9 +192,12 @@ function lSpeakerLabel(index){return String.fromCharCode(65+index)}
 function lMatchingPool(){
   if(L_MATCHING_CATALOG.length)return listeningModule.pool(L_MATCHING_CATALOG,[]);
   return lPool('m',L_M)}
+function lTrueFalsePool(){
+  if(L_TRUE_FALSE_CATALOG.length)return listeningModule.pool(L_TRUE_FALSE_CATALOG,[]);
+  return lPool('tf',L_TF)}
 function lMatchingMax(set){return Math.max(1,Number(set&&set.maxScore)||((set&&set.a&&set.a.length)||1))}
 function lExamMaxScore(){
-  var m=lMatchingPool()[0],tf=lPool('tf',L_TF)[0],iq=lPool('iq',L_IN)[0];
+  var m=lMatchingPool()[0],tf=lTrueFalsePool()[0],iq=lPool('iq',L_IN)[0];
   return lMatchingMax(m)+(tf&&tf.st?tf.st.length:0)+(iq&&iq.qs?iq.qs.length:0)}
 /* ---- задание 1: соответствия ---- */
 function lMt(){S.lisIdxM=(S.lisIdxM||0);var pool=lMatchingPool();var set=lShufM(pool[S.lisIdxM%pool.length]);S.lisIdxM++;
@@ -233,7 +248,8 @@ function lMtCheck(){if(LM.done)return;LM.done=true;lStop();var set=LM.set,r=lSt(
   area.insertBefore(d,area.firstChild);
   try{d.scrollIntoView({behavior:'smooth',block:'start'})}catch(e){};lGen()}
 /* ---- задание 2: True/False/Not stated ---- */
-function lTf(){S.lisIdxT=(S.lisIdxT||0);var pool=lPool('tf',L_TF);var set=pool[S.lisIdxT%pool.length];S.lisIdxT++;
+function lTf(){if(!L_TRUE_FALSE_CATALOG_READY){lLoadTrueFalseCatalog().then(function(){lTf()});return}
+  S.lisIdxT=(S.lisIdxT||0);var pool=lTrueFalsePool();var set=pool[S.lisIdxT%pool.length];S.lisIdxT++;
   LT={set:set,sel:set.st.map(function(){return null}),done:false,evidence:createLearningActivityEvidence({module:'listening',
     activityId:listeningModule.activityId('true_false'),mode:'listening_true_false',source:listeningModule.sourceOf(set)})};LPLAYS=0;lTfRender()}
 function lTfRender(){var area=document.getElementById('l_area');var set=LT.set;
@@ -330,7 +346,7 @@ function lExam(){var area=document.getElementById('l_area');if(!area)return;lSto
     +'<button class="sq" style="'+WBTN+'color:#B54E2F;" onclick="lHub()">← К аудированию</button></div>';
   lAnim('win','.32s')}
 function lExamStart(){
-  var pm=lMatchingPool(),pt=lPool('tf',L_TF),pi=lPool('iq',L_IN);
+  var pm=lMatchingPool(),pt=lTrueFalsePool(),pi=lPool('iq',L_IN);
   S.leIdx=(S.leIdx||0);
   var startedAt=Date.now(),m=lShufM(pm[S.leIdx%pm.length]),tf=pt[S.leIdx%pt.length],iq=pi[S.leIdx%pi.length];
   LE={m:m,tf:tf,iq:iq,stage:0,selM:m.a.map(function(){return null}),plays:[0,0,0],t0:startedAt,
@@ -448,7 +464,7 @@ async function lGen(){
   S.lisAi=S.lisAi||{m:[],tf:[],iq:[]};
   var kind=null;
   if(lMatchingPool().length<5)kind='m';
-  else if(lPool('tf',L_TF).length<5)kind='tf';
+  else if(lTrueFalsePool().length<5)kind='tf';
   else if(lPool('iq',L_IN).length<5)kind='iq';
   if(!kind)return;L_GEN=true;
   try{
@@ -477,7 +493,7 @@ async function lGen(){
     if(item){S.lisAi[kind]=(S.lisAi[kind]||[]).concat([item]);save()}
   }catch(e){}
   L_GEN=false;
-  try{var need=lMatchingPool().length<5||lPool('tf',L_TF).length<5||lPool('iq',L_IN).length<5;
+  try{var need=lMatchingPool().length<5||lTrueFalsePool().length<5||lPool('iq',L_IN).length<5;
     if(need)setTimeout(lGen,4000)}catch(e){}}
 registerRouteHook(function(id){if(id==='scr4')initListening()});
 /* Экзамен по аудированию не должен тикать в фоне после ухода с экрана. */
