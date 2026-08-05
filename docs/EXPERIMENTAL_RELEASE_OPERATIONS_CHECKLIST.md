@@ -90,6 +90,14 @@ sudo /usr/local/sbin/easyboost-staging-rollback
 curl --fail https://staging.useboost.ru/health/ready
 ```
 
+Root-owned deploy и rollback helpers сначала распаковывают архив в отдельный временный каталог и
+проверяют его, затем полностью заменяют code tree. Из текущего staging-каталога сохраняются только
+`.env.staging`,
+`backups/` и `rollbacks/`; PostgreSQL остаётся в именованном Docker volume вне code tree. Архив,
+который сам содержит любой из этих защищённых runtime-путей, отклоняется до удаления текущего кода.
+Поэтому deploy и rollback всегда устанавливают точное дерево выбранного релиза без примеси файлов
+из другого релиза.
+
 Rollback evidence is attached, defect is opened, and a new deploy always restarts the seven-day clock.
 
 ## 3. Новый 7-day soak после deploy

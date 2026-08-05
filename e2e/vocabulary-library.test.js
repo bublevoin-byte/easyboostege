@@ -357,6 +357,10 @@ try {
   await page.getByRole('heading', { name: 'Короткая пауза' }).waitFor();
   await page.getByRole('button', { name: 'Продолжить' }).press('Enter');
   await page.getByRole('heading', { name: 'Выбери значение' }).waitFor();
+  // The task view focuses its heading on the next animation frame. Wait for that
+  // accessibility transition before pressing Enter so it cannot steal focus
+  // between the answer button's keydown and keyup in a slower CI browser.
+  await page.waitForFunction(() => document.activeElement?.id === 'w_session_title');
   await page.getByRole('button', { name: 'новое слово' }).press('Enter');
   await page.getByRole('button', { name: 'Дальше' }).press('Enter');
 
