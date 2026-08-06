@@ -63,6 +63,7 @@ const recorderSource = recorderFile
   .concat('\nwindow.__learningActivityRecorderTest={createLearningActivityEvidence,recordCompletedLearningActivity,recordLearningActivityEvidence};');
 const readingModuleSource = readingModuleFile.replace(/^import[\s\S]*?from ['"][^'"]+['"];\r?\n/gmu, '');
 const listeningModuleSource = listeningModuleFile.replace(/^import .*;\r?\n/mu, '');
+const readingPilotCatalog = await loadReadingPilotCatalog();
 
 function executableScreen(source, exposed) {
   return source
@@ -127,6 +128,7 @@ function createSubjectHarness(subject, { offline = false, slow = false, listenin
   const window = {
     localStorage,
     navigator,
+    __sub: { authenticated: true, active: true, username: 'learner-a' },
     addEventListener() {},
     EasyBoostApi: {
       async post(path, body) {
@@ -177,6 +179,8 @@ function createSubjectHarness(subject, { offline = false, slow = false, listenin
       return { execution: { revision: 2 } };
     },
     S,
+    currentUser: 'learner-a',
+    PILOT_CATALOG: readingPilotCatalog,
     SRV: false,
     TOKEN: '',
     WBTN: 'background:#fff;color:#2B2B2B;border:1px solid #F0EAE2;',
@@ -275,22 +279,22 @@ function createSubjectHarness(subject, { offline = false, slow = false, listenin
     vm.runInContext(readingModuleSource, context);
     context.readingModule = window.EasyBoostReading;
     vm.runInContext(executableScreen(readingScreenFile, `
+      var __readingQuestionIndex=0;
       window.__subjectEvidenceTest={
-        startHeadings:rHl,
-        completeHeadings:function(correct){RH.set.txts.forEach(function(item,index){rHlPick(index,correct===false?(item.a+1)%RH.set.hl.length:item.a)});rHlCheck()},
-        startQuestions:function(){rQs();RQ.i=0;rQsRender()},
-        answerQuestion:function(correct){var q=RQ&&RQ.set.qs[RQ.i];if(!q)return false;
-          var buttons=q.o.map(function(){return{dataset:{},style:{},parentElement:null}});
-          buttons.forEach(function(button){button.parentElement={querySelectorAll:function(){return buttons}}});
-          rQsPick(buttons[correct===false?(q.a+1)%q.o.length:q.a],correct===false?(q.a+1)%q.o.length:q.a);return true},
-        startGaps:rGp,
-        completeGaps:function(correct){RG.set.a.forEach(function(answer,index){rGpPick(index,correct===false?(answer+1)%RG.set.fr.length:answer)});rGpCheck()},
+        installCatalog:function(){catalog=PILOT_CATALOG},
+        startHeadings:function(){rHl()},
+        completeHeadings:function(correct){training.answers=training.set.task.answers.map(function(answer){return correct===false?(answer+1)%training.set.task.headings.length:answer});submitTraining()},
+        startQuestions:function(){__readingQuestionIndex=0;rQs()},
+        answerQuestion:function(correct){if(!training||__readingQuestionIndex>=training.set.task.questions.length)return false;
+          var question=training.set.task.questions[__readingQuestionIndex];training.answers[__readingQuestionIndex]=correct===false?(question.answer+1)%question.options.length:question.answer;
+          __readingQuestionIndex+=1;if(__readingQuestionIndex===training.answers.length)submitTraining();return true},
+        startGaps:function(){rGp()},
+        completeGaps:function(correct){training.answers=training.set.task.answers.map(function(answer){return correct===false?(answer+1)%training.set.task.fragments.length:answer});submitTraining()},
         startExam:rExamStart,
-        completeExam:function(){RE.h.txts.forEach(function(item,index){RE.selH[index]=item.a;rExamDedup('selH',index,item.a)});
-          RE.stage=1;RE.g.a.forEach(function(answer,index){RE.selG[index]=answer;rExamDedup('selG',index,answer)});
-          RE.stage=2;RE.q.qs.forEach(function(q){RE.ansQ.push(q.a)});rExamRender()},
+        completeExam:function(){KINDS.forEach(function(kind){var set=full.attempt.section.sets[kind];full.attempt.answers[kind]=kind==='task12_18'?set.task.questions.map(function(question){return question.answer}):set.task.answers.slice()});confirmFullSubmit()},
       };
     `), context);
+    window.__subjectEvidenceTest.installCatalog();
   } else {
     context.lSt = () => S.lis;
     vm.runInContext(listeningModuleSource, context);
@@ -365,11 +369,11 @@ test('reading screen completions record headings, questions, gaps and distinct c
   assert.deepEqual(harness.ordinary.map(({ activity, score, maxScore, durationMs }) => (
     { activity, score, maxScore, durationMs }
   )), [
-    { activity: 'reading_headings', score: 4, maxScore: 4, durationMs: 400 },
-    { activity: 'reading_detail', score: 4, maxScore: 4, durationMs: 700 },
-    { activity: 'reading_gaps', score: 3, maxScore: 3, durationMs: 300 },
-    { activity: 'reading_headings', score: 4, maxScore: 7, durationMs: 350 },
-    { activity: 'reading_detail', score: 7, maxScore: 13, durationMs: 651 },
+    { activity: 'reading_headings', score: 7, maxScore: 7, durationMs: 400 },
+    { activity: 'reading_detail', score: 7, maxScore: 7, durationMs: 700 },
+    { activity: 'reading_gaps', score: 6, maxScore: 6, durationMs: 300 },
+    { activity: 'reading_headings', score: 7, maxScore: 7, durationMs: 350 },
+    { activity: 'reading_detail', score: 13, maxScore: 13, durationMs: 651 },
   ]);
   assert.deepEqual(harness.ordinary.map((attempt) => attempt.metadata), [
     { mode: 'reading_headings', source: 'builtin', helpUsed: false, hintsUsed: 0 },
@@ -393,7 +397,7 @@ test('reading exact adaptive completion uses only the claim path and a mismatch 
   await settle();
 
   assert.deepEqual(harness.adaptive, [{
-    module: 'reading', activityId: 'reading_headings', score: 4, maxScore: 4, durationMs: 250,
+    module: 'reading', activityId: 'reading_headings', score: 7, maxScore: 7, durationMs: 250,
   }]);
   assert.equal(harness.ordinary.length, 0);
 

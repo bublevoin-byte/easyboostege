@@ -243,6 +243,13 @@ test('technical legacy fallback cannot enter Reading 2.0 history even with a can
   }, { id: 'reading-pilot-v1.task10.looks-canonical' });
   assert.equal(legacy.recordable, false);
   assert.doesNotMatch(legacy.id, /^reading-pilot-v1\./u);
+  assert.deepEqual(
+    { ...reading.scoreSet(legacy, [0]) },
+    {
+      kind: 'task10', rawScore: 1, rawMaxScore: 1, officialScore: 0, officialMaxScore: 0,
+      review: reading.scoreSet(legacy, [0]).review,
+    },
+  );
   assert.throws(() => reading.recordAttempt('student-legacy', null, legacy, {
     attemptId: 'legacy-attempt-1', score: 1, maxScore: 1,
     attemptedAt: 1_700_000_000_000, durationMs: 100, source: 'legacy',
@@ -262,6 +269,34 @@ test('technical legacy fallback cannot enter Reading 2.0 history even with a can
     task11: task11.task.answers,
     task12_18: task12.task.questions.map((question) => question.answer),
   }, { submittedAt: 1_700_000_000_000 }), /cannot be submitted or recorded/u);
+});
+
+test('Reading catalog summary reports new, completed, weak and due sets without content', () => {
+  const reading = createReadingModule();
+  const owner = 'student-summary';
+  const now = 1_800_000_000_000;
+  const sets = [
+    setReference('task10', 'summary-10-a'), setReference('task10', 'summary-10-b'),
+    setReference('task11', 'summary-11-a'), setReference('task12_18', 'summary-12-a'),
+  ];
+  let history = record(reading, owner, null, sets[0], {
+    score: 0, maxScore: 7, attemptedAt: now - 10 * 86_400_000,
+  });
+  history = record(reading, owner, history, sets[0], {
+    score: 1, maxScore: 7, attemptedAt: now - 9 * 86_400_000,
+  });
+  history = record(reading, owner, history, sets[2], {
+    score: 6, maxScore: 6, attemptedAt: now - 1_000,
+  });
+  const summary = reading.catalogSummary({ id: 'reading-pilot-v1', revision: 1, sets }, owner, history, now);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(summary.perKind.task10)), {
+    totalSets: 2, newSets: 1, completedSets: 1, weakSets: 1, dueSets: 1,
+    correct: 1, total: 14, accuracy: 7,
+  });
+  assert.equal(summary.completedSets, 2);
+  assert.equal(summary.weakestKind, 'task10');
+  assert.doesNotMatch(JSON.stringify(summary), /quote|heading|fragment|question/u);
 });
 
 test('Reading rotation is deterministic unseen then due then weak then old', async (t) => {
@@ -472,11 +507,13 @@ test('full Reading resume stores answers but no content and rejects owner, catal
     id: 'attempt-1', ownerId: 'student-resume',
     section: { catalogId: catalog.id, catalogRevision: catalog.revision, sets },
     answers: { task10: [0, null, null, null, null, null, null], task11: [], task12_18: [] },
-    currentKind: 'task10', startedAt: 1_700_000_000_000, durationMs: 456,
+    currentKind: 'task10', currentPosition: 4, startedAt: 1_700_000_000_000, durationMs: 456,
   });
 
   assert.doesNotMatch(JSON.stringify(snapshot), /Long source|Task 10 source|evidence|questions/u);
-  assert.equal(reading.restoreFullAttempt(snapshot, catalog, 'student-resume').ok, true);
+  const restored = reading.restoreFullAttempt(snapshot, catalog, 'student-resume');
+  assert.equal(restored.ok, true);
+  assert.equal(restored.attempt.currentPosition, 4);
   assert.equal(reading.restoreFullAttempt(snapshot, catalog, 'other-owner').reason, 'owner-mismatch');
   assert.equal(reading.restoreFullAttempt(snapshot, { ...catalog, id: 'reading-pilot-v2' }, 'student-resume').reason, 'catalog-version-mismatch');
   assert.equal(reading.restoreFullAttempt(snapshot, { ...catalog, revision: 4 }, 'student-resume').reason, 'catalog-revision-mismatch');

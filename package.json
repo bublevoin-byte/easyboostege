@@ -16,6 +16,7 @@
     "test:e2e:vocabulary": "node e2e/vocabulary-library.test.js",
     "test:e2e:adaptive": "npm run build:frontend && node e2e/adaptive-diagnostic.test.js",
     "test:e2e:evidence": "npm run build:frontend && node e2e/reading-listening-evidence.test.js",
+    "test:e2e:reading": "npm run build:frontend && node e2e/reading-2.test.js",
     "test:e2e:progress": "npm run build:frontend && node e2e/learning-progress.test.js",
     "listening:audio:dry-run": "node scripts/listening-static-audio.js",
     "listening:audio:generate": "node scripts/listening-static-audio.js --paid",

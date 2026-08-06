@@ -22,7 +22,13 @@ try {
   const jwtSecret = 'reading-listening-e2e-secret-32-characters';
   await fs.writeFile(dataFile, JSON.stringify({
     users: {
-      'evidence-user': { created: Date.now(), sub_until: Date.now() + 86_400_000 },
+      'evidence-user': {
+        created: Date.now(), sub_until: Date.now() + 86_400_000,
+        privacy_consent: {
+          text_processing: true, voice_processing: true,
+          policy_version: '2026-08-02-voice-v1', updated_at: new Date().toISOString(),
+        },
+      },
     },
     progress: { 'evidence-user': {} },
   }), 'utf8');
@@ -71,17 +77,24 @@ try {
 
   await page.evaluate(() => window.tab('scr7'));
   await page.locator('#scr7.on').waitFor({ state: 'visible', timeout: 5_000 });
-  await page.getByRole('button', { name: 'Заголовки' }).press('Enter');
-  for (let index = 0; index < 4; index += 1) {
-    await page.locator(`#rhl_row_${index} button`).nth(index).press('Enter');
+  await page.getByRole('heading', { name: 'Каталог чтения' }).waitFor({ timeout: 8_000 });
+  await page.getByRole('button', { name: 'Начать Task 10' }).press('Enter');
+  const readingAnswers = await page.evaluate(async () => {
+    const catalog = await window.EasyBoostReading.loadPilotCatalog();
+    const selected = window.S.readingPilot.history.lastSelected.task10;
+    return catalog.sets.find((set) => set.id === selected.id).task.answers;
+  });
+  for (let index = 0; index < readingAnswers.length; index += 1) {
+    await page.locator(`[data-reading-kind="task10"] [data-reading-answer][data-position="${index}"]`)
+      .selectOption(String(readingAnswers[index]));
   }
   await context.setOffline(true);
-  await page.getByRole('button', { name: 'Проверить', exact: true }).press('Enter');
+  await page.getByRole('button', { name: 'Завершить тренировку', exact: true }).press('Enter');
   await page.waitForFunction(() => window.EasyBoostSync.pendingModuleAttempts().length === 1);
   const queued = await page.evaluate(() => window.EasyBoostSync.pendingModuleAttempts()[0]);
   assert.equal(queued.module, 'reading');
   assert.equal(queued.activity, 'reading_headings');
-  assert.equal(queued.maxScore, 4);
+  assert.equal(queued.maxScore, 7);
   assert.equal(Object.keys(queued.metadata).sort().join(','), 'helpUsed,hintsUsed,mode,source');
 
   await context.setOffline(false);
@@ -134,7 +147,10 @@ try {
     assert.equal(await page.locator(`#liq_row_${index} button`).count(), 4);
     await page.locator(`#liq_row_${index} button`).first().press('Enter');
   }
-  await page.locator('#l_playbtn').press('Enter');
+  for (let playback = 0; playback < 3; playback += 1) {
+    await page.locator('#l_playbtn').press('Enter');
+    await page.waitForTimeout(100);
+  }
   const interviewResponsePromise = page.waitForResponse((response) => (
     response.request().method() === 'POST' && response.url().endsWith('/api/v1/module-attempts')
   ));

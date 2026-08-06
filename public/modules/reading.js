@@ -283,6 +283,49 @@ import {
     return { catalogId: catalog.id, catalogRevision: catalog.revision, sets, history: nextHistory };
   }
 
+  function catalogSummary(catalog, ownerId, history, now = Date.now()) {
+    const owner = ownerIdOf(ownerId);
+    if (!catalog || catalog.id !== READING_CATALOG_ID || !Array.isArray(catalog.sets)) {
+      throw new TypeError('catalog is invalid');
+    }
+    const normalized = normalizeHistory(owner, history);
+    const records = new Map(normalized.items.map((item) => [`${item.id}@${item.revision}`, item]));
+    const perKind = Object.fromEntries(KINDS.map((kind) => {
+      const sets = catalog.sets.filter((set) => setReference(set)?.kind === kind);
+      const completed = sets.flatMap((set) => {
+        const record = records.get(`${set.id}@${set.revision}`);
+        return record ? [record] : [];
+      });
+      const correct = completed.reduce((total, item) => total + item.score, 0);
+      const total = completed.reduce((sum, item) => sum + item.maxScore, 0);
+      return [kind, {
+        totalSets: sets.length,
+        newSets: Math.max(0, sets.length - completed.length),
+        completedSets: completed.length,
+        weakSets: completed.filter((item) => item.attempts >= 2 && smoothedAccuracy(item) < 0.7).length,
+        dueSets: completed.filter((item) => item.lastAttemptAt + dueInterval(item) <= now).length,
+        correct,
+        total,
+        accuracy: total ? Math.round(correct / total * 100) : null,
+      }];
+    }));
+    const recent = normalized.items.slice().sort((left, right) => right.lastAttemptAt - left.lastAttemptAt).slice(0, 2);
+    let trend = 'insufficient';
+    if (recent.length === 2) {
+      const difference = smoothedAccuracy(recent[0]) - smoothedAccuracy(recent[1]);
+      trend = difference > 0.05 ? 'up' : (difference < -0.05 ? 'down' : 'steady');
+    }
+    const attemptedKinds = KINDS.filter((kind) => perKind[kind].total > 0);
+    attemptedKinds.sort((left, right) => perKind[left].accuracy - perKind[right].accuracy || left.localeCompare(right));
+    return {
+      totalSets: catalog.sets.length,
+      completedSets: KINDS.reduce((sum, kind) => sum + perKind[kind].completedSets, 0),
+      perKind,
+      trend,
+      weakestKind: attemptedKinds[0] || null,
+    };
+  }
+
   function normalizeState(state) {
     const target = state && typeof state === 'object' ? state : {};
     target.h = target.h || { ok: 0, tot: 0 };
@@ -406,11 +449,15 @@ import {
 
   function scoreSet(set, submittedAnswers) {
     const reference = setReference(set);
-    if (!reference) throw new TypeError('set must have a valid Reading catalog reference');
+    const technicalFallback = set?.recordable === false && set?.provenance === 'legacy'
+      && KINDS.includes(set?.kind) && set?.task && typeof set.task === 'object';
+    if (!reference && !technicalFallback) throw new TypeError('set must have a valid Reading catalog reference');
     const operation = KIND_OPERATIONS[set.kind];
     const { answers: correctAnswers, evidence } = operation.extract(set);
     const answers = Array.isArray(submittedAnswers) ? submittedAnswers : [];
-    const rawMaxScore = READING_KIND_RULES[set.kind].rawMaxScore;
+    const rawMaxScore = technicalFallback
+      ? correctAnswers.length
+      : READING_KIND_RULES[set.kind].rawMaxScore;
     const rawScore = correctAnswers.reduce((total, answer, position) => (
       total + (answers[position] === answer ? 1 : 0)
     ), 0);
@@ -419,8 +466,8 @@ import {
       kind: set.kind,
       rawScore,
       rawMaxScore,
-      officialScore: tooManyCompositeAnswers ? 0 : operation.officialScore(rawScore),
-      officialMaxScore: READING_KIND_RULES[set.kind].officialMaxScore,
+      officialScore: technicalFallback || tooManyCompositeAnswers ? 0 : operation.officialScore(rawScore),
+      officialMaxScore: technicalFallback ? 0 : READING_KIND_RULES[set.kind].officialMaxScore,
       review: correctAnswers.map((answer, position) => (
         reviewRow(set, operation, answers, correctAnswers, evidence, position)
       )),
@@ -588,6 +635,7 @@ import {
       sets,
       answers: Object.fromEntries(KINDS.map((kind) => [kind, snapshotAnswers(kind, attempt.answers?.[kind])])),
       currentKind: KINDS.includes(attempt.currentKind) ? attempt.currentKind : 'task10',
+      currentPosition: boundedInteger(attempt.currentPosition, 6),
       startedAt: boundedInteger(attempt.startedAt),
       durationMs: boundedInteger(attempt.durationMs),
     };
@@ -619,6 +667,7 @@ import {
         section: { catalogId: catalog.id, catalogRevision: catalog.revision, sets },
         answers: Object.fromEntries(KINDS.map((kind) => [kind, snapshotAnswers(kind, snapshot.answers?.[kind])])),
         currentKind: KINDS.includes(snapshot.currentKind) ? snapshot.currentKind : 'task10',
+        currentPosition: boundedInteger(snapshot.currentPosition, 6),
         startedAt: boundedInteger(snapshot.startedAt),
         durationMs: boundedInteger(snapshot.durationMs),
       },
@@ -654,6 +703,7 @@ import {
     rememberSelection,
     selectNextSet,
     selectFullSection,
+    catalogSummary,
     migrateLegacyState,
     scoreSet,
     scoreFullSection,

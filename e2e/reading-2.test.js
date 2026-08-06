@@ -1,0 +1,212 @@
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright';
+import {
+  availablePort, chromeExecutable, createActiveSubscriptionPage, stopProcess, waitForReady,
+} from './browser-server-harness.js';
+
+const projectDirectory = fileURLToPath(new URL('..', import.meta.url));
+const serverPath = fileURLToPath(new URL('../server.js', import.meta.url));
+const username = 'reading-2-user';
+
+async function openReading(page) {
+  await page.goto(page.url() || '/', { waitUntil: 'networkidle' });
+  await page.locator('#scr1.on').waitFor({ state: 'visible', timeout: 8_000 });
+  await page.evaluate(() => window.tab('scr7'));
+  await page.locator('#scr7.on').waitFor({ state: 'visible', timeout: 8_000 });
+  await page.getByRole('heading', { name: 'Каталог чтения' }).waitFor({ state: 'visible', timeout: 8_000 });
+}
+
+async function selectedSet(page, kind) {
+  return page.evaluate(async (selectedKind) => {
+    const catalog = await window.EasyBoostReading.loadPilotCatalog();
+    const id = window.S.readingPilot.history.lastSelected[selectedKind].id;
+    return catalog.sets.find((set) => set.id === id);
+  }, kind);
+}
+
+async function fillCurrentKindCorrectly(page, kind) {
+  const set = await selectedSet(page, kind);
+  const answers = kind === 'task12_18'
+    ? set.task.questions.map((question) => question.answer)
+    : set.task.answers;
+  const fields = page.locator(`[data-reading-kind="${kind}"] [data-reading-answer]`);
+  assert.equal(await fields.count(), kind === 'task12_18' ? answers.length * 4 : answers.length);
+  for (let index = 0; index < answers.length; index += 1) {
+    if (kind === 'task12_18') {
+      await page.locator(`[data-reading-kind="${kind}"] [data-reading-answer][data-position="${index}"][value="${answers[index]}"]`).check();
+    } else {
+      await fields.nth(index).selectOption(String(answers[index]));
+    }
+  }
+}
+
+let browser;
+let child;
+let temporaryDirectory;
+try {
+  temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-reading-2-'));
+  const port = await availablePort();
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const jwtSecret = 'reading-2-e2e-secret-at-least-32-characters';
+  const dataFile = path.join(temporaryDirectory, 'data.json');
+  await fs.writeFile(dataFile, JSON.stringify({
+    users: { [username]: {
+      created: Date.now(), sub_until: Date.now() + 86_400_000,
+      privacy_consent: {
+        text_processing: true, voice_processing: true,
+        policy_version: '2026-08-02-voice-v1', updated_at: new Date().toISOString(),
+      },
+    } },
+    progress: { [username]: {} },
+  }), 'utf8');
+
+  const output = [];
+  child = spawn(process.execPath, [serverPath], {
+    cwd: projectDirectory,
+    env: {
+      ...process.env,
+      NODE_ENV: 'test', PORT: String(port), APP_URL: baseUrl,
+      DATABASE_PROVIDER: 'file', DATA_FILE: dataFile, JWT_SECRET: jwtSecret,
+      TELEGRAM_BOT_TOKEN: '', ADMIN_TELEGRAM_ID: '', XAI_ENABLED: 'false',
+      VOICE_TUTOR_ENABLED: 'false', ADAPTIVE_LEARNING_ENABLED: 'false',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  child.stdout.on('data', (chunk) => output.push(chunk.toString()));
+  child.stderr.on('data', (chunk) => output.push(chunk.toString()));
+  await waitForReady(baseUrl, child, output);
+
+  browser = await chromium.launch({ headless: true, executablePath: await chromeExecutable() });
+  const { context, page } = await createActiveSubscriptionPage(browser, {
+    baseUrl, username, jwtSecret,
+    contextOptions: { viewport: { width: 375, height: 812 }, reducedMotion: 'reduce', serviceWorkers: 'block' },
+  });
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await page.goto(baseUrl, { waitUntil: 'networkidle' });
+  await openReading(page);
+
+  assert.equal(await page.getByRole('button', { name: /Task 10/u }).count(), 1);
+  assert.equal(await page.getByRole('button', { name: /Task 11/u }).count(), 1);
+  assert.equal(await page.getByRole('button', { name: /Task 12–18/u }).count(), 1);
+  assert.equal(await page.getByRole('button', { name: /Полный раздел 10–18/u }).count(), 1);
+  assert.match(await page.locator('#r_area').innerText(), /60 комплект/u);
+  assert.match(await page.locator('#r_area').innerText(), /Автоматически проверено/u);
+
+  await page.getByRole('button', { name: /Task 10/u }).click();
+  await page.getByRole('heading', { name: 'Задание 10' }).waitFor();
+  assert.equal(await page.locator('[data-reading-answer]').count(), 7);
+  assert.equal(await page.locator('[data-reading-heading]').count(), 8);
+  const task10 = await selectedSet(page, 'task10');
+  const preSubmitText = await page.locator('#r_area').innerText();
+  const preSubmitAria = await page.locator('#r_area [aria-label]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-label')).join('\n'));
+  assert.doesNotMatch(`${preSubmitText}\n${preSubmitAria}`, new RegExp(task10.task.evidence[0].explanationRu.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'));
+  assert.doesNotMatch(preSubmitText, /Цитата-доказательство/u);
+  assert.doesNotMatch(preSubmitText, /Правильный ответ/u);
+  for (let index = 0; index < 7; index += 1) {
+    await page.locator('[data-reading-answer]').nth(index).selectOption(String(index));
+  }
+  await page.getByRole('button', { name: 'Завершить тренировку' }).click();
+  await page.getByRole('heading', { name: 'Разбор задания 10' }).waitFor();
+  assert.equal(await page.locator('[data-reading-review-row]').count(), 7);
+  assert.match(await page.locator('[data-reading-review-row]').first().innerText(), /Ответ ученика.*Правильный ответ.*Цитата-доказательство.*Объяснение/siu);
+  const firstId = task10.id;
+  await page.getByRole('button', { name: 'Следующий комплект' }).click();
+  assert.notEqual((await selectedSet(page, 'task10')).id, firstId);
+
+  await page.getByRole('button', { name: 'К каталогу' }).click();
+  await page.getByRole('button', { name: /Task 11/u }).click();
+  assert.equal(await page.locator('[data-reading-answer]').count(), 6);
+  assert.equal(await page.locator('[data-reading-fragment]').count(), 7);
+  await page.getByRole('button', { name: 'К каталогу' }).click();
+  await page.getByRole('button', { name: /Task 12–18/u }).click();
+  assert.equal(await page.locator('[data-reading-question]').count(), 7);
+  assert.equal(await page.locator('[data-reading-answer]').count(), 28);
+
+  await page.getByRole('button', { name: 'К каталогу' }).click();
+  await page.getByRole('button', { name: /Полный раздел 10–18/u }).click();
+  assert.match(await page.locator('#r_area').innerText(), /9\s*заданий.*20\s*полей ответа/su);
+  assert.doesNotMatch(await page.locator('#r_area').innerText(), /20 задани(?:й|я) ЕГЭ/iu);
+  assert.match(await page.locator('#r_area').innerText(), /рекомендация ФИПИ — 30 минут/iu);
+  assert.match(await page.locator('#r_area').innerText(), /не завершается автоматически/iu);
+  await page.getByRole('button', { name: 'Начать полный раздел' }).click();
+  assert.equal(await page.locator('.reading-overview [data-reading-overview-field]').count(), 20);
+  await page.locator('[data-reading-kind="task10"] [data-reading-answer]').first().selectOption({ index: 1 });
+  assert.match(await page.locator('#reading-full-timer').innerText(), /\d{2}:\d{2}/u);
+  await page.waitForTimeout(1_100);
+  assert.notEqual(await page.locator('#reading-full-timer').innerText(), '00:00');
+
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.locator('#scr1.on').waitFor({ state: 'visible', timeout: 8_000 });
+  await page.evaluate(() => window.tab('scr7'));
+  await page.getByText('Незавершённая попытка восстановлена', { exact: true }).waitFor({ timeout: 8_000 });
+  assert.equal(await page.locator('.reading-overview [data-reading-overview-field]').count(), 20);
+  await page.getByRole('button', { name: 'Сдать раздел' }).first().click();
+  const dialog = page.getByRole('dialog', { name: 'В ответах есть пропуски' });
+  await dialog.waitFor();
+  await dialog.getByRole('button', { name: 'Вернуться к ответам' }).click();
+  assert.equal(await dialog.isVisible(), false);
+
+  await fillCurrentKindCorrectly(page, 'task10');
+  await page.getByRole('button', { name: 'Дальше: Task 11' }).click();
+  await fillCurrentKindCorrectly(page, 'task11');
+  await page.getByRole('button', { name: 'Дальше: Task 12–18' }).click();
+  await fillCurrentKindCorrectly(page, 'task12_18');
+  await page.getByRole('button', { name: 'Сдать раздел' }).first().click();
+  await page.getByRole('heading', { name: 'Результат полного раздела' }).waitFor();
+  assert.match(await page.locator('#r_area').innerText(), /12 из 12 первичных баллов/u);
+  assert.match(await page.locator('#r_area').innerText(), /20 из 20 верных полей/u);
+  assert.equal(await page.locator('[data-reading-review-row]').count(), 20);
+
+  for (const width of [375, 768, 1280]) {
+    await page.setViewportSize({ width, height: 900 });
+    const metrics = await page.locator('#scr7').evaluate((screen) => ({
+      clientWidth: screen.clientWidth, scrollWidth: screen.scrollWidth,
+      controls: [...screen.querySelectorAll('button:not([hidden]),select:not([hidden])')]
+        .filter((control) => control.offsetParent !== null)
+        .map((control) => ({ label: control.getAttribute('aria-label') || control.textContent.trim(), width: control.getBoundingClientRect().width, height: control.getBoundingClientRect().height })),
+    }));
+    assert.ok(metrics.scrollWidth <= metrics.clientWidth + 1, `${width}px Reading overflowed horizontally`);
+    assert.equal(metrics.controls.every((control) => control.height >= 44 && control.width >= 44), true,
+      `${width}px undersized controls: ${JSON.stringify(metrics.controls.filter((control) => control.height < 44 || control.width < 44))}`);
+  }
+  assert.deepEqual(errors, []);
+  await context.close();
+
+  const fallbackSession = await createActiveSubscriptionPage(browser, {
+    baseUrl, username, jwtSecret,
+    contextOptions: { viewport: { width: 768, height: 900 }, serviceWorkers: 'block' },
+  });
+  await fallbackSession.page.route('**/content/reading/*.js', (route) => route.abort());
+  await fallbackSession.page.route('**/assets/task*-v1-*.js', (route) => route.abort());
+  await fallbackSession.page.goto(baseUrl, { waitUntil: 'networkidle' });
+  await fallbackSession.page.locator('#scr1.on').waitFor();
+  await fallbackSession.page.evaluate(() => window.tab('scr7'));
+  await fallbackSession.page.getByRole('alert').waitFor({ timeout: 8_000 });
+  assert.match(await fallbackSession.page.getByRole('alert').innerText(), /Каталог не загрузился/u);
+  const beforeFallback = await fallbackSession.page.evaluate(() => JSON.stringify(window.S.readingPilot?.history || null));
+  await fallbackSession.page.getByRole('button', { name: 'Техническая тренировка' }).click();
+  assert.match(await fallbackSession.page.locator('#r_area').innerText(), /не записывается в прогресс/iu);
+  const fallbackAnswers = fallbackSession.page.locator('[data-reading-kind="task10"] [data-reading-answer]');
+  assert.equal(await fallbackAnswers.count(), 2);
+  assert.equal(await fallbackSession.page.locator('[data-reading-heading]').count(), 3);
+  await fallbackAnswers.nth(0).selectOption('1');
+  await fallbackAnswers.nth(1).selectOption('2');
+  await fallbackSession.page.getByRole('button', { name: 'Завершить тренировку' }).click();
+  assert.match(await fallbackSession.page.locator('#r_area').innerText(), /Технический результат: 2 из 2/u);
+  assert.match(await fallbackSession.page.locator('#r_area').innerText(), /Официальная шкала и прогресс не применяются/u);
+  const afterFallback = await fallbackSession.page.evaluate(() => JSON.stringify(window.S.readingPilot?.history || null));
+  assert.equal(afterFallback, beforeFallback);
+  await fallbackSession.context.close();
+
+  console.log('Reading 2 Chromium E2E passed.');
+} finally {
+  if (browser) await browser.close();
+  await stopProcess(child);
+  if (temporaryDirectory) await fs.rm(temporaryDirectory, { recursive: true, force: true });
+}

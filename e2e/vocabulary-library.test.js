@@ -69,7 +69,32 @@ try {
   await page.locator('#scr1.on').waitFor({state:'visible',timeout:5_000});
   await page.getByRole('button', { name: 'Чтение', exact: true }).press('Enter');
   await page.locator('#scr7.on').waitFor();
-  await page.getByRole('button', { name: 'Полное понимание' }).press('Enter');
+  await page.getByRole('heading', { name: 'Каталог чтения' }).waitFor({ timeout: 8_000 });
+  await page.evaluate(async () => {
+    const catalog = await window.EasyBoostReading.loadPilotCatalog();
+    let history = window.S.readingPilot.history;
+    const keep = new Set([
+      'reading-pilot-v1.task10.school-volunteers',
+      'reading-pilot-v1.task10.useful-technology',
+    ]);
+    for (const [index, set] of catalog.sets.filter((item) => item.kind === 'task10' && !keep.has(item.id)).entries()) {
+      history = window.EasyBoostReading.recordAttempt('vocabulary-sync-user', history, set, {
+        attemptId: `vocabulary-seed-${index}`, score: 7, maxScore: 7,
+        attemptedAt: 1_700_000_000_000 + index, durationMs: 1, source: 'catalog',
+      });
+    }
+    window.S.readingPilot.history = history;
+  });
+  await page.getByRole('button', { name: 'Начать Task 10' }).press('Enter');
+  const volunteerInReading = page.locator('#r_area button[data-w="volunteer"]').first();
+  await volunteerInReading.press('Enter');
+  await page.locator('#r_pop').waitFor();
+  await page.locator('#r_pop button[onclick="r_add(\'know\')"]').press('Enter');
+  await volunteerInReading.press('Enter');
+  await page.locator('#r_pop button[onclick="r_add(\'know\')"]').press('Enter');
+
+  await page.getByRole('button', { name: 'К каталогу' }).press('Enter');
+  await page.getByRole('button', { name: 'Начать Task 10' }).press('Enter');
   const manyInReading = page.locator('#r_area button[data-w="many"]').first();
   await manyInReading.press('Enter');
   await page.locator('#r_tr').getByText(/many|многие/u).waitFor();
@@ -77,13 +102,6 @@ try {
   await manyInReading.press('Enter');
   await page.getByRole('button', { name: '+ Учить', exact: true }).press('Enter');
   await manyInReading.press('Enter');
-  await page.locator('#r_pop button[onclick="r_add(\'know\')"]').press('Enter');
-
-  const volunteerInReading = page.locator('#r_area button[data-w="volunteer"]').first();
-  await volunteerInReading.press('Enter');
-  await page.locator('#r_pop').waitFor();
-  await page.locator('#r_pop button[onclick="r_add(\'know\')"]').press('Enter');
-  await volunteerInReading.press('Enter');
   await page.locator('#r_pop button[onclick="r_add(\'know\')"]').press('Enter');
   const readingCards = await page.evaluate(() => ({
     cards: window.S.personalWords,
@@ -187,14 +205,14 @@ try {
   assert.equal(await page.locator('#w_library_status').getAttribute('aria-live'), 'polite');
 
   await page.evaluate(() => window.wClearLibraryFilters());
-  await page.getByRole('searchbox', { name: 'Поиск по слову или переводу' }).fill('gap year before university');
+  await page.getByRole('searchbox', { name: 'Поиск по слову или переводу' }).fill('many pupils fear making mistakes');
   const contextualPersonal = page.locator('.vocab-source-personal').filter({ hasText: 'many' });
   assert.equal(await contextualPersonal.count(), 1);
   await contextualPersonal.locator('.vocab-word-open').press('Enter');
   await page.getByRole('heading', { name: 'many' }).waitFor();
   assert.equal(await page.getByText('Часть речи не указана').count(), 1);
   assert.equal(await page.locator('.vocab-example p[lang="en"]', {
-    hasText: 'Many British students take a gap year before university.',
+    hasText: 'At first many pupils fear making mistakes; after several calls, they speak more freely and ask better follow-up questions.',
   }).count(), 1);
   assert.equal(await page.getByRole('button', { name: 'Удалить личную карточку' }).count(), 1);
   const progressBeforeManyDelete = await page.evaluate(() => JSON.stringify(window.S.srs.many));
