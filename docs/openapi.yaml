@@ -56,6 +56,58 @@ paths:
       responses:
         '200': { description: Pending or authenticated state }
         '429': { $ref: '#/components/responses/RateLimited' }
+  /api/v1/speaking/pronunciation-assessments/status:
+    get:
+      summary: Read Azure pronunciation availability and the current monthly seconds ledger
+      description: Requires an active subscription. Local recording and playback do not call this paid assessment path and consume zero seconds. Missing configuration or the optional official SDK is returned as an honest unavailable state.
+      responses:
+        '200':
+          description: Bounded provider state and authoritative Base/Premium monthly quota
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SpeakingPronunciationStatus' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/speaking/task-1/sessions/{sessionId}/pronunciation-assessment:
+    post:
+      summary: Assess one owner-bound task 1 recording with the server-owned reference text
+      description: The server loads the pinned task text and never accepts reference text, rubric, tariff or provider settings from the client. The current production SDK seam accepts validated mono 16-bit PCM WAV at 16 kHz only; encoded WebM/MP4/MP3/Ogg requires a separately verified transcoder and is rejected before reservation. Duration is derived from the WAV data chunk, checked against the header and the server-owned 90-second task bound. A reservation is created atomically before Azure starts. Timeout or provider error after continuous recognition starts conservatively bills the full reservation, while a pre-start failure releases it. A five-minute lease reconciles interrupted pre-start work to a canonical zero-bill release and interrupted post-start work to a canonical full-reservation settlement. Exact idempotent replay returns that canonical result without a second charge.
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, format: uuid }
+        - in: header
+          name: X-Speech-Locale
+          required: true
+          schema: { type: string, enum: [en-GB, en-US] }
+        - in: header
+          name: X-Audio-Duration-Seconds
+          required: true
+          schema: { type: number, minimum: 1, maximum: 90 }
+      requestBody:
+        required: true
+        content:
+          audio/wav: { schema: { type: string, format: binary, maxLength: 10485760, x-maxBytes: 10485760 } }
+      responses:
+        '200':
+          description: Bounded normalized result, billing settlement and remaining quota; never raw provider payload, credentials or audio
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SpeakingPronunciationAssessment' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Session not found for this learner }
+        '409': { description: Idempotency key conflict or incompatible catalog revision }
+        '413': { description: Audio exceeds the configured 10 MiB ceiling }
+        '415': { description: Unsupported audio MIME type }
+        '429': { description: Monthly provider seconds exhausted; local recording remains available }
+        '503': { description: Azure configuration or the optional official SDK is unavailable }
   /api/v1/speaking/task-1/sessions:
     post:
       summary: Assign one server-owned Speaking task 1 text to the current learner
@@ -1756,6 +1808,141 @@ components:
       in: cookie
       name: eb_token
   schemas:
+    SpeakingPronunciationQuota:
+      type: object
+      required: [tier, periodStart, limitSeconds, usedSeconds, heldSeconds, remainingSeconds]
+      properties:
+        tier: { type: string, enum: [base, premium] }
+        periodStart: { type: string, format: date-time }
+        limitSeconds: { type: integer, enum: [3600, 14400] }
+        usedSeconds: { type: integer, minimum: 0, maximum: 14400 }
+        heldSeconds: { type: integer, minimum: 0, maximum: 14400 }
+        remainingSeconds: { type: integer, minimum: 0, maximum: 14400 }
+      additionalProperties: false
+    SpeakingPronunciationProviderStatus:
+      type: object
+      required: [available, provider, reason]
+      properties:
+        available: { type: boolean }
+        provider: { type: string, enum: [azure-speech, fake-azure] }
+        reason:
+          type: string
+          nullable: true
+          enum: [provider_not_configured, sdk_not_installed, provider_unavailable, null]
+      additionalProperties: false
+    SpeakingPronunciationStatus:
+      type: object
+      required: [provider, quota]
+      properties:
+        provider: { $ref: '#/components/schemas/SpeakingPronunciationProviderStatus' }
+        quota: { $ref: '#/components/schemas/SpeakingPronunciationQuota' }
+      additionalProperties: false
+    SpeakingPronunciationPhoneme:
+      type: object
+      required: [name, accuracyScore]
+      description: For en-GB the acoustic score may be present while name remains null; IPA and candidates are en-US-only and omitted.
+      properties:
+        name: { type: string, nullable: true, maxLength: 24 }
+        accuracyScore: { type: number, nullable: true, minimum: 0, maximum: 100 }
+        ipa: { type: string, nullable: true, maxLength: 24 }
+        candidates:
+          type: array
+          maxItems: 5
+          items:
+            type: object
+            required: [name, score]
+            properties:
+              name: { type: string, maxLength: 24 }
+              score: { type: number, nullable: true, minimum: 0, maximum: 100 }
+            additionalProperties: false
+      additionalProperties: false
+    SpeakingPronunciationWord:
+      type: object
+      required: [text, offsetSeconds, durationSeconds, accuracyScore, errorType, phonemes]
+      properties:
+        text: { type: string, maxLength: 120 }
+        offsetSeconds: { type: number, nullable: true, minimum: 0 }
+        durationSeconds: { type: number, nullable: true, minimum: 0 }
+        accuracyScore: { type: number, nullable: true, minimum: 0, maximum: 100 }
+        errorType: { type: string, enum: [none, omission, insertion, mispronunciation, unexpected_break, missing_break, monotone, unknown] }
+        phonemes:
+          type: array
+          maxItems: 24
+          items: { $ref: '#/components/schemas/SpeakingPronunciationPhoneme' }
+        syllables:
+          description: en-US-only; omitted for en-GB.
+          type: array
+          maxItems: 16
+          items:
+            type: object
+            required: [text, offsetSeconds, durationSeconds, accuracyScore]
+            properties:
+              text: { type: string, maxLength: 80 }
+              offsetSeconds: { type: number, nullable: true, minimum: 0 }
+              durationSeconds: { type: number, nullable: true, minimum: 0 }
+              accuracyScore: { type: number, nullable: true, minimum: 0, maximum: 100 }
+            additionalProperties: false
+      additionalProperties: false
+    SpeakingPronunciationAssessment:
+      type: object
+      required: [assessment, billing, quota]
+      properties:
+        assessment:
+          type: object
+          required: [status]
+          properties:
+            status:
+              description: partial means either provider interruption or a settled response whose bounded word details were truncated; inspect isFinal and quality.warnings.
+              type: string
+              enum: [success, low_quality, partial, timeout, unavailable, processing]
+            isFinal:
+              description: False only when provider recognition itself was interrupted; a detail-truncated settled result is partial and final.
+              type: boolean
+            provider: { type: string, enum: [azure-speech, fake-azure] }
+            providerVersion: { type: string, maxLength: 80 }
+            locale: { type: string, enum: [en-GB, en-US] }
+            mode: { type: string, enum: [scripted, unscripted] }
+            transcript: { type: string, maxLength: 10000 }
+            processedDurationSeconds: { type: number, minimum: 0, maximum: 180 }
+            confidence: { type: number, nullable: true, minimum: 0, maximum: 100 }
+            overallScore: { type: number, nullable: true, minimum: 0, maximum: 100 }
+            accuracyScore: { type: number, nullable: true, minimum: 0, maximum: 100 }
+            fluencyScore: { type: number, nullable: true, minimum: 0, maximum: 100 }
+            completenessScore: { type: number, nullable: true, minimum: 0, maximum: 100 }
+            prosody:
+              type: object
+              required: [available, score]
+              properties:
+                available: { type: boolean }
+                score: { type: number, nullable: true, minimum: 0, maximum: 100 }
+                reason: { type: string, enum: [locale_not_supported] }
+              additionalProperties: false
+            words:
+              type: array
+              maxItems: 500
+              items: { $ref: '#/components/schemas/SpeakingPronunciationWord' }
+            quality:
+              type: object
+              required: [acceptable, warnings]
+              properties:
+                acceptable: { type: boolean }
+                warnings: { type: array, maxItems: 12, items: { type: string, maxLength: 80 } }
+              additionalProperties: false
+            available: { type: boolean }
+            reason: { type: string, maxLength: 80 }
+            retryable: { type: boolean }
+          additionalProperties: false
+        billing:
+          type: object
+          required: [assessmentId, reservedSeconds, billableSeconds, conservative]
+          properties:
+            assessmentId: { type: string, format: uuid, nullable: true }
+            reservedSeconds: { type: integer, minimum: 0, maximum: 180 }
+            billableSeconds: { type: integer, minimum: 0, maximum: 180 }
+            conservative: { type: boolean }
+          additionalProperties: false
+        quota: { $ref: '#/components/schemas/SpeakingPronunciationQuota' }
+      additionalProperties: false
     SpeakingTask1Task:
       type: object
       required: [id, revision, taskType, cefr, topic, preparationSeconds, responseSeconds, maxScore, instruction, text]

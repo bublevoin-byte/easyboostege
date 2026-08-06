@@ -7,7 +7,7 @@ const latencySamples = [];
 const statusCounts = new Map();
 const routeCounts = new Map();
 const dependencyCounts = new Map();
-const allowedDependencies = new Set(['database', 'telegram', 'ai', 'stt', 'tts']);
+const allowedDependencies = new Set(['database', 'telegram', 'ai', 'stt', 'tts', 'speaking_pronunciation']);
 const allowedOutcomes = new Set(['success', 'error', 'fallback']);
 
 function boundedRoute(route) {

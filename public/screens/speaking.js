@@ -76,6 +76,11 @@ function task4RecoveryPointerInvalid(error){return Number(error&&error.status)==
 function adaptiveSpeakingLock(){try{var active=adaptiveRuntimeSnapshot().active;return active&&active.module==='speaking'?active:null}catch(_){return null}}
 function launchAdaptiveSpeakingLock(lock){var task=lock&&adaptiveSpeakingTask(lock.contentRef);return Boolean(task&&launchSpeakingTask(task.taskNumber,lock.contentRef))}
 function initSpeaking(){if(!S)return;var lock=adaptiveSpeakingLock();spStopAll();spReleaseRecording();spDisposeTask1Flow();spDisposeTask2Flow();spDisposeTask3Flow();spDisposeTask4Flow();SP=null;spSync();if(lock&&launchAdaptiveSpeakingLock(lock))return;spHub()}
+async function spLoadPronunciationStatus(){var box=document.getElementById('speaking_pronunciation_status');if(!box)return;
+  try{var payload=await apiGet('/api/v1/speaking/pronunciation-assessments/status');var view=speakingModule.pronunciationStatusView(payload);box=document.getElementById('speaking_pronunciation_status');if(!box)return;
+    if(view.available){box.style.background='#EAF7F0';box.style.color='#1D6944';box.innerHTML='<b>Оценка произношения доступна</b><br><span style="font-size:11.5px;">Осталось '+spFmt(view.remainingSeconds)+' из '+spFmt(view.limitSeconds)+' в этом месяце · '+(view.tier==='premium'?'Premium':'Base')+'. Локальная запись и прослушивание не расходуют лимит.</span>';return}
+    box.style.background='#FFF4E6';box.style.color='#714515';box.innerHTML='<b>Оценка произношения пока недоступна</b><br><span style="font-size:11.5px;">Можно записывать и прослушивать ответы локально — это не расходует лимит.</span>'}
+  catch(_){box=document.getElementById('speaking_pronunciation_status');if(!box)return;box.style.background='#FFF4E6';box.style.color='#714515';box.innerHTML='<b>Оценка произношения пока недоступна</b><br><span style="font-size:11.5px;">Локальная запись и прослушивание не расходуют лимит.</span>'}}
 function spHub(){var area=document.getElementById('s9_area');if(!area)return;
   var lock=adaptiveSpeakingLock();if(lock&&launchAdaptiveSpeakingLock(lock))return;
   var r=spSt();var GA=0;function ga(){return 'animation:win .34s '+((GA++)*0.06)+'s cubic-bezier(.25,.75,.35,1) both;'}
@@ -94,7 +99,7 @@ function spHub(){var area=document.getElementById('s9_area');if(!area)return;
     +'<div style="font-weight:600;font-size:12px;color:rgba(255,255,255,.62);margin-top:2px;">'+(S.speakingFullSessionId?'есть незавершённая сессия · максимум 20':'4 задания подряд · максимум 20 · оценка позже')+'</div></div>'
     +'<span style="flex:none;background:linear-gradient(145deg,#FFC861,#F2683F);border-radius:14px;width:42px;height:42px;display:grid;place-items:center;box-shadow:0 6px 12px rgba(242,104,63,.4),inset 0 2px 3px rgba(255,255,255,.5);">'
     +'<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span></div></button>';
-  area.innerHTML=exCard+[1,2,3,4].map(function(t){var c=SP_CONF[t];
+  area.innerHTML=exCard+'<div id="speaking_pronunciation_status" class="clayCard" role="status" aria-live="polite" aria-atomic="true" style="'+ga()+'margin-bottom:12px;padding:13px 15px;background:#F4F1EA;color:#514B43;font-weight:650;font-size:12.5px;line-height:1.45;">Проверяем доступность оценки произношения…<br><span style="font-size:11.5px;">Локальная запись и прослушивание не расходуют лимит.</span></div>'+[1,2,3,4].map(function(t){var c=SP_CONF[t];
     return '<button type="button" class="clayCard sq clk" onclick="spOpen('+t+')" style="'+ga()+'width:100%;border:0;text-align:left;font:inherit;padding:16px 18px;margin-bottom:12px;cursor:pointer;">'
       +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'
       +'<div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:15.5px;color:#2B2B2B;">'+c.name+'</div>'
@@ -103,7 +108,7 @@ function spHub(){var area=document.getElementById('s9_area');if(!area)return;
    +'<div class="clayCard" style="'+ga()+'display:flex;align-items:center;gap:12px;padding:13px 15px;">'
     +'<span style="flex:none;width:38px;height:38px;border-radius:13px;background:#FBE9EF;display:grid;place-items:center;"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#D4537E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3Z"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg></span>'
     +'<div style="font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.45;">Сначала подготовка по таймеру, потом запись — тайминги как на настоящем экзамене</div></div>';
-  setTxt('s9_today','4 задания');spGen()}
+  setTxt('s9_today','4 задания');spLoadPronunciationStatus();spGen()}
 function spPool(t){var ai=(S&&S.spkAi&&S.spkAi['p'+t])||[];return speakingModule.pool([SP1,SP2,SP3,SP4][t-1],ai)}
 function spSet(t){var k='spIdx'+t;S[k]=(S[k]||0);return speakingModule.select(spPool(t),S[k])}
 function spNextSet(t){if((SP&&SP.adaptiveContentRef)||adaptiveSpeakingLock()){try{toast('В персональном занятии закреплён точный вариант задания')}catch(_){}return false}S['spIdx'+t]=(S['spIdx'+t]||0)+1;save();return true}

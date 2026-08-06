@@ -75,6 +75,16 @@ import {
   compareAdaptivePlanInputs,
 } from '../adaptive-learning/plan.js';
 import {
+  assertSpeakingAssessmentIdempotencyKey,
+  assertSpeakingAssessmentReservation,
+  interruptedSpeakingAssessmentResult,
+  SPEAKING_ASSESSMENT_LEASE_MS,
+  SpeakingAssessmentQuotaError,
+  speakingAssessmentExportDto,
+  speakingAssessmentPeriodStart,
+  speakingAssessmentQuotaView,
+} from '../speaking/assessment-quota.js';
+import {
   migrateFileWordProgress,
   wordProgressApiDto,
   wordProgressExportDto,
@@ -196,7 +206,7 @@ function sanitizeLegacyAdaptiveExecution(state, now = Date.now()) {
 
 export function createFileRepository(filePath) {
   let loaded = false;
-  let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], speaking_task1_sessions: [], speaking_task2_sessions: [], speaking_task3_sessions: [], speaking_task4_sessions: [], speaking_full_sessions: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, subscription_entitlements: {}, voice_tutor_sessions: [], voice_tutor_recoveries: [], voice_tutor_repeats: [], voice_tutor_repeat_attempts: [], voice_tutor_reports: [], rule_cards: [], payment_requests: {}, subscription_events: [], adaptive_learning_goals: [], adaptive_learning_profiles: {}, adaptive_learning_skill_estimates: {}, adaptive_learning_plan_revisions: [], adaptive_learning_sessions: [], adaptive_learning_execution_claims: [], adaptive_learning_session_events: [], adaptive_learning_session_mutations: [], adaptive_diagnostic_sessions: [], adaptive_diagnostic_start_claims: [], adaptive_diagnostic_responses: [] };
+  let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], speaking_task1_sessions: [], speaking_task2_sessions: [], speaking_task3_sessions: [], speaking_task4_sessions: [], speaking_full_sessions: [], speaking_assessments: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, subscription_entitlements: {}, voice_tutor_sessions: [], voice_tutor_recoveries: [], voice_tutor_repeats: [], voice_tutor_repeat_attempts: [], voice_tutor_reports: [], rule_cards: [], payment_requests: {}, subscription_events: [], adaptive_learning_goals: [], adaptive_learning_profiles: {}, adaptive_learning_skill_estimates: {}, adaptive_learning_plan_revisions: [], adaptive_learning_sessions: [], adaptive_learning_execution_claims: [], adaptive_learning_session_events: [], adaptive_learning_session_mutations: [], adaptive_diagnostic_sessions: [], adaptive_diagnostic_start_claims: [], adaptive_diagnostic_responses: [] };
   let writeQueue = Promise.resolve();
   let coordinatedMutationQueue = Promise.resolve();
   let paymentQueue = Promise.resolve();
@@ -222,6 +232,12 @@ export function createFileRepository(filePath) {
           speaking_task3_sessions: Array.isArray(parsed.speaking_task3_sessions) ? parsed.speaking_task3_sessions : [],
           speaking_task4_sessions: Array.isArray(parsed.speaking_task4_sessions) ? parsed.speaking_task4_sessions : [],
           speaking_full_sessions: Array.isArray(parsed.speaking_full_sessions) ? parsed.speaking_full_sessions : [],
+          speaking_assessments: Array.isArray(parsed.speaking_assessments)
+            ? parsed.speaking_assessments.map((row) => ({
+              ...row,
+              dispatch_started_at: row.dispatch_started_at
+                || (['started', 'finalized'].includes(row.status) ? row.provider_started_at : null),
+            })) : [],
           generated_tasks: Array.isArray(parsed.generated_tasks) ? parsed.generated_tasks : [],
           task_bank: Array.isArray(parsed.task_bank) ? parsed.task_bank : [],
           task_deliveries: Array.isArray(parsed.task_deliveries) ? parsed.task_deliveries : [],
@@ -589,6 +605,250 @@ export function createFileRepository(filePath) {
   }
 
   function serializeVoiceTutorMutation(run) { return serializeCoordinatedMutation(run); }
+
+  function speakingAssessmentRows(username) {
+    return state.speaking_assessments.filter((row) => row.username === username);
+  }
+
+  function speakingAssessmentQuota(username, now) {
+    return speakingAssessmentQuotaView(speakingAssessmentRows(username), {
+      premium: hasVoiceTutorEntitlement(username, new Date(now).getTime()), now,
+    });
+  }
+
+  function publicSpeakingAssessment(row) {
+    return structuredClone(row);
+  }
+
+  function reconcileSpeakingAssessmentLeases(username, now) {
+    const instant = new Date(now);
+    speakingAssessmentPeriodStart(instant);
+    const cutoffMs = instant.getTime() - SPEAKING_ASSESSMENT_LEASE_MS;
+    let changed = false;
+    for (const row of speakingAssessmentRows(username)) {
+      if (row.status === 'reserved' && Date.parse(row.reserved_at) <= cutoffMs) {
+        row.status = 'released';
+        row.billable_seconds = 0;
+        row.released_at = instant.toISOString();
+        row.release_reason = 'process_interrupted_before_start';
+        row.result = interruptedSpeakingAssessmentResult(row, { processingStarted: false });
+        changed = true;
+      } else if (row.status === 'dispatching' && Date.parse(row.dispatch_started_at) <= cutoffMs) {
+        row.status = 'finalized';
+        row.billable_seconds = Number(row.reserved_seconds);
+        row.finalized_at = instant.toISOString();
+        row.result = interruptedSpeakingAssessmentResult(row, {
+          reason: 'process_interrupted_during_dispatch',
+        });
+        changed = true;
+      } else if (row.status === 'started' && Date.parse(row.provider_started_at) <= cutoffMs) {
+        row.status = 'finalized';
+        row.billable_seconds = Number(row.reserved_seconds);
+        row.finalized_at = instant.toISOString();
+        row.result = interruptedSpeakingAssessmentResult(row);
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  async function getSpeakingAssessmentQuota(username, { now = new Date() } = {}) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      if (!state.users[username]) throw new Error('USER_NOT_FOUND');
+      if (reconcileSpeakingAssessmentLeases(username, now)) await persist();
+      return speakingAssessmentQuota(username, now);
+    });
+  }
+
+  async function getSpeakingAssessmentReservation(username, idempotencyKey, { now = new Date() } = {}) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      if (!state.users[username]) throw new Error('USER_NOT_FOUND');
+      const key = assertSpeakingAssessmentIdempotencyKey(idempotencyKey);
+      if (reconcileSpeakingAssessmentLeases(username, now)) await persist();
+      const reservation = state.speaking_assessments.find((row) => (
+        row.username === username && row.idempotency_key === key
+      ));
+      return {
+        reservation: reservation ? publicSpeakingAssessment(reservation) : null,
+        quota: speakingAssessmentQuota(username, now),
+      };
+    });
+  }
+
+  async function reserveSpeakingAssessment(username, input) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      if (!state.users[username]) throw new Error('USER_NOT_FOUND');
+      const candidate = assertSpeakingAssessmentReservation(input);
+      if (reconcileSpeakingAssessmentLeases(username, candidate.now)) await persist();
+      const existing = state.speaking_assessments.find((row) => (
+        row.username === username && row.idempotency_key === candidate.idempotencyKey
+      ));
+      if (existing) {
+        if (existing.request_hash !== candidate.requestHash) {
+          throw new SpeakingAssessmentQuotaError('SPEAKING_ASSESSMENT_IDEMPOTENCY_CONFLICT');
+        }
+        return {
+          created: false,
+          reservation: publicSpeakingAssessment(existing),
+          quota: speakingAssessmentQuota(username, candidate.now),
+        };
+      }
+      const quota = speakingAssessmentQuota(username, candidate.now);
+      if (candidate.reservedSeconds > quota.remainingSeconds) {
+        throw new SpeakingAssessmentQuotaError('SPEAKING_ASSESSMENT_QUOTA_EXHAUSTED');
+      }
+      const row = {
+        id: candidate.id,
+        username,
+        idempotency_key: candidate.idempotencyKey,
+        request_hash: candidate.requestHash,
+        status: 'reserved',
+        locale: candidate.locale,
+        period_start: candidate.periodStart.toISOString(),
+        allowance_seconds: quota.limitSeconds,
+        reserved_seconds: candidate.reservedSeconds,
+        billable_seconds: null,
+        reserved_at: candidate.now.toISOString(),
+        dispatch_started_at: null,
+        provider_started_at: null,
+        finalized_at: null,
+        released_at: null,
+        release_reason: null,
+        result: null,
+      };
+      state.speaking_assessments.push(row);
+      await persist();
+      return {
+        created: true,
+        reservation: publicSpeakingAssessment(row),
+        quota: speakingAssessmentQuota(username, candidate.now),
+      };
+    });
+  }
+
+  async function dispatchSpeakingAssessment(username, idempotencyKey, { now = new Date() } = {}) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      const row = state.speaking_assessments.find((item) => (
+        item.username === username && item.idempotency_key === idempotencyKey
+      ));
+      if (!row) throw new SpeakingAssessmentQuotaError('SPEAKING_ASSESSMENT_RESERVATION_NOT_FOUND');
+      if (row.status === 'released') throw new SpeakingAssessmentQuotaError('SPEAKING_ASSESSMENT_ALREADY_RELEASED');
+      let dispatched = false;
+      if (row.status === 'reserved') {
+        const instant = new Date(now);
+        if (!Number.isFinite(instant.getTime())) throw new SpeakingAssessmentQuotaError('SPEAKING_ASSESSMENT_TIME_INVALID');
+        row.status = 'dispatching';
+        row.dispatch_started_at = instant.toISOString();
+        dispatched = true;
+        await persist();
+      }
+      return {
+        dispatched,
+        reservation: publicSpeakingAssessment(row),
+        quota: speakingAssessmentQuota(username, now),
+      };
+    });
+  }
+
+  async function startSpeakingAssessment(username, idempotencyKey, { now = new Date() } = {}) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      const row = state.speaking_assessments.find((item) => (
+        item.username === username && item.idempotency_key === idempotencyKey
+      ));
+      if (!row) throw new SpeakingAssessmentQuotaError('SPEAKING_ASSESSMENT_RESERVATION_NOT_FOUND');
+      if (row.status === 'released') throw new SpeakingAssessmentQuotaError('SPEAKING_ASSESSMENT_ALREADY_RELEASED');
+      if (row.status === 'reserved') throw new SpeakingAssessmentQuotaError('SPEAKING_ASSESSMENT_NOT_DISPATCHED');
+      let started = false;
+      if (row.status === 'dispatching') {
+        const instant = new Date(now);
+        if (!Number.isFinite(instant.getTime())) throw new SpeakingAssessmentQuotaError('SPEAKING_ASSESSMENT_TIME_INVALID');
+        row.status = 'started';
+        row.provider_started_at = instant.toISOString();
+        started = true;
+        await persist();
+      }
+      return {
+        started,
+        reservation: publicSpeakingAssessment(row),
+        quota: speakingAssessmentQuota(username, now),
+      };
+    });
+  }
+
+  async function finalizeSpeakingAssessment(username, idempotencyKey, {
+    billableSeconds, result, now = new Date(),
+  } = {}) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      const row = state.speaking_assessments.find((item) => (
+        item.username === username && item.idempotency_key === idempotencyKey
+      ));
+      if (!row) throw new SpeakingAssessmentQuotaError('SPEAKING_ASSESSMENT_RESERVATION_NOT_FOUND');
+      if (row.status === 'finalized') return {
+        finalized: false,
+        reservation: publicSpeakingAssessment(row),
+        quota: speakingAssessmentQuota(username, now),
+      };
+      if (row.status !== 'started') throw new SpeakingAssessmentQuotaError('SPEAKING_ASSESSMENT_NOT_STARTED');
+      const seconds = Number(billableSeconds);
+      const instant = new Date(now);
+      if (!Number.isInteger(seconds) || seconds < 0 || seconds > Number(row.reserved_seconds)
+        || !result || typeof result !== 'object' || Array.isArray(result)
+        || !Number.isFinite(instant.getTime())) {
+        throw new SpeakingAssessmentQuotaError('SPEAKING_ASSESSMENT_FINALIZATION_INVALID');
+      }
+      row.status = 'finalized';
+      row.billable_seconds = seconds;
+      row.result = structuredClone(result);
+      row.finalized_at = instant.toISOString();
+      await persist();
+      return {
+        finalized: true,
+        reservation: publicSpeakingAssessment(row),
+        quota: speakingAssessmentQuota(username, instant),
+      };
+    });
+  }
+
+  async function releaseSpeakingAssessment(username, idempotencyKey, {
+    reason, result, now = new Date(),
+  } = {}) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      const row = state.speaking_assessments.find((item) => (
+        item.username === username && item.idempotency_key === idempotencyKey
+      ));
+      if (!row) throw new SpeakingAssessmentQuotaError('SPEAKING_ASSESSMENT_RESERVATION_NOT_FOUND');
+      if (row.status === 'released' || row.status === 'finalized') return {
+        released: false,
+        reservation: publicSpeakingAssessment(row),
+        quota: speakingAssessmentQuota(username, now),
+      };
+      if (!['reserved', 'dispatching'].includes(row.status)
+        || !/^[a-z][a-z0-9_]{0,63}$/u.test(String(reason || ''))
+        || !result || typeof result !== 'object' || Array.isArray(result)) {
+        throw new SpeakingAssessmentQuotaError('SPEAKING_ASSESSMENT_RELEASE_INVALID');
+      }
+      const instant = new Date(now);
+      if (!Number.isFinite(instant.getTime())) throw new SpeakingAssessmentQuotaError('SPEAKING_ASSESSMENT_TIME_INVALID');
+      row.status = 'released';
+      row.billable_seconds = 0;
+      row.released_at = instant.toISOString();
+      row.release_reason = String(reason);
+      row.result = structuredClone(result);
+      await persist();
+      return {
+        released: true,
+        reservation: publicSpeakingAssessment(row),
+        quota: speakingAssessmentQuota(username, instant),
+      };
+    });
+  }
 
   function publicVoiceTutorSession(session) {
     return {
@@ -3353,6 +3613,9 @@ export function createFileRepository(filePath) {
       speaking_full_sessions: state.speaking_full_sessions
         .filter((item) => item.username === username)
         .map(({ username: owner, submission_key, ...item }) => item),
+      speaking_assessments: state.speaking_assessments
+        .filter((item) => item.username === username)
+        .map(speakingAssessmentExportDto),
       generated_tasks: state.generated_tasks.filter((item) => item.username === username).map(({ request_hash, username: owner, ...item }) => item),
       module_attempts: state.module_attempts.filter((item) => item.username === username),
       progress_summary: Object.values(state.progress_summary[username] || {}),
@@ -3423,6 +3686,7 @@ export function createFileRepository(filePath) {
       state.speaking_task3_sessions = state.speaking_task3_sessions.filter((item) => item.username !== username);
       state.speaking_task4_sessions = state.speaking_task4_sessions.filter((item) => item.username !== username);
       state.speaking_full_sessions = state.speaking_full_sessions.filter((item) => item.username !== username);
+      state.speaking_assessments = state.speaking_assessments.filter((item) => item.username !== username);
       state.generated_tasks = state.generated_tasks.filter((item) => item.username !== username);
       state.module_attempts = state.module_attempts.filter((item) => item.username !== username);
       delete state.progress_summary[username];
@@ -3518,6 +3782,13 @@ export function createFileRepository(filePath) {
     activateTrial,
     getSub,
     setEntitlement,
+    getSpeakingAssessmentQuota,
+    getSpeakingAssessmentReservation,
+    reserveSpeakingAssessment,
+    dispatchSpeakingAssessment,
+    startSpeakingAssessment,
+    finalizeSpeakingAssessment,
+    releaseSpeakingAssessment,
     getVoiceTutorAccess,
     reserveVoiceTutorSession,
     issueVoiceTutorProxyTicket,

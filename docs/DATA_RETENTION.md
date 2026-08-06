@@ -1,5 +1,9 @@
 # Жизненный цикл данных
 
+## Speaking pronunciation assessments
+
+The quota/billing ledger is retained while the account exists. It contains locale, state, reserved/billable seconds, bounded normalized transcript/scores/word timing/phoneme facts, provider/version provenance, release or interruption reason, and UTC reservation/dispatch/provider-start/settlement timestamps. A pre-start release retains only its bounded canonical outcome for exact replay; a stale dispatch or post-start recovery retains the bounded conservative settlement. It never stores the audio bytes or full provider payload. User export includes the allowlisted normalized assessment and billing facts but omits the idempotency key and request fingerprint. Account deletion removes file-ledger rows and PostgreSQL rows cascade from `users`.
+
 | Данные | Хранение | Удаление |
 |---|---|---|
 | Коды Telegram и истёкшие сессии | только до использования или истечения срока | удаляются автоматически при обращении к хранилищу |

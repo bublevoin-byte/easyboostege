@@ -72,6 +72,15 @@ import {
   assertAdaptivePlanStabilityTransition,
   compareAdaptivePlanInputs,
 } from '../adaptive-learning/plan.js';
+import {
+  assertSpeakingAssessmentIdempotencyKey,
+  assertSpeakingAssessmentReservation,
+  SPEAKING_ASSESSMENT_LEASE_MS,
+  SpeakingAssessmentQuotaError,
+  speakingAssessmentExportDto,
+  SPEAKING_ASSESSMENT_LIMITS,
+  speakingAssessmentPeriodStart,
+} from '../speaking/assessment-quota.js';
 import { hashAuthCode, normalizeUsername, normalizeVoiceTutorDeliveryMetadata, normalizeVoiceTutorProxyHash, subscriptionView, VoiceTutorError, voiceTutorAccessView, voiceTutorBillableSeconds, voiceTutorProxyUsage, voiceTutorQuotaPeriods, voiceTutorReservationSeconds } from './shared.js';
 import { transitionPedagogicalState } from '../voice-tutor/state-machine.js';
 import { transitionRuleCardReview } from '../voice-tutor/rule-card.js';
@@ -4286,8 +4295,337 @@ export function createPostgresRepository(connectionString, {
     return result.rowCount === 1;
   }
 
+  function mapSpeakingAssessment(row) {
+    if (!row) return null;
+    return {
+      ...row,
+      allowance_seconds: Number(row.allowance_seconds),
+      reserved_seconds: Number(row.reserved_seconds),
+      billable_seconds: row.billable_seconds == null ? null : Number(row.billable_seconds),
+      period_start: new Date(row.period_start).toISOString(),
+      reserved_at: new Date(row.reserved_at).toISOString(),
+      dispatch_started_at: row.dispatch_started_at ? new Date(row.dispatch_started_at).toISOString() : null,
+      provider_started_at: row.provider_started_at ? new Date(row.provider_started_at).toISOString() : null,
+      finalized_at: row.finalized_at ? new Date(row.finalized_at).toISOString() : null,
+      released_at: row.released_at ? new Date(row.released_at).toISOString() : null,
+    };
+  }
+
+  async function readSpeakingAssessmentQuota(queryable, username, now = new Date()) {
+    const instant = new Date(now);
+    const periodStart = speakingAssessmentPeriodStart(instant);
+    const [access, usage] = await Promise.all([
+      queryable.query(
+        `SELECT EXISTS (
+           SELECT 1 FROM subscription_entitlements entitlement
+           WHERE entitlement.username = users.username AND entitlement.entitlement = 'voice_tutor'
+             AND entitlement.starts_at <= $2
+             AND (entitlement.ends_at IS NULL OR entitlement.ends_at > $2)
+         ) AND users.subscription_until > $2 AS premium
+         FROM users WHERE username = $1`,
+        [username, instant],
+      ),
+      queryable.query(
+        `SELECT
+           COALESCE(SUM(billable_seconds) FILTER (WHERE status = 'finalized'), 0) AS used_seconds,
+           COALESCE(SUM(reserved_seconds) FILTER (WHERE status IN ('reserved', 'dispatching', 'started')), 0) AS held_seconds
+         FROM speaking_pronunciation_assessments
+         WHERE username = $1 AND period_start = $2`,
+        [username, periodStart],
+      ),
+    ]);
+    if (!access.rowCount) throw new Error('USER_NOT_FOUND');
+    const tier = access.rows[0].premium ? 'premium' : 'base';
+    const limitSeconds = SPEAKING_ASSESSMENT_LIMITS[tier];
+    const usedSeconds = Number(usage.rows[0].used_seconds);
+    const heldSeconds = Number(usage.rows[0].held_seconds);
+    return {
+      tier,
+      periodStart: periodStart.toISOString(),
+      limitSeconds,
+      usedSeconds,
+      heldSeconds,
+      remainingSeconds: Math.max(0, limitSeconds - usedSeconds - heldSeconds),
+    };
+  }
+
+  async function reconcileSpeakingAssessmentLeases(client, username, now) {
+    const instant = new Date(now);
+    speakingAssessmentPeriodStart(instant);
+    const cutoff = new Date(instant.getTime() - SPEAKING_ASSESSMENT_LEASE_MS);
+    await client.query(
+      `UPDATE speaking_pronunciation_assessments
+       SET status = 'released', billable_seconds = 0, released_at = $2,
+           release_reason = 'process_interrupted_before_start',
+           result = jsonb_build_object(
+             'assessment', jsonb_build_object(
+               'status', 'unavailable', 'available', false,
+               'reason', 'process_interrupted_before_start', 'retryable', true
+             ),
+             'billing', jsonb_build_object(
+               'assessmentId', id::text, 'reservedSeconds', reserved_seconds,
+               'billableSeconds', 0, 'conservative', false
+             )
+           )
+       WHERE username = $1 AND status = 'reserved' AND reserved_at <= $3`,
+      [username, instant, cutoff],
+    );
+    await client.query(
+      `UPDATE speaking_pronunciation_assessments
+       SET status = 'finalized', billable_seconds = reserved_seconds, finalized_at = $2,
+           result = jsonb_build_object(
+             'assessment', jsonb_build_object(
+               'status', 'unavailable', 'available', false,
+               'reason', 'process_interrupted_during_dispatch', 'retryable', true
+             ),
+             'billing', jsonb_build_object(
+               'assessmentId', id::text, 'reservedSeconds', reserved_seconds,
+               'billableSeconds', reserved_seconds, 'conservative', true
+             )
+           )
+       WHERE username = $1 AND status = 'dispatching' AND dispatch_started_at <= $3`,
+      [username, instant, cutoff],
+    );
+    await client.query(
+      `UPDATE speaking_pronunciation_assessments
+       SET status = 'finalized', billable_seconds = reserved_seconds, finalized_at = $2,
+           result = jsonb_build_object(
+             'assessment', jsonb_build_object(
+               'status', 'unavailable', 'available', false,
+               'reason', 'process_interrupted_after_start', 'retryable', true
+             ),
+             'billing', jsonb_build_object(
+               'assessmentId', id::text, 'reservedSeconds', reserved_seconds,
+               'billableSeconds', reserved_seconds, 'conservative', true
+             )
+           )
+       WHERE username = $1 AND status = 'started' AND provider_started_at <= $3`,
+      [username, instant, cutoff],
+    );
+  }
+
+  async function getSpeakingAssessmentQuota(username, { now = new Date() } = {}) {
+    return withSpeakingAssessmentTransaction(username, async (client) => {
+      await reconcileSpeakingAssessmentLeases(client, username, now);
+      return readSpeakingAssessmentQuota(client, username, now);
+    });
+  }
+
+  async function getSpeakingAssessmentReservation(username, idempotencyKey, { now = new Date() } = {}) {
+    const key = assertSpeakingAssessmentIdempotencyKey(idempotencyKey);
+    return withSpeakingAssessmentTransaction(username, async (client) => {
+      await reconcileSpeakingAssessmentLeases(client, username, now);
+      const reservation = await client.query(
+        `SELECT * FROM speaking_pronunciation_assessments
+         WHERE username = $1 AND idempotency_key = $2`,
+        [username, key],
+      );
+      return {
+        reservation: mapSpeakingAssessment(reservation.rows[0]),
+        quota: await readSpeakingAssessmentQuota(client, username, now),
+      };
+    });
+  }
+
+  async function withSpeakingAssessmentTransaction(username, run) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const owner = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+      if (!owner.rowCount) throw new Error('USER_NOT_FOUND');
+      const result = await run(client);
+      await client.query('COMMIT');
+      return result;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async function reserveSpeakingAssessment(username, input) {
+    const candidate = assertSpeakingAssessmentReservation(input);
+    return withSpeakingAssessmentTransaction(username, async (client) => {
+      await reconcileSpeakingAssessmentLeases(client, username, candidate.now);
+      const existing = await client.query(
+        `SELECT * FROM speaking_pronunciation_assessments
+         WHERE username = $1 AND idempotency_key = $2`,
+        [username, candidate.idempotencyKey],
+      );
+      if (existing.rowCount) {
+        if (existing.rows[0].request_hash !== candidate.requestHash) {
+          throw new SpeakingAssessmentQuotaError('SPEAKING_ASSESSMENT_IDEMPOTENCY_CONFLICT');
+        }
+        return {
+          created: false,
+          reservation: mapSpeakingAssessment(existing.rows[0]),
+          quota: await readSpeakingAssessmentQuota(client, username, candidate.now),
+        };
+      }
+      const quota = await readSpeakingAssessmentQuota(client, username, candidate.now);
+      if (candidate.reservedSeconds > quota.remainingSeconds) {
+        throw new SpeakingAssessmentQuotaError('SPEAKING_ASSESSMENT_QUOTA_EXHAUSTED');
+      }
+      const inserted = await client.query(
+        `INSERT INTO speaking_pronunciation_assessments
+         (id, username, idempotency_key, request_hash, status, locale, period_start,
+          allowance_seconds, reserved_seconds, reserved_at)
+         VALUES ($1, $2, $3, $4, 'reserved', $5, $6, $7, $8, $9)
+         RETURNING *`,
+        [candidate.id, username, candidate.idempotencyKey, candidate.requestHash,
+          candidate.locale, candidate.periodStart, quota.limitSeconds,
+          candidate.reservedSeconds, candidate.now],
+      );
+      return {
+        created: true,
+        reservation: mapSpeakingAssessment(inserted.rows[0]),
+        quota: await readSpeakingAssessmentQuota(client, username, candidate.now),
+      };
+    });
+  }
+
+  async function dispatchSpeakingAssessment(username, idempotencyKey, { now = new Date() } = {}) {
+    return withSpeakingAssessmentTransaction(username, async (client) => {
+      const instant = new Date(now);
+      const current = await client.query(
+        `SELECT * FROM speaking_pronunciation_assessments
+         WHERE username = $1 AND idempotency_key = $2 FOR UPDATE`,
+        [username, idempotencyKey],
+      );
+      if (!current.rowCount) throw new SpeakingAssessmentQuotaError('SPEAKING_ASSESSMENT_RESERVATION_NOT_FOUND');
+      if (current.rows[0].status === 'released') throw new SpeakingAssessmentQuotaError('SPEAKING_ASSESSMENT_ALREADY_RELEASED');
+      let row = current.rows[0];
+      let dispatched = false;
+      if (row.status === 'reserved') {
+        const updated = await client.query(
+          `UPDATE speaking_pronunciation_assessments
+           SET status = 'dispatching', dispatch_started_at = $3
+           WHERE username = $1 AND idempotency_key = $2
+           RETURNING *`,
+          [username, idempotencyKey, instant],
+        );
+        row = updated.rows[0];
+        dispatched = true;
+      }
+      return {
+        dispatched,
+        reservation: mapSpeakingAssessment(row),
+        quota: await readSpeakingAssessmentQuota(client, username, instant),
+      };
+    });
+  }
+
+  async function startSpeakingAssessment(username, idempotencyKey, { now = new Date() } = {}) {
+    return withSpeakingAssessmentTransaction(username, async (client) => {
+      const instant = new Date(now);
+      const current = await client.query(
+        `SELECT * FROM speaking_pronunciation_assessments
+         WHERE username = $1 AND idempotency_key = $2 FOR UPDATE`,
+        [username, idempotencyKey],
+      );
+      if (!current.rowCount) throw new SpeakingAssessmentQuotaError('SPEAKING_ASSESSMENT_RESERVATION_NOT_FOUND');
+      if (current.rows[0].status === 'released') throw new SpeakingAssessmentQuotaError('SPEAKING_ASSESSMENT_ALREADY_RELEASED');
+      if (current.rows[0].status === 'reserved') throw new SpeakingAssessmentQuotaError('SPEAKING_ASSESSMENT_NOT_DISPATCHED');
+      let row = current.rows[0];
+      let started = false;
+      if (row.status === 'dispatching') {
+        const updated = await client.query(
+          `UPDATE speaking_pronunciation_assessments
+           SET status = 'started', provider_started_at = $3
+           WHERE username = $1 AND idempotency_key = $2
+           RETURNING *`,
+          [username, idempotencyKey, instant],
+        );
+        row = updated.rows[0];
+        started = true;
+      }
+      return {
+        started,
+        reservation: mapSpeakingAssessment(row),
+        quota: await readSpeakingAssessmentQuota(client, username, instant),
+      };
+    });
+  }
+
+  async function finalizeSpeakingAssessment(username, idempotencyKey, {
+    billableSeconds, result, now = new Date(),
+  } = {}) {
+    return withSpeakingAssessmentTransaction(username, async (client) => {
+      const instant = new Date(now);
+      const current = await client.query(
+        `SELECT * FROM speaking_pronunciation_assessments
+         WHERE username = $1 AND idempotency_key = $2 FOR UPDATE`,
+        [username, idempotencyKey],
+      );
+      if (!current.rowCount) throw new SpeakingAssessmentQuotaError('SPEAKING_ASSESSMENT_RESERVATION_NOT_FOUND');
+      if (current.rows[0].status === 'finalized') return {
+        finalized: false,
+        reservation: mapSpeakingAssessment(current.rows[0]),
+        quota: await readSpeakingAssessmentQuota(client, username, instant),
+      };
+      const seconds = Number(billableSeconds);
+      if (current.rows[0].status !== 'started') throw new SpeakingAssessmentQuotaError('SPEAKING_ASSESSMENT_NOT_STARTED');
+      if (!Number.isInteger(seconds) || seconds < 0 || seconds > Number(current.rows[0].reserved_seconds)
+        || !result || typeof result !== 'object' || Array.isArray(result)
+        || !Number.isFinite(instant.getTime())) {
+        throw new SpeakingAssessmentQuotaError('SPEAKING_ASSESSMENT_FINALIZATION_INVALID');
+      }
+      const updated = await client.query(
+        `UPDATE speaking_pronunciation_assessments
+         SET status = 'finalized', billable_seconds = $3, result = $4::jsonb, finalized_at = $5
+         WHERE username = $1 AND idempotency_key = $2
+         RETURNING *`,
+        [username, idempotencyKey, seconds, JSON.stringify(result), instant],
+      );
+      return {
+        finalized: true,
+        reservation: mapSpeakingAssessment(updated.rows[0]),
+        quota: await readSpeakingAssessmentQuota(client, username, instant),
+      };
+    });
+  }
+
+  async function releaseSpeakingAssessment(username, idempotencyKey, {
+    reason, result, now = new Date(),
+  } = {}) {
+    return withSpeakingAssessmentTransaction(username, async (client) => {
+      const instant = new Date(now);
+      const current = await client.query(
+        `SELECT * FROM speaking_pronunciation_assessments
+         WHERE username = $1 AND idempotency_key = $2 FOR UPDATE`,
+        [username, idempotencyKey],
+      );
+      if (!current.rowCount) throw new SpeakingAssessmentQuotaError('SPEAKING_ASSESSMENT_RESERVATION_NOT_FOUND');
+      if (['released', 'finalized'].includes(current.rows[0].status)) return {
+        released: false,
+        reservation: mapSpeakingAssessment(current.rows[0]),
+        quota: await readSpeakingAssessmentQuota(client, username, instant),
+      };
+      if (!['reserved', 'dispatching'].includes(current.rows[0].status)
+        || !/^[a-z][a-z0-9_]{0,63}$/u.test(String(reason || ''))
+        || !result || typeof result !== 'object' || Array.isArray(result)
+        || !Number.isFinite(instant.getTime())) {
+        throw new SpeakingAssessmentQuotaError('SPEAKING_ASSESSMENT_RELEASE_INVALID');
+      }
+      const updated = await client.query(
+        `UPDATE speaking_pronunciation_assessments
+         SET status = 'released', billable_seconds = 0, released_at = $3, release_reason = $4,
+             result = $5::jsonb
+         WHERE username = $1 AND idempotency_key = $2
+         RETURNING *`,
+        [username, idempotencyKey, instant, String(reason), JSON.stringify(result)],
+      );
+      return {
+        released: true,
+        reservation: mapSpeakingAssessment(updated.rows[0]),
+        quota: await readSpeakingAssessmentQuota(client, username, instant),
+      };
+    });
+  }
+
   async function exportUserData(username) {
-    const [account, progress, privacyConsent, subscriptionEvents, subscriptionEntitlements, voiceTutorSessions, voiceTutorRecoveries, voiceTutorRepeats, voiceTutorRepeatAttempts, voiceTutorReports, ruleCards, paymentRequests, writingAttempts, speakingAttempts, speakingTask1Sessions, speakingTask2Sessions, speakingTask3Sessions, speakingTask4Sessions, speakingFullSessions, generatedTasks, moduleAttempts, progressSummary, wordProgress, errorBank, adaptiveGoals, adaptiveSnapshot, adaptivePlanRevisions, adaptiveSessions, adaptiveSessionExecutionEvents, adaptiveDiagnosticSessions, adaptiveDiagnosticResponses, aiRequests, auditLog] = await Promise.all([
+    const [account, progress, privacyConsent, subscriptionEvents, subscriptionEntitlements, voiceTutorSessions, voiceTutorRecoveries, voiceTutorRepeats, voiceTutorRepeatAttempts, voiceTutorReports, ruleCards, paymentRequests, writingAttempts, speakingAttempts, speakingTask1Sessions, speakingTask2Sessions, speakingTask3Sessions, speakingTask4Sessions, speakingFullSessions, speakingAssessments, generatedTasks, moduleAttempts, progressSummary, wordProgress, errorBank, adaptiveGoals, adaptiveSnapshot, adaptivePlanRevisions, adaptiveSessions, adaptiveSessionExecutionEvents, adaptiveDiagnosticSessions, adaptiveDiagnosticResponses, aiRequests, auditLog] = await Promise.all([
       pool.query('SELECT username, telegram_id, role, trial_used, subscription_until, created_at, updated_at FROM users WHERE username = $1', [username]),
       pool.query('SELECT data, updated_at FROM user_progress WHERE username = $1', [username]),
       pool.query('SELECT text_processing, voice_processing, policy_version, text_consented_at, voice_consented_at, updated_at FROM privacy_consents WHERE username = $1', [username]),
@@ -4339,6 +4677,11 @@ export function createPostgresRepository(connectionString, {
                          status, phase, current_task, current_response, stage_started_at,
                          stage_deadline_at, assigned_at, submitted_at, submission_response
                   FROM speaking_full_sessions WHERE username = $1 ORDER BY assigned_at, id`, [username]),
+      pool.query(`SELECT id, status, locale, period_start, allowance_seconds, reserved_seconds,
+                         billable_seconds, reserved_at, dispatch_started_at, provider_started_at, finalized_at,
+                         released_at, release_reason, result
+                  FROM speaking_pronunciation_assessments
+                  WHERE username = $1 ORDER BY reserved_at, id`, [username]),
       pool.query('SELECT id, operation, request, result, provider, prompt_version, created_at FROM generated_tasks WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, module, activity, score, max_score, duration_ms, metadata, evidence_quality, created_at FROM module_attempts WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT module, attempt_count, best_score, best_max_score, total_duration_ms, last_attempt_at, updated_at FROM progress_summary WHERE username = $1 ORDER BY module', [username]),
@@ -4394,6 +4737,7 @@ export function createPostgresRepository(connectionString, {
       speaking_task3_sessions: speakingTask3Sessions.rows,
       speaking_task4_sessions: speakingTask4Sessions.rows,
       speaking_full_sessions: speakingFullSessions.rows,
+      speaking_assessments: speakingAssessments.rows.map(speakingAssessmentExportDto),
       generated_tasks: generatedTasks.rows,
       module_attempts: moduleAttempts.rows,
       progress_summary: progressSummary.rows,
@@ -4497,6 +4841,13 @@ export function createPostgresRepository(connectionString, {
     activateTrial,
     getSub,
     setEntitlement,
+    getSpeakingAssessmentQuota,
+    getSpeakingAssessmentReservation,
+    reserveSpeakingAssessment,
+    dispatchSpeakingAssessment,
+    startSpeakingAssessment,
+    finalizeSpeakingAssessment,
+    releaseSpeakingAssessment,
     getVoiceTutorAccess,
     reserveVoiceTutorSession,
     issueVoiceTutorProxyTicket,

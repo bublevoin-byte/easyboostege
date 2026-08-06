@@ -1,5 +1,9 @@
 # Схема базы данных
 
+## Speaking pronunciation quota ledger (`046`)
+
+`speaking_pronunciation_assessments` is the authoritative monthly seconds ledger. Each row is owner-bound and unique by `(username, idempotency_key)`, with `period_start`, locale, reservation/finalization state, reserved and billable seconds, bounded normalized result JSON, release reason, and timestamps. Database checks enforce `billable_seconds <= reserved_seconds` and the legal `reserved -> dispatching -> started -> finalized`, explicit pre-start `reserved|dispatching -> released`, and conservative stale-`dispatching -> finalized` shapes. `dispatch_started_at` is written atomically before provider code is entered; `provider_started_at` retains the narrower meaning that the SDK start callback actually fired. Released rows retain only their bounded canonical outcome so an exact retry cannot change status or reason. Under the owner lock, quota/replay/reserve operations reconcile the five-minute nonterminal lease: an expired reservation releases zero seconds, while expired dispatching or started rows finalize the full reservation conservatively. The owner foreign key uses `ON DELETE CASCADE`; the file repository implements the same contract atomically.
+
 Источником истины являются SQL-файлы в `migrations/`.
 
 | Таблица | Назначение | Ключевые данные |

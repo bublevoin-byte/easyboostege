@@ -125,6 +125,14 @@ export const config = Object.freeze({
   adaptiveLearning: Object.freeze({
     enabled: readBoolean('ADAPTIVE_LEARNING_ENABLED', false),
   }),
+  speakingPronunciation: Object.freeze({
+    enabled: readBoolean('SPEAKING_PRONUNCIATION_ENABLED', false),
+    azureKey: String(process.env.AZURE_SPEECH_KEY || '').trim(),
+    azureRegion: String(process.env.AZURE_SPEECH_REGION || '').trim(),
+    timeoutMs: readInteger('SPEAKING_PRONUNCIATION_TIMEOUT_MS', 30_000, { min: 1_000, max: 120_000 }),
+    maxAudioBytes: readInteger('SPEAKING_PRONUNCIATION_MAX_AUDIO_BYTES', 10 * 1024 * 1024, { min: 1_024, max: 50 * 1024 * 1024 }),
+    maxAudioSeconds: readInteger('SPEAKING_PRONUNCIATION_MAX_AUDIO_SECONDS', 180, { min: 1, max: 180 }),
+  }),
   voiceTutor: Object.freeze({
     dailySeconds: voiceTutorDailySeconds,
     monthlySeconds: voiceTutorMonthlySeconds,

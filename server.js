@@ -13,6 +13,9 @@ import {
   assignSpeakingTask1Session, assignSpeakingTask2Session, assignSpeakingTask3Session, assignSpeakingTask4Session,
   completeSpeakingTask1Session, completeSpeakingTask2Question, completeSpeakingTask3Answer, completeSpeakingTask4Session,
   getSpeakingTask1Session, getSpeakingTask2Session, getSpeakingTask3Session, getSpeakingTask4Session,
+  getSpeakingAssessmentQuota, getSpeakingAssessmentReservation, reserveSpeakingAssessment, dispatchSpeakingAssessment,
+  startSpeakingAssessment,
+  finalizeSpeakingAssessment, releaseSpeakingAssessment,
 } from './db.js';
 import { config } from './config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from './ai/writing.js';
@@ -38,6 +41,8 @@ import { createUserRoutes } from './routes/users.js';
 import { createProgressRoutes } from './routes/progress.js';
 import { createReadingRoutes } from './routes/reading.js';
 import { createSpeakingRoutes } from './routes/speaking.js';
+import { createSpeakingAssessmentService } from './speaking/assessment-service.js';
+import { createAzurePronunciationProvider } from './speaking/pronunciation-provider.js';
 import { createAdaptiveLearningRoutes } from './routes/adaptive-learning.js';
 import { createAiRoutes } from './routes/ai.js';
 import { createMediaRoutes } from './routes/media.js';
@@ -216,6 +221,9 @@ const dbApi = {
   assignSpeakingTask2Session, completeSpeakingTask2Question, getSpeakingTask2Session,
   assignSpeakingTask3Session, completeSpeakingTask3Answer, getSpeakingTask3Session,
   assignSpeakingTask4Session, completeSpeakingTask4Session, getSpeakingTask4Session,
+  getSpeakingAssessmentQuota, getSpeakingAssessmentReservation, reserveSpeakingAssessment, dispatchSpeakingAssessment,
+  startSpeakingAssessment,
+  finalizeSpeakingAssessment, releaseSpeakingAssessment,
   assignFullSpeakingSession, getFullSpeakingSession, advanceFullSpeakingSessionStage,
   completeFullSpeakingSessionResponse, submitFullSpeakingSessionResult,
   getGeneratedTask, getSharedGeneratedTask, saveGeneratedTask, logAiRequest, claimAiOperationSlot, settleAiOperationSlot,
@@ -321,7 +329,29 @@ const access = {
   createOperationLimiter, ttsLimiter, sttLimiter, hasAiBudget,
   requireAiBudget, requireActiveSubscription, requirePrivacyConsent,
 };
-app.use(createSpeakingRoutes({ authentication, access, db: dbApi }));
+const speakingPronunciationProvider = createAzurePronunciationProvider({
+  subscriptionKey: config.speakingPronunciation.enabled ? config.speakingPronunciation.azureKey : '',
+  region: config.speakingPronunciation.enabled ? config.speakingPronunciation.azureRegion : '',
+  timeoutMs: config.speakingPronunciation.timeoutMs,
+  maxAudioBytes: config.speakingPronunciation.maxAudioBytes,
+  maxDurationSeconds: config.speakingPronunciation.maxAudioSeconds,
+  logger: (entry) => {
+    if (entry.event === 'completed') recordDependencyEvent('speaking_pronunciation', 'success');
+    if (entry.event === 'failed') recordDependencyEvent('speaking_pronunciation', 'error');
+  },
+});
+const speakingPronunciationAssessment = createSpeakingAssessmentService({
+  db: dbApi,
+  provider: speakingPronunciationProvider,
+});
+app.use(createSpeakingRoutes({
+  authentication,
+  access,
+  db: dbApi,
+  pronunciationAssessment: speakingPronunciationAssessment,
+  pronunciationMaxAudioBytes: config.speakingPronunciation.maxAudioBytes,
+  pronunciationMaxAudioSeconds: config.speakingPronunciation.maxAudioSeconds,
+}));
 const claimVoiceTutorAiOperation = ({ username, ...slot }) => claimAiOperationSlot(username, {
   ...slot, dailyLimit: config.ai.dailyRequestBudget,
 });

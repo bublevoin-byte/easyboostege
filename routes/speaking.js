@@ -16,6 +16,7 @@ import { publicSpeakingTask2Session } from '../speaking/task2-session.js';
 import { publicSpeakingTask3Session } from '../speaking/task3-session.js';
 import { publicSpeakingTask4Session } from '../speaking/task4-session.js';
 import { publicFullSpeakingSession } from '../speaking/full-section-session.js';
+import { parsePcm16Mono16kWav } from '../speaking/wav-audio.js';
 
 const emptyBodySchema = z.object({}).strict();
 const sessionIdSchema = z.string().uuid();
@@ -70,6 +71,12 @@ const fullSubmissionSchema = z.object({
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu,
   ),
 }).strict();
+const pronunciationIdempotencySchema = z.string().uuid().regex(
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu,
+);
+const pronunciationLocaleSchema = z.enum(['en-GB', 'en-US']);
+const pronunciationDurationSchema = z.coerce.number().finite().min(1).max(180);
+const pronunciationMimeTypes = Object.freeze(['audio/wav']);
 
 function validationError(req, res, message) {
   return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message, requestId: req.requestId } });
@@ -103,10 +110,156 @@ function catalogMismatchResponse(req, res, error) {
   return true;
 }
 
-export function createSpeakingRoutes({ authentication, access, db, now = () => new Date() }) {
+export function createSpeakingRoutes({
+  authentication, access, db, pronunciationAssessment = null,
+  pronunciationMaxAudioBytes = 10 * 1024 * 1024,
+  pronunciationMaxAudioSeconds = 180,
+  now = () => new Date(),
+}) {
   const router = express.Router();
   const { auth } = authentication;
   const { requireActiveSubscription } = access;
+  const pronunciationLimiter = typeof access.sttLimiter === 'function'
+    ? access.sttLimiter
+    : (_req, _res, next) => next();
+  const requireVoiceProcessingConsent = typeof access.requirePrivacyConsent === 'function'
+    ? access.requirePrivacyConsent('voice_processing')
+    : (_req, _res, next) => next();
+  const pronunciationAudioSecondsLimit = Number.isFinite(Number(pronunciationMaxAudioSeconds))
+    ? Math.max(1, Math.min(90, Number(pronunciationMaxAudioSeconds))) : 90;
+  const pronunciationAudio = express.raw({
+    type: pronunciationMimeTypes,
+    limit: pronunciationMaxAudioBytes,
+  });
+  const parsePronunciationAudio = (req, res, next) => pronunciationAudio(req, res, (error) => {
+    if (!error) return next();
+    if (error.type === 'entity.too.large') return res.status(413).json({ error: {
+      code: 'SPEAKING_AUDIO_TOO_LARGE',
+      message: 'Запись превышает допустимый размер.',
+      requestId: req.requestId,
+    } });
+    return next(error);
+  });
+
+  function unavailableProviderStatus() {
+    return { available: false, provider: 'azure-speech', reason: 'provider_not_configured' };
+  }
+
+  router.get('/api/v1/speaking/pronunciation-assessments/status', auth, requireActiveSubscription, async (req, res, next) => {
+    try {
+      res.setHeader('Cache-Control', 'no-store');
+      if (pronunciationAssessment) return res.json(await pronunciationAssessment.status(req.user));
+      const quota = db.getSpeakingAssessmentQuota
+        ? await db.getSpeakingAssessmentQuota(req.user, { now: now() })
+        : { tier: 'base', periodStart: null, limitSeconds: 3_600, usedSeconds: 0, heldSeconds: 0, remainingSeconds: 3_600 };
+      return res.json({ provider: unavailableProviderStatus(), quota });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.post(
+    '/api/v1/speaking/task-1/sessions/:sessionId/pronunciation-assessment',
+    auth,
+    requireActiveSubscription,
+    pronunciationLimiter,
+    requireVoiceProcessingConsent,
+    parsePronunciationAudio,
+    async (req, res, next) => {
+      const sessionId = sessionIdSchema.safeParse(req.params.sessionId);
+      const idempotencyKey = pronunciationIdempotencySchema.safeParse(req.get('idempotency-key'));
+      const locale = pronunciationLocaleSchema.safeParse(req.get('x-speech-locale'));
+      const duration = pronunciationDurationSchema.safeParse(req.get('x-audio-duration-seconds'));
+      const mimeType = String(req.get('content-type') || '').split(';', 1)[0].toLowerCase();
+      if (!sessionId.success) return validationError(req, res, 'Недопустимый идентификатор тренировки.');
+      if (!idempotencyKey.success) return validationError(req, res, 'Недопустимый ключ идемпотентности оценки.');
+      if (!locale.success) return validationError(req, res, 'Поддерживаются только en-GB и en-US.');
+      if (!duration.success) return validationError(req, res, 'Длительность записи должна быть от 1 до 180 секунд.');
+      if (!pronunciationMimeTypes.includes(mimeType)) {
+        return res.status(415).json({ error: {
+          code: 'SPEAKING_AUDIO_TYPE_UNSUPPORTED',
+          message: 'Формат записи не поддерживается.',
+          requestId: req.requestId,
+        } });
+      }
+      if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+        return validationError(req, res, 'Запись отсутствует.');
+      }
+      const wav = parsePcm16Mono16kWav(req.body);
+      if (!wav) return validationError(req, res, 'Нужен корректный mono PCM WAV: 16 kHz, 16-bit.');
+      if (duration.data > pronunciationAudioSecondsLimit || wav.durationSeconds < 1
+        || wav.durationSeconds > pronunciationAudioSecondsLimit
+        || Math.abs(duration.data - wav.durationSeconds) > 1) {
+        return validationError(
+          req,
+          res,
+          `Длительность записи не совпадает с WAV или превышает лимит ${pronunciationAudioSecondsLimit} секунд.`,
+        );
+      }
+      try {
+        const session = await db.getSpeakingTask1Session(req.user, sessionId.data);
+        if (!session) return res.status(404).json({ error: {
+          code: 'SPEAKING_SESSION_NOT_FOUND', message: 'Тренировка не найдена.', requestId: req.requestId,
+        } });
+        const task = SPEAKING_TASK1_CATALOG.tasks.find((candidate) => (
+          candidate.id === session.task_id && candidate.revision === Number(session.task_revision)
+        ));
+        if (!task || session.catalog_id !== SPEAKING_TASK1_CATALOG.id
+          || Number(session.catalog_revision) !== SPEAKING_TASK1_CATALOG.revision) {
+          throw Object.assign(new Error('SPEAKING_TASK1_CATALOG_REVISION_MISMATCH'), {
+            code: 'SPEAKING_TASK1_CATALOG_REVISION_MISMATCH',
+          });
+        }
+        if (!pronunciationAssessment) {
+          return res.status(503).json({ error: {
+            code: 'SPEAKING_PRONUNCIATION_UNAVAILABLE',
+            message: 'Оценка произношения пока не подключена.',
+            requestId: req.requestId,
+          } });
+        }
+        const result = await pronunciationAssessment.assess(req.user, {
+          idempotencyKey: idempotencyKey.data,
+          audio: req.body,
+          mimeType,
+          durationSeconds: duration.data,
+          locale: locale.data,
+          mode: 'scripted',
+          referenceText: task.reference.script,
+          contextId: `task1:${session.id}:${task.id}@${task.revision}`,
+        });
+        res.setHeader('Cache-Control', 'no-store');
+        if (result.assessment?.status === 'unavailable'
+          && result.billing?.assessmentId == null) {
+          return res.status(503).json({ error: {
+            code: 'SPEAKING_PRONUNCIATION_UNAVAILABLE',
+            message: 'Оценка произношения пока не подключена.',
+            requestId: req.requestId,
+          } });
+        }
+        return res.json(result);
+      } catch (error) {
+        if (catalogMismatchResponse(req, res, error)) return undefined;
+        if (error?.code === 'SPEAKING_ASSESSMENT_QUOTA_EXHAUSTED') {
+          return res.status(429).json({ error: {
+            code: error.code,
+            message: 'Месячный лимит автоматической оценки исчерпан. Локальная запись остаётся доступной.',
+            requestId: req.requestId,
+          } });
+        }
+        if (error?.code === 'SPEAKING_ASSESSMENT_IDEMPOTENCY_CONFLICT') {
+          return res.status(409).json({ error: {
+            code: error.code,
+            message: 'Этот ключ уже использован для другой записи.',
+            requestId: req.requestId,
+          } });
+        }
+        if (String(error?.code || '').startsWith('SPEAKING_')) {
+          return validationError(req, res, 'Запись не прошла проверку безопасного контура оценки.');
+        }
+        return next(error);
+      }
+    },
+  );
 
   function registerAssignmentRoutes({ basePath, catalog, assign, get, response }) {
     router.post(basePath, auth, requireActiveSubscription, async (req, res, next) => {

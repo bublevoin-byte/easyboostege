@@ -35,6 +35,12 @@
 
 Официальная документация: https://learn.microsoft.com/en-us/azure/ai-services/Speech-Service/how-to-pronunciation-assessment
 
+Дополнительные официальные источники, повторно проверяемые перед rollout:
+
+- языки и региональные возможности Pronunciation Assessment: https://learn.microsoft.com/en-us/azure/ai-services/speech-service/language-support?tabs=pronunciation-assessment
+- JavaScript `SpeechRecognizer`, включая `recognized`, `startContinuousRecognitionAsync` и `stopContinuousRecognitionAsync`: https://learn.microsoft.com/en-us/javascript/api/microsoft-cognitiveservices-speech-sdk/speechrecognizer?view=azure-node-latest
+- Node audio input: https://learn.microsoft.com/en-us/javascript/api/microsoft-cognitiveservices-speech-sdk/audioconfig?view=azure-node-latest и https://learn.microsoft.com/en-us/javascript/api/microsoft-cognitiveservices-speech-sdk/audioinputstream?view=azure-node-latest
+
 Подтверждённые возможности:
 
 - сценарная и свободная речь;
@@ -42,7 +48,15 @@
 - беглость, полнота для сценарного текста и дополнительная оценка просодии;
 - британский английский поддерживается для базовой оценки произношения;
 - часть расширенных возможностей, включая просодию и оценку содержания, ограничена en-US;
+- в `en-GB` фонемный acoustic score может быть доступен без имени фонемы; IPA, syllables и spoken-phoneme candidates являются `en-US`-only и поэтому не должны синтезироваться или заполняться нулями;
+- prosody assessment включается только для `en-US`; для `en-GB` API должен вернуть явное `available: false`, не превращая остальные acoustic scores в нули;
 - для длинных ответов рекомендуется непрерывный режим, а не короткий REST-запрос.
+
+Production adapter использует только официальный JavaScript continuous lifecycle и собирает сегменты из `recognized` до `sessionStopped`/`canceled`, после чего обязательно вызывает stop/close. В scripted-режиме reference text берётся только из server-owned каталога. В unscripted-режиме Azure получает пустой reference и использует собственную модель Speech-to-Text; это отдельная provider STT model, а не xAI STT и не клиентская расшифровка.
+
+В continuous-режиме `EnableMiscue` не поддерживается как источник полных `Omission`/`Insertion`, поэтому adapter передаёт `false`, после всех сегментов детерминированно выравнивает bounded recognized words с server-owned reference и сам помечает пропуски/вставки. Paragraph accuracy, fluency, completeness, prosody и PronScore пересчитываются из выровненных word/timing facts по официальному Node sample, а не усреднением top-level phrase scores.
+
+`AudioConfig.fromStreamInput` официально поддерживает только WAV/PCM, а push stream без явного формата ожидает 16 kHz 16-bit mono PCM. Поэтому encoded WebM/MP4/MP3/Ogg нельзя писать в default push stream. Текущий безопасный production-контракт использует `AudioConfig.fromWavFileInput(Buffer)` и допускает только проверенный PCM16 mono 16 kHz WAV; длительность считается сервером из размера PCM data chunk до резерва квоты.
 
 Вывод: Azure даёт акустические признаки и расшифровку, но его шкалы нельзя напрямую объявлять баллами ФИПИ. Нужен детерминированный слой сопоставления с критериями ЕГЭ и отдельная калибровка на двойной экспертной разметке.
 

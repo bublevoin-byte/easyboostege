@@ -1,6 +1,6 @@
 # 06 — Подключить Azure-контур произношения и квоты
 
-Status: ready-for-agent
+Status: done
 Blocked by: 05
 Spec: `.scratch/speaking-2-pilot/spec.md#провайдер-акустической-оценки`
 
@@ -24,11 +24,11 @@ Spec: `.scratch/speaking-2-pilot/spec.md#провайдер-акустическ
 
 ## Definition of Done
 
-- [ ] Fake Azure проходит сценарии success, low quality, timeout, partial result и unavailable.
-- [ ] en-GB не получает en-US-only показатели и не превращает unavailable в ноль.
-- [ ] Base получает 3600 секунд, Premium 14400; локальная запись расходует 0.
-- [ ] Один idempotency key не списывает секунды дважды, а неиспользованный резерв освобождается.
-- [ ] Секреты, бинарное аудио и полный provider payload отсутствуют в логах/ответах.
-- [ ] Без SDK/config UI показывает честное недоступное состояние.
-- [ ] Целевые тесты, `npm run lint`, `npm run check`, `npm test` проходят.
-- [ ] Один коммит на тикет.
+- [x] Fake Azure проходит сценарии success, low quality, timeout, partial result и unavailable.
+- [x] en-GB не получает en-US-only показатели и не превращает unavailable в ноль.
+- [x] Base получает 3600 секунд, Premium 14400; локальная запись расходует 0.
+- [x] Один idempotency key не списывает секунды дважды, а неиспользованный резерв освобождается.
+- [x] Секреты, бинарное аудио и полный provider payload отсутствуют в логах/ответах.
+- [x] Без SDK/config UI показывает честное недоступное состояние.
+- [x] Целевые тесты, `npm run lint`, `npm run check`, `npm test` проходят.
+- [x] Один коммит на тикет.

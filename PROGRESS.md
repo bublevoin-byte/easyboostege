@@ -28,7 +28,7 @@
 | 03 | Интервью задания 3 и 60 комплектов | done |
 | 04 | Монолог задания 4 и 60 оригинальных фотопар | done |
 | 05 | Полный устный раздел 1+4+5+10=20 | done |
-| 06 | Azure Pronunciation adapter и квоты 60/240 минут | ready-for-agent |
+| 06 | Azure Pronunciation adapter и квоты 60/240 минут | done |
 | 07 | Детерминированная оценка ФИПИ и методический gate | ready-for-agent |
 | 08 | Акцентный профиль, согласия и приватная калибровка | ready-for-agent |
 | 09 | Индивидуальный план, Premium-отчёт и Voice Tutor | ready-for-agent |

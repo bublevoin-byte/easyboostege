@@ -1,5 +1,9 @@
 # Мониторинг
 
+## Pronunciation provider
+
+`/api/v1/speaking/pronunciation-assessments/status` is the authenticated product truth for provider availability and the learner's authoritative monthly quota. Process metrics include a fixed-cardinality `speaking_pronunciation` dependency aggregate for completed/failed provider calls. Logs remain redacted: monitor event/code/locale/segment count and HTTP status only, never audio, transcript/reference text, provider JSON, keys, or idempotency values. For repeated 5xx/provider failures, use `SPEAKING_PRONUNCIATION_ENABLED=false` as the cost/incident kill switch; local recording remains functional. See `docs/SPEAKING_PRONUNCIATION_OPERATIONS.md`.
+
 `GET /api/v1/admin/metrics` доступен только пользователю с ролью `admin` и возвращает:
 
 - uptime процесса;

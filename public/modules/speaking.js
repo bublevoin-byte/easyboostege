@@ -148,6 +148,25 @@
     };
   }
 
+  function pronunciationStatusView(payload) {
+    const provider = payload && payload.provider;
+    const quota = payload && payload.quota;
+    const providerValid = provider && typeof provider === 'object'
+      && provider.provider === 'azure-speech' && typeof provider.available === 'boolean';
+    const tier = quota && (quota.tier === 'base' || quota.tier === 'premium') ? quota.tier : null;
+    const limitSeconds = Number(quota && quota.limitSeconds);
+    const remainingSeconds = Number(quota && quota.remainingSeconds);
+    const quotaValid = tier && Number.isInteger(limitSeconds) && limitSeconds > 0
+      && Number.isInteger(remainingSeconds) && remainingSeconds >= 0 && remainingSeconds <= limitSeconds;
+    if (!providerValid || !quotaValid) {
+      return { available: false, reason: 'invalid_status', tier: null, remainingSeconds: 0, limitSeconds: 0 };
+    }
+    const allowedReasons = ['provider_not_configured', 'sdk_not_installed', 'provider_unavailable'];
+    const reason = provider.available ? null
+      : allowedReasons.includes(provider.reason) ? provider.reason : 'provider_unavailable';
+    return { available: provider.available, reason, tier, remainingSeconds, limitSeconds };
+  }
+
   function serverTask1Set(session) {
     const task = session && session.task;
     const assessment = session && session.pronunciationAssessment;
@@ -260,6 +279,7 @@
     appendScore,
     preferredMimeType,
     formatTime,
+    pronunciationStatusView,
     pool,
     select,
     assignment,

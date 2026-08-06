@@ -140,6 +140,27 @@ test('speaking module rejects malformed AI-generated task sets', () => {
   assert.equal(monologue.ph.length, 2);
 });
 
+test('speaking module normalizes pronunciation availability and quota without trusting malformed payloads', () => {
+  const speaking = createSpeakingModule();
+  assert.deepEqual(plain(speaking.pronunciationStatusView({
+    provider: { available: true, provider: 'azure-speech', reason: null },
+    quota: {
+      tier: 'base', periodStart: '2026-08-01T00:00:00.000Z', limitSeconds: 3600,
+      usedSeconds: 80, heldSeconds: 20, remainingSeconds: 3500,
+    },
+  })), { available: true, reason: null, tier: 'base', remainingSeconds: 3500, limitSeconds: 3600 });
+  assert.deepEqual(plain(speaking.pronunciationStatusView({
+    provider: { available: false, provider: 'azure-speech', reason: 'sdk_not_installed' },
+    quota: { tier: 'premium', remainingSeconds: 14_400, limitSeconds: 14_400 },
+  })), {
+    available: false, reason: 'sdk_not_installed', tier: 'premium',
+    remainingSeconds: 14_400, limitSeconds: 14_400,
+  });
+  assert.deepEqual(plain(speaking.pronunciationStatusView({ provider: { available: true }, quota: {} })), {
+    available: false, reason: 'invalid_status', tier: null, remainingSeconds: 0, limitSeconds: 0,
+  });
+});
+
 test('speaking module accepts only the server-owned public task 1 assignment shape', () => {
   const speaking = createSpeakingModule();
   const session = {
