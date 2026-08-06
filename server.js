@@ -9,7 +9,11 @@ import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { claimAiOperationSlot, claimUnseenBankTask, claimVoiceTutorRuleDiscovery, failVoiceTutorRuleDiscovery, getAdaptiveDiagnostic, getAdaptiveDiagnosticCompletionReplay, getBankTask, getBankTaskByExternalId, listBankTaskContents, recordTaskDelivery, settleAiOperationSlot, upsertBankTask, activateTrial, activateVoiceTutorProxySession, closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, consumeVoiceTutorProxyTicket, countAiRequestsSince, createPaymentRequest, createPaymentRequestForUser, createRuleCardForVoiceTutorSession, createSession, createSpeakingAttempt, createTelegramAuthCode, createVoiceTutorReport, createWritingAttempt, deleteUserData, exportUserData, finalizeVoiceTutorProxySession, finishSpeakingAttempt, finishVoiceTutorSession, finishWritingAttempt, getAdaptiveDiagnosticStartClaim, getAdaptiveLearningEvidenceSources, getAdaptiveLearningGoal, getAdaptiveLearningProfile, getCurrentAdaptiveLearningPlan, getAdaptiveLearningPlanRevision, getAdaptiveLearningSessionCreateReplay, createAdaptiveLearningSession, getCurrentAdaptiveLearningSession, getAdaptiveLearningSessionCommercialScope, getAdaptiveLearningSessionReplacementReplay, replaceAdaptiveLearningSessionBlock, getAdaptiveLearningSessionMutationReplay, startAdaptiveLearningSessionBlock, getAdaptiveLearningSessionExecution, getAdaptiveLearningSessionAdvanceContext, advanceAdaptiveLearningSession, getAdaptiveLearningSessionFinishContext, finishAdaptiveLearningSession, getAdaptiveLearningWeekUsage, getAdaptiveLearningCommercialUsage, getAdaptiveLearningCompletedSessionReports, getAdaptiveLearningMetrics, getAiUsageMetrics, getApprovedRuleCard, getGeneratedTask, getRuleCard, getSharedGeneratedTask, getModuleAttempt, getReadingCompletedAttempts, getPaymentRequestForUser, getPrivacyConsent, getProgress, getSpeakingAttempt, getUser, getVoiceTutorAccess, getVoiceTutorRecoveryMap, getVoiceTutorRecoveryMetrics, getVoiceTutorSession, getWordProgress, getWritingAttempt, healthCheck, isSessionActive, issueVoiceTutorProxyTicket, reissueVoiceTutorFallbackNonce, listPaymentRequests, listRuleCards, listVoiceTutorReports, recordModuleAttempt, recordModuleAttemptWithAdaptiveClaim, bindAdaptiveLearningServerAttempt, reserveVoiceTutorSession, resolvePaymentRequest, reviewRuleCard, reviewVoiceTutorReport, revokeEntitlement, revokeSession, saveAdaptiveLearningGoal, saveAdaptiveLearningProfile, saveAdaptiveLearningPlan, saveGeneratedTask, saveProgress, setPrivacyConsent, setUserRole, submitVoiceTutorRepeat, upsertErrorBank, upsertWordProgress, mergeProgress, getUserByTelegram, createTelegramUser, logAiRequest, getSub, advanceVoiceTutorSession, clarifyVoiceTutorSession, setVoiceTutorSessionDelivery, switchVoiceTutorSessionDelivery, startAdaptiveDiagnostic, getCurrentAdaptiveDiagnostic, answerAdaptiveDiagnostic, completeAdaptiveDiagnostic } from './db.js';
-import { assignSpeakingTask1Session, completeSpeakingTask1Session, getSpeakingTask1Session } from './db.js';
+import {
+  assignSpeakingTask1Session, assignSpeakingTask2Session,
+  completeSpeakingTask1Session, completeSpeakingTask2Question,
+  getSpeakingTask1Session, getSpeakingTask2Session,
+} from './db.js';
 import { config } from './config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from './ai/writing.js';
 import { buildContentPrompt, CONTENT_PROMPT_VERSION, contentRequestSchema, parseContentResponse } from './ai/content.js';
@@ -209,6 +213,7 @@ const dbApi = {
   completeAdaptiveDiagnostic,
   createWritingAttempt, finishWritingAttempt, getWritingAttempt, createSpeakingAttempt, finishSpeakingAttempt, getSpeakingAttempt,
   assignSpeakingTask1Session, completeSpeakingTask1Session, getSpeakingTask1Session,
+  assignSpeakingTask2Session, completeSpeakingTask2Question, getSpeakingTask2Session,
   getGeneratedTask, getSharedGeneratedTask, saveGeneratedTask, logAiRequest, claimAiOperationSlot, settleAiOperationSlot,
   upsertBankTask, getBankTask, getBankTaskByExternalId, claimUnseenBankTask, recordTaskDelivery, listBankTaskContents,
 };

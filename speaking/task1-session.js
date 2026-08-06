@@ -1,48 +1,11 @@
 import crypto from 'node:crypto';
+import { selectSpeakingTrainingAssignment } from './training-session.js';
 
 const DAY_MS = 86_400_000;
 const DUE_DAYS = Object.freeze({ weak: 1, steady: 7, strong: 14 });
 
-function timestamp(value) {
-  const parsed = new Date(value).getTime();
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function excludeImmediateRepeat(candidates, lastTaskId) {
-  if (!lastTaskId) return candidates;
-  return candidates.filter((candidate) => candidate.task.id !== lastTaskId);
-}
-
-function byOldest(first, second) {
-  return first.lastAssignedAt - second.lastAssignedAt || first.task.id.localeCompare(second.task.id, 'en');
-}
-
 export function selectSpeakingTask1Assignment(tasks, sessions, now = new Date()) {
-  const instant = new Date(now).getTime();
-  if (!Number.isFinite(instant) || !Array.isArray(tasks) || !tasks.length) throw new Error('SPEAKING_TASK1_SELECTION_INVALID');
-  const orderedHistory = [...(sessions || [])].sort((left, right) => timestamp(left.assigned_at) - timestamp(right.assigned_at));
-  const latestByTask = new Map();
-  orderedHistory.forEach((session) => latestByTask.set(session.task_id, session));
-  const lastTaskId = orderedHistory.at(-1)?.task_id || null;
-  const candidates = tasks.map((task) => {
-    const latest = latestByTask.get(task.id) || null;
-    return { task, latest, lastAssignedAt: timestamp(latest?.assigned_at) };
-  });
-  const buckets = [
-    ['unseen', candidates.filter((candidate) => !candidate.latest)],
-    ['due', candidates.filter((candidate) => candidate.latest?.status === 'completed'
-      && timestamp(candidate.latest.due_at) > 0 && timestamp(candidate.latest.due_at) <= instant)],
-    ['weak', candidates.filter((candidate) => candidate.latest?.status === 'completed'
-      && candidate.latest.self_rating === 'weak')],
-    ['old', candidates.filter((candidate) => candidate.latest)],
-  ];
-  for (const [reason, bucket] of buckets) {
-    if (!bucket.length) continue;
-    const eligible = excludeImmediateRepeat(bucket.sort(byOldest), lastTaskId);
-    if (!eligible.length) continue;
-    return { task: eligible[0].task, reason };
-  }
-  throw new Error('SPEAKING_TASK1_SELECTION_EMPTY');
+  return selectSpeakingTrainingAssignment(tasks, sessions, now);
 }
 
 export function speakingTask1CompletionMetadata(input, now = new Date()) {

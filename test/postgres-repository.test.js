@@ -36,11 +36,26 @@ import { assertWordProgressRepositoryContract } from './support/word-progress-co
 import { assertPersonalWordsProgressRepositoryContract } from './support/personal-words-progress-contract.js';
 import { assertVocabularyAttemptRepositoryContract } from './support/vocabulary-attempt-contract.js';
 import { assertReadingReportRepositoryContract } from './support/reading-report-contract.js';
+import { assertSpeakingTask2SessionRepositoryContract } from './support/speaking-task2-session-contract.js';
 import { READING_TASK10_SETS } from '../public/content/reading/task10-v1.js';
 import { READING_TASK11_SETS } from '../public/content/reading/task11-v1.js';
 import { READING_TASK12_18_SETS } from '../public/content/reading/task12-18-v1.js';
 
 const connectionString = process.env.TEST_DATABASE_URL;
+
+test('PostgreSQL task 2 sessions match owner isolation, replay, export and deletion contract', { skip: !connectionString }, async () => {
+  const repository = createPostgresRepository(connectionString);
+  const stamp = String(Date.now()).slice(-8);
+  const owner = await repository.createTelegramUser(Number(`82${stamp}`), `Task two owner ${stamp}`);
+  const other = await repository.createTelegramUser(Number(`83${stamp}`), `Task two other ${stamp}`);
+  try {
+    await assertSpeakingTask2SessionRepositoryContract(assert, repository, owner, other);
+  } finally {
+    await repository.deleteUserData(owner).catch(() => {});
+    await repository.deleteUserData(other).catch(() => {});
+    await repository.close();
+  }
+});
 
 test('PostgreSQL Reading report rows match the shared bounded ownership contract', { skip: !connectionString }, async () => {
   const repository = createPostgresRepository(connectionString);
@@ -681,6 +696,7 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
       '039_adaptive_metrics_window_indexes.sql',
       '040_word_mastery.sql',
       '041_speaking_task1_sessions.sql',
+      '042_speaking_task2_sessions.sql',
     ]);
 
     const username = await repository.createTelegramUser(telegramId, `Integration ${suffix}`);

@@ -163,6 +163,30 @@
     return { id: task.id, revision: task.revision, tx: task.text, topic: task.topic, cefr: task.cefr };
   }
 
+  function serverTask2Set(session) {
+    const task = session && session.task;
+    const assessment = session && session.assessment;
+    if (!task || typeof task !== 'object' || Array.isArray(task)
+      || Object.keys(task).sort().join(',') !== 'advertisement,cefr,id,instruction,maxScore,preparationSeconds,questionSeconds,revision,supports,taskType,topic'
+      || !/^speaking-pilot-v1\.task2\.[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(String(task.id || ''))
+      || task.revision !== 1 || task.taskType !== 2
+      || task.preparationSeconds !== 60 || task.questionSeconds !== 20 || task.maxScore !== 4
+      || !['B1', 'B2', 'B2+/C1'].includes(task.cefr)
+      || typeof task.topic !== 'string' || !task.topic.trim()
+      || typeof task.advertisement !== 'string' || !task.advertisement.trim()
+      || !Array.isArray(task.supports) || task.supports.length !== 4
+      || task.supports.some((support) => typeof support !== 'string' || !support.trim())
+      || assessment?.available !== false || assessment.reason !== 'deferred_to_tickets_06_07') return null;
+    return {
+      id: task.id,
+      revision: task.revision,
+      ad: task.advertisement,
+      points: task.supports.slice(),
+      topic: task.topic,
+      cefr: task.cefr,
+    };
+  }
+
   global.EasyBoostSpeaking = Object.freeze({
     config,
     isExperimentalTask,
@@ -182,6 +206,7 @@
     weakestTask,
     normalizeGenerated,
     serverTask1Set,
+    serverTask2Set,
     TASKS,
     EXAM_MAX,
     BADGES,

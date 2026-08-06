@@ -91,6 +91,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { description: Session not found for this learner }
+        '409': { description: The stored session uses an incompatible catalog revision and must be restarted safely }
   /api/v1/speaking/task-1/sessions/{sessionId}/complete:
     post:
       summary: Complete a Speaking task 1 session with bounded practice metadata
@@ -115,6 +116,72 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { description: Session not found for this learner }
+  /api/v1/speaking/task-2/sessions:
+    post:
+      summary: Assign one server-owned Speaking task 2 advertisement to the current learner
+      description: Selects from the validated 60-item catalog. The server fixes the advertisement and exactly four communicative supports under the EGE-2026 60-second preparation and four-by-20-second contract.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false }
+      responses:
+        '201':
+          description: Owner-bound task 2 session with four pending question positions
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SpeakingTask2Session' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/speaking/task-2/sessions/{sessionId}:
+    get:
+      summary: Restore the current learner's Speaking task 2 session
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The owner-bound assignment and safe per-question practice metadata
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SpeakingTask2Session' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Session not found for this learner }
+        '409': { description: The stored session uses an incompatible catalog revision and must be restarted safely }
+  /api/v1/speaking/task-2/sessions/{sessionId}/questions/{questionNumber}/complete:
+    post:
+      summary: Complete the current local question recording with safe metadata
+      description: Accepts questions 1 through 4 in order. Binary audio stays in the browser; retries of a completed position return its canonical stored metadata.
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: questionNumber
+          required: true
+          schema: { type: integer, minimum: 1, maximum: 4 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SpeakingTask2QuestionCompletion' }
+      responses:
+        '200':
+          description: Updated four-position owner-bound session
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SpeakingTask2Session' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Session not found for this learner }
+        '409': { description: The learner skipped the current question or the stored catalog revision is incompatible }
   /api/v1/me:
     get:
       summary: Current user, base subscription, Premium entitlements, remaining voice minutes and server-projected feature flags
@@ -1496,6 +1563,77 @@ components:
           properties:
             available: { type: boolean, enum: [false] }
             reason: { type: string, enum: [provider_not_connected] }
+            message: { type: string }
+          additionalProperties: false
+      additionalProperties: false
+    SpeakingTask2Task:
+      type: object
+      required: [id, revision, taskType, cefr, topic, preparationSeconds, questionSeconds, maxScore, instruction, advertisement, supports]
+      properties:
+        id: { type: string, minLength: 1, maxLength: 140 }
+        revision: { type: integer, enum: [1] }
+        taskType: { type: integer, enum: [2] }
+        cefr: { type: string, enum: [B1, B2, B2+/C1] }
+        topic: { type: string, minLength: 1, maxLength: 80 }
+        preparationSeconds: { type: integer, enum: [60] }
+        questionSeconds: { type: integer, enum: [20] }
+        maxScore: { type: integer, enum: [4] }
+        instruction: { type: string, minLength: 1, maxLength: 300 }
+        advertisement: { type: string, minLength: 1, maxLength: 600 }
+        supports:
+          type: array
+          minItems: 4
+          maxItems: 4
+          items: { type: string, minLength: 1, maxLength: 80 }
+      additionalProperties: false
+    SpeakingTask2QuestionCompletion:
+      type: object
+      required: [recordingDurationSeconds, localPlayback, selfRating]
+      properties:
+        recordingDurationSeconds: { type: number, minimum: 1, maximum: 20 }
+        localPlayback: { type: boolean }
+        selfRating: { type: string, enum: [weak, steady, strong] }
+      additionalProperties: false
+    SpeakingTask2Question:
+      type: object
+      required: [questionNumber, status]
+      properties:
+        questionNumber: { type: integer, minimum: 1, maximum: 4 }
+        status: { type: string, enum: [pending, completed] }
+        recordingDurationSeconds: { type: number, minimum: 1, maximum: 20 }
+        localPlayback: { type: boolean }
+        selfRating: { type: string, enum: [weak, steady, strong] }
+        completedAt: { type: string, format: date-time }
+      additionalProperties: false
+    SpeakingTask2Session:
+      type: object
+      required: [id, catalog, task, selectionReason, status, currentQuestion, questions, assignedAt, completedAt, assessment]
+      properties:
+        id: { type: string, format: uuid }
+        catalog:
+          type: object
+          required: [id, revision]
+          properties:
+            id: { type: string, enum: [speaking-pilot-v1] }
+            revision: { type: integer, enum: [1] }
+          additionalProperties: false
+        task: { $ref: '#/components/schemas/SpeakingTask2Task' }
+        selectionReason: { type: string, enum: [unseen, due, weak, old] }
+        status: { type: string, enum: [assigned, in_progress, completed] }
+        currentQuestion: { type: integer, minimum: 1, maximum: 4 }
+        questions:
+          type: array
+          minItems: 4
+          maxItems: 4
+          items: { $ref: '#/components/schemas/SpeakingTask2Question' }
+        assignedAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time, nullable: true }
+        assessment:
+          type: object
+          required: [available, reason, message]
+          properties:
+            available: { type: boolean, enum: [false] }
+            reason: { type: string, enum: [deferred_to_tickets_06_07] }
             message: { type: string }
           additionalProperties: false
       additionalProperties: false

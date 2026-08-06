@@ -2,12 +2,20 @@ export const SPEAKING_CATALOG_ID = 'speaking-pilot-v1';
 export const SPEAKING_TASK1_CONTRACT_VERSION = 'speaking-task1-catalog-v1';
 export const SPEAKING_TASK1_INSTRUCTION = 'Read the text aloud. You have 90 seconds to prepare and 90 seconds to read the text aloud.';
 export const SPEAKING_TASK1_CEFR_COUNTS = Object.freeze({ B1: 12, B2: 36, 'B2+/C1': 12 });
+export const SPEAKING_TASK2_CONTRACT_VERSION = 'speaking-task2-catalog-v1';
+export const SPEAKING_TASK2_INSTRUCTION = 'Study the advertisement. You have 60 seconds to prepare. Then ask four direct questions. You have 20 seconds to ask each question.';
+export const SPEAKING_TASK2_CEFR_COUNTS = Object.freeze({ B1: 12, B2: 36, 'B2+/C1': 12 });
 
 const SAFE_TASK_ID = /^speaking-pilot-v1\.task1\.[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+const SAFE_TASK2_ID = /^speaking-pilot-v1\.task2\.[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const SAFE_MARKUP = /<\/?[a-z][^>]*>|javascript:|data:text\/html/iu;
 const TASK_KEYS = Object.freeze([
   'cefr', 'id', 'instruction', 'maxScore', 'preparationSeconds', 'provenance', 'reference',
   'responseSeconds', 'revision', 'taskType', 'text', 'topic',
+]);
+const TASK2_KEYS = Object.freeze([
+  'advertisement', 'cefr', 'id', 'instruction', 'maxScore', 'preparationSeconds', 'provenance',
+  'questionSeconds', 'revision', 'rubric', 'supports', 'taskType', 'topic',
 ]);
 
 function fail(location, message) {
@@ -74,6 +82,18 @@ export function analyzeSpeakingTask1CatalogQuality(catalog) {
     minimumLexicalDiversity: Math.min(...tokenLists.map((tokens) => new Set(tokens).size / tokens.length)),
     maximumPairSimilarity,
     sharedEightWordSequence,
+  });
+}
+
+export function analyzeSpeakingTask2CatalogQuality(catalog) {
+  const supportSets = catalog.tasks.map((task) => task.supports.join('\n').toLocaleLowerCase('en'));
+  const repeatedSupportSet = supportSets.find((set, index) => supportSets.indexOf(set) !== index) || null;
+  return Object.freeze({
+    uniqueAdvertisements: new Set(catalog.tasks.map((task) => task.advertisement)).size,
+    uniqueSupportSets: new Set(supportSets).size,
+    uniqueTopics: new Set(catalog.tasks.map((task) => task.topic.toLocaleLowerCase('ru-RU'))).size,
+    supportsChecked: catalog.tasks.reduce((count, task) => count + task.supports.length, 0),
+    sharedFourSupportSequence: repeatedSupportSet,
   });
 }
 
@@ -158,6 +178,101 @@ export function speakingTask1PublicAssignment(task) {
     maxScore: task.maxScore,
     instruction: task.instruction,
     text: task.text,
+  });
+}
+
+export function assertSpeakingTask2(task, location = 'task') {
+  plainObject(task, location);
+  exactKeys(task, TASK2_KEYS, location);
+  if (!SAFE_TASK2_ID.test(task.id || '')) fail(`${location}.id`, 'must be a stable speaking-pilot-v1 task 2 id');
+  if (task.revision !== 1) fail(`${location}.revision`, 'must be 1');
+  if (task.taskType !== 2) fail(`${location}.taskType`, 'must be 2');
+  if (!Object.hasOwn(SPEAKING_TASK2_CEFR_COUNTS, task.cefr)) fail(`${location}.cefr`, 'is unsupported');
+  safeString(task.topic, `${location}.topic`, { min: 3, max: 80 });
+  if (task.preparationSeconds !== 60) fail(`${location}.preparationSeconds`, 'must be 60');
+  if (task.questionSeconds !== 20) fail(`${location}.questionSeconds`, 'must be 20');
+  if (task.maxScore !== 4) fail(`${location}.maxScore`, 'must be 4');
+  if (task.instruction !== SPEAKING_TASK2_INSTRUCTION) fail(`${location}.instruction`, 'must use the task 2 instruction');
+  safeString(task.advertisement, `${location}.advertisement`, { min: 40, max: 600 });
+  if (!Array.isArray(task.supports) || task.supports.length !== 4) fail(`${location}.supports`, 'must contain exactly four supports');
+  task.supports.forEach((support, index) => safeString(support, `${location}.supports[${index}]`, { min: 3, max: 80 }));
+  if (new Set(task.supports.map((support) => support.toLocaleLowerCase('en'))).size !== 4) {
+    fail(`${location}.supports`, 'must be unique within the task');
+  }
+
+  plainObject(task.rubric, `${location}.rubric`);
+  exactKeys(task.rubric, ['directQuestionRequired', 'perQuestionMaxScore', 'questionCount'], `${location}.rubric`);
+  if (task.rubric.questionCount !== 4 || task.rubric.perQuestionMaxScore !== 1
+    || task.rubric.directQuestionRequired !== true) {
+    fail(`${location}.rubric`, 'must define four separately scored direct questions');
+  }
+
+  plainObject(task.provenance, `${location}.provenance`);
+  exactKeys(task.provenance, ['author', 'createdAt', 'kind', 'reviewStatus'], `${location}.provenance`);
+  if (task.provenance.kind !== 'original' || task.provenance.author !== 'Easy Boost'
+    || task.provenance.createdAt !== '2026-08-06'
+    || task.provenance.reviewStatus !== 'automatically_checked') {
+    fail(`${location}.provenance`, 'must identify automatically checked original Easy Boost material');
+  }
+
+  return task;
+}
+
+export function assertSpeakingTask2Catalog(catalog) {
+  plainObject(catalog, 'catalog');
+  exactKeys(catalog, ['contractVersion', 'format', 'id', 'revision', 'tasks'], 'catalog');
+  if (catalog.id !== SPEAKING_CATALOG_ID) fail('catalog.id', `must be ${SPEAKING_CATALOG_ID}`);
+  if (catalog.revision !== 1) fail('catalog.revision', 'must be 1');
+  if (catalog.contractVersion !== SPEAKING_TASK2_CONTRACT_VERSION) fail('catalog.contractVersion', 'is unsupported');
+  plainObject(catalog.format, 'catalog.format');
+  exactKeys(catalog.format, [
+    'exam', 'maxScore', 'preparationSeconds', 'questionCount', 'questionSeconds',
+    'source', 'sourceRevision', 'taskType',
+  ], 'catalog.format');
+  if (catalog.format.exam !== 'ege-english-2026' || catalog.format.taskType !== 2
+    || catalog.format.preparationSeconds !== 60 || catalog.format.questionSeconds !== 20
+    || catalog.format.questionCount !== 4 || catalog.format.maxScore !== 4
+    || catalog.format.source !== 'fipi-ege-2026' || catalog.format.sourceRevision !== '2026-08-06') {
+    fail('catalog.format', 'must match the fixed EGE-2026 task 2 four-question contract');
+  }
+  if (!Array.isArray(catalog.tasks) || catalog.tasks.length !== 60) fail('catalog.tasks', 'must contain exactly 60 tasks');
+
+  const ids = new Set();
+  const advertisements = new Set();
+  const supportSets = new Set();
+  const counts = Object.fromEntries(Object.keys(SPEAKING_TASK2_CEFR_COUNTS).map((cefr) => [cefr, 0]));
+  catalog.tasks.forEach((task, index) => {
+    assertSpeakingTask2(task, `catalog.tasks[${index}]`);
+    const advertisementKey = task.advertisement.toLocaleLowerCase('en');
+    const supportKey = task.supports.join('\n').toLocaleLowerCase('en');
+    if (ids.has(task.id)) fail('catalog.tasks', 'id must be unique');
+    if (advertisements.has(advertisementKey)) fail('catalog.tasks', 'advertisement must be unique');
+    if (supportSets.has(supportKey)) fail('catalog.tasks', 'four-support sequence must be unique');
+    ids.add(task.id);
+    advertisements.add(advertisementKey);
+    supportSets.add(supportKey);
+    counts[task.cefr] += 1;
+  });
+  for (const [cefr, expected] of Object.entries(SPEAKING_TASK2_CEFR_COUNTS)) {
+    if (counts[cefr] !== expected) fail('catalog.tasks', `must contain ${expected} ${cefr} tasks`);
+  }
+  return catalog;
+}
+
+export function speakingTask2PublicAssignment(task) {
+  assertSpeakingTask2(task);
+  return Object.freeze({
+    id: task.id,
+    revision: task.revision,
+    taskType: task.taskType,
+    cefr: task.cefr,
+    topic: task.topic,
+    preparationSeconds: task.preparationSeconds,
+    questionSeconds: task.questionSeconds,
+    maxScore: task.maxScore,
+    instruction: task.instruction,
+    advertisement: task.advertisement,
+    supports: Object.freeze([...task.supports]),
   });
 }
 

@@ -162,3 +162,25 @@ test('speaking module accepts only the server-owned public task 1 assignment sha
   assert.equal(speaking.serverTask1Set({ ...session, task: { ...session.task, reference: { script: 'secret' } } }), null);
   assert.equal(speaking.serverTask1Set({ ...session, pronunciationAssessment: { available: true } }), null);
 });
+
+test('speaking module accepts only the server-owned four-support task 2 assignment shape', () => {
+  const speaking = createSpeakingModule();
+  const session = {
+    id: '72200000-0000-4000-8000-000000000001',
+    task: {
+      id: 'speaking-pilot-v1.task2.weekend-pottery', revision: 1, taskType: 2,
+      cefr: 'B1', topic: 'Creative courses', preparationSeconds: 60, questionSeconds: 20,
+      maxScore: 4, instruction: 'Ask four questions.', advertisement: 'A server-owned advertisement.',
+      supports: ['course dates', 'participation fee', 'group size', 'tools provided'],
+    },
+    assessment: { available: false, reason: 'deferred_to_tickets_06_07' },
+  };
+
+  assert.deepEqual(plain(speaking.serverTask2Set(session)), {
+    id: session.task.id, revision: 1, ad: session.task.advertisement,
+    points: session.task.supports, topic: session.task.topic, cefr: 'B1',
+  });
+  assert.equal(speaking.serverTask2Set({ ...session, task: { ...session.task, supports: [...session.task.supports, 'fifth'] } }), null);
+  assert.equal(speaking.serverTask2Set({ ...session, task: { ...session.task, questionSeconds: 25 } }), null);
+  assert.equal(speaking.serverTask2Set({ ...session, assessment: { available: true } }), null);
+});
