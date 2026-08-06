@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
-import { parseSpeakingReview, speakingRequestSchema } from '../ai/speaking.js';
+import { parseSpeakingReview, speakingTrustedInputSchema } from '../ai/speaking.js';
+import { parseStoredSpeakingReview, SPEAKING_SCORING_VERSION } from '../speaking/fipi-scoring.js';
 import { parseAndValidateWritingReview, writingAssignmentSchema } from '../ai/writing.js';
 import { getCanonicalVoiceTutorItem, getCanonicalVoiceTutorResultSet } from './canonical-items.js';
 import {
@@ -263,10 +264,16 @@ function validatedReviewAttempt(source, attempt) {
     }
     if (source === 'speaking') {
       const taskType = Number(attempt.task_type);
-      const parsedInput = speakingRequestSchema.safeParse({ taskType, transcript: attempt.transcript, assignment: attempt.assignment });
+      const parsedInput = speakingTrustedInputSchema.safeParse({ taskType, transcript: attempt.transcript, assignment: attempt.assignment });
       if (!parsedInput.success) throw new Error('speaking attempt invalid');
       const learnerAnswer = boundedString(parsedInput.data.transcript, 8_000, 'VOICE_TUTOR_CAPSULE_TOO_LARGE');
-      const review = parseSpeakingReview(taskType, JSON.stringify(attempt.review));
+      if (attempt.review.scoringVersion === SPEAKING_SCORING_VERSION
+        && attempt.review.status !== 'scored') {
+        throw new VoiceTutorCapsuleError('VOICE_TUTOR_ATTEMPT_NOT_SUPPORTED');
+      }
+      const review = attempt.review.scoringVersion === SPEAKING_SCORING_VERSION
+        ? parseStoredSpeakingReview(taskType, attempt.review)
+        : parseSpeakingReview(taskType, JSON.stringify(attempt.review));
       return { taskType, assignment: structuredClone(parsedInput.data.assignment), learnerAnswer, review };
     }
   } catch (error) {

@@ -56,6 +56,22 @@ test('a call carries the limits of the operation it was made for', async () => {
   ]);
 });
 
+test('xAI speaking evaluation sends the official strict json_schema response format', async () => {
+  const client = createProviderClient();
+  const calls = stubFetch(() => answer('{"confidence":1}'));
+  const responseFormat = {
+    type: 'json_schema',
+    json_schema: {
+      name: 'speaking_semantic_task_2',
+      strict: true,
+      schema: { type: 'object', properties: { confidence: { type: 'number' } }, required: ['confidence'], additionalProperties: false },
+    },
+  };
+
+  await client.askProvider(GROK, 'system', 'user', 'evaluate_speaking', { responseFormat });
+  assert.deepEqual(calls[0].body.response_format, responseFormat);
+});
+
 test('a failing primary provider hands the request to the spare', async () => {
   const client = createProviderClient();
   const calls = stubFetch((call) => (call.url.startsWith('https://xai.') ? refusal('down for maintenance') : answer('from the spare')));

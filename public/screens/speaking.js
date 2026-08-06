@@ -17,6 +17,7 @@ import {createSpeakingTask2BrowserFlow} from '../speaking-task2-runtime.js';
 import {createSpeakingTask3BrowserFlow} from '../speaking-task3-runtime.js';
 import {createSpeakingTask4BrowserFlow} from '../speaking-task4-runtime.js';
 import {createSpeakingFullBrowserFlow} from '../speaking-full-runtime.js';
+import {convertRecordingToPcm16Wav} from '../speaking-pronunciation-audio.js';
 import {SPEAKING_TASK1_CATALOG} from '../content/speaking/task1-v1.js';
 import {SPEAKING_TASK2_CATALOG} from '../content/speaking/task2-v1.js';
 import {SPEAKING_TASK3_CATALOG} from '../content/speaking/task3-v1.js';
@@ -58,7 +59,7 @@ function spFmt(s){return speakingModule.formatTime(s)}
 function spStopAll(){clearInterval(SP_tm);SP_tm=null;
   if(SP_rec&&SP_rec.state!=='inactive'){try{SP_rec.stop()}catch(e){}}
   try{lStop()}catch(e){}}
-function spReleaseRecording(){if(SP&&SP.url)try{URL.revokeObjectURL(SP.url)}catch(e){}if(SP){SP.url=null;SP.blob=null}SP_chunks=[]}
+function spReleaseRecording(){if(SP&&SP.url)try{URL.revokeObjectURL(SP.url)}catch(e){}if(SP){SP.url=null;SP.blob=null;SP.pronunciationUploadCache=null}SP_chunks=[]}
 function spDisposeTask1Flow(){if(SP_TASK1_FLOW){SP_TASK1_FLOW.dispose();SP_TASK1_FLOW=null}}
 function spDisposeTask2Flow(){if(SP_TASK2_FLOW){SP_TASK2_FLOW.dispose();SP_TASK2_FLOW=null}}
 function spDisposeTask3Flow(){if(SP_TASK3_FLOW){SP_TASK3_FLOW.dispose();SP_TASK3_FLOW=null}}
@@ -74,7 +75,7 @@ function task3RecoveryPointerInvalid(error){return Number(error&&error.status)==
 function task4RecoveryPointerInvalid(error){return Number(error&&error.status)===404
   ||String(error&&error.code)==='SPEAKING_TASK4_CATALOG_REVISION_MISMATCH'}
 function adaptiveSpeakingLock(){try{var active=adaptiveRuntimeSnapshot().active;return active&&active.module==='speaking'?active:null}catch(_){return null}}
-function launchAdaptiveSpeakingLock(lock){var task=lock&&adaptiveSpeakingTask(lock.contentRef);return Boolean(task&&launchSpeakingTask(task.taskNumber,lock.contentRef))}
+function launchAdaptiveSpeakingLock(lock){if(!lock)return false;try{toast('Говорение в персональном плане временно отключено до безопасной привязки оценки к пользователю.')}catch(_){}Promise.resolve(openAdaptivePlan()).catch(function(){});return true}
 function initSpeaking(){if(!S)return;var lock=adaptiveSpeakingLock();spStopAll();spReleaseRecording();spDisposeTask1Flow();spDisposeTask2Flow();spDisposeTask3Flow();spDisposeTask4Flow();SP=null;spSync();if(lock&&launchAdaptiveSpeakingLock(lock))return;spHub()}
 async function spLoadPronunciationStatus(){var box=document.getElementById('speaking_pronunciation_status');if(!box)return;
   try{var payload=await apiGet('/api/v1/speaking/pronunciation-assessments/status');var view=speakingModule.pronunciationStatusView(payload);box=document.getElementById('speaking_pronunciation_status');if(!box)return;
@@ -157,9 +158,8 @@ async function spOpen(t){var lock=adaptiveSpeakingLock();if(lock)return launchAd
       try{toast(apiMessage(error,'request'))}catch(_){}spHub();return false}}
   SP={t:t,set:spSet(t),phase:'intro',qi:0,url:null};spRender();return true}
 function launchSpeakingTask(taskNumber,contentRef){
-  var task=adaptiveSpeakingTask(contentRef);if(!task||task.taskNumber!==taskNumber)return false;
-  var set=taskNumber===2?{...task.assignment,exq:SP2[0].exq}:task.assignment;
-  spReleaseRecording();SP={t:taskNumber,set:set,phase:'intro',qi:0,url:null,adaptiveContentRef:contentRef};SP_sheet=false;spRender();return true}
+  if(!adaptiveSpeakingTask(contentRef)||![2,4].includes(taskNumber))return false;
+  return launchAdaptiveSpeakingLock({contentRef:contentRef})}
 function spRestartAdaptive(){if(!SP||!SP.adaptiveContentRef||SP.evaluating)return false;var taskNumber=SP.t,contentRef=SP.adaptiveContentRef;spStopAll();return launchSpeakingTask(taskNumber,contentRef)}
 function spBtn(label,fn,solid){return '<button type="button" class="sq" style="'+WBTN+(solid?'background:linear-gradient(135deg,#FFA570,#F2683F);color:#fff;border:none;box-shadow:0 12px 24px rgba(242,104,63,.32);':'color:#B54E2F;')+'" onclick="'+fn+'">'+label+'</button>'}
 function spTimerChip(){return '<div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-top:12px;">'
@@ -199,7 +199,8 @@ function spRender(){var area=document.getElementById('s9_area');if(!area||!SP)re
   if(officialTask2Active()&&SP.phase==='task2_complete'){
     area.innerHTML='<div id="s9_card" class="clayCard" role="status" aria-live="polite" style="position:relative;overflow:hidden;padding:22px;text-align:center;">'+wDeco()
       +'<div style="font-size:42px;">✅</div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:20px;color:#2B2B2B;margin-top:8px;">4 отдельные записи завершены</div>'
-      +'<div style="font-weight:600;font-size:13px;color:#777163;line-height:1.55;margin-top:7px;">Сервер сохранил только длительность, локальное прослушивание и самооценку каждой позиции. Автоматическая оценка появится после подключения и методической проверки в следующих этапах.</div></div>'
+      +'<div style="font-weight:600;font-size:13px;color:#777163;line-height:1.55;margin-top:7px;">Все четыре локальные записи готовы. По твоей команде они будут отправлены в защищённый контур оценки и связаны только с этой тренировкой.</div></div>'
+      +'<div style="height:10px;"></div>'+spBtn('✨ Оценить по критериям ЕГЭ','spEval(this)',true)+'<div id="sp_evalbox"></div>'
       +'<div style="height:10px;"></div>'+spBtn('Новая тренировка','spOpen(2)',true)+'<div style="height:10px;"></div>'+spBtn('К заданиям','initSpeaking()');
     spAnim('win','.32s');return}
   if(officialTask3Active()&&SP.phase==='question'){
@@ -234,7 +235,8 @@ function spRender(){var area=document.getElementById('s9_area');if(!area||!SP)re
   if(officialTask3Active()&&SP.phase==='task3_complete'){
     area.innerHTML='<div id="s9_card" class="clayCard" role="status" aria-live="polite" style="position:relative;overflow:hidden;padding:22px;text-align:center;">'+wDeco()
       +'<div style="font-size:42px;">✅</div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:20px;color:#2B2B2B;margin-top:8px;">5 отдельных записей завершены</div>'
-      +'<div style="font-weight:600;font-size:13px;color:#777163;line-height:1.55;margin-top:7px;">Сервер сохранил только длительность, локальное прослушивание и самооценку каждого ответа. Автоматическая оценка появится после подключения и методической проверки в следующих этапах.</div></div>'
+      +'<div style="font-weight:600;font-size:13px;color:#777163;line-height:1.55;margin-top:7px;">Все пять локальных записей готовы. По твоей команде они будут отправлены в защищённый контур оценки и связаны с точными вопросами интервью.</div></div>'
+      +'<div style="height:10px;"></div>'+spBtn('✨ Оценить по критериям ЕГЭ','spEval(this)',true)+'<div id="sp_evalbox"></div>'
       +'<div style="height:10px;"></div>'+spBtn('Новая тренировка','spOpen(3)',true)+'<div style="height:10px;"></div>'+spBtn('К заданиям','initSpeaking()');
     spAnim('win','.32s');return}
   if(officialTask4Active()&&SP.phase==='task4_review'){
@@ -251,7 +253,8 @@ function spRender(){var area=document.getElementById('s9_area');if(!area||!SP)re
   if(officialTask4Active()&&SP.phase==='task4_complete'){
     area.innerHTML='<div id="s9_card" class="clayCard" role="status" aria-live="polite" style="position:relative;overflow:hidden;padding:22px;text-align:center;">'+wDeco()
       +'<div style="font-size:42px;">✅</div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:20px;color:#2B2B2B;margin-top:8px;">Тренировка задания 4 завершена</div>'
-      +'<div style="font-weight:600;font-size:13px;color:#777163;line-height:1.55;margin-top:7px;">Запись осталась только в браузере. Автоматическая оценка появится после подключения и методической проверки следующих этапов.</div></div>'
+      +'<div style="font-weight:600;font-size:13px;color:#777163;line-height:1.55;margin-top:7px;">Локальная запись готова. По твоей команде она будет отправлена в защищённый контур и проверена по трём критериям задания 4.</div></div>'
+      +'<div style="height:10px;"></div>'+spBtn('✨ Оценить по критериям ЕГЭ','spEval(this)',true)+'<div id="sp_evalbox"></div>'
       +'<div style="height:10px;"></div>'+spBtn('Новая тренировка','spOpen(4)',true)+'<div style="height:10px;"></div>'+spBtn('К заданиям','initSpeaking()');
     spAnim('win','.32s');return}
   /* ---- интро ---- */
@@ -313,8 +316,7 @@ function spRender(){var area=document.getElementById('s9_area');if(!area||!SP)re
   /* ---- результат ---- */
   if(SP.phase==='done'){var r=spSt();
     var extra='';
-    if(t===1)extra='<div class="clayCard" role="status" aria-live="polite" style="padding:14px 16px;margin-top:12px;background:#FFF4DE;color:#6E5422;font-weight:700;font-size:12.5px;line-height:1.55;">Оценка произношения пока не подключена. Здесь нет фонетического балла: запись остаётся в браузере, а сервер получает только метаданные тренировки.</div>'
-      +'<div style="height:10px;"></div>'+spBtn('🔊 Эталон диктора','spEtalon()');
+    if(t===1)extra='<div style="height:10px;"></div>'+spBtn('🔊 Эталон диктора','spEtalon()');
     if(t===2)extra='<div class="clayCard" style="padding:14px 16px;margin-top:12px;"><div style="font-weight:800;font-size:10px;letter-spacing:1.2px;color:#1D7F4A;">ОБРАЗЦЫ ВОПРОСОВ</div>'
       +set.points.map(function(p,i){return '<div style="margin-top:8px;font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.5;"><b>'+(i+1)+'. '+p+':</b><br><i>'+set.exq[i]+'</i></div>'}).join('')+'</div>';
     if(t===4)extra='<div class="clayCard" style="padding:14px 16px;margin-top:12px;"><div style="font-weight:800;font-size:10px;letter-spacing:1.2px;color:#1D7F4A;">ПРОВЕРЬ СЕБЯ</div>'
@@ -327,7 +329,7 @@ function spRender(){var area=document.getElementById('s9_area');if(!area||!SP)re
       +'<div style="font-weight:600;font-size:13px;color:#777163;margin-top:5px;">Послушай себя со стороны и сверься со шпаргалкой.<br>Тренировок в этом задании: '+r['t'+t].n+'</div></div>'
       +'<div style="height:12px;"></div>'
       +(SP.url?spBtn('▶ Послушать свою запись','spPlay()',true):'<div style="text-align:center;font-weight:600;font-size:12.5px;color:#A83226;">Запись не получилась — проверь доступ к микрофону</div>')
-      +(SP.blob&&t>1?'<div style="height:10px;"></div><button type="button" class="sq" onclick="spEval(this)" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#6FC2B0,#1F9E5A)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(31,158,90,.3);">✨ Оценить с ИИ по критериям</button>':'')
+      +(SP.blob?'<div style="height:10px;"></div><button type="button" class="sq" onclick="spEval(this)" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#6FC2B0,#1F9E5A)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(31,158,90,.3);">✨ Оценить по критериям ЕГЭ</button>':'')
       +(SP.blob?'<div style="height:10px;"></div>'+spBtn('Удалить запись','spDeleteRecording()'):'')
       +(SP.blob&&t===1&&!SP.task1Completed?'<div class="clayCard" style="padding:14px 16px;margin-top:12px;"><div style="font-weight:800;font-size:12px;color:#4A453E;">Как ощущалось чтение?</div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px;">'
         +'<button type="button" class="sq" onclick="spCompleteTask1(\'weak\',this)" style="min-height:44px;border:0;border-radius:12px;background:#FDEDEA;color:#A83226;font-weight:800;">Нужно повторить</button>'
@@ -457,18 +459,57 @@ async function spSTT(blob){
   var j=await apiPostBinary('/api/v1/stt',blob,blob.type||'application/octet-stream');
   return j.text||''}
 function spAssignment(t,set){return speakingModule.assignment(t,set)}
+function spOfficialRecordings(){
+  if(!SP||!SP.session||!SP.session.id)return null;
+  if(SP.t===1&&SP_TASK1_FLOW&&SP.blob)return [{blob:SP.blob,itemNumber:null}];
+  if(SP.t===2&&SP_TASK2_FLOW)return SP_TASK2_FLOW.assessmentRecordings().map(function(item){return {blob:item.blob,itemNumber:item.positionNumber}});
+  if(SP.t===3&&SP_TASK3_FLOW)return SP_TASK3_FLOW.assessmentRecordings().map(function(item){return {blob:item.blob,itemNumber:item.positionNumber}});
+  if(SP.t===4&&SP_TASK4_FLOW&&SP.blob)return [{blob:SP.blob,itemNumber:null}];
+  return null}
+async function spUploadPronunciation(taskType,sessionId,recording,idempotencyKey){
+  if(!window.crypto||typeof window.crypto.randomUUID!=='function')throw new Error('безопасный ключ загрузки недоступен — обнови браузер');
+  var wav=await convertRecordingToPcm16Wav(recording.blob);
+  var headers={
+    'Idempotency-Key':idempotencyKey||window.crypto.randomUUID(),
+    'X-Speech-Locale':'en-GB',
+    'X-Audio-Duration-Seconds':String(wav.durationSeconds)
+  };
+  if(recording.itemNumber!=null)headers['X-Speaking-Item']=String(recording.itemNumber);
+  var result=await apiPostBinary('/api/v1/speaking/task-'+taskType+'/sessions/'+sessionId+'/pronunciation-assessment',wav.blob,'audio/wav',headers);
+  if(!result||!result.billing||!result.billing.assessmentId||result.assessment&&result.assessment.status!=='success'){
+    var unavailable=new Error('автоматическая оценка записи сейчас недоступна — попробуй позже');unavailable.code='SPEAKING_PRONUNCIATION_UNAVAILABLE';throw unavailable}
+  return {key:headers['Idempotency-Key'],transcript:result.assessment&&result.assessment.transcript||''}}
 async function spEval(btn){
-  if(!SP||!SP.blob)return;
-  if(officialTask2Active()||officialTask3Active()||officialTask4Active())return;
+  if(!SP)return;
+  var officialRecordings=spOfficialRecordings();
+  if(!officialRecordings&& !SP.blob)return;
   var adaptiveRetry=document.getElementById('adaptive_speaking_retry');SP.evaluating=true;if(adaptiveRetry)adaptiveRetry.disabled=true;
-  if(btn){if(btn.dataset.busy)return;btn.dataset.busy=1;btn.textContent='Расшифровываю запись…';btn.style.pointerEvents='none'}
+  if(btn){if(btn.dataset.busy)return;btn.dataset.busy=1;btn.textContent=officialRecordings?'Готовлю аудио…':'Расшифровываю запись…';btn.style.pointerEvents='none'}
   try{
-    var tr=await spSTT(SP.blob);
-    if(!speakingModule.isTranscriptUsable(tr))throw new Error('речь не распознана — говори громче и ближе к микрофону');
+    var tr='';var evaluationRequest;
+    if(officialRecordings){var uploaded=[];
+      var uploadCache=SP.pronunciationUploadCache;
+      if(!uploadCache||uploadCache.sessionId!==SP.session.id||uploadCache.taskType!==SP.t||uploadCache.items.length!==officialRecordings.length){
+        uploadCache={sessionId:SP.session.id,taskType:SP.t,items:officialRecordings.map(function(){return {key:window.crypto.randomUUID(),result:null}})};
+        SP.pronunciationUploadCache=uploadCache}
+      for(var recordingIndex=0;recordingIndex<officialRecordings.length;recordingIndex++){
+        if(btn)btn.textContent='Проверяю запись '+(recordingIndex+1)+' из '+officialRecordings.length+'…';
+        var cachedUpload=uploadCache.items[recordingIndex];
+        if(!cachedUpload.result)cachedUpload.result=await spUploadPronunciation(SP.t,SP.session.id,officialRecordings[recordingIndex],cachedUpload.key);
+        uploaded.push(cachedUpload.result)}
+      tr=uploaded.map(function(item){return item.transcript}).filter(Boolean).join('\n');
+      evaluationRequest={taskType:SP.t,sessionId:SP.session.id};
+      if(SP.t===2||SP.t===3)evaluationRequest.pronunciationAssessmentKeys=uploaded.map(function(item){return item.key});
+      else evaluationRequest.pronunciationAssessmentKey=uploaded[0].key
+    }else{throw new Error('серверная запись не найдена — начни тренировку заново')}
     if(btn)btn.textContent='Оцениваю по критериям…';
-    var response=await apiPost('/api/v1/ai/evaluate-speaking',{taskType:SP.t,transcript:tr,assignment:spAssignment(SP.t,SP.set)},true);
+    var response=await apiPost('/api/v1/ai/evaluate-speaking',evaluationRequest,true);
     var d=response.review;
     if(!d||typeof d.got==='undefined')throw new Error('ИИ вернул неожиданный ответ, попробуй ещё раз');
+    if(d.status==='needs_retry'){
+      SP.pronunciationUploadCache=null;
+      if(btn){btn.style.display='none';btn.style.pointerEvents='';delete btn.dataset.busy}
+      SP.evaluating=false;if(adaptiveRetry)adaptiveRetry.disabled=false;spShowEval(d,tr,null);return}
     var score=speakingModule.clampScore(d,SP.t);d.got=score.got;d.max=score.max;
     S.spkScores=speakingModule.appendScore(S.spkScores,{t:SP.t,g:d.got,m:d.max,ts:Date.now()});
     spSync();save();
@@ -483,12 +524,17 @@ async function spEval(btn){
 function spShowEval(d,tr,voiceTutor){var box=document.getElementById('sp_evalbox');if(!box)return;
   /* всё, что пришло от модели или STT, попадает в DOM только экранированным */
   var safe=ui.escapeHtml;
+  if(d.status==='needs_retry'){
+    box.innerHTML='<div class="clayCard" role="status" style="padding:18px;margin-top:12px;background:#FFF4E6;color:#714515;">'
+      +'<div style="font-weight:900;font-size:18px;">Нужна ещё одна запись</div>'
+      +'<div style="font-weight:600;font-size:13px;line-height:1.5;margin-top:6px;">'+safe(d.verdict||'Запись или расшифровка недостаточно надёжна для честного балла. Попробуй записать ответ ещё раз.')+'</div>'
+      +'<div style="font-weight:600;font-size:11.5px;line-height:1.5;margin-top:8px;">Ноль не поставлен: автоматическая система не уверена в доказательствах.</div></div>';return}
   var pct=d.got/(d.max||1);
   var col=pct>=0.7?'#1F8A50':(pct>=0.4?'#C77400':'#C0392B');
   var h='<div class="clayCard" style="position:relative;overflow:hidden;padding:18px;margin-top:12px;animation:wflip .5s cubic-bezier(.25,.75,.35,1) both;">'
     +'<div style="text-align:center;">'
     +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:30px;color:'+col+';">'+d.got+' из '+d.max+'</div>'
-    +(speakingModule.isExperimentalTask(SP.t)?'<div class="ai-disclaimer" style="margin-top:6px;font-weight:600;font-size:11.5px;color:#777163;line-height:1.5;">'+ui.escapeHtml(ui.AI_DISCLAIMER)+'</div>':'')
+    +(speakingModule.isExperimentalTask(SP.t)||SP.t===1||SP.t===2?'<div class="ai-disclaimer" style="margin-top:6px;font-weight:600;font-size:11.5px;color:#777163;line-height:1.5;">'+ui.escapeHtml(ui.AI_DISCLAIMER)+'</div>':'')
     +'<div style="font-weight:700;font-size:13.5px;color:#2B2B2B;margin-top:4px;">'+safe(d.verdict||'')+'</div></div>';
   if(Array.isArray(d.criteria)&&d.criteria.length)
     h+='<div style="margin-top:12px;">'+d.criteria.map(function(c){
@@ -502,7 +548,10 @@ function spShowEval(d,tr,voiceTutor){var box=document.getElementById('sp_evalbox
       +'<div style="font-weight:800;font-size:10px;letter-spacing:1.2px;color:#C2421B;">НАД ЧЕМ ПОРАБОТАТЬ</div>'
       +d.fix.map(function(f){return '<div style="margin-top:7px;font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.5;">'
         +(f.wrong?'<s style="color:#A83226;">'+safe(f.wrong)+'</s> → ':'')+(f.right?'<b style="color:#1D7F4A;">'+safe(f.right)+'</b><br>':'')+safe(f.note||'')+'</div>'}).join('')+'</div>';
-  h+='<div style="margin-top:10px;font-weight:600;font-size:11.5px;color:#777163;line-height:1.5;">ИИ проверил текст ответа. Произношение, интонация, паузы и беглость не оценивались.</div>';
+  var evidenceNote=SP.t===1
+    ?'Автоматическая оценка учла распознанный текст, полноту чтения, беглость распознавания и отмеченные системой грубые ошибки в словах. Интонация и отдельные фонемы в балл не входили.'
+    :'Автоматическая оценка учла распознанное содержание ответа и отмеченные системой грубые ошибки в словах. Интонация, отдельные фонемы и естественность пауз в балл не входили.';
+  h+='<div style="margin-top:10px;font-weight:600;font-size:11.5px;color:#777163;line-height:1.5;">'+safe(evidenceNote)+'</div>';
   h+='<details style="margin-top:12px;"><summary style="font-weight:700;font-size:12px;color:#777163;cursor:pointer;">Расшифровка твоей речи</summary>'
     +'<div style="margin-top:8px;font-weight:500;font-size:12.5px;color:#4A453E;line-height:1.6;font-style:italic;">'+safe(tr)+'</div><button class="sq" onclick="spFlagTranscript()" style="margin-top:8px;border:0;background:#F4EFE9;padding:7px 10px;border-radius:10px;font-weight:700;font-size:11px;">Расшифровка неточная</button></details>'
     +(voiceTutor&&d.got<d.max?voiceTutorButton(voiceTutor):'')

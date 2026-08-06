@@ -47,6 +47,7 @@ import {
   selectFullSpeakingVariant,
   submitFullSpeakingSession,
 } from '../speaking/full-section-session.js';
+import { recoverSpeakingEvaluationAttempt } from '../speaking/evaluation-claim.js';
 import { isMonotonicAdaptiveRetentionRefresh } from '../adaptive-learning/retention.js';
 import { adaptiveRepeatExecutionMatches } from '../adaptive-learning/repeat-execution.js';
 import {
@@ -707,6 +708,7 @@ export function createFileRepository(filePath) {
         request_hash: candidate.requestHash,
         status: 'reserved',
         locale: candidate.locale,
+        context_id: candidate.contextId,
         period_start: candidate.periodStart.toISOString(),
         allowance_seconds: quota.limitSeconds,
         reserved_seconds: candidate.reservedSeconds,
@@ -1810,17 +1812,73 @@ export function createFileRepository(filePath) {
     return id;
   }
 
-  async function finishSpeakingAttempt(id, result) {
+  async function claimSpeakingEvaluation(username, input, promptVersion, evaluationFingerprint, {
+    now = new Date(),
+  } = {}) {
+    if (!/^[a-f0-9]{64}$/u.test(evaluationFingerprint)) {
+      throw new Error('SPEAKING_EVALUATION_FINGERPRINT_INVALID');
+    }
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      if (!state.users[username]) throw new Error('USER_NOT_FOUND');
+      const replay = state.speaking_attempts.find((item) => (
+        item.username === username && item.evaluation_fingerprint === evaluationFingerprint
+      ));
+      if (replay) {
+        if (recoverSpeakingEvaluationAttempt(replay, now)) {
+          await persist();
+          return { created: true, attempt: structuredClone(replay) };
+        }
+        return { created: false, attempt: structuredClone(replay) };
+      }
+      const id = (state.speaking_attempts.at(-1)?.id || 0) + 1;
+      const attempt = {
+        id,
+        username,
+        task_type: input.taskType,
+        assignment: structuredClone(input.assignment),
+        assignment_fingerprint: adaptiveExecutionRequestHash(input.assignment),
+        evaluation_fingerprint: evaluationFingerprint,
+        transcript: input.transcript,
+        prompt_version: promptVersion,
+        provider: null,
+        model: null,
+        status: 'pending',
+        created_at: Date.now(),
+        evaluation_claimed_at: new Date(now).getTime(),
+        evaluation_claim_generation: 1,
+      };
+      state.speaking_attempts.push(attempt);
+      await persist();
+      return { created: true, attempt: structuredClone(attempt) };
+    });
+  }
+
+  async function finishSpeakingAttempt(id, result, { claimGeneration = null } = {}) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      const attempt = state.speaking_attempts.find((item) => item.id === Number(id));
+      if (!attempt) throw new Error('SPEAKING_ATTEMPT_NOT_FOUND');
+      if (claimGeneration != null && (attempt.status !== 'pending'
+        || Number(attempt.evaluation_claim_generation) !== Number(claimGeneration))) {
+        throw new Error('SPEAKING_EVALUATION_CLAIM_LOST');
+      }
+      attempt.status = result.status;
+      attempt.review = result.review ? structuredClone(result.review) : null;
+      attempt.provider = result.provider || null;
+      attempt.model = result.model || null;
+      attempt.error_code = result.errorCode || null;
+      attempt.evaluated_at = Date.now();
+      await persist();
+    });
+  }
+
+  async function getSpeakingEvaluationClaim(username, evaluationFingerprint) {
     await load();
-    const attempt = state.speaking_attempts.find((item) => item.id === Number(id));
-    if (!attempt) throw new Error('SPEAKING_ATTEMPT_NOT_FOUND');
-    attempt.status = result.status;
-    attempt.review = result.review ? structuredClone(result.review) : null;
-    attempt.provider = result.provider || null;
-    attempt.model = result.model || null;
-    attempt.error_code = result.errorCode || null;
-    attempt.evaluated_at = Date.now();
-    await persist();
+    const attempt = state.speaking_attempts.find((item) => (
+      item.username === username && item.evaluation_fingerprint === evaluationFingerprint
+    ));
+    return attempt ? structuredClone(attempt) : null;
   }
 
   async function getSpeakingAttempt(username, id) {
@@ -2172,7 +2230,9 @@ export function createFileRepository(filePath) {
         .filter((entry) => entry.username === username && entry.status === 'completed')
         .map((entry) => ({ entry, module: 'writing', activity: String(entry.task_type), score: Number(entry.review?.overall_got), maxScore: Number(entry.review?.overall_max) })),
       ...state.speaking_attempts
-        .filter((entry) => entry.username === username && entry.status === 'completed')
+        .filter((entry) => entry.username === username && entry.status === 'completed'
+          && entry.review?.status === 'scored'
+          && typeof entry.review?.got === 'number' && typeof entry.review?.max === 'number')
         .map((entry) => ({ entry, module: 'speaking', activity: `speaking_${entry.task_type}`, score: Number(entry.review?.got), maxScore: Number(entry.review?.max) })),
     ].filter((item) => Number.isFinite(item.score) && Number.isFinite(item.maxScore) && item.maxScore > 0)
       .map((item) => ({
@@ -3353,7 +3413,10 @@ export function createFileRepository(filePath) {
         ? source?.source_task_ref === block.launch?.taskId
         : expectedSpeaking?.taskNumber === Number(source?.task_type)
           && source?.assignment_fingerprint === adaptiveExecutionRequestHash(expectedSpeaking.assignment);
-      if (!source || source.status !== 'completed' || Number(source.created_at) < Number(claim.issued_at)
+      if (!source || source.status !== 'completed'
+        || (attempt.type === 'speaking' && (source.review?.status !== 'scored'
+          || typeof source.review?.got !== 'number' || typeof source.review?.max !== 'number'))
+        || Number(source.created_at) < Number(claim.issued_at)
         || block.module !== attempt.type || block.activityId !== expectedActivity || !exactTask) {
         throw new Error('ADAPTIVE_EXECUTION_ATTEMPT_MISMATCH');
       }
@@ -3597,7 +3660,11 @@ export function createFileRepository(filePath) {
       rule_cards: state.rule_cards.filter((item) => item.created_for_username === username),
       payment_requests: Object.values(state.payment_requests).filter((item) => item.username === username),
       writing_attempts: state.writing_attempts.filter((item) => item.username === username),
-      speaking_attempts: state.speaking_attempts.filter((item) => item.username === username),
+      speaking_attempts: state.speaking_attempts
+        .filter((item) => item.username === username)
+        .map(({
+          evaluation_fingerprint, evaluation_claimed_at, evaluation_claim_generation, ...item
+        }) => item),
       speaking_task1_sessions: state.speaking_task1_sessions
         .filter((item) => item.username === username)
         .map(({ username: owner, ...item }) => item),
@@ -3827,6 +3894,8 @@ export function createFileRepository(filePath) {
     finishWritingAttempt,
     getWritingAttempt,
     createSpeakingAttempt,
+    claimSpeakingEvaluation,
+    getSpeakingEvaluationClaim,
     finishSpeakingAttempt,
     getSpeakingAttempt,
     assignSpeakingTask1Session,

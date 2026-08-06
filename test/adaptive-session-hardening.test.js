@@ -15,6 +15,10 @@ import { buildAdaptiveLearningPlan } from '../adaptive-learning/plan.js';
 import { buildAdaptiveLearningProfile, EGE_SKILL_TAXONOMY } from '../adaptive-learning/profile.js';
 
 const NOW = new Date('2026-08-05T09:30:00.000Z');
+const COMPOSABLE_SKILLS = new Set(ADAPTIVE_ACTIVITY_REGISTRY.activities
+  .filter((activity) => activity.compositionEnabled !== false
+    && activity.launch.kind !== 'voice_tutor_recovery')
+  .map((activity) => activity.skillId));
 const ELIGIBLE_SKILLS = EGE_SKILL_TAXONOMY.skills.map((skill) => skill.id)
   .filter((skillId) => !skillId.startsWith('ege.vocabulary.'));
 
@@ -135,8 +139,12 @@ test('five sessions converge across every positive eligible weekly budget instea
     usage = updateUsage(usage, preview);
   }
   const bySkill = new Map(usage.map((item) => [item.skillId, item.plannedMinutes]));
-  for (const skillId of ELIGIBLE_SKILLS) assert.ok((bySkill.get(skillId) || 0) > 0, skillId);
-  assert.ok(Math.max(...bySkill.values()) - Math.min(...bySkill.values()) <= 30);
+  for (const skillId of ELIGIBLE_SKILLS.filter((id) => COMPOSABLE_SKILLS.has(id))) {
+    assert.ok((bySkill.get(skillId) || 0) > 0, skillId);
+  }
+  assert.equal(bySkill.has('ege.speaking.interaction'), false);
+  assert.equal(bySkill.has('ege.speaking.monologue'), false);
+  assert.equal([...bySkill.values()].reduce((sum, value) => sum + value, 0), 300);
 });
 
 function reasonPlan(targetSkillId, alternativeSkillId) {
@@ -275,16 +283,23 @@ test('the grammar exam launches fixed built-in content and reports through the s
   assert.match(grammar, /function launchGrammarExam\(contentRef\)/u);
 });
 
-test('adaptive Speaking keeps the exact assignment locked through recording and review', async () => {
+test('adaptive Speaking stays out of composition until its evaluation is owner-bound', async () => {
+  const speakingActivities = ADAPTIVE_ACTIVITY_REGISTRY.activities.filter((activity) => (
+    activity.launch.kind === 'speaking_task'
+  ));
+  assert.equal(speakingActivities.length, 2);
+  assert.ok(speakingActivities.every((activity) => activity.compositionEnabled === false));
+  assert.throws(() => buildAdaptiveSessionPreview({
+    plan: plan({ 'ege.speaking.interaction': 100 }), goal: { weekly_minutes: 300 },
+    profile: profile(), weekUsage: [], durationMinutes: 15, now: NOW,
+    registry: { ...ADAPTIVE_ACTIVITY_REGISTRY, activities: [speakingActivities[0]] },
+  }), (error) => error?.code === 'ADAPTIVE_SESSION_COVERAGE_GAP');
+
   const speaking = await fs.readFile(new URL('../public/screens/speaking.js', import.meta.url), 'utf8');
   assert.match(speaking, /function adaptiveSpeakingLock\(\)/u);
-  assert.match(speaking, /if\(!SP\.adaptiveContentRef\)spNextSet\(SP\.t\)/u);
-  assert.match(speaking, /function spRestartAdaptive\(\).*SP\.evaluating.*launchSpeakingTask\(taskNumber,contentRef\)/u);
-  assert.match(speaking, /id="adaptive_speaking_retry"/u);
-  assert.match(speaking, /if\(retry\)retry\.style\.display='none'/u);
-  assert.match(speaking, /SP\.evaluating=true;if\(adaptiveRetry\)adaptiveRetry\.disabled=true/u);
-  assert.match(speaking, /\(SP\.adaptiveContentRef\s*\n\s*\?'.*adaptive_speaking_retry/su);
-  assert.match(speaking, /:\s*'<div style="height:10px;"><\/div>'\+spBtn\('Ещё раз'/u);
+  assert.match(speaking, /function launchAdaptiveSpeakingLock\(lock\).*openAdaptivePlan\(\).*return true/su);
+  const evaluation = speaking.slice(speaking.indexOf('async function spEval'), speaking.indexOf('function spShowEval'));
+  assert.doesNotMatch(evaluation, /contentRef/u);
 });
 
 test('execution hardening migrates legacy plaintext starts and keeps context labels factual', async () => {
@@ -532,22 +547,14 @@ test('actual low-budget plans remain rolling priorities across every duration an
       usage = updateUsage(usage, preview);
     }
     assert.deepEqual([...servedModules.keys()].sort(), [
-      'grammar', 'listening', 'reading', 'speaking', 'vocabulary', 'writing',
+      'grammar', 'listening', 'reading', 'vocabulary', 'writing',
     ]);
     assert.deepEqual([...servedSkills].sort(), [...new Set(ADAPTIVE_ACTIVITY_REGISTRY.activities
-      .filter((activity) => activity.launch.kind !== 'voice_tutor_recovery')
+      .filter((activity) => activity.launch.kind !== 'voice_tutor_recovery'
+        && activity.compositionEnabled !== false)
       .map((activity) => activity.skillId))].sort());
-    const totalServed = [...servedModules.values()].reduce((sum, value) => sum + value, 0);
-    const targetModules = new Map();
-    for (const skill of currentPlan.allocation.skills) {
-      targetModules.set(skill.module, (targetModules.get(skill.module) || 0) + skill.percentage);
-    }
-    for (const [module, percentage] of targetModules) {
-      const actual = (servedModules.get(module) || 0) * 100 / totalServed;
-      assert.ok(Math.abs(actual - percentage) <= 5, [
-        weeklyMinutes, module, actual, percentage,
-      ].join(':'));
-    }
+    assert.equal(servedModules.has('speaking'), false,
+      'disabled Speaking activities must not leak into a composed session');
     assert.equal(sawFallback, true);
     assert.equal(sawPersistedOvershoot, true);
   }

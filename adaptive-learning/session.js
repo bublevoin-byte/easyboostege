@@ -162,7 +162,8 @@ function eligibleActivities(registry, plan, { profile = null, access = null, ret
     .map((skill) => skill.id));
   const premiumDepth = access?.capabilities?.premiumDepth !== false;
   return materializedActivities(registry, retention).filter((activity) => (
-    allocated.has(activity.skillId)
+    activity.compositionEnabled !== false
+    && allocated.has(activity.skillId)
     && SKILL_BY_ID.get(activity.skillId)?.module === activity.module
     && SKILL_BY_ID.get(activity.skillId)?.label === activity.skillLabel
     && isAdaptiveLaunchDescriptor(activity.launch)

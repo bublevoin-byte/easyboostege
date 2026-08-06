@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "speaking-calibration-dataset-v1",
+  "candidate": {
+    "catalogVersion": "REPLACE_WITH_FIXED_CATALOG_VERSION",
+    "promptVersion": "speaking-semantic-v4",
+    "scoringVersion": "speaking-fipi-combiner-v2",
+    "acousticProviderVersion": "REPLACE_WITH_FIXED_AZURE_PROVIDER_VERSION",
+    "semanticProviderVersion": "REPLACE_WITH_FIXED_XAI_MODEL_VERSION"
+  },
+  "cases": []
+}

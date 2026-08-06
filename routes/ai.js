@@ -9,7 +9,16 @@ import {
   parseAndValidateWritingReview, prepareWritingPrompt, WRITING_PROMPT_VERSION, writingRequestSchema,
 } from '../ai/writing.js';
 import { buildContentPrompt, CONTENT_PROMPT_VERSION, contentRequestSchema, parseContentResponse } from '../ai/content.js';
-import { buildSpeakingPrompt, buildSpeakingSamplePrompt, parseSpeakingReview, parseSpeakingSample, SPEAKING_PROMPT_VERSION, speakingRequestSchema, speakingSampleRequestSchema } from '../ai/speaking.js';
+import {
+  buildSpeakingPrompt,
+  buildSpeakingSamplePrompt,
+  parseSpeakingSample,
+  parseSpeakingSemanticReview,
+  SPEAKING_PROMPT_VERSION,
+  speakingRequestSchema,
+  speakingSampleRequestSchema,
+  speakingTrustedInputSchema,
+} from '../ai/speaking.js';
 import { assignmentFor, OPERATION_FOR_TASK_TYPE } from '../ai/task-bank.js';
 import { estimateCostMicrousd, TtlCache } from '../ai/provider-control.js';
 import { createProviderClient } from '../ai/provider-client.js';
@@ -17,6 +26,17 @@ import { providersFor } from '../ai/operations.js';
 import { recordDependencyEvent } from '../observability/metrics.js';
 import { decorateGeneratedVoiceTutorContent } from '../voice-tutor/generated-items.js';
 import { reviewVoiceTutorCriterionChoices } from '../voice-tutor/capsule.js';
+import { SPEAKING_TASK1_CATALOG } from '../public/content/speaking/task1-v1.js';
+import { SPEAKING_TASK2_CATALOG } from '../public/content/speaking/task2-v1.js';
+import { SPEAKING_TASK3_CATALOG } from '../public/content/speaking/task3-v1.js';
+import { SPEAKING_TASK4_CATALOG } from '../public/content/speaking/task4-v1.js';
+import {
+  publicSpeakingAcousticRetry,
+  publicSpeakingReview,
+  scoreSpeakingTask,
+  SPEAKING_SCORING_VERSION,
+} from '../speaking/fipi-scoring.js';
+import { speakingEvaluationClaimRecoverable } from '../speaking/evaluation-claim.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -26,9 +46,50 @@ const EXPERIMENTAL_ASSESSMENT = Object.freeze({
   warning: 'Экспериментальная ИИ-оценка. Балл ориентировочный, может содержать ошибки и не является экспертным заключением.',
 });
 
-function isExperimentalSpeakingTask(taskType) {
-  return taskType === 3 || taskType === 4;
+const AUTOMATIC_TRAINING_ASSESSMENT = Object.freeze({
+  mode: 'automatic_training',
+  scoreKind: 'approximate',
+  methodicallyValidated: false,
+  warning: 'Автоматическая тренировочная оценка. Балл примерный и не является экспертным заключением или точным баллом ЕГЭ.',
+});
+
+function speakingEvaluationFingerprint(request) {
+  const canonical = {
+    contractVersion: 'speaking-evaluation-v1',
+    promptVersion: SPEAKING_PROMPT_VERSION,
+    scoringVersion: SPEAKING_SCORING_VERSION,
+    taskType: request.taskType,
+    sessionId: request.sessionId,
+    pronunciationAssessmentKey: request.pronunciationAssessmentKey || null,
+    pronunciationAssessmentKeys: request.pronunciationAssessmentKeys || null,
+  };
+  return crypto.createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
 }
+
+function speakingReplayPayload(attempt) {
+  if (!attempt?.review || !['completed', 'needs_retry'].includes(attempt.status)) return null;
+  const { semanticFacts: _semanticFacts, acousticFacts: _acousticFacts, ...review } = attempt.review;
+  const payload = {
+    review,
+    provider: attempt.provider || null,
+    promptVersion: attempt.prompt_version,
+    attemptId: Number(attempt.id),
+    assessment: { ...AUTOMATIC_TRAINING_ASSESSMENT, scoringVersion: review.scoringVersion },
+  };
+  if (review.status === 'scored') {
+    payload.voiceTutor = {
+      source: 'speaking', attemptId: Number(attempt.id), revision: 1,
+      criterionChoices: reviewVoiceTutorCriterionChoices(review),
+    };
+  }
+  return payload;
+}
+
+const SPEAKING_RESOLUTION_MESSAGES = Object.freeze({
+  SPEAKING_CATALOG_REVISION_MISMATCH: 'Версия задания больше не поддерживается. Начните новую тренировку.',
+  SPEAKING_ASSESSMENT_CONTEXT_MISMATCH: 'Оценка произношения относится к другой тренировке. Запишите ответ заново.',
+  SPEAKING_ASSESSMENT_NOT_READY: 'Оценка произношения ещё не готова или запись неполна. Запишите ответ заново.',
+});
 
 // A single line an operator can grep: which provider gave up, on what, and whether a spare was left.
 function describeFallback(provider, code, error, index, total) {
@@ -39,10 +100,34 @@ function describeFallback(provider, code, error, index, total) {
 
 // The web server takes the standard chain: both providers, fallback allowed. Pinning exists for
 // the quality runner of section 11.2 and has no business in a student's request.
-const { askProvider, aiProviders, askWithFallback, limitsFor, parseWithOneRepair } = createProviderClient();
+const defaultProviderClient = createProviderClient();
+
+const speakingCatalogs = Object.freeze({
+  1: { catalog: SPEAKING_TASK1_CATALOG, get: 'getSpeakingTask1Session' },
+  2: { catalog: SPEAKING_TASK2_CATALOG, get: 'getSpeakingTask2Session' },
+  3: { catalog: SPEAKING_TASK3_CATALOG, get: 'getSpeakingTask3Session' },
+  4: { catalog: SPEAKING_TASK4_CATALOG, get: 'getSpeakingTask4Session' },
+});
+
+function evaluationAssignment(taskType, task) {
+  if (taskType === 1) return { tx: task.text };
+  if (taskType === 2) return { ad: task.advertisement, points: [...task.supports] };
+  if (taskType === 3) return { topic: task.topic, qs: [...task.questions] };
+  if (taskType === 4) return {
+    topic: task.projectTitle,
+    plan: [...task.plan],
+    ph: task.photoPair.panels.map((panel) => panel.alt),
+  };
+  return null;
+}
 
 // Server-side AI operations. The client never sends a system prompt: each operation has its own contract.
-export function createAiRoutes({ authentication, access, db }) {
+export function createAiRoutes({
+  authentication,
+  access,
+  db,
+  providerClient = defaultProviderClient,
+}) {
   const router = express.Router();
   const { auth } = authentication;
   const { createOperationLimiter, requireAiBudget, requireActiveSubscription, requirePrivacyConsent, hasAiBudget } = access;
@@ -53,10 +138,166 @@ export function createAiRoutes({ authentication, access, db }) {
   const speakingEvalLimiter = perOperation(() => 'evaluate_speaking');
   const speakingSampleLimiter = perOperation(() => 'speaking_sample');
   const {
-    createWritingAttempt, finishWritingAttempt, createSpeakingAttempt, finishSpeakingAttempt,
+    createWritingAttempt, finishWritingAttempt, claimSpeakingEvaluation, getSpeakingEvaluationClaim,
+    finishSpeakingAttempt,
     getGeneratedTask, getSharedGeneratedTask, saveGeneratedTask, logAiRequest,
     getBankTask, getBankTaskByExternalId,
   } = db;
+  const { askProvider, aiProviders, askWithFallback, limitsFor, parseWithOneRepair } = providerClient;
+
+  function expectedSpeakingAssessmentContext(taskType, session, task, itemIndex = null) {
+    const base = `task${taskType}:${session.id}:${task.id}@${task.revision}`;
+    return itemIndex == null ? base : `${base}:item${itemIndex}`;
+  }
+
+  function grossPronunciationError(word) {
+    if (word?.errorType === 'omission' || word?.errorType === 'insertion') return true;
+    const accuracy = Number(word?.accuracyScore);
+    if (word?.errorType !== 'mispronunciation' || !Number.isFinite(accuracy)) return null;
+    // Versioned conservative proxy: a very low Azure word-accuracy event is treated as gross.
+    // The calibration gate must validate this threshold before any "validated" product label.
+    return accuracy < 50;
+  }
+
+  function acousticWordToken(value) {
+    return String(value || '').toLocaleLowerCase('en-US')
+      .replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+  }
+
+  function alignedAcousticWordSpans(transcript, words) {
+    const transcriptTokens = [...String(transcript || '').matchAll(/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/gu)]
+      .map((match) => ({
+        token: acousticWordToken(match[0]),
+        start: match.index,
+        end: match.index + match[0].length,
+      }));
+    let transcriptCursor = 0;
+    return words.map((word) => {
+      const token = acousticWordToken(word?.text);
+      const found = token ? transcriptTokens.findIndex((candidate, index) => (
+        index >= transcriptCursor && candidate.token === token
+      )) : -1;
+      if (found < 0) return null;
+      transcriptCursor = found + 1;
+      return transcriptTokens[found];
+    });
+  }
+
+  function finalizedSpeakingAssessment(reservation, expectedContext) {
+    const assessment = reservation?.result?.assessment;
+    if (!reservation) return null;
+    if (reservation.context_id !== expectedContext) {
+      throw Object.assign(new Error('SPEAKING_ASSESSMENT_CONTEXT_MISMATCH'), {
+        status: 409, code: 'SPEAKING_ASSESSMENT_CONTEXT_MISMATCH',
+      });
+    }
+    if (reservation.status !== 'finalized' || !assessment || assessment.available === false
+      || assessment.status !== 'success' || assessment.isFinal !== true) {
+      throw Object.assign(new Error('SPEAKING_ASSESSMENT_NOT_READY'), {
+        status: 409, code: 'SPEAKING_ASSESSMENT_NOT_READY',
+      });
+    }
+    return assessment;
+  }
+
+  async function resolveSpeakingAssessments(username, request, session, task) {
+    const keys = request.taskType === 2 || request.taskType === 3
+      ? request.pronunciationAssessmentKeys
+      : [request.pronunciationAssessmentKey];
+    if (!Array.isArray(keys) || !keys.length) return null;
+    const resolved = [];
+    for (const [index, key] of keys.entries()) {
+      const stored = await db.getSpeakingAssessmentReservation(username, key);
+      const reservation = stored?.reservation;
+      if (!reservation) return null;
+      const itemIndex = request.taskType === 2 || request.taskType === 3 ? index + 1 : null;
+      const assessment = finalizedSpeakingAssessment(
+        reservation,
+        expectedSpeakingAssessmentContext(request.taskType, session, task, itemIndex),
+      );
+      resolved.push({ assessment, reservation, itemIndex });
+    }
+    const confidences = resolved.map(({ assessment }) => Number(assessment.confidence));
+    const warnings = resolved.flatMap(({ assessment }) => (
+      Array.isArray(assessment.quality?.warnings) ? assessment.quality.warnings : []
+    ));
+    const poor = resolved.some(({ assessment }) => assessment.quality?.acceptable === false);
+    let transcriptOffset = 0;
+    const wordEvents = resolved.flatMap(({ assessment, reservation, itemIndex }) => {
+      const words = Array.isArray(assessment.words) ? assessment.words : [];
+      const spans = alignedAcousticWordSpans(assessment.transcript, words);
+      const currentOffset = transcriptOffset;
+      transcriptOffset += String(assessment.transcript || '').length + 1;
+      return words.flatMap((word, wordIndex) => (
+        ['mispronunciation', 'omission', 'insertion'].includes(word?.errorType)
+          ? [{
+            id: `azure:${reservation.id}:${wordIndex + 1}`,
+            owner: 'azure_pronunciation',
+            type: word.errorType,
+            gross: grossPronunciationError(word),
+            itemIndex,
+            accuracyScore: Number.isFinite(Number(word.accuracyScore)) ? Number(word.accuracyScore) : null,
+            start: spans[wordIndex] ? currentOffset + spans[wordIndex].start : null,
+            end: spans[wordIndex] ? currentOffset + spans[wordIndex].end : null,
+          }]
+          : []
+      ));
+    });
+    const durationFor = (assessment) => (
+      Number.isFinite(Number(assessment.processedDurationSeconds))
+        ? Number(assessment.processedDurationSeconds) : 0
+    );
+    const itemDurations = request.taskType === 2 || request.taskType === 3
+      ? resolved.map(({ assessment, itemIndex }) => ({
+        itemIndex,
+        durationSeconds: durationFor(assessment),
+      }))
+      : [];
+    return {
+      transcript: resolved.map(({ assessment }) => assessment.transcript).join('\n'),
+      acoustic: {
+        available: true,
+        recognitionConfidence: confidences.every(Number.isFinite)
+          ? Math.max(0, Math.min(1, Math.min(...confidences) / 100)) : 0,
+        signalQuality: poor ? 'poor' : (warnings.length ? 'acceptable' : 'good'),
+        recordingDurationSeconds: resolved.reduce((sum, { assessment }) => (
+          sum + durationFor(assessment)
+        ), 0),
+        itemDurations,
+        completenessScore: request.taskType === 1 ? resolved[0].assessment.completenessScore : undefined,
+        fluencyScore: request.taskType === 1 ? resolved[0].assessment.fluencyScore : undefined,
+        wordEvents,
+      },
+    };
+  }
+
+  async function resolveSpeakingEvaluation(username, request) {
+    const entry = speakingCatalogs[request.taskType];
+    const session = await db[entry.get](username, request.sessionId);
+    if (!session) return null;
+    if (session.catalog_id !== entry.catalog.id
+      || Number(session.catalog_revision) !== entry.catalog.revision) {
+      throw Object.assign(new Error('SPEAKING_CATALOG_REVISION_MISMATCH'), {
+        status: 409,
+        code: 'SPEAKING_CATALOG_REVISION_MISMATCH',
+      });
+    }
+    const task = entry.catalog.tasks.find((candidate) => candidate.id === session.task_id
+      && candidate.revision === Number(session.task_revision));
+    if (!task) {
+      throw Object.assign(new Error('SPEAKING_CATALOG_REVISION_MISMATCH'), {
+        status: 409,
+        code: 'SPEAKING_CATALOG_REVISION_MISMATCH',
+      });
+    }
+    const assessment = await resolveSpeakingAssessments(username, request, session, task);
+    if (!assessment) return null;
+    return { input: speakingTrustedInputSchema.parse({
+      taskType: request.taskType,
+      transcript: assessment.transcript,
+      assignment: evaluationAssignment(request.taskType, task),
+    }), acoustic: assessment.acoustic };
+  }
 
   function aiUsage(provider, response) {
     return { promptTokens: response.promptTokens, completionTokens: response.completionTokens, estimatedCostMicrousd: estimateCostMicrousd(response, provider) };
@@ -296,7 +537,7 @@ export function createAiRoutes({ authentication, access, db }) {
     if (!await hasAiBudget()) throw Object.assign(new Error('Дневной лимит ИИ исчерпан. Попробуйте завтра.'), { status: 503, code: 'AI_BUDGET_EXHAUSTED' });
     const prompt = buildContentPrompt(input);
     const startedAt = Date.now();
-    const providers = aiProviders();
+    const providers = providersFor(input.operation, aiProviders());
     if (!providers.length) throw Object.assign(new Error('ИИ не настроен на сервере.'), { status: 503, code: 'AI_NOT_CONFIGURED' });
     let lastCode = 'AI_PROVIDER_UNAVAILABLE';
     let fallbackReason = null;
@@ -363,16 +604,122 @@ export function createAiRoutes({ authentication, access, db }) {
     }
   });
 
-  router.post('/api/v1/ai/evaluate-speaking', auth, requireActiveSubscription, requirePrivacyConsent('voice_processing'), requireAiBudget, speakingEvalLimiter, async (req, res) => {
+  function respondToExistingSpeakingClaim(req, res, attempt) {
+    const replay = speakingReplayPayload(attempt);
+    if (replay) return res.json(replay);
+    if (attempt?.status === 'failed') {
+      const errorCode = attempt.error_code || 'AI_PROVIDER_UNAVAILABLE';
+      return res.status(errorCode === 'AI_RESPONSE_INVALID' ? 502 : 503).json({ error: {
+        code: errorCode,
+        message: 'Не удалось корректно оценить устный ответ.',
+        requestId: req.requestId,
+      } });
+    }
+    return res.status(409).json({ error: {
+      code: 'SPEAKING_EVALUATION_IN_PROGRESS',
+      message: 'Эта запись уже оценивается.',
+      requestId: req.requestId,
+    } });
+  }
+
+  async function prepareSpeakingEvaluation(req, res, next) {
     const parsed = speakingRequestSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректные данные устного ответа.' } });
-    const input = parsed.data;
+    let input;
+    let acousticEvidence = null;
+    try {
+      const resolved = await resolveSpeakingEvaluation(req.user, parsed.data);
+      input = resolved?.input || null;
+      acousticEvidence = resolved?.acoustic || null;
+    } catch (error) {
+      if (error?.status && error?.code) {
+        return res.status(error.status).json({ error: {
+          code: error.code,
+          message: SPEAKING_RESOLUTION_MESSAGES[error.code] || 'Тренировку не удалось подготовить к оценке.',
+          requestId: req.requestId,
+        } });
+      }
+      throw error;
+    }
+    if (!input) return res.status(404).json({ error: {
+      code: 'SPEAKING_SESSION_NOT_FOUND',
+      message: 'Тренировка не найдена.',
+      requestId: req.requestId,
+    } });
+    const evaluationFingerprint = speakingEvaluationFingerprint(parsed.data);
+    const existing = await getSpeakingEvaluationClaim(req.user, evaluationFingerprint);
+    if (existing && !speakingEvaluationClaimRecoverable(existing)) {
+      return respondToExistingSpeakingClaim(req, res, existing);
+    }
+    const acousticRetry = publicSpeakingAcousticRetry(input.taskType, acousticEvidence);
+    if (!acousticRetry) {
+      res.locals.speakingEvaluation = { input, acousticEvidence, evaluationFingerprint };
+      return next();
+    }
+    const claim = await claimSpeakingEvaluation(
+      req.user,
+      input,
+      SPEAKING_PROMPT_VERSION,
+      evaluationFingerprint,
+    );
+    if (!claim.created) {
+      const replay = speakingReplayPayload(claim.attempt);
+      if (replay) return res.json(replay);
+      if (claim.attempt?.status === 'failed') {
+        const errorCode = claim.attempt.error_code || 'AI_PROVIDER_UNAVAILABLE';
+        return res.status(errorCode === 'AI_RESPONSE_INVALID' ? 502 : 503).json({ error: {
+          code: errorCode,
+          message: 'Не удалось корректно оценить устный ответ.',
+          requestId: req.requestId,
+        } });
+      }
+      return res.status(409).json({ error: {
+        code: 'SPEAKING_EVALUATION_IN_PROGRESS',
+        message: 'Эта запись уже оценивается.',
+        requestId: req.requestId,
+      } });
+    }
+    const attemptId = Number(claim.attempt.id);
+    if (acousticRetry) {
+      await finishSpeakingAttempt(attemptId, {
+        status: 'needs_retry', review: { ...acousticRetry, acousticFacts: acousticEvidence },
+      }, { claimGeneration: claim.attempt.evaluation_claim_generation });
+      return res.json({
+        review: acousticRetry,
+        provider: null,
+        promptVersion: SPEAKING_PROMPT_VERSION,
+        attemptId,
+        assessment: { ...AUTOMATIC_TRAINING_ASSESSMENT, scoringVersion: acousticRetry.scoringVersion },
+      });
+    }
+    return undefined;
+  }
+
+  router.post(
+    '/api/v1/ai/evaluate-speaking',
+    auth,
+    requireActiveSubscription,
+    requirePrivacyConsent('voice_processing'),
+    prepareSpeakingEvaluation,
+    requireAiBudget,
+    speakingEvalLimiter,
+    async (req, res) => {
+    const { input, acousticEvidence, evaluationFingerprint } = res.locals.speakingEvaluation;
+    const claim = await claimSpeakingEvaluation(
+      req.user, input, SPEAKING_PROMPT_VERSION, evaluationFingerprint,
+    );
+    if (!claim.created) return respondToExistingSpeakingClaim(req, res, claim.attempt);
+    const attemptId = Number(claim.attempt.id);
+    const claimGeneration = Number(claim.attempt.evaluation_claim_generation);
     const prompt = buildSpeakingPrompt(input);
-    const attemptId = await createSpeakingAttempt(req.user, input, SPEAKING_PROMPT_VERSION);
     const startedAt = Date.now();
-    const providers = aiProviders();
+    const providers = providersFor('evaluate_speaking', aiProviders());
     if (!providers.length) {
-      await finishSpeakingAttempt(attemptId, { status: 'failed', errorCode: 'AI_NOT_CONFIGURED' });
+      await finishSpeakingAttempt(
+        attemptId,
+        { status: 'failed', errorCode: 'AI_NOT_CONFIGURED' },
+        { claimGeneration },
+      );
       return res.status(503).json({ error: { code: 'AI_NOT_CONFIGURED', message: 'ИИ не настроен на сервере.' } });
     }
     let lastCode = 'AI_PROVIDER_UNAVAILABLE';
@@ -380,17 +727,31 @@ export function createAiRoutes({ authentication, access, db }) {
     for (const [providerIndex, provider] of providers.entries()) {
       let usage = {};
       try {
-        const response = await askProvider(provider, prompt.system, prompt.user, 'evaluate_speaking');
+        const response = await askProvider(
+          provider,
+          prompt.system,
+          prompt.user,
+          'evaluate_speaking',
+          { responseFormat: prompt.responseFormat },
+        );
         usage = response;
         const outcome = await parseWithOneRepair({
           provider,
           text: response.text,
-          parse: (text) => parseSpeakingReview(input.taskType, text),
+          parse: (text) => parseSpeakingSemanticReview(input.taskType, text),
           system: prompt.system,
           user: prompt.user,
           operation: 'evaluate_speaking',
+          responseFormat: prompt.responseFormat,
         });
-        const review = outcome.value;
+        const semanticFacts = outcome.value;
+        const scored = scoreSpeakingTask({
+          taskType: input.taskType,
+          semantic: semanticFacts,
+          acoustic: acousticEvidence,
+        });
+        const review = publicSpeakingReview(scored, semanticFacts);
+        const storedReview = { ...review, semanticFacts, acousticFacts: acousticEvidence };
         if (outcome.repair) {
           usage = outcome.repair.usage;
           await logRepairedAttempt({
@@ -400,8 +761,9 @@ export function createAiRoutes({ authentication, access, db }) {
         await Promise.all([
           logAiRequest({ username: req.user, operation: `evaluate_speaking_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt, fallbackReason, ...aiUsage(provider, usage) }),
           finishSpeakingAttempt(attemptId, {
-            status: 'completed', review, provider: provider.name, model: provider.model,
-          }),
+            status: review.status === 'scored' ? 'completed' : 'needs_retry',
+            review: storedReview, provider: provider.name, model: provider.model,
+          }, { claimGeneration }),
         ]);
         recordDependencyEvent('ai', 'success');
         if (providerIndex > 0) recordDependencyEvent('ai', 'fallback');
@@ -410,9 +772,16 @@ export function createAiRoutes({ authentication, access, db }) {
           provider: provider.name,
           promptVersion: SPEAKING_PROMPT_VERSION,
           attemptId,
-          voiceTutor: { source: 'speaking', attemptId, revision: 1, criterionChoices: reviewVoiceTutorCriterionChoices(review) },
         };
-        if (isExperimentalSpeakingTask(input.taskType)) payload.assessment = EXPERIMENTAL_ASSESSMENT;
+        if (review.status === 'scored') {
+          payload.voiceTutor = {
+            source: 'speaking', attemptId, revision: 1, criterionChoices: reviewVoiceTutorCriterionChoices(review),
+          };
+        }
+        payload.assessment = {
+          ...AUTOMATIC_TRAINING_ASSESSMENT,
+          scoringVersion: review.scoringVersion,
+        };
         return res.json(payload);
       } catch (error) {
         recordDependencyEvent('ai', 'error');
@@ -427,7 +796,7 @@ export function createAiRoutes({ authentication, access, db }) {
       provider: lastProvider?.name,
       model: lastProvider?.model,
       errorCode: lastCode,
-    });
+    }, { claimGeneration });
     res.status(lastCode === 'AI_RESPONSE_INVALID' ? 502 : 503).json({ error: { code: lastCode, message: 'Не удалось корректно оценить устный ответ.' } });
   });
 

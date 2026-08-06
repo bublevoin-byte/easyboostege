@@ -4,7 +4,7 @@
 
 The production adapter is deliberately optional and remains unavailable until the official SDK, `AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION`, and the explicit enable switch are present. No fallback invents acoustic scores. Only `en-GB` and `en-US` are accepted. Azure exposes prosody, IPA phoneme names, syllables, and spoken-phoneme candidates only for `en-US`; `en-GB` still retains available acoustic scores but reports those fields as unavailable/absent. Provider acoustic scores are training signals, not validated FIPI/EGE points.
 
-The current verified Node SDK input accepts strict PCM16 mono 16 kHz WAV only. Browser MediaRecorder WebM/MP4 and other encoded containers are not advertised or silently treated as PCM; they remain local until a reviewed capture/transcoding seam is implemented.
+The verified Node SDK input accepts strict PCM16 mono 16 kHz WAV only. The official Speaking 1–4 browser flow now decodes `MediaRecorder` output locally and converts it to PCM16 mono 16 kHz WAV only after explicit learner action; the server still rejects WebM/MP4 and every other encoded container and has no transcoder.
 
 - Полностью валидированный отдельный endpoint пока существует только для письменных заданий 37/38; генерация других модулей использует bounded legacy AI route.
 - Оценка произношения по STT не заменяет фонетический анализ и не должна интерпретироваться как точная экспертная оценка.

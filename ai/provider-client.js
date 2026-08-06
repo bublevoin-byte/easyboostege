@@ -34,7 +34,7 @@ const GROQ_MODEL = config.ai.groqModel;
 
 // The limits arrive resolved rather than looked up here: the client is what decides them, and it is
 // the client — not the operation registry — that a quality run may give a longer timeout.
-async function askProvider({ url, key, model }, system, user, limits) {
+async function askProvider({ url, key, model, name }, system, user, limits, { responseFormat = null } = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), limits.timeoutMs);
   let r;
@@ -48,6 +48,7 @@ async function askProvider({ url, key, model }, system, user, limits) {
       temperature: 0.3,
       max_tokens: limits.maxTokens,
       messages: [...(system ? [{ role: 'system', content: system }] : []), { role: 'user', content: user }],
+      ...(name === 'grok' && responseFormat ? { response_format: responseFormat } : {}),
     }),
   }));
   } finally {
@@ -100,7 +101,9 @@ export function createProviderClient({ provider: pinned = null, model = null, ti
     overrideTimeoutMs ? { ...limitsFor(operation), timeoutMs: overrideTimeoutMs } : limitsFor(operation)
   );
 
-  const ask = (item, system, user, operation) => askProvider(item, system, user, clientLimitsFor(operation));
+  const ask = (item, system, user, operation, options = {}) => (
+    askProvider(item, system, user, clientLimitsFor(operation), options)
+  );
 
   function aiProviders() {
     const providers = configuredProviders();
@@ -120,7 +123,7 @@ export function createProviderClient({ provider: pinned = null, model = null, ti
    * it. Both calls are reported so the budget and the cost metrics stay truthful: a repaired
    * request really did cost two calls.
    */
-  async function parseWithOneRepair({ provider, text, parse, system, user, operation }) {
+  async function parseWithOneRepair({ provider, text, parse, system, user, operation, responseFormat = null }) {
     try {
       return { value: parse(text), repair: null };
     } catch (firstError) {
@@ -130,7 +133,13 @@ export function createProviderClient({ provider: pinned = null, model = null, ti
       const startedAt = Date.now();
       let retry;
       try {
-        retry = await ask(provider, system, buildRepairRequest(user, text, firstError), operation);
+        retry = await ask(
+          provider,
+          system,
+          buildRepairRequest(user, text, firstError),
+          operation,
+          { responseFormat },
+        );
       } catch (retryError) {
         /* The repair call itself failed; the original contract violation is the honest answer. */
         retryError.repairOf = firstError.message;

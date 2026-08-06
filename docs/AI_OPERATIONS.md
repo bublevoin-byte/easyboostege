@@ -14,7 +14,7 @@
 | Генерация задания 37 | `/api/v1/ai/generate-content` (`writing_task_37`) | 40–60 слов, минимум 3 вопроса, тема 2–4 слова | встроенный банк тем |
 | Генерация задания 38 | `/api/v1/ai/generate-content` (`writing_task_38`) | 4–5 уникальных строк, целые проценты в сумме 100 | встроенный банк тем |
 | Генерация устных заданий 1–4 | `/api/v1/ai/generate-content` (`speaking_task_1`…`speaking_task_4`) | отдельная строгая схема каждого типа, контроль количества слов и элементов | встроенный банк заданий |
-| Оценка устного ответа | `/api/v1/ai/evaluate-speaking` | отдельная схема задания и ответа, серверная проверка максимумов и суммы критериев | повтор оценки/встроенная практика |
+| Оценка устного ответа | `/api/v1/ai/evaluate-speaking` | owner-bound session/pronunciation assessment keys; xAI strict JSON Schema возвращает только semantic/language facts, затем versioned server combiner ставит 1/4/5/10; low confidence даёт `needs_retry`, а не ноль | повтор записи; без локального балла |
 | Образец устного ответа | `/api/v1/ai/generate-speaking-sample` | типизированное задание, строгий JSON, контроль 4 вопросов/объёма монолога | встроенные подсказки |
 | Экзаменационная грамматика, чтение и аудирование | `/api/v1/ai/generate-content` | восемь отдельных операций со строгими структурными проверками | встроенные банки заданий |
 | TTS | `/api/v1/tts` | auth, subscription, rate limit, voice allowlist; provider `audio/mpeg`, 1 byte–5 MiB | Web Speech API |
@@ -78,6 +78,58 @@ provisional card по owner-bound `session_id` и показывает её ма
 за повторным аудитом всех ИИ-операций в отдельном тикете.
 
 Версия prompt для письменной проверки задаётся `WRITING_PROMPT_VERSION` в `ai/writing.js`, для устной части — `SPEAKING_PROMPT_VERSION`, для генерации контента — `CONTENT_PROMPT_VERSION`, для Voice Error Tutor — `VOICE_TUTOR_PROMPT_VERSION`, а для извлечения trusted-rule evidence — полем `promptVersion` операции `voice_tutor_rule_extract`. Версия вместе с операцией, провайдером, моделью, длительностью и результатом записывается в `ai_requests`. Универсального AI proxy в production API нет.
+
+## Speaking semantic facts и детерминированный балл
+
+`speaking-semantic-v4` никогда не принимает assignment или rubric от браузера. Официальные задания
+1–4 передают UUID owner-bound session и ключ либо точный набор ключей завершённых pronunciation
+assessment. Adaptive Speaking 2/4 временно исключён из composer до owner-bound привязки оценки;
+старый `contentRef + transcript` контракт API отклоняется. Сервер восстанавливает закреплённую catalog/task revision,
+проверяет точную привязку owner/session/task/item каждого акустического результата, собирает transcript
+из этих результатов и только после этого строит короткий trusted assignment. Transcript помещается
+в отдельное поле `untrustedStudentTranscript`; команды внутри него не исполняются.
+
+Для xAI `response_format` фиксирован как strict `json_schema` по официальному structured-output
+контракту. Схема не содержит score, criterion maxima или фонетических полей. Дополнительно тот же
+ответ повторно проверяется Zod на сервере: bounded строки/массивы, точные 4/5 элементов, task 2
+relevance/direct/blocking-error facts, task 3 completeness/appropriateness/phrase facts, task 4
+content states и точные непересекающиеся error spans, а также отсутствие дополнительных полей.
+Единственная format repair использует ту же строгую схему. Для `evaluate_speaking` fallback отключён:
+операция использует только xAI с обязательным strict response format; недоступность провайдера даёт
+fail-closed ошибку без деградации на Groq. Официальный контракт xAI: https://docs.x.ai/developers/model-capabilities/text/structured-outputs
+
+`speaking-fipi-combiner-v2` применяет максимумы 1/4/5/10 и полный максимум 20. Одно evidence event
+принадлежит одному content/organization/language owner, поэтому один факт не уменьшает два
+критерия. Ноль content задания 4 обнуляет все три критерия. Все четыре задания берут только
+owner/session-bound Azure facts: task 1 — completeness/fluency и error events; task 2/3 — отдельные
+события каждой позиции; task 4 — фонетические события языкового критерия. Omission/insertion не
+считаются второй раз phonetic error. Для task 1 грубой ошибкой служит детерминированный приближённый
+proxy: omission/insertion либо mispronunciation с `accuracyScore < 50`; отсутствие accuracy у
+mispronunciation даёт `needs_retry`. Этот proxy не объявляется методически точным до калибровки.
+Partial, `isFinal=false`, низкокачественная или привязанная к другой session/item оценка не доходит
+до xAI.
+
+Если semantic/acoustic confidence ниже порога, публичный ответ содержит `got:null`, server-owned
+retry verdict, пустые criteria/good/fix и не содержит Voice Tutor pointer. Уверенный результат
+сохраняет strict facts и scoring version; перед Voice Tutor сервер заново вычисляет критерии из
+сохранённых semantic и bounded normalized acoustic facts всех официальных заданий и отклоняет подмену.
+
+До реального калибровочного набора, двух независимых экспертных оценок, требуемой адъюдикации,
+всех quantitative/per-task/subgroup thresholds и внешнего approval точного canonical report digest
+API всегда возвращает `automatic_training`, `approximate`, `methodicallyValidated:false`. Offline
+порядок и команда описаны в `quality/SPEAKING_CALIBRATION.md`; текущий пустой template не является
+release evidence и не включает validated badge.
+
+Tasks 2–3 preserve owner-bound per-item recording durations; one truncated Task 3 answer cannot be
+hidden by the aggregate duration. Azure pronunciation events carry the `azure_pronunciation` owner
+and an aligned transcript span. A Task 4 span already owned by content, organization, or semantic
+language evidence returns `needs_retry` instead of being deducted twice. Canonical attempt replay and
+deterministic acoustic preflight occur before the AI budget/rate gates; a new provider-bound claim is
+created only after both gates admit the request. A five-minute evaluation claim lease recovers
+interrupted pending work exactly once. Every recovery advances a generation, and terminal persistence
+uses pending-generation compare-and-set so an old worker cannot overwrite its successor. Transient xAI
+failures resume the same attempt and reuse its finalized Azure evidence, while invalid structured output
+remains a terminal replay.
 
 ## Realtime Voice Tutor boundary
 

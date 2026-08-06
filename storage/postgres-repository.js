@@ -46,6 +46,10 @@ import {
   selectFullSpeakingVariant,
   submitFullSpeakingSession,
 } from '../speaking/full-section-session.js';
+import {
+  SPEAKING_EVALUATION_CLAIM_LEASE_MS,
+  SPEAKING_EVALUATION_RETRYABLE_ERRORS,
+} from '../speaking/evaluation-claim.js';
 import { isMonotonicAdaptiveRetentionRefresh } from '../adaptive-learning/retention.js';
 import { adaptiveRepeatExecutionMatches } from '../adaptive-learning/repeat-execution.js';
 import {
@@ -1819,19 +1823,103 @@ export function createPostgresRepository(connectionString, {
     return Number(result.rows[0].id);
   }
 
-  async function finishSpeakingAttempt(id, result) {
+  async function claimSpeakingEvaluation(username, input, promptVersion, evaluationFingerprint, {
+    now = new Date(),
+  } = {}) {
+    if (!/^[a-f0-9]{64}$/u.test(evaluationFingerprint)) {
+      throw new Error('SPEAKING_EVALUATION_FINGERPRINT_INVALID');
+    }
+    const claimedAt = new Date(now);
+    if (!Number.isFinite(claimedAt.getTime())) throw new Error('SPEAKING_EVALUATION_CLAIM_TIME_INVALID');
+    const values = [
+      username,
+      input.taskType,
+      JSON.stringify(input.assignment),
+      adaptiveExecutionRequestHash(input.assignment),
+      evaluationFingerprint,
+      input.transcript,
+      promptVersion,
+      claimedAt,
+      new Date(claimedAt.getTime() - SPEAKING_EVALUATION_CLAIM_LEASE_MS),
+      SPEAKING_EVALUATION_RETRYABLE_ERRORS,
+    ];
+    const inserted = await pool.query(
+      `INSERT INTO speaking_attempts
+       (username, task_type, assignment, assignment_fingerprint, evaluation_fingerprint,
+        transcript, prompt_version, status, evaluation_claimed_at, evaluation_claim_generation)
+       VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, 'pending', $8, 1)
+       ON CONFLICT (username, evaluation_fingerprint)
+         WHERE evaluation_fingerprint IS NOT NULL
+       DO UPDATE SET status = 'pending', review = NULL, provider = NULL, model = NULL,
+         error_code = NULL, evaluated_at = NULL, evaluation_claimed_at = EXCLUDED.evaluation_claimed_at,
+         evaluation_claim_generation = speaking_attempts.evaluation_claim_generation + 1
+       WHERE (
+         speaking_attempts.status = 'pending'
+         AND COALESCE(speaking_attempts.evaluation_claimed_at, speaking_attempts.created_at) <= $9
+       ) OR (
+         speaking_attempts.status = 'failed'
+         AND speaking_attempts.error_code = ANY($10::text[])
+       )
+       RETURNING id, username, task_type, assignment, assignment_fingerprint,
+         evaluation_fingerprint, evaluation_claimed_at, evaluation_claim_generation,
+         transcript, review, provider, model, prompt_version, status,
+         error_code, created_at, evaluated_at`,
+      values,
+    );
+    let row = inserted.rows[0];
+    if (!row) {
+      const replay = await pool.query(
+        `SELECT id, username, task_type, assignment, assignment_fingerprint,
+                evaluation_fingerprint, evaluation_claimed_at, evaluation_claim_generation,
+                transcript, review, provider, model, prompt_version, status,
+                error_code, created_at, evaluated_at
+         FROM speaking_attempts
+         WHERE username = $1 AND evaluation_fingerprint = $2`,
+        [username, evaluationFingerprint],
+      );
+      row = replay.rows[0];
+    }
+    if (!row) throw new Error('SPEAKING_EVALUATION_CLAIM_FAILED');
+    return { created: inserted.rowCount === 1, attempt: { ...row, id: Number(row.id) } };
+  }
+
+  async function finishSpeakingAttempt(id, result, { claimGeneration = null } = {}) {
+    const generation = claimGeneration == null ? null : Number(claimGeneration);
+    if (generation != null && (!Number.isInteger(generation) || generation < 1)) {
+      throw new Error('SPEAKING_EVALUATION_CLAIM_LOST');
+    }
     const updated = await pool.query(
       `UPDATE speaking_attempts SET status = $2, review = $3::jsonb, provider = $4, model = $5,
-         error_code = $6, evaluated_at = NOW() WHERE id = $1 RETURNING id`,
+         error_code = $6, evaluated_at = NOW()
+       WHERE id = $1
+         AND ($7::integer IS NULL OR (status = 'pending' AND evaluation_claim_generation = $7))
+       RETURNING id`,
       [id, result.status, result.review ? JSON.stringify(result.review) : null,
-        result.provider || null, result.model || null, result.errorCode || null],
+        result.provider || null, result.model || null, result.errorCode || null, generation],
     );
-    if (!updated.rowCount) throw new Error('SPEAKING_ATTEMPT_NOT_FOUND');
+    if (!updated.rowCount) {
+      throw new Error(generation == null
+        ? 'SPEAKING_ATTEMPT_NOT_FOUND' : 'SPEAKING_EVALUATION_CLAIM_LOST');
+    }
+  }
+
+  async function getSpeakingEvaluationClaim(username, evaluationFingerprint) {
+    const result = await pool.query(
+      `SELECT id, username, task_type, assignment, assignment_fingerprint,
+              evaluation_fingerprint, evaluation_claimed_at, evaluation_claim_generation,
+              transcript, review, provider, model, prompt_version, status,
+              error_code, created_at, evaluated_at
+       FROM speaking_attempts
+       WHERE username = $1 AND evaluation_fingerprint = $2`,
+      [username, evaluationFingerprint],
+    );
+    return result.rows[0] ? { ...result.rows[0], id: Number(result.rows[0].id) } : null;
   }
 
   async function getSpeakingAttempt(username, id) {
     const result = await pool.query(
-      `SELECT id, username, task_type, assignment, assignment_fingerprint, transcript, review, provider, model,
+      `SELECT id, username, task_type, assignment, assignment_fingerprint, evaluation_fingerprint,
+              evaluation_claimed_at, evaluation_claim_generation, transcript, review, provider, model,
               prompt_version, status, error_code, created_at, evaluated_at
        FROM speaking_attempts WHERE username = $1 AND id = $2`,
       [username, id],
@@ -2354,6 +2442,7 @@ export function createPostgresRepository(connectionString, {
                     'server_verified_assisted', COALESCE(evaluated_at, created_at)
              FROM speaking_attempts
              WHERE username = $1 AND status = 'completed'
+               AND review->>'status' = 'scored'
                AND jsonb_typeof(review->'got') = 'number'
                AND jsonb_typeof(review->'max') = 'number'
                AND (review->>'max')::numeric > 0
@@ -4006,7 +4095,7 @@ export function createPostgresRepository(connectionString, {
         ? 'source_task_ref, NULL::text AS assignment_fingerprint'
         : 'NULL::text AS source_task_ref, assignment_fingerprint';
       const source = await client.query(
-        `SELECT id, username, task_type, ${exactTaskColumns}, status, created_at FROM ${table}
+        `SELECT id, username, task_type, ${exactTaskColumns}, status, review, created_at FROM ${table}
          WHERE username = $1 AND id = $2`,
         [username, attempt.id],
       );
@@ -4019,6 +4108,8 @@ export function createPostgresRepository(connectionString, {
         : expectedSpeaking?.taskNumber === Number(sourceRow?.task_type)
           && sourceRow?.assignment_fingerprint === adaptiveExecutionRequestHash(expectedSpeaking.assignment);
       if (!sourceRow || sourceRow.status !== 'completed'
+        || (attempt.type === 'speaking' && (sourceRow.review?.status !== 'scored'
+          || typeof sourceRow.review?.got !== 'number' || typeof sourceRow.review?.max !== 'number'))
         || new Date(sourceRow.created_at) < new Date(claim.issued_at)
         || block.module !== attempt.type || block.activityId !== expectedActivity || !exactTask) {
         throw new Error('ADAPTIVE_EXECUTION_ATTEMPT_MISMATCH');
@@ -4469,12 +4560,12 @@ export function createPostgresRepository(connectionString, {
       }
       const inserted = await client.query(
         `INSERT INTO speaking_pronunciation_assessments
-         (id, username, idempotency_key, request_hash, status, locale, period_start,
+         (id, username, idempotency_key, request_hash, status, locale, context_id, period_start,
           allowance_seconds, reserved_seconds, reserved_at)
-         VALUES ($1, $2, $3, $4, 'reserved', $5, $6, $7, $8, $9)
+         VALUES ($1, $2, $3, $4, 'reserved', $5, $6, $7, $8, $9, $10)
          RETURNING *`,
         [candidate.id, username, candidate.idempotencyKey, candidate.requestHash,
-          candidate.locale, candidate.periodStart, quota.limitSeconds,
+          candidate.locale, candidate.contextId, candidate.periodStart, quota.limitSeconds,
           candidate.reservedSeconds, candidate.now],
       );
       return {
@@ -4677,7 +4768,7 @@ export function createPostgresRepository(connectionString, {
                          status, phase, current_task, current_response, stage_started_at,
                          stage_deadline_at, assigned_at, submitted_at, submission_response
                   FROM speaking_full_sessions WHERE username = $1 ORDER BY assigned_at, id`, [username]),
-      pool.query(`SELECT id, status, locale, period_start, allowance_seconds, reserved_seconds,
+      pool.query(`SELECT id, status, locale, context_id, period_start, allowance_seconds, reserved_seconds,
                          billable_seconds, reserved_at, dispatch_started_at, provider_started_at, finalized_at,
                          released_at, release_reason, result
                   FROM speaking_pronunciation_assessments
@@ -4886,6 +4977,8 @@ export function createPostgresRepository(connectionString, {
     finishWritingAttempt,
     getWritingAttempt,
     createSpeakingAttempt,
+    claimSpeakingEvaluation,
+    getSpeakingEvaluationClaim,
     finishSpeakingAttempt,
     getSpeakingAttempt,
     assignSpeakingTask1Session,

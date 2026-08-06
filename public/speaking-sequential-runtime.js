@@ -136,6 +136,19 @@ export function createSpeakingSequentialBrowserFlow(options = {}, contract) {
     return session;
   }
 
+  function assessmentRecordings() {
+    if (!session || session.status !== 'completed' || recordings.size !== contract.positionCount) {
+      throw flowError('SPEAKING_ASSESSMENT_RECORDINGS_INCOMPLETE', 'All local recordings are required for assessment');
+    }
+    return [...recordings.entries()]
+      .sort(([left], [right]) => left - right)
+      .map(([positionNumber, recording]) => Object.freeze({
+        positionNumber,
+        blob: recording.blob,
+        durationSeconds: recording.durationSeconds,
+      }));
+  }
+
   function dispose() {
     localRecorder.dispose();
     recordings.forEach((recording) => localRecorder.revoke(recording));
@@ -148,6 +161,6 @@ export function createSpeakingSequentialBrowserFlow(options = {}, contract) {
 
   return Object.freeze({
     state, loadAssignment, restoreSession, checkMicrophone,
-    startPosition, stopPosition, playPosition, completePosition, dispose,
+    startPosition, stopPosition, playPosition, completePosition, assessmentRecordings, dispose,
   });
 }

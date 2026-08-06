@@ -128,6 +128,7 @@ export function createSpeakingAssessmentService({ db, provider, now = () => new 
       requestHash,
       reservedSeconds,
       locale: trustedInput.locale,
+      contextId: trustedInput.contextId,
       now: now(),
     });
     if (!reservation.created) {

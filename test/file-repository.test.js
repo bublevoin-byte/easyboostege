@@ -346,6 +346,85 @@ test('speaking attempts persist transcript review metadata but never audio', asy
   });
 });
 
+test('speaking evaluation claims are owner-bound and replay one canonical attempt', async () => {
+  await withRepository(async (repository) => {
+    const owner = await repository.createTelegramUser(3011, 'Speaking Claim Owner');
+    const other = await repository.createTelegramUser(3012, 'Speaking Claim Other');
+    const input = {
+      taskType: 2,
+      assignment: { ad: 'Ask about a course.', points: ['price', 'place', 'time', 'equipment'] },
+      transcript: 'How much does it cost?',
+    };
+    const fingerprint = 'd'.repeat(64);
+    const [first, duplicate] = await Promise.all([
+      repository.claimSpeakingEvaluation(owner, input, 'speaking-semantic-v4', fingerprint),
+      repository.claimSpeakingEvaluation(owner, input, 'speaking-semantic-v4', fingerprint),
+    ]);
+    assert.equal([first, duplicate].filter((claim) => claim.created).length, 1);
+    assert.equal(first.attempt.id, duplicate.attempt.id);
+    assert.equal(first.attempt.evaluation_fingerprint, fingerprint);
+
+    await repository.finishSpeakingAttempt(first.attempt.id, {
+      status: 'failed', provider: 'grok', model: 'temporary-model',
+      errorCode: 'AI_PROVIDER_UNAVAILABLE',
+    });
+    const recoveryNow = new Date('2026-08-06T11:00:00.000Z');
+    const [recovered, recoveryRace] = await Promise.all([
+      repository.claimSpeakingEvaluation(
+        owner, input, 'speaking-semantic-v4', fingerprint, { now: recoveryNow },
+      ),
+      repository.claimSpeakingEvaluation(
+        owner, input, 'speaking-semantic-v4', fingerprint, { now: recoveryNow },
+      ),
+    ]);
+    assert.equal([recovered, recoveryRace].filter((claim) => claim.created).length, 1,
+      'only one caller may recover a transient failed claim');
+    assert.equal(recovered.attempt.id, recoveryRace.attempt.id);
+
+    const staleFingerprint = 'e'.repeat(64);
+    const stale = await repository.claimSpeakingEvaluation(
+      owner, input, 'speaking-semantic-v4', staleFingerprint,
+      { now: new Date('2026-08-06T11:10:00.000Z') },
+    );
+    const earlyReplay = await repository.claimSpeakingEvaluation(
+      owner, input, 'speaking-semantic-v4', staleFingerprint,
+      { now: new Date('2026-08-06T11:14:59.999Z') },
+    );
+    const staleRecovery = await repository.claimSpeakingEvaluation(
+      owner, input, 'speaking-semantic-v4', staleFingerprint,
+      { now: new Date('2026-08-06T11:15:00.001Z') },
+    );
+    assert.equal(earlyReplay.created, false);
+    assert.equal(staleRecovery.created, true);
+    assert.equal(staleRecovery.attempt.id, stale.attempt.id);
+    assert.ok(staleRecovery.attempt.evaluation_claim_generation
+      > stale.attempt.evaluation_claim_generation);
+    await assert.rejects(
+      repository.finishSpeakingAttempt(stale.attempt.id, {
+        status: 'completed', review: { stale: true }, provider: 'grok', model: 'stale-model',
+      }, { claimGeneration: stale.attempt.evaluation_claim_generation }),
+      /SPEAKING_EVALUATION_CLAIM_LOST/u,
+    );
+    await repository.finishSpeakingAttempt(staleRecovery.attempt.id, {
+      status: 'completed', review: { current: true }, provider: 'grok', model: 'current-model',
+    }, { claimGeneration: staleRecovery.attempt.evaluation_claim_generation });
+    assert.deepEqual(
+      (await repository.getSpeakingAttempt(owner, stale.attempt.id)).review,
+      { current: true },
+    );
+
+    const isolated = await repository.claimSpeakingEvaluation(
+      other, input, 'speaking-semantic-v4', fingerprint,
+    );
+    assert.equal(isolated.created, true);
+    assert.notEqual(isolated.attempt.id, first.attempt.id);
+    const exported = await repository.exportUserData(owner);
+    assert.equal('evaluation_fingerprint' in exported.speaking_attempts[0], false);
+    assert.equal('evaluation_claimed_at' in exported.speaking_attempts[0], false);
+    assert.equal('evaluation_claim_generation' in exported.speaking_attempts[0], false);
+  });
+});
+
 test('attempts saved before model provenance export an explicit unknown model', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-legacy-attempts-'));
   const file = path.join(directory, 'data.json');

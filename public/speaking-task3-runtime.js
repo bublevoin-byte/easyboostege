@@ -30,6 +30,7 @@ export function createSpeakingTask3BrowserFlow(options = {}) {
     stopAnswer: flow.stopPosition,
     playAnswer: flow.playPosition,
     completeAnswer: flow.completePosition,
+    assessmentRecordings: flow.assessmentRecordings,
     dispose: flow.dispose,
   });
 }

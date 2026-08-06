@@ -29,7 +29,11 @@ function createApi({ offline = true } = {}) {
   const window = {
     location: { origin: ORIGIN, protocol: 'https:' },
     async fetch(url, options) {
-      attempts.push({ url: String(url), method: (options && options.method) || 'GET' });
+      attempts.push({
+        url: String(url),
+        method: (options && options.method) || 'GET',
+        headers: options?.headers || {},
+      });
       if (offline) throw new TypeError('Failed to fetch');
       return {
         ok: true,
@@ -130,6 +134,24 @@ test('the same operations succeed once the network is back, so the contract is a
   assert.deepEqual(verdict.data, { score: 6 });
   assert.equal(attempts.length, 1);
   assert.equal(attempts[0].url, `${ORIGIN}/api/v1/ai/evaluate-writing`);
+});
+
+test('binary requests forward explicit pronunciation headers without losing the content type', async () => {
+  const { api, attempts } = createApi({ offline: false });
+  await api.postBinary('/api/v1/speaking/upload', new Uint8Array([1, 2]), 'audio/wav', {
+    'Idempotency-Key': '70000000-0000-4000-8000-000000000001',
+    'X-Speech-Locale': 'en-GB',
+    'X-Audio-Duration-Seconds': '12',
+    'X-Speaking-Item': '3',
+  });
+
+  assert.deepEqual(Object.fromEntries(Object.entries(attempts[0].headers)), {
+    'Content-Type': 'audio/wav',
+    'Idempotency-Key': '70000000-0000-4000-8000-000000000001',
+    'X-Speech-Locale': 'en-GB',
+    'X-Audio-Duration-Seconds': '12',
+    'X-Speaking-Item': '3',
+  });
 });
 
 /* ---------- progress synchronization ---------- */

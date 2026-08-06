@@ -63,8 +63,8 @@ async function withServer({
   const audioRequest = (username, sessionId, {
     audio = testPcmWavAudio(),
     idempotencyKey = '10000000-0000-4000-8000-000000000071',
-    locale = 'en-US', duration = '3', contentType = 'audio/wav',
-  } = {}) => fetch(`${baseUrl}/api/v1/speaking/task-1/sessions/${sessionId}/pronunciation-assessment`, {
+    locale = 'en-US', duration = '3', contentType = 'audio/wav', taskType = 1, item = null,
+  } = {}) => fetch(`${baseUrl}/api/v1/speaking/task-${taskType}/sessions/${sessionId}/pronunciation-assessment`, {
     method: 'POST',
     headers: {
       'content-type': contentType,
@@ -72,6 +72,7 @@ async function withServer({
       'idempotency-key': idempotencyKey,
       'x-speech-locale': locale,
       'x-audio-duration-seconds': duration,
+      ...(item == null ? {} : { 'x-speaking-item': String(item) }),
     },
     body: audio,
   });
@@ -136,6 +137,66 @@ test('task 1 pronunciation endpoint binds server reference, returns bounded DTO 
     });
     const afterLocalPlayback = await (await jsonRequest(owner, '/api/v1/speaking/pronunciation-assessments/status')).json();
     assert.equal(afterLocalPlayback.quota.usedSeconds, 3);
+  });
+});
+
+test('tasks 2-4 pronunciation uploads are owner-bound and use exact item contexts', async () => {
+  const providerInputs = [];
+  const pronunciationProvider = {
+    async status() { return { available: true, provider: 'test-azure', reason: null }; },
+    async assess(input, { onProcessingStarted }) {
+      providerInputs.push({
+        mode: input.mode,
+        referenceText: input.referenceText,
+        contextId: input.contextId,
+      });
+      await onProcessingStarted();
+      return {
+        status: 'success', isFinal: true, available: true,
+        processedDurationSeconds: input.durationSeconds,
+        transcript: 'A server assessed answer.', confidence: 96, words: [],
+        quality: { acceptable: true, warnings: [] },
+      };
+    },
+  };
+  await withServer({ pronunciationProvider }, async ({ owner, other, jsonRequest, audioRequest }) => {
+    const sessions = {};
+    for (const taskType of [2, 3, 4]) {
+      sessions[taskType] = await (await jsonRequest(owner, `/api/v1/speaking/task-${taskType}/sessions`, {
+        method: 'POST', body: {},
+      })).json();
+    }
+
+    assert.equal((await audioRequest(owner, sessions[2].id, {
+      taskType: 2, idempotencyKey: '10000000-0000-4000-8000-000000000072',
+    })).status, 400, 'task 2 requires an exact question position');
+    assert.equal((await audioRequest(owner, sessions[3].id, {
+      taskType: 3, item: 6, idempotencyKey: '10000000-0000-4000-8000-000000000073',
+    })).status, 400, 'task 3 rejects an out-of-range answer position');
+    assert.equal((await audioRequest(other, sessions[4].id, {
+      taskType: 4, idempotencyKey: '10000000-0000-4000-8000-000000000074',
+    })).status, 404, 'another user cannot attach audio to the owner session');
+
+    const uploads = [
+      { taskType: 2, item: 3, key: '10000000-0000-4000-8000-000000000082' },
+      { taskType: 3, item: 5, key: '10000000-0000-4000-8000-000000000083' },
+      { taskType: 4, item: null, key: '10000000-0000-4000-8000-000000000084' },
+    ];
+    for (const upload of uploads) {
+      const response = await audioRequest(owner, sessions[upload.taskType].id, {
+        taskType: upload.taskType,
+        item: upload.item,
+        idempotencyKey: upload.key,
+      });
+      assert.equal(response.status, 200);
+      assert.equal((await response.json()).assessment.status, 'success');
+    }
+
+    assert.deepEqual(providerInputs, uploads.map(({ taskType, item }) => ({
+      mode: 'unscripted',
+      referenceText: null,
+      contextId: `task${taskType}:${sessions[taskType].id}:${sessions[taskType].task.id}@${sessions[taskType].task.revision}${item == null ? '' : `:item${item}`}`,
+    })));
   });
 });
 
@@ -225,13 +286,17 @@ test('operator duration cap is enforced before provider lookup or quota reservat
   });
 });
 
-test('OpenAPI and migration publish bounded audio, quota and safe assessment contracts', async () => {
-  const [specification, migration] = await Promise.all([
+test('OpenAPI and migrations publish bounded audio, quota and safe assessment contracts', async () => {
+  const [specification, migration, contextMigration] = await Promise.all([
     fs.readFile(new URL('../docs/openapi.yaml', import.meta.url), 'utf8'),
     fs.readFile(new URL('../migrations/046_speaking_pronunciation_assessments.sql', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../migrations/047_speaking_assessment_context.sql', import.meta.url), 'utf8'),
   ]);
   assert.match(specification, /\/api\/v1\/speaking\/pronunciation-assessments\/status:/u);
   assert.match(specification, /\/api\/v1\/speaking\/task-1\/sessions\/\{sessionId\}\/pronunciation-assessment:/u);
+  assert.match(specification, /\/api\/v1\/speaking\/task-2\/sessions\/\{sessionId\}\/pronunciation-assessment:/u);
+  assert.match(specification, /\/api\/v1\/speaking\/task-3\/sessions\/\{sessionId\}\/pronunciation-assessment:/u);
+  assert.match(specification, /\/api\/v1\/speaking\/task-4\/sessions\/\{sessionId\}\/pronunciation-assessment:/u);
   const pronunciationPath = specification.split(
     '/api/v1/speaking/task-1/sessions/{sessionId}/pronunciation-assessment:',
   )[1].split('/api/v1/speaking/task-1/sessions:')[0];
@@ -246,4 +311,7 @@ test('OpenAPI and migration publish bounded audio, quota and safe assessment con
   assert.match(migration, /dispatch_started_at TIMESTAMPTZ/u);
   assert.match(migration, /ON DELETE CASCADE/u);
   assert.doesNotMatch(migration, /subscription_key|audio BYTEA|provider_payload/iu);
+  assert.match(contextMigration, /ADD COLUMN IF NOT EXISTS context_id VARCHAR\(300\)/u);
+  assert.match(contextMigration, /char_length\(context_id\) BETWEEN 1 AND 300/u);
+  assert.match(contextMigration, /context_id ~ '\^\[a-zA-Z0-9:@\._-\]\+\$'/u);
 });

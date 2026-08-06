@@ -356,7 +356,8 @@ test('audio endpoints enforce upload controls, timeouts and private cached respo
   assert.doesNotMatch(media, /Cache-Control', 'public, max-age=604800'/u);
   assert.match(frontend, /function spDeleteRecording\(/u);
   assert.match(frontend, /function spFlagTranscript\(/u);
-  assert.match(frontend, /Произношение, интонация, паузы и беглость не оценивались/u);
+  assert.match(frontend, /полноту чтения, беглость распознавания/u);
+  assert.match(frontend, /Интонация и отдельные фонемы в балл не входили/u);
 });
 
 test('production documentation covers local setup, API, database and operations', async () => {

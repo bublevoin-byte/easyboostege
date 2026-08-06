@@ -18,11 +18,14 @@ function reservationInput(overrides = {}) {
 }
 
 export async function assertSpeakingAssessmentQuotaContract(assert, repository, username) {
-  const first = reservationInput();
+  const first = reservationInput({
+    contextId: 'task1:71111111-1111-4111-8111-111111111111:read-v1-001@1',
+  });
   const reserved = await repository.reserveSpeakingAssessment(username, first);
   assert.equal(reserved.created, true);
   assert.equal(reserved.reservation.status, 'reserved');
   assert.equal(reserved.reservation.reserved_seconds, 60);
+  assert.equal(reserved.reservation.context_id, first.contextId);
   assert.deepEqual(reserved.quota, {
     tier: 'base', periodStart: '2026-08-01T00:00:00.000Z', limitSeconds: BASE_LIMIT_SECONDS,
     usedSeconds: 0, heldSeconds: 60, remainingSeconds: BASE_LIMIT_SECONDS - 60,
@@ -217,6 +220,7 @@ export async function assertSpeakingAssessmentQuotaContract(assert, repository, 
   const exported = await repository.exportUserData(username);
   assert.ok(Array.isArray(exported.speaking_assessments));
   assert.equal(exported.speaking_assessments.some((entry) => entry.id === first.id), true);
+  assert.equal(exported.speaking_assessments.find((entry) => entry.id === first.id).context_id, first.contextId);
   assert.equal(JSON.stringify(exported.speaking_assessments).includes(first.idempotencyKey), false);
   assert.equal(JSON.stringify(exported.speaking_assessments).includes(first.requestHash), false);
 

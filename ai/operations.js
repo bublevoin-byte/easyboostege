@@ -31,7 +31,7 @@ export const AI_OPERATIONS = Object.freeze({
   // Evaluation: long input, structured output, the most expensive calls we make.
   writing_37: { maxTokens: 1800, timeoutMs: 45_000, requestsPerHour: 12, fallback: 'secondary', promptVersion: WRITING_PROMPT_VERSION },
   writing_38: { maxTokens: 2200, timeoutMs: 60_000, requestsPerHour: 12, fallback: 'secondary', promptVersion: WRITING_PROMPT_VERSION },
-  evaluate_speaking: { maxTokens: 1600, timeoutMs: 45_000, requestsPerHour: 20, fallback: 'secondary', promptVersion: SPEAKING_PROMPT_VERSION },
+  evaluate_speaking: { maxTokens: 1600, timeoutMs: 45_000, requestsPerHour: 20, fallback: 'none', promptVersion: SPEAKING_PROMPT_VERSION },
   // A sample answer is a convenience, not a grade: one failed provider is enough to give up.
   speaking_sample: { maxTokens: 900, timeoutMs: 25_000, requestsPerHour: 20, fallback: 'none', promptVersion: SPEAKING_PROMPT_VERSION },
   voice_tutor_realtime: { maxTokens: 500, timeoutMs: 10_000, requestsPerHour: 20, fallback: 'none', promptVersion: VOICE_TUTOR_PROMPT_VERSION },

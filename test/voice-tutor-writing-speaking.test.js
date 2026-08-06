@@ -58,6 +58,62 @@ const speakingReview = Object.freeze({
   }],
 });
 
+const semanticTask4Facts = Object.freeze({
+  confidence: 0.92,
+  verdict: 'Нужно полнее раскрыть план и исправить две ошибки.',
+  evidence: ['Три из четырёх пунктов раскрыты.'],
+  issues: [],
+  phraseCount: 13,
+  wordList: false,
+  introductionPresent: true,
+  conclusionPresent: true,
+  contentAspects: Array.from({ length: 4 }, (_, index) => ({
+    index: index + 1, id: `content-${index + 1}`, start: 0, end: 0,
+    status: index < 3 ? 'full' : 'missing', evidence: `Plan point ${index + 1}`,
+    correction: index < 3 ? 'No deduction.' : 'Add the missing plan point.',
+  })),
+  organizationErrors: [
+    { id: 'org-1', start: 10, end: 15, evidence: 'Не хватает первой связки.', correction: 'Добавьте первую логическую связку.' },
+    { id: 'org-2', start: 20, end: 25, evidence: 'Не хватает второй связки.', correction: 'Добавьте вторую логическую связку.' },
+  ],
+  lexicalGrammarErrors: [
+    { id: 'lang-1', start: 30, end: 35, evidence: 'There are two photo.', correction: 'There are two photos.', gross: false },
+    { id: 'lang-2', start: 40, end: 45, evidence: 'People is learning.', correction: 'People are learning.', gross: false },
+    { id: 'lang-3', start: 50, end: 55, evidence: 'It more useful.', correction: 'It is more useful.', gross: false },
+    { id: 'lang-4', start: 60, end: 65, evidence: 'I prefer study.', correction: 'I prefer studying.', gross: false },
+  ],
+});
+
+const speakingAcousticFacts = Object.freeze({
+  available: true,
+  recognitionConfidence: 0.95,
+  signalQuality: 'good',
+  recordingDurationSeconds: 90,
+  itemDurations: [],
+  wordEvents: [],
+});
+
+const speakingSemanticReview = Object.freeze({
+  status: 'scored',
+  got: 7,
+  max: 10,
+  verdict: semanticTask4Facts.verdict,
+  criteria: [
+    { name: 'Решение коммуникативной задачи', got: 3, max: 4 },
+    { name: 'Организация', got: 2, max: 3 },
+    { name: 'Языковое оформление', got: 2, max: 3 },
+  ],
+  good: [...semanticTask4Facts.evidence],
+  fix: semanticTask4Facts.issues.map((issue) => ({
+    wrong: issue.evidence, right: issue.correction, note: issue.code,
+  })),
+  confidence: 0.92,
+  needsRetryReason: null,
+  scoringVersion: 'speaking-fipi-combiner-v2',
+  semanticFacts: semanticTask4Facts,
+  acousticFacts: speakingAcousticFacts,
+});
+
 async function seedCompletedReviews(repository, username) {
   const writingId = await repository.createWritingAttempt(username, {
     taskType: 'writing_37',
@@ -351,5 +407,40 @@ test('speaking review tracer uses the stored transcript and rejects stale or inc
     const stored = await repository.getVoiceTutorSession(owner, created.session.id);
     const rebuilt = await rebuildSourceCapsule(repository, owner, stored.capsule, NOW);
     assert.equal(rebuilt.learner_answer, SPEAKING_SECRET);
+
+    const semanticAttemptId = await repository.createSpeakingAttempt(owner, {
+      taskType: 4,
+      assignment: { topic: 'Compare two photographs', plan: ['describe', 'compare', 'advantages', 'opinion'], ph: ['photo one', 'photo two'] },
+      transcript: SPEAKING_SECRET,
+    }, 'speaking-semantic-v4');
+    await repository.finishSpeakingAttempt(semanticAttemptId, {
+      status: 'completed', review: speakingSemanticReview, provider: 'fake-evaluator', model: 'fake-speaking-model',
+    });
+    const semanticAttempt = await repository.getSpeakingAttempt(owner, semanticAttemptId);
+    const semanticCapsule = buildWritingSpeakingCapsule({
+      source: 'speaking', attempt: semanticAttempt, expectedRevision: 1, criterionIndex: 0,
+    });
+    assert.equal(semanticCapsule.module, 'speaking');
+
+    const retryAttemptId = await repository.createSpeakingAttempt(owner, {
+      taskType: 4,
+      assignment: { topic: 'Compare two photographs', plan: ['describe', 'compare', 'advantages', 'opinion'], ph: ['photo one', 'photo two'] },
+      transcript: SPEAKING_SECRET,
+    }, 'speaking-semantic-v4');
+    await repository.finishSpeakingAttempt(retryAttemptId, {
+      status: 'needs_retry',
+      review: {
+        status: 'needs_retry', got: null, max: 10, verdict: 'Запишите ответ ещё раз.',
+        criteria: [], good: [], fix: [], confidence: 0.2,
+        needsRetryReason: 'semantic_evidence_uncertain',
+        scoringVersion: 'speaking-fipi-combiner-v2', semanticFacts: semanticTask4Facts,
+        acousticFacts: speakingAcousticFacts,
+      },
+      provider: 'fake-evaluator', model: 'fake-speaking-model',
+    });
+    const retryAttempt = await repository.getSpeakingAttempt(owner, retryAttemptId);
+    assert.throws(() => buildWritingSpeakingCapsule({
+      source: 'speaking', attempt: retryAttempt, expectedRevision: 1, criterionIndex: 0,
+    }), /VOICE_TUTOR_ATTEMPT_NOT_SUPPORTED/u, 'needs_retry attempts do not expose a Voice Tutor pointer');
   });
 });

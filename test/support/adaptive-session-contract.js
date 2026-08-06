@@ -285,7 +285,7 @@ export async function assertAdaptiveSessionRepositoryContract(assert, repository
           transcript: 'A contract transcript.',
         }, 'contract-speaking-v1');
         await repository.finishSpeakingAttempt(attemptId, {
-          status: 'completed', review: { got: 1, max: 4 },
+          status: 'completed', review: { status: 'scored', got: 1, max: 4 },
         });
         attempt = { type: 'speaking', id: attemptId };
       } else {

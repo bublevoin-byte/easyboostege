@@ -98,6 +98,14 @@ test('browser task 2 flow records and completes four local questions without upl
 
   assert.equal(flow.state().phase, 'completed');
   assert.equal(flow.state().localRecordings.length, 4);
+  assert.deepEqual(
+    flow.assessmentRecordings().map(({ positionNumber, durationSeconds, blob }) => ({
+      positionNumber, durationSeconds, text: blob.size > 0,
+    })),
+    [1, 2, 3, 4].map((positionNumber) => ({
+      positionNumber, durationSeconds: positionNumber + 10, text: true,
+    })),
+  );
   assert.deepEqual(played, [
     'blob:task2-question-1', 'blob:task2-question-2', 'blob:task2-question-3', 'blob:task2-question-4',
   ]);
@@ -132,6 +140,7 @@ test('browser task 2 flow restores the server current question without inventing
   assert.equal(flow.state().phase, 'ready');
   assert.equal(flow.state().currentQuestion, 3);
   assert.deepEqual(flow.state().localRecordings, []);
+  assert.throws(() => flow.assessmentRecordings(), { code: 'SPEAKING_ASSESSMENT_RECORDINGS_INCOMPLETE' });
   await assert.rejects(flow.playQuestion(1), { code: 'LOCAL_RECORDING_UNAVAILABLE' });
 });
 

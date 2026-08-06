@@ -72,16 +72,25 @@ function validTask38Review(words) {
 
 function validSpeakingReview() {
   return {
-    got: 4,
-    max: 5,
-    verdict: 'Ответ по теме',
-    criteria: Array.from({ length: 5 }, (_, index) => ({
-      name: `Ответ ${index + 1}`,
-      got: index === 4 ? 0 : 1,
-      max: 1,
+    confidence: 0.94,
+    verdict: 'Монолог раскрывает все пункты плана.',
+    evidence: ['Проверены четыре пункта плана.'],
+    issues: [],
+    phraseCount: 13,
+    wordList: false,
+    introductionPresent: true,
+    conclusionPresent: true,
+    contentAspects: Array.from({ length: 4 }, (_, index) => ({
+      index: index + 1,
+      id: `content-${index + 1}`,
+      start: 0,
+      end: 0,
+      status: 'full',
+      evidence: `Plan point ${index + 1}`,
+      correction: 'No deduction.',
     })),
-    good: ['Ответы развёрнуты'],
-    fix: [{ wrong: 'I like', right: 'I enjoy it', note: 'Добавь подробность' }],
+    organizationErrors: [],
+    lexicalGrammarErrors: [],
   };
 }
 
@@ -99,7 +108,12 @@ async function startStack({ replies }) {
     request.on('data', (chunk) => chunks.push(chunk));
     request.on('end', () => {
       const body = JSON.parse(Buffer.concat(chunks).toString() || '{}');
-      providerCalls.push({ url: request.url, user: body.messages?.at(-1)?.content || '', maxTokens: body.max_tokens });
+      providerCalls.push({
+        url: request.url,
+        user: body.messages?.at(-1)?.content || '',
+        maxTokens: body.max_tokens,
+        responseFormat: body.response_format,
+      });
       const reply = queue.shift();
       if (!reply) {
         response.writeHead(503, { 'Content-Type': 'application/json' });
@@ -210,19 +224,17 @@ async function startStack({ replies }) {
       return { status: response.status, body: await response.json() };
     },
     async evaluateSpeaking() {
+      const authorization = `Bearer ${jwt.sign({ u: 'student' }, JWT_SECRET)}`;
       const response = await fetch(`${baseUrl}/api/v1/ai/evaluate-speaking`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${jwt.sign({ u: 'student' }, JWT_SECRET)}`,
+          Authorization: authorization,
         },
         body: JSON.stringify({
-          taskType: 3,
-          transcript: 'I enjoy reading because books help me relax and learn new things.',
-          assignment: {
-            topic: 'Hobbies',
-            qs: ['What is your hobby?', 'When did you start?', 'How often?', 'Why?', 'Who with?'],
-          },
+          taskType: 4,
+          contentRef: 'builtin:speaking:task:4:v1',
+          transcript: 'I have found two photos for our project. Both show people learning. The first photo shows a classroom. The second photo shows a student at home. Both people are studying. The main difference is the place. Classroom study offers teamwork. Home study is flexible. I prefer classroom learning because friends can help. It is also more motivating. These photos illustrate two useful approaches. That is all I wanted to say.',
         }),
       });
       return { status: response.status, body: await response.json() };
@@ -454,7 +466,7 @@ test('the last tolerated words of tasks 37 and 38 reach the provider without tru
   }
 });
 
-test('successful free-answer APIs identify the integer score as experimental and approximate', { timeout: 40_000 }, async () => {
+test('writing keeps its approximate gate while legacy adaptive Speaking fails closed', { timeout: 40_000 }, async () => {
   const warning = 'Экспериментальная ИИ-оценка. Балл ориентировочный, может содержать ошибки и не является экспертным заключением.';
   const stack = await startStack({
     replies: [JSON.stringify(validReview(WORDS)), JSON.stringify(validSpeakingReview())],
@@ -464,9 +476,9 @@ test('successful free-answer APIs identify the integer score as experimental and
     const speaking = await stack.evaluateSpeaking();
 
     assert.equal(writing.status, 200);
-    assert.equal(speaking.status, 200);
+    assert.equal(speaking.status, 400);
+    assert.equal(speaking.body.error.code, 'VALIDATION_ERROR');
     assert.equal(Number.isInteger(writing.body.review.overall_got), true);
-    assert.equal(Number.isInteger(speaking.body.review.got), true);
     assert.deepEqual(writing.body.voiceTutor, {
       source: 'writing', attemptId: writing.body.attemptId, revision: 1,
       criterionChoices: [
@@ -474,50 +486,29 @@ test('successful free-answer APIs identify the integer score as experimental and
         { index: 2, label: 'Языковое оформление' },
       ],
     });
-    assert.deepEqual(speaking.body.voiceTutor, {
-      source: 'speaking', attemptId: speaking.body.attemptId, revision: 1,
-      criterionChoices: [{ index: 4, label: 'Ответ 5' }],
-    });
     assert.deepEqual(writing.body.assessment, { mode: 'experimental', scoreKind: 'approximate', warning });
-    assert.deepEqual(speaking.body.assessment, { mode: 'experimental', scoreKind: 'approximate', warning });
+    assert.equal(stack.providerCalls.length, 1, 'rejected adaptive speech never reaches xAI');
     const attempts = await stack.attemptLog();
     assert.deepEqual(
       attempts.writing.map(({ provider, model, prompt_version: promptVersion }) => ({ provider, model, promptVersion })),
       [{ provider: 'grok', model: 'route-provenance-model', promptVersion: 'writing-v5' }],
     );
-    assert.deepEqual(
-      attempts.speaking.map(({ provider, model, prompt_version: promptVersion }) => ({ provider, model, promptVersion })),
-      [{ provider: 'grok', model: 'route-provenance-model', promptVersion: 'speaking-eval-v2' }],
-    );
+    assert.deepEqual(attempts.speaking, []);
   } finally {
     await stack.stop();
   }
 });
 
-test('a failed speaking evaluation keeps the last known provider and model', { timeout: 40_000 }, async () => {
+test('legacy adaptive Speaking is rejected before provider provenance can be invented', { timeout: 40_000 }, async () => {
   const stack = await startStack({ replies: ['not json', 'still not json'] });
   try {
     const { status, body } = await stack.evaluateSpeaking();
 
-    assert.equal(status, 502);
-    assert.equal(body.error.code, 'AI_RESPONSE_INVALID');
+    assert.equal(status, 400);
+    assert.equal(body.error.code, 'VALIDATION_ERROR');
+    assert.equal(stack.providerCalls.length, 0);
     const attempts = await stack.attemptLog();
-    assert.deepEqual(
-      attempts.speaking.map(({
-        status: attemptStatus,
-        provider,
-        model,
-        prompt_version: promptVersion,
-        error_code: errorCode,
-      }) => ({ attemptStatus, provider, model, promptVersion, errorCode })),
-      [{
-        attemptStatus: 'failed',
-        provider: 'grok',
-        model: 'route-provenance-model',
-        promptVersion: 'speaking-eval-v2',
-        errorCode: 'AI_RESPONSE_INVALID',
-      }],
-    );
+    assert.deepEqual(attempts.speaking, []);
   } finally {
     await stack.stop();
   }

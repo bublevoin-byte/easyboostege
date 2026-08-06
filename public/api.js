@@ -96,10 +96,10 @@
     return blob;
   }
 
-  async function postBinary(path, body, contentType = 'application/octet-stream') {
+  async function postBinary(path, body, contentType = 'application/octet-stream', headers = {}) {
     const response = await request(baseUrl + path, {
       method: 'POST',
-      headers: { 'Content-Type': contentType },
+      headers: { 'Content-Type': contentType, ...headers },
       credentials: 'same-origin',
       body,
     });

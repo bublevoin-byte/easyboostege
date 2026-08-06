@@ -31,16 +31,19 @@ export function assertSpeakingAssessmentReservation(input) {
   const requestHash = String(input?.requestHash || '').toLowerCase();
   const reservedSeconds = Number(input?.reservedSeconds);
   const locale = String(input?.locale || '');
+  const contextId = input?.contextId == null ? null : String(input.contextId);
   const now = new Date(input?.now ?? new Date());
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(id)
     || !IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)
     || !/^[a-f0-9]{64}$/u.test(requestHash)
     || !Number.isInteger(reservedSeconds) || reservedSeconds < 1 || reservedSeconds > 180
-    || !['en-GB', 'en-US'].includes(locale) || !Number.isFinite(now.getTime())) {
+    || !['en-GB', 'en-US'].includes(locale)
+    || (contextId !== null && (!/^[a-zA-Z0-9:@._-]{1,300}$/u.test(contextId)))
+    || !Number.isFinite(now.getTime())) {
     throw new SpeakingAssessmentQuotaError('SPEAKING_ASSESSMENT_RESERVATION_INVALID');
   }
   return {
-    id, idempotencyKey, requestHash, reservedSeconds, locale, now,
+    id, idempotencyKey, requestHash, reservedSeconds, locale, contextId, now,
     periodStart: speakingAssessmentPeriodStart(now),
   };
 }
@@ -71,6 +74,7 @@ export function speakingAssessmentExportDto(row) {
     id: row.id,
     status: row.status,
     locale: row.locale,
+    context_id: row.context_id || null,
     period_start: row.period_start,
     allowance_seconds: Number(row.allowance_seconds),
     reserved_seconds: Number(row.reserved_seconds),

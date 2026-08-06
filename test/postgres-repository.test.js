@@ -761,6 +761,8 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
       '044_speaking_task4_sessions.sql',
       '045_speaking_full_sessions.sql',
       '046_speaking_pronunciation_assessments.sql',
+      '047_speaking_assessment_context.sql',
+      '048_speaking_evaluation_idempotency.sql',
     ]);
 
     const username = await repository.createTelegramUser(telegramId, `Integration ${suffix}`);
@@ -899,6 +901,80 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     await repository.finishSpeakingAttempt(speakingAttemptId, {
       status: 'failed', provider: 'test', model: 'integration-speaking-model', errorCode: 'EXPECTED_TEST_ERROR',
     });
+    const speakingClaimInput = {
+      taskType: 2,
+      assignment: { ad: 'Integration claim', points: ['a', 'b', 'c', 'd'] },
+      transcript: 'Four owner-bound questions.',
+    };
+    const speakingFingerprint = crypto.createHash('sha256').update(`${suffix}:speaking`).digest('hex');
+    const [speakingFirstClaim, speakingReplayClaim] = await Promise.all([
+      repository.claimSpeakingEvaluation(
+        username, speakingClaimInput, 'speaking-semantic-v4', speakingFingerprint,
+      ),
+      repository.claimSpeakingEvaluation(
+        username, speakingClaimInput, 'speaking-semantic-v4', speakingFingerprint,
+      ),
+    ]);
+    assert.equal([speakingFirstClaim, speakingReplayClaim].filter((claim) => claim.created).length, 1);
+    assert.equal(speakingFirstClaim.attempt.id, speakingReplayClaim.attempt.id);
+    await repository.finishSpeakingAttempt(speakingFirstClaim.attempt.id, {
+      status: 'failed', provider: 'grok', model: 'temporary-model', errorCode: 'AI_PROVIDER_UNAVAILABLE',
+    });
+    const speakingRecoveryNow = new Date('2026-08-06T11:00:00.000Z');
+    const [speakingRecoveredClaim, speakingRecoveryRace] = await Promise.all([
+      repository.claimSpeakingEvaluation(
+        username, speakingClaimInput, 'speaking-semantic-v4', speakingFingerprint,
+        { now: speakingRecoveryNow },
+      ),
+      repository.claimSpeakingEvaluation(
+        username, speakingClaimInput, 'speaking-semantic-v4', speakingFingerprint,
+        { now: speakingRecoveryNow },
+      ),
+    ]);
+    assert.equal(
+      [speakingRecoveredClaim, speakingRecoveryRace].filter((claim) => claim.created).length,
+      1,
+      'only one PostgreSQL caller may recover a transient failed claim',
+    );
+    assert.equal(speakingRecoveredClaim.attempt.id, speakingRecoveryRace.attempt.id);
+
+    const speakingStaleFingerprint = crypto.createHash('sha256')
+      .update(`${suffix}:speaking-stale`).digest('hex');
+    const speakingStaleClaim = await repository.claimSpeakingEvaluation(
+      username, speakingClaimInput, 'speaking-semantic-v4', speakingStaleFingerprint,
+      { now: new Date('2026-08-06T11:10:00.000Z') },
+    );
+    const speakingEarlyReplay = await repository.claimSpeakingEvaluation(
+      username, speakingClaimInput, 'speaking-semantic-v4', speakingStaleFingerprint,
+      { now: new Date('2026-08-06T11:14:59.999Z') },
+    );
+    const speakingStaleRecovery = await repository.claimSpeakingEvaluation(
+      username, speakingClaimInput, 'speaking-semantic-v4', speakingStaleFingerprint,
+      { now: new Date('2026-08-06T11:15:00.001Z') },
+    );
+    assert.equal(speakingEarlyReplay.created, false);
+    assert.equal(speakingStaleRecovery.created, true);
+    assert.equal(speakingStaleRecovery.attempt.id, speakingStaleClaim.attempt.id);
+    assert.ok(speakingStaleRecovery.attempt.evaluation_claim_generation
+      > speakingStaleClaim.attempt.evaluation_claim_generation);
+    await assert.rejects(
+      repository.finishSpeakingAttempt(speakingStaleClaim.attempt.id, {
+        status: 'completed', review: { stale: true }, provider: 'grok', model: 'stale-model',
+      }, { claimGeneration: speakingStaleClaim.attempt.evaluation_claim_generation }),
+      /SPEAKING_EVALUATION_CLAIM_LOST/u,
+    );
+    await repository.finishSpeakingAttempt(speakingStaleRecovery.attempt.id, {
+      status: 'completed', review: { current: true }, provider: 'grok', model: 'current-model',
+    }, { claimGeneration: speakingStaleRecovery.attempt.evaluation_claim_generation });
+    const speakingOther = await repository.createTelegramUser(
+      independentActorTelegramId, `Speaking Other ${suffix}`,
+    );
+    const speakingIsolatedClaim = await repository.claimSpeakingEvaluation(
+      speakingOther, speakingClaimInput, 'speaking-semantic-v4', speakingFingerprint,
+    );
+    assert.equal(speakingIsolatedClaim.created, true);
+    assert.notEqual(speakingIsolatedClaim.attempt.id, speakingFirstClaim.attempt.id);
+    await repository.deleteUserData(speakingOther);
     const taskHash = crypto.createHash('sha256').update(suffix).digest('hex');
     await repository.saveGeneratedTask(username, { operation: 'grammar_quiz', requestHash: taskHash, request: { operation: 'grammar_quiz' }, result: [{ q: suffix }], provider: 'test', promptVersion: 'content-v1' });
     assert.equal((await repository.getGeneratedTask(username, taskHash)).result[0].q, suffix);
@@ -1100,12 +1176,17 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     assert.equal(exported.account.username, username);
     assert.deepEqual(exported.progress, { learned: 12, prog: { words: 44 }, marker: suffix, extra: true });
     assert.equal(exported.writing_attempts.length, 1);
-    assert.equal(exported.speaking_attempts.length, 1);
+    assert.equal(exported.speaking_attempts.length, 3);
     assert.equal(exported.writing_attempts[0].model, 'integration-writing-model');
     assert.equal(exported.writing_attempts[0].error_code, 'EXPECTED_TEST_ERROR');
     assert.equal(exported.writing_attempts[0].answer, 'Test full answer');
     assert.equal(exported.writing_attempts[0].evaluated_answer, 'Test evaluated answer');
-    assert.equal(exported.speaking_attempts[0].model, 'integration-speaking-model');
+    assert.equal(
+      exported.speaking_attempts.find((attempt) => Number(attempt.id) === speakingAttemptId).model,
+      'integration-speaking-model',
+    );
+    assert.equal(JSON.stringify(exported.speaking_attempts).includes('evaluation_fingerprint'), false);
+    assert.equal(JSON.stringify(exported.speaking_attempts).includes('evaluation_claim_generation'), false);
     assert.equal(exported.generated_tasks.length, 2);
     assert.equal(exported.module_attempts.length, 2);
     assert.equal(exported.voice_tutor_sessions.find((session) => session.id === tracerSessionId).delivery_mode, 'text');

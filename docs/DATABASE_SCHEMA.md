@@ -1,8 +1,10 @@
 # Схема базы данных
 
-## Speaking pronunciation quota ledger (`046`)
+## Speaking pronunciation quota ledger and evaluation replay (`046`–`048`)
 
-`speaking_pronunciation_assessments` is the authoritative monthly seconds ledger. Each row is owner-bound and unique by `(username, idempotency_key)`, with `period_start`, locale, reservation/finalization state, reserved and billable seconds, bounded normalized result JSON, release reason, and timestamps. Database checks enforce `billable_seconds <= reserved_seconds` and the legal `reserved -> dispatching -> started -> finalized`, explicit pre-start `reserved|dispatching -> released`, and conservative stale-`dispatching -> finalized` shapes. `dispatch_started_at` is written atomically before provider code is entered; `provider_started_at` retains the narrower meaning that the SDK start callback actually fired. Released rows retain only their bounded canonical outcome so an exact retry cannot change status or reason. Under the owner lock, quota/replay/reserve operations reconcile the five-minute nonterminal lease: an expired reservation releases zero seconds, while expired dispatching or started rows finalize the full reservation conservatively. The owner foreign key uses `ON DELETE CASCADE`; the file repository implements the same contract atomically.
+`speaking_pronunciation_assessments` is the authoritative monthly seconds ledger. Each row is owner-bound and unique by `(username, idempotency_key)`, with `period_start`, locale, nullable bounded server-owned `context_id`, reservation/finalization state, reserved and billable seconds, bounded normalized result JSON, release reason, and timestamps. Migration `047` adds and bounds `context_id`; official requests use `taskN:<session UUID>:<task id>@<revision>` and tasks 2–3 append `:itemN`, so a saved assessment cannot be attached to another task or position. Database checks enforce `billable_seconds <= reserved_seconds` and the legal `reserved -> dispatching -> started -> finalized`, explicit pre-start `reserved|dispatching -> released`, and conservative stale-`dispatching -> finalized` shapes. `dispatch_started_at` is written atomically before provider code is entered; `provider_started_at` retains the narrower meaning that the SDK start callback actually fired. Released rows retain only their bounded canonical outcome so an exact retry cannot change status or reason. Under the owner lock, quota/replay/reserve operations reconcile the five-minute nonterminal lease: an expired reservation releases zero seconds, while expired dispatching or started rows finalize the full reservation conservatively. The owner foreign key uses `ON DELETE CASCADE`; the file repository implements the same contract atomically.
+
+Migration `048` adds a bounded SHA-256 `evaluation_fingerprint`, `evaluation_claimed_at`, a non-negative `evaluation_claim_generation`, and a partial unique index on `(username, evaluation_fingerprint)` to `speaking_attempts`. File and PostgreSQL repositories atomically claim the same owner-bound attempt, so an identical official evaluation replays its canonical completed, retry or terminal failed result without a second xAI call. A five-minute claim lease lets exactly one caller recover a process-interrupted `pending` attempt; each recovery advances the generation, and a terminal write must compare-and-set the same pending generation so a stale worker cannot overwrite its successor. Transient `AI_NOT_CONFIGURED` and `AI_PROVIDER_UNAVAILABLE` failures can resume the same attempt and reuse the already finalized Azure evidence, while invalid model output remains a terminal canonical replay. New provider-bound claims are created only after budget/rate admission. The fingerprint, lease timestamp, and generation are internal and do not replace owner checks on catalog sessions or pronunciation assessments.
 
 Источником истины являются SQL-файлы в `migrations/`.
 
@@ -32,7 +34,7 @@
 | `user_progress` | JSONB-прогресс пользователя | `username`, `data`, `updated_at` |
 | `telegram_auth_codes` | одноразовые коды входа | hash кода, expiry, consumed state |
 | `writing_attempts` | журнал пользовательских прогонов заданий 37/38 | assignment, answer, evaluated_answer, review, provider, model, prompt_version, status, error_code |
-| `speaking_attempts` | журнал пользовательских прогонов устной части | assignment, transcript, review, provider, model, prompt_version, status, error_code; audio is not stored |
+| `speaking_attempts` | журнал пользовательских прогонов устной части | server-owned assignment, transcript, strict semantic facts, deterministic criteria/score, confidence/retry reason, scoring/prompt/provider/model versions and bounded normalized acoustic facts for official tasks 1–4 needed to re-check the stored score; audio and raw provider payload are not stored |
 | `speaking_task1_sessions` | owner-bound тренировки чтения вслух | catalog/task revision, rotation reason, status, duration, mic check, local-playback flag, self-rating и timestamps; без audio/transcript |
 | `speaking_task2_sessions` | owner-bound последовательные тренировки четырёх вопросов | catalog/task revision, current question, четыре безопасные metadata-позиции, self-rating и timestamps; без audio/transcript/score |
 | `speaking_task3_sessions` | owner-bound последовательные тренировки пяти ответов | catalog/task revision, current question, пять безопасных metadata-позиций, self-rating и timestamps; без audio/transcript/score |
@@ -83,8 +85,9 @@ Rollout закрыт по умолчанию: `ADAPTIVE_LEARNING_ENABLED=false` 
 
 Voice Tutor обращается к этим журналам только через owner-bound lookup по `(username, id)`. Для
 `writing` допускается лишь `status=completed`, валидные assignment/review и ровно сохранённый
-`evaluated_answer`; для `speaking` — лишь completed attempt, сохранённые assignment/transcript и
-повторно провалидированный review. Эти данные передаются только в transient provider capsule и не
+`evaluated_answer`; для `speaking` — лишь attempt с `review.status=scored`, сохранённые
+assignment/transcript и повторно провалидированный review с числовыми `got/max`. Эти данные
+передаются только в transient provider capsule и не
 копируются в `voice_tutor_sessions`, её публичный ответ или раздел этой таблицы в account export.
 Сервер выдаёт bounded-названия и индексы критериев с потерями, а при создании отдельной сессии
 повторно проверяет выбранный индекс по сохранённому review. Tutor session не обновляет review/score и не
@@ -265,8 +268,9 @@ domain-separated HMAC серверного секрета. Bearer не попа�
 перенести между владельцами, блоками, активностями или ревизиями; истёкший/отозванный claim не создаёт
 доказательство. Если claim уже связан с точной попыткой, но ответ `advance` потерян, повторный `start`
 возвращает эту же attempt reference без нового claim; browser сохраняет durable recovery-control до вызова `advance`.
-Для server-owned writing/speaking repository дополнительно проверяет completed status,
-task identity и создание попытки после выдачи claim.
+Для server-owned writing repository дополнительно проверяются completed status, task identity и
+создание попытки после выдачи claim; speaking допускается только с `review.status=scored` и
+числовыми `got/max`, поэтому `needs_retry` не может завершить адаптивный блок.
 
 `adaptive_learning_session_events` — append-only allowlisted журнал `block_completed|session_finished`:
 идентификаторы блока/skill/activity/source, класс происхождения evidence, плановые и доступные

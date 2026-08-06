@@ -46,6 +46,7 @@
     "quality:merge-review": "node scripts/merge-review-worksheet.js",
     "quality:check": "node scripts/ai-quality-report.js",
     "quality:release": "node scripts/ai-quality-report.js --release",
+    "quality:speaking-calibration": "node scripts/speaking-calibration-report.js",
     "monitor": "node scripts/monitor.js",
     "load:smoke": "node scripts/load-smoke.js",
     "tz:readiness": "node scripts/tz-readiness.js",

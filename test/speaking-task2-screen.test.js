@@ -102,7 +102,7 @@ function harness({ recovered = null, restoreError = null } = {}) {
   return { screen: context.window.__speakingScreen, requests, area, context };
 }
 
-test('real Speaking screen runs four task 2 recordings and never offers early AI evaluation', async () => {
+test('real Speaking screen runs four task 2 recordings and offers assessment only after completion', async () => {
   const { screen, requests, area, context } = harness();
 
   assert.equal(await screen.spOpen(2), true);
@@ -122,8 +122,8 @@ test('real Speaking screen runs four task 2 recordings and never offers early AI
   assert.equal(screen.getState().task2Completed, true);
   assert.equal(context.S.speakingTask2SessionId, undefined);
   assert.match(area.innerHTML, /4 отдельные записи/u);
-  assert.match(area.innerHTML, /оценка появится/u);
-  assert.doesNotMatch(area.innerHTML, /Оценить с ИИ|Образец ответа|Расшифровка/u);
+  assert.match(area.innerHTML, /Оценить по критериям ЕГЭ/u);
+  assert.doesNotMatch(area.innerHTML, /Образец ответа|Расшифровка/u);
   assert.deepEqual(JSON.parse(JSON.stringify(requests)), [
     { path: '/api/v1/speaking/task-2/sessions', body: {} },
     ...[1, 2, 3, 4].map((questionNumber) => ({

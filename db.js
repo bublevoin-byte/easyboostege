@@ -63,6 +63,8 @@ export const createWritingAttempt = (...args) => repository.createWritingAttempt
 export const finishWritingAttempt = (...args) => repository.finishWritingAttempt(...args);
 export const getWritingAttempt = (...args) => repository.getWritingAttempt(...args);
 export const createSpeakingAttempt = (...args) => repository.createSpeakingAttempt(...args);
+export const claimSpeakingEvaluation = (...args) => repository.claimSpeakingEvaluation(...args);
+export const getSpeakingEvaluationClaim = (...args) => repository.getSpeakingEvaluationClaim(...args);
 export const finishSpeakingAttempt = (...args) => repository.finishSpeakingAttempt(...args);
 export const getSpeakingAttempt = (...args) => repository.getSpeakingAttempt(...args);
 export const assignSpeakingTask1Session = (...args) => repository.assignSpeakingTask1Session(...args);

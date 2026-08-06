@@ -30,6 +30,7 @@ export function createSpeakingTask2BrowserFlow(options = {}) {
     stopQuestion: flow.stopPosition,
     playQuestion: flow.playPosition,
     completeQuestion: flow.completePosition,
+    assessmentRecordings: flow.assessmentRecordings,
     dispose: flow.dispose,
   });
 }

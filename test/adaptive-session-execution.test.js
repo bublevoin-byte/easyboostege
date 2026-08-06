@@ -306,7 +306,9 @@ test('server-owned writing or speaking completion binds to the claim without a c
           taskType: taskNumber, assignment: { points: ['A different speaking card.'] },
           transcript: 'Student transcript for another card.',
         }, 'test-speaking-v1');
-        await repository.finishSpeakingAttempt(wrongId, { status: 'completed', review: { got: 1, max: 4 } });
+        await repository.finishSpeakingAttempt(wrongId, {
+          status: 'completed', review: { status: 'scored', got: 1, max: 4 },
+        });
         const wrongBind = await request(owner, `/api/v1/adaptive-learning/sessions/${session.id}/bind-attempt`, {
           method: 'POST', body: JSON.stringify({
             executionClaim: started.executionClaim, attempt: { type: 'speaking', id: wrongId },
@@ -318,7 +320,9 @@ test('server-owned writing or speaking completion binds to the claim without a c
           assignment: adaptiveSpeakingTask(block.contentRef).assignment,
           transcript: 'Student transcript.',
         }, 'test-speaking-v1');
-        await repository.finishSpeakingAttempt(id, { status: 'completed', review: { got: 1, max: 4 } });
+        await repository.finishSpeakingAttempt(id, {
+          status: 'completed', review: { status: 'scored', got: 1, max: 4 },
+        });
         attempt = { type: 'speaking', id };
         serverOwnedSeen = true;
       } else {

@@ -108,6 +108,80 @@ paths:
         '415': { description: Unsupported audio MIME type }
         '429': { description: Monthly provider seconds exhausted; local recording remains available }
         '503': { description: Azure configuration or the optional official SDK is unavailable }
+  /api/v1/speaking/task-2/sessions/{sessionId}/pronunciation-assessment:
+    post:
+      summary: Assess one owner-bound task 2 direct question
+      description: Accepts only mono PCM16 16 kHz WAV. X-Speaking-Item binds the recording to one of the four server-owned supports. The server stores no audio and rejects an invalid owner, catalog revision or item before provider work.
+      parameters:
+        - { in: path, name: sessionId, required: true, schema: { type: string, format: uuid } }
+        - { in: header, name: Idempotency-Key, required: true, schema: { type: string, format: uuid } }
+        - { in: header, name: X-Speech-Locale, required: true, schema: { type: string, enum: [en-GB, en-US] } }
+        - { in: header, name: X-Audio-Duration-Seconds, required: true, schema: { type: number, minimum: 1, maximum: 20 } }
+        - { in: header, name: X-Speaking-Item, required: true, schema: { type: integer, minimum: 1, maximum: 4 } }
+      requestBody:
+        required: true
+        content:
+          audio/wav: { schema: { type: string, format: binary, maxLength: 10485760, x-maxBytes: 10485760 } }
+      responses:
+        '200': { description: Final normalized assessment, billing settlement and quota, content: { application/json: { schema: { $ref: '#/components/schemas/SpeakingPronunciationAssessment' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Session not found for this learner }
+        '409': { description: Idempotency key conflict or incompatible catalog revision }
+        '413': { description: Audio exceeds the configured ceiling }
+        '415': { description: Unsupported audio MIME type }
+        '429': { description: Monthly provider seconds exhausted }
+        '503': { description: Pronunciation provider unavailable }
+  /api/v1/speaking/task-3/sessions/{sessionId}/pronunciation-assessment:
+    post:
+      summary: Assess one owner-bound task 3 interview answer
+      description: Accepts only mono PCM16 16 kHz WAV. X-Speaking-Item binds the recording to one of the five server-owned questions. The server stores no audio.
+      parameters:
+        - { in: path, name: sessionId, required: true, schema: { type: string, format: uuid } }
+        - { in: header, name: Idempotency-Key, required: true, schema: { type: string, format: uuid } }
+        - { in: header, name: X-Speech-Locale, required: true, schema: { type: string, enum: [en-GB, en-US] } }
+        - { in: header, name: X-Audio-Duration-Seconds, required: true, schema: { type: number, minimum: 1, maximum: 40 } }
+        - { in: header, name: X-Speaking-Item, required: true, schema: { type: integer, minimum: 1, maximum: 5 } }
+      requestBody:
+        required: true
+        content:
+          audio/wav: { schema: { type: string, format: binary, maxLength: 10485760, x-maxBytes: 10485760 } }
+      responses:
+        '200': { description: Final normalized assessment, billing settlement and quota, content: { application/json: { schema: { $ref: '#/components/schemas/SpeakingPronunciationAssessment' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Session not found for this learner }
+        '409': { description: Idempotency key conflict or incompatible catalog revision }
+        '413': { description: Audio exceeds the configured ceiling }
+        '415': { description: Unsupported audio MIME type }
+        '429': { description: Monthly provider seconds exhausted }
+        '503': { description: Pronunciation provider unavailable }
+  /api/v1/speaking/task-4/sessions/{sessionId}/pronunciation-assessment:
+    post:
+      summary: Assess one owner-bound task 4 monologue
+      description: Accepts only mono PCM16 16 kHz WAV up to the official 180-second response bound. The server stores no audio and attaches the final assessment only to the exact pinned catalog session.
+      parameters:
+        - { in: path, name: sessionId, required: true, schema: { type: string, format: uuid } }
+        - { in: header, name: Idempotency-Key, required: true, schema: { type: string, format: uuid } }
+        - { in: header, name: X-Speech-Locale, required: true, schema: { type: string, enum: [en-GB, en-US] } }
+        - { in: header, name: X-Audio-Duration-Seconds, required: true, schema: { type: number, minimum: 1, maximum: 180 } }
+      requestBody:
+        required: true
+        content:
+          audio/wav: { schema: { type: string, format: binary, maxLength: 10485760, x-maxBytes: 10485760 } }
+      responses:
+        '200': { description: Final normalized assessment, billing settlement and quota, content: { application/json: { schema: { $ref: '#/components/schemas/SpeakingPronunciationAssessment' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Session not found for this learner }
+        '409': { description: Idempotency key conflict or incompatible catalog revision }
+        '413': { description: Audio exceeds the configured ceiling }
+        '415': { description: Unsupported audio MIME type }
+        '429': { description: Monthly provider seconds exhausted }
+        '503': { description: Pronunciation provider unavailable }
   /api/v1/speaking/task-1/sessions:
     post:
       summary: Assign one server-owned Speaking task 1 text to the current learner
@@ -1635,7 +1709,7 @@ paths:
                 required: [review, provider, attemptId, voiceTutor, assessment, evaluationScope]
                 properties:
                   review: { type: object }
-                  provider: { type: string }
+                  provider: { type: string, nullable: true }
                   attemptId: { type: integer }
                   voiceTutor:
                     type: object
@@ -1714,31 +1788,62 @@ paths:
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /api/v1/ai/evaluate-speaking:
     post:
-      summary: Evaluate an EGE speaking transcript with server-owned criteria
+      summary: Extract bounded speaking facts and apply the versioned server-owned EGE combiner
+      description: The browser identifies an owner-bound catalog session and never sends an assignment, transcript or rubric. Official task 1–4 requests include the exact finalized owner/session/item-bound Azure assessment key or keys; partial or context-mismatched evidence is rejected before xAI. Tasks 2–3 retain and validate each item duration instead of trusting only the aggregate. Azure pronunciation events receive an explicit owner and aligned transcript span; task-4 overlap with a semantic scoring span returns needs_retry rather than charging the same event twice. Identical requests are claimed by an owner-bound evaluation fingerprint and replay the canonical attempt without another provider call. Canonical replay and deterministic acoustic preflight run before AI budget and rate gates. A five-minute claim lease recovers interrupted pending work, and transient xAI failure resumes the same attempt with the existing Azure evidence. The server assembles the transcript, xAI receives it as untrusted data under a strict JSON Schema and returns semantic/language facts only; it cannot return a score or phonetic fact. The server applies the 1/4/5/10 combiner. Low confidence returns needs_retry with a null score and no Voice Tutor pointer. Adaptive Speaking composition remains disabled until its evaluation is owner-bound. Until the offline calibration gate and exact external methodological approval pass, every result is labelled automatic_training, approximate and methodicallyValidated=false.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              required: [taskType, transcript, assignment]
-              properties:
-                taskType: { type: integer, enum: [1, 2, 3, 4] }
-                transcript: { type: string, maxLength: 20000 }
-                assignment: { type: object }
-              additionalProperties: false
+              oneOf:
+                - type: object
+                  required: [taskType, sessionId, pronunciationAssessmentKey]
+                  properties:
+                    taskType: { type: integer, enum: [1] }
+                    sessionId: { type: string, format: uuid }
+                    pronunciationAssessmentKey: { type: string, format: uuid }
+                  additionalProperties: false
+                - type: object
+                  required: [taskType, sessionId, pronunciationAssessmentKeys]
+                  properties:
+                    taskType: { type: integer, enum: [2] }
+                    sessionId: { type: string, format: uuid }
+                    pronunciationAssessmentKeys:
+                      type: array
+                      minItems: 4
+                      maxItems: 4
+                      items: { type: string, format: uuid }
+                  additionalProperties: false
+                - type: object
+                  required: [taskType, sessionId, pronunciationAssessmentKeys]
+                  properties:
+                    taskType: { type: integer, enum: [3] }
+                    sessionId: { type: string, format: uuid }
+                    pronunciationAssessmentKeys:
+                      type: array
+                      minItems: 5
+                      maxItems: 5
+                      items: { type: string, format: uuid }
+                  additionalProperties: false
+                - type: object
+                  required: [taskType, sessionId, pronunciationAssessmentKey]
+                  properties:
+                    taskType: { type: integer, enum: [4] }
+                    sessionId: { type: string, format: uuid }
+                    pronunciationAssessmentKey: { type: string, format: uuid }
+                  additionalProperties: false
       responses:
         '200':
-          description: Schema-validated speaking review; tasks 3–4 include experimental assessment metadata
+          description: Deterministically scored review or a fail-closed needs_retry result
           content:
             application/json:
               schema:
                 type: object
-                required: [review, provider, promptVersion, attemptId, voiceTutor]
+                required: [review, provider, promptVersion, attemptId, assessment]
                 properties:
-                  review: { type: object }
-                  provider: { type: string }
-                  promptVersion: { type: string }
+                  review: { $ref: '#/components/schemas/SpeakingAutomaticReview' }
+                  provider: { type: string, nullable: true }
+                  promptVersion: { type: string, enum: [speaking-semantic-v4] }
                   attemptId: { type: integer }
                   voiceTutor:
                     type: object
@@ -1756,10 +1861,15 @@ paths:
                             index: { type: integer, minimum: 0, maximum: 20 }
                             label: { type: string, minLength: 1, maxLength: 160 }
                           additionalProperties: false
-                  assessment: { $ref: '#/components/schemas/ExperimentalAssessment' }
+                    additionalProperties: false
+                  assessment: { $ref: '#/components/schemas/SpeakingAutomaticAssessment' }
+                additionalProperties: false
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Owner-bound speaking session or assessment was not found }
+        '409': { description: Catalog revision, assessment context or final-evidence state is incompatible, or the same evaluation is already in progress }
         '429': { $ref: '#/components/responses/RateLimited' }
+        '502': { description: Provider output failed the strict semantic facts contract and its single repair }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /api/v1/ai/generate-speaking-sample:
     post:
@@ -3338,6 +3448,51 @@ components:
         mode: { type: string, enum: [experimental] }
         scoreKind: { type: string, enum: [approximate] }
         warning: { type: string }
+    SpeakingAutomaticReview:
+      type: object
+      required: [status, got, max, verdict, criteria, good, fix, confidence, needsRetryReason, scoringVersion]
+      properties:
+        status: { type: string, enum: [scored, needs_retry] }
+        got: { type: integer, nullable: true, minimum: 0, maximum: 10 }
+        max: { type: integer, enum: [1, 4, 5, 10] }
+        verdict: { type: string, minLength: 1, maxLength: 600 }
+        criteria:
+          type: array
+          maxItems: 5
+          items:
+            type: object
+            required: [name, got, max]
+            properties:
+              name: { type: string, minLength: 1, maxLength: 160 }
+              got: { type: integer, minimum: 0, maximum: 10 }
+              max: { type: integer, minimum: 1, maximum: 10 }
+            additionalProperties: false
+        good: { type: array, maxItems: 3, items: { type: string, minLength: 1, maxLength: 400 } }
+        fix:
+          type: array
+          maxItems: 4
+          items:
+            type: object
+            required: [wrong, right, note]
+            properties:
+              wrong: { type: string, minLength: 1, maxLength: 400 }
+              right: { type: string, minLength: 1, maxLength: 500 }
+              note: { type: string, minLength: 1, maxLength: 80 }
+            additionalProperties: false
+        confidence: { type: number, minimum: 0, maximum: 1 }
+        needsRetryReason: { type: string, nullable: true, maxLength: 80 }
+        scoringVersion: { type: string, enum: [speaking-fipi-combiner-v2] }
+      additionalProperties: false
+    SpeakingAutomaticAssessment:
+      type: object
+      required: [mode, scoreKind, methodicallyValidated, warning, scoringVersion]
+      properties:
+        mode: { type: string, enum: [automatic_training] }
+        scoreKind: { type: string, enum: [approximate] }
+        methodicallyValidated: { type: boolean, enum: [false] }
+        warning: { type: string }
+        scoringVersion: { type: string, enum: [speaking-fipi-combiner-v2] }
+      additionalProperties: false
     WritingEvaluationScope:
       type: object
       required: [fullWords, evaluatedWords, truncated, evaluatedLimit]

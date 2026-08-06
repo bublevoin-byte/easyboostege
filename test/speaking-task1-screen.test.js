@@ -9,7 +9,32 @@ const executableSource = `${rawSource
   .replace(/export \{[\s\S]*?\};\s*$/u, '')}
 window.__speakingScreen={spOpen,spMicCheck,spPrep,spRec,spFinish,spPlay,spCompleteTask1,speStart,getState:function(){return SP},getExamState:function(){return SPE}};`;
 
-test('real Speaking screen path posts task 1 completion metadata and renders an honest no-provider state', async () => {
+test('speaking evaluation sends only a server reference and preserves needs_retry as unscored', () => {
+  const evaluation = rawSource.slice(rawSource.indexOf('async function spEval'), rawSource.indexOf('function spShowEval'));
+  assert.match(evaluation, /sessionId:SP\.session\.id/u);
+  assert.doesNotMatch(evaluation, /contentRef/u);
+  assert.match(evaluation, /SP\.pronunciationUploadCache/u);
+  assert.match(evaluation, /cachedUpload\.key/u,
+    'an interrupted official upload must retry with the same idempotency key');
+  assert.doesNotMatch(evaluation, /assignment:spAssignment/u);
+  assert.ok(
+    evaluation.indexOf("d.status==='needs_retry'") < evaluation.indexOf('clampScore'),
+    'retry must be handled before a nullable score can be clamped to zero',
+  );
+  assert.match(evaluation, /d\.status==='needs_retry'.*SP\.pronunciationUploadCache=null.*btn\.style\.display='none'/su,
+    'a retry verdict requires a new recording instead of replaying the same evaluation');
+  assert.doesNotMatch(evaluation, /Оценить ещё раз/u);
+});
+
+test('speaking result disclosure names the acoustic evidence that actually affected the score', () => {
+  const presentation = rawSource.slice(rawSource.indexOf('function spShowEval'), rawSource.indexOf('function showAdaptiveSpeakingReturn'));
+  assert.match(presentation, /полноту чтения, беглость распознавания/u);
+  assert.match(presentation, /грубые ошибки в словах/u);
+  assert.match(presentation, /Интонация и отдельные фонемы в балл не входили/u);
+  assert.doesNotMatch(presentation, /Произношение, интонация, паузы и беглость не оценивались/u);
+});
+
+test('real Speaking screen posts task 1 completion metadata and offers explicit assessment upload', async () => {
   const requests = [];
   const area = { innerHTML: '' };
   const elements = new Map([['s9_area', area], ['s9_today', { textContent: '' }]]);
@@ -114,9 +139,8 @@ test('real Speaking screen path posts task 1 completion metadata and renders an 
       body: { recordingDurationSeconds: 72, micCheck: 'passed', localPlayback: true, selfRating: 'steady' },
     },
   ]);
-  assert.match(area.innerHTML, /Оценка произношения пока не подключена/u);
   assert.match(area.innerHTML, /Безопасная история тренировки сохранена/u);
-  assert.doesNotMatch(area.innerHTML, /Оценить с ИИ/u);
+  assert.match(area.innerHTML, /Оценить по критериям ЕГЭ/u);
   assert.equal(screen.getState().task1Completed, true);
 
   await screen.speStart();
