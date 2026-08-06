@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import test from 'node:test';
+import vm from 'node:vm';
 
 import {
   ADAPTIVE_ACTIVITY_REGISTRY,
@@ -198,6 +199,53 @@ test('frontend dispatcher consumes the shared descriptor vocabulary without eval
   assert.match(progress, /item\.id===requestedRepeat/u);
   assert.match(progress, /item\.task_id===requestedTask/u);
   assert.doesNotMatch(source, /eval\(|new Function|window\[[^\]]+\]/u);
+});
+
+test('adaptive dispatcher aborts a Reading launch that outlives its timeout', async () => {
+  const source = await fs.readFile(new URL('../public/adaptive-activity-launch.js', import.meta.url), 'utf8');
+  const executable = `${source.replace(/^import .*;\r?\n/gmu, '').replace('export function launchAdaptiveActivity', 'function launchAdaptiveActivity')}\nwindow.__launchAdaptiveActivity=launchAdaptiveActivity;`;
+  let timeoutCallback;
+  let navigationCallback;
+  let receivedSignal = null;
+  let launchLocked = false;
+  let launchCount = 0;
+  const window = {
+    launchReadingPractice(...args) {
+      launchCount += 1;
+      if (launchLocked) return false;
+      launchLocked = true;
+      receivedSignal = args[3]?.signal || null;
+      if (launchCount > 1) { launchLocked = false; return true; }
+      return new Promise((resolve) => receivedSignal?.addEventListener('abort', () => {
+        launchLocked = false;
+        resolve(false);
+      }, { once: true }));
+    },
+  };
+  vm.runInNewContext(executable, {
+    window, document: { getElementById: () => ({ dataset: {} }) },
+    isAdaptiveLaunchDescriptor: () => true,
+    nav: (_screenId, callback) => { navigationCallback = callback; },
+    setTimeout: (callback) => { timeoutCallback = callback; return 1; }, clearTimeout() {},
+    AbortController, Promise, Boolean, String, Object, Error, CustomEvent,
+  });
+  const resultPromise = window.__launchAdaptiveActivity({
+    kind: 'reading_mode', screenId: 'scr7', mode: 'task10', cefr: 'B1',
+  }, 'builtin:reading:task10:b1:v1');
+  const navigationPromise = navigationCallback();
+  await Promise.resolve();
+  timeoutCallback();
+  assert.equal(await resultPromise, false);
+  assert.equal(receivedSignal?.aborted, true);
+  await navigationPromise;
+  assert.equal(launchLocked, false);
+
+  const secondResult = window.__launchAdaptiveActivity({
+    kind: 'reading_mode', screenId: 'scr7', mode: 'task10', cefr: 'B1',
+  }, 'builtin:reading:task10:b1:v1');
+  await navigationCallback();
+  assert.equal(await secondResult, true);
+  assert.equal(launchCount, 2);
 });
 
 test('OpenAPI documents the exact strict launch descriptor union and block metadata', async () => {

@@ -12,14 +12,21 @@ import {
 const projectDirectory = fileURLToPath(new URL('..', import.meta.url));
 const serverPath = fileURLToPath(new URL('../server.js', import.meta.url));
 const username = 'reading-2-user';
-const premiumUsername = 'reading-2-premium-user';
+const premiumUsername = 'reading_2_premium_user';
+const adminUsername = 'reading-2-admin-user';
+const unknownAccessUsername = 'reading-2-unknown-access';
+const inactiveAccessUsername = 'reading-2-inactive-access';
 
 async function openReading(page) {
   await page.goto(page.url() || '/', { waitUntil: 'networkidle' });
   await page.locator('#scr1.on').waitFor({ state: 'visible', timeout: 8_000 });
   await page.evaluate(() => window.tab('scr7'));
   await page.locator('#scr7.on').waitFor({ state: 'visible', timeout: 8_000 });
-  await page.getByRole('heading', { name: 'Каталог чтения' }).waitFor({ state: 'visible', timeout: 8_000 });
+  try {
+    await page.getByRole('heading', { name: 'Каталог чтения' }).waitFor({ state: 'visible', timeout: 8_000 });
+  } catch (error) {
+    throw new Error(`Reading hub did not open: ${await page.locator('body').innerText()}\n${error.message}`);
+  }
 }
 
 async function selectedSet(page, kind) {
@@ -89,14 +96,15 @@ try {
   const jwtSecret = 'reading-2-e2e-secret-at-least-32-characters';
   const dataFile = path.join(temporaryDirectory, 'data.json');
   await fs.writeFile(dataFile, JSON.stringify({
-    users: Object.fromEntries([username, premiumUsername].map((name) => [name, {
+    users: Object.fromEntries([username, premiumUsername, adminUsername, unknownAccessUsername, inactiveAccessUsername].map((name) => [name, {
       created: Date.now(), sub_until: Date.now() + 86_400_000,
+      ...(name === adminUsername ? { role: 'admin', telegram_id: 987654321 } : {}),
       privacy_consent: {
         text_processing: true, voice_processing: true,
         policy_version: '2026-08-02-voice-v1', updated_at: new Date().toISOString(),
       },
     }])),
-    progress: { [username]: {}, [premiumUsername]: {} },
+    progress: { [username]: {}, [premiumUsername]: {}, [adminUsername]: {} },
     subscription_entitlements: {
       [premiumUsername]: { voice_tutor: {
         starts_at: new Date(Date.now() - 60_000).toISOString(),
@@ -143,6 +151,12 @@ try {
   assert.equal(await page.getByRole('button', { name: /Полный раздел 10–18/u }).count(), 1);
   assert.match(await page.locator('#r_area').innerText(), /60 комплект/u);
   assert.match(await page.locator('#r_area').innerText(), /Автоматически проверено/u);
+  await page.getByRole('heading', { name: 'Краткий отчёт' }).waitFor({ timeout: 8_000 });
+  assert.match(await page.locator('.reading-report').innerText(), /пока недостаточно данных/iu);
+  assert.match(await page.locator('#r_area').innerText(), /Premium добавляет только/iu);
+  const baseExpanded = await page.request.get(`${baseUrl}/api/v1/reading/report?scope=expanded`);
+  assert.equal(baseExpanded.status(), 403);
+  assert.equal((await baseExpanded.json()).error.code, 'READING_PREMIUM_REQUIRED');
 
   const adaptiveReadingSets = [];
   for (const [kind, cefr] of [['task10', 'B1'], ['task11', 'B2'], ['task12_18', 'B2+/C1']]) {
@@ -185,14 +199,17 @@ try {
   assert.match(await page.locator('[data-reading-review-row]').first().innerText(), /Ответ ученика.*Правильный ответ.*Цитата-доказательство.*Объяснение/siu);
   const firstId = task10.id;
   await page.getByRole('button', { name: 'Следующий комплект' }).click();
+  await page.waitForFunction((previousId) => window.S.readingPilot.history.lastSelected.task10.id !== previousId, firstId);
   assert.notEqual((await selectedSet(page, 'task10')).id, firstId);
 
   await page.getByRole('button', { name: 'К каталогу' }).click();
   await page.getByRole('button', { name: /Task 11/u }).click();
+  await page.getByRole('heading', { name: 'Задание 11' }).waitFor();
   assert.equal(await page.locator('[data-reading-answer]').count(), 6);
   assert.equal(await page.locator('[data-reading-fragment]').count(), 7);
   await page.getByRole('button', { name: 'К каталогу' }).click();
   await page.getByRole('button', { name: /Task 12–18/u }).click();
+  await page.getByRole('heading', { name: 'Задания 12–18' }).waitFor();
   assert.equal(await page.locator('[data-reading-question]').count(), 7);
   assert.equal(await page.locator('[data-reading-answer]').count(), 28);
 
@@ -203,6 +220,7 @@ try {
   assert.match(await page.locator('#r_area').innerText(), /рекомендация ФИПИ — 30 минут/iu);
   assert.match(await page.locator('#r_area').innerText(), /не завершается автоматически/iu);
   await page.getByRole('button', { name: 'Начать полный раздел' }).click();
+  await page.locator('.reading-overview').waitFor();
   assert.equal(await page.locator('.reading-overview [data-reading-overview-field]').count(), 20);
   await page.locator('[data-reading-kind="task10"] [data-reading-answer]').first().selectOption({ index: 1 });
   assert.match(await page.locator('#reading-full-timer').innerText(), /\d{2}:\d{2}/u);
@@ -287,7 +305,10 @@ try {
   });
   await premiumSession.page.goto(baseUrl, { waitUntil: 'networkidle' });
   await openReading(premiumSession.page);
+  await premiumSession.page.getByRole('heading', { name: 'Расширенный персональный отчёт' }).waitFor({ timeout: 8_000 });
+  assert.match(await premiumSession.page.locator('.reading-expanded-report').innerText(), /недостаточно данных/iu);
   await premiumSession.page.getByRole('button', { name: /Task 10/u }).click();
+  await premiumSession.page.getByRole('heading', { name: 'Задание 10' }).waitFor();
   const premiumSet = await selectedSet(premiumSession.page, 'task10');
   const premiumFields = premiumSession.page.locator('[data-reading-kind="task10"] [data-reading-answer]');
   for (let index = 0; index < premiumSet.task.answers.length; index += 1) {
@@ -302,7 +323,82 @@ try {
   assert.equal(contextPayloads[0].setId, premiumSet.id);
   assert.equal(contextPayloads[0].revision, premiumSet.revision);
   assert.equal(JSON.stringify(contextPayloads[0]).includes('evidence'), false);
+
+  await premiumSession.page.getByRole('button', { name: 'К каталогу' }).click();
+  await premiumSession.page.getByRole('heading', { name: 'Расширенный персональный отчёт' }).waitFor({ timeout: 8_000 });
+  assert.match(await premiumSession.page.locator('.reading-expanded-report').innerText(), /Основное содержание.*1 наблюдени/siu);
+
+  await premiumSession.page.route('**/api/v1/reading/report?scope=*', (route) => route.abort());
+  await premiumSession.page.getByRole('button', { name: /Task 11/u }).click();
+  await premiumSession.page.getByRole('button', { name: 'К каталогу' }).click();
+  const reportFailure = premiumSession.page.getByText(/Не удалось обновить отчёт/u);
+  await reportFailure.waitFor({ timeout: 8_000 });
+  assert.match(await premiumSession.page.locator('.reading-report-shell').innerText(), /Статус Premium не изменён/iu);
+  assert.doesNotMatch(await premiumSession.page.locator('.reading-report-shell').innerText(), /Основное содержание.*1 наблюдени/siu,
+    'previous expanded text is not treated as a fresh entitlement result');
+  await premiumSession.page.unroute('**/api/v1/reading/report?scope=*');
+  await premiumSession.page.getByRole('button', { name: 'Повторить загрузку отчёта' }).click();
+  await premiumSession.page.getByRole('heading', { name: 'Расширенный персональный отчёт' }).waitFor({ timeout: 8_000 });
+
+  const adminSession = await createActiveSubscriptionPage(browser, {
+    baseUrl, username: adminUsername, jwtSecret,
+    contextOptions: { viewport: { width: 768, height: 900 }, serviceWorkers: 'block' },
+  });
+  await adminSession.page.goto(baseUrl, { waitUntil: 'networkidle' });
+  const revoke = await adminSession.page.evaluate(async (targetUsername) => {
+    const response = await fetch(`/api/v1/admin/users/${encodeURIComponent(targetUsername)}/entitlements/voice_tutor/revoke`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    });
+    return { status: response.status, body: await response.json() };
+  }, premiumUsername);
+  assert.equal(revoke.status, 200, JSON.stringify(revoke.body));
+  await adminSession.context.close();
+  await premiumSession.page.getByRole('button', { name: 'Обновить расширенный отчёт' }).click();
+  await premiumSession.page.getByText(/Доступ к расширенному отчёту изменился/u).waitFor({ timeout: 8_000 });
+  assert.equal(await premiumSession.page.locator('.reading-expanded-report').count(), 0);
+  assert.equal(await premiumSession.page.evaluate(() => window.__sub?.entitlements?.voice_tutor), false);
+  await premiumSession.page.getByRole('button', { name: /Task 10/u }).click();
+  await premiumSession.page.getByRole('heading', { name: 'Задание 10' }).waitFor();
+  const revokedSet = await selectedSet(premiumSession.page, 'task10');
+  const revokedFields = premiumSession.page.locator('[data-reading-kind="task10"] [data-reading-answer]');
+  for (let index = 0; index < revokedSet.task.answers.length; index += 1) {
+    await revokedFields.nth(index).selectOption(String((revokedSet.task.answers[index] + 1) % revokedSet.task.headings.length));
+  }
+  await premiumSession.page.getByRole('button', { name: 'Завершить тренировку' }).click();
+  assert.equal(await premiumSession.page.locator('.voiceTutorTrigger').count(), 0,
+    'revoked entitlement prevents a new Voice launch');
   await premiumSession.context.close();
+
+  const unknownAccess = await createActiveSubscriptionPage(browser, {
+    baseUrl, username: unknownAccessUsername, jwtSecret,
+    contextOptions: { viewport: { width: 375, height: 812 }, serviceWorkers: 'block' },
+  });
+  await unknownAccess.page.goto(baseUrl, { waitUntil: 'networkidle' });
+  await openReading(unknownAccess.page);
+  await unknownAccess.page.route('**/api/v1/me', (route) => route.abort('internetdisconnected'));
+  await unknownAccess.page.getByRole('button', { name: /Task 10/u }).click();
+  await unknownAccess.page.getByRole('heading', { name: 'Не удалось проверить доступ' }).waitFor({ timeout: 8_000 });
+  assert.equal(await unknownAccess.page.getByRole('heading', { name: 'Задание 10' }).count(), 0,
+    'network-unknown cannot start a cached Reading training');
+  await unknownAccess.context.close();
+
+  const inactiveAccess = await createActiveSubscriptionPage(browser, {
+    baseUrl, username: inactiveAccessUsername, jwtSecret,
+    contextOptions: { viewport: { width: 768, height: 900 }, serviceWorkers: 'block' },
+  });
+  await inactiveAccess.page.goto(baseUrl, { waitUntil: 'networkidle' });
+  await openReading(inactiveAccess.page);
+  await inactiveAccess.page.getByRole('button', { name: /Полный раздел 10–18/u }).click();
+  await inactiveAccess.page.route('**/api/v1/me', (route) => route.fulfill({
+    status: 200, contentType: 'application/json',
+    body: JSON.stringify({ authenticated: true, username: inactiveAccessUsername, active: false, sub_until: Date.now() - 1,
+      entitlements: { voice_tutor: false } }),
+  }));
+  await inactiveAccess.page.getByRole('button', { name: 'Начать полный раздел' }).click();
+  await inactiveAccess.page.getByRole('heading', { name: 'Нужен активный доступ' }).waitFor({ timeout: 8_000 });
+  assert.equal(await inactiveAccess.page.locator('.reading-overview').count(), 0,
+    'confirmed inactive access cannot create a full Reading attempt');
+  await inactiveAccess.context.close();
 
   const fallbackSession = await createActiveSubscriptionPage(browser, {
     baseUrl, username, jwtSecret,
@@ -319,6 +415,7 @@ try {
   assert.match(await fallbackSession.page.getByRole('alert').innerText(), /Каталог не загрузился/u);
   const beforeFallback = await fallbackSession.page.evaluate(() => JSON.stringify(window.S.readingPilot?.history || null));
   await fallbackSession.page.getByRole('button', { name: 'Техническая тренировка' }).click();
+  await fallbackSession.page.getByRole('heading', { name: 'Задание 10' }).waitFor();
   assert.deepEqual(fallbackErrors, []);
   assert.match(await fallbackSession.page.locator('#r_area').innerText(), /не записывается в прогресс/iu);
   const fallbackAnswers = fallbackSession.page.locator('[data-reading-kind="task10"] [data-reading-answer]');

@@ -2,10 +2,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import test from 'node:test';
 
-const [screen, html, adaptiveLaunch] = await Promise.all([
+const [screen, html, adaptiveLaunch, app, api, auth] = await Promise.all([
   fs.readFile(new URL('../public/screens/reading.js', import.meta.url), 'utf8'),
   fs.readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
   fs.readFile(new URL('../public/adaptive-activity-launch.js', import.meta.url), 'utf8'),
+  fs.readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
+  fs.readFile(new URL('../public/api.js', import.meta.url), 'utf8'),
+  fs.readFile(new URL('../public/auth.js', import.meta.url), 'utf8'),
 ]);
 
 test('Reading 2 screen is a lazy 60-set catalog client, not a second domain implementation', () => {
@@ -52,5 +55,27 @@ test('Reading 2 exposes accessible status, review and responsive styling contrac
 test('adaptive Reading launches an exact allowlisted kind and CEFR through the canonical screen seam', () => {
   assert.match(adaptiveLaunch, /window\.launchReadingPractice/u);
   assert.match(adaptiveLaunch, /launch\.mode,\s*launch\.cefr,\s*contentRef/u);
-  assert.match(screen, /function launchReadingPractice\(kind,cefr,contentRef\)/u);
+  assert.match(screen, /function launchReadingPractice\(kind,cefr,contentRef,\{signal=null\}=\{\}\)/u);
+});
+
+test('every new Reading session waits for the shared fresh server access gate', () => {
+  assert.match(app, /async function verifyLearningAccessForLaunch/u);
+  assert.match(app, /export \{[^}]*verifyLearningAccessForLaunch/su);
+  assert.match(screen, /verifyLearningAccessForLaunch/u);
+  assert.match(screen, /await verifyLearningAccessForLaunch\(\)/u);
+  assert.match(screen, /async function startTraining/u);
+  assert.match(screen, /async function startFullAttempt/u);
+  assert.match(screen, /async function launchReadingPractice/u);
+  assert.match(adaptiveLaunch, /await window\.launchReadingPractice/u);
+});
+
+test('adaptive Reading cancellation reaches the fresh session fetch and releases its launch lock', () => {
+  assert.match(api, /async function get\(path, options = \{\}\)/u);
+  assert.match(api, /request\(baseUrl \+ path, \{ \.\.\.options, credentials: 'same-origin' \}\)/u);
+  assert.match(auth, /async function currentSession\(options = \{\}\)/u);
+  assert.match(auth, /api\.get\('\/api\/v1\/me', options\)/u);
+  assert.match(app, /async function verifyLearningAccessForLaunch\(\{signal=null\}=\{\}\)/u);
+  assert.match(app, /auth\.currentSession\(\{signal,cache:'no-store'\}\)/u);
+  assert.match(screen, /verifyLearningAccessForLaunch\(\{signal\}\)/u);
+  assert.match(screen, /finally\{launchPending=false\}/u);
 });

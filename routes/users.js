@@ -61,6 +61,7 @@ export function createUserRoutes({
 
   router.get('/api/v1/me', auth, async (req, res, next) => {
     try {
+      res.setHeader('Cache-Control', 'no-store');
       const token = req.sessionId ? req.authToken : await issueToken(req.user);
       setAuthCookie(req, res, token);
       res.json({ authenticated: true, username: req.user, role: req.role, bot: botUsername(), ...await currentSubscription(req.user) });

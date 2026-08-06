@@ -35,8 +35,29 @@ import { assertAdaptiveSessionRepositoryContract } from './support/adaptive-sess
 import { assertWordProgressRepositoryContract } from './support/word-progress-contract.js';
 import { assertPersonalWordsProgressRepositoryContract } from './support/personal-words-progress-contract.js';
 import { assertVocabularyAttemptRepositoryContract } from './support/vocabulary-attempt-contract.js';
+import { assertReadingReportRepositoryContract } from './support/reading-report-contract.js';
+import { READING_TASK10_SETS } from '../public/content/reading/task10-v1.js';
+import { READING_TASK11_SETS } from '../public/content/reading/task11-v1.js';
+import { READING_TASK12_18_SETS } from '../public/content/reading/task12-18-v1.js';
 
 const connectionString = process.env.TEST_DATABASE_URL;
+
+test('PostgreSQL Reading report rows match the shared bounded ownership contract', { skip: !connectionString }, async () => {
+  const repository = createPostgresRepository(connectionString);
+  const stamp = String(Date.now()).slice(-9);
+  const owner = await repository.createTelegramUser(Number(`2${stamp}`), `Reading report owner ${stamp}`);
+  const other = await repository.createTelegramUser(Number(`3${stamp}`), `Reading report other ${stamp}`);
+  try {
+    await assertReadingReportRepositoryContract(assert, repository, owner, other, {
+      task10: READING_TASK10_SETS[0], task11: READING_TASK11_SETS[0],
+      task12_18: READING_TASK12_18_SETS[0],
+    });
+  } finally {
+    await repository.deleteUserData(owner).catch(() => {});
+    await repository.deleteUserData(other).catch(() => {});
+    await repository.close();
+  }
+});
 
 test('PostgreSQL word mastery matches the shared persistence, export and deletion contract', { skip: !connectionString }, async () => {
   const repository = createPostgresRepository(connectionString);

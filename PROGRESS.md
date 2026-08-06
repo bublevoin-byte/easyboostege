@@ -31,7 +31,7 @@
 | 05 | 20 оригинальных комплектов заданий 12–18 | done |
 | 06 | Три тренировки и полный раздел 10–18 | done |
 | 07 | Связь со словами, Voice context и индивидуальным планом | done |
-| 08 | Premium-отчёт, entitlement-gate и финальное укрепление | ready-for-agent |
+| 08 | Premium-отчёт, entitlement-gate и финальное укрепление | done |
 
 Тикет 01 завершён: клиентский учебный демо-вход и все его ветви хранения/ИИ удалены. Учебная
 оболочка открывается только после серверного подтверждения активной подписки; при восстановлении
@@ -85,6 +85,20 @@ payload. Целевой контур 43/43, полный suite 935 (920 pass, 15
 build, signed Base/Premium Reading, adaptive, evidence, progress и общий Chromium E2E,
 `git diff --check` и двухосевой review без оставшихся P0–P2 прошли; push, deploy и переход к
 тикету 08 не выполнялись.
+
+Тикет 08 завершён: один server-owned `reading-report-v1` строит полезный Base и Premium-expanded
+проекции только из bounded owner-bound завершённых canonical попыток. Он исключает дубли,
+неполный полный раздел, technical/generated/legacy строки, показывает выборку, уверенность,
+самостоятельность/поддержку и честные insufficient states. Base по-прежнему получает все 60
+комплектов, тренировки, полный раздел и evidence-разбор; свежий server-side entitlement открывает
+только Voice и расширение по gist/detail, темам, CEFR, времени и повторным ошибкам. Revoke/expiry,
+неактивная подписка и network-unknown различаются без stale Premium-проекции; каждая новая training,
+technical, full или adaptive Reading-сессия сначала проходит свежую общую `/me`-проверку, поэтому
+статический кэш не становится разрешением. File/PostgreSQL parity
+16/16, полный suite 945 (929 pass, 16 штатных skip), целевой контур, lint/check, frontend build,
+общий, Vocabulary, Reading Base/Premium/Voice, adaptive, evidence, progress и performance Chromium
+E2E, оба secret scan и `git diff --check` прошли. Платных вызовов, push, deploy и production rollout
+не было; полный пробник всего ЕГЭ остаётся следующим этапом.
 
 Зафиксирован официальный формат ФИПИ-2026: 7 текстов и 8 заголовков в №10, 6 пропусков и
 7 фрагментов в №11, 7 вопросов по 4 варианта в №12–18. В разделе 9 официально учитываемых

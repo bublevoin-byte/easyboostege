@@ -2903,6 +2903,17 @@ export function createFileRepository(filePath) {
     return attempt ? structuredClone(attempt) : null;
   }
 
+  async function getReadingCompletedAttempts(username, { limit = 120 } = {}) {
+    await load();
+    const boundedLimit = Math.min(120, Math.max(1, Number.isInteger(limit) ? limit : 120));
+    return state.module_attempts
+      .filter((attempt) => attempt.username === username && attempt.module === 'reading')
+      .sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime()
+        || String(right.id).localeCompare(String(left.id)))
+      .slice(0, boundedLimit)
+      .map((attempt) => structuredClone(attempt));
+  }
+
   async function upsertWordProgress(username, words) {
     await load();
     state.word_progress[username] ||= {};
@@ -3358,6 +3369,7 @@ export function createFileRepository(filePath) {
     recordModuleAttemptWithAdaptiveClaim,
     bindAdaptiveLearningServerAttempt,
     getModuleAttempt,
+    getReadingCompletedAttempts,
     upsertWordProgress,
     getWordProgress,
     upsertErrorBank,

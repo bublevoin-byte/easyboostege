@@ -110,6 +110,7 @@ export const recordModuleAttempt = (...args) => repository.recordModuleAttempt(.
 export const recordModuleAttemptWithAdaptiveClaim = (...args) => repository.recordModuleAttemptWithAdaptiveClaim(...args);
 export const bindAdaptiveLearningServerAttempt = (...args) => repository.bindAdaptiveLearningServerAttempt(...args);
 export const getModuleAttempt = (...args) => repository.getModuleAttempt(...args);
+export const getReadingCompletedAttempts = (...args) => repository.getReadingCompletedAttempts(...args);
 export const upsertWordProgress = (...args) => repository.upsertWordProgress(...args);
 export const getWordProgress = (...args) => repository.getWordProgress(...args);
 export const upsertErrorBank = (...args) => repository.upsertErrorBank(...args);

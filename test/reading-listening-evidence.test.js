@@ -225,6 +225,7 @@ function createSubjectHarness(subject, { offline = false, slow = false, listenin
     setTimeout: (callback) => { callback(); return 1; },
     registerRouteHook() {},
     registerScreenGenerator() {},
+    verifyLearningAccessForLaunch: async () => true,
     prepareVoiceTutorContextResult: ({ module, set, selections }) => ({
       module,
       setId: set.voice.id,
@@ -301,13 +302,13 @@ function createSubjectHarness(subject, { offline = false, slow = false, listenin
         installCatalog:function(){catalog=PILOT_CATALOG},
         startAdaptive:function(kind,cefr,contentRef){return launchReadingPractice(kind,cefr,contentRef)},
         currentContract:function(){return training&&readingModule.learningContract(training.set)},
-        startHeadings:function(){rHl()},
+        startHeadings:function(){return rHl()},
         completeHeadings:function(correct){training.answers=training.set.task.answers.map(function(answer){return correct===false?(answer+1)%training.set.task.headings.length:answer});submitTraining()},
-        startQuestions:function(){__readingQuestionIndex=0;rQs()},
+        startQuestions:function(){__readingQuestionIndex=0;return rQs()},
         answerQuestion:function(correct){if(!training||__readingQuestionIndex>=training.set.task.questions.length)return false;
           var question=training.set.task.questions[__readingQuestionIndex];training.answers[__readingQuestionIndex]=correct===false?(question.answer+1)%question.options.length:question.answer;
           __readingQuestionIndex+=1;if(__readingQuestionIndex===training.answers.length)submitTraining();return true},
-        startGaps:function(){rGp()},
+        startGaps:function(){return rGp()},
         completeGaps:function(correct){training.answers=training.set.task.answers.map(function(answer){return correct===false?(answer+1)%training.set.task.fragments.length:answer});submitTraining()},
         startExam:rExamStart,
         completeExam:function(){KINDS.forEach(function(kind){var set=full.attempt.section.sets[kind];full.attempt.answers[kind]=kind==='task12_18'?set.task.questions.map(function(question){return question.answer}):set.task.answers.slice()});confirmFullSubmit()},
@@ -370,16 +371,16 @@ async function settle() {
 test('reading screen completions record headings, questions, gaps and distinct combined-exam slices', async () => {
   const harness = createSubjectHarness('reading');
 
-  harness.screen.startHeadings();
+  await harness.screen.startHeadings();
   harness.advance(400);
   harness.screen.completeHeadings(true);
-  harness.screen.startQuestions();
+  await harness.screen.startQuestions();
   harness.advance(700);
   while (harness.screen.answerQuestion(true)) {}
-  harness.screen.startGaps();
+  await harness.screen.startGaps();
   harness.advance(300);
   harness.screen.completeGaps(true);
-  harness.screen.startExam();
+  await harness.screen.startExam();
   harness.advance(1_001);
   harness.screen.completeExam();
   await settle();
@@ -418,7 +419,7 @@ test('reading screen completions record headings, questions, gaps and distinct c
 
 test('reading exact adaptive completion uses only the claim path and a mismatch fails closed', async () => {
   const harness = createSubjectHarness('reading');
-  harness.screen.startAdaptive('task10', 'B1', 'builtin:reading:task10:b1:v1');
+  await harness.screen.startAdaptive('task10', 'B1', 'builtin:reading:task10:b1:v1');
   const contract = harness.screen.currentContract();
   assert.equal(contract.kind, 'task10');
   assert.equal(contract.cefr, 'B1');
@@ -448,7 +449,7 @@ test('reading exact adaptive completion uses only the claim path and a mismatch 
     module: 'reading', activityId: 'reading_detail', contentRef: 'builtin:reading:task12_18:b1:v1',
     executionClaim: 'b'.repeat(43),
   });
-  harness.screen.startGaps();
+  await harness.screen.startGaps();
   harness.advance(100);
   harness.screen.completeGaps(true);
   await settle();
@@ -712,7 +713,7 @@ test('a third ordinary playback is recorded as help while two static MP3 plays s
 
 test('a reading screen completion stays in the production offline queue for its owner and flushes once', async () => {
   const harness = createSubjectHarness('reading', { offline: true });
-  harness.screen.startHeadings();
+  await harness.screen.startHeadings();
   harness.advance(450);
   harness.screen.completeHeadings(true);
   await settle();

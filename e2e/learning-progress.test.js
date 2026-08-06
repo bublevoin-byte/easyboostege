@@ -113,6 +113,7 @@ try {
   await page.evaluate(() => window.tab('scr7'));
   await page.locator('#scr7.on').waitFor({ state: 'visible', timeout: 5_000 });
   await page.getByRole('button', { name: 'Начать Task 10' }).press('Enter');
+  await page.waitForFunction(() => Boolean(window.S.readingPilot?.history?.lastSelected?.task10?.id));
   const readingAnswers = await page.evaluate(async () => {
     const catalog = await window.EasyBoostReading.loadPilotCatalog();
     const selected = window.S.readingPilot.history.lastSelected.task10;

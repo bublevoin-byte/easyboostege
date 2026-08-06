@@ -1071,6 +1071,25 @@ paths:
       responses:
         '200': { description: Merged progress }
         '400': { $ref: '#/components/responses/BadRequest' }
+  /api/v1/reading/report:
+    get:
+      summary: Build the authenticated learner's deterministic Reading report
+      description: Base is available with every active subscription. Expanded adds topic, CEFR, pace, repeat-error and time-allocation projections and requires a fresh server-side voice_tutor entitlement check. The response is derived from at most 120 persisted owner-bound completed canonical Reading rows; incomplete full sections, duplicates, legacy, generated and technical attempts are excluded. No learner answer, content, Voice payload or client entitlement is accepted or returned. The response is not cacheable.
+      parameters:
+        - in: query
+          name: scope
+          schema: { type: string, enum: [base, expanded], default: base }
+      responses:
+        '200':
+          description: Base or currently entitled expanded Reading report, with explicit evidence counts and confidence states
+          headers:
+            Cache-Control: { schema: { type: string, enum: [no-store] } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReadingReport' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: SUBSCRIPTION_REQUIRED or READING_PREMIUM_REQUIRED }
   /api/v1/module-attempts:
     post:
       summary: Record an idempotent learning-module result
@@ -1367,6 +1386,34 @@ components:
       in: cookie
       name: eb_token
   schemas:
+    ReadingReport:
+      type: object
+      required: [version, scope, generatedAt, evidence, base]
+      properties:
+        version: { type: string, enum: [reading-report-v1] }
+        scope: { type: string, enum: [base, expanded] }
+        generatedAt: { type: string, format: date-time }
+        evidence:
+          type: object
+          required: [source, maximumRows, includedRows, includedAttempts, independentAttempts, assistedAttempts, excludedRows]
+          properties:
+            source: { type: string, enum: [persisted_canonical_completed_attempts] }
+            maximumRows: { type: integer, enum: [120] }
+            includedRows: { type: integer, minimum: 0 }
+            includedAttempts: { type: integer, minimum: 0 }
+            independentAttempts: { type: integer, minimum: 0 }
+            assistedAttempts: { type: integer, minimum: 0 }
+            excludedRows: { type: integer, minimum: 0 }
+          additionalProperties: false
+        base:
+          type: object
+          description: Accuracy, recent trend, weakest observed skill, up to six recent completed attempts and a useful Base recommendation. Empty evidence is represented explicitly rather than invented.
+          additionalProperties: true
+        expanded:
+          type: object
+          description: Present if and only if scope=expanded after the current entitlement check. Contains gist/detail skills, attributable topics, CEFR labels, pace, repeated errors, recent comparison, time allocation, sample sizes/confidence and the non-causal evidence disclosure.
+          additionalProperties: true
+      additionalProperties: false
     WordMasteryDimension:
       type: object
       required: [score, attempts, independentSuccesses, evidence, lastPracticedAt]

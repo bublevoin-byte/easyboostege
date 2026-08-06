@@ -2,8 +2,8 @@
 import {registerRouteHook} from '../router.js';
 import {prepareVoiceTutorContextResult,registerVoiceTutorContextResult} from '../voice-tutor.js';
 import {
-  EGE_WORDS,S,currentUser,lastWord,lastWordContext,readingModule,rEsc,rSync,rWordsHtml,
-  registerScreenGenerator,save,setTxt,srsRecordVocabularyOutcome,toast,wBase,wSync,
+  EGE_WORDS,S,apiGet,currentUser,lastWord,lastWordContext,readingModule,rEsc,rSync,rWordsHtml,
+  registerScreenGenerator,save,setTxt,srsRecordVocabularyOutcome,toast,verifyLearningAccessForLaunch,wBase,wSync,
 } from '../app.js';
 import {createLearningActivityEvidence,recordLearningActivityEvidence} from '../learning-activity-recorder.js';
 import {
@@ -32,6 +32,9 @@ let full=null;
 let fullTimer=null;
 let notice='';
 let submissionLocked=false;
+let reportRequestId=0;
+let reportWrite=Promise.resolve();
+let launchPending=false;
 let RE=null,RQ=null;
 
 function area(){return document.getElementById('r_area')}
@@ -78,20 +81,86 @@ function renderCatalogError(){
   bindActions();
 }
 function validationDetails(){
-  return '<details class="reading-validation"><summary>Автоматически проверено</summary><p>'+h(AUTO_CHECK_COPY)+'</p></details>';
+  return '<details class="reading-validation"><summary>Автоматически проверено</summary><p>'+h(AUTO_CHECK_COPY)+'</p><p>Официальная рамка: задание 10 — 7 из 8 соответствий, максимум 3 балла; задание 11 — 6 из 7, максимум 2; задания 12–18 — 7 вопросов по 4 варианта, максимум 7. Весь раздел: 12 первичных баллов и 20 полей ответа. Рекомендация ФИПИ — 30 минут внутри письменной части, без отдельного принудительного cutoff. Формат 2026 года не изменён относительно 2025 года по сохранённой сверке первичных источников.</p></details>';
 }
 function kindStats(kind,summary){
   const item=summary.perKind[kind];
   return '<dl class="reading-kind-stats"><div><dt>Новые</dt><dd>'+item.newSets+'</dd></div><div><dt>Пройдены</dt><dd>'+item.completedSets+'</dd></div>'
     +'<div><dt>Слабые</dt><dd>'+item.weakSets+'</dd></div><div><dt>К повтору</dt><dd>'+item.dueSets+'</dd></div></dl>';
 }
-function hubReport(summary){
-  const accuracy=KINDS.reduce((sum,kind)=>sum+summary.perKind[kind].correct,0);
-  const total=KINDS.reduce((sum,kind)=>sum+summary.perKind[kind].total,0);
-  const trend={up:'растёт',down:'снизилась',steady:'стабильна',insufficient:'пока мало данных'}[summary.trend];
-  const weak=summary.weakestKind?KIND_META[summary.weakestKind].title:'определим после первой тренировки';
-  return '<section class="reading-report" aria-labelledby="reading-report-title"><h2 id="reading-report-title">Краткий отчёт</h2><div class="reading-report__grid">'
-    +'<p><strong>'+(total?Math.round(accuracy/total*100)+'%':'—')+'</strong><span>точность</span></p><p><strong>'+h(trend)+'</strong><span>недавняя динамика</span></p><p><strong>'+h(weak)+'</strong><span>слабейший формат</span></p></div></section>';
+function reportConfidence(value){return {insufficient:'данных недостаточно',low:'низкая',medium:'средняя',high:'высокая'}[value]||'данных недостаточно'}
+function reportTrend(value){return {up:'растёт',down:'снизилась',steady:'стабильна',insufficient_evidence:'пока недостаточно данных'}[value]||'пока недостаточно данных'}
+function reportLoadingMarkup(){
+  return '<section class="reading-report reading-report--loading" role="status" aria-live="polite"><h2>Обновляем отчёт</h2><p>Собираем только сохранённые завершённые попытки Reading.</p></section>';
+}
+function baseReportMarkup(report){
+  const base=report.base,accuracy=base.accuracy;
+  const weakest=base.weakestSkill?base.weakestSkill.label:'определим после тренировок обоих навыков';
+  const recent=base.recentAttempts.length?'<div class="reading-report-table-wrap"><table class="reading-report-table"><caption>Последние сохранённые попытки</caption><thead><tr><th scope="col">Тренировка</th><th scope="col">Результат</th><th scope="col">Время</th><th scope="col">Условия</th></tr></thead><tbody>'+base.recentAttempts.map((attempt)=>'<tr><th scope="row">'+h(attempt.label)+'</th><td>'+attempt.score+' / '+attempt.maxScore+' · '+attempt.accuracyPercent+'%</td><td>'+attempt.durationMinutes+' мин</td><td>'+(attempt.independent?'самостоятельно':'с поддержкой')+'</td></tr>').join('')+'</tbody></table></div>':'<p class="reading-report-empty">Пока недостаточно данных: завершите первую тренировку, и здесь появится сохранённый результат.</p>';
+  return '<section class="reading-report" aria-labelledby="reading-report-title"><div class="reading-report-head"><div><h2 id="reading-report-title">Краткий отчёт</h2><p>Базовая сводка по '+report.evidence.includedAttempts+' завершённым попыткам: '+report.evidence.independentAttempts+' самостоятельных, '+report.evidence.assistedAttempts+' с поддержкой.</p></div></div><div class="reading-report__grid">'
+    +'<p><strong>'+(accuracy?accuracy.percent+'%':'—')+'</strong><span>точность · '+(accuracy?accuracy.correct+' / '+accuracy.total:'пока недостаточно данных')+'</span></p>'
+    +'<p><strong>'+h(reportTrend(base.recentTrend.state))+'</strong><span>недавняя динамика · '+base.recentTrend.recentSampleSize+' + '+base.recentTrend.previousSampleSize+' попытки</span></p>'
+    +'<p><strong>'+h(weakest)+'</strong><span>слабейший навык · уверенность '+h(reportConfidence(base.weakestSkill?.confidence))+'</span></p></div>'+recent
+    +'<p class="reading-report-recommendation"><strong>Что дальше.</strong> '+h(base.recommendation.text)+'</p></section>';
+}
+function performanceRows(rows,key,label){
+  if(!rows.length)return '<p class="reading-report-empty">Недостаточно данных для этой разбивки.</p>';
+  return '<div class="reading-report-table-wrap"><table class="reading-report-table"><thead><tr><th scope="col">'+h(label)+'</th><th scope="col">Точность</th><th scope="col">Выборка</th><th scope="col">Уверенность</th></tr></thead><tbody>'+rows.map((row)=>'<tr><th scope="row">'+h(String(row[key]).replaceAll('-',' '))+'</th><td>'+row.correct+' / '+row.total+' · '+row.percent+'%</td><td>'+row.sampleSize+'</td><td>'+h(reportConfidence(row.confidence))+'</td></tr>').join('')+'</tbody></table></div>';
+}
+function expandedReportMarkup(report){
+  const expanded=report.expanded;
+  const skills=expanded.skills.map((skill)=>'<article><h3>'+h(skill.label)+'</h3><p><strong>'+(skill.percent==null?'—':skill.percent+'%')+'</strong> · '+skill.correct+' / '+skill.total+' · '+skill.sampleSize+' наблюдений</p><progress max="100" value="'+(skill.percent||0)+'" aria-label="'+h(skill.label)+': '+(skill.percent==null?'нет данных':skill.percent+' процентов')+'"></progress><small>Уверенность: '+h(reportConfidence(skill.confidence))+'</small></article>').join('');
+  const pace=expanded.pace.state==='available'?'<p><strong>'+expanded.pace.averageSecondsPerField+' сек.</strong> в среднем на поле · выборка '+expanded.pace.sampleSize+'. Полных разделов: '+expanded.pace.fullSectionSampleSize+(expanded.pace.fullSectionAverageMinutes==null?'':', среднее '+expanded.pace.fullSectionAverageMinutes+' мин')+'.</p>':'<p>Недостаточно данных о темпе: нужны как минимум две попытки с фактическим временем.</p>';
+  const repeats=expanded.repeatErrors.state==='available'?'<ul class="reading-report-list">'+expanded.repeatErrors.sets.map((set)=>'<li><strong>'+h(set.title)+'</strong><span>'+set.errorAttempts+' попытки с ошибками из '+set.sampleSize+' · '+set.accuracyPercent+'%</span></li>').join('')+'</ul>':'<p>Недостаточно данных о повторных ошибках: вывод появляется только после двух ошибок в одном каноническом комплекте.</p>';
+  const comparison=expanded.comparison.state==='available'?'<p>Последние '+expanded.comparison.recentSampleSize+': '+expanded.comparison.recentAccuracyPercent+'%; предыдущие '+expanded.comparison.previousSampleSize+': '+expanded.comparison.previousAccuracyPercent+'%. Изменение '+(expanded.comparison.deltaPercentagePoints>0?'+':'')+expanded.comparison.deltaPercentagePoints+' п. п.; уверенность '+h(reportConfidence(expanded.comparison.confidence))+'.</p>':'<p>Недостаточно данных для сравнения: нужны минимум четыре завершённые попытки.</p>';
+  const allocation=expanded.recommendation.timeAllocation.length?'<ul class="reading-report-list">'+expanded.recommendation.timeAllocation.map((item)=>'<li><strong>'+h(item.label)+'</strong><span>'+item.minutesPer30+' из 30 минут следующего занятия</span></li>').join('')+'</ul>':'';
+  return '<section class="reading-report reading-expanded-report" aria-labelledby="reading-expanded-report-title"><div class="reading-report-head"><div><p class="reading-kicker">PREMIUM · ТОЛЬКО ДОПОЛНЕНИЕ</p><h2 id="reading-expanded-report-title">Расширенный персональный отчёт</h2><p>Детерминированная сводка без runtime-ИИ.</p></div><button class="reading-report-action" type="button" data-reading-action="retry-report">Обновить расширенный отчёт</button></div>'
+    +'<div class="reading-skill-report">'+skills+'</div><section><h3>Темы</h3>'+performanceRows(expanded.topics,'topic','Тема')+'</section><section><h3>Уровни CEFR банка</h3>'+performanceRows(expanded.cefr,'cefr','Маркировка банка')+'</section>'
+    +'<section><h3>Темп</h3>'+pace+'<small>30 минут — рекомендация ФИПИ внутри письменной части, не принудительный cutoff.</small></section><section><h3>Повторные ошибки</h3>'+repeats+'</section><section><h3>Сравнение недавних попыток</h3>'+comparison+'</section><section><h3>Рекомендация по времени</h3><p>'+h(expanded.recommendation.text)+'</p>'+allocation+'</section><p class="reading-report-disclosure">'+h(expanded.disclosure)+'</p></section>';
+}
+function premiumExplanation(){
+  return '<aside class="reading-premium-note"><strong>Premium добавляет только</strong> голосовой разбор ошибок и расширенный персональный отчёт. Все 60 комплектов, три тренировки, полный раздел, текстовый доказательный разбор, слова и личный план уже доступны с обычной активной подпиской.</aside>';
+}
+function reportErrorMarkup({premium=false,changed=false}={}){
+  const title=changed?'Доступ к расширенному отчёту изменился':'Не удалось обновить отчёт';
+  const copy=changed?'Сервер больше не подтверждает Premium. Базовый Reading и полный текстовый разбор остаются доступны.':'Повторите загрузку. '+(premium?'Статус Premium не изменён: ошибка сети не считается отсутствием подписки.':'Базовый Reading остаётся доступен.');
+  return '<section class="reading-report reading-report--error" role="status" aria-live="polite"><h2>'+h(title)+'</h2><p>'+h(copy)+'</p><button class="reading-report-action" type="button" data-reading-action="retry-report">Повторить загрузку отчёта</button></section>';
+}
+function bindReportActions(){
+  area()?.querySelectorAll('[data-reading-action="retry-report"]').forEach((button)=>button.addEventListener('click',()=>loadReadingReport()));
+}
+function setReportMarkup(markup){const shell=area()?.querySelector('.reading-report-shell');if(shell){shell.innerHTML=markup;bindReportActions()}}
+function clearPremiumProjection(){
+  if(window.__sub?.entitlements)window.__sub={...window.__sub,entitlements:{...window.__sub.entitlements,voice_tutor:false}};
+}
+function clearSubscriptionProjection(){
+  if(window.__sub)window.__sub={...window.__sub,active:false,entitlements:{...window.__sub.entitlements,voice_tutor:false}};
+}
+async function loadReadingReport(){
+  const requestId=++reportRequestId,premium=window.__sub?.entitlements?.voice_tutor===true;
+  setReportMarkup(reportLoadingMarkup());
+  try{
+    await reportWrite.catch(()=>false);
+    const report=await apiGet('/api/v1/reading/report?scope='+(premium?'expanded':'base'));
+    if(requestId!==reportRequestId||!area()?.querySelector('.reading-report-shell'))return;
+    setReportMarkup(baseReportMarkup(report)+(report.expanded?expandedReportMarkup(report):premiumExplanation()));
+  }catch(error){
+    if(requestId!==reportRequestId||!area()?.querySelector('.reading-report-shell'))return;
+    if(error?.code==='READING_PREMIUM_REQUIRED'){
+      clearPremiumProjection();
+      try{
+        const base=await apiGet('/api/v1/reading/report?scope=base');
+        if(requestId===reportRequestId)setReportMarkup(baseReportMarkup(base)+reportErrorMarkup({changed:true}));
+      }catch(_){if(requestId===reportRequestId)setReportMarkup(reportErrorMarkup({changed:true}))}
+      return;
+    }
+    if(error?.code==='SUBSCRIPTION_REQUIRED'){
+      clearSubscriptionProjection();
+      setReportMarkup('<section class="reading-report reading-report--error" role="alert" aria-live="polite"><h2>Доступ к отчёту изменился</h2><p>Сервер больше не подтверждает активную подписку. Ранее показанные данные отчёта удалены; проверьте статус доступа в профиле.</p></section>');
+      return;
+    }
+    setReportMarkup(reportErrorMarkup({premium}));
+  }
 }
 function renderHub(){
   stopFullTimer();training=null;RE=null;RQ=null;
@@ -103,8 +172,8 @@ function renderHub(){
   const noticeMarkup=notice?'<p class="reading-notice" role="status" aria-live="polite">'+h(notice)+'</p>':'';notice='';
   area().innerHTML='<main class="reading2 reading-hub"><header class="reading-title"><p class="reading-kicker">ЕГЭ-2026 · раздел 2</p><h1>Каталог чтения</h1><p>60 комплектов: три точных формата и полный раздел без Premium-gate. Выбор комплекта: новый → к повтору → слабый → давний.</p></header>'+noticeMarkup
     +'<section class="reading-full-card"><div><p class="reading-kicker">ПОЛНЫЙ РАЗДЕЛ</p><h2>Полный раздел 10–18</h2><p>9 официально учитываемых заданий · 20 полей ответа · один elapsed timer</p></div><button class="reading-action reading-action--primary" type="button" data-reading-action="full-intro">Полный раздел 10–18</button></section>'
-    +'<section class="reading-card-grid">'+cards+'</section>'+hubReport(summary)+validationDetails()+'</main>';
-  bindActions();
+    +'<section class="reading-card-grid">'+cards+'</section><section class="reading-report-shell" aria-live="polite">'+reportLoadingMarkup()+'</section>'+validationDetails()+'</main>';
+  bindActions();void loadReadingReport();
 }
 
 function emptyAnswers(kind,set){
@@ -177,19 +246,25 @@ function trainingEvidence(set,startedAt){
     readingAttemptId:id,readingSlice:contract.kind==='task10'?'gist':'detail',readingIndependent:true,
   }});
 }
-function startTraining(kind,{technical=false,preferredCefr=null,adaptiveContentRef=null}={}){
-  if(!technical&&(!catalog||!KINDS.includes(kind)))return;
-  const owner=ownerId(),current=state();if(!owner||!current){renderOwnerError();return}
-  const pool=technical?[]:(adaptiveContentRef?catalog.sets.filter((item)=>item.kind===kind&&item.cefr===preferredCefr):catalog.sets);
-  let set=technical?TECHNICAL_SET:readingModule.selectNextSet(pool,owner,current.history,kind,{now:Date.now(),preferredCefr});
-  if(!set)return;
-  if(adaptiveContentRef&&readingModule.learningContract(set).contentRef!==adaptiveContentRef)return false;
-  if(!technical){current.history=readingModule.rememberSelection(owner,current.history,kind,set,Date.now());save()}
-  const startedAt=Date.now();
-  training={kind,set,answers:emptyAnswers(kind,set),startedAt,result:null,evidence:technical?null:trainingEvidence(set,startedAt)};
-  RQ=kind==='task12_18'?training:null;
-  renderTraining();
-  return true;
+async function startTraining(kind,{technical=false,preferredCefr=null,adaptiveContentRef=null,signal=null}={}){
+  if(launchPending)return false;launchPending=true;
+  try{
+    if(signal?.aborted)return false;
+    if(!await verifyLearningAccessForLaunch({signal}))return false;
+    if(signal?.aborted)return false;
+    if(!technical&&(!catalog||!KINDS.includes(kind)))return false;
+    const owner=ownerId(),current=state();if(!owner||!current){renderOwnerError();return false}
+    const pool=technical?[]:(adaptiveContentRef?catalog.sets.filter((item)=>item.kind===kind&&item.cefr===preferredCefr):catalog.sets);
+    const set=technical?TECHNICAL_SET:readingModule.selectNextSet(pool,owner,current.history,kind,{now:Date.now(),preferredCefr});
+    if(!set)return false;
+    if(adaptiveContentRef&&readingModule.learningContract(set).contentRef!==adaptiveContentRef)return false;
+    if(!technical){current.history=readingModule.rememberSelection(owner,current.history,kind,set,Date.now());save()}
+    const startedAt=Date.now();
+    training={kind,set,answers:emptyAnswers(kind,set),startedAt,result:null,evidence:technical?null:trainingEvidence(set,startedAt)};
+    RQ=kind==='task12_18'?training:null;
+    renderTraining();
+    return true;
+  }finally{launchPending=false}
 }
 function submitTraining(){
   if(!training||training.result||!training.answers.every((answer)=>answer!==null))return;
@@ -200,7 +275,7 @@ function submitTraining(){
     current.history=readingModule.recordAttempt(owner,current.history,training.set,{attemptId,score:result.rawScore,maxScore:result.rawMaxScore,durationMs,attemptedAt:Date.now(),source:'catalog'});
     current.totals[training.kind].correct+=result.rawScore;current.totals[training.kind].total+=result.rawMaxScore;current.completedSets+=1;
     save({queueNow:true});rSync();
-    recordLearningActivityEvidence(training.evidence,{score:result.rawScore,maxScore:result.rawMaxScore,durationMs}).catch(()=>{});
+    reportWrite=recordLearningActivityEvidence(training.evidence,{score:result.rawScore,maxScore:result.rawMaxScore,durationMs}).catch(()=>false);
   }
   renderTrainingResult();
 }
@@ -248,12 +323,16 @@ function renderFullAttempt(restored=false){
   bindActions();startFullTimer();
   if(full.attempt.currentPosition){queueMicrotask(()=>focusPosition(full.attempt.currentKind,full.attempt.currentPosition))}
 }
-function startFullAttempt(){
-  const owner=ownerId(),current=state();if(!catalog||!owner||!current)return;
-  const selected=readingModule.selectFullSection(catalog,owner,current.history,{now:Date.now()});current.history=selected.history;
-  const now=Date.now();
-  const attempt={id:'reading-full-'+(crypto.randomUUID?crypto.randomUUID():now),ownerId:owner,section:{catalogId:selected.catalogId,catalogRevision:selected.catalogRevision,sets:selected.sets},answers:Object.fromEntries(KINDS.map((kind)=>[kind,emptyAnswers(kind,selected.sets[kind])])),currentKind:'task10',currentPosition:0,startedAt:now,durationMs:0};
-  full={attempt,resumedAt:now,result:null};RE=full;persistFull();renderFullAttempt();
+async function startFullAttempt(){
+  if(launchPending)return false;launchPending=true;
+  try{
+    if(!await verifyLearningAccessForLaunch())return false;
+    const owner=ownerId(),current=state();if(!catalog||!owner||!current)return false;
+    const selected=readingModule.selectFullSection(catalog,owner,current.history,{now:Date.now()});current.history=selected.history;
+    const now=Date.now();
+    const attempt={id:'reading-full-'+(crypto.randomUUID?crypto.randomUUID():now),ownerId:owner,section:{catalogId:selected.catalogId,catalogRevision:selected.catalogRevision,sets:selected.sets},answers:Object.fromEntries(KINDS.map((kind)=>[kind,emptyAnswers(kind,selected.sets[kind])])),currentKind:'task10',currentPosition:0,startedAt:now,durationMs:0};
+    full={attempt,resumedAt:now,result:null};RE=full;persistFull();renderFullAttempt();return true;
+  }finally{launchPending=false}
 }
 function focusPosition(kind,position){
   const field=area()?.querySelector('[data-reading-kind="'+kind+'"] [data-reading-answer][data-position="'+position+'"]');
@@ -301,6 +380,7 @@ function confirmFullSubmit(){
         score:slice.score,maxScore:slice.maxScore,durationMs:slice.durationMs,
       })).catch(()=>false);
     });
+    reportWrite=evidenceWrite;
     renderFullResult();
   }finally{submissionLocked=false}
 }
@@ -333,7 +413,7 @@ function bindActions(){
   const host=area();if(!host)return;
   host.querySelectorAll('[data-reading-action]').forEach((button)=>button.addEventListener('click',()=>{
     const action=button.dataset.readingAction,kind=button.dataset.kind,position=Number(button.dataset.position)||0;
-    if(action==='retry')initReading(true);else if(action==='technical')startTraining('task10',{technical:true});else if(action==='training'||action==='repeat')startTraining(kind);
+    if(action==='retry')initReading(true);else if(action==='retry-report')loadReadingReport();else if(action==='technical')startTraining('task10',{technical:true});else if(action==='training'||action==='repeat')startTraining(kind);
     else if(action==='hub')renderHub();else if(action==='submit-training')submitTraining();else if(action==='full-intro')renderFullIntro();else if(action==='start-full')startFullAttempt();
     else if(action==='full-kind'||action==='jump-full')switchFullKind(kind,position);else if(action==='submit-full')requestFullSubmit();else if(action==='cancel-submit')closeSubmitDialog();else if(action==='confirm-submit')confirmFullSubmit();
   }));
@@ -351,13 +431,13 @@ function rHub(){renderHub()}
 function rHl(){return startTraining('task10')}
 function rGp(){return startTraining('task11')}
 function rQs(){return startTraining('task12_18')}
-function launchReadingPractice(kind,cefr,contentRef){
+async function launchReadingPractice(kind,cefr,contentRef,{signal=null}={}){
   const parsed=readingModule.parseAdaptiveContentRef(contentRef);
   if(!parsed||parsed.kind!==kind||parsed.cefr!==cefr)return false;
-  return startTraining(kind,{preferredCefr:cefr,adaptiveContentRef:contentRef})===true;
+  return await startTraining(kind,{preferredCefr:cefr,adaptiveContentRef:contentRef,signal})===true;
 }
 function rExam(){renderFullIntro()}
-function rExamStart(){startFullAttempt()}
+function rExamStart(){return startFullAttempt()}
 
 /* Existing word-saving seam: context remains owner data and never enters the Reading catalog. */
 function r_add(status){

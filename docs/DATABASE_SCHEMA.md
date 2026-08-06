@@ -30,7 +30,7 @@
 | `writing_attempts` | журнал пользовательских прогонов заданий 37/38 | assignment, answer, evaluated_answer, review, provider, model, prompt_version, status, error_code |
 | `speaking_attempts` | журнал пользовательских прогонов устной части | assignment, transcript, review, provider, model, prompt_version, status, error_code; audio is not stored |
 | `generated_tasks` | валидированные результаты генерации | operation, versioned request hash, request/result and provider |
-| `module_attempts` | нормализованная история учебных результатов | module, activity, score, duration, bounded metadata and server-owned `evidence_quality`; legacy/public writes are `client_reported` |
+| `module_attempts` | нормализованная история учебных результатов и единственный persisted source Reading-отчёта | module, activity, score, duration, bounded metadata and server-owned `evidence_quality`; legacy/public writes are `client_reported`; Reading projection принимает только owner-bound canonical catalog ID/revision/provenance и завершённые логические попытки |
 | `progress_summary` | серверная агрегированная сводка прогресса | attempts, best normalized score, total duration and last attempt |
 | `word_progress` | версионированное многомерное освоение слов с совместимым SRS | word, legacy stage/errors/reviews/due time, meaning/spelling/context/listening dimensions, evidence provenance and last answer mode/outcome |
 | `error_bank` | агрегированный банк учебных ошибок | module, item key, type, bounded details and occurrence count |
@@ -326,6 +326,17 @@ summary; ответы, эссе, transcript, audio, prompt и model output ту�
 возвращают только
 фиксированные duration/commercial/reason/evidence buckets, счётчики и rates. Идентификаторы
 владельцев, сессий, попыток и навыков в результат не проецируются.
+
+## Reading 2.0 report
+
+`reading-report-v1` также не добавляет таблиц и не хранит отдельный snapshot. File и PostgreSQL
+repository одинаково возвращают не более 120 последних `module_attempts` только текущего owner с
+`module=reading`. Доменный агрегатор принимает лишь точные ID и revision замороженного каталога,
+expected activity/content reference/provenance, корректные баллы и duration. Полный раздел считается
+завершённой попыткой только при наличии связанной пары gist + detail; дубли, неполные, технические,
+сгенерированные и legacy строки исключаются. Base и expanded строятся детерминированно из одного
+набора строк; expanded дополнительно требует свежий server-side `voice_tutor` entitlement. Исходные
+ответы, тексты, evidence-цитаты, Voice payload и entitlement от клиента endpoint не принимает.
 
 Миграция `039_adaptive_metrics_window_indexes.sql` добавляет индексы timestamp для sessions,
 learning events, completed diagnostics и обновлённых skill estimates. PostgreSQL получает четыре

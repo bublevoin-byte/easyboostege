@@ -3687,6 +3687,20 @@ export function createPostgresRepository(connectionString, {
     return result.rows[0] || null;
   }
 
+  async function getReadingCompletedAttempts(username, { limit = 120 } = {}) {
+    const boundedLimit = Math.min(120, Math.max(1, Number.isInteger(limit) ? limit : 120));
+    const result = await pool.query(
+      `SELECT id, username, module, activity, score, max_score, duration_ms, metadata,
+              evidence_quality, created_at
+       FROM module_attempts
+       WHERE username = $1 AND module = 'reading'
+       ORDER BY created_at DESC, id DESC
+       LIMIT $2`,
+      [username, boundedLimit],
+    );
+    return result.rows;
+  }
+
   async function upsertWordProgress(username, words) {
     const client = await pool.connect();
     try {
@@ -4190,6 +4204,7 @@ export function createPostgresRepository(connectionString, {
     recordModuleAttemptWithAdaptiveClaim,
     bindAdaptiveLearningServerAttempt,
     getModuleAttempt,
+    getReadingCompletedAttempts,
     upsertWordProgress,
     getWordProgress,
     upsertErrorBank,

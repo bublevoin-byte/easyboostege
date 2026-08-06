@@ -92,7 +92,7 @@ export function voiceTutorButton({ profile = browser.__sub, source = '', attempt
   const sourceAttribute = reviewSource ? ` data-source="${reviewSource}"` : '';
   const safeAttemptId = reviewSource ? Number(attemptId) : String(attemptId);
   if (!reviewSource) {
-    return `<button type="button" class="voiceTutorTrigger" data-attempt="${safeAttemptId}" data-revision="${revision}" onclick="openVoiceTutorError(this)">🎙️ Разобрать голосом</button>`;
+    return `<button type="button" class="voiceTutorTrigger" data-attempt="${safeAttemptId}" data-revision="${revision}" onclick="openVoiceTutorError(this)">Разобрать голосом</button>`;
   }
   const seen = new Set();
   const choices = (Array.isArray(criterionChoices) ? criterionChoices : []).filter((choice) => {
@@ -102,7 +102,7 @@ export function voiceTutorButton({ profile = browser.__sub, source = '', attempt
     seen.add(choice.index);
     return true;
   });
-  return choices.map(({ index, label }) => `<button type="button" class="voiceTutorTrigger"${sourceAttribute} data-attempt="${safeAttemptId}" data-revision="${revision}" data-criterion-index="${index}" onclick="openVoiceTutorError(this)">🎙️ Разобрать: ${escapedButtonLabel(label.trim())}</button>`).join('');
+  return choices.map(({ index, label }) => `<button type="button" class="voiceTutorTrigger"${sourceAttribute} data-attempt="${safeAttemptId}" data-revision="${revision}" data-criterion-index="${index}" onclick="openVoiceTutorError(this)">Разобрать: ${escapedButtonLabel(label.trim())}</button>`).join('');
 }
 
 export async function registerVoiceTutorError({ module, itemId, revision, learnerAnswer } = {}) {
@@ -191,7 +191,7 @@ function ensureSheet() {
     <div class="vtCapsule"><b id="voiceTutorSkill">Готовим контекст…</b><span id="voiceTutorPrompt"></span><span id="voiceTutorContext" class="vtContext" hidden></span></div>
     <div id="voiceTutorSources" class="vtSources" hidden></div>
     <div id="voiceTutorCaptions" class="vtCaptions" aria-live="polite" aria-atomic="false"></div>
-    <div class="vtControls"><button id="voiceTutorMic" class="vtMic" type="button" aria-label="Включить или выключить микрофон" aria-pressed="false">🎙️</button><div id="voiceTutorState" class="vtState" role="status" aria-live="polite">Подключаем репетитора…</div></div>
+    <div class="vtControls"><button id="voiceTutorMic" class="vtMic" type="button" aria-label="Включить или выключить микрофон" aria-pressed="false"><svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true" focusable="false"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm-7-3a7 7 0 0 0 14 0M12 19v3M9 22h6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button><div id="voiceTutorState" class="vtState" role="status" aria-live="polite">Подключаем репетитора…</div></div>
     <form id="voiceTutorAnswer" class="vtAnswer"><input id="voiceTutorInput" maxlength="200" aria-label="Ответ репетитору" autocomplete="off"><button type="submit">Продолжить</button></form>
     <button id="voiceTutorFinish" class="vtFinish" type="button">Завершить и вернуться в упражнение</button></section>`;
   document.body.appendChild(sheet);

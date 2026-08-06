@@ -86,6 +86,7 @@ test('current user keeps a base subscription until voice_tutor is granted explic
   await withCurrentUserApp(async ({ repository, username, request }) => {
     const baseResponse = await request('/api/v1/me');
     assert.equal(baseResponse.status, 200);
+    assert.equal(baseResponse.headers.get('cache-control'), 'no-store');
     const base = await baseResponse.json();
     assert.equal(base.active, true);
     assert.deepEqual(base.features, { adaptive_learning: true });

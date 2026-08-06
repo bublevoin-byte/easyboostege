@@ -22,8 +22,8 @@
     return api.post('/api/v1/logout', {});
   }
 
-  async function currentSession() {
-    return api.get('/api/v1/me');
+  async function currentSession(options = {}) {
+    return api.get('/api/v1/me', options);
   }
 
   async function startTelegramLogin() {

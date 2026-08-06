@@ -49,8 +49,8 @@
     });
   }
 
-  async function get(path) {
-    const response = await request(baseUrl + path, { credentials: 'same-origin' });
+  async function get(path, options = {}) {
+    const response = await request(baseUrl + path, { ...options, credentials: 'same-origin' });
     return parseResponse(response);
   }
 

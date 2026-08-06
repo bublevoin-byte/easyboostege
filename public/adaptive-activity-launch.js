@@ -1,7 +1,7 @@
 import { isAdaptiveLaunchDescriptor } from './adaptive-activity-contract.js';
 import { nav } from './router.js';
 
-function consumeDescriptor(launch, contentRef) {
+async function consumeDescriptor(launch, contentRef, options = {}) {
   switch (launch.kind) {
     case 'vocabulary_practice':
       return typeof window.launchVocabularyPractice === 'function'
@@ -15,7 +15,7 @@ function consumeDescriptor(launch, contentRef) {
         && window.launchGrammarExam(contentRef) === true;
     case 'reading_mode':
       return typeof window.launchReadingPractice === 'function'
-        && window.launchReadingPractice(launch.mode, launch.cefr, contentRef) === true;
+        && await window.launchReadingPractice(launch.mode, launch.cefr, contentRef, options) === true;
     case 'listening_mode':
       if (launch.mode === 'matching' && typeof window.lMt === 'function') window.lMt();
       else if (launch.mode === 'interview' && typeof window.lIq === 'function') window.lIq();
@@ -49,15 +49,17 @@ export function launchAdaptiveActivity(launch, contentRef) {
   }
   return new Promise((resolve) => {
     let settled = false;
+    const controller = new AbortController();
     const timeout = setTimeout(() => {
       if (!settled) {
         settled = true;
+        controller.abort();
         resolve(false);
       }
     }, 8_000);
-    nav(launch.screenId, () => {
+    nav(launch.screenId, async () => {
       let launched = false;
-      try { launched = consumeDescriptor(launch, contentRef); } catch { launched = false; }
+      try { launched = await consumeDescriptor(launch, contentRef, { signal: controller.signal }); } catch { launched = false; }
       if (launched) {
         const screen = document.getElementById(launch.screenId);
         if (screen) {

@@ -275,15 +275,25 @@ function adoptServerSession(session){
   TOKEN=session&&session.authenticated===true?'cookie':'';window.__sub=session||null;
   if(session&&session.username){currentUser=session.username;localStorage.setItem('eb_current',currentUser)}
 }
-async function checkLearningAccess(session=null){
+async function checkLearningAccess(session=null,{preserveActiveShell=false,signal=null}={}){
   if(!SRV){const result=classifyLearningAccess(null,new Error('server mode required'));applyLearningAccess(result);return result}
   try{
-    const current=session||await auth.currentSession();const result=classifyLearningAccess(current);
+    if(signal?.aborted)return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,aborted:true};
+    const current=session||await auth.currentSession({signal,cache:'no-store'});
+    if(signal?.aborted)return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,aborted:true};
+    const result=classifyLearningAccess(current);
     if(current&&current.authenticated===true)adoptServerSession(current);else TOKEN='';
-    applyLearningAccess(result);return result;
+    if(preserveActiveShell&&result.state===LEARNING_ACCESS_STATES.ACTIVE)closeAccessGate();else applyLearningAccess(result);return result;
   }catch(error){
+    if(signal?.aborted)return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,aborted:true};
     const result=classifyLearningAccess(null,error);if(result.state===LEARNING_ACCESS_STATES.NO_SESSION)TOKEN='';applyLearningAccess(result);return result;
   }
+}
+async function verifyLearningAccessForLaunch({signal=null}={}){
+  return runAuthTransition(async function(){
+    const access=await checkLearningAccess(null,{preserveActiveShell:true,signal});
+    return signal?.aborted!==true&&access.state===LEARNING_ACCESS_STATES.ACTIVE;
+  });
 }
 
 /* save/load через сервер (или локально) */
@@ -978,5 +988,5 @@ export {
   grammarModule,lSetSlow,lSt,lSync,listeningModule,profileModule,progressModule,readingModule,
   rEsc,rSt,rWordsHtml,registerScreenGenerator,ringOff,runProfileHooks,setTxt,spSt,spSync,
   speakingModule,srsFail,srsOk,srsRecordVocabularyOutcome,syncModuleAttempt,todayStr,ui,wBase,wDeco,wMergeAi,wMigrate,wRec,wStats,wSync,
-  wordModule,writingModule,
+  verifyLearningAccessForLaunch,wordModule,writingModule,
 };
