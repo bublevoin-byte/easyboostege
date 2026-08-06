@@ -38,6 +38,7 @@ test('real Speaking screen path posts task 1 completion metadata and renders an 
     window: {}, document: { getElementById: (id) => elements.get(id) || null },
     SPEAKING_TASK1_CATALOG: { tasks: [{ id: session.task.id, revision: 1, text: 'Full-exam fallback reading text.' }] },
     SPEAKING_TASK2_CATALOG: { tasks: [] },
+    SPEAKING_TASK3_CATALOG: { tasks: [] },
     registerRouteHook() {}, lPlayRaw() {}, lStop() {},
     S: { spk: { t1: { n: 0 }, t2: { n: 0 }, t3: { n: 0 }, t4: { n: 0 } } },
     SRV: true, TOKEN: 'cookie-session', WBTN: 'width:100%;',
@@ -72,6 +73,7 @@ test('real Speaking screen path posts task 1 completion metadata and renders an 
       };
     },
     createSpeakingTask2BrowserFlow() { throw new Error('task 2 not used'); },
+    createSpeakingTask3BrowserFlow() { throw new Error('task 3 not used'); },
     setInterval: () => 1, clearInterval() {}, setTimeout: () => 1,
     URL: { revokeObjectURL() {} }, Blob, Audio: class {}, MediaRecorder: class {},
     console, Object, Number, Math, Array, String, Boolean, Date, Promise,

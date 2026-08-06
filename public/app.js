@@ -859,27 +859,34 @@ registerStartHook(function(){return rSync()});
 /* legacy block 8 */
 /* Замедленная озвучка — настройка проигрывателя, а не экрана: её читает tts.js, который
    настроен один раз при старте, задолго до того как приедет чанк аудирования. */
-let LSLOW=false;
+let LSLOW=false,L_FALLBACK_FINISH=null;
 function lSt(){S.lis=listeningModule.normalizeState(S.lis);return S.lis}
 function lSync(){if(!S)return;var r=lSt(),sum=listeningModule.summary(r),acc=sum.accuracy;
   S.prog=S.prog||{};S.prog.listen=acc;
   setTxt('sub_listen',r.done?('подходов: '+r.done+' · точность '+acc+'%'):'начни с первого диалога');
   setTxt('l_sumline',r.done?('Пройдено '+r.done+' · точность '+acc+'%'):'Три формата — как на экзамене');
   var bar=document.getElementById('l_bar');if(bar)bar.style.width=Math.max(2,acc)+'%'}
-function lStopFallback(){try{speechSynthesis.cancel()}catch(e){}}
+function lStopFallback(){if(L_FALLBACK_FINISH){var finish=L_FALLBACK_FINISH;L_FALLBACK_FINISH=null;finish(false)}try{speechSynthesis.cancel()}catch(e){}}
 function lVoice(i){try{var vs=(speechSynthesis.getVoices()||[]).filter(function(v){return /^en[-_]/i.test(v.lang)});
   if(!vs.length)return null;
   var gb=vs.filter(function(v){return /GB/i.test(v.lang)});
   var pool=gb.length>1?gb:vs;
   return pool[i%pool.length]}catch(e){return null}}
 function lPlayRawFallback(lines){
-  if(!('speechSynthesis'in window)){try{toast('Озвучка недоступна в этом браузере')}catch(e){}return}
-  lStop();
-  var us=lines.map(function(ln){var u=new SpeechSynthesisUtterance(ln.t);
-    u.lang='en-GB';u.rate=LSLOW?0.68:0.85;u.pitch=ln.s?1.15:0.92;
-    var v=lVoice(ln.s);if(v)u.voice=v;return u});
-  if(us.length){us[us.length-1].onend=function(){try{lPlayBtn('')}catch(e){}};try{lPlayBtn('play')}catch(e){}}
-  us.forEach(function(u){speechSynthesis.speak(u)})}
+  lStopFallback();
+  return new Promise(function(resolve){
+    function finish(result){if(L_FALLBACK_FINISH===finish)L_FALLBACK_FINISH=null;resolve(Boolean(result))}
+    L_FALLBACK_FINISH=finish;
+    if(!('speechSynthesis'in window)){try{toast('Озвучка недоступна в этом браузере')}catch(e){}finish(false);return}
+    var us=lines.map(function(ln){var u=new SpeechSynthesisUtterance(ln.t);
+      u.lang='en-GB';u.rate=LSLOW?0.68:0.85;u.pitch=ln.s?1.15:0.92;
+      var v=lVoice(ln.s);if(v)u.voice=v;return u});
+    if(!us.length){finish(true);return}
+    us[us.length-1].onend=function(){try{lPlayBtn('')}catch(e){}finish(true)};
+    us[us.length-1].onerror=function(){try{lPlayBtn('')}catch(e){}finish(false)};
+    try{lPlayBtn('play')}catch(e){}
+    try{us.forEach(function(u){speechSynthesis.speak(u)})}catch(e){finish(false)}
+  })}
 var L_PLAYSVG='<svg width="17" height="17" viewBox="0 0 24 24" fill="#fff"><path d="M7 5v14l12-7z"/></svg>';
 function lPlayBtn(st){var b=document.getElementById('l_playbtn'),ic=document.getElementById('l_playic'),tx=document.getElementById('l_playtx');
   if(!b||!ic||!tx)return;

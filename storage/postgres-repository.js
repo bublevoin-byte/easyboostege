@@ -31,6 +31,7 @@ import {
   speakingTask1CompletionMetadata,
 } from '../speaking/task1-session.js';
 import { applySpeakingTask2QuestionCompletion, newSpeakingTask2Session } from '../speaking/task2-session.js';
+import { applySpeakingTask3AnswerCompletion, newSpeakingTask3Session } from '../speaking/task3-session.js';
 import { selectSpeakingTrainingAssignment } from '../speaking/training-session.js';
 import { isMonotonicAdaptiveRetentionRefresh } from '../adaptive-learning/retention.js';
 import { adaptiveRepeatExecutionMatches } from '../adaptive-learning/repeat-execution.js';
@@ -1816,10 +1817,17 @@ export function createPostgresRepository(connectionString, {
     return result.rows[0] || null;
   }
 
+  const speakingSessionTable = (kind) => ({
+    task1: 'speaking_task1_sessions',
+    task2: 'speaking_task2_sessions',
+    task3: 'speaking_task3_sessions',
+  })[kind];
+
   async function assignSpeakingCatalogSession(kind, createSession, username, {
     catalogId, catalogRevision, tasks, now,
   }) {
-    const table = kind === 'task1' ? 'speaking_task1_sessions' : 'speaking_task2_sessions';
+    const table = speakingSessionTable(kind);
+    if (!table) throw new Error('SPEAKING_SESSION_KIND_INVALID');
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -1852,7 +1860,8 @@ export function createPostgresRepository(connectionString, {
   }
 
   async function getSpeakingCatalogSession(kind, username, id) {
-    const table = kind === 'task1' ? 'speaking_task1_sessions' : 'speaking_task2_sessions';
+    const table = speakingSessionTable(kind);
+    if (!table) throw new Error('SPEAKING_SESSION_KIND_INVALID');
     const result = await pool.query(
       `SELECT * FROM ${table} WHERE username = $1 AND id = $2`,
       [username, id],
@@ -1908,28 +1917,32 @@ export function createPostgresRepository(connectionString, {
 
   const getSpeakingTask2Session = (username, id) => getSpeakingCatalogSession('task2', username, id);
 
-  async function completeSpeakingTask2Question(username, id, questionNumber, completion, { now = new Date() } = {}) {
+  async function completeSequentialSpeakingPosition({
+    kind, collectionColumn, applyCompletion, username, id, positionNumber, completion, now,
+  }) {
+    const table = speakingSessionTable(kind);
+    if (!table || !['questions', 'answers'].includes(collectionColumn)) {
+      throw new Error('SPEAKING_SESSION_KIND_INVALID');
+    }
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
       const existing = await client.query(
-        'SELECT * FROM speaking_task2_sessions WHERE username = $1 AND id = $2 FOR UPDATE',
+        `SELECT * FROM ${table} WHERE username = $1 AND id = $2 FOR UPDATE`,
         [username, id],
       );
       if (!existing.rowCount) {
         await client.query('COMMIT');
         return null;
       }
-      const session = applySpeakingTask2QuestionCompletion(
-        existing.rows[0], questionNumber, completion, now,
-      );
+      const session = applyCompletion(existing.rows[0], positionNumber, completion, now);
       const updated = await client.query(
-        `UPDATE speaking_task2_sessions
-         SET status = $3, current_question = $4, questions = $5,
+        `UPDATE ${table}
+         SET status = $3, current_question = $4, ${collectionColumn} = $5,
              self_rating = $6, completed_at = $7, due_at = $8
          WHERE username = $1 AND id = $2
          RETURNING *`,
-        [username, id, session.status, session.current_question, JSON.stringify(session.questions),
+        [username, id, session.status, session.current_question, JSON.stringify(session[collectionColumn]),
           session.self_rating, session.completed_at, session.due_at],
       );
       await client.query('COMMIT');
@@ -1940,6 +1953,26 @@ export function createPostgresRepository(connectionString, {
     } finally {
       client.release();
     }
+  }
+
+  async function completeSpeakingTask2Question(username, id, questionNumber, completion, { now = new Date() } = {}) {
+    return completeSequentialSpeakingPosition({
+      kind: 'task2', collectionColumn: 'questions', applyCompletion: applySpeakingTask2QuestionCompletion,
+      username, id, positionNumber: questionNumber, completion, now,
+    });
+  }
+
+  const assignSpeakingTask3Session = (username, options) => assignSpeakingCatalogSession(
+    'task3', newSpeakingTask3Session, username, options,
+  );
+
+  const getSpeakingTask3Session = (username, id) => getSpeakingCatalogSession('task3', username, id);
+
+  async function completeSpeakingTask3Answer(username, id, questionNumber, completion, { now = new Date() } = {}) {
+    return completeSequentialSpeakingPosition({
+      kind: 'task3', collectionColumn: 'answers', applyCompletion: applySpeakingTask3AnswerCompletion,
+      username, id, positionNumber: questionNumber, completion, now,
+    });
   }
 
   async function getGeneratedTask(username, requestHash) {
@@ -4065,7 +4098,7 @@ export function createPostgresRepository(connectionString, {
   }
 
   async function exportUserData(username) {
-    const [account, progress, privacyConsent, subscriptionEvents, subscriptionEntitlements, voiceTutorSessions, voiceTutorRecoveries, voiceTutorRepeats, voiceTutorRepeatAttempts, voiceTutorReports, ruleCards, paymentRequests, writingAttempts, speakingAttempts, speakingTask1Sessions, speakingTask2Sessions, generatedTasks, moduleAttempts, progressSummary, wordProgress, errorBank, adaptiveGoals, adaptiveSnapshot, adaptivePlanRevisions, adaptiveSessions, adaptiveSessionExecutionEvents, adaptiveDiagnosticSessions, adaptiveDiagnosticResponses, aiRequests, auditLog] = await Promise.all([
+    const [account, progress, privacyConsent, subscriptionEvents, subscriptionEntitlements, voiceTutorSessions, voiceTutorRecoveries, voiceTutorRepeats, voiceTutorRepeatAttempts, voiceTutorReports, ruleCards, paymentRequests, writingAttempts, speakingAttempts, speakingTask1Sessions, speakingTask2Sessions, speakingTask3Sessions, generatedTasks, moduleAttempts, progressSummary, wordProgress, errorBank, adaptiveGoals, adaptiveSnapshot, adaptivePlanRevisions, adaptiveSessions, adaptiveSessionExecutionEvents, adaptiveDiagnosticSessions, adaptiveDiagnosticResponses, aiRequests, auditLog] = await Promise.all([
       pool.query('SELECT username, telegram_id, role, trial_used, subscription_until, created_at, updated_at FROM users WHERE username = $1', [username]),
       pool.query('SELECT data, updated_at FROM user_progress WHERE username = $1', [username]),
       pool.query('SELECT text_processing, voice_processing, policy_version, text_consented_at, voice_consented_at, updated_at FROM privacy_consents WHERE username = $1', [username]),
@@ -4105,6 +4138,9 @@ export function createPostgresRepository(connectionString, {
       pool.query(`SELECT id, catalog_id, catalog_revision, task_id, task_revision, selection_reason,
                          status, current_question, questions, self_rating, assigned_at, completed_at, due_at
                   FROM speaking_task2_sessions WHERE username = $1 ORDER BY assigned_at, id`, [username]),
+      pool.query(`SELECT id, catalog_id, catalog_revision, task_id, task_revision, selection_reason,
+                         status, current_question, answers, self_rating, assigned_at, completed_at, due_at
+                  FROM speaking_task3_sessions WHERE username = $1 ORDER BY assigned_at, id`, [username]),
       pool.query('SELECT id, operation, request, result, provider, prompt_version, created_at FROM generated_tasks WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, module, activity, score, max_score, duration_ms, metadata, evidence_quality, created_at FROM module_attempts WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT module, attempt_count, best_score, best_max_score, total_duration_ms, last_attempt_at, updated_at FROM progress_summary WHERE username = $1 ORDER BY module', [username]),
@@ -4157,6 +4193,7 @@ export function createPostgresRepository(connectionString, {
       speaking_attempts: speakingAttempts.rows,
       speaking_task1_sessions: speakingTask1Sessions.rows,
       speaking_task2_sessions: speakingTask2Sessions.rows,
+      speaking_task3_sessions: speakingTask3Sessions.rows,
       generated_tasks: generatedTasks.rows,
       module_attempts: moduleAttempts.rows,
       progress_summary: progressSummary.rows,
@@ -4306,6 +4343,9 @@ export function createPostgresRepository(connectionString, {
     assignSpeakingTask2Session,
     getSpeakingTask2Session,
     completeSpeakingTask2Question,
+    assignSpeakingTask3Session,
+    getSpeakingTask3Session,
+    completeSpeakingTask3Answer,
     getGeneratedTask,
     getSharedGeneratedTask,
     saveGeneratedTask,

@@ -5,10 +5,28 @@ export const SPEAKING_TASK1_CEFR_COUNTS = Object.freeze({ B1: 12, B2: 36, 'B2+/C
 export const SPEAKING_TASK2_CONTRACT_VERSION = 'speaking-task2-catalog-v1';
 export const SPEAKING_TASK2_INSTRUCTION = 'Study the advertisement. You have 60 seconds to prepare. Then ask four direct questions. You have 20 seconds to ask each question.';
 export const SPEAKING_TASK2_CEFR_COUNTS = Object.freeze({ B1: 12, B2: 36, 'B2+/C1': 12 });
+export const SPEAKING_TASK3_CONTRACT_VERSION = 'speaking-task3-catalog-v1';
+export const SPEAKING_TASK3_INSTRUCTION = 'Take part in an interview. Give a full answer to each of the five questions. You have 40 seconds to answer each question. Give 2–3 sentences for each answer.';
+export const SPEAKING_TASK3_CEFR_COUNTS = Object.freeze({ B1: 12, B2: 36, 'B2+/C1': 12 });
+export const SPEAKING_TASK3_CODIFIER_AREA_COUNTS = Object.freeze({
+  personal_and_family_life: 11,
+  education_and_careers: 11,
+  culture_and_media: 14,
+  travel_and_places: 9,
+  science_technology_and_environment: 9,
+  health_sport_and_community: 6,
+});
 
 const SAFE_TASK_ID = /^speaking-pilot-v1\.task1\.[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const SAFE_TASK2_ID = /^speaking-pilot-v1\.task2\.[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+const SAFE_TASK3_ID = /^speaking-pilot-v1\.task3\.[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const SAFE_MARKUP = /<\/?[a-z][^>]*>|javascript:|data:text\/html/iu;
+const UNSAFE_TASK3_CONTENT = Object.freeze([
+  ['medical advice', /\b(?:stop|skip|double|replace)\b[^?.]{0,80}\b(?:medicine|medication|treatment|prescription|doctor)\b|\b(?:medicine|medication|treatment)\b[^?.]{0,80}\bwithout\b[^?.]{0,30}\b(?:doctor|clinician)\b/iu],
+  ['discriminatory stereotype', /\b(?:race|nationality|religion|gender|disability)\b[^?.]{0,80}\b(?:naturally\s+)?(?:superior|inferior|better|worse)\b/iu],
+  ['time-sensitive fact', /\b(?:19|20)\d{2}\b|\bcurrent\s+(?:president|prime minister|exchange rate|price)\b/iu],
+  ['sensitive or harmful subject', /\b(?:suicide|self-harm|illegal drugs|gambling|extremist propaganda)\b/iu],
+]);
 const TASK_KEYS = Object.freeze([
   'cefr', 'id', 'instruction', 'maxScore', 'preparationSeconds', 'provenance', 'reference',
   'responseSeconds', 'revision', 'taskType', 'text', 'topic',
@@ -16,6 +34,10 @@ const TASK_KEYS = Object.freeze([
 const TASK2_KEYS = Object.freeze([
   'advertisement', 'cefr', 'id', 'instruction', 'maxScore', 'preparationSeconds', 'provenance',
   'questionSeconds', 'revision', 'rubric', 'supports', 'taskType', 'topic',
+]);
+const TASK3_KEYS = Object.freeze([
+  'cefr', 'codifierArea', 'completeness', 'id', 'instruction', 'maxScore', 'preparationSeconds', 'provenance',
+  'questionSeconds', 'questions', 'revision', 'taskType', 'topic',
 ]);
 
 function fail(location, message) {
@@ -38,6 +60,13 @@ function safeString(value, location, { min, max }) {
     fail(location, `must be a trimmed string between ${min} and ${max} characters`);
   }
   if (SAFE_MARKUP.test(value)) fail(location, 'contains unsafe markup');
+  return value;
+}
+
+function safeTask3Content(value, location, limits) {
+  safeString(value, location, limits);
+  const unsafeRule = UNSAFE_TASK3_CONTENT.find(([, pattern]) => pattern.test(value));
+  if (unsafeRule) fail(location, `contains ${unsafeRule[0]}`);
   return value;
 }
 
@@ -94,6 +123,47 @@ export function analyzeSpeakingTask2CatalogQuality(catalog) {
     uniqueTopics: new Set(catalog.tasks.map((task) => task.topic.toLocaleLowerCase('ru-RU'))).size,
     supportsChecked: catalog.tasks.reduce((count, task) => count + task.supports.length, 0),
     sharedFourSupportSequence: repeatedSupportSet,
+  });
+}
+
+export function analyzeSpeakingTask3CatalogQuality(catalog) {
+  const questionSets = catalog.tasks.map((task) => task.questions.join('\n').toLocaleLowerCase('en'));
+  const questionTokens = catalog.tasks.flatMap((task) => task.questions.map(lexicalTokens));
+  const repeatedQuestionSet = questionSets.find((set, index) => questionSets.indexOf(set) !== index) || null;
+  const openings = questionTokens.map((tokens) => tokens.slice(0, 4).join(' '));
+  const openingCounts = openings.reduce((counts, opening) => (
+    counts.set(opening, (counts.get(opening) || 0) + 1)
+  ), new Map());
+  const seenSequences = new Set();
+  let sharedSixWordSequence = null;
+  for (const tokens of questionTokens) {
+    const currentSequences = new Set(Array.from(
+      { length: Math.max(0, tokens.length - 5) },
+      (_, index) => tokens.slice(index, index + 6).join(' '),
+    ));
+    if (!sharedSixWordSequence) {
+      sharedSixWordSequence = [...currentSequences].find((sequence) => seenSequences.has(sequence)) || null;
+    }
+    currentSequences.forEach((sequence) => seenSequences.add(sequence));
+  }
+  const codifierAreaCounts = Object.fromEntries(
+    Object.keys(SPEAKING_TASK3_CODIFIER_AREA_COUNTS).map((area) => [
+      area, catalog.tasks.filter((task) => task.codifierArea === area).length,
+    ]),
+  );
+  return Object.freeze({
+    uniqueInterviewSets: new Set(questionSets).size,
+    uniqueQuestions: new Set(catalog.tasks.flatMap((task) => (
+      task.questions.map((question) => question.toLocaleLowerCase('en'))
+    ))).size,
+    uniqueTopics: new Set(catalog.tasks.map((task) => task.topic.toLocaleLowerCase('ru-RU'))).size,
+    codifierAreaCounts,
+    missingCodifierAreas: Object.entries(codifierAreaCounts)
+      .filter(([, count]) => count === 0).map(([area]) => area),
+    completenessChecks: catalog.tasks.reduce((count, task) => count + task.completeness.length, 0),
+    sharedFiveQuestionSequence: repeatedQuestionSet,
+    sharedSixWordSequence,
+    maximumFourWordOpeningCount: Math.max(...openingCounts.values()),
   });
 }
 
@@ -273,6 +343,129 @@ export function speakingTask2PublicAssignment(task) {
     instruction: task.instruction,
     advertisement: task.advertisement,
     supports: Object.freeze([...task.supports]),
+  });
+}
+
+export function assertSpeakingTask3(task, location = 'task') {
+  plainObject(task, location);
+  exactKeys(task, TASK3_KEYS, location);
+  if (!SAFE_TASK3_ID.test(task.id || '')) fail(`${location}.id`, 'must be a stable speaking-pilot-v1 task 3 id');
+  if (task.revision !== 1) fail(`${location}.revision`, 'must be 1');
+  if (task.taskType !== 3) fail(`${location}.taskType`, 'must be 3');
+  if (!Object.hasOwn(SPEAKING_TASK3_CEFR_COUNTS, task.cefr)) fail(`${location}.cefr`, 'is unsupported');
+  if (!Object.hasOwn(SPEAKING_TASK3_CODIFIER_AREA_COUNTS, task.codifierArea)) {
+    fail(`${location}.codifierArea`, 'must identify a supported EGE codifier area');
+  }
+  safeTask3Content(task.topic, `${location}.topic`, { min: 3, max: 80 });
+  if (task.preparationSeconds !== 0) fail(`${location}.preparationSeconds`, 'must be 0');
+  if (task.questionSeconds !== 40) fail(`${location}.questionSeconds`, 'must be 40');
+  if (task.maxScore !== 5) fail(`${location}.maxScore`, 'must be 5');
+  if (task.instruction !== SPEAKING_TASK3_INSTRUCTION) fail(`${location}.instruction`, 'must use the task 3 instruction');
+  if (!Array.isArray(task.questions) || task.questions.length !== 5) {
+    fail(`${location}.questions`, 'must contain exactly five questions');
+  }
+  task.questions.forEach((question, index) => {
+    safeTask3Content(question, `${location}.questions[${index}]`, { min: 12, max: 180 });
+    if (!question.endsWith('?')) fail(`${location}.questions[${index}]`, 'must be a question');
+    const words = wordCount(question);
+    if (words < 4 || words > 30) fail(`${location}.questions[${index}]`, 'must contain between 4 and 30 words');
+  });
+  if (new Set(task.questions.map((question) => question.toLocaleLowerCase('en'))).size !== 5) {
+    fail(`${location}.questions`, 'must be unique within the interview');
+  }
+
+  if (!Array.isArray(task.completeness) || task.completeness.length !== 5) {
+    fail(`${location}.completeness`, 'must contain exactly five checks');
+  }
+  task.completeness.forEach((check, index) => {
+    plainObject(check, `${location}.completeness[${index}]`);
+    exactKeys(check, [
+      'maximumSentences', 'minimumSentences', 'questionNumber', 'requiredElements',
+    ], `${location}.completeness[${index}]`);
+    if (check.questionNumber !== index + 1 || check.minimumSentences !== 2 || check.maximumSentences !== 3) {
+      fail(`${location}.completeness[${index}]`, 'must require 2–3 sentences for its question');
+    }
+    if (!Array.isArray(check.requiredElements)
+      || check.requiredElements.join(',') !== 'direct_answer,supporting_detail') {
+      fail(`${location}.completeness[${index}].requiredElements`, 'must require a direct answer and supporting detail');
+    }
+  });
+
+  plainObject(task.provenance, `${location}.provenance`);
+  exactKeys(task.provenance, ['author', 'createdAt', 'kind', 'reviewStatus'], `${location}.provenance`);
+  if (task.provenance.kind !== 'original' || task.provenance.author !== 'Easy Boost'
+    || task.provenance.createdAt !== '2026-08-06'
+    || task.provenance.reviewStatus !== 'automatically_checked') {
+    fail(`${location}.provenance`, 'must identify automatically checked original Easy Boost material');
+  }
+  return task;
+}
+
+export function assertSpeakingTask3Catalog(catalog) {
+  plainObject(catalog, 'catalog');
+  exactKeys(catalog, ['contractVersion', 'format', 'id', 'revision', 'tasks'], 'catalog');
+  if (catalog.id !== SPEAKING_CATALOG_ID) fail('catalog.id', `must be ${SPEAKING_CATALOG_ID}`);
+  if (catalog.revision !== 1) fail('catalog.revision', 'must be 1');
+  if (catalog.contractVersion !== SPEAKING_TASK3_CONTRACT_VERSION) fail('catalog.contractVersion', 'is unsupported');
+  plainObject(catalog.format, 'catalog.format');
+  exactKeys(catalog.format, [
+    'exam', 'maxScore', 'preparationSeconds', 'questionCount', 'questionSeconds',
+    'source', 'sourceRevision', 'taskType',
+  ], 'catalog.format');
+  if (catalog.format.exam !== 'ege-english-2026' || catalog.format.taskType !== 3
+    || catalog.format.preparationSeconds !== 0 || catalog.format.questionSeconds !== 40
+    || catalog.format.questionCount !== 5 || catalog.format.maxScore !== 5
+    || catalog.format.source !== 'fipi-ege-2026' || catalog.format.sourceRevision !== '2026-08-06') {
+    fail('catalog.format', 'must match the fixed EGE-2026 task 3 five-answer contract');
+  }
+  if (!Array.isArray(catalog.tasks) || catalog.tasks.length !== 60) fail('catalog.tasks', 'must contain exactly 60 tasks');
+
+  const ids = new Set();
+  const questionSets = new Set();
+  const questions = new Set();
+  const counts = Object.fromEntries(Object.keys(SPEAKING_TASK3_CEFR_COUNTS).map((cefr) => [cefr, 0]));
+  const codifierCounts = Object.fromEntries(
+    Object.keys(SPEAKING_TASK3_CODIFIER_AREA_COUNTS).map((area) => [area, 0]),
+  );
+  catalog.tasks.forEach((task, index) => {
+    assertSpeakingTask3(task, `catalog.tasks[${index}]`);
+    const questionSetKey = task.questions.join('\n').toLocaleLowerCase('en');
+    if (ids.has(task.id)) fail('catalog.tasks', 'id must be unique');
+    if (questionSets.has(questionSetKey)) fail('catalog.tasks', 'five-question sequence must be unique');
+    task.questions.forEach((question) => {
+      const questionKey = question.toLocaleLowerCase('en');
+      if (questions.has(questionKey)) fail('catalog.tasks', 'questions must be unique across interviews');
+      questions.add(questionKey);
+    });
+    ids.add(task.id);
+    questionSets.add(questionSetKey);
+    counts[task.cefr] += 1;
+    codifierCounts[task.codifierArea] += 1;
+  });
+  for (const [cefr, expected] of Object.entries(SPEAKING_TASK3_CEFR_COUNTS)) {
+    if (counts[cefr] !== expected) fail('catalog.tasks', `must contain ${expected} ${cefr} tasks`);
+  }
+  for (const [area, expected] of Object.entries(SPEAKING_TASK3_CODIFIER_AREA_COUNTS)) {
+    if (codifierCounts[area] !== expected) {
+      fail('catalog.tasks', `must contain ${expected} tasks for codifier area ${area}`);
+    }
+  }
+  return catalog;
+}
+
+export function speakingTask3PublicAssignment(task) {
+  assertSpeakingTask3(task);
+  return Object.freeze({
+    id: task.id,
+    revision: task.revision,
+    taskType: task.taskType,
+    cefr: task.cefr,
+    topic: task.topic,
+    preparationSeconds: task.preparationSeconds,
+    questionSeconds: task.questionSeconds,
+    maxScore: task.maxScore,
+    instruction: task.instruction,
+    questions: Object.freeze([...task.questions]),
   });
 }
 

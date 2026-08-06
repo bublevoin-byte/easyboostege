@@ -187,6 +187,29 @@
     };
   }
 
+  function serverTask3Set(session) {
+    const task = session && session.task;
+    const assessment = session && session.assessment;
+    if (!task || typeof task !== 'object' || Array.isArray(task)
+      || Object.keys(task).sort().join(',') !== 'cefr,id,instruction,maxScore,preparationSeconds,questionSeconds,questions,revision,taskType,topic'
+      || !/^speaking-pilot-v1\.task3\.[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(String(task.id || ''))
+      || task.revision !== 1 || task.taskType !== 3
+      || task.preparationSeconds !== 0 || task.questionSeconds !== 40 || task.maxScore !== 5
+      || !['B1', 'B2', 'B2+/C1'].includes(task.cefr)
+      || typeof task.topic !== 'string' || !task.topic.trim()
+      || !Array.isArray(task.questions) || task.questions.length !== 5
+      || task.questions.some((question) => typeof question !== 'string' || !question.trim())
+      || assessment?.available !== false || assessment.reason !== 'deferred_to_tickets_06_07') return null;
+    return {
+      id: task.id,
+      revision: task.revision,
+      topic: task.topic,
+      instruction: task.instruction,
+      qs: task.questions.slice(),
+      cefr: task.cefr,
+    };
+  }
+
   global.EasyBoostSpeaking = Object.freeze({
     config,
     isExperimentalTask,
@@ -207,6 +230,7 @@
     normalizeGenerated,
     serverTask1Set,
     serverTask2Set,
+    serverTask3Set,
     TASKS,
     EXAM_MAX,
     BADGES,

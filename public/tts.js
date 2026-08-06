@@ -6,7 +6,7 @@ import {assertListeningAudioManifest} from './listening-audio-contract.js';
  * Изменяемые значения (сессия, режим замедления) приходят функциями, а не копиями: обработчик
  * может переключить скорость уже после настройки, и озвучка обязана это увидеть.
  */
-var TTS_CACHE={},TTS_CURRENT=null,TTS_SEQUENCE=0,TTS_LISTENING_MANIFEST=null,TTS_LISTENING_MANIFEST_PROMISE=null;
+var TTS_CACHE={},TTS_CURRENT=null,TTS_SEQUENCE=0,TTS_ACTIVE_FINISH=null,TTS_LISTENING_MANIFEST=null,TTS_LISTENING_MANIFEST_PROMISE=null;
 var TTS_DEPS={
   apiGetBlob:function(){return Promise.reject(new Error('TTS is not configured'))},
   lPlayBtn:function(){},
@@ -29,14 +29,19 @@ function fetchTtsAudio(text,voice,slow){
   if(TTS_CACHE[key])return Promise.resolve(TTS_CACHE[key]);
   return TTS_DEPS.apiGetBlob('/api/v1/tts?text='+encodeURIComponent(text)+'&voice='+voice+(slow?'&slow=1':''))
     .then(function(blob){if(!blob.size)throw new Error('Empty TTS response');var url=URL.createObjectURL(blob);TTS_CACHE[key]=url;return url})}
-function stopTtsAudio(){TTS_SEQUENCE++;if(TTS_CURRENT){try{TTS_CURRENT.pause()}catch(e){}TTS_CURRENT=null}}
+function stopTtsAudio(){TTS_SEQUENCE++;if(TTS_CURRENT){try{TTS_CURRENT.pause()}catch(e){}TTS_CURRENT=null}
+  if(TTS_ACTIVE_FINISH){var finish=TTS_ACTIVE_FINISH;TTS_ACTIVE_FINISH=null;finish(false)}}
 function lStop(){stopTtsAudio();TTS_DEPS.lStopFallback();try{TTS_DEPS.lPlayBtn('')}catch(e){}}
 function lPlayRaw(lines){
-  if(!TTS_DEPS.serverAvailable()){TTS_DEPS.lPlayRawFallback(lines);return}
+  if(!TTS_DEPS.serverAvailable())return Promise.resolve(TTS_DEPS.lPlayRawFallback(lines));
   stopTtsAudio();TTS_DEPS.lStopFallback();var requestSequence=++TTS_SEQUENCE;try{TTS_DEPS.lPlayBtn('load')}catch(e){}
-  Promise.all(lines.map(function(line){return fetchTtsAudio(line.t,line.s?'en-GB-SoniaNeural':'en-GB-RyanNeural',TTS_DEPS.slow())}))
-    .then(function(urls){if(requestSequence!==TTS_SEQUENCE)return;var index=0;(function playNext(){if(requestSequence!==TTS_SEQUENCE||index>=urls.length){if(requestSequence===TTS_SEQUENCE){TTS_CURRENT=null;try{TTS_DEPS.lPlayBtn('')}catch(e){}}return}if(index===0)try{TTS_DEPS.lPlayBtn('play')}catch(e){}TTS_CURRENT=TTS_DEPS.createAudio(urls[index++]);TTS_CURRENT.onended=playNext;TTS_CURRENT.onerror=playNext;TTS_CURRENT.play().catch(playNext)})()})
-    .catch(function(){if(requestSequence===TTS_SEQUENCE){try{TTS_DEPS.lPlayBtn('')}catch(e){}TTS_DEPS.lPlayRawFallback(lines)}})}
+  return new Promise(function(resolve){
+    function settle(result){if(TTS_ACTIVE_FINISH===settle)TTS_ACTIVE_FINISH=null;resolve(Boolean(result))}
+    TTS_ACTIVE_FINISH=settle;
+    Promise.all(lines.map(function(line){return fetchTtsAudio(line.t,line.s?'en-GB-SoniaNeural':'en-GB-RyanNeural',TTS_DEPS.slow())}))
+      .then(function(urls){if(requestSequence!==TTS_SEQUENCE){settle(false);return}var index=0;(function playNext(){if(requestSequence!==TTS_SEQUENCE){settle(false);return}if(index>=urls.length){TTS_CURRENT=null;try{TTS_DEPS.lPlayBtn('')}catch(e){}settle(true);return}if(index===0)try{TTS_DEPS.lPlayBtn('play')}catch(e){}TTS_CURRENT=TTS_DEPS.createAudio(urls[index++]);TTS_CURRENT.onended=playNext;TTS_CURRENT.onerror=playNext;TTS_CURRENT.play().catch(playNext)})()})
+      .catch(function(){if(requestSequence!==TTS_SEQUENCE){settle(false);return}try{TTS_DEPS.lPlayBtn('')}catch(e){}Promise.resolve(TTS_DEPS.lPlayRawFallback(lines)).then(settle,function(){settle(false)})});
+  })}
 
 function loadListeningManifest(){if(TTS_LISTENING_MANIFEST)return Promise.resolve(TTS_LISTENING_MANIFEST);
   if(!TTS_LISTENING_MANIFEST_PROMISE)TTS_LISTENING_MANIFEST_PROMISE=Promise.resolve().then(function(){return TTS_DEPS.loadListeningManifest()})

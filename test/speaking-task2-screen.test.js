@@ -51,6 +51,7 @@ function harness({ recovered = null, restoreError = null } = {}) {
     window: {}, document: { getElementById: (id) => elements.get(id) || null },
     SPEAKING_TASK1_CATALOG: { tasks: [{ id: 'speaking-pilot-v1.task1.one', revision: 1 }] },
     SPEAKING_TASK2_CATALOG: { tasks: [{ id: session.task.id, revision: 1 }] },
+    SPEAKING_TASK3_CATALOG: { tasks: [{ id: 'speaking-pilot-v1.task3.one', revision: 1 }] },
     registerRouteHook() {}, lPlayRaw() {}, lStop() {},
     S: { spk: { t1: { n: 0 }, t2: { n: 0 }, t3: { n: 0 }, t4: { n: 0 } },
       ...(recovered ? { speakingTask2SessionId: recovered.id } : {}) },
@@ -92,6 +93,7 @@ function harness({ recovered = null, restoreError = null } = {}) {
         dispose() {},
       };
     },
+    createSpeakingTask3BrowserFlow() { throw new Error('task 3 not used'); },
     setInterval: () => 1, clearInterval() {}, setTimeout: () => 1,
     URL: { revokeObjectURL() {} }, Blob, Audio: class {}, MediaRecorder: class {},
     console, Object, Number, Math, Array, String, Boolean, Date, Promise,

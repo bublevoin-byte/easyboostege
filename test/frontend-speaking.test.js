@@ -184,3 +184,26 @@ test('speaking module accepts only the server-owned four-support task 2 assignme
   assert.equal(speaking.serverTask2Set({ ...session, task: { ...session.task, questionSeconds: 25 } }), null);
   assert.equal(speaking.serverTask2Set({ ...session, assessment: { available: true } }), null);
 });
+
+test('speaking module accepts only the server-owned five-question task 3 assignment shape', () => {
+  const speaking = createSpeakingModule();
+  const session = {
+    id: '73300000-0000-4000-8000-000000000001',
+    task: {
+      id: 'speaking-pilot-v1.task3.free-time-routines', revision: 1, taskType: 3,
+      cefr: 'B1', topic: 'Свободное время', preparationSeconds: 0, questionSeconds: 40,
+      maxScore: 5, instruction: 'Give five full answers.',
+      questions: Array.from({ length: 5 }, (_, index) => `Original interview question ${index + 1}?`),
+    },
+    assessment: { available: false, reason: 'deferred_to_tickets_06_07' },
+  };
+
+  assert.deepEqual(plain(speaking.serverTask3Set(session)), {
+    id: session.task.id, revision: 1, topic: session.task.topic,
+    instruction: session.task.instruction, qs: session.task.questions, cefr: 'B1',
+  });
+  assert.equal(speaking.serverTask3Set({ ...session, task: { ...session.task, questions: session.task.questions.slice(0, 4) } }), null);
+  assert.equal(speaking.serverTask3Set({ ...session, task: { ...session.task, preparationSeconds: 60 } }), null);
+  assert.equal(speaking.serverTask3Set({ ...session, task: { ...session.task, completeness: [] } }), null);
+  assert.equal(speaking.serverTask3Set({ ...session, assessment: { available: true } }), null);
+});

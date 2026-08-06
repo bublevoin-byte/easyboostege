@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { configureTts, lPlayListeningSet, lStop } from '../public/tts.js';
+import { configureTts, lPlayListeningSet, lPlayRaw, lStop } from '../public/tts.js';
 
 const set = {
   id: 'listening-pilot-v1.true-false.city-library',
@@ -124,4 +124,32 @@ test('stop during manifest loading prevents delayed static playback and fallback
 
   assert.equal(audioCreated, 0);
   assert.equal(fallbackCalls, 0);
+});
+
+test('raw TTS playback resolves only after the final audio segment ends', async () => {
+  let announceAudio;
+  const audioCreated = new Promise((resolve) => { announceAudio = resolve; });
+  configureTts({
+    apiGetBlob: async () => new Blob(['question audio'], { type: 'audio/mpeg' }),
+    createAudio() {
+      const audio = { pause() {}, async play() {} };
+      announceAudio(audio);
+      return audio;
+    },
+    lPlayRawFallback: async () => false,
+    serverAvailable() { return true; },
+    slow() { return false; },
+    lPlayBtn() {},
+    lStopFallback() {},
+  });
+
+  let settled = false;
+  const playback = lPlayRaw([{ s: 1, t: 'What do you enjoy doing after school?' }])
+    .then((result) => { settled = true; return result; });
+  const audio = await audioCreated;
+  await Promise.resolve();
+  assert.equal(settled, false);
+
+  audio.onended();
+  assert.equal(await playback, true);
 });
