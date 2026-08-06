@@ -124,8 +124,8 @@ test('the shared sheet exposes bounded transient clarification and structured le
 
 test('reading and listening result screens register completed canonical sets before mounting the shared bottom-sheet trigger', () => {
   assert.match(readingSource, /import \{prepareVoiceTutorContextResult,registerVoiceTutorContextResult\} from '\.\.\/voice-tutor\.js'/u);
-  assert.match(readingSource, /readingModule\.adaptSet\(item\.set\)/u);
-  assert.match(readingSource, /function renderFullResult\(\)[\s\S]*readingModule\.adaptSet[\s\S]*prepareVoiceTutorContextResult[\s\S]*registerVoiceTutorContextResult\(voiceResult\)/u);
+  assert.match(readingSource, /readingModule\.voiceSet\(item\.set\)/u);
+  assert.match(readingSource, /function renderFullResult\(\)[\s\S]*KINDS\.map[\s\S]*readingModule\.voiceSet[\s\S]*prepareVoiceTutorContextResult[\s\S]*KINDS\.forEach[\s\S]*registerVoiceTutorContextResult/u);
   assert.match(readingSource, /function renderTrainingResult\(\)[\s\S]*prepareVoiceTutorContextResult[\s\S]*registerVoiceTutorContextResult\(voiceResult\)/u);
   assert.doesNotMatch(readingSource, /generateAiContent\('reading_questions'/u);
 

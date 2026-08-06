@@ -7,7 +7,21 @@ const optionalText = (maximum) => z.string().trim().min(1).max(maximum).nullable
 const context = z.object({
   text: z.string().trim().min(1).max(600),
   source: z.literal('reading'),
-}).strict();
+  readingProvenance: z.enum(['canonical', 'technical']).optional(),
+  readingSetId: z.string().trim().min(4).max(140).optional(),
+  readingSetRevision: z.number().int().min(1).max(10_000).optional(),
+  readingKind: z.enum(['task10', 'task11', 'task12_18']).optional(),
+  position: z.string().trim().min(1).max(20).optional(),
+  questionId: z.string().trim().min(4).max(180).optional(),
+}).strict().superRefine((value, issue) => {
+  if (value.readingProvenance !== 'canonical') return;
+  if (!value.readingSetId || !value.readingSetRevision || !value.readingKind || !value.position) {
+    issue.addIssue({ code: 'custom', message: 'canonical Reading context references are incomplete' });
+  }
+  if (!value.readingSetId?.startsWith(`reading-pilot-v1.${value.readingKind}.`)) {
+    issue.addIssue({ code: 'custom', path: ['readingSetId'], message: 'canonical Reading set id is invalid' });
+  }
+});
 
 const personalVocabularyCard = z.object({
   cardVersion: z.literal(1),

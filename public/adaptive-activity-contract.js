@@ -1,4 +1,5 @@
 import { LISTENING_ACTIVITY_IDS, READING_ACTIVITY_IDS } from './learning-activity-contract.js';
+import { readingAdaptiveContentRef } from './reading-catalog-contract.js';
 
 export const ADAPTIVE_LAUNCH_CONTRACT_VERSION = 'adaptive-launch-v1';
 
@@ -56,20 +57,24 @@ const activityDefinitions = [
     difficulty: 3, modality: 'visual_text', requiresAudio: false, requiresMicrophone: false,
     launch: { version: ADAPTIVE_LAUNCH_CONTRACT_VERSION, kind: 'grammar_practice', screenId: 'scr3', topicId: 18 },
   },
-  {
-    skillId: 'ege.reading.gist', activityId: READING_ACTIVITY_IDS.headings,
-    activityLabel: 'Чтение: подобрать заголовки',
-    contentRef: 'builtin:reading:headings:v1', minimumMinutes: 15, recommendedMinutes: 15,
-    difficulty: 2, modality: 'visual_text', requiresAudio: false, requiresMicrophone: false,
-    launch: { version: ADAPTIVE_LAUNCH_CONTRACT_VERSION, kind: 'reading_mode', screenId: 'scr7', mode: 'headings' },
-  },
-  {
-    skillId: 'ege.reading.detail', activityId: READING_ACTIVITY_IDS.detail,
-    activityLabel: 'Чтение: детальные вопросы по тексту',
-    contentRef: 'builtin:reading:detail:v1', minimumMinutes: 20, recommendedMinutes: 20,
-    difficulty: 3, modality: 'visual_text', requiresAudio: false, requiresMicrophone: false,
-    launch: { version: ADAPTIVE_LAUNCH_CONTRACT_VERSION, kind: 'reading_mode', screenId: 'scr7', mode: 'detail' },
-  },
+  ...[
+    ['task10', 'ege.reading.gist', READING_ACTIVITY_IDS.headings, 'подобрать заголовки', 15, 2],
+    ['task11', 'ege.reading.detail', READING_ACTIVITY_IDS.gaps, 'восстановить пропуски', 20, 3],
+    ['task12_18', 'ege.reading.detail', READING_ACTIVITY_IDS.detail, 'ответить на вопросы по тексту', 20, 3],
+  ].flatMap(([mode, skillId, activityId, label, minutes, difficulty]) => (
+    ['B1', 'B2', 'B2+/C1'].map((cefr) => ({
+      skillId, activityId,
+      activityLabel: `Чтение ${cefr}: ${label}`,
+      contentRef: readingAdaptiveContentRef(mode, cefr),
+      minimumMinutes: minutes, recommendedMinutes: minutes,
+      difficulty: difficulty + (cefr === 'B2+/C1' ? 1 : 0),
+      modality: 'visual_text', requiresAudio: false, requiresMicrophone: false,
+      launch: {
+        version: ADAPTIVE_LAUNCH_CONTRACT_VERSION,
+        kind: 'reading_mode', screenId: 'scr7', mode, cefr,
+      },
+    }))
+  )),
   {
     skillId: 'ege.listening.gist', activityId: LISTENING_ACTIVITY_IDS.matching,
     activityLabel: 'Аудирование: сопоставить говорящих',
@@ -235,8 +240,10 @@ export function isAdaptiveLaunchDescriptor(value) {
       && value.screenId === 'scr3' && value.section === 'grammar_19_24';
   }
   if (value.kind === 'reading_mode') {
-    return exactKeys(value, ['kind', 'mode', 'screenId', 'version'])
-      && value.screenId === 'scr7' && ['headings', 'detail'].includes(value.mode);
+    return exactKeys(value, ['cefr', 'kind', 'mode', 'screenId', 'version'])
+      && value.screenId === 'scr7'
+      && ['task10', 'task11', 'task12_18'].includes(value.mode)
+      && ['B1', 'B2', 'B2+/C1'].includes(value.cefr);
   }
   if (value.kind === 'listening_mode') {
     return exactKeys(value, ['kind', 'mode', 'screenId', 'version'])

@@ -213,6 +213,42 @@ test('metadata accepts only named modes, sources and bounded primitive help sign
   assert.deepEqual(JSON.parse(JSON.stringify(harness.ordinary[0].metadata)), {});
 });
 
+test('canonical Reading metadata survives ordinary sync and exact adaptive content matching', async () => {
+  const metadata = {
+    mode: 'reading_gaps', source: 'catalog', helpUsed: false, hintsUsed: 0,
+    readingProvenance: 'canonical', readingSetId: 'reading-pilot-v1.task11.future-01',
+    readingSetRevision: 1, readingKind: 'task11', readingCefr: 'B1',
+    readingContentRef: 'builtin:reading:task11:b1:v1',
+    readingAttemptId: 'reading-training-01', readingSlice: 'detail',
+  };
+  const ordinary = recorderHarness();
+  await ordinary.recorder.recordCompletedLearningActivity({
+    id: ATTEMPT_ID, module: 'reading', activityId: 'reading_gaps',
+    score: 5, maxScore: 6, durationMs: 12_345, metadata,
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(ordinary.ordinary[0].metadata)), metadata);
+
+  const mismatch = recorderHarness({
+    module: 'reading', activityId: 'reading_gaps',
+    contentRef: 'builtin:reading:task11:b2:v1', executionClaim: 'a'.repeat(43),
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(await mismatch.recorder.recordCompletedLearningActivity({
+    id: ATTEMPT_ID, module: 'reading', activityId: 'reading_gaps',
+    score: 5, maxScore: 6, durationMs: 12_345, metadata,
+  }))), { path: 'blocked', reason: 'adaptive_content_mismatch', recorded: false });
+  assert.equal(mismatch.adaptive.length, 0);
+
+  const exact = recorderHarness({
+    module: 'reading', activityId: 'reading_gaps',
+    contentRef: metadata.readingContentRef, executionClaim: 'a'.repeat(43),
+  });
+  await exact.recorder.recordCompletedLearningActivity({
+    id: ATTEMPT_ID, module: 'reading', activityId: 'reading_gaps',
+    score: 5, maxScore: 6, durationMs: 12_345, metadata,
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(exact.adaptive[0].metadata)), metadata);
+});
+
 test('a different active adaptive block fails closed without recording disguised ordinary evidence', async () => {
   const active = {
     module: 'grammar', activityId: 'grammar_transformations_topic_18', executionClaim: 'a'.repeat(43),

@@ -200,7 +200,7 @@ async function runAdaptiveDiagnosticE2E() {
     await fs.writeFile(dataFile, JSON.stringify({
       users: {
         adaptivefree: {
-          created: Date.now(),
+          created: Date.now(), sub_until: Date.now() + 86_400_000,
           privacy_consent: {
             text_processing: true, voice_processing: false,
             policy_version: '2026-08-02-voice-v1', updated_at: new Date().toISOString(),
@@ -348,12 +348,12 @@ async function runAdaptiveDiagnosticE2E() {
     await homeEntry.press('Enter');
     await commercialPage.locator('#adaptive_plan:not([hidden])').waitFor({ state: 'visible', timeout: 5_000 });
     await commercialPage.waitForFunction(() => document.activeElement?.id === 'adaptive_plan_title');
-    await commercialPage.locator('#adaptive_access[data-tier="free"]').waitFor({ state: 'visible', timeout: 5_000 });
+    await commercialPage.locator('#adaptive_access[data-tier="base"]').waitFor({ state: 'visible', timeout: 5_000 });
     assert.equal(await commercialPage.getByRole('heading', { name: 'Мой план подготовки' }).count(), 1);
-    assert.match(await commercialPage.locator('#adaptive_access').innerText(), /Free/u);
+    assert.match(await commercialPage.locator('#adaptive_access').innerText(), /Base/u);
     assert.equal(await commercialPage.locator('input[name="adaptive_session_duration"][value="15"]').isEnabled(), true);
-    assert.equal(await commercialPage.locator('input[name="adaptive_session_duration"][value="30"]').isDisabled(), true);
-    assert.equal(await commercialPage.locator('#adaptive_session_custom').isDisabled(), true);
+    assert.equal(await commercialPage.locator('input[name="adaptive_session_duration"][value="30"]').isEnabled(), true);
+    assert.equal(await commercialPage.locator('#adaptive_session_custom').isEnabled(), true);
     const responsiveState = await commercialPage.evaluate(() => ({
       viewport: window.innerWidth,
       documentWidth: document.documentElement.scrollWidth,
@@ -510,8 +510,8 @@ async function runAdaptiveDiagnosticE2E() {
       '/api/v1/adaptive-learning/sessions/preview',
       { method: 'POST', body: { durationMinutes: 15 } },
     );
-    assert.equal(secondFreePreview.status, 403);
-    assert.equal(secondFreePreview.body.error.code, 'ADAPTIVE_FREE_DEMO_USED');
+    assert.equal(secondFreePreview.status, 200);
+    assert.equal(secondFreePreview.body.preview.durationMinutes, 15);
 
     adjustmentContext = await browser.newContext({ serviceWorkers: 'block' });
     await adjustmentContext.route('https://**', async (route) => {

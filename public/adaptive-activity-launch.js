@@ -14,10 +14,8 @@ function consumeDescriptor(launch, contentRef) {
       return typeof window.launchGrammarExam === 'function'
         && window.launchGrammarExam(contentRef) === true;
     case 'reading_mode':
-      if (launch.mode === 'headings' && typeof window.rHl === 'function') window.rHl();
-      else if (launch.mode === 'detail' && typeof window.rQs === 'function') window.rQs();
-      else return false;
-      return true;
+      return typeof window.launchReadingPractice === 'function'
+        && window.launchReadingPractice(launch.mode, launch.cefr, contentRef) === true;
     case 'listening_mode':
       if (launch.mode === 'matching' && typeof window.lMt === 'function') window.lMt();
       else if (launch.mode === 'interview' && typeof window.lIq === 'function') window.lIq();

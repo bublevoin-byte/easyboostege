@@ -12,6 +12,15 @@ const CEFR_LEVELS = Object.freeze(['B1', 'B2', 'B2+/C1']);
 const EXPECTED_CEFR_COUNTS = Object.freeze({ B1: 4, B2: 12, 'B2+/C1': 4 });
 const POSITION_LABELS = Object.freeze(['A', 'B', 'C', 'D', 'E', 'F', 'G']);
 const SAFE_SET_ID = /^reading-pilot-v1\.(?:task10|task11|task12_18)\.[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+const READING_ACTIVITY_BY_KIND = Object.freeze({
+  task10: Object.freeze({ skillId: 'ege.reading.gist', activityId: 'reading_headings', mode: 'reading_headings' }),
+  task11: Object.freeze({ skillId: 'ege.reading.detail', activityId: 'reading_gaps', mode: 'reading_gaps' }),
+  task12_18: Object.freeze({ skillId: 'ege.reading.detail', activityId: 'reading_detail', mode: 'reading_detail' }),
+});
+const READING_CEFR_SLUGS = Object.freeze({ B1: 'b1', B2: 'b2', 'B2+/C1': 'b2-plus-c1' });
+const READING_CEFR_BY_SLUG = Object.freeze(Object.fromEntries(
+  Object.entries(READING_CEFR_SLUGS).map(([cefr, slug]) => [slug, cefr]),
+));
 
 function fail(location, message) {
   throw new TypeError(`${location}: ${message}`);
@@ -188,6 +197,38 @@ export function readingSetReference(set) {
   if (!SAFE_SET_ID.test(id) || !Number.isSafeInteger(revision) || revision < 1 || revision > 10_000
     || !KINDS.includes(kind) || !id.startsWith(`${READING_CATALOG_ID}.${kind}.`)) return null;
   return { id, revision, kind, key: `${id}@${revision}` };
+}
+
+export function readingAdaptiveContentRef(kind, cefr) {
+  if (!KINDS.includes(kind) || !CEFR_LEVELS.includes(cefr)) {
+    throw new TypeError('Reading adaptive kind and CEFR must be allowlisted');
+  }
+  return `builtin:reading:${kind}:${READING_CEFR_SLUGS[cefr]}:v1`;
+}
+
+export function parseReadingAdaptiveContentRef(value) {
+  const match = /^builtin:reading:(task10|task11|task12_18):(b1|b2|b2-plus-c1):v1$/u.exec(String(value || ''));
+  if (!match) return null;
+  return { kind: match[1], cefr: READING_CEFR_BY_SLUG[match[2]] };
+}
+
+export function readingLearningActivityContract(set) {
+  const reference = readingSetReference(set);
+  if (!reference || !CEFR_LEVELS.includes(set?.cefr) || set?.recordable === false) {
+    throw new TypeError('Reading learning evidence requires a canonical recordable set');
+  }
+  const activity = READING_ACTIVITY_BY_KIND[reference.kind];
+  return {
+    module: 'reading',
+    ...activity,
+    source: 'catalog',
+    setId: reference.id,
+    setRevision: reference.revision,
+    kind: reference.kind,
+    cefr: set.cefr,
+    maxScore: READING_KIND_RULES[reference.kind].rawMaxScore,
+    contentRef: readingAdaptiveContentRef(reference.kind, set.cefr),
+  };
 }
 
 export function assertReadingSet(set, index = 0) {
@@ -400,6 +441,89 @@ export function readingSetForLegacyScreen(set) {
     voice: { id: set.id, revision: set.revision },
     maxScore: 7,
   };
+}
+
+export function readingSetForVoiceTutor(set) {
+  assertReadingSet(set, 0);
+  const reference = readingSetReference(set);
+  if (!reference || set.recordable === false) throw new TypeError('Voice Tutor requires a canonical Reading set');
+  let items;
+  if (set.kind === 'task10') {
+    items = set.task.texts.map((text, index) => ({
+      id: `${set.id}.p${index + 1}`,
+      prompt: `Какой заголовок подходит к тексту ${text.id}?`,
+      options: set.task.headings.slice(), answer: set.task.answers[index],
+      evidence: set.task.evidence[index].quote,
+      explanation: set.task.evidence[index].explanationRu,
+      position: text.id,
+    }));
+  } else if (set.kind === 'task11') {
+    items = set.task.answers.map((answer, index) => ({
+      id: `${set.id}.p${index + 1}`,
+      prompt: `Какой фрагмент подходит в пропуск ${POSITION_LABELS[index]}?`,
+      options: set.task.fragments.slice(), answer,
+      evidence: set.task.evidence[index].quote,
+      explanation: set.task.evidence[index].explanationRu,
+      position: POSITION_LABELS[index],
+    }));
+  } else {
+    items = set.task.questions.map((question, index) => ({
+      id: question.id, prompt: question.prompt, options: question.options.slice(),
+      answer: question.answer, evidence: question.evidence.quote,
+      explanation: question.evidence.explanationRu,
+      position: String(index + 12), questionId: question.id,
+    }));
+  }
+  const skillId = set.kind === 'task10' ? 'ege.reading.gist' : 'ege.reading.detail';
+  return {
+    id: set.id, revision: set.revision, module: 'reading', kind: set.kind, skillId,
+    items,
+    voice: { id: set.id, revision: set.revision },
+    qs: items.map((item) => ({
+      q: item.prompt, o: item.options.slice(), a: item.answer,
+      ev: item.evidence, e: item.explanation,
+      voice: { id: item.id, revision: set.revision },
+    })),
+  };
+}
+
+export function readingSourceContext(set, exactText) {
+  const text = String(exactText || '').normalize('NFKC').trim().replace(/\s+/gu, ' ').slice(0, 600);
+  if (!text || !set || !KINDS.includes(set.kind)) return null;
+  const reference = readingSetReference(set);
+  const contains = (value) => String(value || '').normalize('NFKC').trim().replace(/\s+/gu, ' ').includes(text);
+  let position = 'passage';
+  let questionId = null;
+  let exactCanonicalSource = false;
+  if (set.kind === 'task10') {
+    const index = set.task?.texts?.findIndex((item) => contains(item.text)) ?? -1;
+    if (index >= 0) { position = set.task.texts[index].id; exactCanonicalSource = true; }
+  } else if (set.kind === 'task11') {
+    const index = set.task?.segments?.findIndex(contains) ?? -1;
+    if (index >= 0) { position = POSITION_LABELS[Math.min(index, 5)]; exactCanonicalSource = true; }
+  } else {
+    exactCanonicalSource = contains(set.task?.text);
+    const index = set.task?.questions?.findIndex((question) => (
+      text.includes(question.evidence.quote) || question.evidence.quote.includes(text)
+    )) ?? -1;
+    if (index >= 0) {
+      position = String(index + 12);
+      questionId = set.task.questions[index].id;
+    }
+  }
+  return {
+    text, source: 'reading', readingProvenance: reference && exactCanonicalSource ? 'canonical' : 'technical',
+    readingSetId: reference?.id || String(set.id || 'legacy-reading.technical'),
+    readingSetRevision: reference?.revision || Number(set.revision) || 1,
+    readingKind: set.kind, position,
+    ...(questionId ? { questionId } : {}),
+  };
+}
+
+export function readingSourceContextFromSets(sets, exactText) {
+  const contexts = (Array.isArray(sets) ? sets : []).map((set) => readingSourceContext(set, exactText))
+    .filter(Boolean);
+  return contexts.find((context) => context.readingProvenance === 'canonical') || contexts[0] || null;
 }
 
 export async function loadReadingCatalog(loadCatalog) {

@@ -1955,12 +1955,13 @@ components:
             section: { type: string, enum: [grammar_19_24] }
           additionalProperties: false
         - type: object
-          required: [version, kind, screenId, mode]
+          required: [version, kind, screenId, mode, cefr]
           properties:
             version: { type: string, enum: [adaptive-launch-v1] }
             kind: { type: string, enum: [reading_mode] }
             screenId: { type: string, enum: [scr7] }
-            mode: { type: string, enum: [headings, detail] }
+            mode: { type: string, enum: [task10, task11, task12_18] }
+            cefr: { type: string, enum: [B1, B2, B2+/C1] }
           additionalProperties: false
         - type: object
           required: [version, kind, screenId, mode]

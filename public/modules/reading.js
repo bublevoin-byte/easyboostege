@@ -7,7 +7,12 @@ import {
   assertReadingCatalog,
   assertReadingSet,
   loadReadingCatalog,
+  parseReadingAdaptiveContentRef,
+  readingLearningActivityContract,
+  readingSourceContext,
+  readingSourceContextFromSets,
   readingSetForLegacyScreen,
+  readingSetForVoiceTutor,
   readingSetReference,
 } from '../reading-catalog-contract.js';
 import {
@@ -417,14 +422,19 @@ import {
         maxScore: 13,
       },
     ], durationMs);
+    if (metadata.complete === false) return [];
     if (!Array.isArray(metadata.sets)) return slices;
     const references = metadata.sets.map(setReference).filter(Boolean)
       .map(({ id, revision, kind }) => ({ id, revision, kind }));
     const assisted = assistanceWasUsed(metadata.assistance);
-    return slices.map((slice) => ({
+    return slices.map((slice, index) => ({
       ...slice,
       source: ALLOWED_SOURCES.has(metadata.source) ? metadata.source : 'catalog',
       independent: metadata.complete === true && !assisted,
+      ...(SAFE_ATTEMPT_ID.test(metadata.attemptId || '') ? {
+        attemptId: metadata.attemptId,
+        slice: index === 0 ? 'gist' : 'detail',
+      } : {}),
       sets: references.filter((set) => (
         slice.activityId === readingActivityId('headings') ? set.kind === 'task10' : set.kind !== 'task10'
       )),
@@ -692,6 +702,11 @@ import {
     validateSet: assertReadingSet,
     loadCatalog: loadReadingCatalog,
     adaptSet: readingSetForLegacyScreen,
+    voiceSet: readingSetForVoiceTutor,
+    learningContract: readingLearningActivityContract,
+    sourceContext: readingSourceContext,
+    sourceContextFromSets: readingSourceContextFromSets,
+    parseAdaptiveContentRef: parseReadingAdaptiveContentRef,
     adaptLegacyFallback: adaptLegacyReadingFallback,
     assembleCatalog: assembleReadingPilotCatalog,
     loadPilotCatalog: loadReadingPilotCatalog,

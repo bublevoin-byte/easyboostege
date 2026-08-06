@@ -112,14 +112,20 @@ try {
 
   await page.evaluate(() => window.tab('scr7'));
   await page.locator('#scr7.on').waitFor({ state: 'visible', timeout: 5_000 });
-  await page.getByRole('button', { name: 'Заголовки' }).press('Enter');
-  for (let index = 0; index < 4; index += 1) {
-    await page.locator(`#rhl_row_${index} button`).nth(index).press('Enter');
+  await page.getByRole('button', { name: 'Начать Task 10' }).press('Enter');
+  const readingAnswers = await page.evaluate(async () => {
+    const catalog = await window.EasyBoostReading.loadPilotCatalog();
+    const selected = window.S.readingPilot.history.lastSelected.task10;
+    return catalog.sets.find((set) => set.id === selected.id).task.answers;
+  });
+  for (let index = 0; index < readingAnswers.length; index += 1) {
+    await page.locator(`[data-reading-kind="task10"] [data-reading-answer][data-position="${index}"]`)
+      .selectOption(String(readingAnswers[index]));
   }
   const attemptResponse = page.waitForResponse((response) => (
     response.request().method() === 'POST' && response.url().endsWith('/api/v1/module-attempts')
   ));
-  await page.getByRole('button', { name: 'Проверить', exact: true }).press('Enter');
+  await page.getByRole('button', { name: 'Завершить тренировку', exact: true }).press('Enter');
   assert.equal((await attemptResponse).status(), 201);
 
   const updatedOverview = page.waitForResponse((response) => (

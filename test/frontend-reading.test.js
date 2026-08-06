@@ -19,7 +19,12 @@ import {
   assertReadingCatalog,
   assertReadingSet,
   loadReadingCatalog,
+  parseReadingAdaptiveContentRef,
+  readingLearningActivityContract,
+  readingSourceContext,
+  readingSourceContextFromSets,
   readingSetForLegacyScreen,
+  readingSetForVoiceTutor,
   readingSetReference,
 } from '../public/reading-catalog-contract.js';
 import {
@@ -37,7 +42,9 @@ function createReadingModule() {
   const window = {};
   vm.runInNewContext(source, {
     window, learningActivityPool, learningActivitySource, readingActivityId, splitLearningActivityDuration,
-    assertReadingCatalog, loadReadingCatalog, readingSetForLegacyScreen,
+    assertReadingCatalog, loadReadingCatalog, parseReadingAdaptiveContentRef,
+    readingLearningActivityContract, readingSourceContext, readingSourceContextFromSets,
+    readingSetForLegacyScreen, readingSetForVoiceTutor,
     READING_CATALOG_ID, READING_KINDS, READING_KIND_RULES, assertReadingSet, readingSetReference,
     adaptLegacyReadingFallback, assembleReadingPilotCatalog, loadReadingPilotCatalog,
     loadReadingTask10Shard, loadReadingTask11Shard, loadReadingTask12Shard,

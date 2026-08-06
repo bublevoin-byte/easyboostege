@@ -120,7 +120,7 @@ export async function registerVoiceTutorError({ module, itemId, revision, learne
 
 function voiceTutorSlotId(itemId) {
   const value = String(itemId || '');
-  if (!/^[a-z0-9.-]{4,120}$/u.test(value)) return '';
+  if (!/^[a-z0-9._-]{4,120}$/u.test(value)) return '';
   return `voice_tutor_result_${value.replaceAll('.', '_')}`;
 }
 

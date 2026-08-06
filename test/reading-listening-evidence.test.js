@@ -25,9 +25,20 @@ import {
   assertReadingCatalog,
   assertReadingSet,
   loadReadingCatalog,
+  parseReadingAdaptiveContentRef,
+  readingAdaptiveContentRef,
+  readingLearningActivityContract,
+  readingSourceContext,
+  readingSourceContextFromSets,
   readingSetForLegacyScreen,
+  readingSetForVoiceTutor,
   readingSetReference,
 } from '../public/reading-catalog-contract.js';
+import {
+  normalizeVocabularyWord,
+  personalVocabularyCardId,
+  upsertReadingVocabularyCard,
+} from '../public/vocabulary-domain.js';
 import {
   assembleReadingPilotCatalog,
   loadReadingPilotCatalog,
@@ -152,7 +163,13 @@ function createSubjectHarness(subject, { offline = false, slow = false, listenin
     splitLearningActivityDuration,
     assertReadingCatalog,
     loadReadingCatalog,
+    parseReadingAdaptiveContentRef,
+    readingAdaptiveContentRef,
+    readingLearningActivityContract,
+    readingSourceContext,
+    readingSourceContextFromSets,
     readingSetForLegacyScreen,
+    readingSetForVoiceTutor,
     READING_CATALOG_ID,
     READING_KINDS,
     READING_KIND_RULES,
@@ -229,9 +246,9 @@ function createSubjectHarness(subject, { offline = false, slow = false, listenin
     rSync() {},
     wSync() {},
     wBase: (value) => value,
-    normalizeVocabularyWord: (value) => value,
-    personalVocabularyCardId: () => null,
-    mergePersonalVocabularyCard: () => null,
+    normalizeVocabularyWord,
+    personalVocabularyCardId,
+    upsertReadingVocabularyCard,
     srsRecordVocabularyOutcome() {},
     lSync() {},
     lSetSlow() {},
@@ -282,6 +299,8 @@ function createSubjectHarness(subject, { offline = false, slow = false, listenin
       var __readingQuestionIndex=0;
       window.__subjectEvidenceTest={
         installCatalog:function(){catalog=PILOT_CATALOG},
+        startAdaptive:function(kind,cefr,contentRef){return launchReadingPractice(kind,cefr,contentRef)},
+        currentContract:function(){return training&&readingModule.learningContract(training.set)},
         startHeadings:function(){rHl()},
         completeHeadings:function(correct){training.answers=training.set.task.answers.map(function(answer){return correct===false?(answer+1)%training.set.task.headings.length:answer});submitTraining()},
         startQuestions:function(){__readingQuestionIndex=0;rQs()},
@@ -345,8 +364,7 @@ function createSubjectHarness(subject, { offline = false, slow = false, listenin
 }
 
 async function settle() {
-  await Promise.resolve();
-  await Promise.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
 }
 
 test('reading screen completions record headings, questions, gaps and distinct combined-exam slices', async () => {
@@ -375,34 +393,60 @@ test('reading screen completions record headings, questions, gaps and distinct c
     { activity: 'reading_headings', score: 7, maxScore: 7, durationMs: 350 },
     { activity: 'reading_detail', score: 13, maxScore: 13, durationMs: 651 },
   ]);
-  assert.deepEqual(harness.ordinary.map((attempt) => attempt.metadata), [
-    { mode: 'reading_headings', source: 'builtin', helpUsed: false, hintsUsed: 0 },
-    { mode: 'reading_detail', source: 'builtin', helpUsed: false, hintsUsed: 0 },
-    { mode: 'reading_gaps', source: 'builtin', helpUsed: false, hintsUsed: 0 },
-    { mode: 'reading_exam', source: 'builtin', helpUsed: false, hintsUsed: 0 },
-    { mode: 'reading_exam', source: 'builtin', helpUsed: false, hintsUsed: 0 },
+  for (const [index, attempt] of harness.ordinary.entries()) {
+    assert.equal(attempt.metadata.source, 'catalog');
+    assert.equal(attempt.metadata.readingProvenance, 'canonical');
+    assert.equal(typeof attempt.metadata.readingAttemptId, 'string');
+    assert.equal(attempt.metadata.readingSetRevision, 1);
+    if (index < 3) assert.equal(attempt.metadata.readingSetId.startsWith('reading-pilot-v1.'), true);
+  }
+  assert.deepEqual(harness.ordinary.slice(0, 3).map((attempt) => (
+    [attempt.metadata.readingKind, attempt.metadata.mode, attempt.metadata.readingSlice]
+  )), [
+    ['task10', 'reading_headings', 'gist'],
+    ['task12_18', 'reading_detail', 'detail'],
+    ['task11', 'reading_gaps', 'detail'],
   ]);
+  assert.equal(harness.ordinary[3].metadata.readingSlice, 'gist');
+  assert.equal(harness.ordinary[4].metadata.readingSlice, 'detail');
+  assert.equal(harness.ordinary[3].metadata.readingAttemptId, harness.ordinary[4].metadata.readingAttemptId);
+  assert.equal(harness.ordinary[4].metadata.readingSetRefs.split('|').length, 2);
   assert.equal(new Set(harness.ordinary.map((attempt) => attempt.id)).size, 5);
   assert.equal(harness.ordinary.slice(-2).reduce((sum, attempt) => sum + attempt.durationMs, 0), 1_001);
+  assert.equal(harness.voiceResults.length, 6, 'three separate results and all three full-section sets are registered');
 });
 
 test('reading exact adaptive completion uses only the claim path and a mismatch fails closed', async () => {
   const harness = createSubjectHarness('reading');
+  harness.screen.startAdaptive('task10', 'B1', 'builtin:reading:task10:b1:v1');
+  const contract = harness.screen.currentContract();
+  assert.equal(contract.kind, 'task10');
+  assert.equal(contract.cefr, 'B1');
   harness.setActive({
-    module: 'reading', activityId: 'reading_headings', executionClaim: 'a'.repeat(43),
+    module: 'reading', activityId: 'reading_headings', contentRef: contract.contentRef,
+    executionClaim: 'a'.repeat(43),
   });
-  harness.screen.startHeadings();
   harness.advance(250);
   harness.screen.completeHeadings(true);
   await settle();
 
-  assert.deepEqual(harness.adaptive, [{
+  assert.deepEqual(harness.adaptive.map((item) => ({
+    ...item, metadata: { ...item.metadata, readingSetId: '<canonical>' },
+  })), [{
     module: 'reading', activityId: 'reading_headings', score: 7, maxScore: 7, durationMs: 250,
+    metadata: {
+      mode: 'reading_headings', source: 'catalog', helpUsed: false, hintsUsed: 0,
+      readingProvenance: 'canonical', readingSetId: '<canonical>', readingSetRevision: 1,
+      readingKind: 'task10', readingCefr: 'B1', readingContentRef: contract.contentRef,
+      readingAttemptId: harness.adaptive[0].metadata.readingAttemptId, readingSlice: 'gist',
+      readingIndependent: true,
+    },
   }]);
   assert.equal(harness.ordinary.length, 0);
 
   harness.setActive({
-    module: 'reading', activityId: 'reading_detail', executionClaim: 'b'.repeat(43),
+    module: 'reading', activityId: 'reading_detail', contentRef: 'builtin:reading:task12_18:b1:v1',
+    executionClaim: 'b'.repeat(43),
   });
   harness.screen.startGaps();
   harness.advance(100);

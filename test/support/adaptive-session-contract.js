@@ -18,6 +18,7 @@ import {
   adaptiveEvidenceContext,
 } from '../../adaptive-learning/session-execution.js';
 import { adaptiveSpeakingTask } from '../../public/adaptive-speaking-tasks.js';
+import { readingAdaptiveAttemptMetadata } from './reading-adaptive-attempt.js';
 
 function reverseObjectKeys(value) {
   if (Array.isArray(value)) return value.map(reverseObjectKeys);
@@ -292,21 +293,26 @@ export async function assertAdaptiveSessionRepositoryContract(assert, repository
         const recorded = await repository.recordModuleAttemptWithAdaptiveClaim(username, {
           id: attemptId, module: block.module, activity: block.activityId,
           score: 1, maxScore: 1, durationMs: 60_000,
-          metadata: { helpUsed: true, mode: 'listening_exam', source: 'builtin', hintsUsed: 3, forged: true },
+          metadata: block.module === 'reading' ? readingAdaptiveAttemptMetadata(block) : {
+            helpUsed: true, mode: 'listening_exam', source: 'builtin', hintsUsed: 3, forged: true,
+          },
         }, { executionClaim: token, now: new Date(stepTime.getTime() + 1_000) });
         assert.equal(recorded.created, true);
         assert.equal(recorded.evidenceQuality, 'client_reported');
         assert.equal(recorded.adaptiveExecution.sessionId, replaced.session.id);
         const storedAttempt = await repository.getModuleAttempt(username, attemptId);
-        assert.equal(storedAttempt.metadata.helpUsed, true);
-        assert.equal(storedAttempt.metadata.mode, 'listening_exam');
-        assert.equal(storedAttempt.metadata.source, 'builtin');
-        assert.equal(storedAttempt.metadata.hintsUsed, 3);
+        assert.equal(storedAttempt.metadata.helpUsed, block.module !== 'reading');
+        assert.equal(storedAttempt.metadata.mode, block.module === 'reading'
+          ? readingAdaptiveAttemptMetadata(block).mode : 'listening_exam');
+        assert.equal(storedAttempt.metadata.source, block.module === 'reading' ? 'catalog' : 'builtin');
+        assert.equal(storedAttempt.metadata.hintsUsed, block.module === 'reading' ? 0 : 3);
         assert.equal(Object.hasOwn(storedAttempt.metadata, 'forged'), false);
         const claimReplay = await repository.recordModuleAttemptWithAdaptiveClaim(username, {
           id: attemptId, module: block.module, activity: block.activityId,
           score: 1, maxScore: 1, durationMs: 60_000,
-          metadata: { helpUsed: true, mode: 'listening_exam', source: 'builtin', hintsUsed: 3, forged: true },
+          metadata: block.module === 'reading' ? readingAdaptiveAttemptMetadata(block) : {
+            helpUsed: true, mode: 'listening_exam', source: 'builtin', hintsUsed: 3, forged: true,
+          },
         }, { executionClaim: token, now: new Date(stepTime.getTime() + 2_000) });
         assert.equal(claimReplay.created, false);
         attempt = { type: 'module', id: attemptId };

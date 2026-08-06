@@ -79,14 +79,15 @@ try {
   await page.locator('#scr7.on').waitFor({ state: 'visible', timeout: 5_000 });
   await page.getByRole('heading', { name: 'Каталог чтения' }).waitFor({ timeout: 8_000 });
   await page.getByRole('button', { name: 'Начать Task 10' }).press('Enter');
-  const readingAnswers = await page.evaluate(async () => {
+  const readingSet = await page.evaluate(async () => {
     const catalog = await window.EasyBoostReading.loadPilotCatalog();
     const selected = window.S.readingPilot.history.lastSelected.task10;
-    return catalog.sets.find((set) => set.id === selected.id).task.answers;
+    const set = catalog.sets.find((item) => item.id === selected.id);
+    return { id: set.id, revision: set.revision, cefr: set.cefr, answers: set.task.answers };
   });
-  for (let index = 0; index < readingAnswers.length; index += 1) {
+  for (let index = 0; index < readingSet.answers.length; index += 1) {
     await page.locator(`[data-reading-kind="task10"] [data-reading-answer][data-position="${index}"]`)
-      .selectOption(String(readingAnswers[index]));
+      .selectOption(String(readingSet.answers[index]));
   }
   await context.setOffline(true);
   await page.getByRole('button', { name: 'Завершить тренировку', exact: true }).press('Enter');
@@ -95,7 +96,18 @@ try {
   assert.equal(queued.module, 'reading');
   assert.equal(queued.activity, 'reading_headings');
   assert.equal(queued.maxScore, 7);
-  assert.equal(Object.keys(queued.metadata).sort().join(','), 'helpUsed,hintsUsed,mode,source');
+  assert.deepEqual(Object.keys(queued.metadata).sort(), [
+    'helpUsed', 'hintsUsed', 'mode', 'readingAttemptId', 'readingCefr', 'readingContentRef',
+    'readingIndependent', 'readingKind', 'readingProvenance', 'readingSetId',
+    'readingSetRevision', 'readingSlice', 'source',
+  ]);
+  assert.equal(queued.metadata.readingSetId, readingSet.id);
+  assert.equal(queued.metadata.readingSetRevision, readingSet.revision);
+  assert.equal(queued.metadata.readingCefr, readingSet.cefr);
+  assert.equal(queued.metadata.readingContentRef, `builtin:reading:task10:${readingSet.cefr === 'B1' ? 'b1' : readingSet.cefr === 'B2' ? 'b2' : 'b2-plus-c1'}:v1`);
+  assert.equal(queued.metadata.readingKind, 'task10');
+  assert.equal(queued.metadata.readingSlice, 'gist');
+  assert.equal(queued.metadata.readingIndependent, true);
 
   await context.setOffline(false);
   await page.waitForFunction(() => window.EasyBoostSync.pendingModuleAttempts().length === 0);

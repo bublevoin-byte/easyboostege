@@ -49,7 +49,8 @@ test('Reading 2 exposes accessible status, review and responsive styling contrac
   assert.match(html, /@media\(prefers-reduced-motion:reduce\)[^{]*\{[^}]*reading/su);
 });
 
-test('adaptive Reading launches still enter canonical Task 10 and Task 12–18 modes', () => {
-  assert.match(adaptiveLaunch, /launch\.mode === 'headings'[\s\S]*window\.rHl/u);
-  assert.match(adaptiveLaunch, /launch\.mode === 'detail'[\s\S]*window\.rQs/u);
+test('adaptive Reading launches an exact allowlisted kind and CEFR through the canonical screen seam', () => {
+  assert.match(adaptiveLaunch, /window\.launchReadingPractice/u);
+  assert.match(adaptiveLaunch, /launch\.mode,\s*launch\.cefr,\s*contentRef/u);
+  assert.match(screen, /function launchReadingPractice\(kind,cefr,contentRef\)/u);
 });

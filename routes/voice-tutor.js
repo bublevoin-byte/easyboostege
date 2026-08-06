@@ -168,7 +168,7 @@ function parseContextAttemptRequest(body) {
   const keys = Object.keys(body);
   if (keys.length !== 5 || keys.some((key) => !['attemptId', 'module', 'setId', 'revision', 'answers'].includes(key))) return null;
   if (!ATTEMPT_ID.test(String(body.attemptId || '')) || !isContextVoiceTutorModule(body.module)
-    || !/^[a-z0-9.-]{4,120}$/u.test(String(body.setId || '')) || !Number.isInteger(body.revision)
+    || !/^[a-z0-9._-]{4,120}$/u.test(String(body.setId || '')) || !Number.isInteger(body.revision)
     || !Array.isArray(body.answers) || body.answers.length < 1 || body.answers.length > 20
     || body.answers.some((answer) => typeof answer !== 'string' || answer.length < 1 || answer.length > 200)) return null;
   return body;

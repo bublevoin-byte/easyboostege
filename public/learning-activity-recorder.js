@@ -11,7 +11,30 @@ const ACTIVITY_MODES = new Set([
   'reading_headings', 'reading_detail', 'reading_gaps', 'reading_exam',
   'listening_matching', 'listening_true_false', 'listening_interview', 'listening_exam',
 ]);
-const ACTIVITY_SOURCES = new Set(['builtin', 'generated', 'mixed']);
+const ACTIVITY_SOURCES = new Set(['builtin', 'generated', 'mixed', 'catalog']);
+
+function canonicalReadingMetadata(source) {
+  const separate = ['task10', 'task11', 'task12_18'].includes(source.readingKind)
+    && /^reading-pilot-v1\.(?:task10|task11|task12_18)\.[a-z0-9-]{1,100}$/u.test(String(source.readingSetId || ''))
+    && /^builtin:reading:(?:task10|task11|task12_18):(?:b1|b2|b2-plus-c1):v1$/u.test(String(source.readingContentRef || ''))
+    && ['B1', 'B2', 'B2+/C1'].includes(source.readingCefr);
+  const combinedDetail = source.readingKind === 'full_detail' && source.readingCefr === 'mixed'
+    && source.readingContentRef === 'builtin:reading:full:detail:v1'
+    && /^reading-pilot-v1\.task11\.[a-z0-9-]+@[1-9][0-9]{0,3}\|reading-pilot-v1\.task12_18\.[a-z0-9-]+@[1-9][0-9]{0,3}$/u.test(String(source.readingSetRefs || ''));
+  if (source.readingProvenance !== 'canonical' || (!separate && !combinedDetail)
+    || !Number.isInteger(source.readingSetRevision) || source.readingSetRevision < 1 || source.readingSetRevision > 10_000
+    || !/^[A-Za-z0-9:._-]{8,180}$/u.test(String(source.readingAttemptId || ''))
+    || !['gist', 'detail'].includes(source.readingSlice)) return null;
+  return {
+    readingProvenance: 'canonical', ...(separate ? { readingSetId: source.readingSetId } : {}),
+    ...(combinedDetail ? { readingSetRefs: source.readingSetRefs } : {}),
+    readingSetRevision: source.readingSetRevision, readingKind: source.readingKind,
+    readingCefr: source.readingCefr, readingContentRef: source.readingContentRef,
+    readingAttemptId: source.readingAttemptId, readingSlice: source.readingSlice,
+    ...(typeof source.readingIndependent === 'boolean'
+      ? { readingIndependent: source.readingIndependent } : {}),
+  };
+}
 
 function boundedMetadata(value) {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -22,6 +45,8 @@ function boundedMetadata(value) {
   if (Number.isInteger(source.hintsUsed) && source.hintsUsed >= 0 && source.hintsUsed <= 100) {
     metadata.hintsUsed = source.hintsUsed;
   }
+  const reading = canonicalReadingMetadata(source);
+  if (reading) Object.assign(metadata, reading);
   return metadata;
 }
 
@@ -46,9 +71,9 @@ function ordinaryAttempt(completion) {
   };
 }
 
-export function createLearningActivityEvidence({ module, activityId, mode, source, startedAt = Date.now() } = {}) {
+export function createLearningActivityEvidence({ id = crypto.randomUUID(), module, activityId, mode, source, startedAt = Date.now(), metadata = {} } = {}) {
   return {
-    id: crypto.randomUUID(),
+    id,
     module,
     activityId,
     mode,
@@ -57,6 +82,7 @@ export function createLearningActivityEvidence({ module, activityId, mode, sourc
     reported: false,
     helpUsed: false,
     hintsUsed: 0,
+    metadata,
   };
 }
 
@@ -67,13 +93,17 @@ export async function recordCompletedLearningActivity(completion = {}) {
     if (active.module !== attempt.module || active.activityId !== attempt.activity) {
       return { path: 'blocked', reason: 'adaptive_activity_mismatch', recorded: false };
     }
+    if (attempt.module === 'reading' && active.contentRef !== attempt.metadata.readingContentRef) {
+      return { path: 'blocked', reason: 'adaptive_content_mismatch', recorded: false };
+    }
     const result = await completeAdaptiveModuleActivity({
       module: attempt.module,
       activityId: attempt.activity,
       score: attempt.score,
       maxScore: attempt.maxScore,
       durationMs: attempt.durationMs,
-      ...(attempt.metadata.helpUsed === true ? { metadata: attempt.metadata } : {}),
+      ...(attempt.metadata.helpUsed === true || attempt.module === 'reading'
+        ? { metadata: attempt.metadata } : {}),
     });
     return { path: 'adaptive', result };
   }
@@ -103,6 +133,7 @@ export async function recordLearningActivityEvidence(evidence, { score, maxScore
         source: evidence.source,
         helpUsed: evidence.helpUsed,
         hintsUsed: evidence.hintsUsed,
+        ...(evidence.metadata || {}),
       },
     });
   } catch (error) {

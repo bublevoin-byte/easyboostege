@@ -13,6 +13,7 @@ import { createFileRepository } from '../storage/file-repository.js';
 import { adaptiveSpeakingTask } from '../public/adaptive-speaking-tasks.js';
 import { ADAPTIVE_ACTIVITY_REGISTRY } from '../adaptive-learning/session.js';
 import { completeShortAdaptiveDiagnostic } from './support/adaptive-diagnostic-public.js';
+import { readingAdaptiveAttemptMetadata } from './support/reading-adaptive-attempt.js';
 
 const START = new Date(Date.now() - 2 * 60 * 60_000);
 const MODULE_ACTIVITY_REGISTRY = {
@@ -147,7 +148,9 @@ test('one-block execution starts with an opaque claim, binds a stored attempt, a
     const attempt = {
       id: crypto.randomUUID(), module: block.module, activity: block.activityId,
       score: 4, maxScore: 5, durationMs: 300_000,
-      metadata: { evidenceQuality: 'server_verified_unassisted', contentRef: 'forged' },
+      metadata: block.module === 'reading' ? readingAdaptiveAttemptMetadata(block) : {
+        evidenceQuality: 'server_verified_unassisted', contentRef: 'forged',
+      },
       adaptiveExecutionClaim: started.executionClaim,
     };
     const attemptResponse = await request(owner, '/api/v1/module-attempts', {
@@ -163,6 +166,7 @@ test('one-block execution starts with an opaque claim, binds a stored attempt, a
     assert.equal(storedAttempt.evidence_quality, 'client_reported');
     assert.equal(storedAttempt.metadata.evidenceQuality, undefined);
     assert.equal(storedAttempt.metadata.contentRef, undefined);
+    if (block.module === 'reading') assert.equal(storedAttempt.metadata.readingContentRef, block.contentRef);
 
     const advanceBody = {
       blockId: block.id, expectedRevision: 1,
@@ -323,6 +327,7 @@ test('server-owned writing or speaking completion binds to the claim without a c
           method: 'POST', body: JSON.stringify({
             id, module: block.module, activity: block.activityId,
             score: 1, maxScore: 1, adaptiveExecutionClaim: started.executionClaim,
+            ...(block.module === 'reading' ? { metadata: readingAdaptiveAttemptMetadata(block) } : {}),
           }),
         });
         assert.equal(recorded.status, 201);
@@ -467,12 +472,14 @@ test('claim ownership and compare-and-set prevent forged or concurrent completio
       method: 'POST', body: JSON.stringify({
         id: attemptId, module: block.module, activity: block.activityId,
         score: 1, maxScore: 1, adaptiveExecutionClaim: started.executionClaim,
+        ...(block.module === 'reading' ? { metadata: readingAdaptiveAttemptMetadata(block) } : {}),
       }),
     })).status, 201);
     assert.equal((await request(owner, '/api/v1/module-attempts', {
       method: 'POST', body: JSON.stringify({
         id: crypto.randomUUID(), module: block.module, activity: block.activityId,
         score: 1, maxScore: 1, adaptiveExecutionClaim: started.executionClaim,
+        ...(block.module === 'reading' ? { metadata: readingAdaptiveAttemptMetadata(block) } : {}),
       }),
     })).status, 409);
     const advanceBody = JSON.stringify({
@@ -516,6 +523,7 @@ test('an expired claim cannot create evidence or advance the session', async () 
       method: 'POST', body: JSON.stringify({
         id: attemptId, module: block.module, activity: block.activityId,
         score: 1, maxScore: 1, adaptiveExecutionClaim: started.executionClaim,
+        ...(block.module === 'reading' ? { metadata: readingAdaptiveAttemptMetadata(block) } : {}),
       }),
     });
     assert.equal(expired.status, 410);
@@ -549,6 +557,7 @@ test('a consumed claim recovers its exact attempt instead of issuing a replaceme
       method: 'POST', body: JSON.stringify({
         id: attemptId, module: block.module, activity: block.activityId,
         score: 1, maxScore: 1, adaptiveExecutionClaim: started.executionClaim,
+        ...(block.module === 'reading' ? { metadata: readingAdaptiveAttemptMetadata(block) } : {}),
       }),
     })).status, 201);
 

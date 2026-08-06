@@ -7,7 +7,7 @@ import {
 } from '../app.js';
 import {createLearningActivityEvidence,recordLearningActivityEvidence} from '../learning-activity-recorder.js';
 import {
-  mergePersonalVocabularyCard,normalizeVocabularyWord,personalVocabularyCardId,
+  normalizeVocabularyWord,personalVocabularyCardId,upsertReadingVocabularyCard,
 } from '../vocabulary-domain.js';
 
 const KINDS=['task10','task11','task12_18'];
@@ -152,40 +152,51 @@ function answerLabel(set,index,value){
   if(set.kind==='task11')return String.fromCharCode(65+value)+'. '+set.task.fragments[value];
   return (value+1)+'. '+set.task.questions[index].options[value];
 }
-function reviewMarkup(set,result,voiceResult=null){
-  const legacy=set.kind==='task12_18'?readingModule.adaptSet(set):null;
-  return '<section class="reading-review-list" aria-label="Полный разбор">'+result.review.map((row,index)=>'<article class="reading-review reading-review--'+(row.correct?'correct':'wrong')+'" data-reading-review-row><header><span aria-hidden="true">'+(row.correct?'✓':'×')+'</span><h3>Позиция '+h(row.position)+' · '+(row.correct?'верно':'есть ошибка')+'</h3></header><dl><div><dt>Ответ ученика</dt><dd>'+h(answerLabel(set,index,row.userAnswer))+'</dd></div><div><dt>Правильный ответ</dt><dd>'+h(answerLabel(set,index,row.correctAnswer))+'</dd></div><div><dt>Цитата-доказательство</dt><dd class="reading-text">«'+rWordsHtml(row.evidence.quote)+'»</dd></div><div><dt>Объяснение</dt><dd>'+h(row.evidence.explanationRu)+'</dd></div></dl>'+(voiceResult&&legacy?voiceResult.resultSlot(legacy.qs[index],index):'')+'</article>').join('')+'</section>';
+function reviewMarkup(set,result,voice=null){
+  return '<section class="reading-review-list" aria-label="Полный разбор">'+result.review.map((row,index)=>'<article class="reading-review reading-review--'+(row.correct?'correct':'wrong')+'" data-reading-review-row><header><span aria-hidden="true">'+(row.correct?'✓':'×')+'</span><h3>Позиция '+h(row.position)+' · '+(row.correct?'верно':'есть ошибка')+'</h3></header><dl><div><dt>Ответ ученика</dt><dd>'+h(answerLabel(set,index,row.userAnswer))+'</dd></div><div><dt>Правильный ответ</dt><dd>'+h(answerLabel(set,index,row.correctAnswer))+'</dd></div><div><dt>Цитата-доказательство</dt><dd class="reading-text">«'+rWordsHtml(row.evidence.quote)+'»</dd></div><div><dt>Объяснение</dt><dd>'+h(row.evidence.explanationRu)+'</dd></div></dl>'+(voice?voice.result.resultSlot(voice.set.qs[index],index):'')+'</article>').join('')+'</section>';
 }
 function renderTrainingResult(){
   const item=training,result=item?.result;if(!item||!result)return;
   const seconds=Date.now()-item.startedAt,technical=item.set.recordable===false;
   const reviewTitle=item.kind==='task10'?'разбор задания 10':item.kind==='task11'?'разбор задания 11':'разбор заданий 12–18';
-  const voiceSet=item.kind==='task12_18'?readingModule.adaptSet(item.set):null;
+  const voiceSet=technical?null:readingModule.voiceSet(item.set);
   const voiceResult=voiceSet?prepareVoiceTutorContextResult({module:'reading',set:voiceSet,selections:item.answers}):null;
+  const voice=voiceResult?{set:voiceSet,result:voiceResult}:null;
   setHeader('Разбор готов',result.rawScore+' / '+result.rawMaxScore);
   const scoreCopy=technical?'<strong>Технический результат: '+result.rawScore+' из '+result.rawMaxScore+'.</strong> Официальная шкала и прогресс не применяются.':result.rawScore+' из '+result.rawMaxScore+' верных полей · '+result.officialScore+' из '+result.officialMaxScore+' первичных баллов · '+formatTime(seconds);
-  area().innerHTML='<main class="reading2 reading-result"><header class="reading-title"><p class="reading-kicker">РЕЗУЛЬТАТ</p><h1>'+reviewTitle.charAt(0).toUpperCase()+reviewTitle.slice(1)+'</h1><p>'+scoreCopy+'</p></header><p class="reading-notice" role="status" aria-live="polite">Разбор открыт после сдачи: ключи и доказательства теперь видны.</p>'+reviewMarkup(item.set,result,voiceResult)+validationDetails()
+  area().innerHTML='<main class="reading2 reading-result"><header class="reading-title"><p class="reading-kicker">РЕЗУЛЬТАТ</p><h1>'+reviewTitle.charAt(0).toUpperCase()+reviewTitle.slice(1)+'</h1><p>'+scoreCopy+'</p></header><p class="reading-notice" role="status" aria-live="polite">Разбор открыт после сдачи: ключи и доказательства теперь видны.</p>'+reviewMarkup(item.set,result,voice)+validationDetails()
     +'<div class="reading-actions"><button class="reading-action reading-action--secondary" type="button" data-reading-action="hub">К каталогу</button>'+(item.set.recordable===false?'':'<button class="reading-action reading-action--primary" type="button" data-reading-action="repeat" data-kind="'+item.kind+'">Следующий комплект</button>')+'</div></main>';
   bindActions();
   if(voiceResult)registerVoiceTutorContextResult(voiceResult).catch(()=>{});
 }
-async function startTraining(kind,{technical=false}={}){
+function trainingEvidence(set,startedAt){
+  const contract=readingModule.learningContract(set),id=crypto.randomUUID();
+  return createLearningActivityEvidence({id,module:'reading',activityId:contract.activityId,mode:contract.mode,source:'catalog',startedAt,metadata:{
+    readingProvenance:'canonical',readingSetId:contract.setId,readingSetRevision:contract.setRevision,
+    readingKind:contract.kind,readingCefr:contract.cefr,readingContentRef:contract.contentRef,
+    readingAttemptId:id,readingSlice:contract.kind==='task10'?'gist':'detail',readingIndependent:true,
+  }});
+}
+function startTraining(kind,{technical=false,preferredCefr=null,adaptiveContentRef=null}={}){
   if(!technical&&(!catalog||!KINDS.includes(kind)))return;
   const owner=ownerId(),current=state();if(!owner||!current){renderOwnerError();return}
-  let set=technical?TECHNICAL_SET:readingModule.selectNextSet(catalog.sets,owner,current.history,kind,{now:Date.now()});
+  const pool=technical?[]:(adaptiveContentRef?catalog.sets.filter((item)=>item.kind===kind&&item.cefr===preferredCefr):catalog.sets);
+  let set=technical?TECHNICAL_SET:readingModule.selectNextSet(pool,owner,current.history,kind,{now:Date.now(),preferredCefr});
   if(!set)return;
+  if(adaptiveContentRef&&readingModule.learningContract(set).contentRef!==adaptiveContentRef)return false;
   if(!technical){current.history=readingModule.rememberSelection(owner,current.history,kind,set,Date.now());save()}
   const startedAt=Date.now();
-  training={kind,set,answers:emptyAnswers(kind,set),startedAt,result:null,evidence:technical?null:createLearningActivityEvidence({module:'reading',activityId:readingModule.activityId(KIND_META[kind].activity),mode:kind==='task12_18'?'reading_detail':'reading_'+KIND_META[kind].activity,source:'builtin',startedAt})};
+  training={kind,set,answers:emptyAnswers(kind,set),startedAt,result:null,evidence:technical?null:trainingEvidence(set,startedAt)};
   RQ=kind==='task12_18'?training:null;
   renderTraining();
+  return true;
 }
 function submitTraining(){
   if(!training||training.result||!training.answers.every((answer)=>answer!==null))return;
   const result=readingModule.scoreSet(training.set,training.answers);training.result=result;
   if(training.set.recordable!==false){
     const owner=ownerId(),current=state(),durationMs=Math.max(0,Date.now()-training.startedAt);
-    const attemptId='reading-'+(crypto.randomUUID?crypto.randomUUID():Date.now());
+    const attemptId=training.evidence.id;
     current.history=readingModule.recordAttempt(owner,current.history,training.set,{attemptId,score:result.rawScore,maxScore:result.rawMaxScore,durationMs,attemptedAt:Date.now(),source:'catalog'});
     current.totals[training.kind].correct+=result.rawScore;current.totals[training.kind].total+=result.rawMaxScore;current.completedSets+=1;
     save({queueNow:true});rSync();
@@ -269,19 +280,38 @@ function confirmFullSubmit(){
       KINDS.forEach((kind)=>{current.totals[kind].correct+=submitted.result.perKind[kind].rawScore;current.totals[kind].total+=submitted.result.perKind[kind].rawMaxScore});current.completedSets+=3;
     }
     save({queueNow:true});rSync();
-    submitted.result.evidenceSlices.forEach((slice)=>{const evidence=createLearningActivityEvidence({module:'reading',activityId:slice.activityId,mode:'reading_exam',source:'builtin',startedAt:full.attempt.startedAt});recordLearningActivityEvidence(evidence,{score:slice.score,maxScore:slice.maxScore,durationMs:slice.durationMs}).catch(()=>{})});
+    let evidenceWrite=Promise.resolve();
+    submitted.result.evidenceSlices.forEach((slice)=>{
+      const id=crypto.randomUUID(),gist=slice.slice==='gist',set=gist?full.attempt.section.sets.task10:null;
+      const contract=gist?readingModule.learningContract(set):null;
+      const detailSets=slice.sets||[];
+      const metadata=gist?{
+        readingProvenance:'canonical',readingSetId:contract.setId,readingSetRevision:contract.setRevision,
+        readingKind:contract.kind,readingCefr:contract.cefr,readingContentRef:contract.contentRef,
+        readingAttemptId:full.attempt.id,readingSlice:'gist',readingIndependent:slice.independent===true,
+      }:{
+        readingProvenance:'canonical',readingSetRevision:full.attempt.section.catalogRevision,
+        readingKind:'full_detail',readingCefr:'mixed',readingContentRef:'builtin:reading:full:detail:v1',
+        readingSetRefs:detailSets.map((item)=>item.id+'@'+item.revision).join('|'),
+        readingAttemptId:full.attempt.id,readingSlice:'detail',readingIndependent:slice.independent===true,
+      };
+      const evidence=createLearningActivityEvidence({id,module:'reading',activityId:slice.activityId,
+        mode:gist?'reading_headings':'reading_detail',source:'catalog',startedAt:full.attempt.startedAt,metadata});
+      evidenceWrite=evidenceWrite.then(()=>recordLearningActivityEvidence(evidence,{
+        score:slice.score,maxScore:slice.maxScore,durationMs:slice.durationMs,
+      })).catch(()=>false);
+    });
     renderFullResult();
   }finally{submissionLocked=false}
 }
 function renderFullResult(){
   const result=full?.result;if(!result)return;
-  const voiceSet=readingModule.adaptSet(full.attempt.section.sets.task12_18);
-  const voiceResult=prepareVoiceTutorContextResult({module:'reading',set:voiceSet,selections:full.attempt.answers.task12_18});
+  const voice=Object.fromEntries(KINDS.map((kind)=>{const set=readingModule.voiceSet(full.attempt.section.sets[kind]);return [kind,{set,result:prepareVoiceTutorContextResult({module:'reading',set,selections:full.attempt.answers[kind]})}]}));
   setHeader('Полный раздел завершён',result.officialScore+' / 12');
   const perKind=KINDS.map((kind)=>'<li><span>'+KIND_META[kind].title+'</span><strong>'+result.perKind[kind].officialScore+' / '+result.perKind[kind].officialMaxScore+' балла · '+result.perKind[kind].rawScore+' / '+result.perKind[kind].rawMaxScore+' полей</strong></li>').join('');
-  const reviews=KINDS.map((kind)=>reviewMarkup(full.attempt.section.sets[kind],result.perKind[kind],kind==='task12_18'?voiceResult:null)).join('');
+  const reviews=KINDS.map((kind)=>reviewMarkup(full.attempt.section.sets[kind],result.perKind[kind],voice[kind])).join('');
   area().innerHTML='<main class="reading2 reading-result"><header class="reading-title"><p class="reading-kicker">РЕЗУЛЬТАТ УЧЕБНОГО РАЗДЕЛА</p><h1>Результат полного раздела</h1><p><strong>'+result.officialScore+' из 12 первичных баллов</strong> · '+result.rawScore+' из 20 верных полей · '+formatTime(result.durationMs)+'</p><small>Это учебное воспроизведение шкалы раздела, не прогноз итогового тестового балла ЕГЭ.</small></header><ul class="reading-score-list">'+perKind+'</ul><p class="reading-notice" role="status" aria-live="polite">Разбор всех 20 полей открыт после финальной сдачи.</p>'+reviews+validationDetails()+'<div class="reading-actions"><button class="reading-action reading-action--secondary" type="button" data-reading-action="hub">К каталогу</button><button class="reading-action reading-action--primary" type="button" data-reading-action="full-intro">Новый полный раздел</button></div></main>';
-  bindActions();if(voiceResult)registerVoiceTutorContextResult(voiceResult).catch(()=>{});
+  bindActions();KINDS.forEach((kind)=>{if(voice[kind].result)registerVoiceTutorContextResult(voice[kind].result).catch(()=>{})});
 }
 function restoreDraft(){
   if(!S.readingPilotDraft)return false;
@@ -321,6 +351,11 @@ function rHub(){renderHub()}
 function rHl(){return startTraining('task10')}
 function rGp(){return startTraining('task11')}
 function rQs(){return startTraining('task12_18')}
+function launchReadingPractice(kind,cefr,contentRef){
+  const parsed=readingModule.parseAdaptiveContentRef(contentRef);
+  if(!parsed||parsed.kind!==kind||parsed.cefr!==cefr)return false;
+  return startTraining(kind,{preferredCefr:cefr,adaptiveContentRef:contentRef})===true;
+}
 function rExam(){renderFullIntro()}
 function rExamStart(){startFullAttempt()}
 
@@ -332,10 +367,10 @@ function r_add(status){
   if(!translation||translation.includes('перевод')||translation.includes('офлайн, слова нет')||translation.length>240)translation='';
   const pronunciation=(document.getElementById('r_ipa')?.textContent||'').trim();
   const known=EGE_WORDS.find((item)=>wBase(item.w)===word&&(item.provenance==='core'||(!item.provenance&&Number(item.t)!==0)));
-  const context=lastWordContext||String(document.getElementById('r_card')?.textContent||'').trim().slice(0,600);
-  const cards=Array.isArray(S.personalWords)?S.personalWords:[],existing=cards.find((card)=>card.id===id);
-  const card=mergePersonalVocabularyCard(existing,{word,translation:translation||null,pronunciation:pronunciation||known?.ipa||null,partOfSpeech:known?.p||null,level:known?.level||null,context,source:'reading'});
-  S.personalWords=cards.filter((item)=>item.id!==id).concat([card]);S.personalWordTombstones=(Array.isArray(S.personalWordTombstones)?S.personalWordTombstones:[]).filter((value)=>value!==id);S.wstatus=S.wstatus||{};S.wstatus[word]=previousStatus==='know'?'know':status;
+  const contextText=lastWordContext||String(document.getElementById('r_card')?.textContent||'').trim().slice(0,600);
+  const activeSets=training?.set?[training.set]:(full?.attempt?.section?.sets?KINDS.map((kind)=>full.attempt.section.sets[kind]):[]);
+  const context=readingModule.sourceContextFromSets(activeSets,contextText);if(!context)return;
+  S.personalWords=upsertReadingVocabularyCard(S.personalWords||[],{word,translation:translation||null,pronunciation:pronunciation||known?.ipa||null,partOfSpeech:known?.p||null,level:known?.level||null,context});S.personalWordTombstones=(Array.isArray(S.personalWordTombstones)?S.personalWordTombstones:[]).filter((value)=>value!==id);S.wstatus=S.wstatus||{};S.wstatus[word]=previousStatus==='know'?'know':status;
   if(status==='know'&&previousStatus!=='know')srsRecordVocabularyOutcome(word,{mode:'russian_reveal',outcome:'knew',now:Date.now()});
   toast(status==='know'?'Отмечено как знакомое · самооценка':'Личная карточка добавлена в «Слова»');save();const pop=document.getElementById('r_pop');if(pop)pop.style.display='none';wSync();
 }
@@ -346,4 +381,4 @@ registerRouteHook((id)=>{
 });
 registerScreenGenerator('scr7',()=>initReading(true));
 
-export {RE,RQ,initReading,rExam,rExamStart,rGp,rHl,rHub,rQs,r_add};
+export {RE,RQ,initReading,launchReadingPractice,rExam,rExamStart,rGp,rHl,rHub,rQs,r_add};

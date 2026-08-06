@@ -1,13 +1,17 @@
 import { voiceTutorModule } from './modules.js';
 import { CORE_VOICE_TUTOR_ITEMS } from './core-catalog.js';
 import { LISTENING_PILOT_INTERVIEW_DEFINITIONS } from '../public/listening-pilot-interviews-v1.js';
+import { readingSetForVoiceTutor } from '../public/reading-catalog-contract.js';
+import { READING_TASK10_SETS } from '../public/content/reading/task10-v1.js';
+import { READING_TASK11_SETS } from '../public/content/reading/task11-v1.js';
+import { READING_TASK12_18_SETS } from '../public/content/reading/task12-18-v1.js';
 
 export function createContextVoiceTutorItem(definition) {
   const context = voiceTutorModule(definition.module)?.context;
   if (!context) return null;
   return Object.freeze({
     id: definition.id,
-    revision: 1,
+    revision: definition.revision || 1,
     module: definition.module,
     prompt: definition.prompt,
     options: Object.freeze([...definition.options]),
@@ -18,9 +22,11 @@ export function createContextVoiceTutorItem(definition) {
       text: definition.evidence,
     }),
     errorType: 'unsupported_choice',
-    skill: Object.freeze({
-      ...context.skill,
-    }),
+    skill: Object.freeze(definition.skillId ? {
+      id: definition.skillId,
+      label: definition.skillId === 'ege.reading.gist'
+        ? 'Основная мысль текста' : 'Детальное понимание текста',
+    } : { ...context.skill }),
     rule: Object.freeze({
       id: context.rule.id,
       revision: 1,
@@ -42,10 +48,31 @@ export function createContextVoiceTutorItem(definition) {
       day1: Object.freeze({ id: `${definition.id}.recovery.day1.v1`, ...context.recoveryTasks.day1 }),
       day7: Object.freeze({ id: `${definition.id}.recovery.day7.v1`, ...context.recoveryTasks.day7 }),
     }),
+    ...(definition.origin ? { origin: Object.freeze({ ...definition.origin }) } : {}),
   });
 }
 
+const READING_PILOT_CONTEXT_SETS = [
+  ...READING_TASK10_SETS, ...READING_TASK11_SETS, ...READING_TASK12_18_SETS,
+].map((set) => {
+  const voice = readingSetForVoiceTutor(set);
+  return Object.freeze({
+    id: voice.id, revision: voice.revision, module: 'reading',
+    items: Object.freeze(voice.items.map((item) => Object.freeze({
+      ...item,
+      revision: voice.revision,
+      skillId: voice.skillId,
+      origin: Object.freeze({
+        setId: voice.id, setRevision: voice.revision, kind: voice.kind,
+        position: item.position,
+        ...(item.questionId ? { questionId: item.questionId } : {}),
+      }),
+    }))),
+  });
+});
+
 const CONTEXT_SET_DEFINITIONS = Object.freeze([
+  ...READING_PILOT_CONTEXT_SETS,
   Object.freeze({
     id: 'reading.exam.questions.gap-year', revision: 1, module: 'reading', items: Object.freeze([
       { id: 'reading.gap-year.before-university', prompt: 'What do many British students do before university?', options: ['They take exams again', 'They take a year off', 'They start full-time careers', 'They move abroad for good'], answer: 1, evidence: 'Many British students take a gap year before university.', explanation: 'Take a gap year означает взять год перерыва перед университетом.' },

@@ -22,6 +22,20 @@ function assistedMetadata(value){if(!value||typeof value!=='object'||Array.isArr
   if(typeof value.source==='string'&&/^[a-z0-9_]{3,80}$/u.test(value.source))result.source=value.source;
   if(Number.isInteger(value.hintsUsed)&&value.hintsUsed>=0&&value.hintsUsed<=100)result.hintsUsed=value.hintsUsed;
   return result}
+function readingMetadata(value){if(!value||typeof value!=='object'||Array.isArray(value)
+  ||value.readingProvenance!=='canonical'||!['reading_headings','reading_gaps','reading_detail'].includes(value.mode)
+  ||value.source!=='catalog'||typeof value.helpUsed!=='boolean'||!Number.isInteger(value.hintsUsed)||value.hintsUsed<0||value.hintsUsed>100
+  ||!/^reading-pilot-v1\.(?:task10|task11|task12_18)\.[a-z0-9-]{1,100}$/u.test(String(value.readingSetId||''))
+  ||!Number.isInteger(value.readingSetRevision)||value.readingSetRevision<1||value.readingSetRevision>10000
+  ||!['task10','task11','task12_18'].includes(value.readingKind)||!['B1','B2','B2+/C1'].includes(value.readingCefr)
+  ||!/^builtin:reading:(?:task10|task11|task12_18):(?:b1|b2|b2-plus-c1):v1$/u.test(String(value.readingContentRef||''))
+  ||!/^[A-Za-z0-9:._-]{8,180}$/u.test(String(value.readingAttemptId||''))||!['gist','detail'].includes(value.readingSlice))return null;
+  return {mode:value.mode,source:'catalog',helpUsed:value.helpUsed,hintsUsed:value.hintsUsed,
+    readingProvenance:'canonical',readingSetId:value.readingSetId,readingSetRevision:value.readingSetRevision,
+    readingKind:value.readingKind,readingCefr:value.readingCefr,readingContentRef:value.readingContentRef,
+    readingAttemptId:value.readingAttemptId,readingSlice:value.readingSlice,
+    ...(typeof value.readingIndependent==='boolean'?{readingIndependent:value.readingIndependent}:{})}}
+function completionMetadata(value,active){return active&&active.module==='reading'?readingMetadata(value):assistedMetadata(value)}
 function validPending(pending,active){if(!pending)return true;if(!pending||!['attempt','bind','advance'].includes(pending.phase)||!uuidValue(pending.advanceKey))return false;
   if(pending.phase==='attempt'){const payloadKeys=['activity','adaptiveExecutionClaim','durationMs','id','maxScore','module','score'];
     const keysValid=exactKeys(pending.payload,payloadKeys)||exactKeys(pending.payload,payloadKeys.concat('metadata'));
@@ -29,7 +43,7 @@ function validPending(pending,active){if(!pending)return true;if(!pending||!['at
     &&uuidValue(pending.payload.id)&&pending.payload.module===active.module&&pending.payload.activity===active.activityId&&pending.payload.adaptiveExecutionClaim===active.executionClaim
     &&Number.isFinite(pending.payload.score)&&Number.isFinite(pending.payload.maxScore)&&pending.payload.maxScore>0&&pending.payload.score>=0&&pending.payload.score<=pending.payload.maxScore
     &&Number.isInteger(pending.payload.durationMs)&&pending.payload.durationMs>=0
-    &&(!Object.hasOwn(pending.payload,'metadata')||Boolean(assistedMetadata(pending.payload.metadata)))}
+    &&(!Object.hasOwn(pending.payload,'metadata')||Boolean(completionMetadata(pending.payload.metadata,active)))}
   return exactKeys(pending,['advanceKey','attempt','phase'])&&validAttempt(pending.attempt,active)}
 function runtimeOwner(){try{const value=localStorage.getItem('eb_current');return typeof value==='string'&&value.length>0&&value.length<=64?value:null}catch(_){return null}}
 function validActive(active,savedAt){return !active||Boolean(active&&exactKeys(active,['activityId','blockId','claimExpiresAt','contentRef','evidenceContext','executionClaim','expectedRevision','module','pending','sessionId','startedAt'])
@@ -153,7 +167,9 @@ async function sendPending(state){
 export async function completeAdaptiveModuleActivity({module,activityId,score,maxScore,durationMs,metadata}={}){
   const state=read(),active=state&&state.active;
   if(!active||active.pending||active.module!==module||active.activityId!==activityId||['writing','speaking'].includes(module))return false;
-  const id=uuid();const maximum=Math.max(1,Number(maxScore)||1);const safeMetadata=assistedMetadata(metadata);
+  const safeMetadata=completionMetadata(metadata,active);
+  if(module==='reading'&&(!safeMetadata||safeMetadata.readingContentRef!==active.contentRef))return false;
+  const id=uuid();const maximum=Math.max(1,Number(maxScore)||1);
   active.pending={phase:'attempt',advanceKey:uuid(),payload:{
     id,module:active.module,activity:active.activityId,
     score:Math.min(maximum,Math.max(0,Number(score)||0)),maxScore:maximum,

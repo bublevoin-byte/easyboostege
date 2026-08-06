@@ -19,6 +19,11 @@ const WRITING_BLOCK = {
   ...BLOCK, id: 'asb_bbbbbbbbbbbbbbbb_01', module: 'writing', activityId: 'writing_37',
   contentRef: 'builtin:writing_37:emily-new-flat', launch: { kind: 'writing_task' },
 };
+const READING_BLOCK = {
+  ...BLOCK, id: 'asb_cccccccccccccccc_01', module: 'reading', activityId: 'reading_gaps',
+  contentRef: 'builtin:reading:task11:b1:v1',
+  launch: { kind: 'reading_mode', mode: 'task11', cefr: 'B1' },
+};
 
 function runtimeHarness() {
   const values = new Map();
@@ -52,7 +57,8 @@ function runtimeHarness() {
       let result = replays.get(replayId);
       if (!result) {
         if (path.endsWith('/start')) {
-          const startedBlock = body.blockId === WRITING_BLOCK.id ? WRITING_BLOCK : BLOCK;
+          const startedBlock = body.blockId === WRITING_BLOCK.id
+            ? WRITING_BLOCK : (body.blockId === READING_BLOCK.id ? READING_BLOCK : BLOCK);
           result = startRecoveryAttempt ? {
             block: startedBlock, launch: startedBlock.launch,
             evidenceContext: 'planned_practice', execution: { revision: 1 },
@@ -138,6 +144,30 @@ test('offline completion stays pending and is never displayed as a completed ada
   assert.equal(pending.lastResult, null, 'offline work must not look server-completed');
   assert.equal(harness.navigations.length, 0, 'the learner stays in the activity until confirmation');
   assert.equal(harness.requests.filter((item) => item.path === '/api/v1/module-attempts').length, 0);
+});
+
+test('Reading completion persists only when its canonical content reference matches the active launch', async () => {
+  const harness = runtimeHarness();
+  await harness.runtime.beginAdaptiveBlock({ id: SESSION_ID }, READING_BLOCK, { revision: 0 });
+  const metadata = {
+    mode: 'reading_gaps', source: 'catalog', helpUsed: false, hintsUsed: 0,
+    readingProvenance: 'canonical', readingSetId: 'reading-pilot-v1.task11.future-01',
+    readingSetRevision: 1, readingKind: 'task11', readingCefr: 'B1',
+    readingContentRef: READING_BLOCK.contentRef,
+    readingAttemptId: 'reading-training-01', readingSlice: 'detail',
+  };
+  assert.equal(await harness.runtime.completeAdaptiveModuleActivity({
+    module: 'reading', activityId: 'reading_gaps', score: 6, maxScore: 6,
+    metadata: { ...metadata, readingContentRef: 'builtin:reading:task11:b2:v1' },
+  }), false);
+  assert.equal(harness.runtime.adaptiveRuntimeSnapshot().active.pending, null);
+
+  await harness.runtime.completeAdaptiveModuleActivity({
+    module: 'reading', activityId: 'reading_gaps', score: 6, maxScore: 6,
+    durationMs: 10_000, metadata,
+  });
+  const request = harness.requests.find((item) => item.path === '/api/v1/module-attempts');
+  assert.deepEqual(JSON.parse(JSON.stringify(request.body.metadata)), metadata);
 });
 
 test('the exact queued attempt flushes before advance and returns to the plan only after confirmation', async () => {

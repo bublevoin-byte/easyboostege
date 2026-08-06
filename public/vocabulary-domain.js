@@ -89,10 +89,31 @@ function personalContexts(input) {
     const text = normalizedPersonalText(context?.text, 600);
     if (!text) return null;
     const source = 'reading';
-    return { text, source };
+    const readingProvenance = ['canonical', 'technical'].includes(context?.readingProvenance)
+      ? context.readingProvenance : null;
+    const readingSetId = normalizedPersonalText(context?.readingSetId, 140);
+    const readingSetRevision = Number.isInteger(context?.readingSetRevision)
+      && context.readingSetRevision >= 1 && context.readingSetRevision <= 10_000
+      ? context.readingSetRevision : null;
+    const readingKind = ['task10', 'task11', 'task12_18'].includes(context?.readingKind)
+      ? context.readingKind : null;
+    const position = normalizedPersonalText(context?.position, 20);
+    const questionId = normalizedPersonalText(context?.questionId, 180);
+    if (readingProvenance === 'canonical' && (!readingSetId || !readingSetRevision || !readingKind || !position)) {
+      return null;
+    }
+    return {
+      text, source,
+      ...(readingProvenance ? { readingProvenance } : {}),
+      ...(readingSetId ? { readingSetId } : {}),
+      ...(readingSetRevision ? { readingSetRevision } : {}),
+      ...(readingKind ? { readingKind } : {}),
+      ...(position ? { position } : {}),
+      ...(questionId ? { questionId } : {}),
+    };
   }).filter((value) => {
     if (!value) return false;
-    const key = value.text.toLocaleLowerCase('en');
+    const key = JSON.stringify({ ...value, text: value.text.toLocaleLowerCase('en') });
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -164,6 +185,24 @@ export function normalizePersonalVocabularyCards(input, { now = Date.now(), limi
   }
   return Array.from(cardsById.values())
     .filter((card) => card.contexts.length > 0)
+    .sort((left, right) => left.id.localeCompare(right.id, 'en'));
+}
+
+export function upsertReadingVocabularyCard(cards, input, { now = Date.now() } = {}) {
+  const context = input?.context;
+  if (!context || context.source !== 'reading'
+    || !['canonical', 'technical'].includes(context.readingProvenance)) {
+    throw new TypeError('Reading vocabulary context provenance is required');
+  }
+  const normalized = normalizePersonalVocabularyCards(cards, { now });
+  const id = personalVocabularyCardId(input?.word ?? input?.w);
+  const current = normalized.find((card) => card.id === id) || null;
+  const card = mergePersonalVocabularyCard(current, input, { now });
+  if (!card.contexts.some((item) => item.text === normalizedPersonalText(context.text, 600)
+    && item.readingProvenance === context.readingProvenance)) {
+    throw new TypeError('Reading vocabulary context is incomplete');
+  }
+  return normalized.filter((item) => item.id !== card.id).concat(card)
     .sort((left, right) => left.id.localeCompare(right.id, 'en'));
 }
 
