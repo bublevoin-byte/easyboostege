@@ -6,7 +6,7 @@
 import {registerRouteHook} from '../router.js';
 import {lPlayRaw,lStop} from '../tts.js';
 import {
-  S,SRV,TOKEN,WBTN,apiGet,apiMessage,apiPost,apiPostBinary,examModule,generateAiContent,save,
+  S,SRV,TOKEN,WBTN,apiGet,apiMessage,apiPost,apiPostBinary,generateAiContent,save,
   setTxt,spSt,spSync,speakingModule,toast,ui,wDeco,
 } from '../app.js';
 import {adaptiveRuntimeSnapshot,completeAdaptiveServerAttempt,openAdaptivePlan} from '../adaptive-session-runtime.js';
@@ -16,6 +16,7 @@ import {createSpeakingTask1BrowserFlow} from '../speaking-task1-runtime.js';
 import {createSpeakingTask2BrowserFlow} from '../speaking-task2-runtime.js';
 import {createSpeakingTask3BrowserFlow} from '../speaking-task3-runtime.js';
 import {createSpeakingTask4BrowserFlow} from '../speaking-task4-runtime.js';
+import {createSpeakingFullBrowserFlow} from '../speaking-full-runtime.js';
 import {SPEAKING_TASK1_CATALOG} from '../content/speaking/task1-v1.js';
 import {SPEAKING_TASK2_CATALOG} from '../content/speaking/task2-v1.js';
 import {SPEAKING_TASK3_CATALOG} from '../content/speaking/task3-v1.js';
@@ -78,7 +79,6 @@ function initSpeaking(){if(!S)return;var lock=adaptiveSpeakingLock();spStopAll()
 function spHub(){var area=document.getElementById('s9_area');if(!area)return;
   var lock=adaptiveSpeakingLock();if(lock&&launchAdaptiveSpeakingLock(lock))return;
   var r=spSt();var GA=0;function ga(){return 'animation:win .34s '+((GA++)*0.06)+'s cubic-bezier(.25,.75,.35,1) both;'}
-  var se=S.spkExam||{};
   var exCard='<button type="button" class="sq clk" onclick="spExam()" style="'+ga()+'position:relative;overflow:hidden;width:100%;border:0;text-align:left;font:inherit;border-radius:24px;padding:16px 18px;margin-bottom:12px;cursor:pointer;background:linear-gradient(150deg,#3A3532,#2B2B2B);box-shadow:0 14px 28px rgba(43,35,30,.32),inset 0 2px 3px rgba(255,255,255,.14),inset 0 -5px 10px rgba(0,0,0,.35);">'
     +'<svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;" viewBox="0 0 346 80" preserveAspectRatio="xMidYMid slice">'
     +'<g fill="rgba(255,255,255,.75)">'
@@ -91,7 +91,7 @@ function spHub(){var area=document.getElementById('s9_area');if(!area)return;
     +'</g></svg>'
     +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'
     +'<div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:15.5px;color:#fff;">Экзамен · устная часть</div>'
-    +'<div style="font-weight:600;font-size:12px;color:rgba(255,255,255,.62);margin-top:2px;">'+(se.n?('лучший результат: '+se.best+' из '+speakingModule.EXAM_MAX):'4 задания подряд, оценка ИИ')+'</div></div>'
+    +'<div style="font-weight:600;font-size:12px;color:rgba(255,255,255,.62);margin-top:2px;">'+(S.speakingFullSessionId?'есть незавершённая сессия · максимум 20':'4 задания подряд · максимум 20 · оценка позже')+'</div></div>'
     +'<span style="flex:none;background:linear-gradient(145deg,#FFC861,#F2683F);border-radius:14px;width:42px;height:42px;display:grid;place-items:center;box-shadow:0 6px 12px rgba(242,104,63,.4),inset 0 2px 3px rgba(255,255,255,.5);">'
     +'<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span></div></button>';
   area.innerHTML=exCard+[1,2,3,4].map(function(t){var c=SP_CONF[t];
@@ -528,140 +528,135 @@ function spVoiceSample(){if(!SP||!SP.sample)return;
   var parts=speakingModule.sentences(SP.sample).map(function(x){return {s:0,t:x}});
   try{lPlayRaw(parts)}catch(e){}}
 /* ---- этап 3: экзамен устной части целиком ---- */
-let SPE=null;
+let SPE=null,SPE_FLOW=null,SPE_TM=null,SPE_STARTING=false,SPE_PROMPT_SEQUENCE=0;
+function speFullDispose(){clearInterval(SPE_TM);SPE_TM=null;SPE_STARTING=false;SPE_PROMPT_SEQUENCE++;try{lStop()}catch(_){}if(SPE_FLOW){SPE_FLOW.dispose();SPE_FLOW=null}SPE=null}
+function speFullPointerInvalid(error){return Number(error&&error.status)===404
+  ||String(error&&error.code)==='SPEAKING_FULL_CATALOG_REVISION_MISMATCH'}
 function spExam(){var area=document.getElementById('s9_area');if(!area)return;spStopAll();SP=null;
   var lock=adaptiveSpeakingLock();if(lock){launchAdaptiveSpeakingLock(lock);return}
-  var st=S.spkExam||{};
   area.innerHTML='<div id="s9_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;">'+wDeco()
     +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#B54E2F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">КАК НА ЕГЭ</span>'
     +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:19px;color:#2B2B2B;margin-top:12px;">Устная часть целиком</div>'
-    +'<div style="font-weight:600;font-size:13.5px;color:#4A453E;line-height:1.6;margin-top:8px;">Чтение → вопросы → интервью → монолог, всё подряд с экзаменационными таймерами и без шпаргалок. Задания переключаются сами. В конце ИИ оценит каждую запись — максимум 20 баллов.</div>'
-    +(st.n?'<div style="margin-top:12px;font-weight:700;font-size:12.5px;color:#777163;">Попыток: '+st.n+' · последний: '+st.last+' из '+speakingModule.EXAM_MAX+' · лучший: '+st.best+' из '+speakingModule.EXAM_MAX+'</div>':'')
+    +'<div style="font-weight:600;font-size:13.5px;color:#4A453E;line-height:1.6;margin-top:8px;">Чтение → 4 прямых вопроса → 5 ответов интервью → монолог. Сервер закрепляет один вариант и ведёт по официальным таймерам. Аудио остаётся только на этом устройстве.</div>'
+    +'<div style="margin-top:12px;font-weight:700;font-size:12.5px;color:#777163;">Максимум: 20 баллов · Оценка пока недоступна</div>'
     +'</div>'
     +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
-    +spBtn('Начать экзамен','speStart()',true)
+    +spBtn(S.speakingFullSessionId?'Продолжить экзамен':'Начать экзамен','speStart()',true)
     +spBtn('← К заданиям','initSpeaking()')+'</div>';
   spAnim('win','.32s')}
-function speStart(){
-  S.spExIdx=(S.spExIdx||0);
-  var sets={};speakingModule.TASKS.forEach(function(t){sets[t]=speakingModule.select(spPool(t),S.spExIdx)});
-  S.spExIdx++;save();
-  SPE={stage:1,sets:sets,blobs:{},qi:0,t0:Date.now(),tm:null};
-  speStage()}
-function speStage(){var c=SP_CONF[SPE.stage];
-  if(c.prep){SPE.phase='prep';SPE.left=c.prep;speRender();
-    speTick(c.prep,function(){speRec()})}
-  else speRec()}
-async function speRec(){var c=SP_CONF[SPE.stage];
-  clearInterval(SPE.tm);
-  try{
-    var st=await navigator.mediaDevices.getUserMedia({audio:true});
-    var mime=spMime();
-    SPE.stream=st;SPE.chunks=[];SPE.rec=mime?new MediaRecorder(st,{mimeType:mime}):new MediaRecorder(st);
-    SPE.rec.ondataavailable=function(e){SPE.chunks.push(e.data)};
-    SPE.rec.start();
-  }catch(e){SPE.rec=null;try{toast('Нет доступа к микрофону — задание будет без записи')}catch(_){}}
-  SPE.phase='rec';SPE.left=c.rec;SPE.qi=0;speRender();
-  if(SPE.stage===3){try{lPlayRaw([{s:1,t:SPE.sets[3].qs[0]}])}catch(e){}}
-  speTick(c.rec,function(){SPE.stage===3?speNextQ():speEndStage()})}
-function speNextQ(){if(!SPE)return;
-  if(SPE.qi>=4){speEndStage();return}
-  SPE.qi++;SPE.left=SP_CONF[3].rec;speRender();
-  try{lPlayRaw([{s:1,t:SPE.sets[3].qs[SPE.qi]}])}catch(e){}
-  speTick(SP_CONF[3].rec,function(){SPE.qi>=4?speEndStage():speNextQ()})}
-function speEndStage(){if(!SPE)return;clearInterval(SPE.tm);try{lStop()}catch(e){}
-  var done=function(){if(!SPE)return;
-    if(SPE.stage<4){SPE.stage++;speStage()}else speFinish()};
-  if(SPE.rec&&SPE.rec.state!=='inactive'){
-    var stg=SPE.stage;
-    SPE.rec.onstop=function(){if(!SPE)return;
-      var tp=(SPE.rec&&SPE.rec.mimeType)||(SPE.chunks[0]&&SPE.chunks[0].type)||'';
-      SPE.blobs[stg]=tp?new Blob(SPE.chunks,{type:tp}):new Blob(SPE.chunks);
-      try{SPE.stream.getTracks().forEach(function(x){x.stop()})}catch(e){}
-      done()};
-    try{SPE.rec.stop()}catch(e){done()}}
-  else done()}
-function speTick(total,onEnd){clearInterval(SPE.tm);
-  SPE.tm=setInterval(function(){if(!SPE){return}
-    SPE.left--;setTxt('s9_timer',spFmt(SPE.left));
-    var b=document.getElementById('s9_tbar');if(b)b.style.width=Math.max(0,Math.round(SPE.left/total*100))+'%';
-    setTxt('s9_today','задание '+SPE.stage+' · '+spFmt(SPE.left));
-    if(SPE.left<=0){clearInterval(SPE.tm);onEnd()}},1000)}
-function speTaskBody(){var t=SPE.stage,set=SPE.sets[t];
-  if(t===1)return '<div style="font-weight:500;font-size:13.5px;line-height:1.7;color:#2B2B2B;margin-top:10px;">'+set.tx+'</div>';
-  if(t===2)return '<div style="margin-top:10px;background:#FAF6F1;border-radius:14px;padding:11px 13px;font-weight:600;font-size:13px;color:#4A453E;line-height:1.6;font-style:italic;">'+set.ad+'</div>'
-    +'<div style="margin-top:9px;font-weight:600;font-size:12.5px;color:#2B2B2B;">Задай прямые вопросы о:</div>'
-    +set.points.map(function(p,i){return '<div style="margin-top:5px;font-weight:700;font-size:13px;color:#C2421B;">'+(i+1)+'. '+p+'</div>'}).join('');
-  if(t===3)return '<div style="font-weight:600;font-size:12px;color:#777163;margin-top:10px;">Вопрос '+(SPE.qi+1)+' из 5</div>'
-    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:17px;color:#2B2B2B;line-height:1.5;margin-top:6px;">'+set.qs[SPE.qi]+'</div>'
-    +'<div style="margin-top:10px;"><button type="button" class="clk sq iconbtn" onclick="lPlayRaw([{s:1,t:SPE.sets[3].qs[SPE.qi]}])" style="display:inline-flex;align-items:center;gap:7px;background:#E3F1F5;border-radius:13px;padding:9px 14px;font-weight:800;font-size:12px;color:#317485;cursor:pointer;">🔊 Повторить вопрос</button></div>';
-  return '<div style="margin-top:10px;font-weight:700;font-size:13.5px;color:#2B2B2B;">Тема: '+set.topic+'</div>'
-    +set.ph.map(function(p){return '<div style="margin-top:8px;background:#FAF6F1;border-radius:14px;padding:10px 13px;font-weight:600;font-size:12.5px;color:#4A453E;font-style:italic;">'+p+'</div>'}).join('')
+async function speStart(){return speFullStart()}
+async function speFullStart(){var area=document.getElementById('s9_area');if(!area)return false;speFullDispose();
+  area.innerHTML='<div class="clayCard" role="status" aria-live="polite" style="padding:20px;text-align:center;font-weight:700;color:#777163;">Сервер закрепляет полный вариант…</div>';
+  SPE_FLOW=createSpeakingFullBrowserFlow({api:{post:function(path,body){return apiPost(path,body)},get:function(path){return apiGet(path)}}});
+  try{var session=null;
+    if(S.speakingFullSessionId){try{session=await SPE_FLOW.restoreSession(S.speakingFullSessionId)}catch(error){
+      if(!speFullPointerInvalid(error))throw error;delete S.speakingFullSessionId;save()}}
+    if(!session||session.status==='submitted')session=await SPE_FLOW.loadAssignment();
+    S.speakingFullSessionId=session.id;save();SPE=SPE_FLOW.state();
+    if(session.task&&session.task.taskType===4)await SPE_FLOW.prepareCurrentAssets();
+    SPE=SPE_FLOW.state();speRender();return true
+  }catch(error){speFullDispose();try{toast(apiMessage(error,'request'))}catch(_){}spExam();return false}}
+async function speFullMicCheck(btn){if(!SPE_FLOW)return false;if(btn)btn.disabled=true;try{await SPE_FLOW.checkMicrophone();SPE=SPE_FLOW.state();speRender();return true}
+  catch(error){if(btn)btn.disabled=false;try{toast(apiMessage(error,'request'))}catch(_){}SPE=SPE_FLOW.state();speRender();return false}}
+async function speFullBeginStage(){if(!SPE_FLOW)return false;var current=SPE_FLOW.state().session;
+  if(current.task.taskType===3&&current.phase==='ready')return speFullStartRecording();
+  try{await SPE_FLOW.beginStage();SPE=SPE_FLOW.state();
+    if(SPE.session.phase==='recording')return speFullStartRecording();speRender();return true}
+  catch(error){try{toast(apiMessage(error,'request'))}catch(_){}return false}}
+async function speFullStartRecording(){if(!SPE_FLOW||SPE_STARTING)return false;SPE_STARTING=true;try{
+    var promptSequence=++SPE_PROMPT_SEQUENCE,before=SPE_FLOW.state(),beforeSession=before.session;
+    var beforePosition=beforeSession.current?{taskType:beforeSession.current.taskType,responseNumber:beforeSession.current.responseNumber,phase:beforeSession.phase}:null;
+    if(beforeSession.task.taskType===4)await SPE_FLOW.prepareCurrentAssets();
+    if(beforeSession.task.taskType===3&&beforeSession.phase!=='recording'){
+      var question=beforeSession.task.questions[beforeSession.current.responseNumber-1];
+      try{await Promise.resolve(lPlayRaw([{s:1,t:question}]))}catch(_){}
+      if(!SPE_FLOW||promptSequence!==SPE_PROMPT_SEQUENCE)return false;var afterPrompt=SPE_FLOW.state().session;
+      if(afterPrompt.id!==beforeSession.id||afterPrompt.phase!==beforePosition.phase
+        ||afterPrompt.current.taskType!==beforePosition.taskType
+        ||afterPrompt.current.responseNumber!==beforePosition.responseNumber)return false}
+    await SPE_FLOW.startRecording();SPE=SPE_FLOW.state();
+    speRender();return true
+  }catch(error){SPE=SPE_FLOW?SPE_FLOW.state():null;try{toast(apiMessage(error,'request'))}catch(_){}if(SPE)speRender();return false}
+  finally{SPE_STARTING=false}}
+async function speFullStopRecording(){if(!SPE_FLOW)return false;try{await SPE_FLOW.stopRecording();SPE=SPE_FLOW.state();speRender();return true}
+  catch(error){try{toast(apiMessage(error,'request'))}catch(_){}return false}}
+async function speFullComplete(status,issue){if(!SPE_FLOW)return false;try{
+    SPE_PROMPT_SEQUENCE++;try{lStop()}catch(_){}
+    while(['ready','preparing'].includes(SPE_FLOW.state().session.phase))await SPE_FLOW.beginStage();
+    await SPE_FLOW.completeResponse(status,issue||null);SPE=SPE_FLOW.state();
+    if(SPE.session.task&&SPE.session.task.taskType===4)await SPE_FLOW.prepareCurrentAssets();
+    SPE=SPE_FLOW.state();speRender();return true
+  }catch(error){try{toast(apiMessage(error,'request'))}catch(_){}return false}}
+async function speFullTimeout(){if(!SPE_FLOW||!SPE)return;var state=SPE_FLOW.state();
+  if(state.session.phase==='preparing'){await speFullStartRecording();return}
+  if(state.session.phase==='recording'){
+    if(state.isRecording)await SPE_FLOW.stopRecording();
+    state=SPE_FLOW.state();await speFullComplete(state.recording?'completed':'technical_issue',state.recording?null:'recording_failed')}}
+function speFullArmTimer(){clearInterval(SPE_TM);SPE_TM=null;if(!SPE||!SPE.session.current||!SPE.session.current.stageDeadlineAt)return;
+  var update=function(){if(!SPE_FLOW)return;var current=SPE_FLOW.state().session.current;if(!current||!current.stageDeadlineAt)return;
+    var left=Math.max(0,Math.ceil((new Date(current.stageDeadlineAt).getTime()-Date.now())/1000));setTxt('s9_timer',spFmt(left));
+    setTxt('s9_today','задание '+current.taskType+' · ответ '+current.responseNumber+' · '+spFmt(left));
+    if(left<=0){clearInterval(SPE_TM);SPE_TM=null;void speFullTimeout()}};
+  update();if(SPE_TM===null)SPE_TM=setInterval(update,1000)}
+function speTaskBody(){var task=SPE.session.task,pos=SPE.session.current,safe=ui.escapeHtml;if(!task||!pos)return '';
+  if(task.taskType===1)return '<div style="font-weight:500;font-size:13.5px;line-height:1.7;color:#2B2B2B;margin-top:10px;">'+safe(task.text)+'</div>';
+  if(task.taskType===2){var preparing=SPE.session.phase==='preparing';var supportBody=preparing
+    ?task.supports.map(function(support,index){return '<div style="margin-top:5px;font-weight:700;font-size:13px;color:#C2421B;">'+(index+1)+'. '+safe(support)+'</div>'}).join('')
+    :'<div style="margin-top:5px;font-weight:700;font-size:13px;color:#C2421B;">'+safe(task.supports[pos.responseNumber-1])+'</div>';
+    return '<div style="margin-top:10px;background:#FAF6F1;border-radius:14px;padding:11px 13px;font-weight:600;font-size:13px;color:#4A453E;line-height:1.6;font-style:italic;">'+safe(task.advertisement)+'</div>'
+    +'<div style="margin-top:9px;font-weight:600;font-size:12.5px;color:#2B2B2B;">'+(preparing?'Подготовь четыре прямых вопроса:':'Задай прямой вопрос о пункте '+pos.responseNumber+':')+'</div>'+supportBody}
+  if(task.taskType===3){if(SPE.session.phase==='ready')return '<div role="status" style="margin-top:10px;padding:12px;border-radius:14px;background:#E3F1F5;color:#317485;font-weight:700;font-size:13px;line-height:1.5;">Вопрос прозвучит после запуска. Отдельного времени на подготовку нет; затем начнутся запись и 40 секунд ответа.</div>';
+    var question=task.questions[pos.responseNumber-1];return '<div style="font-weight:600;font-size:12px;color:#777163;margin-top:10px;">Вопрос '+pos.responseNumber+' из 5</div>'
+    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:17px;color:#2B2B2B;line-height:1.5;margin-top:6px;">'+safe(question)+'</div>'
+    }
+  return '<div style="margin-top:10px;font-weight:700;font-size:13.5px;color:#2B2B2B;">Проект: '+safe(task.projectTitle)+'</div>'
+    +'<img src="'+safe(task.photoPair.src)+'" alt="'+safe(task.photoPair.alt)+'" style="display:block;width:100%;height:auto;margin-top:10px;border-radius:16px;">'
     +'<div style="margin-top:9px;font-weight:600;font-size:12.5px;color:#2B2B2B;">План:</div>'
-    +set.plan.map(function(p,i){return '<div style="margin-top:4px;font-weight:600;font-size:12.5px;color:#4A453E;">'+(i+1)+'. '+p+'</div>'}).join('')}
-function speRender(){var area=document.getElementById('s9_area');if(!area||!SPE)return;
-  var c=SP_CONF[SPE.stage];
-  var chip=SPE.phase==='prep'
-    ?'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#A56000;background:#FFF4DE;padding:5px 10px;border-radius:20px;">ПОДГОТОВКА</span>'
-    :'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#A83226;background:#FDEDEA;padding:5px 10px;border-radius:20px;">● ЗАПИСЬ</span>';
+    +task.plan.map(function(point,index){return '<div style="margin-top:4px;font-weight:600;font-size:12.5px;color:#4A453E;">'+(index+1)+'. '+safe(point)+'</div>'}).join('')}
+function speFullProgress(){return SPE.session.progress.map(function(item){return '<span style="font-weight:800;font-size:11px;color:'+(item.completedResponses===item.responseCount?'#1D7F4A':'#777163')+';background:'+(item.completedResponses===item.responseCount?'#EAF7F0':'#F4EFE9')+';padding:6px 9px;border-radius:12px;">'+item.taskType+': '+item.completedResponses+'/'+item.responseCount+'</span>'}).join('')}
+function speFullControls(){var state=SPE,session=state.session,phase=session.phase;
+  if(phase==='ready_to_submit')return spBtn('Сдать устную часть','speFullSubmit()',true);
+  var mic='<button type="button" class="sq" onclick="speFullMicCheck(this)" style="'+WBTN+'min-height:44px;color:#317485;">'+(state.micCheck==='passed'?'✓ Микрофон готов':'Проверить микрофон')+'</button>';
+  var skip='<div style="height:10px;"></div>'+spBtn('Пропустить ответ','speFullComplete(\'skipped\')');
+  if(phase==='ready')return mic+'<div style="height:10px;"></div>'+spBtn(session.task.preparationSeconds&&session.current.responseNumber===1?'Начать подготовку':'Начать запись','speFullBeginStage()',true)
+    +skip+'<div style="height:10px;"></div>'+spBtn('Не могу записать','speFullComplete(\'technical_issue\',\'recording_failed\')');
+  if(phase==='preparing')return mic+'<div style="height:10px;"></div>'+spBtn('Готово — к записи','speFullStartRecording()',true)
+    +skip+'<div style="height:10px;"></div>'+spBtn('Техническая проблема','speFullComplete(\'technical_issue\',\'recording_failed\')');
+  if(state.recording)return '<div role="status" style="font-weight:800;font-size:13px;color:#1D7F4A;margin-bottom:10px;">Ответ записан локально · '+state.recording.durationSeconds+' сек.</div>'
+    +spBtn('Сохранить ответ','speFullComplete(\'completed\')',true)+'<div style="height:10px;"></div>'+spBtn('Перезаписать','speFullStartRecording()')+skip;
+  if(state.isRecording)return spBtn('Стоп — закончить запись','speFullStopRecording()',true);
+  return (state.recordingLostOnRestore?'<div role="alert" style="font-weight:700;font-size:12.5px;color:#A83226;margin-bottom:10px;">После перезагрузки локальная запись недоступна. Начни её заново или отметь проблему.</div>':'')
+    +mic+'<div style="height:10px;"></div>'+spBtn('Начать запись','speFullStartRecording()',true)
+    +skip+'<div style="height:10px;"></div>'+spBtn('Техническая проблема','speFullComplete(\'technical_issue\',\'recording_failed\')')}
+function speRender(){var area=document.getElementById('s9_area');if(!area||!SPE)return;var session=SPE.session;
+  if(session.status==='submitted'){speFullFinal(session.submission);return}
+  var current=session.current,phase=session.phase,chip=phase==='preparing'?'ПОДГОТОВКА':phase==='recording'?'● ЗАПИСЬ':'ГОТОВО';
   area.innerHTML='<div id="s9_card" class="clayCard" style="position:relative;overflow:hidden;padding:18px;margin-bottom:12px;">'+wDeco()
-    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'
-    +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#B54E2F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">ЭКЗАМЕН · '+SPE.stage+' ИЗ 4 · '+SP_CONF[SPE.stage].name.toUpperCase()+'</span>'+chip+'</div>'
-    +speTaskBody()
-    +'<div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-top:12px;">'
-    +'<span id="s9_timer" style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:34px;color:#2B2B2B;">'+spFmt(SPE.left)+'</span></div>'
-    +'<div style="margin-top:8px;height:7px;border-radius:5px;background:#F1EDE7;"><div id="s9_tbar" style="width:100%;height:100%;border-radius:5px;background:linear-gradient(90deg,#FFA570,#F2683F);"></div></div>'
-    +'</div>'
-    +(SPE.phase==='prep'
-      ?spBtn('Готово — к записи','clearInterval(SPE.tm);speRec()',true)
-      :(SPE.stage===3&&SPE.qi<4?spBtn('Следующий вопрос →','clearInterval(SPE.tm);speNextQ()',true):spBtn(SPE.stage<4?'Стоп — дальше':'Завершить экзамен','clearInterval(SPE.tm);speEndStage()',true)))}
-async function speFinish(){if(!SPE)return;clearInterval(SPE.tm);try{lStop()}catch(e){}
-  var sec=Math.floor((Date.now()-SPE.t0)/1000);
-  var area=document.getElementById('s9_area');
-  area.innerHTML='<div id="s9_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;text-align:center;">'+wDeco()
-    +'<div style="font-size:42px;">🎧</div>'
-    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:20px;color:#2B2B2B;margin-top:8px;">Экзамен записан!</div>'
-    +'<div id="spe_prog" style="font-weight:600;font-size:13px;color:#777163;margin-top:6px;">Начинаю проверку…</div>'
-    +'<div style="margin-top:12px;"><span style="display:inline-block;width:22px;height:22px;border-radius:50%;border:3px solid #F1EDE7;border-top-color:#F2683F;animation:lspin .8s linear infinite;"></span></div></div>';
-  var results={};
-  for(var t=1;t<=4;t++){
-    setTxt('spe_prog','Оцениваю задание '+t+' из 4…');
-    var d=null,bl=SPE.blobs[t];
-    if(bl){try{
-      var tr=await spSTT(bl);
-      if(speakingModule.isTranscriptUsable(tr)){
-        var response=await apiPost('/api/v1/ai/evaluate-speaking',{taskType:t,transcript:tr,assignment:spAssignment(t,SPE.sets[t])},true);
-        var p=response.review;
-        if(p&&typeof p.got!=='undefined')d={got:speakingModule.clampScore(p,t).got,verdict:String(p.verdict||''),fix:Array.isArray(p.fix)?p.fix:[],voiceTutor:response.voiceTutor}}
-    }catch(e){}}
-    if(!d)d={got:0,verdict:bl?'не удалось оценить запись':'записи нет',fix:[]};
-    results[t]=d;
-    S.spkScores=speakingModule.appendScore(S.spkScores,{t:t,g:d.got,m:SP_CONF[t].max,ts:Date.now()});
-  }
-  var got=speakingModule.examTotal(results);
-  S.spkExam=examModule.record(S.spkExam,got);
-  var r=spSt();r.t1.n++;r.t2.n++;r.t3.n++;r.t4.n++;
-  spSync();save();
-  var weak=speakingModule.weakestTask(results);
-  var rows=[1,2,3,4].map(function(t){var d=results[t];
-    return '<div style="padding:9px 2px;border-bottom:1px solid #F4EFE9;">'
-      +'<div style="display:flex;justify-content:space-between;gap:10px;font-weight:700;font-size:13px;color:#2B2B2B;"><span>'+SP_CONF[t].name+'</span><b style="flex:none;color:'+(d.got/SP_CONF[t].max>=0.7?'#1F8A50':(d.got>0?'#C77400':'#C0392B'))+';">'+d.got+' / '+SP_CONF[t].max+'</b></div>'
-      +(speakingModule.isExperimentalTask(t)?'<div class="ai-disclaimer" style="font-weight:600;font-size:11.5px;color:#777163;line-height:1.5;margin-top:4px;">'+ui.escapeHtml(ui.AI_DISCLAIMER)+'</div>':'')
-      +(d.verdict?'<div style="font-weight:600;font-size:12px;color:#777163;margin-top:3px;">'+d.verdict+'</div>':'')
-      +(d.fix||[]).map(function(f){return '<div style="font-weight:600;font-size:12px;color:#4A453E;margin-top:4px;line-height:1.5;">'+(f.wrong?'<s style="color:#A83226;">'+f.wrong+'</s> → ':'')+(f.right?'<b style="color:#1D7F4A;">'+f.right+'</b> ':'')+(f.note||'')+'</div>'}).join('')
-      +(d.voiceTutor&&d.got<SP_CONF[t].max?voiceTutorButton(d.voiceTutor):'')
-      +'</div>'}).join('');
-  SPE=null;
+    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">'
+    +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#B54E2F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">ЭКЗАМЕН · '+(current?current.taskType:4)+' ИЗ 4</span>'
+    +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#A56000;background:#FFF4DE;padding:5px 10px;border-radius:20px;">'+chip+'</span></div>'
+    +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;">'+speFullProgress()+'</div>'+speTaskBody()
+    +(current&&current.stageDeadlineAt?'<div id="s9_timer" aria-live="polite" style="text-align:center;font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:34px;color:#2B2B2B;margin-top:12px;">—</div>':'')
+    +'</div><div style="display:flex;flex-direction:column;gap:0;">'+speFullControls()+'</div>';
+  setTxt('s9_today',current?'задание '+current.taskType+' · ответ '+current.responseNumber:'готово к сдаче');speFullArmTimer()}
+async function speFullSubmit(){if(!SPE_FLOW)return false;try{var idempotencyKey=globalThis.crypto.randomUUID();
+    var result=await SPE_FLOW.submit(idempotencyKey);delete S.speakingFullSessionId;save();speFullFinal(result);return true
+  }catch(error){try{toast(apiMessage(error,'request'))}catch(_){}return false}}
+async function speFullPlay(taskType,responseNumber){if(!SPE_FLOW)return false;try{return await SPE_FLOW.playRecording(taskType,responseNumber)}
+  catch(error){try{toast(apiMessage(error,'request'))}catch(_){}return false}}
+function speFullFinal(result){var area=document.getElementById('s9_area');if(!area||!result)return;clearInterval(SPE_TM);SPE_TM=null;
+  var recordings=SPE_FLOW?SPE_FLOW.state().localRecordings:[];
+  var plan=result.improvementPlan||{available:false,message:'План улучшения пока недоступен.'};
+  var rows=result.taskResults.map(function(item){var local=recordings.filter(function(recording){return recording.taskType===item.taskType});return '<div style="padding:10px 2px;border-bottom:1px solid #F4EFE9;">'
+    +'<div style="display:flex;justify-content:space-between;gap:10px;font-weight:700;font-size:13px;color:#2B2B2B;"><span>'+SP_CONF[item.taskType].name+'</span><span>'+item.recordingStatus+' · '+Math.round(item.usedSeconds)+' сек. · максимум '+item.maximumScore+'</span></div>'
+    +local.map(function(recording){return '<button type="button" class="sq" onclick="speFullPlay('+recording.taskType+','+recording.responseNumber+')" style="min-width:44px;min-height:44px;margin-top:7px;border:0;border-radius:12px;background:#E3F1F5;color:#317485;font-weight:800;">▶ Ответ '+recording.responseNumber+'</button>'}).join('')+'</div>'}).join('');
   area.innerHTML='<div id="s9_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;">'+wDeco()
-    +'<div style="text-align:center;"><div style="font-size:42px;">'+examModule.badge(got,speakingModule.EXAM_MAX,speakingModule.BADGES)+'</div>'
-    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:26px;color:#2B2B2B;margin-top:8px;">'+got+' из '+speakingModule.EXAM_MAX+'</div>'
-    +'<div style="font-weight:600;font-size:13px;color:#777163;margin-top:4px;">Время: '+spFmt(sec)+'</div>'
-    +(got<speakingModule.EXAM_MAX?'<div style="font-weight:700;font-size:12.5px;color:#A56000;margin-top:6px;">Слабое место: '+SP_CONF[weak].name.toLowerCase()+' — потренируй отдельно</div>':'')
-    +'</div><div style="margin-top:12px;">'+rows+'</div></div>'
-    +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
-    +spBtn('Ещё раз','speStart()',true)
-    +spBtn('К заданиям','initSpeaking()')+'</div>';
-  spAnim('win','.32s');spGen()}
+    +'<div style="text-align:center;"><div style="font-size:42px;">✓</div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:21px;color:#2B2B2B;margin-top:8px;">Устная часть сдана</div>'
+    +'<div style="font-weight:800;font-size:15px;color:#4A453E;margin-top:7px;">Максимум: 20 баллов</div>'
+    +'<div style="font-weight:700;font-size:13px;color:#A56000;margin-top:5px;">Оценка пока недоступна</div>'
+    +'<div style="font-weight:600;font-size:12px;color:#777163;line-height:1.5;margin-top:5px;">Записи не отправлялись на сервер. Локальное прослушивание доступно только до ухода с этой страницы.</div></div>'
+    +'<div style="margin-top:12px;">'+rows+'</div><div role="status" style="margin-top:12px;padding:11px 13px;border-radius:14px;background:#FFF4DE;color:#8A641A;font-weight:700;font-size:12.5px;">План улучшения пока недоступен. '+ui.escapeHtml(plan.message||'')+'</div></div><div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
+    +spBtn('Новый вариант','speStart()',true)+spBtn('К заданиям','initSpeaking()')+'</div>';setTxt('s9_today','сдано · максимум 20');spAnim('win','.32s')}
 /* ---- фоновая ИИ-генерация комплектов говорения ---- */
 var SPGEN=false;
 async function spGen(){
@@ -682,7 +677,7 @@ async function spGen(){
 registerRouteHook(function(id){
   if(id!=='scr9'){
     if(SP){spStopAll();SP=null}spDisposeTask1Flow();spDisposeTask2Flow();spDisposeTask3Flow();spDisposeTask4Flow();
-    if(SPE){clearInterval(SPE.tm);try{if(SPE.rec&&SPE.rec.state!=='inactive')SPE.rec.stop()}catch(e){}try{SPE.stream&&SPE.stream.getTracks().forEach(function(x){x.stop()})}catch(e){}SPE=null}}});
+    speFullDispose()}});
 registerRouteHook(function(id){if(id==='scr9')initSpeaking()});
 
 /* Имена для обработчиков этого экрана: загрузчик кладёт их на window вместе с чанком. */
@@ -690,5 +685,5 @@ export {
   SP,SPE,
   initSpeaking,spCompleteTask1,spCompleteTask2Question,spCompleteTask3Answer,spCompleteTask4,spDeleteRecording,spEtalon,spEval,spExam,spFinish,spFlagTranscript,spMicCheck,spNextQ,
   launchSpeakingTask,spNextSet,spOpen,spPlay,spPlayTask2Question,spPlayTask3Answer,spPrep,spRec,spRestartAdaptive,spSample,spStopAll,spToggleSheet,spVoiceSample,
-  speEndStage,speNextQ,speRec,speStart,
+  speFullBeginStage,speFullComplete,speFullMicCheck,speFullPlay,speFullStartRecording,speFullStopRecording,speFullSubmit,speStart,
 };

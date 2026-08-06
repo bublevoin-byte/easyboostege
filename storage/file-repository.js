@@ -38,6 +38,15 @@ import {
   speakingTask4CompletionMetadata,
 } from '../speaking/task4-session.js';
 import { selectSpeakingTrainingAssignment } from '../speaking/training-session.js';
+import {
+  abandonFullSpeakingSession,
+  advanceFullSpeakingStage,
+  assertFullSpeakingSessionCompatibility,
+  completeFullSpeakingResponse,
+  createFullSpeakingSession,
+  selectFullSpeakingVariant,
+  submitFullSpeakingSession,
+} from '../speaking/full-section-session.js';
 import { isMonotonicAdaptiveRetentionRefresh } from '../adaptive-learning/retention.js';
 import { adaptiveRepeatExecutionMatches } from '../adaptive-learning/repeat-execution.js';
 import {
@@ -187,7 +196,7 @@ function sanitizeLegacyAdaptiveExecution(state, now = Date.now()) {
 
 export function createFileRepository(filePath) {
   let loaded = false;
-  let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], speaking_task1_sessions: [], speaking_task2_sessions: [], speaking_task3_sessions: [], speaking_task4_sessions: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, subscription_entitlements: {}, voice_tutor_sessions: [], voice_tutor_recoveries: [], voice_tutor_repeats: [], voice_tutor_repeat_attempts: [], voice_tutor_reports: [], rule_cards: [], payment_requests: {}, subscription_events: [], adaptive_learning_goals: [], adaptive_learning_profiles: {}, adaptive_learning_skill_estimates: {}, adaptive_learning_plan_revisions: [], adaptive_learning_sessions: [], adaptive_learning_execution_claims: [], adaptive_learning_session_events: [], adaptive_learning_session_mutations: [], adaptive_diagnostic_sessions: [], adaptive_diagnostic_start_claims: [], adaptive_diagnostic_responses: [] };
+  let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], speaking_task1_sessions: [], speaking_task2_sessions: [], speaking_task3_sessions: [], speaking_task4_sessions: [], speaking_full_sessions: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, subscription_entitlements: {}, voice_tutor_sessions: [], voice_tutor_recoveries: [], voice_tutor_repeats: [], voice_tutor_repeat_attempts: [], voice_tutor_reports: [], rule_cards: [], payment_requests: {}, subscription_events: [], adaptive_learning_goals: [], adaptive_learning_profiles: {}, adaptive_learning_skill_estimates: {}, adaptive_learning_plan_revisions: [], adaptive_learning_sessions: [], adaptive_learning_execution_claims: [], adaptive_learning_session_events: [], adaptive_learning_session_mutations: [], adaptive_diagnostic_sessions: [], adaptive_diagnostic_start_claims: [], adaptive_diagnostic_responses: [] };
   let writeQueue = Promise.resolve();
   let coordinatedMutationQueue = Promise.resolve();
   let paymentQueue = Promise.resolve();
@@ -212,6 +221,7 @@ export function createFileRepository(filePath) {
           speaking_task2_sessions: Array.isArray(parsed.speaking_task2_sessions) ? parsed.speaking_task2_sessions : [],
           speaking_task3_sessions: Array.isArray(parsed.speaking_task3_sessions) ? parsed.speaking_task3_sessions : [],
           speaking_task4_sessions: Array.isArray(parsed.speaking_task4_sessions) ? parsed.speaking_task4_sessions : [],
+          speaking_full_sessions: Array.isArray(parsed.speaking_full_sessions) ? parsed.speaking_full_sessions : [],
           generated_tasks: Array.isArray(parsed.generated_tasks) ? parsed.generated_tasks : [],
           task_bank: Array.isArray(parsed.task_bank) ? parsed.task_bank : [],
           task_deliveries: Array.isArray(parsed.task_deliveries) ? parsed.task_deliveries : [],
@@ -1667,6 +1677,83 @@ export function createFileRepository(filePath) {
       Object.assign(session, speakingTask4CompletionMetadata(completion, now), { status: 'completed' });
       await persist();
       return structuredClone(session);
+    });
+  }
+
+  async function assignFullSpeakingSession(username, { catalogs, now = new Date() }) {
+    return serializeSpeakingSessionMutation(async () => {
+      await load();
+      if (!state.users[username]) throw new Error('USER_NOT_FOUND');
+      const active = state.speaking_full_sessions.find((item) => item.username === username
+        && item.status === 'in_progress'
+        && item.catalog_id === catalogs[0]?.id
+        && Number(item.catalog_revision) === Number(catalogs[0]?.revision));
+      if (active) {
+        try {
+          assertFullSpeakingSessionCompatibility(active, catalogs);
+          return structuredClone(active);
+        } catch (error) {
+          if (error?.code !== 'SPEAKING_FULL_CATALOG_REVISION_MISMATCH') throw error;
+          abandonFullSpeakingSession(active);
+        }
+      }
+      const history = state.speaking_full_sessions.filter((item) => item.username === username
+        && item.catalog_id === catalogs[0]?.id
+        && Number(item.catalog_revision) === Number(catalogs[0]?.revision));
+      const selection = selectFullSpeakingVariant(catalogs, history);
+      const session = createFullSpeakingSession({
+        username, catalogs, variantIndex: selection.variantIndex,
+        selectionReason: selection.reason, now,
+      });
+      state.speaking_full_sessions.push(session);
+      await persist();
+      return structuredClone(session);
+    });
+  }
+
+  async function getFullSpeakingSession(username, id) {
+    await load();
+    const session = state.speaking_full_sessions.find((item) => item.username === username
+      && item.id === id && item.status !== 'abandoned');
+    return session ? structuredClone(session) : null;
+  }
+
+  async function advanceFullSpeakingSessionStage(username, id, { now = new Date() } = {}) {
+    return serializeSpeakingSessionMutation(async () => {
+      await load();
+      const session = state.speaking_full_sessions.find((item) => item.username === username && item.id === id);
+      if (!session) return null;
+      advanceFullSpeakingStage(session, now);
+      await persist();
+      return structuredClone(session);
+    });
+  }
+
+  async function completeFullSpeakingSessionResponse(username, id, completion, { now = new Date() } = {}) {
+    return serializeSpeakingSessionMutation(async () => {
+      await load();
+      const session = state.speaking_full_sessions.find((item) => item.username === username && item.id === id);
+      if (!session) return null;
+      if (Number(session.current_task) !== Number(completion.taskType)
+        || Number(session.current_response) !== Number(completion.responseNumber)) {
+        throw Object.assign(new Error('SPEAKING_FULL_RESPONSE_OUT_OF_SEQUENCE'), {
+          code: 'SPEAKING_FULL_RESPONSE_OUT_OF_SEQUENCE',
+        });
+      }
+      completeFullSpeakingResponse(session, completion, now);
+      await persist();
+      return structuredClone(session);
+    });
+  }
+
+  async function submitFullSpeakingSessionResult(username, id, idempotencyKey, { now = new Date() } = {}) {
+    return serializeSpeakingSessionMutation(async () => {
+      await load();
+      const session = state.speaking_full_sessions.find((item) => item.username === username && item.id === id);
+      if (!session) return null;
+      const result = submitFullSpeakingSession(session, idempotencyKey, now);
+      await persist();
+      return { session: structuredClone(session), result };
     });
   }
 
@@ -3263,6 +3350,9 @@ export function createFileRepository(filePath) {
       speaking_task4_sessions: state.speaking_task4_sessions
         .filter((item) => item.username === username)
         .map(({ username: owner, ...item }) => item),
+      speaking_full_sessions: state.speaking_full_sessions
+        .filter((item) => item.username === username)
+        .map(({ username: owner, submission_key, ...item }) => item),
       generated_tasks: state.generated_tasks.filter((item) => item.username === username).map(({ request_hash, username: owner, ...item }) => item),
       module_attempts: state.module_attempts.filter((item) => item.username === username),
       progress_summary: Object.values(state.progress_summary[username] || {}),
@@ -3332,6 +3422,7 @@ export function createFileRepository(filePath) {
       state.speaking_task2_sessions = state.speaking_task2_sessions.filter((item) => item.username !== username);
       state.speaking_task3_sessions = state.speaking_task3_sessions.filter((item) => item.username !== username);
       state.speaking_task4_sessions = state.speaking_task4_sessions.filter((item) => item.username !== username);
+      state.speaking_full_sessions = state.speaking_full_sessions.filter((item) => item.username !== username);
       state.generated_tasks = state.generated_tasks.filter((item) => item.username !== username);
       state.module_attempts = state.module_attempts.filter((item) => item.username !== username);
       delete state.progress_summary[username];
@@ -3479,6 +3570,11 @@ export function createFileRepository(filePath) {
     assignSpeakingTask4Session,
     getSpeakingTask4Session,
     completeSpeakingTask4Session,
+    assignFullSpeakingSession,
+    getFullSpeakingSession,
+    advanceFullSpeakingSessionStage,
+    completeFullSpeakingSessionResponse,
+    submitFullSpeakingSessionResult,
     getGeneratedTask,
     getSharedGeneratedTask,
     saveGeneratedTask,

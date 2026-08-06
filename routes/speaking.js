@@ -15,6 +15,7 @@ import { publicSpeakingTask1Session } from '../speaking/task1-session.js';
 import { publicSpeakingTask2Session } from '../speaking/task2-session.js';
 import { publicSpeakingTask3Session } from '../speaking/task3-session.js';
 import { publicSpeakingTask4Session } from '../speaking/task4-session.js';
+import { publicFullSpeakingSession } from '../speaking/full-section-session.js';
 
 const emptyBodySchema = z.object({}).strict();
 const sessionIdSchema = z.string().uuid();
@@ -41,6 +42,33 @@ const task4CompletionSchema = z.object({
   micCheck: z.enum(['passed', 'quiet', 'skipped']),
   localPlayback: z.boolean(),
   selfRating: z.enum(['weak', 'steady', 'strong']),
+}).strict();
+const fullResponseSchema = z.object({
+  taskType: z.number().int().min(1).max(4),
+  responseNumber: z.number().int().min(1).max(5),
+  responseStatus: z.enum(['completed', 'skipped', 'technical_issue']),
+  recordingDurationSeconds: z.number().finite().min(0).max(180),
+  micCheck: z.enum(['passed', 'quiet', 'skipped']),
+  localPlayback: z.literal(false),
+  technicalIssueCode: z.enum([
+    'microphone_denied', 'no_audio_track', 'recording_failed',
+    'silence', 'noise', 'clipping', 'other',
+  ]).optional(),
+}).strict().superRefine((value, context) => {
+  if (value.responseStatus === 'completed' && value.recordingDurationSeconds < 1) {
+    context.addIssue({ code: 'custom', message: 'A completed response needs a duration.' });
+  }
+  if (value.responseStatus !== 'completed' && value.recordingDurationSeconds !== 0) {
+    context.addIssue({ code: 'custom', message: 'An absent response has zero duration.' });
+  }
+  if ((value.responseStatus === 'technical_issue') !== Boolean(value.technicalIssueCode)) {
+    context.addIssue({ code: 'custom', message: 'Technical issue metadata is inconsistent.' });
+  }
+});
+const fullSubmissionSchema = z.object({
+  idempotencyKey: z.string().uuid().regex(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu,
+  ),
 }).strict();
 
 function validationError(req, res, message) {
@@ -169,6 +197,118 @@ export function createSpeakingRoutes({ authentication, access, db, now = () => n
     publicAssignment: speakingTask4PublicAssignment,
     publicSession: publicSpeakingTask4Session,
     mismatchCode: 'SPEAKING_TASK4_CATALOG_REVISION_MISMATCH',
+  });
+  const fullCatalogs = [
+    SPEAKING_TASK1_CATALOG, SPEAKING_TASK2_CATALOG,
+    SPEAKING_TASK3_CATALOG, SPEAKING_TASK4_CATALOG,
+  ];
+  const fullResponse = (session) => publicFullSpeakingSession(session, fullCatalogs);
+
+  function fullSessionError(req, res, error) {
+    if (error?.code === 'SPEAKING_FULL_CATALOG_REVISION_MISMATCH') {
+      res.status(409).json({ error: {
+        code: error.code,
+        message: 'Версии полного варианта больше не совместимы. Начни новый вариант.',
+        requestId: req.requestId,
+      } });
+      return true;
+    }
+    if (['SPEAKING_FULL_RESPONSE_INVALID', 'SPEAKING_FULL_SUBMISSION_INVALID'].includes(error?.code)) {
+      res.status(400).json({ error: {
+        code: error.code,
+        message: 'Метаданные полного устного раздела не прошли проверку.',
+        requestId: req.requestId,
+      } });
+      return true;
+    }
+    if (['SPEAKING_FULL_STAGE_INVALID', 'SPEAKING_FULL_RESPONSE_OUT_OF_SEQUENCE',
+      'SPEAKING_FULL_NOT_READY_TO_SUBMIT'].includes(error?.code)) {
+      res.status(409).json({ error: {
+        code: error.code,
+        message: 'Этапы полного устного раздела выполняются только в официальном порядке.',
+        requestId: req.requestId,
+      } });
+      return true;
+    }
+    return false;
+  }
+
+  router.post('/api/v1/speaking/full-sessions', auth, requireActiveSubscription, async (req, res, next) => {
+    const parsed = emptyBodySchema.safeParse(req.body || {});
+    if (!parsed.success) return validationError(req, res, 'Полный вариант назначает сервер.');
+    try {
+      res.setHeader('Cache-Control', 'no-store');
+      const session = await db.assignFullSpeakingSession(req.user, { catalogs: fullCatalogs, now: now() });
+      return res.status(201).json(fullResponse(session));
+    } catch (error) {
+      if (fullSessionError(req, res, error)) return undefined;
+      return next(error);
+    }
+  });
+
+  router.get('/api/v1/speaking/full-sessions/:sessionId', auth, requireActiveSubscription, async (req, res, next) => {
+    const sessionId = sessionIdSchema.safeParse(req.params.sessionId);
+    if (!sessionId.success) return validationError(req, res, 'Недопустимый идентификатор полного варианта.');
+    try {
+      res.setHeader('Cache-Control', 'no-store');
+      const session = await db.getFullSpeakingSession(req.user, sessionId.data);
+      if (!session) return res.status(404).json({ error: { code: 'SPEAKING_FULL_SESSION_NOT_FOUND', message: 'Полный вариант не найден.' } });
+      return res.json(fullResponse(session));
+    } catch (error) {
+      if (fullSessionError(req, res, error)) return undefined;
+      return next(error);
+    }
+  });
+
+  router.post('/api/v1/speaking/full-sessions/:sessionId/stage', auth, requireActiveSubscription, async (req, res, next) => {
+    const sessionId = sessionIdSchema.safeParse(req.params.sessionId);
+    if (!sessionId.success) return validationError(req, res, 'Недопустимый идентификатор полного варианта.');
+    if (!emptyBodySchema.safeParse(req.body || {}).success) return validationError(req, res, 'Этап выбирает сервер.');
+    try {
+      res.setHeader('Cache-Control', 'no-store');
+      const session = await db.advanceFullSpeakingSessionStage(req.user, sessionId.data, { now: now() });
+      if (!session) return res.status(404).json({ error: { code: 'SPEAKING_FULL_SESSION_NOT_FOUND', message: 'Полный вариант не найден.' } });
+      return res.json(fullResponse(session));
+    } catch (error) {
+      if (fullSessionError(req, res, error)) return undefined;
+      return next(error);
+    }
+  });
+
+  router.post('/api/v1/speaking/full-sessions/:sessionId/responses', auth, requireActiveSubscription, async (req, res, next) => {
+    const sessionId = sessionIdSchema.safeParse(req.params.sessionId);
+    if (!sessionId.success) return validationError(req, res, 'Недопустимый идентификатор полного варианта.');
+    const parsed = fullResponseSchema.safeParse(req.body);
+    if (!parsed.success) return validationError(req, res, 'Недопустимые метаданные ответа.');
+    try {
+      res.setHeader('Cache-Control', 'no-store');
+      const session = await db.completeFullSpeakingSessionResponse(
+        req.user, sessionId.data, parsed.data, { now: now() },
+      );
+      if (!session) return res.status(404).json({ error: { code: 'SPEAKING_FULL_SESSION_NOT_FOUND', message: 'Полный вариант не найден.' } });
+      return res.json(fullResponse(session));
+    } catch (error) {
+      if (fullSessionError(req, res, error)) return undefined;
+      return next(error);
+    }
+  });
+
+  router.post('/api/v1/speaking/full-sessions/:sessionId/submit', auth, requireActiveSubscription, async (req, res, next) => {
+    const sessionId = sessionIdSchema.safeParse(req.params.sessionId);
+    if (!sessionId.success) return validationError(req, res, 'Недопустимый идентификатор полного варианта.');
+    const parsed = fullSubmissionSchema.safeParse(req.body);
+    if (!parsed.success) return validationError(req, res, 'Недопустимый ключ сдачи.');
+    try {
+      res.setHeader('Cache-Control', 'no-store');
+      const submitted = await db.submitFullSpeakingSessionResult(
+        req.user, sessionId.data, parsed.data.idempotencyKey, { now: now() },
+      );
+      if (!submitted) return res.status(404).json({ error: { code: 'SPEAKING_FULL_SESSION_NOT_FOUND', message: 'Полный вариант не найден.' } });
+      return res.json(submitted.result);
+    } catch (error) {
+      if (fullSessionError(req, res, error)) return undefined;
+      return next(error);
+    }
   });
 
   registerAssignmentRoutes({

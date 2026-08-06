@@ -37,6 +37,15 @@ import {
   speakingTask4CompletionMetadata,
 } from '../speaking/task4-session.js';
 import { selectSpeakingTrainingAssignment } from '../speaking/training-session.js';
+import {
+  abandonFullSpeakingSession,
+  advanceFullSpeakingStage,
+  assertFullSpeakingSessionCompatibility,
+  completeFullSpeakingResponse,
+  createFullSpeakingSession,
+  selectFullSpeakingVariant,
+  submitFullSpeakingSession,
+} from '../speaking/full-section-session.js';
 import { isMonotonicAdaptiveRetentionRefresh } from '../adaptive-learning/retention.js';
 import { adaptiveRepeatExecutionMatches } from '../adaptive-learning/repeat-execution.js';
 import {
@@ -2020,6 +2029,139 @@ export function createPostgresRepository(connectionString, {
     } finally {
       client.release();
     }
+  }
+
+  async function assignFullSpeakingSession(username, { catalogs, now = new Date() }) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`speaking-full:${username}`]);
+      const active = await client.query(
+        `SELECT * FROM speaking_full_sessions
+         WHERE username = $1 AND status = 'in_progress' AND catalog_id = $2 AND catalog_revision = $3
+         ORDER BY assigned_at DESC LIMIT 1`,
+        [username, catalogs[0]?.id, catalogs[0]?.revision],
+      );
+      if (active.rowCount) {
+        try {
+          assertFullSpeakingSessionCompatibility(active.rows[0], catalogs);
+          await client.query('COMMIT');
+          return active.rows[0];
+        } catch (error) {
+          if (error?.code !== 'SPEAKING_FULL_CATALOG_REVISION_MISMATCH') throw error;
+          const abandoned = abandonFullSpeakingSession(active.rows[0]);
+          await client.query(
+            `UPDATE speaking_full_sessions
+             SET status = $3, phase = $4, stage_started_at = NULL, stage_deadline_at = NULL
+             WHERE username = $1 AND id = $2`,
+            [username, abandoned.id, abandoned.status, abandoned.phase],
+          );
+        }
+      }
+      const history = await client.query(
+        `SELECT * FROM speaking_full_sessions
+         WHERE username = $1 AND catalog_id = $2 AND catalog_revision = $3
+         ORDER BY assigned_at, id`,
+        [username, catalogs[0]?.id, catalogs[0]?.revision],
+      );
+      const selection = selectFullSpeakingVariant(catalogs, history.rows);
+      const session = createFullSpeakingSession({
+        username, catalogs, variantIndex: selection.variantIndex,
+        selectionReason: selection.reason, now,
+      });
+      const inserted = await client.query(
+        `INSERT INTO speaking_full_sessions
+         (id, username, mode, format_id, format_revision, catalog_id, catalog_revision,
+          variant_index, selection_reason, maximum_score, assignments, responses, status, phase,
+          current_task, current_response, assigned_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb,
+                 $13, $14, $15, $16, $17)
+         RETURNING *`,
+        [session.id, username, session.mode, session.format_id, session.format_revision,
+          session.catalog_id, session.catalog_revision, session.variant_index, session.selection_reason,
+          session.maximum_score, JSON.stringify(session.assignments), JSON.stringify(session.responses),
+          session.status, session.phase, session.current_task, session.current_response, session.assigned_at],
+      );
+      await client.query('COMMIT');
+      return inserted.rows[0];
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async function getFullSpeakingSession(username, id) {
+    const result = await pool.query(
+      `SELECT * FROM speaking_full_sessions
+       WHERE username = $1 AND id = $2 AND status <> 'abandoned'`,
+      [username, id],
+    );
+    return result.rows[0] || null;
+  }
+
+  async function mutateFullSpeakingSession(username, id, mutate) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const existing = await client.query(
+        'SELECT * FROM speaking_full_sessions WHERE username = $1 AND id = $2 FOR UPDATE',
+        [username, id],
+      );
+      if (!existing.rowCount) {
+        await client.query('COMMIT');
+        return null;
+      }
+      const session = existing.rows[0];
+      const value = mutate(session);
+      const updated = await client.query(
+        `UPDATE speaking_full_sessions
+         SET responses = $3::jsonb, status = $4, phase = $5, current_task = $6,
+             current_response = $7, stage_started_at = $8, stage_deadline_at = $9,
+             submitted_at = $10, submission_key = $11, submission_response = $12::jsonb
+         WHERE username = $1 AND id = $2
+         RETURNING *`,
+        [username, id, JSON.stringify(session.responses), session.status, session.phase,
+          session.current_task, session.current_response, session.stage_started_at,
+          session.stage_deadline_at, session.submitted_at, session.submission_key,
+          session.submission_response ? JSON.stringify(session.submission_response) : null],
+      );
+      await client.query('COMMIT');
+      return { session: updated.rows[0], value };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async function advanceFullSpeakingSessionStage(username, id, { now = new Date() } = {}) {
+    const mutation = await mutateFullSpeakingSession(
+      username, id, (session) => advanceFullSpeakingStage(session, now),
+    );
+    return mutation?.session || null;
+  }
+
+  async function completeFullSpeakingSessionResponse(username, id, completion, { now = new Date() } = {}) {
+    const mutation = await mutateFullSpeakingSession(username, id, (session) => {
+      if (Number(session.current_task) !== Number(completion.taskType)
+        || Number(session.current_response) !== Number(completion.responseNumber)) {
+        throw Object.assign(new Error('SPEAKING_FULL_RESPONSE_OUT_OF_SEQUENCE'), {
+          code: 'SPEAKING_FULL_RESPONSE_OUT_OF_SEQUENCE',
+        });
+      }
+      return completeFullSpeakingResponse(session, completion, now);
+    });
+    return mutation?.session || null;
+  }
+
+  async function submitFullSpeakingSessionResult(username, id, idempotencyKey, { now = new Date() } = {}) {
+    const mutation = await mutateFullSpeakingSession(
+      username, id, (session) => submitFullSpeakingSession(session, idempotencyKey, now),
+    );
+    return mutation ? { session: mutation.session, result: mutation.value } : null;
   }
 
   async function getGeneratedTask(username, requestHash) {
@@ -4145,7 +4287,7 @@ export function createPostgresRepository(connectionString, {
   }
 
   async function exportUserData(username) {
-    const [account, progress, privacyConsent, subscriptionEvents, subscriptionEntitlements, voiceTutorSessions, voiceTutorRecoveries, voiceTutorRepeats, voiceTutorRepeatAttempts, voiceTutorReports, ruleCards, paymentRequests, writingAttempts, speakingAttempts, speakingTask1Sessions, speakingTask2Sessions, speakingTask3Sessions, speakingTask4Sessions, generatedTasks, moduleAttempts, progressSummary, wordProgress, errorBank, adaptiveGoals, adaptiveSnapshot, adaptivePlanRevisions, adaptiveSessions, adaptiveSessionExecutionEvents, adaptiveDiagnosticSessions, adaptiveDiagnosticResponses, aiRequests, auditLog] = await Promise.all([
+    const [account, progress, privacyConsent, subscriptionEvents, subscriptionEntitlements, voiceTutorSessions, voiceTutorRecoveries, voiceTutorRepeats, voiceTutorRepeatAttempts, voiceTutorReports, ruleCards, paymentRequests, writingAttempts, speakingAttempts, speakingTask1Sessions, speakingTask2Sessions, speakingTask3Sessions, speakingTask4Sessions, speakingFullSessions, generatedTasks, moduleAttempts, progressSummary, wordProgress, errorBank, adaptiveGoals, adaptiveSnapshot, adaptivePlanRevisions, adaptiveSessions, adaptiveSessionExecutionEvents, adaptiveDiagnosticSessions, adaptiveDiagnosticResponses, aiRequests, auditLog] = await Promise.all([
       pool.query('SELECT username, telegram_id, role, trial_used, subscription_until, created_at, updated_at FROM users WHERE username = $1', [username]),
       pool.query('SELECT data, updated_at FROM user_progress WHERE username = $1', [username]),
       pool.query('SELECT text_processing, voice_processing, policy_version, text_consented_at, voice_consented_at, updated_at FROM privacy_consents WHERE username = $1', [username]),
@@ -4192,6 +4334,11 @@ export function createPostgresRepository(connectionString, {
                          status, recording_duration_seconds, mic_check, local_playback, self_rating,
                          assigned_at, completed_at, due_at
                   FROM speaking_task4_sessions WHERE username = $1 ORDER BY assigned_at, id`, [username]),
+      pool.query(`SELECT id, mode, format_id, format_revision, catalog_id, catalog_revision,
+                         variant_index, selection_reason, maximum_score, assignments, responses,
+                         status, phase, current_task, current_response, stage_started_at,
+                         stage_deadline_at, assigned_at, submitted_at, submission_response
+                  FROM speaking_full_sessions WHERE username = $1 ORDER BY assigned_at, id`, [username]),
       pool.query('SELECT id, operation, request, result, provider, prompt_version, created_at FROM generated_tasks WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, module, activity, score, max_score, duration_ms, metadata, evidence_quality, created_at FROM module_attempts WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT module, attempt_count, best_score, best_max_score, total_duration_ms, last_attempt_at, updated_at FROM progress_summary WHERE username = $1 ORDER BY module', [username]),
@@ -4246,6 +4393,7 @@ export function createPostgresRepository(connectionString, {
       speaking_task2_sessions: speakingTask2Sessions.rows,
       speaking_task3_sessions: speakingTask3Sessions.rows,
       speaking_task4_sessions: speakingTask4Sessions.rows,
+      speaking_full_sessions: speakingFullSessions.rows,
       generated_tasks: generatedTasks.rows,
       module_attempts: moduleAttempts.rows,
       progress_summary: progressSummary.rows,
@@ -4401,6 +4549,11 @@ export function createPostgresRepository(connectionString, {
     assignSpeakingTask4Session,
     getSpeakingTask4Session,
     completeSpeakingTask4Session,
+    assignFullSpeakingSession,
+    getFullSpeakingSession,
+    advanceFullSpeakingSessionStage,
+    completeFullSpeakingSessionResponse,
+    submitFullSpeakingSessionResult,
     getGeneratedTask,
     getSharedGeneratedTask,
     saveGeneratedTask,

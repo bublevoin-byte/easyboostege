@@ -309,6 +309,123 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { description: Session not found for this learner }
+  /api/v1/speaking/full-sessions:
+    post:
+      summary: Assign or resume one server-owned full EGE Speaking section
+      description: Pins one compatible revision of tasks 1–4 in official order with maxima 1+4+5+10=20. The client cannot choose assignments, and no answer, rubric, transcript, audio, score or analysis is returned.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false }
+      responses:
+        '201':
+          description: Owner-bound full-section session at its exact current response
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SpeakingFullSession' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: The pinned catalog revision is no longer compatible and a safe restart is required }
+  /api/v1/speaking/full-sessions/{sessionId}:
+    get:
+      summary: Restore the current learner's exact full Speaking position
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Owner-bound current assignment, server deadline and metadata-only progress
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SpeakingFullSession' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Full section not found for this learner }
+        '409': { description: The pinned catalog revision is no longer compatible and a safe restart is required }
+  /api/v1/speaking/full-sessions/{sessionId}/stage:
+    post:
+      summary: Advance the server-owned preparation or recording stage
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false }
+      responses:
+        '200':
+          description: Exact stage with a new server timestamp and deadline
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SpeakingFullSession' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Full section not found for this learner }
+        '409': { description: Stage is out of sequence or the pinned revision is incompatible }
+  /api/v1/speaking/full-sessions/{sessionId}/responses:
+    post:
+      summary: Complete the exact current full-section response with bounded metadata
+      description: Accepts all 11 positions in official 1+4+5+1 order. Audio remains local; the server stores only status, duration, mic status, a false local-playback marker and an optional technical issue code.
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SpeakingFullResponseCompletion' }
+      responses:
+        '200':
+          description: Updated metadata-only progress and next server-owned assignment
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SpeakingFullSession' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Full section not found for this learner }
+        '409': { description: Response is out of sequence or the pinned revision is incompatible }
+  /api/v1/speaking/full-sessions/{sessionId}/submit:
+    post:
+      summary: Submit the completed full Speaking section idempotently
+      description: Returns a canonical result for every retry. Until tickets 06–07 connect and calibrate assessment, maximumScore is 20 while earnedScore remains null and no improvement analysis is invented.
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [idempotencyKey]
+              properties:
+                idempotencyKey: { type: string, format: uuid }
+              additionalProperties: false
+      responses:
+        '200':
+          description: Canonical honest submission result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SpeakingFullSubmission' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Full section not found for this learner }
+        '409': { description: One or more of the 11 response positions are still pending }
   /api/v1/me:
     get:
       summary: Current user, base subscription, Premium entitlements, remaining voice minutes and server-projected feature flags
@@ -1911,6 +2028,134 @@ components:
             reason: { type: string, enum: [deferred_to_tickets_06_07] }
             message: { type: string }
           additionalProperties: false
+      additionalProperties: false
+    SpeakingFullAssessmentUnavailable:
+      type: object
+      required: [available, reason, message]
+      properties:
+        available: { type: boolean, enum: [false] }
+        reason: { type: string, enum: [deferred_to_tickets_06_07] }
+        message: { type: string, minLength: 1, maxLength: 300 }
+      additionalProperties: false
+    SpeakingFullProgressResponse:
+      type: object
+      required: [responseNumber, status]
+      properties:
+        responseNumber: { type: integer, minimum: 1, maximum: 5 }
+        status: { type: string, enum: [pending, completed, skipped, technical_issue] }
+        recordingDurationSeconds: { type: number, minimum: 0, maximum: 180 }
+        micCheck: { type: string, enum: [passed, quiet, skipped] }
+        localPlayback: { type: boolean, enum: [false] }
+        technicalIssueCode: { type: string, enum: [microphone_denied, no_audio_track, recording_failed, response_timeout, silence, noise, clipping, other] }
+        completedAt: { type: string, format: date-time }
+      additionalProperties: false
+    SpeakingFullProgressTask:
+      type: object
+      required: [taskType, maximumScore, responseCount, completedResponses, status, responses]
+      properties:
+        taskType: { type: integer, minimum: 1, maximum: 4 }
+        maximumScore: { type: integer, minimum: 1, maximum: 10 }
+        responseCount: { type: integer, minimum: 1, maximum: 5 }
+        completedResponses: { type: integer, minimum: 0, maximum: 5 }
+        status: { type: string, enum: [pending, in_progress, completed, skipped, technical_issue] }
+        responses:
+          type: array
+          minItems: 1
+          maxItems: 5
+          items: { $ref: '#/components/schemas/SpeakingFullProgressResponse' }
+      additionalProperties: false
+    SpeakingFullResponseCompletion:
+      type: object
+      required: [taskType, responseNumber, responseStatus, recordingDurationSeconds, micCheck, localPlayback]
+      properties:
+        taskType: { type: integer, minimum: 1, maximum: 4 }
+        responseNumber: { type: integer, minimum: 1, maximum: 5 }
+        responseStatus: { type: string, enum: [completed, skipped, technical_issue] }
+        recordingDurationSeconds: { type: number, minimum: 0, maximum: 180 }
+        micCheck: { type: string, enum: [passed, quiet, skipped] }
+        localPlayback: { type: boolean, enum: [false] }
+        technicalIssueCode: { type: string, enum: [microphone_denied, no_audio_track, recording_failed, silence, noise, clipping, other] }
+      additionalProperties: false
+    SpeakingFullTaskResult:
+      type: object
+      required: [taskType, maximumScore, earnedScore, recordingStatus, usedSeconds]
+      properties:
+        taskType: { type: integer, minimum: 1, maximum: 4 }
+        maximumScore: { type: integer, minimum: 1, maximum: 10 }
+        earnedScore: { type: integer, nullable: true, enum: [null] }
+        recordingStatus: { type: string, enum: [completed, skipped, technical_issue] }
+        usedSeconds: { type: number, minimum: 0, maximum: 200 }
+      additionalProperties: false
+    SpeakingFullSubmission:
+      type: object
+      required: [status, maximumScore, earnedScore, assessment, taskResults, improvementPlan, submittedAt]
+      properties:
+        status: { type: string, enum: [submitted] }
+        maximumScore: { type: integer, enum: [20] }
+        earnedScore: { type: integer, nullable: true, enum: [null] }
+        assessment: { $ref: '#/components/schemas/SpeakingFullAssessmentUnavailable' }
+        taskResults:
+          type: array
+          minItems: 4
+          maxItems: 4
+          items: { $ref: '#/components/schemas/SpeakingFullTaskResult' }
+        improvementPlan:
+          allOf:
+            - $ref: '#/components/schemas/SpeakingFullAssessmentUnavailable'
+        submittedAt: { type: string, format: date-time }
+      additionalProperties: false
+    SpeakingFullSession:
+      type: object
+      required: [id, mode, format, catalog, selectionReason, status, phase, current, task, progress, maximumScore, earnedScore, assessment, assignedAt, submittedAt]
+      properties:
+        id: { type: string, format: uuid }
+        mode: { type: string, enum: [full_section] }
+        format:
+          type: object
+          required: [id, revision, source]
+          properties:
+            id: { type: string, enum: [ege-english-speaking-2026] }
+            revision: { type: integer, enum: [1] }
+            source: { type: string }
+          additionalProperties: false
+        catalog:
+          type: object
+          required: [id, revision]
+          properties:
+            id: { type: string, enum: [speaking-pilot-v1] }
+            revision: { type: integer, enum: [1] }
+          additionalProperties: false
+        selectionReason: { type: string, enum: [unseen, old] }
+        status: { type: string, enum: [in_progress, submitted] }
+        phase: { type: string, enum: [ready, preparing, recording, ready_to_submit, submitted] }
+        current:
+          type: object
+          nullable: true
+          required: [taskType, responseNumber, stageStartedAt, stageDeadlineAt]
+          properties:
+            taskType: { type: integer, minimum: 1, maximum: 4 }
+            responseNumber: { type: integer, minimum: 1, maximum: 5 }
+            stageStartedAt: { type: string, format: date-time, nullable: true }
+            stageDeadlineAt: { type: string, format: date-time, nullable: true }
+          additionalProperties: false
+        task:
+          nullable: true
+          oneOf:
+            - $ref: '#/components/schemas/SpeakingTask1Task'
+            - $ref: '#/components/schemas/SpeakingTask2Task'
+            - $ref: '#/components/schemas/SpeakingTask3Task'
+            - $ref: '#/components/schemas/SpeakingTask4Task'
+        progress:
+          type: array
+          minItems: 4
+          maxItems: 4
+          items: { $ref: '#/components/schemas/SpeakingFullProgressTask' }
+        maximumScore: { type: integer, enum: [20] }
+        earnedScore: { type: integer, nullable: true, enum: [null] }
+        assessment: { $ref: '#/components/schemas/SpeakingFullAssessmentUnavailable' }
+        assignedAt: { type: string, format: date-time }
+        submittedAt: { type: string, format: date-time, nullable: true }
+        submission: { $ref: '#/components/schemas/SpeakingFullSubmission' }
       additionalProperties: false
     ReadingReport:
       type: object

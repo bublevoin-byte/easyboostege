@@ -41,6 +41,11 @@ test('voice tutor trigger is a Premium-only real button with bounded data attrib
 });
 
 test('writing and speaking reviews mount the shared tutor and keep only server-issued pointers in the DOM', () => {
+  const fullSpeakingSource = speakingSource.slice(
+    speakingSource.indexOf('function spExam'),
+    speakingSource.indexOf('/* ---- фоновая ИИ-генерация комплектов говорения ---- */'),
+  );
+
   assert.match(writingSource, /import \{voiceTutorButton\} from '\.\.\/voice-tutor\.js'/u);
   assert.match(writingSource, /renderReview\(d,response\.evaluationScope,response\.voiceTutor\)/u);
   assert.match(writingSource, /voiceTutorButton\(voiceTutor\)/u);
@@ -48,7 +53,7 @@ test('writing and speaking reviews mount the shared tutor and keep only server-i
   assert.match(speakingSource, /import \{voiceTutorButton\} from '\.\.\/voice-tutor\.js'/u);
   assert.match(speakingSource, /spShowEval\(d,tr,response\.voiceTutor\)/u);
   assert.match(speakingSource, /voiceTutorButton\(voiceTutor\)/u);
-  assert.match(speakingSource, /voiceTutor:response\.voiceTutor/u);
+  assert.doesNotMatch(fullSpeakingSource, /(?:evaluate-speaking|spSTT\(|voiceTutorButton\()/u);
 
   for (const screenSource of [writingSource, speakingSource]) {
     assert.doesNotMatch(screenSource, /voiceTutorButton\([^)]*(?:answer|transcript|review)/u);

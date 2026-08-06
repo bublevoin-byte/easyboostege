@@ -77,6 +77,11 @@ export const completeSpeakingTask3Answer = (...args) => repository.completeSpeak
 export const assignSpeakingTask4Session = (...args) => repository.assignSpeakingTask4Session(...args);
 export const getSpeakingTask4Session = (...args) => repository.getSpeakingTask4Session(...args);
 export const completeSpeakingTask4Session = (...args) => repository.completeSpeakingTask4Session(...args);
+export const assignFullSpeakingSession = (...args) => repository.assignFullSpeakingSession(...args);
+export const getFullSpeakingSession = (...args) => repository.getFullSpeakingSession(...args);
+export const advanceFullSpeakingSessionStage = (...args) => repository.advanceFullSpeakingSessionStage(...args);
+export const completeFullSpeakingSessionResponse = (...args) => repository.completeFullSpeakingSessionResponse(...args);
+export const submitFullSpeakingSessionResult = (...args) => repository.submitFullSpeakingSessionResult(...args);
 export const getGeneratedTask = (...args) => repository.getGeneratedTask(...args);
 export const getSharedGeneratedTask = (...args) => repository.getSharedGeneratedTask(...args);
 export const saveGeneratedTask = (...args) => repository.saveGeneratedTask(...args);

@@ -72,6 +72,23 @@ test('real Speaking screen path posts task 1 completion metadata and renders an 
         dispose() {},
       };
     },
+    createSpeakingFullBrowserFlow() {
+      const fullSession = {
+        id: '75500000-0000-4000-8000-000000000001', status: 'in_progress', phase: 'ready',
+        current: { taskType: 1, responseNumber: 1 }, task: session.task,
+        progress: [
+          { taskType: 1, completedResponses: 0, responseCount: 1 },
+          { taskType: 2, completedResponses: 0, responseCount: 4 },
+          { taskType: 3, completedResponses: 0, responseCount: 5 },
+          { taskType: 4, completedResponses: 0, responseCount: 1 },
+        ],
+      };
+      return {
+        async loadAssignment() { return fullSession; },
+        state() { return { session: fullSession, micCheck: 'skipped', recording: null, isRecording: false }; },
+        dispose() {},
+      };
+    },
     createSpeakingTask2BrowserFlow() { throw new Error('task 2 not used'); },
     createSpeakingTask3BrowserFlow() { throw new Error('task 3 not used'); },
     setInterval: () => 1, clearInterval() {}, setTimeout: () => 1,
@@ -102,7 +119,7 @@ test('real Speaking screen path posts task 1 completion metadata and renders an 
   assert.doesNotMatch(area.innerHTML, /Оценить с ИИ/u);
   assert.equal(screen.getState().task1Completed, true);
 
-  screen.speStart();
-  assert.match(screen.getExamState().sets[1].tx, /Libraries are changing fast/u);
-  assert.doesNotMatch(screen.getExamState().sets[1].tx, /Full-exam fallback/u);
+  await screen.speStart();
+  assert.match(screen.getExamState().session.task.text, /server-owned reading text/u);
+  assert.doesNotMatch(screen.getExamState().session.task.text, /Full-exam fallback/u);
 });
