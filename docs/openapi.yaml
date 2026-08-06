@@ -248,6 +248,67 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { description: Session not found for this learner }
         '409': { description: The learner skipped the current answer or the stored catalog revision is incompatible }
+  /api/v1/speaking/task-4/sessions:
+    post:
+      summary: Assign one server-owned Speaking task 4 photo project to the current learner
+      description: Selects from the validated 60-item original photo-pair catalog under the EGE-2026 150-second preparation and 180-second response contract.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false }
+      responses:
+        '201':
+          description: Owner-bound task 4 session with a safe local photo-pair reference and four plan points
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SpeakingTask4Session' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/speaking/task-4/sessions/{sessionId}:
+    get:
+      summary: Restore the current learner's Speaking task 4 session
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The owner-bound photo project and safe practice metadata
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SpeakingTask4Session' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Session not found for this learner }
+        '409': { description: The stored session uses an incompatible catalog revision and must be restarted safely }
+  /api/v1/speaking/task-4/sessions/{sessionId}/complete:
+    post:
+      summary: Complete a Speaking task 4 session with bounded local-practice metadata
+      description: Stores duration, microphone-check status, local-playback confirmation and self-rating only. Binary audio stays in the browser and automated assessment remains deferred.
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SpeakingTask4Completion' }
+      responses:
+        '200':
+          description: Completed owner-bound session; retries return canonical stored metadata
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SpeakingTask4Session' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Session not found for this learner }
   /api/v1/me:
     get:
       summary: Current user, base subscription, Premium entitlements, remaining voice minutes and server-projected feature flags
@@ -1764,6 +1825,84 @@ components:
           items: { $ref: '#/components/schemas/SpeakingTask3Answer' }
         assignedAt: { type: string, format: date-time }
         completedAt: { type: string, format: date-time, nullable: true }
+        assessment:
+          type: object
+          required: [available, reason, message]
+          properties:
+            available: { type: boolean, enum: [false] }
+            reason: { type: string, enum: [deferred_to_tickets_06_07] }
+            message: { type: string }
+          additionalProperties: false
+      additionalProperties: false
+    SpeakingTask4Task:
+      type: object
+      required: [id, revision, taskType, cefr, topic, projectTitle, preparationSeconds, responseSeconds, maxScore, instruction, photoPair, plan]
+      properties:
+        id: { type: string, minLength: 1, maxLength: 140 }
+        revision: { type: integer, enum: [1] }
+        taskType: { type: integer, enum: [4] }
+        cefr: { type: string, enum: [B1, B2, B2+/C1] }
+        topic: { type: string, minLength: 3, maxLength: 100 }
+        projectTitle: { type: string, minLength: 8, maxLength: 120 }
+        preparationSeconds: { type: integer, enum: [150] }
+        responseSeconds: { type: integer, enum: [180] }
+        maxScore: { type: integer, enum: [10] }
+        instruction: { type: string, minLength: 1, maxLength: 500 }
+        photoPair:
+          type: object
+          required: [assetId, src, alt, panels]
+          properties:
+            assetId: { type: string, minLength: 1, maxLength: 140 }
+            src: { type: string, pattern: '^/assets/speaking/task4-v1/[a-z0-9-]+\.png$' }
+            alt: { type: string, minLength: 20, maxLength: 260 }
+            panels:
+              type: array
+              minItems: 2
+              maxItems: 2
+              items:
+                type: object
+                required: [number, alt]
+                properties:
+                  number: { type: integer, enum: [1, 2] }
+                  alt: { type: string, minLength: 15, maxLength: 180 }
+                additionalProperties: false
+          additionalProperties: false
+        plan:
+          type: array
+          minItems: 4
+          maxItems: 4
+          items: { type: string, minLength: 30, maxLength: 220 }
+      additionalProperties: false
+    SpeakingTask4Completion:
+      type: object
+      required: [recordingDurationSeconds, micCheck, localPlayback, selfRating]
+      properties:
+        recordingDurationSeconds: { type: number, minimum: 1, maximum: 180 }
+        micCheck: { type: string, enum: [passed, quiet, skipped] }
+        localPlayback: { type: boolean }
+        selfRating: { type: string, enum: [weak, steady, strong] }
+      additionalProperties: false
+    SpeakingTask4Session:
+      type: object
+      required: [id, catalog, task, selectionReason, status, assignedAt, completedAt, practice, assessment]
+      properties:
+        id: { type: string, format: uuid }
+        catalog:
+          type: object
+          required: [id, revision]
+          properties:
+            id: { type: string, enum: [speaking-pilot-v1] }
+            revision: { type: integer, enum: [1] }
+          additionalProperties: false
+        task: { $ref: '#/components/schemas/SpeakingTask4Task' }
+        selectionReason: { type: string, enum: [unseen, due, weak, old] }
+        status: { type: string, enum: [assigned, completed] }
+        assignedAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time, nullable: true }
+        practice:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/SpeakingTask4Completion'
         assessment:
           type: object
           required: [available, reason, message]

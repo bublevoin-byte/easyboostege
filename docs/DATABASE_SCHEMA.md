@@ -29,6 +29,10 @@
 | `telegram_auth_codes` | одноразовые коды входа | hash кода, expiry, consumed state |
 | `writing_attempts` | журнал пользовательских прогонов заданий 37/38 | assignment, answer, evaluated_answer, review, provider, model, prompt_version, status, error_code |
 | `speaking_attempts` | журнал пользовательских прогонов устной части | assignment, transcript, review, provider, model, prompt_version, status, error_code; audio is not stored |
+| `speaking_task1_sessions` | owner-bound тренировки чтения вслух | catalog/task revision, rotation reason, status, duration, mic check, local-playback flag, self-rating и timestamps; без audio/transcript |
+| `speaking_task2_sessions` | owner-bound последовательные тренировки четырёх вопросов | catalog/task revision, current question, четыре безопасные metadata-позиции, self-rating и timestamps; без audio/transcript/score |
+| `speaking_task3_sessions` | owner-bound последовательные тренировки пяти ответов | catalog/task revision, current question, пять безопасных metadata-позиций, self-rating и timestamps; без audio/transcript/score |
+| `speaking_task4_sessions` | owner-bound тренировки проектного монолога по фотопаре | catalog/task revision, rotation reason, status, длительность до 180 секунд, mic check, local-playback flag, self-rating и timestamps; фотопара хранится в versioned static catalog, audio/transcript/score отсутствуют |
 | `generated_tasks` | валидированные результаты генерации | operation, versioned request hash, request/result and provider |
 | `module_attempts` | нормализованная история учебных результатов и единственный persisted source Reading-отчёта | module, activity, score, duration, bounded metadata and server-owned `evidence_quality`; legacy/public writes are `client_reported`; Reading projection принимает только owner-bound canonical catalog ID/revision/provenance и завершённые логические попытки |
 | `progress_summary` | серверная агрегированная сводка прогресса | attempts, best normalized score, total duration and last attempt |

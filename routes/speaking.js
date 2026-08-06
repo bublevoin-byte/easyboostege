@@ -4,14 +4,17 @@ import { z } from 'zod';
 import { SPEAKING_TASK1_CATALOG } from '../public/content/speaking/task1-v1.js';
 import { SPEAKING_TASK2_CATALOG } from '../public/content/speaking/task2-v1.js';
 import { SPEAKING_TASK3_CATALOG } from '../public/content/speaking/task3-v1.js';
+import { SPEAKING_TASK4_CATALOG } from '../public/content/speaking/task4-v1.js';
 import {
   speakingTask1PublicAssignment,
   speakingTask2PublicAssignment,
   speakingTask3PublicAssignment,
+  speakingTask4PublicAssignment,
 } from '../public/speaking-catalog-contract.js';
 import { publicSpeakingTask1Session } from '../speaking/task1-session.js';
 import { publicSpeakingTask2Session } from '../speaking/task2-session.js';
 import { publicSpeakingTask3Session } from '../speaking/task3-session.js';
+import { publicSpeakingTask4Session } from '../speaking/task4-session.js';
 
 const emptyBodySchema = z.object({}).strict();
 const sessionIdSchema = z.string().uuid();
@@ -30,6 +33,12 @@ const task2QuestionCompletionSchema = z.object({
 }).strict();
 const task3AnswerCompletionSchema = z.object({
   recordingDurationSeconds: z.number().finite().min(1).max(40),
+  localPlayback: z.boolean(),
+  selfRating: z.enum(['weak', 'steady', 'strong']),
+}).strict();
+const task4CompletionSchema = z.object({
+  recordingDurationSeconds: z.number().finite().min(1).max(180),
+  micCheck: z.enum(['passed', 'quiet', 'skipped']),
   localPlayback: z.boolean(),
   selfRating: z.enum(['weak', 'steady', 'strong']),
 }).strict();
@@ -54,6 +63,7 @@ function catalogMismatchResponse(req, res, error) {
     'SPEAKING_TASK1_CATALOG_REVISION_MISMATCH',
     'SPEAKING_TASK2_CATALOG_REVISION_MISMATCH',
     'SPEAKING_TASK3_CATALOG_REVISION_MISMATCH',
+    'SPEAKING_TASK4_CATALOG_REVISION_MISMATCH',
   ].includes(code)) {
     return false;
   }
@@ -154,6 +164,12 @@ export function createSpeakingRoutes({ authentication, access, db, now = () => n
     publicSession: publicSpeakingTask3Session,
     mismatchCode: 'SPEAKING_TASK3_CATALOG_REVISION_MISMATCH',
   });
+  const task4Response = (session) => publicCatalogSession(session, {
+    catalog: SPEAKING_TASK4_CATALOG,
+    publicAssignment: speakingTask4PublicAssignment,
+    publicSession: publicSpeakingTask4Session,
+    mismatchCode: 'SPEAKING_TASK4_CATALOG_REVISION_MISMATCH',
+  });
 
   registerAssignmentRoutes({
     basePath: '/api/v1/speaking/task-1/sessions',
@@ -217,6 +233,32 @@ export function createSpeakingRoutes({ authentication, access, db, now = () => n
     invalidPositionMessage: 'Номер вопроса должен быть от 1 до 5.',
     invalidBodyMessage: 'Недопустимые метаданные записи ответа.',
     sequenceMessage: 'Записывай пять ответов по порядку.',
+  });
+
+  registerAssignmentRoutes({
+    basePath: '/api/v1/speaking/task-4/sessions',
+    catalog: SPEAKING_TASK4_CATALOG,
+    assign: (...args) => db.assignSpeakingTask4Session(...args),
+    get: (...args) => db.getSpeakingTask4Session(...args),
+    response: task4Response,
+  });
+
+  router.post('/api/v1/speaking/task-4/sessions/:sessionId/complete', auth, requireActiveSubscription, async (req, res, next) => {
+    const sessionId = sessionIdSchema.safeParse(req.params.sessionId);
+    if (!sessionId.success) return validationError(req, res, 'Invalid training session identifier.');
+    const parsed = task4CompletionSchema.safeParse(req.body);
+    if (!parsed.success) return validationError(req, res, 'Invalid task 4 practice metadata.');
+    try {
+      res.setHeader('Cache-Control', 'no-store');
+      const session = await db.completeSpeakingTask4Session(
+        req.user, sessionId.data, parsed.data, { now: now() },
+      );
+      if (!session) return res.status(404).json({ error: { code: 'SPEAKING_SESSION_NOT_FOUND', message: 'Training session not found.' } });
+      return res.json(task4Response(session));
+    } catch (error) {
+      if (catalogMismatchResponse(req, res, error)) return undefined;
+      return next(error);
+    }
   });
 
   return router;

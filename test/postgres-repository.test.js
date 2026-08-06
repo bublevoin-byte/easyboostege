@@ -38,6 +38,7 @@ import { assertVocabularyAttemptRepositoryContract } from './support/vocabulary-
 import { assertReadingReportRepositoryContract } from './support/reading-report-contract.js';
 import { assertSpeakingTask2SessionRepositoryContract } from './support/speaking-task2-session-contract.js';
 import { assertSpeakingTask3SessionRepositoryContract } from './support/speaking-task3-session-contract.js';
+import { assertSpeakingTask4SessionRepositoryContract } from './support/speaking-task4-session-contract.js';
 import { READING_TASK10_SETS } from '../public/content/reading/task10-v1.js';
 import { READING_TASK11_SETS } from '../public/content/reading/task11-v1.js';
 import { READING_TASK12_18_SETS } from '../public/content/reading/task12-18-v1.js';
@@ -65,6 +66,20 @@ test('PostgreSQL task 3 sessions match owner isolation, replay, export and delet
   const other = await repository.createTelegramUser(Number(`85${stamp}`), `Task three other ${stamp}`);
   try {
     await assertSpeakingTask3SessionRepositoryContract(assert, repository, owner, other);
+  } finally {
+    await repository.deleteUserData(owner).catch(() => {});
+    await repository.deleteUserData(other).catch(() => {});
+    await repository.close();
+  }
+});
+
+test('PostgreSQL task 4 sessions match owner isolation, replay, export and deletion contract', { skip: !connectionString }, async () => {
+  const repository = createPostgresRepository(connectionString);
+  const stamp = String(Date.now()).slice(-8);
+  const owner = await repository.createTelegramUser(Number(`86${stamp}`), `Task four owner ${stamp}`);
+  const other = await repository.createTelegramUser(Number(`87${stamp}`), `Task four other ${stamp}`);
+  try {
+    await assertSpeakingTask4SessionRepositoryContract(assert, repository, owner, other);
   } finally {
     await repository.deleteUserData(owner).catch(() => {});
     await repository.deleteUserData(other).catch(() => {});
@@ -713,6 +728,7 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
       '041_speaking_task1_sessions.sql',
       '042_speaking_task2_sessions.sql',
       '043_speaking_task3_sessions.sql',
+      '044_speaking_task4_sessions.sql',
     ]);
 
     const username = await repository.createTelegramUser(telegramId, `Integration ${suffix}`);

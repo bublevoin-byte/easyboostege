@@ -118,7 +118,8 @@ const staticAssets = sourceFiles.filter((name) => !name.endsWith('.js') && name 
  * listening manifest остаётся частью APP_SHELL.
  */
 function runtimeManagedAsset(name) {
-  return name.startsWith('audio/listening/') && name.endsWith('.mp3');
+  return (name.startsWith('audio/listening/') && name.endsWith('.mp3'))
+    || (name.startsWith('assets/speaking/task4-v1/') && name.endsWith('.png'));
 }
 const shellStaticAssets = staticAssets.filter((name) => !runtimeManagedAsset(name));
 

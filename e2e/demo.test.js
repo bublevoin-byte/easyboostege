@@ -734,10 +734,13 @@ async function runE2E() {
             if (window.__e2eMicrophoneMode === 'denied') {
               throw new DOMException('Permission denied', 'NotAllowedError');
             }
-            return { getTracks: () => [{ stop() {} }] };
+            const track = { readyState: 'live', stop() {} };
+            return { getAudioTracks: () => [track], getTracks: () => [track] };
           },
         },
       });
+      Object.defineProperty(window, 'AudioContext', { configurable: true, value: undefined });
+      Object.defineProperty(window, 'webkitAudioContext', { configurable: true, value: undefined });
       class E2EMediaRecorder {
         static isTypeSupported(type) {
           return type === 'audio/webm';
@@ -769,6 +772,8 @@ async function runE2E() {
     const speakingTask = authenticatedPage.getByRole('button', { name: /Чтение вслух/ });
     await speakingTask.waitFor({ state: 'visible', timeout: 5_000 });
     await speakingTask.press('Enter');
+    await authenticatedPage.getByRole('button', { name: 'Проверить микрофон' }).click();
+    await authenticatedPage.getByText(/Микрофон готов/).waitFor({ state: 'visible', timeout: 5_000 });
     await authenticatedPage.getByRole('button', { name: 'Начать подготовку' }).click();
     await authenticatedPage.getByRole('button', { name: 'Готово — к записи' }).click();
     await authenticatedPage.getByRole('button', { name: 'Стоп — закончить запись' }).click();
@@ -779,8 +784,7 @@ async function runE2E() {
     await authenticatedPage.getByRole('button', { name: 'К заданиям', exact: true }).click({ force: true });
     await authenticatedPage.evaluate(() => { window.__e2eMicrophoneMode = 'denied'; });
     await authenticatedPage.getByRole('button', { name: /Чтение вслух/ }).press('Enter');
-    await authenticatedPage.getByRole('button', { name: 'Начать подготовку' }).click();
-    await authenticatedPage.getByRole('button', { name: 'Готово — к записи' }).click();
+    await authenticatedPage.getByRole('button', { name: 'Проверить микрофон' }).click();
     const microphoneToast = authenticatedPage.locator('#toast');
     await microphoneToast.waitFor({ state: 'visible', timeout: 5_000 });
     assert.match(await microphoneToast.innerText(), /Нет доступа к микрофону/);

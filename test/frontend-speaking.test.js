@@ -23,7 +23,8 @@ test('speaking module exposes exam timings and a 20-point maximum', () => {
   assert.equal(speaking.EXAM_MAX, 20);
   assert.deepEqual(plain(speaking.config(1)), { name: 'Чтение вслух', prep: 90, rec: 90, max: 1, sub: 'задание 1 · 1 балл' });
   assert.equal(speaking.config(3).prep, 0);
-  assert.equal(speaking.config(4).rec, 150);
+  assert.equal(speaking.config(4).prep, 150);
+  assert.equal(speaking.config(4).rec, 180);
   assert.equal(speaking.isExperimentalTask(1), false);
   assert.equal(speaking.isExperimentalTask(2), false);
   assert.equal(speaking.isExperimentalTask(3), true);
@@ -206,4 +207,40 @@ test('speaking module accepts only the server-owned five-question task 3 assignm
   assert.equal(speaking.serverTask3Set({ ...session, task: { ...session.task, preparationSeconds: 60 } }), null);
   assert.equal(speaking.serverTask3Set({ ...session, task: { ...session.task, completeness: [] } }), null);
   assert.equal(speaking.serverTask3Set({ ...session, assessment: { available: true } }), null);
+});
+
+test('speaking module accepts only the server-owned task 4 photo-project assignment shape', () => {
+  const speaking = createSpeakingModule();
+  const session = {
+    id: '74400000-0000-4000-8000-000000000001',
+    task: {
+      id: 'speaking-pilot-v1.task4.learning-new-skills', revision: 1, taskType: 4,
+      cefr: 'B1', topic: 'Learning new skills', projectTitle: 'Learning new skills',
+      preparationSeconds: 150, responseSeconds: 180, maxScore: 10,
+      instruction: 'Give a talk for your project.',
+      photoPair: {
+        assetId: 'speaking-task4-photo-pair.learning-new-skills.v1',
+        src: '/assets/speaking/task4-v1/learning-new-skills.png',
+        alt: 'Two photographs comparing ways to learn new skills.',
+        panels: [{ number: 1, alt: 'A student attends a pottery lesson.' },
+          { number: 2, alt: 'A student follows a guitar lesson.' }],
+      },
+      plan: ['Describe both photographs in detail.', 'Explain what the photographs have in common.',
+        'Compare the main differences between the photographs.', 'Say which way you prefer and explain why.'],
+    },
+    assessment: { available: false, reason: 'deferred_to_tickets_06_07' },
+  };
+
+  assert.deepEqual(plain(speaking.serverTask4Set(session)), {
+    id: session.task.id, revision: 1, topic: session.task.topic,
+    projectTitle: session.task.projectTitle, instruction: session.task.instruction,
+    photoPair: session.task.photoPair, plan: session.task.plan, cefr: 'B1',
+  });
+  assert.equal(speaking.serverTask4Set({ ...session, task: { ...session.task, responseSeconds: 150 } }), null);
+  assert.equal(speaking.serverTask4Set({ ...session, task: { ...session.task, photoPair: { ...session.task.photoPair, src: 'https://external.example/pair.png' } } }), null);
+  assert.equal(speaking.serverTask4Set({ ...session, task: { ...session.task, photoPair: { ...session.task.photoPair, assetId: 'unsafe' } } }), null);
+  assert.equal(speaking.serverTask4Set({ ...session, task: { ...session.task, photoPair: { ...session.task.photoPair,
+    panels: [{ position: 'left', alt: 'Wrong panel shape.' }, { position: 'right', alt: 'Wrong panel shape.' }] } } }), null);
+  assert.equal(speaking.serverTask4Set({ ...session, task: { ...session.task, rubric: {} } }), null);
+  assert.equal(speaking.serverTask4Set({ ...session, assessment: { available: true } }), null);
 });

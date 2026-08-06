@@ -33,6 +33,10 @@ import {
 } from '../speaking/task1-session.js';
 import { applySpeakingTask2QuestionCompletion, newSpeakingTask2Session } from '../speaking/task2-session.js';
 import { applySpeakingTask3AnswerCompletion, newSpeakingTask3Session } from '../speaking/task3-session.js';
+import {
+  newSpeakingTask4Session,
+  speakingTask4CompletionMetadata,
+} from '../speaking/task4-session.js';
 import { selectSpeakingTrainingAssignment } from '../speaking/training-session.js';
 import { isMonotonicAdaptiveRetentionRefresh } from '../adaptive-learning/retention.js';
 import { adaptiveRepeatExecutionMatches } from '../adaptive-learning/repeat-execution.js';
@@ -183,7 +187,7 @@ function sanitizeLegacyAdaptiveExecution(state, now = Date.now()) {
 
 export function createFileRepository(filePath) {
   let loaded = false;
-  let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], speaking_task1_sessions: [], speaking_task2_sessions: [], speaking_task3_sessions: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, subscription_entitlements: {}, voice_tutor_sessions: [], voice_tutor_recoveries: [], voice_tutor_repeats: [], voice_tutor_repeat_attempts: [], voice_tutor_reports: [], rule_cards: [], payment_requests: {}, subscription_events: [], adaptive_learning_goals: [], adaptive_learning_profiles: {}, adaptive_learning_skill_estimates: {}, adaptive_learning_plan_revisions: [], adaptive_learning_sessions: [], adaptive_learning_execution_claims: [], adaptive_learning_session_events: [], adaptive_learning_session_mutations: [], adaptive_diagnostic_sessions: [], adaptive_diagnostic_start_claims: [], adaptive_diagnostic_responses: [] };
+  let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], speaking_task1_sessions: [], speaking_task2_sessions: [], speaking_task3_sessions: [], speaking_task4_sessions: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, subscription_entitlements: {}, voice_tutor_sessions: [], voice_tutor_recoveries: [], voice_tutor_repeats: [], voice_tutor_repeat_attempts: [], voice_tutor_reports: [], rule_cards: [], payment_requests: {}, subscription_events: [], adaptive_learning_goals: [], adaptive_learning_profiles: {}, adaptive_learning_skill_estimates: {}, adaptive_learning_plan_revisions: [], adaptive_learning_sessions: [], adaptive_learning_execution_claims: [], adaptive_learning_session_events: [], adaptive_learning_session_mutations: [], adaptive_diagnostic_sessions: [], adaptive_diagnostic_start_claims: [], adaptive_diagnostic_responses: [] };
   let writeQueue = Promise.resolve();
   let coordinatedMutationQueue = Promise.resolve();
   let paymentQueue = Promise.resolve();
@@ -207,6 +211,7 @@ export function createFileRepository(filePath) {
           speaking_task1_sessions: Array.isArray(parsed.speaking_task1_sessions) ? parsed.speaking_task1_sessions : [],
           speaking_task2_sessions: Array.isArray(parsed.speaking_task2_sessions) ? parsed.speaking_task2_sessions : [],
           speaking_task3_sessions: Array.isArray(parsed.speaking_task3_sessions) ? parsed.speaking_task3_sessions : [],
+          speaking_task4_sessions: Array.isArray(parsed.speaking_task4_sessions) ? parsed.speaking_task4_sessions : [],
           generated_tasks: Array.isArray(parsed.generated_tasks) ? parsed.generated_tasks : [],
           task_bank: Array.isArray(parsed.task_bank) ? parsed.task_bank : [],
           task_deliveries: Array.isArray(parsed.task_deliveries) ? parsed.task_deliveries : [],
@@ -1644,6 +1649,26 @@ export function createFileRepository(filePath) {
       username, id, questionNumber, completion, options,
     )
   );
+
+  const assignSpeakingTask4Session = (username, options) => assignSpeakingCatalogSession(
+    'speaking_task4_sessions', newSpeakingTask4Session, username, options,
+  );
+
+  const getSpeakingTask4Session = (username, id) => getSpeakingCatalogSession(
+    'speaking_task4_sessions', username, id,
+  );
+
+  async function completeSpeakingTask4Session(username, id, completion, { now = new Date() } = {}) {
+    return serializeSpeakingSessionMutation(async () => {
+      await load();
+      const session = state.speaking_task4_sessions.find((item) => item.username === username && item.id === id);
+      if (!session) return null;
+      if (session.status === 'completed') return structuredClone(session);
+      Object.assign(session, speakingTask4CompletionMetadata(completion, now), { status: 'completed' });
+      await persist();
+      return structuredClone(session);
+    });
+  }
 
   async function getGeneratedTask(username, requestHash) {
     await load();
@@ -3235,6 +3260,9 @@ export function createFileRepository(filePath) {
       speaking_task3_sessions: state.speaking_task3_sessions
         .filter((item) => item.username === username)
         .map(({ username: owner, ...item }) => item),
+      speaking_task4_sessions: state.speaking_task4_sessions
+        .filter((item) => item.username === username)
+        .map(({ username: owner, ...item }) => item),
       generated_tasks: state.generated_tasks.filter((item) => item.username === username).map(({ request_hash, username: owner, ...item }) => item),
       module_attempts: state.module_attempts.filter((item) => item.username === username),
       progress_summary: Object.values(state.progress_summary[username] || {}),
@@ -3303,6 +3331,7 @@ export function createFileRepository(filePath) {
       state.speaking_task1_sessions = state.speaking_task1_sessions.filter((item) => item.username !== username);
       state.speaking_task2_sessions = state.speaking_task2_sessions.filter((item) => item.username !== username);
       state.speaking_task3_sessions = state.speaking_task3_sessions.filter((item) => item.username !== username);
+      state.speaking_task4_sessions = state.speaking_task4_sessions.filter((item) => item.username !== username);
       state.generated_tasks = state.generated_tasks.filter((item) => item.username !== username);
       state.module_attempts = state.module_attempts.filter((item) => item.username !== username);
       delete state.progress_summary[username];
@@ -3447,6 +3476,9 @@ export function createFileRepository(filePath) {
     assignSpeakingTask3Session,
     getSpeakingTask3Session,
     completeSpeakingTask3Answer,
+    assignSpeakingTask4Session,
+    getSpeakingTask4Session,
+    completeSpeakingTask4Session,
     getGeneratedTask,
     getSharedGeneratedTask,
     saveGeneratedTask,

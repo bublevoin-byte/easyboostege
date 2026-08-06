@@ -16,10 +16,16 @@ export const SPEAKING_TASK3_CODIFIER_AREA_COUNTS = Object.freeze({
   science_technology_and_environment: 9,
   health_sport_and_community: 6,
 });
+export const SPEAKING_TASK4_CONTRACT_VERSION = 'speaking-task4-catalog-v1';
+export const SPEAKING_TASK4_INSTRUCTION = 'Prepare a voice message about the photo project. Cover all four points in the plan. You have 150 seconds to prepare and up to 180 seconds to speak.';
+export const SPEAKING_TASK4_CEFR_COUNTS = Object.freeze({ B1: 12, B2: 36, 'B2+/C1': 12 });
 
 const SAFE_TASK_ID = /^speaking-pilot-v1\.task1\.[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const SAFE_TASK2_ID = /^speaking-pilot-v1\.task2\.[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const SAFE_TASK3_ID = /^speaking-pilot-v1\.task3\.[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+const SAFE_TASK4_ID = /^speaking-pilot-v1\.task4\.[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+const SAFE_TASK4_ASSET_ID = /^speaking-task4-photo-pair\.[a-z0-9]+(?:-[a-z0-9]+)*\.v1$/u;
+const SAFE_TASK4_ASSET_PATH = /^\/assets\/speaking\/task4-v1\/[a-z0-9]+(?:-[a-z0-9]+)*\.png$/u;
 const SAFE_MARKUP = /<\/?[a-z][^>]*>|javascript:|data:text\/html/iu;
 const UNSAFE_TASK3_CONTENT = Object.freeze([
   ['medical advice', /\b(?:stop|skip|double|replace)\b[^?.]{0,80}\b(?:medicine|medication|treatment|prescription|doctor)\b|\b(?:medicine|medication|treatment)\b[^?.]{0,80}\bwithout\b[^?.]{0,30}\b(?:doctor|clinician)\b/iu],
@@ -39,9 +45,13 @@ const TASK3_KEYS = Object.freeze([
   'cefr', 'codifierArea', 'completeness', 'id', 'instruction', 'maxScore', 'preparationSeconds', 'provenance',
   'questionSeconds', 'questions', 'revision', 'taskType', 'topic',
 ]);
+const TASK4_KEYS = Object.freeze([
+  'cefr', 'id', 'instruction', 'maxScore', 'photoPair', 'plan', 'preparationSeconds',
+  'projectTitle', 'provenance', 'responseSeconds', 'revision', 'rubric', 'taskType', 'topic',
+]);
 
 function fail(location, message) {
-  throw new Error(`SPEAKING_TASK1_CATALOG_INVALID: ${location} ${message}`);
+  throw new Error(`SPEAKING_CATALOG_INVALID: ${location} ${message}`);
 }
 
 function plainObject(value, location) {
@@ -466,6 +476,127 @@ export function speakingTask3PublicAssignment(task) {
     maxScore: task.maxScore,
     instruction: task.instruction,
     questions: Object.freeze([...task.questions]),
+  });
+}
+
+export function assertSpeakingTask4(task, location = 'task') {
+  plainObject(task, location);
+  exactKeys(task, TASK4_KEYS, location);
+  if (!SAFE_TASK4_ID.test(task.id || '')) fail(`${location}.id`, 'must be a stable speaking-pilot-v1 task 4 id');
+  if (task.revision !== 1) fail(`${location}.revision`, 'must be 1');
+  if (task.taskType !== 4) fail(`${location}.taskType`, 'must be 4');
+  if (!Object.hasOwn(SPEAKING_TASK4_CEFR_COUNTS, task.cefr)) fail(`${location}.cefr`, 'is unsupported');
+  safeString(task.topic, `${location}.topic`, { min: 3, max: 100 });
+  safeString(task.projectTitle, `${location}.projectTitle`, { min: 8, max: 120 });
+  if (task.preparationSeconds !== 150) fail(`${location}.preparationSeconds`, 'must be 150');
+  if (task.responseSeconds !== 180) fail(`${location}.responseSeconds`, 'must be 180');
+  if (task.maxScore !== 10) fail(`${location}.maxScore`, 'must be 10');
+  if (task.instruction !== SPEAKING_TASK4_INSTRUCTION) fail(`${location}.instruction`, 'must use the task 4 instruction');
+
+  if (!Array.isArray(task.plan) || task.plan.length !== 4) fail(`${location}.plan`, 'must contain exactly four points');
+  task.plan.forEach((point, index) => {
+    safeString(point, `${location}.plan[${index}]`, { min: 1, max: 220 });
+    if (point.length < 30 || wordCount(point) < 6) fail(`${location}.plan[${index}]`, 'must be substantive');
+  });
+  if (new Set(task.plan.map((point) => point.toLocaleLowerCase('en'))).size !== 4) {
+    fail(`${location}.plan`, 'must contain four distinct substantive points');
+  }
+
+  plainObject(task.rubric, `${location}.rubric`);
+  exactKeys(task.rubric, ['content', 'language', 'organisation', 'zeroContentMeansZero'], `${location}.rubric`);
+  for (const [criterion, maximum] of [['content', 4], ['organisation', 3], ['language', 3]]) {
+    plainObject(task.rubric[criterion], `${location}.rubric.${criterion}`);
+    exactKeys(task.rubric[criterion], ['maxScore'], `${location}.rubric.${criterion}`);
+    if (task.rubric[criterion].maxScore !== maximum) fail(`${location}.rubric`, 'must use the EGE 4/3/3 rubric');
+  }
+  if (task.rubric.zeroContentMeansZero !== true) fail(`${location}.rubric`, 'must apply the zero-content rule');
+
+  plainObject(task.photoPair, `${location}.photoPair`);
+  exactKeys(task.photoPair, ['alt', 'assetId', 'panels', 'src'], `${location}.photoPair`);
+  if (!SAFE_TASK4_ASSET_ID.test(task.photoPair.assetId || '')) fail(`${location}.photoPair.assetId`, 'must be a stable local speaking asset id');
+  if (!SAFE_TASK4_ASSET_PATH.test(task.photoPair.src || '')) fail(`${location}.photoPair.src`, 'must be a local speaking asset');
+  safeString(task.photoPair.alt, `${location}.photoPair.alt`, { min: 20, max: 260 });
+  if (!Array.isArray(task.photoPair.panels) || task.photoPair.panels.length !== 2) {
+    fail(`${location}.photoPair.panels`, 'must contain exactly two photo panels');
+  }
+  task.photoPair.panels.forEach((panel, index) => {
+    plainObject(panel, `${location}.photoPair.panels[${index}]`);
+    exactKeys(panel, ['alt', 'number'], `${location}.photoPair.panels[${index}]`);
+    if (panel.number !== index + 1) fail(`${location}.photoPair.panels[${index}].number`, 'must match panel order');
+    safeString(panel.alt, `${location}.photoPair.panels[${index}].alt`, { min: 15, max: 180 });
+  });
+
+  plainObject(task.provenance, `${location}.provenance`);
+  exactKeys(task.provenance, ['author', 'createdAt', 'kind', 'reviewStatus'], `${location}.provenance`);
+  if (task.provenance.kind !== 'original' || task.provenance.author !== 'Easy Boost'
+    || task.provenance.createdAt !== '2026-08-06'
+    || task.provenance.reviewStatus !== 'automatically_checked') {
+    fail(`${location}.provenance`, 'must identify automatically checked original Easy Boost material');
+  }
+  return task;
+}
+
+export function assertSpeakingTask4Catalog(catalog) {
+  plainObject(catalog, 'catalog');
+  exactKeys(catalog, ['contractVersion', 'format', 'id', 'revision', 'tasks'], 'catalog');
+  if (catalog.id !== SPEAKING_CATALOG_ID) fail('catalog.id', `must be ${SPEAKING_CATALOG_ID}`);
+  if (catalog.revision !== 1) fail('catalog.revision', 'must be 1');
+  if (catalog.contractVersion !== SPEAKING_TASK4_CONTRACT_VERSION) fail('catalog.contractVersion', 'is unsupported');
+  plainObject(catalog.format, 'catalog.format');
+  exactKeys(catalog.format, [
+    'exam', 'maxScore', 'photoCount', 'planPointCount', 'preparationSeconds', 'responseSeconds',
+    'source', 'sourceRevision', 'taskType',
+  ], 'catalog.format');
+  if (catalog.format.exam !== 'ege-english-2026' || catalog.format.taskType !== 4
+    || catalog.format.preparationSeconds !== 150 || catalog.format.responseSeconds !== 180
+    || catalog.format.photoCount !== 2 || catalog.format.planPointCount !== 4
+    || catalog.format.maxScore !== 10 || catalog.format.source !== 'fipi-ege-2026'
+    || catalog.format.sourceRevision !== '2026-08-06') {
+    fail('catalog.format', 'must match the fixed EGE-2026 task 4 contract');
+  }
+  if (!Array.isArray(catalog.tasks) || catalog.tasks.length !== 60) fail('catalog.tasks', 'must contain exactly 60 tasks');
+
+  const ids = new Set();
+  const projects = new Set();
+  const assets = new Set();
+  const counts = Object.fromEntries(Object.keys(SPEAKING_TASK4_CEFR_COUNTS).map((cefr) => [cefr, 0]));
+  catalog.tasks.forEach((task, index) => {
+    assertSpeakingTask4(task, `catalog.tasks[${index}]`);
+    const projectKey = task.projectTitle.toLocaleLowerCase('en');
+    if (ids.has(task.id)) fail('catalog.tasks', 'id must be unique');
+    if (projects.has(projectKey)) fail('catalog.tasks', 'project title must be unique');
+    if (assets.has(task.photoPair.assetId)) fail('catalog.tasks', 'photo-pair asset must be unique');
+    ids.add(task.id);
+    projects.add(projectKey);
+    assets.add(task.photoPair.assetId);
+    counts[task.cefr] += 1;
+  });
+  for (const [cefr, expected] of Object.entries(SPEAKING_TASK4_CEFR_COUNTS)) {
+    if (counts[cefr] !== expected) fail('catalog.tasks', `must contain ${expected} ${cefr} tasks`);
+  }
+  return catalog;
+}
+
+export function speakingTask4PublicAssignment(task) {
+  assertSpeakingTask4(task);
+  return Object.freeze({
+    id: task.id,
+    revision: task.revision,
+    taskType: task.taskType,
+    cefr: task.cefr,
+    topic: task.topic,
+    projectTitle: task.projectTitle,
+    preparationSeconds: task.preparationSeconds,
+    responseSeconds: task.responseSeconds,
+    maxScore: task.maxScore,
+    instruction: task.instruction,
+    photoPair: Object.freeze({
+      assetId: task.photoPair.assetId,
+      src: task.photoPair.src,
+      alt: task.photoPair.alt,
+      panels: Object.freeze(task.photoPair.panels.map((panel) => Object.freeze({ ...panel }))),
+    }),
+    plan: Object.freeze([...task.plan]),
   });
 }
 

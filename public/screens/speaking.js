@@ -15,9 +15,12 @@ import {voiceTutorButton} from '../voice-tutor.js';
 import {createSpeakingTask1BrowserFlow} from '../speaking-task1-runtime.js';
 import {createSpeakingTask2BrowserFlow} from '../speaking-task2-runtime.js';
 import {createSpeakingTask3BrowserFlow} from '../speaking-task3-runtime.js';
+import {createSpeakingTask4BrowserFlow} from '../speaking-task4-runtime.js';
 import {SPEAKING_TASK1_CATALOG} from '../content/speaking/task1-v1.js';
 import {SPEAKING_TASK2_CATALOG} from '../content/speaking/task2-v1.js';
 import {SPEAKING_TASK3_CATALOG} from '../content/speaking/task3-v1.js';
+import {SPEAKING_TASK4_CATALOG} from '../content/speaking/task4-v1.js';
+import {SPEAKING_TASK4_PHOTO_MANIFEST} from '../assets/speaking/task4-v1/manifest.js';
 
 /* ===== SPEAKING v2: устная часть ЕГЭ, 4 задания ===== */
 const SP1=[
@@ -47,7 +50,7 @@ const SP_SHEET={
 2:'<b>Как задавать прямые вопросы:</b><br>Каждый пункт превращай в ПРЯМОЙ вопрос:<br>— цена → <i>How much does it cost?</i><br>— даты → <i>When does the course start?</i><br>— место → <i>Where is the club located?</i><br>— возможность → <i>Can I…? / Is it possible to…?</i><br><b>Ловушки:</b> «What about the price?» — НЕ вопрос, балл не дадут. Вопрос «зачитыванием пункта» (price?) — тоже. Нужен полный вопрос с вспомогательным глаголом.',
 3:'<b>Как отвечать на вопросы интервью:</b><br>— Отвечай развёрнуто: 2-3 предложения, а не «Yes, I do».<br>— Формула: прямой ответ → причина → пример. <i>I usually read in my free time. It helps me to relax. For example, last week I finished a great detective story.</i><br>— Не молчи: если нужно время, начни с <i>Well, let me think…</i><br>— Следи за временем вопроса: «What did you do…» → отвечай в прошедшем.',
 4:'<b>Скелет монолога (2,5–3 минуты):</b><br>1. Вступление: <i>I have found two photos for our project about…</i><br>2. Описание: <i>In the first photo we can see… In the second photo there is…</i><br>3. Общее: <i>Both photos show… / What these photos have in common is…</i><br>4. Различия: <i>The main difference is that… while…</i><br>5. Мнение: <i>As for me, I prefer… because…</i><br>6. Финал: <i>That is all I wanted to say.</i><br><b>Ловушка:</b> пропустил пункт плана — минус баллы за решение задачи.'};
-let SP=null,SP_rec=null,SP_chunks=[],SP_tm=null,SP_sheet=false,SP_TASK1_FLOW=null,SP_TASK2_FLOW=null,SP_TASK3_FLOW=null;
+let SP=null,SP_rec=null,SP_chunks=[],SP_tm=null,SP_sheet=false,SP_TASK1_FLOW=null,SP_TASK2_FLOW=null,SP_TASK3_FLOW=null,SP_TASK4_FLOW=null;
 function spAnim(n,d){ui.animate('s9_card',n,d)}
 function spMime(){return speakingModule.preferredMimeType(window.MediaRecorder)}
 function spFmt(s){return speakingModule.formatTime(s)}
@@ -58,15 +61,20 @@ function spReleaseRecording(){if(SP&&SP.url)try{URL.revokeObjectURL(SP.url)}catc
 function spDisposeTask1Flow(){if(SP_TASK1_FLOW){SP_TASK1_FLOW.dispose();SP_TASK1_FLOW=null}}
 function spDisposeTask2Flow(){if(SP_TASK2_FLOW){SP_TASK2_FLOW.dispose();SP_TASK2_FLOW=null}}
 function spDisposeTask3Flow(){if(SP_TASK3_FLOW){SP_TASK3_FLOW.dispose();SP_TASK3_FLOW=null}}
+function spDisposeTask4Flow(){if(SP_TASK4_FLOW){SP_TASK4_FLOW.dispose();SP_TASK4_FLOW=null}}
 function officialTask2Active(){return Boolean(SP&&SP.t===2&&SP_TASK2_FLOW)}
 function officialTask3Active(){return Boolean(SP&&SP.t===3&&SP_TASK3_FLOW)}
+function officialTask4Active(){return Boolean(SP&&SP.t===4&&SP_TASK4_FLOW)}
+function task4PhotoAsset(src){return SPEAKING_TASK4_PHOTO_MANIFEST.assets.find(function(asset){return asset.src===src})||null}
 function task2RecoveryPointerInvalid(error){return Number(error&&error.status)===404
   ||String(error&&error.code)==='SPEAKING_TASK2_CATALOG_REVISION_MISMATCH'}
 function task3RecoveryPointerInvalid(error){return Number(error&&error.status)===404
   ||String(error&&error.code)==='SPEAKING_TASK3_CATALOG_REVISION_MISMATCH'}
+function task4RecoveryPointerInvalid(error){return Number(error&&error.status)===404
+  ||String(error&&error.code)==='SPEAKING_TASK4_CATALOG_REVISION_MISMATCH'}
 function adaptiveSpeakingLock(){try{var active=adaptiveRuntimeSnapshot().active;return active&&active.module==='speaking'?active:null}catch(_){return null}}
 function launchAdaptiveSpeakingLock(lock){var task=lock&&adaptiveSpeakingTask(lock.contentRef);return Boolean(task&&launchSpeakingTask(task.taskNumber,lock.contentRef))}
-function initSpeaking(){if(!S)return;var lock=adaptiveSpeakingLock();spStopAll();spReleaseRecording();spDisposeTask1Flow();spDisposeTask2Flow();spDisposeTask3Flow();SP=null;spSync();if(lock&&launchAdaptiveSpeakingLock(lock))return;spHub()}
+function initSpeaking(){if(!S)return;var lock=adaptiveSpeakingLock();spStopAll();spReleaseRecording();spDisposeTask1Flow();spDisposeTask2Flow();spDisposeTask3Flow();spDisposeTask4Flow();SP=null;spSync();if(lock&&launchAdaptiveSpeakingLock(lock))return;spHub()}
 function spHub(){var area=document.getElementById('s9_area');if(!area)return;
   var lock=adaptiveSpeakingLock();if(lock&&launchAdaptiveSpeakingLock(lock))return;
   var r=spSt();var GA=0;function ga(){return 'animation:win .34s '+((GA++)*0.06)+'s cubic-bezier(.25,.75,.35,1) both;'}
@@ -99,7 +107,7 @@ function spHub(){var area=document.getElementById('s9_area');if(!area)return;
 function spPool(t){var ai=(S&&S.spkAi&&S.spkAi['p'+t])||[];return speakingModule.pool([SP1,SP2,SP3,SP4][t-1],ai)}
 function spSet(t){var k='spIdx'+t;S[k]=(S[k]||0);return speakingModule.select(spPool(t),S[k])}
 function spNextSet(t){if((SP&&SP.adaptiveContentRef)||adaptiveSpeakingLock()){try{toast('В персональном занятии закреплён точный вариант задания')}catch(_){}return false}S['spIdx'+t]=(S['spIdx'+t]||0)+1;save();return true}
-async function spOpen(t){var lock=adaptiveSpeakingLock();if(lock)return launchAdaptiveSpeakingLock(lock);spReleaseRecording();spDisposeTask1Flow();spDisposeTask2Flow();spDisposeTask3Flow();SP_sheet=false;
+async function spOpen(t){var lock=adaptiveSpeakingLock();if(lock)return launchAdaptiveSpeakingLock(lock);spReleaseRecording();spDisposeTask1Flow();spDisposeTask2Flow();spDisposeTask3Flow();spDisposeTask4Flow();SP_sheet=false;
   if(t===1){var area=document.getElementById('s9_area');if(area)area.innerHTML='<div class="clayCard" role="status" aria-live="polite" style="padding:20px;text-align:center;font-weight:700;color:#777163;">Сервер подбирает текст…</div>';
     SP_TASK1_FLOW=createSpeakingTask1BrowserFlow({api:{post:function(path,body){return apiPost(path,body)}}});
     try{var session=await SP_TASK1_FLOW.loadAssignment();var serverSet=speakingModule.serverTask1Set(session);if(!serverSet||!SP_TASK1_CATALOG_KEYS.has(serverSet.id+'@'+serverSet.revision))throw new Error('SPEAKING_TASK1_RESPONSE_INVALID');
@@ -128,6 +136,19 @@ async function spOpen(t){var lock=adaptiveSpeakingLock();if(lock)return launchAd
       S.speakingTask3SessionId=task3Session.id;save();
       SP={t:3,set:serverTask3,session:task3Session,phase:task3Session.status==='assigned'?'intro':'question',qi:task3Session.currentQuestion-1,url:null,mic:null};spRender();return true}
     catch(error){spDisposeTask3Flow();SP=null;if(task3RecoveryPointerInvalid(error)){delete S.speakingTask3SessionId;save()}
+      try{toast(apiMessage(error,'request'))}catch(_){}spHub();return false}}
+  if(t===4){var task4Area=document.getElementById('s9_area');if(task4Area)task4Area.innerHTML='<div class="clayCard" role="status" aria-live="polite" style="padding:20px;text-align:center;font-weight:700;color:#777163;">Сервер подбирает фотопроект и загружает изображения…</div>';
+    var task4Flow=createSpeakingTask4BrowserFlow({api:{post:function(path,body){return apiPost(path,body)},get:function(path){return apiGet(path)}}});SP_TASK4_FLOW=task4Flow;
+    try{var task4Session=null;
+      if(S.speakingTask4SessionId){try{task4Session=await task4Flow.restoreSession(S.speakingTask4SessionId);if(SP_TASK4_FLOW!==task4Flow)return false}catch(error){
+        if(!task4RecoveryPointerInvalid(error))throw error;delete S.speakingTask4SessionId;save()}}
+      if(!task4Session||task4Session.status==='completed'){task4Session=await task4Flow.loadAssignment();if(SP_TASK4_FLOW!==task4Flow)return false}
+      var serverTask4=speakingModule.serverTask4Set(task4Session);
+      if(!serverTask4||!SPEAKING_TASK4_CATALOG.tasks.some(function(task){return task.id===serverTask4.id&&task.revision===serverTask4.revision}))throw new Error('SPEAKING_TASK4_RESPONSE_INVALID');
+      await task4Flow.prepareAssets();if(SP_TASK4_FLOW!==task4Flow)return false;
+      S.speakingTask4SessionId=task4Session.id;save();
+      SP={t:4,set:serverTask4,session:task4Session,phase:'intro',qi:0,url:null,mic:null,assetReady:true};spRender();return true}
+    catch(error){if(SP_TASK4_FLOW!==task4Flow)return false;spDisposeTask4Flow();SP=null;if(task4RecoveryPointerInvalid(error)){delete S.speakingTask4SessionId;save()}
       try{toast(apiMessage(error,'request'))}catch(_){}spHub();return false}}
   SP={t:t,set:spSet(t),phase:'intro',qi:0,url:null};spRender();return true}
 function launchSpeakingTask(taskNumber,contentRef){
@@ -211,6 +232,23 @@ function spRender(){var area=document.getElementById('s9_area');if(!area||!SP)re
       +'<div style="font-weight:600;font-size:13px;color:#777163;line-height:1.55;margin-top:7px;">Сервер сохранил только длительность, локальное прослушивание и самооценку каждого ответа. Автоматическая оценка появится после подключения и методической проверки в следующих этапах.</div></div>'
       +'<div style="height:10px;"></div>'+spBtn('Новая тренировка','spOpen(3)',true)+'<div style="height:10px;"></div>'+spBtn('К заданиям','initSpeaking()');
     spAnim('win','.32s');return}
+  if(officialTask4Active()&&SP.phase==='task4_review'){
+    area.innerHTML='<div id="s9_card" class="clayCard" style="position:relative;overflow:hidden;padding:20px;text-align:center;">'+wDeco()
+      +'<div style="font-size:40px;">🎙️</div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:20px;color:#2B2B2B;margin-top:8px;">Монолог записан</div>'
+      +'<div style="font-weight:600;font-size:13px;color:#777163;margin-top:5px;">Послушай локальную запись. На сервер уйдут только длительность, проверка микрофона, факт локального прослушивания и самооценка.</div></div>'
+      +'<div style="height:10px;"></div>'+spBtn('▶ Послушать монолог','spPlay()',true)
+      +'<div class="clayCard" style="padding:14px 16px;margin-top:12px;"><div style="font-weight:800;font-size:12px;color:#4A453E;">Получилось раскрыть все четыре пункта плана?</div><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px;">'
+      +'<button type="button" class="sq" onclick="spCompleteTask4(\'weak\',this)" style="min-height:44px;border:0;border-radius:12px;background:#FDEDEA;color:#A83226;font-weight:800;">Повторить</button>'
+      +'<button type="button" class="sq" onclick="spCompleteTask4(\'steady\',this)" style="min-height:44px;border:0;border-radius:12px;background:#FFF4DE;color:#8A641A;font-weight:800;">Нормально</button>'
+      +'<button type="button" class="sq" onclick="spCompleteTask4(\'strong\',this)" style="min-height:44px;border:0;border-radius:12px;background:#EAF7F0;color:#1D7F4A;font-weight:800;">Уверенно</button></div></div>'
+      +'<div style="height:10px;"></div>'+spBtn('Перезаписать монолог','spRec()');
+    spAnim('win','.32s');return}
+  if(officialTask4Active()&&SP.phase==='task4_complete'){
+    area.innerHTML='<div id="s9_card" class="clayCard" role="status" aria-live="polite" style="position:relative;overflow:hidden;padding:22px;text-align:center;">'+wDeco()
+      +'<div style="font-size:42px;">✅</div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:20px;color:#2B2B2B;margin-top:8px;">Тренировка задания 4 завершена</div>'
+      +'<div style="font-weight:600;font-size:13px;color:#777163;line-height:1.55;margin-top:7px;">Запись осталась только в браузере. Автоматическая оценка появится после подключения и методической проверки следующих этапов.</div></div>'
+      +'<div style="height:10px;"></div>'+spBtn('Новая тренировка','spOpen(4)',true)+'<div style="height:10px;"></div>'+spBtn('К заданиям','initSpeaking()');
+    spAnim('win','.32s');return}
   /* ---- интро ---- */
   if(SP.phase==='intro'){
     var body='';
@@ -224,17 +262,21 @@ function spRender(){var area=document.getElementById('s9_area');if(!area||!SP)re
       +(officialTask3Active()?'<div lang="en" style="margin-top:10px;padding:11px 13px;border-radius:13px;background:#FAF6F1;font-weight:700;font-size:12.5px;color:#4A453E;line-height:1.55;">'+ui.escapeHtml(set.instruction)+'</div>':'')
       +(officialTask3Active()?'<div role="status" aria-live="polite" style="margin-top:10px;padding:10px 12px;border-radius:13px;background:'+(SP.mic?(SP.mic.status==='passed'?'#EAF7F0':'#FFF4DE'):'#F4EFE9')+';font-weight:700;font-size:12px;color:#4A453E;">'
         +(SP.mic?(SP.mic.status==='passed'?'Микрофон готов · уровень '+Math.round((SP.mic.level||0)*100)+'%':'Сигнал тихий · подвинь микрофон ближе'):'Перед первым вопросом проверь разрешение и уровень микрофона')+'</div>':'');
-    if(t===4)body='<div style="font-weight:600;font-size:13px;color:#4A453E;line-height:1.6;">Голосовое сообщение другу: сравни две фотографии по плану. Подготовка — '+spFmt(c.prep)+', монолог — до '+spFmt(c.rec)+'.</div>';
+    if(t===4)body='<div style="font-weight:600;font-size:13px;color:#4A453E;line-height:1.6;">Подготовь проектное высказывание по двум фотографиям и четырём пунктам плана. Подготовка — '+spFmt(c.prep)+', монолог — до '+spFmt(c.rec)+'.</div>'
+      +(officialTask4Active()?'<div role="status" aria-live="polite" style="margin-top:10px;padding:10px 12px;border-radius:13px;background:#EAF7F0;color:#1D7F4A;font-weight:700;font-size:12px;">Фотопара полностью загружена и декодирована до запуска таймера.</div>':'')
+      +(officialTask4Active()?'<div role="status" aria-live="polite" style="margin-top:10px;padding:10px 12px;border-radius:13px;background:'+(SP.mic?(SP.mic.status==='passed'?'#EAF7F0':'#FFF4DE'):'#F4EFE9')+';font-weight:700;font-size:12px;color:#4A453E;">'
+        +(SP.mic?(SP.mic.status==='passed'?'Микрофон готов · уровень '+Math.round((SP.mic.level||0)*100)+'%':'Сигнал тихий · подвинь микрофон ближе'):'Перед таймером проверь разрешение и уровень микрофона')+'</div>':'');
     area.innerHTML='<div id="s9_card" class="clayCard" style="position:relative;overflow:hidden;padding:18px;margin-bottom:12px;">'+wDeco()
       +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#B54E2F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">'+c.sub.toUpperCase()+'</span>'
       +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:19px;color:#2B2B2B;margin-top:10px;">'+c.name+'</div>'
       +'<div style="margin-top:8px;">'+body+'</div>'
+      +(officialTask4Active()?spTaskBody():'')
       +'<div style="margin-top:11px;display:flex;gap:8px;">'
-      +(SP.adaptiveContentRef?'':'<button type="button" class="clk sq iconbtn" onclick="'+(t===1?'spOpen(1)':'spNextSet(SP.t);spOpen(SP.t)')+'" style="flex:1;text-align:center;background:#FFEDE4;border-radius:13px;padding:9px 0;font-weight:800;font-size:12px;color:#C2421B;cursor:pointer;">Другой вариант</button>')
-      +(officialTask3Active()?'':'<button type="button" class="clk sq iconbtn" onclick="spToggleSheet()" style="flex:1;text-align:center;background:#EAF7F0;border-radius:13px;padding:9px 0;font-weight:800;font-size:12px;color:#1D7F4A;cursor:pointer;">'+(SP_sheet?'Скрыть шпаргалку':'Шпаргалка')+'</button>')+'</div>'
-      +(SP_sheet&&!officialTask3Active()?'<div style="margin-top:11px;background:#F2F8F4;border-radius:14px;padding:11px 13px;font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.65;">'+SP_SHEET[t]+'</div>':'')
+      +(SP.adaptiveContentRef||officialTask4Active()?'':'<button type="button" class="clk sq iconbtn" onclick="'+(t===1?'spOpen(1)':'spNextSet(SP.t);spOpen(SP.t)')+'" style="flex:1;text-align:center;background:#FFEDE4;border-radius:13px;padding:9px 0;font-weight:800;font-size:12px;color:#C2421B;cursor:pointer;">Другой вариант</button>')
+      +(officialTask3Active()||officialTask4Active()?'':'<button type="button" class="clk sq iconbtn" onclick="spToggleSheet()" style="flex:1;text-align:center;background:#EAF7F0;border-radius:13px;padding:9px 0;font-weight:800;font-size:12px;color:#1D7F4A;cursor:pointer;">'+(SP_sheet?'Скрыть шпаргалку':'Шпаргалка')+'</button>')+'</div>'
+      +(SP_sheet&&!officialTask3Active()&&!officialTask4Active()?'<div style="margin-top:11px;background:#F2F8F4;border-radius:14px;padding:11px 13px;font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.65;">'+SP_SHEET[t]+'</div>':'')
       +'</div>'
-      +((t===1||officialTask2Active()||officialTask3Active())?spBtn(SP.mic?'Проверить микрофон ещё раз':'Проверить микрофон','spMicCheck(this)',!SP.mic)+'<div style="height:10px;"></div>':'')
+      +((t===1||officialTask2Active()||officialTask3Active()||officialTask4Active())?spBtn(SP.mic?'Проверить микрофон ещё раз':'Проверить микрофон','spMicCheck(this)',!SP.mic)+'<div style="height:10px;"></div>':'')
       +spBtn(c.prep?'Начать подготовку':'Начать интервью','spPrep()',true)
       +'<div style="height:10px;"></div>'
       +spBtn('← К заданиям','spStopAll();initSpeaking()');
@@ -300,16 +342,24 @@ function spTaskBody(){var t=SP.t,set=SP.set;
   if(t===2)return '<div style="margin-top:10px;background:#FAF6F1;border-radius:14px;padding:11px 13px;font-weight:600;font-size:13px;color:#4A453E;line-height:1.6;font-style:italic;">'+ui.escapeHtml(set.ad)+'</div>'
     +'<div style="margin-top:9px;font-weight:600;font-size:12.5px;color:#2B2B2B;">Задай прямые вопросы о:</div>'
     +set.points.map(function(p,i){return '<div style="margin-top:5px;font-weight:700;font-size:13px;color:'+(officialTask2Active()&&i===SP.qi?'#A83226':'#C2421B')+';">'+(i+1)+'. '+ui.escapeHtml(p)+'</div>'}).join('');
+  if(t===4&&officialTask4Active()){var photoAsset=task4PhotoAsset(set.photoPair.src);return '<div lang="en" style="margin-top:10px;font-weight:700;font-size:13.5px;color:#2B2B2B;">'+ui.escapeHtml(set.projectTitle)+'</div>'
+    +'<figure style="margin:12px 0 0;max-width:920px;">'
+    +'<img loading="lazy" decoding="async" src="'+ui.escapeHtml(set.photoPair.src)+'" alt="'+ui.escapeHtml(set.photoPair.alt)+'" width="'+(photoAsset?photoAsset.width:1536)+'" height="'+(photoAsset?photoAsset.height:1024)+'" style="display:block;width:100%;height:auto;border-radius:16px;background:#F4EFE9;">'
+    +'<figcaption style="margin-top:7px;font-weight:600;font-size:11.5px;color:#777163;line-height:1.5;">Две оригинальные фотографии для сравнения: слева и справа.</figcaption></figure>'
+    +'<div lang="en" style="margin-top:10px;font-weight:600;font-size:12px;color:#777163;line-height:1.5;">'+ui.escapeHtml(set.instruction)+'</div>'
+    +'<div style="margin-top:9px;font-weight:700;font-size:12.5px;color:#2B2B2B;">План:</div>'
+    +set.plan.map(function(p,i){return '<div lang="en" style="margin-top:5px;font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.5;">'+(i+1)+'. '+ui.escapeHtml(p)+'</div>'}).join('')}
   if(t===4)return '<div style="margin-top:10px;font-weight:700;font-size:13.5px;color:#2B2B2B;">Тема: '+set.topic+'</div>'
     +set.ph.map(function(p){return '<div style="margin-top:8px;background:#FAF6F1;border-radius:14px;padding:10px 13px;font-weight:600;font-size:12.5px;color:#4A453E;font-style:italic;">'+p+'</div>'}).join('')
     +'<div style="margin-top:9px;font-weight:600;font-size:12.5px;color:#2B2B2B;">План:</div>'
     +set.plan.map(function(p,i){return '<div style="margin-top:4px;font-weight:600;font-size:12.5px;color:#4A453E;">'+(i+1)+'. '+p+'</div>'}).join('');
   return ''}
-async function spMicCheck(btn){if(!SP||!((SP.t===1&&SP_TASK1_FLOW)||officialTask2Active()||officialTask3Active()))return false;if(btn)btn.disabled=true;
-  try{SP.mic=await (SP.t===1?SP_TASK1_FLOW:(officialTask2Active()?SP_TASK2_FLOW:SP_TASK3_FLOW)).checkMicrophone();spRender();return true}
+async function spMicCheck(btn){if(!SP||!((SP.t===1&&SP_TASK1_FLOW)||officialTask2Active()||officialTask3Active()||officialTask4Active()))return false;if(btn)btn.disabled=true;
+  try{SP.mic=await (SP.t===1?SP_TASK1_FLOW:(officialTask2Active()?SP_TASK2_FLOW:(officialTask3Active()?SP_TASK3_FLOW:SP_TASK4_FLOW))).checkMicrophone();spRender();return true}
   catch(error){SP.mic=null;try{toast(error&&error.code==='MICROPHONE_PERMISSION_DENIED'?'Нет доступа к микрофону. Разреши его в настройках браузера.':'Микрофон не готов. Проверь подключение и попробуй снова.')}catch(_){}spRender();return false}}
 function spPrep(){var c=SP_CONF[SP.t];
-  if((SP.t===1||officialTask2Active()||officialTask3Active())&&!SP.mic){try{toast('Сначала проверь микрофон — официальный таймер ещё не запущен.')}catch(_){}return}
+  if((SP.t===1||officialTask2Active()||officialTask3Active()||officialTask4Active())&&!SP.mic){try{toast('Сначала проверь микрофон — официальный таймер ещё не запущен.')}catch(_){}return}
+  if(officialTask4Active()&&!SP.assetReady){try{toast('Дождись полной загрузки фотопары — таймер ещё не запущен.')}catch(_){}return}
   if(!c.prep)return spRec();
   SP.phase='prep';SP.left=c.prep;spRender();
   spTick(c.prep,function(){spRec()})}
@@ -325,6 +375,8 @@ async function spRec(){var c=SP_CONF[SP.t];
     if(!SP||!SP_TASK3_FLOW||SP.session.id!==task3SessionId||SP.session.currentQuestion-1!==SP.qi)return false;
     try{await SP_TASK3_FLOW.startAnswer();SP.phase='rec';SP.left=c.rec;spRender();spTick(c.rec,function(){spFinish()});return true}
     catch(error){SP.phase=SP.session.status==='assigned'?'intro':'question';spRender();try{toast(error&&error.code==='MIC_CHECK_REQUIRED'?'Сначала проверь микрофон.':'Не удалось начать запись ответа.')}catch(_){}return}}
+  if(officialTask4Active()){try{await SP_TASK4_FLOW.startRecording();SP.phase='rec';SP.left=c.rec;spRender();spTick(c.rec,function(){spFinish()});return true}
+    catch(error){SP.phase='intro';spRender();try{toast(error&&error.code==='SPEAKING_TASK4_ASSET_NOT_READY'?'Дождись полной загрузки фотопары.':(error&&error.code==='MIC_CHECK_REQUIRED'?'Сначала проверь микрофон.':'Не удалось начать запись монолога.'))}catch(_){}return false}}
   try{
     var st=await navigator.mediaDevices.getUserMedia({audio:true});
     var mime=spMime();
@@ -348,6 +400,8 @@ async function spFinish(){if(!SP)return;clearInterval(SP_tm);try{lStop()}catch(e
     catch(error){SP.blob=null;SP.url=null;SP.phase=SP.session.status==='assigned'?'intro':'question'}spRender();return}
   if(officialTask3Active()){try{var task3Recording=await SP_TASK3_FLOW.stopAnswer();SP.blob=task3Recording.blob;SP.url=task3Recording.url;SP.phase='task3_review'}
     catch(error){SP.blob=null;SP.url=null;SP.phase=SP.session.status==='assigned'?'intro':'question'}spRender();return}
+  if(officialTask4Active()){try{var task4Recording=await SP_TASK4_FLOW.stopRecording();SP.blob=task4Recording.blob;SP.url=task4Recording.url;SP.phase='task4_review'}
+    catch(error){SP.blob=null;SP.url=null;SP.phase='intro'}spRender();return}
   var r=spSt();r['t'+SP.t].n++;if(!SP.adaptiveContentRef)spNextSet(SP.t);
   SP.phase='done';
   if(SP.t===1&&SP_TASK1_FLOW){try{var localRecording=await SP_TASK1_FLOW.stopRecording();SP.blob=localRecording.blob;SP.url=localRecording.url}
@@ -358,6 +412,7 @@ var SP_audio=null;
 async function spPlay(){if(!SP||!SP.url)return;
   if(officialTask2Active())return spPlayTask2Question(SP.qi+1);
   if(officialTask3Active())return spPlayTask3Answer(SP.qi+1);
+  if(officialTask4Active()){try{await SP_TASK4_FLOW.playRecording();SP.played=true;return true}catch(error){try{toast('Локальная запись монолога недоступна.')}catch(_){}return false}}
   if(SP.t===1&&SP_TASK1_FLOW){try{await SP_TASK1_FLOW.playRecording();SP.played=true;return}catch(error){try{toast('Не удалось воспроизвести запись — попробуй ещё раз')}catch(_){}return}}
   try{lStop()}catch(e){}
   if(SP_audio){try{SP_audio.pause()}catch(e){}}
@@ -384,6 +439,10 @@ async function spCompleteTask3Answer(selfRating,btn){if(!SP||SP.t!==3||!SP_TASK3
     else{SP.qi=SP.session.currentQuestion-1;SP.phase='question';save()}
     spRender();return true}
   catch(error){if(btn)btn.disabled=false;try{toast(apiMessage(error,'request'))}catch(_){}return false}}
+async function spCompleteTask4(selfRating,btn){if(!SP||SP.t!==4||!SP_TASK4_FLOW||SP.task4Completed)return false;if(btn)btn.disabled=true;
+  try{SP.session=await SP_TASK4_FLOW.complete(selfRating);SP.task4Completed=true;SP.phase='task4_complete';
+    delete S.speakingTask4SessionId;var r=spSt();r.t4.n++;spSync();save();spRender();return true}
+  catch(error){if(btn)btn.disabled=false;try{toast(apiMessage(error,'request'))}catch(_){}return false}}
 function spEtalon(){if(!SP||SP.t!==1)return;
   if(SP_audio){try{SP_audio.pause()}catch(e){}}
   var parts=speakingModule.sentences(SP.set.tx).map(function(x){return {s:0,t:x}});
@@ -395,7 +454,7 @@ async function spSTT(blob){
 function spAssignment(t,set){return speakingModule.assignment(t,set)}
 async function spEval(btn){
   if(!SP||!SP.blob)return;
-  if(officialTask2Active()||officialTask3Active())return;
+  if(officialTask2Active()||officialTask3Active()||officialTask4Active())return;
   var adaptiveRetry=document.getElementById('adaptive_speaking_retry');SP.evaluating=true;if(adaptiveRetry)adaptiveRetry.disabled=true;
   if(btn){if(btn.dataset.busy)return;btn.dataset.busy=1;btn.textContent='Расшифровываю запись…';btn.style.pointerEvents='none'}
   try{
@@ -449,7 +508,7 @@ function showAdaptiveSpeakingReturn(){var box=document.getElementById('sp_evalbo
 function spFlagTranscript(){S.sttFeedback=(S.sttFeedback||0)+1;save();try{toast('Спасибо, отметка сохранена')}catch(e){}}
 async function spSample(btn){
   if(!SP)return;var t=SP.t,set=SP.set;
-  if(officialTask2Active()||officialTask3Active())return;
+  if(officialTask2Active()||officialTask3Active()||officialTask4Active())return;
   if(btn){if(btn.dataset.busy)return;btn.dataset.busy=1;btn.textContent='Готовлю образец…';btn.style.pointerEvents='none'}
   try{
     var response=await apiPost('/api/v1/ai/generate-speaking-sample',{taskType:t,assignment:spAssignment(t,set)},true);
@@ -622,14 +681,14 @@ async function spGen(){
 /* уборка при уходе с экрана + синк */
 registerRouteHook(function(id){
   if(id!=='scr9'){
-    if(SP){spStopAll();spDisposeTask1Flow();spDisposeTask2Flow();spDisposeTask3Flow();SP=null}
+    if(SP){spStopAll();SP=null}spDisposeTask1Flow();spDisposeTask2Flow();spDisposeTask3Flow();spDisposeTask4Flow();
     if(SPE){clearInterval(SPE.tm);try{if(SPE.rec&&SPE.rec.state!=='inactive')SPE.rec.stop()}catch(e){}try{SPE.stream&&SPE.stream.getTracks().forEach(function(x){x.stop()})}catch(e){}SPE=null}}});
 registerRouteHook(function(id){if(id==='scr9')initSpeaking()});
 
 /* Имена для обработчиков этого экрана: загрузчик кладёт их на window вместе с чанком. */
 export {
   SP,SPE,
-  initSpeaking,spCompleteTask1,spCompleteTask2Question,spCompleteTask3Answer,spDeleteRecording,spEtalon,spEval,spExam,spFinish,spFlagTranscript,spMicCheck,spNextQ,
+  initSpeaking,spCompleteTask1,spCompleteTask2Question,spCompleteTask3Answer,spCompleteTask4,spDeleteRecording,spEtalon,spEval,spExam,spFinish,spFlagTranscript,spMicCheck,spNextQ,
   launchSpeakingTask,spNextSet,spOpen,spPlay,spPlayTask2Question,spPlayTask3Answer,spPrep,spRec,spRestartAdaptive,spSample,spStopAll,spToggleSheet,spVoiceSample,
   speEndStage,speNextQ,speRec,speStart,
 };

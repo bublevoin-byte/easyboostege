@@ -5,7 +5,7 @@
     1: { name: 'Чтение вслух', prep: 90, rec: 90, max: 1, sub: 'задание 1 · 1 балл' },
     2: { name: 'Вопросы к объявлению', prep: 60, rec: 80, per: 20, max: 4, sub: 'задание 2 · 4 балла' },
     3: { name: 'Интервью', prep: 0, rec: 40, max: 5, sub: 'задание 3 · 5 баллов' },
-    4: { name: 'Монолог по фото', prep: 60, rec: 150, max: 10, sub: 'задание 4 · 10 баллов' },
+    4: { name: 'Монолог по фото', prep: 150, rec: 180, max: 10, sub: 'задание 4 · 10 баллов' },
   };
 
   const TASKS = [1, 2, 3, 4];
@@ -210,6 +210,47 @@
     };
   }
 
+  function serverTask4Set(session) {
+    const task = session && session.task;
+    const assessment = session && session.assessment;
+    if (!task || typeof task !== 'object' || Array.isArray(task)
+      || Object.keys(task).sort().join(',') !== 'cefr,id,instruction,maxScore,photoPair,plan,preparationSeconds,projectTitle,responseSeconds,revision,taskType,topic'
+      || !/^speaking-pilot-v1\.task4\.[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(String(task.id || ''))
+      || task.revision !== 1 || task.taskType !== 4
+      || task.preparationSeconds !== 150 || task.responseSeconds !== 180 || task.maxScore !== 10
+      || !['B1', 'B2', 'B2+/C1'].includes(task.cefr)
+      || typeof task.topic !== 'string' || !task.topic.trim()
+      || typeof task.projectTitle !== 'string' || !task.projectTitle.trim()
+      || !Array.isArray(task.plan) || task.plan.length !== 4
+      || task.plan.some((point) => typeof point !== 'string' || !point.trim())
+      || !task.photoPair || typeof task.photoPair !== 'object' || Array.isArray(task.photoPair)
+      || Object.keys(task.photoPair).sort().join(',') !== 'alt,assetId,panels,src'
+      || !/^speaking-task4-photo-pair\.[a-z0-9]+(?:-[a-z0-9]+)*\.v1$/u.test(String(task.photoPair.assetId || ''))
+      || typeof task.photoPair?.src !== 'string'
+      || !/^\/assets\/speaking\/task4-v1\/[a-z0-9-]+\.png$/u.test(task.photoPair.src)
+      || typeof task.photoPair.alt !== 'string' || !task.photoPair.alt.trim()
+      || !Array.isArray(task.photoPair.panels) || task.photoPair.panels.length !== 2
+      || task.photoPair.panels.some((panel, index) => !panel || typeof panel !== 'object'
+        || Array.isArray(panel) || Object.keys(panel).sort().join(',') !== 'alt,number'
+        || panel.number !== index + 1 || typeof panel.alt !== 'string' || !panel.alt.trim())
+      || assessment?.available !== false || assessment.reason !== 'deferred_to_tickets_06_07') return null;
+    return {
+      id: task.id,
+      revision: task.revision,
+      topic: task.topic,
+      projectTitle: task.projectTitle,
+      instruction: task.instruction,
+      photoPair: {
+        assetId: task.photoPair.assetId,
+        src: task.photoPair.src,
+        alt: task.photoPair.alt,
+        panels: task.photoPair.panels.map((panel) => ({ ...panel })),
+      },
+      plan: task.plan.slice(),
+      cefr: task.cefr,
+    };
+  }
+
   global.EasyBoostSpeaking = Object.freeze({
     config,
     isExperimentalTask,
@@ -231,6 +272,7 @@
     serverTask1Set,
     serverTask2Set,
     serverTask3Set,
+    serverTask4Set,
     TASKS,
     EXAM_MAX,
     BADGES,
