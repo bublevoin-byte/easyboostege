@@ -12,11 +12,14 @@ import {
 import {adaptiveRuntimeSnapshot,completeAdaptiveServerAttempt,openAdaptivePlan} from '../adaptive-session-runtime.js';
 import {adaptiveSpeakingTask} from '../adaptive-speaking-tasks.js';
 import {voiceTutorButton} from '../voice-tutor.js';
+import {createSpeakingTask1BrowserFlow} from '../speaking-task1-runtime.js';
+import {SPEAKING_TASK1_CATALOG} from '../content/speaking/task1-v1.js';
 
 /* ===== SPEAKING v2: устная часть ЕГЭ, 4 задания ===== */
 const SP1=[
 {tx:'Libraries are changing fast. Twenty years ago they were quiet places with paper books only. Today a modern library offers computers, online courses and clubs for different hobbies. People come here not only to read, but also to meet friends, work on projects or listen to interesting lectures. Many libraries stay open late in the evening, so students often do their homework there. Scientists say that such places help people of all ages to keep learning through the whole life.'},
 {tx:'Walking is the easiest kind of sport. You do not need special equipment, a gym or a trainer — only comfortable shoes. Doctors say that thirty minutes of walking a day make the heart stronger, improve sleep and even help the brain to work better. Walking with friends is also a great way to spend time together. Some schools now organise walking clubs, where students discover interesting places in their city and learn to notice the beauty around them.'}];
+const SP_TASK1_CATALOG_KEYS=new Set(SPEAKING_TASK1_CATALOG.tasks.map(function(task){return task.id+'@'+task.revision}));
 const ADAPTIVE_SP2=adaptiveSpeakingTask('builtin:speaking:task:2:v1').assignment;
 const ADAPTIVE_SP4=adaptiveSpeakingTask('builtin:speaking:task:4:v1').assignment;
 const SP2=[
@@ -38,7 +41,7 @@ const SP_SHEET={
 2:'<b>Как задавать прямые вопросы:</b><br>Каждый пункт превращай в ПРЯМОЙ вопрос:<br>— цена → <i>How much does it cost?</i><br>— даты → <i>When does the course start?</i><br>— место → <i>Where is the club located?</i><br>— возможность → <i>Can I…? / Is it possible to…?</i><br><b>Ловушки:</b> «What about the price?» — НЕ вопрос, балл не дадут. Вопрос «зачитыванием пункта» (price?) — тоже. Нужен полный вопрос с вспомогательным глаголом.',
 3:'<b>Как отвечать на вопросы интервью:</b><br>— Отвечай развёрнуто: 2-3 предложения, а не «Yes, I do».<br>— Формула: прямой ответ → причина → пример. <i>I usually read in my free time. It helps me to relax. For example, last week I finished a great detective story.</i><br>— Не молчи: если нужно время, начни с <i>Well, let me think…</i><br>— Следи за временем вопроса: «What did you do…» → отвечай в прошедшем.',
 4:'<b>Скелет монолога (2,5–3 минуты):</b><br>1. Вступление: <i>I have found two photos for our project about…</i><br>2. Описание: <i>In the first photo we can see… In the second photo there is…</i><br>3. Общее: <i>Both photos show… / What these photos have in common is…</i><br>4. Различия: <i>The main difference is that… while…</i><br>5. Мнение: <i>As for me, I prefer… because…</i><br>6. Финал: <i>That is all I wanted to say.</i><br><b>Ловушка:</b> пропустил пункт плана — минус баллы за решение задачи.'};
-let SP=null,SP_rec=null,SP_chunks=[],SP_tm=null,SP_sheet=false;
+let SP=null,SP_rec=null,SP_chunks=[],SP_tm=null,SP_sheet=false,SP_TASK1_FLOW=null;
 function spAnim(n,d){ui.animate('s9_card',n,d)}
 function spMime(){return speakingModule.preferredMimeType(window.MediaRecorder)}
 function spFmt(s){return speakingModule.formatTime(s)}
@@ -46,9 +49,10 @@ function spStopAll(){clearInterval(SP_tm);SP_tm=null;
   if(SP_rec&&SP_rec.state!=='inactive'){try{SP_rec.stop()}catch(e){}}
   try{lStop()}catch(e){}}
 function spReleaseRecording(){if(SP&&SP.url)try{URL.revokeObjectURL(SP.url)}catch(e){}if(SP){SP.url=null;SP.blob=null}SP_chunks=[]}
+function spDisposeTask1Flow(){if(SP_TASK1_FLOW){SP_TASK1_FLOW.dispose();SP_TASK1_FLOW=null}}
 function adaptiveSpeakingLock(){try{var active=adaptiveRuntimeSnapshot().active;return active&&active.module==='speaking'?active:null}catch(_){return null}}
 function launchAdaptiveSpeakingLock(lock){var task=lock&&adaptiveSpeakingTask(lock.contentRef);return Boolean(task&&launchSpeakingTask(task.taskNumber,lock.contentRef))}
-function initSpeaking(){if(!S)return;var lock=adaptiveSpeakingLock();spStopAll();spReleaseRecording();SP=null;spSync();if(lock&&launchAdaptiveSpeakingLock(lock))return;spHub()}
+function initSpeaking(){if(!S)return;var lock=adaptiveSpeakingLock();spStopAll();spReleaseRecording();spDisposeTask1Flow();SP=null;spSync();if(lock&&launchAdaptiveSpeakingLock(lock))return;spHub()}
 function spHub(){var area=document.getElementById('s9_area');if(!area)return;
   var lock=adaptiveSpeakingLock();if(lock&&launchAdaptiveSpeakingLock(lock))return;
   var r=spSt();var GA=0;function ga(){return 'animation:win .34s '+((GA++)*0.06)+'s cubic-bezier(.25,.75,.35,1) both;'}
@@ -81,13 +85,19 @@ function spHub(){var area=document.getElementById('s9_area');if(!area)return;
 function spPool(t){var ai=(S&&S.spkAi&&S.spkAi['p'+t])||[];return speakingModule.pool([SP1,SP2,SP3,SP4][t-1],ai)}
 function spSet(t){var k='spIdx'+t;S[k]=(S[k]||0);return speakingModule.select(spPool(t),S[k])}
 function spNextSet(t){if((SP&&SP.adaptiveContentRef)||adaptiveSpeakingLock()){try{toast('В персональном занятии закреплён точный вариант задания')}catch(_){}return false}S['spIdx'+t]=(S['spIdx'+t]||0)+1;save();return true}
-function spOpen(t){var lock=adaptiveSpeakingLock();if(lock)return launchAdaptiveSpeakingLock(lock);spReleaseRecording();SP={t:t,set:spSet(t),phase:'intro',qi:0,url:null};SP_sheet=false;spRender();return true}
+async function spOpen(t){var lock=adaptiveSpeakingLock();if(lock)return launchAdaptiveSpeakingLock(lock);spReleaseRecording();spDisposeTask1Flow();SP_sheet=false;
+  if(t===1){var area=document.getElementById('s9_area');if(area)area.innerHTML='<div class="clayCard" role="status" aria-live="polite" style="padding:20px;text-align:center;font-weight:700;color:#777163;">Сервер подбирает текст…</div>';
+    SP_TASK1_FLOW=createSpeakingTask1BrowserFlow({api:{post:function(path,body){return apiPost(path,body)}}});
+    try{var session=await SP_TASK1_FLOW.loadAssignment();var serverSet=speakingModule.serverTask1Set(session);if(!serverSet||!SP_TASK1_CATALOG_KEYS.has(serverSet.id+'@'+serverSet.revision))throw new Error('SPEAKING_TASK1_RESPONSE_INVALID');
+      SP={t:1,set:serverSet,session:session,phase:'intro',qi:0,url:null,mic:null};spRender();return true}
+    catch(error){spDisposeTask1Flow();SP=null;try{toast(apiMessage(error,'request'))}catch(_){}spHub();return false}}
+  SP={t:t,set:spSet(t),phase:'intro',qi:0,url:null};spRender();return true}
 function launchSpeakingTask(taskNumber,contentRef){
   var task=adaptiveSpeakingTask(contentRef);if(!task||task.taskNumber!==taskNumber)return false;
   var set=taskNumber===2?{...task.assignment,exq:SP2[0].exq}:task.assignment;
   spReleaseRecording();SP={t:taskNumber,set:set,phase:'intro',qi:0,url:null,adaptiveContentRef:contentRef};SP_sheet=false;spRender();return true}
 function spRestartAdaptive(){if(!SP||!SP.adaptiveContentRef||SP.evaluating)return false;var taskNumber=SP.t,contentRef=SP.adaptiveContentRef;spStopAll();return launchSpeakingTask(taskNumber,contentRef)}
-function spBtn(label,fn,solid){return '<button class="sq" style="'+WBTN+(solid?'background:linear-gradient(135deg,#FFA570,#F2683F);color:#fff;border:none;box-shadow:0 12px 24px rgba(242,104,63,.32);':'color:#B54E2F;')+'" onclick="'+fn+'">'+label+'</button>'}
+function spBtn(label,fn,solid){return '<button type="button" class="sq" style="'+WBTN+(solid?'background:linear-gradient(135deg,#FFA570,#F2683F);color:#fff;border:none;box-shadow:0 12px 24px rgba(242,104,63,.32);':'color:#B54E2F;')+'" onclick="'+fn+'">'+label+'</button>'}
 function spTimerChip(){return '<div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-top:12px;">'
   +'<span id="s9_timer" style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:34px;color:#2B2B2B;">'+spFmt(SP.left)+'</span></div>'
   +'<div style="margin-top:8px;height:7px;border-radius:5px;background:#F1EDE7;"><div id="s9_tbar" style="width:100%;height:100%;border-radius:5px;background:linear-gradient(90deg,#FFA570,#F2683F);"></div></div>'}
@@ -104,7 +114,9 @@ function spRender(){var area=document.getElementById('s9_area');if(!area||!SP)re
   /* ---- интро ---- */
   if(SP.phase==='intro'){
     var body='';
-    if(t===1)body='<div style="font-weight:600;font-size:13px;color:#4A453E;line-height:1.6;">Прочитай текст вслух. Подготовка — '+spFmt(c.prep)+', чтение — до '+spFmt(c.rec)+'.</div>';
+    if(t===1)body='<div style="font-weight:600;font-size:13px;color:#4A453E;line-height:1.6;">Прочитай назначенный сервером текст вслух. Подготовка — '+spFmt(c.prep)+', чтение — до '+spFmt(c.rec)+'.</div>'
+      +'<div role="status" aria-live="polite" style="margin-top:10px;padding:10px 12px;border-radius:13px;background:'+(SP.mic?(SP.mic.status==='passed'?'#EAF7F0':'#FFF4DE'):'#F4EFE9')+';font-weight:700;font-size:12px;color:#4A453E;">'
+      +(SP.mic?(SP.mic.status==='passed'?'Микрофон готов · уровень '+Math.round((SP.mic.level||0)*100)+'%':'Сигнал тихий · подвинь микрофон ближе'):'Перед таймером проверь разрешение и уровень микрофона')+'</div>';
     if(t===2)body='<div style="font-weight:600;font-size:13px;color:#4A453E;line-height:1.6;">Изучи объявление и задай <b>4 прямых вопроса</b> по пунктам. Подготовка — '+spFmt(c.prep)+', на каждый вопрос — 20 секунд.</div>';
     if(t===3)body='<div style="font-weight:600;font-size:13px;color:#4A453E;line-height:1.6;">Интервью на тему «'+set.topic+'». Услышишь 5 вопросов — на каждый отвечай развёрнуто, до 40 секунд. Подготовки нет, как на экзамене.</div>';
     if(t===4)body='<div style="font-weight:600;font-size:13px;color:#4A453E;line-height:1.6;">Голосовое сообщение другу: сравни две фотографии по плану. Подготовка — '+spFmt(c.prep)+', монолог — до '+spFmt(c.rec)+'.</div>';
@@ -113,10 +125,11 @@ function spRender(){var area=document.getElementById('s9_area');if(!area||!SP)re
       +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:19px;color:#2B2B2B;margin-top:10px;">'+c.name+'</div>'
       +'<div style="margin-top:8px;">'+body+'</div>'
       +'<div style="margin-top:11px;display:flex;gap:8px;">'
-      +(SP.adaptiveContentRef?'':'<button type="button" class="clk sq iconbtn" onclick="spNextSet(SP.t);spOpen(SP.t)" style="flex:1;text-align:center;background:#FFEDE4;border-radius:13px;padding:9px 0;font-weight:800;font-size:12px;color:#C2421B;cursor:pointer;">Другой вариант</button>')
+      +(SP.adaptiveContentRef?'':'<button type="button" class="clk sq iconbtn" onclick="'+(t===1?'spOpen(1)':'spNextSet(SP.t);spOpen(SP.t)')+'" style="flex:1;text-align:center;background:#FFEDE4;border-radius:13px;padding:9px 0;font-weight:800;font-size:12px;color:#C2421B;cursor:pointer;">Другой вариант</button>')
       +'<button type="button" class="clk sq iconbtn" onclick="spToggleSheet()" style="flex:1;text-align:center;background:#EAF7F0;border-radius:13px;padding:9px 0;font-weight:800;font-size:12px;color:#1D7F4A;cursor:pointer;">'+(SP_sheet?'Скрыть шпаргалку':'Шпаргалка')+'</button></div>'
       +(SP_sheet?'<div style="margin-top:11px;background:#F2F8F4;border-radius:14px;padding:11px 13px;font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.65;">'+SP_SHEET[t]+'</div>':'')
       +'</div>'
+      +(t===1?spBtn(SP.mic?'Проверить микрофон ещё раз':'Проверить микрофон','spMicCheck(this)',!SP.mic)+'<div style="height:10px;"></div>':'')
       +spBtn(c.prep?'Начать подготовку':'Начать интервью','spPrep()',true)
       +'<div style="height:10px;"></div>'
       +spBtn('← К заданиям','spStopAll();initSpeaking()');
@@ -148,7 +161,8 @@ function spRender(){var area=document.getElementById('s9_area');if(!area||!SP)re
   /* ---- результат ---- */
   if(SP.phase==='done'){var r=spSt();
     var extra='';
-    if(t===1)extra='<div style="height:10px;"></div>'+spBtn('🔊 Эталон диктора','spEtalon()');
+    if(t===1)extra='<div class="clayCard" role="status" aria-live="polite" style="padding:14px 16px;margin-top:12px;background:#FFF4DE;color:#6E5422;font-weight:700;font-size:12.5px;line-height:1.55;">Оценка произношения пока не подключена. Здесь нет фонетического балла: запись остаётся в браузере, а сервер получает только метаданные тренировки.</div>'
+      +'<div style="height:10px;"></div>'+spBtn('🔊 Эталон диктора','spEtalon()');
     if(t===2)extra='<div class="clayCard" style="padding:14px 16px;margin-top:12px;"><div style="font-weight:800;font-size:10px;letter-spacing:1.2px;color:#1D7F4A;">ОБРАЗЦЫ ВОПРОСОВ</div>'
       +set.points.map(function(p,i){return '<div style="margin-top:8px;font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.5;"><b>'+(i+1)+'. '+p+':</b><br><i>'+set.exq[i]+'</i></div>'}).join('')+'</div>';
     if(t===4)extra='<div class="clayCard" style="padding:14px 16px;margin-top:12px;"><div style="font-weight:800;font-size:10px;letter-spacing:1.2px;color:#1D7F4A;">ПРОВЕРЬ СЕБЯ</div>'
@@ -161,18 +175,23 @@ function spRender(){var area=document.getElementById('s9_area');if(!area||!SP)re
       +'<div style="font-weight:600;font-size:13px;color:#777163;margin-top:5px;">Послушай себя со стороны и сверься со шпаргалкой.<br>Тренировок в этом задании: '+r['t'+t].n+'</div></div>'
       +'<div style="height:12px;"></div>'
       +(SP.url?spBtn('▶ Послушать свою запись','spPlay()',true):'<div style="text-align:center;font-weight:600;font-size:12.5px;color:#A83226;">Запись не получилась — проверь доступ к микрофону</div>')
-      +(SP.blob?'<div style="height:10px;"></div><button class="sq" onclick="spEval(this)" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#6FC2B0,#1F9E5A)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(31,158,90,.3);">✨ Оценить с ИИ по критериям</button>':'')
+      +(SP.blob&&t>1?'<div style="height:10px;"></div><button type="button" class="sq" onclick="spEval(this)" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#6FC2B0,#1F9E5A)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(31,158,90,.3);">✨ Оценить с ИИ по критериям</button>':'')
       +(SP.blob?'<div style="height:10px;"></div>'+spBtn('Удалить запись','spDeleteRecording()'):'')
+      +(SP.blob&&t===1&&!SP.task1Completed?'<div class="clayCard" style="padding:14px 16px;margin-top:12px;"><div style="font-weight:800;font-size:12px;color:#4A453E;">Как ощущалось чтение?</div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px;">'
+        +'<button type="button" class="sq" onclick="spCompleteTask1(\'weak\',this)" style="min-height:44px;border:0;border-radius:12px;background:#FDEDEA;color:#A83226;font-weight:800;">Нужно повторить</button>'
+        +'<button type="button" class="sq" onclick="spCompleteTask1(\'steady\',this)" style="min-height:44px;border:0;border-radius:12px;background:#FFF4DE;color:#8A641A;font-weight:800;">Нормально</button>'
+        +'<button type="button" class="sq" onclick="spCompleteTask1(\'strong\',this)" style="min-height:44px;border:0;border-radius:12px;background:#EAF7F0;color:#1D7F4A;font-weight:800;">Уверенно</button></div></div>':'')
+      +(t===1&&SP.task1Completed?'<div role="status" aria-live="polite" style="margin-top:12px;padding:10px 12px;border-radius:13px;background:#EAF7F0;color:#1D7F4A;font-weight:800;font-size:12px;">Безопасная история тренировки сохранена.</div>':'')
       +(SP.t>1?'<div style="height:10px;"></div>'+spBtn('Образец ответа от ИИ','spSample(this)'):'')
       +'<div id="sp_evalbox"></div>'
       +extra
       +(SP.adaptiveContentRef
         ?'<div style="height:10px;"></div><div style="text-align:center;font-weight:700;font-size:12.5px;color:#777163;line-height:1.5;">В персональном занятии закреплено это задание. Оцени ответ или перезапиши тот же вариант.</div><div style="height:10px;"></div><button id="adaptive_speaking_retry" class="sq" style="'+WBTN+'" onclick="spRestartAdaptive()">Записать этот вариант ещё раз</button>'
-        :'<div style="height:10px;"></div>'+spBtn('Ещё раз','spNextSet(SP.t);spOpen(SP.t)')
+        :'<div style="height:10px;"></div>'+spBtn('Ещё раз',t===1?'spOpen(1)':'spNextSet(SP.t);spOpen(SP.t)')
           +'<div style="height:10px;"></div>'+spBtn('К заданиям','spStopAll();initSpeaking()'));
     spAnim('win','.32s');setTxt('s9_today',SP_CONF[t].name);return}}
 function spTaskBody(){var t=SP.t,set=SP.set;
-  if(t===1)return '<div style="font-weight:500;font-size:13.5px;line-height:1.7;color:#2B2B2B;margin-top:10px;">'+set.tx+'</div>';
+  if(t===1)return '<div style="font-weight:500;font-size:13.5px;line-height:1.7;color:#2B2B2B;margin-top:10px;">'+ui.escapeHtml(set.tx)+'</div>';
   if(t===2)return '<div style="margin-top:10px;background:#FAF6F1;border-radius:14px;padding:11px 13px;font-weight:600;font-size:13px;color:#4A453E;line-height:1.6;font-style:italic;">'+set.ad+'</div>'
     +'<div style="margin-top:9px;font-weight:600;font-size:12.5px;color:#2B2B2B;">Задай прямые вопросы о:</div>'
     +set.points.map(function(p,i){return '<div style="margin-top:5px;font-weight:700;font-size:13px;color:#C2421B;">'+(i+1)+'. '+p+'</div>'}).join('');
@@ -181,13 +200,19 @@ function spTaskBody(){var t=SP.t,set=SP.set;
     +'<div style="margin-top:9px;font-weight:600;font-size:12.5px;color:#2B2B2B;">План:</div>'
     +set.plan.map(function(p,i){return '<div style="margin-top:4px;font-weight:600;font-size:12.5px;color:#4A453E;">'+(i+1)+'. '+p+'</div>'}).join('');
   return ''}
+async function spMicCheck(btn){if(!SP||SP.t!==1||!SP_TASK1_FLOW)return false;if(btn)btn.disabled=true;
+  try{SP.mic=await SP_TASK1_FLOW.checkMicrophone();spRender();return true}
+  catch(error){SP.mic=null;try{toast(error&&error.code==='MICROPHONE_PERMISSION_DENIED'?'Нет доступа к микрофону. Разреши его в настройках браузера.':'Микрофон не готов. Проверь подключение и попробуй снова.')}catch(_){}spRender();return false}}
 function spPrep(){var c=SP_CONF[SP.t];
+  if(SP.t===1&&!SP.mic){try{toast('Сначала проверь микрофон — официальный таймер ещё не запущен.')}catch(_){}return}
   if(!c.prep){spRec();return}
   SP.phase='prep';SP.left=c.prep;spRender();
   spTick(c.prep,function(){spRec()})}
 async function spRec(){var c=SP_CONF[SP.t];
   clearInterval(SP_tm);
   spReleaseRecording();
+  if(SP.t===1&&SP_TASK1_FLOW){try{await SP_TASK1_FLOW.startRecording();SP.phase='rec';SP.left=c.rec;spRender();spTick(c.rec,function(){spFinish()});return}
+    catch(error){SP.phase='intro';spRender();try{toast(error&&error.code==='MIC_CHECK_REQUIRED'?'Сначала проверь микрофон.':'Не удалось начать запись. Проверь разрешение на микрофон.')}catch(_){}return}}
   try{
     var st=await navigator.mediaDevices.getUserMedia({audio:true});
     var mime=spMime();
@@ -206,19 +231,25 @@ function spNextQ(){if(!SP)return;
   SP.qi++;SP.left=SP_CONF[3].rec;spRender();
   try{lPlayRaw([{s:1,t:SP.set.qs[SP.qi]}])}catch(e){}
   spTick(SP_CONF[3].rec,function(){SP.qi>=4?spFinish():spNextQ()})}
-function spFinish(){if(!SP)return;clearInterval(SP_tm);try{lStop()}catch(e){}
+async function spFinish(){if(!SP)return;clearInterval(SP_tm);try{lStop()}catch(e){}
   var r=spSt();r['t'+SP.t].n++;if(!SP.adaptiveContentRef)spNextSet(SP.t);
   SP.phase='done';
+  if(SP.t===1&&SP_TASK1_FLOW){try{var localRecording=await SP_TASK1_FLOW.stopRecording();SP.blob=localRecording.blob;SP.url=localRecording.url}
+    catch(error){SP.blob=null;SP.url=null}spSync();save();spRender();return}
   if(SP_rec&&SP_rec.state!=='inactive'){try{SP_rec.stop()}catch(e){}}
   spSync();save();spRender()}
 var SP_audio=null;
-function spPlay(){if(!SP||!SP.url)return;
+async function spPlay(){if(!SP||!SP.url)return;
+  if(SP.t===1&&SP_TASK1_FLOW){try{await SP_TASK1_FLOW.playRecording();SP.played=true;return}catch(error){try{toast('Не удалось воспроизвести запись — попробуй ещё раз')}catch(_){}return}}
   try{lStop()}catch(e){}
   if(SP_audio){try{SP_audio.pause()}catch(e){}}
   SP_audio=new Audio(SP.url);
   SP_audio.onerror=function(){try{toast('Не удалось воспроизвести запись — попробуй записать ещё раз')}catch(e){}};
   SP_audio.play().catch(function(){try{toast('Браузер не дал воспроизвести — нажми ещё раз')}catch(e){}})}
-function spDeleteRecording(){if(!SP)return;if(SP.url)try{URL.revokeObjectURL(SP.url)}catch(e){}SP.url=null;SP.blob=null;SP_chunks=[];spRender();try{toast('Запись удалена')}catch(e){}}
+function spDeleteRecording(){if(!SP)return;if(SP.t===1&&SP_TASK1_FLOW)SP_TASK1_FLOW.dispose();else if(SP.url)try{URL.revokeObjectURL(SP.url)}catch(e){}SP.url=null;SP.blob=null;SP_chunks=[];spRender();try{toast('Запись удалена')}catch(e){}}
+async function spCompleteTask1(selfRating,btn){if(!SP||SP.t!==1||!SP_TASK1_FLOW||SP.task1Completed)return false;if(btn)btn.disabled=true;
+  try{SP.completedSession=await SP_TASK1_FLOW.complete(selfRating);SP.task1Completed=true;spRender();return true}
+  catch(error){if(btn)btn.disabled=false;try{toast(apiMessage(error,'request'))}catch(_){}return false}}
 function spEtalon(){if(!SP||SP.t!==1)return;
   if(SP_audio){try{SP_audio.pause()}catch(e){}}
   var parts=speakingModule.sentences(SP.set.tx).map(function(x){return {s:0,t:x}});
@@ -455,14 +486,14 @@ async function spGen(){
 /* уборка при уходе с экрана + синк */
 registerRouteHook(function(id){
   if(id!=='scr9'){
-    if(SP){spStopAll();SP=null}
+    if(SP){spStopAll();spDisposeTask1Flow();SP=null}
     if(SPE){clearInterval(SPE.tm);try{if(SPE.rec&&SPE.rec.state!=='inactive')SPE.rec.stop()}catch(e){}try{SPE.stream&&SPE.stream.getTracks().forEach(function(x){x.stop()})}catch(e){}SPE=null}}});
 registerRouteHook(function(id){if(id==='scr9')initSpeaking()});
 
 /* Имена для обработчиков этого экрана: загрузчик кладёт их на window вместе с чанком. */
 export {
   SP,SPE,
-  initSpeaking,spDeleteRecording,spEtalon,spEval,spExam,spFinish,spFlagTranscript,spNextQ,
+  initSpeaking,spCompleteTask1,spDeleteRecording,spEtalon,spEval,spExam,spFinish,spFlagTranscript,spMicCheck,spNextQ,
   launchSpeakingTask,spNextSet,spOpen,spPlay,spPrep,spRec,spRestartAdaptive,spSample,spStopAll,spToggleSheet,spVoiceSample,
   speEndStage,speNextQ,speRec,speStart,
 };

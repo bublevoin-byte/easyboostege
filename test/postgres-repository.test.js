@@ -680,6 +680,7 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
       '038_adaptive_commercial_scope.sql',
       '039_adaptive_metrics_window_indexes.sql',
       '040_word_mastery.sql',
+      '041_speaking_task1_sessions.sql',
     ]);
 
     const username = await repository.createTelegramUser(telegramId, `Integration ${suffix}`);

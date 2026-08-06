@@ -9,6 +9,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { claimAiOperationSlot, claimUnseenBankTask, claimVoiceTutorRuleDiscovery, failVoiceTutorRuleDiscovery, getAdaptiveDiagnostic, getAdaptiveDiagnosticCompletionReplay, getBankTask, getBankTaskByExternalId, listBankTaskContents, recordTaskDelivery, settleAiOperationSlot, upsertBankTask, activateTrial, activateVoiceTutorProxySession, closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, consumeVoiceTutorProxyTicket, countAiRequestsSince, createPaymentRequest, createPaymentRequestForUser, createRuleCardForVoiceTutorSession, createSession, createSpeakingAttempt, createTelegramAuthCode, createVoiceTutorReport, createWritingAttempt, deleteUserData, exportUserData, finalizeVoiceTutorProxySession, finishSpeakingAttempt, finishVoiceTutorSession, finishWritingAttempt, getAdaptiveDiagnosticStartClaim, getAdaptiveLearningEvidenceSources, getAdaptiveLearningGoal, getAdaptiveLearningProfile, getCurrentAdaptiveLearningPlan, getAdaptiveLearningPlanRevision, getAdaptiveLearningSessionCreateReplay, createAdaptiveLearningSession, getCurrentAdaptiveLearningSession, getAdaptiveLearningSessionCommercialScope, getAdaptiveLearningSessionReplacementReplay, replaceAdaptiveLearningSessionBlock, getAdaptiveLearningSessionMutationReplay, startAdaptiveLearningSessionBlock, getAdaptiveLearningSessionExecution, getAdaptiveLearningSessionAdvanceContext, advanceAdaptiveLearningSession, getAdaptiveLearningSessionFinishContext, finishAdaptiveLearningSession, getAdaptiveLearningWeekUsage, getAdaptiveLearningCommercialUsage, getAdaptiveLearningCompletedSessionReports, getAdaptiveLearningMetrics, getAiUsageMetrics, getApprovedRuleCard, getGeneratedTask, getRuleCard, getSharedGeneratedTask, getModuleAttempt, getReadingCompletedAttempts, getPaymentRequestForUser, getPrivacyConsent, getProgress, getSpeakingAttempt, getUser, getVoiceTutorAccess, getVoiceTutorRecoveryMap, getVoiceTutorRecoveryMetrics, getVoiceTutorSession, getWordProgress, getWritingAttempt, healthCheck, isSessionActive, issueVoiceTutorProxyTicket, reissueVoiceTutorFallbackNonce, listPaymentRequests, listRuleCards, listVoiceTutorReports, recordModuleAttempt, recordModuleAttemptWithAdaptiveClaim, bindAdaptiveLearningServerAttempt, reserveVoiceTutorSession, resolvePaymentRequest, reviewRuleCard, reviewVoiceTutorReport, revokeEntitlement, revokeSession, saveAdaptiveLearningGoal, saveAdaptiveLearningProfile, saveAdaptiveLearningPlan, saveGeneratedTask, saveProgress, setPrivacyConsent, setUserRole, submitVoiceTutorRepeat, upsertErrorBank, upsertWordProgress, mergeProgress, getUserByTelegram, createTelegramUser, logAiRequest, getSub, advanceVoiceTutorSession, clarifyVoiceTutorSession, setVoiceTutorSessionDelivery, switchVoiceTutorSessionDelivery, startAdaptiveDiagnostic, getCurrentAdaptiveDiagnostic, answerAdaptiveDiagnostic, completeAdaptiveDiagnostic } from './db.js';
+import { assignSpeakingTask1Session, completeSpeakingTask1Session, getSpeakingTask1Session } from './db.js';
 import { config } from './config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from './ai/writing.js';
 import { buildContentPrompt, CONTENT_PROMPT_VERSION, contentRequestSchema, parseContentResponse } from './ai/content.js';
@@ -32,6 +33,7 @@ import { createTelegramService } from './services/telegram.js';
 import { createUserRoutes } from './routes/users.js';
 import { createProgressRoutes } from './routes/progress.js';
 import { createReadingRoutes } from './routes/reading.js';
+import { createSpeakingRoutes } from './routes/speaking.js';
 import { createAdaptiveLearningRoutes } from './routes/adaptive-learning.js';
 import { createAiRoutes } from './routes/ai.js';
 import { createMediaRoutes } from './routes/media.js';
@@ -206,6 +208,7 @@ const dbApi = {
   answerAdaptiveDiagnostic,
   completeAdaptiveDiagnostic,
   createWritingAttempt, finishWritingAttempt, getWritingAttempt, createSpeakingAttempt, finishSpeakingAttempt, getSpeakingAttempt,
+  assignSpeakingTask1Session, completeSpeakingTask1Session, getSpeakingTask1Session,
   getGeneratedTask, getSharedGeneratedTask, saveGeneratedTask, logAiRequest, claimAiOperationSlot, settleAiOperationSlot,
   upsertBankTask, getBankTask, getBankTaskByExternalId, claimUnseenBankTask, recordTaskDelivery, listBankTaskContents,
 };
@@ -309,6 +312,7 @@ const access = {
   createOperationLimiter, ttsLimiter, sttLimiter, hasAiBudget,
   requireAiBudget, requireActiveSubscription, requirePrivacyConsent,
 };
+app.use(createSpeakingRoutes({ authentication, access, db: dbApi }));
 const claimVoiceTutorAiOperation = ({ username, ...slot }) => claimAiOperationSlot(username, {
   ...slot, dailyLimit: config.ai.dailyRequestBudget,
 });

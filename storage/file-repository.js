@@ -27,6 +27,11 @@ import {
 import { adaptiveLearningPlanRepositoryDto } from '../adaptive-learning/plan-dto.js';
 import { buildAdaptiveLearningMetrics } from '../adaptive-learning/metrics.js';
 import { adaptiveSpeakingTask } from '../public/adaptive-speaking-tasks.js';
+import {
+  newSpeakingTask1Session,
+  selectSpeakingTask1Assignment,
+  speakingTask1CompletionMetadata,
+} from '../speaking/task1-session.js';
 import { isMonotonicAdaptiveRetentionRefresh } from '../adaptive-learning/retention.js';
 import { adaptiveRepeatExecutionMatches } from '../adaptive-learning/repeat-execution.js';
 import {
@@ -176,11 +181,12 @@ function sanitizeLegacyAdaptiveExecution(state, now = Date.now()) {
 
 export function createFileRepository(filePath) {
   let loaded = false;
-  let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, subscription_entitlements: {}, voice_tutor_sessions: [], voice_tutor_recoveries: [], voice_tutor_repeats: [], voice_tutor_repeat_attempts: [], voice_tutor_reports: [], rule_cards: [], payment_requests: {}, subscription_events: [], adaptive_learning_goals: [], adaptive_learning_profiles: {}, adaptive_learning_skill_estimates: {}, adaptive_learning_plan_revisions: [], adaptive_learning_sessions: [], adaptive_learning_execution_claims: [], adaptive_learning_session_events: [], adaptive_learning_session_mutations: [], adaptive_diagnostic_sessions: [], adaptive_diagnostic_start_claims: [], adaptive_diagnostic_responses: [] };
+  let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], speaking_task1_sessions: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, subscription_entitlements: {}, voice_tutor_sessions: [], voice_tutor_recoveries: [], voice_tutor_repeats: [], voice_tutor_repeat_attempts: [], voice_tutor_reports: [], rule_cards: [], payment_requests: {}, subscription_events: [], adaptive_learning_goals: [], adaptive_learning_profiles: {}, adaptive_learning_skill_estimates: {}, adaptive_learning_plan_revisions: [], adaptive_learning_sessions: [], adaptive_learning_execution_claims: [], adaptive_learning_session_events: [], adaptive_learning_session_mutations: [], adaptive_diagnostic_sessions: [], adaptive_diagnostic_start_claims: [], adaptive_diagnostic_responses: [] };
   let writeQueue = Promise.resolve();
   let coordinatedMutationQueue = Promise.resolve();
   let paymentQueue = Promise.resolve();
   let ruleCardQueue = Promise.resolve();
+  let speakingTask1Queue = Promise.resolve();
 
   async function load() {
     if (loaded) return;
@@ -196,6 +202,7 @@ export function createFileRepository(filePath) {
           auth_codes: parsed.auth_codes && typeof parsed.auth_codes === 'object' ? parsed.auth_codes : {},
           writing_attempts: Array.isArray(parsed.writing_attempts) ? normalizeWritingAttempts(parsed.writing_attempts) : [],
           speaking_attempts: Array.isArray(parsed.speaking_attempts) ? normalizeAttemptModels(parsed.speaking_attempts) : [],
+          speaking_task1_sessions: Array.isArray(parsed.speaking_task1_sessions) ? parsed.speaking_task1_sessions : [],
           generated_tasks: Array.isArray(parsed.generated_tasks) ? parsed.generated_tasks : [],
           task_bank: Array.isArray(parsed.task_bank) ? parsed.task_bank : [],
           task_deliveries: Array.isArray(parsed.task_deliveries) ? parsed.task_deliveries : [],
@@ -1541,6 +1548,44 @@ export function createFileRepository(filePath) {
     await load();
     const attempt = state.speaking_attempts.find((item) => item.username === username && item.id === Number(id));
     return attempt ? structuredClone(attempt) : null;
+  }
+
+  function serializeSpeakingTask1Mutation(run) {
+    const result = speakingTask1Queue.then(run, run);
+    speakingTask1Queue = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
+  async function assignSpeakingTask1Session(username, { catalogId, catalogRevision, tasks, now }) {
+    return serializeSpeakingTask1Mutation(async () => {
+      await load();
+      if (!state.users[username]) throw new Error('USER_NOT_FOUND');
+      const history = state.speaking_task1_sessions.filter((session) => session.username === username
+        && session.catalog_id === catalogId && Number(session.catalog_revision) === Number(catalogRevision));
+      const selection = selectSpeakingTask1Assignment(tasks, history, now);
+      const session = newSpeakingTask1Session({ username, catalogId, catalogRevision, selection, now });
+      state.speaking_task1_sessions.push(session);
+      await persist();
+      return structuredClone(session);
+    });
+  }
+
+  async function getSpeakingTask1Session(username, id) {
+    await load();
+    const session = state.speaking_task1_sessions.find((item) => item.username === username && item.id === id);
+    return session ? structuredClone(session) : null;
+  }
+
+  async function completeSpeakingTask1Session(username, id, completion, { now = new Date() } = {}) {
+    return serializeSpeakingTask1Mutation(async () => {
+      await load();
+      const session = state.speaking_task1_sessions.find((item) => item.username === username && item.id === id);
+      if (!session) return null;
+      if (session.status === 'completed') return structuredClone(session);
+      Object.assign(session, speakingTask1CompletionMetadata(completion, now), { status: 'completed' });
+      await persist();
+      return structuredClone(session);
+    });
   }
 
   async function getGeneratedTask(username, requestHash) {
@@ -3124,6 +3169,9 @@ export function createFileRepository(filePath) {
       payment_requests: Object.values(state.payment_requests).filter((item) => item.username === username),
       writing_attempts: state.writing_attempts.filter((item) => item.username === username),
       speaking_attempts: state.speaking_attempts.filter((item) => item.username === username),
+      speaking_task1_sessions: state.speaking_task1_sessions
+        .filter((item) => item.username === username)
+        .map(({ username: owner, ...item }) => item),
       generated_tasks: state.generated_tasks.filter((item) => item.username === username).map(({ request_hash, username: owner, ...item }) => item),
       module_attempts: state.module_attempts.filter((item) => item.username === username),
       progress_summary: Object.values(state.progress_summary[username] || {}),
@@ -3189,6 +3237,7 @@ export function createFileRepository(filePath) {
       delete state.progress[username];
       state.writing_attempts = state.writing_attempts.filter((item) => item.username !== username);
       state.speaking_attempts = state.speaking_attempts.filter((item) => item.username !== username);
+      state.speaking_task1_sessions = state.speaking_task1_sessions.filter((item) => item.username !== username);
       state.generated_tasks = state.generated_tasks.filter((item) => item.username !== username);
       state.module_attempts = state.module_attempts.filter((item) => item.username !== username);
       delete state.progress_summary[username];
@@ -3324,6 +3373,9 @@ export function createFileRepository(filePath) {
     createSpeakingAttempt,
     finishSpeakingAttempt,
     getSpeakingAttempt,
+    assignSpeakingTask1Session,
+    getSpeakingTask1Session,
+    completeSpeakingTask1Session,
     getGeneratedTask,
     getSharedGeneratedTask,
     saveGeneratedTask,

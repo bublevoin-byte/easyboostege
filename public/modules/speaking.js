@@ -148,6 +148,21 @@
     };
   }
 
+  function serverTask1Set(session) {
+    const task = session && session.task;
+    const assessment = session && session.pronunciationAssessment;
+    if (!task || typeof task !== 'object' || Array.isArray(task)
+      || Object.keys(task).sort().join(',') !== 'cefr,id,instruction,maxScore,preparationSeconds,responseSeconds,revision,taskType,text,topic'
+      || !/^speaking-pilot-v1\.task1\.[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(String(task.id || ''))
+      || task.revision !== 1 || task.taskType !== 1
+      || task.preparationSeconds !== 90 || task.responseSeconds !== 90 || task.maxScore !== 1
+      || !['B1', 'B2', 'B2+/C1'].includes(task.cefr)
+      || typeof task.topic !== 'string' || !task.topic.trim()
+      || typeof task.text !== 'string' || !task.text.trim()
+      || assessment?.available !== false || assessment.reason !== 'provider_not_connected') return null;
+    return { id: task.id, revision: task.revision, tx: task.text, topic: task.topic, cefr: task.cefr };
+  }
+
   global.EasyBoostSpeaking = Object.freeze({
     config,
     isExperimentalTask,
@@ -166,6 +181,7 @@
     examTotal,
     weakestTask,
     normalizeGenerated,
+    serverTask1Set,
     TASKS,
     EXAM_MAX,
     BADGES,

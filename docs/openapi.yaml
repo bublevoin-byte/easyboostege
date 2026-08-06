@@ -56,6 +56,65 @@ paths:
       responses:
         '200': { description: Pending or authenticated state }
         '429': { $ref: '#/components/responses/RateLimited' }
+  /api/v1/speaking/task-1/sessions:
+    post:
+      summary: Assign one server-owned Speaking task 1 text to the current learner
+      description: Selects from the versioned 60-item catalog using unseen, due, weak, then old rotation without immediately repeating a text when an alternative exists. Requires an active base subscription.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false }
+      responses:
+        '201':
+          description: Owner-bound task 1 session with official 90-second preparation and response stages; no answer key, source provenance, audio, transcript, or phonetic score is exposed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SpeakingTask1Session' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/speaking/task-1/sessions/{sessionId}:
+    get:
+      summary: Read the current learner's Speaking task 1 session
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The owner-bound session and safe practice metadata
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SpeakingTask1Session' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Session not found for this learner }
+  /api/v1/speaking/task-1/sessions/{sessionId}/complete:
+    post:
+      summary: Complete a Speaking task 1 session with bounded practice metadata
+      description: Stores duration, microphone-check status, local-playback confirmation and self-rating only. The browser recording remains local. Until an acoustic provider is connected, pronunciation assessment is explicitly unavailable.
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SpeakingTask1Completion' }
+      responses:
+        '200':
+          description: Completed owner-bound session; retries return the canonical stored metadata
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SpeakingTask1Session' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Session not found for this learner }
   /api/v1/me:
     get:
       summary: Current user, base subscription, Premium entitlements, remaining voice minutes and server-projected feature flags
@@ -1386,6 +1445,60 @@ components:
       in: cookie
       name: eb_token
   schemas:
+    SpeakingTask1Task:
+      type: object
+      required: [id, revision, taskType, cefr, topic, preparationSeconds, responseSeconds, maxScore, instruction, text]
+      properties:
+        id: { type: string, minLength: 1, maxLength: 120 }
+        revision: { type: integer, minimum: 1 }
+        taskType: { type: integer, enum: [1] }
+        cefr: { type: string, enum: [B1, B2, B2+/C1] }
+        topic: { type: string, minLength: 1, maxLength: 120 }
+        preparationSeconds: { type: integer, enum: [90] }
+        responseSeconds: { type: integer, enum: [90] }
+        maxScore: { type: integer, enum: [1] }
+        instruction: { type: string, minLength: 1, maxLength: 300 }
+        text: { type: string, minLength: 1, maxLength: 2000 }
+      additionalProperties: false
+    SpeakingTask1Completion:
+      type: object
+      required: [recordingDurationSeconds, micCheck, localPlayback, selfRating]
+      properties:
+        recordingDurationSeconds: { type: number, minimum: 1, maximum: 90 }
+        micCheck: { type: string, enum: [passed, quiet, skipped] }
+        localPlayback: { type: boolean }
+        selfRating: { type: string, enum: [weak, steady, strong] }
+      additionalProperties: false
+    SpeakingTask1Session:
+      type: object
+      required: [id, catalog, task, selectionReason, status, assignedAt, completedAt, practice, pronunciationAssessment]
+      properties:
+        id: { type: string, format: uuid }
+        catalog:
+          type: object
+          required: [id, revision]
+          properties:
+            id: { type: string, enum: [speaking-pilot-v1] }
+            revision: { type: integer, enum: [1] }
+          additionalProperties: false
+        task: { $ref: '#/components/schemas/SpeakingTask1Task' }
+        selectionReason: { type: string, enum: [unseen, due, weak, old] }
+        status: { type: string, enum: [assigned, completed] }
+        assignedAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time, nullable: true }
+        practice:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/SpeakingTask1Completion'
+        pronunciationAssessment:
+          type: object
+          required: [available, reason, message]
+          properties:
+            available: { type: boolean, enum: [false] }
+            reason: { type: string, enum: [provider_not_connected] }
+            message: { type: string }
+          additionalProperties: false
+      additionalProperties: false
     ReadingReport:
       type: object
       required: [version, scope, generatedAt, evidence, base]

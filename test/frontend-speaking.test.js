@@ -138,3 +138,27 @@ test('speaking module rejects malformed AI-generated task sets', () => {
   assert.equal(monologue.plan.length, 4);
   assert.equal(monologue.ph.length, 2);
 });
+
+test('speaking module accepts only the server-owned public task 1 assignment shape', () => {
+  const speaking = createSpeakingModule();
+  const session = {
+    id: '71100000-0000-4000-8000-000000000001',
+    task: {
+      id: 'speaking-pilot-v1.task1.community-garden', revision: 1, taskType: 1,
+      cefr: 'B1', topic: 'Город и природа', preparationSeconds: 90, responseSeconds: 90,
+      maxScore: 1, instruction: 'Read aloud.', text: 'A server-owned reading text.',
+    },
+    pronunciationAssessment: { available: false, reason: 'provider_not_connected' },
+  };
+
+  assert.deepEqual(plain(speaking.serverTask1Set(session)), {
+    id: session.task.id,
+    revision: 1,
+    tx: session.task.text,
+    topic: session.task.topic,
+    cefr: 'B1',
+  });
+  assert.equal(speaking.serverTask1Set({ ...session, task: { ...session.task, preparationSeconds: 60 } }), null);
+  assert.equal(speaking.serverTask1Set({ ...session, task: { ...session.task, reference: { script: 'secret' } } }), null);
+  assert.equal(speaking.serverTask1Set({ ...session, pronunciationAssessment: { available: true } }), null);
+});
