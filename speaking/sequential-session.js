@@ -16,7 +16,7 @@ function pendingPositions({ positionCount, positionNumberKey }) {
 }
 
 export function newSequentialSpeakingSession({
-  username, catalogId, catalogRevision, selection, now = new Date(), contract,
+  username, catalogId, catalogRevision, selection, accentProfile = null, now = new Date(), contract,
 }) {
   return {
     id: crypto.randomUUID(),
@@ -26,6 +26,9 @@ export function newSequentialSpeakingSession({
     task_id: selection.task.id,
     task_revision: selection.task.revision,
     selection_reason: selection.reason,
+    accent_locale: accentProfile?.locale || null,
+    accent_profile_revision: accentProfile?.revision == null ? null : Number(accentProfile.revision),
+    accent_effective_at: accentProfile?.effective_at || null,
     status: 'assigned',
     [contract.currentStorageKey]: 1,
     [contract.collectionStorageKey]: pendingPositions(contract),
@@ -82,6 +85,11 @@ export function publicSequentialSpeakingSession(session, task, contract) {
     catalog: { id: session.catalog_id, revision: Number(session.catalog_revision) },
     task,
     selectionReason: session.selection_reason,
+    accentProfile: session.accent_locale ? {
+      locale: session.accent_locale,
+      revision: Number(session.accent_profile_revision),
+      effectiveAt: new Date(session.accent_effective_at).toISOString(),
+    } : null,
     status: session.status,
     [contract.currentPublicKey]: Number(session[contract.currentStorageKey]),
     [contract.collectionPublicKey]: positions.map((position) => ({

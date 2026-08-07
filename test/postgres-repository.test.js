@@ -41,11 +41,263 @@ import { assertSpeakingTask3SessionRepositoryContract } from './support/speaking
 import { assertSpeakingTask4SessionRepositoryContract } from './support/speaking-task4-session-contract.js';
 import { assertFullSpeakingSessionRepositoryContract } from './support/speaking-full-session-contract.js';
 import { assertSpeakingAssessmentQuotaContract } from './support/speaking-assessment-quota-contract.js';
+import { assertSpeakingAccentCalibrationRepositoryContract } from './support/speaking-accent-calibration-contract.js';
 import { READING_TASK10_SETS } from '../public/content/reading/task10-v1.js';
 import { READING_TASK11_SETS } from '../public/content/reading/task11-v1.js';
 import { READING_TASK12_18_SETS } from '../public/content/reading/task12-18-v1.js';
+import { SPEAKING_TASK1_CATALOG } from '../public/content/speaking/task1-v1.js';
+import { SPEAKING_TASK2_CATALOG } from '../public/content/speaking/task2-v1.js';
+import { SPEAKING_TASK3_CATALOG } from '../public/content/speaking/task3-v1.js';
+import { SPEAKING_TASK4_CATALOG } from '../public/content/speaking/task4-v1.js';
+import { speakingCalibrationSampleMaterial } from './support/speaking-calibration-fixture.js';
+
+const SPEAKING_CATALOGS = [
+  SPEAKING_TASK1_CATALOG, SPEAKING_TASK2_CATALOG,
+  SPEAKING_TASK3_CATALOG, SPEAKING_TASK4_CATALOG,
+];
 
 const connectionString = process.env.TEST_DATABASE_URL;
+
+test('PostgreSQL Speaking accent/calibration matches file privacy and retention contract', { skip: !connectionString }, async () => {
+  const repository = createPostgresRepository(connectionString);
+  const suffix = String(Date.now()).slice(-8);
+  const owner = await repository.createTelegramUser(Number(`95${suffix}`), `Accent owner ${suffix}`);
+  const expertAName = `Accent expert A ${suffix}`;
+  const expertA = await repository.createTelegramUser(Number(`94${suffix}`), expertAName);
+  const expertB = await repository.createTelegramUser(Number(`93${suffix}`), `Accent expert B ${suffix}`);
+  const manualOwner = await repository.createTelegramUser(Number(`91${suffix}`), `Accent manual ${suffix}`);
+  const pendingOwner = await repository.createTelegramUser(Number(`90${suffix}`), `Accent pending ${suffix}`);
+  try {
+    const { sampleId } = await assertSpeakingAccentCalibrationRepositoryContract(
+      assert, repository, {
+        owner, expertA, expertB,
+        recreateExpertA: () => repository.createTelegramUser(Number(`92${suffix}`), expertAName),
+      },
+    );
+    const staleProfile = {
+      locale: 'en-US', revision: 1, source: 'calibration',
+      effective_at: '2026-08-06T10:00:00.000Z', calibration_used: true,
+    };
+    const ordinary = await repository.assignSpeakingTask1Session(owner, {
+      catalogId: 'accent-stale-catalog', catalogRevision: 1,
+      tasks: [{ id: 'accent-stale-task', revision: 1 }], accentProfile: staleProfile,
+      now: new Date('2026-08-06T13:00:00.000Z'),
+    });
+    assert.deepEqual([ordinary.accent_locale, ordinary.accent_profile_revision], ['en-GB', 2]);
+    const full = await repository.assignFullSpeakingSession(owner, {
+      catalogs: SPEAKING_CATALOGS, accentProfile: staleProfile,
+      now: new Date('2026-08-06T13:01:00.000Z'),
+    });
+    assert.deepEqual([full.accent_locale, full.accent_profile_revision], ['en-GB', 2]);
+
+    await repository.setSpeakingAccentProfile(manualOwner, {
+      locale: 'en-GB', source: 'manual', now: new Date('2026-08-06T14:00:00.000Z'),
+    });
+    await assert.rejects(
+      repository.startSpeakingAccentCalibration(manualOwner),
+      (error) => error?.code === 'SPEAKING_ACCENT_CALIBRATION_ALREADY_USED',
+    );
+    const pending = await repository.startSpeakingAccentCalibration(pendingOwner, {
+      now: new Date('2026-08-06T14:00:00.000Z'),
+    });
+    await repository.setSpeakingAccentProfile(pendingOwner, {
+      locale: 'en-US', source: 'manual', now: new Date('2026-08-06T14:01:00.000Z'),
+    });
+    const cancelled = await repository.getSpeakingAccentCalibration(pendingOwner, pending.id);
+    assert.equal(cancelled.status, 'cancelled');
+    assert.equal(cancelled.evidence_keys, null);
+    await assert.rejects(repository.completeSpeakingAccentCalibration(pendingOwner, {
+      setupId: pending.id, locale: 'en-GB', suggestionConfidence: 'clear',
+      evidenceKeys: [crypto.randomUUID(), crypto.randomUUID()],
+      policyVersion: 'speaking-accent-suggestion-v1', now: new Date('2026-08-06T14:02:00.000Z'),
+    }), (error) => error?.code === 'SPEAKING_ACCENT_CALIBRATION_ALREADY_USED');
+
+    assert.equal(await repository.deleteUserData(owner), true);
+    assert.equal(await repository.exportUserData(owner), null);
+    const labels = await repository.listAnonymousSpeakingCalibrationLabels();
+    assert.equal(labels.some((entry) => entry.sampleId === sampleId), true);
+    assert.equal(JSON.stringify(labels).includes(expertA), false);
+    assert.equal(JSON.stringify(labels).includes(expertB), false);
+  } finally {
+    await repository.deleteUserData(owner).catch(() => {});
+    await repository.deleteUserData(expertA).catch(() => {});
+    await repository.deleteUserData(expertB).catch(() => {});
+    await repository.deleteUserData(manualOwner).catch(() => {});
+    await repository.deleteUserData(pendingOwner).catch(() => {});
+    await repository.close();
+  }
+});
+
+test('PostgreSQL calibration mutations lock owner before child rows and finish privacy races', { skip: !connectionString }, async () => {
+  const repository = createPostgresRepository(connectionString);
+  const suffix = String(Date.now()).slice(-7);
+  const uploadOwner = await repository.createTelegramUser(Number(`81${suffix}`), `Accent upload lock ${suffix}`);
+  const completeOwner = await repository.createTelegramUser(Number(`82${suffix}`), `Accent complete lock ${suffix}`);
+  const assignmentOwner = await repository.createTelegramUser(Number(`84${suffix}`), `Accent assignment lock ${suffix}`);
+  const raw = new pg.Client({ connectionString });
+  await raw.connect();
+  const startedAt = new Date('2026-08-06T10:00:00.000Z');
+
+  async function assertOwnerFirst(username, mutation, childLockSql) {
+    await raw.query('BEGIN');
+    await raw.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+    let settled = false;
+    const pending = mutation().finally(() => { settled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    assert.equal(settled, false, 'the mutation waits at the owner lock');
+    await raw.query(childLockSql, [username]);
+    await raw.query('ROLLBACK');
+    return pending;
+  }
+
+  try {
+    await repository.setSpeakingCalibrationConsent(uploadOwner, {
+      granted: true, ageGroup: 'adult', guardianConfirmed: false,
+      policyVersion: 'speaking-calibration-consent-v1', now: startedAt,
+    });
+    const createSample = () => repository.createSpeakingCalibrationSample(uploadOwner, {
+      id: crypto.randomUUID(), assessmentKey: crypto.randomUUID(), taskType: 1,
+      taskRef: `task1:${crypto.randomUUID()}:speaking-pilot-v1.task1.community-garden@1`,
+      ...speakingCalibrationSampleMaterial(
+        1, `task1:${crypto.randomUUID()}:speaking-pilot-v1.task1.community-garden@1`,
+      ),
+      locale: 'en-GB', maximumScore: 1, audio: Buffer.from('owner-first-upload'), now: startedAt,
+    });
+    await assertOwnerFirst(
+      uploadOwner,
+      createSample,
+      'SELECT username FROM speaking_calibration_consents WHERE username = $1 FOR UPDATE NOWAIT',
+    );
+
+    const setup = await repository.startSpeakingAccentCalibration(completeOwner, { now: startedAt });
+    const complete = () => repository.completeSpeakingAccentCalibration(completeOwner, {
+      setupId: setup.id, locale: 'en-US', suggestionConfidence: 'clear',
+      evidenceKeys: [crypto.randomUUID(), crypto.randomUUID()],
+      policyVersion: 'speaking-accent-suggestion-v1', now: startedAt,
+    });
+    await assertOwnerFirst(
+      completeOwner,
+      complete,
+      'SELECT id FROM speaking_accent_calibrations WHERE username = $1 FOR UPDATE NOWAIT',
+    );
+
+    await repository.setSpeakingCalibrationConsent(uploadOwner, {
+      granted: true, ageGroup: 'adult', guardianConfirmed: false,
+      policyVersion: 'speaking-calibration-consent-v1', now: startedAt,
+    });
+    const uploadRevokeRace = await Promise.allSettled([
+      createSample(),
+      repository.setSpeakingCalibrationConsent(uploadOwner, {
+        granted: false, ageGroup: 'adult', guardianConfirmed: false,
+        policyVersion: 'speaking-calibration-consent-v1', now: new Date(startedAt.getTime() + 1_000),
+      }),
+    ]);
+    assert.equal(uploadRevokeRace.some((entry) => entry.status === 'rejected'
+      && entry.reason?.code === '40P01'), false, 'upload/revoke must not deadlock');
+    assert.equal((await repository.listSpeakingCalibrationSamplesForOwner(uploadOwner))
+      .some((sample) => sample.audio_retained), false, 'revocation wins without retained raw audio');
+
+    const deleteSetup = await repository.startSpeakingAccentCalibration(
+      await repository.createTelegramUser(Number(`83${suffix}`), `Accent delete lock ${suffix}`),
+      { now: startedAt },
+    );
+    const deleteOwner = `Accent delete lock ${suffix}`;
+    const completeDeleteRace = await Promise.allSettled([
+      repository.completeSpeakingAccentCalibration(deleteOwner, {
+        setupId: deleteSetup.id, locale: 'en-GB', suggestionConfidence: 'clear',
+        evidenceKeys: [crypto.randomUUID(), crypto.randomUUID()],
+        policyVersion: 'speaking-accent-suggestion-v1', now: startedAt,
+      }),
+      repository.deleteUserData(deleteOwner),
+    ]);
+    assert.equal(completeDeleteRace.some((entry) => entry.status === 'rejected'
+      && entry.reason?.code === '40P01'), false, 'completion/delete must not deadlock');
+    assert.equal(completeDeleteRace[1].status, 'fulfilled');
+    assert.equal(await repository.exportUserData(deleteOwner), null);
+
+    const firstProfile = (await repository.setSpeakingAccentProfile(assignmentOwner, {
+      locale: 'en-GB', source: 'manual', now: startedAt,
+    })).profile;
+    await raw.query('BEGIN');
+    await raw.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [assignmentOwner]);
+    let ordinarySettled = false;
+    const ordinaryPending = repository.assignSpeakingTask1Session(assignmentOwner, {
+      catalogId: 'pg-concurrent-accent', catalogRevision: 1,
+      tasks: [{ id: 'pg-concurrent-task', revision: 1 }], accentProfile: firstProfile,
+      now: new Date('2026-08-06T15:00:00.000Z'),
+    }).finally(() => { ordinarySettled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    assert.equal(ordinarySettled, false, 'ordinary assignment waits for the owner profile transaction');
+    await raw.query(
+      `UPDATE speaking_accent_profiles
+       SET locale = 'en-US', revision = 2, source = 'manual', effective_at = $2
+       WHERE username = $1`,
+      [assignmentOwner, new Date('2026-08-06T14:59:00.000Z')],
+    );
+    await raw.query('COMMIT');
+    const ordinary = await ordinaryPending;
+    assert.deepEqual([ordinary.accent_locale, ordinary.accent_profile_revision], ['en-US', 2]);
+
+    await raw.query('BEGIN');
+    await raw.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [assignmentOwner]);
+    let fullSettled = false;
+    const fullPending = repository.assignFullSpeakingSession(assignmentOwner, {
+      catalogs: SPEAKING_CATALOGS,
+      accentProfile: { ...firstProfile, locale: 'en-US', revision: 2 },
+      now: new Date('2026-08-06T15:01:00.000Z'),
+    }).finally(() => { fullSettled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    assert.equal(fullSettled, false, 'full assignment waits for the owner profile transaction');
+    await raw.query(
+      `UPDATE speaking_accent_profiles
+       SET locale = 'en-GB', revision = 3, source = 'manual', effective_at = $2
+       WHERE username = $1`,
+      [assignmentOwner, new Date('2026-08-06T15:00:30.000Z')],
+    );
+    await raw.query('COMMIT');
+    const full = await fullPending;
+    assert.deepEqual([full.accent_locale, full.accent_profile_revision], ['en-GB', 3]);
+
+    const queueStartedAt = new Date('2026-09-01T10:00:00.000Z');
+    await repository.setSpeakingCalibrationConsent(uploadOwner, {
+      granted: true, ageGroup: 'adult', guardianConfirmed: false,
+      policyVersion: 'speaking-calibration-consent-v1', now: queueStartedAt,
+    });
+    const queueIds = [];
+    for (let index = 0; index < 26; index += 1) {
+      const taskRef = `task1:${crypto.randomUUID()}:speaking-pilot-v1.task1.community-garden@1`;
+      const queued = await repository.createSpeakingCalibrationSample(uploadOwner, {
+        id: crypto.randomUUID(), assessmentKey: crypto.randomUUID(), taskType: 1,
+        taskRef, ...speakingCalibrationSampleMaterial(1, taskRef),
+        locale: 'en-GB', maximumScore: 1, audio: Buffer.from(`queue-audio-${index}`),
+        now: new Date(queueStartedAt.getTime() + index * 1_000),
+      });
+      queueIds.push(queued.id);
+    }
+    const queueClaimAt = new Date(queueStartedAt.getTime() + 30_000);
+    await raw.query(
+      `UPDATE speaking_calibration_samples
+       SET access_audit = jsonb_build_array(jsonb_build_object(
+         'reviewer', 'busy-reviewer', 'review_round', 1, 'accessed_at', $2::text
+       ))
+       WHERE id = ANY($1::uuid[])`,
+      [queueIds.slice(0, 25), queueClaimAt.toISOString()],
+    );
+    const twentySixth = await repository.claimSpeakingCalibrationSample(completeOwner, {
+      now: queueClaimAt,
+    });
+    assert.equal(twentySixth.sampleId, queueIds[25],
+      'ineligible first page must not hide a later available calibration sample');
+  } finally {
+    await raw.query('ROLLBACK').catch(() => {});
+    await raw.end();
+    await repository.deleteUserData(uploadOwner).catch(() => {});
+    await repository.deleteUserData(completeOwner).catch(() => {});
+    await repository.deleteUserData(assignmentOwner).catch(() => {});
+    await repository.deleteUserData(`Accent delete lock ${suffix}`).catch(() => {});
+    await repository.close();
+  }
+});
 
 test('PostgreSQL Speaking assessment quota matches atomic replay, export and deletion contract', { skip: !connectionString }, async () => {
   const repository = createPostgresRepository(connectionString);
@@ -763,6 +1015,7 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
       '046_speaking_pronunciation_assessments.sql',
       '047_speaking_assessment_context.sql',
       '048_speaking_evaluation_idempotency.sql',
+      '049_speaking_accent_calibration.sql',
     ]);
 
     const username = await repository.createTelegramUser(telegramId, `Integration ${suffix}`);

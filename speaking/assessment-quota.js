@@ -29,6 +29,7 @@ export function assertSpeakingAssessmentReservation(input) {
   const id = String(input?.id || '');
   const idempotencyKey = String(input?.idempotencyKey || '');
   const requestHash = String(input?.requestHash || '').toLowerCase();
+  const audioHash = input?.audioHash == null ? null : String(input.audioHash).toLowerCase();
   const reservedSeconds = Number(input?.reservedSeconds);
   const locale = String(input?.locale || '');
   const contextId = input?.contextId == null ? null : String(input.contextId);
@@ -36,6 +37,7 @@ export function assertSpeakingAssessmentReservation(input) {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(id)
     || !IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)
     || !/^[a-f0-9]{64}$/u.test(requestHash)
+    || (audioHash != null && !/^[a-f0-9]{64}$/u.test(audioHash))
     || !Number.isInteger(reservedSeconds) || reservedSeconds < 1 || reservedSeconds > 180
     || !['en-GB', 'en-US'].includes(locale)
     || (contextId !== null && (!/^[a-zA-Z0-9:@._-]{1,300}$/u.test(contextId)))
@@ -43,7 +45,7 @@ export function assertSpeakingAssessmentReservation(input) {
     throw new SpeakingAssessmentQuotaError('SPEAKING_ASSESSMENT_RESERVATION_INVALID');
   }
   return {
-    id, idempotencyKey, requestHash, reservedSeconds, locale, contextId, now,
+    id, idempotencyKey, requestHash, audioHash, reservedSeconds, locale, contextId, now,
     periodStart: speakingAssessmentPeriodStart(now),
   };
 }

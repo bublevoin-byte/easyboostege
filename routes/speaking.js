@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import express from 'express';
 import { z } from 'zod';
 
@@ -17,8 +18,16 @@ import { publicSpeakingTask3Session } from '../speaking/task3-session.js';
 import { publicSpeakingTask4Session } from '../speaking/task4-session.js';
 import { publicFullSpeakingSession } from '../speaking/full-section-session.js';
 import { parsePcm16Mono16kWav } from '../speaking/wav-audio.js';
+import { speakingAssessmentAudioHash } from '../speaking/assessment-service.js';
+import {
+  SPEAKING_CALIBRATION_CONSENT_POLICY,
+  selectSpeakingAccentSuggestion,
+  speakingCalibrationMaximum,
+  speakingCalibrationRubric,
+} from '../speaking/accent-calibration.js';
 
 const emptyBodySchema = z.object({}).strict();
+const assignmentBodySchema = z.object({ calibrationSetupId: z.string().uuid().optional() }).strict();
 const sessionIdSchema = z.string().uuid();
 const questionNumberSchema = z.coerce.number().int().min(1).max(4);
 const interviewQuestionNumberSchema = z.coerce.number().int().min(1).max(5);
@@ -77,6 +86,22 @@ const pronunciationIdempotencySchema = z.string().uuid().regex(
 const pronunciationLocaleSchema = z.enum(['en-GB', 'en-US']);
 const pronunciationDurationSchema = z.coerce.number().finite().min(1).max(180);
 const pronunciationMimeTypes = Object.freeze(['audio/wav']);
+const accentProfileSchema = z.object({ locale: z.enum(['en-GB', 'en-US']) }).strict();
+const accentCalibrationCompleteSchema = z.object({
+  enGbAssessmentKey: pronunciationIdempotencySchema,
+  enUsAssessmentKey: pronunciationIdempotencySchema,
+}).strict();
+const calibrationConsentSchema = z.object({
+  granted: z.boolean(),
+  ageGroup: z.enum(['adult', 'minor']),
+  guardianConfirmed: z.boolean(),
+}).strict();
+const calibrationReviewSchema = z.discriminatedUnion('sufficient', [
+  z.object({ sufficient: z.literal(false) }).strict(),
+  z.object({
+    sufficient: z.literal(true), score: z.number().int().min(0).max(10), criticalError: z.boolean(),
+  }).strict(),
+]);
 
 function validationError(req, res, message) {
   return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message, requestId: req.requestId } });
@@ -90,6 +115,23 @@ function publicCatalogSession(session, { catalog, publicAssignment, publicSessio
     && candidate.revision === Number(session.task_revision));
   if (!task) throw Object.assign(new Error(mismatchCode), { code: mismatchCode });
   return publicSession(session, publicAssignment(task));
+}
+
+const calibrationCatalogs = Object.freeze({
+  1: [SPEAKING_TASK1_CATALOG, speakingTask1PublicAssignment],
+  2: [SPEAKING_TASK2_CATALOG, speakingTask2PublicAssignment],
+  3: [SPEAKING_TASK3_CATALOG, speakingTask3PublicAssignment],
+  4: [SPEAKING_TASK4_CATALOG, speakingTask4PublicAssignment],
+});
+
+function calibrationTaskMaterial(taskType, taskRef, invalidCode = 'SPEAKING_CALIBRATION_TASK_INVALID') {
+  const [catalog, publicAssignment] = calibrationCatalogs[Number(taskType)] || [];
+  const match = /^task[1-4]:[0-9a-f-]{36}:([a-zA-Z0-9._-]+)@(\d+)(?::item\d+)?$/u.exec(taskRef);
+  const task = match && catalog?.tasks.find((candidate) => (
+    candidate.id === match[1] && Number(candidate.revision) === Number(match[2])
+  ));
+  if (!task) throw Object.assign(new Error(invalidCode), { code: invalidCode });
+  return { task: publicAssignment(task), rubric: speakingCalibrationRubric(taskType) };
 }
 
 function catalogMismatchResponse(req, res, error) {
@@ -118,6 +160,9 @@ export function createSpeakingRoutes({
 }) {
   const router = express.Router();
   const { auth } = authentication;
+  const requireCalibrationExpert = typeof authentication.requireRole === 'function'
+    ? authentication.requireRole('admin')
+    : (_req, res) => res.status(403).json({ error: { code: 'FORBIDDEN' } });
   const { requireActiveSubscription } = access;
   const pronunciationLimiter = typeof access.sttLimiter === 'function'
     ? access.sttLimiter
@@ -139,6 +184,251 @@ export function createSpeakingRoutes({
       requestId: req.requestId,
     } });
     return next(error);
+  });
+
+  function accentCalibrationError(req, res, error) {
+    const code = String(error?.code || '');
+    const responses = {
+      SPEAKING_ACCENT_CALIBRATION_ALREADY_USED: [409, 'Калибровка «не знаю» уже использована. Профиль можно изменить вручную.'],
+      SPEAKING_ACCENT_CALIBRATION_NOT_FOUND: [404, 'Калибровка не найдена.'],
+      SPEAKING_ACCENT_CALIBRATION_EVIDENCE_INVALID: [409, 'Нужны две финальные записи одного задания для en-GB и en-US.'],
+      SPEAKING_ACCENT_CALIBRATION_INVALID: [400, 'Калибровка не прошла проверку.'],
+      SPEAKING_CALIBRATION_GUARDIAN_REQUIRED: [409, 'Для несовершеннолетнего нужно подтверждение законного представителя.'],
+      SPEAKING_CALIBRATION_CONSENT_INVALID: [400, 'Настройки согласия не прошли проверку.'],
+      SPEAKING_CALIBRATION_CONSENT_REQUIRED: [403, 'Сначала дайте отдельное согласие на калибровочный корпус.'],
+      SPEAKING_CALIBRATION_SAMPLE_INVALID: [400, 'Калибровочная запись не прошла проверку.'],
+      SPEAKING_CALIBRATION_SAMPLE_NOT_AVAILABLE: [404, 'Калибровочная запись больше недоступна.'],
+      SPEAKING_CALIBRATION_REVIEWER_NOT_INDEPENDENT: [409, 'Нужна независимая оценка другого эксперта.'],
+      SPEAKING_CALIBRATION_REVIEW_CLAIM_REQUIRED: [409, 'Сначала получите слепую карточку из очереди.'],
+      SPEAKING_CALIBRATION_REVIEW_INVALID: [400, 'Оценка эксперта не прошла проверку.'],
+    };
+    if (!responses[code]) return false;
+    const [status, message] = responses[code];
+    res.status(status).json({ error: { code, message, requestId: req.requestId } });
+    return true;
+  }
+
+  async function storedAccentEvidence(username, idempotencyKey, locale) {
+    if (typeof db.getSpeakingAssessmentReservation !== 'function') return null;
+    const stored = await db.getSpeakingAssessmentReservation(username, idempotencyKey, { now: now() });
+    const reservation = stored?.reservation;
+    const assessment = reservation?.result?.assessment;
+    if (reservation?.status !== 'finalized' || reservation.locale !== locale
+      || assessment?.status !== 'success' || assessment?.isFinal !== true
+      || assessment?.locale !== locale || assessment?.quality?.acceptable !== true) return null;
+    return { reservation, assessment };
+  }
+
+  function accentProfileRequired(req, res, error) {
+    if (error?.code !== 'SPEAKING_ACCENT_PROFILE_REQUIRED') return false;
+    res.status(409).json({ error: {
+      code: error.code,
+      message: 'Сначала выберите en-GB или en-US либо начните короткую калибровку.',
+      requestId: req.requestId,
+    } });
+    return true;
+  }
+
+  async function assignmentAccentProfile(username, calibrationSetupId, allowCalibration) {
+    if (typeof db.getSpeakingAccentProfile !== 'function') return null;
+    const profile = await db.getSpeakingAccentProfile(username);
+    if (profile) return profile;
+    const pending = allowCalibration && calibrationSetupId
+      && typeof db.getPendingSpeakingAccentCalibration === 'function'
+      ? await db.getPendingSpeakingAccentCalibration(username) : null;
+    if (pending && pending.id === calibrationSetupId) return null;
+    throw Object.assign(new Error('SPEAKING_ACCENT_PROFILE_REQUIRED'), {
+      code: 'SPEAKING_ACCENT_PROFILE_REQUIRED',
+    });
+  }
+
+  async function sessionAcceptsAccent(username, session, locale) {
+    if (session.accent_locale) return session.accent_locale === locale;
+    if (typeof db.getSpeakingAccentProfile !== 'function'
+      || typeof db.getPendingSpeakingAccentCalibration !== 'function') return false;
+    if (!session.calibration_setup_id) return false;
+    const [profile, pending] = await Promise.all([
+      db.getSpeakingAccentProfile(username), db.getPendingSpeakingAccentCalibration(username),
+    ]);
+    return !profile && pending?.id === session.calibration_setup_id;
+  }
+
+  router.get('/api/v1/speaking/accent-profile', auth, requireActiveSubscription, async (req, res, next) => {
+    try {
+      res.setHeader('Cache-Control', 'no-store');
+      const profile = await db.getSpeakingAccentProfile(req.user);
+      const calibration = typeof db.getPendingSpeakingAccentCalibration === 'function'
+        ? await db.getPendingSpeakingAccentCalibration(req.user) : null;
+      return res.json({ profile, calibration, setupRequired: !profile });
+    } catch (error) { return next(error); }
+  });
+
+  router.put('/api/v1/speaking/accent-profile', auth, requireActiveSubscription, async (req, res, next) => {
+    const parsed = accentProfileSchema.safeParse(req.body);
+    if (!parsed.success) return validationError(req, res, 'Выберите en-GB или en-US.');
+    try {
+      res.setHeader('Cache-Control', 'no-store');
+      return res.json(await db.setSpeakingAccentProfile(req.user, {
+        locale: parsed.data.locale, source: 'manual', now: now(),
+      }));
+    } catch (error) { return next(error); }
+  });
+
+  router.post('/api/v1/speaking/accent-profile/calibration', auth, requireActiveSubscription, async (req, res, next) => {
+    if (!emptyBodySchema.safeParse(req.body || {}).success) return validationError(req, res, 'Калибровка запускается без параметров.');
+    try {
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(201).json(await db.startSpeakingAccentCalibration(req.user, { now: now() }));
+    } catch (error) {
+      if (accentCalibrationError(req, res, error)) return undefined;
+      return next(error);
+    }
+  });
+
+  router.post('/api/v1/speaking/accent-profile/calibration/:setupId/complete', auth, requireActiveSubscription, async (req, res, next) => {
+    const setupId = sessionIdSchema.safeParse(req.params.setupId);
+    const parsed = accentCalibrationCompleteSchema.safeParse(req.body);
+    if (!setupId.success || !parsed.success) return validationError(req, res, 'Нужны две финальные оценки акцента.');
+    try {
+      const [enGB, enUS] = await Promise.all([
+        storedAccentEvidence(req.user, parsed.data.enGbAssessmentKey, 'en-GB'),
+        storedAccentEvidence(req.user, parsed.data.enUsAssessmentKey, 'en-US'),
+      ]);
+      if (!enGB || !enUS || !enGB.reservation.context_id
+        || enGB.reservation.context_id !== enUS.reservation.context_id
+        || !enGB.reservation.audio_hash
+        || enGB.reservation.audio_hash !== enUS.reservation.audio_hash) {
+        const error = new Error('SPEAKING_ACCENT_CALIBRATION_EVIDENCE_INVALID');
+        error.code = 'SPEAKING_ACCENT_CALIBRATION_EVIDENCE_INVALID';
+        throw error;
+      }
+      const suggestion = selectSpeakingAccentSuggestion({ enGB: enGB.assessment, enUS: enUS.assessment });
+      const result = await db.completeSpeakingAccentCalibration(req.user, {
+        setupId: setupId.data,
+        locale: suggestion.locale,
+        suggestionConfidence: suggestion.confidence,
+        evidenceKeys: [parsed.data.enGbAssessmentKey, parsed.data.enUsAssessmentKey],
+        policyVersion: suggestion.policyVersion,
+        now: now(),
+      });
+      res.setHeader('Cache-Control', 'no-store');
+      return res.json(result);
+    } catch (error) {
+      if (accentCalibrationError(req, res, error)) return undefined;
+      return next(error);
+    }
+  });
+
+  router.get('/api/v1/speaking/calibration-consent', auth, async (req, res, next) => {
+    try {
+      res.setHeader('Cache-Control', 'no-store');
+      return res.json({
+        consent: await db.getSpeakingCalibrationConsent(req.user),
+        currentPolicyVersion: SPEAKING_CALIBRATION_CONSENT_POLICY,
+      });
+    } catch (error) { return next(error); }
+  });
+
+  router.put('/api/v1/speaking/calibration-consent', auth, async (req, res, next) => {
+    const parsed = calibrationConsentSchema.safeParse(req.body);
+    if (!parsed.success) return validationError(req, res, 'Настройки согласия не прошли проверку.');
+    try {
+      res.setHeader('Cache-Control', 'no-store');
+      return res.json(await db.setSpeakingCalibrationConsent(req.user, {
+        ...parsed.data, policyVersion: SPEAKING_CALIBRATION_CONSENT_POLICY, now: now(),
+      }));
+    } catch (error) {
+      if (accentCalibrationError(req, res, error)) return undefined;
+      return next(error);
+    }
+  });
+
+  router.post(
+    '/api/v1/speaking/calibration-samples',
+    auth,
+    requireActiveSubscription,
+    parsePronunciationAudio,
+    async (req, res, next) => {
+      const assessmentKey = pronunciationIdempotencySchema.safeParse(req.get('x-speaking-assessment-key'));
+      if (!assessmentKey.success) return validationError(req, res, 'Недопустимая ссылка на оценку.');
+      const wav = parsePcm16Mono16kWav(req.body);
+      if (!wav) return validationError(req, res, 'Нужен корректный mono PCM WAV: 16 kHz, 16-bit.');
+      try {
+        const stored = await db.getSpeakingAssessmentReservation(req.user, assessmentKey.data, { now: now() });
+        const reservation = stored?.reservation;
+        const assessment = reservation?.result?.assessment;
+        const taskMatch = /^task([1-4]):/u.exec(String(reservation?.context_id || ''));
+        if (reservation?.status !== 'finalized' || assessment?.status !== 'success'
+          || assessment?.isFinal !== true || !taskMatch || reservation.locale !== assessment.locale) {
+          const error = new Error('SPEAKING_ACCENT_CALIBRATION_EVIDENCE_INVALID');
+          error.code = 'SPEAKING_ACCENT_CALIBRATION_EVIDENCE_INVALID';
+          throw error;
+        }
+        if (!reservation.audio_hash
+          || reservation.audio_hash !== speakingAssessmentAudioHash(req.body)) {
+          const error = new Error('SPEAKING_ACCENT_CALIBRATION_EVIDENCE_INVALID');
+          error.code = 'SPEAKING_ACCENT_CALIBRATION_EVIDENCE_INVALID';
+          throw error;
+        }
+        const taskType = Number(taskMatch[1]);
+        if (/:item\d+$/u.test(reservation.context_id)) {
+          const error = new Error('SPEAKING_ACCENT_CALIBRATION_EVIDENCE_INVALID');
+          error.code = 'SPEAKING_ACCENT_CALIBRATION_EVIDENCE_INVALID';
+          throw error;
+        }
+        const material = calibrationTaskMaterial(
+          taskType,
+          reservation.context_id,
+          'SPEAKING_ACCENT_CALIBRATION_EVIDENCE_INVALID',
+        );
+        const sample = await db.createSpeakingCalibrationSample(req.user, {
+          id: crypto.randomUUID(), assessmentKey: assessmentKey.data,
+          taskType, taskRef: reservation.context_id, locale: reservation.locale,
+          taskSnapshot: material.task, rubricSnapshot: material.rubric,
+          maximumScore: speakingCalibrationMaximum(taskType), audio: req.body, now: now(),
+        });
+        res.setHeader('Cache-Control', 'no-store');
+        return res.status(201).json(sample);
+      } catch (error) {
+        if (accentCalibrationError(req, res, error)) return undefined;
+        return next(error);
+      }
+    },
+  );
+
+  router.get('/api/v1/speaking/calibration-reviews/next', auth, requireCalibrationExpert, async (req, res, next) => {
+    try {
+      res.setHeader('Cache-Control', 'no-store');
+      const card = await db.claimSpeakingCalibrationSample(req.user, { now: now() });
+      return card ? res.json(card) : res.status(204).end();
+    } catch (error) { return next(error); }
+  });
+
+  router.get('/api/v1/speaking/calibration-reviews/:sampleId/audio', auth, requireCalibrationExpert, async (req, res, next) => {
+    const sampleId = sessionIdSchema.safeParse(req.params.sampleId);
+    if (!sampleId.success) return validationError(req, res, 'Недопустимая калибровочная запись.');
+    try {
+      const audio = await db.getSpeakingCalibrationAudio(sampleId.data, req.user, { now: now() });
+      if (!audio) return res.status(404).json({ error: { code: 'SPEAKING_CALIBRATION_SAMPLE_NOT_AVAILABLE' } });
+      res.setHeader('Cache-Control', 'no-store');
+      res.type('audio/wav');
+      return res.send(audio);
+    } catch (error) { return next(error); }
+  });
+
+  router.post('/api/v1/speaking/calibration-reviews/:sampleId', auth, requireCalibrationExpert, async (req, res, next) => {
+    const sampleId = sessionIdSchema.safeParse(req.params.sampleId);
+    const parsed = calibrationReviewSchema.safeParse(req.body);
+    if (!sampleId.success || !parsed.success) return validationError(req, res, 'Оценка эксперта не прошла проверку.');
+    try {
+      res.setHeader('Cache-Control', 'no-store');
+      return res.json(await db.submitSpeakingCalibrationReview(
+        req.user, sampleId.data, { ...parsed.data, now: now() },
+      ));
+    } catch (error) {
+      if (accentCalibrationError(req, res, error)) return undefined;
+      return next(error);
+    }
   });
 
   function unavailableProviderStatus() {
@@ -210,6 +500,13 @@ export function createSpeakingRoutes({
           throw Object.assign(new Error('SPEAKING_TASK1_CATALOG_REVISION_MISMATCH'), {
             code: 'SPEAKING_TASK1_CATALOG_REVISION_MISMATCH',
           });
+        }
+        if (!await sessionAcceptsAccent(req.user, session, locale.data)) {
+          return res.status(409).json({ error: {
+            code: 'SPEAKING_ACCENT_PROFILE_MISMATCH',
+            message: 'Эта тренировка закреплена за выбранной нормой произношения. Начни новую тренировку после смены профиля.',
+            requestId: req.requestId,
+          } });
         }
         if (!pronunciationAssessment) {
           return res.status(503).json({ error: {
@@ -324,6 +621,13 @@ export function createSpeakingRoutes({
             const code = `SPEAKING_TASK${taskType}_CATALOG_REVISION_MISMATCH`;
             throw Object.assign(new Error(code), { code });
           }
+          if (!await sessionAcceptsAccent(req.user, session, locale.data)) {
+            return res.status(409).json({ error: {
+              code: 'SPEAKING_ACCENT_PROFILE_MISMATCH',
+              message: 'Эта тренировка закреплена за выбранной нормой произношения. Начни новую тренировку после смены профиля.',
+              requestId: req.requestId,
+            } });
+          }
           if (!pronunciationAssessment) {
             return res.status(503).json({ error: {
               code: 'SPEAKING_PRONUNCIATION_UNAVAILABLE',
@@ -397,20 +701,28 @@ export function createSpeakingRoutes({
     maximumSeconds: 180,
   });
 
-  function registerAssignmentRoutes({ basePath, catalog, assign, get, response }) {
+  function registerAssignmentRoutes({
+    basePath, catalog, assign, get, response, allowAccentCalibration = false,
+  }) {
     router.post(basePath, auth, requireActiveSubscription, async (req, res, next) => {
-      const parsed = emptyBodySchema.safeParse(req.body || {});
+      const parsed = assignmentBodySchema.safeParse(req.body || {});
       if (!parsed.success) return validationError(req, res, 'Параметры задания выбирает сервер.');
       try {
         res.setHeader('Cache-Control', 'no-store');
+        const accentProfile = await assignmentAccentProfile(
+          req.user, parsed.data.calibrationSetupId, allowAccentCalibration,
+        );
         const session = await assign(req.user, {
           catalogId: catalog.id,
           catalogRevision: catalog.revision,
           tasks: catalog.tasks,
+          accentProfile,
+          calibrationSetupId: accentProfile ? null : parsed.data.calibrationSetupId,
           now: now(),
         });
         return res.status(201).json(response(session));
       } catch (error) {
+        if (accentProfileRequired(req, res, error)) return undefined;
         if (catalogMismatchResponse(req, res, error)) return undefined;
         return next(error);
       }
@@ -527,9 +839,13 @@ export function createSpeakingRoutes({
     if (!parsed.success) return validationError(req, res, 'Полный вариант назначает сервер.');
     try {
       res.setHeader('Cache-Control', 'no-store');
-      const session = await db.assignFullSpeakingSession(req.user, { catalogs: fullCatalogs, now: now() });
+      const accentProfile = await assignmentAccentProfile(req.user, null, false);
+      const session = await db.assignFullSpeakingSession(req.user, {
+        catalogs: fullCatalogs, accentProfile, now: now(),
+      });
       return res.status(201).json(fullResponse(session));
     } catch (error) {
+      if (accentProfileRequired(req, res, error)) return undefined;
       if (fullSessionError(req, res, error)) return undefined;
       return next(error);
     }
@@ -606,6 +922,7 @@ export function createSpeakingRoutes({
     assign: (...args) => db.assignSpeakingTask1Session(...args),
     get: (...args) => db.getSpeakingTask1Session(...args),
     response: task1Response,
+    allowAccentCalibration: true,
   });
 
   router.post('/api/v1/speaking/task-1/sessions/:sessionId/complete', auth, requireActiveSubscription, async (req, res, next) => {

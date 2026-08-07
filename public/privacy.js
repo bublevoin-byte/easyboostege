@@ -11,12 +11,13 @@ import {clearAdaptiveRuntime} from './adaptive-session-runtime.js';
   'use strict';
   const api = global.EasyBoostApi;
   let current = null;
+  let calibrationConsent = null;
 
   function ensureSheet() {
     if (document.getElementById('privacySheet')) return;
     const style = document.createElement('style');
     style.textContent = `
-      #privacySheet{position:fixed;inset:0;z-index:500;display:none}#privacySheet.open{display:block}
+      #privacySheet{position:fixed;inset:0;z-index:100001;display:none}#privacySheet.open{display:block}
       #privacySheet .privacyBackdrop{position:absolute;inset:0;background:rgba(20,20,30,.55)}
       #privacySheet .privacyPanel{position:absolute;left:50%;bottom:0;transform:translateX(-50%);width:min(100%,430px);max-height:92dvh;overflow:auto;background:#fff;border-radius:26px 26px 0 0;padding:20px 20px calc(24px + env(safe-area-inset-bottom));box-shadow:0 -16px 50px rgba(20,20,30,.24)}
       #privacySheet h2{margin:0;color:#2B2B2B;font:800 21px Nunito,Manrope,sans-serif}#privacySheet p,#privacySheet li{color:#5B5F66;font:600 13px/1.55 Manrope,sans-serif}
@@ -24,6 +25,7 @@ import {clearAdaptiveRuntime} from './adaptive-session-runtime.js';
       .privacyActions{display:flex;gap:10px;margin-top:16px}.privacyBtn{min-height:48px;border-radius:15px;border:0;padding:0 16px;font:800 14px Manrope,sans-serif;cursor:pointer}.privacyBtn:disabled{opacity:.48;cursor:not-allowed}.privacyPrimary{flex:1;background:#F2683F;color:#fff}.privacySecondary{background:#F1F2F4;color:#454950}
       .privacyLink{color:#B33C19;font-weight:800}.privacyStatus{min-height:20px;color:#B42318;font:700 12px/1.4 Manrope,sans-serif;margin-top:8px}
       .privacyProfileBtn{width:100%;min-height:48px;border:0;border-top:1px solid #F4F5F6;background:#fff;padding:12px 16px;text-align:left;font:700 14px Manrope,sans-serif;color:#2B2B2B;cursor:pointer}
+      .privacyCalibration{margin:14px 0;padding:14px;border:1.5px solid #F0D5CA;border-radius:16px;background:#FFF9F6;color:#5B5F66;font:600 12px/1.5 Manrope,sans-serif}.privacyCalibration b{display:block;color:#2B2B2B;font-size:14px;margin-bottom:4px}.privacyCalibration button{width:100%;min-height:44px;margin-top:10px;border:1.5px solid #E2A894;border-radius:13px;background:#fff;color:#A83226;font:800 13px Manrope,sans-serif;cursor:pointer}
     `;
     document.head.appendChild(style);
     const sheet = document.createElement('div');
@@ -34,6 +36,7 @@ import {clearAdaptiveRuntime} from './adaptive-session-runtime.js';
       <ul><li>Текст ответа — для проверки через настроенного провайдера xAI или Groq.</li><li>В Voice Error Tutor голос передаётся внешнему AI-провайдеру потоком в реальном времени для двустороннего разговора.</li><li>Easy Boost не сохраняет исходное аудио, полный transcript или свободные голосовые реплики; сохраняется только структурированный учебный результат.</li><li>ИИ-оценка ориентировочная и не является официальной.</li></ul>
       <label class="privacyChoice"><input id="privacyText" type="checkbox"><span><b>Обработка текста</b><span>Разрешить отправку текста учебного ответа AI-провайдеру.</span></span></label>
       <label class="privacyChoice"><input id="privacyVoice" type="checkbox"><span><b>Потоковая обработка голоса</b><span>Разрешить двустороннюю realtime speech-to-speech передачу внешнему AI-провайдеру. Аудио и полный transcript не сохраняются; согласие можно отозвать здесь до следующего разговора.</span></span></label>
+      <div id="privacyCalibration" class="privacyCalibration"><b>Добровольная экспертная калибровка произношения</b><span id="privacyCalibrationState">Проверяем отдельное согласие…</span><button id="privacyCalibrationRevoke" type="button" hidden>Отозвать согласие и удалить незавершённые аудиозаписи</button></div>
       <a class="privacyLink" href="/privacy.html" target="_blank" rel="noopener">Открыть политику конфиденциальности</a>
       <div id="privacyStatus" class="privacyStatus" role="status" aria-live="polite"></div>
       <div class="privacyActions"><button id="privacyClose" class="privacyBtn privacySecondary" type="button">Позже</button><button id="privacySave" class="privacyBtn privacyPrimary" type="button">Сохранить выбор</button></div></section>`;
@@ -41,6 +44,7 @@ import {clearAdaptiveRuntime} from './adaptive-session-runtime.js';
     sheet.querySelector('.privacyBackdrop').onclick = closePrivacy;
     document.getElementById('privacyClose').onclick = closePrivacy;
     document.getElementById('privacySave').onclick = savePrivacy;
+    document.getElementById('privacyCalibrationRevoke').onclick = revokeCalibrationConsent;
     sheet.addEventListener('keydown', (event) => { if (event.key === 'Escape') closePrivacy(); });
   }
 
@@ -49,8 +53,51 @@ import {clearAdaptiveRuntime} from './adaptive-session-runtime.js';
     document.getElementById('privacyText').checked = Boolean(current?.text_processing);
     document.getElementById('privacyVoice').checked = Boolean(current?.voice_processing);
     document.getElementById('privacyStatus').textContent = '';
+    updateCalibrationPrivacy();
     document.getElementById('privacySheet').classList.add('open');
     document.getElementById('privacyText').focus();
+  }
+  function updateCalibrationPrivacy() {
+    const state = document.getElementById('privacyCalibrationState');
+    const revoke = document.getElementById('privacyCalibrationRevoke');
+    if (!state || !revoke) return;
+    const granted = Boolean(calibrationConsent?.granted);
+    state.textContent = granted
+      ? 'Согласие действует. Его можно отозвать даже после окончания подписки.'
+      : 'Согласие не действует; аудиозаписи для экспертного корпуса не принимаются.';
+    revoke.hidden = !granted;
+  }
+  async function loadCalibrationConsent() {
+    if (!SRV) return null;
+    try {
+      const payload = await api.get('/api/v1/speaking/calibration-consent');
+      calibrationConsent = payload?.consent || null;
+      updateCalibrationPrivacy();
+      return calibrationConsent;
+    } catch (_) { return null; }
+  }
+  async function revokeCalibrationConsent() {
+    const button = document.getElementById('privacyCalibrationRevoke');
+    const status = document.getElementById('privacyStatus');
+    if (!calibrationConsent?.granted || !button || !status) return;
+    button.disabled = true; status.textContent = 'Отзываем согласие и удаляем незавершённые аудиозаписи…';
+    try {
+      calibrationConsent = await api.put('/api/v1/speaking/calibration-consent', {
+        granted: false,
+        ageGroup: calibrationConsent.age_group,
+        guardianConfirmed: Boolean(calibrationConsent.guardian_confirmed),
+      });
+      status.textContent = 'Согласие отозвано; незавершённые аудиозаписи удалены.';
+      updateCalibrationPrivacy();
+    } catch (error) { status.textContent = api.messageFor(error); }
+    finally { button.disabled = false; }
+  }
+  async function openCalibrationPrivacy() {
+    ensureSheet();
+    await Promise.all([loadPrivacy(false), loadCalibrationConsent()]);
+    openPrivacy();
+    const revoke = document.getElementById('privacyCalibrationRevoke');
+    if (revoke && !revoke.hidden) revoke.focus();
   }
   function closePrivacy() { document.getElementById('privacySheet')?.classList.remove('open'); }
   async function savePrivacy() {
@@ -85,6 +132,7 @@ import {clearAdaptiveRuntime} from './adaptive-session-runtime.js';
     catch (error) { global.alert(api.messageFor(error)); }
   }
   global.openPrivacy = openPrivacy;
+  global.openCalibrationPrivacy = openCalibrationPrivacy;
   registerProfileHook(addProfileControls);
-  registerStartHook(() => loadPrivacy(true));
+  registerStartHook(() => Promise.all([loadPrivacy(true), loadCalibrationConsent()]));
 })(window);

@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import pg from 'pg';
 import { adaptiveAssistedMetadata, adaptiveReadingMetadata, requireModuleAttemptEvidenceQuality } from '../adaptive-learning/evidence-quality.js';
 import { compareAdaptiveEvidenceWatermarks } from '../adaptive-learning/evidence-watermark.js';
@@ -85,6 +86,20 @@ import {
   SPEAKING_ASSESSMENT_LIMITS,
   speakingAssessmentPeriodStart,
 } from '../speaking/assessment-quota.js';
+import {
+  assertSpeakingAccentProfileChange,
+  assertSpeakingCalibrationConsent,
+  assertSpeakingCalibrationReview,
+  assertSpeakingCalibrationSample,
+  blindSpeakingCalibrationCard,
+  materialSpeakingCalibrationDisagreement,
+  publicSpeakingAccentCalibration,
+  publicSpeakingAccentProfile,
+  publicSpeakingCalibrationSample,
+  speakingAccentError,
+  speakingCalibrationExpiresAt,
+  speakingCalibrationReviewClaim,
+} from '../speaking/accent-calibration.js';
 import { hashAuthCode, normalizeUsername, normalizeVoiceTutorDeliveryMetadata, normalizeVoiceTutorProxyHash, subscriptionView, VoiceTutorError, voiceTutorAccessView, voiceTutorBillableSeconds, voiceTutorProxyUsage, voiceTutorQuotaPeriods, voiceTutorReservationSeconds } from './shared.js';
 import { transitionPedagogicalState } from '../voice-tutor/state-machine.js';
 import { transitionRuleCardReview } from '../voice-tutor/rule-card.js';
@@ -1733,6 +1748,435 @@ export function createPostgresRepository(connectionString, {
     } finally { client.release(); }
   }
 
+  async function getSpeakingAccentProfile(username) {
+    const result = await pool.query('SELECT * FROM speaking_accent_profiles WHERE username = $1', [username]);
+    return publicSpeakingAccentProfile(result.rows[0] || null);
+  }
+
+  async function getSpeakingAccentHistory(username) {
+    const result = await pool.query(
+      `SELECT id, locale, revision, source, effective_at
+       FROM speaking_accent_profile_history WHERE username = $1 ORDER BY revision`,
+      [username],
+    );
+    return result.rows.map((row) => ({ ...row, revision: Number(row.revision) }));
+  }
+
+  async function setSpeakingAccentProfile(username, input) {
+    const parsed = assertSpeakingAccentProfileChange(input);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const owner = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+      if (!owner.rowCount) throw new Error('USER_NOT_FOUND');
+      const selected = await client.query('SELECT * FROM speaking_accent_profiles WHERE username = $1 FOR UPDATE', [username]);
+      const previous = selected.rows[0] || null;
+      const calibration = await client.query(
+        'SELECT * FROM speaking_accent_calibrations WHERE username = $1 FOR UPDATE',
+        [username],
+      );
+      if (parsed.source === 'manual' && calibration.rows[0]?.status === 'pending') {
+        await client.query(
+          `UPDATE speaking_accent_calibrations
+           SET status = 'cancelled', completed_at = $2, locale = NULL, confidence = NULL,
+               evidence_keys = NULL, policy_version = NULL
+           WHERE username = $1 AND status = 'pending'`,
+          [username, parsed.now],
+        );
+      }
+      if (previous?.locale === parsed.locale) {
+        await client.query('COMMIT');
+        return { changed: false, profile: publicSpeakingAccentProfile(previous) };
+      }
+      const revision = Number(previous?.revision || 0) + 1;
+      const calibrationUsed = Boolean(previous?.calibration_used || calibration.rowCount);
+      const updated = await client.query(
+        `INSERT INTO speaking_accent_profiles
+         (username, locale, revision, source, effective_at, calibration_used)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (username) DO UPDATE SET locale = EXCLUDED.locale, revision = EXCLUDED.revision,
+           source = EXCLUDED.source, effective_at = EXCLUDED.effective_at,
+           calibration_used = EXCLUDED.calibration_used
+         RETURNING *`,
+        [username, parsed.locale, revision, parsed.source, parsed.now, calibrationUsed],
+      );
+      await client.query(
+        `INSERT INTO speaking_accent_profile_history
+         (id, username, locale, revision, source, effective_at) VALUES ($1, $2, $3, $4, $5, $6)`,
+        [crypto.randomUUID(), username, parsed.locale, revision, parsed.source, parsed.now],
+      );
+      await client.query('COMMIT');
+      return { changed: true, profile: publicSpeakingAccentProfile(updated.rows[0]) };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async function startSpeakingAccentCalibration(username, { now = new Date() } = {}) {
+    const instant = new Date(now);
+    if (!Number.isFinite(instant.getTime())) throw speakingAccentError('SPEAKING_ACCENT_CALIBRATION_INVALID');
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const owner = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+      if (!owner.rowCount) throw new Error('USER_NOT_FOUND');
+      const profile = await client.query(
+        'SELECT username FROM speaking_accent_profiles WHERE username = $1 FOR UPDATE',
+        [username],
+      );
+      if (profile.rowCount) throw speakingAccentError('SPEAKING_ACCENT_CALIBRATION_ALREADY_USED');
+      const result = await client.query(
+        `INSERT INTO speaking_accent_calibrations (id, username, status, started_at)
+         VALUES ($1, $2, 'pending', $3) RETURNING id, status, started_at`,
+        [crypto.randomUUID(), username, instant],
+      );
+      await client.query('COMMIT');
+      return result.rows[0];
+    } catch (error) {
+      await client.query('ROLLBACK');
+      if (error.code === '23505') throw speakingAccentError('SPEAKING_ACCENT_CALIBRATION_ALREADY_USED');
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async function getSpeakingAccentCalibration(username, setupId) {
+    const result = await pool.query(
+      'SELECT * FROM speaking_accent_calibrations WHERE username = $1 AND id = $2',
+      [username, setupId],
+    );
+    return result.rows[0] || null;
+  }
+
+  async function getPendingSpeakingAccentCalibration(username) {
+    const result = await pool.query(
+      `SELECT id, status, started_at FROM speaking_accent_calibrations
+       WHERE username = $1 AND status = 'pending'`,
+      [username],
+    );
+    return result.rows[0] || null;
+  }
+
+  async function completeSpeakingAccentCalibration(username, input) {
+    const locale = String(input?.locale || '');
+    const confidence = String(input?.suggestionConfidence || '');
+    const setupId = String(input?.setupId || '');
+    const policyVersion = String(input?.policyVersion || '');
+    const evidenceKeys = Array.isArray(input?.evidenceKeys) ? input.evidenceKeys.map(String) : [];
+    const instant = new Date(input?.now ?? new Date());
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+    if (!['en-GB', 'en-US'].includes(locale) || !['clear', 'close'].includes(confidence)
+      || !uuid.test(setupId) || policyVersion !== 'speaking-accent-suggestion-v1'
+      || evidenceKeys.length !== 2 || evidenceKeys[0] === evidenceKeys[1]
+      || evidenceKeys.some((key) => !uuid.test(key)) || !Number.isFinite(instant.getTime())) {
+      throw speakingAccentError('SPEAKING_ACCENT_CALIBRATION_INVALID');
+    }
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const owner = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+      if (!owner.rowCount) throw new Error('USER_NOT_FOUND');
+      const setup = await client.query(
+        'SELECT * FROM speaking_accent_calibrations WHERE username = $1 AND id = $2 FOR UPDATE',
+        [username, setupId],
+      );
+      if (!setup.rowCount) throw speakingAccentError('SPEAKING_ACCENT_CALIBRATION_NOT_FOUND');
+      if (setup.rows[0].status !== 'pending') throw speakingAccentError('SPEAKING_ACCENT_CALIBRATION_ALREADY_USED');
+      const previous = await client.query('SELECT * FROM speaking_accent_profiles WHERE username = $1 FOR UPDATE', [username]);
+      const revision = Number(previous.rows[0]?.revision || 0) + 1;
+      await client.query(
+        `UPDATE speaking_accent_calibrations SET status = 'completed', completed_at = $3,
+           locale = $4, confidence = $5, evidence_keys = $6::uuid[], policy_version = $7
+         WHERE username = $1 AND id = $2`,
+        [username, setupId, instant, locale, confidence, evidenceKeys, policyVersion],
+      );
+      const profile = await client.query(
+        `INSERT INTO speaking_accent_profiles
+         (username, locale, revision, source, effective_at, calibration_used)
+         VALUES ($1, $2, $3, 'calibration', $4, TRUE)
+         ON CONFLICT (username) DO UPDATE SET locale = EXCLUDED.locale, revision = EXCLUDED.revision,
+           source = 'calibration', effective_at = EXCLUDED.effective_at, calibration_used = TRUE
+         RETURNING *`,
+        [username, locale, revision, instant],
+      );
+      await client.query(
+        `INSERT INTO speaking_accent_profile_history
+         (id, username, locale, revision, source, effective_at)
+         VALUES ($1, $2, $3, $4, 'calibration', $5)`,
+        [crypto.randomUUID(), username, locale, revision, instant],
+      );
+      await client.query('COMMIT');
+      return { profile: publicSpeakingAccentProfile(profile.rows[0]), suggestionConfidence: confidence };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async function getSpeakingCalibrationConsent(username) {
+    const result = await pool.query(
+      `SELECT granted, age_group, guardian_confirmed, policy_version,
+              granted_at, revoked_at, updated_at
+       FROM speaking_calibration_consents WHERE username = $1`,
+      [username],
+    );
+    return result.rows[0] || null;
+  }
+
+  async function setSpeakingCalibrationConsent(username, input) {
+    const parsed = assertSpeakingCalibrationConsent(input);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const owner = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+      if (!owner.rowCount) throw new Error('USER_NOT_FOUND');
+      const consent = await client.query(
+        `INSERT INTO speaking_calibration_consents
+         (username, granted, age_group, guardian_confirmed, policy_version,
+          granted_at, revoked_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, CASE WHEN $2 THEN $6::timestamptz END,
+                 CASE WHEN NOT $2 THEN $6::timestamptz END, $6)
+         ON CONFLICT (username) DO UPDATE SET granted = EXCLUDED.granted,
+           age_group = EXCLUDED.age_group, guardian_confirmed = EXCLUDED.guardian_confirmed,
+           policy_version = EXCLUDED.policy_version,
+           granted_at = CASE WHEN EXCLUDED.granted THEN COALESCE(speaking_calibration_consents.granted_at, EXCLUDED.updated_at) END,
+           revoked_at = CASE WHEN NOT EXCLUDED.granted THEN EXCLUDED.updated_at END,
+           updated_at = EXCLUDED.updated_at
+         RETURNING granted, age_group, guardian_confirmed, policy_version,
+                   granted_at, revoked_at, updated_at`,
+        [username, parsed.granted, parsed.ageGroup, parsed.guardianConfirmed, parsed.policyVersion, parsed.now],
+      );
+      if (!parsed.granted) {
+        await client.query(
+          `UPDATE speaking_calibration_samples SET audio = NULL, raw_deleted_at = $2,
+             status = 'consent_revoked'
+           WHERE username = $1 AND audio IS NOT NULL`,
+          [username, parsed.now],
+        );
+      }
+      await client.query('COMMIT');
+      return consent.rows[0];
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async function createSpeakingCalibrationSample(username, input) {
+    const parsed = assertSpeakingCalibrationSample(input);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const owner = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+      if (!owner.rowCount) throw new Error('USER_NOT_FOUND');
+      const consent = await client.query(
+        'SELECT granted FROM speaking_calibration_consents WHERE username = $1 FOR UPDATE',
+        [username],
+      );
+      if (!consent.rows[0]?.granted) throw speakingAccentError('SPEAKING_CALIBRATION_CONSENT_REQUIRED');
+      const duplicate = await client.query(
+        'SELECT * FROM speaking_calibration_samples WHERE username = $1 AND assessment_key = $2',
+        [username, parsed.assessmentKey],
+      );
+      if (duplicate.rowCount) {
+        await client.query('COMMIT');
+        return publicSpeakingCalibrationSample(duplicate.rows[0]);
+      }
+      const sample = await client.query(
+        `INSERT INTO speaking_calibration_samples
+         (id, username, assessment_key, task_type, task_ref, locale, maximum_score,
+          task_snapshot, rubric_snapshot, status, audio, created_at, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb,
+                 'awaiting_reviews', $10, $11, $12)
+         RETURNING *`,
+        [parsed.id, username, parsed.assessmentKey, parsed.taskType, parsed.taskRef,
+          parsed.locale, parsed.maximumScore, JSON.stringify(parsed.taskSnapshot),
+          JSON.stringify(parsed.rubricSnapshot), parsed.audio, parsed.now,
+          speakingCalibrationExpiresAt(parsed.now)],
+      );
+      await client.query('COMMIT');
+      return publicSpeakingCalibrationSample(sample.rows[0]);
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async function purgeExpiredSpeakingCalibrationSamples({ now = new Date() } = {}) {
+    const instant = new Date(now);
+    if (!Number.isFinite(instant.getTime())) throw speakingAccentError('SPEAKING_CALIBRATION_TIME_INVALID');
+    const result = await pool.query(
+      `UPDATE speaking_calibration_samples SET audio = NULL, raw_deleted_at = $1, status = 'expired'
+       WHERE audio IS NOT NULL AND expires_at <= $1 RETURNING id`,
+      [instant],
+    );
+    return { deletedAudio: result.rowCount };
+  }
+
+  async function claimSpeakingCalibrationSample(reviewer, { now = new Date() } = {}) {
+    const instant = new Date(now);
+    if (!Number.isFinite(instant.getTime())) throw speakingAccentError('SPEAKING_CALIBRATION_TIME_INVALID');
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        `UPDATE speaking_calibration_samples SET audio = NULL, raw_deleted_at = $1, status = 'expired'
+         WHERE audio IS NOT NULL AND expires_at <= $1`,
+        [instant],
+      );
+      const selected = await client.query(
+        `SELECT sample.* FROM speaking_calibration_samples sample
+         JOIN speaking_calibration_consents consent ON consent.username = sample.username AND consent.granted
+         LEFT JOIN LATERAL (
+           SELECT entry.audit
+           FROM jsonb_array_elements(sample.access_audit) WITH ORDINALITY AS entry(audit, ordinal)
+           WHERE (entry.audit->>'review_round')::integer = jsonb_array_length(sample.reviews) + 1
+           ORDER BY entry.ordinal DESC
+           LIMIT 1
+         ) current_claim ON TRUE
+         WHERE sample.audio IS NOT NULL
+           AND sample.status IN ('awaiting_reviews', 'adjudication_pending')
+           AND NOT sample.reviews @> $1::jsonb
+           AND jsonb_array_length(sample.reviews) < 12
+           AND (SELECT COUNT(*) FROM jsonb_array_elements(sample.reviews) review
+                WHERE COALESCE((review->>'sufficient')::boolean, FALSE)) < 3
+           AND (current_claim.audit IS NULL
+             OR current_claim.audit->>'reviewer' = $2
+             OR (current_claim.audit->>'accessed_at')::timestamptz <= $3)
+         ORDER BY sample.created_at, sample.id
+         LIMIT 1 FOR UPDATE OF sample SKIP LOCKED`,
+        [JSON.stringify([{ reviewer }]), reviewer,
+          new Date(instant.getTime() - 15 * 60 * 1_000)],
+      );
+      const sample = selected.rows[0] || null;
+      if (!sample) {
+        await client.query('COMMIT');
+        return null;
+      }
+      const claim = speakingCalibrationReviewClaim(sample, reviewer, instant);
+      if (!claim.resume) {
+        const accessAudit = [...sample.access_audit, {
+          reviewer, review_round: claim.reviewRound, accessed_at: instant.toISOString(),
+        }].slice(-12);
+        sample.access_audit = accessAudit;
+        await client.query(
+          'UPDATE speaking_calibration_samples SET access_audit = $2::jsonb WHERE id = $1',
+          [sample.id, JSON.stringify(accessAudit)],
+        );
+      }
+      await client.query('COMMIT');
+      return blindSpeakingCalibrationCard(sample);
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async function getSpeakingCalibrationAudio(sampleId, reviewer, { now = new Date() } = {}) {
+    const instant = new Date(now);
+    if (!Number.isFinite(instant.getTime())) throw speakingAccentError('SPEAKING_CALIBRATION_TIME_INVALID');
+    const expired = await pool.query(
+      `UPDATE speaking_calibration_samples
+       SET audio = NULL, raw_deleted_at = $2, status = 'expired'
+       WHERE id = $1 AND audio IS NOT NULL AND expires_at <= $2
+       RETURNING id`,
+      [sampleId, instant],
+    );
+    if (expired.rowCount) return null;
+    const result = await pool.query(
+      'SELECT audio, reviews, access_audit FROM speaking_calibration_samples WHERE id = $1 AND audio IS NOT NULL',
+      [sampleId],
+    );
+    const sample = result.rows[0];
+    return sample && speakingCalibrationReviewClaim(sample, reviewer, instant).ownsActiveClaim
+      ? sample.audio : null;
+  }
+
+  async function submitSpeakingCalibrationReview(reviewer, sampleId, input) {
+    const reviewInstant = new Date(input?.now ?? new Date());
+    if (Number.isFinite(reviewInstant.getTime())) {
+      await pool.query(
+        `UPDATE speaking_calibration_samples
+         SET audio = NULL, raw_deleted_at = $2, status = 'expired'
+         WHERE id = $1 AND audio IS NOT NULL AND expires_at <= $2`,
+        [sampleId, reviewInstant],
+      );
+    }
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const selected = await client.query(
+        'SELECT * FROM speaking_calibration_samples WHERE id = $1 FOR UPDATE',
+        [sampleId],
+      );
+      const sample = selected.rows[0];
+      if (!sample?.audio || !['awaiting_reviews', 'adjudication_pending'].includes(sample.status)) {
+        throw speakingAccentError('SPEAKING_CALIBRATION_SAMPLE_NOT_AVAILABLE');
+      }
+      if (sample.reviews.some((entry) => entry.reviewer === reviewer)) {
+        throw speakingAccentError('SPEAKING_CALIBRATION_REVIEWER_NOT_INDEPENDENT');
+      }
+      if (!speakingCalibrationReviewClaim(sample, reviewer, input?.now).ownsActiveClaim) {
+        throw speakingAccentError('SPEAKING_CALIBRATION_REVIEW_CLAIM_REQUIRED');
+      }
+      const review = assertSpeakingCalibrationReview(sample, input);
+      const reviews = [...sample.reviews, {
+        reviewer, sufficient: review.sufficient, score: review.score, critical_error: review.criticalError,
+        reviewed_at: review.now.toISOString(),
+      }];
+      const sufficientReviews = reviews.filter((entry) => entry.sufficient !== false);
+      let status = 'awaiting_reviews';
+      let deleteAudio = false;
+      if (sufficientReviews.length === 2) {
+        const material = materialSpeakingCalibrationDisagreement(sample.task_type,
+          { score: sufficientReviews[0].score, criticalError: sufficientReviews[0].critical_error },
+          { score: sufficientReviews[1].score, criticalError: sufficientReviews[1].critical_error });
+        status = material ? 'adjudication_pending' : 'completed';
+        deleteAudio = !material;
+      } else if (sufficientReviews.length === 3) {
+        status = 'completed';
+        deleteAudio = true;
+      }
+      const updated = await client.query(
+        `UPDATE speaking_calibration_samples
+         SET reviews = $2::jsonb, status = $3,
+             audio = CASE WHEN $4 THEN NULL ELSE audio END,
+             raw_deleted_at = CASE WHEN $4 THEN $5 ELSE raw_deleted_at END,
+             completed_at = CASE WHEN $4 THEN $5 ELSE completed_at END
+         WHERE id = $1 RETURNING *`,
+        [sampleId, JSON.stringify(reviews), status, deleteAudio, review.now],
+      );
+      await client.query('COMMIT');
+      const row = updated.rows[0];
+      return {
+        sampleId: row.id, status: row.status, audio_retained: Boolean(row.audio),
+        reviewCount: row.reviews.filter((entry) => entry.sufficient !== false).length,
+      };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async function listSpeakingCalibrationSamplesForOwner(username) {
+    const result = await pool.query(
+      'SELECT * FROM speaking_calibration_samples WHERE username = $1 ORDER BY created_at',
+      [username],
+    );
+    return result.rows.map(publicSpeakingCalibrationSample);
+  }
+
+  async function listAnonymousSpeakingCalibrationLabels() {
+    const result = await pool.query(
+      `SELECT id, task_type, locale, reviews FROM speaking_calibration_samples
+       WHERE status = 'completed' ORDER BY created_at`,
+    );
+    return result.rows.map((row) => ({
+      sampleId: row.id, taskType: Number(row.task_type), accentLocale: row.locale,
+      ratings: row.reviews.map(({ reviewer, ...rating }) => rating),
+    }));
+  }
+
   async function createTelegramAuthCode(code, expiresAt) {
     await pool.query('DELETE FROM telegram_auth_codes WHERE expires_at <= NOW()');
     await pool.query(
@@ -1935,14 +2379,32 @@ export function createPostgresRepository(connectionString, {
   })[kind];
 
   async function assignSpeakingCatalogSession(kind, createSession, username, {
-    catalogId, catalogRevision, tasks, now,
+    catalogId, catalogRevision, tasks, accentProfile = null, calibrationSetupId = null, now,
   }) {
     const table = speakingSessionTable(kind);
     if (!table) throw new Error('SPEAKING_SESSION_KIND_INVALID');
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      const owner = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+      if (!owner.rowCount) throw new Error('USER_NOT_FOUND');
+      const canonicalProfile = await client.query(
+        'SELECT * FROM speaking_accent_profiles WHERE username = $1',
+        [username],
+      );
+      const effectiveAccentProfile = canonicalProfile.rowCount
+        ? publicSpeakingAccentProfile(canonicalProfile.rows[0])
+        : accentProfile;
+      const effectiveCalibrationSetupId = effectiveAccentProfile ? null : calibrationSetupId;
       await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`speaking-${kind}:${username}`]);
+      if (effectiveCalibrationSetupId) {
+        const calibration = await client.query(
+          `SELECT id FROM speaking_accent_calibrations
+           WHERE id = $1 AND username = $2 AND status = 'pending'`,
+          [effectiveCalibrationSetupId, username],
+        );
+        if (!calibration.rowCount) throw speakingAccentError('SPEAKING_ACCENT_PROFILE_REQUIRED');
+      }
       const history = await client.query(
         `SELECT * FROM ${table}
          WHERE username = $1 AND catalog_id = $2 AND catalog_revision = $3
@@ -1950,16 +2412,33 @@ export function createPostgresRepository(connectionString, {
         [username, catalogId, catalogRevision],
       );
       const selection = selectSpeakingTrainingAssignment(tasks, history.rows, now);
-      const session = createSession({ username, catalogId, catalogRevision, selection, now });
-      const inserted = await client.query(
-        `INSERT INTO ${table}
-         (id, username, catalog_id, catalog_revision, task_id, task_revision, selection_reason,
-          status, assigned_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'assigned', $8)
-         RETURNING *`,
-        [session.id, username, catalogId, catalogRevision, session.task_id, session.task_revision,
-          session.selection_reason, session.assigned_at],
-      );
+      const session = createSession({
+        username, catalogId, catalogRevision, selection, accentProfile: effectiveAccentProfile,
+        calibrationSetupId: effectiveCalibrationSetupId, now,
+      });
+      const commonValues = [
+        session.id, username, catalogId, catalogRevision, session.task_id, session.task_revision,
+        session.selection_reason, session.accent_locale, session.accent_profile_revision,
+        session.accent_effective_at,
+      ];
+      const inserted = kind === 'task1'
+        ? await client.query(
+          `INSERT INTO ${table}
+           (id, username, catalog_id, catalog_revision, task_id, task_revision, selection_reason,
+            accent_locale, accent_profile_revision, accent_effective_at, calibration_setup_id,
+            status, assigned_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'assigned', $12)
+           RETURNING *`,
+          [...commonValues, session.calibration_setup_id, session.assigned_at],
+        )
+        : await client.query(
+          `INSERT INTO ${table}
+           (id, username, catalog_id, catalog_revision, task_id, task_revision, selection_reason,
+            accent_locale, accent_profile_revision, accent_effective_at, status, assigned_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'assigned', $11)
+           RETURNING *`,
+          [...commonValues, session.assigned_at],
+        );
       await client.query('COMMIT');
       return inserted.rows[0];
     } catch (error) {
@@ -2128,10 +2607,19 @@ export function createPostgresRepository(connectionString, {
     }
   }
 
-  async function assignFullSpeakingSession(username, { catalogs, now = new Date() }) {
+  async function assignFullSpeakingSession(username, { catalogs, accentProfile = null, now = new Date() }) {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      const owner = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+      if (!owner.rowCount) throw new Error('USER_NOT_FOUND');
+      const canonicalProfile = await client.query(
+        'SELECT * FROM speaking_accent_profiles WHERE username = $1',
+        [username],
+      );
+      const effectiveAccentProfile = canonicalProfile.rowCount
+        ? publicSpeakingAccentProfile(canonicalProfile.rows[0])
+        : accentProfile;
       await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`speaking-full:${username}`]);
       const active = await client.query(
         `SELECT * FROM speaking_full_sessions
@@ -2164,20 +2652,23 @@ export function createPostgresRepository(connectionString, {
       const selection = selectFullSpeakingVariant(catalogs, history.rows);
       const session = createFullSpeakingSession({
         username, catalogs, variantIndex: selection.variantIndex,
-        selectionReason: selection.reason, now,
+        selectionReason: selection.reason, accentProfile: effectiveAccentProfile, now,
       });
       const inserted = await client.query(
         `INSERT INTO speaking_full_sessions
          (id, username, mode, format_id, format_revision, catalog_id, catalog_revision,
           variant_index, selection_reason, maximum_score, assignments, responses, status, phase,
-          current_task, current_response, assigned_at)
+          current_task, current_response, accent_locale, accent_profile_revision,
+          accent_effective_at, assigned_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb,
-                 $13, $14, $15, $16, $17)
+                 $13, $14, $15, $16, $17, $18, $19, $20)
          RETURNING *`,
         [session.id, username, session.mode, session.format_id, session.format_revision,
           session.catalog_id, session.catalog_revision, session.variant_index, session.selection_reason,
           session.maximum_score, JSON.stringify(session.assignments), JSON.stringify(session.responses),
-          session.status, session.phase, session.current_task, session.current_response, session.assigned_at],
+          session.status, session.phase, session.current_task, session.current_response,
+          session.accent_locale, session.accent_profile_revision, session.accent_effective_at,
+          session.assigned_at],
       );
       await client.query('COMMIT');
       return inserted.rows[0];
@@ -4560,12 +5051,12 @@ export function createPostgresRepository(connectionString, {
       }
       const inserted = await client.query(
         `INSERT INTO speaking_pronunciation_assessments
-         (id, username, idempotency_key, request_hash, status, locale, context_id, period_start,
+         (id, username, idempotency_key, request_hash, audio_hash, status, locale, context_id, period_start,
           allowance_seconds, reserved_seconds, reserved_at)
-         VALUES ($1, $2, $3, $4, 'reserved', $5, $6, $7, $8, $9, $10)
+         VALUES ($1, $2, $3, $4, $5, 'reserved', $6, $7, $8, $9, $10, $11)
          RETURNING *`,
         [candidate.id, username, candidate.idempotencyKey, candidate.requestHash,
-          candidate.locale, candidate.contextId, candidate.periodStart, quota.limitSeconds,
+          candidate.audioHash, candidate.locale, candidate.contextId, candidate.periodStart, quota.limitSeconds,
           candidate.reservedSeconds, candidate.now],
       );
       return {
@@ -4750,21 +5241,26 @@ export function createPostgresRepository(connectionString, {
       pool.query('SELECT id, task_type, assignment, answer, evaluated_answer, review, provider, model, prompt_version, status, error_code, created_at, evaluated_at FROM writing_attempts WHERE username = $1 ORDER BY created_at', [username]),
       pool.query('SELECT id, task_type, assignment, transcript, review, provider, model, prompt_version, status, error_code, created_at, evaluated_at FROM speaking_attempts WHERE username = $1 ORDER BY created_at', [username]),
       pool.query(`SELECT id, catalog_id, catalog_revision, task_id, task_revision, selection_reason,
+                         accent_locale, accent_profile_revision, accent_effective_at,
                          status, recording_duration_seconds, mic_check, local_playback, self_rating,
                          assigned_at, completed_at, due_at
                   FROM speaking_task1_sessions WHERE username = $1 ORDER BY assigned_at, id`, [username]),
       pool.query(`SELECT id, catalog_id, catalog_revision, task_id, task_revision, selection_reason,
+                         accent_locale, accent_profile_revision, accent_effective_at,
                          status, current_question, questions, self_rating, assigned_at, completed_at, due_at
                   FROM speaking_task2_sessions WHERE username = $1 ORDER BY assigned_at, id`, [username]),
       pool.query(`SELECT id, catalog_id, catalog_revision, task_id, task_revision, selection_reason,
+                         accent_locale, accent_profile_revision, accent_effective_at,
                          status, current_question, answers, self_rating, assigned_at, completed_at, due_at
                   FROM speaking_task3_sessions WHERE username = $1 ORDER BY assigned_at, id`, [username]),
       pool.query(`SELECT id, catalog_id, catalog_revision, task_id, task_revision, selection_reason,
+                         accent_locale, accent_profile_revision, accent_effective_at,
                          status, recording_duration_seconds, mic_check, local_playback, self_rating,
                          assigned_at, completed_at, due_at
                   FROM speaking_task4_sessions WHERE username = $1 ORDER BY assigned_at, id`, [username]),
       pool.query(`SELECT id, mode, format_id, format_revision, catalog_id, catalog_revision,
                          variant_index, selection_reason, maximum_score, assignments, responses,
+                         accent_locale, accent_profile_revision, accent_effective_at,
                          status, phase, current_task, current_response, stage_started_at,
                          stage_deadline_at, assigned_at, submitted_at, submission_response
                   FROM speaking_full_sessions WHERE username = $1 ORDER BY assigned_at, id`, [username]),
@@ -4803,6 +5299,18 @@ export function createPostgresRepository(connectionString, {
       pool.query("SELECT id, actor_telegram_id, action, target_type, target_id, result, metadata, created_at FROM audit_log WHERE metadata->>'username' = $1 ORDER BY created_at", [username]),
     ]);
     if (!account.rowCount) return null;
+    const [speakingAccentProfile, speakingAccentHistory, speakingAccentCalibration,
+      speakingCalibrationConsent, speakingCalibrationSamples] = await Promise.all([
+      getSpeakingAccentProfile(username),
+      getSpeakingAccentHistory(username),
+      pool.query(
+        `SELECT id, status, started_at, completed_at, locale, confidence, policy_version
+         FROM speaking_accent_calibrations WHERE username = $1`,
+        [username],
+      ).then((result) => publicSpeakingAccentCalibration(result.rows[0] || null)),
+      getSpeakingCalibrationConsent(username),
+      listSpeakingCalibrationSamplesForOwner(username),
+    ]);
     const adaptiveExport = adaptiveLearningProfileExportDto(
       adaptiveSnapshot,
       adaptiveSnapshot?.estimates || [],
@@ -4829,6 +5337,11 @@ export function createPostgresRepository(connectionString, {
       speaking_task4_sessions: speakingTask4Sessions.rows,
       speaking_full_sessions: speakingFullSessions.rows,
       speaking_assessments: speakingAssessments.rows.map(speakingAssessmentExportDto),
+      speaking_accent_profile: speakingAccentProfile,
+      speaking_accent_history: speakingAccentHistory,
+      speaking_accent_calibration: speakingAccentCalibration,
+      speaking_calibration_consent: speakingCalibrationConsent,
+      speaking_calibration_samples: speakingCalibrationSamples,
       generated_tasks: generatedTasks.rows,
       module_attempts: moduleAttempts.rows,
       progress_summary: progressSummary.rows,
@@ -4884,6 +5397,22 @@ export function createPostgresRepository(connectionString, {
           : entry);
         await client.query('UPDATE voice_tutor_reports SET review_audit = $2::jsonb WHERE id = $1', [report.id, JSON.stringify(audit)]);
       }
+      const calibrationReviews = await client.query(
+        `SELECT id, reviews, access_audit FROM speaking_calibration_samples
+         WHERE reviews @> $1::jsonb OR access_audit @> $1::jsonb`,
+        [JSON.stringify([{ reviewer: username }])],
+      );
+      for (const sample of calibrationReviews.rows) {
+        const anonymize = (entries) => entries.map((entry) => (entry.reviewer === username
+          ? { ...entry, reviewer: null, reviewer_account_deleted: true }
+          : entry));
+        await client.query(
+          `UPDATE speaking_calibration_samples
+           SET reviews = $2::jsonb, access_audit = $3::jsonb WHERE id = $1`,
+          [sample.id, JSON.stringify(anonymize(sample.reviews)),
+            JSON.stringify(anonymize(sample.access_audit))],
+        );
+      }
       await client.query(
         `UPDATE audit_log
          SET metadata = (metadata - 'username') || '{"account_deleted":true}'::jsonb
@@ -4896,6 +5425,25 @@ export function createPostgresRepository(connectionString, {
          WHERE metadata->>'reviewer' = $1`,
         [username],
       );
+      await client.query(
+        `DELETE FROM speaking_calibration_samples
+         WHERE username = $1 AND status <> 'completed'`,
+        [username],
+      );
+      const completedCalibrationSamples = await client.query(
+        `SELECT id, reviews FROM speaking_calibration_samples
+         WHERE username = $1 AND status = 'completed' FOR UPDATE`,
+        [username],
+      );
+      for (const sample of completedCalibrationSamples.rows) {
+        const anonymousReviews = sample.reviews.map((review) => ({ ...review, reviewer: null }));
+        await client.query(
+          `UPDATE speaking_calibration_samples
+           SET assessment_key = NULL, reviews = $2::jsonb, access_audit = '[]'::jsonb
+           WHERE id = $1`,
+          [sample.id, JSON.stringify(anonymousReviews)],
+        );
+      }
       const deleted = await client.query('DELETE FROM users WHERE username = $1 RETURNING username', [username]);
       await client.query('COMMIT');
       return Boolean(deleted.rowCount);
@@ -4970,6 +5518,22 @@ export function createPostgresRepository(connectionString, {
     setUserRole,
     getPrivacyConsent,
     setPrivacyConsent,
+    getSpeakingAccentProfile,
+    getSpeakingAccentHistory,
+    setSpeakingAccentProfile,
+    startSpeakingAccentCalibration,
+    getSpeakingAccentCalibration,
+    getPendingSpeakingAccentCalibration,
+    completeSpeakingAccentCalibration,
+    getSpeakingCalibrationConsent,
+    setSpeakingCalibrationConsent,
+    createSpeakingCalibrationSample,
+    purgeExpiredSpeakingCalibrationSamples,
+    claimSpeakingCalibrationSample,
+    getSpeakingCalibrationAudio,
+    submitSpeakingCalibrationReview,
+    listSpeakingCalibrationSamplesForOwner,
+    listAnonymousSpeakingCalibrationLabels,
     createTelegramAuthCode,
     confirmTelegramAuthCode,
     consumeTelegramAuthCode,

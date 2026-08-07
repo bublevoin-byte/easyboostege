@@ -58,3 +58,46 @@ Set `SPEAKING_PRONUNCIATION_ENABLED=false` and restart/redeploy. This immediatel
 Application logs allow only provider event, locale, segment count, and bounded error code. They must never contain subscription keys, raw audio, transcript/reference text, idempotency values, or full Azure JSON. Raw audio exists only in request/process memory and is not persisted.
 
 Official references: [Pronunciation Assessment](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/how-to-pronunciation-assessment), [SpeechRecognizer JavaScript API](https://learn.microsoft.com/en-us/javascript/api/microsoft-cognitiveservices-speech-sdk/speechrecognizer?view=azure-node-latest), [AudioConfig JavaScript API](https://learn.microsoft.com/en-us/javascript/api/microsoft-cognitiveservices-speech-sdk/audioconfig?view=azure-node-latest), [AudioInputStream JavaScript API](https://learn.microsoft.com/en-us/javascript/api/microsoft-cognitiveservices-speech-sdk/audioinputstream?view=azure-node-latest), [language support](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/language-support?tabs=pronunciation-assessment), and [Speech data privacy](https://learn.microsoft.com/en-us/azure/ai-foundry/responsible-ai/speech-service/speech-to-text/data-privacy-security).
+
+## Accent profile and voluntary calibration operations
+
+The learner explicitly chooses `en-GB` or `en-US` before the first Speaking session. “I do not know”
+creates one resumable dual-accent setup: the same task-1 recording is assessed once per locale, both
+final owner-bound results must share the exact server context and SHA-256 audio digest, and the versioned server rule saves one
+suggestion. Ordinary attempts always use the locale snapshot captured when their session was assigned;
+they never compare both locales or cherry-pick the higher result. A manual profile change is append-only
+audit metadata and affects future sessions only. Manual profile selection cancels a pending setup under
+the same owner lock; setup completion then fails closed and cannot replace the explicit choice. Starting a
+new setup is rejected once any profile exists. New ordinary and full-section assignments re-read the
+canonical profile under that lock instead of trusting a previously loaded route value.
+
+Research calibration is a different, voluntary data flow. Declining it does not restrict training or
+subscription features. A minor cannot grant it without guardian confirmation. A learner who has granted
+it can explicitly contribute only the exact WAV whose SHA-256 digest is bound to one finalized assessment; no background or
+implicit copy of an ordinary recording is allowed.
+Task 2 and task 3 provider contexts ending in `:itemN` cover only one question/answer and are not eligible
+for whole-task expert calibration. They are rejected until a future server-owned aggregation contract can
+prove that every required item belongs to the same completed task.
+
+The admin queue exposes only a pseudorandom sample ID, the server-owned task and versioned rubric,
+locale, scoring maximum, review round and expiry. It contains no name, username, Telegram ID or VK ID.
+The task and rubric are immutable enrollment snapshots, not a lookup in the currently deployed catalog,
+so a retained sample remains reviewable after a catalog revision is retired.
+Its 15-minute lease is enforced on both audio read and submission. Only sufficient independent reviews
+count toward completion; two independent blinded reviews are the minimum. The same admin cannot rate one sample twice. Material disagreement over
+the task score or critical-error flag moves the sample to a third independent adjudicator; it is never
+silently averaged.
+
+Raw calibration audio is erased after an agreeing sufficient pair, after the third sufficient independent
+adjudicator, immediately on consent revocation, or by the 180-day retention purge. Consent read/revoke
+remains auth-only after subscription expiry, and the inactive-access screen keeps an auth-only privacy
+control available for that revoke. Operators must run
+`purgeExpiredSpeakingCalibrationSamples` from the existing retention job at least daily and alert if any
+retained sample is at or past `expires_at`. Do not reconstruct deleted audio from backups into the live
+queue. An active reviewer lease never extends the 180-day boundary: audio read and submission atomically
+expire the sample at that instant. PostgreSQL evaluates lease/review eligibility before its limit, so the
+eligible row is selected in SQL and a busy first page cannot hide newer work. The owner export includes
+allowlisted setup lifecycle metadata but omits its internal evidence keys,
+raw audio, expert ratings/identities and access audit; account deletion
+removes unfinished material and anonymizes only already completed numeric labels. Deleting an expert
+pseudonymizes that identity in reviews and access leases before the account row is removed.

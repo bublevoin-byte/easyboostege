@@ -19,6 +19,8 @@ async function withServer(run) {
   const other = await repository.createTelegramUser(8_500_002, 'Full other');
   await repository.grantDays(8_500_001, 30, 'Full owner');
   await repository.grantDays(8_500_002, 30, 'Full other');
+  await repository.setSpeakingAccentProfile(owner, { locale: 'en-GB', source: 'manual', now: new Date('2026-08-06T10:00:00.000Z') });
+  await repository.setSpeakingAccentProfile(other, { locale: 'en-GB', source: 'manual', now: new Date('2026-08-06T10:00:00.000Z') });
   let now = new Date('2026-08-06T10:00:00.000Z');
   const app = express();
   app.use(express.json());

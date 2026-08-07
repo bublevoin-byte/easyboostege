@@ -19,6 +19,12 @@ function requestFingerprint(input) {
   return digest.digest('hex');
 }
 
+export function speakingAssessmentAudioHash(audio) {
+  return crypto.createHash('sha256')
+    .update(Buffer.isBuffer(audio) ? audio : Buffer.alloc(0))
+    .digest('hex');
+}
+
 function unavailableAssessment(reason, status = 'unavailable') {
   return { status, available: false, reason, retryable: true };
 }
@@ -126,6 +132,7 @@ export function createSpeakingAssessmentService({ db, provider, now = () => new 
       id: crypto.randomUUID(),
       idempotencyKey: trustedInput.idempotencyKey,
       requestHash,
+      audioHash: speakingAssessmentAudioHash(trustedInput.audio),
       reservedSeconds,
       locale: trustedInput.locale,
       contextId: trustedInput.contextId,

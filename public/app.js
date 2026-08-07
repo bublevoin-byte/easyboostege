@@ -248,9 +248,10 @@ function accessGate(){
   const title=document.createElement('h1');title.id='access_gate_title';title.setAttribute('style','margin:0;color:#2B2B2B;font:800 23px Nunito,Manrope,sans-serif;');
   const copy=document.createElement('p');copy.id='access_gate_copy';copy.setAttribute('style','margin:10px 0 20px;color:#5D6168;font:600 14px/1.55 Manrope,system-ui,sans-serif;');
   const bot=document.createElement('a');bot.id='access_gate_bot';bot.target='_blank';bot.rel='noopener';bot.setAttribute('style','display:none;min-height:50px;box-sizing:border-box;border-radius:15px;background:#F2683F;color:#fff;padding:14px 16px;font:800 14px Manrope,sans-serif;text-decoration:none;');bot.textContent='Открыть Telegram-бот';
+  const privacy=document.createElement('button');privacy.id='access_gate_privacy';privacy.type='button';privacy.setAttribute('style','display:none;width:100%;min-height:48px;margin-top:10px;border:1.5px solid #D9DCE1;border-radius:15px;background:#fff;color:#454950;font:800 14px Manrope,sans-serif;cursor:pointer;');privacy.textContent='Настройки приватности и данных';privacy.addEventListener('click',function(){window.openCalibrationPrivacy?.()});
   const retry=document.createElement('button');retry.id='access_gate_retry';retry.type='button';retry.setAttribute('style','width:100%;min-height:48px;margin-top:10px;border:1.5px solid #F3D2C8;border-radius:15px;background:#fff;color:#B54E2F;font:800 14px Manrope,sans-serif;cursor:pointer;');retry.textContent='Повторить проверку';retry.addEventListener('click',function(){pwCheck()});
-  card.append(title,copy,bot,retry);gate.appendChild(card);gate.addEventListener('keydown',function(event){
-    if(event.key!=='Tab')return;const controls=[bot,retry].filter(function(control){return control.offsetParent!==null});
+  card.append(title,copy,bot,privacy,retry);gate.appendChild(card);gate.addEventListener('keydown',function(event){
+    if(event.key!=='Tab')return;const controls=[bot,privacy,retry].filter(function(control){return control.offsetParent!==null});
     if(!controls.length)return;const first=controls[0],last=controls[controls.length-1];
     if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus()}
     else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus()}
@@ -263,12 +264,13 @@ function applyLearningAccess(result){
     show('scr5');closeAccessGate(true);const login=document.getElementById('scr5');if(login)login.dataset.accessState=state;lgMsg('Войдите, чтобы проверить активный доступ.');return
   }
   show('scr5');const gate=accessGate();setAccessBackgroundInert(true);gate.dataset.state=state;
-  const title=document.getElementById('access_gate_title');const copy=document.getElementById('access_gate_copy');const bot=document.getElementById('access_gate_bot');
+  const title=document.getElementById('access_gate_title');const copy=document.getElementById('access_gate_copy');const bot=document.getElementById('access_gate_bot');const privacy=document.getElementById('access_gate_privacy');
   if(state===LEARNING_ACCESS_STATES.INACTIVE){
     title.textContent='Нужен активный доступ';copy.textContent='Сессия подтверждена, но подписка неактивна или закончилась. Учебные разделы откроются после активации доступа.';
     if(result.session&&result.session.bot){bot.href='https://t.me/'+result.session.bot;bot.style.display='block'}else bot.style.display='none';
+    privacy.style.display='block';
   }else{
-    title.textContent='Не удалось проверить доступ';copy.textContent='Сейчас нет связи с сервером, поэтому мы не можем подтвердить подписку. Учебные разделы не открыты. Проверьте сеть и повторите попытку.';bot.style.display='none';
+    title.textContent='Не удалось проверить доступ';copy.textContent='Сейчас нет связи с сервером, поэтому мы не можем подтвердить подписку. Учебные разделы не открыты. Проверьте сеть и повторите попытку.';bot.style.display='none';privacy.style.display='none';
   }queueMicrotask(function(){document.getElementById('access_gate_retry')?.focus()})
 }
 function adoptServerSession(session){

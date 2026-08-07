@@ -6,7 +6,7 @@
 import {registerRouteHook} from '../router.js';
 import {lPlayRaw,lStop} from '../tts.js';
 import {
-  S,SRV,TOKEN,WBTN,apiGet,apiMessage,apiPost,apiPostBinary,generateAiContent,save,
+  S,SRV,TOKEN,WBTN,apiGet,apiMessage,apiPost,apiPostBinary,apiPut,generateAiContent,save,
   setTxt,spSt,spSync,speakingModule,toast,ui,wDeco,
 } from '../app.js';
 import {adaptiveRuntimeSnapshot,completeAdaptiveServerAttempt,openAdaptivePlan} from '../adaptive-session-runtime.js';
@@ -53,6 +53,7 @@ const SP_SHEET={
 3:'<b>Как отвечать на вопросы интервью:</b><br>— Отвечай развёрнуто: 2-3 предложения, а не «Yes, I do».<br>— Формула: прямой ответ → причина → пример. <i>I usually read in my free time. It helps me to relax. For example, last week I finished a great detective story.</i><br>— Не молчи: если нужно время, начни с <i>Well, let me think…</i><br>— Следи за временем вопроса: «What did you do…» → отвечай в прошедшем.',
 4:'<b>Скелет монолога (2,5–3 минуты):</b><br>1. Вступление: <i>I have found two photos for our project about…</i><br>2. Описание: <i>In the first photo we can see… In the second photo there is…</i><br>3. Общее: <i>Both photos show… / What these photos have in common is…</i><br>4. Различия: <i>The main difference is that… while…</i><br>5. Мнение: <i>As for me, I prefer… because…</i><br>6. Финал: <i>That is all I wanted to say.</i><br><b>Ловушка:</b> пропустил пункт плана — минус баллы за решение задачи.'};
 let SP=null,SP_rec=null,SP_chunks=[],SP_tm=null,SP_sheet=false,SP_TASK1_FLOW=null,SP_TASK2_FLOW=null,SP_TASK3_FLOW=null,SP_TASK4_FLOW=null;
+let SP_ACCENT=null,SP_ACCENT_SETUP=null,SP_CALIBRATION_CONSENT=null;
 function spAnim(n,d){ui.animate('s9_card',n,d)}
 function spMime(){return speakingModule.preferredMimeType(window.MediaRecorder)}
 function spFmt(s){return speakingModule.formatTime(s)}
@@ -76,7 +77,35 @@ function task4RecoveryPointerInvalid(error){return Number(error&&error.status)==
   ||String(error&&error.code)==='SPEAKING_TASK4_CATALOG_REVISION_MISMATCH'}
 function adaptiveSpeakingLock(){try{var active=adaptiveRuntimeSnapshot().active;return active&&active.module==='speaking'?active:null}catch(_){return null}}
 function launchAdaptiveSpeakingLock(lock){if(!lock)return false;try{toast('Говорение в персональном плане временно отключено до безопасной привязки оценки к пользователю.')}catch(_){}Promise.resolve(openAdaptivePlan()).catch(function(){});return true}
-function initSpeaking(){if(!S)return;var lock=adaptiveSpeakingLock();spStopAll();spReleaseRecording();spDisposeTask1Flow();spDisposeTask2Flow();spDisposeTask3Flow();spDisposeTask4Flow();SP=null;spSync();if(lock&&launchAdaptiveSpeakingLock(lock))return;spHub()}
+function initSpeaking(){if(!S)return;var lock=adaptiveSpeakingLock();spStopAll();spReleaseRecording();spDisposeTask1Flow();spDisposeTask2Flow();spDisposeTask3Flow();spDisposeTask4Flow();SP=null;spSync();if(lock&&launchAdaptiveSpeakingLock(lock))return;
+  var area=document.getElementById('s9_area');if(area)area.innerHTML='<div class="clayCard" role="status" aria-live="polite" style="padding:20px;text-align:center;font-weight:700;color:#777163;">Загружаем профиль произношения…</div>';
+  Promise.all([apiGet('/api/v1/speaking/accent-profile'),apiGet('/api/v1/speaking/calibration-consent')]).then(function(results){
+    SP_ACCENT=results[0]&&results[0].profile||null;SP_ACCENT_SETUP=results[0]&&results[0].calibration||null;SP_CALIBRATION_CONSENT=results[1]&&results[1].consent||null;
+    if(SP_ACCENT)spHub();else spAccentSetup()}).catch(function(error){if(area)area.innerHTML='<div class="clayCard" role="alert" style="padding:18px;color:#A83226;font-weight:700;">Не удалось загрузить профиль произношения. Проверь сеть и повтори.</div><div style="height:10px;"></div>'+spBtn('Повторить','initSpeaking()',true);try{toast(apiMessage(error,'request'))}catch(_){}})}
+function spAccentSetup(){var area=document.getElementById('s9_area');if(!area)return;
+  var calibrationChoice=!SP_ACCENT
+    ?'<div style="height:10px;"></div>'+spBtn(SP_ACCENT_SETUP?'Продолжить короткую двойную калибровку':'Не знаю — короткая двойная калибровка','spAccentStartUnknown()',false)
+      +'<div class="clayCard" style="padding:13px 15px;margin-top:12px;font-size:12px;line-height:1.5;color:#6B655D;">Для варианта «Не знаю» одна и та же короткая запись проверяется в en-GB и en-US один раз. Затем приложение предлагает профиль; оно не выбирает больший балл заново на каждой попытке.</div>'
+    :'<div class="clayCard" style="padding:13px 15px;margin-top:12px;font-size:12px;line-height:1.5;color:#6B655D;">Изменение применяется только к новым тренировкам. Уже начатая тренировка сохраняет прежний профиль.</div>';
+  area.innerHTML='<div class="clayCard" style="padding:20px;">'
+    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:21px;color:#2B2B2B;">Какой вариант произношения будем тренировать?</div>'
+    +'<div style="font-weight:600;font-size:13px;line-height:1.55;color:#6B655D;margin-top:7px;">ЕГЭ допускает обе нормы. Выбор закрепляется за новой тренировкой и не меняет уже сохранённые оценки.</div></div>'
+    +'<div style="height:10px;"></div>'+spBtn('🇬🇧 Британский · en-GB','spChooseAccent(\'en-GB\')',true)
+    +'<div style="height:10px;"></div>'+spBtn('🇺🇸 Американский · en-US','spChooseAccent(\'en-US\')',true)
+    +calibrationChoice
+    +(SP_ACCENT?'<div style="height:10px;"></div>'+spBtn('Назад без изменений','spHub()',false):'');setTxt('s9_today','настройка произношения')}
+async function spChooseAccent(locale){if(!['en-GB','en-US'].includes(locale))return false;try{var result=await apiPut('/api/v1/speaking/accent-profile',{locale:locale});SP_ACCENT=result.profile;SP_ACCENT_SETUP=null;spHub();return true}catch(error){try{toast(apiMessage(error,'request'))}catch(_){}return false}}
+async function spAccentStartUnknown(){try{if(!SP_ACCENT_SETUP)SP_ACCENT_SETUP=await apiPost('/api/v1/speaking/accent-profile/calibration',{});var opened=await spOpen(1);if(opened&&SP){SP.accentCalibration=SP_ACCENT_SETUP;toast('Прочитай короткий текст один раз. После записи сравним en-GB и en-US.')}return opened}catch(error){try{toast(apiMessage(error,'request'))}catch(_){}return false}}
+function spCalibrationConsentSetup(){var area=document.getElementById('s9_area');if(!area)return;var current=SP_CALIBRATION_CONSENT;
+  area.innerHTML='<div class="clayCard" style="padding:20px;"><div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:20px;">Добровольная калибровка точности</div>'
+    +'<p style="font-size:13px;line-height:1.55;color:#625D56;">Это отдельное согласие на временное хранение анонимной записи для двух независимых экспертных оценок. Отказ не ограничивает обучение или подписку. Сырой звук удаляется после согласованной двойной оценки, отзыва или не позднее 180 дней.</p>'
+    +'<label style="display:grid;gap:6px;font-weight:800;font-size:13px;">Возрастная группа<select id="sp_cal_age" style="min-height:46px;border:1px solid #D7CFC5;border-radius:13px;padding:0 10px;"><option value="adult">18 лет или старше</option><option value="minor">Младше 18 лет</option></select></label>'
+    +'<label style="display:flex;gap:10px;align-items:flex-start;margin-top:12px;font-size:12.5px;font-weight:650;"><input id="sp_cal_guardian" type="checkbox" aria-label="Подтверждение законного представителя" style="width:22px;height:22px;min-height:0;accent-color:#F2683F;"><span>Законный представитель подтвердил передачу записи внешнему сервису и экспертам.</span></label></div>'
+    +'<div style="height:10px;"></div>'+spBtn('Дать добровольное согласие','spSaveCalibrationConsent(true)',true)
+    +(current&&current.granted?'<div style="height:10px;"></div>'+spBtn('Отозвать согласие и удалить сырой звук','spSaveCalibrationConsent(false)',false):'')
+    +'<div style="height:10px;"></div>'+spBtn('Назад без изменений','spHub()',false)}
+async function spSaveCalibrationConsent(granted){var age=document.getElementById('sp_cal_age');var guardian=document.getElementById('sp_cal_guardian');var ageGroup=age?age.value:(SP_CALIBRATION_CONSENT&&SP_CALIBRATION_CONSENT.age_group)||'adult';var guardianConfirmed=Boolean(guardian&&guardian.checked);if(!granted&&SP_CALIBRATION_CONSENT){ageGroup=SP_CALIBRATION_CONSENT.age_group;guardianConfirmed=Boolean(SP_CALIBRATION_CONSENT.guardian_confirmed)}
+  try{SP_CALIBRATION_CONSENT=await apiPut('/api/v1/speaking/calibration-consent',{granted:Boolean(granted),ageGroup:ageGroup,guardianConfirmed:guardianConfirmed});spHub();toast(granted?'Согласие сохранено. Его можно отозвать в любой момент.':'Согласие отозвано; незавершённые сырые записи удалены.');return true}catch(error){try{toast(apiMessage(error,'request'))}catch(_){}return false}}
 async function spLoadPronunciationStatus(){var box=document.getElementById('speaking_pronunciation_status');if(!box)return;
   try{var payload=await apiGet('/api/v1/speaking/pronunciation-assessments/status');var view=speakingModule.pronunciationStatusView(payload);box=document.getElementById('speaking_pronunciation_status');if(!box)return;
     if(view.available){box.style.background='#EAF7F0';box.style.color='#1D6944';box.innerHTML='<b>Оценка произношения доступна</b><br><span style="font-size:11.5px;">Осталось '+spFmt(view.remainingSeconds)+' из '+spFmt(view.limitSeconds)+' в этом месяце · '+(view.tier==='premium'?'Premium':'Base')+'. Локальная запись и прослушивание не расходуют лимит.</span>';return}
@@ -85,6 +114,13 @@ async function spLoadPronunciationStatus(){var box=document.getElementById('spea
 function spHub(){var area=document.getElementById('s9_area');if(!area)return;
   var lock=adaptiveSpeakingLock();if(lock&&launchAdaptiveSpeakingLock(lock))return;
   var r=spSt();var GA=0;function ga(){return 'animation:win .34s '+((GA++)*0.06)+'s cubic-bezier(.25,.75,.35,1) both;'}
+  var accentLabel=SP_ACCENT&&SP_ACCENT.locale==='en-US'?'Американский · en-US':'Британский · en-GB';
+  var accentCard='<div class="clayCard" style="'+ga()+'padding:13px 15px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:10px;">'
+    +'<div><div style="font-weight:900;font-size:13px;color:#2B2B2B;">Профиль произношения</div><div style="font-weight:650;font-size:11.5px;color:#777163;margin-top:3px;">'+ui.escapeHtml(accentLabel)+' · действует для новых тренировок</div></div>'
+    +'<button type="button" class="sq" onclick="spAccentSetup()" style="flex:none;border:0;border-radius:12px;padding:9px 11px;background:#FFEDE4;color:#B54E2F;font-weight:800;cursor:pointer;">Изменить</button></div>';
+  var calibrationGranted=Boolean(SP_CALIBRATION_CONSENT&&SP_CALIBRATION_CONSENT.granted);
+  var calibrationCard='<button type="button" class="clayCard sq" onclick="spCalibrationConsentSetup()" style="'+ga()+'width:100%;border:0;text-align:left;font:inherit;padding:13px 15px;margin-bottom:12px;cursor:pointer;">'
+    +'<div style="font-weight:900;font-size:13px;color:#2B2B2B;">Добровольная калибровка точности</div><div style="font-weight:650;font-size:11.5px;color:'+(calibrationGranted?'#1D7F4A':'#777163')+';margin-top:3px;">'+(calibrationGranted?'Согласие дано · можно отозвать':'Не включена · обучение доступно полностью')+'</div></button>';
   var exCard='<button type="button" class="sq clk" onclick="spExam()" style="'+ga()+'position:relative;overflow:hidden;width:100%;border:0;text-align:left;font:inherit;border-radius:24px;padding:16px 18px;margin-bottom:12px;cursor:pointer;background:linear-gradient(150deg,#3A3532,#2B2B2B);box-shadow:0 14px 28px rgba(43,35,30,.32),inset 0 2px 3px rgba(255,255,255,.14),inset 0 -5px 10px rgba(0,0,0,.35);">'
     +'<svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;" viewBox="0 0 346 80" preserveAspectRatio="xMidYMid slice">'
     +'<g fill="rgba(255,255,255,.75)">'
@@ -100,7 +136,7 @@ function spHub(){var area=document.getElementById('s9_area');if(!area)return;
     +'<div style="font-weight:600;font-size:12px;color:rgba(255,255,255,.62);margin-top:2px;">'+(S.speakingFullSessionId?'есть незавершённая сессия · максимум 20':'4 задания подряд · максимум 20 · оценка позже')+'</div></div>'
     +'<span style="flex:none;background:linear-gradient(145deg,#FFC861,#F2683F);border-radius:14px;width:42px;height:42px;display:grid;place-items:center;box-shadow:0 6px 12px rgba(242,104,63,.4),inset 0 2px 3px rgba(255,255,255,.5);">'
     +'<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span></div></button>';
-  area.innerHTML=exCard+'<div id="speaking_pronunciation_status" class="clayCard" role="status" aria-live="polite" aria-atomic="true" style="'+ga()+'margin-bottom:12px;padding:13px 15px;background:#F4F1EA;color:#514B43;font-weight:650;font-size:12.5px;line-height:1.45;">Проверяем доступность оценки произношения…<br><span style="font-size:11.5px;">Локальная запись и прослушивание не расходуют лимит.</span></div>'+[1,2,3,4].map(function(t){var c=SP_CONF[t];
+  area.innerHTML=accentCard+calibrationCard+exCard+'<div id="speaking_pronunciation_status" class="clayCard" role="status" aria-live="polite" aria-atomic="true" style="'+ga()+'margin-bottom:12px;padding:13px 15px;background:#F4F1EA;color:#514B43;font-weight:650;font-size:12.5px;line-height:1.45;">Проверяем доступность оценки произношения…<br><span style="font-size:11.5px;">Локальная запись и прослушивание не расходуют лимит.</span></div>'+[1,2,3,4].map(function(t){var c=SP_CONF[t];
     return '<button type="button" class="clayCard sq clk" onclick="spOpen('+t+')" style="'+ga()+'width:100%;border:0;text-align:left;font:inherit;padding:16px 18px;margin-bottom:12px;cursor:pointer;">'
       +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'
       +'<div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:15.5px;color:#2B2B2B;">'+c.name+'</div>'
@@ -115,7 +151,7 @@ function spSet(t){var k='spIdx'+t;S[k]=(S[k]||0);return speakingModule.select(sp
 function spNextSet(t){if((SP&&SP.adaptiveContentRef)||adaptiveSpeakingLock()){try{toast('В персональном занятии закреплён точный вариант задания')}catch(_){}return false}S['spIdx'+t]=(S['spIdx'+t]||0)+1;save();return true}
 async function spOpen(t){var lock=adaptiveSpeakingLock();if(lock)return launchAdaptiveSpeakingLock(lock);spReleaseRecording();spDisposeTask1Flow();spDisposeTask2Flow();spDisposeTask3Flow();spDisposeTask4Flow();SP_sheet=false;
   if(t===1){var area=document.getElementById('s9_area');if(area)area.innerHTML='<div class="clayCard" role="status" aria-live="polite" style="padding:20px;text-align:center;font-weight:700;color:#777163;">Сервер подбирает текст…</div>';
-    SP_TASK1_FLOW=createSpeakingTask1BrowserFlow({api:{post:function(path,body){return apiPost(path,body)}}});
+    SP_TASK1_FLOW=createSpeakingTask1BrowserFlow({api:{post:function(path,body){return apiPost(path,SP_ACCENT_SETUP&&!SP_ACCENT?{calibrationSetupId:SP_ACCENT_SETUP.id}:body)}}});
     try{var session=await SP_TASK1_FLOW.loadAssignment();var serverSet=speakingModule.serverTask1Set(session);if(!serverSet||!SP_TASK1_CATALOG_KEYS.has(serverSet.id+'@'+serverSet.revision))throw new Error('SPEAKING_TASK1_RESPONSE_INVALID');
       SP={t:1,set:serverSet,session:session,phase:'intro',qi:0,url:null,mic:null};spRender();return true}
     catch(error){spDisposeTask1Flow();SP=null;try{toast(apiMessage(error,'request'))}catch(_){}spHub();return false}}
@@ -315,6 +351,8 @@ function spRender(){var area=document.getElementById('s9_area');if(!area||!SP)re
     return}
   /* ---- результат ---- */
   if(SP.phase==='done'){var r=spSt();
+    var assessmentAction=SP.accentCalibration?'spAccentFinishUnknown(this)':'spEval(this)';
+    var assessmentLabel=SP.accentCalibration?'Определить вариант произношения':'✨ Оценить по критериям ЕГЭ';
     var extra='';
     if(t===1)extra='<div style="height:10px;"></div>'+spBtn('🔊 Эталон диктора','spEtalon()');
     if(t===2)extra='<div class="clayCard" style="padding:14px 16px;margin-top:12px;"><div style="font-weight:800;font-size:10px;letter-spacing:1.2px;color:#1D7F4A;">ОБРАЗЦЫ ВОПРОСОВ</div>'
@@ -329,7 +367,7 @@ function spRender(){var area=document.getElementById('s9_area');if(!area||!SP)re
       +'<div style="font-weight:600;font-size:13px;color:#777163;margin-top:5px;">Послушай себя со стороны и сверься со шпаргалкой.<br>Тренировок в этом задании: '+r['t'+t].n+'</div></div>'
       +'<div style="height:12px;"></div>'
       +(SP.url?spBtn('▶ Послушать свою запись','spPlay()',true):'<div style="text-align:center;font-weight:600;font-size:12.5px;color:#A83226;">Запись не получилась — проверь доступ к микрофону</div>')
-      +(SP.blob?'<div style="height:10px;"></div><button type="button" class="sq" onclick="spEval(this)" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#6FC2B0,#1F9E5A)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(31,158,90,.3);">✨ Оценить по критериям ЕГЭ</button>':'')
+      +(SP.blob?'<div style="height:10px;"></div><button type="button" class="sq" onclick="'+assessmentAction+'" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#6FC2B0,#1F9E5A)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(31,158,90,.3);">'+assessmentLabel+'</button>':'')
       +(SP.blob?'<div style="height:10px;"></div>'+spBtn('Удалить запись','spDeleteRecording()'):'')
       +(SP.blob&&t===1&&!SP.task1Completed?'<div class="clayCard" style="padding:14px 16px;margin-top:12px;"><div style="font-weight:800;font-size:12px;color:#4A453E;">Как ощущалось чтение?</div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px;">'
         +'<button type="button" class="sq" onclick="spCompleteTask1(\'weak\',this)" style="min-height:44px;border:0;border-radius:12px;background:#FDEDEA;color:#A83226;font-weight:800;">Нужно повторить</button>'
@@ -466,19 +504,40 @@ function spOfficialRecordings(){
   if(SP.t===3&&SP_TASK3_FLOW)return SP_TASK3_FLOW.assessmentRecordings().map(function(item){return {blob:item.blob,itemNumber:item.positionNumber}});
   if(SP.t===4&&SP_TASK4_FLOW&&SP.blob)return [{blob:SP.blob,itemNumber:null}];
   return null}
-async function spUploadPronunciation(taskType,sessionId,recording,idempotencyKey){
+async function spUploadPronunciation(taskType,sessionId,recording,idempotencyKey,locale){
   if(!window.crypto||typeof window.crypto.randomUUID!=='function')throw new Error('безопасный ключ загрузки недоступен — обнови браузер');
   var wav=await convertRecordingToPcm16Wav(recording.blob);
+  var speechLocale=locale||(SP&&SP.session&&SP.session.accentProfile&&SP.session.accentProfile.locale)||(SP_ACCENT&&SP_ACCENT.locale)||'en-GB';
   var headers={
     'Idempotency-Key':idempotencyKey||window.crypto.randomUUID(),
-    'X-Speech-Locale':'en-GB',
+    'X-Speech-Locale':speechLocale,
     'X-Audio-Duration-Seconds':String(wav.durationSeconds)
   };
   if(recording.itemNumber!=null)headers['X-Speaking-Item']=String(recording.itemNumber);
   var result=await apiPostBinary('/api/v1/speaking/task-'+taskType+'/sessions/'+sessionId+'/pronunciation-assessment',wav.blob,'audio/wav',headers);
   if(!result||!result.billing||!result.billing.assessmentId||result.assessment&&result.assessment.status!=='success'){
     var unavailable=new Error('автоматическая оценка записи сейчас недоступна — попробуй позже');unavailable.code='SPEAKING_PRONUNCIATION_UNAVAILABLE';throw unavailable}
-  return {key:headers['Idempotency-Key'],transcript:result.assessment&&result.assessment.transcript||''}}
+  return {key:headers['Idempotency-Key'],transcript:result.assessment&&result.assessment.transcript||'',wavBlob:wav.blob,locale:speechLocale}}
+async function spAccentFinishUnknown(btn){
+  if(!SP||SP.t!==1||!SP.blob||!SP.session||!SP.accentCalibration)return false;
+  if(btn){if(btn.dataset.busy)return false;btn.dataset.busy=1;btn.disabled=true;btn.textContent='Сравниваю en-GB и en-US…'}
+  try{
+    var recording={blob:SP.blob,itemNumber:null};
+    var cache=SP.accentCalibrationUploadCache;
+    if(!cache){cache={enGB:{key:window.crypto.randomUUID(),result:null},enUS:{key:window.crypto.randomUUID(),result:null}};SP.accentCalibrationUploadCache=cache}
+    if(!cache.enGB.result)cache.enGB.result=await spUploadPronunciation(1,SP.session.id,recording,cache.enGB.key,'en-GB');
+    if(!cache.enUS.result)cache.enUS.result=await spUploadPronunciation(1,SP.session.id,recording,cache.enUS.key,'en-US');
+    var result=await apiPost('/api/v1/speaking/accent-profile/calibration/'+encodeURIComponent(SP.accentCalibration.id)+'/complete',{
+      enGbAssessmentKey:cache.enGB.result.key,enUsAssessmentKey:cache.enUS.result.key
+    });
+    SP_ACCENT=result.profile;SP_ACCENT_SETUP=null;SP.accentCalibration=null;
+    spHub();toast('Профиль '+result.profile.locale+' предложен и сохранён. Его можно изменить в любой момент.');return true
+  }catch(error){if(btn){btn.disabled=false;btn.textContent='Повторить определение варианта';delete btn.dataset.busy}try{toast(apiMessage(error,'request'))}catch(_){}return false}}
+async function spContributeCalibration(btn){
+  if(!SP||!SP.calibrationCandidate||!SP_CALIBRATION_CONSENT||!SP_CALIBRATION_CONSENT.granted)return false;
+  if(btn){if(btn.dataset.busy)return false;btn.dataset.busy=1;btn.disabled=true;btn.textContent='Передаю анонимную запись…'}
+  try{await apiPostBinary('/api/v1/speaking/calibration-samples',SP.calibrationCandidate.wavBlob,'audio/wav',{'X-Speaking-Assessment-Key':SP.calibrationCandidate.key});SP.calibrationCandidate=null;if(btn){btn.textContent='Запись передана для двойной проверки'}toast('Спасибо. Эксперты не увидят имя или VK ID, а сырой звук будет удалён по правилам хранения.');return true}
+  catch(error){if(btn){btn.disabled=false;btn.textContent='Повторить передачу для калибровки';delete btn.dataset.busy}try{toast(apiMessage(error,'request'))}catch(_){}return false}}
 async function spEval(btn){
   if(!SP)return;
   var officialRecordings=spOfficialRecordings();
@@ -512,6 +571,8 @@ async function spEval(btn){
       SP.evaluating=false;if(adaptiveRetry)adaptiveRetry.disabled=false;spShowEval(d,tr,null);return}
     var score=speakingModule.clampScore(d,SP.t);d.got=score.got;d.max=score.max;
     S.spkScores=speakingModule.appendScore(S.spkScores,{t:SP.t,g:d.got,m:d.max,ts:Date.now()});
+    SP.calibrationCandidate=SP_CALIBRATION_CONSENT&&SP_CALIBRATION_CONSENT.granted&&uploaded.length===1&&(SP.t===1||SP.t===4)
+      ?{key:uploaded[0].key,wavBlob:uploaded[0].wavBlob}:null;
     spSync();save();
     if(btn){btn.style.display='none'}
     spShowEval(d,tr,response.voiceTutor);
@@ -552,6 +613,7 @@ function spShowEval(d,tr,voiceTutor){var box=document.getElementById('sp_evalbox
     ?'Автоматическая оценка учла распознанный текст, полноту чтения, беглость распознавания и отмеченные системой грубые ошибки в словах. Интонация и отдельные фонемы в балл не входили.'
     :'Автоматическая оценка учла распознанное содержание ответа и отмеченные системой грубые ошибки в словах. Интонация, отдельные фонемы и естественность пауз в балл не входили.';
   h+='<div style="margin-top:10px;font-weight:600;font-size:11.5px;color:#777163;line-height:1.5;">'+safe(evidenceNote)+'</div>';
+  if(SP.calibrationCandidate)h+='<div style="margin-top:10px;padding:11px 13px;border-radius:14px;background:#F2F8F4;font-size:11.5px;line-height:1.5;color:#4A453E;"><b>Добровольная калибровка точности</b><br>Можно отдельно передать эту запись для двух независимых слепых оценок. Имя и VK ID экспертам не показываются.<button type="button" class="sq" onclick="spContributeCalibration(this)" style="display:block;width:100%;margin-top:9px;border:0;border-radius:11px;padding:10px;background:#E3F1F5;color:#317485;font-weight:800;cursor:pointer;">Передать анонимную запись</button></div>';
   h+='<details style="margin-top:12px;"><summary style="font-weight:700;font-size:12px;color:#777163;cursor:pointer;">Расшифровка твоей речи</summary>'
     +'<div style="margin-top:8px;font-weight:500;font-size:12.5px;color:#4A453E;line-height:1.6;font-style:italic;">'+safe(tr)+'</div><button class="sq" onclick="spFlagTranscript()" style="margin-top:8px;border:0;background:#F4EFE9;padding:7px 10px;border-radius:10px;font-weight:700;font-size:11px;">Расшифровка неточная</button></details>'
     +(voiceTutor&&d.got<d.max?voiceTutorButton(voiceTutor):'')
@@ -737,7 +799,7 @@ registerRouteHook(function(id){if(id==='scr9')initSpeaking()});
 /* Имена для обработчиков этого экрана: загрузчик кладёт их на window вместе с чанком. */
 export {
   SP,SPE,
-  initSpeaking,spCompleteTask1,spCompleteTask2Question,spCompleteTask3Answer,spCompleteTask4,spDeleteRecording,spEtalon,spEval,spExam,spFinish,spFlagTranscript,spMicCheck,spNextQ,
-  launchSpeakingTask,spNextSet,spOpen,spPlay,spPlayTask2Question,spPlayTask3Answer,spPrep,spRec,spRestartAdaptive,spSample,spStopAll,spToggleSheet,spVoiceSample,
+  initSpeaking,spAccentFinishUnknown,spAccentSetup,spAccentStartUnknown,spCalibrationConsentSetup,spChooseAccent,spCompleteTask1,spCompleteTask2Question,spCompleteTask3Answer,spCompleteTask4,spContributeCalibration,spDeleteRecording,spEtalon,spEval,spExam,spFinish,spFlagTranscript,spMicCheck,spNextQ,spSaveCalibrationConsent,
+  launchSpeakingTask,spHub,spNextSet,spOpen,spPlay,spPlayTask2Question,spPlayTask3Answer,spPrep,spRec,spRestartAdaptive,spSample,spStopAll,spToggleSheet,spVoiceSample,
   speFullBeginStage,speFullComplete,speFullMicCheck,speFullPlay,speFullStartRecording,speFullStopRecording,speFullSubmit,speStart,
 };

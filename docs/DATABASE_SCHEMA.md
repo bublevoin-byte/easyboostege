@@ -359,3 +359,40 @@ fixed-shape aggregate rows с time predicates; raw lifetime sessions, JSON block
 Локальный migration proof Ticket 08 применяет полный набор `031`–`039` к чистой PostgreSQL и затем
 запускает repository contracts. Наличие схемы не включает функцию: API и UI дополнительно закрыты
 `ADAPTIVE_LEARNING_ENABLED=false` по умолчанию.
+
+## Speaking accent profile and calibration (migration 049)
+
+`049_speaking_accent_calibration.sql` adds nullable bounded `audio_hash` evidence to
+`speaking_pronunciation_assessments`, `speaking_accent_profiles` plus append-only
+`speaking_accent_profile_history`, and a unique owner row in `speaking_accent_calibrations` for the
+one-time unknown-accent setup. Its lifecycle is `pending`, `completed` or `cancelled`; choosing a manual
+profile cancels a pending setup atomically and a cancelled setup cannot later overwrite that choice.
+Every task 1–4 and full-section session now has the all-or-none snapshot
+`accent_locale`, `accent_profile_revision`, `accent_effective_at`, so a profile mutation can only affect
+future assignments. The only nullable-accent exception is a new task 1 row with
+`calibration_setup_id` bound to the learner's exact pending setup; the check constraint forbids combining
+that ID with an accent snapshot. Legacy nullable task 1 rows and every nullable task 2–4/full row fail
+closed at assessment time instead of borrowing any current setup.
+
+`speaking_calibration_consents` stores the separate versioned consent, age group, guardian confirmation
+and grant/revoke timestamps. `speaking_calibration_samples` stores a bounded PCM WAV as `BYTEA`, a
+pseudorandom ID, owner-bound finalized assessment reference whose audio digest must match, task/locale/max-score facts, JSONB reviews
+and access audit, bounded immutable `task_snapshot` and `rubric_snapshot` JSONB objects, lifecycle timestamps
+and an exact 180-day expiry constraint. The snapshots are copied only from the validated server catalog at
+enrollment, contain no learner answer or identifier and keep an old sample reviewable after catalog rollout.
+The state check requires
+raw audio to be present only while awaiting two independent sufficient ratings or third-party adjudication, and
+requires `raw_deleted_at` after completion, revoke or expiry.
+
+The owner foreign key uses `ON DELETE SET NULL` only for completed anonymous labels. Repository deletion
+first removes unfinished samples and clears the completed row's assessment key and reviewer identities;
+deleting an expert separately pseudonymizes the username in every review and access-audit entry;
+all profile, history, setup and consent rows cascade. File storage implements the same projection and
+delete contract with base64 only as its serialized representation of the same binary bytes.
+PostgreSQL calibration setup/completion, contribution upload, consent mutation, assignment and account deletion
+all acquire the owner row before setup/consent/sample rows. This owner → child order prevents privacy
+revoke/delete from deadlocking a concurrent upload or calibration completion. Ordinary and full-section
+assignment re-read the canonical profile under the owner lock immediately before creating a new session;
+a stale route snapshot cannot override the stored revision. Queue claim applies review-count and active-lease
+eligibility in SQL before `LIMIT 1`; audio read and submission enforce `expires_at` even when a claim lease
+is otherwise still active.

@@ -212,6 +212,23 @@ async function runE2E() {
         e2euser: { words: { known: 0 } },
         expireduser: {},
       },
+      speaking_accent_profiles: {
+        e2euser: {
+          username: 'e2euser', locale: 'en-GB', revision: 1, source: 'manual',
+          effective_at: '2026-08-06T00:00:00.000Z', calibration_used: false,
+        },
+      },
+      speaking_calibration_consents: {
+        expireduser: {
+          granted: true,
+          age_group: 'adult',
+          guardian_confirmed: false,
+          policy_version: 'speaking-calibration-consent-v1',
+          granted_at: new Date(Date.now() - 60_000).toISOString(),
+          revoked_at: null,
+          updated_at: new Date(Date.now() - 60_000).toISOString(),
+        },
+      },
       subscription_entitlements: {
         e2euser: {
           voice_tutor: {
@@ -833,6 +850,21 @@ async function runE2E() {
     assert.equal(await expiredPage.locator('#scr1.on').count(), 0);
     await paywall.getByRole('button', { name: 'Повторить проверку' }).waitFor({ state: 'visible' });
     assert.equal(await paywall.getByRole('link', { name: 'Открыть Telegram-бот' }).count(), 0);
+    await paywall.getByRole('button', { name: 'Настройки приватности и данных' }).click();
+    const expiredPrivacy = expiredPage.locator('#privacySheet.open');
+    await expiredPrivacy.waitFor({ state: 'visible', timeout: 5_000 });
+    const revokeCalibration = expiredPrivacy.getByRole('button', {
+      name: 'Отозвать согласие и удалить незавершённые аудиозаписи',
+    });
+    await revokeCalibration.waitFor({ state: 'visible', timeout: 5_000 });
+    await revokeCalibration.click();
+    await expiredPrivacy.getByText('Согласие отозвано; незавершённые аудиозаписи удалены.')
+      .waitFor({ state: 'visible' });
+    assert.equal(await expiredPage.evaluate(async()=>{
+      const payload=await (await fetch('/api/v1/speaking/calibration-consent')).json();
+      return payload.consent.granted;
+    }),false);
+    await expiredPrivacy.getByRole('button', { name: 'Позже' }).click();
     console.log('e2e: expired subscription shows recovery path');
     await expiredContext.close();
 

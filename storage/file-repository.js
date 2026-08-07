@@ -86,6 +86,20 @@ import {
   speakingAssessmentQuotaView,
 } from '../speaking/assessment-quota.js';
 import {
+  assertSpeakingAccentProfileChange,
+  assertSpeakingCalibrationConsent,
+  assertSpeakingCalibrationReview,
+  assertSpeakingCalibrationSample,
+  blindSpeakingCalibrationCard,
+  materialSpeakingCalibrationDisagreement,
+  publicSpeakingAccentCalibration,
+  publicSpeakingAccentProfile,
+  publicSpeakingCalibrationSample,
+  speakingAccentError,
+  speakingCalibrationExpiresAt,
+  speakingCalibrationReviewClaim,
+} from '../speaking/accent-calibration.js';
+import {
   migrateFileWordProgress,
   wordProgressApiDto,
   wordProgressExportDto,
@@ -207,7 +221,7 @@ function sanitizeLegacyAdaptiveExecution(state, now = Date.now()) {
 
 export function createFileRepository(filePath) {
   let loaded = false;
-  let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], speaking_task1_sessions: [], speaking_task2_sessions: [], speaking_task3_sessions: [], speaking_task4_sessions: [], speaking_full_sessions: [], speaking_assessments: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, subscription_entitlements: {}, voice_tutor_sessions: [], voice_tutor_recoveries: [], voice_tutor_repeats: [], voice_tutor_repeat_attempts: [], voice_tutor_reports: [], rule_cards: [], payment_requests: {}, subscription_events: [], adaptive_learning_goals: [], adaptive_learning_profiles: {}, adaptive_learning_skill_estimates: {}, adaptive_learning_plan_revisions: [], adaptive_learning_sessions: [], adaptive_learning_execution_claims: [], adaptive_learning_session_events: [], adaptive_learning_session_mutations: [], adaptive_diagnostic_sessions: [], adaptive_diagnostic_start_claims: [], adaptive_diagnostic_responses: [] };
+  let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], speaking_task1_sessions: [], speaking_task2_sessions: [], speaking_task3_sessions: [], speaking_task4_sessions: [], speaking_full_sessions: [], speaking_assessments: [], speaking_accent_profiles: {}, speaking_accent_history: [], speaking_accent_calibrations: [], speaking_calibration_consents: {}, speaking_calibration_samples: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, subscription_entitlements: {}, voice_tutor_sessions: [], voice_tutor_recoveries: [], voice_tutor_repeats: [], voice_tutor_repeat_attempts: [], voice_tutor_reports: [], rule_cards: [], payment_requests: {}, subscription_events: [], adaptive_learning_goals: [], adaptive_learning_profiles: {}, adaptive_learning_skill_estimates: {}, adaptive_learning_plan_revisions: [], adaptive_learning_sessions: [], adaptive_learning_execution_claims: [], adaptive_learning_session_events: [], adaptive_learning_session_mutations: [], adaptive_diagnostic_sessions: [], adaptive_diagnostic_start_claims: [], adaptive_diagnostic_responses: [] };
   let writeQueue = Promise.resolve();
   let coordinatedMutationQueue = Promise.resolve();
   let paymentQueue = Promise.resolve();
@@ -239,6 +253,18 @@ export function createFileRepository(filePath) {
               dispatch_started_at: row.dispatch_started_at
                 || (['started', 'finalized'].includes(row.status) ? row.provider_started_at : null),
             })) : [],
+          speaking_accent_profiles: parsed.speaking_accent_profiles
+            && typeof parsed.speaking_accent_profiles === 'object'
+            ? parsed.speaking_accent_profiles : {},
+          speaking_accent_history: Array.isArray(parsed.speaking_accent_history)
+            ? parsed.speaking_accent_history : [],
+          speaking_accent_calibrations: Array.isArray(parsed.speaking_accent_calibrations)
+            ? parsed.speaking_accent_calibrations : [],
+          speaking_calibration_consents: parsed.speaking_calibration_consents
+            && typeof parsed.speaking_calibration_consents === 'object'
+            ? parsed.speaking_calibration_consents : {},
+          speaking_calibration_samples: Array.isArray(parsed.speaking_calibration_samples)
+            ? parsed.speaking_calibration_samples : [],
           generated_tasks: Array.isArray(parsed.generated_tasks) ? parsed.generated_tasks : [],
           task_bank: Array.isArray(parsed.task_bank) ? parsed.task_bank : [],
           task_deliveries: Array.isArray(parsed.task_deliveries) ? parsed.task_deliveries : [],
@@ -706,6 +732,7 @@ export function createFileRepository(filePath) {
         username,
         idempotency_key: candidate.idempotencyKey,
         request_hash: candidate.requestHash,
+        audio_hash: candidate.audioHash,
         status: 'reserved',
         locale: candidate.locale,
         context_id: candidate.contextId,
@@ -1707,6 +1734,327 @@ export function createFileRepository(filePath) {
     });
   }
 
+  async function getSpeakingAccentProfile(username) {
+    await load();
+    return publicSpeakingAccentProfile(state.speaking_accent_profiles[username] || null);
+  }
+
+  async function getSpeakingAccentHistory(username) {
+    await load();
+    return state.speaking_accent_history
+      .filter((entry) => entry.username === username)
+      .sort((left, right) => Number(left.revision) - Number(right.revision))
+      .map(({ username: owner, ...entry }) => structuredClone(entry));
+  }
+
+  async function setSpeakingAccentProfile(username, input) {
+    const parsed = assertSpeakingAccentProfileChange(input);
+    return serializeSpeakingSessionMutation(async () => {
+      await load();
+      if (!state.users[username]) throw new Error('USER_NOT_FOUND');
+      const previous = state.speaking_accent_profiles[username] || null;
+      const calibration = state.speaking_accent_calibrations.find((entry) => entry.username === username);
+      if (parsed.source === 'manual' && calibration?.status === 'pending') {
+        Object.assign(calibration, {
+          status: 'cancelled', completed_at: parsed.now.toISOString(), locale: null,
+          confidence: null, evidence_keys: null, policy_version: null,
+        });
+      }
+      if (previous?.locale === parsed.locale) {
+        if (calibration?.status === 'cancelled') await persist();
+        return { changed: false, profile: publicSpeakingAccentProfile(previous) };
+      }
+      const profile = {
+        username,
+        locale: parsed.locale,
+        revision: Number(previous?.revision || 0) + 1,
+        source: parsed.source,
+        effective_at: parsed.now.toISOString(),
+        calibration_used: Boolean(previous?.calibration_used
+          || calibration),
+      };
+      state.speaking_accent_profiles[username] = profile;
+      state.speaking_accent_history.push({
+        id: crypto.randomUUID(), username, locale: profile.locale, revision: profile.revision,
+        source: profile.source, effective_at: profile.effective_at,
+      });
+      await persist();
+      return { changed: true, profile: publicSpeakingAccentProfile(profile) };
+    });
+  }
+
+  async function startSpeakingAccentCalibration(username, { now = new Date() } = {}) {
+    const instant = new Date(now);
+    if (!Number.isFinite(instant.getTime())) throw speakingAccentError('SPEAKING_ACCENT_CALIBRATION_INVALID');
+    return serializeSpeakingSessionMutation(async () => {
+      await load();
+      if (!state.users[username]) throw new Error('USER_NOT_FOUND');
+      if (state.speaking_accent_calibrations.some((entry) => entry.username === username)
+        || state.speaking_accent_profiles[username]) {
+        throw speakingAccentError('SPEAKING_ACCENT_CALIBRATION_ALREADY_USED');
+      }
+      const setup = {
+        id: crypto.randomUUID(), username, status: 'pending',
+        started_at: instant.toISOString(), completed_at: null,
+        locale: null, confidence: null, evidence_keys: null, policy_version: null,
+      };
+      state.speaking_accent_calibrations.push(setup);
+      await persist();
+      return { id: setup.id, status: setup.status, started_at: setup.started_at };
+    });
+  }
+
+  async function getSpeakingAccentCalibration(username, setupId) {
+    await load();
+    const setup = state.speaking_accent_calibrations.find((entry) => (
+      entry.username === username && entry.id === setupId
+    ));
+    return setup ? structuredClone(setup) : null;
+  }
+
+  async function getPendingSpeakingAccentCalibration(username) {
+    await load();
+    const setup = state.speaking_accent_calibrations.find((entry) => (
+      entry.username === username && entry.status === 'pending'
+    ));
+    return setup ? { id: setup.id, status: setup.status, started_at: setup.started_at } : null;
+  }
+
+  async function completeSpeakingAccentCalibration(username, input) {
+    const locale = String(input?.locale || '');
+    const confidence = String(input?.suggestionConfidence || '');
+    const setupId = String(input?.setupId || '');
+    const policyVersion = String(input?.policyVersion || '');
+    const evidenceKeys = Array.isArray(input?.evidenceKeys) ? input.evidenceKeys.map(String) : [];
+    const instant = new Date(input?.now ?? new Date());
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+    if (!['en-GB', 'en-US'].includes(locale) || !['clear', 'close'].includes(confidence)
+      || !uuid.test(setupId) || policyVersion !== 'speaking-accent-suggestion-v1'
+      || evidenceKeys.length !== 2 || evidenceKeys[0] === evidenceKeys[1]
+      || evidenceKeys.some((key) => !uuid.test(key)) || !Number.isFinite(instant.getTime())) {
+      throw speakingAccentError('SPEAKING_ACCENT_CALIBRATION_INVALID');
+    }
+    return serializeSpeakingSessionMutation(async () => {
+      await load();
+      const setup = state.speaking_accent_calibrations.find((entry) => (
+        entry.username === username && entry.id === setupId
+      ));
+      if (!setup) throw speakingAccentError('SPEAKING_ACCENT_CALIBRATION_NOT_FOUND');
+      if (setup.status !== 'pending') throw speakingAccentError('SPEAKING_ACCENT_CALIBRATION_ALREADY_USED');
+      const previous = state.speaking_accent_profiles[username] || null;
+      const profile = {
+        username, locale, revision: Number(previous?.revision || 0) + 1,
+        source: 'calibration', effective_at: instant.toISOString(), calibration_used: true,
+      };
+      Object.assign(setup, {
+        status: 'completed', completed_at: instant.toISOString(), locale,
+        confidence, evidence_keys: evidenceKeys, policy_version: policyVersion,
+      });
+      state.speaking_accent_profiles[username] = profile;
+      state.speaking_accent_history.push({
+        id: crypto.randomUUID(), username, locale, revision: profile.revision,
+        source: 'calibration', effective_at: profile.effective_at,
+      });
+      await persist();
+      return { profile: publicSpeakingAccentProfile(profile), suggestionConfidence: confidence };
+    });
+  }
+
+  function deleteCalibrationAudio(sample, instant, status) {
+    if (sample.audio) sample.audio = null;
+    sample.raw_deleted_at ||= instant.toISOString();
+    if (status) sample.status = status;
+  }
+
+  function purgeExpiredCalibrationSamplesInMemory(instant) {
+    let deletedAudio = 0;
+    for (const sample of state.speaking_calibration_samples) {
+      if (sample.audio && new Date(sample.expires_at).getTime() <= instant.getTime()) {
+        deleteCalibrationAudio(sample, instant, 'expired');
+        deletedAudio += 1;
+      }
+    }
+    return deletedAudio;
+  }
+
+  async function getSpeakingCalibrationConsent(username) {
+    await load();
+    const consent = state.speaking_calibration_consents[username];
+    return consent ? structuredClone(consent) : null;
+  }
+
+  async function setSpeakingCalibrationConsent(username, input) {
+    const parsed = assertSpeakingCalibrationConsent(input);
+    return serializeSpeakingSessionMutation(async () => {
+      await load();
+      if (!state.users[username]) throw new Error('USER_NOT_FOUND');
+      const previous = state.speaking_calibration_consents[username] || null;
+      const consent = {
+        granted: parsed.granted,
+        age_group: parsed.ageGroup,
+        guardian_confirmed: parsed.guardianConfirmed,
+        policy_version: parsed.policyVersion,
+        granted_at: parsed.granted ? (previous?.granted_at || parsed.now.toISOString()) : null,
+        revoked_at: parsed.granted ? null : parsed.now.toISOString(),
+        updated_at: parsed.now.toISOString(),
+      };
+      state.speaking_calibration_consents[username] = consent;
+      if (!parsed.granted) {
+        for (const sample of state.speaking_calibration_samples) {
+          if (sample.username === username && sample.audio) deleteCalibrationAudio(sample, parsed.now, 'consent_revoked');
+        }
+      }
+      await persist();
+      return structuredClone(consent);
+    });
+  }
+
+  async function createSpeakingCalibrationSample(username, input) {
+    const parsed = assertSpeakingCalibrationSample(input);
+    return serializeSpeakingSessionMutation(async () => {
+      await load();
+      const consent = state.speaking_calibration_consents[username];
+      if (!consent?.granted) throw speakingAccentError('SPEAKING_CALIBRATION_CONSENT_REQUIRED');
+      const duplicate = state.speaking_calibration_samples.find((sample) => (
+        sample.username === username && sample.assessment_key === parsed.assessmentKey
+      ));
+      if (duplicate) return publicSpeakingCalibrationSample(duplicate);
+      const sample = {
+        id: parsed.id, username, assessment_key: parsed.assessmentKey,
+        task_type: parsed.taskType, task_ref: parsed.taskRef, locale: parsed.locale,
+        task_snapshot: parsed.taskSnapshot, rubric_snapshot: parsed.rubricSnapshot,
+        maximum_score: parsed.maximumScore, status: 'awaiting_reviews',
+        audio: parsed.audio.toString('base64'), reviews: [], access_audit: [],
+        created_at: parsed.now.toISOString(),
+        expires_at: speakingCalibrationExpiresAt(parsed.now).toISOString(),
+        raw_deleted_at: null, completed_at: null,
+      };
+      state.speaking_calibration_samples.push(sample);
+      await persist();
+      return publicSpeakingCalibrationSample(sample);
+    });
+  }
+
+  async function purgeExpiredSpeakingCalibrationSamples({ now = new Date() } = {}) {
+    const instant = new Date(now);
+    if (!Number.isFinite(instant.getTime())) throw speakingAccentError('SPEAKING_CALIBRATION_TIME_INVALID');
+    return serializeSpeakingSessionMutation(async () => {
+      await load();
+      const deletedAudio = purgeExpiredCalibrationSamplesInMemory(instant);
+      if (deletedAudio) await persist();
+      return { deletedAudio };
+    });
+  }
+
+  async function claimSpeakingCalibrationSample(reviewer, { now = new Date() } = {}) {
+    const instant = new Date(now);
+    if (!Number.isFinite(instant.getTime())) throw speakingAccentError('SPEAKING_CALIBRATION_TIME_INVALID');
+    return serializeSpeakingSessionMutation(async () => {
+      await load();
+      const purged = purgeExpiredCalibrationSamplesInMemory(instant);
+      const sample = state.speaking_calibration_samples
+        .filter((entry) => entry.audio && ['awaiting_reviews', 'adjudication_pending'].includes(entry.status)
+          && !entry.reviews.some((review) => review.reviewer === reviewer)
+          && state.speaking_calibration_consents[entry.username]?.granted
+          && speakingCalibrationReviewClaim(entry, reviewer, instant).canClaim)
+        .sort((left, right) => new Date(left.created_at) - new Date(right.created_at))[0] || null;
+      if (!sample) {
+        if (purged) await persist();
+        return null;
+      }
+      const claim = speakingCalibrationReviewClaim(sample, reviewer, instant);
+      if (!claim.resume) {
+        sample.access_audit.push({
+          reviewer, review_round: claim.reviewRound, accessed_at: instant.toISOString(),
+        });
+        sample.access_audit = sample.access_audit.slice(-12);
+        await persist();
+      } else if (purged) await persist();
+      return blindSpeakingCalibrationCard(sample);
+    });
+  }
+
+  async function getSpeakingCalibrationAudio(sampleId, reviewer, { now = new Date() } = {}) {
+    const instant = new Date(now);
+    if (!Number.isFinite(instant.getTime())) throw speakingAccentError('SPEAKING_CALIBRATION_TIME_INVALID');
+    return serializeSpeakingSessionMutation(async () => {
+      await load();
+      const sample = state.speaking_calibration_samples.find((entry) => entry.id === sampleId);
+      if (sample?.audio && new Date(sample.expires_at).getTime() <= instant.getTime()) {
+        deleteCalibrationAudio(sample, instant, 'expired');
+        await persist();
+        return null;
+      }
+      const claim = sample ? speakingCalibrationReviewClaim(sample, reviewer, instant) : null;
+      if (!sample?.audio || !claim.ownsActiveClaim) return null;
+      return Buffer.from(sample.audio, 'base64');
+    });
+  }
+
+  async function submitSpeakingCalibrationReview(reviewer, sampleId, input) {
+    return serializeSpeakingSessionMutation(async () => {
+      await load();
+      const sample = state.speaking_calibration_samples.find((entry) => entry.id === sampleId);
+      const reviewInstant = new Date(input?.now ?? new Date());
+      if (sample?.audio && Number.isFinite(reviewInstant.getTime())
+        && new Date(sample.expires_at).getTime() <= reviewInstant.getTime()) {
+        deleteCalibrationAudio(sample, reviewInstant, 'expired');
+        await persist();
+        throw speakingAccentError('SPEAKING_CALIBRATION_SAMPLE_NOT_AVAILABLE');
+      }
+      if (!sample || !sample.audio || !['awaiting_reviews', 'adjudication_pending'].includes(sample.status)) {
+        throw speakingAccentError('SPEAKING_CALIBRATION_SAMPLE_NOT_AVAILABLE');
+      }
+      if (sample.reviews.some((review) => review.reviewer === reviewer)) {
+        throw speakingAccentError('SPEAKING_CALIBRATION_REVIEWER_NOT_INDEPENDENT');
+      }
+      if (!speakingCalibrationReviewClaim(sample, reviewer, input?.now).ownsActiveClaim) {
+        throw speakingAccentError('SPEAKING_CALIBRATION_REVIEW_CLAIM_REQUIRED');
+      }
+      const review = assertSpeakingCalibrationReview(sample, input);
+      sample.reviews.push({
+        reviewer, sufficient: review.sufficient, score: review.score, critical_error: review.criticalError,
+        reviewed_at: review.now.toISOString(),
+      });
+      const sufficientReviews = sample.reviews.filter((entry) => entry.sufficient !== false);
+      sample.status = 'awaiting_reviews';
+      if (sufficientReviews.length === 2) {
+        const material = materialSpeakingCalibrationDisagreement(sample.task_type,
+          { score: sufficientReviews[0].score, criticalError: sufficientReviews[0].critical_error },
+          { score: sufficientReviews[1].score, criticalError: sufficientReviews[1].critical_error });
+        if (material) sample.status = 'adjudication_pending';
+        else {
+          sample.completed_at = review.now.toISOString();
+          deleteCalibrationAudio(sample, review.now, 'completed');
+        }
+      } else if (sufficientReviews.length === 3) {
+        sample.completed_at = review.now.toISOString();
+        deleteCalibrationAudio(sample, review.now, 'completed');
+      }
+      await persist();
+      return {
+        sampleId: sample.id, status: sample.status,
+        audio_retained: Boolean(sample.audio), reviewCount: sufficientReviews.length,
+      };
+    });
+  }
+
+  async function listSpeakingCalibrationSamplesForOwner(username) {
+    await load();
+    return state.speaking_calibration_samples.filter((sample) => sample.username === username)
+      .map(publicSpeakingCalibrationSample);
+  }
+
+  async function listAnonymousSpeakingCalibrationLabels() {
+    await load();
+    return state.speaking_calibration_samples
+      .filter((sample) => sample.status === 'completed')
+      .map((sample) => ({
+        sampleId: sample.id, taskType: sample.task_type, accentLocale: sample.locale,
+        ratings: sample.reviews.map(({ reviewer, ...rating }) => structuredClone(rating)),
+      }));
+  }
+
   function removeExpiredAuthCodes(now = Date.now()) {
     let changed = false;
     for (const [codeHash, entry] of Object.entries(state.auth_codes)) {
@@ -1894,15 +2242,27 @@ export function createFileRepository(filePath) {
   }
 
   async function assignSpeakingCatalogSession(stateKey, createSession, username, {
-    catalogId, catalogRevision, tasks, now,
+    catalogId, catalogRevision, tasks, accentProfile = null, calibrationSetupId = null, now,
   }) {
     return serializeSpeakingSessionMutation(async () => {
       await load();
       if (!state.users[username]) throw new Error('USER_NOT_FOUND');
+      const canonicalAccentProfile = state.speaking_accent_profiles[username] || null;
+      const effectiveAccentProfile = canonicalAccentProfile || accentProfile || null;
+      const effectiveCalibrationSetupId = effectiveAccentProfile ? null : calibrationSetupId;
+      if (effectiveCalibrationSetupId) {
+        const calibration = state.speaking_accent_calibrations.find((entry) => (
+          entry.id === effectiveCalibrationSetupId && entry.username === username && entry.status === 'pending'
+        ));
+        if (!calibration) throw speakingAccentError('SPEAKING_ACCENT_PROFILE_REQUIRED');
+      }
       const history = state[stateKey].filter((session) => session.username === username
         && session.catalog_id === catalogId && Number(session.catalog_revision) === Number(catalogRevision));
       const selection = selectSpeakingTrainingAssignment(tasks, history, now);
-      const session = createSession({ username, catalogId, catalogRevision, selection, now });
+      const session = createSession({
+        username, catalogId, catalogRevision, selection, accentProfile: effectiveAccentProfile,
+        calibrationSetupId: effectiveCalibrationSetupId, now,
+      });
       state[stateKey].push(session);
       await persist();
       return structuredClone(session);
@@ -1998,7 +2358,7 @@ export function createFileRepository(filePath) {
     });
   }
 
-  async function assignFullSpeakingSession(username, { catalogs, now = new Date() }) {
+  async function assignFullSpeakingSession(username, { catalogs, accentProfile = null, now = new Date() }) {
     return serializeSpeakingSessionMutation(async () => {
       await load();
       if (!state.users[username]) throw new Error('USER_NOT_FOUND');
@@ -2019,9 +2379,10 @@ export function createFileRepository(filePath) {
         && item.catalog_id === catalogs[0]?.id
         && Number(item.catalog_revision) === Number(catalogs[0]?.revision));
       const selection = selectFullSpeakingVariant(catalogs, history);
+      const effectiveAccentProfile = state.speaking_accent_profiles[username] || accentProfile || null;
       const session = createFullSpeakingSession({
         username, catalogs, variantIndex: selection.variantIndex,
-        selectionReason: selection.reason, now,
+        selectionReason: selection.reason, accentProfile: effectiveAccentProfile, now,
       });
       state.speaking_full_sessions.push(session);
       await persist();
@@ -3683,6 +4044,15 @@ export function createFileRepository(filePath) {
       speaking_assessments: state.speaking_assessments
         .filter((item) => item.username === username)
         .map(speakingAssessmentExportDto),
+      speaking_accent_profile: await getSpeakingAccentProfile(username),
+      speaking_accent_history: await getSpeakingAccentHistory(username),
+      speaking_accent_calibration: publicSpeakingAccentCalibration(
+        state.speaking_accent_calibrations.find((item) => item.username === username) || null,
+      ),
+      speaking_calibration_consent: await getSpeakingCalibrationConsent(username),
+      speaking_calibration_samples: state.speaking_calibration_samples
+        .filter((item) => item.username === username)
+        .map(publicSpeakingCalibrationSample),
       generated_tasks: state.generated_tasks.filter((item) => item.username === username).map(({ request_hash, username: owner, ...item }) => item),
       module_attempts: state.module_attempts.filter((item) => item.username === username),
       progress_summary: Object.values(state.progress_summary[username] || {}),
@@ -3744,6 +4114,14 @@ export function createFileRepository(filePath) {
           entry.metadata.reviewer_account_deleted = true;
         }
       }
+      for (const sample of state.speaking_calibration_samples) {
+        sample.reviews = sample.reviews.map((review) => (review.reviewer === username
+          ? { ...review, reviewer: null, reviewer_account_deleted: true }
+          : review));
+        sample.access_audit = sample.access_audit.map((entry) => (entry.reviewer === username
+          ? { ...entry, reviewer: null, reviewer_account_deleted: true }
+          : entry));
+      }
       delete state.users[username];
       delete state.progress[username];
       state.writing_attempts = state.writing_attempts.filter((item) => item.username !== username);
@@ -3754,6 +4132,21 @@ export function createFileRepository(filePath) {
       state.speaking_task4_sessions = state.speaking_task4_sessions.filter((item) => item.username !== username);
       state.speaking_full_sessions = state.speaking_full_sessions.filter((item) => item.username !== username);
       state.speaking_assessments = state.speaking_assessments.filter((item) => item.username !== username);
+      delete state.speaking_accent_profiles[username];
+      state.speaking_accent_history = state.speaking_accent_history.filter((item) => item.username !== username);
+      state.speaking_accent_calibrations = state.speaking_accent_calibrations.filter((item) => item.username !== username);
+      delete state.speaking_calibration_consents[username];
+      state.speaking_calibration_samples = state.speaking_calibration_samples.flatMap((sample) => {
+        if (sample.username !== username) return [sample];
+        if (sample.status !== 'completed') return [];
+        return [{
+          ...sample,
+          username: null,
+          assessment_key: null,
+          reviews: sample.reviews.map((review) => ({ ...review, reviewer: null })),
+          access_audit: [],
+        }];
+      });
       state.generated_tasks = state.generated_tasks.filter((item) => item.username !== username);
       state.module_attempts = state.module_attempts.filter((item) => item.username !== username);
       delete state.progress_summary[username];
@@ -3887,6 +4280,22 @@ export function createFileRepository(filePath) {
     setUserRole,
     getPrivacyConsent,
     setPrivacyConsent,
+    getSpeakingAccentProfile,
+    getSpeakingAccentHistory,
+    setSpeakingAccentProfile,
+    startSpeakingAccentCalibration,
+    getSpeakingAccentCalibration,
+    getPendingSpeakingAccentCalibration,
+    completeSpeakingAccentCalibration,
+    getSpeakingCalibrationConsent,
+    setSpeakingCalibrationConsent,
+    createSpeakingCalibrationSample,
+    purgeExpiredSpeakingCalibrationSamples,
+    claimSpeakingCalibrationSample,
+    getSpeakingCalibrationAudio,
+    submitSpeakingCalibrationReview,
+    listSpeakingCalibrationSamplesForOwner,
+    listAnonymousSpeakingCalibrationLabels,
     createTelegramAuthCode,
     confirmTelegramAuthCode,
     consumeTelegramAuthCode,

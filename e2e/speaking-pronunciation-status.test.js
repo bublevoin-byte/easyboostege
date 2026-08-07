@@ -37,6 +37,12 @@ try {
       },
     },
     progress: { [username]: {} },
+    speaking_accent_profiles: {
+      [username]: {
+        username, locale: 'en-GB', revision: 1, source: 'manual',
+        effective_at: '2026-08-06T00:00:00.000Z', calibration_used: false,
+      },
+    },
   }), 'utf8');
 
   const output = [];

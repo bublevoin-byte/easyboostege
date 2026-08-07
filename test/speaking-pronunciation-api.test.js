@@ -22,6 +22,8 @@ async function withServer({
   const other = await repository.createTelegramUser(9_620_002, 'Pronunciation API other');
   await repository.grantDays(9_620_001, 30, 'Pronunciation API owner');
   await repository.grantDays(9_620_002, 30, 'Pronunciation API other');
+  await repository.setSpeakingAccentProfile(owner, { locale: 'en-US', source: 'manual', now: new Date('2026-08-06T13:00:00.000Z') });
+  await repository.setSpeakingAccentProfile(other, { locale: 'en-US', source: 'manual', now: new Date('2026-08-06T13:00:00.000Z') });
   const fixedNow = new Date('2026-08-06T13:00:00.000Z');
   const provider = pronunciationProvider || createFakePronunciationProvider({ scenario, maxAudioBytes });
   const pronunciationAssessment = createSpeakingAssessmentService({

@@ -79,7 +79,7 @@ export function selectFullSpeakingVariant(catalogs, sessions = []) {
 }
 
 export function createFullSpeakingSession({
-  username, catalogs, variantIndex, selectionReason, now = new Date(),
+  username, catalogs, variantIndex, selectionReason, accentProfile = null, now = new Date(),
 }) {
   const { catalogId, catalogRevision } = assertCatalogs(catalogs);
   if (!Number.isInteger(variantIndex) || variantIndex < 0 || variantIndex >= 60) {
@@ -123,6 +123,9 @@ export function createFullSpeakingSession({
     catalog_revision: catalogRevision,
     variant_index: variantIndex,
     selection_reason: selectionReason,
+    accent_locale: accentProfile?.locale || null,
+    accent_profile_revision: accentProfile?.revision == null ? null : Number(accentProfile.revision),
+    accent_effective_at: accentProfile?.effective_at || null,
     maximum_score: FULL_SPEAKING_FORMAT.maximumScore,
     assignments,
     responses,
@@ -307,6 +310,11 @@ export function publicFullSpeakingSession(session, catalogs) {
     },
     catalog: { id: session.catalog_id, revision: Number(session.catalog_revision) },
     selectionReason: session.selection_reason,
+    accentProfile: session.accent_locale ? {
+      locale: session.accent_locale,
+      revision: Number(session.accent_profile_revision),
+      effectiveAt: new Date(session.accent_effective_at).toISOString(),
+    } : null,
     status: session.status,
     phase: session.phase,
     current: task ? {

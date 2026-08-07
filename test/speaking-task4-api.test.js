@@ -17,6 +17,8 @@ async function withSpeakingServer(run) {
   const expired = await repository.createTelegramUser(8_400_003, 'Speaking Four Expired');
   await repository.grantDays(8_400_001, 30, 'Speaking Four Owner');
   await repository.grantDays(8_400_002, 30, 'Speaking Four Other');
+  await repository.setSpeakingAccentProfile(owner, { locale: 'en-GB', source: 'manual', now: new Date('2026-08-06T14:00:00.000Z') });
+  await repository.setSpeakingAccentProfile(other, { locale: 'en-GB', source: 'manual', now: new Date('2026-08-06T14:00:00.000Z') });
   let now = new Date('2026-08-06T14:00:00.000Z');
   const app = express();
   app.use(express.json());

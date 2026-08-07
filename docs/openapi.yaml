@@ -56,6 +56,163 @@ paths:
       responses:
         '200': { description: Pending or authenticated state }
         '429': { $ref: '#/components/responses/RateLimited' }
+  /api/v1/speaking/accent-profile:
+    get:
+      summary: Read the learner's future-effective Speaking accent profile
+      description: Returns the current en-GB/en-US profile and a resumable one-time setup pointer. The profile is owner-bound; changes never rewrite a session snapshot or an earlier assessment.
+      responses:
+        '200':
+          description: Current profile, pending one-time setup and setup-required flag
+          content: { application/json: { schema: { $ref: '#/components/schemas/SpeakingAccentProfileState' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      summary: Select en-GB or en-US for future Speaking sessions
+      description: Creates an audited future-effective revision. Manual selection atomically cancels any pending one-time comparison, which can no longer complete or overwrite the explicit choice.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [locale]
+              properties: { locale: { type: string, enum: [en-GB, en-US] } }
+              additionalProperties: false
+      responses:
+        '200': { description: Audited profile revision, content: { application/json: { schema: { $ref: '#/components/schemas/SpeakingAccentProfileMutation' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/speaking/accent-profile/calibration:
+    post:
+      summary: Start the one-time unknown-accent comparison
+      description: Creates one owner-bound setup only while no accent profile exists. It accepts no client scores and can never be restarted after completion or manual cancellation.
+      requestBody:
+        content: { application/json: { schema: { type: object, additionalProperties: false } } }
+      responses:
+        '201': { description: Pending setup pointer }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Setup was already used or an accent profile already exists }
+  /api/v1/speaking/accent-profile/calibration/{setupId}/complete:
+    post:
+      summary: Complete one dual-accent setup from two final owner-bound assessments
+      description: Both assessment keys must refer to the same server-owned task context, one en-GB and one en-US. The server makes one versioned suggestion; ordinary attempts never cherry-pick the higher accent score.
+      parameters:
+        - { in: path, name: setupId, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enGbAssessmentKey, enUsAssessmentKey]
+              properties:
+                enGbAssessmentKey: { type: string, format: uuid }
+                enUsAssessmentKey: { type: string, format: uuid }
+              additionalProperties: false
+      responses:
+        '200': { description: Suggested profile and bounded confidence label }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Invalid, foreign, mismatched or already-used evidence }
+  /api/v1/speaking/calibration-consent:
+    get:
+      summary: Read the separate research-calibration consent
+      description: This consent is independent from ordinary voice processing. Declining or revoking it does not restrict training or paid subscription features.
+      responses:
+        '200': { description: Current consent and current policy version }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    put:
+      summary: Grant or revoke voluntary research-calibration consent
+      description: A minor requires explicit guardian confirmation. Revocation immediately deletes retained owner-bound calibration audio.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [granted, ageGroup, guardianConfirmed]
+              properties:
+                granted: { type: boolean }
+                ageGroup: { type: string, enum: [adult, minor] }
+                guardianConfirmed: { type: boolean }
+              additionalProperties: false
+      responses:
+        '200': { description: Updated separate consent, content: { application/json: { schema: { $ref: '#/components/schemas/SpeakingCalibrationConsent' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { description: Guardian confirmation is required }
+  /api/v1/speaking/calibration-samples:
+    post:
+      summary: Voluntarily retain one finalized assessment recording for blinded calibration
+      description: Requires separate current calibration consent and an owner-bound finalized assessment key in X-Speaking-Assessment-Key. The SHA-256 digest of the submitted PCM WAV must match the exact audio assessed under that key. Task 2/3 item-level recordings are not complete task labels and are rejected until a server-owned aggregate enrollment exists. The WAV is capped at 10 MiB and expires within 180 days. No ordinary recording is retained by this endpoint implicitly.
+      parameters:
+        - { in: header, name: X-Speaking-Assessment-Key, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          audio/wav: { schema: { type: string, format: binary, maxLength: 10485760, x-maxBytes: 10485760 } }
+      responses:
+        '201': { description: Owner-visible allowlisted sample metadata, content: { application/json: { schema: { $ref: '#/components/schemas/SpeakingCalibrationSample' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Consent or assessment evidence is missing }
+        '413': { description: Audio exceeds the configured ceiling }
+  /api/v1/speaking/calibration-reviews/next:
+    get:
+      summary: Claim the next blinded calibration card as an administrator
+      description: No direct learner identifiers are exposed. The card includes immutable enrolled task and rubric snapshots copied from the validated server catalog when the owner contributes audio, so later catalog rollout cannot alter or strand it. A reviewer can never claim the same sample for a second independent position; each claim lease lasts 15 minutes but never extends the sample's 180-day expiry.
+      responses:
+        '200': { description: Blinded task and scoring card, content: { application/json: { schema: { $ref: '#/components/schemas/SpeakingCalibrationExpertCard' } } } }
+        '204': { description: No eligible sample }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/speaking/calibration-reviews/{sampleId}/audio:
+    get:
+      summary: Read claimed calibration audio as an administrator
+      description: Available only to the same administrator during the active 15-minute claim lease, before the exact 180-day expiry and before raw deletion.
+      parameters:
+        - { in: path, name: sampleId, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Temporary raw PCM WAV, content: { audio/wav: { schema: { type: string, format: binary } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Sample is unclaimed, expired or already erased }
+  /api/v1/speaking/calibration-reviews/{sampleId}:
+    post:
+      summary: Submit one independent blinded rating
+      description: Only sufficient independent ratings count. Two agreeing sufficient positions complete the sample; material disagreement requires a third sufficient independent adjudicator before raw deletion. An insufficient rating leaves audio queued until enough sufficient ratings, revocation or expiry.
+      parameters:
+        - { in: path, name: sampleId, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  required: [sufficient]
+                  properties:
+                    sufficient: { type: boolean, enum: [false] }
+                  additionalProperties: false
+                - type: object
+                  required: [sufficient, score, criticalError]
+                  properties:
+                    sufficient: { type: boolean, enum: [true] }
+                    score: { type: integer, minimum: 0, maximum: 10 }
+                    criticalError: { type: boolean }
+                  additionalProperties: false
+      responses:
+        '200': { description: Bounded review count, state and raw-audio retention flag }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Claim, independence or availability conflict }
   /api/v1/speaking/pronunciation-assessments/status:
     get:
       summary: Read Azure pronunciation availability and the current monthly seconds ledger
@@ -185,12 +342,16 @@ paths:
   /api/v1/speaking/task-1/sessions:
     post:
       summary: Assign one server-owned Speaking task 1 text to the current learner
-      description: Selects from the versioned 60-item catalog using unseen, due, weak, then old rotation without immediately repeating a text when an alternative exists. Requires an active base subscription.
+      description: Selects from the versioned 60-item catalog using unseen, due, weak, then old rotation without immediately repeating a text when an alternative exists. Requires an active base subscription and a saved accent profile. The only first-run exception is the exact pending calibration setup owned by the learner; its setup ID permits task 1 only until the learner chooses en-GB or en-US.
       requestBody:
         required: true
         content:
           application/json:
-            schema: { type: object, additionalProperties: false }
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                calibrationSetupId: { type: string, format: uuid }
       responses:
         '201':
           description: Owner-bound task 1 session with official 90-second preparation and response stages; no answer key, source provenance, audio, transcript, or phonetic score is exposed
@@ -200,6 +361,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Accent profile is required, or calibrationSetupId is not the learner's exact pending first-run setup }
   /api/v1/speaking/task-1/sessions/{sessionId}:
     get:
       summary: Read the current learner's Speaking task 1 session
@@ -245,7 +407,7 @@ paths:
   /api/v1/speaking/task-2/sessions:
     post:
       summary: Assign one server-owned Speaking task 2 advertisement to the current learner
-      description: Selects from the validated 60-item catalog. The server fixes the advertisement and exactly four communicative supports under the EGE-2026 60-second preparation and four-by-20-second contract.
+      description: Selects from the validated 60-item catalog. The server fixes the advertisement and exactly four communicative supports under the EGE-2026 60-second preparation and four-by-20-second contract. A saved accent profile is required.
       requestBody:
         required: true
         content:
@@ -260,6 +422,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Accent profile is required }
   /api/v1/speaking/task-2/sessions/{sessionId}:
     get:
       summary: Restore the current learner's Speaking task 2 session
@@ -311,7 +474,7 @@ paths:
   /api/v1/speaking/task-3/sessions:
     post:
       summary: Assign one server-owned Speaking task 3 interview to the current learner
-      description: Selects from the validated 60-item catalog. The server fixes exactly five interview questions under the EGE-2026 no-preparation and five-by-40-second contract.
+      description: Selects from the validated 60-item catalog. The server fixes exactly five interview questions under the EGE-2026 no-preparation and five-by-40-second contract. A saved accent profile is required.
       requestBody:
         required: true
         content:
@@ -326,6 +489,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Accent profile is required }
   /api/v1/speaking/task-3/sessions/{sessionId}:
     get:
       summary: Restore the current learner's Speaking task 3 session
@@ -377,7 +541,7 @@ paths:
   /api/v1/speaking/task-4/sessions:
     post:
       summary: Assign one server-owned Speaking task 4 photo project to the current learner
-      description: Selects from the validated 60-item original photo-pair catalog under the EGE-2026 150-second preparation and 180-second response contract.
+      description: Selects from the validated 60-item original photo-pair catalog under the EGE-2026 150-second preparation and 180-second response contract. A saved accent profile is required.
       requestBody:
         required: true
         content:
@@ -392,6 +556,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Accent profile is required }
   /api/v1/speaking/task-4/sessions/{sessionId}:
     get:
       summary: Restore the current learner's Speaking task 4 session
@@ -438,7 +603,8 @@ paths:
   /api/v1/speaking/full-sessions:
     post:
       summary: Assign or resume one server-owned full EGE Speaking section
-      description: Pins one compatible revision of tasks 1–4 in official order with maxima 1+4+5+10=20. The client cannot choose assignments, and no answer, rubric, transcript, audio, score or analysis is returned.
+      x-accent-profile-required: true
+      description: Pins one compatible revision of tasks 1–4 in official order with maxima 1+4+5+10=20. A saved accent profile is required. The client cannot choose assignments, and no answer, rubric, transcript, audio, score or analysis is returned.
       requestBody:
         required: true
         content:
@@ -453,7 +619,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
-        '409': { description: The pinned catalog revision is no longer compatible and a safe restart is required }
+        '409': { description: Accent profile is required, or the pinned catalog revision is no longer compatible and a safe restart is required }
   /api/v1/speaking/full-sessions/{sessionId}:
     get:
       summary: Restore the current learner's exact full Speaking position
@@ -1497,7 +1663,7 @@ paths:
     get:
       summary: Export the authenticated user's account, progress and attempt data
       responses:
-        '200': { description: JSON export including adaptive goals/structured estimates/plan revisions/learning sessions/diagnostic sessions and bounded responses, Voice Tutor sessions, recovery/repeat outcomes and bounded provider/model/prompt metadata; no raw audio, temporary captions, full Voice Tutor transcript, nonce hash, idempotency replay snapshots or answer key }
+        '200': { description: JSON export including adaptive goals/structured estimates/plan revisions/learning sessions/diagnostic sessions and bounded responses, Voice Tutor sessions, recovery/repeat outcomes, Speaking accent setup lifecycle metadata and bounded provider/model/prompt metadata; no accent evidence keys, raw audio, temporary captions, full Voice Tutor transcript, nonce hash, idempotency replay snapshots or answer key }
         '401': { $ref: '#/components/responses/Unauthorized' }
   /api/v1/account:
     delete:
@@ -1918,6 +2084,106 @@ components:
       in: cookie
       name: eb_token
   schemas:
+    SpeakingAccentProfile:
+      type: object
+      required: [locale, revision, source, effective_at, calibration_used]
+      properties:
+        locale: { type: string, enum: [en-GB, en-US] }
+        revision: { type: integer, minimum: 1 }
+        source: { type: string, enum: [manual, calibration] }
+        effective_at: { type: string, format: date-time }
+        calibration_used: { type: boolean }
+      additionalProperties: false
+    SpeakingAccentCalibrationPointer:
+      type: object
+      nullable: true
+      required: [id, status, started_at]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [pending] }
+        started_at: { type: string, format: date-time }
+      additionalProperties: false
+    SpeakingAccentCalibrationExport:
+      type: object
+      nullable: true
+      description: Owner-visible setup lifecycle metadata only. Internal assessment evidence keys are never exported.
+      required: [id, status, started_at, completed_at, locale, confidence, policy_version]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [pending, completed, cancelled] }
+        started_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time, nullable: true }
+        locale: { type: string, enum: [en-GB, en-US], nullable: true }
+        confidence: { type: string, enum: [clear, close], nullable: true }
+        policy_version: { type: string, enum: [speaking-accent-suggestion-v1], nullable: true }
+      additionalProperties: false
+    SpeakingAccentProfileState:
+      type: object
+      required: [profile, calibration, setupRequired]
+      properties:
+        profile:
+          nullable: true
+          allOf: [{ $ref: '#/components/schemas/SpeakingAccentProfile' }]
+        calibration: { $ref: '#/components/schemas/SpeakingAccentCalibrationPointer' }
+        setupRequired: { type: boolean }
+      additionalProperties: false
+    SpeakingAccentProfileMutation:
+      type: object
+      required: [changed, profile]
+      properties:
+        changed: { type: boolean }
+        profile: { $ref: '#/components/schemas/SpeakingAccentProfile' }
+      additionalProperties: false
+    SpeakingCalibrationConsent:
+      type: object
+      required: [granted, age_group, guardian_confirmed, policy_version, granted_at, revoked_at, updated_at]
+      properties:
+        granted: { type: boolean }
+        age_group: { type: string, enum: [adult, minor] }
+        guardian_confirmed: { type: boolean }
+        policy_version: { type: string, enum: [speaking-calibration-consent-v1] }
+        granted_at: { type: string, format: date-time, nullable: true }
+        revoked_at: { type: string, format: date-time, nullable: true }
+        updated_at: { type: string, format: date-time }
+      additionalProperties: false
+    SpeakingCalibrationSample:
+      type: object
+      description: Owner-visible metadata only. Audio, assessment key, expert identities, reviews and access audit are never returned here.
+      required: [id, task_type, task_ref, accent_locale, status, created_at, expires_at, audio_retained, raw_deleted_at]
+      properties:
+        id: { type: string, format: uuid }
+        task_type: { type: integer, minimum: 1, maximum: 4 }
+        task_ref: { type: string, maxLength: 300 }
+        accent_locale: { type: string, enum: [en-GB, en-US] }
+        status: { type: string, enum: [awaiting_reviews, adjudication_pending, completed, consent_revoked, expired] }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        audio_retained: { type: boolean }
+        raw_deleted_at: { type: string, format: date-time, nullable: true }
+      additionalProperties: false
+    SpeakingCalibrationExpertCard:
+      type: object
+      description: No direct learner identifiers are exposed; there is no name, username, Telegram ID or VK ID.
+      required: [sampleId, taskType, taskRef, task, rubric, accentLocale, maximumScore, reviewRound, expiresAt]
+      properties:
+        sampleId: { type: string, format: uuid }
+        taskType: { type: integer, minimum: 1, maximum: 4 }
+        taskRef: { type: string, maxLength: 300 }
+        task: { type: object, description: Server-owned public task snapshot }
+        rubric:
+          type: object
+          required: [version, maximumScore, criteria, sufficientDefinition]
+          properties:
+            version: { type: string, enum: [ege-speaking-expert-rubric-v1] }
+            maximumScore: { type: integer, enum: [1, 4, 5, 10] }
+            criteria: { type: array, minItems: 1, items: { type: string } }
+            sufficientDefinition: { type: string }
+          additionalProperties: false
+        accentLocale: { type: string, enum: [en-GB, en-US] }
+        maximumScore: { type: integer, enum: [1, 4, 5, 10] }
+        reviewRound: { type: integer, minimum: 1, maximum: 12 }
+        expiresAt: { type: string, format: date-time }
+      additionalProperties: false
     SpeakingPronunciationQuota:
       type: object
       required: [tier, periodStart, limitSeconds, usedSeconds, heldSeconds, remainingSeconds]

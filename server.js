@@ -17,6 +17,12 @@ import {
   startSpeakingAssessment,
   finalizeSpeakingAssessment, releaseSpeakingAssessment,
 } from './db.js';
+import {
+  claimSpeakingCalibrationSample, completeSpeakingAccentCalibration, createSpeakingCalibrationSample,
+  getPendingSpeakingAccentCalibration, getSpeakingAccentProfile, getSpeakingCalibrationAudio,
+  getSpeakingCalibrationConsent, purgeExpiredSpeakingCalibrationSamples, setSpeakingAccentProfile,
+  setSpeakingCalibrationConsent, startSpeakingAccentCalibration, submitSpeakingCalibrationReview,
+} from './db.js';
 import { config } from './config.js';
 import { buildWritingPrompt, parseAndValidateWritingReview, WRITING_PROMPT_VERSION, writingRequestSchema } from './ai/writing.js';
 import { buildContentPrompt, CONTENT_PROMPT_VERSION, contentRequestSchema, parseContentResponse } from './ai/content.js';
@@ -217,6 +223,10 @@ const dbApi = {
   answerAdaptiveDiagnostic,
   completeAdaptiveDiagnostic,
   createWritingAttempt, finishWritingAttempt, getWritingAttempt, createSpeakingAttempt, claimSpeakingEvaluation, finishSpeakingAttempt, getSpeakingAttempt,
+  getSpeakingAccentProfile, setSpeakingAccentProfile, startSpeakingAccentCalibration,
+  getPendingSpeakingAccentCalibration, completeSpeakingAccentCalibration,
+  getSpeakingCalibrationConsent, setSpeakingCalibrationConsent, createSpeakingCalibrationSample,
+  claimSpeakingCalibrationSample, getSpeakingCalibrationAudio, submitSpeakingCalibrationReview,
   assignSpeakingTask1Session, completeSpeakingTask1Session, getSpeakingTask1Session,
   assignSpeakingTask2Session, completeSpeakingTask2Question, getSpeakingTask2Session,
   assignSpeakingTask3Session, completeSpeakingTask3Answer, getSpeakingTask3Session,
@@ -491,6 +501,26 @@ const voiceTutorRealtimeProxy = createVoiceTutorRealtimeProxy({
 const detachVoiceTutorRealtimeProxy = voiceTutorRealtimeProxy.attach(server);
 startTelegram();
 
+async function purgeSpeakingCalibrationRetention() {
+  try {
+    const result = await purgeExpiredSpeakingCalibrationSamples({ now: new Date() });
+    if (result.deletedAudio > 0) console.log(JSON.stringify({
+      timestamp: new Date().toISOString(), level: 'info', type: 'speaking_calibration_retention',
+      deletedAudio: result.deletedAudio,
+    }));
+  } catch (error) {
+    console.error(JSON.stringify({
+      timestamp: new Date().toISOString(), level: 'error', type: 'speaking_calibration_retention_failed',
+      errorCode: error.code || 'RETENTION_FAILED',
+    }));
+  }
+}
+const speakingCalibrationRetentionTimer = setInterval(() => {
+  void purgeSpeakingCalibrationRetention();
+}, 60 * 60 * 1000);
+speakingCalibrationRetentionTimer.unref();
+void purgeSpeakingCalibrationRetention();
+
 /* Section 10.1: built-in tasks need rows in the bank, otherwise they have no identifier a client
    could send. Seeding is keyed on content, so a restart adds nothing. A failure here must not take
    the process down — the built-in tasks still work offline in the browser. */
@@ -507,6 +537,7 @@ let shuttingDown = false;
 async function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
+  clearInterval(speakingCalibrationRetentionTimer);
   console.log(signal + ': shutting down');
   const forceExitTimer = setTimeout(() => process.exit(1), 10_000);
   forceExitTimer.unref();

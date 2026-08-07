@@ -14,9 +14,11 @@ const TASK3_SEQUENCE = Object.freeze({
   errorPrefix: 'SPEAKING_TASK3_ANSWER',
 });
 
-export function newSpeakingTask3Session({ username, catalogId, catalogRevision, selection, now = new Date() }) {
+export function newSpeakingTask3Session({
+  username, catalogId, catalogRevision, selection, accentProfile = null, now = new Date(),
+}) {
   return newSequentialSpeakingSession({
-    username, catalogId, catalogRevision, selection, now, contract: TASK3_SEQUENCE,
+    username, catalogId, catalogRevision, selection, accentProfile, now, contract: TASK3_SEQUENCE,
   });
 }
 

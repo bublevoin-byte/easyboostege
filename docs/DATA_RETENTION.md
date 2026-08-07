@@ -4,6 +4,32 @@
 
 The quota/billing ledger is retained while the account exists. It contains locale, state, reserved/billable seconds, bounded server-owned task/session context, normalized transcript/scores/word timing/phoneme facts, provider/version provenance, release or interruption reason, and UTC reservation/dispatch/provider-start/settlement timestamps. A pre-start release retains only its bounded canonical outcome for exact replay; a stale dispatch or post-start recovery retains the bounded conservative settlement. It never stores the audio bytes or full provider payload. User export includes the allowlisted context, normalized assessment and billing facts but omits the idempotency key and request fingerprint. Account deletion removes file-ledger rows and PostgreSQL rows cascade from `users`.
 
+## Speaking accent calibration
+
+The accent profile and its append-only revision history are owner-bound and retained while the account
+exists. Every new Speaking session snapshots locale, profile revision and effective time; a later manual
+change does not rewrite existing sessions or assessment evidence. The one-time “unknown” setup stores only
+two finalized assessment keys with one identical SHA-256 audio digest and its bounded suggestion metadata,
+never a second copy of the audio. The digest cannot reconstruct the recording.
+
+Research calibration has a separate voluntary consent record. It is not the ordinary training consent,
+and declining or revoking it does not restrict training. A granted minor consent requires guardian
+confirmation. Consent can still be read or revoked after subscription expiry. A deliberately contributed
+PCM WAV is accepted only when its digest matches the finalized assessment and is retained only for two
+independent sufficient blinded ratings. The sample also retains one bounded immutable server-owned task and rubric snapshot,
+so a later catalog deployment cannot change or strand the expert card; these public materials contain no learner data;
+a material disagreement temporarily retains it for a third adjudication. Raw audio is actually deleted
+after the agreeing pair or adjudication, immediately on consent revoke, or at latest after 180 calendar days.
+The deadline is enforced on queue claim, audio read and review submission; an active reviewer lease never
+extends it.
+Owner export includes the profile/history, consent and allowlisted sample lifecycle metadata but excludes
+audio, assessment keys, reviewer identities, ratings and access audit. It also includes allowlisted setup lifecycle metadata
+(`id`, state and timestamps, locale/confidence/policy when completed) but never the two internal evidence keys.
+Account deletion removes unfinished
+owner-bound samples and audio. Completed anonymous labels may survive only without owner, assessment key,
+reviewer identity or raw audio. Deleting an expert also removes that identity from retained ratings and
+access leases, leaving only a reviewer-account-deleted marker on anonymous completed labels.
+
 | Данные | Хранение | Удаление |
 |---|---|---|
 | Коды Telegram и истёкшие сессии | только до использования или истечения срока | удаляются автоматически при обращении к хранилищу |
