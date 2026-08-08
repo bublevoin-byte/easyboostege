@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { speakingAssessmentNotRequested } from '../public/speaking-assessment-contract.js';
 import { selectSpeakingTrainingAssignment } from './training-session.js';
 
 const DAY_MS = 86_400_000;
@@ -60,10 +61,8 @@ export function publicSpeakingTask4Session(session, task) {
       localPlayback: Boolean(session.local_playback),
       selfRating: session.self_rating,
     } : null,
-    assessment: {
-      available: false,
-      reason: 'deferred_to_tickets_06_07',
-      message: 'Automatic assessment will be added after provider and methodology validation in later tickets.',
-    },
+    assessment: speakingAssessmentNotRequested(
+      'Automatic training assessment is a separate action after local recording.',
+    ),
   };
 }

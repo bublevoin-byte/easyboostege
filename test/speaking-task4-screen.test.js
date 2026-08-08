@@ -25,7 +25,7 @@ function task4Session({ id = '74400000-0000-4000-8000-000000000001', slug = 'lea
       plan: ['Describe both photographs in detail.', 'Explain what the photographs have in common.',
         'Compare the main differences between the photographs.', 'Say which way you prefer and explain why.'],
     }, status: 'assigned',
-    assessment: { available: false, reason: 'deferred_to_tickets_06_07', message: 'Later.' },
+    assessment: { available: false, reason: 'not_requested', message: 'Later.' },
   };
 }
 

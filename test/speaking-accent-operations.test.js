@@ -59,8 +59,12 @@ test('OpenAPI publishes learner and blinded expert accent-calibration contracts'
   assert.match(openapi, /180 days/u);
 });
 
-test('production server wires accent repositories and an unrefed retention purge', async () => {
-  const [database, server] = await Promise.all([read('db.js'), read('server.js')]);
+test('production server wires accent repositories through the retention service lifecycle', async () => {
+  const [database, server, retentionService] = await Promise.all([
+    read('db.js'),
+    read('server.js'),
+    read('speaking/calibration-retention-service.js'),
+  ]);
   for (const method of [
     'getSpeakingAccentProfile', 'setSpeakingAccentProfile', 'startSpeakingAccentCalibration',
     'getPendingSpeakingAccentCalibration', 'completeSpeakingAccentCalibration',
@@ -72,6 +76,12 @@ test('production server wires accent repositories and an unrefed retention purge
     assert.match(database, new RegExp(`export const ${method}\\b`, 'u'));
     assert.match(server, new RegExp(`\\b${method}\\b`, 'u'));
   }
-  assert.match(server, /speakingCalibrationRetentionTimer\.unref\(\)/u);
-  assert.match(server, /clearInterval\(speakingCalibrationRetentionTimer\)/u);
+  assert.match(server, /createSpeakingCalibrationRetentionService/u);
+  assert.match(server, /speakingCalibrationRetention\.start\(\)/u);
+  assert.match(server, /speakingCalibrationRetention\.stop\(\)/u);
+  assert.doesNotMatch(server, /async function purgeSpeakingCalibrationRetention/u);
+  assert.match(retentionService, /setIntervalFn/u);
+  assert.match(retentionService, /timer\?\.unref\?\.\(\)/u);
+  assert.match(retentionService, /clearIntervalFn\(timer\)/u);
+  assert.match(retentionService, /speaking_calibration_retention_failed/u);
 });

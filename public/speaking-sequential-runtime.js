@@ -1,4 +1,5 @@
 import { createSpeakingLocalRecorder } from './speaking-local-recording.js';
+import { speakingAssessmentNotRequested } from './speaking-assessment-contract.js';
 
 function flowError(code, message) {
   const error = new Error(message);
@@ -41,11 +42,9 @@ export function createSpeakingSequentialBrowserFlow(options = {}, contract) {
         .map(([questionNumber, recording]) => ({
           questionNumber, url: recording.url, durationSeconds: recording.durationSeconds,
         })),
-      assessment: session?.assessment || {
-        available: false,
-        reason: 'deferred_to_tickets_06_07',
-        message: 'Автоматическая оценка появится после подключения и методической проверки в следующих этапах.',
-      },
+      assessment: session?.assessment || speakingAssessmentNotRequested(
+        'Автоматическая оценка появится после подключения и методической проверки в следующих этапах.',
+      ),
     });
   }
 

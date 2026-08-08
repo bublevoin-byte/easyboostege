@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { speakingAssessmentNotRequested } from '../public/speaking-assessment-contract.js';
 
 const DAY_MS = 86_400_000;
 const DUE_DAYS = Object.freeze({ weak: 1, steady: 7, strong: 14 });
@@ -108,10 +109,8 @@ export function publicSequentialSpeakingSession(session, task, contract) {
     assignedAt: new Date(session.assigned_at).toISOString(),
     completedAt: session.completed_at ? new Date(session.completed_at).toISOString() : null,
     assistanceUsed: Boolean(session.assistance_used),
-    assessment: {
-      available: false,
-      reason: 'deferred_to_tickets_06_07',
-      message: 'Автоматическая оценка появится после подключения и методической проверки в следующих этапах.',
-    },
+    assessment: speakingAssessmentNotRequested(
+      'Автоматическая тренировочная оценка запускается отдельно по сохранённым локальным записям.',
+    ),
   };
 }

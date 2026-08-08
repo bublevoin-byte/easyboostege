@@ -75,6 +75,7 @@ const fullResponseSchema = z.object({
     'microphone_denied', 'no_audio_track', 'recording_failed',
     'silence', 'noise', 'clipping', 'other',
   ]).optional(),
+  assessmentAudioSha256: z.string().regex(/^[0-9a-f]{64}$/u).optional(),
 }).strict().superRefine((value, context) => {
   if (value.responseStatus === 'completed' && value.recordingDurationSeconds < 1) {
     context.addIssue({ code: 'custom', message: 'A completed response needs a duration.' });
@@ -85,12 +86,20 @@ const fullResponseSchema = z.object({
   if ((value.responseStatus === 'technical_issue') !== Boolean(value.technicalIssueCode)) {
     context.addIssue({ code: 'custom', message: 'Technical issue metadata is inconsistent.' });
   }
+  if (value.responseStatus !== 'completed' && value.assessmentAudioSha256) {
+    context.addIssue({ code: 'custom', message: 'Only a completed response can bind assessment audio.' });
+  }
 });
 const fullSubmissionSchema = z.object({
   idempotencyKey: z.string().uuid().regex(
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu,
   ),
 }).strict();
+const fullEvaluationSchema = z.object({
+  attemptIds: z.array(z.number().int().positive()).max(4),
+}).strict().refine((value) => new Set(value.attemptIds).size === value.attemptIds.length, {
+  message: 'Attempt identifiers must be unique.',
+});
 const pronunciationIdempotencySchema = z.string().uuid().regex(
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu,
 );
@@ -507,6 +516,86 @@ export function createSpeakingRoutes({
     }
   });
 
+  async function handlePronunciationAssessment(req, res, next, {
+    parseRouteHeaders, invalidParametersMessage, resolveContext, handleRouteError = null,
+  }) {
+    const sessionId = sessionIdSchema.safeParse(req.params.sessionId);
+    const idempotencyKey = pronunciationIdempotencySchema.safeParse(req.get('idempotency-key'));
+    const locale = pronunciationLocaleSchema.safeParse(req.get('x-speech-locale'));
+    const duration = pronunciationDurationSchema.safeParse(req.get('x-audio-duration-seconds'));
+    const routeHeaders = parseRouteHeaders(req);
+    const mimeType = String(req.get('content-type') || '').split(';', 1)[0].toLowerCase();
+    if (!sessionId.success || !idempotencyKey.success || !locale.success || !duration.success
+      || !routeHeaders.success) {
+      return validationError(req, res, invalidParametersMessage);
+    }
+    if (!pronunciationMimeTypes.includes(mimeType)) {
+      return res.status(415).json({ error: {
+        code: 'SPEAKING_AUDIO_TYPE_UNSUPPORTED', message: 'Формат записи не поддерживается.',
+        requestId: req.requestId,
+      } });
+    }
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+      return validationError(req, res, 'Запись отсутствует.');
+    }
+    const wav = parsePcm16Mono16kWav(req.body);
+    const routeLimit = Math.min(pronunciationAudioSecondsLimit, routeHeaders.maximumSeconds);
+    if (!wav || duration.data > routeLimit || wav.durationSeconds < 1
+      || wav.durationSeconds > routeLimit || Math.abs(duration.data - wav.durationSeconds) > 1) {
+      return validationError(
+        req, res,
+        `Длительность записи не совпадает с WAV или превышает лимит ${routeLimit} секунд.`,
+      );
+    }
+    try {
+      const context = await resolveContext({
+        req, res, sessionId: sessionId.data, idempotencyKey: idempotencyKey.data,
+        locale: locale.data, wav, route: routeHeaders.data,
+      });
+      if (!context || res.headersSent) return undefined;
+      if (!pronunciationAssessment) return res.status(503).json({ error: {
+        code: 'SPEAKING_PRONUNCIATION_UNAVAILABLE',
+        message: 'Оценка произношения пока не подключена.', requestId: req.requestId,
+      } });
+      const result = await pronunciationAssessment.assess(req.user, {
+        idempotencyKey: idempotencyKey.data,
+        audio: req.body,
+        mimeType,
+        durationSeconds: wav.durationSeconds,
+        locale: locale.data,
+        ...context,
+      });
+      res.setHeader('Cache-Control', 'no-store');
+      if (result.assessment?.status === 'unavailable' && result.billing?.assessmentId == null) {
+        return res.status(503).json({ error: {
+          code: 'SPEAKING_PRONUNCIATION_UNAVAILABLE',
+          message: 'Оценка произношения сейчас недоступна.', requestId: req.requestId,
+        } });
+      }
+      return res.json(result);
+    } catch (error) {
+      if (handleRouteError?.(req, res, error)) return undefined;
+      if (catalogMismatchResponse(req, res, error)) return undefined;
+      if (error?.code === 'SPEAKING_ASSESSMENT_QUOTA_EXHAUSTED') {
+        return res.status(429).json({ error: {
+          code: error.code,
+          message: 'Месячный лимит автоматической оценки исчерпан. Локальная запись остаётся доступной.',
+          requestId: req.requestId,
+        } });
+      }
+      if (error?.code === 'SPEAKING_ASSESSMENT_IDEMPOTENCY_CONFLICT') {
+        return res.status(409).json({ error: {
+          code: error.code, message: 'Этот ключ уже использован для другой записи.',
+          requestId: req.requestId,
+        } });
+      }
+      if (String(error?.code || '').startsWith('SPEAKING_')) {
+        return validationError(req, res, 'Запись не прошла проверку безопасного контура оценки.');
+      }
+      return next(error);
+    }
+  }
+
   router.post(
     '/api/v1/speaking/task-1/sessions/:sessionId/pronunciation-assessment',
     auth,
@@ -514,43 +603,17 @@ export function createSpeakingRoutes({
     pronunciationLimiter,
     requireVoiceProcessingConsent,
     parsePronunciationAudio,
-    async (req, res, next) => {
-      const sessionId = sessionIdSchema.safeParse(req.params.sessionId);
-      const idempotencyKey = pronunciationIdempotencySchema.safeParse(req.get('idempotency-key'));
-      const locale = pronunciationLocaleSchema.safeParse(req.get('x-speech-locale'));
-      const duration = pronunciationDurationSchema.safeParse(req.get('x-audio-duration-seconds'));
-      const mimeType = String(req.get('content-type') || '').split(';', 1)[0].toLowerCase();
-      if (!sessionId.success) return validationError(req, res, 'Недопустимый идентификатор тренировки.');
-      if (!idempotencyKey.success) return validationError(req, res, 'Недопустимый ключ идемпотентности оценки.');
-      if (!locale.success) return validationError(req, res, 'Поддерживаются только en-GB и en-US.');
-      if (!duration.success) return validationError(req, res, 'Длительность записи должна быть от 1 до 180 секунд.');
-      if (!pronunciationMimeTypes.includes(mimeType)) {
-        return res.status(415).json({ error: {
-          code: 'SPEAKING_AUDIO_TYPE_UNSUPPORTED',
-          message: 'Формат записи не поддерживается.',
-          requestId: req.requestId,
-        } });
-      }
-      if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
-        return validationError(req, res, 'Запись отсутствует.');
-      }
-      const wav = parsePcm16Mono16kWav(req.body);
-      if (!wav) return validationError(req, res, 'Нужен корректный mono PCM WAV: 16 kHz, 16-bit.');
-      const task1AudioSecondsLimit = Math.min(90, pronunciationAudioSecondsLimit);
-      if (duration.data > task1AudioSecondsLimit || wav.durationSeconds < 1
-        || wav.durationSeconds > task1AudioSecondsLimit
-        || Math.abs(duration.data - wav.durationSeconds) > 1) {
-        return validationError(
-          req,
-          res,
-          `Длительность записи не совпадает с WAV или превышает лимит ${task1AudioSecondsLimit} секунд.`,
-        );
-      }
-      try {
-        const session = await db.getSpeakingTask1Session(req.user, sessionId.data);
-        if (!session) return res.status(404).json({ error: {
-          code: 'SPEAKING_SESSION_NOT_FOUND', message: 'Тренировка не найдена.', requestId: req.requestId,
-        } });
+    (req, res, next) => handlePronunciationAssessment(req, res, next, {
+      parseRouteHeaders: () => ({ success: true, data: {}, maximumSeconds: 90 }),
+      invalidParametersMessage: 'Недопустимые параметры оценки произношения.',
+      async resolveContext({ sessionId, locale }) {
+        const session = await db.getSpeakingTask1Session(req.user, sessionId);
+        if (!session) {
+          res.status(404).json({ error: {
+            code: 'SPEAKING_SESSION_NOT_FOUND', message: 'Тренировка не найдена.', requestId: req.requestId,
+          } });
+          return null;
+        }
         const task = SPEAKING_TASK1_CATALOG.tasks.find((candidate) => (
           candidate.id === session.task_id && candidate.revision === Number(session.task_revision)
         ));
@@ -560,62 +623,20 @@ export function createSpeakingRoutes({
             code: 'SPEAKING_TASK1_CATALOG_REVISION_MISMATCH',
           });
         }
-        if (!await sessionAcceptsAccent(req.user, session, locale.data)) {
-          return res.status(409).json({ error: {
+        if (!await sessionAcceptsAccent(req.user, session, locale)) {
+          res.status(409).json({ error: {
             code: 'SPEAKING_ACCENT_PROFILE_MISMATCH',
             message: 'Эта тренировка закреплена за выбранной нормой произношения. Начни новую тренировку после смены профиля.',
             requestId: req.requestId,
           } });
+          return null;
         }
-        if (!pronunciationAssessment) {
-          return res.status(503).json({ error: {
-            code: 'SPEAKING_PRONUNCIATION_UNAVAILABLE',
-            message: 'Оценка произношения пока не подключена.',
-            requestId: req.requestId,
-          } });
-        }
-        const result = await pronunciationAssessment.assess(req.user, {
-          idempotencyKey: idempotencyKey.data,
-          audio: req.body,
-          mimeType,
-          durationSeconds: duration.data,
-          locale: locale.data,
-          mode: 'scripted',
-          referenceText: task.reference.script,
+        return {
+          mode: 'scripted', referenceText: task.reference.script,
           contextId: `task1:${session.id}:${task.id}@${task.revision}`,
-        });
-        res.setHeader('Cache-Control', 'no-store');
-        if (result.assessment?.status === 'unavailable'
-          && result.billing?.assessmentId == null) {
-          return res.status(503).json({ error: {
-            code: 'SPEAKING_PRONUNCIATION_UNAVAILABLE',
-            message: 'Оценка произношения пока не подключена.',
-            requestId: req.requestId,
-          } });
-        }
-        return res.json(result);
-      } catch (error) {
-        if (catalogMismatchResponse(req, res, error)) return undefined;
-        if (error?.code === 'SPEAKING_ASSESSMENT_QUOTA_EXHAUSTED') {
-          return res.status(429).json({ error: {
-            code: error.code,
-            message: 'Месячный лимит автоматической оценки исчерпан. Локальная запись остаётся доступной.',
-            requestId: req.requestId,
-          } });
-        }
-        if (error?.code === 'SPEAKING_ASSESSMENT_IDEMPOTENCY_CONFLICT') {
-          return res.status(409).json({ error: {
-            code: error.code,
-            message: 'Этот ключ уже использован для другой записи.',
-            requestId: req.requestId,
-          } });
-        }
-        if (String(error?.code || '').startsWith('SPEAKING_')) {
-          return validationError(req, res, 'Запись не прошла проверку безопасного контура оценки.');
-        }
-        return next(error);
-      }
-    },
+        };
+      },
+    }),
   );
 
   function registerUnscriptedPronunciationRoute({
@@ -628,50 +649,23 @@ export function createSpeakingRoutes({
       pronunciationLimiter,
       requireVoiceProcessingConsent,
       parsePronunciationAudio,
-      async (req, res, next) => {
-        const sessionId = sessionIdSchema.safeParse(req.params.sessionId);
-        const idempotencyKey = pronunciationIdempotencySchema.safeParse(req.get('idempotency-key'));
-        const locale = pronunciationLocaleSchema.safeParse(req.get('x-speech-locale'));
-        const duration = pronunciationDurationSchema.safeParse(req.get('x-audio-duration-seconds'));
-        const itemNumber = itemCount == null
-          ? { success: true, data: null }
-          : z.coerce.number().int().min(1).max(itemCount).safeParse(req.get('x-speaking-item'));
-        const mimeType = String(req.get('content-type') || '').split(';', 1)[0].toLowerCase();
-        if (!sessionId.success) return validationError(req, res, 'Недопустимый идентификатор тренировки.');
-        if (!idempotencyKey.success) return validationError(req, res, 'Недопустимый ключ идемпотентности оценки.');
-        if (!locale.success) return validationError(req, res, 'Поддерживаются только en-GB и en-US.');
-        if (!duration.success || duration.data > maximumSeconds) {
-          return validationError(req, res, `Длительность записи должна быть от 1 до ${maximumSeconds} секунд.`);
-        }
-        if (!itemNumber.success) {
-          return validationError(req, res, `Заголовок X-Speaking-Item должен содержать номер от 1 до ${itemCount}.`);
-        }
-        if (!pronunciationMimeTypes.includes(mimeType)) {
-          return res.status(415).json({ error: {
-            code: 'SPEAKING_AUDIO_TYPE_UNSUPPORTED',
-            message: 'Формат записи не поддерживается.',
-            requestId: req.requestId,
-          } });
-        }
-        if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
-          return validationError(req, res, 'Запись отсутствует.');
-        }
-        const wav = parsePcm16Mono16kWav(req.body);
-        if (!wav) return validationError(req, res, 'Нужен корректный mono PCM WAV: 16 kHz, 16-bit.');
-        const routeLimit = Math.min(pronunciationAudioSecondsLimit, maximumSeconds);
-        if (wav.durationSeconds < 1 || wav.durationSeconds > routeLimit
-          || Math.abs(duration.data - wav.durationSeconds) > 1) {
-          return validationError(
-            req,
-            res,
-            `Длительность записи не совпадает с WAV или превышает лимит ${routeLimit} секунд.`,
-          );
-        }
-        try {
-          const session = await db[getSession](req.user, sessionId.data);
-          if (!session) return res.status(404).json({ error: {
-            code: 'SPEAKING_SESSION_NOT_FOUND', message: 'Тренировка не найдена.', requestId: req.requestId,
-          } });
+      (req, res, next) => handlePronunciationAssessment(req, res, next, {
+        parseRouteHeaders(request) {
+          const itemNumber = itemCount == null
+            ? { success: true, data: null }
+            : z.coerce.number().int().min(1).max(itemCount)
+              .safeParse(request.get('x-speaking-item'));
+          return { ...itemNumber, maximumSeconds };
+        },
+        invalidParametersMessage: 'Недопустимые параметры оценки произношения.',
+        async resolveContext({ sessionId, locale, route: itemNumber }) {
+          const session = await db[getSession](req.user, sessionId);
+          if (!session) {
+            res.status(404).json({ error: {
+              code: 'SPEAKING_SESSION_NOT_FOUND', message: 'Тренировка не найдена.', requestId: req.requestId,
+            } });
+            return null;
+          }
           const task = catalog.tasks.find((candidate) => (
             candidate.id === session.task_id && candidate.revision === Number(session.task_revision)
           ));
@@ -680,62 +674,21 @@ export function createSpeakingRoutes({
             const code = `SPEAKING_TASK${taskType}_CATALOG_REVISION_MISMATCH`;
             throw Object.assign(new Error(code), { code });
           }
-          if (!await sessionAcceptsAccent(req.user, session, locale.data)) {
-            return res.status(409).json({ error: {
+          if (!await sessionAcceptsAccent(req.user, session, locale)) {
+            res.status(409).json({ error: {
               code: 'SPEAKING_ACCENT_PROFILE_MISMATCH',
               message: 'Эта тренировка закреплена за выбранной нормой произношения. Начни новую тренировку после смены профиля.',
               requestId: req.requestId,
             } });
-          }
-          if (!pronunciationAssessment) {
-            return res.status(503).json({ error: {
-              code: 'SPEAKING_PRONUNCIATION_UNAVAILABLE',
-              message: 'Оценка произношения пока не подключена.',
-              requestId: req.requestId,
-            } });
+            return null;
           }
           const baseContext = `task${taskType}:${session.id}:${task.id}@${task.revision}`;
-          const result = await pronunciationAssessment.assess(req.user, {
-            idempotencyKey: idempotencyKey.data,
-            audio: req.body,
-            mimeType,
-            durationSeconds: duration.data,
-            locale: locale.data,
-            mode: 'unscripted',
-            referenceText: null,
-            contextId: itemNumber.data == null ? baseContext : `${baseContext}:item${itemNumber.data}`,
-          });
-          res.setHeader('Cache-Control', 'no-store');
-          if (result.assessment?.status === 'unavailable' && result.billing?.assessmentId == null) {
-            return res.status(503).json({ error: {
-              code: 'SPEAKING_PRONUNCIATION_UNAVAILABLE',
-              message: 'Оценка произношения пока не подключена.',
-              requestId: req.requestId,
-            } });
-          }
-          return res.json(result);
-        } catch (error) {
-          if (catalogMismatchResponse(req, res, error)) return undefined;
-          if (error?.code === 'SPEAKING_ASSESSMENT_QUOTA_EXHAUSTED') {
-            return res.status(429).json({ error: {
-              code: error.code,
-              message: 'Месячный лимит автоматической оценки исчерпан. Локальная запись остаётся доступной.',
-              requestId: req.requestId,
-            } });
-          }
-          if (error?.code === 'SPEAKING_ASSESSMENT_IDEMPOTENCY_CONFLICT') {
-            return res.status(409).json({ error: {
-              code: error.code,
-              message: 'Этот ключ уже использован для другой записи.',
-              requestId: req.requestId,
-            } });
-          }
-          if (String(error?.code || '').startsWith('SPEAKING_')) {
-            return validationError(req, res, 'Запись не прошла проверку безопасного контура оценки.');
-          }
-          return next(error);
-        }
-      },
+          return {
+            mode: 'unscripted', referenceText: null,
+            contextId: itemNumber == null ? baseContext : `${baseContext}:item${itemNumber}`,
+          };
+        },
+      }),
     );
   }
 
@@ -873,6 +826,86 @@ export function createSpeakingRoutes({
   ];
   const fullResponse = (session) => publicFullSpeakingSession(session, fullCatalogs);
 
+  router.post(
+    '/api/v1/speaking/full-sessions/:sessionId/pronunciation-assessment',
+    auth,
+    requireActiveSubscription,
+    pronunciationLimiter,
+    requireVoiceProcessingConsent,
+    parsePronunciationAudio,
+    (req, res, next) => handlePronunciationAssessment(req, res, next, {
+      parseRouteHeaders(request) {
+        const taskType = z.coerce.number().int().min(1).max(4)
+          .safeParse(request.get('x-speaking-task'));
+        const responseCounts = { 1: 1, 2: 4, 3: 5, 4: 1 };
+        const itemHeader = request.get('x-speaking-item');
+        const itemNumber = taskType.success && responseCounts[taskType.data] > 1
+          ? z.coerce.number().int().min(1).max(responseCounts[taskType.data]).safeParse(itemHeader)
+          : { success: itemHeader == null, data: 1 };
+        return {
+          success: taskType.success && itemNumber.success,
+          data: taskType.success ? {
+            taskType: taskType.data, responseNumber: itemNumber.data,
+            responseCount: responseCounts[taskType.data],
+          } : null,
+          maximumSeconds: taskType.success ? { 1: 90, 2: 20, 3: 40, 4: 180 }[taskType.data] : 180,
+        };
+      },
+      invalidParametersMessage: 'Недопустимые параметры оценки полного устного раздела.',
+      async resolveContext({ sessionId, idempotencyKey, locale, wav, route }) {
+        const session = await db.getFullSpeakingSession(req.user, sessionId);
+        if (!session) {
+          res.status(404).json({ error: {
+            code: 'SPEAKING_FULL_SESSION_NOT_FOUND', message: 'Полный вариант не найден.',
+            requestId: req.requestId,
+          } });
+          return null;
+        }
+        if (session.status !== 'submitted') {
+          res.status(409).json({ error: {
+            code: 'SPEAKING_FULL_NOT_SUBMITTED',
+            message: 'Автоматическая оценка полного варианта доступна только после сдачи всего раздела.',
+            requestId: req.requestId,
+          } });
+          return null;
+        }
+        const assignment = session.assignments?.find((item) => Number(item.task_type) === route.taskType);
+        const catalog = fullCatalogs[route.taskType - 1];
+        const task = catalog?.tasks.find((candidate) => candidate.id === assignment?.task_id
+          && Number(candidate.revision) === Number(assignment?.task_revision));
+        if (!task || assignment.catalog_id !== catalog.id
+          || Number(assignment.catalog_revision) !== Number(catalog.revision)) {
+          throw Object.assign(new Error('SPEAKING_FULL_CATALOG_REVISION_MISMATCH'), {
+            code: 'SPEAKING_FULL_CATALOG_REVISION_MISMATCH',
+          });
+        }
+        if (session.accent_locale !== locale) {
+          res.status(409).json({ error: {
+            code: 'SPEAKING_ACCENT_PROFILE_MISMATCH',
+            message: 'Полный вариант закреплён за другой нормой произношения.',
+            requestId: req.requestId,
+          } });
+          return null;
+        }
+        await db.claimFullSpeakingSessionAssessment(req.user, sessionId, {
+          taskType: route.taskType,
+          responseNumber: route.responseNumber,
+          audioSha256: speakingAssessmentAudioHash(req.body),
+          idempotencyKey,
+          durationSeconds: wav.durationSeconds,
+        });
+        const baseContext = `task${route.taskType}:${session.id}:${task.id}@${task.revision}`;
+        return {
+          mode: route.taskType === 1 ? 'scripted' : 'unscripted',
+          referenceText: route.taskType === 1 ? task.reference.script : null,
+          contextId: route.responseCount > 1
+            ? `${baseContext}:item${route.responseNumber}` : baseContext,
+        };
+      },
+      handleRouteError: fullSessionError,
+    }),
+  );
+
   function fullSessionError(req, res, error) {
     if (error?.code === 'SPEAKING_FULL_CATALOG_REVISION_MISMATCH') {
       res.status(409).json({ error: {
@@ -890,8 +923,18 @@ export function createSpeakingRoutes({
       } });
       return true;
     }
+    if (error?.code === 'SPEAKING_FULL_EVALUATION_INVALID') {
+      res.status(409).json({ error: {
+        code: error.code,
+        message: 'Результаты оценки не соответствуют этому полному устному разделу.',
+        requestId: req.requestId,
+      } });
+      return true;
+    }
     if (['SPEAKING_FULL_STAGE_INVALID', 'SPEAKING_FULL_RESPONSE_OUT_OF_SEQUENCE',
-      'SPEAKING_FULL_NOT_READY_TO_SUBMIT'].includes(error?.code)) {
+      'SPEAKING_FULL_NOT_READY_TO_SUBMIT', 'SPEAKING_FULL_NOT_SUBMITTED',
+      'SPEAKING_FULL_RESPONSE_NOT_RECORDED', 'SPEAKING_FULL_RESPONSE_ASSESSMENT_MISMATCH',
+      'SPEAKING_FULL_RESPONSE_ASSESSMENT_CONFLICT'].includes(error?.code)) {
       res.status(409).json({ error: {
         code: error.code,
         message: 'Этапы полного устного раздела выполняются только в официальном порядке.',
@@ -978,6 +1021,28 @@ export function createSpeakingRoutes({
       );
       if (!submitted) return res.status(404).json({ error: { code: 'SPEAKING_FULL_SESSION_NOT_FOUND', message: 'Полный вариант не найден.' } });
       return res.json(submitted.result);
+    } catch (error) {
+      if (fullSessionError(req, res, error)) return undefined;
+      return next(error);
+    }
+  });
+
+  router.post('/api/v1/speaking/full-sessions/:sessionId/evaluation', auth, requireActiveSubscription, async (req, res, next) => {
+    const sessionId = sessionIdSchema.safeParse(req.params.sessionId);
+    const parsed = fullEvaluationSchema.safeParse(req.body);
+    if (!sessionId.success || !parsed.success) {
+      return validationError(req, res, 'Недопустимые результаты оценки полного варианта.');
+    }
+    try {
+      res.setHeader('Cache-Control', 'no-store');
+      const evaluated = await db.completeFullSpeakingSessionEvaluation(
+        req.user, sessionId.data, parsed.data.attemptIds, { now: now() },
+      );
+      if (!evaluated) return res.status(404).json({ error: {
+        code: 'SPEAKING_FULL_SESSION_NOT_FOUND', message: 'Полный вариант не найден.',
+        requestId: req.requestId,
+      } });
+      return res.json(evaluated.result);
     } catch (error) {
       if (fullSessionError(req, res, error)) return undefined;
       return next(error);

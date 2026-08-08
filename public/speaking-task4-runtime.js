@@ -1,4 +1,8 @@
 import { createSpeakingLocalRecorder } from './speaking-local-recording.js';
+import {
+  isSpeakingAssessmentNotRequested,
+  speakingAssessmentNotRequested,
+} from './speaking-assessment-contract.js';
 
 function flowError(code, message) {
   const error = new Error(message);
@@ -29,8 +33,7 @@ function acceptTask4Session(next) {
     || task.photoPair.panels.some((panel, index) => !panel || typeof panel !== 'object'
       || Array.isArray(panel) || Object.keys(panel).sort().join(',') !== 'alt,number'
       || panel.number !== index + 1 || typeof panel.alt !== 'string' || !panel.alt.trim())
-    || next.assessment?.available !== false
-    || next.assessment.reason !== 'deferred_to_tickets_06_07') {
+    || !isSpeakingAssessmentNotRequested(next.assessment)) {
     throw flowError('SPEAKING_TASK4_RESPONSE_INVALID', 'Speaking task 4 response is invalid');
   }
   return next;
@@ -64,10 +67,9 @@ export function createSpeakingTask4BrowserFlow(options = {}) {
       micCheck: mic.status, micLevel: mic.level,
       recording: recording ? { url: recording.url, durationSeconds: recording.durationSeconds } : null,
       localPlayback,
-      assessment: session?.assessment || {
-        available: false, reason: 'deferred_to_tickets_06_07',
-        message: 'Automatic assessment is not available yet.',
-      },
+      assessment: session?.assessment || speakingAssessmentNotRequested(
+        'Automatic assessment is not available yet.',
+      ),
     });
   }
 

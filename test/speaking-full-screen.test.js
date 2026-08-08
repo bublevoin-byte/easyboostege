@@ -8,9 +8,14 @@ test('full Speaking screen is driven by the owner-bound server session and an ho
   assert.match(source, /createSpeakingFullBrowserFlow/u);
   assert.match(source, /S\.speakingFullSessionId/u);
   assert.match(source, /prepareCurrentAssets/u);
-  assert.match(source, /Оценка пока недоступна/u);
   assert.match(source, /Максимум: 20 баллов/u);
-  assert.doesNotMatch(source.slice(source.indexOf('function spExam'), source.indexOf('/* ---- фоновая')), /evaluate-speaking|spSTT\(/u);
+  const fullSection = source.slice(source.indexOf('function spExam'), source.indexOf('/* ---- фоновая'));
+  assert.match(fullSection, /speFullEvaluate/u);
+  assert.match(fullSection, /sessionMode:'full_section'/u);
+  assert.match(fullSection, /full-sessions\/.*pronunciation-assessment/u);
+  assert.match(fullSection, /assessmentRecordings/u);
+  assert.match(fullSection, /примерн/u);
+  assert.doesNotMatch(fullSection, /Оценка пока недоступна/u);
 });
 
 test('full Speaking controls cover local recording, technical recovery, eleven responses and submit', () => {

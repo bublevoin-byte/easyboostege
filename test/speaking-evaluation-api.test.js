@@ -154,21 +154,52 @@ async function withEvaluationServer(run, options = {}) {
     3: 'assignSpeakingTask3Session',
     4: 'assignSpeakingTask4Session',
   })[taskType];
-  const session = await repository[assign](owner, {
-    catalogId: catalog.id,
-    catalogRevision: catalog.revision,
-    tasks: catalog.tasks,
-    ...(options.targetedPractice ? {
-      targetedPractice: options.targetedPractice,
-      selectionReason: 'targeted_focus',
-    } : {}),
-    now: new Date('2026-08-06T10:00:00.000Z'),
-  });
-  if (taskType === 1) {
+  let session;
+  if (options.fullSection) {
+    session = await repository.assignFullSpeakingSession(owner, {
+      catalogs: [
+        SPEAKING_TASK1_CATALOG, SPEAKING_TASK2_CATALOG,
+        SPEAKING_TASK3_CATALOG, SPEAKING_TASK4_CATALOG,
+      ],
+      accentProfile: { locale: 'en-GB', revision: 1, effective_at: '2026-08-06T09:59:00.000Z' },
+      now: new Date('2026-08-06T10:00:00.000Z'),
+    });
+    const counts = { 1: 1, 2: 4, 3: 5, 4: 1 };
+    let fullNow = new Date('2026-08-06T10:00:00.000Z');
+    for (const fullTaskType of [1, 2, 3, 4]) {
+      for (let responseNumber = 1; responseNumber <= counts[fullTaskType]; responseNumber += 1) {
+        let active = await repository.advanceFullSpeakingSessionStage(owner, session.id, { now: fullNow });
+        if (active.phase === 'preparing') {
+          active = await repository.advanceFullSpeakingSessionStage(owner, session.id, { now: fullNow });
+        }
+        fullNow = new Date(fullNow.getTime() + 5_000);
+        session = await repository.completeFullSpeakingSessionResponse(owner, session.id, {
+          taskType: fullTaskType, responseNumber, responseStatus: 'completed',
+          recordingDurationSeconds: 5, micCheck: 'passed', localPlayback: false,
+        }, { now: fullNow });
+      }
+    }
+    await repository.submitFullSpeakingSessionResult(
+      owner, session.id, '85500000-0000-4000-8000-000000000001', { now: fullNow },
+    );
+    session = await repository.getFullSpeakingSession(owner, session.id);
+  } else {
+    session = await repository[assign](owner, {
+      catalogId: catalog.id,
+      catalogRevision: catalog.revision,
+      tasks: catalog.tasks,
+      ...(options.targetedPractice ? {
+        targetedPractice: options.targetedPractice,
+        selectionReason: 'targeted_focus',
+      } : {}),
+      now: new Date('2026-08-06T10:00:00.000Z'),
+    });
+  }
+  if (!options.fullSection && taskType === 1) {
     await repository.completeSpeakingTask1Session(owner, session.id, {
       recordingDurationSeconds: 60, micCheck: 'passed', localPlayback: true, selfRating: 'steady',
     }, { now: new Date('2026-08-06T10:01:00.000Z') });
-  } else if (taskType === 2 || taskType === 3) {
+  } else if (!options.fullSection && (taskType === 2 || taskType === 3)) {
     const count = taskType === 2 ? 4 : 5;
     const complete = taskType === 2
       ? repository.completeSpeakingTask2Question.bind(repository)
@@ -179,14 +210,17 @@ async function withEvaluationServer(run, options = {}) {
         localPlayback: true, selfRating: 'steady',
       }, { now: new Date(Date.UTC(2026, 7, 6, 10, index)) });
     }
-  } else {
+  } else if (!options.fullSection) {
     await repository.completeSpeakingTask4Session(owner, session.id, {
       recordingDurationSeconds: 60, micCheck: 'passed', localPlayback: true, selfRating: 'steady',
     }, { now: new Date('2026-08-06T10:01:00.000Z') });
   }
   const assessmentKeys = [];
   if (taskType === 2 || taskType === 3) {
-    const task = catalog.tasks.find((item) => item.id === session.task_id);
+    const taskRef = options.fullSection
+      ? session.assignments.find((item) => Number(item.task_type) === taskType)?.task_id
+      : session.task_id;
+    const task = catalog.tasks.find((item) => item.id === taskRef);
     const transcripts = taskType === 2
       ? ['How much does it cost?', 'Where is it?', 'When is it open?', 'What equipment is available?']
       : Array.from({ length: 5 }, (_, index) => `This is interview answer ${index + 1}. It has two phrases.`);
@@ -208,7 +242,10 @@ async function withEvaluationServer(run, options = {}) {
       assessmentKeys.push(key);
     }
   } else if (taskType === 4) {
-    const task = catalog.tasks.find((item) => item.id === session.task_id);
+    const taskRef = options.fullSection
+      ? session.assignments.find((item) => Number(item.task_type) === taskType)?.task_id
+      : session.task_id;
+    const task = catalog.tasks.find((item) => item.id === taskRef);
     const key = '83000000-0000-4000-8000-000000000001';
     await finalizeAssessment(repository, owner, {
       key,
@@ -299,6 +336,27 @@ async function withEvaluationServer(run, options = {}) {
     await fs.rm(directory, { recursive: true, force: true });
   }
 }
+
+test('submitted full Speaking task is evaluated only from its pinned owner-bound assessment evidence', async () => {
+  await withEvaluationServer(async ({ owner, other, session, request, repository, assessmentKeys, providerCalls }) => {
+    const body = {
+      taskType: 2,
+      sessionMode: 'full_section',
+      sessionId: session.id,
+      pronunciationAssessmentKeys: assessmentKeys,
+    };
+    assert.equal((await request(other, body)).status, 404);
+    const response = await request(owner, body);
+    assert.equal(response.status, 200);
+    assert.equal(response.body.review.status, 'scored');
+    assert.equal(response.body.review.max, 4);
+    assert.equal(providerCalls.length, 1);
+    const stored = await repository.getSpeakingAttempt(owner, response.body.attemptId);
+    assert.equal(stored.source_session_id, session.id);
+    assert.equal(stored.source_task_ref, session.assignments[1].task_id);
+    assert.equal(stored.assistance_used, false);
+  }, { taskType: 2, fullSection: true });
+});
 
 test('missing provider scoring facts fail closed before public learning mastery', async () => {
   const nullableWords = Array.from({ length: 4 }, () => [{

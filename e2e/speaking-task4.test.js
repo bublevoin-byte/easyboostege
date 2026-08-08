@@ -200,6 +200,29 @@ try {
     await page.getByRole('button', { name: '▶ Послушать монолог' }).press('Enter');
     await page.getByRole('button', { name: 'Нормально' }).press('Enter');
     await page.getByText('Тренировка задания 4 завершена').waitFor({ state: 'visible', timeout: 5_000 });
+    const assessmentContrast = await page.getByRole('button', {
+      name: '✨ Оценить по критериям ЕГЭ',
+    }).evaluate((button) => {
+      const channels = (value) => (value.match(/\d+(?:\.\d+)?/gu) || []).slice(0, 3).map(Number);
+      const luminance = (rgb) => {
+        const linear = rgb.map((value) => {
+          const srgb = value / 255;
+          return srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4;
+        });
+        return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+      };
+      const style = getComputedStyle(button);
+      const foreground = luminance(channels(style.color));
+      return [...style.backgroundImage.matchAll(/rgb\(([^)]+)\)/gu)].map((match) => {
+        const background = luminance(channels(match[1]));
+        return (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05);
+      });
+    });
+    assert.equal(assessmentContrast.length, 2);
+    assert.ok(
+      assessmentContrast.every((ratio) => ratio >= 4.5),
+      `individual assessment contrast ratios: ${assessmentContrast.join(', ')}`,
+    );
     assert.deepEqual(pageErrors, []);
     await context.close();
     console.log(`speaking task 4 e2e passed at ${viewport.width}px with reduced motion`);

@@ -1,3 +1,5 @@
+import { isSpeakingAssessmentNotRequested } from '../speaking-assessment-contract.js';
+
 (function initializeSpeakingModule(global) {
   'use strict';
 
@@ -195,7 +197,7 @@
       || typeof task.advertisement !== 'string' || !task.advertisement.trim()
       || !Array.isArray(task.supports) || task.supports.length !== 4
       || task.supports.some((support) => typeof support !== 'string' || !support.trim())
-      || assessment?.available !== false || assessment.reason !== 'deferred_to_tickets_06_07') return null;
+      || !isSpeakingAssessmentNotRequested(assessment)) return null;
     return {
       id: task.id,
       revision: task.revision,
@@ -218,7 +220,7 @@
       || typeof task.topic !== 'string' || !task.topic.trim()
       || !Array.isArray(task.questions) || task.questions.length !== 5
       || task.questions.some((question) => typeof question !== 'string' || !question.trim())
-      || assessment?.available !== false || assessment.reason !== 'deferred_to_tickets_06_07') return null;
+      || !isSpeakingAssessmentNotRequested(assessment)) return null;
     return {
       id: task.id,
       revision: task.revision,
@@ -252,7 +254,7 @@
       || task.photoPair.panels.some((panel, index) => !panel || typeof panel !== 'object'
         || Array.isArray(panel) || Object.keys(panel).sort().join(',') !== 'alt,number'
         || panel.number !== index + 1 || typeof panel.alt !== 'string' || !panel.alt.trim())
-      || assessment?.available !== false || assessment.reason !== 'deferred_to_tickets_06_07') return null;
+      || !isSpeakingAssessmentNotRequested(assessment)) return null;
     return {
       id: task.id,
       revision: task.revision,

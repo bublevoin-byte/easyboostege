@@ -49,7 +49,9 @@ import { selectSpeakingTrainingAssignment } from '../speaking/training-session.j
 import {
   abandonFullSpeakingSession,
   advanceFullSpeakingStage,
+  applyFullSpeakingEvaluation,
   assertFullSpeakingSessionCompatibility,
+  claimFullSpeakingResponseAssessment,
   completeFullSpeakingResponse,
   createFullSpeakingSession,
   selectFullSpeakingVariant,
@@ -59,6 +61,7 @@ import { recoverSpeakingEvaluationAttempt } from '../speaking/evaluation-claim.j
 import {
   assertSpeakingLearningSource,
   buildSpeakingLearningAttempt,
+  canonicalSpeakingLearningSource,
   SPEAKING_ADAPTIVE_EVIDENCE_ATTEMPT_LIMIT,
   speakingTargetedPracticeAssignment,
   speakingAdaptiveEvidenceAttempts,
@@ -2317,31 +2320,6 @@ export function createFileRepository(filePath, {
     return id;
   }
 
-  function canonicalSpeakingLearningSource(username, taskType, source) {
-    if (!source) return null;
-    const sessions = state[`speaking_task${Number(taskType)}_sessions`];
-    const session = Array.isArray(sessions) ? sessions.find((item) => (
-      item.username === username && item.id === source.sessionId
-    )) : null;
-    if (!session) throw new Error('SPEAKING_LEARNING_SESSION_NOT_FOUND');
-    if (session.task_id !== source.taskRef
-      || Number(session.task_revision) !== Number(source.taskRevision)
-      || session.catalog_id !== source.catalogId
-      || Number(session.catalog_revision) !== Number(source.catalogRevision)) {
-      throw new Error('SPEAKING_LEARNING_SOURCE_MISMATCH');
-    }
-    if (session.status !== 'completed') throw new Error('SPEAKING_LEARNING_SESSION_INCOMPLETE');
-    if (session.accent_locale && source.accentLocale && session.accent_locale !== source.accentLocale) {
-      throw new Error('SPEAKING_LEARNING_SOURCE_MISMATCH');
-    }
-    return {
-      ...source,
-      accentLocale: session.accent_locale || source.accentLocale || null,
-      assistanceUsed: Boolean(session.assistance_used),
-      targetedPractice: session.targeted_practice || null,
-    };
-  }
-
   async function claimSpeakingEvaluation(username, input, promptVersion, evaluationFingerprint, {
     now = new Date(), source = null,
   } = {}) {
@@ -2352,7 +2330,15 @@ export function createFileRepository(filePath, {
     return serializeCoordinatedMutation(async () => {
       await load();
       if (!state.users[username]) throw new Error('USER_NOT_FOUND');
-      const learningSource = canonicalSpeakingLearningSource(username, input.taskType, requestedSource);
+      const sourceSessions = requestedSource?.sessionMode === 'full_section'
+        ? state.speaking_full_sessions : state[`speaking_task${Number(input.taskType)}_sessions`];
+      const sourceSession = requestedSource && Array.isArray(sourceSessions)
+        ? sourceSessions.find((item) => item.username === username && item.id === requestedSource.sessionId)
+        : null;
+      const learningSource = requestedSource ? canonicalSpeakingLearningSource(requestedSource, {
+        taskType: input.taskType,
+        session: sourceSession,
+      }) : null;
       const replay = state.speaking_attempts.find((item) => (
         item.username === username && item.evaluation_fingerprint === evaluationFingerprint
       ));
@@ -2727,12 +2713,45 @@ export function createFileRepository(filePath, {
     });
   }
 
+  async function claimFullSpeakingSessionAssessment(username, id, binding) {
+    return serializeSpeakingSessionMutation(async () => {
+      await load();
+      const session = state.speaking_full_sessions.find((item) => item.username === username && item.id === id);
+      if (!session) return null;
+      claimFullSpeakingResponseAssessment(session, binding);
+      await persist();
+      return structuredClone(session);
+    });
+  }
+
   async function submitFullSpeakingSessionResult(username, id, idempotencyKey, { now = new Date() } = {}) {
     return serializeSpeakingSessionMutation(async () => {
       await load();
       const session = state.speaking_full_sessions.find((item) => item.username === username && item.id === id);
       if (!session) return null;
       const result = submitFullSpeakingSession(session, idempotencyKey, now);
+      await persist();
+      return { session: structuredClone(session), result };
+    });
+  }
+
+  async function completeFullSpeakingSessionEvaluation(
+    username, id, attemptIds, { now = new Date() } = {},
+  ) {
+    return serializeSpeakingSessionMutation(async () => {
+      await load();
+      const session = state.speaking_full_sessions.find((item) => item.username === username && item.id === id);
+      if (!session) return null;
+      const requestedIds = Array.isArray(attemptIds) ? attemptIds.map(Number) : [];
+      const attempts = requestedIds.map((attemptId) => state.speaking_attempts.find((item) => (
+        item.username === username && Number(item.id) === attemptId
+      )));
+      if (attempts.some((attempt) => !attempt)) {
+        throw Object.assign(new Error('SPEAKING_FULL_EVALUATION_INVALID'), {
+          code: 'SPEAKING_FULL_EVALUATION_INVALID',
+        });
+      }
+      const result = applyFullSpeakingEvaluation(session, attempts, now);
       await persist();
       return { session: structuredClone(session), result };
     });
@@ -4773,7 +4792,9 @@ export function createFileRepository(filePath, {
     getFullSpeakingSession,
     advanceFullSpeakingSessionStage,
     completeFullSpeakingSessionResponse,
+    claimFullSpeakingSessionAssessment,
     submitFullSpeakingSessionResult,
+    completeFullSpeakingSessionEvaluation,
     getGeneratedTask,
     getSharedGeneratedTask,
     saveGeneratedTask,

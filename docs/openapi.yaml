@@ -418,7 +418,7 @@ paths:
   /api/v1/speaking/task-1/sessions/{sessionId}/complete:
     post:
       summary: Complete a Speaking task 1 session with bounded practice metadata
-      description: Stores duration, microphone-check status, local-playback confirmation and self-rating only. The browser recording remains local. Until an acoustic provider is connected, pronunciation assessment is explicitly unavailable.
+      description: Stores duration, microphone-check status, local-playback confirmation and self-rating only. The browser recording remains local. Automatic training assessment is a separate, explicit post-completion upload action.
       parameters:
         - in: path
           name: sessionId
@@ -626,7 +626,7 @@ paths:
   /api/v1/speaking/task-4/sessions/{sessionId}/complete:
     post:
       summary: Complete a Speaking task 4 session with bounded local-practice metadata
-      description: Stores duration, microphone-check status, local-playback confirmation and self-rating only. Binary audio stays in the browser and automated assessment remains deferred.
+      description: Stores duration, microphone-check status, local-playback confirmation and self-rating only. Binary audio stays in the browser; automatic training assessment is a separate, explicit post-completion upload action.
       parameters:
         - in: path
           name: sessionId
@@ -710,10 +710,36 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { description: Full section not found for this learner }
         '409': { description: Stage is out of sequence or the pinned revision is incompatible }
+  /api/v1/speaking/full-sessions/{sessionId}/pronunciation-assessment:
+    post:
+      summary: Assess one recorded response from a submitted full Speaking section
+      description: Locked until the whole section is submitted. At response completion the client sends a SHA-256 fingerprint of the canonical PCM16 mono 16 kHz WAV; upload atomically requires the same fingerprint and submitted duration, then pins the first assessment idempotency key to that exact owner, task revision, accent and response position. Ordinary raw audio is never persisted. Tasks 2 and 3 require X-Speaking-Item. Exact replay with the pinned key does not spend quota twice; a fresh key, replacement take or duration mismatch is rejected before provider work.
+      parameters:
+        - { in: path, name: sessionId, required: true, schema: { type: string, format: uuid } }
+        - { in: header, name: Idempotency-Key, required: true, schema: { type: string, format: uuid } }
+        - { in: header, name: X-Speech-Locale, required: true, schema: { type: string, enum: [en-GB, en-US] } }
+        - { in: header, name: X-Audio-Duration-Seconds, required: true, schema: { type: number, minimum: 1, maximum: 180 } }
+        - { in: header, name: X-Speaking-Task, required: true, schema: { type: integer, enum: [1, 2, 3, 4] } }
+        - { in: header, name: X-Speaking-Item, required: false, schema: { type: integer, minimum: 1, maximum: 5 } }
+      requestBody:
+        required: true
+        content:
+          audio/wav: { schema: { type: string, format: binary, maxLength: 10485760, x-maxBytes: 10485760 } }
+      responses:
+        '200': { description: Final normalized assessment, billing settlement and quota, content: { application/json: { schema: { $ref: '#/components/schemas/SpeakingPronunciationAssessment' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Full section not found for this learner }
+        '409': { description: Full section is not submitted, response was not recorded, accent/catalog differs, or the submitted fingerprint, duration or pinned idempotency key does not match }
+        '413': { description: Audio exceeds the configured ceiling }
+        '415': { description: Unsupported audio MIME type }
+        '429': { description: Monthly provider seconds exhausted }
+        '503': { description: Pronunciation provider unavailable }
   /api/v1/speaking/full-sessions/{sessionId}/responses:
     post:
       summary: Complete the exact current full-section response with bounded metadata
-      description: Accepts all 11 positions in official 1+4+5+1 order. Audio remains local; the server stores only status, duration, mic status, a false local-playback marker and an optional technical issue code.
+      description: Accepts all 11 positions in official 1+4+5+1 order. Audio remains local; for a completed response the browser may additionally send the SHA-256 fingerprint of its canonical PCM16 WAV so a later explicit assessment can prove it is the same submitted take. The fingerprint is stored internally and never returned in the public session DTO.
       parameters:
         - in: path
           name: sessionId
@@ -738,7 +764,7 @@ paths:
   /api/v1/speaking/full-sessions/{sessionId}/submit:
     post:
       summary: Submit the completed full Speaking section idempotently
-      description: Returns a canonical result for every retry. Until tickets 06–07 connect and calibrate assessment, maximumScore is 20 while earnedScore remains null and no improvement analysis is invented.
+      description: Returns a canonical metadata-only submission for every retry. Automatic assessment remains an explicit post-submit action, so no intermediate score or analysis is disclosed and ordinary raw audio is not persisted.
       parameters:
         - in: path
           name: sessionId
@@ -765,6 +791,34 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { description: Full section not found for this learner }
         '409': { description: One or more of the 11 response positions are still pending }
+  /api/v1/speaking/full-sessions/{sessionId}/evaluation:
+    post:
+      summary: Persist the approximate 0-20 full-section result from exact scored attempts
+      description: Accepts only the current learner's completed or needs-retry Speaking attempts bound to this submitted full session and its four pinned task revisions. Missing recorded tasks, cross-owner attempts and mismatched task/catalog evidence fail closed. Skipped or technical tasks receive zero without a provider call. Replay returns the same canonical result.
+      parameters:
+        - { in: path, name: sessionId, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [attemptIds]
+              properties:
+                attemptIds:
+                  type: array
+                  minItems: 0
+                  maxItems: 4
+                  uniqueItems: true
+                  items: { type: integer, minimum: 1 }
+              additionalProperties: false
+      responses:
+        '200': { description: Canonical approximate per-task and 0-20 result, content: { application/json: { schema: { $ref: '#/components/schemas/SpeakingFullSubmission' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Full section not found for this learner }
+        '409': { description: Attempt evidence does not match the submitted owner-bound session }
   /api/v1/me:
     get:
       summary: Current user, base subscription, Premium entitlements, remaining voice minutes and server-projected feature flags
@@ -2046,6 +2100,7 @@ paths:
                   required: [taskType, sessionId, pronunciationAssessmentKey]
                   properties:
                     taskType: { type: integer, enum: [1] }
+                    sessionMode: { type: string, enum: [full_section] }
                     sessionId: { type: string, format: uuid }
                     pronunciationAssessmentKey: { type: string, format: uuid }
                   additionalProperties: false
@@ -2053,6 +2108,7 @@ paths:
                   required: [taskType, sessionId, pronunciationAssessmentKeys]
                   properties:
                     taskType: { type: integer, enum: [2] }
+                    sessionMode: { type: string, enum: [full_section] }
                     sessionId: { type: string, format: uuid }
                     pronunciationAssessmentKeys:
                       type: array
@@ -2064,6 +2120,7 @@ paths:
                   required: [taskType, sessionId, pronunciationAssessmentKeys]
                   properties:
                     taskType: { type: integer, enum: [3] }
+                    sessionMode: { type: string, enum: [full_section] }
                     sessionId: { type: string, format: uuid }
                     pronunciationAssessmentKeys:
                       type: array
@@ -2075,6 +2132,7 @@ paths:
                   required: [taskType, sessionId, pronunciationAssessmentKey]
                   properties:
                     taskType: { type: integer, enum: [4] }
+                    sessionMode: { type: string, enum: [full_section] }
                     sessionId: { type: string, format: uuid }
                     pronunciationAssessmentKey: { type: string, format: uuid }
                   additionalProperties: false
@@ -3074,7 +3132,7 @@ components:
           required: [available, reason, message]
           properties:
             available: { type: boolean, enum: [false] }
-            reason: { type: string, enum: [deferred_to_tickets_06_07] }
+            reason: { type: string, enum: [not_requested] }
             message: { type: string }
           additionalProperties: false
       additionalProperties: false
@@ -3148,7 +3206,7 @@ components:
           required: [available, reason, message]
           properties:
             available: { type: boolean, enum: [false] }
-            reason: { type: string, enum: [deferred_to_tickets_06_07] }
+            reason: { type: string, enum: [not_requested] }
             message: { type: string }
           additionalProperties: false
       additionalProperties: false
@@ -3230,7 +3288,7 @@ components:
           required: [available, reason, message]
           properties:
             available: { type: boolean, enum: [false] }
-            reason: { type: string, enum: [deferred_to_tickets_06_07] }
+            reason: { type: string, enum: [not_requested] }
             message: { type: string }
           additionalProperties: false
       additionalProperties: false
@@ -3239,9 +3297,28 @@ components:
       required: [available, reason, message]
       properties:
         available: { type: boolean, enum: [false] }
-        reason: { type: string, enum: [deferred_to_tickets_06_07] }
+        reason: { type: string, enum: [not_requested, evidence_needs_retry] }
         message: { type: string, minLength: 1, maxLength: 300 }
       additionalProperties: false
+    SpeakingFullAutomaticAssessment:
+      type: object
+      required: [available, status, mode, scoreKind, methodicallyValidated, scoringVersion, warning, evaluatedAt]
+      properties:
+        available: { type: boolean }
+        status: { type: string, enum: [scored, needs_retry] }
+        mode: { type: string, enum: [automatic_training] }
+        scoreKind: { type: string, enum: [approximate] }
+        methodicallyValidated: { type: boolean, enum: [false] }
+        scoringVersion: { type: string, enum: [speaking-fipi-combiner-v2] }
+        warning: { type: string, minLength: 1, maxLength: 500 }
+        reason: { type: string, enum: [evidence_needs_retry] }
+        message: { type: string, minLength: 1, maxLength: 300 }
+        evaluatedAt: { type: string, format: date-time }
+      additionalProperties: false
+    SpeakingFullAssessment:
+      oneOf:
+        - $ref: '#/components/schemas/SpeakingFullAssessmentUnavailable'
+        - $ref: '#/components/schemas/SpeakingFullAutomaticAssessment'
     SpeakingFullProgressResponse:
       type: object
       required: [responseNumber, status]
@@ -3280,6 +3357,11 @@ components:
         micCheck: { type: string, enum: [passed, quiet, skipped] }
         localPlayback: { type: boolean, enum: [false] }
         technicalIssueCode: { type: string, enum: [microphone_denied, no_audio_track, recording_failed, silence, noise, clipping, other] }
+        assessmentAudioSha256:
+          type: string
+          writeOnly: true
+          pattern: '^[0-9a-f]{64}$'
+          description: Optional only for completed responses; SHA-256 of the canonical PCM16 mono 16 kHz WAV retained in browser memory for an explicit post-submit assessment.
       additionalProperties: false
     SpeakingFullTaskResult:
       type: object
@@ -3287,9 +3369,13 @@ components:
       properties:
         taskType: { type: integer, minimum: 1, maximum: 4 }
         maximumScore: { type: integer, minimum: 1, maximum: 10 }
-        earnedScore: { type: integer, nullable: true, enum: [null] }
+        earnedScore: { type: integer, nullable: true, minimum: 0, maximum: 10 }
         recordingStatus: { type: string, enum: [completed, skipped, technical_issue] }
         usedSeconds: { type: number, minimum: 0, maximum: 200 }
+        attemptId: { type: integer, nullable: true, minimum: 1 }
+        assessmentStatus: { type: string, enum: [scored, needs_retry, not_assessed] }
+        recordingQuality: { type: string, enum: [good, acceptable, poor, unavailable] }
+        review: { type: object, nullable: true, description: Bounded per-task review without raw audio, additionalProperties: true }
       additionalProperties: false
     SpeakingFullSubmission:
       type: object
@@ -3297,16 +3383,22 @@ components:
       properties:
         status: { type: string, enum: [submitted] }
         maximumScore: { type: integer, enum: [20] }
-        earnedScore: { type: integer, nullable: true, enum: [null] }
-        assessment: { $ref: '#/components/schemas/SpeakingFullAssessmentUnavailable' }
+        earnedScore: { type: integer, nullable: true, minimum: 0, maximum: 20 }
+        assessment: { $ref: '#/components/schemas/SpeakingFullAssessment' }
         taskResults:
           type: array
           minItems: 4
           maxItems: 4
           items: { $ref: '#/components/schemas/SpeakingFullTaskResult' }
         improvementPlan:
-          allOf:
+          oneOf:
             - $ref: '#/components/schemas/SpeakingFullAssessmentUnavailable'
+            - type: object
+              required: [available, items]
+              properties:
+                available: { type: boolean, enum: [true] }
+                items: { type: array, minItems: 1, maxItems: 6, items: { type: string, maxLength: 700 } }
+              additionalProperties: false
         submittedAt: { type: string, format: date-time }
       additionalProperties: false
     SpeakingFullSession:
@@ -3356,8 +3448,8 @@ components:
           maxItems: 4
           items: { $ref: '#/components/schemas/SpeakingFullProgressTask' }
         maximumScore: { type: integer, enum: [20] }
-        earnedScore: { type: integer, nullable: true, enum: [null] }
-        assessment: { $ref: '#/components/schemas/SpeakingFullAssessmentUnavailable' }
+        earnedScore: { type: integer, nullable: true, minimum: 0, maximum: 20 }
+        assessment: { $ref: '#/components/schemas/SpeakingFullAssessment' }
         assignedAt: { type: string, format: date-time }
         submittedAt: { type: string, format: date-time, nullable: true }
         submission: { $ref: '#/components/schemas/SpeakingFullSubmission' }

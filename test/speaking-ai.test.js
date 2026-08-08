@@ -33,6 +33,19 @@ test('public speaking evaluation accepts only a server reference, never client a
     taskType: 2, transcript: request.transcript, contentRef: 'builtin:speaking:task:2:v1',
   }).success, false, 'legacy adaptive transcripts are not owner-bound and must stay disabled');
   assert.equal(speakingRequestSchema.safeParse({ ...request, taskType: 5 }).success, false);
+  const fullSection = {
+    taskType: 2,
+    sessionMode: 'full_section',
+    sessionId: '123e4567-e89b-42d3-a456-426614174000',
+    pronunciationAssessmentKeys: [
+      '10000000-0000-4000-8000-000000000001',
+      '10000000-0000-4000-8000-000000000002',
+      '10000000-0000-4000-8000-000000000003',
+      '10000000-0000-4000-8000-000000000004',
+    ],
+  };
+  assert.equal(speakingRequestSchema.safeParse(fullSection).success, true);
+  assert.equal(speakingRequestSchema.safeParse({ ...fullSection, sessionMode: 'client_chosen' }).success, false);
 });
 
 test('speaking prompt keeps transcript in untrusted JSON data', () => {

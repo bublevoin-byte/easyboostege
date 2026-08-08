@@ -112,7 +112,8 @@ test('writing and speaking reviews mount the shared tutor and keep only server-i
     'Premium must show a localized label instead of an internal adaptive skill id');
   assert.match(speakingSource, /targetedPractice/u);
   assert.doesNotMatch(speakingSource, /гарантированно новый материал/u);
-  assert.doesNotMatch(fullSpeakingSource, /(?:evaluate-speaking|spSTT\(|voiceTutorButton\()/u);
+  assert.match(fullSpeakingSource, /evaluate-speaking/u);
+  assert.doesNotMatch(fullSpeakingSource, /(?:spSTT\(|voiceTutorButton\()/u);
   assert.doesNotMatch(speakingSource, /voiceTutor&&d\.got<d\.max/u,
     'a max-score review must still render its server-issued pronunciation control');
 

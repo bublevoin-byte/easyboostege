@@ -3,12 +3,14 @@ import test from 'node:test';
 
 import {
   advanceFullSpeakingStage,
+  applyFullSpeakingEvaluation,
   completeFullSpeakingResponse,
   createFullSpeakingSession,
   publicFullSpeakingSession,
   selectFullSpeakingVariant,
   submitFullSpeakingSession,
 } from '../speaking/full-section-session.js';
+import { SPEAKING_SCORING_VERSION } from '../speaking/fipi-scoring.js';
 import { SPEAKING_TASK1_CATALOG } from '../public/content/speaking/task1-v1.js';
 import { SPEAKING_TASK2_CATALOG } from '../public/content/speaking/task2-v1.js';
 import { SPEAKING_TASK3_CATALOG } from '../public/content/speaking/task3-v1.js';
@@ -39,8 +41,8 @@ test('full Speaking session pins one compatible four-task variant and follows th
   assert.equal(assigned.earnedScore, null);
   assert.deepEqual(assigned.assessment, {
     available: false,
-    reason: 'deferred_to_tickets_06_07',
-    message: 'Автоматическая оценка и балл пока недоступны.',
+    reason: 'not_requested',
+    message: 'Автоматическая тренировочная оценка запускается отдельно после сдачи раздела.',
   });
   assert.equal(assigned.task.taskType, 1);
   assert.equal(forbidden.test(JSON.stringify(assigned)), false);
@@ -55,8 +57,9 @@ test('full Speaking session pins one compatible four-task variant and follows th
   assert.equal(new Date(session.stage_deadline_at) - now, 90_000);
   completeFullSpeakingResponse(session, {
     responseStatus: 'completed', recordingDurationSeconds: 72,
-    micCheck: 'passed', localPlayback: false,
+    micCheck: 'passed', localPlayback: false, assessmentAudioSha256: 'a'.repeat(64),
   }, new Date('2026-08-06T10:01:33.000Z'));
+  assert.equal(session.responses[0].entries[0].assessment_fingerprint, 'a'.repeat(64));
   assert.equal(session.current_task, 2);
   assert.equal(session.current_response, 1);
   assert.equal(session.phase, 'ready');
@@ -139,4 +142,119 @@ test('full Speaking deadlines cannot be paused and an overdue answer becomes a t
   assert.equal(session.responses[0].entries[0].technicalIssueCode, 'response_timeout');
   assert.equal(session.responses[0].entries[0].recordingDurationSeconds, 0);
   assert.equal(session.current_task, 2);
+});
+
+test('full Speaking publishes one honest approximate result from four owner-bound scored attempts', () => {
+  const now = new Date('2026-08-06T10:20:00.000Z');
+  const session = createFullSpeakingSession({
+    username: 'full-owner', catalogs, variantIndex: 0, selectionReason: 'unseen', now,
+  });
+  session.responses.forEach((task) => task.entries.forEach((entry) => {
+    Object.assign(entry, {
+      status: 'completed', recordingDurationSeconds: 10, micCheck: 'passed',
+      localPlayback: false, completedAt: now.toISOString(),
+    });
+  }));
+  session.phase = 'ready_to_submit';
+  submitFullSpeakingSession(session, '75500000-0000-4000-8000-000000000030', now);
+  const attempts = session.assignments.map((assignment, index) => ({
+    id: 501 + index,
+    username: session.username,
+    task_type: assignment.task_type,
+    source_session_id: session.id,
+    source_task_ref: assignment.task_id,
+    source_task_revision: assignment.task_revision,
+    source_catalog_id: assignment.catalog_id,
+    source_catalog_revision: assignment.catalog_revision,
+    status: 'completed',
+    review: {
+      status: 'scored', got: [1, 3, 4, 8][index], max: assignment.max_score,
+      verdict: `Task ${assignment.task_type} review`, criteria: [], good: [],
+      fix: index === 3 ? [{ wrong: 'People is', right: 'People are', note: 'grammar' }] : [],
+      scoringVersion: SPEAKING_SCORING_VERSION,
+      acousticFacts: { signalQuality: 'good', recognitionConfidence: 0.95 },
+    },
+  }));
+
+  const result = applyFullSpeakingEvaluation(session, attempts, now);
+
+  assert.equal(result.earnedScore, 16);
+  assert.equal(result.maximumScore, 20);
+  assert.equal(result.assessment.available, true);
+  assert.equal(result.assessment.scoreKind, 'approximate');
+  assert.equal(result.assessment.methodicallyValidated, false);
+  assert.deepEqual(result.taskResults.map((item) => item.earnedScore), [1, 3, 4, 8]);
+  assert.deepEqual(result.taskResults.map((item) => item.attemptId), [501, 502, 503, 504]);
+  assert.equal(result.taskResults.every((item) => item.recordingQuality === 'good'), true);
+  assert.deepEqual(result.improvementPlan.items, ['People is → People are · grammar']);
+  assert.equal(publicFullSpeakingSession(session, catalogs).earnedScore, 16);
+  assert.deepEqual(applyFullSpeakingEvaluation(session, attempts, now), result);
+});
+
+test('full Speaking scores skipped and technical tasks as zero without provider attempts', () => {
+  const now = new Date('2026-08-06T10:20:00.000Z');
+  const session = createFullSpeakingSession({
+    username: 'full-owner', catalogs, variantIndex: 0, selectionReason: 'unseen', now,
+  });
+  session.responses.forEach((task, taskIndex) => task.entries.forEach((entry) => {
+    const technical = taskIndex % 2 === 1;
+    Object.assign(entry, {
+      status: technical ? 'technical_issue' : 'skipped',
+      recordingDurationSeconds: 0,
+      micCheck: technical ? 'quiet' : 'skipped',
+      localPlayback: false,
+      technicalIssueCode: technical ? 'recording_failed' : null,
+      completedAt: now.toISOString(),
+    });
+  }));
+  session.phase = 'ready_to_submit';
+  submitFullSpeakingSession(session, '75500000-0000-4000-8000-000000000032', now);
+
+  const result = applyFullSpeakingEvaluation(session, [], now);
+
+  assert.equal(result.earnedScore, 0);
+  assert.equal(result.assessment.status, 'scored');
+  assert.deepEqual(result.taskResults.map((item) => item.earnedScore), [0, 0, 0, 0]);
+  assert.deepEqual(result.taskResults.map((item) => item.attemptId), [null, null, null, null]);
+  assert.deepEqual(
+    applyFullSpeakingEvaluation(session, [], new Date('2026-08-06T10:25:00.000Z')),
+    result,
+  );
+});
+
+test('full Speaking refuses cross-owner, wrong-task and incomplete evaluation evidence', () => {
+  const now = new Date('2026-08-06T10:20:00.000Z');
+  const session = createFullSpeakingSession({
+    username: 'full-owner', catalogs, variantIndex: 0, selectionReason: 'unseen', now,
+  });
+  session.responses.forEach((task) => task.entries.forEach((entry) => {
+    Object.assign(entry, { status: 'completed', recordingDurationSeconds: 10, micCheck: 'passed' });
+  }));
+  session.phase = 'ready_to_submit';
+  submitFullSpeakingSession(session, '75500000-0000-4000-8000-000000000031', now);
+  const attempts = session.assignments.map((assignment, index) => ({
+    id: 601 + index, username: session.username, task_type: assignment.task_type,
+    source_session_id: session.id, source_task_ref: assignment.task_id,
+    source_task_revision: assignment.task_revision, source_catalog_id: assignment.catalog_id,
+    source_catalog_revision: assignment.catalog_revision, status: 'completed',
+    review: { status: 'scored', got: 0, max: assignment.max_score,
+      scoringVersion: SPEAKING_SCORING_VERSION, acousticFacts: { signalQuality: 'good' } },
+  }));
+
+  assert.throws(
+    () => applyFullSpeakingEvaluation(session, attempts.slice(0, 3), now),
+    { code: 'SPEAKING_FULL_EVALUATION_INVALID' },
+  );
+  assert.throws(
+    () => applyFullSpeakingEvaluation(session, [
+      { ...attempts[0], username: 'other-owner' }, ...attempts.slice(1),
+    ], now),
+    { code: 'SPEAKING_FULL_EVALUATION_INVALID' },
+  );
+  assert.throws(
+    () => applyFullSpeakingEvaluation(session, attempts.map((attempt) => ({
+      ...attempt, review: { ...attempt.review, scoringVersion: 'obsolete-scoring-v1' },
+    })), now),
+    { code: 'SPEAKING_FULL_EVALUATION_INVALID' },
+  );
 });

@@ -11,6 +11,7 @@ import { SPEAKING_TASK1_CATALOG } from '../public/content/speaking/task1-v1.js';
 import { SPEAKING_TASK2_CATALOG } from '../public/content/speaking/task2-v1.js';
 import { SPEAKING_TASK3_CATALOG } from '../public/content/speaking/task3-v1.js';
 import { SPEAKING_TASK4_CATALOG } from '../public/content/speaking/task4-v1.js';
+import { SPEAKING_SCORING_VERSION } from '../speaking/fipi-scoring.js';
 
 async function withServer(run) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-speaking-full-api-'));
@@ -97,6 +98,45 @@ test('full Speaking HTTP lifecycle is owner-bound, revision-pinned, safe before 
     assert.equal(first.earnedScore, null);
     assert.equal(first.assessment.available, false);
 
+    const storedSession = await repository.getFullSpeakingSession(owner, session.id);
+    const attemptIds = [];
+    for (const assignment of storedSession.assignments) {
+      const taskType = Number(assignment.task_type);
+      const claim = await repository.claimSpeakingEvaluation(
+        owner,
+        { taskType, assignment: { serverOwned: true }, transcript: `Trusted ${taskType}` },
+        'speaking-semantic-v4',
+        String(taskType).repeat(64),
+        { source: {
+          sessionMode: 'full_section', sessionId: session.id,
+          taskRef: assignment.task_id, taskRevision: assignment.task_revision,
+          catalogId: assignment.catalog_id, catalogRevision: assignment.catalog_revision,
+          accentLocale: storedSession.accent_locale, assistanceUsed: false, targetedPractice: null,
+        } },
+      );
+      await repository.finishSpeakingAttempt(claim.attempt.id, {
+        status: 'completed', provider: 'test', model: 'test-model', review: {
+          status: 'scored', got: assignment.max_score, max: assignment.max_score,
+          verdict: `Task ${taskType}`, criteria: [], good: [], fix: [],
+          scoringVersion: SPEAKING_SCORING_VERSION,
+          acousticFacts: { signalQuality: 'good', accentLocale: storedSession.accent_locale },
+        },
+      }, { claimGeneration: claim.attempt.evaluation_claim_generation });
+      attemptIds.push(Number(claim.attempt.id));
+    }
+    assert.equal((await request(other, `/api/v1/speaking/full-sessions/${session.id}/evaluation`, {
+      method: 'POST', body: { attemptIds },
+    })).status, 404);
+    const evaluatedResponse = await request(
+      owner, `/api/v1/speaking/full-sessions/${session.id}/evaluation`,
+      { method: 'POST', body: { attemptIds } },
+    );
+    assert.equal(evaluatedResponse.status, 200);
+    const evaluated = await evaluatedResponse.json();
+    assert.equal(evaluated.earnedScore, 20);
+    assert.equal(evaluated.assessment.scoreKind, 'approximate');
+    assert.deepEqual(evaluated.taskResults.map((item) => item.attemptId), attemptIds);
+
     const exported = await repository.exportUserData(owner);
     assert.equal(exported.speaking_full_sessions.length, 1);
     assert.equal(Object.hasOwn(exported.speaking_full_sessions[0], 'username'), false);
@@ -163,7 +203,7 @@ test('full Speaking abandoned pointer returns 404 and assignment recovers with a
   });
 });
 
-test('full Speaking public contract documents the five owner-bound operations and metadata-only storage', async () => {
+test('full Speaking public contract documents owner-bound practice, upload and approximate evaluation', async () => {
   const [specification, migration, database, retention] = await Promise.all([
     fs.readFile(new URL('../docs/openapi.yaml', import.meta.url), 'utf8'),
     fs.readFile(new URL('../migrations/045_speaking_full_sessions.sql', import.meta.url), 'utf8'),
@@ -176,6 +216,8 @@ test('full Speaking public contract documents the five owner-bound operations an
     '/api/v1/speaking/full-sessions/{sessionId}/stage:',
     '/api/v1/speaking/full-sessions/{sessionId}/responses:',
     '/api/v1/speaking/full-sessions/{sessionId}/submit:',
+    '/api/v1/speaking/full-sessions/{sessionId}/pronunciation-assessment:',
+    '/api/v1/speaking/full-sessions/{sessionId}/evaluation:',
   ]) assert.match(specification, new RegExp(endpoint.replace(/[{}]/gu, '\\$&'), 'u'));
   assert.match(specification, /SpeakingFullSession:/u);
   assert.match(specification, /SpeakingFullSubmission:/u);
@@ -186,7 +228,15 @@ test('full Speaking public contract documents the five owner-bound operations an
     specification.indexOf('SpeakingFullTaskResult:'),
   );
   assert.doesNotMatch(completionContract, /response_timeout/u);
-  assert.match(specification, /deferred_to_tickets_06_07/u);
+  assert.match(specification, /sessionMode: \{ type: string, enum: \[full_section\] \}/u);
+  assert.match(specification, /SpeakingFullAutomaticAssessment:/u);
+  const automaticAssessmentContract = specification.slice(
+    specification.indexOf('SpeakingFullAutomaticAssessment:'),
+    specification.indexOf('SpeakingFullAssessment:'),
+  );
+  assert.match(automaticAssessmentContract, /speaking-fipi-combiner-v2/u);
+  assert.doesNotMatch(automaticAssessmentContract, /fipi-speaking-2026-v1/u);
+  assert.doesNotMatch(specification, /deferred_to_tickets_06_07/u);
   assert.match(migration, /CREATE TABLE IF NOT EXISTS speaking_full_sessions/u);
   assert.match(migration, /jsonb_array_length\(assignments\) = 4/u);
   assert.match(migration, /ON DELETE CASCADE/u);

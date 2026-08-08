@@ -23,16 +23,19 @@ export const speakingTrustedInputSchema = z.discriminatedUnion('taskType', [1, 2
 const sessionEvaluationRequests = [
   z.object({
     taskType: z.literal(2),
+    sessionMode: z.literal('full_section').optional(),
     sessionId: z.string().uuid(),
     pronunciationAssessmentKeys: z.array(z.string().uuid()).length(4),
   }).strict(),
   z.object({
     taskType: z.literal(3),
+    sessionMode: z.literal('full_section').optional(),
     sessionId: z.string().uuid(),
     pronunciationAssessmentKeys: z.array(z.string().uuid()).length(5),
   }).strict(),
   z.object({
     taskType: z.literal(4),
+    sessionMode: z.literal('full_section').optional(),
     sessionId: z.string().uuid(),
     pronunciationAssessmentKey: z.string().uuid(),
   }).strict(),
@@ -40,6 +43,7 @@ const sessionEvaluationRequests = [
 export const speakingRequestSchema = z.union([
   z.object({
     taskType: z.literal(1),
+    sessionMode: z.literal('full_section').optional(),
     sessionId: z.string().uuid(),
     pronunciationAssessmentKey: z.string().uuid(),
   }).strict(),

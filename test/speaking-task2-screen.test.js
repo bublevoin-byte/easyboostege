@@ -20,7 +20,7 @@ function task2Session() {
     },
     status: 'assigned', currentQuestion: 1,
     questions: Array.from({ length: 4 }, (_, index) => ({ questionNumber: index + 1, status: 'pending' })),
-    assessment: { available: false, reason: 'deferred_to_tickets_06_07', message: 'Later.' },
+    assessment: { available: false, reason: 'not_requested', message: 'Later.' },
   };
 }
 

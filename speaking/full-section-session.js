@@ -1,4 +1,8 @@
 import crypto from 'node:crypto';
+import {
+  SPEAKING_ASSESSMENT_NOT_REQUESTED,
+  speakingAssessmentNotRequested,
+} from '../public/speaking-assessment-contract.js';
 
 import {
   speakingTask1PublicAssignment,
@@ -6,6 +10,7 @@ import {
   speakingTask3PublicAssignment,
   speakingTask4PublicAssignment,
 } from '../public/speaking-catalog-contract.js';
+import { combineFullSpeakingScore, SPEAKING_SCORING_VERSION } from './fipi-scoring.js';
 
 export const FULL_SPEAKING_FORMAT = Object.freeze({
   id: 'ege-english-speaking-2026',
@@ -27,11 +32,9 @@ const publicAssignments = Object.freeze({
   4: speakingTask4PublicAssignment,
 });
 
-const assessmentUnavailable = () => ({
-  available: false,
-  reason: 'deferred_to_tickets_06_07',
-  message: 'Автоматическая оценка и балл пока недоступны.',
-});
+const assessmentUnavailable = () => speakingAssessmentNotRequested(
+  'Автоматическая тренировочная оценка запускается отдельно после сдачи раздела.',
+);
 const RESPONSE_SUBMISSION_GRACE_MS = 10_000;
 
 function fullError(code) {
@@ -111,6 +114,8 @@ export function createFullSpeakingSession({
       localPlayback: false,
       technicalIssueCode: null,
       completedAt: null,
+      assessment_fingerprint: null,
+      assessment_idempotency_key: null,
     })),
   }));
   return {
@@ -186,6 +191,7 @@ export function completeFullSpeakingResponse(session, completion, now = new Date
   const duration = Number(effectiveCompletion.recordingDurationSeconds);
   const responseStatus = effectiveCompletion.responseStatus;
   const issue = effectiveCompletion.technicalIssueCode || null;
+  const assessmentAudioSha256 = effectiveCompletion.assessmentAudioSha256 || null;
   if (!['completed', 'skipped', 'technical_issue'].includes(responseStatus)
     || !Number.isFinite(duration) || duration < 0 || duration > task.responseSeconds
     || (responseStatus === 'completed' && duration < 1)
@@ -193,7 +199,9 @@ export function completeFullSpeakingResponse(session, completion, now = new Date
     || !['passed', 'quiet', 'skipped'].includes(effectiveCompletion.micCheck)
     || effectiveCompletion.localPlayback !== false
     || (responseStatus === 'technical_issue' && !issue)
-    || (responseStatus !== 'technical_issue' && issue)) {
+    || (responseStatus !== 'technical_issue' && issue)
+    || (assessmentAudioSha256 !== null
+      && (responseStatus !== 'completed' || !/^[0-9a-f]{64}$/u.test(assessmentAudioSha256)))) {
     throw fullError('SPEAKING_FULL_RESPONSE_INVALID');
   }
   Object.assign(response, {
@@ -203,6 +211,8 @@ export function completeFullSpeakingResponse(session, completion, now = new Date
     localPlayback: false,
     technicalIssueCode: issue,
     completedAt: completedAt.toISOString(),
+    assessment_fingerprint: assessmentAudioSha256,
+    assessment_idempotency_key: null,
   });
   session.stage_started_at = null;
   session.stage_deadline_at = null;
@@ -216,6 +226,27 @@ export function completeFullSpeakingResponse(session, completion, now = new Date
   } else {
     session.phase = 'ready_to_submit';
   }
+  return session;
+}
+
+export function claimFullSpeakingResponseAssessment(session, {
+  taskType, responseNumber, audioSha256, idempotencyKey, durationSeconds,
+}) {
+  if (session.status !== 'submitted') throw fullError('SPEAKING_FULL_NOT_SUBMITTED');
+  const entry = session.responses?.find((item) => Number(item.taskType) === Number(taskType))
+    ?.entries?.find((item) => Number(item.responseNumber) === Number(responseNumber));
+  if (entry?.status !== 'completed') throw fullError('SPEAKING_FULL_RESPONSE_NOT_RECORDED');
+  const duration = Number(durationSeconds);
+  if (!/^[0-9a-f]{64}$/u.test(String(audioSha256 || ''))
+    || entry.assessment_fingerprint !== audioSha256
+    || !Number.isFinite(duration)
+    || Math.abs(Number(entry.recordingDurationSeconds) - duration) > 1) {
+    throw fullError('SPEAKING_FULL_RESPONSE_ASSESSMENT_MISMATCH');
+  }
+  if (entry.assessment_idempotency_key && entry.assessment_idempotency_key !== idempotencyKey) {
+    throw fullError('SPEAKING_FULL_RESPONSE_ASSESSMENT_CONFLICT');
+  }
+  entry.assessment_idempotency_key = idempotencyKey;
   return session;
 }
 
@@ -326,8 +357,9 @@ export function publicFullSpeakingSession(session, catalogs) {
     task,
     progress: publicProgress(session),
     maximumScore: 20,
-    earnedScore: null,
-    assessment: assessmentUnavailable(),
+    earnedScore: session.submission_response?.earnedScore ?? null,
+    assessment: session.submission_response?.assessment
+      ? structuredClone(session.submission_response.assessment) : assessmentUnavailable(),
     assignedAt: new Date(session.assigned_at).toISOString(),
     submittedAt: session.submitted_at ? new Date(session.submitted_at).toISOString() : null,
     ...(session.submission_response ? { submission: structuredClone(session.submission_response) } : {}),
@@ -355,8 +387,8 @@ export function submitFullSpeakingSession(session, idempotencyKey, now = new Dat
     })),
     improvementPlan: {
       available: false,
-      reason: 'deferred_to_tickets_06_07',
-      message: 'План улучшения появится после подключения честной оценки.',
+      reason: SPEAKING_ASSESSMENT_NOT_REQUESTED,
+      message: 'План улучшения появится после автоматической тренировочной оценки.',
     },
     submittedAt,
   };
@@ -364,6 +396,148 @@ export function submitFullSpeakingSession(session, idempotencyKey, now = new Dat
   session.phase = 'submitted';
   session.submitted_at = submittedAt;
   session.submission_key = idempotencyKey;
+  session.submission_response = structuredClone(snapshot);
+  return structuredClone(snapshot);
+}
+
+function fullEvaluationInvalid() {
+  return fullError('SPEAKING_FULL_EVALUATION_INVALID');
+}
+
+function safeReview(review) {
+  return {
+    status: review.status,
+    got: review.got ?? null,
+    max: review.max,
+    verdict: String(review.verdict || '').slice(0, 600),
+    criteria: structuredClone(Array.isArray(review.criteria) ? review.criteria.slice(0, 5) : []),
+    good: structuredClone(Array.isArray(review.good) ? review.good.slice(0, 3) : []),
+    fix: structuredClone(Array.isArray(review.fix) ? review.fix.slice(0, 4) : []),
+    needsRetryReason: review.needsRetryReason || null,
+    scoringVersion: review.scoringVersion,
+  };
+}
+
+function improvementItems(attempts) {
+  const items = attempts.flatMap((attempt) => (
+    Array.isArray(attempt?.review?.fix) ? attempt.review.fix : []
+  )).flatMap((item) => {
+    const wrong = String(item?.wrong || '').trim();
+    const right = String(item?.right || '').trim();
+    const note = String(item?.note || '').trim();
+    if (!wrong && !right && !note) return [];
+    return [`${wrong}${wrong && right ? ' → ' : ''}${right}${note ? ` · ${note}` : ''}`.slice(0, 700)];
+  });
+  const unique = [...new Set(items)].slice(0, 6);
+  return unique.length ? unique : ['Сохраняй экзаменационный темп и повтори полный вариант с новым комплектом заданий.'];
+}
+
+export function applyFullSpeakingEvaluation(session, attempts, now = new Date()) {
+  if (session?.status !== 'submitted' || session.phase !== 'submitted'
+    || !session.submission_response || !Array.isArray(attempts)) throw fullEvaluationInvalid();
+  const currentAttemptIds = session.submission_response.taskResults
+    ?.flatMap((item) => Number.isSafeInteger(Number(item.attemptId)) && Number(item.attemptId) > 0
+      ? [Number(item.attemptId)] : []) || [];
+  const requestedAttemptIds = attempts.map((attempt) => Number(attempt?.id)).sort((a, b) => a - b);
+  const alreadyEvaluated = ['scored', 'needs_retry']
+    .includes(session.submission_response.assessment?.status);
+  if (alreadyEvaluated) {
+    const storedAttemptIds = [...currentAttemptIds].sort((a, b) => a - b);
+    if (JSON.stringify(storedAttemptIds) !== JSON.stringify(requestedAttemptIds)) {
+      throw fullEvaluationInvalid();
+    }
+    return structuredClone(session.submission_response);
+  }
+
+  const attemptByTask = new Map();
+  attempts.forEach((attempt) => {
+    const taskType = Number(attempt?.task_type);
+    if (attemptByTask.has(taskType)) throw fullEvaluationInvalid();
+    attemptByTask.set(taskType, attempt);
+  });
+  const scored = [];
+  const taskResults = session.responses.map((response, index) => {
+    const assignment = session.assignments[index];
+    const taskType = Number(response.taskType);
+    const allCompleted = response.entries.every((entry) => entry.status === 'completed');
+    const attempt = attemptByTask.get(taskType);
+    if (!allCompleted) {
+      if (attempt) throw fullEvaluationInvalid();
+      scored.push({ taskType, status: 'scored', score: 0, maxScore: assignment.max_score });
+      return {
+        ...session.submission_response.taskResults[index], earnedScore: 0, attemptId: null,
+        assessmentStatus: 'not_assessed', recordingQuality: 'unavailable', review: null,
+      };
+    }
+    const review = attempt?.review;
+    if (!attempt || !Number.isSafeInteger(Number(attempt.id))
+      || attempt.username !== session.username || Number(attempt.task_type) !== taskType
+      || attempt.source_session_id !== session.id
+      || attempt.source_task_ref !== assignment.task_id
+      || Number(attempt.source_task_revision) !== Number(assignment.task_revision)
+      || attempt.source_catalog_id !== assignment.catalog_id
+      || Number(attempt.source_catalog_revision) !== Number(assignment.catalog_revision)
+      || !['completed', 'needs_retry'].includes(attempt.status)
+      || !review || !['scored', 'needs_retry'].includes(review.status)
+      || Number(review.max) !== Number(assignment.max_score)
+      || typeof review.scoringVersion !== 'string') throw fullEvaluationInvalid();
+    const isScored = attempt.status === 'completed' && review.status === 'scored';
+    if (isScored && (!Number.isInteger(review.got) || review.got < 0
+      || review.got > assignment.max_score)) throw fullEvaluationInvalid();
+    if (!isScored && review.got != null) throw fullEvaluationInvalid();
+    scored.push({
+      taskType, status: isScored ? 'scored' : 'needs_retry',
+      score: isScored ? review.got : null, maxScore: assignment.max_score,
+    });
+    return {
+      ...session.submission_response.taskResults[index],
+      earnedScore: isScored ? review.got : null,
+      attemptId: Number(attempt.id),
+      assessmentStatus: review.status,
+      recordingQuality: review.acousticFacts?.signalQuality || 'unavailable',
+      review: safeReview(review),
+    };
+  });
+  if (attemptByTask.size !== attempts.length || attempts.some((attempt) => (
+    !session.responses.some((response) => Number(response.taskType) === Number(attempt.task_type))
+  ))) throw fullEvaluationInvalid();
+
+  const combined = combineFullSpeakingScore(scored);
+  const scoringVersions = [...new Set(attempts.map((attempt) => attempt.review?.scoringVersion))];
+  if (attempts.length > 0
+    && (scoringVersions.length !== 1 || scoringVersions[0] !== SPEAKING_SCORING_VERSION)) {
+    throw fullEvaluationInvalid();
+  }
+  const evaluatedAt = new Date(now);
+  if (!Number.isFinite(evaluatedAt.getTime())) throw fullEvaluationInvalid();
+  const scoredSuccessfully = combined.status === 'scored';
+  const snapshot = {
+    ...session.submission_response,
+    earnedScore: scoredSuccessfully ? combined.score : null,
+    taskResults,
+    assessment: {
+      available: scoredSuccessfully,
+      status: combined.status,
+      mode: 'automatic_training',
+      scoreKind: 'approximate',
+      methodicallyValidated: false,
+      scoringVersion: combined.scoringVersion,
+      warning: 'Автоматическая тренировочная оценка. Балл примерный и не является экспертным заключением или точным баллом ЕГЭ.',
+      ...(scoredSuccessfully ? {} : {
+        reason: 'evidence_needs_retry',
+        message: 'Качества одной или нескольких записей недостаточно для надёжного общего балла.',
+      }),
+      evaluatedAt: evaluatedAt.toISOString(),
+    },
+    improvementPlan: scoredSuccessfully ? {
+      available: true,
+      items: improvementItems(attempts),
+    } : {
+      available: false,
+      reason: 'evidence_needs_retry',
+      message: 'Перезапиши задания с недостаточным качеством сигнала, чтобы получить общий план.',
+    },
+  };
   session.submission_response = structuredClone(snapshot);
   return structuredClone(snapshot);
 }

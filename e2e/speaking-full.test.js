@@ -60,7 +60,7 @@ try {
       [username]: {
         created: Date.now(), sub_until: Date.now() + 86_400_000,
         privacy_consent: {
-          text_processing: true, voice_processing: false,
+          text_processing: true, voice_processing: true,
           policy_version: '2026-08-02-voice-v1', updated_at: Date.now(),
         },
       },
@@ -97,6 +97,8 @@ try {
     });
     const pageErrors = [];
     const fullRequests = [];
+    const assessmentUploads = [];
+    const evaluationRequests = [];
     const task3RequestOrder = [];
     let holdNextTts = false;
     let releaseHeldTts = null;
@@ -120,8 +122,27 @@ try {
           },
         },
       });
-      Object.defineProperty(window, 'AudioContext', { configurable: true, value: undefined });
-      Object.defineProperty(window, 'webkitAudioContext', { configurable: true, value: undefined });
+      class FakeAudioContext {
+        createMediaStreamSource() { return { connect() {} }; }
+        createAnalyser() {
+          return {
+            fftSize: 512,
+            getByteTimeDomainData(values) { values.fill(132); },
+          };
+        }
+        async decodeAudioData() {
+          const samples = new Float32Array(16_000).fill(0.04);
+          return {
+            numberOfChannels: 1,
+            length: samples.length,
+            sampleRate: 16_000,
+            getChannelData() { return samples; },
+          };
+        }
+        async close() {}
+      }
+      Object.defineProperty(window, 'AudioContext', { configurable: true, value: FakeAudioContext });
+      Object.defineProperty(window, 'webkitAudioContext', { configurable: true, value: FakeAudioContext });
       class FakeMediaRecorder {
         static isTypeSupported(type) { return type === 'audio/webm'; }
         constructor() { this.mimeType = 'audio/webm'; this.state = 'inactive'; }
@@ -157,12 +178,73 @@ try {
       if (holdNextStage) await new Promise((resolve) => { releaseHeldStage = resolve; });
       await route.continue();
     });
+    await page.route('**/api/v1/speaking/pronunciation-assessments/status', (route) => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ provider: { available: true }, quota: { remainingSeconds: 3_600 } }),
+    }));
+    await page.route('**/api/v1/speaking/full-sessions/*/pronunciation-assessment', async (route) => {
+      const request = route.request();
+      const headers = request.headers();
+      assessmentUploads.push({
+        taskType: Number(headers['x-speaking-task']),
+        itemNumber: headers['x-speaking-item'] ? Number(headers['x-speaking-item']) : null,
+        contentType: headers['content-type'],
+        bodyBytes: request.postDataBuffer()?.byteLength || 0,
+      });
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          assessment: { status: 'success' },
+          billing: { assessmentId: `fake-${assessmentUploads.length}` },
+        }),
+      });
+    });
+    await page.route('**/api/v1/ai/evaluate-speaking', async (route) => {
+      const request = route.request();
+      const body = request.postDataJSON();
+      evaluationRequests.push(body);
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ attemptId: 700 + Number(body.taskType) }),
+      });
+    });
+    await page.route('**/api/v1/speaking/full-sessions/*/evaluation', async (route) => {
+      const body = route.request().postDataJSON();
+      assert.deepEqual(body.attemptIds, [701, 702, 704]);
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          status: 'submitted',
+          earnedScore: 12,
+          maximumScore: 20,
+          taskResults: [
+            { taskType: 1, earnedScore: 1, maximumScore: 1, recordingStatus: 'completed', recordingQuality: 'good', usedSeconds: 1 },
+            { taskType: 2, earnedScore: 3, maximumScore: 4, recordingStatus: 'completed', recordingQuality: 'good', usedSeconds: 4 },
+            { taskType: 3, earnedScore: 0, maximumScore: 5, recordingStatus: 'skipped', recordingQuality: 'unavailable', usedSeconds: 4 },
+            { taskType: 4, earnedScore: 8, maximumScore: 10, recordingStatus: 'completed', recordingQuality: 'acceptable', usedSeconds: 1 },
+          ],
+          assessment: {
+            available: true,
+            status: 'scored',
+            scoreKind: 'approximate',
+            methodicallyValidated: false,
+            warning: 'Автоматическая тренировочная оценка: результат примерный.',
+          },
+          improvementPlan: { available: true, items: ['Повтори связки и проверь грамматику.'] },
+        }),
+      });
+    });
 
     await page.goto(baseUrl, { waitUntil: 'networkidle' });
     await page.locator('#scr1.on').waitFor({ state: 'visible' });
     await openSpeaking(page);
     await page.getByRole('button', { name: /(?:Начать|Продолжить) экзамен/u }).press('Enter');
     await page.getByRole('button', { name: 'Проверить микрофон' }).press('Enter');
+    await page.getByRole('button', { name: '✓ Микрофон готов' }).waitFor({ state: 'visible' });
     await page.getByRole('button', { name: 'Начать подготовку' }).press('Enter');
     await page.waitForTimeout(900);
 
@@ -172,6 +254,7 @@ try {
     await openSpeaking(page);
     await page.getByRole('button', { name: /Продолжить экзамен/u }).press('Enter');
     await page.getByRole('button', { name: 'Проверить микрофон' }).press('Enter');
+    await page.getByRole('button', { name: '✓ Микрофон готов' }).waitFor({ state: 'visible' });
 
     for (let response = 0; response < 11; response += 1) {
       if (response === 5) {
@@ -219,26 +302,65 @@ try {
     }
     await page.getByRole('button', { name: 'Сдать устную часть' }).press('Enter');
     await page.getByText('Устная часть сдана').waitFor({ state: 'visible' });
-    await page.getByText('Максимум: 20 баллов').waitFor({ state: 'visible' });
-    await page.getByText('Оценка пока недоступна').waitFor({ state: 'visible' });
-    assert.equal(await page.getByText(/\d+ сек\. · максимум/u).count(), 4);
-    await page.getByText(/План улучшения пока недоступен/u).waitFor({ state: 'visible' });
+    await page.getByText('Примерная автоматическая оценка запускается отдельно').waitFor({ state: 'visible' });
+    assert.equal(await page.getByText(/— \/ \d+ ·/u).count(), 4);
+    await page.getByText(/До отправки:/u).waitFor({ state: 'visible' });
+    await page.getByText(/Azure Speech/u).waitFor({ state: 'visible' });
+    await page.getByRole('button', { name: 'Получить примерную автоматическую оценку' }).press('Enter');
+    await page.getByText('Примерный результат: 12 из 20').waitFor({ state: 'visible' });
+    await page.getByText('Повтори связки и проверь грамматику.').waitFor({ state: 'visible' });
+    assert.deepEqual(assessmentUploads.map((item) => item.taskType), [1, 2, 2, 2, 2, 4]);
+    assert.equal(assessmentUploads.every((item) => item.contentType === 'audio/wav' && item.bodyBytes > 44), true);
+    assert.deepEqual(evaluationRequests.map((item) => [item.taskType, item.sessionMode]), [
+      [1, 'full_section'], [2, 'full_section'], [4, 'full_section'],
+    ]);
     const audioPlaysBefore = await page.evaluate(() => window.__fullSpeakingAudioPlays || 0);
     await page.getByRole('button', { name: /Ответ 1/u }).first().press('Enter');
     await page.waitForFunction((before) => (window.__fullSpeakingAudioPlays || 0) > before, audioPlaysBefore);
-    assert.equal(await page.locator('#s9_area').getByText(/\b\d+\s*(?:из|\/)\s*20\b/u).count(), 0);
+    assert.equal(await page.locator('#s9_area').getByText(/\b12\s*(?:из|\/)\s*20\b/u).count(), 1);
     assert.equal(await page.locator('#s9_area').getByText(/образец ответа|расшифровк|критерии оценки/iu).count(), 0);
 
-    const layout = await page.evaluate(() => ({
-      documentWidth: document.documentElement.scrollWidth,
-      viewportWidth: innerWidth,
-      undersized: [...document.querySelectorAll('#s9_area button')].filter((button) => {
-        const bounds = button.getBoundingClientRect();
-        return bounds.width < 44 || bounds.height < 44;
-      }).length,
-    }));
+    const layout = await page.evaluate(() => {
+      const luminance = (channels) => {
+        const linear = channels.map((value) => {
+          const srgb = value / 255;
+          return srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4;
+        });
+        return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+      };
+      const rgbChannels = (value) => (value.match(/\d+(?:\.\d+)?/gu) || [])
+        .slice(0, 3).map(Number);
+      const contrast = (first, second) => {
+        const firstLum = luminance(first);
+        const secondLum = luminance(second);
+        return (Math.max(firstLum, secondLum) + 0.05) / (Math.min(firstLum, secondLum) + 0.05);
+      };
+      const primaryContrast = [...document.querySelectorAll('#s9_area button')]
+        .filter((button) => getComputedStyle(button).backgroundImage.includes('linear-gradient'))
+        .flatMap((button) => {
+          const style = getComputedStyle(button);
+          const text = rgbChannels(style.color);
+          const stops = [...style.backgroundImage.matchAll(/rgb\(([^)]+)\)/gu)]
+            .map((match) => rgbChannels(match[1]));
+          return stops.map((stop) => contrast(text, stop));
+        });
+      return {
+        documentWidth: document.documentElement.scrollWidth,
+        viewportWidth: innerWidth,
+        undersized: [...document.querySelectorAll('#s9_area button')].filter((button) => {
+          const bounds = button.getBoundingClientRect();
+          return bounds.width < 44 || bounds.height < 44;
+        }).length,
+        primaryContrast,
+      };
+    });
     assert.ok(layout.documentWidth <= layout.viewportWidth);
     assert.equal(layout.undersized, 0);
+    assert.ok(layout.primaryContrast.length > 0);
+    assert.ok(
+      layout.primaryContrast.every((ratio) => ratio >= 4.5),
+      `primary button contrast ratios: ${layout.primaryContrast.join(', ')}`,
+    );
     assert.deepEqual(pageErrors, []);
     assert.equal(fullRequests.length >= 28, true);
     assert.equal(fullRequests.some((request) => /full-e2e-local-audio|blob:|transcript|audioBytes/iu.test(request.body)), false);

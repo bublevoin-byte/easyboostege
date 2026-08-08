@@ -4,10 +4,15 @@ import test from 'node:test';
 import vm from 'node:vm';
 
 const source = await fs.readFile(new URL('../public/modules/speaking.js', import.meta.url), 'utf8');
+const executableSource = source.replace(/^import[^;]+;\s*/u, '');
 
 function createSpeakingModule() {
   const window = {};
-  vm.runInNewContext(source, { window, Object, Number, Math, Array, String, Boolean });
+  const isSpeakingAssessmentNotRequested = (assessment) => assessment?.available === false
+    && assessment.reason === 'not_requested';
+  vm.runInNewContext(executableSource, {
+    window, Object, Number, Math, Array, String, Boolean, isSpeakingAssessmentNotRequested,
+  });
   return window.EasyBoostSpeaking;
 }
 
@@ -195,7 +200,7 @@ test('speaking module accepts only the server-owned four-support task 2 assignme
       maxScore: 4, instruction: 'Ask four questions.', advertisement: 'A server-owned advertisement.',
       supports: ['course dates', 'participation fee', 'group size', 'tools provided'],
     },
-    assessment: { available: false, reason: 'deferred_to_tickets_06_07' },
+    assessment: { available: false, reason: 'not_requested' },
   };
 
   assert.deepEqual(plain(speaking.serverTask2Set(session)), {
@@ -217,7 +222,7 @@ test('speaking module accepts only the server-owned five-question task 3 assignm
       maxScore: 5, instruction: 'Give five full answers.',
       questions: Array.from({ length: 5 }, (_, index) => `Original interview question ${index + 1}?`),
     },
-    assessment: { available: false, reason: 'deferred_to_tickets_06_07' },
+    assessment: { available: false, reason: 'not_requested' },
   };
 
   assert.deepEqual(plain(speaking.serverTask3Set(session)), {
@@ -249,7 +254,7 @@ test('speaking module accepts only the server-owned task 4 photo-project assignm
       plan: ['Describe both photographs in detail.', 'Explain what the photographs have in common.',
         'Compare the main differences between the photographs.', 'Say which way you prefer and explain why.'],
     },
-    assessment: { available: false, reason: 'deferred_to_tickets_06_07' },
+    assessment: { available: false, reason: 'not_requested' },
   };
 
   assert.deepEqual(plain(speaking.serverTask4Set(session)), {

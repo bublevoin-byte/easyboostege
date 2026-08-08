@@ -61,6 +61,7 @@ function speakingEvaluationFingerprint(request) {
     promptVersion: SPEAKING_PROMPT_VERSION,
     scoringVersion: SPEAKING_SCORING_VERSION,
     taskType: request.taskType,
+    sessionMode: request.sessionMode || 'individual',
     sessionId: request.sessionId,
     pronunciationAssessmentKey: request.pronunciationAssessmentKey || null,
     pronunciationAssessmentKeys: request.pronunciationAssessmentKeys || null,
@@ -414,17 +415,28 @@ export function createAiRoutes({
 
   async function resolveSpeakingEvaluation(username, request) {
     const entry = speakingCatalogs[request.taskType];
-    const session = await db[entry.get](username, request.sessionId);
+    const fullSection = request.sessionMode === 'full_section';
+    const session = fullSection
+      ? await db.getFullSpeakingSession(username, request.sessionId)
+      : await db[entry.get](username, request.sessionId);
     if (!session) return null;
-    if (session.catalog_id !== entry.catalog.id
-      || Number(session.catalog_revision) !== entry.catalog.revision) {
+    const assignment = fullSection ? session.assignments?.find((item) => (
+      Number(item.task_type) === Number(request.taskType)
+    )) : session;
+    if (fullSection && session.status !== 'submitted') {
+      throw Object.assign(new Error('SPEAKING_FULL_NOT_SUBMITTED'), {
+        status: 409, code: 'SPEAKING_FULL_NOT_SUBMITTED',
+      });
+    }
+    if (assignment?.catalog_id !== entry.catalog.id
+      || Number(assignment?.catalog_revision) !== entry.catalog.revision) {
       throw Object.assign(new Error('SPEAKING_CATALOG_REVISION_MISMATCH'), {
         status: 409,
         code: 'SPEAKING_CATALOG_REVISION_MISMATCH',
       });
     }
-    const task = entry.catalog.tasks.find((candidate) => candidate.id === session.task_id
-      && candidate.revision === Number(session.task_revision));
+    const task = entry.catalog.tasks.find((candidate) => candidate.id === assignment?.task_id
+      && candidate.revision === Number(assignment?.task_revision));
     if (!task) {
       throw Object.assign(new Error('SPEAKING_CATALOG_REVISION_MISMATCH'), {
         status: 409,
@@ -438,14 +450,15 @@ export function createAiRoutes({
       transcript: assessment.transcript,
       assignment: evaluationAssignment(request.taskType, task),
     }), acoustic: assessment.acoustic, source: {
+      sessionMode: fullSection ? 'full_section' : 'individual',
       sessionId: session.id,
       taskRef: task.id,
       taskRevision: Number(task.revision),
       catalogId: entry.catalog.id,
       catalogRevision: Number(entry.catalog.revision),
       accentLocale: assessment.acoustic.accentLocale,
-      assistanceUsed: Boolean(session.assistance_used),
-      targetedPractice: session.targeted_practice || null,
+      assistanceUsed: fullSection ? false : Boolean(session.assistance_used),
+      targetedPractice: fullSection ? null : session.targeted_practice || null,
     } };
   }
 

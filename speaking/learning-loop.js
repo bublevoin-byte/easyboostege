@@ -77,11 +77,13 @@ export function assertSpeakingLearningSource(source) {
   const catalogId = String(value.catalogId || '');
   const catalogRevision = Number(value.catalogRevision);
   const accentLocale = value.accentLocale == null ? null : String(value.accentLocale);
+  const sessionMode = value.sessionMode == null ? 'individual' : String(value.sessionMode);
   if (!/^[0-9a-f-]{36}$/iu.test(sessionId)
     || !/^[a-zA-Z0-9._-]{1,140}$/u.test(taskRef)
     || !Number.isInteger(taskRevision) || taskRevision < 1
     || !/^[a-zA-Z0-9._-]{1,80}$/u.test(catalogId)
     || !Number.isInteger(catalogRevision) || catalogRevision < 1
+    || !['individual', 'full_section'].includes(sessionMode)
     || typeof value.assistanceUsed !== 'boolean'
     || (accentLocale != null && !['en-GB', 'en-US'].includes(accentLocale))) {
     throw new Error('SPEAKING_LEARNING_SOURCE_INVALID');
@@ -89,8 +91,40 @@ export function assertSpeakingLearningSource(source) {
   const targetedPractice = value.targetedPractice == null
     ? null : assertSpeakingTargetedPractice(value.targetedPractice);
   return {
-    sessionId, taskRef, taskRevision, catalogId, catalogRevision,
+    sessionMode, sessionId, taskRef, taskRevision, catalogId, catalogRevision,
     accentLocale, assistanceUsed: value.assistanceUsed, targetedPractice,
+  };
+}
+
+export function canonicalSpeakingLearningSource(source, { taskType, session }) {
+  if (!source) return null;
+  if (!session) throw new Error('SPEAKING_LEARNING_SESSION_NOT_FOUND');
+  const normalizedTaskType = Number(taskType);
+  if (!Number.isInteger(normalizedTaskType) || normalizedTaskType < 1 || normalizedTaskType > 4) {
+    throw new Error('SPEAKING_LEARNING_SOURCE_INVALID');
+  }
+  const fullSection = source.sessionMode === 'full_section';
+  const assignment = fullSection ? session.assignments?.find((item) => (
+    Number(item.task_type) === normalizedTaskType
+  )) : session;
+  if (assignment?.task_id !== source.taskRef
+    || Number(assignment?.task_revision) !== Number(source.taskRevision)
+    || assignment?.catalog_id !== source.catalogId
+    || Number(assignment?.catalog_revision) !== Number(source.catalogRevision)) {
+    throw new Error('SPEAKING_LEARNING_SOURCE_MISMATCH');
+  }
+  if (session.status !== (fullSection ? 'submitted' : 'completed')) {
+    throw new Error('SPEAKING_LEARNING_SESSION_INCOMPLETE');
+  }
+  if (session.accent_locale && source.accentLocale
+    && session.accent_locale !== source.accentLocale) {
+    throw new Error('SPEAKING_LEARNING_SOURCE_MISMATCH');
+  }
+  return {
+    ...source,
+    accentLocale: session.accent_locale || source.accentLocale || null,
+    assistanceUsed: fullSection ? false : Boolean(session.assistance_used),
+    targetedPractice: fullSection ? null : session.targeted_practice || null,
   };
 }
 

@@ -73,8 +73,8 @@ test('task 4 API assigns, restores and completes an owner-bound local-only photo
     assert.equal(Object.hasOwn(assigned.task, 'provenance'), false);
     assert.deepEqual(assigned.assessment, {
       available: false,
-      reason: 'deferred_to_tickets_06_07',
-      message: 'Automatic assessment will be added after provider and methodology validation in later tickets.',
+      reason: 'not_requested',
+      message: 'Automatic training assessment is a separate action after local recording.',
     });
 
     assert.equal((await request(other, `/api/v1/speaking/task-4/sessions/${assigned.id}`)).status, 404);

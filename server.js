@@ -8,14 +8,14 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { advanceFullSpeakingSessionStage, assignFullSpeakingSession, claimAiOperationSlot, claimSpeakingEvaluation, claimUnseenBankTask, claimVoiceTutorRuleDiscovery, completeFullSpeakingSessionResponse, failVoiceTutorRuleDiscovery, getAdaptiveDiagnostic, getAdaptiveDiagnosticCompletionReplay, getBankTask, getBankTaskByExternalId, getFullSpeakingSession, listBankTaskContents, recordTaskDelivery, settleAiOperationSlot, submitFullSpeakingSessionResult, upsertBankTask, activateTrial, activateVoiceTutorProxySession, closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, consumeVoiceTutorProxyTicket, countAiRequestsSince, createPaymentRequest, createPaymentRequestForUser, createRuleCardForVoiceTutorSession, createSession, createSpeakingAttempt, createTelegramAuthCode, createVoiceTutorReport, createWritingAttempt, deleteUserData, exportUserData, finalizeVoiceTutorProxySession, finishSpeakingAttempt, finishVoiceTutorSession, finishWritingAttempt, getAdaptiveDiagnosticStartClaim, getAdaptiveLearningEvidenceSources, getAdaptiveLearningGoal, getAdaptiveLearningProfile, getCurrentAdaptiveLearningPlan, getAdaptiveLearningPlanRevision, getAdaptiveLearningSessionCreateReplay, createAdaptiveLearningSession, getCurrentAdaptiveLearningSession, getAdaptiveLearningSessionCommercialScope, getAdaptiveLearningSessionReplacementReplay, replaceAdaptiveLearningSessionBlock, getAdaptiveLearningSessionMutationReplay, startAdaptiveLearningSessionBlock, getAdaptiveLearningSessionExecution, getAdaptiveLearningSessionAdvanceContext, advanceAdaptiveLearningSession, getAdaptiveLearningSessionFinishContext, finishAdaptiveLearningSession, getAdaptiveLearningWeekUsage, getAdaptiveLearningCommercialUsage, getAdaptiveLearningCompletedSessionReports, getAdaptiveLearningMetrics, getAiUsageMetrics, getApprovedRuleCard, getGeneratedTask, getRuleCard, getSharedGeneratedTask, getModuleAttempt, getReadingCompletedAttempts, getPaymentRequestForUser, getPrivacyConsent, getProgress, getSpeakingAttempt, getUser, getVoiceTutorAccess, getVoiceTutorRecoveryMap, getVoiceTutorRecoveryMetrics, getVoiceTutorSession, getWordProgress, getWritingAttempt, healthCheck, isSessionActive, issueVoiceTutorProxyTicket, reissueVoiceTutorFallbackNonce, listPaymentRequests, listRuleCards, listVoiceTutorReports, recordModuleAttempt, recordModuleAttemptWithAdaptiveClaim, bindAdaptiveLearningServerAttempt, reserveVoiceTutorSession, resolvePaymentRequest, reviewRuleCard, reviewVoiceTutorReport, revokeEntitlement, revokeSession, saveAdaptiveLearningGoal, saveAdaptiveLearningProfile, saveAdaptiveLearningPlan, saveGeneratedTask, saveProgress, setPrivacyConsent, setUserRole, submitVoiceTutorRepeat, upsertErrorBank, upsertWordProgress, mergeProgress, getUserByTelegram, createTelegramUser, logAiRequest, getSub, advanceVoiceTutorSession, clarifyVoiceTutorSession, setVoiceTutorSessionDelivery, switchVoiceTutorSessionDelivery, startAdaptiveDiagnostic, getCurrentAdaptiveDiagnostic, answerAdaptiveDiagnostic, completeAdaptiveDiagnostic } from './db.js';
+import { advanceFullSpeakingSessionStage, assignFullSpeakingSession, claimAiOperationSlot, claimSpeakingEvaluation, claimUnseenBankTask, claimVoiceTutorRuleDiscovery, completeFullSpeakingSessionEvaluation, completeFullSpeakingSessionResponse, failVoiceTutorRuleDiscovery, getAdaptiveDiagnostic, getAdaptiveDiagnosticCompletionReplay, getBankTask, getBankTaskByExternalId, getFullSpeakingSession, listBankTaskContents, recordTaskDelivery, settleAiOperationSlot, submitFullSpeakingSessionResult, upsertBankTask, activateTrial, activateVoiceTutorProxySession, closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, consumeVoiceTutorProxyTicket, countAiRequestsSince, createPaymentRequest, createPaymentRequestForUser, createRuleCardForVoiceTutorSession, createSession, createSpeakingAttempt, createTelegramAuthCode, createVoiceTutorReport, createWritingAttempt, deleteUserData, exportUserData, finalizeVoiceTutorProxySession, finishSpeakingAttempt, finishVoiceTutorSession, finishWritingAttempt, getAdaptiveDiagnosticStartClaim, getAdaptiveLearningEvidenceSources, getAdaptiveLearningGoal, getAdaptiveLearningProfile, getCurrentAdaptiveLearningPlan, getAdaptiveLearningPlanRevision, getAdaptiveLearningSessionCreateReplay, createAdaptiveLearningSession, getCurrentAdaptiveLearningSession, getAdaptiveLearningSessionCommercialScope, getAdaptiveLearningSessionReplacementReplay, replaceAdaptiveLearningSessionBlock, getAdaptiveLearningSessionMutationReplay, startAdaptiveLearningSessionBlock, getAdaptiveLearningSessionExecution, getAdaptiveLearningSessionAdvanceContext, advanceAdaptiveLearningSession, getAdaptiveLearningSessionFinishContext, finishAdaptiveLearningSession, getAdaptiveLearningWeekUsage, getAdaptiveLearningCommercialUsage, getAdaptiveLearningCompletedSessionReports, getAdaptiveLearningMetrics, getAiUsageMetrics, getApprovedRuleCard, getGeneratedTask, getRuleCard, getSharedGeneratedTask, getModuleAttempt, getReadingCompletedAttempts, getPaymentRequestForUser, getPrivacyConsent, getProgress, getSpeakingAttempt, getUser, getVoiceTutorAccess, getVoiceTutorRecoveryMap, getVoiceTutorRecoveryMetrics, getVoiceTutorSession, getWordProgress, getWritingAttempt, healthCheck, isSessionActive, issueVoiceTutorProxyTicket, reissueVoiceTutorFallbackNonce, listPaymentRequests, listRuleCards, listVoiceTutorReports, recordModuleAttempt, recordModuleAttemptWithAdaptiveClaim, bindAdaptiveLearningServerAttempt, reserveVoiceTutorSession, resolvePaymentRequest, reviewRuleCard, reviewVoiceTutorReport, revokeEntitlement, revokeSession, saveAdaptiveLearningGoal, saveAdaptiveLearningProfile, saveAdaptiveLearningPlan, saveGeneratedTask, saveProgress, setPrivacyConsent, setUserRole, submitVoiceTutorRepeat, upsertErrorBank, upsertWordProgress, mergeProgress, getUserByTelegram, createTelegramUser, logAiRequest, getSub, advanceVoiceTutorSession, clarifyVoiceTutorSession, setVoiceTutorSessionDelivery, switchVoiceTutorSessionDelivery, startAdaptiveDiagnostic, getCurrentAdaptiveDiagnostic, answerAdaptiveDiagnostic, completeAdaptiveDiagnostic } from './db.js';
 import {
   assignSpeakingTask1Session, assignSpeakingTask2Session, assignSpeakingTask3Session, assignSpeakingTask4Session,
   completeSpeakingTask1Session, completeSpeakingTask2Question, completeSpeakingTask3Answer, completeSpeakingTask4Session,
   getSpeakingTask1Session, getSpeakingTask2Session, getSpeakingTask3Session, getSpeakingTask4Session,
   getSpeakingAssessmentQuota, getSpeakingAssessmentReservation, reserveSpeakingAssessment, dispatchSpeakingAssessment,
   startSpeakingAssessment,
-  finalizeSpeakingAssessment, releaseSpeakingAssessment,
+  finalizeSpeakingAssessment, releaseSpeakingAssessment, claimFullSpeakingSessionAssessment,
 } from './db.js';
 import {
   claimSpeakingCalibrationSample, completeSpeakingAccentCalibration, createSpeakingCalibrationSample,
@@ -48,6 +48,7 @@ import { createProgressRoutes } from './routes/progress.js';
 import { createReadingRoutes } from './routes/reading.js';
 import { createSpeakingRoutes } from './routes/speaking.js';
 import { createSpeakingAssessmentService } from './speaking/assessment-service.js';
+import { createSpeakingCalibrationRetentionService } from './speaking/calibration-retention-service.js';
 import { createAzurePronunciationProvider } from './speaking/pronunciation-provider.js';
 import { createAdaptiveLearningRoutes } from './routes/adaptive-learning.js';
 import { createAiRoutes } from './routes/ai.js';
@@ -235,7 +236,8 @@ const dbApi = {
   startSpeakingAssessment,
   finalizeSpeakingAssessment, releaseSpeakingAssessment,
   assignFullSpeakingSession, getFullSpeakingSession, advanceFullSpeakingSessionStage,
-  completeFullSpeakingSessionResponse, submitFullSpeakingSessionResult,
+  completeFullSpeakingSessionResponse, claimFullSpeakingSessionAssessment, submitFullSpeakingSessionResult,
+  completeFullSpeakingSessionEvaluation,
   getGeneratedTask, getSharedGeneratedTask, saveGeneratedTask, logAiRequest, claimAiOperationSlot, settleAiOperationSlot,
   upsertBankTask, getBankTask, getBankTaskByExternalId, claimUnseenBankTask, recordTaskDelivery, listBankTaskContents,
 };
@@ -501,25 +503,14 @@ const voiceTutorRealtimeProxy = createVoiceTutorRealtimeProxy({
 const detachVoiceTutorRealtimeProxy = voiceTutorRealtimeProxy.attach(server);
 startTelegram();
 
-async function purgeSpeakingCalibrationRetention() {
-  try {
-    const result = await purgeExpiredSpeakingCalibrationSamples({ now: new Date() });
-    if (result.deletedAudio > 0) console.log(JSON.stringify({
-      timestamp: new Date().toISOString(), level: 'info', type: 'speaking_calibration_retention',
-      deletedAudio: result.deletedAudio,
-    }));
-  } catch (error) {
-    console.error(JSON.stringify({
-      timestamp: new Date().toISOString(), level: 'error', type: 'speaking_calibration_retention_failed',
-      errorCode: error.code || 'RETENTION_FAILED',
-    }));
-  }
-}
-const speakingCalibrationRetentionTimer = setInterval(() => {
-  void purgeSpeakingCalibrationRetention();
-}, 60 * 60 * 1000);
-speakingCalibrationRetentionTimer.unref();
-void purgeSpeakingCalibrationRetention();
+const speakingCalibrationRetention = createSpeakingCalibrationRetentionService({
+  purgeExpiredSamples: purgeExpiredSpeakingCalibrationSamples,
+  logger: {
+    info: (entry) => console.log(JSON.stringify(entry)),
+    error: (entry) => console.error(JSON.stringify(entry)),
+  },
+});
+speakingCalibrationRetention.start();
 
 /* Section 10.1: built-in tasks need rows in the bank, otherwise they have no identifier a client
    could send. Seeding is keyed on content, so a restart adds nothing. A failure here must not take
@@ -537,7 +528,7 @@ let shuttingDown = false;
 async function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
-  clearInterval(speakingCalibrationRetentionTimer);
+  speakingCalibrationRetention.stop();
   console.log(signal + ': shutting down');
   const forceExitTimer = setTimeout(() => process.exit(1), 10_000);
   forceExitTimer.unref();

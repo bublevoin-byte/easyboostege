@@ -37,8 +37,16 @@ remain intentionally pending separate authorization.
 | 06 | Azure Pronunciation adapter и квоты 60/240 минут | done |
 | 07 | Детерминированная оценка ФИПИ и методический gate | done |
 | 08 | Акцентный профиль, согласия и приватная калибровка | done |
-| 09 | Индивидуальный план, Premium-отчёт и Voice Tutor | in-review |
-| 10 | Выпускной аудит и release candidate | ready-for-agent |
+| 09 | Индивидуальный план, Premium-отчёт и Voice Tutor | done |
+| 10 | Выпускной аудит и release candidate | done |
+
+Тикет 10 завершён: полный regression прошёл 1 270 тестов (1 229 passed, 41 ожидаемый PostgreSQL
+skip, 0 failed), чистый одноразовый PostgreSQL 17 применил миграции 001–052 и прошёл 41/41. Lint,
+check (351 JavaScript-файл), frontend build (482 assets), полный Chromium E2E на mobile/desktop,
+performance, OpenAPI/parity/security/privacy, secret/history/untracked/audio scans и `git diff --check`
+зелёные. Финальные независимые Standards и Spec re-review вернули `ZERO_FINDINGS`. Azure SDK,
+тестовый Speech-ресурс, значения секретов и отдельный paid smoke остаются owner-actions; provider-вызовов,
+push и deploy не было.
 
 Спецификация и официальное исследование подтверждены владельцем 2026-08-06. Английский контракт
 ЕГЭ-2026 закрепляет четыре вопроса задания 2 и максимум 20 баллов; предварительная формулировка про

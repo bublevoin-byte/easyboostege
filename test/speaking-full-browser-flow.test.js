@@ -31,7 +31,7 @@ function session() {
       { taskType: 4, maximumScore: 10, responseCount: 1, completedResponses: 0, status: 'pending' },
     ],
     maximumScore: 20, earnedScore: null,
-    assessment: { available: false, reason: 'deferred_to_tickets_06_07', message: 'Unavailable.' },
+    assessment: { available: false, reason: 'not_requested', message: 'Not requested.' },
   };
 }
 
@@ -55,6 +55,14 @@ test('full Speaking browser flow keeps bytes local and sends only bounded respon
     Audio: class { async play() {} pause() {} },
     URL: { createObjectURL: () => 'blob:full-local-1', revokeObjectURL() {} },
     Blob, now: () => time, sampleMicrophone: async () => 0.2,
+    async prepareAssessmentRecording(nextRecording) {
+      assert.equal(await nextRecording.blob.text(), 'local-only-full-answer');
+      return {
+        blob: new Blob(['canonical-pcm16-wav'], { type: 'audio/wav' }),
+        durationSeconds: nextRecording.durationSeconds,
+        sha256: 'a'.repeat(64),
+      };
+    },
     setTimeout: () => 1, clearTimeout() {},
   });
 
@@ -69,11 +77,18 @@ test('full Speaking browser flow keeps bytes local and sends only bounded respon
   assert.equal(flow.state().session.current.taskType, 2);
   assert.equal(JSON.stringify(requests).includes('local-only-full-answer'), false);
   assert.equal(JSON.stringify(requests).includes('blob:'), false);
+  const assessmentRecordings = flow.assessmentRecordings();
+  assert.equal(assessmentRecordings.length, 1);
+  assert.equal(assessmentRecordings[0].taskType, 1);
+  assert.equal(assessmentRecordings[0].responseNumber, 1);
+  assert.equal(await assessmentRecordings[0].blob.text(), 'canonical-pcm16-wav');
+  assert.equal(assessmentRecordings[0].sha256, 'a'.repeat(64));
   assert.deepEqual(requests.at(-1), {
     path: `/api/v1/speaking/full-sessions/${session().id}/responses`,
     body: {
       taskType: 1, responseNumber: 1, responseStatus: 'completed',
       recordingDurationSeconds: 72, micCheck: 'passed', localPlayback: false,
+      assessmentAudioSha256: 'a'.repeat(64),
     },
   });
 });

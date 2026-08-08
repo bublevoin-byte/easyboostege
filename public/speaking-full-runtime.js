@@ -1,4 +1,5 @@
 import { createSpeakingLocalRecorder } from './speaking-local-recording.js';
+import { isSpeakingAssessmentPending } from './speaking-assessment-contract.js';
 
 function flowError(code, message) {
   return Object.assign(new Error(message), { code });
@@ -30,13 +31,19 @@ function containsForbiddenAnswerField(value, seen = new WeakSet()) {
 }
 
 function assertSafeSession(next, expectedId = null) {
+  const assessmentPending = next?.earnedScore === null
+    && isSpeakingAssessmentPending(next?.assessment);
+  const assessmentScored = Number.isInteger(next?.earnedScore)
+    && next.earnedScore >= 0 && next.earnedScore <= 20
+    && next?.assessment?.available === true
+    && next.assessment.mode === 'automatic_training'
+    && next.assessment.scoreKind === 'approximate'
+    && next.assessment.methodicallyValidated === false;
   if (!next?.id || next.mode !== 'full_section'
     || expectedId && next.id !== expectedId
     || !['in_progress', 'submitted'].includes(next.status)
     || !['ready', 'preparing', 'recording', 'ready_to_submit', 'submitted'].includes(next.phase)
-    || next.maximumScore !== 20 || next.earnedScore !== null
-    || next.assessment?.available !== false
-    || next.assessment.reason !== 'deferred_to_tickets_06_07'
+    || next.maximumScore !== 20 || (!assessmentPending && !assessmentScored)
     || !Array.isArray(next.progress) || next.progress.length !== 4
     || next.progress.some((item, index) => item.taskType !== index + 1
       || item.maximumScore !== [1, 4, 5, 10][index])
@@ -51,6 +58,7 @@ function assertSafeSession(next, expectedId = null) {
 export function createSpeakingFullBrowserFlow(options = {}) {
   const api = options.api;
   const Image = options.Image || globalThis.Image;
+  const prepareAssessmentRecording = options.prepareAssessmentRecording;
   let session = null;
   let activePosition = null;
   let recording = null;
@@ -200,6 +208,16 @@ export function createSpeakingFullBrowserFlow(options = {}) {
     return true;
   }
 
+  function assessmentRecordings() {
+    return [...recordings.entries()].map(([key, value]) => ({
+      taskType: Number(key.split(':')[0]),
+      responseNumber: Number(key.split(':')[1]),
+      blob: value.assessment?.blob || value.blob,
+      durationSeconds: value.assessment?.durationSeconds || value.durationSeconds,
+      sha256: value.assessment?.sha256 || null,
+    }));
+  }
+
   async function completeResponse(responseStatus, technicalIssueCode = null) {
     if (!session?.current) throw flowError('SPEAKING_FULL_STAGE_INVALID', 'No response is active');
     const position = activePosition || { ...session.current };
@@ -210,6 +228,14 @@ export function createSpeakingFullBrowserFlow(options = {}) {
     if (responseStatus === 'completed' && !recording) {
       throw flowError('LOCAL_RECORDING_UNAVAILABLE', 'Record the response first');
     }
+    let assessment = null;
+    if (responseStatus === 'completed' && typeof prepareAssessmentRecording === 'function') {
+      try {
+        const candidate = await prepareAssessmentRecording(recording);
+        if (candidate?.blob && Number.isFinite(candidate.durationSeconds)
+          && /^[0-9a-f]{64}$/u.test(candidate.sha256)) assessment = candidate;
+      } catch {}
+    }
     const body = {
       taskType: position.taskType,
       responseNumber: position.responseNumber,
@@ -218,6 +244,7 @@ export function createSpeakingFullBrowserFlow(options = {}) {
       micCheck: localRecorder.microphoneState().status,
       localPlayback: false,
       ...(technicalIssueCode ? { technicalIssueCode } : {}),
+      ...(assessment ? { assessmentAudioSha256: assessment.sha256 } : {}),
     };
     const previousSessionId = session.id;
     const next = await api.post(`/api/v1/speaking/full-sessions/${previousSessionId}/responses`, body);
@@ -225,7 +252,7 @@ export function createSpeakingFullBrowserFlow(options = {}) {
       const key = recordingKey(position.taskType, position.responseNumber);
       const old = recordings.get(key);
       if (old) localRecorder.revoke(old);
-      recordings.set(key, recording);
+      recordings.set(key, { ...recording, ...(assessment ? { assessment } : {}) });
     }
     recording = null;
     isRecording = false;
@@ -254,6 +281,6 @@ export function createSpeakingFullBrowserFlow(options = {}) {
   return Object.freeze({
     state, acceptSession, loadAssignment, restoreSession, checkMicrophone,
     prepareCurrentAssets, beginStage, startRecording, stopRecording, playRecording,
-    completeResponse, submit, dispose,
+    assessmentRecordings, completeResponse, submit, dispose,
   });
 }

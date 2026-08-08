@@ -7,7 +7,11 @@ import test from 'node:test';
 import express from 'express';
 
 import { createSpeakingRoutes } from '../routes/speaking.js';
-import { createSpeakingAssessmentService } from '../speaking/assessment-service.js';
+import { SPEAKING_TASK1_CATALOG } from '../public/content/speaking/task1-v1.js';
+import {
+  createSpeakingAssessmentService,
+  speakingAssessmentAudioHash,
+} from '../speaking/assessment-service.js';
 import { createFakePronunciationProvider } from '../speaking/pronunciation-provider.js';
 import { createFileRepository } from '../storage/file-repository.js';
 import { testPcmWavAudio } from './support/wav-audio.js';
@@ -66,7 +70,8 @@ async function withServer({
     audio = testPcmWavAudio(),
     idempotencyKey = '10000000-0000-4000-8000-000000000071',
     locale = 'en-US', duration = '3', contentType = 'audio/wav', taskType = 1, item = null,
-  } = {}) => fetch(`${baseUrl}/api/v1/speaking/task-${taskType}/sessions/${sessionId}/pronunciation-assessment`, {
+    fullSection = false,
+  } = {}) => fetch(`${baseUrl}/api/v1/speaking/${fullSection ? `full-sessions/${sessionId}` : `task-${taskType}/sessions/${sessionId}`}/pronunciation-assessment`, {
     method: 'POST',
     headers: {
       'content-type': contentType,
@@ -74,6 +79,7 @@ async function withServer({
       'idempotency-key': idempotencyKey,
       'x-speech-locale': locale,
       'x-audio-duration-seconds': duration,
+      ...(fullSection ? { 'x-speaking-task': String(taskType) } : {}),
       ...(item == null ? {} : { 'x-speaking-item': String(item) }),
     },
     body: audio,
@@ -86,6 +92,106 @@ async function withServer({
     await fs.rm(directory, { recursive: true, force: true });
   }
 }
+
+test('full-section pronunciation stays locked until submit and binds audio to the pinned task position', async () => {
+  const providerInputs = [];
+  const pronunciationProvider = {
+    async status() { return { available: true, provider: 'test-azure', reason: null }; },
+    async assess(input, { onProcessingStarted }) {
+      providerInputs.push({ mode: input.mode, referenceText: input.referenceText, contextId: input.contextId });
+      await onProcessingStarted();
+      return {
+        status: 'success', isFinal: true, available: true,
+        processedDurationSeconds: input.durationSeconds,
+        transcript: 'A server assessed full-section answer.', confidence: 96, words: [],
+        quality: { acceptable: true, warnings: [] },
+      };
+    },
+  };
+  await withServer({ pronunciationProvider }, async ({ owner, other, repository, jsonRequest, audioRequest }) => {
+    const submittedAudio = testPcmWavAudio();
+    const submittedAudioHash = speakingAssessmentAudioHash(submittedAudio);
+    let session = await (await jsonRequest(owner, '/api/v1/speaking/full-sessions', {
+      method: 'POST', body: {},
+    })).json();
+    assert.equal((await audioRequest(owner, session.id, {
+      fullSection: true, taskType: 1,
+    })).status, 409, 'full answers cannot be assessed before the whole section is submitted');
+    const counts = { 1: 1, 2: 4, 3: 5, 4: 1 };
+    for (const taskType of [1, 2, 3, 4]) {
+      for (let responseNumber = 1; responseNumber <= counts[taskType]; responseNumber += 1) {
+        session = await (await jsonRequest(owner, `/api/v1/speaking/full-sessions/${session.id}/stage`, {
+          method: 'POST', body: {},
+        })).json();
+        if (session.phase === 'preparing') {
+          session = await (await jsonRequest(owner, `/api/v1/speaking/full-sessions/${session.id}/stage`, {
+            method: 'POST', body: {},
+          })).json();
+        }
+        session = await (await jsonRequest(owner, `/api/v1/speaking/full-sessions/${session.id}/responses`, {
+          method: 'POST', body: {
+            taskType, responseNumber, responseStatus: 'completed', recordingDurationSeconds: 3,
+            micCheck: 'passed', localPlayback: false,
+            assessmentAudioSha256: submittedAudioHash,
+          },
+        })).json();
+      }
+    }
+    await jsonRequest(owner, `/api/v1/speaking/full-sessions/${session.id}/submit`, {
+      method: 'POST', body: { idempotencyKey: '15500000-0000-4000-8000-000000000001' },
+    });
+    assert.equal((await audioRequest(other, session.id, {
+      fullSection: true, taskType: 2, item: 3,
+    })).status, 404);
+    assert.equal((await audioRequest(owner, session.id, {
+      fullSection: true, taskType: 2,
+    })).status, 400, 'multi-position tasks require the exact response position');
+    for (const upload of [
+      { taskType: 1, item: null, key: '15500000-0000-4000-8000-000000000011' },
+      { taskType: 2, item: 3, key: '15500000-0000-4000-8000-000000000012' },
+    ]) {
+      const response = await audioRequest(owner, session.id, {
+        fullSection: true, taskType: upload.taskType, item: upload.item,
+        idempotencyKey: upload.key, audio: submittedAudio,
+      });
+      assert.equal(response.status, 200);
+      const replay = await audioRequest(owner, session.id, {
+        fullSection: true, taskType: upload.taskType, item: upload.item,
+        idempotencyKey: upload.key, audio: submittedAudio,
+      });
+      assert.equal(replay.status, 200, 'the exact assessment replay remains idempotent');
+      const replacement = await audioRequest(owner, session.id, {
+        fullSection: true, taskType: upload.taskType, item: upload.item,
+        idempotencyKey: upload.key.replace(/.$/u, '9'), audio: submittedAudio,
+      });
+      assert.equal(replacement.status, 409, 'a fresh key cannot replace a submitted response');
+    }
+    const alternateAudio = Buffer.from(submittedAudio);
+    alternateAudio[alternateAudio.length - 1] ^= 1;
+    assert.equal((await audioRequest(owner, session.id, {
+      fullSection: true, taskType: 3, item: 2,
+      idempotencyKey: '15500000-0000-4000-8000-000000000013', audio: alternateAudio,
+    })).status, 409, 'a different take cannot be assessed for the submitted response');
+    assert.equal((await audioRequest(owner, session.id, {
+      fullSection: true, taskType: 3, item: 3,
+      idempotencyKey: '15500000-0000-4000-8000-000000000014',
+      audio: testPcmWavAudio({ durationSeconds: 1 }), duration: '1',
+    })).status, 409, 'the assessed duration must match the submitted response');
+    const stored = await repository.getFullSpeakingSession(owner, session.id);
+    assert.deepEqual(providerInputs, [
+      {
+        mode: 'scripted',
+        referenceText: SPEAKING_TASK1_CATALOG.tasks
+          .find((task) => task.id === stored.assignments[0].task_id).reference.script,
+        contextId: `task1:${session.id}:${stored.assignments[0].task_id}@${stored.assignments[0].task_revision}`,
+      },
+      {
+        mode: 'unscripted', referenceText: null,
+        contextId: `task2:${session.id}:${stored.assignments[1].task_id}@${stored.assignments[1].task_revision}:item3`,
+      },
+    ]);
+  });
+});
 
 test('task 1 pronunciation endpoint binds server reference, returns bounded DTO and bills exact replay once', async () => {
   await withServer({}, async ({ owner, other, repository, jsonRequest, audioRequest }) => {

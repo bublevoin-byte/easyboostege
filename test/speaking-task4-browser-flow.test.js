@@ -40,7 +40,7 @@ function assignedSession() {
         'Compare the main differences between the photographs.', 'Say which way you prefer and explain why.'],
     },
     status: 'assigned',
-    assessment: { available: false, reason: 'deferred_to_tickets_06_07', message: 'Later.' },
+    assessment: { available: false, reason: 'not_requested', message: 'Later.' },
   };
 }
 

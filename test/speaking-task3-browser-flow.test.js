@@ -38,7 +38,7 @@ function assignedSession() {
     status: 'assigned',
     currentQuestion: 1,
     answers: Array.from({ length: 5 }, (_, index) => ({ questionNumber: index + 1, status: 'pending' })),
-    assessment: { available: false, reason: 'deferred_to_tickets_06_07', message: 'Later.' },
+    assessment: { available: false, reason: 'not_requested', message: 'Later.' },
   };
 }
 

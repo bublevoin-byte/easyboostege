@@ -92,8 +92,8 @@ test('task 3 API owns five sequential interview answers and restores exact safe 
     ]);
     assert.deepEqual(assigned.assessment, {
       available: false,
-      reason: 'deferred_to_tickets_06_07',
-      message: 'Автоматическая оценка появится после подключения и методической проверки в следующих этапах.',
+      reason: 'not_requested',
+      message: 'Автоматическая тренировочная оценка запускается отдельно по сохранённым локальным записям.',
     });
     assert.equal(Object.hasOwn(assigned.task, 'completeness'), false);
     assert.equal(Object.hasOwn(assigned.task, 'provenance'), false);

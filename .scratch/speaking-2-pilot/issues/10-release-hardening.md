@@ -1,8 +1,9 @@
 # 10 — Провести выпускной аудит Speaking 2.0
 
-Status: ready-for-agent
+Status: done
 Blocked by: 09
 Spec: `.scratch/speaking-2-pilot/spec.md#проверки`
+Evidence: `docs/SPEAKING_2_RELEASE_EVIDENCE.md`
 
 ## Что сделать
 
@@ -22,10 +23,10 @@ Spec: `.scratch/speaking-2-pilot/spec.md#проверки`
 
 ## Definition of Done
 
-- [ ] Все критерии спецификации имеют тест, доказательство или честно отмеченный owner-action.
-- [ ] `npm run lint`, `npm run check`, `npm test`, Speaking E2E и performance проходят.
-- [ ] Security, privacy, repository parity, OpenAPI и migration checks проходят.
-- [ ] Нет ложных заявлений «точный/экспертный/методически валидированный».
-- [ ] Secret scan и `git diff --check` чисты; ключей и сырого обычного аудио нет.
-- [ ] Независимые Standards и Spec reviews не содержат нерешённых P0–P3.
-- [ ] Один финальный коммит; push/deploy не выполнялись.
+- [x] Все критерии спецификации имеют тест, доказательство или честно отмеченный owner-action.
+- [x] `npm run lint`, `npm run check`, `npm test`, Speaking E2E и performance проходят.
+- [x] Security, privacy, repository parity, OpenAPI и migration checks проходят.
+- [x] Нет ложных заявлений «точный/экспертный/методически валидированный».
+- [x] Secret scan и `git diff --check` чисты; ключей и сырого обычного аудио нет.
+- [x] Независимые Standards и Spec reviews не содержат нерешённых P0–P3.
+- [x] Один финальный коммит; push/deploy не выполнялись.

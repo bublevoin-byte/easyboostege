@@ -47,6 +47,18 @@ test('contrast helper matches the WCAG reference values', () => {
   assert.ok(contrast('#8A8F98', '#FFFFFF') < 4.5);
 });
 
+test('individual Speaking assessment action meets 4.5:1 at every gradient stop', async () => {
+  const { app } = await readFrontend();
+  const match = app.match(/assessmentAction[\s\S]{0,1600}?background:linear-gradient\(135deg,(#[0-9A-F]{6}),(#[0-9A-F]{6})\)[\s\S]{0,300}?color:#fff/iu);
+  assert.ok(match, 'individual Speaking assessment gradient was not found');
+  for (const background of match.slice(1)) {
+    assert.ok(
+      contrast('#FFFFFF', background) >= 4.5,
+      `individual Speaking assessment contrast is below 4.5:1 on ${background}`,
+    );
+  }
+});
+
 test('interactive elements are real buttons, links or fields', async () => {
   const { html, app } = await readFrontend();
   // A div or span carrying onclick cannot be reached from the keyboard.

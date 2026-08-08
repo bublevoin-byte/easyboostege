@@ -45,7 +45,9 @@ import { selectSpeakingTrainingAssignment } from '../speaking/training-session.j
 import {
   abandonFullSpeakingSession,
   advanceFullSpeakingStage,
+  applyFullSpeakingEvaluation,
   assertFullSpeakingSessionCompatibility,
+  claimFullSpeakingResponseAssessment,
   completeFullSpeakingResponse,
   createFullSpeakingSession,
   selectFullSpeakingVariant,
@@ -58,6 +60,7 @@ import {
 import {
   assertSpeakingLearningSource,
   buildSpeakingLearningAttempt,
+  canonicalSpeakingLearningSource,
   SPEAKING_ADAPTIVE_EVIDENCE_ATTEMPT_LIMIT,
   speakingTargetedPracticeAssignment,
   speakingAdaptiveEvidenceAttempts,
@@ -2426,31 +2429,23 @@ export function createPostgresRepository(connectionString, {
         if (!Number.isInteger(taskType) || taskType < 1 || taskType > 4) {
           throw new Error('SPEAKING_LEARNING_SOURCE_INVALID');
         }
-        const sourceSession = await client.query(
-          `SELECT id, catalog_id, catalog_revision, task_id, task_revision, status, assistance_used,
-                  accent_locale, targeted_practice
-           FROM speaking_task${taskType}_sessions WHERE username = $1 AND id = $2 FOR UPDATE`,
-          [username, requestedSource.sessionId],
-        );
-        const session = sourceSession.rows[0];
-        if (!session) throw new Error('SPEAKING_LEARNING_SESSION_NOT_FOUND');
-        if (session.task_id !== requestedSource.taskRef
-          || Number(session.task_revision) !== Number(requestedSource.taskRevision)
-          || session.catalog_id !== requestedSource.catalogId
-          || Number(session.catalog_revision) !== Number(requestedSource.catalogRevision)) {
-          throw new Error('SPEAKING_LEARNING_SOURCE_MISMATCH');
-        }
-        if (session.status !== 'completed') throw new Error('SPEAKING_LEARNING_SESSION_INCOMPLETE');
-        if (session.accent_locale && requestedSource.accentLocale
-          && session.accent_locale !== requestedSource.accentLocale) {
-          throw new Error('SPEAKING_LEARNING_SOURCE_MISMATCH');
-        }
-        learningSource = {
-          ...requestedSource,
-          accentLocale: session.accent_locale || requestedSource.accentLocale || null,
-          assistanceUsed: Boolean(session.assistance_used),
-          targetedPractice: session.targeted_practice || null,
-        };
+        const fullSection = requestedSource.sessionMode === 'full_section';
+        const sourceSession = fullSection
+          ? await client.query(
+            `SELECT id, assignments, status, accent_locale
+             FROM speaking_full_sessions WHERE username = $1 AND id = $2 FOR UPDATE`,
+            [username, requestedSource.sessionId],
+          )
+          : await client.query(
+            `SELECT id, catalog_id, catalog_revision, task_id, task_revision, status, assistance_used,
+                    accent_locale, targeted_practice
+             FROM speaking_task${taskType}_sessions WHERE username = $1 AND id = $2 FOR UPDATE`,
+            [username, requestedSource.sessionId],
+          );
+        learningSource = canonicalSpeakingLearningSource(requestedSource, {
+          taskType,
+          session: sourceSession.rows[0],
+        });
       }
       const values = [
         username,
@@ -3071,7 +3066,7 @@ export function createPostgresRepository(connectionString, {
         return null;
       }
       const session = existing.rows[0];
-      const value = mutate(session);
+      const value = await mutate(session, client);
       const updated = await client.query(
         `UPDATE speaking_full_sessions
          SET responses = $3::jsonb, status = $4, phase = $5, current_task = $6,
@@ -3114,10 +3109,37 @@ export function createPostgresRepository(connectionString, {
     return mutation?.session || null;
   }
 
+  async function claimFullSpeakingSessionAssessment(username, id, binding) {
+    const mutation = await mutateFullSpeakingSession(
+      username, id, (session) => claimFullSpeakingResponseAssessment(session, binding),
+    );
+    return mutation?.session || null;
+  }
+
   async function submitFullSpeakingSessionResult(username, id, idempotencyKey, { now = new Date() } = {}) {
     const mutation = await mutateFullSpeakingSession(
       username, id, (session) => submitFullSpeakingSession(session, idempotencyKey, now),
     );
+    return mutation ? { session: mutation.session, result: mutation.value } : null;
+  }
+
+  async function completeFullSpeakingSessionEvaluation(
+    username, id, attemptIds, { now = new Date() } = {},
+  ) {
+    const requestedIds = Array.isArray(attemptIds) ? attemptIds.map(Number) : [];
+    const mutation = await mutateFullSpeakingSession(username, id, async (session, client) => {
+      const attempts = requestedIds.length ? await client.query(
+        `SELECT * FROM speaking_attempts
+         WHERE username = $1 AND id = ANY($2::bigint[]) ORDER BY array_position($2::bigint[], id)`,
+        [username, requestedIds],
+      ) : { rows: [] };
+      if (attempts.rows.length !== requestedIds.length) {
+        throw Object.assign(new Error('SPEAKING_FULL_EVALUATION_INVALID'), {
+          code: 'SPEAKING_FULL_EVALUATION_INVALID',
+        });
+      }
+      return applyFullSpeakingEvaluation(session, attempts.rows, now);
+    });
     return mutation ? { session: mutation.session, result: mutation.value } : null;
   }
 
@@ -6168,7 +6190,9 @@ export function createPostgresRepository(connectionString, {
     getFullSpeakingSession,
     advanceFullSpeakingSessionStage,
     completeFullSpeakingSessionResponse,
+    claimFullSpeakingSessionAssessment,
     submitFullSpeakingSessionResult,
+    completeFullSpeakingSessionEvaluation,
     getGeneratedTask,
     getSharedGeneratedTask,
     saveGeneratedTask,

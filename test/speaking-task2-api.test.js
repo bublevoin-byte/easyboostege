@@ -91,8 +91,8 @@ test('task 2 API owns four sequential question records and restores the current 
     ]);
     assert.deepEqual(assigned.assessment, {
       available: false,
-      reason: 'deferred_to_tickets_06_07',
-      message: 'Автоматическая оценка появится после подключения и методической проверки в следующих этапах.',
+      reason: 'not_requested',
+      message: 'Автоматическая тренировочная оценка запускается отдельно по сохранённым локальным записям.',
     });
     assert.equal(Object.hasOwn(assigned.task, 'rubric'), false);
     assert.equal(Object.hasOwn(assigned.task, 'reference'), false);
