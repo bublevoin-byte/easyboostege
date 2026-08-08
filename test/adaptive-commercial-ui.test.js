@@ -26,7 +26,9 @@ function authentication() {
 
 async function withCommercialApp(run) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-adaptive-commercial-'));
-  const repository = createFileRepository(path.join(directory, 'data.json'));
+  const repository = createFileRepository(path.join(directory, 'data.json'), {
+    adaptiveMutationNow: () => new Date(NOW),
+  });
   const free = await repository.createTelegramUser(9901, 'Adaptive Free');
   const base = await repository.createTelegramUser(9902, 'Adaptive Base');
   const premium = await repository.createTelegramUser(9903, 'Adaptive Premium');
@@ -199,7 +201,7 @@ test('server enforces Free demo, Base continuous plan and Premium depth at every
     });
     assert.equal(premiumDeep.status, 201);
     const deep = await premiumDeep.json();
-    assert.equal(deep.diagnostic.catalogVersion, 'ege-deep-diagnostic-v1');
+    assert.equal(deep.diagnostic.catalogVersion, 'ege-deep-diagnostic-v2');
     assert.equal(deep.diagnostic.depth, 'deep');
     assert.ok(deep.diagnostic.estimatedMinutes > 15);
 

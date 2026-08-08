@@ -38,6 +38,18 @@ test('voice tutor trigger is a Premium-only real button with bounded data attrib
   assert.match(reviewMarkup, /Разобрать: Организация текста/u);
   assert.equal((reviewMarkup.match(/voiceTutorTrigger/gu) || []).length, 2);
   assert.equal(reviewMarkup.includes('answer'), false);
+
+  const pronunciationMarkup = voiceTutorButton({
+    profile: { entitlements: { voice_tutor: true } }, source: 'speaking',
+    attemptId: 501, revision: 1,
+    pronunciationError: {
+      ref: 'phoneme.501.0.0', label: 'Фонема /w/ в слове «weather»',
+    },
+  });
+  assert.match(pronunciationMarkup, /data-source="speaking"/u);
+  assert.match(pronunciationMarkup, /data-pronunciation-error-ref="phoneme\.501\.0\.0"/u);
+  assert.match(pronunciationMarkup, /Разобрать: Фонема \/w\/ в слове «weather»/u);
+  assert.equal(pronunciationMarkup.includes('data-criterion-index'), false);
 });
 
 test('writing and speaking reviews mount the shared tutor and keep only server-issued pointers in the DOM', () => {
@@ -51,9 +63,58 @@ test('writing and speaking reviews mount the shared tutor and keep only server-i
   assert.match(writingSource, /voiceTutorButton\(voiceTutor\)/u);
 
   assert.match(speakingSource, /import \{voiceTutorButton\} from '\.\.\/voice-tutor\.js'/u);
-  assert.match(speakingSource, /spShowEval\(d,tr,response\.voiceTutor\)/u);
+  assert.doesNotMatch(speakingSource, /spShowEval\(d,tr,response\.voiceTutor\)/u,
+    'the evaluation response must not authorize a Voice Tutor control after the subscription can change');
+  assert.match(speakingSource, /freshVoiceReport=await apiGet\('\/api\/v1\/speaking\/learning-report'\)/u,
+    'the evaluation screen must re-read fresh server entitlements before mounting Voice Tutor');
+  assert.match(speakingSource, /freshVoiceReport\.premium&&freshVoiceReport\.premium\.voiceTutor/u);
   assert.match(speakingSource, /voiceTutorButton\(voiceTutor\)/u);
+  assert.match(speakingSource, /profile:\{entitlements:\{voice_tutor:true\}\}/u,
+    'fresh report.premium must authorize its own Voice Tutor control');
+  assert.match(speakingSource, /contentRef:targetedPractice\.contentRef/u,
+    'the browser must replay the exact server-issued pronunciation target reference');
+  assert.match(speakingSource, /reportRevision:targetedPractice\.reportRevision/u);
+  assert.match(speakingSource, /accentLocale:targetedPractice\.accentLocale\|\|null/u);
+  assert.match(speakingSource, /criterionDynamics/u);
+  assert.match(speakingSource, /fluencyDynamics/u);
+  assert.match(speakingSource, /pauseDynamics/u);
+  assert.match(speakingSource, /unexpectedBreakCount/u);
+  assert.match(speakingSource, /missingBreakCount/u);
+  assert.match(speakingSource, /currentReliableAccentLocale/u);
+  assert.match(speakingSource, /report\.activeAccentLocale/u);
+  assert.match(speakingSource, /voice\.criterion/u);
+  assert.match(speakingSource, /voice\.pronunciationError/u);
+  assert.match(speakingSource, /voice\.attemptSummary\.attemptId===voice\.attemptId/u);
+  assert.doesNotMatch(speakingSource, /voice&&\(current\.criteria\|\|\[\]\)\[voice\.criterionIndex\]/u);
+  assert.match(speakingSource, /comparison\.accentLocale/u);
+  assert.match(speakingSource, /item\.direction/u);
+  assert.match(speakingSource, /улучшение/u);
+  assert.match(speakingSource, /снижение/u);
+  assert.match(speakingSource, /personalSummary/u);
+  const learningReportSource = speakingSource.slice(
+    speakingSource.indexOf('function spLearningReportMarkup'),
+    speakingSource.indexOf('function spStartTargetedPractice'),
+  );
+  assert.match(learningReportSource, /current\.transcript/u,
+    'the persistent Base/Premium report must render the latest transcript after navigation or reload');
+  assert.match(learningReportSource, /Расшифровка/u);
+  assert.match(learningReportSource, /spSpeakingSkillLabel/u);
+  assert.match(learningReportSource, /item\.focus/u);
+  assert.match(learningReportSource, /item\.offsetSeconds/u);
+  assert.match(learningReportSource, /item\.durationSeconds/u);
+  assert.match(learningReportSource, /Ответ /u);
+  assert.doesNotMatch(learningReportSource, /\(current\.wordIssues\|\|\[\]\)\.slice/u,
+    'Base must not truncate the bounded server word-issue list');
+  assert.match(speakingSource, /Прямые вопросы/u);
+  assert.match(speakingSource, /слово «/u);
+  assert.match(speakingSource, /фонема \//u);
+  assert.doesNotMatch(learningReportSource, /return item\.skillId/u,
+    'Premium must show a localized label instead of an internal adaptive skill id');
+  assert.match(speakingSource, /targetedPractice/u);
+  assert.doesNotMatch(speakingSource, /гарантированно новый материал/u);
   assert.doesNotMatch(fullSpeakingSource, /(?:evaluate-speaking|spSTT\(|voiceTutorButton\()/u);
+  assert.doesNotMatch(speakingSource, /voiceTutor&&d\.got<d\.max/u,
+    'a max-score review must still render its server-issued pronunciation control');
 
   for (const screenSource of [writingSource, speakingSource]) {
     assert.doesNotMatch(screenSource, /voiceTutorButton\([^)]*(?:answer|transcript|review)/u);

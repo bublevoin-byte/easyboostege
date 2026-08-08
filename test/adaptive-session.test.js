@@ -24,7 +24,7 @@ const NOW = new Date('2026-08-05T09:30:00.000Z');
 function plan() {
   return {
     id: '71000000-0000-4000-8000-000000000001', revision: 3,
-    version: 'adaptive-plan-v1', taxonomyVersion: 'ege-en-v1',
+    version: 'adaptive-plan-v1', taxonomyVersion: 'ege-en-v2',
     allocation: {
       skills: EGE_SKILL_TAXONOMY.skills.map((skill, index) => ({
         id: skill.id, label: skill.label, module: skill.module,

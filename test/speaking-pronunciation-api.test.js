@@ -121,6 +121,8 @@ test('task 1 pronunciation endpoint binds server reference, returns bounded DTO 
     const assessed = await assessedResponse.json();
     assert.equal(assessed.assessment.status, 'success');
     assert.equal(assessed.assessment.transcript, 'A short trusted transcript.');
+    assert.equal(assessed.assessment.locale, 'en-US');
+    assert.equal(assessed.assessment.pauseAnalysisAvailable, true);
     assert.equal(assessed.assessment.words.length, 1);
     assert.equal(assessed.billing.reservedSeconds, 3);
     assert.equal(assessed.billing.billableSeconds, 3);
@@ -308,6 +310,8 @@ test('OpenAPI and migrations publish bounded audio, quota and safe assessment co
   assert.doesNotMatch(pronunciationPath, /audio\/(?:webm|mp4|mpeg|ogg)/iu);
   assert.match(specification, /maxLength: 10485760, x-maxBytes: 10485760/u);
   assert.match(specification, /SpeakingPronunciationAssessment:/u);
+  assert.match(specification, /pauseAnalysisAvailable:/u);
+  assert.match(specification, /provider_pause_metric_unavailable, locale_not_supported/u);
   assert.match(migration, /UNIQUE \(username, idempotency_key\)/u);
   assert.match(migration, /status IN \('reserved', 'dispatching', 'started', 'finalized', 'released'\)/u);
   assert.match(migration, /dispatch_started_at TIMESTAMPTZ/u);

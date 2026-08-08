@@ -4,9 +4,17 @@ import path from 'node:path';
 import { hashAuthCode, normalizeUsername, normalizeVoiceTutorDeliveryMetadata, normalizeVoiceTutorProxyHash, subscriptionView, VoiceTutorError, voiceTutorAccessView, voiceTutorBillableSeconds, voiceTutorProxyUsage, voiceTutorQuotaPeriods, voiceTutorReservationSeconds } from './shared.js';
 import { transitionPedagogicalState } from '../voice-tutor/state-machine.js';
 import { transitionRuleCardReview } from '../voice-tutor/rule-card.js';
+import {
+  persistedVoiceTutorCapsule,
+  revalidateSpeakingPronunciationCapsule,
+} from '../voice-tutor/capsule.js';
 import { createRecoveryLedger, planRecoveryFromTransfer, planRepeatAttempt, publicRepeatAttempt, recoveryMap, recoveryMetrics } from '../voice-tutor/recovery.js';
 import { adaptiveAssistedMetadata, adaptiveReadingMetadata, requireModuleAttemptEvidenceQuality } from '../adaptive-learning/evidence-quality.js';
-import { compareAdaptiveEvidenceWatermarks } from '../adaptive-learning/evidence-watermark.js';
+import {
+  adaptiveEvidenceFingerprintConflict,
+  compareAdaptiveEvidenceWatermarks,
+} from '../adaptive-learning/evidence-watermark.js';
+import { adaptiveProfileMatchesCurrentEvidence } from '../adaptive-learning/profile.js';
 import { adaptiveLearningGoalRepositoryDto } from '../adaptive-learning/goal-dto.js';
 import {
   adaptiveLearningProfileExportDto,
@@ -26,7 +34,7 @@ import {
 } from '../adaptive-learning/diagnostic-claims.js';
 import { adaptiveLearningPlanRepositoryDto } from '../adaptive-learning/plan-dto.js';
 import { buildAdaptiveLearningMetrics } from '../adaptive-learning/metrics.js';
-import { adaptiveSpeakingTask } from '../public/adaptive-speaking-tasks.js';
+import { adaptiveSpeakingActivityMatchesTask, adaptiveSpeakingTask } from '../public/adaptive-speaking-tasks.js';
 import {
   newSpeakingTask1Session,
   speakingTask1CompletionMetadata,
@@ -48,6 +56,14 @@ import {
   submitFullSpeakingSession,
 } from '../speaking/full-section-session.js';
 import { recoverSpeakingEvaluationAttempt } from '../speaking/evaluation-claim.js';
+import {
+  assertSpeakingLearningSource,
+  buildSpeakingLearningAttempt,
+  SPEAKING_ADAPTIVE_EVIDENCE_ATTEMPT_LIMIT,
+  speakingTargetedPracticeAssignment,
+  speakingAdaptiveEvidenceAttempts,
+  speakingAdaptiveEvidenceMatchesTarget,
+} from '../speaking/learning-loop.js';
 import { isMonotonicAdaptiveRetentionRefresh } from '../adaptive-learning/retention.js';
 import { adaptiveRepeatExecutionMatches } from '../adaptive-learning/repeat-execution.js';
 import {
@@ -55,10 +71,12 @@ import {
   adaptiveLearningSessionRepositoryDto,
 } from '../adaptive-learning/session-dto.js';
 import {
+  adaptiveActivityRequiresPremiumDepth,
   assertAdaptiveSessionCreateCandidate,
   assertAdaptiveSessionReplacementTransition,
 } from '../adaptive-learning/session.js';
 import {
+  ADAPTIVE_EXECUTION_CLAIM_TTL_MS,
   adaptiveCompletedBlockDto,
   adaptiveConsumedClaimAttempt,
   adaptiveExecutionEventExportDto,
@@ -108,7 +126,69 @@ import {
 } from './word-progress-dto.js';
 
 function normalizeAttemptModels(attempts) {
-  return attempts.map((attempt) => ({ ...attempt, model: attempt.model ?? null }));
+  return attempts.map((attempt) => ({
+    ...attempt,
+    model: attempt.model ?? null,
+  }));
+}
+
+function normalizeSpeakingAttempts(attempts) {
+  return normalizeAttemptModels(attempts).map((attempt) => ({
+    ...attempt,
+    assistance_used: typeof attempt.assistance_used === 'boolean' ? attempt.assistance_used : true,
+    assistance_updated_at: attempt.assistance_updated_at ?? null,
+    accent_locale: ['en-GB', 'en-US'].includes(attempt.accent_locale)
+      ? attempt.accent_locale
+      : (['en-GB', 'en-US'].includes(attempt.review?.acousticFacts?.accentLocale)
+        ? attempt.review.acousticFacts.accentLocale : null),
+    targeted_practice: attempt.targeted_practice ?? null,
+  }));
+}
+
+function compactSpeakingEvidenceAttempt(attempt) {
+  return {
+    id: attempt.id,
+    task_type: attempt.task_type,
+    review: attempt.review,
+    status: attempt.status,
+    source_session_id: attempt.source_session_id,
+    source_task_ref: attempt.source_task_ref,
+    source_task_revision: attempt.source_task_revision,
+    source_catalog_id: attempt.source_catalog_id,
+    source_catalog_revision: attempt.source_catalog_revision,
+    assistance_used: attempt.assistance_used,
+    assistance_updated_at: attempt.assistance_updated_at,
+    accent_locale: attempt.accent_locale,
+    targeted_practice: attempt.targeted_practice,
+    created_at: attempt.created_at,
+    evaluated_at: attempt.evaluated_at,
+  };
+}
+
+function boundedSpeakingEvidenceRows(attempts, username) {
+  return attempts
+    .filter((entry) => entry.username === username && ['completed', 'needs_retry'].includes(entry.status))
+    .sort((first, second) => {
+      const firstTimestamp = new Date(first.evaluated_at ?? first.created_at).getTime();
+      const secondTimestamp = new Date(second.evaluated_at ?? second.created_at).getTime();
+      const firstObserved = Number.isFinite(firstTimestamp) ? firstTimestamp : Number.NEGATIVE_INFINITY;
+      const secondObserved = Number.isFinite(secondTimestamp) ? secondTimestamp : Number.NEGATIVE_INFINITY;
+      if (firstObserved !== secondObserved) return secondObserved - firstObserved;
+      const firstId = Number(first.id);
+      const secondId = Number(second.id);
+      if (Number.isSafeInteger(firstId) && Number.isSafeInteger(secondId)) return secondId - firstId;
+      return String(second.id).localeCompare(String(first.id), 'en');
+    })
+    .slice(0, SPEAKING_ADAPTIVE_EVIDENCE_ATTEMPT_LIMIT)
+    .map(compactSpeakingEvidenceAttempt);
+}
+
+function normalizeSpeakingSessions(sessions) {
+  return sessions.map((session) => ({
+    ...session,
+    assistance_used: typeof session.assistance_used === 'boolean' ? session.assistance_used : true,
+    targeted_practice: session.targeted_practice ?? null,
+  }));
 }
 
 function normalizeWritingAttempts(attempts) {
@@ -219,14 +299,16 @@ function sanitizeLegacyAdaptiveExecution(state, now = Date.now()) {
   return changed;
 }
 
-export function createFileRepository(filePath) {
+export function createFileRepository(filePath, {
+  adaptiveMutationNow = () => new Date(),
+  speakingLearningNow = () => new Date(),
+  voiceTutorMutationNow = () => new Date(),
+} = {}) {
   let loaded = false;
   let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], speaking_task1_sessions: [], speaking_task2_sessions: [], speaking_task3_sessions: [], speaking_task4_sessions: [], speaking_full_sessions: [], speaking_assessments: [], speaking_accent_profiles: {}, speaking_accent_history: [], speaking_accent_calibrations: [], speaking_calibration_consents: {}, speaking_calibration_samples: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, subscription_entitlements: {}, voice_tutor_sessions: [], voice_tutor_recoveries: [], voice_tutor_repeats: [], voice_tutor_repeat_attempts: [], voice_tutor_reports: [], rule_cards: [], payment_requests: {}, subscription_events: [], adaptive_learning_goals: [], adaptive_learning_profiles: {}, adaptive_learning_skill_estimates: {}, adaptive_learning_plan_revisions: [], adaptive_learning_sessions: [], adaptive_learning_execution_claims: [], adaptive_learning_session_events: [], adaptive_learning_session_mutations: [], adaptive_diagnostic_sessions: [], adaptive_diagnostic_start_claims: [], adaptive_diagnostic_responses: [] };
   let writeQueue = Promise.resolve();
   let coordinatedMutationQueue = Promise.resolve();
-  let paymentQueue = Promise.resolve();
   let ruleCardQueue = Promise.resolve();
-  let speakingSessionQueue = Promise.resolve();
 
   async function load() {
     if (loaded) return;
@@ -241,11 +323,11 @@ export function createFileRepository(filePath) {
           progress_summary: parsed.progress_summary && typeof parsed.progress_summary === 'object' ? parsed.progress_summary : {},
           auth_codes: parsed.auth_codes && typeof parsed.auth_codes === 'object' ? parsed.auth_codes : {},
           writing_attempts: Array.isArray(parsed.writing_attempts) ? normalizeWritingAttempts(parsed.writing_attempts) : [],
-          speaking_attempts: Array.isArray(parsed.speaking_attempts) ? normalizeAttemptModels(parsed.speaking_attempts) : [],
-          speaking_task1_sessions: Array.isArray(parsed.speaking_task1_sessions) ? parsed.speaking_task1_sessions : [],
-          speaking_task2_sessions: Array.isArray(parsed.speaking_task2_sessions) ? parsed.speaking_task2_sessions : [],
-          speaking_task3_sessions: Array.isArray(parsed.speaking_task3_sessions) ? parsed.speaking_task3_sessions : [],
-          speaking_task4_sessions: Array.isArray(parsed.speaking_task4_sessions) ? parsed.speaking_task4_sessions : [],
+          speaking_attempts: Array.isArray(parsed.speaking_attempts) ? normalizeSpeakingAttempts(parsed.speaking_attempts) : [],
+          speaking_task1_sessions: Array.isArray(parsed.speaking_task1_sessions) ? normalizeSpeakingSessions(parsed.speaking_task1_sessions) : [],
+          speaking_task2_sessions: Array.isArray(parsed.speaking_task2_sessions) ? normalizeSpeakingSessions(parsed.speaking_task2_sessions) : [],
+          speaking_task3_sessions: Array.isArray(parsed.speaking_task3_sessions) ? normalizeSpeakingSessions(parsed.speaking_task3_sessions) : [],
+          speaking_task4_sessions: Array.isArray(parsed.speaking_task4_sessions) ? normalizeSpeakingSessions(parsed.speaking_task4_sessions) : [],
           speaking_full_sessions: Array.isArray(parsed.speaking_full_sessions) ? parsed.speaking_full_sessions : [],
           speaking_assessments: Array.isArray(parsed.speaking_assessments)
             ? parsed.speaking_assessments.map((row) => ({
@@ -407,9 +489,7 @@ export function createFileRepository(filePath) {
   }
 
   function serializePaymentMutation(run) {
-    const result = paymentQueue.then(run, run);
-    paymentQueue = result.then(() => undefined, () => undefined);
-    return result;
+    return serializeCoordinatedMutation(run);
   }
 
   function paymentRequestView(request) {
@@ -549,20 +629,22 @@ export function createFileRepository(filePath) {
   }
 
   async function setEntitlement(username, entitlement, { startsAt = new Date(), endsAt = null } = {}) {
-    await load();
-    if (!state.users[username]) throw new Error('USER_NOT_FOUND');
-    if (!/^[a-z0-9_]{1,64}$/u.test(entitlement)) throw new Error('INVALID_ENTITLEMENT');
-    const startsAtMs = new Date(startsAt).getTime();
-    const endsAtMs = endsAt == null ? null : new Date(endsAt).getTime();
-    if (!Number.isFinite(startsAtMs) || (endsAtMs != null && (!Number.isFinite(endsAtMs) || endsAtMs <= startsAtMs))) {
-      throw new Error('INVALID_ENTITLEMENT_PERIOD');
-    }
-    state.subscription_entitlements[username] ||= {};
-    state.subscription_entitlements[username][entitlement] = {
-      starts_at: new Date(startsAtMs).toISOString(),
-      ends_at: endsAtMs == null ? null : new Date(endsAtMs).toISOString(),
-    };
-    await persist();
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      if (!state.users[username]) throw new Error('USER_NOT_FOUND');
+      if (!/^[a-z0-9_]{1,64}$/u.test(entitlement)) throw new Error('INVALID_ENTITLEMENT');
+      const startsAtMs = new Date(startsAt).getTime();
+      const endsAtMs = endsAt == null ? null : new Date(endsAt).getTime();
+      if (!Number.isFinite(startsAtMs) || (endsAtMs != null && (!Number.isFinite(endsAtMs) || endsAtMs <= startsAtMs))) {
+        throw new Error('INVALID_ENTITLEMENT_PERIOD');
+      }
+      state.subscription_entitlements[username] ||= {};
+      state.subscription_entitlements[username][entitlement] = {
+        starts_at: new Date(startsAtMs).toISOString(),
+        ends_at: endsAtMs == null ? null : new Date(endsAtMs).toISOString(),
+      };
+      await persist();
+    });
   }
 
   function hasVoiceTutorEntitlement(username, nowMs) {
@@ -571,6 +653,36 @@ export function createFileRepository(filePath) {
       && Boolean(entitlement)
       && new Date(entitlement.starts_at).getTime() <= nowMs
       && (entitlement.ends_at == null || new Date(entitlement.ends_at).getTime() > nowMs);
+  }
+
+  function requireVoiceTutorEntitlement(username, nowMs) {
+    if (Number(state.users[username]?.sub_until || 0) <= nowMs) {
+      throw new VoiceTutorError('SUBSCRIPTION_REQUIRED');
+    }
+    const entitlement = state.subscription_entitlements[username]?.voice_tutor;
+    if (!entitlement || new Date(entitlement.starts_at).getTime() > nowMs
+      || (entitlement.ends_at != null && new Date(entitlement.ends_at).getTime() <= nowMs)) {
+      throw new VoiceTutorError('VOICE_TUTOR_PREMIUM_REQUIRED');
+    }
+  }
+
+  function voiceTutorMutationEffectiveNow() {
+    const effectiveNow = new Date(voiceTutorMutationNow());
+    if (!Number.isFinite(effectiveNow.getTime())) {
+      throw new VoiceTutorError('VOICE_TUTOR_USAGE_INVALID');
+    }
+    return effectiveNow;
+  }
+
+  function revalidateVoiceTutorPronunciationCapsule(username, storedCapsule, effectiveNow) {
+    if (!storedCapsule?.source?.pronunciation_error_ref) return null;
+    const attemptId = Number(storedCapsule.source.attempt_id);
+    const attempt = state.speaking_attempts.find((entry) => (
+      entry.username === username && entry.id === attemptId
+    ));
+    return revalidateSpeakingPronunciationCapsule({
+      attempt, storedCapsule, referenceTime: effectiveNow,
+    });
   }
 
   function voiceTutorUsage(username, now) {
@@ -900,64 +1012,88 @@ export function createFileRepository(filePath) {
   }
 
   async function reserveVoiceTutorSession(username, {
-    id, idempotencyKey, limits, now = new Date(), context = null, allowFallbackOnly = false,
+    id, idempotencyKey, limits, context = null, allowFallbackOnly = false,
   }) {
     return serializeVoiceTutorMutation(async () => {
       await load();
-      if (!state.users[username]) throw new Error('USER_NOT_FOUND');
-      const expired = expireVoiceTutorSessions(username, now);
-      const existing = state.voice_tutor_sessions.find((session) => session.username === username && session.idempotency_key === idempotencyKey);
-      if (existing) {
-        if (expired) await persist();
-        return { created: false, session: publicVoiceTutorSession(existing), ...await getVoiceTutorAccess(username, limits, now) };
-      }
-      const usage = voiceTutorUsage(username, now);
-      const access = voiceTutorAccessView({ entitled: hasVoiceTutorEntitlement(username, new Date(now).getTime()), ...usage }, limits);
-      let reservedSeconds;
-      let fallbackOnly = false;
+      const stateBeforeReservation = structuredClone(state);
       try {
-        reservedSeconds = voiceTutorReservationSeconds(access, limits.sessionSeconds);
+        if (!state.users[username]) throw new Error('USER_NOT_FOUND');
+        const effectiveNow = voiceTutorMutationEffectiveNow();
+        const expired = expireVoiceTutorSessions(username, effectiveNow);
+        const usage = voiceTutorUsage(username, effectiveNow);
+        const access = voiceTutorAccessView({
+          entitled: hasVoiceTutorEntitlement(username, effectiveNow.getTime()), ...usage,
+        }, limits);
+        requireVoiceTutorEntitlement(username, effectiveNow.getTime());
+        const existing = state.voice_tutor_sessions.find((session) => session.username === username && session.idempotency_key === idempotencyKey);
+        if (existing) {
+          const validatedCapsule = revalidateVoiceTutorPronunciationCapsule(
+            username, existing.capsule, effectiveNow,
+          );
+          if (expired) await persist();
+          return {
+            created: false, session: publicVoiceTutorSession(existing), ...access,
+            ...(validatedCapsule ? { capsule: validatedCapsule } : {}),
+          };
+        }
+        const validatedCapsule = context?.capsule
+          ? revalidateVoiceTutorPronunciationCapsule(username, context.capsule, effectiveNow) : null;
+        const storedContextCapsule = validatedCapsule
+          ? persistedVoiceTutorCapsule(validatedCapsule) : context?.capsule;
+        let reservedSeconds;
+        let fallbackOnly = false;
+        try {
+          reservedSeconds = voiceTutorReservationSeconds(access, limits.sessionSeconds);
+        } catch (error) {
+          if (!context || !allowFallbackOnly || !['VOICE_TUTOR_DAILY_QUOTA_EXHAUSTED', 'VOICE_TUTOR_MONTHLY_QUOTA_EXHAUSTED'].includes(error?.code)) throw error;
+          reservedSeconds = 0;
+          fallbackOnly = true;
+        }
+        const startedAt = effectiveNow;
+        const session = {
+          id,
+          username,
+          idempotency_key: idempotencyKey,
+          status: 'active',
+          reserved_seconds: reservedSeconds,
+          billable_seconds: null,
+          started_at: startedAt.toISOString(),
+          expires_at: new Date(startedAt.getTime() + (fallbackOnly ? limits.sessionSeconds : reservedSeconds) * 1000).toISOString(),
+          ended_at: null,
+          ...(context ? {
+            capsule: structuredClone(storedContextCapsule),
+            capsule_id: storedContextCapsule.id,
+            nonce_hash: context.nonceHash,
+            delivery_mode: fallbackOnly ? 'local' : 'voice',
+            voice_activated_at: null,
+            provider: null,
+            model: null,
+            prompt_version: null,
+            proxy_ticket_reissue_count: 0,
+            pedagogical_state: 'diagnose',
+            micro_check_passed: null,
+            micro_check_attempts: 0,
+            micro_check_passes: 0,
+            clarification_turns: 0,
+            transfer_passed: null,
+            outcome: null,
+          } : {}),
+        };
+        state.voice_tutor_sessions.push(session);
+        const updatedAccess = voiceTutorAccessView({
+          entitled: true, ...voiceTutorUsage(username, effectiveNow),
+        }, limits);
+        await persist();
+        return {
+          created: true, fallback_only: fallbackOnly,
+          session: publicVoiceTutorSession(session), ...updatedAccess,
+          ...(validatedCapsule ? { capsule: validatedCapsule } : {}),
+        };
       } catch (error) {
-        if (!context || !allowFallbackOnly || !['VOICE_TUTOR_DAILY_QUOTA_EXHAUSTED', 'VOICE_TUTOR_MONTHLY_QUOTA_EXHAUSTED'].includes(error?.code)) throw error;
-        reservedSeconds = 0;
-        fallbackOnly = true;
+        state = stateBeforeReservation;
+        throw error;
       }
-      const startedAt = new Date(now);
-      const session = {
-        id,
-        username,
-        idempotency_key: idempotencyKey,
-        status: 'active',
-        reserved_seconds: reservedSeconds,
-        billable_seconds: null,
-        started_at: startedAt.toISOString(),
-        expires_at: new Date(startedAt.getTime() + (fallbackOnly ? limits.sessionSeconds : reservedSeconds) * 1000).toISOString(),
-        ended_at: null,
-        ...(context ? {
-          capsule: structuredClone(context.capsule),
-          capsule_id: context.capsule.id,
-          nonce_hash: context.nonceHash,
-          delivery_mode: fallbackOnly ? 'local' : 'voice',
-          voice_activated_at: null,
-          provider: null,
-          model: null,
-          prompt_version: null,
-          proxy_ticket_reissue_count: 0,
-          pedagogical_state: 'diagnose',
-          micro_check_passed: null,
-          micro_check_attempts: 0,
-          micro_check_passes: 0,
-          clarification_turns: 0,
-          transfer_passed: null,
-          outcome: null,
-        } : {}),
-      };
-      state.voice_tutor_sessions.push(session);
-      await persist();
-      return {
-        created: true, fallback_only: fallbackOnly,
-        session: publicVoiceTutorSession(session), ...await getVoiceTutorAccess(username, limits, now),
-      };
     });
   }
 
@@ -997,15 +1133,17 @@ export function createFileRepository(filePath) {
   }
 
   async function issueVoiceTutorProxyTicket(username, sessionId, {
-    ticketHash, idempotencyKey, expiresAt, now = new Date(), reissue = false, nextNonceHash,
+    ticketHash, idempotencyKey, expiresAt, reissue = false, nextNonceHash,
   }) {
     return serializeVoiceTutorMutation(async () => {
       await load();
-      const instant = new Date(now);
+      const instant = voiceTutorMutationEffectiveNow();
       const ticketExpiresAt = new Date(expiresAt);
       const hash = normalizeVoiceTutorProxyHash(ticketHash);
+      requireVoiceTutorEntitlement(username, instant.getTime());
       const session = state.voice_tutor_sessions.find((entry) => entry.username === username && entry.id === sessionId);
       if (!session?.capsule) throw new VoiceTutorError('VOICE_TUTOR_SESSION_NOT_FOUND');
+      revalidateVoiceTutorPronunciationCapsule(username, session.capsule, instant);
       if (session.idempotency_key !== idempotencyKey) throw new VoiceTutorError('VOICE_TUTOR_PROXY_TICKET_INVALID');
       if (session.status !== 'active' || !Number.isFinite(instant.getTime())
         || new Date(session.expires_at).getTime() <= instant.getTime()) {
@@ -1041,11 +1179,14 @@ export function createFileRepository(filePath) {
   }
 
   async function reissueVoiceTutorFallbackNonce(username, sessionId, {
-    idempotencyKey, nextNonceHash, now = new Date(), recoverLostRealtime = false,
+    idempotencyKey, nextNonceHash, recoverLostRealtime = false,
   }) {
     return serializeVoiceTutorMutation(async () => {
       await load();
+      const effectiveNow = voiceTutorMutationEffectiveNow();
+      requireVoiceTutorEntitlement(username, effectiveNow.getTime());
       const session = state.voice_tutor_sessions.find((entry) => entry.username === username && entry.id === sessionId);
+      revalidateVoiceTutorPronunciationCapsule(username, session?.capsule, effectiveNow);
       const provisionalVoice = session?.delivery_mode === 'voice' && !session.proxy_ticket_hash && !session.voice_activated_at;
       const lostRealtime = recoverLostRealtime && session?.delivery_mode === 'voice'
         && Boolean(session.proxy_ticket_hash) && !session.proxy_ticket_consumed_at && !session.voice_activated_at
@@ -1060,7 +1201,7 @@ export function createFileRepository(filePath) {
       }
       session.nonce_hash = normalizeVoiceTutorProxyHash(nextNonceHash);
       if (!lostRealtime) session.proxy_ticket_reissue_count = Number(session.proxy_ticket_reissue_count || 0) + 1;
-      const recoveredAt = new Date(now).toISOString();
+      const recoveredAt = effectiveNow.toISOString();
       if (session.delivery_mode == null || provisionalVoice || lostRealtime) {
         session.delivery_mode = 'local';
         session.status = 'completed';
@@ -1320,18 +1461,19 @@ export function createFileRepository(filePath) {
   }) {
     return serializeVoiceTutorMutation(async () => {
       await load();
+      const effectiveNow = adaptiveExecutionClaim ? adaptiveMutationEffectiveNow() : now;
       const plan = planRepeatAttempt({
         ledger: createRecoveryLedger({
           recoveries: state.voice_tutor_recoveries,
           repeats: state.voice_tutor_repeats,
           attempts: state.voice_tutor_repeat_attempts,
         }),
-        username, repeatId, attemptId, taskId, answer, now,
+        username, repeatId, attemptId, taskId, answer, now: effectiveNow,
       });
       let binding = null;
       if (adaptiveExecutionClaim) {
         const context = adaptiveClaimMutationContext(
-          username, adaptiveSessionId, adaptiveExecutionClaim, now,
+          username, adaptiveSessionId, adaptiveExecutionClaim, effectiveNow,
         );
         const repeat = state.voice_tutor_repeats.find((item) => item.id === repeatId);
         const recovery = state.voice_tutor_recoveries.find((item) => (
@@ -1430,12 +1572,19 @@ export function createFileRepository(filePath) {
     });
   }
 
-  async function switchVoiceTutorSessionDelivery(username, sessionId, { nonceHash, nextNonceHash, mode, limits, now = new Date(), errorCode = null }) {
+  async function switchVoiceTutorSessionDelivery(username, sessionId, {
+    nonceHash, nextNonceHash, mode, limits, errorCode = null,
+  }) {
     return serializeVoiceTutorMutation(async () => {
       await load();
       if (!['text', 'local'].includes(mode)) throw new VoiceTutorError('VOICE_TUTOR_DELIVERY_INVALID');
+      const effectiveNow = voiceTutorMutationEffectiveNow();
+      requireVoiceTutorEntitlement(username, effectiveNow.getTime());
       const session = state.voice_tutor_sessions.find((entry) => entry.username === username && entry.id === sessionId);
       if (!session || !session.capsule) throw new VoiceTutorError('VOICE_TUTOR_SESSION_NOT_FOUND');
+      const validatedCapsule = revalidateVoiceTutorPronunciationCapsule(
+        username, session.capsule, effectiveNow,
+      );
       if (!session.nonce_hash || session.nonce_hash !== nonceHash) throw new VoiceTutorError('VOICE_TUTOR_NONCE_REPLAYED');
       if (session.status === 'active') {
         session.status = 'completed';
@@ -1445,7 +1594,7 @@ export function createFileRepository(filePath) {
             outputAudioBytes: Number(session.proxy_output_audio_bytes || 0),
             confirmed: false,
             reason: 'runtime_fallback',
-            now,
+            now: effectiveNow,
           });
           session.billable_seconds = usage.billable_seconds;
           session.proxy_input_audio_bytes = usage.input_audio_bytes;
@@ -1455,16 +1604,22 @@ export function createFileRepository(filePath) {
           session.proxy_finalized_at = usage.finalized_at;
           session.ended_at = usage.finalized_at;
         } else {
-          session.billable_seconds = voiceTutorBillableSeconds(session, now);
-          session.ended_at = new Date(now).toISOString();
+          session.billable_seconds = voiceTutorBillableSeconds(session, effectiveNow);
+          session.ended_at = effectiveNow.toISOString();
         }
       }
       session.delivery_mode = mode;
       session.error_code = errorCode;
       session.nonce_hash = nextNonceHash;
+      const access = voiceTutorAccessView({
+        entitled: true, ...voiceTutorUsage(username, effectiveNow),
+      }, limits);
       await persist();
-      const access = await getVoiceTutorAccess(username, limits, now);
-      return { session: publicVoiceTutorSession(session), capsule: structuredClone(session.capsule), ...access };
+      return {
+        session: publicVoiceTutorSession(session),
+        capsule: structuredClone(validatedCapsule || session.capsule),
+        ...access,
+      };
     });
   }
 
@@ -2134,16 +2289,18 @@ export function createFileRepository(filePath) {
   }
 
   async function finishWritingAttempt(id, result) {
-    await load();
-    const attempt = state.writing_attempts.find((item) => item.id === Number(id));
-    if (!attempt) throw new Error('WRITING_ATTEMPT_NOT_FOUND');
-    attempt.status = result.status;
-    attempt.review = result.review ? structuredClone(result.review) : null;
-    attempt.provider = result.provider || null;
-    attempt.model = result.model || null;
-    attempt.error_code = result.errorCode || null;
-    attempt.evaluated_at = Date.now();
-    await persist();
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      const attempt = state.writing_attempts.find((item) => item.id === Number(id));
+      if (!attempt) throw new Error('WRITING_ATTEMPT_NOT_FOUND');
+      attempt.status = result.status;
+      attempt.review = result.review ? structuredClone(result.review) : null;
+      attempt.provider = result.provider || null;
+      attempt.model = result.model || null;
+      attempt.error_code = result.errorCode || null;
+      attempt.evaluated_at = Date.now();
+      await persist();
+    });
   }
 
   async function getWritingAttempt(username, id) {
@@ -2155,25 +2312,64 @@ export function createFileRepository(filePath) {
   async function createSpeakingAttempt(username, input, promptVersion) {
     await load();
     const id = (state.speaking_attempts.at(-1)?.id || 0) + 1;
-    state.speaking_attempts.push({ id, username, task_type: input.taskType, assignment: structuredClone(input.assignment), assignment_fingerprint: adaptiveExecutionRequestHash(input.assignment), transcript: input.transcript, prompt_version: promptVersion, model: null, status: 'pending', created_at: Date.now() });
+    state.speaking_attempts.push({ id, username, task_type: input.taskType, assignment: structuredClone(input.assignment), assignment_fingerprint: adaptiveExecutionRequestHash(input.assignment), transcript: input.transcript, prompt_version: promptVersion, model: null, status: 'pending', source_session_id: null, source_task_ref: null, source_task_revision: null, source_catalog_id: null, source_catalog_revision: null, assistance_used: true, assistance_updated_at: Date.now(), accent_locale: null, targeted_practice: null, created_at: Date.now() });
     await persist();
     return id;
   }
 
+  function canonicalSpeakingLearningSource(username, taskType, source) {
+    if (!source) return null;
+    const sessions = state[`speaking_task${Number(taskType)}_sessions`];
+    const session = Array.isArray(sessions) ? sessions.find((item) => (
+      item.username === username && item.id === source.sessionId
+    )) : null;
+    if (!session) throw new Error('SPEAKING_LEARNING_SESSION_NOT_FOUND');
+    if (session.task_id !== source.taskRef
+      || Number(session.task_revision) !== Number(source.taskRevision)
+      || session.catalog_id !== source.catalogId
+      || Number(session.catalog_revision) !== Number(source.catalogRevision)) {
+      throw new Error('SPEAKING_LEARNING_SOURCE_MISMATCH');
+    }
+    if (session.status !== 'completed') throw new Error('SPEAKING_LEARNING_SESSION_INCOMPLETE');
+    if (session.accent_locale && source.accentLocale && session.accent_locale !== source.accentLocale) {
+      throw new Error('SPEAKING_LEARNING_SOURCE_MISMATCH');
+    }
+    return {
+      ...source,
+      accentLocale: session.accent_locale || source.accentLocale || null,
+      assistanceUsed: Boolean(session.assistance_used),
+      targetedPractice: session.targeted_practice || null,
+    };
+  }
+
   async function claimSpeakingEvaluation(username, input, promptVersion, evaluationFingerprint, {
-    now = new Date(),
+    now = new Date(), source = null,
   } = {}) {
     if (!/^[a-f0-9]{64}$/u.test(evaluationFingerprint)) {
       throw new Error('SPEAKING_EVALUATION_FINGERPRINT_INVALID');
     }
+    const requestedSource = source == null ? null : assertSpeakingLearningSource(source);
     return serializeCoordinatedMutation(async () => {
       await load();
       if (!state.users[username]) throw new Error('USER_NOT_FOUND');
+      const learningSource = canonicalSpeakingLearningSource(username, input.taskType, requestedSource);
       const replay = state.speaking_attempts.find((item) => (
         item.username === username && item.evaluation_fingerprint === evaluationFingerprint
       ));
       if (replay) {
         if (recoverSpeakingEvaluationAttempt(replay, now)) {
+          if (learningSource) Object.assign(replay, {
+            source_session_id: learningSource.sessionId,
+            source_task_ref: learningSource.taskRef,
+            source_task_revision: learningSource.taskRevision,
+            source_catalog_id: learningSource.catalogId,
+            source_catalog_revision: learningSource.catalogRevision,
+            accent_locale: learningSource.accentLocale,
+            assistance_used: Boolean(replay.assistance_used || learningSource.assistanceUsed),
+            assistance_updated_at: replay.assistance_used || !learningSource.assistanceUsed
+              ? replay.assistance_updated_at : new Date(now).getTime(),
+            targeted_practice: learningSource.targetedPractice || null,
+          });
           await persist();
           return { created: true, attempt: structuredClone(replay) };
         }
@@ -2195,6 +2391,15 @@ export function createFileRepository(filePath) {
         created_at: Date.now(),
         evaluation_claimed_at: new Date(now).getTime(),
         evaluation_claim_generation: 1,
+        source_session_id: learningSource?.sessionId || null,
+        source_task_ref: learningSource?.taskRef || null,
+        source_task_revision: learningSource?.taskRevision || null,
+        source_catalog_id: learningSource?.catalogId || null,
+        source_catalog_revision: learningSource?.catalogRevision || null,
+        accent_locale: learningSource?.accentLocale || null,
+        assistance_used: learningSource?.assistanceUsed ?? true,
+        assistance_updated_at: learningSource?.assistanceUsed === false ? null : new Date(now).getTime(),
+        targeted_practice: learningSource?.targetedPractice || null,
       };
       state.speaking_attempts.push(attempt);
       await persist();
@@ -2211,6 +2416,14 @@ export function createFileRepository(filePath) {
         || Number(attempt.evaluation_claim_generation) !== Number(claimGeneration))) {
         throw new Error('SPEAKING_EVALUATION_CLAIM_LOST');
       }
+      const resultLocale = result.review?.acousticFacts?.accentLocale;
+      if (resultLocale && !['en-GB', 'en-US'].includes(resultLocale)) {
+        throw new Error('SPEAKING_ACCENT_LOCALE_INVALID');
+      }
+      if (attempt.accent_locale && resultLocale && attempt.accent_locale !== resultLocale) {
+        throw new Error('SPEAKING_LEARNING_SOURCE_MISMATCH');
+      }
+      attempt.accent_locale ||= resultLocale || null;
       attempt.status = result.status;
       attempt.review = result.review ? structuredClone(result.review) : null;
       attempt.provider = result.provider || null;
@@ -2235,18 +2448,64 @@ export function createFileRepository(filePath) {
     return attempt ? structuredClone(attempt) : null;
   }
 
+  function speakingLearningAttempts(username, { limit = 120 } = {}) {
+    const boundedLimit = Math.min(120, Math.max(1, Number.isInteger(limit) ? limit : 120));
+    return state.speaking_attempts
+      .filter((item) => item.username === username && ['completed', 'needs_retry'].includes(item.status))
+      .sort((left, right) => Number(right.evaluated_at || right.created_at) - Number(left.evaluated_at || left.created_at)
+        || Number(right.id) - Number(left.id))
+      .slice(0, boundedLimit)
+      .map(buildSpeakingLearningAttempt)
+      .filter(Boolean)
+      .map((item) => structuredClone(item));
+  }
+
+  async function getSpeakingLearningAttempts(username, options = {}) {
+    await load();
+    return speakingLearningAttempts(username, options);
+  }
+
+  async function getSpeakingLearningReportSnapshot(username, { limit = 120 } = {}) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      if (!state.users[username]) throw new Error('USER_NOT_FOUND');
+      const effectiveNow = new Date(speakingLearningNow());
+      if (Number.isNaN(effectiveNow.getTime())) throw new Error('SPEAKING_LEARNING_CLOCK_INVALID');
+      const subscriptionUntilMs = Number(state.users[username].sub_until || 0);
+      if (!Number.isFinite(subscriptionUntilMs) || subscriptionUntilMs <= effectiveNow.getTime()) {
+        throw Object.assign(new Error('SUBSCRIPTION_REQUIRED'), { code: 'SUBSCRIPTION_REQUIRED' });
+      }
+      if (reconcileSpeakingAssessmentLeases(username, effectiveNow)) await persist();
+      return {
+        attempts: speakingLearningAttempts(username, { limit }),
+        quota: speakingAssessmentQuota(username, effectiveNow),
+        accentProfile: publicSpeakingAccentProfile(state.speaking_accent_profiles[username] || null),
+        effectiveNow: effectiveNow.toISOString(),
+      };
+    });
+  }
+
   function serializeSpeakingSessionMutation(run) {
-    const result = speakingSessionQueue.then(run, run);
-    speakingSessionQueue = result.then(() => undefined, () => undefined);
-    return result;
+    return serializeCoordinatedMutation(run);
   }
 
   async function assignSpeakingCatalogSession(stateKey, createSession, username, {
     catalogId, catalogRevision, tasks, accentProfile = null, calibrationSetupId = null, now,
+    excludeTaskIds = [], preferredTaskIds = [], selectionReason = null, targetedPractice = null,
+    targetedPracticeRequest = null,
   }) {
-    return serializeSpeakingSessionMutation(async () => {
+    return serializeCoordinatedMutation(async () => {
       await load();
       if (!state.users[username]) throw new Error('USER_NOT_FOUND');
+      let targetedPracticeNow = null;
+      if (targetedPracticeRequest) {
+        targetedPracticeNow = new Date(speakingLearningNow());
+        if (Number.isNaN(targetedPracticeNow.getTime())) throw new Error('SPEAKING_LEARNING_CLOCK_INVALID');
+        const subscriptionUntilMs = Number(state.users[username].sub_until || 0);
+        if (!Number.isFinite(subscriptionUntilMs) || subscriptionUntilMs <= targetedPracticeNow.getTime()) {
+          throw Object.assign(new Error('SUBSCRIPTION_REQUIRED'), { code: 'SUBSCRIPTION_REQUIRED' });
+        }
+      }
       const canonicalAccentProfile = state.speaking_accent_profiles[username] || null;
       const effectiveAccentProfile = canonicalAccentProfile || accentProfile || null;
       const effectiveCalibrationSetupId = effectiveAccentProfile ? null : calibrationSetupId;
@@ -2256,9 +2515,27 @@ export function createFileRepository(filePath) {
         ));
         if (!calibration) throw speakingAccentError('SPEAKING_ACCENT_PROFILE_REQUIRED');
       }
+      let effectiveAssignment = {
+        excludeTaskIds, preferredTaskIds, selectionReason, targetedPractice,
+      };
+      if (targetedPracticeRequest) {
+        const learningAttempts = state.speaking_attempts
+          .filter((item) => item.username === username && ['completed', 'needs_retry'].includes(item.status))
+          .sort((left, right) => Number(right.evaluated_at || right.created_at)
+            - Number(left.evaluated_at || left.created_at) || Number(right.id) - Number(left.id))
+          .slice(0, 120).map(buildSpeakingLearningAttempt).filter(Boolean);
+        effectiveAssignment = speakingTargetedPracticeAssignment(
+          learningAttempts, targetedPracticeRequest, tasks[0]?.taskType, {
+            tier: hasVoiceTutorEntitlement(username, targetedPracticeNow.getTime()) ? 'premium' : 'base',
+            activeAccentLocale: effectiveAccentProfile?.locale || null,
+          },
+        );
+      }
       const history = state[stateKey].filter((session) => session.username === username
         && session.catalog_id === catalogId && Number(session.catalog_revision) === Number(catalogRevision));
-      const selection = selectSpeakingTrainingAssignment(tasks, history, now);
+      const selection = selectSpeakingTrainingAssignment(tasks, history, now, {
+        ...effectiveAssignment,
+      });
       const session = createSession({
         username, catalogId, catalogRevision, selection, accentProfile: effectiveAccentProfile,
         calibrationSetupId: effectiveCalibrationSetupId, now,
@@ -2273,6 +2550,31 @@ export function createFileRepository(filePath) {
     await load();
     const session = state[stateKey].find((item) => item.username === username && item.id === id);
     return session ? structuredClone(session) : null;
+  }
+
+  async function markSpeakingSessionAssisted(username, taskType, id, { now = new Date() } = {}) {
+    const stateKey = `speaking_task${Number(taskType)}_sessions`;
+    if (![1, 2, 3, 4].includes(Number(taskType))) throw new Error('SPEAKING_SESSION_KIND_INVALID');
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      const session = state[stateKey].find((item) => item.username === username && item.id === id);
+      if (!session) return null;
+      if (!session.assistance_used) {
+        const changedAt = new Date(now).getTime();
+        if (!Number.isFinite(changedAt)) throw new Error('SPEAKING_ASSISTANCE_TIME_INVALID');
+        session.assistance_used = true;
+        state.speaking_attempts.filter((attempt) => (
+          attempt.username === username && attempt.source_session_id === id
+        )).forEach((attempt) => {
+          if (!attempt.assistance_used) {
+            attempt.assistance_used = true;
+            attempt.assistance_updated_at = changedAt;
+          }
+        });
+        await persist();
+      }
+      return structuredClone(session);
+    });
   }
 
   const assignSpeakingTask1Session = (username, options) => assignSpeakingCatalogSession(
@@ -2589,13 +2891,9 @@ export function createFileRepository(filePath) {
     const assessedAttempts = [
       ...state.writing_attempts
         .filter((entry) => entry.username === username && entry.status === 'completed')
-        .map((entry) => ({ entry, module: 'writing', activity: String(entry.task_type), score: Number(entry.review?.overall_got), maxScore: Number(entry.review?.overall_max) })),
-      ...state.speaking_attempts
-        .filter((entry) => entry.username === username && entry.status === 'completed'
-          && entry.review?.status === 'scored'
-          && typeof entry.review?.got === 'number' && typeof entry.review?.max === 'number')
-        .map((entry) => ({ entry, module: 'speaking', activity: `speaking_${entry.task_type}`, score: Number(entry.review?.got), maxScore: Number(entry.review?.max) })),
-    ].filter((item) => Number.isFinite(item.score) && Number.isFinite(item.maxScore) && item.maxScore > 0)
+        .map((entry) => ({ entry, module: 'writing', activity: String(entry.task_type), score: entry.review?.overall_got, maxScore: entry.review?.overall_max })),
+    ].filter((item) => typeof item.score === 'number' && Number.isFinite(item.score)
+        && typeof item.maxScore === 'number' && Number.isFinite(item.maxScore) && item.maxScore > 0)
       .map((item) => ({
         id: `${item.module}:${item.entry.id}`, module: item.module, activity: item.activity,
         score: Math.max(0, Math.min(item.maxScore, item.score)), max_score: item.maxScore,
@@ -2608,6 +2906,9 @@ export function createFileRepository(filePath) {
           .filter((entry) => entry.username === username)
           .map((entry) => ({ ...entry, evidence_quality: entry.evidence_quality || 'client_reported' })),
         ...assessedAttempts,
+        ...speakingAdaptiveEvidenceAttempts(boundedSpeakingEvidenceRows(state.speaking_attempts, username)
+          .map(buildSpeakingLearningAttempt)
+          .filter(Boolean)),
       ],
       recoveries,
       repeatAttempts: state.voice_tutor_repeat_attempts
@@ -2626,18 +2927,35 @@ export function createFileRepository(filePath) {
           skill_id: entry.skill_id,
           module: entry.module,
           evidence_quality: entry.evidence_quality,
-          correct: Boolean(entry.correct),
+          correct: entry.correct,
           answered_at: entry.answered_at,
         })),
       diagnosticCompletions,
     });
   }
 
-  async function saveAdaptiveLearningProfile(username, profile, { now = new Date() } = {}) {
+  async function saveAdaptiveLearningProfile(username, profile, {
+    now = new Date(), verifyCurrentEvidence = false, diagnosticRegistry,
+  } = {}) {
     return serializeCoordinatedMutation(async () => {
       await load();
       if (!state.users[username]) throw new Error('USER_NOT_FOUND');
+      if (verifyCurrentEvidence) {
+        const currentSources = await getAdaptiveLearningEvidenceSources(username);
+        if (!adaptiveProfileMatchesCurrentEvidence(profile, currentSources, { diagnosticRegistry })) {
+          throw new Error('ADAPTIVE_PROFILE_EVIDENCE_STALE');
+        }
+      }
       const persistedProfile = state.adaptive_learning_profiles[username];
+      if (persistedProfile && adaptiveEvidenceFingerprintConflict(profile, persistedProfile)) {
+        const currentSources = await getAdaptiveLearningEvidenceSources(username);
+        if (!adaptiveProfileMatchesCurrentEvidence(profile, currentSources, { diagnosticRegistry })) {
+          return adaptiveLearningProfileRepositoryDto(
+            persistedProfile,
+            state.adaptive_learning_skill_estimates[username] || [],
+          );
+        }
+      }
       const evidenceOrder = persistedProfile
         ? compareAdaptiveEvidenceWatermarks(profile, persistedProfile)
         : 1;
@@ -2668,6 +2986,7 @@ export function createFileRepository(filePath) {
         evidence_watermark_version: profile.evidenceWatermarkVersion,
         evidence_observed_at: profile.evidenceObservedAt,
         evidence_source_count: profile.evidenceSourceCount,
+        evidence_fingerprint: profile.evidenceFingerprint,
         needs_diagnostic: Boolean(profile.needsDiagnostic),
         explanation_codes: structuredClone(profile.explanationCodes),
         updated_at: updatedAt,
@@ -2708,7 +3027,7 @@ export function createFileRepository(filePath) {
     );
   }
 
-  async function saveAdaptiveLearningPlan(username, candidate) {
+  async function saveAdaptiveLearningPlan(username, candidate, { diagnosticRegistry } = {}) {
     return serializeCoordinatedMutation(async () => {
       await load();
       if (!state.users[username]) throw new Error('USER_NOT_FOUND');
@@ -2716,6 +3035,15 @@ export function createFileRepository(filePath) {
         .filter((entry) => entry.username === username && entry.current)
         .sort((left, right) => Number(right.revision) - Number(left.revision))[0];
       assertAdaptivePlanPersistenceCandidate(candidate);
+      const authoritativeProfile = adaptiveLearningProfileRepositoryDto(
+        state.adaptive_learning_profiles[username] || null,
+        state.adaptive_learning_skill_estimates[username] || [],
+      );
+      const currentSources = await getAdaptiveLearningEvidenceSources(username);
+      if (!adaptiveProfileMatchesCurrentEvidence(authoritativeProfile, currentSources, { diagnosticRegistry })
+        || !adaptiveProfileMatchesCurrentEvidence(candidate, currentSources, { diagnosticRegistry })) {
+        throw new Error('ADAPTIVE_PLAN_EVIDENCE_STALE');
+      }
       const duplicate = state.adaptive_learning_plan_revisions.find((entry) => (
         entry.username === username && entry.input_fingerprint === candidate.inputFingerprint
       ));
@@ -2735,10 +3063,6 @@ export function createFileRepository(filePath) {
       if (!goal || goal.id !== candidate.goalId || Number(goal.revision) !== Number(candidate.goalRevision)) {
         throw new Error('ADAPTIVE_PLAN_GOAL_STALE');
       }
-      const authoritativeProfile = adaptiveLearningProfileRepositoryDto(
-        state.adaptive_learning_profiles[username] || null,
-        state.adaptive_learning_skill_estimates[username] || [],
-      );
       assertAdaptivePlanPersistenceCandidate(candidate, {
         authoritativeProfile,
       });
@@ -2792,6 +3116,7 @@ export function createFileRepository(filePath) {
         profile_evidence_watermark_version: candidate.profileEvidenceWatermarkVersion,
         profile_evidence_observed_at: candidate.profileEvidenceObservedAt,
         profile_evidence_source_count: candidate.profileEvidenceSourceCount,
+        profile_evidence_fingerprint: candidate.profileEvidenceFingerprint,
         recalculation_bucket: candidate.recalculationBucket,
         input_fingerprint: candidate.inputFingerprint,
         forecast: structuredClone(candidate.plan.forecast),
@@ -2913,15 +3238,35 @@ export function createFileRepository(filePath) {
   }
 
   async function getAdaptiveLearningSessionReplacementReplay(username, sessionId, candidate) {
-    await load();
-    const row = state.adaptive_learning_sessions.find((entry) => (
-      entry.username === username && entry.replacement_idempotency_key === candidate.idempotencyKey
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      const row = state.adaptive_learning_sessions.find((entry) => (
+        entry.username === username && entry.replacement_idempotency_key === candidate.idempotencyKey
+      ));
+      if (row && (row.id !== sessionId || row.replacement_request_hash !== candidate.requestHash)) {
+        throw new Error('ADAPTIVE_SESSION_IDEMPOTENCY_CONFLICT');
+      }
+      const target = state.adaptive_learning_sessions.find((entry) => (
+        entry.username === username && entry.id === sessionId
+      ));
+      if (!target) return null;
+      assertAdaptiveSessionReplacementOpen(username, target);
+      if (!row) return null;
+      return adaptiveLearningSessionPublicDto(row.replacement_response_snapshot);
+    });
+  }
+
+  function assertAdaptiveSessionReplacementOpen(username, row) {
+    const hasClaim = state.adaptive_learning_execution_claims.some((claim) => (
+      claim.username === username && claim.session_id === row.id
     ));
-    if (!row) return null;
-    if (row.id !== sessionId || row.replacement_request_hash !== candidate.requestHash) {
-      throw new Error('ADAPTIVE_SESSION_IDEMPOTENCY_CONFLICT');
+    const hasEvent = state.adaptive_learning_session_events.some((event) => (
+      event.username === username && event.session_id === row.id
+    ));
+    if (row.status !== 'created' || row.started_at != null
+      || Number(row.execution_revision || 0) > 0 || hasClaim || hasEvent) {
+      throw new Error('ADAPTIVE_SESSION_REPLACEMENT_LOCKED');
     }
-    return adaptiveLearningSessionPublicDto(row.replacement_response_snapshot);
   }
 
   async function replaceAdaptiveLearningSessionBlock(username, candidate) {
@@ -2934,6 +3279,7 @@ export function createFileRepository(filePath) {
         if (replay.id !== candidate.sessionId || replay.replacement_request_hash !== candidate.requestHash) {
           throw new Error('ADAPTIVE_SESSION_IDEMPOTENCY_CONFLICT');
         }
+        assertAdaptiveSessionReplacementOpen(username, replay);
         return {
           replaced: false, replayed: true,
           session: adaptiveLearningSessionPublicDto(replay.replacement_response_snapshot),
@@ -2943,6 +3289,7 @@ export function createFileRepository(filePath) {
         entry.username === username && entry.id === candidate.sessionId
       ));
       if (!row) throw new Error('ADAPTIVE_SESSION_NOT_FOUND');
+      assertAdaptiveSessionReplacementOpen(username, row);
       if (row.replacement_idempotency_key || row.replacement) {
         throw new Error('ADAPTIVE_SESSION_REPLACEMENT_ALREADY_USED');
       }
@@ -2972,6 +3319,34 @@ export function createFileRepository(filePath) {
       .sort((left, right) => Number(left.sequence) - Number(right.sequence));
   }
 
+  function adaptiveSpeakingSourceMatches(username, block, source, claimIssuedAt) {
+    const descriptor = adaptiveSpeakingTask(block?.contentRef);
+    const taskType = Number(source?.task_type);
+    const sessions = state[`speaking_task${taskType}_sessions`];
+    const taskSession = Array.isArray(sessions) ? sessions.find((entry) => (
+      entry.username === username && entry.id === source?.source_session_id
+    )) : null;
+    const evidence = buildSpeakingLearningAttempt(source);
+    return Boolean(descriptor
+      && descriptor.taskNumber === taskType
+      && descriptor.skillId === block.skillId
+      && block.module === 'speaking'
+      && adaptiveSpeakingActivityMatchesTask(block.activityId, taskType)
+      && taskSession
+      && taskSession.task_id === source.source_task_ref
+      && Number(taskSession.task_revision) === Number(source.source_task_revision)
+      && taskSession.catalog_id === source.source_catalog_id
+      && Number(taskSession.catalog_revision) === Number(source.source_catalog_revision)
+      && taskSession.assistance_used === false
+      && source.assistance_used === false
+      && new Date(taskSession.assigned_at).getTime() >= new Date(claimIssuedAt).getTime()
+      && Number(source.created_at) >= Number(claimIssuedAt)
+      && speakingAdaptiveEvidenceMatchesTarget(evidence, {
+        skillId: block.skillId,
+        focusRef: descriptor.focusRef,
+      }));
+  }
+
   function adaptiveMutationReplay(username, candidate) {
     const replay = state.adaptive_learning_session_mutations.find((entry) => (
       entry.username === username && entry.idempotency_key === candidate.idempotencyKey
@@ -2996,26 +3371,74 @@ export function createFileRepository(filePath) {
     });
   }
 
+  function requireAdaptivePremiumDepthEntitlement(username, block, now) {
+    if (adaptiveActivityRequiresPremiumDepth(block)
+      && !hasVoiceTutorEntitlement(username, new Date(now).getTime())) {
+      throw new Error('ADAPTIVE_PREMIUM_REQUIRED');
+    }
+  }
+
+  function adaptiveMutationEffectiveNow() {
+    const effectiveNow = new Date(adaptiveMutationNow());
+    if (Number.isNaN(effectiveNow.getTime())) throw new Error('ADAPTIVE_MUTATION_CLOCK_INVALID');
+    return effectiveNow;
+  }
+
+  function assertAdaptiveStartSnapshotMatchesLockedSession(row, block, snapshot) {
+    const lockedSession = adaptiveLearningSessionPublicDto(row);
+    if (Number(snapshot?.session?.revision) !== Number(lockedSession.revision)) {
+      throw new Error('ADAPTIVE_SESSION_REVISION_CONFLICT');
+    }
+    if (snapshot.session.id !== lockedSession.id
+      || snapshot.session.previewFingerprint !== lockedSession.previewFingerprint
+      || JSON.stringify(snapshot.session.replacement ?? null) !== JSON.stringify(lockedSession.replacement ?? null)
+      || adaptiveLaunchFingerprint(snapshot.block || {}) !== adaptiveLaunchFingerprint(block)
+      || JSON.stringify(snapshot.launch) !== JSON.stringify(block.launch)) {
+      throw new Error('ADAPTIVE_SESSION_EXECUTION_SNAPSHOT_INVALID');
+    }
+  }
+
   async function getAdaptiveLearningSessionMutationReplay(username, candidate) {
-    await load();
-    return adaptiveMutationReplay(username, candidate);
+    if (!candidate.blockId) {
+      await load();
+      return adaptiveMutationReplay(username, candidate);
+    }
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      const row = adaptiveSessionRow(username, candidate.sessionId);
+      if (!row) throw new Error('ADAPTIVE_SESSION_NOT_FOUND');
+      const block = row.blocks.find((item) => item.id === candidate.blockId);
+      requireAdaptivePremiumDepthEntitlement(username, block, adaptiveMutationEffectiveNow());
+      return adaptiveMutationReplay(username, candidate);
+    });
   }
 
   async function startAdaptiveLearningSessionBlock(username, candidate) {
     return serializeCoordinatedMutation(async () => {
       await load();
-      const replay = adaptiveMutationReplay(username, { ...candidate, operation: 'start' });
-      if (replay) return { created: false, replayed: true, responseSnapshot: replay };
       const row = adaptiveSessionRow(username, candidate.sessionId);
       if (!row) throw new Error('ADAPTIVE_SESSION_NOT_FOUND');
+      const block = row.blocks.find((item) => item.id === candidate.blockId);
+      const effectiveNow = adaptiveMutationEffectiveNow();
+      const instant = effectiveNow.getTime();
+      requireAdaptivePremiumDepthEntitlement(username, block, effectiveNow);
+      const replay = adaptiveMutationReplay(username, { ...candidate, operation: 'start' });
+      if (replay) {
+        const replayClaim = state.adaptive_learning_execution_claims.find((claim) => (
+          claim.id === replay.executionClaimId && claim.username === username
+        ));
+        if (replayClaim && Number(replayClaim.expires_at) <= instant) {
+          throw new Error('ADAPTIVE_EXECUTION_CLAIM_EXPIRED');
+        }
+        return { created: false, replayed: true, responseSnapshot: replay };
+      }
       if (!['created', 'in_progress'].includes(row.status)) throw new Error('ADAPTIVE_SESSION_STATE_CONFLICT');
       if (Number(row.execution_revision || 0) !== Number(candidate.expectedRevision)) {
         throw new Error('ADAPTIVE_SESSION_REVISION_CONFLICT');
       }
       if (row.current_block_id !== candidate.blockId) throw new Error('ADAPTIVE_SESSION_BLOCK_NOT_CURRENT');
-      const block = row.blocks.find((item) => item.id === candidate.blockId);
       if (!block || block.kind !== 'learning') throw new Error('ADAPTIVE_SESSION_BLOCK_NOT_LAUNCHABLE');
-      const instant = new Date(candidate.now).getTime();
+      assertAdaptiveStartSnapshotMatchesLockedSession(row, block, candidate.responseSnapshot);
       let consumedClaim = null;
       for (const claim of state.adaptive_learning_execution_claims) {
         if (claim.username !== username || claim.session_id !== row.id || claim.block_id !== block.id
@@ -3050,12 +3473,26 @@ export function createFileRepository(filePath) {
         };
       }
       const nextRevision = Number(row.execution_revision || 0) + 1;
+      const expiresAt = new Date(instant + ADAPTIVE_EXECUTION_CLAIM_TTL_MS);
+      const responseSnapshot = {
+        ...structuredClone(candidate.responseSnapshot),
+        session: {
+          ...structuredClone(candidate.responseSnapshot?.session),
+          status: 'in_progress',
+          updatedAt: effectiveNow.toISOString(),
+        },
+        execution: {
+          ...structuredClone(candidate.responseSnapshot?.execution),
+          startedAt: row.started_at
+            ? new Date(row.started_at).toISOString() : effectiveNow.toISOString(),
+        },
+        claimExpiresAt: expiresAt.toISOString(),
+      };
       if (candidate.responseSnapshot?.execution?.revision !== nextRevision
         || candidate.responseSnapshot?.block?.id !== block.id
         || candidate.responseSnapshot?.executionClaimId !== candidate.claimId
         || JSON.stringify(candidate.responseSnapshot).includes(candidate.token)
-        || adaptiveExecutionTokenHash(candidate.token) !== candidate.tokenHash
-        || candidate.responseSnapshot?.claimExpiresAt !== new Date(candidate.expiresAt).toISOString()) {
+        || adaptiveExecutionTokenHash(candidate.token) !== candidate.tokenHash) {
         throw new Error('ADAPTIVE_SESSION_EXECUTION_SNAPSHOT_INVALID');
       }
       state.adaptive_learning_execution_claims.push({
@@ -3068,7 +3505,7 @@ export function createFileRepository(filePath) {
         launch_fingerprint: adaptiveLaunchFingerprint(block),
         evidence_context: candidate.evidenceContext,
         issued_at: instant,
-        expires_at: new Date(candidate.expiresAt).getTime(),
+        expires_at: expiresAt.getTime(),
         consumed_at: null,
         revoked_at: null,
         attempt_type: null,
@@ -3078,9 +3515,9 @@ export function createFileRepository(filePath) {
       row.status = 'in_progress';
       row.started_at ||= instant;
       row.updated_at = instant;
-      addAdaptiveMutation(username, { ...candidate, operation: 'start' }, candidate.responseSnapshot);
+      addAdaptiveMutation(username, { ...candidate, operation: 'start' }, responseSnapshot);
       await persist();
-      return { created: true, replayed: false, responseSnapshot: structuredClone(candidate.responseSnapshot) };
+      return { created: true, replayed: false, responseSnapshot: structuredClone(responseSnapshot) };
     });
   }
 
@@ -3097,7 +3534,7 @@ export function createFileRepository(filePath) {
     };
   }
 
-  function sourceEventForAdvance(username, row, block, attempt, now) {
+  function sourceEventForAdvance(username, row, block, attempt, authorityNow = null) {
     if (block.kind === 'break') {
       if (attempt != null) throw new Error('ADAPTIVE_SESSION_BREAK_ATTEMPT_FORBIDDEN');
       return {
@@ -3112,6 +3549,9 @@ export function createFileRepository(filePath) {
       && entry.consumed_at && !entry.revoked_at
     ));
     if (!claim) throw new Error('ADAPTIVE_SESSION_ATTEMPT_NOT_BOUND');
+    if (authorityNow && Number(claim.expires_at) <= new Date(authorityNow).getTime()) {
+      throw new Error('ADAPTIVE_EXECUTION_CLAIM_EXPIRED');
+    }
     if (claim.launch_fingerprint !== adaptiveLaunchFingerprint(block)
       || Number(claim.session_execution_revision) !== Number(row.execution_revision || 0)) {
       throw new Error('ADAPTIVE_SESSION_ATTEMPT_MISMATCH');
@@ -3152,18 +3592,18 @@ export function createFileRepository(filePath) {
     const source = attempt.type === 'writing'
       ? state.writing_attempts.find((item) => item.username === username && Number(item.id) === Number(attempt.id))
       : state.speaking_attempts.find((item) => item.username === username && Number(item.id) === Number(attempt.id));
-    const expectedSpeaking = attempt.type === 'speaking' ? adaptiveSpeakingTask(block.contentRef) : null;
     const exactTask = attempt.type === 'writing'
       ? source?.source_task_ref === block.launch?.taskId
-      : expectedSpeaking?.taskNumber === Number(source?.task_type)
-        && source?.assignment_fingerprint === adaptiveExecutionRequestHash(expectedSpeaking.assignment);
+      : adaptiveSpeakingSourceMatches(username, block, source, claim.issued_at);
     if (!source || source.status !== 'completed' || Number(source.created_at) < Number(claim.issued_at)
       || !exactTask) {
       throw new Error('ADAPTIVE_SESSION_ATTEMPT_MISMATCH');
     }
     return {
       source_type: attempt.type, source_ref: String(source.id),
-      evidence_quality: 'server_verified_assisted', evidence_context: claim.evidence_context,
+      evidence_quality: attempt.type === 'speaking'
+        ? 'server_verified_unassisted' : 'server_verified_assisted',
+      evidence_context: claim.evidence_context,
       actual_minutes: null,
     };
   }
@@ -3178,7 +3618,7 @@ export function createFileRepository(filePath) {
     if (row.current_block_id !== candidate.blockId) throw new Error('ADAPTIVE_SESSION_BLOCK_NOT_CURRENT');
     const block = row.blocks.find((item) => item.id === candidate.blockId);
     if (!block) throw new Error('ADAPTIVE_SESSION_BLOCK_NOT_CURRENT');
-    const source = sourceEventForAdvance(username, row, block, candidate.attempt, candidate.now);
+    const source = sourceEventForAdvance(username, row, block, candidate.attempt);
     const nextBlock = row.blocks.find((item) => item.position === block.position + 1) || null;
     return {
       session: adaptiveLearningSessionPublicDto(row),
@@ -3192,21 +3632,23 @@ export function createFileRepository(filePath) {
   async function advanceAdaptiveLearningSession(username, candidate) {
     return serializeCoordinatedMutation(async () => {
       await load();
-      const replay = adaptiveMutationReplay(username, { ...candidate, operation: 'advance' });
-      if (replay) return { advanced: false, replayed: true, responseSnapshot: replay };
       const row = adaptiveSessionRow(username, candidate.sessionId);
       if (!row) throw new Error('ADAPTIVE_SESSION_NOT_FOUND');
+      const block = row.blocks.find((item) => item.id === candidate.blockId);
+      const effectiveNow = adaptiveMutationEffectiveNow();
+      requireAdaptivePremiumDepthEntitlement(username, block, effectiveNow);
+      const replay = adaptiveMutationReplay(username, { ...candidate, operation: 'advance' });
+      if (replay) return { advanced: false, replayed: true, responseSnapshot: replay };
       if (Number(row.execution_revision || 0) !== Number(candidate.expectedRevision)) {
         throw new Error('ADAPTIVE_SESSION_REVISION_CONFLICT');
       }
       if (row.current_block_id !== candidate.blockId) throw new Error('ADAPTIVE_SESSION_BLOCK_NOT_CURRENT');
-      const block = row.blocks.find((item) => item.id === candidate.blockId);
-      const source = sourceEventForAdvance(username, row, block, candidate.attempt, candidate.now);
+      const source = sourceEventForAdvance(username, row, block, candidate.attempt, effectiveNow);
       if (adaptiveSessionEvents(username, row.id).some((event) => event.block_id === block.id)) {
         throw new Error('ADAPTIVE_SESSION_BLOCK_ALREADY_COMPLETED');
       }
       const nextBlock = row.blocks.find((item) => item.position === block.position + 1) || null;
-      const instant = new Date(candidate.now).getTime();
+      const instant = effectiveNow.getTime();
       const event = {
         id: candidate.eventId,
         username,
@@ -3322,10 +3764,12 @@ export function createFileRepository(filePath) {
     const diagnostics = state.adaptive_diagnostic_sessions.filter((entry) => entry.username === username);
     return {
       shortDiagnosticsCompleted: diagnostics.filter((entry) => (
-        entry.status === 'completed' && entry.catalog_version === 'ege-short-diagnostic-v1'
+        entry.status === 'completed'
+          && ['ege-short-diagnostic-v1', 'ege-short-diagnostic-v2'].includes(entry.catalog_version)
       )).length,
       deepDiagnosticsCompleted: diagnostics.filter((entry) => (
-        entry.status === 'completed' && entry.catalog_version === 'ege-deep-diagnostic-v1'
+        entry.status === 'completed'
+          && ['ege-deep-diagnostic-v1', 'ege-deep-diagnostic-v2'].includes(entry.catalog_version)
       )).length,
       sessionsCreated: sessions.length,
       sessionsCompleted: sessions.filter((entry) => entry.status === 'completed').length,
@@ -3381,7 +3825,7 @@ export function createFileRepository(filePath) {
       }
       if (diagnostic.commercialMode === 'free_short' && state.adaptive_diagnostic_sessions.some((entry) => (
         entry.username === username && entry.status === 'completed'
-          && entry.catalog_version === 'ege-short-diagnostic-v1'
+          && ['ege-short-diagnostic-v1', 'ege-short-diagnostic-v2'].includes(entry.catalog_version)
       ))) {
         throw new Error('ADAPTIVE_FREE_DIAGNOSTIC_USED');
       }
@@ -3630,32 +4074,32 @@ export function createFileRepository(filePath) {
   }
 
   async function recordModuleAttempt(username, attempt, { evidenceQuality = 'client_reported' } = {}) {
-    await load();
-    const trustedEvidenceQuality = requireModuleAttemptEvidenceQuality(evidenceQuality);
-    if (state.module_attempts.some((item) => item.id === attempt.id)) return { id: attempt.id, created: false };
-    state.module_attempts.push({ id: attempt.id, username, module: attempt.module, activity: attempt.activity, score: attempt.score, max_score: attempt.maxScore, duration_ms: attempt.durationMs ?? null, metadata: structuredClone(attempt.metadata || {}), evidence_quality: trustedEvidenceQuality, created_at: Date.now() });
-    state.progress_summary[username] ||= {};
-    const summary = state.progress_summary[username][attempt.module] ||= { module: attempt.module, attempt_count: 0, best_score: 0, best_max_score: 1, total_duration_ms: 0, last_attempt_at: null, updated_at: null };
-    summary.attempt_count += 1;
-    if (attempt.score / attempt.maxScore > summary.best_score / summary.best_max_score) {
-      summary.best_score = attempt.score;
-      summary.best_max_score = attempt.maxScore;
-    }
-    summary.total_duration_ms += attempt.durationMs ?? 0;
-    summary.last_attempt_at = Date.now();
-    summary.updated_at = summary.last_attempt_at;
-    await persist();
-    return { id: attempt.id, created: true };
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      const trustedEvidenceQuality = requireModuleAttemptEvidenceQuality(evidenceQuality);
+      if (state.module_attempts.some((item) => item.id === attempt.id)) return { id: attempt.id, created: false };
+      state.module_attempts.push({ id: attempt.id, username, module: attempt.module, activity: attempt.activity, score: attempt.score, max_score: attempt.maxScore, duration_ms: attempt.durationMs ?? null, metadata: structuredClone(attempt.metadata || {}), evidence_quality: trustedEvidenceQuality, created_at: Date.now() });
+      state.progress_summary[username] ||= {};
+      const summary = state.progress_summary[username][attempt.module] ||= { module: attempt.module, attempt_count: 0, best_score: 0, best_max_score: 1, total_duration_ms: 0, last_attempt_at: null, updated_at: null };
+      summary.attempt_count += 1;
+      if (attempt.score / attempt.maxScore > summary.best_score / summary.best_max_score) {
+        summary.best_score = attempt.score;
+        summary.best_max_score = attempt.maxScore;
+      }
+      summary.total_duration_ms += attempt.durationMs ?? 0;
+      summary.last_attempt_at = Date.now();
+      summary.updated_at = summary.last_attempt_at;
+      await persist();
+      return { id: attempt.id, created: true };
+    });
   }
 
-  async function recordModuleAttemptWithAdaptiveClaim(username, attempt, {
-    executionClaim, now = new Date(),
-  }) {
+  async function recordModuleAttemptWithAdaptiveClaim(username, attempt, { executionClaim }) {
     return serializeCoordinatedMutation(async () => {
       await load();
       const tokenHash = adaptiveExecutionTokenHash(executionClaim);
       const claim = state.adaptive_learning_execution_claims.find((entry) => entry.token_hash === tokenHash);
-      const instant = new Date(now).getTime();
+      const instant = adaptiveMutationEffectiveNow().getTime();
       if (!claim || claim.username !== username) throw new Error('ADAPTIVE_EXECUTION_CLAIM_INVALID');
       const row = adaptiveSessionRow(username, claim.session_id);
       const block = row?.blocks.find((item) => item.id === claim.block_id);
@@ -3727,12 +4171,16 @@ export function createFileRepository(filePath) {
   }
 
   async function bindAdaptiveLearningServerAttempt(username, {
-    sessionId, executionClaim, attempt, now = new Date(),
+    sessionId, executionClaim, attempt,
   }) {
     return serializeCoordinatedMutation(async () => {
       await load();
-      const context = adaptiveClaimMutationContext(username, sessionId, executionClaim, now);
+      const effectiveNow = adaptiveMutationEffectiveNow();
+      const context = adaptiveClaimMutationContext(
+        username, sessionId, executionClaim, effectiveNow,
+      );
       const { instant, claim, row, block } = context;
+      requireAdaptivePremiumDepthEntitlement(username, block, effectiveNow);
       if (attempt.type === 'voice_tutor_repeat') {
         const source = state.voice_tutor_repeat_attempts.find((item) => item.id === attempt.id);
         const repeat = state.voice_tutor_repeats.find((item) => item.id === source?.repeat_id);
@@ -3754,7 +4202,7 @@ export function createFileRepository(filePath) {
         }
         return {
           created: false,
-          evidenceQuality: attempt.type === 'voice_tutor_repeat'
+          evidenceQuality: ['voice_tutor_repeat', 'speaking'].includes(attempt.type)
             ? 'server_verified_unassisted' : 'server_verified_assisted',
           adaptiveExecution: {
             sessionId: row.id, blockId: block.id,
@@ -3766,19 +4214,17 @@ export function createFileRepository(filePath) {
       const source = attempt.type === 'writing'
         ? state.writing_attempts.find((item) => item.username === username && Number(item.id) === Number(attempt.id))
         : state.speaking_attempts.find((item) => item.username === username && Number(item.id) === Number(attempt.id));
-      const expectedActivity = attempt.type === 'writing'
-        ? String(source?.task_type || '')
-        : `speaking_${source?.task_type}`;
-      const expectedSpeaking = attempt.type === 'speaking' ? adaptiveSpeakingTask(block.contentRef) : null;
+      const activityMatches = attempt.type === 'writing'
+        ? block.activityId === String(source?.task_type || '')
+        : adaptiveSpeakingActivityMatchesTask(block.activityId, source?.task_type);
       const exactTask = attempt.type === 'writing'
         ? source?.source_task_ref === block.launch?.taskId
-        : expectedSpeaking?.taskNumber === Number(source?.task_type)
-          && source?.assignment_fingerprint === adaptiveExecutionRequestHash(expectedSpeaking.assignment);
+        : adaptiveSpeakingSourceMatches(username, block, source, claim.issued_at);
       if (!source || source.status !== 'completed'
         || (attempt.type === 'speaking' && (source.review?.status !== 'scored'
           || typeof source.review?.got !== 'number' || typeof source.review?.max !== 'number'))
         || Number(source.created_at) < Number(claim.issued_at)
-        || block.module !== attempt.type || block.activityId !== expectedActivity || !exactTask) {
+        || block.module !== attempt.type || !activityMatches || !exactTask) {
         throw new Error('ADAPTIVE_EXECUTION_ATTEMPT_MISMATCH');
       }
       claim.consumed_at = instant;
@@ -3786,7 +4232,8 @@ export function createFileRepository(filePath) {
       claim.attempt_ref = String(attempt.id);
       await persist();
       return {
-        created: true, evidenceQuality: 'server_verified_assisted',
+        created: true, evidenceQuality: attempt.type === 'speaking'
+          ? 'server_verified_unassisted' : 'server_verified_assisted',
         adaptiveExecution: {
           sessionId: row.id, blockId: block.id,
           attemptType: attempt.type, attemptId: Number(attempt.id),
@@ -4307,6 +4754,9 @@ export function createFileRepository(filePath) {
     getSpeakingEvaluationClaim,
     finishSpeakingAttempt,
     getSpeakingAttempt,
+    getSpeakingLearningAttempts,
+    getSpeakingLearningReportSnapshot,
+    markSpeakingSessionAssisted,
     assignSpeakingTask1Session,
     getSpeakingTask1Session,
     completeSpeakingTask1Session,

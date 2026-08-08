@@ -12,6 +12,7 @@ import { SPEAKING_TASK2_CATALOG } from '../public/content/speaking/task2-v1.js';
 import { SPEAKING_TASK3_CATALOG } from '../public/content/speaking/task3-v1.js';
 import { SPEAKING_TASK4_CATALOG } from '../public/content/speaking/task4-v1.js';
 import { createFileRepository } from '../storage/file-repository.js';
+import { buildSpeakingLearningAttempt } from '../speaking/learning-loop.js';
 
 function semanticTask2({ confidence = 0.95 } = {}) {
   return {
@@ -79,15 +80,27 @@ function semanticTask4() {
 }
 
 async function finalizeAssessment(repository, owner, {
-  key, id, contextId, transcript, acceptable = true, processedDurationSeconds = 10, words = [],
+  key, id, contextId, transcript, acceptable = true, processedDurationSeconds = 10,
+  confidence = 96, locale = 'en-GB', mode = 'unscripted',
+  metrics = {},
+  words = [{
+    text: 'trusted', errorType: 'none', accuracyScore: 93,
+    offsetSeconds: 1, durationSeconds: 0.4,
+    phonemes: [{ ipa: 't', accuracyScore: 90 }],
+  }],
 }) {
+  const preparedWords = words?.map((word, index) => ({
+    ...word,
+    ...(word.errorType !== 'omission' && !Object.hasOwn(word, 'offsetSeconds')
+      ? { offsetSeconds: 1 + index, durationSeconds: 0.4 } : {}),
+  }));
   const reservedSeconds = Math.max(20, Math.ceil(processedDurationSeconds));
   await repository.reserveSpeakingAssessment(owner, {
     id,
     idempotencyKey: key,
     requestHash: key.replaceAll('-', '').padEnd(64, 'a').slice(0, 64),
     reservedSeconds,
-    locale: 'en-GB',
+    locale,
     contextId,
     now: new Date('2026-08-06T10:01:00.000Z'),
   });
@@ -98,9 +111,14 @@ async function finalizeAssessment(repository, owner, {
     now: new Date('2026-08-06T10:01:10.000Z'),
     result: {
       assessment: {
-        status: 'success', isFinal: true, available: true, transcript, confidence: 96,
-        processedDurationSeconds,
-        words, quality: { acceptable, warnings: acceptable ? [] : ['low_recognition_confidence'] },
+        status: 'success', isFinal: true, available: true, transcript, confidence,
+        processedDurationSeconds, locale, mode, pauseAnalysisAvailable: locale === 'en-US',
+        overallScore: Object.hasOwn(metrics, 'overallScore') ? metrics.overallScore : 90,
+        accuracyScore: Object.hasOwn(metrics, 'accuracyScore') ? metrics.accuracyScore : 94,
+        fluencyScore: Object.hasOwn(metrics, 'fluencyScore') ? metrics.fluencyScore : 86,
+        ...(Object.hasOwn(metrics, 'completenessScore')
+          ? { completenessScore: metrics.completenessScore } : {}),
+        words: preparedWords, quality: { acceptable, warnings: acceptable ? [] : ['low_recognition_confidence'] },
       },
       billing: {
         assessmentId: id, reservedSeconds,
@@ -140,8 +158,32 @@ async function withEvaluationServer(run, options = {}) {
     catalogId: catalog.id,
     catalogRevision: catalog.revision,
     tasks: catalog.tasks,
+    ...(options.targetedPractice ? {
+      targetedPractice: options.targetedPractice,
+      selectionReason: 'targeted_focus',
+    } : {}),
     now: new Date('2026-08-06T10:00:00.000Z'),
   });
+  if (taskType === 1) {
+    await repository.completeSpeakingTask1Session(owner, session.id, {
+      recordingDurationSeconds: 60, micCheck: 'passed', localPlayback: true, selfRating: 'steady',
+    }, { now: new Date('2026-08-06T10:01:00.000Z') });
+  } else if (taskType === 2 || taskType === 3) {
+    const count = taskType === 2 ? 4 : 5;
+    const complete = taskType === 2
+      ? repository.completeSpeakingTask2Question.bind(repository)
+      : repository.completeSpeakingTask3Answer.bind(repository);
+    for (let index = 1; index <= count; index += 1) {
+      await complete(owner, session.id, index, {
+        recordingDurationSeconds: taskType === 2 ? 12 : 20,
+        localPlayback: true, selfRating: 'steady',
+      }, { now: new Date(Date.UTC(2026, 7, 6, 10, index)) });
+    }
+  } else {
+    await repository.completeSpeakingTask4Session(owner, session.id, {
+      recordingDurationSeconds: 60, micCheck: 'passed', localPlayback: true, selfRating: 'steady',
+    }, { now: new Date('2026-08-06T10:01:00.000Z') });
+  }
   const assessmentKeys = [];
   if (taskType === 2 || taskType === 3) {
     const task = catalog.tasks.find((item) => item.id === session.task_id);
@@ -156,7 +198,12 @@ async function withEvaluationServer(run, options = {}) {
         key, id, transcript: transcripts[index - 1],
         contextId: `task${taskType}:${session.id}:${task.id}@${task.revision}:item${index}`,
         acceptable: options.acousticAcceptable !== false,
+        confidence: Object.hasOwn(options.assessmentConfidences || [], index - 1)
+          ? options.assessmentConfidences[index - 1] : 96,
         processedDurationSeconds: options.itemDurations?.[index - 1] ?? 10,
+        locale: options.assessmentLocale || 'en-GB',
+        metrics: options.assessmentMetrics?.[index - 1] || {},
+        words: options.assessmentWords?.[index - 1],
       });
       assessmentKeys.push(key);
     }
@@ -169,7 +216,10 @@ async function withEvaluationServer(run, options = {}) {
       transcript: 'People is learning in both pictures. The monologue continues with enough phrases.',
       contextId: `task4:${session.id}:${task.id}@${task.revision}`,
       processedDurationSeconds: 30,
-      words: [{ text: 'People', errorType: 'mispronunciation', accuracyScore: 70 }],
+      words: [{
+        text: 'People', errorType: 'mispronunciation', accuracyScore: 70,
+        offsetSeconds: 1.25, durationSeconds: 0.4,
+      }],
     });
     assessmentKeys.push(key);
   }
@@ -250,6 +300,167 @@ async function withEvaluationServer(run, options = {}) {
   }
 }
 
+test('missing provider scoring facts fail closed before public learning mastery', async () => {
+  const nullableWords = Array.from({ length: 4 }, () => [{
+    text: 'weather', errorType: 'mispronunciation', accuracyScore: null,
+    phonemes: [{ ipa: 'w', accuracyScore: null }],
+  }]);
+  await withEvaluationServer(async ({ owner, session, request, repository, assessmentKeys }) => {
+    const response = await request(owner, {
+      taskType: 2, sessionId: session.id, pronunciationAssessmentKeys: assessmentKeys,
+    });
+    assert.equal(response.status, 200);
+    assert.equal(response.body.review.status, 'needs_retry');
+    assert.equal(response.body.review.needsRetryReason, 'acoustic_evidence_uncertain');
+    const stored = await repository.getSpeakingAttempt(owner, response.body.attemptId);
+    assert.deepEqual({
+      completenessScore: stored.review.acousticFacts.completenessScore,
+      fluencyScore: stored.review.acousticFacts.fluencyScore,
+      wordAccuracyScore: stored.review.acousticFacts.wordAccuracyScore,
+      phonemeAccuracyScore: stored.review.acousticFacts.phonemeAccuracyScore,
+    }, {
+      completenessScore: null,
+      fluencyScore: null,
+      wordAccuracyScore: null,
+      phonemeAccuracyScore: null,
+    });
+    const learning = buildSpeakingLearningAttempt(stored);
+    assert.equal(learning.status, 'needs_retry');
+    assert.equal(learning.masteryEligible, false);
+    assert.equal(learning.signal.fluencyScore, null);
+  }, {
+    taskType: 2,
+    budgetBlocked: true,
+    rateBlocked: true,
+    assessmentMetrics: Array.from({ length: 4 }, () => ({
+      accuracyScore: null, fluencyScore: null, completenessScore: null,
+    })),
+    assessmentWords: nullableWords,
+  });
+});
+
+test('Azure pause and monotone annotations survive evaluation without becoming pronunciation errors', async () => {
+  await withEvaluationServer(async ({ owner, session, request, repository, assessmentKeys }) => {
+    const response = await request(owner, {
+      taskType: 2, sessionId: session.id, pronunciationAssessmentKeys: assessmentKeys,
+    });
+    assert.equal(response.status, 200);
+    assert.equal(response.body.review.status, 'scored');
+    const stored = await repository.getSpeakingAttempt(owner, response.body.attemptId);
+    assert.deepEqual(stored.review.acousticFacts.wordEvents.map((event) => event.type), [
+      'unexpected_break', 'missing_break', 'monotone',
+    ]);
+    const learning = buildSpeakingLearningAttempt(stored);
+    assert.equal(learning.masteryEligible, true);
+    assert.deepEqual(learning.wordIssues, []);
+    assert.equal(learning.signal.pauseAnalysis.available, true);
+    assert.equal(learning.signal.pauseAnalysis.totalCount, 2);
+  }, {
+    taskType: 2,
+    assessmentLocale: 'en-US',
+    assessmentWords: [
+      [{ text: 'weather', errorType: 'unexpected_break', accuracyScore: 93,
+        offsetSeconds: 1.2, durationSeconds: 0.8, phonemes: [] }],
+      [{ text: 'today', errorType: 'missing_break', accuracyScore: 93,
+        offsetSeconds: 2.4, durationSeconds: 0.3, phonemes: [] }],
+      [{ text: 'open', errorType: 'none', accuracyScore: 93,
+        offsetSeconds: 1, durationSeconds: 0.4, phonemes: [] }],
+      [{ text: 'equipment', errorType: 'monotone', accuracyScore: 93,
+        offsetSeconds: 1, durationSeconds: 0.4, phonemes: [] }],
+    ],
+  });
+});
+
+test('targeted evaluation persists only the exact bounded Azure target measurement', async () => {
+  const target = {
+    sourceAttemptId: 77,
+    reportRevision: 'attempt.77.1786093200000',
+    accentLocale: 'en-GB',
+    skillId: 'ege.speaking.pronunciation_words',
+    label: 'Произношение слова «cost»',
+    contentRef: 'server:speaking:task:2:skill:ege.speaking.pronunciation_words:focus:word.77.0:new:v1',
+    focus: { kind: 'word', value: 'cost', anchorWord: 'cost', ref: 'word.77.0' },
+  };
+  await withEvaluationServer(async ({ owner, session, request, repository, assessmentKeys }) => {
+    const response = await request(owner, {
+      taskType: 2, sessionId: session.id, pronunciationAssessmentKeys: assessmentKeys,
+    });
+    assert.equal(response.status, 200);
+    const stored = await repository.getSpeakingAttempt(owner, response.body.attemptId);
+    assert.deepEqual(stored.targeted_practice, target);
+    assert.deepEqual(stored.review.acousticFacts.targetMeasurement, {
+      focusRef: 'word.77.0', kind: 'word', value: 'cost', anchorWord: 'cost',
+      anchorObserved: true, score: 74,
+    });
+    const exported = await repository.exportUserData(owner);
+    assert.deepEqual(exported.speaking_attempts[0].review.acousticFacts.targetMeasurement,
+      stored.review.acousticFacts.targetMeasurement);
+    assert.equal(JSON.stringify(stored.review.acousticFacts.targetMeasurement).includes('trusted'), false,
+      'the target measurement must not retain unrelated recognized words');
+  }, {
+    targetedPractice: target,
+    assessmentWords: [
+      [{ text: 'cost', errorType: 'none', accuracyScore: 74, phonemes: [] }],
+      [{ text: 'trusted', errorType: 'none', accuracyScore: 99, phonemes: [] }],
+      [{ text: 'trusted', errorType: 'none', accuracyScore: 99, phonemes: [] }],
+      [{ text: 'trusted', errorType: 'none', accuracyScore: 99, phonemes: [] }],
+    ],
+  });
+});
+
+test('target measurement treats scripted omissions and invalid raw scores as inconclusive', async () => {
+  const target = {
+    sourceAttemptId: 77,
+    reportRevision: 'attempt.77.1786093200000',
+    accentLocale: 'en-GB',
+    skillId: 'ege.speaking.pronunciation_words',
+    label: 'Произношение слова «cost»',
+    contentRef: 'server:speaking:task:2:skill:ege.speaking.pronunciation_words:focus:word.77.0:new:v1',
+    focus: { kind: 'word', value: 'cost', anchorWord: 'cost', ref: 'word.77.0' },
+  };
+  const scenarios = [
+    {
+      words: [{ text: 'cost', errorType: 'omission', accuracyScore: 95, phonemes: [] }],
+      expected: { anchorObserved: false, score: null },
+    },
+    {
+      words: [
+        { text: 'cost', errorType: 'none', accuracyScore: null, phonemes: [] },
+        { text: 'cost', errorType: 'none', accuracyScore: 101, phonemes: [] },
+      ],
+      expected: null,
+    },
+  ];
+  for (const scenario of scenarios) {
+    await withEvaluationServer(async ({ owner, session, request, repository, assessmentKeys }) => {
+      const response = await request(owner, {
+        taskType: 2, sessionId: session.id, pronunciationAssessmentKeys: assessmentKeys,
+      });
+      assert.equal(response.status, 200);
+      const stored = await repository.getSpeakingAttempt(owner, response.body.attemptId);
+      assert.deepEqual(stored.review.acousticFacts.targetMeasurement, scenario.expected === null
+        ? undefined : {
+          focusRef: target.focus.ref,
+          kind: target.focus.kind,
+          value: target.focus.value,
+          anchorWord: target.focus.anchorWord,
+          ...scenario.expected,
+        });
+      const learning = buildSpeakingLearningAttempt(stored);
+      assert.equal(learning.targetOutcome.status, 'inconclusive');
+      assert.equal(learning.targetOutcome.score, null);
+    }, {
+      targetedPractice: target,
+      assessmentWords: [
+        scenario.words,
+        [{ text: 'trusted', errorType: 'none', accuracyScore: 99, phonemes: [] }],
+        [{ text: 'trusted', errorType: 'none', accuracyScore: 99, phonemes: [] }],
+        [{ text: 'trusted', errorType: 'none', accuracyScore: 99, phonemes: [] }],
+      ],
+    });
+  }
+});
+
 test('speaking evaluation resolves the owner-bound session and deterministically scores model facts', async () => {
   await withEvaluationServer(async ({
     owner, session, request, providerCalls, repository, assessmentKeys,
@@ -281,6 +492,9 @@ test('speaking evaluation resolves the owner-bound session and deterministically
     assert.equal(stored.review.acousticFacts.available, true);
     assert.deepEqual(stored.review.acousticFacts.itemDurations.map((item) => item.itemIndex), [1, 2, 3, 4]);
     assert.deepEqual(stored.review.acousticFacts.itemDurations.map((item) => item.durationSeconds), [10, 10, 10, 10]);
+    assert.equal(stored.review.acousticFacts.wordAccuracyScore, 94);
+    assert.equal(stored.review.acousticFacts.phonemeAccuracyScore, 90);
+    assert.equal(stored.review.acousticFacts.fluencyScore, 86);
     assert.equal(stored.review.scoringVersion, 'speaking-fipi-combiner-v2');
 
     setBudgetBlocked(true);
@@ -346,6 +560,50 @@ test('unusable acoustic evidence returns retry before any xAI call', async () =>
   }, { acousticAcceptable: false, budgetBlocked: true, rateBlocked: true });
 });
 
+test('missing recognition confidence stays unavailable through stored retry evidence', async () => {
+  await withEvaluationServer(async ({
+    owner, session, request, assessmentKeys, providerCalls, repository,
+  }) => {
+    const response = await request(owner, {
+      taskType: 2, sessionId: session.id, pronunciationAssessmentKeys: assessmentKeys,
+    });
+    assert.equal(response.status, 200);
+    assert.equal(response.body.review.status, 'needs_retry');
+    assert.equal(response.body.review.needsRetryReason, 'acoustic_evidence_uncertain');
+    assert.equal(response.body.review.confidence, null);
+    assert.equal(providerCalls.length, 0);
+    const stored = await repository.getSpeakingAttempt(owner, response.body.attemptId);
+    assert.equal(stored.review.acousticFacts.recognitionConfidence, null);
+    assert.equal(stored.review.acousticFacts.fluencyScore, null);
+  }, { assessmentConfidences: [null, 96, 96, 96], budgetBlocked: true, rateBlocked: true });
+});
+
+test('word timing beyond the trusted processed WAV duration fails closed before FIPI', async () => {
+  await withEvaluationServer(async ({ owner, session, request, assessmentKeys, providerCalls, repository }) => {
+    const response = await request(owner, {
+      taskType: 2, sessionId: session.id, pronunciationAssessmentKeys: assessmentKeys,
+    });
+    assert.equal(response.status, 200);
+    assert.equal(response.body.review.status, 'needs_retry');
+    assert.equal(response.body.review.needsRetryReason, 'acoustic_evidence_uncertain');
+    assert.equal(providerCalls.length, 0);
+    const stored = await repository.getSpeakingAttempt(owner, response.body.attemptId);
+    assert.equal(stored.review.acousticFacts.signalQuality, 'poor');
+    assert.equal(stored.review.acousticFacts.fluencyScore, null);
+    assert.equal(stored.review.acousticFacts.wordAccuracyScore, null);
+    assert.equal(stored.review.acousticFacts.wordEvents[0].offsetSeconds, null);
+    assert.equal(stored.review.acousticFacts.wordEvents[0].durationSeconds, null);
+    assert.equal(buildSpeakingLearningAttempt(stored).masteryEligible, false);
+  }, {
+    taskType: 2, budgetBlocked: true, rateBlocked: true,
+    assessmentWords: [
+      [{ text: 'weather', errorType: 'mispronunciation', accuracyScore: 70,
+        offsetSeconds: 9.9, durationSeconds: 0.2, phonemes: [] }],
+      undefined, undefined, undefined,
+    ],
+  });
+});
+
 test('budget and rate rejection do not create a pending speaking claim', async () => {
   await withEvaluationServer(async ({
     owner, session, request, assessmentKeys, providerCalls, repository,
@@ -401,8 +659,13 @@ test('task 4 rejects a score event claimed by both semantic and Azure evidence o
     assert.equal(providerCalls.length, 1);
     const stored = await repository.getSpeakingAttempt(owner, response.body.attemptId);
     assert.deepEqual(
-      { start: stored.review.acousticFacts.wordEvents[0].start, end: stored.review.acousticFacts.wordEvents[0].end },
-      { start: 0, end: 6 },
+      {
+        start: stored.review.acousticFacts.wordEvents[0].start,
+        end: stored.review.acousticFacts.wordEvents[0].end,
+        offsetSeconds: stored.review.acousticFacts.wordEvents[0].offsetSeconds,
+        durationSeconds: stored.review.acousticFacts.wordEvents[0].durationSeconds,
+      },
+      { start: 0, end: 6, offsetSeconds: 1.25, durationSeconds: 0.4 },
     );
   }, { taskType: 4 });
 });
@@ -479,9 +742,13 @@ test('task 1 combines the exact owner-bound Azure assessment and rejects a misma
       result: {
         assessment: {
           status: 'success', isFinal: true, available: true, transcript: task.text, confidence: 94,
-          processedDurationSeconds: 58,
-          completenessScore: 96, fluencyScore: 82,
-          words: [{ text: task.text.match(/[A-Za-z]+/u)[0], errorType: 'mispronunciation', accuracyScore: 70 }],
+          processedDurationSeconds: 58, locale: 'en-GB', mode: 'scripted',
+          pauseAnalysisAvailable: false,
+          overallScore: 84, accuracyScore: 88, completenessScore: 96, fluencyScore: 82,
+          words: [{
+            text: task.text.match(/[A-Za-z]+/u)[0], errorType: 'mispronunciation', accuracyScore: 70,
+            offsetSeconds: 1.25, durationSeconds: 0.4,
+          }],
           quality: { acceptable: true, warnings: [] },
         },
         billing: { assessmentId, reservedSeconds: 60, billableSeconds: 58, conservative: false },

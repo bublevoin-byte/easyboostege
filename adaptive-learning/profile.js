@@ -2,7 +2,9 @@ import { normalizeModuleAttemptEvidenceQuality } from './evidence-quality.js';
 import { requiresServerAssessment } from './evidence-policy.js';
 import {
   ADAPTIVE_PROFILE_CALCULATION_REVISION,
+  adaptiveProfileMatchesEvidenceSources,
   buildAdaptiveEvidenceWatermark,
+  canonicalAdaptiveEvidenceTimestamp,
 } from './evidence-watermark.js';
 import { resolveVoiceTutorAdaptiveSkill, VOICE_TUTOR_SKILL_COMPATIBILITY } from './skill-compatibility.js';
 import {
@@ -19,13 +21,13 @@ import {
   READING_GIST_ACTIVITY_IDS,
 } from '../public/learning-activity-contract.js';
 
-const TAXONOMY_VERSION = 'ege-en-v1';
-const WEIGHTING_VERSION = 'adaptive-evidence-v1';
+const TAXONOMY_VERSION = 'ege-en-v2';
+const WEIGHTING_VERSION = 'adaptive-evidence-v2';
 
 export const ADAPTIVE_EVIDENCE_WEIGHTS = Object.freeze({
   moduleAttempt: 0.7,
   clientReportedAttempt: 0.1,
-  assistedRecovery: 0.2,
+  assistedRecovery: 0,
   retentionCheck: 0.9,
   diagnosticAnswer: 1,
 });
@@ -46,8 +48,17 @@ const SKILLS = [
   { id: 'ege.listening.detail', label: 'Детальное понимание аудио', module: 'listening', egeWeight: 1, recommendedBlockMinutes: 20, activityIds: LISTENING_DETAIL_ACTIVITY_IDS },
   { id: 'ege.writing.email', label: 'Электронное письмо', module: 'writing', egeWeight: 0.8, recommendedBlockMinutes: 25, premiumDeepAssessment: true, activityIds: ['writing_37', 'email'] },
   { id: 'ege.writing.essay', label: 'Развёрнутое письменное высказывание', module: 'writing', egeWeight: 1, recommendedBlockMinutes: 30, premiumDeepAssessment: true, activityIds: ['writing_38', 'essay'] },
-  { id: 'ege.speaking.interaction', label: 'Устное взаимодействие', module: 'speaking', egeWeight: 0.9, recommendedBlockMinutes: 15, premiumDeepAssessment: true, activityIds: ['speaking_2', 'speaking_3', 'speaking_interaction'] },
-  { id: 'ege.speaking.monologue', label: 'Монологическое высказывание', module: 'speaking', egeWeight: 1, recommendedBlockMinutes: 20, premiumDeepAssessment: true, activityIds: ['speaking_4', 'speaking_monologue', 'speaking'] },
+  { id: 'ege.speaking.reading_aloud', label: 'Чтение вслух', module: 'speaking', egeWeight: 0.8, recommendedBlockMinutes: 15, premiumDeepAssessment: true, activityIds: ['speaking_1', 'speaking_reading_aloud'] },
+  { id: 'ege.speaking.direct_questions', label: 'Прямые вопросы', module: 'speaking', egeWeight: 0.9, recommendedBlockMinutes: 15, premiumDeepAssessment: true, activityIds: ['speaking_2', 'speaking_direct_questions', 'speaking_interaction'] },
+  { id: 'ege.speaking.interview_completeness', label: 'Полнота интервью', module: 'speaking', egeWeight: 0.9, recommendedBlockMinutes: 20, premiumDeepAssessment: true, activityIds: ['speaking_3', 'speaking_interview'] },
+  { id: 'ege.speaking.monologue_content', label: 'Содержание монолога', module: 'speaking', egeWeight: 1, recommendedBlockMinutes: 20, premiumDeepAssessment: true, activityIds: ['speaking_4', 'speaking_monologue', 'speaking'] },
+  { id: 'ege.speaking.monologue_organization', label: 'Организация монолога', module: 'speaking', egeWeight: 0.9, recommendedBlockMinutes: 20, premiumDeepAssessment: true, activityIds: ['speaking_4_organization'] },
+  { id: 'ege.speaking.spoken_grammar', label: 'Грамматика устной речи', module: 'speaking', egeWeight: 0.9, recommendedBlockMinutes: 20, premiumDeepAssessment: true, activityIds: ['speaking_4_grammar'] },
+  { id: 'ege.speaking.spoken_lexis', label: 'Лексика устной речи', module: 'speaking', egeWeight: 0.9, recommendedBlockMinutes: 20, premiumDeepAssessment: true, activityIds: ['speaking_4_lexis'] },
+  { id: 'ege.speaking.fluency', label: 'Беглость речи', module: 'speaking', egeWeight: 0.8, recommendedBlockMinutes: 15, premiumDeepAssessment: true, activityIds: ['speaking_1_fluency'] },
+  { id: 'ege.speaking.pronunciation_words', label: 'Произношение слов', module: 'speaking', egeWeight: 0.8, recommendedBlockMinutes: 15, premiumDeepAssessment: true, activityIds: ['speaking_1_words'] },
+  { id: 'ege.speaking.pronunciation_phonemes', label: 'Произношение фонем', module: 'speaking', egeWeight: 0.8, recommendedBlockMinutes: 15, premiumDeepAssessment: true, activityIds: ['speaking_1_phonemes'] },
+  { id: 'ege.speaking.signal_quality', label: 'Качество записи', module: 'speaking', egeWeight: 0.4, recommendedBlockMinutes: 10, premiumDeepAssessment: true, activityIds: ['speaking_1_signal'] },
 ];
 
 const SKILL_BY_ID = new Map(SKILLS.map((skill) => [skill.id, skill]));
@@ -60,7 +71,7 @@ const DEFAULT_SKILL_BY_MODULE = new Map([
   ['reading', SKILL_BY_ID.get('ege.reading.detail')],
   ['listening', SKILL_BY_ID.get('ege.listening.detail')],
   ['writing', SKILL_BY_ID.get('ege.writing.email')],
-  ['speaking', SKILL_BY_ID.get('ege.speaking.monologue')],
+  ['speaking', SKILL_BY_ID.get('ege.speaking.monologue_content')],
 ]);
 
 export const EGE_SKILL_TAXONOMY = Object.freeze({
@@ -69,14 +80,12 @@ export const EGE_SKILL_TAXONOMY = Object.freeze({
   skills: Object.freeze(SKILLS.map((skill) => Object.freeze({ ...skill }))),
 });
 
-function number(value, fallback = 0) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
+function evidenceNumber(value) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
 function iso(value) {
-  const date = value instanceof Date ? value : new Date(value);
-  return Number.isFinite(date.getTime()) ? date.toISOString() : null;
+  return canonicalAdaptiveEvidenceTimestamp(value);
 }
 
 function skillFor(module, activity = '', requestedId = '', { allowModuleFallback = true } = {}) {
@@ -102,9 +111,11 @@ function skillFor(module, activity = '', requestedId = '', { allowModuleFallback
 
 function attemptObservation(attempt) {
   if (String(attempt.activity || '').startsWith('voice_tutor_')) return null;
-  const skill = skillFor(attempt.module, attempt.activity);
-  const maximum = number(attempt.max_score ?? attempt.maxScore);
-  if (!skill || maximum <= 0) return null;
+  const requestedSkill = attempt.metadata?.skill_id ?? attempt.metadata?.skillId ?? '';
+  const skill = skillFor(attempt.module, attempt.activity, requestedSkill);
+  const score = evidenceNumber(attempt.score);
+  const maximum = evidenceNumber(attempt.max_score ?? attempt.maxScore);
+  if (!skill || score === null || maximum === null || maximum <= 0) return null;
   const storedQuality = normalizeModuleAttemptEvidenceQuality(attempt.evidence_quality ?? attempt.evidenceQuality);
   const quality = storedQuality === 'server_verified_unassisted'
     ? 'independent'
@@ -113,7 +124,7 @@ function attemptObservation(attempt) {
       : 'client_reported';
   return {
     skillId: skill.id,
-    score: Math.max(0, Math.min(100, number(attempt.score) / maximum * 100)),
+    score: Math.max(0, Math.min(100, score / maximum * 100)),
     weight: quality === 'independent'
       ? ADAPTIVE_EVIDENCE_WEIGHTS.moduleAttempt
       : quality === 'assisted'
@@ -122,6 +133,7 @@ function attemptObservation(attempt) {
     kind: 'module_attempt',
     quality,
     independent: quality === 'independent',
+    independentSourceId: String(attempt.metadata?.source_attempt_id || attempt.id || '') || null,
     observedAt: iso(attempt.created_at ?? attempt.createdAt),
   };
 }
@@ -135,10 +147,12 @@ function isEligibleAdaptiveAttempt(attempt) {
 
 function recoveryObservation(recovery) {
   const skill = skillFor(recovery.module, '', recovery.skill_id ?? recovery.skillId, { allowModuleFallback: false });
-  if (!skill) return null;
-  const microPassed = Boolean(recovery.initial_micro_check_passed ?? recovery.initialMicroCheckPassed);
-  const transferPassed = Boolean(recovery.initial_transfer_passed ?? recovery.initialTransferPassed);
-  const fallback = (recovery.terminal_outcome ?? recovery.terminalOutcome) === 'fallback';
+  const microPassed = recovery.initial_micro_check_passed ?? recovery.initialMicroCheckPassed;
+  const transferPassed = recovery.initial_transfer_passed ?? recovery.initialTransferPassed;
+  const outcome = recovery.terminal_outcome ?? recovery.terminalOutcome;
+  if (!skill || typeof microPassed !== 'boolean' || typeof transferPassed !== 'boolean'
+    || !['resolved', 'fallback'].includes(outcome)) return null;
+  const fallback = outcome === 'fallback';
   return {
     skillId: skill.id,
     score: fallback ? 35 : transferPassed ? 65 : microPassed ? 50 : 35,
@@ -146,6 +160,7 @@ function recoveryObservation(recovery) {
     kind: 'assisted_recovery',
     quality: 'assisted',
     independent: false,
+    independentSourceId: null,
     observedAt: iso(recovery.observed_at ?? recovery.observedAt),
   };
 }
@@ -160,6 +175,7 @@ function repeatObservation(attempt) {
     kind: 'retention_check',
     quality: 'independent',
     independent: true,
+    independentSourceId: String(attempt.id ? `repeat:${attempt.id}` : '') || null,
     observedAt: iso(attempt.observed_at ?? attempt.observedAt),
   };
 }
@@ -171,8 +187,9 @@ function diagnosticObservation(response, diagnosticRegistry) {
     response.item_id ?? response.itemId,
     diagnosticRegistry,
   );
-  const skill = SKILL_BY_ID.get(response.skill_id ?? response.skillId);
-  if (!item || !skill || item.skillId !== skill.id || item.module !== response.module
+  const requestedSkillId = response.skill_id ?? response.skillId;
+  const skill = skillFor(response.module, '', requestedSkillId, { allowModuleFallback: false });
+  if (!item || !skill || item.skillId !== requestedSkillId || item.module !== response.module
     || typeof response.correct !== 'boolean') return null;
   const storedEvidenceQuality = response.evidence_quality ?? response.evidenceQuality ?? item.evidenceQuality;
   if (storedEvidenceQuality !== item.evidenceQuality) return null;
@@ -189,9 +206,124 @@ function diagnosticObservation(response, diagnosticRegistry) {
       : assisted ? 'diagnostic_listening_assisted' : 'diagnostic_answer',
     quality: assisted ? 'assisted' : 'independent',
     independent: !assisted,
-    diagnosticFamily: `${item.skillId}:${item.id}`,
+    independentSourceId: String(response.id
+      ? `diagnostic:${response.id}`
+      : `${response.diagnostic_id ?? response.diagnosticId ?? ''}:${response.item_id ?? response.itemId ?? ''}`) || null,
+    diagnosticFamily: `${skill.id}:${item.id}`,
     observedAt: iso(response.answered_at ?? response.answeredAt),
   };
+}
+
+function text(value) {
+  return value == null ? null : String(value);
+}
+
+function canonicalAttempt(attempt) {
+  const metadata = attempt?.metadata && typeof attempt.metadata === 'object' && !Array.isArray(attempt.metadata)
+    ? attempt.metadata : {};
+  return {
+    id: text(attempt?.id),
+    module: text(attempt?.module),
+    activity: text(attempt?.activity),
+    score: evidenceNumber(attempt?.score),
+    max_score: evidenceNumber(attempt?.max_score ?? attempt?.maxScore),
+    metadata: {
+      skill_id: text(metadata.skill_id ?? metadata.skillId),
+      source_attempt_id: text(metadata.source_attempt_id ?? metadata.sourceAttemptId),
+    },
+    evidence_quality: normalizeModuleAttemptEvidenceQuality(
+      attempt?.evidence_quality ?? attempt?.evidenceQuality,
+    ),
+    created_at: iso(attempt?.created_at ?? attempt?.createdAt),
+  };
+}
+
+function canonicalRecovery(recovery) {
+  return {
+    id: text(recovery?.id),
+    skill_id: text(recovery?.skill_id ?? recovery?.skillId),
+    module: text(recovery?.module),
+    initial_micro_check_passed: typeof (
+      recovery?.initial_micro_check_passed ?? recovery?.initialMicroCheckPassed
+    ) === 'boolean' ? (recovery?.initial_micro_check_passed ?? recovery?.initialMicroCheckPassed) : null,
+    initial_transfer_passed: typeof (
+      recovery?.initial_transfer_passed ?? recovery?.initialTransferPassed
+    ) === 'boolean' ? (recovery?.initial_transfer_passed ?? recovery?.initialTransferPassed) : null,
+    terminal_outcome: text(recovery?.terminal_outcome ?? recovery?.terminalOutcome),
+    observed_at: iso(recovery?.observed_at ?? recovery?.observedAt),
+  };
+}
+
+function canonicalRepeatAttempt(attempt) {
+  return {
+    id: text(attempt?.id),
+    skill_id: text(attempt?.skill_id ?? attempt?.skillId),
+    module: text(attempt?.module),
+    passed: typeof attempt?.passed === 'boolean' ? attempt.passed : null,
+    observed_at: iso(attempt?.observed_at ?? attempt?.observedAt),
+  };
+}
+
+function canonicalDiagnosticResponse(response) {
+  return {
+    id: text(response?.id),
+    diagnostic_id: text(response?.diagnostic_id ?? response?.diagnosticId),
+    catalog_version: text(response?.catalog_version ?? response?.catalogVersion),
+    item_id: text(response?.item_id ?? response?.itemId),
+    skill_id: text(response?.skill_id ?? response?.skillId),
+    module: text(response?.module),
+    evidence_quality: text(response?.evidence_quality ?? response?.evidenceQuality),
+    correct: typeof response?.correct === 'boolean' ? response.correct : null,
+    answered_at: iso(response?.answered_at ?? response?.answeredAt),
+  };
+}
+
+export function projectAdaptiveLearningEvidenceSources({
+  attempts = [], recoveries = [], repeatAttempts = [], diagnosticResponses = [],
+  diagnosticCompletions = [],
+} = {}, { diagnosticRegistry = DIAGNOSTIC_REGISTRY } = {}) {
+  const projectedAttempts = attempts.map(canonicalAttempt)
+    .filter((attempt) => isEligibleAdaptiveAttempt(attempt) && attemptObservation(attempt));
+  const projectedRecoveries = recoveries.map(canonicalRecovery)
+    .filter((recovery) => recoveryObservation(recovery));
+  const projectedRepeats = repeatAttempts.map(canonicalRepeatAttempt)
+    .filter((attempt) => repeatObservation(attempt));
+  const projectedResponses = diagnosticResponses.map(canonicalDiagnosticResponse)
+    .filter((response) => diagnosticObservation(response, diagnosticRegistry));
+  const projectedCompletions = diagnosticCompletions
+    .map((completion) => ({
+      catalog_version: text(completion?.catalog_version ?? completion?.catalogVersion),
+      completed_at: iso(completion?.completed_at ?? completion?.completedAt),
+    }))
+    .filter((completion) => completion.completed_at && getDiagnosticCatalog(
+      completion.catalog_version,
+      diagnosticRegistry,
+    ));
+  return {
+    attempts: projectedAttempts,
+    recoveries: projectedRecoveries,
+    repeatAttempts: projectedRepeats,
+    diagnosticResponses: projectedResponses,
+    diagnosticCompletions: projectedCompletions,
+  };
+}
+
+export function adaptiveLearningEvidenceSnapshot(sources = {}, options = {}) {
+  const projectedSources = projectAdaptiveLearningEvidenceSources(sources, options);
+  const watermark = buildAdaptiveEvidenceWatermark(projectedSources);
+  return {
+    profileCalculationRevision: ADAPTIVE_PROFILE_CALCULATION_REVISION,
+    evidenceWatermarkVersion: watermark.version,
+    evidenceObservedAt: watermark.observedAt,
+    evidenceSourceCount: watermark.sourceCount,
+    evidenceFingerprint: watermark.fingerprint,
+    sources: projectedSources,
+  };
+}
+
+export function adaptiveProfileMatchesCurrentEvidence(profile, sources = {}, options = {}) {
+  const snapshot = adaptiveLearningEvidenceSnapshot(sources, options);
+  return adaptiveProfileMatchesEvidenceSources(profile, snapshot.sources);
 }
 
 function downgradeRepeatedDiagnosticEvidence(observations) {
@@ -226,6 +358,15 @@ function evidenceQualityFor(observations) {
   return observations[0].quality;
 }
 
+function independentSourceCount(observations) {
+  const sources = new Set();
+  observations.forEach((observation, index) => {
+    if (!observation.independent) return;
+    sources.add(observation.independentSourceId || `observation:${index}`);
+  });
+  return sources.size;
+}
+
 function explanationFor(observations) {
   if (!observations.length) return 'no_evidence';
   const kinds = new Set(observations.map((item) => item.kind));
@@ -239,25 +380,15 @@ function explanationFor(observations) {
   return 'attempt_evidence';
 }
 
-export function buildAdaptiveLearningProfile({
-  attempts = [], recoveries = [], repeatAttempts = [], diagnosticResponses = [],
-  diagnosticCompletions = [],
-} = {}, { diagnosticRegistry = DIAGNOSTIC_REGISTRY } = {}) {
-  const eligibleAttempts = attempts.filter(isEligibleAdaptiveAttempt);
-  const supportedDiagnosticCompletions = diagnosticCompletions
-    .filter((completion) => getDiagnosticCatalog(
-      completion.catalog_version ?? completion.catalogVersion,
-      diagnosticRegistry,
-    ))
-    .map((completion) => ({
-      catalog_version: completion.catalog_version ?? completion.catalogVersion,
-      completed_at: iso(completion.completed_at ?? completion.completedAt),
-    }))
-    .filter((completion) => completion.completed_at);
-  const watermark = buildAdaptiveEvidenceWatermark({
-    attempts: eligibleAttempts, recoveries, repeatAttempts, diagnosticResponses,
+export function buildAdaptiveLearningProfile(sources = {}, { diagnosticRegistry = DIAGNOSTIC_REGISTRY } = {}) {
+  const snapshot = adaptiveLearningEvidenceSnapshot(sources, { diagnosticRegistry });
+  const {
+    attempts: eligibleAttempts,
+    recoveries,
+    repeatAttempts,
+    diagnosticResponses,
     diagnosticCompletions: supportedDiagnosticCompletions,
-  });
+  } = snapshot.sources;
   const observations = downgradeRepeatedDiagnosticEvidence([
     ...eligibleAttempts.map(attemptObservation),
     ...recoveries.map(recoveryObservation),
@@ -268,6 +399,7 @@ export function buildAdaptiveLearningProfile({
   const skills = SKILLS.map((skill) => {
     const relevant = observations.filter((item) => item.skillId === skill.id);
     const independent = relevant.filter((item) => item.independent);
+    const independentCount = independentSourceCount(independent);
     const assisted = relevant.filter((item) => item.quality === 'assisted').slice(-MAX_ASSISTED_OBSERVATIONS_PER_SKILL);
     const clientReported = relevant.filter((item) => item.quality === 'client_reported').slice(-MAX_CLIENT_REPORTED_OBSERVATIONS_PER_SKILL);
     const effective = [...independent, ...assisted, ...clientReported];
@@ -280,7 +412,7 @@ export function buildAdaptiveLearningProfile({
     const timestamps = relevant.map((item) => item.observedAt).filter(Boolean).sort();
     const status = !relevant.length
       ? 'unobserved'
-      : independent.length >= MIN_INDEPENDENT_EVIDENCE_PER_SKILL
+      : independentCount >= MIN_INDEPENDENT_EVIDENCE_PER_SKILL
         ? 'established'
         : 'preliminary';
     return {
@@ -292,7 +424,7 @@ export function buildAdaptiveLearningProfile({
       status,
       evidenceCount: relevant.length,
       effectiveEvidenceCount: effective.length,
-      independentEvidenceCount: independent.length,
+      independentEvidenceCount: independentCount,
       evidenceQuality: evidenceQualityFor(relevant),
       lastObservedAt: timestamps.at(-1) || null,
       dueState: 'not_due',
@@ -312,12 +444,14 @@ export function buildAdaptiveLearningProfile({
       uncertainty: Math.round(moduleSkills.reduce((sum, skill) => sum + skill.uncertainty, 0) / moduleSkills.length),
       status: moduleSkills.every((skill) => skill.status === 'established') ? 'established' : 'preliminary',
       evidenceCount: moduleSkills.reduce((sum, skill) => sum + skill.evidenceCount, 0),
-      independentEvidenceCount: moduleSkills.reduce((sum, skill) => sum + skill.independentEvidenceCount, 0),
+      independentEvidenceCount: independentSourceCount(
+        observations.filter((item) => item.skillId && SKILL_BY_ID.get(item.skillId)?.module === module),
+      ),
     };
   });
   const confidence = Math.round(skills.reduce((sum, skill) => sum + 100 - skill.uncertainty, 0) / skills.length);
   const coveredModules = modules.filter((module) => module.evidenceCount > 0).length;
-  const independentEvidenceCount = observations.filter((item) => item.independent).length;
+  const independentEvidenceCount = independentSourceCount(observations);
   const assistedEvidenceCount = observations.filter((item) => item.quality === 'assisted').length;
   const clientReportedEvidenceCount = observations.filter((item) => item.quality === 'client_reported').length;
   const independentModuleCount = modules.filter((module) => module.independentEvidenceCount > 0).length;
@@ -337,10 +471,11 @@ export function buildAdaptiveLearningProfile({
   return {
     taxonomyVersion: TAXONOMY_VERSION,
     weightingVersion: WEIGHTING_VERSION,
-    profileCalculationRevision: ADAPTIVE_PROFILE_CALCULATION_REVISION,
-    evidenceWatermarkVersion: watermark.version,
-    evidenceObservedAt: watermark.observedAt,
-    evidenceSourceCount: watermark.sourceCount,
+    profileCalculationRevision: snapshot.profileCalculationRevision,
+    evidenceWatermarkVersion: snapshot.evidenceWatermarkVersion,
+    evidenceObservedAt: snapshot.evidenceObservedAt,
+    evidenceSourceCount: snapshot.evidenceSourceCount,
+    evidenceFingerprint: snapshot.evidenceFingerprint,
     preliminary,
     status: preliminary ? 'preliminary' : 'established',
     confidence,

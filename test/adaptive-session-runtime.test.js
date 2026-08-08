@@ -7,7 +7,7 @@ const rawSource = await fs.readFile(new URL('../public/adaptive-session-runtime.
 const runtimeSource = `${rawSource
   .replace(/^import[\s\S]*?from '[^']+';\r?\n/gmu, '')
   .replaceAll('export ', '')}
-window.__adaptiveRuntimeTest={adaptiveRuntimeSnapshot,clearAdaptiveRuntime,openAdaptivePlan,beginAdaptiveBlock,completeAdaptiveModuleActivity,completeAdaptiveServerAttempt,advanceAdaptiveBreak,finishAdaptiveSession,resumeAdaptiveExecution};`;
+window.__adaptiveRuntimeTest={adaptiveRuntimeSnapshot,clearAdaptiveRuntime,openAdaptivePlan,beginAdaptiveBlock,completeAdaptiveModuleActivity,completeAdaptiveServerAttempt,advanceAdaptiveBreak,finishAdaptiveSession,resumeAdaptiveExecution,adaptiveSessionReplacementAvailable:typeof adaptiveSessionReplacementAvailable==='function'?adaptiveSessionReplacementAvailable:null};`;
 
 const SESSION_ID = '10000000-0000-4000-8000-000000000001';
 const BLOCK = {
@@ -374,4 +374,25 @@ test('confirmed writing evidence keeps the paid review open until the learner re
   assert.equal(harness.runtime.adaptiveRuntimeSnapshot().active, null);
   harness.runtime.openAdaptivePlan();
   assert.deepEqual(harness.navigations, ['scr10']);
+});
+
+test('replacement controls close for local pending, claimed, started, or completed execution', () => {
+  const harness = runtimeHarness();
+  const available = harness.runtime.adaptiveSessionReplacementAvailable;
+  assert.equal(typeof available, 'function');
+  const session = { id: SESSION_ID, status: 'created', replacement: null };
+  const execution = {
+    status: 'created', revision: 0, startedAt: null, completedBlockIds: [],
+  };
+  assert.equal(available(session, execution, { active: null, control: null }), true);
+  assert.equal(available(session, execution, {
+    active: null, control: { phase: 'start', sessionId: SESSION_ID },
+  }), false);
+  assert.equal(available(session, execution, {
+    active: { sessionId: SESSION_ID }, control: null,
+  }), false);
+  assert.equal(available(session, { ...execution, status: 'in_progress' }, { active: null, control: null }), false);
+  assert.equal(available(session, { ...execution, revision: 1 }, { active: null, control: null }), false);
+  assert.equal(available(session, { ...execution, startedAt: '2026-08-08T10:00:00.000Z' }, { active: null, control: null }), false);
+  assert.equal(available(session, { ...execution, completedBlockIds: [BLOCK.id] }, { active: null, control: null }), false);
 });

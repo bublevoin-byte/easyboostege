@@ -48,7 +48,11 @@ const PREREQUISITES = new Map([
   ['ege.reading.detail', ['ege.reading.gist']],
   ['ege.listening.detail', ['ege.listening.gist']],
   ['ege.writing.essay', ['ege.writing.email']],
-  ['ege.speaking.monologue', ['ege.speaking.interaction']],
+  ['ege.speaking.interview_completeness', ['ege.speaking.direct_questions']],
+  ['ege.speaking.monologue_content', ['ege.speaking.interview_completeness']],
+  ['ege.speaking.monologue_organization', ['ege.speaking.monologue_content']],
+  ['ege.speaking.spoken_grammar', ['ege.speaking.monologue_content']],
+  ['ege.speaking.spoken_lexis', ['ege.speaking.monologue_content']],
 ]);
 
 function sha(value) {
@@ -188,7 +192,7 @@ function prerequisiteEvidence(profile, plan, budget, usage) {
   const skills = Array.isArray(profile?.skills) ? profile.skills : [];
   const canonical = skills.length === EGE_SKILL_TAXONOMY.skills.length
     && profile?.taxonomyVersion === EGE_SKILL_TAXONOMY.version
-    && profile?.weightingVersion === 'adaptive-evidence-v1'
+    && profile?.weightingVersion === 'adaptive-evidence-v2'
     && skills.every((skill) => SKILL_BY_ID.has(skill?.id)
       && Number.isInteger(skill.mastery) && skill.mastery >= 0 && skill.mastery <= 100
       && ['unobserved', 'preliminary', 'established'].includes(skill.status));

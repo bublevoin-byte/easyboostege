@@ -83,8 +83,8 @@ provisional card по owner-bound `session_id` и показывает её ма
 
 `speaking-semantic-v4` никогда не принимает assignment или rubric от браузера. Официальные задания
 1–4 передают UUID owner-bound session и ключ либо точный набор ключей завершённых pronunciation
-assessment. Adaptive Speaking 2/4 временно исключён из composer до owner-bound привязки оценки;
-старый `contentRef + transcript` контракт API отклоняется. Сервер восстанавливает закреплённую catalog/task revision,
+assessment. Adaptive Speaking 1–4 uses only a fresh owner-bound task session assigned after the adaptive
+execution claim; the old `contentRef + transcript` contract remains rejected. The server restores the pinned catalog/task revision,
 проверяет точную привязку owner/session/task/item каждого акустического результата, собирает transcript
 из этих результатов и только после этого строит короткий trusted assignment. Transcript помещается
 в отдельное поле `untrustedStudentTranscript`; команды внутри него не исполняются.
@@ -131,7 +131,63 @@ uses pending-generation compare-and-set so an old worker cannot overwrite its su
 failures resume the same attempt and reuse its finalized Azure evidence, while invalid structured output
 remains a terminal replay.
 
+`speaking-learning-evidence-v1` is derived only by revalidating the stored deterministic review and its
+bounded Azure facts. It publishes separate criterion, word, phoneme, fluency and signal observations. Positive
+word-accuracy and phoneme-accuracy aggregates are calculated across the assessed words; fluency is collected
+for tasks 1–4, so mastery is not inferred from the absence of an error. Task 4 keeps the official combined
+language criterion for the score, but adaptive grammar and lexis are split only by validated semantic issue
+codes (`language_grammar`, `language_vocabulary`, `language_register`); the combined score is not copied into
+both skills. Assistance is an irreversible server-side flag with a change timestamp on the exact task session;
+assisted, technical, partial or low-confidence results remain visible in feedback but cannot increase adaptive
+mastery, and post-hoc help advances the evidence watermark so a persisted independent profile is rebuilt. The adaptive
+profile and plan use one eligible-source projection for fingerprint, count and latest time; known timestamps are canonicalized
+across file/PostgreSQL representations. Plan persistence revalidates the full vector under the owner lock before replay or
+insert. If evidence changes after the profile save, the overview retries its complete read-profile-plan cycle instead of
+publishing a stale allocation. The report endpoint does not call either provider: Base receives the complete current analysis and 60 monthly assessment minutes;
+
+The complete evidence-profile-plan overview is attempted at most three times, including goal-less and
+plan-disabled reads. Exhausted profile CAS, plan save conflict, goal mismatch, goal/profile/evidence stale or
+recalculation conflict all return retryable `409 ADAPTIVE_PROFILE_RETRY_REQUIRED` and `Retry-After: 1`;
+an older stored profile or plan is never used as a success fallback. Evidence parsing is also fail-closed: scoring fields
+must be finite numbers, maxima must be positive, and result flags must be booleans before they can affect mastery
+or any watermark component. Numeric-looking or boolean-looking persisted strings are treated as absent evidence.
+
+Premium receives 240 minutes plus longitudinal dynamics, same-task comparison, a targeted-practice pointer
+and a bounded Voice Tutor capsule. A lost official criterion keeps precedence. When all official criteria are at
+their maximum, the report may instead issue the weakest exact word/phoneme below 80 as a 30-day pronunciation
+pointer. The launch endpoint accepts only its stable attempt-bound ref, rebuilds it from the owner attempt and
+rechecks both current weakest evidence and expiry; replay after expiry or evidence drift returns a bounded 409.
+This coaching pointer carries zero lost points and never changes the official score or mastery. A concrete weak
+word or phoneme is also carried as a bounded targeted-practice focus with
+an opaque server-issued content reference; assignment revalidates it against the fresh report and restricts the
+selector to a different canonical task containing its anchor word. If no such server-owned material exists, the
+report exposes the target as unavailable rather than substituting an unrelated task. The exact target is persisted
+with the session and evaluation attempt; a later eligible result records `resolved`, `still_needs_work` or
+`inconclusive`, so a resolved word/phoneme target is retired. Voice Tutor never changes the official stored result.
+
 ## Realtime Voice Tutor boundary
+
+Every create, exact replay, realtime-ticket issue/reissue and text/local recovery re-enters the owner's
+serialized repository mutation. After the file owner queue or PostgreSQL user `FOR UPDATE` lock is acquired,
+the server takes a fresh authority timestamp and rechecks the whole active Base subscription plus the Premium
+Voice Tutor entitlement before returning a session or rotating any credential. A route precheck is therefore
+only an early rejection: expiry or revocation committed while the request waits returns 403 and leaves the
+stored ticket/nonce unchanged.
+
+For a pronunciation-error capsule, that same mutation reloads and locks the source Speaking attempt and rebuilds
+the bounded pointer from its current assistance, mastery, exact word/phoneme ref and 30-day expiry. The route-built
+capsule is never sufficient authority. Assistance, ref drift, mastery retirement or the exact expiry boundary
+returns the documented bounded 409 before a session, ticket or recovery nonce is created. Official criterion
+pointers keep their existing precedence and replay semantics.
+
+The explicit `/fallback` transition uses the same authority boundary before it finalizes status/billing or rotates
+the pedagogy nonce. A failed Base/Premium check or stale pronunciation pointer therefore leaves the complete
+stored session byte-for-byte unchanged and never reaches the text AI operation. On fresh create, the ticket catch
+may enter text/local delivery only for the explicit `VOICE_TUTOR_PROVIDER_UNAVAILABLE` class; authorization,
+pronunciation staleness/expiry, session integrity and ticket conflicts propagate as their documented 403/409.
+The file reserve path snapshots and restores its whole in-memory state on any failed reservation, so lease expiry
+reconciliation cannot leak into a later persistence after a rejected replay; PostgreSQL obtains the same behavior
+from transaction rollback.
 
 После auth, Premium entitlement, актуального `voice_processing` consent, quota reservation и
 server-owned capsule validation HTTP API выдаёт только одноразовый app ticket, его `expires_at` и

@@ -10,8 +10,10 @@ import express from 'express';
 import { createAdaptiveLearningRoutes } from '../routes/adaptive-learning.js';
 import { createProgressRoutes } from '../routes/progress.js';
 import { createFileRepository } from '../storage/file-repository.js';
-import { adaptiveSpeakingTask } from '../public/adaptive-speaking-tasks.js';
 import { ADAPTIVE_ACTIVITY_REGISTRY } from '../adaptive-learning/session.js';
+import { ADAPTIVE_EXECUTION_CLAIM_TTL_MS } from '../adaptive-learning/session-execution.js';
+import { SPEAKING_TASK2_CATALOG } from '../public/content/speaking/task2-v1.js';
+import { publicSpeakingReview, scoreSpeakingTask } from '../speaking/fipi-scoring.js';
 import { completeShortAdaptiveDiagnostic } from './support/adaptive-diagnostic-public.js';
 import { readingAdaptiveAttemptMetadata } from './support/reading-adaptive-attempt.js';
 
@@ -22,6 +24,31 @@ const MODULE_ACTIVITY_REGISTRY = {
     !['writing', 'speaking'].includes(activity.module)
   )),
 };
+const OWNER_BOUND_ACTIVITY_REGISTRY = {
+  ...ADAPTIVE_ACTIVITY_REGISTRY,
+  activities: ADAPTIVE_ACTIVITY_REGISTRY.activities.filter((activity) => (
+    activity.module !== 'speaking' || activity.activityId === 'speaking_2'
+  )),
+};
+
+function adaptiveTask2Review() {
+  const semanticFacts = {
+    confidence: 0.95, verdict: 'Assessable.', evidence: ['Four direct questions.'], issues: [],
+    items: Array.from({ length: 4 }, (_, index) => ({
+      index: index + 1, relevant: index !== 1, directQuestion: true,
+      lexicalGrammarBlocksCommunication: false, evidence: `Question ${index + 1}`,
+    })),
+  };
+  const acousticFacts = {
+    available: true, recognitionConfidence: 0.94, signalQuality: 'good', recordingDurationSeconds: 48,
+    itemDurations: Array.from({ length: 4 }, (_, index) => ({ itemIndex: index + 1, durationSeconds: 12 })),
+    wordEvents: [],
+  };
+  return {
+    ...publicSpeakingReview(scoreSpeakingTask({ taskType: 2, semantic: semanticFacts, acoustic: acousticFacts }), semanticFacts),
+    semanticFacts, acousticFacts,
+  };
+}
 
 function authentication() {
   return { auth(req, res, next) {
@@ -32,26 +59,53 @@ function authentication() {
   } };
 }
 
-async function withExecutionApp(run, { activityRegistry = MODULE_ACTIVITY_REGISTRY } = {}) {
+async function withExecutionApp(run, {
+  activityRegistry = MODULE_ACTIVITY_REGISTRY,
+  grantPremium = true,
+} = {}) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-execution-api-'));
   const dataPath = path.join(directory, 'data.json');
-  const repository = createFileRepository(dataPath);
+  let current = new Date(START);
+  const repository = createFileRepository(dataPath, {
+    adaptiveMutationNow: () => new Date(current),
+  });
   const owner = await repository.createTelegramUser(9501, 'Execution Owner');
   const stranger = await repository.createTelegramUser(9502, 'Execution Stranger');
   for (const [telegramId, username] of [[9501, owner], [9502, stranger]]) {
     await repository.grantDays(telegramId, 30, username);
-    await repository.setEntitlement(username, 'voice_tutor', {
-      startsAt: new Date(START.getTime() - 60_000),
-      endsAt: new Date(START.getTime() + 24 * 60 * 60_000),
-    });
+    if (grantPremium) {
+      await repository.setEntitlement(username, 'voice_tutor', {
+        startsAt: new Date(START.getTime() - 60_000),
+        endsAt: new Date(START.getTime() + 24 * 60 * 60_000),
+      });
+    }
   }
-  let current = new Date(START);
+  const mutationHooks = new Map();
+  const routeRepository = new Proxy(repository, {
+    get(target, property) {
+      const value = Reflect.get(target, property, target);
+      if (typeof value !== 'function') return value;
+      if (!['getAdaptiveLearningSessionMutationReplay', 'startAdaptiveLearningSessionBlock',
+        'bindAdaptiveLearningServerAttempt', 'recordModuleAttemptWithAdaptiveClaim',
+        'advanceAdaptiveLearningSession'].includes(property)) {
+        return value.bind(target);
+      }
+      return async (...args) => {
+        const hook = mutationHooks.get(property);
+        if (hook) {
+          mutationHooks.delete(property);
+          await hook(...args);
+        }
+        return value.apply(target, args);
+      };
+    },
+  });
   const now = () => new Date(current);
   const app = express();
   app.use(express.json());
-  app.use(createProgressRoutes({ authentication: authentication(), db: repository, now }));
+  app.use(createProgressRoutes({ authentication: authentication(), db: routeRepository, now }));
   app.use(createAdaptiveLearningRoutes({
-    authentication: authentication(), db: repository, enabled: true, now,
+    authentication: authentication(), db: routeRepository, enabled: true, now,
     executionTokenSecret: 'adaptive-test-token-secret-32-characters',
     activityRegistry,
   }));
@@ -75,6 +129,7 @@ async function withExecutionApp(run, { activityRegistry = MODULE_ACTIVITY_REGIST
     await run({
       owner, stranger, repository, request, dataPath,
       setTime(value) { current = new Date(value); },
+      setMutationHook(operation, hook) { mutationHooks.set(operation, hook); },
     });
   } finally {
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
@@ -104,6 +159,144 @@ async function createSession(request, owner, durationMinutes = 15) {
   assert.equal(response.status, 201);
   return (await response.json()).session;
 }
+
+test('delayed start mints a fresh fixed-TTL claim only after the owner queue', async () => {
+  await withExecutionApp(async ({
+    owner, request, dataPath, setTime, setMutationHook,
+  }) => {
+    const session = await createSession(request, owner);
+    const block = session.blocks[0];
+    const effectiveNow = new Date(START.getTime() + ADAPTIVE_EXECUTION_CLAIM_TTL_MS + 60_000);
+    setMutationHook('startAdaptiveLearningSessionBlock', async () => setTime(effectiveNow));
+    const response = await request(owner, `/api/v1/adaptive-learning/sessions/${session.id}/start`, {
+      method: 'POST', headers: { 'Idempotency-Key': 'execution-start-delayed-0001' },
+      body: JSON.stringify({ blockId: block.id, expectedRevision: 0 }),
+    });
+    assert.equal(response.status, 201);
+    const started = await response.json();
+    assert.equal(started.claimExpiresAt,
+      new Date(effectiveNow.getTime() + ADAPTIVE_EXECUTION_CLAIM_TTL_MS).toISOString());
+    assert.ok(new Date(started.claimExpiresAt) > effectiveNow);
+    const stored = JSON.parse(await fs.readFile(dataPath, 'utf8'));
+    const claim = stored.adaptive_learning_execution_claims.find((item) => item.session_id === session.id);
+    assert.equal(new Date(claim.issued_at).toISOString(), effectiveNow.toISOString());
+    assert.equal(new Date(claim.expires_at).getTime() - new Date(claim.issued_at).getTime(),
+      ADAPTIVE_EXECUTION_CLAIM_TTL_MS);
+  });
+});
+
+test('exact start replay never returns an expired stored claim', async () => {
+  await withExecutionApp(async ({ owner, request, setTime }) => {
+    const session = await createSession(request, owner);
+    const block = session.blocks[0];
+    const options = {
+      method: 'POST', headers: { 'Idempotency-Key': 'execution-start-expired-replay-1' },
+      body: JSON.stringify({ blockId: block.id, expectedRevision: 0 }),
+    };
+    const started = await (await request(
+      owner, `/api/v1/adaptive-learning/sessions/${session.id}/start`, options,
+    )).json();
+    setTime(new Date(new Date(started.claimExpiresAt).getTime() + 1));
+    const replay = await request(
+      owner, `/api/v1/adaptive-learning/sessions/${session.id}/start`, options,
+    );
+    assert.equal(replay.status, 410);
+    assert.equal((await replay.json()).error.code, 'ADAPTIVE_EXECUTION_CLAIM_EXPIRED');
+  });
+});
+
+test('module binding rejects a claim that expires while waiting for the owner queue', async () => {
+  await withExecutionApp(async ({ owner, request, setTime, setMutationHook }) => {
+    const session = await createSession(request, owner);
+    const block = session.blocks[0];
+    const started = await (await request(
+      owner, `/api/v1/adaptive-learning/sessions/${session.id}/start`, {
+        method: 'POST', headers: { 'Idempotency-Key': 'execution-start-module-expiry-01' },
+        body: JSON.stringify({ blockId: block.id, expectedRevision: 0 }),
+      },
+    )).json();
+    const expiresAt = new Date(started.claimExpiresAt);
+    setTime(new Date(expiresAt.getTime() - 1));
+    setMutationHook('recordModuleAttemptWithAdaptiveClaim', async () => {
+      setTime(new Date(expiresAt.getTime() + 1));
+    });
+    const response = await request(owner, '/api/v1/module-attempts', {
+      method: 'POST', body: JSON.stringify({
+        id: crypto.randomUUID(), module: block.module, activity: block.activityId,
+        score: 1, maxScore: 1, adaptiveExecutionClaim: started.executionClaim,
+      }),
+    });
+    assert.equal(response.status, 410);
+    assert.equal((await response.json()).error.code, 'ADAPTIVE_EXECUTION_CLAIM_EXPIRED');
+  });
+});
+
+test('server-attempt binding rejects a claim that expires while waiting for the owner queue', async () => {
+  await withExecutionApp(async ({ owner, request, setTime, setMutationHook }) => {
+    const session = await createSession(request, owner);
+    const block = session.blocks[0];
+    const started = await (await request(
+      owner, `/api/v1/adaptive-learning/sessions/${session.id}/start`, {
+        method: 'POST', headers: { 'Idempotency-Key': 'execution-start-bind-expiry-001' },
+        body: JSON.stringify({ blockId: block.id, expectedRevision: 0 }),
+      },
+    )).json();
+    const expiresAt = new Date(started.claimExpiresAt);
+    setTime(new Date(expiresAt.getTime() - 1));
+    setMutationHook('bindAdaptiveLearningServerAttempt', async () => {
+      setTime(new Date(expiresAt.getTime() + 1));
+    });
+    const response = await request(
+      owner, `/api/v1/adaptive-learning/sessions/${session.id}/bind-attempt`, {
+        method: 'POST', body: JSON.stringify({
+          executionClaim: started.executionClaim,
+          attempt: { type: 'writing', id: 999_999 },
+        }),
+      },
+    );
+    assert.equal(response.status, 410);
+    assert.equal((await response.json()).error.code, 'ADAPTIVE_EXECUTION_CLAIM_EXPIRED');
+  });
+});
+
+test('advance rejects a bound claim that expires while waiting for the owner queue', async () => {
+  await withExecutionApp(async ({ owner, repository, request, setTime, setMutationHook }) => {
+    const session = await createSession(request, owner);
+    const block = session.blocks[0];
+    const started = await (await request(
+      owner, `/api/v1/adaptive-learning/sessions/${session.id}/start`, {
+        method: 'POST', headers: { 'Idempotency-Key': 'execution-start-advance-expiry-1' },
+        body: JSON.stringify({ blockId: block.id, expectedRevision: 0 }),
+      },
+    )).json();
+    const expiresAt = new Date(started.claimExpiresAt);
+    setTime(new Date(expiresAt.getTime() - 2));
+    const attemptId = crypto.randomUUID();
+    const recorded = await request(owner, '/api/v1/module-attempts', {
+      method: 'POST', body: JSON.stringify({
+        id: attemptId, module: block.module, activity: block.activityId,
+        score: 1, maxScore: 1, adaptiveExecutionClaim: started.executionClaim,
+      }),
+    });
+    assert.equal(recorded.status, 201);
+    setTime(new Date(expiresAt.getTime() - 1));
+    setMutationHook('advanceAdaptiveLearningSession', async () => {
+      setTime(new Date(expiresAt.getTime() + 1));
+    });
+    const response = await request(owner,
+      `/api/v1/adaptive-learning/sessions/${session.id}/advance`, {
+        method: 'POST', headers: { 'Idempotency-Key': 'execution-advance-expiry-001' },
+        body: JSON.stringify({
+          blockId: block.id, expectedRevision: 1, attempt: { type: 'module', id: attemptId },
+        }),
+      });
+    assert.equal(response.status, 410);
+    assert.equal((await response.json()).error.code, 'ADAPTIVE_EXECUTION_CLAIM_EXPIRED');
+    const execution = await repository.getAdaptiveLearningSessionExecution(owner, session.id);
+    assert.equal(execution.execution.revision, 1);
+    assert.deepEqual(execution.execution.completedBlockIds, []);
+  });
+});
 
 test('one-block execution starts with an opaque claim, binds a stored attempt, advances, then finishes explicitly', async () => {
   await withExecutionApp(async ({ owner, stranger, repository, request, setTime, dataPath }) => {
@@ -221,11 +414,12 @@ test('one-block execution starts with an opaque claim, binds a stored attempt, a
     assert.equal(exported.adaptive_learning_session_events.length, 2);
     assert.equal(JSON.stringify(exported).includes(started.executionClaim), false);
     assert.equal(JSON.stringify(exported).includes('request_hash'), false);
-  });
+  }, { grantPremium: false });
 });
 
 test('server-owned writing or speaking completion binds to the claim without a client score', async () => {
   await withExecutionApp(async ({ owner, repository, request, setTime }) => {
+    await repository.setSpeakingAccentProfile(owner, { locale: 'en-GB', source: 'manual', now: START });
     const establishedNonSpeaking = [
       ['vocabulary', 'vocabulary_lexical_choice_topic_1'],
       ['grammar', 'grammar_forms_topic_3'], ['grammar', 'grammar_transformations_topic_18'],
@@ -250,7 +444,8 @@ test('server-owned writing or speaking completion binds to the claim without a c
     let serverOwnedSeen = false;
     let minute = 1;
     for (const block of session.blocks) {
-      setTime(new Date(START.getTime() + minute * 60_000));
+      const blockNow = new Date(START.getTime() + minute * 60_000);
+      setTime(blockNow);
       minute += 1;
       if (block.kind === 'break') {
         const advanced = await request(owner, `/api/v1/adaptive-learning/sessions/${session.id}/advance`, {
@@ -268,7 +463,8 @@ test('server-owned writing or speaking completion binds to the claim without a c
       assert.equal(start.status, 201);
       const started = await start.json();
       executionRevision = started.execution.revision;
-      setTime(new Date(START.getTime() + minute * 60_000));
+      const evidenceNow = new Date(START.getTime() + minute * 60_000);
+      setTime(evidenceNow);
       minute += 1;
       let attempt;
       if (['writing', 'speaking'].includes(block.module)) {
@@ -315,15 +511,31 @@ test('server-owned writing or speaking completion binds to the claim without a c
           }),
         });
         assert.equal(wrongBind.status, 409, 'a completed answer to another speaking card is not evidence for this block');
-        const id = await repository.createSpeakingAttempt(owner, {
-          taskType: taskNumber,
-          assignment: adaptiveSpeakingTask(block.contentRef).assignment,
-          transcript: 'Student transcript.',
-        }, 'test-speaking-v1');
-        await repository.finishSpeakingAttempt(id, {
-          status: 'completed', review: { status: 'scored', got: 1, max: 4 },
+        const sourceSession = await repository.assignSpeakingTask2Session(owner, {
+          catalogId: SPEAKING_TASK2_CATALOG.id,
+          catalogRevision: SPEAKING_TASK2_CATALOG.revision,
+          tasks: SPEAKING_TASK2_CATALOG.tasks,
+          now: evidenceNow,
         });
-        attempt = { type: 'speaking', id };
+        for (let question = 1; question <= 4; question += 1) {
+          await repository.completeSpeakingTask2Question(owner, sourceSession.id, question, {
+            recordingDurationSeconds: 12, localPlayback: true, selfRating: 'steady',
+          }, { now: evidenceNow });
+        }
+        const claimed = await repository.claimSpeakingEvaluation(owner, {
+          taskType: taskNumber, assignment: {}, transcript: 'Student transcript.',
+        }, 'test-speaking-v1', crypto.randomBytes(32).toString('hex'), { now: evidenceNow, source: {
+          sessionId: sourceSession.id,
+          taskRef: sourceSession.task_id,
+          taskRevision: sourceSession.task_revision,
+          catalogId: sourceSession.catalog_id,
+          catalogRevision: sourceSession.catalog_revision,
+          assistanceUsed: false,
+        } });
+        await repository.finishSpeakingAttempt(claimed.attempt.id, {
+          status: 'completed', review: adaptiveTask2Review(),
+        });
+        attempt = { type: 'speaking', id: claimed.attempt.id };
         serverOwnedSeen = true;
       } else {
         const id = crypto.randomUUID();
@@ -344,8 +556,9 @@ test('server-owned writing or speaking completion binds to the claim without a c
           }),
         });
         const binding = await bound.json();
-        assert.equal(bound.status, 201, JSON.stringify(binding));
-        assert.equal(binding.evidenceQuality, 'server_verified_assisted');
+        assert.equal(bound.status, 201, `${block.module}:${block.activityId}:${JSON.stringify(binding)}`);
+        assert.equal(binding.evidenceQuality, attempt.type === 'speaking'
+          ? 'server_verified_unassisted' : 'server_verified_assisted');
         assert.equal('score' in binding, false);
         const replay = await request(owner, `/api/v1/adaptive-learning/sessions/${session.id}/bind-attempt`, {
           method: 'POST', body: JSON.stringify({ executionClaim: started.executionClaim, attempt }),
@@ -360,7 +573,8 @@ test('server-owned writing or speaking completion binds to the claim without a c
       const result = await advanced.json();
       executionRevision = result.execution.revision;
       if (attempt.type !== 'module') {
-        assert.equal(result.completedBlock.evidenceQuality, 'server_verified_assisted');
+        assert.equal(result.completedBlock.evidenceQuality, attempt.type === 'speaking'
+          ? 'server_verified_unassisted' : 'server_verified_assisted');
         assert.ok(
           result.profileChange.evidenceSourceCountAfter > result.profileChange.evidenceSourceCountBefore,
           'completed server-owned evaluations update the general evidence profile, while only the exact one binds this block',
@@ -368,23 +582,45 @@ test('server-owned writing or speaking completion binds to the claim without a c
       }
     }
     assert.equal(serverOwnedSeen, true, 'the full registry must exercise a writing or speaking handoff');
-  }, { activityRegistry: ADAPTIVE_ACTIVITY_REGISTRY });
+  }, { activityRegistry: OWNER_BOUND_ACTIVITY_REGISTRY });
 });
 
-test('deep Writing/Speaking execution rechecks current Premium access on claim replay, bind, and advance', async () => {
+test('deep execution atomically rechecks Premium after route precheck for start, bind, and advance', async () => {
   const writingRegistry = {
     ...ADAPTIVE_ACTIVITY_REGISTRY,
     activities: ADAPTIVE_ACTIVITY_REGISTRY.activities.filter((activity) => (
       activity.module === 'writing' && activity.launch.kind === 'writing_task'
     )),
   };
-  await withExecutionApp(async ({ owner, repository, request, setTime }) => {
+  await withExecutionApp(async ({ owner, repository, request, setTime, setMutationHook }) => {
     const session = await createSession(request, owner, 30);
     const block = session.blocks[0];
     assert.equal(block.module, 'writing');
     assert.equal(block.launch.kind, 'writing_task');
 
     const startBody = { blockId: block.id, expectedRevision: 0 };
+    const revokeAtMutation = async (...args) => {
+      const requestInstant = new Date(args[1].now);
+      const instant = new Date(requestInstant.getTime() + 1_000);
+      setTime(instant);
+      assert.equal(await repository.revokeEntitlement(
+        owner, 'voice_tutor', 9501, { now: instant },
+      ), true);
+    };
+    const restorePremium = async (instant) => repository.setEntitlement(owner, 'voice_tutor', {
+      startsAt: new Date(instant.getTime() - 1_000),
+      endsAt: new Date(instant.getTime() + 60 * 60_000),
+    });
+
+    setMutationHook('startAdaptiveLearningSessionBlock', revokeAtMutation);
+    const deniedFreshStart = await request(owner, `/api/v1/adaptive-learning/sessions/${session.id}/start`, {
+      method: 'POST', headers: { 'Idempotency-Key': 'execution-premium-start-0001' },
+      body: JSON.stringify(startBody),
+    });
+    assert.equal(deniedFreshStart.status, 403);
+    assert.equal((await repository.getAdaptiveLearningSessionExecution(owner, session.id)).execution.revision, 0);
+
+    await restorePremium(START);
     const startedResponse = await request(owner, `/api/v1/adaptive-learning/sessions/${session.id}/start`, {
       method: 'POST', headers: { 'Idempotency-Key': 'execution-premium-start-0001' },
       body: JSON.stringify(startBody),
@@ -402,21 +638,22 @@ test('deep Writing/Speaking execution rechecks current Premium access on claim r
 
     const revokedAt = new Date(START.getTime() + 60_000);
     setTime(revokedAt);
-    assert.equal(await repository.revokeEntitlement(owner, 'voice_tutor', 9501, { now: revokedAt }), true);
+    await restorePremium(revokedAt);
+    setMutationHook('startAdaptiveLearningSessionBlock', revokeAtMutation);
     const deniedReplay = await request(owner, `/api/v1/adaptive-learning/sessions/${session.id}/start`, {
       method: 'POST', headers: { 'Idempotency-Key': 'execution-premium-start-0001' },
       body: JSON.stringify(startBody),
     });
     assert.equal(deniedReplay.status, 403);
+
+    await restorePremium(revokedAt);
+    setMutationHook('bindAdaptiveLearningServerAttempt', revokeAtMutation);
     const deniedBind = await request(owner, `/api/v1/adaptive-learning/sessions/${session.id}/bind-attempt`, {
       method: 'POST', body: JSON.stringify({ executionClaim: started.executionClaim, attempt }),
     });
     assert.equal(deniedBind.status, 403);
 
-    await repository.setEntitlement(owner, 'voice_tutor', {
-      startsAt: new Date(revokedAt.getTime() - 1_000),
-      endsAt: new Date(revokedAt.getTime() + 60 * 60_000),
-    });
+    await restorePremium(revokedAt);
     const bound = await request(owner, `/api/v1/adaptive-learning/sessions/${session.id}/bind-attempt`, {
       method: 'POST', body: JSON.stringify({ executionClaim: started.executionClaim, attempt }),
     });
@@ -424,13 +661,102 @@ test('deep Writing/Speaking execution rechecks current Premium access on claim r
 
     const secondRevocation = new Date(revokedAt.getTime() + 60_000);
     setTime(secondRevocation);
-    assert.equal(await repository.revokeEntitlement(owner, 'voice_tutor', 9501, { now: secondRevocation }), true);
+    await restorePremium(secondRevocation);
+    setMutationHook('advanceAdaptiveLearningSession', revokeAtMutation);
     const deniedAdvance = await request(owner, `/api/v1/adaptive-learning/sessions/${session.id}/advance`, {
       method: 'POST', headers: { 'Idempotency-Key': 'execution-premium-advance-01' },
       body: JSON.stringify({ blockId: block.id, expectedRevision: 1, attempt }),
     });
     assert.equal(deniedAdvance.status, 403);
+
+    await restorePremium(secondRevocation);
+    const advanced = await request(owner, `/api/v1/adaptive-learning/sessions/${session.id}/advance`, {
+      method: 'POST', headers: { 'Idempotency-Key': 'execution-premium-advance-01' },
+      body: JSON.stringify({ blockId: block.id, expectedRevision: 1, attempt }),
+    });
+    assert.equal(advanced.status, 200);
+
+    const advanceReplayRevocation = new Date(secondRevocation.getTime() + 60_000);
+    setTime(advanceReplayRevocation);
+    await restorePremium(advanceReplayRevocation);
+    setMutationHook('getAdaptiveLearningSessionMutationReplay', revokeAtMutation);
+    const deniedAdvanceReplay = await request(owner, `/api/v1/adaptive-learning/sessions/${session.id}/advance`, {
+      method: 'POST', headers: { 'Idempotency-Key': 'execution-premium-advance-01' },
+      body: JSON.stringify({ blockId: block.id, expectedRevision: 1, attempt }),
+    });
+    assert.equal(deniedAdvanceReplay.status, 403);
   }, { activityRegistry: writingRegistry });
+});
+
+test('start rejects a stale launch when replacement wins before the owner mutation lock', async () => {
+  await withExecutionApp(async ({ owner, repository, request, setMutationHook }) => {
+    const session = await createSession(request, owner, 90);
+    const block = session.blocks.find((item) => item.id === session.currentBlockId);
+    assert.equal(block?.kind, 'learning');
+    let replacement = null;
+    setMutationHook('startAdaptiveLearningSessionBlock', async () => {
+      const response = await request(owner, `/api/v1/adaptive-learning/sessions/${session.id}/replace`, {
+        method: 'POST', headers: { 'Idempotency-Key': 'execution-race-replace-owner-01' },
+        body: JSON.stringify({ blockId: block.id, reason: 'excluded' }),
+      });
+      assert.equal(response.status, 200);
+      replacement = (await response.json()).session;
+    });
+
+    const response = await request(owner, `/api/v1/adaptive-learning/sessions/${session.id}/start`, {
+      method: 'POST', headers: { 'Idempotency-Key': 'execution-race-start-replaced-owner-01' },
+      body: JSON.stringify({ blockId: block.id, expectedRevision: 0 }),
+    });
+    assert.equal(response.status, 409);
+    assert.ok(replacement);
+    assert.notDeepEqual(replacement.blocks.find((item) => item.id === block.id).launch, block.launch);
+    const current = await repository.getAdaptiveLearningSessionExecution(owner, session.id);
+    assert.equal(current.execution.revision, 0);
+    assert.deepEqual(current.session.blocks, replacement.blocks);
+  }, { grantPremium: false });
+});
+
+test('replacement fails closed as soon as a start claim exists', async () => {
+  await withExecutionApp(async ({ owner, request }) => {
+    const session = await createSession(request, owner, 90);
+    const block = session.blocks.find((item) => item.id === session.currentBlockId);
+    const started = await request(owner, `/api/v1/adaptive-learning/sessions/${session.id}/start`, {
+      method: 'POST', headers: { 'Idempotency-Key': 'execution-lock-replacement-start-01' },
+      body: JSON.stringify({ blockId: block.id, expectedRevision: 0 }),
+    });
+    assert.equal(started.status, 201);
+    const replacement = await request(owner, `/api/v1/adaptive-learning/sessions/${session.id}/replace`, {
+      method: 'POST', headers: { 'Idempotency-Key': 'execution-lock-replacement-new-01' },
+      body: JSON.stringify({ blockId: block.id, reason: 'excluded' }),
+    });
+    assert.equal(replacement.status, 409);
+    assert.equal((await replacement.json()).error.code, 'ADAPTIVE_SESSION_REPLACEMENT_LOCKED');
+  }, { grantPremium: false });
+});
+
+test('lost replacement response cannot be replayed after execution starts', async () => {
+  await withExecutionApp(async ({ owner, request }) => {
+    const session = await createSession(request, owner, 90);
+    const block = session.blocks.find((item) => item.id === session.currentBlockId);
+    const replacementBody = JSON.stringify({ blockId: block.id, reason: 'excluded' });
+    const replacementPath = `/api/v1/adaptive-learning/sessions/${session.id}/replace`;
+    const replacementKey = 'execution-lock-replacement-replay-01';
+    const replaced = await request(owner, replacementPath, {
+      method: 'POST', headers: { 'Idempotency-Key': replacementKey }, body: replacementBody,
+    });
+    assert.equal(replaced.status, 200);
+    const current = (await replaced.json()).session;
+    const currentBlock = current.blocks.find((item) => item.id === current.currentBlockId);
+    assert.equal((await request(owner, `/api/v1/adaptive-learning/sessions/${session.id}/start`, {
+      method: 'POST', headers: { 'Idempotency-Key': 'execution-lock-replacement-replay-start-01' },
+      body: JSON.stringify({ blockId: currentBlock.id, expectedRevision: 0 }),
+    })).status, 201);
+    const replay = await request(owner, replacementPath, {
+      method: 'POST', headers: { 'Idempotency-Key': replacementKey }, body: replacementBody,
+    });
+    assert.equal(replay.status, 409);
+    assert.equal((await replay.json()).error.code, 'ADAPTIVE_SESSION_REPLACEMENT_LOCKED');
+  }, { grantPremium: false });
 });
 
 test('claim ownership and compare-and-set prevent forged or concurrent completion', async () => {

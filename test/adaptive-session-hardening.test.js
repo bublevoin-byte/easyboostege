@@ -13,6 +13,8 @@ import {
 import * as adaptiveSessionModule from '../adaptive-learning/session.js';
 import { buildAdaptiveLearningPlan } from '../adaptive-learning/plan.js';
 import { buildAdaptiveLearningProfile, EGE_SKILL_TAXONOMY } from '../adaptive-learning/profile.js';
+import { adaptiveSpeakingActivityMatchesTask } from '../public/adaptive-speaking-tasks.js';
+import { speakingAdaptiveEvidenceMatchesTarget } from '../speaking/learning-loop.js';
 
 const NOW = new Date('2026-08-05T09:30:00.000Z');
 const COMPOSABLE_SKILLS = new Set(ADAPTIVE_ACTIVITY_REGISTRY.activities
@@ -21,6 +23,94 @@ const COMPOSABLE_SKILLS = new Set(ADAPTIVE_ACTIVITY_REGISTRY.activities
   .map((activity) => activity.skillId));
 const ELIGIBLE_SKILLS = EGE_SKILL_TAXONOMY.skills.map((skill) => skill.id)
   .filter((skillId) => !skillId.startsWith('ege.vocabulary.'));
+
+test('all eleven Speaking micro-activities bind through their validated task-number family', () => {
+  const speaking = ADAPTIVE_ACTIVITY_REGISTRY.activities.filter((activity) => (
+    activity.module === 'speaking' && activity.launch?.kind === 'speaking_task'
+  ));
+  assert.equal(speaking.length, 11);
+  for (const activity of speaking) {
+    assert.equal(adaptiveSpeakingActivityMatchesTask(activity.activityId, activity.launch.taskNumber), true,
+      `${activity.activityId} must bind to task ${activity.launch.taskNumber}`);
+  }
+  assert.equal(adaptiveSpeakingActivityMatchesTask('speaking_1_words', 2), false);
+  assert.equal(adaptiveSpeakingActivityMatchesTask('speaking_1forged', 1), false);
+});
+
+test('all eleven Speaking micro-activities require evidence for their exact assigned skill', () => {
+  const speaking = ADAPTIVE_ACTIVITY_REGISTRY.activities.filter((activity) => (
+    activity.module === 'speaking' && activity.launch?.kind === 'speaking_task'
+  ));
+  const evidenceFor = (skillId) => ({
+    attemptId: 91,
+    taskType: 1,
+    taskRef: 'speaking-pilot-v1.task1.city-gardens',
+    taskRevision: 1,
+    status: 'scored',
+    criteria: skillId === 'ege.speaking.reading_aloud'
+      ? [{ skillIds: [skillId], score: 1, maxScore: 1 }]
+      : [],
+    languageDiagnostics: [
+      'ege.speaking.direct_questions',
+      'ege.speaking.interview_completeness',
+      'ege.speaking.monologue_content',
+      'ege.speaking.monologue_organization',
+      'ege.speaking.spoken_grammar',
+      'ege.speaking.spoken_lexis',
+    ].includes(skillId) ? [{ skillId, score: 1, maxScore: 1 }] : [],
+    signal: {
+      highConfidence: true,
+      quality: 'good',
+      wordAccuracyScore: skillId === 'ege.speaking.pronunciation_words' ? 82 : null,
+      phonemeAccuracyScore: skillId === 'ege.speaking.pronunciation_phonemes' ? 82 : null,
+      fluencyScore: skillId === 'ege.speaking.fluency' ? 82 : null,
+    },
+    provenance: { officialSession: true, assistance: 'unassisted' },
+    masteryEligible: true,
+  });
+  for (const activity of speaking) {
+    const evidence = evidenceFor(activity.skillId);
+    assert.equal(speakingAdaptiveEvidenceMatchesTarget(evidence, {
+      skillId: activity.skillId,
+    }), true, `${activity.activityId} must accept its own skill evidence`);
+    const otherSkill = speaking.find((candidate) => candidate.skillId !== activity.skillId).skillId;
+    assert.equal(speakingAdaptiveEvidenceMatchesTarget(evidence, {
+      skillId: otherSkill,
+    }), false, `${activity.activityId} must reject evidence for ${otherSkill}`);
+  }
+
+  const focused = evidenceFor('ege.speaking.pronunciation_words');
+  focused.targetOutcome = {
+    status: 'inconclusive', skillId: 'ege.speaking.pronunciation_words',
+    focus: { kind: 'word', ref: 'word.91.0', value: 'weather', anchorWord: 'weather' },
+  };
+  assert.equal(speakingAdaptiveEvidenceMatchesTarget(focused, {
+    skillId: 'ege.speaking.pronunciation_words', focusRef: 'word.91.0',
+  }), false, 'focused evidence cannot bind an inconclusive target outcome');
+  focused.targetOutcome.status = 'still_needs_work';
+  assert.equal(speakingAdaptiveEvidenceMatchesTarget(focused, {
+    skillId: 'ege.speaking.pronunciation_words', focusRef: 'word.91.0',
+  }), true);
+  assert.equal(speakingAdaptiveEvidenceMatchesTarget(focused, {
+    skillId: 'ege.speaking.pronunciation_words', focusRef: 'word.91.1',
+  }), false, 'focused evidence must bind the exact focus ref');
+});
+
+test('file and PostgreSQL Speaking binders delegate exact skill and focused-outcome checks', async () => {
+  const repositories = await Promise.all([
+    fs.readFile(new URL('../storage/file-repository.js', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../storage/postgres-repository.js', import.meta.url), 'utf8'),
+  ]);
+  for (const source of repositories) {
+    const start = source.indexOf('function adaptiveSpeakingSourceMatches');
+    const end = source.indexOf('\n  function adaptiveMutationReplay', start);
+    const alternateEnd = source.indexOf('\n  async function adaptiveAdvanceSource', start);
+    const binder = source.slice(start, end > start ? end : alternateEnd);
+    assert.match(binder, /speakingAdaptiveEvidenceMatchesTarget\(evidence/u);
+    assert.match(binder, /skillId: block\.skillId/u);
+    assert.match(binder, /focusRef: descriptor\.focusRef/u);
+  }
+});
 
 function allocation(percentages = {}, { dueSkillId = null } = {}) {
   return EGE_SKILL_TAXONOMY.skills.map((skill) => ({
@@ -35,15 +125,15 @@ function allocation(percentages = {}, { dueSkillId = null } = {}) {
 
 function plan(percentages, options) {
   return {
-    id: crypto.randomUUID(), revision: 4, version: 'adaptive-plan-v1', taxonomyVersion: 'ege-en-v1',
+    id: crypto.randomUUID(), revision: 4, version: 'adaptive-plan-v1', taxonomyVersion: 'ege-en-v2',
     allocation: { skills: allocation(percentages, options) },
   };
 }
 
 function profile(masteryBySkill = {}) {
   return {
-    taxonomyVersion: 'ege-en-v1',
-    weightingVersion: 'adaptive-evidence-v1',
+    taxonomyVersion: 'ege-en-v2',
+    weightingVersion: 'adaptive-evidence-v2',
     profileCalculationRevision: 1,
     evidenceWatermarkVersion: 'adaptive-evidence-watermark-v1',
     skills: EGE_SKILL_TAXONOMY.skills.map((skill) => ({
@@ -128,10 +218,10 @@ test('prerequisite support requires an authoritative weak prerequisite and remai
   assert.equal(covered.blocks.some((block) => block.reasonCodes.includes('prerequisite_support')), false);
 });
 
-test('five sessions converge across every positive eligible weekly budget instead of starving dependents', () => {
+test('six sessions converge across every positive eligible weekly budget instead of starving dependents', () => {
   const currentPlan = uniformEligiblePlan();
   let usage = [];
-  for (let index = 0; index < 5; index += 1) {
+  for (let index = 0; index < 6; index += 1) {
     const preview = buildAdaptiveSessionPreview({
       plan: currentPlan, goal: { weekly_minutes: 300 }, profile: profile(),
       weekUsage: usage, durationMinutes: 60, now: NOW,
@@ -142,9 +232,9 @@ test('five sessions converge across every positive eligible weekly budget instea
   for (const skillId of ELIGIBLE_SKILLS.filter((id) => COMPOSABLE_SKILLS.has(id))) {
     assert.ok((bySkill.get(skillId) || 0) > 0, skillId);
   }
-  assert.equal(bySkill.has('ege.speaking.interaction'), false);
-  assert.equal(bySkill.has('ege.speaking.monologue'), false);
-  assert.equal([...bySkill.values()].reduce((sum, value) => sum + value, 0), 300);
+  assert.equal(bySkill.has('ege.speaking.reading_aloud'), true);
+  assert.equal(bySkill.has('ege.speaking.monologue_content'), true);
+  assert.equal([...bySkill.values()].reduce((sum, value) => sum + value, 0), 360);
 });
 
 function reasonPlan(targetSkillId, alternativeSkillId) {
@@ -283,21 +373,24 @@ test('the grammar exam launches fixed built-in content and reports through the s
   assert.match(grammar, /function launchGrammarExam\(contentRef\)/u);
 });
 
-test('adaptive Speaking stays out of composition until its evaluation is owner-bound', async () => {
+test('adaptive Speaking composes only server-assigned tasks and owner-bound evaluation', async () => {
   const speakingActivities = ADAPTIVE_ACTIVITY_REGISTRY.activities.filter((activity) => (
     activity.launch.kind === 'speaking_task'
   ));
-  assert.equal(speakingActivities.length, 2);
-  assert.ok(speakingActivities.every((activity) => activity.compositionEnabled === false));
-  assert.throws(() => buildAdaptiveSessionPreview({
-    plan: plan({ 'ege.speaking.interaction': 100 }), goal: { weekly_minutes: 300 },
+  assert.equal(speakingActivities.length, EGE_SKILL_TAXONOMY.skills
+    .filter((skill) => skill.module === 'speaking').length);
+  assert.ok(speakingActivities.every((activity) => activity.contentRef.startsWith('server:speaking:task:')));
+  assert.ok(speakingActivities.every((activity) => activity.contentRef.includes(`:skill:${activity.skillId}:new:v1`)));
+  const speakingPreview = buildAdaptiveSessionPreview({
+    plan: plan({ [speakingActivities[0].skillId]: 100 }), goal: { weekly_minutes: 300 },
     profile: profile(), weekUsage: [], durationMinutes: 15, now: NOW,
     registry: { ...ADAPTIVE_ACTIVITY_REGISTRY, activities: [speakingActivities[0]] },
-  }), (error) => error?.code === 'ADAPTIVE_SESSION_COVERAGE_GAP');
+  });
+  assert.equal(speakingPreview.blocks[0].module, 'speaking');
 
   const speaking = await fs.readFile(new URL('../public/screens/speaking.js', import.meta.url), 'utf8');
   assert.match(speaking, /function adaptiveSpeakingLock\(\)/u);
-  assert.match(speaking, /function launchAdaptiveSpeakingLock\(lock\).*openAdaptivePlan\(\).*return true/su);
+  assert.doesNotMatch(speaking, /РІСЂРµРјРµРЅРЅРѕ РѕС‚РєР»СЋС‡РµРЅРѕ/u);
   const evaluation = speaking.slice(speaking.indexOf('async function spEval'), speaking.indexOf('function spShowEval'));
   assert.doesNotMatch(evaluation, /contentRef/u);
 });
@@ -547,14 +640,13 @@ test('actual low-budget plans remain rolling priorities across every duration an
       usage = updateUsage(usage, preview);
     }
     assert.deepEqual([...servedModules.keys()].sort(), [
-      'grammar', 'listening', 'reading', 'vocabulary', 'writing',
+      'grammar', 'listening', 'reading', 'speaking', 'vocabulary', 'writing',
     ]);
     assert.deepEqual([...servedSkills].sort(), [...new Set(ADAPTIVE_ACTIVITY_REGISTRY.activities
       .filter((activity) => activity.launch.kind !== 'voice_tutor_recovery'
         && activity.compositionEnabled !== false)
       .map((activity) => activity.skillId))].sort());
-    assert.equal(servedModules.has('speaking'), false,
-      'disabled Speaking activities must not leak into a composed session');
+    assert.equal(servedModules.has('speaking'), true);
     assert.equal(sawFallback, true);
     assert.equal(sawPersistedOvershoot, true);
   }

@@ -9,11 +9,19 @@ import { createFileRepository } from '../storage/file-repository.js';
 
 const NOW = new Date('2026-08-03T10:00:00.000Z');
 const LIMITS = Object.freeze({ dailySeconds: 600, monthlySeconds: 7_200, sessionSeconds: 300 });
+const MUTATION_CLOCKS = new WeakMap();
+
+function createTimedRepository(file, initialNow = NOW) {
+  const clock = { now: new Date(initialNow) };
+  const repository = createFileRepository(file, { voiceTutorMutationNow: () => clock.now });
+  MUTATION_CLOCKS.set(repository, clock);
+  return repository;
+}
 
 async function withRepository(run) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-ticket-10-storage-'));
   const file = path.join(directory, 'data.json');
-  const repository = createFileRepository(file);
+  const repository = createTimedRepository(file);
   try {
     await run(repository, file);
   } finally {
@@ -37,6 +45,8 @@ function ruleCard({ id = crypto.randomUUID(), username, skillId = 'ege.grammar.f
 }
 
 async function createVoiceSession(repository, telegramId, { now = NOW } = {}) {
+  const mutationClock = MUTATION_CLOCKS.get(repository);
+  if (mutationClock) mutationClock.now = new Date(now);
   const username = await repository.createTelegramUser(telegramId, `Proxy Student ${telegramId}`);
   await repository.grantDays(telegramId, 30, `Proxy Student ${telegramId}`);
   await repository.setEntitlement(username, 'voice_tutor', {
@@ -193,7 +203,7 @@ test('file repository converts a lost realtime reissue into zero-bill local reco
 test('file repository atomically recovers a partial null-delivery creation into local mode', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-ticket-10-partial-'));
   const file = path.join(directory, 'data.json');
-  const repository = createFileRepository(file);
+  const repository = createTimedRepository(file);
   try {
     const { username, sessionId, idempotencyKey } = await createVoiceSession(repository, 7107);
     await repository.close();
@@ -201,7 +211,7 @@ test('file repository atomically recovers a partial null-delivery creation into 
     const partial = data.voice_tutor_sessions.find((session) => session.id === sessionId);
     partial.delivery_mode = null;
     await fs.writeFile(file, JSON.stringify(data));
-    const reopened = createFileRepository(file);
+    const reopened = createTimedRepository(file);
     try {
       const recovered = await reopened.reissueVoiceTutorFallbackNonce(username, sessionId, {
         idempotencyKey, nextNonceHash: '4'.repeat(64), now: NOW,

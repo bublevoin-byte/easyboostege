@@ -82,7 +82,10 @@ function escapedButtonLabel(value) {
   return String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 }
 
-export function voiceTutorButton({ profile = browser.__sub, source = '', attemptId, revision, criterionChoices } = {}) {
+export function voiceTutorButton({
+  profile = browser.__sub, source = '', attemptId, revision, criterionChoices,
+  pronunciationError,
+} = {}) {
   if (!canStartVoiceTutor(profile)) return '';
   const reviewSource = source === 'writing' || source === 'speaking' ? source : '';
   const validAttempt = reviewSource
@@ -93,6 +96,14 @@ export function voiceTutorButton({ profile = browser.__sub, source = '', attempt
   const safeAttemptId = reviewSource ? Number(attemptId) : String(attemptId);
   if (!reviewSource) {
     return `<button type="button" class="voiceTutorTrigger" data-attempt="${safeAttemptId}" data-revision="${revision}" onclick="openVoiceTutorError(this)">Разобрать голосом</button>`;
+  }
+  if (reviewSource === 'speaking' && pronunciationError != null) {
+    const ref = typeof pronunciationError?.ref === 'string' ? pronunciationError.ref.trim() : '';
+    const label = typeof pronunciationError?.label === 'string' ? pronunciationError.label.trim() : '';
+    if (!/^(?:word|phoneme)\.[0-9]+\.[0-9]+(?:\.[0-9]+)?$/u.test(ref)
+      || !ref.startsWith(`word.${safeAttemptId}.`) && !ref.startsWith(`phoneme.${safeAttemptId}.`)
+      || !label || label.length > 160) return '';
+    return `<button type="button" class="voiceTutorTrigger"${sourceAttribute} data-attempt="${safeAttemptId}" data-revision="${revision}" data-pronunciation-error-ref="${ref}" onclick="openVoiceTutorError(this)">Разобрать: ${escapedButtonLabel(label)}</button>`;
   }
   const seen = new Set();
   const choices = (Array.isArray(criterionChoices) ? criterionChoices : []).filter((choice) => {
@@ -521,7 +532,10 @@ export async function openVoiceTutorError(buttonOrDetails) {
     source: buttonOrDetails.dataset.source || '',
     attemptId: buttonOrDetails.dataset.attempt,
     revision: Number(buttonOrDetails.dataset.revision),
-    criterionIndex: buttonOrDetails.dataset.source ? Number(buttonOrDetails.dataset.criterionIndex) : undefined,
+    ...(buttonOrDetails.dataset.pronunciationErrorRef
+      ? { pronunciationErrorRef: buttonOrDetails.dataset.pronunciationErrorRef }
+      : { criterionIndex: buttonOrDetails.dataset.source
+        ? Number(buttonOrDetails.dataset.criterionIndex) : undefined }),
   } : buttonOrDetails;
   if (!canStartVoiceTutor() || !details) return;
   const operation = ++sessionOperation;
@@ -535,7 +549,12 @@ export async function openVoiceTutorError(buttonOrDetails) {
   try {
     const attemptId = details.source ? Number(details.attemptId) : details.attemptId;
     const body = {
-      ...(details.source ? { source: details.source, criterionIndex: details.criterionIndex } : {}),
+      ...(details.source ? {
+        source: details.source,
+        ...(details.pronunciationErrorRef
+          ? { pronunciationErrorRef: details.pronunciationErrorRef }
+          : { criterionIndex: details.criterionIndex }),
+      } : {}),
       attemptId,
       revision: details.revision,
     };

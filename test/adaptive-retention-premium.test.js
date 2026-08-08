@@ -41,7 +41,7 @@ function plan() {
     id: '71000000-0000-4000-8000-000000000006',
     revision: 6,
     version: 'adaptive-plan-v1',
-    taxonomyVersion: 'ege-en-v1',
+    taxonomyVersion: 'ege-en-v2',
     allocation: { skills: allocation() },
   };
 }
@@ -107,10 +107,10 @@ test('confidence and independent coverage choose a truthful 28/35/42-day cadence
   const sparse = buildAdaptiveLearningProfile();
   const medium = structuredClone(sparse);
   medium.confidence = 65;
-  medium.establishedSkillCount = 8;
+  medium.establishedSkillCount = Math.ceil(EGE_SKILL_TAXONOMY.skills.length / 2);
   const strong = structuredClone(sparse);
   strong.confidence = 85;
-  strong.establishedSkillCount = 12;
+  strong.establishedSkillCount = EGE_SKILL_TAXONOMY.skills.length;
   for (const [profile, expected] of [[sparse, 28], [medium, 35], [strong, 42]]) {
     assert.equal(buildAdaptiveRetentionState({ profile, recoveryMap: {}, now: NOW }).rediagnostic.cadenceDays, expected);
   }
@@ -313,6 +313,7 @@ test('due repeat executes end-to-end through the existing ledger and orientation
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'adaptive-retention-e2e-'));
   const dataPath = path.join(directory, 'data.json');
   let repository = createFileRepository(dataPath);
+  let authorityNow = new Date(NOW);
   let server;
   try {
     const owner = await repository.createTelegramUser(9816, 'Retention Premium');
@@ -367,7 +368,9 @@ test('due repeat executes end-to-end through the existing ledger and orientation
       superseded_at: null,
     });
     await fs.writeFile(dataPath, JSON.stringify(state));
-    repository = createFileRepository(dataPath);
+    repository = createFileRepository(dataPath, {
+      adaptiveMutationNow: () => new Date(authorityNow),
+    });
 
     const authentication = { auth(req, res, next) {
       const username = String(req.headers['x-test-user'] || '');
@@ -453,6 +456,26 @@ test('due repeat executes end-to-end through the existing ledger and orientation
     assert.equal(afterMismatch.voice_tutor_repeat_attempts.some((item) => item.id === mismatchedAttemptId), false,
       'repeat submission and adaptive claim binding must fail atomically');
 
+    authorityNow = new Date(new Date(started.claimExpiresAt).getTime() + 1);
+    const expiredAttemptId = '78200000-0000-4000-8000-000000000006';
+    const expiredAttempt = await request(owner, `/api/v1/voice-tutor/repeats/${repeatId}/attempts`, {
+      method: 'POST', body: JSON.stringify({
+        attemptId: expiredAttemptId, taskId, answer: 'was built',
+        adaptiveExecutionClaim: started.executionClaim, adaptiveSessionId: session.id,
+      }),
+    });
+    assert.equal(expiredAttempt.status, 410);
+    assert.equal((await expiredAttempt.json()).error.code, 'ADAPTIVE_EXECUTION_CLAIM_EXPIRED');
+    assert.equal((JSON.parse(await fs.readFile(dataPath, 'utf8'))).voice_tutor_repeat_attempts
+      .some((item) => item.id === expiredAttemptId), false);
+    const restartedResponse = await request(owner,
+      `/api/v1/adaptive-learning/sessions/${session.id}/start`, {
+        method: 'POST', headers: { 'Idempotency-Key': 'retention-e2e-restart-001' },
+        body: JSON.stringify({ blockId: session.blocks[0].id, expectedRevision: 1 }),
+      });
+    assert.equal(restartedResponse.status, 201, await restartedResponse.clone().text());
+    const restarted = await restartedResponse.json();
+
     const strangerAttempt = await request(base, `/api/v1/voice-tutor/repeats/${repeatId}/attempts`, {
       method: 'POST', body: JSON.stringify({
         attemptId: '78000000-0000-4000-8000-000000000006', taskId, answer: 'was built',
@@ -463,16 +486,16 @@ test('due repeat executes end-to-end through the existing ledger and orientation
     const attemptResponse = await request(owner, `/api/v1/voice-tutor/repeats/${repeatId}/attempts`, {
       method: 'POST', body: JSON.stringify({
         attemptId: '79000000-0000-4000-8000-000000000006', taskId, answer: 'was built',
-        adaptiveExecutionClaim: started.executionClaim, adaptiveSessionId: session.id,
+        adaptiveExecutionClaim: restarted.executionClaim, adaptiveSessionId: session.id,
       }),
     });
-    assert.equal(attemptResponse.status, 201);
+    assert.equal(attemptResponse.status, 201, await attemptResponse.clone().text());
     const attempt = (await attemptResponse.json()).attempt;
     assert.equal(attempt.passed, true);
     const advancedResponse = await request(owner, `/api/v1/adaptive-learning/sessions/${session.id}/advance`, {
       method: 'POST', headers: { 'Idempotency-Key': 'retention-e2e-advance-01' },
       body: JSON.stringify({
-        blockId: session.blocks[0].id, expectedRevision: 1,
+        blockId: session.blocks[0].id, expectedRevision: 2,
         attempt: { type: 'voice_tutor_repeat', id: attempt.id },
       }),
     });

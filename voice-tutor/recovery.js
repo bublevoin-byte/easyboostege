@@ -131,7 +131,7 @@ function iso(value) {
 export function recoveryPotentialPoints(capsule) {
   const cap = POINT_CAPS[capsule?.module] || 0;
   const loss = Number(capsule?.error?.lost_points);
-  return Math.max(0, Math.min(cap, Number.isFinite(loss) && loss > 0 ? Math.ceil(loss) : cap));
+  return Math.max(0, Math.min(cap, Number.isFinite(loss) ? Math.ceil(loss) : cap));
 }
 
 function recoveryRepeatTask(check, skillId, excludedPrompts) {

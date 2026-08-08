@@ -30,7 +30,9 @@ function authenticationFor(username) {
 
 async function withTracerApp(run, { realtimeEnabled = true, textTutor, textProcessing = true, clock = () => NOW } = {}) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-voice-tracer-'));
-  const repository = createFileRepository(path.join(directory, 'data.json'));
+  const repository = createFileRepository(path.join(directory, 'data.json'), {
+    voiceTutorMutationNow: clock,
+  });
   const username = await repository.createTelegramUser(6202, 'Voice Tracer');
   await repository.grantDays(6202, 30, 'Voice Tracer');
   await repository.setEntitlement(username, 'voice_tutor', { startsAt: NOW, endsAt: new Date('2026-09-02T12:00:00.000Z') });

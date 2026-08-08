@@ -8,8 +8,9 @@ import { buildAdaptiveLearningProfile } from '../../adaptive-learning/profile.js
 
 const PLAN_KEYS = Object.freeze([
   'allocation', 'base_plan_revision', 'calculated_at', 'created_at', 'forecast', 'goal_id', 'goal_revision', 'id',
-  'plan_version', 'profile_calculation_revision', 'profile_evidence_observed_at',
-  'profile_evidence_source_count', 'profile_evidence_watermark_version', 'recalculation_bucket',
+  'plan_version', 'profile_calculation_revision', 'profile_evidence_fingerprint',
+  'profile_evidence_observed_at', 'profile_evidence_source_count',
+  'profile_evidence_watermark_version', 'recalculation_bucket',
   'revision', 'stability', 'taxonomy_version', 'updated_at',
 ]);
 
@@ -33,10 +34,36 @@ function candidate({
     profileEvidenceWatermarkVersion: profile.evidenceWatermarkVersion,
     profileEvidenceObservedAt: profile.evidenceObservedAt,
     profileEvidenceSourceCount: profile.evidenceSourceCount,
+    profileEvidenceFingerprint: profile.evidenceFingerprint,
     recalculationBucket: plan.recalculationBucket,
     plan,
     now,
   };
+}
+
+async function appendEvidenceAndBuildProfile(repository, username, {
+  module = 'listening',
+  activity = 'listening_detail',
+  skillId = 'ege.listening.detail',
+  score = 1,
+  maxScore = 10,
+} = {}) {
+  const attemptId = crypto.randomUUID();
+  await repository.recordModuleAttempt(username, {
+    id: attemptId,
+    module,
+    activity,
+    score,
+    maxScore,
+    durationMs: 60_000,
+    metadata: {
+      skill_id: skillId,
+      source_attempt_id: attemptId,
+    },
+  }, { evidenceQuality: 'server_verified_unassisted' });
+  return buildAdaptiveLearningProfile(
+    await repository.getAdaptiveLearningEvidenceSources(username),
+  );
 }
 
 function assertBoundedTransition(assert, previous, next) {
@@ -211,8 +238,15 @@ export async function assertAdaptivePlanRepositoryContract(assert, repository, u
       entry.profileEvidenceObservedAt = '2026-08-04 08:00';
       entry.plan.profileEvidenceObservedAt = '2026-08-04 08:00';
     }],
+    ['invalid profile evidence fingerprint', (entry) => {
+      entry.profileEvidenceFingerprint = 'A'.repeat(64);
+      entry.plan.profileEvidenceFingerprint = 'A'.repeat(64);
+    }],
     ['outer and inner profile vector mismatch', (entry) => {
       entry.plan.profileEvidenceSourceCount += 1;
+    }],
+    ['outer and inner profile evidence fingerprint mismatch', (entry) => {
+      entry.plan.profileEvidenceFingerprint = 'b'.repeat(64);
     }],
     ['non-UUID plan id', (entry) => { entry.id = 'not-a-uuid'; }],
     ['non-lowercase fingerprint', (entry) => { entry.inputFingerprint = 'A'.repeat(64); }],
@@ -230,6 +264,7 @@ export async function assertAdaptivePlanRepositoryContract(assert, repository, u
           evidenceWatermarkVersion: malformed.profileEvidenceWatermarkVersion,
           evidenceObservedAt: malformed.profileEvidenceObservedAt,
           evidenceSourceCount: malformed.profileEvidenceSourceCount,
+          evidenceFingerprint: malformed.profileEvidenceFingerprint,
         },
         basePlanRevision: malformed.basePlanRevision,
         now: malformed.now,
@@ -305,13 +340,12 @@ export async function assertAdaptivePlanRepositoryContract(assert, repository, u
   assert.equal(freshSameBucketReplay.replayed, true);
   assert.equal(freshSameBucketReplay.plan.revision, 1);
 
-  const nextProfile = {
-    ...firstProfile,
-    evidenceSourceCount: 1,
-    evidenceObservedAt: '2026-08-05T08:00:00.000Z',
-  };
+  const nextProfile = await appendEvidenceAndBuildProfile(repository, username, {
+    score: 2,
+  });
   await repository.saveAdaptiveLearningProfile(username, nextProfile, {
     now: new Date('2026-08-05T08:30:00.000Z'),
+    verifyCurrentEvidence: true,
   });
   const staleProfilePlan = buildAdaptiveLearningPlan({
     goal: firstGoal,
@@ -327,7 +361,7 @@ export async function assertAdaptivePlanRepositoryContract(assert, repository, u
       basePlanRevision: 1,
       now: new Date('2026-08-05T09:00:00.000Z'),
     })),
-    /ADAPTIVE_PLAN_PROFILE_STALE/u,
+    /ADAPTIVE_PLAN_EVIDENCE_STALE/u,
     'a candidate built before a newer authoritative profile cannot become current',
   );
   const secondPlan = buildAdaptiveLearningPlan({
@@ -365,16 +399,14 @@ export async function assertAdaptivePlanRepositoryContract(assert, repository, u
     'a known fingerprint must still match the supplied historical metadata',
   );
 
-  const historicalFingerprint = await repository.saveAdaptiveLearningPlan(username, {
-    ...firstCandidate,
-    id: crypto.randomUUID(),
-  });
-  assert.equal(historicalFingerprint.created, false);
-  assert.equal(historicalFingerprint.replayed, true);
-  assert.equal(historicalFingerprint.stale, true);
-  assert.equal(historicalFingerprint.reason, 'historical_fingerprint');
-  assert.equal(historicalFingerprint.plan.revision, 2,
-    'a historical fingerprint never escapes as the live plan');
+  await assert.rejects(
+    repository.saveAdaptiveLearningPlan(username, {
+      ...firstCandidate,
+      id: crypto.randomUUID(),
+    }),
+    /ADAPTIVE_PLAN_EVIDENCE_STALE/u,
+    'a historical fingerprint cannot bypass the current evidence snapshot',
+  );
 
   await assert.rejects(
     repository.saveAdaptiveLearningPlan(username, candidate({
@@ -389,17 +421,37 @@ export async function assertAdaptivePlanRepositoryContract(assert, repository, u
       basePlanRevision: 2,
       now: new Date('2026-08-06T09:00:00.000Z'),
     })),
-    /ADAPTIVE_PLAN_PROFILE_STALE/u,
+    /ADAPTIVE_PLAN_EVIDENCE_STALE/u,
   );
 
-  const newAlgorithmProfile = {
-    ...firstProfile,
-    profileCalculationRevision: firstProfile.profileCalculationRevision + 1,
-    evidenceSourceCount: 0,
-    evidenceObservedAt: null,
+  const unsupportedAlgorithmProfile = {
+    ...nextProfile,
+    profileCalculationRevision: nextProfile.profileCalculationRevision + 1,
   };
+  await assert.rejects(
+    repository.saveAdaptiveLearningPlan(username, candidate({
+      goal: firstGoal,
+      profile: unsupportedAlgorithmProfile,
+      plan: buildAdaptiveLearningPlan({
+        goal: firstGoal,
+        profile: unsupportedAlgorithmProfile,
+        previousPlan: second.plan,
+        now: new Date('2026-08-06T09:00:00.000Z'),
+      }),
+      basePlanRevision: 2,
+      now: new Date('2026-08-06T09:00:00.000Z'),
+    })),
+    /ADAPTIVE_PLAN_EVIDENCE_STALE/u,
+    'an unsupported profile algorithm revision cannot become authoritative',
+  );
+  const newAlgorithmProfile = await appendEvidenceAndBuildProfile(repository, username, {
+    activity: 'listening_gist',
+    skillId: 'ege.listening.gist',
+    score: 8,
+  });
   await repository.saveAdaptiveLearningProfile(username, newAlgorithmProfile, {
     now: new Date('2026-08-06T08:30:00.000Z'),
+    verifyCurrentEvidence: true,
   });
   const newAlgorithmPlan = buildAdaptiveLearningPlan({
     goal: firstGoal,
@@ -417,14 +469,9 @@ export async function assertAdaptivePlanRepositoryContract(assert, repository, u
   assert.equal(newAlgorithm.created, true);
   assert.equal(newAlgorithm.plan.revision, 3);
   assert.equal(newAlgorithm.plan.profile_calculation_revision, newAlgorithmProfile.profileCalculationRevision);
-  assert.equal(newAlgorithm.plan.profile_evidence_source_count, 0);
+  assert.equal(newAlgorithm.plan.profile_evidence_source_count, 2);
 
-  const olderAlgorithmProfile = {
-    ...nextProfile,
-    profileCalculationRevision: firstProfile.profileCalculationRevision,
-    evidenceSourceCount: 100,
-    evidenceObservedAt: '2026-08-07T08:00:00.000Z',
-  };
+  const olderAlgorithmProfile = nextProfile;
   await assert.rejects(
     repository.saveAdaptiveLearningPlan(username, candidate({
       goal: firstGoal,
@@ -438,19 +485,17 @@ export async function assertAdaptivePlanRepositoryContract(assert, repository, u
       basePlanRevision: 3,
       now: new Date('2026-08-07T09:00:00.000Z'),
     })),
-    /ADAPTIVE_PLAN_PROFILE_STALE/u,
+    /ADAPTIVE_PLAN_EVIDENCE_STALE/u,
   );
 
-  const winningProfile = {
-    ...newAlgorithmProfile,
-    evidenceSourceCount: 1,
-    evidenceObservedAt: '2026-08-08T08:00:00.000Z',
-  };
-  winningProfile.skills = winningProfile.skills.map((skill) => skill.module === 'listening'
-    ? { ...skill, mastery: 20, uncertainty: 90 }
-    : skill);
+  const winningProfile = await appendEvidenceAndBuildProfile(repository, username, {
+    activity: 'listening_detail',
+    skillId: 'ege.listening.detail',
+    score: 0,
+  });
   await repository.saveAdaptiveLearningProfile(username, winningProfile, {
     now: new Date('2026-08-08T08:30:00.000Z'),
+    verifyCurrentEvidence: true,
   });
   const winningPlan = buildAdaptiveLearningPlan({
     goal: firstGoal,
@@ -467,16 +512,15 @@ export async function assertAdaptivePlanRepositoryContract(assert, repository, u
   }));
   assert.equal(winner.plan.revision, 4);
 
-  const newerProfile = {
-    ...winningProfile,
-    evidenceSourceCount: 2,
-    evidenceObservedAt: '2026-08-09T08:00:00.000Z',
-  };
-  newerProfile.skills = newerProfile.skills.map((skill) => skill.module === 'writing'
-    ? { ...skill, mastery: 5, uncertainty: 95 }
-    : skill);
+  const newerProfile = await appendEvidenceAndBuildProfile(repository, username, {
+    module: 'grammar',
+    activity: 'grammar_forms',
+    skillId: 'ege.grammar.forms',
+    score: 0,
+  });
   await repository.saveAdaptiveLearningProfile(username, newerProfile, {
     now: new Date('2026-08-09T08:30:00.000Z'),
+    verifyCurrentEvidence: true,
   });
   const staleBasePlan = buildAdaptiveLearningPlan({
     goal: firstGoal,
@@ -515,8 +559,6 @@ export async function assertAdaptivePlanRepositoryContract(assert, repository, u
 
   const criticalProfile = {
     ...newerProfile,
-    evidenceSourceCount: 3,
-    evidenceObservedAt: '2026-08-10T06:00:00.000Z',
     skills: newerProfile.skills.map((skill) => skill.id === 'ege.listening.detail' ? {
       ...skill,
       dueState: 'critical_due',
@@ -665,16 +707,14 @@ export async function assertAdaptivePlanRepositoryContract(assert, repository, u
   assert.equal(reset.plan.goal_revision, 2);
   assert.equal(reset.plan.stability.bypassReason, 'goal_changed');
 
-  const historicalAfterGoalChange = await repository.saveAdaptiveLearningPlan(username, {
-    ...firstCandidate,
-    id: crypto.randomUUID(),
-  });
-  assert.equal(historicalAfterGoalChange.created, false);
-  assert.equal(historicalAfterGoalChange.replayed, true);
-  assert.equal(historicalAfterGoalChange.stale, true);
-  assert.equal(historicalAfterGoalChange.reason, 'historical_fingerprint');
-  assert.equal(historicalAfterGoalChange.plan.id, reset.plan.id);
-  assert.equal(historicalAfterGoalChange.plan.goal_revision, 2);
+  await assert.rejects(
+    repository.saveAdaptiveLearningPlan(username, {
+      ...firstCandidate,
+      id: crypto.randomUUID(),
+    }),
+    /ADAPTIVE_PLAN_EVIDENCE_STALE/u,
+    'a goal revision change cannot revive a fingerprint from stale evidence',
+  );
 
   const structurallyValidOldGoalPlan = buildAdaptiveLearningPlan({
     goal: firstGoal,

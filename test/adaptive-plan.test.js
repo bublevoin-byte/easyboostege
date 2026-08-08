@@ -17,6 +17,8 @@ import {
 import { buildAdaptiveLearningProfile, EGE_SKILL_TAXONOMY } from '../adaptive-learning/profile.js';
 import { createAdaptiveLearningRoutes } from '../routes/adaptive-learning.js';
 import { createFileRepository } from '../storage/file-repository.js';
+import { publicSpeakingReview, scoreSpeakingTask } from '../speaking/fipi-scoring.js';
+import { SPEAKING_TASK2_CATALOG } from '../public/content/speaking/task2-v1.js';
 
 const NOW = new Date('2026-08-04T09:00:00.000Z');
 
@@ -53,12 +55,13 @@ function profile(overrides = {}) {
     explanationCode: 'attempt_evidence',
   }));
   return {
-    taxonomyVersion: 'ege-en-v1',
-    weightingVersion: 'adaptive-evidence-v1',
+    taxonomyVersion: 'ege-en-v2',
+    weightingVersion: 'adaptive-evidence-v2',
     profileCalculationRevision: 1,
     evidenceWatermarkVersion: 'adaptive-evidence-watermark-v1',
     evidenceObservedAt: '2026-08-03T09:00:00.000Z',
     evidenceSourceCount: 12,
+    evidenceFingerprint: 'a'.repeat(64),
     preliminary: true,
     status: 'preliminary',
     confidence: 55,
@@ -74,6 +77,63 @@ function profile(overrides = {}) {
     modules: [],
     ...overrides,
   };
+}
+
+function scoredTask2Review() {
+  const semanticFacts = {
+    confidence: 0.96, verdict: 'Assessable.', evidence: ['Four direct questions.'], issues: [],
+    items: Array.from({ length: 4 }, (_, index) => ({
+      index: index + 1, relevant: true, directQuestion: true,
+      lexicalGrammarBlocksCommunication: false, evidence: `Question ${index + 1}`,
+    })),
+  };
+  const acousticFacts = {
+    available: true, recognitionConfidence: 0.95, signalQuality: 'good', recordingDurationSeconds: 48,
+    itemDurations: Array.from({ length: 4 }, (_, index) => ({
+      itemIndex: index + 1, durationSeconds: 12,
+    })),
+    wordAccuracyScore: 96, phonemeAccuracyScore: 95, fluencyScore: 84, wordEvents: [],
+  };
+  return {
+    ...publicSpeakingReview(
+      scoreSpeakingTask({ taskType: 2, semantic: semanticFacts, acoustic: acousticFacts }),
+      semanticFacts,
+    ),
+    semanticFacts,
+    acousticFacts,
+  };
+}
+
+async function createUnassistedTask2Evidence(repository, owner) {
+  const assignedAt = new Date('2026-08-04T07:00:00.000Z');
+  await repository.setSpeakingAccentProfile(owner, {
+    locale: 'en-GB', source: 'manual', now: assignedAt,
+  });
+  const session = await repository.assignSpeakingTask2Session(owner, {
+    catalogId: SPEAKING_TASK2_CATALOG.id,
+    catalogRevision: SPEAKING_TASK2_CATALOG.revision,
+    tasks: SPEAKING_TASK2_CATALOG.tasks,
+    now: assignedAt,
+  });
+  for (let questionNumber = 1; questionNumber <= 4; questionNumber += 1) {
+    await repository.completeSpeakingTask2Question(owner, session.id, questionNumber, {
+      recordingDurationSeconds: 12, localPlayback: true, selfRating: 'steady',
+    }, { now: new Date(assignedAt.getTime() + questionNumber * 12_000) });
+  }
+  const claim = await repository.claimSpeakingEvaluation(owner, {
+    taskType: 2, assignment: {}, transcript: 'Four complete direct questions.',
+  }, 'speaking-evaluation-v1', crypto.randomBytes(32).toString('hex'), {
+    now: new Date(assignedAt.getTime() + 60_000),
+    source: {
+      sessionId: session.id, taskRef: session.task_id, taskRevision: Number(session.task_revision),
+      catalogId: session.catalog_id, catalogRevision: Number(session.catalog_revision),
+      assistanceUsed: false,
+    },
+  });
+  await repository.finishSpeakingAttempt(claim.attempt.id, {
+    status: 'completed', review: scoredTask2Review(), provider: 'test', model: 'test', errorCode: null,
+  });
+  return session;
 }
 
 test('transparent plan returns an honest range, exact allocation and diagnostic probes', () => {
@@ -103,6 +163,47 @@ test('transparent plan returns an honest range, exact allocation and diagnostic 
   assert.equal(plan.allocation.modules.find((item) => item.id === 'listening').percentage,
     plan.allocation.skills.filter((item) => item.module === 'listening')
       .reduce((sum, item) => sum + item.percentage, 0));
+});
+
+test('a persisted v1 taxonomy plan resets stability before a v2 allocation is built', () => {
+  const current = buildAdaptiveLearningPlan({ goal: goal(), profile: profile(), now: NOW });
+  const legacy = structuredClone(current);
+  legacy.revision = 7;
+  legacy.taxonomyVersion = 'ege-en-v1';
+  const speakingPercentage = legacy.allocation.modules
+    .find((module) => module.id === 'speaking').percentage;
+  legacy.allocation.skills = legacy.allocation.skills
+    .filter((skill) => skill.module !== 'speaking')
+    .concat([
+      { id: 'ege.speaking.interaction', label: 'Interaction', module: 'speaking', percentage: Math.floor(speakingPercentage / 2), activityType: 'practice', reasonCodes: [] },
+      { id: 'ege.speaking.monologue', label: 'Monologue', module: 'speaking', percentage: Math.ceil(speakingPercentage / 2), activityType: 'practice', reasonCodes: [] },
+    ]);
+
+  const upgraded = buildAdaptiveLearningPlan({
+    goal: goal(), profile: profile(), previousPlan: legacy,
+    now: new Date('2026-08-05T09:00:00.000Z'),
+  });
+
+  assert.equal(upgraded.basePlanRevision, 7);
+  assert.equal(upgraded.taxonomyVersion, 'ege-en-v2');
+  assert.equal(upgraded.stability.applied, false);
+  assert.equal(upgraded.stability.bypassReason, 'taxonomy_changed');
+  assert.equal(upgraded.allocation.skills.length, EGE_SKILL_TAXONOMY.skills.length);
+  assert.equal(upgraded.allocation.skills.every((skill) => Number.isFinite(skill.percentage)), true);
+  assert.equal(upgraded.allocation.skills.reduce((sum, skill) => sum + skill.percentage, 0), 100);
+  assert.doesNotThrow(() => assertAdaptivePlanStabilityTransition(legacy, upgraded));
+});
+
+test('module priority is not multiplied by the number of micro-skills in its taxonomy', () => {
+  const result = buildAdaptiveLearningPlan({ goal: goal(), profile: profile(), now: NOW });
+  const modules = new Map(result.allocation.modules.map((module) => [module.id, module.percentage]));
+  assert.ok(modules.get('speaking') <= modules.get('writing') + 2, JSON.stringify(result.allocation.modules));
+  for (const module of result.allocation.modules) {
+    assert.equal(module.percentage, result.allocation.skills
+      .filter((skill) => skill.module === module.id)
+      .reduce((sum, skill) => sum + skill.percentage, 0));
+  }
+  assert.equal(result.allocation.skills.reduce((sum, skill) => sum + skill.percentage, 0), 100);
 });
 
 test('unrealistic target offers concrete time and target choices without a promise', () => {
@@ -405,7 +506,7 @@ function testAuthentication() {
   } };
 }
 
-async function withPlanApp(run, { decorateDb } = {}) {
+async function withPlanApp(run, { decorateDb, enabled = true } = {}) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-plan-'));
   const repository = createFileRepository(path.join(directory, 'data.json'));
   const owner = await repository.createTelegramUser(9301, 'Plan Owner');
@@ -414,7 +515,7 @@ async function withPlanApp(run, { decorateDb } = {}) {
   const app = express();
   app.use(express.json());
   app.use(createAdaptiveLearningRoutes({
-    authentication: testAuthentication(), db: decorateDb ? decorateDb(repository) : repository, enabled: true,
+    authentication: testAuthentication(), db: decorateDb ? decorateDb(repository) : repository, enabled,
     now: () => new Date(currentTime),
     executionTokenSecret: 'adaptive-test-token-secret-32-characters',
   }));
@@ -486,6 +587,219 @@ test('authenticated plan API persists one daily revision and diagnostic evidence
   });
 });
 
+test('file HTTP overview creates a coherent new plan for same-time post-hoc assistance evidence', async () => {
+  await withPlanApp(async ({ repository, owner, request }) => {
+    const session = await createUnassistedTask2Evidence(repository, owner);
+    const createdResponse = await request(owner, '/api/v1/adaptive-learning/goal', {
+      method: 'PUT', headers: { 'Idempotency-Key': 'adaptive-plan-assistance-file-01' },
+      body: JSON.stringify({
+        targetExam: 'ege_english', targetScore: 85,
+        examDate: '2027-06-01', weeklyMinutes: 300,
+      }),
+    });
+    assert.equal(createdResponse.status, 201);
+    const before = await createdResponse.json();
+    assert.ok(before.profile.independentEvidenceCount > 0);
+    assert.equal(before.plan.profileEvidenceFingerprint, before.profile.evidenceFingerprint);
+
+    await repository.markSpeakingSessionAssisted(owner, 2, session.id, {
+      now: new Date(before.profile.evidenceObservedAt),
+    });
+    const response = await request(owner, '/api/v1/adaptive-learning/overview');
+    assert.equal(response.status, 200);
+    const after = await response.json();
+    assert.equal(after.profile.evidenceSourceCount, before.profile.evidenceSourceCount);
+    assert.equal(after.profile.evidenceObservedAt, before.profile.evidenceObservedAt);
+    assert.notEqual(after.profile.evidenceFingerprint, before.profile.evidenceFingerprint);
+    assert.equal(after.profile.independentEvidenceCount, 0);
+    assert.ok(after.profile.assistedEvidenceCount > 0);
+    assert.equal(after.plan.revision, before.plan.revision + 1);
+    assert.notEqual(after.plan.id, before.plan.id);
+    assert.equal(after.plan.profileEvidenceFingerprint, after.profile.evidenceFingerprint);
+    assert.notDeepEqual(after.plan.allocation, before.plan.allocation);
+    const revisions = (await repository.exportUserData(owner)).adaptive_learning_plan_revisions;
+    assert.deepEqual(revisions.map((entry) => entry.revision), [1, 2]);
+    assert.deepEqual(revisions.map((entry) => entry.profile_evidence_fingerprint), [
+      before.profile.evidenceFingerprint, after.profile.evidenceFingerprint,
+    ]);
+  });
+});
+
+test('file HTTP overview retries evidence changed after profile save before plan save', async () => {
+  let armed = false;
+  let injected = false;
+  let sourceSession = null;
+  const decorateDb = (repository) => new Proxy(repository, {
+    get(target, property) {
+      if (property !== 'saveAdaptiveLearningPlan') return Reflect.get(target, property);
+      return async (username, candidate) => {
+        if (armed && !injected) {
+          injected = true;
+          await target.markSpeakingSessionAssisted(username, 2, sourceSession.id, {
+            now: new Date(candidate.profileEvidenceObservedAt),
+          });
+        }
+        return target.saveAdaptiveLearningPlan(username, candidate);
+      };
+    },
+  });
+  await withPlanApp(async ({ repository, owner, request }) => {
+    sourceSession = await createUnassistedTask2Evidence(repository, owner);
+    const createdResponse = await request(owner, '/api/v1/adaptive-learning/goal', {
+      method: 'PUT', headers: { 'Idempotency-Key': 'adaptive-plan-interleaving-file-01' },
+      body: JSON.stringify({
+        targetExam: 'ege_english', targetScore: 85,
+        examDate: '2027-06-01', weeklyMinutes: 300,
+      }),
+    });
+    assert.equal(createdResponse.status, 201);
+    const before = await createdResponse.json();
+    armed = true;
+
+    const response = await request(owner, '/api/v1/adaptive-learning/overview');
+    assert.equal(response.status, 200);
+    const after = await response.json();
+    assert.equal(injected, true);
+    assert.equal(after.profile.evidenceSourceCount, before.profile.evidenceSourceCount);
+    assert.equal(after.profile.evidenceObservedAt, before.profile.evidenceObservedAt);
+    assert.notEqual(after.profile.evidenceFingerprint, before.profile.evidenceFingerprint);
+    assert.equal(after.profile.independentEvidenceCount, 0);
+    assert.ok(after.profile.assistedEvidenceCount > 0);
+    assert.equal(after.plan.revision, before.plan.revision + 1);
+    assert.equal(after.plan.profileEvidenceFingerprint, after.profile.evidenceFingerprint);
+    assert.notDeepEqual(after.plan.allocation, before.plan.allocation);
+    const current = await repository.getCurrentAdaptiveLearningPlan(owner);
+    assert.equal(current.profile_evidence_fingerprint, after.profile.evidenceFingerprint);
+    assert.equal((await repository.exportUserData(owner)).adaptive_learning_plan_revisions.length, 2,
+      'the rejected stale plan must not create a revision');
+  }, { decorateDb });
+});
+
+test('file overview exhausts profile CAS retries as a retryable 409 without a goal or plan', async () => {
+  let saves = 0;
+  const decorateDb = (repository) => new Proxy(repository, {
+    get(target, property) {
+      if (property !== 'saveAdaptiveLearningProfile') return Reflect.get(target, property);
+      return async () => {
+        saves += 1;
+        throw new Error('ADAPTIVE_PROFILE_EVIDENCE_STALE');
+      };
+    },
+  });
+  await withPlanApp(async ({ owner, request }) => {
+    const response = await request(owner, '/api/v1/adaptive-learning/overview');
+    assert.equal(response.status, 409);
+    assert.equal(response.headers.get('retry-after'), '1');
+    assert.deepEqual(await response.json(), {
+      error: { code: 'ADAPTIVE_PROFILE_RETRY_REQUIRED', retryable: true },
+    });
+    assert.equal(saves, 3, 'initial profile CAS plus two bounded retries');
+  }, { decorateDb, enabled: false });
+});
+
+test('file overview recovers coherently when the first or second profile CAS retry wins', async () => {
+  for (const failures of [1, 2]) {
+    let saves = 0;
+    const decorateDb = (repository) => new Proxy(repository, {
+      get(target, property) {
+        if (property !== 'saveAdaptiveLearningProfile') return Reflect.get(target, property);
+        return async (...args) => {
+          saves += 1;
+          if (saves <= failures) throw new Error('ADAPTIVE_PROFILE_EVIDENCE_STALE');
+          return target.saveAdaptiveLearningProfile(...args);
+        };
+      },
+    });
+    await withPlanApp(async ({ owner, request }) => {
+      const response = await request(owner, '/api/v1/adaptive-learning/overview');
+      assert.equal(response.status, 200);
+      const result = await response.json();
+      assert.equal(result.goal, null);
+      assert.equal(result.plan, null);
+      assert.equal(result.profile.evidenceSourceCount, 0);
+      assert.equal(saves, failures + 1);
+    }, { decorateDb, enabled: false });
+  }
+});
+
+test('file overview normalizes every exhausted plan race to one retryable bounded 409', async () => {
+  const failures = [
+    { label: 'save conflict', result: () => ({ conflict: true }) },
+    { label: 'goal mismatch', result: (_target, candidate) => ({
+      conflict: false, plan: { goal_revision: Number(candidate.goalRevision) + 1 },
+    }) },
+    ...['ADAPTIVE_PLAN_GOAL_STALE', 'ADAPTIVE_PLAN_PROFILE_STALE',
+      'ADAPTIVE_PLAN_EVIDENCE_STALE', 'ADAPTIVE_PLAN_RECALCULATION_CONFLICT']
+      .map((code) => ({ label: code, result: () => { throw new Error(code); } })),
+  ];
+  for (const [index, failure] of failures.entries()) {
+    let armed = false;
+    let saves = 0;
+    const decorateDb = (repository) => new Proxy(repository, {
+      get(target, property) {
+        if (property !== 'saveAdaptiveLearningPlan') return Reflect.get(target, property);
+        return async (username, candidate) => {
+          if (!armed) return target.saveAdaptiveLearningPlan(username, candidate);
+          saves += 1;
+          return failure.result(target, candidate);
+        };
+      },
+    });
+    await withPlanApp(async ({ owner, request }) => {
+      const goal = await request(owner, '/api/v1/adaptive-learning/goal', {
+        method: 'PUT', headers: { 'Idempotency-Key': `adaptive-plan-race-${index}-0001` },
+        body: JSON.stringify({
+          targetExam: 'ege_english', targetScore: 85,
+          examDate: '2027-06-01', weeklyMinutes: 300,
+        }),
+      });
+      assert.equal(goal.status, 201, failure.label);
+      armed = true;
+      const response = await request(owner, '/api/v1/adaptive-learning/overview');
+      assert.equal(response.status, 409, failure.label);
+      assert.equal(response.headers.get('retry-after'), '1', failure.label);
+      assert.deepEqual(await response.json(), {
+        error: { code: 'ADAPTIVE_PROFILE_RETRY_REQUIRED', retryable: true },
+      }, failure.label);
+      assert.equal(saves, 3, `${failure.label}: initial plan attempt plus two bounded retries`);
+    }, { decorateDb });
+  }
+});
+
+test('file overview recovers coherently when the first or second plan race retry wins', async () => {
+  for (const failures of [1, 2]) {
+    let armed = false;
+    let saves = 0;
+    const decorateDb = (repository) => new Proxy(repository, {
+      get(target, property) {
+        if (property !== 'saveAdaptiveLearningPlan') return Reflect.get(target, property);
+        return async (...args) => {
+          if (!armed) return target.saveAdaptiveLearningPlan(...args);
+          saves += 1;
+          if (saves <= failures) throw new Error('ADAPTIVE_PLAN_EVIDENCE_STALE');
+          return target.saveAdaptiveLearningPlan(...args);
+        };
+      },
+    });
+    await withPlanApp(async ({ owner, request }) => {
+      const goal = await request(owner, '/api/v1/adaptive-learning/goal', {
+        method: 'PUT', headers: { 'Idempotency-Key': `adaptive-plan-recovery-${failures}-0001` },
+        body: JSON.stringify({
+          targetExam: 'ege_english', targetScore: 85,
+          examDate: '2027-06-01', weeklyMinutes: 300,
+        }),
+      });
+      assert.equal(goal.status, 201);
+      armed = true;
+      const response = await request(owner, '/api/v1/adaptive-learning/overview');
+      assert.equal(response.status, 200);
+      const overview = await response.json();
+      assert.equal(overview.plan.goalRevision, overview.goal.revision);
+      assert.equal(saves, failures + 1);
+    }, { decorateDb });
+  }
+});
+
 test('goal replay and concurrent goal saves return one internally consistent current snapshot', async () => {
   await withPlanApp(async ({ owner, request }) => {
     const firstBody = {
@@ -539,7 +853,7 @@ test('goal replay and concurrent goal saves return one internally consistent cur
   });
 });
 
-test('overview retries when the authoritative profile advances before plan persistence', async () => {
+test('overview retries and rejects a profile advance that is not backed by current evidence', async () => {
   let advanced = false;
   const decorateDb = (repository) => new Proxy(repository, {
     get(target, property) {
@@ -568,8 +882,8 @@ test('overview retries when the authoritative profile advances before plan persi
     });
     assert.equal(response.status, 201);
     const result = await response.json();
-    assert.equal(result.plan.profileEvidenceSourceCount, 1);
-    assert.equal(result.profile.evidenceSourceCount, 1);
+    assert.equal(result.plan.profileEvidenceSourceCount, 0);
+    assert.equal(result.profile.evidenceSourceCount, 0);
   }, { decorateDb });
 });
 
@@ -787,6 +1101,7 @@ test('plan API recomputes against the winning concurrent base instead of losing 
             profileEvidenceWatermarkVersion: authoritativeProfile.evidence_watermark_version,
             profileEvidenceObservedAt: authoritativeProfile.evidence_observed_at,
             profileEvidenceSourceCount: Number(authoritativeProfile.evidence_source_count),
+            profileEvidenceFingerprint: authoritativeProfile.evidence_fingerprint,
             recalculationBucket: '2026-08-04',
             now: winningNow,
             plan: winningPlan,
@@ -853,4 +1168,5 @@ test('plan card exposes forecast confidence, reasons, allocation and realistic c
   assert.match(openapi, /maximum_supported_weekly_time/u);
   assert.match(openapi, /AdaptiveGoalMutationResponse/u);
   assert.match(openapi, /exam_date_expired/u);
+  assert.match(openapi, /profileEvidenceFingerprint/u);
 });

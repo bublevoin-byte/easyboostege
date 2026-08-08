@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 
 import { buildAdaptiveLearningPlan, adaptivePlanInputFingerprint } from '../../adaptive-learning/plan.js';
-import { buildAdaptiveLearningProfile } from '../../adaptive-learning/profile.js';
+import { buildAdaptiveLearningProfile, EGE_SKILL_TAXONOMY } from '../../adaptive-learning/profile.js';
 import { adaptiveLearningProfilePublicDto } from '../../adaptive-learning/repository-dto.js';
 import {
   ADAPTIVE_ACTIVITY_REGISTRY,
@@ -10,6 +10,7 @@ import {
   createAdaptiveLearningSessionFromPreview,
 } from '../../adaptive-learning/session.js';
 import {
+  ADAPTIVE_EXECUTION_CLAIM_TTL_MS,
   adaptiveCompletedBlockDto,
   adaptiveExecutionRequestHash,
   adaptiveExecutionSummary,
@@ -18,7 +19,102 @@ import {
   adaptiveEvidenceContext,
 } from '../../adaptive-learning/session-execution.js';
 import { adaptiveSpeakingTask } from '../../public/adaptive-speaking-tasks.js';
+import { SPEAKING_TASK1_CATALOG } from '../../public/content/speaking/task1-v1.js';
+import { SPEAKING_TASK2_CATALOG } from '../../public/content/speaking/task2-v1.js';
+import { SPEAKING_TASK3_CATALOG } from '../../public/content/speaking/task3-v1.js';
+import { SPEAKING_TASK4_CATALOG } from '../../public/content/speaking/task4-v1.js';
+import { publicSpeakingReview, scoreSpeakingTask } from '../../speaking/fipi-scoring.js';
 import { readingAdaptiveAttemptMetadata } from './reading-adaptive-attempt.js';
+
+function adaptiveSpeakingReview(taskType) {
+  const semanticFacts = taskType === 1 ? {
+    confidence: 1, verdict: 'Assessable.', evidence: ['Complete reading.'], issues: [],
+  } : taskType === 2 ? {
+    confidence: 0.95, verdict: 'Assessable.', evidence: ['Four direct questions.'], issues: [],
+    items: Array.from({ length: 4 }, (_, index) => ({
+      index: index + 1, relevant: true, directQuestion: true,
+      lexicalGrammarBlocksCommunication: false, evidence: `Question ${index + 1}`,
+    })),
+  } : taskType === 3 ? {
+    confidence: 0.95, verdict: 'Assessable.', evidence: ['Five complete answers.'], issues: [],
+    items: Array.from({ length: 5 }, (_, index) => ({
+      index: index + 1, relevant: true, complete: true, communicativelyAppropriate: true,
+      phraseCount: 2, elementaryLexicalGrammarError: false, evidence: `Answer ${index + 1}`,
+    })),
+  } : {
+    confidence: 0.95, verdict: 'Assessable.', evidence: ['All plan points covered.'], issues: [],
+    phraseCount: 13, wordList: false, introductionPresent: true, conclusionPresent: true,
+    contentAspects: Array.from({ length: 4 }, (_, index) => ({
+      index: index + 1, id: `content-${index + 1}`, start: 0, end: 0,
+      status: 'full', evidence: `Plan point ${index + 1}`, correction: 'No deduction.',
+    })),
+    organizationErrors: [], lexicalGrammarErrors: [],
+  };
+  const acousticFacts = {
+    available: true, recognitionConfidence: 0.95, signalQuality: 'good',
+    recordingDurationSeconds: taskType === 2 ? 48 : taskType === 3 ? 100 : 60,
+    itemDurations: [2, 3].includes(taskType)
+      ? Array.from({ length: taskType === 2 ? 4 : 5 }, (_, index) => ({
+        itemIndex: index + 1, durationSeconds: taskType === 2 ? 12 : 20,
+      })) : [],
+    completenessScore: 96, fluencyScore: 84, wordEvents: [],
+  };
+  return {
+    ...publicSpeakingReview(
+      scoreSpeakingTask({ taskType, semantic: semanticFacts, acoustic: acousticFacts }),
+      semanticFacts,
+    ),
+    semanticFacts,
+    acousticFacts,
+  };
+}
+
+async function createAdaptiveSpeakingAttempt(repository, username, block, now) {
+  const descriptor = adaptiveSpeakingTask(block.contentRef);
+  const catalogs = {
+    1: SPEAKING_TASK1_CATALOG, 2: SPEAKING_TASK2_CATALOG,
+    3: SPEAKING_TASK3_CATALOG, 4: SPEAKING_TASK4_CATALOG,
+  };
+  const catalog = catalogs[descriptor?.taskNumber] || null;
+  if (!catalog) throw new Error('ADAPTIVE_SPEAKING_FIXTURE_INVALID');
+  const assign = repository[`assignSpeakingTask${descriptor.taskNumber}Session`].bind(repository);
+  const session = await assign(username, {
+    catalogId: catalog.id, catalogRevision: catalog.revision, tasks: catalog.tasks, now,
+  });
+  if (descriptor.taskNumber === 1) {
+    await repository.completeSpeakingTask1Session(username, session.id, {
+      recordingDurationSeconds: 60, micCheck: 'passed', localPlayback: true, selfRating: 'steady',
+    }, { now });
+  } else if (descriptor.taskNumber === 2 || descriptor.taskNumber === 3) {
+    const count = descriptor.taskNumber === 2 ? 4 : 5;
+    const complete = descriptor.taskNumber === 2
+      ? repository.completeSpeakingTask2Question.bind(repository)
+      : repository.completeSpeakingTask3Answer.bind(repository);
+    for (let position = 1; position <= count; position += 1) {
+      await complete(username, session.id, position, {
+        recordingDurationSeconds: descriptor.taskNumber === 2 ? 12 : 20,
+        localPlayback: true, selfRating: 'steady',
+      }, { now });
+    }
+  } else {
+    await repository.completeSpeakingTask4Session(username, session.id, {
+      recordingDurationSeconds: 60, micCheck: 'passed', localPlayback: true, selfRating: 'steady',
+    }, { now });
+  }
+  const claimed = await repository.claimSpeakingEvaluation(username, {
+    taskType: descriptor.taskNumber, assignment: {}, transcript: 'A complete contract transcript.',
+  }, 'contract-speaking-v1', crypto.randomUUID().replaceAll('-', '').padEnd(64, '0').slice(0, 64), {
+    now,
+    source: {
+      sessionId: session.id, taskRef: session.task_id, taskRevision: session.task_revision,
+      catalogId: session.catalog_id, catalogRevision: session.catalog_revision, assistanceUsed: false,
+    },
+  });
+  await repository.finishSpeakingAttempt(claimed.attempt.id, {
+    status: 'completed', review: adaptiveSpeakingReview(descriptor.taskNumber),
+  });
+  return { type: 'speaking', id: claimed.attempt.id };
+}
 
 function reverseObjectKeys(value) {
   if (Array.isArray(value)) return value.map(reverseObjectKeys);
@@ -28,16 +124,59 @@ function reverseObjectKeys(value) {
   )));
 }
 
-export async function assertAdaptiveSessionRepositoryContract(assert, repository, username) {
+export async function assertAdaptiveSessionRepositoryContract(assert, repository, username, {
+  beforeSpeakingBind = null,
+} = {}) {
   const executionTokenSecret = 'adaptive-contract-secret-32-characters';
   const instant = new Date(Date.now() - 2 * 60 * 60_000);
+  const owner = await repository.getUser(username);
+  await repository.grantDays(Number(owner.telegram_id), 30, owner.name || username);
+  await repository.setEntitlement(username, 'voice_tutor', {
+    startsAt: new Date(instant.getTime() - 60_000),
+    endsAt: new Date(Date.now() + 7 * 24 * 60 * 60_000),
+  });
   const goal = (await repository.saveAdaptiveLearningGoal(username, {
     id: crypto.randomUUID(), idempotencyKey: 'session-contract-goal-01', requestHash: '7'.repeat(64),
     targetExam: 'ege_english', targetScore: 85, examDate: '2027-06-01', weeklyMinutes: 300,
     now: instant,
   })).goal;
-  const rawProfile = buildAdaptiveLearningProfile();
-  const storedProfile = await repository.saveAdaptiveLearningProfile(username, rawProfile, { now: instant });
+  const racePriorityAttempts = beforeSpeakingBind
+    ? EGE_SKILL_TAXONOMY.skills
+      .filter((skill) => skill.module !== 'speaking')
+      .flatMap((skill, skillIndex) => Array.from({ length: 3 }, (_, evidenceIndex) => {
+        const attemptId = crypto.randomUUID();
+        return {
+          id: attemptId,
+          module: skill.module,
+          activity: skill.activityIds[0],
+          score: 10,
+          max_score: 10,
+          evidence_quality: 'server_verified_unassisted',
+          metadata: {
+            skill_id: skill.id,
+            source_attempt_id: attemptId,
+          },
+          created_at: new Date(instant.getTime() - 60_000
+            + skillIndex * 1_000 + evidenceIndex).toISOString(),
+        };
+      })) : [];
+  for (const attempt of racePriorityAttempts) {
+    await repository.recordModuleAttempt(username, {
+      id: attempt.id,
+      module: attempt.module,
+      activity: attempt.activity,
+      score: attempt.score,
+      maxScore: attempt.max_score,
+      metadata: attempt.metadata,
+    }, { evidenceQuality: attempt.evidence_quality });
+  }
+  const rawProfile = buildAdaptiveLearningProfile(
+    await repository.getAdaptiveLearningEvidenceSources(username),
+  );
+  const storedProfile = await repository.saveAdaptiveLearningProfile(username, rawProfile, {
+    now: instant,
+    verifyCurrentEvidence: true,
+  });
   const profile = adaptiveLearningProfilePublicDto(storedProfile);
   const calculated = buildAdaptiveLearningPlan({ goal, profile, now: instant });
   const storedPlan = (await repository.saveAdaptiveLearningPlan(username, {
@@ -49,6 +188,7 @@ export async function assertAdaptiveSessionRepositoryContract(assert, repository
     profileEvidenceWatermarkVersion: profile.evidenceWatermarkVersion,
     profileEvidenceObservedAt: profile.evidenceObservedAt,
     profileEvidenceSourceCount: profile.evidenceSourceCount,
+    profileEvidenceFingerprint: profile.evidenceFingerprint,
     recalculationBucket: calculated.recalculationBucket, plan: calculated, now: instant,
   })).plan;
   const publicPlan = {
@@ -263,10 +403,18 @@ export async function assertAdaptiveSessionRepositoryContract(assert, repository
       };
       const started = await repository.startAdaptiveLearningSessionBlock(username, startCandidate);
       assert.equal(started.created, true);
-      assert.deepEqual(started.responseSnapshot, startSnapshot);
+      assert.equal(started.responseSnapshot.executionClaimId, claimId);
+      assert.deepEqual(started.responseSnapshot.block, block);
+      assert.deepEqual(started.responseSnapshot.launch, block.launch);
+      const claimExpiresAt = new Date(started.responseSnapshot.claimExpiresAt);
+      const claimIssuedAt = new Date(claimExpiresAt.getTime() - ADAPTIVE_EXECUTION_CLAIM_TTL_MS);
+      assert.equal(claimExpiresAt.getTime() - claimIssuedAt.getTime(), ADAPTIVE_EXECUTION_CLAIM_TTL_MS);
+      assert.equal(started.responseSnapshot.session.updatedAt, claimIssuedAt.toISOString());
+      assert.equal(started.responseSnapshot.execution.startedAt,
+        current.execution.startedAt || claimIssuedAt.toISOString());
       const startReplay = await repository.startAdaptiveLearningSessionBlock(username, startCandidate);
       assert.equal(startReplay.replayed, true);
-      assert.deepEqual(startReplay.responseSnapshot, startSnapshot);
+      assert.deepEqual(startReplay.responseSnapshot, started.responseSnapshot);
       executionRevision += 1;
 
       if (block.module === 'writing') {
@@ -279,15 +427,9 @@ export async function assertAdaptiveSessionRepositoryContract(assert, repository
         });
         attempt = { type: 'writing', id: attemptId };
       } else if (block.module === 'speaking') {
-        const speaking = adaptiveSpeakingTask(block.contentRef);
-        const attemptId = await repository.createSpeakingAttempt(username, {
-          taskType: speaking.taskNumber, assignment: speaking.assignment,
-          transcript: 'A contract transcript.',
-        }, 'contract-speaking-v1');
-        await repository.finishSpeakingAttempt(attemptId, {
-          status: 'completed', review: { status: 'scored', got: 1, max: 4 },
-        });
-        attempt = { type: 'speaking', id: attemptId };
+        attempt = await createAdaptiveSpeakingAttempt(
+          repository, username, block, new Date(claimIssuedAt.getTime() + 1_000),
+        );
       } else {
         const attemptId = crypto.randomUUID();
         const recorded = await repository.recordModuleAttemptWithAdaptiveClaim(username, {
@@ -318,12 +460,19 @@ export async function assertAdaptiveSessionRepositoryContract(assert, repository
         attempt = { type: 'module', id: attemptId };
       }
       if (attempt.type !== 'module') {
+        if (attempt.type === 'speaking' && beforeSpeakingBind) {
+          await beforeSpeakingBind({
+            username, sessionId: replaced.session.id, executionClaim: token,
+            attempt, block, now: new Date(stepTime.getTime() + 1_000),
+          });
+        }
         const bound = await repository.bindAdaptiveLearningServerAttempt(username, {
           sessionId: replaced.session.id, executionClaim: token, attempt,
           now: new Date(stepTime.getTime() + 1_000),
         });
         assert.equal(bound.created, true);
-        assert.equal(bound.evidenceQuality, 'server_verified_assisted');
+        assert.equal(bound.evidenceQuality, attempt.type === 'speaking'
+          ? 'server_verified_unassisted' : 'server_verified_assisted');
       }
       const recoveryCurrent = await repository.getAdaptiveLearningSessionExecution(
         username, replaced.session.id,

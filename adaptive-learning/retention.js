@@ -1,5 +1,7 @@
+import { EGE_SKILL_TAXONOMY } from './profile.js';
+
 const DAY_MS = 86_400_000;
-const SKILL_COUNT = 12;
+const SKILL_COUNT = EGE_SKILL_TAXONOMY.skills.length;
 
 function instant(value) {
   const parsed = value instanceof Date ? new Date(value) : new Date(value);

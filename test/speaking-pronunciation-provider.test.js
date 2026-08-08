@@ -20,6 +20,7 @@ test('deterministic fake pronunciation provider covers success, low quality, par
   assert.equal(success.transcript, 'A short trusted transcript.');
   assert.equal(success.words[0].phonemes[0].name, 'æ');
   assert.equal(success.prosody.available, true);
+  assert.equal(success.pauseAnalysisAvailable, true);
 
   const lowQuality = await createFakePronunciationProvider({ scenario: 'low_quality' }).assess(request());
   assert.equal(lowQuality.status, 'low_quality');
@@ -27,7 +28,9 @@ test('deterministic fake pronunciation provider covers success, low quality, par
   assert.equal(lowQuality.overallScore, null);
 
   const partial = await createFakePronunciationProvider({ scenario: 'partial' }).assess(request());
-  assert.equal(partial.status, 'partial');
+  assert.equal(partial.status, 'low_quality');
+  assert.equal(partial.quality.acceptable, false);
+  assert.equal(partial.quality.warnings.includes('recognition_segments_truncated'), true);
   assert.equal(partial.transcript.length > 0, true);
   assert.equal(partial.isFinal, false);
 
@@ -49,9 +52,12 @@ test('en-GB keeps acoustic scores but suppresses en-US-only phoneme names, IPA, 
   assert.equal(Object.hasOwn(result.words[0], 'syllables'), false);
   assert.equal(Object.hasOwn(result.words[0].phonemes[0], 'candidates'), false);
   assert.deepEqual(result.prosody, { available: false, score: null, reason: 'locale_not_supported' });
+  assert.equal(result.pauseAnalysisAvailable, false);
 });
 
-function fakeSdk(rawJson, { stopEvent = true, recognitions = 1, stopCallback = true } = {}) {
+function fakeSdk(rawJson, {
+  stopEvent = true, recognitions = 1, stopCallback = true, recognitionReasons = [],
+} = {}) {
   const lifecycle = { start: 0, stop: 0, pushWrites: 0, pushClosed: 0, applied: 0 };
   class Recognizer {
     constructor(speechConfig, audioConfig) {
@@ -67,7 +73,7 @@ function fakeSdk(rawJson, { stopEvent = true, recognitions = 1, stopCallback = t
         for (let index = 0; index < recognitions; index += 1) {
           const providerPayload = Array.isArray(rawJson) ? rawJson[index] : rawJson;
           this.recognized?.(this, { result: {
-            reason: 'recognized', text: 'SDK transcript',
+            reason: recognitionReasons[index] || 'recognized', text: 'SDK transcript',
             properties: { getProperty: () => JSON.stringify(providerPayload) },
           } });
         }
@@ -147,6 +153,210 @@ test('Azure adapter uses the official JavaScript continuous recognition lifecycl
   assert.equal(serializedLogs.includes('SDK transcript'), false);
 });
 
+test('Azure raw confidence and timing require finite bounded JavaScript numbers', async () => {
+  for (const invalid of [null, undefined, '', '100000', Number.POSITIVE_INFINITY, -1, 2_000_000_000]) {
+    const raw = structuredClone(azureRaw);
+    raw.NBest[0].Words[0].Offset = invalid;
+    raw.NBest[0].Words[0].Duration = invalid;
+    const result = await createAzurePronunciationProvider({
+      subscriptionKey: 'configured', region: 'configured', sdkLoader: async () => fakeSdk(raw),
+      timeoutMs: 100, maxAudioBytes: 128 * 1024, maxDurationSeconds: 180,
+    }).assess(request());
+    assert.equal(result.status, 'low_quality', `invalid timing ${String(invalid)} cannot succeed`);
+    assert.equal(result.fluencyScore, null);
+    assert.equal(result.words[0].offsetSeconds, null);
+    assert.equal(result.words[0].durationSeconds, null);
+    assert.equal(result.quality.warnings.includes('assessment_scores_unavailable'), true);
+  }
+
+  for (const invalid of [null, undefined, '', '0.92', Number.POSITIVE_INFINITY, -0.1, 1.1]) {
+    const raw = structuredClone(azureRaw);
+    raw.NBest[0].Confidence = invalid;
+    const result = await createAzurePronunciationProvider({
+      subscriptionKey: 'configured', region: 'configured', sdkLoader: async () => fakeSdk(raw),
+      timeoutMs: 100, maxAudioBytes: 128 * 1024, maxDurationSeconds: 180,
+    }).assess(request());
+    assert.equal(result.confidence, null);
+    assert.equal(result.status, 'low_quality', `invalid confidence ${String(invalid)} is unavailable`);
+    assert.equal(result.quality.acceptable, false);
+    assert.equal(result.quality.warnings.includes('recognition_confidence_unavailable'), true);
+  }
+});
+
+test('Azure continuous coverage fails closed for malformed segments, missing facts and pre-slice overflow', async () => {
+  const validSecond = structuredClone(azureRaw);
+  validSecond.NBest[0].Display = 'second segment';
+  validSecond.NBest[0].Words[0].Word = 'second';
+  validSecond.NBest[0].Words[0].Offset = 6_000_000;
+
+  const cases = [
+    {
+      label: 'missing NBest', raw: [azureRaw, { RecognitionStatus: 'Success', NBest: [] }],
+      warning: 'recognition_segment_unavailable',
+    },
+    {
+      label: 'non-object provider JSON', raw: [azureRaw, 'malformed-segment'],
+      warning: 'recognition_segment_unavailable',
+    },
+    {
+      label: 'missing segment confidence', raw: [azureRaw, {
+        ...validSecond, NBest: [{ ...validSecond.NBest[0], Confidence: undefined }],
+      }], warning: 'recognition_confidence_unavailable',
+    },
+    {
+      label: 'missing word score', raw: [{
+        ...azureRaw, NBest: [{ ...azureRaw.NBest[0], Words: [{
+          ...azureRaw.NBest[0].Words[0], PronunciationAssessment: { ErrorType: 'None' },
+        }] }],
+      }], warning: 'word_facts_unavailable',
+    },
+  ];
+  for (const scenario of cases) {
+    const provider = createAzurePronunciationProvider({
+      subscriptionKey: 'configured', region: 'configured',
+      sdkLoader: async () => fakeSdk(scenario.raw, {
+        recognitions: Array.isArray(scenario.raw) ? scenario.raw.length : 1,
+      }),
+      timeoutMs: 100, maxAudioBytes: 128 * 1024, maxDurationSeconds: 180,
+    });
+    const result = await provider.assess(request({ mode: 'unscripted', referenceText: '' }));
+    assert.equal(result.status, 'low_quality', scenario.label);
+    assert.equal(result.quality.acceptable, false, scenario.label);
+    assert.equal(result.quality.warnings.includes(scenario.warning), true, scenario.label);
+    assert.equal(result.overallScore, null, scenario.label);
+  }
+
+  const overflowRaw = structuredClone(azureRaw);
+  overflowRaw.NBest[0].Words = Array.from({ length: 501 }, (_, index) => ({
+    Word: `word${index}`, Offset: 100_000 + index * 40_000, Duration: 30_000,
+    PronunciationAssessment: { AccuracyScore: 90, ErrorType: 'None' },
+  }));
+  const overflow = await createAzurePronunciationProvider({
+    subscriptionKey: 'configured', region: 'configured', sdkLoader: async () => fakeSdk(overflowRaw),
+    timeoutMs: 100, maxAudioBytes: 128 * 1024, maxDurationSeconds: 180,
+  }).assess(request({ mode: 'unscripted', referenceText: '' }));
+  assert.equal(overflow.words.length, 500);
+  assert.equal(overflow.status, 'low_quality');
+  assert.equal(overflow.quality.acceptable, false);
+  assert.equal(overflow.quality.warnings.includes('word_details_truncated'), true);
+});
+
+test('Azure continuous coverage fails closed when a final NoMatch follows a valid segment', async () => {
+  const result = await createAzurePronunciationProvider({
+    subscriptionKey: 'configured', region: 'configured',
+    sdkLoader: async () => fakeSdk([azureRaw, azureRaw], {
+      recognitions: 2, recognitionReasons: ['recognized', 'no_match'],
+    }),
+    timeoutMs: 100, maxAudioBytes: 128 * 1024, maxDurationSeconds: 180,
+  }).assess(request({ mode: 'unscripted', referenceText: '' }));
+
+  assert.equal(result.transcript, 'SDK transcript');
+  assert.equal(result.status, 'low_quality');
+  assert.equal(result.isFinal, false);
+  assert.equal(result.quality.acceptable, false);
+  assert.equal(result.quality.warnings.includes('recognition_segment_unavailable'), true);
+  assert.equal(result.overallScore, null);
+});
+
+test('Azure exposes pause and prosody capability only after the SDK method succeeds', async () => {
+  const assess = async (sdk, overrides = {}) => createAzurePronunciationProvider({
+    subscriptionKey: 'configured', region: 'configured', sdkLoader: async () => sdk,
+    timeoutMs: 100, maxAudioBytes: 128 * 1024, maxDurationSeconds: 180,
+  }).assess(request(overrides));
+
+  const withoutMethod = fakeSdk(azureRaw);
+  delete withoutMethod.PronunciationAssessmentConfig.prototype.enableProsodyAssessment;
+  const unavailable = await assess(withoutMethod);
+  assert.equal(unavailable.pauseAnalysisAvailable, false);
+  assert.deepEqual(unavailable.prosody, {
+    available: false, score: null, reason: 'provider_pause_metric_unavailable',
+  });
+
+  const throwingMethod = fakeSdk(azureRaw);
+  throwingMethod.PronunciationAssessmentConfig.prototype.enableProsodyAssessment = () => {
+    throw new Error('unsupported SDK build');
+  };
+  const failedCapability = await assess(throwingMethod);
+  assert.equal(failedCapability.pauseAnalysisAvailable, false);
+  assert.deepEqual(failedCapability.prosody, {
+    available: false, score: null, reason: 'provider_pause_metric_unavailable',
+  });
+
+  const zeroProsodyRaw = structuredClone(azureRaw);
+  zeroProsodyRaw.NBest[0].PronunciationAssessment.ProsodyScore = 0;
+  const supported = await assess(fakeSdk(zeroProsodyRaw), { mode: 'unscripted', referenceText: '' });
+  assert.equal(supported.pauseAnalysisAvailable, true);
+  assert.deepEqual(supported.prosody, { available: true, score: 0 });
+});
+
+test('Azure word timing is bounded by the trusted WAV duration with explicit tolerance', async () => {
+  const impossible = structuredClone(azureRaw);
+  impossible.NBest[0].Words[0].Offset = 29_000_000;
+  impossible.NBest[0].Words[0].Duration = 2_000_000;
+  const rejected = await createAzurePronunciationProvider({
+    subscriptionKey: 'configured', region: 'configured', sdkLoader: async () => fakeSdk(impossible),
+    timeoutMs: 100, maxAudioBytes: 128 * 1024, maxDurationSeconds: 180,
+  }).assess(request({ mode: 'unscripted', referenceText: '' }));
+  assert.equal(rejected.status, 'low_quality');
+  assert.equal(rejected.words[0].offsetSeconds, null);
+  assert.equal(rejected.words[0].durationSeconds, null);
+  assert.equal(rejected.fluencyScore, null);
+  assert.equal(rejected.quality.warnings.includes('word_timing_out_of_bounds'), true);
+
+  const tolerated = structuredClone(azureRaw);
+  tolerated.NBest[0].Words[0].Offset = 29_500_000;
+  tolerated.NBest[0].Words[0].Duration = 400_000;
+  const accepted = await createAzurePronunciationProvider({
+    subscriptionKey: 'configured', region: 'configured', sdkLoader: async () => fakeSdk(tolerated),
+    timeoutMs: 100, maxAudioBytes: 128 * 1024, maxDurationSeconds: 180,
+  }).assess(request({ mode: 'unscripted', referenceText: '' }));
+  assert.equal(accepted.status, 'success');
+  assert.equal(accepted.words[0].offsetSeconds, 2.95);
+  assert.equal(accepted.words[0].durationSeconds, 0.04);
+});
+
+test('Azure pause and monotone annotations preserve recognized-word scoring and remain visible', async () => {
+  const ordinary = structuredClone(azureRaw);
+  ordinary.NBest[0].Words[0].Word = 'SDK';
+  ordinary.NBest[0].Words[0].PronunciationAssessment.AccuracyScore = 40;
+  ordinary.NBest[0].Words[0].PronunciationAssessment.ErrorType = 'None';
+  const paused = structuredClone(ordinary);
+  paused.NBest[0].Words[0].PronunciationAssessment.ErrorType = 'UnexpectedBreak';
+  const monotone = structuredClone(ordinary);
+  monotone.NBest[0].Words[0].PronunciationAssessment.ErrorType = 'Monotone';
+  const assess = async (raw, locale = 'en-US') => createAzurePronunciationProvider({
+    subscriptionKey: 'configured', region: 'configured', sdkLoader: async () => fakeSdk(raw),
+    timeoutMs: 100, maxAudioBytes: 128 * 1024, maxDurationSeconds: 180,
+  }).assess(request({ locale, referenceText: 'SDK' }));
+  const [baseline, annotated, monotoneAnnotated, unsupported] = await Promise.all([
+    assess(ordinary), assess(paused), assess(monotone), assess(paused, 'en-GB'),
+  ]);
+  assert.equal(baseline.status, 'success');
+  assert.equal(annotated.status, 'success');
+  assert.deepEqual({
+    accuracy: annotated.accuracyScore,
+    fluency: annotated.fluencyScore,
+    completeness: annotated.completenessScore,
+  }, {
+    accuracy: baseline.accuracyScore,
+    fluency: baseline.fluencyScore,
+    completeness: baseline.completenessScore,
+  });
+  assert.equal(annotated.words[0].errorType, 'unexpected_break');
+  assert.deepEqual({
+    accuracy: monotoneAnnotated.accuracyScore,
+    fluency: monotoneAnnotated.fluencyScore,
+    completeness: monotoneAnnotated.completenessScore,
+  }, {
+    accuracy: baseline.accuracyScore,
+    fluency: baseline.fluencyScore,
+    completeness: baseline.completenessScore,
+  });
+  assert.equal(monotoneAnnotated.words[0].errorType, 'monotone');
+  assert.equal(annotated.pauseAnalysisAvailable, true);
+  assert.equal(unsupported.pauseAnalysisAvailable, false);
+});
+
 test('Azure adapter awaits the durable start claim before settlement and gives unscripted recognition no reference text', async () => {
   const sdk = fakeSdk(azureRaw);
   let releaseStart;
@@ -175,6 +385,9 @@ test('Azure adapter bounds continuous recognition segments before normalization 
     logger: (entry) => logs.push(entry),
   });
   const result = await provider.assess(request());
+  assert.equal(result.status, 'low_quality');
+  assert.equal(result.quality.acceptable, false);
+  assert.equal(result.quality.warnings.includes('recognition_segments_truncated'), true);
   assert.equal(result.words.length >= 200 && result.words.length <= 500, true);
   assert.equal(logs.find((entry) => entry.event === 'completed').segmentCount, 200);
 });
@@ -272,13 +485,14 @@ test('continuous paragraph scores retain omissions when the public word cap is s
 
   const result = await provider.assess(request({ referenceText }));
 
-  assert.equal(result.status, 'partial');
+  assert.equal(result.status, 'low_quality');
   assert.equal(result.isFinal, true);
   assert.equal(result.words.length, 500);
   assert.equal(result.words.every((word) => word.errorType === 'insertion'), true);
   assert.equal(result.accuracyScore, 0);
   assert.equal(result.completenessScore, 0);
-  assert.equal(result.overallScore, 16);
+  assert.equal(result.fluencyScore, null, 'no valid timed word means fluency is unavailable');
+  assert.equal(result.overallScore, null, 'missing fluency cannot manufacture an aggregate score');
   assert.equal(result.quality.warnings.includes('word_details_truncated'), true);
 });
 

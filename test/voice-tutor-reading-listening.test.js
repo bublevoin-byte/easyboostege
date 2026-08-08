@@ -44,7 +44,9 @@ test('all pilot interview errors are available as canonical voice-tutor context'
 
 async function withVoiceTutorApp(run) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-reading-listening-'));
-  const repository = createFileRepository(path.join(directory, 'data.json'));
+  const repository = createFileRepository(path.join(directory, 'data.json'), {
+    voiceTutorMutationNow: () => NOW,
+  });
   const username = await repository.createTelegramUser(6303, 'Reading Listening Tutor');
   await repository.grantDays(6303, 30, 'Reading Listening Tutor');
   await repository.setEntitlement(username, 'voice_tutor', { startsAt: NOW, endsAt: new Date('2026-09-02T12:00:00.000Z') });

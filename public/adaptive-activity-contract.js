@@ -109,23 +109,32 @@ const activityDefinitions = [
       taskType: 38, taskId: 'builtin:writing_38:teen-sport',
     },
   },
-  {
-    skillId: 'ege.speaking.interaction', activityId: 'speaking_2',
-    activityLabel: 'Говорение: задание 2, прямые вопросы',
-    contentRef: 'builtin:speaking:task:2:v1', minimumMinutes: 15, recommendedMinutes: 15,
-    compositionEnabled: false,
-    difficulty: 3, modality: 'microphone', requiresAudio: false, requiresMicrophone: true,
-    launch: { version: ADAPTIVE_LAUNCH_CONTRACT_VERSION, kind: 'speaking_task', screenId: 'scr9', taskNumber: 2 },
-  },
-  {
-    skillId: 'ege.speaking.monologue', activityId: 'speaking_4',
-    activityLabel: 'Говорение: задание 4, монолог по фотографиям',
-    contentRef: 'builtin:speaking:task:4:v1', minimumMinutes: 20, recommendedMinutes: 20,
-    compositionEnabled: false,
-    difficulty: 4, modality: 'microphone', requiresAudio: false, requiresMicrophone: true,
-    launch: { version: ADAPTIVE_LAUNCH_CONTRACT_VERSION, kind: 'speaking_task', screenId: 'scr9', taskNumber: 4 },
-  },
 ];
+
+const speakingPractices = [
+  ['ege.speaking.reading_aloud', 'speaking_1', 1, 'чтение вслух', 15, 3],
+  ['ege.speaking.direct_questions', 'speaking_2', 2, 'прямые вопросы', 15, 3],
+  ['ege.speaking.interview_completeness', 'speaking_3', 3, 'полные ответы в интервью', 20, 3],
+  ['ege.speaking.monologue_content', 'speaking_4', 4, 'содержание монолога', 20, 4],
+  ['ege.speaking.monologue_organization', 'speaking_4_organization', 4, 'организация монолога', 20, 4],
+  ['ege.speaking.spoken_grammar', 'speaking_4_grammar', 4, 'грамматика устной речи', 20, 4],
+  ['ege.speaking.spoken_lexis', 'speaking_4_lexis', 4, 'лексика устной речи', 20, 4],
+  ['ege.speaking.fluency', 'speaking_1_fluency', 1, 'беглость речи', 15, 3],
+  ['ege.speaking.pronunciation_words', 'speaking_1_words', 1, 'произношение проблемных слов', 15, 3],
+  ['ege.speaking.pronunciation_phonemes', 'speaking_1_phonemes', 1, 'произношение проблемных фонем', 15, 3],
+  ['ege.speaking.signal_quality', 'speaking_1_signal', 1, 'техника записи', 15, 2],
+];
+for (const [skillId, activityId, taskNumber, label, minutes, difficulty] of speakingPractices) {
+  activityDefinitions.push({
+    skillId, activityId, activityLabel: `Говорение: ${label}`,
+    contentRef: `server:speaking:task:${taskNumber}:skill:${skillId}:new:v1`,
+    minimumMinutes: minutes, recommendedMinutes: minutes,
+    difficulty, modality: 'microphone', requiresAudio: false, requiresMicrophone: true,
+    launch: {
+      version: ADAPTIVE_LAUNCH_CONTRACT_VERSION, kind: 'speaking_task', screenId: 'scr9', taskNumber,
+    },
+  });
+}
 
 const vocabularyTopics = [
   [1, 'семья и отношения'],
@@ -188,8 +197,7 @@ const retentionSkills = [
   ['ege.listening.detail', 'Детальное понимание аудио', 'listening'],
   ['ege.writing.email', 'Электронное письмо', 'writing'],
   ['ege.writing.essay', 'Развёрнутое письменное высказывание', 'writing'],
-  ['ege.speaking.interaction', 'Устное взаимодействие', 'speaking'],
-  ['ege.speaking.monologue', 'Монологическое высказывание', 'speaking'],
+  ...speakingPractices.map(([skillId, _activityId, _taskNumber, label]) => [skillId, label, 'speaking']),
 ];
 
 for (const [skillId, label, module] of retentionSkills) {
@@ -259,7 +267,7 @@ export function isAdaptiveLaunchDescriptor(value) {
   }
   if (value.kind === 'speaking_task') {
     return exactKeys(value, ['kind', 'screenId', 'taskNumber', 'version'])
-      && value.screenId === 'scr9' && [2, 4].includes(value.taskNumber);
+      && value.screenId === 'scr9' && [1, 2, 3, 4].includes(value.taskNumber);
   }
   if (value.kind === 'voice_tutor_recovery') {
     return exactKeys(value, [

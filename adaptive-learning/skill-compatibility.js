@@ -3,13 +3,18 @@ function entry(adaptiveSkillId, modules) {
 }
 
 export const VOICE_TUTOR_SKILL_COMPATIBILITY = Object.freeze({
-  version: 'voice-tutor-skill-compat-v1',
+  version: 'voice-tutor-skill-compat-v2',
   exact: Object.freeze({
     'ege.grammar.past_simple': entry('ege.grammar.forms', ['grammar']),
     'ege.grammar.future_passive': entry('ege.grammar.forms', ['grammar']),
     'ege.vocabulary.meaning_in_context': entry('ege.vocabulary.lexical_choice', ['vocabulary']),
     'ege.reading.evidence': entry('ege.reading.detail', ['reading']),
     'ege.listening.evidence': entry('ege.listening.detail', ['listening']),
+    'ege.speaking.interaction': entry('ege.speaking.direct_questions', ['speaking']),
+    'ege.speaking.monologue': entry('ege.speaking.monologue_content', ['speaking']),
+    'ege.speaking.4.criterion.1': entry('ege.speaking.monologue_content', ['speaking']),
+    'ege.speaking.4.criterion.2': entry('ege.speaking.monologue_organization', ['speaking']),
+    'ege.speaking.4.criterion.3': entry(null, ['speaking']),
   }),
   families: Object.freeze([
     Object.freeze({ prefix: 'ege.word_formation.', ...entry('ege.vocabulary.word_formation', ['grammar', 'vocabulary']) }),
@@ -22,10 +27,9 @@ export const VOICE_TUTOR_SKILL_COMPATIBILITY = Object.freeze({
     Object.freeze({ prefix: 'ege.writing.email.criterion.', ...entry('ege.writing.email', ['writing']) }),
     Object.freeze({ prefix: 'ege.writing.writing_38.criterion.', ...entry('ege.writing.essay', ['writing']) }),
     Object.freeze({ prefix: 'ege.writing.essay.criterion.', ...entry('ege.writing.essay', ['writing']) }),
-    Object.freeze({ prefix: 'ege.speaking.1.criterion.', ...entry(null, ['speaking']) }),
-    Object.freeze({ prefix: 'ege.speaking.2.criterion.', ...entry('ege.speaking.interaction', ['speaking']) }),
-    Object.freeze({ prefix: 'ege.speaking.3.criterion.', ...entry('ege.speaking.interaction', ['speaking']) }),
-    Object.freeze({ prefix: 'ege.speaking.4.criterion.', ...entry('ege.speaking.monologue', ['speaking']) }),
+    Object.freeze({ prefix: 'ege.speaking.1.criterion.', ...entry('ege.speaking.reading_aloud', ['speaking']) }),
+    Object.freeze({ prefix: 'ege.speaking.2.criterion.', ...entry('ege.speaking.direct_questions', ['speaking']) }),
+    Object.freeze({ prefix: 'ege.speaking.3.criterion.', ...entry('ege.speaking.interview_completeness', ['speaking']) }),
   ]),
 });
 

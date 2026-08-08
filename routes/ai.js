@@ -36,9 +36,11 @@ import {
   scoreSpeakingTask,
   SPEAKING_SCORING_VERSION,
 } from '../speaking/fipi-scoring.js';
+import { boundedAcousticMetric, finiteAcousticAverage } from '../speaking/acoustic-metrics.js';
 import { speakingEvaluationClaimRecoverable } from '../speaking/evaluation-claim.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const SPEAKING_TIMING_TOLERANCE_SECONDS = 0.05;
 
 const EXPERIMENTAL_ASSESSMENT = Object.freeze({
   mode: 'experimental',
@@ -152,8 +154,11 @@ export function createAiRoutes({
 
   function grossPronunciationError(word) {
     if (word?.errorType === 'omission' || word?.errorType === 'insertion') return true;
-    const accuracy = Number(word?.accuracyScore);
-    if (word?.errorType !== 'mispronunciation' || !Number.isFinite(accuracy)) return null;
+    const accuracy = boundedAcousticMetric(word?.accuracyScore);
+    if (word?.errorType !== 'mispronunciation') return null;
+    // A provider-labelled mispronunciation is not a proven gross error without a bounded score.
+    // Keep the missing score nullable while allowing the semantic criterion to remain assessable.
+    if (accuracy === null) return false;
     // Versioned conservative proxy: a very low Azure word-accuracy event is treated as gross.
     // The calibration gate must validate this threshold before any "validated" product label.
     return accuracy < 50;
@@ -180,6 +185,57 @@ export function createAiRoutes({
       if (found < 0) return null;
       transcriptCursor = found + 1;
       return transcriptTokens[found];
+    });
+  }
+
+  function assessmentDuration(assessment) {
+    const value = assessment?.processedDurationSeconds;
+    return typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= 180
+      ? value : null;
+  }
+
+  function acousticWordTiming(word, processedDurationSeconds) {
+    const offsetSeconds = word?.offsetSeconds;
+    const durationSeconds = word?.durationSeconds;
+    if (typeof offsetSeconds !== 'number' || !Number.isFinite(offsetSeconds) || offsetSeconds < 0
+      || typeof durationSeconds !== 'number' || !Number.isFinite(durationSeconds)
+      || durationSeconds <= 0) return null;
+    const maximum = processedDurationSeconds + SPEAKING_TIMING_TOLERANCE_SECONDS;
+    if (offsetSeconds > maximum || durationSeconds > maximum
+      || offsetSeconds + durationSeconds > maximum) return null;
+    return { offsetSeconds, durationSeconds };
+  }
+
+  function assessmentCoverageComplete(assessment, expectedMode, expectedLocale) {
+    const processedDurationSeconds = assessmentDuration(assessment);
+    const words = Array.isArray(assessment?.words) ? assessment.words : [];
+    const confidence = assessment?.confidence;
+    const baseScores = [assessment?.overallScore, assessment?.accuracyScore, assessment?.fluencyScore];
+    if (processedDurationSeconds === null || typeof assessment?.transcript !== 'string'
+      || !assessment.transcript.trim() || words.length === 0 || words.length > 500
+      || assessment?.mode !== expectedMode || assessment?.locale !== expectedLocale
+      || assessment?.quality?.acceptable !== true || typeof assessment?.pauseAnalysisAvailable !== 'boolean'
+      || typeof confidence !== 'number' || !Number.isFinite(confidence)
+      || confidence < 0 || confidence > 100
+      || baseScores.some((score) => typeof score !== 'number' || !Number.isFinite(score)
+        || score < 0 || score > 100)
+      || (assessment?.mode === 'scripted'
+        && (typeof assessment?.completenessScore !== 'number'
+          || !Number.isFinite(assessment.completenessScore)
+          || assessment.completenessScore < 0 || assessment.completenessScore > 100))) return false;
+    const supportedTypes = new Set([
+      'none', 'omission', 'insertion', 'mispronunciation',
+      'unexpected_break', 'missing_break', 'monotone',
+    ]);
+    return words.every((word) => {
+      const accuracyScore = word?.accuracyScore;
+      if (!acousticWordToken(word?.text) || !supportedTypes.has(word?.errorType)
+        || typeof accuracyScore !== 'number' || !Number.isFinite(accuracyScore)
+        || accuracyScore < 0 || accuracyScore > 100) return false;
+      if (word.errorType === 'omission') {
+        return word.offsetSeconds == null && word.durationSeconds == null;
+      }
+      return acousticWordTiming(word, processedDurationSeconds) !== null;
     });
   }
 
@@ -217,36 +273,114 @@ export function createAiRoutes({
       );
       resolved.push({ assessment, reservation, itemIndex });
     }
-    const confidences = resolved.map(({ assessment }) => Number(assessment.confidence));
+    const confidences = resolved.map(({ assessment }) => boundedAcousticMetric(
+      assessment.confidence, { minimum: 0, maximum: 100 },
+    ));
     const warnings = resolved.flatMap(({ assessment }) => (
       Array.isArray(assessment.quality?.warnings) ? assessment.quality.warnings : []
     ));
-    const poor = resolved.some(({ assessment }) => assessment.quality?.acceptable === false);
+    const accentLocales = [...new Set(resolved.map(({ reservation }) => reservation.locale))];
+    if (accentLocales.length !== 1 || !['en-GB', 'en-US'].includes(accentLocales[0])) {
+      throw Object.assign(new Error('SPEAKING_ASSESSMENT_CONTEXT_MISMATCH'), {
+        status: 409, code: 'SPEAKING_ASSESSMENT_CONTEXT_MISMATCH',
+      });
+    }
+    const expectedMode = request.taskType === 1 ? 'scripted' : 'unscripted';
+    const coverageIncomplete = resolved.some(({ assessment, reservation }) => (
+      !assessmentCoverageComplete(assessment, expectedMode, reservation.locale)
+    ));
+    const poor = coverageIncomplete
+      || resolved.some(({ assessment }) => assessment.quality?.acceptable !== true);
+    const pauseAnalysisAvailable = accentLocales[0] === 'en-US'
+      && resolved.every(({ assessment }) => assessment.pauseAnalysisAvailable === true);
+    const assessedWords = resolved.flatMap(({ assessment }) => (
+      Array.isArray(assessment.words) ? assessment.words : []
+    ));
+    const targetMeasurement = (() => {
+      if (coverageIncomplete) return undefined;
+      const focus = session?.targeted_practice?.focus;
+      if (!focus || !['word', 'phoneme'].includes(focus.kind)) return undefined;
+      const focusRef = String(focus.ref || '').trim().slice(0, 120);
+      const value = String(focus.value || '').normalize('NFKC').trim()
+        .slice(0, focus.kind === 'phoneme' ? 20 : 120);
+      const anchorWord = String(focus.anchorWord || '').normalize('NFKC')
+        .toLocaleLowerCase('en').trim().slice(0, 120);
+      if (!focusRef || !value || !anchorWord) return undefined;
+      const normalizeWord = (candidate) => {
+        const words = String(candidate || '').normalize('NFKC').toLocaleLowerCase('en')
+          .match(/[\p{L}\p{M}]+(?:['’-][\p{L}\p{M}]+)*/gu) || [];
+        return words.length === 1 ? words[0] : '';
+      };
+      const anchorWords = assessedWords.filter((word) => (
+        normalizeWord(word?.text) === anchorWord && word?.errorType !== 'omission'
+      ));
+      const scores = focus.kind === 'word'
+        ? anchorWords.map((word) => word?.accuracyScore)
+        : anchorWords.flatMap((word) => (
+          (Array.isArray(word?.phonemes) ? word.phonemes : []).flatMap((phoneme) => {
+            const label = String(phoneme?.ipa || phoneme?.name || '').normalize('NFKC').trim();
+            return label === value ? [phoneme?.accuracyScore] : [];
+          })
+        ));
+      const boundedScores = scores.filter((score) => (
+        typeof score === 'number' && Number.isFinite(score) && score >= 0 && score <= 100
+      ));
+      return {
+        focusRef,
+        kind: focus.kind,
+        value,
+        anchorWord,
+        anchorObserved: anchorWords.length > 0,
+        score: boundedScores.length
+          ? Math.round(boundedScores.reduce((sum, score) => sum + score, 0) / boundedScores.length)
+          : null,
+      };
+    })();
+    const wordAccuracyScore = coverageIncomplete ? null : finiteAcousticAverage([
+      ...resolved.map(({ assessment }) => assessment.accuracyScore),
+      ...(resolved.some(({ assessment }) => boundedAcousticMetric(assessment.accuracyScore) !== null)
+        ? [] : assessedWords.map((word) => word.accuracyScore)),
+    ]);
+    const phonemeAccuracyScore = coverageIncomplete ? null : finiteAcousticAverage(assessedWords.flatMap((word) => (
+      Array.isArray(word?.phonemes) ? word.phonemes.map((phoneme) => phoneme?.accuracyScore) : []
+    )));
     let transcriptOffset = 0;
     const wordEvents = resolved.flatMap(({ assessment, reservation, itemIndex }) => {
       const words = Array.isArray(assessment.words) ? assessment.words : [];
+      const processedDurationSeconds = assessmentDuration(assessment);
       const spans = alignedAcousticWordSpans(assessment.transcript, words);
       const currentOffset = transcriptOffset;
       transcriptOffset += String(assessment.transcript || '').length + 1;
-      return words.flatMap((word, wordIndex) => (
-        ['mispronunciation', 'omission', 'insertion'].includes(word?.errorType)
-          ? [{
+      return words.flatMap((word, wordIndex) => {
+        if (![
+          'mispronunciation', 'omission', 'insertion', 'unexpected_break', 'missing_break', 'monotone',
+        ].includes(word?.errorType)) return [];
+        const timing = processedDurationSeconds === null
+          ? null : acousticWordTiming(word, processedDurationSeconds);
+        return [{
             id: `azure:${reservation.id}:${wordIndex + 1}`,
             owner: 'azure_pronunciation',
             type: word.errorType,
             gross: grossPronunciationError(word),
             itemIndex,
-            accuracyScore: Number.isFinite(Number(word.accuracyScore)) ? Number(word.accuracyScore) : null,
+            accuracyScore: boundedAcousticMetric(word.accuracyScore),
             start: spans[wordIndex] ? currentOffset + spans[wordIndex].start : null,
             end: spans[wordIndex] ? currentOffset + spans[wordIndex].end : null,
-          }]
-          : []
-      ));
+            offsetSeconds: timing?.offsetSeconds ?? null,
+            durationSeconds: timing?.durationSeconds ?? null,
+            word: String(word.text || '').slice(0, 120),
+            phonemes: (Array.isArray(word.phonemes) ? word.phonemes : []).slice(0, 20).flatMap((phoneme) => {
+              const label = String(phoneme?.ipa || phoneme?.name || '').trim().slice(0, 20);
+              if (!label) return [];
+              return [{ label, accuracyScore: boundedAcousticMetric(phoneme?.accuracyScore) }];
+            }),
+          }];
+      });
     });
-    const durationFor = (assessment) => (
-      Number.isFinite(Number(assessment.processedDurationSeconds))
-        ? Number(assessment.processedDurationSeconds) : 0
-    );
+    const durationFor = (assessment) => {
+      const value = assessmentDuration(assessment);
+      return value === null ? 0 : value;
+    };
     const itemDurations = request.taskType === 2 || request.taskType === 3
       ? resolved.map(({ assessment, itemIndex }) => ({
         itemIndex,
@@ -257,16 +391,23 @@ export function createAiRoutes({
       transcript: resolved.map(({ assessment }) => assessment.transcript).join('\n'),
       acoustic: {
         available: true,
-        recognitionConfidence: confidences.every(Number.isFinite)
-          ? Math.max(0, Math.min(1, Math.min(...confidences) / 100)) : 0,
+        accentLocale: accentLocales[0],
+        pauseAnalysisAvailable,
+        recognitionConfidence: confidences.every((confidence) => confidence !== null)
+          ? Math.min(...confidences) / 100 : null,
         signalQuality: poor ? 'poor' : (warnings.length ? 'acceptable' : 'good'),
         recordingDurationSeconds: resolved.reduce((sum, { assessment }) => (
           sum + durationFor(assessment)
         ), 0),
         itemDurations,
-        completenessScore: request.taskType === 1 ? resolved[0].assessment.completenessScore : undefined,
-        fluencyScore: request.taskType === 1 ? resolved[0].assessment.fluencyScore : undefined,
+        completenessScore: request.taskType === 1 && !coverageIncomplete
+          ? boundedAcousticMetric(resolved[0].assessment.completenessScore) : null,
+        fluencyScore: coverageIncomplete ? null
+          : finiteAcousticAverage(resolved.map(({ assessment }) => assessment.fluencyScore)),
+        wordAccuracyScore,
+        phonemeAccuracyScore,
         wordEvents,
+        ...(targetMeasurement ? { targetMeasurement } : {}),
       },
     };
   }
@@ -296,7 +437,16 @@ export function createAiRoutes({
       taskType: request.taskType,
       transcript: assessment.transcript,
       assignment: evaluationAssignment(request.taskType, task),
-    }), acoustic: assessment.acoustic };
+    }), acoustic: assessment.acoustic, source: {
+      sessionId: session.id,
+      taskRef: task.id,
+      taskRevision: Number(task.revision),
+      catalogId: entry.catalog.id,
+      catalogRevision: Number(entry.catalog.revision),
+      accentLocale: assessment.acoustic.accentLocale,
+      assistanceUsed: Boolean(session.assistance_used),
+      targetedPractice: session.targeted_practice || null,
+    } };
   }
 
   function aiUsage(provider, response) {
@@ -627,10 +777,12 @@ export function createAiRoutes({
     if (!parsed.success) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректные данные устного ответа.' } });
     let input;
     let acousticEvidence = null;
+    let source = null;
     try {
       const resolved = await resolveSpeakingEvaluation(req.user, parsed.data);
       input = resolved?.input || null;
       acousticEvidence = resolved?.acoustic || null;
+      source = resolved?.source || null;
     } catch (error) {
       if (error?.status && error?.code) {
         return res.status(error.status).json({ error: {
@@ -653,7 +805,7 @@ export function createAiRoutes({
     }
     const acousticRetry = publicSpeakingAcousticRetry(input.taskType, acousticEvidence);
     if (!acousticRetry) {
-      res.locals.speakingEvaluation = { input, acousticEvidence, evaluationFingerprint };
+      res.locals.speakingEvaluation = { input, acousticEvidence, evaluationFingerprint, source };
       return next();
     }
     const claim = await claimSpeakingEvaluation(
@@ -661,6 +813,7 @@ export function createAiRoutes({
       input,
       SPEAKING_PROMPT_VERSION,
       evaluationFingerprint,
+      { source },
     );
     if (!claim.created) {
       const replay = speakingReplayPayload(claim.attempt);
@@ -704,9 +857,9 @@ export function createAiRoutes({
     requireAiBudget,
     speakingEvalLimiter,
     async (req, res) => {
-    const { input, acousticEvidence, evaluationFingerprint } = res.locals.speakingEvaluation;
+    const { input, acousticEvidence, evaluationFingerprint, source } = res.locals.speakingEvaluation;
     const claim = await claimSpeakingEvaluation(
-      req.user, input, SPEAKING_PROMPT_VERSION, evaluationFingerprint,
+      req.user, input, SPEAKING_PROMPT_VERSION, evaluationFingerprint, { source },
     );
     if (!claim.created) return respondToExistingSpeakingClaim(req, res, claim.attempt);
     const attemptId = Number(claim.attempt.id);

@@ -28,12 +28,14 @@ const ACTIVE_ASSUMPTION_CODES = new Set([
 const CANDIDATE_KEYS = Object.freeze([
   'basePlanRevision', 'goalId', 'goalRevision', 'id', 'inputFingerprint', 'now', 'plan',
   'profileCalculationRevision', 'profileEvidenceObservedAt', 'profileEvidenceSourceCount',
-  'profileEvidenceWatermarkVersion', 'recalculationBucket', 'taxonomyVersion',
+  'profileEvidenceFingerprint', 'profileEvidenceWatermarkVersion', 'recalculationBucket',
+  'taxonomyVersion',
 ]);
 const PLAN_KEYS = Object.freeze([
   'allocation', 'basePlanRevision', 'calculatedAt', 'forecast', 'goalId', 'goalRevision',
   'profileCalculationRevision', 'profileEvidenceObservedAt', 'profileEvidenceSourceCount',
-  'profileEvidenceWatermarkVersion', 'recalculationBucket', 'stability', 'taxonomyVersion', 'version',
+  'profileEvidenceFingerprint', 'profileEvidenceWatermarkVersion', 'recalculationBucket',
+  'stability', 'taxonomyVersion', 'version',
 ]);
 
 function bounded(value, minimum, maximum) {
@@ -259,6 +261,7 @@ export function adaptivePlanInputFingerprint({ goal, profile, basePlanRevision =
     profileField(profile, 'evidenceWatermarkVersion', 'evidence_watermark_version'),
     number(profileField(profile, 'evidenceSourceCount', 'evidence_source_count')),
     profileField(profile, 'evidenceObservedAt', 'evidence_observed_at') || null,
+    profileField(profile, 'evidenceFingerprint', 'evidence_fingerprint') || null,
     basePlanRevision == null ? null : number(basePlanRevision),
     isoDate(bucketInstant),
   ])).digest('hex');
@@ -271,6 +274,7 @@ function planEvidenceVector(plan) {
       ?? plan?.profile_evidence_watermark_version,
     evidenceObservedAt: plan?.profileEvidenceObservedAt ?? plan?.profile_evidence_observed_at,
     evidenceSourceCount: plan?.profileEvidenceSourceCount ?? plan?.profile_evidence_source_count,
+    evidenceFingerprint: plan?.profileEvidenceFingerprint ?? plan?.profile_evidence_fingerprint,
   };
 }
 
@@ -467,14 +471,14 @@ function validateStability(stability, { basePlanRevision }) {
   ])
     || typeof stability.applied !== 'boolean'
     || stability.maximumChangePercentagePoints !== ORDINARY_CHANGE_LIMIT
-    || ![null, 'goal_changed', 'critical_retention_expiry'].includes(stability.bypassReason)
+    || ![null, 'goal_changed', 'taxonomy_changed', 'critical_retention_expiry'].includes(stability.bypassReason)
     || !hasUniqueAllowedStrings(stability.bypassedSkillIds, new Set(CANONICAL_SKILL_BY_ID.keys()))
     || !hasUniqueAllowedStrings(stability.bypassedModuleIds, new Set(CANONICAL_MODULE_IDS))) {
     persistenceInvalid();
   }
   if (stability.bypassReason === null
     && (stability.bypassedSkillIds.length || stability.bypassedModuleIds.length)) persistenceInvalid();
-  if (stability.bypassReason === 'goal_changed'
+  if (['goal_changed', 'taxonomy_changed'].includes(stability.bypassReason)
     && (stability.applied || stability.bypassedSkillIds.length || stability.bypassedModuleIds.length)) {
     persistenceInvalid();
   }
@@ -532,6 +536,8 @@ function adaptivePlanReplaySemantics(value) {
     value?.profileEvidenceSourceCount ?? value?.profile_evidence_source_count
       ?? plan.profileEvidenceSourceCount,
   );
+  const profileEvidenceFingerprint = value?.profileEvidenceFingerprint
+    ?? value?.profile_evidence_fingerprint ?? plan.profileEvidenceFingerprint ?? null;
   return {
     inputFingerprint: value?.inputFingerprint ?? value?.input_fingerprint,
     basePlanRevision: basePlanRevision == null ? null : Number(basePlanRevision),
@@ -542,6 +548,7 @@ function adaptivePlanReplaySemantics(value) {
     profileEvidenceWatermarkVersion,
     profileEvidenceObservedAt,
     profileEvidenceSourceCount,
+    profileEvidenceFingerprint,
     recalculationBucket,
     plan: {
       version: plan.version ?? value?.plan_version,
@@ -553,6 +560,7 @@ function adaptivePlanReplaySemantics(value) {
       profileEvidenceWatermarkVersion,
       profileEvidenceObservedAt,
       profileEvidenceSourceCount,
+      profileEvidenceFingerprint,
       recalculationBucket,
       calculatedAt,
       forecast: plan.forecast ?? value?.forecast,
@@ -586,6 +594,8 @@ export function assertAdaptivePlanPersistenceCandidate(candidate, options = {}) 
     || (candidate.profileEvidenceObservedAt !== null
       && !isCanonicalIso(candidate.profileEvidenceObservedAt))
     || !isIntegerBetween(candidate.profileEvidenceSourceCount, 0)
+    || typeof candidate.profileEvidenceFingerprint !== 'string'
+    || !/^[0-9a-f]{64}$/u.test(candidate.profileEvidenceFingerprint)
     || !isCanonicalBucket(candidate.recalculationBucket)
     || !(candidate.now instanceof Date) || !Number.isFinite(candidate.now.getTime())
     || candidate.recalculationBucket !== candidate.now.toISOString().slice(0, 10)
@@ -599,6 +609,7 @@ export function assertAdaptivePlanPersistenceCandidate(candidate, options = {}) 
     || plan.profileEvidenceWatermarkVersion !== candidate.profileEvidenceWatermarkVersion
     || plan.profileEvidenceObservedAt !== candidate.profileEvidenceObservedAt
     || plan.profileEvidenceSourceCount !== candidate.profileEvidenceSourceCount
+    || plan.profileEvidenceFingerprint !== candidate.profileEvidenceFingerprint
     || plan.recalculationBucket !== candidate.recalculationBucket
     || !isCanonicalIso(plan.calculatedAt)
     || plan.calculatedAt !== calculationBucketInstant(candidate.recalculationBucket).toISOString()) {
@@ -612,6 +623,7 @@ export function assertAdaptivePlanPersistenceCandidate(candidate, options = {}) 
       evidenceWatermarkVersion: candidate.profileEvidenceWatermarkVersion,
       evidenceObservedAt: candidate.profileEvidenceObservedAt,
       evidenceSourceCount: candidate.profileEvidenceSourceCount,
+      evidenceFingerprint: candidate.profileEvidenceFingerprint,
     },
     basePlanRevision: candidate.basePlanRevision,
     now: candidate.now,
@@ -633,7 +645,10 @@ export function assertAdaptivePlanPersistenceCandidate(candidate, options = {}) 
     || candidate.profileEvidenceObservedAt !== normalizedProfileObservedAt(authoritativeProfile)
     || candidate.profileEvidenceSourceCount !== Number(profileVectorValue(
       authoritativeProfile, 'evidenceSourceCount', 'evidence_source_count',
-    )))) {
+    ))
+    || candidate.profileEvidenceFingerprint !== profileVectorValue(
+      authoritativeProfile, 'evidenceFingerprint', 'evidence_fingerprint',
+    ))) {
     throw new Error('ADAPTIVE_PLAN_PROFILE_STALE');
   }
 }
@@ -672,6 +687,8 @@ export function assertAdaptivePlanAuthoritativeCandidate(candidate, {
       expectedPlan.profileEvidenceObservedAt],
     ['profile_evidence_source_count', candidate.profileEvidenceSourceCount,
       expectedPlan.profileEvidenceSourceCount],
+    ['profile_evidence_fingerprint', candidate.profileEvidenceFingerprint,
+      expectedPlan.profileEvidenceFingerprint],
     ['recalculation_bucket', candidate.recalculationBucket, expectedPlan.recalculationBucket],
   ].filter(([, actual, expected]) => actual !== expected).map(([field]) => field);
   for (const key of PLAN_KEYS) {
@@ -709,18 +726,27 @@ export function assertAdaptivePlanStabilityTransition(current, candidate) {
     }
     return;
   }
-  validateAllocationShape(current.allocation);
   const currentGoalRevision = number(current.goal_revision ?? current.goalRevision);
   const candidateGoalRevision = number(candidate.goal_revision ?? candidate.goalRevision);
   const stability = candidate.stability || {};
   const reason = stability.bypassReason ?? null;
   const goalChanged = candidateGoalRevision !== currentGoalRevision;
+  const currentTaxonomyVersion = current.taxonomy_version ?? current.taxonomyVersion;
+  const taxonomyChanged = currentTaxonomyVersion !== candidate.taxonomyVersion;
   if (goalChanged) {
     if (candidateGoalRevision < currentGoalRevision || reason !== 'goal_changed') {
       throw new Error('ADAPTIVE_PLAN_STABILITY_VIOLATION');
     }
     return;
   }
+  if (taxonomyChanged) {
+    if (reason !== 'taxonomy_changed' || stability.applied !== false
+      || stability.bypassedSkillIds?.length || stability.bypassedModuleIds?.length) {
+      throw new Error('ADAPTIVE_PLAN_STABILITY_VIOLATION');
+    }
+    return;
+  }
+  validateAllocationShape(current.allocation);
   if (reason === 'goal_changed') throw new Error('ADAPTIVE_PLAN_STABILITY_VIOLATION');
   if (reason && reason !== 'critical_retention_expiry') throw new Error('ADAPTIVE_PLAN_STABILITY_VIOLATION');
   const declaredSkillIds = Array.isArray(stability.bypassedSkillIds) ? stability.bypassedSkillIds : [];
@@ -761,18 +787,23 @@ export function buildAdaptiveLearningPlan({ goal, profile, previousPlan = null, 
     module: skill.module,
     weight: priorityFor(skill, estimateById.get(skill.id), targetScore, weeks),
   }));
-  const weightedModules = [...new Set(weightedSkills.map((skill) => skill.module))].map((module) => ({
-    id: module,
-    weight: weightedSkills.filter((skill) => skill.module === module)
-      .reduce((sum, skill) => sum + skill.weight, 0),
-  }));
+  const weightedModules = [...new Set(weightedSkills.map((skill) => skill.module))].map((module) => {
+    const moduleSkills = weightedSkills.filter((skill) => skill.module === module);
+    return {
+      id: module,
+      weight: moduleSkills.reduce((sum, skill) => sum + skill.weight, 0) / moduleSkills.length,
+    };
+  });
   const goalRevision = number(goalField(goal, 'revision', 'revision'));
   const previousGoalRevision = number(previousPlan?.goalRevision ?? previousPlan?.goal_revision, -1);
   const goalChanged = Boolean(previousPlan) && previousGoalRevision !== goalRevision;
+  const previousTaxonomyVersion = previousPlan?.taxonomyVersion ?? previousPlan?.taxonomy_version;
+  const taxonomyChanged = Boolean(previousPlan)
+    && previousTaxonomyVersion !== profileField(profile, 'taxonomyVersion', 'taxonomy_version');
   const criticalScope = criticalRetentionScope(profile, instant);
   const criticalSignalSkillIds = new Set(criticalScope.skillIds);
   const criticalSignalModuleIds = new Set(criticalScope.moduleIds);
-  const stabilityApplied = Boolean(previousPlan) && !goalChanged;
+  const stabilityApplied = Boolean(previousPlan) && !goalChanged && !taxonomyChanged;
   const criticalBypass = stabilityApplied && criticalScope.skillIds.length > 0;
   const previousModules = stabilityApplied ? new Map((previousPlan.allocation?.modules || [])
     .map((module) => [module.id, number(module.percentage)])) : null;
@@ -787,7 +818,7 @@ export function buildAdaptiveLearningPlan({ goal, profile, previousPlan = null, 
     const moduleSkills = weightedSkills.filter((skill) => skill.module === module.id);
     const modulePrevious = previousSkills && new Map(moduleSkills.map((skill) => [skill.id, previousSkills.get(skill.id)]));
     const shares = stableApportion(
-      moduleSkills, moduleShares.get(module.id), modulePrevious, 1,
+      moduleSkills, moduleShares.get(module.id), modulePrevious, 0,
       criticalBypass ? criticalSignalSkillIds : new Set(),
     );
     for (const [skillId, percentage] of shares) skillShares.set(skillId, percentage);
@@ -829,12 +860,15 @@ export function buildAdaptiveLearningPlan({ goal, profile, previousPlan = null, 
       profile, 'evidenceObservedAt', 'evidence_observed_at',
     ) || null,
     profileEvidenceSourceCount: number(profileField(profile, 'evidenceSourceCount', 'evidence_source_count')),
+    profileEvidenceFingerprint: profileField(profile, 'evidenceFingerprint', 'evidence_fingerprint') || null,
     recalculationBucket: isoDate(instant),
     calculatedAt: instant.toISOString(),
     stability: {
       applied: stabilityApplied,
       maximumChangePercentagePoints: ORDINARY_CHANGE_LIMIT,
-      bypassReason: goalChanged ? 'goal_changed' : criticalBypass ? 'critical_retention_expiry' : null,
+      bypassReason: goalChanged ? 'goal_changed'
+        : taxonomyChanged ? 'taxonomy_changed'
+          : criticalBypass ? 'critical_retention_expiry' : null,
       bypassedSkillIds: criticalBypass ? criticalScope.skillIds : [],
       bypassedModuleIds: criticalBypass ? criticalScope.moduleIds : [],
     },

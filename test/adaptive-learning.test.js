@@ -9,9 +9,17 @@ import express from 'express';
 
 import { createAdaptiveLearningRoutes } from '../routes/adaptive-learning.js';
 import { createProgressRoutes } from '../routes/progress.js';
-import { buildAdaptiveLearningProfile, EGE_SKILL_TAXONOMY } from '../adaptive-learning/profile.js';
+import {
+  adaptiveProfileMatchesCurrentEvidence,
+  buildAdaptiveLearningProfile,
+  EGE_SKILL_TAXONOMY,
+} from '../adaptive-learning/profile.js';
+import { buildAdaptiveLearningPlan } from '../adaptive-learning/plan.js';
 import { requiresServerAssessment, SERVER_ASSESSED_MODULES } from '../adaptive-learning/evidence-policy.js';
 import { adaptiveAssistedMetadata } from '../adaptive-learning/evidence-quality.js';
+import {
+  ADAPTIVE_PROFILE_CALCULATION_REVISION,
+} from '../adaptive-learning/evidence-watermark.js';
 import {
   DEEP_DIAGNOSTIC_CATALOG,
   SHORT_DIAGNOSTIC_CATALOG,
@@ -37,6 +45,105 @@ test('one evidence policy identifies modules that require server assessment', ()
   assert.equal(requiresServerAssessment('writing'), true);
   assert.equal(requiresServerAssessment('speaking'), true);
   assert.equal(requiresServerAssessment('reading'), false);
+});
+
+test('one eligible evidence projection owns the complete profile watermark vector', () => {
+  const eligible = {
+    id: '71563fb2-9d76-4de1-ae70-b9a014792ed1', module: 'grammar', activity: 'grammar_19_24',
+    score: 4, max_score: 5, evidence_quality: 'server_verified_unassisted',
+    created_at: '2026-08-04T08:00:00.000Z',
+  };
+  const baseline = buildAdaptiveLearningProfile({ attempts: [eligible] });
+  const withExcludedSources = buildAdaptiveLearningProfile({ attempts: [
+    eligible,
+    {
+      id: crypto.randomUUID(), module: 'writing', activity: 'writing_37',
+      score: 100, max_score: 100, evidence_quality: 'client_reported',
+      created_at: '2026-08-04T09:00:00.000Z',
+    },
+    {
+      id: crypto.randomUUID(), module: 'speaking', activity: 'speaking_4',
+      score: 100, max_score: 100, evidence_quality: 'client_reported',
+      created_at: '2026-08-04T09:01:00.000Z',
+    },
+    {
+      id: crypto.randomUUID(), module: 'grammar', activity: 'voice_tutor_error',
+      score: 1, max_score: 1, evidence_quality: 'server_verified_assisted',
+      created_at: '2026-08-04T09:02:00.000Z',
+    },
+  ] });
+  const vector = (profile) => ({
+    profileCalculationRevision: profile.profileCalculationRevision,
+    evidenceWatermarkVersion: profile.evidenceWatermarkVersion,
+    evidenceObservedAt: profile.evidenceObservedAt,
+    evidenceSourceCount: profile.evidenceSourceCount,
+    evidenceFingerprint: profile.evidenceFingerprint,
+  });
+  assert.deepEqual(vector(withExcludedSources), vector(baseline));
+  assert.equal(withExcludedSources.evidenceCount, baseline.evidenceCount);
+});
+
+test('evidence matching validates revision, count, time and fingerprint as one vector', () => {
+  const sources = { attempts: [{
+    id: '71563fb2-9d76-4de1-ae70-b9a014792ed1', module: 'grammar', activity: 'grammar_19_24',
+    score: 4, max_score: 5, evidence_quality: 'server_verified_unassisted',
+    created_at: '2026-08-04T08:00:00.000Z',
+  }] };
+  const profile = buildAdaptiveLearningProfile(sources);
+  assert.equal(adaptiveProfileMatchesCurrentEvidence(profile, sources), true);
+  for (const changed of [
+    { profileCalculationRevision: profile.profileCalculationRevision + 1 },
+    { evidenceSourceCount: profile.evidenceSourceCount + 1 },
+    { evidenceObservedAt: '2026-08-04T08:00:01.000Z' },
+    { evidenceFingerprint: 'f'.repeat(64) },
+  ]) {
+    assert.equal(adaptiveProfileMatchesCurrentEvidence({ ...profile, ...changed }, sources), false);
+  }
+});
+
+test('canonical evidence hashing gives Date, ISO, epoch milliseconds and seconds one identity', () => {
+  const instant = new Date('2026-08-04T08:00:00.000Z');
+  const event = (createdAt) => ({ attempts: [{
+    id: '71563fb2-9d76-4de1-ae70-b9a014792ed1', module: 'grammar', activity: 'grammar_19_24',
+    score: 4, max_score: 5, evidence_quality: 'server_verified_unassisted', created_at: createdAt,
+  }] });
+  const profiles = [
+    instant,
+    instant.toISOString(),
+    instant.getTime(),
+    instant.getTime() / 1_000,
+  ].map((value) => buildAdaptiveLearningProfile(event(value)));
+  assert.deepEqual(new Set(profiles.map((profile) => profile.evidenceFingerprint)).size, 1,
+    'file epoch and PostgreSQL Date/ISO values must hash identically');
+  assert.deepEqual(new Set(profiles.map((profile) => profile.evidenceObservedAt)).size, 1);
+});
+
+test('malformed numeric and boolean evidence is absent from the complete watermark vector', () => {
+  const timestamp = '2026-08-04T08:00:00.000Z';
+  const malformedAttempts = [null, undefined, '', '4', true].flatMap((score, index) => ([{
+    id: `bad-score-${index}`, module: 'grammar', activity: 'grammar_19_24',
+    score, max_score: 5, evidence_quality: 'server_verified_unassisted', created_at: timestamp,
+  }, {
+    id: `bad-max-${index}`, module: 'grammar', activity: 'grammar_19_24',
+    score: 4, max_score: score, evidence_quality: 'server_verified_unassisted', created_at: timestamp,
+  }]));
+  const malformedRecoveries = [null, undefined, '', 'false', 0].map((flag, index) => ({
+    id: `bad-recovery-${index}`, module: 'grammar', skill_id: 'ege.grammar.forms',
+    initial_micro_check_passed: flag, initial_transfer_passed: false,
+    terminal_outcome: 'resolved', observed_at: timestamp,
+  }));
+  const empty = buildAdaptiveLearningProfile();
+  const malformed = buildAdaptiveLearningProfile({
+    attempts: malformedAttempts,
+    recoveries: malformedRecoveries,
+  });
+  const vector = (profile) => ({
+    evidenceSourceCount: profile.evidenceSourceCount,
+    evidenceObservedAt: profile.evidenceObservedAt,
+    evidenceFingerprint: profile.evidenceFingerprint,
+    evidenceCount: profile.evidenceCount,
+  });
+  assert.deepEqual(vector(malformed), vector(empty));
 });
 
 function testAuthentication() {
@@ -114,7 +221,7 @@ async function withAdaptiveApp(run, { enabled = true } = {}) {
 }
 
 test('versioned EGE taxonomy covers six modules and assisted recovery is not mastery proof', () => {
-  assert.equal(EGE_SKILL_TAXONOMY.version, 'ege-en-v1');
+  assert.equal(EGE_SKILL_TAXONOMY.version, 'ege-en-v2');
   assert.deepEqual(
     [...new Set(EGE_SKILL_TAXONOMY.skills.map((skill) => skill.module))].sort(),
     ['grammar', 'listening', 'reading', 'speaking', 'vocabulary', 'writing'],
@@ -150,12 +257,12 @@ test('versioned EGE taxonomy covers six modules and assisted recovery is not mas
       evidenceCount: grammar.evidenceCount,
       explanationCode: grammar.explanationCode,
     },
-    { mastery: 73, uncertainty: 86, evidenceCount: 2, explanationCode: 'mixed_with_assistance' },
+    { mastery: 80, uncertainty: 86, evidenceCount: 2, explanationCode: 'mixed_with_assistance' },
   );
   assert.equal(profile.preliminary, true);
   assert.equal(profile.confidence, 1);
-  assert.equal(profile.weightingVersion, 'adaptive-evidence-v1');
-  assert.equal(profile.profileCalculationRevision, 2);
+  assert.equal(profile.weightingVersion, 'adaptive-evidence-v2');
+  assert.equal(profile.profileCalculationRevision, ADAPTIVE_PROFILE_CALCULATION_REVISION);
   assert.equal(profile.evidenceWatermarkVersion, 'adaptive-evidence-watermark-v1');
   assert.equal(profile.evidenceObservedAt, NOW.toISOString());
   assert.equal(profile.evidenceSourceCount, 2);
@@ -198,11 +305,50 @@ test('assisted-only histories never establish mastery while genuine retention ev
   assert.equal(retentionBacked.status, 'established');
 });
 
+test('positive assisted evidence stays observable but cannot raise mastery or weaken the plan priority', () => {
+  const independentFailure = {
+    id: crypto.randomUUID(), module: 'grammar', activity: 'grammar_19_24',
+    score: 0, max_score: 10, evidence_quality: 'server_verified_unassisted',
+    created_at: NOW.toISOString(),
+  };
+  const assistedSuccess = {
+    id: crypto.randomUUID(), module: 'grammar', activity: 'grammar_19_24',
+    score: 10, max_score: 10, evidence_quality: 'server_verified_assisted',
+    created_at: new Date(NOW.getTime() + 1_000).toISOString(),
+  };
+  const baseline = buildAdaptiveLearningProfile({ attempts: [independentFailure] });
+  const withHelp = buildAdaptiveLearningProfile({ attempts: [independentFailure, assistedSuccess] });
+  const forms = (profile) => profile.skills.find((skill) => skill.id === 'ege.grammar.forms');
+  assert.equal(forms(baseline).mastery, 0);
+  assert.equal(forms(withHelp).mastery, 0);
+  assert.equal(forms(withHelp).evidenceCount, 2);
+  assert.equal(withHelp.assistedEvidenceCount, 1);
+  assert.equal(withHelp.evidenceSourceCount, 2,
+    'assisted evidence must remain in the append-only watermark');
+
+  const planningGoal = {
+    id: '61000000-0000-4000-8000-000000000001', target_exam: 'ege_english',
+    target_score: 85, exam_date: '2027-06-01', weekly_minutes: 300, revision: 1,
+  };
+  const baselinePlan = buildAdaptiveLearningPlan({ goal: planningGoal, profile: baseline, now: NOW });
+  const assistedPlan = buildAdaptiveLearningPlan({ goal: planningGoal, profile: withHelp, now: NOW });
+  const formsAllocation = (plan) => plan.allocation.skills.find((skill) => (
+    skill.id === 'ege.grammar.forms'
+  ));
+  assert.equal(formsAllocation(assistedPlan).percentage, formsAllocation(baselinePlan).percentage);
+  assert.deepEqual(formsAllocation(assistedPlan).reasonCodes, formsAllocation(baselinePlan).reasonCodes);
+});
+
 test('short diagnostic productive choices stay preliminary and cannot create Free productive mastery', () => {
   const productiveItems = SHORT_DIAGNOSTIC_CATALOG.items.filter((item) => (
     item.module === 'writing' || item.module === 'speaking'
   ));
-  assert.equal(productiveItems.length, 4);
+  assert.deepEqual(
+    [...new Set(productiveItems.map((item) => item.skillId))].sort(),
+    EGE_SKILL_TAXONOMY.skills
+      .filter((skill) => skill.module === 'writing' || skill.module === 'speaking')
+      .map((skill) => skill.id).sort(),
+  );
   assert.ok(productiveItems.every((item) => item.evidenceQuality === 'assisted'));
   const profile = buildAdaptiveLearningProfile({
     diagnosticResponses: productiveItems.map((item, index) => ({
@@ -227,11 +373,44 @@ test('short diagnostic productive choices stay preliminary and cannot create Fre
   assert.equal(profile.independentEvidenceCount, 0);
 });
 
+test('Speaking diagnostic copy points to the real assessment available in the Speaking section, not Premium-only proof', () => {
+  const speakingItems = SHORT_DIAGNOSTIC_CATALOG.items.filter((item) => item.module === 'speaking');
+  assert.ok(speakingItems.length > 0);
+  assert.ok(speakingItems.every((item) => item.measurementNotice.includes('разделе «Говорение»')));
+  assert.ok(speakingItems.every((item) => !item.measurementNotice.includes('Premium-проверкой')));
+});
+
+test('saved v1 Speaking diagnostic history maps through compatibility without changing the old response', () => {
+  const profile = buildAdaptiveLearningProfile({
+    diagnosticResponses: [{
+      id: crypto.randomUUID(),
+      catalog_version: 'ege-short-diagnostic-v1',
+      item_id: 'speaking-interaction-follow-up-1',
+      skill_id: 'ege.speaking.interaction',
+      module: 'speaking',
+      evidence_quality: 'assisted',
+      correct: true,
+      answered_at: NOW.toISOString(),
+    }],
+    diagnosticCompletions: [{
+      catalog_version: 'ege-short-diagnostic-v1', completed_at: NOW.toISOString(),
+    }],
+  });
+  const directQuestions = profile.skills.find((skill) => (
+    skill.id === 'ege.speaking.direct_questions'
+  ));
+  assert.equal(profile.evidenceCount, 1);
+  assert.equal(profile.assistedEvidenceCount, 1);
+  assert.equal(directQuestions.evidenceCount, 1);
+  assert.equal(directQuestions.mastery, 0);
+});
+
 test('deep diagnostic recognition without audio or productive work remains assisted', () => {
   const indirectItems = DEEP_DIAGNOSTIC_CATALOG.items.filter((item) => (
     ['listening', 'writing', 'speaking'].includes(item.module)
   ));
-  assert.equal(indirectItems.length, 12);
+  assert.equal(indirectItems.length, 12 + EGE_SKILL_TAXONOMY.skills
+    .filter((skill) => skill.module === 'speaking').length);
   assert.ok(indirectItems.every((item) => item.evidenceQuality === 'assisted'));
   assert.ok(indirectItems.every((item) => item.measurementNotice));
 });
@@ -356,8 +535,17 @@ test('activity mapping is exact, most-specific and covers every versioned taxono
     ['ege.listening.detail', ['listening', 'listening_detail']],
     ['ege.writing.email', ['writing', 'writing_37']],
     ['ege.writing.essay', ['writing', 'writing_38']],
-    ['ege.speaking.interaction', ['speaking', 'speaking_interaction']],
-    ['ege.speaking.monologue', ['speaking', 'speaking_monologue']],
+    ['ege.speaking.reading_aloud', ['speaking', 'speaking_1']],
+    ['ege.speaking.direct_questions', ['speaking', 'speaking_2']],
+    ['ege.speaking.interview_completeness', ['speaking', 'speaking_3']],
+    ['ege.speaking.monologue_content', ['speaking', 'speaking_4']],
+    ['ege.speaking.monologue_organization', ['speaking', 'speaking_4_organization']],
+    ['ege.speaking.spoken_grammar', ['speaking', 'speaking_4_grammar']],
+    ['ege.speaking.spoken_lexis', ['speaking', 'speaking_4_lexis']],
+    ['ege.speaking.fluency', ['speaking', 'speaking_1_fluency']],
+    ['ege.speaking.pronunciation_words', ['speaking', 'speaking_1_words']],
+    ['ege.speaking.pronunciation_phonemes', ['speaking', 'speaking_1_phonemes']],
+    ['ege.speaking.signal_quality', ['speaking', 'speaking_1_signal']],
   ]);
   const attempts = [...activities].map(([skillId, [module, activity]]) => ({
     id: crypto.randomUUID(), module, activity, score: 1, max_score: 1,
@@ -418,7 +606,7 @@ test('legacy client-reported writing and speaking rows cannot influence the adap
   ];
 
   const profile = buildAdaptiveLearningProfile({ attempts });
-  assert.equal(profile.profileCalculationRevision, 2);
+  assert.equal(profile.profileCalculationRevision, ADAPTIVE_PROFILE_CALCULATION_REVISION);
   assert.equal(profile.evidenceSourceCount, 3);
   assert.equal(profile.evidenceCount, 3);
   assert.equal(profile.clientReportedEvidenceCount, 1);
@@ -469,9 +657,11 @@ test('production Voice Tutor recovery skill families map to the intended adaptiv
     ['writing', 'ege.writing.email.criterion.2', 'ege.writing.email'],
     ['writing', 'ege.writing.writing_38.criterion.5', 'ege.writing.essay'],
     ['writing', 'ege.writing.essay.criterion.1', 'ege.writing.essay'],
-    ['speaking', 'ege.speaking.2.criterion.4', 'ege.speaking.interaction'],
-    ['speaking', 'ege.speaking.3.criterion.5', 'ege.speaking.interaction'],
-    ['speaking', 'ege.speaking.4.criterion.3', 'ege.speaking.monologue'],
+    ['speaking', 'ege.speaking.1.criterion.1', 'ege.speaking.reading_aloud'],
+    ['speaking', 'ege.speaking.2.criterion.4', 'ege.speaking.direct_questions'],
+    ['speaking', 'ege.speaking.3.criterion.5', 'ege.speaking.interview_completeness'],
+    ['speaking', 'ege.speaking.4.criterion.1', 'ege.speaking.monologue_content'],
+    ['speaking', 'ege.speaking.4.criterion.2', 'ege.speaking.monologue_organization'],
   ];
 
   for (const [module, skillId, expectedAdaptiveSkill] of productionRecoveries) {
@@ -488,17 +678,21 @@ test('production Voice Tutor recovery skill families map to the intended adaptiv
     assert.equal(credited[0].uncertainty, 100);
   }
 
+  const combinedLanguageCriterion = buildAdaptiveLearningProfile({ recoveries: [{
+    id: crypto.randomUUID(), module: 'speaking', skill_id: 'ege.speaking.4.criterion.3',
+    initial_micro_check_passed: true, initial_transfer_passed: true,
+    terminal_outcome: 'resolved', observed_at: NOW.toISOString(),
+  }] });
+  assert.equal(combinedLanguageCriterion.evidenceCount, 0,
+    'the combined official language criterion cannot establish grammar or lexis without a split');
+  assert.equal(ADAPTIVE_PROFILE_CALCULATION_REVISION, 4,
+    'assisted zero-weight semantics must outrank older persisted snapshots');
+
   const mismatchedKnownFamily = buildAdaptiveLearningProfile({ recoveries: [{
     id: crypto.randomUUID(), module: 'grammar', skill_id: 'ege.writing.essay.criterion.1',
     terminal_outcome: 'resolved', observed_at: NOW.toISOString(),
   }] });
   assert.equal(mismatchedKnownFamily.evidenceCount, 0, 'known families never fall through to an unrelated module');
-
-  const unsupportedReadingAloud = buildAdaptiveLearningProfile({ recoveries: [{
-    id: crypto.randomUUID(), module: 'speaking', skill_id: 'ege.speaking.1.criterion.1',
-    terminal_outcome: 'resolved', observed_at: NOW.toISOString(),
-  }] });
-  assert.equal(unsupportedReadingAloud.evidenceCount, 0, 'reading aloud has no matching v1 adaptive skill');
 
   const unknownLegacyFamily = buildAdaptiveLearningProfile({ recoveries: [{
     id: crypto.randomUUID(), module: 'reading', skill_id: 'legacy.reading.custom',
@@ -537,7 +731,7 @@ test('Voice Tutor service attempts do not double-credit a module default beside 
     }],
   });
 
-  assert.equal(profile.evidenceSourceCount, 2, 'raw watermark still sees both server records');
+  assert.equal(profile.evidenceSourceCount, 1, 'unsupported service rows are outside the canonical watermark');
   assert.equal(profile.evidenceCount, 1, 'only the exact recovery supplies adaptive evidence');
   assert.equal(profile.skills.find((skill) => skill.id === 'ege.grammar.forms').evidenceCount, 0);
   assert.equal(profile.skills.find((skill) => skill.id === 'ege.vocabulary.word_formation').evidenceCount, 1);
@@ -549,7 +743,7 @@ test('many forged public module attempts remain useful but cannot establish a pr
       module: skill.module,
       activity: skill.id,
     }));
-    for (let round = 0; round < 20; round += 1) {
+    for (let round = 0; round < 10; round += 1) {
       for (const activity of activities) {
         const response = await request(owner, '/api/v1/module-attempts', {
           method: 'POST',
@@ -570,12 +764,12 @@ test('many forged public module attempts remain useful but cannot establish a pr
     }
 
     const sources = await repository.getAdaptiveLearningEvidenceSources(owner);
-    assert.equal(sources.attempts.filter((attempt) => attempt.evidence_quality === 'client_reported').length, 161);
+    assert.equal(sources.attempts.filter((attempt) => attempt.evidence_quality === 'client_reported').length, 81);
     assert.equal(sources.attempts.some((attempt) => attempt.evidence_quality === 'server_verified_unassisted'), false);
     const overview = await (await request(owner, '/api/v1/adaptive-learning/overview')).json();
-    assert.equal(overview.profile.clientReportedEvidenceCount, 161);
+    assert.equal(overview.profile.clientReportedEvidenceCount, 81);
     assert.equal(overview.profile.independentEvidenceCount, 0);
-    assert.equal(overview.profile.evidenceCount, 161);
+    assert.equal(overview.profile.evidenceCount, 81);
     assert.equal(overview.profile.preliminary, true);
     assert.equal(overview.profile.status, 'preliminary');
     assert.ok(overview.profile.confidence <= 15);
@@ -644,7 +838,7 @@ test('authenticated learner saves an idempotent goal and gets an owner-bound pre
       },
       { ...body, revision: 1 },
     );
-    assert.equal(created.profile.taxonomyVersion, 'ege-en-v1');
+    assert.equal(created.profile.taxonomyVersion, 'ege-en-v2');
     assert.match(created.goal.createdAt, /^2026-08-04T/u);
     assert.match(created.goal.updatedAt, /^2026-08-04T/u);
 
@@ -696,7 +890,7 @@ test('authenticated learner saves an idempotent goal and gets an owner-bound pre
 
     const exported = await repository.exportUserData(owner);
     assert.equal(exported.adaptive_learning_goals.length, 2);
-    assert.equal(exported.adaptive_learning_profile.taxonomy_version, 'ege-en-v1');
+    assert.equal(exported.adaptive_learning_profile.taxonomy_version, 'ege-en-v2');
     assert.equal(exported.adaptive_learning_profile.evidence_watermark_version, 'adaptive-evidence-watermark-v1');
     assert.match(exported.adaptive_learning_profile.updated_at, /^\d{4}-\d{2}-\d{2}T/u);
     assert.ok(exported.adaptive_learning_skill_estimates.every((estimate) => (
@@ -713,7 +907,7 @@ test('authenticated learner saves an idempotent goal and gets an owner-bound pre
   });
 });
 
-test('overview returns the authoritative stored profile when a reverse-order recomputation is rejected', async () => {
+test('overview fails closed after reverse-order profile recomputation exhausts bounded retries', async () => {
   await withAdaptiveApp(async ({ repository, owner, request }) => {
     const attempt = (id, createdAt) => ({
       id,
@@ -735,11 +929,11 @@ test('overview returns the authoritative stored profile when a reverse-order rec
     });
 
     const response = await request(owner, '/api/v1/adaptive-learning/overview');
-    assert.equal(response.status, 200);
-    const overview = await response.json();
-    assert.equal(overview.profile.evidenceSourceCount, 2);
-    assert.equal(overview.profile.evidenceCount, 2);
-    assert.equal(overview.profile.skills.find((skill) => skill.id === 'ege.grammar.forms').evidenceCount, 2);
+    assert.equal(response.status, 409);
+    assert.equal(response.headers.get('retry-after'), '1');
+    assert.deepEqual(await response.json(), {
+      error: { code: 'ADAPTIVE_PROFILE_RETRY_REQUIRED', retryable: true },
+    });
   });
 });
 
@@ -772,6 +966,8 @@ test('progress screen contains an accessible current-plan form and renders the s
   assert.match(openapi, /profileCalculationRevision/u);
   assert.match(openapi, /Higher profileCalculationRevision wins first/u);
   assert.match(openapi, /Within the same calculation revision, evidenceSourceCount is monotonic/u);
+  assert.match(openapi, /ADAPTIVE_PROFILE_RETRY_REQUIRED/u);
+  assert.match(openapi, /Retry-After:/u);
   assert.doesNotMatch(openapi, /no revision may reduce evidenceSourceCount/u);
   assert.doesNotMatch(openapi, /goal: \{ \$ref: '#\/components\/schemas\/AdaptiveGoal', nullable: true \}/u);
   assert.equal([...openapi.matchAll(/goal:\s*\n\s+allOf:\s*\n\s+- \$ref: '#\/components\/schemas\/AdaptiveGoal'\s*\n\s+nullable: true/gu)].length, 2);

@@ -32,10 +32,12 @@ function authenticationFor(username) {
 
 async function withCurrentUserApp(run, { limits = LIMITS, sessionStartLimiter, featureFlags = {} } = {}) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-voice-user-'));
-  const repository = createFileRepository(path.join(directory, 'data.json'));
+  const clock = { now: new Date(NOW) };
+  const repository = createFileRepository(path.join(directory, 'data.json'), {
+    voiceTutorMutationNow: () => clock.now,
+  });
   const username = await repository.createTelegramUser(6101, 'Voice Student');
   await repository.grantDays(6101, 30, 'Voice Student');
-  const clock = { now: new Date(NOW) };
   const app = express();
   app.use(express.json());
   const authentication = authenticationFor(username);
@@ -276,7 +278,7 @@ test('legacy file data migrates to base access and account export/delete covers 
     users: { legacy: { sub_until: NOW.getTime() + 86_400_000, created: NOW.getTime() } },
     progress: { legacy: {} },
   }));
-  const repository = createFileRepository(file);
+  const repository = createFileRepository(file, { voiceTutorMutationNow: () => NOW });
   try {
     assert.deepEqual(await repository.getVoiceTutorAccess('legacy', LIMITS, NOW), {
       entitlements: { voice_tutor: false },

@@ -2,11 +2,14 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
+import http from 'node:http';
 import test from 'node:test';
+import express from 'express';
 import pg from 'pg';
 import { createPostgresRepository } from '../storage/postgres-repository.js';
-import { buildGrammarLexiconCapsule, createGrammarLexiconErrorAttempt, persistedVoiceTutorCapsule } from '../voice-tutor/capsule.js';
-import { buildAdaptiveLearningProfile } from '../adaptive-learning/profile.js';
+import { buildGrammarLexiconCapsule, buildWritingSpeakingCapsule, createGrammarLexiconErrorAttempt, persistedVoiceTutorCapsule } from '../voice-tutor/capsule.js';
+import { rebuildSourceCapsule } from '../routes/voice-tutor.js';
+import { buildAdaptiveLearningProfile, EGE_SKILL_TAXONOMY } from '../adaptive-learning/profile.js';
 import { adaptivePlanInputFingerprint, buildAdaptiveLearningPlan } from '../adaptive-learning/plan.js';
 import { adaptiveLearningProfilePublicDto } from '../adaptive-learning/repository-dto.js';
 import {
@@ -14,10 +17,12 @@ import {
   buildAdaptiveRetentionState,
 } from '../adaptive-learning/retention.js';
 import {
+  ADAPTIVE_ACTIVITY_REGISTRY,
   buildAdaptiveSessionPreview,
   createAdaptiveLearningSessionFromPreview,
 } from '../adaptive-learning/session.js';
 import {
+  ADAPTIVE_EXECUTION_CLAIM_TTL_MS,
   adaptiveEvidenceContext,
   adaptiveExecutionRequestHash,
   adaptiveExecutionToken,
@@ -50,6 +55,9 @@ import { SPEAKING_TASK2_CATALOG } from '../public/content/speaking/task2-v1.js';
 import { SPEAKING_TASK3_CATALOG } from '../public/content/speaking/task3-v1.js';
 import { SPEAKING_TASK4_CATALOG } from '../public/content/speaking/task4-v1.js';
 import { speakingCalibrationSampleMaterial } from './support/speaking-calibration-fixture.js';
+import { buildSpeakingLearningReport } from '../speaking/learning-loop.js';
+import { publicSpeakingReview, scoreSpeakingTask } from '../speaking/fipi-scoring.js';
+import { createAdaptiveLearningRoutes } from '../routes/adaptive-learning.js';
 
 const SPEAKING_CATALOGS = [
   SPEAKING_TASK1_CATALOG, SPEAKING_TASK2_CATALOG,
@@ -57,6 +65,1058 @@ const SPEAKING_CATALOGS = [
 ];
 
 const connectionString = process.env.TEST_DATABASE_URL;
+
+test('PostgreSQL module evidence writer shares the profile owner lock and rejects a stale snapshot', {
+  skip: !connectionString,
+}, async () => {
+  const repository = createPostgresRepository(connectionString);
+  const lockPool = new pg.Pool({ connectionString });
+  const suffix = `${Date.now()}`.slice(-8);
+  const username = await repository.createTelegramUser(Number(`89${suffix}`), `Module CAS ${suffix}`);
+  const staleProfile = buildAdaptiveLearningProfile(
+    await repository.getAdaptiveLearningEvidenceSources(username),
+  );
+  const locker = await lockPool.connect();
+  try {
+    await locker.query('BEGIN');
+    await locker.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+    let settled = false;
+    const writing = repository.recordModuleAttempt(username, {
+      id: crypto.randomUUID(), module: 'exam', activity: 'grammar_19_24',
+      score: 5, maxScore: 6, durationMs: 45_000, metadata: { source: 'builtin' },
+    }, { evidenceQuality: 'server_verified_unassisted' }).finally(() => { settled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assert.equal(settled, false, 'the evidence writer must wait for the profile owner lock');
+    await locker.query('COMMIT');
+    await writing;
+    await assert.rejects(repository.saveAdaptiveLearningProfile(username, staleProfile, {
+      now: new Date('2026-08-07T11:00:00.000Z'), verifyCurrentEvidence: true,
+    }), /ADAPTIVE_PROFILE_EVIDENCE_STALE/u);
+  } finally {
+    try { await locker.query('ROLLBACK'); } catch {}
+    locker.release();
+    await lockPool.end();
+    await repository.close();
+  }
+});
+
+test('PostgreSQL fingerprint CAS persists a same-time assistance downgrade and rejects stale mastery', {
+  skip: !connectionString,
+}, async () => {
+  const repository = createPostgresRepository(connectionString);
+  const raw = new pg.Client({ connectionString });
+  const suffix = `${Date.now()}`.slice(-8);
+  const username = await repository.createTelegramUser(Number(`88${suffix}`), `Fingerprint CAS ${suffix}`);
+  await raw.connect();
+  try {
+    const attemptId = crypto.randomUUID();
+    await repository.recordModuleAttempt(username, {
+      id: attemptId, module: 'exam', activity: 'grammar_19_24', score: 6, maxScore: 6,
+      durationMs: 45_000, metadata: { source: 'builtin' },
+    }, { evidenceQuality: 'server_verified_unassisted' });
+    const independent = buildAdaptiveLearningProfile(
+      await repository.getAdaptiveLearningEvidenceSources(username),
+    );
+    const storedIndependent = await repository.saveAdaptiveLearningProfile(username, independent, {
+      verifyCurrentEvidence: true,
+    });
+    assert.equal(storedIndependent.evidence_fingerprint, independent.evidenceFingerprint);
+    assert.ok(Number(storedIndependent.independent_evidence_count) > 0);
+    await raw.query(
+      'UPDATE adaptive_learning_profiles SET evidence_fingerprint = NULL WHERE username = $1',
+      [username],
+    );
+    assert.equal((await repository.getAdaptiveLearningProfile(username)).evidence_fingerprint, null,
+      'migration 051 keeps legacy rows readable while their fingerprint is absent');
+    const repairedLegacy = await repository.saveAdaptiveLearningProfile(username, independent, {
+      verifyCurrentEvidence: true,
+    });
+    assert.equal(repairedLegacy.evidence_fingerprint, independent.evidenceFingerprint);
+
+    await raw.query(
+      `UPDATE module_attempts SET evidence_quality = 'server_verified_assisted'
+       WHERE username = $1 AND id = $2`,
+      [username, attemptId],
+    );
+    const assisted = buildAdaptiveLearningProfile(
+      await repository.getAdaptiveLearningEvidenceSources(username),
+    );
+    assert.equal(assisted.evidenceSourceCount, independent.evidenceSourceCount);
+    assert.equal(assisted.evidenceObservedAt, independent.evidenceObservedAt);
+    assert.notEqual(assisted.evidenceFingerprint, independent.evidenceFingerprint);
+
+    const storedAssisted = await repository.saveAdaptiveLearningProfile(username, assisted, {
+      verifyCurrentEvidence: true,
+    });
+    assert.equal(Number(storedAssisted.independent_evidence_count), 0);
+    assert.ok(Number(storedAssisted.assisted_evidence_count) > 0);
+    assert.equal(storedAssisted.evidence_fingerprint, assisted.evidenceFingerprint);
+    await assert.rejects(repository.saveAdaptiveLearningProfile(username, independent, {
+      verifyCurrentEvidence: true,
+    }), /ADAPTIVE_PROFILE_EVIDENCE_STALE/u);
+    const rejectedStaleMastery = await repository.saveAdaptiveLearningProfile(username, independent);
+    assert.equal(Number(rejectedStaleMastery.independent_evidence_count), 0);
+    assert.equal(rejectedStaleMastery.evidence_fingerprint, assisted.evidenceFingerprint);
+
+    const exported = await repository.exportUserData(username);
+    assert.equal(exported.adaptive_learning_profile.evidence_fingerprint, assisted.evidenceFingerprint);
+    await repository.deleteUserData(username);
+    assert.equal((await raw.query(
+      'SELECT 1 FROM adaptive_learning_profiles WHERE username = $1', [username],
+    )).rowCount, 0);
+  } finally {
+    await raw.end();
+    await repository.deleteUserData(username).catch(() => {});
+    await repository.close();
+  }
+});
+
+test('PostgreSQL evidence reader excludes numeric-looking strings from Writing review JSON', {
+  skip: !connectionString,
+}, async () => {
+  const repository = createPostgresRepository(connectionString);
+  const raw = new pg.Client({ connectionString });
+  const suffix = String(Date.now()).slice(-8);
+  const username = await repository.createTelegramUser(
+    Number(`87${suffix}`), `Corrupt evidence ${suffix}`,
+  );
+  await raw.connect();
+  try {
+    await raw.query(
+      `INSERT INTO writing_attempts
+       (username, task_type, assignment, answer, evaluated_answer, review,
+        prompt_version, status, evaluated_at)
+       VALUES ($1, 'writing_37', '{}'::jsonb, 'test', 'test', $2::jsonb,
+               'test-v1', 'completed', $3)`,
+      [
+        username,
+        JSON.stringify({ overall_got: '4', overall_max: '6' }),
+        new Date('2026-08-04T08:01:00.000Z'),
+      ],
+    );
+    const sources = await repository.getAdaptiveLearningEvidenceSources(username);
+    assert.equal(sources.attempts.some((entry) => entry.module === 'writing'), false);
+    const malformed = buildAdaptiveLearningProfile(sources);
+    const empty = buildAdaptiveLearningProfile();
+    assert.equal(malformed.evidenceSourceCount, empty.evidenceSourceCount);
+    assert.equal(malformed.evidenceFingerprint, empty.evidenceFingerprint);
+    assert.equal(malformed.evidenceCount, empty.evidenceCount);
+  } finally {
+    await raw.end();
+    await repository.deleteUserData(username).catch(() => {});
+    await repository.close();
+  }
+});
+
+function targetedPracticeScoredReview() {
+  const semanticFacts = {
+    confidence: 0.96, verdict: 'Assessable.', evidence: ['Four questions.'], issues: [],
+    items: Array.from({ length: 4 }, (_, index) => ({
+      index: index + 1, relevant: index !== 1, directQuestion: true,
+      lexicalGrammarBlocksCommunication: false, evidence: `Question ${index + 1}`,
+    })),
+  };
+  const acousticFacts = {
+    available: true, recognitionConfidence: 0.95, signalQuality: 'good', recordingDurationSeconds: 48,
+    itemDurations: Array.from({ length: 4 }, (_, index) => ({ itemIndex: index + 1, durationSeconds: 12 })),
+    wordAccuracyScore: 96, phonemeAccuracyScore: 95, fluencyScore: 84,
+    wordEvents: [{
+      id: 'azure:pg-weather:1', owner: 'azure_pronunciation', type: 'mispronunciation',
+      gross: false, itemIndex: 2, accuracyScore: 72, start: 10, end: 17,
+      word: 'weather', phonemes: [{ label: 'ð', accuracyScore: 48 }],
+    }],
+  };
+  return {
+    ...publicSpeakingReview(
+      scoreSpeakingTask({ taskType: 2, semantic: semanticFacts, acoustic: acousticFacts }),
+      semanticFacts,
+    ),
+    semanticFacts, acousticFacts,
+  };
+}
+
+async function createAdaptivePlanTask2Evidence(repository, owner, { pronunciationError = false } = {}) {
+  const assignedAt = new Date('2026-08-07T07:00:00.000Z');
+  await repository.setSpeakingAccentProfile(owner, {
+    locale: 'en-GB', source: 'manual', now: assignedAt,
+  });
+  const session = await repository.assignSpeakingTask2Session(owner, {
+    catalogId: SPEAKING_TASK2_CATALOG.id,
+    catalogRevision: SPEAKING_TASK2_CATALOG.revision,
+    tasks: SPEAKING_TASK2_CATALOG.tasks,
+    now: assignedAt,
+  });
+  for (let questionNumber = 1; questionNumber <= 4; questionNumber += 1) {
+    await repository.completeSpeakingTask2Question(owner, session.id, questionNumber, {
+      recordingDurationSeconds: 12, localPlayback: true, selfRating: 'steady',
+    }, { now: new Date(assignedAt.getTime() + questionNumber * 12_000) });
+  }
+  const semanticFacts = {
+    confidence: 0.96, verdict: 'Assessable.', evidence: ['Four direct questions.'], issues: [],
+    items: Array.from({ length: 4 }, (_, index) => ({
+      index: index + 1, relevant: true, directQuestion: true,
+      lexicalGrammarBlocksCommunication: false, evidence: `Question ${index + 1}`,
+    })),
+  };
+  const acousticFacts = {
+    available: true, recognitionConfidence: 0.95, signalQuality: 'good', recordingDurationSeconds: 48,
+    itemDurations: Array.from({ length: 4 }, (_, index) => ({
+      itemIndex: index + 1, durationSeconds: 12,
+    })),
+    wordAccuracyScore: 96, phonemeAccuracyScore: 95, fluencyScore: 84,
+    wordEvents: pronunciationError ? [{
+      id: 'azure:pg-max-weather:1', owner: 'azure_pronunciation', type: 'mispronunciation',
+      gross: false, itemIndex: 2, accuracyScore: 72, start: 10, end: 17,
+      word: 'weather', phonemes: [{ label: 'w', accuracyScore: 48 }],
+    }] : [],
+  };
+  const review = {
+    ...publicSpeakingReview(
+      scoreSpeakingTask({ taskType: 2, semantic: semanticFacts, acoustic: acousticFacts }),
+      semanticFacts,
+    ),
+    semanticFacts, acousticFacts,
+  };
+  const task = SPEAKING_TASK2_CATALOG.tasks.find((item) => item.id === session.task_id);
+  const claim = await repository.claimSpeakingEvaluation(owner, {
+    taskType: 2,
+    assignment: { ad: task.advertisement, points: [...task.supports] },
+    transcript: 'Four complete direct questions.',
+  }, 'speaking-evaluation-v1', crypto.randomBytes(32).toString('hex'), {
+    now: new Date(assignedAt.getTime() + 60_000),
+    source: {
+      sessionId: session.id, taskRef: session.task_id, taskRevision: Number(session.task_revision),
+      catalogId: session.catalog_id, catalogRevision: Number(session.catalog_revision),
+      assistanceUsed: false,
+    },
+  });
+  await repository.finishSpeakingAttempt(claim.attempt.id, {
+    status: 'completed', review, provider: 'test', model: 'test', errorCode: null,
+  });
+  return { ...session, evidence_attempt_id: claim.attempt.id };
+}
+
+test('PostgreSQL preserves, rebuilds, exports and deletes an exact max-score pronunciation capsule', {
+  skip: !connectionString,
+}, async () => {
+  const repository = createPostgresRepository(connectionString);
+  const raw = new pg.Client({ connectionString });
+  const stamp = String(Date.now()).slice(-8);
+  const telegramId = Number(`87${stamp}`);
+  const owner = await repository.createTelegramUser(telegramId, `Pronunciation capsule ${stamp}`);
+  await raw.connect();
+  try {
+    await repository.grantDays(telegramId, 30, `Pronunciation capsule ${stamp}`);
+    const source = await createAdaptivePlanTask2Evidence(repository, owner, {
+      pronunciationError: true,
+    });
+    const attempt = await repository.getSpeakingAttempt(owner, source.evidence_attempt_id);
+    const referenceTime = new Date();
+    await repository.setEntitlement(owner, 'voice_tutor', {
+      startsAt: new Date(referenceTime.getTime() - 1_000),
+      endsAt: new Date(referenceTime.getTime() + 30 * 86_400_000),
+    });
+    const pronunciationErrorRef = `phoneme.${attempt.id}.0.0`;
+    const capsule = buildWritingSpeakingCapsule({
+      source: 'speaking', attempt, expectedRevision: 1,
+      pronunciationErrorRef, referenceTime,
+    });
+    assert.equal(attempt.review.got, 4);
+    assert.equal(attempt.review.max, 4);
+    const idempotencyKey = crypto.randomUUID();
+    const reservation = await repository.reserveVoiceTutorSession(owner, {
+      id: crypto.randomUUID(), idempotencyKey,
+      limits: { dailySeconds: 600, monthlySeconds: 7_200, sessionSeconds: 300 },
+      now: referenceTime, allowFallbackOnly: true,
+      context: { capsule: persistedVoiceTutorCapsule(capsule), nonceHash: '9'.repeat(64) },
+    });
+    const replay = await repository.reserveVoiceTutorSession(owner, {
+      id: crypto.randomUUID(), idempotencyKey,
+      limits: { dailySeconds: 600, monthlySeconds: 7_200, sessionSeconds: 300 },
+      now: referenceTime, allowFallbackOnly: true,
+      context: { capsule: persistedVoiceTutorCapsule(capsule), nonceHash: '8'.repeat(64) },
+    });
+    assert.equal(replay.created, false);
+    assert.equal(replay.session.id, reservation.session.id);
+    assert.equal(replay.capsule.item.reference.pronunciationError.ref, pronunciationErrorRef);
+    const stored = await repository.getVoiceTutorSession(owner, reservation.session.id);
+    assert.equal(stored.capsule.source.pronunciation_error_ref, pronunciationErrorRef);
+    assert.equal((await rebuildSourceCapsule(
+      repository, owner, stored.capsule, referenceTime,
+    )).item.reference.pronunciationError.phoneme, 'w');
+    const exported = await repository.exportUserData(owner);
+    assert.equal(exported.voice_tutor_sessions.find((session) => (
+      session.id === reservation.session.id
+    )).capsule.source.pronunciation_error_ref, pronunciationErrorRef);
+
+    assert.equal(await repository.deleteUserData(owner), true);
+    assert.equal((await raw.query(
+      'SELECT 1 FROM voice_tutor_sessions WHERE username = $1', [owner],
+    )).rowCount, 0);
+    assert.equal((await raw.query(
+      'SELECT 1 FROM speaking_attempts WHERE username = $1', [owner],
+    )).rowCount, 0);
+  } finally {
+    await repository.deleteUserData(owner).catch(() => {});
+    await raw.end();
+    await repository.close();
+  }
+});
+
+test('PostgreSQL Voice Tutor replay and recovery recheck Premium after the owner lock', {
+  skip: !connectionString,
+}, async () => {
+  const repository = createPostgresRepository(connectionString);
+  const locker = new pg.Client({ connectionString });
+  const stamp = String(Date.now()).slice(-8);
+  const telegramId = Number(`85${stamp}`);
+  const owner = await repository.createTelegramUser(telegramId, `Voice entitlement race ${stamp}`);
+  await locker.connect();
+  const limits = { dailySeconds: 600, monthlySeconds: 7_200, sessionSeconds: 300 };
+  const t0 = new Date();
+  const sessionId = crypto.randomUUID();
+  const idempotencyKey = crypto.randomUUID();
+  try {
+    await repository.grantDays(telegramId, 30, `Voice entitlement race ${stamp}`);
+    await repository.setEntitlement(owner, 'voice_tutor', {
+      startsAt: new Date(t0.getTime() - 1_000),
+      endsAt: new Date(t0.getTime() + 30 * 86_400_000),
+    });
+    await repository.reserveVoiceTutorSession(owner, {
+      id: sessionId, idempotencyKey, limits, now: t0,
+      context: { capsule: { id: 'voice.final18.entitlement' }, nonceHash: '1'.repeat(64) },
+    });
+    await repository.issueVoiceTutorProxyTicket(owner, sessionId, {
+      ticketHash: '2'.repeat(64), idempotencyKey,
+      expiresAt: new Date(t0.getTime() + 30_000), now: t0,
+    });
+    const before = await repository.getVoiceTutorSession(owner, sessionId);
+
+    await locker.query('BEGIN');
+    await locker.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [owner]);
+    await locker.query(
+      `UPDATE subscription_entitlements SET ends_at = clock_timestamp()
+       WHERE username = $1 AND entitlement = 'voice_tutor'`,
+      [owner],
+    );
+    let replaySettled = false;
+    const replay = repository.reserveVoiceTutorSession(owner, {
+      id: crypto.randomUUID(), idempotencyKey, limits, now: t0,
+      context: { capsule: { id: 'voice.final18.entitlement' }, nonceHash: '3'.repeat(64) },
+    }).finally(() => { replaySettled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(replaySettled, false);
+    await locker.query('COMMIT');
+    await assert.rejects(replay, /VOICE_TUTOR_PREMIUM_REQUIRED/u);
+
+    await assert.rejects(repository.issueVoiceTutorProxyTicket(owner, sessionId, {
+      ticketHash: '4'.repeat(64), idempotencyKey,
+      expiresAt: new Date(t0.getTime() + 31_000), now: t0,
+      reissue: true, nextNonceHash: '5'.repeat(64),
+    }), /VOICE_TUTOR_PREMIUM_REQUIRED/u);
+    await assert.rejects(repository.reissueVoiceTutorFallbackNonce(owner, sessionId, {
+      idempotencyKey, nextNonceHash: '6'.repeat(64), now: t0,
+    }), /VOICE_TUTOR_PREMIUM_REQUIRED/u);
+    await assert.rejects(repository.switchVoiceTutorSessionDelivery(owner, sessionId, {
+      nonceHash: before.nonce_hash,
+      nextNonceHash: '7'.repeat(64),
+      mode: 'text',
+      limits,
+      now: t0,
+      errorCode: 'VOICE_TUTOR_PROVIDER_UNAVAILABLE',
+    }), /VOICE_TUTOR_PREMIUM_REQUIRED/u);
+    const after = await repository.getVoiceTutorSession(owner, sessionId);
+    assert.deepEqual(after, before);
+  } finally {
+    try { await locker.query('ROLLBACK'); } catch {}
+    await repository.deleteUserData(owner).catch(() => {});
+    await locker.end();
+    await repository.close();
+  }
+});
+
+test('PostgreSQL pronunciation reservation revalidates assistance after the owner lock', {
+  skip: !connectionString,
+}, async () => {
+  const repository = createPostgresRepository(connectionString);
+  const locker = new pg.Client({ connectionString });
+  const stamp = String(Date.now()).slice(-8);
+  const telegramId = Number(`84${stamp}`);
+  const owner = await repository.createTelegramUser(telegramId, `Pronunciation assistance race ${stamp}`);
+  await locker.connect();
+  let reservation;
+  try {
+    await repository.grantDays(telegramId, 60, `Pronunciation assistance race ${stamp}`);
+    const source = await createAdaptivePlanTask2Evidence(repository, owner, {
+      pronunciationError: true,
+    });
+    const attempt = await repository.getSpeakingAttempt(owner, source.evidence_attempt_id);
+    const referenceTime = new Date();
+    await repository.setEntitlement(owner, 'voice_tutor', {
+      startsAt: new Date(referenceTime.getTime() - 1_000),
+      endsAt: new Date(referenceTime.getTime() + 60 * 86_400_000),
+    });
+    const pronunciationErrorRef = `phoneme.${attempt.id}.0.0`;
+    const capsule = buildWritingSpeakingCapsule({
+      source: 'speaking', attempt, expectedRevision: 1,
+      pronunciationErrorRef, referenceTime,
+    });
+
+    await locker.query('BEGIN');
+    await locker.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [owner]);
+    let assistanceSettled = false;
+    const assistance = repository.markSpeakingSessionAssisted(owner, 2, source.id, {
+      now: new Date(referenceTime.getTime() + 1_000),
+    }).finally(() => { assistanceSettled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    assert.equal(assistanceSettled, false);
+    let reservationSettled = false;
+    reservation = repository.reserveVoiceTutorSession(owner, {
+      id: crypto.randomUUID(), idempotencyKey: crypto.randomUUID(),
+      limits: { dailySeconds: 600, monthlySeconds: 7_200, sessionSeconds: 300 },
+      now: referenceTime, allowFallbackOnly: true,
+      context: { capsule: persistedVoiceTutorCapsule(capsule), nonceHash: '7'.repeat(64) },
+    }).finally(() => { reservationSettled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(reservationSettled, false);
+    await locker.query('COMMIT');
+    await assistance;
+    await assert.rejects(reservation, /VOICE_TUTOR_PRONUNCIATION_POINTER_STALE/u);
+    reservation = null;
+    assert.equal(Number((await locker.query(
+      'SELECT COUNT(*)::integer AS count FROM voice_tutor_sessions WHERE username = $1', [owner],
+    )).rows[0].count), 0);
+  } finally {
+    try { await locker.query('ROLLBACK'); } catch {}
+    if (reservation) await reservation.catch(() => {});
+    await repository.deleteUserData(owner).catch(() => {});
+    await locker.end();
+    await repository.close();
+  }
+});
+
+test('PostgreSQL exact pronunciation replay rejects ref drift and the 30-day expiry boundary', {
+  skip: !connectionString,
+}, async () => {
+  const repository = createPostgresRepository(connectionString);
+  const locker = new pg.Client({ connectionString });
+  const stamp = String(Date.now()).slice(-8);
+  const owners = [];
+  await locker.connect();
+  const limits = { dailySeconds: 600, monthlySeconds: 7_200, sessionSeconds: 300 };
+
+  async function prepare(prefix, label) {
+    const telegramId = Number(`${prefix}${stamp}`);
+    const owner = await repository.createTelegramUser(telegramId, `${label} ${stamp}`);
+    owners.push(owner);
+    await repository.grantDays(telegramId, 60, `${label} ${stamp}`);
+    const source = await createAdaptivePlanTask2Evidence(repository, owner, {
+      pronunciationError: true,
+    });
+    const attempt = await repository.getSpeakingAttempt(owner, source.evidence_attempt_id);
+    const referenceTime = new Date();
+    await repository.setEntitlement(owner, 'voice_tutor', {
+      startsAt: new Date(referenceTime.getTime() - 1_000),
+      endsAt: new Date(referenceTime.getTime() + 60 * 86_400_000),
+    });
+    const pronunciationErrorRef = `phoneme.${attempt.id}.0.0`;
+    const storedCapsule = persistedVoiceTutorCapsule(buildWritingSpeakingCapsule({
+      source: 'speaking', attempt, expectedRevision: 1,
+      pronunciationErrorRef, referenceTime,
+    }));
+    const idempotencyKey = crypto.randomUUID();
+    const first = await repository.reserveVoiceTutorSession(owner, {
+      id: crypto.randomUUID(), idempotencyKey, limits, now: referenceTime,
+      context: { capsule: storedCapsule, nonceHash: '8'.repeat(64) },
+    });
+    return { owner, attempt, storedCapsule, idempotencyKey, first, referenceTime };
+  }
+
+  async function replayBehindMutation(prepared, mutate, expectedCode) {
+    await locker.query('BEGIN');
+    await locker.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [prepared.owner]);
+    await mutate();
+    let settled = false;
+    const replay = repository.reserveVoiceTutorSession(prepared.owner, {
+      id: crypto.randomUUID(), idempotencyKey: prepared.idempotencyKey, limits,
+      now: prepared.referenceTime,
+      context: { capsule: prepared.storedCapsule, nonceHash: '9'.repeat(64) },
+    }).finally(() => { settled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(settled, false);
+    await locker.query('COMMIT');
+    await assert.rejects(replay, new RegExp(expectedCode, 'u'));
+    assert.equal(Number((await locker.query(
+      'SELECT COUNT(*)::integer AS count FROM voice_tutor_sessions WHERE username = $1',
+      [prepared.owner],
+    )).rows[0].count), 1);
+    const beforeFallback = await repository.getVoiceTutorSession(
+      prepared.owner, prepared.first.session.id,
+    );
+    await assert.rejects(repository.switchVoiceTutorSessionDelivery(
+      prepared.owner,
+      prepared.first.session.id,
+      {
+        nonceHash: '8'.repeat(64),
+        nextNonceHash: '7'.repeat(64),
+        mode: 'text',
+        limits,
+        now: prepared.referenceTime,
+        errorCode: 'VOICE_TUTOR_PROVIDER_UNAVAILABLE',
+      },
+    ), new RegExp(expectedCode, 'u'));
+    assert.deepEqual(
+      await repository.getVoiceTutorSession(prepared.owner, prepared.first.session.id),
+      beforeFallback,
+    );
+  }
+
+  try {
+    const refDrift = await prepare('83', 'Pronunciation ref replay');
+    await replayBehindMutation(refDrift, () => locker.query(
+      `UPDATE speaking_attempts
+       SET review = jsonb_set(review, '{acousticFacts,wordEvents,0,phonemes,0,accuracyScore}', '90'::jsonb)
+       WHERE username = $1 AND id = $2`,
+      [refDrift.owner, refDrift.attempt.id],
+    ), 'VOICE_TUTOR_PRONUNCIATION_POINTER_STALE');
+
+    const expired = await prepare('82', 'Pronunciation expiry replay');
+    await replayBehindMutation(expired, () => locker.query(
+      `UPDATE speaking_attempts SET evaluated_at = clock_timestamp() - INTERVAL '30 days'
+       WHERE username = $1 AND id = $2`,
+      [expired.owner, expired.attempt.id],
+    ), 'VOICE_TUTOR_PRONUNCIATION_POINTER_EXPIRED');
+  } finally {
+    try { await locker.query('ROLLBACK'); } catch {}
+    await Promise.all(owners.map((owner) => repository.deleteUserData(owner).catch(() => {})));
+    await locker.end();
+    await repository.close();
+  }
+});
+
+test('PostgreSQL HTTP overview replaces a same-time post-hoc assistance plan atomically', {
+  skip: !connectionString,
+}, async () => {
+  const repository = createPostgresRepository(connectionString);
+  const raw = new pg.Client({ connectionString });
+  const stamp = String(Date.now()).slice(-8);
+  const owner = await repository.createTelegramUser(Number(`86${stamp}`), `Plan fingerprint ${stamp}`);
+  let armed = false;
+  let injected = false;
+  let sourceSession = null;
+  const routeRepository = new Proxy(repository, {
+    get(target, property) {
+      if (property !== 'saveAdaptiveLearningPlan') return Reflect.get(target, property);
+      return async (username, candidate) => {
+        if (armed && !injected) {
+          injected = true;
+          await target.markSpeakingSessionAssisted(username, 2, sourceSession.id, {
+            now: new Date(candidate.profileEvidenceObservedAt),
+          });
+        }
+        return target.saveAdaptiveLearningPlan(username, candidate);
+      };
+    },
+  });
+  const app = express();
+  app.use(express.json());
+  app.use(createAdaptiveLearningRoutes({
+    authentication: { auth(req, res, next) {
+      const username = String(req.headers['x-test-user'] || '');
+      if (!username) return res.status(401).json({ error: { code: 'AUTH_REQUIRED' } });
+      req.user = username;
+      next();
+    } },
+    db: routeRepository,
+    enabled: true,
+    now: () => new Date('2026-08-07T09:00:00.000Z'),
+    executionTokenSecret: 'adaptive-pg-test-token-secret-32-characters',
+  }));
+  app.use((error, req, res, next) => res.status(500).json({ error: { code: error.message } }));
+  const server = http.createServer(app);
+  await raw.connect();
+  try {
+    sourceSession = await createAdaptivePlanTask2Evidence(repository, owner);
+    await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const request = (pathname, options = {}) => fetch(
+      `http://127.0.0.1:${server.address().port}${pathname}`,
+      { ...options, headers: {
+        'Content-Type': 'application/json', 'X-Test-User': owner, ...(options.headers || {}),
+      } },
+    );
+    const createdResponse = await request('/api/v1/adaptive-learning/goal', {
+      method: 'PUT', headers: { 'Idempotency-Key': `adaptive-plan-pg-${stamp}` },
+      body: JSON.stringify({
+        targetExam: 'ege_english', targetScore: 85,
+        examDate: '2027-06-01', weeklyMinutes: 300,
+      }),
+    });
+    assert.equal(createdResponse.status, 201);
+    const before = await createdResponse.json();
+    assert.ok(before.profile.independentEvidenceCount > 0);
+    assert.equal(before.plan.profileEvidenceFingerprint, before.profile.evidenceFingerprint);
+
+    armed = true;
+    const response = await request('/api/v1/adaptive-learning/overview');
+    assert.equal(response.status, 200);
+    const after = await response.json();
+    assert.equal(injected, true);
+    assert.equal(after.profile.evidenceSourceCount, before.profile.evidenceSourceCount);
+    assert.equal(after.profile.evidenceObservedAt, before.profile.evidenceObservedAt);
+    assert.notEqual(after.profile.evidenceFingerprint, before.profile.evidenceFingerprint);
+    assert.equal(after.profile.independentEvidenceCount, 0);
+    assert.ok(after.profile.assistedEvidenceCount > 0);
+    assert.equal(after.plan.revision, before.plan.revision + 1);
+    assert.notEqual(after.plan.id, before.plan.id);
+    assert.equal(after.plan.profileEvidenceFingerprint, after.profile.evidenceFingerprint);
+    assert.notDeepEqual(after.plan.allocation, before.plan.allocation);
+    const revisions = (await repository.exportUserData(owner)).adaptive_learning_plan_revisions;
+    assert.deepEqual(revisions.map((entry) => entry.revision), [1, 2]);
+    assert.deepEqual(revisions.map((entry) => entry.profile_evidence_fingerprint), [
+      before.profile.evidenceFingerprint, after.profile.evidenceFingerprint,
+    ]);
+
+    assert.equal(await repository.deleteUserData(owner), true);
+    assert.equal((await raw.query(
+      'SELECT 1 FROM adaptive_learning_plan_revisions WHERE username = $1', [owner],
+    )).rowCount, 0);
+  } finally {
+    if (server.listening) {
+      await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+    await raw.end();
+    await repository.deleteUserData(owner).catch(() => {});
+    await repository.close();
+  }
+});
+
+test('PostgreSQL overview exhausts profile CAS retries as a retryable 409', {
+  skip: !connectionString,
+}, async () => {
+  const repository = createPostgresRepository(connectionString);
+  const stamp = String(Date.now()).slice(-8);
+  const owner = await repository.createTelegramUser(Number(`85${stamp}`), `Profile retry ${stamp}`);
+  let saves = 0;
+  const routeRepository = new Proxy(repository, {
+    get(target, property) {
+      if (property !== 'saveAdaptiveLearningProfile') return Reflect.get(target, property);
+      return async () => {
+        saves += 1;
+        throw new Error('ADAPTIVE_PROFILE_EVIDENCE_STALE');
+      };
+    },
+  });
+  const app = express();
+  app.use(express.json());
+  app.use(createAdaptiveLearningRoutes({
+    authentication: { auth(req, res, next) {
+      const username = String(req.headers['x-test-user'] || '');
+      if (!username) return res.status(401).json({ error: { code: 'AUTH_REQUIRED' } });
+      req.user = username;
+      return next();
+    } },
+    db: routeRepository,
+    enabled: false,
+    now: () => new Date('2026-08-07T09:00:00.000Z'),
+    executionTokenSecret: 'adaptive-pg-test-token-secret-32-characters',
+  }));
+  app.use((error, req, res, next) => res.status(500).json({ error: { code: error.message } }));
+  const server = http.createServer(app);
+  try {
+    await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const response = await fetch(
+      `http://127.0.0.1:${server.address().port}/api/v1/adaptive-learning/overview`,
+      { headers: { 'X-Test-User': owner } },
+    );
+    assert.equal(response.status, 409);
+    assert.equal(response.headers.get('retry-after'), '1');
+    assert.deepEqual(await response.json(), {
+      error: { code: 'ADAPTIVE_PROFILE_RETRY_REQUIRED', retryable: true },
+    });
+    assert.equal(saves, 3);
+  } finally {
+    if (server.listening) {
+      await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+    await repository.deleteUserData(owner).catch(() => {});
+    await repository.close();
+  }
+});
+
+test('PostgreSQL overview exhausts plan races as the same retryable bounded 409', {
+  skip: !connectionString,
+}, async () => {
+  const repository = createPostgresRepository(connectionString);
+  const stamp = String(Date.now()).slice(-8);
+  const owner = await repository.createTelegramUser(Number(`84${stamp}`), `Plan retry ${stamp}`);
+  const instant = new Date('2026-08-07T09:00:00.000Z');
+  await repository.saveAdaptiveLearningGoal(owner, {
+    id: crypto.randomUUID(), idempotencyKey: `adaptive-plan-retry-pg-${stamp}`,
+    requestHash: '8'.repeat(64), targetExam: 'ege_english', targetScore: 85,
+    examDate: '2027-06-01', weeklyMinutes: 300, now: instant,
+  });
+  let saves = 0;
+  const routeRepository = new Proxy(repository, {
+    get(target, property) {
+      if (property !== 'saveAdaptiveLearningPlan') return Reflect.get(target, property);
+      return async () => {
+        saves += 1;
+        throw new Error('ADAPTIVE_PLAN_PROFILE_STALE');
+      };
+    },
+  });
+  const app = express();
+  app.use(express.json());
+  app.use(createAdaptiveLearningRoutes({
+    authentication: { auth(req, res, next) {
+      const username = String(req.headers['x-test-user'] || '');
+      if (!username) return res.status(401).json({ error: { code: 'AUTH_REQUIRED' } });
+      req.user = username;
+      return next();
+    } },
+    db: routeRepository,
+    enabled: true,
+    now: () => instant,
+    executionTokenSecret: 'adaptive-pg-test-token-secret-32-characters',
+  }));
+  app.use((error, req, res, next) => res.status(500).json({ error: { code: error.message } }));
+  const server = http.createServer(app);
+  try {
+    await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const response = await fetch(
+      `http://127.0.0.1:${server.address().port}/api/v1/adaptive-learning/overview`,
+      { headers: { 'X-Test-User': owner } },
+    );
+    assert.equal(response.status, 409);
+    assert.equal(response.headers.get('retry-after'), '1');
+    assert.deepEqual(await response.json(), {
+      error: { code: 'ADAPTIVE_PROFILE_RETRY_REQUIRED', retryable: true },
+    });
+    assert.equal(saves, 3);
+  } finally {
+    if (server.listening) {
+      await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+    await repository.deleteUserData(owner).catch(() => {});
+    await repository.close();
+  }
+});
+
+test('PostgreSQL deep mutations recheck Premium inside the locked owner transaction', {
+  skip: !connectionString,
+}, async () => {
+  const repository = createPostgresRepository(connectionString);
+  const client = new pg.Client({ connectionString });
+  const stamp = String(Date.now()).slice(-8);
+  const telegramId = Number(`83${stamp}`);
+  const owner = await repository.createTelegramUser(telegramId, `Premium mutation ${stamp}`);
+  let current = new Date(Date.now() - 10_000);
+  const writingRegistry = {
+    ...ADAPTIVE_ACTIVITY_REGISTRY,
+    activities: ADAPTIVE_ACTIVITY_REGISTRY.activities.filter((activity) => (
+      activity.module === 'writing' && activity.launch.kind === 'writing_task'
+    )),
+  };
+  const mutationHooks = new Map();
+  const routeRepository = new Proxy(repository, {
+    get(target, property) {
+      const value = Reflect.get(target, property, target);
+      if (typeof value !== 'function') return value;
+      if (!['getAdaptiveLearningSessionMutationReplay', 'startAdaptiveLearningSessionBlock',
+        'bindAdaptiveLearningServerAttempt', 'advanceAdaptiveLearningSession'].includes(property)) {
+        return value.bind(target);
+      }
+      return async (...args) => {
+        const hook = mutationHooks.get(property);
+        if (hook) {
+          mutationHooks.delete(property);
+          await hook(...args);
+        }
+        return value.apply(target, args);
+      };
+    },
+  });
+  const app = express();
+  app.use(express.json());
+  app.use(createAdaptiveLearningRoutes({
+    authentication: { auth(req, res, next) {
+      const username = String(req.headers['x-test-user'] || '');
+      if (!username) return res.status(401).json({ error: { code: 'AUTH_REQUIRED' } });
+      req.user = username;
+      return next();
+    } },
+    db: routeRepository,
+    enabled: true,
+    now: () => new Date(current),
+    activityRegistry: writingRegistry,
+    executionTokenSecret: 'adaptive-pg-test-token-secret-32-characters',
+  }));
+  app.use((error, req, res, next) => res.status(500).json({ error: { code: error.message } }));
+  const server = http.createServer(app);
+  const entitle = (instant) => repository.setEntitlement(owner, 'voice_tutor', {
+    startsAt: new Date(instant.getTime() - 1_000),
+    endsAt: new Date(instant.getTime() + 60 * 60_000),
+  });
+  try {
+    await client.connect();
+    await repository.grantDays(telegramId, 30, owner);
+    await entitle(current);
+    const goal = (await repository.saveAdaptiveLearningGoal(owner, {
+      id: crypto.randomUUID(), idempotencyKey: `premium-mutation-goal-${stamp}`,
+      requestHash: '3'.repeat(64), targetExam: 'ege_english', targetScore: 85,
+      examDate: '2027-06-01', weeklyMinutes: 300, now: current,
+    })).goal;
+    const storedProfile = await repository.saveAdaptiveLearningProfile(
+      owner,
+      buildAdaptiveLearningProfile(await repository.getAdaptiveLearningEvidenceSources(owner)),
+      { now: current, verifyCurrentEvidence: true },
+    );
+    const profile = adaptiveLearningProfilePublicDto(storedProfile);
+    const calculated = buildAdaptiveLearningPlan({ goal, profile, now: current });
+    const storedPlan = (await repository.saveAdaptiveLearningPlan(owner, {
+      id: crypto.randomUUID(),
+      inputFingerprint: adaptivePlanInputFingerprint({
+        goal, profile, basePlanRevision: null, now: current,
+      }),
+      basePlanRevision: null, goalId: goal.id, goalRevision: goal.revision,
+      taxonomyVersion: profile.taxonomyVersion,
+      profileCalculationRevision: profile.profileCalculationRevision,
+      profileEvidenceWatermarkVersion: profile.evidenceWatermarkVersion,
+      profileEvidenceObservedAt: profile.evidenceObservedAt,
+      profileEvidenceSourceCount: profile.evidenceSourceCount,
+      profileEvidenceFingerprint: profile.evidenceFingerprint,
+      recalculationBucket: calculated.recalculationBucket, plan: calculated, now: current,
+    })).plan;
+    const publicPlan = {
+      id: storedPlan.id, revision: storedPlan.revision, version: storedPlan.plan_version,
+      taxonomyVersion: storedPlan.taxonomy_version, allocation: storedPlan.allocation,
+    };
+    const preview = buildAdaptiveSessionPreview({
+      plan: publicPlan, goal, profile, weekUsage: [], durationMinutes: 30, now: current,
+      registry: writingRegistry,
+      access: { tier: 'premium', capabilities: { premiumDepth: true } },
+    });
+    const session = createAdaptiveLearningSessionFromPreview(preview, {
+      id: crypto.randomUUID(), now: current,
+    });
+    const created = await repository.createAdaptiveLearningSession(owner, {
+      idempotencyKey: `premium-mutation-create-${stamp}`,
+      requestHash: crypto.createHash('sha256')
+        .update(JSON.stringify([30, preview.previewFingerprint])).digest('hex'),
+      planId: publicPlan.id, planRevision: publicPlan.revision,
+      previewFingerprint: preview.previewFingerprint, session, commercialScope: 'premium', now: current,
+    });
+    let block = created.session.blocks[0];
+    assert.equal(block.module, 'writing');
+    await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const request = (pathname, options = {}) => fetch(
+      `http://127.0.0.1:${server.address().port}${pathname}`,
+      { ...options, headers: {
+        'Content-Type': 'application/json', 'X-Test-User': owner, ...(options.headers || {}),
+      } },
+    );
+    const startBody = { blockId: block.id, expectedRevision: 0 };
+    const replacementBody = JSON.stringify({ blockId: block.id, reason: 'excluded' });
+    let replacement = null;
+    mutationHooks.set('startAdaptiveLearningSessionBlock', async () => {
+      const replacementResponse = await request(`/api/v1/adaptive-learning/sessions/${created.session.id}/replace`, {
+        method: 'POST', headers: { 'Idempotency-Key': `premium-race-replace-${stamp}` },
+        body: replacementBody,
+      });
+      assert.equal(replacementResponse.status, 200);
+      replacement = (await replacementResponse.json()).session;
+    });
+    let response = await request(`/api/v1/adaptive-learning/sessions/${created.session.id}/start`, {
+      method: 'POST', headers: { 'Idempotency-Key': `premium-race-start-${stamp}` },
+      body: JSON.stringify(startBody),
+    });
+    assert.equal(response.status, 409, 'replacement-wins-before-start cannot bind a stale launch');
+    assert.ok(replacement);
+    assert.notDeepEqual(replacement.blocks.find((item) => item.id === block.id).launch, block.launch);
+    block = replacement.blocks.find((item) => item.id === block.id);
+
+    const revokeAtMutation = async (...args) => {
+      const requestInstant = new Date(args[1].now);
+      const instant = new Date(requestInstant.getTime() + 1_000);
+      current = instant;
+      assert.equal(await repository.revokeEntitlement(
+        owner, 'voice_tutor', telegramId, { now: instant },
+      ), true);
+    };
+    mutationHooks.set('startAdaptiveLearningSessionBlock', revokeAtMutation);
+    response = await request(`/api/v1/adaptive-learning/sessions/${created.session.id}/start`, {
+      method: 'POST', headers: { 'Idempotency-Key': `premium-start-${stamp}` },
+      body: JSON.stringify(startBody),
+    });
+    assert.equal(response.status, 403);
+
+    await entitle(current);
+    response = await request(`/api/v1/adaptive-learning/sessions/${created.session.id}/start`, {
+      method: 'POST', headers: { 'Idempotency-Key': `premium-start-${stamp}` },
+      body: JSON.stringify(startBody),
+    });
+    assert.equal(response.status, 201);
+    const started = await response.json();
+    const storedClaim = (await client.query(
+      `SELECT issued_at, expires_at FROM adaptive_learning_execution_claims
+       WHERE session_id = $1 AND block_id = $2 AND username = $3`,
+      [created.session.id, block.id, owner],
+    )).rows[0];
+    assert.equal(
+      new Date(storedClaim.expires_at).getTime() - new Date(storedClaim.issued_at).getTime(),
+      ADAPTIVE_EXECUTION_CLAIM_TTL_MS,
+    );
+    assert.equal(started.claimExpiresAt, new Date(storedClaim.expires_at).toISOString());
+    assert.equal(started.session.updatedAt, new Date(storedClaim.issued_at).toISOString());
+    assert.ok(new Date(started.claimExpiresAt).getTime() > Date.now());
+    response = await request(`/api/v1/adaptive-learning/sessions/${created.session.id}/replace`, {
+      method: 'POST', headers: { 'Idempotency-Key': `premium-race-replace-${stamp}` },
+      body: replacementBody,
+    });
+    assert.equal(response.status, 409, 'an exact replacement replay closes after a claim exists');
+    assert.equal((await response.json()).error.code, 'ADAPTIVE_SESSION_REPLACEMENT_LOCKED');
+    response = await request(`/api/v1/adaptive-learning/sessions/${created.session.id}/replace`, {
+      method: 'POST', headers: { 'Idempotency-Key': `premium-replace-after-start-${stamp}` },
+      body: JSON.stringify({ blockId: block.id, reason: 'not_relevant' }),
+    });
+    assert.equal(response.status, 409, 'a new replacement closes after a claim exists');
+    assert.equal((await response.json()).error.code, 'ADAPTIVE_SESSION_REPLACEMENT_LOCKED');
+    const attemptId = await repository.createWritingAttempt(owner, {
+      taskType: block.activityId, sourceTaskRef: block.launch.taskId, assignment: {},
+      answer: 'A sufficiently long student answer for the persisted attempt.',
+    }, 'test-writing-v1');
+    await repository.finishWritingAttempt(attemptId, {
+      status: 'completed', review: { overall_got: 1, overall_max: 6 },
+    });
+    const attempt = { type: 'writing', id: attemptId };
+
+    current = new Date(current.getTime() + 100);
+    await entitle(current);
+    mutationHooks.set('startAdaptiveLearningSessionBlock', revokeAtMutation);
+    response = await request(`/api/v1/adaptive-learning/sessions/${created.session.id}/start`, {
+      method: 'POST', headers: { 'Idempotency-Key': `premium-start-${stamp}` },
+      body: JSON.stringify(startBody),
+    });
+    assert.equal(response.status, 403, 'a committed revoke wins before exact replay');
+
+    await entitle(current);
+    await client.query(
+      `UPDATE adaptive_learning_execution_claims
+       SET expires_at = clock_timestamp() - interval '1 millisecond'
+       WHERE session_id = $1 AND block_id = $2 AND username = $3`,
+      [created.session.id, block.id, owner],
+    );
+    response = await request(`/api/v1/adaptive-learning/sessions/${created.session.id}/start`, {
+      method: 'POST', headers: { 'Idempotency-Key': `premium-start-${stamp}` },
+      body: JSON.stringify(startBody),
+    });
+    assert.equal(response.status, 410, 'an exact replay must recheck stored claim expiry after the lock');
+    const expiredModuleAttemptId = crypto.randomUUID();
+    await assert.rejects(repository.recordModuleAttemptWithAdaptiveClaim(owner, {
+      id: expiredModuleAttemptId, module: block.module, activity: block.activityId,
+      score: 1, maxScore: 1, durationMs: 1_000, metadata: {},
+    }, { executionClaim: started.executionClaim }), /ADAPTIVE_EXECUTION_CLAIM_EXPIRED/u);
+    assert.equal((await client.query(
+      'SELECT id FROM module_attempts WHERE username = $1 AND id = $2',
+      [owner, expiredModuleAttemptId],
+    )).rowCount, 0);
+    await client.query(
+      `UPDATE adaptive_learning_execution_claims
+       SET expires_at = clock_timestamp() + interval '2 hours'
+       WHERE session_id = $1 AND block_id = $2 AND username = $3`,
+      [created.session.id, block.id, owner],
+    );
+    mutationHooks.set('bindAdaptiveLearningServerAttempt', revokeAtMutation);
+    response = await request(`/api/v1/adaptive-learning/sessions/${created.session.id}/bind-attempt`, {
+      method: 'POST', body: JSON.stringify({ executionClaim: started.executionClaim, attempt }),
+    });
+    assert.equal(response.status, 403);
+
+    await entitle(current);
+    await client.query(
+      `UPDATE adaptive_learning_execution_claims
+       SET expires_at = clock_timestamp() - interval '1 millisecond'
+       WHERE session_id = $1 AND block_id = $2 AND username = $3`,
+      [created.session.id, block.id, owner],
+    );
+    response = await request(`/api/v1/adaptive-learning/sessions/${created.session.id}/bind-attempt`, {
+      method: 'POST', body: JSON.stringify({ executionClaim: started.executionClaim, attempt }),
+    });
+    assert.equal(response.status, 410, 'server attempt binding must use post-lock claim time');
+    await client.query(
+      `UPDATE adaptive_learning_execution_claims
+       SET expires_at = clock_timestamp() + interval '2 hours'
+       WHERE session_id = $1 AND block_id = $2 AND username = $3`,
+      [created.session.id, block.id, owner],
+    );
+    response = await request(`/api/v1/adaptive-learning/sessions/${created.session.id}/bind-attempt`, {
+      method: 'POST', body: JSON.stringify({ executionClaim: started.executionClaim, attempt }),
+    });
+    assert.equal(response.status, 201);
+
+    current = new Date(current.getTime() + 100);
+    await entitle(current);
+    mutationHooks.set('advanceAdaptiveLearningSession', revokeAtMutation);
+    const advanceBody = { blockId: block.id, expectedRevision: 1, attempt };
+    response = await request(`/api/v1/adaptive-learning/sessions/${created.session.id}/advance`, {
+      method: 'POST', headers: { 'Idempotency-Key': `premium-advance-${stamp}` },
+      body: JSON.stringify(advanceBody),
+    });
+    assert.equal(response.status, 403);
+
+    await entitle(current);
+    await client.query(
+      `UPDATE adaptive_learning_execution_claims
+       SET expires_at = clock_timestamp() - interval '1 millisecond'
+       WHERE session_id = $1 AND block_id = $2 AND username = $3`,
+      [created.session.id, block.id, owner],
+    );
+    response = await request(`/api/v1/adaptive-learning/sessions/${created.session.id}/advance`, {
+      method: 'POST', headers: { 'Idempotency-Key': `premium-advance-${stamp}` },
+      body: JSON.stringify(advanceBody),
+    });
+    assert.equal(response.status, 410, 'advance must reject a claim expired after route precheck');
+    await client.query(
+      `UPDATE adaptive_learning_execution_claims
+       SET expires_at = clock_timestamp() + interval '2 hours'
+       WHERE session_id = $1 AND block_id = $2 AND username = $3`,
+      [created.session.id, block.id, owner],
+    );
+    response = await request(`/api/v1/adaptive-learning/sessions/${created.session.id}/advance`, {
+      method: 'POST', headers: { 'Idempotency-Key': `premium-advance-${stamp}` },
+      body: JSON.stringify(advanceBody),
+    });
+    assert.equal(response.status, 200);
+
+    current = new Date(current.getTime() + 100);
+    await entitle(current);
+    mutationHooks.set('getAdaptiveLearningSessionMutationReplay', revokeAtMutation);
+    response = await request(`/api/v1/adaptive-learning/sessions/${created.session.id}/advance`, {
+      method: 'POST', headers: { 'Idempotency-Key': `premium-advance-${stamp}` },
+      body: JSON.stringify(advanceBody),
+    });
+    assert.equal(response.status, 403, 'a committed revoke wins before exact advance replay');
+  } finally {
+    if (server.listening) {
+      await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+    await client.end().catch(() => {});
+    await repository.deleteUserData(owner).catch(() => {});
+    await repository.close();
+  }
+});
 
 test('PostgreSQL Speaking accent/calibration matches file privacy and retention contract', { skip: !connectionString }, async () => {
   const repository = createPostgresRepository(connectionString);
@@ -341,6 +1401,599 @@ test('PostgreSQL task 2 sessions match owner isolation, replay, export and delet
   }
 });
 
+test('PostgreSQL speaking evaluation claim locks the owner before its source session', { skip: !connectionString }, async () => {
+  const repository = createPostgresRepository(connectionString);
+  const stamp = String(Date.now()).slice(-8);
+  const owner = await repository.createTelegramUser(Number(`79${stamp}`), `Speaking claim lock ${stamp}`);
+  const raw = new pg.Client({ connectionString });
+  await raw.connect();
+  let pending = null;
+  try {
+    let now = new Date(new Date((await raw.query(
+      'SELECT clock_timestamp() AS now',
+    )).rows[0].now).getTime() - 60_000);
+    const session = await repository.assignSpeakingTask2Session(owner, {
+      catalogId: SPEAKING_TASK2_CATALOG.id,
+      catalogRevision: SPEAKING_TASK2_CATALOG.revision,
+      tasks: SPEAKING_TASK2_CATALOG.tasks,
+      now,
+    });
+    for (let questionNumber = 1; questionNumber <= 4; questionNumber += 1) {
+      now = new Date(now.getTime() + 12_000);
+      await repository.completeSpeakingTask2Question(owner, session.id, questionNumber, {
+        recordingDurationSeconds: 12, localPlayback: true, selfRating: 'steady',
+      }, { now });
+    }
+    const source = {
+      sessionId: session.id,
+      taskRef: session.task_id,
+      taskRevision: Number(session.task_revision),
+      catalogId: session.catalog_id,
+      catalogRevision: Number(session.catalog_revision),
+      assistanceUsed: false,
+    };
+    const fingerprint = crypto.createHash('sha256').update(`${owner}:owner-first-claim`).digest('hex');
+    await raw.query('BEGIN');
+    await raw.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [owner]);
+    let settled = false;
+    pending = repository.claimSpeakingEvaluation(owner, {
+      taskType: 2,
+      assignment: { ad: 'Owner-first lock test', points: ['a', 'b', 'c', 'd'] },
+      transcript: 'Four owner-bound questions.',
+    }, 'speaking-semantic-v4', fingerprint, { now, source }).finally(() => { settled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    assert.equal(settled, false, 'the evaluation claim must wait at the owner lock');
+    await raw.query(
+      'SELECT id FROM speaking_task2_sessions WHERE username = $1 AND id = $2 FOR UPDATE NOWAIT',
+      [owner, session.id],
+    );
+    await raw.query('ROLLBACK');
+    const claim = await pending;
+    pending = null;
+    assert.equal(claim.created, true);
+  } finally {
+    await raw.query('ROLLBACK').catch(() => {});
+    await pending?.catch(() => {});
+    await raw.end();
+    await repository.deleteUserData(owner).catch(() => {});
+    await repository.close();
+  }
+});
+
+test('PostgreSQL assistance invalidation locks owner before session and attempt rows', { skip: !connectionString }, async () => {
+  const repository = createPostgresRepository(connectionString);
+  const stamp = String(Date.now()).slice(-8);
+  const owner = await repository.createTelegramUser(Number(`78${stamp}`), `Speaking assistance lock ${stamp}`);
+  const raw = new pg.Client({ connectionString });
+  await raw.connect();
+  let pending = null;
+  try {
+    let now = new Date('2026-08-06T10:00:00.000Z');
+    const session = await repository.assignSpeakingTask2Session(owner, {
+      catalogId: SPEAKING_TASK2_CATALOG.id,
+      catalogRevision: SPEAKING_TASK2_CATALOG.revision,
+      tasks: SPEAKING_TASK2_CATALOG.tasks,
+      now,
+    });
+    for (let questionNumber = 1; questionNumber <= 4; questionNumber += 1) {
+      now = new Date(now.getTime() + 12_000);
+      await repository.completeSpeakingTask2Question(owner, session.id, questionNumber, {
+        recordingDurationSeconds: 12, localPlayback: true, selfRating: 'steady',
+      }, { now });
+    }
+    const source = {
+      sessionId: session.id,
+      taskRef: session.task_id,
+      taskRevision: Number(session.task_revision),
+      catalogId: session.catalog_id,
+      catalogRevision: Number(session.catalog_revision),
+      assistanceUsed: false,
+    };
+    const fingerprint = crypto.createHash('sha256').update(`${owner}:assistance-lock`).digest('hex');
+    const claim = await repository.claimSpeakingEvaluation(owner, {
+      taskType: 2,
+      assignment: { ad: 'Assistance lock test', points: ['a', 'b', 'c', 'd'] },
+      transcript: 'Four owner-bound questions.',
+    }, 'speaking-semantic-v4', fingerprint, { now, source });
+
+    await raw.query('BEGIN');
+    await raw.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [owner]);
+    let settled = false;
+    pending = repository.markSpeakingSessionAssisted(owner, 2, session.id, {
+      now: new Date(now.getTime() + 1_000),
+    }).finally(() => { settled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    assert.equal(settled, false, 'assistance invalidation must wait at the owner lock');
+    await raw.query(
+      'SELECT id FROM speaking_task2_sessions WHERE username = $1 AND id = $2 FOR UPDATE NOWAIT',
+      [owner, session.id],
+    );
+    await raw.query(
+      'SELECT id FROM speaking_attempts WHERE username = $1 AND id = $2 FOR UPDATE NOWAIT',
+      [owner, claim.attempt.id],
+    );
+    await raw.query('ROLLBACK');
+    assert.ok(await pending);
+    pending = null;
+    const attempt = await repository.getSpeakingAttempt(owner, claim.attempt.id);
+    assert.equal(attempt.assistance_used, true);
+  } finally {
+    await raw.query('ROLLBACK').catch(() => {});
+    await pending?.catch(() => {});
+    await raw.end();
+    await repository.deleteUserData(owner).catch(() => {});
+    await repository.close();
+  }
+});
+
+test('PostgreSQL targeted assignment revalidates after a concurrent owner-locked assistance update', { skip: !connectionString }, async () => {
+  const repository = createPostgresRepository(connectionString);
+  const stamp = String(Date.now()).slice(-8);
+  const telegramId = Number(`77${stamp}`);
+  const owner = await repository.createTelegramUser(telegramId, `Speaking targeted race ${stamp}`);
+  const raw = new pg.Client({ connectionString });
+  await raw.connect();
+  let pending = null;
+  let pendingFinish = null;
+  let pendingSnapshot = null;
+  try {
+    let now = new Date('2026-08-06T10:00:00.000Z');
+    await repository.grantDays(telegramId, 30, `Speaking targeted race ${stamp}`);
+    await repository.setSpeakingAccentProfile(owner, { locale: 'en-GB', source: 'manual', now });
+    await repository.setEntitlement(owner, 'voice_tutor', {
+      startsAt: new Date(now.getTime() - 1_000), endsAt: new Date(now.getTime() + 86_400_000),
+    });
+    const session = await repository.assignSpeakingTask2Session(owner, {
+      catalogId: SPEAKING_TASK2_CATALOG.id,
+      catalogRevision: SPEAKING_TASK2_CATALOG.revision,
+      tasks: SPEAKING_TASK2_CATALOG.tasks,
+      now,
+    });
+    for (let questionNumber = 1; questionNumber <= 4; questionNumber += 1) {
+      now = new Date(now.getTime() + 12_000);
+      await repository.completeSpeakingTask2Question(owner, session.id, questionNumber, {
+        recordingDurationSeconds: 12, localPlayback: true, selfRating: 'steady',
+      }, { now });
+    }
+    const claim = await repository.claimSpeakingEvaluation(owner, {
+      taskType: 2, assignment: { ad: 'Weather course', points: ['a', 'b', 'c', 'd'] },
+      transcript: 'When does it start? What is the weather like?',
+    }, 'speaking-semantic-v4', crypto.createHash('sha256').update(`${owner}:target-race`).digest('hex'), {
+      now,
+      source: {
+        sessionId: session.id, taskRef: session.task_id, taskRevision: Number(session.task_revision),
+        catalogId: session.catalog_id, catalogRevision: Number(session.catalog_revision),
+        assistanceUsed: false,
+      },
+    });
+    await repository.finishSpeakingAttempt(claim.attempt.id, {
+      status: 'completed', review: targetedPracticeScoredReview(), provider: 'test', model: 'test', errorCode: null,
+    });
+    const report = buildSpeakingLearningReport(await repository.getSpeakingLearningAttempts(owner), {
+      quota: { tier: 'premium', limitSeconds: 14_400, remainingSeconds: 14_400 },
+    });
+    const target = report.premium.targetedPractice;
+    assert.ok(target);
+
+    const effectiveRequestTime = new Date((await raw.query(
+      'SELECT clock_timestamp() AS now',
+    )).rows[0].now);
+    await raw.query('BEGIN');
+    await raw.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [owner]);
+    let reportSettled = false;
+    pendingSnapshot = repository.getSpeakingLearningReportSnapshot(owner, {
+      now: effectiveRequestTime,
+    }).finally(() => { reportSettled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    assert.equal(reportSettled, false, 'learning report must wait for the owner lock');
+    await raw.query(
+      `UPDATE subscription_entitlements SET ends_at = clock_timestamp()
+       WHERE username = $1 AND entitlement = 'voice_tutor'`,
+      [owner],
+    );
+    await raw.query('COMMIT');
+    const revokedSnapshot = await pendingSnapshot;
+    pendingSnapshot = null;
+    assert.equal(revokedSnapshot.quota.tier, 'base',
+      'report must evaluate entitlement after the owner lock, not at request time');
+
+    const restoredAt = new Date((await raw.query(
+      'SELECT clock_timestamp() AS now',
+    )).rows[0].now);
+    await repository.setEntitlement(owner, 'voice_tutor', {
+      startsAt: new Date(restoredAt.getTime() - 1_000),
+      endsAt: new Date(restoredAt.getTime() + 86_400_000),
+    });
+    const sessionsBeforeEffectiveRevoke = Number((await raw.query(
+      'SELECT COUNT(*)::integer AS count FROM speaking_task2_sessions WHERE username = $1', [owner],
+    )).rows[0].count);
+    await raw.query('BEGIN');
+    await raw.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [owner]);
+    let effectiveAssignmentSettled = false;
+    pending = repository.assignSpeakingTask2Session(owner, {
+      catalogId: SPEAKING_TASK2_CATALOG.id,
+      catalogRevision: SPEAKING_TASK2_CATALOG.revision,
+      tasks: SPEAKING_TASK2_CATALOG.tasks,
+      targetedPracticeRequest: {
+        sourceAttemptId: target.sourceAttemptId,
+        reportRevision: target.reportRevision,
+        accentLocale: target.accentLocale,
+        skillId: target.skillId,
+        contentRef: target.contentRef,
+      },
+      now: restoredAt,
+    }).finally(() => { effectiveAssignmentSettled = true; });
+    const effectiveAssignmentRejection = assert.rejects(
+      pending, /SPEAKING_TARGETED_PRACTICE_STALE/u,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    assert.equal(effectiveAssignmentSettled, false, 'targeted assignment must wait for the owner lock');
+    await raw.query(
+      `UPDATE subscription_entitlements SET ends_at = clock_timestamp()
+       WHERE username = $1 AND entitlement = 'voice_tutor'`,
+      [owner],
+    );
+    await raw.query('COMMIT');
+    await effectiveAssignmentRejection;
+    pending = null;
+    assert.equal(Number((await raw.query(
+      'SELECT COUNT(*)::integer AS count FROM speaking_task2_sessions WHERE username = $1', [owner],
+    )).rows[0].count), sessionsBeforeEffectiveRevoke);
+    await repository.setEntitlement(owner, 'voice_tutor', {
+      startsAt: new Date(now.getTime() - 1_000),
+      endsAt: new Date(now.getTime() + 86_400_000),
+    });
+
+    const followup = await repository.assignSpeakingTask2Session(owner, {
+      catalogId: SPEAKING_TASK2_CATALOG.id,
+      catalogRevision: SPEAKING_TASK2_CATALOG.revision,
+      tasks: SPEAKING_TASK2_CATALOG.tasks,
+      now: new Date(now.getTime() + 1_000),
+    });
+    for (let questionNumber = 1; questionNumber <= 4; questionNumber += 1) {
+      now = new Date(now.getTime() + 12_000);
+      await repository.completeSpeakingTask2Question(owner, followup.id, questionNumber, {
+        recordingDurationSeconds: 12, localPlayback: true, selfRating: 'steady',
+      }, { now });
+    }
+    const followupClaim = await repository.claimSpeakingEvaluation(owner, {
+      taskType: 2, assignment: { ad: 'Weather course', points: ['a', 'b', 'c', 'd'] },
+      transcript: 'The weather course begins on Monday.',
+    }, 'speaking-semantic-v4', crypto.createHash('sha256').update(`${owner}:target-race-followup`).digest('hex'), {
+      now,
+      source: {
+        sessionId: followup.id, taskRef: followup.task_id, taskRevision: Number(followup.task_revision),
+        catalogId: followup.catalog_id, catalogRevision: Number(followup.catalog_revision),
+        assistanceUsed: false,
+      },
+    });
+
+    await raw.query('BEGIN');
+    await raw.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [owner]);
+    let finishSettled = false;
+    pendingFinish = repository.finishSpeakingAttempt(followupClaim.attempt.id, {
+      status: 'completed', review: targetedPracticeScoredReview(), provider: 'test', model: 'test', errorCode: null,
+    }).finally(() => { finishSettled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    assert.equal(finishSettled, false, 'attempt completion must wait for the owner-scoped mutation transaction');
+    let supersededSettled = false;
+    pending = repository.assignSpeakingTask2Session(owner, {
+      catalogId: SPEAKING_TASK2_CATALOG.id,
+      catalogRevision: SPEAKING_TASK2_CATALOG.revision,
+      tasks: SPEAKING_TASK2_CATALOG.tasks,
+      targetedPracticeRequest: {
+        sourceAttemptId: target.sourceAttemptId,
+        reportRevision: target.reportRevision,
+        accentLocale: target.accentLocale,
+        skillId: target.skillId,
+        contentRef: target.contentRef,
+      },
+      now: new Date(now.getTime() + 1_000),
+    }).finally(() => { supersededSettled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    assert.equal(finishSettled, false, 'attempt completion must remain owner-locked before commit');
+    assert.equal(supersededSettled, false, 'targeted assignment must wait behind the queued attempt completion');
+    await raw.query('COMMIT');
+    await pendingFinish;
+    pendingFinish = null;
+    await assert.rejects(pending, /SPEAKING_TARGETED_PRACTICE_STALE/u,
+      'assignment must revalidate after the concurrently completed newer attempt');
+    pending = null;
+
+    const refreshedReport = buildSpeakingLearningReport(await repository.getSpeakingLearningAttempts(owner), {
+      quota: { tier: 'premium', limitSeconds: 14_400, remainingSeconds: 14_400 },
+    });
+    const refreshedTarget = refreshedReport.premium.targetedPractice;
+    assert.equal(refreshedTarget.sourceAttemptId, followupClaim.attempt.id);
+    const sessionsBeforeAccentSwitch = Number((await raw.query(
+      'SELECT COUNT(*)::integer AS count FROM speaking_task2_sessions WHERE username = $1', [owner],
+    )).rows[0].count);
+    await repository.setSpeakingAccentProfile(owner, {
+      locale: 'en-US', source: 'manual', now: new Date(now.getTime() + 1_250),
+    });
+    await assert.rejects(repository.assignSpeakingTask2Session(owner, {
+      catalogId: SPEAKING_TASK2_CATALOG.id,
+      catalogRevision: SPEAKING_TASK2_CATALOG.revision,
+      tasks: SPEAKING_TASK2_CATALOG.tasks,
+      targetedPracticeRequest: {
+        sourceAttemptId: refreshedTarget.sourceAttemptId,
+        reportRevision: refreshedTarget.reportRevision,
+        accentLocale: refreshedTarget.accentLocale,
+        skillId: refreshedTarget.skillId,
+        contentRef: refreshedTarget.contentRef,
+      },
+      now: new Date(now.getTime() + 1_300),
+    }), /SPEAKING_TARGETED_PRACTICE_STALE/u,
+    'PostgreSQL must reject an en-GB pointer after the canonical profile moves to en-US');
+    assert.equal(Number((await raw.query(
+      'SELECT COUNT(*)::integer AS count FROM speaking_task2_sessions WHERE username = $1', [owner],
+    )).rows[0].count), sessionsBeforeAccentSwitch);
+    const usScopedReport = buildSpeakingLearningReport(
+      await repository.getSpeakingLearningAttempts(owner),
+      {
+        quota: { tier: 'premium', limitSeconds: 14_400, remainingSeconds: 14_400 },
+        activeAccentLocale: 'en-US',
+      },
+    );
+    assert.equal(usScopedReport.activeAccentLocale, 'en-US');
+    assert.equal(usScopedReport.premium.targetedPractice, null);
+    assert.deepEqual(usScopedReport.premium.timeAllocationRecommendation, []);
+    await repository.setSpeakingAccentProfile(owner, {
+      locale: 'en-GB', source: 'manual', now: new Date(now.getTime() + 1_400),
+    });
+    const sessionsBeforeRevoke = Number((await raw.query(
+      'SELECT COUNT(*)::integer AS count FROM speaking_task2_sessions WHERE username = $1', [owner],
+    )).rows[0].count);
+    await raw.query('BEGIN');
+    await raw.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [owner]);
+    let revokeSettled = false;
+    const revoking = repository.revokeEntitlement(owner, 'voice_tutor', 7_700_099, {
+      now: new Date(now.getTime() + 1_500),
+    }).finally(() => { revokeSettled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    assert.equal(revokeSettled, false, 'Premium revocation must wait for the owner lock');
+    let revokedAssignmentSettled = false;
+    pending = repository.assignSpeakingTask2Session(owner, {
+      catalogId: SPEAKING_TASK2_CATALOG.id,
+      catalogRevision: SPEAKING_TASK2_CATALOG.revision,
+      tasks: SPEAKING_TASK2_CATALOG.tasks,
+      targetedPracticeRequest: {
+        sourceAttemptId: refreshedTarget.sourceAttemptId,
+        reportRevision: refreshedTarget.reportRevision,
+        accentLocale: refreshedTarget.accentLocale,
+        skillId: refreshedTarget.skillId,
+        contentRef: refreshedTarget.contentRef,
+      },
+      now: new Date(now.getTime() + 2_000),
+    }).finally(() => { revokedAssignmentSettled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    assert.equal(revokeSettled, false);
+    assert.equal(revokedAssignmentSettled, false);
+    await raw.query('COMMIT');
+    assert.equal(await revoking, true);
+    await assert.rejects(pending, /SPEAKING_TARGETED_PRACTICE_STALE/u,
+      'assignment queued after revocation must revalidate entitlement and fail closed');
+    pending = null;
+    assert.equal(Number((await raw.query(
+      'SELECT COUNT(*)::integer AS count FROM speaking_task2_sessions WHERE username = $1', [owner],
+    )).rows[0].count), sessionsBeforeRevoke,
+    'there must be no targeted session after completed revocation');
+    await repository.setEntitlement(owner, 'voice_tutor', {
+      startsAt: new Date(now.getTime() + 2_100), endsAt: new Date(now.getTime() + 86_400_000),
+    });
+    const profileBeforeAssistance = buildAdaptiveLearningProfile(
+      await repository.getAdaptiveLearningEvidenceSources(owner),
+    );
+
+    await raw.query('BEGIN');
+    await raw.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [owner]);
+    await raw.query(
+      `UPDATE speaking_accent_profiles
+       SET locale = 'en-US', revision = revision + 1, effective_at = $2
+       WHERE username = $1`,
+      [owner, new Date(now.getTime() + 2_500)],
+    );
+    await raw.query(
+      `UPDATE subscription_entitlements SET ends_at = $2
+       WHERE username = $1 AND entitlement = 'voice_tutor'`,
+      [owner, new Date(now.getTime() + 2_500)],
+    );
+    await raw.query(
+      'UPDATE speaking_task2_sessions SET assistance_used = TRUE WHERE username = $1 AND id = $2',
+      [owner, followup.id],
+    );
+    await raw.query(
+      `UPDATE speaking_attempts SET assistance_used = TRUE, assistance_updated_at = $3
+       WHERE username = $1 AND source_session_id = $2`,
+      [owner, followup.id, new Date(now.getTime() + 2_000)],
+    );
+    let snapshotSettled = false;
+    pendingSnapshot = repository.getSpeakingLearningReportSnapshot(owner, {
+      now: new Date(now.getTime() + 3_000),
+    }).finally(() => { snapshotSettled = true; });
+    let settled = false;
+    pending = repository.assignSpeakingTask2Session(owner, {
+      catalogId: SPEAKING_TASK2_CATALOG.id,
+      catalogRevision: SPEAKING_TASK2_CATALOG.revision,
+      tasks: SPEAKING_TASK2_CATALOG.tasks,
+      targetedPracticeRequest: {
+        sourceAttemptId: refreshedTarget.sourceAttemptId,
+        reportRevision: refreshedTarget.reportRevision,
+        accentLocale: refreshedTarget.accentLocale,
+        skillId: refreshedTarget.skillId,
+        contentRef: refreshedTarget.contentRef,
+      },
+      now: new Date(now.getTime() + 3_000),
+    }).finally(() => { settled = true; });
+    const pendingAssignmentRejection = assert.rejects(
+      pending, /SPEAKING_TARGETED_PRACTICE_STALE/u,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    assert.equal(snapshotSettled, false, 'the report snapshot must wait for the owner transaction');
+    assert.equal(settled, false, 'assignment must wait for the owner-scoped mutation transaction');
+    await raw.query('COMMIT');
+    const coherentSnapshot = await pendingSnapshot;
+    pendingSnapshot = null;
+    assert.equal(coherentSnapshot.accentProfile.locale, 'en-US');
+    assert.equal(coherentSnapshot.quota.tier, 'base');
+    const invalidated = coherentSnapshot.attempts.find((item) => item.attemptId === followupClaim.attempt.id);
+    assert.equal(invalidated.provenance.assistance, 'assisted');
+    assert.equal(invalidated.masteryEligible, false);
+    await pendingAssignmentRejection;
+    pending = null;
+    await assert.rejects(
+      repository.saveAdaptiveLearningProfile(owner, profileBeforeAssistance, {
+        now: new Date(now.getTime() + 4_000), verifyCurrentEvidence: true,
+      }),
+      /ADAPTIVE_PROFILE_EVIDENCE_STALE/u,
+      'PostgreSQL must reject a profile snapshot captured before the owner-locked assistance update',
+    );
+  } finally {
+    await raw.query('ROLLBACK').catch(() => {});
+    await pending?.catch(() => {});
+    await pendingFinish?.catch(() => {});
+    await pendingSnapshot?.catch(() => {});
+    await raw.end();
+    await repository.deleteUserData(owner).catch(() => {});
+    await repository.close();
+  }
+});
+
+test('PostgreSQL Speaking learning snapshot rejects Base expiry committed before its owner lock', { skip: !connectionString }, async () => {
+  const repository = createPostgresRepository(connectionString);
+  const stamp = String(Date.now()).slice(-8);
+  const telegramId = Number(`76${stamp}`);
+  const owner = await repository.createTelegramUser(telegramId, `Speaking report expiry ${stamp}`);
+  const raw = new pg.Client({ connectionString });
+  await raw.connect();
+  let pending = null;
+  try {
+    await repository.grantDays(telegramId, 30, `Speaking report expiry ${stamp}`);
+    const capturedRequestT0 = new Date((await raw.query('SELECT clock_timestamp() AS now')).rows[0].now);
+    const expiresAt = new Date(capturedRequestT0.getTime() + 100);
+    await raw.query('BEGIN');
+    await raw.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [owner]);
+    let settled = false;
+    pending = repository.getSpeakingLearningReportSnapshot(owner, {
+      now: capturedRequestT0,
+    }).finally(() => { settled = true; });
+    const rejection = assert.rejects(
+      pending,
+      (error) => error?.code === 'SUBSCRIPTION_REQUIRED',
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    assert.equal(settled, false, 'learning snapshot must wait for the owner lock');
+    await raw.query(
+      'UPDATE users SET subscription_until = $2 WHERE username = $1',
+      [owner, expiresAt],
+    );
+    await raw.query('SELECT pg_sleep(0.15)');
+    await raw.query('COMMIT');
+    await rejection;
+    pending = null;
+  } finally {
+    await raw.query('ROLLBACK').catch(() => {});
+    await pending?.catch(() => {});
+    await raw.end();
+    await repository.deleteUserData(owner).catch(() => {});
+    await repository.close();
+  }
+});
+
+test('PostgreSQL targeted Speaking assignment rejects Base expiry before mutation', { skip: !connectionString }, async () => {
+  const repository = createPostgresRepository(connectionString);
+  const stamp = String(Date.now()).slice(-8);
+  const telegramId = Number(`75${stamp}`);
+  const owner = await repository.createTelegramUser(telegramId, `Speaking targeted expiry ${stamp}`);
+  const raw = new pg.Client({ connectionString });
+  await raw.connect();
+  let pending = null;
+  try {
+    let now = new Date();
+    await repository.grantDays(telegramId, 30, `Speaking targeted expiry ${stamp}`);
+    await repository.setSpeakingAccentProfile(owner, { locale: 'en-GB', source: 'manual', now });
+    await repository.setEntitlement(owner, 'voice_tutor', {
+      startsAt: new Date(now.getTime() - 1_000), endsAt: new Date(now.getTime() + 86_400_000),
+    });
+    const source = await repository.assignSpeakingTask2Session(owner, {
+      catalogId: SPEAKING_TASK2_CATALOG.id,
+      catalogRevision: SPEAKING_TASK2_CATALOG.revision,
+      tasks: SPEAKING_TASK2_CATALOG.tasks,
+      now,
+    });
+    for (let questionNumber = 1; questionNumber <= 4; questionNumber += 1) {
+      now = new Date(now.getTime() + 12_000);
+      await repository.completeSpeakingTask2Question(owner, source.id, questionNumber, {
+        recordingDurationSeconds: 12, localPlayback: true, selfRating: 'steady',
+      }, { now });
+    }
+    const claim = await repository.claimSpeakingEvaluation(owner, {
+      taskType: 2, assignment: { ad: 'Expiry', points: ['a', 'b', 'c', 'd'] },
+      transcript: 'Four expiry race questions.',
+    }, 'speaking-semantic-v4', crypto.createHash('sha256').update(`${owner}:base-expiry`).digest('hex'), {
+      now,
+      source: {
+        sessionId: source.id, taskRef: source.task_id, taskRevision: Number(source.task_revision),
+        catalogId: source.catalog_id, catalogRevision: Number(source.catalog_revision),
+        assistanceUsed: false,
+      },
+    });
+    await repository.finishSpeakingAttempt(claim.attempt.id, {
+      status: 'completed', review: targetedPracticeScoredReview(), provider: 'test', model: 'test', errorCode: null,
+    });
+    const snapshot = await repository.getSpeakingLearningReportSnapshot(owner);
+    const target = buildSpeakingLearningReport(snapshot.attempts, {
+      quota: snapshot.quota,
+      activeAccentLocale: snapshot.accentProfile.locale,
+    }).premium.targetedPractice;
+    assert.ok(target);
+    const sessionsBefore = Number((await raw.query(
+      'SELECT COUNT(*)::integer AS count FROM speaking_task2_sessions WHERE username = $1', [owner],
+    )).rows[0].count);
+    const capturedRequestT0 = new Date((await raw.query('SELECT clock_timestamp() AS now')).rows[0].now);
+    const expiresAt = new Date(capturedRequestT0.getTime() + 100);
+    await raw.query('BEGIN');
+    await raw.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [owner]);
+    let settled = false;
+    pending = repository.assignSpeakingTask2Session(owner, {
+      catalogId: SPEAKING_TASK2_CATALOG.id,
+      catalogRevision: SPEAKING_TASK2_CATALOG.revision,
+      tasks: SPEAKING_TASK2_CATALOG.tasks,
+      targetedPracticeRequest: {
+        sourceAttemptId: target.sourceAttemptId,
+        reportRevision: target.reportRevision,
+        accentLocale: target.accentLocale,
+        skillId: target.skillId,
+        contentRef: target.contentRef,
+      },
+      now: capturedRequestT0,
+    }).finally(() => { settled = true; });
+    const rejection = assert.rejects(
+      pending,
+      (error) => error?.code === 'SUBSCRIPTION_REQUIRED',
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    assert.equal(settled, false, 'targeted assignment must wait for the owner lock');
+    await raw.query(
+      'UPDATE users SET subscription_until = $2 WHERE username = $1',
+      [owner, expiresAt],
+    );
+    await raw.query('SELECT pg_sleep(0.15)');
+    await raw.query('COMMIT');
+    await rejection;
+    pending = null;
+    assert.equal(Number((await raw.query(
+      'SELECT COUNT(*)::integer AS count FROM speaking_task2_sessions WHERE username = $1', [owner],
+    )).rows[0].count), sessionsBefore);
+  } finally {
+    await raw.query('ROLLBACK').catch(() => {});
+    await pending?.catch(() => {});
+    await raw.end();
+    await repository.deleteUserData(owner).catch(() => {});
+    await repository.close();
+  }
+});
+
 test('PostgreSQL task 3 sessions match owner isolation, replay, export and deletion contract', { skip: !connectionString }, async () => {
   const repository = createPostgresRepository(connectionString);
   const stamp = String(Date.now()).slice(-8);
@@ -445,9 +2098,51 @@ test('PostgreSQL adaptive sessions match the shared replay, race, export and del
   const client = new pg.Client({ connectionString });
   const stamp = Date.now() + 5;
   const username = await repository.createTelegramUser(Number(`3${String(stamp).slice(-9)}`), `Session ${stamp}`);
+  let speakingBindRaceChecked = false;
   await client.connect();
   try {
-    await assertAdaptiveSessionRepositoryContract(assert, repository, username);
+    await assertAdaptiveSessionRepositoryContract(assert, repository, username, {
+      beforeSpeakingBind: async ({ sessionId, executionClaim, attempt, now }) => {
+        if (speakingBindRaceChecked) return;
+        const source = await repository.getSpeakingAttempt(username, attempt.id);
+        const taskType = Number(source.task_type);
+        assert.ok([1, 2, 3, 4].includes(taskType));
+        await client.query('BEGIN');
+        try {
+          await client.query(
+            `UPDATE speaking_task${taskType}_sessions SET assistance_used = TRUE
+             WHERE username = $1 AND id = $2`,
+            [username, source.source_session_id],
+          );
+          const binding = repository.bindAdaptiveLearningServerAttempt(username, {
+            sessionId, executionClaim, attempt, now,
+          });
+          const early = await Promise.race([
+            binding.then(() => 'fulfilled', () => 'rejected'),
+            new Promise((resolve) => setTimeout(() => resolve('pending'), 100)),
+          ]);
+          assert.equal(early, 'pending', 'bind must wait for the canonical task-session lock');
+          await client.query('COMMIT');
+          await assert.rejects(binding, /ADAPTIVE_EXECUTION_ATTEMPT_MISMATCH/u);
+          const claim = await client.query(
+            `SELECT consumed_at FROM adaptive_learning_execution_claims
+             WHERE username = $1 AND token_hash = $2`,
+            [username, adaptiveExecutionTokenHash(executionClaim)],
+          );
+          assert.equal(claim.rows[0]?.consumed_at, null);
+          await client.query(
+            `UPDATE speaking_task${taskType}_sessions SET assistance_used = FALSE
+             WHERE username = $1 AND id = $2`,
+            [username, source.source_session_id],
+          );
+          speakingBindRaceChecked = true;
+        } catch (error) {
+          await client.query('ROLLBACK').catch(() => {});
+          throw error;
+        }
+      },
+    });
+    assert.equal(speakingBindRaceChecked, true, 'fixture must exercise a Speaking bind race');
     const recoveryReplayCount = Number((await client.query(
       `SELECT COUNT(*)::int AS count FROM adaptive_learning_session_mutations
        WHERE username = $1 AND operation = 'start' AND response_snapshot ? 'recoveryAttempt'`,
@@ -558,6 +2253,79 @@ test('PostgreSQL adaptive plan revisions match the shared persistence and export
     assert.equal(await repository.getCurrentAdaptiveLearningPlan(username), null);
   } finally {
     await repository.deleteUserData(username).catch(() => {});
+    await repository.close();
+  }
+});
+
+test('PostgreSQL upgrades a realistically persisted v1 plan to the v2 taxonomy atomically', { skip: !connectionString }, async () => {
+  const repository = createPostgresRepository(connectionString);
+  const raw = new pg.Client({ connectionString });
+  await raw.connect();
+  const stamp = Date.now() + 14;
+  const username = await repository.createTelegramUser(Number(`3${String(stamp).slice(-9)}`), `Plan upgrade ${stamp}`);
+  try {
+    const goal = (await repository.saveAdaptiveLearningGoal(username, {
+      id: crypto.randomUUID(), idempotencyKey: `plan-upgrade-${stamp}`, requestHash: 'f'.repeat(64),
+      targetExam: 'ege_english', targetScore: 85, examDate: '2027-06-01', weeklyMinutes: 300,
+      now: new Date('2026-08-04T08:00:00.000Z'),
+    })).goal;
+    const profile = buildAdaptiveLearningProfile();
+    await repository.saveAdaptiveLearningProfile(username, profile, {
+      now: new Date('2026-08-04T08:30:00.000Z'),
+    });
+    const firstNow = new Date('2026-08-04T09:00:00.000Z');
+    const firstPlan = buildAdaptiveLearningPlan({ goal, profile, now: firstNow });
+    await repository.saveAdaptiveLearningPlan(username, {
+      id: crypto.randomUUID(),
+      inputFingerprint: adaptivePlanInputFingerprint({ goal, profile, basePlanRevision: null, now: firstNow }),
+      basePlanRevision: null, goalId: goal.id, goalRevision: goal.revision,
+      taxonomyVersion: profile.taxonomyVersion,
+      profileCalculationRevision: profile.profileCalculationRevision,
+      profileEvidenceWatermarkVersion: profile.evidenceWatermarkVersion,
+      profileEvidenceObservedAt: profile.evidenceObservedAt,
+      profileEvidenceSourceCount: profile.evidenceSourceCount,
+      profileEvidenceFingerprint: profile.evidenceFingerprint,
+      recalculationBucket: firstPlan.recalculationBucket, plan: firstPlan, now: firstNow,
+    });
+    const legacyAllocation = structuredClone(firstPlan.allocation);
+    const speakingPercentage = legacyAllocation.modules.find((item) => item.id === 'speaking').percentage;
+    legacyAllocation.skills = legacyAllocation.skills.filter((item) => item.module !== 'speaking').concat([
+      { id: 'ege.speaking.interaction', label: 'Interaction', module: 'speaking', percentage: Math.floor(speakingPercentage / 2), activityType: 'practice', reasonCodes: [] },
+      { id: 'ege.speaking.monologue', label: 'Monologue', module: 'speaking', percentage: Math.ceil(speakingPercentage / 2), activityType: 'practice', reasonCodes: [] },
+    ]);
+    await raw.query(
+      `UPDATE adaptive_learning_plan_revisions
+       SET taxonomy_version = 'ege-en-v1', allocation = $2::jsonb,
+           profile_evidence_fingerprint = NULL
+       WHERE username = $1 AND current`,
+      [username, JSON.stringify(legacyAllocation)],
+    );
+
+    const previousPlan = await repository.getCurrentAdaptiveLearningPlan(username);
+    assert.equal(previousPlan.profile_evidence_fingerprint, null,
+      'migration 052 keeps legacy PostgreSQL plans readable without a fingerprint');
+    const nextNow = new Date('2026-08-05T09:00:00.000Z');
+    const nextPlan = buildAdaptiveLearningPlan({ goal, profile, previousPlan, now: nextNow });
+    const saved = await repository.saveAdaptiveLearningPlan(username, {
+      id: crypto.randomUUID(),
+      inputFingerprint: adaptivePlanInputFingerprint({ goal, profile, basePlanRevision: 1, now: nextNow }),
+      basePlanRevision: 1, goalId: goal.id, goalRevision: goal.revision,
+      taxonomyVersion: profile.taxonomyVersion,
+      profileCalculationRevision: profile.profileCalculationRevision,
+      profileEvidenceWatermarkVersion: profile.evidenceWatermarkVersion,
+      profileEvidenceObservedAt: profile.evidenceObservedAt,
+      profileEvidenceSourceCount: profile.evidenceSourceCount,
+      profileEvidenceFingerprint: profile.evidenceFingerprint,
+      recalculationBucket: nextPlan.recalculationBucket, plan: nextPlan, now: nextNow,
+    });
+    assert.equal(saved.created, true);
+    assert.equal(saved.plan.taxonomy_version, 'ege-en-v2');
+    assert.equal(saved.plan.profile_evidence_fingerprint, profile.evidenceFingerprint);
+    assert.equal(saved.plan.stability.bypassReason, 'taxonomy_changed');
+    assert.equal(saved.plan.allocation.skills.every((item) => Number.isFinite(item.percentage)), true);
+  } finally {
+    await repository.deleteUserData(username).catch(() => {});
+    await raw.end();
     await repository.close();
   }
 });
@@ -809,12 +2577,70 @@ test('PostgreSQL adaptive evidence sources come from one MVCC snapshot without o
   }
 });
 
+test('PostgreSQL adaptive evidence bounds Speaking rows before JSON hydration', { skip: !connectionString }, async () => {
+  const repository = createPostgresRepository(connectionString);
+  const client = new pg.Client({ connectionString });
+  const stamp = Date.now() + 3;
+  const username = await repository.createTelegramUser(
+    Number(`5${String(stamp).slice(-9)}`), `Speaking evidence bound ${stamp}`,
+  );
+  const semanticFacts = {
+    confidence: 0.95, verdict: 'Scored.', evidence: ['Read aloud.'], issues: [],
+  };
+  const acousticFacts = {
+    available: true, recognitionConfidence: 0.96, signalQuality: 'good',
+    recordingDurationSeconds: 30, itemDurations: [], completenessScore: 95,
+    fluencyScore: 90, wordAccuracyScore: 94, phonemeAccuracyScore: 93, wordEvents: [],
+  };
+  const review = {
+    ...publicSpeakingReview(
+      scoreSpeakingTask({ taskType: 1, semantic: semanticFacts, acoustic: acousticFacts }),
+      semanticFacts,
+    ),
+    semanticFacts, acousticFacts,
+  };
+  await client.connect();
+  try {
+    await client.query(
+      `INSERT INTO speaking_attempts
+       (username, task_type, assignment, transcript, review, provider, prompt_version, status,
+        source_session_id, source_task_ref, source_task_revision, source_catalog_id,
+        source_catalog_revision, assistance_used, accent_locale, created_at, evaluated_at)
+       SELECT $1, 1, '{}'::jsonb, 'Attempt ' || series.id, $2::jsonb, 'test',
+              'speaking-semantic-v4', 'completed', $4::uuid, 'task-' || series.id, 1,
+              'speaking-pilot-v1', 1, FALSE, 'en-GB',
+              $3::timestamptz + series.id * interval '1 second',
+              $3::timestamptz + (CASE WHEN series.id = 124 THEN 125 ELSE series.id END) * interval '1 second'
+       FROM generate_series(1, 125) AS series(id)`,
+      [username, JSON.stringify(review), new Date('2026-08-01T00:00:00.000Z'), crypto.randomUUID()],
+    );
+
+    const sources = await repository.getAdaptiveLearningEvidenceSources(username);
+    const speakingSourceIds = [...new Set(sources.attempts
+      .filter((entry) => entry.module === 'speaking')
+      .map((entry) => entry.metadata.source_attempt_id))];
+    assert.equal(speakingSourceIds.length, 120);
+    const storedIds = (await client.query(
+      `SELECT id::text FROM speaking_attempts WHERE username = $1
+       ORDER BY COALESCE(evaluated_at, created_at) DESC, id DESC`,
+      [username],
+    )).rows.map((row) => `speaking:${row.id}`);
+    assert.deepEqual(speakingSourceIds.slice(0, 2), storedIds.slice(0, 2));
+    assert.deepEqual(speakingSourceIds, storedIds.slice(0, 120));
+  } finally {
+    await client.end();
+    await repository.deleteUserData(username).catch(() => {});
+    await repository.close();
+  }
+});
+
 test('PostgreSQL binds an exact Voice Tutor repeat to an adaptive retention claim without copied content', { skip: !connectionString }, async () => {
   const repository = createPostgresRepository(connectionString);
   const client = new pg.Client({ connectionString });
   const stamp = Date.now() + 8;
   const username = await repository.createTelegramUser(Number(`6${String(stamp).slice(-9)}`), `Retention ${stamp}`);
-  const instant = new Date('2026-08-10T12:00:00.000Z');
+  const instant = new Date();
+  const relative = (milliseconds) => new Date(instant.getTime() + milliseconds);
   const voiceSessionId = crypto.randomUUID();
   const olderVoiceSessionId = crypto.randomUUID();
   const recoveryId = crypto.randomUUID();
@@ -831,9 +2657,9 @@ test('PostgreSQL binds an exact Voice Tutor repeat to an adaptive retention clai
        (id, username, idempotency_key, status, reserved_seconds, billable_seconds, started_at, expires_at, ended_at)
        VALUES ($1, $2, $3, 'completed', 1, 0, $4, $5, $5),
               ($6, $2, $7, 'completed', 1, 0, $8, $9, $9)`,
-      [voiceSessionId, username, crypto.randomUUID(), new Date('2026-08-09T08:00:00.000Z'),
-        new Date('2026-08-09T08:05:00.000Z'), olderVoiceSessionId, crypto.randomUUID(),
-        new Date('2026-08-08T08:00:00.000Z'), new Date('2026-08-08T08:05:00.000Z')],
+      [voiceSessionId, username, crypto.randomUUID(), relative(-24 * 60 * 60_000),
+        relative(-24 * 60 * 60_000 + 5 * 60_000), olderVoiceSessionId, crypto.randomUUID(),
+        relative(-48 * 60 * 60_000), relative(-48 * 60 * 60_000 + 5 * 60_000)],
     );
     await client.query(
       `INSERT INTO voice_tutor_recoveries
@@ -847,8 +2673,8 @@ test('PostgreSQL binds an exact Voice Tutor repeat to an adaptive retention clai
       [recoveryId, username, voiceSessionId, JSON.stringify({
         day_1: { prompt: 'This prompt must stay in Voice Tutor.', answers: ['was built'] },
         day_7: { prompt: 'Another private prompt.', answers: ['were built'] },
-      }), new Date('2026-08-09T08:04:00.000Z'), olderRecoveryId, olderVoiceSessionId,
-        new Date('2026-08-08T08:04:00.000Z')],
+      }), relative(-24 * 60 * 60_000 + 4 * 60_000), olderRecoveryId, olderVoiceSessionId,
+        relative(-48 * 60 * 60_000 + 4 * 60_000)],
     );
     await client.query(
       `INSERT INTO voice_tutor_repeats
@@ -856,12 +2682,12 @@ test('PostgreSQL binds an exact Voice Tutor repeat to an adaptive retention clai
        VALUES ($1, $2, 'day_1', $3, $4, $5),
               ($6, $2, 'day_7', $7, $8, $9),
               ($10, $11, 'day_1', $12, $13, $14)`,
-      [repeatId, recoveryId, repeatTaskId, new Date('2026-08-10T11:00:00.000Z'),
-        new Date('2026-08-10T16:00:00.000Z'), daySevenId,
-        `voice-repeat.${recoveryId}.day_7.v1`, new Date('2026-08-16T08:00:00.000Z'),
-        new Date('2026-08-17T08:00:00.000Z'), olderRepeatId, olderRecoveryId,
-        olderRepeatTaskId, new Date('2026-08-10T10:00:00.000Z'),
-        new Date('2026-08-10T17:00:00.000Z')],
+      [repeatId, recoveryId, repeatTaskId, relative(-60 * 60_000),
+        relative(4 * 60 * 60_000), daySevenId,
+        `voice-repeat.${recoveryId}.day_7.v1`, relative(6 * 24 * 60 * 60_000),
+        relative(7 * 24 * 60 * 60_000), olderRepeatId, olderRecoveryId,
+        olderRepeatTaskId, relative(-2 * 60 * 60_000),
+        relative(5 * 60 * 60_000)],
     );
 
     const goal = (await repository.saveAdaptiveLearningGoal(username, {
@@ -888,6 +2714,7 @@ test('PostgreSQL binds an exact Voice Tutor repeat to an adaptive retention clai
       profileEvidenceWatermarkVersion: profile.evidenceWatermarkVersion,
       profileEvidenceObservedAt: profile.evidenceObservedAt,
       profileEvidenceSourceCount: profile.evidenceSourceCount,
+      profileEvidenceFingerprint: profile.evidenceFingerprint,
       recalculationBucket: calculatedPlan.recalculationBucket, plan: calculatedPlan, now: instant,
     })).plan;
     const publicPlan = {
@@ -913,43 +2740,74 @@ test('PostgreSQL binds an exact Voice Tutor repeat to an adaptive retention clai
     const claimId = crypto.randomUUID();
     const token = adaptiveExecutionToken(claimId, 'postgres-retention-secret-32-characters');
     const startBody = { blockId: block.id, expectedRevision: 0 };
-    await repository.startAdaptiveLearningSessionBlock(username, {
+    const started = await repository.startAdaptiveLearningSessionBlock(username, {
       operation: 'start', sessionId: created.session.id, ...startBody,
       idempotencyKey: 'postgres-retention-start-01', requestHash: adaptiveExecutionRequestHash(startBody),
       claimId, token, tokenHash: adaptiveExecutionTokenHash(token),
-      expiresAt: new Date('2026-08-10T14:01:00.000Z'), now: new Date('2026-08-10T12:01:00.000Z'),
+      expiresAt: relative(2 * 60 * 60_000), now: relative(60_000),
       evidenceContext: adaptiveEvidenceContext(block),
       responseSnapshot: {
-        session: { ...created.session, status: 'in_progress', updatedAt: '2026-08-10T12:01:00.000Z' },
+        session: { ...created.session, status: 'in_progress', updatedAt: relative(60_000).toISOString() },
         execution: {
           version: 'adaptive-execution-v1', revision: 1, status: 'in_progress', currentBlockId: block.id,
-          completedBlockIds: [], readyToFinish: false, startedAt: '2026-08-10T12:01:00.000Z', completedAt: null,
+          completedBlockIds: [], readyToFinish: false, startedAt: relative(60_000).toISOString(), completedAt: null,
         },
         block, launch: block.launch, executionClaimId: claimId,
-        claimExpiresAt: '2026-08-10T14:01:00.000Z', evidenceContext: adaptiveEvidenceContext(block),
+        claimExpiresAt: relative(2 * 60 * 60_000).toISOString(), evidenceContext: adaptiveEvidenceContext(block),
       },
     });
+    const storedClaim = (await client.query(
+      `SELECT issued_at, expires_at FROM adaptive_learning_execution_claims
+       WHERE id = $1 AND username = $2`,
+      [claimId, username],
+    )).rows[0];
+    assert.equal(
+      new Date(storedClaim.expires_at).getTime() - new Date(storedClaim.issued_at).getTime(),
+      ADAPTIVE_EXECUTION_CLAIM_TTL_MS,
+    );
+    assert.equal(started.responseSnapshot.claimExpiresAt, new Date(storedClaim.expires_at).toISOString());
     const mismatchedAttemptId = crypto.randomUUID();
     await assert.rejects(repository.submitVoiceTutorRepeat(username, olderRepeatId, {
       attemptId: mismatchedAttemptId, taskId: olderRepeatTaskId, answer: 'was built',
       adaptiveExecutionClaim: token, adaptiveSessionId: created.session.id,
-      now: new Date('2026-08-10T12:01:30.000Z'),
+      now: relative(90_000),
     }), /ADAPTIVE_EXECUTION_ATTEMPT_MISMATCH/u);
     const mismatchedStored = await client.query(
       'SELECT id FROM voice_tutor_repeat_attempts WHERE id = $1', [mismatchedAttemptId],
     );
     assert.equal(mismatchedStored.rowCount, 0,
       'PostgreSQL must roll back repeat persistence when exact adaptive binding fails');
+    await client.query(
+      `UPDATE adaptive_learning_execution_claims
+       SET expires_at = clock_timestamp() - interval '1 millisecond'
+       WHERE id = $1 AND username = $2`,
+      [claimId, username],
+    );
+    const expiredAttemptId = crypto.randomUUID();
+    await assert.rejects(repository.submitVoiceTutorRepeat(username, repeatId, {
+      attemptId: expiredAttemptId, taskId: repeatTaskId, answer: 'was built',
+      adaptiveExecutionClaim: token, adaptiveSessionId: created.session.id,
+      now: relative(120_000),
+    }), /ADAPTIVE_EXECUTION_CLAIM_EXPIRED/u);
+    assert.equal((await client.query(
+      'SELECT id FROM voice_tutor_repeat_attempts WHERE id = $1', [expiredAttemptId],
+    )).rowCount, 0);
+    await client.query(
+      `UPDATE adaptive_learning_execution_claims
+       SET expires_at = clock_timestamp() + interval '2 hours'
+       WHERE id = $1 AND username = $2`,
+      [claimId, username],
+    );
     const attempt = await repository.submitVoiceTutorRepeat(username, repeatId, {
       attemptId: crypto.randomUUID(), taskId: repeatTaskId, answer: 'was built',
       adaptiveExecutionClaim: token, adaptiveSessionId: created.session.id,
-      now: new Date('2026-08-10T12:02:00.000Z'),
+      now: relative(120_000),
     });
     assert.equal(attempt.adaptiveExecution.evidenceQuality, 'server_verified_unassisted');
     const context = await repository.getAdaptiveLearningSessionAdvanceContext(username, {
       sessionId: created.session.id, blockId: block.id, expectedRevision: 1,
       attempt: { type: 'voice_tutor_repeat', id: attempt.attempt.id },
-      now: new Date('2026-08-10T12:03:00.000Z'),
+      now: relative(180_000),
     });
     assert.equal(context.source.source_type, 'voice_tutor_repeat');
     assert.equal(context.source.evidence_quality, 'server_verified_unassisted');
@@ -1016,6 +2874,9 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
       '047_speaking_assessment_context.sql',
       '048_speaking_evaluation_idempotency.sql',
       '049_speaking_accent_calibration.sql',
+      '050_speaking_learning_loop.sql',
+      '051_adaptive_profile_evidence_fingerprint.sql',
+      '052_adaptive_plan_evidence_fingerprint.sql',
     ]);
 
     const username = await repository.createTelegramUser(telegramId, `Integration ${suffix}`);
@@ -1440,6 +3301,9 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     );
     assert.equal(JSON.stringify(exported.speaking_attempts).includes('evaluation_fingerprint'), false);
     assert.equal(JSON.stringify(exported.speaking_attempts).includes('evaluation_claim_generation'), false);
+    assert.ok(exported.speaking_attempts.every((attempt) => (
+      Object.hasOwn(attempt, 'assistance_updated_at')
+    )), 'PostgreSQL export keeps assistance invalidation timestamp parity');
     assert.equal(exported.generated_tasks.length, 2);
     assert.equal(exported.module_attempts.length, 2);
     assert.equal(exported.voice_tutor_sessions.find((session) => session.id === tracerSessionId).delivery_mode, 'text');
@@ -1459,9 +3323,9 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
     assert.equal(exported.voice_tutor_reports[0].reason, 'technical_issue');
     assert.equal(exported.rule_cards.length, 2);
     assert.equal(exported.adaptive_learning_goals[0].target_score, 85);
-    assert.equal(exported.adaptive_learning_profile.taxonomy_version, 'ege-en-v1');
+    assert.equal(exported.adaptive_learning_profile.taxonomy_version, 'ege-en-v2');
     assert.equal(Number(exported.adaptive_learning_profile.independent_evidence_count), adaptiveProfile.independentEvidenceCount);
-    assert.equal(exported.adaptive_learning_skill_estimates.length, 12);
+    assert.equal(exported.adaptive_learning_skill_estimates.length, EGE_SKILL_TAXONOMY.skills.length);
     const originalVoiceSession = exported.voice_tutor_sessions.find((session) => session.id === firstVoiceReservation.session.id);
     assert.equal(originalVoiceSession.billable_seconds, 120);
     const exportedTracerSession = exported.voice_tutor_sessions.find((session) => session.id === tracerSessionId);
@@ -1672,7 +3536,7 @@ test('PostgreSQL proxy tickets, usage settlement and canonical review are atomic
   const client = new pg.Client({ connectionString });
   const suffix = crypto.randomBytes(6).toString('hex');
   const telegramId = Number(`6${Date.now().toString().slice(-9)}`);
-  const now = new Date('2026-08-03T10:00:00.000Z');
+  const now = new Date();
   const limits = { dailySeconds: 600, monthlySeconds: 7_200, sessionSeconds: 300 };
   await client.connect();
 
@@ -1733,16 +3597,23 @@ test('PostgreSQL proxy tickets, usage settlement and canonical review are atomic
     assert.equal((await repository.getVoiceTutorSession(exact.username, exact.sessionId)).proxy_ticket_reissue_count, 1);
     const consumed = await Promise.allSettled([
       repository.consumeVoiceTutorProxyTicket(exact.username, { ticketHash: replacementHash }, {
-        now, provider: 'xai', model: 'grok-voice-v1', promptVersion: 'voice-tutor-error-v4',
+        now: new Date(now.getTime() + 1_000),
+        provider: 'xai', model: 'grok-voice-v1', promptVersion: 'voice-tutor-error-v4',
       }),
       repository.consumeVoiceTutorProxyTicket(exact.username, { ticketHash: replacementHash }, {
-        now, provider: 'xai', model: 'grok-voice-v1', promptVersion: 'voice-tutor-error-v4',
+        now: new Date(now.getTime() + 1_000),
+        provider: 'xai', model: 'grok-voice-v1', promptVersion: 'voice-tutor-error-v4',
       }),
     ]);
-    assert.equal(consumed.filter((result) => result.status === 'fulfilled').length, 1);
+    assert.equal(consumed.filter((result) => result.status === 'fulfilled').length, 1,
+      consumed.map((result) => result.status === 'rejected' ? result.reason?.code : 'fulfilled').join(','));
     assert.match(consumed.find((result) => result.status === 'rejected').reason.message, /VOICE_TUTOR_PROXY_TICKET_REPLAYED/u);
-    assert.equal((await repository.activateVoiceTutorProxySession(exact.username, exact.sessionId, { now })).activated, true);
-    assert.equal((await repository.activateVoiceTutorProxySession(exact.username, exact.sessionId, { now })).activated, false);
+    assert.equal((await repository.activateVoiceTutorProxySession(exact.username, exact.sessionId, {
+      now: new Date(now.getTime() + 1_000),
+    })).activated, true);
+    assert.equal((await repository.activateVoiceTutorProxySession(exact.username, exact.sessionId, {
+      now: new Date(now.getTime() + 1_000),
+    })).activated, false);
     const exactFinalization = await repository.finalizeVoiceTutorProxySession(exact.username, exact.sessionId, {
       inputAudioBytes: 48_000, outputAudioBytes: 1, confirmed: true, reason: 'completed',
       now: new Date(now.getTime() + 20_000), limits,
@@ -1773,7 +3644,9 @@ test('PostgreSQL proxy tickets, usage settlement and canonical review are atomic
     await repository.issueVoiceTutorProxyTicket(bounded.username, bounded.sessionId, {
       ticketHash: '6'.repeat(64), idempotencyKey: bounded.idempotencyKey, expiresAt: ticketExpiresAt, now,
     });
-    await repository.consumeVoiceTutorProxyTicket(bounded.username, { ticketHash: '6'.repeat(64) }, { now });
+    await repository.consumeVoiceTutorProxyTicket(bounded.username, { ticketHash: '6'.repeat(64) }, {
+      now: new Date(Date.now() + 1_000),
+    });
     await client.query('BEGIN');
     await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [bounded.username]);
     const timeoutStartedAt = Date.now();
@@ -1840,7 +3713,9 @@ test('PostgreSQL proxy tickets, usage settlement and canonical review are atomic
     await repository.issueVoiceTutorProxyTicket(conservative.username, conservative.sessionId, {
       ticketHash: 'c'.repeat(64), idempotencyKey: conservative.idempotencyKey, expiresAt: ticketExpiresAt, now,
     });
-    await repository.consumeVoiceTutorProxyTicket(conservative.username, { ticketHash: 'c'.repeat(64) }, { now });
+    await repository.consumeVoiceTutorProxyTicket(conservative.username, { ticketHash: 'c'.repeat(64) }, {
+      now: new Date(Date.now() + 1_000),
+    });
     const conservativeFinalization = await repository.finalizeVoiceTutorProxySession(conservative.username, conservative.sessionId, {
       inputAudioBytes: 0, outputAudioBytes: 0, confirmed: false, reason: 'provider_error',
       now: new Date(now.getTime() + 1_000), limits,
@@ -1871,8 +3746,12 @@ test('PostgreSQL proxy tickets, usage settlement and canonical review are atomic
     await repository.issueVoiceTutorProxyTicket(legacyFinish.username, legacyFinish.sessionId, {
       ticketHash: 'd'.repeat(64), idempotencyKey: legacyFinish.idempotencyKey, expiresAt: ticketExpiresAt, now,
     });
-    await repository.consumeVoiceTutorProxyTicket(legacyFinish.username, { ticketHash: 'd'.repeat(64), now });
-    await repository.activateVoiceTutorProxySession(legacyFinish.username, legacyFinish.sessionId, { now });
+    await repository.consumeVoiceTutorProxyTicket(legacyFinish.username, { ticketHash: 'd'.repeat(64) }, {
+      now: new Date(Date.now() + 1_000),
+    });
+    await repository.activateVoiceTutorProxySession(legacyFinish.username, legacyFinish.sessionId, {
+      now: new Date(Date.now() + 1_000),
+    });
     await repository.finishVoiceTutorSession(legacyFinish.username, legacyFinish.sessionId, {
       confirmedBillableSeconds: 0, now: new Date(now.getTime() + 1_000), limits,
     });
@@ -1885,7 +3764,9 @@ test('PostgreSQL proxy tickets, usage settlement and canonical review are atomic
     await repository.issueVoiceTutorProxyTicket(fallback.username, fallback.sessionId, {
       ticketHash: '7'.repeat(64), idempotencyKey: fallback.idempotencyKey, expiresAt: ticketExpiresAt, now,
     });
-    await repository.consumeVoiceTutorProxyTicket(fallback.username, { ticketHash: '7'.repeat(64), now });
+    await repository.consumeVoiceTutorProxyTicket(fallback.username, { ticketHash: '7'.repeat(64) }, {
+      now: new Date(Date.now() + 1_000),
+    });
     await repository.switchVoiceTutorSessionDelivery(fallback.username, fallback.sessionId, {
       nonceHash: '1'.repeat(64), nextNonceHash: '2'.repeat(64), mode: 'local',
       errorCode: 'VOICE_TUTOR_PROVIDER_UNAVAILABLE', limits, now: new Date(now.getTime() + 1_000),
@@ -1903,8 +3784,12 @@ test('PostgreSQL proxy tickets, usage settlement and canonical review are atomic
     await repository.issueVoiceTutorProxyTicket(timeout.username, timeout.sessionId, {
       ticketHash: 'e'.repeat(64), idempotencyKey: timeout.idempotencyKey, expiresAt: ticketExpiresAt, now,
     });
-    await repository.consumeVoiceTutorProxyTicket(timeout.username, { ticketHash: 'e'.repeat(64), now });
-    await repository.activateVoiceTutorProxySession(timeout.username, timeout.sessionId, { now });
+    await repository.consumeVoiceTutorProxyTicket(timeout.username, { ticketHash: 'e'.repeat(64) }, {
+      now: new Date(Date.now() + 1_000),
+    });
+    await repository.activateVoiceTutorProxySession(timeout.username, timeout.sessionId, {
+      now: new Date(Date.now() + 1_000),
+    });
     await repository.finishVoiceTutorSession(timeout.username, timeout.sessionId, {
       now: new Date(now.getTime() + 301_000), limits,
     });

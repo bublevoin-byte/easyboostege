@@ -62,10 +62,12 @@ function authentication() {
 
 async function withRecoveryApp(run) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-voice-recovery-'));
-  const repository = createFileRepository(path.join(directory, 'data.json'));
+  let clock = new Date('2026-08-02T12:00:00.000Z');
+  const repository = createFileRepository(path.join(directory, 'data.json'), {
+    voiceTutorMutationNow: () => clock,
+  });
   const owner = await repository.createTelegramUser(7601, 'Recovery Owner');
   const stranger = await repository.createTelegramUser(7602, 'Recovery Stranger');
-  let clock = new Date('2026-08-02T12:00:00.000Z');
   for (const [telegramId, username] of [[7601, owner], [7602, stranger]]) {
     await repository.grantDays(telegramId, 30, username);
     await repository.setEntitlement(username, 'voice_tutor', { startsAt: clock, endsAt: new Date('2026-09-02T12:00:00.000Z') });

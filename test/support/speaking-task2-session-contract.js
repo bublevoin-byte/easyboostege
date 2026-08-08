@@ -2,14 +2,32 @@ import { SPEAKING_TASK2_CATALOG } from '../../public/content/speaking/task2-v1.j
 
 export async function assertSpeakingTask2SessionRepositoryContract(assert, repository, owner, other) {
   let now = new Date('2026-08-06T10:00:00.000Z');
+  const targetedPractice = {
+    sourceAttemptId: 42,
+    reportRevision: 'attempt.42.1786093200000',
+    accentLocale: 'en-GB',
+    skillId: 'ege.speaking.pronunciation_phonemes',
+    label: 'Звук /w/ в слове weather',
+    contentRef: 'server:speaking:task:2:skill:ege.speaking.pronunciation_phonemes:focus:phoneme.1.2.1:new:v1',
+    focus: {
+      kind: 'phoneme', value: 'w', anchorWord: 'weather', ref: 'phoneme.1.2.1',
+    },
+  };
+  const targetedTask = SPEAKING_TASK2_CATALOG.tasks.find((task) => /weather/iu.test(JSON.stringify(task)));
+  assert.ok(targetedTask);
   const session = await repository.assignSpeakingTask2Session(owner, {
     catalogId: SPEAKING_TASK2_CATALOG.id,
     catalogRevision: SPEAKING_TASK2_CATALOG.revision,
     tasks: SPEAKING_TASK2_CATALOG.tasks,
+    preferredTaskIds: [targetedTask.id],
+    selectionReason: 'targeted_focus',
+    targetedPractice,
     now,
   });
   assert.equal(session.current_question, 1);
   assert.equal(session.questions.length, 4);
+  assert.equal(session.selection_reason, 'targeted_focus');
+  assert.deepEqual(session.targeted_practice, targetedPractice);
   assert.equal(await repository.getSpeakingTask2Session(other, session.id), null);
 
   now = new Date(now.getTime() + 12_000);
@@ -44,6 +62,7 @@ export async function assertSpeakingTask2SessionRepositoryContract(assert, repos
   const exported = await repository.exportUserData(owner);
   assert.equal(exported.speaking_task2_sessions.length, 1);
   assert.equal(exported.speaking_task2_sessions[0].questions.length, 4);
+  assert.deepEqual(exported.speaking_task2_sessions[0].targeted_practice, targetedPractice);
   assert.equal(Object.hasOwn(exported.speaking_task2_sessions[0], 'username'), false);
   assert.equal(/\b(?:audio|transcript|score)\b/iu.test(JSON.stringify(exported.speaking_task2_sessions)), false);
 

@@ -7,18 +7,62 @@ import test from 'node:test';
 import express from 'express';
 
 import { createVoiceTutorRoutes, rebuildSourceCapsule } from '../routes/voice-tutor.js';
+import { publicSpeakingReview, scoreSpeakingTask } from '../speaking/fipi-scoring.js';
+import { SPEAKING_TASK2_CATALOG } from '../public/content/speaking/task2-v1.js';
 import { createFileRepository } from '../storage/file-repository.js';
 import {
   buildWritingSpeakingCapsule,
   persistedVoiceTutorCapsule,
   publicVoiceTutorCapsule,
 } from '../voice-tutor/capsule.js';
+import { recoveryPotentialPoints } from '../voice-tutor/recovery.js';
 
 const NOW = new Date('2026-08-02T12:00:00.000Z');
 const LIMITS = Object.freeze({ dailySeconds: 600, monthlySeconds: 7_200, sessionSeconds: 300 });
 const WRITING_SECRET = 'My complete private essay must stay outside the public Voice Tutor session.';
 const WRITING_ANSWER = `${WRITING_SECRET} ${Array.from({ length: 100 }, (_, index) => `word${index + 1}`).join(' ')}`;
 const SPEAKING_SECRET = 'My complete private speaking transcript must stay outside the public Voice Tutor session.';
+
+function maxScorePronunciationAttempt() {
+  const semanticFacts = {
+    confidence: 0.96,
+    verdict: 'Все четыре прямых вопроса засчитаны.',
+    evidence: ['Четыре прямых вопроса проверены.'],
+    issues: [],
+    items: Array.from({ length: 4 }, (_, index) => ({
+      index: index + 1, relevant: true, directQuestion: true,
+      lexicalGrammarBlocksCommunication: false, evidence: `Question ${index + 1}`,
+    })),
+  };
+  const acousticFacts = {
+    available: true, recognitionConfidence: 0.95, signalQuality: 'good',
+    accentLocale: 'en-GB', recordingDurationSeconds: 48,
+    itemDurations: Array.from({ length: 4 }, (_, index) => ({
+      itemIndex: index + 1, durationSeconds: 12,
+    })),
+    wordAccuracyScore: 94, phonemeAccuracyScore: 91, fluencyScore: 86,
+    pauseAnalysisAvailable: false,
+    wordEvents: [{
+      id: 'azure:assessment:weather', owner: 'azure_pronunciation',
+      type: 'mispronunciation', gross: false, itemIndex: 2,
+      accuracyScore: 72, start: 12, end: 19, offsetSeconds: 3.25,
+      durationSeconds: 0.6, word: 'weather',
+      phonemes: [{ label: 'w', accuracyScore: 48 }],
+    }],
+  };
+  const scored = scoreSpeakingTask({ taskType: 2, semantic: semanticFacts, acoustic: acousticFacts });
+  return {
+    id: 501, status: 'completed', task_type: 2,
+    assignment: { ad: 'Ask about a hotel.', points: ['price', 'location', 'breakfast', 'parking'] },
+    transcript: 'How much does it cost? Where is the hotel? Is breakfast included? Is there parking?',
+    source_session_id: '99ad4346-480f-4124-8f66-79c915cadbc5',
+    source_task_ref: 'speaking-pilot-v1.task2.weekend-pottery',
+    source_task_revision: 1, source_catalog_id: 'speaking-pilot-v1', source_catalog_revision: 1,
+    accent_locale: 'en-GB', assistance_used: false,
+    created_at: '2026-08-07T08:00:00.000Z', evaluated_at: '2026-08-07T08:01:00.000Z',
+    review: { ...publicSpeakingReview(scored, semanticFacts), semanticFacts, acousticFacts },
+  };
+}
 
 const writingReview = Object.freeze({
   words: 112,
@@ -135,6 +179,38 @@ async function seedCompletedReviews(repository, username) {
   return { writingId, speakingId };
 }
 
+async function seedMaxScorePronunciationReview(repository, username) {
+  await repository.setSpeakingAccentProfile(username, {
+    locale: 'en-GB', source: 'manual', now: NOW,
+  });
+  const session = await repository.assignSpeakingTask2Session(username, {
+    catalogId: SPEAKING_TASK2_CATALOG.id,
+    catalogRevision: SPEAKING_TASK2_CATALOG.revision,
+    tasks: SPEAKING_TASK2_CATALOG.tasks,
+    now: NOW,
+  });
+  for (let questionNumber = 1; questionNumber <= 4; questionNumber += 1) {
+    await repository.completeSpeakingTask2Question(username, session.id, questionNumber, {
+      recordingDurationSeconds: 12, localPlayback: true, selfRating: 'steady',
+    }, { now: new Date(NOW.getTime() + questionNumber * 12_000) });
+  }
+  const task = SPEAKING_TASK2_CATALOG.tasks.find((item) => item.id === session.task_id);
+  const fixture = maxScorePronunciationAttempt();
+  const claim = await repository.claimSpeakingEvaluation(username, {
+    taskType: 2,
+    assignment: { ad: task.advertisement, points: [...task.supports] },
+    transcript: fixture.transcript,
+  }, 'speaking-evaluation-v1', 'e'.repeat(64), { now: NOW, source: {
+    sessionId: session.id, taskRef: session.task_id, taskRevision: session.task_revision,
+    catalogId: session.catalog_id, catalogRevision: session.catalog_revision,
+    accentLocale: 'en-GB', assistanceUsed: false,
+  } });
+  await repository.finishSpeakingAttempt(claim.attempt.id, {
+    status: 'completed', review: fixture.review, provider: 'test', model: 'test', errorCode: null,
+  });
+  return claim.attempt.id;
+}
+
 function authentication() {
   return {
     auth(req, res, next) {
@@ -146,9 +222,15 @@ function authentication() {
   };
 }
 
-async function withReviewApp(run) {
+async function withReviewApp(run, {
+  repositoryOptions = {}, repositoryHooks = new Map(), routeNow = () => NOW, textTutor = null,
+} = {}) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-voice-review-'));
-  const repository = createFileRepository(path.join(directory, 'data.json'));
+  const dataFile = path.join(directory, 'data.json');
+  const repository = createFileRepository(dataFile, {
+    voiceTutorMutationNow: routeNow,
+    ...repositoryOptions,
+  });
   const owner = await repository.createTelegramUser(7411, 'Review Owner');
   const stranger = await repository.createTelegramUser(7412, 'Review Stranger');
   for (const [telegramId, username] of [[7411, owner], [7412, stranger]]) {
@@ -167,11 +249,19 @@ async function withReviewApp(run) {
   ];
   const app = express();
   app.use(express.json());
+  const routeRepository = new Proxy(repository, {
+    get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver);
+      const hook = repositoryHooks.get(property);
+      if (typeof value !== 'function' || typeof hook !== 'function') return value;
+      return (...args) => hook(value.bind(target), ...args);
+    },
+  });
   app.use(createVoiceTutorRoutes({
     authentication: authentication(),
-    db: repository,
+    db: routeRepository,
     limits: LIMITS,
-    now: () => NOW,
+    now: routeNow,
     newSessionId: () => sessionIds.shift(),
     newNonce: () => nonces.shift(),
     privacyPolicyVersion: 'test-v1',
@@ -183,6 +273,7 @@ async function withReviewApp(run) {
       failPedagogyCall() { return true; },
     },
     realtimePolicy: { enabled: true, requireZdr: true, zdrAttested: true },
+    textTutor,
   }));
   const server = http.createServer(app);
   await new Promise((resolve, reject) => {
@@ -194,7 +285,7 @@ async function withReviewApp(run) {
     headers: { Authorization: `Bearer ${username}`, 'Content-Type': 'application/json', ...(options.headers || {}) },
   });
   try {
-    await run({ repository, owner, stranger, source, request });
+    await run({ repository, owner, stranger, source, request, dataFile });
   } finally {
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     await repository.close();
@@ -314,6 +405,544 @@ test('writing and speaking capsules use only completed validated server-owned re
   }
 });
 
+test('a max-score speaking attempt builds an immutable exact pronunciation capsule and revalidates expiry', () => {
+  const attempt = maxScorePronunciationAttempt();
+  const capsule = buildWritingSpeakingCapsule({
+    source: 'speaking', attempt, expectedRevision: 1,
+    pronunciationErrorRef: 'phoneme.501.0.0',
+    referenceTime: new Date('2026-08-08T08:00:00.000Z'),
+  });
+
+  assert.equal(attempt.review.got, 4);
+  assert.equal(attempt.review.max, 4);
+  assert.deepEqual(capsule.source, {
+    attempt_type: 'speaking', attempt_id: 501, item_revision: 1,
+    pronunciation_error_ref: 'phoneme.501.0.0',
+  });
+  assert.deepEqual(capsule.item.reference.pronunciationError, {
+    ref: 'phoneme.501.0.0', kind: 'phoneme', label: 'Фонема /w/ в слове «weather»',
+    word: 'weather', phoneme: 'w', accuracyScore: 48, expectedMinimum: 80,
+    observedAt: '2026-08-07T08:01:00.000Z', accentLocale: 'en-GB',
+    expiresAt: '2026-09-06T08:01:00.000Z',
+  });
+  assert.deepEqual(capsule.item.reference.attemptSummary, {
+    attemptId: 501, taskType: 2, score: 4, maxScore: 4,
+    observedAt: '2026-08-07T08:01:00.000Z', accentLocale: 'en-GB',
+  });
+  assert.equal(capsule.error.type, 'speaking_pronunciation_error');
+  assert.equal(capsule.error.lost_points, 0, 'pronunciation coaching cannot forge a FIPI deduction');
+  assert.equal(recoveryPotentialPoints(capsule), 0,
+    'pronunciation coaching cannot be reported as recovered official EGE points');
+  assert.equal(publicVoiceTutorCapsule(capsule).learner_answer, undefined);
+  assert.equal(persistedVoiceTutorCapsule(capsule).source.pronunciation_error_ref,
+    'phoneme.501.0.0');
+  assert.throws(() => buildWritingSpeakingCapsule({
+    source: 'speaking', attempt, expectedRevision: 1,
+    pronunciationErrorRef: 'phoneme.501.0.0',
+    referenceTime: new Date('2026-09-06T08:01:00.000Z'),
+  }), (error) => error.code === 'VOICE_TUTOR_PRONUNCIATION_POINTER_EXPIRED');
+});
+
+test('an exact Voice Tutor replay rechecks Premium after the file owner queue without rotating recovery credentials', async () => {
+  let authorityNow = NOW;
+  await withReviewApp(async ({ repository, owner, request }) => {
+    const attemptId = await seedMaxScorePronunciationReview(repository, owner);
+    const body = {
+      source: 'speaking', attemptId, revision: 1,
+      pronunciationErrorRef: `phoneme.${attemptId}.0.0`,
+    };
+    const headers = { 'Idempotency-Key': 'review-pronunciation-revoke-replay-01' };
+    const created = await request(owner, '/api/v1/voice-tutor/sessions', {
+      method: 'POST', headers, body: JSON.stringify(body),
+    });
+    assert.equal(created.status, 201);
+    const createdBody = await created.json();
+    const storedBefore = await repository.getVoiceTutorSession(owner, createdBody.session.id);
+
+    const revokedAt = new Date(NOW.getTime() + 1_000);
+    assert.equal(await repository.revokeEntitlement(owner, 'voice_tutor', 7_411_099, {
+      now: revokedAt,
+    }), true);
+    authorityNow = new Date(revokedAt.getTime() + 1);
+    const replay = await request(owner, '/api/v1/voice-tutor/sessions', {
+      method: 'POST', headers, body: JSON.stringify(body),
+    });
+    assert.equal(replay.status, 403);
+    assert.equal((await replay.json()).error.code, 'VOICE_TUTOR_PREMIUM_REQUIRED');
+
+    const storedAfter = await repository.getVoiceTutorSession(owner, createdBody.session.id);
+    assert.equal(storedAfter.proxy_ticket_hash, storedBefore.proxy_ticket_hash);
+    assert.equal(storedAfter.nonce_hash, storedBefore.nonce_hash);
+    assert.equal(storedAfter.proxy_ticket_reissue_count, storedBefore.proxy_ticket_reissue_count);
+  }, {
+    repositoryOptions: { voiceTutorMutationNow: () => authorityNow },
+  });
+});
+
+test('an exact Voice Tutor replay rejects Base subscription expiry at the file authority time', async () => {
+  let authorityNow = NOW;
+  await withReviewApp(async ({ repository, owner, source, request }) => {
+    const body = {
+      source: 'writing', attemptId: source.writingId, revision: 1, criterionIndex: 0,
+    };
+    const headers = { 'Idempotency-Key': 'review-base-expiry-replay-01' };
+    const created = await request(owner, '/api/v1/voice-tutor/sessions', {
+      method: 'POST', headers, body: JSON.stringify(body),
+    });
+    assert.equal(created.status, 201);
+    const createdBody = await created.json();
+    const storedBefore = await repository.getVoiceTutorSession(owner, createdBody.session.id);
+    const current = await repository.getUser(owner);
+    const expiresAt = new Date(authorityNow.getTime() + 1_000);
+    await repository.grantDays(
+      Number(current.telegram_id),
+      (expiresAt.getTime() - Number(current.sub_until)) / 86_400_000,
+    );
+    authorityNow = new Date(expiresAt.getTime() + 1);
+
+    const fallback = await request(
+      owner, `/api/v1/voice-tutor/sessions/${createdBody.session.id}/fallback`, {
+        method: 'POST', body: JSON.stringify({ nonce: createdBody.nonce }),
+      },
+    );
+    assert.equal(fallback.status, 403);
+    assert.equal((await fallback.json()).error.code, 'SUBSCRIPTION_REQUIRED');
+    assert.deepEqual(await repository.getVoiceTutorSession(owner, createdBody.session.id), storedBefore);
+
+    const replay = await request(owner, '/api/v1/voice-tutor/sessions', {
+      method: 'POST', headers, body: JSON.stringify(body),
+    });
+    assert.equal(replay.status, 403);
+    assert.equal((await replay.json()).error.code, 'SUBSCRIPTION_REQUIRED');
+    const storedAfter = await repository.getVoiceTutorSession(owner, createdBody.session.id);
+    assert.equal(storedAfter.proxy_ticket_hash, storedBefore.proxy_ticket_hash);
+    assert.equal(storedAfter.nonce_hash, storedBefore.nonce_hash);
+    assert.equal(storedAfter.proxy_ticket_reissue_count, storedBefore.proxy_ticket_reissue_count);
+  }, {
+    repositoryOptions: { voiceTutorMutationNow: () => authorityNow },
+  });
+});
+
+test('realtime ticket recovery rechecks Premium inside the file owner queue before rotating credentials', async () => {
+  let authorityNow = NOW;
+  await withReviewApp(async ({ repository, owner, source, request }) => {
+    const idempotencyKey = 'review-ticket-revoke-recovery-01';
+    const created = await request(owner, '/api/v1/voice-tutor/sessions', {
+      method: 'POST', headers: { 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify({
+        source: 'writing', attemptId: source.writingId, revision: 1, criterionIndex: 0,
+      }),
+    });
+    assert.equal(created.status, 201);
+    const createdBody = await created.json();
+    const storedBefore = await repository.getVoiceTutorSession(owner, createdBody.session.id);
+    const revokedAt = new Date(NOW.getTime() + 1_000);
+    assert.equal(await repository.revokeEntitlement(owner, 'voice_tutor', 7_411_099, {
+      now: revokedAt,
+    }), true);
+    authorityNow = new Date(revokedAt.getTime() + 1);
+
+    const recovery = await request(
+      owner, `/api/v1/voice-tutor/sessions/${createdBody.session.id}/realtime-ticket`, {
+        method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({}),
+      },
+    );
+    assert.equal(recovery.status, 403);
+    assert.equal((await recovery.json()).error.code, 'VOICE_TUTOR_PREMIUM_REQUIRED');
+    const storedAfter = await repository.getVoiceTutorSession(owner, createdBody.session.id);
+    assert.equal(storedAfter.proxy_ticket_hash, storedBefore.proxy_ticket_hash);
+    assert.equal(storedAfter.nonce_hash, storedBefore.nonce_hash);
+    assert.equal(storedAfter.proxy_ticket_reissue_count, storedBefore.proxy_ticket_reissue_count);
+  }, {
+    repositoryOptions: { voiceTutorMutationNow: () => authorityNow },
+  });
+});
+
+test('assistance committed before the file reservation lock invalidates a route-built pronunciation pointer', async () => {
+  const hooks = new Map();
+  await withReviewApp(async ({ repository, owner, request }) => {
+    const attemptId = await seedMaxScorePronunciationReview(repository, owner);
+    const attempt = await repository.getSpeakingAttempt(owner, attemptId);
+    const sessionsBefore = (await repository.exportUserData(owner)).voice_tutor_sessions.length;
+    hooks.set('reserveVoiceTutorSession', async (original, ...args) => {
+      const assisted = await repository.markSpeakingSessionAssisted(
+        owner, 2, attempt.source_session_id, { now: new Date(NOW.getTime() + 1_000) },
+      );
+      assert.equal(assisted.assistance_used, true);
+      return original(...args);
+    });
+
+    const response = await request(owner, '/api/v1/voice-tutor/sessions', {
+      method: 'POST', headers: { 'Idempotency-Key': 'review-pronunciation-assistance-race-01' },
+      body: JSON.stringify({
+        source: 'speaking', attemptId, revision: 1,
+        pronunciationErrorRef: `phoneme.${attemptId}.0.0`,
+      }),
+    });
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).error.code, 'VOICE_TUTOR_PRONUNCIATION_POINTER_STALE');
+    assert.equal((await repository.exportUserData(owner)).voice_tutor_sessions.length, sessionsBefore);
+  }, { repositoryHooks: hooks });
+});
+
+test('an exact file replay revalidates pronunciation assistance without rotating its ticket or nonce', async () => {
+  await withReviewApp(async ({ repository, owner, request }) => {
+    const attemptId = await seedMaxScorePronunciationReview(repository, owner);
+    const attempt = await repository.getSpeakingAttempt(owner, attemptId);
+    const body = {
+      source: 'speaking', attemptId, revision: 1,
+      pronunciationErrorRef: `phoneme.${attemptId}.0.0`,
+    };
+    const headers = { 'Idempotency-Key': 'review-pronunciation-assisted-replay-01' };
+    const created = await request(owner, '/api/v1/voice-tutor/sessions', {
+      method: 'POST', headers, body: JSON.stringify(body),
+    });
+    assert.equal(created.status, 201);
+    const createdBody = await created.json();
+    const storedBefore = await repository.getVoiceTutorSession(owner, createdBody.session.id);
+    await repository.markSpeakingSessionAssisted(owner, 2, attempt.source_session_id, {
+      now: new Date(NOW.getTime() + 1_000),
+    });
+
+    const replay = await request(owner, '/api/v1/voice-tutor/sessions', {
+      method: 'POST', headers, body: JSON.stringify(body),
+    });
+    assert.equal(replay.status, 409);
+    assert.equal((await replay.json()).error.code, 'VOICE_TUTOR_PRONUNCIATION_POINTER_STALE');
+    const storedAfter = await repository.getVoiceTutorSession(owner, createdBody.session.id);
+    assert.equal(storedAfter.proxy_ticket_hash, storedBefore.proxy_ticket_hash);
+    assert.equal(storedAfter.nonce_hash, storedBefore.nonce_hash);
+    assert.equal(storedAfter.proxy_ticket_reissue_count, storedBefore.proxy_ticket_reissue_count);
+  });
+});
+
+test('a pronunciation ref changed before the file reservation lock rejects the stale route capsule', async () => {
+  const hooks = new Map();
+  await withReviewApp(async ({ repository, owner, request }) => {
+    const attemptId = await seedMaxScorePronunciationReview(repository, owner);
+    const attempt = await repository.getSpeakingAttempt(owner, attemptId);
+    await repository.grantDays(7_411, 40);
+    await repository.setEntitlement(owner, 'voice_tutor', {
+      startsAt: NOW,
+      endsAt: new Date(new Date(attempt.evaluated_at).getTime() + 60 * 86_400_000),
+    });
+    hooks.set('reserveVoiceTutorSession', async (original, ...args) => {
+      const changedReview = structuredClone(attempt.review);
+      changedReview.acousticFacts.wordEvents[0].phonemes[0].accuracyScore = 90;
+      await repository.finishSpeakingAttempt(attemptId, {
+        status: 'completed', review: changedReview,
+        provider: 'test', model: 'test', errorCode: null,
+      });
+      return original(...args);
+    });
+
+    const response = await request(owner, '/api/v1/voice-tutor/sessions', {
+      method: 'POST', headers: { 'Idempotency-Key': 'review-pronunciation-ref-race-01' },
+      body: JSON.stringify({
+        source: 'speaking', attemptId, revision: 1,
+        pronunciationErrorRef: `phoneme.${attemptId}.0.0`,
+      }),
+    });
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).error.code, 'VOICE_TUTOR_PRONUNCIATION_POINTER_STALE');
+    assert.equal((await repository.exportUserData(owner)).voice_tutor_sessions.length, 0);
+  }, { repositoryHooks: hooks });
+});
+
+test('the file reservation authority rejects a pronunciation pointer exactly at its 30-day boundary', async () => {
+  let authorityNow = NOW;
+  const hooks = new Map();
+  await withReviewApp(async ({ repository, owner, request }) => {
+    const attemptId = await seedMaxScorePronunciationReview(repository, owner);
+    const attempt = await repository.getSpeakingAttempt(owner, attemptId);
+    await repository.grantDays(7_411, 40);
+    await repository.setEntitlement(owner, 'voice_tutor', {
+      startsAt: NOW,
+      endsAt: new Date(new Date(attempt.evaluated_at).getTime() + 60 * 86_400_000),
+    });
+    hooks.set('reserveVoiceTutorSession', async (original, ...args) => {
+      authorityNow = new Date(new Date(attempt.evaluated_at).getTime() + 30 * 86_400_000);
+      return original(...args);
+    });
+    const response = await request(owner, '/api/v1/voice-tutor/sessions', {
+      method: 'POST', headers: { 'Idempotency-Key': 'review-pronunciation-expiry-boundary-01' },
+      body: JSON.stringify({
+        source: 'speaking', attemptId, revision: 1,
+        pronunciationErrorRef: `phoneme.${attemptId}.0.0`,
+      }),
+    });
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).error.code, 'VOICE_TUTOR_PRONUNCIATION_POINTER_EXPIRED');
+    assert.equal((await repository.exportUserData(owner)).voice_tutor_sessions.length, 0);
+  }, {
+    repositoryHooks: hooks,
+    repositoryOptions: { voiceTutorMutationNow: () => authorityNow },
+  });
+});
+
+test('fallback rechecks Premium inside the file owner queue before mutating the session', async () => {
+  let authorityNow = NOW;
+  let textCalls = 0;
+  await withReviewApp(async ({ repository, owner, request }) => {
+    const attemptId = await seedMaxScorePronunciationReview(repository, owner);
+    const createdResponse = await request(owner, '/api/v1/voice-tutor/sessions', {
+      method: 'POST', headers: { 'Idempotency-Key': 'final19-fallback-revoke-01' },
+      body: JSON.stringify({
+        source: 'speaking', attemptId, revision: 1,
+        pronunciationErrorRef: `phoneme.${attemptId}.0.0`,
+      }),
+    });
+    assert.equal(createdResponse.status, 201);
+    const created = await createdResponse.json();
+    const before = await repository.getVoiceTutorSession(owner, created.session.id);
+    const revokedAt = new Date(NOW.getTime() + 1_000);
+    assert.equal(await repository.revokeEntitlement(owner, 'voice_tutor', 7_411_099, {
+      now: revokedAt,
+    }), true);
+    authorityNow = new Date(revokedAt.getTime() + 1);
+
+    const fallback = await request(
+      owner, `/api/v1/voice-tutor/sessions/${created.session.id}/fallback`, {
+        method: 'POST', body: JSON.stringify({ nonce: created.nonce }),
+      },
+    );
+    assert.equal(fallback.status, 403);
+    assert.equal((await fallback.json()).error.code, 'VOICE_TUTOR_PREMIUM_REQUIRED');
+    assert.deepEqual(await repository.getVoiceTutorSession(owner, created.session.id), before);
+    assert.equal(textCalls, 0);
+  }, {
+    routeNow: () => authorityNow,
+    repositoryOptions: { voiceTutorMutationNow: () => authorityNow },
+    textTutor: { async createTurn() { textCalls += 1; return {}; } },
+  });
+});
+
+test('fallback revalidates pronunciation assistance before any file mutation', async () => {
+  let authorityNow = NOW;
+  await withReviewApp(async ({ repository, owner, request }) => {
+    const attemptId = await seedMaxScorePronunciationReview(repository, owner);
+    const attempt = await repository.getSpeakingAttempt(owner, attemptId);
+    await repository.grantDays(7_411, 60);
+    await repository.setEntitlement(owner, 'voice_tutor', {
+      startsAt: NOW,
+      endsAt: new Date(new Date(attempt.evaluated_at).getTime() + 60 * 86_400_000),
+    });
+    const body = {
+      source: 'speaking', attemptId, revision: 1,
+      pronunciationErrorRef: `phoneme.${attemptId}.0.0`,
+    };
+    const assistedResponse = await request(owner, '/api/v1/voice-tutor/sessions', {
+      method: 'POST', headers: { 'Idempotency-Key': 'final19-fallback-assisted-01' },
+      body: JSON.stringify(body),
+    });
+    assert.equal(assistedResponse.status, 201);
+    const assisted = await assistedResponse.json();
+    const assistedBefore = await repository.getVoiceTutorSession(owner, assisted.session.id);
+    await repository.markSpeakingSessionAssisted(owner, 2, attempt.source_session_id, {
+      now: new Date(NOW.getTime() + 1_000),
+    });
+    const staleFallback = await request(
+      owner, `/api/v1/voice-tutor/sessions/${assisted.session.id}/fallback`, {
+        method: 'POST', body: JSON.stringify({ nonce: assisted.nonce }),
+      },
+    );
+    assert.equal(staleFallback.status, 409);
+    assert.equal((await staleFallback.json()).error.code, 'VOICE_TUTOR_PRONUNCIATION_POINTER_STALE');
+    assert.deepEqual(await repository.getVoiceTutorSession(owner, assisted.session.id), assistedBefore);
+  }, {
+    routeNow: () => authorityNow,
+    repositoryOptions: { voiceTutorMutationNow: () => authorityNow },
+  });
+});
+
+test('fallback rejects a pronunciation pointer exactly at expiry without file mutation', async () => {
+  let authorityNow = NOW;
+  await withReviewApp(async ({ repository, owner, request }) => {
+    const expiryAttemptId = await seedMaxScorePronunciationReview(repository, owner);
+    const expiryAttempt = await repository.getSpeakingAttempt(owner, expiryAttemptId);
+    await repository.grantDays(7_411, 60);
+    await repository.setEntitlement(owner, 'voice_tutor', {
+      startsAt: NOW,
+      endsAt: new Date(new Date(expiryAttempt.evaluated_at).getTime() + 60 * 86_400_000),
+    });
+    const expiryResponse = await request(owner, '/api/v1/voice-tutor/sessions', {
+      method: 'POST', headers: { 'Idempotency-Key': 'final19-fallback-expiry-01' },
+      body: JSON.stringify({
+        source: 'speaking', attemptId: expiryAttemptId, revision: 1,
+        pronunciationErrorRef: `phoneme.${expiryAttemptId}.0.0`,
+      }),
+    });
+    assert.equal(expiryResponse.status, 201);
+    const expiry = await expiryResponse.json();
+    const expiryBefore = await repository.getVoiceTutorSession(owner, expiry.session.id);
+    authorityNow = new Date(new Date(expiryAttempt.evaluated_at).getTime() + 30 * 86_400_000);
+    const expiredFallback = await request(
+      owner, `/api/v1/voice-tutor/sessions/${expiry.session.id}/fallback`, {
+        method: 'POST', body: JSON.stringify({ nonce: expiry.nonce }),
+      },
+    );
+    assert.equal(expiredFallback.status, 409);
+    assert.equal((await expiredFallback.json()).error.code, 'VOICE_TUTOR_PRONUNCIATION_POINTER_EXPIRED');
+    assert.deepEqual(await repository.getVoiceTutorSession(owner, expiry.session.id), expiryBefore);
+  }, {
+    routeNow: () => authorityNow,
+    repositoryOptions: { voiceTutorMutationNow: () => authorityNow },
+  });
+});
+
+test('fresh create propagates entitlement failure from ticket issue without local fallback', async () => {
+  let authorityNow = NOW;
+  let textCalls = 0;
+  let reservedBeforeIssue;
+  const hooks = new Map();
+  await withReviewApp(async ({ repository, owner, source, request }) => {
+    hooks.set('issueVoiceTutorProxyTicket', async (original, username, sessionId, input) => {
+      reservedBeforeIssue = await repository.getVoiceTutorSession(username, sessionId);
+      const revokedAt = new Date(NOW.getTime() + 1_000);
+      assert.equal(await repository.revokeEntitlement(owner, 'voice_tutor', 7_411_099, {
+        now: revokedAt,
+      }), true);
+      authorityNow = new Date(revokedAt.getTime() + 1);
+      return original(username, sessionId, input);
+    });
+    const response = await request(owner, '/api/v1/voice-tutor/sessions', {
+      method: 'POST', headers: { 'Idempotency-Key': 'final19-create-revoke-issue-01' },
+      body: JSON.stringify({
+        source: 'writing', attemptId: source.writingId, revision: 1, criterionIndex: 0,
+      }),
+    });
+    assert.equal(response.status, 403);
+    assert.equal((await response.json()).error.code, 'VOICE_TUTOR_PREMIUM_REQUIRED');
+    const after = await repository.getVoiceTutorSession(owner, reservedBeforeIssue.id);
+    assert.deepEqual(after, reservedBeforeIssue);
+    assert.equal(textCalls, 0);
+  }, {
+    repositoryHooks: hooks,
+    routeNow: () => authorityNow,
+    repositoryOptions: { voiceTutorMutationNow: () => authorityNow },
+    textTutor: { async createTurn() { textCalls += 1; return {}; } },
+  });
+});
+
+test('fresh create propagates pronunciation drift from ticket issue without local fallback', async () => {
+  let textCalls = 0;
+  let reservedBeforeIssue;
+  const hooks = new Map();
+  await withReviewApp(async ({ repository, owner, request }) => {
+    const attemptId = await seedMaxScorePronunciationReview(repository, owner);
+    const attempt = await repository.getSpeakingAttempt(owner, attemptId);
+    hooks.set('issueVoiceTutorProxyTicket', async (original, username, sessionId, input) => {
+      reservedBeforeIssue = await repository.getVoiceTutorSession(username, sessionId);
+      await repository.markSpeakingSessionAssisted(owner, 2, attempt.source_session_id, {
+        now: new Date(NOW.getTime() + 1_000),
+      });
+      return original(username, sessionId, input);
+    });
+    const response = await request(owner, '/api/v1/voice-tutor/sessions', {
+      method: 'POST', headers: { 'Idempotency-Key': 'final19-create-assist-issue-01' },
+      body: JSON.stringify({
+        source: 'speaking', attemptId, revision: 1,
+        pronunciationErrorRef: `phoneme.${attemptId}.0.0`,
+      }),
+    });
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).error.code, 'VOICE_TUTOR_PRONUNCIATION_POINTER_STALE');
+    assert.deepEqual(await repository.getVoiceTutorSession(owner, reservedBeforeIssue.id), reservedBeforeIssue);
+    assert.equal(textCalls, 0);
+  }, {
+    repositoryHooks: hooks,
+    textTutor: { async createTurn() { textCalls += 1; return {}; } },
+  });
+});
+
+test('fresh create propagates ticket integrity conflicts without local fallback', async () => {
+  let textCalls = 0;
+  let reservedBeforeIssue;
+  const hooks = new Map();
+  await withReviewApp(async ({ repository, owner, source, request }) => {
+    hooks.set('issueVoiceTutorProxyTicket', async (_original, username, sessionId) => {
+      reservedBeforeIssue = await repository.getVoiceTutorSession(username, sessionId);
+      throw Object.assign(new Error('VOICE_TUTOR_PROXY_TICKET_INVALID'), {
+        code: 'VOICE_TUTOR_PROXY_TICKET_INVALID',
+      });
+    });
+    const response = await request(owner, '/api/v1/voice-tutor/sessions', {
+      method: 'POST', headers: { 'Idempotency-Key': 'final19-create-ticket-conflict-01' },
+      body: JSON.stringify({
+        source: 'writing', attemptId: source.writingId, revision: 1, criterionIndex: 0,
+      }),
+    });
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).error.code, 'VOICE_TUTOR_PROXY_TICKET_INVALID');
+    assert.deepEqual(await repository.getVoiceTutorSession(owner, reservedBeforeIssue.id),
+      reservedBeforeIssue);
+    assert.equal(textCalls, 0);
+  }, {
+    repositoryHooks: hooks,
+    textTutor: { async createTurn() { textCalls += 1; return {}; } },
+  });
+});
+
+test('fresh create keeps explicit provider unavailability as the bounded local fallback', async () => {
+  const hooks = new Map();
+  await withReviewApp(async ({ repository, owner, source, request }) => {
+    hooks.set('issueVoiceTutorProxyTicket', async () => {
+      throw Object.assign(new Error('VOICE_TUTOR_PROVIDER_UNAVAILABLE'), {
+        code: 'VOICE_TUTOR_PROVIDER_UNAVAILABLE',
+      });
+    });
+    const response = await request(owner, '/api/v1/voice-tutor/sessions', {
+      method: 'POST', headers: { 'Idempotency-Key': 'final19-create-provider-fallback-01' },
+      body: JSON.stringify({
+        source: 'writing', attemptId: source.writingId, revision: 1, criterionIndex: 0,
+      }),
+    });
+    assert.equal(response.status, 201);
+    const body = await response.json();
+    assert.equal(body.mode, 'local');
+    assert.equal(body.voice_unavailable.code, 'VOICE_TUTOR_PROVIDER_UNAVAILABLE');
+    const stored = await repository.getVoiceTutorSession(owner, body.session.id);
+    assert.equal(stored.delivery_mode, 'local');
+    assert.equal(stored.billable_seconds, 0);
+  }, { repositoryHooks: hooks });
+});
+
+test('failed file replay rolls back expiry in memory and in the next persisted snapshot', async () => {
+  let authorityNow = NOW;
+  await withReviewApp(async ({ repository, owner, source, request, dataFile }) => {
+    const body = {
+      source: 'writing', attemptId: source.writingId, revision: 1, criterionIndex: 0,
+    };
+    const headers = { 'Idempotency-Key': 'final19-file-replay-rollback-01' };
+    const createdResponse = await request(owner, '/api/v1/voice-tutor/sessions', {
+      method: 'POST', headers, body: JSON.stringify(body),
+    });
+    assert.equal(createdResponse.status, 201);
+    const created = await createdResponse.json();
+    const revokedAt = new Date(NOW.getTime() + 1_000);
+    assert.equal(await repository.revokeEntitlement(owner, 'voice_tutor', 7_411_099, {
+      now: revokedAt,
+    }), true);
+    const before = await repository.getVoiceTutorSession(owner, created.session.id);
+    authorityNow = new Date(new Date(before.expires_at).getTime() + 1);
+    const replay = await request(owner, '/api/v1/voice-tutor/sessions', {
+      method: 'POST', headers, body: JSON.stringify(body),
+    });
+    assert.equal(replay.status, 403);
+    assert.deepEqual(await repository.getVoiceTutorSession(owner, created.session.id), before);
+
+    await repository.saveProgress(owner, { final19: true });
+    const persisted = JSON.parse(await fs.readFile(dataFile, 'utf8'));
+    assert.deepEqual(
+      persisted.voice_tutor_sessions.find((session) => session.id === created.session.id),
+      before,
+    );
+  }, {
+    routeNow: () => authorityNow,
+    repositoryOptions: { voiceTutorMutationNow: () => authorityNow },
+  });
+});
+
 test('review tracer is owner-bound, rejects client context and never exposes the full response', async () => {
   await withReviewApp(async ({ repository, owner, stranger, source, request }) => {
     const forged = await request(owner, '/api/v1/voice-tutor/sessions', {
@@ -407,6 +1036,43 @@ test('speaking review tracer uses the stored transcript and rejects stale or inc
     const stored = await repository.getVoiceTutorSession(owner, created.session.id);
     const rebuilt = await rebuildSourceCapsule(repository, owner, stored.capsule, NOW);
     assert.equal(rebuilt.learner_answer, SPEAKING_SECRET);
+    assert.equal((await request(owner, `/api/v1/voice-tutor/sessions/${created.session.id}/finish`, {
+      method: 'POST', body: JSON.stringify({}),
+    })).status, 200);
+
+    const maxScoreAttemptId = await seedMaxScorePronunciationReview(repository, owner);
+    const pronunciation = await request(owner, '/api/v1/voice-tutor/sessions', {
+      method: 'POST', headers: { 'Idempotency-Key': 'review-speaking-pronunciation-01' },
+      body: JSON.stringify({
+        source: 'speaking', attemptId: maxScoreAttemptId, revision: 1,
+        pronunciationErrorRef: `phoneme.${maxScoreAttemptId}.0.0`,
+      }),
+    });
+    assert.equal(pronunciation.status, 201);
+    const pronunciationCreated = await pronunciation.json();
+    assert.equal(pronunciationCreated.capsule.source.pronunciation_error_ref,
+      `phoneme.${maxScoreAttemptId}.0.0`);
+    assert.equal(pronunciationCreated.capsule.error.lost_points, 0);
+    const storedPronunciation = await repository.getVoiceTutorSession(
+      owner, pronunciationCreated.session.id,
+    );
+    const exportedPronunciation = (await repository.exportUserData(owner)).voice_tutor_sessions
+      .find((session) => session.id === pronunciationCreated.session.id);
+    assert.equal(exportedPronunciation.capsule.source.pronunciation_error_ref,
+      `phoneme.${maxScoreAttemptId}.0.0`);
+    assert.equal(JSON.stringify(exportedPronunciation).includes(maxScorePronunciationAttempt().transcript),
+      false);
+    const rebuiltPronunciation = await rebuildSourceCapsule(
+      repository, owner, storedPronunciation.capsule, NOW,
+    );
+    assert.equal(rebuiltPronunciation.item.reference.pronunciationError.phoneme, 'w');
+    await assert.rejects(
+      rebuildSourceCapsule(
+        repository, owner, storedPronunciation.capsule,
+        new Date('2026-10-08T08:00:00.000Z'),
+      ),
+      (error) => error.code === 'VOICE_TUTOR_PRONUNCIATION_POINTER_EXPIRED',
+    );
 
     const semanticAttemptId = await repository.createSpeakingAttempt(owner, {
       taskType: 4,

@@ -90,7 +90,7 @@ test('file storage rewrites legacy full and hashed reference capsules before per
       },
     ],
   }), 'utf8');
-  const repository = createFileRepository(file);
+  const repository = createFileRepository(file, { voiceTutorMutationNow: () => NOW });
   try {
     const exported = await repository.exportUserData('legacy');
     const encoded = JSON.stringify(exported.voice_tutor_sessions);
@@ -282,7 +282,9 @@ test('clarification text reaches the provider transiently without changing the r
 
 test('file storage atomically binds provisional rules, bounds clarifications and supports structured report review/privacy', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-ticket-09-'));
-  const repository = createFileRepository(path.join(directory, 'data.json'));
+  const repository = createFileRepository(path.join(directory, 'data.json'), {
+    voiceTutorMutationNow: () => NOW,
+  });
   try {
     const student = await repository.createTelegramUser(9901, 'Loop Student');
     const admin = await repository.createTelegramUser(9902, 'Loop Admin');
@@ -348,7 +350,9 @@ test('file storage atomically binds provisional rules, bounds clarifications and
 
 test('file storage claims discovery before external work and a finish during discovery cannot bind a provisional rule', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-ticket-09-discovery-race-'));
-  const repository = createFileRepository(path.join(directory, 'data.json'));
+  const repository = createFileRepository(path.join(directory, 'data.json'), {
+    voiceTutorMutationNow: () => NOW,
+  });
   try {
     const student = await repository.createTelegramUser(9911, 'Discovery Race Student');
     await repository.grantDays(9911, 30, 'Discovery Race Student');
@@ -388,7 +392,9 @@ test('file storage claims discovery before external work and a finish during dis
 
 test('file storage atomically claims and observably settles paid AI rate/budget slots', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-ticket-09-ai-slot-'));
-  const repository = createFileRepository(path.join(directory, 'data.json'));
+  const repository = createFileRepository(path.join(directory, 'data.json'), {
+    voiceTutorMutationNow: () => NOW,
+  });
   try {
     const student = await repository.createTelegramUser(9921, 'AI Slot Student');
     const claims = await Promise.allSettled([

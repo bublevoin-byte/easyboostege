@@ -1,6 +1,11 @@
 import crypto from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { parseSpeakingReview, speakingTrustedInputSchema } from '../ai/speaking.js';
 import { parseStoredSpeakingReview, SPEAKING_SCORING_VERSION } from '../speaking/fipi-scoring.js';
+import {
+  buildSpeakingLearningAttempt,
+  speakingPronunciationErrorPointer,
+} from '../speaking/learning-loop.js';
 import { parseAndValidateWritingReview, writingAssignmentSchema } from '../ai/writing.js';
 import { getCanonicalVoiceTutorItem, getCanonicalVoiceTutorResultSet } from './canonical-items.js';
 import {
@@ -458,9 +463,119 @@ function assignmentPrompt(source, taskType, assignment) {
   return `${label}: ${boundedString(JSON.stringify(assignment), 2_500, 'VOICE_TUTOR_CAPSULE_TOO_LARGE')}`;
 }
 
-export function buildWritingSpeakingCapsule({ source, attempt, expectedRevision, criterionIndex }) {
+function pronunciationCheck(prompt, answers) {
+  return { prompt, answers };
+}
+
+function buildSpeakingPronunciationCapsule({ attempt, expectedRevision, pronunciationErrorRef, referenceTime }) {
+  const sourceId = Number(attempt.id);
+  const ref = boundedString(
+    pronunciationErrorRef, 120, 'VOICE_TUTOR_PRONUNCIATION_POINTER_STALE',
+  );
+  if (!/^(?:word|phoneme)\.[0-9]+\.[0-9]+(?:\.[0-9]+)?$/u.test(ref)
+    || !ref.startsWith(`word.${sourceId}.`) && !ref.startsWith(`phoneme.${sourceId}.`)) {
+    throw new VoiceTutorCapsuleError('VOICE_TUTOR_PRONUNCIATION_POINTER_STALE');
+  }
+  if (Number(expectedRevision) !== 1) throw new VoiceTutorCapsuleError('VOICE_TUTOR_REVISION_MISMATCH');
+  const validated = validatedReviewAttempt('speaking', attempt);
+  const evidence = buildSpeakingLearningAttempt(attempt);
+  if (!evidence?.masteryEligible || evidence.status !== 'scored'
+    || evidence.criteria.some((criterion) => criterion.score < criterion.maxScore)) {
+    throw new VoiceTutorCapsuleError('VOICE_TUTOR_PRONUNCIATION_POINTER_STALE');
+  }
+  const pointer = speakingPronunciationErrorPointer(evidence, { now: evidence.observedAt });
+  if (!pointer || pointer.ref !== ref) {
+    throw new VoiceTutorCapsuleError('VOICE_TUTOR_PRONUNCIATION_POINTER_STALE');
+  }
+  const effectiveNow = referenceTime instanceof Date ? referenceTime : new Date(referenceTime || Date.now());
+  if (Number.isNaN(effectiveNow.getTime())) {
+    throw new VoiceTutorCapsuleError('VOICE_TUTOR_PRONUNCIATION_POINTER_STALE');
+  }
+  if (effectiveNow >= new Date(pointer.expiresAt)) {
+    throw new VoiceTutorCapsuleError('VOICE_TUTOR_PRONUNCIATION_POINTER_EXPIRED');
+  }
+
+  const skillId = pointer.kind === 'phoneme'
+    ? 'ege.speaking.pronunciation_phonemes' : 'ege.speaking.pronunciation_words';
+  const word = pointer.word;
+  const focus = pointer.kind === 'phoneme' ? `/${pointer.phoneme}/` : `«${word}»`;
+  const microCheck = pronunciationCheck(
+    `Произнеси отдельно слово «${word}», сохраняя фокус на ${focus}.`, [word],
+  );
+  const transferAnswer = `i can say ${word} clearly`;
+  const transferTask = pronunciationCheck(
+    `Произнеси новую фразу: “I can say ${word} clearly.”`, [transferAnswer],
+  );
+  const excludedPrompts = new Set([
+    assignmentPrompt('speaking', validated.taskType, validated.assignment),
+    microCheck.prompt, transferTask.prompt,
+  ].map(practicePromptKey).filter(Boolean));
+  const capsule = {
+    id: `voice-capsule:speaking:${sourceId}:pronunciation:${ref}`,
+    version: WRITING_SPEAKING_CAPSULE_VERSION,
+    source: {
+      attempt_type: 'speaking', attempt_id: sourceId, item_revision: 1,
+      pronunciation_error_ref: ref,
+    },
+    module: 'speaking',
+    item: {
+      id: `speaking.pronunciation.${ref}`,
+      prompt: assignmentPrompt('speaking', validated.taskType, validated.assignment),
+      reference: {
+        pronunciationError: structuredClone(pointer),
+        attemptSummary: {
+          attemptId: evidence.attemptId, taskType: evidence.taskType,
+          score: evidence.score, maxScore: evidence.maxScore,
+          observedAt: evidence.observedAt, accentLocale: evidence.accentLocale,
+        },
+      },
+    },
+    learner_answer: validated.learnerAnswer,
+    error: {
+      type: 'speaking_pronunciation_error', lost_points: 0,
+      ref, kind: pointer.kind, accuracy_score: pointer.accuracyScore,
+    },
+    skill: { id: skillId, label: pointer.label },
+    rule: {
+      id: `speaking.pronunciation.${pointer.kind}.review-v1`,
+      title: pointer.label,
+      explanation: `Автоматическая проверка отметила ${focus} как самый слабый точный фрагмент: ${pointer.accuracyScore} из 100. Официальный балл ФИПИ не меняется; отдельно закрепляем артикуляцию и повторяем слово в новой фразе.`,
+      examples: [word],
+    },
+    checks: {
+      micro_check: { id: `speaking.${sourceId}.pronunciation.check`, ...microCheck },
+      transfer_task: { id: `speaking.${sourceId}.pronunciation.transfer`, ...transferTask },
+    },
+    recovery_tasks: {
+      day_1: recoveryTask({
+        skillId,
+        prompt: `На следующий день произнеси фразу: “The word is ${word}.”`,
+        answers: [`the word is ${word}`],
+      }, skillId, excludedPrompts),
+      day_7: recoveryTask({
+        skillId,
+        prompt: `Через неделю произнеси фразу: “Today I practised ${word}.”`,
+        answers: [`today i practised ${word}`],
+      }, skillId, excludedPrompts),
+    },
+  };
+  if (JSON.stringify(capsule).length > 12_000) throw new VoiceTutorCapsuleError('VOICE_TUTOR_CAPSULE_TOO_LARGE');
+  return capsule;
+}
+
+export function buildWritingSpeakingCapsule({
+  source, attempt, expectedRevision, criterionIndex, pronunciationErrorRef, referenceTime,
+}) {
   if (source !== 'writing' && source !== 'speaking') throw new VoiceTutorCapsuleError('VOICE_TUTOR_ATTEMPT_NOT_SUPPORTED');
   if (!Number.isInteger(Number(attempt?.id)) || Number(attempt.id) < 1) throw new VoiceTutorCapsuleError('VOICE_TUTOR_ATTEMPT_NOT_FOUND');
+  if (pronunciationErrorRef != null) {
+    if (source !== 'speaking' || criterionIndex != null) {
+      throw new VoiceTutorCapsuleError('VOICE_TUTOR_PRONUNCIATION_POINTER_STALE');
+    }
+    return buildSpeakingPronunciationCapsule({
+      attempt, expectedRevision, pronunciationErrorRef, referenceTime,
+    });
+  }
   if (Number(expectedRevision) !== 1) throw new VoiceTutorCapsuleError('VOICE_TUTOR_REVISION_MISMATCH');
   if (!Number.isInteger(criterionIndex) || criterionIndex < 0 || criterionIndex > 20) {
     throw new VoiceTutorCapsuleError('VOICE_TUTOR_CRITERION_NOT_FOUND');
@@ -563,4 +678,24 @@ export function persistedVoiceTutorCapsule(capsule) {
     skill_id: capsule.skill.id,
     ...(capsule.rule_card_id ? { rule_card_id: capsule.rule_card_id } : {}),
   };
+}
+
+export function revalidateSpeakingPronunciationCapsule({
+  attempt, storedCapsule, referenceTime = new Date(),
+}) {
+  const source = storedCapsule?.source;
+  if (source?.attempt_type !== 'speaking' || !source.pronunciation_error_ref) {
+    throw new VoiceTutorCapsuleError('VOICE_TUTOR_PRONUNCIATION_POINTER_STALE');
+  }
+  const capsule = buildWritingSpeakingCapsule({
+    source: 'speaking', attempt,
+    expectedRevision: Number(source.item_revision),
+    pronunciationErrorRef: source.pronunciation_error_ref,
+    referenceTime,
+  });
+  const canonical = persistedVoiceTutorCapsule(capsule);
+  if (!isDeepStrictEqual(canonical, storedCapsule)) {
+    throw new VoiceTutorCapsuleError('VOICE_TUTOR_PRONUNCIATION_POINTER_STALE');
+  }
+  return capsule;
 }

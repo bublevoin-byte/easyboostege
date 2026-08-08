@@ -142,7 +142,7 @@ test('new learner starts and resumes one server-owned bounded diagnostic without
     const payload = await started.json();
     assert.equal(payload.required, true);
     assert.equal(payload.diagnostic.status, 'in_progress');
-    assert.equal(payload.diagnostic.catalogVersion, 'ege-short-diagnostic-v1');
+    assert.equal(payload.diagnostic.catalogVersion, 'ege-short-diagnostic-v2');
     assert.equal(payload.diagnostic.estimatedMinutes, 15);
     assert.equal(payload.diagnostic.answeredItems, 0);
     assert.equal(payload.diagnostic.maxItems, 12);
@@ -215,11 +215,11 @@ test('accepted answers adapt the next private probe before completion without be
 });
 
 test('versioned catalog covers each taxonomy skill and selection prefers uncertain high-impact gaps', () => {
-  assert.equal(SHORT_DIAGNOSTIC_CATALOG.version, 'ege-short-diagnostic-v1');
-  assert.equal(getDiagnosticCatalog('ege-short-diagnostic-v1'), SHORT_DIAGNOSTIC_CATALOG);
+  assert.equal(SHORT_DIAGNOSTIC_CATALOG.version, 'ege-short-diagnostic-v2');
+  assert.equal(getDiagnosticCatalog('ege-short-diagnostic-v2'), SHORT_DIAGNOSTIC_CATALOG);
   assert.equal(getDiagnosticCatalog('unknown-diagnostic-version'), null);
   assert.equal(
-    getDiagnosticItem('ege-short-diagnostic-v1', 'grammar-forms-present-perfect-1')?.skillId,
+    getDiagnosticItem('ege-short-diagnostic-v2', 'grammar-forms-present-perfect-1')?.skillId,
     'ege.grammar.forms',
   );
   assert.equal(getDiagnosticItem('unknown-diagnostic-version', 'grammar-forms-present-perfect-1'), null);
@@ -238,7 +238,7 @@ test('versioned catalog covers each taxonomy skill and selection prefers uncerta
       assert.match(safe.measurementNotice, /не подтверждает навык/u);
     }
   }
-  const selected = selectDiagnosticItem('ege-short-diagnostic-v1', {
+  const selected = selectDiagnosticItem('ege-short-diagnostic-v2', {
     skills: [
       ...EGE_SKILL_TAXONOMY.skills.map((skill) => ({ id: skill.id, uncertainty: 0 })),
       { id: 'ege.grammar.forms', uncertainty: 10 },
@@ -247,12 +247,42 @@ test('versioned catalog covers each taxonomy skill and selection prefers uncerta
     ],
   });
   assert.equal(selected.skillId, 'ege.reading.detail');
-  assert.notEqual(selectDiagnosticItem('ege-short-diagnostic-v1', {}, [selected.id])?.id, selected.id);
+  assert.notEqual(selectDiagnosticItem('ege-short-diagnostic-v2', {}, [selected.id])?.id, selected.id);
   assert.equal(selectDiagnosticItem('unknown-diagnostic-version', {}, []), null);
 });
 
+test('published v2 diagnostics preserve the exact saved v1 catalogs and mappings', () => {
+  assert.equal(DIAGNOSTIC_REGISTRY.currentVersion, 'ege-short-diagnostic-v2');
+  assert.equal(DIAGNOSTIC_REGISTRY.versionForDepth('short'), 'ege-short-diagnostic-v2');
+  assert.equal(DIAGNOSTIC_REGISTRY.versionForDepth('deep'), 'ege-deep-diagnostic-v2');
+  const legacyShort = getDiagnosticCatalog('ege-short-diagnostic-v1');
+  const legacyDeep = getDiagnosticCatalog('ege-deep-diagnostic-v1');
+  const currentShort = getDiagnosticCatalog('ege-short-diagnostic-v2');
+  const currentDeep = getDiagnosticCatalog('ege-deep-diagnostic-v2');
+  assert.ok(legacyShort && legacyDeep && currentShort && currentDeep);
+  assert.equal(legacyShort.items.length, 12);
+  assert.equal(legacyDeep.items.length, 24);
+  assert.equal(getDiagnosticItem(
+    legacyShort.version, 'speaking-interaction-follow-up-1',
+  ).skillId, 'ege.speaking.interaction');
+  assert.equal(getDiagnosticItem(
+    legacyShort.version, 'speaking-monologue-structure-1',
+  ).skillId, 'ege.speaking.monologue');
+  assert.equal(getDiagnosticItem(
+    legacyDeep.version, 'speaking-interaction-clarify-2',
+  ).skillId, 'ege.speaking.interaction');
+  assert.equal(getDiagnosticItem(
+    legacyDeep.version, 'speaking-monologue-example-2',
+  ).skillId, 'ege.speaking.monologue');
+  assert.equal(legacyShort.items.some((item) => item.id === 'pronunciation-phonemes-1'), false);
+  assert.deepEqual(
+    [...new Set(currentShort.items.map((item) => item.skillId))].sort(),
+    EGE_SKILL_TAXONOMY.skills.map((skill) => skill.id).sort(),
+  );
+});
+
 test('diagnostic registry versions catalog and policy together instead of borrowing current limits', () => {
-  assert.equal(DIAGNOSTIC_REGISTRY.currentVersion, 'ege-short-diagnostic-v1');
+  assert.equal(DIAGNOSTIC_REGISTRY.currentVersion, 'ege-short-diagnostic-v2');
   assert.equal(getDiagnosticPolicy('ege-short-diagnostic-v1').maximumItems, 12);
   assert.equal(getDiagnosticPolicy('unknown-diagnostic-version'), null);
 
@@ -427,7 +457,7 @@ test('replayable browser listening probes stay assisted and cannot create indepe
   const grammar = profile.skills.find((skill) => skill.id === 'ege.grammar.forms');
   assert.equal(listening.independentEvidenceCount, 0);
   assert.equal(listening.evidenceQuality, 'assisted');
-  assert.equal(listening.mastery, 49);
+  assert.equal(listening.mastery, 0);
   assert.equal(listening.uncertainty, 100);
   assert.equal(listening.status, 'preliminary');
   assert.equal(listening.explanationCode, 'assisted_local_tts_diagnostic');

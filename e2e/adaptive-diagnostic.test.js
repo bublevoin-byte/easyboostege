@@ -9,9 +9,27 @@ import { fileURLToPath } from 'node:url';
 import jwt from 'jsonwebtoken';
 import { chromium } from 'playwright';
 import { getDiagnosticItem } from '../adaptive-learning/diagnostic-catalog.js';
+import { EGE_SKILL_TAXONOMY } from '../adaptive-learning/profile.js';
 
 const projectDirectory = fileURLToPath(new URL('..', import.meta.url));
 const serverPath = fileURLToPath(new URL('../server.js', import.meta.url));
+
+function writerBaselineAttempts() {
+  return EGE_SKILL_TAXONOMY.skills
+    .filter((skill) => skill.id !== 'ege.writing.email')
+    .map((skill, index) => ({
+      id: `71000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+      username: 'adaptivewriter',
+      module: skill.module,
+      activity: skill.id,
+      score: 10,
+      max_score: 10,
+      duration_ms: 60_000,
+      metadata: {},
+      evidence_quality: 'server_verified_unassisted',
+      created_at: Date.parse(`2026-08-04T08:${String(index).padStart(2, '0')}:00.000Z`),
+    }));
+}
 
 async function findAvailablePort() {
   const listener = net.createServer();
@@ -238,6 +256,7 @@ async function runAdaptiveDiagnosticE2E() {
       progress: {
         adaptivefree: {}, adaptivee2e: {}, adaptiveadjust: {}, adaptiveexam: {}, adaptivewriter: {},
       },
+      module_attempts: writerBaselineAttempts(),
       subscription_entitlements: {
         adaptivewriter: {
           voice_tutor: {

@@ -5,6 +5,7 @@ const PROFILE_KEYS = Object.freeze([
   'established_skill_count',
   'estimates',
   'evidence_count',
+  'evidence_fingerprint',
   'evidence_observed_at',
   'evidence_source_count',
   'evidence_watermark_version',
@@ -45,7 +46,7 @@ export async function assertAdaptiveProfileRepositoryContract(assert, repository
   assert.deepEqual(saved, loaded, 'save and get return the same repository DTO');
   assert.deepEqual(Object.keys(loaded).sort(), [...PROFILE_KEYS]);
   assert.equal(loaded.updated_at, now.toISOString());
-  assert.equal(loaded.estimates.length, 12);
+  assert.equal(loaded.estimates.length, profile.skills.length);
   assert.deepEqual(
     loaded.estimates.map((estimate) => estimate.skill_id),
     [...loaded.estimates.map((estimate) => estimate.skill_id)].sort(),

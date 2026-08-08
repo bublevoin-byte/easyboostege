@@ -268,6 +268,12 @@ export function createAdaptiveLearningRoutes({
     });
   }
 
+  function adaptiveOverviewRetryRequired() {
+    return Object.assign(new Error('ADAPTIVE_PROFILE_RETRY_REQUIRED'), {
+      code: 'ADAPTIVE_PROFILE_RETRY_REQUIRED', status: 409, retryable: true,
+    });
+  }
+
   async function overview(username, { remainingPlanRetries = 2, includePlan = enabled } = {}) {
     const [goal, sources, access] = await Promise.all([
       db.getAdaptiveLearningGoal(username),
@@ -277,7 +283,21 @@ export function createAdaptiveLearningRoutes({
     const baseProfile = buildAdaptiveLearningProfile(sources, { diagnosticRegistry });
     const retention = await retentionState(username, baseProfile, sources);
     const profile = applyAdaptiveRetentionState(baseProfile, retention);
-    const authoritativeProfile = await db.saveAdaptiveLearningProfile(username, profile, { now: now() });
+    let authoritativeProfile;
+    try {
+      authoritativeProfile = await db.saveAdaptiveLearningProfile(username, profile, {
+        now: now(), verifyCurrentEvidence: true, diagnosticRegistry,
+      });
+    } catch (error) {
+      if (error?.message === 'ADAPTIVE_PROFILE_EVIDENCE_STALE' && remainingPlanRetries > 0) {
+        return overview(username, {
+          remainingPlanRetries: remainingPlanRetries - 1,
+          includePlan,
+        });
+      }
+      if (error?.message !== 'ADAPTIVE_PROFILE_EVIDENCE_STALE') throw error;
+      throw adaptiveOverviewRetryRequired();
+    }
     const publicProfile = adaptiveLearningProfilePublicDto(authoritativeProfile);
     let plan = null;
     if (goal && includePlan) {
@@ -313,27 +333,29 @@ export function createAdaptiveLearningRoutes({
           profileEvidenceWatermarkVersion: publicProfile.evidenceWatermarkVersion,
           profileEvidenceObservedAt: publicProfile.evidenceObservedAt,
           profileEvidenceSourceCount: publicProfile.evidenceSourceCount,
+          profileEvidenceFingerprint: publicProfile.evidenceFingerprint,
           recalculationBucket: calculated.recalculationBucket,
           plan: calculated,
           now: instant,
-        });
+        }, { diagnosticRegistry });
         if (saved.conflict) {
-          if (remainingPlanRetries > 0) {
-            return overview(username, { remainingPlanRetries: remainingPlanRetries - 1 });
-          }
           throw new Error('ADAPTIVE_PLAN_RECALCULATION_CONFLICT');
         }
         if (Number(saved.plan?.goal_revision) !== Number(goal.revision)) {
-          if (remainingPlanRetries > 0) {
-            return overview(username, { remainingPlanRetries: remainingPlanRetries - 1 });
-          }
           throw new Error('ADAPTIVE_PLAN_RECALCULATION_CONFLICT');
         }
         plan = adaptiveLearningPlanPublicDto(saved.plan);
       } catch (error) {
-        if (['ADAPTIVE_PLAN_GOAL_STALE', 'ADAPTIVE_PLAN_PROFILE_STALE'].includes(error?.message)
-          && remainingPlanRetries > 0) {
-          return overview(username, { remainingPlanRetries: remainingPlanRetries - 1 });
+        if (['ADAPTIVE_PLAN_GOAL_STALE', 'ADAPTIVE_PLAN_PROFILE_STALE',
+          'ADAPTIVE_PLAN_EVIDENCE_STALE', 'ADAPTIVE_PLAN_RECALCULATION_CONFLICT']
+          .includes(error?.message)) {
+          if (remainingPlanRetries > 0) {
+            return overview(username, {
+              remainingPlanRetries: remainingPlanRetries - 1,
+              includePlan,
+            });
+          }
+          throw adaptiveOverviewRetryRequired();
         }
         throw error;
       }
@@ -354,7 +376,19 @@ export function createAdaptiveLearningRoutes({
     } catch (error) { next(error); }
   });
 
-  if (!enabled) return router;
+  function profileRetryError(error, req, res, next) {
+    if (error?.code !== 'ADAPTIVE_PROFILE_RETRY_REQUIRED'
+      && error?.message !== 'ADAPTIVE_PROFILE_RETRY_REQUIRED') return next(error);
+    res.setHeader('Retry-After', '1');
+    return res.status(409).json({
+      error: { code: 'ADAPTIVE_PROFILE_RETRY_REQUIRED', retryable: true },
+    });
+  }
+
+  if (!enabled) {
+    router.use(profileRetryError);
+    return router;
+  }
 
   router.get('/api/v1/adaptive-learning/goal', auth, async (req, res, next) => {
     try {
@@ -497,6 +531,7 @@ export function createAdaptiveLearningRoutes({
       ADAPTIVE_SESSION_PLAN_STALE: [409, 'ADAPTIVE_SESSION_PLAN_STALE'],
       ADAPTIVE_SESSION_ALREADY_CURRENT: [409, 'ADAPTIVE_SESSION_ALREADY_CURRENT'],
       ADAPTIVE_SESSION_REPLACEMENT_ALREADY_USED: [409, 'ADAPTIVE_SESSION_REPLACEMENT_ALREADY_USED'],
+      ADAPTIVE_SESSION_REPLACEMENT_LOCKED: [409, 'ADAPTIVE_SESSION_REPLACEMENT_LOCKED'],
       ADAPTIVE_SESSION_REVISION_CONFLICT: [409, 'ADAPTIVE_SESSION_REVISION_CONFLICT'],
       ADAPTIVE_SESSION_IDEMPOTENCY_CONFLICT: [409, 'IDEMPOTENCY_CONFLICT'],
       ADAPTIVE_SESSION_STATE_CONFLICT: [409, 'ADAPTIVE_SESSION_STATE_CONFLICT'],
@@ -678,12 +713,6 @@ export function createAdaptiveLearningRoutes({
       }
       await requireStoredSessionAccess(req.user, current.session, { block });
       await requireCurrentPremiumDepth(req.user, block);
-      const replay = await db.getAdaptiveLearningSessionMutationReplay(req.user, {
-        operation: 'start', sessionId: req.params.sessionId, idempotencyKey, requestHash,
-      });
-      if (replay) {
-        return res.json(adaptiveStartPublicSnapshot(replay, executionTokenSecret));
-      }
       if (block.kind !== 'learning') throw new Error('ADAPTIVE_SESSION_BLOCK_NOT_LAUNCHABLE');
       const instant = now();
       const claimId = crypto.randomUUID();
@@ -744,7 +773,8 @@ export function createAdaptiveLearningRoutes({
       await requireStoredSessionAccess(req.user, stored.session, { block: requestedBlock });
       await requireCurrentPremiumDepth(req.user, requestedBlock);
       const replay = await db.getAdaptiveLearningSessionMutationReplay(req.user, {
-        operation: 'advance', sessionId: req.params.sessionId, idempotencyKey, requestHash,
+        operation: 'advance', sessionId: req.params.sessionId, blockId: requestedBlock.id,
+        idempotencyKey, requestHash, now: now(),
       });
       if (replay) return res.json(replay);
       const instant = now();
@@ -1170,7 +1200,14 @@ export function createAdaptiveLearningRoutes({
         now: instant,
       });
       if (saved.created) {
-        await db.saveAdaptiveLearningProfile(req.user, completionProfile, { now: instant });
+        try {
+          await db.saveAdaptiveLearningProfile(req.user, completionProfile, {
+            now: instant, verifyCurrentEvidence: true, diagnosticRegistry,
+          });
+        } catch (error) {
+          if (error?.message !== 'ADAPTIVE_PROFILE_EVIDENCE_STALE') throw error;
+          await overview(req.user, { remainingPlanRetries: 2, includePlan: false });
+        }
       }
       return res.status(saved.created ? 201 : 200).json(saved.responseSnapshot);
     } catch (error) {
@@ -1186,5 +1223,6 @@ export function createAdaptiveLearningRoutes({
     }
   });
 
+  router.use(profileRetryError);
   return router;
 }

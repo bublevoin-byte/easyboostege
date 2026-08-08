@@ -7,7 +7,7 @@ const rawSource = await fs.readFile(new URL('../public/screens/speaking.js', imp
 const executableSource = `${rawSource
   .replace(/^import[\s\S]*?from '[^']+';\r?\n/gmu, '')
   .replace(/export \{[\s\S]*?\};\s*$/u, '')}
-window.__speakingScreen={spOpen,spMicCheck,spPrep,spRec,spFinish,spPlay,spCompleteTask1,speStart,getState:function(){return SP},getExamState:function(){return SPE}};`;
+window.__speakingScreen={spOpen,spMicCheck,spPrep,spRec,spFinish,spPlay,spCompleteTask1,spEval,speStart,getState:function(){return SP},getExamState:function(){return SPE}};`;
 
 test('speaking evaluation sends only a server reference and preserves needs_retry as unscored', () => {
   const evaluation = rawSource.slice(rawSource.indexOf('async function spEval'), rawSource.indexOf('function spShowEval'));
@@ -130,6 +130,10 @@ test('real Speaking screen posts task 1 completion metadata and offers explicit 
   await screen.spRec();
   await screen.spFinish();
   await screen.spPlay();
+  assert.doesNotMatch(area.innerHTML, /Оценить по критериям ЕГЭ/u,
+    'paid Task 1 assessment must stay hidden before canonical completion');
+  assert.equal(await screen.spEval({ dataset: {}, disabled: false }), false);
+  assert.equal(requests.length, 1, 'Task 1 cannot upload before the self-rating is persisted');
   await screen.spCompleteTask1('steady', { disabled: false });
 
   assert.deepEqual(JSON.parse(JSON.stringify(requests)), [

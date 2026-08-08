@@ -5,7 +5,7 @@ const PROFILE_FIELDS = Object.freeze([
   'independent_evidence_count', 'assisted_evidence_count', 'client_reported_evidence_count',
   'independent_module_count', 'established_skill_count', 'needs_diagnostic', 'explanation_codes',
   'evidence_watermark_version', 'evidence_observed_at', 'evidence_source_count',
-  'profile_calculation_revision',
+  'evidence_fingerprint', 'profile_calculation_revision',
 ]);
 
 const ESTIMATE_FIELDS = Object.freeze([
@@ -31,6 +31,7 @@ export function adaptiveLearningProfileRepositoryDto(profile, estimates = []) {
   if (!profile) return null;
   return {
     ...allowlist(profile, PROFILE_FIELDS),
+    evidence_fingerprint: profile.evidence_fingerprint ?? null,
     explanation_codes: Array.isArray(profile.explanation_codes) ? structuredClone(profile.explanation_codes) : [],
     evidence_observed_at: timestamp(profile.evidence_observed_at),
     updated_at: timestamp(profile.updated_at),
@@ -95,6 +96,7 @@ export function adaptiveLearningProfilePublicDto(profile) {
     evidenceWatermarkVersion: profile.evidence_watermark_version,
     evidenceObservedAt: profile.evidence_observed_at,
     evidenceSourceCount: Number(profile.evidence_source_count),
+    evidenceFingerprint: profile.evidence_fingerprint ?? null,
     preliminary: Boolean(profile.preliminary),
     status: profile.status,
     confidence: Number(profile.confidence),
@@ -120,6 +122,7 @@ export function adaptiveLearningProfileSnapshotDto(profile) {
     evidenceWatermarkVersion: profile.evidenceWatermarkVersion,
     evidenceObservedAt: timestamp(profile.evidenceObservedAt),
     evidenceSourceCount: Number(profile.evidenceSourceCount),
+    evidenceFingerprint: profile.evidenceFingerprint ?? null,
     preliminary: Boolean(profile.preliminary),
     status: profile.status,
     confidence: Number(profile.confidence),

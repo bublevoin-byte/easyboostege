@@ -25,9 +25,20 @@ import {
   speakingCalibrationMaximum,
   speakingCalibrationRubric,
 } from '../speaking/accent-calibration.js';
+import { buildSpeakingLearningReport } from '../speaking/learning-loop.js';
 
 const emptyBodySchema = z.object({}).strict();
-const assignmentBodySchema = z.object({ calibrationSetupId: z.string().uuid().optional() }).strict();
+const assignmentBodySchema = z.object({
+  calibrationSetupId: z.string().uuid().optional(),
+  targetedPractice: z.object({
+    sourceAttemptId: z.number().int().positive(),
+    reportRevision: z.string().max(80).regex(/^attempt\.[0-9]+\.[0-9]+$/u),
+    accentLocale: z.enum(['en-GB', 'en-US']).nullable(),
+    skillId: z.string().min(3).max(120).regex(/^[a-z0-9._-]+$/u),
+    contentRef: z.string().min(20).max(320)
+      .regex(/^server:speaking:task:[1-4](?::skill:[a-z0-9._-]{3,120})?(?::focus:[a-z0-9._-]{3,120})?:new:v1$/u),
+  }).strict().optional(),
+}).strict();
 const sessionIdSchema = z.string().uuid();
 const questionNumberSchema = z.coerce.number().int().min(1).max(4);
 const interviewQuestionNumberSchema = z.coerce.number().int().min(1).max(5);
@@ -105,6 +116,16 @@ const calibrationReviewSchema = z.discriminatedUnion('sufficient', [
 
 function validationError(req, res, message) {
   return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message, requestId: req.requestId } });
+}
+
+function subscriptionRequiredResponse(req, res, error) {
+  if (error?.code !== 'SUBSCRIPTION_REQUIRED') return false;
+  res.status(403).json({ error: {
+    code: error.code,
+    message: 'Для этой функции требуется активный доступ.',
+    requestId: req.requestId,
+  } });
+  return true;
 }
 
 function publicCatalogSession(session, { catalog, publicAssignment, publicSession, mismatchCode }) {
@@ -185,6 +206,44 @@ export function createSpeakingRoutes({
     } });
     return next(error);
   });
+
+  router.get('/api/v1/speaking/learning-report', auth, requireActiveSubscription, async (req, res, next) => {
+    try {
+      const snapshot = await db.getSpeakingLearningReportSnapshot(req.user, { now: now() });
+      res.setHeader('Cache-Control', 'no-store');
+      return res.json(buildSpeakingLearningReport(snapshot.attempts, {
+        quota: snapshot.quota,
+        activeAccentLocale: snapshot.accentProfile?.locale || null,
+        now: snapshot.effectiveNow,
+      }));
+    } catch (error) {
+      if (subscriptionRequiredResponse(req, res, error)) return undefined;
+      return next(error);
+    }
+  });
+
+  router.post(
+    '/api/v1/speaking/task-:taskType/sessions/:sessionId/assistance',
+    auth,
+    requireActiveSubscription,
+    async (req, res, next) => {
+      const taskType = z.coerce.number().int().min(1).max(4).safeParse(req.params.taskType);
+      const sessionId = sessionIdSchema.safeParse(req.params.sessionId);
+      if (!taskType.success || !sessionId.success || !emptyBodySchema.safeParse(req.body || {}).success) {
+        return validationError(req, res, 'Invalid speaking assistance marker.');
+      }
+      try {
+        const session = await db.markSpeakingSessionAssisted(
+          req.user, taskType.data, sessionId.data, { now: now() },
+        );
+        if (!session) return res.status(404).json({ error: {
+          code: 'SPEAKING_SESSION_NOT_FOUND', message: 'Training session not found.', requestId: req.requestId,
+        } });
+        res.setHeader('Cache-Control', 'no-store');
+        return res.json({ assistanceUsed: true });
+      } catch (error) { return next(error); }
+    },
+  );
 
   function accentCalibrationError(req, res, error) {
     const code = String(error?.code || '');
@@ -718,10 +777,19 @@ export function createSpeakingRoutes({
           tasks: catalog.tasks,
           accentProfile,
           calibrationSetupId: accentProfile ? null : parsed.data.calibrationSetupId,
+          targetedPracticeRequest: parsed.data.targetedPractice || null,
           now: now(),
         });
         return res.status(201).json(response(session));
       } catch (error) {
+        if (subscriptionRequiredResponse(req, res, error)) return undefined;
+        if (error?.code === 'SPEAKING_TARGETED_PRACTICE_STALE') {
+          return res.status(409).json({ error: {
+            code: error.code,
+            message: 'Целевая тренировка устарела. Обнови личный отчёт.',
+            requestId: req.requestId,
+          } });
+        }
         if (accentProfileRequired(req, res, error)) return undefined;
         if (catalogMismatchResponse(req, res, error)) return undefined;
         return next(error);

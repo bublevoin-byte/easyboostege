@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { boundedAcousticMetric } from './acoustic-metrics.js';
 
 export const SPEAKING_SCORING_VERSION = 'speaking-fipi-combiner-v2';
 export const SPEAKING_SEMANTIC_CONFIDENCE_THRESHOLD = 0.65;
@@ -144,32 +145,68 @@ export function parseSpeakingSemanticFacts(taskType, input) {
 const acousticEventSchema = z.object({
   id: eventId,
   owner: z.literal('azure_pronunciation'),
-  type: z.enum(['mispronunciation', 'omission', 'insertion']),
+  type: z.enum(['mispronunciation', 'omission', 'insertion', 'unexpected_break', 'missing_break', 'monotone']),
   gross: z.boolean().nullable(),
   itemIndex: z.number().int().min(1).max(5).nullable(),
   accuracyScore: z.number().finite().min(0).max(100).nullable(),
   start: z.number().int().min(0).max(20_000).nullable(),
   end: z.number().int().min(1).max(20_000).nullable(),
+  offsetSeconds: z.number().finite().min(0).max(180).nullable().optional(),
+  durationSeconds: z.number().finite().positive().max(180).nullable().optional(),
+  word: z.string().trim().min(1).max(120).optional(),
+  phonemes: z.array(z.object({
+    label: z.string().trim().min(1).max(20),
+    accuracyScore: z.number().finite().min(0).max(100).nullable(),
+  }).strict()).max(20).optional(),
 }).strict().superRefine((event, context) => {
   if ((event.start == null) !== (event.end == null)) {
     context.addIssue({ code: 'custom', message: 'acoustic transcript span must be complete' });
   } else if (event.start != null && event.end <= event.start) {
     context.addIssue({ code: 'custom', message: 'acoustic transcript span must be positive' });
   }
+  if ((event.offsetSeconds == null) !== (event.durationSeconds == null)) {
+    context.addIssue({ code: 'custom', message: 'acoustic word timing must be complete' });
+  } else if (event.offsetSeconds != null && event.offsetSeconds + event.durationSeconds > 180.001) {
+    context.addIssue({ code: 'custom', message: 'acoustic word timing exceeds the recording limit' });
+  }
 });
 const acousticItemDurationSchema = z.object({
   itemIndex: z.number().int().min(1).max(5),
   durationSeconds: z.number().finite().min(1).max(180),
 }).strict();
+const acousticTargetMeasurementSchema = z.object({
+  focusRef: z.string().trim().min(1).max(120)
+    .regex(/^(?:word|phoneme)\.[0-9]+\.[0-9]+(?:\.[0-9]+)?$/u),
+  kind: z.enum(['word', 'phoneme']),
+  value: safeText(120),
+  anchorWord: safeText(120),
+  anchorObserved: z.boolean(),
+  score: z.number().finite().min(0).max(100).nullable(),
+}).strict().superRefine((measurement, context) => {
+  if (!measurement.focusRef.startsWith(`${measurement.kind}.`)) {
+    context.addIssue({ code: 'custom', message: 'target measurement kind must match focus reference' });
+  }
+  if (measurement.kind === 'phoneme' && measurement.value.length > 20) {
+    context.addIssue({ code: 'custom', message: 'target phoneme is too long' });
+  }
+  if (!measurement.anchorObserved && measurement.score != null) {
+    context.addIssue({ code: 'custom', message: 'unobserved target anchor cannot have a score' });
+  }
+});
 const acousticSchema = z.object({
   available: z.literal(true),
-  recognitionConfidence: z.number().finite().min(0).max(1),
+  accentLocale: z.enum(['en-GB', 'en-US']).optional(),
+  pauseAnalysisAvailable: z.boolean().default(false),
+  recognitionConfidence: z.number().finite().min(0).max(1).nullable(),
   signalQuality: z.enum(['good', 'acceptable', 'poor']),
   recordingDurationSeconds: z.number().finite().min(1).max(900),
   itemDurations: z.array(acousticItemDurationSchema).max(5),
-  completenessScore: z.number().finite().min(0).max(100).optional(),
-  fluencyScore: z.number().finite().min(0).max(100).optional(),
+  completenessScore: z.number().finite().min(0).max(100).nullable().optional(),
+  fluencyScore: z.number().finite().min(0).max(100).nullable().optional(),
+  wordAccuracyScore: z.number().finite().min(0).max(100).nullable().optional(),
+  phonemeAccuracyScore: z.number().finite().min(0).max(100).nullable().optional(),
   wordEvents: z.array(acousticEventSchema).max(300),
+  targetMeasurement: acousticTargetMeasurementSchema.optional(),
 }).strict().superRefine((facts, context) => {
   const ids = new Set();
   for (const event of facts.wordEvents) {
@@ -240,7 +277,9 @@ function parseAcoustic(taskType, acoustic) {
   } else if (facts.itemDurations.length !== 0) {
     return { retry: retryResult(taskType, 'acoustic_evidence_unavailable') };
   }
-  if (facts.recognitionConfidence < SPEAKING_SEMANTIC_CONFIDENCE_THRESHOLD || facts.signalQuality === 'poor') {
+  if (facts.recognitionConfidence == null
+    || facts.recognitionConfidence < SPEAKING_SEMANTIC_CONFIDENCE_THRESHOLD
+    || facts.signalQuality === 'poor') {
     return { retry: retryResult(taskType, 'acoustic_evidence_uncertain') };
   }
   return { facts };
@@ -257,15 +296,18 @@ function task1Score(acoustic) {
   if (!Number.isFinite(facts.completenessScore) || !Number.isFinite(facts.fluencyScore)) {
     return retryResult(1, 'acoustic_evidence_uncertain');
   }
-  const errors = facts.wordEvents.length;
+  const scoringEvents = facts.wordEvents.filter((event) => (
+    ['mispronunciation', 'omission', 'insertion'].includes(event.type)
+  ));
+  const errors = scoringEvents.length;
   const decisiveFailure = facts.completenessScore < 85 || facts.fluencyScore < 60 || errors > 5;
   if (decisiveFailure) return scoredResult(1, 0, [{
     name: 'Чтение вслух', score: 0, maxScore: 1, evidenceOwner: 'azure_acoustic_and_server_combiner',
   }]);
-  if (facts.wordEvents.some((event) => event.gross == null)) {
+  if (scoringEvents.some((event) => event.gross == null)) {
     return retryResult(1, 'critical_error_evidence_unknown');
   }
-  const grossErrors = facts.wordEvents.filter((event) => event.gross).length;
+  const grossErrors = scoringEvents.filter((event) => event.gross).length;
   const score = grossErrors <= 2 ? 1 : 0;
   return scoredResult(1, score, [{
     name: 'Чтение вслух', score, maxScore: 1, evidenceOwner: 'azure_acoustic_and_server_combiner',
@@ -273,7 +315,8 @@ function task1Score(acoustic) {
 }
 
 function acousticEventsForItem(facts, itemIndex) {
-  return facts.wordEvents.filter((event) => event.itemIndex === itemIndex);
+  return facts.wordEvents.filter((event) => event.itemIndex === itemIndex
+    && ['mispronunciation', 'omission', 'insertion'].includes(event.type));
 }
 
 function task2Score(semantic, acoustic) {
@@ -338,10 +381,13 @@ function languageBand(total, gross) {
 
 function task4LanguageScore(semantic, acoustic) {
   if (semantic.wordList) return 0;
-  if (acoustic.wordEvents.some((event) => event.gross == null)) return null;
-  const total = semantic.lexicalGrammarErrors.length + acoustic.wordEvents.length;
+  const scoringEvents = acoustic.wordEvents.filter((event) => (
+    ['mispronunciation', 'omission', 'insertion'].includes(event.type)
+  ));
+  if (scoringEvents.some((event) => event.gross == null)) return null;
+  const total = semantic.lexicalGrammarErrors.length + scoringEvents.length;
   const gross = semantic.lexicalGrammarErrors.filter((event) => event.gross).length
-    + acoustic.wordEvents.filter((event) => event.gross).length;
+    + scoringEvents.filter((event) => event.gross).length;
   return languageBand(total, gross);
 }
 
@@ -351,7 +397,9 @@ function task4HasCrossSourceOwnershipConflict(semantic, acoustic) {
     ...semantic.organizationErrors,
     ...semantic.lexicalGrammarErrors,
   ];
-  return acoustic.wordEvents.some((event) => event.start == null || event.end == null
+  return acoustic.wordEvents.filter((event) => (
+    ['mispronunciation', 'omission', 'insertion'].includes(event.type)
+  )).some((event) => event.start == null || event.end == null
     || semanticEvents.some((semanticEvent) => eventSpansOverlap(event, semanticEvent)));
 }
 
@@ -431,7 +479,7 @@ export function publicSpeakingAcousticRetry(taskType, acoustic) {
   return {
     status: 'needs_retry', got: null, max: TASK_MAXIMA[taskType],
     verdict: retryVerdicts[reason], criteria: [], good: [], fix: [],
-    confidence: Number.isFinite(acoustic?.recognitionConfidence) ? acoustic.recognitionConfidence : 0,
+    confidence: boundedAcousticMetric(acoustic?.recognitionConfidence, { maximum: 1 }),
     needsRetryReason: reason, scoringVersion: SPEAKING_SCORING_VERSION,
   };
 }

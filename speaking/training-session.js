@@ -11,7 +11,9 @@ const byOldest = (first, second) => (
   first.lastAssignedAt - second.lastAssignedAt || first.task.id.localeCompare(second.task.id, 'en')
 );
 
-export function selectSpeakingTrainingAssignment(tasks, sessions, now = new Date()) {
+export function selectSpeakingTrainingAssignment(tasks, sessions, now = new Date(), {
+  excludeTaskIds = [], preferredTaskIds = [], selectionReason = null, targetedPractice = null,
+} = {}) {
   const instant = new Date(now).getTime();
   if (!Number.isFinite(instant) || !Array.isArray(tasks) || !tasks.length) {
     throw new Error('SPEAKING_SELECTION_INVALID');
@@ -21,10 +23,14 @@ export function selectSpeakingTrainingAssignment(tasks, sessions, now = new Date
   const latestByTask = new Map();
   orderedHistory.forEach((session) => latestByTask.set(session.task_id, session));
   const lastTaskId = orderedHistory.at(-1)?.task_id || null;
-  const candidates = tasks.map((task) => {
+  const excluded = new Set(excludeTaskIds.map(String));
+  const preferred = new Set(preferredTaskIds.map(String));
+  const candidates = tasks.filter((task) => !excluded.has(String(task.id))
+    && (!preferred.size || preferred.has(String(task.id)))).map((task) => {
     const latest = latestByTask.get(task.id) || null;
     return { task, latest, lastAssignedAt: timestamp(latest?.assigned_at) };
   });
+  const hasImmediateRepeatAlternative = candidates.some((candidate) => candidate.task.id !== lastTaskId);
   const buckets = [
     ['unseen', candidates.filter((candidate) => !candidate.latest)],
     ['due', candidates.filter((candidate) => candidate.latest?.status === 'completed'
@@ -35,8 +41,13 @@ export function selectSpeakingTrainingAssignment(tasks, sessions, now = new Date
   ];
   for (const [reason, bucket] of buckets) {
     if (!bucket.length) continue;
-    const eligible = withoutImmediateRepeat(bucket.sort(byOldest), lastTaskId);
-    if (eligible.length) return { task: eligible[0].task, reason };
+    const sorted = bucket.sort(byOldest);
+    const eligible = hasImmediateRepeatAlternative ? withoutImmediateRepeat(sorted, lastTaskId) : sorted;
+    if (eligible.length) return {
+      task: eligible[0].task,
+      reason: selectionReason || reason,
+      targetedPractice: targetedPractice ? structuredClone(targetedPractice) : null,
+    };
   }
   throw new Error('SPEAKING_SELECTION_EMPTY');
 }

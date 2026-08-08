@@ -1,4 +1,5 @@
 import { parsePcm16Mono16kWav } from './wav-audio.js';
+import { boundedAcousticMetric } from './acoustic-metrics.js';
 
 const SUPPORTED_LOCALES = new Set(['en-GB', 'en-US']);
 const SUPPORTED_MIME_TYPES = new Set(['audio/wav']);
@@ -11,6 +12,9 @@ const MAX_REFERENCE_WORDS = 500;
 const MAX_PROVIDER_SEGMENTS = 200;
 const MAX_PROVIDER_JSON_BYTES = 256 * 1024;
 const MAX_PROVIDER_TOTAL_JSON_BYTES = 2 * 1024 * 1024;
+const TICKS_PER_SECOND = 10_000_000;
+const MAX_PROVIDER_TIMING_TICKS = 180 * TICKS_PER_SECOND;
+const PROVIDER_TIMING_TOLERANCE_SECONDS = 0.05;
 
 export class SpeakingPronunciationError extends Error {
   constructor(code, { processingStarted = false } = {}) {
@@ -26,14 +30,53 @@ function boundedText(value, maxLength = MAX_TRANSCRIPT_LENGTH) {
 }
 
 function finiteScore(value) {
-  if (value == null || value === '') return null;
-  const score = Number(value);
-  return Number.isFinite(score) ? Math.max(0, Math.min(100, score)) : null;
+  return boundedAcousticMetric(value);
 }
 
-function secondsFromTicks(value) {
-  const ticks = Number(value);
-  return Number.isFinite(ticks) && ticks >= 0 ? Math.round((ticks / 10_000_000) * 1_000) / 1_000 : null;
+function boundedProviderNumber(value, { minimum, maximum }) {
+  return typeof value === 'number' && Number.isFinite(value)
+    && value >= minimum && value <= maximum ? value : null;
+}
+
+function secondsFromTicks(value, { positive = false } = {}) {
+  const ticks = boundedProviderNumber(value, {
+    minimum: positive ? Number.EPSILON : 0,
+    maximum: MAX_PROVIDER_TIMING_TICKS,
+  });
+  return ticks === null ? null : Math.round((ticks / TICKS_PER_SECOND) * 1_000) / 1_000;
+}
+
+function providerWordTiming(raw, processedDurationSeconds) {
+  const processedDuration = boundedProviderNumber(processedDurationSeconds, {
+    minimum: Number.EPSILON,
+    maximum: MAX_PROVIDER_TIMING_TICKS / TICKS_PER_SECOND,
+  });
+  const offsetTicks = boundedProviderNumber(raw?.Offset, {
+    minimum: 0,
+    maximum: MAX_PROVIDER_TIMING_TICKS,
+  });
+  const durationTicks = boundedProviderNumber(raw?.Duration, {
+    minimum: Number.EPSILON,
+    maximum: MAX_PROVIDER_TIMING_TICKS,
+  });
+  if (processedDuration === null || offsetTicks === null || durationTicks === null) return null;
+  const trustedMaximumTicks = Math.min(
+    MAX_PROVIDER_TIMING_TICKS,
+    Math.round((processedDuration + PROVIDER_TIMING_TOLERANCE_SECONDS) * TICKS_PER_SECOND),
+  );
+  if (offsetTicks > trustedMaximumTicks || durationTicks > trustedMaximumTicks
+    || offsetTicks + durationTicks > trustedMaximumTicks) return null;
+  return {
+    offsetTicks,
+    durationTicks,
+    offsetSeconds: secondsFromTicks(offsetTicks),
+    durationSeconds: secondsFromTicks(durationTicks, { positive: true }),
+  };
+}
+
+function confidenceScore(value) {
+  const confidence = boundedProviderNumber(value, { minimum: 0, maximum: 1 });
+  return confidence === null ? null : confidence * 100;
 }
 
 function providerErrorType(value) {
@@ -86,12 +129,13 @@ function publicPhoneme(raw, locale) {
   };
 }
 
-function publicWord(raw, locale) {
+function publicWord(raw, locale, processedDurationSeconds) {
   const assessment = raw?.PronunciationAssessment || {};
+  const timing = providerWordTiming(raw, processedDurationSeconds);
   const word = {
     text: boundedText(raw?.Word, 120),
-    offsetSeconds: secondsFromTicks(raw?.Offset),
-    durationSeconds: secondsFromTicks(raw?.Duration),
+    offsetSeconds: timing?.offsetSeconds ?? null,
+    durationSeconds: timing?.durationSeconds ?? null,
     accuracyScore: finiteScore(assessment.AccuracyScore),
     errorType: providerErrorType(assessment.ErrorType),
     phonemes: (Array.isArray(raw?.Phonemes) ? raw.Phonemes : [])
@@ -104,7 +148,7 @@ function publicWord(raw, locale) {
       .map((syllable) => ({
         text: boundedText(syllable?.Syllable, 80),
         offsetSeconds: secondsFromTicks(syllable?.Offset),
-        durationSeconds: secondsFromTicks(syllable?.Duration),
+        durationSeconds: secondsFromTicks(syllable?.Duration, { positive: true }),
         accuracyScore: finiteScore(syllable?.PronunciationAssessment?.AccuracyScore),
       }));
   }
@@ -128,14 +172,12 @@ function wordToken(value) {
 
 function assessedRawWord(raw, forcedErrorType = null) {
   const assessment = raw?.PronunciationAssessment || {};
-  const score = finiteScore(assessment.AccuracyScore);
   const current = providerErrorType(forcedErrorType || assessment.ErrorType);
-  const errorType = current === 'none' && score != null && score < 60 ? 'mispronunciation' : current;
   return {
     ...raw,
     PronunciationAssessment: {
       ...assessment,
-      ErrorType: errorType,
+      ErrorType: current,
     },
   };
 }
@@ -184,41 +226,51 @@ function alignScriptedWords(referenceText, providerWords) {
   return aligned;
 }
 
-function continuousScores(rawWords, alignedWords, { locale, mode, phraseAssessments }) {
+function continuousScores(rawWords, alignedWords, {
+  locale, mode, phraseAssessments, processedDurationSeconds, prosodyAvailable = false,
+}) {
   const nonInsertions = alignedWords.filter((word) => (
     providerErrorType(word?.PronunciationAssessment?.ErrorType) !== 'insertion'
   ));
   const accuracyValues = nonInsertions.map((word) => (
-    finiteScore(word?.PronunciationAssessment?.AccuracyScore) ?? 0
-  ));
+    finiteScore(word?.PronunciationAssessment?.AccuracyScore)
+  )).filter((score) => score !== null);
   const accuracyScore = accuracyValues.length
     ? rounded(accuracyValues.reduce((total, value) => total + value, 0) / accuracyValues.length)
     : null;
+  const recognizedScoringTypes = new Set(['none', 'unexpected_break', 'missing_break', 'monotone']);
   const validWords = alignedWords.filter((word) => (
-    providerErrorType(word?.PronunciationAssessment?.ErrorType) === 'none'
+    recognizedScoringTypes.has(providerErrorType(word?.PronunciationAssessment?.ErrorType))
       && finiteScore(word?.PronunciationAssessment?.AccuracyScore) != null
   ));
-  const timedWords = rawWords.filter((word) => (
-    Number.isFinite(Number(word?.Offset)) && Number.isFinite(Number(word?.Duration))
-      && Number(word.Offset) >= 0 && Number(word.Duration) >= 0
+  const timedWords = rawWords.flatMap((word) => {
+    const timing = providerWordTiming(word, processedDurationSeconds);
+    return timing ? [{ word, timing }] : [];
+  });
+  const validWordTimingComplete = validWords.length > 0 && validWords.every((word) => (
+    providerErrorType(word?.PronunciationAssessment?.ErrorType) === 'omission'
+      || providerWordTiming(word, processedDurationSeconds) !== null
   ));
-  const startOffset = timedWords.length ? Math.min(...timedWords.map((word) => Number(word.Offset))) : null;
+  const startOffset = timedWords.length
+    ? Math.min(...timedWords.map(({ timing }) => timing.offsetTicks)) : null;
   const endOffset = timedWords.length
-    ? Math.max(...timedWords.map((word) => Number(word.Offset) + Number(word.Duration) + 100_000)) : null;
+    ? Math.max(...timedWords.map(({ timing }) => (
+      timing.offsetTicks + timing.durationTicks + 100_000
+  ))) : null;
   const spokenTicks = validWords.reduce((total, word) => {
-    const duration = Number(word?.Duration);
-    return Number.isFinite(duration) && duration >= 0 ? total + duration + 100_000 : total;
+    const timing = providerWordTiming(word, processedDurationSeconds);
+    return timing ? total + timing.durationTicks + 100_000 : total;
   }, 0);
-  const fluencyScore = startOffset != null && endOffset > startOffset
+  const fluencyScore = validWordTimingComplete && startOffset != null && endOffset > startOffset
     ? rounded(Math.max(0, Math.min(100, (spokenTicks / (endOffset - startOffset)) * 100))) : null;
   const completenessScore = mode === 'scripted' && nonInsertions.length
     ? rounded(Math.min(100, (validWords.length / nonInsertions.length) * 100)) : null;
-  const prosodyScore = locale === 'en-US'
+  const prosodyScore = locale === 'en-US' && prosodyAvailable
     ? average(phraseAssessments.map((assessment) => finiteScore(assessment.ProsodyScore))) : null;
   const scoreParts = mode === 'scripted'
     ? [accuracyScore, fluencyScore, completenessScore]
     : [accuracyScore, fluencyScore];
-  if (locale === 'en-US' && prosodyScore != null) scoreParts.push(prosodyScore);
+  if (locale === 'en-US' && prosodyAvailable && prosodyScore != null) scoreParts.push(prosodyScore);
   let overallScore = null;
   if (scoreParts.every((score) => score != null)) {
     const sorted = scoreParts.sort((left, right) => left - right);
@@ -235,36 +287,69 @@ function continuousScores(rawWords, alignedWords, { locale, mode, phraseAssessme
 
 function normalizeAzureResults(rawResults, {
   locale, mode, referenceText = '', partial = false, fallbackTranscript = '', claimedDurationSeconds,
+  coverageWarnings = [], pauseAnalysisAvailable = false,
 }) {
-  const recognized = rawResults.map((raw) => raw?.NBest?.[0]).filter(Boolean);
-  const rawWords = recognized.flatMap((best) => (Array.isArray(best.Words) ? best.Words : []))
-    .slice(0, MAX_WORDS);
+  const recognizedSegments = rawResults.map((raw) => (
+    Array.isArray(raw?.NBest) && raw.NBest[0] && typeof raw.NBest[0] === 'object'
+      ? raw.NBest[0] : null
+  ));
+  const recognized = recognizedSegments.filter(Boolean);
+  const providerWords = recognized.flatMap((best) => (
+    Array.isArray(best.Words) ? best.Words : []
+  ));
+  const rawWords = providerWords.slice(0, MAX_WORDS);
+  const processedDurationSeconds = Math.round(Number(claimedDurationSeconds) * 1_000) / 1_000;
   const alignedWords = mode === 'scripted' && referenceText
     ? alignScriptedWords(referenceText, rawWords)
     : rawWords.map((word) => assessedRawWord(word));
-  const words = alignedWords.slice(0, MAX_WORDS).map((word) => publicWord(word, locale));
+  const words = alignedWords.slice(0, MAX_WORDS)
+    .map((word) => publicWord(word, locale, processedDurationSeconds));
   const transcript = boundedText(
     recognized.map((best) => best.Display || best.Lexical || '').filter(Boolean).join(' ') || fallbackTranscript,
   );
   const assessments = recognized.map((best) => best.PronunciationAssessment || {});
   const scores = continuousScores(rawWords, alignedWords, {
-    locale, mode, phraseAssessments: assessments,
+    locale, mode, phraseAssessments: assessments, processedDurationSeconds,
+    prosodyAvailable: pauseAnalysisAvailable,
   });
-  const confidence = average(recognized.map((best) => finiteScore(Number(best.Confidence) * 100)));
-  const processedDurationSeconds = Math.round(Number(claimedDurationSeconds) * 1_000) / 1_000;
-  const warnings = [];
-  const detailsTruncated = alignedWords.length > words.length;
-  if (!transcript || rawWords.length === 0) warnings.push('speech_not_recognized');
-  if (confidence != null && confidence < 35) warnings.push('low_recognition_confidence');
-  if (detailsTruncated) warnings.push('word_details_truncated');
+  const confidenceValues = recognized.map((best) => confidenceScore(best.Confidence));
+  const confidenceComplete = recognized.length > 0
+    && recognized.length === recognizedSegments.length
+    && confidenceValues.every((value) => value !== null);
+  const confidence = confidenceComplete ? average(confidenceValues) : null;
+  const warnings = new Set(coverageWarnings);
+  const segmentUnavailable = recognized.length !== recognizedSegments.length;
+  const segmentWordsUnavailable = recognized.some((best) => !Array.isArray(best.Words)
+    || best.Words.length === 0);
+  const detailsTruncated = providerWords.length > MAX_WORDS || alignedWords.length > words.length;
+  const wordFactsUnavailable = rawWords.some((word) => (
+    !wordToken(word?.Word)
+      || finiteScore(word?.PronunciationAssessment?.AccuracyScore) === null
+      || typeof word?.PronunciationAssessment?.ErrorType !== 'string'
+      || !word.PronunciationAssessment.ErrorType.trim()
+      || providerErrorType(word?.PronunciationAssessment?.ErrorType) === 'unknown'
+  ));
+  const wordTimingUnavailable = rawWords.some((word) => (
+    providerWordTiming(word, processedDurationSeconds) === null
+  ));
+  if (partial && warnings.size === 0) warnings.add('recognition_segments_truncated');
+  if (segmentUnavailable) warnings.add('recognition_segment_unavailable');
+  if (segmentWordsUnavailable || wordFactsUnavailable) warnings.add('word_facts_unavailable');
+  if (wordTimingUnavailable) warnings.add('word_timing_out_of_bounds');
+  if (!transcript || rawWords.length === 0) warnings.add('speech_not_recognized');
+  if (!confidenceComplete) warnings.add('recognition_confidence_unavailable');
+  if (confidence != null && confidence < 35) warnings.add('low_recognition_confidence');
+  if (detailsTruncated) warnings.add('word_details_truncated');
   const requiredScores = mode === 'scripted'
     ? [scores.accuracyScore, scores.fluencyScore, scores.completenessScore]
     : [scores.accuracyScore, scores.fluencyScore];
   const scoresAvailable = requiredScores.every((score) => score != null);
-  if (rawWords.length > 0 && !scoresAvailable) warnings.push('assessment_scores_unavailable');
+  if (rawWords.length > 0 && !scoresAvailable) warnings.add('assessment_scores_unavailable');
+  const coverageComplete = !partial && !segmentUnavailable && !segmentWordsUnavailable
+    && !detailsTruncated && !wordFactsUnavailable && !wordTimingUnavailable && confidenceComplete;
   const acceptable = transcript.length > 0 && rawWords.length > 0
-    && (confidence == null || confidence >= 35) && scoresAvailable;
-  const status = partial || detailsTruncated ? 'partial' : acceptable ? 'success' : 'low_quality';
+    && confidence != null && confidence >= 35 && scoresAvailable && coverageComplete;
+  const status = acceptable ? 'success' : 'low_quality';
   return {
     status,
     isFinal: !partial,
@@ -276,14 +361,19 @@ function normalizeAzureResults(rawResults, {
     processedDurationSeconds,
     confidence,
     overallScore: acceptable ? scores.overallScore : null,
-    accuracyScore: acceptable ? scores.accuracyScore : null,
-    fluencyScore: acceptable ? scores.fluencyScore : null,
-    completenessScore: acceptable && mode === 'scripted' ? scores.completenessScore : null,
-    prosody: locale === 'en-US'
+    accuracyScore: scores.accuracyScore,
+    fluencyScore: scores.fluencyScore,
+    completenessScore: mode === 'scripted' ? scores.completenessScore : null,
+    pauseAnalysisAvailable: locale === 'en-US' && pauseAnalysisAvailable,
+    prosody: locale === 'en-US' && pauseAnalysisAvailable
       ? { available: true, score: acceptable ? scores.prosodyScore : null }
-      : { available: false, score: null, reason: 'locale_not_supported' },
+      : {
+        available: false,
+        score: null,
+        reason: locale === 'en-US' ? 'provider_pause_metric_unavailable' : 'locale_not_supported',
+      },
     words,
-    quality: { acceptable, warnings: warnings.slice(0, 12) },
+    quality: { acceptable, warnings: [...warnings].slice(0, 12) },
   };
 }
 
@@ -334,7 +424,9 @@ export function createFakePronunciationProvider({
         locale: validated.locale,
         mode: validated.mode,
         partial: scenario === 'partial',
+        coverageWarnings: scenario === 'partial' ? ['recognition_segments_truncated'] : [],
         claimedDurationSeconds: validated.durationSeconds,
+        pauseAnalysisAvailable: validated.locale === 'en-US',
       });
       return { ...result, provider: 'fake-azure' };
     },
@@ -398,6 +490,8 @@ export function createAzurePronunciationProvider({
     let recognizedSegments = 0;
     let providerJsonBytes = 0;
     let partial = false;
+    const coverageWarnings = new Set();
+    let pauseAnalysisAvailable = false;
     let timer;
 
     try {
@@ -413,7 +507,14 @@ export function createAzurePronunciationProvider({
       if (validated.locale === 'en-US') {
         pronunciation.phonemeAlphabet = 'IPA';
         pronunciation.nbestPhonemeCount = MAX_CANDIDATES;
-        pronunciation.enableProsodyAssessment?.();
+        if (typeof pronunciation.enableProsodyAssessment === 'function') {
+          try {
+            pronunciation.enableProsodyAssessment();
+            pauseAnalysisAvailable = true;
+          } catch {
+            pauseAnalysisAvailable = false;
+          }
+        }
       }
       recognizer = new sdk.SpeechRecognizer(speechConfig, audioConfig);
       pronunciation.applyTo(recognizer);
@@ -455,8 +556,16 @@ export function createAzurePronunciationProvider({
         };
         recognizer.recognized = (_sender, event) => {
           const result = event?.result;
-          if (!result || result.reason !== sdk.ResultReason.RecognizedSpeech) return;
-          if (recognizedSegments >= MAX_PROVIDER_SEGMENTS) { partial = true; return; }
+          if (!result || result.reason !== sdk.ResultReason.RecognizedSpeech) {
+            partial = true;
+            coverageWarnings.add('recognition_segment_unavailable');
+            return;
+          }
+          if (recognizedSegments >= MAX_PROVIDER_SEGMENTS) {
+            partial = true;
+            coverageWarnings.add('recognition_segments_truncated');
+            return;
+          }
           recognizedSegments += 1;
           transcripts.push(boundedText(result.text, 500));
           try {
@@ -467,17 +576,27 @@ export function createAzurePronunciationProvider({
             if (jsonBytes > MAX_PROVIDER_JSON_BYTES
               || providerJsonBytes + jsonBytes > MAX_PROVIDER_TOTAL_JSON_BYTES) {
               partial = true;
+              coverageWarnings.add('recognition_segment_unavailable');
               return;
             }
             providerJsonBytes += jsonBytes;
             const parsed = JSON.parse(json || '{}');
             if (parsed && typeof parsed === 'object') rawResults.push(parsed);
+            else {
+              partial = true;
+              coverageWarnings.add('recognition_segment_unavailable');
+            }
           } catch {
             partial = true;
+            coverageWarnings.add('recognition_segment_unavailable');
           }
         };
         recognizer.canceled = () => {
-          if (rawResults.length) { partial = true; finish(); }
+          if (rawResults.length) {
+            partial = true;
+            coverageWarnings.add('recognition_segments_truncated');
+            finish();
+          }
           else finish(new SpeakingPronunciationError('SPEAKING_PRONUNCIATION_PROVIDER_ERROR', {
             processingStarted,
           }));
@@ -501,8 +620,10 @@ export function createAzurePronunciationProvider({
         mode: validated.mode,
         referenceText: validated.referenceText,
         partial,
+        coverageWarnings: [...coverageWarnings],
         fallbackTranscript: transcripts.join(' '),
         claimedDurationSeconds: validated.durationSeconds,
+        pauseAnalysisAvailable,
       });
       redactedLog(logger, 'completed', { locale: validated.locale, segmentCount: rawResults.length });
       return normalized;

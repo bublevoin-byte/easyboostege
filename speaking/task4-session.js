@@ -27,12 +27,14 @@ export function newSpeakingTask4Session({
     id: crypto.randomUUID(), username, catalog_id: catalogId, catalog_revision: catalogRevision,
     task_id: selection.task.id, task_revision: selection.task.revision,
     selection_reason: selection.reason,
+    targeted_practice: selection.targetedPractice || null,
     accent_locale: accentProfile?.locale || null,
     accent_profile_revision: accentProfile?.revision == null ? null : Number(accentProfile.revision),
     accent_effective_at: accentProfile?.effective_at || null,
     status: 'assigned', assigned_at: new Date(now).toISOString(),
     completed_at: null, due_at: null, recording_duration_seconds: null,
     mic_check: null, local_playback: false, self_rating: null,
+    assistance_used: false,
   };
 }
 
@@ -42,6 +44,7 @@ export function publicSpeakingTask4Session(session, task) {
     catalog: { id: session.catalog_id, revision: Number(session.catalog_revision) },
     task,
     selectionReason: session.selection_reason,
+    targetedPractice: session.targeted_practice || null,
     accentProfile: session.accent_locale ? {
       locale: session.accent_locale,
       revision: Number(session.accent_profile_revision),
@@ -50,6 +53,7 @@ export function publicSpeakingTask4Session(session, task) {
     status: session.status,
     assignedAt: new Date(session.assigned_at).toISOString(),
     completedAt: session.completed_at ? new Date(session.completed_at).toISOString() : null,
+    assistanceUsed: Boolean(session.assistance_used),
     practice: session.status === 'completed' ? {
       recordingDurationSeconds: Number(session.recording_duration_seconds),
       micCheck: session.mic_check,

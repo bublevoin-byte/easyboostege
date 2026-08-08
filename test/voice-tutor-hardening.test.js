@@ -30,7 +30,7 @@ async function withHardeningApp(run, options = {}) {
   const { clock = () => NOW } = options;
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-voice-hardening-'));
   const dataFile = path.join(directory, 'data.json');
-  const repository = createFileRepository(dataFile);
+  const repository = createFileRepository(dataFile, { voiceTutorMutationNow: clock });
   const username = await repository.createTelegramUser(7801, 'Hardening Student');
   await repository.grantDays(7801, 30, 'Hardening Student');
   await repository.setEntitlement(username, 'voice_tutor', {

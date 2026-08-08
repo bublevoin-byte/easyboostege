@@ -225,6 +225,40 @@ paths:
               schema: { $ref: '#/components/schemas/SpeakingPronunciationStatus' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/speaking/learning-report:
+    get:
+      summary: Read the learner's current Speaking analysis and adaptive next step
+      description: Requires an active subscription, rechecked under the owner lock immediately before the snapshot is built; expiry after the route precheck returns SUBSCRIPTION_REQUIRED without report data. Base receives the complete latest bounded analysis and its 60-minute monthly pronunciation allowance. Premium receives the same official result, a 240-minute allowance, longitudinal dynamics, comparison, targeted practice on a different suitable server-owned task when such material exists, and a bounded Voice Tutor pointer. If the catalog has no suitable focus material, the report exposes that target as unavailable instead of silently substituting an unrelated task. Assisted, technically invalid or low-confidence attempts remain visible but never raise mastery.
+      responses:
+        '200':
+          description: Fresh entitlement-aware Speaking learning report; no raw audio or provider payload
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SpeakingLearningReport' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/speaking/task-{taskType}/sessions/{sessionId}/assistance:
+    post:
+      summary: Mark an owner-bound Speaking session as assisted before help is shown
+      description: Server-owned, irreversible and idempotent marker. The body must be empty. Any evaluation from this exact session remains useful for feedback but cannot raise adaptive mastery.
+      parameters:
+        - { in: path, name: taskType, required: true, schema: { type: integer, enum: [1, 2, 3, 4] } }
+        - { in: path, name: sessionId, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Assistance marker stored for the exact session
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [assistanceUsed]
+                properties:
+                  assistanceUsed: { type: boolean, enum: [true] }
+                additionalProperties: false
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Session not found for this learner and task type }
   /api/v1/speaking/task-1/sessions/{sessionId}/pronunciation-assessment:
     post:
       summary: Assess one owner-bound task 1 recording with the server-owned reference text
@@ -342,7 +376,7 @@ paths:
   /api/v1/speaking/task-1/sessions:
     post:
       summary: Assign one server-owned Speaking task 1 text to the current learner
-      description: Selects from the versioned 60-item catalog using unseen, due, weak, then old rotation without immediately repeating a text when an alternative exists. Requires an active base subscription and a saved accent profile. The only first-run exception is the exact pending calibration setup owned by the learner; its setup ID permits task 1 only until the learner chooses en-GB or en-US.
+      description: Selects from the versioned 60-item catalog using unseen, due, weak, then old rotation without immediately repeating a text when an alternative exists. Requires an active base subscription and a saved accent profile. For targeted practice the active base subscription is rechecked under the owner lock before Premium or pointer validation; an intervening Base expiry returns SUBSCRIPTION_REQUIRED and creates no session, while a Premium-only downgrade keeps Base access and makes the pointer stale. Premium may send the exact current targeted-practice pointer from the learning report; the server revalidates it and excludes the source material. The only first-run exception is the exact pending calibration setup owned by the learner; its setup ID permits task 1 only until the learner chooses en-GB or en-US.
       requestBody:
         required: true
         content:
@@ -352,6 +386,7 @@ paths:
               additionalProperties: false
               properties:
                 calibrationSetupId: { type: string, format: uuid }
+                targetedPractice: { $ref: '#/components/schemas/SpeakingTargetedPracticeRequest' }
       responses:
         '201':
           description: Owner-bound task 1 session with official 90-second preparation and response stages; no answer key, source provenance, audio, transcript, or phonetic score is exposed
@@ -361,7 +396,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
-        '409': { description: Accent profile is required, or calibrationSetupId is not the learner's exact pending first-run setup }
+        '409': { description: Accent profile is required, calibrationSetupId is not the learner's exact pending first-run setup, or the targeted-practice pointer is stale }
   /api/v1/speaking/task-1/sessions/{sessionId}:
     get:
       summary: Read the current learner's Speaking task 1 session
@@ -407,12 +442,16 @@ paths:
   /api/v1/speaking/task-2/sessions:
     post:
       summary: Assign one server-owned Speaking task 2 advertisement to the current learner
-      description: Selects from the validated 60-item catalog. The server fixes the advertisement and exactly four communicative supports under the EGE-2026 60-second preparation and four-by-20-second contract. A saved accent profile is required.
+      description: Selects from the validated 60-item catalog. The server fixes the advertisement and exactly four communicative supports under the EGE-2026 60-second preparation and four-by-20-second contract. Premium may send the exact fresh targeted-practice pointer; under the owner lock the server first rechecks active Base access, then Premium and pointer freshness, so Base expiry returns SUBSCRIPTION_REQUIRED without creating a session. The source assignment is excluded and the selector uses a different suitable server-owned task. A saved accent profile is required.
       requestBody:
         required: true
         content:
           application/json:
-            schema: { type: object, additionalProperties: false }
+            schema:
+              type: object
+              properties:
+                targetedPractice: { $ref: '#/components/schemas/SpeakingTargetedPracticeRequest' }
+              additionalProperties: false
       responses:
         '201':
           description: Owner-bound task 2 session with four pending question positions
@@ -422,7 +461,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
-        '409': { description: Accent profile is required }
+        '409': { description: Accent profile is required, or the targeted-practice pointer is stale }
   /api/v1/speaking/task-2/sessions/{sessionId}:
     get:
       summary: Restore the current learner's Speaking task 2 session
@@ -474,12 +513,16 @@ paths:
   /api/v1/speaking/task-3/sessions:
     post:
       summary: Assign one server-owned Speaking task 3 interview to the current learner
-      description: Selects from the validated 60-item catalog. The server fixes exactly five interview questions under the EGE-2026 no-preparation and five-by-40-second contract. A saved accent profile is required.
+      description: Selects from the validated 60-item catalog. The server fixes exactly five interview questions under the EGE-2026 no-preparation and five-by-40-second contract. Premium may send the exact fresh targeted-practice pointer; under the owner lock the server first rechecks active Base access, then Premium and pointer freshness, so Base expiry returns SUBSCRIPTION_REQUIRED without creating a session. The source assignment is excluded and the selector uses a different suitable server-owned task. A saved accent profile is required.
       requestBody:
         required: true
         content:
           application/json:
-            schema: { type: object, additionalProperties: false }
+            schema:
+              type: object
+              properties:
+                targetedPractice: { $ref: '#/components/schemas/SpeakingTargetedPracticeRequest' }
+              additionalProperties: false
       responses:
         '201':
           description: Owner-bound task 3 session with five pending answer positions
@@ -489,7 +532,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
-        '409': { description: Accent profile is required }
+        '409': { description: Accent profile is required, or the targeted-practice pointer is stale }
   /api/v1/speaking/task-3/sessions/{sessionId}:
     get:
       summary: Restore the current learner's Speaking task 3 session
@@ -541,12 +584,16 @@ paths:
   /api/v1/speaking/task-4/sessions:
     post:
       summary: Assign one server-owned Speaking task 4 photo project to the current learner
-      description: Selects from the validated 60-item original photo-pair catalog under the EGE-2026 150-second preparation and 180-second response contract. A saved accent profile is required.
+      description: Selects from the validated 60-item original photo-pair catalog under the EGE-2026 150-second preparation and 180-second response contract. Premium may send the exact fresh targeted-practice pointer; under the owner lock the server first rechecks active Base access, then Premium and pointer freshness, so Base expiry returns SUBSCRIPTION_REQUIRED without creating a session. The source assignment is excluded and the selector uses a different suitable server-owned task. A saved accent profile is required.
       requestBody:
         required: true
         content:
           application/json:
-            schema: { type: object, additionalProperties: false }
+            schema:
+              type: object
+              properties:
+                targetedPractice: { $ref: '#/components/schemas/SpeakingTargetedPracticeRequest' }
+              additionalProperties: false
       responses:
         '201':
           description: Owner-bound task 4 session with a safe local photo-pair reference and four plan points
@@ -556,7 +603,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
-        '409': { description: Accent profile is required }
+        '409': { description: Accent profile is required, or the targeted-practice pointer is stale }
   /api/v1/speaking/task-4/sessions/{sessionId}:
     get:
       summary: Restore the current learner's Speaking task 4 session
@@ -913,7 +960,7 @@ paths:
           required: true
           schema: { type: string, minLength: 8, maxLength: 100 }
       requestBody:
-        description: Omit the body for the legacy quota-only reservation. Grammar/lexicon/reading/listening send a UUID attempt pointer; writing/speaking send a server-issued numeric review pointer, source and one server-issued lost-criterion index. No answer, transcript, assignment or review is accepted here.
+        description: Omit the body for the legacy quota-only reservation. Grammar/lexicon/reading/listening send a UUID attempt pointer; writing/speaking send a server-issued numeric review pointer, source and one server-issued lost-criterion index. A max-score Speaking result may instead send its exact unexpired server-issued pronunciation-error ref. No answer, transcript, assignment or review is accepted here.
         content:
           application/json:
             schema:
@@ -932,13 +979,24 @@ paths:
                     revision: { type: integer, minimum: 1, maximum: 10000 }
                     criterionIndex: { type: integer, minimum: 0, maximum: 20 }
                   additionalProperties: false
+                - type: object
+                  required: [source, attemptId, revision, pronunciationErrorRef]
+                  properties:
+                    source: { type: string, enum: [speaking] }
+                    attemptId: { type: integer, minimum: 1 }
+                    revision: { type: integer, enum: [1] }
+                    pronunciationErrorRef:
+                      type: string
+                      maxLength: 120
+                      pattern: '^(?:word|phoneme)\.[0-9]+\.[0-9]+(?:\.[0-9]+)?$'
+                  additionalProperties: false
       responses:
-        '201': { description: Capsule created. Voice mode exposes only a random one-use application ticket, expires_at clamped to the reserved session deadline, same-origin proxy_url and pedagogy nonce. Provider credentials, URL, prompt, model and tools remain server-only. If voice is blocked or unavailable, the same capsule returns text/local mode with a bounded voice_unavailable code. }
-        '200': { description: Existing idempotent result. A lost voice 201 returns realtime.status=reissue_required and a bounded realtime.reissue_url, never the original ticket or nonce. A provisional voice reservation with no issued ticket atomically receives its first ticket plus a replacement nonce, or becomes zero-billable local mode when realtime is unavailable. A lost text/local 201 atomically rotates and returns one replacement pedagogy nonce without repeating the AI call. A legacy or partially committed null delivery is atomically completed as zero-billable local mode. Any recovery is allowed exactly once. }
+        '201': { description: Capsule created. Voice mode exposes only a random one-use application ticket, expires_at clamped to the reserved session deadline, same-origin proxy_url and pedagogy nonce. Provider credentials, URL, prompt, model and tools remain server-only. Policy/configuration fallback is selected before reservation; after reservation, only an explicitly classified provider-unavailable ticket failure may return the same capsule in text/local mode. Subscription, Premium, pronunciation-pointer, session-integrity, expiry and conflict errors propagate without fallback, AI call or nonce rotation. }
+        '200': { description: Existing idempotent result. The owner-serialized replay first rechecks the active Base subscription and Premium entitlement at fresh authority time. For a pronunciation capsule it also reloads the owner attempt and revalidates assistance, mastery eligibility, exact weakest ref and 30-day expiry inside that same mutation. A lost voice 201 returns realtime.status=reissue_required and a bounded realtime.reissue_url, never the original ticket or nonce. A provisional voice reservation with no issued ticket atomically receives its first ticket plus a replacement nonce, or becomes zero-billable local mode when realtime is unavailable. A lost text/local 201 atomically rotates and returns one replacement pedagogy nonce without repeating the AI call. A legacy or partially committed null delivery is atomically completed as zero-billable local mode. Any recovery is allowed exactly once. }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { description: The current subscription has no voice_tutor entitlement }
-        '409': { description: Another Voice Tutor session is active }
+        '403': { description: The fresh owner-locked subscription or voice_tutor entitlement is inactive; exact replay returns no session payload and cannot issue or rotate a ticket or nonce }
+        '409': { description: Another Voice Tutor session is active, or the selected server-owned speaking pronunciation pointer is stale or expired }
         '422': { description: Attempt, canonical item/context, or completed validated writing/speaking review is not supported }
         '429': { description: Daily or monthly voice quota is exhausted }
         '503': { description: New quota-only voice reservation is disabled by the feature flag, cost kill switch or required-but-unconfirmed ZDR policy; tracer requests continue with text/local fallback in a 201 response }
@@ -1050,6 +1108,7 @@ paths:
   /api/v1/voice-tutor/sessions/{sessionId}/fallback:
     post:
       summary: Continue the server-finalized proxy capsule in text or local mode without accepting client usage or wall-clock evidence
+      description: The owner-serialized file mutation or PostgreSQL transaction first takes a fresh post-lock authority time, rechecks the whole active Base subscription and Premium entitlement, and for an exact pronunciation capsule locks and rebuilds its current attempt/ref/assistance/mastery/30-day-expiry evidence. Only a valid snapshot may finalize billing/status and rotate the fallback nonce.
       parameters:
         - in: path
           name: sessionId
@@ -1067,9 +1126,10 @@ paths:
                 reason: { type: string, enum: [microphone_unavailable, provider_unavailable, session_timeout], default: microphone_unavailable }
               additionalProperties: false
       responses:
-        '200': { description: Same capsule through the budgeted text AI operation when current text_processing consent exists, otherwise through its local canonical rule. A ticket not consumed by the proxy bills zero; a consumed abnormal proxy session retains its full reservation; a clean provider-confirmed session uses server-observed input plus output PCM bytes. No client time or second reservation is accepted. }
+        '200': { description: Same owner-locked capsule through the budgeted text AI operation when current text_processing consent exists, otherwise through its local canonical rule. A ticket not consumed by the proxy bills zero; a consumed abnormal proxy session retains its full reservation; a clean provider-confirmed session uses server-observed input plus output PCM bytes. No client time or second reservation is accepted. }
         '400': { $ref: '#/components/responses/BadRequest' }
-        '409': { description: Replayed nonce }
+        '403': { description: The fresh owner-locked Base subscription or Premium voice_tutor entitlement is inactive; status, billing, outcome, delivery and nonce remain unchanged }
+        '409': { description: Replayed nonce, session conflict, or the exact pronunciation attempt/ref/assistance/mastery/expiry evidence became stale; status, billing, outcome, delivery and nonce remain unchanged }
   /api/v1/voice-tutor/sessions/{sessionId}/clarifications:
     post:
       summary: Ask one bounded transient clarification without changing the pedagogical state
@@ -1170,9 +1230,9 @@ paths:
         '200': { description: If the single replacement response was also lost, the same key atomically completes the unactivated reservation as zero-bill local mode and returns one fallback nonce; no provider connection or charge remains possible. }
         '201': { description: Exactly one replacement ticket and nonce. The original ticket is invalidated atomically. }
         '400': { $ref: '#/components/responses/BadRequest' }
-        '403': { description: Current voice-processing consent and Premium voice_tutor entitlement are rechecked before any ticket or nonce rotation }
+        '403': { description: Current voice-processing consent and the fresh owner-locked Base subscription and Premium voice_tutor entitlement are rechecked before any ticket or nonce rotation }
         '404': { description: Session does not belong to the current user }
-        '409': { description: Ticket already consumed, session expired, Idempotency-Key mismatch or replacement limit reached }
+        '409': { description: Ticket already consumed, session expired, Idempotency-Key mismatch, replacement limit reached, or the stored exact pronunciation pointer became stale or expired before recovery }
   /api/v1/voice-tutor/sessions/{sessionId}/finish:
     post:
       summary: Idempotently finish an unused reservation; consumed proxy sessions remain governed by server-owned exact or conservative finalization
@@ -1254,7 +1314,7 @@ paths:
   /api/v1/adaptive-learning/overview:
     get:
       summary: Read the current goal and an owner-bound profile bootstrapped from persisted attempts and Voice Tutor recoveries
-      description: The overview remains available when the plan rollout is disabled so the authenticated learner can read the six-module evidence summary. In that mode goal and plan are null, while all goal, plan, diagnostic, report and session routes stay unavailable. This read does not bypass commercial capabilities.
+      description: The overview remains available when the plan rollout is disabled so the authenticated learner can read the six-module evidence summary. In that mode goal and plan are null, while all goal, plan, diagnostic, report and session routes stay unavailable. This read does not bypass commercial capabilities. The complete evidence-profile-plan cycle runs at most three times. Exhausted profile CAS, plan save conflict, goal mismatch, goal/profile/evidence stale or recalculation conflict fails closed with one retryable 409 and Retry-After instead of returning a mixed snapshot. Evidence scoring fields are eligible only as finite JSON numbers with a positive maximum, and result flags only as JSON booleans; numeric-looking or boolean-looking strings do not affect mastery or the watermark.
       responses:
         '200':
           description: Goal plus transparent preliminary or established profile; no raw answer, essay, transcript or audio is copied
@@ -1262,6 +1322,23 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/AdaptiveOverview' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '409':
+          description: Evidence, profile, goal or plan changed during all three bounded overview attempts; the client may retry the complete overview after the advertised delay.
+          headers:
+            Retry-After:
+              schema: { type: string, enum: ['1'] }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: object
+                    required: [code, retryable]
+                    properties:
+                      code: { type: string, enum: [ADAPTIVE_PROFILE_RETRY_REQUIRED] }
+                      retryable: { type: boolean, enum: [true] }
   /api/v1/adaptive-learning/plan:
     get:
       summary: Read or idempotently refresh the authenticated learner's honest EGE forecast and weekly allocation
@@ -1395,7 +1472,7 @@ paths:
   /api/v1/adaptive-learning/sessions/{sessionId}/replace:
     post:
       summary: Replace or exclude one learning block once while preserving duration and block identities
-      description: The alternative is selected from the same server-owned content registry and persisted plan revision. `excluded` removes the named block from this session and fills the same minutes with another useful skill, so the selected duration remains truthful. A session permits one replacement-or-exclusion total; exact retries return the retained response snapshot.
+      description: The alternative is selected from the same server-owned content registry and persisted plan revision. `excluded` removes the named block from this session and fills the same minutes with another useful skill, so the selected duration remains truthful. A session permits one replacement-or-exclusion total. Replacement is available only before execution starts; once a start is pending or any execution claim, started timestamp, positive execution revision, in-progress/completed state, or completion event exists, both a new request and an exact retry fail closed with `409 ADAPTIVE_SESSION_REPLACEMENT_LOCKED`.
       parameters:
         - in: path
           name: sessionId
@@ -1421,11 +1498,11 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { description: Session or block does not belong to the authenticated learner }
-        '409': { description: The shared replacement-or-exclusion allowance was already used, no safe alternative exists, plan is unavailable, revision changed or key conflicts }
+        '409': { description: `ADAPTIVE_SESSION_REPLACEMENT_LOCKED` after execution has begun; otherwise the shared allowance was already used, no safe alternative exists, plan is unavailable, revision changed or the idempotency key conflicts }
   /api/v1/adaptive-learning/sessions/{sessionId}/start:
     post:
       summary: Atomically start the exact current learning block and issue a short-lived opaque execution claim
-      description: The claim is owner/session/block/launch/revision-bound and expires after two hours. Its plaintext value is reconstructed by a domain-separated server HMAC for an exact Idempotency-Key replay, is never stored in a mutation snapshot or claim row, and is never exported. Another live unconsumed claim and a stale compare-and-set revision fail closed; an expired unconsumed claim may be replaced. If a claim was already consumed by an exact persisted attempt but its advance response was lost, the 200 response returns that attempt for a durable exact advance and never issues a second claim.
+      description: The claim is owner/session/block/launch/revision-bound and expires after two hours. Its plaintext value is reconstructed by a domain-separated server HMAC for an exact Idempotency-Key replay, is never stored in a mutation snapshot or claim row, and is never exported. Another live unconsumed claim and a stale compare-and-set revision fail closed; an expired unconsumed claim may be replaced. The response snapshot session revision, replacement state and exact launch fingerprint are validated against the owner-locked session before the claim is written, so a concurrent replacement yields a coherent current launch or 409 and never an old response paired with a new claim. If a claim was already consumed by an exact persisted attempt but its advance response was lost, the 200 response returns that attempt for a durable exact advance and never issues a second claim. A Premium-depth block rechecks active base plus voice entitlement inside the same owner-serialized repository mutation using time captured only after file queue acquisition or PostgreSQL `FOR UPDATE` (`clock_timestamp()`), never the request timestamp.
       parameters:
         - in: path
           name: sessionId
@@ -1451,12 +1528,13 @@ paths:
         '200': { description: Exact immutable start response replayed, or a consumed exact attempt returned for durable recovery without a new claim, content: { application/json: { schema: { $ref: '#/components/schemas/AdaptiveSessionStartResult' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: ADAPTIVE_PREMIUM_REQUIRED after current Premium entitlement is rechecked for a deep Writing/Speaking block }
         '404': { description: Owner-bound session or block was not found }
         '409': { description: Stale revision, wrong/current state, active claim or idempotency conflict }
   /api/v1/adaptive-learning/sessions/{sessionId}/bind-attempt:
     post:
       summary: Bind a completed server-owned writing, speaking or day-1/day-7 repeat attempt to the active execution claim
-      description: The browser supplies no score. The repository verifies owner, task/activity identity, completed status, creation after claim issuance and exact claim launch fingerprint. Repeat binding additionally verifies the exact owner recovery, repeat task, skill and module. Exact binding replay is safe.
+      description: The browser supplies no score. The repository verifies owner, task/activity identity, completed status, creation after claim issuance and exact claim launch fingerprint. Repeat binding additionally verifies the exact owner recovery, repeat task, skill and module. Exact binding replay is safe. A Premium-depth block rechecks active base plus voice entitlement in the same owner-serialized mutation before consumed-claim replay or binding.
       parameters:
         - in: path
           name: sessionId
@@ -1491,13 +1569,14 @@ paths:
         '200': { description: Exact binding replayed }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: ADAPTIVE_PREMIUM_REQUIRED after current Premium entitlement is rechecked for a deep Writing/Speaking block }
         '404': { description: Owner-bound session was not found }
         '409': { description: Invalid, consumed or mismatched claim/attempt }
         '410': { description: Execution claim expired }
   /api/v1/adaptive-learning/sessions/{sessionId}/advance:
     post:
       summary: Complete the exact current block from persisted evidence and recalculate the learner profile and plan
-      description: Learning blocks require a claim-bound persisted module, writing, speaking or exact Voice Tutor day-1/day-7 repeat attempt. Breaks require null. The response contains an allowlisted evidence summary, profile/plan delta and next action; it never accepts a client-supplied completion or score. Compare-and-set and owner-global idempotency make concurrent/exact retries safe.
+      description: Learning blocks require a claim-bound persisted module, writing, speaking or exact Voice Tutor day-1/day-7 repeat attempt. Breaks require null. The response contains an allowlisted evidence summary, profile/plan delta and next action; it never accepts a client-supplied completion or score. Compare-and-set and owner-global idempotency make concurrent/exact retries safe. A Premium-depth block rechecks active base plus voice entitlement inside the same owner-serialized replay or completion transaction.
       parameters:
         - in: path
           name: sessionId
@@ -1537,6 +1616,7 @@ paths:
         '200': { description: Block completed or exact response replayed, content: { application/json: { schema: { $ref: '#/components/schemas/AdaptiveSessionAdvanceResult' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: ADAPTIVE_PREMIUM_REQUIRED after current Premium entitlement is rechecked for a deep Writing/Speaking block }
         '404': { description: Owner-bound session or block was not found }
         '409': { description: Stale revision, wrong block/state, missing/mismatched attempt or idempotency conflict }
   /api/v1/adaptive-learning/sessions/{sessionId}/finish:
@@ -1570,7 +1650,7 @@ paths:
   /api/v1/adaptive-learning/diagnostics/start:
     post:
       summary: Start or resume a bounded short or Premium deep diagnostic with a durable owner-bound replay claim
-      description: Short is the default for backward compatibility. Deep selects the separate ege-deep-diagnostic-v1 catalog-policy and requires current Premium throughout the run. A Free learner may complete one short diagnostic. A scheduled 28/35/42-day short refresh is offered through retention.rediagnostic.due but does not block ordinary learning sessions. Every resumed session uses its stored catalog version's policy. A successful key owns its exact start snapshot for the 24-hour start-claim retention window. New keys are bounded by a per-user hourly rate and by a finite live-claim budget.
+      description: Short is the default. New sessions use the immutable ege-short-diagnostic-v2 or Premium ege-deep-diagnostic-v2 catalog-policy; saved v1 sessions remain resumable under their original definitions. Deep requires current Premium throughout the run. A Free learner may complete one short diagnostic. A scheduled 28/35/42-day short refresh is offered through retention.rediagnostic.due but does not block ordinary learning sessions. Every resumed session uses its stored catalog version's policy. A successful key owns its exact start snapshot for the 24-hour start-claim retention window. New keys are bounded by a per-user hourly rate and by a finite live-claim budget.
       parameters:
         - in: header
           name: Idempotency-Key
@@ -1955,7 +2035,7 @@ paths:
   /api/v1/ai/evaluate-speaking:
     post:
       summary: Extract bounded speaking facts and apply the versioned server-owned EGE combiner
-      description: The browser identifies an owner-bound catalog session and never sends an assignment, transcript or rubric. Official task 1–4 requests include the exact finalized owner/session/item-bound Azure assessment key or keys; partial or context-mismatched evidence is rejected before xAI. Tasks 2–3 retain and validate each item duration instead of trusting only the aggregate. Azure pronunciation events receive an explicit owner and aligned transcript span; task-4 overlap with a semantic scoring span returns needs_retry rather than charging the same event twice. Identical requests are claimed by an owner-bound evaluation fingerprint and replay the canonical attempt without another provider call. Canonical replay and deterministic acoustic preflight run before AI budget and rate gates. A five-minute claim lease recovers interrupted pending work, and transient xAI failure resumes the same attempt with the existing Azure evidence. The server assembles the transcript, xAI receives it as untrusted data under a strict JSON Schema and returns semantic/language facts only; it cannot return a score or phonetic fact. The server applies the 1/4/5/10 combiner. Low confidence returns needs_retry with a null score and no Voice Tutor pointer. Adaptive Speaking composition remains disabled until its evaluation is owner-bound. Until the offline calibration gate and exact external methodological approval pass, every result is labelled automatic_training, approximate and methodicallyValidated=false.
+      description: The browser identifies an owner-bound catalog session and never sends an assignment, transcript or rubric. Official task 1–4 requests include the exact finalized owner/session/item-bound Azure assessment key or keys; partial or context-mismatched evidence is rejected before xAI. Tasks 2–3 retain and validate each item duration instead of trusting only the aggregate. Azure pronunciation events receive an explicit owner and aligned transcript span; task-4 overlap with a semantic scoring span returns needs_retry rather than charging the same event twice. Identical requests are claimed by an owner-bound evaluation fingerprint and replay the canonical attempt without another provider call. Canonical replay and deterministic acoustic preflight run before AI budget and rate gates. A five-minute claim lease recovers interrupted pending work, and transient xAI failure resumes the same attempt with the existing Azure evidence. The server assembles the transcript, xAI receives it as untrusted data under a strict JSON Schema and returns semantic/language facts only; it cannot return a score or phonetic fact. The server applies the 1/4/5/10 combiner. Low confidence returns needs_retry with a null score and no Voice Tutor pointer. Adaptive Speaking composition for tasks 1–4 is enabled only through a fresh owner-bound session assigned after the adaptive execution claim. Until the offline calibration gate and exact external methodological approval pass, every result is labelled automatic_training, approximate and methodicallyValidated=false.
       requestBody:
         required: true
         content:
@@ -2268,7 +2348,7 @@ components:
           required: [status]
           properties:
             status:
-              description: partial means either provider interruption or a settled response whose bounded word details were truncated; inspect isFinal and quality.warnings.
+              description: Incomplete, malformed, interrupted or detail-truncated provider evidence is fail-closed as low_quality and is never eligible for official mastery; partial is retained only for legacy stored responses.
               type: string
               enum: [success, low_quality, partial, timeout, unavailable, processing]
             isFinal:
@@ -2285,13 +2365,16 @@ components:
             accuracyScore: { type: number, nullable: true, minimum: 0, maximum: 100 }
             fluencyScore: { type: number, nullable: true, minimum: 0, maximum: 100 }
             completenessScore: { type: number, nullable: true, minimum: 0, maximum: 100 }
+            pauseAnalysisAvailable:
+              type: boolean
+              description: Explicit provider/locale capability. True for supported en-US assessments even when zero pause events were detected; false for unsupported locales such as en-GB.
             prosody:
               type: object
               required: [available, score]
               properties:
                 available: { type: boolean }
                 score: { type: number, nullable: true, minimum: 0, maximum: 100 }
-                reason: { type: string, enum: [locale_not_supported] }
+                reason: { type: string, enum: [provider_pause_metric_unavailable, locale_not_supported] }
               additionalProperties: false
             words:
               type: array
@@ -2319,6 +2402,549 @@ components:
           additionalProperties: false
         quota: { $ref: '#/components/schemas/SpeakingPronunciationQuota' }
       additionalProperties: false
+    SpeakingAdaptiveSkillId:
+      type: string
+      enum:
+        - ege.speaking.reading_aloud
+        - ege.speaking.direct_questions
+        - ege.speaking.interview_completeness
+        - ege.speaking.monologue_content
+        - ege.speaking.monologue_organization
+        - ege.speaking.spoken_grammar
+        - ege.speaking.spoken_lexis
+        - ege.speaking.fluency
+        - ege.speaking.pronunciation_words
+        - ege.speaking.pronunciation_phonemes
+        - ege.speaking.signal_quality
+    SpeakingTargetedPracticeRequest:
+      type: object
+      required: [sourceAttemptId, reportRevision, accentLocale, skillId, contentRef]
+      properties:
+        sourceAttemptId: { type: integer, minimum: 1 }
+        reportRevision: { type: string, pattern: '^attempt\.[0-9]+\.[0-9]+$', maxLength: 80 }
+        accentLocale: { type: string, nullable: true, enum: [en-GB, en-US] }
+        skillId: { $ref: '#/components/schemas/SpeakingAdaptiveSkillId' }
+        contentRef:
+          type: string
+          maxLength: 320
+          pattern: '^server:speaking:task:[1-4](?::skill:[a-z0-9._-]{3,120})?(?::focus:[a-z0-9._-]{3,120})?:new:v1$'
+      additionalProperties: false
+    SpeakingPronunciationFocus:
+      type: object
+      required: [kind, value, anchorWord, ref]
+      properties:
+        kind: { type: string, enum: [word, phoneme] }
+        value: { type: string, minLength: 1, maxLength: 120 }
+        anchorWord: { type: string, minLength: 1, maxLength: 120 }
+        ref: { type: string, pattern: '^(?:word|phoneme)\.[1-9][0-9]*\.[0-9]+(?:\.[0-9]+)?$', maxLength: 120 }
+      additionalProperties: false
+    SpeakingAssignedTargetedPractice:
+      type: object
+      required: [sourceAttemptId, reportRevision, accentLocale, skillId, label, contentRef, focus]
+      properties:
+        sourceAttemptId: { type: integer, minimum: 1 }
+        reportRevision: { type: string, nullable: true, pattern: '^attempt\.[0-9]+\.[0-9]+$', maxLength: 80 }
+        accentLocale: { type: string, nullable: true, enum: [en-GB, en-US] }
+        skillId: { $ref: '#/components/schemas/SpeakingAdaptiveSkillId' }
+        label: { type: string, minLength: 1, maxLength: 160 }
+        contentRef: { type: string, minLength: 20, maxLength: 320 }
+        focus:
+          nullable: true
+          allOf: [{ $ref: '#/components/schemas/SpeakingPronunciationFocus' }]
+      additionalProperties: false
+    SpeakingTargetOutcome:
+      type: object
+      required: [sourceAttemptId, evaluatedAttemptId, reportRevision, accentLocale, skillId, focus, status, score, maxScore]
+      properties:
+        sourceAttemptId: { type: integer, minimum: 1 }
+        evaluatedAttemptId: { type: integer, minimum: 1 }
+        reportRevision: { type: string, nullable: true, pattern: '^attempt\.[0-9]+\.[0-9]+$', maxLength: 80 }
+        accentLocale: { type: string, nullable: true, enum: [en-GB, en-US] }
+        skillId: { $ref: '#/components/schemas/SpeakingAdaptiveSkillId' }
+        focus:
+          nullable: true
+          allOf: [{ $ref: '#/components/schemas/SpeakingPronunciationFocus' }]
+        status: { type: string, enum: [resolved, still_needs_work, inconclusive] }
+        score: { type: number, nullable: true, minimum: 0, maximum: 100 }
+        maxScore: { type: integer, enum: [100] }
+      additionalProperties: false
+    SpeakingLearningMaterial:
+      type: object
+      required: [catalogId, catalogRevision, taskRef, taskRevision, cefr, topic]
+      properties:
+        catalogId: { type: string, maxLength: 80 }
+        catalogRevision: { type: integer, minimum: 1 }
+        taskRef: { type: string, maxLength: 160 }
+        taskRevision: { type: integer, minimum: 1 }
+        cefr: { type: string, maxLength: 12 }
+        topic: { type: string, maxLength: 160 }
+      additionalProperties: false
+    SpeakingLearningCriterion:
+      type: object
+      required: [id, skillIds, name, score, maxScore, masteryEligible]
+      properties:
+        id: { type: string, pattern: '^task[1-4]\.criterion\.[1-9][0-9]*$' }
+        skillIds:
+          type: array
+          minItems: 1
+          maxItems: 2
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/SpeakingAdaptiveSkillId' }
+        name: { type: string, maxLength: 160 }
+        score: { type: number, minimum: 0, maximum: 10 }
+        maxScore: { type: number, minimum: 1, maximum: 10 }
+        masteryEligible: { type: boolean }
+      additionalProperties: false
+    SpeakingLanguageDiagnostic:
+      type: object
+      required: [skillId, name, score, maxScore, basis, masteryEligible]
+      properties:
+        skillId: { type: string, enum: [ege.speaking.spoken_grammar, ege.speaking.spoken_lexis] }
+        name: { type: string, maxLength: 160 }
+        score: { type: number, minimum: 0, maximum: 100 }
+        maxScore: { type: number, enum: [100] }
+        basis: { type: string, enum: [full_official_language_criterion_without_validated_errors, official_language_score_with_validated_error_kind] }
+        masteryEligible: { type: boolean }
+      additionalProperties: false
+    SpeakingLearningWordIssue:
+      type: object
+      required: [id, word, errorType, itemIndex, accuracyScore, gross, phonemes]
+      properties:
+        id: { type: string, maxLength: 160 }
+        word: { type: string, maxLength: 120 }
+        errorType: { type: string, maxLength: 80 }
+        itemIndex: { type: integer, nullable: true, minimum: 1, maximum: 5 }
+        accuracyScore: { type: number, nullable: true, minimum: 0, maximum: 100 }
+        gross: { type: boolean, nullable: true }
+        offsetSeconds: { type: number, minimum: 0, maximum: 180, description: Provider-owned offset within the item recording; omitted for legacy evidence without timing. }
+        durationSeconds: { type: number, minimum: 0, exclusiveMinimum: true, maximum: 180, description: Provider-owned word duration paired with offsetSeconds. }
+        phonemes:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            required: [label, accuracyScore]
+            properties:
+              label: { type: string, maxLength: 20 }
+              accuracyScore: { type: number, nullable: true, minimum: 0, maximum: 100 }
+            additionalProperties: false
+      additionalProperties: false
+    SpeakingLearningSignal:
+      type: object
+      required: [quality, semanticConfidence, acousticConfidence, highConfidence]
+      properties:
+        quality: { type: string, enum: [good, acceptable, poor] }
+        semanticConfidence: { type: number, nullable: true, minimum: 0, maximum: 1 }
+        acousticConfidence: { type: number, nullable: true, minimum: 0, maximum: 1 }
+        highConfidence: { type: boolean }
+        recordingDurationSeconds: { type: number, minimum: 0, maximum: 200 }
+        completenessScore: { type: number, nullable: true, minimum: 0, maximum: 100 }
+        fluencyScore: { type: number, nullable: true, minimum: 0, maximum: 100 }
+        wordAccuracyScore: { type: number, nullable: true, minimum: 0, maximum: 100 }
+        phonemeAccuracyScore: { type: number, nullable: true, minimum: 0, maximum: 100 }
+        itemDurations:
+          type: array
+          maxItems: 5
+          items:
+            type: object
+            required: [itemIndex, durationSeconds]
+            properties:
+              itemIndex: { type: integer, minimum: 1, maximum: 5 }
+              durationSeconds: { type: number, minimum: 0, maximum: 180 }
+            additionalProperties: false
+        pauseAnalysis:
+          type: object
+          required: [available, reason, fluencyProxyAvailable, totalCount, unexpectedBreakCount, missingBreakCount, events]
+          properties:
+            available: { type: boolean }
+            reason: { type: string, nullable: true, enum: [provider_pause_metric_unavailable, locale_not_supported] }
+            fluencyProxyAvailable: { type: boolean }
+            totalCount: { type: integer, minimum: 0, maximum: 120 }
+            unexpectedBreakCount: { type: integer, minimum: 0, maximum: 120 }
+            missingBreakCount: { type: integer, minimum: 0, maximum: 120 }
+            events:
+              type: array
+              maxItems: 120
+              items:
+                type: object
+                required: [id, type, itemIndex, word]
+                properties:
+                  id: { type: string, maxLength: 160 }
+                  type: { type: string, enum: [unexpected_break, missing_break] }
+                  itemIndex: { type: integer, nullable: true, minimum: 1, maximum: 5 }
+                  word: { type: string, nullable: true, maxLength: 120 }
+                  offsetSeconds: { type: number, minimum: 0, maximum: 180 }
+                  durationSeconds: { type: number, exclusiveMinimum: true, maximum: 180 }
+                additionalProperties: false
+          additionalProperties: false
+      additionalProperties: false
+    SpeakingLearningAttempt:
+      type: object
+      required: [version, attemptId, taskType, taskRef, sessionId, taskRevision, accentLocale, material, targetedPractice, targetOutcome, status, score, maxScore, transcript, verdict, criteria, languageDiagnostics, wordIssues, signal, provenance, masteryEligible, observedAt]
+      properties:
+        version: { type: string, enum: [speaking-learning-evidence-v1] }
+        attemptId: { type: integer, minimum: 1 }
+        taskType: { type: integer, enum: [1, 2, 3, 4] }
+        taskRef: { type: string, nullable: true, maxLength: 160 }
+        sessionId: { type: string, nullable: true, maxLength: 80 }
+        taskRevision: { type: integer, nullable: true, minimum: 1 }
+        accentLocale: { type: string, nullable: true, enum: [en-GB, en-US] }
+        material:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/SpeakingLearningMaterial'
+        targetedPractice:
+          nullable: true
+          allOf: [{ $ref: '#/components/schemas/SpeakingAssignedTargetedPractice' }]
+        targetOutcome:
+          nullable: true
+          allOf: [{ $ref: '#/components/schemas/SpeakingTargetOutcome' }]
+        status: { type: string, enum: [scored, needs_retry] }
+        score: { type: number, nullable: true, minimum: 0, maximum: 10 }
+        maxScore: { type: integer, enum: [1, 4, 5, 10] }
+        transcript: { type: string, maxLength: 8000 }
+        verdict: { type: string, maxLength: 1000 }
+        criteria:
+          type: array
+          maxItems: 5
+          items: { $ref: '#/components/schemas/SpeakingLearningCriterion' }
+        languageDiagnostics:
+          type: array
+          maxItems: 2
+          items: { $ref: '#/components/schemas/SpeakingLanguageDiagnostic' }
+        strengths: { type: array, maxItems: 20, items: { type: string, maxLength: 600 } }
+        improvements:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            required: [wrong, right, note]
+            properties:
+              wrong: { type: string, maxLength: 300 }
+              right: { type: string, maxLength: 300 }
+              note: { type: string, maxLength: 600 }
+            additionalProperties: false
+        wordIssues:
+          type: array
+          maxItems: 120
+          items: { $ref: '#/components/schemas/SpeakingLearningWordIssue' }
+        signal: { $ref: '#/components/schemas/SpeakingLearningSignal' }
+        provenance:
+          type: object
+          required: [officialSession, assistance]
+          properties:
+            officialSession: { type: boolean }
+            assistance: { type: string, enum: [unassisted, assisted] }
+          additionalProperties: false
+        masteryEligible: { type: boolean }
+        observedAt: { type: string, format: date-time, nullable: true }
+      additionalProperties: false
+    SpeakingLearningReport:
+      type: object
+      required: [version, reportRevision, activeAccentLocale, assessment, access, currentAttempt, attemptTimeline, nextStep, premium]
+      properties:
+        version: { type: string, enum: [speaking-learning-report-v1] }
+        reportRevision: { type: string, pattern: '^(?:empty\.0|attempt\.[0-9]+\.[0-9]+)$', maxLength: 80 }
+        activeAccentLocale:
+          description: Canonical pronunciation profile used to scope Premium targets, dynamics, comparison and time allocation.
+          type: string
+          nullable: true
+          enum: [en-GB, en-US]
+        assessment:
+          type: object
+          required: [mode, approximate, methodicallyValidated]
+          properties:
+            mode: { type: string, enum: [automatic_training] }
+            approximate: { type: boolean, enum: [true] }
+            methodicallyValidated: { type: boolean, enum: [false] }
+          additionalProperties: false
+        access:
+          type: object
+          required: [tier, limitSeconds, usedSeconds, remainingSeconds]
+          properties:
+            tier: { type: string, enum: [base, premium] }
+            limitSeconds: { type: integer, enum: [3600, 14400] }
+            usedSeconds: { type: integer, minimum: 0 }
+            remainingSeconds: { type: integer, minimum: 0 }
+          additionalProperties: false
+        currentAttempt:
+          description: Bounded revalidated official analysis. Technical and assisted attempts are visible with masteryEligible=false.
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/SpeakingLearningAttempt'
+        attemptTimeline:
+          description: Bounded Base and Premium history. Assisted and technical attempts remain visible but declare masteryEligible=false.
+          type: array
+          maxItems: 120
+          items:
+            type: object
+            required: [attemptId, taskType, status, score, maxScore, masteryEligible, observedAt]
+            properties:
+              attemptId: { type: integer, minimum: 1 }
+              taskType: { type: integer, enum: [1, 2, 3, 4] }
+              status: { type: string, enum: [scored, needs_retry] }
+              score: { type: number, nullable: true, minimum: 0, maximum: 10 }
+              maxScore: { type: integer, enum: [1, 4, 5, 10] }
+              masteryEligible: { type: boolean }
+              observedAt: { type: string, format: date-time, nullable: true }
+            additionalProperties: false
+        nextStep:
+          type: object
+          required: [skillId, label, taskType, focus, reason]
+          properties:
+            skillId:
+              nullable: true
+              allOf: [{ $ref: '#/components/schemas/SpeakingAdaptiveSkillId' }]
+            label: { type: string, maxLength: 160 }
+            taskType: { type: integer, enum: [1, 2, 3, 4] }
+            focus:
+              nullable: true
+              allOf: [{ $ref: '#/components/schemas/SpeakingPronunciationFocus' }]
+            reason: { type: string, enum: [weakest_observed_criterion, weakest_pronunciation_target, focus_material_unavailable, start_official_attempt, retry_without_assistance, retry_for_signal_quality, retry_technical_assessment, continue_official_practice] }
+          additionalProperties: false
+        premium:
+          description: Null for Base; bounded longitudinal and transfer-practice tools for Premium, scoped to activeAccentLocale when the canonical profile exists. It never rewrites currentAttempt.
+          type: object
+          nullable: true
+          required: [trend, comparison, criterionDynamics, wordDynamics, phonemeDynamics, fluencyDynamics, pauseDynamics, targetedPractice, unavailableTargets, targetOutcomes, voiceTutor, timeAllocationRecommendation, personalSummary]
+          properties:
+            trend:
+              type: array
+              maxItems: 120
+              items:
+                type: object
+                required: [attemptId, taskType, score, maxScore, observedAt, accentLocale, basis]
+                properties:
+                  attemptId: { type: integer, minimum: 1 }
+                  taskType: { type: integer, enum: [1, 2, 3, 4] }
+                  score: { type: number, minimum: 0, maximum: 10 }
+                  maxScore: { type: integer, enum: [1, 4, 5, 10] }
+                  observedAt: { type: string, format: date-time, nullable: true }
+                  accentLocale: { type: string, nullable: true, enum: [en-GB, en-US] }
+                  basis: { type: string, enum: [accent_locale] }
+                additionalProperties: false
+            comparison:
+              type: object
+              nullable: true
+              required: [currentAttemptId, previousAttemptId, scoreDelta, accentLocale, basis]
+              properties:
+                currentAttemptId: { type: integer, minimum: 1 }
+                previousAttemptId: { type: integer, nullable: true, minimum: 1 }
+                scoreDelta: { type: integer, nullable: true, minimum: -100, maximum: 100 }
+                accentLocale: { type: string, nullable: true, enum: [en-GB, en-US] }
+                basis: { type: string, enum: [same_accent_locale_task_type_and_cefr] }
+              additionalProperties: false
+            criterionDynamics:
+              type: array
+              maxItems: 22
+              items:
+                type: object
+                required: [skillId, accentLocale, basis, points]
+                properties:
+                  skillId: { $ref: '#/components/schemas/SpeakingAdaptiveSkillId' }
+                  accentLocale: { type: string, nullable: true, enum: [en-GB, en-US] }
+                  basis: { type: string, enum: [same_accent_locale] }
+                  points:
+                    type: array
+                    maxItems: 120
+                    items:
+                      type: object
+                      required: [attemptId, score, maxScore, observedAt, accentLocale]
+                      properties:
+                        attemptId: { type: integer, minimum: 1 }
+                        score: { type: number, minimum: 0, maximum: 100 }
+                        maxScore: { type: number, minimum: 1, maximum: 100 }
+                        observedAt: { type: string, format: date-time, nullable: true }
+                        accentLocale: { type: string, nullable: true, enum: [en-GB, en-US] }
+                      additionalProperties: false
+                additionalProperties: false
+            wordDynamics: { $ref: '#/components/schemas/SpeakingIssueDynamics' }
+            phonemeDynamics: { $ref: '#/components/schemas/SpeakingIssueDynamics' }
+            fluencyDynamics:
+              type: array
+              maxItems: 120
+              items:
+                type: object
+                required: [attemptId, observedAt, fluencyScore, completenessScore, signalQuality, accentLocale, basis]
+                properties:
+                  attemptId: { type: integer, minimum: 1 }
+                  observedAt: { type: string, format: date-time, nullable: true }
+                  fluencyScore: { type: number, nullable: true, minimum: 0, maximum: 100 }
+                  completenessScore: { type: number, nullable: true, minimum: 0, maximum: 100 }
+                  signalQuality: { type: string, enum: [good, acceptable, poor] }
+                  accentLocale: { type: string, nullable: true, enum: [en-GB, en-US] }
+                  basis: { type: string, enum: [accent_locale] }
+                additionalProperties: false
+            pauseDynamics:
+              type: array
+              maxItems: 120
+              items:
+                type: object
+                required: [attemptId, observedAt, available, reason, fluencyScore, totalCount, unexpectedBreakCount, missingBreakCount, accentLocale, basis]
+                properties:
+                  attemptId: { type: integer, minimum: 1 }
+                  observedAt: { type: string, format: date-time, nullable: true }
+                  available: { type: boolean }
+                  reason: { type: string, nullable: true, enum: [provider_pause_metric_unavailable, locale_not_supported] }
+                  fluencyScore: { type: number, nullable: true, minimum: 0, maximum: 100 }
+                  totalCount: { type: integer, minimum: 0, maximum: 120 }
+                  unexpectedBreakCount: { type: integer, minimum: 0, maximum: 120 }
+                  missingBreakCount: { type: integer, minimum: 0, maximum: 120 }
+                  accentLocale: { type: string, nullable: true, enum: [en-GB, en-US] }
+                  basis: { type: string, enum: [accent_locale] }
+                additionalProperties: false
+            targetedPractice:
+              type: object
+              nullable: true
+              required: [skillId, label, taskType, materialPolicy, sourceAttemptId, reportRevision, accentLocale, excludeTaskRef, cefr, focus, contentRef, suitableTaskRefs]
+              properties:
+                skillId: { $ref: '#/components/schemas/SpeakingAdaptiveSkillId' }
+                label: { type: string, maxLength: 160 }
+                taskType: { type: integer, enum: [1, 2, 3, 4] }
+                materialPolicy: { type: string, enum: [different_server_owned_material] }
+                sourceAttemptId: { type: integer, minimum: 1 }
+                reportRevision: { type: string, pattern: '^attempt\.[0-9]+\.[0-9]+$', maxLength: 80 }
+                accentLocale: { type: string, nullable: true, enum: [en-GB, en-US] }
+                excludeTaskRef: { type: string, maxLength: 160 }
+                cefr: { type: string, nullable: true, maxLength: 12 }
+                focus:
+                  nullable: true
+                  allOf: [{ $ref: '#/components/schemas/SpeakingPronunciationFocus' }]
+                contentRef:
+                  type: string
+                  maxLength: 320
+                  pattern: '^server:speaking:task:[1-4](?::skill:[a-z0-9._-]{3,120})?(?::focus:[a-z0-9._-]{3,120})?:new:v1$'
+                suitableTaskRefs:
+                  type: array
+                  minItems: 1
+                  maxItems: 20
+                  uniqueItems: true
+                  items: { type: string, maxLength: 160 }
+              additionalProperties: false
+            unavailableTargets:
+              type: array
+              maxItems: 20
+              items:
+                type: object
+                required: [skillId, label, taskType, sourceAttemptId, accentLocale, focus, reason]
+                properties:
+                  skillId: { $ref: '#/components/schemas/SpeakingAdaptiveSkillId' }
+                  label: { type: string, maxLength: 160 }
+                  taskType: { type: integer, enum: [1, 2, 3, 4] }
+                  sourceAttemptId: { type: integer, minimum: 1 }
+                  accentLocale: { type: string, nullable: true, enum: [en-GB, en-US] }
+                  focus: { $ref: '#/components/schemas/SpeakingPronunciationFocus' }
+                  reason: { type: string, enum: [no_server_owned_focus_material] }
+                additionalProperties: false
+            targetOutcomes:
+              type: array
+              maxItems: 30
+              items: { $ref: '#/components/schemas/SpeakingTargetOutcome' }
+            voiceTutor:
+              type: object
+              nullable: true
+              required: [source, attemptId, revision, attemptSummary]
+              oneOf:
+                - required: [criterion]
+                - required: [pronunciationError]
+              properties:
+                source: { type: string, enum: [speaking] }
+                attemptId: { type: integer, minimum: 1 }
+                revision: { type: integer, enum: [1] }
+                criterion:
+                  type: object
+                  required: [index, ref, label, score, maxScore]
+                  properties:
+                    index: { type: integer, minimum: 0, maximum: 4 }
+                    ref: { type: string, pattern: '^task[1-4]\.criterion\.[1-9][0-9]*$', maxLength: 120 }
+                    label: { type: string, maxLength: 160 }
+                    score: { type: number, minimum: 0, maximum: 10 }
+                    maxScore: { type: number, minimum: 1, maximum: 10 }
+                  additionalProperties: false
+                pronunciationError:
+                  type: object
+                  required: [ref, kind, label, word, phoneme, accuracyScore, expectedMinimum, observedAt, accentLocale, expiresAt]
+                  properties:
+                    ref:
+                      type: string
+                      maxLength: 120
+                      pattern: '^(?:word|phoneme)\.[0-9]+\.[0-9]+(?:\.[0-9]+)?$'
+                    kind: { type: string, enum: [word, phoneme] }
+                    label: { type: string, minLength: 1, maxLength: 160 }
+                    word: { type: string, minLength: 1, maxLength: 120 }
+                    phoneme: { type: string, nullable: true, maxLength: 20 }
+                    accuracyScore: { type: number, minimum: 0, maximum: 80, exclusiveMaximum: true }
+                    expectedMinimum: { type: integer, enum: [80] }
+                    observedAt: { type: string, format: date-time }
+                    accentLocale: { type: string, nullable: true, enum: [en-GB, en-US] }
+                    expiresAt: { type: string, format: date-time }
+                  additionalProperties: false
+                attemptSummary:
+                  type: object
+                  required: [attemptId, taskType, score, maxScore, observedAt, accentLocale]
+                  properties:
+                    attemptId: { type: integer, minimum: 1 }
+                    taskType: { type: integer, enum: [1, 2, 3, 4] }
+                    score: { type: number, minimum: 0, maximum: 10 }
+                    maxScore: { type: integer, enum: [1, 4, 5, 10] }
+                    observedAt: { type: string, format: date-time, nullable: true }
+                    accentLocale: { type: string, nullable: true, enum: [en-GB, en-US] }
+                  additionalProperties: false
+              additionalProperties: false
+            timeAllocationRecommendation:
+              type: array
+              maxItems: 4
+              items:
+                type: object
+                required: [skillId, label, focus, accentLocale, percentage]
+                properties:
+                  skillId: { $ref: '#/components/schemas/SpeakingAdaptiveSkillId' }
+                  label: { type: string, maxLength: 160 }
+                  focus:
+                    nullable: true
+                    allOf: [{ $ref: '#/components/schemas/SpeakingPronunciationFocus' }]
+                  accentLocale: { type: string, nullable: true, enum: [en-GB, en-US] }
+                  percentage: { type: integer, minimum: 0, maximum: 100 }
+                additionalProperties: false
+            personalSummary:
+              type: object
+              required: [reliableAttemptCount, currentReliableAttemptId, currentReliableAccentLocale, priorityCount, unavailableTargetCount]
+              properties:
+                reliableAttemptCount: { type: integer, minimum: 0, maximum: 120 }
+                currentReliableAttemptId: { type: integer, nullable: true, minimum: 1 }
+                currentReliableAccentLocale: { type: string, nullable: true, enum: [en-GB, en-US] }
+                priorityCount: { type: integer, minimum: 0, maximum: 4 }
+                unavailableTargetCount: { type: integer, minimum: 0, maximum: 240 }
+              additionalProperties: false
+          additionalProperties: false
+      additionalProperties: false
+    SpeakingIssueDynamics:
+      type: array
+      maxItems: 30
+      items:
+        type: object
+        required: [label, accentLocale, count, averageAccuracy, previousAccuracy, currentAccuracy, delta, direction, points]
+        properties:
+          label: { type: string, maxLength: 120 }
+          accentLocale: { type: string, nullable: true, enum: [en-GB, en-US] }
+          count: { type: integer, minimum: 1, maximum: 120 }
+          averageAccuracy: { type: integer, nullable: true, minimum: 0, maximum: 100 }
+          previousAccuracy: { type: integer, nullable: true, minimum: 0, maximum: 100 }
+          currentAccuracy: { type: integer, nullable: true, minimum: 0, maximum: 100 }
+          delta: { type: integer, nullable: true, minimum: -100, maximum: 100 }
+          direction: { type: string, enum: [improved, declined, stable, insufficient_data] }
+          points:
+            type: array
+            maxItems: 120
+            items:
+              type: object
+              required: [attemptId, observedAt, accuracyScore]
+              properties:
+                attemptId: { type: integer, minimum: 1 }
+                observedAt: { type: string, format: date-time, nullable: true }
+                accuracyScore: { type: integer, minimum: 0, maximum: 100 }
+              additionalProperties: false
+        additionalProperties: false
     SpeakingTask1Task:
       type: object
       required: [id, revision, taskType, cefr, topic, preparationSeconds, responseSeconds, maxScore, instruction, text]
@@ -2345,7 +2971,7 @@ components:
       additionalProperties: false
     SpeakingTask1Session:
       type: object
-      required: [id, catalog, task, selectionReason, status, assignedAt, completedAt, practice, pronunciationAssessment]
+      required: [id, catalog, task, selectionReason, targetedPractice, status, assistanceUsed, assignedAt, completedAt, practice, pronunciationAssessment]
       properties:
         id: { type: string, format: uuid }
         catalog:
@@ -2356,8 +2982,12 @@ components:
             revision: { type: integer, enum: [1] }
           additionalProperties: false
         task: { $ref: '#/components/schemas/SpeakingTask1Task' }
-        selectionReason: { type: string, enum: [unseen, due, weak, old] }
+        selectionReason: { type: string, enum: [unseen, due, weak, old, targeted_focus] }
+        targetedPractice:
+          nullable: true
+          allOf: [{ $ref: '#/components/schemas/SpeakingAssignedTargetedPractice' }]
         status: { type: string, enum: [assigned, completed] }
+        assistanceUsed: { type: boolean }
         assignedAt: { type: string, format: date-time }
         completedAt: { type: string, format: date-time, nullable: true }
         practice:
@@ -2414,7 +3044,7 @@ components:
       additionalProperties: false
     SpeakingTask2Session:
       type: object
-      required: [id, catalog, task, selectionReason, status, currentQuestion, questions, assignedAt, completedAt, assessment]
+      required: [id, catalog, task, selectionReason, targetedPractice, status, assistanceUsed, currentQuestion, questions, assignedAt, completedAt, assessment]
       properties:
         id: { type: string, format: uuid }
         catalog:
@@ -2425,8 +3055,12 @@ components:
             revision: { type: integer, enum: [1] }
           additionalProperties: false
         task: { $ref: '#/components/schemas/SpeakingTask2Task' }
-        selectionReason: { type: string, enum: [unseen, due, weak, old] }
+        selectionReason: { type: string, enum: [unseen, due, weak, old, targeted_focus] }
+        targetedPractice:
+          nullable: true
+          allOf: [{ $ref: '#/components/schemas/SpeakingAssignedTargetedPractice' }]
         status: { type: string, enum: [assigned, in_progress, completed] }
+        assistanceUsed: { type: boolean }
         currentQuestion: { type: integer, minimum: 1, maximum: 4 }
         questions:
           type: array
@@ -2484,7 +3118,7 @@ components:
       additionalProperties: false
     SpeakingTask3Session:
       type: object
-      required: [id, catalog, task, selectionReason, status, currentQuestion, answers, assignedAt, completedAt, assessment]
+      required: [id, catalog, task, selectionReason, targetedPractice, status, assistanceUsed, currentQuestion, answers, assignedAt, completedAt, assessment]
       properties:
         id: { type: string, format: uuid }
         catalog:
@@ -2495,8 +3129,12 @@ components:
             revision: { type: integer, enum: [1] }
           additionalProperties: false
         task: { $ref: '#/components/schemas/SpeakingTask3Task' }
-        selectionReason: { type: string, enum: [unseen, due, weak, old] }
+        selectionReason: { type: string, enum: [unseen, due, weak, old, targeted_focus] }
+        targetedPractice:
+          nullable: true
+          allOf: [{ $ref: '#/components/schemas/SpeakingAssignedTargetedPractice' }]
         status: { type: string, enum: [assigned, in_progress, completed] }
+        assistanceUsed: { type: boolean }
         currentQuestion: { type: integer, minimum: 1, maximum: 5 }
         answers:
           type: array
@@ -2564,7 +3202,7 @@ components:
       additionalProperties: false
     SpeakingTask4Session:
       type: object
-      required: [id, catalog, task, selectionReason, status, assignedAt, completedAt, practice, assessment]
+      required: [id, catalog, task, selectionReason, targetedPractice, status, assistanceUsed, assignedAt, completedAt, practice, assessment]
       properties:
         id: { type: string, format: uuid }
         catalog:
@@ -2575,8 +3213,12 @@ components:
             revision: { type: integer, enum: [1] }
           additionalProperties: false
         task: { $ref: '#/components/schemas/SpeakingTask4Task' }
-        selectionReason: { type: string, enum: [unseen, due, weak, old] }
+        selectionReason: { type: string, enum: [unseen, due, weak, old, targeted_focus] }
+        targetedPractice:
+          nullable: true
+          allOf: [{ $ref: '#/components/schemas/SpeakingAssignedTargetedPractice' }]
         status: { type: string, enum: [assigned, completed] }
+        assistanceUsed: { type: boolean }
         assignedAt: { type: string, format: date-time }
         completedAt: { type: string, format: date-time, nullable: true }
         practice:
@@ -2910,24 +3552,29 @@ components:
       additionalProperties: false
     AdaptiveProfile:
       type: object
-      required: [taxonomyVersion, weightingVersion, profileCalculationRevision, evidenceWatermarkVersion, evidenceObservedAt, evidenceSourceCount, preliminary, status, confidence, evidenceCount, independentEvidenceCount, assistedEvidenceCount, clientReportedEvidenceCount, independentModuleCount, establishedSkillCount, needsDiagnostic, explanationCodes, skills, modules]
+      required: [taxonomyVersion, weightingVersion, profileCalculationRevision, evidenceWatermarkVersion, evidenceObservedAt, evidenceSourceCount, evidenceFingerprint, preliminary, status, confidence, evidenceCount, independentEvidenceCount, assistedEvidenceCount, clientReportedEvidenceCount, independentModuleCount, establishedSkillCount, needsDiagnostic, explanationCodes, skills, modules]
       properties:
-        taxonomyVersion: { type: string, enum: [ege-en-v1] }
-        weightingVersion: { type: string, enum: [adaptive-evidence-v1] }
+        taxonomyVersion: { type: string, enum: [ege-en-v2] }
+        weightingVersion: { type: string, enum: [adaptive-evidence-v2] }
         profileCalculationRevision:
           type: integer
           minimum: 1
-          description: Higher profileCalculationRevision wins first, so a newer algorithm may intentionally filter sources. Revision 2 excludes legacy client_reported writing/speaking module attempts; only their server-assessed evidence remains eligible. Within the same calculation revision, evidenceSourceCount is monotonic; equal counts are ordered by evidenceObservedAt and then evidenceWatermarkVersion.
+          description: Higher profileCalculationRevision wins first, so a newer algorithm may intentionally filter sources. Revision 4 keeps assisted evidence observable but gives it zero positive mastery weight; it preserves the revision-3 21-skill Speaking taxonomy and criterion-safe Voice Tutor compatibility and the revision-2 exclusion of client_reported productive attempts. Within the same calculation revision, evidenceSourceCount is monotonic. Fingerprint, evidenceSourceCount and evidenceObservedAt come from one canonical eligible-source projection and are validated as one vector against the current revision before plan replay or persistence.
         evidenceWatermarkVersion: { type: string, enum: [adaptive-evidence-watermark-v1] }
         evidenceObservedAt:
           type: string
           format: date-time
           nullable: true
-          description: Latest valid source-event timestamp used as the equal-count ordering tie-breaker.
+          description: Latest timestamp in the same canonical eligible-source projection that produces source count and fingerprint. Date, ISO, epoch-millisecond and epoch-second representations normalize to one ISO instant.
         evidenceSourceCount:
           type: integer
           minimum: 0
-          description: Append-only raw source-event count; lower counts never replace higher counts within one calculation revision and may include safely uncredited events.
+          description: Count of the canonical eligible-source projection; excluded client-reported productive or unsupported events cannot advance this field.
+        evidenceFingerprint:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          nullable: true
+          description: Canonical SHA-256 of the same eligible-source projection that owns count and latest time. It distinguishes snapshots whose count and time are identical, including post-hoc assistance invalidation; null is reserved for legacy persisted profiles.
         preliminary: { type: boolean }
         status: { type: string, enum: [preliminary, established] }
         confidence: { type: integer, minimum: 0, maximum: 100 }
@@ -2939,8 +3586,8 @@ components:
         establishedSkillCount:
           type: integer
           minimum: 0
-          maximum: 12
-          description: Number of independently established taxonomy skills; the whole profile stays preliminary below 12.
+          maximum: 21
+          description: Number of independently established taxonomy skills; the whole profile stays preliminary below 21.
         needsDiagnostic: { type: boolean, description: True only while the initial diagnostic or sufficient genuine production evidence is missing; scheduled refresh is represented separately by retention.rediagnostic.due and never blocks sessions. }
         explanationCodes: { type: array, items: { type: string } }
         skills: { type: array, items: { $ref: '#/components/schemas/AdaptiveSkillEstimate' } }
@@ -3070,8 +3717,8 @@ components:
           type: object
           required: [independentlyEstablishedSkills, totalSkills, confidence, assistedEvidenceDoesNotEstablishLevel]
           properties:
-            independentlyEstablishedSkills: { type: integer, minimum: 0, maximum: 12 }
-            totalSkills: { type: integer, enum: [12] }
+            independentlyEstablishedSkills: { type: integer, minimum: 0, maximum: 21 }
+            totalSkills: { type: integer, enum: [21] }
             confidence: { type: integer, minimum: 0, maximum: 100 }
             assistedEvidenceDoesNotEstablishLevel: { type: boolean, enum: [true] }
           additionalProperties: false
@@ -3176,18 +3823,19 @@ components:
       additionalProperties: false
     AdaptivePlan:
       type: object
-      required: [id, version, revision, basePlanRevision, goalRevision, taxonomyVersion, profileCalculationRevision, profileEvidenceWatermarkVersion, profileEvidenceObservedAt, profileEvidenceSourceCount, recalculationBucket, calculatedAt, forecast, allocation, stability, createdAt, updatedAt]
+      required: [id, version, revision, basePlanRevision, goalRevision, taxonomyVersion, profileCalculationRevision, profileEvidenceWatermarkVersion, profileEvidenceObservedAt, profileEvidenceSourceCount, profileEvidenceFingerprint, recalculationBucket, calculatedAt, forecast, allocation, stability, createdAt, updatedAt]
       properties:
         id: { type: string, format: uuid }
         version: { type: string, enum: [adaptive-plan-v1] }
         revision: { type: integer, minimum: 1 }
         basePlanRevision: { type: integer, minimum: 1, nullable: true, description: Exact current plan revision used to calculate this revision; null only for the first plan. }
         goalRevision: { type: integer, minimum: 1 }
-        taxonomyVersion: { type: string, enum: [ege-en-v1] }
+        taxonomyVersion: { type: string, enum: [ege-en-v2] }
         profileCalculationRevision: { type: integer, minimum: 1 }
         profileEvidenceWatermarkVersion: { type: string, enum: [adaptive-evidence-watermark-v1] }
-        profileEvidenceObservedAt: { type: string, format: date-time, nullable: true }
-        profileEvidenceSourceCount: { type: integer, minimum: 0 }
+        profileEvidenceObservedAt: { type: string, format: date-time, nullable: true, description: Canonical latest time from the exact eligible evidence projection bound to this plan. }
+        profileEvidenceSourceCount: { type: integer, minimum: 0, description: Count from the exact eligible evidence projection bound to this plan. }
+        profileEvidenceFingerprint: { type: string, pattern: '^[0-9a-f]{64}$', nullable: true, description: Canonical content fingerprint of the exact eligible evidence projection bound to this plan. The full revision/version/count/time/fingerprint vector is revalidated before replay or persistence; null is returned only for a plan persisted before migration 052. }
         recalculationBucket: { type: string, format: date }
         calculatedAt: { type: string, format: date-time, description: Deterministic UTC start of recalculationBucket used by every time-dependent plan calculation. }
         forecast: { $ref: '#/components/schemas/AdaptiveForecast' }
@@ -3196,7 +3844,7 @@ components:
           required: [modules, skills]
           properties:
             modules: { type: array, minItems: 6, maxItems: 6, items: { $ref: '#/components/schemas/AdaptiveAllocationItem' }, description: Integer percentages total exactly 100. }
-            skills: { type: array, minItems: 12, maxItems: 12, items: { $ref: '#/components/schemas/AdaptiveAllocationItem' }, description: Integer percentages total exactly 100; high uncertainty creates diagnostic_probe work. }
+            skills: { type: array, minItems: 21, maxItems: 21, items: { $ref: '#/components/schemas/AdaptiveAllocationItem' }, description: Integer percentages total exactly 100; high uncertainty creates diagnostic_probe work. }
           additionalProperties: false
         stability:
           type: object
@@ -3204,7 +3852,7 @@ components:
           properties:
             applied: { type: boolean }
             maximumChangePercentagePoints: { type: integer, enum: [10] }
-            bypassReason: { type: string, nullable: true, enum: [goal_changed, critical_retention_expiry] }
+            bypassReason: { type: string, nullable: true, enum: [goal_changed, taxonomy_changed, critical_retention_expiry] }
             bypassedSkillIds: { type: array, maxItems: 0, items: { type: string }, description: Reserved and empty until Ticket 06 adds repository-derived persisted critical expiry. }
             bypassedModuleIds: { type: array, maxItems: 0, items: { type: string, enum: [vocabulary, grammar, reading, listening, writing, speaking] }, description: Reserved and empty until Ticket 06 adds repository-derived persisted critical expiry. }
           additionalProperties: false
@@ -3240,7 +3888,7 @@ components:
       required: [id, catalogVersion, status, estimatedMinutes, deadlineMinutes, answeredItems, maxItems, progressPercent, canComplete, stopReason, startedAt, expiresAt, completedAt]
       properties:
         id: { type: string, format: uuid }
-        catalogVersion: { type: string, minLength: 1, maxLength: 40, description: Stored catalog-policy registry version; ege-short-diagnostic-v1 and Premium ege-deep-diagnostic-v1 are supported. }
+        catalogVersion: { type: string, minLength: 1, maxLength: 40, description: Immutable stored catalog-policy registry version. New sessions use ege-short-diagnostic-v2 or Premium ege-deep-diagnostic-v2; saved ege-short-diagnostic-v1 and ege-deep-diagnostic-v1 sessions remain supported. }
         depth: { type: string, enum: [deep], description: Present only for the explicit Premium deep diagnostic; omitted for backward-compatible short responses. }
         status: { type: string, enum: [in_progress, ready, completed, expired] }
         estimatedMinutes: { type: integer, minimum: 1, maximum: 120 }
@@ -3452,7 +4100,7 @@ components:
             supported: { type: boolean }
             skillIds: { type: array, uniqueItems: true, items: { type: string, maxLength: 120 } }
           additionalProperties: false
-        skills: { type: array, minItems: 12, maxItems: 12, items: { $ref: '#/components/schemas/AdaptiveSessionBudgetSkill' } }
+        skills: { type: array, minItems: 21, maxItems: 21, items: { $ref: '#/components/schemas/AdaptiveSessionBudgetSkill' } }
       additionalProperties: false
     AdaptiveSessionPreview:
       type: object
@@ -3461,7 +4109,7 @@ components:
         version: { type: string, enum: [adaptive-session-v1] }
         composerPolicyVersion: { type: string, enum: [adaptive-composer-v1] }
         contentRegistryVersion: { type: string, enum: [adaptive-content-v1] }
-        taxonomyVersion: { type: string, enum: [ege-en-v1] }
+        taxonomyVersion: { type: string, enum: [ege-en-v2] }
         previewFingerprint: { type: string, pattern: '^[0-9a-f]{64}$' }
         planId: { type: string, format: uuid }
         planRevision: { type: integer, minimum: 1 }
@@ -3495,7 +4143,7 @@ components:
         previewFingerprint: { type: string, pattern: '^[0-9a-f]{64}$' }
         composerPolicyVersion: { type: string, enum: [adaptive-composer-v1] }
         contentRegistryVersion: { type: string, enum: [adaptive-content-v1] }
-        taxonomyVersion: { type: string, enum: [ege-en-v1] }
+        taxonomyVersion: { type: string, enum: [ege-en-v2] }
         weekStart: { type: string, format: date-time }
         durationMinutes: { type: integer, minimum: 15, maximum: 120, multipleOf: 5 }
         learningMinutes: { type: integer, minimum: 5, maximum: 120 }
@@ -3745,7 +4393,7 @@ components:
               right: { type: string, minLength: 1, maxLength: 500 }
               note: { type: string, minLength: 1, maxLength: 80 }
             additionalProperties: false
-        confidence: { type: number, minimum: 0, maximum: 1 }
+        confidence: { type: number, nullable: true, minimum: 0, maximum: 1 }
         needsRetryReason: { type: string, nullable: true, maxLength: 80 }
         scoringVersion: { type: string, enum: [speaking-fipi-combiner-v2] }
       additionalProperties: false

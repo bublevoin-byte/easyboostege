@@ -15,6 +15,12 @@
 
 ---
 
+Ticket Speaking 2.0 / 09 is done. Final independent Standards and Spec reviews both returned
+`ZERO_FINDINGS`. The accepted freeze is Final19: 1259 tests total (1218 passed, 41 expected
+PostgreSQL skips, 0 failed), disposable PostgreSQL 41/41, lint/check/build, full and adaptive E2E,
+secret/history scans and `git diff --check` all green. One local ticket commit follows; push and deploy
+remain intentionally pending separate authorization.
+
 # Прогресс — «Говорение 2.0»
 
 Спека: [.scratch/speaking-2-pilot/spec.md](.scratch/speaking-2-pilot/spec.md)
@@ -31,12 +37,28 @@
 | 06 | Azure Pronunciation adapter и квоты 60/240 минут | done |
 | 07 | Детерминированная оценка ФИПИ и методический gate | done |
 | 08 | Акцентный профиль, согласия и приватная калибровка | done |
-| 09 | Индивидуальный план, Premium-отчёт и Voice Tutor | ready-for-agent |
+| 09 | Индивидуальный план, Premium-отчёт и Voice Tutor | in-review |
 | 10 | Выпускной аудит и release candidate | ready-for-agent |
 
 Спецификация и официальное исследование подтверждены владельцем 2026-08-06. Английский контракт
 ЕГЭ-2026 закрепляет четыре вопроса задания 2 и максимум 20 баллов; предварительная формулировка про
 пять вопросов исправлена до реализации. Платных вызовов, установки Azure SDK, push и deploy не было.
+
+Тикет 09 заморожен для финального review: Base получает полный текущий разбор, безопасную историю и
+следующий шаг, Premium — динамику, сравнение, targeted practice и bounded Voice Tutor handoff. Надёжные
+Speaking-evidence меняют индивидуальный план, а подсказанные, технические и low-confidence попытки не
+повышают mastery. Переход сохранённого плана `ege-en-v1` на `ege-en-v2` явно сбрасывает стабильность.
+Targeted practice проверяет фактический Premium и атомарно отклоняет старый указатель после новой
+оценки или помощи одинаково в file/PostgreSQL. Финальное укрепление добавило locale-bound цели и
+динамику, хронологическую реактивацию после регрессии, `reportRevision` для любой новой оценки, все 11
+Speaking micro-activities, bounded Premium mining и evidence-fingerprint CAS после поздней помощи.
+Последний review-hardening перенёс entitlement/report/targeted-practice и execution-claim TTL на
+post-lock authority time, связал start response с сохранённым fixed-TTL claim и ограничил adaptive
+Speaking evidence 120 новейшими попытками до hydration/hash без удаления старых owner-данных.
+Проверка: focused 107/107; полный suite 1233 total (1198 pass, 35 штатных PostgreSQL skip, 0 fail),
+живой PostgreSQL 35/35 с миграциями 001–052, lint/check, frontend build 482 assets и diff-check —
+зелёные. Полный и adaptive Chromium E2E и secret/history scans прошли повторно. Платных/provider-вызовов,
+commit, push и deploy не было; дерево передано на свежие последовательные Standards → Spec review.
 
 Тикет 01 закрыт: строгий каталог `speaking-pilot-v1` содержит 60 оригинальных текстов задания 1 с распределением 12/36/12 и автоматическими проверками структуры, уникальности и сходства. Owner-bound API для активной подписки назначает unseen/due/weak/old материал без немедленного повтора, файловое и PostgreSQL-хранилища поддерживают одинаковые безопасные метаданные, экспорт и удаление. Экран проводит mic check, подготовку и запись 90/90 секунд, хранит и проигрывает аудио только локально и честно сообщает об отсутствии фонетического балла без провайдера. Целевые тесты 18/18, frontend build, lint, check и полный `npm test` прошли; независимый Standards/Spec review завершён, все P1/P2 исправлены. Azure SDK, платных/сетевых вызовов, push и deploy не было.
 
@@ -1027,16 +1049,16 @@ Ticket 01 complete: the authenticated tracer now stores revisioned EGE goals and
 confidence-labelled profile from owner-bound attempts plus validated Voice Tutor recovery/retention
 evidence. It includes the versioned six-module taxonomy and weighting policy, explicit
 client-reported/assisted/independent provenance and per-skill trust states. Exact aliases cover all
-12 skills; `voice-tutor-skill-compat-v1` maps all current production Voice skill families, including
+21 skills; `voice-tutor-skill-compat-v2` maps all current production Voice skill families, including
 nested IDs and grammar-origin word-formation/collocation evidence, to the intended skill. Known
 families with a wrong module are rejected instead of falling through to an unrelated default;
-unknown recovery/repeat IDs are uncredited. Speaking task 1 is deliberately uncredited because
-`ege-en-v1` has no reading-aloud skill, while tasks 2–4 keep their intended mappings. Service
+unknown recovery/repeat IDs are uncredited. Speaking tasks 1–4 publish their intended v2 mappings,
+including the dedicated reading-aloud skill for task 1. Service
 `voice_tutor_*` attempts are ignored by the adaptive scorer because their exact recovery/repeat
 ledger is authoritative, preventing double credit into a module default.
 Assisted/client-only evidence is scoring-bounded, cannot reduce uncertainty, exceed 49
 mastery or establish a skill; forged high-volume public history remains preliminary guidance. The
-whole profile is established only at 12/12 independently confirmed skills. Migration 031 has
+whole profile is established only at 21/21 independently confirmed skills. Migration 031 has
 file/PostgreSQL and export/delete parity. A separate monotonic calculation revision permits a newer
 algorithm to recompute the same evidence but blocks every older algorithm; the append-only watermark
 never lets a lower source count replace a higher one and accepts larger backfills even with an older
@@ -1113,12 +1135,11 @@ concurrency. One shared strict validator rejects malformed candidate/forecast/al
 outer/inner mismatches and a fingerprint that does not match the complete supplied metadata before any
 duplicate lookup. A retained duplicate fingerprint replays only after an exact normalized comparison of
 the candidate envelope and all plan semantics; only regenerated identity and actual receipt timestamps
-are ignored. A complete historical candidate returns current before current-goal/profile checks, but a
-bare captured hash or changed confidence/allocation/reason cannot replay. For every new candidate, the repository rebuilds the expected
+are ignored. The current canonical evidence vector is now checked before that replay, so a historical
+candidate cannot bypass evidence added after it was built; a bare captured hash or changed confidence/allocation/reason cannot replay. For every new candidate, the repository rebuilds the expected
 plan under the same owner mutation/transaction from the full persisted goal, full profile with all 12
 skill estimates and current plan; synthetic goal values, skill states, forecasts or allocations reject.
-Historical fingerprints return current before those authoritative-current checks, while
-the route boundedly recomputes a CAS loser against the winning plan. The repository independently
+The route boundedly recomputes a CAS loser against the winning plan. The repository independently
 checks the ±10 transition. Calculation revision precedes append-only count/time/version ordering,
 so a newer algorithm may intentionally filter sources and an older one can never overwrite it.
 Exact old-goal fingerprints still return current after a goal change, but unknown stale fingerprints
@@ -1413,5 +1434,177 @@ VPS без изменения работающего staging. Созданы в�
 аудио по требованию. Lint/check и secret scan прошли; `XAI_API_KEY` не выводился и не сохранялся.
 До deploy остаются ручная проверка голосов, отдельный commit с бинарными assets и owner-approved
 push/deploy.
+
+Ticket Speaking 2.0 / 09 прошёл финальное укрепление: adaptive bind принимает только evidence ровно
+назначенного Speaking `skillId`, а focused word/phoneme — только точный подтверждённый outcome. Все
+Premium-цели и динамика сегментированы по `en-GB`/`en-US`. Все writers adaptive evidence и операции
+Premium entitlement разделяют owner serialization, поэтому устаревший профиль не перезаписывает новое
+свидетельство, а после завершённого отзыва Premium не создаётся целевая Speaking-сессия. Проверки:
+95/95 focused, полный набор 1187 total (1159 pass, 28 PostgreSQL skip), disposable PostgreSQL 001–050
+и 28/28, lint/check, frontend build 482 assets, adaptive/full Speaking/pronunciation E2E и оба secret scan.
+Платных вызовов, push и deploy не было.
+
+Повторный review Ticket Speaking 2.0 / 09 закрыл nullable acoustics и активную локаль профиля.
+Отсутствующая точность Azure теперь остаётся `null` на всём пути и не превращается в ложный 0%, mastery
+или фонетическую цель. Premium report и целевая выдача используют только текущую каноническую
+`en-GB`/`en-US`; после ручной смены профиля старый target pointer атомарно отклоняется с `409` в file и
+PostgreSQL, а новая сессия получает локаль новой цели. Проверки: focused 58/58, полный набор 1190 total
+(1162 pass, 28 PostgreSQL skip, 0 fail), disposable PostgreSQL 001–050 и 28/28, lint/check, frontend
+build 482 assets, HTTP smoke, adaptive/full Speaking/pronunciation E2E и оба secret scan. Временные
+PostgreSQL-ресурсы удалены; provider-вызовов, push и deploy не было.
+
+Финальный review Ticket Speaking 2.0 / 09 закрыл строгий числовой контракт Azure, отдельные
+`unexpected_break`/`missing_break`, атомарный Learning report и устойчивую привязку Voice Tutor.
+Отсутствующие/строковые confidence и timing не создают ложную беглость, ноль или mastery. Паузы видны
+в Base/Premium, но не являются ошибками произношения и не меняют балл ФИПИ. File и PostgreSQL читают
+attempts, квоту/тариф и акцент одним owner-serialized снимком; гонки смены акцента, поздней помощи и
+отзыва Premium проверены детерминированно. Voice Tutor использует bounded criterion и matching attempt
+summary из надёжной попытки, а не данные более новой technical/assisted попытки. Проверки: focused
+Speaking/UI 84/84; полный набор 1195 total (1167 pass, 28 штатных PostgreSQL skip, 0 fail); disposable
+PostgreSQL 001–050 и 28/28; lint/check; frontend build 482 assets; полный и adaptive Chromium E2E; оба
+secret scan и diff-check. Временные PostgreSQL-ресурсы удалены; provider-вызовов, push и deploy не было.
+
+Финальная граница полноты Azure для Ticket Speaking 2.0 / 09 закрыта fail-closed. Потерянный segment,
+`NBest`, confidence, обязательный факт слова, превышение 200 сегментов или 500 слов больше не может
+дать успешную оценку или mastery. Временные метки каждого слова строго сверяются с разобранной
+длительностью WAV и допуском 50 мс до расчёта беглости, ФИПИ и публичного отчёта. Pause-аннотации
+сохраняют слово в accuracy/completeness/fluency, но не считаются ошибками ФИПИ и не меняют балл.
+Явный `pauseAnalysisAvailable` проходит от provider через storage/report/OpenAPI/UI: `en-US` показывает
+доступный нулевой результат, `en-GB` — неподдерживаемый показатель, а Premium-динамика различает ноль
+и отсутствие измерения. Проверки: focused 84/84; полный набор 1200 total (1172 pass, 28 штатных
+PostgreSQL skip, 0 fail); disposable PostgreSQL 001–050 и 28/28; lint/check; frontend build 482 assets;
+полный и adaptive Chromium E2E; оба secret scan и diff-check. Временные PostgreSQL-ресурсы удалены;
+реальных provider-вызовов, push и deploy не было.
+
+Финальная граница Ticket Speaking 2.0 / 09 закрыта по результатам повторного аудита. Azure continuous
+recognition теперь fail-closed обрабатывает смешанный valid + `NoMatch`; поддержка пауз/просодии считается
+доступной только после успешного `enableProsodyAssessment()`, сохраняя честную разницу между нулём и
+отсутствием метрики. Миграция 051 проводит evidence fingerprint через profile DTO, file/PostgreSQL,
+public projection и export. Owner-serialized CAS по содержимому позволяет same-count/same-time помощи
+понизить устаревшее independent mastery и не даёт старому снимку восстановить его. Проверки: focused
+117/117; полный набор 1203 total (1174 pass, 29 штатных PostgreSQL skip, 0 fail); disposable PostgreSQL
+001–051 и 29/29; lint/check; frontend build 482 assets; полный и adaptive Chromium E2E; secret scan
+1082 файлов и history scan 298 commits; diff-check. Временные PostgreSQL-ресурсы удалены; реальных
+provider/платных вызовов, push и deploy не было. Код заморожен для Standards → Spec review.
+
+Повторный аудит Ticket Speaking 2.0 / 09 закрыл последнюю сквозную границу между evidence-профилем и
+сохранённым персональным планом. Миграция 052 добавляет nullable SHA-256 content fingerprint в ревизии
+плана; новые планы связывают с ним input fingerprint, ordering/replay, authoritative validation, DTO,
+file/PostgreSQL storage и export. Поэтому same-count/same-time поздняя отметка помощи создаёт новую
+согласованную ревизию и распределение, а не возвращает устаревший current plan. Legacy null читается и
+обновляется; удаление аккаунта каскадно удаляет историю. HTTP-регрессия зелёная в file и реальном
+PostgreSQL. Проверки: focused 72/72; полный набор 1205 total (1175 pass, 30 штатных PostgreSQL skip,
+0 fail); disposable PostgreSQL 001–052 и 30/30; lint/check; frontend build 482 assets; полный и adaptive
+Chromium E2E; secret scan 1082 файлов, history scan 298 commits и diff-check. Временные PostgreSQL-
+ресурсы удалены; реальных provider/платных вызовов, push и deploy не было. Код заморожен для свежих
+Standards → Spec review.
+
+Финальный interleaving-аудит Ticket Speaking 2.0 / 09 перевёл evidence watermark на одну каноническую
+eligible-source проекцию: calculation revision, version, count, latest time и SHA-256 fingerprint больше
+не могут расходиться, а timestamps `Date`/ISO/epoch milliseconds/seconds дают одинаковую identity в
+file и PostgreSQL. Сохранение плана теперь до replay/insert повторно сверяет persisted profile и
+candidate с текущим полным evidence-вектором внутри owner queue/transaction. Если помощь появилась
+после сохранения профиля, route ограниченно повторяет весь overview и возвращает согласованные
+пониженный профиль и новую ревизию плана. Детерминированные file и live PostgreSQL HTTP hooks зелёные.
+Проверки: focused diagnostic/adaptive/plan/file 111/111; полный набор 1209 total (1179 pass,
+30 штатных PostgreSQL skip, 0 fail); disposable PostgreSQL 001–052 и 30/30; lint/check; frontend build
+482 assets; полный и adaptive Chromium E2E; secret scan 1082 файлов, history scan 298 commits и
+diff-check. Временные PostgreSQL-ресурсы удалены; provider-вызовов, push и deploy не было. Код
+заморожен для свежих Standards → Spec review и единого коммита владельцем родительской задачи.
+
+Последний fail-closed аудит Ticket Speaking 2.0 / 09 запретил неявно превращать повреждённые evidence-
+поля в учебный прогресс: score/max принимаются только как конечные числа с положительным максимумом,
+а diagnostic/recovery-флаги — только как boolean. File и PostgreSQL одинаково исключают `null`, пустые,
+числовые и boolean-похожие строки из mastery и всего watermark-вектора; corrupted JSON покрыт прямыми
+регрессиями. Profile CAS выполняет максимум три полных overview-попытки, включая режим без цели и без
+плана: временная первая/вторая гонка возвращает согласованный 200, исчерпание — retryable
+`409 ADAPTIVE_PROFILE_RETRY_REQUIRED` с `Retry-After: 1`, без смешивания старого профиля с новой
+retention/access-проекцией. Проверки: focused 124/124; полный набор 1215 total (1183 pass,
+32 штатных PostgreSQL skip, 0 fail); disposable PostgreSQL 001–052 и 32/32; lint/check; frontend build
+482 assets; полный и adaptive Chromium E2E; secret scan 1082 tracked файлов, history scan 298 commits,
+scan 7 untracked файлов и diff-check. Временные PostgreSQL-ресурсы удалены; provider-вызовов, push и
+deploy не было. Код заморожен для свежих Standards → Spec review.
+
+Финальный конкурентный аудит Ticket Speaking 2.0 / 09 закрыт. Premium-depth `start`, exact replay,
+`bind-attempt` и `advance` атомарно перечитывают активные base+voice entitlement внутри file owner queue
+или PostgreSQL user-lock transaction; завершённый отзыв Premium не может пропустить запись после
+route-precheck, а Basic execution сохранён. Azure `monotone` учитывается как произнесённое слово в
+completeness/fluency и остаётся видимым событием, но не является ошибкой ФИПИ и не меняет балл задания
+1. Все исчерпанные plan-stage conflict/stale исходы после трёх полных overview-попыток унифицированы в
+retryable `409 ADAPTIVE_PROFILE_RETRY_REQUIRED` с `Retry-After: 1`; временная первая/вторая гонка даёт
+согласованный 200. Проверки: focused RED 80/85 → GREEN 85/85; полный набор 1219 total (1185 pass,
+34 штатных PostgreSQL skip, 0 fail); disposable PostgreSQL 001–052 и 34/34; lint/check; frontend build
+482 assets; полный и adaptive Chromium E2E; secret scan 1082 tracked файлов, history scan 298 commits
+и diff-check. Временные PostgreSQL-ресурсы удалены; provider-вызовов, commit, push и deploy не было.
+Код заморожен для свежих Standards → Spec review.
+
+Final14 закрыл authority времени, start/replacement interleaving и момент закрытия замены. Premium-depth
+`start`, exact start/advance replay, `bind-attempt` и `advance` используют effective time только после file
+owner queue или PostgreSQL user `FOR UPDATE` (`clock_timestamp()`), а не route `candidate.now`. Start до
+claim атомарно сверяет locked session revision/replacement и launch fingerprint; replacement-wins даёт
+409 вместо старого ответа с новым claim. После local pending/start, любого claim, `started_at`,
+`in_progress`/`completed`, execution revision или event новый replace и exact replay fail-closed отвечают
+`409 ADAPTIVE_SESSION_REPLACEMENT_LOCKED`; UI скрывает контролы уже при pending.
+
+TDD RED: effective-time file 5/6, stale-launch 6/7, replacement/UI 20/23; GREEN file/API/runtime 23/23.
+Полный набор — 1223 total (1189 pass, 34 штатных PostgreSQL skip, 0 fail); disposable PostgreSQL применил
+001–052 и прошёл 34/34, после чего container/network/volume удалены, Docker Desktop остановлен. Реальных
+provider/платных вызовов, commit, push и deploy не было. `lint`, `check` (348 JS), frontend build (482
+assets), полный и adaptive Chromium E2E, secret scan 1082 tracked файлов, history scan 298 commits,
+отдельный scan 7 untracked файлов и `git diff --check` зелёные. Код заморожен для свежих
+последовательных Standards → Spec review.
+
+Final16 закрыл последнюю authorization-гонку Speaking learning loop. Learning report и targeted
+assignment после file owner queue / PostgreSQL user `FOR UPDATE` сначала перечитывают активную Base-
+подписку по свежему authority-времени и только затем определяют Premium. Поэтому Base expiry после
+route-precheck даёт `403 SUBSCRIPTION_REQUIRED` без report payload и без новой targeted session, тогда
+как отзыв только Premium сохраняет Base report и прежний stale-pointer 409. TDD: file RED 200→403 и
+409→403, затем learning API 11/11; живой disposable PostgreSQL 001–052 — 37/37 с двумя lock-race
+сценариями и неизменившимся session count. Полный набор — 1237 total (1200 pass, 37 штатных PostgreSQL
+skip, 0 fail); lint/check (348 JS), frontend build 482 assets, полный и adaptive Chromium E2E зелёные.
+Provider/платных вызовов, commit, push и deploy не было; код заморожен для свежих Standards → Spec
+review.
+
+Final17 закрывает последний продуктовый разрыв Voice Tutor: максимальный официальный балл больше не скрывает
+конкретную надёжную ошибку произношения. Если все критерии ФИПИ максимальны, Premium report выбирает самый слабый
+точный word/phoneme ниже 80, выдаёт bounded server-owned pointer с attempt/task/accent, стабильным ref/label,
+кратким evidence, observation time и 30-дневным expiry. Любая потеря официального критерия по-прежнему имеет
+приоритет. Launch/replay заново строят капсулу из owner-bound attempt, сверяют точный ref и expiry; устаревший
+указатель получает bounded 409. Капсула имеет `lost_points: 0`, не меняет официальный score/mastery и хранится
+только как существующий `voice-tutor-reference-v1`; UI показывает точный label и не ставит прежний `got < max`
+барьер. File route, публичный report, capsule/replay и UI закреплены TDD; OpenAPI и retention parity обновлены.
+Focused-набор прошёл 56/56; полный `npm test` — 1241 total (1203 pass, 38 штатных PostgreSQL skip,
+0 fail); disposable PostgreSQL применил миграции 001–052 и прошёл 38/38, включая reserve/rebuild/export/delete
+новой капсулы, после чего container/network/volume удалены. `lint`, `check` (348 JS), frontend build (482 assets),
+полный и adaptive Chromium E2E, secret/history scans и `git diff --check` зелёные. Provider/платных вызовов,
+commit, push и deploy не было.
+
+Final19 закрыл explicit fallback endpoint, fresh-create catch и rollback parity file storage. `/fallback` теперь
+внутри file owner queue либо PostgreSQL user `FOR UPDATE` берёт свежее authority-время, повторно требует активные
+Base+Premium и до любых status/billing/outcome/delivery/nonce изменений блокирует и пересобирает exact
+pronunciation attempt/ref/assistance/mastery/30-day-expiry pointer. Revoke, Base expiry, assistance/ref drift и
+точная граница expiry возвращают 403/409 без изменения сессии и без text AI. Fresh-create ticket catch переводит
+сессию в text/local только для явного `VOICE_TUTOR_PROVIDER_UNAVAILABLE`; authorization, stale/expired pointer,
+session integrity/expiry/conflict ошибки сохраняют свой код. File reserve восстанавливает полный in-memory snapshot
+после любого throw, поэтому expiry reconciliation не может протечь в следующую persistence; PostgreSQL даёт ту же
+гарантию rollback транзакции. Проверки: initial TDD RED 16 total / 11 pass / 5 intended fail и отдельный
+integrity-classification RED 18/19; GREEN 19/19 file/API, 53/53 focused Voice Tutor, live PostgreSQL 41/41;
+полный набор 1259 total (1218 pass, 41 штатный PostgreSQL skip, 0 fail),
+lint/check (348 JS), frontend build 482 assets, full Chromium/adaptive E2E, оба secret scan и `git diff --check`.
+Provider/платных вызовов, commit, push и deploy не было; дерево заморожено для свежего Standards → Spec review.
+
+Final18 закрыл две последние атомарные гонки Voice Tutor. Create, exact replay, realtime-ticket issue/reissue и
+text/local recovery теперь после file owner queue либо PostgreSQL user `FOR UPDATE` берут свежее authority-время,
+повторно требуют активные Base+Premium и только затем возвращают сессию или меняют ticket/nonce. Поэтому revoke
+или Base expiry, завершившиеся во время ожидания lock, дают 403 без ротации credentials. Для pronunciation-error
+капсулы та же owner-мутация заново блокирует исходную Speaking-попытку и сверяет assistance, mastery, точный
+word/phoneme ref и 30-дневный expiry; route-built capsule больше не считается authority, а assistance-wins,
+ref drift и точная граница expiry дают bounded 409 до создания сессии/ticket. Criterion pointer, idempotency,
+export/delete и retention-семантика сохранены. TDD RED зафиксировал file replay/recovery/assistance и две live-PG
+гонки; GREEN: focused 63/63, весь Voice Tutor 90/90, полный набор 1251 total (1210 pass, 41 штатный PostgreSQL skip,
+0 fail), disposable PostgreSQL 001–052 и 41/41. `lint`, `check` (348 JS), frontend build (482 assets), полный и
+adaptive Chromium E2E, secret scan 1082 tracked файлов, history scan 298 commits, scan 7 untracked файлов и
+`git diff --check` зелёные. Временные PostgreSQL-ресурсы удалены; provider/платных вызовов, commit, push и deploy
+не было. Код заморожен для свежих последовательных Standards → Spec review и единственного родительского коммита.
 
 ---

@@ -1,34 +1,25 @@
-const tasks = Object.freeze({
-  'builtin:speaking:task:2:v1': Object.freeze({
-    taskNumber: 2,
-    assignment: Object.freeze({
-      ad: 'Language Summer Camp «Sunny Hills». English every day with native speakers, sports and new friends! Join us this summer!',
-      points: Object.freeze(['dates of the course', 'price', 'number of lessons a day', 'accommodation']),
-    }),
-  }),
-  'builtin:speaking:task:4:v1': Object.freeze({
-    taskNumber: 4,
-    assignment: Object.freeze({
-      topic: 'Зимние каникулы',
-      plan: Object.freeze([
-        'кратко опиши обе фотографии — что на них происходит',
-        'скажи, что общего у этих фотографий',
-        'скажи, чем они различаются',
-        'скажи, какой отдых ближе тебе, и объясни почему',
-      ]),
-      ph: Object.freeze([
-        'Фото 1: семья катается на лыжах в горах в солнечный день',
-        'Фото 2: девушка читает книгу у камина дома',
-      ]),
-    }),
-  }),
-});
+const taskPattern = /^server:speaking:task:([1-4])(?::skill:([a-z0-9._-]{3,120}))?(?::focus:([a-z0-9._-]{3,120}))?:new:v1$/u;
 
 export function adaptiveSpeakingTask(contentRef) {
-  const task = tasks[String(contentRef || '')];
-  return task ? structuredClone(task) : null;
+  const match = taskPattern.exec(String(contentRef || ''));
+  return match ? {
+    taskNumber: Number(match[1]), skillId: match[2] || null, focusRef: match[3] || null,
+  } : null;
 }
 
-export function adaptiveSpeakingContentRef(taskNumber) {
-  return Object.keys(tasks).find((ref) => tasks[ref].taskNumber === Number(taskNumber)) || null;
+export function adaptiveSpeakingContentRef(taskNumber, skillId = null, focusRef = null) {
+  const normalized = Number(taskNumber);
+  if (!Number.isInteger(normalized) || normalized < 1 || normalized > 4) return null;
+  const normalizedSkill = String(skillId || '');
+  if (normalizedSkill && !/^[a-z0-9._-]{3,120}$/u.test(normalizedSkill)) return null;
+  const normalizedFocus = String(focusRef || '');
+  if (normalizedFocus && !/^[a-z0-9._-]{3,120}$/u.test(normalizedFocus)) return null;
+  return `server:speaking:task:${normalized}${normalizedSkill ? `:skill:${normalizedSkill}` : ''}`
+    + `${normalizedFocus ? `:focus:${normalizedFocus}` : ''}:new:v1`;
+}
+
+export function adaptiveSpeakingActivityMatchesTask(activityId, taskNumber) {
+  const normalized = Number(taskNumber);
+  return Number.isInteger(normalized) && normalized >= 1 && normalized <= 4
+    && new RegExp(`^speaking_${normalized}(?:_|$)`, 'u').test(String(activityId || ''));
 }

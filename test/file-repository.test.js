@@ -1,10 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { buildAdaptiveLearningProfile } from '../adaptive-learning/profile.js';
+import { adaptivePlanInputFingerprint, buildAdaptiveLearningPlan } from '../adaptive-learning/plan.js';
 import { createFileRepository } from '../storage/file-repository.js';
+import { publicSpeakingReview, scoreSpeakingTask } from '../speaking/fipi-scoring.js';
 import {
   assertAdaptiveProfileAppendOnlyOrdering,
   assertAdaptiveProfileRejectsStale,
@@ -117,6 +120,102 @@ test('file adaptive profile save/get expose the shared allowlisted repository DT
   });
 });
 
+test('file evidence reader never coerces malformed JSON into eligible evidence', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-corrupt-evidence-'));
+  const file = path.join(directory, 'data.json');
+  const username = 'corrupt-evidence-owner';
+  const diagnosticId = '10000000-0000-4000-8000-000000000011';
+  await fs.writeFile(file, JSON.stringify({
+    users: { [username]: { created: Date.now() } },
+    module_attempts: [{
+      id: '10000000-0000-4000-8000-000000000012', username,
+      module: 'grammar', activity: 'grammar_19_24', score: '4', max_score: '5',
+      evidence_quality: 'server_verified_unassisted', created_at: '2026-08-04T08:00:00.000Z',
+    }],
+    writing_attempts: [{
+      id: 1, username, status: 'completed', task_type: 37,
+      review: { overall_got: '4', overall_max: '6' },
+      evaluated_at: '2026-08-04T08:01:00.000Z', created_at: '2026-08-04T08:01:00.000Z',
+    }],
+    voice_tutor_recoveries: [{
+      id: '10000000-0000-4000-8000-000000000013', username,
+      module: 'grammar', skill_id: 'ege.grammar.forms',
+      initial_micro_check_passed: 'false', initial_transfer_passed: 'true',
+      terminal_outcome: 'resolved', observed_at: '2026-08-04T08:02:00.000Z',
+    }],
+    adaptive_diagnostic_sessions: [{
+      id: diagnosticId, username, status: 'completed', catalog_version: 'ege-short-diagnostic-v1',
+      completed_at: '2026-08-04T08:03:00.000Z',
+    }],
+    adaptive_diagnostic_responses: [{
+      id: '10000000-0000-4000-8000-000000000014', diagnostic_id: diagnosticId,
+      item_id: 'grammar-forms-present-perfect-1', skill_id: 'ege.grammar.forms', module: 'grammar',
+      evidence_quality: 'independent', correct: 'false', answered_at: '2026-08-04T08:03:00.000Z',
+    }],
+  }), 'utf8');
+  const repository = createFileRepository(file);
+  try {
+    const sources = await repository.getAdaptiveLearningEvidenceSources(username);
+    assert.equal(sources.attempts.some((entry) => entry.module === 'writing'), false);
+    assert.equal(sources.attempts.find((entry) => entry.module === 'grammar').score, '4');
+    assert.equal(sources.diagnosticResponses[0].correct, 'false');
+    assert.equal(sources.recoveries[0].initial_micro_check_passed, 'false');
+    const malformed = buildAdaptiveLearningProfile(sources);
+    const empty = buildAdaptiveLearningProfile({
+      diagnosticCompletions: sources.diagnosticCompletions,
+    });
+    assert.equal(malformed.evidenceSourceCount, empty.evidenceSourceCount);
+    assert.equal(malformed.evidenceFingerprint, empty.evidenceFingerprint);
+    assert.equal(malformed.evidenceCount, empty.evidenceCount);
+  } finally {
+    await repository.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('file adaptive evidence hydrates only the newest 120 Speaking attempts', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-speaking-evidence-bound-'));
+  const file = path.join(directory, 'data.json');
+  const username = 'speaking-evidence-owner';
+  const semanticFacts = {
+    confidence: 0.95, verdict: 'Scored.', evidence: ['Read aloud.'], issues: [],
+  };
+  const acousticFacts = {
+    available: true, recognitionConfidence: 0.96, signalQuality: 'good',
+    recordingDurationSeconds: 30, itemDurations: [], completenessScore: 95,
+    fluencyScore: 90, wordAccuracyScore: 94, phonemeAccuracyScore: 93, wordEvents: [],
+  };
+  const review = {
+    ...publicSpeakingReview(scoreSpeakingTask({ taskType: 1, semantic: semanticFacts, acoustic: acousticFacts }), semanticFacts),
+    semanticFacts, acousticFacts,
+  };
+  const speakingAttempts = Array.from({ length: 125 }, (_, index) => ({
+    id: index + 1, username, task_type: 1, transcript: `Attempt ${index + 1}`,
+    review, status: 'completed', source_session_id: crypto.randomUUID(),
+    source_task_ref: `task-${index + 1}`, source_task_revision: 1,
+    source_catalog_id: 'speaking-pilot-v1', source_catalog_revision: 1,
+    assistance_used: false, accent_locale: 'en-GB', targeted_practice: null,
+    created_at: new Date(Date.UTC(2026, 7, 1, 0, index)).toISOString(),
+    evaluated_at: new Date(Date.UTC(2026, 7, 1, 0, index)).toISOString(),
+  }));
+  await fs.writeFile(file, JSON.stringify({
+    users: { [username]: { created: Date.now() } }, speaking_attempts: speakingAttempts,
+  }), 'utf8');
+  const repository = createFileRepository(file);
+  try {
+    const sources = await repository.getAdaptiveLearningEvidenceSources(username);
+    const speakingSourceIds = [...new Set(sources.attempts
+      .filter((entry) => entry.module === 'speaking')
+      .map((entry) => entry.metadata.source_attempt_id))];
+    assert.equal(speakingSourceIds.length, 120);
+    assert.equal(speakingSourceIds[0], 'speaking:125');
+    assert.equal(speakingSourceIds.at(-1), 'speaking:6');
+  } finally {
+    await repository.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('file adaptive profile watermark rejects reverse-order and same-time stale saves', async () => {
   await withRepository(async (repository) => {
     const username = await repository.createTelegramUser(1100, 'Adaptive Race');
@@ -176,6 +275,77 @@ test('file adaptive plan revisions use the shared owner-bound persistence and ex
     assert.equal(await repository.deleteUserData(username), true);
     assert.equal(await repository.getCurrentAdaptiveLearningPlan(username), null);
   });
+});
+
+test('file repository upgrades a realistically persisted v1 plan to v2 without a stability 500', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-plan-taxonomy-upgrade-'));
+  const file = path.join(directory, 'data.json');
+  let repository = createFileRepository(file);
+  try {
+    const username = await repository.createTelegramUser(1_106, 'Legacy plan owner');
+    const goal = (await repository.saveAdaptiveLearningGoal(username, {
+      id: crypto.randomUUID(), idempotencyKey: 'legacy-plan-goal-0001', requestHash: 'e'.repeat(64),
+      targetExam: 'ege_english', targetScore: 85, examDate: '2027-06-01', weeklyMinutes: 300,
+      now: new Date('2026-08-04T08:00:00.000Z'),
+    })).goal;
+    const profile = buildAdaptiveLearningProfile();
+    await repository.saveAdaptiveLearningProfile(username, profile, {
+      now: new Date('2026-08-04T08:30:00.000Z'),
+    });
+    const firstNow = new Date('2026-08-04T09:00:00.000Z');
+    const firstPlan = buildAdaptiveLearningPlan({ goal, profile, now: firstNow });
+    await repository.saveAdaptiveLearningPlan(username, {
+      id: crypto.randomUUID(),
+      inputFingerprint: adaptivePlanInputFingerprint({ goal, profile, basePlanRevision: null, now: firstNow }),
+      basePlanRevision: null, goalId: goal.id, goalRevision: goal.revision,
+      taxonomyVersion: profile.taxonomyVersion,
+      profileCalculationRevision: profile.profileCalculationRevision,
+      profileEvidenceWatermarkVersion: profile.evidenceWatermarkVersion,
+      profileEvidenceObservedAt: profile.evidenceObservedAt,
+      profileEvidenceSourceCount: profile.evidenceSourceCount,
+      profileEvidenceFingerprint: profile.evidenceFingerprint,
+      recalculationBucket: firstPlan.recalculationBucket, plan: firstPlan, now: firstNow,
+    });
+    await repository.close();
+
+    const stored = JSON.parse(await fs.readFile(file, 'utf8'));
+    const legacy = stored.adaptive_learning_plan_revisions[0];
+    legacy.taxonomy_version = 'ege-en-v1';
+    delete legacy.profile_evidence_fingerprint;
+    const speakingPercentage = legacy.allocation.modules.find((item) => item.id === 'speaking').percentage;
+    legacy.allocation.skills = legacy.allocation.skills.filter((item) => item.module !== 'speaking').concat([
+      { id: 'ege.speaking.interaction', label: 'Interaction', module: 'speaking', percentage: Math.floor(speakingPercentage / 2), activityType: 'practice', reasonCodes: [] },
+      { id: 'ege.speaking.monologue', label: 'Monologue', module: 'speaking', percentage: Math.ceil(speakingPercentage / 2), activityType: 'practice', reasonCodes: [] },
+    ]);
+    await fs.writeFile(file, JSON.stringify(stored), 'utf8');
+
+    repository = createFileRepository(file);
+    const previousPlan = await repository.getCurrentAdaptiveLearningPlan(username);
+    assert.equal(previousPlan.profile_evidence_fingerprint, null,
+      'migration 052 keeps legacy file plans readable without a fingerprint');
+    const nextNow = new Date('2026-08-05T09:00:00.000Z');
+    const nextPlan = buildAdaptiveLearningPlan({ goal, profile, previousPlan, now: nextNow });
+    const saved = await repository.saveAdaptiveLearningPlan(username, {
+      id: crypto.randomUUID(),
+      inputFingerprint: adaptivePlanInputFingerprint({ goal, profile, basePlanRevision: 1, now: nextNow }),
+      basePlanRevision: 1, goalId: goal.id, goalRevision: goal.revision,
+      taxonomyVersion: profile.taxonomyVersion,
+      profileCalculationRevision: profile.profileCalculationRevision,
+      profileEvidenceWatermarkVersion: profile.evidenceWatermarkVersion,
+      profileEvidenceObservedAt: profile.evidenceObservedAt,
+      profileEvidenceSourceCount: profile.evidenceSourceCount,
+      profileEvidenceFingerprint: profile.evidenceFingerprint,
+      recalculationBucket: nextPlan.recalculationBucket, plan: nextPlan, now: nextNow,
+    });
+    assert.equal(saved.created, true);
+    assert.equal(saved.plan.taxonomy_version, 'ege-en-v2');
+    assert.equal(saved.plan.profile_evidence_fingerprint, profile.evidenceFingerprint);
+    assert.equal(saved.plan.stability.bypassReason, 'taxonomy_changed');
+    assert.equal(saved.plan.allocation.skills.every((item) => Number.isFinite(item.percentage)), true);
+  } finally {
+    await repository.close().catch(() => {});
+    await fs.rm(directory, { recursive: true, force: true });
+  }
 });
 
 test('file repository merges progress modules without replacing siblings', async () => {
@@ -438,6 +608,7 @@ test('attempts saved before model provenance export an explicit unknown model', 
     const exported = await repository.exportUserData('legacy');
     assert.equal(exported.writing_attempts[0].model, null);
     assert.equal(exported.writing_attempts[0].evaluated_answer, 'Legacy full answer');
+    assert.equal(Object.hasOwn(exported.writing_attempts[0], 'assistance_used'), false);
     assert.equal(exported.speaking_attempts[0].model, null);
   } finally {
     await repository.close();
@@ -495,6 +666,58 @@ test('module attempts are idempotent and included in user export', async () => {
     assert.equal(exported.progress_summary[0].attempt_count, 2);
     assert.equal(exported.progress_summary[0].best_score, 4);
   });
+});
+
+test('a module evidence write invalidates an older adaptive profile snapshot', async () => {
+  await withRepository(async (repository) => {
+    const username = await repository.createTelegramUser(30301, 'Adaptive module CAS');
+    const staleProfile = buildAdaptiveLearningProfile(
+      await repository.getAdaptiveLearningEvidenceSources(username),
+    );
+    await repository.recordModuleAttempt(username, {
+      id: '0aeab55d-c78c-43a8-ab52-8670fb57ac2f',
+      module: 'exam', activity: 'grammar_19_24', score: 5, maxScore: 6,
+      durationMs: 45_000, metadata: { source: 'builtin' },
+    }, { evidenceQuality: 'server_verified_unassisted' });
+    await assert.rejects(repository.saveAdaptiveLearningProfile(username, staleProfile, {
+      now: new Date('2026-08-07T11:00:00.000Z'), verifyCurrentEvidence: true,
+    }), /ADAPTIVE_PROFILE_EVIDENCE_STALE/u);
+  });
+});
+
+test('every file and PostgreSQL adaptive evidence writer uses the owner coordination boundary', async () => {
+  const [fileSource, postgresSource] = await Promise.all([
+    fs.readFile(new URL('../storage/file-repository.js', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../storage/postgres-repository.js', import.meta.url), 'utf8'),
+  ]);
+  const body = (source, name) => {
+    const start = source.indexOf(`  async function ${name}`);
+    assert.notEqual(start, -1, `${name} must exist`);
+    const end = source.indexOf('\n  async function ', start + 10);
+    return source.slice(start, end < 0 ? source.length : end);
+  };
+  for (const name of [
+    'advanceVoiceTutorSession', 'submitVoiceTutorRepeat', 'finishWritingAttempt',
+    'finishSpeakingAttempt', 'answerAdaptiveDiagnostic', 'completeAdaptiveDiagnostic',
+    'recordModuleAttempt',
+  ]) {
+    assert.match(body(fileSource, name), /serialize(?:Coordinated|VoiceTutor)Mutation/u,
+      `${name} must share the file owner mutation queue`);
+    assert.match(body(postgresSource, name),
+      /SELECT username FROM users WHERE username = \$1 FOR UPDATE/u,
+      `${name} must lock the PostgreSQL evidence owner`);
+  }
+  assert.match(body(fileSource, 'setEntitlement'), /serializeCoordinatedMutation/u);
+  assert.match(fileSource.slice(
+    fileSource.indexOf('  function serializePaymentMutation'),
+    fileSource.indexOf('\n  function paymentRequestView'),
+  ), /return serializeCoordinatedMutation\(run\)/u,
+  'file payment approval and revocation must share the assignment queue');
+  for (const name of ['setEntitlement', 'revokeEntitlement', 'assignSpeakingCatalogSession']) {
+    assert.match(body(postgresSource, name),
+      /SELECT username(?:, subscription_until)? FROM users WHERE username = \$1 FOR UPDATE/u,
+      `${name} must use the shared PostgreSQL owner lock`);
+  }
 });
 
 test('file vocabulary summaries match the shared idempotency and ownership contract', async () => {

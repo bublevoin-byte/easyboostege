@@ -220,8 +220,12 @@ export function buildAdaptiveLearningMetrics({
     .filter((row) => insideWindow(row, 'completedAt', 'completed_at', window))) {
     if (field(diagnostic, 'status', 'status') !== 'completed') continue;
     const version = String(field(diagnostic, 'catalogVersion', 'catalog_version') || '');
-    if (version === 'ege-short-diagnostic-v1') counters.diagnostics.shortCompleted += 1;
-    if (version === 'ege-deep-diagnostic-v1') counters.diagnostics.deepCompleted += 1;
+    if (['ege-short-diagnostic-v1', 'ege-short-diagnostic-v2'].includes(version)) {
+      counters.diagnostics.shortCompleted += 1;
+    }
+    if (['ege-deep-diagnostic-v1', 'ege-deep-diagnostic-v2'].includes(version)) {
+      counters.diagnostics.deepCompleted += 1;
+    }
   }
 
   return finalizeAdaptiveLearningMetrics(counters, { window });

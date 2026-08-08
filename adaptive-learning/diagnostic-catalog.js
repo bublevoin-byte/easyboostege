@@ -1,4 +1,4 @@
-export const SHORT_DIAGNOSTIC_POLICY = Object.freeze({
+export const SHORT_DIAGNOSTIC_POLICY_V1 = Object.freeze({
   catalogVersion: 'ege-short-diagnostic-v1',
   depth: 'short',
   estimatedMinutes: 15,
@@ -9,7 +9,7 @@ export const SHORT_DIAGNOSTIC_POLICY = Object.freeze({
   maximumSeconds: 1_200,
 });
 
-export const DEEP_DIAGNOSTIC_POLICY = Object.freeze({
+export const DEEP_DIAGNOSTIC_POLICY_V1 = Object.freeze({
   catalogVersion: 'ege-deep-diagnostic-v1',
   depth: 'deep',
   estimatedMinutes: 35,
@@ -20,7 +20,17 @@ export const DEEP_DIAGNOSTIC_POLICY = Object.freeze({
   maximumSeconds: 2_700,
 });
 
-const ITEMS = [
+export const SHORT_DIAGNOSTIC_POLICY = Object.freeze({
+  ...SHORT_DIAGNOSTIC_POLICY_V1,
+  catalogVersion: 'ege-short-diagnostic-v2',
+});
+
+export const DEEP_DIAGNOSTIC_POLICY = Object.freeze({
+  ...DEEP_DIAGNOSTIC_POLICY_V1,
+  catalogVersion: 'ege-deep-diagnostic-v2',
+});
+
+const LEGACY_ITEMS = [
   {
     id: 'grammar-forms-present-perfect-1',
     skillId: 'ege.grammar.forms',
@@ -213,7 +223,45 @@ const ITEMS = [
   },
 ];
 
-const DEEP_ITEMS = [
+const ITEMS = LEGACY_ITEMS.map((item) => {
+  if (item.id === 'speaking-interaction-follow-up-1') return {
+    ...item,
+    skillId: 'ege.speaking.direct_questions',
+    measurementNotice: 'Короткий тест проверяет выбор реплики, но не устную речь. Навык подтверждается оценкой реального ответа в разделе «Говорение», доступной с обычной активной подпиской.',
+  };
+  if (item.id === 'speaking-monologue-structure-1') return {
+    ...item,
+    skillId: 'ege.speaking.monologue_organization',
+    measurementNotice: 'Короткий тест проверяет выбор структуры, но не устный монолог. Навык подтверждается оценкой реального ответа в разделе «Говорение», доступной с обычной активной подпиской.',
+  };
+  return item;
+});
+
+const SPEAKING_DIAGNOSTIC_ITEMS = [
+  ['reading-aloud-strategy-1', 'ege.speaking.reading_aloud', 'Which preparation step best supports clear reading aloud?', 'Mark sense groups and difficult words before recording.'],
+  ['direct-questions-form-1', 'ege.speaking.direct_questions', 'Which option is a complete direct question?', 'Could you tell me when the course starts?'],
+  ['interview-completeness-1', 'ege.speaking.interview_completeness', 'Which interview answer is complete?', 'I practise twice a week because it helps me speak confidently.'],
+  ['monologue-content-1', 'ege.speaking.monologue_content', 'How should you cover a photo-project plan?', 'Address every point with relevant details.'],
+  ['monologue-organization-2', 'ege.speaking.monologue_organization', 'Which structure is clearest?', 'Introduction, every plan point in order, and conclusion.'],
+  ['spoken-grammar-1', 'ege.speaking.spoken_grammar', 'Which spoken sentence is grammatically complete?', 'The students have been preparing since Monday.'],
+  ['spoken-lexis-1', 'ege.speaking.spoken_lexis', 'Which phrase is natural in a spoken answer?', 'This activity helps me broaden my horizons.'],
+  ['speaking-fluency-1', 'ege.speaking.fluency', 'Which strategy supports fluent speech?', 'Use short planning notes and speak in connected sense groups.'],
+  ['pronunciation-words-1', 'ege.speaking.pronunciation_words', 'What is the safest way to practise a difficult word?', 'Listen, repeat it in a phrase, record yourself, and compare.'],
+  ['pronunciation-phonemes-1', 'ege.speaking.pronunciation_phonemes', 'How should a difficult sound be practised?', 'Contrast it in minimal pairs and then use it in words.'],
+  ['speaking-signal-1', 'ege.speaking.signal_quality', 'Which setup gives the most reliable recording?', 'A quiet room with the microphone at a stable distance.'],
+].map(([id, skillId, prompt, correct]) => ({
+  id, skillId, module: 'speaking', egeImpact: 0.8, evidenceQuality: 'assisted',
+  measurementNotice: 'Выбор стратегии не подтверждает самостоятельную устную речь; навык подтверждается оценкой реального ответа в разделе «Говорение», доступной с обычной активной подпиской.',
+  prompt,
+  choices: [
+    { id: 'a', label: correct },
+    { id: 'b', label: 'Skip preparation and rely on guessing.' },
+    { id: 'c', label: 'Repeat unrelated words until the timer ends.' },
+  ],
+  correctChoiceId: 'a', estimatedSeconds: 60,
+}));
+
+const LEGACY_DEEP_ITEMS = [
   ['grammar-forms-conditionals-2', 'ege.grammar.forms', 'grammar', 1,
     'Choose the correct form: If I ___ about the change, I would have arrived earlier.',
     ['had known', 'knew', 'have known'], 'a'],
@@ -266,20 +314,50 @@ const DEEP_ITEMS = [
   correctChoiceId, estimatedSeconds: 90,
 }));
 
-export const SHORT_DIAGNOSTIC_CATALOG = Object.freeze({
-  version: SHORT_DIAGNOSTIC_POLICY.catalogVersion,
-  items: Object.freeze(ITEMS.map((item) => Object.freeze({
+const DEEP_ITEMS = LEGACY_DEEP_ITEMS.map((item) => {
+  const skillId = item.id === 'speaking-interaction-clarify-2'
+    ? 'ege.speaking.direct_questions'
+    : item.id === 'speaking-monologue-example-2'
+      ? 'ege.speaking.monologue_content'
+      : item.skillId;
+  return {
+    ...item,
+    skillId,
+    measurementNotice: item.module === 'listening'
+      ? 'Это проверка понимания стратегии без аудиозаписи; результат ориентировочный.'
+      : item.module === 'speaking'
+        ? 'Выбор варианта не подтверждает самостоятельную речь; навык подтверждается оценкой реального ответа в разделе «Говорение», доступной с обычной активной подпиской.'
+        : item.module === 'writing'
+          ? 'Выбор варианта не подтверждает самостоятельное письмо; результат ориентировочный.'
+        : undefined,
+  };
+});
+
+function freezeCatalogItems(items) {
+  return Object.freeze(items.map((item) => Object.freeze({
     ...item,
     choices: Object.freeze(item.choices.map((choice) => Object.freeze({ ...choice }))),
-  }))),
+  })));
+}
+
+export const SHORT_DIAGNOSTIC_CATALOG_V1 = Object.freeze({
+  version: SHORT_DIAGNOSTIC_POLICY_V1.catalogVersion,
+  items: freezeCatalogItems(LEGACY_ITEMS),
+});
+
+export const DEEP_DIAGNOSTIC_CATALOG_V1 = Object.freeze({
+  version: DEEP_DIAGNOSTIC_POLICY_V1.catalogVersion,
+  items: freezeCatalogItems([...LEGACY_ITEMS, ...LEGACY_DEEP_ITEMS]),
+});
+
+export const SHORT_DIAGNOSTIC_CATALOG = Object.freeze({
+  version: SHORT_DIAGNOSTIC_POLICY.catalogVersion,
+  items: freezeCatalogItems([...ITEMS, ...SPEAKING_DIAGNOSTIC_ITEMS]),
 });
 
 export const DEEP_DIAGNOSTIC_CATALOG = Object.freeze({
   version: DEEP_DIAGNOSTIC_POLICY.catalogVersion,
-  items: Object.freeze([...ITEMS, ...DEEP_ITEMS].map((item) => Object.freeze({
-    ...item,
-    choices: Object.freeze(item.choices.map((choice) => Object.freeze({ ...choice }))),
-  }))),
+  items: freezeCatalogItems([...ITEMS, ...SPEAKING_DIAGNOSTIC_ITEMS, ...DEEP_ITEMS]),
 });
 
 export function createDiagnosticRegistry(definitions, { currentVersion } = {}) {
@@ -303,6 +381,8 @@ export function createDiagnosticRegistry(definitions, { currentVersion } = {}) {
 }
 
 export const DIAGNOSTIC_REGISTRY = createDiagnosticRegistry([
+  { catalog: SHORT_DIAGNOSTIC_CATALOG_V1, policy: SHORT_DIAGNOSTIC_POLICY_V1 },
+  { catalog: DEEP_DIAGNOSTIC_CATALOG_V1, policy: DEEP_DIAGNOSTIC_POLICY_V1 },
   { catalog: SHORT_DIAGNOSTIC_CATALOG, policy: SHORT_DIAGNOSTIC_POLICY },
   { catalog: DEEP_DIAGNOSTIC_CATALOG, policy: DEEP_DIAGNOSTIC_POLICY },
 ], { currentVersion: SHORT_DIAGNOSTIC_POLICY.catalogVersion });

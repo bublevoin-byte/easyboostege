@@ -64,7 +64,9 @@ function fixtureDiscovery(repository, { urls = URLS, evidence = () => RULE, fetc
 
 test('trusted discovery creates a bounded provisional card only after two independent agreeing sources', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-rule-discovery-'));
-  const repository = createFileRepository(path.join(directory, 'data.json'));
+  const repository = createFileRepository(path.join(directory, 'data.json'), {
+    voiceTutorMutationNow: () => NOW,
+  });
   try {
     const username = await repository.createTelegramUser(7501, 'Rule Student');
     const fixture = fixtureDiscovery(repository, {
@@ -104,7 +106,9 @@ test('trusted discovery creates a bounded provisional card only after two indepe
 
 test('trusted discovery fails closed for one source, conflicting evidence or any blocked URL', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-rule-fail-closed-'));
-  const repository = createFileRepository(path.join(directory, 'data.json'));
+  const repository = createFileRepository(path.join(directory, 'data.json'), {
+    voiceTutorMutationNow: () => NOW,
+  });
   try {
     const username = await repository.createTelegramUser(7502, 'Rule Student');
     const one = fixtureDiscovery(repository, { urls: [URLS[0]] }).service;
@@ -335,7 +339,9 @@ function authenticationFor(repository) {
 
 test('only admins review cards idempotently and canonical retrieval exposes approved cards only', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-rule-routes-'));
-  const repository = createFileRepository(path.join(directory, 'data.json'));
+  const repository = createFileRepository(path.join(directory, 'data.json'), {
+    voiceTutorMutationNow: () => NOW,
+  });
   const student = await repository.createTelegramUser(7503, 'Rule Student');
   const admin = await repository.createTelegramUser(7504, 'Rule Admin');
   await repository.setUserRole(admin, 'admin');

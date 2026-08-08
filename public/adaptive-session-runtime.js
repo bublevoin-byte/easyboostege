@@ -76,6 +76,13 @@ function storeConfirmedResult(result,{navigate=true}={}){write({active:null,cont
 function sameControl(control,phase,sessionId,blockId,revision){return Boolean(control&&control.phase===phase&&control.sessionId===sessionId&&Number(control.expectedRevision)===Number(revision)&&(phase==='finish'||control.blockId===blockId))}
 
 export function adaptiveRuntimeSnapshot(){return read()||{version:STORAGE_VERSION,owner:runtimeOwner(),active:null,control:null,lastResult:null}}
+export function adaptiveSessionReplacementAvailable(session,execution,runtime=adaptiveRuntimeSnapshot()){
+  if(!session||!execution||session.replacement||session.status!=='created'||execution.status!=='created'
+    ||Number(execution.revision||0)!==0||execution.startedAt||(execution.completedBlockIds||[]).length)return false;
+  const localActive=runtime&&runtime.active&&runtime.active.sessionId===session.id;
+  const localControl=runtime&&runtime.control&&runtime.control.sessionId===session.id;
+  return !localActive&&!localControl
+}
 export function clearAdaptiveRuntime(){try{localStorage.removeItem(STORAGE_KEY)}catch(_){}}
 export function openAdaptivePlan(){nav('scr10')}
 

@@ -192,6 +192,28 @@ test('task 1 counts omission and insertion exactly once and resolves decisive ze
   assert.equal(xaiCannotLowerCoverage.score, 1);
 });
 
+test('task 1 score is invariant to pause and monotone Azure annotations', () => {
+  const baseline = scoreSpeakingTask({
+    taskType: 1, semantic: common(), acoustic: acoustic({ wordEvents: [] }),
+  });
+  const annotated = scoreSpeakingTask({
+    taskType: 1,
+    semantic: common(),
+    acoustic: acoustic({
+      pauseAnalysisAvailable: true,
+      wordEvents: [
+        event(1, { type: 'unexpected_break', gross: null }),
+        event(2, { type: 'missing_break', gross: null }),
+        event(3, { type: 'monotone', gross: null }),
+      ],
+    }),
+  });
+  assert.deepEqual(
+    { status: annotated.status, score: annotated.score, criteria: annotated.criteria },
+    { status: baseline.status, score: baseline.score, criteria: baseline.criteria },
+  );
+});
+
 test('tasks 2 and 3 apply semantic and phonetic FIPI gates per response', () => {
   const task2 = scoreSpeakingTask({
     taskType: 2,
