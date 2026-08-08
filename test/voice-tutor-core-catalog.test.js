@@ -8,6 +8,7 @@ import {
   decorateCoreGrammar,
   decorateCoreVocabulary,
 } from '../public/modules/core-voice-catalog.js';
+import { GRAMMAR_CATALOG } from '../public/grammar-catalog.js';
 import { getCanonicalVoiceTutorItem } from '../voice-tutor/canonical-items.js';
 import { CORE_VOICE_TUTOR_COVERAGE, CORE_VOICE_TUTOR_ITEMS } from '../voice-tutor/core-catalog.js';
 import { CORE_VOICE_CATALOG_SOURCE } from '../voice-tutor/generated-core-catalog.js';
@@ -54,18 +55,31 @@ function assertVocabularyPracticeTargets(item, headword) {
   }
 }
 
-test('committed core catalog is generated from every current built-in grammar and vocabulary path', () => {
+test('core Voice Tutor consumes the versioned grammar catalog and generated vocabulary source', () => {
   const check = spawnSync(process.execPath, ['scripts/build-core-voice-catalog.js', '--check'], {
     cwd: new URL('..', import.meta.url), encoding: 'utf8',
   });
   assert.equal(check.status, 0, check.stderr || check.stdout);
 
-  const grammarCount = Object.values(CORE_VOICE_CATALOG_SOURCE.grammar)
+  const grammarCount = Object.values(GRAMMAR_CATALOG.bank)
     .reduce((count, levels) => count + Object.values(levels).reduce((sum, questions) => sum + questions.length, 0), 0)
-    + CORE_VOICE_CATALOG_SOURCE.exams.reduce((count, exam) => count + exam.gaps.length, 0);
+    + GRAMMAR_CATALOG.exams.reduce((count, exam) => count + exam.gaps.length, 0);
   assert.deepEqual(CORE_VOICE_TUTOR_COVERAGE, { grammar: grammarCount, vocabulary: CORE_VOICE_CATALOG_SOURCE.vocabulary.length * 3 });
   assert.equal(grammarCount, 218);
   assert.equal(CORE_VOICE_TUTOR_COVERAGE.vocabulary, 897);
+
+  for (const levels of Object.values(GRAMMAR_CATALOG.bank)) {
+    for (const questions of Object.values(levels)) {
+      for (const question of questions) {
+        assert.equal(CORE_VOICE_TUTOR_ITEMS[question.id].revision, question.revision, `${question.id} revision`);
+      }
+    }
+  }
+  for (const exam of GRAMMAR_CATALOG.exams) {
+    for (const gap of exam.gaps) {
+      assert.equal(CORE_VOICE_TUTOR_ITEMS[gap.id].revision, gap.revision, `${gap.id} revision`);
+    }
+  }
 
   for (const item of Object.values(CORE_VOICE_TUTOR_ITEMS)) {
     assertDistinctSameSkillPractice(item);

@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
 import { grammarActivityId, splitLearningActivityDuration } from '../public/learning-activity-contract.js';
+import { GRAMMAR_CATALOG, validateGeneratedGrammarSupplement } from '../public/grammar-catalog.js';
 
 const rawSource = await fs.readFile(new URL('../public/learning-activity-recorder.js', import.meta.url), 'utf8');
 const grammarScreenSource = await fs.readFile(new URL('../public/screens/grammar.js', import.meta.url), 'utf8');
@@ -28,6 +29,7 @@ function recorderHarness(active = null) {
   };
   vm.runInNewContext(source, {
     window,
+    GRAMMAR_CATALOG, validateGeneratedGrammarSupplement,
     adaptiveRuntimeSnapshot: () => ({ active }),
     completeAdaptiveModuleActivity: async (completion) => {
       adaptive.push(completion);
@@ -83,6 +85,7 @@ function grammarScreenHarness() {
   };
   const context = vm.createContext({
     window,
+    GRAMMAR_CATALOG, validateGeneratedGrammarSupplement,
     grammarActivityId, splitLearningActivityDuration,
     adaptiveRuntimeSnapshot: () => ({ active }),
     completeAdaptiveModuleActivity: async (completion) => {

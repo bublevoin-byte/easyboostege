@@ -1,4 +1,5 @@
 import { CORE_VOICE_CATALOG_SOURCE } from './generated-core-catalog.js';
+import { GRAMMAR_CATALOG } from '../public/grammar-catalog.js';
 import { maskAcceptedAnswers, practicePromptKey, vocabularyTargetCandidates } from './practice.js';
 
 function cleanHtml(value) {
@@ -36,23 +37,25 @@ function frozenPractice(id, candidate, skillId) {
 
 function grammarItem({ id, topicId, question, kind, practice }) {
   const fields = grammarFields(question, kind);
-  const topic = CORE_VOICE_CATALOG_SOURCE.topics[topicId];
+  const topic = GRAMMAR_CATALOG.topics[topicId];
   const domain = grammarDomain(topicId);
   const skillId = `ege.${domain.skill}.topic_${topicId}`;
+  const itemVersion = `v${question.revision}`;
+  const topicVersion = `v${topic.revision}`;
   return Object.freeze({
-    id, revision: 1, module: 'grammar', prompt: fields.prompt,
+    id, revision: question.revision, module: 'grammar', prompt: fields.prompt,
     reference: Object.freeze(fields.reference), errorType: domain.type,
     skill: Object.freeze({ id: skillId, label: cleanHtml(topic.n) }),
     rule: Object.freeze({
-      id: `core.grammar.topic.${topicId}.v1`, revision: 1,
+      id: `core.grammar.topic.${topicId}.${topicVersion}`, revision: topic.revision,
       title: cleanHtml(topic.n), explanation: cleanHtml(topic.th),
       examples: Object.freeze([cleanHtml(question.e), fields.prompt]),
     }),
-    microCheck: frozenPractice(`${id}.micro.v1`, practice[0], skillId),
-    transferTask: frozenPractice(`${id}.transfer.v1`, practice[1], skillId),
+    microCheck: frozenPractice(`${id}.micro.${itemVersion}`, practice[0], skillId),
+    transferTask: frozenPractice(`${id}.transfer.${itemVersion}`, practice[1], skillId),
     recoveryTasks: Object.freeze({
-      day1: frozenPractice(`${id}.recovery.day1.v1`, practice[2], skillId),
-      day7: frozenPractice(`${id}.recovery.day7.v1`, practice[3], skillId),
+      day1: frozenPractice(`${id}.recovery.day1.${itemVersion}`, practice[2], skillId),
+      day7: frozenPractice(`${id}.recovery.day7.${itemVersion}`, practice[3], skillId),
     }),
   });
 }
@@ -104,27 +107,26 @@ function vocabularyPractice(words, word, mode) {
 function buildItems() {
   const result = {};
   const grammarPools = {};
-  for (const [topicId, levels] of Object.entries(CORE_VOICE_CATALOG_SOURCE.grammar)) {
+  for (const [topicId, levels] of Object.entries(GRAMMAR_CATALOG.bank)) {
     grammarPools[topicId] = ['c', 'c2', 'f'].flatMap((kind) => (
       (levels[kind] || []).map((question) => ({ ...grammarFields(question, kind), question, kind }))
     ));
   }
   for (const [topicId, pool] of Object.entries(grammarPools)) {
     pool.forEach((candidate, index) => {
-      const kindIndex = CORE_VOICE_CATALOG_SOURCE.grammar[topicId][candidate.kind].indexOf(candidate.question) + 1;
-      const id = `core.g.${topicId}.${candidate.kind}.${kindIndex}`;
+      const id = candidate.question.id;
       result[id] = grammarItem({
         id, topicId, question: candidate.question, kind: candidate.kind,
         practice: [1, 2, 3, 4].map((offset) => pool[(index + offset) % pool.length]),
       });
     });
   }
-  CORE_VOICE_CATALOG_SOURCE.exams.forEach((exam, examIndex) => {
+  GRAMMAR_CATALOG.exams.forEach((exam) => {
     exam.gaps.forEach((gap, gapIndex) => {
       const topicId = String(gap.t);
-      const id = `core.g.exam.${examIndex + 1}.${gapIndex + 1}`;
+      const id = gap.id;
       const pool = grammarPools[topicId];
-      const question = { s: `${exam.tx[gapIndex]}_____ (${gap.b})${exam.tx[gapIndex + 1]}`, ans: gap.ans, e: gap.e };
+      const question = { s: `${exam.tx[gapIndex]}_____ (${gap.b})${exam.tx[gapIndex + 1]}`, ans: gap.ans, e: gap.e, revision: gap.revision };
       result[id] = grammarItem({
         id, topicId, question, kind: 'f',
         practice: [0, 1, 2, 3].map((offset) => pool[(gapIndex + offset) % pool.length]),

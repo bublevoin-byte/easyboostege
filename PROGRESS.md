@@ -15,6 +15,23 @@
 
 ---
 
+## Grammar 2.0 — active mastery system
+
+Spec: `.scratch/grammar-2/spec.md`
+
+| Ticket | Результат | Статус |
+|---|---|---|
+| 01 | Версионированный каталог без потери текущей грамматики | done |
+| 02 | Честные стадии освоения и миграция старого прогресса | ready-for-agent |
+| 03 | Активный runner и полноценные времена | ready-for-agent |
+| 04 | Активный банк глагольных конструкций | ready-for-agent |
+| 05 | Активный банк частей речи | ready-for-agent |
+| 06 | Активный банк служебных слов | ready-for-agent |
+| 07 | Смешанная практика и точный фокус плана | ready-for-agent |
+| 08 | Экзаменационный режим и release hardening | ready-for-agent |
+
+Подтверждённый объём: все 20 тем, минимум 480 встроенных заданий (не менее шести каждого из четырёх типов на тему), обязательная работа без ИИ, интервалы 1/3/7/16/35 дней, assisted evidence без повышения стадии и точный error focus для индивидуального плана. Реализация начата после явного подтверждения владельца 2026-08-08.
+
 Ticket Speaking 2.0 / 09 is done. Final independent Standards and Spec reviews both returned
 `ZERO_FINDINGS`. The accepted freeze is Final19: 1259 tests total (1218 passed, 41 expected
 PostgreSQL skips, 0 failed), disposable PostgreSQL 41/41, lint/check/build, full and adaptive E2E,

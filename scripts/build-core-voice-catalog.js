@@ -20,7 +20,6 @@ function literal(source, startMarker, endMarker) {
 }
 
 export function buildCoreVoiceCatalogSource() {
-  const grammarSource = fs.readFileSync(path.join(root, 'public/screens/grammar.js'), 'utf8');
   const appSource = fs.readFileSync(path.join(root, 'public/app.js'), 'utf8');
   const vocabulary = literal(appSource, 'const EGE_WORDS=', '\ndecorateCoreVocabulary(EGE_WORDS);')
     .map((word) => {
@@ -38,9 +37,6 @@ export function buildCoreVoiceCatalogSource() {
       return { ...word, practice: [...practice] };
     });
   return {
-    topics: literal(grammarSource, 'const G_TOPICS=', '\nconst G_BANK='),
-    grammar: literal(grammarSource, 'const G_BANK=', '\nconst G_RINT='),
-    exams: literal(grammarSource, 'const G_EXAMS=', '\ndecorateCoreGrammar(G_BANK,G_EXAMS);'),
     vocabulary,
   };
 }
