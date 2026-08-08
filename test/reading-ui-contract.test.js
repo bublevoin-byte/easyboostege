@@ -55,7 +55,7 @@ test('Reading 2 exposes accessible status, review and responsive styling contrac
 test('adaptive Reading launches an exact allowlisted kind and CEFR through the canonical screen seam', () => {
   assert.match(adaptiveLaunch, /window\.launchReadingPractice/u);
   assert.match(adaptiveLaunch, /launch\.mode,\s*launch\.cefr,\s*contentRef/u);
-  assert.match(screen, /function launchReadingPractice\(kind,cefr,contentRef,\{signal=null\}=\{\}\)/u);
+  assert.match(screen, /function launchReadingPractice\(kind,cefr,contentRef,\{signal=null,authorityCurrent=null\}=\{\}\)/u);
 });
 
 test('every new Reading session waits for the shared fresh server access gate', () => {

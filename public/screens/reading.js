@@ -246,23 +246,25 @@ function trainingEvidence(set,startedAt){
     readingAttemptId:id,readingSlice:contract.kind==='task10'?'gist':'detail',readingIndependent:true,
   }});
 }
-async function startTraining(kind,{technical=false,preferredCefr=null,adaptiveContentRef=null,signal=null}={}){
+async function startTraining(kind,{technical=false,preferredCefr=null,adaptiveContentRef=null,signal=null,authorityCurrent=null}={}){
   if(launchPending)return false;launchPending=true;
   try{
-    if(signal?.aborted)return false;
+    const authorized=()=>!signal?.aborted&&(typeof authorityCurrent!=='function'||authorityCurrent()===true);
+    if(!authorized())return false;
     if(!await verifyLearningAccessForLaunch({signal}))return false;
-    if(signal?.aborted)return false;
+    if(!authorized())return false;
     if(!technical&&(!catalog||!KINDS.includes(kind)))return false;
     const owner=ownerId(),current=state();if(!owner||!current){renderOwnerError();return false}
     const pool=technical?[]:(adaptiveContentRef?catalog.sets.filter((item)=>item.kind===kind&&item.cefr===preferredCefr):catalog.sets);
     const set=technical?TECHNICAL_SET:readingModule.selectNextSet(pool,owner,current.history,kind,{now:Date.now(),preferredCefr});
     if(!set)return false;
     if(adaptiveContentRef&&readingModule.learningContract(set).contentRef!==adaptiveContentRef)return false;
+    if(!authorized())return false;
     if(!technical){current.history=readingModule.rememberSelection(owner,current.history,kind,set,Date.now());save()}
     const startedAt=Date.now();
     training={kind,set,answers:emptyAnswers(kind,set),startedAt,result:null,evidence:technical?null:trainingEvidence(set,startedAt)};
     RQ=kind==='task12_18'?training:null;
-    renderTraining();
+    if(!authorized()){training=null;RQ=null;return false}renderTraining();
     return true;
   }finally{launchPending=false}
 }
@@ -431,10 +433,10 @@ function rHub(){renderHub()}
 function rHl(){return startTraining('task10')}
 function rGp(){return startTraining('task11')}
 function rQs(){return startTraining('task12_18')}
-async function launchReadingPractice(kind,cefr,contentRef,{signal=null}={}){
+async function launchReadingPractice(kind,cefr,contentRef,{signal=null,authorityCurrent=null}={}){
   const parsed=readingModule.parseAdaptiveContentRef(contentRef);
   if(!parsed||parsed.kind!==kind||parsed.cefr!==cefr)return false;
-  return await startTraining(kind,{preferredCefr:cefr,adaptiveContentRef:contentRef,signal})===true;
+  return await startTraining(kind,{preferredCefr:cefr,adaptiveContentRef:contentRef,signal,authorityCurrent})===true;
 }
 function rExam(){renderFullIntro()}
 function rExamStart(){return startFullAttempt()}

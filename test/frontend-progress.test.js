@@ -133,9 +133,9 @@ test('progress screen exposes an accessible recovery card and a server-owned rep
   ]);
 
   assert.match(markup, /id="voice_recovery_map"[^>]*aria-label="Карта освоенных ошибок"[^>]*aria-live="polite"/u);
-  assert.match(screen, /apiGet\('\/api\/v1\/voice-tutor\/recovery-map'\)/u);
+  assert.match(screen, /adaptiveGet\('\/api\/v1\/voice-tutor\/recovery-map',recoveryAuthority\)/u);
   assert.match(screen, /repeat\.task_id/u);
-  assert.match(screen, /apiPost\('\/api\/v1\/voice-tutor\/repeats\/'/u);
+  assert.match(screen, /adaptivePost\('\/api\/v1\/voice-tutor\/repeats\/'/u);
   assert.match(screen, /input\.maxLength=200/u);
   assert.match(screen, /initial_micro_check_passed/u);
   assert.match(screen, /view\.nextBest/u);
@@ -155,13 +155,34 @@ test('progress screen owns an accessible evidence summary and labels cached data
   assert.match(screen, /progressModule\.evidenceSummary\(profile\)/u);
   assert.match(screen, /progressModule\.EVIDENCE_MODULE_LABELS/u);
   assert.doesNotMatch(screen, /const adaptiveModuleLabels=/u);
-  assert.match(screen, /async function loadAdaptiveOverview\(\)/u);
+  assert.match(screen, /async function loadAdaptiveOverview\(overviewAuthority=beginAdaptiveView\(\)\)/u);
   assert.doesNotMatch(screen, /async function renderAdaptivePlan\(\)/u);
   assert.doesNotMatch(screen, /function renderProgress\(\)\{if\(!S\)return/u);
   assert.match(screen, /readAdaptiveOverviewCacheSnapshot/u);
   assert.match(screen, /Сохранённая копия/u);
   assert.match(screen, /не свежими/u);
   assert.match(screen, /savedAt/u);
+});
+
+test('progress async overview and recovery continuations are exact-owner guarded before cache or redraw', async () => {
+  const screen = await fs.readFile(new URL('../public/screens/progress.js', import.meta.url), 'utf8');
+  assert.match(screen, /function captureAdaptiveAuthority/u);
+  assert.match(screen, /function adaptiveAuthorityCurrent/u);
+  assert.match(screen, /async function loadAdaptiveOverview\(overviewAuthority=beginAdaptiveView\(\)\)[\s\S]*?await apiGet\('\/api\/v1\/adaptive-learning\/overview',adaptiveOwnerHeaders\(overviewAuthority\)\)[\s\S]*?adaptivePayloadOwned\(payload,overviewAuthority\)/u);
+  assert.match(screen, /const goalAuthority=captureAdaptiveAuthority\(\)[\s\S]*?await adaptivePut\('\/api\/v1\/adaptive-learning\/goal'[\s\S]*?adaptiveAuthorityCurrent\(goalAuthority\)/u);
+  assert.match(screen, /async function renderRecoveryMap\(\)\{[^}]*captureAdaptiveAuthority\(\)[\s\S]*?await adaptiveGet\('\/api\/v1\/voice-tutor\/recovery-map',recoveryAuthority\)[\s\S]*?drawRecoveryMap/u);
+  assert.match(screen, /async function resumeAdaptiveSession\(authority\)[\s\S]*?await adaptiveGet\('\/api\/v1\/adaptive-learning\/sessions\/current',authority\)[\s\S]*?adaptiveAuthorityCurrent\(authority\)[\s\S]*?drawAdaptiveSession/u,
+    'the nested session continuation must validate the captured incarnation before redraw');
+  assert.match(screen, /async function resumeAdaptiveDiagnostic\(retention,authority\)[\s\S]*?await adaptiveGet\('\/api\/v1\/adaptive-learning\/diagnostics\/current',authority\)[\s\S]*?adaptiveAuthorityCurrent\(authority\)[\s\S]*?drawAdaptiveDiagnostic/u,
+    'the nested diagnostic continuation must validate the captured incarnation before redraw');
+  assert.match(screen, /apiGet\('\/api\/v1\/adaptive-learning\/overview',adaptiveOwnerHeaders\(overviewAuthority\)\)/u,
+    'adaptive reads carry the intended owner so a shared cookie switch fails closed');
+});
+
+test('offline continuity E2E resolves the generation-bound current owner marker', async () => {
+  const demo = await fs.readFile(new URL('../e2e/demo.test.js', import.meta.url), 'utf8');
+  assert.match(demo, /EasyBoostStore\.readCurrentOwner\(\)/u);
+  assert.doesNotMatch(demo, /loadLocal\(localStorage\.getItem\('eb_current'\)\)/u);
 });
 
 test('browser evidence tracers share one server and Chromium harness', async () => {
@@ -178,4 +199,92 @@ test('browser evidence tracers share one server and Chromium harness', async () 
     assert.doesNotMatch(tracer, /async function waitForReady\(/u);
     assert.doesNotMatch(tracer, /async function stopProcess\(/u);
   }
+});
+
+test('adaptive async handlers commit notices and controls only for their captured incarnation', async () => {
+  const screen = await fs.readFile(new URL('../public/screens/progress.js', import.meta.url), 'utf8');
+  assert.match(screen, /viewToken/u);
+  assert.match(screen, /complete\.addEventListener\('click',[\s\S]*?await loadAdaptiveOverview\(authority\)[\s\S]*?commitAdaptiveUi\(authority/u);
+  assert.match(screen, /list\.replaceChildren\(\);create\.hidden=!preview;start\.hidden=preview\|\|!session;if\(!preview&&session\)start\.disabled=false/u);
+  assert.match(screen, /function commitAdaptiveUi\(authority,commit\)\{if\(!adaptiveAuthorityCurrent\(authority\)\)return false;commit\(\);return true\}/u);
+  assert.doesNotMatch(screen, /catch\(error\)\{if\(error&&error\.code==='OWNER_CHANGED'\)return;notice\.textContent/u);
+  assert.doesNotMatch(screen, /finally\{(?:button|complete)\.disabled=false\}/u);
+});
+
+test('adaptive overview uses cached private data only for retryable offline failures', async () => {
+  const screen = await fs.readFile(new URL('../public/screens/progress.js', import.meta.url), 'utf8');
+  assert.match(screen, /if\(!adaptivePayloadOwned\(payload,overviewAuthority\)\)throw adaptiveOwnerError\(\)/u);
+  assert.match(screen, /if\(apiIsAuthorityFailure\(error\)\)\{await invalidateLearningAuthority\(overviewAuthority\);return\}/u);
+  assert.match(screen, /await clearAdaptiveOverviewCache\(localStorage,overviewAuthority\);if\(!adaptiveAuthorityCurrent\(overviewAuthority\)\)return/u);
+  assert.match(screen, /apiIsAuthorityFailure\(error\)[\s\S]*?invalidateLearningAuthority\(overviewAuthority\)/u);
+  assert.match(screen, /async function adaptiveBoundRequest\(request,authority\)[\s\S]*?invalidateAdaptiveAuthority\(authority\)/u,
+    'every adaptive Progress request must globally invalidate an exact stale incarnation');
+  assert.match(screen, /if\(!apiCanUseOfflineFallback\(error\)\)[\s\S]*?drawEvidenceProgressSummary\(null,\{source:'unavailable',unavailable:true\}\)/u);
+  assert.match(screen, /const cached=readAdaptiveOverviewCacheSnapshot/u);
+});
+
+test('adaptive authority loss clears every owner-derived private view before logout', async () => {
+  const screen = await fs.readFile(new URL('../public/screens/progress.js', import.meta.url), 'utf8');
+  assert.match(screen, /registerAuthorityReset\(function\(authority\)\{clearAdaptivePrivateUi\(authority\)\}\)/u);
+  assert.match(screen, /function clearAdaptivePrivateUi\(authority/u);
+  assert.match(screen, /adaptiveAccessState=null/u);
+  for (const id of ['adaptive_target_score', 'adaptive_exam_date', 'adaptive_weekly_minutes']) {
+    assert.match(screen, new RegExp(`getElementById\\('${id}'\\)`, 'u'));
+  }
+  assert.match(screen, /adaptive_report[\s\S]*?hidden=true/u);
+  assert.match(screen, /adaptive_report_rows[\s\S]*?replaceChildren\(\)/u);
+  assert.match(screen, /adaptive_orientation[\s\S]*?textContent=''/u);
+  assert.match(screen, /adaptive_report_disclaimer[\s\S]*?textContent=''/u);
+  assert.match(screen, /adaptive_detailed_report[\s\S]*?dataset\.locked='true'/u);
+  assert.match(screen, /adaptive_deep_diagnostic_start[\s\S]*?hidden=true/u);
+  assert.match(screen, /adaptive_paywall_copy[\s\S]*?textContent=''/u);
+  assert.match(screen, /drawEvidenceProgressSummary\(null,\{source:'unavailable',unavailable:true\}\)/u);
+  assert.match(screen, /setAdaptiveReadOnly\(true\)/u);
+  assert.match(screen, /querySelectorAll\('input,select,textarea,button'\)[\s\S]*?control\.disabled=false/u,
+    'owner reset must normalize pending-disabled controls before applying read-only state');
+});
+
+test('adaptive authority reset clears only the matching owner recovery view and launch filters', async () => {
+  const screen = await fs.readFile(new URL('../public/screens/progress.js', import.meta.url), 'utf8');
+  const resetSource = screen.match(
+    /function clearAdaptivePrivateUi\(authority=adaptiveViewAuthority\)\{[\s\S]*?\n\}\nregisterAuthorityReset/u,
+  )[0].replace(/\nregisterAuthorityReset$/u, '');
+  const nodes = new Map();
+  function node(id) {
+    if (!nodes.has(id)) nodes.set(id, {
+      id, hidden: false, value: 'private', textContent: 'private', dataset: {}, children: ['private'],
+      replaceChildren() { this.children = []; },
+      querySelectorAll() { return []; },
+    });
+    return nodes.get(id);
+  }
+  const recovery = node('voice_recovery_map');
+  const screenNode = node('scr10');
+  Object.assign(screenNode.dataset, {
+    adaptiveRecoverySkillId: 'alice-skill',
+    adaptiveRecoveryRepeatId: 'alice-repeat',
+    adaptiveRecoveryTaskId: 'alice-task',
+  });
+  const context = vm.createContext({
+    adaptiveViewAuthority: { owner: 'alice', ownerGeneration: 0 },
+    adaptiveViewToken: 7,
+    adaptiveAccessState: {}, adaptiveSessionPreview: {}, adaptiveCurrentSession: {}, adaptiveCurrentExecution: {},
+    sameAdaptiveOwner(a, b) { return Boolean(a && b && a.owner === b.owner && a.ownerGeneration === b.ownerGeneration); },
+    document: { getElementById: node },
+    drawAdaptiveSession() {}, drawAdaptiveDiagnostic() {}, drawEvidenceProgressSummary() {}, setAdaptiveReadOnly() {},
+  });
+  vm.runInContext(`${resetSource}\nthis.clearAdaptivePrivateUi=clearAdaptivePrivateUi;`, context);
+
+  assert.equal(context.clearAdaptivePrivateUi({ owner: 'bob', ownerGeneration: 0 }), false);
+  assert.deepEqual(recovery.children, ['private']);
+  assert.equal(screenNode.dataset.adaptiveRecoverySkillId, 'alice-skill');
+
+  assert.equal(context.clearAdaptivePrivateUi({ owner: 'alice', ownerGeneration: 0 }), true);
+  assert.equal(recovery.hidden, true);
+  assert.deepEqual(recovery.children, []);
+  assert.equal('adaptiveRecoverySkillId' in screenNode.dataset, false);
+  assert.equal('adaptiveRecoveryRepeatId' in screenNode.dataset, false);
+  assert.equal('adaptiveRecoveryTaskId' in screenNode.dataset, false);
+  assert.match(screen, /function drawRecoveryMap\(payload\)\{[\s\S]*?root\.hidden=false/u,
+    'the next exact-owner recovery response makes the freshly rendered card visible again');
 });

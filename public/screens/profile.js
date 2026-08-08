@@ -4,11 +4,14 @@
  * поэтому экран только рисует шапку и зовёт хуки.
  */
 import {nav,registerRouteHook} from '../router.js';
-import {SRV,S,TOKEN,apiGet,currentUser,profileModule,runProfileHooks,save,setTxt} from '../app.js';
+import {SRV,S,TOKEN,apiGet,apiIsAuthorityFailure,apiResponseOwner,currentUser,invalidateLearningAuthority,profileModule,registerAuthorityReset,runProfileHooks,save,setTxt} from '../app.js';
 
 let profileGoal=null;
 let profileGoalAvailable=true;
-let profileGoalOwner=null;
+let profileGoalAuthority=null;
+function sameProfileAuthority(a,b){return Boolean(a&&b&&a.owner===b.owner&&a.ownerGeneration===b.ownerGeneration)}
+function currentProfileAuthority(){const owner=currentUser,generation=window.EasyBoostSync?.ownerBoundGeneration?.(owner);return owner&&Number.isSafeInteger(generation)?{owner:owner,ownerGeneration:generation}:null}
+function resetProfileAuthority(authority){if(authority&&!sameProfileAuthority(authority,profileGoalAuthority))return false;profileGoal=null;profileGoalAvailable=false;profileGoalAuthority=null;drawStudySettings();return true}
 
 function drawStudySettings(){
   const preferences=profileModule.studyPreferences(S&&S.learnerPreferences);
@@ -36,19 +39,23 @@ function bindStudySettings(){
   })}
 }
 
-async function loadAdaptiveGoal(owner){
+async function loadAdaptiveGoal(authority){
+  const owner=authority&&authority.owner,generation=authority&&authority.ownerGeneration;if(!owner||!Number.isSafeInteger(generation))return;
   try{
-    const payload=await apiGet('/api/v1/adaptive-learning/goal');
-    if(currentUser!==owner)return;profileGoal=payload&&payload.goal||null;profileGoalAvailable=true;drawStudySettings();
-  }catch(_){if(currentUser!==owner)return;profileGoal=null;profileGoalAvailable=false;drawStudySettings()}
+    const payload=await apiGet('/api/v1/adaptive-learning/goal',{headers:{'X-EasyBoost-Expected-Owner':owner}});
+    if(currentUser!==owner||window.EasyBoostSync?.ownerBoundGeneration?.(owner)!==generation)return;
+    if(!payload||apiResponseOwner(payload)!==owner){await invalidateLearningAuthority({owner:owner,ownerGeneration:generation});return}
+    profileGoal=payload.goal||null;profileGoalAvailable=true;drawStudySettings();
+  }catch(error){if(currentUser!==owner||window.EasyBoostSync?.ownerBoundGeneration?.(owner)!==generation)return;if(apiIsAuthorityFailure(error)){await invalidateLearningAuthority({owner:owner,ownerGeneration:generation});return}profileGoal=null;profileGoalAvailable=false;drawStudySettings()}
 }
 
 function renderProfile(){
   const u=profileModule.displayName(currentUser);setTxt('pf_ava',profileModule.initial(u));setTxt('pf_name',u);setTxt('pf_ai','через сервер ✓');
-  if(profileGoalOwner!==currentUser){profileGoalOwner=currentUser;profileGoal=null;profileGoalAvailable=true}
-  bindStudySettings();drawStudySettings();if(SRV&&TOKEN)loadAdaptiveGoal(currentUser);runProfileHooks();
+  const authority=currentProfileAuthority();if(!sameProfileAuthority(profileGoalAuthority,authority)){profileGoalAuthority=authority;profileGoal=null;profileGoalAvailable=true}
+  bindStudySettings();drawStudySettings();if(SRV&&TOKEN&&authority)loadAdaptiveGoal(authority);runProfileHooks();
 }
 
+registerAuthorityReset(function(authority){resetProfileAuthority(authority)});
 registerRouteHook(function(id){if(id==='scr11')renderProfile()});
 
 export {drawStudySettings,renderProfile};

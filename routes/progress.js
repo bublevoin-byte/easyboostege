@@ -11,11 +11,32 @@ import {
   personalVocabularyTombstonesSchema,
 } from '../validation/personal-words.js';
 import { learnerPreferencesSchema } from '../validation/learner-preferences.js';
+import { grammarMasteryBatchSchema, grammarMasteryEventSchema } from '../validation/grammar-mastery.js';
+import { bindResponseOwner, requireExpectedOwner } from '../middleware/expected-owner.js';
 
 const MAX_MODULES_PER_REQUEST = 64;
 
+function requireIntendedOwner(req, res) {
+  const owner = typeof req.body?.owner === 'string' ? req.body.owner : '';
+  if (!owner || owner !== owner.trim() || owner.length > 128) {
+    res.status(400).json({ error: { code: 'INVALID_OWNER', message: 'Некорректный владелец результата.' } });
+    return false;
+  }
+  if (owner !== req.user) {
+    res.status(409).json({ error: {
+      code: 'OWNER_CHANGED',
+      message: 'Аккаунт изменился. Войдите снова и повторите синхронизацию.',
+    } });
+    return false;
+  }
+  return true;
+}
+
 function parseStructuredProgressModules(progress) {
   const data = { ...(progress || {}) };
+  if (Object.hasOwn(data, 'grammarMastery')) {
+    return { ok: false, code: 'SERVER_OWNED_GRAMMAR_MASTERY' };
+  }
   for (const [key, schema, code] of [
     ['personalWords', personalVocabularyCardsSchema, 'INVALID_PERSONAL_WORDS'],
     ['personalWordTombstones', personalVocabularyTombstonesSchema, 'INVALID_PERSONAL_WORDS'],
@@ -46,17 +67,22 @@ export function createProgressRoutes({ authentication, db, now = () => new Date(
   const { auth } = authentication;
 
   router.get('/api/v1/progress', auth, async (req, res, next) => {
-    try { res.json(await db.getProgress(req.user)); } catch (error) { next(error); }
+    try {
+      if (!requireExpectedOwner(req, res)) return;
+      const progress = await db.getProgress(req.user); bindResponseOwner(res, req.user); res.json(progress);
+    } catch (error) { next(error); }
   });
 
   router.post('/api/v1/progress', auth, async (req, res, next) => {
     try {
+      if (!requireExpectedOwner(req, res)) return;
       const parsed = validateProgress(req.body);
       const structured = parsed.ok ? parseStructuredProgressModules(parsed.data) : { ok: false };
       if (!parsed.ok || !structured.ok) {
         return res.status(400).json({ error: { code: 'INVALID_PROGRESS', message: 'Некорректные данные прогресса.', reason: parsed.code || structured.code } });
       }
       await db.saveProgress(req.user, structured.data);
+      bindResponseOwner(res, req.user);
       res.json({ ok: true });
     } catch (error) { next(error); }
   });
@@ -64,6 +90,7 @@ export function createProgressRoutes({ authentication, db, now = () => new Date(
   // Module-level merge: a partial update must never replace the whole progress object.
   router.post('/api/v1/progress/modules', auth, async (req, res, next) => {
     try {
+      if (!requireIntendedOwner(req, res)) return;
       const modules = req.body?.modules;
       const parsed = validateProgress(modules);
       const count = Object.keys(parsed.data || {}).length;
@@ -76,9 +103,43 @@ export function createProgressRoutes({ authentication, db, now = () => new Date(
     } catch (error) { next(error); }
   });
 
+  router.post('/api/v1/grammar/mastery-events', auth, perUserLimiter(240, 'Слишком много результатов грамматики за короткое время.'), async (req, res, next) => {
+    try {
+      if (!requireExpectedOwner(req, res)) return;
+      const parsed = grammarMasteryEventSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректное событие освоения грамматики.' } });
+      }
+      const result = await db.applyGrammarMasteryEvent(
+        req.user, parsed.data.topicId, parsed.data.event,
+      );
+      bindResponseOwner(res, req.user);
+      return res.status(result.applied ? 201 : 200).json(result);
+    } catch (error) { return next(error); }
+  });
+
+  router.post('/api/v1/grammar/mastery-events/batch', auth, perUserLimiter(240, 'Слишком много результатов грамматики за короткое время.'), async (req, res, next) => {
+    try {
+      const parsed = grammarMasteryBatchSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректная группа событий освоения грамматики.' } });
+      }
+      if (parsed.data.owner !== req.user) {
+        return res.status(409).json({ error: {
+          code: 'GRAMMAR_MASTERY_OWNER_CHANGED',
+          message: 'Аккаунт изменился. Войдите снова и повторите синхронизацию.',
+        } });
+      }
+      const results = await db.applyGrammarMasteryEvents(req.user, parsed.data.events);
+      return res.status(results.every((result) => result.applied) ? 201 : 200).json({ batchId: parsed.data.batchId, results });
+    } catch (error) { return next(error); }
+  });
+
   router.post('/api/v1/module-attempts', auth, perUserLimiter(240, 'Слишком много результатов за короткое время.'), async (req, res, next) => {
     try {
-      const parsed = moduleAttemptSchema.safeParse(req.body);
+      if (!requireIntendedOwner(req, res)) return;
+      const { owner: _intendedOwner, ...attemptBody } = req.body || {};
+      const parsed = moduleAttemptSchema.safeParse(attemptBody);
       if (!parsed.success) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректные данные попытки.' } });
       if (requiresServerAssessment(parsed.data.module)) {
         return res.status(400).json({ error: {
@@ -110,14 +171,20 @@ export function createProgressRoutes({ authentication, db, now = () => new Date(
 
   router.put('/api/v1/word-progress', auth, perUserLimiter(120, 'Слишком много обновлений словаря.'), async (req, res, next) => {
     try {
+      if (!requireExpectedOwner(req, res)) return;
       const parsed = wordProgressBatchSchema.safeParse(req.body);
       if (!parsed.success) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректный прогресс слов.' } });
-      res.json(await db.upsertWordProgress(req.user, parsed.data.words));
+      const result = await db.upsertWordProgress(req.user, parsed.data.words);
+      bindResponseOwner(res, req.user); res.json(result);
     } catch (error) { next(error); }
   });
 
   router.get('/api/v1/word-progress', auth, async (req, res, next) => {
-    try { res.json({ words: await db.getWordProgress(req.user) }); } catch (error) { next(error); }
+    try {
+      if (!requireExpectedOwner(req, res)) return;
+      const words = await db.getWordProgress(req.user);
+      bindResponseOwner(res, req.user); res.json({ words });
+    } catch (error) { next(error); }
   });
 
   router.post('/api/v1/error-bank', auth, perUserLimiter(120, 'Слишком много обновлений банка ошибок.'), async (req, res, next) => {

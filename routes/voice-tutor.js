@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import express from 'express';
+import { bindResponseOwner, requireExpectedOwner } from '../middleware/expected-owner.js';
 import { parseContentResponse } from '../ai/content.js';
 import { buildVoiceTutorCapsule, buildWritingSpeakingCapsule, createGrammarLexiconErrorAttempt, createVoiceTutorContextResult, persistedVoiceTutorCapsule, publicVoiceTutorCapsule } from '../voice-tutor/capsule.js';
 import { buildGeneratedVoiceTutorDefinitions, parseGeneratedVoiceTutorItemId, parseGeneratedVoiceTutorSetId } from '../voice-tutor/generated-items.js';
@@ -493,8 +494,10 @@ export function createVoiceTutorRoutes({
   }
 
   router.get('/api/v1/voice-tutor/recovery-map', auth, async (req, res, next) => {
+    if (!requireExpectedOwner(req, res)) return;
     try {
       res.setHeader('Cache-Control', 'no-store');
+      bindResponseOwner(res, req.user);
       return res.json(await db.getVoiceTutorRecoveryMap(req.user, { limits, now: now() }));
     } catch (error) {
       return sendVoiceTutorError(error, res, next);
@@ -502,6 +505,8 @@ export function createVoiceTutorRoutes({
   });
 
   router.post('/api/v1/voice-tutor/repeats/:repeatId/attempts', auth, async (req, res, next) => {
+    if (!requireExpectedOwner(req, res)) return;
+    bindResponseOwner(res, req.user);
     if (!ATTEMPT_ID.test(req.params.repeatId)) {
       return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректный идентификатор повтора.' } });
     }

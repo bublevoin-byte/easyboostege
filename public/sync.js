@@ -2,12 +2,19 @@
   const LEGACY_STORAGE_KEY='easyboost_pending_modules_v2';
   const STORAGE_KEY='easyboost_pending_modules_v3';
   const ATTEMPT_STORAGE_KEY='easyboost_pending_module_attempts_v1';
+  const GRAMMAR_EVENT_STORAGE_KEY='easyboost_pending_grammar_mastery_events_v1';
   const MAX_PENDING_ATTEMPTS=20;
+  const MAX_PENDING_GRAMMAR_EVENTS=20;
   const MAX_ATTEMPT_BYTES=20_000;
+  const GRAMMAR_SYNC_CHANNEL='easyboost-grammar-mastery-sync-v1';
   let baseline={};
-  let flushing=null;
-  let flushingOwner=null;
+  const flushingByOwner=new Map();
   let owner=null;
+  let ownerAuthGeneration=null;
+  const grammarSyncListeners=new Set();
+  const ownerDeletedListeners=new Set();
+  const incarnation=global.EasyBoostOwnerIncarnation;
+  let grammarSyncChannel=null;
 
   function clone(value){return JSON.parse(JSON.stringify(value==null?null:value))}
   function equal(left,right){try{return JSON.stringify(left)===JSON.stringify(right)}catch(_){return false}}
@@ -26,6 +33,11 @@
     }catch(_){return false}
   }
   function readPending(ownerKey=owner){const store=readModuleStore();return ownerKey&&store.owners[ownerKey]||null}
+  function pendingMatchesOwner(pending,ownerKey=owner){
+    if(!pending||!ownerKey)return false;
+    const generation=Number.isSafeInteger(pending.ownerGeneration)?pending.ownerGeneration:0;
+    return ownerAuthorityCurrent(ownerKey)&&generation===ownerAuthGeneration
+  }
   function clearPending(ownerKey=owner,sentModules=null){
     if(!ownerKey)return false;
     const store=readModuleStore(),pending=store.owners[ownerKey];
@@ -33,7 +45,7 @@
     if(sentModules&&pending.modules&&typeof pending.modules==='object'){
       const remaining={...pending.modules};
       Object.keys(sentModules).forEach(function(key){if(equal(remaining[key],sentModules[key]))delete remaining[key]});
-      if(Object.keys(remaining).length)store.owners[ownerKey]={modules:remaining,queuedAt:pending.queuedAt||Date.now()};
+      if(Object.keys(remaining).length)store.owners[ownerKey]={modules:remaining,queuedAt:pending.queuedAt||Date.now(),ownerGeneration:pending.ownerGeneration};
       else delete store.owners[ownerKey]
     }else delete store.owners[ownerKey];
     return writeModuleStore(store)
@@ -45,6 +57,38 @@
       return parsed&&parsed.version===1&&parsed.owners&&typeof parsed.owners==='object'?parsed:{version:1,owners:{}}
     }catch(_){return {version:1,owners:{}}}
   }
+  function readGrammarEventStore(){
+    try{
+      const parsed=JSON.parse(localStorage.getItem(GRAMMAR_EVENT_STORAGE_KEY)||'null');
+      if(!parsed||![1,2].includes(parsed.version)||!parsed.owners||typeof parsed.owners!=='object')return{version:2,owners:{}};
+      const owners={};
+      Object.keys(parsed.owners).forEach(function(ownerKey){
+        const entry=parsed.owners[ownerKey];
+        if(parsed.version===1&&Array.isArray(entry))owners[ownerKey]={ownerGeneration:0,batches:entry};
+        else if(parsed.version===2&&entry&&Number.isSafeInteger(entry.ownerGeneration)&&Array.isArray(entry.batches))owners[ownerKey]={ownerGeneration:entry.ownerGeneration,batches:entry.batches}
+      });
+      return{version:2,owners:owners}
+    }catch(_){return {version:2,owners:{}}}
+  }
+  function writeGrammarEventStore(store){
+    try{
+      const owners=store&&store.owners&&typeof store.owners==='object'?store.owners:{};
+      if(!Object.keys(owners).length)localStorage.removeItem(GRAMMAR_EVENT_STORAGE_KEY);
+      else localStorage.setItem(GRAMMAR_EVENT_STORAGE_KEY,JSON.stringify({version:2,owners:owners}));
+      return true
+    }catch(_){return false}
+  }
+  function ownerGrammarBatches(store,ownerKey=owner){
+    const entry=ownerKey&&store.owners[ownerKey],authority=ownerKey&&ownerAuthSnapshot(ownerKey);
+    if(!entry||!authority||authority.deleted||entry.ownerGeneration!==authority.ownerGeneration
+      ||ownerKey===owner&&entry.ownerGeneration!==ownerAuthGeneration)return[];
+    return entry.batches.flatMap(function(item){
+      if(item&&Array.isArray(item.events)&&item.events.length)return[{id:String(item.id||item.events[0]?.event?.id||''),events:item.events}];
+      if(item&&item.event)return[{id:String(item.event.id||''),events:[item]}];
+      return[]
+    })
+  }
+  function ownerGrammarEvents(store,ownerKey=owner){return ownerGrammarBatches(store,ownerKey).flatMap(function(batch){return batch.events})}
   function writeAttemptStore(store){
     try{
       const owners=store&&store.owners&&typeof store.owners==='object'?store.owners:{};
@@ -54,117 +98,433 @@
     }catch(_){return false}
   }
   function ownerAttempts(store,ownerKey=owner){return ownerKey&&Array.isArray(store.owners[ownerKey])?store.owners[ownerKey]:[]}
+  function attemptGeneration(item){return Number.isSafeInteger(item&&item._ownerGeneration)?item._ownerGeneration:0}
+  function publicAttempt(item){if(!item||typeof item!=='object')return item;const result={...item};delete result._ownerGeneration;return result}
+  function isOwnerDeleted(ownerKey){return incarnation.isDeleted(ownerKey)}
+  function ownerAuthSnapshot(ownerKey=null){return incarnation.snapshot(ownerKey)}
+  function markOwnerDeleted(ownerKey){return incarnation.markDeleted(ownerKey)}
+  function observeOwnerDeleted(update){return incarnation.observeDeleted(update)}
+  function purgeOwnerLocalData(ownerKey,ownerGeneration=0,ownerLockToken=null){
+    const moduleStore=readModuleStore(),attemptStore=readAttemptStore(),grammarStore=readGrammarEventStore();
+    delete moduleStore.owners[ownerKey];delete attemptStore.owners[ownerKey];delete grammarStore.owners[ownerKey];
+    let snapshot=true;try{localStorage.removeItem('eb_data_'+ownerKey);localStorage.removeItem('eb_data_'+ownerKey+'_g'+ownerGeneration)}catch(_){snapshot=false}
+    const modulesCleared=writeModuleStore(moduleStore);
+    const attemptsCleared=writeAttemptStore(attemptStore);
+    const grammarCleared=writeGrammarEventStore(grammarStore);
+    let marker=true,runtime=true,overview=true;
+    if(ownerLockToken){
+      marker=incarnation.clearMatchingStorageLocked(ownerKey,'eb_current',function(raw){try{const value=JSON.parse(raw);
+        return value&&value.owner===ownerKey&&value.ownerGeneration===ownerGeneration}catch(_){return ownerGeneration===0&&raw===ownerKey}},ownerLockToken);
+      const runtimeKey='easyboost.adaptive.execution.v1:'+encodeURIComponent(ownerKey)+':g'+ownerGeneration;
+      runtime=incarnation.clearMatchingStorageLocked(ownerKey,runtimeKey,function(raw){try{const value=JSON.parse(raw);
+        return value&&value.owner===ownerKey&&(value.version===3?0:value.ownerGeneration)===ownerGeneration}catch(_){return false}},ownerLockToken);
+      if(ownerGeneration===0)runtime=incarnation.clearMatchingStorageLocked(ownerKey,'easyboost.adaptive.execution.v1',function(raw){try{const value=JSON.parse(raw);
+        return value&&value.owner===ownerKey&&(value.version===3||value.ownerGeneration===0)}catch(_){return false}},ownerLockToken)&&runtime;
+      const overviewKey='easyboost.adaptive.overview.v1:'+encodeURIComponent(ownerKey)+':g'+ownerGeneration;
+      overview=incarnation.clearMatchingStorageLocked(ownerKey,overviewKey,function(raw){try{const value=JSON.parse(raw);
+        return value&&value.owner===ownerKey&&(value.version==='adaptive-overview-cache-v1'?0:value.ownerGeneration)===ownerGeneration}catch(_){return false}},ownerLockToken)
+      if(ownerGeneration===0)overview=incarnation.clearMatchingStorageLocked(ownerKey,'easyboost.adaptive.overview.v1',function(raw){try{const value=JSON.parse(raw);
+        return value&&value.owner===ownerKey&&(value.version==='adaptive-overview-cache-v1'?0:value.ownerGeneration)===0}catch(_){return false}},ownerLockToken)&&overview
+    }
+    return modulesCleared&&attemptsCleared&&grammarCleared&&snapshot&&marker&&runtime&&overview
+  }
+  function durableOwnerAuthorityMatches(ownerKey,generation){
+    if(!ownerKey||!Number.isSafeInteger(generation))return false;
+    const authority=ownerAuthSnapshot(ownerKey);
+    return !authority.deleted&&authority.ownerGeneration===generation
+  }
+  function ownerAuthorityMatches(ownerKey,generation){
+    return ownerKey===owner&&ownerAuthGeneration===generation&&durableOwnerAuthorityMatches(ownerKey,generation)
+  }
+  function ownerAuthorityCurrent(ownerKey=owner){return ownerAuthorityMatches(ownerKey,ownerAuthGeneration)}
+  function ownerBoundGeneration(ownerKey=owner){return ownerKey===owner&&Number.isSafeInteger(ownerAuthGeneration)
+    &&durableOwnerAuthorityMatches(ownerKey,ownerAuthGeneration)?ownerAuthGeneration:null}
   function setOwner(value){
     const nextOwner=normalizedOwner(value);
     if(nextOwner!==owner)baseline={};
-    owner=nextOwner;
+    owner=nextOwner;ownerAuthGeneration=owner?ownerAuthSnapshot(owner).ownerGeneration:null;
     try{localStorage.removeItem(LEGACY_STORAGE_KEY)}catch(_){}
     return owner
   }
-  function clearOwner(){
+  async function confirmOwner(value,authGuard={},callbacks={}){const nextOwner=normalizedOwner(value);if(!nextOwner)return null;
+    const committed=await incarnation.commitOwnerAdoption(nextOwner,{...authGuard,revive:true},callbacks);
+    if(!committed)return null;publishOwnerRevived(nextOwner,committed);return setOwner(nextOwner)}
+  async function adoptOwner(value,expectedGeneration,callbacks={}){const nextOwner=normalizedOwner(value);if(!nextOwner)return null;
+    const committed=await incarnation.commitOwnerAdoption(nextOwner,{ownerScoped:true,ownerGeneration:expectedGeneration,revive:false},callbacks);
+    return committed?setOwner(nextOwner):null}
+  async function clearOwner(){
     if(!owner)return false;
     const ownerKey=owner;
-    const moduleStore=readModuleStore(),attemptStore=readAttemptStore();
-    delete moduleStore.owners[ownerKey];delete attemptStore.owners[ownerKey];
-    const modulesCleared=writeModuleStore(moduleStore);
-    const attemptsCleared=writeAttemptStore(attemptStore);
-    owner=null;baseline={};return modulesCleared&&attemptsCleared
+    const locks=global.navigator&&global.navigator.locks;
+    const previousGeneration=ownerAuthGeneration;
+    const mutate=function(token){const tombstone=markOwnerDeleted(ownerKey),cleared=purgeOwnerLocalData(ownerKey,previousGeneration,token);
+      if(owner===ownerKey){owner=null;ownerAuthGeneration=null;baseline={}}return{tombstone:tombstone,cleared:cleared}};
+    const outcome=locks&&typeof locks.request==='function'?await withGrammarQueueLock(mutate,ownerKey):mutate();
+    const tombstone=outcome&&outcome.tombstone||{saved:false,ownerGeneration:ownerAuthSnapshot(ownerKey).ownerGeneration,globalGeneration:ownerAuthSnapshot(ownerKey).globalGeneration};
+    publishOwnerDeleted(ownerKey,tombstone);
+    const cleared=Boolean(outcome&&outcome.cleared);
+    if(owner===ownerKey){owner=null;ownerAuthGeneration=null;baseline={}}
+    if(cleared!==true)return cleared&&cleared.code?cleared:grammarQueueError('GRAMMAR_MASTERY_QUEUE_WRITE_FAILED','Не удалось полностью удалить локальные данные аккаунта.');
+    if(!tombstone.saved)return grammarQueueError('GRAMMAR_MASTERY_QUEUE_WRITE_FAILED','Локальные данные удалены, но браузер не смог сохранить запрет на восстановление аккаунта.');
+    return true
+  }
+  async function deleteOwner(removeRemote){
+    if(!owner||typeof removeRemote!=='function')return false;
+    const ownerKey=owner;
+    return withGrammarQueueLock(async function(token){
+      if(!ownerAuthorityCurrent(ownerKey))return grammarQueueError('GRAMMAR_MASTERY_OWNER_CHANGED','Аккаунт изменился. Войдите снова перед удалением.');
+      await removeRemote(ownerKey);
+      const previousGeneration=ownerAuthGeneration;
+      const tombstone=markOwnerDeleted(ownerKey),cleared=purgeOwnerLocalData(ownerKey,previousGeneration,token);
+      if(owner===ownerKey){owner=null;ownerAuthGeneration=null;baseline={}}
+      publishOwnerDeleted(ownerKey,tombstone);
+      if(!cleared)return grammarQueueError('GRAMMAR_MASTERY_QUEUE_WRITE_FAILED','Не удалось полностью удалить локальные данные аккаунта.');
+      if(!tombstone.saved)return grammarQueueError('GRAMMAR_MASTERY_QUEUE_WRITE_FAILED','Локальные данные удалены, но браузер не смог сохранить запрет на восстановление аккаунта.');
+      return true
+    },ownerKey)
   }
   function shouldRetry(error){return !error||!error.status||error.status>=500}
-  function changedModules(progress){const modules={};Object.keys(progress||{}).forEach(function(key){if(!equal(progress[key],baseline[key]))modules[key]=clone(progress[key])});return modules}
+  function changedModules(progress){const modules={};Object.keys(progress||{}).forEach(function(key){if(key!=='grammarMastery'&&!equal(progress[key],baseline[key]))modules[key]=clone(progress[key])});return modules}
   function queueModules(modules,ownerKey=owner){
-    if(!ownerKey)return false;
+    if(!ownerKey||isOwnerDeleted(ownerKey)||!ownerAuthorityCurrent(ownerKey))return false;
+    if(Object.hasOwn(modules,'grammarMastery')){modules={...modules};delete modules.grammarMastery}
     const store=readModuleStore(),previous=readPending(ownerKey);
-    const merged={...((previous&&previous.modules)||{}),...clone(modules)};
-    store.owners[ownerKey]={modules:merged,queuedAt:Date.now()};return writeModuleStore(store)
+    const merged={...((pendingMatchesOwner(previous,ownerKey)&&previous.modules)||{}),...clone(modules)};
+    if(isOwnerDeleted(ownerKey)||!ownerAuthorityCurrent(ownerKey))return false;
+    store.owners[ownerKey]={modules:merged,queuedAt:Date.now(),ownerGeneration:ownerAuthGeneration};return writeModuleStore(store)
   }
   function applyBaseline(modules){baseline={...baseline,...clone(modules)}}
 
-  async function sendModules(modules,ownerKey=owner){
+  async function sendModules(modules,ownerKey=owner,expectedGeneration=ownerAuthGeneration){
+    if(Object.hasOwn(modules,'grammarMastery')){modules={...modules};delete modules.grammarMastery}
     if(!Object.keys(modules).length)return true;
+    if(isOwnerDeleted(ownerKey)||!ownerAuthorityMatches(ownerKey,expectedGeneration))return false;
     try{
-      await EasyBoostApi.post('/api/v1/progress/modules',{modules:modules},true);
-      if(owner===ownerKey)applyBaseline(modules);
-      clearPending(ownerKey,modules);return true
+      await EasyBoostApi.post('/api/v1/progress/modules',{owner:ownerKey,modules:modules},true);
+      return withGrammarQueueLock(function(){
+        if(!ownerAuthorityMatches(ownerKey,expectedGeneration))return false;
+        applyBaseline(modules);clearPending(ownerKey,modules);return true
+      },ownerKey)
     }
-    catch(error){if(shouldRetry(error))queueModules(modules,ownerKey);throw error}
+    catch(error){if(shouldRetry(error))await withGrammarQueueLock(function(){
+      return ownerAuthorityMatches(ownerKey,expectedGeneration)?queueModules(modules,ownerKey):false
+    },ownerKey);throw error}
   }
-  function queueModuleAttempt(attempt){
-    if(!owner||!attempt||typeof attempt!=='object'||typeof attempt.id!=='string'||!attempt.id)return false;
-    let candidate;try{candidate=clone(attempt)}catch(_){return false}
+  function queueModuleAttempt(attempt,ownerKey=owner,expectedGeneration=ownerAuthGeneration){
+    if(!ownerKey||isOwnerDeleted(ownerKey)||!ownerAuthorityMatches(ownerKey,expectedGeneration)||!attempt||typeof attempt!=='object'||typeof attempt.id!=='string'||!attempt.id)return false;
+    let candidate;try{candidate={...clone(attempt),_ownerGeneration:expectedGeneration}}catch(_){return false}
     try{if(JSON.stringify(candidate).length>MAX_ATTEMPT_BYTES)return false}catch(_){return false}
-    const store=readAttemptStore(),attempts=ownerAttempts(store).slice();
+    const store=readAttemptStore(),attempts=ownerAttempts(store,ownerKey).slice();
     if(!attempts.some(function(item){return item&&item.id===attempt.id}))attempts.push(candidate);
-    store.owners[owner]=attempts.slice(-MAX_PENDING_ATTEMPTS);return writeAttemptStore(store)
+    if(isOwnerDeleted(ownerKey)||!ownerAuthorityMatches(ownerKey,expectedGeneration))return false;
+    store.owners[ownerKey]=attempts.slice(-MAX_PENDING_ATTEMPTS);return writeAttemptStore(store)
   }
   function removeModuleAttempt(id,ownerKey=owner){
     if(!ownerKey)return;
     const store=readAttemptStore(),attempts=ownerAttempts(store,ownerKey).filter(function(item){return item&&item.id!==id});
     if(attempts.length)store.owners[ownerKey]=attempts;else delete store.owners[ownerKey];writeAttemptStore(store)
   }
-  async function flushModuleAttempts(ownerKey=owner){
-    if(!ownerKey||typeof navigator!=='undefined'&&navigator.onLine===false)return false;
-    const attempts=ownerAttempts(readAttemptStore(),ownerKey).slice();if(!attempts.length)return false;
-    let sent=false;
+  async function sendModuleAttempt(attempt,ownerKey,expectedGeneration,ownerLockToken=null){
+    if(!ownerAuthorityMatches(ownerKey,expectedGeneration)||attemptGeneration(attempt)!==expectedGeneration)return{stop:true,ownerConflict:true};
+    try{await EasyBoostApi.post('/api/v1/module-attempts',{...publicAttempt(attempt),owner:ownerKey});
+      return withGrammarQueueLock(function(){
+        if(!ownerAuthorityMatches(ownerKey,expectedGeneration))return{stop:true,ownerConflict:true};
+        removeModuleAttempt(attempt.id,ownerKey);return{sent:true}
+      },ownerKey,ownerLockToken)}
+    catch(error){if(error&&error.status>=400&&error.status<500&&error.status!==401&&error.status!==403
+      &&error.code!=='OWNER_CHANGED')return withGrammarQueueLock(function(){
+        if(!ownerAuthorityMatches(ownerKey,expectedGeneration))return{stop:true,ownerConflict:true};
+        removeModuleAttempt(attempt.id,ownerKey);return{discarded:true,code:error.code||'MODULE_ATTEMPT_REJECTED'}
+      },ownerKey,ownerLockToken);
+      return{stop:true,ownerConflict:error&&error.code==='OWNER_CHANGED',code:error&&error.code||'NETWORK_ERROR'}}
+  }
+  function ownerLockTokenMatches(token,ownerKey,expectedGeneration){
+    return incarnation.tokenMatches(token,ownerKey)&&ownerAuthorityMatches(ownerKey,expectedGeneration)}
+  async function flushModuleAttempts(ownerKey=owner,targetAttemptId=null,expectedGeneration=ownerAuthGeneration,ownerLockToken=null){
+    const targeted=typeof targetAttemptId==='string'&&Boolean(targetAttemptId);
+    const retryResult=function(code='NETWORK_ERROR'){return targeted?{status:'queued_retry',code:code}:false};
+    if(!ownerKey||isOwnerDeleted(ownerKey)||!ownerAuthorityMatches(ownerKey,expectedGeneration))return targeted?{status:'owner_conflict',code:'OWNER_CHANGED'}:false;
+    if(typeof navigator!=='undefined'&&navigator.onLine===false)return retryResult();
+    const attempts=await withGrammarQueueLock(function(){return ownerAuthorityMatches(ownerKey,expectedGeneration)
+      ?clone(ownerAttempts(readAttemptStore(),ownerKey).filter(function(item){return attemptGeneration(item)===expectedGeneration})):[]},ownerKey,ownerLockToken);
+    if(!Array.isArray(attempts)||!attempts.length)return retryResult();
+    let sent=false,targetResult=null;
     for(const attempt of attempts){
-      try{await EasyBoostApi.post('/api/v1/module-attempts',attempt);removeModuleAttempt(attempt.id,ownerKey);sent=true}
-      catch(error){
-        if(error&&error.status>=400&&error.status<500&&error.status!==401&&error.status!==403){removeModuleAttempt(attempt.id,ownerKey);continue}
-        break
-      }
+      const result=await sendModuleAttempt(attempt,ownerKey,expectedGeneration,ownerLockToken);
+      if(result&&result.sent){sent=true;if(attempt.id===targetAttemptId)targetResult={status:'delivered',code:null};continue}
+      if(result&&result.discarded){if(attempt.id===targetAttemptId)targetResult={status:'terminal_rejected',code:result.code};continue}
+      if(attempt.id===targetAttemptId)targetResult=result&&result.ownerConflict?{status:'owner_conflict',code:'OWNER_CHANGED'}:{status:'queued_retry',code:result&&result.code||'NETWORK_ERROR'};
+      break
     }
-    return sent
+    return targeted?targetResult||{status:'queued_retry',code:'NETWORK_ERROR'}:sent
+  }
+  function grammarQueueError(code,message){return{queued:false,code:code,message:message}}
+  function deliverGrammarMasterySync(update){
+    if(!update||typeof update.owner!=='string'||!Number.isSafeInteger(update.ownerGeneration)||!Array.isArray(update.records))return;
+    const authority=ownerAuthSnapshot(update.owner);
+    if(authority.deleted||authority.ownerGeneration!==update.ownerGeneration
+      ||update.owner===owner&&update.ownerGeneration!==ownerAuthGeneration)return;
+    grammarSyncListeners.forEach(function(listener){try{listener(clone(update))}catch(_){}})
+  }
+  function deliverOwnerDeleted(update){
+    ownerDeletedListeners.forEach(function(listener){try{listener(clone(update))}catch(_){}})
+  }
+  function receiveSyncMessage(update){
+    if(update&&update.type==='owner_deleted'&&typeof update.owner==='string'){
+      void withGrammarQueueLock(function(token){const before=ownerAuthSnapshot(update.owner).ownerGeneration;
+        const observed=observeOwnerDeleted(update);
+        if(observed){purgeOwnerLocalData(update.owner,Math.max(0,Number(update.ownerGeneration)-1||before),token);if(owner===update.owner)baseline={}}
+        deliverOwnerDeleted(update);return true
+      },update.owner);
+      return
+    }
+    if(update&&update.type==='owner_revived'&&typeof update.owner==='string')return;
+    deliverGrammarMasterySync(update)
+  }
+  function ensureGrammarSyncChannel(){
+    if(grammarSyncChannel||typeof global.BroadcastChannel!=='function')return grammarSyncChannel;
+    try{grammarSyncChannel=new global.BroadcastChannel(GRAMMAR_SYNC_CHANNEL);grammarSyncChannel.onmessage=function(message){receiveSyncMessage(message&&message.data)}}catch(_){grammarSyncChannel=null}
+    return grammarSyncChannel
+  }
+  function onGrammarMasterySync(listener){
+    if(typeof listener!=='function')return function(){};
+    grammarSyncListeners.add(listener);ensureGrammarSyncChannel();
+    return function(){grammarSyncListeners.delete(listener)}
+  }
+  function onOwnerDeleted(listener){
+    if(typeof listener!=='function')return function(){};
+    ownerDeletedListeners.add(listener);ensureGrammarSyncChannel();
+    return function(){ownerDeletedListeners.delete(listener)}
+  }
+  function publishGrammarMasterySync(ownerKey,expectedGeneration,entries,results){
+    if(isOwnerDeleted(ownerKey)||!ownerAuthorityMatches(ownerKey,expectedGeneration))return;
+    const byId=new Map((results||[]).map(function(result){return[result&&result.eventId,result]}));
+    const records=entries.flatMap(function(entry){const result=byId.get(entry&&entry.event&&entry.event.id);
+      return result&&(result.applied||result.replay||result.conflict)&&result.record?[{topicId:Number(entry.topicId),record:result.record}]:[]});
+    if(!records.length)return;
+    const update={owner:ownerKey,ownerGeneration:expectedGeneration,records:records};deliverGrammarMasterySync(update);
+    try{ensureGrammarSyncChannel()?.postMessage(clone(update))}catch(_){}
+  }
+  function publishOwnerDeleted(ownerKey,tombstone){
+    const update={type:'owner_deleted',owner:ownerKey,ownerGeneration:tombstone.ownerGeneration,globalGeneration:tombstone.globalGeneration};
+    deliverOwnerDeleted(update);
+    try{ensureGrammarSyncChannel()?.postMessage(clone(update))}catch(_){}
+  }
+  function publishOwnerRevived(ownerKey,snapshot){
+    const update={type:'owner_revived',owner:ownerKey,ownerGeneration:snapshot.ownerGeneration,globalGeneration:snapshot.globalGeneration};
+    try{ensureGrammarSyncChannel()?.postMessage(clone(update))}catch(_){}
+  }
+  function withGrammarQueueLock(action,lockOwner=owner,existingToken=null){
+    const deepOwner=normalizedOwner(lockOwner)||'unbound';
+    return incarnation.withOwnerLock(deepOwner,action,existingToken).then(function(result){return result==null
+      ?grammarQueueError('GRAMMAR_MASTERY_QUEUE_LOCK_UNAVAILABLE','Safe local persistence is unavailable in this browser.')
+      :result});
+  }
+  function withOwnerIncarnationLock(guard,action){const ownerKey=normalizedOwner(guard&&guard.owner),expectedGeneration=Number(guard&&guard.ownerGeneration);
+    if(!ownerKey||!Number.isSafeInteger(expectedGeneration)||typeof action!=='function')return Promise.resolve(grammarQueueError('GRAMMAR_MASTERY_OWNER_CHANGED','Аккаунт изменился.'));
+    return withGrammarQueueLock(async function(token){
+      if(!ownerAuthorityMatches(ownerKey,expectedGeneration))return grammarQueueError('GRAMMAR_MASTERY_OWNER_CHANGED','Аккаунт изменился.');
+      return action(token)
+    },ownerKey)
+  }
+  function queueGrammarMasteryBatch(ownerKey,expectedGeneration,entries){
+    if(isOwnerDeleted(ownerKey))return grammarQueueError('GRAMMAR_MASTERY_OWNER_DELETED','Аккаунт удалён. Результат нельзя сохранить.');
+    if(!ownerAuthorityMatches(ownerKey,expectedGeneration))return grammarQueueError('GRAMMAR_MASTERY_OWNER_CHANGED','Аккаунт изменился. Войдите снова перед сохранением результата.');
+    if(!ownerKey||!Array.isArray(entries)||!entries.length||entries.length>MAX_PENDING_GRAMMAR_EVENTS)return grammarQueueError('GRAMMAR_MASTERY_EVENT_INVALID','Некорректный результат тренировки.');
+    let candidates;try{candidates=clone(entries)}catch(_){return grammarQueueError('GRAMMAR_MASTERY_EVENT_INVALID','Некорректный результат тренировки.')}
+    if(candidates.some(function(item){return !Number.isInteger(Number(item&&item.topicId))||!item.event||typeof item.event.id!=='string'||!item.event.id}))return grammarQueueError('GRAMMAR_MASTERY_EVENT_INVALID','Некорректный результат тренировки.');
+    const store=readGrammarEventStore();
+    let batches=ownerGrammarBatches(store,ownerKey).map(function(batch){
+      const kept=batch.events.filter(function(existing){
+        if(!Number.isInteger(existing&&existing._conflictRevision))return true;
+        return !candidates.some(function(candidate){return Number(candidate.topicId)===Number(existing.topicId)
+          &&Number(candidate.event.expectedRevision)>=existing._conflictRevision})
+      });
+      return{id:batch.id,events:kept}
+    }).filter(function(batch){return batch.events.length});
+    const events=batches.flatMap(function(batch){return batch.events});
+    const existingIds=new Set(events.map(function(item){return item.event.id}));
+    const requestedIds=new Set(candidates.map(function(item){return item.event.id}));
+    if(requestedIds.size!==candidates.length)return grammarQueueError('GRAMMAR_MASTERY_EVENT_INVALID','Некорректный результат тренировки.');
+    const duplicateBatch=batches.find(function(batch){return batch.events.length===candidates.length
+      &&candidates.every(function(item){return batch.events.some(function(existing){return existing.event.id===item.event.id})})});
+    if(duplicateBatch)return{queued:true,duplicate:true,batchId:duplicateBatch.id};
+    const retryableCount=events.filter(function(item){return !Number.isInteger(item&&item._conflictRevision)}).length;
+    if(retryableCount+candidates.length>MAX_PENDING_GRAMMAR_EVENTS)return grammarQueueError('GRAMMAR_MASTERY_QUEUE_FULL','Подключитесь для синхронизации: очередь результатов заполнена.');
+    if(candidates.some(function(item){return existingIds.has(item.event.id)}))return grammarQueueError('GRAMMAR_MASTERY_EVENT_INVALID','Некорректный результат тренировки.');
+    const batchId=candidates[0].event.id;
+    batches.push({id:batchId,events:candidates});
+    if(isOwnerDeleted(ownerKey))return grammarQueueError('GRAMMAR_MASTERY_OWNER_DELETED','Аккаунт удалён. Результат нельзя сохранить.');
+    if(!ownerAuthorityMatches(ownerKey,expectedGeneration))return grammarQueueError('GRAMMAR_MASTERY_OWNER_CHANGED','Аккаунт изменился. Войдите снова перед сохранением результата.');
+    store.owners[ownerKey]={ownerGeneration:expectedGeneration,batches:batches};
+    return writeGrammarEventStore(store)?{queued:true,batchId:batchId}:{...grammarQueueError('GRAMMAR_MASTERY_QUEUE_WRITE_FAILED','Не удалось безопасно сохранить результат.')}
+  }
+  function coalesceGrammarConflictMarkers(batches){
+    const latest=new Map();
+    batches.forEach(function(batch){batch.events.forEach(function(item){
+      if(!Number.isInteger(item&&item._conflictRevision))return;
+      const topicId=Number(item.topicId),current=latest.get(topicId);
+      if(!current||item._conflictRevision>=current._conflictRevision)latest.set(topicId,item)
+    })});
+    return batches.map(function(batch){return{id:batch.id,events:batch.events.filter(function(item){
+      return !Number.isInteger(item&&item._conflictRevision)||latest.get(Number(item.topicId))===item
+    })}}).filter(function(batch){return batch.events.length})
+  }
+  function replaceGrammarMasteryBatch(ownerKey,expectedGeneration,batchId,events){
+    if(isOwnerDeleted(ownerKey)||!durableOwnerAuthorityMatches(ownerKey,expectedGeneration))return false;
+    const store=readGrammarEventStore(),batches=ownerGrammarBatches(store,ownerKey),index=batches.findIndex(function(batch){return batch.id===batchId});
+    if(index<0)return false;
+    if(events.length)batches[index]={id:batchId,events:events};else batches.splice(index,1);
+    const coalesced=coalesceGrammarConflictMarkers(batches);
+    if(!durableOwnerAuthorityMatches(ownerKey,expectedGeneration))return false;
+    if(coalesced.length)store.owners[ownerKey]={ownerGeneration:expectedGeneration,batches:coalesced};else delete store.owners[ownerKey];return writeGrammarEventStore(store)
+  }
+  function rebaseGrammarEvent(item,record){
+    const id=global.crypto&&typeof global.crypto.randomUUID==='function'?global.crypto.randomUUID():null;
+    if(!id||!record)return null;
+    return{topicId:item.topicId,event:{...item.event,id:id,expectedRevision:record.masteryRevision,expectedStage:record.stage,expectedReviewStep:record.reviewStep}}
+  }
+  function canSafelyRebaseGrammarEvent(item){
+    const event=item&&item.event;
+    return Boolean(event&&event.type==='session_completed'&&Array.isArray(event.completedTypes)
+      &&event.completedTypes.length<4&&!event.reason&&event.completedTypes.every(function(type){
+        const score=event.typeScores&&event.typeScores[type];
+        return score&&Number.isInteger(score.correct)&&Number.isInteger(score.total)&&score.correct===score.total
+      }))
+  }
+  async function flushGrammarMasteryEventsUnlocked(ownerKey,targetBatchId=null,expectedGeneration=ownerAuthGeneration){
+      const batches=await withGrammarQueueLock(function(){return ownerAuthorityMatches(ownerKey,expectedGeneration)
+        ?clone(ownerGrammarBatches(readGrammarEventStore(),ownerKey)):[]},ownerKey);
+      if(!Array.isArray(batches)||!batches.length||isOwnerDeleted(ownerKey)||!ownerAuthorityMatches(ownerKey,expectedGeneration))return false;
+      let last=false,target=false;
+      for(const batch of batches){
+        if(isOwnerDeleted(ownerKey)||!ownerAuthorityMatches(ownerKey,expectedGeneration))break;
+        const blocked=batch.events.filter(function(item){return Number.isInteger(item&&item._conflictRevision)});
+        let events=batch.events.filter(function(item){return !Number.isInteger(item&&item._conflictRevision)});
+        if(!events.length)continue;
+        for(let attempt=0;attempt<2&&events.length;attempt++){
+          try{
+            last=await EasyBoostApi.post('/api/v1/grammar/mastery-events/batch',{owner:ownerKey,batchId:batch.id,events:events},true);
+            if(batch.id===targetBatchId)target=last;
+            if(isOwnerDeleted(ownerKey)||!durableOwnerAuthorityMatches(ownerKey,expectedGeneration))return false;
+            const update=await withGrammarQueueLock(function(){
+              if(!durableOwnerAuthorityMatches(ownerKey,expectedGeneration))return null;
+              const byId=new Map((last&&last.results||[]).map(function(result){return[result.eventId,result]})),remaining=blocked.slice();
+              for(const item of events){
+                const result=byId.get(item.event.id);
+                if(result&&(result.applied||result.replay))continue;
+                const rebased=result&&result.conflict&&canSafelyRebaseGrammarEvent(item)?rebaseGrammarEvent(item,result.record):null;
+                const conflictRevision=Number(result&&result.record&&result.record.masteryRevision);
+                remaining.push(rebased||(result&&result.conflict&&Number.isInteger(conflictRevision)
+                  ?{...item,_conflictRevision:conflictRevision}:item))
+              }
+              if(!replaceGrammarMasteryBatch(ownerKey,expectedGeneration,batch.id,remaining))return null;
+              publishGrammarMasterySync(ownerKey,expectedGeneration,events,last&&last.results);
+              return{remaining:remaining,knownIds:[...byId.keys()]}
+            },ownerKey);
+            if(!update||!Array.isArray(update.remaining))break;
+            const remaining=update.remaining,knownIds=new Set(update.knownIds||[]);
+            events=remaining.filter(function(item){return !Number.isInteger(item&&item._conflictRevision)});
+            if(!ownerAuthorityMatches(ownerKey,expectedGeneration))break;
+            if(!events.length||!events.every(function(item){return !knownIds.has(item.event.id)}))break
+          }catch(error){
+            if(error&&error.code==='GRAMMAR_MASTERY_OWNER_CHANGED')return grammarQueueError('GRAMMAR_MASTERY_OWNER_CHANGED','Аккаунт изменился. Войдите снова и повторите синхронизацию.');
+            return false
+          }
+        }
+      }
+      return targetBatchId?target:last
+  }
+  async function flushGrammarMasteryEvents(ownerKey=owner,expectedGeneration=ownerAuthGeneration){
+    if(!ownerKey||isOwnerDeleted(ownerKey)||!ownerAuthorityMatches(ownerKey,expectedGeneration)||typeof navigator!=='undefined'&&navigator.onLine===false)return false;
+    return flushGrammarMasteryEventsUnlocked(ownerKey,null,expectedGeneration)
   }
   async function flush(){
     const requestedOwner=owner;
-    if(flushing){
-      if(flushingOwner===requestedOwner)return flushing;
-      return flushing.then(function(){return flush()},function(){return flush()})
-    }
-    const ownerKey=owner,pending=readPending(ownerKey);
-    const modules=pending&&pending.modules;
+    if(!ownerAuthorityCurrent(requestedOwner))return false;
+    if(flushingByOwner.has(requestedOwner))return flushingByOwner.get(requestedOwner);
+    const ownerKey=owner,expectedGeneration=ownerAuthGeneration,pending=readPending(ownerKey);
+    const modules=pendingMatchesOwner(pending,ownerKey)&&pending.modules;
     const hasModules=Boolean(modules&&Object.keys(modules).length);
-    const hasAttempts=Boolean(ownerAttempts(readAttemptStore(),ownerKey).length);
-    if(!hasModules&&!hasAttempts)return false;
-    flushingOwner=ownerKey;
+    const hasAttempts=ownerAttempts(readAttemptStore(),ownerKey).some(function(item){return attemptGeneration(item)===expectedGeneration});
+    const hasGrammarEvents=Boolean(ownerGrammarBatches(readGrammarEventStore(),ownerKey).length);
+    if(!hasModules&&!hasAttempts&&!hasGrammarEvents)return false;
     const current=Promise.all([
-      hasModules?sendModules(modules,ownerKey).catch(function(){return false}):false,
-      hasAttempts?flushModuleAttempts(ownerKey):false,
-    ]).then(function(results){return results.some(Boolean)}).finally(function(){
-      if(flushing===current){flushing=null;flushingOwner=null}
+      hasModules?sendModules(modules,ownerKey,expectedGeneration).catch(function(){return false}):false,
+      hasAttempts?flushModuleAttempts(ownerKey,null,expectedGeneration):false,
+      hasGrammarEvents?flushGrammarMasteryEvents(ownerKey,expectedGeneration):false,
+    ]).then(function(results){return results.some(function(result){
+      return result===true||Boolean(result&&Array.isArray(result.results)&&result.results.some(function(item){return item&&(item.applied||item.replay)}))
+    })}).finally(function(){
+      if(flushingByOwner.get(ownerKey)===current)flushingByOwner.delete(ownerKey)
     });
-    flushing=current;
-    return flushing;
+    flushingByOwner.set(ownerKey,current);
+    return current;
   }
   function progressModules(progress){
     const pending=readPending();
-    return {...((pending&&pending.modules)||{}),...changedModules(progress)}
+    return {...((pendingMatchesOwner(pending)&&pending.modules)||{}),...changedModules(progress)}
   }
-  function queueProgress(progress){
+  async function queueProgress(progress){
     const modules=progressModules(progress);
     if(!Object.keys(modules).length)return false;
-    return queueModules(modules)
+    const ownerKey=owner;
+    return withGrammarQueueLock(function(){return owner===ownerKey?queueModules(modules,ownerKey):false},ownerKey)
   }
-  function saveProgress(progress){
+  async function saveProgress(progress){
     const modules=progressModules(progress);
-    if(!Object.keys(modules).length)return Promise.resolve(true);
-    queueModules(modules);
-    if(typeof navigator!=='undefined'&&navigator.onLine===false)return Promise.resolve(false);
-    return sendModules(modules).catch(function(){return false});
+    if(!Object.keys(modules).length)return true;
+    const ownerKey=owner,expectedGeneration=ownerAuthGeneration;
+    const queued=await withGrammarQueueLock(function(){
+      if(owner!==ownerKey||queueModules(modules,ownerKey)!==true)return false;
+      return true
+    },ownerKey);
+    if(queued!==true||typeof navigator!=='undefined'&&navigator.onLine===false)return false;
+    return sendModules(modules,ownerKey,expectedGeneration).catch(function(){return false})
   }
-  function saveModuleAttempt(attempt){
-    if(!queueModuleAttempt(attempt))return Promise.resolve(false);
-    if(typeof navigator!=='undefined'&&navigator.onLine===false)return Promise.resolve(false);
-    return flush()
+  async function saveModuleAttempt(attempt,guard={}){
+    const ownerKey=owner,guarded=Object.hasOwn(guard,'owner');
+    const expectedGeneration=guarded?guard.ownerGeneration:ownerAuthGeneration;
+    const ownerConflict=function(){return guarded?{status:'owner_conflict',code:'OWNER_CHANGED'}:false};
+    if(guarded&&(guard.owner!==ownerKey||!ownerAuthorityMatches(ownerKey,expectedGeneration)))return ownerConflict();
+    const held=ownerLockTokenMatches(guard&&guard.ownerLockToken,ownerKey,expectedGeneration);
+    const queued=held?(ownerAuthorityMatches(ownerKey,expectedGeneration)?queueModuleAttempt(attempt,ownerKey,expectedGeneration):ownerConflict())
+      :await withGrammarQueueLock(function(){return ownerAuthorityMatches(ownerKey,expectedGeneration)?queueModuleAttempt(attempt,ownerKey,expectedGeneration):ownerConflict()},ownerKey);
+    if(queued!==true){
+      if(guarded&&queued&&queued.code==='GRAMMAR_MASTERY_QUEUE_LOCK_UNAVAILABLE')return{status:'queued_retry',code:queued.code};
+      return queued&&queued.status?queued:ownerConflict()
+    }
+    if(typeof navigator!=='undefined'&&navigator.onLine===false)return guarded?{status:'queued_retry',code:'NETWORK_ERROR'}:false;
+    return flushModuleAttempts(ownerKey,attempt&&attempt.id,expectedGeneration,held?guard.ownerLockToken:null)
   }
+  async function saveGrammarMasteryEvents(entries){
+    const ownerKey=owner,expectedGeneration=ownerAuthGeneration;
+    const queued=await withGrammarQueueLock(function(){
+      const queued=queueGrammarMasteryBatch(ownerKey,expectedGeneration,entries);
+      return queued||false
+    },ownerKey);
+    if(!queued||queued.queued!==true)return queued||false;
+    if(typeof navigator!=='undefined'&&navigator.onLine===false)return false;
+    const result=await flushGrammarMasteryEventsUnlocked(ownerKey,queued.batchId,expectedGeneration);
+    return ownerAuthorityMatches(ownerKey,expectedGeneration)?result:false
+  }
+  function saveGrammarMasteryEvent(topicId,event){return saveGrammarMasteryEvents([{topicId:Number(topicId),event:event}])}
   function setBaseline(progress){baseline=clone(progress||{});return flush()}
 
   if(typeof window!=='undefined')window.addEventListener('online',flush);
-  function pendingModules(){const pending=readPending();return (pending&&pending.modules)||{}}
-  function pendingModuleAttempts(){return clone(ownerAttempts(readAttemptStore()))}
+  function pendingModules(){const pending=readPending();return pendingMatchesOwner(pending)?pending.modules||{}:{}}
+  function pendingModuleAttempts(){return clone(ownerAttempts(readAttemptStore()).filter(function(item){return attemptGeneration(item)===ownerAuthGeneration}).map(publicAttempt))}
+  function pendingGrammarMasteryEvents(){return clone(ownerGrammarEvents(readGrammarEventStore()))}
+  function canQueueGrammarMasteryEvent(required=1){
+    const slots=Math.max(1,Math.min(MAX_PENDING_GRAMMAR_EVENTS,Math.floor(Number(required)||1)));
+    const retryable=ownerGrammarEvents(readGrammarEventStore()).filter(function(item){return !Number.isInteger(item&&item._conflictRevision)});
+    return Boolean(owner)&&!isOwnerDeleted(owner)&&ownerAuthorityCurrent(owner)&&retryable.length+slots<=MAX_PENDING_GRAMMAR_EVENTS
+  }
   global.EasyBoostSync=Object.freeze({
-    queueProgress:queueProgress,saveProgress:saveProgress,saveModuleAttempt:saveModuleAttempt,setBaseline:setBaseline,setOwner:setOwner,clearOwner:clearOwner,
-    flush:flush,pendingModules:pendingModules,pendingModuleAttempts:pendingModuleAttempts,
-    hasPending:function(){return Boolean(readPending())||Boolean(ownerAttempts(readAttemptStore()).length)},
+    queueProgress:queueProgress,saveProgress:saveProgress,saveModuleAttempt:saveModuleAttempt,saveGrammarMasteryEvent:saveGrammarMasteryEvent,saveGrammarMasteryEvents:saveGrammarMasteryEvents,setBaseline:setBaseline,setOwner:setOwner,confirmOwner:confirmOwner,adoptOwner:adoptOwner,clearOwner:clearOwner,deleteOwner:deleteOwner,isOwnerDeleted:isOwnerDeleted,ownerAuthSnapshot:ownerAuthSnapshot,ownerBoundGeneration:ownerBoundGeneration,withOwnerIncarnationLock:withOwnerIncarnationLock,
+    flush:flush,pendingModules:pendingModules,pendingModuleAttempts:pendingModuleAttempts,pendingGrammarMasteryEvents:pendingGrammarMasteryEvents,canQueueGrammarMasteryEvent:canQueueGrammarMasteryEvent,onGrammarMasterySync:onGrammarMasterySync,onOwnerDeleted:onOwnerDeleted,
+    hasPending:function(){return pendingMatchesOwner(readPending())
+      ||ownerAttempts(readAttemptStore()).some(function(item){return attemptGeneration(item)===ownerAuthGeneration})
+      ||Boolean(ownerGrammarEvents(readGrammarEventStore()).length)},
   });
 })(window);

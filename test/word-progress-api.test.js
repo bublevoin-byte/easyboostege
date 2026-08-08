@@ -42,7 +42,7 @@ test('authenticated word-progress API migrates legacy payloads and isolates rich
     const now = Date.parse('2026-08-04T10:00:00.000Z');
     const legacyResponse = await fetch(`${baseUrl}/api/v1/word-progress`, {
       method: 'PUT',
-      headers: { 'content-type': 'application/json', 'x-test-user': 'owner' },
+      headers: { 'content-type': 'application/json', 'x-test-user': 'owner', 'x-easyboost-expected-owner': 'owner' },
       body: JSON.stringify({ words: [{
         word: ' To Achieve ', stage: 3, errorCount: 1, reviewCount: 4, dueAt: now,
       }] }),
@@ -52,7 +52,7 @@ test('authenticated word-progress API migrates legacy payloads and isolates rich
 
     const otherResponse = await fetch(`${baseUrl}/api/v1/word-progress`, {
       method: 'PUT',
-      headers: { 'content-type': 'application/json', 'x-test-user': 'other' },
+      headers: { 'content-type': 'application/json', 'x-test-user': 'other', 'x-easyboost-expected-owner': 'other' },
       body: JSON.stringify({ words: [{
         word: 'private', stage: 5, errorCount: 0, reviewCount: 10, dueAt: now,
       }] }),
@@ -60,9 +60,10 @@ test('authenticated word-progress API migrates legacy payloads and isolates rich
     assert.equal(otherResponse.status, 200);
 
     const response = await fetch(`${baseUrl}/api/v1/word-progress`, {
-      headers: { 'x-test-user': 'owner' },
+      headers: { 'x-test-user': 'owner', 'x-easyboost-expected-owner': 'owner' },
     });
     assert.equal(response.status, 200);
+    assert.equal(response.headers.get('x-easyboost-response-owner'), 'owner');
     const body = await response.json();
     assert.equal(body.words.length, 1);
     assert.equal(body.words[0].word, 'achieve');
@@ -81,25 +82,25 @@ test('authenticated word-progress API migrates legacy payloads and isolates rich
     richer.lastOutcome = 'correct';
     const richerResponse = await fetch(`${baseUrl}/api/v1/word-progress`, {
       method: 'PUT',
-      headers: { 'content-type': 'application/json', 'x-test-user': 'owner' },
+      headers: { 'content-type': 'application/json', 'x-test-user': 'owner', 'x-easyboost-expected-owner': 'owner' },
       body: JSON.stringify({ words: [richer] }),
     });
     assert.equal(richerResponse.status, 200);
     const reloaded = await fetch(`${baseUrl}/api/v1/word-progress`, {
-      headers: { 'x-test-user': 'owner' },
+      headers: { 'x-test-user': 'owner', 'x-easyboost-expected-owner': 'owner' },
     });
     assert.deepEqual((await reloaded.json()).words, [richer]);
 
     const legacyAgain = await fetch(`${baseUrl}/api/v1/word-progress`, {
       method: 'PUT',
-      headers: { 'content-type': 'application/json', 'x-test-user': 'owner' },
+      headers: { 'content-type': 'application/json', 'x-test-user': 'owner', 'x-easyboost-expected-owner': 'owner' },
       body: JSON.stringify({ words: [{
         word: 'to achieve', stage: 3, errorCount: 2, reviewCount: 6, dueAt: now + 2_000,
       }] }),
     });
     assert.equal(legacyAgain.status, 200);
     const afterLegacy = await fetch(`${baseUrl}/api/v1/word-progress`, {
-      headers: { 'x-test-user': 'owner' },
+      headers: { 'x-test-user': 'owner', 'x-easyboost-expected-owner': 'owner' },
     });
     const preserved = (await afterLegacy.json()).words[0];
     assert.equal(preserved.dimensions.spelling.independentSuccesses, 1);
@@ -108,7 +109,7 @@ test('authenticated word-progress API migrates legacy payloads and isolates rich
     assert.equal((await fetch(`${baseUrl}/api/v1/word-progress`)).status, 401);
     const invalid = await fetch(`${baseUrl}/api/v1/word-progress`, {
       method: 'PUT',
-      headers: { 'content-type': 'application/json', 'x-test-user': 'owner' },
+      headers: { 'content-type': 'application/json', 'x-test-user': 'owner', 'x-easyboost-expected-owner': 'owner' },
       body: JSON.stringify({ words: [{
         word: 'unsafe', stage: 1, errorCount: 0, reviewCount: 1, dueAt: now,
         owner: 'other',
@@ -116,6 +117,39 @@ test('authenticated word-progress API migrates legacy payloads and isolates rich
     });
     assert.equal(invalid.status, 400);
   });
+});
+
+test('word progress rejects a shared-cookie owner switch before read or mutation', async () => {
+  await withServer(async (baseUrl, repository) => {
+    const missingOwner = await fetch(`${baseUrl}/api/v1/word-progress`, {
+      headers: { 'x-test-user': 'owner' },
+    });
+    assert.equal(missingOwner.status, 400);
+    const wrongWrite = await fetch(`${baseUrl}/api/v1/word-progress`, {
+      method: 'PUT',
+      headers: {
+        'content-type': 'application/json', 'x-test-user': 'other',
+        'x-easyboost-expected-owner': 'owner',
+      },
+      body: JSON.stringify({ words: [{
+        word: 'private', stage: 1, errorCount: 0, reviewCount: 1, dueAt: 0,
+      }] }),
+    });
+    assert.equal(wrongWrite.status, 409);
+    assert.deepEqual(await repository.getWordProgress('other'), []);
+    const wrongRead = await fetch(`${baseUrl}/api/v1/word-progress`, {
+      headers: { 'x-test-user': 'other', 'x-easyboost-expected-owner': 'owner' },
+    });
+    assert.equal(wrongRead.status, 409);
+  });
+});
+
+test('word progress OpenAPI documents required and authoritative owner headers', async () => {
+  const openapi = await fs.readFile(new URL('../docs/openapi.yaml', import.meta.url), 'utf8');
+  const contract = openapi.match(/  \/api\/v1\/word-progress:[\s\S]*?(?=\n  \/api\/v1\/error-bank:)/u)?.[0] || '';
+  assert.equal((contract.match(/#\/components\/parameters\/ExpectedOwner/gu) || []).length, 2);
+  assert.equal((contract.match(/X-EasyBoost-Response-Owner/gu) || []).length, 4);
+  assert.equal((contract.match(/OWNER_CHANGED/gu) || []).length, 2);
 });
 
 test('personal cards use bounded progress persistence with owner, export and deletion parity', async () => {
@@ -133,14 +167,16 @@ test('personal cards use bounded progress persistence with owner, export and del
     const stored = await fetch(`${baseUrl}/api/v1/progress/modules`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-test-user': 'owner' },
-      body: JSON.stringify({ modules: {
+      body: JSON.stringify({ owner: 'owner', modules: {
         personalWords: [requestCard], personalWordTombstones: ['personal:volunteer'],
       } }),
     });
     assert.equal(stored.status, 200);
     assert.deepEqual((await stored.json()).progress.personalWords, [card]);
 
-    const other = await fetch(`${baseUrl}/api/v1/progress`, { headers: { 'x-test-user': 'other' } });
+    const other = await fetch(`${baseUrl}/api/v1/progress`, {
+      headers: { 'x-test-user': 'other', 'x-easyboost-expected-owner': 'other' },
+    });
     assert.deepEqual(await other.json(), {});
     assert.deepEqual((await repository.exportUserData('owner')).progress.personalWords, [card]);
     assert.deepEqual((await repository.getProgress('owner')).personalWordTombstones, ['personal:volunteer']);
@@ -148,7 +184,7 @@ test('personal cards use bounded progress persistence with owner, export and del
     const malformed = await fetch(`${baseUrl}/api/v1/progress/modules`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-test-user': 'owner' },
-      body: JSON.stringify({ modules: { personalWords: [{ ...card, provenance: 'core' }] } }),
+      body: JSON.stringify({ owner: 'owner', modules: { personalWords: [{ ...card, provenance: 'core' }] } }),
     });
     assert.equal(malformed.status, 400);
     assert.deepEqual((await repository.getProgress('owner')).personalWords, [card]);
@@ -156,7 +192,7 @@ test('personal cards use bounded progress persistence with owner, export and del
     const malformedTombstone = await fetch(`${baseUrl}/api/v1/progress/modules`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-test-user': 'owner' },
-      body: JSON.stringify({ modules: { personalWordTombstones: ['core:volunteer'] } }),
+      body: JSON.stringify({ owner: 'owner', modules: { personalWordTombstones: ['core:volunteer'] } }),
     });
     assert.equal(malformedTombstone.status, 400);
     assert.deepEqual((await repository.getProgress('owner')).personalWordTombstones, ['personal:volunteer']);

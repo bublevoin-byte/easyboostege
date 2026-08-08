@@ -43,8 +43,12 @@ async function withApp(run) {
   });
   const request = (username, pathname, options = {}) => fetch(
     `http://127.0.0.1:${server.address().port}${pathname}`,
-    { ...options, headers: {
-      'Content-Type': 'application/json', 'X-Test-User': username, ...(options.headers || {}),
+    { ...options,
+      body: pathname === '/api/v1/module-attempts' && options.body
+        ? JSON.stringify({ owner: username, ...JSON.parse(options.body) }) : options.body,
+      headers: {
+      'Content-Type': 'application/json', 'X-Test-User': username,
+      'X-EasyBoost-Expected-Owner': username, ...(options.headers || {}),
     } },
   );
   try { await run({ owner, stranger, repository, request }); }

@@ -166,6 +166,9 @@ test('application starts and serves health, security headers and PWA assets', { 
     }
 
     const activeAuthorization = { Authorization: `Bearer ${jwt.sign({ u: 'active' }, jwtSecret)}`, 'Content-Type': 'application/json' };
+    const bearerAdaptive = await fetch(`${baseUrl}/api/v1/adaptive-learning/goal`, { headers: activeAuthorization });
+    assert.equal(bearerAdaptive.status, 404, 'a verified bearer identity does not need to echo its signed JWT as an owner');
+    assert.equal(bearerAdaptive.headers.get('x-easyboost-response-owner'), 'active');
     const apiDurations = [];
     for (let index = 0; index < 60; index += 1) {
       const startedAt = performance.now();
@@ -216,7 +219,7 @@ test('application starts and serves health, security headers and PWA assets', { 
     assert.match(exported.headers.get('content-disposition') || '', /easyboost-data\.json/u);
     assert.equal((await exported.json()).account.username, 'active');
 
-    const moduleAttempt = { id: '58ffc848-99ab-4a9d-99c4-f960558c1e51', module: 'exam', activity: 'grammar_19_24', score: 5, maxScore: 6, durationMs: 45_000 };
+    const moduleAttempt = { owner: 'active', id: '58ffc848-99ab-4a9d-99c4-f960558c1e51', module: 'exam', activity: 'grammar_19_24', score: 5, maxScore: 6, durationMs: 45_000 };
     const recordedAttempt = await fetch(`${baseUrl}/api/v1/module-attempts`, { method: 'POST', headers: activeAuthorization, body: JSON.stringify(moduleAttempt) });
     assert.equal(recordedAttempt.status, 201);
     assert.equal((await recordedAttempt.json()).created, true);
@@ -302,10 +305,28 @@ test('application starts and serves health, security headers and PWA assets', { 
     assert.equal(unconfirmedDeletion.status, 400);
     assert.equal((await unconfirmedDeletion.json()).error.code, 'CONFIRMATION_REQUIRED');
 
-    const deletion = await fetch(`${baseUrl}/api/v1/account`, {
+    const ownerlessDeletion = await fetch(`${baseUrl}/api/v1/account`, {
       method: 'DELETE',
       headers: activeAuthorization,
       body: JSON.stringify({ confirmation: 'DELETE' }),
+    });
+    assert.equal(ownerlessDeletion.status, 400);
+    assert.equal((await ownerlessDeletion.json()).error.code, 'INVALID_OWNER');
+
+    const wrongOwnerDeletion = await fetch(`${baseUrl}/api/v1/account`, {
+      method: 'DELETE',
+      headers: activeAuthorization,
+      body: JSON.stringify({ confirmation: 'DELETE', owner: 'sessionuser' }),
+    });
+    assert.equal(wrongOwnerDeletion.status, 409);
+    assert.equal((await wrongOwnerDeletion.json()).error.code, 'OWNER_CHANGED');
+    assert.equal((await fetch(`${baseUrl}/api/v1/me`, { headers: activeAuthorization })).status, 200,
+      'an owner mismatch must not delete the authenticated account');
+
+    const deletion = await fetch(`${baseUrl}/api/v1/account`, {
+      method: 'DELETE',
+      headers: activeAuthorization,
+      body: JSON.stringify({ confirmation: 'DELETE', owner: 'active' }),
     });
     assert.equal(deletion.status, 200);
     assert.equal((await deletion.json()).ok, true);

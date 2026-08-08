@@ -346,6 +346,130 @@ test('adaptive dispatcher aborts a Reading launch that outlives its timeout', as
   assert.equal(launchCount, 2);
 });
 
+test('adaptive dispatcher timeout invalidates a late synchronous activity navigation', async () => {
+  const source = await fs.readFile(new URL('../public/adaptive-activity-launch.js', import.meta.url), 'utf8');
+  const executable = `${source.replace(/^import .*;\r?\n/gmu, '').replace('export function launchAdaptiveActivity', 'function launchAdaptiveActivity')}\nwindow.__launchAdaptiveActivity=launchAdaptiveActivity;`;
+  let timeoutCallback;
+  let navigationCallback;
+  let navigationOptions;
+  let starts = 0;
+  const window = { gStart() { starts += 1; } };
+  vm.runInNewContext(executable, {
+    window, document: { getElementById: () => ({ dataset: {} }) },
+    isAdaptiveLaunchDescriptor: () => true,
+    nav: (_screenId, callback, options) => { navigationCallback = callback; navigationOptions = options; },
+    setTimeout: (callback) => { timeoutCallback = callback; return 1; }, clearTimeout() {},
+    AbortController, Promise, Boolean, String, Object, Error, CustomEvent,
+  });
+  const result = window.__launchAdaptiveActivity({
+    kind: 'grammar_practice', screenId: 'scr3', topicId: 3,
+  }, 'builtin:grammar:topic:3');
+  timeoutCallback();
+  assert.equal(await result, false);
+  assert.equal(navigationOptions.beforeCommit(), false, 'timeout makes the pending route permanently stale');
+  await navigationCallback(() => true);
+  assert.equal(starts, 0, 'a late lazy chunk cannot start a synchronous activity after timeout');
+});
+
+test('router rejects a stale guarded lazy navigation before entering the screen or running hooks', async () => {
+  const source = await fs.readFile(new URL('../public/router.js', import.meta.url), 'utf8');
+  const executable = `${source.replace(/export \{[^}]+\};?\s*$/u, '')}\nwindow.__guardedRouter={nav,registerRouteHook,registerScreenSource};`;
+  const screen = (id, active = false) => ({
+    id, scrollTop: 0, inert: false, dataset: {}, attributes: new Map(),
+    classList: {
+      values: new Set(active ? ['screen', 'on'] : ['screen']),
+      contains(value) { return this.values.has(value); },
+      add(value) { this.values.add(value); },
+      remove(value) { this.values.delete(value); },
+    },
+    setAttribute(name, value) { this.attributes.set(name, value); },
+    removeAttribute(name) { this.attributes.delete(name); },
+  });
+  const current = screen('scr1', true); const target = screen('scr7');
+  const screens = [current, target];
+  let resolveChunk; const chunk = new Promise((resolve) => { resolveChunk = resolve; });
+  let authorized = true; let hooks = 0; let after = 0;
+  const window = {
+    EasyBoostComponents: { screenState() {}, clearScreenState() {} },
+    EasyBoostApi: { messageFor: () => 'error' },
+  };
+  vm.runInNewContext(executable, {
+    window, console, navigator: { onLine: true },
+    document: {
+      querySelector: (selector) => selector === '.screen.on' ? screens.find((item) => item.classList.contains('on')) : null,
+      querySelectorAll: (selector) => selector === '.screen' ? screens : [],
+      getElementById: (id) => id === 'navmenu' ? { classList: { remove() {} }, appendChild() {} } : screens.find((item) => item.id === id) || null,
+      createElement: () => ({ setAttribute() {} }),
+    },
+    requestAnimationFrame: (callback) => callback(), setTimeout, clearTimeout, Promise, Map, Set, Error,
+  });
+  window.__guardedRouter.registerRouteHook(() => { hooks += 1; });
+  window.__guardedRouter.registerScreenSource(() => chunk);
+  window.__guardedRouter.nav('scr7', () => { after += 1; }, { beforeCommit: () => authorized });
+  authorized = false;
+  resolveChunk();
+  await Promise.resolve(); await Promise.resolve();
+
+  assert.equal(target.classList.contains('on'), false);
+  assert.equal(current.classList.contains('on'), true);
+  assert.equal(hooks, 0);
+  assert.equal(after, 0);
+});
+
+test('router preserves the prior screen and clears its own loading state on late resolve or reject', async () => {
+  const source = await fs.readFile(new URL('../public/router.js', import.meta.url), 'utf8');
+  const executable = `${source.replace(/export \{[^}]+\};?\s*$/u, '')}\nwindow.__guardedRouter={nav,registerRouteHook,registerScreenSource};`;
+  async function run(outcome) {
+    const screen = (id, active = false) => ({
+      id, scrollTop: 0, inert: false, dataset: {}, attributes: new Map(),
+      classList: {
+        values: new Set(active ? ['screen', 'on'] : ['screen']),
+        contains(value) { return this.values.has(value); },
+        add(value) { this.values.add(value); },
+        remove(value) { this.values.delete(value); },
+      },
+      setAttribute(name, value) { this.attributes.set(name, value); },
+      removeAttribute(name) { this.attributes.delete(name); },
+    });
+    const prior = screen('scr1', true); const target = screen('scr7'); const screens = [prior, target];
+    let resolveChunk; let rejectChunk;
+    const chunk = new Promise((resolve, reject) => { resolveChunk = resolve; rejectChunk = reject; });
+    const timers = []; let authorized = true; let hooks = 0; let clears = 0; let loading = 0;
+    const window = {
+      EasyBoostComponents: { screenState() { loading += 1; }, clearScreenState() { clears += 1; } },
+      EasyBoostApi: { messageFor: () => 'error' },
+    };
+    vm.runInNewContext(executable, {
+      window, console: { error() {} }, navigator: { onLine: true },
+      document: {
+        querySelector: (selector) => selector === '.screen.on' ? screens.find((item) => item.classList.contains('on')) : null,
+        querySelectorAll: (selector) => selector === '.screen' ? screens : [],
+        getElementById: (id) => id === 'navmenu' ? { classList: { remove() {} }, appendChild() {} } : screens.find((item) => item.id === id) || null,
+        createElement: () => ({ setAttribute() {} }),
+      },
+      requestAnimationFrame: (callback) => callback(),
+      setTimeout: (callback) => { timers.push(callback); return timers.length; }, clearTimeout() {},
+      Promise, Map, Set, Error,
+    });
+    window.__guardedRouter.registerRouteHook(() => { hooks += 1; });
+    window.__guardedRouter.registerScreenSource(() => chunk);
+    window.__guardedRouter.nav('scr7', null, { beforeCommit: () => authorized });
+    timers.at(-1)();
+    assert.equal(loading, 1, 'slow loading is presented without committing the destination');
+    authorized = false;
+    if (outcome === 'resolve') resolveChunk(); else rejectChunk(new Error('late chunk failure'));
+    await Promise.resolve(); await Promise.resolve();
+    return { prior, target, hooks, clears };
+  }
+  for (const outcome of ['resolve', 'reject']) {
+    const result = await run(outcome);
+    assert.equal(result.target.classList.contains('on'), false, `${outcome}: stale target never becomes active`);
+    assert.equal(result.prior.classList.contains('on'), true, `${outcome}: prior screen remains active`);
+    assert.equal(result.hooks, 0, `${outcome}: stale hooks never run`);
+    assert.equal(result.clears, 1, `${outcome}: only this navigation's loading state is cleared`);
+  }
+});
+
 test('OpenAPI documents the exact strict launch descriptor union and block metadata', async () => {
   const openapi = await fs.readFile(new URL('../docs/openapi.yaml', import.meta.url), 'utf8');
   assert.match(openapi, /AdaptiveActivityLaunch:/u);

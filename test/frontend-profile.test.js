@@ -166,7 +166,21 @@ test('profile exposes working study controls and one adaptive goal editor withou
   assert.doesNotMatch(markup, /Напоминания|Язык интерфейса/u);
   assert.match(screen, /S\.learnerPreferences=/u);
   assert.match(screen, /save\(\{queueNow:true\}\)/u);
-  assert.match(screen, /apiGet\('\/api\/v1\/adaptive-learning\/goal'\)/u);
+  assert.match(screen, /apiGet\('\/api\/v1\/adaptive-learning\/goal'/u);
   assert.match(screen, /nav\('scr10'/u);
   assert.match(screen, /adaptive-goal-edit/u);
+});
+
+test('profile goal request is bound to and verified against the captured owner', async () => {
+  const screen = await fs.readFile(new URL('../public/screens/profile.js', import.meta.url), 'utf8');
+  assert.match(screen, /apiGet\('\/api\/v1\/adaptive-learning\/goal',\{headers:\{'X-EasyBoost-Expected-Owner':owner\}\}\)/u);
+  assert.match(screen, /apiResponseOwner\(payload\)!==owner/u);
+  assert.match(screen, /apiIsAuthorityFailure\(error\)[\s\S]*?invalidateLearningAuthority\(\{owner:owner,ownerGeneration:generation\}\)/u);
+  assert.match(
+    screen,
+    /catch\(error\)\{if\(currentUser!==owner\|\|window\.EasyBoostSync\?\.ownerBoundGeneration\?\.\(owner\)!==generation\)return;/u,
+  );
+  assert.match(screen, /profileGoalAuthority/u);
+  assert.match(screen, /ownerGeneration:generation/u);
+  assert.match(screen, /registerAuthorityReset/u);
 });

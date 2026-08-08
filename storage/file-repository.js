@@ -127,6 +127,12 @@ import {
   wordProgressPersistenceCandidate,
   wordProgressStorageDto,
 } from './word-progress-dto.js';
+import {
+  hasCanonicalMasteryRecords,
+  migrateLegacyMasteryRecords,
+  migrateMasteryRecords,
+  reduceMastery,
+} from '../public/modules/grammar.js';
 
 function normalizeAttemptModels(attempts) {
   return attempts.map((attempt) => ({
@@ -435,21 +441,106 @@ export function createFileRepository(filePath, {
   }
 
   async function getProgress(username) {
-    await load();
+    await migrateGrammarMastery(username);
     return structuredClone(state.progress[username] || {});
   }
 
   async function saveProgress(username, data) {
     await load();
-    state.progress[username] = structuredClone(data || {});
+    const canonicalMastery = state.progress[username]?.grammarMastery;
+    const accepted = structuredClone(data || {});
+    delete accepted.grammarMastery;
+    state.progress[username] = accepted;
+    if (canonicalMastery) state.progress[username].grammarMastery = canonicalMastery;
     await persist();
   }
 
   async function mergeProgress(username, modules) {
     await load();
-    state.progress[username] = { ...(state.progress[username] || {}), ...structuredClone(modules || {}) };
+    const accepted = structuredClone(modules || {});
+    delete accepted.grammarMastery;
+    state.progress[username] = { ...(state.progress[username] || {}), ...accepted };
     await persist();
     return structuredClone(state.progress[username]);
+  }
+
+  async function migrateGrammarMastery(username) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      const progress = state.progress[username] || {};
+      const canonicalOwnsTruth = hasCanonicalMasteryRecords(progress.grammarMastery);
+      const source = canonicalOwnsTruth ? progress.grammarMastery : progress.gram;
+      if (!source || typeof source !== 'object') return structuredClone(canonicalOwnsTruth ? progress.grammarMastery : {});
+      const migrated = canonicalOwnsTruth
+        ? migrateMasteryRecords(source, { now: Date.now() })
+        : migrateLegacyMasteryRecords(source, { now: Date.now() });
+      if (JSON.stringify(progress.grammarMastery) !== JSON.stringify(migrated)) {
+        state.progress[username] = { ...progress, grammarMastery: migrated };
+        await persist();
+      }
+      return structuredClone(migrated);
+    });
+  }
+
+  async function applyGrammarMasteryEvents(username, entries) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      if (!state.users[username]) throw new Error('USER_NOT_FOUND');
+      const now = Date.now();
+      const progress = state.progress[username] || {};
+      const canonicalOwnsTruth = hasCanonicalMasteryRecords(progress.grammarMastery);
+      const source = canonicalOwnsTruth ? progress.grammarMastery : (progress.gram || {});
+      const grammarMastery = canonicalOwnsTruth
+        ? migrateMasteryRecords(source, { now })
+        : migrateLegacyMasteryRecords(source, { now });
+      const authoritativeMastery = structuredClone(grammarMastery);
+      const pendingResults = [];
+      let changed = !canonicalOwnsTruth;
+      for (const { topicId, event } of entries) {
+        const current = grammarMastery[topicId]
+          || migrateMasteryRecords({ [topicId]: {} }, { now })[topicId];
+        const replay = current.recentEventIds.includes(event.id);
+        const record = replay
+          ? current
+          : reduceMastery(current, event, { now, clockAuthority: 'server' });
+        const applied = !replay && record.masteryRevision === current.masteryRevision + 1;
+        if (applied) {
+          grammarMastery[topicId] = record;
+          changed = true;
+        }
+        pendingResults.push({
+          topicId,
+          eventId: event.id,
+          applied,
+          conflict: !applied && !replay,
+          replay,
+          record: structuredClone(applied ? record : current),
+        });
+      }
+      const hasConflict = pendingResults.some((result) => result.conflict);
+      const results = hasConflict
+        ? pendingResults.map(({ topicId, eventId, replay }) => {
+          const record = authoritativeMastery[topicId]
+            || migrateMasteryRecords({ [topicId]: {} }, { now })[topicId];
+          return {
+            eventId,
+            applied: false,
+            conflict: !replay,
+            replay,
+            record: structuredClone(record),
+          };
+        })
+        : pendingResults.map(({ topicId: _topicId, ...result }) => result);
+      if (changed && !hasConflict) {
+        state.progress[username] = { ...progress, grammarMastery };
+        await persist();
+      }
+      return results;
+    });
+  }
+
+  async function applyGrammarMasteryEvent(username, topicId, event) {
+    return (await applyGrammarMasteryEvents(username, [{ topicId, event }]))[0];
   }
 
   async function getUserByTelegram(telegramId) {
@@ -4694,6 +4785,9 @@ export function createFileRepository(filePath, {
     getProgress,
     saveProgress,
     mergeProgress,
+    migrateGrammarMastery,
+    applyGrammarMasteryEvent,
+    applyGrammarMasteryEvents,
     getUserByTelegram,
     createTelegramUser,
     ensureTelegramUser,

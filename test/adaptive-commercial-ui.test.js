@@ -58,8 +58,12 @@ async function withCommercialApp(run) {
   });
   const request = (username, pathname, options = {}) => fetch(
     `http://127.0.0.1:${server.address().port}${pathname}`,
-    { ...options, headers: {
-      'Content-Type': 'application/json', 'X-Test-User': username, ...(options.headers || {}),
+    { ...options,
+      body: pathname === '/api/v1/module-attempts' && options.body
+        ? JSON.stringify({ owner: username, ...JSON.parse(options.body) }) : options.body,
+      headers: {
+      'Content-Type': 'application/json', 'X-Test-User': username,
+      'X-EasyBoost-Expected-Owner': username, ...(options.headers || {}),
     } },
   );
   try { await run({ repository, free, base, premium, request }); }
@@ -310,7 +314,9 @@ test('commercial plan UI has complete labelled controls, paywall, accessible rep
   assert.match(screen, /features\?\.adaptive_learning===true/u);
   assert.doesNotMatch(screen, /writeAdaptiveOverviewCache\(localStorage,adaptiveOverviewOwner\(\),saved\)/u);
   assert.match(screen, /destination\.focus/u);
-  assert.match(screen, /apiGet\('\/api\/v1\/adaptive-learning\/reports\/detailed'\)/u);
+  assert.match(screen, /adaptiveGet\('\/api\/v1\/adaptive-learning\/reports\/detailed',authority\)/u);
+  assert.match(screen, /commitAdaptiveUi\(authority/u,
+    'a stale adaptive continuation must not redraw another owner\'s session');
   assert.match(screen, /примерн/u);
   assert.match(screen, /неофициальн/u);
 });

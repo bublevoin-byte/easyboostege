@@ -399,7 +399,8 @@ test('due repeat executes end-to-end through the existing ledger and orientation
     const request = (username, pathname, options = {}) => fetch(
       `http://127.0.0.1:${server.address().port}${pathname}`,
       { ...options, headers: {
-        'Content-Type': 'application/json', 'X-Test-User': username, ...(options.headers || {}),
+        'Content-Type': 'application/json', 'X-Test-User': username,
+        'X-EasyBoost-Expected-Owner': username, ...(options.headers || {}),
       } },
     );
 

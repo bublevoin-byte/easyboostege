@@ -47,6 +47,7 @@ import { assertSpeakingTask4SessionRepositoryContract } from './support/speaking
 import { assertFullSpeakingSessionRepositoryContract } from './support/speaking-full-session-contract.js';
 import { assertSpeakingAssessmentQuotaContract } from './support/speaking-assessment-quota-contract.js';
 import { assertSpeakingAccentCalibrationRepositoryContract } from './support/speaking-accent-calibration-contract.js';
+import { assertGrammarMasteryProgressContract } from './support/grammar-mastery-progress-contract.js';
 import { READING_TASK10_SETS } from '../public/content/reading/task10-v1.js';
 import { READING_TASK11_SETS } from '../public/content/reading/task11-v1.js';
 import { READING_TASK12_18_SETS } from '../public/content/reading/task12-18-v1.js';
@@ -644,7 +645,8 @@ test('PostgreSQL HTTP overview replaces a same-time post-hoc assistance plan ato
     const request = (pathname, options = {}) => fetch(
       `http://127.0.0.1:${server.address().port}${pathname}`,
       { ...options, headers: {
-        'Content-Type': 'application/json', 'X-Test-User': owner, ...(options.headers || {}),
+        'Content-Type': 'application/json', 'X-Test-User': owner,
+        'X-EasyBoost-Expected-Owner': owner, ...(options.headers || {}),
       } },
     );
     const createdResponse = await request('/api/v1/adaptive-learning/goal', {
@@ -732,7 +734,7 @@ test('PostgreSQL overview exhausts profile CAS retries as a retryable 409', {
     });
     const response = await fetch(
       `http://127.0.0.1:${server.address().port}/api/v1/adaptive-learning/overview`,
-      { headers: { 'X-Test-User': owner } },
+      { headers: { 'X-Test-User': owner, 'X-EasyBoost-Expected-Owner': owner } },
     );
     assert.equal(response.status, 409);
     assert.equal(response.headers.get('retry-after'), '1');
@@ -794,7 +796,7 @@ test('PostgreSQL overview exhausts plan races as the same retryable bounded 409'
     });
     const response = await fetch(
       `http://127.0.0.1:${server.address().port}/api/v1/adaptive-learning/overview`,
-      { headers: { 'X-Test-User': owner } },
+      { headers: { 'X-Test-User': owner, 'X-EasyBoost-Expected-Owner': owner } },
     );
     assert.equal(response.status, 409);
     assert.equal(response.headers.get('retry-after'), '1');
@@ -924,7 +926,8 @@ test('PostgreSQL deep mutations recheck Premium inside the locked owner transact
     const request = (pathname, options = {}) => fetch(
       `http://127.0.0.1:${server.address().port}${pathname}`,
       { ...options, headers: {
-        'Content-Type': 'application/json', 'X-Test-User': owner, ...(options.headers || {}),
+        'Content-Type': 'application/json', 'X-Test-User': owner,
+        'X-EasyBoost-Expected-Owner': owner, ...(options.headers || {}),
       } },
     );
     const startBody = { blockId: block.id, expectedRevision: 0 };
@@ -2035,6 +2038,37 @@ test('PostgreSQL Reading report rows match the shared bounded ownership contract
   } finally {
     await repository.deleteUserData(owner).catch(() => {});
     await repository.deleteUserData(other).catch(() => {});
+    await repository.close();
+  }
+});
+
+test('PostgreSQL progress matches the Grammar mastery persistence contract', { skip: !connectionString }, async () => {
+  const repository = createPostgresRepository(connectionString);
+  const raw = new pg.Client({ connectionString });
+  const stamp = String(Date.now()).slice(-9);
+  const owner = await repository.createTelegramUser(Number(`4${stamp}`), `Grammar owner ${stamp}`);
+  const other = await repository.createTelegramUser(Number(`5${stamp}`), `Grammar other ${stamp}`);
+  const emptyCanonical = await repository.createTelegramUser(Number(`6${stamp}`), `Grammar empty ${stamp}`);
+  try {
+    await raw.connect();
+    await raw.query(
+      `INSERT INTO user_progress (username, data, updated_at)
+       VALUES ($1, $2::jsonb, clock_timestamp())
+       ON CONFLICT (username) DO UPDATE SET data = EXCLUDED.data, updated_at = clock_timestamp()`,
+      [emptyCanonical, JSON.stringify({
+        grammarMastery: {},
+        gram: { 1: { st: 2, ok: 8, err: 1, sr: 4, rs: 2, due: 12_345 } },
+      })],
+    );
+    const restored = await repository.getProgress(emptyCanonical);
+    assert.equal(restored.grammarMastery['1'].stage, 'learned');
+    assert.equal(restored.grammarMastery['1'].stats.correct, 8);
+    await assertGrammarMasteryProgressContract(repository, owner, other);
+  } finally {
+    await repository.deleteUserData(owner).catch(() => {});
+    await repository.deleteUserData(other).catch(() => {});
+    await repository.deleteUserData(emptyCanonical).catch(() => {});
+    await raw.end().catch(() => {});
     await repository.close();
   }
 });

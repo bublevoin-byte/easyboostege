@@ -472,6 +472,7 @@ try {
   await authenticatedPage.getByRole('button', { name: 'Проверить' }).press('Enter');
   await authenticatedPage.getByRole('button', { name: 'Дальше' }).press('Enter');
   await authenticatedPage.getByRole('heading', { name: 'Итоги тренировки' }).waitFor();
+  await authenticatedPage.waitForFunction(() => window.EasyBoostSync.pendingModuleAttempts().length === 1);
   const queuedAttempt = await authenticatedPage.evaluate(() => {
     const attempts = window.EasyBoostSync.pendingModuleAttempts();
     return { count: attempts.length, id: attempts[0]?.id || '', pending: window.EasyBoostSync.hasPending() };

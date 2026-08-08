@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import express from 'express';
+import { bindResponseOwner, requireExpectedOwner } from '../middleware/expected-owner.js';
 
 import { buildAdaptiveLearningProfile } from '../adaptive-learning/profile.js';
 import { adaptiveLearningGoalPublicDto } from '../adaptive-learning/goal-dto.js';
@@ -150,10 +151,15 @@ export function createAdaptiveLearningRoutes({
   voiceTutorLimits = {},
 }) {
   const router = express.Router();
+  const { auth } = authentication;
+  router.use('/api/v1/adaptive-learning', auth, (req, res, next) => {
+    if (!requireExpectedOwner(req, res)) return;
+    bindResponseOwner(res, req.user);
+    next();
+  });
   if (enabled && (typeof executionTokenSecret !== 'string' || executionTokenSecret.length < 32)) {
     throw new Error('ADAPTIVE_EXECUTION_TOKEN_CONFIG_INVALID');
   }
-  const { auth } = authentication;
   const diagnosticStartRateGate = createDiagnosticStartRateGate();
 
   async function adaptiveAccess(username) {
@@ -370,6 +376,7 @@ export function createAdaptiveLearningRoutes({
   }
 
   router.get('/api/v1/adaptive-learning/overview', auth, async (req, res, next) => {
+    if (!requireExpectedOwner(req, res)) return;
     try {
       res.setHeader('Cache-Control', 'no-store');
       res.json(await overview(req.user));
@@ -398,6 +405,7 @@ export function createAdaptiveLearningRoutes({
   });
 
   router.put('/api/v1/adaptive-learning/goal', auth, async (req, res, next) => {
+    if (!requireExpectedOwner(req, res)) return;
     const parsed = adaptiveGoalSchema.safeParse(req.body);
     const idempotencyKey = String(req.headers['idempotency-key'] || '');
     if (!parsed.success || !IDEMPOTENCY_KEY.test(idempotencyKey)
@@ -426,6 +434,7 @@ export function createAdaptiveLearningRoutes({
         && Number(result.goal?.revision) === Number(saved.goal?.revision);
       const responseCreated = Boolean(saved.created && savedIsCurrent);
       return res.status(responseCreated ? 201 : 200).json({
+        owner: req.user,
         created: responseCreated,
         replayed: !saved.created,
         superseded: !savedIsCurrent,
@@ -626,6 +635,7 @@ export function createAdaptiveLearningRoutes({
   });
 
   router.get('/api/v1/adaptive-learning/sessions/current', auth, async (req, res, next) => {
+    if (!requireExpectedOwner(req, res)) return;
     try {
       res.setHeader('Cache-Control', 'no-store');
       const session = await db.getCurrentAdaptiveLearningSession(req.user);
@@ -1014,6 +1024,7 @@ export function createAdaptiveLearningRoutes({
   });
 
   router.get('/api/v1/adaptive-learning/diagnostics/current', auth, async (req, res, next) => {
+    if (!requireExpectedOwner(req, res)) return;
     try {
       res.setHeader('Cache-Control', 'no-store');
       const diagnostic = await db.getCurrentAdaptiveDiagnostic(req.user);

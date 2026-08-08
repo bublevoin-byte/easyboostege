@@ -54,6 +54,7 @@ import {
 
 const [
   recorderFile,
+  ownerIncarnationFile,
   syncFile,
   readingModuleFile,
   readingScreenFile,
@@ -61,6 +62,7 @@ const [
   listeningScreenFile,
 ] = await Promise.all([
   fs.readFile(new URL('../public/learning-activity-recorder.js', import.meta.url), 'utf8'),
+  fs.readFile(new URL('../public/owner-incarnation.js', import.meta.url), 'utf8'),
   fs.readFile(new URL('../public/sync.js', import.meta.url), 'utf8'),
   fs.readFile(new URL('../public/modules/reading.js', import.meta.url), 'utf8'),
   fs.readFile(new URL('../public/screens/reading.js', import.meta.url), 'utf8'),
@@ -126,7 +128,9 @@ function createSubjectHarness(subject, { offline = false, slow = false, listenin
   const voiceResults = [];
   const staticPlays = [];
   const values = new Map();
-  const navigator = { onLine: !offline };
+  const navigator = { onLine: !offline, locks: {
+    request(_name, _options, callback) { return Promise.resolve(callback({ name: 'owner-incarnation' })); },
+  } };
   const localStorage = {
     getItem: (key) => values.get(key) ?? null,
     setItem: (key, value) => values.set(key, String(value)),
@@ -277,6 +281,7 @@ function createSubjectHarness(subject, { offline = false, slow = false, listenin
   });
 
   if (offline) {
+    vm.runInContext(ownerIncarnationFile, context);
     vm.runInContext(syncFile, context);
     window.EasyBoostSync.setOwner('learner-a');
   } else {

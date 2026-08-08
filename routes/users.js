@@ -198,6 +198,16 @@ export function createUserRoutes({
       if (req.body?.confirmation !== 'DELETE') {
         return res.status(400).json({ error: { code: 'CONFIRMATION_REQUIRED', message: 'Подтвердите удаление аккаунта.' } });
       }
+      const intendedOwner = typeof req.body?.owner === 'string' ? req.body.owner : '';
+      if (!intendedOwner || intendedOwner !== intendedOwner.trim() || intendedOwner.length > 128) {
+        return res.status(400).json({ error: { code: 'INVALID_OWNER', message: 'Некорректный владелец аккаунта.' } });
+      }
+      if (intendedOwner !== req.user) {
+        return res.status(409).json({ error: {
+          code: 'OWNER_CHANGED',
+          message: 'Аккаунт изменился. Войдите снова перед удалением.',
+        } });
+      }
       await db.deleteUserData(req.user);
       clearAuthCookie(req, res);
       res.json({ ok: true });

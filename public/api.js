@@ -3,6 +3,7 @@
 
   const baseUrl = global.location.origin;
   const isServerMode = global.location.protocol === 'http:' || global.location.protocol === 'https:';
+  const responseOwners = new WeakMap();
 
   class ApiError extends Error {
     constructor(message, { status = 0, code = 'REQUEST_FAILED', requestId = '' } = {}) {
@@ -36,9 +37,32 @@
     return (error && error.message) || 'Не удалось выполнить запрос.';
   }
 
+  function isAuthorityFailure(error) {
+    const status = Number(error && error.status) || 0;
+    const code = String((error && error.code) || '');
+    return code === 'OWNER_CHANGED' || status === 401 || (status === 403 && code === 'FORBIDDEN');
+  }
+
+  function canUseOfflineFallback(error) {
+    const status = Number(error && error.status) || 0;
+    const code = String((error && error.code) || '');
+    if (isAuthorityFailure(error)) return false;
+    return ['NETWORK_ERROR', 'REQUEST_TIMEOUT', 'TIMEOUT'].includes(code) || status >= 500;
+  }
+
+  function responseOwner(payload) {
+    return payload && typeof payload === 'object' ? (responseOwners.get(payload) || '') : '';
+  }
+
   async function parseResponse(response) {
     const payload = await response.json().catch(() => ({}));
-    if (response.ok) return payload;
+    if (response.ok) {
+      const owner = String(response.headers.get('x-easyboost-response-owner') || '').trim();
+      if (owner && payload && typeof payload === 'object' && !Array.isArray(payload)) {
+        responseOwners.set(payload, owner);
+      }
+      return payload;
+    }
 
     const details = payload && typeof payload.error === 'object' ? payload.error : {};
     const message = details.message || payload.error || `Ошибка ${response.status}`;
@@ -54,20 +78,20 @@
     return parseResponse(response);
   }
 
-  async function post(path, body) {
+  async function post(path, body, headers = {}) {
     const response = await request(baseUrl + path, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...headers },
       credentials: 'same-origin',
       body: JSON.stringify(body || {}),
     });
     return parseResponse(response);
   }
 
-  async function postIdempotent(path, body, idempotencyKey) {
+  async function postIdempotent(path, body, idempotencyKey, headers = {}) {
     const response = await request(baseUrl + path, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': String(idempotencyKey || '') },
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': String(idempotencyKey || ''), ...headers },
       credentials: 'same-origin',
       body: JSON.stringify(body || {}),
     });
@@ -112,5 +136,8 @@
     return result.data;
   }
 
-  global.EasyBoostApi = Object.freeze({ ApiError, get, post, postIdempotent, put, remove, getBlob, postBinary, generateContent, messageFor });
+  global.EasyBoostApi = Object.freeze({
+    ApiError, get, post, postIdempotent, put, remove, getBlob, postBinary, generateContent, messageFor,
+    responseOwner, isAuthorityFailure, canUseOfflineFallback,
+  });
 })(window);

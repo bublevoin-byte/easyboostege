@@ -12,6 +12,20 @@ import {
 
 const METRICS_NOW = new Date('2026-08-04T12:00:00.000Z');
 
+globalThis.window = globalThis.window || {};
+const ownerGenerations = new Map();
+const deletedOwners = new Set();
+globalThis.window.EasyBoostOwnerIncarnation = {
+  snapshot(owner) {
+    return { ownerGeneration: ownerGenerations.get(owner) || 0, deleted: deletedOwners.has(owner) };
+  },
+  async withOwnerLock(_owner, action) { return action(Symbol('test-owner-lock')); },
+  async clearMatchingStorage(_owner, key, matcher, _token, storage) {
+    const raw = storage.getItem(key); if (!raw) return true;
+    if (matcher(raw) !== true) return false; storage.removeItem(key); return true;
+  },
+};
+
 function memoryStorage() {
   const values = new Map();
   return {
@@ -20,6 +34,19 @@ function memoryStorage() {
     removeItem(key) { values.delete(key); },
   };
 }
+
+test('overview cache partitions same-name account incarnations by owner generation', async () => {
+  ownerGenerations.clear(); deletedOwners.clear();
+  const storage = memoryStorage();
+  const now = Date.parse('2026-08-04T12:00:00.000Z');
+  const oldOverview = overview(); oldOverview.goal = { ...oldOverview.goal, targetScore: 70 };
+  const newOverview = overview(); newOverview.goal = { ...newOverview.goal, targetScore: 90 };
+  assert.equal(await writeAdaptiveOverviewCache(storage, 'learner-one', oldOverview, now, 0), true);
+  ownerGenerations.set('learner-one', 1);
+  assert.equal(await writeAdaptiveOverviewCache(storage, 'learner-one', newOverview, now + 1, 1), true);
+  assert.equal(readAdaptiveOverviewCache(storage, 'learner-one', now + 2, 0)?.goal?.targetScore, 70);
+  assert.equal(readAdaptiveOverviewCache(storage, 'learner-one', now + 2, 1)?.goal?.targetScore, 90);
+});
 
 function overview() {
   return {
@@ -36,10 +63,11 @@ function overview() {
   };
 }
 
-test('offline overview cache is owner-bound, bounded and contains only the public read-only projection', () => {
+test('offline overview cache is owner-bound, bounded and contains only the public read-only projection', async () => {
+  ownerGenerations.clear(); deletedOwners.clear();
   const storage = memoryStorage();
   const now = Date.parse('2026-08-04T12:00:00.000Z');
-  assert.equal(writeAdaptiveOverviewCache(storage, 'learner-one', overview(), now), true);
+  assert.equal(await writeAdaptiveOverviewCache(storage, 'learner-one', overview(), now), true);
 
   const cached = readAdaptiveOverviewCache(storage, 'learner-one', now + 60_000);
   assert.deepEqual(Object.keys(cached).sort(), ['access', 'goal', 'plan', 'profile', 'retention']);
@@ -47,13 +75,15 @@ test('offline overview cache is owner-bound, bounded and contains only the publi
   assert.equal(JSON.stringify(cached).includes('must-not-be-cached'), false);
 
   assert.equal(readAdaptiveOverviewCache(storage, 'learner-two', now + 60_000), null);
-  assert.equal(readAdaptiveOverviewCache(storage, 'learner-one', now + 60_000), null);
+  assert.deepEqual(readAdaptiveOverviewCache(storage, 'learner-one', now + 60_000), cached,
+    'a different tab cannot destroy the owning account cache merely by reading it');
 });
 
-test('offline overview cache exposes its saved timestamp without marking the payload fresh', () => {
+test('offline overview cache exposes its saved timestamp without marking the payload fresh', async () => {
+  ownerGenerations.clear(); deletedOwners.clear();
   const storage = memoryStorage();
   const savedAt = Date.parse('2026-08-04T12:00:00.000Z');
-  assert.equal(writeAdaptiveOverviewCache(storage, 'learner-one', overview(), savedAt), true);
+  assert.equal(await writeAdaptiveOverviewCache(storage, 'learner-one', overview(), savedAt), true);
 
   const snapshot = readAdaptiveOverviewCacheSnapshot(storage, 'learner-one', savedAt + 60_000);
   assert.equal(snapshot.savedAt, savedAt);
@@ -61,17 +91,30 @@ test('offline overview cache exposes its saved timestamp without marking the pay
   assert.equal(Object.hasOwn(snapshot.payload, 'fresh'), false);
 });
 
-test('offline overview cache expires, rejects oversized snapshots and can be cleared explicitly', () => {
+test('offline overview cache survives stale cleanup from an older same-name incarnation', async () => {
+  ownerGenerations.clear(); deletedOwners.clear(); ownerGenerations.set('learner-one', 1);
   const storage = memoryStorage();
   const now = Date.parse('2026-08-04T12:00:00.000Z');
-  assert.equal(writeAdaptiveOverviewCache(storage, 'learner-one', overview(), now), true);
+  assert.equal(await writeAdaptiveOverviewCache(storage, 'learner-one', overview(), now, 1), true);
+  assert.equal(readAdaptiveOverviewCache(storage, 'learner-one', now + 1_000, 0), null);
+  assert.equal(await clearAdaptiveOverviewCache(storage, { owner: 'learner-one', ownerGeneration: 0 }), true,
+    'generation-qualified cleanup has nothing from the old incarnation to remove');
+  assert.equal(readAdaptiveOverviewCache(storage, 'learner-one', now + 1_000, 1)?.goal?.targetScore, 85);
+  assert.equal(await clearAdaptiveOverviewCache(storage, { owner: 'learner-one', ownerGeneration: 1 }), true);
+});
+
+test('offline overview cache expires, rejects oversized snapshots and can be cleared explicitly', async () => {
+  ownerGenerations.clear(); deletedOwners.clear();
+  const storage = memoryStorage();
+  const now = Date.parse('2026-08-04T12:00:00.000Z');
+  assert.equal(await writeAdaptiveOverviewCache(storage, 'learner-one', overview(), now), true);
   assert.equal(readAdaptiveOverviewCache(storage, 'learner-one', now + 24 * 60 * 60 * 1000), null);
-  assert.equal(writeAdaptiveOverviewCache(storage, 'learner-one', overview(), now), true);
+  assert.equal(await writeAdaptiveOverviewCache(storage, 'learner-one', overview(), now), true);
   const safeSnapshot = readAdaptiveOverviewCache(storage, 'learner-one', now);
 
   const huge = overview();
   huge.profile.modules = [{ id: 'grammar', explanation: 'x'.repeat(130_000) }];
-  assert.equal(writeAdaptiveOverviewCache(storage, 'learner-one', huge, now), false);
+  assert.equal(await writeAdaptiveOverviewCache(storage, 'learner-one', huge, now), false);
   assert.deepEqual(readAdaptiveOverviewCache(storage, 'learner-one', now), safeSnapshot);
 
   const partialGoalResponse = {
@@ -79,12 +122,28 @@ test('offline overview cache expires, rejects oversized snapshots and can be cle
     profile: overview().profile,
     plan: overview().plan,
   };
-  assert.equal(writeAdaptiveOverviewCache(storage, 'learner-one', partialGoalResponse, now), false);
+  assert.equal(await writeAdaptiveOverviewCache(storage, 'learner-one', partialGoalResponse, now), false);
   assert.deepEqual(readAdaptiveOverviewCache(storage, 'learner-one', now), safeSnapshot);
 
-  assert.equal(writeAdaptiveOverviewCache(storage, 'learner-one', overview(), now), true);
-  clearAdaptiveOverviewCache(storage);
+  assert.equal(await writeAdaptiveOverviewCache(storage, 'learner-one', overview(), now), true);
+  await clearAdaptiveOverviewCache(storage, { owner: 'learner-one', ownerGeneration: 0 });
   assert.equal(readAdaptiveOverviewCache(storage, 'learner-one', now), null);
+});
+
+test('overview cache write removes stale private data when deletion wins before post-write validation', async () => {
+  ownerGenerations.clear(); deletedOwners.clear();
+  const storage = memoryStorage(); const originalSetItem = storage.setItem.bind(storage);
+  storage.setItem = (key, value) => {
+    originalSetItem(key, value);
+    ownerGenerations.set('learner-one', 1); deletedOwners.add('learner-one');
+  };
+
+  assert.equal(await writeAdaptiveOverviewCache(
+    storage, 'learner-one', overview(), Date.parse('2026-08-04T12:00:00.000Z'), 0,
+  ), false);
+  assert.equal(readAdaptiveOverviewCache(
+    storage, 'learner-one', Date.parse('2026-08-04T12:00:01.000Z'), 0,
+  ), null);
 });
 
 test('adaptive metrics are fixed-cardinality, PII-free and preserve honest denominators', () => {

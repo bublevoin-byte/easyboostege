@@ -2,6 +2,7 @@ import { isAdaptiveLaunchDescriptor } from './adaptive-activity-contract.js';
 import { nav } from './router.js';
 
 async function consumeDescriptor(launch, contentRef, options = {}) {
+  if (typeof options.authorityCurrent === 'function' && options.authorityCurrent() !== true) return false;
   switch (launch.kind) {
     case 'vocabulary_practice':
       return typeof window.launchVocabularyPractice === 'function'
@@ -43,23 +44,44 @@ async function consumeDescriptor(launch, contentRef, options = {}) {
   }
 }
 
-export function launchAdaptiveActivity(launch, contentRef) {
+export function launchAdaptiveActivity(launch, contentRef, authorityCurrent = null) {
   if (!isAdaptiveLaunchDescriptor(launch) || typeof contentRef !== 'string') {
     return Promise.resolve(false);
   }
+  const ownerAuthorized = () => {
+    try { return typeof authorityCurrent !== 'function' || authorityCurrent() === true; } catch { return false; }
+  };
+  if (!ownerAuthorized()) return Promise.resolve(false);
   return new Promise((resolve) => {
     let settled = false;
     const controller = new AbortController();
+    let navigation = null;
+    const authorized = () => !settled && !controller.signal.aborted && ownerAuthorized();
     const timeout = setTimeout(() => {
       if (!settled) {
         settled = true;
         controller.abort();
+        if (navigation && typeof navigation.cancel === 'function') navigation.cancel();
         resolve(false);
       }
     }, 8_000);
-    nav(launch.screenId, async () => {
+    const cancel = () => {
+      controller.abort();
+      clearTimeout(timeout);
+      if (!settled) { settled = true; resolve(false); }
+    };
+    navigation = nav(launch.screenId, async (navigationCurrent) => {
+      const commitAllowed = () => authorized()
+        && (typeof navigationCurrent !== 'function' || navigationCurrent() === true);
+      if (!commitAllowed()) {
+        clearTimeout(timeout);
+        settled = true;
+        resolve(false);
+        return;
+      }
       let launched = false;
-      try { launched = await consumeDescriptor(launch, contentRef, { signal: controller.signal }); } catch { launched = false; }
+      try { launched = await consumeDescriptor(launch, contentRef, { signal: controller.signal, authorityCurrent: commitAllowed }); } catch { launched = false; }
+      if (!commitAllowed()) launched = false;
       if (launched) {
         const screen = document.getElementById(launch.screenId);
         if (screen) {
@@ -72,6 +94,6 @@ export function launchAdaptiveActivity(launch, contentRef) {
         settled = true;
         resolve(launched);
       }
-    });
+    }, { beforeCommit: authorized, onCancel: cancel, signal: controller.signal });
   });
 }

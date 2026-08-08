@@ -10,7 +10,8 @@ import {
 } from '../public/learning-activity-contract.js';
 
 const source = (await fs.readFile(new URL('../public/modules/grammar.js', import.meta.url), 'utf8'))
-  .replace(/^import .*;\r?\n/mu, '');
+  .replace(/^import .*;\r?\n/mu, '')
+  .replace(/^export /gmu, '');
 
 function createGrammarModule() {
   const window = {};
@@ -55,22 +56,22 @@ test('grammar module combines built-in and generated banks and builds level queu
   assert.equal(continuing.length, 3);
 });
 
-test('grammar module applies learning and review answers with spaced repetition', () => {
+test('grammar answers update only the session and never mutate server-owned mastery locally', () => {
   const grammar = createGrammarModule();
   const record = { st: 1, ok: 0, err: 0, sr: 3 };
   const item = { k: 'f', t: 2, q: {} };
   const session = { queue: [item], mode: 'learn', ok: 0, done: 0, errT: {} };
 
+  const before = JSON.parse(JSON.stringify(record));
   grammar.applyAnswer(record, session, item, true, 1_000);
-  assert.equal(record.st, 2);
-  assert.equal(record.sr, 4);
-  assert.equal(record.due, 1_000 + 7 * 86_400_000);
+  assert.deepEqual(record, before);
   assert.equal(session.ok, 1);
+  assert.equal(session.done, 1);
 
   const reviewRecord = { st: 2, ok: 1, err: 0, sr: 4 };
   const review = { queue: [item], mode: 'rev', ok: 0, done: 0, errT: {} };
   grammar.applyAnswer(reviewRecord, review, item, false, 2_000);
-  assert.equal(reviewRecord.err, 1);
+  assert.deepEqual(reviewRecord, { st: 2, ok: 1, err: 0, sr: 4 });
   assert.equal(review.errT[2], 1);
   assert.equal(review.queue.length, 2);
 });

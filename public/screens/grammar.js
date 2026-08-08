@@ -52,8 +52,7 @@ async function genGrammar(){
 const G_GROUPS=GRAMMAR_CATALOG.groups;
 const G_TOPICS=GRAMMAR_CATALOG.topics;
 const G_BANK=GRAMMAR_CATALOG.bank;
-const G_RINT=[7,16,35];
-/* --- состояние: S.gram = {tid:{st,ok,err,sr,rs,due}} --- */
+/* --- состояние: S.gram = {tid:{masteryVersion,stage,reviewStep,eligibleAt,ok,err,...}} --- */
 let GS=null;
 function gEvidence(activityId,startedAt=Date.now()){return{id:crypto.randomUUID(),activityId:activityId,startedAt:startedAt,reported:false,score:0,maxScore:0,sources:{},helpUsed:false}}
 function gReportEvidence(evidence,metadata,durationMs){if(!evidence||evidence.reported)return;evidence.reported=true;
@@ -63,16 +62,60 @@ function gReportEvidence(evidence,metadata,durationMs){if(!evidence||evidence.re
 function gEvidenceSource(evidence,fallback){var sources=Object.keys((evidence&&evidence.sources)||{});
   if(sources.length>1)return'mixed';if(sources[0]==='generated')return'generated';if(sources[0]==='builtin')return'builtin';return fallback||'builtin'}
 function gTrackEvidenceSource(evidence,item){if(!evidence)return;var source=item&&item.source==='generated'?'generated':'builtin';evidence.sources[source]=true}
-function gMarkHelp(topic){if(!GS)return;GS.helpUsed=true;
-  if(GS.mode==='rev'){var activityId=grammarModule.activityId(topic,'spaced_review');GS.helpActivities[activityId]=true;
-    var evidence=GS.evidence[activityId];if(evidence)evidence.helpUsed=true}}
-function gRec(t){S.gram=S.gram||{};return S.gram[t]||(S.gram[t]={st:0,ok:0,err:0,sr:0})}
+function gMarkHelp(topic,affectsMastery=true){if(!GS)return;GS.helpUsed=true;var countsForMastery=affectsMastery&&!GS.answerCommitted;
+  if(GS.mode==='rev'){var activityId=grammarModule.activityId(topic,'spaced_review');
+    if(countsForMastery){GS.helpActivities[topic]=true;GS.helpActivities[activityId]=true}
+    var evidence=GS.evidence[activityId];if(evidence)evidence.helpUsed=true}
+  else if(countsForMastery)GS.masteryAssisted=true}
+function gRec(t){S.grammarMastery=S.grammarMastery||{};return S.grammarMastery[t]||(S.grammarMastery[t]=grammarModule.migrateMasteryRecord())}
+function gSetRec(t,record){S.grammarMastery=S.grammarMastery||{};S.grammarMastery[t]=record;return record}
+function gMasteryExpectation(record){return{expectedRevision:record.masteryRevision,expectedStage:record.stage,expectedReviewStep:record.reviewStep}}
+function gMasteryOutcomes(result){return result&&Array.isArray(result.results)?result.results:[result]}
+function gMasteryProvisional(result){return result===false||Boolean(result&&result.queued===true)}
+function gMasteryUnsaved(result){return Boolean(result&&result.queued===false)||gMasteryOutcomes(result).some(function(item){return Boolean(item&&item.conflict)})}
+function gMasteryPersistenceLine(result){
+  if(gMasteryProvisional(result))return'Сохранено на устройстве, статус обновится после синхронизации';
+  if(!gMasteryUnsaved(result))return'';
+  if(result&&result.code==='GRAMMAR_MASTERY_QUEUE_FULL')return'Подключитесь для синхронизации: результат не записан';
+  if(result&&result.code==='GRAMMAR_MASTERY_QUEUE_LOCK_UNAVAILABLE')return'Безопасное сохранение недоступно: повторите подход в поддерживаемом браузере';
+  if(result&&result.code==='GRAMMAR_MASTERY_QUEUE_WRITE_FAILED')return'Не удалось безопасно сохранить результат: освободите место и повторите подход';
+  if(result&&result.code==='GRAMMAR_MASTERY_OWNER_CHANGED')return'Аккаунт изменился: войдите снова и повторите синхронизацию';
+  if(result&&result.code==='GRAMMAR_MASTERY_OWNER_DELETED')return'Аккаунт удалён: результат нельзя сохранить';
+  return'Результат не записан: прогресс изменился, обновите раздел и повторите подход'
+}
+async function gSubmitMasteryEvent(topicId,event){
+  if(!window.EasyBoostSync||typeof window.EasyBoostSync.saveGrammarMasteryEvent!=='function')return false;
+  var response=await window.EasyBoostSync.saveGrammarMasteryEvent(topicId,event);
+  var result=response&&Array.isArray(response.results)?response.results.find(function(item){return item&&item.eventId===event.id}):response;
+  if(result&&result.record)gSetRec(topicId,result.record);
+  return result
+}
+async function gSubmitMasteryBatch(entries){
+  if(!window.EasyBoostSync||typeof window.EasyBoostSync.saveGrammarMasteryEvents!=='function'){
+    if(entries.length!==1)return false;
+    var single=await gSubmitMasteryEvent(entries[0].topicId,entries[0].event);return single&&single.eventId?{results:[single]}:single
+  }
+  var result=await window.EasyBoostSync.saveGrammarMasteryEvents(entries);
+  if(result&&Array.isArray(result.results)){var byId=new Map(result.results.map(function(item){return[item&&item.eventId,item]}));
+    entries.forEach(function(entry){var item=byId.get(entry.event.id);if(item&&item.record)gSetRec(entry.topicId,item.record)})}
+  return result
+}
 function gAnim(name,dur){ui.animate('g_card',name,dur)}
-function gStatusChip(st,isDue){
-  if(st===2&&isDue)return '<span style="font-weight:800;font-size:10px;letter-spacing:.6px;color:#C2421B;background:#FFEDE4;padding:5px 10px;border-radius:20px;">ПОРА ПОВТОРИТЬ</span>';
-  if(st===2)return '<span style="font-weight:800;font-size:10px;letter-spacing:.6px;color:#1D7F4A;background:#EAF7F0;padding:5px 10px;border-radius:20px;">ЗАКРЕПЛЕНА</span>';
-  if(st===1)return '<span style="font-weight:800;font-size:10px;letter-spacing:.6px;color:#A56000;background:#FFF4DE;padding:5px 10px;border-radius:20px;">ИЗУЧАЕТСЯ</span>';
+function gStatusChip(record){var view=grammarModule.masteryView(record);
+  if(view.due)return '<span style="font-weight:800;font-size:10px;letter-spacing:.6px;color:#C2421B;background:#FFEDE4;padding:5px 10px;border-radius:20px;">'+view.nextLabel.toUpperCase()+'</span>';
+  if(view.stage==='stable')return '<span style="font-weight:800;font-size:10px;letter-spacing:.6px;color:#1D7F4A;background:#EAF7F0;padding:5px 10px;border-radius:20px;">УСТОЙЧИВО</span>';
+  if(view.stage==='confirmed')return '<span style="font-weight:800;font-size:10px;letter-spacing:.6px;color:#1D7F4A;background:#EAF7F0;padding:5px 10px;border-radius:20px;">ПОДТВЕРЖДЕНО</span>';
+  if(view.stage==='learned')return '<span style="font-weight:800;font-size:10px;letter-spacing:.6px;color:#2369A8;background:#EAF3FC;padding:5px 10px;border-radius:20px;">ИЗУЧЕНО</span>';
+  if(view.stage==='learning')return '<span style="font-weight:800;font-size:10px;letter-spacing:.6px;color:#A56000;background:#FFF4DE;padding:5px 10px;border-radius:20px;">ИЗУЧАЕТСЯ</span>';
   return '<span style="font-weight:800;font-size:10px;letter-spacing:.6px;color:#6A6E75;background:#F1F2F4;padding:5px 10px;border-radius:20px;">НЕ НАЧАТА</span>'}
+function gDateLine(view){if(view.due)return view.nextLabel;
+  if(view.eligibleAt!=null)return 'следующая проверка '+new Date(view.eligibleAt).toLocaleDateString('ru-RU',{day:'numeric',month:'short'});
+  return view.nextLabel}
+function gRegressionLine(view){if(!view.regressionReason)return'';
+  return '<div style="margin-top:7px;font-weight:700;font-size:11px;color:#A56000;">Снова в работе: '+grammarModule.regressionReasonLabel(view.regressionReason)+'</div>'}
+function gMasteryQueueAvailable(required){return !window.EasyBoostSync||typeof window.EasyBoostSync.canQueueGrammarMasteryEvent!=='function'||window.EasyBoostSync.canQueueGrammarMasteryEvent(required||1)}
+function gShowMasteryQueueFull(){var area=document.getElementById('g_area');if(!area)return;
+  area.innerHTML='<div class="clayCard" style="padding:22px;text-align:center;"><div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:19px;color:#2B2B2B;">Подключитесь для синхронизации</div><div style="font-weight:600;font-size:13px;color:#777163;line-height:1.55;margin-top:8px;">Очередь результатов заполнена. После синхронизации можно продолжить тренировку.</div></div><button class="sq" style="'+WBTN+'color:#B54E2F;margin-top:12px;" onclick="gMap()">К темам</button>'}
 function initGrammar(){if(!S)return;gSync();gMap()}
 /* Обработчик разметки не может присвоить переменную модуля, поэтому сброс темы — функция. */
 function gToThemes(){GS=null;initGrammar()}
@@ -104,14 +147,14 @@ function gMap(){var area=document.getElementById('g_area');if(!area)return;
     +'<span style="flex:none;background:rgba(255,255,255,.96);border-radius:14px;padding:9px 14px;font-weight:800;font-size:12.5px;color:#C2421B;">Начать</span></div></button>';
   G_GROUPS.forEach(function(gr){
     h+='<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:12px;letter-spacing:1.8px;color:#6F695E;margin:6px 2px 10px;">'+gr.n.toUpperCase()+'</div>';
-    gr.ids.forEach(function(t){var r=gRec(t),tp=G_TOPICS[t];
-      var isDue=r.st===2&&r.due&&r.due<=Date.now();
-      var pct=r.st===2?100:Math.min(99,Math.round(r.sr/4*100));
+    gr.ids.forEach(function(t){var r=gRec(t),tp=G_TOPICS[t],view=grammarModule.masteryView(r);
+      var pct=view.stage==='learning'?Math.max(view.progress,Math.min(39,Math.round(r.stats.advancedStreak/4*40))):view.progress;
       h+='<button type="button" class="clayCard sq clk cardbtn" onclick="gOpen('+t+')" style="'+ga()+'padding:14px 16px;margin-bottom:11px;cursor:pointer;">'
         +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'
-        +'<div style="font-weight:800;font-size:14.5px;color:#2B2B2B;">'+tp.n+'</div>'+gStatusChip(r.st,isDue)+'</div>'
+        +'<div style="font-weight:800;font-size:14.5px;color:#2B2B2B;">'+tp.n+'</div>'+gStatusChip(r)+'</div>'
         +'<div style="margin-top:10px;height:6px;border-radius:4px;background:#F1EDE7;"><div style="width:'+pct+'%;height:100%;border-radius:4px;background:linear-gradient(90deg,#FFA570,#F2683F);"></div></div>'
-        +(r.ok+r.err>0?'<div style="margin-top:7px;font-weight:600;font-size:11px;color:#777163;">верно '+r.ok+' · ошибок '+r.err+'</div>':'')
+        +(r.stats.correct+r.stats.errors>0?'<div style="margin-top:7px;font-weight:600;font-size:11px;color:#777163;">верно '+r.stats.correct+' · ошибок '+r.stats.errors+'</div>':'')
+        +'<div style="margin-top:6px;font-weight:600;font-size:11px;color:#777163;">'+gDateLine(view)+'</div>'+gRegressionLine(view)
         +'</button>'});
   });
   area.innerHTML=h;setTxt('g_today','20 тем'+(due.length?' · '+due.length+' на повторение':''))}
@@ -121,7 +164,7 @@ function gTheory(t,fromMap){var area=document.getElementById('g_area');if(!area)
     +wDeco()
     +'<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'
     +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#1D7F4A;background:#EAF7F0;padding:5px 10px;border-radius:20px;">ПРАВИЛО</span>'
-    +gStatusChip(gRec(t).st)+'</div>'
+    +gStatusChip(gRec(t))+'</div>'
     +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:19px;color:#2B2B2B;margin-top:12px;">'+tp.n+'</div>'
     +'<div style="font-weight:600;font-size:13.5px;color:#4A453E;line-height:1.6;margin-top:10px;">'+tp.th+'</div></div>'
     +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
@@ -132,26 +175,27 @@ function gShuffle(a){return grammarModule.shuffled(a)}
 function gBankEff(t){var b=G_BANK[t]||{};var ai=(S&&S.gramAi&&S.gramAi[t])||[];
   return grammarModule.effectiveBank(b,ai)}
 function gLvl2(t){return grammarModule.levelTwo(gBankEff(t),t)}
-function gDue(){return grammarModule.dueTopics(S.gram)}
-function gStart(t){var e=gBankEff(t),r=gRec(t);
+function gDue(){return grammarModule.dueTopics(S.grammarMastery)}
+function gStart(t){if(!gMasteryQueueAvailable()){gShowMasteryQueueFull();return}var e=gBankEff(t),r=gRec(t);
   var queue=grammarModule.buildTopicQueue(e,t,r);
-  GS={t:t,queue:queue,i:0,ok:0,done:0,source:grammarModule.queueSource(queue),helpUsed:false,evidence:gEvidence(grammarModule.activityId(t,'topic_practice'))};
+  GS={t:t,queue:queue,i:0,ok:0,done:0,source:grammarModule.queueSource(queue),helpUsed:false,masteryAssisted:false,answerCommitted:false,errorReasons:{},types:{},typeScores:{},evidence:gEvidence(grammarModule.activityId(t,'topic_practice'))};
   gRenderQ();gGen(t)}
 function gResume(){if(GS)gRenderQ();else gMap()}
-function gReview(){var due=gDue();if(!due.length){gMap();return}
+function gReview(){var due=gDue();if(!due.length){gMap();return}if(!gMasteryQueueAvailable(due.length)){gShowMasteryQueueFull();return}
   var items=[];
   due.forEach(function(t){items=items.concat(gShuffle(gLvl2(t)).slice(0,2))});
   var queue=gShuffle(items);
-  GS={mode:'rev',revT:due.slice(),queue:queue,i:0,ok:0,done:0,errT:{},startedAt:Date.now(),source:grammarModule.queueSource(queue),helpUsed:false,helpActivities:{},evidence:{}};
+  GS={mode:'rev',revT:due.slice(),queue:queue,i:0,ok:0,done:0,errT:{},startedAt:Date.now(),source:grammarModule.queueSource(queue),helpUsed:false,answerCommitted:false,errorReasons:{},helpActivities:{},evidence:{}};
   gRenderQ()}
 function gProgressLine(){setTxt('g_today',(GS.done)+' / '+GS.queue.length+' в подходе')}
 function gRenderQ(){var area=document.getElementById('g_area');if(!area||!GS)return;gProgressLine();
   var it=GS.queue[GS.i];
   if(!it){gFinish();return}
+  GS.answerCommitted=false;
   var t=it.t||GS.t,tp=G_TOPICS[t];
   var head='<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'
     +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#B54E2F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">'+(GS.mode==='rev'?'ПОВТОРЕНИЕ':(it.k==='c'?'УРОВЕНЬ 1 · ВЫБОР':'УРОВЕНЬ 2 · КАК НА ЕГЭ'))+'</span>'
-    +'<button type="button" class="clk iconbtn" onclick="gTheory('+t+')" style="font-weight:800;font-size:10px;letter-spacing:.6px;color:#1D7F4A;background:#EAF7F0;padding:5px 10px;border-radius:20px;cursor:pointer;">ПРАВИЛО</button></div>';
+    +'<button id="g_rule_btn" type="button" class="clk iconbtn" onclick="gTheory('+t+')" style="font-weight:800;font-size:10px;letter-spacing:.6px;color:#1D7F4A;background:#EAF7F0;padding:5px 10px;border-radius:20px;cursor:pointer;">ПРАВИЛО</button></div>';
   if(it.k==='c'||it.k==='c2'){var q=it.q;
     area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:20px;min-height:150px;">'+wDeco()+head
       +'<div style="font-weight:600;font-size:11px;color:#777163;margin-top:14px;">'+tp.n+'</div>'
@@ -170,7 +214,7 @@ function gRenderQ(){var area=document.getElementById('g_area');if(!area||!GS)ret
       +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="gSubmit()">Проверить</button>'}
   gAnim('win','.32s')}
 function gNorm(v){return grammarModule.normalizeAnswer(v)}
-function gExplain(it,userWrong){var q=it.q,t=it.t||GS.t;gMarkHelp(t);
+function gExplain(it,userWrong){var q=it.q,t=it.t||GS.t;gMarkHelp(t,false);
   var right=it.k==='f'?q.ans[0]:q.o[q.a];
   var sent=it.k==='f'
     ? q.s.replace('_____','<b style="color:#1D7F4A;">'+right+'</b>').replace(/\((?:[A-Z ]+)\)/,'')
@@ -191,7 +235,14 @@ function gExplain(it,userWrong){var q=it.q,t=it.t||GS.t;gMarkHelp(t);
     .then(function(recorded){var slot=document.getElementById('voice_tutor_grammar_practice');if(slot&&recorded)slot.innerHTML=voiceTutorButton(recorded)}).catch(function(){});
   gAnim('wflip','.5s')}
 function gAfterExplain(){GS.i++;gSync();save();gRenderQ()}
-function gAnswer(ok,it){var topic=it.t||GS.t;grammarModule.applyAnswer(gRec(topic),GS,it,ok);
+function gErrorReason(it){var allowed=['construction_choice','word_or_verb_form','auxiliary','agreement','word_order','negation_or_question','confusion_pair'];
+  var candidate=it&&((it.errorSkill)||(it.q&&it.q.errorSkill));if(allowed.includes(candidate))return candidate;
+  return it&&it.k==='f'?'word_or_verb_form':'construction_choice'}
+function gAnswer(ok,it){var topic=it.t||GS.t,type=it.k==='f'?'input':'choice';GS.types=GS.types||{};GS.typeScores=GS.typeScores||{};GS.types[type]=true;
+  GS.answerCommitted=true;var rule=document.getElementById('g_rule_btn');if(rule){rule.disabled=true;rule.setAttribute('aria-disabled','true')}
+  var score=GS.typeScores[type]||(GS.typeScores[type]={correct:0,total:0});score.total++;if(ok)score.correct++;
+  if(!ok){GS.errorReasons=GS.errorReasons||{};GS.errorReasons[topic]=gErrorReason(it)}
+  grammarModule.applyAnswer(gRec(topic),GS,it,ok);
   if(GS.mode==='rev'){var activityId=grammarModule.activityId(topic,'spaced_review');var evidence=GS.evidence[activityId];
     if(!evidence)evidence=GS.evidence[activityId]=gEvidence(activityId,GS.startedAt);
     evidence.helpUsed=Boolean(GS.helpActivities[activityId]);gTrackEvidenceSource(evidence,it);evidence.maxScore++;if(ok)evidence.score++}}
@@ -213,36 +264,53 @@ function gSubmit(){var it=GS.queue[GS.i];if(!it)return;var inp=document.getEleme
   gAnswer(ok,it);
   if(ok){gAnim('wpop','.35s');setTimeout(function(){GS.i++;gSync();save();gRenderQ()},600)}
   else{inp.value=q.ans[0];gAnim('wshake','.42s');setTimeout(function(){gExplain(it,userWrong)},900)}}
-function gFinish(){if(GS&&GS.mode==='rev'){gFinishRev();return}
-  if(GS){GS.evidence.score=GS.ok;GS.evidence.maxScore=GS.done;
-    gReportEvidence(GS.evidence,{mode:'topic_practice',source:GS.source,helpUsed:GS.helpUsed,hintsUsed:0})}
-  var area=document.getElementById('g_area');var r=gRec(GS.t),tp=G_TOPICS[GS.t];
-  var closed=r.st===2;
+async function gFinish(){if(GS&&GS.mode==='rev'){await gFinishRev();return}
+  var finishedSession=GS,result=null;
+  if(finishedSession){finishedSession.evidence.score=finishedSession.ok;finishedSession.evidence.maxScore=finishedSession.done;
+    gReportEvidence(finishedSession.evidence,{mode:'topic_practice',source:finishedSession.source,helpUsed:finishedSession.helpUsed,hintsUsed:0});
+    var completedTypes=Object.keys(finishedSession.types||{});
+    if(completedTypes.length){var current=gRec(finishedSession.t),event={type:'session_completed',id:crypto.randomUUID(),assisted:finishedSession.masteryAssisted,source:finishedSession.source,completedTypes:completedTypes,typeScores:finishedSession.typeScores,...gMasteryExpectation(current)};
+      if(!event.assisted&&finishedSession.errorReasons[finishedSession.t])event.reason=finishedSession.errorReasons[finishedSession.t];result=await gSubmitMasteryEvent(finishedSession.t,event)}}
+  if(GS!==finishedSession)return;
+  var area=document.getElementById('g_area');var r=gRec(finishedSession.t),tp=G_TOPICS[finishedSession.t],view=grammarModule.masteryView(r);
+  var provisional=gMasteryProvisional(result),unsaved=gMasteryUnsaved(result),persistenceLine=gMasteryPersistenceLine(result),stable=!unsaved&&!provisional&&view.stage==='stable';
   area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:24px;">'+wDeco()
     +'<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:14px 0;">'
-    +'<div style="font-size:44px;">'+(closed?'🏆':'💪')+'</div>'
-    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:21px;color:#2B2B2B;margin-top:10px;">'+(closed?'Тема закреплена!':'Подход завершён')+'</div>'
-    +'<div style="font-weight:600;font-size:13.5px;color:#777163;margin-top:8px;line-height:1.5;">'+tp.n+'<br>Верно: '+GS.ok+' из '+GS.done+(closed?'':'<br>Для закрепления — 4 верных ответа уровня 2 подряд')+'</div></div></div>'
+    +'<div style="font-size:44px;">'+(provisional?'⏳':stable?'🏆':'💪')+'</div>'
+    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:21px;color:#2B2B2B;margin-top:10px;">'+(unsaved?'Результат не сохранён':provisional?'Результат ждёт синхронизации':stable?'Навык устойчив!':'Подход завершён')+'</div>'
+    +'<div style="font-weight:600;font-size:13.5px;color:#777163;margin-top:8px;line-height:1.5;">'+tp.n+'<br>Верно: '+finishedSession.ok+' из '+finishedSession.done+'<br>'+(provisional?'СТАТУС ОБНОВИТСЯ ПОСЛЕ СИНХРОНИЗАЦИИ':view.label+' · '+gDateLine(view)+gRegressionLine(view))+(persistenceLine?'<br>'+persistenceLine:'')+(finishedSession.masteryAssisted?'<br>Помощь до ответа использована: подход не повышает стадию':finishedSession.helpUsed?'<br>Разбор ошибки показан после ответа; самостоятельная попытка учтена':'')+'</div></div></div>'
     +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
-    +(closed?'':'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="gStart('+GS.t+')">Ещё подход</button>')
+    +(stable?'':'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="gStart('+finishedSession.t+')">'+(unsaved?'Повторить подход':'Ещё подход')+'</button>')
     +'<button class="sq" style="'+WBTN+'color:#B54E2F;" onclick="gToThemes()">К темам</button></div>';
   gAnim('win','.32s');gSync();save()}
-function gFinishRev(){var area=document.getElementById('g_area');var rows='';
-  var durationMs=Math.max(0,Date.now()-GS.startedAt);
-  grammarModule.reviewEvidenceSlices(GS.evidence,durationMs).forEach(function(evidence){
-    gReportEvidence(evidence,{mode:'spaced_review',source:gEvidenceSource(evidence,GS.source),helpUsed:evidence.helpUsed,hintsUsed:0},evidence.durationMs)});
-  GS.revT.forEach(function(t){var r=gRec(t);var bad=GS.errT[t];
-    if(bad){r.st=1;r.sr=0;r.due=0}
-    else{r.rs=Math.min(2,(r.rs||0)+1);r.due=Date.now()+G_RINT[r.rs]*86400000}
+async function gFinishRev(){var reviewSession=GS,area=document.getElementById('g_area'),rows='',finishedAt=Date.now();
+  if(!reviewSession)return;
+  var durationMs=Math.max(0,finishedAt-reviewSession.startedAt);
+  grammarModule.reviewEvidenceSlices(reviewSession.evidence,durationMs).forEach(function(evidence){
+    gReportEvidence(evidence,{mode:'spaced_review',source:gEvidenceSource(evidence,reviewSession.source),helpUsed:evidence.helpUsed,hintsUsed:0},evidence.durationMs)});
+  var entries=reviewSession.revT.map(function(t){var bad=reviewSession.errT[t],activityId=grammarModule.activityId(t,'spaced_review'),evidence=reviewSession.evidence[activityId],current=gRec(t);
+    var event={type:'review_completed',id:crypto.randomUUID(),passed:!bad,assisted:Boolean(reviewSession.helpActivities[t]||reviewSession.helpActivities[activityId]),source:gEvidenceSource(evidence,reviewSession.source),...gMasteryExpectation(current)};
+    if(bad&&!event.assisted)event.reason=reviewSession.errorReasons[t]||'construction_choice';
+    return{topicId:t,event:event}});
+  var batchResult=await gSubmitMasteryBatch(entries),results=batchResult&&Array.isArray(batchResult.results)?batchResult.results:[];
+  if(GS!==reviewSession)return;
+  var batchProvisional=gMasteryProvisional(batchResult),batchUnsaved=gMasteryUnsaved(batchResult),batchLine=gMasteryPersistenceLine(batchResult);
+  var resultsById=new Map(results.map(function(item){return[item&&item.eventId,item]}));
+  for(let index=0;index<entries.length;index++){var t=entries[index].topicId,bad=reviewSession.errT[t],event=entries[index].event,result=resultsById.get(event.id)||batchResult,r=result&&result.record?result.record:gRec(t),line=gMasteryPersistenceLine(result)||batchLine,provisional=gMasteryProvisional(result)||batchProvisional;
+    var view=grammarModule.masteryView(r,{now:finishedAt});
+    var eventHistory=Array.isArray(r.masteryHistory)&&r.masteryHistory.find(function(item){return item&&item.eventId===event.id});
+    var regressed=Boolean(event.passed===false&&!event.assisted&&result&&(result.applied||result.replay)
+      &&eventHistory&&eventHistory.outcome==='regressed'&&r.lastRegressionReason);
     rows+='<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 2px;border-bottom:1px solid #F4EFE9;">'
-      +'<div style="font-weight:700;font-size:13.5px;color:#2B2B2B;">'+G_TOPICS[t].n+'</div>'
-      +(bad?'<span style="flex:none;font-weight:800;font-size:10px;color:#A56000;background:#FFF4DE;padding:5px 10px;border-radius:20px;">СНОВА В РАБОТЕ</span>'
-           :'<span style="flex:none;font-weight:800;font-size:10px;color:#1D7F4A;background:#EAF7F0;padding:5px 10px;border-radius:20px;">ЧЕРЕЗ '+G_RINT[r.rs]+' ДН.</span>')
-      +'</div>'});
+      +'<div><div style="font-weight:700;font-size:13.5px;color:#2B2B2B;">'+G_TOPICS[t].n+'</div><div style="font-weight:600;font-size:11px;color:#777163;margin-top:4px;">'+(provisional?'СТАТУС ОБНОВИТСЯ ПОСЛЕ СИНХРОНИЗАЦИИ':gDateLine(view))+'</div>'+(provisional?'':gRegressionLine(view))+(line?'<div style="font-weight:700;font-size:11px;color:#A56000;margin-top:4px;">'+line+'</div>':'')+'</div>'
+      +(provisional?'<span style="flex:none;font-weight:800;font-size:10px;color:#A56000;background:#FFF4DE;padding:5px 10px;border-radius:20px;">ОЖИДАЕТ СИНХРОНИЗАЦИИ</span>'
+        :regressed?'<span style="flex:none;font-weight:800;font-size:10px;color:#A56000;background:#FFF4DE;padding:5px 10px;border-radius:20px;">СНОВА В РАБОТЕ</span>'
+           :'<span style="flex:none;font-weight:800;font-size:10px;color:#1D7F4A;background:#EAF7F0;padding:5px 10px;border-radius:20px;">'+view.label.toUpperCase()+'</span>')
+      +'</div>'}
   area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;">'+wDeco()
     +'<div style="text-align:center;"><div style="font-size:42px;">🧠</div>'
-    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:21px;color:#2B2B2B;margin-top:8px;">Повторение завершено</div>'
-    +'<div style="font-weight:600;font-size:13px;color:#777163;margin-top:5px;">Верно: '+GS.ok+' из '+GS.done+'</div></div>'
+    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:21px;color:#2B2B2B;margin-top:8px;">'+(batchUnsaved?'Результат не сохранён':batchProvisional?'Результат ждёт синхронизации':'Повторение завершено')+'</div>'
+    +'<div style="font-weight:600;font-size:13px;color:#777163;margin-top:5px;">Верно: '+reviewSession.ok+' из '+reviewSession.done+'</div></div>'
     +'<div style="margin-top:12px;">'+rows+'</div></div>'
     +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
     +'<button class="sq" style="'+WBTN+'color:#B54E2F;" onclick="gToThemes()">К темам</button></div>';
@@ -289,7 +357,7 @@ function gExamCheck(){if(!EX)return;var ex=EX.ex,evidence=EX.evidence,source=EX.
   ex.gaps.forEach(function(g,i){var inp=document.getElementById('g_ex_'+i);var learnerAnswer=inp?inp.value:'';var val=gNorm(learnerAnswer);
     var ok=g.ans.some(function(a){return gNorm(a)===val});
     if(ok)score++;
-    else{if(g.t){var r=gRec(g.t);r.err++;if(r.st===2)r.due=Date.now()}
+    else{if(g.t){S.gram=S.gram||{};var legacy=S.gram[g.t]||(S.gram[g.t]={st:0,ok:0,err:0,sr:0});legacy.err++;if(legacy.st===2)legacy.due=Date.now()}
       bank.push({module:'grammar',itemKey:'grammar_19_24:'+String(g.b).toLowerCase(),errorType:'incorrect_form',details:{expected:String(g.ans[0])}})}
     var voiceSlot='';
     if(!ok&&g.voice){var slotId='voice_tutor_grammar_'+i;voiceSlot='<div id="'+slotId+'"></div>';voiceErrors.push({slotId:slotId,module:'grammar',itemId:g.voice.id,revision:g.voice.revision,learnerAnswer:learnerAnswer})}

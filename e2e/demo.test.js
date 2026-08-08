@@ -411,28 +411,34 @@ async function runE2E() {
     assert.equal(await authenticatedPage.evaluate(() => window.EasyBoostSync.hasPending()), false);
     console.log('e2e: queued progress synchronized');
     await authenticatedPage.reload({ waitUntil: 'networkidle' });
-    const persisted = await authenticatedPage.evaluate(async () => (await fetch('/api/v1/progress')).json());
+    const persisted = await authenticatedPage.evaluate(async () => {
+      const marker = window.EasyBoostStore.readCurrentOwner();
+      return (await fetch('/api/v1/progress', {
+        headers: { 'X-EasyBoost-Expected-Owner': marker.owner },
+      })).json();
+    });
     assert.equal(persisted.words.known, 1);
     console.log('e2e: progress persisted after reload');
 
     // A local snapshot may support an already-open active session, but it is never permission to
     // start the learning shell when the server cannot confirm access.
     const snapshot = await authenticatedPage.evaluate(() => {
-      const user = localStorage.getItem('eb_current');
-      const state = window.EasyBoostStore.loadLocal(user);
+      const marker = window.EasyBoostStore.readCurrentOwner();
+      const state = window.EasyBoostStore.loadLocal(marker.owner, marker.ownerGeneration);
       state.learned = 42;
       state.prog.words = 63;
       state.prog.read = 55;
       state.streak = 7;
-      window.EasyBoostStore.saveLocal(user, state);
-      return window.EasyBoostStore.loadLocal(user).learned;
+      window.EasyBoostStore.saveLocal(marker.owner, state, marker.ownerGeneration);
+      return window.EasyBoostStore.loadLocal(marker.owner, marker.ownerGeneration).learned;
     });
     assert.equal(snapshot, 42, 'the running app keeps a local snapshot for offline continuity');
     await authenticatedContext.setOffline(true);
     await authenticatedPage.evaluate(() => window.startApp());
     await authenticatedPage.locator('#access_gate[data-state="network-unknown"]').waitFor({ state: 'visible', timeout: 5_000 });
     assert.equal(await authenticatedPage.locator('#scr1.on').count(), 0);
-    assert.equal(await authenticatedPage.evaluate(() => window.EasyBoostStore.loadLocal(localStorage.getItem('eb_current')).learned), 42);
+    assert.equal(await authenticatedPage.evaluate(() => { const marker = window.EasyBoostStore.readCurrentOwner();
+      return window.EasyBoostStore.loadLocal(marker.owner, marker.ownerGeneration).learned; }), 42);
     console.log('e2e: saved progress is not treated as offline access permission');
 
     await authenticatedContext.setOffline(false);
@@ -452,6 +458,17 @@ async function runE2E() {
     await authenticatedPage.getByRole('button', { name: 'Грамматика', exact: true }).press('Enter');
     await authenticatedPage.locator('#scr3.on').waitFor({ state: 'visible', timeout: 5_000 });
     assert.ok(await authenticatedPage.locator('#g_area button').count() >= 1);
+    await authenticatedPage.evaluate(() => {
+      window.S.gram = { 1: { st: 2, ok: 8, err: 1, sr: 4, rs: 0, due: Date.now() + 86_400_000 } };
+      delete window.S.grammarMastery;
+      window.tab('scr1');
+      window.tab('scr3');
+    });
+    const migratedGrammarTopic = authenticatedPage.locator('#g_area button').filter({ hasText: 'Present Simple' }).first();
+    await migratedGrammarTopic.waitFor({ state: 'visible', timeout: 5_000 });
+    assert.match(await migratedGrammarTopic.innerText(), /ИЗУЧЕНО/u);
+    assert.doesNotMatch(await migratedGrammarTopic.innerText(), /ЗАКРЕПЛЕНА/u);
+    assert.equal(await authenticatedPage.evaluate(() => window.S.grammarMastery[1].stage), 'learned');
     console.log('e2e: built-in word and grammar tasks work offline');
     await authenticatedContext.setOffline(false);
     await authenticatedPage.evaluate(() => window.tab('scr1'));
@@ -564,7 +581,7 @@ async function runE2E() {
       return session?.delivery_mode === 'local';
     });
     const voiceEvidence = await authenticatedPage.evaluate(async () => {
-      const recovery = await (await fetch('/api/v1/voice-tutor/recovery-map')).json();
+      const recovery = await (await fetch('/api/v1/voice-tutor/recovery-map', { headers: { 'X-EasyBoost-Expected-Owner': 'e2euser' } })).json();
       const exported = await (await fetch('/api/v1/account/export')).json();
       return {
         recovery,
@@ -627,7 +644,7 @@ async function runE2E() {
       return exported.voice_tutor_sessions?.some((session) => session.proxy_finalization_reason === 'completed');
     });
     const cleanVoiceEvidence = await authenticatedPage.evaluate(async () => {
-      const recovery = await (await fetch('/api/v1/voice-tutor/recovery-map')).json();
+      const recovery = await (await fetch('/api/v1/voice-tutor/recovery-map', { headers: { 'X-EasyBoost-Expected-Owner': 'e2euser' } })).json();
       const exported = await (await fetch('/api/v1/account/export')).json();
       return { recovery, sessions: exported.voice_tutor_sessions };
     });
@@ -669,7 +686,7 @@ async function runE2E() {
         && session?.status === 'completed';
     }, priorVoiceSessionIds);
     const deniedVoiceEvidence = await authenticatedPage.evaluate(async (priorIds) => {
-      const recovery = await (await fetch('/api/v1/voice-tutor/recovery-map')).json();
+      const recovery = await (await fetch('/api/v1/voice-tutor/recovery-map', { headers: { 'X-EasyBoost-Expected-Owner': 'e2euser' } })).json();
       const exported = await (await fetch('/api/v1/account/export')).json();
       return {
         recovery,

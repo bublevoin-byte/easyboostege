@@ -529,7 +529,7 @@ async function withPlanApp(run, { decorateDb, enabled = true } = {}) {
     `http://127.0.0.1:${server.address().port}${pathname}`,
     { ...options, headers: {
       'Content-Type': 'application/json',
-      ...(username ? { 'X-Test-User': username } : {}),
+      ...(username ? { 'X-Test-User': username, 'X-EasyBoost-Expected-Owner': username } : {}),
       ...(options.headers || {}),
     } },
   );

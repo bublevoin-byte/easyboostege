@@ -204,9 +204,11 @@ async function withAdaptiveApp(run, { enabled = true } = {}) {
     `http://127.0.0.1:${server.address().port}${pathname}`,
     {
       ...options,
+      body: pathname === '/api/v1/module-attempts' && options.body
+        ? JSON.stringify({ owner: username, ...JSON.parse(options.body) }) : options.body,
       headers: {
         'Content-Type': 'application/json',
-        ...(username ? { 'X-Test-User': username } : {}),
+        ...(username ? { 'X-Test-User': username, 'X-EasyBoost-Expected-Owner': username } : {}),
         ...(options.headers || {}),
       },
     },
@@ -801,6 +803,50 @@ test('disabled plan rollout keeps the owner-bound evidence overview but no plan 
   }, { enabled: false });
 });
 
+test('adaptive HTTP boundary rejects a shared-cookie owner switch before returning private data', async () => {
+  await withAdaptiveApp(async ({ owner, stranger, request }) => {
+    const rejected = await request(stranger, '/api/v1/adaptive-learning/overview', {
+      headers: { 'X-EasyBoost-Expected-Owner': owner },
+    });
+    assert.equal(rejected.status, 409);
+    assert.equal((await rejected.json()).error.code, 'OWNER_CHANGED');
+
+    const accepted = await request(owner, '/api/v1/adaptive-learning/overview', {
+      headers: { 'X-EasyBoost-Expected-Owner': owner },
+    });
+    assert.equal(accepted.status, 200);
+    assert.equal(accepted.headers.get('x-easyboost-response-owner'), owner);
+  });
+});
+
+test('adaptive owner boundary is required and documented through request and response headers', async () => {
+  const [openapi, middleware, apiClient] = await Promise.all([
+    fs.readFile(new URL('../docs/openapi.yaml', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../middleware/expected-owner.js', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../public/api.js', import.meta.url), 'utf8'),
+  ]);
+  assert.match(openapi, /ExpectedOwner:[\s\S]*name: X-EasyBoost-Expected-Owner[\s\S]*required: true/u);
+  assert.match(openapi, /headers:\s*\n\s+X-EasyBoost-Response-Owner:/u);
+  const ownerBoundPaths = [...openapi.matchAll(/^  (\/api\/v1\/(?:adaptive-learning\/[^:]+|voice-tutor\/(?:recovery-map|repeats\/\{repeatId\}\/attempts))):\s*$/gmu)];
+  assert.equal(ownerBoundPaths.length, 19, 'the exact adaptive and Voice owner-bound route set is documented');
+  for (let index = 0; index < ownerBoundPaths.length; index += 1) {
+    const start = ownerBoundPaths[index].index;
+    const nextPath = openapi.slice(start + 1).search(/^  \/api\/v1\//mu);
+    const end = nextPath < 0 ? openapi.length : start + 1 + nextPath;
+    const section = openapi.slice(start, end);
+    assert.match(section, /#\/components\/parameters\/ExpectedOwner/u,
+      `${ownerBoundPaths[index][1]} must require the captured owner`);
+    const successes = [...section.matchAll(/^        '(?:200|201)':([\s\S]*?)(?=^        '(?:[1-5][0-9]{2}|default)':|^  \/api\/v1\/|(?![\s\S]))/gmu)];
+    for (const success of successes) {
+      assert.match(success[1], /#\/components\/headers\/X-EasyBoost-Response-Owner/u,
+        `${ownerBoundPaths[index][1]} success response must document its authoritative owner`);
+    }
+  }
+  assert.match(middleware, /EXPECTED_OWNER_REQUIRED/u);
+  assert.match(middleware, /X-EasyBoost-Response-Owner/u);
+  assert.match(apiClient, /x-easyboost-response-owner/u);
+});
+
 test('authenticated learner saves an idempotent goal and gets an owner-bound preliminary overview', async () => {
   await withAdaptiveApp(async ({ repository, owner, stranger, request, file }) => {
     assert.equal((await request('', '/api/v1/adaptive-learning/overview')).status, 401);
@@ -950,8 +996,8 @@ test('progress screen contains an accessible current-plan form and renders the s
   assert.match(markup, /<label[^>]*for="adaptive_target_score"/u);
   assert.match(markup, /id="adaptive_exam_date"[^>]*type="date"/u);
   assert.match(markup, /id="adaptive_weekly_minutes"[^>]*step="5"/u);
-  assert.match(screen, /apiGet\('\/api\/v1\/adaptive-learning\/overview'\)/u);
-  assert.match(screen, /apiPut\('\/api\/v1\/adaptive-learning\/goal'/u);
+  assert.match(screen, /apiGet\('\/api\/v1\/adaptive-learning\/overview',adaptiveOwnerHeaders/u);
+  assert.match(screen, /adaptivePut\('\/api\/v1\/adaptive-learning\/goal'/u);
   assert.match(screen, /Idempotency-Key/u);
   assert.match(screen, /profile\.preliminary/u);
   assert.match(screen, /needsDiagnostic/u);

@@ -118,6 +118,12 @@ import {
   speakingCalibrationReviewClaim,
 } from '../speaking/accent-calibration.js';
 import { hashAuthCode, normalizeUsername, normalizeVoiceTutorDeliveryMetadata, normalizeVoiceTutorProxyHash, subscriptionView, VoiceTutorError, voiceTutorAccessView, voiceTutorBillableSeconds, voiceTutorProxyUsage, voiceTutorQuotaPeriods, voiceTutorReservationSeconds } from './shared.js';
+import {
+  hasCanonicalMasteryRecords,
+  migrateLegacyMasteryRecords,
+  migrateMasteryRecords,
+  reduceMastery,
+} from '../public/modules/grammar.js';
 import { transitionPedagogicalState } from '../voice-tutor/state-machine.js';
 import { transitionRuleCardReview } from '../voice-tutor/rule-card.js';
 import {
@@ -212,20 +218,30 @@ export function createPostgresRepository(connectionString, {
   }
 
   async function getProgress(username) {
+    await migrateGrammarMastery(username);
     const result = await pool.query('SELECT data FROM user_progress WHERE username = $1', [username]);
     return result.rows[0]?.data || {};
   }
 
   async function saveProgress(username, data) {
+    const accepted = structuredClone(data || {});
+    delete accepted.grammarMastery;
     await pool.query(
       `INSERT INTO user_progress (username, data, updated_at)
        VALUES ($1, $2::jsonb, NOW())
-       ON CONFLICT (username) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()`,
-      [username, JSON.stringify(data || {})],
+       ON CONFLICT (username) DO UPDATE
+       SET data = EXCLUDED.data || CASE
+         WHEN user_progress.data ? 'grammarMastery'
+           THEN jsonb_build_object('grammarMastery', user_progress.data->'grammarMastery')
+         ELSE '{}'::jsonb END,
+           updated_at = NOW()`,
+      [username, JSON.stringify(accepted)],
     );
   }
 
   async function mergeProgress(username, modules) {
+    const accepted = structuredClone(modules || {});
+    delete accepted.grammarMastery;
     const result = await pool.query(
       `INSERT INTO user_progress (username, data, updated_at)
        VALUES ($1, $2::jsonb, NOW())
@@ -233,9 +249,120 @@ export function createPostgresRepository(connectionString, {
        SET data = COALESCE(user_progress.data, '{}'::jsonb) || EXCLUDED.data,
            updated_at = NOW()
        RETURNING data`,
-      [username, JSON.stringify(modules || {})],
+      [username, JSON.stringify(accepted)],
     );
     return result.rows[0]?.data || {};
+  }
+
+  async function migrateGrammarMastery(username) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+      const [clock, stored] = await Promise.all([
+        client.query('SELECT clock_timestamp() AS now'),
+        client.query('SELECT data FROM user_progress WHERE username = $1 FOR UPDATE', [username]),
+      ]);
+      const progress = stored.rows[0]?.data || {};
+      const canonicalOwnsTruth = hasCanonicalMasteryRecords(progress.grammarMastery);
+      const source = canonicalOwnsTruth ? progress.grammarMastery : progress.gram;
+      if (!source || typeof source !== 'object') {
+        await client.query('COMMIT');
+        return structuredClone(canonicalOwnsTruth ? progress.grammarMastery : {});
+      }
+      const migrated = canonicalOwnsTruth
+        ? migrateMasteryRecords(source, { now: new Date(clock.rows[0].now).getTime() })
+        : migrateLegacyMasteryRecords(source, { now: new Date(clock.rows[0].now).getTime() });
+      if (JSON.stringify(progress.grammarMastery) !== JSON.stringify(migrated)) {
+        await client.query(
+          `INSERT INTO user_progress (username, data, updated_at)
+           VALUES ($1, $2::jsonb, clock_timestamp())
+           ON CONFLICT (username) DO UPDATE
+           SET data = EXCLUDED.data, updated_at = clock_timestamp()`,
+          [username, JSON.stringify({ ...progress, grammarMastery: migrated })],
+        );
+      }
+      await client.query('COMMIT');
+      return migrated;
+    } catch (error) {
+      try { await client.query('ROLLBACK'); } catch {}
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async function applyGrammarMasteryEvents(username, entries) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const lockedOwner = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+      if (!lockedOwner.rowCount) throw new Error('USER_NOT_FOUND');
+      const clock = await client.query('SELECT clock_timestamp() AS now');
+      const stored = await client.query('SELECT data FROM user_progress WHERE username = $1 FOR UPDATE', [username]);
+      const now = new Date(clock.rows[0].now).getTime();
+      const progress = stored.rows[0]?.data || {};
+      const canonicalOwnsTruth = hasCanonicalMasteryRecords(progress.grammarMastery);
+      const source = canonicalOwnsTruth ? progress.grammarMastery : (progress.gram || {});
+      const grammarMastery = canonicalOwnsTruth
+        ? migrateMasteryRecords(source, { now })
+        : migrateLegacyMasteryRecords(source, { now });
+      const authoritativeMastery = structuredClone(grammarMastery);
+      const pendingResults = [];
+      let changed = !canonicalOwnsTruth;
+      for (const { topicId, event } of entries) {
+        const current = grammarMastery[topicId]
+          || migrateMasteryRecords({ [topicId]: {} }, { now })[topicId];
+        const replay = current.recentEventIds.includes(event.id);
+        const record = replay
+          ? current
+          : reduceMastery(current, event, { now, clockAuthority: 'server' });
+        const applied = !replay && record.masteryRevision === current.masteryRevision + 1;
+        if (applied) {
+          grammarMastery[topicId] = record;
+          changed = true;
+        }
+        pendingResults.push({
+          topicId,
+          eventId: event.id,
+          applied,
+          conflict: !applied && !replay,
+          replay,
+          record: applied ? record : current,
+        });
+      }
+      const hasConflict = pendingResults.some((result) => result.conflict);
+      const results = hasConflict
+        ? pendingResults.map(({ topicId, eventId, replay }) => ({
+          eventId,
+          applied: false,
+          conflict: !replay,
+          replay,
+          record: authoritativeMastery[topicId]
+            || migrateMasteryRecords({ [topicId]: {} }, { now })[topicId],
+        }))
+        : pendingResults.map(({ topicId: _topicId, ...result }) => result);
+      if (changed && !hasConflict) {
+        await client.query(
+          `INSERT INTO user_progress (username, data, updated_at)
+           VALUES ($1, $2::jsonb, clock_timestamp())
+           ON CONFLICT (username) DO UPDATE
+           SET data = EXCLUDED.data, updated_at = clock_timestamp()`,
+          [username, JSON.stringify({ ...progress, grammarMastery })],
+        );
+      }
+      await client.query('COMMIT');
+      return results;
+    } catch (error) {
+      try { await client.query('ROLLBACK'); } catch {}
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async function applyGrammarMasteryEvent(username, topicId, event) {
+    return (await applyGrammarMasteryEvents(username, [{ topicId, event }]))[0];
   }
 
   async function getUserByTelegram(telegramId) {
@@ -6092,6 +6219,9 @@ export function createPostgresRepository(connectionString, {
     getProgress,
     saveProgress,
     mergeProgress,
+    migrateGrammarMastery,
+    applyGrammarMasteryEvent,
+    applyGrammarMasteryEvents,
     getUserByTelegram,
     createTelegramUser,
     ensureTelegramUser,

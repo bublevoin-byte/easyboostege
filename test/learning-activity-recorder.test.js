@@ -8,7 +8,8 @@ import { GRAMMAR_CATALOG, validateGeneratedGrammarSupplement } from '../public/g
 const rawSource = await fs.readFile(new URL('../public/learning-activity-recorder.js', import.meta.url), 'utf8');
 const grammarScreenSource = await fs.readFile(new URL('../public/screens/grammar.js', import.meta.url), 'utf8');
 const grammarModuleSource = (await fs.readFile(new URL('../public/modules/grammar.js', import.meta.url), 'utf8'))
-  .replace(/^import .*;\r?\n/mu, '');
+  .replace(/^import .*;\r?\n/mu, '')
+  .replace(/^export /gmu, '');
 const source = rawSource
   .replace(/^import\s*\{[\s\S]*?\}\s*from\s*'\.\/adaptive-session-runtime\.js';\r?\n/mu, '')
   .replace(/^export /gmu, '')
@@ -40,13 +41,16 @@ function recorderHarness(active = null) {
   return { recorder: window.__learningActivityRecorderTest, adaptive, ordinary };
 }
 
-function grammarScreenHarness() {
+function grammarScreenHarness(options = {}) {
   let now = 1_000;
   let active = null;
   let uuid = 40;
   let random = 1;
   const ordinary = [];
   const adaptive = [];
+  const capacityRequests = [];
+  const masteryBatches = [];
+  const masteryEvents = [];
   const elements = new Map();
   const element = (id) => {
     if (!elements.has(id)) {
@@ -66,6 +70,10 @@ function grammarScreenHarness() {
       3: { st: 2, ok: 0, err: 0, sr: 4, due: 1 },
       18: { st: 2, ok: 0, err: 0, sr: 4, due: 1 },
     },
+    grammarMastery: options.grammarMastery || {
+      3: { masteryVersion: 2, masteryRevision: 0, stage: 'learned', reviewStep: 0, eligibleAt: 1 },
+      18: { masteryVersion: 2, masteryRevision: 0, stage: 'learned', reviewStep: 0, eligibleAt: 1 },
+    },
     gramAi: {
       18: [
         { k: 'f', q: { s: 'A _____ (ACT).', b: 'ACT', ans: ['action'], e: '' } },
@@ -81,6 +89,15 @@ function grammarScreenHarness() {
         ordinary.push(JSON.parse(JSON.stringify(attempt)));
         return true;
       },
+      async saveGrammarMasteryEvent(topicId, event) {
+        masteryEvents.push(JSON.parse(JSON.stringify({ topicId, event })));
+        return options.saveGrammarMasteryEvent ? options.saveGrammarMasteryEvent(topicId, event) : false;
+      },
+      async saveGrammarMasteryEvents(entries) {
+        masteryBatches.push(JSON.parse(JSON.stringify(entries)));
+        return options.saveGrammarMasteryEvents ? options.saveGrammarMasteryEvents(entries) : false;
+      },
+      canQueueGrammarMasteryEvent(required = 1) { capacityRequests.push(required); return true; },
     },
   };
   const context = vm.createContext({
@@ -122,6 +139,10 @@ function grammarScreenHarness() {
     .concat(`
       window.__grammarScreenTest={
         gStart:gStart,gReview:gReview,gTheory:gTheory,gResume:gResume,gExamStart:gExamStart,gExamCheck:gExamCheck,
+        finish:gFinish,finishReview:gFinishRev,sessionMode:function(){return GS&&GS.mode},sessionTopic:function(){return GS&&GS.t},
+        masteryAssisted:function(){return Boolean(GS&&GS.masteryAssisted)},masteryStage:function(topic){return gRec(topic).stage},
+        commitCurrentAnswer:function(correct){var item=GS&&GS.queue[GS.i];if(item)gAnswer(correct,item)},
+        ruleDisabled:function(){return Boolean(document.getElementById('g_rule_btn').disabled)},
         currentItem:function(){var item=GS&&GS.queue[GS.i];return item?{topic:item.t||GS.t,kind:item.k}:null},
         answerCurrent:function(correct){var item=GS&&GS.queue[GS.i];if(!item)return;
           if(item.k==='f'){var input=document.getElementById('g_inp');input.dataset={};input.style={};
@@ -138,10 +159,192 @@ function grammarScreenHarness() {
     screen: window.__grammarScreenTest,
     ordinary,
     adaptive,
+    capacityRequests,
+    masteryBatches,
+    masteryEvents,
+    area: element('g_area'),
     advance(milliseconds) { now += milliseconds; },
     setActive(value) { active = value; },
   };
 }
+
+test('automatic post-answer explanation does not retroactively mark independent errors assisted', async () => {
+  const harness = grammarScreenHarness();
+  harness.screen.gStart(3);
+  harness.screen.answerCurrent(false);
+  while (harness.screen.currentItem()) harness.screen.answerCurrent(true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(harness.masteryEvents.length, 1);
+  assert.equal(harness.masteryEvents[0].event.assisted, false);
+  assert.ok(['construction_choice', 'word_or_verb_form', 'auxiliary', 'agreement',
+    'word_order', 'negation_or_question', 'confusion_pair'].includes(harness.masteryEvents[0].event.reason));
+  assert.equal(harness.ordinary[0].metadata.helpUsed, true, 'the automatic explanation stays observable');
+
+  harness.screen.gReview();
+  harness.screen.answerCurrent(false);
+  while (harness.screen.currentItem()) harness.screen.answerCurrent(true);
+  await new Promise((resolve) => setImmediate(resolve));
+  const failed = harness.masteryBatches.at(-1).find((entry) => entry.event.passed === false);
+  assert.equal(failed.event.assisted, false);
+  assert.ok(['construction_choice', 'word_or_verb_form', 'auxiliary', 'agreement',
+    'word_order', 'negation_or_question', 'confusion_pair'].includes(failed.event.reason));
+});
+
+test('a rule click after answer commitment cannot retroactively mark the answer assisted', () => {
+  const harness = grammarScreenHarness();
+  harness.screen.gStart(3);
+  harness.screen.commitCurrentAnswer(true);
+  assert.equal(harness.screen.ruleDisabled(), true);
+  harness.screen.gTheory(3);
+  assert.equal(harness.screen.masteryAssisted(), false);
+});
+
+test('single mastery submission selects its exact event result instead of the first batch sibling', async () => {
+  const harness = grammarScreenHarness({
+    saveGrammarMasteryEvent: async (topicId, event) => ({ results: [
+      { eventId: '00000000-0000-4000-8000-000000009999', applied: true, conflict: false, replay: false,
+        record: { masteryVersion: 2, masteryRevision: 7, stage: 'stable', reviewStep: 5 } },
+      { eventId: event.id, applied: true, conflict: false, replay: false,
+        record: { masteryVersion: 2, masteryRevision: 1, stage: 'confirmed', reviewStep: 1 } },
+    ] }),
+  });
+  harness.screen.gStart(3);
+  while (harness.screen.currentItem()) harness.screen.answerCurrent(true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(harness.screen.masteryStage(3), 'confirmed');
+});
+
+test('an assisted failed review never claims that the topic regressed', async () => {
+  const harness = grammarScreenHarness({
+    saveGrammarMasteryEvents: async (entries) => ({ results: entries.map((entry) => ({
+      eventId: entry.event.id, applied: true, conflict: false, replay: false,
+      record: { masteryVersion: 2, masteryRevision: 1, stage: 'learned', reviewStep: 0,
+        eligibleAt: 1, lastRegressionReason: null },
+    })) }),
+  });
+  harness.screen.gReview();
+  const topic = harness.screen.currentItem().topic;
+  harness.screen.gTheory(topic); harness.screen.gResume(); harness.screen.answerCurrent(false);
+  while (harness.screen.currentItem()) harness.screen.answerCurrent(true);
+  await new Promise((resolve) => setImmediate(resolve));
+  const assistedEvent = harness.masteryBatches[0].find((entry) => entry.event.assisted).event;
+  assert.equal(Object.hasOwn(assistedEvent, 'reason'), false,
+    'assisted evidence cannot claim a specific independent weakness');
+  assert.doesNotMatch(harness.area.innerHTML, /СНОВА В РАБОТЕ/u);
+  assert.match(harness.area.innerHTML, /ИЗУЧЕНО/u);
+});
+
+test('assisted topic errors omit the independent regression reason', async () => {
+  const harness = grammarScreenHarness();
+  harness.screen.gStart(3);
+  harness.screen.gTheory(3); harness.screen.gResume(); harness.screen.answerCurrent(false);
+  while (harness.screen.currentItem()) harness.screen.answerCurrent(true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(harness.masteryEvents[0].event.assisted, true);
+  assert.equal(Object.hasOwn(harness.masteryEvents[0].event, 'reason'), false);
+});
+
+test('an early passed review never reuses an older regression badge', async () => {
+  const harness = grammarScreenHarness({
+    saveGrammarMasteryEvents: async (entries) => ({ results: entries.map((entry) => ({
+      eventId: entry.event.id, applied: true, conflict: false, replay: false,
+      record: { masteryVersion: 2, masteryRevision: 2, stage: 'learned', reviewStep: 0,
+        eligibleAt: 9_999_999, lastRegressionReason: 'auxiliary' },
+    })) }),
+  });
+  harness.screen.gReview();
+  while (harness.screen.currentItem()) harness.screen.answerCurrent(true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.doesNotMatch(harness.area.innerHTML, /СНОВА В РАБОТЕ/u);
+  assert.match(harness.area.innerHTML, /ИЗУЧЕНО/u);
+});
+
+test('Grammar completion explicitly reports typed unsaved results instead of claiming success', async () => {
+  const harness = grammarScreenHarness({
+    saveGrammarMasteryEvent: async () => ({ queued: false, code: 'GRAMMAR_MASTERY_QUEUE_LOCK_UNAVAILABLE' }),
+  });
+  harness.screen.gStart(3);
+  while (harness.screen.currentItem()) harness.screen.answerCurrent(true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(harness.area.innerHTML, /Результат не сохранён/u);
+  assert.match(harness.area.innerHTML, /безопасное сохранение недоступно|повторите/iu);
+  assert.doesNotMatch(harness.area.innerHTML, /Подход завершён/u);
+});
+
+test('an offline queued Grammar error stays provisional instead of reusing the old stable proof', async () => {
+  const harness = grammarScreenHarness({
+    grammarMastery: {
+      3: {
+        masteryVersion: 2, masteryRevision: 5, stage: 'stable', reviewStep: 5,
+        eligibleAt: null, lastRegressionReason: null,
+      },
+    },
+    saveGrammarMasteryEvent: async () => false,
+  });
+  harness.screen.gStart(3);
+  harness.screen.answerCurrent(false);
+  while (harness.screen.currentItem()) harness.screen.answerCurrent(true);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.match(harness.area.innerHTML, /Результат ждёт синхронизации/u);
+  assert.match(harness.area.innerHTML, /СТАТУС ОБНОВИТСЯ ПОСЛЕ СИНХРОНИЗАЦИИ/u);
+  assert.doesNotMatch(harness.area.innerHTML, /Навык устойчив!/u);
+  assert.doesNotMatch(harness.area.innerHTML, /\u{1F3C6}/u);
+});
+
+test('an offline queued Grammar review shows only a provisional status badge', async () => {
+  const harness = grammarScreenHarness({
+    saveGrammarMasteryEvents: async () => false,
+  });
+  harness.screen.gReview();
+  while (harness.screen.currentItem()) harness.screen.answerCurrent(true);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.match(harness.area.innerHTML, /Результат ждёт синхронизации/u);
+  assert.match(harness.area.innerHTML, /ОЖИДАЕТ СИНХРОНИЗАЦИИ/u);
+  assert.doesNotMatch(harness.area.innerHTML, /ИЗУЧЕНО|УСТОЙЧИВО|СНОВА В РАБОТЕ/u);
+});
+
+test('a conflicted Grammar review remains explicitly unsaved instead of claiming completion', async () => {
+  const harness = grammarScreenHarness({
+    saveGrammarMasteryEvents: async (entries) => ({ results: entries.map((entry) => ({
+      eventId: entry.event.id, applied: false, conflict: true, replay: false,
+      record: { masteryVersion: 2, masteryRevision: 2, stage: 'learned', reviewStep: 0, eligibleAt: 1 },
+    })) }),
+  });
+  harness.screen.gReview();
+  while (harness.screen.currentItem()) harness.screen.answerCurrent(true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(harness.area.innerHTML, /Результат не сохранён/u);
+  assert.match(harness.area.innerHTML, /прогресс изменился/iu);
+  assert.doesNotMatch(harness.area.innerHTML, /Повторение завершено/u);
+});
+
+test('a delayed review response cannot render over or clear a replacement Grammar session', async () => {
+  let release;
+  let started;
+  const requested = new Promise((resolve) => { started = resolve; });
+  const harness = grammarScreenHarness({
+    saveGrammarMasteryEvents: async (entries) => {
+      started();
+      await new Promise((resolve) => { release = resolve; });
+      return { results: entries.map((entry) => ({
+        eventId: entry.event.id, applied: true, conflict: false, replay: false,
+        record: { masteryVersion: 2, masteryRevision: 1, stage: 'confirmed', reviewStep: 1 },
+      })) };
+    },
+  });
+  harness.screen.gReview();
+  while (harness.screen.currentItem()) harness.screen.answerCurrent(true);
+  await requested;
+  harness.screen.gStart(3);
+  const replacementMarkup = harness.area.innerHTML;
+  release();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(harness.screen.sessionTopic(), 3);
+  assert.equal(harness.area.innerHTML, replacementMarkup);
+  assert.doesNotMatch(harness.area.innerHTML, /Повторение завершено/u);
+});
 
 test('ordinary completion creates one bounded owner-synced attempt with the supplied stable UUID', async () => {
   const harness = recorderHarness();
@@ -295,6 +498,8 @@ test('grammar topic, mixed review and exam completions emit observable owner-bou
   });
 
   harness.screen.gReview();
+  assert.equal(harness.capacityRequests.at(-1), 2,
+    'the screen reserves one offline event slot for every due topic before review');
   harness.advance(1_001);
   let transformationMistakeMade = false;
   let transformationHelpOpened = false;
@@ -309,7 +514,9 @@ test('grammar topic, mixed review and exam completions emit observable owner-bou
     if (item.topic === 18 && !correct) transformationMistakeMade = true;
     harness.screen.answerCurrent(correct);
   }
-  await Promise.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(harness.masteryBatches.length, 1, 'all due topics use one owner-bound batch submission');
+  assert.equal(harness.masteryBatches[0].length, 2);
   assert.equal(harness.ordinary.length, 3, 'mixed review emits one distinct attempt per skill family');
   const review = harness.ordinary.slice(1).sort((left, right) => left.activity.localeCompare(right.activity));
   assert.deepEqual(review.map(({ activity, score, maxScore, metadata }) => ({ activity, score, maxScore, metadata })), [

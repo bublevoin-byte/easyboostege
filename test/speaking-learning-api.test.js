@@ -14,6 +14,14 @@ import { SPEAKING_TASK2_CATALOG } from '../public/content/speaking/task2-v1.js';
 
 const NOW = new Date('2026-08-07T10:00:00.000Z');
 
+function activePremiumWindow() {
+  const wallClock = Date.now();
+  return {
+    startsAt: new Date(Math.min(NOW.getTime() - 1_000, wallClock - 1_000)),
+    endsAt: new Date(Math.max(NOW.getTime() + 86_400_000, wallClock + 86_400_000)),
+  };
+}
+
 function scoredReview({ allRelevant = false, phonemeLabel = 'ð' } = {}) {
   const semanticFacts = {
     confidence: 0.96, verdict: 'The response can be assessed.', evidence: ['Four direct questions.'], issues: [],
@@ -231,9 +239,7 @@ test('learning report keeps Base analysis and derives Premium expansion from the
     assert.equal(base.attemptTimeline[0].masteryEligible, true);
     assert.equal(base.premium, null);
 
-    await repository.setEntitlement(owner, 'voice_tutor', {
-      startsAt: new Date(NOW.getTime() - 1_000), endsAt: new Date(NOW.getTime() + 86_400_000),
-    });
+    await repository.setEntitlement(owner, 'voice_tutor', activePremiumWindow());
     const premium = await (await request(owner, '/api/v1/speaking/learning-report')).json();
     assert.equal(premium.access.tier, 'premium');
     assert.equal(premium.access.limitSeconds, 14_400);
@@ -356,9 +362,7 @@ test('learning report keeps Base analysis and derives Premium expansion from the
 
 test('manual accent switch rejects the old pointer and scopes the next Premium report and session', async () => {
   await withServer(async ({ repository, owner, request }) => {
-    await repository.setEntitlement(owner, 'voice_tutor', {
-      startsAt: new Date(NOW.getTime() - 1_000), endsAt: new Date(NOW.getTime() + 86_400_000),
-    });
+    await repository.setEntitlement(owner, 'voice_tutor', activePremiumWindow());
     const gbSession = await (await request(owner, '/api/v1/speaking/task-2/sessions', {
       method: 'POST', body: {},
     })).json();
@@ -442,9 +446,7 @@ test('manual accent switch rejects the old pointer and scopes the next Premium r
 
 test('Premium learning-report API exposes an exact pronunciation pointer at a 4/4 official score', async () => {
   await withServer(async ({ repository, owner, request }) => {
-    await repository.setEntitlement(owner, 'voice_tutor', {
-      startsAt: new Date(NOW.getTime() - 1_000), endsAt: new Date(NOW.getTime() + 86_400_000),
-    });
+    await repository.setEntitlement(owner, 'voice_tutor', activePremiumWindow());
     const assigned = await (await request(owner, '/api/v1/speaking/task-2/sessions', {
       method: 'POST', body: {},
     })).json();
@@ -482,9 +484,7 @@ test('Premium learning-report API exposes an exact pronunciation pointer at a 4/
 test('learning report uses one owner-serialized attempts, entitlement and accent snapshot', async () => {
   await withServer(async ({ repository, owner, request }) => {
     assert.equal(typeof repository.getSpeakingLearningReportSnapshot, 'function');
-    await repository.setEntitlement(owner, 'voice_tutor', {
-      startsAt: new Date(NOW.getTime() - 1_000), endsAt: new Date(NOW.getTime() + 86_400_000),
-    });
+    await repository.setEntitlement(owner, 'voice_tutor', activePremiumWindow());
     const session = await (await request(owner, '/api/v1/speaking/task-2/sessions', {
       method: 'POST', body: {},
     })).json();
@@ -533,9 +533,7 @@ test('learning report rechecks Premium at effective time after the owner queue',
   let authorityNow = NOW;
   const hooks = new Map();
   await withServer(async ({ repository, owner, request }) => {
-    await repository.setEntitlement(owner, 'voice_tutor', {
-      startsAt: new Date(NOW.getTime() - 1_000), endsAt: new Date(NOW.getTime() + 86_400_000),
-    });
+    await repository.setEntitlement(owner, 'voice_tutor', activePremiumWindow());
     hooks.set('getSpeakingLearningReportSnapshot', async (original, ...args) => {
       const revokedAt = new Date(NOW.getTime() + 1_000);
       authorityNow = revokedAt;
@@ -585,9 +583,7 @@ test('targeted assignment rechecks Premium at effective time after the owner que
   let authorityNow = NOW;
   const hooks = new Map();
   await withServer(async ({ repository, owner, request }) => {
-    await repository.setEntitlement(owner, 'voice_tutor', {
-      startsAt: new Date(NOW.getTime() - 1_000), endsAt: new Date(NOW.getTime() + 86_400_000),
-    });
+    await repository.setEntitlement(owner, 'voice_tutor', activePremiumWindow());
     const sourceSession = await (await request(owner, '/api/v1/speaking/task-2/sessions', {
       method: 'POST', body: {},
     })).json();
@@ -635,9 +631,7 @@ test('targeted assignment rejects an expired Base subscription after the route p
   let authorityNow = NOW;
   const hooks = new Map();
   await withServer(async ({ repository, owner, request }) => {
-    await repository.setEntitlement(owner, 'voice_tutor', {
-      startsAt: new Date(NOW.getTime() - 1_000), endsAt: new Date(NOW.getTime() + 86_400_000),
-    });
+    await repository.setEntitlement(owner, 'voice_tutor', activePremiumWindow());
     const sourceSession = await (await request(owner, '/api/v1/speaking/task-2/sessions', {
       method: 'POST', body: {},
     })).json();

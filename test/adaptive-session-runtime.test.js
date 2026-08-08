@@ -7,7 +7,7 @@ const rawSource = await fs.readFile(new URL('../public/adaptive-session-runtime.
 const runtimeSource = `${rawSource
   .replace(/^import[\s\S]*?from '[^']+';\r?\n/gmu, '')
   .replaceAll('export ', '')}
-window.__adaptiveRuntimeTest={adaptiveRuntimeSnapshot,clearAdaptiveRuntime,openAdaptivePlan,beginAdaptiveBlock,completeAdaptiveModuleActivity,completeAdaptiveServerAttempt,advanceAdaptiveBreak,finishAdaptiveSession,resumeAdaptiveExecution,adaptiveSessionReplacementAvailable:typeof adaptiveSessionReplacementAvailable==='function'?adaptiveSessionReplacementAvailable:null};`;
+window.__adaptiveRuntimeTest={adaptiveRuntimeSnapshot,clearAdaptiveRuntime,openAdaptivePlan,beginAdaptiveBlock,completeAdaptiveModuleActivity,completeAdaptiveServerAttempt,completeAdaptiveVoiceTutorRepeat,advanceAdaptiveBreak,finishAdaptiveSession,resumeAdaptiveExecution,adaptiveSessionReplacementAvailable:typeof adaptiveSessionReplacementAvailable==='function'?adaptiveSessionReplacementAvailable:null};`;
 
 const SESSION_ID = '10000000-0000-4000-8000-000000000001';
 const BLOCK = {
@@ -24,41 +24,98 @@ const READING_BLOCK = {
   contentRef: 'builtin:reading:task11:b1:v1',
   launch: { kind: 'reading_mode', mode: 'task11', cefr: 'B1' },
 };
+const VOICE_BLOCK = {
+  ...BLOCK, id: 'asb_dddddddddddddddd_01', module: 'speaking', activityId: 'voice_tutor_recovery',
+  contentRef: 'builtin:voice:tutor:recovery', launch: { kind: 'voice_tutor_recovery' },
+};
+const OWNER_RUNTIME_KEY = 'easyboost.adaptive.execution.v1:adaptive-owner:g0';
 
-function runtimeHarness() {
+test('runtime bound transport globally invalidates only its captured owner authority', () => {
+  assert.match(rawSource, /isAuthorityFailure/u);
+  assert.match(rawSource, /EasyBoostAuthority/u);
+  assert.match(rawSource, /owner:state\.owner,ownerGeneration:state\.ownerGeneration/u);
+});
+
+function createRuntimeLockManager() {
+  const calls = [];
+  const tails = new Map();
+  return {
+    calls,
+    idle() { return Promise.all([...tails.values()]); },
+    request(name, _options, callback) {
+      calls.push(name);
+      const prior = tails.get(name) || Promise.resolve();
+      const current = prior.catch(() => {}).then(() => callback({ name }));
+      tails.set(name, current.catch(() => {}));
+      return current;
+    },
+  };
+}
+
+function runtimeHarness({ lockManager = createRuntimeLockManager() } = {}) {
   const values = new Map();
   const requests = [];
+  const syncCalls = [];
   const navigations = [];
+  const launches = [];
   const listeners = new Map();
   const replays = new Map();
   const failAfterCommit = new Set();
+  const terminalFailures = new Map();
+  const deferredRequests = [];
   let startRecoveryAttempt = null;
+  let startClaimSequence = 0;
+  let ownerGeneration = 0;
+  let syncAttemptResult = true;
+  let beforeRuntimeWrite = null;
   let online = true;
   let id = 0;
   const localStorage = {
     getItem: (key) => values.get(key) ?? null,
-    setItem: (key, value) => values.set(key, String(value)),
+    setItem: (key, value) => {
+      if (key === OWNER_RUNTIME_KEY && beforeRuntimeWrite) {
+        const callback = beforeRuntimeWrite; beforeRuntimeWrite = null; callback();
+      }
+      values.set(key, String(value));
+    },
     removeItem: (key) => values.delete(key),
   };
   values.set('eb_current', 'adaptive-owner');
-  const navigator = {};
+  const navigator = { locks: lockManager };
   Object.defineProperty(navigator, 'onLine', { get: () => online });
+  async function waitForDeferred(path) {
+    const index = deferredRequests.findIndex((entry) => path.endsWith(entry.suffix));
+    if (index < 0) return;
+    const [entry] = deferredRequests.splice(index, 1);
+    entry.started();
+    await entry.wait;
+  }
   const api = {
-    async post(path, body) {
-      requests.push({ method: 'POST', path, body });
+    responseOwner(result) { return result && result.owner; },
+    async post(path, body, headers) {
+      requests.push({ method: 'POST', path, body, headers });
       if (!online) throw Object.assign(new Error('offline'), { code: 'NETWORK_ERROR', status: 0 });
-      if (path === '/api/v1/module-attempts') return { id: body.id, created: true };
-      return { created: true };
+      await waitForDeferred(path);
+      const terminalFailure = [...terminalFailures].find(([suffix]) => path.endsWith(suffix));
+      if (terminalFailure) {
+        terminalFailures.delete(terminalFailure[0]);
+        throw Object.assign(new Error(terminalFailure[1].code), terminalFailure[1]);
+      }
+      if (path === '/api/v1/module-attempts') return { owner: values.get('eb_current'), id: body.id, created: true };
+      return { owner: values.get('eb_current'), created: true };
     },
-    async postIdempotent(path, body, key) {
-      requests.push({ method: 'POST_IDEMPOTENT', path, body, key });
+    async postIdempotent(path, body, key, headers) {
+      requests.push({ method: 'POST_IDEMPOTENT', path, body, key, headers });
       if (!online) throw Object.assign(new Error('offline'), { code: 'NETWORK_ERROR', status: 0 });
       const replayId = `${path}:${key}`;
       let result = replays.get(replayId);
       if (!result) {
         if (path.endsWith('/start')) {
           const startedBlock = body.blockId === WRITING_BLOCK.id
-            ? WRITING_BLOCK : (body.blockId === READING_BLOCK.id ? READING_BLOCK : BLOCK);
+            ? WRITING_BLOCK : (body.blockId === READING_BLOCK.id
+              ? READING_BLOCK : (body.blockId === VOICE_BLOCK.id ? VOICE_BLOCK : BLOCK));
+          const claimCharacter = String.fromCharCode(97 + startClaimSequence % 20);
+          startClaimSequence += 1;
           result = startRecoveryAttempt ? {
             block: startedBlock, launch: startedBlock.launch,
             evidenceContext: 'planned_practice', execution: { revision: 1 },
@@ -66,7 +123,7 @@ function runtimeHarness() {
           } : {
             block: startedBlock, launch: startedBlock.launch,
             evidenceContext: startedBlock.module === 'writing' ? 'ai_assisted_review' : 'planned_practice',
-            execution: { revision: 1 }, executionClaim: 'a'.repeat(43),
+            execution: { revision: 1 }, executionClaim: claimCharacter.repeat(43),
             claimExpiresAt: new Date(Date.now() + 60_000).toISOString(),
           };
         } else if (path.endsWith('/finish')) result = {
@@ -97,11 +154,34 @@ function runtimeHarness() {
         failAfterCommit.delete(matchingFailure);
         throw Object.assign(new Error('response lost'), { code: 'NETWORK_ERROR', status: 0 });
       }
-      return result;
+      await waitForDeferred(path);
+      return { owner: values.get('eb_current'), ...result };
     },
   };
   const window = {
     EasyBoostApi: api,
+    EasyBoostOwnerIncarnation: {
+      clearMatchingStorage(owner, key, matcher) {
+        return lockManager.request(`easyboost-owner-incarnation:${owner}`, { mode: 'exclusive' }, () => {
+          const raw = localStorage.getItem(key); if (!raw) return true;
+          if (matcher(raw) !== true) return false; localStorage.removeItem(key); return true;
+        });
+      },
+    },
+    EasyBoostSync: {
+      ownerBoundGeneration(owner) { return owner === values.get('eb_current') ? ownerGeneration : null; },
+      ownerAuthSnapshot(owner) { return { ownerGeneration, deleted: owner !== values.get('eb_current') }; },
+      async withOwnerIncarnationLock(guard, action) {
+        return lockManager.request(`easyboost-owner-incarnation:${guard.owner}`, { mode: 'exclusive' },
+          () => action(Symbol('owner-incarnation-lock')));
+      },
+      async saveModuleAttempt(payload, guard) {
+        syncCalls.push({ payload, guard });
+        if (!online) return false;
+        requests.push({ method: 'SYNC_ATTEMPT', path: '/api/v1/module-attempts', body: { ...payload, owner: guard.owner } });
+        return syncAttemptResult;
+      },
+    },
     dispatchEvent() {},
     addEventListener: (type, listener) => listeners.set(type, listener),
   };
@@ -109,18 +189,142 @@ function runtimeHarness() {
     window, localStorage, navigator, console,
     CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init?.detail; } },
     nav: (screen) => navigations.push(screen),
-    launchAdaptiveActivity: async () => true,
+    launchAdaptiveActivity: async (descriptor, _contentRef, authorityCurrent) => {
+      if (authorityCurrent && authorityCurrent() !== true) return false;
+      launches.push(descriptor); return true;
+    },
     crypto: { randomUUID: () => `00000000-0000-4000-8000-${String(++id).padStart(12, '0')}` },
     Date, JSON, Math, Number, String, Boolean, Object, Array, Promise, RegExp, Error,
   });
   return {
-    runtime: window.__adaptiveRuntimeTest, requests, navigations, values,
+    runtime: window.__adaptiveRuntimeTest, requests, syncCalls, navigations, launches, values, lockManager,
     setOnline(value) { online = value; },
     setOwner(value) { if(value==null)values.delete('eb_current');else values.set('eb_current',value); },
+    setOwnerGeneration(value) { ownerGeneration = value; },
+    setSyncAttemptResult(value) { syncAttemptResult = value; },
+    deferOnce(pathSuffix) {
+      let started;
+      let release;
+      const startedPromise = new Promise((resolve) => { started = resolve; });
+      const wait = new Promise((resolve) => { release = resolve; });
+      deferredRequests.push({ suffix: pathSuffix, started, wait });
+      return { started: startedPromise, release };
+    },
     recoverStartWith(attempt) { startRecoveryAttempt = attempt; },
     failAfterCommitOnce(pathSuffix) { failAfterCommit.add(pathSuffix); },
+    rejectPostOnce(pathSuffix, error) { terminalFailures.set(pathSuffix, error); },
+    beforeRuntimeWriteOnce(callback) { beforeRuntimeWrite = callback; },
+    drainLocks() { return lockManager.idle(); },
   };
 }
+
+test('every adaptive operation is serialized by the owner runtime lock and launch receives an authority guard', async () => {
+  const harness = runtimeHarness();
+  await harness.runtime.beginAdaptiveBlock({ id: SESSION_ID }, BLOCK, { revision: 0 });
+  assert.deepEqual(harness.lockManager.calls, [
+    'easyboost-owner-incarnation:adaptive-owner',
+    'easyboost-adaptive-runtime:adaptive-owner:0',
+  ]);
+  assert.match(rawSource, /locks\.request\('easyboost-adaptive-runtime:'/u);
+  assert.match(rawSource, /launchAdaptiveActivity\([^;]+runtimeAuthorityCurrent/u);
+});
+
+test('every adaptive runtime request sends and verifies the exact owner contract', async () => {
+  const harness = runtimeHarness();
+  await harness.runtime.beginAdaptiveBlock({ id: SESSION_ID }, BLOCK, { revision: 0 });
+  await harness.runtime.completeAdaptiveModuleActivity({
+    module: 'grammar', activityId: 'grammar_forms_topic_3', score: 5, maxScore: 5,
+  });
+  const runtimeRequests = harness.requests.filter((item) => item.method !== 'SYNC_ATTEMPT');
+  assert.ok(runtimeRequests.length >= 2);
+  for (const request of runtimeRequests) {
+    assert.equal(request.headers?.['X-EasyBoost-Expected-Owner'], 'adaptive-owner');
+  }
+  assert.match(rawSource, /api\(\)\.responseOwner\(result\)!==state\.owner/u);
+});
+
+test('generation-zero runtime storage is partitioned by owner and the singleton is migration-only', async () => {
+  const harness = runtimeHarness();
+  await harness.runtime.beginAdaptiveBlock({ id: SESSION_ID }, BLOCK, { revision: 0 });
+  assert.equal(harness.values.has(OWNER_RUNTIME_KEY), true);
+  assert.equal(harness.values.has('easyboost.adaptive.execution.v1'), false);
+  harness.setOwner('second-owner');
+  await harness.runtime.beginAdaptiveBlock({ id: SESSION_ID }, BLOCK, { revision: 0 });
+  assert.equal(harness.values.has('easyboost.adaptive.execution.v1:second-owner:g0'), true);
+  assert.equal(harness.values.has(OWNER_RUNTIME_KEY), true);
+});
+
+test('a runtime created while its first request is pending keeps later writes under the same atomic lock', async () => {
+  const harness = runtimeHarness();
+  const deferred = harness.deferOnce('/start');
+  const first = harness.runtime.beginAdaptiveBlock({ id: SESSION_ID }, BLOCK, { revision: 0 });
+  await deferred.started;
+  const second = harness.runtime.beginAdaptiveBlock({ id: SESSION_ID }, BLOCK, { revision: 0 });
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.equal(harness.requests.filter((item) => item.path.endsWith('/start')).length, 1,
+    'the second tab must wait even after the first tab creates a runtimeId');
+  assert.deepEqual(harness.lockManager.calls, [
+    'easyboost-owner-incarnation:adaptive-owner',
+    'easyboost-adaptive-runtime:adaptive-owner:0',
+    'easyboost-owner-incarnation:adaptive-owner',
+  ]);
+
+  deferred.release();
+  assert.deepEqual(await Promise.all([first, second]), [true, true]);
+  assert.equal(harness.requests.filter((item) => item.path.endsWith('/start')).length, 1);
+  assert.equal(harness.lockManager.calls.at(-1), 'easyboost-adaptive-runtime:adaptive-owner:0');
+});
+
+test('a deletion between adaptive CAS and localStorage commit cannot resurrect the old envelope', async () => {
+  const harness = runtimeHarness();
+  await harness.runtime.beginAdaptiveBlock({ id: SESSION_ID }, BLOCK, { revision: 0 });
+  harness.setOnline(false);
+  harness.beforeRuntimeWriteOnce(() => {
+    harness.setOwnerGeneration(1);
+    harness.values.delete(OWNER_RUNTIME_KEY);
+  });
+
+  await assert.rejects(
+    harness.runtime.completeAdaptiveModuleActivity({
+      module: 'grammar', activityId: 'grammar_forms_topic_3', score: 4, maxScore: 5,
+    }),
+    (error) => error?.code === 'OWNER_CHANGED',
+  );
+  assert.equal(harness.values.has(OWNER_RUNTIME_KEY), false);
+});
+
+test('old-incarnation cleanup cannot remove a newer adaptive runtime envelope', async () => {
+  const harness = runtimeHarness();
+  await harness.runtime.beginAdaptiveBlock({ id: SESSION_ID }, BLOCK, { revision: 0 });
+  const current = JSON.parse(harness.values.get(OWNER_RUNTIME_KEY));
+  const revived = { ...current, ownerGeneration: 1, revision: current.revision + 1 };
+  const revivedKey = 'easyboost.adaptive.execution.v1:adaptive-owner:g1';
+  harness.values.set(revivedKey, JSON.stringify(revived));
+  assert.equal(await harness.runtime.clearAdaptiveRuntime({ owner: 'adaptive-owner', ownerGeneration: 0 }), true);
+  assert.deepEqual(JSON.parse(harness.values.get(revivedKey)), revived);
+  assert.equal(await harness.runtime.clearAdaptiveRuntime({
+    owner: 'adaptive-owner', ownerGeneration: 1, runtimeId: revived.runtimeId, revision: revived.revision,
+  }), true);
+  assert.equal(harness.values.has(revivedKey), false);
+});
+
+test('legacy runtime cleanup treats missing generation as zero and snapshot migration never writes unlocked', async () => {
+  const harness = runtimeHarness();
+  const legacy = {
+    version: 3, owner: 'adaptive-owner', savedAt: Date.now(),
+    active: null, control: null, lastResult: null,
+  };
+  const raw = JSON.stringify(legacy);
+  harness.values.set('easyboost.adaptive.execution.v1', raw);
+  const snapshot = harness.runtime.adaptiveRuntimeSnapshot();
+  assert.equal(snapshot.ownerGeneration, 0);
+  assert.equal(harness.values.get('easyboost.adaptive.execution.v1'), raw,
+    'v3 is projected in memory and migrates only later inside the owner/runtime lock');
+  assert.equal(await harness.runtime.clearAdaptiveRuntime({ owner: 'adaptive-owner', ownerGeneration: 0 }), true);
+  assert.equal(harness.values.has('easyboost.adaptive.execution.v1'), false);
+});
 
 test('offline completion stays pending and is never displayed as a completed adaptive block', async () => {
   const harness = runtimeHarness();
@@ -181,13 +385,120 @@ test('the exact queued attempt flushes before advance and returns to the plan on
   const attemptRequest = harness.requests.find((item) => item.path === '/api/v1/module-attempts');
   const advanceRequest = harness.requests.find((item) => item.path.endsWith('/advance'));
   assert.equal(attemptRequest.body.id, attemptId);
+  assert.equal(attemptRequest.method, 'SYNC_ATTEMPT', 'adaptive evidence uses the incarnation-bound durable sync seam');
+  assert.equal(attemptRequest.body.owner, 'adaptive-owner');
+  assert.deepEqual(JSON.parse(JSON.stringify(harness.syncCalls[0].guard)), { owner: 'adaptive-owner', ownerGeneration: 0 });
   assert.equal(JSON.stringify(advanceRequest.body.attempt), JSON.stringify({ type: 'module', id: attemptId }));
   assert.equal(result.execution.readyToFinish, true);
   assert.equal(harness.runtime.adaptiveRuntimeSnapshot().active, null);
   assert.equal(JSON.stringify(harness.navigations), JSON.stringify(['scr10']));
 });
 
-test('tampered local handoff is discarded before any request is sent', () => {
+test('a recreated same-name owner cannot resume an adaptive claim from an older incarnation', async () => {
+  const harness = runtimeHarness();
+  await harness.runtime.beginAdaptiveBlock({ id: SESSION_ID }, BLOCK, { revision: 0 });
+  harness.setOnline(false);
+  await harness.runtime.completeAdaptiveModuleActivity({
+    module: 'grammar', activityId: 'grammar_forms_topic_3', score: 4, maxScore: 5,
+  });
+  assert.equal(harness.runtime.adaptiveRuntimeSnapshot().active.pending.phase, 'attempt');
+
+  harness.setOwnerGeneration(1);
+
+  assert.equal(harness.runtime.adaptiveRuntimeSnapshot().active, null);
+  await harness.drainLocks();
+  assert.equal(harness.values.has(OWNER_RUNTIME_KEY), true,
+    'the old generation partition is inaccessible and is removed by the serialized deletion purge');
+});
+
+test('a stale start response cannot overwrite or launch a recreated same-name runtime', async () => {
+  const harness = runtimeHarness();
+  const deferred = harness.deferOnce('/start');
+  const staleStart = harness.runtime.beginAdaptiveBlock({ id: SESSION_ID }, BLOCK, { revision: 0 });
+  const staleOutcome = staleStart.then((value) => value, (error) => error);
+  await deferred.started;
+
+  harness.setOwnerGeneration(1);
+  const freshStart = harness.runtime.beginAdaptiveBlock({ id: SESSION_ID }, BLOCK, { revision: 0 });
+  deferred.release();
+  const staleError = await staleOutcome;
+  assert.equal(staleError.code, 'OWNER_CHANGED');
+  await freshStart;
+  const fresh = harness.runtime.adaptiveRuntimeSnapshot();
+  assert.equal(fresh.ownerGeneration, 1);
+  assert.equal(fresh.active.executionClaim, 'b'.repeat(43));
+  assert.equal(harness.launches.length, 1);
+
+  const preserved = harness.runtime.adaptiveRuntimeSnapshot();
+  assert.equal(preserved.ownerGeneration, 1);
+  assert.equal(preserved.active.executionClaim, 'b'.repeat(43));
+  assert.equal(harness.launches.length, 1, 'the stale launch is never opened');
+});
+
+test('a stale advance response cannot publish or clear a newer incarnation result', async () => {
+  const harness = runtimeHarness();
+  await harness.runtime.beginAdaptiveBlock({ id: SESSION_ID }, BLOCK, { revision: 0 });
+  const deferred = harness.deferOnce('/advance');
+  const staleCompletion = harness.runtime.completeAdaptiveModuleActivity({
+    module: 'grammar', activityId: 'grammar_forms_topic_3', score: 4, maxScore: 5,
+  });
+  const staleOutcome = staleCompletion.then((value) => value, (error) => error);
+  await deferred.started;
+
+  harness.setOwnerGeneration(1);
+  const freshStart = harness.runtime.beginAdaptiveBlock({ id: SESSION_ID }, BLOCK, { revision: 0 });
+  deferred.release();
+  const staleError = await staleOutcome;
+  assert.equal(staleError.code, 'OWNER_CHANGED');
+  await freshStart;
+  const fresh = harness.runtime.adaptiveRuntimeSnapshot();
+  assert.equal(fresh.ownerGeneration, 1);
+  assert.equal(fresh.active.executionClaim, 'b'.repeat(43));
+
+  const preserved = harness.runtime.adaptiveRuntimeSnapshot();
+  assert.equal(preserved.ownerGeneration, 1);
+  assert.equal(preserved.active.executionClaim, 'b'.repeat(43));
+  assert.equal(preserved.lastResult, null);
+  assert.equal(harness.navigations.length, 0, 'a stale completion cannot navigate the new owner');
+});
+
+test('a terminal adaptive attempt rejection is surfaced once and clears the unrecoverable claim', async () => {
+  const harness = runtimeHarness();
+  await harness.runtime.beginAdaptiveBlock({ id: SESSION_ID }, BLOCK, { revision: 0 });
+  harness.setSyncAttemptResult({ status: 'terminal_rejected', code: 'ADAPTIVE_EXECUTION_CLAIM_EXPIRED' });
+
+  await assert.rejects(
+    harness.runtime.completeAdaptiveModuleActivity({
+      module: 'grammar', activityId: 'grammar_forms_topic_3', score: 4, maxScore: 5,
+    }),
+    (error) => error?.code === 'ADAPTIVE_EXECUTION_CLAIM_EXPIRED',
+  );
+  assert.equal(harness.runtime.adaptiveRuntimeSnapshot().active, null);
+  assert.equal(harness.syncCalls.length, 1);
+  assert.equal(await harness.runtime.resumeAdaptiveExecution(), false);
+  assert.equal(harness.syncCalls.length, 1, 'terminal evidence is not requeued forever');
+});
+
+test('an expired initial Voice Tutor repeat claim is cleared once instead of retrying forever', async () => {
+  const harness = runtimeHarness();
+  await harness.runtime.beginAdaptiveBlock({ id: SESSION_ID }, VOICE_BLOCK, { revision: 0 });
+  harness.rejectPostOnce('/attempts', { code: 'ADAPTIVE_EXECUTION_CLAIM_EXPIRED', status: 410 });
+  const payload = {
+    repeatId: '20000000-0000-4000-8000-000000000001',
+    taskId: 'voice-repeat-task-1', answer: 'was built',
+    attemptId: '30000000-0000-4000-8000-000000000001',
+  };
+
+  await assert.rejects(
+    harness.runtime.completeAdaptiveVoiceTutorRepeat(payload),
+    (error) => error?.code === 'ADAPTIVE_EXECUTION_CLAIM_EXPIRED',
+  );
+  assert.equal(harness.runtime.adaptiveRuntimeSnapshot().active, null);
+  assert.equal(await harness.runtime.completeAdaptiveVoiceTutorRepeat(payload), false);
+  assert.equal(harness.requests.filter((item) => item.path.endsWith('/attempts')).length, 1);
+});
+
+test('tampered local handoff is discarded before any request is sent', async () => {
   const harness = runtimeHarness();
   harness.values.set('easyboost.adaptive.execution.v1', JSON.stringify({
     version: 3, owner: 'adaptive-owner', savedAt: Date.now(), active: {
@@ -195,11 +506,12 @@ test('tampered local handoff is discarded before any request is sent', () => {
     }, control: null, lastResult: null,
   }));
   assert.equal(harness.runtime.adaptiveRuntimeSnapshot().active, null);
+  await harness.drainLocks();
   assert.equal(harness.values.has('easyboost.adaptive.execution.v1'), false);
   assert.equal(harness.requests.length, 0);
 });
 
-test('a superficially valid handoff with a cross-activity pending payload is discarded', () => {
+test('a superficially valid handoff with a cross-activity pending payload is discarded', async () => {
   const harness = runtimeHarness();
   const savedAt = Date.now();
   harness.values.set('easyboost.adaptive.execution.v1', JSON.stringify({
@@ -221,6 +533,7 @@ test('a superficially valid handoff with a cross-activity pending payload is dis
     }, control: null, lastResult: null,
   }));
   assert.equal(harness.runtime.adaptiveRuntimeSnapshot().active, null);
+  await harness.drainLocks();
   assert.equal(harness.values.has('easyboost.adaptive.execution.v1'), false);
   assert.equal(harness.requests.length, 0);
 });
@@ -352,7 +665,8 @@ test('runtime is owner-bound and cannot resume or render after an account switch
   const requestCount = harness.requests.length;
   harness.setOwner('different-owner');
   assert.equal(harness.runtime.adaptiveRuntimeSnapshot().active, null);
-  assert.equal(harness.values.has('easyboost.adaptive.execution.v1'), false);
+  assert.equal(harness.values.has(OWNER_RUNTIME_KEY), true,
+    'switching owners cannot destroy another owner\'s shared runtime envelope');
   assert.equal(await harness.runtime.resumeAdaptiveExecution(), false);
   assert.equal(harness.requests.length, requestCount);
 });
@@ -360,8 +674,8 @@ test('runtime is owner-bound and cannot resume or render after an account switch
 test('clearing the runtime removes pending claims and the last result', async () => {
   const harness = runtimeHarness();
   await harness.runtime.beginAdaptiveBlock({ id: SESSION_ID }, BLOCK, { revision: 0 });
-  harness.runtime.clearAdaptiveRuntime();
-  assert.equal(harness.values.has('easyboost.adaptive.execution.v1'), false);
+  await harness.runtime.clearAdaptiveRuntime();
+  assert.equal(harness.values.has(OWNER_RUNTIME_KEY), false);
   assert.equal(harness.runtime.adaptiveRuntimeSnapshot().active, null);
 });
 

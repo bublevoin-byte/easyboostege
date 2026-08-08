@@ -96,12 +96,14 @@ async function openProgress(page) {
 
 async function replayPublicRequest(page, pathName, key, body) {
   return page.evaluate(async ({ requestPath, idempotencyKey, payload }) => {
+    const marker = window.EasyBoostStore.readCurrentOwner();
     const response = await fetch(requestPath, {
       method: 'POST',
       credentials: 'same-origin',
       headers: {
         'Content-Type': 'application/json',
         'Idempotency-Key': idempotencyKey,
+        'X-EasyBoost-Expected-Owner': marker.owner,
       },
       body: JSON.stringify(payload),
     });
@@ -111,14 +113,18 @@ async function replayPublicRequest(page, pathName, key, body) {
 
 async function browserApiRequest(page, pathName, { method = 'GET', key = null, body = null } = {}) {
   return page.evaluate(async ({ requestPath, requestMethod, idempotencyKey, payload }) => {
-    const headers = {};
+    const marker = window.EasyBoostStore.readCurrentOwner();
+    const headers = { 'X-EasyBoost-Expected-Owner': marker.owner };
     if (payload !== null) headers['Content-Type'] = 'application/json';
     if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
+    const requestPayload = requestPath === '/api/v1/module-attempts' && payload !== null
+      ? { ...payload, owner: marker.owner }
+      : payload;
     const response = await fetch(requestPath, {
       method: requestMethod,
       credentials: 'same-origin',
       headers,
-      ...(payload === null ? {} : { body: JSON.stringify(payload) }),
+      ...(requestPayload === null ? {} : { body: JSON.stringify(requestPayload) }),
     });
     return { status: response.status, body: await response.json() };
   }, {
@@ -771,33 +777,20 @@ async function runAdaptiveDiagnosticE2E() {
     assert.equal(await page.locator('#adaptive_diagnostic_form').isHidden(), true);
     assert.equal(await startButton.isHidden(), true);
 
-    const current = await page.evaluate(async () => {
-      const response = await fetch('/api/v1/adaptive-learning/diagnostics/current');
-      return { status: response.status, body: await response.json() };
-    });
+    const current = await browserApiRequest(page, '/api/v1/adaptive-learning/diagnostics/current');
     assert.equal(current.status, 200);
     assert.deepEqual(current.body, { diagnostic: null, item: null });
-    const currentPlan = await page.evaluate(async () => {
-      const response = await fetch('/api/v1/adaptive-learning/plan');
-      return { status: response.status, body: await response.json() };
-    });
+    const currentPlan = await browserApiRequest(page, '/api/v1/adaptive-learning/plan');
     assert.equal(currentPlan.status, 200);
     assert.equal(currentPlan.body.plan.revision, 2);
     assert.ok(currentPlan.body.plan.profileEvidenceSourceCount >= 10);
     assert.equal(await page.locator('#adaptive_forecast').isVisible(), true);
-    const lowBudgetGoal = await page.evaluate(async () => {
-      const response = await fetch('/api/v1/adaptive-learning/goal', {
-        method: 'PUT',
-        credentials: 'same-origin',
-        headers: {
-          'Content-Type': 'application/json',
-          'Idempotency-Key': 'adaptive-e2e-low-budget-goal-01',
-        },
-        body: JSON.stringify({
-          targetExam: 'ege_english', targetScore: 85, examDate: '2027-06-01', weeklyMinutes: 30,
-        }),
-      });
-      return { status: response.status, body: await response.json() };
+    const lowBudgetGoal = await browserApiRequest(page, '/api/v1/adaptive-learning/goal', {
+      method: 'PUT',
+      key: 'adaptive-e2e-low-budget-goal-01',
+      body: {
+        targetExam: 'ege_english', targetScore: 85, examDate: '2027-06-01', weeklyMinutes: 30,
+      },
     });
     assert.equal(lowBudgetGoal.status, 201);
     assert.equal(lowBudgetGoal.body.goal.weeklyMinutes, 30);
@@ -810,6 +803,7 @@ async function runAdaptiveDiagnosticE2E() {
       choice.type === 'adjust_target_score'
     )), true);
     const vocabularyGap = await page.evaluate(async () => {
+      const marker = window.EasyBoostStore.readCurrentOwner();
       const responses = [];
       const activities = [
         ['vocabulary', 'vocabulary_lexical_choice_topic_1', 0],
@@ -821,32 +815,31 @@ async function runAdaptiveDiagnosticE2E() {
       for (const [module, activity, score] of activities) for (let index = 0; index < 3; index += 1) {
         const response = await fetch('/api/v1/module-attempts', {
           method: 'POST', credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'X-EasyBoost-Expected-Owner': marker.owner,
+          },
           body: JSON.stringify({
-            id: crypto.randomUUID(), module, activity, score, maxScore: 1,
+            id: crypto.randomUUID(), owner: marker.owner, module, activity, score, maxScore: 1,
           }),
         });
         responses.push(response.status);
       }
-      const plan = await fetch('/api/v1/adaptive-learning/plan', { credentials: 'same-origin' });
+      const plan = await fetch('/api/v1/adaptive-learning/plan', {
+        credentials: 'same-origin', headers: { 'X-EasyBoost-Expected-Owner': marker.owner },
+      });
       return { responses, status: plan.status, body: await plan.json() };
     });
     assert.equal(vocabularyGap.responses.length, 21);
     assert.equal(vocabularyGap.responses.every((status) => status === 201), true);
     assert.equal(vocabularyGap.status, 200);
     assert.equal(vocabularyGap.body.plan.revision, 4);
-    const resetAllocation = await page.evaluate(async () => {
-      const response = await fetch('/api/v1/adaptive-learning/goal', {
-        method: 'PUT', credentials: 'same-origin',
-        headers: {
-          'Content-Type': 'application/json',
-          'Idempotency-Key': 'adaptive-e2e-evidence-reset-goal-01',
-        },
-        body: JSON.stringify({
-          targetExam: 'ege_english', targetScore: 85, examDate: '2027-06-01', weeklyMinutes: 35,
-        }),
-      });
-      return { status: response.status, body: await response.json() };
+    const resetAllocation = await browserApiRequest(page, '/api/v1/adaptive-learning/goal', {
+      method: 'PUT',
+      key: 'adaptive-e2e-evidence-reset-goal-01',
+      body: {
+        targetExam: 'ege_english', targetScore: 85, examDate: '2027-06-01', weeklyMinutes: 35,
+      },
     });
     assert.equal(resetAllocation.status, 201);
     assert.equal(resetAllocation.body.plan.revision, 5);
@@ -924,9 +917,8 @@ async function runAdaptiveDiagnosticE2E() {
       kind: firstActivity.launch.kind,
       contentRef: firstActivity.contentRef,
     }, { timeout: 5_000 });
-    const activeHandoff = await page.evaluate(() => (
-      JSON.parse(localStorage.getItem('easyboost.adaptive.execution.v1')).active
-    ));
+    const activeHandoff = await page.evaluate(() => { const marker=window.EasyBoostStore.readCurrentOwner();
+      return JSON.parse(localStorage.getItem('easyboost.adaptive.execution.v1:'+encodeURIComponent(marker.owner)+':g'+marker.ownerGeneration)).active });
     assert.equal(activeHandoff.module, firstActivity.module);
     assert.equal(activeHandoff.activityId, firstActivity.activityId);
     assert.equal(activeHandoff.pending, null);
@@ -980,8 +972,8 @@ async function runAdaptiveDiagnosticE2E() {
     const attemptResponse = await attemptResponsePromise;
     if (!attemptResponse) {
       const probe = await page.evaluate(async () => {
-        const raw = localStorage.getItem('easyboost.adaptive.execution.v1');
-        const current = await fetch('/api/v1/adaptive-learning/sessions/current');
+        const marker=window.EasyBoostStore.readCurrentOwner();const raw=localStorage.getItem('easyboost.adaptive.execution.v1:'+encodeURIComponent(marker.owner)+':g'+marker.ownerGeneration);
+        const current = await fetch('/api/v1/adaptive-learning/sessions/current',{headers:{'X-EasyBoost-Expected-Owner':marker.owner}});
         return { raw, currentStatus: current.status, current: await current.json() };
       });
       assert.fail(`adaptive attempt was not sent: ${JSON.stringify({ firstActivity, probe })}`);
@@ -1003,9 +995,8 @@ async function runAdaptiveDiagnosticE2E() {
       state: 'visible', timeout: 5_000,
     });
     assert.match(await page.locator('#adaptive_session_notice').innerText(), /новых доказательств: 1/u);
-    assert.equal(await page.evaluate(() => (
-      JSON.parse(localStorage.getItem('easyboost.adaptive.execution.v1')).active
-    )), null);
+    assert.equal(await page.evaluate(() => { const marker=window.EasyBoostStore.readCurrentOwner();
+      return JSON.parse(localStorage.getItem('easyboost.adaptive.execution.v1:'+encodeURIComponent(marker.owner)+':g'+marker.ownerGeneration)).active }), null);
 
     const finishResponsePromise = page.waitForResponse((response) => (
       response.request().method() === 'POST' && response.url().endsWith('/finish')
@@ -1035,10 +1026,11 @@ async function runAdaptiveDiagnosticE2E() {
       updatedOverview.body.profile.evidenceSourceCount,
       advanceResult.profileChange.evidenceSourceCountAfter,
     );
-    const currentSessionAfterFinish = await page.evaluate(async () => (
-      (await fetch('/api/v1/adaptive-learning/sessions/current')).status
-    ));
-    assert.equal(currentSessionAfterFinish, 404);
+    const currentSessionAfterFinish = await browserApiRequest(
+      page,
+      '/api/v1/adaptive-learning/sessions/current',
+    );
+    assert.equal(currentSessionAfterFinish.status, 404);
 
     await duration15.focus();
     await duration15.press('Space');

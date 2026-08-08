@@ -68,7 +68,7 @@ async function withDiagnosticApp(run, { enabled = true, diagnosticRegistry } = {
       ...options,
       headers: {
         'Content-Type': 'application/json',
-        ...(username ? { 'X-Test-User': username } : {}),
+        ...(username ? { 'X-Test-User': username, 'X-EasyBoost-Expected-Owner': username } : {}),
         ...(options.headers || {}),
       },
     },
@@ -123,7 +123,7 @@ function renderDiagnosticDom(screenSource, payload) {
       createTextNode(value) { return { textContent: value }; },
     },
     window: { addEventListener() {} },
-    registerStartHook() {},
+    registerStartHook() {}, registerAuthorityReset() {},
     console,
   };
   vm.runInNewContext(executable, context);
@@ -990,8 +990,8 @@ test('plan card exposes an accessible start, progress, audio and resumable diagn
   assert.doesNotMatch(markup, /можно продолжить позже/u);
   assert.match(markup, /Точное время и предел заданий появятся после старта/u);
   assert.doesNotMatch(markup, /(?:около 15|После 20|0 из 12)/u);
-  assert.match(screen, /apiGet\('\/api\/v1\/adaptive-learning\/diagnostics\/current'\)/u);
-  assert.match(screen, /apiPostIdempotent\('\/api\/v1\/adaptive-learning\/diagnostics\/start'/u);
+  assert.match(screen, /adaptiveGet\('\/api\/v1\/adaptive-learning\/diagnostics\/current',authority\)/u);
+  assert.match(screen, /adaptivePostIdempotent\('\/api\/v1\/adaptive-learning\/diagnostics\/start'/u);
   assert.match(screen, /\/answers'/u);
   assert.match(screen, /\/complete'/u);
   assert.match(screen, /speechSynthesis/u);
@@ -1000,7 +1000,7 @@ test('plan card exposes an accessible start, progress, audio and resumable diagn
   assert.match(screen, /diagnostic\.deadlineMinutes/u);
   assert.match(screen, /measurementNotice/u);
   assert.match(screen, /start\.dataset\.diagnosticDepth/u);
-  assert.match(screen, /await loadAdaptiveOverview\(\);drawAdaptiveDiagnostic\(result\);focusAdaptiveDiagnosticStep\(\)/u);
+  assert.match(screen, /await loadAdaptiveOverview\(authority\);commitAdaptiveUi\(authority,function\(\)\{delete complete\.dataset\.pendingKey;drawAdaptiveDiagnostic\(result\);focusAdaptiveDiagnosticStep\(\)\}\)/u);
   assert.match(screen, /textContent/u);
   assert.doesNotMatch(screen, /innerHTML/u);
   assert.match(appSource, /apiPostIdempotent/u);

@@ -16,6 +16,7 @@
 import {exposeGlobals} from './globals.js';
 import './api.js';
 import './auth.js';
+import './owner-incarnation.js';
 import './sync.js';
 import './store.js';
 import './components.js';

@@ -13,7 +13,7 @@ const frontendAuthPath = new URL('../public/auth.js', import.meta.url);
  * Чанки экранов идут следом: в точку входа они не подключены, но это тот же код приложения,
  * и требования к нему не меняются от того, что он приезжает позже.
  */
-const frontendScriptNames = ['main.js', 'globals.js', 'auth.js', 'access.js', 'sync.js', 'store.js', 'components.js', 'router.js', 'learning.js', 'vocabulary-domain.js', 'learning-activity-contract.js', 'learning-activity-recorder.js', 'reading-catalog-contract.js', 'listening-catalog-contract.js', 'listening-pilot-v1.js', 'listening-audio-contract.js', 'speaking-catalog-contract.js', 'content/speaking/task1-v1.js', 'content/speaking/task2-v1.js', 'speaking-local-recording.js', 'speaking-task1-runtime.js', 'speaking-task2-runtime.js', 'modules/words.js', 'modules/grammar.js', 'modules/reading.js', 'modules/listening.js', 'modules/writing.js', 'modules/speaking.js', 'modules/exam.js', 'modules/progress.js', 'modules/profile.js', 'app.js', 'voice-tutor.js', 'realtime-transport.js', 'screens.js', 'screens/words.js', 'screens/grammar.js', 'screens/reading.js', 'screens/listening.js', 'screens/writing.js', 'screens/speaking.js', 'screens/progress.js', 'screens/profile.js', 'privacy.js', 'tts.js', 'pwa.js'];
+const frontendScriptNames = ['main.js', 'globals.js', 'auth.js', 'access.js', 'owner-incarnation.js', 'sync.js', 'store.js', 'components.js', 'router.js', 'learning.js', 'vocabulary-domain.js', 'learning-activity-contract.js', 'learning-activity-recorder.js', 'reading-catalog-contract.js', 'listening-catalog-contract.js', 'listening-pilot-v1.js', 'listening-audio-contract.js', 'speaking-catalog-contract.js', 'content/speaking/task1-v1.js', 'content/speaking/task2-v1.js', 'speaking-local-recording.js', 'speaking-task1-runtime.js', 'speaking-task2-runtime.js', 'modules/words.js', 'modules/grammar.js', 'modules/reading.js', 'modules/listening.js', 'modules/writing.js', 'modules/speaking.js', 'modules/exam.js', 'modules/progress.js', 'modules/profile.js', 'app.js', 'voice-tutor.js', 'realtime-transport.js', 'screens.js', 'screens/words.js', 'screens/grammar.js', 'screens/reading.js', 'screens/listening.js', 'screens/writing.js', 'screens/speaking.js', 'screens/progress.js', 'screens/profile.js', 'privacy.js', 'tts.js', 'pwa.js'];
 const frontendScriptPaths = frontendScriptNames.map((name) => new URL(`../public/${name}`, import.meta.url));
 const serverPath = new URL('../server.js', import.meta.url);
 const usersRoutePath = new URL('../routes/users.js', import.meta.url);
@@ -90,7 +90,7 @@ test('frontend loads through a single module entry point that keeps the previous
   const entry = await fs.readFile(new URL('../public/main.js', import.meta.url), 'utf8');
   const imported = [...entry.matchAll(/^import\s+(?:[^;']*from\s*)?'\.\/([^']+)'/gmu)].map((match) => match[1]);
   assert.deepEqual(imported, [
-    'globals.js', 'api.js', 'auth.js', 'sync.js', 'store.js', 'components.js', 'router.js',
+    'globals.js', 'api.js', 'auth.js', 'owner-incarnation.js', 'sync.js', 'store.js', 'components.js', 'router.js',
     'learning.js', 'modules/words.js', 'modules/grammar.js', 'modules/reading.js',
     'modules/listening.js', 'modules/writing.js', 'modules/speaking.js', 'modules/exam.js',
     'modules/progress.js', 'modules/profile.js', 'app.js', 'voice-tutor.js',
@@ -254,11 +254,13 @@ test('progress is snapshotted locally so an offline start is not a blank slate',
     fs.readFile(new URL('../public/store.js', import.meta.url), 'utf8'),
   ]);
   // Every save writes the snapshot, in server mode too — not only the sync queue.
-  assert.match(app, /store\.saveLocal\(currentUser,S\);\s*\n\s*if\(SRV\)\{clearTimeout/u);
+  assert.match(app, /store\.saveLocal\(currentUser,S,ADOPTED_OWNER_GENERATION\);\s*\n\s*if\(SRV\)\{clearTimeout/u);
   // A failed /api/v1/progress must never reset the visible state to defaults.
   assert.doesNotMatch(app, /catch\(e\)\{S=fillDefaults\(\{\}\)\}/u);
-  assert.match(app, /S=store\.restore\(currentUser,served,store\.sync\.pendingModules\(\)\)/u);
-  assert.match(store, /function restore\(username, serverState, pendingModules\)/u);
+  assert.match(app, /apiResponseOwner\(served\)!==startOwner/u);
+  assert.doesNotMatch(app, /delete progressState\.owner/u);
+  assert.match(app, /S=store\.restore\(currentUser,served,store\.sync\.pendingModules\(\),ADOPTED_OWNER_GENERATION\)/u);
+  assert.match(store, /function restore\(username, serverState, pendingModules, ownerGeneration\)/u);
 });
 
 test('frontend keeps zoom, keyboard focus and assistive announcements accessible', async () => {
@@ -282,18 +284,19 @@ test('progress sync queues the latest state and retries when connectivity return
   const sync = await fs.readFile(new URL('../public/sync.js', import.meta.url), 'utf8');
   assert.match(sync, /easyboost_pending_modules_v3/u);
   assert.match(sync, /LEGACY_STORAGE_KEY='easyboost_pending_modules_v2'/u);
-  assert.match(sync, /store\.owners\[ownerKey\]=\{modules:merged,queuedAt:Date\.now\(\)\}/u);
+  assert.match(sync, /store\.owners\[ownerKey\]=\{modules:merged,queuedAt:Date\.now\(\),ownerGeneration:ownerAuthGeneration\}/u);
   assert.match(sync, /navigator\.onLine===false/u);
   assert.match(sync, /window\.addEventListener\('online',flush\)/u);
-  assert.match(sync, /EasyBoostApi\.post\('\/api\/v1\/progress\/modules',\{modules:modules\},true\)/u);
+  assert.match(sync, /EasyBoostApi\.post\('\/api\/v1\/progress\/modules',\{owner:ownerKey,modules:modules\},true\)/u);
   assert.match(sync, /error\.status>=500/u);
-  assert.match(sync, /pending&&pending\.modules/u);
+  assert.match(sync, /pendingMatchesOwner\(pending,ownerKey\)&&pending\.modules/u);
   assert.match(sync, /easyboost_pending_module_attempts_v1/u);
-  assert.match(sync, /store\.owners\[owner\]=attempts\.slice\(-MAX_PENDING_ATTEMPTS\)/u);
+  assert.match(sync, /candidate=\{\.\.\.clone\(attempt\),_ownerGeneration:expectedGeneration\}/u);
+  assert.match(sync, /store\.owners\[ownerKey\]=attempts\.slice\(-MAX_PENDING_ATTEMPTS\)/u);
   assert.match(sync, /setOwner/u);
   assert.match(sync, /MAX_ATTEMPT_BYTES=20_000/u);
   const privacy = await fs.readFile(new URL('../public/privacy.js', import.meta.url), 'utf8');
-  assert.match(privacy, /EasyBoostSync\?\.clearOwner\(\)/u);
+  assert.match(privacy, /EasyBoostSync\?\.deleteOwner\(/u);
 });
 
 test('module progress endpoint merges validated keys instead of replacing the document', async () => {
@@ -367,6 +370,7 @@ test('production documentation covers local setup, API, database and operations'
   for (const route of ['/health/live', '/health/ready', '/api/v1/tg/start', '/api/v1/me', '/api/v1/account/export', '/api/v1/account', '/api/v1/privacy/consent', '/api/v1/progress/modules', '/api/v1/module-attempts', '/api/v1/word-progress', '/api/v1/error-bank', '/api/v1/ai/generate-content', '/api/v1/ai/evaluate-writing', '/api/v1/ai/evaluate-speaking', '/api/v1/ai/generate-speaking-sample', '/api/v1/tts', '/api/v1/stt']) {
     assert.match(documents[1], new RegExp(route.replaceAll('/', '\\/'), 'u'));
   }
+  assert.match(documents[1], /\/api\/v1\/account:[\s\S]*?delete:[\s\S]*?required: \[confirmation, owner\][\s\S]*?OWNER_CHANGED/u);
   assert.match(documents[2], /user_progress/u);
   assert.match(documents[2], /журнал пользовательских прогонов/u);
   assert.match(documents[2], /provider, model, prompt_version/u);

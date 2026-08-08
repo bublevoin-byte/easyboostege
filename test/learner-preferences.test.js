@@ -32,9 +32,12 @@ async function withPreferencesApp(run) {
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
   const request = (username, pathname, options = {}) => fetch(`${baseUrl}${pathname}`, {
     ...options,
+    body: pathname === '/api/v1/progress/modules' && options.body
+      ? JSON.stringify({ owner: username, ...JSON.parse(options.body) }) : options.body,
     headers: {
       'content-type': 'application/json',
       'x-test-user': username,
+      'x-easyboost-expected-owner': username,
       ...(options.headers || {}),
     },
   });

@@ -22,7 +22,25 @@ import './screens.js';
 
 /* ---------- STATE ---------- */
 const todayStr=()=>new Date().toISOString().slice(0,10);
-let currentUser=localStorage.getItem('eb_current')||null,S=null;
+const INITIAL_OWNER_MARKER=window.EasyBoostStore?.readCurrentOwner?.()||null;
+let currentUser=INITIAL_OWNER_MARKER&&INITIAL_OWNER_MARKER.owner||null,S=null;
+let AUTH_SESSION_GENERATION=0;
+const AUTHORITY_RESET_HOOKS=new Set();
+function registerAuthorityReset(hook){if(typeof hook!=='function')return function(){};AUTHORITY_RESET_HOOKS.add(hook);return function(){AUTHORITY_RESET_HOOKS.delete(hook)}}
+async function notifyAuthorityReset(authority){for(const hook of AUTHORITY_RESET_HOOKS){try{await hook(authority)}catch(error){console.error('Authority reset hook failed',error)}}}
+const OWNER_SESSION_GENERATION_KEY='eb_owner_generation_session_v1';
+function readSessionOwnerGeneration(owner){try{const parsed=JSON.parse(sessionStorage.getItem(OWNER_SESSION_GENERATION_KEY)||'null');
+  return parsed&&parsed.owner===owner&&Number.isSafeInteger(parsed.generation)&&parsed.generation>=0?parsed.generation:null}catch(_){return null}}
+function rememberSessionOwnerGeneration(owner,generation){try{if(owner&&Number.isSafeInteger(generation))sessionStorage.setItem(OWNER_SESSION_GENERATION_KEY,JSON.stringify({owner:owner,generation:generation}));
+  else sessionStorage.removeItem(OWNER_SESSION_GENERATION_KEY)}catch(_){}}
+let ADOPTED_OWNER_GENERATION=readSessionOwnerGeneration(currentUser);
+if(ADOPTED_OWNER_GENERATION==null&&INITIAL_OWNER_MARKER&&INITIAL_OWNER_MARKER.owner===currentUser)
+  ADOPTED_OWNER_GENERATION=INITIAL_OWNER_MARKER.ownerGeneration;
+function normalizedAuthOwner(value){var owner=String(value||'').trim();return owner||null}
+function captureExplicitAuth(owner=null){var ownerKey=normalizedAuthOwner(owner);
+  var authority=store.sync.ownerAuthSnapshot?.(ownerKey)||{ownerGeneration:0,globalGeneration:0};return{
+  sessionGeneration:AUTH_SESSION_GENERATION,owner:ownerKey,
+  ownerGeneration:ownerKey?authority.ownerGeneration:null,globalGeneration:authority.globalGeneration}}
 const store=window.EasyBoostStore;
 const ui=window.EasyBoostComponents;
 const txt=ui.elementText;
@@ -40,6 +58,37 @@ const speakingModule=window.EasyBoostSpeaking;
 const examModule=window.EasyBoostExam;
 const progressModule=window.EasyBoostProgress;
 const profileModule=window.EasyBoostProfile;
+function applySyncedGrammarMastery(update){
+  if(!S||!update||update.owner!==currentUser||!Array.isArray(update.records))return false;
+  if(update.ownerGeneration!==ADOPTED_OWNER_GENERATION)return false;
+  if(!currentOwnerAuthorityCurrent(update.owner))return false;
+  S.grammarMastery=S.grammarMastery||{};let changed=false;
+  update.records.forEach(function(item){
+    const topicId=Number(item&&item.topicId);if(!Number.isInteger(topicId)||topicId<1||topicId>20||!item.record)return;
+    const incoming=grammarModule.migrateMasteryRecord(item.record);
+    const current=grammarModule.migrateMasteryRecord(S.grammarMastery[topicId]);
+    if(incoming.masteryRevision<=current.masteryRevision)return;
+    S.grammarMastery[topicId]=incoming;changed=true
+  });
+  if(changed){store.saveLocal(currentUser,S,ADOPTED_OWNER_GENERATION);gSync()}
+  return changed
+}
+store.sync.onGrammarMasterySync?.(applySyncedGrammarMastery);
+function applyDeletedOwner(update){
+  if(!update||!update.owner)return false;
+  if(update.owner!==currentUser)return false;
+  const resetAuthority={owner:currentUser,ownerGeneration:ADOPTED_OWNER_GENERATION};
+  const deletedGeneration=Number(update.ownerGeneration);
+  if(Number.isSafeInteger(deletedGeneration)&&Number.isSafeInteger(ADOPTED_OWNER_GENERATION)
+    &&deletedGeneration<=ADOPTED_OWNER_GENERATION&&update.deleted!==true)return false;
+  AUTH_SESSION_GENERATION+=1;
+  TOKEN='';currentUser=null;S=null;window.__sub=null;ADOPTED_OWNER_GENERATION=null;rememberSessionOwnerGeneration(null,null);store.sync.setOwner(null);
+  void notifyAuthorityReset(resetAuthority);
+  try{localStorage.removeItem('eb_tg_code')}catch(_){}
+  hideLearningShell();show('scr5');
+  return true
+}
+store.sync.onOwnerDeleted?.(applyDeletedOwner);
 function getUsers(){try{return JSON.parse(localStorage.getItem('eb_users'))||{}}catch(e){return{}}}
 function setUsers(u){localStorage.setItem('eb_users',JSON.stringify(u))}
 /* ---------- DATA ---------- */
@@ -66,7 +115,7 @@ function inputVal(scr,ph){const el=document.querySelector('#'+scr+' input[placeh
 document.addEventListener('DOMContentLoaded',()=>{wire();
 });
 wire();
-S=currentUser?store.loadLocal(currentUser):null;
+S=currentUser?store.loadLocal(currentUser,ADOPTED_OWNER_GENERATION):null;
 
 /* ===== READING ===== */
 /* Последнее слово, по которому кликнули в тексте: его показывает всплывающая карточка перевода
@@ -224,6 +273,9 @@ const apiGet=EasyBoostApi.get;
 const apiGetBlob=EasyBoostApi.getBlob;
 const apiPostBinary=EasyBoostApi.postBinary;
 const apiMessage=EasyBoostApi.messageFor;
+const apiResponseOwner=EasyBoostApi.responseOwner;
+const apiIsAuthorityFailure=EasyBoostApi.isAuthorityFailure;
+const apiCanUseOfflineFallback=EasyBoostApi.canUseOfflineFallback;
 function syncModuleAttempt(attempt){return store.sync.saveModuleAttempt(attempt)}
 let authTransition=Promise.resolve();
 function runAuthTransition(action){
@@ -273,18 +325,47 @@ function applyLearningAccess(result){
     title.textContent='Не удалось проверить доступ';copy.textContent='Сейчас нет связи с сервером, поэтому мы не можем подтвердить подписку. Учебные разделы не открыты. Проверьте сеть и повторите попытку.';bot.style.display='none';privacy.style.display='none';
   }queueMicrotask(function(){document.getElementById('access_gate_retry')?.focus()})
 }
-function adoptServerSession(session){
-  TOKEN=session&&session.authenticated===true?'cookie':'';window.__sub=session||null;
-  if(session&&session.username){currentUser=session.username;localStorage.setItem('eb_current',currentUser)}
+function adoptServerSession(session,ownerGeneration){
+  const sessionOwner=normalizedAuthOwner(session&&session.username);
+  if(!session||session.authenticated!==true||!sessionOwner||!Number.isSafeInteger(ownerGeneration)||ownerGeneration<0)return false;
+  const authority=store.sync.ownerAuthSnapshot?.(sessionOwner)||{ownerGeneration:0,deleted:false};
+  if(authority.deleted||authority.ownerGeneration!==ownerGeneration)return false;
+  AUTH_SESSION_GENERATION+=1;
+  TOKEN='cookie';window.__sub=session;currentUser=sessionOwner;ADOPTED_OWNER_GENERATION=ownerGeneration;
+  rememberSessionOwnerGeneration(currentUser,ADOPTED_OWNER_GENERATION);
+  return true
+}
+function currentOwnerAuthorityCurrent(owner=currentUser){
+  if(!owner||owner!==currentUser||!Number.isSafeInteger(ADOPTED_OWNER_GENERATION))return false;
+  const authority=store.sync.ownerAuthSnapshot?.(owner)||{ownerGeneration:0,deleted:false};
+  if(authority.ownerGeneration===ADOPTED_OWNER_GENERATION&&!authority.deleted)return true;
+  applyDeletedOwner({owner:owner,ownerGeneration:authority.ownerGeneration,deleted:authority.deleted});return false
 }
 async function checkLearningAccess(session=null,{preserveActiveShell=false,signal=null}={}){
   if(!SRV){const result=classifyLearningAccess(null,new Error('server mode required'));applyLearningAccess(result);return result}
+  const authGuard={sessionGeneration:AUTH_SESSION_GENERATION,owner:currentUser,ownerGeneration:ADOPTED_OWNER_GENERATION,
+    globalGeneration:store.sync.ownerAuthSnapshot?.()?.globalGeneration??0};
   try{
     if(signal?.aborted)return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,aborted:true};
     const current=session||await auth.currentSession({signal,cache:'no-store'});
     if(signal?.aborted)return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,aborted:true};
+    if(authGuard.sessionGeneration!==AUTH_SESSION_GENERATION){return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,stale:true}}
     const result=classifyLearningAccess(current);
-    if(current&&current.authenticated===true)adoptServerSession(current);else TOKEN='';
+    if(current&&current.authenticated===true){
+      const sessionOwner=normalizedAuthOwner(current.username);let generation=authGuard.ownerGeneration;
+      if(Number.isSafeInteger(generation)){
+        if(sessionOwner!==authGuard.owner||store.sync.ownerAuthSnapshot?.(sessionOwner)?.ownerGeneration!==generation)return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,stale:true}
+      }else{
+        if(authGuard.owner&&sessionOwner!==authGuard.owner)return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,stale:true};
+        if(store.sync.ownerAuthSnapshot?.()?.globalGeneration!==authGuard.globalGeneration)return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,stale:true};
+        generation=store.sync.ownerAuthSnapshot?.(sessionOwner)?.ownerGeneration??0
+      }
+      const adopted=await store.sync.adoptOwner?.(sessionOwner,generation,{
+        canCommit:function(){return authGuard.sessionGeneration===AUTH_SESSION_GENERATION},
+        commit:function(committedGeneration){return adoptServerSession(current,committedGeneration)},
+      });
+      if(adopted!==sessionOwner)return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,stale:true}
+    }else{TOKEN='';ADOPTED_OWNER_GENERATION=null;rememberSessionOwnerGeneration(null,null)}
     if(preserveActiveShell&&result.state===LEARNING_ACCESS_STATES.ACTIVE)closeAccessGate();else applyLearningAccess(result);return result;
   }catch(error){
     if(signal?.aborted)return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,aborted:true};
@@ -303,27 +384,62 @@ let _saveT=null;
 const START_HOOKS=[];
 function registerStartHook(hook){START_HOOKS.push(hook)}
 function save(options={}){
-  if(SRV&&!TOKEN)return;
+  if(SRV&&(!TOKEN||!currentOwnerAuthorityCurrent())||!SRV&&store.sync.isOwnerDeleted?.(currentUser))return;
   /* локальный снимок держит слова, SRS, грамматику и прогресс доступными без сети */
-  store.saveLocal(currentUser,S);
-  if(SRV){clearTimeout(_saveT);if(options.queueNow)store.sync.queueProgress(S);_saveT=setTimeout(()=>{store.sync.saveProgress(S)},600)}}
+  store.saveLocal(currentUser,S,ADOPTED_OWNER_GENERATION);
+  if(SRV){clearTimeout(_saveT);if(options.queueNow)store.sync.queueProgress(S);_saveT=setTimeout(()=>{if(currentOwnerAuthorityCurrent())store.sync.saveProgress(S)},600)}}
+async function invalidateLearningAuthority(authority){
+  var owner=authority&&authority.owner,ownerGeneration=authority&&authority.ownerGeneration;
+  if(currentUser!==owner||ADOPTED_OWNER_GENERATION!==ownerGeneration)return false;
+  AUTH_SESSION_GENERATION+=1;TOKEN='';currentUser=null;S=null;window.__sub=null;ADOPTED_OWNER_GENERATION=null;rememberSessionOwnerGeneration(null,null);store.sync.setOwner(null);
+  await notifyAuthorityReset(authority);
+  await Promise.all([
+    store.clearCurrentOwner?.(owner,ownerGeneration),
+    clearAdaptiveRuntime({owner:owner,ownerGeneration:ownerGeneration}),
+    clearAdaptiveOverviewCache(localStorage,{owner:owner,ownerGeneration:ownerGeneration}),
+  ]);
+  hideLearningShell();show('scr5');return true;
+}
+window.EasyBoostAuthority=Object.freeze({invalidate:invalidateLearningAuthority});
 async function startLearningWithVerifiedSession(session){
   const access=classifyLearningAccess(session);applyLearningAccess(access);
-  if(access.state!==LEARNING_ACCESS_STATES.ACTIVE)return false;adoptServerSession(session);
+  if(access.state!==LEARNING_ACCESS_STATES.ACTIVE||normalizedAuthOwner(session&&session.username)!==currentUser||!currentOwnerAuthorityCurrent())return false;
+  var startOwner=currentUser,startGeneration=AUTH_SESSION_GENERATION,startOwnerGeneration=ADOPTED_OWNER_GENERATION;
+  function startStillCurrent(){return Boolean(TOKEN&&currentUser===startOwner
+    &&AUTH_SESSION_GENERATION===startGeneration&&currentOwnerAuthorityCurrent(startOwner))}
   /* Встроенные задания нужны до первого экрана письма и должны быть доступны офлайн,
      поэтому банк загружается из закэшированного /task-bank.json на старте. */
   await loadTaskBank();
+  if(!startStillCurrent())return false;
   store.sync.setOwner(currentUser);
   if(SRV){
     var served=null;
-    try{served=await apiGet('/api/v1/progress')}catch(e){served=null}
-    S=store.restore(currentUser,served,store.sync.pendingModules());
-    store.saveLocal(currentUser,S);
+    try{served=await apiGet('/api/v1/progress',{headers:{'X-EasyBoost-Expected-Owner':startOwner}})}catch(e){
+      if(apiIsAuthorityFailure(e))await invalidateLearningAuthority({owner:startOwner,ownerGeneration:startOwnerGeneration});
+      if(!apiCanUseOfflineFallback(e))return false;served=null}
+    if(!startStillCurrent())return false;
+    if(served&&apiResponseOwner(served)!==startOwner){await invalidateLearningAuthority({owner:startOwner,ownerGeneration:startOwnerGeneration});return false}
+    S=store.restore(currentUser,served,store.sync.pendingModules(),ADOPTED_OWNER_GENERATION);
+    store.saveLocal(currentUser,S,ADOPTED_OWNER_GENERATION);
     if(!served)try{toast('Нет сети — показан сохранённый прогресс')}catch(e){}}
+  if(!startStillCurrent())return false;
   store.sync.setBaseline(S);
   tab('scr1');
-  for(const hook of START_HOOKS){try{await hook()}catch(e){}}
+  for(const hook of START_HOOKS){if(!startStillCurrent())return false;try{await hook()}catch(e){}if(!startStillCurrent())return false}
   return true;
+}
+async function confirmExplicitServerOwner(session,authGuard){
+  var sessionOwner=normalizedAuthOwner(session&&session.username);
+  if(!authGuard||authGuard.sessionGeneration!==AUTH_SESSION_GENERATION||!sessionOwner)return false;
+  if(authGuard.owner&&authGuard.owner!==sessionOwner)return false;
+  const confirmed=await store.sync.confirmOwner?.(sessionOwner,{
+    ownerScoped:Boolean(authGuard.owner),ownerGeneration:authGuard.ownerGeneration,globalGeneration:authGuard.globalGeneration,
+  },{
+    canCommit:function(){return authGuard.sessionGeneration===AUTH_SESSION_GENERATION},
+    commit:function(){const generation=authGuard.owner?authGuard.ownerGeneration:store.sync.ownerAuthSnapshot?.(sessionOwner)?.ownerGeneration;
+      return adoptServerSession(session,generation)},
+  });
+  return confirmed===sessionOwner
 }
 async function startApp(){
   return runAuthTransition(async function(){
@@ -338,19 +454,28 @@ async function doLogin(){
   if(!SRV){applyLearningAccess(classifyLearningAccess(null,new Error('server mode required')));return}
   const u=gv('lg_user'),p=gv('lg_pass');if(!u||!p){lgMsg('Введите имя и пароль');return}
   lgMsg('Вход…');
-  try{await runAuthTransition(async function(){const d=await auth.login(u,p);adoptServerSession(d);lgMsg('');await startLearningWithVerifiedSession(d)})}
+  try{await runAuthTransition(async function(){var authGuard=captureExplicitAuth(u);const d=await auth.login(u,p);
+    if(!await confirmExplicitServerOwner(d,authGuard))return false;lgMsg('');await startLearningWithVerifiedSession(d)})}
   catch(e){lgMsg(apiMessage(e,'auth'))}}
 async function doRegister(){
   if(!SRV){applyLearningAccess(classifyLearningAccess(null,new Error('server mode required')));return}
   const u=gv('lg_user'),p=gv('lg_pass');if(!u||!p){lgMsg('Введите имя и пароль');return}
   lgMsg('Создаём аккаунт…');
-  try{await runAuthTransition(async function(){const d=await auth.register(u,p);adoptServerSession(d);lgMsg('');if(classifyLearningAccess(d).state===LEARNING_ACCESS_STATES.ACTIVE){show('scr6');hideLearningShell()}else applyLearningAccess(classifyLearningAccess(d))})}
+  try{await runAuthTransition(async function(){var authGuard=captureExplicitAuth(u);const d=await auth.register(u,p);
+    if(!await confirmExplicitServerOwner(d,authGuard))return false;lgMsg('');if(classifyLearningAccess(d).state===LEARNING_ACCESS_STATES.ACTIVE){show('scr6');hideLearningShell()}else applyLearningAccess(classifyLearningAccess(d))})}
   catch(e){lgMsg(apiMessage(e,'auth'))}}
 async function logout(){
   return runAuthTransition(async function(){
+    const logoutOwner=currentUser,logoutOwnerGeneration=ADOPTED_OWNER_GENERATION;
     try{if(SRV)await auth.logout()}catch(_){}
-    TOKEN='';store.sync.setOwner(null);clearAdaptiveRuntime();clearAdaptiveOverviewCache(localStorage);
-    try{localStorage.removeItem('eb_current');localStorage.removeItem('eb_tg_code')}catch(_){}
+    AUTH_SESSION_GENERATION+=1;
+    TOKEN='';ADOPTED_OWNER_GENERATION=null;rememberSessionOwnerGeneration(null,null);store.sync.setOwner(null);
+    await Promise.all([
+      store.clearCurrentOwner?.(logoutOwner,logoutOwnerGeneration),
+      clearAdaptiveRuntime({owner:logoutOwner,ownerGeneration:logoutOwnerGeneration}),
+      clearAdaptiveOverviewCache(localStorage,{owner:logoutOwner,ownerGeneration:logoutOwnerGeneration}),
+    ]);
+    try{localStorage.removeItem('eb_tg_code')}catch(_){}
     location.reload()
   })
 }
@@ -380,9 +505,9 @@ async function tgInit(){
 function tgPoll(){
   if(!TG_CODE)return;try{localStorage.setItem('eb_tg_code',TG_CODE)}catch(_){};let tries=0;clearInterval(TG_IV);
   TG_IV=setInterval(()=>{tries++;runAuthTransition(async function(){
-    try{const c=await auth.checkTelegramLogin(TG_CODE);
-      if(c&&c.authenticated){clearInterval(TG_IV);TOKEN='cookie';
-        adoptServerSession(c);lgMsg('');await startLearningWithVerifiedSession(c);}
+    try{var authGuard=captureExplicitAuth();const c=await auth.checkTelegramLogin(TG_CODE);
+      if(c&&c.authenticated){clearInterval(TG_IV);
+        if(!await confirmExplicitServerOwner(c,authGuard))return false;lgMsg('');await startLearningWithVerifiedSession(c);}
     }catch(e){}
     if(tries>300){clearInterval(TG_IV)}
   })},2000);
@@ -778,10 +903,24 @@ const EGE_WORDS=[
 {w:'window shopping',t:10,p:'n',tr:'разглядывание витрин',ex:'We went window shopping in the mall.'}
 ];
 decorateCoreVocabulary(EGE_WORDS);
-var W_SYNC={},W_SYNC_T=null;
-function wQueueServer(w){if(typeof SRV==='undefined'||!SRV||!TOKEN)return;var r=wRec(w);if(!r)return;
-  W_SYNC[w]=migrateVocabularyProgress({...r,word:w});clearTimeout(W_SYNC_T);
-  W_SYNC_T=setTimeout(function(){var pending=W_SYNC;W_SYNC={};apiPut('/api/v1/word-progress',{words:Object.keys(pending).map(function(k){return pending[k]})}).catch(function(){Object.keys(pending).forEach(function(k){W_SYNC[k]=pending[k]})})},900)}
+var W_SYNC=new Map(),W_SYNC_T=new Map();
+function wAuthority(){return TOKEN&&currentOwnerAuthorityCurrent()?Object.freeze({owner:currentUser,ownerGeneration:ADOPTED_OWNER_GENERATION}):null}
+function wAuthorityKey(authority){return authority.owner+'\u0000'+authority.ownerGeneration}
+function wAuthorityCurrent(authority){return Boolean(authority&&currentUser===authority.owner&&ADOPTED_OWNER_GENERATION===authority.ownerGeneration&&currentOwnerAuthorityCurrent(authority.owner))}
+async function wFlushServer(authority){
+  var key=wAuthorityKey(authority),pending=W_SYNC.get(key);W_SYNC_T.delete(key);
+  if(!pending||!pending.size||!wAuthorityCurrent(authority))return false;
+  var entries=Array.from(pending.entries()),result;
+  try{result=await apiPut('/api/v1/word-progress',{words:entries.map(function(entry){return entry[1]})},{'X-EasyBoost-Expected-Owner':authority.owner})}
+  catch(error){if(apiIsAuthorityFailure(error))await invalidateLearningAuthority(authority);return false}
+  if(!wAuthorityCurrent(authority))return false;
+  if(apiResponseOwner(result)!==authority.owner){await invalidateLearningAuthority(authority);return false}
+  entries.forEach(function(entry){if(pending.get(entry[0])===entry[1])pending.delete(entry[0])});if(!pending.size)W_SYNC.delete(key);return true
+}
+function wQueueServer(w){if(typeof SRV==='undefined'||!SRV)return;var authority=wAuthority(),r=wRec(w);if(!authority||!r)return;
+  var key=wAuthorityKey(authority),pending=W_SYNC.get(key);if(!pending){pending=new Map();W_SYNC.set(key,pending)}
+  pending.set(w,migrateVocabularyProgress({...r,word:w}));clearTimeout(W_SYNC_T.get(key));
+  W_SYNC_T.set(key,setTimeout(function(){void wFlushServer(authority)},900))}
 function wToday0(){var d=new Date();d.setHours(0,0,0,0);return d.getTime()}
 function wRec(w){S.srs=S.srs||{};return S.srs[w]}
 function wSet(w){S.srs=S.srs||{};return S.srs[w]||(S.srs[w]=localVocabularyProgress(w,{s:0,e:0,n:0,due:0}))}
@@ -803,7 +942,7 @@ function wMigrate(){if(!S.srsMig){S.srsMig=1;S.srs=wordModule.migrateLegacy(EGE_
   S.personalWords=normalizePersonalVocabularyCards(S.personalWords||[]);
   S.personalWordTombstones=Array.from(new Set((Array.isArray(S.personalWordTombstones)?S.personalWordTombstones:[])
     .map(String).filter(function(id){return id.startsWith('personal:')}))).slice(-500);
-  store.saveLocal(currentUser,S)}
+  store.saveLocal(currentUser,S,ADOPTED_OWNER_GENERATION)}
 function wSpeakFallback(txt){try{var u=new SpeechSynthesisUtterance(txt.replace(/^to /,''));u.lang='en-GB';u.rate=.9;speechSynthesis.cancel();speechSynthesis.speak(u)}catch(e){}}
 function wDeco(){return '<svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;" viewBox="0 0 346 280" preserveAspectRatio="xMidYMid slice">'
   +'<circle cx="330" cy="8" r="64" fill="rgba(255,200,97,.16)"/>'
@@ -827,9 +966,13 @@ registerStartHook(function(){wMigrate();wMergeAi();return wSync()});
 registerRouteHook(function(id){if(id==='scr2'){var f=document.getElementById('genfab');if(f)f.style.display='none'}});
 
 /* legacy block 6 */
-function gClosed(){return grammarModule.countClosed(S.gram)}
-function gSync(){if(!S)return;var c=gClosed();S.prog=S.prog||{};S.prog.gram=Math.round(c/20*100);
-  setTxt('sub_gram','закреплено '+c+' из 20 тем');setTxt('g_sumline','Закреплено '+c+' из 20 тем');
+function gClosed(){return grammarModule.countStable(S.grammarMastery)}
+function gSync(){if(!S)return;var before=JSON.stringify(S.grammarMastery||{});
+  S.grammarMastery=grammarModule.hasCanonicalMasteryRecords(S.grammarMastery)
+    ?grammarModule.migrateMasteryRecords(S.grammarMastery)
+    :grammarModule.migrateLegacyMasteryRecords(S.gram);
+  if(JSON.stringify(S.grammarMastery)!==before)save();var c=gClosed();S.prog=S.prog||{};S.prog.gram=Math.round(c/20*100);
+  setTxt('sub_gram','устойчиво '+c+' из 20 тем');setTxt('g_sumline','Устойчиво освоено '+c+' из 20 тем');
   var bar=document.getElementById('g_bar');if(bar)bar.style.width=Math.max(2,Math.round(c/20*100))+'%'}
 function gExamFmt(sec){return grammarModule.formatDuration(sec)}
 /* прячем FAB на грамматике, синк при старте */
@@ -993,7 +1136,7 @@ export {SRV,registerProfileHook,registerStartHook,toast};
  */
 export {
   EGE_WORDS,LSLOW,L_PLAYSVG,S,TOKEN,W37,W38,WBTN,
-  apiGet,apiMessage,apiPost,apiPostBinary,apiPostIdempotent,apiPut,currentUser,examModule,gExamFmt,gSync,generateAiContent,
+  apiCanUseOfflineFallback,apiGet,apiIsAuthorityFailure,apiMessage,apiPost,apiPostBinary,apiPostIdempotent,apiPut,apiResponseOwner,currentUser,examModule,gExamFmt,gSync,generateAiContent,invalidateLearningAuthority,registerAuthorityReset,
   grammarModule,lSetSlow,lSt,lSync,listeningModule,profileModule,progressModule,readingModule,
   rEsc,rSt,rWordsHtml,registerScreenGenerator,ringOff,runProfileHooks,setTxt,spSt,spSync,
   speakingModule,srsFail,srsOk,srsRecordVocabularyOutcome,syncModuleAttempt,todayStr,ui,wBase,wDeco,wMergeAi,wMigrate,wRec,wStats,wSync,

@@ -4,8 +4,6 @@
  * поэтому зависимости приходят импортом и остаются живыми при смене серверной сессии.
  */
 import {SRV, registerProfileHook, registerStartHook} from './app.js';
-import {clearAdaptiveOverviewCache} from './adaptive-overview-cache.js';
-import {clearAdaptiveRuntime} from './adaptive-session-runtime.js';
 
 (function initializePrivacyControls(global) {
   'use strict';
@@ -128,7 +126,13 @@ import {clearAdaptiveRuntime} from './adaptive-session-runtime.js';
   async function deleteAccount() {
     if (!global.confirm('Аккаунт, прогресс и ответы будут удалены без возможности восстановления. Продолжить?')) return;
     if (global.prompt('Для подтверждения введите DELETE') !== 'DELETE') return;
-    try { await api.remove('/api/v1/account', { confirmation: 'DELETE' }); clearAdaptiveRuntime(); clearAdaptiveOverviewCache(global.localStorage); global.EasyBoostSync?.clearOwner(); global.localStorage.removeItem('eb_current'); global.location.reload(); }
+    try { const cleared = await global.EasyBoostSync?.deleteOwner((expectedOwner) => api.remove('/api/v1/account', { confirmation: 'DELETE', owner: expectedOwner }));
+      if (cleared == null || cleared === false || ['GRAMMAR_MASTERY_QUEUE_LOCK_UNAVAILABLE', 'GRAMMAR_MASTERY_OWNER_CHANGED'].includes(cleared?.code)) {
+        global.alert('Удаление не выполнено: браузер не поддерживает безопасную блокировку данных. Аккаунт и локальные данные сохранены. Откройте приложение в поддерживаемом браузере и повторите попытку.');
+        return;
+      }
+      if (cleared !== true) { global.alert('Аккаунт удалён, но локальные данные пока не очищены. Закройте приложение и повторите очистку в поддерживаемом браузере.'); return; }
+      global.location.reload(); }
     catch (error) { global.alert(api.messageFor(error)); }
   }
   global.openPrivacy = openPrivacy;
