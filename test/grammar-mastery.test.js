@@ -4,19 +4,39 @@ import test from 'node:test';
 import vm from 'node:vm';
 
 import { grammarActivityId, splitLearningActivityDuration } from '../public/learning-activity-contract.js';
+import {
+  GENERATED_GRAMMAR_REVISION,
+  GRAMMAR_ACTIVE_PRACTICE_TYPES,
+  GRAMMAR_ERROR_CODES,
+  parseGeneratedGrammarItemId,
+  parseGeneratedGrammarItemReference,
+} from '../public/grammar-domain-contract.js';
+import { grammarMasteryEventSchema } from '../validation/grammar-mastery.js';
 
 const DAY = 86_400_000;
 const source = (await fs.readFile(new URL('../public/modules/grammar.js', import.meta.url), 'utf8'))
-  .replace(/^import .*;\r?\n/mu, '')
+  .replace(/^import .*;\r?\n/gmu, '')
   .replace(/^export /gmu, '');
 
 function grammarModule() {
   const window = {};
-  vm.runInNewContext(source, { window, grammarActivityId, splitLearningActivityDuration, Object, String, Number, Math, Date });
+  vm.runInNewContext(source, {
+    window, grammarActivityId, splitLearningActivityDuration,
+    GENERATED_GRAMMAR_REVISION, GRAMMAR_ACTIVE_PRACTICE_TYPES, GRAMMAR_ERROR_CODES,
+    parseGeneratedGrammarItemId, parseGeneratedGrammarItemReference,
+    Object, String, Number, Math, Date,
+  });
   return window.EasyBoostGrammar;
 }
 
 function plain(value) { return JSON.parse(JSON.stringify(value)); }
+function historyOutcome(id, type, generated = false) {
+  return {
+    id, type, transfer: false, correct: true,
+    diagnosticId: null, errorCode: null, confusionPair: null, transferStatus: null,
+    ...(generated ? { source: 'generated', revision: 1 } : {}),
+  };
+}
 function scores(correct = 4, total = 4) {
   return Object.fromEntries(['choice', 'input', 'correction', 'transform'].map((type) => [type, { correct, total }]));
 }
@@ -37,6 +57,44 @@ function review(id, record, overrides = {}) {
 function serverReduce(grammar, record, event, now) {
   return grammar.reduceMastery(record, event, { now, clockAuthority: 'server' });
 }
+
+test('different canonical completion material cannot replay through the known FNV-1a-32 collision', () => {
+  const grammar = grammarModule();
+  const id = '00000000-0000-4000-8000-000000000402';
+  const outcome = {
+    id: 'core.g.5.c.1', type: 'choice', transfer: false, correct: true,
+    diagnosticId: null, errorCode: null, confusionPair: null, transferStatus: null,
+  };
+  const base = {
+    id, type: 'session_completed', expectedRevision: 0, expectedStage: 'not_started', expectedReviewStep: 0,
+    source: 'builtin', assisted: false, completedTypes: ['choice'],
+    typeScores: { choice: { correct: 1, total: 1 } },
+  };
+  const makeEvent = (startedAt) => ({
+    ...base,
+    session: {
+      id, scope: 'topic', mode: 'legacy_practice', source: 'builtin',
+      catalog: { version: 'grammar-core-v2', revision: 2 },
+      items: [outcome], startedAt, assisted: false,
+    },
+  });
+  const eventA = makeEvent(19_181_966_713_209);
+  const eventB = makeEvent(288_105_508_095_880);
+  assert.equal(grammarMasteryEventSchema.safeParse({ topicId: 5, event: eventA }).success, true);
+  assert.equal(grammarMasteryEventSchema.safeParse({ topicId: 5, event: eventB }).success, true);
+  assert.notDeepEqual(eventA, eventB);
+  assert.notEqual(grammar.masteryEventReplayFingerprint(eventA), grammar.masteryEventReplayFingerprint(eventB),
+    'exact replay identity must distinguish the reproduced 32-bit collision');
+  const applied = grammar.reduceMastery(grammar.migrateMasteryRecord(), eventA,
+    { now: 300_000_000_000_000, clockAuthority: 'server' });
+  assert.equal(grammar.masteryEventReplayMatches(applied, eventA), true);
+  assert.equal(grammar.masteryEventReplayMatches(applied, eventB), false,
+    'changed canonical material must conflict even when its legacy FNV digest collides');
+  const legacyDigestOnly = structuredClone(applied);
+  legacyDigestOnly.masteryHistory.at(-1).replayFingerprint = 'fnv1a32:34dfbaf5';
+  assert.equal(grammar.masteryEventReplayMatches(grammar.migrateMasteryRecord(legacyDigestOnly), eventA), false,
+    'a legacy 32-bit digest alone is never replay authority');
+});
 
 test('legacy mastery migration is idempotent, canonical and never overclaims confirmed mastery', () => {
   const grammar = grammarModule();
@@ -60,6 +118,215 @@ test('legacy mastery migration is idempotent, canonical and never overclaims con
   assert.equal(repairedStable.highestReviewStep, 5);
   assert.equal(repairedStable.eligibleAt, null);
 });
+
+test('canonical mastery preserves all 32 ordered active-session outcomes across normalization', () => {
+  const grammar = grammarModule();
+  const items = Array.from({ length: 32 }, (_, index) => ({
+    id: `core.g.1.${index % 4 === 0 ? 'c' : index % 4 === 1 ? 'f' : index % 4 === 2 ? 'correction' : 'transform'}.${index + 1}`,
+    type: ['choice', 'input', 'correction', 'transform'][index % 4],
+    transfer: index % 2 === 1,
+    correct: index % 2 === 0,
+    diagnosticId: null,
+    errorCode: index % 2 === 1 ? 'word_or_verb_form' : null,
+    confusionPair: null,
+    transferStatus: index % 2 === 1 ? 'due_next_session' : null,
+  }));
+  const record = {
+    masteryVersion: 2, masteryRevision: 1, stage: 'not_started', reviewStep: 0,
+    highestReviewStep: 0, eligibleAt: null,
+    masteryHistory: [{
+      eventId: '00000000-0000-4000-8000-000000000032', type: 'session_completed',
+      outcome: 'recorded', at: 2_000,
+      session: {
+        id: '00000000-0000-4000-8000-000000000032', scope: 'topic', mode: 'topic_practice',
+        source: 'builtin', catalog: { version: 'grammar-core-v2', revision: 2 },
+        items, startedAt: 1_000, endedAt: 2_000, assisted: true,
+      },
+    }],
+  };
+  const once = grammar.migrateMasteryRecord(record, { now: 3_000 });
+  const twice = grammar.migrateMasteryRecord(once, { now: 4_000 });
+  assert.equal(once.masteryHistory[0].session.items.length, 32);
+  assert.deepEqual(plain(twice.masteryHistory[0].session.items), items,
+    'reload/replay normalization cannot truncate or reorder canonical outcomes');
+  assert.equal(twice.masteryHistory[0].session.items.at(-1).transferStatus, 'due_next_session');
+});
+
+test('canonical mastery preserves generated pointer provenance across repeated normalization', () => {
+  const grammar = grammarModule();
+  const generatedItem = {
+    id: `generated.g.q.${'a'.repeat(64)}.${'b'.repeat(16)}.c1`,
+    type: 'choice', transfer: false, correct: true,
+    diagnosticId: null, errorCode: null, confusionPair: null, transferStatus: null,
+    source: 'generated', revision: 1,
+  };
+  const generatedInputItem = {
+    ...generatedItem,
+    id: `generated.g.q.${'a'.repeat(64)}.${'b'.repeat(16)}.f1`,
+    type: 'input',
+  };
+  const record = {
+    masteryVersion: 2, masteryRevision: 1, stage: 'not_started', reviewStep: 0,
+    highestReviewStep: 0, eligibleAt: null,
+    masteryHistory: [{
+      eventId: '00000000-0000-4000-8000-000000000076', type: 'session_completed',
+      outcome: 'recorded', at: 2_000,
+      session: {
+        id: '00000000-0000-4000-8000-000000000076', scope: 'topic', mode: 'legacy_practice',
+        source: 'generated', catalog: { version: 'grammar-core-v2', revision: 2 },
+        items: [generatedItem, generatedInputItem], startedAt: 1_000, endedAt: 2_000, assisted: true,
+      },
+    }],
+  };
+
+  const once = grammar.migrateMasteryRecord(record, { now: 3_000 });
+  const twice = grammar.migrateMasteryRecord(once, { now: 4_000 });
+  assert.deepEqual(plain(twice.masteryHistory[0].session.items), [generatedItem, generatedInputItem],
+    'a progress read keeps valid c/choice and f/input generated source/revision');
+  assert.deepEqual(plain(twice), plain(once), 'generated provenance normalization is idempotent');
+  assert.equal(/(?:prompt|answer|reference)/iu.test(JSON.stringify(twice.masteryHistory[0].session)), false,
+    'normalization persists only the pointer metadata and bounded outcome');
+
+  const forged = structuredClone(record);
+  forged.masteryHistory[0].session.items[0] = {
+    ...generatedItem, id: 'core.g.5.c.1', source: 'generated', revision: 1,
+  };
+  const stripped = grammar.migrateMasteryRecord(forged, { now: 3_000 });
+  assert.equal(stripped.masteryHistory[0].session, undefined,
+    'a built-in ID cannot leave a generated-looking canonical session during migration');
+});
+
+for (const [pointerKind, itemType] of [['c', 'input'], ['f', 'choice']]) {
+  test(`canonical normalization strips generated .${pointerKind} provenance from ${itemType} history`, () => {
+    const grammar = grammarModule();
+    const eventId = `00000000-0000-4000-8000-00000000008${pointerKind === 'c' ? '1' : '2'}`;
+    const record = {
+      masteryVersion: 2, masteryRevision: 1, stage: 'not_started', reviewStep: 0,
+      highestReviewStep: 0, eligibleAt: null, recentEventIds: [eventId],
+      masteryHistory: [{
+        eventId,
+        type: 'session_completed', outcome: 'recorded', at: 2_000,
+        session: {
+          id: `00000000-0000-4000-8000-00000000008${pointerKind === 'c' ? '1' : '2'}`,
+          scope: 'topic', mode: 'legacy_practice', source: 'generated',
+          catalog: { version: 'grammar-core-v2', revision: 2 },
+          items: [{
+            id: `generated.g.q.${'a'.repeat(64)}.${'b'.repeat(16)}.${pointerKind}1`,
+            type: itemType, transfer: false, correct: true,
+            diagnosticId: null, errorCode: null, confusionPair: null, transferStatus: null,
+            source: 'generated', revision: 1,
+          }],
+          startedAt: 1_000, endedAt: 2_000, assisted: true,
+        },
+      }],
+    };
+    const invalidEvent = {
+      id: eventId, type: 'session_completed', expectedRevision: 0,
+      expectedStage: 'not_started', expectedReviewStep: 0,
+      source: 'generated', assisted: true, completedTypes: [itemType],
+      typeScores: { [itemType]: { correct: 1, total: 1 } },
+      session: structuredClone(record.masteryHistory[0].session),
+    };
+    record.masteryHistory[0].replayFingerprint = grammar.masteryEventReplayFingerprint(invalidEvent);
+
+    const once = grammar.migrateMasteryRecord(record, { now: 3_000 });
+    const twice = grammar.migrateMasteryRecord(once, { now: 4_000 });
+    assert.equal(once.masteryHistory[0].session, undefined,
+      'the whole contradictory session is removed from canonical history');
+    assert.equal(grammar.masteryEventReplayMatches(once, invalidEvent), false,
+      'a contradictory persisted pointer cannot authorize an exact generated replay');
+    assert.deepEqual(plain(twice), plain(once), 'mismatch stripping stays idempotent');
+  });
+}
+
+test('canonical normalization preserves exact valid builtin, generated and mixed composition', () => {
+  const grammar = grammarModule();
+  const generatedChoice = historyOutcome(
+    `generated.g.q.${'a'.repeat(64)}.${'b'.repeat(16)}.c1`, 'choice', true,
+  );
+  const builtinChoice = historyOutcome('core.g.5.c.1', 'choice');
+  const sessions = [
+    { source: 'builtin', assisted: false, items: [builtinChoice] },
+    { source: 'builtin', assisted: true, items: [builtinChoice] },
+    { source: 'generated', assisted: true, items: [generatedChoice] },
+    { source: 'mixed', assisted: true, items: [builtinChoice, generatedChoice] },
+  ];
+  const record = {
+    masteryVersion: 2, masteryRevision: 1, stage: 'not_started', reviewStep: 0,
+    highestReviewStep: 0, eligibleAt: null,
+    masteryHistory: sessions.map((session, index) => ({
+      eventId: `00000000-0000-4000-8000-${String(91 + index).padStart(12, '0')}`,
+      type: 'session_completed', outcome: 'recorded', at: 2_000 + index,
+      session: {
+        id: `00000000-0000-4000-8000-${String(91 + index).padStart(12, '0')}`,
+        scope: 'topic', mode: 'legacy_practice',
+        catalog: { version: 'grammar-core-v2', revision: 2 },
+        startedAt: 1_000, endedAt: 2_000 + index, ...session,
+      },
+    })),
+  };
+
+  const once = grammar.migrateMasteryRecord(record, { now: 3_000 });
+  const twice = grammar.migrateMasteryRecord(once, { now: 4_000 });
+  assert.deepEqual(once.masteryHistory.map((entry) => (
+    [entry.session.source, entry.session.assisted, entry.session.items.length]
+  )), [['builtin', false, 1], ['builtin', true, 1], ['generated', true, 1], ['mixed', true, 2]]);
+  assert.deepEqual(plain(twice), plain(once), 'every valid source composition stays idempotent');
+});
+
+for (const [label, session] of [
+  ['builtin source with generated participation', {
+    source: 'builtin', assisted: false,
+    items: [historyOutcome(`generated.g.q.${'a'.repeat(64)}.${'b'.repeat(16)}.c1`, 'choice', true)],
+  }],
+  ['generated source with only built-in items', {
+    source: 'generated', assisted: true, items: [historyOutcome('core.g.5.c.1', 'choice')],
+  }],
+  ['mixed source without both provenance families', {
+    source: 'mixed', assisted: true,
+    items: [historyOutcome(`generated.g.q.${'a'.repeat(64)}.${'b'.repeat(16)}.c1`, 'choice', true)],
+  }],
+  ['unassisted generated participation', {
+    source: 'generated', assisted: false,
+    items: [historyOutcome(`generated.g.q.${'a'.repeat(64)}.${'b'.repeat(16)}.c1`, 'choice', true)],
+  }],
+]) {
+  test(`canonical normalization rejects ${label}`, () => {
+    const grammar = grammarModule();
+    const eventId = `00000000-0000-4000-8000-0000000001${String(label.length).padStart(2, '0')}`;
+    const canonicalSession = {
+      id: eventId, scope: 'topic', mode: 'legacy_practice',
+      catalog: { version: 'grammar-core-v2', revision: 2 },
+      startedAt: 1_000, endedAt: 2_000, ...session,
+    };
+    const typeScores = Object.fromEntries([...new Set(session.items.map((item) => item.type))].map((type) => {
+      const total = session.items.filter((item) => item.type === type).length;
+      return [type, { correct: total, total }];
+    }));
+    const invalidEvent = {
+      id: eventId, type: 'session_completed', expectedRevision: 0,
+      expectedStage: 'not_started', expectedReviewStep: 0,
+      source: session.source, assisted: session.assisted,
+      completedTypes: Object.keys(typeScores), typeScores, session: canonicalSession,
+    };
+    const record = {
+      masteryVersion: 2, masteryRevision: 1, stage: 'not_started', reviewStep: 0,
+      highestReviewStep: 0, eligibleAt: null, recentEventIds: [eventId],
+      masteryHistory: [{
+        eventId, type: 'session_completed', outcome: 'recorded', at: 2_000,
+        replayFingerprint: grammar.masteryEventReplayFingerprint(invalidEvent),
+        session: canonicalSession,
+      }],
+    };
+
+    const once = grammar.migrateMasteryRecord(record, { now: 3_000 });
+    const twice = grammar.migrateMasteryRecord(once, { now: 4_000 });
+    assert.equal(once.masteryHistory[0].session, undefined);
+    assert.equal(grammar.masteryEventReplayMatches(once, invalidEvent), false,
+      'contradictory session provenance cannot authorize replay');
+    assert.deepEqual(plain(twice), plain(once), 'rejection stays idempotent');
+  });
+}
 
 test('the explicit legacy seam ignores canonical-only fields and detects meaningful canonical ownership', () => {
   const grammar = grammarModule();
@@ -196,7 +463,7 @@ test('revision CAS survives bounded ID rotation and serializes same-time races',
   assert.equal(loser.reviewStep, 1);
 });
 
-test('assisted review never advances and late error regresses one stage without erasing proof', () => {
+test('assistance never advances while a pre-disclosure late review error regresses one stage', () => {
   const grammar = grammarModule();
   const confirmed = grammar.migrateMasteryRecord({
     masteryVersion: 2, masteryRevision: 7, stage: 'confirmed', reviewStep: 3,
@@ -212,7 +479,13 @@ test('assisted review never advances and late error regresses one stage without 
   assert.equal(assistedFailure.reviewStep, 3);
   assert.equal(assistedFailure.eligibleAt, 10_000);
   assert.equal(assistedFailure.lastRegressionReason, null);
-  const regressed = serverReduce(grammar, assisted, review('00000000-0000-4000-8000-000000000052', assisted, { passed: false, reason: 'confusion_pair' }), 11_000);
+  const regressed = serverReduce(grammar, assisted, review('00000000-0000-4000-8000-000000000052', assisted, {
+    assisted: true, passed: false,
+    independentError: {
+      itemId: 'core.g.1.c.1', diagnosticId: 'core.g.1.c.1.diagnostic.1',
+      reason: 'confusion_pair', confusionPair: 'present_perfect__past_simple',
+    },
+  }), 11_000);
   assert.equal(regressed.stage, 'learned');
   assert.equal(regressed.reviewStep, 3, 'prior review proof is retained');
   assert.equal(regressed.highestReviewStep, 3);
@@ -221,7 +494,7 @@ test('assisted review never advances and late error regresses one stage without 
   assert.equal(regressed.masteryHistory.length, 2);
 });
 
-test('a later unassisted topic error regresses at most one stage and preserves prior proof', () => {
+test('a later independently committed topic error regresses despite subsequent disclosure', () => {
   const grammar = grammarModule();
   const stable = grammar.migrateMasteryRecord({
     masteryVersion: 2, masteryRevision: 9, stage: 'stable', reviewStep: 5,
@@ -231,7 +504,17 @@ test('a later unassisted topic error regresses at most one stage and preserves p
   const error = session('00000000-0000-4000-8000-000000000053', 9, {
     expectedStage: 'stable', expectedReviewStep: 5,
     completedTypes: ['choice'], typeScores: { choice: { correct: 0, total: 4 } },
-    reason: 'auxiliary',
+    assisted: true,
+    independentError: {
+      itemId: 'core.g.1.f.1', diagnosticId: null,
+      reason: 'auxiliary', confusionPair: null,
+    },
+    session: {
+      items: [{
+        id: 'core.g.1.f.1', type: 'input', transfer: false, correct: false,
+        diagnosticId: null, errorCode: 'auxiliary', confusionPair: null, transferStatus: null,
+      }],
+    },
   });
   const regressed = serverReduce(grammar, stable, error, 12_000);
   assert.equal(regressed.stage, 'confirmed');
@@ -241,15 +524,17 @@ test('a later unassisted topic error regresses at most one stage and preserves p
   assert.equal(regressed.lastRegressionReason, 'auxiliary');
   assert.equal(regressed.stats.errors, 5);
 
-  const missingReason = serverReduce(grammar, stable, {
-    ...error, id: '00000000-0000-4000-8000-000000000056', reason: undefined,
-  }, 12_000);
-  assert.equal(missingReason.stage, 'stable', 'missing evidence cannot invent a specific weakness reason');
-  assert.equal(missingReason.lastRegressionReason, null);
+  const missingReason = structuredClone(error);
+  missingReason.id = '00000000-0000-4000-8000-000000000056';
+  delete missingReason.independentError;
+  const missingEvidence = serverReduce(grammar, stable, missingReason, 12_000);
+  assert.equal(missingEvidence.stage, 'stable', 'missing evidence cannot invent a specific weakness reason');
+  assert.equal(missingEvidence.lastRegressionReason, null);
 
-  const assisted = serverReduce(grammar, stable, { ...error,
-    id: '00000000-0000-4000-8000-000000000054', assisted: true,
-  }, 12_000);
+  const preAssisted = structuredClone(error);
+  preAssisted.id = '00000000-0000-4000-8000-000000000054';
+  delete preAssisted.independentError;
+  const assisted = serverReduce(grammar, stable, preAssisted, 12_000);
   assert.equal(assisted.stage, 'stable', 'assisted mistakes are not independent regression proof');
 });
 

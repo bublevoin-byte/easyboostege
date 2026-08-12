@@ -1,3 +1,11 @@
+import {
+  ACTIVE_TENSES_BANK,
+  ACTIVE_TENSES_LEGACY_CHOICE_DIAGNOSTICS,
+  ACTIVE_TENSES_LEGACY_META,
+  ACTIVE_TENSES_LEGACY_OVERRIDES,
+  ACTIVE_TENSES_TRANSFER_PAIR_PLANS,
+} from './grammar-tenses-content.js';
+
 // Authored Grammar 1.0 content migrated into the versioned Grammar 2.0 registry.
 export const GRAMMAR_CATALOG_CONTENT = {
   "version": "grammar-core-v1",
@@ -2796,3 +2804,44 @@ export const GRAMMAR_CATALOG_CONTENT = {
     }
   ]
 };
+
+// Grammar 2.0 keeps every legacy choice/input item intact and adds the two active
+// production levels only to the five tense topics owned by Ticket 03.
+export const GRAMMAR_CATALOG_V1_CONTENT = structuredClone(GRAMMAR_CATALOG_CONTENT);
+GRAMMAR_CATALOG_CONTENT.version = 'grammar-core-v2';
+GRAMMAR_CATALOG_CONTENT.revision = 2;
+for (const [topicId, additions] of Object.entries(ACTIVE_TENSES_BANK)) {
+  const legacy = GRAMMAR_CATALOG_CONTENT.bank[topicId];
+  const metadata = ACTIVE_TENSES_LEGACY_META[topicId];
+  const overrides = ACTIVE_TENSES_LEGACY_OVERRIDES[topicId] || {};
+  legacy.c = legacy.c.map((item, index) => ({
+    ...item,
+    ...(overrides.c?.[index] || {}),
+    ...metadata.c[index],
+    diagnostics: ACTIVE_TENSES_LEGACY_CHOICE_DIAGNOSTICS[topicId][index],
+  })).concat(additions.c);
+  legacy.f = legacy.f.map((item, index) => ({ ...item, ...(overrides.f?.[index] || {}), ...metadata.f[index] })).concat(additions.f);
+  legacy.correction = [...additions.correction];
+  legacy.transform = [...additions.transform];
+  for (const kind of ['c', 'f', 'correction', 'transform']) {
+    const explicitPairPlan = ACTIVE_TENSES_TRANSFER_PAIR_PLANS[topicId]?.[kind] || null;
+    const pairCounts = new Map();
+    const pairIds = new Map();
+    legacy[kind] = legacy[kind].map((item, itemIndex) => {
+      if (explicitPairPlan) return { ...item, transferPair: `grammar-v2:${topicId}:${kind}:${explicitPairPlan[itemIndex]}` };
+      const weakness = `${item.errorSkill}:${item.confusionPair || '-'}`;
+      const count = pairCounts.get(weakness) || 0;
+      pairCounts.set(weakness, count + 1);
+      const pairKey = `${weakness}:${Math.floor(count / 2)}`;
+      if (!pairIds.has(pairKey)) pairIds.set(pairKey, pairIds.size + 1);
+      return { ...item, transferPair: `grammar-v2:${topicId}:${kind}:${pairIds.get(pairKey)}` };
+    });
+    if (explicitPairPlan && (explicitPairPlan.length !== legacy[kind].length
+      || [...new Set(explicitPairPlan)].some((pairId) => explicitPairPlan.filter((candidate) => candidate === pairId).length !== 2))) {
+      throw new Error(`INVALID_EXPLICIT_ACTIVE_TENSE_PAIR_PLAN:${topicId}.${kind}`);
+    }
+    if (!explicitPairPlan && [...pairCounts.values()].some((count) => count % 2 !== 0)) {
+      throw new Error(`INVALID_ACTIVE_TENSE_PAIR_PLAN:${topicId}.${kind}`);
+    }
+  }
+}

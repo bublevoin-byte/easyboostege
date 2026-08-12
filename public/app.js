@@ -413,13 +413,17 @@ async function startLearningWithVerifiedSession(session){
   if(!startStillCurrent())return false;
   store.sync.setOwner(currentUser);
   if(SRV){
-    var served=null;
+    var served=null,localWorkflow=store.loadLocal(currentUser,ADOPTED_OWNER_GENERATION);
     try{served=await apiGet('/api/v1/progress',{headers:{'X-EasyBoost-Expected-Owner':startOwner}})}catch(e){
       if(apiIsAuthorityFailure(e))await invalidateLearningAuthority({owner:startOwner,ownerGeneration:startOwnerGeneration});
       if(!apiCanUseOfflineFallback(e))return false;served=null}
     if(!startStillCurrent())return false;
     if(served&&apiResponseOwner(served)!==startOwner){await invalidateLearningAuthority({owner:startOwner,ownerGeneration:startOwnerGeneration});return false}
     S=store.restore(currentUser,served,store.sync.pendingModules(),ADOPTED_OWNER_GENERATION);
+    /* Active exercise queues are device-local workflow, not mastery authority. Keep the exact
+       generation-bound value (including null) so an immediate reload cannot lose a committed
+       answer or resurrect a completed queue while server-owned mastery still comes from served. */
+    if(Object.hasOwn(localWorkflow,'grammarRunner'))S.grammarRunner=localWorkflow.grammarRunner;
     store.saveLocal(currentUser,S,ADOPTED_OWNER_GENERATION);
     if(!served)try{toast('Нет сети — показан сохранённый прогресс')}catch(e){}}
   if(!startStillCurrent())return false;

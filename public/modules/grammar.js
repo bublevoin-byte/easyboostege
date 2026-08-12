@@ -1,4 +1,5 @@
 import { grammarActivityId, splitLearningActivityDuration } from '../learning-activity-contract.js';
+import { GENERATED_GRAMMAR_REVISION, GRAMMAR_ACTIVE_PRACTICE_TYPES, GRAMMAR_ERROR_CODES, parseGeneratedGrammarItemId, parseGeneratedGrammarItemReference } from '../grammar-domain-contract.js';
 
 export const EasyBoostGrammar = (function initializeGrammarModule(global) {
   'use strict';
@@ -6,17 +7,15 @@ export const EasyBoostGrammar = (function initializeGrammarModule(global) {
   const REVIEW_INTERVAL_DAYS = Object.freeze([7, 16, 35]);
   const MASTERY_INTERVAL_DAYS = Object.freeze([1, 3, 7, 16, 35]);
   const MASTERY_STAGES = Object.freeze(['not_started', 'learning', 'learned', 'confirmed', 'stable']);
-  const REQUIRED_PRACTICE_TYPES = Object.freeze(['choice', 'input', 'correction', 'transform']);
+  const REQUIRED_PRACTICE_TYPES = GRAMMAR_ACTIVE_PRACTICE_TYPES;
   const MASTERY_VERSION = 2;
   const DAY_MS = 86_400_000;
   const MAX_RECENT_EVENT_IDS = 64;
   const MAX_MASTERY_HISTORY = 64;
+  const MAX_REPLAY_MATERIAL_LENGTH = 65_536;
   const MIN_CORRECT_PER_TYPE = 4;
   const MIN_ACCURACY_PER_TYPE = 0.75;
-  const REGRESSION_REASON_CODES = Object.freeze([
-    'construction_choice', 'word_or_verb_form', 'auxiliary', 'agreement',
-    'word_order', 'negation_or_question', 'confusion_pair',
-  ]);
+  const REGRESSION_REASON_CODES = GRAMMAR_ERROR_CODES;
   const REGRESSION_REASON_LABELS = Object.freeze({
     construction_choice: 'выбор конструкции',
     word_or_verb_form: 'форма слова или глагола',
@@ -29,6 +28,30 @@ export const EasyBoostGrammar = (function initializeGrammarModule(global) {
   function normalizeRegressionReason(value) {
     if (REGRESSION_REASON_CODES.includes(value)) return value;
     return null;
+  }
+
+  function generatedHistoryPointerType(item) {
+    return parseGeneratedGrammarItemId(item?.id)?.type || null;
+  }
+
+  function hasValidGeneratedHistoryProvenance(item) {
+    const reference = parseGeneratedGrammarItemReference(item);
+    return reference != null && item?.source === 'generated' && item?.type === reference.type;
+  }
+
+  function historySessionHasValidGeneratedProvenance(session) {
+    if (!session || typeof session !== 'object' || !Array.isArray(session.items)
+      || session.items.length === 0 || typeof session.assisted !== 'boolean') return false;
+    const itemsValid = session.items.every((item) => {
+      const claimsGenerated = item?.source === 'generated'
+        || String(item?.id || '').startsWith('generated.g.q.');
+      return !claimsGenerated || hasValidGeneratedHistoryProvenance(item);
+    });
+    if (!itemsValid) return false;
+    const generatedCount = session.items.filter((item) => generatedHistoryPointerType(item) != null).length;
+    const expectedSource = generatedCount === 0 ? 'builtin'
+      : (generatedCount === session.items.length ? 'generated' : 'mixed');
+    return session.source === expectedSource && (generatedCount === 0 || session.assisted === true);
   }
 
   function finiteTimestamp(value) {
@@ -73,16 +96,55 @@ export const EasyBoostGrammar = (function initializeGrammarModule(global) {
     const recentEventIds = Array.isArray(source.recentEventIds)
       ? [...new Set(source.recentEventIds.filter((id) => typeof id === 'string' && id).slice(-MAX_RECENT_EVENT_IDS))]
       : [];
+    const normalizeHistorySession = (session) => {
+      if (!session || typeof session !== 'object') return null;
+      if (!historySessionHasValidGeneratedProvenance(session)) return null;
+      return {
+        id: typeof session.id === 'string' ? session.id : null,
+        scope: session.scope === 'topic' ? 'topic' : null,
+        mode: ['topic_practice', 'legacy_practice'].includes(session.mode) ? session.mode : null,
+        source: ['builtin', 'mixed', 'generated'].includes(session.source) ? session.source : null,
+        catalog: {
+          version: typeof session.catalog?.version === 'string' ? session.catalog.version : null,
+          revision: boundedInteger(session.catalog?.revision),
+        },
+        items: Array.isArray(session.items) ? session.items.slice(0, 32).map((item) => ({
+          id: typeof item?.id === 'string' ? item.id : null,
+          type: REQUIRED_PRACTICE_TYPES.includes(item?.type) ? item.type : null,
+          transfer: Boolean(item?.transfer),
+          correct: Boolean(item?.correct),
+          diagnosticId: typeof item?.diagnosticId === 'string' ? item.diagnosticId : null,
+          errorCode: normalizeRegressionReason(item?.errorCode),
+          confusionPair: typeof item?.confusionPair === 'string' ? item.confusionPair : null,
+          transferStatus: item?.transferStatus === 'due_next_session' ? 'due_next_session' : null,
+          ...(hasValidGeneratedHistoryProvenance(item)
+            ? { source: 'generated', revision: GENERATED_GRAMMAR_REVISION }
+            : {}),
+        })) : [],
+        startedAt: finiteTimestamp(session.startedAt),
+        assisted: Boolean(session.assisted),
+        endedAt: finiteTimestamp(session.endedAt),
+      };
+    };
     const masteryHistory = Array.isArray(source.masteryHistory)
-      ? source.masteryHistory.filter((entry) => entry && typeof entry === 'object').slice(-MAX_MASTERY_HISTORY).map((entry) => ({
-        eventId: typeof entry.eventId === 'string' ? entry.eventId : null,
-        type: entry.type === 'session_completed' ? 'session_completed' : 'review_completed',
-        at: finiteTimestamp(entry.at),
-        outcome: typeof entry.outcome === 'string' ? entry.outcome : 'recorded',
-        fromStage: MASTERY_STAGES.includes(entry.fromStage) ? entry.fromStage : 'not_started',
-        toStage: MASTERY_STAGES.includes(entry.toStage) ? entry.toStage : stage,
-        reviewStep: boundedInteger(entry.reviewStep, 0, MASTERY_INTERVAL_DAYS.length),
-      }))
+      ? source.masteryHistory.filter((entry) => entry && typeof entry === 'object').slice(-MAX_MASTERY_HISTORY).map((entry) => {
+        const session = entry.type === 'session_completed' ? normalizeHistorySession(entry.session) : null;
+        return {
+          eventId: typeof entry.eventId === 'string' ? entry.eventId : null,
+          type: entry.type === 'session_completed' ? 'session_completed' : 'review_completed',
+          replayFingerprint: (() => {
+            const replayMaterial = String(entry.replayFingerprint || '');
+            return replayMaterial.startsWith('canonical-json-v1:')
+              && replayMaterial.length <= MAX_REPLAY_MATERIAL_LENGTH ? replayMaterial : null;
+          })(),
+          at: finiteTimestamp(entry.at),
+          outcome: typeof entry.outcome === 'string' ? entry.outcome : 'recorded',
+          fromStage: MASTERY_STAGES.includes(entry.fromStage) ? entry.fromStage : 'not_started',
+          toStage: MASTERY_STAGES.includes(entry.toStage) ? entry.toStage : stage,
+          reviewStep: boundedInteger(entry.reviewStep, 0, MASTERY_INTERVAL_DAYS.length),
+          ...(session ? { session } : {}),
+        };
+      })
       : [];
     let reviewStep = isCurrent ? boundedInteger(source.reviewStep, 0, MASTERY_INTERVAL_DAYS.length) : 0;
     if (stage === 'stable') reviewStep = MASTERY_INTERVAL_DAYS.length;
@@ -131,7 +193,38 @@ export const EasyBoostGrammar = (function initializeGrammarModule(global) {
   }
 
   function eventWasApplied(record, event) {
-    return typeof event?.id === 'string' && event.id && record.recentEventIds.includes(event.id);
+    return typeof event?.id === 'string' && event.id && Array.isArray(record?.recentEventIds)
+      && record.recentEventIds.includes(event.id);
+  }
+
+  function canonicalReplayValue(value) {
+    if (Array.isArray(value)) return value.map(canonicalReplayValue);
+    if (!value || typeof value !== 'object') return value;
+    return Object.fromEntries(Object.keys(value).sort().flatMap((key) => (
+      value[key] === undefined ? [] : [[key, canonicalReplayValue(value[key])]]
+    )));
+  }
+
+  function masteryEventReplayFingerprint(event) {
+    return `canonical-json-v1:${JSON.stringify(canonicalReplayValue(event))}`;
+  }
+
+  function masteryEventReplayMatches(record, event) {
+    if (!eventWasApplied(record, event)) return false;
+    if (!['session_completed', 'review_completed'].includes(event?.type)) return true;
+    const storedEntry = record.masteryHistory.find((entry) => entry.eventId === event.id);
+    if (event.type === 'session_completed'
+      && (!storedEntry?.session || !historySessionHasValidGeneratedProvenance(storedEntry.session))) return false;
+    return Boolean(storedEntry?.replayFingerprint)
+      && storedEntry.replayFingerprint === masteryEventReplayFingerprint(event);
+  }
+
+  function completionEventIsDurable({ record, event, result = null } = {}) {
+    if (!event || typeof event.id !== 'string') return false;
+    const outcomes = Array.isArray(result?.results) ? result.results : [result];
+    const serverOutcome = outcomes.find((item) => item?.eventId === event.id);
+    if (serverOutcome?.applied === true || serverOutcome?.replay === true) return true;
+    return Boolean(record && masteryEventReplayMatches(record, event));
   }
 
   function migrateMasteryRecords(records, options = {}) {
@@ -165,9 +258,25 @@ export const EasyBoostGrammar = (function initializeGrammarModule(global) {
     record.stage = stage;
   }
 
-  function markLateRegression(record, event, at) {
-    const reason = normalizeRegressionReason(event.reason);
-    if (!reason) return false;
+  function independentRegressionReason(event) {
+    const evidence = event?.independentError;
+    const reason = normalizeRegressionReason(evidence?.reason);
+    if (!reason || event?.source === 'generated' || event?.assisted !== true) return null;
+    if (event.type === 'review_completed') {
+      return event.passed === false && typeof evidence.itemId === 'string' && evidence.itemId
+        ? reason : null;
+    }
+    if (event.type !== 'session_completed' || !Array.isArray(event.session?.items)) return null;
+    const matched = event.session.items.some((outcome) => outcome && outcome.correct === false
+      && outcome.id === evidence.itemId
+      && outcome.diagnosticId === evidence.diagnosticId
+      && outcome.errorCode === reason
+      && (outcome.confusionPair || null) === (evidence.confusionPair || null));
+    return matched ? reason : null;
+  }
+
+  function markLateRegression(record, reason, at) {
+    if (!normalizeRegressionReason(reason)) return false;
     const isLate = record.stage === 'stable'
       || (record.eligibleAt != null && at >= record.eligibleAt);
     if (!isLate || !['learned', 'confirmed', 'stable'].includes(record.stage)) return false;
@@ -207,11 +316,15 @@ export const EasyBoostGrammar = (function initializeGrammarModule(global) {
     record.masteryHistory = record.masteryHistory.concat({
       eventId: typeof event.id === 'string' ? event.id : null,
       type: event.type,
+      replayFingerprint: masteryEventReplayFingerprint(event),
       at,
       outcome,
       fromStage,
       toStage: record.stage,
       reviewStep: record.reviewStep,
+      ...(event.type === 'session_completed' && event.session ? {
+        session: { ...event.session, items: event.session.items.map((item) => ({ ...item })), endedAt: at },
+      } : {}),
     }).slice(-MAX_MASTERY_HISTORY);
   }
 
@@ -248,12 +361,8 @@ export const EasyBoostGrammar = (function initializeGrammarModule(global) {
         next.stats.correct += correct;
         next.stats.errors += total - correct;
       }
-      const hasIndependentError = stageEligible && [...completedTypes].some((type) => {
-        const score = event.typeScores?.[type];
-        return Number.isInteger(Number(score?.correct)) && Number.isInteger(Number(score?.total))
-          && Number(score.total) > Number(score.correct);
-      });
-      const sessionRegressed = hasIndependentError && markLateRegression(next, event, at);
+      const regressionReason = independentRegressionReason(event);
+      const sessionRegressed = regressionReason != null && markLateRegression(next, regressionReason, at);
       if (stageEligible && next.stage === 'not_started') setStage(next, 'learning', at);
       if (stageEligible && next.stage === 'learning' && completedRequiredPractice(event)) {
         setStage(next, 'learned', at);
@@ -271,8 +380,9 @@ export const EasyBoostGrammar = (function initializeGrammarModule(global) {
       next.lastAttemptAt = at;
       if (event.assisted) next.stats.assistedAttempts += 1;
       let reviewRegressed = false;
-      if (!event.passed && stageEligible) {
-        reviewRegressed = markLateRegression(next, event, at);
+      const regressionReason = independentRegressionReason(event);
+      if (!event.passed && regressionReason != null) {
+        reviewRegressed = markLateRegression(next, regressionReason, at);
       } else if (stageEligible
         && ['learned', 'confirmed'].includes(next.stage)
         && next.eligibleAt != null && at >= next.eligibleAt) {
@@ -331,11 +441,139 @@ export const EasyBoostGrammar = (function initializeGrammarModule(global) {
   function normalizeAnswer(value) {
     return String(value || '')
       .toLowerCase()
-      .replace(/[’’']/gu, '')
+      .replace(/[\u2018\u2019]/gu, "'")
       .replace(/\s+/gu, ' ')
       .trim()
-      .replace(/\.+$/u, '')
+      .replace(/[.?!]+$/u, '')
       .trim();
+  }
+
+  function seededRandom(seed) {
+    let state = 2_166_136_261;
+    for (const character of String(seed ?? 'grammar-active-runner')) {
+      state = Math.imul(state ^ character.charCodeAt(0), 16_777_619) >>> 0;
+    }
+    return function nextSeededValue() {
+      state += 0x6D2B79F5;
+      let value = state;
+      value = Math.imul(value ^ (value >>> 15), value | 1);
+      value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+      return ((value ^ (value >>> 14)) >>> 0) / 4_294_967_296;
+    };
+  }
+
+  function practiceRandom(seedOrRandom) {
+    return typeof seedOrRandom === 'function' ? seedOrRandom : seededRandom(seedOrRandom);
+  }
+
+  function activePracticeLevels(bank) {
+    const source = bank || {};
+    return {
+      choice: Array.isArray(source.c) ? source.c : [],
+      input: Array.isArray(source.f) ? source.f : [],
+      correction: Array.isArray(source.correction) ? source.correction : [],
+      transform: Array.isArray(source.transform) ? source.transform : [],
+    };
+  }
+
+  function hasActivePractice(bank) {
+    const levels = activePracticeLevels(bank);
+    return REQUIRED_PRACTICE_TYPES.every((type) => levels[type].length >= 8);
+  }
+
+  function activeQueueItem(type, question, topic, transfer = false) {
+    return {
+      k: type,
+      q: question,
+      t: topic,
+      voice: question.voice || null,
+      source: 'builtin',
+      transfer,
+    };
+  }
+
+  function buildActiveTopicQueue(bank, topic, seedOrRandom) {
+    if (!hasActivePractice(bank)) return [];
+    const levels = activePracticeLevels(bank);
+    const random = practiceRandom(seedOrRandom);
+    const selected = [];
+    for (const type of REQUIRED_PRACTICE_TYPES) {
+      const pairs = new Map();
+      for (const question of levels[type]) {
+        if (!question.transferPair) return [];
+        if (!pairs.has(question.transferPair)) pairs.set(question.transferPair, []);
+        pairs.get(question.transferPair).push(question);
+      }
+      const candidates = shuffled([...pairs.values()], random).filter((pair) => pair.length === 2);
+      if (candidates.length < 4) return [];
+      const originals = candidates.slice(0, 4).map((pair) => shuffled(pair, random)[0]);
+      selected.push(...originals.map((question) => activeQueueItem(type, question, topic)));
+    }
+    return selected;
+  }
+
+  function checkPracticeAnswer(item, answer) {
+    const question = item?.q || item;
+    const type = question?.type || item?.k;
+    let correct = false;
+    let normalized = null;
+    if (type === 'choice') {
+      const index = typeof answer === 'number' ? answer : Number(answer?.choiceIndex);
+      correct = Number.isInteger(index) && index === question?.a;
+      normalized = Number.isInteger(index) ? String(index) : '';
+      const diagnostic = !correct && Number.isInteger(index) ? question?.diagnostics?.[index] : null;
+      return {
+        correct,
+        normalized,
+        diagnosticId: correct ? null : (diagnostic?.id || null),
+        errorCode: correct ? null : (diagnostic ? diagnostic.errorCode : question?.errorSkill || null),
+        confusionPair: correct ? null : (diagnostic ? diagnostic.confusionPair ?? null : question?.confusionPair ?? null),
+      };
+    } else {
+      normalized = normalizeAnswer(answer);
+      correct = Array.isArray(question?.ans)
+        && question.ans.some((accepted) => normalizeAnswer(accepted) === normalized);
+    }
+    return {
+      correct,
+      normalized,
+      diagnosticId: null,
+      errorCode: correct ? null : (question?.errorSkill || null),
+      confusionPair: correct ? null : (question?.confusionPair || null),
+    };
+  }
+
+  function dueNextSession(weakness) {
+    return {
+      status: 'due_next_session',
+      errorCode: weakness?.errorCode || null,
+      confusionPair: weakness?.confusionPair ?? null,
+      maxTransferAttempts: 1,
+    };
+  }
+
+  function enqueueTransferAfterFailure(session, bank, failedItem, seedOrRandom, chosenWeakness = null) {
+    if (!session?.activeRunner || !failedItem?.q) return null;
+    const weakness = chosenWeakness || {
+      errorCode: failedItem.q.errorSkill,
+      confusionPair: failedItem.q.confusionPair || null,
+    };
+    if (failedItem.transfer) return dueNextSession(weakness);
+    const levels = activePracticeLevels(bank);
+    const reserved = new Set(Array.isArray(session.reservedItemIds) ? session.reservedItemIds : []);
+    const sameWeakness = (question) => question.id !== failedItem.q.id
+      && !reserved.has(question.id)
+      && question.transferPair === failedItem.q.transferPair;
+    const sameType = (levels[failedItem.k] || []).filter(sameWeakness);
+    const candidates = sameType;
+    if (!candidates.length) return dueNextSession(weakness);
+    const random = practiceRandom(seedOrRandom);
+    const question = shuffled(candidates, random)[0];
+    const type = question.type;
+    const transfer = activeQueueItem(type, question, failedItem.t, true);
+    session.reservedItemIds = [...reserved, question.id];
+    session.queue.splice(Math.min(session.queue.length, session.i + 1), 0, transfer);
+    return transfer;
   }
 
   function countClosed(records, topicCount = 20) {
@@ -367,7 +605,13 @@ export const EasyBoostGrammar = (function initializeGrammarModule(global) {
 
   function effectiveBank(bank, generated) {
     const source = bank || {};
-    const ai = generated || [];
+    const ai = (generated || []).filter((item) => {
+      const question = item?.q;
+      const expectedType = item?.k === 'c' ? 'choice' : item?.k === 'f' ? 'input' : null;
+      const reference = parseGeneratedGrammarItemReference(question);
+      return expectedType && question?.type === expectedType
+        && reference?.type === expectedType;
+    });
     return {
       c: (source.c || []).map((question) => ({ ...question, evidenceSource: 'builtin' }))
         .concat(ai.filter((item) => item.k === 'c').map((item) => ({ ...item.q, voice: item.voice || item.q?.voice || null, evidenceSource: 'generated' }))),
@@ -412,8 +656,14 @@ export const EasyBoostGrammar = (function initializeGrammarModule(global) {
     }
     if (correct) {
       session.ok += 1;
-    } else {
-      session.queue.push(item);
+    } else if (!session.activeRunner) {
+      const outcomes = Array.isArray(session.itemOutcomes) ? session.itemOutcomes : [];
+      const attempts = outcomes.filter((outcome) => outcome.id === item?.q?.id).length;
+      if (attempts < 2) {
+        session.queue.push(item);
+      } else if (outcomes.length) {
+        outcomes[outcomes.length - 1].transferStatus = 'due_next_session';
+      }
     }
     session.done += 1;
     return record;
@@ -457,12 +707,19 @@ export const EasyBoostGrammar = (function initializeGrammarModule(global) {
     migrateLegacyMasteryRecords,
     hasCanonicalMasteryRecords,
     reduceMastery,
+    masteryEventReplayMatches,
+    masteryEventReplayFingerprint,
+    completionEventIsDurable,
     masteryView,
     regressionReasonLabel,
     effectiveBank,
     levelTwo,
     shuffled,
     buildTopicQueue,
+    hasActivePractice,
+    buildActiveTopicQueue,
+    checkPracticeAnswer,
+    enqueueTransferAfterFailure,
     applyAnswer,
     formatDuration,
     queueSource,
@@ -481,4 +738,6 @@ export const {
   migrateLegacyMasteryRecords,
   hasCanonicalMasteryRecords,
   reduceMastery,
+  masteryEventReplayMatches,
+  masteryEventReplayFingerprint,
 } = EasyBoostGrammar;

@@ -8,9 +8,13 @@ import {
   decorateCoreGrammar,
   decorateCoreVocabulary,
 } from '../public/modules/core-voice-catalog.js';
-import { GRAMMAR_CATALOG } from '../public/grammar-catalog.js';
+import { GRAMMAR_CATALOG, GRAMMAR_CATALOG_V1 } from '../public/grammar-catalog.js';
 import { getCanonicalVoiceTutorItem } from '../voice-tutor/canonical-items.js';
-import { CORE_VOICE_TUTOR_COVERAGE, CORE_VOICE_TUTOR_ITEMS } from '../voice-tutor/core-catalog.js';
+import {
+  CORE_VOICE_TUTOR_COVERAGE,
+  CORE_VOICE_TUTOR_ITEMS,
+  CORE_VOICE_TUTOR_LEGACY_GRAMMAR_ITEMS,
+} from '../voice-tutor/core-catalog.js';
 import { CORE_VOICE_CATALOG_SOURCE } from '../voice-tutor/generated-core-catalog.js';
 import { maskAcceptedAnswers, practicePromptKey } from '../voice-tutor/practice.js';
 import {
@@ -65,19 +69,55 @@ test('core Voice Tutor consumes the versioned grammar catalog and generated voca
     .reduce((count, levels) => count + Object.values(levels).reduce((sum, questions) => sum + questions.length, 0), 0)
     + GRAMMAR_CATALOG.exams.reduce((count, exam) => count + exam.gaps.length, 0);
   assert.deepEqual(CORE_VOICE_TUTOR_COVERAGE, { grammar: grammarCount, vocabulary: CORE_VOICE_CATALOG_SOURCE.vocabulary.length * 3 });
-  assert.equal(grammarCount, 218);
+  assert.equal(grammarCount, 328);
   assert.equal(CORE_VOICE_TUTOR_COVERAGE.vocabulary, 897);
+  assert.equal(Object.keys(CORE_VOICE_TUTOR_LEGACY_GRAMMAR_ITEMS).length, 218);
+
+  for (const levels of Object.values(GRAMMAR_CATALOG_V1.bank)) {
+    for (const questions of Object.values(levels)) {
+      for (const question of questions) {
+        const legacy = getCanonicalVoiceTutorItem(question.id, question.revision);
+        assert.equal(legacy, CORE_VOICE_TUTOR_LEGACY_GRAMMAR_ITEMS[question.id], `${question.id} v1 registry identity`);
+        assert.equal(legacy.revision, 1, `${question.id} v1 revision`);
+        const legacyTopic = GRAMMAR_CATALOG_V1.topics[question.id.split('.')[2]];
+        assert.deepEqual(legacy.rule, {
+          id: `core.grammar.topic.${legacyTopic.id}.v1`, revision: 1,
+          title: legacyTopic.n.replace(/<[^>]+>/gu, '').replace(/\s+/gu, ' ').trim(),
+          explanation: legacyTopic.th.replace(/<br\s*\/?\s*>/giu, ' ').replace(/<[^>]+>/gu, '').replace(/&nbsp;/gu, ' ').replace(/\s+/gu, ' ').trim(),
+          examples: legacy.rule.examples,
+        }, `${question.id} v1 rule derives from the immutable v1 topic`);
+      }
+    }
+  }
+  for (const exam of GRAMMAR_CATALOG_V1.exams) {
+    for (const gap of exam.gaps) {
+      const legacy = getCanonicalVoiceTutorItem(gap.id, gap.revision);
+      assert.equal(legacy, CORE_VOICE_TUTOR_LEGACY_GRAMMAR_ITEMS[gap.id], `${gap.id} v1 registry identity`);
+      assert.deepEqual([...legacy.reference], gap.ans, `${gap.id} v1 reference`);
+    }
+  }
+  assert.equal(getCanonicalVoiceTutorItem('core.g.1.c.1', 999), null, 'unknown revisions fail closed');
+  assert.equal(getCanonicalVoiceTutorItem('core.g.1.c.6', 1), null, 'a v2-only item cannot resolve through v1');
 
   for (const levels of Object.values(GRAMMAR_CATALOG.bank)) {
     for (const questions of Object.values(levels)) {
       for (const question of questions) {
-        assert.equal(CORE_VOICE_TUTOR_ITEMS[question.id].revision, question.revision, `${question.id} revision`);
+        assert.deepEqual(Object.keys(question.voice).sort(), ['id', 'revision'], `${question.id} exposes a pointer-only DTO`);
+        assert.deepEqual(question.voice, { id: question.id, revision: question.revision }, `${question.id} pointer identity`);
+        const registered = getCanonicalVoiceTutorItem(question.voice.id, question.voice.revision);
+        assert.equal(registered, CORE_VOICE_TUTOR_ITEMS[question.id], `${question.id} resolves through the canonical registry`);
+        assert.equal(registered.revision, question.voice.revision, `${question.id} revision`);
+        const accepted = question.type === 'choice' ? [question.o[question.a]] : question.ans;
+        assert.deepEqual([...registered.reference], accepted, `${question.id} server reference matches the catalog revision`);
       }
     }
   }
   for (const exam of GRAMMAR_CATALOG.exams) {
     for (const gap of exam.gaps) {
+      assert.deepEqual(gap.voice, { id: gap.id, revision: gap.revision }, `${gap.id} pointer identity`);
+      assert.equal(getCanonicalVoiceTutorItem(gap.id, gap.revision), CORE_VOICE_TUTOR_ITEMS[gap.id], `${gap.id} current registry identity`);
       assert.equal(CORE_VOICE_TUTOR_ITEMS[gap.id].revision, gap.revision, `${gap.id} revision`);
+      assert.deepEqual([...CORE_VOICE_TUTOR_ITEMS[gap.id].reference], gap.ans, `${gap.id} current reference`);
     }
   }
 

@@ -1,5 +1,5 @@
 import { voiceTutorModule } from './modules.js';
-import { CORE_VOICE_TUTOR_ITEMS } from './core-catalog.js';
+import { CORE_VOICE_TUTOR_ITEMS, getCoreVoiceTutorItem } from './core-catalog.js';
 import { LISTENING_PILOT_INTERVIEW_DEFINITIONS } from '../public/listening-pilot-interviews-v1.js';
 import { readingSetForVoiceTutor } from '../public/reading-catalog-contract.js';
 import { READING_TASK10_SETS } from '../public/content/reading/task10-v1.js';
@@ -180,8 +180,13 @@ const RESULT_SETS = Object.freeze(Object.fromEntries(CONTEXT_SET_DEFINITIONS.map
   items: Object.freeze(set.items.map((item) => item.id)),
 })])));
 
-export function getCanonicalVoiceTutorItem(itemId) {
-  return ITEMS[String(itemId || '')] || null;
+export function getCanonicalVoiceTutorItem(itemId, revision = null) {
+  const id = String(itemId || '');
+  const core = getCoreVoiceTutorItem(id, revision);
+  if (core) return core;
+  const item = ITEMS[id] || null;
+  if (revision == null) return item;
+  return item?.revision === Number(revision) ? item : null;
 }
 
 export function getCanonicalVoiceTutorResultSet(setId) {

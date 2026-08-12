@@ -4644,8 +4644,9 @@ components:
       additionalProperties: false
     GrammarMasterySessionEvent:
       type: object
-      description: reason is required exactly when an unassisted session has at least one wrong answer (correct less than total); it is forbidden for assisted or fully correct sessions.
-      required: [id, type, expectedRevision, expectedStage, expectedReviewStep, assisted, source, completedTypes, typeScores]
+      description: Practice reveals the correct answer after an error, so every wrong completed session must be assisted. Unassisted session evidence is valid only when all submitted type scores are fully correct. The event UUID is the stable practice-session UUID, and an exact replay is idempotent while changed outcomes under the same UUID conflict.
+      x-easyboost-grammar-type-scores: session-items
+      required: [id, type, expectedRevision, expectedStage, expectedReviewStep, assisted, source, completedTypes, typeScores, session]
       properties:
         id: { type: string, format: uuid }
         type: { type: string, enum: [session_completed] }
@@ -4669,14 +4670,558 @@ components:
             correction: { $ref: '#/components/schemas/GrammarMasteryTypeScore' }
             transform: { $ref: '#/components/schemas/GrammarMasteryTypeScore' }
           additionalProperties: false
-        reason:
+        session: { $ref: '#/components/schemas/GrammarPracticeSession' }
+        independentError:
+          $ref: '#/components/schemas/GrammarIndependentError'
+      allOf:
+        - oneOf:
+            - $ref: '#/components/schemas/GrammarBuiltinAssistedMasterySessionEvent'
+            - $ref: '#/components/schemas/GrammarBuiltinUnassistedMasterySessionEvent'
+            - $ref: '#/components/schemas/GrammarGeneratedAssistedMasterySessionEvent'
+            - $ref: '#/components/schemas/GrammarMixedAssistedMasterySessionEvent'
+        - oneOf:
+            - $ref: '#/components/schemas/GrammarActiveMasterySessionEvidence'
+            - $ref: '#/components/schemas/GrammarLegacyMasterySessionEvidence'
+      additionalProperties: false
+    GrammarActiveMasterySessionEvidence:
+      title: Complete active practice evidence
+      description: A topic_practice run always covers every canonical practice type, so both declarations are exact four-member sets.
+      type: object
+      required: [completedTypes, typeScores, session]
+      properties:
+        completedTypes:
+          type: array
+          minItems: 4
+          maxItems: 4
+          uniqueItems: true
+          items: { type: string, enum: [choice, input, correction, transform] }
+        typeScores:
+          type: object
+          required: [choice, input, correction, transform]
+          properties:
+            choice: { $ref: '#/components/schemas/GrammarMasteryTypeScore' }
+            input: { $ref: '#/components/schemas/GrammarMasteryTypeScore' }
+            correction: { $ref: '#/components/schemas/GrammarMasteryTypeScore' }
+            transform: { $ref: '#/components/schemas/GrammarMasteryTypeScore' }
+          additionalProperties: false
+        session:
+          allOf:
+            - $ref: '#/components/schemas/GrammarActivePracticeSession'
+            - type: object
+              required: [mode]
+              properties:
+                mode: { type: string, enum: [topic_practice] }
+    GrammarLegacyMasterySessionEvidence:
+      title: Truthful partial legacy practice evidence
+      description: A legacy_practice run may cover only part of the canonical practice set; completedTypes and typeScores must declare exactly the types that produced outcomes.
+      type: object
+      required: [completedTypes, typeScores, session]
+      properties:
+        completedTypes:
+          type: array
+          minItems: 1
+          maxItems: 4
+          uniqueItems: true
+          items: { type: string, enum: [choice, input, correction, transform] }
+        typeScores:
+          type: object
+          minProperties: 1
+          maxProperties: 4
+          properties:
+            choice: { $ref: '#/components/schemas/GrammarMasteryTypeScore' }
+            input: { $ref: '#/components/schemas/GrammarMasteryTypeScore' }
+            correction: { $ref: '#/components/schemas/GrammarMasteryTypeScore' }
+            transform: { $ref: '#/components/schemas/GrammarMasteryTypeScore' }
+          additionalProperties: false
+        session:
+          allOf:
+            - $ref: '#/components/schemas/GrammarLegacyPracticeSession'
+            - type: object
+              required: [mode]
+              properties:
+                mode: { type: string, enum: [legacy_practice] }
+    GrammarBuiltinAssistedMasterySessionEvent:
+      title: Assisted practice session
+      description: Built-in practice where an answer was disclosed or the rule was opened; this evidence cannot advance mastery.
+      type: object
+      required: [source, assisted, session]
+      properties:
+        source: { type: string, enum: [builtin] }
+        assisted: { type: boolean, enum: [true] }
+        session:
+          allOf:
+            - $ref: '#/components/schemas/GrammarPracticeSession'
+            - type: object
+              required: [source, assisted]
+              properties:
+                source: { type: string, enum: [builtin] }
+                assisted: { type: boolean, enum: [true] }
+    GrammarBuiltinUnassistedMasterySessionEvent:
+      title: Clean unassisted practice session
+      description: Built-in evidence whose session is also unassisted; all submitted type scores must be fully correct because any wrong answer is automatically disclosed and becomes assisted.
+      type: object
+      required: [source, assisted, session]
+      properties:
+        source: { type: string, enum: [builtin] }
+        assisted: { type: boolean, enum: [false] }
+        session:
+          allOf:
+            - $ref: '#/components/schemas/GrammarPracticeSession'
+            - type: object
+              required: [source, assisted]
+              properties:
+                source: { type: string, enum: [builtin] }
+                assisted: { type: boolean, enum: [false] }
+                items:
+                  type: array
+                  items:
+                    type: object
+                    required: [correct, diagnosticId, errorCode, confusionPair, transferStatus]
+                    properties:
+                      correct: { type: boolean, enum: [true] }
+                      diagnosticId: { nullable: true, enum: [null] }
+                      errorCode: { nullable: true, enum: [null] }
+                      confusionPair: { nullable: true, enum: [null] }
+                      transferStatus: { nullable: true, enum: [null] }
+      not:
+        required: [independentError]
+      allOf:
+        - oneOf:
+            - title: Clean unassisted active scores
+              type: object
+              required: [typeScores, session]
+              properties:
+                typeScores:
+                  type: object
+                  required: [choice, input, correction, transform]
+                  properties:
+                    choice: { type: object, required: [correct, total], properties: { correct: { type: integer, enum: [4] }, total: { type: integer, enum: [4] } }, additionalProperties: false }
+                    input: { type: object, required: [correct, total], properties: { correct: { type: integer, enum: [4] }, total: { type: integer, enum: [4] } }, additionalProperties: false }
+                    correction: { type: object, required: [correct, total], properties: { correct: { type: integer, enum: [4] }, total: { type: integer, enum: [4] } }, additionalProperties: false }
+                    transform: { type: object, required: [correct, total], properties: { correct: { type: integer, enum: [4] }, total: { type: integer, enum: [4] } }, additionalProperties: false }
+                  additionalProperties: false
+                session:
+                  type: object
+                  required: [mode]
+                  properties:
+                    mode: { type: string, enum: [topic_practice] }
+            - title: Clean unassisted legacy scores
+              type: object
+              required: [session]
+              properties:
+                session:
+                  type: object
+                  required: [mode]
+                  properties:
+                    mode: { type: string, enum: [legacy_practice] }
+    GrammarGeneratedAssistedMasterySessionEvent:
+      title: Assisted generated practice session
+      description: Generated evidence and its session have exact generated source and assisted provenance.
+      type: object
+      required: [source, assisted, session]
+      properties:
+        source: { type: string, enum: [generated] }
+        assisted: { type: boolean, enum: [true] }
+        session:
+          allOf:
+            - $ref: '#/components/schemas/GrammarPracticeSession'
+            - type: object
+              required: [source, assisted]
+              properties:
+                source: { type: string, enum: [generated] }
+                assisted: { type: boolean, enum: [true] }
+      not:
+        required: [independentError]
+    GrammarMixedAssistedMasterySessionEvent:
+      title: Assisted mixed practice session
+      description: Mixed evidence and its session have exact mixed source and assisted provenance.
+      type: object
+      required: [source, assisted, session]
+      properties:
+        source: { type: string, enum: [mixed] }
+        assisted: { type: boolean, enum: [true] }
+        session:
+          allOf:
+            - $ref: '#/components/schemas/GrammarPracticeSession'
+            - type: object
+              required: [source, assisted]
+              properties:
+                source: { type: string, enum: [mixed] }
+                assisted: { type: boolean, enum: [true] }
+    GrammarPracticeSession:
+      oneOf:
+        - $ref: '#/components/schemas/GrammarActivePracticeSession'
+        - $ref: '#/components/schemas/GrammarLegacyPracticeSession'
+    GrammarActivePracticeSession:
+      type: object
+      description: Bounded answer-free evidence stored atomically with the mastery event. IDs, outcomes and weakness codes are validated against the indicated server catalog. The server appends endedAt from its authoritative clock when it persists mastery history; clients cannot submit endedAt.
+      required: [id, scope, mode, source, catalog, items, startedAt, assisted]
+      properties:
+        id: { type: string, format: uuid }
+        scope: { type: string, enum: [topic] }
+        mode: { type: string, enum: [topic_practice] }
+        source: { type: string, enum: [builtin] }
+        catalog:
+          type: object
+          required: [version, revision]
+          properties:
+            version: { type: string, enum: [grammar-core-v2] }
+            revision: { type: integer, enum: [2] }
+          additionalProperties: false
+        items:
+          type: array
+          minItems: 16
+          maxItems: 32
+          uniqueItems: true
+          description: Ordered completed item outcomes with exactly four non-transfer originals of every practice type plus at most sixteen distinct authored transfers. Every wrong original is immediately followed by its unique paired transfer, and a wrong transfer ends with due_next_session.
+          items: { $ref: '#/components/schemas/GrammarBuiltinPracticeSessionItem' }
+        startedAt: { type: integer, minimum: 0, maximum: 9007199254740991 }
+        assisted: { type: boolean }
+      additionalProperties: false
+    GrammarLegacyPracticeSession:
+      type: object
+      required: [id, scope, mode, source, catalog, items, startedAt, assisted]
+      properties:
+        id: { type: string, format: uuid }
+        scope: { type: string, enum: [topic] }
+        mode: { type: string, enum: [legacy_practice] }
+        source: { type: string, enum: [builtin, mixed, generated] }
+        catalog:
+          type: object
+          description: The immutable built-in base catalog; generated items override it only through their own required owner-bound item source/revision pointer.
+          required: [version, revision]
+          properties:
+            version: { type: string, enum: [grammar-core-v2] }
+            revision: { type: integer, enum: [2] }
+          additionalProperties: false
+        items:
+          type: array
+          minItems: 1
+          maxItems: 16
+          description: Ordered catalog-backed outcomes. Each original may appear once more only as its single retry; a second wrong outcome is closed with due_next_session and is not requeued.
+          items: { $ref: '#/components/schemas/GrammarLegacyPracticeSessionItem' }
+        startedAt: { type: integer, minimum: 0, maximum: 9007199254740991 }
+        assisted: { type: boolean }
+      oneOf:
+        - $ref: '#/components/schemas/GrammarBuiltinLegacyPracticeSession'
+        - $ref: '#/components/schemas/GrammarGeneratedLegacyPracticeSession'
+        - $ref: '#/components/schemas/GrammarMixedLegacyPracticeSession'
+      additionalProperties: false
+    GrammarBuiltinLegacyPracticeSession:
+      type: object
+      required: [source, items]
+      properties:
+        source: { type: string, enum: [builtin] }
+        items:
+          type: array
+          minItems: 1
+          maxItems: 16
+          items: { $ref: '#/components/schemas/GrammarBuiltinLegacyPracticeSessionItem' }
+    GrammarGeneratedLegacyPracticeSession:
+      type: object
+      required: [source, assisted, items]
+      properties:
+        source: { type: string, enum: [generated] }
+        assisted: { type: boolean, enum: [true] }
+        items:
+          type: array
+          minItems: 1
+          maxItems: 16
+          items: { $ref: '#/components/schemas/GrammarGeneratedLegacyPracticeSessionItem' }
+    GrammarMixedLegacyPracticeSession:
+      type: object
+      description: Mixed legacy evidence is always assisted and contains at least one built-in and one generated outcome.
+      required: [source, assisted, items]
+      properties:
+        source: { type: string, enum: [mixed] }
+        assisted: { type: boolean, enum: [true] }
+        items:
+          type: array
+          minItems: 2
+          maxItems: 16
+          items: { $ref: '#/components/schemas/GrammarLegacyPracticeSessionItem' }
+          allOf:
+            - not:
+                items: { $ref: '#/components/schemas/GrammarBuiltinLegacyPracticeSessionItem' }
+            - not:
+                items: { $ref: '#/components/schemas/GrammarGeneratedLegacyPracticeSessionItem' }
+    GrammarPracticeSessionItem:
+      oneOf:
+        - $ref: '#/components/schemas/GrammarBuiltinPracticeSessionItem'
+        - $ref: '#/components/schemas/GrammarGeneratedPracticeSessionItem'
+    GrammarBuiltinPracticeSessionItem:
+      type: object
+      description: A pointer and outcome only; prompts, accepted answers and references are never accepted from the client or persisted here.
+      required: [id, type, transfer, correct, diagnosticId, errorCode, confusionPair, transferStatus]
+      properties:
+        id:
           type: string
-          description: Closed error taxonomy for an independently wrong answer; omitted when the session had no error.
+          minLength: 1
+          maxLength: 128
+          pattern: '^core\.g\.(?:[1-9]|1[0-9]|20)\.(?:c|c2|f|correction|transform)\.[1-9]\d*$'
+        type: { type: string, enum: [choice, input, correction, transform] }
+        transfer: { type: boolean }
+        correct: { type: boolean }
+        diagnosticId:
+          type: string
+          nullable: true
+          pattern: '^core\.g\.(?:1|2|3|4|13)\.c\.\d+\.diagnostic\.[1-9]\d*$'
+          description: Server-owned selected-option diagnostic pointer; non-null only for a wrong choice outcome.
+        errorCode:
+          type: string
+          nullable: true
           enum: [construction_choice, word_or_verb_form, auxiliary, agreement, word_order, negation_or_question, confusion_pair]
+        confusionPair:
+          type: string
+          nullable: true
+          pattern: '^[a-z0-9]+(?:_[a-z0-9]+)*__(?:[a-z0-9]+(?:_[a-z0-9]+)*)$'
+        transferStatus:
+          type: string
+          nullable: true
+          enum: [due_next_session]
+          description: Required as due_next_session exactly when the single authored active transfer or the one allowed legacy retry is wrong; otherwise null.
+      allOf:
+        - oneOf:
+            - title: Built-in choice pointer
+              required: [id, type]
+              properties:
+                id: { type: string, pattern: '^core\.g\.(?:[1-9]|1[0-9]|20)\.(?:c|c2)\.[1-9]\d*$' }
+                type: { type: string, enum: [choice] }
+            - title: Built-in input pointer
+              required: [id, type]
+              properties:
+                id: { type: string, pattern: '^core\.g\.(?:[1-9]|1[0-9]|20)\.f\.[1-9]\d*$' }
+                type: { type: string, enum: [input] }
+            - title: Built-in correction pointer
+              required: [id, type]
+              properties:
+                id: { type: string, pattern: '^core\.g\.(?:[1-9]|1[0-9]|20)\.correction\.[1-9]\d*$' }
+                type: { type: string, enum: [correction] }
+            - title: Built-in transform pointer
+              required: [id, type]
+              properties:
+                id: { type: string, pattern: '^core\.g\.(?:[1-9]|1[0-9]|20)\.transform\.[1-9]\d*$' }
+                type: { type: string, enum: [transform] }
+      oneOf:
+        - title: Correct active outcome
+          required: [correct, diagnosticId, errorCode, confusionPair, transferStatus]
+          properties:
+            correct: { type: boolean, enum: [true] }
+            diagnosticId: { nullable: true, enum: [null] }
+            errorCode: { nullable: true, enum: [null] }
+            confusionPair: { nullable: true, enum: [null] }
+            transferStatus: { nullable: true, enum: [null] }
+        - title: Wrong active choice original
+          required: [type, correct, transfer, diagnosticId, errorCode, transferStatus]
+          properties:
+            type: { type: string, enum: [choice] }
+            correct: { type: boolean, enum: [false] }
+            transfer: { type: boolean, enum: [false] }
+            diagnosticId: { type: string }
+            errorCode: { type: string, enum: [construction_choice, word_or_verb_form, auxiliary, agreement, word_order, negation_or_question, confusion_pair] }
+            transferStatus: { nullable: true, enum: [null] }
+        - title: Wrong active text original
+          required: [type, correct, transfer, diagnosticId, errorCode, transferStatus]
+          properties:
+            type: { type: string, enum: [input, correction, transform] }
+            correct: { type: boolean, enum: [false] }
+            transfer: { type: boolean, enum: [false] }
+            diagnosticId: { nullable: true, enum: [null] }
+            errorCode: { type: string, enum: [construction_choice, word_or_verb_form, auxiliary, agreement, word_order, negation_or_question, confusion_pair] }
+            transferStatus: { nullable: true, enum: [null] }
+        - title: Wrong active choice transfer
+          required: [type, correct, transfer, diagnosticId, errorCode, transferStatus]
+          properties:
+            type: { type: string, enum: [choice] }
+            correct: { type: boolean, enum: [false] }
+            transfer: { type: boolean, enum: [true] }
+            diagnosticId: { type: string }
+            errorCode: { type: string, enum: [construction_choice, word_or_verb_form, auxiliary, agreement, word_order, negation_or_question, confusion_pair] }
+            transferStatus: { type: string, enum: [due_next_session] }
+        - title: Wrong active text transfer
+          required: [type, correct, transfer, diagnosticId, errorCode, transferStatus]
+          properties:
+            type: { type: string, enum: [input, correction, transform] }
+            correct: { type: boolean, enum: [false] }
+            transfer: { type: boolean, enum: [true] }
+            diagnosticId: { nullable: true, enum: [null] }
+            errorCode: { type: string, enum: [construction_choice, word_or_verb_form, auxiliary, agreement, word_order, negation_or_question, confusion_pair] }
+            transferStatus: { type: string, enum: [due_next_session] }
+      additionalProperties: false
+    GrammarGeneratedPracticeSessionItem:
+      type: object
+      description: Owner-generated outcome pointer only; the server resolves its content inside the owner transaction and never accepts a prompt or answer.
+      required: [id, type, transfer, correct, diagnosticId, errorCode, confusionPair, transferStatus, source, revision]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^generated\.g\.q\.[a-f0-9]{64}\.[a-f0-9]{16}\.(?:c|f)[1-9]\d*$'
+        type: { type: string, enum: [choice, input] }
+        transfer: { type: boolean }
+        correct: { type: boolean }
+        diagnosticId:
+          type: string
+          nullable: true
+          pattern: '^core\.g\.(?:1|2|3|4|13)\.c\.\d+\.diagnostic\.[1-9]\d*$'
+        errorCode:
+          type: string
+          nullable: true
+          enum: [construction_choice, word_or_verb_form, auxiliary, agreement, word_order, negation_or_question, confusion_pair]
+        confusionPair:
+          type: string
+          nullable: true
+          pattern: '^[a-z0-9]+(?:_[a-z0-9]+)*__(?:[a-z0-9]+(?:_[a-z0-9]+)*)$'
+        transferStatus:
+          type: string
+          nullable: true
+          enum: [due_next_session]
+        source:
+          type: string
+          enum: [generated]
+        revision:
+          type: integer
+          enum: [1]
+      allOf:
+        - oneOf:
+            - title: Generated choice pointer
+              required: [id, type]
+              properties:
+                id: { type: string, pattern: '^generated\.g\.q\.[a-f0-9]{64}\.[a-f0-9]{16}\.c[1-9]\d*$' }
+                type: { type: string, enum: [choice] }
+            - title: Generated input pointer
+              required: [id, type]
+              properties:
+                id: { type: string, pattern: '^generated\.g\.q\.[a-f0-9]{64}\.[a-f0-9]{16}\.f[1-9]\d*$' }
+                type: { type: string, enum: [input] }
+        - oneOf:
+            - title: Correct generated outcome
+              required: [correct, diagnosticId, errorCode, confusionPair, transferStatus]
+              properties:
+                correct: { type: boolean, enum: [true] }
+                diagnosticId: { nullable: true, enum: [null] }
+                errorCode: { nullable: true, enum: [null] }
+                confusionPair: { nullable: true, enum: [null] }
+                transferStatus: { nullable: true, enum: [null] }
+            - title: Wrong generated original
+              required: [correct, transfer, errorCode, transferStatus]
+              properties:
+                correct: { type: boolean, enum: [false] }
+                transfer: { type: boolean, enum: [false] }
+                errorCode: { type: string, enum: [construction_choice, word_or_verb_form, auxiliary, agreement, word_order, negation_or_question, confusion_pair] }
+                transferStatus: { nullable: true, enum: [null] }
+            - title: Wrong generated transfer
+              required: [correct, transfer, errorCode, transferStatus]
+              properties:
+                correct: { type: boolean, enum: [false] }
+                transfer: { type: boolean, enum: [true] }
+                errorCode: { type: string, enum: [construction_choice, word_or_verb_form, auxiliary, agreement, word_order, negation_or_question, confusion_pair] }
+                transferStatus: { type: string, enum: [due_next_session] }
+      additionalProperties: false
+    GrammarLegacyPracticeSessionItem:
+      oneOf:
+        - $ref: '#/components/schemas/GrammarBuiltinLegacyPracticeSessionItem'
+        - $ref: '#/components/schemas/GrammarGeneratedLegacyPracticeSessionItem'
+    GrammarBuiltinLegacyPracticeSessionItem:
+      type: object
+      description: Exact built-in legacy outcome. Active transfer and selected-option diagnostic metadata are forbidden; a second wrong retry may close with due_next_session.
+      required: [id, type, transfer, correct, diagnosticId, errorCode, confusionPair, transferStatus]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^core\.g\.(?:[1-9]|1[0-9]|20)\.(?:c|c2|f)\.[1-9]\d*$'
+        type: { type: string, enum: [choice, input] }
+        transfer: { type: boolean, enum: [false] }
+        correct: { type: boolean }
+        diagnosticId:
+          nullable: true
+          enum: [null]
+        errorCode:
+          type: string
+          nullable: true
+          enum: [construction_choice, word_or_verb_form, auxiliary, agreement, word_order, negation_or_question, confusion_pair]
+        confusionPair:
+          nullable: true
+          enum: [null]
+        transferStatus:
+          type: string
+          nullable: true
+          enum: [due_next_session]
+      oneOf:
+        - title: Correct legacy outcome
+          required: [correct, errorCode, transferStatus]
+          properties:
+            correct: { type: boolean, enum: [true] }
+            errorCode: { nullable: true, enum: [null] }
+            transferStatus: { nullable: true, enum: [null] }
+        - title: Wrong legacy outcome or bounded retry
+          required: [correct, errorCode]
+          properties:
+            correct: { type: boolean, enum: [false] }
+            errorCode: { type: string, enum: [construction_choice, word_or_verb_form, auxiliary, agreement, word_order, negation_or_question, confusion_pair] }
+      additionalProperties: false
+    GrammarGeneratedLegacyPracticeSessionItem:
+      type: object
+      description: Exact owner-generated legacy outcome with shared pointer revision and no active transfer or diagnostic metadata.
+      required: [id, type, transfer, correct, diagnosticId, errorCode, confusionPair, transferStatus, source, revision]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^generated\.g\.q\.[a-f0-9]{64}\.[a-f0-9]{16}\.(?:c|f)[1-9]\d*$'
+        type: { type: string, enum: [choice, input] }
+        transfer: { type: boolean, enum: [false] }
+        correct: { type: boolean }
+        diagnosticId:
+          nullable: true
+          enum: [null]
+        errorCode:
+          type: string
+          nullable: true
+          enum: [construction_choice, word_or_verb_form, auxiliary, agreement, word_order, negation_or_question, confusion_pair]
+        confusionPair:
+          nullable: true
+          enum: [null]
+        transferStatus:
+          type: string
+          nullable: true
+          enum: [due_next_session]
+        source: { type: string, enum: [generated] }
+        revision:
+          type: integer
+          enum: [1]
+      allOf:
+        - oneOf:
+            - title: Generated legacy choice pointer
+              required: [id, type]
+              properties:
+                id: { type: string, pattern: '^generated\.g\.q\.[a-f0-9]{64}\.[a-f0-9]{16}\.c[1-9]\d*$' }
+                type: { type: string, enum: [choice] }
+            - title: Generated legacy input pointer
+              required: [id, type]
+              properties:
+                id: { type: string, pattern: '^generated\.g\.q\.[a-f0-9]{64}\.[a-f0-9]{16}\.f[1-9]\d*$' }
+                type: { type: string, enum: [input] }
+        - oneOf:
+            - title: Correct generated legacy outcome
+              required: [correct, errorCode, transferStatus]
+              properties:
+                correct: { type: boolean, enum: [true] }
+                errorCode: { nullable: true, enum: [null] }
+                transferStatus: { nullable: true, enum: [null] }
+            - title: Wrong generated legacy outcome or bounded retry
+              required: [correct, errorCode]
+              properties:
+                correct: { type: boolean, enum: [false] }
+                errorCode: { type: string, enum: [construction_choice, word_or_verb_form, auxiliary, agreement, word_order, negation_or_question, confusion_pair] }
       additionalProperties: false
     GrammarMasteryReviewEvent:
       type: object
-      description: reason is required exactly when an unassisted review is wrong (passed is false); it is forbidden for assisted or passed reviews.
+      description: A wrong review is assisted after answer disclosure. An optional independentError may conservatively regress a due stage only when its bounded pointer matches the built-in server catalog; it never authorizes advancement.
       required: [id, type, expectedRevision, expectedStage, expectedReviewStep, assisted, source, passed]
       properties:
         id: { type: string, format: uuid }
@@ -4687,9 +5232,48 @@ components:
         assisted: { type: boolean }
         source: { type: string, enum: [builtin, mixed, generated] }
         passed: { type: boolean }
+        independentError: { $ref: '#/components/schemas/GrammarIndependentError' }
+      oneOf:
+        - title: Passed review
+          required: [passed]
+          properties:
+            passed: { type: boolean, enum: [true] }
+          not:
+            required: [independentError]
+        - title: Assisted failed review without independent error evidence
+          required: [passed, assisted]
+          properties:
+            passed: { type: boolean, enum: [false] }
+            assisted: { type: boolean, enum: [true] }
+          not:
+            required: [independentError]
+        - title: Assisted failed review with bounded independent error evidence
+          required: [passed, assisted, independentError]
+          properties:
+            passed: { type: boolean, enum: [false] }
+            assisted: { type: boolean, enum: [true] }
+      additionalProperties: false
+    GrammarIndependentError:
+      type: object
+      description: Exact built-in catalog pointer committed before any rule, hint or answer disclosure. No learner answer is accepted. The server verifies diagnostic/reason/confusion fields against the topic catalog before a conservative late regression.
+      required: [itemId, diagnosticId, reason, confusionPair]
+      properties:
+        itemId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^core\.g\.(?:[1-9]|1[0-9]|20)\.(?:c|c2|f|correction|transform)\.[1-9]\d*$'
+        diagnosticId:
+          type: string
+          nullable: true
+          pattern: '^core\.g\.(?:1|2|3|4|13)\.c\.\d+\.diagnostic\.[1-9]\d*$'
         reason:
           type: string
           enum: [construction_choice, word_or_verb_form, auxiliary, agreement, word_order, negation_or_question, confusion_pair]
+        confusionPair:
+          type: string
+          nullable: true
+          pattern: '^[a-z0-9]+(?:_[a-z0-9]+)*__(?:[a-z0-9]+(?:_[a-z0-9]+)*)$'
       additionalProperties: false
     GrammarMasteryTypeScore:
       type: object

@@ -51,6 +51,7 @@ import {
   LISTENING_MATCHING_SETS,
   LISTENING_TRUE_FALSE_SETS,
 } from '../public/listening-pilot-v1.js';
+import { isGrammarErrorCode, parseGrammarConfusionPair } from '../public/grammar-domain-contract.js';
 
 const [
   recorderFile,
@@ -72,6 +73,7 @@ const [
 
 const recorderSource = recorderFile
   .replace(/^import\s*\{[\s\S]*?\}\s*from\s*'\.\/adaptive-session-runtime\.js';\r?\n/mu, '')
+  .replace(/^import .*;\r?\n/gmu, '')
   .replace(/^export /gmu, '')
   .concat('\nwindow.__learningActivityRecorderTest={createLearningActivityEvidence,recordCompletedLearningActivity,recordLearningActivityEvidence};');
 const readingModuleSource = readingModuleFile.replace(/^import[\s\S]*?from ['"][^'"]+['"];\r?\n/gmu, '');
@@ -254,6 +256,8 @@ function createSubjectHarness(subject, { offline = false, slow = false, listenin
     normalizeVocabularyWord,
     personalVocabularyCardId,
     upsertReadingVocabularyCard,
+    isGrammarErrorCode,
+    parseGrammarConfusionPair,
     srsRecordVocabularyOutcome() {},
     lSync() {},
     lSetSlow() {},

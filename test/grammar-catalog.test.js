@@ -4,7 +4,10 @@ import test from 'node:test';
 
 import {
   GRAMMAR_CATALOG,
+  GRAMMAR_CATALOG_REGISTRY,
+  GRAMMAR_CATALOG_V1,
   createGrammarCatalog,
+  getGrammarCatalog,
   grammarCatalogCoverage,
   validateGeneratedGrammarSupplement,
 } from '../public/grammar-catalog.js';
@@ -13,24 +16,32 @@ function editableSource() {
   return JSON.parse(JSON.stringify(GRAMMAR_CATALOG));
 }
 
+function generatedVoice(kind, index) {
+  return {
+    id: `generated.g.q.${'a'.repeat(64)}.${'b'.repeat(16)}.${kind}${index}`,
+    revision: 1,
+  };
+}
+
 test('versioned grammar catalog preserves every built-in topic, exercise and exam gap', () => {
   const coverage = grammarCatalogCoverage(GRAMMAR_CATALOG);
 
-  assert.equal(GRAMMAR_CATALOG.version, 'grammar-core-v1');
-  assert.equal(GRAMMAR_CATALOG.revision, 1);
+  assert.equal(GRAMMAR_CATALOG.version, 'grammar-core-v2');
+  assert.equal(GRAMMAR_CATALOG.revision, 2);
   assert.equal(coverage.groups, 4);
   assert.equal(coverage.topics, 20);
-  assert.equal(coverage.exercises, 200);
+  assert.equal(coverage.exercises, 310);
   assert.equal(coverage.exams, 3);
   assert.equal(coverage.examGaps, 18);
-  assert.deepEqual(coverage.byKind, { c: 100, c2: 25, f: 75 });
-  assert.equal(coverage.itemIds.length, 218);
-  assert.equal(new Set(coverage.itemIds).size, 218);
-  assert.deepEqual(coverage.byTopic[1], { c: 5, c2: 0, f: 5, total: 10 });
-  assert.equal(coverage.contentFingerprint, 'fnv1a32:45cee292');
+  assert.deepEqual(coverage.byKind, { c: 115, c2: 25, f: 90, correction: 40, transform: 40 });
+  assert.equal(coverage.itemIds.length, 328);
+  assert.equal(new Set(coverage.itemIds).size, 328);
+  assert.deepEqual(coverage.byTopic[1], { c: 8, c2: 0, f: 8, correction: 8, transform: 8, total: 32 });
+  assert.equal(coverage.contentFingerprint, 'fnv1a32:2e59251e');
+  assert.equal(coverage.legacyContentFingerprint, 'fnv1a32:45cee292');
 
   assert.equal(GRAMMAR_CATALOG.bank[1].c[0].id, 'core.g.1.c.1');
-  assert.equal(GRAMMAR_CATALOG.bank[1].c[0].revision, 1);
+  assert.equal(GRAMMAR_CATALOG.bank[1].c[0].revision, 2);
   assert.equal(GRAMMAR_CATALOG.bank[1].c[0].o[GRAMMAR_CATALOG.bank[1].c[0].a], 'goes');
   assert.match(GRAMMAR_CATALOG.bank[1].c[0].e, /Present Simple/u);
   assert.equal(GRAMMAR_CATALOG.exams[0].gaps[0].id, 'core.g.exam.1.1');
@@ -43,7 +54,7 @@ test('versioned grammar catalog preserves every built-in topic, exercise and exa
     for (const kind of ['c', 'c2', 'f']) {
       levels[kind].forEach((item, index) => {
         assert.equal(item.id, `core.g.${topicId}.${kind}.${index + 1}`);
-        assert.equal(item.revision, 1);
+        assert.equal(item.revision, 2);
         assert.ok(item.e.trim(), `${item.id} explanation`);
         const answers = item.type === 'choice' ? [item.o[item.a]] : item.ans;
         assert.ok(answers.every((answer) => answer.trim()), `${item.id} answers`);
@@ -54,19 +65,30 @@ test('versioned grammar catalog preserves every built-in topic, exercise and exa
     assert.equal(exam.id, `core.g.exam.${examIndex + 1}`);
     exam.gaps.forEach((gap, gapIndex) => {
       assert.equal(gap.id, `core.g.exam.${examIndex + 1}.${gapIndex + 1}`);
-      assert.equal(gap.revision, 1);
+      assert.equal(gap.revision, 2);
       assert.ok(gap.e.trim());
       assert.ok(gap.ans.every((answer) => answer.trim()));
     });
   });
 });
 
+test('the immutable registry keeps the exact legacy v1 catalog addressable beside current v2', () => {
+  assert.deepEqual(Object.keys(GRAMMAR_CATALOG_REGISTRY), ['grammar-core-v1', 'grammar-core-v2']);
+  assert.equal(getGrammarCatalog('grammar-core-v1'), GRAMMAR_CATALOG_V1);
+  assert.equal(getGrammarCatalog('grammar-core-v2'), GRAMMAR_CATALOG);
+  assert.equal(grammarCatalogCoverage(GRAMMAR_CATALOG_V1).exercises, 200);
+  assert.equal(grammarCatalogCoverage(GRAMMAR_CATALOG_V1).contentFingerprint, 'fnv1a32:45cee292');
+  assert.equal(GRAMMAR_CATALOG_V1.bank[1].c[0].errorSkill, undefined);
+  assert.equal(GRAMMAR_CATALOG.bank[1].c[0].id, GRAMMAR_CATALOG_V1.bank[1].c[0].id);
+  assert.deepEqual(GRAMMAR_CATALOG.bank[1].c[0].o, GRAMMAR_CATALOG_V1.bank[1].c[0].o);
+});
+
 test('grammar catalog is recursively immutable and has stable Voice Tutor pointers', () => {
   assert.equal(Object.isFrozen(GRAMMAR_CATALOG), true);
   assert.equal(Object.isFrozen(GRAMMAR_CATALOG.bank[1].c), true);
   assert.equal(Object.isFrozen(GRAMMAR_CATALOG.bank[1].c[0]), true);
-  assert.deepEqual(GRAMMAR_CATALOG.bank[1].c[0].voice, { id: 'core.g.1.c.1', revision: 1 });
-  assert.deepEqual(GRAMMAR_CATALOG.exams[1].gaps[5].voice, { id: 'core.g.exam.2.6', revision: 1 });
+  assert.deepEqual(GRAMMAR_CATALOG.bank[1].c[0].voice, { id: 'core.g.1.c.1', revision: 2 });
+  assert.deepEqual(GRAMMAR_CATALOG.exams[1].gaps[5].voice, { id: 'core.g.exam.2.6', revision: 2 });
   assert.throws(() => { GRAMMAR_CATALOG.bank[1].c[0].a = 0; }, TypeError);
 });
 
@@ -92,8 +114,26 @@ test('grammar catalog schema rejects malformed or unsupported authored content',
     ['duplicate prompt and answer', (source) => {
       const originalId = source.bank[1].c[1].id;
       source.bank[1].c[1] = { ...source.bank[1].c[0], id: originalId };
+      source.bank[1].c[1].diagnostics = source.bank[1].c[1].diagnostics.map((diagnostic, index) => (
+        diagnostic ? { ...diagnostic, id: `${originalId}.diagnostic.${index + 1}` } : null
+      ));
     }, /DUPLICATE_GRAMMAR_CONTENT/u],
     ['unsupported markup', (source) => { source.topics[1].th = '<script>alert(1)</script>'; }, /UNSUPPORTED_GRAMMAR_MARKUP/u],
+    ['unknown active error skill', (source) => { source.bank[1].correction[0].errorSkill = 'other'; }, /UNKNOWN_GRAMMAR_ERROR_SKILL/u],
+    ['missing active difficulty', (source) => { delete source.bank[1].correction[0].difficulty; }, /INVALID_GRAMMAR_DIFFICULTY/u],
+    ['missing active provenance', (source) => { delete source.bank[1].correction[0].provenance; }, /INVALID_GRAMMAR_PROVENANCE/u],
+    ['unbounded confusion pair', (source) => { source.bank[1].transform[0].confusionPair = 'present/simple'; }, /INVALID_GRAMMAR_CONFUSION_PAIR/u],
+    ['empty correction answer', (source) => { source.bank[1].correction[0].ans = []; }, /EMPTY_GRAMMAR_ANSWER/u],
+    ['missing transform prompt', (source) => { source.bank[1].transform[0].s = ' '; }, /INVALID_GRAMMAR_PROMPT/u],
+    ['wrong correction type', (source) => { source.bank[1].correction[0].type = 'transform'; }, /UNSUPPORTED_GRAMMAR_KIND/u],
+    ['duplicate active semantics', (source) => {
+      const originalId = source.bank[1].correction[1].id;
+      source.bank[1].correction[1] = { ...source.bank[1].correction[0], id: originalId };
+    }, /DUPLICATE_GRAMMAR_CONTENT/u],
+    ['incomplete active choice bank', (source) => { source.bank[1].c.pop(); }, /INCOMPLETE_ACTIVE_GRAMMAR_COVERAGE/u],
+    ['incomplete active input bank', (source) => { source.bank[2].f.pop(); }, /INCOMPLETE_ACTIVE_GRAMMAR_COVERAGE/u],
+    ['incomplete active correction bank', (source) => { source.bank[3].correction.pop(); }, /INCOMPLETE_ACTIVE_GRAMMAR_COVERAGE/u],
+    ['incomplete active transform bank', (source) => { source.bank[13].transform.pop(); }, /INCOMPLETE_ACTIVE_GRAMMAR_COVERAGE/u],
   ];
 
   for (const [label, mutate, expected] of cases) {
@@ -105,14 +145,23 @@ test('grammar catalog schema rejects malformed or unsupported authored content',
 
 test('generated grammar supplements pass through the same strict catalog boundary', () => {
   const topic = validateGeneratedGrammarSupplement('grammar_topic_set', {
-    c: [{ t: ['She ', ' every day.'], o: ['go', 'goes', 'going', 'went'], a: 1, e: 'Present Simple.' }],
-    f: [{ s: 'She _____ (GO) every day.', b: 'GO', ans: ['goes'], e: 'Third person singular.' }],
+    c: [{ t: ['She ', ' every day.'], o: ['go', 'goes', 'going', 'went'], a: 1, e: 'Present Simple.', voice: generatedVoice('c', 1) }],
+    f: [{ s: 'She _____ (GO) every day.', b: 'GO', ans: ['goes'], e: 'Third person singular.', voice: generatedVoice('f', 1) }],
   });
   assert.equal(topic.c[0].o[topic.c[0].a], 'goes');
+  assert.equal(topic.c[0].id, generatedVoice('c', 1).id);
+  assert.equal(topic.c[0].revision, 1);
+  assert.equal(topic.f[0].id, generatedVoice('f', 1).id);
   assert.equal(Object.isFrozen(topic), true);
 
   assert.throws(() => validateGeneratedGrammarSupplement('grammar_topic_set', {
-    c: [{ t: ['She ', '.'], o: ['go', 'goes'], a: 2, e: 'Bad index.' }],
+    c: [{ t: ['She ', ' every day.'], o: ['go', 'goes', 'going', 'went'], a: 1, e: 'Present Simple.' }],
+    f: [],
+  }), /INVALID_GENERATED_GRAMMAR_REFERENCE/u,
+  'runtime-local generated content without a server-addressable pointer cannot enter practice');
+
+  assert.throws(() => validateGeneratedGrammarSupplement('grammar_topic_set', {
+    c: [{ t: ['She ', '.'], o: ['go', 'goes', 'going', 'went'], a: 4, e: 'Bad index.', voice: generatedVoice('c', 1) }],
     f: [],
   }), /INVALID_GRAMMAR_ANSWER_INDEX/u);
   assert.throws(() => validateGeneratedGrammarSupplement('grammar_topic_set', {
@@ -121,8 +170,8 @@ test('generated grammar supplements pass through the same strict catalog boundar
   }), /UNSUPPORTED_GRAMMAR_KIND/u);
   assert.throws(() => validateGeneratedGrammarSupplement('grammar_topic_set', {
     c: [
-      { t: ['She ', '.'], o: ['go', 'goes', 'going', 'went'], a: 1, e: 'Present Simple.' },
-      { t: [' she  ', '!'], o: ['go', 'goes', 'going', 'went'], a: 1, e: 'Same content.' },
+      { t: ['She ', '.'], o: ['go', 'goes', 'going', 'went'], a: 1, e: 'Present Simple.', voice: generatedVoice('c', 1) },
+      { t: [' she  ', '!'], o: ['go', 'goes', 'going', 'went'], a: 1, e: 'Same content.', voice: generatedVoice('c', 2) },
     ],
     f: [],
   }), /DUPLICATE_GRAMMAR_CONTENT/u);

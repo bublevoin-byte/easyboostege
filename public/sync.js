@@ -7,6 +7,7 @@
   const MAX_PENDING_GRAMMAR_EVENTS=20;
   const MAX_ATTEMPT_BYTES=20_000;
   const GRAMMAR_SYNC_CHANNEL='easyboost-grammar-mastery-sync-v1';
+  const NON_SYNC_PROGRESS_MODULES=new Set(['grammarMastery','grammarRunner']);
   let baseline={};
   const flushingByOwner=new Map();
   let owner=null;
@@ -17,7 +18,14 @@
   let grammarSyncChannel=null;
 
   function clone(value){return JSON.parse(JSON.stringify(value==null?null:value))}
+  function synchronizedModules(value){const result=clone(value||{});NON_SYNC_PROGRESS_MODULES.forEach(function(key){delete result[key]});return result}
   function equal(left,right){try{return JSON.stringify(left)===JSON.stringify(right)}catch(_){return false}}
+  function canonicalJson(value){
+    if(Array.isArray(value))return'['+value.map(canonicalJson).join(',')+']';
+    if(value&&typeof value==='object')return'{'+Object.keys(value).sort().map(function(key){return JSON.stringify(key)+':'+canonicalJson(value[key])}).join(',')+'}';
+    return JSON.stringify(value)
+  }
+  function canonicalEqual(left,right){try{return canonicalJson(left)===canonicalJson(right)}catch(_){return false}}
   function readModuleStore(){
     try{
       const parsed=JSON.parse(localStorage.getItem(STORAGE_KEY)||'null');
@@ -184,19 +192,19 @@
     },ownerKey)
   }
   function shouldRetry(error){return !error||!error.status||error.status>=500}
-  function changedModules(progress){const modules={};Object.keys(progress||{}).forEach(function(key){if(key!=='grammarMastery'&&!equal(progress[key],baseline[key]))modules[key]=clone(progress[key])});return modules}
+  function changedModules(progress){const modules={};Object.keys(progress||{}).forEach(function(key){if(!NON_SYNC_PROGRESS_MODULES.has(key)&&!equal(progress[key],baseline[key]))modules[key]=clone(progress[key])});return modules}
   function queueModules(modules,ownerKey=owner){
     if(!ownerKey||isOwnerDeleted(ownerKey)||!ownerAuthorityCurrent(ownerKey))return false;
-    if(Object.hasOwn(modules,'grammarMastery')){modules={...modules};delete modules.grammarMastery}
+    modules=synchronizedModules(modules);
     const store=readModuleStore(),previous=readPending(ownerKey);
-    const merged={...((pendingMatchesOwner(previous,ownerKey)&&previous.modules)||{}),...clone(modules)};
+    const merged={...synchronizedModules((pendingMatchesOwner(previous,ownerKey)&&previous.modules)||{}),...modules};
     if(isOwnerDeleted(ownerKey)||!ownerAuthorityCurrent(ownerKey))return false;
     store.owners[ownerKey]={modules:merged,queuedAt:Date.now(),ownerGeneration:ownerAuthGeneration};return writeModuleStore(store)
   }
   function applyBaseline(modules){baseline={...baseline,...clone(modules)}}
 
   async function sendModules(modules,ownerKey=owner,expectedGeneration=ownerAuthGeneration){
-    if(Object.hasOwn(modules,'grammarMastery')){modules={...modules};delete modules.grammarMastery}
+    modules=synchronizedModules(modules);
     if(!Object.keys(modules).length)return true;
     if(isOwnerDeleted(ownerKey)||!ownerAuthorityMatches(ownerKey,expectedGeneration))return false;
     try{
@@ -334,21 +342,20 @@
     let candidates;try{candidates=clone(entries)}catch(_){return grammarQueueError('GRAMMAR_MASTERY_EVENT_INVALID','Некорректный результат тренировки.')}
     if(candidates.some(function(item){return !Number.isInteger(Number(item&&item.topicId))||!item.event||typeof item.event.id!=='string'||!item.event.id}))return grammarQueueError('GRAMMAR_MASTERY_EVENT_INVALID','Некорректный результат тренировки.');
     const store=readGrammarEventStore();
-    let batches=ownerGrammarBatches(store,ownerKey).map(function(batch){
-      const kept=batch.events.filter(function(existing){
-        if(!Number.isInteger(existing&&existing._conflictRevision))return true;
-        return !candidates.some(function(candidate){return Number(candidate.topicId)===Number(existing.topicId)
-          &&Number(candidate.event.expectedRevision)>=existing._conflictRevision})
-      });
-      return{id:batch.id,events:kept}
-    }).filter(function(batch){return batch.events.length});
+    let batches=ownerGrammarBatches(store,ownerKey);
     const events=batches.flatMap(function(batch){return batch.events});
     const existingIds=new Set(events.map(function(item){return item.event.id}));
     const requestedIds=new Set(candidates.map(function(item){return item.event.id}));
     if(requestedIds.size!==candidates.length)return grammarQueueError('GRAMMAR_MASTERY_EVENT_INVALID','Некорректный результат тренировки.');
     const duplicateBatch=batches.find(function(batch){return batch.events.length===candidates.length
       &&candidates.every(function(item){return batch.events.some(function(existing){return existing.event.id===item.event.id})})});
-    if(duplicateBatch)return{queued:true,duplicate:true,batchId:duplicateBatch.id};
+    if(duplicateBatch){
+      const exact=candidates.every(function(item){return duplicateBatch.events.some(function(existing){return Number(existing.topicId)===Number(item.topicId)&&existing.event.id===item.event.id&&canonicalEqual(existing.event,item.event)})});
+      return exact?{queued:true,duplicate:true,batchId:duplicateBatch.id}:grammarQueueError('GRAMMAR_MASTERY_EVENT_CONFLICT','Этот результат уже ожидает синхронизации с другим содержимым.')
+    }
+    const blockedTopics=new Set(events.filter(function(item){return Number.isInteger(item&&item._conflictRevision)})
+      .map(function(item){return Number(item.topicId)}));
+    if(candidates.some(function(item){return blockedTopics.has(Number(item.topicId))}))return grammarQueueError('GRAMMAR_MASTERY_EVENT_CONFLICT','Previous evidence for this topic is still unresolved.');
     const retryableCount=events.filter(function(item){return !Number.isInteger(item&&item._conflictRevision)}).length;
     if(retryableCount+candidates.length>MAX_PENDING_GRAMMAR_EVENTS)return grammarQueueError('GRAMMAR_MASTERY_QUEUE_FULL','Подключитесь для синхронизации: очередь результатов заполнена.');
     if(candidates.some(function(item){return existingIds.has(item.event.id)}))return grammarQueueError('GRAMMAR_MASTERY_EVENT_INVALID','Некорректный результат тренировки.');
@@ -360,15 +367,7 @@
     return writeGrammarEventStore(store)?{queued:true,batchId:batchId}:{...grammarQueueError('GRAMMAR_MASTERY_QUEUE_WRITE_FAILED','Не удалось безопасно сохранить результат.')}
   }
   function coalesceGrammarConflictMarkers(batches){
-    const latest=new Map();
-    batches.forEach(function(batch){batch.events.forEach(function(item){
-      if(!Number.isInteger(item&&item._conflictRevision))return;
-      const topicId=Number(item.topicId),current=latest.get(topicId);
-      if(!current||item._conflictRevision>=current._conflictRevision)latest.set(topicId,item)
-    })});
-    return batches.map(function(batch){return{id:batch.id,events:batch.events.filter(function(item){
-      return !Number.isInteger(item&&item._conflictRevision)||latest.get(Number(item.topicId))===item
-    })}}).filter(function(batch){return batch.events.length})
+    return batches.filter(function(batch){return batch.events.length})
   }
   function replaceGrammarMasteryBatch(ownerKey,expectedGeneration,batchId,events){
     if(isOwnerDeleted(ownerKey)||!durableOwnerAuthorityMatches(ownerKey,expectedGeneration))return false;
@@ -379,28 +378,17 @@
     if(!durableOwnerAuthorityMatches(ownerKey,expectedGeneration))return false;
     if(coalesced.length)store.owners[ownerKey]={ownerGeneration:expectedGeneration,batches:coalesced};else delete store.owners[ownerKey];return writeGrammarEventStore(store)
   }
-  function rebaseGrammarEvent(item,record){
-    const id=global.crypto&&typeof global.crypto.randomUUID==='function'?global.crypto.randomUUID():null;
-    if(!id||!record)return null;
-    return{topicId:item.topicId,event:{...item.event,id:id,expectedRevision:record.masteryRevision,expectedStage:record.stage,expectedReviewStep:record.reviewStep}}
-  }
-  function canSafelyRebaseGrammarEvent(item){
-    const event=item&&item.event;
-    return Boolean(event&&event.type==='session_completed'&&Array.isArray(event.completedTypes)
-      &&event.completedTypes.length<4&&!event.reason&&event.completedTypes.every(function(type){
-        const score=event.typeScores&&event.typeScores[type];
-        return score&&Number.isInteger(score.correct)&&Number.isInteger(score.total)&&score.correct===score.total
-      }))
-  }
   async function flushGrammarMasteryEventsUnlocked(ownerKey,targetBatchId=null,expectedGeneration=ownerAuthGeneration){
       const batches=await withGrammarQueueLock(function(){return ownerAuthorityMatches(ownerKey,expectedGeneration)
         ?clone(ownerGrammarBatches(readGrammarEventStore(),ownerKey)):[]},ownerKey);
       if(!Array.isArray(batches)||!batches.length||isOwnerDeleted(ownerKey)||!ownerAuthorityMatches(ownerKey,expectedGeneration))return false;
-      let last=false,target=false;
+      let last=false,target=false;const blockedTopics=new Set();
       for(const batch of batches){
         if(isOwnerDeleted(ownerKey)||!ownerAuthorityMatches(ownerKey,expectedGeneration))break;
         const blocked=batch.events.filter(function(item){return Number.isInteger(item&&item._conflictRevision)});
-        let events=batch.events.filter(function(item){return !Number.isInteger(item&&item._conflictRevision)});
+        blocked.forEach(function(item){blockedTopics.add(Number(item.topicId))});
+        let events=batch.events.filter(function(item){return !Number.isInteger(item&&item._conflictRevision)
+          &&!blockedTopics.has(Number(item.topicId))});
         if(!events.length)continue;
         for(let attempt=0;attempt<2&&events.length;attempt++){
           try{
@@ -413,10 +401,10 @@
               for(const item of events){
                 const result=byId.get(item.event.id);
                 if(result&&(result.applied||result.replay))continue;
-                const rebased=result&&result.conflict&&canSafelyRebaseGrammarEvent(item)?rebaseGrammarEvent(item,result.record):null;
                 const conflictRevision=Number(result&&result.record&&result.record.masteryRevision);
-                remaining.push(rebased||(result&&result.conflict&&Number.isInteger(conflictRevision)
-                  ?{...item,_conflictRevision:conflictRevision}:item))
+                remaining.push(result&&result.conflict&&Number.isInteger(conflictRevision)
+                  ?{...item,_conflictRevision:conflictRevision}:item);
+                if(result&&result.conflict&&Number.isInteger(conflictRevision))blockedTopics.add(Number(item.topicId))
               }
               if(!replaceGrammarMasteryBatch(ownerKey,expectedGeneration,batch.id,remaining))return null;
               publishGrammarMasterySync(ownerKey,expectedGeneration,events,last&&last.results);
@@ -444,7 +432,7 @@
     if(!ownerAuthorityCurrent(requestedOwner))return false;
     if(flushingByOwner.has(requestedOwner))return flushingByOwner.get(requestedOwner);
     const ownerKey=owner,expectedGeneration=ownerAuthGeneration,pending=readPending(ownerKey);
-    const modules=pendingMatchesOwner(pending,ownerKey)&&pending.modules;
+    const modules=synchronizedModules((pendingMatchesOwner(pending,ownerKey)&&pending.modules)||{});
     const hasModules=Boolean(modules&&Object.keys(modules).length);
     const hasAttempts=ownerAttempts(readAttemptStore(),ownerKey).some(function(item){return attemptGeneration(item)===expectedGeneration});
     const hasGrammarEvents=Boolean(ownerGrammarBatches(readGrammarEventStore(),ownerKey).length);
@@ -512,7 +500,14 @@
   function setBaseline(progress){baseline=clone(progress||{});return flush()}
 
   if(typeof window!=='undefined')window.addEventListener('online',flush);
-  function pendingModules(){const pending=readPending();return pendingMatchesOwner(pending)?pending.modules||{}:{}}
+  function pendingModules(){
+    const pending=readPending();
+    const modules=pendingMatchesOwner(pending)?pending.modules||{}:{};
+    if(!Object.keys(modules).some(function(key){return NON_SYNC_PROGRESS_MODULES.has(key)}))return modules;
+    const sanitized=clone(modules);
+    NON_SYNC_PROGRESS_MODULES.forEach(function(key){delete sanitized[key]});
+    return sanitized
+  }
   function pendingModuleAttempts(){return clone(ownerAttempts(readAttemptStore()).filter(function(item){return attemptGeneration(item)===ownerAuthGeneration}).map(publicAttempt))}
   function pendingGrammarMasteryEvents(){return clone(ownerGrammarEvents(readGrammarEventStore()))}
   function canQueueGrammarMasteryEvent(required=1){
@@ -523,7 +518,7 @@
   global.EasyBoostSync=Object.freeze({
     queueProgress:queueProgress,saveProgress:saveProgress,saveModuleAttempt:saveModuleAttempt,saveGrammarMasteryEvent:saveGrammarMasteryEvent,saveGrammarMasteryEvents:saveGrammarMasteryEvents,setBaseline:setBaseline,setOwner:setOwner,confirmOwner:confirmOwner,adoptOwner:adoptOwner,clearOwner:clearOwner,deleteOwner:deleteOwner,isOwnerDeleted:isOwnerDeleted,ownerAuthSnapshot:ownerAuthSnapshot,ownerBoundGeneration:ownerBoundGeneration,withOwnerIncarnationLock:withOwnerIncarnationLock,
     flush:flush,pendingModules:pendingModules,pendingModuleAttempts:pendingModuleAttempts,pendingGrammarMasteryEvents:pendingGrammarMasteryEvents,canQueueGrammarMasteryEvent:canQueueGrammarMasteryEvent,onGrammarMasterySync:onGrammarMasterySync,onOwnerDeleted:onOwnerDeleted,
-    hasPending:function(){return pendingMatchesOwner(readPending())
+    hasPending:function(){return Object.keys(pendingModules()).length>0
       ||ownerAttempts(readAttemptStore()).some(function(item){return attemptGeneration(item)===ownerAuthGeneration})
       ||Boolean(ownerGrammarEvents(readGrammarEventStore()).length)},
   });

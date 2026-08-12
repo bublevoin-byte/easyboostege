@@ -3,19 +3,51 @@ import fs from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
 import { grammarActivityId, splitLearningActivityDuration } from '../public/learning-activity-contract.js';
+import {
+  GENERATED_GRAMMAR_REVISION,
+  GRAMMAR_ACTIVE_PRACTICE_TYPES,
+  GRAMMAR_ERROR_CODES,
+  isGrammarConfusionPair,
+  isGrammarErrorCode,
+  parseGrammarConfusionPair,
+  parseGeneratedGrammarItemId,
+  parseGeneratedGrammarItemReference,
+} from '../public/grammar-domain-contract.js';
 import { GRAMMAR_CATALOG, validateGeneratedGrammarSupplement } from '../public/grammar-catalog.js';
+import { migrateMasteryRecord, reduceMastery } from '../public/modules/grammar.js';
+import { grammarMasteryEventSchema } from '../validation/grammar-mastery.js';
 
 const rawSource = await fs.readFile(new URL('../public/learning-activity-recorder.js', import.meta.url), 'utf8');
 const grammarScreenSource = await fs.readFile(new URL('../public/screens/grammar.js', import.meta.url), 'utf8');
 const grammarModuleSource = (await fs.readFile(new URL('../public/modules/grammar.js', import.meta.url), 'utf8'))
-  .replace(/^import .*;\r?\n/mu, '')
+  .replace(/^import .*;\r?\n/gmu, '')
   .replace(/^export /gmu, '');
 const source = rawSource
   .replace(/^import\s*\{[\s\S]*?\}\s*from\s*'\.\/adaptive-session-runtime\.js';\r?\n/mu, '')
+  .replace(/^import .*;\r?\n/gmu, '')
   .replace(/^export /gmu, '')
   .concat('\nwindow.__learningActivityRecorderTest={recordCompletedLearningActivity};');
 
 const ATTEMPT_ID = '10000000-0000-4000-8000-000000000031';
+const GENERATED_REQUEST_HASH = 'a'.repeat(64);
+const GENERATED_RESULT_HASH = 'b'.repeat(16);
+
+function generatedVoice(kind, index) {
+  return { id: `generated.g.q.${GENERATED_REQUEST_HASH}.${GENERATED_RESULT_HASH}.${kind}${index}`, revision: 1 };
+}
+
+function generatedTopicSupplement() {
+  return validateGeneratedGrammarSupplement('grammar_topic_set', {
+    c: Array.from({ length: 3 }, (_, index) => ({
+      t: [`Generated choice ${index + 1}: She `, ' every day.'],
+      o: ['go', 'goes', 'going', 'went'], a: 1, e: 'Present Simple.', voice: generatedVoice('c', index + 1),
+    })),
+    f: Array.from({ length: 3 }, (_, index) => ({
+      s: `Generated input ${index + 1}: She _____ (GO) every day.`,
+      b: 'GO', ans: ['goes'], e: 'Third person singular.', voice: generatedVoice('f', index + 1),
+    })),
+  });
+}
 
 function recorderHarness(active = null) {
   const adaptive = [];
@@ -31,6 +63,7 @@ function recorderHarness(active = null) {
   vm.runInNewContext(source, {
     window,
     GRAMMAR_CATALOG, validateGeneratedGrammarSupplement,
+    isGrammarErrorCode, parseGrammarConfusionPair,
     adaptiveRuntimeSnapshot: () => ({ active }),
     completeAdaptiveModuleActivity: async (completion) => {
       adaptive.push(completion);
@@ -51,6 +84,7 @@ function grammarScreenHarness(options = {}) {
   const capacityRequests = [];
   const masteryBatches = [];
   const masteryEvents = [];
+  const timers = [];
   const elements = new Map();
   const element = (id) => {
     if (!elements.has(id)) {
@@ -65,7 +99,7 @@ function grammarScreenHarness(options = {}) {
   class TestDate extends Date {
     static now() { return now; }
   }
-  const S = {
+  const S = options.state ? JSON.parse(JSON.stringify(options.state)) : {
     gram: {
       3: { st: 2, ok: 0, err: 0, sr: 4, due: 1 },
       18: { st: 2, ok: 0, err: 0, sr: 4, due: 1 },
@@ -97,6 +131,11 @@ function grammarScreenHarness(options = {}) {
         masteryBatches.push(JSON.parse(JSON.stringify(entries)));
         return options.saveGrammarMasteryEvents ? options.saveGrammarMasteryEvents(entries) : false;
       },
+      pendingGrammarMasteryEvents() {
+        const pending = typeof options.pendingGrammarMasteryEvents === 'function'
+          ? options.pendingGrammarMasteryEvents() : options.pendingGrammarMasteryEvents;
+        return JSON.parse(JSON.stringify(pending || []));
+      },
       canQueueGrammarMasteryEvent(required = 1) { capacityRequests.push(required); return true; },
     },
   };
@@ -104,6 +143,9 @@ function grammarScreenHarness(options = {}) {
     window,
     GRAMMAR_CATALOG, validateGeneratedGrammarSupplement,
     grammarActivityId, splitLearningActivityDuration,
+    GENERATED_GRAMMAR_REVISION, GRAMMAR_ACTIVE_PRACTICE_TYPES, GRAMMAR_ERROR_CODES,
+    isGrammarConfusionPair, isGrammarErrorCode, parseGrammarConfusionPair,
+    parseGeneratedGrammarItemId, parseGeneratedGrammarItemReference,
     adaptiveRuntimeSnapshot: () => ({ active }),
     completeAdaptiveModuleActivity: async (completion) => {
       adaptive.push(JSON.parse(JSON.stringify(completion)));
@@ -123,12 +165,14 @@ function grammarScreenHarness(options = {}) {
     save() {}, setTxt() {}, tab() {},
     ui: { animate() {}, markAnswer() {} }, wDeco: () => '',
     decorateCoreGrammar() {},
-    document: { getElementById: element, createElement: () => element(`created:${elements.size}`) },
+    document: { getElementById: (id) => (window.__skipGrammarArea && id === 'g_area' ? null : element(id)), createElement: () => element(`created:${elements.size}`) },
     crypto: { randomUUID: () => `10000000-0000-4000-8000-${String(++uuid).padStart(12, '0')}` },
     Date: TestDate, Math: testMath,
-    setInterval: () => 1, clearInterval() {}, setTimeout: (callback) => callback(),
+    setInterval: () => 1, clearInterval() {},
+    setTimeout: (callback) => { if (options.deferTimers) timers.push(callback); else callback(); },
     console,
   });
+  context.isGrammarErrorCode = isGrammarErrorCode;
   vm.runInContext(grammarModuleSource, context);
   context.grammarModule = window.EasyBoostGrammar;
   vm.runInContext(source, context);
@@ -139,19 +183,32 @@ function grammarScreenHarness(options = {}) {
     .concat(`
       window.__grammarScreenTest={
         gStart:gStart,gReview:gReview,gTheory:gTheory,gResume:gResume,gExamStart:gExamStart,gExamCheck:gExamCheck,
+        restore:initGrammar,
         finish:gFinish,finishReview:gFinishRev,sessionMode:function(){return GS&&GS.mode},sessionTopic:function(){return GS&&GS.t},
+        sessionSnapshot:function(){var item=GS&&GS.queue[GS.i];return GS?{sessionId:GS.sessionId,topic:GS.t,index:GS.i,
+          itemId:item&&item.q.id,phase:GS.phase,done:GS.done,ok:GS.ok}:null},
+        gToThemes:function(){window.__skipGrammarArea=true;try{gToThemes()}finally{window.__skipGrammarArea=false}},
         masteryAssisted:function(){return Boolean(GS&&GS.masteryAssisted)},masteryStage:function(topic){return gRec(topic).stage},
         commitCurrentAnswer:function(correct){var item=GS&&GS.queue[GS.i];if(item)gAnswer(correct,item)},
         ruleDisabled:function(){return Boolean(document.getElementById('g_rule_btn').disabled)},
-        currentItem:function(){var item=GS&&GS.queue[GS.i];return item?{topic:item.t||GS.t,kind:item.k}:null},
+        currentItem:function(){var item=GS&&GS.queue[GS.i];return item?{topic:item.t||GS.t,kind:item.k,id:item.q.id,
+          errorSkill:item.q.errorSkill,confusionPair:item.q.confusionPair||null}:null},
+        renderTransfer:function(topic,type){var levels=G_BANK[topic],kind=type==='choice'?'c':type==='input'?'f':type;
+          var question=levels[kind][0];GS={activeRunner:false,t:topic,queue:[{k:type,q:question,t:topic,transfer:true}],i:0,
+            ok:0,done:0,phase:'question'};gRenderQ();return document.getElementById('g_area').innerHTML},
         answerCurrent:function(correct){var item=GS&&GS.queue[GS.i];if(!item)return;
-          if(item.k==='f'){var input=document.getElementById('g_inp');input.dataset={};input.style={};
+          if(['f','input','correction','transform'].includes(item.k)){var input=document.getElementById('g_inp');input.dataset={};input.style={};
             input.value=correct?item.q.ans[0]:'definitely wrong';gSubmit()}
           else{var buttons=item.q.o.map(function(){return{dataset:{},style:{},setAttribute:function(){},
             querySelector:function(){return{setAttribute:function(){},innerHTML:''}}}});
             buttons.forEach(function(button){button.parentElement={querySelectorAll:function(){return buttons}}});
             var choice=correct?item.q.a:(item.q.a+1)%item.q.o.length;gPick(buttons[choice],choice)}
           if(!correct)gAfterExplain()}
+        ,answerChoice:function(choice){var item=GS&&GS.queue[GS.i];if(!item||!['c','c2','choice'].includes(item.k))return;
+          var buttons=item.q.o.map(function(){return{dataset:{},style:{},setAttribute:function(){},
+            querySelector:function(){return{setAttribute:function(){},innerHTML:''}}}});
+          buttons.forEach(function(button){button.parentElement={querySelectorAll:function(){return buttons}}});
+          var correct=choice===item.q.a;gPick(buttons[choice],choice);if(!correct)gAfterExplain()}
       };
     `);
   vm.runInContext(executableScreen, context);
@@ -163,31 +220,426 @@ function grammarScreenHarness(options = {}) {
     masteryBatches,
     masteryEvents,
     area: element('g_area'),
+    stateSnapshot() { return JSON.parse(JSON.stringify(S)); },
+    runTimers() { while (timers.length) timers.shift()(); },
     advance(milliseconds) { now += milliseconds; },
     setActive(value) { active = value; },
   };
 }
 
-test('automatic post-answer explanation does not retroactively mark independent errors assisted', async () => {
-  const harness = grammarScreenHarness();
+test('automatic disclosure keeps the run assisted while preserving the independently committed wrong pointer', async () => {
+  const harness = grammarScreenHarness({
+    saveGrammarMasteryEvent: (topicId, event) => ({ eventId: event.id, applied: true }),
+  });
   harness.screen.gStart(3);
+  const failedItem = harness.screen.currentItem();
   harness.screen.answerCurrent(false);
   while (harness.screen.currentItem()) harness.screen.answerCurrent(true);
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(harness.masteryEvents.length, 1);
-  assert.equal(harness.masteryEvents[0].event.assisted, false);
-  assert.ok(['construction_choice', 'word_or_verb_form', 'auxiliary', 'agreement',
-    'word_order', 'negation_or_question', 'confusion_pair'].includes(harness.masteryEvents[0].event.reason));
+  assert.equal(harness.masteryEvents[0].event.assisted, true);
+  assert.equal(Object.hasOwn(harness.masteryEvents[0].event, 'reason'), false);
   assert.equal(harness.ordinary[0].metadata.helpUsed, true, 'the automatic explanation stays observable');
+  const failedQuestion = GRAMMAR_CATALOG.bank[failedItem.topic].c.find((item) => item.id === failedItem.id);
+  const selectedDiagnostic = failedQuestion.diagnostics[(failedQuestion.a + 1) % failedQuestion.o.length];
+  assert.deepEqual(JSON.parse(JSON.stringify(harness.masteryEvents[0].event.independentError)), {
+    itemId: failedItem.id,
+    diagnosticId: selectedDiagnostic.id,
+    reason: selectedDiagnostic.errorCode,
+    confusionPair: selectedDiagnostic.confusionPair || null,
+  }, 'the pre-disclosure wrong answer remains exact bounded regression evidence');
+  assert.equal(harness.ordinary[0].metadata.grammarErrorCode, selectedDiagnostic.errorCode);
+  assert.equal(harness.ordinary[0].metadata.grammarConfusionPair, selectedDiagnostic.confusionPair ?? undefined);
+  assert.equal(harness.ordinary[0].metadata.grammarTopicId, 3);
 
   harness.screen.gReview();
+  const failedReviewItem = harness.screen.currentItem();
   harness.screen.answerCurrent(false);
   while (harness.screen.currentItem()) harness.screen.answerCurrent(true);
   await new Promise((resolve) => setImmediate(resolve));
   const failed = harness.masteryBatches.at(-1).find((entry) => entry.event.passed === false);
-  assert.equal(failed.event.assisted, false);
-  assert.ok(['construction_choice', 'word_or_verb_form', 'auxiliary', 'agreement',
-    'word_order', 'negation_or_question', 'confusion_pair'].includes(failed.event.reason));
+  assert.equal(failed.event.assisted, true);
+  assert.equal(Object.hasOwn(failed.event, 'reason'), false);
+  assert.equal(failed.event.independentError.itemId, failedReviewItem.id);
+  assert.ok(GRAMMAR_ERROR_CODES.includes(failed.event.independentError.reason));
+});
+
+test('an explicitly null chosen confusion pair survives the client event, server validation and canonical history', async () => {
+  const harness = grammarScreenHarness();
+  harness.screen.gStart(3);
+  let failed = false;
+  while (harness.screen.currentItem()) {
+    const current = harness.screen.currentItem();
+    const question = current.kind === 'choice'
+      ? GRAMMAR_CATALOG.bank[current.topic].c.find((item) => item.id === current.id)
+      : null;
+    const nullPairChoice = question?.diagnostics.findIndex((diagnostic, index) => (
+      index !== question.a && diagnostic?.confusionPair === null
+    ));
+    if (!failed && Number.isInteger(nullPairChoice) && nullPairChoice >= 0) {
+      harness.screen.answerChoice(nullPairChoice);
+      assert.equal(harness.screen.currentItem()?.kind, 'choice', 'the paired authored transfer is rendered next');
+      harness.screen.answerCurrent(false);
+      failed = true;
+    } else {
+      harness.screen.answerCurrent(true);
+    }
+  }
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(failed, true, 'the deterministic queue contains a reviewed null-pair distractor');
+  assert.equal(harness.masteryEvents.length, 1);
+  const { topicId, event } = harness.masteryEvents[0];
+  const wrong = event.session.items.filter((item) => !item.correct);
+  assert.equal(wrong.length, 2);
+  assert.deepEqual(wrong.map((item) => [item.transfer, item.confusionPair, item.transferStatus]), [
+    [false, null, null],
+    [true, null, 'due_next_session'],
+  ]);
+  assert.equal(grammarMasteryEventSchema.safeParse({ topicId, event }).success, true,
+    'the server accepts the exact catalog-owned null diagnostic and adjacent transfer');
+
+  const initial = migrateMasteryRecord({
+    masteryVersion: 2, masteryRevision: event.expectedRevision, stage: event.expectedStage,
+    reviewStep: event.expectedReviewStep, eligibleAt: 1,
+  });
+  const stored = reduceMastery(initial, event, { now: 2_000, clockAuthority: 'server' });
+  const storedWrong = stored.masteryHistory.at(-1).session.items.filter((item) => !item.correct);
+  assert.deepEqual(storedWrong.map((item) => [item.transfer, item.confusionPair, item.transferStatus]), [
+    [false, null, null],
+    [true, null, 'due_next_session'],
+  ], 'canonical history preserves null instead of substituting the item-level confusion pair');
+});
+
+test('a stale correct-answer timer cannot advance a replacement Grammar session', () => {
+  const harness = grammarScreenHarness({ deferTimers: true });
+  harness.screen.gStart(3);
+  harness.screen.answerCurrent(true);
+  assert.equal(harness.screen.sessionSnapshot().phase, 'advance');
+  harness.screen.gStart(4);
+  const replacement = harness.screen.sessionSnapshot();
+
+  harness.runTimers();
+
+  assert.deepEqual(harness.screen.sessionSnapshot(), replacement);
+});
+
+test('topic completion emits one stable answer-free session identity and ordered bounded outcomes', async () => {
+  const harness = grammarScreenHarness();
+  harness.screen.gStart(3);
+  const sessionId = harness.screen.sessionSnapshot().sessionId;
+  while (harness.screen.currentItem()) harness.screen.answerCurrent(true);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(harness.masteryEvents.length, 1);
+  const event = harness.masteryEvents[0].event;
+  assert.equal(event.id, sessionId);
+  assert.equal(event.session.id, sessionId);
+  assert.equal(event.session.scope, 'topic');
+  assert.equal(event.session.mode, 'topic_practice');
+  assert.equal(event.session.source, 'builtin');
+  assert.deepEqual(event.session.catalog, { version: GRAMMAR_CATALOG.version, revision: GRAMMAR_CATALOG.revision });
+  assert.equal(event.session.items.length, 16);
+  assert.equal(new Set(event.session.items.map((item) => item.id)).size, 16);
+  assert.deepEqual(new Set(event.session.items.map((item) => item.type)), new Set(['choice', 'input', 'correction', 'transform']));
+  assert.ok(event.session.items.every((item) => item.correct === true && item.transfer === false
+    && item.errorCode === null && item.confusionPair === null));
+  assert.equal(Number.isSafeInteger(event.session.startedAt), true);
+  assert.equal(Object.hasOwn(event.session, 'endedAt'), false, 'the server owns the canonical completion time');
+  assert.equal(event.session.assisted, false);
+  assert.equal(JSON.stringify(event.session).includes('answer'), false, 'server evidence cannot expose answer keys');
+});
+
+test('a real legacy topic emits one stable bounded session without claiming four-type mastery', async () => {
+  const harness = grammarScreenHarness();
+  harness.screen.gStart(5);
+  const sessionId = harness.screen.sessionSnapshot().sessionId;
+  while (harness.screen.currentItem()) harness.screen.answerCurrent(true);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(harness.masteryEvents.length, 1);
+  const { topicId, event } = harness.masteryEvents[0];
+  assert.equal(topicId, 5);
+  assert.equal(event.id, sessionId);
+  assert.equal(event.session.id, sessionId);
+  assert.equal(event.session.mode, 'legacy_practice');
+  assert.equal(event.session.items.length, 7);
+  assert.deepEqual(event.session.items.map((item) => item.id),
+    [...new Set(event.session.items.map((item) => item.id))], 'legacy outcomes retain exact queue order and identity');
+  assert.deepEqual(new Set(event.completedTypes), new Set(['choice', 'input']));
+  assert.ok(event.session.items.every((item) => item.correct && !item.transfer
+    && item.diagnosticId === null && item.errorCode === null && item.confusionPair === null));
+  assert.equal(grammarMasteryEventSchema.safeParse({ topicId, event }).success, true,
+    'the production server schema accepts the real legacy runner event');
+  assert.equal(harness.ordinary[0].metadata.mode, 'legacy_practice',
+    'ordinary evidence and the mastery session use the same canonical mode');
+  assert.equal(harness.ordinary[0].activity, 'grammar_forms_topic_5',
+    'the stable topic activity id remains compatible with existing adaptive mappings');
+
+  const stored = reduceMastery(migrateMasteryRecord(), event, { now: 2_000, clockAuthority: 'server' });
+  assert.equal(stored.stage, 'learning', 'choice/input-only legacy evidence cannot claim four-type learned mastery');
+  assert.deepEqual(stored.masteryHistory.at(-1).session.items, event.session.items);
+});
+
+test('legacy completion_pending survives a crash and retries the exact UUID without duplicate history', async () => {
+  const first = grammarScreenHarness();
+  first.screen.gStart(5);
+  while (first.screen.currentItem()) first.screen.answerCurrent(true);
+  await new Promise((resolve) => setImmediate(resolve));
+  const pendingState = first.stateSnapshot();
+  const pendingEvent = pendingState.grammarRunner.completionEvent;
+  assert.equal(pendingState.grammarRunner.mode, 'legacy_practice');
+  assert.equal(pendingState.grammarRunner.phase, 'completion_pending');
+  assert.equal(pendingEvent.session.items.length, 7);
+
+  first.screen.gToThemes();
+  const navigatedState = first.stateSnapshot();
+  assert.deepEqual(navigatedState.grammarRunner, pendingState.grammarRunner,
+    'ordinary navigation preserves the exact non-durable completion for later reload and replay');
+
+  for (const [label, begin] of [
+    ['new topic practice', (screen) => screen.gStart(3)],
+    ['due review', (screen) => screen.gReview()],
+  ]) {
+    const attempted = grammarScreenHarness({ state: navigatedState });
+    begin(attempted.screen);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(attempted.masteryEvents.length, 1, `${label} retries the pending completion first`);
+    assert.deepEqual(attempted.masteryEvents[0].event, pendingEvent,
+      `${label} cannot replace the exact pending UUID and outcomes`);
+    const retainedRunner = attempted.stateSnapshot().grammarRunner;
+    assert.equal(retainedRunner.phase, 'completion_pending');
+    assert.equal(retainedRunner.sessionId, navigatedState.grammarRunner.sessionId);
+    assert.deepEqual(retainedRunner.completionEvent, navigatedState.grammarRunner.completionEvent,
+      `${label} leaves the exact recoverable event intact until durable acceptance`);
+  }
+
+  const reloaded = grammarScreenHarness({ state: navigatedState });
+  reloaded.screen.restore();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(reloaded.masteryEvents.length, 1);
+  assert.deepEqual(reloaded.masteryEvents[0].event, pendingEvent,
+    'startup retry reuses the exact persisted completion event and UUID');
+  assert.equal(reloaded.stateSnapshot().grammarRunner.phase, 'completion_pending',
+    'a non-durable result retains the same recoverable legacy completion');
+
+  const initial = migrateMasteryRecord();
+  const once = reduceMastery(initial, pendingEvent, { now: 2_000, clockAuthority: 'server' });
+  const replayed = reduceMastery(once, pendingEvent, { now: 3_000, clockAuthority: 'server' });
+  assert.equal(replayed.masteryRevision, once.masteryRevision);
+  assert.equal(replayed.masteryHistory.length, 1, 'the exact startup replay cannot duplicate history');
+  const changed = { ...pendingEvent, expectedRevision: pendingEvent.expectedRevision + 1 };
+  assert.equal(reloaded.screen.sessionSnapshot().phase, 'completion_pending');
+  assert.equal(JSON.stringify(changed) === JSON.stringify(pendingEvent), false,
+    'changed material remains distinguishable for the canonical conflict path');
+});
+
+test('a queued conflict marker never clears the exact completion_pending runner', async () => {
+  let pending = [];
+  const first = grammarScreenHarness({
+    pendingGrammarMasteryEvents: () => pending,
+    saveGrammarMasteryEvent: async (topicId, event) => {
+      pending = [{ topicId, event, _conflictRevision: 4 }];
+      return {
+        eventId: event.id, applied: false, replay: false, conflict: true,
+        record: { masteryVersion: 2, masteryRevision: 4, stage: 'learning', reviewStep: 0 },
+      };
+    },
+  });
+  first.screen.gStart(5);
+  while (first.screen.currentItem()) first.screen.answerCurrent(true);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const state = first.stateSnapshot();
+  assert.equal(state.grammarRunner.phase, 'completion_pending');
+  assert.equal(pending[0].event.id, state.grammarRunner.completionEvent.id);
+  assert.deepEqual(JSON.parse(JSON.stringify(pending[0].event)), state.grammarRunner.completionEvent);
+
+  first.screen.gToThemes();
+  const reloaded = grammarScreenHarness({ state: first.stateSnapshot(), pendingGrammarMasteryEvents: () => pending });
+  assert.equal(reloaded.stateSnapshot().grammarRunner.phase, 'completion_pending',
+    'navigation and reload retain the exact UUID until applied or exact replay is acknowledged');
+});
+
+test('a legacy input answered incorrectly after mid-session reload keeps its canonical weakness', async () => {
+  const first = grammarScreenHarness();
+  first.screen.gStart(5);
+  let guard = 0;
+  while (first.screen.currentItem()?.kind !== 'f' && guard < 8) {
+    first.screen.answerCurrent(true);
+    guard += 1;
+  }
+  assert.equal(first.screen.currentItem()?.kind, 'f', 'the real topic-5 queue reaches a legacy input');
+  const state = first.stateSnapshot();
+  assert.equal(state.grammarRunner.phase, 'question');
+
+  const reloaded = grammarScreenHarness({ state });
+  reloaded.screen.restore();
+  assert.equal(reloaded.screen.currentItem()?.kind, 'input',
+    'addressable reload restores the catalog type instead of the legacy queue alias');
+  reloaded.screen.answerCurrent(false);
+  while (reloaded.screen.currentItem()) reloaded.screen.answerCurrent(true);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const { topicId, event } = reloaded.masteryEvents[0];
+  const failedInput = event.session.items.find((item) => item.type === 'input' && !item.correct);
+  assert.equal(failedInput?.errorCode, 'word_or_verb_form');
+  const parsed = grammarMasteryEventSchema.safeParse({ topicId, event });
+  assert.equal(parsed.success, true, JSON.stringify(parsed.error?.issues));
+});
+
+test('a legacy wrong answer is automatically assisted and cannot claim learned mastery', async () => {
+  const harness = grammarScreenHarness();
+  harness.screen.gStart(5);
+  harness.screen.answerCurrent(false);
+  while (harness.screen.currentItem()) harness.screen.answerCurrent(true);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const { topicId, event } = harness.masteryEvents[0];
+  assert.equal(topicId, 5);
+  assert.equal(event.assisted, true);
+  assert.equal(event.session.assisted, true);
+  assert.equal(Object.hasOwn(event, 'reason'), false);
+  assert.equal(event.session.items.filter((item) => !item.correct).length, 1);
+  const parsed = grammarMasteryEventSchema.safeParse({ topicId, event });
+  assert.equal(parsed.success, true, JSON.stringify(parsed.error?.issues));
+  const stored = reduceMastery(migrateMasteryRecord(), event, { now: 2_000, clockAuthority: 'server' });
+  assert.equal(stored.stage, 'not_started', 'assisted legacy evidence remains visible without stage advancement');
+  assert.equal(stored.masteryHistory.length, 1);
+
+  const pendingState = harness.stateSnapshot();
+  assert.equal(pendingState.grammarRunner.phase, 'completion_pending');
+  const reloaded = grammarScreenHarness({ state: pendingState });
+  reloaded.screen.restore();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(reloaded.masteryEvents.length, 1,
+    'a failed legacy retry queue remains restorable instead of being discarded as a duplicate');
+  assert.deepEqual(reloaded.masteryEvents[0].event, event,
+    'startup flush retries the exact assisted legacy UUID and outcomes');
+});
+
+test('generated legacy practice is addressable, assisted and reloads the exact durable event', async () => {
+  const generated = generatedTopicSupplement();
+  const harness = grammarScreenHarness({ state: {
+    gram: {}, grammarMastery: {},
+    gramAi: { 5: [
+      ...generated.c.map((q) => ({ k: 'c', q, voice: q.voice })),
+      ...generated.f.map((q) => ({ k: 'f', q, voice: q.voice })),
+    ] },
+  } });
+  harness.screen.gStart(5);
+  let sawGenerated = false;
+  let attempts = 0;
+  while (harness.screen.currentItem() && attempts < 20) {
+    sawGenerated ||= String(harness.screen.currentItem().id).startsWith('generated.g.q.');
+    harness.screen.answerCurrent(true);
+    attempts += 1;
+  }
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.ok(attempts <= 8 && harness.screen.currentItem() === null,
+    `the generated legacy queue completes without turning an unaddressable answer into retries: ${JSON.stringify({ attempts, current: harness.screen.currentItem() })}`);
+  assert.equal(sawGenerated, true, 'the deterministic legacy queue actually selected generated content');
+  const { topicId, event } = harness.masteryEvents[0];
+  assert.equal(topicId, 5);
+  assert.equal(event.source, 'mixed');
+  assert.equal(event.assisted, true, 'any generated participation is conservative assisted evidence');
+  assert.ok(event.session.items.some((item) => item.id.startsWith('generated.g.q.')));
+  assert.equal(JSON.stringify(event.session).includes('answer'), false);
+  assert.equal(grammarMasteryEventSchema.safeParse({ topicId, event }).success, true);
+  const pendingState = harness.stateSnapshot();
+  assert.equal(pendingState.grammarRunner.phase, 'completion_pending');
+
+  const reloaded = grammarScreenHarness({ state: pendingState });
+  reloaded.screen.restore();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(reloaded.masteryEvents[0].event, event,
+    'reload/startup retries the exact generated-addressable UUID without persisting prompts or answers');
+  const stored = reduceMastery(migrateMasteryRecord(), event, { now: 2_000, clockAuthority: 'server' });
+  assert.equal(stored.stage, 'not_started');
+});
+
+test('a generated input answered incorrectly after reload retains its pointer type and weakness', async () => {
+  const generated = generatedTopicSupplement();
+  const state = {
+    gram: {}, grammarMastery: {},
+    gramAi: { 5: [
+      ...generated.c.map((q) => ({ k: 'c', q, voice: q.voice })),
+      ...generated.f.map((q) => ({ k: 'f', q, voice: q.voice })),
+    ] },
+  };
+  const first = grammarScreenHarness({ state });
+  first.screen.gStart(5);
+  let guard = 0;
+  while (!(first.screen.currentItem()?.kind === 'f'
+    && first.screen.currentItem()?.id.startsWith('generated.g.q.')) && guard < 8) {
+    first.screen.answerCurrent(true);
+    guard += 1;
+  }
+  assert.equal(first.screen.currentItem()?.kind, 'f');
+  assert.match(first.screen.currentItem().id, /^generated\.g\.q\./u);
+
+  const reloaded = grammarScreenHarness({ state: first.stateSnapshot() });
+  reloaded.screen.restore();
+  assert.equal(reloaded.screen.currentItem()?.kind, 'input');
+  reloaded.screen.answerCurrent(false);
+  while (reloaded.screen.currentItem()) reloaded.screen.answerCurrent(true);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const { topicId, event } = reloaded.masteryEvents[0];
+  const failedInput = event.session.items.find((item) => item.type === 'input'
+    && item.source === 'generated' && !item.correct);
+  assert.equal(failedInput?.errorCode, 'word_or_verb_form');
+  assert.equal(failedInput?.revision, 1);
+  assert.equal(event.assisted, true);
+  const parsed = grammarMasteryEventSchema.safeParse({ topicId, event });
+  assert.equal(parsed.success, true, JSON.stringify(parsed.error?.issues));
+});
+
+test('legacy practice gives every original at most one retry and closes a second miss as due', async () => {
+  const harness = grammarScreenHarness();
+  harness.screen.gStart(5);
+  let attempts = 0;
+  while (harness.screen.currentItem() && attempts < 15) {
+    harness.screen.answerCurrent(false);
+    attempts += 1;
+  }
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(attempts, 14, 'seven originals produce at most seven retries, never an unbounded queue');
+  assert.equal(harness.screen.currentItem(), null);
+  const { topicId, event } = harness.masteryEvents[0];
+  assert.equal(event.session.items.length, 14);
+  assert.equal(event.session.items.filter((item) => item.transferStatus === 'due_next_session').length, 7);
+  assert.equal(grammarMasteryEventSchema.safeParse({ topicId, event }).success, true);
+  const pendingState = harness.stateSnapshot();
+  const reloaded = grammarScreenHarness({ state: pendingState });
+  reloaded.screen.restore();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(reloaded.masteryEvents[0].event, event,
+    'the bounded unresolved legacy event survives reload with the exact UUID');
+});
+
+test('transfer renderer keeps all four authored types labelled and natively keyboard reachable', () => {
+  const harness = grammarScreenHarness();
+  const labels = {
+    choice: 'УРОВЕНЬ 1 · ВЫБОР',
+    input: 'УРОВЕНЬ 2 · ВВОД',
+    correction: 'УРОВЕНЬ 3 · ИСПРАВЛЕНИЕ',
+    transform: 'УРОВЕНЬ 4 · ПРЕОБРАЗОВАНИЕ',
+  };
+  for (const [type, label] of Object.entries(labels)) {
+    const html = harness.screen.renderTransfer(2, type);
+    assert.match(html, new RegExp(`data-grammar-level="${type}"[^>]*>ТРАНСФЕР · ${label}`), type);
+    assert.doesNotMatch(html, /tabindex="-1"/u, `${type} is not removed from keyboard order`);
+    if (type === 'choice') {
+      assert.match(html, /<button[^>]+onclick="gPick\(this,0\)"/u);
+      assert.doesNotMatch(html, /id="g_inp"/u);
+    } else {
+      assert.match(html, /<input id="g_inp" aria-label="[^"]+"/u, `${type} input label`);
+      assert.match(html, /onkeydown="if\(event\.key==='Enter'\)gSubmit\(\)"/u, `${type} Enter submit`);
+    }
+  }
 });
 
 test('a rule click after answer commitment cannot retroactively mark the answer assisted', () => {
@@ -230,6 +682,8 @@ test('an assisted failed review never claims that the topic regressed', async ()
   const assistedEvent = harness.masteryBatches[0].find((entry) => entry.event.assisted).event;
   assert.equal(Object.hasOwn(assistedEvent, 'reason'), false,
     'assisted evidence cannot claim a specific independent weakness');
+  assert.equal(Object.hasOwn(assistedEvent, 'independentError'), false,
+    'help before commitment cannot be turned into late-error regression evidence');
   assert.doesNotMatch(harness.area.innerHTML, /СНОВА В РАБОТЕ/u);
   assert.match(harness.area.innerHTML, /ИЗУЧЕНО/u);
 });
@@ -242,6 +696,7 @@ test('assisted topic errors omit the independent regression reason', async () =>
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(harness.masteryEvents[0].event.assisted, true);
   assert.equal(Object.hasOwn(harness.masteryEvents[0].event, 'reason'), false);
+  assert.equal(Object.hasOwn(harness.masteryEvents[0].event, 'independentError'), false);
 });
 
 test('an early passed review never reuses an older regression badge', async () => {
@@ -474,19 +929,21 @@ test('a different active adaptive block fails closed without recording disguised
   assert.equal(harness.ordinary.length, 0);
 });
 
-test('grammar topic, mixed review and exam completions emit observable owner-bound or adaptive calls', async () => {
+test('grammar topic, filtered review and exam completions emit observable owner-bound or adaptive calls', async () => {
   assert.match(
     grammarScreenSource,
     /import \{recordCompletedLearningActivity\} from '\.\.\/learning-activity-recorder\.js';/u,
   );
   assert.doesNotMatch(grammarScreenSource, /completeAdaptiveModuleActivity/u);
   assert.doesNotMatch(grammarScreenSource, /apiPost\('\/api\/v1\/module-attempts'/u);
-  const harness = grammarScreenHarness();
+  const harness = grammarScreenHarness({
+    saveGrammarMasteryEvent: (topicId, event) => ({ eventId: event.id, applied: true }),
+  });
 
   harness.screen.gStart(3);
   harness.advance(500);
   while (harness.screen.currentItem()) harness.screen.answerCurrent(true);
-  await Promise.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(harness.ordinary.length, 1);
   assert.equal(harness.ordinary[0].module, 'grammar');
   assert.equal(harness.ordinary[0].activity, 'grammar_forms_topic_3');
@@ -494,7 +951,7 @@ test('grammar topic, mixed review and exam completions emit observable owner-bou
   assert.ok(harness.ordinary[0].maxScore > 0);
   assert.equal(harness.ordinary[0].durationMs, 500);
   assert.deepEqual(harness.ordinary[0].metadata, {
-    mode: 'topic_practice', source: 'builtin', helpUsed: false, hintsUsed: 0,
+    mode: 'topic_practice', source: 'builtin', helpUsed: false, hintsUsed: 0, grammarTopicId: 3,
   });
 
   harness.screen.gReview();
@@ -526,7 +983,7 @@ test('grammar topic, mixed review and exam completions emit observable owner-bou
     },
     {
       activity: 'grammar_transformations_review', score: 2, maxScore: 3,
-      metadata: { mode: 'spaced_review', source: 'generated', helpUsed: true, hintsUsed: 0 },
+      metadata: { mode: 'spaced_review', source: 'builtin', helpUsed: true, hintsUsed: 0 },
     },
   ]);
   assert.equal(review.reduce((sum, attempt) => sum + attempt.durationMs, 0), 1_001);

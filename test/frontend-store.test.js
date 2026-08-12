@@ -25,12 +25,21 @@ function deferred() {
   return { promise, resolve };
 }
 
-function createStartLearningHarness({ deferTaskBank = false, deferProgress = false, progressError = null, progressResponseOwner = 'grammar-owner' } = {}) {
+function createStartLearningHarness({
+  deferTaskBank = false,
+  deferProgress = false,
+  progressError = null,
+  progressResponseOwner = 'grammar-owner',
+  localWorkflow = {},
+  restoredState = { learned: 1 },
+} = {}) {
   const taskBank = deferred();
   const progress = deferred();
   const calls = [];
   let progressRequest = null;
   let restoredPayload = null;
+  let savedState = null;
+  const localReads = [];
   const deleted = new Set();
   const context = vm.createContext({
     currentUser: 'grammar-owner',
@@ -73,8 +82,13 @@ function createStartLearningHarness({ deferTaskBank = false, deferProgress = fal
         pendingModules() { return {}; },
         setBaseline() { calls.push('baseline'); },
       },
-      restore(_owner, serverState) { calls.push('restore'); restoredPayload = serverState; return { learned: 1 }; },
-      saveLocal() { calls.push('save'); return true; },
+      loadLocal(owner, ownerGeneration) {
+        calls.push('load-local'); localReads.push({ owner, ownerGeneration }); return structuredClone(localWorkflow);
+      },
+      restore(_owner, serverState) {
+        calls.push('restore'); restoredPayload = serverState; return structuredClone(restoredState);
+      },
+      saveLocal(_owner, state) { calls.push('save'); savedState = structuredClone(state); return true; },
     },
     tab(screen) { calls.push(`tab:${screen}`); },
     START_HOOKS: [async () => { calls.push('hook'); }],
@@ -89,6 +103,8 @@ function createStartLearningHarness({ deferTaskBank = false, deferProgress = fal
     resolveProgress: (value) => progress.resolve(value),
     progressRequest: () => progressRequest,
     restoredPayload: () => restoredPayload,
+    localReads: () => localReads,
+    savedState: () => savedState,
     deleteOwner({ recreate = false } = {}) {
       context.AUTH_SESSION_GENERATION += 1;
       context.TOKEN = '';
@@ -189,6 +205,42 @@ test('startup keeps a legitimate extensible owner progress field separate from r
   const harness = createStartLearningHarness();
   assert.equal(await harness.start(), true);
   assert.deepEqual(JSON.parse(JSON.stringify(harness.restoredPayload())), { owner: { custom: 'kept' }, learned: 1 });
+});
+
+test('startup overlays only the exact owner-generation local grammar workflow, never mastery', async () => {
+  const localRunner = {
+    schema: 'grammar-runner-v1', catalogVersion: 'grammar-core-v2', sessionId: 'local-session', queue: [],
+  };
+  const harness = createStartLearningHarness({
+    localWorkflow: {
+      grammarRunner: localRunner,
+      grammarMastery: { 2: { stage: 'stable', forged: true } },
+      learned: 999,
+    },
+    restoredState: {
+      grammarRunner: { sessionId: 'stale-server-session' },
+      grammarMastery: { 2: { stage: 'learning', masteryRevision: 4 } },
+      learned: 7,
+    },
+  });
+
+  assert.equal(await harness.start(), true);
+  assert.deepEqual(JSON.parse(JSON.stringify(harness.localReads())), [
+    { owner: 'grammar-owner', ownerGeneration: 0 },
+  ]);
+  assert.deepEqual(JSON.parse(JSON.stringify(harness.savedState())), {
+    grammarRunner: localRunner,
+    grammarMastery: { 2: { stage: 'learning', masteryRevision: 4 } },
+    learned: 7,
+  });
+
+  const completed = createStartLearningHarness({
+    localWorkflow: { grammarRunner: null, grammarMastery: { forged: true } },
+    restoredState: { grammarRunner: { sessionId: 'stale-server-session' }, grammarMastery: { server: true } },
+  });
+  assert.equal(await completed.start(), true);
+  assert.equal(completed.savedState().grammarRunner, null, 'local null intentionally clears a stale server workflow');
+  assert.deepEqual(JSON.parse(JSON.stringify(completed.savedState().grammarMastery)), { server: true });
 });
 
 test('a stale explicit-auth response cannot revive a newer deletion tombstone', async () => {

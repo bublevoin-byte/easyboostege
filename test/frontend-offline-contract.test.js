@@ -416,13 +416,33 @@ test('learner preferences changed offline replay only for the same owner', async
   assert.equal(online.sync.hasPending(), false);
 });
 
-test('server-owned Grammar mastery is excluded from generic progress synchronization', async () => {
+test('server-owned Grammar mastery and device-local runner are excluded from generic synchronization', async () => {
+  const runner = { schema: 'grammar-runner-v1', sessionId: 'device-only' };
   const offline = createSync({ online: false });
   offline.sync.setOwner('grammar-owner');
   await offline.sync.setBaseline({});
-  assert.equal(await offline.sync.saveProgress({ grammarMastery: { 1: { stage: 'stable' } } }), true);
+  assert.equal(await offline.sync.saveProgress({
+    grammarMastery: { 1: { stage: 'stable' } },
+    grammarRunner: runner,
+  }), true);
   assert.equal(Object.keys(offline.sync.pendingModules()).length, 0);
   assert.equal(offline.sync.hasPending(), false);
+  assert.equal(offline.posts.length, 0);
+
+  const progress = {
+    words: { learned: 3 },
+    grammarMastery: { 1: { stage: 'stable' } },
+    grammarRunner: runner,
+  };
+  const online = createSync({ online: true, failRequest: false });
+  online.sync.setOwner('grammar-owner');
+  await online.sync.setBaseline({});
+  assert.equal(await online.sync.saveProgress(progress), true);
+  assert.deepEqual(progress.grammarRunner, runner, 'sanitizing a transport clone must not mutate local runner state');
+  assert.deepEqual(JSON.parse(JSON.stringify(online.posts)), [{
+    path: '/api/v1/progress/modules',
+    body: { owner: 'grammar-owner', modules: { words: { learned: 3 } } },
+  }]);
 });
 
 test('Grammar mastery event changed offline replays once and only for its owner', async () => {
@@ -450,6 +470,23 @@ test('Grammar mastery event changed offline replays once and only for its owner'
     body: { owner: 'grammar-owner', batchId: event.id, events: [{ topicId: 1, event }] },
   }]);
   assert.equal(await online.sync.flush(), false, 'accepted mastery event is not replayed twice');
+});
+
+test('an offline Grammar mastery UUID is idempotent only for the exact queued event', async () => {
+  const event = {
+    id: '00000000-0000-4000-8000-000000000094', type: 'review_completed',
+    expectedRevision: 3, expectedStage: 'learned', expectedReviewStep: 0,
+    source: 'builtin', assisted: false, passed: true,
+  };
+  const offline = createSync({ online: false });
+  offline.sync.setOwner('grammar-owner');
+  assert.equal(await offline.sync.saveGrammarMasteryEvent(1, event), false);
+  assert.equal(await offline.sync.saveGrammarMasteryEvent(1, { ...event }), false,
+    'an exact offline retry reuses the durable event');
+  const changed = await offline.sync.saveGrammarMasteryEvent(1, { ...event, passed: false });
+  assert.equal(changed.code, 'GRAMMAR_MASTERY_EVENT_CONFLICT');
+  assert.deepEqual(JSON.parse(JSON.stringify(offline.sync.pendingGrammarMasteryEvents())), [{ topicId: 1, event }],
+    'a changed same-UUID payload cannot replace or be conflated with the exact queued event');
 });
 
 test('the Grammar mastery queue fails closed at 20 and never evicts earlier proof', async () => {
@@ -527,18 +564,20 @@ test('Grammar 429 and stale CAS retain proof while replay/applied results clear 
   let calls = 0;
   active.window.EasyBoostApi.post = async (path, body) => {
     active.posts.push({ path, body }); calls += 1;
-    if (calls === 1) return { results: [{
+    return { results: [{
       eventId: entry.event.id, applied: false, conflict: true, replay: false,
       record: { masteryVersion: 2, masteryRevision: 4, stage: 'learning', reviewStep: 0 },
     }] };
-    return { results: [{ eventId: body.events[0].event.id, applied: true, conflict: false, replay: false,
-      record: { masteryVersion: 2, masteryRevision: 5, stage: 'learning', reviewStep: 0 } }] };
   };
-  assert.ok(await active.sync.flush());
-  assert.equal(active.posts.length, 2, 'a genuine stale event is durably rebuilt and retried');
-  assert.notEqual(active.posts[1].body.events[0].event.id, entry.event.id);
-  assert.equal(active.posts[1].body.events[0].event.expectedRevision, 4);
-  assert.equal(active.sync.pendingGrammarMasteryEvents().length, 0);
+  await active.sync.flush();
+  assert.equal(active.posts.length, 1, 'a stale completion is never rebuilt under a replacement UUID');
+  assert.equal(active.posts[0].body.events[0].event.id, entry.event.id);
+  const retained = active.sync.pendingGrammarMasteryEvents();
+  assert.equal(retained.length, 1, 'the exact completion remains recoverable after stale CAS');
+  assert.equal(retained[0].event.id, entry.event.id);
+  assert.equal(retained[0].event.expectedRevision, entry.event.expectedRevision,
+    'the queued immutable event keeps its original compare-and-set evidence');
+  assert.equal(calls, 1);
 });
 
 test('Grammar queue fails closed without Web Locks and retains network/5xx proof', async () => {
@@ -622,10 +661,16 @@ test('a stale stage-advancing event is retained unchanged instead of being rebas
     })) };
   };
   const recovered = await active.sync.saveGrammarMasteryEvents([fresh]);
-  assert.equal(recovered.results[0].eventId, fresh.event.id);
-  assert.equal(active.posts.length, 2, 'the rejected stage proof is not retried ahead of fresh evidence');
-  assert.equal(active.sync.pendingGrammarMasteryEvents().length, 0,
-    'a fresh event at the converged revision replaces its obsolete conflict');
+  assert.equal(recovered.code, 'GRAMMAR_MASTERY_EVENT_CONFLICT');
+  assert.equal(active.posts.length, 1, 'later same-topic evidence is blocked behind the exact unresolved completion');
+  assert.equal(active.sync.pendingGrammarMasteryEvents().length, 1);
+  assert.deepEqual(active.sync.pendingGrammarMasteryEvents()[0].event, entry.event,
+    'a newer same-topic candidate cannot coalesce away the original UUID or canonical material');
+
+  const reloaded = createSync({ online: true, failRequest: false, sharedValues: active.values });
+  reloaded.sync.setOwner('grammar-owner');
+  assert.deepEqual(reloaded.sync.pendingGrammarMasteryEvents()[0].event, entry.event,
+    'reload preserves the exact conflict marker as recoverable pending evidence');
 });
 
 test('a stale wrong partial session cannot rebase onto and regress newer authority', async () => {

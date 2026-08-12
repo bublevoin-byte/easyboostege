@@ -2,12 +2,13 @@ import {
   adaptiveRuntimeSnapshot,
   completeAdaptiveModuleActivity,
 } from './adaptive-session-runtime.js';
+import { isGrammarErrorCode, parseGrammarConfusionPair } from './grammar-domain-contract.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const ACTIVITY_ID = /^[a-z0-9_]{1,80}$/u;
 const CLIENT_REPORTED_MODULES = new Set(['grammar', 'reading', 'listening']);
 const ACTIVITY_MODES = new Set([
-  'topic_practice', 'spaced_review', 'exam_19_24',
+  'topic_practice', 'legacy_practice', 'spaced_review', 'exam_19_24',
   'reading_headings', 'reading_detail', 'reading_gaps', 'reading_exam',
   'listening_matching', 'listening_true_false', 'listening_interview', 'listening_exam',
 ]);
@@ -44,6 +45,12 @@ function boundedMetadata(value) {
   if (typeof source.helpUsed === 'boolean') metadata.helpUsed = source.helpUsed;
   if (Number.isInteger(source.hintsUsed) && source.hintsUsed >= 0 && source.hintsUsed <= 100) {
     metadata.hintsUsed = source.hintsUsed;
+  }
+  if (isGrammarErrorCode(source.grammarErrorCode)) metadata.grammarErrorCode = source.grammarErrorCode;
+  const grammarConfusionPair = parseGrammarConfusionPair(source.grammarConfusionPair);
+  if (grammarConfusionPair) metadata.grammarConfusionPair = grammarConfusionPair;
+  if (Number.isInteger(source.grammarTopicId) && source.grammarTopicId >= 1 && source.grammarTopicId <= 20) {
+    metadata.grammarTopicId = source.grammarTopicId;
   }
   const reading = canonicalReadingMetadata(source);
   if (reading) Object.assign(metadata, reading);

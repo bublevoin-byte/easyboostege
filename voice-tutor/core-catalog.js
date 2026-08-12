@@ -1,5 +1,5 @@
 import { CORE_VOICE_CATALOG_SOURCE } from './generated-core-catalog.js';
-import { GRAMMAR_CATALOG } from '../public/grammar-catalog.js';
+import { GRAMMAR_CATALOG, GRAMMAR_CATALOG_V1 } from '../public/grammar-catalog.js';
 import { maskAcceptedAnswers, practicePromptKey, vocabularyTargetCandidates } from './practice.js';
 
 function cleanHtml(value) {
@@ -35,9 +35,9 @@ function frozenPractice(id, candidate, skillId) {
   return Object.freeze({ id, skillId, prompt: candidate.prompt, answers: Object.freeze([...candidate.reference]) });
 }
 
-function grammarItem({ id, topicId, question, kind, practice }) {
+function grammarItem({ id, topicId, question, kind, practice, catalog }) {
   const fields = grammarFields(question, kind);
-  const topic = GRAMMAR_CATALOG.topics[topicId];
+  const topic = catalog.topics[topicId];
   const domain = grammarDomain(topicId);
   const skillId = `ege.${domain.skill}.topic_${topicId}`;
   const itemVersion = `v${question.revision}`;
@@ -104,35 +104,49 @@ function vocabularyPractice(words, word, mode) {
   return candidates;
 }
 
-function buildItems() {
+function buildGrammarItems(catalog, legacyItems = {}) {
   const result = {};
   const grammarPools = {};
-  for (const [topicId, levels] of Object.entries(GRAMMAR_CATALOG.bank)) {
-    grammarPools[topicId] = ['c', 'c2', 'f'].flatMap((kind) => (
+  for (const [topicId, levels] of Object.entries(catalog.bank)) {
+    grammarPools[topicId] = ['c', 'c2', 'f', 'correction', 'transform'].flatMap((kind) => (
       (levels[kind] || []).map((question) => ({ ...grammarFields(question, kind), question, kind }))
     ));
   }
   for (const [topicId, pool] of Object.entries(grammarPools)) {
     pool.forEach((candidate, index) => {
       const id = candidate.question.id;
-      result[id] = grammarItem({
+      result[id] = legacyItems[id] || grammarItem({
         id, topicId, question: candidate.question, kind: candidate.kind,
         practice: [1, 2, 3, 4].map((offset) => pool[(index + offset) % pool.length]),
+        catalog,
       });
     });
   }
-  GRAMMAR_CATALOG.exams.forEach((exam) => {
+  catalog.exams.forEach((exam) => {
     exam.gaps.forEach((gap, gapIndex) => {
       const topicId = String(gap.t);
       const id = gap.id;
       const pool = grammarPools[topicId];
       const question = { s: `${exam.tx[gapIndex]}_____ (${gap.b})${exam.tx[gapIndex + 1]}`, ans: gap.ans, e: gap.e, revision: gap.revision };
-      result[id] = grammarItem({
+      result[id] = legacyItems[id] || grammarItem({
         id, topicId, question, kind: 'f',
         practice: [0, 1, 2, 3].map((offset) => pool[(gapIndex + offset) % pool.length]),
+        catalog,
       });
     });
   });
+  return result;
+}
+
+export const CORE_VOICE_TUTOR_LEGACY_GRAMMAR_ITEMS = Object.freeze(buildGrammarItems(GRAMMAR_CATALOG_V1));
+export const CORE_VOICE_TUTOR_CURRENT_GRAMMAR_ITEMS = Object.freeze(buildGrammarItems(GRAMMAR_CATALOG));
+export const CORE_VOICE_TUTOR_GRAMMAR_REVISIONS = Object.freeze(Object.fromEntries([
+  ...Object.values(CORE_VOICE_TUTOR_LEGACY_GRAMMAR_ITEMS).map((item) => [`${item.id}@${item.revision}`, item]),
+  ...Object.values(CORE_VOICE_TUTOR_CURRENT_GRAMMAR_ITEMS).map((item) => [`${item.id}@${item.revision}`, item]),
+]));
+
+function buildItems() {
+  const result = { ...CORE_VOICE_TUTOR_CURRENT_GRAMMAR_ITEMS };
   const words = CORE_VOICE_CATALOG_SOURCE.vocabulary;
   for (const mode of ['c1', 'c2', 'type']) {
     words.forEach((word, index) => {
@@ -148,8 +162,11 @@ function buildItems() {
 
 export const CORE_VOICE_TUTOR_ITEMS = buildItems();
 
-export function getCoreVoiceTutorItem(itemId) {
-  return CORE_VOICE_TUTOR_ITEMS[String(itemId || '')] || null;
+export function getCoreVoiceTutorItem(itemId, revision = null) {
+  const id = String(itemId || '');
+  if (revision != null) return CORE_VOICE_TUTOR_GRAMMAR_REVISIONS[`${id}@${Number(revision)}`]
+    || (CORE_VOICE_TUTOR_ITEMS[id]?.revision === Number(revision) ? CORE_VOICE_TUTOR_ITEMS[id] : null);
+  return CORE_VOICE_TUTOR_ITEMS[id] || null;
 }
 
 export function corePracticeCandidatesForSkill(skillId, excludedPrompts = [], limit = 4) {

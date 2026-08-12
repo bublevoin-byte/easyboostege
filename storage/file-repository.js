@@ -130,9 +130,11 @@ import {
 import {
   hasCanonicalMasteryRecords,
   migrateLegacyMasteryRecords,
+  masteryEventReplayMatches,
   migrateMasteryRecords,
   reduceMastery,
 } from '../public/modules/grammar.js';
+import { assertGeneratedGrammarMasteryReferences } from '../validation/generated-grammar-mastery.js';
 
 function normalizeAttemptModels(attempts) {
   return attempts.map((attempt) => ({
@@ -450,6 +452,7 @@ export function createFileRepository(filePath, {
     const canonicalMastery = state.progress[username]?.grammarMastery;
     const accepted = structuredClone(data || {});
     delete accepted.grammarMastery;
+    delete accepted.grammarRunner;
     state.progress[username] = accepted;
     if (canonicalMastery) state.progress[username].grammarMastery = canonicalMastery;
     await persist();
@@ -459,7 +462,10 @@ export function createFileRepository(filePath, {
     await load();
     const accepted = structuredClone(modules || {});
     delete accepted.grammarMastery;
-    state.progress[username] = { ...(state.progress[username] || {}), ...accepted };
+    delete accepted.grammarRunner;
+    const current = { ...(state.progress[username] || {}) };
+    delete current.grammarRunner;
+    state.progress[username] = { ...current, ...accepted };
     await persist();
     return structuredClone(state.progress[username]);
   }
@@ -499,8 +505,19 @@ export function createFileRepository(filePath, {
       for (const { topicId, event } of entries) {
         const current = grammarMastery[topicId]
           || migrateMasteryRecords({ [topicId]: {} }, { now })[topicId];
-        const replay = current.recentEventIds.includes(event.id);
-        const record = replay
+        const eventSeen = current.recentEventIds.includes(event.id);
+        const replay = eventSeen && masteryEventReplayMatches(current, event);
+        if (!eventSeen) {
+          await assertGeneratedGrammarMasteryReferences(topicId, event, async (requestHash) => {
+            const task = state.generated_tasks.find((item) => (
+              item.username === username && item.request_hash === requestHash
+            ));
+            return task ? {
+              operation: task.operation, request: task.request, result: task.result,
+            } : null;
+          });
+        }
+        const record = eventSeen
           ? current
           : reduceMastery(current, event, { now, clockAuthority: 'server' });
         const applied = !replay && record.masteryRevision === current.masteryRevision + 1;
@@ -2872,6 +2889,19 @@ export function createFileRepository(filePath, {
     return id;
   }
 
+  async function deleteGeneratedTask(username, requestHash) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      const before = state.generated_tasks.length;
+      state.generated_tasks = state.generated_tasks.filter((item) => (
+        item.username !== username || item.request_hash !== requestHash
+      ));
+      if (state.generated_tasks.length === before) return false;
+      await persist();
+      return true;
+    });
+  }
+
   /* ---------- Section 10.1: the shared task bank ---------- */
 
   async function upsertBankTask(task) {
@@ -4890,6 +4920,7 @@ export function createFileRepository(filePath, {
     submitFullSpeakingSessionResult,
     completeFullSpeakingSessionEvaluation,
     getGeneratedTask,
+    deleteGeneratedTask,
     getSharedGeneratedTask,
     saveGeneratedTask,
     upsertBankTask,

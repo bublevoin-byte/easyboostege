@@ -8,15 +8,25 @@ import {
   grammarActivityId,
   splitLearningActivityDuration,
 } from '../public/learning-activity-contract.js';
+import {
+  GENERATED_GRAMMAR_REVISION,
+  GRAMMAR_ACTIVE_PRACTICE_TYPES,
+  GRAMMAR_ERROR_CODES,
+  parseGeneratedGrammarItemId,
+  parseGeneratedGrammarItemReference,
+} from '../public/grammar-domain-contract.js';
 
 const source = (await fs.readFile(new URL('../public/modules/grammar.js', import.meta.url), 'utf8'))
-  .replace(/^import .*;\r?\n/mu, '')
+  .replace(/^import .*;\r?\n/gmu, '')
   .replace(/^export /gmu, '');
 
 function createGrammarModule() {
   const window = {};
   vm.runInNewContext(source, {
-    window, grammarActivityId, splitLearningActivityDuration, Object, String, Number, Math, Date,
+    window, grammarActivityId, splitLearningActivityDuration,
+    GENERATED_GRAMMAR_REVISION, GRAMMAR_ACTIVE_PRACTICE_TYPES, GRAMMAR_ERROR_CODES,
+    parseGeneratedGrammarItemId, parseGeneratedGrammarItemReference,
+    Object, String, Number, Math, Date,
   });
   return window.EasyBoostGrammar;
 }
@@ -29,7 +39,7 @@ test('grammar module normalizes answers and reports closed and due topics', () =
     3: { st: 1, due: 50 },
   };
 
-  assert.equal(grammar.normalizeAnswer("  Hasn't... "), 'hasnt');
+  assert.equal(grammar.normalizeAnswer("  Hasn't... "), "hasn't");
   assert.equal(grammar.countClosed(records), 2);
   assert.deepEqual(Array.from(grammar.dueTopics(records, { now: 500 })), [1]);
   assert.equal(grammar.formatDuration(125), '2:05');
@@ -39,9 +49,13 @@ test('grammar module combines built-in and generated banks and builds level queu
   const grammar = createGrammarModule();
   const choice = { t: ['A ', ' B'], o: ['x', 'y'], a: 0 };
   const fill = { s: 'A _____ B', ans: ['x'] };
+  const generatedPrefix = `generated.g.q.${'a'.repeat(64)}.${'b'.repeat(16)}`;
   const bank = grammar.effectiveBank(
     { c: [choice], c2: [] },
-    [{ k: 'c', q: choice }, { k: 'f', q: fill }],
+    [
+      { k: 'c', q: { ...choice, id: `${generatedPrefix}.c1`, revision: 1, type: 'choice' } },
+      { k: 'f', q: { ...fill, id: `${generatedPrefix}.f1`, revision: 1, type: 'input' } },
+    ],
   );
   const initial = grammar.buildTopicQueue(bank, 4, { st: 0 }, () => 0.5);
   const continuing = grammar.buildTopicQueue(bank, 4, { st: 1 }, () => 0.5);

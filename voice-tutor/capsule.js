@@ -40,7 +40,7 @@ function boundedString(value, maximum, code) {
 function itemForError({ module, itemId, revision, getItem }) {
   if (!voiceTutorModule(module)) throw new VoiceTutorCapsuleError('VOICE_TUTOR_ATTEMPT_NOT_SUPPORTED');
   const canonicalId = boundedString(itemId, 120, 'VOICE_TUTOR_ITEM_NOT_FOUND');
-  const item = getItem(canonicalId);
+  const item = getItem(canonicalId, revision);
   if (!item || item.module !== module) throw new VoiceTutorCapsuleError('VOICE_TUTOR_ITEM_NOT_FOUND');
   if (!Number.isInteger(revision) || revision !== item.revision) throw new VoiceTutorCapsuleError('VOICE_TUTOR_REVISION_MISMATCH');
   return item;

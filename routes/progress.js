@@ -37,6 +37,7 @@ function parseStructuredProgressModules(progress) {
   if (Object.hasOwn(data, 'grammarMastery')) {
     return { ok: false, code: 'SERVER_OWNED_GRAMMAR_MASTERY' };
   }
+  delete data.grammarRunner;
   for (const [key, schema, code] of [
     ['personalWords', personalVocabularyCardsSchema, 'INVALID_PERSONAL_WORDS'],
     ['personalWordTombstones', personalVocabularyTombstonesSchema, 'INVALID_PERSONAL_WORDS'],
@@ -115,7 +116,12 @@ export function createProgressRoutes({ authentication, db, now = () => new Date(
       );
       bindResponseOwner(res, req.user);
       return res.status(result.applied ? 201 : 200).json(result);
-    } catch (error) { return next(error); }
+    } catch (error) {
+      if (error?.code === 'INVALID_GENERATED_GRAMMAR_REFERENCE') {
+        return res.status(400).json({ error: { code: error.code, message: 'Сгенерированное задание больше не принадлежит активному каталогу ученика.' } });
+      }
+      return next(error);
+    }
   });
 
   router.post('/api/v1/grammar/mastery-events/batch', auth, perUserLimiter(240, 'Слишком много результатов грамматики за короткое время.'), async (req, res, next) => {
@@ -132,7 +138,12 @@ export function createProgressRoutes({ authentication, db, now = () => new Date(
       }
       const results = await db.applyGrammarMasteryEvents(req.user, parsed.data.events);
       return res.status(results.every((result) => result.applied) ? 201 : 200).json({ batchId: parsed.data.batchId, results });
-    } catch (error) { return next(error); }
+    } catch (error) {
+      if (error?.code === 'INVALID_GENERATED_GRAMMAR_REFERENCE') {
+        return res.status(400).json({ error: { code: error.code, message: 'Сгенерированное задание больше не принадлежит активному каталогу ученика.' } });
+      }
+      return next(error);
+    }
   });
 
   router.post('/api/v1/module-attempts', auth, perUserLimiter(240, 'Слишком много результатов за короткое время.'), async (req, res, next) => {

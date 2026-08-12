@@ -12,6 +12,7 @@ import {
 } from '../app.js';
 import {recordCompletedLearningActivity} from '../learning-activity-recorder.js';
 import {GRAMMAR_CATALOG,validateGeneratedGrammarSupplement} from '../grammar-catalog.js';
+import {GENERATED_GRAMMAR_REVISION,GRAMMAR_ACTIVE_PRACTICE_TYPES,isGrammarConfusionPair,isGrammarErrorCode,parseGrammarConfusionPair,parseGeneratedGrammarItemReference} from '../grammar-domain-contract.js';
 
 const GRAM_Q=[
  {t:['She ','_____',' already finished her homework.'],o:['have','has','had','is'],a:1,e:'<b>She/he/it</b> — третье лицо, поэтому <b>has</b>.'},
@@ -52,6 +53,18 @@ async function genGrammar(){
 const G_GROUPS=GRAMMAR_CATALOG.groups;
 const G_TOPICS=GRAMMAR_CATALOG.topics;
 const G_BANK=GRAMMAR_CATALOG.bank;
+const G_ITEM_INDEX=new Map();
+Object.entries(G_BANK).forEach(function(entry){var topic=Number(entry[0]),levels=entry[1];
+  ['c','c2','f','correction','transform'].forEach(function(kind){(levels[kind]||[]).forEach(function(q){G_ITEM_INDEX.set(q.id,{q:q,t:topic,k:q.type})})})});
+function gGeneratedItems(t){var raw=(S&&S.gramAi&&S.gramAi[t])||[],groups=new Map(),safe=[];
+  raw.forEach(function(entry){var q=entry&&entry.q,reference=parseGeneratedGrammarItemReference(q&&q.voice);
+    if(!reference||entry.k!==reference.kind)return;var group=groups.get(reference.groupId)||{c:[],f:[]};group[reference.kind][reference.index-1]=q;groups.set(reference.groupId,group)});
+  groups.forEach(function(group){if(!group.c.length||!group.f.length||!Array.from(group.c).every(Boolean)||!Array.from(group.f).every(Boolean))return;
+    try{var checked=validateGeneratedGrammarSupplement('grammar_topic_set',group);
+      checked.c.forEach(function(q){safe.push({k:'c',q:q,voice:q.voice})});checked.f.forEach(function(q){safe.push({k:'f',q:q,voice:q.voice})})}catch(error){}});
+  return safe}
+function gAddressableItem(t,id){var builtin=G_ITEM_INDEX.get(id);if(builtin&&builtin.t===t)return builtin;
+  var generated=gGeneratedItems(t).find(function(entry){return entry.q.id===id});return generated?{q:generated.q,t:t,k:generated.q.type,source:'generated'}:null}
 /* --- состояние: S.gram = {tid:{masteryVersion,stage,reviewStep,eligibleAt,ok,err,...}} --- */
 let GS=null;
 function gEvidence(activityId,startedAt=Date.now()){return{id:crypto.randomUUID(),activityId:activityId,startedAt:startedAt,reported:false,score:0,maxScore:0,sources:{},helpUsed:false}}
@@ -62,15 +75,101 @@ function gReportEvidence(evidence,metadata,durationMs){if(!evidence||evidence.re
 function gEvidenceSource(evidence,fallback){var sources=Object.keys((evidence&&evidence.sources)||{});
   if(sources.length>1)return'mixed';if(sources[0]==='generated')return'generated';if(sources[0]==='builtin')return'builtin';return fallback||'builtin'}
 function gTrackEvidenceSource(evidence,item){if(!evidence)return;var source=item&&item.source==='generated'?'generated':'builtin';evidence.sources[source]=true}
-function gMarkHelp(topic,affectsMastery=true){if(!GS)return;GS.helpUsed=true;var countsForMastery=affectsMastery&&!GS.answerCommitted;
+function gIsPracticeSession(){return Boolean(GS&&GS.mode!=='rev'&&GS.sessionId&&['topic_practice','legacy_practice'].includes(GS.practiceMode))}
+function gMarkHelp(topic,affectsMastery=true,answerDisclosed=false){if(!GS)return;GS.helpUsed=true;var countsForMastery=answerDisclosed||(affectsMastery&&!GS.answerCommitted);
+  if(affectsMastery&&!GS.answerCommitted)GS.answerAssisted=true;
   if(GS.mode==='rev'){var activityId=grammarModule.activityId(topic,'spaced_review');
     if(countsForMastery){GS.helpActivities[topic]=true;GS.helpActivities[activityId]=true}
     var evidence=GS.evidence[activityId];if(evidence)evidence.helpUsed=true}
-  else if(countsForMastery)GS.masteryAssisted=true}
+  else if(countsForMastery)GS.masteryAssisted=true;
+  if(gIsPracticeSession())gPersistRunner()}
+function gRunnerSnapshot(){if(!gIsPracticeSession())return null;return{
+  schema:'grammar-runner-v4',catalogVersion:GRAMMAR_CATALOG.version,catalogRevision:GRAMMAR_CATALOG.revision,sessionId:GS.sessionId,topicId:GS.t,mode:GS.practiceMode,
+  queue:GS.queue.map(function(item){return{id:item.q.id,transfer:Boolean(item.transfer)}}),i:GS.i,ok:GS.ok,done:GS.done,
+  source:GS.source,helpUsed:Boolean(GS.helpUsed),masteryAssisted:Boolean(GS.masteryAssisted),phase:GS.phase||'question',
+  answerAssisted:Boolean(GS.answerAssisted),errorReasons:{...(GS.errorReasons||{})},confusionPairs:{...(GS.confusionPairs||{})},independentErrors:JSON.parse(JSON.stringify(GS.independentErrors||{})),types:{...(GS.types||{})},typeScores:JSON.parse(JSON.stringify(GS.typeScores||{})),
+  reservedItemIds:(GS.reservedItemIds||[]).slice(0,32),itemOutcomes:JSON.parse(JSON.stringify(GS.itemOutcomes||[])),evidence:JSON.parse(JSON.stringify(GS.evidence)),completionEvent:GS.completionEvent?JSON.parse(JSON.stringify(GS.completionEvent)):null,
+}}
+function gPersistRunner(){var snapshot=gRunnerSnapshot();if(!snapshot||!S)return;S.grammarRunner=snapshot;save()}
+function gClearRunner(){if(!S||S.grammarRunner==null)return;S.grammarRunner=null;save()}
+function gSafeRunnerScores(value){var result={};GRAMMAR_ACTIVE_PRACTICE_TYPES.forEach(function(type){var score=value&&value[type];
+  if(!score)return;var total=Number(score.total),correct=Number(score.correct);if(Number.isInteger(total)&&Number.isInteger(correct)&&total>=0&&total<=40&&correct>=0&&correct<=total)result[type]={correct:correct,total:total}});return result}
+function gSafeRunnerFlags(value){var result={};GRAMMAR_ACTIVE_PRACTICE_TYPES.forEach(function(type){if(value&&value[type]===true)result[type]=true});return result}
+function gSafeRunnerErrors(value,t){var candidate=value&&value[t];return isGrammarErrorCode(candidate)?{[t]:candidate}:{}}
+function gSafeRunnerPairs(value,t){var candidate=parseGrammarConfusionPair(value&&value[t]);return candidate?{[t]:candidate}:{}}
+function gExactIndependentError(t,itemId,diagnosticId,reason,pair){var found=gAddressableItem(t,itemId);if(!found||found.source==='generated'||!isGrammarErrorCode(reason))return null;
+  var normalizedPair=pair==null?null:parseGrammarConfusionPair(pair);if(pair!=null&&!normalizedPair)return null;
+  var diagnostic=Array.isArray(found.q.diagnostics)?found.q.diagnostics.find(function(candidate){return candidate&&candidate.id===diagnosticId}):null;
+  if(diagnostic){if(diagnostic.errorCode!==reason||(diagnostic.confusionPair||null)!==normalizedPair)return null}
+  else{var expectedReason=found.q.errorSkill||(['f','input'].includes(found.k)?'word_or_verb_form':'construction_choice');
+    if(diagnosticId!=null||expectedReason!==reason||(found.q.confusionPair||null)!==normalizedPair)return null}
+  return{itemId:itemId,diagnosticId:diagnosticId==null?null:diagnosticId,reason:reason,confusionPair:normalizedPair}}
+function gSafeIndependentErrors(value,t){var candidate=value&&value[t];if(!candidate||typeof candidate!=='object'||Array.isArray(candidate))return{};
+  var exact=gExactIndependentError(t,String(candidate.itemId||''),candidate.diagnosticId==null?null:String(candidate.diagnosticId),String(candidate.reason||''),candidate.confusionPair==null?null:String(candidate.confusionPair));
+  return exact?{[t]:exact}:{}}
+function gSafeRunnerOutcomes(value,queue,done,active){if(!Array.isArray(value)||value.length!==done)return null;var outcomes=[],legacyAttempts=new Map();
+  for(var index=0;index<value.length;index++){var raw=value[index],item=queue[index],type=item&&item.k==='f'?'input':item&&['c','c2'].includes(item.k)?'choice':item&&item.k;
+    if(!raw||!item||raw.id!==item.q.id||raw.type!==type||typeof raw.transfer!=='boolean'||raw.transfer!==Boolean(item.transfer)||typeof raw.correct!=='boolean')return null;
+    var diagnosticId=raw.diagnosticId==null?null:String(raw.diagnosticId),errorCode=raw.errorCode==null?null:String(raw.errorCode),confusionPair=raw.confusionPair==null?null:String(raw.confusionPair),transferStatus=raw.transferStatus==null?null:String(raw.transferStatus);
+    if(raw.correct?(errorCode!==null||confusionPair!==null):!isGrammarErrorCode(errorCode))return null;
+    if(confusionPair!==null&&!isGrammarConfusionPair(confusionPair))return null;
+    var generated=item&&item.source==='generated',revision=raw.revision==null?null:Number(raw.revision),provenance=raw.source==null?null:String(raw.source);
+    if(generated?(revision!==GENERATED_GRAMMAR_REVISION||provenance!=='generated'):(revision!==null||provenance!==null))return null;
+    if(transferStatus!==null&&(transferStatus!=='due_next_session'||raw.correct||(active&&!raw.transfer)))return null;
+    if(diagnosticId!==null&&!/^core\.g\.(?:1|2|3|4|13)\.c\.\d+\.diagnostic\.[1-9]\d*$/u.test(diagnosticId))return null;
+    if(active?((type==='choice'&&!raw.correct&&diagnosticId===null)||((type!=='choice'||raw.correct)&&diagnosticId!==null))
+      :(diagnosticId!==null||raw.transfer||confusionPair!==null))return null;
+    if(!active){var attempt=(legacyAttempts.get(raw.id)||0)+1;legacyAttempts.set(raw.id,attempt);
+      if(attempt>2||(attempt===1&&transferStatus!==null)||(attempt===2&&((raw.correct&&transferStatus!==null)||(!raw.correct&&transferStatus!=='due_next_session'))))return null}
+    outcomes.push({id:raw.id,type:type,transfer:raw.transfer,correct:raw.correct,diagnosticId:diagnosticId,errorCode:errorCode,confusionPair:confusionPair,transferStatus:transferStatus,
+      ...(generated?{source:'generated',revision:GENERATED_GRAMMAR_REVISION}:{})})}
+  return outcomes}
+function gSafeRunnerEvidence(value,t,mode,source){var activityId=grammarModule.activityId(t,mode),id=String(value&&value.id||''),startedAt=Number(value&&value.startedAt);
+  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(id))return gEvidence(activityId);
+  var sources=source==='mixed'?{builtin:true,generated:true}:source==='generated'?{generated:true}:{builtin:true};
+  return{id:id,activityId:activityId,startedAt:Number.isFinite(startedAt)&&startedAt>=0?startedAt:Date.now(),reported:false,score:0,maxScore:0,sources:sources,helpUsed:Boolean(value&&value.helpUsed)}}
+function gSafeCompletionEvent(value,state){if(!value||typeof value!=='object'||Array.isArray(value))return null;var allowed=['type','id','assisted','source','completedTypes','typeScores','session','independentError','expectedRevision','expectedStage','expectedReviewStep'];
+  if(Object.keys(value).some(function(key){return!allowed.includes(key)}))return null;
+  var completedTypes=Object.keys(state.types||{}),session=value.session,expectedItems=state.itemOutcomes;
+  if(value.type!=='session_completed'||value.id!==state.sessionId||value.source!==state.source||value.assisted!==state.masteryAssisted
+    ||!Array.isArray(value.completedTypes)||JSON.stringify([...value.completedTypes].sort())!==JSON.stringify([...completedTypes].sort())
+    ||JSON.stringify(value.typeScores)!==JSON.stringify(state.typeScores)||!session||session.id!==state.sessionId||session.scope!=='topic'||session.mode!==state.practiceMode||session.source!==state.source
+    ||!session.catalog||session.catalog.version!==GRAMMAR_CATALOG.version||session.catalog.revision!==GRAMMAR_CATALOG.revision
+    ||JSON.stringify(session.items)!==JSON.stringify(expectedItems)||session.startedAt!==state.evidence.startedAt||session.assisted!==state.masteryAssisted
+    ||JSON.stringify(value.independentError||null)!==JSON.stringify(state.independentErrors[state.t]||null)
+    ||!Number.isSafeInteger(value.expectedRevision)||!['not_started','learning','learned','confirmed','stable'].includes(value.expectedStage)||!Number.isInteger(value.expectedReviewStep)||value.expectedReviewStep<0||value.expectedReviewStep>5)return null;
+  return JSON.parse(JSON.stringify(value))}
+function gRestoreRunner(){var snapshot=S&&S.grammarRunner;if(!snapshot||snapshot.schema!=='grammar-runner-v4'||snapshot.catalogVersion!==GRAMMAR_CATALOG.version||snapshot.catalogRevision!==GRAMMAR_CATALOG.revision)return null;
+  var t=Number(snapshot.topicId),queueRaw=Array.isArray(snapshot.queue)?snapshot.queue:[];
+  var sessionId=String(snapshot.sessionId||''),ok=Number(snapshot.ok),done=Number(snapshot.done),practiceMode=String(snapshot.mode||'');
+  var completionPending=snapshot.phase==='completion_pending';
+  var active=practiceMode==='topic_practice',source=String(snapshot.source||'');
+  if(!['topic_practice','legacy_practice'].includes(practiceMode)||grammarModule.hasActivePractice(G_BANK[t])!==active
+    ||!['builtin','mixed','generated'].includes(source)||(source!=='builtin'&&!snapshot.masteryAssisted)
+    ||!G_TOPICS[t]||queueRaw.length<1||queueRaw.length>(active?32:16)||!Number.isInteger(snapshot.i)||snapshot.i<0||snapshot.i>queueRaw.length||(!completionPending&&snapshot.i>=queueRaw.length)||(completionPending&&snapshot.i!==queueRaw.length)
+    ||!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(sessionId)
+    ||!Number.isInteger(ok)||!Number.isInteger(done)||ok<0||done<0||ok>done||done>32)return null;
+  var seen=new Set(),queue=[];
+  for(var raw of queueRaw){var found=gAddressableItem(t,raw&&raw.id);if(!found||(active&&seen.has(raw.id)))return null;seen.add(raw.id);
+    if(!active&&raw.transfer)return null;queue.push({k:found.k,q:found.q,t:t,voice:found.q.voice||null,source:found.source||'builtin',transfer:Boolean(raw.transfer)})}
+  if(grammarModule.queueSource(queue)!==source)return null;
+  var evidence=gSafeRunnerEvidence(snapshot.evidence,t,practiceMode,source);
+  var itemOutcomes=gSafeRunnerOutcomes(snapshot.itemOutcomes,queue,done,active);if(!itemOutcomes)return null;
+  var restored={activeRunner:active,practiceMode:practiceMode,sessionId:sessionId,t:t,queue:queue,i:snapshot.i,ok:ok,done:done,
+    source:source,helpUsed:Boolean(snapshot.helpUsed),masteryAssisted:Boolean(snapshot.masteryAssisted),answerCommitted:false,answerAssisted:Boolean(snapshot.answerAssisted),
+    phase:completionPending?'completion_pending':snapshot.phase==='explain'?'explain':snapshot.phase==='advance'?'advance':'question',errorReasons:gSafeRunnerErrors(snapshot.errorReasons,t),confusionPairs:gSafeRunnerPairs(snapshot.confusionPairs,t),independentErrors:gSafeIndependentErrors(snapshot.independentErrors,t),types:gSafeRunnerFlags(snapshot.types),
+    typeScores:gSafeRunnerScores(snapshot.typeScores),reservedItemIds:Array.isArray(snapshot.reservedItemIds)?snapshot.reservedItemIds.filter(function(id){return Boolean(gAddressableItem(t,id))}).slice(0,32):[...seen],itemOutcomes:itemOutcomes,evidence:evidence};
+  if(restored.phase==='advance'){restored.i++;restored.phase='question'}
+  if(restored.phase==='completion_pending'){restored.completionEvent=gSafeCompletionEvent(snapshot.completionEvent,restored);if(!restored.completionEvent)return null}
+  return restored}
 function gRec(t){S.grammarMastery=S.grammarMastery||{};return S.grammarMastery[t]||(S.grammarMastery[t]=grammarModule.migrateMasteryRecord())}
 function gSetRec(t,record){S.grammarMastery=S.grammarMastery||{};S.grammarMastery[t]=record;return record}
 function gMasteryExpectation(record){return{expectedRevision:record.masteryRevision,expectedStage:record.stage,expectedReviewStep:record.reviewStep}}
 function gMasteryOutcomes(result){return result&&Array.isArray(result.results)?result.results:[result]}
+function gMasteryDurable(result,event,topicId){
+  var syncedRecord=S&&S.grammarMastery&&S.grammarMastery[topicId];
+  return grammarModule.completionEventIsDurable({record:syncedRecord,event:event,result:result})
+}
 function gMasteryProvisional(result){return result===false||Boolean(result&&result.queued===true)}
 function gMasteryUnsaved(result){return Boolean(result&&result.queued===false)||gMasteryOutcomes(result).some(function(item){return Boolean(item&&item.conflict)})}
 function gMasteryPersistenceLine(result){
@@ -116,9 +215,11 @@ function gRegressionLine(view){if(!view.regressionReason)return'';
 function gMasteryQueueAvailable(required){return !window.EasyBoostSync||typeof window.EasyBoostSync.canQueueGrammarMasteryEvent!=='function'||window.EasyBoostSync.canQueueGrammarMasteryEvent(required||1)}
 function gShowMasteryQueueFull(){var area=document.getElementById('g_area');if(!area)return;
   area.innerHTML='<div class="clayCard" style="padding:22px;text-align:center;"><div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:19px;color:#2B2B2B;">Подключитесь для синхронизации</div><div style="font-weight:600;font-size:13px;color:#777163;line-height:1.55;margin-top:8px;">Очередь результатов заполнена. После синхронизации можно продолжить тренировку.</div></div><button class="sq" style="'+WBTN+'color:#B54E2F;margin-top:12px;" onclick="gMap()">К темам</button>'}
-function initGrammar(){if(!S)return;gSync();gMap()}
+function initGrammar(){if(!S)return;gSync();GS=gRestoreRunner();if(GS){gResume();return}if(S.grammarRunner){delete S.grammarRunner;save()}gMap()}
 /* Обработчик разметки не может присвоить переменную модуля, поэтому сброс темы — функция. */
-function gToThemes(){GS=null;initGrammar()}
+function gToThemes(){var preservePending=Boolean(GS&&GS.phase==='completion_pending'&&S&&S.grammarRunner);GS=null;if(!preservePending)gClearRunner();gMap()}
+function gRetryPendingCompletion(){var snapshot=S&&S.grammarRunner;if(!snapshot||snapshot.phase!=='completion_pending')return false;
+  var pending=gRestoreRunner();if(!pending){gRenderCompletionPending();return true}GS=pending;gResume();return true}
 function gMap(){var area=document.getElementById('g_area');if(!area)return;
   var due=gDue();
   var GA=0;function ga(){return 'animation:win .34s '+((GA++)*0.05)+'s cubic-bezier(.25,.75,.35,1) both;'}
@@ -172,55 +273,62 @@ function gTheory(t,fromMap){var area=document.getElementById('g_area');if(!area)
     +'<button class="sq" style="'+WBTN+'color:#B54E2F;" onclick="gMap()">← К темам</button></div>';
   gAnim('win','.32s')}
 function gShuffle(a){return grammarModule.shuffled(a)}
-function gBankEff(t){var b=G_BANK[t]||{};var ai=(S&&S.gramAi&&S.gramAi[t])||[];
+function gBankEff(t){var b=G_BANK[t]||{};var ai=gGeneratedItems(t);
   return grammarModule.effectiveBank(b,ai)}
 function gLvl2(t){return grammarModule.levelTwo(gBankEff(t),t)}
 function gDue(){return grammarModule.dueTopics(S.grammarMastery)}
-function gStart(t){if(!gMasteryQueueAvailable()){gShowMasteryQueueFull();return}var e=gBankEff(t),r=gRec(t);
-  var queue=grammarModule.buildTopicQueue(e,t,r);
-  GS={t:t,queue:queue,i:0,ok:0,done:0,source:grammarModule.queueSource(queue),helpUsed:false,masteryAssisted:false,answerCommitted:false,errorReasons:{},types:{},typeScores:{},evidence:gEvidence(grammarModule.activityId(t,'topic_practice'))};
-  gRenderQ();gGen(t)}
-function gResume(){if(GS)gRenderQ();else gMap()}
-function gReview(){var due=gDue();if(!due.length){gMap();return}if(!gMasteryQueueAvailable(due.length)){gShowMasteryQueueFull();return}
+function gStart(t){if(gRetryPendingCompletion())return;if(!gMasteryQueueAvailable()){gShowMasteryQueueFull();return}var e=gBankEff(t),r=gRec(t);
+  var active=grammarModule.hasActivePractice(G_BANK[t]),sessionId=crypto.randomUUID();
+  var queue=active?grammarModule.buildActiveTopicQueue(G_BANK[t],t,GRAMMAR_CATALOG.version+':'+t+':'+sessionId):grammarModule.buildTopicQueue(e,t,r);
+  var practiceMode=active?'topic_practice':'legacy_practice',queueSource=grammarModule.queueSource(queue);
+  GS={activeRunner:active,practiceMode:practiceMode,sessionId:sessionId,t:t,queue:queue,i:0,ok:0,done:0,source:queueSource,helpUsed:false,masteryAssisted:queueSource!=='builtin',answerCommitted:false,answerAssisted:false,phase:'question',reservedItemIds:queue.map(function(item){return item.q.id}),itemOutcomes:[],errorReasons:{},confusionPairs:{},independentErrors:{},types:{},typeScores:{},evidence:gEvidence(grammarModule.activityId(t,practiceMode))};
+  gPersistRunner();gRenderQ();gGen(t)}
+function gResume(){if(!GS){gMap();return}if(GS.phase==='completion_pending'){gRenderCompletionPending();gFinish();return}if(GS.phase==='explain'){gExplain(GS.queue[GS.i],null,true);return}gRenderQ(true)}
+function gReview(){if(gRetryPendingCompletion())return;var due=gDue();if(!due.length){gMap();return}if(!gMasteryQueueAvailable(due.length)){gShowMasteryQueueFull();return}
   var items=[];
   due.forEach(function(t){items=items.concat(gShuffle(gLvl2(t)).slice(0,2))});
   var queue=gShuffle(items);
-  GS={mode:'rev',revT:due.slice(),queue:queue,i:0,ok:0,done:0,errT:{},startedAt:Date.now(),source:grammarModule.queueSource(queue),helpUsed:false,answerCommitted:false,errorReasons:{},helpActivities:{},evidence:{}};
+  GS={mode:'rev',revT:due.slice(),queue:queue,i:0,ok:0,done:0,errT:{},startedAt:Date.now(),source:grammarModule.queueSource(queue),helpUsed:false,answerCommitted:false,answerAssisted:false,errorReasons:{},independentErrors:{},helpActivities:{},evidence:{}};
   gRenderQ()}
 function gProgressLine(){setTxt('g_today',(GS.done)+' / '+GS.queue.length+' в подходе')}
-function gRenderQ(){var area=document.getElementById('g_area');if(!area||!GS)return;gProgressLine();
+function gRenderQ(preserveAnswerState){var area=document.getElementById('g_area');if(!area||!GS)return;gProgressLine();
   var it=GS.queue[GS.i];
   if(!it){gFinish();return}
-  GS.answerCommitted=false;
+  GS.answerCommitted=false;if(!preserveAnswerState)GS.answerAssisted=false;GS.phase='question';if(gIsPracticeSession())gPersistRunner();
   var t=it.t||GS.t,tp=G_TOPICS[t];
+  var labels={choice:'УРОВЕНЬ 1 · ВЫБОР',input:'УРОВЕНЬ 2 · ВВОД',correction:'УРОВЕНЬ 3 · ИСПРАВЛЕНИЕ',transform:'УРОВЕНЬ 4 · ПРЕОБРАЗОВАНИЕ'};
+  var level=it.transfer?'ТРАНСФЕР · '+(labels[it.k]||'НОВОЕ ЗАДАНИЕ'):(labels[it.k]||(it.k==='c'?'УРОВЕНЬ 1 · ВЫБОР':'УРОВЕНЬ 2 · КАК НА ЕГЭ'));
   var head='<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'
-    +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#B54E2F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">'+(GS.mode==='rev'?'ПОВТОРЕНИЕ':(it.k==='c'?'УРОВЕНЬ 1 · ВЫБОР':'УРОВЕНЬ 2 · КАК НА ЕГЭ'))+'</span>'
-    +'<button id="g_rule_btn" type="button" class="clk iconbtn" onclick="gTheory('+t+')" style="font-weight:800;font-size:10px;letter-spacing:.6px;color:#1D7F4A;background:#EAF7F0;padding:5px 10px;border-radius:20px;cursor:pointer;">ПРАВИЛО</button></div>';
-  if(it.k==='c'||it.k==='c2'){var q=it.q;
-    area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:20px;min-height:150px;">'+wDeco()+head
+    +'<span data-grammar-level="'+it.k+'" style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#B54E2F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">'+(GS.mode==='rev'?'ПОВТОРЕНИЕ':level)+'</span>'
+    +'<button id="g_rule_btn" type="button" class="clk iconbtn" onclick="gTheory('+t+')" style="box-sizing:border-box;min-block-size:48px;min-inline-size:48px;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;font-weight:800;font-size:10px;letter-spacing:.6px;color:#1D7F4A;background:#EAF7F0;padding:5px 10px;border-radius:20px;cursor:pointer;">ПРАВИЛО</button></div>';
+  if(it.k==='c'||it.k==='c2'||it.k==='choice'){var q=it.q;
+    area.innerHTML='<div id="g_card" class="clayCard" aria-live="polite" style="position:relative;overflow:hidden;padding:20px;min-height:150px;">'+wDeco()+head
       +'<div style="font-weight:600;font-size:11px;color:#777163;margin-top:14px;">'+tp.n+'</div>'
       +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:18px;color:#2B2B2B;line-height:1.5;margin-top:8px;">'
       +q.t[0]+'<span style="display:inline-block;min-width:64px;border-bottom:2.5px dashed #F2683F;text-align:center;color:#B54E2F;">&nbsp;?&nbsp;</span>'+q.t[1]+'</div></div>'
       +'<div id="g_btns" style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
       +q.o.map(function(o,i){return '<button class="sq" style="'+WBTN+'" onclick="gPick(this,'+i+')">'+o+'</button>'}).join('')+'</div>';
-  }else{var q=it.q;
-    area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:20px;min-height:150px;">'+wDeco()+head
-      +'<div style="font-weight:600;font-size:11px;color:#777163;margin-top:14px;">'+tp.n+' · впиши форму слова</div>'
+  }else{var q=it.q,isInput=it.k==='f'||it.k==='input',instruction=isInput?'впиши форму слова':it.k==='correction'?'перепиши предложение без ошибки':'выполни преобразование';
+    var prompt=isInput?q.s.replace('_____','<span style="display:inline-block;min-width:70px;border-bottom:2.5px dashed #F2683F;text-align:center;color:#B54E2F;">&nbsp;?&nbsp;</span>'):q.s;
+    var inputLabel=isInput?'Форма слова '+q.b:it.k==='correction'?'Исправленное предложение':'Преобразованное предложение';
+    area.innerHTML='<div id="g_card" class="clayCard" aria-live="polite" style="position:relative;overflow:hidden;padding:20px;min-height:150px;">'+wDeco()+head
+      +'<div style="font-weight:600;font-size:11px;color:#777163;margin-top:14px;">'+tp.n+' · '+instruction+'</div>'
       +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:17px;color:#2B2B2B;line-height:1.55;margin-top:8px;">'
-      +q.s.replace('_____','<span style="display:inline-block;min-width:70px;border-bottom:2.5px dashed #F2683F;text-align:center;color:#B54E2F;">&nbsp;?&nbsp;</span>')+'</div></div>'
+      +prompt+'</div></div>'
       +'<div id="g_btns" style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
-      +'<input id="g_inp" aria-label="Форма слова '+q.b+'" autocapitalize="none" autocomplete="off" spellcheck="false" placeholder="Форма слова '+q.b+'" '
+      +'<input id="g_inp" aria-label="'+inputLabel+'" autocapitalize="sentences" autocomplete="off" spellcheck="false" placeholder="'+inputLabel+'" '
       +'style="width:100%;box-sizing:border-box;height:52px;border:1px solid #F0EAE2;border-radius:18px;padding:0 16px;font-family:Manrope,sans-serif;font-weight:700;font-size:15px;color:#2B2B2B;outline:none;box-shadow:inset 0 2px 4px rgba(60,45,30,.05);" onkeydown="if(event.key===\'Enter\')gSubmit()">'
       +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="gSubmit()">Проверить</button>'}
   gAnim('win','.32s')}
 function gNorm(v){return grammarModule.normalizeAnswer(v)}
-function gExplain(it,userWrong){var q=it.q,t=it.t||GS.t;gMarkHelp(t,false);
-  var right=it.k==='f'?q.ans[0]:q.o[q.a];
-  var sent=it.k==='f'
+function gExplain(it,userWrong,restoring){var q=it.q,t=it.t||GS.t;gMarkHelp(t,true,true);GS.phase='explain';if(gIsPracticeSession())gPersistRunner();
+  var textAnswer=it.k==='f'||it.k==='input'||it.k==='correction'||it.k==='transform';
+  var right=textAnswer?q.ans[0]:q.o[q.a];
+  var sent=it.k==='f'||it.k==='input'
     ? q.s.replace('_____','<b style="color:#1D7F4A;">'+right+'</b>').replace(/\((?:[A-Z ]+)\)/,'')
-    : q.t[0]+'<b style="color:#1D7F4A;">'+right+'</b>'+q.t[1];
+    : textAnswer?q.s+'<br><b style="color:#1D7F4A;">'+right+'</b>':q.t[0]+'<b style="color:#1D7F4A;">'+right+'</b>'+q.t[1];
   var area=document.getElementById('g_area');
-  area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:20px;">'+wDeco()
+  area.innerHTML='<div id="g_card" class="clayCard" aria-live="polite" style="position:relative;overflow:hidden;padding:20px;">'+wDeco()
     +'<div style="display:flex;align-items:center;gap:8px;"><span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#A83226;background:#FDEDEA;padding:5px 10px;border-radius:20px;">РАЗБОР ОШИБКИ</span></div>'
     +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:22px;color:#1D7F4A;margin-top:14px;text-align:center;">'+right+'</div>'
     +'<div style="font-weight:600;font-size:14px;color:#2B2B2B;line-height:1.6;margin-top:10px;text-align:center;font-style:italic;">'+sent+'</div>'
@@ -228,49 +336,71 @@ function gExplain(it,userWrong){var q=it.q,t=it.t||GS.t;gMarkHelp(t,false);
     +'<div style="margin-top:12px;background:#F2F8F4;border-radius:14px;padding:12px 14px;">'
     +'<div style="font-weight:800;font-size:10px;letter-spacing:1.2px;color:#1D7F4A;">ПРАВИЛО · '+G_TOPICS[t].n.toUpperCase()+'</div>'
     +'<div style="font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.6;margin-top:6px;">'+G_TOPICS[t].th+'</div></div>'
-    +'<div style="font-weight:600;font-size:11.5px;color:#75705F;margin-top:10px;text-align:center;">Вопрос вернётся в конце подхода</div><div id="voice_tutor_grammar_practice"></div></div>'
+    +'<div style="font-weight:600;font-size:11.5px;color:#75705F;margin-top:10px;text-align:center;">'+(GS.itemOutcomes&&GS.itemOutcomes.at(-1)&&GS.itemOutcomes.at(-1).transferStatus==='due_next_session'?'Одна transfer-попытка использована. Эта точная слабость сохранена на следующий подход.':it.transfer?'Следующее задание проверит перенос ещё раз':'Дальше будет отдельное новое задание на эту же слабость')+'</div><div id="voice_tutor_grammar_practice"></div></div>'
     +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
     +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="gAfterExplain()">Понятно, дальше</button></div>';
-  if(it.voice&&userWrong!=null)registerVoiceTutorError({module:'grammar',itemId:it.voice.id,revision:it.voice.revision,learnerAnswer:String(userWrong)})
+  if(!restoring&&it.voice&&userWrong!=null)registerVoiceTutorError({module:'grammar',itemId:it.voice.id,revision:it.voice.revision,learnerAnswer:String(userWrong)})
     .then(function(recorded){var slot=document.getElementById('voice_tutor_grammar_practice');if(slot&&recorded)slot.innerHTML=voiceTutorButton(recorded)}).catch(function(){});
   gAnim('wflip','.5s')}
-function gAfterExplain(){GS.i++;gSync();save();gRenderQ()}
-function gErrorReason(it){var allowed=['construction_choice','word_or_verb_form','auxiliary','agreement','word_order','negation_or_question','confusion_pair'];
-  var candidate=it&&((it.errorSkill)||(it.q&&it.q.errorSkill));if(allowed.includes(candidate))return candidate;
-  return it&&it.k==='f'?'word_or_verb_form':'construction_choice'}
-function gAnswer(ok,it){var topic=it.t||GS.t,type=it.k==='f'?'input':'choice';GS.types=GS.types||{};GS.typeScores=GS.typeScores||{};GS.types[type]=true;
-  GS.answerCommitted=true;var rule=document.getElementById('g_rule_btn');if(rule){rule.disabled=true;rule.setAttribute('aria-disabled','true')}
+function gAfterExplain(){GS.i++;GS.phase='question';if(gIsPracticeSession())gPersistRunner();gSync();save();gRenderQ()}
+function gErrorReason(it){var candidate=it&&((it.errorSkill)||(it.q&&it.q.errorSkill));if(isGrammarErrorCode(candidate))return candidate;
+  return it&&['f','input'].includes(it.k)?'word_or_verb_form':'construction_choice'}
+function gAnswer(ok,it,checked){var topic=it.t||GS.t,type=it.k==='f'?'input':it.k==='c'||it.k==='c2'?'choice':it.k;GS.types=GS.types||{};GS.typeScores=GS.typeScores||{};GS.types[type]=true;
+  var committedWithoutHelp=!GS.answerAssisted;GS.answerCommitted=true;var rule=document.getElementById('g_rule_btn');if(rule){rule.disabled=true;rule.setAttribute('aria-disabled','true')}
   var score=GS.typeScores[type]||(GS.typeScores[type]={correct:0,total:0});score.total++;if(ok)score.correct++;
-  if(!ok){GS.errorReasons=GS.errorReasons||{};GS.errorReasons[topic]=gErrorReason(it)}
+  var errorCode=ok?null:(checked&&checked.errorCode||gErrorReason(it)),confusionPair=ok?null:(checked&&Object.hasOwn(checked,'confusionPair')?checked.confusionPair:it.q&&it.q.confusionPair||null);
+  if(!ok){GS.errorReasons=GS.errorReasons||{};GS.confusionPairs=GS.confusionPairs||{};GS.errorReasons[topic]=errorCode;GS.confusionPairs[topic]=confusionPair;
+    if(committedWithoutHelp){var exactError=gExactIndependentError(topic,it.q.id,checked&&checked.diagnosticId||null,errorCode,confusionPair);if(exactError){GS.independentErrors=GS.independentErrors||{};GS.independentErrors[topic]=exactError}}}
+  if(gIsPracticeSession()){GS.itemOutcomes=GS.itemOutcomes||[];GS.itemOutcomes.push({id:it.q.id,type:type,transfer:Boolean(it.transfer),correct:Boolean(ok),diagnosticId:GS.activeRunner&&!ok?(checked&&checked.diagnosticId||null):null,errorCode:errorCode,confusionPair:GS.activeRunner?confusionPair:null,transferStatus:null,
+    ...(it.source==='generated'?{source:'generated',revision:it.q.revision}:{})})}
   grammarModule.applyAnswer(gRec(topic),GS,it,ok);
   if(GS.mode==='rev'){var activityId=grammarModule.activityId(topic,'spaced_review');var evidence=GS.evidence[activityId];
     if(!evidence)evidence=GS.evidence[activityId]=gEvidence(activityId,GS.startedAt);
     evidence.helpUsed=Boolean(GS.helpActivities[activityId]);gTrackEvidenceSource(evidence,it);evidence.maxScore++;if(ok)evidence.score++}}
+function gCommitWrongState(it,checked){
+  gMarkHelp(it.t||GS.t,true,true);
+  if(GS.activeRunner){var transferResult=grammarModule.enqueueTransferAfterFailure(GS,G_BANK[it.t||GS.t],it,GS.sessionId+':transfer:'+GS.done,{errorCode:checked&&checked.errorCode||gErrorReason(it),confusionPair:checked&&Object.hasOwn(checked,'confusionPair')?checked.confusionPair:it.q&&it.q.confusionPair||null});
+    if(transferResult&&transferResult.status==='due_next_session'&&GS.itemOutcomes.length)GS.itemOutcomes[GS.itemOutcomes.length-1].transferStatus='due_next_session'}
+  GS.phase='explain';if(gIsPracticeSession())gPersistRunner()
+}
+function gScheduleWrongExplanation(it,userWrong){var sessionId=GS.sessionId,itemId=it.q.id;
+  setTimeout(function(){if(!GS||GS.sessionId!==sessionId||GS.phase!=='explain'||!GS.queue[GS.i]||GS.queue[GS.i].q.id!==itemId)return;gExplain(it,userWrong)},900)}
+function gScheduleCorrectAdvance(it){var session=GS,itemId=it.q.id;
+  setTimeout(function(){if(!GS||GS!==session||GS.phase!=='advance'||!GS.queue[GS.i]||GS.queue[GS.i].q.id!==itemId)return;GS.i++;GS.phase='question';if(gIsPracticeSession())gPersistRunner();gSync();save();gRenderQ()},600)}
 function gPick(btn,i){var it=GS.queue[GS.i];if(!it||btn.dataset.done)return;var q=it.q;
   var all=btn.parentElement.querySelectorAll('button');all.forEach(function(b){b.dataset.done=1});
-  var ok=i===q.a;
-  gAnswer(ok,it);
-  if(ok){ui.markAnswer(btn,'correct');gAnim('wpop','.35s');
-    setTimeout(function(){GS.i++;gSync();save();gRenderQ()},600)}
+  var checked=grammarModule.checkPracticeAnswer(it,i),ok=checked.correct;
+  gAnswer(ok,it,checked);
+  if(ok){ui.markAnswer(btn,'correct');gAnim('wpop','.35s');GS.phase='advance';if(gIsPracticeSession())gPersistRunner();
+    gScheduleCorrectAdvance(it)}
   else{ui.markAnswer(btn,'wrong');
     all.forEach(function(b,bi){if(bi===q.a)ui.markAnswer(b,'correct')});
-    gAnim('wshake','.42s');
-    setTimeout(function(){gExplain(it,q.o[i])},900)}}
+    gCommitWrongState(it,checked);gAnim('wshake','.42s');gScheduleWrongExplanation(it,q.o[i])}}
 function gSubmit(){var it=GS.queue[GS.i];if(!it)return;var inp=document.getElementById('g_inp');if(!inp||inp.dataset.done)return;
-  var q=it.q,userWrong=inp.value,val=gNorm(userWrong);
-  var ok=q.ans.some(function(a){return gNorm(a)===val});
+  var q=it.q,userWrong=inp.value,checked=grammarModule.checkPracticeAnswer(it,userWrong),ok=checked.correct;
   inp.dataset.done=1;
   inp.style.borderColor=ok?'#1F9E5A':'#E24B4A';inp.style.background=ok?'#EAF7F0':'#FDEDEA';
-  gAnswer(ok,it);
-  if(ok){gAnim('wpop','.35s');setTimeout(function(){GS.i++;gSync();save();gRenderQ()},600)}
-  else{inp.value=q.ans[0];gAnim('wshake','.42s');setTimeout(function(){gExplain(it,userWrong)},900)}}
+  gAnswer(ok,it,checked);
+  if(ok){gAnim('wpop','.35s');GS.phase='advance';if(gIsPracticeSession())gPersistRunner();gScheduleCorrectAdvance(it)}
+  else{inp.value=q.ans[0];gCommitWrongState(it,checked);gAnim('wshake','.42s');gScheduleWrongExplanation(it,userWrong)}}
+function gRenderCompletionPending(){var area=document.getElementById('g_area');if(!area||!GS)return;
+  area.innerHTML='<div id="g_card" class="clayCard" role="status" aria-live="polite" style="position:relative;overflow:hidden;padding:24px;text-align:center;">'+wDeco()
+    +'<div style="font-size:44px;">⏳</div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:21px;color:#2B2B2B;margin-top:10px;">Сохраняем результат…</div>'
+    +'<div style="font-weight:600;font-size:13.5px;color:#777163;margin-top:8px;line-height:1.5;">Не закрывайте этот экран: точная сессия уже сохранена на устройстве и будет безопасно повторена.</div></div>'}
+function gCompletionEvent(session){var current=gRec(session.t),independentError=session.independentErrors&&session.independentErrors[session.t];return{type:'session_completed',id:session.sessionId,assisted:session.masteryAssisted,source:session.source,completedTypes:Object.keys(session.types||{}),typeScores:session.typeScores,session:{id:session.sessionId,scope:'topic',mode:session.practiceMode,source:session.source,catalog:{version:GRAMMAR_CATALOG.version,revision:GRAMMAR_CATALOG.revision},items:session.itemOutcomes,startedAt:session.evidence.startedAt,assisted:session.masteryAssisted},...(independentError?{independentError:independentError}:{}),...gMasteryExpectation(current)}}
 async function gFinish(){if(GS&&GS.mode==='rev'){await gFinishRev();return}
-  var finishedSession=GS,result=null;
-  if(finishedSession){finishedSession.evidence.score=finishedSession.ok;finishedSession.evidence.maxScore=finishedSession.done;
-    gReportEvidence(finishedSession.evidence,{mode:'topic_practice',source:finishedSession.source,helpUsed:finishedSession.helpUsed,hintsUsed:0});
-    var completedTypes=Object.keys(finishedSession.types||{});
-    if(completedTypes.length){var current=gRec(finishedSession.t),event={type:'session_completed',id:crypto.randomUUID(),assisted:finishedSession.masteryAssisted,source:finishedSession.source,completedTypes:completedTypes,typeScores:finishedSession.typeScores,...gMasteryExpectation(current)};
-      if(!event.assisted&&finishedSession.errorReasons[finishedSession.t])event.reason=finishedSession.errorReasons[finishedSession.t];result=await gSubmitMasteryEvent(finishedSession.t,event)}}
+  var finishedSession=GS,result=null,durable=false;if(!finishedSession)return;
+  finishedSession.evidence.score=finishedSession.ok;finishedSession.evidence.maxScore=finishedSession.done;
+  gReportEvidence(finishedSession.evidence,{mode:finishedSession.practiceMode,source:finishedSession.source,helpUsed:finishedSession.helpUsed,hintsUsed:0,
+    grammarTopicId:finishedSession.t,grammarErrorCode:finishedSession.errorReasons[finishedSession.t],grammarConfusionPair:finishedSession.confusionPairs[finishedSession.t]});
+  var completedTypes=Object.keys(finishedSession.types||{});
+  if(completedTypes.length){
+    if(!finishedSession.completionEvent)finishedSession.completionEvent=gCompletionEvent(finishedSession);
+    finishedSession.phase='completion_pending';gPersistRunner();gRenderCompletionPending();
+    result=await gSubmitMasteryEvent(finishedSession.t,finishedSession.completionEvent);
+    if(GS!==finishedSession)return;
+    durable=gMasteryDurable(result,finishedSession.completionEvent,finishedSession.t);if(durable)gClearRunner();
+  }
   if(GS!==finishedSession)return;
   var area=document.getElementById('g_area');var r=gRec(finishedSession.t),tp=G_TOPICS[finishedSession.t],view=grammarModule.masteryView(r);
   var provisional=gMasteryProvisional(result),unsaved=gMasteryUnsaved(result),persistenceLine=gMasteryPersistenceLine(result),stable=!unsaved&&!provisional&&view.stage==='stable';
@@ -278,9 +408,9 @@ async function gFinish(){if(GS&&GS.mode==='rev'){await gFinishRev();return}
     +'<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:14px 0;">'
     +'<div style="font-size:44px;">'+(provisional?'⏳':stable?'🏆':'💪')+'</div>'
     +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:21px;color:#2B2B2B;margin-top:10px;">'+(unsaved?'Результат не сохранён':provisional?'Результат ждёт синхронизации':stable?'Навык устойчив!':'Подход завершён')+'</div>'
-    +'<div style="font-weight:600;font-size:13.5px;color:#777163;margin-top:8px;line-height:1.5;">'+tp.n+'<br>Верно: '+finishedSession.ok+' из '+finishedSession.done+'<br>'+(provisional?'СТАТУС ОБНОВИТСЯ ПОСЛЕ СИНХРОНИЗАЦИИ':view.label+' · '+gDateLine(view)+gRegressionLine(view))+(persistenceLine?'<br>'+persistenceLine:'')+(finishedSession.masteryAssisted?'<br>Помощь до ответа использована: подход не повышает стадию':finishedSession.helpUsed?'<br>Разбор ошибки показан после ответа; самостоятельная попытка учтена':'')+'</div></div></div>'
+    +'<div style="font-weight:600;font-size:13.5px;color:#777163;margin-top:8px;line-height:1.5;">'+tp.n+'<br>Верно: '+finishedSession.ok+' из '+finishedSession.done+'<br>'+(provisional?'СТАТУС ОБНОВИТСЯ ПОСЛЕ СИНХРОНИЗАЦИИ':view.label+' · '+gDateLine(view)+gRegressionLine(view))+(persistenceLine?'<br>'+persistenceLine:'')+(finishedSession.masteryAssisted?'<br>Показана помощь или правильный ответ: подход не повышает стадию':'')+'</div></div></div>'
     +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
-    +(stable?'':'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="gStart('+finishedSession.t+')">'+(unsaved?'Повторить подход':'Ещё подход')+'</button>')
+    +(stable?'':'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="'+(durable?'gStart('+finishedSession.t+')':'gFinish()')+'">'+(durable?'Ещё подход':'Повторить синхронизацию')+'</button>')
     +'<button class="sq" style="'+WBTN+'color:#B54E2F;" onclick="gToThemes()">К темам</button></div>';
   gAnim('win','.32s');gSync();save()}
 async function gFinishRev(){var reviewSession=GS,area=document.getElementById('g_area'),rows='',finishedAt=Date.now();
@@ -289,8 +419,8 @@ async function gFinishRev(){var reviewSession=GS,area=document.getElementById('g
   grammarModule.reviewEvidenceSlices(reviewSession.evidence,durationMs).forEach(function(evidence){
     gReportEvidence(evidence,{mode:'spaced_review',source:gEvidenceSource(evidence,reviewSession.source),helpUsed:evidence.helpUsed,hintsUsed:0},evidence.durationMs)});
   var entries=reviewSession.revT.map(function(t){var bad=reviewSession.errT[t],activityId=grammarModule.activityId(t,'spaced_review'),evidence=reviewSession.evidence[activityId],current=gRec(t);
-    var event={type:'review_completed',id:crypto.randomUUID(),passed:!bad,assisted:Boolean(reviewSession.helpActivities[t]||reviewSession.helpActivities[activityId]),source:gEvidenceSource(evidence,reviewSession.source),...gMasteryExpectation(current)};
-    if(bad&&!event.assisted)event.reason=reviewSession.errorReasons[t]||'construction_choice';
+    var independentError=reviewSession.independentErrors&&reviewSession.independentErrors[t];
+    var event={type:'review_completed',id:crypto.randomUUID(),passed:!bad,assisted:Boolean(reviewSession.helpActivities[t]||reviewSession.helpActivities[activityId]),source:gEvidenceSource(evidence,reviewSession.source),...(bad&&independentError?{independentError:independentError}:{}),...gMasteryExpectation(current)};
     return{topicId:t,event:event}});
   var batchResult=await gSubmitMasteryBatch(entries),results=batchResult&&Array.isArray(batchResult.results)?batchResult.results:[];
   if(GS!==reviewSession)return;
@@ -413,11 +543,11 @@ async function gGen(t){
   G_GEN=false}
 registerRouteHook(function(id){if(id==='scr3')initGrammar()});
 /* Экзамен по грамматике не должен тикать в фоне после ухода с экрана. */
-registerRouteHook(function(id){if(EX&&EX.iv){clearInterval(EX.iv);EX=null}if(id==='scr3')GS=null});
+registerRouteHook(function(id){if(EX&&EX.iv){clearInterval(EX.iv);EX=null}if(id!=='scr3')GS=null});
 registerScreenGenerator('scr3',genGrammar);
 
 /* Имена для обработчиков этого экрана: загрузчик кладёт их на window вместе с чанком. */
 export {
-  gAfterExplain,gExam,gExamCheck,gExamStart,gMap,gOpen,gPick,gResume,gReview,gStart,gSubmit,launchGrammarExam,
+  gAfterExplain,gExam,gExamCheck,gExamStart,gFinish,gMap,gOpen,gPick,gResume,gReview,gStart,gSubmit,launchGrammarExam,
   gTheory,gToThemes,
 };

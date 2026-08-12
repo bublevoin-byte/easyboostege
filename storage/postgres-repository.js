@@ -121,9 +121,11 @@ import { hashAuthCode, normalizeUsername, normalizeVoiceTutorDeliveryMetadata, n
 import {
   hasCanonicalMasteryRecords,
   migrateLegacyMasteryRecords,
+  masteryEventReplayMatches,
   migrateMasteryRecords,
   reduceMastery,
 } from '../public/modules/grammar.js';
+import { assertGeneratedGrammarMasteryReferences } from '../validation/generated-grammar-mastery.js';
 import { transitionPedagogicalState } from '../voice-tutor/state-machine.js';
 import { transitionRuleCardReview } from '../voice-tutor/rule-card.js';
 import {
@@ -226,6 +228,7 @@ export function createPostgresRepository(connectionString, {
   async function saveProgress(username, data) {
     const accepted = structuredClone(data || {});
     delete accepted.grammarMastery;
+    delete accepted.grammarRunner;
     await pool.query(
       `INSERT INTO user_progress (username, data, updated_at)
        VALUES ($1, $2::jsonb, NOW())
@@ -242,11 +245,12 @@ export function createPostgresRepository(connectionString, {
   async function mergeProgress(username, modules) {
     const accepted = structuredClone(modules || {});
     delete accepted.grammarMastery;
+    delete accepted.grammarRunner;
     const result = await pool.query(
       `INSERT INTO user_progress (username, data, updated_at)
        VALUES ($1, $2::jsonb, NOW())
        ON CONFLICT (username) DO UPDATE
-       SET data = COALESCE(user_progress.data, '{}'::jsonb) || EXCLUDED.data,
+       SET data = (COALESCE(user_progress.data, '{}'::jsonb) - 'grammarRunner') || EXCLUDED.data,
            updated_at = NOW()
        RETURNING data`,
       [username, JSON.stringify(accepted)],
@@ -313,8 +317,19 @@ export function createPostgresRepository(connectionString, {
       for (const { topicId, event } of entries) {
         const current = grammarMastery[topicId]
           || migrateMasteryRecords({ [topicId]: {} }, { now })[topicId];
-        const replay = current.recentEventIds.includes(event.id);
-        const record = replay
+        const eventSeen = current.recentEventIds.includes(event.id);
+        const replay = eventSeen && masteryEventReplayMatches(current, event);
+        if (!eventSeen) {
+          await assertGeneratedGrammarMasteryReferences(topicId, event, async (requestHash) => {
+            const generated = await client.query(
+              `SELECT operation, request, result FROM generated_tasks
+               WHERE username = $1 AND request_hash = $2`,
+              [username, requestHash],
+            );
+            return generated.rows[0] || null;
+          });
+        }
+        const record = eventSeen
           ? current
           : reduceMastery(current, event, { now, clockAuthority: 'server' });
         const applied = !replay && record.masteryRevision === current.masteryRevision + 1;
@@ -3296,6 +3311,26 @@ export function createPostgresRepository(connectionString, {
       [username, entry.operation, entry.requestHash, JSON.stringify(entry.request), JSON.stringify(entry.result), entry.provider, entry.promptVersion],
     );
     return Number(result.rows[0].id);
+  }
+
+  async function deleteGeneratedTask(username, requestHash) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const owner = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
+      if (!owner.rowCount) throw new Error('USER_NOT_FOUND');
+      const result = await client.query(
+        'DELETE FROM generated_tasks WHERE username = $1 AND request_hash = $2',
+        [username, requestHash],
+      );
+      await client.query('COMMIT');
+      return result.rowCount > 0;
+    } catch (error) {
+      try { await client.query('ROLLBACK'); } catch {}
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   /* ---------- Section 10.1: the shared task bank ---------- */
@@ -6324,6 +6359,7 @@ export function createPostgresRepository(connectionString, {
     submitFullSpeakingSessionResult,
     completeFullSpeakingSessionEvaluation,
     getGeneratedTask,
+    deleteGeneratedTask,
     getSharedGeneratedTask,
     saveGeneratedTask,
     upsertBankTask,
