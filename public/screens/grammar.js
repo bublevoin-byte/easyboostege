@@ -12,7 +12,7 @@ import {
 } from '../app.js';
 import {recordCompletedLearningActivity} from '../learning-activity-recorder.js';
 import {GRAMMAR_CATALOG,validateGeneratedGrammarSupplement} from '../grammar-catalog.js';
-import {GENERATED_GRAMMAR_REVISION,GRAMMAR_ACTIVE_PRACTICE_TYPES,isGrammarConfusionPair,isGrammarErrorCode,parseGrammarConfusionPair,parseGeneratedGrammarItemReference} from '../grammar-domain-contract.js';
+import {GENERATED_GRAMMAR_REVISION,GRAMMAR_ACTIVE_PRACTICE_TYPES,isBuiltinGrammarDiagnosticId,isGrammarConfusionPair,isGrammarErrorCode,parseGrammarConfusionPair,parseGeneratedGrammarItemReference} from '../grammar-domain-contract.js';
 
 const GRAM_Q=[
  {t:['She ','_____',' already finished her homework.'],o:['have','has','had','is'],a:1,e:'<b>She/he/it</b> — третье лицо, поэтому <b>has</b>.'},
@@ -116,7 +116,7 @@ function gSafeRunnerOutcomes(value,queue,done,active){if(!Array.isArray(value)||
     var generated=item&&item.source==='generated',revision=raw.revision==null?null:Number(raw.revision),provenance=raw.source==null?null:String(raw.source);
     if(generated?(revision!==GENERATED_GRAMMAR_REVISION||provenance!=='generated'):(revision!==null||provenance!==null))return null;
     if(transferStatus!==null&&(transferStatus!=='due_next_session'||raw.correct||(active&&!raw.transfer)))return null;
-    if(diagnosticId!==null&&!/^core\.g\.(?:1|2|3|4|13)\.c\.\d+\.diagnostic\.[1-9]\d*$/u.test(diagnosticId))return null;
+    if(diagnosticId!==null&&!isBuiltinGrammarDiagnosticId(diagnosticId))return null;
     if(active?((type==='choice'&&!raw.correct&&diagnosticId===null)||((type!=='choice'||raw.correct)&&diagnosticId!==null))
       :(diagnosticId!==null||raw.transfer||confusionPair!==null))return null;
     if(!active){var attempt=(legacyAttempts.get(raw.id)||0)+1;legacyAttempts.set(raw.id,attempt);

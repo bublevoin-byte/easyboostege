@@ -83,7 +83,7 @@ function assistedDueSession(id, topicId = 2) {
 }
 
 function legacySession(id, { assisted = false, wrongRetry = false } = {}) {
-  const topicId = 5;
+  const topicId = 10;
   const originals = [
     ...GRAMMAR_CATALOG.bank[topicId].c.slice(0, wrongRetry ? 1 : 4),
     ...GRAMMAR_CATALOG.bank[topicId].f.slice(0, wrongRetry ? 0 : 3),
@@ -321,7 +321,7 @@ export async function assertGrammarMasteryProgressContract(repository, owner, st
       id: collisionId, scope: 'topic', mode: 'legacy_practice', source: 'builtin',
       catalog: { version: GRAMMAR_CATALOG.version, revision: GRAMMAR_CATALOG.revision },
       items: [{
-        id: 'core.g.5.c.1', type: 'choice', transfer: false, correct: true,
+        id: 'core.g.10.c.1', type: 'choice', transfer: false, correct: true,
         diagnosticId: null, errorCode: null, confusionPair: null, transferStatus: null,
       }],
       startedAt, assisted: false,
@@ -329,11 +329,11 @@ export async function assertGrammarMasteryProgressContract(repository, owner, st
   });
   const collisionA = collisionEvent(19_181_966_713_209);
   const collisionB = collisionEvent(288_105_508_095_880);
-  assert.equal(grammarMasteryEventSchema.safeParse({ topicId: 5, event: collisionA }).success, true);
-  assert.equal(grammarMasteryEventSchema.safeParse({ topicId: 5, event: collisionB }).success, true);
-  const collisionApplied = await repository.applyGrammarMasteryEvent(stranger, 5, collisionA);
+  assert.equal(grammarMasteryEventSchema.safeParse({ topicId: 10, event: collisionA }).success, true);
+  assert.equal(grammarMasteryEventSchema.safeParse({ topicId: 10, event: collisionB }).success, true);
+  const collisionApplied = await repository.applyGrammarMasteryEvent(stranger, 10, collisionA);
   assert.equal(collisionApplied.applied, true);
-  const collisionConflict = await repository.applyGrammarMasteryEvent(stranger, 5, collisionB);
+  const collisionConflict = await repository.applyGrammarMasteryEvent(stranger, 10, collisionB);
   assert.equal(collisionConflict.conflict, true);
   assert.equal(collisionConflict.replay, false,
     'file/PostgreSQL exact replay comparison rejects the reproduced FNV-1a-32 collision');
@@ -343,8 +343,8 @@ export async function assertGrammarMasteryProgressContract(repository, owner, st
   const legacyClean = legacySession('00000000-0000-4000-8000-000000000070');
   legacyClean.expectedRevision = 1;
   legacyClean.expectedStage = 'learning';
-  assert.equal(grammarMasteryEventSchema.safeParse({ topicId: 5, event: legacyClean }).success, true);
-  const legacyCleanResult = await repository.applyGrammarMasteryEvent(stranger, 5, legacyClean);
+  assert.equal(grammarMasteryEventSchema.safeParse({ topicId: 10, event: legacyClean }).success, true);
+  const legacyCleanResult = await repository.applyGrammarMasteryEvent(stranger, 10, legacyClean);
   assert.equal(legacyCleanResult.applied, true);
   assert.equal(legacyCleanResult.record.stage, 'learning',
     'choice/input legacy evidence remains partial and cannot claim four-type learned mastery');
@@ -355,21 +355,21 @@ export async function assertGrammarMasteryProgressContract(repository, owner, st
     assisted: true, wrongRetry: true,
   });
   legacyWrong.expectedRevision = 2;
-  assert.equal(grammarMasteryEventSchema.safeParse({ topicId: 5, event: legacyWrong }).success, true,
+  assert.equal(grammarMasteryEventSchema.safeParse({ topicId: 10, event: legacyWrong }).success, true,
     'the shared boundary accepts one exact assisted legacy retry with an ordered repeated item');
-  const legacyWrongResult = await repository.applyGrammarMasteryEvent(stranger, 5, legacyWrong);
+  const legacyWrongResult = await repository.applyGrammarMasteryEvent(stranger, 10, legacyWrong);
   assert.equal(legacyWrongResult.applied, true);
   assert.equal(legacyWrongResult.record.stage, 'learning',
     'automatic disclosure cannot advance partial legacy mastery');
   assert.deepEqual(legacyWrongResult.record.masteryHistory.at(-1).session.items,
     legacyWrong.session.items, 'the duplicate legacy retry stays ordered and answer-free');
-  const legacyWrongReplay = await repository.applyGrammarMasteryEvent(stranger, 5, legacyWrong);
+  const legacyWrongReplay = await repository.applyGrammarMasteryEvent(stranger, 10, legacyWrong);
   assert.equal(legacyWrongReplay.replay, true);
   assert.equal(legacyWrongReplay.record.masteryHistory.length, 3,
     'exact assisted legacy replay cannot duplicate canonical history');
   const changedLegacyWrong = structuredClone(legacyWrong);
   changedLegacyWrong.session.startedAt += 1;
-  const legacyWrongConflict = await repository.applyGrammarMasteryEvent(stranger, 5, changedLegacyWrong);
+  const legacyWrongConflict = await repository.applyGrammarMasteryEvent(stranger, 10, changedLegacyWrong);
   assert.equal(legacyWrongConflict.conflict, true);
   assert.equal(legacyWrongConflict.replay, false,
     'changed legacy completion material cannot reuse its persisted UUID');
@@ -382,8 +382,8 @@ export async function assertGrammarMasteryProgressContract(repository, owner, st
     ...legacyDue.session.items[0], transferStatus: 'due_next_session',
   };
   legacyDue.typeScores.choice = { correct: 0, total: 2 };
-  assert.equal(grammarMasteryEventSchema.safeParse({ topicId: 5, event: legacyDue }).success, true);
-  const legacyDueResult = await repository.applyGrammarMasteryEvent(stranger, 5, legacyDue);
+  assert.equal(grammarMasteryEventSchema.safeParse({ topicId: 10, event: legacyDue }).success, true);
+  const legacyDueResult = await repository.applyGrammarMasteryEvent(stranger, 10, legacyDue);
   assert.equal(legacyDueResult.applied, true);
   assert.equal(legacyDueResult.record.stage, 'learning');
   assert.equal(legacyDueResult.record.masteryHistory.at(-1).session.items[1].transferStatus,
@@ -602,11 +602,11 @@ export async function assertGrammarMasteryProgressContract(repository, owner, st
   assert.equal(strangerExport.progress.grammarMastery['2'].masteryHistory[0].session.id, dueSessionId);
   assert.equal(strangerExport.progress.grammarMastery['2'].masteryHistory[0].session.items.length, 32);
   assert.equal(strangerExport.progress.grammarMastery['2'].masteryHistory[0].session.items[1].transferStatus, 'due_next_session');
-  assert.equal(strangerExport.progress.grammarMastery['5'].stage, 'learning');
-  assert.equal(strangerExport.progress.grammarMastery['5'].masteryHistory.length, 4);
-  assert.deepEqual(strangerExport.progress.grammarMastery['5'].masteryHistory[2].session.items,
+  assert.equal(strangerExport.progress.grammarMastery['10'].stage, 'learning');
+  assert.equal(strangerExport.progress.grammarMastery['10'].masteryHistory.length, 4);
+  assert.deepEqual(strangerExport.progress.grammarMastery['10'].masteryHistory[2].session.items,
     legacyWrong.session.items, 'privacy export preserves the exact bounded assisted legacy retry');
-  assert.deepEqual(strangerExport.progress.grammarMastery['5'].masteryHistory[3].session.items,
+  assert.deepEqual(strangerExport.progress.grammarMastery['10'].masteryHistory[3].session.items,
     legacyDue.session.items, 'privacy export preserves the exact due-next-session retry outcome');
   assert.equal(JSON.stringify(strangerExport.progress.grammarMastery).includes('answer'), false);
   assert.equal(await repository.deleteUserData(stranger), true);

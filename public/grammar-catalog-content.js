@@ -5,6 +5,13 @@ import {
   ACTIVE_TENSES_LEGACY_OVERRIDES,
   ACTIVE_TENSES_TRANSFER_PAIR_PLANS,
 } from './grammar-tenses-content.js';
+import {
+  ACTIVE_VERB_CONSTRUCTIONS_BANK,
+  ACTIVE_VERB_CONSTRUCTIONS_LEGACY_CHOICE_DIAGNOSTICS,
+  ACTIVE_VERB_CONSTRUCTIONS_LEGACY_META,
+  ACTIVE_VERB_CONSTRUCTIONS_LEGACY_OVERRIDES,
+  ACTIVE_VERB_CONSTRUCTIONS_TRANSFER_PAIR_PLANS,
+} from './grammar-verb-constructions-content.js';
 
 // Authored Grammar 1.0 content migrated into the versioned Grammar 2.0 registry.
 export const GRAMMAR_CATALOG_CONTENT = {
@@ -2805,26 +2812,28 @@ export const GRAMMAR_CATALOG_CONTENT = {
   ]
 };
 
-// Grammar 2.0 keeps every legacy choice/input item intact and adds the two active
-// production levels only to the five tense topics owned by Ticket 03.
+// Grammar 2.0 keeps every legacy choice/input item intact. Ticket-owned content
+// packages add active levels through this single catalog merge boundary.
 export const GRAMMAR_CATALOG_V1_CONTENT = structuredClone(GRAMMAR_CATALOG_CONTENT);
 GRAMMAR_CATALOG_CONTENT.version = 'grammar-core-v2';
 GRAMMAR_CATALOG_CONTENT.revision = 2;
-for (const [topicId, additions] of Object.entries(ACTIVE_TENSES_BANK)) {
+
+function applyActiveTopicBank({ bank, legacyMeta, legacyChoiceDiagnostics, legacyOverrides, pairPlans }) {
+for (const [topicId, additions] of Object.entries(bank)) {
   const legacy = GRAMMAR_CATALOG_CONTENT.bank[topicId];
-  const metadata = ACTIVE_TENSES_LEGACY_META[topicId];
-  const overrides = ACTIVE_TENSES_LEGACY_OVERRIDES[topicId] || {};
+  const metadata = legacyMeta[topicId];
+  const overrides = legacyOverrides[topicId] || {};
   legacy.c = legacy.c.map((item, index) => ({
     ...item,
     ...(overrides.c?.[index] || {}),
     ...metadata.c[index],
-    diagnostics: ACTIVE_TENSES_LEGACY_CHOICE_DIAGNOSTICS[topicId][index],
+    diagnostics: legacyChoiceDiagnostics[topicId][index],
   })).concat(additions.c);
-  legacy.f = legacy.f.map((item, index) => ({ ...item, ...(overrides.f?.[index] || {}), ...metadata.f[index] })).concat(additions.f);
+  legacy.f = (legacy.f || []).map((item, index) => ({ ...item, ...(overrides.f?.[index] || {}), ...metadata.f[index] })).concat(additions.f);
   legacy.correction = [...additions.correction];
   legacy.transform = [...additions.transform];
   for (const kind of ['c', 'f', 'correction', 'transform']) {
-    const explicitPairPlan = ACTIVE_TENSES_TRANSFER_PAIR_PLANS[topicId]?.[kind] || null;
+    const explicitPairPlan = pairPlans[topicId]?.[kind] || null;
     const pairCounts = new Map();
     const pairIds = new Map();
     legacy[kind] = legacy[kind].map((item, itemIndex) => {
@@ -2838,10 +2847,26 @@ for (const [topicId, additions] of Object.entries(ACTIVE_TENSES_BANK)) {
     });
     if (explicitPairPlan && (explicitPairPlan.length !== legacy[kind].length
       || [...new Set(explicitPairPlan)].some((pairId) => explicitPairPlan.filter((candidate) => candidate === pairId).length !== 2))) {
-      throw new Error(`INVALID_EXPLICIT_ACTIVE_TENSE_PAIR_PLAN:${topicId}.${kind}`);
+      throw new Error(`INVALID_EXPLICIT_ACTIVE_GRAMMAR_PAIR_PLAN:${topicId}.${kind}`);
     }
     if (!explicitPairPlan && [...pairCounts.values()].some((count) => count % 2 !== 0)) {
-      throw new Error(`INVALID_ACTIVE_TENSE_PAIR_PLAN:${topicId}.${kind}`);
+      throw new Error(`INVALID_ACTIVE_GRAMMAR_PAIR_PLAN:${topicId}.${kind}`);
     }
   }
 }
+}
+
+applyActiveTopicBank({
+  bank: ACTIVE_TENSES_BANK,
+  legacyMeta: ACTIVE_TENSES_LEGACY_META,
+  legacyChoiceDiagnostics: ACTIVE_TENSES_LEGACY_CHOICE_DIAGNOSTICS,
+  legacyOverrides: ACTIVE_TENSES_LEGACY_OVERRIDES,
+  pairPlans: ACTIVE_TENSES_TRANSFER_PAIR_PLANS,
+});
+applyActiveTopicBank({
+  bank: ACTIVE_VERB_CONSTRUCTIONS_BANK,
+  legacyMeta: ACTIVE_VERB_CONSTRUCTIONS_LEGACY_META,
+  legacyChoiceDiagnostics: ACTIVE_VERB_CONSTRUCTIONS_LEGACY_CHOICE_DIAGNOSTICS,
+  legacyOverrides: ACTIVE_VERB_CONSTRUCTIONS_LEGACY_OVERRIDES,
+  pairPlans: ACTIVE_VERB_CONSTRUCTIONS_TRANSFER_PAIR_PLANS,
+});

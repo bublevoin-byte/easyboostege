@@ -4,10 +4,12 @@ import test from 'node:test';
 
 import {
   GRAMMAR_ACTIVE_PRACTICE_TYPES,
+  GRAMMAR_ACTIVE_TOPIC_IDS,
   GRAMMAR_ERROR_CODES,
   GENERATED_GRAMMAR_REVISION,
   isGrammarConfusionPair,
   isGrammarErrorCode,
+  isBuiltinGrammarDiagnosticId,
   parseGrammarConfusionPair,
   parseGeneratedGrammarItemId,
   parseGeneratedGrammarItemReference,
@@ -19,10 +21,20 @@ test('one grammar domain contract owns the exact error taxonomy and active type 
     'word_order', 'negation_or_question', 'confusion_pair',
   ]);
   assert.deepEqual(GRAMMAR_ACTIVE_PRACTICE_TYPES, ['choice', 'input', 'correction', 'transform']);
+  assert.deepEqual(GRAMMAR_ACTIVE_TOPIC_IDS, [1, 2, 3, 13, 4, 5, 6, 7, 8, 9, 18]);
   assert.equal(Object.isFrozen(GRAMMAR_ERROR_CODES), true);
   assert.equal(Object.isFrozen(GRAMMAR_ACTIVE_PRACTICE_TYPES), true);
   assert.equal(isGrammarErrorCode('word_order'), true);
   assert.equal(isGrammarErrorCode('review_error'), false);
+});
+
+test('one grammar domain predicate accepts diagnostics for every active topic without screen-specific topic lists', () => {
+  for (const topicId of GRAMMAR_ACTIVE_TOPIC_IDS) {
+    assert.equal(isBuiltinGrammarDiagnosticId(`core.g.${topicId}.c.8.diagnostic.3`), true, String(topicId));
+  }
+  assert.equal(isBuiltinGrammarDiagnosticId('core.g.10.c.1.diagnostic.1'), false, 'not-yet-active topic');
+  assert.equal(isBuiltinGrammarDiagnosticId('core.g.5.f.1.diagnostic.1'), false, 'only authored choice diagnostics');
+  assert.equal(isBuiltinGrammarDiagnosticId('core.g.5.c.0.diagnostic.1'), false, 'positive item index');
 });
 
 test('one grammar domain predicate owns exact confusion-pair parsing', () => {

@@ -2,16 +2,18 @@ import { z } from 'zod';
 import { GRAMMAR_CATALOG } from '../public/grammar-catalog.js';
 import {
   GRAMMAR_ACTIVE_PRACTICE_TYPES,
+  GRAMMAR_ACTIVE_TOPIC_IDS,
   GRAMMAR_ERROR_CODES,
   GENERATED_GRAMMAR_REVISION,
   isGrammarConfusionPair,
+  isBuiltinGrammarDiagnosticId,
   parseGeneratedGrammarItemId,
   parseGeneratedGrammarItemReference,
 } from '../public/grammar-domain-contract.js';
 
 const stages = ['not_started', 'learning', 'learned', 'confirmed', 'stable'];
 const practiceTypes = GRAMMAR_ACTIVE_PRACTICE_TYPES;
-const activeTopicIds = [1, 2, 3, 4, 13];
+const activeTopicIds = GRAMMAR_ACTIVE_TOPIC_IDS;
 const source = z.enum(['builtin', 'mixed', 'generated']);
 const regressionReason = z.enum(GRAMMAR_ERROR_CODES);
 const common = {
@@ -30,7 +32,7 @@ const typeScore = z.object({
 const confusionPair = z.string().refine(isGrammarConfusionPair, { message: 'invalid grammar confusion pair' });
 const independentError = z.object({
   itemId: z.string().min(1).max(128),
-  diagnosticId: z.string().regex(/^core\.g\.(?:1|2|3|4|13)\.c\.\d+\.diagnostic\.[1-9]\d*$/u).nullable(),
+  diagnosticId: z.string().refine(isBuiltinGrammarDiagnosticId, { message: 'invalid built-in grammar diagnostic' }).nullable(),
   reason: regressionReason,
   confusionPair: confusionPair.nullable(),
 }).strict();
@@ -53,7 +55,7 @@ const practiceSessionItem = z.object({
   type: z.enum(practiceTypes),
   transfer: z.boolean(),
   correct: z.boolean(),
-  diagnosticId: z.string().regex(/^core\.g\.(?:1|2|3|4|13)\.c\.\d+\.diagnostic\.[1-9]\d*$/u).nullable(),
+  diagnosticId: z.string().refine(isBuiltinGrammarDiagnosticId, { message: 'invalid built-in grammar diagnostic' }).nullable(),
   errorCode: regressionReason.nullable(),
   confusionPair: confusionPair.nullable(),
   transferStatus: z.enum(['due_next_session']).nullable(),
@@ -137,11 +139,12 @@ export const grammarMasteryEventSchema = z.object({
     return;
   }
   const activeTopic = activeTopicIds.includes(value.topicId);
-  const expectedMode = activeTopic ? 'topic_practice' : 'legacy_practice';
+  const activeSession = activeTopic && value.event.source === 'builtin';
+  const expectedMode = activeSession ? 'topic_practice' : 'legacy_practice';
   if (value.event.session.mode !== expectedMode) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['event', 'session', 'mode'], message: `topic requires ${expectedMode}` });
   }
-  if (activeTopic && (!practiceTypes.every((type) => value.event.completedTypes.includes(type))
+  if (activeSession && (!practiceTypes.every((type) => value.event.completedTypes.includes(type))
     || value.event.completedTypes.length !== practiceTypes.length
     || !practiceTypes.every((type) => value.event.typeScores[type] != null)
     || Object.keys(value.event.typeScores).length !== practiceTypes.length)) {
@@ -168,18 +171,18 @@ export const grammarMasteryEventSchema = z.object({
   if (value.event.source !== expectedSource || (generatedOutcomes.length > 0 && !value.event.assisted)) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['event', 'source'], message: 'generated participation requires exact assisted provenance' });
   }
-  if (!activeTopic && value.event.session.items.length > 16) {
+  if (!activeSession && value.event.session.items.length > 16) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['event', 'session', 'items'], message: 'legacy sessions are bounded to eight originals and one retry each' });
   }
-  if (activeTopic
+  if (activeSession
     && !practiceTypes.every((type) => value.event.session.items.filter((item) => !item.transfer && item.type === type).length === 4)) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['event', 'session', 'items'], message: 'active sessions require exactly four original items per practice type' });
   }
-  if (activeTopic
+  if (activeSession
     && new Set(value.event.session.items.map((item) => item.id)).size !== value.event.session.items.length) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['event', 'session', 'items'], message: 'active sessions cannot repeat a practice item' });
   }
-  if (activeTopic) {
+  if (activeSession) {
     for (const type of practiceTypes) {
       const originals = value.event.session.items.filter((outcome) => !outcome.transfer && outcome.type === type);
       const pairIds = originals.map((outcome) => catalogItems.get(outcome.id)?.transferPair).filter(Boolean);
@@ -229,7 +232,7 @@ export const grammarMasteryEventSchema = z.object({
     const legacyErrorCode = item?.errorSkill || (expectedType === 'input' ? 'word_or_verb_form' : 'construction_choice');
     const expectedWeakness = outcome.correct
       ? outcome.diagnosticId == null && outcome.errorCode == null && outcome.confusionPair == null
-      : !activeTopic
+      : !activeSession
         ? outcome.diagnosticId == null && outcome.confusionPair == null && outcome.errorCode === legacyErrorCode
         : item?.type === 'choice'
         ? selectedDiagnostic?.errorCode === outcome.errorCode
@@ -242,7 +245,7 @@ export const grammarMasteryEventSchema = z.object({
       : (outcome.source != null || outcome.revision != null)) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ['event', 'session', 'items', index], message: 'generated session items require exact revision provenance' });
     }
-    if (!activeTopic && (outcome.transfer || outcome.diagnosticId != null || outcome.confusionPair != null)) {
+    if (!activeSession && (outcome.transfer || outcome.diagnosticId != null || outcome.confusionPair != null)) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ['event', 'session', 'items', index], message: 'legacy sessions accept catalog outcomes without active transfer diagnostics' });
     }
     if (outcome.transfer) {
@@ -255,12 +258,12 @@ export const grammarMasteryEventSchema = z.object({
         context.addIssue({ code: z.ZodIssueCode.custom, path: ['event', 'session', 'items', index], message: 'transfer must immediately follow the same exact weakness' });
       }
     }
-    if (activeTopic && !outcome.transfer && !outcome.correct
+    if (activeSession && !outcome.transfer && !outcome.correct
       && outcomes[index + 1]?.transfer !== true) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ['event', 'session', 'items', index], message: 'each failed original requires one adjacent authored transfer outcome' });
     }
     let expectedTransferStatus = outcome.transfer && !outcome.correct ? 'due_next_session' : null;
-    if (!activeTopic) {
+    if (!activeSession) {
       const occurrence = (legacyOccurrences.get(outcome.id) || 0) + 1;
       legacyOccurrences.set(outcome.id, occurrence);
       const total = legacyTotals.get(outcome.id);
@@ -272,7 +275,7 @@ export const grammarMasteryEventSchema = z.object({
       expectedTransferStatus = occurrence === 2 && !outcome.correct ? 'due_next_session' : null;
     }
     if ((outcome.transferStatus || null) !== expectedTransferStatus || (outcome.transferStatus != null
-      && activeTopic && (index < 1 || outcomes[index - 1]?.correct !== false))) {
+      && activeSession && (index < 1 || outcomes[index - 1]?.correct !== false))) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ['event', 'session', 'items', index, 'transferStatus'], message: 'due-next-session requires one failed bounded transfer' });
     }
   });

@@ -4586,15 +4586,77 @@ components:
         learnerPreferences: { $ref: '#/components/schemas/LearnerPreferences' }
       additionalProperties: true
     GrammarMasteryEventRequest:
+      description: Built-in sessions use the exact active-topic envelope selected by topicId; generated and mixed sessions remain assisted legacy evidence.
+      oneOf:
+        - $ref: '#/components/schemas/GrammarActiveBuiltinMasteryEventRequest'
+        - $ref: '#/components/schemas/GrammarLegacyBuiltinMasteryEventRequest'
+        - $ref: '#/components/schemas/GrammarGeneratedOrMixedMasteryEventRequest'
+        - $ref: '#/components/schemas/GrammarMasteryReviewEventRequest'
+    GrammarActiveBuiltinMasteryEventRequest:
+      type: object
+      required: [topicId, event]
+      properties:
+        topicId: { type: integer, enum: [1, 2, 3, 13, 4, 5, 6, 7, 8, 9, 18] }
+        event:
+          allOf:
+            - $ref: '#/components/schemas/GrammarMasterySessionEvent'
+            - type: object
+              required: [source, session]
+              properties:
+                source: { type: string, enum: [builtin] }
+                session:
+                  type: object
+                  required: [mode]
+                  properties:
+                    mode: { type: string, enum: [topic_practice] }
+      additionalProperties: false
+    GrammarLegacyBuiltinMasteryEventRequest:
+      type: object
+      required: [topicId, event]
+      properties:
+        topicId:
+          allOf:
+            - type: integer
+              minimum: 1
+              maximum: 20
+            - not: { enum: [1, 2, 3, 13, 4, 5, 6, 7, 8, 9, 18] }
+        event:
+          allOf:
+            - $ref: '#/components/schemas/GrammarMasterySessionEvent'
+            - type: object
+              required: [source, session]
+              properties:
+                source: { type: string, enum: [builtin] }
+                session:
+                  type: object
+                  required: [mode]
+                  properties:
+                    mode: { type: string, enum: [legacy_practice] }
+      additionalProperties: false
+    GrammarGeneratedOrMixedMasteryEventRequest:
       type: object
       required: [topicId, event]
       properties:
         topicId: { type: integer, minimum: 1, maximum: 20 }
         event:
-          oneOf:
-            - { $ref: '#/components/schemas/GrammarMasterySessionEvent' }
-            - { $ref: '#/components/schemas/GrammarMasteryReviewEvent' }
-          discriminator: { propertyName: type }
+          allOf:
+            - $ref: '#/components/schemas/GrammarMasterySessionEvent'
+            - type: object
+              required: [source, session]
+              properties:
+                source: { type: string, enum: [generated, mixed] }
+                session:
+                  type: object
+                  required: [mode]
+                  properties:
+                    mode: { type: string, enum: [legacy_practice] }
+      additionalProperties: false
+    GrammarMasteryReviewEventRequest:
+      type: object
+      required: [topicId, event]
+      properties:
+        topicId: { type: integer, minimum: 1, maximum: 20 }
+        event: { $ref: '#/components/schemas/GrammarMasteryReviewEvent' }
       additionalProperties: false
     GrammarMasteryEventBatchRequest:
       type: object
@@ -4965,7 +5027,7 @@ components:
         diagnosticId:
           type: string
           nullable: true
-          pattern: '^core\.g\.(?:1|2|3|4|13)\.c\.\d+\.diagnostic\.[1-9]\d*$'
+          pattern: '^core\.g\.(?:1|2|3|4|5|6|7|8|9|13|18)\.c\.[1-9]\d*\.diagnostic\.[1-9]\d*$'
           description: Server-owned selected-option diagnostic pointer; non-null only for a wrong choice outcome.
         errorCode:
           type: string
@@ -5064,7 +5126,7 @@ components:
         diagnosticId:
           type: string
           nullable: true
-          pattern: '^core\.g\.(?:1|2|3|4|13)\.c\.\d+\.diagnostic\.[1-9]\d*$'
+          pattern: '^core\.g\.(?:1|2|3|4|5|6|7|8|9|13|18)\.c\.[1-9]\d*\.diagnostic\.[1-9]\d*$'
         errorCode:
           type: string
           nullable: true
@@ -5266,7 +5328,7 @@ components:
         diagnosticId:
           type: string
           nullable: true
-          pattern: '^core\.g\.(?:1|2|3|4|13)\.c\.\d+\.diagnostic\.[1-9]\d*$'
+          pattern: '^core\.g\.(?:1|2|3|4|5|6|7|8|9|13|18)\.c\.[1-9]\d*\.diagnostic\.[1-9]\d*$'
         reason:
           type: string
           enum: [construction_choice, word_or_verb_form, auxiliary, agreement, word_order, negation_or_question, confusion_pair]

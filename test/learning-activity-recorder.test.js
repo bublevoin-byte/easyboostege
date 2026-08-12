@@ -7,6 +7,7 @@ import {
   GENERATED_GRAMMAR_REVISION,
   GRAMMAR_ACTIVE_PRACTICE_TYPES,
   GRAMMAR_ERROR_CODES,
+  isBuiltinGrammarDiagnosticId,
   isGrammarConfusionPair,
   isGrammarErrorCode,
   parseGrammarConfusionPair,
@@ -144,7 +145,7 @@ function grammarScreenHarness(options = {}) {
     GRAMMAR_CATALOG, validateGeneratedGrammarSupplement,
     grammarActivityId, splitLearningActivityDuration,
     GENERATED_GRAMMAR_REVISION, GRAMMAR_ACTIVE_PRACTICE_TYPES, GRAMMAR_ERROR_CODES,
-    isGrammarConfusionPair, isGrammarErrorCode, parseGrammarConfusionPair,
+    isBuiltinGrammarDiagnosticId, isGrammarConfusionPair, isGrammarErrorCode, parseGrammarConfusionPair,
     parseGeneratedGrammarItemId, parseGeneratedGrammarItemReference,
     adaptiveRuntimeSnapshot: () => ({ active }),
     completeAdaptiveModuleActivity: async (completion) => {
@@ -352,14 +353,14 @@ test('topic completion emits one stable answer-free session identity and ordered
 
 test('a real legacy topic emits one stable bounded session without claiming four-type mastery', async () => {
   const harness = grammarScreenHarness();
-  harness.screen.gStart(5);
+  harness.screen.gStart(10);
   const sessionId = harness.screen.sessionSnapshot().sessionId;
   while (harness.screen.currentItem()) harness.screen.answerCurrent(true);
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(harness.masteryEvents.length, 1);
   const { topicId, event } = harness.masteryEvents[0];
-  assert.equal(topicId, 5);
+  assert.equal(topicId, 10);
   assert.equal(event.id, sessionId);
   assert.equal(event.session.id, sessionId);
   assert.equal(event.session.mode, 'legacy_practice');
@@ -373,7 +374,7 @@ test('a real legacy topic emits one stable bounded session without claiming four
     'the production server schema accepts the real legacy runner event');
   assert.equal(harness.ordinary[0].metadata.mode, 'legacy_practice',
     'ordinary evidence and the mastery session use the same canonical mode');
-  assert.equal(harness.ordinary[0].activity, 'grammar_forms_topic_5',
+  assert.equal(harness.ordinary[0].activity, 'grammar_forms_topic_10',
     'the stable topic activity id remains compatible with existing adaptive mappings');
 
   const stored = reduceMastery(migrateMasteryRecord(), event, { now: 2_000, clockAuthority: 'server' });
@@ -383,7 +384,7 @@ test('a real legacy topic emits one stable bounded session without claiming four
 
 test('legacy completion_pending survives a crash and retries the exact UUID without duplicate history', async () => {
   const first = grammarScreenHarness();
-  first.screen.gStart(5);
+  first.screen.gStart(10);
   while (first.screen.currentItem()) first.screen.answerCurrent(true);
   await new Promise((resolve) => setImmediate(resolve));
   const pendingState = first.stateSnapshot();
@@ -446,7 +447,7 @@ test('a queued conflict marker never clears the exact completion_pending runner'
       };
     },
   });
-  first.screen.gStart(5);
+  first.screen.gStart(10);
   while (first.screen.currentItem()) first.screen.answerCurrent(true);
   await new Promise((resolve) => setImmediate(resolve));
 
@@ -463,13 +464,13 @@ test('a queued conflict marker never clears the exact completion_pending runner'
 
 test('a legacy input answered incorrectly after mid-session reload keeps its canonical weakness', async () => {
   const first = grammarScreenHarness();
-  first.screen.gStart(5);
+  first.screen.gStart(10);
   let guard = 0;
   while (first.screen.currentItem()?.kind !== 'f' && guard < 8) {
     first.screen.answerCurrent(true);
     guard += 1;
   }
-  assert.equal(first.screen.currentItem()?.kind, 'f', 'the real topic-5 queue reaches a legacy input');
+  assert.equal(first.screen.currentItem()?.kind, 'f', 'the real topic-10 queue reaches a legacy input');
   const state = first.stateSnapshot();
   assert.equal(state.grammarRunner.phase, 'question');
 
@@ -490,13 +491,13 @@ test('a legacy input answered incorrectly after mid-session reload keeps its can
 
 test('a legacy wrong answer is automatically assisted and cannot claim learned mastery', async () => {
   const harness = grammarScreenHarness();
-  harness.screen.gStart(5);
+  harness.screen.gStart(10);
   harness.screen.answerCurrent(false);
   while (harness.screen.currentItem()) harness.screen.answerCurrent(true);
   await new Promise((resolve) => setImmediate(resolve));
 
   const { topicId, event } = harness.masteryEvents[0];
-  assert.equal(topicId, 5);
+  assert.equal(topicId, 10);
   assert.equal(event.assisted, true);
   assert.equal(event.session.assisted, true);
   assert.equal(Object.hasOwn(event, 'reason'), false);
@@ -522,12 +523,12 @@ test('generated legacy practice is addressable, assisted and reloads the exact d
   const generated = generatedTopicSupplement();
   const harness = grammarScreenHarness({ state: {
     gram: {}, grammarMastery: {},
-    gramAi: { 5: [
+    gramAi: { 10: [
       ...generated.c.map((q) => ({ k: 'c', q, voice: q.voice })),
       ...generated.f.map((q) => ({ k: 'f', q, voice: q.voice })),
     ] },
   } });
-  harness.screen.gStart(5);
+  harness.screen.gStart(10);
   let sawGenerated = false;
   let attempts = 0;
   while (harness.screen.currentItem() && attempts < 20) {
@@ -541,7 +542,7 @@ test('generated legacy practice is addressable, assisted and reloads the exact d
     `the generated legacy queue completes without turning an unaddressable answer into retries: ${JSON.stringify({ attempts, current: harness.screen.currentItem() })}`);
   assert.equal(sawGenerated, true, 'the deterministic legacy queue actually selected generated content');
   const { topicId, event } = harness.masteryEvents[0];
-  assert.equal(topicId, 5);
+  assert.equal(topicId, 10);
   assert.equal(event.source, 'mixed');
   assert.equal(event.assisted, true, 'any generated participation is conservative assisted evidence');
   assert.ok(event.session.items.some((item) => item.id.startsWith('generated.g.q.')));
@@ -563,13 +564,13 @@ test('a generated input answered incorrectly after reload retains its pointer ty
   const generated = generatedTopicSupplement();
   const state = {
     gram: {}, grammarMastery: {},
-    gramAi: { 5: [
+    gramAi: { 10: [
       ...generated.c.map((q) => ({ k: 'c', q, voice: q.voice })),
       ...generated.f.map((q) => ({ k: 'f', q, voice: q.voice })),
     ] },
   };
   const first = grammarScreenHarness({ state });
-  first.screen.gStart(5);
+  first.screen.gStart(10);
   let guard = 0;
   while (!(first.screen.currentItem()?.kind === 'f'
     && first.screen.currentItem()?.id.startsWith('generated.g.q.')) && guard < 8) {
@@ -598,7 +599,7 @@ test('a generated input answered incorrectly after reload retains its pointer ty
 
 test('legacy practice gives every original at most one retry and closes a second miss as due', async () => {
   const harness = grammarScreenHarness();
-  harness.screen.gStart(5);
+  harness.screen.gStart(10);
   let attempts = 0;
   while (harness.screen.currentItem() && attempts < 15) {
     harness.screen.answerCurrent(false);

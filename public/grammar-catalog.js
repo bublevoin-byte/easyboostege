@@ -1,5 +1,6 @@
 import { GRAMMAR_CATALOG_CONTENT, GRAMMAR_CATALOG_V1_CONTENT } from './grammar-catalog-content.js';
 import {
+  GRAMMAR_ACTIVE_TOPIC_IDS,
   GRAMMAR_ERROR_CODES,
   GENERATED_GRAMMAR_REVISION,
   parseGrammarConfusionPair,
@@ -8,8 +9,8 @@ import {
 
 const LEGACY_BUILTIN_KINDS = Object.freeze(['c', 'c2', 'f']);
 const BUILTIN_KINDS = Object.freeze([...LEGACY_BUILTIN_KINDS, 'correction', 'transform']);
-const ACTIVE_TOPIC_IDS = Object.freeze(new Set(['1', '2', '3', '4', '13']));
-const ACTIVE_PROVENANCE = Object.freeze(['grammar-1-migrated', 'grammar-2-ticket-03']);
+const ACTIVE_TOPIC_IDS = Object.freeze(new Set(GRAMMAR_ACTIVE_TOPIC_IDS.map(String)));
+const ACTIVE_PROVENANCE = Object.freeze(['grammar-1-migrated', 'grammar-2-ticket-03', 'grammar-2-ticket-04']);
 const ALLOWED_MARKUP = /<\/?b>|<br\s*\/?>/giu;
 
 function fail(code, details = '') {
@@ -76,7 +77,10 @@ function activeMetadata(source, details, required) {
   const provenance = String(source.provenance || '');
   if (!ACTIVE_PROVENANCE.includes(provenance)) fail('INVALID_GRAMMAR_PROVENANCE', details);
   const transferPair = String(source.transferPair || '');
-  if (!/^grammar-v2:(?:1|2|3|4|13):(?:c|f|correction|transform):[1-9]\d*$/u.test(transferPair)) {
+  const identity = /^core\.g\.([1-9]|1\d|20)\.(c|f|correction|transform)\.[1-9]\d*$/u.exec(details);
+  const expectedPairPrefix = identity ? `grammar-v2:${identity[1]}:${identity[2]}:` : '';
+  if (!identity || !transferPair.startsWith(expectedPairPrefix)
+    || !/^[1-9]\d*$/u.test(transferPair.slice(expectedPairPrefix.length))) {
     fail('INVALID_GRAMMAR_TRANSFER_PAIR', details);
   }
   return { errorSkill, confusionPair, difficulty, provenance, transferPair };
@@ -206,8 +210,9 @@ function normalizeBank(source, revision, topics, ids, catalogVersion) {
       if (!catalogKinds.includes(kind)) fail('UNSUPPORTED_GRAMMAR_KIND', `${topicId}.${kind}`);
     }
     bank[topicId] = {};
-    const requireActiveMetadata = catalogVersion !== 'grammar-core-v1' && ACTIVE_TOPIC_IDS.has(topicId);
+    const requireActiveTopicMetadata = catalogVersion !== 'grammar-core-v1' && ACTIVE_TOPIC_IDS.has(topicId);
     for (const kind of catalogKinds) {
+      const requireActiveMetadata = requireActiveTopicMetadata && kind !== 'c2';
       const questions = levels?.[kind] || [];
       if (!Array.isArray(questions)) fail('UNSUPPORTED_GRAMMAR_KIND', `${topicId}.${kind}`);
       bank[topicId][kind] = questions.map((question, index) => {

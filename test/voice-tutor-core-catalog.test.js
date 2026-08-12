@@ -69,7 +69,7 @@ test('core Voice Tutor consumes the versioned grammar catalog and generated voca
     .reduce((count, levels) => count + Object.values(levels).reduce((sum, questions) => sum + questions.length, 0), 0)
     + GRAMMAR_CATALOG.exams.reduce((count, exam) => count + exam.gaps.length, 0);
   assert.deepEqual(CORE_VOICE_TUTOR_COVERAGE, { grammar: grammarCount, vocabulary: CORE_VOICE_CATALOG_SOURCE.vocabulary.length * 3 });
-  assert.equal(grammarCount, 328);
+  assert.equal(grammarCount, 470);
   assert.equal(CORE_VOICE_TUTOR_COVERAGE.vocabulary, 897);
   assert.equal(Object.keys(CORE_VOICE_TUTOR_LEGACY_GRAMMAR_ITEMS).length, 218);
 
