@@ -8,8 +8,9 @@ import {
   decorateCoreGrammar,
   decorateCoreVocabulary,
 } from '../public/modules/core-voice-catalog.js';
-import { GRAMMAR_CATALOG, GRAMMAR_CATALOG_V1 } from '../public/grammar-catalog.js';
+import { GRAMMAR_CATALOG, GRAMMAR_CATALOG_REGISTRY, GRAMMAR_CATALOG_V1, GRAMMAR_CATALOG_V2 } from '../public/grammar-catalog.js';
 import { getCanonicalVoiceTutorItem } from '../voice-tutor/canonical-items.js';
+import { createVoiceTutorErrorAttempt } from '../voice-tutor/capsule.js';
 import {
   CORE_VOICE_TUTOR_COVERAGE,
   CORE_VOICE_TUTOR_ITEMS,
@@ -69,7 +70,7 @@ test('core Voice Tutor consumes the versioned grammar catalog and generated voca
     .reduce((count, levels) => count + Object.values(levels).reduce((sum, questions) => sum + questions.length, 0), 0)
     + GRAMMAR_CATALOG.exams.reduce((count, exam) => count + exam.gaps.length, 0);
   assert.deepEqual(CORE_VOICE_TUTOR_COVERAGE, { grammar: grammarCount, vocabulary: CORE_VOICE_CATALOG_SOURCE.vocabulary.length * 3 });
-  assert.equal(grammarCount, 602);
+  assert.equal(grammarCount, 683);
   assert.equal(CORE_VOICE_TUTOR_COVERAGE.vocabulary, 897);
   assert.equal(Object.keys(CORE_VOICE_TUTOR_LEGACY_GRAMMAR_ITEMS).length, 218);
 
@@ -98,6 +99,36 @@ test('core Voice Tutor consumes the versioned grammar catalog and generated voca
   }
   assert.equal(getCanonicalVoiceTutorItem('core.g.1.c.1', 999), null, 'unknown revisions fail closed');
   assert.equal(getCanonicalVoiceTutorItem('core.g.1.c.6', 1), null, 'a v2-only item cannot resolve through v1');
+
+  for (const levels of Object.values(GRAMMAR_CATALOG_V2.bank)) {
+    for (const questions of Object.values(levels)) {
+      for (const question of questions) {
+        const historical = getCanonicalVoiceTutorItem(question.id, question.revision);
+        assert.ok(historical, `${question.id} v2 pointer remains registered`);
+        assert.equal(historical.revision, 2, `${question.id} v2 revision`);
+      }
+    }
+  }
+  for (const exam of GRAMMAR_CATALOG_V2.exams) {
+    for (const gap of exam.gaps) {
+      const historical = getCanonicalVoiceTutorItem(gap.id, gap.revision);
+      assert.ok(historical, `${gap.id} v2 pointer remains registered`);
+      assert.equal(historical.revision, 2, `${gap.id} v2 revision`);
+    }
+  }
+
+  const restoredV2Question = GRAMMAR_CATALOG_V2.bank[19].c[1];
+  const restoredV2Item = getCanonicalVoiceTutorItem(restoredV2Question.id, restoredV2Question.revision);
+  assert.ok(restoredV2Item, 'a genuine restored v2 pointer remains available to Voice Tutor');
+  assert.equal(restoredV2Item.revision, 2);
+  const restoredV2Attempt = createVoiceTutorErrorAttempt({
+    id: '18aff494-d87e-4fea-9acd-e8254753dfa9',
+    module: 'grammar',
+    itemId: restoredV2Question.id,
+    revision: restoredV2Question.revision,
+    learnerAnswer: restoredV2Question.o[(restoredV2Question.a + 1) % restoredV2Question.o.length],
+  });
+  assert.equal(restoredV2Attempt.metadata.item_revision, 2);
 
   for (const levels of Object.values(GRAMMAR_CATALOG.bank)) {
     for (const questions of Object.values(levels)) {
@@ -164,6 +195,25 @@ test('core Voice Tutor consumes the versioned grammar catalog and generated voca
   decorateCoreGrammar(bank, exams);
   assert.deepEqual(coreGrammarVoice(bank[1].c[0]), { id: 'core.g.1.c.1', revision: 1 });
   assert.deepEqual(coreGrammarVoice(exams[0].gaps[0]), { id: 'core.g.exam.1.1', revision: 1 });
+});
+
+test('every immutable catalog registered by Grammar is automatically registered for Voice revisions', () => {
+  for (const catalog of Object.values(GRAMMAR_CATALOG_REGISTRY)) {
+    for (const levels of Object.values(catalog.bank)) {
+      for (const kind of ['c', 'c2', 'f', 'correction', 'transform']) {
+        for (const item of levels[kind] || []) {
+          const voiceItem = getCanonicalVoiceTutorItem(item.id, catalog.revision);
+          assert.ok(voiceItem, `${catalog.version} ${item.id} is Voice-addressable`);
+          assert.equal(voiceItem.revision, catalog.revision);
+        }
+      }
+    }
+    for (const exam of catalog.exams) {
+      for (const gap of exam.gaps) {
+        assert.equal(getCanonicalVoiceTutorItem(gap.id, catalog.revision)?.revision, catalog.revision);
+      }
+    }
+  }
 });
 
 test('generated direct exercises expose stable server-owned definitions without client references', () => {

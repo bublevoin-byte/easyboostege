@@ -9,10 +9,11 @@ export const GRAMMAR_ACTIVE_PRACTICE_TYPES = Object.freeze([
 
 export const GRAMMAR_ACTIVE_TOPIC_IDS = Object.freeze([
   1, 2, 3, 13, 4, 5, 6, 7, 8, 9, 18, 10, 11, 12, 16, 17, 20,
+  14, 15, 19,
 ]);
 
 export const GRAMMAR_PREACTIVATION_LEGACY_TOPIC_IDS = Object.freeze([
-  10, 11, 12, 16, 17, 20,
+  10, 11, 12, 16, 17, 20, 14, 15, 19,
 ]);
 
 export const GENERATED_GRAMMAR_REVISION = 1;

@@ -1,4 +1,8 @@
-import { GRAMMAR_CATALOG_CONTENT, GRAMMAR_CATALOG_V1_CONTENT } from './grammar-catalog-content.js';
+import {
+  GRAMMAR_CATALOG_CONTENT,
+  GRAMMAR_CATALOG_V1_CONTENT,
+  GRAMMAR_CATALOG_V2_CONTENT,
+} from './grammar-catalog-content.js';
 import {
   GRAMMAR_ACTIVE_TOPIC_IDS,
   GRAMMAR_ERROR_CODES,
@@ -10,7 +14,14 @@ import {
 const LEGACY_BUILTIN_KINDS = Object.freeze(['c', 'c2', 'f']);
 const BUILTIN_KINDS = Object.freeze([...LEGACY_BUILTIN_KINDS, 'correction', 'transform']);
 const ACTIVE_TOPIC_IDS = Object.freeze(new Set(GRAMMAR_ACTIVE_TOPIC_IDS.map(String)));
-const ACTIVE_PROVENANCE = Object.freeze(['grammar-1-migrated', 'grammar-2-ticket-03', 'grammar-2-ticket-04', 'grammar-2-ticket-05']);
+const V1_ACTIVE_TOPIC_IDS = Object.freeze(new Set());
+const V2_ACTIVE_TOPIC_IDS = Object.freeze(new Set(
+  GRAMMAR_ACTIVE_TOPIC_IDS.filter((topicId) => ![14, 15, 19].includes(topicId)).map(String),
+));
+const ACTIVE_PROVENANCE = Object.freeze([
+  'grammar-1-migrated', 'grammar-2-ticket-03', 'grammar-2-ticket-04',
+  'grammar-2-ticket-05', 'grammar-2-ticket-06',
+]);
 const ALLOWED_MARKUP = /<\/?b>|<br\s*\/?>/giu;
 
 function fail(code, details = '') {
@@ -200,7 +211,7 @@ function registerId(ids, id, expectedId) {
   ids.add(id);
 }
 
-function normalizeBank(source, revision, topics, ids, catalogVersion) {
+function normalizeBank(source, revision, topics, ids, catalogVersion, activeTopicIds) {
   const bank = {};
   const catalogKinds = catalogVersion === 'grammar-core-v1' ? LEGACY_BUILTIN_KINDS : BUILTIN_KINDS;
   for (const topicId of Object.keys(source || {})) {
@@ -210,7 +221,7 @@ function normalizeBank(source, revision, topics, ids, catalogVersion) {
       if (!catalogKinds.includes(kind)) fail('UNSUPPORTED_GRAMMAR_KIND', `${topicId}.${kind}`);
     }
     bank[topicId] = {};
-    const requireActiveTopicMetadata = catalogVersion !== 'grammar-core-v1' && ACTIVE_TOPIC_IDS.has(topicId);
+    const requireActiveTopicMetadata = catalogVersion !== 'grammar-core-v1' && activeTopicIds.has(topicId);
     for (const kind of catalogKinds) {
       const requireActiveMetadata = requireActiveTopicMetadata && kind !== 'c2';
       const questions = levels?.[kind] || [];
@@ -330,8 +341,8 @@ function assertUniqueContent(bank, exams) {
   assertUniqueEntries(entries);
 }
 
-function assertActiveWeaknessCoverage(bank) {
-  for (const topicId of ACTIVE_TOPIC_IDS) {
+function assertActiveWeaknessCoverage(bank, activeTopicIds) {
+  for (const topicId of activeTopicIds) {
     const levels = bank[topicId];
     if (!levels || !levels.correction?.length || !levels.transform?.length) continue;
     const counts = new Map();
@@ -343,9 +354,9 @@ function assertActiveWeaknessCoverage(bank) {
   }
 }
 
-function assertActivePracticeCoverage(bank, catalogVersion) {
+function assertActivePracticeCoverage(bank, catalogVersion, activeTopicIds) {
   if (catalogVersion === 'grammar-core-v1') return;
-  for (const topicId of ACTIVE_TOPIC_IDS) {
+  for (const topicId of activeTopicIds) {
     const levels = bank[topicId];
     for (const kind of ['c', 'f', 'correction', 'transform']) {
       if (!levels || !Array.isArray(levels[kind]) || levels[kind].length < 8) {
@@ -360,8 +371,8 @@ function diagnosticWeaknesses(item) {
   return new Set(item.diagnostics.filter(Boolean).map((value) => `${value.errorCode}:${value.confusionPair || '-'}`));
 }
 
-function assertActiveTransferPairs(bank) {
-  for (const topicId of ACTIVE_TOPIC_IDS) {
+function assertActiveTransferPairs(bank, activeTopicIds) {
+  for (const topicId of activeTopicIds) {
     for (const kind of ['c', 'f', 'correction', 'transform']) {
       const pairs = new Map();
       for (const item of bank[topicId][kind]) {
@@ -392,6 +403,8 @@ function catalogContentFingerprint(catalog) {
 export function createGrammarCatalog(input) {
   const source = clone(input);
   const version = text(source.version, 'INVALID_GRAMMAR_VERSION');
+  const activeTopicIds = version === 'grammar-core-v1' ? V1_ACTIVE_TOPIC_IDS
+    : version === 'grammar-core-v2' ? V2_ACTIVE_TOPIC_IDS : ACTIVE_TOPIC_IDS;
   const revision = normalizeRevision(source.revision, null, version);
   const topics = {};
   for (const [topicId, topic] of Object.entries(source.topics || {})) {
@@ -406,13 +419,13 @@ export function createGrammarCatalog(input) {
   }
   const groups = normalizeGroups(source.groups, topics);
   const ids = new Set();
-  const bank = normalizeBank(source.bank, revision, topics, ids, version);
+  const bank = normalizeBank(source.bank, revision, topics, ids, version, activeTopicIds);
   if (Object.keys(bank).length !== Object.keys(topics).length) fail('INCOMPLETE_GRAMMAR_BANK');
   const exams = normalizeExams(source.exams, revision, topics, ids);
   assertUniqueContent(bank, exams);
-  assertActivePracticeCoverage(bank, version);
-  assertActiveWeaknessCoverage(bank);
-  if (version !== 'grammar-core-v1') assertActiveTransferPairs(bank);
+  assertActivePracticeCoverage(bank, version, activeTopicIds);
+  assertActiveWeaknessCoverage(bank, activeTopicIds);
+  if (version !== 'grammar-core-v1') assertActiveTransferPairs(bank, activeTopicIds);
   return deepFreeze({ version, revision, groups, topics, bank, exams });
 }
 
@@ -537,12 +550,53 @@ export function validateGeneratedGrammarSupplement(operation, input) {
 }
 
 export const GRAMMAR_CATALOG_V1 = createGrammarCatalog(GRAMMAR_CATALOG_V1_CONTENT);
+export const GRAMMAR_CATALOG_V2 = createGrammarCatalog(GRAMMAR_CATALOG_V2_CONTENT);
 export const GRAMMAR_CATALOG = createGrammarCatalog(GRAMMAR_CATALOG_CONTENT);
 export const GRAMMAR_CATALOG_REGISTRY = Object.freeze({
   [GRAMMAR_CATALOG_V1.version]: GRAMMAR_CATALOG_V1,
+  [GRAMMAR_CATALOG_V2.version]: GRAMMAR_CATALOG_V2,
   [GRAMMAR_CATALOG.version]: GRAMMAR_CATALOG,
 });
 
+function createGrammarCatalogRuntime(catalog) {
+  const itemIndex = new Map();
+  const legacyItemIds = new Set();
+  for (const [topicIdText, levels] of Object.entries(catalog.bank)) {
+    const topicId = Number(topicIdText);
+    for (const kind of BUILTIN_KINDS) {
+      for (const item of levels[kind] || []) {
+        itemIndex.set(item.id, Object.freeze({ item, topicId, kind: item.type }));
+        if (LEGACY_BUILTIN_KINDS.includes(kind)) legacyItemIds.add(item.id);
+      }
+    }
+  }
+  return Object.freeze({
+    catalog,
+    getItem(itemId) {
+      return itemIndex.get(String(itemId || '')) || null;
+    },
+    hasLegacyItem(itemId) {
+      return legacyItemIds.has(String(itemId || ''));
+    },
+    hasActivePractice(topicId) {
+      const levels = catalog.bank[Number(topicId)];
+      return Boolean(levels && ['c', 'f', 'correction', 'transform']
+        .every((kind) => levels[kind].length >= 8));
+    },
+  });
+}
+
+export const GRAMMAR_CATALOG_RUNTIMES = Object.freeze(Object.values(GRAMMAR_CATALOG_REGISTRY)
+  .map(createGrammarCatalogRuntime));
+const GRAMMAR_CATALOG_RUNTIME_REGISTRY = Object.freeze(Object.fromEntries(
+  GRAMMAR_CATALOG_RUNTIMES.map((runtime) => [runtime.catalog.version, runtime]),
+));
+
 export function getGrammarCatalog(version) {
   return GRAMMAR_CATALOG_REGISTRY[String(version || '')] || null;
+}
+
+export function getGrammarCatalogRuntime(version, revision) {
+  const runtime = GRAMMAR_CATALOG_RUNTIME_REGISTRY[String(version || '')] || null;
+  return runtime?.catalog.revision === Number(revision) ? runtime : null;
 }

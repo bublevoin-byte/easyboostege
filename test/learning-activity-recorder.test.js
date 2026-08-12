@@ -15,9 +15,9 @@ import {
   parseGeneratedGrammarItemId,
   parseGeneratedGrammarItemReference,
 } from '../public/grammar-domain-contract.js';
-import { GRAMMAR_CATALOG, validateGeneratedGrammarSupplement } from '../public/grammar-catalog.js';
+import { GRAMMAR_CATALOG, GRAMMAR_CATALOG_V1, GRAMMAR_CATALOG_V2, getGrammarCatalogRuntime, validateGeneratedGrammarSupplement } from '../public/grammar-catalog.js';
 import { migrateMasteryRecord, reduceMastery } from '../public/modules/grammar.js';
-import { grammarMasteryEventSchema } from '../validation/grammar-mastery.js';
+import { grammarMasteryEventSchema, hasExactActiveTransferPairCoverage } from '../validation/grammar-mastery.js';
 
 const rawSource = await fs.readFile(new URL('../public/learning-activity-recorder.js', import.meta.url), 'utf8');
 const grammarScreenSource = await fs.readFile(new URL('../public/screens/grammar.js', import.meta.url), 'utf8');
@@ -64,7 +64,7 @@ function recorderHarness(active = null) {
   };
   vm.runInNewContext(source, {
     window,
-    GRAMMAR_CATALOG, validateGeneratedGrammarSupplement,
+    GRAMMAR_CATALOG, GRAMMAR_CATALOG_V1, GRAMMAR_CATALOG_V2, getGrammarCatalogRuntime, validateGeneratedGrammarSupplement,
     isGrammarErrorCode, parseGrammarConfusionPair,
     adaptiveRuntimeSnapshot: () => ({ active }),
     completeAdaptiveModuleActivity: async (completion) => {
@@ -87,6 +87,7 @@ function grammarScreenHarness(options = {}) {
   const capacityRequests = [];
   const masteryBatches = [];
   const masteryEvents = [];
+  const voiceErrors = [];
   const timers = [];
   const elements = new Map();
   const element = (id) => {
@@ -148,7 +149,7 @@ function grammarScreenHarness(options = {}) {
   };
   const context = vm.createContext({
     window,
-    GRAMMAR_CATALOG, validateGeneratedGrammarSupplement,
+    GRAMMAR_CATALOG, GRAMMAR_CATALOG_V1, GRAMMAR_CATALOG_V2, getGrammarCatalogRuntime, validateGeneratedGrammarSupplement,
     grammarActivityId, splitLearningActivityDuration,
     GENERATED_GRAMMAR_REVISION, GRAMMAR_ACTIVE_PRACTICE_TYPES, GRAMMAR_ERROR_CODES,
     GRAMMAR_PREACTIVATION_LEGACY_TOPIC_IDS,
@@ -169,7 +170,7 @@ function grammarScreenHarness(options = {}) {
     gExamFmt: (seconds) => String(seconds),
     gSync() {}, generateAiContent: async () => null,
     registerScreenGenerator() {}, registerRouteHook() {},
-    registerVoiceTutorError: async () => null, voiceTutorButton: () => '',
+    registerVoiceTutorError: async (details) => { voiceErrors.push(JSON.parse(JSON.stringify(details))); return details; }, voiceTutorButton: () => '',
     save() {}, setTxt() {}, tab() {},
     ui: { animate() {}, markAnswer() {} }, wDeco: () => '',
     decorateCoreGrammar() {},
@@ -200,18 +201,20 @@ function grammarScreenHarness(options = {}) {
         commitCurrentAnswer:function(correct){var item=GS&&GS.queue[GS.i];if(item)gAnswer(correct,item)},
         ruleDisabled:function(){return Boolean(document.getElementById('g_rule_btn').disabled)},
         currentItem:function(){var item=GS&&GS.queue[GS.i];return item?{topic:item.t||GS.t,kind:item.k,id:item.q.id,
+          prompt:item.q.t||item.q.s,options:item.q.o||null,answer:Number.isInteger(item.q.a)?item.q.a:null,
+          voice:item.q.voice||null,
           errorSkill:item.q.errorSkill,confusionPair:item.q.confusionPair||null}:null},
         renderTransfer:function(topic,type){var levels=G_BANK[topic],kind=type==='choice'?'c':type==='input'?'f':type;
           var question=levels[kind][0];GS={activeRunner:false,t:topic,queue:[{k:type,q:question,t:topic,transfer:true}],i:0,
             ok:0,done:0,phase:'question'};gRenderQ();return document.getElementById('g_area').innerHTML},
-        answerCurrent:function(correct){var item=GS&&GS.queue[GS.i];if(!item)return;
+        answerCurrent:function(correct,advanceExplanation=true){var item=GS&&GS.queue[GS.i];if(!item)return;
           if(['f','input','correction','transform'].includes(item.k)){var input=document.getElementById('g_inp');input.dataset={};input.style={};
             input.value=correct?item.q.ans[0]:'definitely wrong';gSubmit()}
           else{var buttons=item.q.o.map(function(){return{dataset:{},style:{},setAttribute:function(){},
             querySelector:function(){return{setAttribute:function(){},innerHTML:''}}}});
             buttons.forEach(function(button){button.parentElement={querySelectorAll:function(){return buttons}}});
             var choice=correct?item.q.a:(item.q.a+1)%item.q.o.length;gPick(buttons[choice],choice)}
-          if(!correct)gAfterExplain()}
+          if(!correct&&advanceExplanation)gAfterExplain()}
         ,answerChoice:function(choice){var item=GS&&GS.queue[GS.i];if(!item||!['c','c2','choice'].includes(item.k))return;
           var buttons=item.q.o.map(function(){return{dataset:{},style:{},setAttribute:function(){},
             querySelector:function(){return{setAttribute:function(){},innerHTML:''}}}});
@@ -227,12 +230,47 @@ function grammarScreenHarness(options = {}) {
     capacityRequests,
     masteryBatches,
     masteryEvents,
+    voiceErrors,
     area: element('g_area'),
     stateSnapshot() { return JSON.parse(JSON.stringify(S)); },
     runTimers() { while (timers.length) timers.shift()(); },
     advance(milliseconds) { now += milliseconds; },
     setActive(value) { active = value; },
   };
+}
+
+function preActivationLegacyState({ topicId = 14, queueIds = null, gramAi = {} } = {}) {
+  const seed = grammarScreenHarness({ state: { gram: {}, grammarMastery: {}, gramAi } });
+  seed.screen.gStart(topicId);
+  const state = seed.stateSnapshot();
+  const ids = queueIds || [
+    `core.g.${topicId}.c.1`, `core.g.${topicId}.c.2`, `core.g.${topicId}.c.3`, `core.g.${topicId}.c.4`,
+    `core.g.${topicId}.c2.1`, `core.g.${topicId}.c2.2`, `core.g.${topicId}.c2.3`,
+  ];
+  Object.assign(state.grammarRunner, {
+    catalogVersion: GRAMMAR_CATALOG_V1.version,
+    catalogRevision: GRAMMAR_CATALOG_V1.revision,
+    topicId,
+    mode: 'legacy_practice',
+    queue: ids.map((id) => ({ id, transfer: false })),
+    i: 0,
+    ok: 0,
+    done: 0,
+    source: ids.some((id) => id.startsWith('generated.')) ? 'mixed' : 'builtin',
+    helpUsed: false,
+    masteryAssisted: ids.some((id) => id.startsWith('generated.')),
+    phase: 'question',
+    answerAssisted: false,
+    errorReasons: {},
+    confusionPairs: {},
+    independentErrors: {},
+    types: {},
+    typeScores: {},
+    reservedItemIds: [...ids],
+    itemOutcomes: [],
+    completionEvent: null,
+  });
+  return state;
 }
 
 test('automatic disclosure keeps the run assisted while preserving the independently committed wrong pointer', async () => {
@@ -386,9 +424,9 @@ test('topic completion emits one stable answer-free session identity and ordered
   assert.equal(JSON.stringify(event.session).includes('answer'), false, 'server evidence cannot expose answer keys');
 });
 
-test('a real legacy topic emits one stable bounded session without claiming four-type mastery', async () => {
-  const harness = grammarScreenHarness();
-  harness.screen.gStart(14);
+test('a queued pre-activation legacy topic emits one stable bounded session without claiming four-type mastery', async () => {
+  const harness = grammarScreenHarness({ state: preActivationLegacyState() });
+  harness.screen.restore();
   const sessionId = harness.screen.sessionSnapshot().sessionId;
   while (harness.screen.currentItem()) harness.screen.answerCurrent(true);
   await new Promise((resolve) => setImmediate(resolve));
@@ -417,9 +455,103 @@ test('a real legacy topic emits one stable bounded session without claiming four
   assert.deepEqual(stored.masteryHistory.at(-1).session.items, event.session.items);
 });
 
+test('a real pre-Ticket06 v2 queue restores and records its immutable historical item after activation', async () => {
+  const state = preActivationLegacyState({ topicId: 19, queueIds: ['core.g.19.c.2'] });
+  state.grammarRunner.catalogVersion = GRAMMAR_CATALOG_V2.version;
+  state.grammarRunner.catalogRevision = GRAMMAR_CATALOG_V2.revision;
+  assert.deepEqual({
+    version: state.grammarRunner.catalogVersion,
+    revision: state.grammarRunner.catalogRevision,
+  }, { version: GRAMMAR_CATALOG_V2.version, revision: GRAMMAR_CATALOG_V2.revision },
+  'the pre-Ticket06 runner really persisted the then-current v2 identity');
+
+  const reloaded = grammarScreenHarness({ state });
+  reloaded.screen.restore();
+  const current = reloaded.screen.currentItem();
+  assert.deepEqual(JSON.parse(JSON.stringify(current?.prompt)), GRAMMAR_CATALOG_V2.bank[19].c[1].t);
+  assert.deepEqual(JSON.parse(JSON.stringify(current?.options)), GRAMMAR_CATALOG_V2.bank[19].c[1].o);
+  assert.equal(current?.answer, GRAMMAR_CATALOG_V2.bank[19].c[1].a);
+  assert.equal(current?.voice?.revision, GRAMMAR_CATALOG_V2.bank[19].c[1].voice.revision);
+  assert.notDeepEqual(GRAMMAR_CATALOG.bank[19].c[1].o, GRAMMAR_CATALOG_V2.bank[19].c[1].o,
+    'the seam proves restore did not silently substitute the active v2 override');
+  reloaded.screen.answerCurrent(true);
+  await new Promise((resolve) => setImmediate(resolve));
+  const { topicId, event } = reloaded.masteryEvents[0];
+  assert.deepEqual(event.session.catalog, {
+    version: GRAMMAR_CATALOG_V2.version,
+    revision: GRAMMAR_CATALOG_V2.revision,
+  });
+  const parsed = grammarMasteryEventSchema.safeParse({ topicId, event });
+  assert.equal(parsed.success, true, JSON.stringify(parsed.error?.issues));
+});
+
+test('an active v2 failure keeps its transfer, reload, Voice pointer and completion in immutable v2', async () => {
+  const seed = grammarScreenHarness({ state: { gram: {}, grammarMastery: {}, gramAi: {} } });
+  seed.screen.gStart(1);
+  const state = seed.stateSnapshot();
+  state.grammarRunner.catalogVersion = GRAMMAR_CATALOG_V2.version;
+  state.grammarRunner.catalogRevision = GRAMMAR_CATALOG_V2.revision;
+
+  const first = grammarScreenHarness({ state });
+  first.screen.restore();
+  const original = first.screen.currentItem();
+  assert.equal(original.voice.revision, 2);
+  first.screen.answerCurrent(false);
+  assert.equal(first.screen.currentItem()?.voice?.revision, 2,
+    'the in-memory transfer must use the resolved v2 bank before any reload can reinterpret its ID');
+  const interrupted = first.stateSnapshot();
+  assert.equal(interrupted.grammarRunner.queue[interrupted.grammarRunner.i].transfer, true);
+
+  const reloaded = grammarScreenHarness({
+    state: interrupted,
+    saveGrammarMasteryEvent: (topicId, event) => ({ eventId: event.id, applied: true }),
+  });
+  reloaded.screen.restore();
+  const transfer = reloaded.screen.currentItem();
+  assert.equal(transfer.voice.revision, 2, 'the restored transfer uses the immutable v2 question pointer');
+  assert.equal(transfer.voice.revision, GRAMMAR_CATALOG_V2.bank[1].c.find((item) => item.id === transfer.id).revision);
+  reloaded.screen.answerCurrent(false);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(reloaded.voiceErrors.at(-1)?.revision, 2, 'Voice Tutor records the displayed historical transfer revision');
+
+  while (reloaded.screen.currentItem()) reloaded.screen.answerCurrent(true);
+  await new Promise((resolve) => setImmediate(resolve));
+  const { topicId, event } = reloaded.masteryEvents[0];
+  assert.deepEqual(event.session.catalog, { version: GRAMMAR_CATALOG_V2.version, revision: GRAMMAR_CATALOG_V2.revision });
+  assert.equal(event.session.items.find((item) => item.transfer)?.id, transfer.id);
+  const parsed = grammarMasteryEventSchema.safeParse({ topicId, event });
+  assert.equal(parsed.success, true, JSON.stringify(parsed.error?.issues));
+});
+
+test('a failed active answer durably snapshots explain and transfer before the delayed renderer', () => {
+  const harness = grammarScreenHarness({
+    state: { gram: {}, grammarMastery: {}, gramAi: {} }, deferTimers: true,
+  });
+  harness.screen.gStart(1);
+  harness.screen.answerCurrent(false, false);
+  const interrupted = harness.stateSnapshot().grammarRunner;
+  assert.equal(interrupted.phase, 'explain');
+  assert.equal(interrupted.queue[interrupted.i + 1].transfer, true);
+});
+
+test('active transfer-pair ownership is resolved from the submitted immutable session catalog', () => {
+  const outcomes = ['one', 'two', 'three', 'four'].map((id) => ({ id, type: 'choice', transfer: false }));
+  const immutableV2 = new Map(outcomes.map((outcome, index) => [outcome.id, { transferPair: `v2-pair-${index}` }]));
+  const mismatchedCurrent = new Map(outcomes.map((outcome, index) => [
+    outcome.id, { transferPair: index === 3 ? 'current-pair-0' : `current-pair-${index}` },
+  ]));
+
+  assert.equal(hasExactActiveTransferPairCoverage(
+    outcomes, (id) => immutableV2.get(id), ['choice'],
+  ), true, 'the submitted immutable catalog owns four distinct authored pairs');
+  assert.equal(hasExactActiveTransferPairCoverage(
+    outcomes, (id) => mismatchedCurrent.get(id), ['choice'],
+  ), false, 'a current-catalog lookup cannot validate the immutable session by accident');
+});
+
 test('legacy completion_pending survives a crash and retries the exact UUID without duplicate history', async () => {
-  const first = grammarScreenHarness();
-  first.screen.gStart(14);
+  const first = grammarScreenHarness({ state: preActivationLegacyState() });
+  first.screen.restore();
   while (first.screen.currentItem()) first.screen.answerCurrent(true);
   await new Promise((resolve) => setImmediate(resolve));
   const pendingState = first.stateSnapshot();
@@ -498,14 +630,14 @@ test('a queued conflict marker never clears the exact completion_pending runner'
 });
 
 test('a legacy choice answered incorrectly after mid-session reload keeps its canonical weakness', async () => {
-  const first = grammarScreenHarness();
-  first.screen.gStart(14);
+  const first = grammarScreenHarness({ state: preActivationLegacyState() });
+  first.screen.restore();
   let guard = 0;
-  while (first.screen.currentItem()?.kind !== 'c' && guard < 8) {
+  while (first.screen.currentItem()?.kind !== 'choice' && guard < 8) {
     first.screen.answerCurrent(true);
     guard += 1;
   }
-  assert.equal(first.screen.currentItem()?.kind, 'c', 'the real topic-14 queue reaches a legacy choice');
+  assert.equal(first.screen.currentItem()?.kind, 'choice', 'the queued topic-14 run reaches a legacy choice');
   const state = first.stateSnapshot();
   assert.equal(state.grammarRunner.phase, 'question');
 
@@ -525,29 +657,7 @@ test('a legacy choice answered incorrectly after mid-session reload keeps its ca
 });
 
 test('a queued pre-activation legacy input survives topic activation and reload with its historical weakness', async () => {
-  const first = grammarScreenHarness();
-  first.screen.gStart(14);
-  const state = first.stateSnapshot();
-  Object.assign(state.grammarRunner, {
-    topicId: 10,
-    queue: [{ id: 'core.g.10.f.1', transfer: false }],
-    i: 0,
-    ok: 0,
-    done: 0,
-    source: 'builtin',
-    helpUsed: false,
-    masteryAssisted: false,
-    phase: 'question',
-    answerAssisted: false,
-    errorReasons: {},
-    confusionPairs: {},
-    independentErrors: {},
-    types: {},
-    typeScores: {},
-    reservedItemIds: ['core.g.10.f.1'],
-    itemOutcomes: [],
-    completionEvent: null,
-  });
+  const state = preActivationLegacyState({ topicId: 10, queueIds: ['core.g.10.f.1'] });
 
   const reloaded = grammarScreenHarness({ state });
   reloaded.screen.restore();
@@ -567,17 +677,7 @@ test('a queued pre-activation legacy input survives topic activation and reload 
 });
 
 test('a queued pre-activation legacy choice keeps independent regression evidence after activation', async () => {
-  const first = grammarScreenHarness();
-  first.screen.gStart(14);
-  const state = first.stateSnapshot();
-  Object.assign(state.grammarRunner, {
-    topicId: 10,
-    queue: [{ id: 'core.g.10.c.1', transfer: false }],
-    i: 0, ok: 0, done: 0, source: 'builtin', helpUsed: false,
-    masteryAssisted: false, phase: 'question', answerAssisted: false,
-    errorReasons: {}, confusionPairs: {}, independentErrors: {}, types: {}, typeScores: {},
-    reservedItemIds: ['core.g.10.c.1'], itemOutcomes: [], completionEvent: null,
-  });
+  const state = preActivationLegacyState({ topicId: 10, queueIds: ['core.g.10.c.1'] });
 
   const reloaded = grammarScreenHarness({ state });
   reloaded.screen.restore();
@@ -605,8 +705,8 @@ test('a queued pre-activation legacy choice keeps independent regression evidenc
 });
 
 test('a legacy wrong answer is automatically assisted and cannot claim learned mastery', async () => {
-  const harness = grammarScreenHarness();
-  harness.screen.gStart(14);
+  const harness = grammarScreenHarness({ state: preActivationLegacyState() });
+  harness.screen.restore();
   harness.screen.answerCurrent(false);
   while (harness.screen.currentItem()) harness.screen.answerCurrent(true);
   await new Promise((resolve) => setImmediate(resolve));
@@ -636,14 +736,16 @@ test('a legacy wrong answer is automatically assisted and cannot claim learned m
 
 test('generated legacy practice is addressable, assisted and reloads the exact durable event', async () => {
   const generated = generatedTopicSupplement();
-  const harness = grammarScreenHarness({ state: {
-    gram: {}, grammarMastery: {},
-    gramAi: { 14: [
-      ...generated.c.map((q) => ({ k: 'c', q, voice: q.voice })),
-      ...generated.f.map((q) => ({ k: 'f', q, voice: q.voice })),
-    ] },
-  } });
-  harness.screen.gStart(14);
+  const gramAi = { 14: [
+    ...generated.c.map((q) => ({ k: 'c', q, voice: q.voice })),
+    ...generated.f.map((q) => ({ k: 'f', q, voice: q.voice })),
+  ] };
+  const queueIds = [
+    'core.g.14.c.1', 'core.g.14.c2.1',
+    generated.c[0].id, generated.c[1].id, generated.f[0].id, generated.f[1].id,
+  ];
+  const harness = grammarScreenHarness({ state: preActivationLegacyState({ gramAi, queueIds }) });
+  harness.screen.restore();
   let sawGenerated = false;
   let attempts = 0;
   while (harness.screen.currentItem() && attempts < 20) {
@@ -677,22 +779,22 @@ test('generated legacy practice is addressable, assisted and reloads the exact d
 
 test('a generated input answered incorrectly after reload retains its pointer type and weakness', async () => {
   const generated = generatedTopicSupplement();
-  const state = {
-    gram: {}, grammarMastery: {},
-    gramAi: { 14: [
-      ...generated.c.map((q) => ({ k: 'c', q, voice: q.voice })),
-      ...generated.f.map((q) => ({ k: 'f', q, voice: q.voice })),
-    ] },
-  };
+  const gramAi = { 14: [
+    ...generated.c.map((q) => ({ k: 'c', q, voice: q.voice })),
+    ...generated.f.map((q) => ({ k: 'f', q, voice: q.voice })),
+  ] };
+  const state = preActivationLegacyState({ gramAi, queueIds: [
+    generated.f[0].id, 'core.g.14.c.1', generated.c[0].id,
+  ] });
   const first = grammarScreenHarness({ state });
-  first.screen.gStart(14);
+  first.screen.restore();
   let guard = 0;
-  while (!(first.screen.currentItem()?.kind === 'f'
+  while (!(first.screen.currentItem()?.kind === 'input'
     && first.screen.currentItem()?.id.startsWith('generated.g.q.')) && guard < 8) {
     first.screen.answerCurrent(true);
     guard += 1;
   }
-  assert.equal(first.screen.currentItem()?.kind, 'f');
+  assert.equal(first.screen.currentItem()?.kind, 'input');
   assert.match(first.screen.currentItem().id, /^generated\.g\.q\./u);
 
   const reloaded = grammarScreenHarness({ state: first.stateSnapshot() });
@@ -713,8 +815,8 @@ test('a generated input answered incorrectly after reload retains its pointer ty
 });
 
 test('legacy practice gives every original at most one retry and closes a second miss as due', async () => {
-  const harness = grammarScreenHarness();
-  harness.screen.gStart(14);
+  const harness = grammarScreenHarness({ state: preActivationLegacyState() });
+  harness.screen.restore();
   let attempts = 0;
   while (harness.screen.currentItem() && attempts < 15) {
     harness.screen.answerCurrent(false);

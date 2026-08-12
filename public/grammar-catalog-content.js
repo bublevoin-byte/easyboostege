@@ -19,6 +19,13 @@ import {
   ACTIVE_PARTS_OF_SPEECH_LEGACY_OVERRIDES,
   ACTIVE_PARTS_OF_SPEECH_TRANSFER_PAIR_PLANS,
 } from './grammar-parts-of-speech-content.js';
+import {
+  ACTIVE_FUNCTION_WORDS_BANK,
+  ACTIVE_FUNCTION_WORDS_LEGACY_CHOICE_DIAGNOSTICS,
+  ACTIVE_FUNCTION_WORDS_LEGACY_META,
+  ACTIVE_FUNCTION_WORDS_LEGACY_OVERRIDES,
+  ACTIVE_FUNCTION_WORDS_TRANSFER_PAIR_PLANS,
+} from './grammar-function-words-content.js';
 
 // Authored Grammar 1.0 content migrated into the versioned Grammar 2.0 registry.
 export const GRAMMAR_CATALOG_CONTENT = {
@@ -2883,4 +2890,16 @@ applyActiveTopicBank({
   legacyChoiceDiagnostics: ACTIVE_PARTS_OF_SPEECH_LEGACY_CHOICE_DIAGNOSTICS,
   legacyOverrides: ACTIVE_PARTS_OF_SPEECH_LEGACY_OVERRIDES,
   pairPlans: ACTIVE_PARTS_OF_SPEECH_TRANSFER_PAIR_PLANS,
+});
+// Ticket 06 must not mutate the v2 identity already persisted by earlier
+// Grammar 2.0 runners. Keep the exact pre-Ticket06 catalog addressable.
+export const GRAMMAR_CATALOG_V2_CONTENT = structuredClone(GRAMMAR_CATALOG_CONTENT);
+GRAMMAR_CATALOG_CONTENT.version = 'grammar-core-v3';
+GRAMMAR_CATALOG_CONTENT.revision = 3;
+applyActiveTopicBank({
+  bank: ACTIVE_FUNCTION_WORDS_BANK,
+  legacyMeta: ACTIVE_FUNCTION_WORDS_LEGACY_META,
+  legacyChoiceDiagnostics: ACTIVE_FUNCTION_WORDS_LEGACY_CHOICE_DIAGNOSTICS,
+  legacyOverrides: ACTIVE_FUNCTION_WORDS_LEGACY_OVERRIDES,
+  pairPlans: ACTIVE_FUNCTION_WORDS_TRANSFER_PAIR_PLANS,
 });

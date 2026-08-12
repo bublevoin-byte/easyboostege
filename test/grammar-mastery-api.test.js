@@ -8,7 +8,12 @@ import express from 'express';
 
 import { createProgressRoutes } from '../routes/progress.js';
 import { createFileRepository } from '../storage/file-repository.js';
-import { GRAMMAR_CATALOG } from '../public/grammar-catalog.js';
+import {
+  GRAMMAR_CATALOG,
+  GRAMMAR_CATALOG_RUNTIMES,
+  GRAMMAR_CATALOG_V1,
+  GRAMMAR_CATALOG_V2,
+} from '../public/grammar-catalog.js';
 import {
   GRAMMAR_ACTIVE_TOPIC_IDS,
   GRAMMAR_PREACTIVATION_LEGACY_TOPIC_IDS,
@@ -30,7 +35,7 @@ function practiceSession(id, { topicId = 1, typeScores = null, assisted = false,
   };
   return {
     id, scope: 'topic', mode: GRAMMAR_ACTIVE_TOPIC_IDS.includes(topicId) ? 'topic_practice' : 'legacy_practice', source: 'builtin',
-    catalog: { version: 'grammar-core-v2', revision: 2 },
+    catalog: { version: GRAMMAR_CATALOG.version, revision: GRAMMAR_CATALOG.revision },
     items: Object.entries(scores).flatMap(([type, score]) => {
       const catalog = GRAMMAR_CATALOG.bank[topicId][kinds[type]];
       const originals = GRAMMAR_ACTIVE_TOPIC_IDS.includes(topicId)
@@ -88,7 +93,7 @@ function independentChoiceError(topicId, item = GRAMMAR_CATALOG.bank[topicId].c[
 }
 
 function legacyPracticeEvent(id, topicId = 14) {
-  const queue = EasyBoostGrammar.buildTopicQueue(GRAMMAR_CATALOG.bank[topicId], topicId, () => 0.5);
+  const queue = EasyBoostGrammar.buildTopicQueue(GRAMMAR_CATALOG_V1.bank[topicId], topicId, () => 0.5);
   const items = queue.map((item) => ({
     id: item.q.id, type: item.q.type, transfer: false, correct: true,
     diagnosticId: null, errorCode: null, confusionPair: null, transferStatus: null,
@@ -102,7 +107,7 @@ function legacyPracticeEvent(id, topicId = 14) {
     source: 'builtin', assisted: false, completedTypes: Object.keys(typeScores), typeScores,
     session: {
       id, scope: 'topic', mode: 'legacy_practice', source: 'builtin',
-      catalog: { version: GRAMMAR_CATALOG.version, revision: GRAMMAR_CATALOG.revision },
+      catalog: { version: GRAMMAR_CATALOG_V1.version, revision: GRAMMAR_CATALOG_V1.revision },
       items, startedAt: 1_000, assisted: false,
     },
   };
@@ -209,6 +214,27 @@ test('active mastery requires exact four-type declarations while legacy practice
   const legacy = legacyPracticeEvent('00000000-0000-4000-8000-000000000019');
   assert.equal(grammarMasteryEventSchema.safeParse({ topicId: 14, event: legacy }).success, true,
     'legacy practice keeps its truthful partial declaration');
+
+  const historicalActive = practiceSession('00000000-0000-4000-8000-000000000029');
+  historicalActive.catalog = { version: GRAMMAR_CATALOG_V2.version, revision: GRAMMAR_CATALOG_V2.revision };
+  assert.equal(grammarMasteryEventSchema.safeParse({
+    topicId: 1,
+    event: {
+      ...event,
+      id: historicalActive.id,
+      completedTypes: ['choice', 'input', 'correction', 'transform'],
+      typeScores: scoresFromSession(historicalActive),
+      session: historicalActive,
+    },
+  }).success, true, 'a queued active v2 session restores against its immutable v2 catalog');
+
+  const historicalFunctionWords = legacyPracticeEvent('00000000-0000-4000-8000-000000000039');
+  historicalFunctionWords.session.catalog = {
+    version: GRAMMAR_CATALOG_V2.version,
+    revision: GRAMMAR_CATALOG_V2.revision,
+  };
+  assert.equal(grammarMasteryEventSchema.safeParse({ topicId: 14, event: historicalFunctionWords }).success, true,
+    'a pre-Ticket06 function-words session restores as legacy practice against immutable v2');
   const extraDeclaredType = structuredClone(legacy);
   extraDeclaredType.completedTypes = ['choice', 'input'];
   extraDeclaredType.typeScores = { ...legacy.typeScores, input: { correct: 1, total: 1 } };
@@ -803,18 +829,10 @@ test('grammar mastery API owns time/revision and generic progress cannot forge c
     const persisted = await request(baseUrl, owner, '/api/v1/progress', undefined);
     assert.equal(persisted.body.grammarMastery['3'].stats.correct, 16);
 
-    const batchEvents = [14, 15].map((topicId, index) => ({
-      topicId,
-      event: {
-        ...event,
-        id: `00000000-0000-4000-8000-${String(20 + index).padStart(12, '0')}`,
-        expectedStage: 'not_started', completedTypes: ['choice'],
-        typeScores: { choice: { correct: 1, total: 1 } },
-        session: practiceSession(`00000000-0000-4000-8000-${String(20 + index).padStart(12, '0')}`, {
-          topicId, typeScores: { choice: { correct: 1, total: 1 } },
-        }),
-      },
-    }));
+    const batchEvents = [14, 15].map((topicId, index) => {
+      const id = `00000000-0000-4000-8000-${String(20 + index).padStart(12, '0')}`;
+      return { topicId, event: legacyPracticeEvent(id, topicId) };
+    });
     const batchId = batchEvents[0].event.id;
     const batch = await request(baseUrl, owner, '/api/v1/grammar/mastery-events/batch', { owner, batchId, events: batchEvents });
     assert.equal(batch.status, 201);
@@ -825,20 +843,13 @@ test('grammar mastery API owns time/revision and generic progress cannot forge c
     assert.equal(batchReplay.status, 200);
     assert.ok(batchReplay.body.results.every((result) => result.replay && !result.conflict));
 
-    const atomicBatch = [19, 14].map((topicId, index) => ({
-      topicId,
-      event: {
-        ...event,
-        id: `00000000-0000-4000-8000-${String(30 + index).padStart(12, '0')}`,
-        expectedRevision: index * 2,
-        expectedStage: 'not_started',
-        completedTypes: ['choice'],
-        typeScores: { choice: { correct: 1, total: 1 } },
-        session: practiceSession(`00000000-0000-4000-8000-${String(30 + index).padStart(12, '0')}`, {
-          topicId, typeScores: { choice: { correct: 1, total: 1 } },
-        }),
-      },
-    }));
+    const atomicBatch = [19, 14].map((topicId, index) => {
+      const id = `00000000-0000-4000-8000-${String(30 + index).padStart(12, '0')}`;
+      return {
+        topicId,
+        event: { ...legacyPracticeEvent(id, topicId), expectedRevision: index * 2 },
+      };
+    });
     const atomicBatchId = atomicBatch[0].event.id;
     const conflict = await request(baseUrl, owner, '/api/v1/grammar/mastery-events/batch', { owner, batchId: atomicBatchId, events: atomicBatch });
     assert.equal(conflict.status, 200);
@@ -927,7 +938,9 @@ test('Grammar OpenAPI request couples every runtime active built-in topic to its
   const validateRequest = compileOpenApiSchema(openapi, 'GrammarMasteryEventRequest');
   for (const topicId of Array.from({ length: 20 }, (_, index) => index + 1)) {
     const id = `00000000-0000-4000-8000-${String(700 + topicId).padStart(12, '0')}`;
-    const item = GRAMMAR_CATALOG.bank[topicId].c[0];
+    const queuedBeforeActivation = GRAMMAR_PREACTIVATION_LEGACY_TOPIC_IDS.includes(topicId);
+    const eventCatalog = queuedBeforeActivation ? GRAMMAR_CATALOG_V1 : GRAMMAR_CATALOG;
+    const item = eventCatalog.bank[topicId].c[0];
     const legacy = {
       id, type: 'session_completed', expectedRevision: 0,
       expectedStage: 'not_started', expectedReviewStep: 0,
@@ -935,7 +948,7 @@ test('Grammar OpenAPI request couples every runtime active built-in topic to its
       typeScores: { choice: { correct: 1, total: 1 } },
       session: {
         id, scope: 'topic', mode: 'legacy_practice', source: 'builtin',
-        catalog: { version: GRAMMAR_CATALOG.version, revision: GRAMMAR_CATALOG.revision },
+        catalog: { version: eventCatalog.version, revision: eventCatalog.revision },
         items: [{
           id: item.id, type: 'choice', transfer: false, correct: true,
           diagnosticId: null, errorCode: null, confusionPair: null, transferStatus: null,
@@ -944,8 +957,7 @@ test('Grammar OpenAPI request couples every runtime active built-in topic to its
       },
     };
     const runtimeAccepted = grammarMasteryEventSchema.safeParse({ topicId, event: legacy }).success;
-    const compatibilityExpected = !GRAMMAR_ACTIVE_TOPIC_IDS.includes(topicId)
-      || GRAMMAR_PREACTIVATION_LEGACY_TOPIC_IDS.includes(topicId);
+    const compatibilityExpected = !GRAMMAR_ACTIVE_TOPIC_IDS.includes(topicId) || queuedBeforeActivation;
     assert.equal(runtimeAccepted, compatibilityExpected,
       `runtime keeps only the explicitly versioned pre-activation legacy envelope for topic ${topicId}`);
     assert.equal(validateRequest({ topicId, event: legacy }), runtimeAccepted,
@@ -973,10 +985,15 @@ test('Grammar OpenAPI request couples every runtime active built-in topic to its
     `OpenAPI accepts the same queued v1 input envelope: ${JSON.stringify(validateRequest.errors)}`);
 
   for (const [topicIndex, topicId] of GRAMMAR_PREACTIVATION_LEGACY_TOPIC_IDS.entries()) {
-    for (const [kindIndex, contract] of [
-      { pointerKind: 'c', type: 'choice', errorCode: 'construction_choice' },
-      { pointerKind: 'f', type: 'input', errorCode: 'word_or_verb_form' },
-    ].entries()) {
+    const contracts = [
+      GRAMMAR_CATALOG_V1.bank[topicId].c.length
+        ? { pointerKind: 'c', type: 'choice', errorCode: 'construction_choice' } : null,
+      GRAMMAR_CATALOG_V1.bank[topicId].c2.length
+        ? { pointerKind: 'c2', type: 'choice', errorCode: 'construction_choice' } : null,
+      GRAMMAR_CATALOG_V1.bank[topicId].f.length
+        ? { pointerKind: 'f', type: 'input', errorCode: 'word_or_verb_form' } : null,
+    ].filter(Boolean);
+    for (const [kindIndex, contract] of contracts.entries()) {
       const id = `00000000-0000-4000-8000-${String(7300 + topicIndex * 2 + kindIndex).padStart(12, '0')}`;
       const exact = assistedLegacyPracticeEvent(id, topicId);
       exact.session.items = [
@@ -1138,6 +1155,170 @@ test('Grammar OpenAPI request couples every runtime active built-in topic to its
   assert.equal(grammarMasteryEventSchema.safeParse({ topicId: 5, event: review }).success, true);
   assert.equal(validateRequest({ topicId: 5, event: review }), true,
     `review events remain topic-independent: ${JSON.stringify(validateRequest.errors)}`);
+});
+
+test('runtime and OpenAPI preserve the exact immutable v1 identity of a restored legacy session', async () => {
+  const openapi = await fs.readFile(new URL('../docs/openapi.yaml', import.meta.url), 'utf8');
+  const validateRequest = compileOpenApiSchema(openapi, 'GrammarMasteryEventRequest');
+  const topicId = 19;
+  const event = legacyPracticeEvent('00000000-0000-4000-8000-000000009019', topicId);
+  event.session.catalog = {
+    version: GRAMMAR_CATALOG_V1.version,
+    revision: GRAMMAR_CATALOG_V1.revision,
+  };
+
+  assert.deepEqual({
+    runtime: grammarMasteryEventSchema.safeParse({ topicId, event }).success,
+    openapi: validateRequest({ topicId, event }),
+  }, { runtime: true, openapi: true },
+  `the restored v1 session keeps one accepted identity: ${JSON.stringify(validateRequest.errors)}`);
+
+  const postActivationPointer = structuredClone(event);
+  postActivationPointer.id = '00000000-0000-4000-8000-000000009020';
+  postActivationPointer.session.id = postActivationPointer.id;
+  postActivationPointer.session.items = [{
+    id: 'core.g.19.correction.1', type: 'correction', transfer: false, correct: true,
+    diagnosticId: null, errorCode: null, confusionPair: null, transferStatus: null,
+  }];
+  postActivationPointer.completedTypes = ['correction'];
+  postActivationPointer.typeScores = { correction: { correct: 1, total: 1 } };
+  assert.deepEqual({
+    runtime: grammarMasteryEventSchema.safeParse({ topicId, event: postActivationPointer }).success,
+    openapi: validateRequest({ topicId, event: postActivationPointer }),
+  }, { runtime: false, openapi: false },
+  'a v1 identity cannot be used to submit post-activation built-in content');
+
+  const topicPractice = structuredClone(event);
+  topicPractice.id = '00000000-0000-4000-8000-000000009021';
+  topicPractice.session.id = topicPractice.id;
+  topicPractice.session.mode = 'topic_practice';
+  assert.deepEqual({
+    runtime: grammarMasteryEventSchema.safeParse({ topicId, event: topicPractice }).success,
+    openapi: validateRequest({ topicId, event: topicPractice }),
+  }, { runtime: false, openapi: false },
+  'a v1 identity remains bounded to a queued legacy-practice session');
+});
+
+test('runtime and OpenAPI restore v2 only within its immutable pre-Ticket06 capabilities', async () => {
+  const openapi = await fs.readFile(new URL('../docs/openapi.yaml', import.meta.url), 'utf8');
+  const validateRequest = compileOpenApiSchema(openapi, 'GrammarMasteryEventRequest');
+
+  const activeSession = practiceSession('00000000-0000-4000-8000-000000009022', { topicId: 1 });
+  activeSession.catalog = { version: GRAMMAR_CATALOG_V2.version, revision: GRAMMAR_CATALOG_V2.revision };
+  const activeEvent = {
+    id: activeSession.id, type: 'session_completed', expectedRevision: 0,
+    expectedStage: 'not_started', expectedReviewStep: 0,
+    source: 'builtin', assisted: false,
+    completedTypes: ['choice', 'input', 'correction', 'transform'],
+    typeScores: scoresFromSession(activeSession), session: activeSession,
+  };
+  assert.deepEqual({
+    runtime: grammarMasteryEventSchema.safeParse({ topicId: 1, event: activeEvent }).success,
+    openapi: validateRequest({ topicId: 1, event: activeEvent }),
+  }, { runtime: true, openapi: true },
+  `an active v2 runner remains resumable: ${JSON.stringify(validateRequest.errors)}`);
+
+  const legacyEvent = legacyPracticeEvent('00000000-0000-4000-8000-000000009023', 14);
+  legacyEvent.session.catalog = { version: GRAMMAR_CATALOG_V2.version, revision: GRAMMAR_CATALOG_V2.revision };
+  assert.deepEqual({
+    runtime: grammarMasteryEventSchema.safeParse({ topicId: 14, event: legacyEvent }).success,
+    openapi: validateRequest({ topicId: 14, event: legacyEvent }),
+  }, { runtime: true, openapi: true },
+  `a function-words v2 runner stays pre-activation legacy practice: ${JSON.stringify(validateRequest.errors)}`);
+
+  for (const [index, alreadyActiveTopicId] of [10, 11, 12, 16, 17, 20].entries()) {
+    const impossibleLegacy = legacyPracticeEvent(
+      `00000000-0000-4000-8000-${String(9026 + index).padStart(12, '0')}`,
+      alreadyActiveTopicId,
+    );
+    impossibleLegacy.session.catalog = {
+      version: GRAMMAR_CATALOG_V2.version,
+      revision: GRAMMAR_CATALOG_V2.revision,
+    };
+    assert.deepEqual({
+      runtime: grammarMasteryEventSchema.safeParse({
+        topicId: alreadyActiveTopicId, event: impossibleLegacy,
+      }).success,
+      openapi: validateRequest({ topicId: alreadyActiveTopicId, event: impossibleLegacy }),
+    }, { runtime: false, openapi: false },
+    `v2 topic ${alreadyActiveTopicId} was already active and cannot use a legacy-practice envelope`);
+  }
+
+  const impossibleV2Active = practiceSession('00000000-0000-4000-8000-000000009024', { topicId: 14 });
+  impossibleV2Active.catalog = { version: GRAMMAR_CATALOG_V2.version, revision: GRAMMAR_CATALOG_V2.revision };
+  const impossibleV2Event = {
+    ...activeEvent,
+    id: impossibleV2Active.id,
+    typeScores: scoresFromSession(impossibleV2Active),
+    session: impossibleV2Active,
+  };
+  assert.deepEqual({
+    runtime: grammarMasteryEventSchema.safeParse({ topicId: 14, event: impossibleV2Event }).success,
+    openapi: validateRequest({ topicId: 14, event: impossibleV2Event }),
+  }, { runtime: false, openapi: false },
+  'v2 cannot claim topic practice that was introduced only by Ticket06');
+
+  const impossibleCurrentLegacy = structuredClone(legacyEvent);
+  impossibleCurrentLegacy.id = '00000000-0000-4000-8000-000000009025';
+  impossibleCurrentLegacy.session.id = impossibleCurrentLegacy.id;
+  impossibleCurrentLegacy.session.catalog = {
+    version: GRAMMAR_CATALOG.version,
+    revision: GRAMMAR_CATALOG.revision,
+  };
+  assert.deepEqual({
+    runtime: grammarMasteryEventSchema.safeParse({ topicId: 14, event: impossibleCurrentLegacy }).success,
+    openapi: validateRequest({ topicId: 14, event: impossibleCurrentLegacy }),
+  }, { runtime: false, openapi: false },
+  'current v3 cannot masquerade as a pre-activation legacy identity');
+});
+
+test('generated OpenAPI catalog unions match every registered runtime and active topic', async () => {
+  const openapi = await fs.readFile(new URL('../docs/openapi.yaml', import.meta.url), 'utf8');
+  const validateRequest = compileOpenApiSchema(openapi, 'GrammarMasteryEventRequest');
+  const validateActiveSession = compileOpenApiSchema(openapi, 'GrammarActivePracticeSession');
+  const validateLegacySession = compileOpenApiSchema(openapi, 'GrammarLegacyPracticeSession');
+
+  for (const [runtimeIndex, runtime] of GRAMMAR_CATALOG_RUNTIMES.entries()) {
+    const identity = {
+      version: runtime.catalog.version,
+      revision: runtime.catalog.revision,
+    };
+    for (const topicId of GRAMMAR_ACTIVE_TOPIC_IDS) {
+      const session = practiceSession(
+        `00000000-0000-4000-8000-${String(9100 + runtimeIndex * 20 + topicId).padStart(12, '0')}`,
+        { topicId },
+      );
+      session.catalog = identity;
+      const event = {
+        id: session.id, type: 'session_completed', expectedRevision: 0,
+        expectedStage: 'not_started', expectedReviewStep: 0,
+        source: 'builtin', assisted: false,
+        completedTypes: ['choice', 'input', 'correction', 'transform'],
+        typeScores: scoresFromSession(session), session,
+      };
+      const runtimeAccepted = grammarMasteryEventSchema.safeParse({ topicId, event }).success;
+      assert.equal(runtimeAccepted, runtime.hasActivePractice(topicId),
+        `${identity.version} topic ${topicId} runtime capability`);
+      assert.equal(validateRequest({ topicId, event }), runtimeAccepted,
+        `${identity.version} topic ${topicId} generated request parity: ${JSON.stringify(validateRequest.errors)}`);
+    }
+
+    const activeSession = practiceSession(
+      `00000000-0000-4000-8000-${String(9200 + runtimeIndex).padStart(12, '0')}`,
+      { topicId: 1 },
+    );
+    activeSession.catalog = identity;
+    assert.equal(validateActiveSession(activeSession), runtime.hasActivePractice(1),
+      `${identity.version} generated active-session catalog union`);
+
+    const legacySession = legacyPracticeEvent(
+      `00000000-0000-4000-8000-${String(9210 + runtimeIndex).padStart(12, '0')}`,
+      14,
+    ).session;
+    legacySession.catalog = identity;
+    assert.equal(validateLegacySession(legacySession), true,
+      `${identity.version} generated immutable legacy-session catalog union`);
+  }
 });
 
 test('Grammar OpenAPI accepts assisted wrong-choice diagnostics for every parts-of-speech topic', async () => {

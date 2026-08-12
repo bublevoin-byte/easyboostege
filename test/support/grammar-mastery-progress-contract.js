@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { GRAMMAR_CATALOG } from '../../public/grammar-catalog.js';
+import { GRAMMAR_CATALOG, GRAMMAR_CATALOG_V1, GRAMMAR_CATALOG_V2 } from '../../public/grammar-catalog.js';
 import { grammarMasteryEventSchema } from '../../validation/grammar-mastery.js';
 import { decorateGeneratedVoiceTutorContent } from '../../voice-tutor/generated-items.js';
 
@@ -84,7 +84,7 @@ function assistedDueSession(id, topicId = 2) {
 
 function legacySession(id, { assisted = false, wrongRetry = false } = {}) {
   const topicId = 14;
-  const originals = GRAMMAR_CATALOG.bank[topicId].c.slice(0, wrongRetry ? 1 : 4);
+  const originals = GRAMMAR_CATALOG_V1.bank[topicId].c.slice(0, wrongRetry ? 1 : 4);
   const items = originals.map((item) => ({
     id: item.id, type: item.type, transfer: false, correct: true,
     diagnosticId: null, errorCode: null, confusionPair: null, transferStatus: null,
@@ -104,7 +104,7 @@ function legacySession(id, { assisted = false, wrongRetry = false } = {}) {
     source: 'builtin', assisted, completedTypes: Object.keys(typeScores), typeScores,
     session: {
       id, scope: 'topic', mode: 'legacy_practice', source: 'builtin',
-      catalog: { version: GRAMMAR_CATALOG.version, revision: GRAMMAR_CATALOG.revision },
+      catalog: { version: GRAMMAR_CATALOG_V1.version, revision: GRAMMAR_CATALOG_V1.revision },
       items, startedAt: wrongRetry ? 2_500 : 2_000, assisted,
     },
   };
@@ -171,6 +171,15 @@ export const GRAMMAR_MASTERY_FIXTURE = Object.freeze({
 });
 
 export async function assertGrammarMasteryProgressContract(repository, owner, stranger) {
+  assert.deepEqual({
+    currentVersion: GRAMMAR_CATALOG.version,
+    currentRevision: GRAMMAR_CATALOG.revision,
+    historicalVersion: GRAMMAR_CATALOG_V2.version,
+    historicalRevision: GRAMMAR_CATALOG_V2.revision,
+  }, {
+    currentVersion: 'grammar-core-v3', currentRevision: 3,
+    historicalVersion: 'grammar-core-v2', historicalRevision: 2,
+  }, 'persistence fixtures bind current v3 separately from immutable pre-Ticket06 v2');
   await repository.saveProgress(owner, {
     gram: { 1: { st: 2, ok: 14, err: 3, sr: 4, rs: 2, due: 1 } },
     grammarRunner: { schema: 'grammar-runner-v1', sessionId: 'device-only-save' },
@@ -316,7 +325,7 @@ export async function assertGrammarMasteryProgressContract(repository, owner, st
     ...collisionBase,
     session: {
       id: collisionId, scope: 'topic', mode: 'legacy_practice', source: 'builtin',
-      catalog: { version: GRAMMAR_CATALOG.version, revision: GRAMMAR_CATALOG.revision },
+      catalog: { version: GRAMMAR_CATALOG_V1.version, revision: GRAMMAR_CATALOG_V1.revision },
       items: [{
         id: 'core.g.14.c.1', type: 'choice', transfer: false, correct: true,
         diagnosticId: null, errorCode: null, confusionPair: null, transferStatus: null,

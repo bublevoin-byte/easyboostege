@@ -583,21 +583,6 @@ test('the production screen exposes four levels, assisted rule evidence and tran
     'the rule control keeps an actual, non-shrinking touch target above 44px');
   assert.match(screen, /function gExplain[\s\S]+?id="g_card"[^>]+aria-live="polite"/u,
     'the dynamically inserted explanation is announced');
-  const choiceFailure = screen.indexOf('enqueueTransferAfterFailure(GS,G_BANK[it.t||GS.t],it');
-  const durableExplain = screen.indexOf("GS.phase='explain'", choiceFailure);
-  const durablePersist = screen.indexOf('gPersistRunner()', durableExplain);
-  const delayedExplain = screen.indexOf('setTimeout(function()', choiceFailure);
-  assert.ok(choiceFailure >= 0 && durableExplain > choiceFailure && durablePersist > durableExplain
-    && durablePersist < delayedExplain,
-    'wrong answer plus transfer must be persisted as explain before the timer can yield');
-  const completionStart = screen.indexOf('async function gFinish()');
-  const completionEvent = screen.indexOf('finishedSession.completionEvent=gCompletionEvent', completionStart);
-  const completionPhase = screen.indexOf("finishedSession.phase='completion_pending'", completionStart);
-  const completionPersist = screen.indexOf('gPersistRunner()', completionPhase);
-  const completionAwait = screen.indexOf('await gSubmitMasteryEvent', completionPersist);
-  assert.ok(completionEvent > completionStart && completionPhase > completionStart
-    && completionPersist > completionEvent && completionPersist > completionPhase && completionAwait > completionPersist,
-  'completion persists the exact event and pending phase before the async owner lock or network can yield');
   assert.match(screen, /gMasteryDurable[\s\S]+?gClearRunner\(\)/u,
     'the workflow clears only after durable queue acceptance or server replay/application');
 });

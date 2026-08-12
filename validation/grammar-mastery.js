@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { GRAMMAR_CATALOG } from '../public/grammar-catalog.js';
+import {
+  GRAMMAR_CATALOG,
+  GRAMMAR_CATALOG_REGISTRY,
+  GRAMMAR_CATALOG_RUNTIMES,
+  getGrammarCatalogRuntime,
+} from '../public/grammar-catalog.js';
 import {
   GRAMMAR_ACTIVE_PRACTICE_TYPES,
   GRAMMAR_ACTIVE_TOPIC_IDS,
@@ -30,6 +35,21 @@ const typeScore = z.object({
   correct: z.number().int().min(0).max(1000),
   total: z.number().int().min(1).max(1000),
 }).strict().refine((value) => value.correct <= value.total, { message: 'correct exceeds total' });
+const currentCatalogRuntime = getGrammarCatalogRuntime(GRAMMAR_CATALOG.version, GRAMMAR_CATALOG.revision);
+
+function runtimeTopicItem(runtime, topicId, itemId) {
+  const entry = runtime?.getItem(itemId);
+  return entry?.topicId === topicId ? entry.item : null;
+}
+
+export function hasExactActiveTransferPairCoverage(items, resolveItem, types = practiceTypes) {
+  if (!Array.isArray(items) || typeof resolveItem !== 'function' || !Array.isArray(types)) return false;
+  return types.every((type) => {
+    const originals = items.filter((outcome) => !outcome.transfer && outcome.type === type);
+    const pairIds = originals.map((outcome) => resolveItem(outcome.id)?.transferPair).filter(Boolean);
+    return originals.length === 4 && pairIds.length === 4 && new Set(pairIds).size === 4;
+  });
+}
 
 const confusionPair = z.string().refine(isGrammarConfusionPair, { message: 'invalid grammar confusion pair' });
 const independentError = z.object({
@@ -74,10 +94,12 @@ const practiceSession = z.object({
   scope: z.literal('topic'),
   mode: z.enum(['topic_practice', 'legacy_practice']),
   source,
-  catalog: z.object({
-    version: z.literal(GRAMMAR_CATALOG.version),
-    revision: z.literal(GRAMMAR_CATALOG.revision),
-  }).strict(),
+  catalog: z.discriminatedUnion('version', Object.values(GRAMMAR_CATALOG_REGISTRY).map((catalog) => (
+    z.object({
+      version: z.literal(catalog.version),
+      revision: z.literal(catalog.revision),
+    }).strict()
+  ))),
   items: z.array(practiceSessionItem).min(1).max(32),
   startedAt: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
   assisted: z.boolean(),
@@ -126,18 +148,19 @@ export const grammarMasteryEventSchema = z.object({
   topicId: z.number().int().min(1).max(20),
   event: z.discriminatedUnion('type', [sessionCompleted, reviewCompleted]),
 }).strict().superRefine((value, context) => {
-  const levels = GRAMMAR_CATALOG.bank[value.topicId];
-  const catalogItems = new Map(['c', 'c2', 'f', 'correction', 'transform'].flatMap((kind) => (
-    (levels?.[kind] || []).map((item) => [item.id, item])
-  )));
   if (value.event.type === 'review_completed') {
     const evidence = value.event.independentError;
-    const evidenceItem = evidence ? catalogItems.get(evidence.itemId) : null;
-    const preActivationLegacyReview = evidence && preActivationLegacyTopicIds.includes(value.topicId)
-      && evidenceItem?.provenance === 'grammar-1-migrated' && evidence.diagnosticId == null;
+    const evidenceItem = evidence
+      ? runtimeTopicItem(currentCatalogRuntime, value.topicId, evidence.itemId) : null;
+    const historicalEvidenceItem = evidence && preActivationLegacyTopicIds.includes(value.topicId)
+      ? GRAMMAR_CATALOG_RUNTIMES
+        .filter((runtime) => runtime !== currentCatalogRuntime && !runtime.hasActivePractice(value.topicId))
+        .map((runtime) => runtimeTopicItem(runtime, value.topicId, evidence.itemId))
+        .find(Boolean) : null;
+    const preActivationLegacyReview = historicalEvidenceItem && evidence.diagnosticId == null;
     const currentReview = evidence && catalogMatchesIndependentError(evidenceItem, evidence);
     const historicalReview = preActivationLegacyReview
-      && catalogMatchesIndependentError(evidenceItem, evidence, true);
+      && catalogMatchesIndependentError(historicalEvidenceItem, evidence, true);
     if (evidence && (value.event.passed || !value.event.assisted || value.event.source === 'generated'
       || !(currentReview || historicalReview))) {
       context.addIssue({
@@ -151,18 +174,28 @@ export const grammarMasteryEventSchema = z.object({
   const activeTopic = activeTopicIds.includes(value.topicId);
   const builtinSession = value.event.source === 'builtin';
   const topicPractice = value.event.session.mode === 'topic_practice';
+  const sessionRuntime = getGrammarCatalogRuntime(
+    value.event.session.catalog.version, value.event.session.catalog.revision,
+  );
+  const sessionItem = (itemId) => runtimeTopicItem(sessionRuntime, value.topicId, itemId);
+  const immutableLegacyCatalog = sessionRuntime !== currentCatalogRuntime;
+  const sessionCatalogHasActiveTopic = sessionRuntime?.hasActivePractice(value.topicId) === true;
   const preActivationLegacy = preActivationLegacyTopicIds.includes(value.topicId) && builtinSession && !topicPractice
-    && value.event.session.items.every((outcome) => catalogItems.get(outcome.id)?.provenance === 'grammar-1-migrated');
-  const activeSession = activeTopic && builtinSession && topicPractice;
+    && immutableLegacyCatalog && !sessionCatalogHasActiveTopic
+    && value.event.session.items.every((outcome) => sessionItem(outcome.id));
+  const activeSession = builtinSession && topicPractice && sessionCatalogHasActiveTopic;
   const validMode = activeSession || preActivationLegacy || (!activeTopic || !builtinSession) && !topicPractice;
   if (!validMode) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['event', 'session', 'mode'], message: 'topic and content generation require their canonical practice mode' });
   }
-  if (!topicPractice && preActivationLegacyTopicIds.includes(value.topicId) && value.event.session.items.some((outcome) => {
-    const item = catalogItems.get(outcome.id);
-    return item && item.provenance !== 'grammar-1-migrated';
-  })) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ['event', 'session', 'items'], message: 'legacy compatibility accepts only pre-activation built-in content' });
+  if (immutableLegacyCatalog && value.event.session.items.some((outcome) => (
+    !parseGeneratedGrammarItemId(outcome.id) && !sessionItem(outcome.id)
+  ))) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['event', 'session', 'catalog'],
+      message: 'immutable historical identity accepts only its exact built-in membership',
+    });
   }
   if (activeSession && (!practiceTypes.every((type) => value.event.completedTypes.includes(type))
     || value.event.completedTypes.length !== practiceTypes.length
@@ -202,15 +235,10 @@ export const grammarMasteryEventSchema = z.object({
     && new Set(value.event.session.items.map((item) => item.id)).size !== value.event.session.items.length) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['event', 'session', 'items'], message: 'active sessions cannot repeat a practice item' });
   }
-  if (activeSession) {
-    for (const type of practiceTypes) {
-      const originals = value.event.session.items.filter((outcome) => !outcome.transfer && outcome.type === type);
-      const pairIds = originals.map((outcome) => catalogItems.get(outcome.id)?.transferPair).filter(Boolean);
-      if (pairIds.length !== 4 || new Set(pairIds).size !== pairIds.length) {
-        context.addIssue({ code: z.ZodIssueCode.custom, path: ['event', 'session', 'items'], message: 'active sessions require one original item per authored transfer pair' });
-        break;
-      }
-    }
+  if (activeSession && !hasExactActiveTransferPairCoverage(
+    value.event.session.items, sessionItem, practiceTypes,
+  )) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['event', 'session', 'items'], message: 'active sessions require one original item per authored transfer pair' });
   }
   if (!value.event.assisted
     && value.event.session.items.some((item) => !item.correct)) {
@@ -224,7 +252,7 @@ export const grammarMasteryEventSchema = z.object({
       && outcome.errorCode === evidence.reason
       && (outcome.confusionPair || null) === (evidence.confusionPair || null));
     if (!value.event.assisted || value.event.source === 'generated' || !matchingOutcome
-      || !catalogMatchesIndependentError(catalogItems.get(evidence.itemId), evidence, !activeSession)) {
+      || !catalogMatchesIndependentError(sessionItem(evidence.itemId), evidence, !activeSession)) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['event', 'independentError'],
@@ -238,7 +266,7 @@ export const grammarMasteryEventSchema = z.object({
   ]));
   value.event.session.items.forEach((outcome, index, outcomes) => {
     const generatedPointer = parseGeneratedGrammarItemId(outcome.id);
-    const item = catalogItems.get(outcome.id) || (generatedPointer ? {
+    const item = sessionItem(outcome.id) || (generatedPointer ? {
       id: outcome.id, type: generatedPointer.type, generated: true,
     } : null);
     const expectedType = item?.type;
@@ -270,7 +298,7 @@ export const grammarMasteryEventSchema = z.object({
     }
     if (outcome.transfer) {
       const failed = outcomes[index - 1];
-      const failedItem = catalogItems.get(failed?.id);
+      const failedItem = sessionItem(failed?.id);
       if (!failed || failed.correct || failed.id === outcome.id
         || !failedItem || failedItem.transferPair !== item?.transferPair
         || !supportsWeakness(failedItem, failed.errorCode, failed.confusionPair)

@@ -1,5 +1,5 @@
 import { CORE_VOICE_CATALOG_SOURCE } from './generated-core-catalog.js';
-import { GRAMMAR_CATALOG, GRAMMAR_CATALOG_V1 } from '../public/grammar-catalog.js';
+import { GRAMMAR_CATALOG, GRAMMAR_CATALOG_REGISTRY } from '../public/grammar-catalog.js';
 import { maskAcceptedAnswers, practicePromptKey, vocabularyTargetCandidates } from './practice.js';
 
 function cleanHtml(value) {
@@ -138,12 +138,17 @@ function buildGrammarItems(catalog, legacyItems = {}) {
   return result;
 }
 
-export const CORE_VOICE_TUTOR_LEGACY_GRAMMAR_ITEMS = Object.freeze(buildGrammarItems(GRAMMAR_CATALOG_V1));
-export const CORE_VOICE_TUTOR_CURRENT_GRAMMAR_ITEMS = Object.freeze(buildGrammarItems(GRAMMAR_CATALOG));
-export const CORE_VOICE_TUTOR_GRAMMAR_REVISIONS = Object.freeze(Object.fromEntries([
-  ...Object.values(CORE_VOICE_TUTOR_LEGACY_GRAMMAR_ITEMS).map((item) => [`${item.id}@${item.revision}`, item]),
-  ...Object.values(CORE_VOICE_TUTOR_CURRENT_GRAMMAR_ITEMS).map((item) => [`${item.id}@${item.revision}`, item]),
-]));
+const GRAMMAR_VOICE_CATALOGS = Object.freeze(Object.values(GRAMMAR_CATALOG_REGISTRY)
+  .sort((left, right) => left.revision - right.revision)
+  .map((catalog) => Object.freeze({ catalog, items: Object.freeze(buildGrammarItems(catalog)) })));
+export const CORE_VOICE_TUTOR_LEGACY_GRAMMAR_ITEMS = GRAMMAR_VOICE_CATALOGS[0].items;
+export const CORE_VOICE_TUTOR_CURRENT_GRAMMAR_ITEMS = GRAMMAR_VOICE_CATALOGS
+  .find(({ catalog }) => catalog === GRAMMAR_CATALOG).items;
+export const CORE_VOICE_TUTOR_GRAMMAR_REVISIONS = Object.freeze(Object.fromEntries(
+  GRAMMAR_VOICE_CATALOGS.flatMap(({ items }) => (
+    Object.values(items).map((item) => [`${item.id}@${item.revision}`, item])
+  )),
+));
 
 function buildItems() {
   const result = { ...CORE_VOICE_TUTOR_CURRENT_GRAMMAR_ITEMS };
