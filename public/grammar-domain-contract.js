@@ -8,7 +8,11 @@ export const GRAMMAR_ACTIVE_PRACTICE_TYPES = Object.freeze([
 ]);
 
 export const GRAMMAR_ACTIVE_TOPIC_IDS = Object.freeze([
-  1, 2, 3, 13, 4, 5, 6, 7, 8, 9, 18,
+  1, 2, 3, 13, 4, 5, 6, 7, 8, 9, 18, 10, 11, 12, 16, 17, 20,
+]);
+
+export const GRAMMAR_PREACTIVATION_LEGACY_TOPIC_IDS = Object.freeze([
+  10, 11, 12, 16, 17, 20,
 ]);
 
 export const GENERATED_GRAMMAR_REVISION = 1;
@@ -61,6 +65,7 @@ export const EasyBoostGrammarDomain = Object.freeze({
   GRAMMAR_ERROR_CODES,
   GRAMMAR_ACTIVE_PRACTICE_TYPES,
   GRAMMAR_ACTIVE_TOPIC_IDS,
+  GRAMMAR_PREACTIVATION_LEGACY_TOPIC_IDS,
   GENERATED_GRAMMAR_REVISION,
   isGrammarConfusionPair,
   isGrammarErrorCode,

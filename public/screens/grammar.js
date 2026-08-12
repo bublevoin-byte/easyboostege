@@ -12,7 +12,7 @@ import {
 } from '../app.js';
 import {recordCompletedLearningActivity} from '../learning-activity-recorder.js';
 import {GRAMMAR_CATALOG,validateGeneratedGrammarSupplement} from '../grammar-catalog.js';
-import {GENERATED_GRAMMAR_REVISION,GRAMMAR_ACTIVE_PRACTICE_TYPES,isBuiltinGrammarDiagnosticId,isGrammarConfusionPair,isGrammarErrorCode,parseGrammarConfusionPair,parseGeneratedGrammarItemReference} from '../grammar-domain-contract.js';
+import {GENERATED_GRAMMAR_REVISION,GRAMMAR_ACTIVE_PRACTICE_TYPES,GRAMMAR_PREACTIVATION_LEGACY_TOPIC_IDS,isBuiltinGrammarDiagnosticId,isGrammarConfusionPair,isGrammarErrorCode,parseGrammarConfusionPair,parseGeneratedGrammarItemReference} from '../grammar-domain-contract.js';
 
 const GRAM_Q=[
  {t:['She ','_____',' already finished her homework.'],o:['have','has','had','is'],a:1,e:'<b>She/he/it</b> — третье лицо, поэтому <b>has</b>.'},
@@ -97,15 +97,18 @@ function gSafeRunnerScores(value){var result={};GRAMMAR_ACTIVE_PRACTICE_TYPES.fo
 function gSafeRunnerFlags(value){var result={};GRAMMAR_ACTIVE_PRACTICE_TYPES.forEach(function(type){if(value&&value[type]===true)result[type]=true});return result}
 function gSafeRunnerErrors(value,t){var candidate=value&&value[t];return isGrammarErrorCode(candidate)?{[t]:candidate}:{}}
 function gSafeRunnerPairs(value,t){var candidate=parseGrammarConfusionPair(value&&value[t]);return candidate?{[t]:candidate}:{}}
-function gExactIndependentError(t,itemId,diagnosticId,reason,pair){var found=gAddressableItem(t,itemId);if(!found||found.source==='generated'||!isGrammarErrorCode(reason))return null;
+function gExactIndependentError(t,itemId,diagnosticId,reason,pair,legacy=false){var found=gAddressableItem(t,itemId);if(!found||found.source==='generated'||!isGrammarErrorCode(reason))return null;
   var normalizedPair=pair==null?null:parseGrammarConfusionPair(pair);if(pair!=null&&!normalizedPair)return null;
+  if(legacy){var legacyReason=['f','input'].includes(found.k)?'word_or_verb_form':'construction_choice';
+    if(legacyReason!==reason||normalizedPair!==null)return null;
+    return{itemId:itemId,diagnosticId:null,reason:reason,confusionPair:null}}
   var diagnostic=Array.isArray(found.q.diagnostics)?found.q.diagnostics.find(function(candidate){return candidate&&candidate.id===diagnosticId}):null;
   if(diagnostic){if(diagnostic.errorCode!==reason||(diagnostic.confusionPair||null)!==normalizedPair)return null}
   else{var expectedReason=found.q.errorSkill||(['f','input'].includes(found.k)?'word_or_verb_form':'construction_choice');
-    if(diagnosticId!=null||expectedReason!==reason||(found.q.confusionPair||null)!==normalizedPair)return null}
+    var expectedPair=found.q.confusionPair||null;if(diagnosticId!=null||expectedReason!==reason||expectedPair!==normalizedPair)return null}
   return{itemId:itemId,diagnosticId:diagnosticId==null?null:diagnosticId,reason:reason,confusionPair:normalizedPair}}
-function gSafeIndependentErrors(value,t){var candidate=value&&value[t];if(!candidate||typeof candidate!=='object'||Array.isArray(candidate))return{};
-  var exact=gExactIndependentError(t,String(candidate.itemId||''),candidate.diagnosticId==null?null:String(candidate.diagnosticId),String(candidate.reason||''),candidate.confusionPair==null?null:String(candidate.confusionPair));
+function gSafeIndependentErrors(value,t,legacy){var candidate=value&&value[t];if(!candidate||typeof candidate!=='object'||Array.isArray(candidate))return{};
+  var exact=gExactIndependentError(t,String(candidate.itemId||''),candidate.diagnosticId==null?null:String(candidate.diagnosticId),String(candidate.reason||''),candidate.confusionPair==null?null:String(candidate.confusionPair),legacy);
   return exact?{[t]:exact}:{}}
 function gSafeRunnerOutcomes(value,queue,done,active){if(!Array.isArray(value)||value.length!==done)return null;var outcomes=[],legacyAttempts=new Map();
   for(var index=0;index<value.length;index++){var raw=value[index],item=queue[index],type=item&&item.k==='f'?'input':item&&['c','c2'].includes(item.k)?'choice':item&&item.k;
@@ -144,20 +147,22 @@ function gRestoreRunner(){var snapshot=S&&S.grammarRunner;if(!snapshot||snapshot
   var sessionId=String(snapshot.sessionId||''),ok=Number(snapshot.ok),done=Number(snapshot.done),practiceMode=String(snapshot.mode||'');
   var completionPending=snapshot.phase==='completion_pending';
   var active=practiceMode==='topic_practice',source=String(snapshot.source||'');
-  if(!['topic_practice','legacy_practice'].includes(practiceMode)||grammarModule.hasActivePractice(G_BANK[t])!==active
+  var hasActivePractice=grammarModule.hasActivePractice(G_BANK[t]);
+  var activatedLegacy=!active&&hasActivePractice&&GRAMMAR_PREACTIVATION_LEGACY_TOPIC_IDS.includes(t);
+  if(!['topic_practice','legacy_practice'].includes(practiceMode)||active&&!hasActivePractice||!active&&hasActivePractice&&!activatedLegacy
     ||!['builtin','mixed','generated'].includes(source)||(source!=='builtin'&&!snapshot.masteryAssisted)
     ||!G_TOPICS[t]||queueRaw.length<1||queueRaw.length>(active?32:16)||!Number.isInteger(snapshot.i)||snapshot.i<0||snapshot.i>queueRaw.length||(!completionPending&&snapshot.i>=queueRaw.length)||(completionPending&&snapshot.i!==queueRaw.length)
     ||!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(sessionId)
     ||!Number.isInteger(ok)||!Number.isInteger(done)||ok<0||done<0||ok>done||done>32)return null;
   var seen=new Set(),queue=[];
-  for(var raw of queueRaw){var found=gAddressableItem(t,raw&&raw.id);if(!found||(active&&seen.has(raw.id)))return null;seen.add(raw.id);
+  for(var raw of queueRaw){var found=gAddressableItem(t,raw&&raw.id);if(!found||(active&&seen.has(raw.id))||(activatedLegacy&&found.source!=='generated'&&found.q.provenance!=='grammar-1-migrated'))return null;seen.add(raw.id);
     if(!active&&raw.transfer)return null;queue.push({k:found.k,q:found.q,t:t,voice:found.q.voice||null,source:found.source||'builtin',transfer:Boolean(raw.transfer)})}
   if(grammarModule.queueSource(queue)!==source)return null;
   var evidence=gSafeRunnerEvidence(snapshot.evidence,t,practiceMode,source);
   var itemOutcomes=gSafeRunnerOutcomes(snapshot.itemOutcomes,queue,done,active);if(!itemOutcomes)return null;
   var restored={activeRunner:active,practiceMode:practiceMode,sessionId:sessionId,t:t,queue:queue,i:snapshot.i,ok:ok,done:done,
     source:source,helpUsed:Boolean(snapshot.helpUsed),masteryAssisted:Boolean(snapshot.masteryAssisted),answerCommitted:false,answerAssisted:Boolean(snapshot.answerAssisted),
-    phase:completionPending?'completion_pending':snapshot.phase==='explain'?'explain':snapshot.phase==='advance'?'advance':'question',errorReasons:gSafeRunnerErrors(snapshot.errorReasons,t),confusionPairs:gSafeRunnerPairs(snapshot.confusionPairs,t),independentErrors:gSafeIndependentErrors(snapshot.independentErrors,t),types:gSafeRunnerFlags(snapshot.types),
+    phase:completionPending?'completion_pending':snapshot.phase==='explain'?'explain':snapshot.phase==='advance'?'advance':'question',errorReasons:gSafeRunnerErrors(snapshot.errorReasons,t),confusionPairs:gSafeRunnerPairs(snapshot.confusionPairs,t),independentErrors:gSafeIndependentErrors(snapshot.independentErrors,t,!active),types:gSafeRunnerFlags(snapshot.types),
     typeScores:gSafeRunnerScores(snapshot.typeScores),reservedItemIds:Array.isArray(snapshot.reservedItemIds)?snapshot.reservedItemIds.filter(function(id){return Boolean(gAddressableItem(t,id))}).slice(0,32):[...seen],itemOutcomes:itemOutcomes,evidence:evidence};
   if(restored.phase==='advance'){restored.i++;restored.phase='question'}
   if(restored.phase==='completion_pending'){restored.completionEvent=gSafeCompletionEvent(snapshot.completionEvent,restored);if(!restored.completionEvent)return null}
@@ -343,14 +348,14 @@ function gExplain(it,userWrong,restoring){var q=it.q,t=it.t||GS.t;gMarkHelp(t,tr
     .then(function(recorded){var slot=document.getElementById('voice_tutor_grammar_practice');if(slot&&recorded)slot.innerHTML=voiceTutorButton(recorded)}).catch(function(){});
   gAnim('wflip','.5s')}
 function gAfterExplain(){GS.i++;GS.phase='question';if(gIsPracticeSession())gPersistRunner();gSync();save();gRenderQ()}
-function gErrorReason(it){var candidate=it&&((it.errorSkill)||(it.q&&it.q.errorSkill));if(isGrammarErrorCode(candidate))return candidate;
+function gErrorReason(it){if(GS&&GS.practiceMode==='legacy_practice')return it&&['f','input'].includes(it.k)?'word_or_verb_form':'construction_choice';var candidate=it&&((it.errorSkill)||(it.q&&it.q.errorSkill));if(isGrammarErrorCode(candidate))return candidate;
   return it&&['f','input'].includes(it.k)?'word_or_verb_form':'construction_choice'}
 function gAnswer(ok,it,checked){var topic=it.t||GS.t,type=it.k==='f'?'input':it.k==='c'||it.k==='c2'?'choice':it.k;GS.types=GS.types||{};GS.typeScores=GS.typeScores||{};GS.types[type]=true;
   var committedWithoutHelp=!GS.answerAssisted;GS.answerCommitted=true;var rule=document.getElementById('g_rule_btn');if(rule){rule.disabled=true;rule.setAttribute('aria-disabled','true')}
   var score=GS.typeScores[type]||(GS.typeScores[type]={correct:0,total:0});score.total++;if(ok)score.correct++;
-  var errorCode=ok?null:(checked&&checked.errorCode||gErrorReason(it)),confusionPair=ok?null:(checked&&Object.hasOwn(checked,'confusionPair')?checked.confusionPair:it.q&&it.q.confusionPair||null);
+  var legacy=GS.practiceMode==='legacy_practice';var errorCode=ok?null:(legacy?gErrorReason(it):checked&&checked.errorCode||gErrorReason(it)),confusionPair=ok||legacy?null:(checked&&Object.hasOwn(checked,'confusionPair')?checked.confusionPair:it.q&&it.q.confusionPair||null);
   if(!ok){GS.errorReasons=GS.errorReasons||{};GS.confusionPairs=GS.confusionPairs||{};GS.errorReasons[topic]=errorCode;GS.confusionPairs[topic]=confusionPair;
-    if(committedWithoutHelp){var exactError=gExactIndependentError(topic,it.q.id,checked&&checked.diagnosticId||null,errorCode,confusionPair);if(exactError){GS.independentErrors=GS.independentErrors||{};GS.independentErrors[topic]=exactError}}}
+    if(committedWithoutHelp){var exactError=gExactIndependentError(topic,it.q.id,checked&&checked.diagnosticId||null,errorCode,confusionPair,GS.practiceMode==='legacy_practice');if(exactError){GS.independentErrors=GS.independentErrors||{};GS.independentErrors[topic]=exactError}}}
   if(gIsPracticeSession()){GS.itemOutcomes=GS.itemOutcomes||[];GS.itemOutcomes.push({id:it.q.id,type:type,transfer:Boolean(it.transfer),correct:Boolean(ok),diagnosticId:GS.activeRunner&&!ok?(checked&&checked.diagnosticId||null):null,errorCode:errorCode,confusionPair:GS.activeRunner?confusionPair:null,transferStatus:null,
     ...(it.source==='generated'?{source:'generated',revision:it.q.revision}:{})})}
   grammarModule.applyAnswer(gRec(topic),GS,it,ok);

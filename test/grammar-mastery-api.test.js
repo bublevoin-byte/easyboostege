@@ -9,7 +9,10 @@ import express from 'express';
 import { createProgressRoutes } from '../routes/progress.js';
 import { createFileRepository } from '../storage/file-repository.js';
 import { GRAMMAR_CATALOG } from '../public/grammar-catalog.js';
-import { GRAMMAR_ACTIVE_TOPIC_IDS } from '../public/grammar-domain-contract.js';
+import {
+  GRAMMAR_ACTIVE_TOPIC_IDS,
+  GRAMMAR_PREACTIVATION_LEGACY_TOPIC_IDS,
+} from '../public/grammar-domain-contract.js';
 import { EasyBoostGrammar } from '../public/modules/grammar.js';
 import { grammarMasteryEventSchema } from '../validation/grammar-mastery.js';
 import { decorateGeneratedVoiceTutorContent } from '../voice-tutor/generated-items.js';
@@ -84,7 +87,7 @@ function independentChoiceError(topicId, item = GRAMMAR_CATALOG.bank[topicId].c[
   };
 }
 
-function legacyPracticeEvent(id, topicId = 10) {
+function legacyPracticeEvent(id, topicId = 14) {
   const queue = EasyBoostGrammar.buildTopicQueue(GRAMMAR_CATALOG.bank[topicId], topicId, () => 0.5);
   const items = queue.map((item) => ({
     id: item.q.id, type: item.q.type, transfer: false, correct: true,
@@ -105,7 +108,7 @@ function legacyPracticeEvent(id, topicId = 10) {
   };
 }
 
-function assistedLegacyPracticeEvent(id, topicId = 10) {
+function assistedLegacyPracticeEvent(id, topicId = 14) {
   const event = legacyPracticeEvent(id, topicId);
   const failed = event.session.items[0];
   failed.correct = false;
@@ -204,13 +207,13 @@ test('active mastery requires exact four-type declarations while legacy practice
     'declared active scores must exactly match every canonical outcome before mastery reduction');
 
   const legacy = legacyPracticeEvent('00000000-0000-4000-8000-000000000019');
-  assert.equal(grammarMasteryEventSchema.safeParse({ topicId: 10, event: legacy }).success, true,
-    'legacy practice keeps its truthful partial choice/input declaration');
-  const omittedOutcomeType = structuredClone(legacy);
-  omittedOutcomeType.completedTypes = ['choice'];
-  omittedOutcomeType.typeScores = { choice: legacy.typeScores.choice };
-  assert.equal(grammarMasteryEventSchema.safeParse({ topicId: 10, event: omittedOutcomeType }).success, false,
-    'legacy declarations must cover every distinct type that produced an outcome');
+  assert.equal(grammarMasteryEventSchema.safeParse({ topicId: 14, event: legacy }).success, true,
+    'legacy practice keeps its truthful partial declaration');
+  const extraDeclaredType = structuredClone(legacy);
+  extraDeclaredType.completedTypes = ['choice', 'input'];
+  extraDeclaredType.typeScores = { ...legacy.typeScores, input: { correct: 1, total: 1 } };
+  assert.equal(grammarMasteryEventSchema.safeParse({ topicId: 14, event: extraDeclaredType }).success, false,
+    'legacy declarations must exactly equal the distinct types that produced outcomes');
 });
 
 test('catalog-bound independent errors can regress after disclosure without authorizing advancement', () => {
@@ -339,14 +342,14 @@ test('grammar mastery API owns time/revision and generic progress cannot forge c
     const legacyOwner = await repository.createTelegramUser(8_811_003, 'Grammar Legacy Owner');
     const legacyEvent = legacyPracticeEvent('00000000-0000-4000-8000-000000000020');
     const legacyAccepted = await request(baseUrl, legacyOwner, '/api/v1/grammar/mastery-events', {
-      topicId: 10, event: legacyEvent,
+      topicId: 14, event: legacyEvent,
     });
     assert.equal(legacyAccepted.status, 201, JSON.stringify(legacyAccepted.body));
     assert.equal(legacyAccepted.body.record.stage, 'learning',
       'a clean choice/input legacy run records partial evidence without false learned mastery');
     assert.deepEqual(legacyAccepted.body.record.masteryHistory.at(-1).session.items, legacyEvent.session.items);
     const legacyReplay = await request(baseUrl, legacyOwner, '/api/v1/grammar/mastery-events', {
-      topicId: 10, event: legacyEvent,
+      topicId: 14, event: legacyEvent,
     });
     assert.equal(legacyReplay.status, 200);
     assert.equal(legacyReplay.body.replay, true);
@@ -354,7 +357,7 @@ test('grammar mastery API owns time/revision and generic progress cannot forge c
     const changedLegacyEvent = structuredClone(legacyEvent);
     changedLegacyEvent.session.startedAt += 1;
     const legacyConflict = await request(baseUrl, legacyOwner, '/api/v1/grammar/mastery-events', {
-      topicId: 10, event: changedLegacyEvent,
+      topicId: 14, event: changedLegacyEvent,
     });
     assert.equal(legacyConflict.status, 200);
     assert.equal(legacyConflict.body.replay, false);
@@ -369,17 +372,17 @@ test('grammar mastery API owns time/revision and generic progress cannot forge c
     invalidLegacyWrong.session.id = invalidLegacyWrong.id;
     invalidLegacyWrong.session.items[0].errorCode = 'word_order';
     assert.equal((await request(baseUrl, legacyWrongOwner, '/api/v1/grammar/mastery-events', {
-      topicId: 10, event: invalidLegacyWrong,
+      topicId: 14, event: invalidLegacyWrong,
     })).status, 400, 'legacy errors must match the catalog item and cannot claim an unrelated weakness');
     const legacyWrongAccepted = await request(baseUrl, legacyWrongOwner, '/api/v1/grammar/mastery-events', {
-      topicId: 10, event: legacyWrong,
+      topicId: 14, event: legacyWrong,
     });
     assert.equal(legacyWrongAccepted.status, 201, JSON.stringify(legacyWrongAccepted.body));
     assert.equal(legacyWrongAccepted.body.record.stage, 'not_started');
     assert.deepEqual(legacyWrongAccepted.body.record.masteryHistory.at(-1).session.items,
       legacyWrong.session.items, 'the repeated legacy retry remains ordered canonical evidence');
     const legacyWrongReplay = await request(baseUrl, legacyWrongOwner, '/api/v1/grammar/mastery-events', {
-      topicId: 10, event: legacyWrong,
+      topicId: 14, event: legacyWrong,
     });
     assert.equal(legacyWrongReplay.status, 200);
     assert.equal(legacyWrongReplay.body.replay, true);
@@ -800,7 +803,7 @@ test('grammar mastery API owns time/revision and generic progress cannot forge c
     const persisted = await request(baseUrl, owner, '/api/v1/progress', undefined);
     assert.equal(persisted.body.grammarMastery['3'].stats.correct, 16);
 
-    const batchEvents = [10, 11].map((topicId, index) => ({
+    const batchEvents = [14, 15].map((topicId, index) => ({
       topicId,
       event: {
         ...event,
@@ -822,12 +825,12 @@ test('grammar mastery API owns time/revision and generic progress cannot forge c
     assert.equal(batchReplay.status, 200);
     assert.ok(batchReplay.body.results.every((result) => result.replay && !result.conflict));
 
-    const atomicBatch = [12, 14].map((topicId, index) => ({
+    const atomicBatch = [19, 14].map((topicId, index) => ({
       topicId,
       event: {
         ...event,
         id: `00000000-0000-4000-8000-${String(30 + index).padStart(12, '0')}`,
-        expectedRevision: index,
+        expectedRevision: index * 2,
         expectedStage: 'not_started',
         completedTypes: ['choice'],
         typeScores: { choice: { correct: 1, total: 1 } },
@@ -841,7 +844,7 @@ test('grammar mastery API owns time/revision and generic progress cannot forge c
     assert.equal(conflict.status, 200);
     assert.ok(conflict.body.results.every((result) => !result.applied));
     const afterConflict = await request(baseUrl, owner, '/api/v1/progress', undefined);
-    assert.equal(afterConflict.body.grammarMastery['12'], undefined,
+    assert.equal(afterConflict.body.grammarMastery['19'], undefined,
       'one stale event must prevent an unseen sibling event from being committed');
 
     const duplicate = await request(baseUrl, owner, '/api/v1/grammar/mastery-events/batch', {
@@ -941,10 +944,137 @@ test('Grammar OpenAPI request couples every runtime active built-in topic to its
       },
     };
     const runtimeAccepted = grammarMasteryEventSchema.safeParse({ topicId, event: legacy }).success;
-    assert.equal(runtimeAccepted, !GRAMMAR_ACTIVE_TOPIC_IDS.includes(topicId), `runtime topic ${topicId}`);
+    const compatibilityExpected = !GRAMMAR_ACTIVE_TOPIC_IDS.includes(topicId)
+      || GRAMMAR_PREACTIVATION_LEGACY_TOPIC_IDS.includes(topicId);
+    assert.equal(runtimeAccepted, compatibilityExpected,
+      `runtime keeps only the explicitly versioned pre-activation legacy envelope for topic ${topicId}`);
     assert.equal(validateRequest({ topicId, event: legacy }), runtimeAccepted,
       `OpenAPI must select the same built-in envelope for topic ${topicId}: ${JSON.stringify(validateRequest.errors)}`);
   }
+
+  const preActivationInput = assistedLegacyPracticeEvent(
+    '00000000-0000-4000-8000-000000000799', 10,
+  );
+  preActivationInput.session.items = [
+    {
+      id: 'core.g.10.f.1', type: 'input', transfer: false, correct: false,
+      diagnosticId: null, errorCode: 'word_or_verb_form', confusionPair: null, transferStatus: null,
+    },
+    {
+      id: 'core.g.10.f.1', type: 'input', transfer: false, correct: true,
+      diagnosticId: null, errorCode: null, confusionPair: null, transferStatus: null,
+    },
+  ];
+  preActivationInput.completedTypes = ['input'];
+  preActivationInput.typeScores = { input: { correct: 1, total: 2 } };
+  assert.equal(grammarMasteryEventSchema.safeParse({ topicId: 10, event: preActivationInput }).success, true,
+    'the current runtime accepts a queued v1 input error with the historical fallback weakness');
+  assert.equal(validateRequest({ topicId: 10, event: preActivationInput }), true,
+    `OpenAPI accepts the same queued v1 input envelope: ${JSON.stringify(validateRequest.errors)}`);
+
+  for (const [topicIndex, topicId] of GRAMMAR_PREACTIVATION_LEGACY_TOPIC_IDS.entries()) {
+    for (const [kindIndex, contract] of [
+      { pointerKind: 'c', type: 'choice', errorCode: 'construction_choice' },
+      { pointerKind: 'f', type: 'input', errorCode: 'word_or_verb_form' },
+    ].entries()) {
+      const id = `00000000-0000-4000-8000-${String(7300 + topicIndex * 2 + kindIndex).padStart(12, '0')}`;
+      const exact = assistedLegacyPracticeEvent(id, topicId);
+      exact.session.items = [
+        {
+          id: `core.g.${topicId}.${contract.pointerKind}.1`, type: contract.type,
+          transfer: false, correct: false, diagnosticId: null,
+          errorCode: contract.errorCode, confusionPair: null, transferStatus: null,
+        },
+        {
+          id: `core.g.${topicId}.${contract.pointerKind}.1`, type: contract.type,
+          transfer: false, correct: true, diagnosticId: null,
+          errorCode: null, confusionPair: null, transferStatus: null,
+        },
+      ];
+      exact.completedTypes = [contract.type];
+      exact.typeScores = { [contract.type]: { correct: 1, total: 2 } };
+      assert.deepEqual({
+        runtime: grammarMasteryEventSchema.safeParse({ topicId, event: exact }).success,
+        openapi: validateRequest({ topicId, event: exact }),
+      }, { runtime: true, openapi: true },
+      `queued topic ${topicId} ${contract.type} keeps first-miss/null then correct/null retry order`);
+
+      const secondMiss = structuredClone(exact);
+      secondMiss.id = `00000000-0000-4000-8000-${String(7350 + topicIndex * 2 + kindIndex).padStart(12, '0')}`;
+      secondMiss.session.id = secondMiss.id;
+      secondMiss.session.items[1].correct = false;
+      secondMiss.session.items[1].errorCode = contract.errorCode;
+      secondMiss.session.items[1].transferStatus = 'due_next_session';
+      secondMiss.typeScores = { [contract.type]: { correct: 0, total: 2 } };
+      assert.deepEqual({
+        runtime: grammarMasteryEventSchema.safeParse({ topicId, event: secondMiss }).success,
+        openapi: validateRequest({ topicId, event: secondMiss }),
+      }, { runtime: true, openapi: true },
+      `queued topic ${topicId} ${contract.type} keeps second-miss/due retry order`);
+
+      const misplacedDue = structuredClone(exact);
+      misplacedDue.id = `00000000-0000-4000-8000-${String(7375 + topicIndex * 2 + kindIndex).padStart(12, '0')}`;
+      misplacedDue.session.id = misplacedDue.id;
+      misplacedDue.session.items[0].transferStatus = 'due_next_session';
+      const missingDue = structuredClone(secondMiss);
+      missingDue.id = `00000000-0000-4000-8000-${String(7425 + topicIndex * 2 + kindIndex).padStart(12, '0')}`;
+      missingDue.session.id = missingDue.id;
+      missingDue.session.items[1].transferStatus = null;
+      for (const [name, event] of [['misplaced due', misplacedDue], ['missing due', missingDue]]) {
+        assert.deepEqual({
+          runtime: grammarMasteryEventSchema.safeParse({ topicId, event }).success,
+          openapi: validateRequest({ topicId, event }),
+        }, { runtime: false, openapi: false },
+        `queued topic ${topicId} ${contract.type} rejects ${name}`);
+      }
+
+      const forged = structuredClone(exact);
+      forged.id = `00000000-0000-4000-8000-${String(7400 + topicIndex * 2 + kindIndex).padStart(12, '0')}`;
+      forged.session.id = forged.id;
+      forged.session.items[0].errorCode = 'auxiliary';
+      assert.deepEqual({
+        runtime: grammarMasteryEventSchema.safeParse({ topicId, event: forged }).success,
+        openapi: validateRequest({ topicId, event: forged }),
+      }, { runtime: false, openapi: false },
+      `queued topic ${topicId} ${contract.type} rejects a non-historical weakness`);
+    }
+  }
+
+  const wrongLegacyType = structuredClone(preActivationInput);
+  wrongLegacyType.id = '00000000-0000-4000-8000-000000000797';
+  wrongLegacyType.session.id = wrongLegacyType.id;
+  wrongLegacyType.session.items.forEach((item) => { item.type = 'choice'; });
+  wrongLegacyType.completedTypes = ['choice'];
+  wrongLegacyType.typeScores = { choice: { correct: 1, total: 2 } };
+  assert.equal(grammarMasteryEventSchema.safeParse({ topicId: 10, event: wrongLegacyType }).success, false,
+    'runtime rejects a pre-activation input pointer declared as a choice');
+
+  const crossTopicPointer = structuredClone(preActivationInput);
+  crossTopicPointer.id = '00000000-0000-4000-8000-000000000796';
+  crossTopicPointer.session.id = crossTopicPointer.id;
+  crossTopicPointer.session.items.forEach((item) => { item.id = 'core.g.11.f.1'; });
+  assert.equal(grammarMasteryEventSchema.safeParse({ topicId: 10, event: crossTopicPointer }).success, false,
+    'runtime resolves every legacy pointer inside the selected topic');
+  assert.deepEqual({
+    typeCoupled: !validateRequest({ topicId: 10, event: wrongLegacyType }),
+    topicCoupled: !validateRequest({ topicId: 10, event: crossTopicPointer }),
+  }, { typeCoupled: true, topicCoupled: true },
+  'OpenAPI couples pre-activation pointers to both their exact runtime type and selected topic');
+
+  const postActivationPointer = structuredClone(preActivationInput);
+  postActivationPointer.id = '00000000-0000-4000-8000-000000000798';
+  postActivationPointer.session.id = postActivationPointer.id;
+  postActivationPointer.session.items = [{
+    id: 'core.g.10.f.6', type: 'input', transfer: false, correct: true,
+    diagnosticId: null, errorCode: null, confusionPair: null, transferStatus: null,
+  }];
+  postActivationPointer.assisted = false;
+  postActivationPointer.session.assisted = false;
+  postActivationPointer.typeScores = { input: { correct: 1, total: 1 } };
+  assert.equal(grammarMasteryEventSchema.safeParse({ topicId: 10, event: postActivationPointer }).success, false,
+    'legacy compatibility cannot submit content that did not exist before activation');
+  assert.equal(validateRequest({ topicId: 10, event: postActivationPointer }), false,
+    'OpenAPI exposes the same pre-activation content boundary');
 
   for (const topicId of GRAMMAR_ACTIVE_TOPIC_IDS) {
     const session = practiceSession(
@@ -961,6 +1091,25 @@ test('Grammar OpenAPI request couples every runtime active built-in topic to its
     assert.equal(grammarMasteryEventSchema.safeParse({ topicId, event }).success, true, `runtime active topic ${topicId}`);
     assert.equal(validateRequest({ topicId, event }), true,
       `OpenAPI active topic ${topicId}: ${JSON.stringify(validateRequest.errors)}`);
+  }
+
+  for (const [index, topicId] of GRAMMAR_ACTIVE_TOPIC_IDS.entries()) {
+    const otherTopicId = GRAMMAR_ACTIVE_TOPIC_IDS[(index + 1) % GRAMMAR_ACTIVE_TOPIC_IDS.length];
+    const crossTopicActive = practiceSession(
+      `00000000-0000-4000-8000-${String(860 + topicId).padStart(12, '0')}`,
+      { topicId: otherTopicId },
+    );
+    const crossTopicActiveEvent = {
+      id: crossTopicActive.id, type: 'session_completed', expectedRevision: 0,
+      expectedStage: 'not_started', expectedReviewStep: 0,
+      source: 'builtin', assisted: false,
+      completedTypes: ['choice', 'input', 'correction', 'transform'],
+      typeScores: scoresFromSession(crossTopicActive), session: crossTopicActive,
+    };
+    assert.equal(grammarMasteryEventSchema.safeParse({ topicId, event: crossTopicActiveEvent }).success, false,
+      `runtime rejects topic ${otherTopicId} pointers submitted for active topic ${topicId}`);
+    assert.equal(validateRequest({ topicId, event: crossTopicActiveEvent }), false,
+      `OpenAPI rejects topic ${otherTopicId} pointers submitted for active topic ${topicId}`);
   }
 
   const generated = generatedGrammarEvent('00000000-0000-4000-8000-000000000850', generatedGrammarFixture());
@@ -991,12 +1140,442 @@ test('Grammar OpenAPI request couples every runtime active built-in topic to its
     `review events remain topic-independent: ${JSON.stringify(validateRequest.errors)}`);
 });
 
+test('Grammar OpenAPI accepts assisted wrong-choice diagnostics for every parts-of-speech topic', async () => {
+  const openapi = await fs.readFile(new URL('../docs/openapi.yaml', import.meta.url), 'utf8');
+  const validateRequest = compileOpenApiSchema(openapi, 'GrammarMasteryEventRequest');
+  const accepted = {};
+  for (const topicId of GRAMMAR_PREACTIVATION_LEGACY_TOPIC_IDS) {
+    const id = `00000000-0000-4000-8000-${String(900 + topicId).padStart(12, '0')}`;
+    const session = addCorrectTransfers(practiceSession(id, {
+      topicId,
+      assisted: true,
+      typeScores: {
+        choice: { correct: 3, total: 4 },
+        input: { correct: 4, total: 4 },
+        correction: { correct: 4, total: 4 },
+        transform: { correct: 4, total: 4 },
+      },
+    }), topicId);
+    const event = {
+      id, type: 'session_completed', expectedRevision: 0,
+      expectedStage: 'not_started', expectedReviewStep: 0,
+      source: 'builtin', assisted: true,
+      completedTypes: ['choice', 'input', 'correction', 'transform'],
+      typeScores: scoresFromSession(session), session,
+    };
+    assert.equal(grammarMasteryEventSchema.safeParse({ topicId, event }).success, true,
+      `runtime accepts the authored topic ${topicId} diagnostic`);
+    accepted[topicId] = validateRequest({ topicId, event });
+  }
+  assert.deepEqual(accepted, Object.fromEntries(GRAMMAR_PREACTIVATION_LEGACY_TOPIC_IDS.map((topicId) => [topicId, true])),
+    `OpenAPI accepts every authored parts-of-speech diagnostic: ${JSON.stringify(validateRequest.errors)}`);
+});
+
+test('Grammar OpenAPI couples session and review diagnostics to every active topic', async () => {
+  const openapi = await fs.readFile(new URL('../docs/openapi.yaml', import.meta.url), 'utf8');
+  assert.equal((openapi.match(/^    GrammarActiveDiagnosticId:$/gmu) || []).length, 1,
+    'the active diagnostic whitelist has one OpenAPI source of truth');
+  assert.equal((openapi.match(/\$ref: '#\/components\/schemas\/GrammarActiveDiagnosticId'/gu) || []).length, 3,
+    'built-in items, generated items, and independent errors reuse the active diagnostic whitelist');
+  const validateRequest = compileOpenApiSchema(openapi, 'GrammarMasteryEventRequest');
+  const parity = {};
+
+  for (const [index, topicId] of GRAMMAR_ACTIVE_TOPIC_IDS.entries()) {
+    const otherTopicId = GRAMMAR_ACTIVE_TOPIC_IDS[(index + 1) % GRAMMAR_ACTIVE_TOPIC_IDS.length];
+    const id = `00000000-0000-4000-8000-${String(940 + topicId).padStart(12, '0')}`;
+    const session = practiceSession(id, {
+      topicId,
+      assisted: true,
+      typeScores: {
+        choice: { correct: 3, total: 4 },
+        input: { correct: 4, total: 4 },
+        correction: { correct: 4, total: 4 },
+        transform: { correct: 4, total: 4 },
+      },
+    });
+    const wrong = session.items.find((item) => item.type === 'choice' && !item.correct);
+    const wrongCatalogItem = GRAMMAR_CATALOG.bank[topicId].c.find((item) => item.id === wrong.id);
+    const exactDiagnostic = wrongCatalogItem.diagnostics.find((diagnostic) => diagnostic
+      && diagnostic.errorCode === wrongCatalogItem.errorSkill
+      && (diagnostic.confusionPair || null) === (wrongCatalogItem.confusionPair || null));
+    Object.assign(wrong, {
+      diagnosticId: exactDiagnostic.id,
+      errorCode: exactDiagnostic.errorCode,
+      confusionPair: exactDiagnostic.confusionPair || null,
+    });
+    addCorrectTransfers(session, topicId);
+    const evidence = {
+      itemId: wrong.id, diagnosticId: wrong.diagnosticId,
+      reason: wrong.errorCode, confusionPair: wrong.confusionPair,
+    };
+    const event = {
+      id, type: 'session_completed', expectedRevision: 1,
+      expectedStage: 'learned', expectedReviewStep: 0,
+      source: 'builtin', assisted: true,
+      completedTypes: ['choice', 'input', 'correction', 'transform'],
+      typeScores: scoresFromSession(session), session, independentError: evidence,
+    };
+    const review = {
+      id: `00000000-0000-4000-8000-${String(980 + topicId).padStart(12, '0')}`,
+      type: 'review_completed', expectedRevision: 1,
+      expectedStage: 'learned', expectedReviewStep: 0,
+      source: 'builtin', assisted: true, passed: false, independentError: evidence,
+    };
+    const otherEvidence = independentChoiceError(otherTopicId);
+    const crossSession = structuredClone(event);
+    const crossWrong = crossSession.session.items.find((item) => item.id === evidence.itemId);
+    crossWrong.diagnosticId = otherEvidence.diagnosticId;
+    crossSession.independentError.diagnosticId = otherEvidence.diagnosticId;
+    const crossReview = structuredClone(review);
+    crossReview.independentError = otherEvidence;
+    const sameTopicItem = GRAMMAR_CATALOG.bank[topicId].c.find((item) => item.id !== evidence.itemId);
+    const sameTopicEvidence = independentChoiceError(topicId, sameTopicItem);
+    const crossItemSession = structuredClone(event);
+    const crossItemWrong = crossItemSession.session.items.find((item) => item.id === evidence.itemId);
+    Object.assign(crossItemWrong, {
+      diagnosticId: sameTopicEvidence.diagnosticId,
+      errorCode: sameTopicEvidence.reason,
+      confusionPair: sameTopicEvidence.confusionPair,
+    });
+    crossItemSession.independentError = { ...sameTopicEvidence, itemId: evidence.itemId };
+    const crossItemReview = structuredClone(review);
+    crossItemReview.independentError = { ...sameTopicEvidence, itemId: evidence.itemId };
+
+    const runtime = {
+      session: grammarMasteryEventSchema.safeParse({ topicId, event }).success,
+      review: grammarMasteryEventSchema.safeParse({ topicId, event: review }).success,
+      crossSession: grammarMasteryEventSchema.safeParse({ topicId, event: crossSession }).success,
+      crossReview: grammarMasteryEventSchema.safeParse({ topicId, event: crossReview }).success,
+      crossItemSession: grammarMasteryEventSchema.safeParse({ topicId, event: crossItemSession }).success,
+      crossItemReview: grammarMasteryEventSchema.safeParse({ topicId, event: crossItemReview }).success,
+    };
+    assert.deepEqual(runtime, {
+      session: true, review: true, crossSession: false, crossReview: false,
+      crossItemSession: false, crossItemReview: false,
+    },
+      `runtime diagnostic ownership for active topic ${topicId}`);
+    parity[topicId] = {
+      session: validateRequest({ topicId, event }),
+      review: validateRequest({ topicId, event: review }),
+      crossSession: validateRequest({ topicId, event: crossSession }),
+      crossReview: validateRequest({ topicId, event: crossReview }),
+      crossItemSession: validateRequest({ topicId, event: crossItemSession }),
+      crossItemReview: validateRequest({ topicId, event: crossItemReview }),
+    };
+  }
+
+  const expected = Object.fromEntries(GRAMMAR_ACTIVE_TOPIC_IDS.map((topicId) => [topicId, {
+    session: true, review: true, crossSession: false, crossReview: false,
+    crossItemSession: false, crossItemReview: false,
+  }]));
+  assert.deepEqual(parity, expected, 'OpenAPI matches runtime diagnostic ownership for all active topics');
+});
+
+test('Grammar OpenAPI binds every active diagnostic to its exact catalog item', async () => {
+  const openapi = await fs.readFile(new URL('../docs/openapi.yaml', import.meta.url), 'utf8');
+  const validateOwnership = compileOpenApiSchema(openapi, 'GrammarActiveItemDiagnosticOwnership');
+  const validateCatalogItemId = compileOpenApiSchema(openapi, 'GrammarBuiltinCatalogItemId');
+  const catalogIds = Object.values(GRAMMAR_CATALOG.bank).flatMap((levels) => (
+    ['c', 'c2', 'f', 'correction', 'transform'].flatMap((kind) => levels[kind] || [])
+  )).map((item) => item.id);
+  for (const itemId of catalogIds) {
+    assert.equal(validateCatalogItemId(itemId), true, `${itemId} is an exact built-in catalog pointer`);
+  }
+  assert.equal(validateCatalogItemId('core.g.10.c2.1'), false,
+    'the public contract cannot invent an absent active pointer');
+  const choices = GRAMMAR_ACTIVE_TOPIC_IDS.flatMap((topicId) => GRAMMAR_CATALOG.bank[topicId].c);
+  for (const item of choices) {
+    const topicId = Number(item.id.match(/^core\.g\.(\d+)\./u)?.[1]);
+    const other = choices.find((candidate) => candidate.id !== item.id
+      && candidate.id.startsWith(`core.g.${topicId}.`));
+    for (const diagnostic of item.diagnostics.filter(Boolean)) {
+      const sessionTuple = {
+        id: item.id, diagnosticId: diagnostic.id,
+        correct: false,
+        errorCode: diagnostic.errorCode, confusionPair: diagnostic.confusionPair || null,
+      };
+      const reviewTuple = {
+        itemId: item.id, diagnosticId: diagnostic.id,
+        reason: diagnostic.errorCode, confusionPair: diagnostic.confusionPair || null,
+      };
+      assert.equal(validateOwnership(sessionTuple), true,
+        `session item owns ${diagnostic.id}`);
+      assert.equal(validateOwnership(reviewTuple), true,
+        `independent error owns ${diagnostic.id}`);
+      assert.equal(validateOwnership({ ...sessionTuple, id: other.id }), false,
+        `${other.id} cannot borrow ${diagnostic.id}`);
+      assert.equal(validateOwnership({ ...reviewTuple, itemId: other.id }), false,
+        `${other.id} independent error cannot borrow ${diagnostic.id}`);
+      const forgedReason = diagnostic.errorCode === 'auxiliary' ? 'agreement' : 'auxiliary';
+      assert.equal(validateOwnership({ ...sessionTuple, errorCode: forgedReason }), false,
+        `${diagnostic.id} session tuple cannot forge its weakness`);
+      assert.equal(validateOwnership({ ...reviewTuple, reason: forgedReason }), false,
+        `${diagnostic.id} review tuple cannot forge its weakness`);
+    }
+    assert.equal(validateOwnership({ id: item.id, diagnosticId: `${item.id}.diagnostic.99` }), false,
+      `${item.id} cannot invent a selected-option diagnostic`);
+  }
+  assert.equal(validateOwnership({
+    id: 'core.g.10.f.1', correct: true,
+    diagnosticId: null, errorCode: null, confusionPair: null,
+  }), true, 'correct text outcomes retain the explicit clean null-diagnostic branch');
+});
+
+test('Grammar OpenAPI binds every active text item to its exact weakness tuple', async () => {
+  const openapi = await fs.readFile(new URL('../docs/openapi.yaml', import.meta.url), 'utf8');
+  const validateOwnership = compileOpenApiSchema(openapi, 'GrammarActiveItemDiagnosticOwnership');
+  const textItems = GRAMMAR_ACTIVE_TOPIC_IDS.flatMap((topicId) => (
+    ['f', 'correction', 'transform'].flatMap((kind) => GRAMMAR_CATALOG.bank[topicId][kind])
+  ));
+  for (const item of textItems) {
+    const topicId = Number(item.id.match(/^core\.g\.(\d+)\./u)?.[1]);
+    const preActivationLegacyReview = GRAMMAR_PREACTIVATION_LEGACY_TOPIC_IDS.includes(topicId)
+      && item.provenance === 'grammar-1-migrated';
+    const exactSession = {
+      diagnosticId: null, confusionPair: item.confusionPair || null,
+    };
+    assert.equal(validateOwnership({
+      ...exactSession, id: item.id, correct: false, errorCode: item.errorSkill,
+    }), true, `${item.id} owns its wrong session weakness`);
+    const reviewReason = item.errorSkill;
+    const reviewPair = item.confusionPair || null;
+    assert.equal(validateOwnership({
+      itemId: item.id, diagnosticId: null, reason: reviewReason, confusionPair: reviewPair,
+    }), true, `${item.id} owns its current independent review weakness`);
+    if (preActivationLegacyReview) {
+      assert.equal(validateOwnership({
+        itemId: item.id, diagnosticId: null,
+        reason: 'word_or_verb_form', confusionPair: null,
+      }), true, `${item.id} retains its bounded historical independent review weakness`);
+    }
+    const forgedReason = item.errorSkill === 'auxiliary' ? 'agreement' : 'auxiliary';
+    assert.equal(validateOwnership({
+      ...exactSession, id: item.id, correct: false, errorCode: forgedReason,
+    }), false, `${item.id} session cannot forge its weakness`);
+    assert.equal(validateOwnership({
+      itemId: item.id, diagnosticId: null, reason: forgedReason, confusionPair: reviewPair,
+    }), false, `${item.id} review cannot forge its weakness`);
+    assert.equal(validateOwnership({
+      id: item.id, correct: true, diagnosticId: null, errorCode: null, confusionPair: null,
+    }), true, `${item.id} still accepts a correct clean session outcome`);
+  }
+  assert.equal(textItems.length, GRAMMAR_ACTIVE_TOPIC_IDS.length * 24);
+});
+
+test('Grammar runtime and OpenAPI require exact active independent-error evidence', async () => {
+  const openapi = await fs.readFile(new URL('../docs/openapi.yaml', import.meta.url), 'utf8');
+  const validateRequest = compileOpenApiSchema(openapi, 'GrammarMasteryEventRequest');
+  const topicId = 10;
+
+  const wrongSession = addCorrectTransfers(practiceSession(
+    '00000000-0000-4000-8000-000000001022',
+    {
+      topicId, assisted: true,
+      typeScores: {
+        choice: { correct: 3, total: 4 }, input: { correct: 4, total: 4 },
+        correction: { correct: 4, total: 4 }, transform: { correct: 4, total: 4 },
+      },
+    },
+  ), topicId);
+  const wrong = wrongSession.items.find((item) => item.type === 'choice' && !item.correct);
+  const evidence = {
+    itemId: wrong.id, diagnosticId: wrong.diagnosticId,
+    reason: wrong.errorCode, confusionPair: wrong.confusionPair,
+  };
+  const exactSessionEvent = {
+    id: wrongSession.id, type: 'session_completed', expectedRevision: 1,
+    expectedStage: 'learned', expectedReviewStep: 0,
+    source: 'builtin', assisted: true,
+    completedTypes: ['choice', 'input', 'correction', 'transform'],
+    typeScores: scoresFromSession(wrongSession), session: wrongSession, independentError: evidence,
+  };
+  const exactReviewEvent = {
+    id: '00000000-0000-4000-8000-000000001023', type: 'review_completed',
+    expectedRevision: 1, expectedStage: 'learned', expectedReviewStep: 0,
+    source: 'builtin', assisted: true, passed: false, independentError: evidence,
+  };
+  assert.deepEqual({
+    runtimeSession: grammarMasteryEventSchema.safeParse({ topicId, event: exactSessionEvent }).success,
+    openapiSession: validateRequest({ topicId, event: exactSessionEvent }),
+    runtimeReview: grammarMasteryEventSchema.safeParse({ topicId, event: exactReviewEvent }).success,
+    openapiReview: validateRequest({ topicId, event: exactReviewEvent }),
+  }, { runtimeSession: true, openapiSession: true, runtimeReview: true, openapiReview: true },
+  `exact evidence stays accepted: ${JSON.stringify(validateRequest.errors)}`);
+
+  const currentTextSession = practiceSession(
+    '00000000-0000-4000-8000-000000001028', { topicId, assisted: true },
+  );
+  const currentTextItem = GRAMMAR_CATALOG.bank[topicId].f.find((item) => item.id === 'core.g.10.f.1');
+  const currentTextOutcome = currentTextSession.items.find((item) => (
+    item.type === 'input'
+    && GRAMMAR_CATALOG.bank[topicId].f.find((candidate) => candidate.id === item.id)?.transferPair
+      === currentTextItem.transferPair
+  ));
+  Object.assign(currentTextOutcome, {
+    id: currentTextItem.id, correct: false, errorCode: currentTextItem.errorSkill,
+    confusionPair: currentTextItem.confusionPair || null,
+  });
+  addCorrectTransfers(currentTextSession, topicId);
+  const currentTextEvidence = {
+    itemId: currentTextItem.id, diagnosticId: null,
+    reason: currentTextItem.errorSkill, confusionPair: currentTextItem.confusionPair || null,
+  };
+  const currentTextSessionEvent = {
+    id: currentTextSession.id, type: 'session_completed', expectedRevision: 1,
+    expectedStage: 'learned', expectedReviewStep: 0,
+    source: 'builtin', assisted: true,
+    completedTypes: ['choice', 'input', 'correction', 'transform'],
+    typeScores: scoresFromSession(currentTextSession), session: currentTextSession,
+    independentError: currentTextEvidence,
+  };
+  const currentTextReviewEvent = {
+    id: '00000000-0000-4000-8000-000000001029', type: 'review_completed',
+    expectedRevision: 1, expectedStage: 'learned', expectedReviewStep: 0,
+    source: 'builtin', assisted: true, passed: false,
+    independentError: currentTextEvidence,
+  };
+  assert.deepEqual({
+    runtimeSession: grammarMasteryEventSchema.safeParse({ topicId, event: currentTextSessionEvent }).success,
+    openapiSession: validateRequest({ topicId, event: currentTextSessionEvent }),
+    runtimeReview: grammarMasteryEventSchema.safeParse({ topicId, event: currentTextReviewEvent }).success,
+    openapiReview: validateRequest({ topicId, event: currentTextReviewEvent }),
+  }, { runtimeSession: true, openapiSession: true, runtimeReview: true, openapiReview: true },
+  `current migrated text evidence stays accepted: ${JSON.stringify(validateRequest.errors)}`);
+
+  const forgedReason = wrong.errorCode === 'auxiliary' ? 'agreement' : 'auxiliary';
+  const forgedSessionEvent = structuredClone(exactSessionEvent);
+  const forgedOutcome = forgedSessionEvent.session.items.find((item) => item.id === evidence.itemId);
+  forgedOutcome.errorCode = forgedReason;
+  forgedSessionEvent.independentError.reason = forgedReason;
+  const forgedReviewEvent = structuredClone(exactReviewEvent);
+  forgedReviewEvent.independentError.reason = forgedReason;
+
+  const absentItem = GRAMMAR_CATALOG.bank[topicId].c.find((item) => (
+    !exactSessionEvent.session.items.some((outcome) => outcome.id === item.id)
+  ));
+  const allCorrectSession = practiceSession(
+    '00000000-0000-4000-8000-000000001024', { topicId, assisted: true },
+  );
+  const outOfSessionEvent = {
+    id: allCorrectSession.id, type: 'session_completed', expectedRevision: 1,
+    expectedStage: 'learned', expectedReviewStep: 0,
+    source: 'builtin', assisted: true,
+    completedTypes: ['choice', 'input', 'correction', 'transform'],
+    typeScores: scoresFromSession(allCorrectSession), session: allCorrectSession,
+    independentError: independentChoiceError(topicId, absentItem),
+  };
+
+  const activeChoice = GRAMMAR_CATALOG.bank[topicId].c.find((item) => item.provenance !== 'grammar-1-migrated');
+  const nullChoiceReview = {
+    ...exactReviewEvent,
+    id: '00000000-0000-4000-8000-000000001025',
+    independentError: {
+      itemId: activeChoice.id, diagnosticId: null,
+      reason: activeChoice.errorSkill, confusionPair: activeChoice.confusionPair || null,
+    },
+  };
+
+  const nonexistentPointerEvent = structuredClone({ ...exactSessionEvent, independentError: undefined });
+  delete nonexistentPointerEvent.independentError;
+  const replaced = nonexistentPointerEvent.session.items.find((item) => item.type === 'choice');
+  replaced.id = 'core.g.10.c2.1';
+
+  const preActivationCrossTopic = assistedLegacyPracticeEvent(
+    '00000000-0000-4000-8000-000000001026', topicId,
+  );
+  preActivationCrossTopic.independentError = {
+    itemId: 'core.g.11.c.1', diagnosticId: null,
+    reason: 'construction_choice', confusionPair: null,
+  };
+
+  const wrongTextSession = addCorrectTransfers(practiceSession(
+    '00000000-0000-4000-8000-000000001027',
+    {
+      topicId, assisted: true,
+      typeScores: {
+        choice: { correct: 4, total: 4 }, input: { correct: 3, total: 4 },
+        correction: { correct: 4, total: 4 }, transform: { correct: 4, total: 4 },
+      },
+    },
+  ), topicId);
+  const wrongText = wrongTextSession.items.find((item) => item.type === 'input' && !item.correct);
+  Object.assign(wrongText, { errorCode: 'auxiliary', confusionPair: 'be__have' });
+  const forgedTextEvent = {
+    id: wrongTextSession.id, type: 'session_completed', expectedRevision: 1,
+    expectedStage: 'learned', expectedReviewStep: 0,
+    source: 'builtin', assisted: true,
+    completedTypes: ['choice', 'input', 'correction', 'transform'],
+    typeScores: scoresFromSession(wrongTextSession), session: wrongTextSession,
+    independentError: {
+      itemId: wrongText.id, diagnosticId: null,
+      reason: wrongText.errorCode, confusionPair: wrongText.confusionPair,
+    },
+  };
+
+  const rejected = {
+    forgedSession: forgedSessionEvent,
+    forgedReview: forgedReviewEvent,
+    outOfSession: outOfSessionEvent,
+    nullActiveChoiceReview: nullChoiceReview,
+    nonexistentActivePointer: nonexistentPointerEvent,
+    preActivationCrossTopic,
+    forgedActiveTextTuple: forgedTextEvent,
+  };
+  for (const [name, event] of Object.entries(rejected)) {
+    assert.equal(grammarMasteryEventSchema.safeParse({ topicId, event }).success, false,
+      `runtime rejects ${name}`);
+    assert.equal(validateRequest({ topicId, event }), false,
+      `OpenAPI rejects ${name}: ${JSON.stringify(validateRequest.errors)}`);
+  }
+});
+
+test('queued pre-activation review evidence retains its bounded legacy pointer contract', async () => {
+  const openapi = await fs.readFile(new URL('../docs/openapi.yaml', import.meta.url), 'utf8');
+  const validateRequest = compileOpenApiSchema(openapi, 'GrammarMasteryEventRequest');
+  const event = {
+    id: '00000000-0000-4000-8000-000000001021', type: 'review_completed',
+    expectedRevision: 9, expectedStage: 'stable', expectedReviewStep: 5,
+    source: 'builtin', assisted: true, passed: false,
+    independentError: {
+      itemId: 'core.g.10.c.1', diagnosticId: null,
+      reason: 'construction_choice', confusionPair: null,
+    },
+  };
+  const parsed = grammarMasteryEventSchema.safeParse({ topicId: 10, event });
+  assert.deepEqual({ runtime: parsed.success, openapi: validateRequest({ topicId: 10, event }) },
+    { runtime: true, openapi: true },
+    `queued Grammar 1 review evidence survives activation: ${JSON.stringify(parsed.error?.issues || validateRequest.errors)}`);
+  const regressed = EasyBoostGrammar.reduceMastery({
+    masteryVersion: 2, masteryRevision: 9, stage: 'stable', reviewStep: 5,
+    highestReviewStep: 5, eligibleAt: null,
+  }, parsed.data.event, { now: 20_000, clockAuthority: 'server' });
+  assert.equal(regressed.stage, 'confirmed');
+  assert.equal(regressed.lastRegressionReason, 'construction_choice');
+
+  const currentItem = GRAMMAR_CATALOG.bank[10].f.find((item) => item.id === 'core.g.10.f.1');
+  const currentEvent = {
+    ...event,
+    id: '00000000-0000-4000-8000-000000001030',
+    independentError: {
+      itemId: currentItem.id, diagnosticId: null,
+      reason: currentItem.errorSkill, confusionPair: currentItem.confusionPair || null,
+    },
+  };
+  const currentParsed = grammarMasteryEventSchema.safeParse({ topicId: 10, event: currentEvent });
+  assert.deepEqual({
+    runtime: currentParsed.success,
+    openapi: validateRequest({ topicId: 10, event: currentEvent }),
+  }, { runtime: true, openapi: true },
+  `the current review runner's exact migrated-item weakness remains valid: ${JSON.stringify(currentParsed.error?.issues || validateRequest.errors)}`);
+});
+
 test('Grammar OpenAPI evaluator binds each built-in pointer kind to its runtime type', async () => {
   const openapi = await fs.readFile(new URL('../docs/openapi.yaml', import.meta.url), 'utf8');
   const validateBuiltinItem = compileOpenApiSchema(openapi, 'GrammarBuiltinPracticeSessionItem');
   const builtinExamples = [
     ['core.g.1.c.1', 'choice', true],
-    ['core.g.1.c2.1', 'choice', true],
+    ['core.g.8.c2.1', 'choice', true],
+    ['core.g.1.c2.1', 'choice', false],
     ['core.g.1.f.1', 'input', true],
     ['core.g.1.correction.1', 'correction', true],
     ['core.g.1.transform.1', 'transform', true],

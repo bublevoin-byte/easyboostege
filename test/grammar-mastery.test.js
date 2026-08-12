@@ -62,7 +62,7 @@ test('different canonical completion material cannot replay through the known FN
   const grammar = grammarModule();
   const id = '00000000-0000-4000-8000-000000000402';
   const outcome = {
-    id: 'core.g.10.c.1', type: 'choice', transfer: false, correct: true,
+    id: 'core.g.14.c.1', type: 'choice', transfer: false, correct: true,
     diagnosticId: null, errorCode: null, confusionPair: null, transferStatus: null,
   };
   const base = {
@@ -80,8 +80,8 @@ test('different canonical completion material cannot replay through the known FN
   });
   const eventA = makeEvent(19_181_966_713_209);
   const eventB = makeEvent(288_105_508_095_880);
-  assert.equal(grammarMasteryEventSchema.safeParse({ topicId: 10, event: eventA }).success, true);
-  assert.equal(grammarMasteryEventSchema.safeParse({ topicId: 10, event: eventB }).success, true);
+  assert.equal(grammarMasteryEventSchema.safeParse({ topicId: 14, event: eventA }).success, true);
+  assert.equal(grammarMasteryEventSchema.safeParse({ topicId: 14, event: eventB }).success, true);
   assert.notDeepEqual(eventA, eventB);
   assert.notEqual(grammar.masteryEventReplayFingerprint(eventA), grammar.masteryEventReplayFingerprint(eventB),
     'exact replay identity must distinguish the reproduced 32-bit collision');

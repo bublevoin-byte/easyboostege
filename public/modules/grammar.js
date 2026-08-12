@@ -561,9 +561,17 @@ export const EasyBoostGrammar = (function initializeGrammarModule(global) {
     if (failedItem.transfer) return dueNextSession(weakness);
     const levels = activePracticeLevels(bank);
     const reserved = new Set(Array.isArray(session.reservedItemIds) ? session.reservedItemIds : []);
+    const supportsWeakness = (question) => question?.type === 'choice'
+      ? question.diagnostics?.some((diagnostic) => diagnostic
+        && diagnostic.errorCode === weakness.errorCode
+        && (diagnostic.confusionPair || null) === (weakness.confusionPair || null))
+      : question?.errorSkill === weakness.errorCode
+        && (question.confusionPair || null) === (weakness.confusionPair || null);
+    if (chosenWeakness && !supportsWeakness(failedItem.q)) return dueNextSession(weakness);
     const sameWeakness = (question) => question.id !== failedItem.q.id
       && !reserved.has(question.id)
-      && question.transferPair === failedItem.q.transferPair;
+      && question.transferPair === failedItem.q.transferPair
+      && (!chosenWeakness || supportsWeakness(question));
     const sameType = (levels[failedItem.k] || []).filter(sameWeakness);
     const candidates = sameType;
     if (!candidates.length) return dueNextSession(weakness);

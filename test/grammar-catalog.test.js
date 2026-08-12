@@ -30,14 +30,14 @@ test('versioned grammar catalog preserves every built-in topic, exercise and exa
   assert.equal(GRAMMAR_CATALOG.revision, 2);
   assert.equal(coverage.groups, 4);
   assert.equal(coverage.topics, 20);
-  assert.equal(coverage.exercises, 452);
+  assert.equal(coverage.exercises, 584);
   assert.equal(coverage.exams, 3);
   assert.equal(coverage.examGaps, 18);
-  assert.deepEqual(coverage.byKind, { c: 133, c2: 25, f: 118, correction: 88, transform: 88 });
-  assert.equal(coverage.itemIds.length, 470);
-  assert.equal(new Set(coverage.itemIds).size, 470);
+  assert.deepEqual(coverage.byKind, { c: 151, c2: 25, f: 136, correction: 136, transform: 136 });
+  assert.equal(coverage.itemIds.length, 602);
+  assert.equal(new Set(coverage.itemIds).size, 602);
   assert.deepEqual(coverage.byTopic[1], { c: 8, c2: 0, f: 8, correction: 8, transform: 8, total: 32 });
-  assert.equal(coverage.contentFingerprint, 'fnv1a32:4b03208c');
+  assert.equal(coverage.contentFingerprint, 'fnv1a32:86530c23');
   assert.equal(coverage.legacyContentFingerprint, 'fnv1a32:45cee292');
 
   assert.equal(GRAMMAR_CATALOG.bank[1].c[0].id, 'core.g.1.c.1');

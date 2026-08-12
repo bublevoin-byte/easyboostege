@@ -10,7 +10,7 @@ import {
 const LEGACY_BUILTIN_KINDS = Object.freeze(['c', 'c2', 'f']);
 const BUILTIN_KINDS = Object.freeze([...LEGACY_BUILTIN_KINDS, 'correction', 'transform']);
 const ACTIVE_TOPIC_IDS = Object.freeze(new Set(GRAMMAR_ACTIVE_TOPIC_IDS.map(String)));
-const ACTIVE_PROVENANCE = Object.freeze(['grammar-1-migrated', 'grammar-2-ticket-03', 'grammar-2-ticket-04']);
+const ACTIVE_PROVENANCE = Object.freeze(['grammar-1-migrated', 'grammar-2-ticket-03', 'grammar-2-ticket-04', 'grammar-2-ticket-05']);
 const ALLOWED_MARKUP = /<\/?b>|<br\s*\/?>/giu;
 
 function fail(code, details = '') {

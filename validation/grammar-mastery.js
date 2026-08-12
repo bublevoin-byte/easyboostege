@@ -3,6 +3,7 @@ import { GRAMMAR_CATALOG } from '../public/grammar-catalog.js';
 import {
   GRAMMAR_ACTIVE_PRACTICE_TYPES,
   GRAMMAR_ACTIVE_TOPIC_IDS,
+  GRAMMAR_PREACTIVATION_LEGACY_TOPIC_IDS,
   GRAMMAR_ERROR_CODES,
   GENERATED_GRAMMAR_REVISION,
   isGrammarConfusionPair,
@@ -14,6 +15,7 @@ import {
 const stages = ['not_started', 'learning', 'learned', 'confirmed', 'stable'];
 const practiceTypes = GRAMMAR_ACTIVE_PRACTICE_TYPES;
 const activeTopicIds = GRAMMAR_ACTIVE_TOPIC_IDS;
+const preActivationLegacyTopicIds = GRAMMAR_PREACTIVATION_LEGACY_TOPIC_IDS;
 const source = z.enum(['builtin', 'mixed', 'generated']);
 const regressionReason = z.enum(GRAMMAR_ERROR_CODES);
 const common = {
@@ -37,17 +39,19 @@ const independentError = z.object({
   confusionPair: confusionPair.nullable(),
 }).strict();
 
-function catalogMatchesIndependentError(item, evidence) {
+function catalogMatchesIndependentError(item, evidence, legacy = false) {
   if (!item || !evidence) return false;
   const diagnostic = item.diagnostics?.find((candidate) => candidate?.id === evidence.diagnosticId);
   if (diagnostic) {
     return diagnostic.errorCode === evidence.reason
       && (diagnostic.confusionPair || null) === (evidence.confusionPair || null);
   }
-  const expectedReason = item.errorSkill
-    || (item.type === 'input' ? 'word_or_verb_form' : 'construction_choice');
+  if (!legacy && item.type === 'choice' && item.diagnostics?.some(Boolean)) return false;
+  const expectedReason = legacy
+    ? (item.type === 'input' ? 'word_or_verb_form' : 'construction_choice')
+    : item.errorSkill || (item.type === 'input' ? 'word_or_verb_form' : 'construction_choice');
   return evidence.diagnosticId == null && evidence.reason === expectedReason
-    && (item.confusionPair || null) === (evidence.confusionPair || null);
+    && (legacy ? null : (item.confusionPair || null)) === (evidence.confusionPair || null);
 }
 
 const practiceSessionItem = z.object({
@@ -128,8 +132,14 @@ export const grammarMasteryEventSchema = z.object({
   )));
   if (value.event.type === 'review_completed') {
     const evidence = value.event.independentError;
+    const evidenceItem = evidence ? catalogItems.get(evidence.itemId) : null;
+    const preActivationLegacyReview = evidence && preActivationLegacyTopicIds.includes(value.topicId)
+      && evidenceItem?.provenance === 'grammar-1-migrated' && evidence.diagnosticId == null;
+    const currentReview = evidence && catalogMatchesIndependentError(evidenceItem, evidence);
+    const historicalReview = preActivationLegacyReview
+      && catalogMatchesIndependentError(evidenceItem, evidence, true);
     if (evidence && (value.event.passed || !value.event.assisted || value.event.source === 'generated'
-      || !catalogMatchesIndependentError(catalogItems.get(evidence.itemId), evidence))) {
+      || !(currentReview || historicalReview))) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['event', 'independentError'],
@@ -139,10 +149,20 @@ export const grammarMasteryEventSchema = z.object({
     return;
   }
   const activeTopic = activeTopicIds.includes(value.topicId);
-  const activeSession = activeTopic && value.event.source === 'builtin';
-  const expectedMode = activeSession ? 'topic_practice' : 'legacy_practice';
-  if (value.event.session.mode !== expectedMode) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ['event', 'session', 'mode'], message: `topic requires ${expectedMode}` });
+  const builtinSession = value.event.source === 'builtin';
+  const topicPractice = value.event.session.mode === 'topic_practice';
+  const preActivationLegacy = preActivationLegacyTopicIds.includes(value.topicId) && builtinSession && !topicPractice
+    && value.event.session.items.every((outcome) => catalogItems.get(outcome.id)?.provenance === 'grammar-1-migrated');
+  const activeSession = activeTopic && builtinSession && topicPractice;
+  const validMode = activeSession || preActivationLegacy || (!activeTopic || !builtinSession) && !topicPractice;
+  if (!validMode) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['event', 'session', 'mode'], message: 'topic and content generation require their canonical practice mode' });
+  }
+  if (!topicPractice && preActivationLegacyTopicIds.includes(value.topicId) && value.event.session.items.some((outcome) => {
+    const item = catalogItems.get(outcome.id);
+    return item && item.provenance !== 'grammar-1-migrated';
+  })) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['event', 'session', 'items'], message: 'legacy compatibility accepts only pre-activation built-in content' });
   }
   if (activeSession && (!practiceTypes.every((type) => value.event.completedTypes.includes(type))
     || value.event.completedTypes.length !== practiceTypes.length
@@ -204,7 +224,7 @@ export const grammarMasteryEventSchema = z.object({
       && outcome.errorCode === evidence.reason
       && (outcome.confusionPair || null) === (evidence.confusionPair || null));
     if (!value.event.assisted || value.event.source === 'generated' || !matchingOutcome
-      || !catalogMatchesIndependentError(catalogItems.get(evidence.itemId), evidence)) {
+      || !catalogMatchesIndependentError(catalogItems.get(evidence.itemId), evidence, !activeSession)) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['event', 'independentError'],
@@ -229,7 +249,7 @@ export const grammarMasteryEventSchema = z.object({
     const selectedDiagnostic = item?.type === 'choice'
       ? item.diagnostics?.find((diagnostic) => diagnostic?.id === outcome.diagnosticId)
       : null;
-    const legacyErrorCode = item?.errorSkill || (expectedType === 'input' ? 'word_or_verb_form' : 'construction_choice');
+    const legacyErrorCode = expectedType === 'input' ? 'word_or_verb_form' : 'construction_choice';
     const expectedWeakness = outcome.correct
       ? outcome.diagnosticId == null && outcome.errorCode == null && outcome.confusionPair == null
       : !activeSession

@@ -48,7 +48,7 @@ function scalar(source) {
   if (value.startsWith('{') && value.endsWith('}')) {
     return Object.fromEntries(splitFlow(value.slice(1, -1)).map((part) => {
       const [key, child] = flowPair(part);
-      return [key, scalar(child)];
+      return [scalar(key), scalar(child)];
     }));
   }
   if (value.startsWith("'") && value.endsWith("'")) return value.slice(1, -1).replace(/''/gu, "'");
@@ -81,6 +81,9 @@ function parseYamlBlock(lines, start = 0, indent = indentation(lines[start] || '
       if (!content) {
         const parsed = parseYamlBlock(lines, index + 1, indentation(lines[index + 1]));
         value.push(parsed.value); index = parsed.index; continue;
+      }
+      if (content.startsWith('{') && content.endsWith('}')) {
+        value.push(scalar(content)); index += 1; continue;
       }
       if (content.includes(':')) {
         const item = {};
@@ -193,6 +196,38 @@ export function compileOpenApiSchema(openapi, name) {
         || types.some((type) => declared[type]?.correct !== actual[type].correct
           || declared[type]?.total !== actual[type].total)) {
         errors.push(`${path}/typeScores must exactly equal counts from session.items`); return false;
+      }
+    }
+    if (schema['x-easyboost-grammar-independent-error'] === 'session-items' && value?.independentError) {
+      const evidence = value.independentError;
+      const matchingOutcome = value?.session?.items?.some((outcome) => !outcome.correct
+        && outcome.id === evidence.itemId
+        && outcome.diagnosticId === evidence.diagnosticId
+        && outcome.errorCode === evidence.reason
+        && (outcome.confusionPair || null) === (evidence.confusionPair || null));
+      if (!matchingOutcome) {
+        errors.push(`${path}/independentError must exactly equal one wrong session.items outcome`); return false;
+      }
+    }
+    if (schema['x-easyboost-grammar-legacy-retry-order'] === 'session-items') {
+      const items = value?.session?.items;
+      if (!Array.isArray(items)) return false;
+      const occurrences = new Map();
+      const totals = new Map(items.map((item) => [
+        item.id, items.filter((candidate) => candidate.id === item.id).length,
+      ]));
+      for (const item of items) {
+        const occurrence = (occurrences.get(item.id) || 0) + 1;
+        occurrences.set(item.id, occurrence);
+        const total = totals.get(item.id);
+        const first = items.find((candidate) => candidate.id === item.id);
+        const validShape = total <= 2
+          && !(total === 2 && (first?.correct || occurrence === 1 && item.correct))
+          && !(total === 1 && !item.correct);
+        const expectedTransferStatus = occurrence === 2 && !item.correct ? 'due_next_session' : null;
+        if (!validShape || (item.transferStatus || null) !== expectedTransferStatus) {
+          errors.push(`${path}/session/items must preserve exact legacy retry order`); return false;
+        }
       }
     }
     if (schema.enum && !schema.enum.some((candidate) => JSON.stringify(candidate) === JSON.stringify(value))) {
