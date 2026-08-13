@@ -68,6 +68,22 @@ import {
   speakingAdaptiveEvidenceMatchesTarget,
 } from '../speaking/learning-loop.js';
 import { isMonotonicAdaptiveRetentionRefresh } from '../adaptive-learning/retention.js';
+import {
+  applyEgeMockAssessmentRetryable,
+  applyEgeMockAssessmentRetryMutation,
+  applyEgeMockDraftMutation,
+  applyEgeMockOralMutation,
+  applyEgeMockOralStartMutation,
+  applyEgeMockWrittenMutation,
+  createEgeMockAttempt,
+  egeMockAttemptExportDto,
+  egeMockAttemptPublicDto,
+  EgeMockAttemptError,
+  egeMockResultPublicDto,
+  egeMockStartDecision,
+  reconcileEgeMockAttempt,
+} from '../ege-mock/attempt.js';
+import { getEgeMockForm } from '../ege-mock/catalog.js';
 import { adaptiveRepeatExecutionMatches } from '../adaptive-learning/repeat-execution.js';
 import {
   adaptiveLearningSessionPublicDto,
@@ -316,7 +332,7 @@ export function createFileRepository(filePath, {
   voiceTutorMutationNow = () => new Date(),
 } = {}) {
   let loaded = false;
-  let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], speaking_task1_sessions: [], speaking_task2_sessions: [], speaking_task3_sessions: [], speaking_task4_sessions: [], speaking_full_sessions: [], speaking_assessments: [], speaking_accent_profiles: {}, speaking_accent_history: [], speaking_accent_calibrations: [], speaking_calibration_consents: {}, speaking_calibration_samples: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, subscription_entitlements: {}, voice_tutor_sessions: [], voice_tutor_recoveries: [], voice_tutor_repeats: [], voice_tutor_repeat_attempts: [], voice_tutor_reports: [], rule_cards: [], payment_requests: {}, subscription_events: [], adaptive_learning_goals: [], adaptive_learning_profiles: {}, adaptive_learning_skill_estimates: {}, adaptive_learning_plan_revisions: [], adaptive_learning_sessions: [], adaptive_learning_execution_claims: [], adaptive_learning_session_events: [], adaptive_learning_session_mutations: [], adaptive_diagnostic_sessions: [], adaptive_diagnostic_start_claims: [], adaptive_diagnostic_responses: [] };
+  let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], speaking_task1_sessions: [], speaking_task2_sessions: [], speaking_task3_sessions: [], speaking_task4_sessions: [], speaking_full_sessions: [], speaking_assessments: [], speaking_accent_profiles: {}, speaking_accent_history: [], speaking_accent_calibrations: [], speaking_calibration_consents: {}, speaking_calibration_samples: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, subscription_entitlements: {}, voice_tutor_sessions: [], voice_tutor_recoveries: [], voice_tutor_repeats: [], voice_tutor_repeat_attempts: [], voice_tutor_reports: [], rule_cards: [], payment_requests: {}, subscription_events: [], adaptive_learning_goals: [], adaptive_learning_profiles: {}, adaptive_learning_skill_estimates: {}, adaptive_learning_plan_revisions: [], adaptive_learning_sessions: [], adaptive_learning_execution_claims: [], adaptive_learning_session_events: [], adaptive_learning_session_mutations: [], adaptive_diagnostic_sessions: [], adaptive_diagnostic_start_claims: [], adaptive_diagnostic_responses: [], ege_mock_attempts: [], ege_mock_mutations: [] };
   let writeQueue = Promise.resolve();
   let coordinatedMutationQueue = Promise.resolve();
   let ruleCardQueue = Promise.resolve();
@@ -402,6 +418,8 @@ export function createFileRepository(filePath, {
           adaptive_diagnostic_sessions: Array.isArray(parsed.adaptive_diagnostic_sessions) ? parsed.adaptive_diagnostic_sessions : [],
           adaptive_diagnostic_start_claims: Array.isArray(parsed.adaptive_diagnostic_start_claims) ? parsed.adaptive_diagnostic_start_claims : [],
           adaptive_diagnostic_responses: Array.isArray(parsed.adaptive_diagnostic_responses) ? parsed.adaptive_diagnostic_responses : [],
+          ege_mock_attempts: Array.isArray(parsed.ege_mock_attempts) ? parsed.ege_mock_attempts : [],
+          ege_mock_mutations: Array.isArray(parsed.ege_mock_mutations) ? parsed.ege_mock_mutations : [],
         };
         const reconciledLegacyCanonical = reconcileLegacyApprovedRuleCards(state.rule_cards);
         const sanitizedLegacyAdaptiveExecution = sanitizeLegacyAdaptiveExecution(state);
@@ -855,6 +873,238 @@ export function createFileRepository(filePath, {
   }
 
   function serializeVoiceTutorMutation(run) { return serializeCoordinatedMutation(run); }
+
+  function egeMockInstant(clock) {
+    const instant = new Date(typeof clock === 'function' ? clock() : clock);
+    if (!Number.isFinite(instant.getTime())) throw new EgeMockAttemptError('EGE_MOCK_TIME_INVALID');
+    return instant;
+  }
+
+  async function startEgeMockAttempt(username, candidate, { now = () => new Date() } = {}) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      const user = state.users[username];
+      const instant = egeMockInstant(now);
+      if (!user) throw new EgeMockAttemptError('EGE_MOCK_OWNER_NOT_FOUND');
+      if (Number(user.sub_until || 0) <= instant.getTime()) {
+        throw new EgeMockAttemptError('SUBSCRIPTION_REQUIRED');
+      }
+      const form = getEgeMockForm(candidate.formId, candidate.formRevision);
+      if (!form || form.fingerprint !== candidate.catalogFingerprint) {
+        throw new EgeMockAttemptError('EGE_MOCK_FORM_UNAVAILABLE');
+      }
+      const replay = state.ege_mock_attempts.find((attempt) => (
+        attempt.username === username && attempt.start_idempotency_key === candidate.idempotencyKey
+      ));
+      if (replay) {
+        if (replay.start_request_hash !== candidate.requestHash) {
+          throw new EgeMockAttemptError('EGE_MOCK_IDEMPOTENCY_CONFLICT');
+        }
+        return {
+          created: false,
+          replayed: true,
+          attempt: structuredClone(replay.start_response_attempt || egeMockAttemptPublicDto(replay)),
+        };
+      }
+      const mutationReplay = state.ege_mock_mutations.find((entry) => (
+        entry.username === username && entry.idempotency_key === candidate.idempotencyKey
+      ));
+      if (mutationReplay) {
+        if (mutationReplay.operation !== 'start' || mutationReplay.request_hash !== candidate.requestHash) {
+          throw new EgeMockAttemptError('EGE_MOCK_IDEMPOTENCY_CONFLICT');
+        }
+        return { ...structuredClone(mutationReplay.response_snapshot), replayed: true };
+      }
+      const exactFormAttempts = state.ege_mock_attempts.filter((attempt) => (
+        attempt.username === username && attempt.form_id === form.id && attempt.form_revision === form.revision
+      ));
+      for (const attempt of exactFormAttempts) reconcileEgeMockAttempt(attempt, instant);
+      const decision = egeMockStartDecision(exactFormAttempts);
+      const { active } = decision;
+      if (active) {
+        const response = {
+          created: false, replayed: false, resumed: true,
+          attempt: egeMockAttemptPublicDto(active),
+        };
+        state.ege_mock_mutations.push({
+          username, attempt_id: active.id, operation: 'start',
+          idempotency_key: candidate.idempotencyKey, request_hash: candidate.requestHash,
+          response_snapshot: structuredClone(response), created_at: instant.toISOString(),
+        });
+        await persist();
+        return response;
+      }
+      const ownerGeneration = `account:${new Date(user.created).toISOString()}`;
+      const attempt = createEgeMockAttempt({
+        id: crypto.randomUUID(), username, ownerGeneration, form,
+        mode: decision.mode,
+        attemptNumber: decision.attemptNumber,
+        idempotencyKey: candidate.idempotencyKey,
+        requestHash: candidate.requestHash,
+        now: instant,
+      });
+      state.ege_mock_attempts.push(attempt);
+      await persist();
+      return { created: true, replayed: false, attempt: egeMockAttemptPublicDto(attempt) };
+    });
+  }
+
+  async function getCurrentEgeMockAttempt(username, { now = () => new Date() } = {}) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      const instant = egeMockInstant(now);
+      let changed = false;
+      for (const entry of state.ege_mock_attempts) {
+        if (entry.username === username) changed = reconcileEgeMockAttempt(entry, instant) || changed;
+      }
+      if (changed) await persist();
+      const attempts = state.ege_mock_attempts.filter((entry) => entry.username === username)
+        .sort((left, right) => String(right.created_at).localeCompare(String(left.created_at)));
+      return egeMockAttemptPublicDto(egeMockStartDecision(attempts).active);
+    });
+  }
+
+  async function getEgeMockAttempt(username, attemptId, { now = () => new Date() } = {}) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      const instant = egeMockInstant(now);
+      const attempt = state.ege_mock_attempts.find((entry) => (
+        entry.username === username && entry.id === attemptId
+      ));
+      if (attempt && reconcileEgeMockAttempt(attempt, instant)) await persist();
+      return egeMockAttemptPublicDto(attempt);
+    });
+  }
+
+  function egeMockMutationReplay(username, attemptId, idempotencyKey, operation, requestHash) {
+    const reusedStart = state.ege_mock_attempts.find((attempt) => (
+      attempt.username === username && attempt.start_idempotency_key === idempotencyKey
+    ));
+    if (reusedStart) throw new EgeMockAttemptError('EGE_MOCK_IDEMPOTENCY_CONFLICT');
+    const mutation = state.ege_mock_mutations.find((entry) => (
+      entry.username === username && entry.idempotency_key === idempotencyKey
+    ));
+    if (!mutation) return null;
+    if (mutation.attempt_id !== attemptId || mutation.operation !== operation
+      || mutation.request_hash !== requestHash) {
+      throw new EgeMockAttemptError('EGE_MOCK_IDEMPOTENCY_CONFLICT');
+    }
+    return structuredClone(mutation.response_snapshot);
+  }
+
+  function requireEgeMockSubscription(username, now) {
+    const instant = egeMockInstant(now);
+    if (!state.users[username]) throw new EgeMockAttemptError('EGE_MOCK_OWNER_NOT_FOUND');
+    if (Number(state.users[username].sub_until || 0) <= instant.getTime()) {
+      throw new EgeMockAttemptError('SUBSCRIPTION_REQUIRED');
+    }
+    return instant;
+  }
+
+  async function mutateEgeMockAttempt(
+    username, attemptId, operation, candidate, { now = () => new Date() } = {}, apply,
+  ) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      const instant = requireEgeMockSubscription(username, now);
+      const replay = egeMockMutationReplay(
+        username, attemptId, candidate.idempotencyKey, operation, candidate.requestHash,
+      );
+      if (replay) return { ...replay, replayed: true };
+      const attempt = state.ege_mock_attempts.find((entry) => (
+        entry.username === username && entry.id === attemptId
+      ));
+      if (!attempt) throw new EgeMockAttemptError('EGE_MOCK_ATTEMPT_NOT_FOUND');
+      const reconciled = reconcileEgeMockAttempt(attempt, instant);
+      let response;
+      try {
+        response = await apply(attempt, instant, reconciled);
+      } catch (error) {
+        if (reconciled) await persist();
+        throw error;
+      }
+      state.ege_mock_mutations.push({
+        username, attempt_id: attempt.id, operation,
+        idempotency_key: candidate.idempotencyKey, request_hash: candidate.requestHash,
+        response_snapshot: structuredClone(response), created_at: instant.toISOString(),
+      });
+      await persist();
+      return response;
+    });
+  }
+
+  async function saveEgeMockDraft(username, attemptId, candidate, { now = () => new Date() } = {}) {
+    return mutateEgeMockAttempt(username, attemptId, 'draft', candidate, { now },
+      (attempt, instant) => applyEgeMockDraftMutation(attempt, {
+        form: getEgeMockForm(attempt.form_id, attempt.form_revision),
+        expectedRevision: candidate.expectedRevision,
+        answers: candidate.answers,
+        now: instant,
+      }));
+  }
+
+  async function submitEgeMockWritten(username, attemptId, candidate, { now = () => new Date() } = {}) {
+    return mutateEgeMockAttempt(username, attemptId, 'written_submit', candidate, { now },
+      (attempt, instant, reconciled) => applyEgeMockWrittenMutation(attempt, {
+        expectedRevision: candidate.expectedRevision,
+        now: instant,
+        receiptId: crypto.randomUUID(),
+        reconciled,
+      }));
+  }
+
+  async function startEgeMockOral(username, attemptId, candidate, { now = () => new Date() } = {}) {
+    return mutateEgeMockAttempt(username, attemptId, 'oral_start', candidate, { now },
+      (attempt, instant) => applyEgeMockOralStartMutation(attempt, {
+        expectedRevision: candidate.expectedRevision,
+        now: instant,
+      }));
+  }
+
+  async function submitEgeMockOral(username, attemptId, candidate, { now = () => new Date() } = {}) {
+    return mutateEgeMockAttempt(username, attemptId, 'oral_submit', candidate, { now },
+      (attempt, instant, reconciled) => applyEgeMockOralMutation(attempt, {
+        expectedRevision: candidate.expectedRevision,
+        recordings: candidate.recordings,
+        now: instant,
+        receiptId: crypto.randomUUID(),
+        reconciled,
+      }));
+  }
+
+  async function getEgeMockResult(username, attemptId, { now = () => new Date() } = {}) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      const instant = egeMockInstant(now);
+      const attempt = state.ege_mock_attempts.find((entry) => (
+        entry.username === username && entry.id === attemptId
+      ));
+      if (!attempt) return null;
+      if (reconcileEgeMockAttempt(attempt, instant)) await persist();
+      return egeMockResultPublicDto(attempt);
+    });
+  }
+
+  async function markEgeMockAssessmentRetryable(username, attemptId, {
+    reason, now = () => new Date(),
+  } = {}) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      const attempt = state.ege_mock_attempts.find((entry) => (
+        entry.username === username && entry.id === attemptId
+      ));
+      const instant = egeMockInstant(now);
+      if (!attempt) throw new EgeMockAttemptError('EGE_MOCK_ASSESSMENT_STATE_INVALID');
+      const response = applyEgeMockAssessmentRetryable(attempt, { reason, now: instant });
+      await persist();
+      return response;
+    });
+  }
+
+  async function retryEgeMockAssessment(username, attemptId, candidate, { now = () => new Date() } = {}) {
+    return mutateEgeMockAttempt(username, attemptId, 'assessment_retry', candidate, { now },
+      (attempt, instant) => applyEgeMockAssessmentRetryMutation(attempt, { now: instant }));
+  }
 
   function speakingAssessmentRows(username) {
     return state.speaking_assessments.filter((row) => row.username === username);
@@ -4564,14 +4814,20 @@ export function createFileRepository(filePath, {
   }
 
   async function exportUserData(username) {
-    await load();
-    const user = state.users[username];
-    if (!user) return null;
-    const adaptiveExport = adaptiveLearningProfileExportDto(
-      state.adaptive_learning_profiles[username] || null,
-      state.adaptive_learning_skill_estimates[username] || [],
-    );
-    return structuredClone({
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      const user = state.users[username];
+      if (!user) return null;
+      const instant = new Date();
+      const changed = state.ege_mock_attempts
+        .filter((item) => item.username === username)
+        .reduce((anyChanged, item) => reconcileEgeMockAttempt(item, instant) || anyChanged, false);
+      if (changed) await persist();
+      const adaptiveExport = adaptiveLearningProfileExportDto(
+        state.adaptive_learning_profiles[username] || null,
+        state.adaptive_learning_skill_estimates[username] || [],
+      );
+      return structuredClone({
       exported_at: new Date().toISOString(),
       account: {
         username,
@@ -4682,6 +4938,11 @@ export function createFileRepository(filePath, {
           session.username === username && session.id === item.diagnostic_id
         )))
         .map(adaptiveDiagnosticResponseExportDto),
+      ege_mock_attempts: state.ege_mock_attempts
+        .filter((item) => item.username === username)
+        .sort((left, right) => String(left.created_at).localeCompare(String(right.created_at)))
+        .map(egeMockAttemptExportDto),
+      });
     });
   }
 
@@ -4763,6 +5024,8 @@ export function createFileRepository(filePath, {
         .filter((item) => item.username !== username);
       state.adaptive_diagnostic_sessions = state.adaptive_diagnostic_sessions
         .filter((item) => item.username !== username);
+      state.ege_mock_attempts = state.ege_mock_attempts.filter((item) => item.username !== username);
+      state.ege_mock_mutations = state.ege_mock_mutations.filter((item) => item.username !== username);
       state.voice_tutor_sessions = state.voice_tutor_sessions.filter((item) => item.username !== username);
       const recoveryIds = new Set(state.voice_tutor_recoveries.filter((item) => item.username === username).map((item) => item.id));
       const repeatIds = new Set(state.voice_tutor_repeats.filter((item) => recoveryIds.has(item.recovery_id)).map((item) => item.id));
@@ -4961,6 +5224,16 @@ export function createFileRepository(filePath, {
     getAdaptiveDiagnosticCompletionReplay,
     answerAdaptiveDiagnostic,
     completeAdaptiveDiagnostic,
+    startEgeMockAttempt,
+    getCurrentEgeMockAttempt,
+    getEgeMockAttempt,
+    saveEgeMockDraft,
+    submitEgeMockWritten,
+    startEgeMockOral,
+    submitEgeMockOral,
+    getEgeMockResult,
+    markEgeMockAssessmentRetryable,
+    retryEgeMockAssessment,
     recordModuleAttempt,
     recordModuleAttemptWithAdaptiveClaim,
     bindAdaptiveLearningServerAttempt,

@@ -67,6 +67,7 @@ import {
   speakingAdaptiveEvidenceMatchesTarget,
 } from '../speaking/learning-loop.js';
 import { isMonotonicAdaptiveRetentionRefresh } from '../adaptive-learning/retention.js';
+import { createPostgresEgeMockStore } from '../ege-mock/postgres-store.js';
 import { adaptiveRepeatExecutionMatches } from '../adaptive-learning/repeat-execution.js';
 import {
   adaptiveLearningSessionPublicDto,
@@ -195,6 +196,7 @@ export function createPostgresRepository(connectionString, {
   const finalizationPool = new Pool({
     connectionString, application_name: 'easyboost_voice_finalization', max: 4, connectionTimeoutMillis: 1_000,
   });
+  const egeMockStore = createPostgresEgeMockStore(pool);
   const reportIdleClientError = (poolName) => {
     try { onOperationalError({ code: 'POSTGRES_IDLE_CLIENT_ERROR', pool: poolName }); } catch {}
   };
@@ -5991,7 +5993,7 @@ export function createPostgresRepository(connectionString, {
   }
 
   async function exportUserData(username) {
-    const [account, progress, privacyConsent, subscriptionEvents, subscriptionEntitlements, voiceTutorSessions, voiceTutorRecoveries, voiceTutorRepeats, voiceTutorRepeatAttempts, voiceTutorReports, ruleCards, paymentRequests, writingAttempts, speakingAttempts, speakingTask1Sessions, speakingTask2Sessions, speakingTask3Sessions, speakingTask4Sessions, speakingFullSessions, speakingAssessments, generatedTasks, moduleAttempts, progressSummary, wordProgress, errorBank, adaptiveGoals, adaptiveSnapshot, adaptivePlanRevisions, adaptiveSessions, adaptiveSessionExecutionEvents, adaptiveDiagnosticSessions, adaptiveDiagnosticResponses, aiRequests, auditLog] = await Promise.all([
+    const [account, progress, privacyConsent, subscriptionEvents, subscriptionEntitlements, voiceTutorSessions, voiceTutorRecoveries, voiceTutorRepeats, voiceTutorRepeatAttempts, voiceTutorReports, ruleCards, paymentRequests, writingAttempts, speakingAttempts, speakingTask1Sessions, speakingTask2Sessions, speakingTask3Sessions, speakingTask4Sessions, speakingFullSessions, speakingAssessments, generatedTasks, moduleAttempts, progressSummary, wordProgress, errorBank, adaptiveGoals, adaptiveSnapshot, adaptivePlanRevisions, adaptiveSessions, adaptiveSessionExecutionEvents, adaptiveDiagnosticSessions, adaptiveDiagnosticResponses, egeMockAttempts, aiRequests, auditLog] = await Promise.all([
       pool.query('SELECT username, telegram_id, role, trial_used, subscription_until, created_at, updated_at FROM users WHERE username = $1', [username]),
       pool.query('SELECT data, updated_at FROM user_progress WHERE username = $1', [username]),
       pool.query('SELECT text_processing, voice_processing, policy_version, text_consented_at, voice_consented_at, updated_at FROM privacy_consents WHERE username = $1', [username]),
@@ -6083,6 +6085,7 @@ export function createPostgresRepository(connectionString, {
                   FROM adaptive_diagnostic_responses response
                   JOIN adaptive_diagnostic_sessions diagnostic ON diagnostic.id = response.diagnostic_id
                   WHERE diagnostic.username = $1 ORDER BY response.answered_at`, [username]),
+      egeMockStore.exportEgeMockAttempts(username),
       pool.query('SELECT id, operation, provider, model, prompt_version, status, duration_ms, error_code, prompt_tokens, completion_tokens, estimated_cost_microusd, created_at FROM ai_requests WHERE username = $1 ORDER BY created_at', [username]),
       pool.query("SELECT id, actor_telegram_id, action, target_type, target_id, result, metadata, created_at FROM audit_log WHERE metadata->>'username' = $1 ORDER BY created_at", [username]),
     ]);
@@ -6151,6 +6154,7 @@ export function createPostgresRepository(connectionString, {
         .map(adaptiveExecutionEventExportDto),
       adaptive_diagnostic_sessions: adaptiveDiagnosticSessions.rows.map(adaptiveDiagnosticExportDto),
       adaptive_diagnostic_responses: adaptiveDiagnosticResponses.rows.map(adaptiveDiagnosticResponseExportDto),
+      ege_mock_attempts: egeMockAttempts,
       ai_requests: aiRequests.rows,
       audit_log: auditLog.rows,
     };
@@ -6249,6 +6253,7 @@ export function createPostgresRepository(connectionString, {
   }
 
   return {
+    ...egeMockStore,
     getUser,
     createUser,
     getProgress,

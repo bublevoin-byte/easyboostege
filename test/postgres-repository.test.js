@@ -48,6 +48,8 @@ import { assertFullSpeakingSessionRepositoryContract } from './support/speaking-
 import { assertSpeakingAssessmentQuotaContract } from './support/speaking-assessment-quota-contract.js';
 import { assertSpeakingAccentCalibrationRepositoryContract } from './support/speaking-accent-calibration-contract.js';
 import { assertGrammarMasteryProgressContract } from './support/grammar-mastery-progress-contract.js';
+import { assertEgeMockAttemptRepositoryContract } from './support/ege-mock-attempt-contract.js';
+import { EGE_MOCK_FORM_ID, EGE_MOCK_FORM_REVISION, getEgeMockForm } from '../ege-mock/catalog.js';
 import { READING_TASK10_SETS } from '../public/content/reading/task10-v1.js';
 import { READING_TASK11_SETS } from '../public/content/reading/task11-v1.js';
 import { READING_TASK12_18_SETS } from '../public/content/reading/task12-18-v1.js';
@@ -66,6 +68,71 @@ const SPEAKING_CATALOGS = [
 ];
 
 const connectionString = process.env.TEST_DATABASE_URL;
+
+test('PostgreSQL EGE mock attempts match the shared lifecycle, concurrency, export and deletion contract', {
+  skip: !connectionString,
+}, async () => {
+  const repository = createPostgresRepository(connectionString);
+  try { await assertEgeMockAttemptRepositoryContract(assert, repository, 92_603_000); }
+  finally { await repository.close(); }
+});
+
+test('PostgreSQL EGE mock persists deadline reconciliation when a late draft is rejected', {
+  skip: !connectionString,
+}, async () => {
+  const repository = createPostgresRepository(connectionString);
+  const raw = new pg.Client({ connectionString });
+  const telegramId = 92_603_020;
+  let username;
+  try {
+    await raw.connect();
+    username = await repository.createTelegramUser(telegramId, 'EGE mock deadline authority');
+    await repository.grantDays(telegramId, 45, 'EGE mock deadline authority');
+    const form = getEgeMockForm(EGE_MOCK_FORM_ID, EGE_MOCK_FORM_REVISION);
+    const started = await repository.startEgeMockAttempt(username, {
+      formId: form.id, formRevision: form.revision, catalogFingerprint: form.fingerprint,
+      idempotencyKey: crypto.randomUUID(), requestHash: 'b'.repeat(64),
+    });
+    await raw.query(
+      `UPDATE ege_mock_attempts
+       SET written_started_at = transaction_timestamp() - INTERVAL '190 minutes',
+           written_deadline_at = transaction_timestamp()
+       WHERE username = $1 AND id = $2`,
+      [username, started.attempt.id],
+    );
+
+    await assert.rejects(repository.saveEgeMockDraft(username, started.attempt.id, {
+      expectedRevision: 0, answers: { 19: 'late' },
+      idempotencyKey: crypto.randomUUID(), requestHash: 'c'.repeat(64),
+    }), { code: 'EGE_MOCK_WRITTEN_CLOSED' });
+    const persisted = await raw.query(
+      'SELECT state, revision, written_receipt FROM ege_mock_attempts WHERE id = $1',
+      [started.attempt.id],
+    );
+    assert.equal(persisted.rows[0].state, 'oral_ready');
+    assert.equal(persisted.rows[0].revision, 1);
+    assert.equal(persisted.rows[0].written_receipt.automatic, true);
+    assert.match(persisted.rows[0].written_receipt.payloadDigest, /^sha256:[a-f0-9]{64}$/u);
+
+    await raw.query(
+      `UPDATE ege_mock_attempts
+       SET state = 'written_in_progress', revision = 0,
+           written_started_at = transaction_timestamp() - INTERVAL '190 minutes',
+           written_deadline_at = transaction_timestamp(), written_submitted_at = NULL,
+           written_receipt = NULL, oral_available_until = NULL
+       WHERE username = $1 AND id = $2`,
+      [username, started.attempt.id],
+    );
+    const exported = await repository.exportUserData(username);
+    assert.equal(exported.ege_mock_attempts[0].state, 'oral_ready');
+    assert.match(exported.ege_mock_attempts[0].written_receipt.payloadDigest,
+      /^sha256:[a-f0-9]{64}$/u);
+  } finally {
+    if (username) await repository.deleteUserData(username).catch(() => {});
+    await raw.end().catch(() => {});
+    await repository.close();
+  }
+});
 
 test('PostgreSQL module evidence writer shares the profile owner lock and rejects a stale snapshot', {
   skip: !connectionString,
@@ -2911,6 +2978,7 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
       '050_speaking_learning_loop.sql',
       '051_adaptive_profile_evidence_fingerprint.sql',
       '052_adaptive_plan_evidence_fingerprint.sql',
+      '053_ege_mock_attempts.sql',
     ]);
 
     const username = await repository.createTelegramUser(telegramId, `Integration ${suffix}`);

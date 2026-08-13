@@ -11,6 +11,11 @@ import { fileURLToPath } from 'url';
 import { advanceFullSpeakingSessionStage, applyGrammarMasteryEvent, assignFullSpeakingSession, claimAiOperationSlot, claimSpeakingEvaluation, claimUnseenBankTask, claimVoiceTutorRuleDiscovery, completeFullSpeakingSessionEvaluation, completeFullSpeakingSessionResponse, failVoiceTutorRuleDiscovery, getAdaptiveDiagnostic, getAdaptiveDiagnosticCompletionReplay, getBankTask, getBankTaskByExternalId, getFullSpeakingSession, listBankTaskContents, recordTaskDelivery, settleAiOperationSlot, submitFullSpeakingSessionResult, upsertBankTask, activateTrial, activateVoiceTutorProxySession, closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, consumeVoiceTutorProxyTicket, countAiRequestsSince, createPaymentRequest, createPaymentRequestForUser, createRuleCardForVoiceTutorSession, createSession, createSpeakingAttempt, createTelegramAuthCode, createVoiceTutorReport, createWritingAttempt, deleteUserData, exportUserData, finalizeVoiceTutorProxySession, finishSpeakingAttempt, finishVoiceTutorSession, finishWritingAttempt, getAdaptiveDiagnosticStartClaim, getAdaptiveLearningEvidenceSources, getAdaptiveLearningGoal, getAdaptiveLearningProfile, getCurrentAdaptiveLearningPlan, getAdaptiveLearningPlanRevision, getAdaptiveLearningSessionCreateReplay, createAdaptiveLearningSession, getCurrentAdaptiveLearningSession, getAdaptiveLearningSessionCommercialScope, getAdaptiveLearningSessionReplacementReplay, replaceAdaptiveLearningSessionBlock, getAdaptiveLearningSessionMutationReplay, startAdaptiveLearningSessionBlock, getAdaptiveLearningSessionExecution, getAdaptiveLearningSessionAdvanceContext, advanceAdaptiveLearningSession, getAdaptiveLearningSessionFinishContext, finishAdaptiveLearningSession, getAdaptiveLearningWeekUsage, getAdaptiveLearningCommercialUsage, getAdaptiveLearningCompletedSessionReports, getAdaptiveLearningMetrics, getAiUsageMetrics, getApprovedRuleCard, getGeneratedTask, getRuleCard, getSharedGeneratedTask, getModuleAttempt, getReadingCompletedAttempts, getPaymentRequestForUser, getPrivacyConsent, getProgress, getSpeakingAttempt, getUser, getVoiceTutorAccess, getVoiceTutorRecoveryMap, getVoiceTutorRecoveryMetrics, getVoiceTutorSession, getWordProgress, getWritingAttempt, healthCheck, isSessionActive, issueVoiceTutorProxyTicket, reissueVoiceTutorFallbackNonce, listPaymentRequests, listRuleCards, listVoiceTutorReports, recordModuleAttempt, recordModuleAttemptWithAdaptiveClaim, bindAdaptiveLearningServerAttempt, reserveVoiceTutorSession, resolvePaymentRequest, reviewRuleCard, reviewVoiceTutorReport, revokeEntitlement, revokeSession, saveAdaptiveLearningGoal, saveAdaptiveLearningProfile, saveAdaptiveLearningPlan, saveGeneratedTask, saveProgress, setPrivacyConsent, setUserRole, submitVoiceTutorRepeat, upsertErrorBank, upsertWordProgress, mergeProgress, getUserByTelegram, createTelegramUser, logAiRequest, getSub, advanceVoiceTutorSession, clarifyVoiceTutorSession, setVoiceTutorSessionDelivery, switchVoiceTutorSessionDelivery, startAdaptiveDiagnostic, getCurrentAdaptiveDiagnostic, answerAdaptiveDiagnostic, completeAdaptiveDiagnostic } from './db.js';
 import { applyGrammarMasteryEvents } from './db.js';
 import {
+  getCurrentEgeMockAttempt, getEgeMockAttempt, getEgeMockResult,
+  retryEgeMockAssessment, saveEgeMockDraft, startEgeMockAttempt,
+  startEgeMockOral, submitEgeMockOral, submitEgeMockWritten,
+} from './db.js';
+import {
   assignSpeakingTask1Session, assignSpeakingTask2Session, assignSpeakingTask3Session, assignSpeakingTask4Session,
   completeSpeakingTask1Session, completeSpeakingTask2Question, completeSpeakingTask3Answer, completeSpeakingTask4Session,
   getSpeakingTask1Session, getSpeakingTask2Session, getSpeakingTask3Session, getSpeakingTask4Session,
@@ -56,6 +61,7 @@ import { createAiRoutes } from './routes/ai.js';
 import { createMediaRoutes } from './routes/media.js';
 import { createTaskRoutes, seedBuiltinTasks } from './routes/tasks.js';
 import { createVoiceTutorRoutes, rebuildSourceCapsule } from './routes/voice-tutor.js';
+import { createEgeMockRoutes } from './routes/ege-mocks.js';
 import { createAiTextTutor } from './voice-tutor/text-fallback.js';
 import { createVoiceTutorRealtimeProxy } from './voice-tutor/realtime-proxy.js';
 import { createProviderClient } from './ai/provider-client.js';
@@ -239,6 +245,9 @@ const dbApi = {
   assignFullSpeakingSession, getFullSpeakingSession, advanceFullSpeakingSessionStage,
   completeFullSpeakingSessionResponse, claimFullSpeakingSessionAssessment, submitFullSpeakingSessionResult,
   completeFullSpeakingSessionEvaluation,
+  startEgeMockAttempt, getCurrentEgeMockAttempt, getEgeMockAttempt, saveEgeMockDraft,
+  submitEgeMockWritten, startEgeMockOral, submitEgeMockOral, getEgeMockResult,
+  retryEgeMockAssessment,
   getGeneratedTask, getSharedGeneratedTask, saveGeneratedTask, logAiRequest, claimAiOperationSlot, settleAiOperationSlot,
   upsertBankTask, getBankTask, getBankTaskByExternalId, claimUnseenBankTask, recordTaskDelivery, listBankTaskContents,
 };
@@ -344,6 +353,7 @@ const access = {
   createOperationLimiter, ttsLimiter, sttLimiter, hasAiBudget,
   requireAiBudget, requireActiveSubscription, requirePrivacyConsent,
 };
+app.use(createEgeMockRoutes({ authentication, access, db: dbApi }));
 const speakingPronunciationProvider = createAzurePronunciationProvider({
   subscriptionKey: config.speakingPronunciation.enabled ? config.speakingPronunciation.azureKey : '',
   region: config.speakingPronunciation.enabled ? config.speakingPronunciation.azureRegion : '',

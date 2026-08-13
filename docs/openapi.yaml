@@ -1841,6 +1841,177 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { description: Diagnostic does not belong to the authenticated learner }
         '409': { description: Diagnostic is not ready, time expired, the idempotency key conflicts, or the stored catalog version is unsupported }
+  /api/v1/ege-mocks/forms:
+    get:
+      summary: List released answer-free full EGE forms
+      description: Returns immutable browser-safe authored form projections. Assessment keys, accepted answers, criteria references and private content references are never included.
+      parameters:
+        - { $ref: '#/components/parameters/ExpectedOwner' }
+      responses:
+        '200':
+          description: Released forms
+          headers: { X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' } }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [forms]
+                properties:
+                  forms: { type: array, items: { $ref: '#/components/schemas/EgeMockPublicForm' } }
+                additionalProperties: false
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/ege-mocks/attempts:
+    post:
+      summary: Start or restore one owner-bound full EGE attempt
+      description: The server resolves and pins the exact released form revision and fingerprint, owner generation, diagnostic/training mode and attempt number. An active subscription and a UUID idempotency key are required.
+      parameters:
+        - { $ref: '#/components/parameters/ExpectedOwner' }
+        - { $ref: '#/components/parameters/EgeMockIdempotencyKey' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/EgeMockStartRequest' } } }
+      responses:
+        '200': { description: Exact replay or active-attempt restore, headers: { X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' } }, content: { application/json: { schema: { $ref: '#/components/schemas/EgeMockStartResponse' } } } }
+        '201': { description: New attempt, headers: { X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' } }, content: { application/json: { schema: { $ref: '#/components/schemas/EgeMockStartResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Idempotency, owner, form or lifecycle conflict }
+  /api/v1/ege-mocks/attempts/current:
+    get:
+      summary: Restore the current owner-bound unfinished attempt
+      parameters:
+        - { $ref: '#/components/parameters/ExpectedOwner' }
+      responses:
+        '200':
+          description: Current attempt, or null when none is active
+          headers: { X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' } }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [attempt]
+                properties:
+                  attempt: { $ref: '#/components/schemas/EgeMockNullableAttempt' }
+                additionalProperties: false
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/ege-mocks/attempts/{attemptId}:
+    get:
+      summary: Restore one exact owner-bound attempt
+      parameters:
+        - { $ref: '#/components/parameters/ExpectedOwner' }
+        - { $ref: '#/components/parameters/EgeMockAttemptId' }
+      responses:
+        '200':
+          description: Exact attempt without result keys
+          headers: { X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' } }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [attempt]
+                properties: { attempt: { $ref: '#/components/schemas/EgeMockAttempt' } }
+                additionalProperties: false
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { description: Attempt is absent or belongs to another owner }
+  /api/v1/ege-mocks/attempts/{attemptId}/draft:
+    put:
+      summary: Compare-and-swap the written draft
+      parameters:
+        - { $ref: '#/components/parameters/ExpectedOwner' }
+        - { $ref: '#/components/parameters/EgeMockAttemptId' }
+        - { $ref: '#/components/parameters/EgeMockIdempotencyKey' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/EgeMockDraftRequest' } } }
+      responses:
+        '200': { description: Saved draft or exact replay, headers: { X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' } }, content: { application/json: { schema: { $ref: '#/components/schemas/EgeMockMutationResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Attempt is absent or belongs to another owner }
+        '409': { description: Revision, idempotency, owner or lifecycle conflict }
+  /api/v1/ege-mocks/attempts/{attemptId}/written/submit:
+    post:
+      summary: Submit the written part and issue a server receipt
+      parameters:
+        - { $ref: '#/components/parameters/ExpectedOwner' }
+        - { $ref: '#/components/parameters/EgeMockAttemptId' }
+        - { $ref: '#/components/parameters/EgeMockIdempotencyKey' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/EgeMockRevisionRequest' } } }
+      responses:
+        '200': { description: Submitted part or exact replay, headers: { X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' } }, content: { application/json: { schema: { $ref: '#/components/schemas/EgeMockMutationResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Attempt is absent or belongs to another owner }
+        '409': { description: Revision, idempotency, owner or lifecycle conflict }
+  /api/v1/ege-mocks/attempts/{attemptId}/oral/start:
+    post:
+      summary: Start the strict 17-minute oral timer
+      parameters:
+        - { $ref: '#/components/parameters/ExpectedOwner' }
+        - { $ref: '#/components/parameters/EgeMockAttemptId' }
+        - { $ref: '#/components/parameters/EgeMockIdempotencyKey' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/EgeMockRevisionRequest' } } }
+      responses:
+        '200': { description: Started oral part or exact replay, headers: { X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' } }, content: { application/json: { schema: { $ref: '#/components/schemas/EgeMockMutationResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Attempt is absent or belongs to another owner }
+        '409': { description: Revision, idempotency, owner or lifecycle conflict }
+  /api/v1/ege-mocks/attempts/{attemptId}/oral/submit:
+    post:
+      summary: Submit the four ordered oral items and issue a server receipt
+      parameters:
+        - { $ref: '#/components/parameters/ExpectedOwner' }
+        - { $ref: '#/components/parameters/EgeMockAttemptId' }
+        - { $ref: '#/components/parameters/EgeMockIdempotencyKey' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/EgeMockOralSubmitRequest' } } }
+      responses:
+        '200': { description: Submitted part or exact replay, headers: { X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' } }, content: { application/json: { schema: { $ref: '#/components/schemas/EgeMockMutationResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Attempt is absent or belongs to another owner }
+        '409': { description: Revision, idempotency, owner or lifecycle conflict }
+  /api/v1/ege-mocks/attempts/{attemptId}/assessment/retry:
+    post:
+      summary: Retry assessment only from a server-marked retryable state
+      parameters:
+        - { $ref: '#/components/parameters/ExpectedOwner' }
+        - { $ref: '#/components/parameters/EgeMockAttemptId' }
+        - { $ref: '#/components/parameters/EgeMockIdempotencyKey' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: false } } }
+      responses:
+        '200': { description: Accepted retry or exact replay, headers: { X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' } }, content: { application/json: { schema: { $ref: '#/components/schemas/EgeMockMutationResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Attempt is absent or belongs to another owner }
+        '409': { description: Retry is not server-allowed, or another conflict occurred }
+  /api/v1/ege-mocks/attempts/{attemptId}/result:
+    get:
+      summary: Read the safely gated attempt result
+      description: Until both parts are complete, available and keysRevealed are false and no result or answer-key fields are returned.
+      parameters:
+        - { $ref: '#/components/parameters/ExpectedOwner' }
+        - { $ref: '#/components/parameters/EgeMockAttemptId' }
+      responses:
+        '200': { description: Safe result envelope, headers: { X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' } }, content: { application/json: { schema: { $ref: '#/components/schemas/EgeMockResult' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { description: Attempt is absent or belongs to another owner }
   /api/v1/account/export:
     get:
       summary: Export the authenticated user's account, progress and attempt data
@@ -2399,6 +2570,17 @@ components:
       required: true
       description: Exact account captured before the request. Cookie-authenticated clients must send it; a mismatch fails closed with 409 OWNER_CHANGED before private data is read or mutated. Bearer integrations bind the same value through their Authorization identity.
       schema: { type: string, minLength: 1, maxLength: 64 }
+    EgeMockAttemptId:
+      in: path
+      name: attemptId
+      required: true
+      schema: { type: string, format: uuid }
+    EgeMockIdempotencyKey:
+      in: header
+      name: Idempotency-Key
+      required: true
+      description: Owner-global UUID. Exact operation and request replays return the original snapshot; reuse for another operation, attempt or payload fails closed.
+      schema: { type: string, format: uuid }
   headers:
     X-EasyBoost-Response-Owner:
       required: true
@@ -2410,6 +2592,250 @@ components:
       in: cookie
       name: eb_token
   schemas:
+    EgeMockDraftAnswer:
+      oneOf:
+        - { type: string, maxLength: 20000 }
+        - { type: array, maxItems: 20, items: { type: string, maxLength: 500 } }
+        - { type: object, nullable: true, enum: [null] }
+    EgeMockStartRequest:
+      type: object
+      required: [formId, formRevision, catalogFingerprint]
+      properties:
+        formId: { type: string, pattern: '^ege-en-[0-9]{4}-form-[0-9]+$' }
+        formRevision: { type: integer, minimum: 1, maximum: 1000000 }
+        catalogFingerprint: { type: string, pattern: '^sha256:[a-f0-9]{64}$' }
+      additionalProperties: false
+    EgeMockDraftRequest:
+      type: object
+      required: [expectedRevision, answers]
+      properties:
+        expectedRevision: { type: integer, minimum: 0, maximum: 1000000 }
+        answers:
+          type: object
+          properties:
+            1: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            2: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            3: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            4: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            5: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            6: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            7: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            8: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            9: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            10: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            11: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            12: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            13: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            14: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            15: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            16: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            17: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            18: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            19: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            20: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            21: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            22: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            23: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            24: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            25: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            26: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            27: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            28: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            29: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            30: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            31: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            32: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            33: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            34: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            35: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            36: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            37: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+            38: { $ref: '#/components/schemas/EgeMockDraftAnswer' }
+          additionalProperties: false
+      additionalProperties: false
+    EgeMockRevisionRequest:
+      type: object
+      required: [expectedRevision]
+      properties: { expectedRevision: { type: integer, minimum: 0, maximum: 1000000 } }
+      additionalProperties: false
+    EgeMockOralRecording:
+      type: object
+      required: [recordingId, durationSeconds]
+      properties:
+        recordingId: { type: string, minLength: 1, maxLength: 120 }
+        durationSeconds: { type: number, minimum: 0, maximum: 1020 }
+      additionalProperties: false
+    EgeMockOralSubmitRequest:
+      type: object
+      required: [expectedRevision, recordings]
+      properties:
+        expectedRevision: { type: integer, minimum: 0, maximum: 1000000 }
+        recordings:
+          type: object
+          properties:
+            39: { $ref: '#/components/schemas/EgeMockOralRecording' }
+            40: { $ref: '#/components/schemas/EgeMockOralRecording' }
+            41: { $ref: '#/components/schemas/EgeMockOralRecording' }
+            42: { $ref: '#/components/schemas/EgeMockOralRecording' }
+          additionalProperties: false
+      additionalProperties: false
+    EgeMockPublicSection:
+      type: object
+      required: [id, positionRange, maxScore]
+      properties:
+        id: { type: string, enum: [listening, reading, grammar_lexis, writing, speaking] }
+        positionRange: { type: array, minItems: 2, maxItems: 2, items: { type: integer, minimum: 1, maximum: 42 } }
+        maxScore: { type: integer, minimum: 1, maximum: 82 }
+      additionalProperties: false
+    EgeMockPublicStimulus:
+      type: object
+      required: [id, kind]
+      properties:
+        id: { type: string, minLength: 1 }
+        kind: { type: string, minLength: 1 }
+        text: { type: string }
+        fragments: { type: array, items: {} }
+      additionalProperties: false
+    EgeMockPublicAsset:
+      type: object
+      required: [id, kind, path, mimeType, bytes, sha256]
+      properties:
+        id: { type: string, pattern: '^/' }
+        kind: { type: string, enum: [audio, image] }
+        path: { type: string, pattern: '^/' }
+        mimeType: { type: string, minLength: 1 }
+        bytes: { type: integer, minimum: 1 }
+        sha256: { type: string, pattern: '^[a-f0-9]{64}$' }
+      additionalProperties: false
+    EgeMockPublicPosition:
+      type: object
+      required: [position, section, maxScore, presentation, assetIds]
+      properties:
+        position: { type: integer, minimum: 1, maximum: 42 }
+        section: { type: string, enum: [listening, reading, grammar_lexis, writing, speaking] }
+        maxScore: { type: integer, minimum: 1, maximum: 20 }
+        presentation: { type: object }
+        assetIds: { type: array, uniqueItems: true, items: { type: string, pattern: '^/' } }
+      additionalProperties: false
+    EgeMockPublicForm:
+      type: object
+      description: Answer-free immutable form projection. Private contentRef, assessment, accepted answers and criteriaRef are forbidden by additionalProperties false.
+      required: [schemaVersion, id, revision, identity, examYear, maxScore, fingerprint, attemptPolicy, sections, stimuli, assets, positions]
+      properties:
+        schemaVersion: { type: string, enum: [ege-mock-browser-form-v1] }
+        id: { type: string, pattern: '^ege-en-[0-9]{4}-form-[0-9]+$' }
+        revision: { type: integer, minimum: 1 }
+        identity: { type: string, minLength: 1 }
+        examYear: { type: integer, minimum: 2026 }
+        maxScore: { type: integer, enum: [82] }
+        fingerprint: { type: string, pattern: '^sha256:[a-f0-9]{64}$' }
+        attemptPolicy: { $ref: '#/components/schemas/EgeMockAttemptPolicy' }
+        sections: { type: array, minItems: 5, maxItems: 5, items: { $ref: '#/components/schemas/EgeMockPublicSection' } }
+        stimuli: { type: array, items: { $ref: '#/components/schemas/EgeMockPublicStimulus' } }
+        assets: { type: array, minItems: 21, maxItems: 21, items: { $ref: '#/components/schemas/EgeMockPublicAsset' } }
+        positions: { type: array, minItems: 42, maxItems: 42, items: { $ref: '#/components/schemas/EgeMockPublicPosition' } }
+      additionalProperties: false
+    EgeMockAttemptPolicy:
+      type: object
+      description: Versioned public timing policy frozen onto every attempt.
+      required: [id, writtenMinutes, oralStartWindowDays, oralMinutes]
+      properties:
+        id: { type: string, enum: [ege-mock-attempt-policy-v1] }
+        writtenMinutes: { type: integer, enum: [190] }
+        oralStartWindowDays: { type: integer, enum: [30] }
+        oralMinutes: { type: integer, enum: [17] }
+      additionalProperties: false
+    EgeMockAssessmentState:
+      type: object
+      required: [status, retryAllowed, retryCount]
+      properties:
+        status: { type: string, enum: [not_started, pending, retryable, completed, failed] }
+        retryAllowed: { type: boolean }
+        retryCount: { type: integer, minimum: 0, maximum: 3 }
+      additionalProperties: false
+    EgeMockAttempt:
+      type: object
+      required: [id, ownerGeneration, policyId, formId, formRevision, examYear, catalogFingerprint, mode, attemptNumber, state, revision, draft, writtenStartedAt, writtenDeadlineAt, writtenSubmittedAt, oralAvailableUntil, oralStartedAt, oralDeadlineAt, oralSubmittedAt, assessment]
+      properties:
+        id: { type: string, format: uuid }
+        ownerGeneration: { type: string, pattern: '^account:' }
+        policyId: { type: string, enum: [ege-mock-attempt-policy-v1] }
+        formId: { type: string, pattern: '^ege-en-[0-9]{4}-form-[0-9]+$' }
+        formRevision: { type: integer, minimum: 1 }
+        examYear: { type: integer, minimum: 2026 }
+        catalogFingerprint: { type: string, pattern: '^sha256:[a-f0-9]{64}$' }
+        mode: { type: string, enum: [diagnostic, training] }
+        attemptNumber: { type: integer, minimum: 1 }
+        state: { type: string, enum: [created, written_in_progress, written_submitted, oral_ready, oral_in_progress, assessment_pending, completed, expired] }
+        revision: { type: integer, minimum: 0 }
+        draft: { type: object }
+        writtenStartedAt: { type: string, format: date-time }
+        writtenDeadlineAt: { type: string, format: date-time }
+        writtenSubmittedAt: { type: string, format: date-time, nullable: true }
+        oralAvailableUntil: { type: string, format: date-time, nullable: true }
+        oralStartedAt: { type: string, format: date-time, nullable: true }
+        oralDeadlineAt: { type: string, format: date-time, nullable: true }
+        oralSubmittedAt: { type: string, format: date-time, nullable: true }
+        assessment: { $ref: '#/components/schemas/EgeMockAssessmentState' }
+      additionalProperties: false
+    EgeMockNullableAttempt:
+      oneOf:
+        - { type: object, nullable: true, enum: [null] }
+        - { $ref: '#/components/schemas/EgeMockAttempt' }
+    EgeMockReceipt:
+      type: object
+      required: [id, operation, attemptId, ownerGeneration, formId, formRevision, catalogFingerprint, revision, orderedPositions, deadlineAt, payloadDigest, appliedAt, automatic]
+      properties:
+        id: { type: string, minLength: 1 }
+        operation: { type: string, enum: [written_submit, oral_submit] }
+        attemptId: { type: string, format: uuid }
+        ownerGeneration: { type: string, pattern: '^account:' }
+        formId: { type: string }
+        formRevision: { type: integer, minimum: 1 }
+        catalogFingerprint: { type: string, pattern: '^sha256:[a-f0-9]{64}$' }
+        revision: { type: integer, minimum: 1 }
+        orderedPositions: { type: array, minItems: 4, maxItems: 38, uniqueItems: true, items: { type: integer, minimum: 1, maximum: 42 } }
+        deadlineAt: { type: string, format: date-time }
+        payloadDigest: { type: string, pattern: '^sha256:[a-f0-9]{64}$' }
+        appliedAt: { type: string, format: date-time }
+        automatic: { type: boolean }
+      additionalProperties: false
+    EgeMockStartResponse:
+      type: object
+      required: [created, replayed, attempt]
+      properties:
+        created: { type: boolean }
+        replayed: { type: boolean }
+        resumed: { type: boolean }
+        attempt: { $ref: '#/components/schemas/EgeMockAttempt' }
+      additionalProperties: false
+    EgeMockMutationResponse:
+      type: object
+      required: [applied, replayed, attempt]
+      properties:
+        applied: { type: boolean }
+        replayed: { type: boolean }
+        attempt: { $ref: '#/components/schemas/EgeMockAttempt' }
+        receipt: { $ref: '#/components/schemas/EgeMockReceipt' }
+      additionalProperties: false
+    EgeMockResult:
+      oneOf:
+        - type: object
+          required: [available, state, keysRevealed]
+          properties:
+            available: { type: boolean, enum: [false] }
+            state: { type: string, enum: [created, written_in_progress, written_submitted, oral_ready, oral_in_progress, expired] }
+            keysRevealed: { type: boolean, enum: [false] }
+          additionalProperties: false
+        - type: object
+          required: [available, state, keysRevealed, assessment, result]
+          properties:
+            available: { type: boolean, enum: [true] }
+            state: { type: string, enum: [assessment_pending, completed] }
+            keysRevealed: { type: boolean, enum: [true] }
+            assessment: { $ref: '#/components/schemas/EgeMockAssessmentState' }
+            result: { type: object, nullable: true }
+          additionalProperties: false
     SpeakingAccentProfile:
       type: object
       required: [locale, revision, source, effective_at, calibration_used]

@@ -153,6 +153,16 @@ export const getAdaptiveDiagnostic = (...args) => repository.getAdaptiveDiagnost
 export const getAdaptiveDiagnosticCompletionReplay = (...args) => repository.getAdaptiveDiagnosticCompletionReplay(...args);
 export const answerAdaptiveDiagnostic = (...args) => repository.answerAdaptiveDiagnostic(...args);
 export const completeAdaptiveDiagnostic = (...args) => repository.completeAdaptiveDiagnostic(...args);
+export const startEgeMockAttempt = (...args) => repository.startEgeMockAttempt(...args);
+export const getCurrentEgeMockAttempt = (...args) => repository.getCurrentEgeMockAttempt(...args);
+export const getEgeMockAttempt = (...args) => repository.getEgeMockAttempt(...args);
+export const saveEgeMockDraft = (...args) => repository.saveEgeMockDraft(...args);
+export const submitEgeMockWritten = (...args) => repository.submitEgeMockWritten(...args);
+export const startEgeMockOral = (...args) => repository.startEgeMockOral(...args);
+export const submitEgeMockOral = (...args) => repository.submitEgeMockOral(...args);
+export const getEgeMockResult = (...args) => repository.getEgeMockResult(...args);
+export const markEgeMockAssessmentRetryable = (...args) => repository.markEgeMockAssessmentRetryable(...args);
+export const retryEgeMockAssessment = (...args) => repository.retryEgeMockAssessment(...args);
 export const recordModuleAttempt = (...args) => repository.recordModuleAttempt(...args);
 export const recordModuleAttemptWithAdaptiveClaim = (...args) => repository.recordModuleAttemptWithAdaptiveClaim(...args);
 export const bindAdaptiveLearningServerAttempt = (...args) => repository.bindAdaptiveLearningServerAttempt(...args);
