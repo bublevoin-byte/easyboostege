@@ -15,6 +15,29 @@
 
 ---
 
+## Полный пробный ЕГЭ-2026
+
+Спека: `.scratch/ege-full-mock-2026/spec.md`
+
+Overall status: `in-progress` — Ticket 01 завершён; Tickets 02–07 готовы к последовательной реализации.
+
+| Ticket | Результат | Статус |
+|---|---|---|
+| 01 | Версионированный эталонный авторский вариант | done |
+| 02 | Owner-bound попытка, строгие таймеры и persistence/API | ready-for-agent |
+| 03 | Единый письменный runner заданий 1–36 | ready-for-agent |
+| 04 | Задания 37–38 и честная предварительная оценка | ready-for-agent |
+| 05 | Устная часть 1–4 и предварительная оценка | ready-for-agent |
+| 06 | Итог 82, прогноз, разбор и тренировочный повтор | ready-for-agent |
+| 07 | PWA/E2E/release hardening полного пробника | ready-for-agent |
+| 99 | Существенно расширить проверенный авторский банк | needs-triage; после 07 |
+
+Решения 2026-08-13: полный формат; одна попытка с раздельно запускаемыми письменной и устной частями; строгие deadlines 190 и 17 минут; только проверенный авторский контент; один эталонный form в первом релизе; развёрнутые ответы получают явно предварительную автоматическую оценку; первый проход диагностический, повторы после раскрытия ключей тренировочные. В финале серии обязательно напомнить владельцу о Ticket 99.
+
+Ticket 01 evidence: immutable `ege-en-2026-form-1@1` закрепляет 42 позиции, матрицу `12+12+18+20+20=82`, exact versioned content/criteria refs, pinned form/asset/criteria fingerprints и статическую answer-free browser projection. TDD завершён на `8/8` focused; полный suite — `1576 total / 1534 pass / 42` штатных PostgreSQL skip / `0 fail`; lint, check (`386 JS`, `211` handlers, `126` names), frontend build (`484` assets, `11` lazy chunks), catalog freshness, secret/history scans и diff-check зелёные. Package manifests, OpenAPI, storage и старые catalog snapshots не менялись; Docker/E2E/provider calls/install/push/deploy не требовались. Fresh Standards и Spec reviews вернули literal `ZERO_FINDINGS` на frozen tree `5b4fbd5d095f71df4da45d1efe6c2651e12983a7`.
+
+---
+
 ## Grammar 2.0 — active mastery system
 
 Spec: `.scratch/grammar-2/spec.md`

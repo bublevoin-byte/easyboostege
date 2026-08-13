@@ -77,6 +77,11 @@
       .replace(/[.!?,;:]+$/gu, '');
   }
 
+  async function loadFullMockForm() {
+    const catalog = await import('../ege-mock-catalog-contract.js');
+    return catalog.loadEgeMockPublicForm();
+  }
+
   function masteryExpectation(topicId, record) {
     const value = record && typeof record === 'object' ? record : {};
     const stages = ['not_started', 'learning', 'learned', 'confirmed', 'stable'];
@@ -214,6 +219,7 @@
     badge,
     attempt,
     normalizeGrammarAnswer,
+    loadFullMockForm,
     assessGrammar19To24,
     grammarDashboard,
     DEFAULT_BADGES,
