@@ -1,4 +1,4 @@
-import { getGrammarCatalogRuntime } from '../../public/grammar-catalog.js';
+import { GRAMMAR_CATALOG, getGrammarCatalogRuntime } from '../../public/grammar-catalog.js';
 
 function exactGrammarTransfers(items, catalog) {
   const runtime = getGrammarCatalogRuntime(catalog?.version, catalog?.revision);
@@ -258,6 +258,44 @@ export function compileOpenApiSchema(openapi, name) {
           && (outcome.confusionPair || null) === (evidence.confusionPair || null)));
       if (!exactExpectations || !ownerMatches || !exactErrors) {
         errors.push(`${path}/event/session mixed bindings are not exact`); return false;
+      }
+    }
+    if (schema['x-easyboost-grammar-exam-bindings'] === 'event-session') {
+      const event = value?.event;
+      const items = event?.session?.items;
+      const expectations = event?.session?.topicExpectations;
+      const topics = Array.isArray(items) ? [...new Set(items.map((item) => item.topicId))] : [];
+      const exactExpectations = Array.isArray(expectations) && expectations.length === topics.length
+        && expectations.every((item, index) => item?.topicId === topics[index]);
+      const ownerExpectation = expectations?.[0];
+      const ownerMatches = value?.topicId === ownerExpectation?.topicId
+        && ownerExpectation?.expectedRevision === event?.expectedRevision
+        && ownerExpectation?.expectedStage === event?.expectedStage
+        && ownerExpectation?.expectedReviewStep === event?.expectedReviewStep;
+      let exactItems = false;
+      let exactErrors = false;
+      if (event?.source === 'builtin' && Array.isArray(items)) {
+        exactItems = GRAMMAR_CATALOG.exams.some((form) => form.gaps.length === items.length
+          && form.gaps.every((gap, index) => gap.id === items[index]?.id
+            && Number(gap.t) === items[index]?.topicId));
+        const expectedErrors = [];
+        for (const item of items) {
+          if (item.correct || expectedErrors.some((error) => error.topicId === item.topicId)) continue;
+          expectedErrors.push({
+            topicId: item.topicId, itemId: item.id, diagnosticId: null,
+            reason: item.errorCode, confusionPair: item.confusionPair || null,
+          });
+        }
+        exactErrors = JSON.stringify(event.independentErrors || []) === JSON.stringify(expectedErrors);
+      } else if (event?.source === 'generated' && Array.isArray(items)) {
+        const pointers = items.map((item) => /^generated\.g\.e\.([a-f0-9]{64})\.([a-f0-9]{16})\.([1-9]\d*)$/u.exec(item?.id || ''));
+        exactItems = pointers.every(Boolean)
+          && pointers.every((pointer, index) => pointer[1] === pointers[0][1]
+            && pointer[2] === pointers[0][2] && Number(pointer[3]) === index + 1);
+        exactErrors = !event.independentErrors;
+      }
+      if (!exactExpectations || !ownerMatches || !exactItems || !exactErrors) {
+        errors.push(`${path}/event/session exam bindings are not exact`); return false;
       }
     }
     if (schema['x-easyboost-grammar-targeted-binding'] === 'event-session') {

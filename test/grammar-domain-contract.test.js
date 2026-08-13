@@ -31,7 +31,7 @@ test('one grammar domain contract owns the exact error taxonomy and active type 
   ]);
   assert.deepEqual(GRAMMAR_PREACTIVATION_LEGACY_TOPIC_IDS, [10, 11, 12, 16, 17, 20, 14, 15, 19]);
   assert.deepEqual(GRAMMAR_PRACTICE_MODES, [
-    'topic_practice', 'legacy_practice', 'mixed_practice', 'targeted_practice',
+    'topic_practice', 'legacy_practice', 'mixed_practice', 'targeted_practice', 'exam_19_24',
   ]);
   assert.equal(GRAMMAR_RECOMMENDATION_VERSION, 'grammar-focus-v1');
   assert.equal(GRAMMAR_TARGETED_MIN_EXACT_ITEMS, 2);

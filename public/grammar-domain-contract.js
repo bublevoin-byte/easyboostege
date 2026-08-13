@@ -8,7 +8,7 @@ export const GRAMMAR_ACTIVE_PRACTICE_TYPES = Object.freeze([
 ]);
 
 export const GRAMMAR_PRACTICE_MODES = Object.freeze([
-  'topic_practice', 'legacy_practice', 'mixed_practice', 'targeted_practice',
+  'topic_practice', 'legacy_practice', 'mixed_practice', 'targeted_practice', 'exam_19_24',
 ]);
 
 export const GRAMMAR_RECOMMENDATION_VERSION = 'grammar-focus-v1';
@@ -27,6 +27,7 @@ export const GRAMMAR_PREACTIVATION_LEGACY_TOPIC_IDS = Object.freeze([
 export const GENERATED_GRAMMAR_REVISION = 1;
 
 const GENERATED_GRAMMAR_ITEM_ID = /^generated\.g\.q\.([a-f0-9]{64})\.([a-f0-9]{16})\.(c|f)([1-9]\d*)$/u;
+const GENERATED_GRAMMAR_EXAM_ITEM_ID = /^generated\.g\.e\.([a-f0-9]{64})\.([a-f0-9]{16})\.([1-9]\d*)$/u;
 const GRAMMAR_CONFUSION_PAIR = /^[a-z0-9]+(?:_[a-z0-9]+)*__(?:[a-z0-9]+(?:_[a-z0-9]+)*)$/u;
 const BUILTIN_GRAMMAR_DIAGNOSTIC_ID = /^core\.g\.([1-9]|1\d|20)\.c\.([1-9]\d*)\.diagnostic\.([1-9]\d*)$/u;
 
@@ -50,8 +51,23 @@ export function parseGrammarConfusionPair(value) {
 }
 
 export function parseGeneratedGrammarItemId(value) {
-  const match = GENERATED_GRAMMAR_ITEM_ID.exec(String(value || ''));
-  if (!match) return null;
+  const id = String(value || '');
+  const match = GENERATED_GRAMMAR_ITEM_ID.exec(id);
+  if (!match) {
+    const examMatch = GENERATED_GRAMMAR_EXAM_ITEM_ID.exec(id);
+    if (!examMatch) return null;
+    return Object.freeze({
+      id: examMatch[0],
+      groupId: `generated.g.e.${examMatch[1]}.${examMatch[2]}`,
+      requestHash: examMatch[1],
+      resultDigest: examMatch[2],
+      kind: 'exam',
+      index: Number(examMatch[3]),
+      type: 'input',
+      revision: GENERATED_GRAMMAR_REVISION,
+      operation: 'grammar_exam_19_24',
+    });
+  }
   const kind = match[3];
   return Object.freeze({
     id: match[0],

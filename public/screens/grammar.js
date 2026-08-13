@@ -211,7 +211,7 @@ async function gSubmitMasteryEvent(topicId,event){
   if(response&&Array.isArray(response.results))response.results.forEach(function(item){if(Number.isInteger(item&&item.topicId)&&item.record)gSetRec(item.topicId,item.record)});
   var result=response&&Array.isArray(response.results)?response.results.find(function(item){return item&&item.eventId===event.id}):response;
   if(result&&result.record)gSetRec(topicId,result.record);
-  return event&&event.session&&event.session.mode==='mixed_practice'&&response?response:result
+  return event&&event.session&&['mixed_practice','exam_19_24'].includes(event.session.mode)&&response?response:result
 }
 async function gSubmitMasteryBatch(entries){
   if(!window.EasyBoostSync||typeof window.EasyBoostSync.saveGrammarMasteryEvents!=='function'){
@@ -239,7 +239,7 @@ function gRegressionLine(view){if(!view.regressionReason)return'';
 function gMasteryQueueAvailable(required){return !window.EasyBoostSync||typeof window.EasyBoostSync.canQueueGrammarMasteryEvent!=='function'||window.EasyBoostSync.canQueueGrammarMasteryEvent(required||1)}
 function gShowMasteryQueueFull(){var area=document.getElementById('g_area');if(!area)return;
   area.innerHTML='<div class="clayCard" style="padding:22px;text-align:center;"><div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:19px;color:#2B2B2B;">Подключитесь для синхронизации</div><div style="font-weight:600;font-size:13px;color:#777163;line-height:1.55;margin-top:8px;">Очередь результатов заполнена. После синхронизации можно продолжить тренировку.</div></div><button class="sq" style="'+WBTN+'color:#B54E2F;margin-top:12px;" onclick="gMap()">К темам</button>'}
-function initGrammar(){if(!S)return;gSync();GS=gRestoreRunner();if(GS){gResume();return}if(S.grammarRunner){delete S.grammarRunner;save()}gMap()}
+function initGrammar(){if(!S)return;gSync();GS=gRestoreRunner();if(GS){gResume();return}if(gRestoreExamRunner())return;if(S.grammarRunner){delete S.grammarRunner;save()}gMap()}
 /* Обработчик разметки не может присвоить переменную модуля, поэтому сброс темы — функция. */
 function gToThemes(){var preservePending=Boolean(GS&&GS.phase==='completion_pending'&&S&&S.grammarRunner);GS=null;if(!preservePending)gClearRunner();gMap()}
 function gRetryPendingCompletion(){var snapshot=S&&S.grammarRunner;if(!snapshot||snapshot.phase!=='completion_pending')return false;
@@ -248,6 +248,14 @@ function gMap(){var area=document.getElementById('g_area');if(!area)return;
   var due=gDue();
   var GA=0;function ga(){return 'animation:win .34s '+((GA++)*0.05)+'s cubic-bezier(.25,.75,.35,1) both;'}
   var h='';
+  var dashboard=examModule.grammarDashboard(S.grammarMastery||{},{now:Date.now()});
+  var secured=(dashboard.stageCounts.confirmed||0)+(dashboard.stageCounts.stable||0);
+  var weakLabels=dashboard.weakErrorTypes.slice(0,3).map(function(item){return grammarModule.regressionReasonLabel(item.errorCode)});
+  h+='<section data-grammar-dashboard role="status" class="clayCard" style="padding:16px 18px;margin-bottom:14px;">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;"><div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:17px;color:#2B2B2B;">Grammar 2.0 · 20 тем</div>'
+    +'<div style="font-weight:600;font-size:12px;color:#777163;margin-top:3px;">Подтверждено или устойчиво: '+secured+' · На повторение: '+dashboard.dueTopicIds.length+'</div></div>'
+    +'<span style="flex:none;font-weight:900;font-size:18px;color:#1D7F4A;">'+dashboard.stageCounts.stable+'</span></div>'
+    +'<div style="font-weight:700;font-size:11.5px;color:#A56000;margin-top:9px;">Слабые места: '+(weakLabels.length?weakLabels.join(' · '):'пока не выявлены')+'</div></section>';
   var e19=S.exam19||{};
   h+='<button type="button" class="sq clk cardbtn" onclick="gExam()" style="'+ga()+'position:relative;overflow:hidden;border-radius:24px;padding:16px 18px;margin-bottom:14px;cursor:pointer;background:linear-gradient(150deg,#3A3532,#2B2B2B);box-shadow:0 14px 28px rgba(43,35,30,.32),inset 0 2px 3px rgba(255,255,255,.14),inset 0 -5px 10px rgba(0,0,0,.35);">'
     +'<svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;" viewBox="0 0 346 80" preserveAspectRatio="xMidYMid slice">'
@@ -495,6 +503,19 @@ const G_EXAMS=GRAMMAR_CATALOG.exams;
 
 let EX=null;
 function gExamPool(){var ai=(S&&S.examAi)||[];return G_EXAMS.concat(ai)}
+function gExamFormById(id,source){var pool=source==='generated'?(S.examAi||[]):G_EXAMS;return pool.find(function(form){return form&&form.id===id})||null}
+function gExamSnapshot(){return S&&S.grammarRunner&&S.grammarRunner.schema==='grammar-exam-runner-v1'?S.grammarRunner:null}
+function gPersistExamRunner(){if(!S||!EX)return;S.grammarRunner={schema:'grammar-exam-runner-v1',sessionId:EX.sessionId,
+  catalogVersion:GRAMMAR_CATALOG.version,catalogRevision:GRAMMAR_CATALOG.revision,formId:EX.ex.id,formRevision:EX.ex.revision,
+  source:EX.source,startedAt:EX.t0,answers:EX.answers.slice(0,6).map(function(answer){return String(answer).slice(0,200)})};save()}
+function gRestoreExamRunner(){var snapshot=gExamSnapshot();if(!snapshot||snapshot.catalogVersion!==GRAMMAR_CATALOG.version
+  ||snapshot.catalogRevision!==GRAMMAR_CATALOG.revision||!['builtin','generated'].includes(snapshot.source)
+  ||typeof snapshot.sessionId!=='string'||!Array.isArray(snapshot.answers)||snapshot.answers.length!==6
+  ||!Number.isSafeInteger(snapshot.startedAt)||snapshot.startedAt<0)return false;
+  var ex=gExamFormById(snapshot.formId,snapshot.source);if(!ex||ex.revision!==snapshot.formRevision)return false;
+  EX={ex:ex,t0:snapshot.startedAt,sessionId:snapshot.sessionId,source:snapshot.source,answers:snapshot.answers.map(String),
+    evidence:gEvidence(grammarModule.activityId(null,'exam_19_24'),snapshot.startedAt),iv:null};gExamRender();return true}
+function gExamInput(index,value){if(!EX||!Number.isInteger(index)||index<0||index>=6)return;EX.answers[index]=String(value||'').slice(0,200);gPersistExamRunner()}
 function gExam(){var area=document.getElementById('g_area');if(!area)return;
   var st=S.exam19||{};
   area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;">'+wDeco()
@@ -508,10 +529,13 @@ function gExam(){var area=document.getElementById('g_area');if(!area)return;
     +'<button class="sq" style="'+WBTN+'color:#B54E2F;" onclick="gMap()">← К темам</button></div>';
   gAnim('win','.32s');gExamGen()}
 function gExamStart(contentRef){var adaptive=contentRef==='builtin:exam:grammar:19-24:v1';var pool=adaptive?G_EXAMS:gExamPool();
+  if(!gMasteryQueueAvailable()){gShowMasteryQueueFull();return}
   S.examIdx=(S.examIdx||0);var ex=adaptive?G_EXAMS[0]:pool[S.examIdx%pool.length];if(!adaptive)S.examIdx++;
   if(EX&&EX.iv)clearInterval(EX.iv);
-  var startedAt=Date.now();EX={ex:ex,t0:startedAt,adaptive:adaptive,source:adaptive||G_EXAMS.includes(ex)?'builtin':'generated',
-    evidence:gEvidence(grammarModule.activityId(null,'exam_19_24'),startedAt),iv:setInterval(function(){setTxt('g_today',gExamFmt(Math.floor((Date.now()-EX.t0)/1000)))},1000)};
+  var startedAt=Date.now();EX={ex:ex,t0:startedAt,sessionId:crypto.randomUUID(),source:adaptive||G_EXAMS.includes(ex)?'builtin':'generated',answers:['','','','','',''],
+    evidence:gEvidence(grammarModule.activityId(null,'exam_19_24'),startedAt),iv:null};gPersistExamRunner();gExamRender()}
+function gExamRender(){if(!EX)return;if(EX.iv)clearInterval(EX.iv);EX.iv=setInterval(function(){if(EX)setTxt('g_today',gExamFmt(Math.floor((Date.now()-EX.t0)/1000)))},1000);
+  var ex=EX.ex;
   var area=document.getElementById('g_area');
   var txt='';
   ex.tx.forEach(function(seg,i){txt+=seg;
@@ -519,47 +543,52 @@ function gExamStart(contentRef){var adaptive=contentRef==='builtin:exam:grammar:
   var inputs=ex.gaps.map(function(g,i){
     return '<div style="display:flex;align-items:center;gap:10px;">'
       +'<span style="flex:none;width:64px;font-weight:800;font-size:12.5px;color:#B54E2F;">'+(19+i)+' · '+g.b+'</span>'
-      +'<input id="g_ex_'+i+'" aria-label="Пропуск '+(19+i)+', форма слова '+g.b+'" autocapitalize="none" autocomplete="off" spellcheck="false" style="flex:1;box-sizing:border-box;height:46px;border:1px solid #F0EAE2;border-radius:15px;padding:0 13px;font-family:Manrope,sans-serif;font-weight:700;font-size:14px;color:#2B2B2B;outline:none;box-shadow:inset 0 2px 4px rgba(60,45,30,.05);"></div>'}).join('');
+      +'<input id="g_ex_'+i+'" aria-label="Пропуск '+(19+i)+', форма слова '+g.b+'" value="'+ui.escapeHtml(EX.answers[i]||'')+'" oninput="gExamInput('+i+',this.value)" autocapitalize="none" autocomplete="off" spellcheck="false" style="flex:1;box-sizing:border-box;height:46px;border:1px solid #F0EAE2;border-radius:15px;padding:0 13px;font-family:Manrope,sans-serif;font-weight:700;font-size:14px;color:#2B2B2B;outline:none;box-shadow:inset 0 2px 4px rgba(60,45,30,.05);"></div>'}).join('');
   area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:20px;">'+wDeco()
     +'<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#B54E2F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">ЗАДАНИЯ 19–24</span></div>'
     +'<div style="font-weight:600;font-size:14px;color:#2B2B2B;line-height:1.7;margin-top:12px;">'+txt+'</div></div>'
     +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:9px;">'+inputs
     +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);margin-top:3px;" onclick="gExamCheck()">Проверить</button></div>';
   gAnim('win','.32s')}
-function gExamCheck(){if(!EX)return;var ex=EX.ex,evidence=EX.evidence,source=EX.source;
+async function gExamCheck(){if(!EX||EX.submitting)return;EX.submitting=true;var ex=EX.ex,evidence=EX.evidence,source=EX.source;
   clearInterval(EX.iv);var sec=examModule.elapsedSeconds(EX.t0,Date.now());
-  var score=0,rows='',bank=[],voiceErrors=[];
-  ex.gaps.forEach(function(g,i){var inp=document.getElementById('g_ex_'+i);var learnerAnswer=inp?inp.value:'';var val=gNorm(learnerAnswer);
-    var ok=g.ans.some(function(a){return gNorm(a)===val});
-    if(ok)score++;
-    else{if(g.t){S.gram=S.gram||{};var legacy=S.gram[g.t]||(S.gram[g.t]={st:0,ok:0,err:0,sr:0});legacy.err++;if(legacy.st===2)legacy.due=Date.now()}
-      bank.push({module:'grammar',itemKey:'grammar_19_24:'+String(g.b).toLowerCase(),errorType:'incorrect_form',details:{expected:String(g.ans[0])}})}
+  EX.answers=ex.gaps.map(function(_g,i){var inp=document.getElementById('g_ex_'+i);return inp?inp.value:EX.answers[i]||''});gPersistExamRunner();
+  var assessment;try{assessment=examModule.assessGrammar19To24({id:EX.sessionId,catalog:GRAMMAR_CATALOG,form:ex,answers:EX.answers,records:S.grammarMastery||{},startedAt:EX.t0,source:source})}
+  catch(_){EX.submitting=false;gExamRender();return}
+  var score=assessment.score,rows='',bank=assessment.errorBank,voiceErrors=[];
+  var masteryResult=await gSubmitMasteryEvent(assessment.event.topicId,assessment.event.event);
+  var provisional=gMasteryProvisional(masteryResult),unsaved=gMasteryUnsaved(masteryResult),persistenceLine=gMasteryPersistenceLine(masteryResult);
+  ex.gaps.forEach(function(g,i){var learnerAnswer=EX.answers[i]||'';var ok=g.ans.some(function(a){return examModule.normalizeGrammarAnswer(a)===examModule.normalizeGrammarAnswer(learnerAnswer)});
     var voiceSlot='';
     if(!ok&&g.voice){var slotId='voice_tutor_grammar_'+i;voiceSlot='<div id="'+slotId+'"></div>';voiceErrors.push({slotId:slotId,module:'grammar',itemId:g.voice.id,revision:g.voice.revision,learnerAnswer:learnerAnswer})}
     rows+='<div style="padding:10px 2px;border-bottom:1px solid #F4EFE9;">'
       +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'
       +'<span style="font-weight:800;font-size:13px;color:'+(ok?'#1F8A50':'#C0392B')+';">'+(19+i)+' · '+g.b+' → '+g.ans[0]+'</span>'
       +(ok?'<span style="font-weight:800;font-size:10px;color:#1D7F4A;background:#EAF7F0;padding:4px 9px;border-radius:20px;">ВЕРНО</span>'
-          :'<span style="font-weight:800;font-size:10px;color:#A83226;background:#FDEDEA;padding:4px 9px;border-radius:20px;">'+((document.getElementById('g_ex_'+i)||{}).value||'—')+'</span>')
+          :'<span style="font-weight:800;font-size:10px;color:#A83226;background:#FDEDEA;padding:4px 9px;border-radius:20px;">'+ui.escapeHtml(learnerAnswer||'—')+'</span>')
       +'</div>'
       +(ok?'':'<div style="font-weight:600;font-size:12px;color:#777163;margin-top:4px;">'+g.e+'</div>'+voiceSlot)
       +'</div>'});
-  S.exam19=examModule.record(S.exam19,score);
-  evidence.score=score;evidence.maxScore=6;
-  gReportEvidence(evidence,{mode:'exam_19_24',source:source,helpUsed:false,hintsUsed:0});
-  if(bank.length&&typeof SRV!=='undefined'&&SRV&&TOKEN){apiPost('/api/v1/error-bank',{errors:bank}).catch(function(){})}
-  EX=null;save();gSync();
+  if(!unsaved){
+    S.exam19=examModule.record(S.exam19,score);
+    evidence.score=score;evidence.maxScore=6;
+    gReportEvidence(evidence,{mode:'exam_19_24',source:source,helpUsed:false,hintsUsed:0});
+    if(bank.length&&typeof SRV!=='undefined'&&SRV&&TOKEN){apiPost('/api/v1/error-bank',{errors:bank}).catch(function(){})}
+    EX=null;gClearRunner();save();gSync()
+  }else{EX.submitting=false;gPersistExamRunner()}
   var area=document.getElementById('g_area');
   area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;">'+wDeco()
     +'<div style="text-align:center;"><div style="font-size:42px;">'+examModule.badge(score,6)+'</div>'
     +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:22px;color:#2B2B2B;margin-top:8px;">'+score+' из 6</div>'
-    +'<div style="font-weight:600;font-size:13px;color:#777163;margin-top:4px;">Время: '+gExamFmt(sec)+(score<6?' · слабые темы отмечены к повторению':'')+'</div></div>'
+    +'<div style="font-weight:600;font-size:13px;color:#777163;margin-top:4px;">Время: '+gExamFmt(sec)+(score<6?' · слабые темы отмечены к повторению':'')+(provisional?' · статус обновится после синхронизации':'')+(unsaved?' · результат mastery не записан':'')+(persistenceLine?'<br>'+persistenceLine:'')+'</div></div>'
     +'<div style="margin-top:12px;">'+rows+'</div></div>'
     +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
-    +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="gExamStart()">Ещё текст</button>'
-    +'<button class="sq" style="'+WBTN+'color:#B54E2F;" onclick="gMap()">К темам</button></div>';
-  voiceErrors.forEach(function(details){registerVoiceTutorError(details).then(function(recorded){var slot=document.getElementById(details.slotId);if(slot&&recorded)slot.innerHTML=voiceTutorButton(recorded)}).catch(function(){})});
-  gAnim('win','.32s');gExamGen()}
+    +(unsaved?'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="gExamCheck()">Повторить сохранение</button>'
+      :(score<6?'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="gStartTargeted()">Точная практика по ошибке</button>':'')
+        +'<button class="sq" style="'+WBTN+'color:#B54E2F;" onclick="gExamStart()">Ещё текст</button>'
+        +'<button class="sq" style="'+WBTN+'color:#B54E2F;" onclick="gMap()">К темам</button>')+'</div>';
+  if(!unsaved)voiceErrors.forEach(function(details){registerVoiceTutorError(details).then(function(recorded){var slot=document.getElementById(details.slotId);if(slot&&recorded)slot.innerHTML=voiceTutorButton(recorded)}).catch(function(){})});
+  gAnim('win','.32s');if(!unsaved)gExamGen()}
 function launchGrammarExam(contentRef){if(contentRef!=='builtin:exam:grammar:19-24:v1')return false;gExamStart(contentRef);return true}
 /* фоновая генерация новых экзаменационных текстов */
 var G_EXGEN=false;
@@ -588,11 +617,11 @@ async function gGen(t){
   G_GEN=false}
 registerRouteHook(function(id){if(id==='scr3')initGrammar()});
 /* Экзамен по грамматике не должен тикать в фоне после ухода с экрана. */
-registerRouteHook(function(id){if(EX&&EX.iv){clearInterval(EX.iv);EX=null}if(id!=='scr3')GS=null});
+registerRouteHook(function(id){if(id!=='scr3'){if(EX&&EX.iv)clearInterval(EX.iv);EX=null;GS=null}});
 registerScreenGenerator('scr3',genGrammar);
 
 /* Имена для обработчиков этого экрана: загрузчик кладёт их на window вместе с чанком. */
 export {
-  gAfterExplain,gExam,gExamCheck,gExamStart,gFinish,gMap,gOpen,gPick,gResume,gReview,gStart,gStartMixed,gStartTargeted,gSubmit,launchGrammarExam,
+  gAfterExplain,gExam,gExamCheck,gExamInput,gExamStart,gFinish,gMap,gOpen,gPick,gResume,gReview,gStart,gStartMixed,gStartTargeted,gSubmit,launchGrammarExam,
   gTheory,gToThemes,
 };

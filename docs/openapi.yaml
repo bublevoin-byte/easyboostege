@@ -4718,10 +4718,11 @@ components:
         completionToken: { type: string, pattern: '^[A-Za-z0-9_-]{43}$' }
       additionalProperties: false
     GrammarMasteryEventRequest:
-      description: Built-in sessions use the exact active-topic envelope selected by topicId. A queued built-in legacy session may finish after activation only when every pointer belongs to the immutable pre-activation catalog; generated and mixed sessions remain assisted legacy evidence.
+      description: Built-in sessions use the exact active-topic envelope selected by topicId. Exam 19–24 completion is one atomic multi-topic event and can record regression/history but never grants mastery. A queued built-in legacy session may finish after activation only when every pointer belongs to the immutable pre-activation catalog; generated and mixed sessions remain assisted evidence.
       oneOf:
         - $ref: '#/components/schemas/GrammarActiveBuiltinMasteryEventRequest'
         - $ref: '#/components/schemas/GrammarMixedBuiltinMasteryEventRequest'
+        - $ref: '#/components/schemas/GrammarExamMasteryEventRequest'
         - $ref: '#/components/schemas/GrammarTargetedBuiltinMasteryEventRequest'
         - $ref: '#/components/schemas/GrammarPreActivationLegacyBuiltinMasteryEventRequest'
         - $ref: '#/components/schemas/GrammarLegacyBuiltinMasteryEventRequest'
@@ -4787,6 +4788,49 @@ components:
                 session: { $ref: '#/components/schemas/GrammarMixedPracticeSession' }
               not:
                 required: [independentError]
+      additionalProperties: false
+    GrammarExamMasteryEventRequest:
+      type: object
+      description: One replay-safe 19–24 completion. Six exact input outcomes are expanded atomically across the ordered physical-topic expectations. Built-in errors may regress only their owning topics; correct or generated exam answers are history, never mastery proof.
+      x-easyboost-grammar-exam-bindings: event-session
+      required: [topicId, event]
+      properties:
+        topicId: { type: integer, minimum: 1, maximum: 20 }
+        event:
+          allOf:
+            - $ref: '#/components/schemas/GrammarMasterySessionEvent'
+            - type: object
+              required: [session]
+              properties:
+                session: { $ref: '#/components/schemas/GrammarExamPracticeSession' }
+              not:
+                required: [independentError]
+      oneOf:
+        - title: Immutable built-in 19–24 form
+          properties:
+            event:
+              type: object
+              required: [source, session]
+              properties:
+                source: { type: string, enum: [builtin] }
+                session: { $ref: '#/components/schemas/GrammarBuiltinExamPracticeSession' }
+                independentErrors:
+                  type: array
+                  minItems: 1
+                  maxItems: 6
+                  uniqueItems: true
+                  items: { $ref: '#/components/schemas/GrammarBuiltinExamIndependentError' }
+        - title: Owner-bound generated 19–24 supplement
+          properties:
+            event:
+              type: object
+              required: [source, assisted, session]
+              properties:
+                source: { type: string, enum: [generated] }
+                assisted: { type: boolean, enum: [true] }
+                session: { $ref: '#/components/schemas/GrammarGeneratedExamPracticeSession' }
+              not:
+                required: [independentErrors]
       additionalProperties: false
     GrammarTargetedBuiltinMasteryEventRequest:
       type: object
@@ -5066,8 +5110,9 @@ components:
         record: { type: object, additionalProperties: true }
         results:
           type: array
-          minItems: 8
+          minItems: 1
           maxItems: 16
+          description: Exact per-topic results for one mixed-practice or exam completion, in first-topic-occurrence order.
           items: { $ref: '#/components/schemas/GrammarMasteryEventResult' }
       additionalProperties: false
     GrammarMasteryEventWriteResult:
@@ -5132,6 +5177,7 @@ components:
         - oneOf:
             - $ref: '#/components/schemas/GrammarActiveMasterySessionEvidence'
             - $ref: '#/components/schemas/GrammarMixedMasterySessionEvidence'
+            - $ref: '#/components/schemas/GrammarExamMasterySessionEvidence'
             - $ref: '#/components/schemas/GrammarTargetedMasterySessionEvidence'
             - $ref: '#/components/schemas/GrammarLegacyMasterySessionEvidence'
       additionalProperties: false
@@ -5190,6 +5236,36 @@ components:
               required: [mode]
               properties:
                 mode: { type: string, enum: [mixed_practice] }
+    GrammarExamMasterySessionEvidence:
+      title: Exact 19–24 input evidence
+      type: object
+      required: [completedTypes, typeScores, session]
+      properties:
+        completedTypes:
+          type: array
+          minItems: 1
+          maxItems: 1
+          uniqueItems: true
+          items: { type: string, enum: [input] }
+        typeScores:
+          type: object
+          required: [input]
+          properties:
+            input:
+              type: object
+              required: [correct, total]
+              properties:
+                correct: { type: integer, minimum: 0, maximum: 6 }
+                total: { type: integer, enum: [6] }
+              additionalProperties: false
+          additionalProperties: false
+        session:
+          allOf:
+            - $ref: '#/components/schemas/GrammarExamPracticeSession'
+            - type: object
+              required: [mode]
+              properties:
+                mode: { type: string, enum: [exam_19_24] }
     GrammarTargetedMasterySessionEvidence:
       title: Exact server-focused targeted practice evidence
       type: object
@@ -5314,6 +5390,21 @@ components:
                   required: [mode]
                   properties:
                     mode: { type: string, enum: [mixed_practice] }
+            - title: Clean unassisted built-in 19–24 score
+              type: object
+              required: [typeScores, session]
+              properties:
+                typeScores:
+                  type: object
+                  required: [input]
+                  properties:
+                    input: { type: object, required: [correct, total], properties: { correct: { type: integer, enum: [6] }, total: { type: integer, enum: [6] } }, additionalProperties: false }
+                  additionalProperties: false
+                session:
+                  type: object
+                  required: [mode]
+                  properties:
+                    mode: { type: string, enum: [exam_19_24] }
             - title: Clean unassisted targeted scores
               type: object
               required: [session]
@@ -5370,8 +5461,150 @@ components:
       oneOf:
         - $ref: '#/components/schemas/GrammarActivePracticeSession'
         - $ref: '#/components/schemas/GrammarMixedPracticeSession'
+        - $ref: '#/components/schemas/GrammarExamPracticeSession'
         - $ref: '#/components/schemas/GrammarTargetedPracticeSession'
         - $ref: '#/components/schemas/GrammarLegacyPracticeSession'
+    GrammarExamPracticeSession:
+      type: object
+      description: Bounded answer-free evidence for one six-gap 19–24 form. The server appends its authoritative completion time; prompts and submitted answers are never persisted in mastery history.
+      required: [id, scope, mode, source, catalog, items, startedAt, assisted, topicExpectations]
+      properties:
+        id: { type: string, format: uuid }
+        scope: { type: string, enum: [mixed] }
+        mode: { type: string, enum: [exam_19_24] }
+        source: { type: string, enum: [builtin, generated] }
+        catalog:
+          type: object
+          required: [version, revision]
+          properties:
+            version: { type: string, enum: [grammar-core-v3] }
+            revision: { type: integer, enum: [3] }
+          additionalProperties: false
+        items:
+          type: array
+          minItems: 6
+          maxItems: 6
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/GrammarExamSessionItem' }
+        startedAt: { type: integer, minimum: 0, maximum: 9007199254740991 }
+        assisted: { type: boolean }
+        topicExpectations:
+          type: array
+          minItems: 1
+          maxItems: 6
+          uniqueItems: true
+          description: Exact physical topics in first-gap-occurrence order. The request owner expectation repeats the first member; the server applies the full list in one transaction.
+          items: { $ref: '#/components/schemas/GrammarMasteryExpectation' }
+      oneOf:
+        - $ref: '#/components/schemas/GrammarBuiltinExamPracticeSession'
+        - $ref: '#/components/schemas/GrammarGeneratedExamPracticeSession'
+      additionalProperties: false
+    GrammarBuiltinExamPracticeSession:
+      type: object
+      required: [source, items]
+      properties:
+        source: { type: string, enum: [builtin] }
+        items:
+          type: array
+          minItems: 6
+          maxItems: 6
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/GrammarBuiltinExamSessionItem' }
+    GrammarGeneratedExamPracticeSession:
+      type: object
+      required: [source, assisted, items]
+      properties:
+        source: { type: string, enum: [generated] }
+        assisted: { type: boolean, enum: [true] }
+        items:
+          type: array
+          minItems: 6
+          maxItems: 6
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/GrammarGeneratedExamSessionItem' }
+    GrammarExamSessionItem:
+      oneOf:
+        - $ref: '#/components/schemas/GrammarBuiltinExamSessionItem'
+        - $ref: '#/components/schemas/GrammarGeneratedExamSessionItem'
+    GrammarBuiltinExamSessionItem:
+      type: object
+      description: Immutable built-in gap outcome with its catalog-owned physical topic. A wrong gap uses the closed word_or_verb_form taxonomy after correction disclosure.
+      required: [id, topicId, type, transfer, correct, diagnosticId, errorCode, confusionPair, transferStatus]
+      properties:
+        id: { $ref: '#/components/schemas/GrammarBuiltinExamItemId' }
+        topicId: { type: integer, minimum: 1, maximum: 20 }
+        type: { type: string, enum: [input] }
+        transfer: { type: boolean, enum: [false] }
+        correct: { type: boolean }
+        diagnosticId: { nullable: true, enum: [null] }
+        errorCode:
+          type: string
+          nullable: true
+          enum: [word_or_verb_form]
+        confusionPair: { nullable: true, enum: [null] }
+        transferStatus: { nullable: true, enum: [null] }
+      allOf:
+        - $ref: '#/components/schemas/GrammarBuiltinExamItemOwnership'
+        - oneOf:
+            - title: Correct built-in exam gap
+              required: [correct, errorCode]
+              properties:
+                correct: { type: boolean, enum: [true] }
+                errorCode: { nullable: true, enum: [null] }
+            - title: Wrong built-in exam gap
+              required: [correct, errorCode]
+              properties:
+                correct: { type: boolean, enum: [false] }
+                errorCode: { type: string, enum: [word_or_verb_form] }
+      additionalProperties: false
+    GrammarGeneratedExamSessionItem:
+      type: object
+      description: Owner-bound generated 19–24 pointer. Generation provenance is always assisted and cannot advance mastery.
+      required: [id, topicId, type, transfer, correct, diagnosticId, errorCode, confusionPair, transferStatus, source, revision]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^generated\.g\.e\.[a-f0-9]{64}\.[a-f0-9]{16}\.[1-9]\d*$'
+        topicId: { type: integer, minimum: 1, maximum: 20 }
+        type: { type: string, enum: [input] }
+        transfer: { type: boolean, enum: [false] }
+        correct: { type: boolean }
+        diagnosticId: { nullable: true, enum: [null] }
+        errorCode:
+          type: string
+          nullable: true
+          enum: [word_or_verb_form]
+        confusionPair: { nullable: true, enum: [null] }
+        transferStatus: { nullable: true, enum: [null] }
+        source: { type: string, enum: [generated] }
+        revision: { type: integer, enum: [1] }
+      oneOf:
+        - title: Correct generated exam gap
+          required: [correct, errorCode]
+          properties:
+            correct: { type: boolean, enum: [true] }
+            errorCode: { nullable: true, enum: [null] }
+        - title: Wrong generated exam gap
+          required: [correct, errorCode]
+          properties:
+            correct: { type: boolean, enum: [false] }
+            errorCode: { type: string, enum: [word_or_verb_form] }
+      additionalProperties: false
+    GrammarBuiltinExamIndependentError:
+      type: object
+      description: One exact late built-in exam error per physical topic; must equal a wrong outcome in the same session.
+      required: [topicId, itemId, diagnosticId, reason, confusionPair]
+      properties:
+        topicId: { type: integer, minimum: 1, maximum: 20 }
+        itemId: { $ref: '#/components/schemas/GrammarBuiltinExamItemId' }
+        diagnosticId: { nullable: true, enum: [null] }
+        reason: { type: string, enum: [word_or_verb_form] }
+        confusionPair: { nullable: true, enum: [null] }
+      allOf:
+        - $ref: '#/components/schemas/GrammarBuiltinExamIndependentErrorOwnership'
+      additionalProperties: false
     GrammarActivePracticeSession:
       type: object
       description: Bounded answer-free evidence stored atomically with the mastery event. IDs, outcomes and weakness codes are validated against the indicated server catalog. The server appends endedAt from its authoritative clock when it persists mastery history; clients cannot submit endedAt.
@@ -5533,6 +5766,56 @@ components:
       oneOf:
         - $ref: '#/components/schemas/GrammarBuiltinPracticeSessionItem'
         - $ref: '#/components/schemas/GrammarGeneratedPracticeSessionItem'
+    GrammarBuiltinExamItemId:
+      type: string
+      enum: ["core.g.exam.1.1","core.g.exam.1.2","core.g.exam.1.3","core.g.exam.1.4","core.g.exam.1.5","core.g.exam.1.6","core.g.exam.2.1","core.g.exam.2.2","core.g.exam.2.3","core.g.exam.2.4","core.g.exam.2.5","core.g.exam.2.6","core.g.exam.3.1","core.g.exam.3.2","core.g.exam.3.3","core.g.exam.3.4","core.g.exam.3.5","core.g.exam.3.6"]
+      description: Catalog-generated exact whitelist of immutable built-in 19–24 gap pointers.
+    GrammarBuiltinExamItemOwnership:
+      type: object
+      description: Catalog-generated exact built-in exam gap and physical topic ownership.
+      required: [id, topicId]
+      oneOf:
+        - {"required":["id","topicId"],"properties":{"id":{"type":"string","enum":["core.g.exam.1.1"]},"topicId":{"type":"integer","enum":[2]}}}
+        - {"required":["id","topicId"],"properties":{"id":{"type":"string","enum":["core.g.exam.1.2"]},"topicId":{"type":"integer","enum":[12]}}}
+        - {"required":["id","topicId"],"properties":{"id":{"type":"string","enum":["core.g.exam.1.3"]},"topicId":{"type":"integer","enum":[5]}}}
+        - {"required":["id","topicId"],"properties":{"id":{"type":"string","enum":["core.g.exam.1.4"]},"topicId":{"type":"integer","enum":[10]}}}
+        - {"required":["id","topicId"],"properties":{"id":{"type":"string","enum":["core.g.exam.1.5"]},"topicId":{"type":"integer","enum":[1]}}}
+        - {"required":["id","topicId"],"properties":{"id":{"type":"string","enum":["core.g.exam.1.6"]},"topicId":{"type":"integer","enum":[11]}}}
+        - {"required":["id","topicId"],"properties":{"id":{"type":"string","enum":["core.g.exam.2.1"]},"topicId":{"type":"integer","enum":[1]}}}
+        - {"required":["id","topicId"],"properties":{"id":{"type":"string","enum":["core.g.exam.2.2"]},"topicId":{"type":"integer","enum":[2]}}}
+        - {"required":["id","topicId"],"properties":{"id":{"type":"string","enum":["core.g.exam.2.3"]},"topicId":{"type":"integer","enum":[7]}}}
+        - {"required":["id","topicId"],"properties":{"id":{"type":"string","enum":["core.g.exam.2.4"]},"topicId":{"type":"integer","enum":[6]}}}
+        - {"required":["id","topicId"],"properties":{"id":{"type":"string","enum":["core.g.exam.2.5"]},"topicId":{"type":"integer","enum":[12]}}}
+        - {"required":["id","topicId"],"properties":{"id":{"type":"string","enum":["core.g.exam.2.6"]},"topicId":{"type":"integer","enum":[5]}}}
+        - {"required":["id","topicId"],"properties":{"id":{"type":"string","enum":["core.g.exam.3.1"]},"topicId":{"type":"integer","enum":[5]}}}
+        - {"required":["id","topicId"],"properties":{"id":{"type":"string","enum":["core.g.exam.3.2"]},"topicId":{"type":"integer","enum":[10]}}}
+        - {"required":["id","topicId"],"properties":{"id":{"type":"string","enum":["core.g.exam.3.3"]},"topicId":{"type":"integer","enum":[2]}}}
+        - {"required":["id","topicId"],"properties":{"id":{"type":"string","enum":["core.g.exam.3.4"]},"topicId":{"type":"integer","enum":[7]}}}
+        - {"required":["id","topicId"],"properties":{"id":{"type":"string","enum":["core.g.exam.3.5"]},"topicId":{"type":"integer","enum":[11]}}}
+        - {"required":["id","topicId"],"properties":{"id":{"type":"string","enum":["core.g.exam.3.6"]},"topicId":{"type":"integer","enum":[11]}}}
+    GrammarBuiltinExamIndependentErrorOwnership:
+      type: object
+      description: Catalog-generated exact built-in exam error pointer and physical topic ownership.
+      required: [itemId, topicId]
+      oneOf:
+        - {"required":["itemId","topicId"],"properties":{"itemId":{"type":"string","enum":["core.g.exam.1.1"]},"topicId":{"type":"integer","enum":[2]}}}
+        - {"required":["itemId","topicId"],"properties":{"itemId":{"type":"string","enum":["core.g.exam.1.2"]},"topicId":{"type":"integer","enum":[12]}}}
+        - {"required":["itemId","topicId"],"properties":{"itemId":{"type":"string","enum":["core.g.exam.1.3"]},"topicId":{"type":"integer","enum":[5]}}}
+        - {"required":["itemId","topicId"],"properties":{"itemId":{"type":"string","enum":["core.g.exam.1.4"]},"topicId":{"type":"integer","enum":[10]}}}
+        - {"required":["itemId","topicId"],"properties":{"itemId":{"type":"string","enum":["core.g.exam.1.5"]},"topicId":{"type":"integer","enum":[1]}}}
+        - {"required":["itemId","topicId"],"properties":{"itemId":{"type":"string","enum":["core.g.exam.1.6"]},"topicId":{"type":"integer","enum":[11]}}}
+        - {"required":["itemId","topicId"],"properties":{"itemId":{"type":"string","enum":["core.g.exam.2.1"]},"topicId":{"type":"integer","enum":[1]}}}
+        - {"required":["itemId","topicId"],"properties":{"itemId":{"type":"string","enum":["core.g.exam.2.2"]},"topicId":{"type":"integer","enum":[2]}}}
+        - {"required":["itemId","topicId"],"properties":{"itemId":{"type":"string","enum":["core.g.exam.2.3"]},"topicId":{"type":"integer","enum":[7]}}}
+        - {"required":["itemId","topicId"],"properties":{"itemId":{"type":"string","enum":["core.g.exam.2.4"]},"topicId":{"type":"integer","enum":[6]}}}
+        - {"required":["itemId","topicId"],"properties":{"itemId":{"type":"string","enum":["core.g.exam.2.5"]},"topicId":{"type":"integer","enum":[12]}}}
+        - {"required":["itemId","topicId"],"properties":{"itemId":{"type":"string","enum":["core.g.exam.2.6"]},"topicId":{"type":"integer","enum":[5]}}}
+        - {"required":["itemId","topicId"],"properties":{"itemId":{"type":"string","enum":["core.g.exam.3.1"]},"topicId":{"type":"integer","enum":[5]}}}
+        - {"required":["itemId","topicId"],"properties":{"itemId":{"type":"string","enum":["core.g.exam.3.2"]},"topicId":{"type":"integer","enum":[10]}}}
+        - {"required":["itemId","topicId"],"properties":{"itemId":{"type":"string","enum":["core.g.exam.3.3"]},"topicId":{"type":"integer","enum":[2]}}}
+        - {"required":["itemId","topicId"],"properties":{"itemId":{"type":"string","enum":["core.g.exam.3.4"]},"topicId":{"type":"integer","enum":[7]}}}
+        - {"required":["itemId","topicId"],"properties":{"itemId":{"type":"string","enum":["core.g.exam.3.5"]},"topicId":{"type":"integer","enum":[11]}}}
+        - {"required":["itemId","topicId"],"properties":{"itemId":{"type":"string","enum":["core.g.exam.3.6"]},"topicId":{"type":"integer","enum":[11]}}}
     GrammarBuiltinCatalogItemId:
       type: string
       enum: ["core.g.1.c.1","core.g.1.c.2","core.g.1.c.3","core.g.1.c.4","core.g.1.c.5","core.g.1.c.6","core.g.1.c.7","core.g.1.c.8","core.g.1.correction.1","core.g.1.correction.2","core.g.1.correction.3","core.g.1.correction.4","core.g.1.correction.5","core.g.1.correction.6","core.g.1.correction.7","core.g.1.correction.8","core.g.1.f.1","core.g.1.f.2","core.g.1.f.3","core.g.1.f.4","core.g.1.f.5","core.g.1.f.6","core.g.1.f.7","core.g.1.f.8","core.g.1.transform.1","core.g.1.transform.2","core.g.1.transform.3","core.g.1.transform.4","core.g.1.transform.5","core.g.1.transform.6","core.g.1.transform.7","core.g.1.transform.8","core.g.10.c.1","core.g.10.c.2","core.g.10.c.3","core.g.10.c.4","core.g.10.c.5","core.g.10.c.6","core.g.10.c.7","core.g.10.c.8","core.g.10.correction.1","core.g.10.correction.2","core.g.10.correction.3","core.g.10.correction.4","core.g.10.correction.5","core.g.10.correction.6","core.g.10.correction.7","core.g.10.correction.8","core.g.10.f.1","core.g.10.f.2","core.g.10.f.3","core.g.10.f.4","core.g.10.f.5","core.g.10.f.6","core.g.10.f.7","core.g.10.f.8","core.g.10.transform.1","core.g.10.transform.2","core.g.10.transform.3","core.g.10.transform.4","core.g.10.transform.5","core.g.10.transform.6","core.g.10.transform.7","core.g.10.transform.8","core.g.11.c.1","core.g.11.c.2","core.g.11.c.3","core.g.11.c.4","core.g.11.c.5","core.g.11.c.6","core.g.11.c.7","core.g.11.c.8","core.g.11.correction.1","core.g.11.correction.2","core.g.11.correction.3","core.g.11.correction.4","core.g.11.correction.5","core.g.11.correction.6","core.g.11.correction.7","core.g.11.correction.8","core.g.11.f.1","core.g.11.f.2","core.g.11.f.3","core.g.11.f.4","core.g.11.f.5","core.g.11.f.6","core.g.11.f.7","core.g.11.f.8","core.g.11.transform.1","core.g.11.transform.2","core.g.11.transform.3","core.g.11.transform.4","core.g.11.transform.5","core.g.11.transform.6","core.g.11.transform.7","core.g.11.transform.8","core.g.12.c.1","core.g.12.c.2","core.g.12.c.3","core.g.12.c.4","core.g.12.c.5","core.g.12.c.6","core.g.12.c.7","core.g.12.c.8","core.g.12.correction.1","core.g.12.correction.2","core.g.12.correction.3","core.g.12.correction.4","core.g.12.correction.5","core.g.12.correction.6","core.g.12.correction.7","core.g.12.correction.8","core.g.12.f.1","core.g.12.f.2","core.g.12.f.3","core.g.12.f.4","core.g.12.f.5","core.g.12.f.6","core.g.12.f.7","core.g.12.f.8","core.g.12.transform.1","core.g.12.transform.2","core.g.12.transform.3","core.g.12.transform.4","core.g.12.transform.5","core.g.12.transform.6","core.g.12.transform.7","core.g.12.transform.8","core.g.13.c.1","core.g.13.c.2","core.g.13.c.3","core.g.13.c.4","core.g.13.c.5","core.g.13.c.6","core.g.13.c.7","core.g.13.c.8","core.g.13.correction.1","core.g.13.correction.2","core.g.13.correction.3","core.g.13.correction.4","core.g.13.correction.5","core.g.13.correction.6","core.g.13.correction.7","core.g.13.correction.8","core.g.13.f.1","core.g.13.f.2","core.g.13.f.3","core.g.13.f.4","core.g.13.f.5","core.g.13.f.6","core.g.13.f.7","core.g.13.f.8","core.g.13.transform.1","core.g.13.transform.2","core.g.13.transform.3","core.g.13.transform.4","core.g.13.transform.5","core.g.13.transform.6","core.g.13.transform.7","core.g.13.transform.8","core.g.14.c.1","core.g.14.c.2","core.g.14.c.3","core.g.14.c.4","core.g.14.c.5","core.g.14.c.6","core.g.14.c.7","core.g.14.c.8","core.g.14.c2.1","core.g.14.c2.2","core.g.14.c2.3","core.g.14.c2.4","core.g.14.c2.5","core.g.14.correction.1","core.g.14.correction.2","core.g.14.correction.3","core.g.14.correction.4","core.g.14.correction.5","core.g.14.correction.6","core.g.14.correction.7","core.g.14.correction.8","core.g.14.f.1","core.g.14.f.2","core.g.14.f.3","core.g.14.f.4","core.g.14.f.5","core.g.14.f.6","core.g.14.f.7","core.g.14.f.8","core.g.14.transform.1","core.g.14.transform.2","core.g.14.transform.3","core.g.14.transform.4","core.g.14.transform.5","core.g.14.transform.6","core.g.14.transform.7","core.g.14.transform.8","core.g.15.c.1","core.g.15.c.2","core.g.15.c.3","core.g.15.c.4","core.g.15.c.5","core.g.15.c.6","core.g.15.c.7","core.g.15.c.8","core.g.15.c2.1","core.g.15.c2.2","core.g.15.c2.3","core.g.15.c2.4","core.g.15.c2.5","core.g.15.correction.1","core.g.15.correction.2","core.g.15.correction.3","core.g.15.correction.4","core.g.15.correction.5","core.g.15.correction.6","core.g.15.correction.7","core.g.15.correction.8","core.g.15.f.1","core.g.15.f.2","core.g.15.f.3","core.g.15.f.4","core.g.15.f.5","core.g.15.f.6","core.g.15.f.7","core.g.15.f.8","core.g.15.transform.1","core.g.15.transform.2","core.g.15.transform.3","core.g.15.transform.4","core.g.15.transform.5","core.g.15.transform.6","core.g.15.transform.7","core.g.15.transform.8","core.g.16.c.1","core.g.16.c.2","core.g.16.c.3","core.g.16.c.4","core.g.16.c.5","core.g.16.c.6","core.g.16.c.7","core.g.16.c.8","core.g.16.correction.1","core.g.16.correction.2","core.g.16.correction.3","core.g.16.correction.4","core.g.16.correction.5","core.g.16.correction.6","core.g.16.correction.7","core.g.16.correction.8","core.g.16.f.1","core.g.16.f.2","core.g.16.f.3","core.g.16.f.4","core.g.16.f.5","core.g.16.f.6","core.g.16.f.7","core.g.16.f.8","core.g.16.transform.1","core.g.16.transform.2","core.g.16.transform.3","core.g.16.transform.4","core.g.16.transform.5","core.g.16.transform.6","core.g.16.transform.7","core.g.16.transform.8","core.g.17.c.1","core.g.17.c.2","core.g.17.c.3","core.g.17.c.4","core.g.17.c.5","core.g.17.c.6","core.g.17.c.7","core.g.17.c.8","core.g.17.correction.1","core.g.17.correction.2","core.g.17.correction.3","core.g.17.correction.4","core.g.17.correction.5","core.g.17.correction.6","core.g.17.correction.7","core.g.17.correction.8","core.g.17.f.1","core.g.17.f.2","core.g.17.f.3","core.g.17.f.4","core.g.17.f.5","core.g.17.f.6","core.g.17.f.7","core.g.17.f.8","core.g.17.transform.1","core.g.17.transform.2","core.g.17.transform.3","core.g.17.transform.4","core.g.17.transform.5","core.g.17.transform.6","core.g.17.transform.7","core.g.17.transform.8","core.g.18.c.1","core.g.18.c.2","core.g.18.c.3","core.g.18.c.4","core.g.18.c.5","core.g.18.c.6","core.g.18.c.7","core.g.18.c.8","core.g.18.c2.1","core.g.18.c2.2","core.g.18.c2.3","core.g.18.c2.4","core.g.18.c2.5","core.g.18.correction.1","core.g.18.correction.2","core.g.18.correction.3","core.g.18.correction.4","core.g.18.correction.5","core.g.18.correction.6","core.g.18.correction.7","core.g.18.correction.8","core.g.18.f.1","core.g.18.f.2","core.g.18.f.3","core.g.18.f.4","core.g.18.f.5","core.g.18.f.6","core.g.18.f.7","core.g.18.f.8","core.g.18.transform.1","core.g.18.transform.2","core.g.18.transform.3","core.g.18.transform.4","core.g.18.transform.5","core.g.18.transform.6","core.g.18.transform.7","core.g.18.transform.8","core.g.19.c.1","core.g.19.c.2","core.g.19.c.3","core.g.19.c.4","core.g.19.c.5","core.g.19.c.6","core.g.19.c.7","core.g.19.c.8","core.g.19.c2.1","core.g.19.c2.2","core.g.19.c2.3","core.g.19.c2.4","core.g.19.c2.5","core.g.19.correction.1","core.g.19.correction.2","core.g.19.correction.3","core.g.19.correction.4","core.g.19.correction.5","core.g.19.correction.6","core.g.19.correction.7","core.g.19.correction.8","core.g.19.f.1","core.g.19.f.2","core.g.19.f.3","core.g.19.f.4","core.g.19.f.5","core.g.19.f.6","core.g.19.f.7","core.g.19.f.8","core.g.19.transform.1","core.g.19.transform.2","core.g.19.transform.3","core.g.19.transform.4","core.g.19.transform.5","core.g.19.transform.6","core.g.19.transform.7","core.g.19.transform.8","core.g.2.c.1","core.g.2.c.2","core.g.2.c.3","core.g.2.c.4","core.g.2.c.5","core.g.2.c.6","core.g.2.c.7","core.g.2.c.8","core.g.2.correction.1","core.g.2.correction.2","core.g.2.correction.3","core.g.2.correction.4","core.g.2.correction.5","core.g.2.correction.6","core.g.2.correction.7","core.g.2.correction.8","core.g.2.f.1","core.g.2.f.2","core.g.2.f.3","core.g.2.f.4","core.g.2.f.5","core.g.2.f.6","core.g.2.f.7","core.g.2.f.8","core.g.2.transform.1","core.g.2.transform.2","core.g.2.transform.3","core.g.2.transform.4","core.g.2.transform.5","core.g.2.transform.6","core.g.2.transform.7","core.g.2.transform.8","core.g.20.c.1","core.g.20.c.2","core.g.20.c.3","core.g.20.c.4","core.g.20.c.5","core.g.20.c.6","core.g.20.c.7","core.g.20.c.8","core.g.20.correction.1","core.g.20.correction.2","core.g.20.correction.3","core.g.20.correction.4","core.g.20.correction.5","core.g.20.correction.6","core.g.20.correction.7","core.g.20.correction.8","core.g.20.f.1","core.g.20.f.2","core.g.20.f.3","core.g.20.f.4","core.g.20.f.5","core.g.20.f.6","core.g.20.f.7","core.g.20.f.8","core.g.20.transform.1","core.g.20.transform.2","core.g.20.transform.3","core.g.20.transform.4","core.g.20.transform.5","core.g.20.transform.6","core.g.20.transform.7","core.g.20.transform.8","core.g.3.c.1","core.g.3.c.2","core.g.3.c.3","core.g.3.c.4","core.g.3.c.5","core.g.3.c.6","core.g.3.c.7","core.g.3.c.8","core.g.3.correction.1","core.g.3.correction.2","core.g.3.correction.3","core.g.3.correction.4","core.g.3.correction.5","core.g.3.correction.6","core.g.3.correction.7","core.g.3.correction.8","core.g.3.f.1","core.g.3.f.2","core.g.3.f.3","core.g.3.f.4","core.g.3.f.5","core.g.3.f.6","core.g.3.f.7","core.g.3.f.8","core.g.3.transform.1","core.g.3.transform.2","core.g.3.transform.3","core.g.3.transform.4","core.g.3.transform.5","core.g.3.transform.6","core.g.3.transform.7","core.g.3.transform.8","core.g.4.c.1","core.g.4.c.2","core.g.4.c.3","core.g.4.c.4","core.g.4.c.5","core.g.4.c.6","core.g.4.c.7","core.g.4.c.8","core.g.4.correction.1","core.g.4.correction.2","core.g.4.correction.3","core.g.4.correction.4","core.g.4.correction.5","core.g.4.correction.6","core.g.4.correction.7","core.g.4.correction.8","core.g.4.f.1","core.g.4.f.2","core.g.4.f.3","core.g.4.f.4","core.g.4.f.5","core.g.4.f.6","core.g.4.f.7","core.g.4.f.8","core.g.4.transform.1","core.g.4.transform.2","core.g.4.transform.3","core.g.4.transform.4","core.g.4.transform.5","core.g.4.transform.6","core.g.4.transform.7","core.g.4.transform.8","core.g.5.c.1","core.g.5.c.2","core.g.5.c.3","core.g.5.c.4","core.g.5.c.5","core.g.5.c.6","core.g.5.c.7","core.g.5.c.8","core.g.5.correction.1","core.g.5.correction.2","core.g.5.correction.3","core.g.5.correction.4","core.g.5.correction.5","core.g.5.correction.6","core.g.5.correction.7","core.g.5.correction.8","core.g.5.f.1","core.g.5.f.2","core.g.5.f.3","core.g.5.f.4","core.g.5.f.5","core.g.5.f.6","core.g.5.f.7","core.g.5.f.8","core.g.5.transform.1","core.g.5.transform.2","core.g.5.transform.3","core.g.5.transform.4","core.g.5.transform.5","core.g.5.transform.6","core.g.5.transform.7","core.g.5.transform.8","core.g.6.c.1","core.g.6.c.2","core.g.6.c.3","core.g.6.c.4","core.g.6.c.5","core.g.6.c.6","core.g.6.c.7","core.g.6.c.8","core.g.6.correction.1","core.g.6.correction.2","core.g.6.correction.3","core.g.6.correction.4","core.g.6.correction.5","core.g.6.correction.6","core.g.6.correction.7","core.g.6.correction.8","core.g.6.f.1","core.g.6.f.2","core.g.6.f.3","core.g.6.f.4","core.g.6.f.5","core.g.6.f.6","core.g.6.f.7","core.g.6.f.8","core.g.6.transform.1","core.g.6.transform.2","core.g.6.transform.3","core.g.6.transform.4","core.g.6.transform.5","core.g.6.transform.6","core.g.6.transform.7","core.g.6.transform.8","core.g.7.c.1","core.g.7.c.2","core.g.7.c.3","core.g.7.c.4","core.g.7.c.5","core.g.7.c.6","core.g.7.c.7","core.g.7.c.8","core.g.7.correction.1","core.g.7.correction.2","core.g.7.correction.3","core.g.7.correction.4","core.g.7.correction.5","core.g.7.correction.6","core.g.7.correction.7","core.g.7.correction.8","core.g.7.f.1","core.g.7.f.2","core.g.7.f.3","core.g.7.f.4","core.g.7.f.5","core.g.7.f.6","core.g.7.f.7","core.g.7.f.8","core.g.7.transform.1","core.g.7.transform.2","core.g.7.transform.3","core.g.7.transform.4","core.g.7.transform.5","core.g.7.transform.6","core.g.7.transform.7","core.g.7.transform.8","core.g.8.c.1","core.g.8.c.2","core.g.8.c.3","core.g.8.c.4","core.g.8.c.5","core.g.8.c.6","core.g.8.c.7","core.g.8.c.8","core.g.8.c2.1","core.g.8.c2.2","core.g.8.c2.3","core.g.8.c2.4","core.g.8.c2.5","core.g.8.correction.1","core.g.8.correction.2","core.g.8.correction.3","core.g.8.correction.4","core.g.8.correction.5","core.g.8.correction.6","core.g.8.correction.7","core.g.8.correction.8","core.g.8.f.1","core.g.8.f.2","core.g.8.f.3","core.g.8.f.4","core.g.8.f.5","core.g.8.f.6","core.g.8.f.7","core.g.8.f.8","core.g.8.transform.1","core.g.8.transform.2","core.g.8.transform.3","core.g.8.transform.4","core.g.8.transform.5","core.g.8.transform.6","core.g.8.transform.7","core.g.8.transform.8","core.g.9.c.1","core.g.9.c.2","core.g.9.c.3","core.g.9.c.4","core.g.9.c.5","core.g.9.c.6","core.g.9.c.7","core.g.9.c.8","core.g.9.correction.1","core.g.9.correction.2","core.g.9.correction.3","core.g.9.correction.4","core.g.9.correction.5","core.g.9.correction.6","core.g.9.correction.7","core.g.9.correction.8","core.g.9.f.1","core.g.9.f.2","core.g.9.f.3","core.g.9.f.4","core.g.9.f.5","core.g.9.f.6","core.g.9.f.7","core.g.9.f.8","core.g.9.transform.1","core.g.9.transform.2","core.g.9.transform.3","core.g.9.transform.4","core.g.9.transform.5","core.g.9.transform.6","core.g.9.transform.7","core.g.9.transform.8"]

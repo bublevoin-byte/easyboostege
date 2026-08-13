@@ -19,6 +19,10 @@ const allItems = Object.values(GRAMMAR_CATALOG.bank).flatMap((levels) => (
   kinds.flatMap((kind) => levels[kind] || [])
 )).sort((left, right) => ordinal(left.id, right.id));
 const allItemIds = allItems.map((item) => item.id);
+const examItems = GRAMMAR_CATALOG.exams.flatMap((form) => form.gaps.map((gap) => ({
+  id: gap.id,
+  topicId: Number(gap.t),
+}))).sort((left, right) => ordinal(left.id, right.id));
 const legacyItemIds = new Set(Object.values(GRAMMAR_CATALOG_REGISTRY)
   .filter((catalog) => catalog !== GRAMMAR_CATALOG)
   .flatMap((catalog) => {
@@ -76,6 +80,38 @@ const catalogItemIdSchema = schema('GrammarBuiltinCatalogItemId', [
   'type: string',
   `enum: ${JSON.stringify(allItemIds)}`,
   'description: Catalog-generated exact whitelist of built-in grammar item pointers.',
+]);
+
+const examItemIdSchema = schema('GrammarBuiltinExamItemId', [
+  'type: string',
+  `enum: ${JSON.stringify(examItems.map((item) => item.id))}`,
+  'description: Catalog-generated exact whitelist of immutable built-in 19–24 gap pointers.',
+]);
+const examItemOwnershipSchema = schema('GrammarBuiltinExamItemOwnership', [
+  'type: object',
+  'description: Catalog-generated exact built-in exam gap and physical topic ownership.',
+  'required: [id, topicId]',
+  'oneOf:',
+  ...examItems.map((item) => `  - ${JSON.stringify({
+    required: ['id', 'topicId'],
+    properties: {
+      id: { type: 'string', enum: [item.id] },
+      topicId: { type: 'integer', enum: [item.topicId] },
+    },
+  })}`),
+]);
+const examIndependentErrorOwnershipSchema = schema('GrammarBuiltinExamIndependentErrorOwnership', [
+  'type: object',
+  'description: Catalog-generated exact built-in exam error pointer and physical topic ownership.',
+  'required: [itemId, topicId]',
+  'oneOf:',
+  ...examItems.map((item) => `  - ${JSON.stringify({
+    required: ['itemId', 'topicId'],
+    properties: {
+      itemId: { type: 'string', enum: [item.id] },
+      topicId: { type: 'integer', enum: [item.topicId] },
+    },
+  })}`),
 ]);
 
 const diagnosticBranches = activeChoiceItems.flatMap((item) => (
@@ -375,6 +411,14 @@ function insertBefore(source, nextName, replacement) {
 const openApiUrl = new URL('../docs/openapi.yaml', import.meta.url);
 const original = (await fs.readFile(openApiUrl, 'utf8')).replace(/\r\n/gu, '\n');
 let generated = original;
+for (const [name, replacement] of [
+  ['GrammarBuiltinExamItemId', examItemIdSchema],
+  ['GrammarBuiltinExamItemOwnership', examItemOwnershipSchema],
+  ['GrammarBuiltinExamIndependentErrorOwnership', examIndependentErrorOwnershipSchema],
+]) {
+  if (generated.includes(`    ${name}:`)) generated = replaceSchema(generated, name, replacement);
+  else generated = insertBefore(generated, 'GrammarBuiltinCatalogItemId', replacement);
+}
 if (generated.includes('    GrammarBuiltinCatalogItemId:')) {
   generated = replaceSchema(generated, 'GrammarBuiltinCatalogItemId', catalogItemIdSchema);
 } else {

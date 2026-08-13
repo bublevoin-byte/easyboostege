@@ -1,5 +1,18 @@
 # Реестр ИИ-операций
 
+## Grammar 2.0 exam 19–24
+
+`grammar_exam_19_24` is a typed `/api/v1/ai/generate-content` operation with the immutable
+three-form built-in catalog as its fallback. A successful generated supplement receives six
+server-issued owner-bound pointers in the `generated.g.e.<request-hash>.<result-digest>.<position>`
+namespace. Completion validation resolves every pointer against that owner's saved generated task;
+ordinary `generated.g.q.*` practice pointers, changed topics, revisions or positions fail closed.
+
+Generated exam evidence is always `assisted` and never advances mastery. A built-in exam also cannot
+advance mastery: it records bounded history and may regress only the physical topic of an exact wrong
+catalog gap. Provider failure therefore keeps the built-in form useful without changing the mastery
+or retention contract, and release verification makes no paid provider call.
+
 Успешные результаты типизированной генерации сохраняются для пользователя в `generated_tasks`. Ключ кэша — SHA-256 от валидированного запроса и `CONTENT_PROMPT_VERSION`: новая версия промпта автоматически перестаёт использовать старые записи. Кэш требует авторизацию, активную подписку и согласие на обработку текста, но не расходует внешний ИИ-бюджет.
 
 | Операция | Endpoint | Валидация | Fallback |

@@ -270,7 +270,8 @@ export const EasyBoostGrammar = (function initializeGrammarModule(global) {
   }
 
   function independentRegressionReason(event, topicId = null) {
-    const evidence = event?.session?.mode === 'mixed_practice'
+    const multiTopic = ['mixed_practice', 'exam_19_24'].includes(event?.session?.mode);
+    const evidence = multiTopic
       ? event?.independentErrors?.find((candidate) => candidate?.topicId === topicId)
       : event?.independentError;
     const reason = normalizeRegressionReason(evidence?.reason);
@@ -281,7 +282,7 @@ export const EasyBoostGrammar = (function initializeGrammarModule(global) {
     }
     if (event.type !== 'session_completed' || !Array.isArray(event.session?.items)) return null;
     const matched = event.session.items.some((outcome) => outcome && outcome.correct === false
-      && (event.session.mode !== 'mixed_practice' || outcome.topicId === topicId)
+      && (!multiTopic || outcome.topicId === topicId)
       && outcome.id === evidence.itemId
       && outcome.diagnosticId === evidence.diagnosticId
       && outcome.errorCode === reason
@@ -380,7 +381,8 @@ export const EasyBoostGrammar = (function initializeGrammarModule(global) {
         || ['topic_practice', 'legacy_practice'].includes(event.session.mode));
       const sessionMode = event.session?.mode;
       const topicId = Number(options.topicId);
-      const scopedItems = sessionMode === 'mixed_practice'
+      const multiTopic = ['mixed_practice', 'exam_19_24'].includes(sessionMode);
+      const scopedItems = multiTopic
         ? event.session.items.filter((item) => item?.topicId === topicId)
         : event.session?.items || [];
       const independentRecall = event.source === 'builtin'
@@ -391,7 +393,7 @@ export const EasyBoostGrammar = (function initializeGrammarModule(global) {
       const fromStage = next.stage;
       next.lastAttemptAt = at;
       if (event.assisted) next.stats.assistedAttempts += 1;
-      if (sessionMode === 'mixed_practice') {
+      if (multiTopic) {
         next.stats.correct += scopedItems.filter((item) => item?.correct === true).length;
         next.stats.errors += scopedItems.filter((item) => item?.correct === false).length;
       } else {

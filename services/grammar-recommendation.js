@@ -67,6 +67,9 @@ function catalogIndex(catalog) {
       for (const item of levels?.[kind] || []) result.set(item.id, { item, topicId });
     }
   }
+  for (const form of catalog?.exams || []) {
+    for (const gap of form?.gaps || []) result.set(gap.id, { item: gap, topicId: Number(gap.t) });
+  }
   return result;
 }
 
@@ -85,9 +88,10 @@ function exactOutcomeWeakness(outcome, indexed, fallbackTopicId) {
       confusionPair: diagnostic.confusionPair || null,
     };
   }
-  if (outcome.diagnosticId != null || item.errorSkill !== outcome.errorCode
+  const errorSkill = item.errorSkill || (item.type === 'input' ? 'word_or_verb_form' : null);
+  if (outcome.diagnosticId != null || errorSkill !== outcome.errorCode
     || (item.confusionPair || null) !== (outcome.confusionPair || null)) return null;
-  return { topicId, errorCode: item.errorSkill, confusionPair: item.confusionPair || null };
+  return { topicId, errorCode: errorSkill, confusionPair: item.confusionPair || null };
 }
 
 function fallbackWeakness(catalog, topicId) {

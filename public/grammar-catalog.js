@@ -75,6 +75,16 @@ function voicePointer(id, revision) {
   return { id, revision };
 }
 
+function examMetadata(source, details, provenance = 'grammar-1-migrated') {
+  const errorSkill = String(source.errorSkill || 'word_or_verb_form');
+  if (!GRAMMAR_ERROR_CODES.includes(errorSkill)) fail('UNKNOWN_GRAMMAR_ERROR_SKILL', details);
+  const confusionPair = parseGrammarConfusionPair(source.confusionPair);
+  if (source.confusionPair != null && confusionPair == null) {
+    fail('INVALID_GRAMMAR_CONFUSION_PAIR', details);
+  }
+  return { errorSkill, confusionPair, provenance };
+}
+
 function activeMetadata(source, details, required) {
   if (!required) return {};
   const errorSkill = String(source.errorSkill || '');
@@ -523,21 +533,32 @@ export function validateGeneratedGrammarSupplement(operation, input) {
     if (!Array.isArray(source.tx) || source.tx.length !== 7 || !Array.isArray(source.gaps) || source.gaps.length !== 6) {
       fail('INVALID_GRAMMAR_SUPPLEMENT');
     }
-    const exam = {
-      tx: source.tx.map((part, index) => promptFragment(part, `generated.exam.tx.${index + 1}`)),
-      gaps: source.gaps.map((gap, index) => {
+    const gaps = source.gaps.map((gap, index) => {
         const details = `generated.exam.gap.${index + 1}`;
         validateItemType(gap, 'input', details);
         const topicId = Number(gap.t);
         if (!Number.isInteger(topicId) || topicId < 1 || topicId > 20) fail('UNKNOWN_GRAMMAR_TOPIC', details);
+        const reference = parseGeneratedGrammarItemReference(gap.voice);
+        if (!reference || reference.kind !== 'exam' || reference.index !== index + 1) {
+          fail('INVALID_GENERATED_GRAMMAR_REFERENCE', details);
+        }
         return {
+          id: reference.id,
+          revision: reference.revision,
+          type: 'input',
           b: text(gap.b, 'INVALID_GRAMMAR_BASE', details),
           ans: acceptedAnswers(gap.ans, details),
           e: text(gap.e, 'EMPTY_GRAMMAR_EXPLANATION', details),
           t: topicId,
+          ...examMetadata(gap, details, 'generated'),
           voice: gap.voice || null,
         };
-      }),
+      });
+    const exam = {
+      id: gaps[0].id.replace(/\.[1-9]\d*$/u, ''),
+      revision: GENERATED_GRAMMAR_REVISION,
+      tx: source.tx.map((part, index) => promptFragment(part, `generated.exam.tx.${index + 1}`)),
+      gaps,
     };
     assertUniqueEntries(exam.gaps.map((gap, index) => ({
       id: `generated.exam.gap.${index + 1}`,
@@ -568,6 +589,11 @@ function createGrammarCatalogRuntime(catalog) {
         itemIndex.set(item.id, Object.freeze({ item, topicId, kind: item.type }));
         if (LEGACY_BUILTIN_KINDS.includes(kind)) legacyItemIds.add(item.id);
       }
+    }
+  }
+  for (const exam of catalog.exams) {
+    for (const item of exam.gaps) {
+      itemIndex.set(item.id, Object.freeze({ item, topicId: Number(item.t), kind: item.type }));
     }
   }
   return Object.freeze({

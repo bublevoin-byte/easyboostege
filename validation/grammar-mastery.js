@@ -125,7 +125,7 @@ const practiceSession = z.object({
   items: z.array(practiceSessionItem).min(1).max(32),
   startedAt: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
   assisted: z.boolean(),
-  topicExpectations: z.array(masteryExpectation).min(8).max(16).optional(),
+  topicExpectations: z.array(masteryExpectation).min(1).max(16).optional(),
   recommendation: targetedRecommendation.optional(),
 }).strict();
 
@@ -203,10 +203,11 @@ export const grammarMasteryEventSchema = z.object({
   const topicPractice = value.event.session.mode === 'topic_practice';
   const mixedPractice = value.event.session.mode === 'mixed_practice';
   const targetedPractice = value.event.session.mode === 'targeted_practice';
+  const examPractice = value.event.session.mode === 'exam_19_24';
   const sessionRuntime = getGrammarCatalogRuntime(
     value.event.session.catalog.version, value.event.session.catalog.revision,
   );
-  const sessionTopicId = (outcome) => mixedPractice ? Number(outcome?.topicId) : value.topicId;
+  const sessionTopicId = (outcome) => mixedPractice || examPractice ? Number(outcome?.topicId) : value.topicId;
   const sessionItem = (itemId, topicId = value.topicId) => runtimeTopicItem(sessionRuntime, topicId, itemId);
   const immutableLegacyCatalog = sessionRuntime !== currentCatalogRuntime;
   const sessionCatalogHasActiveTopic = sessionRuntime?.hasActivePractice(value.topicId) === true;
@@ -226,18 +227,42 @@ export const grammarMasteryEventSchema = z.object({
     && sessionRuntime === currentCatalogRuntime && sessionCatalogHasActiveTopic
     && value.event.session.items.every((outcome) => outcome.topicId == null
       && sessionItem(outcome.id));
+  const exactBuiltinExamForm = currentCatalogRuntime.catalog.exams.some((form) => (
+    form.gaps.length === value.event.session.items.length
+    && form.gaps.every((gap, index) => gap.id === value.event.session.items[index]?.id
+      && Number(gap.t) === value.event.session.items[index]?.topicId)
+  ));
+  const builtinExamSession = builtinSession && examPractice && value.event.session.scope === 'mixed'
+    && sessionRuntime === currentCatalogRuntime && value.event.session.items.length === 6
+    && exactBuiltinExamForm
+    && value.event.session.items.every((outcome) => Number.isInteger(outcome.topicId)
+      && outcome.type === 'input' && outcome.transfer === false
+      && /^core\.g\.exam\.[1-3]\.[1-6]$/u.test(outcome.id)
+      && sessionItem(outcome.id, outcome.topicId));
+  const generatedExamPointers = value.event.session.items.map((outcome) => parseGeneratedGrammarItemId(outcome.id));
+  const generatedExamSession = value.event.source === 'generated' && examPractice
+    && value.event.session.scope === 'mixed' && sessionRuntime === currentCatalogRuntime
+    && value.event.session.items.length === 6
+    && generatedExamPointers.every((pointer, index) => pointer?.operation === 'grammar_exam_19_24'
+      && pointer.type === 'input' && pointer.groupId === generatedExamPointers[0]?.groupId
+      && pointer.index === index + 1)
+    && value.event.session.items.every((outcome) => Number.isInteger(outcome.topicId)
+      && outcome.transfer === false);
+  const examSession = builtinExamSession || generatedExamSession;
   const structuredSession = activeSession || mixedSession || targetedSession;
-  const validMode = structuredSession || preActivationLegacy
-    || (!activeTopic || !builtinSession) && !topicPractice && !mixedPractice && !targetedPractice
+  const catalogBoundSession = structuredSession || examSession;
+  const multiTopicSession = mixedSession || examSession;
+  const validMode = catalogBoundSession || preActivationLegacy
+    || (!activeTopic || !builtinSession) && !topicPractice && !mixedPractice && !targetedPractice && !examPractice
       && value.event.session.scope === 'topic';
   if (!validMode) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['event', 'session', 'mode'], message: 'topic and content generation require their canonical practice mode' });
   }
-  if (mixedSession && value.event.session.items[0]?.topicId !== value.topicId) {
+  if (multiTopicSession && value.event.session.items[0]?.topicId !== value.topicId) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['topicId'], message: 'mixed history owner must match its first exact catalog outcome' });
   }
   const originalItems = value.event.session.items.filter((item) => !item.transfer);
-  if (mixedSession) {
+  if (multiTopicSession) {
     const exactTopics = [...new Set(originalItems.map((item) => item.topicId))];
     const expectations = value.event.session.topicExpectations || [];
     if (expectations.length !== exactTopics.length
@@ -262,7 +287,7 @@ export const grammarMasteryEventSchema = z.object({
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['event'],
-        message: 'mixed sessions use per-topic errors and cannot claim a targeted recommendation',
+        message: 'multi-topic sessions use per-topic errors and cannot claim a targeted recommendation',
       });
     }
   } else if (targetedSession) {
@@ -293,7 +318,7 @@ export const grammarMasteryEventSchema = z.object({
       message: 'mixed and targeted state is mode-bound',
     });
   }
-  if (!mixedPractice && value.event.session.items.some((outcome) => outcome.topicId != null)) {
+  if (!mixedPractice && !examPractice && value.event.session.items.some((outcome) => outcome.topicId != null)) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['event', 'session', 'items'], message: 'topic sessions cannot substitute item topic ownership' });
   }
   if (immutableLegacyCatalog && value.event.session.items.some((outcome) => (
@@ -332,14 +357,14 @@ export const grammarMasteryEventSchema = z.object({
   if (value.event.source !== expectedSource || (generatedOutcomes.length > 0 && !value.event.assisted)) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['event', 'source'], message: 'generated participation requires exact assisted provenance' });
   }
-  if (!structuredSession && value.event.session.items.length > 16) {
+  if (!catalogBoundSession && value.event.session.items.length > 16) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['event', 'session', 'items'], message: 'legacy sessions are bounded to eight originals and one retry each' });
   }
   if ((activeSession || mixedSession)
     && !practiceTypes.every((type) => value.event.session.items.filter((item) => !item.transfer && item.type === type).length === 4)) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['event', 'session', 'items'], message: 'active sessions require exactly four original items per practice type' });
   }
-  if (structuredSession
+  if (catalogBoundSession
     && new Set(value.event.session.items.map((item) => item.id)).size !== value.event.session.items.length) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['event', 'session', 'items'], message: 'active sessions cannot repeat a practice item' });
   }
@@ -372,7 +397,7 @@ export const grammarMasteryEventSchema = z.object({
       && (outcome.confusionPair || null) === (evidence.confusionPair || null));
     if (!value.event.assisted || value.event.source === 'generated' || !matchingOutcome
       || !catalogMatchesIndependentError(
-        sessionItem(evidence.itemId, sessionTopicId(matchingOutcome)), evidence, !structuredSession,
+        sessionItem(evidence.itemId, sessionTopicId(matchingOutcome)), evidence, !catalogBoundSession,
       )) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -389,7 +414,7 @@ export const grammarMasteryEventSchema = z.object({
         && outcome.diagnosticId === evidence.diagnosticId
         && outcome.errorCode === evidence.reason
         && (outcome.confusionPair || null) === (evidence.confusionPair || null));
-      if (!mixedSession || !value.event.assisted || value.event.source !== 'builtin'
+      if (!multiTopicSession || !value.event.assisted || value.event.source !== 'builtin'
         || !matchingOutcome || !catalogMatchesIndependentError(
           sessionItem(evidence.itemId, evidence.topicId), evidence,
         )) {
@@ -401,6 +426,26 @@ export const grammarMasteryEventSchema = z.object({
       }
     }
   }
+  if (builtinExamSession) {
+    const expectedErrors = [];
+    for (const outcome of value.event.session.items) {
+      if (outcome.correct || expectedErrors.some((error) => error.topicId === outcome.topicId)) continue;
+      expectedErrors.push({
+        topicId: outcome.topicId,
+        itemId: outcome.id,
+        diagnosticId: null,
+        reason: outcome.errorCode,
+        confusionPair: outcome.confusionPair || null,
+      });
+    }
+    if (JSON.stringify(value.event.independentErrors || []) !== JSON.stringify(expectedErrors)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['event', 'independentErrors'],
+        message: 'built-in exam errors must equal the first wrong exact catalog outcome for every physical topic',
+      });
+    }
+  }
   const legacyOccurrences = new Map();
   const legacyTotals = new Map(value.event.session.items.map((outcome) => [
     outcome.id, value.event.session.items.filter((candidate) => candidate.id === outcome.id).length,
@@ -410,19 +455,21 @@ export const grammarMasteryEventSchema = z.object({
     const outcomeTopicId = sessionTopicId(outcome);
     const item = sessionItem(outcome.id, outcomeTopicId) || (generatedPointer ? {
       id: outcome.id, type: generatedPointer.type, generated: true,
+      errorSkill: 'word_or_verb_form', confusionPair: null,
     } : null);
     const expectedType = item?.type;
     const supportsWeakness = (candidate, errorCode, pair) => candidate?.type === 'choice'
       ? candidate.diagnostics?.some((diagnostic) => diagnostic?.errorCode === errorCode
         && (diagnostic.confusionPair || null) === (pair || null))
-      : candidate?.errorSkill === errorCode && (candidate.confusionPair || null) === (pair || null);
+      : (candidate?.errorSkill || (candidate?.type === 'input' ? 'word_or_verb_form' : null)) === errorCode
+        && (candidate.confusionPair || null) === (pair || null);
     const selectedDiagnostic = item?.type === 'choice'
       ? item.diagnostics?.find((diagnostic) => diagnostic?.id === outcome.diagnosticId)
       : null;
     const legacyErrorCode = expectedType === 'input' ? 'word_or_verb_form' : 'construction_choice';
     const expectedWeakness = outcome.correct
       ? outcome.diagnosticId == null && outcome.errorCode == null && outcome.confusionPair == null
-      : !structuredSession
+      : !catalogBoundSession
         ? outcome.diagnosticId == null && outcome.confusionPair == null && outcome.errorCode === legacyErrorCode
         : item?.type === 'choice'
         ? selectedDiagnostic?.errorCode === outcome.errorCode
@@ -435,7 +482,7 @@ export const grammarMasteryEventSchema = z.object({
       : (outcome.source != null || outcome.revision != null)) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ['event', 'session', 'items', index], message: 'generated session items require exact revision provenance' });
     }
-    if (!structuredSession && (outcome.transfer || outcome.diagnosticId != null || outcome.confusionPair != null)) {
+    if (!catalogBoundSession && (outcome.transfer || outcome.diagnosticId != null || outcome.confusionPair != null)) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ['event', 'session', 'items', index], message: 'legacy sessions accept catalog outcomes without active transfer diagnostics' });
     }
     if (outcome.transfer) {
@@ -454,7 +501,7 @@ export const grammarMasteryEventSchema = z.object({
       context.addIssue({ code: z.ZodIssueCode.custom, path: ['event', 'session', 'items', index], message: 'each failed original requires one adjacent authored transfer outcome' });
     }
     let expectedTransferStatus = outcome.transfer && !outcome.correct ? 'due_next_session' : null;
-    if (!structuredSession) {
+    if (!catalogBoundSession) {
       const occurrence = (legacyOccurrences.get(outcome.id) || 0) + 1;
       legacyOccurrences.set(outcome.id, occurrence);
       const total = legacyTotals.get(outcome.id);

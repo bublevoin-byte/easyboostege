@@ -83,6 +83,25 @@ test('generated history is quarantined from exact focus and cannot become sole r
   assert.ok(recommendation.reasonCodes.includes('catalog_fallback'));
 });
 
+test('the freshest exact built-in exam gap becomes the next targeted practice focus', () => {
+  const now = new Date('2026-08-13T08:00:00.000Z');
+  const gap = GRAMMAR_CATALOG.exams[0].gaps[0];
+  const exact = record(gap.t, { ...gap, errorSkill: 'word_or_verb_form' }, { at: now.getTime() - 1_000 });
+  exact.masteryHistory[0].session.scope = 'mixed';
+  exact.masteryHistory[0].session.mode = 'exam_19_24';
+  exact.masteryHistory[0].session.items[0].topicId = gap.t;
+
+  const recommendation = buildGrammarRecommendation({
+    mastery: { [gap.t]: exact }, catalog: GRAMMAR_CATALOG, now,
+  });
+
+  assert.deepEqual({
+    topicId: recommendation.pointer.topicId,
+    errorCode: recommendation.pointer.errorCode,
+  }, { topicId: gap.t, errorCode: 'word_or_verb_form' });
+  assert.ok(recommendation.reasonCodes.includes('recent_weakness'));
+});
+
 test('one mixed error copied into per-topic history remains one recommendation observation', () => {
   const now = new Date('2026-08-13T08:00:00.000Z');
   const item = GRAMMAR_CATALOG.bank[3].c[0];

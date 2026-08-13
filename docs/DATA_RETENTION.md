@@ -1,5 +1,21 @@
 # Жизненный цикл данных
 
+## Grammar 2.0 mastery and exam resume
+
+Canonical Grammar mastery lives with the account and contains only bounded versioned catalog
+pointers, correctness facts, closed weakness codes, provenance, stages/review timing and replay IDs.
+For `exam_19_24`, one event is retained atomically for each physical topic in first-occurrence order;
+prompts and answers are not persisted in mastery history. Generated evidence keeps only its
+owner-bound `generated.g.e.*` pointer and revision; the already-governed `generated_tasks` record owns
+the typed generated content.
+
+An unfinished exam uses the existing device-local `grammarRunner` snapshot. It contains the runner
+schema, session/catalog/form pointers, start time and six bounded draft answers so reload or offline
+navigation can resume. `grammarRunner` is excluded from progress sync, server storage and account
+export, and is cleared only after the completion event has reached durable local queue/server save.
+Account deletion removes canonical mastery and generated tasks with the existing user-progress
+contract; device storage is cleared by the existing owner-generation/logout boundary.
+
 ## Speaking pronunciation assessments
 
 The quota/billing ledger is retained while the account exists. It contains locale, state, reserved/billable seconds, bounded server-owned task/session context, normalized transcript/scores/word timing/phoneme facts, provider/version provenance, release or interruption reason, and UTC reservation/dispatch/provider-start/settlement timestamps. A pre-start release retains only its bounded canonical outcome for exact replay; a stale dispatch or post-start recovery retains the bounded conservative settlement. It never stores the audio bytes or full provider payload. User export includes the allowlisted context, normalized assessment and billing facts but omits the idempotency key and request fingerprint. Account deletion removes file-ledger rows and PostgreSQL rows cascade from `users`.

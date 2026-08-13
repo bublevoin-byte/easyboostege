@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { GRAMMAR_CATALOG, GRAMMAR_CATALOG_V1, GRAMMAR_CATALOG_V2 } from '../../public/grammar-catalog.js';
+import {
+  GRAMMAR_CATALOG, GRAMMAR_CATALOG_V1, GRAMMAR_CATALOG_V2, validateGeneratedGrammarSupplement,
+} from '../../public/grammar-catalog.js';
 import { EasyBoostGrammar } from '../../public/modules/grammar.js';
 import { grammarMasteryEventSchema } from '../../validation/grammar-mastery.js';
 import { decorateGeneratedVoiceTutorContent } from '../../voice-tutor/generated-items.js';
@@ -184,6 +186,56 @@ function generatedLegacyFixture(id) {
       result, provider: 'fixture', promptVersion: 'fixture-v1',
     },
   };
+}
+
+function examEventFixture(id, form, records, { source = 'builtin', wrongFirst = false } = {}) {
+  const topicIds = [...new Set(form.gaps.map((gap) => Number(gap.t)))];
+  const topicExpectations = topicIds.map((topicId) => {
+    const record = EasyBoostGrammar.migrateMasteryRecord(records?.[topicId]);
+    return {
+      topicId, expectedRevision: record.masteryRevision,
+      expectedStage: record.stage, expectedReviewStep: record.reviewStep,
+    };
+  });
+  const items = form.gaps.map((gap, index) => ({
+    id: gap.id, topicId: Number(gap.t), type: 'input', transfer: false,
+    correct: !(wrongFirst && index === 0), diagnosticId: null,
+    errorCode: wrongFirst && index === 0 ? 'word_or_verb_form' : null,
+    confusionPair: null, transferStatus: null,
+    ...(source === 'generated' ? { source: 'generated', revision: 1 } : {}),
+  }));
+  const owner = topicExpectations[0];
+  return {
+    topicId: owner.topicId,
+    event: {
+      id, type: 'session_completed', expectedRevision: owner.expectedRevision,
+      expectedStage: owner.expectedStage, expectedReviewStep: owner.expectedReviewStep,
+      source, assisted: source === 'generated' || wrongFirst,
+      completedTypes: ['input'],
+      typeScores: { input: { correct: wrongFirst ? 5 : 6, total: 6 } },
+      session: {
+        id, scope: 'mixed', mode: 'exam_19_24', source,
+        catalog: { version: GRAMMAR_CATALOG.version, revision: GRAMMAR_CATALOG.revision },
+        items, startedAt: 3_800, assisted: source === 'generated' || wrongFirst, topicExpectations,
+      },
+      ...(wrongFirst ? { independentErrors: [{
+        topicId: items[0].topicId, itemId: items[0].id,
+        diagnosticId: null, reason: 'word_or_verb_form', confusionPair: null,
+      }] } : {}),
+    },
+  };
+}
+
+function examEntries(payload) {
+  return payload.event.session.topicExpectations.map((expectation) => ({
+    topicId: expectation.topicId,
+    event: {
+      ...payload.event,
+      expectedRevision: expectation.expectedRevision,
+      expectedStage: expectation.expectedStage,
+      expectedReviewStep: expectation.expectedReviewStep,
+    },
+  }));
 }
 
 export const GRAMMAR_MASTERY_FIXTURE = Object.freeze({
@@ -622,6 +674,53 @@ export async function assertGrammarMasteryProgressContract(repository, owner, st
   assert.deepEqual(selectedExport.progress.grammarMastery['3']
     .masteryHistory.at(-1).session.items, targetedPractice.event.session.items);
 
+  const examProgressBefore = (await repository.getProgress(owner)).grammarMastery;
+  const builtInExam = examEventFixture(
+    '00000000-0000-4000-8000-000000000080', GRAMMAR_CATALOG.exams[0], examProgressBefore,
+    { wrongFirst: true },
+  );
+  assert.equal(grammarMasteryEventSchema.safeParse(builtInExam).success, true);
+  const builtInExamResults = await repository.applyGrammarMasteryEvents(owner, examEntries(builtInExam));
+  assert.equal(builtInExamResults.length, builtInExam.event.session.topicExpectations.length);
+  assert.ok(builtInExamResults.every((result) => result.applied),
+    'one built-in exam completion atomically persists every physical topic');
+  assert.deepEqual(builtInExamResults.map((result) => result.record.stage),
+    builtInExam.event.session.topicExpectations.map((expectation) => expectation.expectedStage),
+    'exam correctness records history without granting mastery');
+  const builtInExamReplay = await repository.applyGrammarMasteryEvents(owner, examEntries(builtInExam));
+  assert.ok(builtInExamReplay.every((result) => result.replay && !result.applied),
+    'the exact exam identity replays across every physical topic without duplicate evidence');
+
+  const generatedExamHash = 'e'.repeat(64);
+  const generatedExamRaw = {
+    tx: ['A ', ' B ', ' C ', ' D ', ' E ', ' F ', '.'],
+    gaps: Array.from({ length: 6 }, (_, index) => ({
+      b: `WORD${index}`, ans: [`answer${index}`], e: `Reason ${index}.`, t: index + 13,
+    })),
+  };
+  const generatedExamForm = validateGeneratedGrammarSupplement('grammar_exam_19_24',
+    decorateGeneratedVoiceTutorContent('grammar_exam_19_24', generatedExamHash, generatedExamRaw));
+  await repository.saveGeneratedTask(owner, {
+    operation: 'grammar_exam_19_24', requestHash: generatedExamHash,
+    request: { operation: 'grammar_exam_19_24' }, result: generatedExamRaw,
+    provider: 'fixture', promptVersion: 'fixture-v1',
+  });
+  const generatedExam = examEventFixture(
+    '00000000-0000-4000-8000-000000000081', generatedExamForm,
+    (await repository.getProgress(owner)).grammarMastery, { source: 'generated' },
+  );
+  assert.equal(grammarMasteryEventSchema.safeParse(generatedExam).success, true);
+  const generatedExamResults = await repository.applyGrammarMasteryEvents(owner, examEntries(generatedExam));
+  assert.ok(generatedExamResults.every((result) => result.applied
+    && result.record.stage === 'not_started' && result.record.stats.assistedAttempts === 1),
+  'owner-bound generated exam pointers persist only assisted history');
+  const examExport = await repository.exportUserData(owner);
+  assert.deepEqual(examExport.progress.grammarMastery['13'].masteryHistory.at(-1).session.items,
+    generatedExam.event.session.items, 'export retains bounded generated exam refs without answer content');
+  assert.equal(/(?:prompt|answer|reference)/iu.test(JSON.stringify(
+    examExport.progress.grammarMastery['13'].masteryHistory.at(-1).session,
+  )), false);
+
   const strangerSessionId = '00000000-0000-4000-8000-000000000001';
   const strangerSession = practiceSession(strangerSessionId);
   const strangerLearning = await repository.applyGrammarMasteryEvent(stranger, 1, {
@@ -700,8 +799,10 @@ export async function assertGrammarMasteryProgressContract(repository, owner, st
   assert.deepEqual((await repository.getProgress(stranger)).grammarMastery, atomicBefore.grammarMastery,
     'one stale event aborts every unseen mutation in the owner batch');
   assert.equal((await repository.getProgress(owner)).words.learned, 7, 'mastery mutation preserves sibling progress');
-  assert.deepEqual((await repository.exportUserData(owner)).progress.grammarMastery['1'], unrelatedMastery.record,
-    'the unrelated mastery mutation remains authoritative beside generated topic evidence');
+  const ownerTopicOneExport = (await repository.exportUserData(owner)).progress.grammarMastery['1'];
+  assert.deepEqual(ownerTopicOneExport.masteryHistory.find((entry) => entry.eventId === unrelatedMastery.eventId),
+    unrelatedMastery.record.masteryHistory.find((entry) => entry.eventId === unrelatedMastery.eventId),
+    'the unrelated mastery mutation remains authoritative beside generated and exam evidence');
 
   assert.equal(await repository.deleteUserData(owner), true);
   assert.deepEqual(await repository.getProgress(owner), {});

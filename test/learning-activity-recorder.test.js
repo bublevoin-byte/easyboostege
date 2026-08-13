@@ -25,6 +25,7 @@ import { grammarMasteryEventSchema, hasExactActiveTransferPairCoverage } from '.
 
 const rawSource = await fs.readFile(new URL('../public/learning-activity-recorder.js', import.meta.url), 'utf8');
 const grammarScreenSource = await fs.readFile(new URL('../public/screens/grammar.js', import.meta.url), 'utf8');
+const examModuleSource = await fs.readFile(new URL('../public/modules/exam.js', import.meta.url), 'utf8');
 const grammarModuleSource = (await fs.readFile(new URL('../public/modules/grammar.js', import.meta.url), 'utf8'))
   .replace(/^import(?:[\s\S]*?)from '[^']+';\r?\n/gmu, '')
   .replace(/^export /gmu, '');
@@ -94,6 +95,7 @@ function grammarScreenHarness(options = {}) {
   const apiCalls = [];
   const voiceErrors = [];
   const timers = [];
+  const routeHooks = [];
   const elements = new Map();
   const element = (id) => {
     if (!elements.has(id)) {
@@ -149,7 +151,12 @@ function grammarScreenHarness(options = {}) {
           ? options.pendingGrammarMasteryEvents() : options.pendingGrammarMasteryEvents;
         return JSON.parse(JSON.stringify(pending || []));
       },
-      canQueueGrammarMasteryEvent(required = 1) { capacityRequests.push(required); return true; },
+      canQueueGrammarMasteryEvent(required = 1) {
+        capacityRequests.push(required);
+        return options.canQueueGrammarMasteryEvent
+          ? options.canQueueGrammarMasteryEvent(required)
+          : true;
+      },
     },
   };
   const context = vm.createContext({
@@ -176,10 +183,10 @@ function grammarScreenHarness(options = {}) {
     },
     gExamFmt: (seconds) => String(seconds),
     gSync() {}, generateAiContent: async () => null,
-    registerScreenGenerator() {}, registerRouteHook() {},
+    registerScreenGenerator() {}, registerRouteHook(callback) { routeHooks.push(callback); },
     registerVoiceTutorError: async (details) => { voiceErrors.push(JSON.parse(JSON.stringify(details))); return details; }, voiceTutorButton: () => '',
     save() {}, setTxt() {}, tab() {},
-    ui: { animate() {}, markAnswer() {} }, wDeco: () => '',
+    ui: { animate() {}, markAnswer() {}, escapeHtml(value) { return String(value); } }, wDeco: () => '',
     decorateCoreGrammar() {},
     document: { getElementById: (id) => (window.__skipGrammarArea && id === 'g_area' ? null : element(id)), createElement: () => element(`created:${elements.size}`) },
     crypto: { randomUUID: () => `10000000-0000-4000-8000-${String(++uuid).padStart(12, '0')}` },
@@ -189,6 +196,8 @@ function grammarScreenHarness(options = {}) {
     console,
   });
   context.isGrammarErrorCode = isGrammarErrorCode;
+  vm.runInContext(examModuleSource, context);
+  context.examModule = window.EasyBoostExam;
   vm.runInContext(grammarModuleSource, context);
   context.grammarModule = window.EasyBoostGrammar;
   vm.runInContext(source, context);
@@ -198,7 +207,7 @@ function grammarScreenHarness(options = {}) {
     .replace(/^export \{[\s\S]*?\};\r?\n?/mu, '')
     .concat(`
       window.__grammarScreenTest={
-        gStart:gStart,gReview:gReview,gTheory:gTheory,gResume:gResume,gExamStart:gExamStart,gExamCheck:gExamCheck,
+        gStart:gStart,gReview:gReview,gTheory:gTheory,gResume:gResume,gExamStart:gExamStart,gExamCheck:gExamCheck,gExamInput:gExamInput,
         gStartMixed:function(){return gStartMixed()},
         gStartTargeted:function(){return gStartTargeted()},
         restore:initGrammar,
@@ -248,6 +257,7 @@ function grammarScreenHarness(options = {}) {
     runTimers() { while (timers.length) timers.shift()(); },
     advance(milliseconds) { now += milliseconds; },
     setActive(value) { active = value; },
+    navigate(id) { routeHooks.forEach((hook) => hook(id)); },
   };
 }
 
@@ -1435,10 +1445,72 @@ test('grammar topic, filtered review and exam completions emit observable owner-
   });
   harness.screen.gExamStart('builtin:exam:grammar:19-24:v1');
   harness.advance(2_000);
-  harness.screen.gExamCheck();
-  await Promise.resolve();
+  await harness.screen.gExamCheck();
   assert.equal(harness.ordinary.length, 3, 'adaptive exam does not emit an ordinary duplicate');
   assert.deepEqual(harness.adaptive, [{
     module: 'grammar', activityId: 'grammar_forms_exam_19_24', score: 0, maxScore: 6, durationMs: 2_000,
   }]);
+});
+
+test('grammar exam reserves its one atomic offline event slot before starting', () => {
+  const harness = grammarScreenHarness({
+    canQueueGrammarMasteryEvent: () => false,
+  });
+
+  harness.screen.gExamStart('builtin:exam:grammar:19-24:v1');
+
+  assert.deepEqual(harness.capacityRequests, [1]);
+  assert.equal(harness.stateSnapshot().grammarRunner, undefined,
+    'a full queue cannot create a runner whose atomic multi-topic completion cannot be stored');
+  assert.match(harness.screen.markup(), /Подключитесь для синхронизации/u);
+});
+
+test('grammar exam keeps its exact runner and evidence local until the atomic result is durable', async () => {
+  let submission = 0;
+  const harness = grammarScreenHarness({
+    saveGrammarMasteryEvent: (_topicId, event) => (++submission === 1 ? {
+      queued: false, code: 'GRAMMAR_MASTERY_QUEUE_FULL',
+    } : { eventId: event.id, applied: true }),
+  });
+  harness.screen.gExamStart('builtin:exam:grammar:19-24:v1');
+  const started = harness.stateSnapshot().grammarRunner;
+
+  await harness.screen.gExamCheck();
+
+  const retained = harness.stateSnapshot().grammarRunner;
+  assert.equal(retained.schema, 'grammar-exam-runner-v1');
+  assert.equal(retained.sessionId, started.sessionId);
+  assert.equal(retained.formId, started.formId);
+  assert.equal(retained.startedAt, started.startedAt);
+  assert.equal(harness.stateSnapshot().exam19, undefined,
+    'a failed atomic write cannot become a completed local exam attempt');
+  assert.equal(harness.ordinary.length, 0);
+  assert.equal(harness.adaptive.length, 0);
+  assert.match(harness.screen.markup(), /Повторить сохранение/u);
+
+  await harness.screen.gExamCheck();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(harness.stateSnapshot().grammarRunner, null);
+  assert.equal(harness.stateSnapshot().exam19.n, 1,
+    'the recovered exact event becomes one completed local exam attempt');
+  assert.equal(harness.masteryEvents.length, 2);
+  assert.equal(harness.masteryEvents[0].event.id, harness.masteryEvents[1].event.id,
+    'retry reuses the stable session UUID');
+  assert.equal(harness.ordinary.length, 1,
+    'ordinary learning evidence is emitted once, only after durable acceptance');
+});
+
+test('route entry restores an exam that remains editable and submittable', () => {
+  const seed = grammarScreenHarness();
+  seed.screen.gExamStart('builtin:exam:grammar:19-24:v1');
+  seed.screen.gExamInput(0, 'saved draft');
+  const state = seed.stateSnapshot();
+
+  const restored = grammarScreenHarness({ state });
+  restored.navigate('scr3');
+  restored.screen.gExamInput(0, 'edited after restore');
+
+  assert.equal(restored.stateSnapshot().grammarRunner.answers[0], 'edited after restore',
+    'the screen cleanup hook cannot discard the live restored EX state');
 });

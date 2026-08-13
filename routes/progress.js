@@ -142,7 +142,9 @@ export function createProgressRoutes({
 
   function masteryPersistenceEntries(entry) {
     if (entry.event?.type !== 'session_completed'
-      || entry.event.session?.mode !== 'mixed_practice') return [{ ...entry, mixed: false }];
+      || !['mixed_practice', 'exam_19_24'].includes(entry.event.session?.mode)) {
+      return [{ ...entry, multiTopic: false }];
+    }
     return entry.event.session.topicExpectations.map((expectation) => ({
       topicId: expectation.topicId,
       event: {
@@ -151,12 +153,12 @@ export function createProgressRoutes({
         expectedStage: expectation.expectedStage,
         expectedReviewStep: expectation.expectedReviewStep,
       },
-      mixed: true,
+      multiTopic: true,
     }));
   }
 
   function publicMasteryResults(entries, results) {
-    return results.map((result, index) => entries[index]?.mixed
+    return results.map((result, index) => entries[index]?.multiTopic
       ? { ...result, topicId: entries[index].topicId }
       : result);
   }
@@ -230,7 +232,7 @@ export function createProgressRoutes({
         return rejectUnauthorizedTargetedCompletion(res);
       }
       const entries = masteryPersistenceEntries(parsed.data);
-      const results = entries.length === 1 && !entries[0].mixed
+      const results = entries.length === 1 && !entries[0].multiTopic
         ? [await db.applyGrammarMasteryEvent(req.user, entries[0].topicId, entries[0].event)]
         : await db.applyGrammarMasteryEvents(req.user,
           entries.map(({ topicId, event }) => ({ topicId, event })));

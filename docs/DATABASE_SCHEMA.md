@@ -1,5 +1,19 @@
 # Схема базы данных
 
+## Grammar 2.0 mastery persistence
+
+Grammar has no separate PostgreSQL table: file and PostgreSQL repositories store the canonical map
+under `user_progress.data.grammarMastery`, while explicitly stripping the device-only
+`grammarRunner` key. Each record carries its revision, stage/review state, bounded stats and mastery
+history. The repository's existing owner transaction, compare-and-set expectations and event UUID
+give exact replay idempotency in both backends.
+
+An `exam_19_24` completion is expanded atomically over the ordered `topicExpectations` in one owner
+transaction. All per-topic history rows retain the same event/session identity; exact replay changes
+nothing, while a changed payload under that UUID conflicts. Correct exam outcomes and all generated
+outcomes are history only. A wrong immutable built-in gap may regress only its catalog-owned physical
+topic. Prompts, answer strings and the resumable browser snapshot are not written to the database.
+
 ## Speaking pronunciation quota ledger and evaluation replay (`046`–`048`)
 
 `speaking_pronunciation_assessments` is the authoritative monthly seconds ledger. Each row is owner-bound and unique by `(username, idempotency_key)`, with `period_start`, locale, nullable bounded server-owned `context_id`, reservation/finalization state, reserved and billable seconds, bounded normalized result JSON, release reason, and timestamps. Migration `047` adds and bounds `context_id`; official requests use `taskN:<session UUID>:<task id>@<revision>` and tasks 2–3 append `:itemN`, so a saved assessment cannot be attached to another task or position. Database checks enforce `billable_seconds <= reserved_seconds` and the legal `reserved -> dispatching -> started -> finalized`, explicit pre-start `reserved|dispatching -> released`, and conservative stale-`dispatching -> finalized` shapes. `dispatch_started_at` is written atomically before provider code is entered; `provider_started_at` retains the narrower meaning that the SDK start callback actually fired. Released rows retain only their bounded canonical outcome so an exact retry cannot change status or reason. Under the owner lock, quota/replay/reserve operations reconcile the five-minute nonterminal lease: an expired reservation releases zero seconds, while expired dispatching or started rows finalize the full reservation conservatively. The owner foreign key uses `ON DELETE CASCADE`; the file repository implements the same contract atomically.
