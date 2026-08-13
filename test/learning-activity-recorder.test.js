@@ -7,7 +7,11 @@ import {
   GENERATED_GRAMMAR_REVISION,
   GRAMMAR_ACTIVE_PRACTICE_TYPES,
   GRAMMAR_ERROR_CODES,
+  GRAMMAR_PRACTICE_MODES,
   GRAMMAR_PREACTIVATION_LEGACY_TOPIC_IDS,
+  GRAMMAR_RECOMMENDATION_VERSION,
+  GRAMMAR_TARGETED_MIN_ERROR_ITEMS,
+  GRAMMAR_TARGETED_MIN_EXACT_ITEMS,
   isBuiltinGrammarDiagnosticId,
   isGrammarConfusionPair,
   isGrammarErrorCode,
@@ -16,13 +20,13 @@ import {
   parseGeneratedGrammarItemReference,
 } from '../public/grammar-domain-contract.js';
 import { GRAMMAR_CATALOG, GRAMMAR_CATALOG_V1, GRAMMAR_CATALOG_V2, getGrammarCatalogRuntime, validateGeneratedGrammarSupplement } from '../public/grammar-catalog.js';
-import { migrateMasteryRecord, reduceMastery } from '../public/modules/grammar.js';
+import { EasyBoostGrammar, migrateMasteryRecord, reduceMastery } from '../public/modules/grammar.js';
 import { grammarMasteryEventSchema, hasExactActiveTransferPairCoverage } from '../validation/grammar-mastery.js';
 
 const rawSource = await fs.readFile(new URL('../public/learning-activity-recorder.js', import.meta.url), 'utf8');
 const grammarScreenSource = await fs.readFile(new URL('../public/screens/grammar.js', import.meta.url), 'utf8');
 const grammarModuleSource = (await fs.readFile(new URL('../public/modules/grammar.js', import.meta.url), 'utf8'))
-  .replace(/^import .*;\r?\n/gmu, '')
+  .replace(/^import(?:[\s\S]*?)from '[^']+';\r?\n/gmu, '')
   .replace(/^export /gmu, '');
 const source = rawSource
   .replace(/^import\s*\{[\s\S]*?\}\s*from\s*'\.\/adaptive-session-runtime\.js';\r?\n/mu, '')
@@ -65,7 +69,7 @@ function recorderHarness(active = null) {
   vm.runInNewContext(source, {
     window,
     GRAMMAR_CATALOG, GRAMMAR_CATALOG_V1, GRAMMAR_CATALOG_V2, getGrammarCatalogRuntime, validateGeneratedGrammarSupplement,
-    isGrammarErrorCode, parseGrammarConfusionPair,
+    GRAMMAR_PRACTICE_MODES, isGrammarErrorCode, parseGrammarConfusionPair,
     adaptiveRuntimeSnapshot: () => ({ active }),
     completeAdaptiveModuleActivity: async (completion) => {
       adaptive.push(completion);
@@ -87,6 +91,7 @@ function grammarScreenHarness(options = {}) {
   const capacityRequests = [];
   const masteryBatches = [];
   const masteryEvents = [];
+  const apiCalls = [];
   const voiceErrors = [];
   const timers = [];
   const elements = new Map();
@@ -152,7 +157,8 @@ function grammarScreenHarness(options = {}) {
     GRAMMAR_CATALOG, GRAMMAR_CATALOG_V1, GRAMMAR_CATALOG_V2, getGrammarCatalogRuntime, validateGeneratedGrammarSupplement,
     grammarActivityId, splitLearningActivityDuration,
     GENERATED_GRAMMAR_REVISION, GRAMMAR_ACTIVE_PRACTICE_TYPES, GRAMMAR_ERROR_CODES,
-    GRAMMAR_PREACTIVATION_LEGACY_TOPIC_IDS,
+    GRAMMAR_PRACTICE_MODES, GRAMMAR_PREACTIVATION_LEGACY_TOPIC_IDS, GRAMMAR_RECOMMENDATION_VERSION,
+    GRAMMAR_TARGETED_MIN_ERROR_ITEMS, GRAMMAR_TARGETED_MIN_EXACT_ITEMS,
     isBuiltinGrammarDiagnosticId, isGrammarConfusionPair, isGrammarErrorCode, parseGrammarConfusionPair,
     parseGeneratedGrammarItemId, parseGeneratedGrammarItemReference,
     adaptiveRuntimeSnapshot: () => ({ active }),
@@ -161,7 +167,8 @@ function grammarScreenHarness(options = {}) {
       return { execution: { revision: 2 } };
     },
     S, SRV: false, TOKEN: '', WBTN: 'background:#fff;color:#2B2B2B;border:1px solid #F0EAE2;',
-    apiPost: async () => ({}),
+    apiGet: async (path) => { apiCalls.push({ method: 'GET', path }); return options.apiGet ? options.apiGet(path) : {}; },
+    apiPost: async (path, body) => { apiCalls.push({ method: 'POST', path, body: JSON.parse(JSON.stringify(body || null)) }); return options.apiPost ? options.apiPost(path, body) : {}; },
     examModule: {
       elapsedSeconds: (startedAt, endedAt) => Math.floor((endedAt - startedAt) / 1_000),
       record: (record, score) => ({ ...(record || {}), n: Number(record?.n || 0) + 1, last: score, best: Math.max(Number(record?.best || 0), score) }),
@@ -192,10 +199,14 @@ function grammarScreenHarness(options = {}) {
     .concat(`
       window.__grammarScreenTest={
         gStart:gStart,gReview:gReview,gTheory:gTheory,gResume:gResume,gExamStart:gExamStart,gExamCheck:gExamCheck,
+        gStartMixed:function(){return gStartMixed()},
+        gStartTargeted:function(){return gStartTargeted()},
         restore:initGrammar,
         finish:gFinish,finishReview:gFinishRev,sessionMode:function(){return GS&&GS.mode},sessionTopic:function(){return GS&&GS.t},
         sessionSnapshot:function(){var item=GS&&GS.queue[GS.i];return GS?{sessionId:GS.sessionId,topic:GS.t,index:GS.i,
-          itemId:item&&item.q.id,phase:GS.phase,done:GS.done,ok:GS.ok}:null},
+          practiceMode:GS.practiceMode,scope:GS.scope,focus:GS.recommendation&&GS.recommendation.pointer||null,itemId:item&&item.q.id,phase:GS.phase,done:GS.done,ok:GS.ok,
+          queue:GS.queue.map(function(entry){return{id:entry.q.id,topicId:entry.t||GS.t}})}:null},
+        markup:function(){return document.getElementById('g_area').innerHTML},
         gToThemes:function(){window.__skipGrammarArea=true;try{gToThemes()}finally{window.__skipGrammarArea=false}},
         masteryAssisted:function(){return Boolean(GS&&GS.masteryAssisted)},masteryStage:function(topic){return gRec(topic).stage},
         commitCurrentAnswer:function(correct){var item=GS&&GS.queue[GS.i];if(item)gAnswer(correct,item)},
@@ -231,6 +242,7 @@ function grammarScreenHarness(options = {}) {
     masteryBatches,
     masteryEvents,
     voiceErrors,
+    apiCalls,
     area: element('g_area'),
     stateSnapshot() { return JSON.parse(JSON.stringify(S)); },
     runTimers() { while (timers.length) timers.shift()(); },
@@ -238,6 +250,218 @@ function grammarScreenHarness(options = {}) {
     setActive(value) { active = value; },
   };
 }
+
+test('mixed browser practice hides topic hints and restores its exact device-local queue offline', () => {
+  const first = grammarScreenHarness();
+  first.screen.gStartMixed();
+  const started = first.screen.sessionSnapshot();
+  const current = first.screen.currentItem();
+
+  assert.equal(started.practiceMode, 'mixed_practice');
+  assert.equal(started.scope, 'mixed');
+  assert.equal(started.queue.length, 16);
+  assert.ok(new Set(started.queue.map((entry) => entry.topicId)).size >= 8);
+  assert.match(first.screen.markup(), /Смешанная практика/u);
+  assert.doesNotMatch(first.screen.markup(), new RegExp(GRAMMAR_CATALOG.topics[current.topic].n, 'u'));
+  assert.doesNotMatch(first.screen.markup(), /id="g_rule_btn"/u,
+    'a rule button would disclose the hidden topic before the answer');
+
+  const local = first.stateSnapshot();
+  assert.equal(local.grammarRunner.schema, 'grammar-runner-v5');
+  assert.equal(local.grammarRunner.scope, 'mixed');
+  assert.ok(local.grammarRunner.queue.every((entry) => Number.isInteger(entry.topicId)));
+
+  const reloaded = grammarScreenHarness({ state: local });
+  reloaded.screen.restore();
+  assert.deepEqual(JSON.parse(JSON.stringify(reloaded.screen.sessionSnapshot())), JSON.parse(JSON.stringify(started)),
+    'reload uses only the addressable local snapshot and does not rebuild a different queue');
+  assert.match(reloaded.screen.markup(), /Смешанная практика/u);
+});
+
+test('targeted browser practice resolves the exact server focus once and resumes it offline', async () => {
+  const focusItem = GRAMMAR_CATALOG.bank[3].c[0];
+  const diagnostic = focusItem.diagnostics.find(Boolean);
+  const pointer = {
+    version: 'grammar-focus-v1', catalogVersion: GRAMMAR_CATALOG.version,
+    catalogRevision: GRAMMAR_CATALOG.revision, topicId: 3,
+    errorCode: diagnostic.errorCode, confusionPair: diagnostic.confusionPair || null,
+    masteryRevision: 0, eligibleAt: null, earlyPractice: false,
+    stateFingerprint: 'a'.repeat(64), ref: 'b'.repeat(64),
+  };
+  const recommendation = { pointer, reasonCodes: ['recent_weakness'], observedErrorCount: 1, observedAt: 900 };
+  const selected = EasyBoostGrammar.buildTargetedPracticeQueue(
+    GRAMMAR_CATALOG.bank, pointer, { seed: pointer.ref },
+  );
+  const first = grammarScreenHarness({
+    apiGet: async () => ({ recommendation }),
+    apiPost: async () => ({
+      recommendation,
+      catalog: { version: GRAMMAR_CATALOG.version, revision: GRAMMAR_CATALOG.revision },
+      itemIds: selected.map((entry) => entry.q.id),
+      completionToken: 'g'.repeat(43),
+    }),
+  });
+
+  await first.screen.gStartTargeted();
+  const started = first.screen.sessionSnapshot();
+  assert.equal(started.practiceMode, 'targeted_practice');
+  assert.equal(started.scope, 'topic');
+  assert.deepEqual(JSON.parse(JSON.stringify(started.focus)), pointer);
+  assert.equal(started.queue.length, 8);
+  assert.ok(started.queue.every((entry) => entry.topicId === pointer.topicId));
+  assert.deepEqual(first.apiCalls.map((call) => `${call.method} ${call.path}`), [
+    'GET /api/v1/grammar/recommendation',
+    'POST /api/v1/grammar/recommendation/resolve',
+  ]);
+  assert.deepEqual(first.apiCalls[1].body, { pointer });
+  assert.match(first.screen.markup(), /Точечная практика/u);
+  assert.doesNotMatch(first.screen.markup(), new RegExp(GRAMMAR_CATALOG.topics[pointer.topicId].n, 'u'));
+  assert.doesNotMatch(first.screen.markup(), /id="g_rule_btn"/u);
+
+  const local = first.stateSnapshot();
+  const reloaded = grammarScreenHarness({ state: local });
+  reloaded.screen.restore();
+  assert.deepEqual(JSON.parse(JSON.stringify(reloaded.screen.sessionSnapshot())), JSON.parse(JSON.stringify(started)));
+  assert.equal(reloaded.apiCalls.length, 0, 'an already authorized local queue resumes without network calls');
+});
+
+test('mixed completion persists exact cross-topic history without granting a topic stage', async () => {
+  const harness = grammarScreenHarness({
+    saveGrammarMasteryEvent: (topicId, event) => ({
+      eventId: event.id, applied: true, replay: false, conflict: false,
+      record: reduceMastery(migrateMasteryRecord(), event, { now: 10_000, clockAuthority: 'server' }),
+    }),
+  });
+  harness.screen.gStartMixed();
+  while (harness.screen.currentItem()) harness.screen.answerCurrent(true);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(harness.masteryEvents.length, 1);
+  const submitted = harness.masteryEvents[0];
+  assert.equal(submitted.event.session.scope, 'mixed');
+  assert.equal(submitted.event.session.mode, 'mixed_practice');
+  assert.equal(submitted.event.session.items.length, 16);
+  assert.ok(submitted.event.session.items.every((item) => Number.isInteger(item.topicId)));
+  assert.equal(grammarMasteryEventSchema.safeParse(submitted).success, true);
+  assert.equal(harness.stateSnapshot().grammarMastery[submitted.topicId].stage, 'not_started');
+  assert.equal(harness.ordinary.length, 1);
+  assert.equal(harness.ordinary[0].activity, 'grammar_mixed_practice');
+  assert.deepEqual(harness.ordinary[0].metadata, {
+    mode: 'mixed_practice', source: 'builtin', helpUsed: false, hintsUsed: 0,
+  });
+  assert.match(harness.screen.markup(), /Смешанная практика/u);
+  assert.match(harness.screen.markup(), /onclick="gStartMixed\(\)"/u);
+});
+
+test('a failed mixed item keeps its paired transfer and exact pending event across reload', async () => {
+  const first = grammarScreenHarness();
+  first.screen.gStartMixed();
+  first.screen.answerCurrent(false);
+  while (first.screen.currentItem()) first.screen.answerCurrent(true);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const submitted = first.masteryEvents[0];
+  assert.equal(submitted.event.session.items.length, 17);
+  assert.equal(submitted.event.session.items.filter((item) => item.transfer).length, 1);
+  assert.equal(submitted.event.assisted, true);
+  assert.equal(Object.hasOwn(submitted.event, 'independentError'), false);
+  assert.equal(grammarMasteryEventSchema.safeParse(submitted).success, true);
+  const pendingState = first.stateSnapshot();
+  assert.equal(pendingState.grammarRunner.phase, 'completion_pending');
+
+  const reloaded = grammarScreenHarness({ state: pendingState });
+  reloaded.screen.restore();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(reloaded.masteryEvents.length, 1,
+    'a mixed disclosure must not make the exact device-local pending event unrestorable');
+  assert.deepEqual(reloaded.masteryEvents[0].event, submitted.event);
+});
+
+test('targeted completion reports its server-selected exact weakness but cannot advance mastery', async () => {
+  const focusItem = GRAMMAR_CATALOG.bank[3].c[0];
+  const diagnostic = focusItem.diagnostics.find(Boolean);
+  const pointer = {
+    version: 'grammar-focus-v1', catalogVersion: GRAMMAR_CATALOG.version,
+    catalogRevision: GRAMMAR_CATALOG.revision, topicId: 3,
+    errorCode: diagnostic.errorCode, confusionPair: diagnostic.confusionPair || null,
+    masteryRevision: 0, eligibleAt: null, earlyPractice: false,
+    stateFingerprint: 'c'.repeat(64), ref: 'd'.repeat(64),
+  };
+  const recommendation = { pointer, reasonCodes: ['recent_weakness'], observedErrorCount: 1, observedAt: 900 };
+  const selected = EasyBoostGrammar.buildTargetedPracticeQueue(
+    GRAMMAR_CATALOG.bank, pointer, { seed: pointer.ref },
+  );
+  const harness = grammarScreenHarness({
+    apiGet: async () => ({ recommendation }),
+    apiPost: async () => ({
+      recommendation,
+      catalog: { version: GRAMMAR_CATALOG.version, revision: GRAMMAR_CATALOG.revision },
+      itemIds: selected.map((entry) => entry.q.id),
+      completionToken: 'h'.repeat(43),
+    }),
+    saveGrammarMasteryEvent: (topicId, event) => ({
+      eventId: event.id, applied: true, replay: false, conflict: false,
+      record: reduceMastery(migrateMasteryRecord(), event, { now: 10_000, clockAuthority: 'server' }),
+    }),
+  });
+
+  await harness.screen.gStartTargeted();
+  while (harness.screen.currentItem()) harness.screen.answerCurrent(true);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const submitted = harness.masteryEvents[0];
+  assert.equal(grammarMasteryEventSchema.safeParse(submitted).success, true);
+  assert.equal(submitted.event.session.mode, 'targeted_practice');
+  assert.equal(harness.stateSnapshot().grammarMastery[3].stage, 'not_started');
+  assert.deepEqual(harness.ordinary[0].metadata, {
+    mode: 'targeted_practice', source: 'builtin', helpUsed: false, hintsUsed: 0,
+    grammarTopicId: 3, grammarErrorCode: pointer.errorCode,
+    ...(pointer.confusionPair ? { grammarConfusionPair: pointer.confusionPair } : {}),
+  });
+  assert.match(harness.screen.markup(), /Точечная практика/u);
+  assert.match(harness.screen.markup(), /onclick="gStartTargeted\(\)"/u);
+});
+
+test('a failed targeted item keeps its exact authorized transfer queue across reload', async () => {
+  const focusItem = GRAMMAR_CATALOG.bank[3].c[0];
+  const diagnostic = focusItem.diagnostics.find(Boolean);
+  const pointer = {
+    version: 'grammar-focus-v1', catalogVersion: GRAMMAR_CATALOG.version,
+    catalogRevision: GRAMMAR_CATALOG.revision, topicId: 3,
+    errorCode: diagnostic.errorCode, confusionPair: diagnostic.confusionPair || null,
+    masteryRevision: 0, eligibleAt: null, earlyPractice: false,
+    stateFingerprint: 'e'.repeat(64), ref: 'f'.repeat(64),
+  };
+  const recommendation = { pointer, reasonCodes: ['recent_weakness'], observedErrorCount: 1, observedAt: 900 };
+  const selected = EasyBoostGrammar.buildTargetedPracticeQueue(
+    GRAMMAR_CATALOG.bank, pointer, { seed: pointer.ref },
+  );
+  const first = grammarScreenHarness({
+    apiGet: async () => ({ recommendation }),
+    apiPost: async () => ({
+      recommendation,
+      catalog: { version: GRAMMAR_CATALOG.version, revision: GRAMMAR_CATALOG.revision },
+      itemIds: selected.map((entry) => entry.q.id),
+      completionToken: 'i'.repeat(43),
+    }),
+  });
+
+  await first.screen.gStartTargeted();
+  first.screen.answerCurrent(false);
+  while (first.screen.currentItem()) first.screen.answerCurrent(true);
+  await new Promise((resolve) => setImmediate(resolve));
+  const submitted = first.masteryEvents[0];
+  assert.equal(submitted.event.session.items.length, 9);
+  assert.equal(submitted.event.session.items.filter((item) => item.transfer).length, 1);
+  assert.equal(grammarMasteryEventSchema.safeParse(submitted).success, true);
+
+  const reloaded = grammarScreenHarness({ state: first.stateSnapshot() });
+  reloaded.screen.restore();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(reloaded.masteryEvents[0].event, submitted.event);
+  assert.equal(reloaded.apiCalls.length, 0,
+    'an authorized targeted transfer queue restores without resolving a new focus');
+});
 
 function preActivationLegacyState({ topicId = 14, queueIds = null, gramAi = {} } = {}) {
   const seed = grammarScreenHarness({ state: { gram: {}, grammarMastery: {}, gramAi } });

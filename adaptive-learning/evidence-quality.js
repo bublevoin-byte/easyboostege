@@ -1,6 +1,7 @@
 import { READING_TASK10_SETS } from '../public/content/reading/task10-v1.js';
 import { READING_TASK11_SETS } from '../public/content/reading/task11-v1.js';
 import { READING_TASK12_18_SETS } from '../public/content/reading/task12-18-v1.js';
+import { GRAMMAR_PRACTICE_MODES } from '../public/grammar-domain-contract.js';
 
 export const MODULE_ATTEMPT_EVIDENCE_QUALITIES = Object.freeze([
   'client_reported',
@@ -14,7 +15,7 @@ const READING_SET_BY_ID = new Map([
 
 const MODULE_ATTEMPT_EVIDENCE_QUALITY_SET = new Set(MODULE_ATTEMPT_EVIDENCE_QUALITIES);
 const ASSISTED_MODES = new Set([
-  'topic_practice', 'spaced_review', 'exam_19_24',
+  ...GRAMMAR_PRACTICE_MODES, 'spaced_review', 'exam_19_24',
   'reading_headings', 'reading_detail', 'reading_gaps', 'reading_exam',
   'listening_matching', 'listening_true_false', 'listening_interview', 'listening_exam',
 ]);

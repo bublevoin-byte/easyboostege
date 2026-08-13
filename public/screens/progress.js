@@ -6,6 +6,7 @@
 import {registerRouteHook} from '../router.js';
 import {clearAdaptiveOverviewCache,readAdaptiveOverviewCacheSnapshot,writeAdaptiveOverviewCache} from '../adaptive-overview-cache.js';
 import {adaptiveRuntimeSnapshot,adaptiveSessionReplacementAvailable,advanceAdaptiveBreak,beginAdaptiveBlock,completeAdaptiveVoiceTutorRepeat,finishAdaptiveSession,resumeAdaptiveExecution} from '../adaptive-session-runtime.js';
+import {GRAMMAR_CATALOG} from '../grammar-catalog.js';
 import {S,apiCanUseOfflineFallback,apiGet,apiIsAuthorityFailure,apiMessage,apiPost,apiPostIdempotent,apiPut,apiResponseOwner,currentUser,invalidateLearningAuthority,profileModule,progressModule,registerAuthorityReset,registerStartHook,setTxt} from '../app.js';
 
 function syncAdaptivePlanEntries(){
@@ -100,6 +101,8 @@ function drawAdaptivePlan(payload){
   const scheduled=Boolean(payload&&payload.retention&&payload.retention.rediagnostic&&payload.retention.rediagnostic.due&&!profile.needsDiagnostic);const diagnostic=profile.needsDiagnostic?' Нужна короткая диагностика для уточнения.':scheduled?' Пора обновить короткую диагностику; занятия остаются доступны.':'';
   const assisted=Number(profile.assistedEvidenceCount)>0&&establishedSkillCount<skillCount?' Результаты с подсказкой не подтверждают владение навыком.':'';
   summary.textContent=state+' · подтверждено навыков: '+establishedSkillCount+' из '+skillCount+' · уверенность '+confidence+'% · данных: '+observed+'.'+(weakest?' Сейчас важнее всего: '+weakest.id+' ('+weakest.mastery+'%).':'')+assisted+diagnostic;
+  const focusNode=document.getElementById('adaptive_grammar_focus');const recommendation=payload&&payload.grammarRecommendation;const focus=recommendation&&recommendation.pointer;
+  if(focusNode){focusNode.hidden=!focus;if(focus){const topic=GRAMMAR_CATALOG.topics[focus.topicId];const errorLabels={construction_choice:'выбор конструкции',word_or_verb_form:'форма слова или глагола',auxiliary:'вспомогательный глагол',agreement:'согласование',word_order:'порядок слов',negation_or_question:'отрицание или вопрос',confusion_pair:'пара похожих конструкций'};const pair=focus.confusionPair?' · '+focus.confusionPair.replace('__',' ↔ ').replaceAll('_',' '):'';const early=focus.earlyPractice?' · ранняя практика из-за близкого экзамена, без досрочного повышения стадии':'';focusNode.textContent='Точный фокус грамматики: '+(topic&&topic.n||'тема '+focus.topicId)+' · '+(errorLabels[focus.errorCode]||focus.errorCode)+pair+early}}
   drawAdaptiveForecast(payload&&payload.plan);
   const access=payload&&payload.access||adaptiveAccessState;const start=document.getElementById('adaptive_diagnostic_start');if(start)start.hidden=!adaptiveDiagnosticDue(payload)||!(access&&access.capabilities&&access.capabilities.shortDiagnostic);
 }
@@ -211,7 +214,8 @@ function clearAdaptivePrivateUi(authority=adaptiveViewAuthority){
   if(authority&&(!sameAdaptiveOwner(authority,adaptiveViewAuthority)||(Number.isSafeInteger(authority.viewToken)&&authority.viewToken!==adaptiveViewToken)))return false;
   adaptiveAccessState=null;adaptiveSessionPreview=null;adaptiveCurrentSession=null;adaptiveCurrentExecution=null;
   ['adaptive_target_score','adaptive_exam_date','adaptive_weekly_minutes'].forEach(function(id){const input=document.getElementById(id);if(input)input.value=''});
-  ['adaptive_access_title','adaptive_access_copy','adaptive_plan_summary','adaptive_goal_notice','adaptive_goal_errors','adaptive_report_notice'].forEach(function(id){const node=document.getElementById(id);if(node)node.textContent=''});
+  ['adaptive_access_title','adaptive_access_copy','adaptive_plan_summary','adaptive_grammar_focus','adaptive_goal_notice','adaptive_goal_errors','adaptive_report_notice'].forEach(function(id){const node=document.getElementById(id);if(node)node.textContent=''});
+  const grammarFocus=document.getElementById('adaptive_grammar_focus');if(grammarFocus)grammarFocus.hidden=true;
   const access=document.getElementById('adaptive_access');if(access)delete access.dataset.tier;
   const paywall=document.getElementById('adaptive_paywall');if(paywall)paywall.hidden=true;
   const paywallCopy=document.getElementById('adaptive_paywall_copy');if(paywallCopy)paywallCopy.textContent='';

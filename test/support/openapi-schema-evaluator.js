@@ -1,3 +1,21 @@
+import { getGrammarCatalogRuntime } from '../../public/grammar-catalog.js';
+
+function exactGrammarTransfers(items, catalog) {
+  const runtime = getGrammarCatalogRuntime(catalog?.version, catalog?.revision);
+  if (!runtime || !Array.isArray(items)) return false;
+  return items.every((item, index) => {
+    if (!item.transfer) return item.correct || items[index + 1]?.transfer === true;
+    const original = items[index - 1];
+    const originalEntry = runtime.getItem(original?.id);
+    const transferEntry = runtime.getItem(item.id);
+    return original?.transfer === false && original?.correct === false
+      && originalEntry?.topicId === transferEntry?.topicId
+      && originalEntry?.item?.type === transferEntry?.item?.type
+      && originalEntry?.item?.transferPair === transferEntry?.item?.transferPair
+      && original.id !== item.id;
+  });
+}
+
 function splitFlow(source, separator = ',') {
   const parts = [];
   let quote = null;
@@ -207,6 +225,93 @@ export function compileOpenApiSchema(openapi, name) {
         && (outcome.confusionPair || null) === (evidence.confusionPair || null));
       if (!matchingOutcome) {
         errors.push(`${path}/independentError must exactly equal one wrong session.items outcome`); return false;
+      }
+    }
+    if (schema['x-easyboost-grammar-topic-items'] === 'session-items') {
+      const topicId = value?.topicId;
+      const items = value?.event?.session?.items;
+      const topicMatches = Array.isArray(items) && Number.isInteger(topicId)
+        && items.every((item) => Number(/^core\.g\.(\d+)\./u.exec(item?.id || '')?.[1]) === topicId);
+      if (!topicMatches) {
+        errors.push(`${path}/event/session/items must all belong to topicId`); return false;
+      }
+    }
+    if (schema['x-easyboost-grammar-mixed-bindings'] === 'event-session') {
+      const event = value?.event;
+      const items = event?.session?.items;
+      const originals = Array.isArray(items) ? items.filter((item) => !item.transfer) : [];
+      const topics = [...new Set(originals.map((item) => item.topicId))];
+      const expectations = event?.session?.topicExpectations;
+      const exactExpectations = Array.isArray(expectations) && expectations.length === topics.length
+        && expectations.every((item, index) => item?.topicId === topics[index]);
+      const ownerExpectation = expectations?.find((item) => item?.topicId === value?.topicId);
+      const ownerMatches = ownerExpectation
+        && ownerExpectation.expectedRevision === event.expectedRevision
+        && ownerExpectation.expectedStage === event.expectedStage
+        && ownerExpectation.expectedReviewStep === event.expectedReviewStep;
+      const independentErrors = event?.independentErrors || [];
+      const exactErrors = Array.isArray(independentErrors)
+        && new Set(independentErrors.map((item) => item.topicId)).size === independentErrors.length
+        && independentErrors.every((evidence) => items.some((outcome) => outcome?.correct === false
+          && outcome.topicId === evidence.topicId && outcome.id === evidence.itemId
+          && outcome.diagnosticId === evidence.diagnosticId && outcome.errorCode === evidence.reason
+          && (outcome.confusionPair || null) === (evidence.confusionPair || null)));
+      if (!exactExpectations || !ownerMatches || !exactErrors) {
+        errors.push(`${path}/event/session mixed bindings are not exact`); return false;
+      }
+    }
+    if (schema['x-easyboost-grammar-targeted-binding'] === 'event-session') {
+      const session = value?.event?.session;
+      const binding = session?.recommendation;
+      const originals = Array.isArray(session?.items) ? session.items.filter((item) => !item.transfer) : [];
+      const ids = originals.map((item) => item.id);
+      const runtime = getGrammarCatalogRuntime(session?.catalog?.version, session?.catalog?.revision);
+      const pointer = binding?.pointer;
+      const supports = (item, exact) => Boolean(item && pointer) && (item.type === 'choice'
+        ? item.diagnostics?.some((diagnostic) => diagnostic?.errorCode === pointer.errorCode
+          && (!exact || (diagnostic.confusionPair || null) === (pointer?.confusionPair || null)))
+        : item.errorSkill === pointer.errorCode
+          && (!exact || (item.confusionPair || null) === (pointer.confusionPair || null)));
+      const selected = ids.map((id) => runtime?.getItem(id)?.item);
+      const exactCount = selected.filter((item) => supports(item, true)).length;
+      const errorCount = selected.filter((item) => supports(item, false)).length;
+      if (!binding || pointer?.topicId !== value?.topicId
+        || pointer?.catalogVersion !== session?.catalog?.version
+        || pointer?.catalogRevision !== session?.catalog?.revision
+        || pointer?.masteryRevision !== value?.event?.expectedRevision
+        || JSON.stringify(binding.itemIds) !== JSON.stringify(ids)
+        || exactCount < 2 || errorCount < 4) {
+        errors.push(`${path}/event/session targeted recommendation binding is not exact`); return false;
+      }
+    }
+    if (schema['x-easyboost-grammar-mixed-balance'] === 'four-types-eight-topics') {
+      const items = value?.items;
+      const originals = Array.isArray(items) ? items.filter((item) => !item.transfer) : [];
+      const typeCounts = new Map();
+      const topicCounts = new Map();
+      for (const item of originals) {
+        typeCounts.set(item.type, (typeCounts.get(item.type) || 0) + 1);
+        topicCounts.set(item.topicId, (topicCounts.get(item.topicId) || 0) + 1);
+      }
+      const exactTypes = ['choice', 'input', 'correction', 'transform']
+        .every((type) => typeCounts.get(type) === 4) && typeCounts.size === 4;
+      const balancedTopics = topicCounts.size >= 8
+        && [...topicCounts.values()].every((count) => count <= 2);
+      const exactTransfers = exactGrammarTransfers(items, value?.catalog)
+        && items.every((item, index) => !item.transfer
+          || items[index - 1]?.topicId === item.topicId);
+      if (!Array.isArray(items) || originals.length !== 16 || !exactTypes || !balancedTopics
+        || !exactTransfers) {
+        errors.push(`${path}/items must contain four originals per type across at least eight topics, max two per topic`);
+        return false;
+      }
+    }
+    if (schema['x-easyboost-grammar-targeted-balance'] === 'eight-originals') {
+      const items = value?.items;
+      const originals = Array.isArray(items) ? items.filter((item) => !item.transfer) : [];
+      const exactTransfers = exactGrammarTransfers(items, value?.catalog);
+      if (originals.length !== 8 || !exactTransfers) {
+        errors.push(`${path}/items must contain eight originals and only adjacent transfers`); return false;
       }
     }
     if (schema['x-easyboost-grammar-legacy-retry-order'] === 'session-items') {

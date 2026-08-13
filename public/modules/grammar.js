@@ -1,5 +1,14 @@
 import { grammarActivityId, splitLearningActivityDuration } from '../learning-activity-contract.js';
-import { GENERATED_GRAMMAR_REVISION, GRAMMAR_ACTIVE_PRACTICE_TYPES, GRAMMAR_ERROR_CODES, parseGeneratedGrammarItemId, parseGeneratedGrammarItemReference } from '../grammar-domain-contract.js';
+import {
+  GENERATED_GRAMMAR_REVISION,
+  GRAMMAR_ACTIVE_PRACTICE_TYPES,
+  GRAMMAR_ERROR_CODES,
+  GRAMMAR_PRACTICE_MODES,
+  GRAMMAR_TARGETED_MIN_ERROR_ITEMS,
+  GRAMMAR_TARGETED_MIN_EXACT_ITEMS,
+  parseGeneratedGrammarItemId,
+  parseGeneratedGrammarItemReference,
+} from '../grammar-domain-contract.js';
 
 export const EasyBoostGrammar = (function initializeGrammarModule(global) {
   'use strict';
@@ -101,8 +110,8 @@ export const EasyBoostGrammar = (function initializeGrammarModule(global) {
       if (!historySessionHasValidGeneratedProvenance(session)) return null;
       return {
         id: typeof session.id === 'string' ? session.id : null,
-        scope: session.scope === 'topic' ? 'topic' : null,
-        mode: ['topic_practice', 'legacy_practice'].includes(session.mode) ? session.mode : null,
+        scope: ['topic', 'mixed'].includes(session.scope) ? session.scope : null,
+        mode: GRAMMAR_PRACTICE_MODES.includes(session.mode) ? session.mode : null,
         source: ['builtin', 'mixed', 'generated'].includes(session.source) ? session.source : null,
         catalog: {
           version: typeof session.catalog?.version === 'string' ? session.catalog.version : null,
@@ -110,6 +119,8 @@ export const EasyBoostGrammar = (function initializeGrammarModule(global) {
         },
         items: Array.isArray(session.items) ? session.items.slice(0, 32).map((item) => ({
           id: typeof item?.id === 'string' ? item.id : null,
+          ...(Number.isInteger(item?.topicId) && item.topicId >= 1 && item.topicId <= 20
+            ? { topicId: item.topicId } : {}),
           type: REQUIRED_PRACTICE_TYPES.includes(item?.type) ? item.type : null,
           transfer: Boolean(item?.transfer),
           correct: Boolean(item?.correct),
@@ -258,8 +269,10 @@ export const EasyBoostGrammar = (function initializeGrammarModule(global) {
     record.stage = stage;
   }
 
-  function independentRegressionReason(event) {
-    const evidence = event?.independentError;
+  function independentRegressionReason(event, topicId = null) {
+    const evidence = event?.session?.mode === 'mixed_practice'
+      ? event?.independentErrors?.find((candidate) => candidate?.topicId === topicId)
+      : event?.independentError;
     const reason = normalizeRegressionReason(evidence?.reason);
     if (!reason || event?.source === 'generated' || event?.assisted !== true) return null;
     if (event.type === 'review_completed') {
@@ -268,6 +281,7 @@ export const EasyBoostGrammar = (function initializeGrammarModule(global) {
     }
     if (event.type !== 'session_completed' || !Array.isArray(event.session?.items)) return null;
     const matched = event.session.items.some((outcome) => outcome && outcome.correct === false
+      && (event.session.mode !== 'mixed_practice' || outcome.topicId === topicId)
       && outcome.id === evidence.itemId
       && outcome.diagnosticId === evidence.diagnosticId
       && outcome.errorCode === reason
@@ -291,8 +305,22 @@ export const EasyBoostGrammar = (function initializeGrammarModule(global) {
     return true;
   }
 
+  function advanceEligibleRecall(record, at) {
+    if (!['learned', 'confirmed'].includes(record.stage)
+      || record.eligibleAt == null || at < record.eligibleAt) return false;
+    record.reviewStep = Math.min(MASTERY_INTERVAL_DAYS.length, record.reviewStep + 1);
+    record.highestReviewStep = Math.max(record.highestReviewStep, record.reviewStep);
+    setStage(record, record.reviewStep >= MASTERY_INTERVAL_DAYS.length ? 'stable' : 'confirmed', at);
+    record.eligibleAt = record.reviewStep >= MASTERY_INTERVAL_DAYS.length
+      ? null
+      : at + MASTERY_INTERVAL_DAYS[record.reviewStep] * DAY_MS;
+    record.lastRegressionReason = null;
+    return true;
+  }
+
   function completedRequiredPractice(event) {
-    if (event.assisted || event.source !== 'builtin') return false;
+    if (event.assisted || event.source !== 'builtin'
+      || (event.session && event.session.mode !== 'topic_practice')) return false;
     const completedTypes = new Set(Array.isArray(event.completedTypes) ? event.completedTypes : []);
     if (!REQUIRED_PRACTICE_TYPES.every((type) => completedTypes.has(type))) return false;
     if (!event.typeScores || typeof event.typeScores !== 'object') return false;
@@ -348,30 +376,50 @@ export const EasyBoostGrammar = (function initializeGrammarModule(global) {
       }
     } else if (event.type === 'session_completed') {
       if (!serverCanonical || !matchesExpectedMastery(next, event)) return next;
+      const topicStageEligible = stageEligible && (!event.session
+        || ['topic_practice', 'legacy_practice'].includes(event.session.mode));
+      const sessionMode = event.session?.mode;
+      const topicId = Number(options.topicId);
+      const scopedItems = sessionMode === 'mixed_practice'
+        ? event.session.items.filter((item) => item?.topicId === topicId)
+        : event.session?.items || [];
+      const independentRecall = event.source === 'builtin'
+        && ['mixed_practice', 'targeted_practice'].includes(sessionMode)
+        && scopedItems.some((item) => item?.transfer !== true)
+        && scopedItems.every((item) => item?.correct === true)
+        && (sessionMode === 'mixed_practice' || event.assisted !== true);
       const fromStage = next.stage;
       next.lastAttemptAt = at;
       if (event.assisted) next.stats.assistedAttempts += 1;
-      const completedTypes = new Set(Array.isArray(event.completedTypes) ? event.completedTypes : []);
-      for (const type of REQUIRED_PRACTICE_TYPES) {
-        if (!completedTypes.has(type)) continue;
-        const score = event.typeScores?.[type];
-        const correct = boundedInteger(score?.correct);
-        const total = boundedInteger(score?.total);
-        if (total < 1 || correct > total) continue;
-        next.stats.correct += correct;
-        next.stats.errors += total - correct;
+      if (sessionMode === 'mixed_practice') {
+        next.stats.correct += scopedItems.filter((item) => item?.correct === true).length;
+        next.stats.errors += scopedItems.filter((item) => item?.correct === false).length;
+      } else {
+        const completedTypes = new Set(Array.isArray(event.completedTypes) ? event.completedTypes : []);
+        for (const type of REQUIRED_PRACTICE_TYPES) {
+          if (!completedTypes.has(type)) continue;
+          const score = event.typeScores?.[type];
+          const correct = boundedInteger(score?.correct);
+          const total = boundedInteger(score?.total);
+          if (total < 1 || correct > total) continue;
+          next.stats.correct += correct;
+          next.stats.errors += total - correct;
+        }
       }
-      const regressionReason = independentRegressionReason(event);
+      const regressionReason = independentRegressionReason(event, topicId);
       const sessionRegressed = regressionReason != null && markLateRegression(next, regressionReason, at);
-      if (stageEligible && next.stage === 'not_started') setStage(next, 'learning', at);
-      if (stageEligible && next.stage === 'learning' && completedRequiredPractice(event)) {
+      if (topicStageEligible && next.stage === 'not_started') setStage(next, 'learning', at);
+      if (topicStageEligible && next.stage === 'learning' && completedRequiredPractice(event)) {
         setStage(next, 'learned', at);
         next.reviewStep = 0;
         next.eligibleAt = at + MASTERY_INTERVAL_DAYS[0] * DAY_MS;
         next.lastRegressionReason = null;
       }
+      const recallAdvanced = !sessionRegressed && independentRecall
+        && advanceEligibleRecall(next, at);
       const stageAdvanced = MASTERY_STAGES.indexOf(next.stage) > MASTERY_STAGES.indexOf(fromStage);
-      const outcome = sessionRegressed ? 'regressed' : stageAdvanced ? 'advanced' : 'recorded';
+      const outcome = sessionRegressed ? 'regressed'
+        : recallAdvanced || stageAdvanced ? 'advanced' : 'recorded';
       appendMasteryHistory(next, event, at, fromStage, outcome);
       next.masteryRevision += 1;
     } else if (event.type === 'review_completed') {
@@ -380,20 +428,10 @@ export const EasyBoostGrammar = (function initializeGrammarModule(global) {
       next.lastAttemptAt = at;
       if (event.assisted) next.stats.assistedAttempts += 1;
       let reviewRegressed = false;
-      const regressionReason = independentRegressionReason(event);
+      const regressionReason = independentRegressionReason(event, Number(options.topicId));
       if (!event.passed && regressionReason != null) {
         reviewRegressed = markLateRegression(next, regressionReason, at);
-      } else if (stageEligible
-        && ['learned', 'confirmed'].includes(next.stage)
-        && next.eligibleAt != null && at >= next.eligibleAt) {
-        next.reviewStep = Math.min(MASTERY_INTERVAL_DAYS.length, next.reviewStep + 1);
-        next.highestReviewStep = Math.max(next.highestReviewStep, next.reviewStep);
-        setStage(next, next.reviewStep >= MASTERY_INTERVAL_DAYS.length ? 'stable' : 'confirmed', at);
-        next.eligibleAt = next.reviewStep >= MASTERY_INTERVAL_DAYS.length
-          ? null
-          : at + MASTERY_INTERVAL_DAYS[next.reviewStep] * DAY_MS;
-        next.lastRegressionReason = null;
-      }
+      } else if (stageEligible) advanceEligibleRecall(next, at);
       appendMasteryHistory(next, event, at, fromStage, reviewRegressed ? 'regressed'
         : event.assisted ? 'assisted' : !event.passed ? 'failed' : 'passed');
       next.masteryRevision += 1;
@@ -510,6 +548,125 @@ export const EasyBoostGrammar = (function initializeGrammarModule(global) {
       selected.push(...originals.map((question) => activeQueueItem(type, question, topic)));
     }
     return selected;
+  }
+
+  function itemWeaknesses(question) {
+    const result = [];
+    if (question?.type === 'choice') {
+      for (const diagnostic of question.diagnostics || []) {
+        if (!diagnostic) continue;
+        result.push({ errorCode: diagnostic.errorCode, confusionPair: diagnostic.confusionPair || null });
+      }
+    } else if (question?.errorSkill) {
+      result.push({ errorCode: question.errorSkill, confusionPair: question.confusionPair || null });
+    }
+    return result;
+  }
+
+  function weaknessHistory(records) {
+    const weights = new Map();
+    const seen = new Set();
+    for (const [topicText, rawRecord] of Object.entries(records || {})) {
+      const topicId = Number(topicText);
+      if (!Number.isInteger(topicId) || topicId < 1 || topicId > 20) continue;
+      const record = migrateMasteryRecord(rawRecord);
+      for (const entry of record.masteryHistory || []) {
+        if (entry?.session?.source !== 'builtin') continue;
+        const at = finiteTimestamp(entry?.at) || 0;
+        for (const outcome of entry?.session?.items || []) {
+          if (entry.session.scope === 'mixed' && Number(outcome?.topicId) !== topicId) continue;
+          if (outcome?.source === 'generated') continue;
+          const outcomeTopic = Number(outcome?.topicId) || topicId;
+          if (typeof outcome?.id === 'string') seen.add(outcome.id);
+          if (outcome?.correct || !normalizeRegressionReason(outcome?.errorCode)) continue;
+          const key = `${outcomeTopic}:${outcome.errorCode}:${outcome.confusionPair || '-'}`;
+          const current = weights.get(key) || { count: 0, lastAt: 0 };
+          current.count += 1;
+          current.lastAt = Math.max(current.lastAt, at);
+          weights.set(key, current);
+        }
+      }
+    }
+    return { weights, seen };
+  }
+
+  function buildMixedPracticeQueue(bankByTopic, records, options = {}) {
+    const random = practiceRandom(options.seed ?? options.random);
+    const { weights, seen } = weaknessHistory(records);
+    const topicUse = new Map();
+    const selected = [];
+    for (const type of REQUIRED_PRACTICE_TYPES) {
+      const candidates = [];
+      for (let topicId = 1; topicId <= 20; topicId += 1) {
+        const levels = activePracticeLevels(bankByTopic?.[topicId]);
+        for (const question of levels[type]) {
+          if (!question?.id || !question.transferPair) continue;
+          const weaknessWeight = itemWeaknesses(question).reduce((maximum, weakness) => {
+            const exact = weights.get(`${topicId}:${weakness.errorCode}:${weakness.confusionPair || '-'}`);
+            const broad = weights.get(`${topicId}:${weakness.errorCode}:-`);
+            return Math.max(maximum, (exact?.count || 0) * 80 + (broad?.count || 0) * 25
+              + Math.min(20, Math.floor(Math.max(exact?.lastAt || 0, broad?.lastAt || 0) / DAY_MS)));
+          }, 0);
+          const record = records?.[topicId] ? migrateMasteryRecord(records[topicId]) : null;
+          const dueWeight = record && masteryView(record, { now: finiteTimestamp(options.now) ?? Date.now() }).due ? 50 : 0;
+          candidates.push({
+            topicId, question,
+            score: weaknessWeight + dueWeight + (seen.has(question.id) ? 0 : 30) + random(),
+          });
+        }
+      }
+      candidates.sort((left, right) => right.score - left.score
+        || left.topicId - right.topicId || left.question.id.localeCompare(right.question.id));
+      const usedPairs = new Set();
+      for (const candidate of candidates) {
+        if (selected.filter((item) => item.k === type).length >= 4) break;
+        if ((topicUse.get(candidate.topicId) || 0) >= 2 || usedPairs.has(candidate.question.transferPair)) continue;
+        selected.push(activeQueueItem(type, candidate.question, candidate.topicId));
+        topicUse.set(candidate.topicId, (topicUse.get(candidate.topicId) || 0) + 1);
+        usedPairs.add(candidate.question.transferPair);
+      }
+    }
+    return selected.length === 16 ? selected : [];
+  }
+
+  function supportsFocus(question, focus, exactPair = true) {
+    return itemWeaknesses(question).some((weakness) => weakness.errorCode === focus?.errorCode
+      && (!exactPair || (weakness.confusionPair || null) === (focus?.confusionPair || null)));
+  }
+
+  function buildTargetedPracticeQueue(bankByTopic, focus, options = {}) {
+    const topicId = Number(focus?.topicId);
+    if (!Number.isInteger(topicId) || topicId < 1 || topicId > 20
+      || !normalizeRegressionReason(focus?.errorCode)) return [];
+    const levels = activePracticeLevels(bankByTopic?.[topicId]);
+    if (!REQUIRED_PRACTICE_TYPES.every((type) => levels[type].length >= 8)) return [];
+    const random = practiceRandom(options.seed ?? options.random);
+    const all = REQUIRED_PRACTICE_TYPES.flatMap((type) => levels[type].map((question) => ({ type, question })));
+    const exactPairs = new Set(all.filter((candidate) => supportsFocus(candidate.question, focus, true))
+      .map((candidate) => candidate.question.transferPair));
+    const errorPairs = new Set(all.filter((candidate) => supportsFocus(candidate.question, focus, false))
+      .map((candidate) => candidate.question.transferPair));
+    if (exactPairs.size < GRAMMAR_TARGETED_MIN_EXACT_ITEMS
+      || errorPairs.size < GRAMMAR_TARGETED_MIN_ERROR_ITEMS) return [];
+    const ordered = shuffled(all, random).sort((left, right) => {
+      const leftExact = supportsFocus(left.question, focus, true) ? 2 : supportsFocus(left.question, focus, false) ? 1 : 0;
+      const rightExact = supportsFocus(right.question, focus, true) ? 2 : supportsFocus(right.question, focus, false) ? 1 : 0;
+      return rightExact - leftExact;
+    });
+    const selected = [];
+    const pairs = new Set();
+    for (const candidate of ordered) {
+      if (selected.length >= 8) break;
+      if (pairs.has(candidate.question.transferPair)) continue;
+      selected.push(activeQueueItem(candidate.type, candidate.question, topicId));
+      pairs.add(candidate.question.transferPair);
+    }
+    const exactCount = selected.filter((item) => supportsFocus(item.q, focus, true)).length;
+    const errorCount = selected.filter((item) => supportsFocus(item.q, focus, false)).length;
+    return selected.length === 8
+      && exactCount >= Math.min(4, exactPairs.size)
+      && errorCount >= Math.min(4, errorPairs.size)
+      ? selected : [];
   }
 
   function checkPracticeAnswer(item, answer) {
@@ -726,6 +883,8 @@ export const EasyBoostGrammar = (function initializeGrammarModule(global) {
     buildTopicQueue,
     hasActivePractice,
     buildActiveTopicQueue,
+    buildMixedPracticeQueue,
+    buildTargetedPracticeQueue,
     checkPracticeAnswer,
     enqueueTransferAfterFailure,
     applyAnswer,

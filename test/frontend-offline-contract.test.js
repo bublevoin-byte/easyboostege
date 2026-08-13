@@ -762,6 +762,135 @@ test('accepted background Grammar batches publish owner-scoped authoritative rec
     'application merge must reject mastery from another owner incarnation');
 });
 
+test('offline mixed Grammar completion publishes every physical topic record exactly once after reconnect', async () => {
+  const sharedValues = new Map();
+  const BroadcastChannel = createBroadcastHub();
+  const offline = createSync({ online: false, sharedValues, BroadcastChannel });
+  offline.sync.setOwner('grammar-owner');
+  const event = {
+    id: '00000000-0000-4000-8000-000000000884', type: 'session_completed',
+    expectedRevision: 2, expectedStage: 'learned', expectedReviewStep: 0,
+    source: 'builtin', assisted: false, completedTypes: ['choice', 'input', 'correction', 'transform'],
+    typeScores: {
+      choice: { correct: 4, total: 4 }, input: { correct: 4, total: 4 },
+      correction: { correct: 4, total: 4 }, transform: { correct: 4, total: 4 },
+    },
+    session: {
+      mode: 'mixed_practice',
+      topicExpectations: [3, 8, 12].map((topicId) => ({
+        topicId, expectedRevision: 2, expectedStage: 'learned', expectedReviewStep: 0,
+      })),
+    },
+  };
+  await offline.sync.saveGrammarMasteryEvent(3, event);
+  const remoteUpdates = [];
+  offline.sync.onGrammarMasterySync((update) => remoteUpdates.push(update));
+
+  const online = createSync({ online: true, failRequest: false, sharedValues, BroadcastChannel });
+  online.sync.setOwner('grammar-owner');
+  const localUpdates = [];
+  online.sync.onGrammarMasterySync((update) => localUpdates.push(update));
+  online.window.EasyBoostApi.post = async (_path, body) => ({
+    batchId: body.batchId,
+    results: [3, 8, 12].map((topicId, index) => ({
+      eventId: event.id, topicId, applied: true, conflict: false, replay: false,
+      record: {
+        masteryVersion: 2, masteryRevision: 3 + index,
+        stage: 'learned', reviewStep: index, eligibleAt: null,
+      },
+    })),
+  });
+
+  assert.equal(await online.sync.flush(), true);
+  assert.equal(online.sync.pendingGrammarMasteryEvents().length, 0);
+  for (const updates of [localUpdates, remoteUpdates]) {
+    assert.equal(updates.length, 1);
+    assert.deepEqual(JSON.parse(JSON.stringify(updates[0].records)), [
+      { topicId: 3, record: { masteryVersion: 2, masteryRevision: 3, stage: 'learned', reviewStep: 0, eligibleAt: null } },
+      { topicId: 8, record: { masteryVersion: 2, masteryRevision: 4, stage: 'learned', reviewStep: 1, eligibleAt: null } },
+      { topicId: 12, record: { masteryVersion: 2, masteryRevision: 5, stage: 'learned', reviewStep: 2, eligibleAt: null } },
+    ], 'one expanded mixed result must refresh each authoritative physical topic once');
+  }
+});
+
+test('a sole mismatched-topic Grammar result remains queued and is never broadcast', async () => {
+  const sharedValues = new Map();
+  const BroadcastChannel = createBroadcastHub();
+  const offline = createSync({ online: false, sharedValues, BroadcastChannel });
+  offline.sync.setOwner('grammar-owner');
+  const event = {
+    id: '00000000-0000-4000-8000-000000000885', type: 'review_completed',
+    expectedRevision: 2, expectedStage: 'learned', expectedReviewStep: 0,
+    source: 'builtin', assisted: false, passed: true,
+  };
+  await offline.sync.saveGrammarMasteryEvent(3, event);
+  const remoteUpdates = [];
+  offline.sync.onGrammarMasterySync((update) => remoteUpdates.push(update));
+
+  const online = createSync({ online: true, failRequest: false, sharedValues, BroadcastChannel });
+  online.sync.setOwner('grammar-owner');
+  const localUpdates = [];
+  online.sync.onGrammarMasterySync((update) => localUpdates.push(update));
+  let calls = 0;
+  online.window.EasyBoostApi.post = async (_path, body) => {
+    calls += 1;
+    return { batchId: body.batchId, results: [{
+      eventId: event.id, topicId: 8, applied: true, conflict: false, replay: false,
+      record: { masteryVersion: 2, masteryRevision: 3, stage: 'learned', reviewStep: 1 },
+    }] };
+  };
+
+  await online.sync.flush();
+  assert.equal(calls, 2, 'an unmatched response may use only the existing bounded retry');
+  assert.equal(online.sync.pendingGrammarMasteryEvents().length, 1,
+    'a wrong physical topic is not authority for the queued topic');
+  assert.equal(online.sync.pendingGrammarMasteryEvents()[0].event.id, event.id);
+  assert.deepEqual(localUpdates, []);
+  assert.deepEqual(remoteUpdates, []);
+});
+
+test('a topic-less mixed Grammar result remains queued and is never broadcast', async () => {
+  const sharedValues = new Map();
+  const BroadcastChannel = createBroadcastHub();
+  const offline = createSync({ online: false, sharedValues, BroadcastChannel });
+  offline.sync.setOwner('grammar-owner');
+  const event = {
+    id: '00000000-0000-4000-8000-000000000886', type: 'session_completed',
+    expectedRevision: 2, expectedStage: 'learned', expectedReviewStep: 0,
+    source: 'builtin', assisted: false,
+    session: {
+      mode: 'mixed_practice',
+      topicExpectations: [3, 8].map((topicId) => ({
+        topicId, expectedRevision: 2, expectedStage: 'learned', expectedReviewStep: 0,
+      })),
+    },
+  };
+  await offline.sync.saveGrammarMasteryEvent(3, event);
+  const remoteUpdates = [];
+  offline.sync.onGrammarMasterySync((update) => remoteUpdates.push(update));
+
+  const online = createSync({ online: true, failRequest: false, sharedValues, BroadcastChannel });
+  online.sync.setOwner('grammar-owner');
+  const localUpdates = [];
+  online.sync.onGrammarMasterySync((update) => localUpdates.push(update));
+  let calls = 0;
+  online.window.EasyBoostApi.post = async (_path, body) => {
+    calls += 1;
+    return { batchId: body.batchId, results: [{
+      eventId: event.id, applied: true, conflict: false, replay: false,
+      record: { masteryVersion: 2, masteryRevision: 3, stage: 'learned', reviewStep: 1 },
+    }] };
+  };
+
+  await online.sync.flush();
+  assert.equal(calls, 2, 'an ambiguous mixed response may use only the existing bounded retry');
+  assert.equal(online.sync.pendingGrammarMasteryEvents().length, 1,
+    'mixed authority must name the physical topic it updated');
+  assert.equal(online.sync.pendingGrammarMasteryEvents()[0].event.id, event.id);
+  assert.deepEqual(localUpdates, []);
+  assert.deepEqual(remoteUpdates, []);
+});
+
 test('Grammar batches carry owner generation and legacy generation-zero evidence cannot cross recreation', async () => {
   const sharedValues = new Map();
   const offline = createSync({ online: false, sharedValues });

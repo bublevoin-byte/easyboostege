@@ -6,6 +6,10 @@ import {
   GRAMMAR_ACTIVE_PRACTICE_TYPES,
   GRAMMAR_ACTIVE_TOPIC_IDS,
   GRAMMAR_PREACTIVATION_LEGACY_TOPIC_IDS,
+  GRAMMAR_PRACTICE_MODES,
+  GRAMMAR_RECOMMENDATION_VERSION,
+  GRAMMAR_TARGETED_MIN_ERROR_ITEMS,
+  GRAMMAR_TARGETED_MIN_EXACT_ITEMS,
   GRAMMAR_ERROR_CODES,
   GENERATED_GRAMMAR_REVISION,
   isGrammarConfusionPair,
@@ -26,9 +30,16 @@ test('one grammar domain contract owns the exact error taxonomy and active type 
     1, 2, 3, 13, 4, 5, 6, 7, 8, 9, 18, 10, 11, 12, 16, 17, 20, 14, 15, 19,
   ]);
   assert.deepEqual(GRAMMAR_PREACTIVATION_LEGACY_TOPIC_IDS, [10, 11, 12, 16, 17, 20, 14, 15, 19]);
+  assert.deepEqual(GRAMMAR_PRACTICE_MODES, [
+    'topic_practice', 'legacy_practice', 'mixed_practice', 'targeted_practice',
+  ]);
+  assert.equal(GRAMMAR_RECOMMENDATION_VERSION, 'grammar-focus-v1');
+  assert.equal(GRAMMAR_TARGETED_MIN_EXACT_ITEMS, 2);
+  assert.equal(GRAMMAR_TARGETED_MIN_ERROR_ITEMS, 4);
   assert.equal(Object.isFrozen(GRAMMAR_ERROR_CODES), true);
   assert.equal(Object.isFrozen(GRAMMAR_ACTIVE_PRACTICE_TYPES), true);
   assert.equal(Object.isFrozen(GRAMMAR_PREACTIVATION_LEGACY_TOPIC_IDS), true);
+  assert.equal(Object.isFrozen(GRAMMAR_PRACTICE_MODES), true);
   assert.equal(isGrammarErrorCode('word_order'), true);
   assert.equal(isGrammarErrorCode('review_error'), false);
 });

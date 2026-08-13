@@ -51,7 +51,11 @@ import {
   LISTENING_MATCHING_SETS,
   LISTENING_TRUE_FALSE_SETS,
 } from '../public/listening-pilot-v1.js';
-import { isGrammarErrorCode, parseGrammarConfusionPair } from '../public/grammar-domain-contract.js';
+import {
+  GRAMMAR_PRACTICE_MODES,
+  isGrammarErrorCode,
+  parseGrammarConfusionPair,
+} from '../public/grammar-domain-contract.js';
 
 const [
   recorderFile,
@@ -256,6 +260,7 @@ function createSubjectHarness(subject, { offline = false, slow = false, listenin
     normalizeVocabularyWord,
     personalVocabularyCardId,
     upsertReadingVocabularyCard,
+    GRAMMAR_PRACTICE_MODES,
     isGrammarErrorCode,
     parseGrammarConfusionPair,
     srsRecordVocabularyOutcome() {},

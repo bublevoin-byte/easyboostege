@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
 import express from 'express';
 import { bindResponseOwner, requireExpectedOwner } from '../middleware/expected-owner.js';
+import { GRAMMAR_CATALOG } from '../public/grammar-catalog.js';
+import { buildGrammarRecommendation } from '../services/grammar-recommendation.js';
 
 import { buildAdaptiveLearningProfile } from '../adaptive-learning/profile.js';
 import { adaptiveLearningGoalPublicDto } from '../adaptive-learning/goal-dto.js';
@@ -281,11 +283,18 @@ export function createAdaptiveLearningRoutes({
   }
 
   async function overview(username, { remainingPlanRetries = 2, includePlan = enabled } = {}) {
-    const [goal, sources, access] = await Promise.all([
+    const [goal, sources, access, grammarMastery] = await Promise.all([
       db.getAdaptiveLearningGoal(username),
       db.getAdaptiveLearningEvidenceSources(username),
       adaptiveAccess(username),
+      typeof db.migrateGrammarMastery === 'function' ? db.migrateGrammarMastery(username) : {},
     ]);
+    const grammarRecommendation = buildGrammarRecommendation({
+      mastery: grammarMastery,
+      catalog: GRAMMAR_CATALOG,
+      examDate: goal?.examDate ?? goal?.exam_date ?? null,
+      now: now(),
+    });
     const baseProfile = buildAdaptiveLearningProfile(sources, { diagnosticRegistry });
     const retention = await retentionState(username, baseProfile, sources);
     const profile = applyAdaptiveRetentionState(baseProfile, retention);
@@ -313,6 +322,7 @@ export function createAdaptiveLearningRoutes({
           goal: adaptiveLearningGoalPublicDto(goal),
           profile: publicProfile,
           plan: adaptiveLearningPlanPublicDto(previousPlan),
+          grammarRecommendation,
           retention,
           access,
         };
@@ -370,6 +380,7 @@ export function createAdaptiveLearningRoutes({
       goal: includePlan ? adaptiveLearningGoalPublicDto(goal) : null,
       profile: publicProfile,
       plan,
+      grammarRecommendation,
       retention,
       access,
     };

@@ -7,12 +7,12 @@
 import {registerRouteHook,tab} from '../router.js';
 import {registerVoiceTutorError,voiceTutorButton} from '../voice-tutor.js';
 import {
-  S,SRV,TOKEN,WBTN,apiPost,examModule,gExamFmt,gSync,generateAiContent,grammarModule,
+  S,SRV,TOKEN,WBTN,apiGet,apiPost,examModule,gExamFmt,gSync,generateAiContent,grammarModule,
   registerScreenGenerator,save,setTxt,ui,wDeco,
 } from '../app.js';
 import {recordCompletedLearningActivity} from '../learning-activity-recorder.js';
 import {GRAMMAR_CATALOG,getGrammarCatalogRuntime,validateGeneratedGrammarSupplement} from '../grammar-catalog.js';
-import {GENERATED_GRAMMAR_REVISION,GRAMMAR_ACTIVE_PRACTICE_TYPES,GRAMMAR_PREACTIVATION_LEGACY_TOPIC_IDS,isBuiltinGrammarDiagnosticId,isGrammarConfusionPair,isGrammarErrorCode,parseGrammarConfusionPair,parseGeneratedGrammarItemReference} from '../grammar-domain-contract.js';
+import {GENERATED_GRAMMAR_REVISION,GRAMMAR_ACTIVE_PRACTICE_TYPES,GRAMMAR_PRACTICE_MODES,GRAMMAR_PREACTIVATION_LEGACY_TOPIC_IDS,GRAMMAR_RECOMMENDATION_VERSION,isBuiltinGrammarDiagnosticId,isGrammarConfusionPair,isGrammarErrorCode,parseGrammarConfusionPair,parseGeneratedGrammarItemReference} from '../grammar-domain-contract.js';
 
 const GRAM_Q=[
  {t:['She ','_____',' already finished her homework.'],o:['have','has','had','is'],a:1,e:'<b>She/he/it</b> — третье лицо, поэтому <b>has</b>.'},
@@ -74,7 +74,7 @@ function gReportEvidence(evidence,metadata,durationMs){if(!evidence||evidence.re
 function gEvidenceSource(evidence,fallback){var sources=Object.keys((evidence&&evidence.sources)||{});
   if(sources.length>1)return'mixed';if(sources[0]==='generated')return'generated';if(sources[0]==='builtin')return'builtin';return fallback||'builtin'}
 function gTrackEvidenceSource(evidence,item){if(!evidence)return;var source=item&&item.source==='generated'?'generated':'builtin';evidence.sources[source]=true}
-function gIsPracticeSession(){return Boolean(GS&&GS.mode!=='rev'&&GS.sessionId&&['topic_practice','legacy_practice'].includes(GS.practiceMode))}
+function gIsPracticeSession(){return Boolean(GS&&GS.mode!=='rev'&&GS.sessionId&&GRAMMAR_PRACTICE_MODES.includes(GS.practiceMode))}
 function gMarkHelp(topic,affectsMastery=true,answerDisclosed=false){if(!GS)return;GS.helpUsed=true;var countsForMastery=answerDisclosed||(affectsMastery&&!GS.answerCommitted);
   if(affectsMastery&&!GS.answerCommitted)GS.answerAssisted=true;
   if(GS.mode==='rev'){var activityId=grammarModule.activityId(topic,'spaced_review');
@@ -83,11 +83,11 @@ function gMarkHelp(topic,affectsMastery=true,answerDisclosed=false){if(!GS)retur
   else if(countsForMastery)GS.masteryAssisted=true;
   if(gIsPracticeSession())gPersistRunner()}
 function gRunnerSnapshot(){if(!gIsPracticeSession())return null;return{
-  schema:'grammar-runner-v4',catalogVersion:GS.catalogVersion||GRAMMAR_CATALOG.version,catalogRevision:GS.catalogRevision||GRAMMAR_CATALOG.revision,sessionId:GS.sessionId,topicId:GS.t,mode:GS.practiceMode,
-  queue:GS.queue.map(function(item){return{id:item.q.id,transfer:Boolean(item.transfer)}}),i:GS.i,ok:GS.ok,done:GS.done,
+  schema:'grammar-runner-v5',catalogVersion:GS.catalogVersion||GRAMMAR_CATALOG.version,catalogRevision:GS.catalogRevision||GRAMMAR_CATALOG.revision,sessionId:GS.sessionId,topicId:GS.t,scope:GS.scope||'topic',mode:GS.practiceMode,
+  queue:GS.queue.map(function(item){return{id:item.q.id,topicId:item.t||GS.t,transfer:Boolean(item.transfer)}}),i:GS.i,ok:GS.ok,done:GS.done,
   source:GS.source,helpUsed:Boolean(GS.helpUsed),masteryAssisted:Boolean(GS.masteryAssisted),phase:GS.phase||'question',
   answerAssisted:Boolean(GS.answerAssisted),errorReasons:{...(GS.errorReasons||{})},confusionPairs:{...(GS.confusionPairs||{})},independentErrors:JSON.parse(JSON.stringify(GS.independentErrors||{})),types:{...(GS.types||{})},typeScores:JSON.parse(JSON.stringify(GS.typeScores||{})),
-  reservedItemIds:(GS.reservedItemIds||[]).slice(0,32),itemOutcomes:JSON.parse(JSON.stringify(GS.itemOutcomes||[])),evidence:JSON.parse(JSON.stringify(GS.evidence)),completionEvent:GS.completionEvent?JSON.parse(JSON.stringify(GS.completionEvent)):null,
+  reservedItemIds:(GS.reservedItemIds||[]).slice(0,32),itemOutcomes:JSON.parse(JSON.stringify(GS.itemOutcomes||[])),evidence:JSON.parse(JSON.stringify(GS.evidence)),recommendation:GS.recommendation?JSON.parse(JSON.stringify(GS.recommendation)):null,completionEvent:GS.completionEvent?JSON.parse(JSON.stringify(GS.completionEvent)):null,
 }}
 function gPersistRunner(){var snapshot=gRunnerSnapshot();if(!snapshot||!S)return;S.grammarRunner=snapshot;save()}
 function gClearRunner(){if(!S||S.grammarRunner==null)return;S.grammarRunner=null;save()}
@@ -96,6 +96,8 @@ function gSafeRunnerScores(value){var result={};GRAMMAR_ACTIVE_PRACTICE_TYPES.fo
 function gSafeRunnerFlags(value){var result={};GRAMMAR_ACTIVE_PRACTICE_TYPES.forEach(function(type){if(value&&value[type]===true)result[type]=true});return result}
 function gSafeRunnerErrors(value,t){var candidate=value&&value[t];return isGrammarErrorCode(candidate)?{[t]:candidate}:{}}
 function gSafeRunnerPairs(value,t){var candidate=parseGrammarConfusionPair(value&&value[t]);return candidate?{[t]:candidate}:{}}
+function gSafeRecommendation(value,t,catalogVersion,catalogRevision){var pointer=value&&value.pointer,itemIds=value&&value.itemIds,completionToken=value&&value.completionToken;if(!pointer||pointer.version!==GRAMMAR_RECOMMENDATION_VERSION||pointer.catalogVersion!==catalogVersion||pointer.catalogRevision!==catalogRevision||pointer.topicId!==t||!isGrammarErrorCode(pointer.errorCode)||(pointer.confusionPair!=null&&!isGrammarConfusionPair(pointer.confusionPair))||!Number.isInteger(pointer.masteryRevision)||pointer.masteryRevision<0||(pointer.eligibleAt!=null&&(!Number.isFinite(pointer.eligibleAt)||pointer.eligibleAt<0))||typeof pointer.earlyPractice!=='boolean'||!/^[0-9a-f]{64}$/u.test(pointer.stateFingerprint)||!/^[0-9a-f]{64}$/u.test(pointer.ref)||!Array.isArray(itemIds)||itemIds.length!==8||new Set(itemIds).size!==8||itemIds.some(function(id){return typeof id!=='string'||!id})||!/^[A-Za-z0-9_-]{43}$/u.test(String(completionToken||'')))return null;
+  return{pointer:{version:pointer.version,catalogVersion:pointer.catalogVersion,catalogRevision:pointer.catalogRevision,topicId:pointer.topicId,errorCode:pointer.errorCode,confusionPair:pointer.confusionPair||null,masteryRevision:pointer.masteryRevision,eligibleAt:pointer.eligibleAt==null?null:pointer.eligibleAt,earlyPractice:pointer.earlyPractice,stateFingerprint:pointer.stateFingerprint,ref:pointer.ref},itemIds:itemIds.slice(),completionToken:completionToken}}
 function gExactIndependentError(t,itemId,diagnosticId,reason,pair,legacy=false,catalogRuntime=G_CATALOG_RUNTIME){var found=gAddressableItem(t,itemId,catalogRuntime);if(!found||found.source==='generated'||!isGrammarErrorCode(reason))return null;
   var normalizedPair=pair==null?null:parseGrammarConfusionPair(pair);if(pair!=null&&!normalizedPair)return null;
   if(legacy){var legacyReason=['f','input'].includes(found.k)?'word_or_verb_form':'construction_choice';
@@ -109,7 +111,9 @@ function gExactIndependentError(t,itemId,diagnosticId,reason,pair,legacy=false,c
 function gSafeIndependentErrors(value,t,legacy,catalogRuntime=G_CATALOG_RUNTIME){var candidate=value&&value[t];if(!candidate||typeof candidate!=='object'||Array.isArray(candidate))return{};
   var exact=gExactIndependentError(t,String(candidate.itemId||''),candidate.diagnosticId==null?null:String(candidate.diagnosticId),String(candidate.reason||''),candidate.confusionPair==null?null:String(candidate.confusionPair),legacy,catalogRuntime);
   return exact?{[t]:exact}:{}}
-function gSafeRunnerOutcomes(value,queue,done,active){if(!Array.isArray(value)||value.length!==done)return null;var outcomes=[],legacyAttempts=new Map();
+function gSafeMixedIndependentErrors(value,topics,catalogRuntime=G_CATALOG_RUNTIME){var result={};if(!value||typeof value!=='object'||Array.isArray(value))return result;
+  topics.forEach(function(topic){var safe=gSafeIndependentErrors(value,topic,false,catalogRuntime);if(safe[topic])result[topic]=safe[topic]});return result}
+function gSafeRunnerOutcomes(value,queue,done,active,scope){if(!Array.isArray(value)||value.length!==done)return null;var outcomes=[],legacyAttempts=new Map();
   for(var index=0;index<value.length;index++){var raw=value[index],item=queue[index],type=item&&item.k==='f'?'input':item&&['c','c2'].includes(item.k)?'choice':item&&item.k;
     if(!raw||!item||raw.id!==item.q.id||raw.type!==type||typeof raw.transfer!=='boolean'||raw.transfer!==Boolean(item.transfer)||typeof raw.correct!=='boolean')return null;
     var diagnosticId=raw.diagnosticId==null?null:String(raw.diagnosticId),errorCode=raw.errorCode==null?null:String(raw.errorCode),confusionPair=raw.confusionPair==null?null:String(raw.confusionPair),transferStatus=raw.transferStatus==null?null:String(raw.transferStatus);
@@ -123,54 +127,67 @@ function gSafeRunnerOutcomes(value,queue,done,active){if(!Array.isArray(value)||
       :(diagnosticId!==null||raw.transfer||confusionPair!==null))return null;
     if(!active){var attempt=(legacyAttempts.get(raw.id)||0)+1;legacyAttempts.set(raw.id,attempt);
       if(attempt>2||(attempt===1&&transferStatus!==null)||(attempt===2&&((raw.correct&&transferStatus!==null)||(!raw.correct&&transferStatus!=='due_next_session'))))return null}
-    outcomes.push({id:raw.id,type:type,transfer:raw.transfer,correct:raw.correct,diagnosticId:diagnosticId,errorCode:errorCode,confusionPair:confusionPair,transferStatus:transferStatus,
+    var topicId=Number(raw.topicId);if(scope==='mixed'&&topicId!==item.t||scope!=='mixed'&&raw.topicId!=null)return null;
+    outcomes.push({id:raw.id,...(scope==='mixed'?{topicId:topicId}:{}),type:type,transfer:raw.transfer,correct:raw.correct,diagnosticId:diagnosticId,errorCode:errorCode,confusionPair:confusionPair,transferStatus:transferStatus,
       ...(generated?{source:'generated',revision:GENERATED_GRAMMAR_REVISION}:{})})}
   return outcomes}
 function gSafeRunnerEvidence(value,t,mode,source){var activityId=grammarModule.activityId(t,mode),id=String(value&&value.id||''),startedAt=Number(value&&value.startedAt);
   if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(id))return gEvidence(activityId);
   var sources=source==='mixed'?{builtin:true,generated:true}:source==='generated'?{generated:true}:{builtin:true};
   return{id:id,activityId:activityId,startedAt:Number.isFinite(startedAt)&&startedAt>=0?startedAt:Date.now(),reported:false,score:0,maxScore:0,sources:sources,helpUsed:Boolean(value&&value.helpUsed)}}
-function gSafeCompletionEvent(value,state){if(!value||typeof value!=='object'||Array.isArray(value))return null;var allowed=['type','id','assisted','source','completedTypes','typeScores','session','independentError','expectedRevision','expectedStage','expectedReviewStep'];
+function gSafeCompletionEvent(value,state){if(!value||typeof value!=='object'||Array.isArray(value))return null;var allowed=['type','id','assisted','source','completedTypes','typeScores','session','independentError','independentErrors','expectedRevision','expectedStage','expectedReviewStep'];
   if(Object.keys(value).some(function(key){return!allowed.includes(key)}))return null;
-  var completedTypes=Object.keys(state.types||{}),session=value.session,expectedItems=state.itemOutcomes;
+  var completedTypes=Object.keys(state.types||{}),session=value.session,expectedItems=state.itemOutcomes,expectedMixedErrors=gMixedIndependentErrorList(state),expectedTopics=gMixedTopicIds(state),expectations=session&&session.topicExpectations;
   if(value.type!=='session_completed'||value.id!==state.sessionId||value.source!==state.source||value.assisted!==state.masteryAssisted
     ||!Array.isArray(value.completedTypes)||JSON.stringify([...value.completedTypes].sort())!==JSON.stringify([...completedTypes].sort())
-    ||JSON.stringify(value.typeScores)!==JSON.stringify(state.typeScores)||!session||session.id!==state.sessionId||session.scope!=='topic'||session.mode!==state.practiceMode||session.source!==state.source
+    ||GRAMMAR_ACTIVE_PRACTICE_TYPES.some(function(type){return JSON.stringify(value.typeScores&&value.typeScores[type]||null)!==JSON.stringify(state.typeScores&&state.typeScores[type]||null)})||!session||session.id!==state.sessionId||session.scope!==state.scope||session.mode!==state.practiceMode||session.source!==state.source
     ||!session.catalog||session.catalog.version!==state.catalogVersion||session.catalog.revision!==state.catalogRevision
     ||JSON.stringify(session.items)!==JSON.stringify(expectedItems)||session.startedAt!==state.evidence.startedAt||session.assisted!==state.masteryAssisted
-    ||JSON.stringify(value.independentError||null)!==JSON.stringify(state.independentErrors[state.t]||null)
+    ||JSON.stringify(value.independentError||null)!==JSON.stringify(state.scope==='mixed'?null:state.independentErrors[state.t]||null)
+    ||JSON.stringify(value.independentErrors||null)!==JSON.stringify(state.scope==='mixed'&&expectedMixedErrors.length?expectedMixedErrors:null)
+    ||JSON.stringify(session.recommendation||null)!==JSON.stringify(state.practiceMode==='targeted_practice'?state.recommendation:null)
+    ||(state.scope==='mixed'&&(!Array.isArray(expectations)||expectations.length!==expectedTopics.length||expectations.some(function(item,index){return!item||item.topicId!==expectedTopics[index]||!Number.isSafeInteger(item.expectedRevision)||!['not_started','learning','learned','confirmed','stable'].includes(item.expectedStage)||!Number.isInteger(item.expectedReviewStep)||item.expectedReviewStep<0||item.expectedReviewStep>5})||!expectations.some(function(item){return item.topicId===state.t&&item.expectedRevision===value.expectedRevision&&item.expectedStage===value.expectedStage&&item.expectedReviewStep===value.expectedReviewStep})))
+    ||(state.scope!=='mixed'&&session.topicExpectations!=null)
     ||!Number.isSafeInteger(value.expectedRevision)||!['not_started','learning','learned','confirmed','stable'].includes(value.expectedStage)||!Number.isInteger(value.expectedReviewStep)||value.expectedReviewStep<0||value.expectedReviewStep>5)return null;
   return JSON.parse(JSON.stringify(value))}
-function gRestoreRunner(){var snapshot=S&&S.grammarRunner;if(!snapshot||snapshot.schema!=='grammar-runner-v4')return null;
+function gSelectedQueueHasExactTransfers(queue){return queue.every(function(item,index){if(!item.transfer)return true;var original=queue[index-1];return Boolean(original&&!original.transfer&&original.t===item.t&&original.k===item.k&&original.q.transferPair===item.q.transferPair)})}
+function gRestoreRunner(){var snapshot=S&&S.grammarRunner;if(!snapshot||!['grammar-runner-v4','grammar-runner-v5'].includes(snapshot.schema))return null;
   var t=Number(snapshot.topicId),queueRaw=Array.isArray(snapshot.queue)?snapshot.queue:[];
   var sessionId=String(snapshot.sessionId||''),ok=Number(snapshot.ok),done=Number(snapshot.done),practiceMode=String(snapshot.mode||'');
   var completionPending=snapshot.phase==='completion_pending';
-  var active=practiceMode==='topic_practice',source=String(snapshot.source||'');
+  var scope=practiceMode==='mixed_practice'?'mixed':'topic',active=practiceMode!=='legacy_practice'&&GRAMMAR_PRACTICE_MODES.includes(practiceMode),source=String(snapshot.source||'');
   var resolvedRuntime=getGrammarCatalogRuntime(snapshot.catalogVersion,snapshot.catalogRevision);if(!resolvedRuntime)return null;
   var currentCatalog=resolvedRuntime===G_CATALOG_RUNTIME,catalogLevels=resolvedRuntime.catalog.bank[t];
   var catalogHasActivePractice=grammarModule.hasActivePractice(catalogLevels),currentHasActivePractice=grammarModule.hasActivePractice(G_BANK[t]);
   var activatedLegacy=!active&&!catalogHasActivePractice&&currentHasActivePractice&&!currentCatalog&&GRAMMAR_PREACTIVATION_LEGACY_TOPIC_IDS.includes(t);
-  if(!['topic_practice','legacy_practice'].includes(practiceMode)||active&&!catalogHasActivePractice||!active&&currentHasActivePractice&&!activatedLegacy
+  if(!GRAMMAR_PRACTICE_MODES.includes(practiceMode)||(snapshot.scope!=null&&snapshot.scope!==scope)||active&&!catalogHasActivePractice||!active&&currentHasActivePractice&&!activatedLegacy
     ||!['builtin','mixed','generated'].includes(source)||(source!=='builtin'&&!snapshot.masteryAssisted)
     ||!G_TOPICS[t]||queueRaw.length<1||queueRaw.length>(active?32:16)||!Number.isInteger(snapshot.i)||snapshot.i<0||snapshot.i>queueRaw.length||(!completionPending&&snapshot.i>=queueRaw.length)||(completionPending&&snapshot.i!==queueRaw.length)
     ||!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(sessionId)
     ||!Number.isInteger(ok)||!Number.isInteger(done)||ok<0||done<0||ok>done||done>32)return null;
   var seen=new Set(),queue=[];
-  for(var raw of queueRaw){var found=gAddressableItem(t,raw&&raw.id,resolvedRuntime);if(!found||(active&&seen.has(raw.id))||(activatedLegacy&&found.source!=='generated'&&!resolvedRuntime.hasLegacyItem(found.q.id)))return null;seen.add(raw.id);
-    if(!active&&raw.transfer)return null;queue.push({k:found.k,q:found.q,t:t,voice:found.q.voice||null,source:found.source||'builtin',transfer:Boolean(raw.transfer)})}
+  for(var raw of queueRaw){var itemTopic=scope==='mixed'?Number(raw&&raw.topicId):t,found=gAddressableItem(itemTopic,raw&&raw.id,resolvedRuntime);if(!found||(active&&seen.has(raw.id))||(activatedLegacy&&found.source!=='generated'&&!resolvedRuntime.hasLegacyItem(found.q.id)))return null;seen.add(raw.id);
+    if(!active&&raw.transfer)return null;queue.push({k:found.k,q:found.q,t:itemTopic,voice:found.q.voice||null,source:found.source||'builtin',transfer:Boolean(raw.transfer)})}
+  if(scope==='mixed'){var mixedOriginals=queue.filter(function(item){return!item.transfer}),mixedTypes=Object.fromEntries(GRAMMAR_ACTIVE_PRACTICE_TYPES.map(function(type){return[type,mixedOriginals.filter(function(item){return item.k===type}).length]})),mixedTopics=new Map();
+    mixedOriginals.forEach(function(item){mixedTopics.set(item.t,(mixedTopics.get(item.t)||0)+1)});if(mixedOriginals.length!==16||Object.values(mixedTypes).some(function(count){return count!==4})||mixedTopics.size<8||Math.max(...mixedTopics.values())>2||source!=='builtin'||!gSelectedQueueHasExactTransfers(queue))return null}
+  var recommendation=practiceMode==='targeted_practice'?gSafeRecommendation(snapshot.recommendation,t,snapshot.catalogVersion,snapshot.catalogRevision):null;
+  if(practiceMode==='targeted_practice'){var expectedTargeted=recommendation&&grammarModule.buildTargetedPracticeQueue(resolvedRuntime.catalog.bank,recommendation.pointer,{seed:recommendation.pointer.ref}),targetedOriginals=queue.filter(function(item){return!item.transfer});
+    if(!recommendation||targetedOriginals.length!==8||source!=='builtin'||queue.some(function(item){return item.t!==t})||JSON.stringify(targetedOriginals.map(function(item){return item.q.id}))!==JSON.stringify(expectedTargeted.map(function(item){return item.q.id}))||JSON.stringify(recommendation.itemIds)!==JSON.stringify(targetedOriginals.map(function(item){return item.q.id}))||!gSelectedQueueHasExactTransfers(queue))return null}
   if(grammarModule.queueSource(queue)!==source)return null;
   var evidence=gSafeRunnerEvidence(snapshot.evidence,t,practiceMode,source);
-  var itemOutcomes=gSafeRunnerOutcomes(snapshot.itemOutcomes,queue,done,active);if(!itemOutcomes)return null;
-  var restored={activeRunner:active,practiceMode:practiceMode,catalogVersion:snapshot.catalogVersion,catalogRevision:snapshot.catalogRevision,...gRunnerCatalogRuntime(resolvedRuntime),sessionId:sessionId,t:t,queue:queue,i:snapshot.i,ok:ok,done:done,
+  var itemOutcomes=gSafeRunnerOutcomes(snapshot.itemOutcomes,queue,done,active,scope);if(!itemOutcomes)return null;
+  var restored={activeRunner:active,practiceMode:practiceMode,scope:scope,catalogVersion:snapshot.catalogVersion,catalogRevision:snapshot.catalogRevision,...gRunnerCatalogRuntime(resolvedRuntime),sessionId:sessionId,t:t,queue:queue,i:snapshot.i,ok:ok,done:done,
     source:source,helpUsed:Boolean(snapshot.helpUsed),masteryAssisted:Boolean(snapshot.masteryAssisted),answerCommitted:false,answerAssisted:Boolean(snapshot.answerAssisted),
-    phase:completionPending?'completion_pending':snapshot.phase==='explain'?'explain':snapshot.phase==='advance'?'advance':'question',errorReasons:gSafeRunnerErrors(snapshot.errorReasons,t),confusionPairs:gSafeRunnerPairs(snapshot.confusionPairs,t),independentErrors:gSafeIndependentErrors(snapshot.independentErrors,t,!active,resolvedRuntime),types:gSafeRunnerFlags(snapshot.types),
-    typeScores:gSafeRunnerScores(snapshot.typeScores),reservedItemIds:Array.isArray(snapshot.reservedItemIds)?snapshot.reservedItemIds.filter(function(id){return Boolean(gAddressableItem(t,id,resolvedRuntime))}).slice(0,32):[...seen],itemOutcomes:itemOutcomes,evidence:evidence};
+    phase:completionPending?'completion_pending':snapshot.phase==='explain'?'explain':snapshot.phase==='advance'?'advance':'question',errorReasons:scope==='mixed'?{}:gSafeRunnerErrors(snapshot.errorReasons,t),confusionPairs:scope==='mixed'?{}:gSafeRunnerPairs(snapshot.confusionPairs,t),independentErrors:scope==='mixed'?gSafeMixedIndependentErrors(snapshot.independentErrors,[...new Set(queue.map(function(item){return item.t}))],resolvedRuntime):gSafeIndependentErrors(snapshot.independentErrors,t,!active,resolvedRuntime),types:gSafeRunnerFlags(snapshot.types),
+    typeScores:gSafeRunnerScores(snapshot.typeScores),reservedItemIds:active?[...seen]:Array.isArray(snapshot.reservedItemIds)?snapshot.reservedItemIds.filter(function(id){return Boolean(gAddressableItem(t,id,resolvedRuntime))}).slice(0,32):[...seen],itemOutcomes:itemOutcomes,evidence:evidence,recommendation:recommendation};
   if(restored.phase==='advance'){restored.i++;restored.phase='question'}
   if(restored.phase==='completion_pending'){restored.completionEvent=gSafeCompletionEvent(snapshot.completionEvent,restored);if(!restored.completionEvent)return null}
   return restored}
 function gRec(t){S.grammarMastery=S.grammarMastery||{};return S.grammarMastery[t]||(S.grammarMastery[t]=grammarModule.migrateMasteryRecord())}
 function gSetRec(t,record){S.grammarMastery=S.grammarMastery||{};S.grammarMastery[t]=record;return record}
 function gMasteryExpectation(record){return{expectedRevision:record.masteryRevision,expectedStage:record.stage,expectedReviewStep:record.reviewStep}}
+function gMixedTopicIds(session){return[...new Set((session.itemOutcomes||[]).filter(function(item){return!item.transfer}).map(function(item){return Number(item.topicId)}).filter(Number.isInteger))]}
+function gMixedIndependentErrorList(session){return gMixedTopicIds(session).flatMap(function(topic){var error=session.independentErrors&&session.independentErrors[topic];return error?[{topicId:topic,...error}]:[]})}
 function gMasteryOutcomes(result){return result&&Array.isArray(result.results)?result.results:[result]}
 function gMasteryDurable(result,event,topicId){
   var syncedRecord=S&&S.grammarMastery&&S.grammarMastery[topicId];
@@ -191,9 +208,10 @@ function gMasteryPersistenceLine(result){
 async function gSubmitMasteryEvent(topicId,event){
   if(!window.EasyBoostSync||typeof window.EasyBoostSync.saveGrammarMasteryEvent!=='function')return false;
   var response=await window.EasyBoostSync.saveGrammarMasteryEvent(topicId,event);
+  if(response&&Array.isArray(response.results))response.results.forEach(function(item){if(Number.isInteger(item&&item.topicId)&&item.record)gSetRec(item.topicId,item.record)});
   var result=response&&Array.isArray(response.results)?response.results.find(function(item){return item&&item.eventId===event.id}):response;
   if(result&&result.record)gSetRec(topicId,result.record);
-  return result
+  return event&&event.session&&event.session.mode==='mixed_practice'&&response?response:result
 }
 async function gSubmitMasteryBatch(entries){
   if(!window.EasyBoostSync||typeof window.EasyBoostSync.saveGrammarMasteryEvents!=='function'){
@@ -252,6 +270,12 @@ function gMap(){var area=document.getElementById('g_area');if(!area)return;
     +'<div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:15.5px;color:#fff;">Пора повторить</div>'
     +'<div style="font-weight:600;font-size:12px;color:rgba(255,255,255,.85);margin-top:2px;">'+due.length+' '+(due.length===1?'тема ждёт':(due.length<5?'темы ждут':'тем ждут'))+' проверки памяти</div></div>'
     +'<span style="flex:none;background:rgba(255,255,255,.96);border-radius:14px;padding:9px 14px;font-weight:800;font-size:12.5px;color:#C2421B;">Начать</span></div></button>';
+  h+='<button type="button" class="sq clk cardbtn" onclick="gStartMixed()" style="'+ga()+'position:relative;overflow:hidden;border-radius:24px;padding:16px 18px;margin-bottom:14px;cursor:pointer;background:linear-gradient(145deg,#EAF3FC,#F5F0FF);border:1px solid #D9DDF1;">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;"><div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:15.5px;color:#2B2B2B;">Смешанная практика</div>'
+    +'<div style="font-weight:600;font-size:12px;color:#626B7A;margin-top:2px;">16 заданий · тема заранее не раскрывается</div></div><span style="flex:none;background:#fff;border-radius:14px;padding:9px 14px;font-weight:800;font-size:12.5px;color:#465B9B;">Начать</span></div></button>';
+  h+='<button type="button" class="sq clk cardbtn" onclick="gStartTargeted()" style="'+ga()+'position:relative;overflow:hidden;border-radius:24px;padding:16px 18px;margin-bottom:14px;cursor:pointer;background:#F2F8F4;border:1px solid #D7EADF;">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;"><div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:15.5px;color:#2B2B2B;">Точечная практика</div>'
+    +'<div style="font-weight:600;font-size:12px;color:#557064;margin-top:2px;">8 заданий по актуальной слабости</div></div><span style="flex:none;background:#fff;border-radius:14px;padding:9px 14px;font-weight:800;font-size:12.5px;color:#1D7F4A;">Подобрать</span></div></button>';
   G_GROUPS.forEach(function(gr){
     h+='<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:12px;letter-spacing:1.8px;color:#6F695E;margin:6px 2px 10px;">'+gr.n.toUpperCase()+'</div>';
     gr.ids.forEach(function(t){var r=gRec(t),tp=G_TOPICS[t],view=grammarModule.masteryView(r);
@@ -289,6 +313,18 @@ function gStart(t){if(gRetryPendingCompletion())return;if(!gMasteryQueueAvailabl
   var practiceMode=active?'topic_practice':'legacy_practice',queueSource=grammarModule.queueSource(queue);
   GS={activeRunner:active,practiceMode:practiceMode,catalogVersion:GRAMMAR_CATALOG.version,catalogRevision:GRAMMAR_CATALOG.revision,...gRunnerCatalogRuntime(G_CATALOG_RUNTIME),sessionId:sessionId,t:t,queue:queue,i:0,ok:0,done:0,source:queueSource,helpUsed:false,masteryAssisted:queueSource!=='builtin',answerCommitted:false,answerAssisted:false,phase:'question',reservedItemIds:queue.map(function(item){return item.q.id}),itemOutcomes:[],errorReasons:{},confusionPairs:{},independentErrors:{},types:{},typeScores:{},evidence:gEvidence(grammarModule.activityId(t,practiceMode))};
   gPersistRunner();gRenderQ();gGen(t)}
+function gStartMixed(){if(gRetryPendingCompletion())return;if(!gMasteryQueueAvailable()){gShowMasteryQueueFull();return}var sessionId=crypto.randomUUID();
+  var queue=grammarModule.buildMixedPracticeQueue(G_BANK,S.grammarMastery||{},{seed:GRAMMAR_CATALOG.version+':mixed:'+sessionId,now:Date.now()});if(queue.length!==16){gMap();return}
+  var t=queue[0].t;GS={activeRunner:true,practiceMode:'mixed_practice',scope:'mixed',catalogVersion:GRAMMAR_CATALOG.version,catalogRevision:GRAMMAR_CATALOG.revision,...gRunnerCatalogRuntime(G_CATALOG_RUNTIME),sessionId:sessionId,t:t,queue:queue,i:0,ok:0,done:0,source:'builtin',helpUsed:false,masteryAssisted:false,answerCommitted:false,answerAssisted:false,phase:'question',reservedItemIds:queue.map(function(item){return item.q.id}),itemOutcomes:[],errorReasons:{},confusionPairs:{},independentErrors:{},types:{},typeScores:{},evidence:gEvidence(grammarModule.activityId(t,'mixed_practice'))};
+  gPersistRunner();gRenderQ()}
+function gTargetedUnavailable(){var area=document.getElementById('g_area');if(!area)return;area.innerHTML='<div class="clayCard" role="status" style="padding:22px;text-align:center;"><div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:19px;color:#2B2B2B;">Точечная практика пока недоступна</div><div style="font-weight:600;font-size:13px;color:#777163;line-height:1.55;margin-top:8px;">Подключитесь к сети и обновите рекомендацию.</div></div><button class="sq" style="'+WBTN+'color:#B54E2F;margin-top:12px;" onclick="gMap()">К темам</button>'}
+async function gStartTargeted(){if(gRetryPendingCompletion())return;if(!gMasteryQueueAvailable()){gShowMasteryQueueFull();return}try{var issued=await apiGet('/api/v1/grammar/recommendation'),recommendation=issued&&issued.recommendation;
+    var resolved=await apiPost('/api/v1/grammar/recommendation/resolve',{pointer:recommendation&&recommendation.pointer}),pointer=resolved&&resolved.recommendation&&resolved.recommendation.pointer;
+    if(!pointer||JSON.stringify(pointer)!==JSON.stringify(recommendation.pointer)||!resolved.catalog||resolved.catalog.version!==GRAMMAR_CATALOG.version||resolved.catalog.revision!==GRAMMAR_CATALOG.revision||!/^[A-Za-z0-9_-]{43}$/u.test(String(resolved.completionToken||'')))throw new Error('GRAMMAR_RECOMMENDATION_INVALID');
+    var expected=grammarModule.buildTargetedPracticeQueue(G_BANK,pointer,{seed:pointer.ref}),ids=Array.isArray(resolved.itemIds)?resolved.itemIds:[];
+    if(expected.length!==8||JSON.stringify(expected.map(function(item){return item.q.id}))!==JSON.stringify(ids))throw new Error('GRAMMAR_RECOMMENDATION_INVALID');
+    var sessionId=crypto.randomUUID(),t=pointer.topicId;GS={activeRunner:true,practiceMode:'targeted_practice',scope:'topic',catalogVersion:GRAMMAR_CATALOG.version,catalogRevision:GRAMMAR_CATALOG.revision,...gRunnerCatalogRuntime(G_CATALOG_RUNTIME),sessionId:sessionId,t:t,queue:expected,i:0,ok:0,done:0,source:'builtin',helpUsed:false,masteryAssisted:false,answerCommitted:false,answerAssisted:false,phase:'question',reservedItemIds:ids.slice(),itemOutcomes:[],errorReasons:{},confusionPairs:{},independentErrors:{},types:{},typeScores:{},recommendation:{pointer:pointer,itemIds:ids.slice(),completionToken:resolved.completionToken},evidence:gEvidence(grammarModule.activityId(t,'targeted_practice'))};
+    gPersistRunner();gRenderQ()}catch(error){gTargetedUnavailable()}}
 function gResume(){if(!GS){gMap();return}if(GS.phase==='completion_pending'){gRenderCompletionPending();gFinish();return}if(GS.phase==='explain'){gExplain(GS.queue[GS.i],null,true);return}gRenderQ(true)}
 function gReview(){if(gRetryPendingCompletion())return;var due=gDue();if(!due.length){gMap();return}if(!gMasteryQueueAvailable(due.length)){gShowMasteryQueueFull();return}
   var items=[];
@@ -301,15 +337,15 @@ function gRenderQ(preserveAnswerState){var area=document.getElementById('g_area'
   var it=GS.queue[GS.i];
   if(!it){gFinish();return}
   GS.answerCommitted=false;if(!preserveAnswerState)GS.answerAssisted=false;GS.phase='question';if(gIsPracticeSession())gPersistRunner();
-  var t=it.t||GS.t,tp=(GS.catalogTopics||G_TOPICS)[t]||G_TOPICS[t];
+  var t=it.t||GS.t,tp=(GS.catalogTopics||G_TOPICS)[t]||G_TOPICS[t],mixed=GS.scope==='mixed',hiddenTopic=mixed||GS.practiceMode==='targeted_practice';
   var labels={choice:'УРОВЕНЬ 1 · ВЫБОР',input:'УРОВЕНЬ 2 · ВВОД',correction:'УРОВЕНЬ 3 · ИСПРАВЛЕНИЕ',transform:'УРОВЕНЬ 4 · ПРЕОБРАЗОВАНИЕ'};
   var level=it.transfer?'ТРАНСФЕР · '+(labels[it.k]||'НОВОЕ ЗАДАНИЕ'):(labels[it.k]||(it.k==='c'?'УРОВЕНЬ 1 · ВЫБОР':'УРОВЕНЬ 2 · КАК НА ЕГЭ'));
   var head='<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'
     +'<span data-grammar-level="'+it.k+'" style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#B54E2F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">'+(GS.mode==='rev'?'ПОВТОРЕНИЕ':level)+'</span>'
-    +'<button id="g_rule_btn" type="button" class="clk iconbtn" onclick="gTheory('+t+')" style="box-sizing:border-box;min-block-size:48px;min-inline-size:48px;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;font-weight:800;font-size:10px;letter-spacing:.6px;color:#1D7F4A;background:#EAF7F0;padding:5px 10px;border-radius:20px;cursor:pointer;">ПРАВИЛО</button></div>';
+    +(hiddenTopic?'':'<button id="g_rule_btn" type="button" class="clk iconbtn" onclick="gTheory('+t+')" style="box-sizing:border-box;min-block-size:48px;min-inline-size:48px;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;font-weight:800;font-size:10px;letter-spacing:.6px;color:#1D7F4A;background:#EAF7F0;padding:5px 10px;border-radius:20px;cursor:pointer;">ПРАВИЛО</button>')+'</div>';
   if(it.k==='c'||it.k==='c2'||it.k==='choice'){var q=it.q;
     area.innerHTML='<div id="g_card" class="clayCard" aria-live="polite" style="position:relative;overflow:hidden;padding:20px;min-height:150px;">'+wDeco()+head
-      +'<div style="font-weight:600;font-size:11px;color:#777163;margin-top:14px;">'+tp.n+'</div>'
+      +'<div style="font-weight:600;font-size:11px;color:#777163;margin-top:14px;">'+(mixed?'Смешанная практика · определи правило сам':GS.practiceMode==='targeted_practice'?'Точечная практика · определи правило сам':tp.n)+'</div>'
       +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:18px;color:#2B2B2B;line-height:1.5;margin-top:8px;">'
       +q.t[0]+'<span style="display:inline-block;min-width:64px;border-bottom:2.5px dashed #F2683F;text-align:center;color:#B54E2F;">&nbsp;?&nbsp;</span>'+q.t[1]+'</div></div>'
       +'<div id="g_btns" style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
@@ -318,7 +354,7 @@ function gRenderQ(preserveAnswerState){var area=document.getElementById('g_area'
     var prompt=isInput?q.s.replace('_____','<span style="display:inline-block;min-width:70px;border-bottom:2.5px dashed #F2683F;text-align:center;color:#B54E2F;">&nbsp;?&nbsp;</span>'):q.s;
     var inputLabel=isInput?'Форма слова '+q.b:it.k==='correction'?'Исправленное предложение':'Преобразованное предложение';
     area.innerHTML='<div id="g_card" class="clayCard" aria-live="polite" style="position:relative;overflow:hidden;padding:20px;min-height:150px;">'+wDeco()+head
-      +'<div style="font-weight:600;font-size:11px;color:#777163;margin-top:14px;">'+tp.n+' · '+instruction+'</div>'
+      +'<div style="font-weight:600;font-size:11px;color:#777163;margin-top:14px;">'+(mixed?'Смешанная практика · ':GS.practiceMode==='targeted_practice'?'Точечная практика · ':tp.n+' · ')+instruction+'</div>'
       +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:17px;color:#2B2B2B;line-height:1.55;margin-top:8px;">'
       +prompt+'</div></div>'
       +'<div id="g_btns" style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
@@ -357,7 +393,7 @@ function gAnswer(ok,it,checked){var topic=it.t||GS.t,type=it.k==='f'?'input':it.
   var legacy=GS.practiceMode==='legacy_practice';var errorCode=ok?null:(legacy?gErrorReason(it):checked&&checked.errorCode||gErrorReason(it)),confusionPair=ok||legacy?null:(checked&&Object.hasOwn(checked,'confusionPair')?checked.confusionPair:it.q&&it.q.confusionPair||null);
   if(!ok){GS.errorReasons=GS.errorReasons||{};GS.confusionPairs=GS.confusionPairs||{};GS.errorReasons[topic]=errorCode;GS.confusionPairs[topic]=confusionPair;
     if(committedWithoutHelp){var exactError=gExactIndependentError(topic,it.q.id,checked&&checked.diagnosticId||null,errorCode,confusionPair,GS.practiceMode==='legacy_practice',GS.catalogRuntime||G_CATALOG_RUNTIME);if(exactError){GS.independentErrors=GS.independentErrors||{};GS.independentErrors[topic]=exactError}}}
-  if(gIsPracticeSession()){GS.itemOutcomes=GS.itemOutcomes||[];GS.itemOutcomes.push({id:it.q.id,type:type,transfer:Boolean(it.transfer),correct:Boolean(ok),diagnosticId:GS.activeRunner&&!ok?(checked&&checked.diagnosticId||null):null,errorCode:errorCode,confusionPair:GS.activeRunner?confusionPair:null,transferStatus:null,
+  if(gIsPracticeSession()){GS.itemOutcomes=GS.itemOutcomes||[];GS.itemOutcomes.push({id:it.q.id,...(GS.scope==='mixed'?{topicId:topic}:{}),type:type,transfer:Boolean(it.transfer),correct:Boolean(ok),diagnosticId:GS.activeRunner&&!ok?(checked&&checked.diagnosticId||null):null,errorCode:errorCode,confusionPair:GS.activeRunner?confusionPair:null,transferStatus:null,
     ...(it.source==='generated'?{source:'generated',revision:it.q.revision}:{})})}
   grammarModule.applyAnswer(gRec(topic),GS,it,ok);
   if(GS.mode==='rev'){var activityId=grammarModule.activityId(topic,'spaced_review');var evidence=GS.evidence[activityId];
@@ -393,12 +429,14 @@ function gRenderCompletionPending(){var area=document.getElementById('g_area');i
   area.innerHTML='<div id="g_card" class="clayCard" role="status" aria-live="polite" style="position:relative;overflow:hidden;padding:24px;text-align:center;">'+wDeco()
     +'<div style="font-size:44px;">⏳</div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:21px;color:#2B2B2B;margin-top:10px;">Сохраняем результат…</div>'
     +'<div style="font-weight:600;font-size:13.5px;color:#777163;margin-top:8px;line-height:1.5;">Не закрывайте этот экран: точная сессия уже сохранена на устройстве и будет безопасно повторена.</div></div>'}
-function gCompletionEvent(session){var current=gRec(session.t),independentError=session.independentErrors&&session.independentErrors[session.t];return{type:'session_completed',id:session.sessionId,assisted:session.masteryAssisted,source:session.source,completedTypes:Object.keys(session.types||{}),typeScores:session.typeScores,session:{id:session.sessionId,scope:'topic',mode:session.practiceMode,source:session.source,catalog:{version:session.catalogVersion||GRAMMAR_CATALOG.version,revision:session.catalogRevision||GRAMMAR_CATALOG.revision},items:session.itemOutcomes,startedAt:session.evidence.startedAt,assisted:session.masteryAssisted},...(independentError?{independentError:independentError}:{}),...gMasteryExpectation(current)}}
+function gCompletionEvent(session){var current=gRec(session.t),mixed=session.scope==='mixed',independentError=mixed?null:session.independentErrors&&session.independentErrors[session.t],independentErrors=mixed?gMixedIndependentErrorList(session):[],topicExpectations=mixed?gMixedTopicIds(session).map(function(topic){return{topicId:topic,...gMasteryExpectation(gRec(topic))}}):null;
+  return{type:'session_completed',id:session.sessionId,assisted:session.masteryAssisted,source:session.source,completedTypes:Object.keys(session.types||{}),typeScores:session.typeScores,session:{id:session.sessionId,scope:session.scope||'topic',mode:session.practiceMode,source:session.source,catalog:{version:session.catalogVersion||GRAMMAR_CATALOG.version,revision:session.catalogRevision||GRAMMAR_CATALOG.revision},items:session.itemOutcomes,startedAt:session.evidence.startedAt,assisted:session.masteryAssisted,...(mixed?{topicExpectations:topicExpectations}:{}),...(session.practiceMode==='targeted_practice'?{recommendation:session.recommendation}:{})},...(independentError?{independentError:independentError}:{}),...(independentErrors.length?{independentErrors:independentErrors}:{}),...gMasteryExpectation(current)}}
 async function gFinish(){if(GS&&GS.mode==='rev'){await gFinishRev();return}
   var finishedSession=GS,result=null,durable=false;if(!finishedSession)return;
   finishedSession.evidence.score=finishedSession.ok;finishedSession.evidence.maxScore=finishedSession.done;
+  var focus=finishedSession.recommendation&&finishedSession.recommendation.pointer;
   gReportEvidence(finishedSession.evidence,{mode:finishedSession.practiceMode,source:finishedSession.source,helpUsed:finishedSession.helpUsed,hintsUsed:0,
-    grammarTopicId:finishedSession.t,grammarErrorCode:finishedSession.errorReasons[finishedSession.t],grammarConfusionPair:finishedSession.confusionPairs[finishedSession.t]});
+    ...(finishedSession.scope==='mixed'?{}:{grammarTopicId:finishedSession.t}),grammarErrorCode:focus&&focus.errorCode||finishedSession.errorReasons[finishedSession.t],grammarConfusionPair:focus?focus.confusionPair:finishedSession.confusionPairs[finishedSession.t]});
   var completedTypes=Object.keys(finishedSession.types||{});
   if(completedTypes.length){
     if(!finishedSession.completionEvent)finishedSession.completionEvent=gCompletionEvent(finishedSession);
@@ -408,15 +446,16 @@ async function gFinish(){if(GS&&GS.mode==='rev'){await gFinishRev();return}
     durable=gMasteryDurable(result,finishedSession.completionEvent,finishedSession.t);if(durable)gClearRunner();
   }
   if(GS!==finishedSession)return;
-  var area=document.getElementById('g_area');var r=gRec(finishedSession.t),tp=(finishedSession.catalogTopics||G_TOPICS)[finishedSession.t]||G_TOPICS[finishedSession.t],view=grammarModule.masteryView(r);
-  var provisional=gMasteryProvisional(result),unsaved=gMasteryUnsaved(result),persistenceLine=gMasteryPersistenceLine(result),stable=!unsaved&&!provisional&&view.stage==='stable';
+  var area=document.getElementById('g_area');var r=gRec(finishedSession.t),tp=(finishedSession.catalogTopics||G_TOPICS)[finishedSession.t]||G_TOPICS[finishedSession.t],view=grammarModule.masteryView(r),mixed=finishedSession.scope==='mixed',targeted=finishedSession.practiceMode==='targeted_practice';
+  var provisional=gMasteryProvisional(result),unsaved=gMasteryUnsaved(result),persistenceLine=gMasteryPersistenceLine(result),stable=!mixed&&!targeted&&!unsaved&&!provisional&&view.stage==='stable';
+  var sessionLabel=mixed?'Смешанная практика':targeted?'Точечная практика · '+tp.n:tp.n,statusLine=mixed?'Результаты тем сверены с их доказательными сроками':targeted?view.label+' · '+gDateLine(view)+gRegressionLine(view):view.label+' · '+gDateLine(view)+gRegressionLine(view),retryAction=mixed?'gStartMixed()':targeted?'gStartTargeted()':'gStart('+finishedSession.t+')';
   area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:24px;">'+wDeco()
     +'<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:14px 0;">'
     +'<div style="font-size:44px;">'+(provisional?'⏳':stable?'🏆':'💪')+'</div>'
     +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:21px;color:#2B2B2B;margin-top:10px;">'+(unsaved?'Результат не сохранён':provisional?'Результат ждёт синхронизации':stable?'Навык устойчив!':'Подход завершён')+'</div>'
-    +'<div style="font-weight:600;font-size:13.5px;color:#777163;margin-top:8px;line-height:1.5;">'+tp.n+'<br>Верно: '+finishedSession.ok+' из '+finishedSession.done+'<br>'+(provisional?'СТАТУС ОБНОВИТСЯ ПОСЛЕ СИНХРОНИЗАЦИИ':view.label+' · '+gDateLine(view)+gRegressionLine(view))+(persistenceLine?'<br>'+persistenceLine:'')+(finishedSession.masteryAssisted?'<br>Показана помощь или правильный ответ: подход не повышает стадию':'')+'</div></div></div>'
+    +'<div style="font-weight:600;font-size:13.5px;color:#777163;margin-top:8px;line-height:1.5;">'+sessionLabel+'<br>Верно: '+finishedSession.ok+' из '+finishedSession.done+'<br>'+(provisional?'СТАТУС ОБНОВИТСЯ ПОСЛЕ СИНХРОНИЗАЦИИ':statusLine)+(persistenceLine?'<br>'+persistenceLine:'')+(finishedSession.masteryAssisted?'<br>Ошибки и показанные ответы не повышают соответствующие темы':'')+'</div></div></div>'
     +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
-    +(stable?'':'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="'+(durable?'gStart('+finishedSession.t+')':'gFinish()')+'">'+(durable?'Ещё подход':'Повторить синхронизацию')+'</button>')
+    +(stable?'':'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="'+(durable?retryAction:'gFinish()')+'">'+(durable?'Ещё подход':'Повторить синхронизацию')+'</button>')
     +'<button class="sq" style="'+WBTN+'color:#B54E2F;" onclick="gToThemes()">К темам</button></div>';
   gAnim('win','.32s');gSync();save()}
 async function gFinishRev(){var reviewSession=GS,area=document.getElementById('g_area'),rows='',finishedAt=Date.now();
@@ -554,6 +593,6 @@ registerScreenGenerator('scr3',genGrammar);
 
 /* Имена для обработчиков этого экрана: загрузчик кладёт их на window вместе с чанком. */
 export {
-  gAfterExplain,gExam,gExamCheck,gExamStart,gFinish,gMap,gOpen,gPick,gResume,gReview,gStart,gSubmit,launchGrammarExam,
+  gAfterExplain,gExam,gExamCheck,gExamStart,gFinish,gMap,gOpen,gPick,gResume,gReview,gStart,gStartMixed,gStartTargeted,gSubmit,launchGrammarExam,
   gTheory,gToThemes,
 };

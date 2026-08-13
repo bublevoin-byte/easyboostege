@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { GRAMMAR_CATALOG, GRAMMAR_CATALOG_V1, GRAMMAR_CATALOG_V2 } from '../../public/grammar-catalog.js';
+import { EasyBoostGrammar } from '../../public/modules/grammar.js';
 import { grammarMasteryEventSchema } from '../../validation/grammar-mastery.js';
 import { decorateGeneratedVoiceTutorContent } from '../../voice-tutor/generated-items.js';
 
@@ -9,6 +10,37 @@ const TYPE_SCORES = Object.freeze({
   correction: { correct: 4, total: 4 },
   transform: { correct: 4, total: 4 },
 });
+
+function selectedPracticeEvent(queue, {
+  id, mode, topicId, revision, stage, reviewStep, topicExpectations = null, recommendation = null,
+}) {
+  const mixed = mode === 'mixed_practice';
+  const items = queue.map((entry) => ({
+    id: entry.q.id, ...(mixed ? { topicId: entry.t } : {}),
+    type: entry.k, transfer: false, correct: true,
+    diagnosticId: null, errorCode: null, confusionPair: null, transferStatus: null,
+  }));
+  const completedTypes = [...new Set(items.map((item) => item.type))];
+  const typeScores = Object.fromEntries(completedTypes.map((type) => {
+    const total = items.filter((item) => item.type === type).length;
+    return [type, { correct: total, total }];
+  }));
+  return {
+    topicId,
+    event: {
+      id, type: 'session_completed', expectedRevision: revision,
+      expectedStage: stage, expectedReviewStep: reviewStep,
+      source: 'builtin', assisted: false, completedTypes, typeScores,
+      session: {
+        id, scope: mixed ? 'mixed' : 'topic', mode, source: 'builtin',
+        catalog: { version: GRAMMAR_CATALOG.version, revision: GRAMMAR_CATALOG.revision },
+        items, startedAt: 3_500, assisted: false,
+        ...(mixed ? { topicExpectations } : {}),
+        ...(mode === 'targeted_practice' ? { recommendation } : {}),
+      },
+    },
+  };
+}
 
 function independentCatalogError(topicId) {
   const item = GRAMMAR_CATALOG.bank[topicId].c[0];
@@ -511,6 +543,84 @@ export async function assertGrammarMasteryProgressContract(repository, owner, st
     /INVALID_GENERATED_GRAMMAR_REFERENCE/u,
     'a new event cannot reuse a removed generated source task',
   );
+
+  const mixedQueue = EasyBoostGrammar.buildMixedPracticeQueue(
+    GRAMMAR_CATALOG.bank, (await repository.getProgress(owner)).grammarMastery,
+    { seed: 'repository-mixed-parity', now: 4_000 },
+  );
+  const mixedOwnerTopic = mixedQueue[0].t;
+  const mixedProgressBefore = (await repository.getProgress(owner)).grammarMastery;
+  const mixedExpectations = [...new Set(mixedQueue.map((entry) => entry.t))].map((topicId) => {
+    const record = EasyBoostGrammar.migrateMasteryRecord(mixedProgressBefore[topicId]);
+    return {
+      topicId, expectedRevision: record.masteryRevision,
+      expectedStage: record.stage, expectedReviewStep: record.reviewStep,
+    };
+  });
+  const mixedBefore = EasyBoostGrammar.migrateMasteryRecord(mixedProgressBefore[mixedOwnerTopic]);
+  const mixedPractice = selectedPracticeEvent(mixedQueue, {
+    id: '00000000-0000-4000-8000-000000000078', mode: 'mixed_practice',
+    topicId: mixedOwnerTopic, revision: mixedBefore.masteryRevision,
+    stage: mixedBefore.stage, reviewStep: mixedBefore.reviewStep,
+    topicExpectations: mixedExpectations,
+  });
+  assert.equal(grammarMasteryEventSchema.safeParse(mixedPractice).success, true);
+  const mixedPracticeResults = await repository.applyGrammarMasteryEvents(owner,
+    mixedExpectations.map((expectation) => ({
+      topicId: expectation.topicId,
+      event: {
+        ...mixedPractice.event,
+        expectedRevision: expectation.expectedRevision,
+        expectedStage: expectation.expectedStage,
+        expectedReviewStep: expectation.expectedReviewStep,
+      },
+    })));
+  assert.equal(mixedPracticeResults.length, mixedExpectations.length);
+  assert.ok(mixedPracticeResults.every((result) => result.applied),
+    'one mixed completion atomically updates every exact topic expectation');
+  assert.deepEqual(mixedPracticeResults.map((result) => result.record.stage),
+    mixedExpectations.map((expectation) => expectation.expectedStage),
+    'early mixed recall records per-topic history without granting later-stage advancement');
+  const mixedPracticeResult = mixedPracticeResults[mixedExpectations
+    .findIndex((expectation) => expectation.topicId === mixedOwnerTopic)];
+  assert.deepEqual(mixedPracticeResult.record.masteryHistory.at(-1).session.items,
+    mixedPractice.event.session.items);
+
+  const targetedBefore = EasyBoostGrammar.migrateMasteryRecord(
+    (await repository.getProgress(owner)).grammarMastery['3'],
+  );
+  const targetedPointer = {
+    version: 'grammar-focus-v1',
+    catalogVersion: GRAMMAR_CATALOG.version, catalogRevision: GRAMMAR_CATALOG.revision,
+    topicId: 3, errorCode: 'word_or_verb_form', confusionPair: null,
+    masteryRevision: targetedBefore.masteryRevision, eligibleAt: targetedBefore.eligibleAt,
+    earlyPractice: true, stateFingerprint: 'a'.repeat(64), ref: 'b'.repeat(64),
+  };
+  const targetedQueue = EasyBoostGrammar.buildTargetedPracticeQueue(
+    GRAMMAR_CATALOG.bank, targetedPointer, { seed: 'repository-targeted-parity' },
+  );
+  const targetedPractice = selectedPracticeEvent(targetedQueue, {
+    id: '00000000-0000-4000-8000-000000000079', mode: 'targeted_practice',
+    topicId: 3, revision: targetedBefore.masteryRevision,
+    stage: targetedBefore.stage, reviewStep: targetedBefore.reviewStep,
+    recommendation: {
+      pointer: targetedPointer,
+      itemIds: targetedQueue.map((entry) => entry.q.id),
+      completionToken: 'c'.repeat(43),
+    },
+  });
+  assert.equal(grammarMasteryEventSchema.safeParse(targetedPractice).success, true);
+  const targetedPracticeResult = await repository.applyGrammarMasteryEvent(
+    owner, targetedPractice.topicId, targetedPractice.event,
+  );
+  assert.equal(targetedPracticeResult.applied, true);
+  assert.equal(targetedPracticeResult.record.stage, targetedBefore.stage,
+    'early targeted recall persists exact server focus without granting later-stage advancement');
+  const selectedExport = await repository.exportUserData(owner);
+  assert.deepEqual(selectedExport.progress.grammarMastery[String(mixedOwnerTopic)]
+    .masteryHistory.at(-1).session.items, mixedPractice.event.session.items);
+  assert.deepEqual(selectedExport.progress.grammarMastery['3']
+    .masteryHistory.at(-1).session.items, targetedPractice.event.session.items);
 
   const strangerSessionId = '00000000-0000-4000-8000-000000000001';
   const strangerSession = practiceSession(strangerSessionId);

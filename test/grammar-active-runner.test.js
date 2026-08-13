@@ -9,19 +9,23 @@ import {
   GENERATED_GRAMMAR_REVISION,
   GRAMMAR_ACTIVE_PRACTICE_TYPES,
   GRAMMAR_ERROR_CODES,
+  GRAMMAR_PRACTICE_MODES,
+  GRAMMAR_TARGETED_MIN_ERROR_ITEMS,
+  GRAMMAR_TARGETED_MIN_EXACT_ITEMS,
   parseGeneratedGrammarItemId,
   parseGeneratedGrammarItemReference,
 } from '../public/grammar-domain-contract.js';
 
 const moduleSource = (await fs.readFile(new URL('../public/modules/grammar.js', import.meta.url), 'utf8'))
-  .replace(/^import .*;\r?\n/gmu, '')
+  .replace(/^import(?:[\s\S]*?)from '[^']+';\r?\n/gmu, '')
   .replace(/^export /gmu, '');
 
 function createGrammarModule() {
   const window = {};
   vm.runInNewContext(moduleSource, {
     window, grammarActivityId, splitLearningActivityDuration,
-    GENERATED_GRAMMAR_REVISION, GRAMMAR_ACTIVE_PRACTICE_TYPES, GRAMMAR_ERROR_CODES,
+    GENERATED_GRAMMAR_REVISION, GRAMMAR_ACTIVE_PRACTICE_TYPES, GRAMMAR_ERROR_CODES, GRAMMAR_PRACTICE_MODES,
+    GRAMMAR_TARGETED_MIN_ERROR_ITEMS, GRAMMAR_TARGETED_MIN_EXACT_ITEMS,
     parseGeneratedGrammarItemId, parseGeneratedGrammarItemReference,
     Object, String, Number, Math, Date, Set, Map,
   });
@@ -577,7 +581,7 @@ test('the production screen exposes four levels, assisted rule evidence and tran
   assert.match(screen, /ИСПРАВЛЕНИЕ/u);
   assert.match(screen, /ПРЕОБРАЗОВАНИЕ/u);
   assert.match(screen, /ТРАНСФЕР/u);
-  assert.match(screen, /подход не повышает стадию/u);
+  assert.match(screen, /Результаты тем сверены с их доказательными сроками/u);
   assert.match(screen, /aria-live=["']polite["']/u);
   assert.match(screen, /id="g_rule_btn"[^>]+box-sizing:border-box[^>]+min-block-size:48px[^>]+min-inline-size:48px[^>]+flex:0 0 auto[^>]+display:inline-flex/u,
     'the rule control keeps an actual, non-shrinking touch target above 44px');

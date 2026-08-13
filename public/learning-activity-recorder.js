@@ -2,13 +2,13 @@ import {
   adaptiveRuntimeSnapshot,
   completeAdaptiveModuleActivity,
 } from './adaptive-session-runtime.js';
-import { isGrammarErrorCode, parseGrammarConfusionPair } from './grammar-domain-contract.js';
+import { GRAMMAR_PRACTICE_MODES, isGrammarErrorCode, parseGrammarConfusionPair } from './grammar-domain-contract.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const ACTIVITY_ID = /^[a-z0-9_]{1,80}$/u;
 const CLIENT_REPORTED_MODULES = new Set(['grammar', 'reading', 'listening']);
 const ACTIVITY_MODES = new Set([
-  'topic_practice', 'legacy_practice', 'spaced_review', 'exam_19_24',
+  ...GRAMMAR_PRACTICE_MODES, 'spaced_review', 'exam_19_24',
   'reading_headings', 'reading_detail', 'reading_gaps', 'reading_exam',
   'listening_matching', 'listening_true_false', 'listening_interview', 'listening_exam',
 ]);

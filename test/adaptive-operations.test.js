@@ -59,6 +59,15 @@ function overview() {
     },
     retention: { rediagnostic: { due: false } },
     access: { tier: 'base', capabilities: { adaptivePlan: true }, usage: {}, limits: {} },
+    grammarRecommendation: {
+      pointer: {
+        version: 'grammar-focus-v1', catalogVersion: 'grammar-core-v3', catalogRevision: 3,
+        topicId: 3, errorCode: 'word_or_verb_form', confusionPair: null,
+        masteryRevision: 2, eligibleAt: null, earlyPractice: false,
+        stateFingerprint: 'a'.repeat(64), ref: 'b'.repeat(64),
+      },
+      reasonCodes: ['recent_weakness'], observedErrorCount: 2, observedAt: 1_000,
+    },
     debug: { username: 'must-not-be-cached' },
   };
 }
@@ -70,8 +79,9 @@ test('offline overview cache is owner-bound, bounded and contains only the publi
   assert.equal(await writeAdaptiveOverviewCache(storage, 'learner-one', overview(), now), true);
 
   const cached = readAdaptiveOverviewCache(storage, 'learner-one', now + 60_000);
-  assert.deepEqual(Object.keys(cached).sort(), ['access', 'goal', 'plan', 'profile', 'retention']);
+  assert.deepEqual(Object.keys(cached).sort(), ['access', 'goal', 'grammarRecommendation', 'plan', 'profile', 'retention']);
   assert.equal(cached.plan.allocation.modules[0].percentage, 35);
+  assert.equal(cached.grammarRecommendation.pointer.errorCode, 'word_or_verb_form');
   assert.equal(JSON.stringify(cached).includes('must-not-be-cached'), false);
 
   assert.equal(readAdaptiveOverviewCache(storage, 'learner-two', now + 60_000), null);
@@ -87,7 +97,7 @@ test('offline overview cache exposes its saved timestamp without marking the pay
 
   const snapshot = readAdaptiveOverviewCacheSnapshot(storage, 'learner-one', savedAt + 60_000);
   assert.equal(snapshot.savedAt, savedAt);
-  assert.deepEqual(Object.keys(snapshot.payload).sort(), ['access', 'goal', 'plan', 'profile', 'retention']);
+  assert.deepEqual(Object.keys(snapshot.payload).sort(), ['access', 'goal', 'grammarRecommendation', 'plan', 'profile', 'retention']);
   assert.equal(Object.hasOwn(snapshot.payload, 'fresh'), false);
 });
 

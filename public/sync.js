@@ -304,11 +304,30 @@
     ownerDeletedListeners.add(listener);ensureGrammarSyncChannel();
     return function(){ownerDeletedListeners.delete(listener)}
   }
+  function grammarMasteryResultForEntry(entry,results){
+    const eventId=entry&&entry.event&&entry.event.id,topicId=Number(entry&&entry.topicId);
+    const matches=(results||[]).filter(function(result){return result&&result.eventId===eventId});
+    return matches.find(function(result){return Number(result.topicId)===topicId})
+      ||(!grammarMasteryEntryExpandsTopics(entry)?matches.find(function(result){return result.topicId==null}):null)
+  }
+  function grammarMasteryEntryExpandsTopics(entry){
+    return Array.isArray(entry&&entry.event&&entry.event.session&&entry.event.session.topicExpectations)
+  }
+  function grammarMasteryResultTopicAllowed(entry,topicId){
+    const expectations=entry&&entry.event&&entry.event.session&&entry.event.session.topicExpectations;
+    if(!Array.isArray(expectations))return topicId===Number(entry&&entry.topicId);
+    return expectations.some(function(expectation){return Number(expectation&&expectation.topicId)===topicId})
+  }
   function publishGrammarMasterySync(ownerKey,expectedGeneration,entries,results){
     if(isOwnerDeleted(ownerKey)||!ownerAuthorityMatches(ownerKey,expectedGeneration))return;
-    const byId=new Map((results||[]).map(function(result){return[result&&result.eventId,result]}));
-    const records=entries.flatMap(function(entry){const result=byId.get(entry&&entry.event&&entry.event.id);
-      return result&&(result.applied||result.replay||result.conflict)&&result.record?[{topicId:Number(entry.topicId),record:result.record}]:[]});
+    const entriesById=new Map(entries.map(function(entry){return[entry&&entry.event&&entry.event.id,entry]})),seen=new Set(),records=[];
+    for(const result of results||[]){
+      const entry=entriesById.get(result&&result.eventId),resultTopicId=result&&result.topicId==null?NaN:Number(result.topicId);
+      const topicId=Number.isInteger(resultTopicId)?resultTopicId:Number(entry&&entry.topicId);
+      const identity=`${result&&result.eventId}:${topicId}`;
+      if(!entry||result.topicId==null&&grammarMasteryEntryExpandsTopics(entry)||!Number.isInteger(topicId)||!grammarMasteryResultTopicAllowed(entry,topicId)||seen.has(identity)||!(result.applied||result.replay||result.conflict)||!result.record)continue;
+      seen.add(identity);records.push({topicId:topicId,record:result.record})
+    }
     if(!records.length)return;
     const update={owner:ownerKey,ownerGeneration:expectedGeneration,records:records};deliverGrammarMasterySync(update);
     try{ensureGrammarSyncChannel()?.postMessage(clone(update))}catch(_){}
@@ -397,9 +416,10 @@
             if(isOwnerDeleted(ownerKey)||!durableOwnerAuthorityMatches(ownerKey,expectedGeneration))return false;
             const update=await withGrammarQueueLock(function(){
               if(!durableOwnerAuthorityMatches(ownerKey,expectedGeneration))return null;
-              const byId=new Map((last&&last.results||[]).map(function(result){return[result.eventId,result]})),remaining=blocked.slice();
+              const results=last&&last.results||[],knownIds=[],remaining=blocked.slice();
               for(const item of events){
-                const result=byId.get(item.event.id);
+                const result=grammarMasteryResultForEntry(item,results);
+                if(result)knownIds.push(item.event.id);
                 if(result&&(result.applied||result.replay))continue;
                 const conflictRevision=Number(result&&result.record&&result.record.masteryRevision);
                 remaining.push(result&&result.conflict&&Number.isInteger(conflictRevision)
@@ -407,8 +427,8 @@
                 if(result&&result.conflict&&Number.isInteger(conflictRevision))blockedTopics.add(Number(item.topicId))
               }
               if(!replaceGrammarMasteryBatch(ownerKey,expectedGeneration,batch.id,remaining))return null;
-              publishGrammarMasterySync(ownerKey,expectedGeneration,events,last&&last.results);
-              return{remaining:remaining,knownIds:[...byId.keys()]}
+              publishGrammarMasterySync(ownerKey,expectedGeneration,events,results);
+              return{remaining:remaining,knownIds:knownIds}
             },ownerKey);
             if(!update||!Array.isArray(update.remaining))break;
             const remaining=update.remaining,knownIds=new Set(update.knownIds||[]);

@@ -7,6 +7,14 @@ export const GRAMMAR_ACTIVE_PRACTICE_TYPES = Object.freeze([
   'choice', 'input', 'correction', 'transform',
 ]);
 
+export const GRAMMAR_PRACTICE_MODES = Object.freeze([
+  'topic_practice', 'legacy_practice', 'mixed_practice', 'targeted_practice',
+]);
+
+export const GRAMMAR_RECOMMENDATION_VERSION = 'grammar-focus-v1';
+export const GRAMMAR_TARGETED_MIN_EXACT_ITEMS = 2;
+export const GRAMMAR_TARGETED_MIN_ERROR_ITEMS = 4;
+
 export const GRAMMAR_ACTIVE_TOPIC_IDS = Object.freeze([
   1, 2, 3, 13, 4, 5, 6, 7, 8, 9, 18, 10, 11, 12, 16, 17, 20,
   14, 15, 19,
@@ -65,6 +73,10 @@ export function parseGeneratedGrammarItemReference(value) {
 export const EasyBoostGrammarDomain = Object.freeze({
   GRAMMAR_ERROR_CODES,
   GRAMMAR_ACTIVE_PRACTICE_TYPES,
+  GRAMMAR_PRACTICE_MODES,
+  GRAMMAR_RECOMMENDATION_VERSION,
+  GRAMMAR_TARGETED_MIN_EXACT_ITEMS,
+  GRAMMAR_TARGETED_MIN_ERROR_ITEMS,
   GRAMMAR_ACTIVE_TOPIC_IDS,
   GRAMMAR_PREACTIVATION_LEGACY_TOPIC_IDS,
   GENERATED_GRAMMAR_REVISION,

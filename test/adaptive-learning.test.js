@@ -184,7 +184,7 @@ async function withAdaptiveApp(run, { enabled = true } = {}) {
 
   const app = express();
   app.use(express.json());
-  app.use(createProgressRoutes({ authentication: testAuthentication(), db: repository }));
+  app.use(createProgressRoutes({ authentication: testAuthentication(), db: repository, now: () => NOW }));
   app.use(createAdaptiveLearningRoutes({
     authentication: testAuthentication(),
     db: repository,
@@ -803,6 +803,30 @@ test('disabled plan rollout keeps the owner-bound evidence overview but no plan 
   }, { enabled: false });
 });
 
+test('adaptive overview exposes the same owner-bound exact grammar focus as the resolver API', async () => {
+  await withAdaptiveApp(async ({ owner, stranger, request }) => {
+    const goal = await request(owner, '/api/v1/adaptive-learning/goal', {
+      method: 'PUT', headers: { 'Idempotency-Key': 'grammar-focus-goal-0001' },
+      body: JSON.stringify({
+        targetExam: 'ege_english', targetScore: 85,
+        examDate: '2026-08-10', weeklyMinutes: 300,
+      }),
+    });
+    assert.equal(goal.status, 201);
+
+    const overview = await (await request(owner, '/api/v1/adaptive-learning/overview')).json();
+    const direct = await (await request(owner, '/api/v1/grammar/recommendation')).json();
+    assert.deepEqual(overview.grammarRecommendation, direct.recommendation);
+    assert.equal(overview.grammarRecommendation.pointer.version, 'grammar-focus-v1');
+    assert.ok(overview.grammarRecommendation.reasonCodes.includes('deadline_pressure'));
+    assert.equal(Object.hasOwn(overview.grammarRecommendation.pointer, 'learnerAnswer'), false);
+
+    const strangerOverview = await (await request(stranger, '/api/v1/adaptive-learning/overview')).json();
+    assert.equal(strangerOverview.grammarRecommendation.reasonCodes.includes('deadline_pressure'), false,
+      'one learner\'s exam deadline cannot leak into another learner\'s recommendation');
+  });
+});
+
 test('adaptive HTTP boundary rejects a shared-cookie owner switch before returning private data', async () => {
   await withAdaptiveApp(async ({ owner, stranger, request }) => {
     const rejected = await request(stranger, '/api/v1/adaptive-learning/overview', {
@@ -996,12 +1020,15 @@ test('progress screen contains an accessible current-plan form and renders the s
   assert.match(markup, /<label[^>]*for="adaptive_target_score"/u);
   assert.match(markup, /id="adaptive_exam_date"[^>]*type="date"/u);
   assert.match(markup, /id="adaptive_weekly_minutes"[^>]*step="5"/u);
+  assert.match(markup, /id="adaptive_grammar_focus"[^>]*role="status"/u);
   assert.match(screen, /apiGet\('\/api\/v1\/adaptive-learning\/overview',adaptiveOwnerHeaders/u);
   assert.match(screen, /adaptivePut\('\/api\/v1\/adaptive-learning\/goal'/u);
   assert.match(screen, /Idempotency-Key/u);
   assert.match(screen, /profile\.preliminary/u);
   assert.match(screen, /needsDiagnostic/u);
   assert.match(screen, /establishedSkillCount/u);
+  assert.match(screen, /grammarRecommendation/u);
+  assert.match(screen, /Точный фокус грамматики/u);
   assert.match(screen, /Результаты с подсказкой не подтверждают владение навыком/u);
   assert.match(screen, /features\?\.adaptive_learning/u);
   assert.match(configSource, /adaptiveLearning:\s*Object\.freeze\(\{[\s\S]*ADAPTIVE_LEARNING_ENABLED', false/u);

@@ -519,7 +519,7 @@ export function createFileRepository(filePath, {
         }
         const record = eventSeen
           ? current
-          : reduceMastery(current, event, { now, clockAuthority: 'server' });
+          : reduceMastery(current, event, { now, clockAuthority: 'server', topicId });
         const applied = !replay && record.masteryRevision === current.masteryRevision + 1;
         if (applied) {
           grammarMastery[topicId] = record;

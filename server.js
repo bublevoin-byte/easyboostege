@@ -307,7 +307,9 @@ app.use(createUserRoutes({
   voiceTutorLimits: config.voiceTutor,
   featureFlags: { adaptiveLearning: config.adaptiveLearning.enabled },
 }));
-app.use(createProgressRoutes({ authentication, db: dbApi }));
+app.use(createProgressRoutes({
+  authentication, db: dbApi, recommendationSecret: SECRET,
+}));
 app.use(createReadingRoutes({
   authentication, db: dbApi, voiceTutorLimits: config.voiceTutor,
 }));

@@ -14,20 +14,24 @@ import {
   GENERATED_GRAMMAR_REVISION,
   GRAMMAR_ACTIVE_PRACTICE_TYPES,
   GRAMMAR_ERROR_CODES,
+  GRAMMAR_PRACTICE_MODES,
+  GRAMMAR_TARGETED_MIN_ERROR_ITEMS,
+  GRAMMAR_TARGETED_MIN_EXACT_ITEMS,
   parseGeneratedGrammarItemId,
   parseGeneratedGrammarItemReference,
 } from '../public/grammar-domain-contract.js';
 import { grammarMasteryEventSchema } from '../validation/grammar-mastery.js';
 
 const moduleSource = (await fs.readFile(new URL('../public/modules/grammar.js', import.meta.url), 'utf8'))
-  .replace(/^import .*;\r?\n/gmu, '')
+  .replace(/^import(?:[\s\S]*?)from '[^']+';\r?\n/gmu, '')
   .replace(/^export /gmu, '');
 
 function createGrammarModule() {
   const window = {};
   vm.runInNewContext(moduleSource, {
     window, grammarActivityId, splitLearningActivityDuration,
-    GENERATED_GRAMMAR_REVISION, GRAMMAR_ACTIVE_PRACTICE_TYPES, GRAMMAR_ERROR_CODES,
+    GENERATED_GRAMMAR_REVISION, GRAMMAR_ACTIVE_PRACTICE_TYPES, GRAMMAR_ERROR_CODES, GRAMMAR_PRACTICE_MODES,
+    GRAMMAR_TARGETED_MIN_ERROR_ITEMS, GRAMMAR_TARGETED_MIN_EXACT_ITEMS,
     parseGeneratedGrammarItemId, parseGeneratedGrammarItemReference,
     Object, String, Number, Math, Date, Set, Map,
   });

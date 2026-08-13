@@ -12,7 +12,16 @@ import {
 } from '../validation/personal-words.js';
 import { learnerPreferencesSchema } from '../validation/learner-preferences.js';
 import { grammarMasteryBatchSchema, grammarMasteryEventSchema } from '../validation/grammar-mastery.js';
+import { grammarRecommendationResolveSchema } from '../validation/grammar-recommendation.js';
 import { bindResponseOwner, requireExpectedOwner } from '../middleware/expected-owner.js';
+import { GRAMMAR_CATALOG } from '../public/grammar-catalog.js';
+import { EasyBoostGrammar } from '../public/modules/grammar.js';
+import {
+  buildGrammarRecommendation,
+  createGrammarRecommendationCompletionToken,
+  resolveGrammarRecommendation,
+  verifyGrammarRecommendationCompletionToken,
+} from '../services/grammar-recommendation.js';
 
 const MAX_MODULES_PER_REQUEST = 64;
 
@@ -63,7 +72,9 @@ function perUserLimiter(limit, message) {
 }
 
 // Progress, module attempts, word cards and the error bank — everything a student generates.
-export function createProgressRoutes({ authentication, db, now = () => new Date() }) {
+export function createProgressRoutes({
+  authentication, db, now = () => new Date(), recommendationSecret = null,
+}) {
   const router = express.Router();
   const { auth } = authentication;
 
@@ -104,6 +115,110 @@ export function createProgressRoutes({ authentication, db, now = () => new Date(
     } catch (error) { next(error); }
   });
 
+  async function grammarRecommendationContext(username) {
+    const [mastery, goal] = await Promise.all([
+      db.migrateGrammarMastery(username),
+      typeof db.getAdaptiveLearningGoal === 'function'
+        ? db.getAdaptiveLearningGoal(username) : null,
+    ]);
+    return {
+      mastery,
+      catalog: GRAMMAR_CATALOG,
+      examDate: goal?.examDate ?? goal?.exam_date ?? null,
+      now: now(),
+    };
+  }
+
+  function targetedCompletionIsAuthorized(username, event) {
+    if (event?.type !== 'session_completed' || event.session?.mode !== 'targeted_practice') return true;
+    const binding = event.session.recommendation;
+    return binding?.pointer?.masteryRevision === event.expectedRevision
+      && verifyGrammarRecommendationCompletionToken({
+      owner: username,
+      pointer: binding?.pointer,
+      itemIds: binding?.itemIds,
+    }, recommendationSecret, binding?.completionToken);
+  }
+
+  function masteryPersistenceEntries(entry) {
+    if (entry.event?.type !== 'session_completed'
+      || entry.event.session?.mode !== 'mixed_practice') return [{ ...entry, mixed: false }];
+    return entry.event.session.topicExpectations.map((expectation) => ({
+      topicId: expectation.topicId,
+      event: {
+        ...entry.event,
+        expectedRevision: expectation.expectedRevision,
+        expectedStage: expectation.expectedStage,
+        expectedReviewStep: expectation.expectedReviewStep,
+      },
+      mixed: true,
+    }));
+  }
+
+  function publicMasteryResults(entries, results) {
+    return results.map((result, index) => entries[index]?.mixed
+      ? { ...result, topicId: entries[index].topicId }
+      : result);
+  }
+
+  function rejectUnauthorizedTargetedCompletion(res) {
+    return res.status(409).json({ error: {
+      code: 'GRAMMAR_RECOMMENDATION_COMPLETION_INVALID',
+      message: 'Точная рекомендация устарела или была изменена. Начните новый подход.',
+    } });
+  }
+
+  router.get('/api/v1/grammar/recommendation', auth, async (req, res, next) => {
+    try {
+      if (!requireExpectedOwner(req, res)) return;
+      const recommendation = buildGrammarRecommendation(
+        await grammarRecommendationContext(req.user),
+      );
+      res.setHeader('Cache-Control', 'no-store');
+      bindResponseOwner(res, req.user);
+      return res.json({ recommendation });
+    } catch (error) { return next(error); }
+  });
+
+  router.post('/api/v1/grammar/recommendation/resolve', auth, perUserLimiter(120, 'Слишком много запросов точной практики.'), async (req, res, next) => {
+    try {
+      if (!requireExpectedOwner(req, res)) return;
+      const parsed = grammarRecommendationResolveSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректный указатель точной практики.' } });
+      }
+      const context = await grammarRecommendationContext(req.user);
+      const recommendation = resolveGrammarRecommendation(parsed.data.pointer, context);
+      if (!recommendation) {
+        return res.status(409).json({ error: {
+          code: 'GRAMMAR_RECOMMENDATION_STALE',
+          message: 'Приоритет изменился. Обновите рекомендацию и начните новый подход.',
+        } });
+      }
+      const queue = EasyBoostGrammar.buildTargetedPracticeQueue(
+        GRAMMAR_CATALOG.bank, recommendation.pointer, { seed: recommendation.pointer.ref },
+      );
+      if (queue.length !== 8) {
+        return res.status(409).json({ error: {
+          code: 'GRAMMAR_RECOMMENDATION_UNAVAILABLE',
+          message: 'Для этой точной слабости пока недостаточно независимых заданий.',
+        } });
+      }
+      const itemIds = queue.map((item) => item.q.id);
+      const completionToken = createGrammarRecommendationCompletionToken({
+        owner: req.user, pointer: recommendation.pointer, itemIds,
+      }, recommendationSecret);
+      res.setHeader('Cache-Control', 'no-store');
+      bindResponseOwner(res, req.user);
+      return res.json({
+        recommendation,
+        catalog: { version: GRAMMAR_CATALOG.version, revision: GRAMMAR_CATALOG.revision },
+        itemIds,
+        completionToken,
+      });
+    } catch (error) { return next(error); }
+  });
+
   router.post('/api/v1/grammar/mastery-events', auth, perUserLimiter(240, 'Слишком много результатов грамматики за короткое время.'), async (req, res, next) => {
     try {
       if (!requireExpectedOwner(req, res)) return;
@@ -111,9 +226,23 @@ export function createProgressRoutes({ authentication, db, now = () => new Date(
       if (!parsed.success) {
         return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректное событие освоения грамматики.' } });
       }
-      const result = await db.applyGrammarMasteryEvent(
-        req.user, parsed.data.topicId, parsed.data.event,
-      );
+      if (!targetedCompletionIsAuthorized(req.user, parsed.data.event)) {
+        return rejectUnauthorizedTargetedCompletion(res);
+      }
+      const entries = masteryPersistenceEntries(parsed.data);
+      const results = entries.length === 1 && !entries[0].mixed
+        ? [await db.applyGrammarMasteryEvent(req.user, entries[0].topicId, entries[0].event)]
+        : await db.applyGrammarMasteryEvents(req.user,
+          entries.map(({ topicId, event }) => ({ topicId, event })));
+      const publicResults = publicMasteryResults(entries, results);
+      const result = entries.length === 1 ? publicResults[0] : {
+        eventId: parsed.data.event.id,
+        applied: publicResults.every((item) => item.applied),
+        conflict: publicResults.some((item) => item.conflict),
+        replay: publicResults.every((item) => item.replay),
+        record: publicResults[0]?.record,
+        results: publicResults,
+      };
       bindResponseOwner(res, req.user);
       return res.status(result.applied ? 201 : 200).json(result);
     } catch (error) {
@@ -136,8 +265,16 @@ export function createProgressRoutes({ authentication, db, now = () => new Date(
           message: 'Аккаунт изменился. Войдите снова и повторите синхронизацию.',
         } });
       }
-      const results = await db.applyGrammarMasteryEvents(req.user, parsed.data.events);
-      return res.status(results.every((result) => result.applied) ? 201 : 200).json({ batchId: parsed.data.batchId, results });
+      if (parsed.data.events.some((entry) => !targetedCompletionIsAuthorized(req.user, entry.event))) {
+        return rejectUnauthorizedTargetedCompletion(res);
+      }
+      const entries = parsed.data.events.flatMap(masteryPersistenceEntries);
+      const results = await db.applyGrammarMasteryEvents(req.user,
+        entries.map(({ topicId, event }) => ({ topicId, event })));
+      const publicResults = publicMasteryResults(entries, results);
+      bindResponseOwner(res, req.user);
+      return res.status(publicResults.every((result) => result.applied) ? 201 : 200)
+        .json({ batchId: parsed.data.batchId, results: publicResults });
     } catch (error) {
       if (error?.code === 'INVALID_GENERATED_GRAMMAR_REFERENCE') {
         return res.status(400).json({ error: { code: error.code, message: 'Сгенерированное задание больше не принадлежит активному каталогу ученика.' } });

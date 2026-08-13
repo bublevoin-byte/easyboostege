@@ -1356,8 +1356,8 @@ test('Grammar OpenAPI couples session and review diagnostics to every active top
   const openapi = await fs.readFile(new URL('../docs/openapi.yaml', import.meta.url), 'utf8');
   assert.equal((openapi.match(/^    GrammarActiveDiagnosticId:$/gmu) || []).length, 1,
     'the active diagnostic whitelist has one OpenAPI source of truth');
-  assert.equal((openapi.match(/\$ref: '#\/components\/schemas\/GrammarActiveDiagnosticId'/gu) || []).length, 3,
-    'built-in items, generated items, and independent errors reuse the active diagnostic whitelist');
+  assert.equal((openapi.match(/\$ref: '#\/components\/schemas\/GrammarActiveDiagnosticId'/gu) || []).length, 4,
+    'built-in items, generated items, topic errors, and mixed-topic errors reuse the active diagnostic whitelist');
   const validateRequest = compileOpenApiSchema(openapi, 'GrammarMasteryEventRequest');
   const parity = {};
 

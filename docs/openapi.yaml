@@ -1932,6 +1932,45 @@ paths:
         '200': { description: Merged progress }
         '400': { $ref: '#/components/responses/BadRequest' }
         '409': { description: OWNER_CHANGED; intended owner does not match the authenticated account }
+  /api/v1/grammar/recommendation:
+    get:
+      summary: Get the authenticated learner's exact server-owned Grammar focus
+      description: Returns an answer-free, non-cacheable pointer derived from current canonical mastery, exact built-in weakness history and the learner's exam deadline. Generated-only evidence cannot select the focus, and deadline pressure never changes the mastery stage or eligibleAt.
+      parameters:
+        - $ref: '#/components/parameters/ExpectedOwner'
+      responses:
+        '200':
+          description: Current exact Grammar focus
+          headers:
+            X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GrammarRecommendationResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { description: OWNER_CHANGED; expected owner does not match the authenticated account }
+  /api/v1/grammar/recommendation/resolve:
+    post:
+      summary: Resolve the current exact Grammar focus into eight built-in item pointers
+      description: Recomputes the recommendation under the authenticated owner and rejects every stale or client-substituted pointer. The response contains only catalog item IDs and no answer content.
+      parameters:
+        - $ref: '#/components/parameters/ExpectedOwner'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GrammarRecommendationResolveRequest' }
+      responses:
+        '200':
+          description: Exact current pointer resolved to a bounded built-in queue
+          headers:
+            X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GrammarRecommendationResolveResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { description: GRAMMAR_RECOMMENDATION_STALE or OWNER_CHANGED }
+        '429': { $ref: '#/components/responses/RateLimited' }
   /api/v1/grammar/mastery-events:
     post:
       summary: Apply one owner-bound Grammar mastery event with server-authoritative time and revision CAS
@@ -1950,14 +1989,14 @@ paths:
             X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' }
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/GrammarMasteryEventResult' }
+              schema: { $ref: '#/components/schemas/GrammarMasteryEventWriteResult' }
         '200':
           description: Stale or replayed event not applied; current authoritative record returned
           headers:
             X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' }
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/GrammarMasteryEventResult' }
+              schema: { $ref: '#/components/schemas/GrammarMasteryEventWriteResult' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '409': { description: OWNER_CHANGED; intended owner does not match the authenticated account }
@@ -1974,11 +2013,15 @@ paths:
       responses:
         '201':
           description: Every event atomically applied
+          headers:
+            X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/GrammarMasteryEventBatchResult' }
         '200':
           description: Batch contained a replay or conflict; no conflicting unseen batch was partially committed. A conflict record is current authority. A stage-changing conflict must not be blindly retried or rebased; the client retains a bounded non-retryable marker until fresh evidence at the returned revision explicitly replaces it.
+          headers:
+            X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/GrammarMasteryEventBatchResult' }
@@ -3843,7 +3886,7 @@ components:
       additionalProperties: false
     AdaptiveOverview:
       type: object
-      required: [goal, profile, plan, retention, access]
+      required: [goal, profile, plan, grammarRecommendation, retention, access]
       properties:
         goal:
           allOf:
@@ -3854,6 +3897,7 @@ components:
           allOf:
             - $ref: '#/components/schemas/AdaptivePlan'
           nullable: true
+        grammarRecommendation: { $ref: '#/components/schemas/GrammarRecommendation' }
         retention: { $ref: '#/components/schemas/AdaptiveRetention' }
         access: { $ref: '#/components/schemas/AdaptiveAccess' }
       additionalProperties: false
@@ -4585,10 +4629,100 @@ components:
       properties:
         learnerPreferences: { $ref: '#/components/schemas/LearnerPreferences' }
       additionalProperties: true
+    GrammarRecommendationPointer:
+      type: object
+      required: [version, catalogVersion, catalogRevision, topicId, errorCode, confusionPair, masteryRevision, eligibleAt, earlyPractice, stateFingerprint, ref]
+      properties:
+        version: { type: string, enum: [grammar-focus-v1] }
+        catalogVersion: { type: string, enum: [grammar-core-v3] }
+        catalogRevision: { type: integer, enum: [3] }
+        topicId: { type: integer, minimum: 1, maximum: 20 }
+        errorCode: { type: string, enum: [construction_choice, word_or_verb_form, auxiliary, agreement, word_order, negation_or_question, confusion_pair] }
+        confusionPair: { type: string, nullable: true, pattern: '^[a-z0-9]+(?:_[a-z0-9]+)*__(?:[a-z0-9]+(?:_[a-z0-9]+)*)$' }
+        masteryRevision: { type: integer, minimum: 0, maximum: 9007199254740991 }
+        eligibleAt: { type: integer, nullable: true, minimum: 0, maximum: 9007199254740991 }
+        earlyPractice: { type: boolean }
+        stateFingerprint: { type: string, pattern: '^[a-f0-9]{64}$' }
+        ref: { type: string, pattern: '^[a-f0-9]{64}$' }
+      additionalProperties: false
+    GrammarRecommendation:
+      type: object
+      required: [pointer, reasonCodes, observedErrorCount, observedAt]
+      properties:
+        pointer: { $ref: '#/components/schemas/GrammarRecommendationPointer' }
+        reasonCodes:
+          type: array
+          minItems: 1
+          maxItems: 4
+          uniqueItems: true
+          items: { type: string, enum: [catalog_fallback, recent_weakness, due_review, deadline_pressure] }
+        observedErrorCount: { type: integer, minimum: 0, maximum: 9007199254740991 }
+        observedAt: { type: integer, nullable: true, minimum: 0, maximum: 9007199254740991 }
+      additionalProperties: false
+    GrammarRecommendationResponse:
+      type: object
+      required: [recommendation]
+      properties:
+        recommendation: { $ref: '#/components/schemas/GrammarRecommendation' }
+      additionalProperties: false
+    GrammarRecommendationResolveRequest:
+      type: object
+      required: [pointer]
+      properties:
+        pointer: { $ref: '#/components/schemas/GrammarRecommendationPointer' }
+      additionalProperties: false
+    GrammarRecommendationResolveResponse:
+      type: object
+      required: [recommendation, catalog, itemIds, completionToken]
+      properties:
+        recommendation: { $ref: '#/components/schemas/GrammarRecommendation' }
+        catalog:
+          type: object
+          required: [version, revision]
+          properties:
+            version: { type: string, enum: [grammar-core-v3] }
+            revision: { type: integer, enum: [3] }
+          additionalProperties: false
+        itemIds:
+          type: array
+          minItems: 8
+          maxItems: 8
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/GrammarBuiltinCatalogItemId' }
+        completionToken:
+          type: string
+          pattern: '^[A-Za-z0-9_-]{43}$'
+          description: Owner-bound HMAC receipt over the exact recommendation pointer and ordered original item IDs. It is replayed unchanged by offline completion and contains no answer material.
+      additionalProperties: false
+    GrammarMasteryExpectation:
+      type: object
+      required: [topicId, expectedRevision, expectedStage, expectedReviewStep]
+      properties:
+        topicId: { type: integer, minimum: 1, maximum: 20 }
+        expectedRevision: { type: integer, minimum: 0, maximum: 9007199254740991 }
+        expectedStage: { type: string, enum: [not_started, learning, learned, confirmed, stable] }
+        expectedReviewStep: { type: integer, minimum: 0, maximum: 5 }
+      additionalProperties: false
+    GrammarTargetedRecommendationBinding:
+      type: object
+      description: Owner-signed exact focus and ordered item sequence. The pointer masteryRevision must equal the completion event expectedRevision, so a receipt cannot authorize a later mastery revision.
+      required: [pointer, itemIds, completionToken]
+      properties:
+        pointer: { $ref: '#/components/schemas/GrammarRecommendationPointer' }
+        itemIds:
+          type: array
+          minItems: 8
+          maxItems: 8
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/GrammarBuiltinCatalogItemId' }
+        completionToken: { type: string, pattern: '^[A-Za-z0-9_-]{43}$' }
+      additionalProperties: false
     GrammarMasteryEventRequest:
       description: Built-in sessions use the exact active-topic envelope selected by topicId. A queued built-in legacy session may finish after activation only when every pointer belongs to the immutable pre-activation catalog; generated and mixed sessions remain assisted legacy evidence.
       oneOf:
         - $ref: '#/components/schemas/GrammarActiveBuiltinMasteryEventRequest'
+        - $ref: '#/components/schemas/GrammarMixedBuiltinMasteryEventRequest'
+        - $ref: '#/components/schemas/GrammarTargetedBuiltinMasteryEventRequest'
         - $ref: '#/components/schemas/GrammarPreActivationLegacyBuiltinMasteryEventRequest'
         - $ref: '#/components/schemas/GrammarLegacyBuiltinMasteryEventRequest'
         - $ref: '#/components/schemas/GrammarGeneratedOrMixedMasteryEventRequest'
@@ -4636,6 +4770,41 @@ components:
         - {"title":"Active topic 14 pointer ownership","required":["topicId","event"],"properties":{"topicId":{"type":"integer","enum":[14]},"event":{"type":"object","required":["session"],"properties":{"session":{"type":"object","required":["items"],"properties":{"items":{"type":"array","items":{"type":"object","required":["id"],"properties":{"id":{"type":"string","pattern":"^core\\.g\\.14\\.(?:c|c2|f|correction|transform)\\.[1-9]\\d*$"},"diagnosticId":{"type":"string","nullable":true,"pattern":"^core\\.g\\.14\\.c\\.[1-9]\\d*\\.diagnostic\\.[1-9]\\d*$"}}}}}}}}}}
         - {"title":"Active topic 15 pointer ownership","required":["topicId","event"],"properties":{"topicId":{"type":"integer","enum":[15]},"event":{"type":"object","required":["session"],"properties":{"session":{"type":"object","required":["items"],"properties":{"items":{"type":"array","items":{"type":"object","required":["id"],"properties":{"id":{"type":"string","pattern":"^core\\.g\\.15\\.(?:c|c2|f|correction|transform)\\.[1-9]\\d*$"},"diagnosticId":{"type":"string","nullable":true,"pattern":"^core\\.g\\.15\\.c\\.[1-9]\\d*\\.diagnostic\\.[1-9]\\d*$"}}}}}}}}}}
         - {"title":"Active topic 19 pointer ownership","required":["topicId","event"],"properties":{"topicId":{"type":"integer","enum":[19]},"event":{"type":"object","required":["session"],"properties":{"session":{"type":"object","required":["items"],"properties":{"items":{"type":"array","items":{"type":"object","required":["id"],"properties":{"id":{"type":"string","pattern":"^core\\.g\\.19\\.(?:c|c2|f|correction|transform)\\.[1-9]\\d*$"},"diagnosticId":{"type":"string","nullable":true,"pattern":"^core\\.g\\.19\\.c\\.[1-9]\\d*\\.diagnostic\\.[1-9]\\d*$"}}}}}}}}}}
+    GrammarMixedBuiltinMasteryEventRequest:
+      type: object
+      description: Current-catalog mixed recall. One client-stable session is atomically applied to the exact topic expectations carried for its originals; only due, unassisted per-topic recall can advance and a late exact error affects its actual topic.
+      x-easyboost-grammar-mixed-bindings: event-session
+      required: [topicId, event]
+      properties:
+        topicId: { type: integer, minimum: 1, maximum: 20 }
+        event:
+          allOf:
+            - $ref: '#/components/schemas/GrammarMasterySessionEvent'
+            - type: object
+              required: [source, session]
+              properties:
+                source: { type: string, enum: [builtin] }
+                session: { $ref: '#/components/schemas/GrammarMixedPracticeSession' }
+              not:
+                required: [independentError]
+      additionalProperties: false
+    GrammarTargetedBuiltinMasteryEventRequest:
+      type: object
+      description: Current-catalog targeted recall selected through the exact server recommendation resolver. The owner-bound completion receipt prevents item, focus or mastery-revision substitution; only due unassisted recall can advance.
+      x-easyboost-grammar-topic-items: session-items
+      x-easyboost-grammar-targeted-binding: event-session
+      required: [topicId, event]
+      properties:
+        topicId: { type: integer, minimum: 1, maximum: 20 }
+        event:
+          allOf:
+            - $ref: '#/components/schemas/GrammarMasterySessionEvent'
+            - type: object
+              required: [source, session]
+              properties:
+                source: { type: string, enum: [builtin] }
+                session: { $ref: '#/components/schemas/GrammarTargetedPracticeSession' }
+      additionalProperties: false
     GrammarActiveTopicIndependentErrorOwnership:
       type: object
       description: Couples optional independent-error evidence to the selected active built-in topic for sessions and reviews.
@@ -4870,6 +5039,11 @@ components:
       type: object
       required: [eventId, applied, conflict, replay, record]
       properties:
+        topicId:
+          type: integer
+          minimum: 1
+          maximum: 20
+          description: Present on per-topic results expanded atomically from one mixed completion.
         eventId: { type: string, format: uuid }
         applied: { type: boolean }
         conflict:
@@ -4881,6 +5055,25 @@ components:
           description: Current canonical Grammar mastery record after the owner transaction.
           additionalProperties: true
       additionalProperties: false
+    GrammarMasteryMixedEventResult:
+      type: object
+      required: [eventId, applied, conflict, replay, record, results]
+      properties:
+        eventId: { type: string, format: uuid }
+        applied: { type: boolean }
+        conflict: { type: boolean }
+        replay: { type: boolean }
+        record: { type: object, additionalProperties: true }
+        results:
+          type: array
+          minItems: 8
+          maxItems: 16
+          items: { $ref: '#/components/schemas/GrammarMasteryEventResult' }
+      additionalProperties: false
+    GrammarMasteryEventWriteResult:
+      oneOf:
+        - $ref: '#/components/schemas/GrammarMasteryEventResult'
+        - $ref: '#/components/schemas/GrammarMasteryMixedEventResult'
     GrammarMasteryEventBatchResult:
       type: object
       required: [batchId, results]
@@ -4889,7 +5082,7 @@ components:
         results:
           type: array
           minItems: 1
-          maxItems: 20
+          maxItems: 320
           items: { $ref: '#/components/schemas/GrammarMasteryEventResult' }
       additionalProperties: false
     GrammarMasterySessionEvent:
@@ -4924,6 +5117,12 @@ components:
         session: { $ref: '#/components/schemas/GrammarPracticeSession' }
         independentError:
           $ref: '#/components/schemas/GrammarIndependentError'
+        independentErrors:
+          type: array
+          minItems: 1
+          maxItems: 16
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/GrammarMixedIndependentError' }
       allOf:
         - oneOf:
             - $ref: '#/components/schemas/GrammarBuiltinAssistedMasterySessionEvent'
@@ -4932,6 +5131,8 @@ components:
             - $ref: '#/components/schemas/GrammarMixedAssistedMasterySessionEvent'
         - oneOf:
             - $ref: '#/components/schemas/GrammarActiveMasterySessionEvidence'
+            - $ref: '#/components/schemas/GrammarMixedMasterySessionEvidence'
+            - $ref: '#/components/schemas/GrammarTargetedMasterySessionEvidence'
             - $ref: '#/components/schemas/GrammarLegacyMasterySessionEvidence'
       additionalProperties: false
     GrammarActiveMasterySessionEvidence:
@@ -4962,6 +5163,45 @@ components:
               required: [mode]
               properties:
                 mode: { type: string, enum: [topic_practice] }
+    GrammarMixedMasterySessionEvidence:
+      title: Balanced mixed practice evidence
+      type: object
+      required: [completedTypes, typeScores, session]
+      properties:
+        completedTypes:
+          type: array
+          minItems: 4
+          maxItems: 4
+          uniqueItems: true
+          items: { type: string, enum: [choice, input, correction, transform] }
+        typeScores:
+          type: object
+          required: [choice, input, correction, transform]
+          properties:
+            choice: { $ref: '#/components/schemas/GrammarMasteryTypeScore' }
+            input: { $ref: '#/components/schemas/GrammarMasteryTypeScore' }
+            correction: { $ref: '#/components/schemas/GrammarMasteryTypeScore' }
+            transform: { $ref: '#/components/schemas/GrammarMasteryTypeScore' }
+          additionalProperties: false
+        session:
+          allOf:
+            - $ref: '#/components/schemas/GrammarMixedPracticeSession'
+            - type: object
+              required: [mode]
+              properties:
+                mode: { type: string, enum: [mixed_practice] }
+    GrammarTargetedMasterySessionEvidence:
+      title: Exact server-focused targeted practice evidence
+      type: object
+      required: [completedTypes, typeScores, session]
+      properties:
+        session:
+          allOf:
+            - $ref: '#/components/schemas/GrammarTargetedPracticeSession'
+            - type: object
+              required: [mode]
+              properties:
+                mode: { type: string, enum: [targeted_practice] }
     GrammarLegacyMasterySessionEvidence:
       title: Truthful partial legacy practice evidence
       description: A legacy_practice run may cover only part of the canonical practice set; completedTypes and typeScores must declare exactly the types that produced outcomes.
@@ -5056,6 +5296,33 @@ components:
                   required: [mode]
                   properties:
                     mode: { type: string, enum: [topic_practice] }
+            - title: Clean unassisted mixed scores
+              type: object
+              required: [typeScores, session]
+              properties:
+                typeScores:
+                  type: object
+                  required: [choice, input, correction, transform]
+                  properties:
+                    choice: { type: object, required: [correct, total], properties: { correct: { type: integer, enum: [4] }, total: { type: integer, enum: [4] } }, additionalProperties: false }
+                    input: { type: object, required: [correct, total], properties: { correct: { type: integer, enum: [4] }, total: { type: integer, enum: [4] } }, additionalProperties: false }
+                    correction: { type: object, required: [correct, total], properties: { correct: { type: integer, enum: [4] }, total: { type: integer, enum: [4] } }, additionalProperties: false }
+                    transform: { type: object, required: [correct, total], properties: { correct: { type: integer, enum: [4] }, total: { type: integer, enum: [4] } }, additionalProperties: false }
+                  additionalProperties: false
+                session:
+                  type: object
+                  required: [mode]
+                  properties:
+                    mode: { type: string, enum: [mixed_practice] }
+            - title: Clean unassisted targeted scores
+              type: object
+              required: [session]
+              properties:
+                session:
+                  type: object
+                  required: [mode]
+                  properties:
+                    mode: { type: string, enum: [targeted_practice] }
             - title: Clean unassisted legacy scores
               type: object
               required: [session]
@@ -5102,6 +5369,8 @@ components:
     GrammarPracticeSession:
       oneOf:
         - $ref: '#/components/schemas/GrammarActivePracticeSession'
+        - $ref: '#/components/schemas/GrammarMixedPracticeSession'
+        - $ref: '#/components/schemas/GrammarTargetedPracticeSession'
         - $ref: '#/components/schemas/GrammarLegacyPracticeSession'
     GrammarActivePracticeSession:
       type: object
@@ -5122,9 +5391,78 @@ components:
           maxItems: 32
           uniqueItems: true
           description: Ordered completed item outcomes with exactly four non-transfer originals of every practice type plus at most sixteen distinct authored transfers. Every wrong original is immediately followed by its unique paired transfer, and a wrong transfer ends with due_next_session.
-          items: { $ref: '#/components/schemas/GrammarBuiltinPracticeSessionItem' }
+          items:
+            allOf:
+              - $ref: '#/components/schemas/GrammarBuiltinPracticeSessionItem'
+              - not:
+                  required: [topicId]
         startedAt: { type: integer, minimum: 0, maximum: 9007199254740991 }
         assisted: { type: boolean }
+      additionalProperties: false
+    GrammarMixedPracticeSession:
+      type: object
+      description: Exactly sixteen current built-in originals, four per practice type, spanning at least eight topics with no topic used more than twice, plus at most one adjacent authored transfer after each failed original. Topic names and rules remain hidden until an answer is committed.
+      x-easyboost-grammar-mixed-balance: four-types-eight-topics
+      required: [id, scope, mode, source, catalog, items, startedAt, assisted, topicExpectations]
+      properties:
+        id: { type: string, format: uuid }
+        scope: { type: string, enum: [mixed] }
+        mode: { type: string, enum: [mixed_practice] }
+        source: { type: string, enum: [builtin] }
+        catalog:
+          type: object
+          required: [version, revision]
+          properties:
+            version: { type: string, enum: [grammar-core-v3] }
+            revision: { type: integer, enum: [3] }
+          additionalProperties: false
+        items:
+          type: array
+          minItems: 16
+          maxItems: 32
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/GrammarMixedPracticeSessionItem' }
+        startedAt: { type: integer, minimum: 0, maximum: 9007199254740991 }
+        assisted: { type: boolean }
+        topicExpectations:
+          type: array
+          minItems: 8
+          maxItems: 16
+          uniqueItems: true
+          description: Ordered exactly like the first occurrence of each original topic. The event envelope repeats the first topic expectation; persistence applies the whole list atomically.
+          items: { $ref: '#/components/schemas/GrammarMasteryExpectation' }
+      additionalProperties: false
+    GrammarTargetedPracticeSession:
+      type: object
+      description: Exactly eight distinct current built-in originals from the topic resolved by the server-owned Grammar recommendation pointer, plus at most one adjacent authored transfer after each failed original.
+      x-easyboost-grammar-targeted-balance: eight-originals
+      required: [id, scope, mode, source, catalog, items, startedAt, assisted, recommendation]
+      properties:
+        id: { type: string, format: uuid }
+        scope: { type: string, enum: [topic] }
+        mode: { type: string, enum: [targeted_practice] }
+        source: { type: string, enum: [builtin] }
+        catalog:
+          type: object
+          required: [version, revision]
+          properties:
+            version: { type: string, enum: [grammar-core-v3] }
+            revision: { type: integer, enum: [3] }
+          additionalProperties: false
+        items:
+          type: array
+          minItems: 8
+          maxItems: 16
+          uniqueItems: true
+          items:
+            allOf:
+              - $ref: '#/components/schemas/GrammarBuiltinPracticeSessionItem'
+              - not:
+                  required: [topicId]
+        startedAt: { type: integer, minimum: 0, maximum: 9007199254740991 }
+        assisted: { type: boolean }
+        recommendation:
+          $ref: '#/components/schemas/GrammarTargetedRecommendationBinding'
       additionalProperties: false
     GrammarLegacyPracticeSession:
       type: object
@@ -6767,6 +7105,7 @@ components:
       properties:
         id:
           $ref: '#/components/schemas/GrammarBuiltinCatalogItemId'
+        topicId: { type: integer, minimum: 1, maximum: 20, description: Required only for mixed scope and bound to the topic encoded by id. }
         type: { type: string, enum: [choice, input, correction, transform] }
         transfer: { type: boolean }
         correct: { type: boolean }
@@ -6855,6 +7194,32 @@ components:
             errorCode: { type: string, enum: [construction_choice, word_or_verb_form, auxiliary, agreement, word_order, negation_or_question, confusion_pair] }
             transferStatus: { type: string, enum: [due_next_session] }
       additionalProperties: false
+    GrammarMixedPracticeSessionItem:
+      allOf:
+        - $ref: '#/components/schemas/GrammarBuiltinPracticeSessionItem'
+        - type: object
+          required: [topicId]
+          oneOf:
+            - { properties: { topicId: { type: integer, enum: [1] }, id: { type: string, pattern: '^core\.g\.1\.' } } }
+            - { properties: { topicId: { type: integer, enum: [2] }, id: { type: string, pattern: '^core\.g\.2\.' } } }
+            - { properties: { topicId: { type: integer, enum: [3] }, id: { type: string, pattern: '^core\.g\.3\.' } } }
+            - { properties: { topicId: { type: integer, enum: [4] }, id: { type: string, pattern: '^core\.g\.4\.' } } }
+            - { properties: { topicId: { type: integer, enum: [5] }, id: { type: string, pattern: '^core\.g\.5\.' } } }
+            - { properties: { topicId: { type: integer, enum: [6] }, id: { type: string, pattern: '^core\.g\.6\.' } } }
+            - { properties: { topicId: { type: integer, enum: [7] }, id: { type: string, pattern: '^core\.g\.7\.' } } }
+            - { properties: { topicId: { type: integer, enum: [8] }, id: { type: string, pattern: '^core\.g\.8\.' } } }
+            - { properties: { topicId: { type: integer, enum: [9] }, id: { type: string, pattern: '^core\.g\.9\.' } } }
+            - { properties: { topicId: { type: integer, enum: [10] }, id: { type: string, pattern: '^core\.g\.10\.' } } }
+            - { properties: { topicId: { type: integer, enum: [11] }, id: { type: string, pattern: '^core\.g\.11\.' } } }
+            - { properties: { topicId: { type: integer, enum: [12] }, id: { type: string, pattern: '^core\.g\.12\.' } } }
+            - { properties: { topicId: { type: integer, enum: [13] }, id: { type: string, pattern: '^core\.g\.13\.' } } }
+            - { properties: { topicId: { type: integer, enum: [14] }, id: { type: string, pattern: '^core\.g\.14\.' } } }
+            - { properties: { topicId: { type: integer, enum: [15] }, id: { type: string, pattern: '^core\.g\.15\.' } } }
+            - { properties: { topicId: { type: integer, enum: [16] }, id: { type: string, pattern: '^core\.g\.16\.' } } }
+            - { properties: { topicId: { type: integer, enum: [17] }, id: { type: string, pattern: '^core\.g\.17\.' } } }
+            - { properties: { topicId: { type: integer, enum: [18] }, id: { type: string, pattern: '^core\.g\.18\.' } } }
+            - { properties: { topicId: { type: integer, enum: [19] }, id: { type: string, pattern: '^core\.g\.19\.' } } }
+            - { properties: { topicId: { type: integer, enum: [20] }, id: { type: string, pattern: '^core\.g\.20\.' } } }
     GrammarGeneratedPracticeSessionItem:
       type: object
       description: Owner-generated outcome pointer only; the server resolves its content inside the owner transaction and never accepts a prompt or answer.
@@ -7086,6 +7451,17 @@ components:
               properties:
                 itemId: { $ref: '#/components/schemas/GrammarNullDiagnosticIndependentErrorItemId' }
                 diagnosticId: { nullable: true, enum: [null] }
+      additionalProperties: false
+    GrammarMixedIndependentError:
+      type: object
+      description: Exact independent late error bound to the actual topic of one mixed-session outcome.
+      required: [topicId, itemId, diagnosticId, reason, confusionPair]
+      properties:
+        topicId: { type: integer, minimum: 1, maximum: 20 }
+        itemId: { $ref: '#/components/schemas/GrammarBuiltinCatalogItemId' }
+        diagnosticId: { $ref: '#/components/schemas/GrammarActiveDiagnosticId' }
+        reason: { type: string, enum: [construction_choice, word_or_verb_form, auxiliary, agreement, word_order, negation_or_question, confusion_pair] }
+        confusionPair: { type: string, nullable: true, pattern: '^[a-z0-9]+(?:_[a-z0-9]+)*__(?:[a-z0-9]+(?:_[a-z0-9]+)*)$' }
       additionalProperties: false
     GrammarMasteryTypeScore:
       type: object
