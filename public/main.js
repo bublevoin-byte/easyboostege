@@ -43,7 +43,9 @@ import * as voiceTutor from './voice-tutor.js';
  * перестаёт существовать там, где service worker недоступен или ещё не установился. Именно так
  * и проверяет `e2e/demo.test.js` — контекст с `serviceWorkers: 'block'`.
  *
- * Остальные четыре экрана приезжают по требованию; размер оболочки проверяет frontend build.
+ * Остальные пять экранов, включая пробный ЕГЭ, приезжают по требованию; открытый экран попадает в
+ * runtime-cache, а exact preflight не запускает попытку до готовности form/audio. Размер оболочки
+ * проверяет frontend build.
  */
 import * as wordsScreen from './screens/words.js';
 import * as grammarScreen from './screens/grammar.js';

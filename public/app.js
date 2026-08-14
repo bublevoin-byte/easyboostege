@@ -6,6 +6,10 @@ import {clearAdaptiveOverviewCache} from './adaptive-overview-cache.js';
 import {clearAdaptiveRuntime} from './adaptive-session-runtime.js';
 import {classifyLearningAccess,LEARNING_ACCESS_STATES} from './access.js';
 import {
+  EGE_MOCK_PUBLIC_FORM_FINGERPRINT,EGE_MOCK_PUBLIC_FORM_ID,EGE_MOCK_PUBLIC_FORM_REVISION,
+} from './ege-mock-catalog-contract.js';
+import {egeMockLocalContinuation} from './ege-mock-written-continuation.js';
+import {
   applyVocabularyOutcome,
   localVocabularyProgress,
   mergeLegacyVocabularyProgress,
@@ -24,6 +28,7 @@ import './screens.js';
 const todayStr=()=>new Date().toISOString().slice(0,10);
 const INITIAL_OWNER_MARKER=window.EasyBoostStore?.readCurrentOwner?.()||null;
 let currentUser=INITIAL_OWNER_MARKER&&INITIAL_OWNER_MARKER.owner||null,S=null;
+let OFFLINE_EGE_MOCK_CONTINUATION=false;
 let AUTH_SESSION_GENERATION=0;
 const AUTHORITY_RESET_HOOKS=new Set();
 function registerAuthorityReset(hook){if(typeof hook!=='function')return function(){};AUTHORITY_RESET_HOOKS.add(hook);return function(){AUTHORITY_RESET_HOOKS.delete(hook)}}
@@ -81,7 +86,7 @@ function applyDeletedOwner(update){
   const deletedGeneration=Number(update.ownerGeneration);
   if(Number.isSafeInteger(deletedGeneration)&&Number.isSafeInteger(ADOPTED_OWNER_GENERATION)
     &&deletedGeneration<=ADOPTED_OWNER_GENERATION&&update.deleted!==true)return false;
-  AUTH_SESSION_GENERATION+=1;
+  AUTH_SESSION_GENERATION+=1;OFFLINE_EGE_MOCK_CONTINUATION=false;
   TOKEN='';currentUser=null;S=null;window.__sub=null;ADOPTED_OWNER_GENERATION=null;rememberSessionOwnerGeneration(null,null);store.sync.setOwner(null);
   void notifyAuthorityReset(resetAuthority);
   try{localStorage.removeItem('eb_tg_code')}catch(_){}
@@ -150,7 +155,7 @@ const METRIC_IDS={words:'m_words',gram:'m_gram',read:'m_read',listen:'m_listen',
 function daysLeft(){return progressModule.daysLeft(Date.now())}
 function renderHome(){if(!S)return;const view=progressModule.overview(S,Date.now());
   setTxt('h_hello',profileModule.greeting(currentUser));
-  setTxt('h_days','До ЕГЭ — '+view.daysLeft+' дней · полный пробник в разработке');
+  setTxt('h_days','До ЕГЭ — '+view.daysLeft+' дней · строгий пробник 190 минут');
   setTxt('h_ava',profileModule.initial(currentUser||'друг'));
   setTxt('h_min',view.daily.minutes);setTxt('h_pct',view.daily.percent+'%');ringOff('h_ring',263.9,view.daily.percent);
   setTxt('h_streak',progressModule.streakLabel(view.streak,true));
@@ -172,7 +177,7 @@ const LEARN_MODS=[
  ['🎧','Аудирование','слушай и отвечай','scr4','linear-gradient(135deg,#5FB6C9,#3E93A8)'],
  ['✍️','Письмо','задания 37 / 38 + ИИ','scr8','linear-gradient(135deg,#FF9E8A,#E26A56)'],
  ['🎤','Говорение','таймер + запись','scr9','linear-gradient(135deg,#FFB07A,#F2683F)'],
- ['⏱','Пробный ЕГЭ','полный вариант · в разработке','scr16','linear-gradient(135deg,#B6BBC2,#8A8F98)']
+ ['⏱','Пробный ЕГЭ','задания 1–36 · строгий таймер','scr16','linear-gradient(135deg,#F47C55,#C94628)']
 ];
 const EXAM_TRAININGS=[
  {screen:'scr3',start:'gExam',icon:'✎',label:'Грамматика · задания 19–24',background:'#FFEDE4'},
@@ -274,6 +279,7 @@ const apiGetBlob=EasyBoostApi.getBlob;
 const apiPostBinary=EasyBoostApi.postBinary;
 const apiMessage=EasyBoostApi.messageFor;
 const apiResponseOwner=EasyBoostApi.responseOwner;
+const apiResponseServerTime=EasyBoostApi.responseServerTime;
 const apiIsAuthorityFailure=EasyBoostApi.isAuthorityFailure;
 const apiCanUseOfflineFallback=EasyBoostApi.canUseOfflineFallback;
 function syncModuleAttempt(attempt){return store.sync.saveModuleAttempt(attempt)}
@@ -331,7 +337,7 @@ function adoptServerSession(session,ownerGeneration){
   const authority=store.sync.ownerAuthSnapshot?.(sessionOwner)||{ownerGeneration:0,deleted:false};
   if(authority.deleted||authority.ownerGeneration!==ownerGeneration)return false;
   AUTH_SESSION_GENERATION+=1;
-  TOKEN='cookie';window.__sub=session;currentUser=sessionOwner;ADOPTED_OWNER_GENERATION=ownerGeneration;
+  TOKEN='cookie';OFFLINE_EGE_MOCK_CONTINUATION=false;window.__sub=session;currentUser=sessionOwner;ADOPTED_OWNER_GENERATION=ownerGeneration;
   rememberSessionOwnerGeneration(currentUser,ADOPTED_OWNER_GENERATION);
   return true
 }
@@ -340,6 +346,28 @@ function currentOwnerAuthorityCurrent(owner=currentUser){
   const authority=store.sync.ownerAuthSnapshot?.(owner)||{ownerGeneration:0,deleted:false};
   if(authority.ownerGeneration===ADOPTED_OWNER_GENERATION&&!authority.deleted)return true;
   applyDeletedOwner({owner:owner,ownerGeneration:authority.ownerGeneration,deleted:authority.deleted});return false
+}
+function currentOwnerBinding(){
+  return TOKEN&&currentOwnerAuthorityCurrent()
+    ?Object.freeze({username:currentUser,generation:ADOPTED_OWNER_GENERATION}):null
+}
+function offlineEgeMockContinuation(){
+  if(!currentUser||!Number.isSafeInteger(ADOPTED_OWNER_GENERATION))return null;
+  const authority=store.sync.ownerAuthSnapshot?.(currentUser)||{ownerGeneration:0,deleted:false};
+  if(authority.deleted||authority.ownerGeneration!==ADOPTED_OWNER_GENERATION)return null;
+  const owner={username:currentUser,generation:ADOPTED_OWNER_GENERATION};
+  const form={identity:EGE_MOCK_PUBLIC_FORM_ID+'@'+EGE_MOCK_PUBLIC_FORM_REVISION,fingerprint:EGE_MOCK_PUBLIC_FORM_FINGERPRINT};
+  return egeMockLocalContinuation(localStorage,owner,form)?owner:null
+}
+function currentEgeMockOwnerBinding(){return currentOwnerBinding()||(OFFLINE_EGE_MOCK_CONTINUATION?offlineEgeMockContinuation():null)}
+async function commitEgeMockOwnerMutation(owner,canCommit,commit){
+  const changed=()=>Object.assign(new Error('EGE_MOCK_OWNER_AUTHORITY_CHANGED'),{code:'EGE_MOCK_OWNER_AUTHORITY_CHANGED'});
+  if(!owner||typeof canCommit!=='function'||typeof commit!=='function')throw changed();
+  const result=await store.sync.withDurableOwnerIncarnationLock({owner:owner.username,ownerGeneration:owner.generation},()=>{
+    if(canCommit()!==true)throw changed();
+    commit();return{egeMockCommit:true}
+  });
+  if(result?.egeMockCommit!==true)throw changed();
 }
 async function checkLearningAccess(session=null,{preserveActiveShell=false,signal=null}={}){
   if(!SRV){const result=classifyLearningAccess(null,new Error('server mode required'));applyLearningAccess(result);return result}
@@ -369,6 +397,10 @@ async function checkLearningAccess(session=null,{preserveActiveShell=false,signa
     if(preserveActiveShell&&result.state===LEARNING_ACCESS_STATES.ACTIVE)closeAccessGate();else applyLearningAccess(result);return result;
   }catch(error){
     if(signal?.aborted)return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,aborted:true};
+    const status=Number(error&&error.status)||0;
+    const offlineMock=(status===0||status>=500)?offlineEgeMockContinuation():null;
+    if(offlineMock){OFFLINE_EGE_MOCK_CONTINUATION=true;closeAccessGate();hideLearningShell();queueMicrotask(function(){tab('scr16')});
+      return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,offlineEgeMock:true}}
     const result=classifyLearningAccess(null,error);if(result.state===LEARNING_ACCESS_STATES.NO_SESSION)TOKEN='';applyLearningAccess(result);return result;
   }
 }
@@ -391,7 +423,7 @@ function save(options={}){
 async function invalidateLearningAuthority(authority){
   var owner=authority&&authority.owner,ownerGeneration=authority&&authority.ownerGeneration;
   if(currentUser!==owner||ADOPTED_OWNER_GENERATION!==ownerGeneration)return false;
-  AUTH_SESSION_GENERATION+=1;TOKEN='';currentUser=null;S=null;window.__sub=null;ADOPTED_OWNER_GENERATION=null;rememberSessionOwnerGeneration(null,null);store.sync.setOwner(null);
+  AUTH_SESSION_GENERATION+=1;TOKEN='';OFFLINE_EGE_MOCK_CONTINUATION=false;currentUser=null;S=null;window.__sub=null;ADOPTED_OWNER_GENERATION=null;rememberSessionOwnerGeneration(null,null);store.sync.setOwner(null);
   await notifyAuthorityReset(authority);
   await Promise.all([
     store.clearCurrentOwner?.(owner,ownerGeneration),
@@ -472,7 +504,7 @@ async function logout(){
   return runAuthTransition(async function(){
     const logoutOwner=currentUser,logoutOwnerGeneration=ADOPTED_OWNER_GENERATION;
     try{if(SRV)await auth.logout()}catch(_){}
-    AUTH_SESSION_GENERATION+=1;
+    AUTH_SESSION_GENERATION+=1;OFFLINE_EGE_MOCK_CONTINUATION=false;
     TOKEN='';ADOPTED_OWNER_GENERATION=null;rememberSessionOwnerGeneration(null,null);store.sync.setOwner(null);
     await Promise.all([
       store.clearCurrentOwner?.(logoutOwner,logoutOwnerGeneration),
@@ -1140,7 +1172,7 @@ export {SRV,registerProfileHook,registerStartHook,toast};
  */
 export {
   EGE_WORDS,LSLOW,L_PLAYSVG,S,TOKEN,W37,W38,WBTN,
-  apiCanUseOfflineFallback,apiGet,apiIsAuthorityFailure,apiMessage,apiPost,apiPostBinary,apiPostIdempotent,apiPut,apiResponseOwner,currentUser,examModule,gExamFmt,gSync,generateAiContent,invalidateLearningAuthority,registerAuthorityReset,
+  apiCanUseOfflineFallback,apiGet,apiIsAuthorityFailure,apiMessage,apiPost,apiPostBinary,apiPostIdempotent,apiPut,apiResponseOwner,apiResponseServerTime,commitEgeMockOwnerMutation,currentEgeMockOwnerBinding,currentOwnerBinding,currentUser,examModule,gExamFmt,gSync,generateAiContent,invalidateLearningAuthority,registerAuthorityReset,
   grammarModule,lSetSlow,lSt,lSync,listeningModule,profileModule,progressModule,readingModule,
   rEsc,rSt,rWordsHtml,registerScreenGenerator,ringOff,runProfileHooks,setTxt,spSt,spSync,
   speakingModule,srsFail,srsOk,srsRecordVocabularyOutcome,syncModuleAttempt,todayStr,ui,wBase,wDeco,wMergeAi,wMigrate,wRec,wStats,wSync,

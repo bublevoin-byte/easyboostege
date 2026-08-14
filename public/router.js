@@ -95,7 +95,7 @@ function tab(id,after,options={}){
   return{cancel:cancelNavigation,isCurrent:canCommit}
 }
 function nav(id,after,options){return tab(id,after,options)}
-function back(){NAVIGATION_REVISION+=1;clearNavigationScreenState();let id=HIST.pop()||'scr1';if(id==='scr5'||id==='scr6')id='scr1';showScreen(id)}
+function back(){NAVIGATION_REVISION+=1;clearNavigationScreenState();const previous=cur();let id=HIST.pop()||'scr1';if(id==='scr5'||id==='scr6')id='scr1';showScreen(id);runRouteHooks(id,previous)}
 
 (function buildDebugNavigation(){const menu=document.getElementById('navmenu');document.querySelectorAll('.screen').forEach(function(screen){const button=document.createElement('button');button.type='button';button.textContent=screen.id.replace('scr','')+' · '+screen.dataset.name;button.setAttribute('aria-label','Открыть экран '+(screen.dataset.name||screen.id));button.onclick=function(){HIST.length=0;tab(screen.id)};menu.appendChild(button)})})();
 

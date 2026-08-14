@@ -101,20 +101,21 @@ test('frontend loads through a single module entry point that keeps the previous
   /*
    * Разделение экранов на статические и ленивые — требование, а не вкус. Раздел 6.1 ТЗ обещает без
    * сети словарные карточки, интервальное повторение, встроенные грамматические тесты, просмотр
-   * сохранённого прогресса и изменение предпочтений, поэтому эти четыре экрана обязаны быть в оболочке: обещание, отложенное до
-   * первого перехода, ученик, ушедший в офлайн раньше, не получит, а кэш service worker гарантией
-   * быть не может — там, где service worker заблокирован, её просто нет.
+   * сохранённого прогресса и изменение предпочтений, поэтому эти четыре экрана обязаны быть в оболочке.
    *
-   * Остальные четыре экрана обязаны остаться ленивыми: на них держится бюджет раздела 19.
+   * Остальные пять экранов обязаны остаться ленивыми: на них держится бюджет раздела 19. Уже открытый
+   * пробник продолжает работу из runtime-cache, который его exact preflight успел заполнить до старта.
    * Ни один список не должен молча съехать в другую сторону, поэтому проверяются оба.
    */
   const eagerScreens = imported.filter((name) => name.startsWith('screens/'));
-  assert.deepEqual(eagerScreens, ['screens/words.js', 'screens/grammar.js', 'screens/progress.js', 'screens/profile.js']);
+  assert.deepEqual(eagerScreens, [
+    'screens/words.js', 'screens/grammar.js', 'screens/progress.js', 'screens/profile.js',
+  ]);
   const loader = await fs.readFile(new URL('../public/screens.js', import.meta.url), 'utf8');
   const lazy = [...loader.matchAll(/import\(\s*'\.\/(screens\/[^']+)'\s*\)/gu)].map((match) => match[1]);
   assert.deepEqual(lazy, [
     'screens/listening.js', 'screens/reading.js',
-    'screens/writing.js', 'screens/speaking.js',
+    'screens/writing.js', 'screens/speaking.js', 'screens/ege-mock.js',
   ]);
   for (const screen of eagerScreens) {
     assert.ok(!lazy.includes(screen), `${screen} не может быть одновременно в оболочке и чанком`);

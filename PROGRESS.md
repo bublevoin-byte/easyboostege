@@ -19,13 +19,13 @@
 
 Спека: `.scratch/ege-full-mock-2026/spec.md`
 
-Overall status: `in-progress` — Ticket 02 done; Ticket 03 next.
+Overall status: `in-progress` — Ticket 03 complete; Ticket 04 next.
 
 | Ticket | Результат | Статус |
 |---|---|---|
 | 01 | Версионированный эталонный авторский вариант | done |
 | 02 | Owner-bound попытка, строгие таймеры и persistence/API | done |
-| 03 | Единый письменный runner заданий 1–36 | ready-for-agent |
+| 03 | Единый письменный runner заданий 1–36 | in-progress |
 | 04 | Задания 37–38 и честная предварительная оценка | ready-for-agent |
 | 05 | Устная часть 1–4 и предварительная оценка | ready-for-agent |
 | 06 | Итог 82, прогноз, разбор и тренировочный повтор | ready-for-agent |
@@ -37,6 +37,194 @@ Overall status: `in-progress` — Ticket 02 done; Ticket 03 next.
 Ticket 01 evidence: immutable `ege-en-2026-form-1@1` закрепляет 42 позиции, матрицу `12+12+18+20+20=82`, exact versioned content/criteria refs, pinned form/asset/criteria fingerprints и статическую answer-free browser projection. TDD завершён на `8/8` focused; полный suite — `1576 total / 1534 pass / 42` штатных PostgreSQL skip / `0 fail`; lint, check (`386 JS`, `211` handlers, `126` names), frontend build (`484` assets, `11` lazy chunks), catalog freshness, secret/history scans и diff-check зелёные. Package manifests, OpenAPI, storage и старые catalog snapshots не менялись; Docker/E2E/provider calls/install/push/deploy не требовались. Fresh Standards и Spec reviews вернули literal `ZERO_FINDINGS` на frozen tree `5b4fbd5d095f71df4da45d1efe6c2651e12983a7`.
 
 Ticket 02 final evidence: owner-bound attempt lifecycle, immutable start snapshot, diagnostic/training split, versioned answer-free timing policy `ege-mock-attempt-policy-v1` (`190m + 30d oral-start window + 17m`), CAS draft, exact owner-global replay/conflict, complete authoritative part digests including blank positions, bounded assessment retry and safe result gating are implemented through one file/PostgreSQL contract and exact `/api/v1/ege-mocks` routes. Initial focused lifecycle passed `14/14`; four fresh-review findings were captured as exact RED `15 total / 8 pass / 7 intended fail` and closed at GREEN `15/15`, including the shared file mutation helper and transactionally reconciled export in both backends. A later Spec review exposed stale request-time clock capture before the file queue: a real queued HTTP RED `0/1` returned `200` after crossing the deadline, then GREEN `16/16` passed a clock thunk and sampled it only inside the file queue, matching PostgreSQL's after-owner-lock authority. Final Standards/Spec feedback required pure shared lifecycle operations plus both concurrent submit races: RED `2 total / 1 pass / 1 fail` → GREEN `17/17`; `attempt.js` owns every mutation guard/transition/result, and the shared file/live-PG contract proves exactly one written and oral winner plus one persisted/exported receipt. The last residual start/current duplication was captured by a direct domain RED `0/1` → GREEN `18/18`; `egeMockStartDecision` alone owns active-state selection, diagnostic-to-training mode and attempt numbering, and adapters only serialize/lock/reconcile/replay/persist. A final public-surface RED `0/1` proved raw transitions/digests/normalizers/durations were importable; GREEN retained `18/18` with only guarded lifecycle/apply/reconcile/start-decision/projection seams exported. A final executable-OpenAPI RED `0/1` then proved `EgeMockNullableAttempt` rejected the valid empty-current `attempt: null`; a null-only/reference `oneOf` and parity assertions for null, populated and invalid empty attempts produced HTTP/OpenAPI GREEN `3/3` while the focused contour remained `18/18`. The next full Standards pass caught invalid OpenAPI 3.0 `type: null` for a blank draft answer: exact RED `0/1` prohibited that keyword, then the valid nullable null-only branch returned GREEN `1/1`; executable parity accepts string/array/null answers and rejects boolean/object/forbidden-position shapes, with the full focused contour still `18/18`. Final full unit is `1596 total / 1552 pass / 44` expected no-DB skips / `0 fail`. Final disposable PostgreSQL project `easyboost-postgres-integration-36860` applied migrations `001–053` and passed `44/44`; compose removed its container/network/volume and three independent exact-label filters were empty. That PostgreSQL evidence remains applicable because the later remediation changed only documentation, executable OpenAPI and its parity test, leaving route/runtime validation/domain/repository/migration/persistence untouched. Docker Desktop was stopped by the parent task and the daemon pipe was absent. Lint, check (`391 JS`, `211` handlers / `126` names), generated OpenAPI check, frontend build (`484` assets / `11` lazy chunks), secret scan (`1156` tracked files), history scan (`309` commits) and diff-check are green. Manifests are unchanged, so no fresh dependency audit was required; no browser/provider calls, install, push or deploy occurred. Fresh full Standards and Spec reviews both returned literal `ZERO_FINDINGS` on deterministic bytewise identity `9dde7fdaedf2930a9ff5f162af8d1ae478eaf844fae096051c96c431168f6344`; Ticket 02 is done and Ticket 03 is next.
+
+Ticket 03 implementation checkpoint: единый answer-free runner позиций `1–36` владеет strict server
+deadline, semantic omissions, exact owner/form restore, per-answer monotonic cross-tab merge, CAS autosave
+и durable idempotent draft/submit queue. Ручное завершение 1–36 сохраняет server-confirmed objective
+draft-checkpoint, не сдавая будущие 37–38; только authoritative deadline reconciliation закрывает всю
+письменную часть. Deadline closure принимает server truth, снимает superseded queue и явно сообщает о
+непринятых offline changes. Monotonic watermark и compaction сохраняют ambiguous UUID, но ограничивают
+очередь и tombstones даже после сотен reload/edit. Listening/reading unique selection и persisted bounded
+audio-play переиспользуют существующие deep section modules. Preflight до старта проверяет `20` MP3 по
+MIME/bytes/SHA-256; playback URL и service worker привязаны к exact form+fingerprint+asset digest,
+различают revision-cache с одинаковым путём и отдают offline Range без network/generic fallback.
+Публичные RED закрыли отсутствие runner, preflight/start ordering, offline reload, ambiguous start/save,
+deadline submit with blanks, all-position roundtrip, warning bands, durable-storage failure и invalid
+server timing. Review-remediation import/service-worker RED был `4 total / 1 pass / 3 fail`; отдельный
+browser audio-contract RED завершился timeout. Следующая fresh double review дала RED
+`24 total / 17 pass / 7 fail` для раннего whole-submit, bounded state и terminal restore, затем два
+follow-up seam дали RED `0/2`. Следующая canonical double review дала adversarial RED `29/33` для exact
+draft acknowledgement, client-early deadline, offline cache loss и long-offline exact-attempt restore;
+следующая frozen-index проверка воспроизвела ещё два public RED для repeated early deadline и failed
+online re-preflight; monotonic cancellation watermark и fail-closed `asset_blocked` закрыли их. Всё
+это закрыто; следующий Standards adversarial набор дал RED `31/36` для overlapping checkpoint/CAS,
+controlling SW, concurrent preflight и terminal cross-tab merge. Следующая полная двойная ревизия раскрыла
+ещё cross-tab atomic persistence/asset block/stale start, dirty-position CAS, strict policy/timing/watermark,
+exact form cache, owner invalidation, transient deadline retry, live omission status и playback lease: общий
+публичный RED `31/42` закрыт финальным focused GREEN `52/52`.
+Checkpoint intent переживает conflict; preflight требует exact-capable controlling SW и Web Lock, а
+same-form tabs переиспользуют один полный verified cache. Terminal envelope восстанавливается без cache и онлайн
+перепроверяется через `/attempts/{attemptId}`, включая authoritative `expired`; running-попытка онлайн
+повторяет exact preflight без второго start, а offline cache loss даёт durable non-runnable state. Dedicated Chromium
+проверил keyboard, reduced motion, `>=44px`, 320/1440 no-overflow, real offline `206`, shared two-play
+audio, reload/CAS/reconnect и durable 1–36 checkpoint; реальный HTTP seam проверил answer-free
+`oral_ready` после offline deadline; отдельный two-page owner-switch E2E сбрасывает старую authority и не
+оставляет ответы другого владельца на экране. Full+adaptive Chromium также зелёные. Последний полный unit — `1645`
+total (`1601` pass + `44` штатных PostgreSQL skip, `0` fail); lint/check (`399` JS, `211` handlers,
+`126` names), build (`483` assets, `683.1 КБ` shell JS, `10` lazy chunks), secrets (`1173` tracked),
+history (`310` commits), fresh authorized audit
+(`0 vulnerabilities`) и diff-check зелёные. Один параллельный full-unit gate поймал известный несвязанный
+Speaking timing transient `service_hung`; изолированный полный rerun зелёный. Изменений server/repository/validation/migration нет, поэтому
+новый PostgreSQL/Docker прогон не нужен. Provider/install/push/deploy не выполнялись; Ticket 04 не
+начинался. Код готов к canonical freeze и двум свежим независимым review.
+
+Возобновлённый final review-remediation Ticket 03 зафиксировал публичный RED `43/52` ровно для девяти
+оставшихся seam: start-lock readiness, exact offline policy/timing, monotonic deadline, overlapping ACK,
+built form path, transient `503`, focus-safe projection, old-owner DOM reset и deletion purge. GREEN —
+`52/52`; общий deletion/offline contract — `60/60`. Актуальный полный unit — `1654 total / 1610 pass / 44`
+штатных PostgreSQL skip / `0 fail`; lint/check (`399` JS, `211` handlers / `126` names), production build
+(`483` assets, `688.1 КБ`, `10` lazy chunks) с реально подставленным hashed exact-form path,
+dedicated/full/adaptive Chromium, secrets (`1173`), history (`310`) и diff-check зелёные. Fresh authorized
+audit `0 vulnerabilities` остаётся применимым, потому что manifests не менялись. Server/repository/
+validation/migration не затрагивались, Docker/PostgreSQL не требуются; provider/install/push/deploy и
+Ticket 04 не выполнялись. Следующий шаг — canonical freeze и две свежие независимые проверки.
+
+Финальный performance/timer review-remediation Ticket 03 зафиксировал публичный RED для быстрых
+клиентских часов, отсутствующего HTTP server-time, ошибочного пятого eager-screen и мёртвого `writerId`.
+GREEN передаёт стандартный HTTP `Date` как non-enumerable metadata, пинит подписанный server offset и
+продолжает время monotonic/offline; EGE screen/runner/preflight приезжают существующим lazy loader, а shell
+держит только малый exact continuation contract. Focused+security — `140/140`; полный unit —
+`1655 total / 1611 pass / 44` штатных PostgreSQL skip / `0 fail`; lint/check (`400` JS, `211` handlers /
+`126` names), build (`484` assets, `641.6 КБ`, `11` lazy chunks), dedicated/full/adaptive Chromium,
+secrets (`1173`) и history (`310`) зелёные. Performance first-load подтверждает ровно четыре eager screen
+и отсутствие EGE. Оставшийся historical debt воспроизведён на чистом base `fc14cddd` без Ticket 03:
+`178.8 КБ > 150 КБ` и тот же `EXPECTED_OWNER_REQUIRED`; текущий размер `180.6 КБ`, бюджет не повышался,
+унаследованный harness/server не менялись. Audit `0 vulnerabilities` применим, manifests неизменны.
+Server/repository/validation/migration не затрагивались; Docker/PostgreSQL/provider/install/push/deploy и
+Ticket 04 не выполнялись. Следующий шаг — canonical freeze и две свежие независимые проверки.
+
+Последний frozen review Ticket 03 выявил forward wall-clock jump после server anchor, задержку
+owner-deletion notification за CacheStorage purge, глобальный radio refresh, необработанный exact-form
+import failure и Back без route leave-hook. Публичный RED `108/112` закрыт GREEN `112/112`: timer после
+authoritative anchor движется только monotonic elapsed, tombstone немедленно отзывает authority до
+best-effort purge, projection ограничен EGE root, точная форма имеет fail-closed retry без старта таймера,
+а Back запускает стандартные hooks и снимает expanded frame. Dedicated Chromium проверяет и failed exact
+chunk → retry, и обычный Back; полный и adaptive Chromium зелёные. Полный unit — `1657 total / 1613 pass /
+44` штатных PostgreSQL skip / `0 fail`; lint/check (`400` JS, `211` handlers / `126` names), build (`484`
+assets, `641.6 КБ`, `11` lazy chunks), secrets (`1174`), history (`310`) и diff-check зелёные. Performance
+снова показывает четыре eager screen без EGE; текущие `180.3 КБ > 150 КБ` и `EXPECTED_OWNER_REQUIRED`
+остаются воспроизведённым на чистом base historical debt. Audit `0 vulnerabilities` применим, manifests
+после него не менялись. Server/repository/validation/migration не затрагивались; Docker/PostgreSQL/provider/
+install/push/deploy и Ticket 04 не выполнялись. Следующий шаг — canonical freeze и fresh ZERO×2 review.
+
+Следующий fresh double review Ticket 03 нашёл ещё две границы: SW activation удаляла runtime-кэш
+ленивого runner, а missing exact attempt/другая server `ownerGeneration` могла сохранить на экране private
+ответы старой инкарнации. Публичный RED `53/57` закрыт GREEN `57/57`: отдельный versioned executable-cache
+до `skipWaiting` получает новую hashed runner-ревизию только для уже открывавшего EGE клиента; lifecycle
+VM доказывает install → activate → offline fetch, не добавляя EGE к чистой первой загрузке. Runner требует,
+сохраняет и валидирует server `ownerGeneration`; `404`, mismatch или legacy envelope без identity удаляет
+exact local state, очищает DOM и показывает безопасный retry. Полный unit — `1660 total / 1616 pass / 44`
+штатных PostgreSQL skip / `0 fail`; lint/check (`400` JS, `211` handlers / `126` names), build (`484` assets,
+`641.6 КБ`, `11` lazy chunks), dedicated/full/adaptive Chromium, secrets (`1174`), history (`310`) и
+diff-check зелёные. Performance сохраняет четыре eager screen без EGE; `180.5 КБ > 150 КБ` и
+`EXPECTED_OWNER_REQUIRED` — тот же подтверждённый на чистом base historical debt. Audit `0 vulnerabilities`
+применим, manifests неизменны. Server/repository/validation/migration не менялись; Docker/PostgreSQL/
+provider/install/push/deploy и Ticket 04 не выполнялись. Следующий шаг — новая freeze и fresh ZERO×2.
+
+Последний pre-freeze review-remediation Ticket 03 закрыл четыре независимые границы публичным RED
+`56/60` → GREEN `60/60`. Activation повторно проверяет прежний runtime-кэш непосредственно перед его
+удалением, поэтому install → позднее открытие EGE → activate сохраняет новую exact executable revision.
+Retryable `503` при restore больше не обходит asset readiness: потерянный exact cache переводит попытку в
+durable `asset_blocked`. Браузер без local envelope сначала запрашивает authoritative `current`, принимает
+активную попытку с exact policy/190-minute deadline и preflight, а только настоящий `null` оставляет idle.
+Каждая lazy-import/restore/action/autosave/timer completion привязана к immutable owner+epoch token и перед
+commit/render повторно сверяет authority, поэтому ABA owner switch не может оживить старый runner или
+инвалидировать нового владельца. E2E новой вкладки теперь прямо подтверждает adoption уже идущей попытки.
+Полный unit — `1663 total / 1619 pass / 44` штатных PostgreSQL skip / `0 fail`; lint/check (`400` JS,
+`211` handlers / `126` names), build (`484` assets, `641.6 КБ`, `11` lazy chunks), dedicated/full/adaptive
+Chromium, secrets (`1174`), history (`310`), diff-check и fresh authorized audit (`0 vulnerabilities`)
+зелёные. Performance сохраняет четыре eager screen без EGE; текущие `180.5 КБ > 150 КБ` и
+`EXPECTED_OWNER_REQUIRED` повторно воспроизведены тем же запуском на изолированном чистом base
+`fc14cddd` (`178.8 КБ > 150 КБ`), поэтому остаются historical debt вне Ticket 03. Server/repository/
+validation/migration не менялись; Docker/PostgreSQL/provider/install/push/deploy и Ticket 04 не
+выполнялись. Следующий шаг — canonical freeze и fresh ZERO×2.
+
+Финальная authority/activation remediation Ticket 03 закрыла ещё три review-находки. Transport retry
+теперь допускает только явный `NETWORK_ERROR`/status `0`, `429` и конечный `>=500`; status-less integrity
+и owner mismatch всегда fail-closed. Все EGE durable commits, включая ответы без network await и ответы
+на delayed restore/autosave, проходят после form-lock через общий durable owner-incarnation lock и повторно
+сверяют immutable runner/owner authority: concurrent tombstone+purge выигрывает и старый callback не может
+воссоздать localStorage. Offline continuation использует durable generation guard, не требуя in-memory sync
+owner. Service worker хранит versioned EGE-open marker, а при любом настоящем обновлении с active worker
+заранее загружает новую exact executable revision на install; activation-open TOCTOU больше не зависит от
+одного снимка старых cache keys, при этом чистая первая установка EGE не загружает. Начальный review RED
+был `54/56` (две исполняемые гонки), скорректированный status-less seam также закреплён; финальный focused
+контур — `64/64`. Полный unit — `1667 total / 1623 pass / 44` штатных PostgreSQL skip / `0 fail`;
+lint/check (`400` JS, `211` handlers / `126` names), build (`484` assets, `642.4 КБ`, `11` lazy chunks),
+dedicated/full/adaptive Chromium, secrets (`1174`), history (`310`) и diff-check зелёные. Fresh audit
+остаётся `0 vulnerabilities`, manifests после него не менялись. Performance снова показал ровно четыре
+eager screen без EGE; `180.5 КБ > 150 КБ` и `EXPECTED_OWNER_REQUIRED` совпадают с уже подтверждённым
+на base historical debt. Server/repository/validation/migration не менялись; Docker/PostgreSQL/provider/
+install/push/deploy и Ticket 04 не выполнялись. Следующий шаг — новая canonical freeze и fresh ZERO×2.
+
+Последняя публичная remediation Ticket 03 закрыла clean-install/update различение service worker,
+fail-closed восстановление при неизвестном server `current` и межвкладочную resurrection после definitive
+invalidation. Worker фиксирует наличие active predecessor до install, не загружает EGE на чистой первой
+activation и не повторяет полный executable preload без сети. Missing/owner-invalid attempt под общими
+form + durable owner locks повышает отдельный invalidation watermark и удаляет envelope; storage event
+скрывает старую вкладку, а все её дальнейшие commits/refresh отклоняются до записи. Empty-local `503`
+показывает только noninteractive retry, без стартовой кнопки и редактирования; dedicated Chromium проверяет
+и этот отказ, и успешный retry. Public RED `61/66` закрыт GREEN `66/66`. Полный unit — `1669 total / 1625
+pass / 44` штатных PostgreSQL skip / `0 fail`; lint/check (`400` JS, `211` handlers / `126` names), build
+(`484` assets, `642.8 КБ`, `11` lazy chunks), dedicated/full/adaptive Chromium, secrets (`1174`), history
+(`310`) и diff-check зелёные. Performance удерживает четыре eager screen без EGE (LCP `312 ms`, CLS `0`,
+INP `96 ms`); исторические `180.6 КБ > 150 КБ` и `EXPECTED_OWNER_REQUIRED` по-прежнему совпадают с
+изолированно воспроизведённым base debt. Fresh authorized audit `0 vulnerabilities` применим, manifests
+не менялись. Server/repository/schema/migration не менялись; Docker/PostgreSQL/provider/install/push/deploy
+и Ticket 04 не выполнялись. Следующий шаг — canonical freeze и fresh ZERO×2.
+
+Следующая review-remediation Ticket 03 сделала invalidation success-only и переживающей teardown service
+worker. Captured watermark сверяется внутри form + owner locks прямо перед delete, поэтому delayed stale
+callback не удаляет replacement attempt. Для quota сначала удаляется большой envelope, затем сохраняется
+маленький tombstone; failed marker восстанавливает exact envelope, а failed marker/lock показывает только
+noninteractive unavailable retry. Install-time clean/update decision хранится в отдельном per-shell cache и
+читается новым worker global на activation. Public RED `63/67` закрыт GREEN `67/67`; полный unit — `1670
+total / 1626 pass / 44` штатных PostgreSQL skip / `0 fail`. Lint/check (`400` JS, `211` handlers / `126`
+names), build (`484` assets, `642.8 КБ`, `11` lazy chunks), dedicated/full и standalone adaptive Chromium,
+secrets (`1174`), history (`310`) и diff-check зелёные. Один параллельный adaptive запуск поймал прежний
+timing timeout скрытого `#home_adaptive_plan`; немедленный standalone rerun зелёный и Ticket 03 не затрагивает.
+Performance сохранил четыре eager screen без EGE (LCP `308 ms`, CLS `0`, INP `96 ms`); `180.6 КБ > 150
+КБ` и `EXPECTED_OWNER_REQUIRED` остаются подтверждённым base debt. Authorized audit `0 vulnerabilities`
+применим, manifests неизменны. Server/repository/schema/migration не менялись; Docker/PostgreSQL/provider/
+install/push/deploy и Ticket 04 не выполнялись. Следующий шаг — canonical freeze и fresh ZERO×2.
+
+Последний frozen double review Ticket 03 независимо выявил одну двустороннюю install-time гонку service
+worker: retained `clean` позволял update пропустить executable preload, а retained `update` нарушал lazy
+clean reinstall. Публичный service-worker RED `8/10` закрыт GREEN `11/11`. Follow-up
+equal-timestamp/clock-rollback RED `10/11` закрыт GREEN `11/11`: install под
+origin-wide lock атомарно выделяет durable монотонное mode generation до preservation, использует captured
+predecessor bit для своего решения, а activation после worker teardown выбирает единственное последнее
+поколение и fail-closed отклоняет неоднозначность, поэтому delayed older write и wall clock не меняют новый
+результат. Следующий source-mode stable-cache RED `11/12` доказал stale offline runner после update и после
+clean re-registration с retained-open evidence; GREEN `12/12` заставляет любой реально нужный install-time
+preservation атомарно refresh все executable paths независимо от стабильных ключей. Genuine clean/no-open
+install остаётся lazy, а activation строго cache-only.
+Общий focused runner/SW/UI контур — `71/71`; полный unit — `1674 total / 1630 pass / 44` штатных PostgreSQL
+skip / `0 fail`; lint/check (`400` JS, `211` handlers / `126` names), build (`484` assets, `642.8 КБ`, `11`
+lazy chunks), dedicated/full/adaptive Chromium, secrets (`1174`), history (`310`) и diff-check зелёные.
+Первый full E2E rerun поймал timing-flake неизменённого Speaking task 3 TTS; точный Speaking rerun и следующий
+полный последовательный rerun зелёные. Performance сохраняет четыре eager screen без EGE: LCP `284 ms`, CLS
+`0`, INP `88 ms`; прежние `180.6 КБ > 150 КБ` и `EXPECTED_OWNER_REQUIRED` остаются подтверждённым base debt.
+Authorized audit `0 vulnerabilities`
+применим, manifests неизменны. Server/repository/schema/migration не менялись; Docker/PostgreSQL/provider/
+install/push/deploy и Ticket 04 не выполнялись. Следующий шаг — canonical freeze и fresh ZERO×2.
+
+Ticket 03 final closeout: независимые Standards и Spec review вернули буквальный `ZERO_FINDINGS` на одной
+canonical frozen identity `b472186eaf1d0d206f97d50b56c5c6d2f2bb0cb3` при base/HEAD
+`fc14cddd2036d7d4fd17f01f44b141fb40202305`. После этой identity изменены только status/evidence metadata.
+Ticket 03 отмечен `done`; Ticket 04 остаётся следующим и не начинался. Единственный локальный commit закрывает
+тикет без push/deploy/provider/install/Docker действий; reminder Ticket 99 о существенном расширении
+проверенного авторского банка остаётся после Ticket 07.
 
 ---
 

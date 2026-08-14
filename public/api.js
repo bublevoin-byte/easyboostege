@@ -4,6 +4,7 @@
   const baseUrl = global.location.origin;
   const isServerMode = global.location.protocol === 'http:' || global.location.protocol === 'https:';
   const responseOwners = new WeakMap();
+  const responseServerTimes = new WeakMap();
 
   class ApiError extends Error {
     constructor(message, { status = 0, code = 'REQUEST_FAILED', requestId = '' } = {}) {
@@ -54,12 +55,18 @@
     return payload && typeof payload === 'object' ? (responseOwners.get(payload) || '') : '';
   }
 
+  function responseServerTime(payload) {
+    return payload && typeof payload === 'object' ? (responseServerTimes.get(payload) ?? null) : null;
+  }
+
   async function parseResponse(response) {
     const payload = await response.json().catch(() => ({}));
     if (response.ok) {
       const owner = String(response.headers.get('x-easyboost-response-owner') || '').trim();
-      if (owner && payload && typeof payload === 'object' && !Array.isArray(payload)) {
-        responseOwners.set(payload, owner);
+      const serverTime = Date.parse(String(response.headers.get('date') || ''));
+      if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+        if (owner) responseOwners.set(payload, owner);
+        if (Number.isFinite(serverTime)) responseServerTimes.set(payload, serverTime);
       }
       return payload;
     }
@@ -138,6 +145,6 @@
 
   global.EasyBoostApi = Object.freeze({
     ApiError, get, post, postIdempotent, put, remove, getBlob, postBinary, generateContent, messageFor,
-    responseOwner, isAuthorityFailure, canUseOfflineFallback,
+    responseOwner, responseServerTime, isAuthorityFailure, canUseOfflineFallback,
   });
 })(window);

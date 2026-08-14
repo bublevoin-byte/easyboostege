@@ -112,10 +112,23 @@
   function ownerAuthSnapshot(ownerKey=null){return incarnation.snapshot(ownerKey)}
   function markOwnerDeleted(ownerKey){return incarnation.markDeleted(ownerKey)}
   function observeOwnerDeleted(update){return incarnation.observeDeleted(update)}
-  function purgeOwnerLocalData(ownerKey,ownerGeneration=0,ownerLockToken=null){
+  async function purgeEgeMockCaches(){
+    const cacheStorage=global.caches;
+    if(!cacheStorage||typeof cacheStorage.keys!=='function'||typeof cacheStorage.delete!=='function')return true;
+    try{
+      const names=await cacheStorage.keys();
+      const exact=names.filter(function(name){return name.startsWith('easyboost-ege-mock-assets-v1-')
+        ||name.startsWith('easyboost-ege-mock-form-v1-')});
+      const deleted=await Promise.all(exact.map(function(name){return cacheStorage.delete(name)}));
+      return deleted.every(Boolean)
+    }catch(_){return false}
+  }
+  async function purgeOwnerLocalData(ownerKey,ownerGeneration=0,ownerLockToken=null){
     const moduleStore=readModuleStore(),attemptStore=readAttemptStore(),grammarStore=readGrammarEventStore();
     delete moduleStore.owners[ownerKey];delete attemptStore.owners[ownerKey];delete grammarStore.owners[ownerKey];
-    let snapshot=true;try{localStorage.removeItem('eb_data_'+ownerKey);localStorage.removeItem('eb_data_'+ownerKey+'_g'+ownerGeneration)}catch(_){snapshot=false}
+    let snapshot=true;try{localStorage.removeItem('eb_data_'+ownerKey);localStorage.removeItem('eb_data_'+ownerKey+'_g'+ownerGeneration);
+      localStorage.removeItem('easyboost-ege-mock-written-v1:'+ownerKey+':'+ownerGeneration);
+      localStorage.removeItem('easyboost-ege-mock-written-v1:'+ownerKey+':'+ownerGeneration+':invalidation')}catch(_){snapshot=false}
     const modulesCleared=writeModuleStore(moduleStore);
     const attemptsCleared=writeAttemptStore(attemptStore);
     const grammarCleared=writeGrammarEventStore(grammarStore);
@@ -134,7 +147,8 @@
       if(ownerGeneration===0)overview=incarnation.clearMatchingStorageLocked(ownerKey,'easyboost.adaptive.overview.v1',function(raw){try{const value=JSON.parse(raw);
         return value&&value.owner===ownerKey&&(value.version==='adaptive-overview-cache-v1'?0:value.ownerGeneration)===0}catch(_){return false}},ownerLockToken)&&overview
     }
-    return modulesCleared&&attemptsCleared&&grammarCleared&&snapshot&&marker&&runtime&&overview
+    const egeCaches=await purgeEgeMockCaches();
+    return modulesCleared&&attemptsCleared&&grammarCleared&&snapshot&&marker&&runtime&&overview&&egeCaches
   }
   function durableOwnerAuthorityMatches(ownerKey,generation){
     if(!ownerKey||!Number.isSafeInteger(generation))return false;
@@ -165,11 +179,11 @@
     const ownerKey=owner;
     const locks=global.navigator&&global.navigator.locks;
     const previousGeneration=ownerAuthGeneration;
-    const mutate=function(token){const tombstone=markOwnerDeleted(ownerKey),cleared=purgeOwnerLocalData(ownerKey,previousGeneration,token);
-      if(owner===ownerKey){owner=null;ownerAuthGeneration=null;baseline={}}return{tombstone:tombstone,cleared:cleared}};
-    const outcome=locks&&typeof locks.request==='function'?await withGrammarQueueLock(mutate,ownerKey):mutate();
+    const mutate=async function(token){const tombstone=markOwnerDeleted(ownerKey);
+      if(owner===ownerKey){owner=null;ownerAuthGeneration=null;baseline={}}publishOwnerDeleted(ownerKey,tombstone);
+      const cleared=await purgeOwnerLocalData(ownerKey,previousGeneration,token);return{tombstone:tombstone,cleared:cleared}};
+    const outcome=await (locks&&typeof locks.request==='function'?withGrammarQueueLock(mutate,ownerKey):mutate());
     const tombstone=outcome&&outcome.tombstone||{saved:false,ownerGeneration:ownerAuthSnapshot(ownerKey).ownerGeneration,globalGeneration:ownerAuthSnapshot(ownerKey).globalGeneration};
-    publishOwnerDeleted(ownerKey,tombstone);
     const cleared=Boolean(outcome&&outcome.cleared);
     if(owner===ownerKey){owner=null;ownerAuthGeneration=null;baseline={}}
     if(cleared!==true)return cleared&&cleared.code?cleared:grammarQueueError('GRAMMAR_MASTERY_QUEUE_WRITE_FAILED','Не удалось полностью удалить локальные данные аккаунта.');
@@ -183,9 +197,10 @@
       if(!ownerAuthorityCurrent(ownerKey))return grammarQueueError('GRAMMAR_MASTERY_OWNER_CHANGED','Аккаунт изменился. Войдите снова перед удалением.');
       await removeRemote(ownerKey);
       const previousGeneration=ownerAuthGeneration;
-      const tombstone=markOwnerDeleted(ownerKey),cleared=purgeOwnerLocalData(ownerKey,previousGeneration,token);
+      const tombstone=markOwnerDeleted(ownerKey);
       if(owner===ownerKey){owner=null;ownerAuthGeneration=null;baseline={}}
       publishOwnerDeleted(ownerKey,tombstone);
+      const cleared=await purgeOwnerLocalData(ownerKey,previousGeneration,token);
       if(!cleared)return grammarQueueError('GRAMMAR_MASTERY_QUEUE_WRITE_FAILED','Не удалось полностью удалить локальные данные аккаунта.');
       if(!tombstone.saved)return grammarQueueError('GRAMMAR_MASTERY_QUEUE_WRITE_FAILED','Локальные данные удалены, но браузер не смог сохранить запрет на восстановление аккаунта.');
       return true
@@ -279,10 +294,11 @@
   }
   function receiveSyncMessage(update){
     if(update&&update.type==='owner_deleted'&&typeof update.owner==='string'){
-      void withGrammarQueueLock(function(token){const before=ownerAuthSnapshot(update.owner).ownerGeneration;
+      void withGrammarQueueLock(async function(token){const before=ownerAuthSnapshot(update.owner).ownerGeneration;
         const observed=observeOwnerDeleted(update);
-        if(observed){purgeOwnerLocalData(update.owner,Math.max(0,Number(update.ownerGeneration)-1||before),token);if(owner===update.owner)baseline={}}
-        deliverOwnerDeleted(update);return true
+        deliverOwnerDeleted(update);
+        if(observed){await purgeOwnerLocalData(update.owner,Math.max(0,Number(update.ownerGeneration)-1||before),token);if(owner===update.owner)baseline={}}
+        return true
       },update.owner);
       return
     }
@@ -351,6 +367,13 @@
     if(!ownerKey||!Number.isSafeInteger(expectedGeneration)||typeof action!=='function')return Promise.resolve(grammarQueueError('GRAMMAR_MASTERY_OWNER_CHANGED','Аккаунт изменился.'));
     return withGrammarQueueLock(async function(token){
       if(!ownerAuthorityMatches(ownerKey,expectedGeneration))return grammarQueueError('GRAMMAR_MASTERY_OWNER_CHANGED','Аккаунт изменился.');
+      return action(token)
+    },ownerKey)
+  }
+  function withDurableOwnerIncarnationLock(guard,action){const ownerKey=normalizedOwner(guard&&guard.owner),expectedGeneration=Number(guard&&guard.ownerGeneration);
+    if(!ownerKey||!Number.isSafeInteger(expectedGeneration)||typeof action!=='function')return Promise.resolve(grammarQueueError('GRAMMAR_MASTERY_OWNER_CHANGED','Аккаунт изменился.'));
+    return withGrammarQueueLock(async function(token){const authority=ownerAuthSnapshot(ownerKey);
+      if(authority.deleted||authority.ownerGeneration!==expectedGeneration)return grammarQueueError('GRAMMAR_MASTERY_OWNER_CHANGED','Аккаунт изменился.');
       return action(token)
     },ownerKey)
   }
@@ -536,7 +559,7 @@
     return Boolean(owner)&&!isOwnerDeleted(owner)&&ownerAuthorityCurrent(owner)&&retryable.length+slots<=MAX_PENDING_GRAMMAR_EVENTS
   }
   global.EasyBoostSync=Object.freeze({
-    queueProgress:queueProgress,saveProgress:saveProgress,saveModuleAttempt:saveModuleAttempt,saveGrammarMasteryEvent:saveGrammarMasteryEvent,saveGrammarMasteryEvents:saveGrammarMasteryEvents,setBaseline:setBaseline,setOwner:setOwner,confirmOwner:confirmOwner,adoptOwner:adoptOwner,clearOwner:clearOwner,deleteOwner:deleteOwner,isOwnerDeleted:isOwnerDeleted,ownerAuthSnapshot:ownerAuthSnapshot,ownerBoundGeneration:ownerBoundGeneration,withOwnerIncarnationLock:withOwnerIncarnationLock,
+    queueProgress:queueProgress,saveProgress:saveProgress,saveModuleAttempt:saveModuleAttempt,saveGrammarMasteryEvent:saveGrammarMasteryEvent,saveGrammarMasteryEvents:saveGrammarMasteryEvents,setBaseline:setBaseline,setOwner:setOwner,confirmOwner:confirmOwner,adoptOwner:adoptOwner,clearOwner:clearOwner,deleteOwner:deleteOwner,isOwnerDeleted:isOwnerDeleted,ownerAuthSnapshot:ownerAuthSnapshot,ownerBoundGeneration:ownerBoundGeneration,withOwnerIncarnationLock:withOwnerIncarnationLock,withDurableOwnerIncarnationLock:withDurableOwnerIncarnationLock,
     flush:flush,pendingModules:pendingModules,pendingModuleAttempts:pendingModuleAttempts,pendingGrammarMasteryEvents:pendingGrammarMasteryEvents,canQueueGrammarMasteryEvent:canQueueGrammarMasteryEvent,onGrammarMasterySync:onGrammarMasterySync,onOwnerDeleted:onOwnerDeleted,
     hasPending:function(){return Object.keys(pendingModules()).length>0
       ||ownerAttempts(readAttemptStore()).some(function(item){return attemptGeneration(item)===ownerAuthGeneration})

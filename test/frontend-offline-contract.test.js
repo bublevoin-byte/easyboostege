@@ -36,7 +36,9 @@ function deferred() {
   return { promise, resolve };
 }
 
-function createApi({ offline = true, responseOwner = '', payload = { data: { score: 6 } } } = {}) {
+function createApi({
+  offline = true, responseOwner = '', responseDate = '', payload = { data: { score: 6 } },
+} = {}) {
   const attempts = [];
   const window = {
     location: { origin: ORIGIN, protocol: 'https:' },
@@ -50,7 +52,11 @@ function createApi({ offline = true, responseOwner = '', payload = { data: { sco
       return {
         ok: true,
         status: 200,
-        headers: { get: (name) => String(name).toLowerCase() === 'x-easyboost-response-owner' ? responseOwner : '' },
+        headers: { get: (name) => {
+          if (String(name).toLowerCase() === 'x-easyboost-response-owner') return responseOwner;
+          if (String(name).toLowerCase() === 'date') return responseDate;
+          return '';
+        } },
         json: async () => payload,
         blob: async () => ({ size: 128 }),
       };
@@ -76,10 +82,12 @@ test('response-owner metadata is non-enumerable transport state and authority er
   const { api } = createApi({
     offline: false,
     responseOwner: 'Owner_A',
+    responseDate: 'Thu, 13 Aug 2026 06:00:00 GMT',
     payload: { learned: 12 },
   });
   const result = await api.get('/api/v1/progress');
   assert.equal(api.responseOwner(result), 'Owner_A');
+  assert.equal(api.responseServerTime(result), Date.parse('2026-08-13T06:00:00.000Z'));
   assert.deepEqual(Object.keys(result), ['learned']);
   assert.equal(JSON.stringify(result), '{"learned":12}');
   assert.equal(api.canUseOfflineFallback(Object.assign(new Error(), { code: 'OWNER_CHANGED', status: 409 })), false);
@@ -295,8 +303,12 @@ function createDeferredBroadcastHub() {
   return DeferredBroadcastChannel;
 }
 
-function createSync({ online = false, failRequest = true, sharedValues = null, lockManager = createLockManager(), BroadcastChannel, failSetKey = null, failSetKeys = [] } = {}) {
+function createSync({
+  online = false, failRequest = true, sharedValues = null, lockManager = createLockManager(),
+  BroadcastChannel, failSetKey = null, failSetKeys = [], cacheNames = [], cacheStorage = null,
+} = {}) {
   const values = sharedValues || new Map();
+  const cacheStore = new Set(cacheNames);
   const posts = [];
   let uuid = 500;
   const localStorage = {
@@ -309,6 +321,10 @@ function createSync({ online = false, failRequest = true, sharedValues = null, l
   };
   const window = {
     localStorage,
+    caches: cacheStorage || {
+      async keys() { return [...cacheStore]; },
+      async delete(name) { return cacheStore.delete(name); },
+    },
     navigator: { onLine: online, locks: lockManager },
     crypto: { randomUUID: () => `00000000-0000-4000-8000-${String(++uuid).padStart(12, '0')}` },
     BroadcastChannel,
@@ -346,7 +362,7 @@ function createSync({ online = false, failRequest = true, sharedValues = null, l
   });
   vm.runInContext(ownerIncarnationSource, context);
   vm.runInContext(syncSource, context);
-  return { sync: window.EasyBoostSync, posts, values, window };
+  return { sync: window.EasyBoostSync, posts, values, window, cacheStore };
 }
 
 test('offline progress synchronization reports failure instead of a silent success', async () => {
@@ -952,6 +968,57 @@ test('account deletion passes the owner captured under the lock to the remote mu
   assert.equal(capturedOwner, 'grammar-owner');
   for (const key of ['eb_current', 'eb_data_grammar-owner_g0', 'easyboost.adaptive.execution.v1', 'easyboost.adaptive.overview.v1:grammar-owner:g0']) {
     assert.equal(active.values.has(key), false, `${key} is purged before deleteOwner reports success`);
+  }
+});
+
+test('account deletion purges the exact EGE owner continuation and immutable cache namespaces', async () => {
+  const active = createSync({
+    online: true,
+    failRequest: false,
+    cacheNames: [
+      'easyboost-static-keep',
+      'easyboost-ege-mock-assets-v1-form@1-exact',
+      'easyboost-ege-mock-form-v1-exact',
+    ],
+  });
+  active.sync.setOwner('grammar-owner');
+  active.values.set('easyboost-ege-mock-written-v1:grammar-owner:0', '{"private":"draft"}');
+  active.values.set('easyboost-ege-mock-written-v1:other-owner:0', '{"private":"other"}');
+
+  assert.equal(await active.sync.deleteOwner(async () => {}), true);
+
+  assert.equal(active.values.has('easyboost-ege-mock-written-v1:grammar-owner:0'), false);
+  assert.equal(active.values.has('easyboost-ege-mock-written-v1:other-owner:0'), true);
+  assert.deepEqual([...active.cacheStore], ['easyboost-static-keep']);
+});
+
+test('owner deletion invalidates authority before best-effort CacheStorage cleanup settles', async () => {
+  for (const action of ['clearOwner', 'deleteOwner']) {
+    let releaseCacheKeys;
+    let cacheReadStarted;
+    const cacheStarted = new Promise((resolve) => { cacheReadStarted = resolve; });
+    const cacheKeys = new Promise((resolve) => { releaseCacheKeys = resolve; });
+    const active = createSync({
+      online: action === 'deleteOwner', failRequest: false,
+      cacheStorage: {
+        async keys() { cacheReadStarted(); return cacheKeys; },
+        async delete() { return true; },
+      },
+    });
+    active.sync.setOwner('grammar-owner');
+    const deleted = [];
+    active.sync.onOwnerDeleted((update) => deleted.push(update.owner));
+
+    const deletion = action === 'clearOwner'
+      ? active.sync.clearOwner()
+      : active.sync.deleteOwner(async () => {});
+    await cacheStarted;
+
+    assert.deepEqual(deleted, ['grammar-owner'], `${action} must notify before cache cleanup`);
+    assert.equal(active.sync.ownerBoundGeneration('grammar-owner'), null,
+      `${action} must revoke same-tab authority before cache cleanup`);
+    releaseCacheKeys([]);
+    assert.equal(await deletion, true);
   }
 });
 

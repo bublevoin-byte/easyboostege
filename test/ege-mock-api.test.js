@@ -10,6 +10,8 @@ import { createFileRepository } from '../storage/file-repository.js';
 import { createEgeMockAttempt, egeMockAttemptPublicDto } from '../ege-mock/attempt.js';
 import { EGE_MOCK_FORM_ID, EGE_MOCK_FORM_REVISION, getEgeMockForm } from '../ege-mock/catalog.js';
 import { compileOpenApiSchema } from './support/openapi-schema-evaluator.js';
+import { EGE_MOCK_FORM_1_V1_PUBLIC } from '../public/ege-mock-form-1-v1.js';
+import { createEgeMockWrittenRunner } from '../public/ege-mock-written-runner.js';
 
 function objectKeys(value) {
   if (Array.isArray(value)) return value.flatMap(objectKeys);
@@ -228,6 +230,94 @@ test('EGE mock HTTP samples file timer authority after its queued owner boundary
     await repository.close();
     await fs.rm(directory, { recursive: true, force: true });
   }
+});
+
+test('written browser queue reconciles real HTTP auto-submit after an offline deadline', async () => {
+  await withServer(async ({ owner, request, setNow }) => {
+    let online = true;
+    let id = 0;
+    async function payload(response) {
+      const body = await response.json();
+      if (response.ok) return body;
+      throw Object.assign(new Error(body.error?.code || 'HTTP_ERROR'), {
+        code: body.error?.code || 'HTTP_ERROR', status: response.status,
+      });
+    }
+    const transport = {
+      async attempt(attemptId) {
+        return payload(await request(owner, `/api/v1/ege-mocks/attempts/${attemptId}`));
+      },
+      async current() { return payload(await request(owner, '/api/v1/ege-mocks/attempts/current')); },
+      async start(input) {
+        return payload(await request(owner, '/api/v1/ege-mocks/attempts', {
+          method: 'POST', idempotencyKey: input.idempotencyKey,
+          body: {
+            formId: input.formId, formRevision: input.formRevision,
+            catalogFingerprint: input.catalogFingerprint,
+          },
+        }));
+      },
+      async saveDraft(input) {
+        return payload(await request(owner, `/api/v1/ege-mocks/attempts/${input.attemptId}/draft`, {
+          method: 'PUT', idempotencyKey: input.idempotencyKey,
+          body: { expectedRevision: input.expectedRevision, answers: input.answers },
+        }));
+      },
+      async submitWritten(input) {
+        return payload(await request(owner, `/api/v1/ege-mocks/attempts/${input.attemptId}/written/submit`, {
+          method: 'POST', idempotencyKey: input.idempotencyKey,
+          body: { expectedRevision: input.expectedRevision },
+        }));
+      },
+    };
+    const values = new Map();
+    const runner = createEgeMockWrittenRunner({
+      owner: { username: owner, generation: 0 },
+      storage: {
+        getItem(key) { return values.get(key) ?? null; },
+        setItem(key, value) { values.set(key, String(value)); },
+      },
+      online: () => online,
+      clock: () => Date.parse(online ? '2026-08-13T09:10:00.000Z' : '2026-08-13T08:50:00.000Z'),
+      uuid: () => `c0000000-0000-4000-8000-${String(++id).padStart(12, '0')}`,
+      assets: { async preflight() { return {
+        identity: EGE_MOCK_FORM_1_V1_PUBLIC.identity,
+        fingerprint: EGE_MOCK_FORM_1_V1_PUBLIC.fingerprint,
+        assetCount: 20,
+      }; } },
+      transport,
+    });
+    await runner.dispatch({ type: 'prepare', form: EGE_MOCK_FORM_1_V1_PUBLIC });
+    await runner.dispatch({ type: 'start' });
+    online = false;
+    await runner.dispatch({ type: 'answer', position: 19, answer: 'went offline' });
+    setNow(runner.snapshot().writtenDeadlineAt);
+    online = true;
+
+    await runner.dispatch({ type: 'sync' });
+    const snapshot = runner.snapshot();
+    assert.equal(snapshot.phase, 'written_submitted');
+    assert.equal(snapshot.result.offlineChangesNotAccepted, true);
+    assert.equal(snapshot.answers['19'], undefined);
+    assert.equal(snapshot.blankPositions.length, 36);
+    const current = await transport.current();
+    assert.equal(current.attempt.state, 'oral_ready');
+    setNow(current.attempt.oralAvailableUntil);
+    assert.equal((await transport.current()).attempt, null);
+    const afterOralWindow = createEgeMockWrittenRunner({
+      owner: { username: owner, generation: 0 },
+      storage: {
+        getItem(key) { return values.get(key) ?? null; },
+        setItem(key, value) { values.set(key, String(value)); },
+      },
+      online: () => true,
+      assets: {},
+      transport,
+    });
+    await afterOralWindow.dispatch({ type: 'restore', form: EGE_MOCK_FORM_1_V1_PUBLIC });
+    assert.equal(afterOralWindow.snapshot().phase, 'written_submitted');
+    assert.equal(afterOralWindow.snapshot().result.state, 'expired');
+  });
 });
 
 test('EGE mock executable OpenAPI matches runtime forms, attempts and strict mutations', async () => {

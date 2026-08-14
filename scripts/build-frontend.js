@@ -29,6 +29,10 @@ const configFile = path.join(projectDirectory, 'vite.config.js');
 
 const SHELL_MARKER_START = '/* build:app-shell */';
 const SHELL_MARKER_END = '/* end build:app-shell */';
+const EGE_MOCK_FORM_MARKER_START = '/* build:ege-mock-form */';
+const EGE_MOCK_FORM_MARKER_END = '/* end build:ege-mock-form */';
+const EGE_MOCK_EXEC_MARKER_START = '/* build:ege-mock-exec */';
+const EGE_MOCK_EXEC_MARKER_END = '/* end build:ege-mock-exec */';
 
 /* ---------- исходники ---------- */
 
@@ -152,6 +156,12 @@ for (const chunk of chunks) {
 for (const name of reachable) {
   if (!modules[name]) throw new Error(`Модуль ${name} не попал в сборку — проверьте импорты`);
 }
+const builtEgeMockFormModule = modules['ege-mock-form-1-v1.js'];
+if (!builtEgeMockFormModule) throw new Error('Exact EGE mock form module не попал в сборку');
+const builtEgeMockFormPath = `/${builtEgeMockFormModule}`;
+const builtEgeMockScreenModule = modules['screens/ege-mock.js'];
+if (!builtEgeMockScreenModule) throw new Error('Lazy EGE mock executable не попал в сборку');
+const builtEgeMockExecPaths = [`/${builtEgeMockScreenModule}`];
 
 const entryChunk = chunks.find((chunk) => chunk.isEntry);
 if (!entryChunk) throw new Error('Сборка не дала точки входа');
@@ -210,7 +220,27 @@ if (declaredSorted.join('\n') !== expectedSorted.join('\n')) {
 }
 
 const builtShell = shellFrom([...shellChunks, ...shellStaticAssets]);
-const workerBuilt = `${workerSource.slice(0, shellStart)}${SHELL_MARKER_START}\nconst APP_SHELL=${JSON.stringify(builtShell).replaceAll('"', "'")};\n${workerSource.slice(shellEnd)}`;
+let workerBuilt = `${workerSource.slice(0, shellStart)}${SHELL_MARKER_START}\nconst APP_SHELL=${JSON.stringify(builtShell).replaceAll('"', "'")};\n${workerSource.slice(shellEnd)}`;
+const egeMockFormStart = workerBuilt.indexOf(EGE_MOCK_FORM_MARKER_START);
+const egeMockFormEnd = workerBuilt.indexOf(EGE_MOCK_FORM_MARKER_END);
+if (egeMockFormStart === -1 || egeMockFormEnd === -1) {
+  throw new Error('public/service-worker.js потерял exact EGE form markers');
+}
+const sourceEgeMockFormBlock = workerBuilt.slice(egeMockFormStart, egeMockFormEnd);
+if (!sourceEgeMockFormBlock.includes("const EGE_MOCK_FORM_PATH='/ege-mock-form-1-v1.js';")) {
+  throw new Error('Source service worker потерял exact EGE form path');
+}
+workerBuilt = `${workerBuilt.slice(0, egeMockFormStart)}${EGE_MOCK_FORM_MARKER_START}\nconst EGE_MOCK_FORM_PATH='${builtEgeMockFormPath}';\n${workerBuilt.slice(egeMockFormEnd)}`;
+const egeMockExecStart = workerBuilt.indexOf(EGE_MOCK_EXEC_MARKER_START);
+const egeMockExecEnd = workerBuilt.indexOf(EGE_MOCK_EXEC_MARKER_END);
+if (egeMockExecStart === -1 || egeMockExecEnd === -1) {
+  throw new Error('public/service-worker.js потерял markers build:ege-mock-exec');
+}
+const sourceEgeMockExecBlock = workerBuilt.slice(egeMockExecStart, egeMockExecEnd);
+if (!sourceEgeMockExecBlock.includes("const EGE_MOCK_EXEC_PATHS=['/screens/ege-mock.js','/ege-mock-written-assets.js','/ege-mock-written-runner.js'];")) {
+  throw new Error('Source service worker потерял EGE executable paths');
+}
+workerBuilt = `${workerBuilt.slice(0, egeMockExecStart)}${EGE_MOCK_EXEC_MARKER_START}\nconst EGE_MOCK_EXEC_PATHS=${JSON.stringify(builtEgeMockExecPaths).replaceAll('"', "'")};\n${workerBuilt.slice(egeMockExecEnd)}`;
 await fs.writeFile(path.join(stagingDirectory, 'service-worker.js'), workerBuilt, 'utf8');
 
 /* ---------- целостность ---------- */
@@ -227,6 +257,9 @@ const builtScripts = [...builtHtml.matchAll(/<script[^>]+src="\/([^"]+)"/gu)].ma
 if (!builtScripts.length) throw new Error('Собранный index.html подключает ноль скриптов');
 for (const name of builtScripts) {
   if (!assets[name]) throw new Error(`Собранный index.html подключает отсутствующий файл: ${name}`);
+}
+if (!assets[builtEgeMockFormPath.slice(1)]) {
+  throw new Error(`Exact EGE mock form module отсутствует в dist: ${builtEgeMockFormPath}`);
 }
 if (!builtScripts.includes(entryChunk.fileName)) {
   throw new Error(`Собранный index.html не подключает точку входа ${entryChunk.fileName}`);
