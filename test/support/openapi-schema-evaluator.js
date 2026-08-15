@@ -457,6 +457,8 @@ export function compileOpenApiSchema(openapi, name) {
       if (schema.items && !value.every((item, index) => matches(schema.items, item, `${path}/${index}`, errors))) return false;
     }
     if (value && typeof value === 'object' && !Array.isArray(value)) {
+      if (schema.minProperties != null && Object.keys(value).length < schema.minProperties) return false;
+      if (schema.maxProperties != null && Object.keys(value).length > schema.maxProperties) return false;
       if (schema.required && !schema.required.every((key) => Object.hasOwn(value, key))) return false;
       if (schema.properties && !Object.entries(schema.properties).every(([key, child]) => (
         !Object.hasOwn(value, key) || matches(child, value[key], `${path}/${key}`, errors)

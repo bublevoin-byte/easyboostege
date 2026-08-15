@@ -4,6 +4,44 @@ import { EGE_MOCK_FORM_ID, EGE_MOCK_FORM_REVISION, getEgeMockForm } from '../../
 import { createEgeMockWritingAssessmentBinding } from '../../ege-mock/writing-assessment.js';
 import { AUTOMATIC_ASSESSMENT_PUBLIC_CONTRACT } from '../../shared/automatic-assessment-contract.js';
 
+export async function completeEgeMockOralStageLedger(
+  repository, username, initial, candidate = (body) => ({
+    ...body, idempotencyKey: crypto.randomUUID(),
+    requestHash: crypto.randomBytes(32).toString('hex'),
+  }),
+) {
+  let oral = initial;
+  let cursorAt = oral.attempt.oralStartedAt;
+  while (oral.attempt.oralProgress.phase !== 'ready_to_submit') {
+    const progress = oral.attempt.oralProgress;
+    const finalTaskAnchor = progress.position === 42 && progress.responseNumber === 1
+      && progress.phase === 'ready'
+      ? new Date(new Date(oral.attempt.oralDeadlineAt).getTime() - 330_000).toISOString()
+      : null;
+    const now = progress.stageDeadlineAt || finalTaskAnchor || cursorAt;
+    if (progress.phase === 'ready' || progress.phase === 'preparing') {
+      oral = await repository.advanceEgeMockOralStage(username, oral.attempt.id,
+        candidate({
+          action: 'advance', expectedRevision: oral.attempt.revision,
+          position: progress.position, responseNumber: progress.responseNumber,
+        }), { now: () => new Date(now) });
+    } else {
+      oral = await repository.advanceEgeMockOralStage(username, oral.attempt.id,
+        candidate({
+          action: 'complete', expectedRevision: oral.attempt.revision,
+          position: progress.position, responseNumber: progress.responseNumber,
+          recording: {
+            recordingId: crypto.randomUUID(), status: 'completed',
+            durationSeconds: { 39: 90, 40: 20, 41: 40, 42: 180 }[progress.position],
+            sha256: crypto.randomBytes(32).toString('hex'),
+          },
+        }), { now: () => new Date(now) });
+      cursorAt = now;
+    }
+  }
+  return oral;
+}
+
 export async function assertEgeMockAttemptRepositoryContract(assert, repository, telegramBase) {
   const owner = await repository.createTelegramUser(telegramBase, `EGE mock ${telegramBase}`);
   const other = await repository.createTelegramUser(telegramBase + 1, `EGE mock other ${telegramBase}`);
@@ -161,15 +199,14 @@ export async function assertEgeMockAttemptRepositoryContract(assert, repository,
       idempotencyKey: crypto.randomUUID(), requestHash: '7'.repeat(64),
     });
     assert.equal(new Date(oral.attempt.oralDeadlineAt) - new Date(oral.attempt.oralStartedAt), 17 * 60_000);
+    const completedOral = await completeEgeMockOralStageLedger(repository, owner, oral);
     const oralCandidates = [
       {
-        expectedRevision: oral.attempt.revision,
-        recordings: { 39: { recordingId: 'shared-local-39-a', durationSeconds: 60 } },
+        expectedRevision: completedOral.attempt.revision,
         idempotencyKey: crypto.randomUUID(), requestHash: '8'.repeat(64),
       },
       {
-        expectedRevision: oral.attempt.revision,
-        recordings: { 39: { recordingId: 'shared-local-39-b', durationSeconds: 61 } },
+        expectedRevision: completedOral.attempt.revision,
         idempotencyKey: crypto.randomUUID(), requestHash: 'c'.repeat(64),
       },
     ];
@@ -255,6 +292,191 @@ export async function assertEgeMockAttemptRepositoryContract(assert, repository,
   } finally {
     await repository.deleteUserData(owner).catch(() => {});
     await repository.deleteUserData(other).catch(() => {});
+  }
+}
+
+export async function assertEgeMockOralStageRepositoryContract(assert, repository, telegramBase) {
+  const owner = await repository.grantDays(telegramBase, 45, `EGE oral stages ${telegramBase}`);
+  const other = await repository.grantDays(telegramBase + 1, 45, `EGE oral other ${telegramBase}`);
+  const form = getEgeMockForm(EGE_MOCK_FORM_ID, EGE_MOCK_FORM_REVISION);
+  let counter = 0;
+  const candidate = (body) => ({
+    ...body,
+    idempotencyKey: crypto.randomUUID(),
+    requestHash: crypto.createHash('sha256').update(`oral-stage:${telegramBase}:${counter += 1}`)
+      .digest('hex'),
+  });
+  const voiceConsentPolicyVersion = '2026-08-02-voice-v1';
+  try {
+    await repository.setPrivacyConsent(owner.username, {
+      text_processing: false, voice_processing: true,
+      policy_version: voiceConsentPolicyVersion,
+    });
+    const started = await repository.startEgeMockAttempt(owner.username, candidate({
+      formId: form.id, formRevision: form.revision, catalogFingerprint: form.fingerprint,
+    }));
+    const written = await repository.submitEgeMockWritten(owner.username, started.attempt.id,
+      candidate({ expectedRevision: started.attempt.revision }));
+    let oral = await repository.startEgeMockOral(owner.username, started.attempt.id,
+      candidate({ expectedRevision: written.attempt.revision }));
+    assert.equal(oral.attempt.oralProgress.phase, 'ready');
+    await repository.setSpeakingAccentProfile(owner.username, {
+      locale: 'en-GB', source: 'manual', now: new Date('2026-08-15T05:55:00.000Z'),
+    });
+    const initiallyPinnedBridge = await repository.syncEgeMockSpeakingBridge(
+      owner.username, started.attempt.id,
+    );
+    await repository.setSpeakingAccentProfile(owner.username, {
+      locale: 'en-US', source: 'manual', now: new Date('2026-08-15T05:56:00.000Z'),
+    });
+    assert.equal(await repository.getEgeMockAttempt(other.username, started.attempt.id), null);
+
+    const firstAdvance = candidate({
+      action: 'advance', expectedRevision: oral.attempt.revision, position: 39, responseNumber: 1,
+    });
+    oral = await repository.advanceEgeMockOralStage(owner.username, started.attempt.id, firstAdvance);
+    await repository.syncEgeMockSpeakingBridge(owner.username, started.attempt.id);
+    const replay = await repository.advanceEgeMockOralStage(
+      owner.username, started.attempt.id, firstAdvance,
+    );
+    assert.equal(replay.replayed, true);
+    assert.deepEqual(replay.attempt, oral.attempt);
+
+    const closedUntil = new Date(
+      new Date(oral.attempt.oralProgress.stageDeadlineAt).getTime() + 90_000 + 5_001,
+    );
+    const recovered = await repository.getEgeMockAttempt(owner.username, started.attempt.id, {
+      now: () => closedUntil,
+    });
+    assert.equal(recovered.oralProgress.position, 40,
+      'a real-clock restore advances beyond an expired preparation and response');
+    assert.equal(recovered.oralProgress.phase, 'ready');
+    assert.equal(recovered.revision, oral.attempt.revision + 2);
+    assert.deepEqual({
+      status: recovered.oralProgress.recordings['39:1'].status,
+      durationSeconds: recovered.oralProgress.recordings['39:1'].durationSeconds,
+      technicalIssueCode: recovered.oralProgress.recordings['39:1'].technicalIssueCode,
+    }, {
+      status: 'technical_issue', durationSeconds: 0, technicalIssueCode: 'response_timeout',
+    });
+    oral = { attempt: recovered };
+
+    oral = await completeEgeMockOralStageLedger(repository, owner.username, oral, candidate);
+    assert.equal(Object.keys(oral.attempt.oralProgress.recordings).length, 11);
+    const submitted = await repository.submitEgeMockOral(owner.username, started.attempt.id,
+      candidate({ expectedRevision: oral.attempt.revision }));
+    assert.equal(submitted.attempt.speakingAssessment.status, 'pending');
+    assert.equal(submitted.attempt.speakingAssessment.items['41'].mode, 'experimental');
+    const bridge = await repository.syncEgeMockSpeakingBridge(
+      owner.username, started.attempt.id,
+    );
+    const bridgeReplay = await repository.syncEgeMockSpeakingBridge(
+      owner.username, started.attempt.id,
+    );
+    assert.equal(bridge.id, started.attempt.id);
+    assert.equal(bridge.selection_reason, 'ege_mock');
+    assert.equal(bridge.status, 'submitted');
+    assert.deepEqual([
+      bridge.accent_locale, bridge.accent_profile_revision, bridge.accent_effective_at,
+    ], [
+      initiallyPinnedBridge.accent_locale,
+      initiallyPinnedBridge.accent_profile_revision,
+      initiallyPinnedBridge.accent_effective_at,
+    ], 'file and PostgreSQL preserve the same first-sync EGE accent pin');
+    assert.deepEqual(bridgeReplay, bridge, 'bridge sync is exact and replay-safe');
+    const firstRecordedTask = bridge.responses.find(({ entries }) => (
+      entries.some(({ status }) => status === 'completed')
+    ));
+    const firstRecordedResponse = firstRecordedTask.entries
+      .find(({ status }) => status === 'completed');
+    const sourceAssignment = bridge.assignments.find(({ task_type: taskType }) => (
+      Number(taskType) === Number(firstRecordedTask.taskType)
+    ));
+    await assert.rejects(repository.claimSpeakingEvaluation(
+      owner.username, {
+        taskType: Number(firstRecordedTask.taskType),
+        assignment: { source: 'EGE oral claim-time authorization contract' },
+        transcript: 'Owner-bound submitted EGE oral response.',
+      }, 'speaking-semantic-v4', crypto.createHash('sha256')
+        .update(`expired-ege-semantic:${telegramBase}`).digest('hex'), {
+        now: () => new Date('2100-01-01T00:00:00.000Z'),
+        source: {
+          sessionMode: 'full_section', sessionId: bridge.id,
+          taskRef: sourceAssignment.task_id,
+          taskRevision: Number(sourceAssignment.task_revision),
+          catalogId: sourceAssignment.catalog_id,
+          catalogRevision: Number(sourceAssignment.catalog_revision),
+          accentLocale: bridge.accent_locale,
+          assistanceUsed: true,
+          targetedPractice: null,
+        },
+        voiceConsentPolicyVersion,
+      },
+    ), { code: 'SUBSCRIPTION_REQUIRED' },
+    'semantic provider reservation rechecks subscription at its claim-time instant');
+    const assessmentKey = crypto.randomUUID();
+    const claimed = await repository.claimFullSpeakingSessionAssessment(
+      owner.username, started.attempt.id, {
+        taskType: firstRecordedTask.taskType,
+        responseNumber: firstRecordedResponse.responseNumber,
+        audioSha256: firstRecordedResponse.assessment_fingerprint,
+        durationSeconds: firstRecordedResponse.recordingDurationSeconds,
+        idempotencyKey: assessmentKey,
+      },
+      { voiceConsentPolicyVersion },
+    );
+    const claimedResponse = claimed.responses.find(({ taskType }) => (
+      taskType === firstRecordedTask.taskType
+    )).entries.find(({ responseNumber }) => (
+      responseNumber === firstRecordedResponse.responseNumber
+    ));
+    assert.equal(claimedResponse.assessment_idempotency_key, assessmentKey,
+      'the provider seam opens only after the authoritative EGE oral submission');
+    const anotherRecordedResponse = firstRecordedTask.entries.find(({ status, responseNumber }) => (
+      status === 'completed' && responseNumber !== firstRecordedResponse.responseNumber
+    ));
+    await repository.setPrivacyConsent(owner.username, {
+      text_processing: false, voice_processing: false,
+      policy_version: voiceConsentPolicyVersion,
+    });
+    const frozenPronunciationReplay = await repository.claimFullSpeakingSessionAssessment(
+      owner.username, started.attempt.id, {
+        taskType: firstRecordedTask.taskType,
+        responseNumber: firstRecordedResponse.responseNumber,
+        audioSha256: firstRecordedResponse.assessment_fingerprint,
+        durationSeconds: firstRecordedResponse.recordingDurationSeconds,
+        idempotencyKey: assessmentKey,
+      },
+      { voiceConsentPolicyVersion },
+    );
+    assert.equal(frozenPronunciationReplay.responses.find(({ taskType }) => (
+      taskType === firstRecordedTask.taskType
+    )).entries.find(({ responseNumber }) => (
+      responseNumber === firstRecordedResponse.responseNumber
+    )).assessment_idempotency_key, assessmentKey,
+    'an exact frozen pronunciation claim replays after consent revocation without new provider authority');
+    await assert.rejects(repository.claimFullSpeakingSessionAssessment(
+      owner.username, started.attempt.id, {
+        taskType: firstRecordedTask.taskType,
+        responseNumber: anotherRecordedResponse.responseNumber,
+        audioSha256: anotherRecordedResponse.assessment_fingerprint,
+        durationSeconds: anotherRecordedResponse.recordingDurationSeconds,
+        idempotencyKey: crypto.randomUUID(),
+      },
+      { voiceConsentPolicyVersion },
+    ), { code: 'PRIVACY_CONSENT_REQUIRED' },
+    'claim-time revocation closes the pronunciation provider seam inside the owner lock');
+    assert.equal((await repository.getFullSpeakingSession(
+      other.username, started.attempt.id,
+    )), null, 'the reusable provider boundary is owner-isolated');
+    const exported = await repository.exportUserData(owner.username);
+    const record = exported.ege_mock_attempts.find(({ id }) => id === started.attempt.id);
+    assert.equal(record.oral_progress.phase, 'ready_to_submit');
+    assert.equal(record.speaking_assessment.version, 'ege-mock-speaking-assessment-v1');
+    assert.equal(/(?:audio|transcript|referenceText)/iu.test(JSON.stringify(record)), false);
+  } finally {
+    await repository.deleteUserData(owner.username).catch(() => {});
+    await repository.deleteUserData(other.username).catch(() => {});
   }
 }
 

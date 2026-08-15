@@ -76,12 +76,72 @@ test('the written runner and exact revision caches are reachable after an app re
 
 test('same-phase synchronization and exact-owner storage merges refresh status without replacing focus', () => {
   assert.match(screen, /function refreshRunningProjection\(/u);
+  assert.match(screen, /function refreshRunningProjection\([^)]*\) \{\s*if \(oralRunner\) return;/u,
+    'a late written refresh cannot rewrite the active oral timer and status card');
   assert.match(screen, /snapshot\.phase === before[\s\S]*?refreshRunningProjection\(snapshot\)/u);
   assert.match(screen, /event\.key === runnerStorageKey/u);
   assert.match(screen, /document\.activeElement/u);
   assert.match(screen, /refreshLocal[\s\S]*?refreshRunningProjection/u);
   assert.match(screen, /const area = document\.getElementById\('ege_mock_area'\)[\s\S]*?area\.querySelectorAll\('input\[type=radio\]'\)/u);
   assert.doesNotMatch(screen, /document\.querySelectorAll\('input\[type=radio\]'\)/u);
+});
+
+test('oral screen submit cannot send candidate-owned recording material', () => {
+  const transport = screen.match(/async submit\(candidateId, input\) \{([\s\S]*?)\n    \},/u)?.[1];
+  assert.ok(transport, 'oral submit transport must remain an explicit reviewable seam');
+  assert.match(transport, /expectedRevision: input\.expectedRevision/u);
+  assert.doesNotMatch(transport, /recordings/u);
+  assert.match(screen, /createEgeMockOralRunner\(\{[\s\S]*?attemptId,[\s\S]*?attemptOwnerGeneration/u,
+    'the oral runner is bound to the exact written attempt before local restore');
+});
+
+test('oral UI announces its section, authoritative timer warnings and exact task changes', () => {
+  assert.match(markup, /id="ege_mock_part"/u);
+  assert.match(screen, /const ORAL_WARNING_MINUTES = Object\.freeze\(\[10, 5, 1\]\)/u);
+  assert.match(screen, /function renderOralHeader\([\s\S]*?УСТНАЯ ЧАСТЬ[\s\S]*?role', 'timer'/u);
+  assert.match(screen, /snapshot\.authorityNowMs/u);
+  assert.match(screen, /oralMedia\.assetUrl\(pair\.src\)/u);
+  assert.match(screen, /await media\.preflight\([\s\S]*?await beginAutomaticOralRecording\(restored, media\)/u,
+    'a reload inside the authoritative recording phase restarts capture for the remaining interval');
+  const tick = screen.match(/async function tickOral\(\) \{([\s\S]*?)\n\}/u)?.[1] || '';
+  assert.ok(tick.indexOf('stageDeadlineAt') < tick.indexOf("type: 'tick'"),
+    'the expiring recording is finalized before overall automatic submit');
+  assert.match(screen, /oralProjectionIdentity\(before\) !== oralProjectionIdentity\(snapshot\)[\s\S]*?requestAnimationFrame[\s\S]*?focus/u);
+});
+
+test('cross-tab oral adoption discards the old response capture before starting the adopted one', () => {
+  assert.match(screen, /createEgeMockOralRunner\(\{[\s\S]*?lockManager: navigator\.locks/u);
+  assert.match(screen, /async function cancelAutomaticOralRecording\([\s\S]*?media\?\.cancelRecording\?\.\([\s\S]*?oralRecordingActive = false[\s\S]*?oralCaptured = null/u);
+  const storageHandler = screen.slice(screen.indexOf("window.addEventListener('storage'"));
+  assert.match(storageHandler,
+    /const beforeIdentity = oralProjectionIdentity\(candidateRunner\.snapshot\(\)\)[\s\S]*?const incomingIdentity = oralStoredProjectionIdentity\(event\.newValue\)[\s\S]*?const captureNeedsRebinding = incomingIdentity !== '' && incomingIdentity !== beforeIdentity/u,
+    'same-cursor writes from another tab must not repeatedly destroy the active recording');
+  assert.match(storageHandler,
+    /if \(captureNeedsRebinding\) await cancelAutomaticOralRecording\(\)[\s\S]*?type: 'refreshLocal'/u,
+    'a known cursor change cancels the stale recorder before adopting remote progress');
+  assert.match(storageHandler,
+    /const projectionChanged = oralProjectionIdentity\(snapshot\) !== beforeIdentity[\s\S]*?if \(projectionChanged && !captureNeedsRebinding\) await cancelAutomaticOralRecording\(\)/u,
+    'authoritative changes that were not readable from storage still discard stale capture');
+  assert.ok(storageHandler.indexOf("type: 'refreshLocal'")
+    < storageHandler.indexOf('await beginAutomaticOralRecording(snapshot, candidateMedia)'));
+});
+
+test('oral cross-tab UI has one durable capture owner and storage adoption cannot feed back', () => {
+  assert.match(screen, /hasRecordingLease\(\)[\s\S]*?acquireRecordingLease\(identity\)/u);
+  const storageHandler = screen.slice(screen.indexOf("window.addEventListener('storage'"));
+  assert.match(storageHandler, /type: 'refreshLocal'/u);
+  assert.doesNotMatch(storageHandler.slice(0, storageHandler.indexOf('if (runner &&')),
+    /type: 'restore'/u, 'a peer storage event must not perform GET + persist + another storage event');
+});
+
+test('oral stage countdown is quiet and the verified task-42 composite spans the mobile grid', () => {
+  assert.match(screen, /<p><span>Этап<\/span><strong>/u);
+  assert.doesNotMatch(screen, /<p role="status"><span>Этап<\/span>/u);
+  assert.match(markup, /\.ege-mock__oral-photos img\{[^}]*grid-column:1\/-1/u);
+});
+
+test('a failed oral reopen preserves its actionable error instead of returning to a silent written card', () => {
+  assert.match(screen, /const opened = await ensureOralRunner\(\);[\s\S]*?if \(!opened\) return/u);
 });
 
 test('route startup failures stay handled and the native Back action runs leave hooks', () => {
@@ -111,6 +171,23 @@ test('authority reset clears the old-owner DOM before invalidation can continue'
   assert.match(screen, /catch \(invalidationError\)[\s\S]*?return 'unavailable'/u);
   assert.match(runnerSource, /EGE_MOCK_WRITTEN_LOCAL_STATE_INVALIDATED/u);
   assert.match(screen, /event\.key === runnerInvalidationKey/u);
+});
+
+test('oral initialization is epoch-bound across every asynchronous media boundary', () => {
+  assert.match(screen,
+    /const oralOperation = \{[\s\S]*?epoch: openEpoch[\s\S]*?candidate[\s\S]*?media[\s\S]*?\};/u);
+  assert.match(screen,
+    /await candidate\.dispatch\(\{ type: 'restore', form \}\);[\s\S]*?if \(!oralOperationCurrent\(oralOperation\)\)[\s\S]*?media\.dispose/u,
+    'a stale restore is disposed before it can install global oral state');
+  assert.match(screen,
+    /await media\.preflight\([\s\S]*?if \(!oralOperationCurrent\(oralOperation\)\)[\s\S]*?media\.dispose/u,
+    'a stale preflight is disposed before it can acquire the microphone');
+  assert.match(screen,
+    /finally\(\(\) => \{[\s\S]*?if \(oralOpening === guardedOpening\) oralOpening = null/u,
+    'an old opening promise cannot clear a newer oral opening');
+  assert.match(screen,
+    /await media\.startRecording\(remainingSeconds\);[\s\S]*?if \(media !== oralMedia\)[\s\S]*?cancelRecording/u,
+    'a recorder resolved after route invalidation is cancelled instead of reviving capture state');
 });
 
 test('the public account-deletion seam purges the exact EGE owner state and form caches', () => {

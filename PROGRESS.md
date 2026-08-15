@@ -19,7 +19,187 @@
 
 Спека: `.scratch/ege-full-mock-2026/spec.md`
 
-Overall status: `in-progress` — Tickets 01–04 complete; Ticket 05 is next and `ready-for-agent` only.
+Overall status: `in-progress` — Tickets 01–05 complete; Ticket 06 results/repeat/adaptive work is next and not started.
+
+Ticket 05 pre-freeze evidence: exact owner/attempt/form/task/stage-bound oral tasks 39–42 run under a separate
+server-authoritative 17-minute timer after mic and immutable-asset preflight. The device-local WAV/IndexedDB layer,
+durable idempotent UUIDv4 start/stage/submit commands, offline reload/reconnect, immutable 11-response cursor,
+responsive keyboard/reduced-motion UI and explicit-only provisional assessment reuse existing full Speaking,
+pronunciation and evaluation modules through `selection_reason = ege_mock`; safe GET performs no provider work.
+Missing or technical evidence stays retryable/null, tasks 39–42 expose maxima `1/4/5/10` with the canonical
+`experimental` / `approximate` warning, and all EGE speaking evidence is assisted so it cannot grant mastery credit.
+
+Six frozen-review/remediation rounds drove public-seam TDD across authoritative server time, GET bridge
+reconciliation, exact-final-deadline settlement, cross-tab identity, technical/skipped evidence, immutable asset
+TOCTOU, PostgreSQL lock order, paid-result settlement ambiguity, EGE score/mode honesty, oral a11y, duplicated
+contract ownership, distinct stage UUIDs, ordered offline journals, reload capture and canonical deadline evidence.
+One shared oral contract owns all `17`-minute/task/count/timing/maximum constants. A paid provider result whose
+durable finish cannot be confirmed retains its pending claim, returns
+`SPEAKING_EVALUATION_SETTLEMENT_UNKNOWN` and never falls through to another provider. A transient false-online
+browser signal now preserves the exact queued oral projection on explicit `NETWORK_ERROR` without observational GET
+or command loss, while authoritative conflicts still reconcile normally.
+
+The fifth review added durable cross-tab oral serialization and rollback, monotonic-only advancement after a server
+clock sample, real-time `TOO_EARLY` journal retention, stale-recorder cancellation/rebinding, canonical technical
+codes, PostgreSQL EGE assistance provenance, legacy-shadow lifecycle guards, terminal speaking retry honesty and
+owner→EGE→Speaking subscription-checked provider claim/settlement. Public RED groups were `29/24/5`, `20/17/3`,
+`17/15/2`, post-submit claim `21/20/1`, PG lock order `3/2/1`, and the browser later exposed one late written refresh
+overwriting the oral timer (`11/10/1`). All are GREEN; the final oral/UI contour is `31/31` and fresh full Chromium
+is green.
+
+The fourth public-seam RED was `47 total / 41 pass / 6 intended fail`: candidate-authored historical time,
+cross-attempt local restore, final offline stage-plus-submit recovery, UI attempt binding and executable EGE OAS
+semantics all failed first. GREEN is `47/47`: server stage mutations use only repository time; local envelopes are
+exact-attempt-bound and mismatch-purged; the durable journal restores and replays final stage then submit; OpenAPI
+discriminates ordinary `automatic_training` from EGE `experimental` and preserves EGE technical needs-retry/null.
+
+Fresh disposable PostgreSQL project `easyboost-postgres-integration-30492` applied migrations `001–055` and passed
+all `48/48` registered tests in `12771.6974 ms`; Compose removed container/volume/network and exact project-label
+filters are empty. Docker 28.0.1 is stopped with its daemon pipe absent. Pre-documentation gates are green: full unit
+`1808 total / 1760 pass / 48` expected PostgreSQL skips / `0 fail` in `31976.457 ms`; lint; executable/generated
+OpenAPI; check (`422` JS / `211` handlers / `126` names); build (`485` assets / `645.6 KB` shell JS / `12` lazy
+chunks); dedicated EGE, fresh full and adaptive Chromium; secrets (`1193` tracked files); history (`312` commits);
+diff-check; and fresh authorized production audit (`0 vulnerabilities`). Performance operational metrics pass at LCP
+`300 ms`, CLS `0`, INP `96 ms`, AI loading `40 ms`, adaptive overview `89 ms` and preview `32 ms`; only the
+documented base first-load budget remains `181.5 KB > 150 KB` (Ticket04 baseline `180.7 KB`), while EGE remains
+lazy. No provider/paid call, install, push, deploy or Ticket 06 occurred. Ticket 05 remains `in-progress` pending
+post-documentation gates, strict hardcoded-allowlist freeze, fresh literal `ZERO_FINDINGS`×2 and metadata closeout;
+the sole local commit is held for the coordinator. Ticket 99 remains the explicit reminder to expand the verified
+authored bank substantially.
+
+Ticket 05 final post-documentation gates preserve full unit `1808 total / 1760 pass / 48` expected PostgreSQL skips /
+`0 fail` in `32646.1498 ms`; lint, executable/generated OpenAPI, check (`422` JS / `211` handlers / `126` names),
+diff-check, secrets `1193`, history `312`, build (`485` assets / `645.6 KB` shell JS / `12` lazy chunks), dedicated
+EGE, fresh full and adaptive Chromium are green. The last browser RED `0/1` prevents a same-cursor journal write
+from repeatedly cancelling a live recording while preserving cancel-before-adopt for a real remote cursor change.
+Performance operational metrics pass at LCP `372 ms`, CLS `0`, INP `112 ms`, AI loading `45 ms`, adaptive overview
+`107 ms` and preview `41 ms`; the inherited first-load baseline alone remains `181.5 KB > 150 KB`. Fresh live
+PostgreSQL migrations `001–055`, `48/48`, cleanup-empty evidence and authorized production audit `0 vulnerabilities`
+remain exact. Docker remains stopped with pipe absent; Ticket 99 remains intact. The scoped candidate is ready for a
+strict hardcoded raw-byte freeze and two fresh literal `ZERO_FINDINGS` reviews.
+
+The sixth frozen review found seven final browser/contract seams: cross-tab observational GET/write feedback,
+competing microphone capture, an offline navigation resetting the monotonic epoch, missing EGE
+`methodicallyValidated:false`, a per-second live-region announcement, the task-42 composite constrained to half a
+mobile grid, and an oral E2E that stopped at task 39 preparation. Public RED was oral runner/media/UI `42 total / 37
+pass / 5 intended fail` plus executable assessment-contract `0/1`; GREEN is `42/42`, `1/1`, and the combined focused
+contour `65/65`. A non-writing `refreshLocal` projection, one held owner/attempt recorder Web Lock, cross-navigation
+`performance.timeOrigin + performance.now()` authority, the shared canonical speaking warning contract, quiet stage
+text and a full-width verified composite close those seams. The expanded Chromium path completes all exact `11`
+responses across tasks `39–42`, reload/offline/reconnect, one cross-tab recorder owner with bounded GETs, 320/1440
+layouts and 44 px controls, submit, exactly `11` explicit WAV uploads and four approximate evaluations; safe restore,
+GET and reconnect still perform zero provider work.
+
+Latest non-PostgreSQL gates are full unit `1813 total / 1765 pass / 48` expected skips / `0 fail` in `37472.5589 ms`;
+lint; executable/generated OpenAPI; check (`422` JS / `211` handlers / `126` names); build (`485` assets / `645.6 KB`
+shell JS / `12` lazy chunks); dedicated EGE, full and adaptive Chromium; secrets `1193`; history `312`; and
+allowlist-scoped diff-check. Performance remains operationally green at LCP `300 ms`, CLS `0`, INP `96 ms`, AI
+loading `42 ms`, adaptive overview `95 ms` and preview `34 ms`; the inherited first-load budget alone remains `181.6
+KB > 150 KB`. The final remediation changed no persistence or migrations, so the fresh disposable PostgreSQL
+`001–055`, `48/48`, cleanup-empty evidence remains exact; Docker is stopped. Authorized production audit remains `0`
+because manifests did not change. No provider/paid call, install, push, deploy or Ticket 06 occurred. Ticket 99's
+verified-bank expansion reminder remains intact. Ticket 05 stays `in-progress` until a new strict allowlist freeze,
+fresh literal `ZERO_FINDINGS`×2, metadata closeout and the coordinator-held local commit.
+
+The fourth final frozen review found six reachable release seams: stale asynchronous oral initialization, durable
+`prepared` without current device assets, account deletion between WAV persistence and journal commit, a closed tab
+stuck beyond a per-response deadline, automatic paid JSON repair for malformed EGE output, and broad oral-recording
+OAS status invariants. Public RED was oral/domain/UI `47 total / 43 pass / 4 intended fail`, paid-call `0/1`, and OAS
+`0/1`; focused GREEN is `102/102`. Oral readiness now always repeats preflight after reload, initialization and late
+recording completion are epoch/owner/attempt bound, every journal commit is owner-incarnation guarded with exact WAV
+rollback, and server reads deterministically settle missed stages as `response_timeout` after a shared five-second
+grace. EGE malformed output receives no automatic second paid call, and OAS binds every status/digest/duration/code
+and position/task/response maximum.
+
+Fresh non-PostgreSQL gates are full unit `1818 total / 1770 pass / 48` expected PostgreSQL skips / `0 fail` in
+`34721.7847 ms`; lint; executable/generated OpenAPI; check (`422` JS / `211` handlers / `126` names); build (`485`
+assets / `645.6 KB` shell JS / `12` lazy chunks); dedicated EGE, full and adaptive Chromium; secrets `1193`; history
+`312`; and diff-check. Performance operational gates pass at LCP `312 ms`, CLS `0`, INP `96 ms`, AI `39 ms`, overview
+`101 ms` and preview `37 ms`; only inherited first-load `181.6 KB > 150 KB` remains. Live PostgreSQL first exposed
+clock-parity RED `47/48`; after the named-attempt GET shared the injected contract clock, fresh disposable project
+`easyboost-postgres-integration-32420` applied migrations `001–055` and passed literal `48/48` in `13414.0556 ms`.
+Cleanup and exact project-label filters for pre-escalation `25548`, RED `34240` and GREEN `32420` are empty; Docker is
+stopped with pipe absent. No provider/paid call, install, push, deploy or Ticket 06 occurred. Ticket 99's verified-bank
+expansion reminder remains intact; Ticket 05 remains `in-progress` pending final post-doc gates and fresh literal
+`ZERO_FINDINGS`×2.
+
+Final post-documentation verification preserves full unit `1818 total / 1770 pass / 48` expected PostgreSQL skips /
+`0 fail` in `34683.5678 ms`; lint, executable/generated OpenAPI, check (`422` JS / `211` handlers / `126` names),
+build (`485` assets / `645.6 KB` shell JS / `12` lazy chunks), secrets `1193`, history `312`, diff-check, fresh full and
+adaptive Chromium are green. Performance operational metrics pass at LCP `332 ms`, CLS `0`, INP `104 ms`, AI `48
+ms`, overview `99 ms` and preview `38 ms`; the inherited first-load `181.6 KB > 150 KB` is the only performance
+exit. Fresh PostgreSQL migrations `001–055`, literal `48/48` and cleanup-empty evidence remain exact; Docker is
+stopped. Next is the strict hardcoded allowlist freeze and two fresh independent literal `ZERO_FINDINGS` reviews.
+
+The fifth-final frozen review exposed five last cross-layer contracts: provider authorization could outlive the
+route subscription/voice-consent snapshot, an EGE bridge resync could switch the accent pinned to an existing full
+Speaking projection, an immutable stage replay could regress the live oral cursor and strand a second WAV, safe GET
+wording denied its deterministic deadline reconciliation, and OpenAPI admitted impossible oral cursor/ledger
+combinations. Exact grouped RED was full unit `1822 total / 1768 pass / 48` expected PostgreSQL skips / `6 fail`,
+followed by one executable OAS RED for a future ledger key. Owner-serialized provider claims now recheck current
+Base plus version-bound voice consent only before new/recovered paid work; non-paying frozen replay remains safe.
+The first bridge accent pin is immutable, immutable command replay adopts a fresh authoritative attempt and retires
+only an unbound exact WAV, while generated OAS encodes all eleven exact oral states and ledger prefixes.
+
+Focused GREEN is `6/6`, expanded oral/EGE/Speaking/HTTP is `106/106`, lock/offline is `66/66`, and full unit is
+`1822 total / 1774 pass / 48` expected PostgreSQL skips / `0 fail` in `34746.758 ms`. Lint, executable/generated
+OpenAPI, check (`422` JS), build (`485` assets / `12` lazy chunks), dedicated EGE, full and adaptive Chromium,
+secrets `1193`, history `312` and diff-check are green. Performance passes LCP `316 ms`, CLS `0`, INP `104 ms`, AI
+`54 ms`, overview `100 ms` and preview `36 ms`; the inherited first-load JS baseline alone remains `181.5 KB > 150
+KB`. The sandbox-denied project `easyboost-postgres-integration-9360` left only an isolated disposable volume,
+which exact scoped cleanup removed. Authorized project `easyboost-postgres-integration-30608` applied migrations
+`001–055` and passed literal `48/48` in `13638.3602 ms`; exact project-label filters are empty for both identities.
+Docker is stopped with pipe absent. No provider/paid call, install, push, deploy or Ticket 06 occurred; unchanged
+manifests preserve audit `0 vulnerabilities`, and Ticket 99's verified-bank expansion reminder remains intact.
+Ticket 05 stays `in-progress` pending post-documentation gates, a new strict complete allowlist freeze and fresh
+literal `ZERO_FINDINGS`×2; the sole commit remains held for the coordinator.
+
+Post-documentation gates are full unit `1822 total / 1774 pass / 48` expected PostgreSQL skips / `0 fail` in
+`35079.8717 ms`; lint; executable/generated OpenAPI; check (`422` JS / `211` handlers / `126` names); build (`485`
+assets / `645.6 KB` shell JS / `12` lazy chunks); dedicated EGE, full and adaptive Chromium; secrets `1193`;
+history `312`; and diff-check. Performance operational metrics pass at LCP `300 ms`, CLS `0`, INP `96 ms`, AI
+`50 ms`, overview `107 ms` and preview `41 ms`; only the inherited initial-JS baseline remains `181.5 KB > 150
+KB`. The scoped candidate is ready for a new strict complete allowlist freeze and fresh literal
+`ZERO_FINDINGS`×2; metadata closeout and the sole local commit remain held.
+
+The sixth-final Ticket 05 remediation closed post-lock claim time, frozen paid-result recovery, terminal local-audio
+cleanup and exact API/OAS state correlation. The first grouped RED was `121` total / `68` pass / `48` expected
+PostgreSQL skips / `5` fail; after a test-only runner fixture correction, the exact journal seam was RED `26/25/1`,
+and a later executable OAS seam was RED `0/1` for completed-attempt/pending-speaking drift. File and PostgreSQL now
+sample authorization time after their owner serialization boundary. Exact already-settled semantic and full
+pronunciation requests replay without renewed subscription/consent and without provider work; anything new or
+recoverable still requires current Base and version-bound voice consent. Terminal reconciliation removes every
+queued WAV not present in the authoritative ledger, runtime rejects impossible task/response/duration tuples at
+validation, and executable OpenAPI correlates speaking item/status/score, attempt lifecycle and available results.
+Focused GREEN is `142` total / `94` pass / `48` expected PostgreSQL skips / `0` fail. Full unit is `1823 total /
+1775 pass / 48` expected PostgreSQL skips / `0 fail` in `36102.6334 ms`; lint, generated/executable OpenAPI, check
+(`422` JS / `211` handlers / `126` names), build (`485` assets / `645.6 KB` / `12` lazy), dedicated EGE, full
+sequential and adaptive Chromium, secrets `1193`, history `312`, diff-check and fresh authorized production audit
+(`0 vulnerabilities`) are green. Performance is LCP `316 ms`, CLS `0`, INP `96 ms`, AI `44 ms`, overview `100 ms`
+and preview `40 ms`; only inherited first-load JS `181.5 KB > 150 KB` remains. Disposable PostgreSQL project
+`easyboost-postgres-integration-24028` applied migrations `001–055`, passed `48/48` in `13548.6759 ms`, removed its
+container/volume/network and left all exact-label filters empty. Docker is stopped with pipe absent. Ticket 05 is
+still `in-progress` until post-doc gates, a strict complete allowlist freeze, fresh literal `ZERO_FINDINGS`×2,
+metadata closeout and the sole local commit. No provider/paid call, install, push, deploy or Ticket 06 occurred;
+Ticket 99 remains the explicit reminder to expand the verified authored bank substantially.
+
+The final Ticket 05 post-documentation rerun is full unit `1823 total / 1775 pass / 48` expected PostgreSQL skips /
+`0 fail` in `34909.5975 ms`; lint; generated/executable OpenAPI; check (`422` JS / `211` handlers / `126` names);
+build (`485` assets / `645.6 KB` shell JS / `12` lazy chunks); dedicated EGE, full sequential and adaptive
+Chromium; secrets `1193`; history `312`; and diff-check. Performance operational metrics pass at LCP `320 ms`,
+CLS `0`, INP `104 ms`, AI `51 ms`, overview `117 ms` and preview `40 ms`; only the inherited first-load JavaScript
+baseline remains `181.5 KB > 150 KB`. Docker and provider processes remain stopped. The candidate proceeds to a
+strict complete raw-byte allowlist freeze and fresh literal `ZERO_FINDINGS`×2; metadata closeout and the sole local
+commit remain held.
+
+Ticket 05 final closeout supersedes its historical checkpoints above. Fresh independent final7 Standards and Spec
+reviews both returned literal `ZERO_FINDINGS` on the identical frozen `59`-path candidate. Each reproduced
+PRE=POST with `59` unique paths, `0` missing, `4,436,814` raw bytes and SHA-256
+`d3bf82bddcd00a7288167eab8ea8865b1e13884c8d0d01bd8a462299aef07679`; HEAD/base/merge-base were all
+`cf6b15cc725ed4d580d5bba1aa0d96feedd7b9b4` and the candidate index was empty. Ticket 05 is `done`; Ticket 06 is
+next and remains untouched. The sole local Ticket05 commit is coordinator-held. No provider/paid call, install,
+push or deploy occurred, Docker is stopped, and Ticket 99 remains the explicit reminder to expand the verified
+authored bank substantially.
 
 Ticket 04 final closeout supersedes its historical checkpoints below. Brand-new final17 Standards and Spec reviews
 both returned literal `ZERO_FINDINGS` on identical frozen 65-path identity
@@ -671,7 +851,7 @@ read-only literal `ZERO_FINDINGS` reviews. Ticket 99 remains the explicit bank-e
 | 02 | Owner-bound попытка, строгие таймеры и persistence/API | done |
 | 03 | Единый письменный runner заданий 1–36 | done |
 | 04 | Задания 37–38 и честная предварительная оценка | done |
-| 05 | Устная часть 1–4 и предварительная оценка | ready-for-agent |
+| 05 | Устная часть 1–4 и предварительная оценка | in-progress |
 | 06 | Итог 82, прогноз, разбор и тренировочный повтор | ready-for-agent |
 | 07 | PWA/E2E/release hardening полного пробника | ready-for-agent |
 | 99 | Существенно расширить проверенный авторский банк | needs-triage; после 07 |

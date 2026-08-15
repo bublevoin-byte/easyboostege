@@ -13,6 +13,10 @@ import { SPEAKING_TASK3_CATALOG } from '../public/content/speaking/task3-v1.js';
 import { SPEAKING_TASK4_CATALOG } from '../public/content/speaking/task4-v1.js';
 import { createFileRepository } from '../storage/file-repository.js';
 import { buildSpeakingLearningAttempt } from '../speaking/learning-loop.js';
+import { getEgeMockForm } from '../ege-mock/catalog.js';
+import { AUTOMATIC_ASSESSMENT_PUBLIC_CONTRACT } from '../shared/automatic-assessment-contract.js';
+
+const TEST_PRIVACY_POLICY_VERSION = '2026-08-02-voice-v1';
 
 function semanticTask2({ confidence = 0.95 } = {}) {
   return {
@@ -142,6 +146,14 @@ async function withEvaluationServer(run, options = {}) {
   const other = await repository.createTelegramUser(9_100_002, 'Evaluation Other');
   await repository.grantDays(9_100_001, 30, 'Evaluation Owner');
   await repository.grantDays(9_100_002, 30, 'Evaluation Other');
+  await repository.setPrivacyConsent(owner, {
+    text_processing: false, voice_processing: true,
+    policy_version: TEST_PRIVACY_POLICY_VERSION,
+  });
+  await repository.setPrivacyConsent(other, {
+    text_processing: false, voice_processing: true,
+    policy_version: TEST_PRIVACY_POLICY_VERSION,
+  });
   const catalog = ({
     1: SPEAKING_TASK1_CATALOG,
     2: SPEAKING_TASK2_CATALOG,
@@ -155,13 +167,62 @@ async function withEvaluationServer(run, options = {}) {
     4: 'assignSpeakingTask4Session',
   })[taskType];
   let session;
-  if (options.fullSection) {
+  if (options.egeMock) {
+    const form = getEgeMockForm('ege-en-2026-form-1', 1);
+    const started = await repository.startEgeMockAttempt(owner, {
+      formId: form.id, formRevision: form.revision, catalogFingerprint: form.fingerprint,
+      idempotencyKey: '70000000-0000-4000-8000-000000000001', requestHash: '7'.repeat(64),
+    }, { now: () => new Date('2026-08-06T06:00:00.000Z') });
+    let attempt = started.attempt;
+    ({ attempt } = await repository.submitEgeMockWritten(owner, attempt.id, {
+      expectedRevision: attempt.revision,
+      idempotencyKey: '70000000-0000-4000-8000-000000000002', requestHash: '8'.repeat(64),
+    }, { now: () => new Date('2026-08-06T06:01:00.000Z') }));
+    ({ attempt } = await repository.startEgeMockOral(owner, attempt.id, {
+      expectedRevision: attempt.revision,
+      idempotencyKey: '70000000-0000-4000-8000-000000000003', requestHash: '9'.repeat(64),
+    }, { now: () => new Date('2026-08-06T06:02:00.000Z') }));
+    let mutationIndex = 4;
+    const counts = { 39: 1, 40: 4, 41: 5, 42: 1 };
+    for (const position of [39, 40, 41, 42]) {
+      for (let responseNumber = 1; responseNumber <= counts[position]; responseNumber += 1) {
+        const stage = async (action, at, recording = null) => {
+          const result = await repository.advanceEgeMockOralStage(owner, attempt.id, {
+            expectedRevision: attempt.revision, action, position, responseNumber, recording,
+            idempotencyKey: `70000000-0000-4000-8000-${String(mutationIndex).padStart(12, '0')}`,
+            requestHash: String(mutationIndex % 10).repeat(64),
+          }, { now: () => new Date(at) });
+          mutationIndex += 1;
+          attempt = result.attempt;
+        };
+        await stage('advance', attempt.updatedAt || '2026-08-06T06:02:00.000Z');
+        if (attempt.oralProgress.phase === 'preparing') {
+          await stage('advance', attempt.oralProgress.stageDeadlineAt);
+        }
+        await stage('complete', attempt.oralProgress.stageDeadlineAt, {
+          recordingId: `71000000-0000-4000-8000-${String(position * 10 + responseNumber).padStart(12, '0')}`,
+          status: 'completed',
+          durationSeconds: { 39: 90, 40: 20, 41: 40, 42: 180 }[position],
+          sha256: String(position % 10).repeat(64),
+        });
+      }
+    }
+    ({ attempt } = await repository.submitEgeMockOral(owner, attempt.id, {
+      expectedRevision: attempt.revision,
+      idempotencyKey: '70000000-0000-4000-8000-000000000099', requestHash: 'a'.repeat(64),
+    }, { now: () => new Date('2026-08-06T06:16:30.000Z') }));
+    session = await repository.syncEgeMockSpeakingBridge(owner, attempt.id, {
+      now: () => new Date('2026-08-06T06:16:31.000Z'),
+    });
+  } else if (options.fullSection) {
     session = await repository.assignFullSpeakingSession(owner, {
       catalogs: [
         SPEAKING_TASK1_CATALOG, SPEAKING_TASK2_CATALOG,
         SPEAKING_TASK3_CATALOG, SPEAKING_TASK4_CATALOG,
       ],
-      accentProfile: { locale: 'en-GB', revision: 1, effective_at: '2026-08-06T09:59:00.000Z' },
+      accentProfile: options.egeMock
+        ? null : { locale: 'en-GB', revision: 1, effective_at: '2026-08-06T09:59:00.000Z' },
+      ...(options.egeMock ? { selectionReason: 'ege_mock' } : {}),
       now: new Date('2026-08-06T10:00:00.000Z'),
     });
     const counts = { 1: 1, 2: 4, 3: 5, 4: 1 };
@@ -264,13 +325,19 @@ async function withEvaluationServer(run, options = {}) {
   let budgetBlocked = Boolean(options.budgetBlocked);
   let rateBlocked = Boolean(options.rateBlocked);
   const providerReplies = Array.isArray(options.providerReplies) ? [...options.providerReplies] : null;
-  const provider = { name: 'grok', model: 'fake-xai-model' };
+  const providers = Array.from({ length: options.providerCount || 1 }, (_, index) => ({
+    name: index === 0 ? 'grok' : `fallback-${index}`,
+    model: index === 0 ? 'fake-xai-model' : `fake-fallback-model-${index}`,
+  }));
+  let providersConfigured = options.providersConfigured !== false;
+  let accessSubscriptionActive = true;
+  let accessVoiceConsent = true;
   const providerClient = {
     limitsFor: () => ({ requestsPerHour: 20 }),
-    aiProviders: () => [provider],
+    aiProviders: () => (providersConfigured ? providers : []),
     askWithFallback: async () => { throw new Error('unused'); },
-    async askProvider(_provider, system, user, operation, requestOptions) {
-      providerCalls.push({ system, user, operation, options: requestOptions });
+    async askProvider(provider, system, user, operation, requestOptions) {
+      providerCalls.push({ provider: provider.name, system, user, operation, options: requestOptions });
       const configuredReply = providerReplies?.length ? providerReplies.shift() : options.providerReply;
       if (configuredReply instanceof Error) throw configuredReply;
       return {
@@ -279,10 +346,32 @@ async function withEvaluationServer(run, options = {}) {
         completionTokens: 50,
       };
     },
-    async parseWithOneRepair({ text, parse }) {
-      return { value: parse(text), repair: null };
+    async parseWithOneRepair({ provider, text, parse, system, user, operation, responseFormat }) {
+      try { return { value: parse(text), repair: null }; }
+      catch (error) {
+        if (!options.productionRepair) throw error;
+        const repaired = await providerClient.askProvider(
+          provider, system, user, operation, { responseFormat },
+        );
+        return { value: parse(repaired.text), repair: { provider, usage: repaired, reason: error.code } };
+      }
     },
   };
+  const routeRepository = Object.create(repository);
+  if (options.beforeSpeakingClaim) {
+    routeRepository.claimSpeakingEvaluation = async (...args) => {
+      await options.beforeSpeakingClaim({ repository, owner, args });
+      return repository.claimSpeakingEvaluation(...args);
+    };
+  }
+  if (options.failSuccessfulFinish) {
+    routeRepository.finishSpeakingAttempt = async (attemptId, outcome, context) => {
+      if (['completed', 'needs_retry'].includes(outcome?.status)) {
+        throw Object.assign(new Error('speaking persistence unavailable'), { code: 'STORAGE_UNAVAILABLE' });
+      }
+      return repository.finishSpeakingAttempt(attemptId, outcome, context);
+    };
+  }
   const app = express();
   app.use(express.json());
   app.use(createAiRoutes({
@@ -295,6 +384,7 @@ async function withEvaluationServer(run, options = {}) {
       },
     },
     access: {
+      privacyPolicyVersion: TEST_PRIVACY_POLICY_VERSION,
       createOperationLimiter: () => (_req, res, next) => (
         rateBlocked
           ? res.status(429).json({ error: { code: 'RATE_LIMITED' } })
@@ -305,13 +395,22 @@ async function withEvaluationServer(run, options = {}) {
           ? res.status(503).json({ error: { code: 'AI_BUDGET_EXHAUSTED' } })
           : next()
       ),
-      requireActiveSubscription: (_req, _res, next) => next(),
-      requirePrivacyConsent: () => (_req, _res, next) => next(),
+      requireActiveSubscription: (_req, res, next) => (
+        accessSubscriptionActive
+          ? next() : res.status(403).json({ error: { code: 'SUBSCRIPTION_REQUIRED' } })
+      ),
+      requirePrivacyConsent: () => (_req, res, next) => (
+        accessVoiceConsent
+          ? next() : res.status(403).json({ error: { code: 'PRIVACY_CONSENT_REQUIRED' } })
+      ),
       hasAiBudget: async () => true,
     },
-    db: repository,
+    db: routeRepository,
     providerClient,
   }).router);
+  app.use((error, _req, res, _next) => res.status(
+    ['SUBSCRIPTION_REQUIRED', 'PRIVACY_CONSENT_REQUIRED'].includes(error?.code) ? 403 : 500,
+  ).json({ error: { code: error?.code || 'INTERNAL_ERROR' } }));
   const server = app.listen(0, '127.0.0.1');
   await new Promise((resolve) => server.once('listening', resolve));
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -328,6 +427,9 @@ async function withEvaluationServer(run, options = {}) {
       owner, other, session, request, providerCalls, repository, assessmentKeys,
       setBudgetBlocked(value) { budgetBlocked = Boolean(value); },
       setRateBlocked(value) { rateBlocked = Boolean(value); },
+      setProvidersConfigured(value) { providersConfigured = Boolean(value); },
+      setAccessSubscriptionActive(value) { accessSubscriptionActive = Boolean(value); },
+      setAccessVoiceConsent(value) { accessVoiceConsent = Boolean(value); },
     });
   } finally {
     server.closeAllConnections();
@@ -356,6 +458,174 @@ test('submitted full Speaking task is evaluated only from its pinned owner-bound
     assert.equal(stored.source_task_ref, session.assignments[1].task_id);
     assert.equal(stored.assistance_used, false);
   }, { taskType: 2, fullSection: true });
+});
+
+test('EGE speaking recovery requires explicit paid-repeat acknowledgement before a second provider call', async () => {
+  await withEvaluationServer(async ({ owner, session, request, assessmentKeys, providerCalls }) => {
+    const body = {
+      taskType: 2, sessionMode: 'full_section', sessionId: session.id,
+      pronunciationAssessmentKeys: assessmentKeys,
+    };
+    const uncertain = await request(owner, body);
+    assert.equal(uncertain.status, 503);
+    assert.equal(providerCalls.length, 1);
+
+    const blocked = await request(owner, body);
+    assert.equal(blocked.status, 409);
+    assert.equal(blocked.body.error.code, 'SPEAKING_PROVIDER_REPEAT_ACKNOWLEDGEMENT_REQUIRED');
+    assert.equal(providerCalls.length, 1, 'ordinary retry never repeats an ambiguous paid EGE call');
+
+    const acknowledged = await request(owner, {
+      ...body, acknowledgePossibleProviderRepeat: true,
+    });
+    assert.equal(acknowledged.status, 200);
+    assert.deepEqual({
+      mode: acknowledged.body.assessment.mode,
+      scoreKind: acknowledged.body.assessment.scoreKind,
+      methodicallyValidated: acknowledged.body.assessment.methodicallyValidated,
+      warning: acknowledged.body.assessment.warning,
+    }, { ...AUTOMATIC_ASSESSMENT_PUBLIC_CONTRACT, methodicallyValidated: false });
+    assert.equal(providerCalls.length, 2);
+  }, {
+    taskType: 2, fullSection: true, egeMock: true,
+    providerReplies: [new Error('provider transport uncertain'), JSON.stringify(semanticTask2())],
+  });
+});
+
+test('EGE semantic provider claim rechecks current voice consent inside the owner mutation', async () => {
+  let revoked = false;
+  await withEvaluationServer(async ({ owner, session, request, assessmentKeys, providerCalls }) => {
+    const response = await request(owner, {
+      taskType: 2, sessionMode: 'full_section', sessionId: session.id,
+      pronunciationAssessmentKeys: assessmentKeys,
+    });
+    assert.equal(response.status, 403);
+    assert.equal(response.body.error.code, 'PRIVACY_CONSENT_REQUIRED');
+    assert.equal(providerCalls.length, 0, 'revocation after middleware still prevents a paid call');
+  }, {
+    taskType: 2, fullSection: true, egeMock: true,
+    async beforeSpeakingClaim({ repository, owner }) {
+      if (revoked) return;
+      revoked = true;
+      await repository.setPrivacyConsent(owner, {
+        text_processing: false, voice_processing: false,
+        policy_version: TEST_PRIVACY_POLICY_VERSION,
+      });
+    },
+  });
+});
+
+test('a frozen EGE semantic result replays after access revocation without another provider call', async () => {
+  await withEvaluationServer(async ({
+    owner, session, request, assessmentKeys, providerCalls, repository,
+    setAccessSubscriptionActive, setAccessVoiceConsent,
+  }) => {
+    const body = {
+      taskType: 2, sessionMode: 'full_section', sessionId: session.id,
+      pronunciationAssessmentKeys: assessmentKeys,
+    };
+    const completed = await request(owner, body);
+    assert.equal(completed.status, 200);
+    assert.equal(providerCalls.length, 1);
+    await repository.setPrivacyConsent(owner, {
+      text_processing: false, voice_processing: false,
+      policy_version: TEST_PRIVACY_POLICY_VERSION,
+    });
+    setAccessSubscriptionActive(false);
+    setAccessVoiceConsent(false);
+
+    const replay = await request(owner, body);
+    assert.equal(replay.status, 200,
+      'route access middleware cannot strand an exact already-paid result replay');
+    assert.equal(replay.body.attemptId, completed.body.attemptId);
+    assert.deepEqual(replay.body.review, completed.body.review);
+    assert.equal(providerCalls.length, 1);
+  }, { taskType: 2, fullSection: true, egeMock: true });
+});
+
+test('invalid EGE provider output is recoverable only after explicit paid-repeat acknowledgement', async () => {
+  await withEvaluationServer(async ({
+    owner, session, request, assessmentKeys, providerCalls, repository,
+  }) => {
+    const body = {
+      taskType: 2, sessionMode: 'full_section', sessionId: session.id,
+      pronunciationAssessmentKeys: assessmentKeys,
+    };
+    const invalid = await request(owner, body);
+    assert.equal(invalid.status, 502);
+    assert.equal(invalid.body.error.code, 'AI_RESPONSE_INVALID');
+    const failedAttempt = (await repository.exportUserData(owner)).speaking_attempts[0];
+    assert.equal(providerCalls.length, 1);
+
+    const blocked = await request(owner, body);
+    assert.equal(blocked.status, 409);
+    assert.equal(blocked.body.error.code, 'SPEAKING_PROVIDER_REPEAT_ACKNOWLEDGEMENT_REQUIRED');
+    assert.equal(providerCalls.length, 1);
+
+    const recovered = await request(owner, {
+      ...body, acknowledgePossibleProviderRepeat: true,
+    });
+    assert.equal(recovered.status, 200);
+    assert.equal(recovered.body.attemptId, Number(failedAttempt.id));
+    assert.equal(providerCalls.length, 2);
+    assert.equal((await repository.exportUserData(owner)).speaking_attempts.length, 1);
+  }, {
+    taskType: 2, fullSection: true, egeMock: true,
+    providerReplies: ['not valid json', JSON.stringify(semanticTask2())],
+  });
+});
+
+test('invalid EGE output never triggers an automatic paid JSON repair', async () => {
+  await withEvaluationServer(async ({ owner, session, request, assessmentKeys, providerCalls }) => {
+    const invalid = await request(owner, {
+      taskType: 2, sessionMode: 'full_section', sessionId: session.id,
+      pronunciationAssessmentKeys: assessmentKeys,
+    });
+    assert.equal(invalid.status, 502);
+    assert.equal(invalid.body.error.code, 'AI_RESPONSE_INVALID');
+    assert.equal(providerCalls.length, 1,
+      'malformed EGE output freezes the claim before any same-provider repair call');
+  }, {
+    taskType: 2, fullSection: true, egeMock: true, productionRepair: true,
+    providerReplies: ['not valid json', JSON.stringify(semanticTask2())],
+  });
+});
+
+test('successful EGE provider response with ambiguous persistence never calls a fallback provider', async () => {
+  await withEvaluationServer(async ({ owner, session, request, assessmentKeys, providerCalls }) => {
+    const response = await request(owner, {
+      taskType: 2, sessionMode: 'full_section', sessionId: session.id,
+      pronunciationAssessmentKeys: assessmentKeys,
+    });
+    assert.equal(response.status, 503);
+    assert.equal(response.body.error.code, 'SPEAKING_EVALUATION_SETTLEMENT_UNKNOWN');
+    assert.deepEqual(providerCalls.map((call) => call.provider), ['grok']);
+  }, {
+    taskType: 2, fullSection: true, egeMock: true,
+    providerCount: 2, failSuccessfulFinish: true,
+  });
+});
+
+test('EGE speaking retries an unconfigured claim without a paid-repeat acknowledgement', async () => {
+  await withEvaluationServer(async ({
+    owner, session, request, assessmentKeys, providerCalls, setProvidersConfigured,
+  }) => {
+    const body = {
+      taskType: 2, sessionMode: 'full_section', sessionId: session.id,
+      pronunciationAssessmentKeys: assessmentKeys,
+    };
+    const unconfigured = await request(owner, body);
+    assert.equal(unconfigured.status, 503);
+    assert.equal(unconfigured.body.error.code, 'AI_NOT_CONFIGURED');
+    assert.equal(providerCalls.length, 0);
+
+    setProvidersConfigured(true);
+    const recovered = await request(owner, body);
+    assert.equal(recovered.status, 200);
+    assert.equal(providerCalls.length, 1);
+  }, {
+    taskType: 2, fullSection: true, egeMock: true, providersConfigured: false,
+  });
 });
 
 test('missing provider scoring facts fail closed before public learning mastery', async () => {
@@ -905,6 +1175,8 @@ test('OpenAPI exposes only server-owned speaking evaluation references and the a
   assert.match(operation, /needs_retry with a null score and no Voice Tutor pointer/u);
   assert.match(operation, /provider:\s*\{ type: string, nullable: true \}/u);
   assert.match(operation, /409[^\n]*same evaluation is already in progress/u);
+  assert.match(operation, /EGE mock result is experimental, approximate and not an expert conclusion/u);
+  assert.match(operation, /503[^\n]*SPEAKING_EVALUATION_SETTLEMENT_UNKNOWN/u);
   assert.match(specification, /SpeakingAutomaticAssessment:[\s\S]*methodicallyValidated:[^\n]*enum: \[false\]/u);
 });
 

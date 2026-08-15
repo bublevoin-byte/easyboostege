@@ -196,7 +196,10 @@ async function measureAiLoadingState(browser, baseUrl, jwtSecret) {
     const goal = await page.evaluate(async () => {
       const response = await fetch('/api/v1/adaptive-learning/goal', {
         method: 'PUT', credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
+        headers: {
+          'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID(),
+          'X-EasyBoost-Expected-Owner': 'perfuser',
+        },
         body: JSON.stringify({
           targetExam: 'ege_english', targetScore: 85,
           examDate: '2027-06-01', weeklyMinutes: 300,
@@ -209,7 +212,10 @@ async function measureAiLoadingState(browser, baseUrl, jwtSecret) {
       const request = async (pathName, body, key) => {
         const response = await fetch(pathName, {
           method: 'POST', credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
+          headers: {
+            'Content-Type': 'application/json', 'Idempotency-Key': key,
+            'X-EasyBoost-Expected-Owner': 'perfuser',
+          },
           body: JSON.stringify(body),
         });
         return { status: response.status, body: await response.json() };

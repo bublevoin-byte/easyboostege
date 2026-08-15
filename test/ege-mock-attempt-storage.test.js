@@ -11,6 +11,8 @@ import {
   assertEgeMockAssessmentRevisionExhaustionContract,
   assertEgeMockAssessmentRunSubscriptionContract,
   assertEgeMockAttemptRepositoryContract,
+  assertEgeMockOralStageRepositoryContract,
+  completeEgeMockOralStageLedger,
 } from './support/ege-mock-attempt-contract.js';
 
 const START_KEY = 'd250e109-6b0c-4ccd-9c47-c80bdf0627b4';
@@ -543,9 +545,9 @@ test('file EGE mock reveals no result before both parts and replays explicit ora
       expectedRevision: written.attempt.revision,
       idempotencyKey: 'e3739274-84fa-40d5-b88c-ac7479417a0a', requestHash: 'c'.repeat(64),
     }, { now: new Date('2026-08-13T07:00:00.000Z') });
+    const completedOral = await completeEgeMockOralStageLedger(repository, username, oral);
     const input = {
-      expectedRevision: oral.attempt.revision,
-      recordings: { 39: { recordingId: 'local-task-1', durationSeconds: 72 } },
+      expectedRevision: completedOral.attempt.revision,
       idempotencyKey: '56b7a17a-c515-43e6-9e46-63f93d29fec8', requestHash: 'd'.repeat(64),
     };
     const submitted = await repository.submitEgeMockOral(username, started.attempt.id, input, {
@@ -559,26 +561,94 @@ test('file EGE mock reveals no result before both parts and replays explicit ora
     assert.equal(submitted.receipt.operation, 'oral_submit');
     assert.deepEqual(submitted.receipt.orderedPositions, [39, 40, 41, 42]);
     assert.deepEqual(replay, { ...submitted, replayed: true });
-    assert.deepEqual(await repository.getEgeMockResult(username, started.attempt.id), {
+    const result = await repository.getEgeMockResult(username, started.attempt.id);
+    const automaticAssessment = {
+      ...AUTOMATIC_ASSESSMENT_PUBLIC_CONTRACT,
+      label: 'Предварительная автоматическая оценка',
+    };
+    const speakingItems = {
+      39: {
+        position: 39, maximum: 1, status: 'pending', score: null,
+        mode: 'experimental', scoreKind: 'approximate',
+      },
+      40: {
+        position: 40, maximum: 4, status: 'pending', score: null,
+        mode: 'experimental', scoreKind: 'approximate',
+      },
+      41: {
+        position: 41, maximum: 5, status: 'pending', score: null,
+        mode: 'experimental', scoreKind: 'approximate',
+      },
+      42: {
+        position: 42, maximum: 10, status: 'pending', score: null,
+        mode: 'experimental', scoreKind: 'approximate',
+      },
+    };
+    const speakingAssessment = {
+      status: 'pending', ...automaticAssessment,
+      retryAllowed: false, retryCount: 0, items: speakingItems,
+    };
+    assert.deepEqual(result, {
       available: true,
       state: 'assessment_pending',
       keysRevealed: true,
       writingAssessment: {
-        status: 'pending', assessmentRevision: 1,
-        ...AUTOMATIC_ASSESSMENT_PUBLIC_CONTRACT,
-        label: 'Предварительная автоматическая оценка',
+        status: 'pending', assessmentRevision: 1, ...automaticAssessment,
         retryAllowed: false, retryCount: 0,
       },
-      assessment: { status: 'not_started', retryAllowed: false, retryCount: 0 },
+      speakingAssessment,
+      assessment: { status: 'pending', retryAllowed: false, retryCount: 0 },
       result: {
         writing: {
-          status: 'pending', assessmentRevision: 1,
-          ...AUTOMATIC_ASSESSMENT_PUBLIC_CONTRACT,
-          label: 'Предварительная автоматическая оценка',
+          status: 'pending', assessmentRevision: 1, ...automaticAssessment,
           score: null, maximum: 20, items: [],
         },
+        speaking: { ...speakingAssessment, score: null, maximum: 20 },
       },
     });
+  } finally {
+    await repository.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('file EGE shadow Speaking session rejects legacy lifecycle mutations', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-ege-shadow-guard-'));
+  const repository = createFileRepository(path.join(directory, 'data.json'));
+  try {
+    const { username } = await repository.grantDays(9_260_269, 30, 'Mock shadow guard');
+    const form = getEgeMockForm(EGE_MOCK_FORM_ID, EGE_MOCK_FORM_REVISION);
+    let { attempt } = await repository.startEgeMockAttempt(username, {
+      formId: form.id, formRevision: form.revision, catalogFingerprint: form.fingerprint,
+      idempotencyKey: '31d32e4d-8efd-432c-88b4-94766b768abc', requestHash: '1'.repeat(64),
+    }, { now: new Date('2026-08-13T06:00:00.000Z') });
+    ({ attempt } = await repository.submitEgeMockWritten(username, attempt.id, {
+      expectedRevision: attempt.revision,
+      idempotencyKey: '31d32e4d-8efd-432c-88b4-94766b768abd', requestHash: '2'.repeat(64),
+    }, { now: new Date('2026-08-13T06:01:00.000Z') }));
+    ({ attempt } = await repository.startEgeMockOral(username, attempt.id, {
+      expectedRevision: attempt.revision,
+      idempotencyKey: '31d32e4d-8efd-432c-88b4-94766b768abe', requestHash: '3'.repeat(64),
+    }, { now: new Date('2026-08-13T07:00:00.000Z') }));
+    await repository.syncEgeMockSpeakingBridge(username, attempt.id, {
+      now: () => new Date('2026-08-13T07:00:01.000Z'),
+    });
+    for (const mutation of [
+      () => repository.advanceFullSpeakingSessionStage(username, attempt.id),
+      () => repository.completeFullSpeakingSessionResponse(username, attempt.id, {
+        taskType: 1, responseNumber: 1, responseStatus: 'technical_issue',
+        recordingDurationSeconds: 0, micCheck: 'skipped', localPlayback: false,
+        technicalIssueCode: 'recording_failed',
+      }),
+      () => repository.submitFullSpeakingSessionResult(
+        username, attempt.id, '31d32e4d-8efd-432c-88b4-94766b768abf',
+      ),
+      () => repository.claimFullSpeakingSessionAssessment(username, attempt.id, {
+        taskType: 1, responseNumber: 1, audioSha256: 'a'.repeat(64),
+        idempotencyKey: '31d32e4d-8efd-432c-88b4-94766b768ac0', durationSeconds: 10,
+      }),
+      () => repository.completeFullSpeakingSessionEvaluation(username, attempt.id, []),
+    ]) await assert.rejects(mutation(), { code: 'SPEAKING_FULL_EGE_LIFECYCLE_REQUIRED' });
   } finally {
     await repository.close();
     await fs.rm(directory, { recursive: true, force: true });
@@ -608,8 +678,9 @@ test('file EGE mock assessment retry is bounded and only server-state allowed', 
       expectedRevision: 1, idempotencyKey: '37390a64-a070-4c00-9dd7-2a58660aba64',
       requestHash: 'd'.repeat(64),
     }, { now: new Date('2026-08-13T07:00:00.000Z') });
+    const completedOral = await completeEgeMockOralStageLedger(repository, username, oral);
     await repository.submitEgeMockOral(username, started.attempt.id, {
-      expectedRevision: oral.attempt.revision, recordings: {},
+      expectedRevision: completedOral.attempt.revision,
       idempotencyKey: 'b7749c89-c2d9-44f1-8b45-b9b922ff73ee', requestHash: 'e'.repeat(64),
     }, { now: new Date('2026-08-13T07:05:00.000Z') });
     await repository.markEgeMockAssessmentRetryable(username, started.attempt.id, {
@@ -673,6 +744,16 @@ test('file EGE mock lifecycle matches the shared repository contract', async () 
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-ege-mock-shared-'));
   const repository = createFileRepository(path.join(directory, 'data.json'));
   try { await assertEgeMockAttemptRepositoryContract(assert, repository, 9_260_300); }
+  finally {
+    await repository.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('file EGE oral stages match the shared repository contract', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-ege-oral-shared-'));
+  const repository = createFileRepository(path.join(directory, 'data.json'));
+  try { await assertEgeMockOralStageRepositoryContract(assert, repository, 9_260_310); }
   finally {
     await repository.close();
     await fs.rm(directory, { recursive: true, force: true });

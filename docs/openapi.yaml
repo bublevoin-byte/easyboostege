@@ -794,7 +794,7 @@ paths:
   /api/v1/speaking/full-sessions/{sessionId}/evaluation:
     post:
       summary: Persist the approximate 0-20 full-section result from exact scored attempts
-      description: Accepts only the current learner's completed or needs-retry Speaking attempts bound to this submitted full session and its four pinned task revisions. Missing recorded tasks, cross-owner attempts and mismatched task/catalog evidence fail closed. Skipped or technical tasks receive zero without a provider call. Replay returns the same canonical result.
+      description: Accepts only the current learner's completed or needs-retry Speaking attempts bound to this submitted full session and its four pinned task revisions. Missing recorded tasks, cross-owner attempts and mismatched task/catalog evidence fail closed. Ordinary training sessions score skipped or technical tasks as zero without a provider call; EGE experimental sessions preserve unavailable evidence as needs-retry with a null score and never invent a score or provider call. Replay returns the same canonical result.
       parameters:
         - { in: path, name: sessionId, required: true, schema: { type: string, format: uuid } }
       requestBody:
@@ -1971,6 +1971,7 @@ paths:
   /api/v1/ege-mocks/attempts/{attemptId}/oral/submit:
     post:
       summary: Submit the four ordered oral items and issue a server receipt
+      description: The body carries revision authority only. All eleven response records must already exist in the server-owned stage ledger; client-supplied recordings cannot complete or replace a stage.
       parameters:
         - { $ref: '#/components/parameters/ExpectedOwner' }
         - { $ref: '#/components/parameters/EgeMockAttemptId' }
@@ -1985,6 +1986,24 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { description: Attempt is absent or belongs to another owner }
         '409': { description: Revision, idempotency, owner or lifecycle conflict }
+  /api/v1/ege-mocks/attempts/{attemptId}/oral/stage:
+    post:
+      summary: Advance or complete one server-authoritative oral stage
+      description: The stage cursor and its preparation/recording deadline are owned by the exact attempt. A completed recording is immutable and bound to owner generation, attempt, form fingerprint, task, response and stage timestamps. Safe GET operations never claim work or call a provider; they may deterministically reconcile an elapsed server-owned deadline into technical evidence and the next cursor.
+      parameters:
+        - { $ref: '#/components/parameters/ExpectedOwner' }
+        - { $ref: '#/components/parameters/EgeMockAttemptId' }
+        - { $ref: '#/components/parameters/EgeMockIdempotencyKey' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/EgeMockOralStageRequest' } } }
+      responses:
+        '200': { description: Stage applied or exact immutable replay, headers: { X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' } }, content: { application/json: { schema: { $ref: '#/components/schemas/EgeMockMutationResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Attempt is absent or belongs to another owner }
+        '409': { description: Revision, idempotency, owner, deadline or stage conflict }
   /api/v1/ege-mocks/attempts/{attemptId}/assessment/run:
     post:
       summary: Explicitly dispatch or non-paying recover the pending provisional writing assessment
@@ -2462,7 +2481,7 @@ paths:
   /api/v1/ai/evaluate-speaking:
     post:
       summary: Extract bounded speaking facts and apply the versioned server-owned EGE combiner
-      description: The browser identifies an owner-bound catalog session and never sends an assignment, transcript or rubric. Official task 1–4 requests include the exact finalized owner/session/item-bound Azure assessment key or keys; partial or context-mismatched evidence is rejected before xAI. Tasks 2–3 retain and validate each item duration instead of trusting only the aggregate. Azure pronunciation events receive an explicit owner and aligned transcript span; task-4 overlap with a semantic scoring span returns needs_retry rather than charging the same event twice. Identical requests are claimed by an owner-bound evaluation fingerprint and replay the canonical attempt without another provider call. Canonical replay and deterministic acoustic preflight run before AI budget and rate gates. A five-minute claim lease recovers interrupted pending work, and transient xAI failure resumes the same attempt with the existing Azure evidence. The server assembles the transcript, xAI receives it as untrusted data under a strict JSON Schema and returns semantic/language facts only; it cannot return a score or phonetic fact. The server applies the 1/4/5/10 combiner. Low confidence returns needs_retry with a null score and no Voice Tutor pointer. Adaptive Speaking composition for tasks 1–4 is enabled only through a fresh owner-bound session assigned after the adaptive execution claim. Until the offline calibration gate and exact external methodological approval pass, every result is labelled automatic_training, approximate and methodicallyValidated=false.
+      description: The browser identifies an owner-bound catalog session and never sends an assignment, transcript or rubric. Official task 1–4 requests include the exact finalized owner/session/item-bound Azure assessment key or keys; partial or context-mismatched evidence is rejected before xAI. Tasks 2–3 retain and validate each item duration instead of trusting only the aggregate. Azure pronunciation events receive an explicit owner and aligned transcript span; task-4 overlap with a semantic scoring span returns needs_retry rather than charging the same event twice. Identical requests are claimed by an owner-bound evaluation fingerprint and replay the canonical attempt without another provider call. Canonical replay and deterministic acoustic preflight run before AI budget and rate gates. A five-minute claim lease recovers ordinary interrupted work. For an EGE mock, any recoverable outcome that may follow a paid provider start is frozen until acknowledgePossibleProviderRepeat=true explicitly accepts the possible duplicate-call risk. The server assembles the transcript, xAI receives it as untrusted data under a strict JSON Schema and returns semantic/language facts only; it cannot return a score or phonetic fact. The server applies the 1/4/5/10 combiner. Low confidence returns needs_retry with a null score and no Voice Tutor pointer. Adaptive Speaking composition for tasks 1–4 is enabled only through a fresh owner-bound session assigned after the adaptive execution claim. An EGE mock result is experimental, approximate and not an expert conclusion; ordinary training results remain automatic_training, approximate and methodicallyValidated=false.
       requestBody:
         required: true
         content:
@@ -2476,6 +2495,7 @@ paths:
                     sessionMode: { type: string, enum: [full_section] }
                     sessionId: { type: string, format: uuid }
                     pronunciationAssessmentKey: { type: string, format: uuid }
+                    acknowledgePossibleProviderRepeat: { type: boolean }
                   additionalProperties: false
                 - type: object
                   required: [taskType, sessionId, pronunciationAssessmentKeys]
@@ -2483,6 +2503,7 @@ paths:
                     taskType: { type: integer, enum: [2] }
                     sessionMode: { type: string, enum: [full_section] }
                     sessionId: { type: string, format: uuid }
+                    acknowledgePossibleProviderRepeat: { type: boolean }
                     pronunciationAssessmentKeys:
                       type: array
                       minItems: 4
@@ -2495,6 +2516,7 @@ paths:
                     taskType: { type: integer, enum: [3] }
                     sessionMode: { type: string, enum: [full_section] }
                     sessionId: { type: string, format: uuid }
+                    acknowledgePossibleProviderRepeat: { type: boolean }
                     pronunciationAssessmentKeys:
                       type: array
                       minItems: 5
@@ -2508,6 +2530,7 @@ paths:
                     sessionMode: { type: string, enum: [full_section] }
                     sessionId: { type: string, format: uuid }
                     pronunciationAssessmentKey: { type: string, format: uuid }
+                    acknowledgePossibleProviderRepeat: { type: boolean }
                   additionalProperties: false
       responses:
         '200':
@@ -2544,10 +2567,10 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { description: Owner-bound speaking session or assessment was not found }
-        '409': { description: Catalog revision, assessment context or final-evidence state is incompatible, or the same evaluation is already in progress }
+        '409': { description: Catalog revision, assessment context or final-evidence state is incompatible, the same evaluation is already in progress, or an EGE provider-repeat risk requires explicit acknowledgement }
         '429': { $ref: '#/components/responses/RateLimited' }
         '502': { description: Provider output failed the strict semantic facts contract and its single repair }
-        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+        '503': { description: SPEAKING_EVALUATION_SETTLEMENT_UNKNOWN means a provider result was accepted but durable settlement could not be confirmed; the pending claim is retained and the server does not fall through to another paid provider. Other dependency outages are also reported as unavailable. }
   /api/v1/ai/generate-speaking-sample:
     post:
       summary: Generate a validated model answer for speaking tasks 2-4
@@ -2692,27 +2715,80 @@ components:
       required: [expectedRevision]
       properties: { expectedRevision: { type: integer, minimum: 0, maximum: 1000000 } }
       additionalProperties: false
-    EgeMockOralRecording:
-      type: object
-      required: [recordingId, durationSeconds]
-      properties:
-        recordingId: { type: string, minLength: 1, maxLength: 120 }
-        durationSeconds: { type: number, minimum: 0, maximum: 1020 }
-      additionalProperties: false
     EgeMockOralSubmitRequest:
       type: object
-      required: [expectedRevision, recordings]
+      required: [expectedRevision]
       properties:
         expectedRevision: { type: integer, minimum: 0, maximum: 1000000 }
-        recordings:
-          type: object
-          properties:
-            39: { $ref: '#/components/schemas/EgeMockOralRecording' }
-            40: { $ref: '#/components/schemas/EgeMockOralRecording' }
-            41: { $ref: '#/components/schemas/EgeMockOralRecording' }
-            42: { $ref: '#/components/schemas/EgeMockOralRecording' }
-          additionalProperties: false
       additionalProperties: false
+    EgeMockOralStageRecordingRequest:
+      oneOf:
+        - type: object
+          required: [recordingId, status, durationSeconds, sha256]
+          properties:
+            recordingId: { type: string, format: uuid }
+            status: { type: string, enum: [completed] }
+            durationSeconds: { type: number, minimum: 1, maximum: 180 }
+            sha256: { type: string, pattern: '^[a-f0-9]{64}$' }
+          additionalProperties: false
+        - type: object
+          required: [recordingId, status, durationSeconds, technicalIssueCode]
+          properties:
+            recordingId: { type: string, format: uuid }
+            status: { type: string, enum: [technical_issue] }
+            durationSeconds: { type: number, enum: [0] }
+            technicalIssueCode: { type: string, enum: [microphone_denied, no_audio_track, recording_failed, response_timeout, offline_capture_unavailable, oral_deadline_elapsed, silence, noise, clipping, other] }
+          additionalProperties: false
+        - type: object
+          required: [recordingId, status, durationSeconds]
+          properties:
+            recordingId: { type: string, format: uuid }
+            status: { type: string, enum: [skipped] }
+            durationSeconds: { type: number, enum: [0] }
+          additionalProperties: false
+    EgeMockOralStageRequest:
+      oneOf:
+        - type: object
+          required: [action, expectedRevision, position, responseNumber]
+          properties:
+            action: { type: string, enum: [advance] }
+            expectedRevision: { type: integer, minimum: 0, maximum: 1000000 }
+            position: { type: integer, minimum: 39, maximum: 42 }
+            responseNumber: { type: integer, minimum: 1, maximum: 5 }
+          allOf:
+            - oneOf:
+                - { properties: { position: { type: integer, enum: [39] }, responseNumber: { type: integer, enum: [1] } } }
+                - { properties: { position: { type: integer, enum: [40] }, responseNumber: { type: integer, minimum: 1, maximum: 4 } } }
+                - { properties: { position: { type: integer, enum: [41] }, responseNumber: { type: integer, minimum: 1, maximum: 5 } } }
+                - { properties: { position: { type: integer, enum: [42] }, responseNumber: { type: integer, enum: [1] } } }
+          additionalProperties: false
+        - type: object
+          required: [action, expectedRevision, position, responseNumber, recording]
+          properties:
+            action: { type: string, enum: [complete] }
+            expectedRevision: { type: integer, minimum: 0, maximum: 1000000 }
+            position: { type: integer, minimum: 39, maximum: 42 }
+            responseNumber: { type: integer, minimum: 1, maximum: 5 }
+            recording: { $ref: '#/components/schemas/EgeMockOralStageRecordingRequest' }
+          allOf:
+            - oneOf:
+                - properties:
+                    position: { type: integer, enum: [39] }
+                    responseNumber: { type: integer, enum: [1] }
+                    recording: { properties: { durationSeconds: { type: number, maximum: 90 } } }
+                - properties:
+                    position: { type: integer, enum: [40] }
+                    responseNumber: { type: integer, minimum: 1, maximum: 4 }
+                    recording: { properties: { durationSeconds: { type: number, maximum: 20 } } }
+                - properties:
+                    position: { type: integer, enum: [41] }
+                    responseNumber: { type: integer, minimum: 1, maximum: 5 }
+                    recording: { properties: { durationSeconds: { type: number, maximum: 40 } } }
+                - properties:
+                    position: { type: integer, enum: [42] }
+                    responseNumber: { type: integer, enum: [1] }
+                    recording: { properties: { durationSeconds: { type: number, maximum: 180 } } }
+          additionalProperties: false
     EgeMockPublicSection:
       type: object
       required: [id, positionRange, maxScore]
@@ -2856,6 +2932,286 @@ components:
         retryWarning: { type: string, enum: ['Предыдущий результат провайдера нельзя подтвердить. Явный повтор может повторно отправить ответ на проверку и учесть ещё один вызов.'] }
         runDisposition: { type: string, enum: [subscription_required] }
       additionalProperties: false
+    EgeMockSpeakingAssessmentItem:
+      type: object
+      required: [position, maximum, status, score, mode, scoreKind]
+      properties:
+        position: { type: integer, minimum: 39, maximum: 42 }
+        maximum: { type: integer, minimum: 1, maximum: 10 }
+        status: { type: string, enum: [pending, retryable, completed] }
+        score: { type: integer, minimum: 0, maximum: 10, nullable: true }
+        mode: { type: string, enum: [experimental] }
+        scoreKind: { type: string, enum: [approximate] }
+        errorCode: { type: string, pattern: '^[a-z][a-z0-9_]{0,63}$' }
+      oneOf:
+        - properties:
+            status: { type: string, enum: [pending] }
+            score: { type: integer, nullable: true, enum: [null] }
+          not: { required: [errorCode] }
+        - properties:
+            status: { type: string, enum: [retryable] }
+            score: { type: integer, nullable: true, enum: [null] }
+          required: [errorCode]
+        - properties:
+            status: { type: string, enum: [completed] }
+            score: { type: integer, minimum: 0, maximum: 10 }
+          not: { required: [errorCode] }
+      additionalProperties: false
+    EgeMockSpeakingAssessmentItem39:
+      allOf:
+        - { $ref: '#/components/schemas/EgeMockSpeakingAssessmentItem' }
+        - type: object
+          properties:
+            position: { type: integer, enum: [39] }
+            maximum: { type: integer, enum: [1] }
+            score: { type: integer, minimum: 0, maximum: 1, nullable: true }
+    EgeMockSpeakingAssessmentItem40:
+      allOf:
+        - { $ref: '#/components/schemas/EgeMockSpeakingAssessmentItem' }
+        - type: object
+          properties:
+            position: { type: integer, enum: [40] }
+            maximum: { type: integer, enum: [4] }
+            score: { type: integer, minimum: 0, maximum: 4, nullable: true }
+    EgeMockSpeakingAssessmentItem41:
+      allOf:
+        - { $ref: '#/components/schemas/EgeMockSpeakingAssessmentItem' }
+        - type: object
+          properties:
+            position: { type: integer, enum: [41] }
+            maximum: { type: integer, enum: [5] }
+            score: { type: integer, minimum: 0, maximum: 5, nullable: true }
+    EgeMockSpeakingAssessmentItem42:
+      allOf:
+        - { $ref: '#/components/schemas/EgeMockSpeakingAssessmentItem' }
+        - type: object
+          properties:
+            position: { type: integer, enum: [42] }
+            maximum: { type: integer, enum: [10] }
+            score: { type: integer, minimum: 0, maximum: 10, nullable: true }
+    EgeMockSpeakingAssessmentItems:
+      type: object
+      required: [39, 40, 41, 42]
+      properties:
+        39: { $ref: '#/components/schemas/EgeMockSpeakingAssessmentItem39' }
+        40: { $ref: '#/components/schemas/EgeMockSpeakingAssessmentItem40' }
+        41: { $ref: '#/components/schemas/EgeMockSpeakingAssessmentItem41' }
+        42: { $ref: '#/components/schemas/EgeMockSpeakingAssessmentItem42' }
+      additionalProperties: false
+    EgeMockSpeakingAssessmentPendingItems:
+      allOf:
+        - { $ref: '#/components/schemas/EgeMockSpeakingAssessmentItems' }
+        - properties:
+            39: { properties: { status: { type: string, enum: [pending] } } }
+            40: { properties: { status: { type: string, enum: [pending] } } }
+            41: { properties: { status: { type: string, enum: [pending] } } }
+            42: { properties: { status: { type: string, enum: [pending] } } }
+    EgeMockSpeakingAssessmentCompletedItems:
+      allOf:
+        - { $ref: '#/components/schemas/EgeMockSpeakingAssessmentItems' }
+        - properties:
+            39: { properties: { status: { type: string, enum: [completed] } } }
+            40: { properties: { status: { type: string, enum: [completed] } } }
+            41: { properties: { status: { type: string, enum: [completed] } } }
+            42: { properties: { status: { type: string, enum: [completed] } } }
+    EgeMockSpeakingAssessmentRetryableItems:
+      allOf:
+        - { $ref: '#/components/schemas/EgeMockSpeakingAssessmentItems' }
+        - properties:
+            39: { properties: { status: { type: string, enum: [completed, retryable] } } }
+            40: { properties: { status: { type: string, enum: [completed, retryable] } } }
+            41: { properties: { status: { type: string, enum: [completed, retryable] } } }
+            42: { properties: { status: { type: string, enum: [completed, retryable] } } }
+          not:
+            properties:
+              39: { properties: { status: { type: string, enum: [completed] } } }
+              40: { properties: { status: { type: string, enum: [completed] } } }
+              41: { properties: { status: { type: string, enum: [completed] } } }
+              42: { properties: { status: { type: string, enum: [completed] } } }
+    EgeMockSpeakingAssessmentState:
+      type: object
+      required: [status, mode, scoreKind, warning, label, retryAllowed, retryCount, items]
+      properties:
+        status: { type: string, enum: [pending, retryable, completed] }
+        mode: { type: string, enum: [experimental] }
+        scoreKind: { type: string, enum: [approximate] }
+        warning: { type: string, enum: ['Экспериментальная ИИ-оценка. Балл ориентировочный, может содержать ошибки и не является экспертным заключением.'] }
+        label: { type: string, enum: ['Предварительная автоматическая оценка'] }
+        retryAllowed: { type: boolean, enum: [false] }
+        retryCount: { type: integer, minimum: 0, maximum: 3 }
+        items: { $ref: '#/components/schemas/EgeMockSpeakingAssessmentItems' }
+      oneOf:
+        - properties:
+            status: { type: string, enum: [pending] }
+            retryCount: { type: integer, enum: [0] }
+            items: { $ref: '#/components/schemas/EgeMockSpeakingAssessmentPendingItems' }
+        - properties:
+            status: { type: string, enum: [retryable] }
+            retryCount: { type: integer, minimum: 1, maximum: 3 }
+            items: { $ref: '#/components/schemas/EgeMockSpeakingAssessmentRetryableItems' }
+        - properties:
+            status: { type: string, enum: [completed] }
+            retryCount: { type: integer, enum: [0] }
+            items: { $ref: '#/components/schemas/EgeMockSpeakingAssessmentCompletedItems' }
+      additionalProperties: false
+    EgeMockSpeakingResult:
+      type: object
+      required: [status, mode, scoreKind, warning, label, retryAllowed, retryCount, items, score, maximum]
+      properties:
+        status: { type: string, enum: [pending, retryable, completed] }
+        mode: { type: string, enum: [experimental] }
+        scoreKind: { type: string, enum: [approximate] }
+        warning: { type: string, enum: ['Экспериментальная ИИ-оценка. Балл ориентировочный, может содержать ошибки и не является экспертным заключением.'] }
+        label: { type: string, enum: ['Предварительная автоматическая оценка'] }
+        retryAllowed: { type: boolean, enum: [false] }
+        retryCount: { type: integer, minimum: 0, maximum: 3 }
+        items: { $ref: '#/components/schemas/EgeMockSpeakingAssessmentItems' }
+        score: { type: integer, minimum: 0, maximum: 20, nullable: true }
+        maximum: { type: integer, enum: [20] }
+      oneOf:
+        - properties:
+            status: { type: string, enum: [pending] }
+            retryCount: { type: integer, enum: [0] }
+            items: { $ref: '#/components/schemas/EgeMockSpeakingAssessmentPendingItems' }
+            score: { type: integer, nullable: true, enum: [null] }
+        - properties:
+            status: { type: string, enum: [retryable] }
+            retryCount: { type: integer, minimum: 1, maximum: 3 }
+            items: { $ref: '#/components/schemas/EgeMockSpeakingAssessmentRetryableItems' }
+            score: { type: integer, nullable: true, enum: [null] }
+        - properties:
+            status: { type: string, enum: [completed] }
+            retryCount: { type: integer, enum: [0] }
+            items: { $ref: '#/components/schemas/EgeMockSpeakingAssessmentCompletedItems' }
+            score: { type: integer, minimum: 0, maximum: 20 }
+      additionalProperties: false
+    EgeMockBoundOralRecording:
+      type: object
+      required: [schemaVersion, recordingId, ownerGeneration, attemptId, formId, formRevision, catalogFingerprint, position, taskType, responseNumber, status, durationSeconds, sha256, stageStartedAt, stageDeadlineAt, completedAt]
+      properties:
+        schemaVersion: { type: string, enum: [ege-mock-oral-recording-v1] }
+        recordingId: { type: string, format: uuid }
+        ownerGeneration: { type: string, pattern: '^account:' }
+        attemptId: { type: string, format: uuid }
+        formId: { type: string }
+        formRevision: { type: integer, minimum: 1 }
+        catalogFingerprint: { type: string, pattern: '^sha256:[a-f0-9]{64}$' }
+        position: { type: integer, minimum: 39, maximum: 42 }
+        taskType: { type: integer, minimum: 1, maximum: 4 }
+        responseNumber: { type: integer, minimum: 1, maximum: 5 }
+        status: { type: string, enum: [completed, technical_issue, skipped] }
+        durationSeconds: { type: number, minimum: 0, maximum: 180 }
+        sha256: { type: string, pattern: '^[a-f0-9]{64}$', nullable: true }
+        technicalIssueCode: { type: string, enum: [microphone_denied, no_audio_track, recording_failed, response_timeout, offline_capture_unavailable, oral_deadline_elapsed, silence, noise, clipping, other] }
+        stageStartedAt: { type: string, format: date-time }
+        stageDeadlineAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time }
+      allOf:
+        - oneOf:
+            - properties:
+                position: { type: integer, enum: [39] }
+                taskType: { type: integer, enum: [1] }
+                responseNumber: { type: integer, enum: [1] }
+                durationSeconds: { type: number, maximum: 90 }
+            - properties:
+                position: { type: integer, enum: [40] }
+                taskType: { type: integer, enum: [2] }
+                responseNumber: { type: integer, minimum: 1, maximum: 4 }
+                durationSeconds: { type: number, maximum: 20 }
+            - properties:
+                position: { type: integer, enum: [41] }
+                taskType: { type: integer, enum: [3] }
+                responseNumber: { type: integer, minimum: 1, maximum: 5 }
+                durationSeconds: { type: number, maximum: 40 }
+            - properties:
+                position: { type: integer, enum: [42] }
+                taskType: { type: integer, enum: [4] }
+                responseNumber: { type: integer, enum: [1] }
+                durationSeconds: { type: number, maximum: 180 }
+        - oneOf:
+            - required: [status, durationSeconds, sha256]
+              properties:
+                status: { type: string, enum: [completed] }
+                durationSeconds: { type: number, minimum: 1 }
+                sha256: { type: string, pattern: '^[a-f0-9]{64}$' }
+              not: { required: [technicalIssueCode] }
+            - required: [status, durationSeconds, sha256, technicalIssueCode]
+              properties:
+                status: { type: string, enum: [technical_issue] }
+                durationSeconds: { type: number, enum: [0] }
+                sha256: { type: string, nullable: true, enum: [null] }
+            - required: [status, durationSeconds, sha256]
+              properties:
+                status: { type: string, enum: [skipped] }
+                durationSeconds: { type: number, enum: [0] }
+                sha256: { type: string, nullable: true, enum: [null] }
+              not: { required: [technicalIssueCode] }
+      additionalProperties: false
+    EgeMockOralRecordingLedger:
+      type: object
+      properties: { '39:1': { allOf: [ { $ref: '#/components/schemas/EgeMockBoundOralRecording' }, { properties: { position: { type: integer, enum: [39] }, taskType: { type: integer, enum: [1] }, responseNumber: { type: integer, enum: [1] } } } ] }, '40:1': { allOf: [ { $ref: '#/components/schemas/EgeMockBoundOralRecording' }, { properties: { position: { type: integer, enum: [40] }, taskType: { type: integer, enum: [2] }, responseNumber: { type: integer, enum: [1] } } } ] }, '40:2': { allOf: [ { $ref: '#/components/schemas/EgeMockBoundOralRecording' }, { properties: { position: { type: integer, enum: [40] }, taskType: { type: integer, enum: [2] }, responseNumber: { type: integer, enum: [2] } } } ] }, '40:3': { allOf: [ { $ref: '#/components/schemas/EgeMockBoundOralRecording' }, { properties: { position: { type: integer, enum: [40] }, taskType: { type: integer, enum: [2] }, responseNumber: { type: integer, enum: [3] } } } ] }, '40:4': { allOf: [ { $ref: '#/components/schemas/EgeMockBoundOralRecording' }, { properties: { position: { type: integer, enum: [40] }, taskType: { type: integer, enum: [2] }, responseNumber: { type: integer, enum: [4] } } } ] }, '41:1': { allOf: [ { $ref: '#/components/schemas/EgeMockBoundOralRecording' }, { properties: { position: { type: integer, enum: [41] }, taskType: { type: integer, enum: [3] }, responseNumber: { type: integer, enum: [1] } } } ] }, '41:2': { allOf: [ { $ref: '#/components/schemas/EgeMockBoundOralRecording' }, { properties: { position: { type: integer, enum: [41] }, taskType: { type: integer, enum: [3] }, responseNumber: { type: integer, enum: [2] } } } ] }, '41:3': { allOf: [ { $ref: '#/components/schemas/EgeMockBoundOralRecording' }, { properties: { position: { type: integer, enum: [41] }, taskType: { type: integer, enum: [3] }, responseNumber: { type: integer, enum: [3] } } } ] }, '41:4': { allOf: [ { $ref: '#/components/schemas/EgeMockBoundOralRecording' }, { properties: { position: { type: integer, enum: [41] }, taskType: { type: integer, enum: [3] }, responseNumber: { type: integer, enum: [4] } } } ] }, '41:5': { allOf: [ { $ref: '#/components/schemas/EgeMockBoundOralRecording' }, { properties: { position: { type: integer, enum: [41] }, taskType: { type: integer, enum: [3] }, responseNumber: { type: integer, enum: [5] } } } ] }, '42:1': { allOf: [ { $ref: '#/components/schemas/EgeMockBoundOralRecording' }, { properties: { position: { type: integer, enum: [42] }, taskType: { type: integer, enum: [4] }, responseNumber: { type: integer, enum: [1] } } } ] } }
+      maxProperties: 11
+      additionalProperties: false
+    EgeMockOralProgress:
+      type: object
+      required: [schemaVersion, position, responseNumber, phase, stageStartedAt, stageDeadlineAt, recordings]
+      properties:
+        schemaVersion: { type: string, enum: [ege-mock-oral-progress-v1] }
+        position: { type: integer, minimum: 39, maximum: 42 }
+        responseNumber: { type: integer, minimum: 1, maximum: 5 }
+        phase: { type: string, enum: [ready, preparing, recording, ready_to_submit] }
+        stageStartedAt: { type: string, format: date-time, nullable: true }
+        stageDeadlineAt: { type: string, format: date-time, nullable: true }
+        recordings:
+          $ref: '#/components/schemas/EgeMockOralRecordingLedger'
+      allOf:
+        - oneOf:
+            - { properties: { position: { type: integer, enum: [39] }, responseNumber: { type: integer, enum: [1] }, recordings: { minProperties: 0, maxProperties: 0 } } }
+            - { properties: { position: { type: integer, enum: [40] }, responseNumber: { type: integer, enum: [1] }, recordings: { required: ['39:1'], minProperties: 1, maxProperties: 1 } } }
+            - { properties: { position: { type: integer, enum: [40] }, responseNumber: { type: integer, enum: [2] }, recordings: { required: ['39:1', '40:1'], minProperties: 2, maxProperties: 2 } } }
+            - { properties: { position: { type: integer, enum: [40] }, responseNumber: { type: integer, enum: [3] }, recordings: { required: ['39:1', '40:1', '40:2'], minProperties: 3, maxProperties: 3 } } }
+            - { properties: { position: { type: integer, enum: [40] }, responseNumber: { type: integer, enum: [4] }, recordings: { required: ['39:1', '40:1', '40:2', '40:3'], minProperties: 4, maxProperties: 4 } } }
+            - { properties: { position: { type: integer, enum: [41] }, responseNumber: { type: integer, enum: [1] }, recordings: { required: ['39:1', '40:1', '40:2', '40:3', '40:4'], minProperties: 5, maxProperties: 5 } } }
+            - { properties: { position: { type: integer, enum: [41] }, responseNumber: { type: integer, enum: [2] }, recordings: { required: ['39:1', '40:1', '40:2', '40:3', '40:4', '41:1'], minProperties: 6, maxProperties: 6 } } }
+            - { properties: { position: { type: integer, enum: [41] }, responseNumber: { type: integer, enum: [3] }, recordings: { required: ['39:1', '40:1', '40:2', '40:3', '40:4', '41:1', '41:2'], minProperties: 7, maxProperties: 7 } } }
+            - { properties: { position: { type: integer, enum: [41] }, responseNumber: { type: integer, enum: [4] }, recordings: { required: ['39:1', '40:1', '40:2', '40:3', '40:4', '41:1', '41:2', '41:3'], minProperties: 8, maxProperties: 8 } } }
+            - { properties: { position: { type: integer, enum: [41] }, responseNumber: { type: integer, enum: [5] }, recordings: { required: ['39:1', '40:1', '40:2', '40:3', '40:4', '41:1', '41:2', '41:3', '41:4'], minProperties: 9, maxProperties: 9 } } }
+            - properties:
+                position: { type: integer, enum: [42] }
+                responseNumber: { type: integer, enum: [1] }
+              oneOf:
+                - properties:
+                    phase: { type: string, enum: [ready, preparing, recording] }
+                    recordings: { required: ['39:1', '40:1', '40:2', '40:3', '40:4', '41:1', '41:2', '41:3', '41:4', '41:5'], minProperties: 10, maxProperties: 10 }
+                - properties:
+                    phase: { type: string, enum: [ready_to_submit] }
+                    recordings: { required: ['39:1', '40:1', '40:2', '40:3', '40:4', '41:1', '41:2', '41:3', '41:4', '41:5', '42:1'], minProperties: 11, maxProperties: 11 }
+        - oneOf:
+            - properties:
+                phase: { type: string, enum: [ready] }
+                stageStartedAt: { type: string, nullable: true, enum: [null] }
+                stageDeadlineAt: { type: string, nullable: true, enum: [null] }
+            - properties:
+                phase: { type: string, enum: [preparing] }
+                stageStartedAt: { type: string, format: date-time }
+                stageDeadlineAt: { type: string, format: date-time }
+              allOf:
+                - oneOf:
+                    - { properties: { position: { type: integer, enum: [39] }, responseNumber: { type: integer, enum: [1] } } }
+                    - { properties: { position: { type: integer, enum: [40] }, responseNumber: { type: integer, enum: [1] } } }
+                    - { properties: { position: { type: integer, enum: [42] }, responseNumber: { type: integer, enum: [1] } } }
+            - properties:
+                phase: { type: string, enum: [recording] }
+                stageStartedAt: { type: string, format: date-time }
+                stageDeadlineAt: { type: string, format: date-time }
+            - properties:
+                position: { type: integer, enum: [42] }
+                responseNumber: { type: integer, enum: [1] }
+                phase: { type: string, enum: [ready_to_submit] }
+                stageStartedAt: { type: string, nullable: true, enum: [null] }
+                stageDeadlineAt: { type: string, nullable: true, enum: [null] }
+                recordings: { allOf: [ { $ref: '#/components/schemas/EgeMockOralRecordingLedger' }, { required: ['39:1', '40:1', '40:2', '40:3', '40:4', '41:1', '41:2', '41:3', '41:4', '41:5', '42:1'], minProperties: 11, maxProperties: 11 } ] }
+      additionalProperties: false
     EgeMockAttempt:
       type: object
       required: [id, ownerGeneration, policyId, formId, formRevision, examYear, catalogFingerprint, mode, attemptNumber, state, revision, draft, writtenStartedAt, writtenDeadlineAt, writtenSubmittedAt, oralAvailableUntil, oralStartedAt, oralDeadlineAt, oralSubmittedAt, assessment, writingAssessment]
@@ -2879,8 +3235,26 @@ components:
         oralStartedAt: { type: string, format: date-time, nullable: true }
         oralDeadlineAt: { type: string, format: date-time, nullable: true }
         oralSubmittedAt: { type: string, format: date-time, nullable: true }
+        oralProgress: { $ref: '#/components/schemas/EgeMockOralProgress' }
         assessment: { $ref: '#/components/schemas/EgeMockAssessmentState' }
         writingAssessment: { $ref: '#/components/schemas/EgeMockWritingAssessmentState' }
+        speakingAssessment: { $ref: '#/components/schemas/EgeMockSpeakingAssessmentState' }
+      allOf:
+        - oneOf:
+            - required: [state, oralProgress]
+              properties: { state: { type: string, enum: [oral_in_progress] } }
+            - required: [state, oralProgress, speakingAssessment]
+              properties:
+                state: { type: string, enum: [assessment_pending] }
+                assessment: { properties: { status: { type: string, enum: [pending, retryable] } } }
+            - required: [state, oralProgress, speakingAssessment]
+              properties:
+                state: { type: string, enum: [completed] }
+                assessment: { properties: { status: { type: string, enum: [completed] } } }
+                writingAssessment: { properties: { status: { type: string, enum: [completed] } } }
+                speakingAssessment: { properties: { status: { type: string, enum: [completed] } } }
+            - required: [state]
+              properties: { state: { type: string, enum: [created, written_in_progress, written_submitted, oral_ready, expired] } }
       additionalProperties: false
     EgeMockNullableAttempt:
       oneOf:
@@ -3357,9 +3731,10 @@ components:
       additionalProperties: false
     EgeMockCompositeResult:
       type: object
-      required: [writing]
+      required: [writing, speaking]
       properties:
         writing: { $ref: '#/components/schemas/EgeMockWritingResult' }
+        speaking: { $ref: '#/components/schemas/EgeMockSpeakingResult' }
       additionalProperties: true
     EgeMockResultUnblockedWritingAssessment:
       allOf:
@@ -3382,22 +3757,34 @@ components:
         state: { type: string, enum: [created, written_in_progress, written_submitted, oral_ready, oral_in_progress, expired] }
         keysRevealed: { type: boolean, enum: [false] }
         writingAssessment: { $ref: '#/components/schemas/EgeMockWritingAssessmentState' }
+        speakingAssessment: { $ref: '#/components/schemas/EgeMockSpeakingAssessmentState' }
         assessmentRunDisposition: { type: string, enum: [subscription_required] }
       additionalProperties: false
     EgeMockAvailableResult:
       type: object
-      required: [available, state, keysRevealed, writingAssessment, assessment, result]
+      required: [available, state, keysRevealed, writingAssessment, speakingAssessment, assessment, result]
       properties:
         available: { type: boolean, enum: [true] }
         state: { type: string, enum: [assessment_pending, completed] }
         keysRevealed: { type: boolean, enum: [true] }
         writingAssessment: { $ref: '#/components/schemas/EgeMockWritingAssessmentState' }
+        speakingAssessment: { $ref: '#/components/schemas/EgeMockSpeakingAssessmentState' }
         assessmentRunDisposition: { type: string, enum: [subscription_required] }
         assessment: { $ref: '#/components/schemas/EgeMockAssessmentState' }
         result:
           oneOf:
             - { type: object, nullable: true, enum: [null] }
             - { $ref: '#/components/schemas/EgeMockCompositeResult' }
+      allOf:
+        - oneOf:
+            - properties:
+                state: { type: string, enum: [assessment_pending] }
+                assessment: { properties: { status: { type: string, enum: [pending, retryable] } } }
+            - properties:
+                state: { type: string, enum: [completed] }
+                assessment: { properties: { status: { type: string, enum: [completed] } } }
+                writingAssessment: { properties: { status: { type: string, enum: [completed] } } }
+                speakingAssessment: { properties: { status: { type: string, enum: [completed] } } }
       additionalProperties: false
     EgeMockResult:
       oneOf:
@@ -4510,12 +4897,31 @@ components:
         message: { type: string, minLength: 1, maxLength: 300 }
       additionalProperties: false
     SpeakingFullAutomaticAssessment:
+      oneOf:
+        - $ref: '#/components/schemas/SpeakingFullAutomaticTrainingAssessment'
+        - $ref: '#/components/schemas/EgeSpeakingFullAutomaticAssessment'
+    SpeakingFullAutomaticTrainingAssessment:
       type: object
       required: [available, status, mode, scoreKind, methodicallyValidated, scoringVersion, warning, evaluatedAt]
       properties:
         available: { type: boolean }
         status: { type: string, enum: [scored, needs_retry] }
         mode: { type: string, enum: [automatic_training] }
+        scoreKind: { type: string, enum: [approximate] }
+        methodicallyValidated: { type: boolean, enum: [false] }
+        scoringVersion: { type: string, enum: [speaking-fipi-combiner-v2] }
+        warning: { type: string, minLength: 1, maxLength: 500 }
+        reason: { type: string, enum: [evidence_needs_retry] }
+        message: { type: string, minLength: 1, maxLength: 300 }
+        evaluatedAt: { type: string, format: date-time }
+      additionalProperties: false
+    EgeSpeakingFullAutomaticAssessment:
+      type: object
+      required: [available, status, mode, scoreKind, methodicallyValidated, scoringVersion, warning, evaluatedAt]
+      properties:
+        available: { type: boolean }
+        status: { type: string, enum: [scored, needs_retry] }
+        mode: { type: string, enum: [experimental] }
         scoreKind: { type: string, enum: [approximate] }
         methodicallyValidated: { type: boolean, enum: [false] }
         scoringVersion: { type: string, enum: [speaking-fipi-combiner-v2] }
@@ -4537,7 +4943,7 @@ components:
         recordingDurationSeconds: { type: number, minimum: 0, maximum: 180 }
         micCheck: { type: string, enum: [passed, quiet, skipped] }
         localPlayback: { type: boolean, enum: [false] }
-        technicalIssueCode: { type: string, enum: [microphone_denied, no_audio_track, recording_failed, response_timeout, silence, noise, clipping, other] }
+        technicalIssueCode: { type: string, enum: [microphone_denied, no_audio_track, recording_failed, response_timeout, offline_capture_unavailable, oral_deadline_elapsed, silence, noise, clipping, other] }
         completedAt: { type: string, format: date-time }
       additionalProperties: false
     SpeakingFullProgressTask:
@@ -4631,7 +5037,7 @@ components:
             id: { type: string, enum: [speaking-pilot-v1] }
             revision: { type: integer, enum: [1] }
           additionalProperties: false
-        selectionReason: { type: string, enum: [unseen, old] }
+        selectionReason: { type: string, enum: [unseen, old, ege_mock] }
         status: { type: string, enum: [in_progress, submitted] }
         phase: { type: string, enum: [ready, preparing, recording, ready_to_submit, submitted] }
         current:
@@ -8826,10 +9232,24 @@ components:
         scoringVersion: { type: string, enum: [speaking-fipi-combiner-v2] }
       additionalProperties: false
     SpeakingAutomaticAssessment:
+      oneOf:
+        - $ref: '#/components/schemas/SpeakingAutomaticTrainingAssessment'
+        - $ref: '#/components/schemas/EgeSpeakingAutomaticAssessment'
+    SpeakingAutomaticTrainingAssessment:
       type: object
       required: [mode, scoreKind, methodicallyValidated, warning, scoringVersion]
       properties:
         mode: { type: string, enum: [automatic_training] }
+        scoreKind: { type: string, enum: [approximate] }
+        methodicallyValidated: { type: boolean, enum: [false] }
+        warning: { type: string }
+        scoringVersion: { type: string, enum: [speaking-fipi-combiner-v2] }
+      additionalProperties: false
+    EgeSpeakingAutomaticAssessment:
+      type: object
+      required: [mode, scoreKind, methodicallyValidated, warning, scoringVersion]
+      properties:
+        mode: { type: string, enum: [experimental] }
         scoreKind: { type: string, enum: [approximate] }
         methodicallyValidated: { type: boolean, enum: [false] }
         warning: { type: string }

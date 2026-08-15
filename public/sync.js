@@ -123,12 +123,43 @@
       return deleted.every(Boolean)
     }catch(_){return false}
   }
+  async function purgeEgeMockOralMedia(ownerKey,ownerGeneration){
+    const indexedDB=global.indexedDB;
+    if(!indexedDB||typeof indexedDB.open!=='function')return true;
+    return new Promise(function(resolve){
+      let settled=false,created=false;
+      const finish=function(value){if(settled)return;settled=true;resolve(Boolean(value))};
+      let request;
+      try{request=indexedDB.open('easyboost-ege-mock-oral-media-v1',1)}catch(_){finish(false);return}
+      request.onupgradeneeded=function(){created=true;try{request.transaction&&request.transaction.abort()}catch(_){}};
+      request.onerror=function(){finish(created)};
+      request.onsuccess=function(){
+        const database=request.result;
+        if(created||!database.objectStoreNames||!database.objectStoreNames.contains('recordings')){
+          try{database.close()}catch(_){}finish(true);return
+        }
+        let transaction;
+        try{transaction=database.transaction('recordings','readwrite');const cursorRequest=transaction.objectStore('recordings').openCursor();
+          cursorRequest.onerror=function(){try{transaction.abort()}catch(_){}};
+          cursorRequest.onsuccess=function(){const cursor=cursorRequest.result;if(!cursor)return;
+            const binding=cursor.value&&cursor.value.binding||{};
+            if(!binding.username||(binding.username===ownerKey&&binding.ownerGeneration===ownerGeneration))cursor.delete();
+            cursor.continue()
+          }
+        }catch(_){try{database.close()}catch(__){}finish(false);return}
+        transaction.oncomplete=function(){try{database.close()}catch(_){}finish(true)};
+        transaction.onerror=function(){try{database.close()}catch(_){}finish(false)};
+        transaction.onabort=function(){try{database.close()}catch(_){}finish(false)}
+      }
+    })
+  }
   async function purgeOwnerLocalData(ownerKey,ownerGeneration=0,ownerLockToken=null){
     const moduleStore=readModuleStore(),attemptStore=readAttemptStore(),grammarStore=readGrammarEventStore();
     delete moduleStore.owners[ownerKey];delete attemptStore.owners[ownerKey];delete grammarStore.owners[ownerKey];
     let snapshot=true;try{localStorage.removeItem('eb_data_'+ownerKey);localStorage.removeItem('eb_data_'+ownerKey+'_g'+ownerGeneration);
       localStorage.removeItem('easyboost-ege-mock-written-v1:'+ownerKey+':'+ownerGeneration);
-      localStorage.removeItem('easyboost-ege-mock-written-v1:'+ownerKey+':'+ownerGeneration+':invalidation')}catch(_){snapshot=false}
+      localStorage.removeItem('easyboost-ege-mock-written-v1:'+ownerKey+':'+ownerGeneration+':invalidation');
+      localStorage.removeItem('easyboost-ege-mock-oral-v1:'+ownerKey+':'+ownerGeneration)}catch(_){snapshot=false}
     const modulesCleared=writeModuleStore(moduleStore);
     const attemptsCleared=writeAttemptStore(attemptStore);
     const grammarCleared=writeGrammarEventStore(grammarStore);
@@ -147,8 +178,9 @@
       if(ownerGeneration===0)overview=incarnation.clearMatchingStorageLocked(ownerKey,'easyboost.adaptive.overview.v1',function(raw){try{const value=JSON.parse(raw);
         return value&&value.owner===ownerKey&&(value.version==='adaptive-overview-cache-v1'?0:value.ownerGeneration)===0}catch(_){return false}},ownerLockToken)&&overview
     }
+    const oralMedia=await purgeEgeMockOralMedia(ownerKey,ownerGeneration);
     const egeCaches=await purgeEgeMockCaches();
-    return modulesCleared&&attemptsCleared&&grammarCleared&&snapshot&&marker&&runtime&&overview&&egeCaches
+    return modulesCleared&&attemptsCleared&&grammarCleared&&snapshot&&marker&&runtime&&overview&&oralMedia&&egeCaches
   }
   function durableOwnerAuthorityMatches(ownerKey,generation){
     if(!ownerKey||!Number.isSafeInteger(generation))return false;

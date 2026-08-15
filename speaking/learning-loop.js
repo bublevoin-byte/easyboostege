@@ -123,7 +123,9 @@ export function canonicalSpeakingLearningSource(source, { taskType, session }) {
   return {
     ...source,
     accentLocale: session.accent_locale || source.accentLocale || null,
-    assistanceUsed: fullSection ? false : Boolean(session.assistance_used),
+    assistanceUsed: fullSection
+      ? session.selection_reason === 'ege_mock'
+      : Boolean(session.assistance_used),
     targetedPractice: fullSection ? null : session.targeted_practice || null,
   };
 }

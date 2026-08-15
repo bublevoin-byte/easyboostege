@@ -20,6 +20,8 @@ async function withServer({
   scenario = 'success', maxAudioBytes = 4 * 1024 * 1024, voiceConsent = true, rateLimited = false,
   pronunciationProvider = null, maxAudioSeconds = 180,
 } = {}, run) {
+  let accessSubscriptionActive = true;
+  let accessVoiceConsent = Boolean(voiceConsent);
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-speaking-pronunciation-api-'));
   const repository = createFileRepository(path.join(directory, 'data.json'));
   const owner = await repository.createTelegramUser(9_620_001, 'Pronunciation API owner');
@@ -43,12 +45,12 @@ async function withServer({
       return next();
     } },
     access: { async requireActiveSubscription(req, res, next) {
-      if ((await repository.getSub(req.user)).active) return next();
+      if (accessSubscriptionActive && (await repository.getSub(req.user)).active) return next();
       return res.status(403).json({ error: { code: 'SUBSCRIPTION_REQUIRED' } });
     }, sttLimiter(_req, res, next) {
       return rateLimited ? res.status(429).json({ error: { code: 'RATE_LIMITED' } }) : next();
     }, requirePrivacyConsent(kind) { return (_req, res, next) => (
-      kind === 'voice_processing' && voiceConsent
+      kind === 'voice_processing' && accessVoiceConsent
         ? next()
         : res.status(403).json({ error: { code: 'PRIVACY_CONSENT_REQUIRED' } })
     ); } },
@@ -85,7 +87,11 @@ async function withServer({
     body: audio,
   });
   try {
-    await run({ owner, other, repository, jsonRequest, audioRequest });
+    await run({
+      owner, other, repository, jsonRequest, audioRequest,
+      setAccessSubscriptionActive(value) { accessSubscriptionActive = Boolean(value); },
+      setAccessVoiceConsent(value) { accessVoiceConsent = Boolean(value); },
+    });
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await repository.close();
@@ -108,7 +114,10 @@ test('full-section pronunciation stays locked until submit and binds audio to th
       };
     },
   };
-  await withServer({ pronunciationProvider }, async ({ owner, other, repository, jsonRequest, audioRequest }) => {
+  await withServer({ pronunciationProvider }, async ({
+    owner, other, repository, jsonRequest, audioRequest,
+    setAccessSubscriptionActive, setAccessVoiceConsent,
+  }) => {
     const submittedAudio = testPcmWavAudio();
     const submittedAudioHash = speakingAssessmentAudioHash(submittedAudio);
     let session = await (await jsonRequest(owner, '/api/v1/speaking/full-sessions', {
@@ -160,6 +169,18 @@ test('full-section pronunciation stays locked until submit and binds audio to th
         idempotencyKey: upload.key, audio: submittedAudio,
       });
       assert.equal(replay.status, 200, 'the exact assessment replay remains idempotent');
+      if (upload.taskType === 1) {
+        setAccessSubscriptionActive(false);
+        setAccessVoiceConsent(false);
+        const afterRevocation = await audioRequest(owner, session.id, {
+          fullSection: true, taskType: upload.taskType, item: upload.item,
+          idempotencyKey: upload.key, audio: submittedAudio,
+        });
+        assert.equal(afterRevocation.status, 200,
+          'an exact frozen pronunciation result remains replayable after access revocation');
+        setAccessSubscriptionActive(true);
+        setAccessVoiceConsent(true);
+      }
       const replacement = await audioRequest(owner, session.id, {
         fullSection: true, taskType: upload.taskType, item: upload.item,
         idempotencyKey: upload.key.replace(/.$/u, '9'), audio: submittedAudio,

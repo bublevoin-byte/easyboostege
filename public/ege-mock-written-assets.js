@@ -16,7 +16,7 @@ function egeMockWrittenAssetManifest(form) {
   return assets;
 }
 
-function cacheName(form) {
+function egeMockAssetCacheName(form) {
   const identity = String(form?.identity || '').replace(/[^a-z0-9@._-]/giu, '_');
   const match = /^sha256:([a-f0-9]{64})$/u.exec(String(form?.fingerprint || ''));
   const fingerprint = match?.[1] || '';
@@ -24,13 +24,21 @@ function cacheName(form) {
   return `${CACHE_PREFIX}${identity}-${fingerprint}`;
 }
 
+function egeMockExactAssetUrl(form, assetPath, assetDigest) {
+  if (typeof assetPath !== 'string' || !assetPath.startsWith('/')
+    || !/^[a-f0-9]{64}$/u.test(String(assetDigest || ''))) {
+    throw new TypeError('EGE_MOCK_ASSET_BINDING_INVALID');
+  }
+  const parameters = new URLSearchParams({
+    egeMockAssetCache: egeMockAssetCacheName(form), egeMockAssetDigest: assetDigest,
+  });
+  return `${assetPath}?${parameters}`;
+}
+
 function egeMockAssetPlaybackUrl(form, assetPath) {
   const asset = egeMockWrittenAssetManifest(form).find((candidate) => candidate.path === assetPath);
   if (!asset) throw new TypeError('EGE_MOCK_WRITTEN_ASSET_PATH_INVALID');
-  const parameters = new URLSearchParams({
-    egeMockAssetCache: cacheName(form), egeMockAssetDigest: asset.sha256,
-  });
-  return `${assetPath}?${parameters}`;
+  return egeMockExactAssetUrl(form, assetPath, asset.sha256);
 }
 
 async function sha256(bytes) {
@@ -74,7 +82,7 @@ function createEgeMockAssetPreflight(options = {}) {
   }
 
   async function cacheReady(form, manifest) {
-    const cache = await cacheStorage.open(cacheName(form));
+    const cache = await cacheStorage.open(egeMockAssetCacheName(form));
     try {
       for (const asset of manifest) {
         const response = await cache.match(egeMockAssetPlaybackUrl(form, asset.path));
@@ -103,7 +111,7 @@ function createEgeMockAssetPreflight(options = {}) {
 
   async function preflight(form) {
     const manifest = egeMockWrittenAssetManifest(form);
-    const name = cacheName(form);
+    const name = egeMockAssetCacheName(form);
     if (!await playbackControl()) throw new Error('EGE_MOCK_SERVICE_WORKER_REQUIRED');
     if (!lockManager || typeof lockManager.request !== 'function') {
       throw new Error('EGE_MOCK_ASSET_LOCK_REQUIRED');
@@ -140,5 +148,6 @@ function createEgeMockAssetPreflight(options = {}) {
 
 export {
   CACHE_PREFIX, controllingServiceWorkerSupportsExactAssets, createEgeMockAssetPreflight,
-  egeMockAssetPlaybackUrl, egeMockWrittenAssetManifest,
+  egeMockAssetCacheName, egeMockAssetPlaybackUrl, egeMockExactAssetUrl,
+  egeMockWrittenAssetManifest,
 };

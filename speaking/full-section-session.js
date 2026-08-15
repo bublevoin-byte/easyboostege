@@ -11,19 +11,28 @@ import {
   speakingTask4PublicAssignment,
 } from '../public/speaking-catalog-contract.js';
 import { combineFullSpeakingScore, SPEAKING_SCORING_VERSION } from './fipi-scoring.js';
+import { AUTOMATIC_ASSESSMENT_PUBLIC_CONTRACT } from '../shared/automatic-assessment-contract.js';
+import {
+  EGE_MOCK_ORAL_MAXIMUM_SCORE,
+  EGE_MOCK_ORAL_TASKS,
+} from '../shared/ege-mock-oral-contract.js';
 
 export const FULL_SPEAKING_FORMAT = Object.freeze({
   id: 'ege-english-speaking-2026',
   revision: 1,
   source: 'FIPI EGE-2026 English speaking instructions',
-  maximumScore: 20,
-  tasks: Object.freeze([
-    Object.freeze({ taskType: 1, responseCount: 1, preparationSeconds: 90, responseSeconds: 90, maximumScore: 1 }),
-    Object.freeze({ taskType: 2, responseCount: 4, preparationSeconds: 60, responseSeconds: 20, maximumScore: 4 }),
-    Object.freeze({ taskType: 3, responseCount: 5, preparationSeconds: 0, responseSeconds: 40, maximumScore: 5 }),
-    Object.freeze({ taskType: 4, responseCount: 1, preparationSeconds: 150, responseSeconds: 180, maximumScore: 10 }),
-  ]),
+  maximumScore: EGE_MOCK_ORAL_MAXIMUM_SCORE,
+  tasks: Object.freeze(EGE_MOCK_ORAL_TASKS.map(({
+    taskType, responseCount, preparationSeconds, responseSeconds, maximumScore,
+  }) => Object.freeze({
+    taskType, responseCount, preparationSeconds, responseSeconds, maximumScore,
+  }))),
 });
+
+export function effectiveFullSpeakingAccentLocale(session) {
+  if (['en-GB', 'en-US'].includes(session?.accent_locale)) return session.accent_locale;
+  return session?.selection_reason === 'ege_mock' ? 'en-GB' : null;
+}
 
 const publicAssignments = Object.freeze({
   1: speakingTask1PublicAssignment,
@@ -229,7 +238,7 @@ export function completeFullSpeakingResponse(session, completion, now = new Date
   return session;
 }
 
-export function claimFullSpeakingResponseAssessment(session, {
+export function fullSpeakingResponseAssessmentClaimState(session, {
   taskType, responseNumber, audioSha256, idempotencyKey, durationSeconds,
 }) {
   if (session.status !== 'submitted') throw fullError('SPEAKING_FULL_NOT_SUBMITTED');
@@ -246,6 +255,15 @@ export function claimFullSpeakingResponseAssessment(session, {
   if (entry.assessment_idempotency_key && entry.assessment_idempotency_key !== idempotencyKey) {
     throw fullError('SPEAKING_FULL_RESPONSE_ASSESSMENT_CONFLICT');
   }
+  return entry.assessment_idempotency_key === idempotencyKey ? 'replayed' : 'new';
+}
+
+export function claimFullSpeakingResponseAssessment(session, binding) {
+  const state = fullSpeakingResponseAssessmentClaimState(session, binding);
+  if (state === 'replayed') return session;
+  const entry = session.responses.find((item) => Number(item.taskType) === Number(binding.taskType))
+    .entries.find((item) => Number(item.responseNumber) === Number(binding.responseNumber));
+  const { idempotencyKey } = binding;
   entry.assessment_idempotency_key = idempotencyKey;
   return session;
 }
@@ -356,7 +374,7 @@ export function publicFullSpeakingSession(session, catalogs) {
     } : null,
     task,
     progress: publicProgress(session),
-    maximumScore: 20,
+    maximumScore: EGE_MOCK_ORAL_MAXIMUM_SCORE,
     earnedScore: session.submission_response?.earnedScore ?? null,
     assessment: session.submission_response?.assessment
       ? structuredClone(session.submission_response.assessment) : assessmentUnavailable(),
@@ -375,7 +393,7 @@ export function submitFullSpeakingSession(session, idempotencyKey, now = new Dat
   const submittedAt = new Date(now).toISOString();
   const snapshot = {
     status: 'submitted',
-    maximumScore: 20,
+    maximumScore: EGE_MOCK_ORAL_MAXIMUM_SCORE,
     earnedScore: null,
     assessment: assessmentUnavailable(),
     taskResults: session.responses.map((task) => ({
@@ -450,6 +468,7 @@ export function applyFullSpeakingEvaluation(session, attempts, now = new Date())
   }
 
   const attemptByTask = new Map();
+  const isEgeMock = session.selection_reason === 'ege_mock';
   attempts.forEach((attempt) => {
     const taskType = Number(attempt?.task_type);
     if (attemptByTask.has(taskType)) throw fullEvaluationInvalid();
@@ -463,9 +482,13 @@ export function applyFullSpeakingEvaluation(session, attempts, now = new Date())
     const attempt = attemptByTask.get(taskType);
     if (!allCompleted) {
       if (attempt) throw fullEvaluationInvalid();
-      scored.push({ taskType, status: 'scored', score: 0, maxScore: assignment.max_score });
+      scored.push({
+        taskType, status: isEgeMock ? 'needs_retry' : 'scored',
+        score: isEgeMock ? null : 0, maxScore: assignment.max_score,
+      });
       return {
-        ...session.submission_response.taskResults[index], earnedScore: 0, attemptId: null,
+        ...session.submission_response.taskResults[index],
+        earnedScore: isEgeMock ? null : 0, attemptId: null,
         assessmentStatus: 'not_assessed', recordingQuality: 'unavailable', review: null,
       };
     }
@@ -518,11 +541,12 @@ export function applyFullSpeakingEvaluation(session, attempts, now = new Date())
     assessment: {
       available: scoredSuccessfully,
       status: combined.status,
-      mode: 'automatic_training',
-      scoreKind: 'approximate',
+      mode: isEgeMock ? AUTOMATIC_ASSESSMENT_PUBLIC_CONTRACT.mode : 'automatic_training',
+      scoreKind: AUTOMATIC_ASSESSMENT_PUBLIC_CONTRACT.scoreKind,
       methodicallyValidated: false,
       scoringVersion: combined.scoringVersion,
-      warning: 'Автоматическая тренировочная оценка. Балл примерный и не является экспертным заключением или точным баллом ЕГЭ.',
+      warning: isEgeMock ? AUTOMATIC_ASSESSMENT_PUBLIC_CONTRACT.warning
+        : 'Автоматическая тренировочная оценка. Балл примерный и не является экспертным заключением или точным баллом ЕГЭ.',
       ...(scoredSuccessfully ? {} : {
         reason: 'evidence_needs_retry',
         message: 'Качества одной или нескольких записей недостаточно для надёжного общего балла.',

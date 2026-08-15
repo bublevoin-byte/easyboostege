@@ -22,6 +22,7 @@ import {
   egeMockWritingResultPublicDto,
 } from '../ege-mock/writing-assessment.js';
 import { AUTOMATIC_ASSESSMENT_WARNING } from '../public/automatic-assessment-contract.js';
+import { completeEgeMockOralStageLedger } from './support/ege-mock-attempt-contract.js';
 
 function objectKeys(value) {
   if (Array.isArray(value)) return value.flatMap(objectKeys);
@@ -442,7 +443,7 @@ test('writing worker failures stay response-safe and log only sanitized operatio
   });
 });
 
-test('safe attempt/result GETs have zero claim side effects and explicit POST reclaims a lost lease', async () => {
+test('safe attempt/result GETs have zero provider/claim side effects while deadline reconciliation remains allowed', async () => {
   let dispatches = 0;
   await withServer(async ({ owner, repository, request }) => {
     const formResponse = await (await request(owner, '/api/v1/ege-mocks/forms')).json();
@@ -487,9 +488,10 @@ test('safe attempt/result GETs have zero claim side effects and explicit POST re
         method: 'POST', idempotencyKey: '869524b8-d383-4477-b61b-fe2d221aa757',
         body: { expectedRevision: written.attempt.revision },
       })).json();
+    const completedOral = await completeEgeMockOralStageLedger(repository, owner, oral);
     await request(owner, `/api/v1/ege-mocks/attempts/${started.attempt.id}/oral/submit`, {
       method: 'POST', idempotencyKey: '6021394b-7564-4cc3-9f19-b0491c48688d',
-      body: { expectedRevision: oral.attempt.revision, recordings: {} },
+      body: { expectedRevision: completedOral.attempt.revision },
     });
 
     const pendingResult = await (await request(owner,
@@ -745,13 +747,11 @@ test('EGE mock HTTP lifecycle is answer-free, owner-bound and restores exact aut
       available: false, state: 'oral_in_progress', keysRevealed: false,
       writingAssessment: oral.attempt.writingAssessment,
     });
+    const completedOral = await completeEgeMockOralStageLedger(repository, owner, oral);
     const oralSubmit = await (await request(owner,
       `/api/v1/ege-mocks/attempts/${started.attempt.id}/oral/submit`, {
         method: 'POST', idempotencyKey: 'a54bb188-2489-4d6c-b8b4-d900102a6f86',
-        body: {
-          expectedRevision: oral.attempt.revision,
-          recordings: { 39: { recordingId: 'owner-bound-39', durationSeconds: 72 } },
-        },
+        body: { expectedRevision: completedOral.attempt.revision },
       })).json();
     assert.equal(oralSubmit.attempt.state, 'assessment_pending');
     const result = await (await request(owner,
@@ -993,6 +993,174 @@ test('EGE mock executable OpenAPI matches runtime forms, attempts and strict mut
     requestHash: 'a'.repeat(64), now: new Date('2026-08-13T06:00:00.000Z'),
   }));
   const attemptSchema = compileOpenApiSchema(specification, 'EgeMockAttempt');
+  const oralSubmitSchema = compileOpenApiSchema(specification, 'EgeMockOralSubmitRequest');
+  assert.equal(oralSubmitSchema({ expectedRevision: 12 }), true,
+    JSON.stringify(oralSubmitSchema.errors));
+  assert.equal(oralSubmitSchema({ expectedRevision: 12, recordings: {} }), false,
+    'candidate recordings cannot bypass the server-owned oral stage ledger');
+  const oralStageSchema = compileOpenApiSchema(specification, 'EgeMockOralStageRequest');
+  assert.equal(oralStageSchema({
+    action: 'advance', expectedRevision: 12, position: 39, responseNumber: 1,
+  }), true, JSON.stringify(oralStageSchema.errors));
+  assert.equal(oralStageSchema({
+    action: 'advance', expectedRevision: 12, position: 39, responseNumber: 1,
+    observedAt: '2026-08-15T06:00:10.000Z',
+  }), false, 'client time is never accepted as oral deadline authority');
+  assert.equal(oralStageSchema({
+    action: 'complete', expectedRevision: 12, position: 39, responseNumber: 5,
+    recording: {
+      recordingId: '6d0e8916-ec2a-4a13-98f7-ad692d31acc8',
+      status: 'completed', durationSeconds: 180, sha256: 'b'.repeat(64),
+    },
+  }), false, 'task 39 accepts only response 1 and its exact 90-second ceiling');
+  const oralRecordingSchema = compileOpenApiSchema(
+    specification, 'EgeMockBoundOralRecording',
+  );
+  const boundRecording = {
+    schemaVersion: 'ege-mock-oral-recording-v1',
+    recordingId: '6d0e8916-ec2a-4a13-98f7-ad692d31acc8',
+    ownerGeneration: 'account:2026-08-15T00:00:00.000Z',
+    attemptId: 'aab67ae4-c5a5-45d2-8536-0706339a38b1',
+    formId: 'ege-en-2026-form-1', formRevision: 1,
+    catalogFingerprint: `sha256:${'a'.repeat(64)}`,
+    position: 39, taskType: 1, responseNumber: 1,
+    status: 'completed', durationSeconds: 90, sha256: 'b'.repeat(64),
+    stageStartedAt: '2026-08-15T06:01:40.000Z',
+    stageDeadlineAt: '2026-08-15T06:03:10.000Z', completedAt: '2026-08-15T06:03:10.000Z',
+  };
+  assert.equal(oralRecordingSchema(boundRecording), true, JSON.stringify(oralRecordingSchema.errors));
+  for (const invalidRecording of [
+    { ...boundRecording, sha256: null },
+    { ...boundRecording, technicalIssueCode: 'response_timeout' },
+    { ...boundRecording, position: 40, taskType: 1 },
+    { ...boundRecording, position: 39, responseNumber: 2 },
+    { ...boundRecording, position: 40, taskType: 2, responseNumber: 1, durationSeconds: 21 },
+    { ...boundRecording, status: 'technical_issue', durationSeconds: 0, sha256: null },
+    { ...boundRecording, status: 'skipped', durationSeconds: 1, sha256: null },
+  ]) assert.equal(oralRecordingSchema(invalidRecording), false,
+    `OpenAPI accepted impossible oral recording ${JSON.stringify(invalidRecording)}`);
+  assert.equal(oralRecordingSchema({
+    ...boundRecording, status: 'technical_issue', durationSeconds: 0, sha256: null,
+    technicalIssueCode: 'response_timeout',
+  }), true, JSON.stringify(oralRecordingSchema.errors));
+  const oralProgressSchema = compileOpenApiSchema(specification, 'EgeMockOralProgress');
+  const completeLedger = {};
+  for (const [position, responseCount] of [[39, 1], [40, 4], [41, 5], [42, 1]]) {
+    for (let responseNumber = 1; responseNumber <= responseCount; responseNumber += 1) {
+      completeLedger[`${position}:${responseNumber}`] = {
+        ...boundRecording,
+        recordingId: crypto.randomUUID(), position, taskType: position - 38, responseNumber,
+        durationSeconds: { 39: 90, 40: 20, 41: 40, 42: 180 }[position],
+      };
+    }
+  }
+  assert.equal(oralProgressSchema({
+    schemaVersion: 'ege-mock-oral-progress-v1', position: 42, responseNumber: 1,
+    phase: 'ready_to_submit', stageStartedAt: null, stageDeadlineAt: null,
+    recordings: completeLedger,
+  }), true, JSON.stringify(oralProgressSchema.errors));
+  assert.equal(oralProgressSchema({
+    schemaVersion: 'ege-mock-oral-progress-v1', position: 42, responseNumber: 1,
+    phase: 'ready_to_submit', stageStartedAt: null, stageDeadlineAt: null, recordings: {},
+  }), false, 'ready_to_submit requires the exact immutable eleven-response ledger');
+  assert.equal(oralProgressSchema({
+    schemaVersion: 'ege-mock-oral-progress-v1', position: 39, responseNumber: 5,
+    phase: 'ready', stageStartedAt: null, stageDeadlineAt: null, recordings: {},
+  }), false, 'the response cursor is bounded by its exact task');
+  assert.equal(oralProgressSchema({
+    schemaVersion: 'ege-mock-oral-progress-v1', position: 41, responseNumber: 1,
+    phase: 'preparing', stageStartedAt: '2026-08-15T06:10:00.000Z',
+    stageDeadlineAt: '2026-08-15T06:10:01.000Z', recordings: {},
+  }), false, 'task 41 has no preparation stage');
+  assert.equal(oralProgressSchema({
+    schemaVersion: 'ege-mock-oral-progress-v1', position: 40, responseNumber: 1,
+    phase: 'ready', stageStartedAt: '2026-08-15T06:10:00.000Z',
+    stageDeadlineAt: null, recordings: {},
+  }), false, 'ready has no active stage timestamps');
+  assert.equal(oralProgressSchema({
+    schemaVersion: 'ege-mock-oral-progress-v1', position: 40, responseNumber: 2,
+    phase: 'ready', stageStartedAt: null, stageDeadlineAt: null,
+    recordings: {
+      '39:1': completeLedger['39:1'],
+      '40:1': completeLedger['40:1'],
+      '40:2': completeLedger['40:2'],
+    },
+  }), false, 'a nonterminal cursor cannot carry future response evidence');
+  assert.equal(oralProgressSchema({
+    schemaVersion: 'ege-mock-oral-progress-v1', position: 40, responseNumber: 2,
+    phase: 'ready', stageStartedAt: null, stageDeadlineAt: null,
+    recordings: { '39:1': completeLedger['39:1'] },
+  }), false, 'a nonterminal cursor requires every exact prior response');
+  assert.equal(oralProgressSchema({
+    schemaVersion: 'ege-mock-oral-progress-v1', position: 42, responseNumber: 1,
+    phase: 'ready_to_submit', stageStartedAt: null, stageDeadlineAt: null,
+    recordings: {
+      ...completeLedger,
+      '39:1': { ...completeLedger['39:1'], position: 40, taskType: 2 },
+    },
+  }), false, 'each exact ledger key is bound to the same position, task and response');
+  const automaticAssessment = compileOpenApiSchema(
+    specification, 'SpeakingAutomaticAssessment',
+  );
+  assert.equal(automaticAssessment({
+    mode: 'experimental', scoreKind: 'approximate', methodicallyValidated: false,
+    warning: AUTOMATIC_ASSESSMENT_WARNING, scoringVersion: 'speaking-fipi-combiner-v2',
+  }), true, JSON.stringify(automaticAssessment.errors));
+  const fullAutomaticAssessment = compileOpenApiSchema(
+    specification, 'SpeakingFullAutomaticAssessment',
+  );
+  assert.equal(fullAutomaticAssessment({
+    available: true, status: 'needs_retry', mode: 'experimental', scoreKind: 'approximate',
+    methodicallyValidated: false, scoringVersion: 'speaking-fipi-combiner-v2',
+    warning: AUTOMATIC_ASSESSMENT_WARNING, reason: 'evidence_needs_retry',
+    message: 'Запись недоступна для автоматической оценки.',
+    evaluatedAt: '2026-08-15T06:17:00.000Z',
+  }), true, JSON.stringify(fullAutomaticAssessment.errors));
+  const fullProgressResponse = compileOpenApiSchema(
+    specification, 'SpeakingFullProgressResponse',
+  );
+  assert.equal(fullProgressResponse({
+    responseNumber: 1, status: 'technical_issue', recordingDurationSeconds: 0,
+    micCheck: 'quiet', localPlayback: false, technicalIssueCode: 'oral_deadline_elapsed',
+    completedAt: '2026-08-15T06:17:00.000Z',
+  }), true, JSON.stringify(fullProgressResponse.errors));
+  const speakingStateSchema = compileOpenApiSchema(
+    specification, 'EgeMockSpeakingAssessmentState',
+  );
+  const speakingState = {
+    status: 'completed', mode: 'experimental', scoreKind: 'approximate',
+    warning: AUTOMATIC_ASSESSMENT_WARNING, label: 'Предварительная автоматическая оценка',
+    retryAllowed: false, retryCount: 0,
+    items: {
+      39: { position: 39, maximum: 1, status: 'completed', score: 1, mode: 'experimental', scoreKind: 'approximate' },
+      40: { position: 40, maximum: 4, status: 'completed', score: 4, mode: 'experimental', scoreKind: 'approximate' },
+      41: { position: 41, maximum: 5, status: 'completed', score: 5, mode: 'experimental', scoreKind: 'approximate' },
+      42: { position: 42, maximum: 10, status: 'completed', score: 10, mode: 'experimental', scoreKind: 'approximate' },
+    },
+  };
+  assert.equal(speakingStateSchema(speakingState), true,
+    JSON.stringify(speakingStateSchema.errors));
+  assert.equal(speakingStateSchema({
+    ...speakingState,
+    items: { ...speakingState.items, 39: { ...speakingState.items[39], maximum: 10 } },
+  }), false, 'task 39 is structurally capped at one point');
+  assert.equal(speakingStateSchema({
+    ...speakingState,
+    items: { ...speakingState.items, 40: { ...speakingState.items[40], score: 5 } },
+  }), false, 'task 40 cannot expose a score above its exact four-point maximum');
+  assert.equal(speakingStateSchema({
+    ...speakingState,
+    items: { ...speakingState.items, 42: { ...speakingState.items[42], position: 41 } },
+  }), false, 'each keyed oral assessment item carries the same exact position');
+  const pendingSpeakingItems = Object.fromEntries(Object.entries(speakingState.items).map(
+    ([position, item]) => [position, { ...item, status: 'pending', score: null }],
+  ));
+  const pendingSpeakingState = {
+    ...speakingState, status: 'pending', retryAllowed: false, items: pendingSpeakingItems,
+  };
+  assert.equal(speakingStateSchema({
+    ...speakingState, retryAllowed: true, items: pendingSpeakingItems,
+  }), false, 'completed speaking assessment requires four completed scores and is never retryable');
   const writingStateSchema = compileOpenApiSchema(specification, 'EgeMockWritingAssessmentState');
   const completedWritingState = {
     status: 'completed', assessmentRevision: 7,
@@ -1088,6 +1256,31 @@ test('EGE mock executable OpenAPI matches runtime forms, attempts and strict mut
     attempt: { ...pendingRunAttempt, writingAssessment: subscriptionBlockedWritingState },
   }), false, 'a nonterminal response cannot hide a nested terminal subscription disposition');
   assert.equal(attemptSchema(attempt), true, JSON.stringify(attemptSchema.errors));
+  assert.equal(attemptSchema({
+    ...attempt, state: 'oral_in_progress',
+    oralStartedAt: '2026-08-13T06:20:00.000Z', oralDeadlineAt: '2026-08-13T06:37:00.000Z',
+  }), false, 'oral_in_progress always carries its authoritative oral progress projection');
+  const completedAttempt = {
+    ...attempt,
+    state: 'completed',
+    writtenSubmittedAt: '2026-08-13T06:20:00.000Z',
+    oralAvailableUntil: '2026-09-12T06:20:00.000Z',
+    oralStartedAt: '2026-08-13T06:20:00.000Z',
+    oralDeadlineAt: '2026-08-13T06:37:00.000Z',
+    oralSubmittedAt: '2026-08-13T06:37:00.000Z',
+    oralProgress: {
+      schemaVersion: 'ege-mock-oral-progress-v1', position: 42, responseNumber: 1,
+      phase: 'ready_to_submit', stageStartedAt: null, stageDeadlineAt: null,
+      recordings: completeLedger,
+    },
+    assessment: { status: 'completed', retryAllowed: false, retryCount: 0 },
+    writingAssessment: completedWritingState,
+    speakingAssessment: speakingState,
+  };
+  assert.equal(attemptSchema(completedAttempt), true, JSON.stringify(attemptSchema.errors));
+  assert.equal(attemptSchema({
+    ...completedAttempt, speakingAssessment: pendingSpeakingState,
+  }), false, 'a completed attempt requires terminal writing and speaking assessments');
   const nullableAttemptSchema = compileOpenApiSchema(specification, 'EgeMockNullableAttempt');
   assert.equal(nullableAttemptSchema(null), true, JSON.stringify(nullableAttemptSchema.errors));
   assert.equal(nullableAttemptSchema(attempt), true, JSON.stringify(nullableAttemptSchema.errors));
@@ -1123,8 +1316,14 @@ test('EGE mock executable OpenAPI matches runtime forms, attempts and strict mut
   assert.equal(result({
     available: true, state: 'assessment_pending', keysRevealed: true,
     writingAssessment: { ...completedWritingState, status: 'not_started' },
-    assessment: { status: 'not_started', retryAllowed: false, retryCount: 0 }, result: null,
+    speakingAssessment: pendingSpeakingState,
+    assessment: { status: 'pending', retryAllowed: false, retryCount: 0 }, result: null,
   }), true, JSON.stringify(result.errors));
+  assert.equal(result({
+    available: true, state: 'assessment_pending', keysRevealed: true,
+    writingAssessment: { ...completedWritingState, status: 'not_started' },
+    assessment: { status: 'not_started', retryAllowed: false, retryCount: 0 }, result: null,
+  }), false, 'an available oral result always includes its provisional speaking state');
   assert.equal(result({
     available: true, state: 'assessment_pending', keysRevealed: true,
     writingAssessment: subscriptionBlockedWritingState,
@@ -1177,9 +1376,28 @@ test('EGE mock executable OpenAPI matches runtime forms, attempts and strict mut
   assert.equal(result({
     available: true, state: 'assessment_pending', keysRevealed: true,
     writingAssessment: completedWritingState,
+    speakingAssessment: pendingSpeakingState,
     assessment: { status: 'pending', retryAllowed: false, retryCount: 0 },
-    result: { writing: writingResult },
+    result: {
+      writing: writingResult,
+      speaking: { ...pendingSpeakingState, score: null, maximum: 20 },
+    },
   }), true, JSON.stringify(result.errors));
+  const completedSpeakingResult = { ...speakingState, score: 20, maximum: 20 };
+  assert.equal(result({
+    available: true, state: 'completed', keysRevealed: true,
+    writingAssessment: completedWritingState,
+    speakingAssessment: speakingState,
+    assessment: { status: 'completed', retryAllowed: false, retryCount: 0 },
+    result: { writing: writingResult, speaking: completedSpeakingResult },
+  }), true, JSON.stringify(result.errors));
+  assert.equal(result({
+    available: true, state: 'completed', keysRevealed: true,
+    writingAssessment: completedWritingState,
+    speakingAssessment: pendingSpeakingState,
+    assessment: { status: 'completed', retryAllowed: false, retryCount: 0 },
+    result: { writing: writingResult, speaking: completedSpeakingResult },
+  }), false, 'a completed result cannot expose a pending provisional speaking state');
   const writingItem = compileOpenApiSchema(specification, 'EgeMockWritingResultItem');
   const writingResultSchema = compileOpenApiSchema(specification, 'EgeMockWritingResult');
   const standardSpecification = specification.replace(

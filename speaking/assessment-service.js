@@ -96,7 +96,7 @@ export function createSpeakingAssessmentService({ db, provider, now = () => new 
     return { provider: providerStatus, quota };
   }
 
-  async function assess(username, input) {
+  function trustedAssessmentRequest(input) {
     const wav = parsePcm16Mono16kWav(input?.audio);
     if (!wav) {
       throw Object.assign(new Error('SPEAKING_AUDIO_CONTAINER_INVALID'), {
@@ -109,13 +109,28 @@ export function createSpeakingAssessmentService({ db, provider, now = () => new 
       });
     }
     const trustedInput = { ...input, durationSeconds: wav.durationSeconds };
-    const requestHash = requestFingerprint(trustedInput);
+    return { trustedInput, requestHash: requestFingerprint(trustedInput) };
+  }
+
+  async function findReplay(username, trustedInput, requestHash) {
     if (typeof db.getSpeakingAssessmentReservation === 'function') {
       const existing = await db.getSpeakingAssessmentReservation(username, trustedInput.idempotencyKey, { now: now() });
       if (existing.reservation) {
         return existingAssessmentResponse(existing.reservation, existing.quota, requestHash);
       }
     }
+    return null;
+  }
+
+  async function replay(username, input) {
+    const { trustedInput, requestHash } = trustedAssessmentRequest(input);
+    return findReplay(username, trustedInput, requestHash);
+  }
+
+  async function assess(username, input) {
+    const { trustedInput, requestHash } = trustedAssessmentRequest(input);
+    const replayed = await findReplay(username, trustedInput, requestHash);
+    if (replayed) return replayed;
     const providerStatus = await provider.status().catch(() => ({
       available: false, provider: 'azure-speech', reason: 'provider_unavailable',
     }));
@@ -127,7 +142,7 @@ export function createSpeakingAssessmentService({ db, provider, now = () => new 
       };
     }
 
-    const reservedSeconds = Math.ceil(wav.durationSeconds);
+    const reservedSeconds = Math.ceil(trustedInput.durationSeconds);
     const reservation = await db.reserveSpeakingAssessment(username, {
       id: crypto.randomUUID(),
       idempotencyKey: trustedInput.idempotencyKey,
@@ -233,5 +248,5 @@ export function createSpeakingAssessmentService({ db, provider, now = () => new 
     }
   }
 
-  return Object.freeze({ status, assess });
+  return Object.freeze({ status, replay, assess });
 }

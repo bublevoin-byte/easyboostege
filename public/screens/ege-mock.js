@@ -2,6 +2,13 @@ import { loadEgeMockPublicForm } from '../ege-mock-catalog-contract.js';
 import { createEgeMockAssetPreflight, egeMockAssetPlaybackUrl } from '../ege-mock-written-assets.js';
 import { egeMockWrittenInvalidationKey } from '../ege-mock-written-continuation.js';
 import { createEgeMockWrittenRunner, normalizeEgeMockSelection } from '../ege-mock-written-runner.js';
+import { createEgeMockOralRunner } from '../ege-mock-oral-runner.js';
+import { createEgeMockOralMedia } from '../ege-mock-oral-media.js';
+import {
+  EGE_MOCK_ORAL_POSITIONS,
+  EGE_MOCK_ORAL_TASK_BY_POSITION,
+  EGE_MOCK_ORAL_TASKS,
+} from '../ege-mock-oral-contract.js';
 import { countEgeWritingWords, sanitizeEgeWritingText } from '../ege-writing-text.js';
 import {
   renderEgeMockWritingAssessmentActions,
@@ -9,7 +16,8 @@ import {
 } from '../ege-mock-writing-assessment-ui.js';
 import { AUTOMATIC_ASSESSMENT_WARNING } from '../automatic-assessment-contract.js';
 import {
-  apiGet, apiIsAuthorityFailure, apiMessage, apiPostIdempotent, apiPut, apiResponseOwner, apiResponseServerTime,
+  apiGet, apiIsAuthorityFailure, apiMessage, apiPost, apiPostBinary, apiPostIdempotent, apiPut,
+  apiResponseOwner, apiResponseServerTime,
   commitEgeMockOwnerMutation,
   currentEgeMockOwnerBinding, invalidateLearningAuthority, listeningModule, readingModule,
   registerAuthorityReset,
@@ -21,6 +29,7 @@ const SECTION_LABELS = Object.freeze({
   writing: 'Письменная речь',
 });
 const SECTION_STARTS = Object.freeze({ listening: 1, reading: 10, grammar_lexis: 19, writing: 37 });
+const ORAL_WARNING_MINUTES = Object.freeze([10, 5, 1]);
 
 let runner = null;
 let runnerOwnerKey = '';
@@ -33,8 +42,19 @@ let opening = null;
 let openingOwnerKey = '';
 let openEpoch = 0;
 let announcedWarning = null;
+let announcedOralWarning = null;
 let visibleError = '';
 let retryAt = 0;
+let oralRunner = null;
+let oralMedia = null;
+let oralOpening = null;
+let oralTimer = null;
+let oralCaptured = null;
+let oralRecordingActive = false;
+let oralAssessing = false;
+let oralProviderRepeatAckRequired = false;
+let oralStorageKey = '';
+let oralRetryAt = 0;
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/gu, (character) => ({
@@ -43,6 +63,12 @@ function escapeHtml(value) {
 }
 
 function ownerKey(owner) { return owner ? `${owner.username}\u0000${owner.generation}` : ''; }
+
+function hasLocalOralState(owner) {
+  return localStorage.getItem(
+    `easyboost-ege-mock-oral-v1:${owner.username}:${owner.generation}`,
+  ) != null;
+}
 
 function openOperationCurrent(operation) {
   return operation?.epoch === openEpoch
@@ -59,6 +85,11 @@ function currentRunnerOperation() {
 
 function runnerOperationCurrent(operation) {
   return openOperationCurrent(operation) && operation.runner === runner && operation.form === form;
+}
+
+function oralOperationCurrent(operation) {
+  return openOperationCurrent(operation) && operation.writtenRunner === runner
+    && operation.form === form && operation.attemptId === runner?.snapshot().attemptId;
 }
 
 function ownerHeaders(owner) { return { 'X-EasyBoost-Expected-Owner': owner.username }; }
@@ -141,11 +172,44 @@ function transportFor(owner) {
   });
 }
 
+function oralTransportFor(owner, attemptId) {
+  return Object.freeze({
+    async attempt(candidateId) {
+      return timedOwnedResponse(await apiGet(
+        `/api/v1/ege-mocks/attempts/${candidateId || attemptId}`,
+        { headers: ownerHeaders(owner) },
+      ), owner);
+    },
+    async start(candidateId, input) {
+      return timedOwnedResponse(await apiPostIdempotent(
+        `/api/v1/ege-mocks/attempts/${candidateId}/oral/start`,
+        { expectedRevision: input.expectedRevision }, input.idempotencyKey, ownerHeaders(owner),
+      ), owner);
+    },
+    async stage(candidateId, input) {
+      const { idempotencyKey, ...body } = input;
+      return timedOwnedResponse(await apiPostIdempotent(
+        `/api/v1/ege-mocks/attempts/${candidateId}/oral/stage`,
+        body, idempotencyKey, ownerHeaders(owner),
+      ), owner);
+    },
+    async submit(candidateId, input) {
+      return timedOwnedResponse(await apiPostIdempotent(
+        `/api/v1/ege-mocks/attempts/${candidateId}/oral/submit`,
+        { expectedRevision: input.expectedRevision },
+        input.idempotencyKey, ownerHeaders(owner),
+      ), owner);
+    },
+  });
+}
+
 function stopTimers() {
   if (timer) clearInterval(timer);
   if (autosave) clearTimeout(autosave);
   timer = null;
   autosave = null;
+  if (oralTimer) clearInterval(oralTimer);
+  oralTimer = null;
 }
 
 function clearPrivateRunnerDom() {
@@ -163,12 +227,23 @@ function resetRunnerState(keepOpening = false, invalidateOpening = true) {
   runnerOwnerKey = '';
   runnerStorageKey = '';
   runnerInvalidationKey = '';
+  oralMedia?.dispose?.();
+  oralRunner = null;
+  oralMedia = null;
+  oralOpening = null;
+  oralCaptured = null;
+  oralRecordingActive = false;
+  oralAssessing = false;
+  oralProviderRepeatAckRequired = false;
+  oralStorageKey = '';
+  oralRetryAt = 0;
   form = null;
   if (!keepOpening) {
     opening = null;
     openingOwnerKey = '';
   }
   announcedWarning = null;
+  announcedOralWarning = null;
   visibleError = '';
   document.getElementById('frame')?.classList.remove('ege-mock-expanded');
 }
@@ -231,6 +306,8 @@ function formatTime(seconds) {
 }
 
 function renderTimer(snapshot) {
+  const part = document.getElementById('ege_mock_part');
+  if (part) part.textContent = 'ЕГЭ-2026 · ПИСЬМЕННАЯ ЧАСТЬ';
   const element = document.getElementById('ege_mock_timer');
   if (!element) return;
   const running = ['running', 'writing', 'asset_blocked', 'objective_queued', 'objective_completed', 'submit_queued'].includes(snapshot.phase);
@@ -243,6 +320,42 @@ function renderTimer(snapshot) {
   if (notice && snapshot.timerWarningMinutes !== announcedWarning) {
     announcedWarning = snapshot.timerWarningMinutes;
     notice.textContent = announcedWarning == null ? '' : `До автоматической сдачи осталось ${announcedWarning} минут`;
+  }
+}
+
+function oralAuthorityNow(snapshot) {
+  const value = Number(snapshot.authorityNowMs);
+  if (!Number.isFinite(value)) throw new Error('EGE_MOCK_ORAL_TIMER_AUTHORITY_INVALID');
+  return value;
+}
+
+function oralTimerWarningMinutes(snapshot) {
+  if (snapshot?.phase !== 'oral' || !Number.isFinite(Number(snapshot.remainingMs))) return null;
+  return ORAL_WARNING_MINUTES.filter(
+    (minutes) => Number(snapshot.remainingMs) <= minutes * 60_000,
+  ).at(-1) ?? null;
+}
+
+function renderOralHeader(snapshot) {
+  const part = document.getElementById('ege_mock_part');
+  if (part) part.textContent = 'ЕГЭ-2026 · УСТНАЯ ЧАСТЬ';
+  const element = document.getElementById('ege_mock_timer');
+  if (!element) return;
+  const running = snapshot?.phase === 'oral';
+  const remainingSeconds = running ? Math.ceil(Number(snapshot.remainingMs) / 1_000) : null;
+  element.innerHTML = `${running ? formatTime(remainingSeconds) : '—'}<small>${running ? 'до сдачи' : '17 минут'}</small>`;
+  element.setAttribute('role', 'timer');
+  element.setAttribute('aria-live', 'off');
+  element.setAttribute('aria-label', running
+    ? `До автоматической сдачи устной части ${formatTime(remainingSeconds)}`
+    : 'Таймер устной части не запущен');
+  const warning = oralTimerWarningMinutes(snapshot);
+  element.classList.toggle('ege-mock__timer--warning', warning != null);
+  const notice = document.getElementById('ege_mock_timer_notice');
+  if (notice && warning !== announcedOralWarning) {
+    announcedOralWarning = warning;
+    notice.textContent = warning == null ? ''
+      : `До автоматической сдачи устной части осталось ${warning} минут`;
   }
 }
 
@@ -386,6 +499,376 @@ function runningMarkup(snapshot) {
   </div>`;
 }
 
+function oralTaskMarkup(snapshot) {
+  const current = snapshot.current;
+  if (!current) return '';
+  const item = form.positions[current.position - 1];
+  const presentation = item.presentation;
+  if (current.position === 39) {
+    return `<p>${escapeHtml(presentation.instruction)}</p><article class="ege-mock__stimulus">${escapeHtml(presentation.text)}</article>`;
+  }
+  if (current.position === 40) {
+    return `<p>${escapeHtml(presentation.instruction)}</p><article class="ege-mock__stimulus"><strong>${escapeHtml(presentation.advertisement)}</strong><ul>${presentation.supports.map((entry) => `<li>${escapeHtml(entry)}</li>`).join('')}</ul></article>`;
+  }
+  if (current.position === 41) {
+    return `<p>${escapeHtml(presentation.instruction)}</p><article class="ege-mock__stimulus"><strong>Вопрос ${current.responseNumber} из ${EGE_MOCK_ORAL_TASK_BY_POSITION[41].responseCount}</strong><p>${escapeHtml(presentation.questions[current.responseNumber - 1])}</p></article>`;
+  }
+  const pair = presentation.photoPair;
+  const verifiedPairUrl = oralMedia.assetUrl(pair.src);
+  return `<p>${escapeHtml(presentation.instruction)}</p><article class="ege-mock__stimulus"><strong>${escapeHtml(presentation.projectTitle)}</strong><div class="ege-mock__oral-photos"><img src="${escapeHtml(verifiedPairUrl)}" alt="${escapeHtml(pair.alt)}"></div><ol>${presentation.plan.map((entry) => `<li>${escapeHtml(entry)}</li>`).join('')}</ol></article>`;
+}
+
+function oralMarkup(snapshot) {
+  const warning = `<p class="ege-mock__status"><strong>Оценка речи предварительная.</strong> ${escapeHtml(AUTOMATIC_ASSESSMENT_WARNING)}</p>`;
+  if (snapshot.phase === 'ready') return `<section class="ege-mock__card ege-mock__success"><h2>Письменная часть сдана</h2><p>Устную часть можно начать после проверки микрофона и фотографий. Отдельные 17 минут начнутся только после этой проверки.</p>${warning}<button class="ege-mock__action" type="button" data-ege-action="oral-preflight">Проверить микрофон и материалы</button></section>`;
+  if (snapshot.phase === 'prepared') return `<section class="ege-mock__card ege-mock__success"><h2>Устная часть готова</h2><p>Микрофон и материалы доступны. После старта таймер нельзя поставить на паузу.</p><button class="ege-mock__action" type="button" data-ege-action="oral-start">Начать 17 минут</button></section>`;
+  if (snapshot.phase === 'submitted') {
+    const assessment = snapshot.speakingAssessment;
+    const rows = Object.values(assessment?.items || {}).map((item) => `<li>Задание ${item.position}: ${item.score == null ? '—' : item.score} из ${item.maximum} · ${escapeHtml(item.status)}</li>`).join('');
+    const localReady = snapshot.assessmentEvidenceReady === true;
+    const assessmentAction = oralProviderRepeatAckRequired
+      ? '<p class="ege-mock__error" role="alert">Предыдущий вызов провайдера мог состояться. Повтор может создать ещё один платный вызов.</p><button class="ege-mock__action" type="button" data-ege-action="oral-assess-repeat">Повторить, понимаю риск повторного платного вызова</button>'
+      : assessment?.status === 'completed'
+      ? `<p role="status">Ориентировочная оценка готова.</p><ul>${rows}</ul>`
+      : assessment?.status === 'retryable'
+        ? `<p class="ege-mock__error" role="alert">Данных одной или нескольких записей недостаточно. Нулевой балл за недоступное доказательство не выставлен.</p><ul>${rows}</ul>`
+        : `<p role="status">Оценка запускается только отдельным явным действием. Записи обработает внешний сервис; обычный исходный звук сервер приложения не сохраняет.</p><button class="ege-mock__action" type="button" data-ege-action="oral-assess" ${oralAssessing || !localReady ? 'disabled' : ''}>${oralAssessing ? 'Получаем примерную оценку…' : localReady ? 'Получить примерную автоматическую оценку' : 'Локальные записи недоступны'}</button>`;
+    return `<section class="ege-mock__card ege-mock__success"><h2>Устная часть сдана</h2>${visibleError ? `<p class="ege-mock__error" role="alert">${escapeHtml(visibleError)}</p>` : ''}${warning}<p>Записи привязаны к этой попытке. Сбой или неоднозначный ответ провайдера не создаст повторную платную оценку при перезагрузке.</p>${assessmentAction}</section>`;
+  }
+  if (snapshot.phase === 'expired') return '<section class="ege-mock__card ege-mock__error" role="alert"><h2>Устная часть завершена по времени</h2><p>Сервер закрыл отдельные 17 минут. Уже подтверждённые ответы сохранены.</p></section>';
+  if (snapshot.phase !== 'oral') return '<section class="ege-mock__card"><p role="status">Восстанавливаем устную часть…</p></section>';
+  if (snapshot.readyToSubmit) return `<section class="ege-mock__card ege-mock__success"><h2>Все задания 39–42 пройдены</h2>${warning}<button class="ege-mock__action" type="button" data-ege-action="oral-submit">Сдать устную часть</button></section>`;
+  const current = snapshot.current;
+  const stage = current.phase === 'ready' ? 'ГОТОВО' : current.phase === 'preparing' ? 'ПОДГОТОВКА' : '● ЗАПИСЬ';
+  const stageRemaining = current.stageDeadlineAt
+    ? Math.max(0, Math.ceil(
+      (new Date(current.stageDeadlineAt).getTime() - oralAuthorityNow(snapshot)) / 1000,
+    )) : null;
+  const limit = EGE_MOCK_ORAL_TASK_BY_POSITION[current.position].responseSeconds;
+  const captureOwned = oralMedia?.hasRecordingLease?.() === true;
+  const controls = current.phase === 'ready'
+    ? captureOwned
+      ? '<button class="ege-mock__action" type="button" data-ege-action="oral-advance">Начать этап</button>'
+      : '<p role="status">Запись активна в другой вкладке. Здесь отображается подтверждённый прогресс.</p><button class="ege-mock__action" type="button" disabled>Начать этап</button>'
+    : current.phase === 'preparing'
+      ? '<p role="status">Подготовка идёт до серверного дедлайна. Запись начнётся автоматически.</p>'
+      : oralCaptured
+        ? `<p role="status">Запись завершена автоматически: ${Math.round(oralCaptured.durationSeconds)} сек. Сохраняем…</p>`
+        : `<p role="status">${oralRecordingActive ? 'Идёт автоматическая запись' : 'Готовим автоматическую запись'} до серверного дедлайна (${limit} сек.). Остановить или перезаписать ответ нельзя.</p>`;
+  return `${visibleError ? `<p class="ege-mock__error" role="alert">${escapeHtml(visibleError)}</p>` : ''}<div class="ege-mock__layout"><aside class="ege-mock__side"><section class="ege-mock__card ege-mock__progress"><p><span>Устная часть</span><strong id="ege_mock_oral_timer">${Math.ceil(snapshot.remainingMs / 60_000)} мин</strong></p><p><span>Этап</span><strong>${stage}${stageRemaining == null ? '' : ` · ${stageRemaining} сек.`}</strong></p><p><span>Сохранение</span><strong>${snapshot.saveStatus === 'saved' ? 'на сервере' : 'в очереди'}</strong></p></section></aside><section class="ege-mock__card ege-mock__task"><header class="ege-mock__task-head"><div><p>Говорение</p><h2 tabindex="-1">Задание ${current.position} · ответ ${current.responseNumber}</h2></div><p>${stage}</p></header>${oralTaskMarkup(snapshot)}<div class="ege-mock__nav">${controls}</div></section></div>`;
+}
+
+function refreshOralProjection(snapshot) {
+  renderOralHeader(snapshot);
+  const timer = document.getElementById('ege_mock_oral_timer');
+  if (timer) timer.textContent = `${Math.ceil(snapshot.remainingMs / 60_000)} мин`;
+  const stage = document.querySelector('.ege-mock__progress p:nth-child(2) strong');
+  if (stage && snapshot.current) {
+    const label = snapshot.current.phase === 'ready'
+      ? 'ГОТОВО' : snapshot.current.phase === 'preparing' ? 'ПОДГОТОВКА' : '● ЗАПИСЬ';
+    const remaining = snapshot.current.stageDeadlineAt
+      ? Math.max(0, Math.ceil(
+        (new Date(snapshot.current.stageDeadlineAt).getTime() - oralAuthorityNow(snapshot)) / 1_000,
+      )) : null;
+    stage.textContent = `${label}${remaining == null ? '' : ` · ${remaining} сек.`}`;
+  }
+  const save = document.querySelector('.ege-mock__progress p:nth-child(3) strong');
+  if (save) save.textContent = snapshot.saveStatus === 'saved' ? 'на сервере' : 'в очереди';
+}
+
+function oralProjectionIdentity(snapshot) {
+  return [snapshot.phase, snapshot.readyToSubmit, snapshot.current?.position,
+    snapshot.current?.responseNumber, snapshot.current?.phase].join(':');
+}
+
+function oralStoredProjectionIdentity(serialized) {
+  if (typeof serialized !== 'string' || serialized.length > 1_000_000) return '';
+  try {
+    const saved = JSON.parse(serialized);
+    if (!saved || saved.schemaVersion !== 'ege-mock-oral-local-v1'
+      || typeof saved.phase !== 'string') return '';
+    return oralProjectionIdentity(saved);
+  } catch {
+    return '';
+  }
+}
+
+function oralRecordingLeaseIdentity(snapshot) {
+  const owner = currentEgeMockOwnerBinding();
+  return owner && snapshot?.attemptId
+    ? `${owner.username}:${owner.generation}:${snapshot.attemptId}` : '';
+}
+
+async function ensureOralRecordingLease(snapshot, media = oralMedia) {
+  if (!media || !['prepared', 'oral'].includes(snapshot?.phase)) {
+    media?.releaseRecordingLease?.();
+    return false;
+  }
+  if (media.hasRecordingLease()) return true;
+  const identity = oralRecordingLeaseIdentity(snapshot);
+  if (!identity) return false;
+  const acquired = await media.acquireRecordingLease(identity);
+  if (media !== oralMedia) {
+    media.releaseRecordingLease();
+    return false;
+  }
+  return acquired;
+}
+
+function oralRecordingBinding(recording) {
+  const owner = currentEgeMockOwnerBinding();
+  return {
+    username: owner.username,
+    ownerGeneration: owner.generation,
+    attemptId: oralRunner.snapshot().attemptId,
+    formId: form.id,
+    formRevision: form.revision,
+    catalogFingerprint: form.fingerprint,
+    position: Number(recording.position),
+    taskType: Number(recording.taskType),
+    responseNumber: Number(recording.responseNumber),
+    recordingId: recording.recordingId,
+    sha256: recording.sha256,
+  };
+}
+
+async function assessOralRecordings(acknowledgePossibleProviderRepeat = false) {
+  if (!oralRunner || !oralMedia || oralAssessing) return;
+  oralAssessing = true;
+  render();
+  try {
+    const snapshot = oralRunner.snapshot();
+    const session = await apiGet(`/api/v1/speaking/full-sessions/${snapshot.attemptId}`);
+    const locale = session?.accentProfile?.locale || 'en-GB';
+    const grouped = new Map();
+    for (const recording of Object.values(snapshot.recordings || {})) {
+      const taskType = Number(recording.taskType);
+      if (!grouped.has(taskType)) grouped.set(taskType, []);
+      grouped.get(taskType).push(recording);
+    }
+    const attemptIds = [];
+    for (const task of EGE_MOCK_ORAL_TASKS) {
+      const { taskType, responseCount } = task;
+      const recordings = (grouped.get(taskType) || [])
+        .sort((left, right) => left.responseNumber - right.responseNumber);
+      if (recordings.length !== responseCount
+        || recordings.some(({ status }) => status !== 'completed')) continue;
+      const keys = [];
+      for (const recording of recordings) {
+        const blob = await oralMedia.get(oralRecordingBinding(recording));
+        if (!blob) throw new Error('EGE_MOCK_ORAL_RECORDING_UNAVAILABLE');
+        const headers = {
+          'Idempotency-Key': recording.recordingId,
+          'X-Speech-Locale': locale,
+          'X-Audio-Duration-Seconds': String(recording.durationSeconds),
+          'X-Speaking-Task': String(taskType),
+          ...(responseCount > 1
+            ? { 'X-Speaking-Item': String(recording.responseNumber) } : {}),
+        };
+        const uploaded = await apiPostBinary(
+          `/api/v1/speaking/full-sessions/${snapshot.attemptId}/pronunciation-assessment`,
+          blob, 'audio/wav', headers,
+        );
+        if (!uploaded?.billing?.assessmentId || uploaded.assessment?.status !== 'success') {
+          throw new Error('SPEAKING_PRONUNCIATION_UNAVAILABLE');
+        }
+        keys.push(recording.recordingId);
+      }
+      const request = {
+        taskType, sessionMode: 'full_section', sessionId: snapshot.attemptId,
+        ...(acknowledgePossibleProviderRepeat ? { acknowledgePossibleProviderRepeat: true } : {}),
+        ...(responseCount > 1
+          ? { pronunciationAssessmentKeys: keys }
+          : { pronunciationAssessmentKey: keys[0] }),
+      };
+      const evaluated = await apiPost('/api/v1/ai/evaluate-speaking', request, true);
+      if (!Number.isSafeInteger(Number(evaluated?.attemptId))) {
+        throw new Error('EGE_MOCK_SPEAKING_ASSESSMENT_INVALID');
+      }
+      attemptIds.push(Number(evaluated.attemptId));
+    }
+    await apiPost(
+      `/api/v1/speaking/full-sessions/${snapshot.attemptId}/evaluation`, { attemptIds },
+    );
+    await oralRunner.dispatch({ type: 'restore', form });
+    oralProviderRepeatAckRequired = false;
+    visibleError = '';
+  } catch (error) {
+    if (error?.code === 'SPEAKING_PROVIDER_REPEAT_ACKNOWLEDGEMENT_REQUIRED') {
+      oralProviderRepeatAckRequired = true;
+      visibleError = 'Предыдущий вызов провайдера мог состояться. Автоматический повтор заблокирован.';
+      return;
+    }
+    throw error;
+  } finally {
+    oralAssessing = false;
+  }
+}
+
+async function ensureOralRunner() {
+  if (oralRunner) return oralRunner;
+  if (oralOpening) return oralOpening;
+  if (!runner || runner.snapshot().phase !== 'written_submitted') {
+    throw new Error('EGE_MOCK_ORAL_WRITTEN_STATE_REQUIRED');
+  }
+  const owner = currentEgeMockOwnerBinding();
+  const attemptId = runner.snapshot().attemptId;
+  if (!owner || !attemptId || !form) throw new Error('EGE_MOCK_ORAL_AUTHORITY_REQUIRED');
+  const media = createEgeMockOralMedia();
+  const candidate = createEgeMockOralRunner({
+    owner, attemptId, storage: localStorage, media, online: () => navigator.onLine,
+    lockManager: navigator.locks,
+    attemptOwnerGeneration: runner.snapshot().attemptOwnerGeneration,
+    transport: oralTransportFor(owner, attemptId),
+    authority: {
+      commit: (commit) => commitEgeMockOwnerMutation(
+        owner, () => oralOperationCurrent(oralOperation), commit,
+      ),
+    },
+  });
+  const oralOperation = {
+    epoch: openEpoch, ownerKey: ownerKey(owner), owner, attemptId,
+    writtenRunner: runner, form, candidate, media,
+  };
+  const openingTask = (async () => {
+    const restored = await candidate.dispatch({ type: 'restore', form });
+    if (!oralOperationCurrent(oralOperation)) { media.dispose(); return null; }
+    if (restored.phase === 'oral') {
+      await media.preflight({
+        form,
+        tasks: EGE_MOCK_ORAL_POSITIONS.map((position) => form.positions[position - 1]),
+        assets: form.assets,
+      });
+      if (!oralOperationCurrent(oralOperation)) { media.dispose(); return null; }
+    }
+    oralMedia = media;
+    oralRunner = candidate;
+    if (restored.phase === 'oral') {
+      await ensureOralRecordingLease(restored, media);
+      if (!oralOperationCurrent(oralOperation)) { media.dispose(); return null; }
+      await beginAutomaticOralRecording(restored, media);
+      if (!oralOperationCurrent(oralOperation)) { media.dispose(); return null; }
+    }
+    oralStorageKey = `easyboost-ege-mock-oral-v1:${owner.username}:${owner.generation}`;
+    if (!oralTimer) oralTimer = setInterval(() => { void tickOral(); }, 1_000);
+    render();
+    return candidate;
+  })();
+  let guardedOpening;
+  guardedOpening = openingTask.catch(async (error) => {
+    media.dispose();
+    if (!oralOperationCurrent(oralOperation)) return null;
+    visibleError = apiMessage(error);
+    if (oralRunner === candidate) {
+      oralRunner = null;
+      oralMedia = null;
+    }
+    render();
+    return null;
+  }).finally(() => {
+    if (oralOpening === guardedOpening) oralOpening = null;
+  });
+  oralOpening = guardedOpening;
+  return oralOpening;
+}
+
+async function tickOral() {
+  if (!oralRunner) return;
+  try {
+    const before = oralRunner.snapshot();
+    if (before.phase === 'oral' && !oralMedia?.hasRecordingLease?.()) {
+      const acquired = await ensureOralRecordingLease(before);
+      if (!acquired) {
+        const observed = await oralRunner.dispatch({ type: 'refreshLocal' });
+        if (oralProjectionIdentity(before) === oralProjectionIdentity(observed)) {
+          refreshOralProjection(observed);
+        } else render();
+        return;
+      }
+      await beginAutomaticOralRecording(oralRunner.snapshot());
+    }
+    let snapshot = before;
+    const expiring = before.current;
+    if (before.phase === 'oral' && expiring?.stageDeadlineAt
+      && oralAuthorityNow(before) >= new Date(expiring.stageDeadlineAt).getTime()) {
+      if (expiring.phase === 'preparing') {
+        snapshot = await oralRunner.dispatch({ type: 'advance' });
+        await beginAutomaticOralRecording(snapshot);
+      } else if (expiring.phase === 'recording') {
+        if (oralRecordingActive) {
+          try { oralCaptured = await oralMedia.stopRecording(); }
+          catch { oralCaptured = null; }
+          oralRecordingActive = false;
+        }
+        snapshot = oralCaptured
+          ? await oralRunner.dispatch({
+            type: 'completeResponse', blob: oralCaptured.blob,
+            recording: {
+              recordingId: oralCaptured.recordingId,
+              durationSeconds: oralCaptured.durationSeconds,
+              sha256: oralCaptured.sha256,
+              status: 'completed',
+            },
+          })
+          : await oralRunner.dispatch({
+            type: 'completeResponse', blob: null,
+            recording: {
+              recordingId: globalThis.crypto.randomUUID(), status: 'technical_issue', durationSeconds: 0,
+              technicalIssueCode: 'response_timeout',
+            },
+          });
+        oralCaptured = null;
+      }
+    }
+    snapshot = await oralRunner.dispatch({ type: 'tick' });
+    if (snapshot.pendingCommand && navigator.onLine && Date.now() >= oralRetryAt) {
+      try {
+        snapshot = await oralRunner.dispatch({ type: 'sync' });
+        oralRetryAt = 0;
+        await beginAutomaticOralRecording(snapshot);
+      } catch (error) {
+        oralRetryAt = Date.now() + 2_000;
+        throw error;
+      }
+    }
+    const projectionChanged = oralProjectionIdentity(before) !== oralProjectionIdentity(snapshot);
+    if (snapshot.phase !== 'oral') oralMedia?.releaseRecordingLease?.();
+    if (!projectionChanged) {
+      refreshOralProjection(snapshot);
+    } else {
+      render();
+      requestAnimationFrame(() => document.querySelector('.ege-mock__task h2')?.focus?.());
+    }
+  } catch (error) { visibleError = apiMessage(error); render(); }
+}
+
+async function beginAutomaticOralRecording(snapshot, media = oralMedia) {
+  const current = snapshot?.current;
+  if (snapshot?.phase !== 'oral' || current?.phase !== 'recording'
+    || !media?.hasRecordingLease?.() || oralRecordingActive || oralCaptured) return snapshot;
+  const remainingSeconds = Math.ceil(
+    (new Date(current.stageDeadlineAt).getTime() - oralAuthorityNow(snapshot)) / 1_000,
+  );
+  if (remainingSeconds <= 0) return snapshot;
+  await media.startRecording(remainingSeconds);
+  if (media !== oralMedia) {
+    await media.cancelRecording?.();
+    return snapshot;
+  }
+  oralRecordingActive = true;
+  return snapshot;
+}
+
+async function cancelAutomaticOralRecording(media = oralMedia) {
+  try { await media?.cancelRecording?.(); }
+  finally {
+    if (media === oralMedia) {
+      oralRecordingActive = false;
+      oralCaptured = null;
+    }
+  }
+}
+
 function render() {
   const area = document.getElementById('ege_mock_area');
   if (!area || !runner) return;
@@ -399,6 +882,12 @@ function render() {
   else if (snapshot.phase === 'objective_completed') area.innerHTML = `${alert}<section class="ege-mock__card ege-mock__success"><h2>Задания 1–36 сохранены</h2><p>Сервер подтвердил checkpoint. Письменная часть ещё не сдана: общий таймер продолжает идти для заданий 37–38.</p><button class="ege-mock__action" type="button" data-ege-action="continue-writing">Перейти к заданиям 37–38</button></section>`;
   else if (snapshot.phase === 'submit_queued') area.innerHTML = `${alert}<section class="ege-mock__card ege-mock__success"><h2>Сохраняем всю письменную часть</h2><p>Ожидаем авторитетное подтверждение сервера. Локальная очередь сохранена и не создаст повторную сдачу.</p></section>`;
   else if (snapshot.phase === 'written_submitted') {
+    if (oralRunner) {
+      const oralSnapshot = oralRunner.snapshot();
+      renderOralHeader(oralSnapshot);
+      area.innerHTML = oralMarkup(oralSnapshot);
+      return;
+    }
     const retryWarning = snapshot.result?.writingAssessment?.retryWarning;
     const retryActions = renderEgeMockWritingAssessmentActions(
       snapshot.result?.writingAssessment,
@@ -407,7 +896,7 @@ function render() {
         revisionBlocked: snapshot.assessmentRunBlocked,
       },
     );
-    area.innerHTML = `<section class="ege-mock__card ege-mock__success"><h2>Задания 1–38 сданы</h2>${renderEgeMockWritingAssessmentStatus(snapshot.result?.writingAssessment)}${retryWarning ? `<p class="ege-mock__error" role="alert">${escapeHtml(retryWarning)}</p>` : ''}${retryActions}<p>Сервер принял ответы и пропуски. Баллы, критерии и ключи не раскрываются до завершения обеих частей пробника.</p>${snapshot.result?.offlineChangesNotAccepted ? '<p class="ege-mock__error" role="alert">После истечения времени сервер уже закрыл письменную часть. Изменения, оставшиеся только на этом устройстве, не вошли в принятую работу.</p>' : ''}</section>`;
+    area.innerHTML = `<section class="ege-mock__card ege-mock__success"><h2>Задания 1–38 сданы</h2>${visibleError ? `<p class="ege-mock__error" role="alert">${escapeHtml(visibleError)}</p>` : ''}${renderEgeMockWritingAssessmentStatus(snapshot.result?.writingAssessment)}${retryWarning ? `<p class="ege-mock__error" role="alert">${escapeHtml(retryWarning)}</p>` : ''}${retryActions}<p>Сервер принял ответы и пропуски. Баллы, критерии и ключи не раскрываются до завершения обеих частей пробника.</p>${snapshot.result?.offlineChangesNotAccepted ? '<p class="ege-mock__error" role="alert">После истечения времени сервер уже закрыл письменную часть. Изменения, оставшиеся только на этом устройстве, не вошли в принятую работу.</p>' : ''}<button class="ege-mock__action" type="button" data-ege-action="oral-open">Перейти к устной части</button></section>`;
   }
 }
 
@@ -432,6 +921,7 @@ function scheduleSave() {
 }
 
 function refreshRunningProjection(snapshot) {
+  if (oralRunner) return;
   const area = document.getElementById('ege_mock_area');
   if (!area) return;
   const writingPhase = snapshot.phase === 'writing';
@@ -538,6 +1028,48 @@ async function handleAction(event) {
   button.disabled = true;
   if (button.dataset.egeAction === 'retry-open') {
     await beginOpenRunner();
+    return;
+  }
+  if (button.dataset.egeAction.startsWith('oral-')) {
+    try {
+      if (button.dataset.egeAction === 'oral-open') {
+        const opened = await ensureOralRunner();
+        if (!opened) return;
+      }
+      else if (button.dataset.egeAction === 'oral-assess') await assessOralRecordings();
+      else if (button.dataset.egeAction === 'oral-assess-repeat') {
+        await assessOralRecordings(true);
+      }
+      else {
+        if (!oralRunner) await ensureOralRunner();
+        if (!oralRunner) return;
+        if (button.dataset.egeAction === 'oral-preflight') {
+          await oralRunner.dispatch({ type: 'preflight' });
+        }
+        if (button.dataset.egeAction === 'oral-start') {
+          if (!await ensureOralRecordingLease(oralRunner.snapshot())) {
+            throw new Error('Устная часть уже активна в другой вкладке.');
+          }
+          await oralRunner.dispatch({ type: 'start' });
+        }
+        if (button.dataset.egeAction === 'oral-advance') {
+          if (!await ensureOralRecordingLease(oralRunner.snapshot())) {
+            throw new Error('Устная часть уже активна в другой вкладке.');
+          }
+          const snapshot = await oralRunner.dispatch({ type: 'advance' });
+          await beginAutomaticOralRecording(snapshot);
+        }
+        if (button.dataset.egeAction === 'oral-submit') {
+          if (!await ensureOralRecordingLease(oralRunner.snapshot())) {
+            throw new Error('Устная часть уже активна в другой вкладке.');
+          }
+          await oralRunner.dispatch({ type: 'submit' });
+          oralMedia?.releaseRecordingLease?.();
+        }
+      }
+      visibleError = '';
+    } catch (error) { visibleError = apiMessage(error); }
+    render();
     return;
   }
   const operation = currentRunnerOperation();
@@ -712,7 +1244,10 @@ async function openRunner(operation) {
   runnerInvalidationKey = invalidationKey;
   form = localForm;
   committed = true;
-  render();
+  if (runner.snapshot().phase === 'written_submitted'
+    && hasLocalOralState(owner)) {
+    await ensureOralRunner();
+  } else render();
   startClock();
 }
 
@@ -752,6 +1287,22 @@ const area = document.getElementById('ege_mock_area');
 area?.addEventListener('click', (event) => { handleAction(event); });
 area?.addEventListener('input', (event) => { handleAnswer(event); });
 window.addEventListener('online', () => {
+  if (oralRunner) {
+    const candidateRunner = oralRunner;
+    const candidateMedia = oralMedia;
+    void (async () => {
+      const before = candidateRunner.snapshot();
+      const ownsCapture = candidateMedia?.hasRecordingLease?.()
+        || await ensureOralRecordingLease(before, candidateMedia);
+      if (oralRunner !== candidateRunner || oralMedia !== candidateMedia) return;
+      const snapshot = await candidateRunner.dispatch({
+        type: ownsCapture ? 'sync' : 'refreshLocal',
+      });
+      if (oralRunner !== candidateRunner || oralMedia !== candidateMedia) return;
+      await beginAutomaticOralRecording(snapshot, candidateMedia);
+      render();
+    })().catch((error) => { visibleError = apiMessage(error); render(); });
+  }
   const operation = currentRunnerOperation();
   if (!operation) return;
   const before = operation.runner.snapshot();
@@ -771,6 +1322,25 @@ window.addEventListener('online', () => {
     });
 });
 window.addEventListener('storage', (event) => {
+  if (oralRunner && event.key === oralStorageKey) {
+    const candidateRunner = oralRunner;
+    const candidateMedia = oralMedia;
+    void (async () => {
+      const beforeIdentity = oralProjectionIdentity(candidateRunner.snapshot());
+      const incomingIdentity = oralStoredProjectionIdentity(event.newValue);
+      const captureNeedsRebinding = incomingIdentity !== '' && incomingIdentity !== beforeIdentity;
+      if (captureNeedsRebinding) await cancelAutomaticOralRecording();
+      if (oralRunner !== candidateRunner || oralMedia !== candidateMedia) return;
+      const snapshot = await candidateRunner.dispatch({ type: 'refreshLocal' });
+      if (oralRunner !== candidateRunner || oralMedia !== candidateMedia) return;
+      const projectionChanged = oralProjectionIdentity(snapshot) !== beforeIdentity;
+      if (projectionChanged && !captureNeedsRebinding) await cancelAutomaticOralRecording();
+      if (oralRunner !== candidateRunner || oralMedia !== candidateMedia) return;
+      await ensureOralRecordingLease(snapshot, candidateMedia);
+      await beginAutomaticOralRecording(snapshot, candidateMedia);
+      render();
+    })().catch((error) => { visibleError = apiMessage(error); render(); });
+  }
   if (runner && (event.key === runnerStorageKey || event.key === runnerInvalidationKey)) {
     const operation = currentRunnerOperation();
     if (!operation) return;
@@ -795,6 +1365,8 @@ registerRouteHook((id) => {
     opening = null;
     openingOwnerKey = '';
     stopTimers();
+    oralMedia?.dispose?.();
+    oralRecordingActive = false;
     document.getElementById('frame')?.classList.remove('ege-mock-expanded');
   }
 });

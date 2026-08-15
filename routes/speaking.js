@@ -16,7 +16,11 @@ import { publicSpeakingTask1Session } from '../speaking/task1-session.js';
 import { publicSpeakingTask2Session } from '../speaking/task2-session.js';
 import { publicSpeakingTask3Session } from '../speaking/task3-session.js';
 import { publicSpeakingTask4Session } from '../speaking/task4-session.js';
-import { publicFullSpeakingSession } from '../speaking/full-section-session.js';
+import {
+  effectiveFullSpeakingAccentLocale,
+  fullSpeakingResponseAssessmentClaimState,
+  publicFullSpeakingSession,
+} from '../speaking/full-section-session.js';
 import { parsePcm16Mono16kWav } from '../speaking/wav-audio.js';
 import { speakingAssessmentAudioHash } from '../speaking/assessment-service.js';
 import {
@@ -132,6 +136,16 @@ function subscriptionRequiredResponse(req, res, error) {
   res.status(403).json({ error: {
     code: error.code,
     message: 'Для этой функции требуется активный доступ.',
+    requestId: req.requestId,
+  } });
+  return true;
+}
+
+function privacyConsentRequiredResponse(req, res, error) {
+  if (error?.code !== 'PRIVACY_CONSENT_REQUIRED') return false;
+  res.status(403).json({ error: {
+    code: error.code,
+    message: 'Перед отправкой данных подтвердите согласие в профиле.',
     requestId: req.requestId,
   } });
   return true;
@@ -517,7 +531,8 @@ export function createSpeakingRoutes({
   });
 
   async function handlePronunciationAssessment(req, res, next, {
-    parseRouteHeaders, invalidParametersMessage, resolveContext, handleRouteError = null,
+    parseRouteHeaders, invalidParametersMessage, resolveContext, claimContext = null,
+    handleRouteError = null, replayOnly = false,
   }) {
     const sessionId = sessionIdSchema.safeParse(req.params.sessionId);
     const idempotencyKey = pronunciationIdempotencySchema.safeParse(req.get('idempotency-key'));
@@ -527,21 +542,25 @@ export function createSpeakingRoutes({
     const mimeType = String(req.get('content-type') || '').split(';', 1)[0].toLowerCase();
     if (!sessionId.success || !idempotencyKey.success || !locale.success || !duration.success
       || !routeHeaders.success) {
+      if (replayOnly) return next();
       return validationError(req, res, invalidParametersMessage);
     }
     if (!pronunciationMimeTypes.includes(mimeType)) {
+      if (replayOnly) return next();
       return res.status(415).json({ error: {
         code: 'SPEAKING_AUDIO_TYPE_UNSUPPORTED', message: 'Формат записи не поддерживается.',
         requestId: req.requestId,
       } });
     }
     if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+      if (replayOnly) return next();
       return validationError(req, res, 'Запись отсутствует.');
     }
     const wav = parsePcm16Mono16kWav(req.body);
     const routeLimit = Math.min(pronunciationAudioSecondsLimit, routeHeaders.maximumSeconds);
     if (!wav || duration.data > routeLimit || wav.durationSeconds < 1
       || wav.durationSeconds > routeLimit || Math.abs(duration.data - wav.durationSeconds) > 1) {
+      if (replayOnly) return next();
       return validationError(
         req, res,
         `Длительность записи не совпадает с WAV или превышает лимит ${routeLimit} секунд.`,
@@ -550,21 +569,31 @@ export function createSpeakingRoutes({
     try {
       const context = await resolveContext({
         req, res, sessionId: sessionId.data, idempotencyKey: idempotencyKey.data,
-        locale: locale.data, wav, route: routeHeaders.data,
+        locale: locale.data, wav, route: routeHeaders.data, replayOnly,
       });
-      if (!context || res.headersSent) return undefined;
-      if (!pronunciationAssessment) return res.status(503).json({ error: {
+      if (!context || res.headersSent) return replayOnly && !res.headersSent ? next() : undefined;
+      const { assessmentClaimState: _claimState, assessmentBinding: _binding, ...publicContext } = context;
+      if (!pronunciationAssessment) return replayOnly ? next() : res.status(503).json({ error: {
         code: 'SPEAKING_PRONUNCIATION_UNAVAILABLE',
         message: 'Оценка произношения пока не подключена.', requestId: req.requestId,
       } });
-      const result = await pronunciationAssessment.assess(req.user, {
+      const assessmentInput = {
         idempotencyKey: idempotencyKey.data,
         audio: req.body,
         mimeType,
         durationSeconds: wav.durationSeconds,
         locale: locale.data,
-        ...context,
-      });
+        ...publicContext,
+      };
+      if (replayOnly) {
+        const result = typeof pronunciationAssessment.replay === 'function'
+          ? await pronunciationAssessment.replay(req.user, assessmentInput) : null;
+        if (!result) return next();
+        res.setHeader('Cache-Control', 'no-store');
+        return res.json(result);
+      }
+      if (claimContext) await claimContext({ context, sessionId: sessionId.data });
+      const result = await pronunciationAssessment.assess(req.user, assessmentInput);
       res.setHeader('Cache-Control', 'no-store');
       if (result.assessment?.status === 'unavailable' && result.billing?.assessmentId == null) {
         return res.status(503).json({ error: {
@@ -574,7 +603,10 @@ export function createSpeakingRoutes({
       }
       return res.json(result);
     } catch (error) {
+      if (replayOnly) return next();
       if (handleRouteError?.(req, res, error)) return undefined;
+      if (subscriptionRequiredResponse(req, res, error)
+        || privacyConsentRequiredResponse(req, res, error)) return undefined;
       if (catalogMismatchResponse(req, res, error)) return undefined;
       if (error?.code === 'SPEAKING_ASSESSMENT_QUOTA_EXHAUSTED') {
         return res.status(429).json({ error: {
@@ -826,14 +858,9 @@ export function createSpeakingRoutes({
   ];
   const fullResponse = (session) => publicFullSpeakingSession(session, fullCatalogs);
 
-  router.post(
-    '/api/v1/speaking/full-sessions/:sessionId/pronunciation-assessment',
-    auth,
-    requireActiveSubscription,
-    pronunciationLimiter,
-    requireVoiceProcessingConsent,
-    parsePronunciationAudio,
-    (req, res, next) => handlePronunciationAssessment(req, res, next, {
+  function fullPronunciationAssessmentOptions(req, res, { replayOnly = false } = {}) {
+    return {
+      replayOnly,
       parseRouteHeaders(request) {
         const taskType = z.coerce.number().int().min(1).max(4)
           .safeParse(request.get('x-speaking-task'));
@@ -855,6 +882,7 @@ export function createSpeakingRoutes({
       async resolveContext({ sessionId, idempotencyKey, locale, wav, route }) {
         const session = await db.getFullSpeakingSession(req.user, sessionId);
         if (!session) {
+          if (replayOnly) return null;
           res.status(404).json({ error: {
             code: 'SPEAKING_FULL_SESSION_NOT_FOUND', message: 'Полный вариант не найден.',
             requestId: req.requestId,
@@ -862,6 +890,7 @@ export function createSpeakingRoutes({
           return null;
         }
         if (session.status !== 'submitted') {
+          if (replayOnly) return null;
           res.status(409).json({ error: {
             code: 'SPEAKING_FULL_NOT_SUBMITTED',
             message: 'Автоматическая оценка полного варианта доступна только после сдачи всего раздела.',
@@ -875,11 +904,13 @@ export function createSpeakingRoutes({
           && Number(candidate.revision) === Number(assignment?.task_revision));
         if (!task || assignment.catalog_id !== catalog.id
           || Number(assignment.catalog_revision) !== Number(catalog.revision)) {
+          if (replayOnly) return null;
           throw Object.assign(new Error('SPEAKING_FULL_CATALOG_REVISION_MISMATCH'), {
             code: 'SPEAKING_FULL_CATALOG_REVISION_MISMATCH',
           });
         }
-        if (session.accent_locale !== locale) {
+        if (effectiveFullSpeakingAccentLocale(session) !== locale) {
+          if (replayOnly) return null;
           res.status(409).json({ error: {
             code: 'SPEAKING_ACCENT_PROFILE_MISMATCH',
             message: 'Полный вариант закреплён за другой нормой произношения.',
@@ -887,23 +918,56 @@ export function createSpeakingRoutes({
           } });
           return null;
         }
-        await db.claimFullSpeakingSessionAssessment(req.user, sessionId, {
+        const assessmentBinding = {
           taskType: route.taskType,
           responseNumber: route.responseNumber,
           audioSha256: speakingAssessmentAudioHash(req.body),
           idempotencyKey,
           durationSeconds: wav.durationSeconds,
-        });
+        };
+        let assessmentClaimState;
+        try {
+          assessmentClaimState = fullSpeakingResponseAssessmentClaimState(
+            session, assessmentBinding,
+          );
+        } catch (error) {
+          if (replayOnly) return null;
+          throw error;
+        }
+        if (replayOnly && assessmentClaimState !== 'replayed') return null;
         const baseContext = `task${route.taskType}:${session.id}:${task.id}@${task.revision}`;
         return {
           mode: route.taskType === 1 ? 'scripted' : 'unscripted',
           referenceText: route.taskType === 1 ? task.reference.script : null,
           contextId: route.responseCount > 1
             ? `${baseContext}:item${route.responseNumber}` : baseContext,
+          assessmentBinding,
+          assessmentClaimState,
         };
       },
+      async claimContext({ context, sessionId }) {
+        await db.claimFullSpeakingSessionAssessment(
+          req.user, sessionId, context.assessmentBinding,
+          { voiceConsentPolicyVersion: access.privacyPolicyVersion },
+        );
+      },
       handleRouteError: fullSessionError,
-    }),
+    };
+  }
+
+  router.post(
+    '/api/v1/speaking/full-sessions/:sessionId/pronunciation-assessment',
+    auth,
+    pronunciationLimiter,
+    parsePronunciationAudio,
+    (req, res, next) => handlePronunciationAssessment(
+      req, res, next, fullPronunciationAssessmentOptions(req, res, { replayOnly: true }),
+    ),
+    requireActiveSubscription,
+    requireVoiceProcessingConsent,
+    (req, res, next) => handlePronunciationAssessment(
+      req, res, next, fullPronunciationAssessmentOptions(req, res),
+    ),
   );
 
   function fullSessionError(req, res, error) {
@@ -934,7 +998,8 @@ export function createSpeakingRoutes({
     if (['SPEAKING_FULL_STAGE_INVALID', 'SPEAKING_FULL_RESPONSE_OUT_OF_SEQUENCE',
       'SPEAKING_FULL_NOT_READY_TO_SUBMIT', 'SPEAKING_FULL_NOT_SUBMITTED',
       'SPEAKING_FULL_RESPONSE_NOT_RECORDED', 'SPEAKING_FULL_RESPONSE_ASSESSMENT_MISMATCH',
-      'SPEAKING_FULL_RESPONSE_ASSESSMENT_CONFLICT'].includes(error?.code)) {
+      'SPEAKING_FULL_RESPONSE_ASSESSMENT_CONFLICT',
+      'SPEAKING_FULL_EGE_LIFECYCLE_REQUIRED'].includes(error?.code)) {
       res.status(409).json({ error: {
         code: error.code,
         message: 'Этапы полного устного раздела выполняются только в официальном порядке.',

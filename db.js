@@ -167,7 +167,9 @@ export const failEgeMockWritingAssessment = (...args) => repository.failEgeMockW
 export const saveEgeMockDraft = (...args) => repository.saveEgeMockDraft(...args);
 export const submitEgeMockWritten = (...args) => repository.submitEgeMockWritten(...args);
 export const startEgeMockOral = (...args) => repository.startEgeMockOral(...args);
+export const advanceEgeMockOralStage = (...args) => repository.advanceEgeMockOralStage(...args);
 export const submitEgeMockOral = (...args) => repository.submitEgeMockOral(...args);
+export const syncEgeMockSpeakingBridge = (...args) => repository.syncEgeMockSpeakingBridge(...args);
 export const getEgeMockResult = (...args) => repository.getEgeMockResult(...args);
 export const markEgeMockAssessmentRetryable = (...args) => repository.markEgeMockAssessmentRetryable(...args);
 export const retryEgeMockAssessment = (...args) => repository.retryEgeMockAssessment(...args);

@@ -52,6 +52,7 @@ import {
   assertEgeMockAssessmentRevisionExhaustionContract,
   assertEgeMockAssessmentRunSubscriptionContract,
   assertEgeMockAttemptRepositoryContract,
+  assertEgeMockOralStageRepositoryContract,
 } from './support/ege-mock-attempt-contract.js';
 import { EGE_MOCK_FORM_ID, EGE_MOCK_FORM_REVISION, getEgeMockForm } from '../ege-mock/catalog.js';
 import { READING_TASK10_SETS } from '../public/content/reading/task10-v1.js';
@@ -78,6 +79,14 @@ test('PostgreSQL EGE mock attempts match the shared lifecycle, concurrency, expo
 }, async () => {
   const repository = createPostgresRepository(connectionString);
   try { await assertEgeMockAttemptRepositoryContract(assert, repository, 92_603_000); }
+  finally { await repository.close(); }
+});
+
+test('PostgreSQL EGE oral stages match the shared repository contract', {
+  skip: !connectionString,
+}, async () => {
+  const repository = createPostgresRepository(connectionString);
+  try { await assertEgeMockOralStageRepositoryContract(assert, repository, 92_603_006); }
   finally { await repository.close(); }
 });
 
@@ -3106,6 +3115,7 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
       '052_adaptive_plan_evidence_fingerprint.sql',
       '053_ege_mock_attempts.sql',
       '054_ege_mock_writing_assessment.sql',
+      '055_ege_mock_oral_progress.sql',
     ]);
 
     const username = await repository.createTelegramUser(telegramId, `Integration ${suffix}`);

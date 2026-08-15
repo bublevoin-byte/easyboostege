@@ -45,6 +45,9 @@ test('public speaking evaluation accepts only a server reference, never client a
     ],
   };
   assert.equal(speakingRequestSchema.safeParse(fullSection).success, true);
+  assert.equal(speakingRequestSchema.safeParse({
+    ...fullSection, acknowledgePossibleProviderRepeat: true,
+  }).success, true);
   assert.equal(speakingRequestSchema.safeParse({ ...fullSection, sessionMode: 'client_chosen' }).success, false);
 });
 

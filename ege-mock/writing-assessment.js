@@ -11,6 +11,7 @@ import {
   EGE_MOCK_WRITING_ASSESSMENT_LABEL,
 } from '../shared/automatic-assessment-contract.js';
 import { sameSemanticJsonValue } from '../shared/semantic-json.js';
+import { reconcileEgeMockSubjectiveAssessmentState } from './speaking-assessment.js';
 
 export const EGE_MOCK_WRITING_ASSESSMENT_VERSION = 'ege-mock-writing-assessment-v1';
 export const EGE_MOCK_WRITING_ASSESSMENT_LEASE_MS = 5 * 60 * 1000;
@@ -574,6 +575,7 @@ export function applyEgeMockWritingAssessmentItemCompletion(row, {
   assessment.updated_at = instant;
   assessment.assessment_revision = nextRevision;
   row.updated_at = instant;
+  reconcileEgeMockSubjectiveAssessmentState(row);
   return { applied: true, writingAssessment: egeMockWritingAssessmentPublicDto(row) };
 }
 
@@ -606,6 +608,7 @@ export function applyEgeMockWritingAssessmentFailure(row, {
   assessment.updated_at = instant;
   assessment.assessment_revision = nextRevision;
   row.updated_at = instant;
+  reconcileEgeMockSubjectiveAssessmentState(row);
   return egeMockWritingAssessmentPublicDto(row);
 }
 
@@ -645,5 +648,6 @@ export function retryEgeMockWritingAssessment(row, now, { acknowledgePossiblePro
   assessment.updated_at = instant;
   assessment.assessment_revision = nextRevision;
   row.updated_at = instant;
+  reconcileEgeMockSubjectiveAssessmentState(row);
   return true;
 }

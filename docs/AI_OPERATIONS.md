@@ -107,9 +107,13 @@ execution claim; the old `contentRef + transcript` contract remains rejected. Th
 ответ повторно проверяется Zod на сервере: bounded строки/массивы, точные 4/5 элементов, task 2
 relevance/direct/blocking-error facts, task 3 completeness/appropriateness/phrase facts, task 4
 content states и точные непересекающиеся error spans, а также отсутствие дополнительных полей.
-Единственная format repair использует ту же строгую схему. Для `evaluate_speaking` fallback отключён:
-операция использует только xAI с обязательным strict response format; недоступность провайдера даёт
-fail-closed ошибку без деградации на Groq. Официальный контракт xAI: https://docs.x.ai/developers/model-capabilities/text/structured-outputs
+Обычная Speaking-тренировка допускает единственную format repair с той же строгой схемой. Для
+`selection_reason = ege_mock` некорректный provider JSON завершает исходный durable claim как
+`AI_RESPONSE_INVALID` после одного физического вызова: автоматическая format repair запрещена, а новый платный
+вызов возможен только через уже существующую явную acknowledgement/recovery границу. Для
+`evaluate_speaking` provider fallback также отключён: операция использует только xAI с обязательным strict response
+format; недоступность провайдера даёт fail-closed ошибку без деградации на Groq. Официальный контракт xAI:
+https://docs.x.ai/developers/model-capabilities/text/structured-outputs
 
 `speaking-fipi-combiner-v2` применяет максимумы 1/4/5/10 и полный максимум 20. Одно evidence event
 принадлежит одному content/organization/language owner, поэтому один факт не уменьшает два
@@ -419,3 +423,32 @@ orphan card. A non-streaming HTTP body is rejected before buffering.
 (идемпотентный посев по содержанию) и отдаётся клиенту как часть офлайн-оболочки, поэтому
 идентификаторы на обеих сторонах совпадают. Менять идентификаторы в этом файле нельзя:
 по ним сервер узнаёт, какую работу он проверяет.
+
+## Предварительная оценка устной части пробного ЕГЭ
+
+Безопасные GET текущей/именованной попытки, результата и full Speaking projection не создают assessment claim и
+не вызывают провайдера. После авторитетной сдачи устной части ученик запускает обработку отдельным явным действием;
+браузер передаёт только локальный WAV, привязанный к exact owner generation, attempt, form, task, response,
+recording UUID и SHA-256. Серверная EGE stage ledger и `selection_reason = ege_mock` определяют допустимый контекст,
+а существующие pronunciation и semantic-evaluation seams выполняют приблизительную проверку заданий 39–42.
+
+Provider claim и финальное settlement повторно проверяют активную Base-подписку и текущее
+версионно-привязанное voice consent внутри owner-serialized repository границы до создания или
+восстановления provider-bound work. Точный уже замороженный неоплачиваемый replay не становится
+новой авторизацией. Legacy full-session mutations не могут продвинуть или сдать EGE shadow session.
+Авторитетное время этой проверки читается только после owner lock/queue: ожидание в очереди не продлевает
+истекающую подписку. Внешние subscription/consent middleware пропускаются только lookup-only веткой, которая
+уже нашла exact завершённый semantic result либо exact full-response binding вместе с его сохранённой
+pronunciation reservation. Отсутствующий, несовпавший, pending или recoverable результат продолжает обычный
+access/rate/budget/provider контур; replay не может превратиться в новую платную работу.
+Неоднозначный возможный
+платный результат сохраняет durable recovery authority и требует явного acknowledgement перед повтором; успешный
+результат с не подтверждённым settlement не переключается на другого провайдера. Terminal speaking fingerprint
+неизменяем, поэтому публичный `retryAllowed` для speaking равен `false`: недоступное/техническое evidence остаётся
+`needs_retry` с `null`, а не выдуманным нулём. Public result всегда помечен canonical
+`experimental` / `approximate` warning с `methodicallyValidated: false` и никогда не является официальной или
+экспертной оценкой.
+
+Первый EGE bridge sync фиксирует `accent_locale`, ревизию профиля и effective time в reusable full
+Speaking session. Последующая смена `en-GB`/`en-US` не переписывает уже привязанный EGE
+assessment; file и PostgreSQL восстанавливают одинаковый исторический pin.

@@ -17,6 +17,7 @@ import {
 } from '../ege-mock/writing-assessment.js';
 import { createFileRepository } from '../storage/file-repository.js';
 import { AUTOMATIC_ASSESSMENT_PUBLIC_CONTRACT } from '../public/automatic-assessment-contract.js';
+import { completeEgeMockOralStageLedger } from './support/ege-mock-attempt-contract.js';
 
 const words = (count, prefix) => Array.from({ length: count }, (_, index) => `${prefix}${index + 1}`).join(' ');
 
@@ -1013,8 +1014,9 @@ test('validated writing reviews become a private replay-safe provisional result 
       expectedRevision: submitted.attempt.revision,
       idempotencyKey: '6b4f2de5-bce1-4f71-8e39-8271d5f137d7', requestHash: '7'.repeat(64),
     }, { now: new Date('2026-08-14T08:00:00.000Z') });
+    const completedOral = await completeEgeMockOralStageLedger(repository, username, oral);
     await repository.submitEgeMockOral(username, started.attempt.id, {
-      expectedRevision: oral.attempt.revision, recordings: {},
+      expectedRevision: completedOral.attempt.revision,
       idempotencyKey: 'a03189eb-6a4f-4710-a411-a7dc0bc7894b', requestHash: '8'.repeat(64),
     }, { now: new Date('2026-08-14T08:05:00.000Z') });
     const result = await repository.getEgeMockResult(username, started.attempt.id);

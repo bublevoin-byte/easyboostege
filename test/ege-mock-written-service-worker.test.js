@@ -14,9 +14,11 @@ test('service worker serves EGE playback only from the requested fingerprint and
   const listeners = new Map();
   const path = '/audio/listening/listening-pilot-v1/matching/exact.mp3';
   const digest = 'a'.repeat(64);
+  const imagePath = '/images/ege-mock/form-1/task-42-pair.png';
   const currentName = `easyboost-ege-mock-assets-v1-form@2-${'b'.repeat(64)}`;
   const oldName = `easyboost-ege-mock-assets-v1-form@1-${'c'.repeat(64)}`;
   const playbackUrl = `https://easyboost.test${path}?egeMockAssetCache=${encodeURIComponent(currentName)}&egeMockAssetDigest=${digest}`;
+  const imagePlaybackUrl = `https://easyboost.test${imagePath}?egeMockAssetCache=${encodeURIComponent(currentName)}&egeMockAssetDigest=${digest}`;
   const stores = new Map([
     ['easyboost-static-test', new Map([[`https://easyboost.test${path}`, new Response('generic-corrupt', {
       headers: { 'content-type': 'audio/mpeg' },
@@ -24,9 +26,10 @@ test('service worker serves EGE playback only from the requested fingerprint and
     [oldName, new Map([[playbackUrl, new Response('old-revision', {
       headers: { 'content-type': 'audio/mpeg' },
     })]])],
-    [currentName, new Map([[playbackUrl, new Response('current-exact', {
-      headers: { 'content-type': 'audio/mpeg' },
-    })]])],
+    [currentName, new Map([
+      [playbackUrl, new Response('current-exact', { headers: { 'content-type': 'audio/mpeg' } })],
+      [imagePlaybackUrl, new Response('exact-png', { headers: { 'content-type': 'image/png' } })],
+    ])],
   ]);
   const caches = {
     async open(name) {
@@ -68,6 +71,16 @@ test('service worker serves EGE playback only from the requested fingerprint and
   assert.equal(response.status, 206);
   assert.equal(await response.text(), 'current');
   assert.equal(networkCalls, 0);
+
+  listeners.get('fetch')({
+    request: { method: 'GET', mode: 'cors', url: imagePlaybackUrl, headers: new Headers() },
+    respondWith(value) { responsePromise = value; },
+    waitUntil() {},
+  });
+  const imageResponse = await responsePromise;
+  assert.equal(imageResponse.status, 200);
+  assert.equal(await imageResponse.text(), 'exact-png');
+  assert.equal(networkCalls, 0, 'task-42 PNG is served only from the exact requested cache');
 
   let capability;
   let capabilityReady;
@@ -136,7 +149,7 @@ test('frontend build pins the exact emitted form module path into the service wo
   assert.match(buildSource, /assets\[builtEgeMockFormPath\.slice\(1\)\]/u);
 });
 
-test('built output preserves the derived five-module EGE closure and neutral text dependencies', {
+test('built output preserves the derived oral and written EGE closure and neutral dependencies', {
   timeout: 120_000,
 }, async () => {
   const built = spawnSync(process.execPath, ['scripts/build-frontend.js'], {
@@ -148,12 +161,14 @@ test('built output preserves the derived five-module EGE closure and neutral tex
   ));
   const egeModules = [
     'screens/ege-mock.js', 'ege-mock-writing-assessment-ui.js', 'ege-mock-written-assets.js',
-    'ege-mock-written-runner.js', 'ege-writing-text.js',
+    'ege-mock-written-runner.js', 'ege-writing-text.js', 'ege-mock-oral-media.js',
+    'ege-mock-oral-runner.js', 'ege-mock-oral-contract.js',
+    'speaking-local-recording.js', 'speaking-pronunciation-audio.js',
   ];
-  assert.equal(egeModules.length, 5);
+  assert.equal(egeModules.length, 10);
   const sourceClosure = [
-    ...egeModules, '../shared/ege-writing-text.js', '../shared/ege-writing-text-sanitizer.js',
-    '../shared/semantic-json.js',
+    ...egeModules, '../shared/ege-mock-oral-contract.js', '../shared/ege-writing-text.js',
+    '../shared/ege-writing-text-sanitizer.js', '../shared/semantic-json.js',
   ];
   assert.equal(sourceClosure.every((name) => typeof manifest.modules[name] === 'string'), true);
   const expectedPaths = [...new Set(sourceClosure.map((name) => `/${manifest.modules[name]}`))].sort();

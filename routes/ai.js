@@ -37,15 +37,21 @@ import {
   SPEAKING_SCORING_VERSION,
 } from '../speaking/fipi-scoring.js';
 import { boundedAcousticMetric, finiteAcousticAverage } from '../speaking/acoustic-metrics.js';
-import { speakingEvaluationClaimRecoverable } from '../speaking/evaluation-claim.js';
+import {
+  speakingEvaluationClaimRecoverable,
+  speakingEvaluationProviderRepeatPossible,
+} from '../speaking/evaluation-claim.js';
+import { AUTOMATIC_ASSESSMENT_PUBLIC_CONTRACT } from '../shared/automatic-assessment-contract.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SPEAKING_TIMING_TOLERANCE_SECONDS = 0.05;
 
 const EXPERIMENTAL_ASSESSMENT = Object.freeze({
-  mode: 'experimental',
-  scoreKind: 'approximate',
-  warning: 'Экспериментальная ИИ-оценка. Балл ориентировочный, может содержать ошибки и не является экспертным заключением.',
+  ...AUTOMATIC_ASSESSMENT_PUBLIC_CONTRACT,
+});
+const EXPERIMENTAL_SPEAKING_ASSESSMENT = Object.freeze({
+  ...AUTOMATIC_ASSESSMENT_PUBLIC_CONTRACT,
+  methodicallyValidated: false,
 });
 
 const AUTOMATIC_TRAINING_ASSESSMENT = Object.freeze({
@@ -69,7 +75,14 @@ function speakingEvaluationFingerprint(request) {
   return crypto.createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
 }
 
-function speakingReplayPayload(attempt) {
+function speakingAssessmentContract(review, egeMock = false) {
+  return {
+    ...(egeMock ? EXPERIMENTAL_SPEAKING_ASSESSMENT : AUTOMATIC_TRAINING_ASSESSMENT),
+    scoringVersion: review.scoringVersion,
+  };
+}
+
+function speakingReplayPayload(attempt, egeMock = false) {
   if (!attempt?.review || !['completed', 'needs_retry'].includes(attempt.status)) return null;
   const { semanticFacts: _semanticFacts, acousticFacts: _acousticFacts, ...review } = attempt.review;
   const payload = {
@@ -77,7 +90,7 @@ function speakingReplayPayload(attempt) {
     provider: attempt.provider || null,
     promptVersion: attempt.prompt_version,
     attemptId: Number(attempt.id),
-    assessment: { ...AUTOMATIC_TRAINING_ASSESSMENT, scoringVersion: review.scoringVersion },
+    assessment: speakingAssessmentContract(review, egeMock),
   };
   if (review.status === 'scored') {
     payload.voiceTutor = {
@@ -133,7 +146,10 @@ export function createAiRoutes({
 }) {
   const router = express.Router();
   const { auth } = authentication;
-  const { createOperationLimiter, requireAiBudget, requireActiveSubscription, requirePrivacyConsent, hasAiBudget } = access;
+  const {
+    privacyPolicyVersion, createOperationLimiter, requireAiBudget,
+    requireActiveSubscription, requirePrivacyConsent, hasAiBudget,
+  } = access;
   const perOperation = (resolve) => createOperationLimiter(resolve, (operation) => limitsFor(operation).requestsPerHour);
   // Each endpoint is rationed by the operation actually requested, not by a shared category quota.
   const writingLimiter = perOperation((req) => (typeof req.body?.taskType === 'string' ? req.body.taskType : 'writing_37'));
@@ -449,7 +465,9 @@ export function createAiRoutes({
       taskType: request.taskType,
       transcript: assessment.transcript,
       assignment: evaluationAssignment(request.taskType, task),
-    }), acoustic: assessment.acoustic, source: {
+    }), acoustic: assessment.acoustic,
+    providerRepeatAcknowledgementRequired: fullSection && session.selection_reason === 'ege_mock',
+    source: {
       sessionMode: fullSection ? 'full_section' : 'individual',
       sessionId: session.id,
       taskRef: task.id,
@@ -457,7 +475,9 @@ export function createAiRoutes({
       catalogId: entry.catalog.id,
       catalogRevision: Number(entry.catalog.revision),
       accentLocale: assessment.acoustic.accentLocale,
-      assistanceUsed: fullSection ? false : Boolean(session.assistance_used),
+      assistanceUsed: fullSection
+        ? session.selection_reason === 'ege_mock'
+        : Boolean(session.assistance_used),
       targetedPractice: fullSection ? null : session.targeted_practice || null,
     } };
   }
@@ -767,8 +787,8 @@ export function createAiRoutes({
     }
   });
 
-  function respondToExistingSpeakingClaim(req, res, attempt) {
-    const replay = speakingReplayPayload(attempt);
+  function respondToExistingSpeakingClaim(req, res, attempt, egeMock = false) {
+    const replay = speakingReplayPayload(attempt, egeMock);
     if (replay) return res.json(replay);
     if (attempt?.status === 'failed') {
       const errorCode = attempt.error_code || 'AI_PROVIDER_UNAVAILABLE';
@@ -785,17 +805,33 @@ export function createAiRoutes({
     } });
   }
 
+  function respondToSpeakingAuthorizationError(req, res, error) {
+    if (!['SUBSCRIPTION_REQUIRED', 'PRIVACY_CONSENT_REQUIRED'].includes(error?.code)) {
+      return false;
+    }
+    res.status(403).json({ error: {
+      code: error.code,
+      message: error.code === 'SUBSCRIPTION_REQUIRED'
+        ? 'Для этой функции требуется активный доступ.'
+        : 'Перед отправкой записи подтвердите согласие в профиле.',
+      requestId: req.requestId,
+    } });
+    return true;
+  }
+
   async function prepareSpeakingEvaluation(req, res, next) {
     const parsed = speakingRequestSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректные данные устного ответа.' } });
     let input;
     let acousticEvidence = null;
     let source = null;
+    let providerRepeatAcknowledgementRequired = false;
     try {
       const resolved = await resolveSpeakingEvaluation(req.user, parsed.data);
       input = resolved?.input || null;
       acousticEvidence = resolved?.acoustic || null;
       source = resolved?.source || null;
+      providerRepeatAcknowledgementRequired = resolved?.providerRepeatAcknowledgementRequired === true;
     } catch (error) {
       if (error?.status && error?.code) {
         return res.status(error.status).json({ error: {
@@ -813,23 +849,61 @@ export function createAiRoutes({
     } });
     const evaluationFingerprint = speakingEvaluationFingerprint(parsed.data);
     const existing = await getSpeakingEvaluationClaim(req.user, evaluationFingerprint);
-    if (existing && !speakingEvaluationClaimRecoverable(existing)) {
-      return respondToExistingSpeakingClaim(req, res, existing);
+    const invalidEgeProviderResponse = providerRepeatAcknowledgementRequired
+      && existing?.status === 'failed' && existing?.error_code === 'AI_RESPONSE_INVALID';
+    const recoveryOptions = {
+      allowInvalidProviderResponse: invalidEgeProviderResponse,
+    };
+    if (existing && !speakingEvaluationClaimRecoverable(existing, new Date(), recoveryOptions)) {
+      return respondToExistingSpeakingClaim(
+        req, res, existing, providerRepeatAcknowledgementRequired,
+      );
+    }
+    const providerRepeatPossible = providerRepeatAcknowledgementRequired
+      && speakingEvaluationProviderRepeatPossible(existing, new Date(), recoveryOptions);
+    const allowRecovery = !providerRepeatPossible
+      || parsed.data.acknowledgePossibleProviderRepeat === true;
+    const allowInvalidRecovery = invalidEgeProviderResponse && allowRecovery;
+    if (existing && !allowRecovery) {
+      return res.status(409).json({ error: {
+        code: 'SPEAKING_PROVIDER_REPEAT_ACKNOWLEDGEMENT_REQUIRED',
+        message: 'Предыдущий вызов провайдера мог состояться. Повтор требует явного подтверждения риска повторной оплаты.',
+        requestId: req.requestId,
+      } });
     }
     const acousticRetry = publicSpeakingAcousticRetry(input.taskType, acousticEvidence);
-    if (!acousticRetry) {
-      res.locals.speakingEvaluation = { input, acousticEvidence, evaluationFingerprint, source };
-      return next();
+    res.locals.speakingEvaluation = {
+      input, acousticEvidence, evaluationFingerprint, source, allowRecovery,
+      allowInvalidRecovery, acousticRetry,
+      egeMock: providerRepeatAcknowledgementRequired,
+    };
+    return next();
+  }
+
+  async function settlePreparedSpeakingAcousticRetry(req, res, next) {
+    const {
+      input, acousticEvidence, evaluationFingerprint, source, allowRecovery,
+      allowInvalidRecovery, acousticRetry, egeMock,
+    } = res.locals.speakingEvaluation;
+    if (!acousticRetry) return next();
+    let claim;
+    try {
+      claim = await claimSpeakingEvaluation(
+        req.user,
+        input,
+        SPEAKING_PROMPT_VERSION,
+        evaluationFingerprint,
+        {
+          source, allowRecovery, allowInvalidRecovery,
+          voiceConsentPolicyVersion: privacyPolicyVersion,
+        },
+      );
+    } catch (error) {
+      if (respondToSpeakingAuthorizationError(req, res, error)) return undefined;
+      throw error;
     }
-    const claim = await claimSpeakingEvaluation(
-      req.user,
-      input,
-      SPEAKING_PROMPT_VERSION,
-      evaluationFingerprint,
-      { source },
-    );
     if (!claim.created) {
-      const replay = speakingReplayPayload(claim.attempt);
+      const replay = speakingReplayPayload(claim.attempt, egeMock);
       if (replay) return res.json(replay);
       if (claim.attempt?.status === 'failed') {
         const errorCode = claim.attempt.error_code || 'AI_PROVIDER_UNAVAILABLE';
@@ -855,7 +929,7 @@ export function createAiRoutes({
         provider: null,
         promptVersion: SPEAKING_PROMPT_VERSION,
         attemptId,
-        assessment: { ...AUTOMATIC_TRAINING_ASSESSMENT, scoringVersion: acousticRetry.scoringVersion },
+        assessment: speakingAssessmentContract(acousticRetry, egeMock),
       });
     }
     return undefined;
@@ -864,17 +938,31 @@ export function createAiRoutes({
   router.post(
     '/api/v1/ai/evaluate-speaking',
     auth,
+    prepareSpeakingEvaluation,
     requireActiveSubscription,
     requirePrivacyConsent('voice_processing'),
-    prepareSpeakingEvaluation,
+    settlePreparedSpeakingAcousticRetry,
     requireAiBudget,
     speakingEvalLimiter,
     async (req, res) => {
-    const { input, acousticEvidence, evaluationFingerprint, source } = res.locals.speakingEvaluation;
-    const claim = await claimSpeakingEvaluation(
-      req.user, input, SPEAKING_PROMPT_VERSION, evaluationFingerprint, { source },
-    );
-    if (!claim.created) return respondToExistingSpeakingClaim(req, res, claim.attempt);
+    const {
+      input, acousticEvidence, evaluationFingerprint, source, allowRecovery,
+      allowInvalidRecovery, egeMock,
+    } = res.locals.speakingEvaluation;
+    let claim;
+    try {
+      claim = await claimSpeakingEvaluation(
+        req.user, input, SPEAKING_PROMPT_VERSION, evaluationFingerprint,
+        {
+          source, allowRecovery, allowInvalidRecovery,
+          voiceConsentPolicyVersion: privacyPolicyVersion,
+        },
+      );
+    } catch (error) {
+      if (respondToSpeakingAuthorizationError(req, res, error)) return undefined;
+      throw error;
+    }
+    if (!claim.created) return respondToExistingSpeakingClaim(req, res, claim.attempt, egeMock);
     const attemptId = Number(claim.attempt.id);
     const claimGeneration = Number(claim.attempt.evaluation_claim_generation);
     const prompt = buildSpeakingPrompt(input);
@@ -892,6 +980,9 @@ export function createAiRoutes({
     let fallbackReason = null;
     for (const [providerIndex, provider] of providers.entries()) {
       let usage = {};
+      let review;
+      let storedReview;
+      let repair = null;
       try {
         const response = await askProvider(
           provider,
@@ -901,60 +992,82 @@ export function createAiRoutes({
           { responseFormat: prompt.responseFormat },
         );
         usage = response;
-        const outcome = await parseWithOneRepair({
-          provider,
-          text: response.text,
-          parse: (text) => parseSpeakingSemanticReview(input.taskType, text),
-          system: prompt.system,
-          user: prompt.user,
-          operation: 'evaluate_speaking',
-          responseFormat: prompt.responseFormat,
-        });
+        const outcome = egeMock
+          ? { value: parseSpeakingSemanticReview(input.taskType, response.text), repair: null }
+          : await parseWithOneRepair({
+            provider,
+            text: response.text,
+            parse: (text) => parseSpeakingSemanticReview(input.taskType, text),
+            system: prompt.system,
+            user: prompt.user,
+            operation: 'evaluate_speaking',
+            responseFormat: prompt.responseFormat,
+          });
         const semanticFacts = outcome.value;
         const scored = scoreSpeakingTask({
           taskType: input.taskType,
           semantic: semanticFacts,
           acoustic: acousticEvidence,
         });
-        const review = publicSpeakingReview(scored, semanticFacts);
-        const storedReview = { ...review, semanticFacts, acousticFacts: acousticEvidence };
-        if (outcome.repair) {
+        review = publicSpeakingReview(scored, semanticFacts);
+        storedReview = { ...review, semanticFacts, acousticFacts: acousticEvidence };
+        repair = outcome.repair;
+        if (repair) {
           usage = outcome.repair.usage;
-          await logRepairedAttempt({
-            username: req.user, operation: `evaluate_speaking_${input.taskType}`, promptVersion: SPEAKING_PROMPT_VERSION, repair: outcome.repair, model: provider.model,
-          });
         }
-        await Promise.all([
-          logAiRequest({ username: req.user, operation: `evaluate_speaking_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt, fallbackReason, ...aiUsage(provider, usage) }),
-          finishSpeakingAttempt(attemptId, {
-            status: review.status === 'scored' ? 'completed' : 'needs_retry',
-            review: storedReview, provider: provider.name, model: provider.model,
-          }, { claimGeneration }),
-        ]);
-        recordDependencyEvent('ai', 'success');
-        if (providerIndex > 0) recordDependencyEvent('ai', 'fallback');
-        const payload = {
-          review,
-          provider: provider.name,
-          promptVersion: SPEAKING_PROMPT_VERSION,
-          attemptId,
-        };
-        if (review.status === 'scored') {
-          payload.voiceTutor = {
-            source: 'speaking', attemptId, revision: 1, criterionChoices: reviewVoiceTutorCriterionChoices(review),
-          };
-        }
-        payload.assessment = {
-          ...AUTOMATIC_TRAINING_ASSESSMENT,
-          scoringVersion: review.scoringVersion,
-        };
-        return res.json(payload);
       } catch (error) {
         recordDependencyEvent('ai', 'error');
         fallbackReason = describeFallback(provider, lastCode, error, providerIndex, providers.length);
         lastCode = error.code === 'AI_RESPONSE_INVALID' ? error.code : 'AI_PROVIDER_UNAVAILABLE';
         await logAiRequest({ username: req.user, operation: `evaluate_speaking_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'failed', durationMs: Date.now() - startedAt, errorCode: lastCode, fallbackReason: describeFallback(provider, lastCode, error, providerIndex, providers.length), ...aiUsage(provider, usage) });
+        continue;
       }
+      try {
+        await finishSpeakingAttempt(attemptId, {
+          status: review.status === 'scored' ? 'completed' : 'needs_retry',
+          review: storedReview, provider: provider.name, model: provider.model,
+        }, { claimGeneration });
+      } catch (_) {
+        recordDependencyEvent('ai', 'error');
+        await Promise.allSettled([
+          logAiRequest({
+            username: req.user, operation: `evaluate_speaking_${input.taskType}`,
+            provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION,
+            status: 'failed', durationMs: Date.now() - startedAt,
+            errorCode: 'SPEAKING_EVALUATION_SETTLEMENT_UNKNOWN',
+            fallbackReason: `${provider.name} → provider result received; durable settlement unknown`,
+            ...aiUsage(provider, usage),
+          }),
+        ]);
+        return res.status(503).json({ error: {
+          code: 'SPEAKING_EVALUATION_SETTLEMENT_UNKNOWN',
+          message: 'Ответ провайдера получен, но сохранение результата не подтверждено. Автоматический повтор отключён.',
+          requestId: req.requestId,
+        } });
+      }
+      await Promise.allSettled([
+        ...(repair ? [logRepairedAttempt({
+          username: req.user, operation: `evaluate_speaking_${input.taskType}`,
+          promptVersion: SPEAKING_PROMPT_VERSION, repair, model: provider.model,
+        })] : []),
+        logAiRequest({ username: req.user, operation: `evaluate_speaking_${input.taskType}`, provider: provider.name, model: provider.model, promptVersion: SPEAKING_PROMPT_VERSION, status: 'completed', durationMs: Date.now() - startedAt, fallbackReason, ...aiUsage(provider, usage) }),
+      ]);
+      recordDependencyEvent('ai', 'success');
+      if (providerIndex > 0) recordDependencyEvent('ai', 'fallback');
+      const payload = {
+        review,
+        provider: provider.name,
+        promptVersion: SPEAKING_PROMPT_VERSION,
+        attemptId,
+      };
+      if (review.status === 'scored') {
+        payload.voiceTutor = {
+          source: 'speaking', attemptId, revision: 1,
+          criterionChoices: reviewVoiceTutorCriterionChoices(review),
+        };
+      }
+      payload.assessment = speakingAssessmentContract(review, egeMock);
+      return res.json(payload);
     }
     const lastProvider = providers.at(-1);
     await finishSpeakingAttempt(attemptId, {

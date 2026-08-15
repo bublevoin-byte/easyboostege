@@ -256,3 +256,51 @@ Full-mock attempt records are retained while the learner account exists so an in
 The provisional writing-assessment snapshot has the same account lifetime as its attempt. It retains sanitized full/evaluated answers and the deterministic FIPI word/sentence-boundary scope so a claimed job and owner export remain reproducible, plus immutable criteria references/fingerprints, complete pinned criteria snapshots, validated feedback and bounded provider/model provenance. The shared task-aware scope counts slash and ordinal-hyphen forms once. Task 37 counts only the first word in an artificial run of three or more identical consecutive words and does not collapse multiword phrases. Task 38 counts two or more adjacent copies of either one identical word or one identical multiword combination as a single occurrence. Exact copied question tokens without terminal punctuation and structural assignment headings are excluded. The scope distinguishes the 100–140/200–250 learner target from the 90–154/180–275 gradable shoulders: in-band `evaluatedWords` equals `fullWords`, while an overlength record stores the formal 140/250 cutoff beside the exact retained whole-question/whole-sentence fragment. Decimal/abbreviation boundaries and Unicode ellipsis remain reproducible. The anchored leading task-37 letter envelope may include structural city/country lines after a numbered postal address, but stops before and counts the greeting through the signature; it never consumes a learner-authored lead-in or unnumbered first-line prose ending in Street/Road/Square. Task 38 also retains the bounded published-source overlap facts computed from the pinned topic, row labels and percentages so the strict greater-than-30-percent K1/total cascade is reproducible. A private per-item result token and bounded call-settlement list make a validated result replayable; they contain no prompt or raw provider response. Every prepared/durable outcome retains the exact form fingerprint, authored assignment/content and complete criteria binding used for the provider request; record and replay compare the complete JSON value independent of object-key order and fail closed on semantic drift. A transport/timeout after reservation preserves the token as `prepared_unknown`; automatic recovery is lookup-only. The renewable lease stores only its claim UUID and expiry and remains owner/attempt locked. The initial claim additionally retains the bounded authorization time, subscription expiry, exact consent boolean and consent-policy version; file/PostgreSQL derive that boolean from current owner-locked state and ignore a stale caller boolean. Those facts allow the same valid authorized work to recover/settle after expiry but cannot authorize new provider work. Public API projections never return answer copies, claim/result tokens, authorization internals or provider payload and expose only the canonical `mode: experimental`, `scoreKind: approximate` warning contract, reused unchanged in editor and terminal UI. Ordinary failures are retryable with null score. If automatic non-paying lookup cannot resolve a prepared provider idempotency key, the snapshot remains explicit `ambiguous`; only a manual acknowledged retry may append a bounded tombstone and replace the reservation, and the public warning says provider work may repeat. Every primary, fallback and format-repair call creates its own durable AI usage row before I/O. Its `context_fingerprint` binds the exact immutable assessment context but contains no learner answer or prompt; unresolved, failed and completed rows all remain budget-visible. A current version-bound `text_processing` consent is required before the initial provider authorization. Account deletion removes the attempt snapshot and its owner-bound AI rows in both storage backends. Browser drafts and retry/acknowledgement commands for positions 37–38 use the bounded offline/reload envelope until the server acknowledges them; a terminal `retryAllowed:false` server reconciliation retires a stale queued retry instead of replaying 409 forever, and a bounded legacy string-array draft is joined with line breaks once and surfaced for learner review before persistence.
 
 Policy `ege-mock-attempt-policy-v1`, exposed answer-free with the released form, fixes the written window at exactly 190 minutes. After written submission, the learner has 30 days to start the separately timed 17-minute oral part; reaching that boundary changes the lifecycle to `expired` but does not silently erase the owner-visible history. Manual and automatic receipts retain only the bounded frozen payload digest, with all ordered blank positions represented, rather than a copy of authored keys or a client request hash. Owner-global idempotency UUIDs, request hashes and replay snapshots are internal and excluded from export. Before both parts are complete the result endpoint returns only `available: false`, the lifecycle state and `keysRevealed: false`. File and PostgreSQL export reconcile elapsed deadlines under the same mutation/owner transaction before producing the allowlisted attempt history without `username`, idempotency data or request hashes. Deleting the account removes attempts and their mutation ledger in both storage backends.
+
+The oral browser journal is bounded to the exact owner generation, attempt and immutable form. It keeps only cursor,
+timer authority, ordered idempotent commands and recording metadata in local storage; local revision plus Web Locks
+serialize cooperating tabs, merge the newest journal before mutation and roll back an optimistic cursor if durable
+write fails. Observing tabs adopt a newer projection without writing another revision or issuing an observational
+server GET. A server-time sample advances only by the cross-navigation monotonic origin
+`performance.timeOrigin + performance.now()`, so reload or time spent closed/offline cannot pause the strict oral
+deadline and a corrected wall clock cannot mint an early submission. Commands rejected as too early remain ordered
+for later replay instead of being lost or blocking valid future stages.
+
+Browser readiness is deliberately not durable device authority: reopening an `oral_ready` attempt always repeats
+the microphone and immutable-asset preflight before start, even when an older journal says it was prepared. Once the
+oral timer is running, a server read reconciles every elapsed preparation boundary and any response deadline older
+than the shared five-second settlement grace. A missed response becomes one deterministic owner/attempt/stage-bound
+`response_timeout` technical record and the cursor advances, so a closed or offline client cannot remain trapped on
+an expired stage. File and PostgreSQL use the same real-clock domain transition and persist it under their owner
+serialization boundary.
+
+Canonical PCM16 WAV bytes live only in owner/attempt/form/task/response-bound IndexedDB. They are not included in
+the EGE attempt, repository export, application logs or normal submit payload. One exclusive held Web Lock binds the
+microphone owner to the exact owner generation and attempt; observing tabs cannot start or complete a competing
+capture. A cross-tab projection change cancels and discards the current capture before adopting and, where
+applicable, starting the new response; stale bytes cannot attach to another cursor. Account deletion and
+owner-incarnation invalidation purge the local oral journal,
+exact recording store and form asset caches. The retained server speaking assessment contains only bounded status,
+score/null, error and immutable settlement metadata and follows the account lifetime/deletion cascade of its EGE
+attempt.
+
+Every journal write is committed through the current owner-incarnation authority. If deletion wins after a WAV has
+entered IndexedDB but before its stage command is durably journaled, the stale operation rolls back and removes that
+exact WAV instead of recreating either private store. A malformed EGE semantic provider response is not repaired by
+an automatic second paid call; its retained failed claim can cross the explicit repeat-risk acknowledgement boundary
+only when the learner deliberately retries.
+
+When server reconciliation establishes `submitted` or `expired`, the browser checks every remaining queued
+completion before clearing the journal. Any completed local WAV whose exact recording UUID is absent from the
+authoritative ledger is deleted, including later entries after the first rejected command; an accepted UUID is
+retained only under its exact owner/attempt/form/task/response binding. A frozen semantic or pronunciation replay
+reads its existing result and quota metadata only and creates no new retention period or paid claim.
+
+Before new or recoverable EGE pronunciation/semantic provider work, both repositories re-read the current Base
+subscription and version-bound voice consent inside the owner serialization boundary. A frozen exact replay that
+cannot spend again remains recoverable without turning old authority into a new paid authorization. The first EGE
+Speaking bridge sync retains its accent locale/revision/effective-time pin for the account lifetime of the attempt;
+a later profile switch does not rewrite historical assessment provenance. Immutable command replay may retain its
+original audit snapshot, but the browser adopts the current attempt and removes a device-local WAV only when the
+current server ledger no longer binds its exact recording UUID. None of these guards add audio, transcript, consent
+contents or provider payloads to export; account deletion still removes the owner-bound server rows and local bytes.

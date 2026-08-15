@@ -5,6 +5,7 @@ import {
   applyEgeMockAssessmentRetryMutation,
   applyEgeMockDraftMutation,
   applyEgeMockOralMutation,
+  applyEgeMockOralStageMutation,
   applyEgeMockOralStartMutation,
   applyEgeMockWrittenMutation,
   createEgeMockAttempt,
@@ -14,6 +15,7 @@ import {
   egeMockResultPublicDto,
   egeMockStartDecision,
   reconcileEgeMockAttempt,
+  shouldSettleEgeMockOralStageBeforeReconcile,
 } from './attempt.js';
 import {
   applyEgeMockAssessmentRunDisposition,
@@ -71,16 +73,19 @@ async function writeAttempt(client, row) {
        written_submitted_at = $5, written_receipt = $6::jsonb,
        oral_available_until = $7, oral_started_at = $8, oral_deadline_at = $9,
        oral_submitted_at = $10, oral_recordings = $11::jsonb, oral_receipt = $12::jsonb,
-       assessment_status = $13, assessment_retry_count = $14,
-       assessment_error_code = $15, result = $16::jsonb,
-       writing_assessment = $17::jsonb, updated_at = $18
+       oral_progress = $13::jsonb, assessment_status = $14, assessment_retry_count = $15,
+       assessment_error_code = $16, result = $17::jsonb,
+       writing_assessment = $18::jsonb, speaking_assessment = $19::jsonb, updated_at = $20
      WHERE id = $1`,
     [row.id, row.state, row.revision, JSON.stringify(row.draft || {}), row.written_submitted_at,
       JSON.stringify(row.written_receipt ?? null), row.oral_available_until, row.oral_started_at,
       row.oral_deadline_at, row.oral_submitted_at, JSON.stringify(row.oral_recordings || {}),
-      JSON.stringify(row.oral_receipt ?? null), row.assessment_status, row.assessment_retry_count,
+      JSON.stringify(row.oral_receipt ?? null),
+      row.oral_progress == null ? null : JSON.stringify(row.oral_progress),
+      row.assessment_status, row.assessment_retry_count,
       row.assessment_error_code ?? null, JSON.stringify(row.result ?? null),
-      row.writing_assessment == null ? null : JSON.stringify(row.writing_assessment), row.updated_at],
+      row.writing_assessment == null ? null : JSON.stringify(row.writing_assessment),
+      row.speaking_assessment == null ? null : JSON.stringify(row.speaking_assessment), row.updated_at],
   );
 }
 
@@ -237,11 +242,12 @@ export function createPostgresEgeMockStore(pool) {
     });
   }
 
-  async function getEgeMockAttempt(username, attemptId) {
+  async function getEgeMockAttempt(username, attemptId, { now: suppliedNow } = {}) {
     return transaction(pool, async (client) => {
       const locked = await lockOwner(client, username, { missingReturnsNull: true });
       if (!locked) return null;
-      const { now } = locked;
+      const now = typeof suppliedNow === 'function' ? new Date(suppliedNow()) : locked.now;
+      if (!Number.isFinite(now.getTime())) throw new EgeMockAttemptError('EGE_MOCK_TIME_INVALID');
       const row = await lockedAttempt(client, username, attemptId);
       if (row && reconcileEgeMockAttempt(row, now)) await writeAttempt(client, row);
       return egeMockAttemptPublicDto(row);
@@ -265,16 +271,20 @@ export function createPostgresEgeMockStore(pool) {
     });
   }
 
-  async function mutate(username, attemptId, operation, candidate, apply) {
+  async function mutate(username, attemptId, operation, candidate, apply, { now: suppliedNow } = {}) {
     const outcome = await transaction(pool, async (client) => {
-      const { now } = await lockOwner(client, username, { requireSubscription: true });
+      const { now: databaseNow } = await lockOwner(client, username, { requireSubscription: true });
+      const now = typeof suppliedNow === 'function' ? new Date(suppliedNow()) : databaseNow;
+      if (!Number.isFinite(now.getTime())) throw new EgeMockAttemptError('EGE_MOCK_TIME_INVALID');
       const replay = await findMutationReplay(
         client, username, attemptId, candidate.idempotencyKey, operation, candidate.requestHash,
       );
       if (replay) return { ...replay, replayed: true };
       const row = await lockedAttempt(client, username, attemptId);
       if (!row) throw new EgeMockAttemptError('EGE_MOCK_ATTEMPT_NOT_FOUND');
-      const reconciled = reconcileEgeMockAttempt(row, now);
+      const reconciled = shouldSettleEgeMockOralStageBeforeReconcile(
+        row, operation, candidate, now,
+      ) ? false : reconcileEgeMockAttempt(row, now);
       let result;
       try {
         result = await apply(row, now, reconciled);
@@ -312,7 +322,11 @@ export function createPostgresEgeMockStore(pool) {
 
   const startEgeMockOral = (username, attemptId, candidate) => mutate(
     username, attemptId, 'oral_start', candidate, (row, now) => (
-      applyEgeMockOralStartMutation(row, { expectedRevision: candidate.expectedRevision, now })
+      applyEgeMockOralStartMutation(row, {
+        expectedRevision: candidate.expectedRevision,
+        now,
+        form: getEgeMockForm(row.form_id, row.form_revision),
+      })
     ),
   );
 
@@ -325,6 +339,19 @@ export function createPostgresEgeMockStore(pool) {
       receiptId: crypto.randomUUID(),
       reconciled,
     }),
+  );
+
+  const advanceEgeMockOralStage = (username, attemptId, candidate, options = {}) => mutate(
+    username, attemptId, 'oral_stage', candidate,
+    (row, now) => applyEgeMockOralStageMutation(row, {
+      form: getEgeMockForm(row.form_id, row.form_revision),
+      expectedRevision: candidate.expectedRevision,
+      action: candidate.action,
+      position: candidate.position,
+      responseNumber: candidate.responseNumber,
+      recording: candidate.recording,
+      now,
+    }), options,
   );
 
   async function getEgeMockResult(username, attemptId) {
@@ -562,6 +589,7 @@ export function createPostgresEgeMockStore(pool) {
     saveEgeMockDraft,
     submitEgeMockWritten,
     startEgeMockOral,
+    advanceEgeMockOralStage,
     submitEgeMockOral,
     getEgeMockResult,
     beginEgeMockAssessmentRun,

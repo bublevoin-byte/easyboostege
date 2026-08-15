@@ -79,6 +79,7 @@ export function createAccessControl({ ai, privacyPolicyVersion, countAiRequestsS
   }
 
   return {
+    privacyPolicyVersion,
     createUserRateLimiter,
     createOperationLimiter,
     hasAiBudget,

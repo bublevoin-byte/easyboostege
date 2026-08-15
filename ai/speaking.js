@@ -26,18 +26,21 @@ const sessionEvaluationRequests = [
     sessionMode: z.literal('full_section').optional(),
     sessionId: z.string().uuid(),
     pronunciationAssessmentKeys: z.array(z.string().uuid()).length(4),
+    acknowledgePossibleProviderRepeat: z.boolean().optional(),
   }).strict(),
   z.object({
     taskType: z.literal(3),
     sessionMode: z.literal('full_section').optional(),
     sessionId: z.string().uuid(),
     pronunciationAssessmentKeys: z.array(z.string().uuid()).length(5),
+    acknowledgePossibleProviderRepeat: z.boolean().optional(),
   }).strict(),
   z.object({
     taskType: z.literal(4),
     sessionMode: z.literal('full_section').optional(),
     sessionId: z.string().uuid(),
     pronunciationAssessmentKey: z.string().uuid(),
+    acknowledgePossibleProviderRepeat: z.boolean().optional(),
   }).strict(),
 ];
 export const speakingRequestSchema = z.union([
@@ -46,6 +49,7 @@ export const speakingRequestSchema = z.union([
     sessionMode: z.literal('full_section').optional(),
     sessionId: z.string().uuid(),
     pronunciationAssessmentKey: z.string().uuid(),
+    acknowledgePossibleProviderRepeat: z.boolean().optional(),
   }).strict(),
   ...sessionEvaluationRequests,
 ]);

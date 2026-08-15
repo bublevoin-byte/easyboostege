@@ -55,10 +55,14 @@ import {
   claimFullSpeakingResponseAssessment,
   completeFullSpeakingResponse,
   createFullSpeakingSession,
+  fullSpeakingResponseAssessmentClaimState,
   selectFullSpeakingVariant,
   submitFullSpeakingSession,
 } from '../speaking/full-section-session.js';
-import { recoverSpeakingEvaluationAttempt } from '../speaking/evaluation-claim.js';
+import {
+  recoverSpeakingEvaluationAttempt,
+  speakingEvaluationClaimRecoverable,
+} from '../speaking/evaluation-claim.js';
 import {
   assertSpeakingLearningSource,
   buildSpeakingLearningAttempt,
@@ -74,6 +78,7 @@ import {
   applyEgeMockAssessmentRetryMutation,
   applyEgeMockDraftMutation,
   applyEgeMockOralMutation,
+  applyEgeMockOralStageMutation,
   applyEgeMockOralStartMutation,
   applyEgeMockWrittenMutation,
   createEgeMockAttempt,
@@ -83,6 +88,7 @@ import {
   egeMockResultPublicDto,
   egeMockStartDecision,
   reconcileEgeMockAttempt,
+  shouldSettleEgeMockOralStageBeforeReconcile,
 } from '../ege-mock/attempt.js';
 import {
   applyEgeMockAssessmentRunDisposition,
@@ -91,6 +97,10 @@ import {
   egeMockAssessmentRunSettlement,
 } from '../ege-mock/assessment-run-command.js';
 import { getEgeMockForm } from '../ege-mock/catalog.js';
+import {
+  applyEgeMockSpeakingBridgeEvaluation,
+  syncEgeMockFullSpeakingSession,
+} from '../ege-mock/speaking-bridge.js';
 import {
   assertEgeMockWritingAssessmentRevisionAvailable,
   applyEgeMockWritingAssessmentClaim,
@@ -890,6 +900,23 @@ export function createFileRepository(filePath, {
 
   function serializeVoiceTutorMutation(run) { return serializeCoordinatedMutation(run); }
 
+  function requireEgeMockProviderAuthorization(username, now, voiceConsentPolicyVersion) {
+    const instant = new Date(now);
+    if (!Number.isFinite(instant.getTime())) throw new Error('SPEAKING_EVALUATION_CLAIM_TIME_INVALID');
+    if (Number(state.users[username]?.sub_until || 0) <= instant.getTime()) {
+      throw Object.assign(new Error('SUBSCRIPTION_REQUIRED'), {
+        code: 'SUBSCRIPTION_REQUIRED', status: 403,
+      });
+    }
+    const consent = state.users[username]?.privacy_consent || {};
+    if (!voiceConsentPolicyVersion || consent.policy_version !== voiceConsentPolicyVersion
+      || consent.voice_processing !== true) {
+      throw Object.assign(new Error('PRIVACY_CONSENT_REQUIRED'), {
+        code: 'PRIVACY_CONSENT_REQUIRED', status: 403,
+      });
+    }
+  }
+
   function egeMockInstant(clock) {
     const instant = new Date(typeof clock === 'function' ? clock() : clock);
     if (!Number.isFinite(instant.getTime())) throw new EgeMockAttemptError('EGE_MOCK_TIME_INVALID');
@@ -1052,7 +1079,9 @@ export function createFileRepository(filePath, {
         entry.username === username && entry.id === attemptId
       ));
       if (!attempt) throw new EgeMockAttemptError('EGE_MOCK_ATTEMPT_NOT_FOUND');
-      const reconciled = reconcileEgeMockAttempt(attempt, instant);
+      const reconciled = shouldSettleEgeMockOralStageBeforeReconcile(
+        attempt, operation, candidate, instant,
+      ) ? false : reconcileEgeMockAttempt(attempt, instant);
       let response;
       try {
         response = await apply(attempt, instant, reconciled);
@@ -1095,6 +1124,7 @@ export function createFileRepository(filePath, {
       (attempt, instant) => applyEgeMockOralStartMutation(attempt, {
         expectedRevision: candidate.expectedRevision,
         now: instant,
+        form: getEgeMockForm(attempt.form_id, attempt.form_revision),
       }));
   }
 
@@ -1107,6 +1137,45 @@ export function createFileRepository(filePath, {
         receiptId: crypto.randomUUID(),
         reconciled,
       }));
+  }
+
+  async function advanceEgeMockOralStage(username, attemptId, candidate, { now = () => new Date() } = {}) {
+    return mutateEgeMockAttempt(username, attemptId, 'oral_stage', candidate, { now },
+      (attempt, instant) => applyEgeMockOralStageMutation(attempt, {
+        form: getEgeMockForm(attempt.form_id, attempt.form_revision),
+        expectedRevision: candidate.expectedRevision,
+        action: candidate.action,
+        position: candidate.position,
+        responseNumber: candidate.responseNumber,
+        recording: candidate.recording,
+        now: instant,
+      }));
+  }
+
+  async function syncEgeMockSpeakingBridge(username, attemptId, { now = () => new Date() } = {}) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      const instant = requireEgeMockOwner(username, now);
+      const attempt = state.ege_mock_attempts.find((entry) => (
+        entry.username === username && entry.id === attemptId
+      ));
+      if (!attempt) throw new EgeMockAttemptError('EGE_MOCK_ATTEMPT_NOT_FOUND');
+      const index = state.speaking_full_sessions.findIndex((entry) => (
+        entry.username === username && entry.id === attemptId
+      ));
+      const existing = index < 0 ? null : state.speaking_full_sessions[index];
+      const session = syncEgeMockFullSpeakingSession(existing, {
+        username,
+        attempt,
+        form: getEgeMockForm(attempt.form_id, attempt.form_revision),
+        accentProfile: state.speaking_accent_profiles[username] || null,
+        now: instant,
+      });
+      if (index < 0) state.speaking_full_sessions.push(session);
+      else state.speaking_full_sessions[index] = session;
+      await persist();
+      return structuredClone(session);
+    });
   }
 
   async function getEgeMockResult(username, attemptId, { now = () => new Date() } = {}) {
@@ -2933,7 +3002,8 @@ export function createFileRepository(filePath, {
   }
 
   async function claimSpeakingEvaluation(username, input, promptVersion, evaluationFingerprint, {
-    now = new Date(), source = null,
+    now = null, source = null, allowRecovery = true, allowInvalidRecovery = false,
+    voiceConsentPolicyVersion = null,
   } = {}) {
     if (!/^[a-f0-9]{64}$/u.test(evaluationFingerprint)) {
       throw new Error('SPEAKING_EVALUATION_FINGERPRINT_INVALID');
@@ -2942,6 +3012,10 @@ export function createFileRepository(filePath, {
     return serializeCoordinatedMutation(async () => {
       await load();
       if (!state.users[username]) throw new Error('USER_NOT_FOUND');
+      const claimedAt = new Date(typeof now === 'function' ? now() : (now ?? new Date()));
+      if (!Number.isFinite(claimedAt.getTime())) {
+        throw new Error('SPEAKING_EVALUATION_CLAIM_TIME_INVALID');
+      }
       const sourceSessions = requestedSource?.sessionMode === 'full_section'
         ? state.speaking_full_sessions : state[`speaking_task${Number(input.taskType)}_sessions`];
       const sourceSession = requestedSource && Array.isArray(sourceSessions)
@@ -2954,8 +3028,16 @@ export function createFileRepository(filePath, {
       const replay = state.speaking_attempts.find((item) => (
         item.username === username && item.evaluation_fingerprint === evaluationFingerprint
       ));
+      const recovering = Boolean(replay && allowRecovery && speakingEvaluationClaimRecoverable(
+        replay, claimedAt, { allowInvalidProviderResponse: allowInvalidRecovery },
+      ));
+      if (sourceSession?.selection_reason === 'ege_mock' && (!replay || recovering)) {
+        requireEgeMockProviderAuthorization(username, claimedAt, voiceConsentPolicyVersion);
+      }
       if (replay) {
-        if (recoverSpeakingEvaluationAttempt(replay, now)) {
+        if (allowRecovery && recoverSpeakingEvaluationAttempt(replay, claimedAt, {
+          allowInvalidProviderResponse: allowInvalidRecovery,
+        })) {
           if (learningSource) Object.assign(replay, {
             source_session_id: learningSource.sessionId,
             source_task_ref: learningSource.taskRef,
@@ -2965,7 +3047,7 @@ export function createFileRepository(filePath, {
             accent_locale: learningSource.accentLocale,
             assistance_used: Boolean(replay.assistance_used || learningSource.assistanceUsed),
             assistance_updated_at: replay.assistance_used || !learningSource.assistanceUsed
-              ? replay.assistance_updated_at : new Date(now).getTime(),
+              ? replay.assistance_updated_at : claimedAt.getTime(),
             targeted_practice: learningSource.targetedPractice || null,
           });
           await persist();
@@ -2987,7 +3069,7 @@ export function createFileRepository(filePath, {
         model: null,
         status: 'pending',
         created_at: Date.now(),
-        evaluation_claimed_at: new Date(now).getTime(),
+        evaluation_claimed_at: claimedAt.getTime(),
         evaluation_claim_generation: 1,
         source_session_id: learningSource?.sessionId || null,
         source_task_ref: learningSource?.taskRef || null,
@@ -2996,7 +3078,7 @@ export function createFileRepository(filePath, {
         source_catalog_revision: learningSource?.catalogRevision || null,
         accent_locale: learningSource?.accentLocale || null,
         assistance_used: learningSource?.assistanceUsed ?? true,
-        assistance_updated_at: learningSource?.assistanceUsed === false ? null : new Date(now).getTime(),
+        assistance_updated_at: learningSource?.assistanceUsed === false ? null : claimedAt.getTime(),
         targeted_practice: learningSource?.targetedPractice || null,
       };
       state.speaking_attempts.push(attempt);
@@ -3297,11 +3379,20 @@ export function createFileRepository(filePath, {
     return session ? structuredClone(session) : null;
   }
 
+  function assertOrdinaryFullSpeakingMutation(session) {
+    if (session.selection_reason === 'ege_mock') {
+      throw Object.assign(new Error('SPEAKING_FULL_EGE_LIFECYCLE_REQUIRED'), {
+        code: 'SPEAKING_FULL_EGE_LIFECYCLE_REQUIRED',
+      });
+    }
+  }
+
   async function advanceFullSpeakingSessionStage(username, id, { now = new Date() } = {}) {
     return serializeSpeakingSessionMutation(async () => {
       await load();
       const session = state.speaking_full_sessions.find((item) => item.username === username && item.id === id);
       if (!session) return null;
+      assertOrdinaryFullSpeakingMutation(session);
       advanceFullSpeakingStage(session, now);
       await persist();
       return structuredClone(session);
@@ -3313,6 +3404,7 @@ export function createFileRepository(filePath, {
       await load();
       const session = state.speaking_full_sessions.find((item) => item.username === username && item.id === id);
       if (!session) return null;
+      assertOrdinaryFullSpeakingMutation(session);
       if (Number(session.current_task) !== Number(completion.taskType)
         || Number(session.current_response) !== Number(completion.responseNumber)) {
         throw Object.assign(new Error('SPEAKING_FULL_RESPONSE_OUT_OF_SEQUENCE'), {
@@ -3325,11 +3417,35 @@ export function createFileRepository(filePath, {
     });
   }
 
-  async function claimFullSpeakingSessionAssessment(username, id, binding) {
+  async function claimFullSpeakingSessionAssessment(
+    username, id, binding, { voiceConsentPolicyVersion = null } = {},
+  ) {
     return serializeSpeakingSessionMutation(async () => {
       await load();
       const session = state.speaking_full_sessions.find((item) => item.username === username && item.id === id);
       if (!session) return null;
+      if (session.selection_reason === 'ege_mock') {
+        const egeAttempt = state.ege_mock_attempts.find((item) => (
+          item.username === username && item.id === session.id
+        ));
+        if (!egeAttempt) throw Object.assign(new Error('EGE_MOCK_ATTEMPT_NOT_FOUND'), {
+          code: 'EGE_MOCK_ATTEMPT_NOT_FOUND',
+        });
+        if (!['assessment_pending', 'completed'].includes(egeAttempt.state)
+          || egeAttempt.oral_submitted_at == null) {
+          throw Object.assign(new Error('SPEAKING_FULL_EGE_LIFECYCLE_REQUIRED'), {
+            code: 'SPEAKING_FULL_EGE_LIFECYCLE_REQUIRED',
+          });
+        }
+        if (fullSpeakingResponseAssessmentClaimState(session, binding) === 'replayed') {
+          return structuredClone(session);
+        }
+        const effectiveNow = new Date(speakingLearningNow());
+        if (!Number.isFinite(effectiveNow.getTime())) throw new Error('SPEAKING_LEARNING_CLOCK_INVALID');
+        requireEgeMockProviderAuthorization(
+          username, effectiveNow, voiceConsentPolicyVersion,
+        );
+      }
       claimFullSpeakingResponseAssessment(session, binding);
       await persist();
       return structuredClone(session);
@@ -3341,6 +3457,7 @@ export function createFileRepository(filePath, {
       await load();
       const session = state.speaking_full_sessions.find((item) => item.username === username && item.id === id);
       if (!session) return null;
+      assertOrdinaryFullSpeakingMutation(session);
       const result = submitFullSpeakingSession(session, idempotencyKey, now);
       await persist();
       return { session: structuredClone(session), result };
@@ -3354,6 +3471,27 @@ export function createFileRepository(filePath, {
       await load();
       const session = state.speaking_full_sessions.find((item) => item.username === username && item.id === id);
       if (!session) return null;
+      let effectiveNow = now;
+      let egeAttempt = null;
+      if (session.selection_reason === 'ege_mock') {
+        effectiveNow = new Date(speakingLearningNow());
+        if (!Number.isFinite(effectiveNow.getTime())) throw new Error('SPEAKING_LEARNING_CLOCK_INVALID');
+        if (Number(state.users[username]?.sub_until || 0) <= effectiveNow.getTime()) {
+          throw Object.assign(new Error('SUBSCRIPTION_REQUIRED'), { code: 'SUBSCRIPTION_REQUIRED' });
+        }
+        egeAttempt = state.ege_mock_attempts.find((item) => (
+          item.username === username && item.id === session.id
+        ));
+        if (!egeAttempt) throw Object.assign(new Error('EGE_MOCK_ATTEMPT_NOT_FOUND'), {
+          code: 'EGE_MOCK_ATTEMPT_NOT_FOUND',
+        });
+        if (!['assessment_pending', 'completed'].includes(egeAttempt.state)
+          || egeAttempt.oral_submitted_at == null) {
+          throw Object.assign(new Error('SPEAKING_FULL_EGE_LIFECYCLE_REQUIRED'), {
+            code: 'SPEAKING_FULL_EGE_LIFECYCLE_REQUIRED',
+          });
+        }
+      }
       const requestedIds = Array.isArray(attemptIds) ? attemptIds.map(Number) : [];
       const attempts = requestedIds.map((attemptId) => state.speaking_attempts.find((item) => (
         item.username === username && Number(item.id) === attemptId
@@ -3363,7 +3501,10 @@ export function createFileRepository(filePath, {
           code: 'SPEAKING_FULL_EVALUATION_INVALID',
         });
       }
-      const result = applyFullSpeakingEvaluation(session, attempts, now);
+      const result = applyFullSpeakingEvaluation(session, attempts, effectiveNow);
+      if (session.selection_reason === 'ege_mock') {
+        applyEgeMockSpeakingBridgeEvaluation(egeAttempt, result, effectiveNow);
+      }
       await persist();
       return { session: structuredClone(session), result };
     });
@@ -5493,7 +5634,9 @@ export function createFileRepository(filePath, {
     saveEgeMockDraft,
     submitEgeMockWritten,
     startEgeMockOral,
+    advanceEgeMockOralStage,
     submitEgeMockOral,
+    syncEgeMockSpeakingBridge,
     getEgeMockResult,
     beginEgeMockAssessmentRun,
     settleEgeMockAssessmentRun,

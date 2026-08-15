@@ -306,6 +306,7 @@ function createDeferredBroadcastHub() {
 function createSync({
   online = false, failRequest = true, sharedValues = null, lockManager = createLockManager(),
   BroadcastChannel, failSetKey = null, failSetKeys = [], cacheNames = [], cacheStorage = null,
+  indexedDB = null,
 } = {}) {
   const values = sharedValues || new Map();
   const cacheStore = new Set(cacheNames);
@@ -328,6 +329,7 @@ function createSync({
     navigator: { onLine: online, locks: lockManager },
     crypto: { randomUUID: () => `00000000-0000-4000-8000-${String(++uuid).padStart(12, '0')}` },
     BroadcastChannel,
+    indexedDB,
     addEventListener() {},
     EasyBoostApi: {
       async post(path, body) {
@@ -359,6 +361,7 @@ function createSync({
     Promise,
     crypto: window.crypto,
     BroadcastChannel,
+    indexedDB,
   });
   vm.runInContext(ownerIncarnationSource, context);
   vm.runInContext(syncSource, context);
@@ -990,6 +993,63 @@ test('account deletion purges the exact EGE owner continuation and immutable cac
   assert.equal(active.values.has('easyboost-ege-mock-written-v1:grammar-owner:0'), false);
   assert.equal(active.values.has('easyboost-ege-mock-written-v1:other-owner:0'), true);
   assert.deepEqual([...active.cacheStore], ['easyboost-static-keep']);
+});
+
+test('account deletion purges exact-owner oral WAV rows and ownerless legacy rows', async () => {
+  const rows = [
+    { binding: { username: 'grammar-owner', ownerGeneration: 0 }, blob: 'owner-wav' },
+    { binding: { username: 'other-owner', ownerGeneration: 0 }, blob: 'other-wav' },
+    { binding: { ownerGeneration: 0 }, blob: 'legacy-unattributed-wav' },
+  ];
+  const indexedDB = {
+    open() {
+      const request = {};
+      queueMicrotask(() => {
+        request.result = {
+          objectStoreNames: { contains: () => true },
+          transaction() {
+            const transaction = {};
+            transaction.objectStore = () => ({
+              openCursor() {
+                const cursorRequest = {};
+                let index = 0;
+                const project = () => queueMicrotask(() => {
+                  if (index >= rows.length) {
+                    cursorRequest.result = null;
+                    cursorRequest.onsuccess?.();
+                    queueMicrotask(() => transaction.oncomplete?.());
+                    return;
+                  }
+                  const current = rows[index];
+                  cursorRequest.result = {
+                    value: current,
+                    delete() { rows.splice(index, 1); index -= 1; },
+                    continue() { index += 1; project(); },
+                  };
+                  cursorRequest.onsuccess?.();
+                });
+                project();
+                return cursorRequest;
+              },
+            });
+            return transaction;
+          },
+          close() {},
+        };
+        request.onsuccess?.();
+      });
+      return request;
+    },
+  };
+  const active = createSync({ online: true, failRequest: false, indexedDB });
+  active.sync.setOwner('grammar-owner');
+  active.values.set('easyboost-ege-mock-oral-v1:grammar-owner:0', '{"private":"oral"}');
+
+  assert.equal(await active.sync.deleteOwner(async () => {}), true);
+  assert.equal(active.values.has('easyboost-ege-mock-oral-v1:grammar-owner:0'), false);
+  assert.deepEqual(rows, [{
+    binding: { username: 'other-owner', ownerGeneration: 0 }, blob: 'other-wav',
+  }]);
 });
 
 test('owner deletion invalidates authority before best-effort CacheStorage cleanup settles', async () => {

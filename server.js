@@ -17,7 +17,8 @@ import {
   failEgeMockWritingAssessment, prepareEgeMockWritingAssessmentItemOutcome,
   recordEgeMockWritingAssessmentItemOutcome,
   retryEgeMockAssessment, saveEgeMockDraft, startEgeMockAttempt,
-  startEgeMockOral, submitEgeMockOral, submitEgeMockWritten,
+  advanceEgeMockOralStage, startEgeMockOral, submitEgeMockOral,
+  submitEgeMockWritten, syncEgeMockSpeakingBridge,
 } from './db.js';
 import {
   assignSpeakingTask1Session, assignSpeakingTask2Session, assignSpeakingTask3Session, assignSpeakingTask4Session,
@@ -260,7 +261,8 @@ const dbApi = {
   completeFullSpeakingSessionResponse, claimFullSpeakingSessionAssessment, submitFullSpeakingSessionResult,
   completeFullSpeakingSessionEvaluation,
   startEgeMockAttempt, getCurrentEgeMockAttempt, getEgeMockAttempt, saveEgeMockDraft,
-  submitEgeMockWritten, startEgeMockOral, submitEgeMockOral, getEgeMockResult,
+  submitEgeMockWritten, startEgeMockOral, advanceEgeMockOralStage, submitEgeMockOral,
+  syncEgeMockSpeakingBridge, getEgeMockResult,
   beginEgeMockAssessmentRun, settleEgeMockAssessmentRun, retryEgeMockAssessment,
   claimEgeMockWritingAssessment, renewEgeMockWritingAssessmentClaim,
   prepareEgeMockWritingAssessmentItemOutcome,
@@ -355,7 +357,7 @@ const voiceTutorProxyConfigured = Boolean(
   config.ai.xaiEnabled && config.ai.xaiKey && config.voiceTutor.model && config.voiceTutor.voice,
 );
 const {
-  createUserRateLimiter, createOperationLimiter, ttsLimiter, sttLimiter, hasAiBudget,
+  privacyPolicyVersion, createUserRateLimiter, createOperationLimiter, ttsLimiter, sttLimiter, hasAiBudget,
   requireAiBudget, requireActiveSubscription, requirePrivacyConsent,
 } = createAccessControl({
   ai: config.ai,
@@ -368,6 +370,7 @@ const voiceTutorSessionStartLimiter = createUserRateLimiter(config.voiceTutor.se
 
 
 const access = {
+  privacyPolicyVersion,
   createOperationLimiter, ttsLimiter, sttLimiter, hasAiBudget,
   requireAiBudget, requireActiveSubscription, requirePrivacyConsent,
 };

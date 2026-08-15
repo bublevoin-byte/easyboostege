@@ -15,6 +15,7 @@ import { SPEAKING_TASK1_CATALOG } from '../public/content/speaking/task1-v1.js';
 import { SPEAKING_TASK2_CATALOG } from '../public/content/speaking/task2-v1.js';
 import { SPEAKING_TASK3_CATALOG } from '../public/content/speaking/task3-v1.js';
 import { SPEAKING_TASK4_CATALOG } from '../public/content/speaking/task4-v1.js';
+import { AUTOMATIC_ASSESSMENT_PUBLIC_CONTRACT } from '../shared/automatic-assessment-contract.js';
 
 const catalogs = [
   SPEAKING_TASK1_CATALOG, SPEAKING_TASK2_CATALOG,
@@ -220,6 +221,35 @@ test('full Speaking scores skipped and technical tasks as zero without provider 
     applyFullSpeakingEvaluation(session, [], new Date('2026-08-06T10:25:00.000Z')),
     result,
   );
+});
+
+test('EGE Speaking keeps incomplete evidence retryable and never invents a zero score', () => {
+  const now = new Date('2026-08-06T10:20:00.000Z');
+  const session = createFullSpeakingSession({
+    username: 'ege-owner', catalogs, variantIndex: 0, selectionReason: 'ege_mock', now,
+  });
+  session.responses.forEach((task, taskIndex) => task.entries.forEach((entry) => {
+    const technical = taskIndex % 2 === 1;
+    Object.assign(entry, {
+      status: technical ? 'technical_issue' : 'skipped', recordingDurationSeconds: 0,
+      micCheck: technical ? 'quiet' : 'skipped', localPlayback: false,
+      technicalIssueCode: technical ? 'recording_failed' : null,
+      completedAt: now.toISOString(),
+    });
+  }));
+  session.phase = 'ready_to_submit';
+  submitFullSpeakingSession(session, '75500000-0000-4000-8000-000000000033', now);
+
+  const result = applyFullSpeakingEvaluation(session, [], now);
+
+  assert.equal(result.earnedScore, null);
+  assert.equal(result.assessment.status, 'needs_retry');
+  assert.deepEqual({
+    mode: result.assessment.mode,
+    scoreKind: result.assessment.scoreKind,
+    warning: result.assessment.warning,
+  }, AUTOMATIC_ASSESSMENT_PUBLIC_CONTRACT);
+  assert.deepEqual(result.taskResults.map((item) => item.earnedScore), [null, null, null, null]);
 });
 
 test('full Speaking refuses cross-owner, wrong-task and incomplete evaluation evidence', () => {

@@ -51,12 +51,14 @@ import {
   claimFullSpeakingResponseAssessment,
   completeFullSpeakingResponse,
   createFullSpeakingSession,
+  fullSpeakingResponseAssessmentClaimState,
   selectFullSpeakingVariant,
   submitFullSpeakingSession,
 } from '../speaking/full-section-session.js';
 import {
   SPEAKING_EVALUATION_CLAIM_LEASE_MS,
   SPEAKING_EVALUATION_RETRYABLE_ERRORS,
+  speakingEvaluationClaimRecoverable,
 } from '../speaking/evaluation-claim.js';
 import {
   assertSpeakingLearningSource,
@@ -69,6 +71,11 @@ import {
 } from '../speaking/learning-loop.js';
 import { isMonotonicAdaptiveRetentionRefresh } from '../adaptive-learning/retention.js';
 import { createPostgresEgeMockStore } from '../ege-mock/postgres-store.js';
+import {
+  applyEgeMockSpeakingBridgeEvaluation,
+  syncEgeMockFullSpeakingSession,
+} from '../ege-mock/speaking-bridge.js';
+import { getEgeMockForm } from '../ege-mock/catalog.js';
 import { adaptiveRepeatExecutionMatches } from '../adaptive-learning/repeat-execution.js';
 import {
   adaptiveLearningSessionPublicDto,
@@ -2552,23 +2559,30 @@ export function createPostgresRepository(connectionString, {
   }
 
   async function claimSpeakingEvaluation(username, input, promptVersion, evaluationFingerprint, {
-    now = new Date(), source = null,
+    now = null, source = null, allowRecovery = true, allowInvalidRecovery = false,
+    voiceConsentPolicyVersion = null,
   } = {}) {
     if (!/^[a-f0-9]{64}$/u.test(evaluationFingerprint)) {
       throw new Error('SPEAKING_EVALUATION_FINGERPRINT_INVALID');
     }
     const requestedSource = source == null ? null : assertSpeakingLearningSource(source);
-    const claimedAt = new Date(now);
-    if (!Number.isFinite(claimedAt.getTime())) throw new Error('SPEAKING_EVALUATION_CLAIM_TIME_INVALID');
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
       const owner = await client.query(
-        'SELECT username FROM users WHERE username = $1 FOR UPDATE',
+        'SELECT username, subscription_until FROM users WHERE username = $1 FOR UPDATE',
         [username],
       );
       if (!owner.rowCount) throw new Error('USER_NOT_FOUND');
+      const claimClock = now == null
+        ? (await client.query('SELECT clock_timestamp() AS now')).rows[0].now
+        : (typeof now === 'function' ? now() : now);
+      const claimedAt = new Date(claimClock);
+      if (!Number.isFinite(claimedAt.getTime())) {
+        throw new Error('SPEAKING_EVALUATION_CLAIM_TIME_INVALID');
+      }
       let learningSource = requestedSource;
+      let sourceSessionRow = null;
       if (requestedSource) {
         const taskType = Number(input.taskType);
         if (!Number.isInteger(taskType) || taskType < 1 || taskType > 4) {
@@ -2577,7 +2591,7 @@ export function createPostgresRepository(connectionString, {
         const fullSection = requestedSource.sessionMode === 'full_section';
         const sourceSession = fullSection
           ? await client.query(
-            `SELECT id, assignments, status, accent_locale
+            `SELECT id, assignments, status, accent_locale, selection_reason
              FROM speaking_full_sessions WHERE username = $1 AND id = $2 FOR UPDATE`,
             [username, requestedSource.sessionId],
           )
@@ -2591,6 +2605,37 @@ export function createPostgresRepository(connectionString, {
           taskType,
           session: sourceSession.rows[0],
         });
+        sourceSessionRow = sourceSession.rows[0] || null;
+      }
+      const replayForAuthorization = await client.query(
+        `SELECT status, error_code, evaluation_claimed_at, created_at
+         FROM speaking_attempts
+         WHERE username = $1 AND evaluation_fingerprint = $2 FOR UPDATE`,
+        [username, evaluationFingerprint],
+      );
+      const replayRow = replayForAuthorization.rows[0] || null;
+      const recovering = Boolean(replayRow && allowRecovery && speakingEvaluationClaimRecoverable(
+        replayRow, claimedAt, { allowInvalidProviderResponse: allowInvalidRecovery },
+      ));
+      if (sourceSessionRow?.selection_reason === 'ege_mock' && (!replayRow || recovering)) {
+        if (!owner.rows[0].subscription_until
+          || new Date(owner.rows[0].subscription_until) <= claimedAt) {
+          throw Object.assign(new Error('SUBSCRIPTION_REQUIRED'), {
+            code: 'SUBSCRIPTION_REQUIRED', status: 403,
+          });
+        }
+        const consent = await client.query(
+          `SELECT voice_processing, policy_version FROM privacy_consents
+           WHERE username = $1 FOR UPDATE`,
+          [username],
+        );
+        if (!voiceConsentPolicyVersion
+          || consent.rows[0]?.policy_version !== voiceConsentPolicyVersion
+          || consent.rows[0]?.voice_processing !== true) {
+          throw Object.assign(new Error('PRIVACY_CONSENT_REQUIRED'), {
+            code: 'PRIVACY_CONSENT_REQUIRED', status: 403,
+          });
+        }
       }
       const values = [
         username,
@@ -2602,7 +2647,9 @@ export function createPostgresRepository(connectionString, {
         promptVersion,
         claimedAt,
         new Date(claimedAt.getTime() - SPEAKING_EVALUATION_CLAIM_LEASE_MS),
-        SPEAKING_EVALUATION_RETRYABLE_ERRORS,
+        allowInvalidRecovery
+          ? [...SPEAKING_EVALUATION_RETRYABLE_ERRORS, 'AI_RESPONSE_INVALID']
+          : SPEAKING_EVALUATION_RETRYABLE_ERRORS,
         learningSource?.sessionId || null,
         learningSource?.taskRef || null,
         learningSource?.taskRevision || null,
@@ -2611,6 +2658,7 @@ export function createPostgresRepository(connectionString, {
         learningSource?.assistanceUsed ?? true,
         learningSource?.accentLocale || null,
         learningSource?.targetedPractice ? JSON.stringify(learningSource.targetedPractice) : null,
+        allowRecovery === true,
       ];
       const inserted = await client.query(
       `INSERT INTO speaking_attempts
@@ -2638,13 +2686,13 @@ export function createPostgresRepository(connectionString, {
            WHEN EXCLUDED.assistance_used THEN EXCLUDED.assistance_updated_at
            ELSE NULL
          END
-       WHERE (
+       WHERE $19::boolean AND ((
          speaking_attempts.status = 'pending'
          AND COALESCE(speaking_attempts.evaluation_claimed_at, speaking_attempts.created_at) <= $9
        ) OR (
          speaking_attempts.status = 'failed'
          AND speaking_attempts.error_code = ANY($10::text[])
-       )
+       ))
        RETURNING id, username, task_type, assignment, assignment_fingerprint,
           evaluation_fingerprint, evaluation_claimed_at, evaluation_claim_generation,
           source_session_id, source_task_ref, source_task_revision, source_catalog_id,
@@ -3189,6 +3237,77 @@ export function createPostgresRepository(connectionString, {
     }
   }
 
+  async function syncEgeMockSpeakingBridge(username, attemptId, { now = () => new Date() } = {}) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const instant = typeof now === 'function' ? now() : now;
+      const owner = await client.query(
+        'SELECT username FROM users WHERE username = $1 FOR UPDATE', [username],
+      );
+      if (!owner.rowCount) throw Object.assign(new Error('EGE_MOCK_OWNER_NOT_FOUND'), {
+        code: 'EGE_MOCK_OWNER_NOT_FOUND',
+      });
+      const attemptResult = await client.query(
+        'SELECT * FROM ege_mock_attempts WHERE username = $1 AND id = $2 FOR UPDATE',
+        [username, attemptId],
+      );
+      if (!attemptResult.rowCount) throw Object.assign(new Error('EGE_MOCK_ATTEMPT_NOT_FOUND'), {
+        code: 'EGE_MOCK_ATTEMPT_NOT_FOUND',
+      });
+      const existingResult = await client.query(
+        'SELECT * FROM speaking_full_sessions WHERE username = $1 AND id = $2 FOR UPDATE',
+        [username, attemptId],
+      );
+      const profileResult = await client.query(
+        'SELECT * FROM speaking_accent_profiles WHERE username = $1', [username],
+      );
+      const attempt = attemptResult.rows[0];
+      const session = syncEgeMockFullSpeakingSession(existingResult.rows[0] || null, {
+        username,
+        attempt,
+        form: getEgeMockForm(attempt.form_id, attempt.form_revision),
+        accentProfile: profileResult.rowCount
+          ? publicSpeakingAccentProfile(profileResult.rows[0]) : null,
+        now: instant,
+      });
+      const saved = await client.query(
+        `INSERT INTO speaking_full_sessions
+          (id, username, mode, format_id, format_revision, catalog_id, catalog_revision,
+           variant_index, selection_reason, maximum_score, assignments, responses, status, phase,
+           current_task, current_response, stage_started_at, stage_deadline_at, accent_locale,
+           accent_profile_revision, accent_effective_at, assigned_at, submitted_at,
+           submission_key, submission_response)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb,$13,$14,$15,$16,
+                 $17,$18,$19,$20,$21,$22,$23,$24,$25::jsonb)
+         ON CONFLICT (id) DO UPDATE SET
+           responses = EXCLUDED.responses, status = EXCLUDED.status, phase = EXCLUDED.phase,
+           current_task = EXCLUDED.current_task, current_response = EXCLUDED.current_response,
+           stage_started_at = EXCLUDED.stage_started_at, stage_deadline_at = EXCLUDED.stage_deadline_at,
+           submitted_at = EXCLUDED.submitted_at, submission_key = EXCLUDED.submission_key,
+           submission_response = EXCLUDED.submission_response
+         WHERE speaking_full_sessions.username = EXCLUDED.username
+         RETURNING *`,
+        [session.id, username, session.mode, session.format_id, session.format_revision,
+          session.catalog_id, session.catalog_revision, session.variant_index,
+          session.selection_reason, session.maximum_score, JSON.stringify(session.assignments),
+          JSON.stringify(session.responses), session.status, session.phase, session.current_task,
+          session.current_response, session.stage_started_at, session.stage_deadline_at,
+          session.accent_locale, session.accent_profile_revision, session.accent_effective_at,
+          session.assigned_at, session.submitted_at, session.submission_key,
+          session.submission_response ? JSON.stringify(session.submission_response) : null],
+      );
+      if (!saved.rowCount) throw Object.assign(new Error('EGE_MOCK_SPEAKING_BRIDGE_INVALID'), {
+        code: 'EGE_MOCK_SPEAKING_BRIDGE_INVALID',
+      });
+      await client.query('COMMIT');
+      return saved.rows[0];
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
   async function getFullSpeakingSession(username, id) {
     const result = await pool.query(
       `SELECT * FROM speaking_full_sessions
@@ -3196,6 +3315,21 @@ export function createPostgresRepository(connectionString, {
       [username, id],
     );
     return result.rows[0] || null;
+  }
+
+  function updateFullSpeakingSession(client, username, id, session) {
+    return client.query(
+      `UPDATE speaking_full_sessions
+       SET responses = $3::jsonb, status = $4, phase = $5, current_task = $6,
+           current_response = $7, stage_started_at = $8, stage_deadline_at = $9,
+           submitted_at = $10, submission_key = $11, submission_response = $12::jsonb
+       WHERE username = $1 AND id = $2
+       RETURNING *`,
+      [username, id, JSON.stringify(session.responses), session.status, session.phase,
+        session.current_task, session.current_response, session.stage_started_at,
+        session.stage_deadline_at, session.submitted_at, session.submission_key,
+        session.submission_response ? JSON.stringify(session.submission_response) : null],
+    );
   }
 
   async function mutateFullSpeakingSession(username, id, mutate) {
@@ -3211,19 +3345,13 @@ export function createPostgresRepository(connectionString, {
         return null;
       }
       const session = existing.rows[0];
+      if (session.selection_reason === 'ege_mock') {
+        throw Object.assign(new Error('SPEAKING_FULL_EGE_LIFECYCLE_REQUIRED'), {
+          code: 'SPEAKING_FULL_EGE_LIFECYCLE_REQUIRED',
+        });
+      }
       const value = await mutate(session, client);
-      const updated = await client.query(
-        `UPDATE speaking_full_sessions
-         SET responses = $3::jsonb, status = $4, phase = $5, current_task = $6,
-             current_response = $7, stage_started_at = $8, stage_deadline_at = $9,
-             submitted_at = $10, submission_key = $11, submission_response = $12::jsonb
-         WHERE username = $1 AND id = $2
-         RETURNING *`,
-        [username, id, JSON.stringify(session.responses), session.status, session.phase,
-          session.current_task, session.current_response, session.stage_started_at,
-          session.stage_deadline_at, session.submitted_at, session.submission_key,
-          session.submission_response ? JSON.stringify(session.submission_response) : null],
-      );
+      const updated = await updateFullSpeakingSession(client, username, id, session);
       await client.query('COMMIT');
       return { session: updated.rows[0], value };
     } catch (error) {
@@ -3254,7 +3382,88 @@ export function createPostgresRepository(connectionString, {
     return mutation?.session || null;
   }
 
-  async function claimFullSpeakingSessionAssessment(username, id, binding) {
+  async function claimEgeMockFullSpeakingSessionAssessment(
+    username, id, binding, { voiceConsentPolicyVersion = null } = {},
+  ) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const owner = await client.query(
+        'SELECT username, subscription_until FROM users WHERE username = $1 FOR UPDATE', [username],
+      );
+      if (!owner.rowCount) {
+        await client.query('COMMIT');
+        return null;
+      }
+      const egeAttempt = await client.query(
+        `SELECT state, oral_submitted_at FROM ege_mock_attempts
+         WHERE username = $1 AND id = $2 FOR UPDATE`,
+        [username, id],
+      );
+      if (!egeAttempt.rowCount) throw Object.assign(new Error('EGE_MOCK_ATTEMPT_NOT_FOUND'), {
+        code: 'EGE_MOCK_ATTEMPT_NOT_FOUND',
+      });
+      if (!['assessment_pending', 'completed'].includes(egeAttempt.rows[0].state)
+        || egeAttempt.rows[0].oral_submitted_at == null) {
+        throw Object.assign(new Error('SPEAKING_FULL_EGE_LIFECYCLE_REQUIRED'), {
+          code: 'SPEAKING_FULL_EGE_LIFECYCLE_REQUIRED',
+        });
+      }
+      const existing = await client.query(
+        'SELECT * FROM speaking_full_sessions WHERE username = $1 AND id = $2 FOR UPDATE',
+        [username, id],
+      );
+      if (!existing.rowCount) {
+        await client.query('COMMIT');
+        return null;
+      }
+      if (existing.rows[0].selection_reason !== 'ege_mock') {
+        throw Object.assign(new Error('SPEAKING_FULL_EGE_LIFECYCLE_REQUIRED'), {
+          code: 'SPEAKING_FULL_EGE_LIFECYCLE_REQUIRED',
+        });
+      }
+      if (fullSpeakingResponseAssessmentClaimState(existing.rows[0], binding) === 'replayed') {
+        await client.query('COMMIT');
+        return existing.rows[0];
+      }
+      const effectiveNow = new Date((await client.query(
+        'SELECT clock_timestamp() AS now',
+      )).rows[0].now);
+      if (!owner.rows[0].subscription_until
+        || new Date(owner.rows[0].subscription_until) <= effectiveNow) {
+        throw Object.assign(new Error('SUBSCRIPTION_REQUIRED'), { code: 'SUBSCRIPTION_REQUIRED' });
+      }
+      const consent = await client.query(
+        `SELECT voice_processing, policy_version FROM privacy_consents
+         WHERE username = $1 FOR UPDATE`,
+        [username],
+      );
+      if (!voiceConsentPolicyVersion
+        || consent.rows[0]?.policy_version !== voiceConsentPolicyVersion
+        || consent.rows[0]?.voice_processing !== true) {
+        throw Object.assign(new Error('PRIVACY_CONSENT_REQUIRED'), {
+          code: 'PRIVACY_CONSENT_REQUIRED', status: 403,
+        });
+      }
+      claimFullSpeakingResponseAssessment(existing.rows[0], binding);
+      const updated = await updateFullSpeakingSession(client, username, id, existing.rows[0]);
+      await client.query('COMMIT');
+      return updated.rows[0];
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async function claimFullSpeakingSessionAssessment(username, id, binding, options = {}) {
+    const descriptor = await pool.query(
+      'SELECT selection_reason FROM speaking_full_sessions WHERE username = $1 AND id = $2',
+      [username, id],
+    );
+    if (!descriptor.rowCount) return null;
+    if (descriptor.rows[0].selection_reason === 'ege_mock') {
+      return claimEgeMockFullSpeakingSessionAssessment(username, id, binding, options);
+    }
     const mutation = await mutateFullSpeakingSession(
       username, id, (session) => claimFullSpeakingResponseAssessment(session, binding),
     );
@@ -3268,10 +3477,96 @@ export function createPostgresRepository(connectionString, {
     return mutation ? { session: mutation.session, result: mutation.value } : null;
   }
 
+  async function completeEgeMockSpeakingSessionEvaluation(username, id, requestedIds, now) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const owner = await client.query(
+        'SELECT username, subscription_until FROM users WHERE username = $1 FOR UPDATE', [username],
+      );
+      if (!owner.rowCount) {
+        await client.query('COMMIT');
+        return null;
+      }
+      const effectiveNow = new Date((await client.query(
+        'SELECT clock_timestamp() AS now',
+      )).rows[0].now);
+      if (!owner.rows[0].subscription_until
+        || new Date(owner.rows[0].subscription_until) <= effectiveNow) {
+        throw Object.assign(new Error('SUBSCRIPTION_REQUIRED'), { code: 'SUBSCRIPTION_REQUIRED' });
+      }
+      const egeAttempt = await client.query(
+        'SELECT * FROM ege_mock_attempts WHERE username = $1 AND id = $2 FOR UPDATE',
+        [username, id],
+      );
+      if (!egeAttempt.rowCount) throw Object.assign(new Error('EGE_MOCK_ATTEMPT_NOT_FOUND'), {
+        code: 'EGE_MOCK_ATTEMPT_NOT_FOUND',
+      });
+      if (!['assessment_pending', 'completed'].includes(egeAttempt.rows[0].state)
+        || egeAttempt.rows[0].oral_submitted_at == null) {
+        throw Object.assign(new Error('SPEAKING_FULL_EGE_LIFECYCLE_REQUIRED'), {
+          code: 'SPEAKING_FULL_EGE_LIFECYCLE_REQUIRED',
+        });
+      }
+      const existing = await client.query(
+        'SELECT * FROM speaking_full_sessions WHERE username = $1 AND id = $2 FOR UPDATE',
+        [username, id],
+      );
+      if (!existing.rowCount) {
+        await client.query('COMMIT');
+        return null;
+      }
+      if (existing.rows[0].selection_reason !== 'ege_mock') {
+        throw Object.assign(new Error('SPEAKING_FULL_EGE_LIFECYCLE_REQUIRED'), {
+          code: 'SPEAKING_FULL_EGE_LIFECYCLE_REQUIRED',
+        });
+      }
+      const attempts = requestedIds.length ? await client.query(
+        `SELECT * FROM speaking_attempts
+         WHERE username = $1 AND id = ANY($2::bigint[])
+         ORDER BY array_position($2::bigint[], id) FOR SHARE`,
+        [username, requestedIds],
+      ) : { rows: [] };
+      if (attempts.rows.length !== requestedIds.length) {
+        throw Object.assign(new Error('SPEAKING_FULL_EVALUATION_INVALID'), {
+          code: 'SPEAKING_FULL_EVALUATION_INVALID',
+        });
+      }
+      const session = existing.rows[0];
+      const result = applyFullSpeakingEvaluation(session, attempts.rows, effectiveNow);
+      const updatedEge = applyEgeMockSpeakingBridgeEvaluation(
+        egeAttempt.rows[0], result, effectiveNow,
+      );
+      await client.query(
+        `UPDATE ege_mock_attempts
+         SET state = $3, revision = $4, assessment_status = $5,
+             assessment_retry_count = $6, speaking_assessment = $7::jsonb, updated_at = $8
+         WHERE username = $1 AND id = $2`,
+        [username, id, updatedEge.state, updatedEge.revision, updatedEge.assessment_status,
+          updatedEge.assessment_retry_count, JSON.stringify(updatedEge.speaking_assessment),
+          updatedEge.updated_at],
+      );
+      const updatedSession = await updateFullSpeakingSession(client, username, id, session);
+      await client.query('COMMIT');
+      return { session: updatedSession.rows[0], result };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
   async function completeFullSpeakingSessionEvaluation(
     username, id, attemptIds, { now = new Date() } = {},
   ) {
     const requestedIds = Array.isArray(attemptIds) ? attemptIds.map(Number) : [];
+    const descriptor = await pool.query(
+      'SELECT selection_reason FROM speaking_full_sessions WHERE username = $1 AND id = $2',
+      [username, id],
+    );
+    if (!descriptor.rowCount) return null;
+    if (descriptor.rows[0].selection_reason === 'ege_mock') {
+      return completeEgeMockSpeakingSessionEvaluation(username, id, requestedIds, now);
+    }
     const mutation = await mutateFullSpeakingSession(username, id, async (session, client) => {
       const attempts = requestedIds.length ? await client.query(
         `SELECT * FROM speaking_attempts
@@ -3283,7 +3578,8 @@ export function createPostgresRepository(connectionString, {
           code: 'SPEAKING_FULL_EVALUATION_INVALID',
         });
       }
-      return applyFullSpeakingEvaluation(session, attempts.rows, now);
+      const result = applyFullSpeakingEvaluation(session, attempts.rows, now);
+      return result;
     });
     return mutation ? { session: mutation.session, result: mutation.value } : null;
   }
@@ -6370,6 +6666,7 @@ export function createPostgresRepository(connectionString, {
     getSpeakingTask4Session,
     completeSpeakingTask4Session,
     assignFullSpeakingSession,
+    syncEgeMockSpeakingBridge,
     getFullSpeakingSession,
     advanceFullSpeakingSessionStage,
     completeFullSpeakingSessionResponse,
