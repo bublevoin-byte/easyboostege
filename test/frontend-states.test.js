@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
+import { AUTOMATIC_ASSESSMENT_WARNING } from '../public/automatic-assessment-contract.js';
 
 /*
  * Код предметных экранов приезжает отдельными чанками, поэтому «приложение» — это оболочка
@@ -18,12 +19,22 @@ async function readApplicationSource() {
 }
 
 const source = await fs.readFile(new URL('../public/components.js', import.meta.url), 'utf8');
+const executableSource = source.replace(/^import[^;]+;\r?\n/u, '');
 const appSource = await readApplicationSource();
 const htmlSource = await fs.readFile(new URL('../public/index.html', import.meta.url), 'utf8');
 
 function createComponents() {
   const window = { document: { getElementById: () => null, createElement: () => ({ setAttribute() {} }) } };
-  vm.runInNewContext(source, { window, Object, Number, Math, Array, String, Boolean });
+  vm.runInNewContext(executableSource, {
+    window,
+    Object,
+    Number,
+    Math,
+    Array,
+    String,
+    Boolean,
+    AUTOMATIC_ASSESSMENT_WARNING,
+  });
   return window.EasyBoostComponents;
 }
 

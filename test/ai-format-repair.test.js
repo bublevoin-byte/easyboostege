@@ -37,7 +37,7 @@ function findAvailablePort() {
 function validReview(words) {
   return {
     words,
-    in_range: words >= 100 && words <= 140,
+    in_range: words >= 90 && words <= 154,
     overall_got: 4,
     overall_max: 6,
     verdict: 'Хорошая работа',
@@ -54,7 +54,7 @@ function validReview(words) {
 function validTask38Review(words) {
   return {
     words,
-    in_range: words >= 200 && words <= 250,
+    in_range: words >= 180 && words <= 275,
     overall_got: 8,
     overall_max: 14,
     verdict: 'Хорошая основа проекта',
@@ -347,7 +347,7 @@ test('a second malformed answer ends the request instead of retrying forever', {
         status: 'failed',
         provider: 'grok',
         model: 'route-provenance-model',
-        promptVersion: 'writing-v5',
+        promptVersion: 'writing-v8',
         errorCode: 'AI_RESPONSE_INVALID',
       },
     );
@@ -395,9 +395,13 @@ test('an overlength writing route evaluates only the allowed fragment and preser
   }
 });
 
-test('an overlength task 38 route evaluates exactly the first 250 words', { timeout: 40_000 }, async () => {
-  const answer = Array.from({ length: 276 }, (_, index) => `essay${String(index + 1).padStart(3, '0')}`).join(' ');
-  const evaluatedAnswer = Array.from({ length: 250 }, (_, index) => `essay${String(index + 1).padStart(3, '0')}`).join(' ');
+test('an overlength task 38 route evaluates through the official sentence boundary at word 250', { timeout: 40_000 }, async () => {
+  const evaluatedAnswer = Array.from({ length: 250 }, (_, index) => (
+    `essay${String(index + 1).padStart(3, '0')}${index === 249 ? '.' : ''}`
+  )).join(' ');
+  const answer = `${evaluatedAnswer} ${Array.from({ length: 26 }, (_, index) => (
+    `tail${String(index + 1).padStart(3, '0')}`
+  )).join(' ')}`;
   const stack = await startStack({ replies: [JSON.stringify(validTask38Review(276))] });
   try {
     const { status, body } = await stack.evaluateWriting(
@@ -442,7 +446,7 @@ test('the last tolerated words of tasks 37 and 38 reach the provider without tru
       fullWords: 154, evaluatedWords: 154, truncated: false, evaluatedLimit: 140,
     });
     assert.equal(task37Result.body.review.words, 154);
-    assert.equal(task37Result.body.review.in_range, false);
+    assert.equal(task37Result.body.review.in_range, true);
     assert.match(stack.providerCalls[0].user, /letter154/u);
 
     assert.equal(task38Result.status, 200);
@@ -450,7 +454,7 @@ test('the last tolerated words of tasks 37 and 38 reach the provider without tru
       fullWords: 275, evaluatedWords: 275, truncated: false, evaluatedLimit: 250,
     });
     assert.equal(task38Result.body.review.words, 275);
-    assert.equal(task38Result.body.review.in_range, false);
+    assert.equal(task38Result.body.review.in_range, true);
     assert.match(stack.providerCalls[1].user, /project275/u);
 
     const attempts = await stack.attemptLog();
@@ -491,7 +495,7 @@ test('writing keeps its approximate gate while legacy adaptive Speaking fails cl
     const attempts = await stack.attemptLog();
     assert.deepEqual(
       attempts.writing.map(({ provider, model, prompt_version: promptVersion }) => ({ provider, model, promptVersion })),
-      [{ provider: 'grok', model: 'route-provenance-model', promptVersion: 'writing-v5' }],
+      [{ provider: 'grok', model: 'route-provenance-model', promptVersion: 'writing-v8' }],
     );
     assert.deepEqual(attempts.speaking, []);
   } finally {
@@ -532,8 +536,8 @@ test('both calls of a repaired request are reported, so the budget stays truthfu
     assert.match(rejected.fallbackReason, /format repair requested/u);
     assert.ok(rejected.completionTokens > 0, 'потраченные токены не должны потеряться');
     assert.ok(accepted, 'принятый разбор тоже записывается');
-    // Version string only: v5 means overlength answers are scoped before the provider call.
-    assert.equal(accepted.promptVersion, 'writing-v5');
+    // Version string only: v6 adds the official token and sentence/question boundary rules.
+    assert.equal(accepted.promptVersion, 'writing-v8');
   } finally {
     await stack.stop();
   }

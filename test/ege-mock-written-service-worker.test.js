@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 
 const source = await fs.readFile(new URL('../public/service-worker.js', import.meta.url), 'utf8');
 const buildSource = await fs.readFile(new URL('../scripts/build-frontend.js', import.meta.url), 'utf8');
+const projectDirectory = fileURLToPath(new URL('..', import.meta.url));
 const immediateLocks = { request(_name, operation) { return operation(); } };
 
 test('service worker serves EGE playback only from the requested fingerprint and digest cache', async () => {
@@ -133,6 +136,99 @@ test('frontend build pins the exact emitted form module path into the service wo
   assert.match(buildSource, /assets\[builtEgeMockFormPath\.slice\(1\)\]/u);
 });
 
+test('built output preserves the derived five-module EGE closure and neutral text dependencies', {
+  timeout: 120_000,
+}, async () => {
+  const built = spawnSync(process.execPath, ['scripts/build-frontend.js'], {
+    cwd: projectDirectory, encoding: 'utf8', timeout: 110_000,
+  });
+  assert.equal(built.status, 0, built.stderr || built.stdout);
+  const manifest = JSON.parse(await fs.readFile(
+    new URL('../dist/public/asset-manifest.json', import.meta.url), 'utf8',
+  ));
+  const egeModules = [
+    'screens/ege-mock.js', 'ege-mock-writing-assessment-ui.js', 'ege-mock-written-assets.js',
+    'ege-mock-written-runner.js', 'ege-writing-text.js',
+  ];
+  assert.equal(egeModules.length, 5);
+  const sourceClosure = [
+    ...egeModules, '../shared/ege-writing-text.js', '../shared/ege-writing-text-sanitizer.js',
+    '../shared/semantic-json.js',
+  ];
+  assert.equal(sourceClosure.every((name) => typeof manifest.modules[name] === 'string'), true);
+  const expectedPaths = [...new Set(sourceClosure.map((name) => `/${manifest.modules[name]}`))].sort();
+  const builtWorker = await fs.readFile(
+    new URL('../dist/public/service-worker.js', import.meta.url), 'utf8',
+  );
+  const listeners = new Map();
+  const stores = new Map();
+  let online = true;
+  const caches = {
+    async open(name) {
+      const store = stores.get(name) || new Map(); stores.set(name, store);
+      return {
+        async addAll(paths) {
+          for (const pathname of paths) {
+            store.set(`https://easyboost.test${pathname}`, new Response(`built:${pathname}`));
+          }
+        },
+        async put(key, value) { store.set(typeof key === 'string' ? key : key.url, value); },
+        async match(key) { return store.get(typeof key === 'string' ? key : key.url)?.clone(); },
+        async keys() { return [...store.keys()].map((url) => ({ url })); },
+      };
+    },
+    async keys() { return [...stores.keys()]; },
+    async delete(name) { return stores.delete(name); },
+    async match() { return undefined; },
+  };
+  const self = {
+    location: { origin: 'https://easyboost.test' },
+    registration: { active: { scriptURL: 'previous-worker.js' } },
+    navigator: { locks: immediateLocks },
+    addEventListener(type, listener) { listeners.set(type, listener); },
+    async skipWaiting() {}, clients: { async claim() {} },
+  };
+  vm.runInNewContext(builtWorker, {
+    self, caches, Headers, URL, Promise, Response,
+    async fetch(request) {
+      if (!online) throw new Error('offline');
+      const pathname = new URL(typeof request === 'string' ? request : request.url).pathname;
+      return new Response(`built:${pathname}`);
+    },
+  });
+  let install;
+  listeners.get('install')({ waitUntil(value) { install = value; } });
+  await install;
+  const executableStore = [...stores.entries()]
+    .find(([name]) => name.startsWith('easyboost-ege-mock-exec-v1-'))?.[1];
+  const cachedPaths = [...(executableStore?.keys() || [])]
+    .map((url) => new URL(url).pathname).sort();
+  assert.deepEqual(cachedPaths, expectedPaths);
+  const generationStore = [...stores.entries()]
+    .find(([name]) => name.startsWith('easyboost-ege-mock-install-v1-'))?.[1];
+  const generations = [...(generationStore?.keys() || [])]
+    .map((url) => new URL(url, 'https://easyboost.test').pathname);
+  assert.deepEqual(generations, ['/__easyboost/ege-mock-install-mode-v3/1-update']);
+
+  let activation;
+  listeners.get('activate')({ waitUntil(value) { activation = value; } });
+  await activation;
+  online = false;
+  for (const pathname of expectedPaths) {
+    let responsePromise;
+    listeners.get('fetch')({
+      request: { method: 'GET', mode: 'cors', url: `https://easyboost.test${pathname}` },
+      respondWith(value) { responsePromise = value; }, waitUntil() {},
+    });
+    assert.equal(await (await responsePromise).text(), `built:${pathname}`);
+  }
+  assert.deepEqual(
+    [...(generationStore?.keys() || [])]
+      .map((url) => new URL(url, 'https://easyboost.test').pathname),
+    ['/__easyboost/ege-mock-install-mode-v3/1-update'],
+  );
+});
+
 test('an update preserves an opened lazy EGE executable before activation and restores it offline', async () => {
   const listeners = new Map();
   const oldScreen = 'https://easyboost.test/screens/ege-mock.js';
@@ -194,7 +290,11 @@ test('a source-mode update refreshes a complete stable-path executable cache bef
   const stores = new Map();
   let version = 'old';
   let online = true;
-  const paths = ['/screens/ege-mock.js', '/ege-mock-written-assets.js', '/ege-mock-written-runner.js'];
+  const paths = [
+    '/screens/ege-mock.js', '/ege-mock-writing-assessment-ui.js', '/ege-mock-written-assets.js',
+    '/ege-mock-written-runner.js', '/ege-writing-text.js', '/shared/ege-writing-text.js',
+    '/shared/ege-writing-text-sanitizer.js', '/shared/semantic-json.js',
+  ];
   const caches = {
     async open(name) {
       const store = stores.get(name) || new Map(); stores.set(name, store);
@@ -248,6 +348,11 @@ test('a source-mode update refreshes a complete stable-path executable cache bef
     respondWith(value) { responsePromise = value; }, waitUntil() {},
   });
   assert.equal(await (await responsePromise).text(), 'new:/screens/ege-mock.js');
+  activationListeners.get('fetch')({
+    request: { method: 'GET', mode: 'cors', url: 'https://easyboost.test/ege-writing-text.js' },
+    respondWith(value) { responsePromise = value; }, waitUntil() {},
+  });
+  assert.equal(await (await responsePromise).text(), 'new:/ege-writing-text.js');
 
   online = true;
   version = 'newer';
@@ -584,11 +689,4 @@ test('an updating worker preloads the exact executable before an open races insi
   const executableCache = [...stores.entries()].find(([name]) => name.startsWith('easyboost-ege-mock-exec-v1-'))?.[1];
   assert.ok(executableCache?.size, 'an update must not depend on one racy opened-cache snapshot');
   assert.match(source, /easyboost-ege-mock-open-v1/u);
-});
-
-test('build pins the emitted lazy EGE executable into its update-safe cache contract', () => {
-  assert.match(source, /\/\* build:ege-mock-exec \*\/[\s\S]*?const EGE_MOCK_EXEC_PATHS=\['\/screens\/ege-mock\.js','\/ege-mock-written-assets\.js','\/ege-mock-written-runner\.js'\]/u);
-  assert.match(buildSource, /modules\['screens\/ege-mock\.js'\]/u);
-  assert.match(buildSource, /EGE_MOCK_EXEC_MARKER_START/u);
-  assert.match(buildSource, /builtEgeMockExecPaths/u);
 });

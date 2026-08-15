@@ -34,14 +34,20 @@ const GROQ_MODEL = config.ai.groqModel;
 
 // The limits arrive resolved rather than looked up here: the client is what decides them, and it is
 // the client — not the operation registry — that a quality run may give a longer timeout.
-async function askProvider({ url, key, model, name }, system, user, limits, { responseFormat = null } = {}) {
+async function askProvider({ url, key, model, name }, system, user, limits, {
+  responseFormat = null, idempotencyKey = null,
+} = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), limits.timeoutMs);
   let r;
   try {
     r = await gate.run(() => fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key },
+    headers: {
+      'Content-Type': 'application/json', Authorization: 'Bearer ' + key,
+      ...(typeof idempotencyKey === 'string' && /^[a-zA-Z0-9._:-]{1,200}$/u.test(idempotencyKey)
+        ? { 'Idempotency-Key': idempotencyKey } : {}),
+    },
     signal: controller.signal,
     body: JSON.stringify({
       model,
@@ -111,9 +117,15 @@ export function createProviderClient({ provider: pinned = null, model = null, ti
     return model ? chosen.map((item) => ({ ...item, model })) : chosen;
   }
 
-  async function askWithFallback(system, user, operation) {
+  async function askWithFallback(system, user, operation, callControls = {}) {
     const providers = providersFor(operation, aiProviders());
-    return runProviderFallback(providers, (item) => ask(item, system, user, operation));
+    return runProviderFallback(
+      providers,
+      (item, context) => ask(item, system, user, operation, {
+        idempotencyKey: context?.idempotencyKey || null,
+      }),
+      callControls,
+    );
   }
 
   /*
@@ -123,7 +135,9 @@ export function createProviderClient({ provider: pinned = null, model = null, ti
    * it. Both calls are reported so the budget and the cost metrics stay truthful: a repaired
    * request really did cost two calls.
    */
-  async function parseWithOneRepair({ provider, text, parse, system, user, operation, responseFormat = null }) {
+  async function parseWithOneRepair({
+    provider, text, parse, system, user, operation, responseFormat = null, callControls = {},
+  }) {
     try {
       return { value: parse(text), repair: null };
     } catch (firstError) {
@@ -131,6 +145,8 @@ export function createProviderClient({ provider: pinned = null, model = null, ti
       if (!provider) throw firstError;
 
       const startedAt = Date.now();
+      const context = typeof callControls.beforeAttempt === 'function'
+        ? await callControls.beforeAttempt(provider, { attempt: 1 }) : null;
       let retry;
       try {
         retry = await ask(
@@ -138,12 +154,24 @@ export function createProviderClient({ provider: pinned = null, model = null, ti
           system,
           buildRepairRequest(user, text, firstError),
           operation,
-          { responseFormat },
+          { responseFormat, idempotencyKey: context?.idempotencyKey || null },
         );
       } catch (retryError) {
+        if (typeof callControls.afterAttempt === 'function') {
+          await callControls.afterAttempt(context, {
+            status: 'failed', error: retryError, provider, attempt: 1,
+            durationMs: Date.now() - startedAt,
+          });
+        }
         /* The repair call itself failed; the original contract violation is the honest answer. */
         retryError.repairOf = firstError.message;
         throw firstError;
+      }
+      if (typeof callControls.afterAttempt === 'function') {
+        await callControls.afterAttempt(context, {
+          status: 'completed', value: retry, provider, attempt: 1,
+          durationMs: Date.now() - startedAt,
+        });
       }
 
       const value = parse(retry.text);
@@ -159,5 +187,13 @@ export function createProviderClient({ provider: pinned = null, model = null, ti
     }
   }
 
-  return { askProvider: ask, aiProviders, askWithFallback, parseWithOneRepair, limitsFor: clientLimitsFor, appLimitsFor: limitsFor };
+  async function recoverByIdempotencyKey() {
+    return { status: 'unsupported' };
+  }
+
+  return {
+    askProvider: ask, aiProviders, askWithFallback, parseWithOneRepair,
+    recoverByIdempotencyKey,
+    limitsFor: clientLimitsFor, appLimitsFor: limitsFor,
+  };
 }

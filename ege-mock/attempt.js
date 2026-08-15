@@ -1,11 +1,19 @@
 import crypto from 'node:crypto';
 
+import { sanitizeEgeWritingText } from '../shared/ege-writing-text.js';
+
 import {
   EGE_MOCK_ATTEMPT_POLICY,
   EGE_MOCK_ORAL_DURATION_MS,
   EGE_MOCK_ORAL_START_WINDOW_MS,
   EGE_MOCK_WRITTEN_DURATION_MS,
 } from './policy.js';
+import {
+  beginEgeMockWritingAssessment,
+  egeMockWritingAssessmentPublicDto,
+  egeMockWritingResultPublicDto,
+  retryEgeMockWritingAssessment,
+} from './writing-assessment.js';
 
 export class EgeMockAttemptError extends Error {
   constructor(code) {
@@ -56,6 +64,7 @@ export function createEgeMockAttempt({
     oral_submitted_at: null,
     assessment_status: 'not_started',
     assessment_retry_count: 0,
+    writing_assessment: null,
     result: null,
     start_idempotency_key: idempotencyKey,
     start_request_hash: requestHash,
@@ -108,6 +117,7 @@ export function egeMockAttemptPublicDto(row) {
       retryAllowed: row.assessment_status === 'retryable' && Number(row.assessment_retry_count) < 3,
       retryCount: Number(row.assessment_retry_count),
     },
+    writingAssessment: egeMockWritingAssessmentPublicDto(row),
   };
 }
 
@@ -121,13 +131,16 @@ function normalizeEgeMockDraft(form, answers) {
   for (const key of Object.keys(answers).sort((left, right) => Number(left) - Number(right))) {
     if (!writtenPositions.has(key)) throw new EgeMockAttemptError('EGE_MOCK_DRAFT_INVALID');
     const value = answers[key];
-    const validString = typeof value === 'string' && value.length <= 20_000;
-    const validList = Array.isArray(value) && value.length <= 20
+    const item = form.positions[Number(key) - 1];
+    const writingLimit = item?.position === 37 ? 12_000 : item?.position === 38 ? 20_000 : null;
+    const validString = typeof value === 'string' && value.length <= (writingLimit || 20_000);
+    const validList = writingLimit == null && Array.isArray(value) && value.length <= 20
       && value.every((entry) => typeof entry === 'string' && entry.length <= 500);
     if (!validString && !validList && value !== null) {
       throw new EgeMockAttemptError('EGE_MOCK_DRAFT_INVALID');
     }
-    normalized[key] = structuredClone(value);
+    normalized[key] = writingLimit != null && typeof value === 'string'
+      ? sanitizeEgeWritingText(value) : structuredClone(value);
   }
   if (Buffer.byteLength(JSON.stringify(normalized), 'utf8') > 100_000) {
     throw new EgeMockAttemptError('EGE_MOCK_DRAFT_INVALID');
@@ -191,6 +204,7 @@ export function reconcileEgeMockAttempt(row, now = new Date()) {
       appliedAt: row.written_submitted_at,
       automatic: true,
     };
+    beginEgeMockWritingAssessment(row, row.written_submitted_at);
     changed = true;
   }
   if (row.state === 'oral_ready' && row.oral_available_until != null
@@ -250,6 +264,7 @@ function submitEgeMockWrittenPart(row, { now, payloadDigest, receiptId }) {
     appliedAt: row.written_submitted_at,
     automatic: false,
   };
+  beginEgeMockWritingAssessment(row, row.written_submitted_at);
   return row;
 }
 
@@ -398,7 +413,12 @@ export function applyEgeMockAssessmentRetryable(row, { reason, now }) {
   return egeMockAttemptPublicDto(row);
 }
 
-export function applyEgeMockAssessmentRetryMutation(row, { now }) {
+export function applyEgeMockAssessmentRetryMutation(row, {
+  now, acknowledgePossibleProviderRepeat = false,
+}) {
+  if (retryEgeMockWritingAssessment(row, now, { acknowledgePossibleProviderRepeat })) {
+    return { applied: true, replayed: false, attempt: egeMockAttemptPublicDto(row) };
+  }
   if (row.state !== 'assessment_pending' || row.assessment_status !== 'retryable'
     || Number(row.assessment_retry_count) >= 3) {
     throw new EgeMockAttemptError('EGE_MOCK_ASSESSMENT_RETRY_NOT_ALLOWED');
@@ -411,19 +431,30 @@ export function applyEgeMockAssessmentRetryMutation(row, { now }) {
 }
 
 export function egeMockResultPublicDto(row) {
+  const assessmentRunDisposition = row?.writing_assessment?.run_disposition === 'subscription_required'
+    ? { assessmentRunDisposition: 'subscription_required' } : {};
+  const writingAssessment = row ? egeMockWritingAssessmentPublicDto(row) : null;
   if (!row || !['assessment_pending', 'completed'].includes(row.state)) {
-    return row ? { available: false, state: row.state, keysRevealed: false } : null;
+    return row ? {
+      available: false, state: row.state, keysRevealed: false,
+      writingAssessment, ...assessmentRunDisposition,
+    } : null;
   }
   return {
     available: true,
     state: row.state,
     keysRevealed: true,
+    writingAssessment,
+    ...assessmentRunDisposition,
     assessment: {
       status: row.assessment_status,
       retryAllowed: row.assessment_status === 'retryable' && Number(row.assessment_retry_count) < 3,
       retryCount: Number(row.assessment_retry_count),
     },
-    result: structuredClone(row.result),
+    result: {
+      ...(row.result && typeof row.result === 'object' ? structuredClone(row.result) : {}),
+      writing: egeMockWritingResultPublicDto(row),
+    },
   };
 }
 
@@ -453,6 +484,7 @@ export function egeMockAttemptExportDto(row) {
     oral_receipt: structuredClone(row.oral_receipt || null),
     assessment_status: row.assessment_status,
     assessment_retry_count: Number(row.assessment_retry_count),
+    writing_assessment: structuredClone(row.writing_assessment || null),
     result: structuredClone(row.result),
     created_at: iso(row.created_at),
     updated_at: iso(row.updated_at),

@@ -4,6 +4,9 @@ import {
   analyzeWriting, countWords as countAnswerWords, describeFacts, takeFirstWords,
 } from './writing-facts.js';
 import { sanitizeStudentText } from '../validation/student-text.js';
+import {
+  egeWritingAssessableText, egeWritingPublishedSourceOverlap,
+} from '../shared/ege-writing-text.js';
 
 // The answer is normalised at the boundary, so the prompt, the pre-checks and the stored attempt
 // all work on the same string. What survives sanitising must still be a real answer.
@@ -12,14 +15,18 @@ const studentAnswer = (max) => z.string().trim().min(20).max(max)
   .refine((value) => value.length >= 20, { message: 'answer is empty after sanitising' });
 
 // v2 adds the deterministic pre-check block to the prompt (section 10.5).
-// v3 names the allowed `kind` values and the three FIPI rules that force a zero. The first
+// v3 names the allowed `kind` values and the original FIPI rules that force a zero. The first
 // measurement showed the model inventing a third `kind` and never reaching zero on its own.
 // v4 bans the angle brackets v3 taught the model to write: it echoed the word-limit rule back as a
 // comparison sign, and section 10.4 rejected every such review. It also gives the communicative
 // criterion its FIPI aspect scheme — v3 gave the model the consequence of a zero but never the
 // countable sign by which a zero is awarded.
 // v5 means the server, rather than the model, limits an overlength answer to the evaluated fragment.
-export const WRITING_PROMPT_VERSION = 'writing-v5';
+// v6 pins FIPI Appendix 3 word forms and sentence/question-aware overlength boundaries.
+// v7 adds slash forms, artificial-repeat and copied-stimulus exclusions and names the exact
+// server-selected official fragment instead of asking the provider to truncate it again.
+// v8 binds the official task-38 published-source overlap rule to the pinned assignment corpus.
+export const WRITING_PROMPT_VERSION = 'writing-v8';
 
 const task37AssignmentSchema = z.object({
   from: z.string().trim().min(1).max(40),
@@ -121,19 +128,68 @@ const TASK_RULES = Object.freeze({
   }),
 });
 
+function assessmentContextFailure() {
+  return Object.assign(new Error('EGE_MOCK_WRITING_ASSESSMENT_CONTEXT_INVALID'), {
+    code: 'EGE_MOCK_WRITING_ASSESSMENT_CONTEXT_INVALID',
+  });
+}
+
+function rulesFor(input) {
+  const canonical = TASK_RULES[input.taskType];
+  if (!canonical) throw assessmentContextFailure();
+  if (input.criteriaSnapshot == null) return canonical;
+  const expectedLength = input.taskType === 'writing_37' ? 3 : 5;
+  if (!Array.isArray(input.criteriaSnapshot) || input.criteriaSnapshot.length !== expectedLength) {
+    throw assessmentContextFailure();
+  }
+  const criteria = input.criteriaSnapshot.map((criterion) => {
+    const name = String(criterion?.name || '').trim();
+    const maximum = Number(criterion?.maximum);
+    if (!name || name.length > 120 || !Number.isInteger(maximum) || maximum < 1) {
+      throw assessmentContextFailure();
+    }
+    return [name, maximum];
+  });
+  if (new Set(criteria.map(([name]) => name)).size !== criteria.length
+    || criteria.reduce((sum, [, maximum]) => sum + maximum, 0) !== canonical.overallMax
+    || criteria.some(([name, maximum], index) => (
+      canonical.criteria[index]?.[0] !== name || canonical.criteria[index]?.[1] !== maximum
+    ))) {
+    throw assessmentContextFailure();
+  }
+  return Object.freeze({ ...canonical, criteria: Object.freeze(criteria) });
+}
+
+function gradableWordBounds(rules) {
+  return Object.freeze({
+    minimum: Math.round(rules.minWords * 0.9),
+    maximum: Math.round(rules.maxWords * 1.1),
+  });
+}
+
+function isGradableWordCount(wordCount, rules) {
+  const bounds = gradableWordBounds(rules);
+  return wordCount >= bounds.minimum && wordCount <= bounds.maximum;
+}
+
 export const countWords = countAnswerWords;
 
 export function prepareWritingEvaluation(input) {
   const rules = TASK_RULES[input.taskType];
-  const fullWords = countWords(input.answer);
+  const context = { taskType: input.taskType, assignment: input.assignment };
+  const fullWords = countWords(input.answer, context);
   const evaluatedLimit = rules.maxWords;
   const truncated = fullWords > Math.round(evaluatedLimit * 1.1);
-  const evaluatedAnswer = truncated ? takeFirstWords(input.answer, evaluatedLimit) : input.answer;
+  const evaluatedAnswer = truncated
+    ? takeFirstWords(input.answer, evaluatedLimit, input.taskType, input.assignment)
+    : egeWritingAssessableText(input.answer, context);
   return {
     evaluatedAnswer,
     scope: {
       fullWords,
-      evaluatedWords: countWords(evaluatedAnswer),
+      // The public scope records the formal FIPI count boundary. The exact fragment may end
+      // immediately before or after it because a task-37 question or task-38 sentence is atomic.
+      evaluatedWords: truncated ? evaluatedLimit : fullWords,
       truncated,
       evaluatedLimit,
     },
@@ -153,7 +209,7 @@ export function prepareWritingPrompt(input) {
 }
 
 export function buildWritingPrompt(input) {
-  const rules = TASK_RULES[input.taskType];
+  const rules = rulesFor(input);
   const system = [
     'Ты эксперт письменной части ЕГЭ по английскому языку.',
     'Проверяй строго по указанным критериям ФИПИ, используй британский английский.',
@@ -167,10 +223,13 @@ export function buildWritingPrompt(input) {
     : `Тема проекта: ${JSON.stringify(input.assignment.topic)}. Данные таблицы: ${input.assignment.rows.map((row) => `${row.label} — ${row.percent}%`).join('; ')}. План: вступление о цели проекта; 2–3 факта из таблицы; 1–2 сравнения; проблема и решение; вывод с мнением.`;
 
   const criteria = rules.criteria.map(([name, max]) => `${name}: максимум ${max}`).join('; ');
-  const promptWords = input.evaluationScope?.fullWords ?? countWords(input.answer);
+  const promptWords = input.evaluationScope?.fullWords ?? countWords(input.answer, {
+    taskType: input.taskType, assignment: input.assignment,
+  });
+  const gradableBounds = gradableWordBounds(rules);
   const responseShape = {
     words: promptWords,
-    in_range: promptWords >= rules.minWords && promptWords <= rules.maxWords,
+    in_range: isGradableWordCount(promptWords, rules),
     overall_got: 0,
     overall_max: rules.overallMax,
     verdict: 'краткий итог',
@@ -179,17 +238,20 @@ export function buildWritingPrompt(input) {
     errors: [{ title: 'тип ошибки', wrong: 'фрагмент', right: 'исправление', kind: 'err', note: 'пояснение' }],
   };
 
-  // The three FIPI rules that force a zero. Their thresholds are derived from the same TASK_RULES
+  // The FIPI rules that force a zero. Their thresholds are derived from the same TASK_RULES
   // the criteria and the range come from: a second set of constants would drift on the first edit
   // and the prompt would start stating rules the server does not hold.
   const [communicativeCriterion, communicativeMax] = rules.criteria[0];
-  const zeroBelowWords = Math.round(rules.minWords * 0.9);
-  const cutOffAboveWords = Math.round(rules.maxWords * 1.1);
+  const zeroBelowWords = gradableBounds.minimum;
+  const cutOffAboveWords = gradableBounds.maximum;
   const zeroRules = [
     'Правила ФИПИ, обязательные при выставлении баллов:',
     `1. Ноль по критерию «${communicativeCriterion}» означает ноль по всем остальным критериям и overall_got = 0.`,
     `2. Меньше ${zeroBelowWords} слов — задание проверке не подлежит: ноль по всем критериям и overall_got = 0.`,
-    `3. Больше ${cutOffAboveWords} слов — оценивай только первые ${rules.maxWords} слов ответа, остальное не читай и не учитывай.`,
+    `3. Больше ${cutOffAboveWords} слов — оценивай только официально выделенный сервером фрагмент с границей по правилам ФИПИ; он уже передан как ответ ученика. Не отсекай его повторно по числу слов и не учитывай текст после него.`,
+    ...(input.taskType === 'writing_38' ? [
+      '4. Если сумма точных совпадений с одним или несколькими опубликованными источниками, каждое из которых содержит не менее 10 слов подряд, составляет более 30 % оцениваемого ответа, по К1 и по всему заданию ставь 0.',
+    ] : []),
     // Правило 3 сужает то, что оценивается, но не то, что считается. Поле words сверяется сервером
     // с фактическим объёмом всего ответа, и «оценивай только первые N слов» без этой оговорки
     // читается как «столько и напиши»: отсечённая работа получала бы AI_RESPONSE_INVALID_WORD_COUNT
@@ -214,7 +276,7 @@ export function buildWritingPrompt(input) {
       'Аспект 5 — нормы вежливости: благодарность за письмо или радость от его получения и надежда на последующие контакты.',
       'Аспект 6 — стилевое оформление: обращение, завершающая фраза, подпись в неофициальном стиле.',
       `Балл: ${communicativeMax} — все аспекты раскрыты, допускается 1 неполный или неточный;`,
-      '0 — 3 и более аспекта не раскрыты, ИЛИ все 6 раскрыты неполно/неточно, ИЛИ 1 не раскрыт и 4–5 раскрыты неполно/неточно, ИЛИ 2 не раскрыты и 2–4 раскрыты неполно/неточно, ИЛИ объём не соответствует требуемому;',
+      `0 — 3 и более аспекта не раскрыты, ИЛИ все 6 раскрыты неполно/неточно, ИЛИ 1 не раскрыт и 4–5 раскрыты неполно/неточно, ИЛИ 2 не раскрыты и 2–4 раскрыты неполно/неточно, ИЛИ объём меньше ${zeroBelowWords} слов;`,
       `${communicativeMax - 1} — все прочие случаи.`,
     ]
     : [
@@ -227,7 +289,7 @@ export function buildWritingPrompt(input) {
       `Балл: ${communicativeMax} — все аспекты раскрыты полно и точно, допускается 1 неполный/неточный аспект и 1 нарушение нейтрального стиля;`,
       `${communicativeMax - 1} — 1 аспект не раскрыт, ИЛИ 1 не раскрыт и 1 раскрыт неполно/неточно, ИЛИ 2–3 раскрыты неполно/неточно (допускаются 2–3 нарушения стиля);`,
       `${communicativeMax - 2} — 1 не раскрыт и 2–3 раскрыты неполно/неточно, ИЛИ 2 не раскрыты, ИЛИ 2 не раскрыты и 1 раскрыт неполно/неточно, ИЛИ 4–5 раскрыты неполно/неточно (допускаются 4 нарушения стиля);`,
-      '0 — все прочие случаи, ИЛИ объём не соответствует требуемому.',
+      `0 — все прочие случаи, ИЛИ объём меньше ${zeroBelowWords} слов.`,
     ];
   const aspectScheme = [
     `Балл по критерию «${communicativeCriterion}» выставляется подсчётом ${aspectCount} аспектов, а не на глаз. Каждому аспекту поставь ровно одну пометку: раскрыт, раскрыт неполно/неточно, не раскрыт. Затем посчитай пометки и выбери балл.`,
@@ -237,13 +299,15 @@ export function buildWritingPrompt(input) {
   const facts = analyzeWriting(input);
   if (input.evaluationScope) facts.words = input.evaluationScope.fullWords;
   const user = [
-    `Тип задания: ${input.taskType}. Допустимый объём: ${rules.minWords}–${rules.maxWords} слов.`,
+    `Тип задания: ${input.taskType}. Целевой требуемый объём: ${rules.minWords}–${rules.maxWords} слов. Граница оценивания: ${gradableBounds.minimum}–${gradableBounds.maximum} слов.`,
+    input.assessmentContext
+      ? `Immutable assessment context: ${JSON.stringify(input.assessmentContext)}.` : '',
     assignment,
     `Критерии: ${criteria}. Общий максимум: ${rules.overallMax}.`,
     aspectScheme,
     zeroRules,
     input.evaluationScope
-      ? `Сервер определил полный объём: ${input.evaluationScope.fullWords} слов. Для оценивания передан фрагмент из ${input.evaluationScope.evaluatedWords} слов.`
+      ? `Сервер определил полный объём: ${input.evaluationScope.fullWords} слов. Официальная граница отсчёта: ${input.evaluationScope.evaluatedWords} слов; переданный фрагмент заканчивается на разрешённой правилами ФИПИ границе целого вопроса или предложения.`
       : '',
     describeFacts(facts, input.taskType),
     `Верни JSON следующей формы: ${JSON.stringify(responseShape)}.`,
@@ -271,13 +335,15 @@ export function parseAndValidateWritingReview(raw, input) {
   if (!result.success) throw new Error('AI_RESPONSE_INVALID_SCHEMA');
 
   const review = result.data;
-  const rules = TASK_RULES[input.taskType];
-  const actualWords = countWords(input.answer);
+  const rules = rulesFor(input);
+  const actualWords = countWords(input.answer, {
+    taskType: input.taskType, assignment: input.assignment,
+  });
   const expectedCriteria = new Map(rules.criteria);
 
   if (review.overall_max !== rules.overallMax) throw new Error('AI_RESPONSE_INVALID_MAX_SCORE');
   if (review.words !== actualWords) throw new Error('AI_RESPONSE_INVALID_WORD_COUNT');
-  if (review.in_range !== (actualWords >= rules.minWords && actualWords <= rules.maxWords)) {
+  if (review.in_range !== isGradableWordCount(actualWords, rules)) {
     throw new Error('AI_RESPONSE_INVALID_WORD_RANGE');
   }
   if (review.criteria.length !== rules.criteria.length) throw new Error('AI_RESPONSE_INVALID_CRITERIA');
@@ -297,9 +363,29 @@ export function parseAndValidateWritingReview(raw, input) {
     throw new Error('AI_RESPONSE_INVALID_TOTAL');
   }
 
+  const [communicativeName] = rules.criteria[0];
+  const communicative = review.criteria.find(({ name }) => name === communicativeName);
+  if (communicative?.got === 0
+    && (review.overall_got !== 0 || review.criteria.some(({ got }) => got !== 0))) {
+    throw new Error('AI_RESPONSE_INVALID_COMMUNICATIVE_ZERO');
+  }
+
   if (actualWords < Math.round(rules.minWords * 0.9)) {
     review.overall_got = 0;
     for (const criterion of review.criteria) criterion.got = 0;
+  }
+
+  if (input.taskType === 'writing_38') {
+    const evaluation = prepareWritingEvaluation(input);
+    const overlap = egeWritingPublishedSourceOverlap(evaluation.evaluatedAnswer, input.assignment);
+    if (overlap.exceedsThirtyPercent) {
+      review.overall_got = 0;
+      for (const criterion of review.criteria) criterion.got = 0;
+      review.errors = [{
+        title: 'Published-source overlap', wrong: '', right: '', kind: 'err',
+        note: `Exact source matches cover ${overlap.matchedWords} of ${overlap.totalWords} assessable words, which is above 30 percent.`,
+      }, ...review.errors].slice(0, 5);
+    }
   }
 
   return review;

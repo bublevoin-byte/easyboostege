@@ -107,13 +107,28 @@ Manifest, который не даёт ровно 42 позиции, 82 макс
 
 - `GET /forms` — answer-free доступные authored forms;
 - `POST /attempts` — start/replay owner-bound attempt;
-- `GET /attempts/current` и `GET /attempts/{attemptId}` — safe restore projection;
+- `GET /attempts/current` и `GET /attempts/{attemptId}` — observational safe restore projection без claim/reserve/provider side effects;
 - `PUT /attempts/{attemptId}/draft` — CAS draft save;
 - `POST /attempts/{attemptId}/written/submit`;
 - `POST /attempts/{attemptId}/oral/start`;
 - `POST /attempts/{attemptId}/oral/submit`;
+- `POST /attempts/{attemptId}/assessment/run` — owner-bound idempotent dispatch/recovery после submit/restore;
+  owner-global UUID связан с точными operation/attempt/payload, остаётся тем же для nonterminal recovery и
+  получает immutable replay snapshot после completed/retryable/ambiguous либо terminal
+  `subscription_required` disposition. Последний сохраняется в авторитетной attempt/result projection, поэтому
+  safe restore на другой вкладке или устройстве не создаёт новую команду. Старый pending UUID и новый UUID без
+  `explicitRenewal:true` терминально подтверждают уже сохранённый блок даже после продления. Только явное действие
+  ученика создаёт новый UUID с этим payload-маркером; owner lock заново проверяет активную подписку, снимает блок и
+  возобновляет assessment. Отдельная server-owned `writingAssessment.assessmentRevision` монотонно увеличивается
+  при каждом изменении assessment/result/run-disposition и возвращается во всех current/attempt/result и frozen
+  command projections. Межвкладочное объединение shared storage сравнивает assessment revision независимо от draft
+  revision: более высокая ревизия атомарно заменяет всю assessment projection, более низкая игнорируется, а равная
+  обязана быть семантически идентичной и иначе закрывается ошибкой без перезаписи памяти или storage. Старый
+  immutable UUID всё ещё можно подтвердить/удалить без отката уже увиденного состояния. Ревизия ограничена
+  JavaScript MAX_SAFE_INTEGER `9007199254740991`: переход с предыдущего значения разрешён, а следующая mutation
+  закрывается bounded `ASSESSMENT_REVISION_EXHAUSTED` до изменения assessment snapshot или operation ledger;
 - `POST /attempts/{attemptId}/assessment/retry` — только когда retry разрешён server state;
-- `GET /attempts/{attemptId}/result` — без ключей до завершения обеих частей.
+- `GET /attempts/{attemptId}/result` — observational projection без dispatch и без ключей до завершения обеих частей.
 
 File repository и PostgreSQL реализуют один shared contract: lifecycle, timer authority, idempotent replay/conflict, draft CAS, owner isolation, score/result, export, account deletion, retention и concurrent submit. Новая миграция не изменяет старые Grammar 2.0, Writing или Speaking records задним числом.
 

@@ -38,6 +38,46 @@ test('the sanitiser reports what it took out', () => {
   assert.equal(report.removedControl, 1);
 });
 
+test('one neutral text policy drives the thin browser and server sanitization adapters', async () => {
+  const [shared, browser, server] = await Promise.all([
+    import('../shared/ege-writing-text-sanitizer.js'),
+    import('../public/ege-writing-text.js'),
+    import('../validation/student-text.js'),
+  ]);
+  const original = `<b>x</b>${ZERO_WIDTH}\u0001y`;
+  const sanitized = shared.sanitizeEgeWritingText(original);
+  const report = shared.describeEgeWritingTextSanitization(original, sanitized);
+  assert.equal(browser.sanitizeEgeWritingText(original), sanitized);
+  assert.equal(server.sanitizeStudentText(original), sanitized);
+  assert.deepEqual(server.describeSanitization(original, sanitized), report);
+  assert.deepEqual(report, {
+    changed: true, removedTags: 2, removedControl: 1, removedInvisible: 1,
+  });
+});
+
+test('one neutral writing policy drives browser and server counting without reverse frontend dependencies', async () => {
+  const [shared, browser] = await Promise.all([
+    import('../shared/ege-writing-text.js'),
+    import('../public/ege-writing-text.js'),
+  ]);
+  const answer = 'Dear Sam,\nThanks for your email. I am happy to answer your questions.\nBest wishes,\nAlex';
+  const context = { taskType: 'writing_37', assignment: { stimulus: 'What helps you study?' } };
+  assert.equal(browser.countEgeWritingWords(answer, context), shared.countEgeWritingWords(answer, context));
+  assert.equal(browser.egeWritingAssessableText(answer, context), shared.egeWritingAssessableText(answer, context));
+
+  const serverModules = [
+    '../ai/writing.js', '../ai/writing-facts.js', '../ege-mock/attempt.js',
+    '../ege-mock/writing-assessment.js',
+  ];
+  const sources = await Promise.all(serverModules.map((name) => fs.readFile(
+    new URL(name, import.meta.url), 'utf8',
+  )));
+  sources.forEach((source, index) => assert.doesNotMatch(
+    source, /from\s+['"][^'"]*public\//u,
+    `${serverModules[index]} must not depend on the frontend-owned public layer`,
+  ));
+});
+
 test('the writing endpoint stores the sanitised answer, not what was posted', () => {
   const answer = `<b>Dear Sam,</b>${ZERO_WIDTH} Thanks a lot for your email, it was great to hear from you.`;
   const parsed = writingRequestSchema.parse({

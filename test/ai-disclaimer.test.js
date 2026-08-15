@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import test from 'node:test';
+import {
+  AUTOMATIC_ASSESSMENT_WARNING,
+  EGE_MOCK_WRITING_AMBIGUOUS_RETRY_WARNING,
+  EGE_MOCK_WRITING_ASSESSMENT_LABEL,
+  validEgeMockWritingAssessmentState,
+} from '../public/automatic-assessment-contract.js';
+import { AUTOMATIC_ASSESSMENT_PUBLIC_CONTRACT as SHARED_AUTOMATIC_ASSESSMENT_PUBLIC_CONTRACT } from '../shared/automatic-assessment-contract.js';
 
 const REQUIRED = 'Экспериментальная ИИ-оценка. Балл ориентировочный, может содержать ошибки и не является экспертным заключением.';
 
@@ -18,9 +25,8 @@ async function readApplicationSource() {
   return sources.join('\n');
 }
 
-const [html, components, app] = await Promise.all([
+const [html, app] = await Promise.all([
   fs.readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
-  fs.readFile(new URL('../public/components.js', import.meta.url), 'utf8'),
   readApplicationSource(),
 ]);
 
@@ -28,12 +34,54 @@ function normalize(value) {
   return value.replace(/\s+/gu, ' ');
 }
 
-test('the wording required by section 10.9 is defined once and used verbatim', () => {
-  const defined = components.match(/const AI_DISCLAIMER = ([\s\S]*?);\n/u);
-  assert.ok(defined, 'components.js must define AI_DISCLAIMER');
-  const literal = defined[1].match(/'([^']*)'/gu).map((part) => part.slice(1, -1)).join('');
-  assert.equal(literal, REQUIRED, 'the constant must match the wording from the specification');
-  assert.match(components, /AI_DISCLAIMER,\n\s*\}\);/u, 'the constant must be exported');
+test('the public automatic-assessment warning equals the required wording', () => {
+  assert.equal(AUTOMATIC_ASSESSMENT_WARNING, REQUIRED, 'the canonical constant must match the specification');
+  assert.equal(SHARED_AUTOMATIC_ASSESSMENT_PUBLIC_CONTRACT.warning, AUTOMATIC_ASSESSMENT_WARNING,
+    'the browser adapter re-exports the neutral server/browser contract');
+});
+
+test('the browser-safe EGE writing projection validator matches every discriminated state', () => {
+  const base = {
+    assessmentRevision: 1,
+    mode: 'experimental',
+    scoreKind: 'approximate',
+    warning: AUTOMATIC_ASSESSMENT_WARNING,
+    label: EGE_MOCK_WRITING_ASSESSMENT_LABEL,
+    retryCount: 0,
+  };
+  const accepted = [
+    { ...base, status: 'not_started', retryAllowed: false },
+    { ...base, status: 'pending', retryAllowed: false },
+    { ...base, status: 'in_progress', retryAllowed: false },
+    { ...base, status: 'completed', retryAllowed: false },
+    { ...base, status: 'retryable', retryAllowed: true },
+    { ...base, status: 'retryable', retryAllowed: false, retryCount: 3 },
+    {
+      ...base, status: 'ambiguous', retryAllowed: true,
+      retryWarning: EGE_MOCK_WRITING_AMBIGUOUS_RETRY_WARNING,
+    },
+    {
+      ...base, status: 'ambiguous', retryAllowed: false, retryCount: 3,
+      retryWarning: EGE_MOCK_WRITING_AMBIGUOUS_RETRY_WARNING,
+    },
+    {
+      ...base, status: 'pending', retryAllowed: false,
+      runDisposition: 'subscription_required',
+    },
+  ];
+  accepted.forEach((candidate) => assert.equal(validEgeMockWritingAssessmentState(candidate), true));
+
+  const rejected = [
+    { ...accepted[1], mode: 'official' },
+    { ...accepted[1], scoreKind: 'final' },
+    { ...accepted[1], warning: '' },
+    { ...accepted[1], label: 'Итоговая оценка' },
+    { ...accepted[4], retryAllowed: false },
+    { ...accepted[6], retryWarning: '' },
+    { ...accepted[8], status: 'completed' },
+    { ...accepted[1], extra: true },
+  ];
+  rejected.forEach((candidate) => assert.equal(validEgeMockWritingAssessmentState(candidate), false));
 });
 
 test('the written review screen shows the disclaimer', () => {

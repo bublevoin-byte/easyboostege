@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import pg from 'pg';
+import { aiRequestExportDto } from './ai-request-export.js';
 import { adaptiveAssistedMetadata, adaptiveReadingMetadata, requireModuleAttemptEvidenceQuality } from '../adaptive-learning/evidence-quality.js';
 import {
   adaptiveEvidenceFingerprintConflict,
@@ -5517,7 +5518,8 @@ export function createPostgresRepository(connectionString, {
   }
 
   async function claimAiOperationSlot(username, {
-    claimId, operation, promptVersion, requestsPerHour, dailyLimit, now = new Date(),
+    claimId, operation, promptVersion, contextFingerprint = null,
+    requestsPerHour, dailyLimit, now = new Date(),
   }) {
     const client = await pool.connect();
     const instant = new Date(now);
@@ -5527,15 +5529,21 @@ export function createPostgresRepository(connectionString, {
       await client.query('BEGIN');
       const owner = await client.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [username]);
       if (!owner.rowCount) throw new Error('USER_NOT_FOUND');
+      if (contextFingerprint != null && !/^sha256:[a-f0-9]{64}$/u.test(contextFingerprint)) {
+        throw new VoiceTutorError('AI_OPERATION_CLAIM_INVALID');
+      }
       const existing = await client.query(
-        'SELECT id, username, operation, status FROM ai_requests WHERE claim_key = $1',
+        'SELECT id, username, operation, status, context_fingerprint FROM ai_requests WHERE claim_key = $1',
         [claimId],
       );
       if (existing.rowCount) {
         const row = existing.rows[0];
-        if (row.username !== username || row.operation !== operation) throw new VoiceTutorError('AI_OPERATION_CLAIM_CONFLICT');
+        if (row.username !== username || row.operation !== operation
+          || (row.context_fingerprint ?? null) !== contextFingerprint) {
+          throw new VoiceTutorError('AI_OPERATION_CLAIM_CONFLICT');
+        }
         await client.query('COMMIT');
-        return { claim_id: claimId, id: Number(row.id), status: row.status };
+        return { applied: false, claim_id: claimId, id: Number(row.id), status: row.status };
       }
       if (!Number.isInteger(dailyLimit) || dailyLimit < 1 || !Number.isInteger(requestsPerHour) || requestsPerHour < 1) {
         throw new VoiceTutorError('AI_OPERATION_CLAIM_INVALID');
@@ -5550,13 +5558,18 @@ export function createPostgresRepository(connectionString, {
       if (Number(hourly.rows[0].count) >= requestsPerHour) throw new VoiceTutorError('RATE_LIMITED');
       const inserted = await client.query(
         `INSERT INTO ai_requests
-         (username, operation, prompt_version, status, claim_key, created_at)
-         VALUES ($1, $2, $3, 'in_progress', $4, $5)
+         (username, operation, prompt_version, context_fingerprint, status, claim_key, created_at)
+         VALUES ($1, $2, $3, $4, 'in_progress', $5, $6)
          RETURNING id, status`,
-        [username, operation, promptVersion || null, claimId, instant],
+        [username, operation, promptVersion || null, contextFingerprint, claimId, instant],
       );
       await client.query('COMMIT');
-      return { claim_id: claimId, id: Number(inserted.rows[0].id), status: inserted.rows[0].status };
+      return {
+        applied: true,
+        claim_id: claimId,
+        id: Number(inserted.rows[0].id),
+        status: inserted.rows[0].status,
+      };
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -6086,7 +6099,7 @@ export function createPostgresRepository(connectionString, {
                   JOIN adaptive_diagnostic_sessions diagnostic ON diagnostic.id = response.diagnostic_id
                   WHERE diagnostic.username = $1 ORDER BY response.answered_at`, [username]),
       egeMockStore.exportEgeMockAttempts(username),
-      pool.query('SELECT id, operation, provider, model, prompt_version, status, duration_ms, error_code, prompt_tokens, completion_tokens, estimated_cost_microusd, created_at FROM ai_requests WHERE username = $1 ORDER BY created_at', [username]),
+      pool.query('SELECT id, operation, provider, model, prompt_version, context_fingerprint, status, duration_ms, error_code, prompt_tokens, completion_tokens, estimated_cost_microusd, created_at FROM ai_requests WHERE username = $1 ORDER BY created_at', [username]),
       pool.query("SELECT id, actor_telegram_id, action, target_type, target_id, result, metadata, created_at FROM audit_log WHERE metadata->>'username' = $1 ORDER BY created_at", [username]),
     ]);
     if (!account.rowCount) return null;
@@ -6155,7 +6168,7 @@ export function createPostgresRepository(connectionString, {
       adaptive_diagnostic_sessions: adaptiveDiagnosticSessions.rows.map(adaptiveDiagnosticExportDto),
       adaptive_diagnostic_responses: adaptiveDiagnosticResponses.rows.map(adaptiveDiagnosticResponseExportDto),
       ege_mock_attempts: egeMockAttempts,
-      ai_requests: aiRequests.rows,
+      ai_requests: aiRequests.rows.map(aiRequestExportDto),
       audit_log: auditLog.rows,
     };
   }

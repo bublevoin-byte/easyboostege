@@ -21,6 +21,10 @@ export const egeMockDraftSchema = z.object({
 
 export const egeMockMutationSchema = z.object({ expectedRevision: revision }).strict();
 
+export const egeMockAssessmentRunSchema = z.object({
+  explicitRenewal: z.literal(true).optional(),
+}).strict();
+
 export const egeMockOralSubmitSchema = z.object({
   expectedRevision: revision,
   recordings: z.partialRecord(z.enum(['39', '40', '41', '42']), z.object({
@@ -29,7 +33,9 @@ export const egeMockOralSubmitSchema = z.object({
   }).strict()),
 }).strict();
 
-export const egeMockRetrySchema = z.object({}).strict();
+export const egeMockRetrySchema = z.object({
+  acknowledgePossibleProviderRepeat: z.literal(true).optional(),
+}).strict();
 
 export const egeMockAttemptIdSchema = z.string().uuid();
 export const egeMockIdempotencyKeySchema = z.string().uuid();

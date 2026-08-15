@@ -17,8 +17,8 @@ or retention contract, and release verification makes no paid provider call.
 
 | Операция | Endpoint | Валидация | Fallback |
 |---|---|---|---|
-| Проверка задания 37 | `/api/v1/ai/evaluate-writing` | Zod request + server score validation; с 155 слов оцениваются первые 140 | локальная проверка объёма |
-| Проверка задания 38 | `/api/v1/ai/evaluate-writing` | Zod request + критерии/итоговый балл; с 276 слов оцениваются первые 250 | локальная проверка объёма |
+| Проверка задания 37 | `/api/v1/ai/evaluate-writing` | Zod request + server score validation; с 155 слов оценивается официальный фрагмент до целой границы вопроса | локальная проверка объёма |
+| Проверка задания 38 | `/api/v1/ai/evaluate-writing` | Zod request + критерии/итоговый балл; с 276 слов оценивается официальный фрагмент до целой границы предложения | локальная проверка объёма |
 | Словарная справка | `/api/v1/ai/generate-content` (`dictionary_lookup`) | Zod request + строгий JSON output | мини-словарь |
 | Тест по грамматике | `/api/v1/ai/generate-content` (`grammar_quiz`) | Zod request + ровно 5 валидированных заданий | встроенный банк заданий |
 | Диалог для аудирования | `/api/v1/ai/generate-content` (`listening_dialog`) | Zod request + вопросы и допустимые индексы ответов | встроенное задание |
@@ -258,11 +258,120 @@ fake HTTP+WebSocket provider при выполнении настоящего ap
 решением вне автоматических gates. Операторский процесс описан в
 `docs/VOICE_TUTOR_OPERATIONS.md`.
 
-Для `writing-v5` сервер считает полный объём до вызова провайдера. На 154/275 словах ответ не
-усекается; начиная с 155/276 провайдер и программные факты получают только первые 140/250 слов.
-`review.words` и `review.in_range` продолжают описывать полный ответ. Пользовательская попытка
+Для `writing-v8` сервер считает полный объём до вызова провайдера по правилам ФИПИ: числовые
+группы и проценты с пробелом, дефисные формы и slash-формы считаются одним словом. В задании 37 серия
+из трёх или более подряд одинаковых слов даёт в объём только первое слово, а повторяющиеся
+многословные фразы считаются полностью. В задании 38 уже две или более соседние копии одного слова
+или одной комбинации слов считаются одним вхождением. Только точные токены дословно скопированного вопроса задания 37 исключаются,
+а ученическая вводная фраза или метка перед ними остаётся в объёме. Распознанные заголовки,
+подзаголовки и блоки вопроса задания 38 исключаются вместе с их метками. Тот же task-aware normalizer используется браузерным счётчиком, программными фактами,
+провайдерным prompt и сохранённым evaluation scope. На 154/275 словах ответ не
+усекается; начиная с 155/276 провайдер и программные факты получают официальный оцениваемый фрагмент.
+Если формальная граница попадает внутрь вопроса задания 37 или предложения задания 38, общий модуль
+либо исключает этот вопрос/предложение целиком, либо включает его до конца при допустимом остатке в
+одно слово для задания 37 и одно-два слова для задания 38.
+`review.words` и `review.in_range` продолжают описывать полный ответ. Целевой объём для ученика
+остаётся `100–140`/`200–250`, но `in_range` и провайдерная K1-логика используют официальные границы
+оценивания `90–154`/`180–275`: только ответ короче нижней границы программно получает ноль, а выше
+верхней границы оценивается официальный фрагмент до `140`/`250` слов с целой граничной
+репликой/фразой. Пользовательская попытка
 хранит полный `answer` и отдельный `evaluated_answer`; технический `ai_requests` не хранит ни один
-из этих текстов.
+из этих текстов. Для задания 37 оцениваемый текст является единым фрагментом от приветствия до
+подписи: начальный структурный конверт письма
+(`From`/`To`/`Subject`, самостоятельная дата, почтовый адрес с обязательным номером и следующие за ним строки города/страны) исключается до приветствия или первой
+обычной строки, а текст после распознанной завершающей фразы и подписи не оценивается. Слова
+`drive`, `road`, `square` и числовое начало внутри прозы остаются словами ответа.
+Для задания 38 единый закреплённый опубликованный корпус состоит из темы, всех подписей строк и
+процентов таблицы. Точные непрерывные совпадения длиной не менее 10 слов, которые покрывают строго
+больше 30% оцениваемого фрагмента, программно обнуляют K1, все остальные критерии и общий балл.
+
+Provider payload, its budget reservation and every durable per-item outcome carry the exact form fingerprint,
+authored assignment/content reference, criteria reference/fingerprint and complete pinned criteria snapshot.
+Each provisional full-mock item claims its hourly AI slot from the same production provider registry used by
+transport: `limitsFor(item.taskType)`. The canonical `writing_37` and `writing_38` ceiling is 12 requests per
+owner/hour, further clamped by the active deployment/provider configuration; the unrelated global Writing route
+limit is not authority for these durable assessment claims.
+The canonical SHA-256 `context_fingerprint` is claimed before each primary, fallback or repair transport and a
+replayed claim with a different context is rejected. Recording and replay compare that complete JSON value
+semantically (object key order is irrelevant for PostgreSQL JSONB) and fail closed before applying any score if
+a value is missing or changed. Public evidence is also executable-contract bounded: at most five items, `kind` is only
+`err|warn`, `title` and `note` are non-empty bounded strings, and `wrong`/`right` are bounded strings. The
+source-mode service worker preserves the writing normalizer as part of the statically derived EGE executable
+dependency closure, so an update cannot leave the runner cached without its shared word-boundary module.
+
+The provider transport receives the prepared outcome UUID as its idempotency key. A transport error or timeout
+after any physical-call reservation retains that token as `prepared_unknown`; it is never deleted into an ordinary
+retry. If a worker sees `prepared` or `prepared_unknown` after a crash, automatic dispatch first performs only a
+non-paying durable provider lookup by that key. A
+recovered response is revalidated against the same pinned context and recorded; unsupported or missing recovery
+becomes explicit `ambiguous` state and cannot enter the ordinary automatic retry loop. Only the learner's explicit
+retry request with `acknowledgePossibleProviderRepeat: true` may atomically tombstone that prepared reservation
+and issue a new outcome UUID. The public warning says that provider work may repeat. Old in-progress/failed usage
+rows remain counted by the hourly and daily budgets, so uncertainty never creates free calls.
+
+Provider success is the irreversible boundary even if the next claim renewal, result write or usage settlement
+fails. The already-durable prepared token immediately becomes non-discardable; a later failure leaves it on the
+same lookup-only `prepared_unknown` recovery path, while a process loss leaves the equivalent lookup-only
+`prepared` row. Neither state authorizes automatic paid work. Browser persistence, the live word counter and the
+server assessment all apply the same browser-safe writing sanitizer before task-aware tokenization, so markup,
+invisible controls and line-ending normalization cannot produce different displayed and assessed word counts.
+Safe current/attempt/result `GET` routes only read projections and never claim assessment work, reserve budget or
+call a provider. After written submission or restore, the browser durably queues the owner-bound idempotent
+`POST .../assessment/run`. Its owner-global mutation row binds UUID to the exact operation, attempt and payload.
+A pending/in-progress response is `applied:false`, keeps that row resumable and leaves the same browser UUID
+queued. A terminal completed/retryable/ambiguous response freezes the exact response snapshot for replay and
+retires the command. If the owner lock finds no active subscription and no frozen authorization, it instead stores
+`subscription_required` in the authoritative assessment snapshot and returns the same exact terminal disposition.
+Every safe current/attempt/result read projects that block, so reload, a second tab or a new device never queues a
+replacement automatically. A pending UUID created before that block, or a fresh UUID without `explicitRenewal:true`,
+terminalizes with the same disposition even if subscription has since been renewed; neither can dispatch provider
+work. The UI renders the subscription-blocked state. Only the learner's explicit action replaces any stale local
+automatic command with a new UUID and the marker in its request/hash; the owner-locked begin rechecks current
+entitlement and clears the disposition before dispatch. Every assessment/result/disposition mutation advances a
+server-owned `assessmentRevision` that is independent from the attempt draft revision and appears in safe reads and
+frozen command responses. Browser shared-storage reconciliation compares that revision independently from the draft
+revision: a higher assessment projection wins atomically, a lower one is ignored, and an equal revision must be
+recursively semantically identical or the runner fails closed without overwriting memory or storage. The same rule
+preserves newer assessment state when acknowledging an older immutable terminal replay; the old UUID can still be
+retired without regressing the current tab or another restored device. The server permits the exact transition from
+`9007199254740990` to JavaScript MAX_SAFE_INTEGER `9007199254740991`; every later assessment mutation fails with
+bounded `ASSESSMENT_REVISION_EXHAUSTED` before changing the snapshot or settling the operation ledger. Before applying any
+returned current attempt or advancing the queue watermark, the browser
+validates the exact `applied`/`replayed` acknowledgement, terminal disposition and attempt/owner/form/timing binding.
+A malformed successful HTTP response therefore throws, keeps the previous local state and preserves the same
+durable UUID for retry. Explicit retry and ambiguous-repeat acknowledgement remain separate POST mutations.
+Task-38 heading exclusion accepts exact pinned topic/row headings and explicit structural heading labels; a
+top-of-document isolated heading may use normal heading casing, but an ordinary prose sentence ending in a colon
+is counted. The task-37 rule suppresses only an artificial run of three or more copies of the same word, while
+task 38 counts two or more adjacent copies of either the same word or the same multiword combination once.
+Task-37 counting starts at the greeting and ends with
+the signature, excluding a structurally anchored leading From/To/Subject/address/date envelope and any trailing
+text after the recognized sign-off/signature pair. For an
+overlength answer, `evaluatedWords` records the formal FIPI cutoff (`140` or `250`) while the retained answer keeps
+the exact whole-question/whole-sentence boundary. The OpenAPI rubric, scope and completed-total relations are
+generated from the pinned rules as finite standard `oneOf` branches: K1 zero admits only the complete zero cascade,
+below-shoulder scope admits only that zero rubric, in-band scope binds `evaluatedWords = fullWords`, and overlength
+scope binds the formal cutoff. Custom `x-easyboost-*` checks are redundant evidence, not validator authority.
+
+The initial owner-locked claim stores the authorization decision used for provider work: authorization time,
+subscription expiry, exact `text_processing` consent decision and consent-policy version. File storage reads the
+current consent from the owner record inside its serialized owner mutation; PostgreSQL locks the owner first and
+then reads the consent row in the same transaction. A stale caller boolean is ignored, so a revocation that wins
+that owner lock wins authorization. New external provider work requires the resulting current subscription and
+version-bound consent snapshot. An already-authorized claim may renew, recover and settle after
+entitlement expiry under the same owner/attempt/token fence, preventing paid work from being orphaned or repeated.
+The browser renders different learner actions for `retryable` and `ambiguous`; the latter requires the explicit
+repeat-risk acknowledgement. Both actions persist in the existing offline/reload queue until the HTTP mutation is
+acknowledged.
+
+The public automatic-writing contract and complete word/scope policy live in neutral browser-safe shared modules;
+`public/` contains only thin adapters and assessment server/domain modules never reverse-import them. The automatic
+contract is `mode: experimental`, `scoreKind: approximate`
+and one exact warning sentence consumed unchanged by API, editors and every terminal browser state. Internal job storage may retain its
+private `provisional` discriminator, but it is never published as the score authority. Expected domain failures
+stay quiet; unexpected worker or repository failures are emitted through the existing sanitized logger with only
+timestamp, fixed event type, request/attempt identifiers and a bounded safe error code—never learner text,
+provider output, stack, credentials or raw error message.
 
 Дневной проектный бюджет задаётся `AI_DAILY_REQUEST_BUDGET` и считается по устойчивому журналу `ai_requests` с начала UTC-суток. Trusted-rule search/extract atomically claim an `in_progress` row before provider transport; global/day and user/operation/hour limits include in-progress and failed attempts, and idempotent settlement records `completed|failed`. При исчерпании API возвращает `AI_BUDGET_EXHAUSTED`. Провайдеры можно аварийно отключить независимо через `XAI_ENABLED=false` или `GROQ_ENABLED=false`, не удаляя ключи.
 

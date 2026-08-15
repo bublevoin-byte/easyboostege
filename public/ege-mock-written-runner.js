@@ -3,10 +3,53 @@ import {
   egeMockWrittenInvalidationKey as runnerInvalidationKey,
   egeMockWrittenStorageKey as runnerStorageKey, validEgeMockWrittenTiming as validServerTiming,
 } from './ege-mock-written-continuation.js';
+import { countEgeWritingWords, sanitizeEgeWritingText } from './ege-writing-text.js';
+import { validEgeMockWritingAssessmentState } from './automatic-assessment-contract.js';
+import { sameSemanticJsonValue } from '../shared/semantic-json.js';
 
-const WRITTEN_POSITIONS = Object.freeze(Array.from({ length: 36 }, (_, index) => index + 1));
+const OBJECTIVE_POSITIONS = Object.freeze(Array.from({ length: 36 }, (_, index) => index + 1));
+const WRITTEN_POSITIONS = Object.freeze(Array.from({ length: 38 }, (_, index) => index + 1));
 const AUDIO_GROUPS = Object.freeze(['matching', 'true_false', 'interview']);
 const AUDIO_LEASE_MS = 15 * 60 * 1000;
+const WRITING_TEXT_LIMITS = Object.freeze({ 37: 12_000, 38: 20_000 });
+const ASSESSMENT_TERMINAL_STATUSES = Object.freeze(['completed', 'retryable', 'ambiguous']);
+const ASSESSMENT_RESPONSE_STATUSES = Object.freeze([
+  'pending', 'in_progress', ...ASSESSMENT_TERMINAL_STATUSES,
+]);
+const ASSESSMENT_EXHAUSTION_SENTINEL = Number.MAX_SAFE_INTEGER;
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const ASSESSMENT_COMMANDS = Object.freeze({
+  run: Object.freeze({
+    action: 'run', transportMethod: 'runAssessment', requiresAcknowledgementFlag: false,
+    requestFields: (command) => (command.explicitRenewal === true ? { explicitRenewal: true } : {}),
+    queueAutomaticRunAfterAck: false,
+    acceptsResponse(status, acknowledged, disposition) {
+      if (disposition === 'subscription_required') return acknowledged && status === 'pending';
+      if (disposition != null) return false;
+      return ASSESSMENT_RESPONSE_STATUSES.includes(status)
+        && ASSESSMENT_TERMINAL_STATUSES.includes(status) === acknowledged;
+    },
+    retainsAfterResponse(acknowledged, terminal) { return !acknowledged || !terminal; },
+  }),
+  retry: Object.freeze({
+    action: 'retry', transportMethod: 'retryAssessment', requiresAcknowledgementFlag: true,
+    requestFields: (command) => ({
+      acknowledgePossibleProviderRepeat: command.acknowledgePossibleProviderRepeat,
+    }),
+    queueAutomaticRunAfterAck: true,
+    acceptsResponse(status, acknowledged, disposition) {
+      return disposition == null && acknowledged && ASSESSMENT_RESPONSE_STATUSES.includes(status);
+    },
+    retainsAfterResponse(acknowledged) { return !acknowledged; },
+  }),
+});
+
+function assessmentCommandDescriptor(command) {
+  if (!command || typeof command !== 'object') return null;
+  if (command.action === 'run') return ASSESSMENT_COMMANDS.run;
+  if (command.action === 'retry') return ASSESSMENT_COMMANDS.retry;
+  return null;
+}
 
 function copy(value) {
   return value == null ? value : JSON.parse(JSON.stringify(value));
@@ -18,9 +61,9 @@ function normalizeEgeMockSelection(selection) {
 }
 
 function assertForm(form) {
-  const positions = Array.isArray(form?.positions) ? form.positions.slice(0, 36) : [];
+  const positions = Array.isArray(form?.positions) ? form.positions.slice(0, 38) : [];
   if (!form || typeof form.identity !== 'string' || typeof form.fingerprint !== 'string'
-    || positions.length !== 36 || positions.some((item, index) => item?.position !== index + 1)) {
+    || positions.length !== 38 || positions.some((item, index) => item?.position !== index + 1)) {
     throw new TypeError('EGE_MOCK_WRITTEN_FORM_INVALID');
   }
   return form;
@@ -67,6 +110,7 @@ function createEgeMockWrittenRunner(options = {}) {
     timerAuthority: null,
     answers: {},
     answerVersions: {},
+    writingDraftRecovery: null,
     audioPlays: { matching: 0, true_false: 0, interview: 0 },
     currentPosition: 1,
     preflight: null,
@@ -75,8 +119,12 @@ function createEgeMockWrittenRunner(options = {}) {
     queue: [],
     compactedThrough: null,
     canceledSubmit: null,
+    assessmentCommand: null,
+    assessmentCommandThrough: null,
+    assessmentCommandBlockedRevision: null,
     assetBlockedAt: 0,
     assetReadyAt: 0,
+    assetResumePhase: null,
     audioLease: null,
     audioLeaseThrough: null,
     invalidationWatermark: 0,
@@ -88,6 +136,10 @@ function createEgeMockWrittenRunner(options = {}) {
   let timerRuntime = null;
   let invalidationWatermark = readInvalidationWatermark();
   state.invalidationWatermark = invalidationWatermark;
+
+  function assessmentRevisionExhausted(candidate = state) {
+    return candidate?.assessmentCommandBlockedRevision === ASSESSMENT_EXHAUSTION_SENTINEL;
+  }
 
   function withDurableLock(task) {
     if (lockManager?.request) {
@@ -130,8 +182,61 @@ function createEgeMockWrittenRunner(options = {}) {
       || (Number.isFinite(status) && status >= 500);
   }
 
+  function assessmentResponseError() {
+    return Object.assign(new Error('EGE_MOCK_ASSESSMENT_RESPONSE_INVALID'), {
+      code: 'EGE_MOCK_ASSESSMENT_RESPONSE_INVALID',
+    });
+  }
+
+  function localStateError() {
+    return Object.assign(new Error('EGE_MOCK_WRITTEN_LOCAL_STATE_INVALID'), {
+      code: 'EGE_MOCK_WRITTEN_LOCAL_STATE_INVALID',
+    });
+  }
+
+  function validAssessmentProjection(value) {
+    return validEgeMockWritingAssessmentState(value);
+  }
+
+  function mergeWritingAssessmentProjection(incoming) {
+    if (!validAssessmentProjection(incoming)) throw assessmentResponseError();
+    const current = state.result?.writingAssessment;
+    if (!validAssessmentProjection(current)) return copy(incoming);
+    if (incoming.assessmentRevision < current.assessmentRevision) return copy(current);
+    if (incoming.assessmentRevision === current.assessmentRevision
+      && !sameSemanticJsonValue(incoming, current)) throw assessmentResponseError();
+    return copy(incoming);
+  }
+
+  function assertAssessmentResponse(result, descriptor) {
+    if (!result || typeof result !== 'object'
+      || typeof result.applied !== 'boolean' || typeof result.replayed !== 'boolean'
+      || (!result.applied && result.replayed)) throw assessmentResponseError();
+    let attempt;
+    try { attempt = assertCurrentAttempt(result.attempt); } catch (_) { throw assessmentResponseError(); }
+    const status = attempt.writingAssessment?.status;
+    const disposition = result.disposition ?? null;
+    const attemptDisposition = attempt.writingAssessment?.runDisposition ?? null;
+    if ((disposition === 'subscription_required')
+      !== (attemptDisposition === 'subscription_required')
+      || (attemptDisposition != null && attemptDisposition !== 'subscription_required')) {
+      throw assessmentResponseError();
+    }
+    const terminal = ASSESSMENT_TERMINAL_STATUSES.includes(status)
+      || disposition === 'subscription_required';
+    const acknowledged = result.applied || result.replayed;
+    if (!descriptor?.acceptsResponse(status, acknowledged, disposition)) {
+      throw assessmentResponseError();
+    }
+    return { attempt, acknowledged, terminal, disposition };
+  }
+
   function nextLocalTime() {
-    logicalTime = Math.max(logicalTime + 1, Number(localNow()) || 0);
+    const wallTime = Number(localNow());
+    const next = Math.max(logicalTime + 1,
+      Number.isSafeInteger(wallTime) && wallTime >= 0 ? wallTime : 0);
+    if (!Number.isSafeInteger(next) || next < 0) throw localStateError();
+    logicalTime = next;
     return logicalTime;
   }
 
@@ -219,7 +324,8 @@ function createEgeMockWrittenRunner(options = {}) {
 
   function snapshot() {
     const answers = copy(state.answers);
-    const completedPositions = WRITTEN_POSITIONS.filter((position) => answerComplete(position, answers[String(position)]));
+    const completedObjective = OBJECTIVE_POSITIONS.filter((position) => answerComplete(position, answers[String(position)]));
+    const completedWritten = WRITTEN_POSITIONS.filter((position) => answerComplete(position, answers[String(position)]));
     const remaining = remainingSeconds();
     const timerWarningMinutes = remaining > 0
       ? ([1, 5, 10, 30].find((minutes) => remaining <= minutes * 60) || null) : null;
@@ -239,8 +345,20 @@ function createEgeMockWrittenRunner(options = {}) {
       audioInFlight: state.audioLease ? {
         group: state.audioLease.group, token: state.audioLease.token,
       } : null,
-      answeredCount: completedPositions.length,
-      blankPositions: WRITTEN_POSITIONS.filter((position) => !completedPositions.includes(position)),
+      answeredCount: completedObjective.length,
+      blankPositions: OBJECTIVE_POSITIONS.filter((position) => !completedObjective.includes(position)),
+      writtenAnsweredCount: completedWritten.length,
+      writtenBlankPositions: WRITTEN_POSITIONS.filter((position) => !completedWritten.includes(position)),
+      writingWordCounts: Object.freeze(Object.fromEntries([37, 38].map((position) => [
+        String(position), typeof answers[String(position)] === 'string'
+          ? countEgeWritingWords(answers[String(position)], {
+            taskType: `writing_${position}`, assignment: form?.positions?.[position - 1]?.presentation,
+          }) : 0,
+      ]))),
+      writingDraftRecovery: copy(state.writingDraftRecovery),
+      assessmentRunQueued: assessmentCommandDescriptor(state.assessmentCommand)?.action === 'run',
+      assessmentRetryQueued: assessmentCommandDescriptor(state.assessmentCommand)?.action === 'retry',
+      assessmentRunBlocked: assessmentRevisionExhausted(),
       saveStatus: state.saveStatus,
       result: copy(state.result || null),
     });
@@ -296,8 +414,63 @@ function createEgeMockWrittenRunner(options = {}) {
       && Number.isFinite(Number(value.canceledSubmit.createdAt))
       && typeof value.canceledSubmit.idempotencyKey === 'string'
       ? value.canceledSubmit : null;
+    const hasCurrentCommandThrough = Object.hasOwn(value, 'assessmentCommandThrough');
+    const hasLegacyCommandThrough = !hasCurrentCommandThrough
+      && Object.hasOwn(value, 'assessmentRetryThrough');
+    const storedCommandThrough = hasCurrentCommandThrough
+      ? value.assessmentCommandThrough : hasLegacyCommandThrough ? value.assessmentRetryThrough : null;
+    if (storedCommandThrough != null && (!storedCommandThrough
+      || typeof storedCommandThrough !== 'object' || Array.isArray(storedCommandThrough)
+      || !Number.isSafeInteger(storedCommandThrough.createdAt)
+      || storedCommandThrough.createdAt < 0
+      || !UUID_V4.test(storedCommandThrough.idempotencyKey)
+      || Object.keys(storedCommandThrough).sort().join(',') !== 'createdAt,idempotencyKey')) {
+      throw localStateError();
+    }
+    value.assessmentCommandThrough = storedCommandThrough == null ? null : storedCommandThrough;
+    if (value.assessmentCommandBlockedRevision == null) {
+      value.assessmentCommandBlockedRevision = null;
+    } else if (!Number.isSafeInteger(value.assessmentCommandBlockedRevision)
+      || value.assessmentCommandBlockedRevision < 0) {
+      throw localStateError();
+    } else {
+      value.assessmentCommandBlockedRevision = ASSESSMENT_EXHAUSTION_SENTINEL;
+    }
+    const hasCurrentCommand = Object.hasOwn(value, 'assessmentCommand');
+    const hasLegacyCommand = !hasCurrentCommand && Object.hasOwn(value, 'assessmentRetry');
+    const storedCommand = hasCurrentCommand
+      ? value.assessmentCommand : hasLegacyCommand ? value.assessmentRetry : null;
+    let descriptor = assessmentCommandDescriptor(storedCommand);
+    if (storedCommand && !descriptor && hasLegacyCommand
+      && !Object.hasOwn(storedCommand, 'action')) descriptor = ASSESSMENT_COMMANDS.retry;
+    if (storedCommand != null) {
+      const normalizedCommand = descriptor && typeof storedCommand === 'object'
+        && !Array.isArray(storedCommand) ? { ...storedCommand, action: descriptor.action } : null;
+      const allowedKeys = descriptor?.action === 'run' && normalizedCommand?.explicitRenewal === true
+        ? 'acknowledgePossibleProviderRepeat,action,createdAt,explicitRenewal,idempotencyKey'
+        : 'acknowledgePossibleProviderRepeat,action,createdAt,idempotencyKey';
+      if (!normalizedCommand
+        || Object.keys(normalizedCommand).sort().join(',') !== allowedKeys
+        || !UUID_V4.test(normalizedCommand.idempotencyKey)
+        || !Number.isSafeInteger(normalizedCommand.createdAt) || normalizedCommand.createdAt < 0
+        || typeof normalizedCommand.acknowledgePossibleProviderRepeat !== 'boolean'
+        || (descriptor.action === 'run'
+          && normalizedCommand.acknowledgePossibleProviderRepeat !== false)
+        || (Object.hasOwn(normalizedCommand, 'explicitRenewal')
+          && (descriptor.action !== 'run' || normalizedCommand.explicitRenewal !== true))
+        || !queueEventAfter(normalizedCommand, value.assessmentCommandThrough)) {
+        throw localStateError();
+      }
+      value.assessmentCommand = normalizedCommand;
+    } else {
+      value.assessmentCommand = null;
+    }
+    delete value.assessmentRetry;
+    delete value.assessmentRetryThrough;
+    retireExhaustedAssessmentCommand(value);
     value.assetBlockedAt = Math.max(0, Number(value.assetBlockedAt) || (value.phase === 'asset_blocked' ? 1 : 0));
     value.assetReadyAt = Math.max(0, Number(value.assetReadyAt) || 0);
+    value.assetResumePhase = value.assetResumePhase === 'writing' ? 'writing' : null;
     value.audioLease = value.audioLease && AUDIO_GROUPS.includes(value.audioLease.group)
       && typeof value.audioLease.token === 'string' && Number(value.audioLease.expiresAt) > Number(localNow())
       ? value.audioLease : null;
@@ -308,18 +481,79 @@ function createEgeMockWrittenRunner(options = {}) {
     delete value.canceledSubmitId;
     delete value.acknowledgedIds;
     value.queue = Array.isArray(value.queue) ? value.queue : [];
+    const recoveredWritingPositions = new Set(
+      Array.isArray(value.writingDraftRecovery?.positions)
+        ? value.writingDraftRecovery.positions.filter((position) => position === 37 || position === 38)
+        : [],
+    );
+    function normalizeWritingContainer(container) {
+      if (!container || typeof container !== 'object' || Array.isArray(container)) return;
+      for (const position of [37, 38]) {
+        const key = String(position);
+        if (!Object.hasOwn(container, key) || container[key] == null) continue;
+        const limit = WRITING_TEXT_LIMITS[position];
+        if (typeof container[key] === 'string') {
+          if (container[key].length > limit) throw new Error('EGE_MOCK_WRITTEN_LOCAL_STATE_INVALID');
+          continue;
+        }
+        if (Array.isArray(container[key])
+          && container[key].every((part) => typeof part === 'string')) {
+          const restored = container[key].join('\n');
+          if (restored.length > limit) throw new Error('EGE_MOCK_WRITTEN_LOCAL_STATE_INVALID');
+          container[key] = restored;
+          recoveredWritingPositions.add(position);
+          continue;
+        }
+        throw new Error('EGE_MOCK_WRITTEN_LOCAL_STATE_INVALID');
+      }
+    }
+    normalizeWritingContainer(value.answers);
+    Object.entries(value.answerVersions).forEach(([position, record]) => {
+      if (record && typeof record === 'object' && (position === '37' || position === '38')) {
+        const candidate = { [position]: record.value };
+        normalizeWritingContainer(candidate);
+        record.value = candidate[position];
+      }
+    });
+    value.queue.forEach((event) => {
+      if (event?.type === 'draft') normalizeWritingContainer(event.answers);
+    });
+    value.writingDraftRecovery = recoveredWritingPositions.size ? {
+      positions: [...recoveredWritingPositions].sort((left, right) => left - right),
+      kind: 'legacy_array',
+    } : null;
+    if (value.result?.writingAssessment != null
+      && !validAssessmentProjection(value.result.writingAssessment)) throw localStateError();
     logicalTime = Math.max(logicalTime,
-      ...Object.values(value.answerVersions).map((record) => Number(record?.recordedAt) || 0),
+      ...Object.values(value.answerVersions).map((record) => (
+        serverAnswerRevision(record) != null && record?.recordedAt === Number.MAX_SAFE_INTEGER
+          ? 0 : Number(record?.recordedAt) || 0
+      )),
       ...value.queue.map((event) => Number(event?.createdAt) || 0),
       Number(value.compactedThrough?.createdAt) || 0,
       Number(value.canceledSubmit?.createdAt) || 0,
+      Number(value.assessmentCommand?.createdAt) || 0,
+      Number(value.assessmentCommandThrough?.createdAt) || 0,
       value.assetBlockedAt, value.assetReadyAt,
       Number(value.audioLease?.createdAt) || 0,
       Number(value.audioLeaseThrough?.createdAt) || 0);
     return value;
   }
 
+  function serverAnswerRevision(record) {
+    const match = /^server:(\d+):\d+$/u.exec(String(record?.id || ''));
+    if (!match) return null;
+    const revision = Number(match[1]);
+    return Number.isSafeInteger(revision) && revision >= 0 ? revision : null;
+  }
+
   function recordIsNewer(left, right) {
+    const leftServerRevision = serverAnswerRevision(left);
+    const rightServerRevision = serverAnswerRevision(right);
+    if (leftServerRevision != null && rightServerRevision != null
+      && leftServerRevision !== rightServerRevision) {
+      return leftServerRevision > rightServerRevision;
+    }
     const leftTime = Number(left?.recordedAt) || 0;
     const rightTime = Number(right?.recordedAt) || 0;
     return leftTime > rightTime || (leftTime === rightTime && String(left?.id || '') > String(right?.id || ''));
@@ -334,12 +568,36 @@ function createEgeMockWrittenRunner(options = {}) {
     return !watermark || compareQueueOrder(event, watermark) > 0;
   }
 
+  function ensureAutomaticAssessmentRun() {
+    const status = state.result?.writingAssessment?.status;
+    if (state.phase !== 'written_submitted' || typeof transport.runAssessment !== 'function'
+      || state.result?.writingAssessment?.runDisposition === 'subscription_required'
+      || assessmentRevisionExhausted()
+      || !['pending', 'in_progress'].includes(status) || state.assessmentCommand) return false;
+    state.assessmentCommand = {
+      action: 'run', idempotencyKey: uuid(), createdAt: nextLocalTime(),
+      acknowledgePossibleProviderRepeat: false,
+    };
+    state.saveStatus = 'queued';
+    return true;
+  }
+
   function newerWatermark(left, right) {
     const selected = !left ? right : !right ? left : compareQueueOrder(left, right) >= 0 ? left : right;
     return selected ? {
       createdAt: Number(selected.createdAt) || 0,
       idempotencyKey: String(selected.idempotencyKey || ''),
     } : null;
+  }
+
+  function retireExhaustedAssessmentCommand(candidate) {
+    if (!assessmentRevisionExhausted(candidate) || !candidate.assessmentCommand) return false;
+    candidate.assessmentCommandThrough = newerWatermark(
+      candidate.assessmentCommandThrough, candidate.assessmentCommand,
+    );
+    candidate.assessmentCommand = null;
+    if (!candidate.queue?.length) candidate.saveStatus = 'saved';
+    return true;
   }
 
   function compactQueue(events, watermark) {
@@ -419,13 +677,40 @@ function createEgeMockWrittenRunner(options = {}) {
       || saved.owner?.username !== owner.username || saved.owner?.generation !== owner.generation) return;
     if (!state.attemptId) {
       if (typeof saved.attemptId === 'string' && Number.isInteger(saved.revision)) {
-        state = normalizeDurableShape(saved);
+        const previousLogicalTime = logicalTime;
+        try {
+          const adopted = normalizeDurableShape(copy(saved));
+          state = adopted;
+        } catch (error) {
+          logicalTime = previousLogicalTime;
+          throw error;
+        }
       }
       return;
     }
     if (saved.attemptId !== state.attemptId) return;
-    normalizeDurableShape(state);
-    normalizeDurableShape(saved);
+    const previousState = state;
+    const previousLogicalTime = logicalTime;
+    state = copy(previousState);
+    saved = copy(saved);
+    try {
+      normalizeDurableShape(state);
+      normalizeDurableShape(saved);
+    function storedAssessment(result) {
+      const candidate = result?.writingAssessment;
+      if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)
+        || !Object.hasOwn(candidate, 'assessmentRevision')) return null;
+      if (!validAssessmentProjection(candidate)) throw assessmentResponseError();
+      return candidate;
+    }
+    const localAssessment = storedAssessment(state.result);
+    const savedAssessment = storedAssessment(saved.result);
+    if (localAssessment && savedAssessment
+      && localAssessment.assessmentRevision === savedAssessment.assessmentRevision
+      && !sameSemanticJsonValue(localAssessment, savedAssessment)) throw assessmentResponseError();
+    const savedAssessmentWins = Boolean(savedAssessment && (!localAssessment
+      || savedAssessment.assessmentRevision > localAssessment.assessmentRevision));
+    const mergedAssessment = savedAssessmentWins ? savedAssessment : localAssessment || savedAssessment;
     const localRevisionBeforeMerge = Number(state.revision) || 0;
     const localObservedNow = Number(state.timerAuthority.observedNowMs) || 0;
     const savedObservedNow = Number(saved.timerAuthority.observedNowMs) || 0;
@@ -440,7 +725,23 @@ function createEgeMockWrittenRunner(options = {}) {
     );
     state.compactedThrough = newerWatermark(state.compactedThrough, saved.compactedThrough);
     state.canceledSubmit = newerWatermark(state.canceledSubmit, saved.canceledSubmit);
-    state.assetBlockedAt = Math.max(state.assetBlockedAt, saved.assetBlockedAt);
+    state.assessmentCommandThrough = newerWatermark(
+      state.assessmentCommandThrough, saved.assessmentCommandThrough,
+    );
+    state.assessmentCommandBlockedRevision = assessmentRevisionExhausted(state)
+      || assessmentRevisionExhausted(saved) ? ASSESSMENT_EXHAUSTION_SENTINEL : null;
+    const assessmentCommands = [state.assessmentCommand, saved.assessmentCommand]
+      .filter((event) => event && queueEventAfter(event, state.assessmentCommandThrough))
+      .sort(compareQueueOrder);
+    state.assessmentCommand = assessmentCommands.at(-1) || null;
+    retireExhaustedAssessmentCommand(state);
+    const localAssetBlockedAt = state.assetBlockedAt;
+    const savedAssetBlockedAt = saved.assetBlockedAt;
+    if (savedAssetBlockedAt > localAssetBlockedAt
+      || (savedAssetBlockedAt === localAssetBlockedAt && saved.assetResumePhase === 'writing')) {
+      state.assetBlockedAt = savedAssetBlockedAt;
+      state.assetResumePhase = saved.assetResumePhase === 'writing' ? 'writing' : null;
+    }
     state.assetReadyAt = Math.max(state.assetReadyAt, saved.assetReadyAt);
     state.audioLeaseThrough = newerWatermark(state.audioLeaseThrough, saved.audioLeaseThrough);
     const positions = new Set([...Object.keys(state.answerVersions), ...Object.keys(saved.answerVersions)]);
@@ -470,7 +771,7 @@ function createEgeMockWrittenRunner(options = {}) {
     } else {
       const ranks = {
         running: 0, asset_blocked: 0, objective_queued: 1, objective_completed: 2,
-        submit_queued: 3, written_submitted: 4,
+        writing: 3, submit_queued: 4, written_submitted: 5,
       };
       const savedPhaseStillPending = saved.phase !== 'submit_queued'
         || state.queue.some((event) => event.type === 'submit');
@@ -479,18 +780,35 @@ function createEgeMockWrittenRunner(options = {}) {
         if (saved.phase === 'objective_completed') state.result = copy(saved.result);
       }
     }
-    if (state.assetBlockedAt > state.assetReadyAt && state.phase === 'running') state.phase = 'asset_blocked';
-    if (state.assetReadyAt >= state.assetBlockedAt && state.phase === 'asset_blocked') state.phase = 'running';
+    if (state.phase === 'written_submitted' && mergedAssessment) {
+      if (savedAssessmentWins) state.result = copy(saved.result);
+      else if (state.result) state.result.writingAssessment = copy(mergedAssessment);
+    }
+    if (state.assetBlockedAt > state.assetReadyAt && ['running', 'writing'].includes(state.phase)) {
+      state.assetResumePhase = state.phase === 'writing' ? 'writing' : null;
+      state.phase = 'asset_blocked';
+    }
+    if (state.assetReadyAt >= state.assetBlockedAt && state.phase === 'asset_blocked') {
+      state.phase = state.assetResumePhase || 'running';
+      state.assetResumePhase = null;
+    }
+    } catch (error) {
+      state = previousState;
+      logicalTime = previousLogicalTime;
+      throw error;
+    }
   }
 
   function markAssetBlocked() {
     state.assetBlockedAt = nextLocalTime();
+    if (state.phase === 'writing') state.assetResumePhase = 'writing';
     state.phase = 'asset_blocked';
   }
 
   function markAssetsReady() {
     state.assetReadyAt = nextLocalTime();
-    if (state.phase === 'asset_blocked') state.phase = 'running';
+    if (state.phase === 'asset_blocked') state.phase = state.assetResumePhase || 'running';
+    state.assetResumePhase = null;
   }
 
   function rebaseUnattemptedQueue() {
@@ -512,8 +830,10 @@ function createEgeMockWrittenRunner(options = {}) {
     try {
       assertInvalidationCurrent();
       mergeStoredState();
+      normalizeDurableShape(state);
       rebaseUnattemptedQueue();
-      if (state.queue.length && ['running', 'submit_queued'].includes(state.phase)) state.saveStatus = 'queued';
+      if ((state.queue.length && ['running', 'writing', 'submit_queued'].includes(state.phase))
+        || state.assessmentCommand) state.saveStatus = 'queued';
       state.invalidationWatermark = invalidationWatermark;
       storage.setItem(storageKey(), JSON.stringify(state));
     } catch (cause) {
@@ -657,17 +977,31 @@ function createEgeMockWrittenRunner(options = {}) {
   async function answer(position, value) {
     return withDurableLock(async () => {
       mergeStoredState();
-      if (state.phase !== 'running') throw new Error('EGE_MOCK_WRITTEN_NOT_RUNNING');
+      if (!['running', 'writing'].includes(state.phase)) throw new Error('EGE_MOCK_WRITTEN_NOT_RUNNING');
       if (!WRITTEN_POSITIONS.includes(position)) throw new TypeError('EGE_MOCK_WRITTEN_POSITION_INVALID');
-      const valid = value == null || (typeof value === 'string' && value.length <= 100)
-        || (Array.isArray(value) && value.length <= 20
+      if (state.phase === 'running' && !OBJECTIVE_POSITIONS.includes(position)) {
+        throw new TypeError('EGE_MOCK_WRITTEN_POSITION_INVALID');
+      }
+      const textLimit = WRITING_TEXT_LIMITS[position] || 100;
+      const writingPosition = position === 37 || position === 38;
+      const valid = value == null || (typeof value === 'string' && value.length <= textLimit)
+        || (!writingPosition && Array.isArray(value) && value.length <= 20
           && value.every((item) => typeof item === 'string' && item.length <= 40));
       if (!valid) throw new TypeError('EGE_MOCK_WRITTEN_ANSWER_INVALID');
+      const normalizedValue = writingPosition && typeof value === 'string'
+        ? sanitizeEgeWritingText(value) : value;
       const previous = copy(state);
       const eventId = uuid();
       const recordedAt = nextLocalTime();
-      state.answers[String(position)] = copy(value);
-      state.answerVersions[String(position)] = { id: eventId, recordedAt, value: copy(value) };
+      state.answers[String(position)] = copy(normalizedValue);
+      state.answerVersions[String(position)] = {
+        id: eventId, recordedAt, value: copy(normalizedValue),
+      };
+      if (writingPosition && state.writingDraftRecovery?.positions.includes(position)) {
+        const positions = state.writingDraftRecovery.positions.filter((candidate) => candidate !== position);
+        state.writingDraftRecovery = positions.length
+          ? { positions, kind: state.writingDraftRecovery.kind } : null;
+      }
       const dirtyPositions = [...new Set([
         ...state.queue.filter((event) => event.type === 'draft')
           .flatMap((event) => Array.isArray(event.dirtyPositions) ? event.dirtyPositions : []),
@@ -692,8 +1026,11 @@ function createEgeMockWrittenRunner(options = {}) {
   async function navigate(position) {
     return withDurableLock(async () => {
       mergeStoredState();
-      if (state.phase !== 'running') throw new Error('EGE_MOCK_WRITTEN_NOT_RUNNING');
+      if (!['running', 'writing'].includes(state.phase)) throw new Error('EGE_MOCK_WRITTEN_NOT_RUNNING');
       if (!WRITTEN_POSITIONS.includes(position)) throw new TypeError('EGE_MOCK_WRITTEN_POSITION_INVALID');
+      if (state.phase === 'running' && !OBJECTIVE_POSITIONS.includes(position)) {
+        throw new TypeError('EGE_MOCK_WRITTEN_POSITION_INVALID');
+      }
       const previous = copy(state);
       state.currentPosition = position;
       try { await withAuthorityCommit(() => persist()); } catch (error) { state = previous; throw error; }
@@ -712,7 +1049,7 @@ function createEgeMockWrittenRunner(options = {}) {
       || ![
         'written_in_progress', 'written_submitted', 'oral_ready', 'oral_in_progress',
         'assessment_pending', 'completed', 'expired',
-      ].includes(attempt.state)
+      ].includes(attempt.state) || !validAssessmentProjection(attempt.writingAssessment)
       || !attempt.draft || typeof attempt.draft !== 'object' || Array.isArray(attempt.draft)) {
       throw new Error('EGE_MOCK_RESTORE_RESPONSE_INVALID');
     }
@@ -728,7 +1065,7 @@ function createEgeMockWrittenRunner(options = {}) {
       || ![
         'written_in_progress', 'written_submitted', 'oral_ready', 'oral_in_progress',
         'assessment_pending', 'completed', 'expired',
-      ].includes(candidate.state)
+      ].includes(candidate.state) || !validAssessmentProjection(candidate.writingAssessment)
       || !candidate.draft || typeof candidate.draft !== 'object' || Array.isArray(candidate.draft)) {
       throw new Error('EGE_MOCK_RESTORE_RESPONSE_INVALID');
     }
@@ -755,6 +1092,9 @@ function createEgeMockWrittenRunner(options = {}) {
       queue: [],
       compactedThrough: null,
       canceledSubmit: null,
+      assessmentCommand: null,
+      assessmentCommandThrough: null,
+      assessmentCommandBlockedRevision: null,
       assetBlockedAt: 0,
       assetReadyAt: 0,
       audioLease: null,
@@ -764,25 +1104,33 @@ function createEgeMockWrittenRunner(options = {}) {
     applyServerCurrent(candidate, serverTimeMs);
   }
 
-  function objectiveAnswers(candidate = {}) {
+  function writtenAnswers(candidate = {}) {
     return Object.fromEntries(WRITTEN_POSITIONS.flatMap((position) => (
       Object.hasOwn(candidate, String(position)) ? [[String(position), copy(candidate[String(position)])]] : []
     )));
   }
 
   function objectiveResult(kind, serverState, answers, extra = {}) {
+    const positions = kind === 'objective_written_checkpoint' ? OBJECTIVE_POSITIONS : WRITTEN_POSITIONS;
     return {
       kind, attemptId: state.attemptId, state: serverState,
       ...(kind === 'objective_written_checkpoint'
-        ? { checkpointPositions: [...WRITTEN_POSITIONS] }
+        ? { checkpointPositions: [...OBJECTIVE_POSITIONS] }
         : { submittedPositions: [...WRITTEN_POSITIONS] }),
-      blankPositions: WRITTEN_POSITIONS.filter((position) => !answerComplete(position, answers[String(position)])),
+      blankPositions: positions.filter((position) => !answerComplete(position, answers[String(position)])),
       ...extra,
     };
   }
 
   function applyServerCurrent(candidate, serverTimeMs = null) {
     const attempt = assertCurrentAttempt(candidate);
+    const writingAssessment = mergeWritingAssessmentProjection(attempt.writingAssessment);
+    if (attempt.id === state.attemptId && Number.isInteger(state.revision)
+      && attempt.revision < state.revision) {
+      if (state.result) state.result.writingAssessment = copy(writingAssessment);
+      return;
+    }
+    const resumePhase = state.phase === 'writing' || state.assetResumePhase === 'writing' ? 'writing' : 'running';
     const resumeAssetBlocked = state.assetBlockedAt > state.assetReadyAt || state.phase === 'asset_blocked'
       || state.queue.some((event) => event.type === 'submit' && event.resumeAssetBlocked === true);
     const inheritedTimerAuthority = copy(state.timerAuthority);
@@ -792,7 +1140,7 @@ function createEgeMockWrittenRunner(options = {}) {
     seedTimerAuthority({ ...attempt, timerAuthority: inheritedTimerAuthority }, state, serverTimeMs);
     if (attempt.state !== 'written_in_progress') {
       const localAnswers = copy(state.answers);
-      const serverAnswers = objectiveAnswers(attempt.draft);
+      const serverAnswers = writtenAnswers(attempt.draft);
       const offlineChangesNotAccepted = state.queue.some((event) => event.type === 'draft')
         && JSON.stringify(localAnswers) !== JSON.stringify(serverAnswers);
       [...state.queue].forEach(retireThrough);
@@ -809,7 +1157,9 @@ function createEgeMockWrittenRunner(options = {}) {
       state.saveStatus = 'saved';
       state.result = objectiveResult('objective_written_submission', attempt.state, serverAnswers, {
         offlineChangesNotAccepted,
+        writingAssessment,
       });
+      ensureAutomaticAssessmentRun();
       return;
     }
     const localSubmit = state.queue.findLast((event) => event.type === 'submit');
@@ -818,7 +1168,7 @@ function createEgeMockWrittenRunner(options = {}) {
     state.saveStatus = state.queue.length ? 'queued' : 'saved';
     if (!state.queue.length) {
       state.revision = attempt.revision;
-      state.answers = objectiveAnswers(attempt.draft);
+      state.answers = writtenAnswers(attempt.draft);
       state.answerVersions = Object.fromEntries(Object.entries(state.answers).map(([position, value]) => [
         position, { id: `server:${attempt.revision}:${position}`, recordedAt: nextLocalTime(), value: copy(value) },
       ]));
@@ -829,7 +1179,7 @@ function createEgeMockWrittenRunner(options = {}) {
         .flatMap((event) => Array.isArray(event.dirtyPositions) ? event.dirtyPositions
           : Object.keys(event.answers || {}).filter((position) => !String(localVersions[position]?.id || '').startsWith('server:')))
         .map(String));
-      state.answers = objectiveAnswers(attempt.draft);
+      state.answers = writtenAnswers(attempt.draft);
       state.answerVersions = Object.fromEntries(Object.entries(state.answers).map(([position, value]) => [
         position, { id: `server:${attempt.revision}:${position}`, recordedAt: nextLocalTime(), value: copy(value) },
       ]));
@@ -841,13 +1191,16 @@ function createEgeMockWrittenRunner(options = {}) {
       });
       if (attempt.revision > state.revision) state.revision = attempt.revision;
     }
-    if (state.result?.kind === 'objective_written_checkpoint') {
+    if (state.result?.kind === 'objective_written_checkpoint' && resumePhase !== 'writing') {
       state.phase = 'objective_completed';
-      state.answers = objectiveAnswers(attempt.draft);
+      state.answers = writtenAnswers(attempt.draft);
       state.result = objectiveResult('objective_written_checkpoint', attempt.state, state.answers);
     } else if (state.queue.some((event) => event.completesObjective === true)) {
       state.phase = 'objective_queued';
-    } else state.phase = resumeAssetBlocked ? 'asset_blocked' : 'running';
+    } else {
+      state.assetResumePhase = resumeAssetBlocked && resumePhase === 'writing' ? 'writing' : null;
+      state.phase = resumeAssetBlocked ? 'asset_blocked' : resumePhase;
+    }
   }
 
   async function reconcileClosedQueue() {
@@ -890,6 +1243,7 @@ function createEgeMockWrittenRunner(options = {}) {
     } : {
       type: 'submit', idempotencyKey: replacementId, expectedRevision: state.revision,
       createdAt: nextLocalTime(), attempted: false,
+      manual: event.manual === true,
       resumeAssetBlocked: event.resumeAssetBlocked === true,
     });
     await persistLocked();
@@ -918,6 +1272,7 @@ function createEgeMockWrittenRunner(options = {}) {
       }
       timerRuntime = null;
       state = normalizeDurableShape(saved);
+      if (assessmentRevisionExhausted()) await persistLocked();
     } else {
       if (!online() || typeof transport.current !== 'function') return notify();
       const result = await transport.current();
@@ -925,6 +1280,7 @@ function createEgeMockWrittenRunner(options = {}) {
       adoptServerAttempt(result.attempt, result.serverTimeMs);
       await persistLocked();
     }
+    if (ensureAutomaticAssessmentRun()) await persistLocked();
     if (pendingStart && state.phase === 'error') return notify();
     if (state.phase === 'written_submitted' && !online()) return notify();
     async function ensureAssetsReady() {
@@ -979,20 +1335,97 @@ function createEgeMockWrittenRunner(options = {}) {
           ? await transport.attempt(state.attemptId) : await transport.current();
         applyServerCurrent(result?.attempt, result?.serverTimeMs);
         await persistLocked();
-        if (state.phase === 'written_submitted') return notify();
+        if (state.phase === 'written_submitted' && !state.assessmentCommand) return notify();
       } catch (error) {
         if (!retryableTransportError(error)) throw error;
       }
     }
-    if (['running', 'asset_blocked'].includes(state.phase) && !await ensureAssetsReady()) return snapshot();
+    if (['running', 'writing', 'asset_blocked'].includes(state.phase) && !await ensureAssetsReady()) return snapshot();
     notify();
-    if (['running', 'objective_queued', 'objective_completed'].includes(state.phase)
+    if (['running', 'writing', 'objective_queued', 'objective_completed'].includes(state.phase)
       && remainingSeconds() === 0) return queueSubmit();
-    if (state.queue.length) return sync();
+    if (state.queue.length || state.assessmentCommand) return sync();
     return snapshot();
   }
 
+  async function flushAssessmentCommand() {
+    mergeStoredState();
+    if (assessmentRevisionExhausted()) {
+      retireExhaustedAssessmentCommand(state);
+      await persistLocked();
+      notify();
+      return false;
+    }
+    const pending = copy(state.assessmentCommand);
+    if (!pending) return false;
+    const descriptor = assessmentCommandDescriptor(pending);
+    const operation = transport[descriptor.transportMethod];
+    if (!online() || typeof operation !== 'function') {
+      state.saveStatus = 'queued';
+      await persistLocked();
+      notify();
+      return true;
+    }
+    try {
+      const result = await operation({
+        attemptId: state.attemptId,
+        idempotencyKey: pending.idempotencyKey,
+        ...descriptor.requestFields(pending),
+      });
+      const {
+        acknowledged, terminal,
+      } = assertAssessmentResponse(result, descriptor);
+      applyServerCurrent(result.attempt, result.serverTimeMs);
+      if (descriptor.retainsAfterResponse(acknowledged, terminal)) {
+        state.saveStatus = 'queued';
+        await persistLocked();
+        notify();
+        return true;
+      }
+      state.assessmentCommandThrough = newerWatermark(state.assessmentCommandThrough, pending);
+      state.assessmentCommand = null;
+      if (descriptor.queueAutomaticRunAfterAck) ensureAutomaticAssessmentRun();
+      state.saveStatus = 'saved';
+      await persistLocked();
+      notify();
+      return true;
+    } catch (error) {
+      if (error?.code === 'ASSESSMENT_REVISION_EXHAUSTED') {
+        const revision = state.result?.writingAssessment?.assessmentRevision;
+        if (!Number.isSafeInteger(revision) || revision < 0) throw assessmentResponseError();
+        state.assessmentCommandThrough = newerWatermark(state.assessmentCommandThrough, pending);
+        state.assessmentCommand = null;
+        state.assessmentCommandBlockedRevision = ASSESSMENT_EXHAUSTION_SENTINEL;
+        state.saveStatus = 'saved';
+        await persistLocked();
+        notify();
+        return true;
+      }
+      if (error?.code !== 'EGE_MOCK_ASSESSMENT_RESPONSE_INVALID'
+        && !retryableTransportError(error)
+        && (typeof transport.attempt === 'function' || typeof transport.current === 'function')) {
+        try {
+          const result = typeof transport.attempt === 'function'
+            ? await transport.attempt(state.attemptId) : await transport.current();
+          applyServerCurrent(result?.attempt, result?.serverTimeMs);
+          if (!state.assessmentCommand) {
+            state.saveStatus = 'saved';
+            await persistLocked();
+            notify();
+            return true;
+          }
+        } catch (_) {}
+      }
+      state.saveStatus = 'queued';
+      await persistLocked();
+      notify();
+      if (retryableTransportError(error)) return true;
+      throw error;
+    }
+  }
+
   async function flushQueue() {
+    if (await flushAssessmentCommand()) return snapshot();
     if (!online() || !state.attemptId) {
       if (state.queue.length) state.saveStatus = 'queued';
       await persistLocked();
@@ -1004,19 +1437,33 @@ function createEgeMockWrittenRunner(options = {}) {
       const pending = state.queue[0];
       if (pending.type === 'submit') {
         try {
-          const current = typeof transport.attempt === 'function'
-            ? await transport.attempt(state.attemptId) : await transport.current?.();
-          if (!current) throw new Error('EGE_MOCK_CURRENT_REQUIRED');
-          applyServerCurrent(current?.attempt, current?.serverTimeMs);
+          const result = pending.manual === true
+            ? await transport.submitWritten({
+              attemptId: state.attemptId,
+              expectedRevision: pending.expectedRevision,
+              idempotencyKey: pending.idempotencyKey,
+            })
+            : typeof transport.attempt === 'function'
+              ? await transport.attempt(state.attemptId) : await transport.current?.();
+          if (!result) throw new Error('EGE_MOCK_CURRENT_REQUIRED');
+          applyServerCurrent(result?.attempt, result?.serverTimeMs);
+          if (pending.manual === true && state.phase === 'written_submitted') {
+            state.result.kind = 'written_submission';
+          }
           await persistLocked();
           notify();
-          if (state.phase === 'written_submitted') return snapshot();
+          if (state.phase === 'written_submitted') {
+            await flushAssessmentCommand();
+            return snapshot();
+          }
           return snapshot();
         } catch (error) {
           state.saveStatus = 'queued';
           await persistLocked();
           notify();
           if (retryableTransportError(error)) return snapshot();
+          if (error?.code === 'EGE_MOCK_WRITTEN_CLOSED' && await reconcileClosedQueue()) return snapshot();
+          if (error?.code === 'EGE_MOCK_REVISION_CONFLICT' && await rebaseAfterRevisionConflict(pending)) continue;
           throw error;
         }
       }
@@ -1039,8 +1486,8 @@ function createEgeMockWrittenRunner(options = {}) {
         } else throw new Error('EGE_MOCK_WRITTEN_QUEUE_EVENT_INVALID');
         const attempt = assertCurrentAttempt(result?.attempt);
         seedTimerAuthority({ ...attempt, timerAuthority: copy(state.timerAuthority) }, state, result?.serverTimeMs);
-        const appliedDraft = objectiveAnswers(attempt.draft);
-        const expectedDraft = objectiveAnswers(event.answers);
+        const appliedDraft = writtenAnswers(attempt.draft);
+        const expectedDraft = writtenAnswers(event.answers);
         if (attempt.state !== 'written_in_progress' || attempt.revision !== event.expectedRevision + 1
           || JSON.stringify(appliedDraft) !== JSON.stringify(expectedDraft)) {
           throw new Error('EGE_MOCK_DRAFT_RESPONSE_INVALID');
@@ -1049,7 +1496,7 @@ function createEgeMockWrittenRunner(options = {}) {
         retireThrough(event);
         state.revision = attempt.revision;
         if (event.completesObjective === true) {
-          state.answers = objectiveAnswers(attempt.draft);
+          state.answers = writtenAnswers(attempt.draft);
           state.answerVersions = Object.fromEntries(Object.entries(state.answers).map(([position, value]) => [
             position, {
               id: `server:${attempt.revision}:${position}`, recordedAt: nextLocalTime(), value: copy(value),
@@ -1080,10 +1527,76 @@ function createEgeMockWrittenRunner(options = {}) {
     return flushing;
   }
 
+  async function retryAssessment(acknowledgePossibleProviderRepeat = false) {
+    const queued = await withDurableLock(async () => {
+      mergeStoredState();
+      const status = state.result?.writingAssessment?.status;
+      if (state.phase !== 'written_submitted'
+        || !['retryable', 'ambiguous'].includes(status)
+        || state.result?.writingAssessment?.retryAllowed !== true) {
+        throw new Error('EGE_MOCK_WRITING_ASSESSMENT_RETRY_NOT_ALLOWED');
+      }
+      if (assessmentRevisionExhausted()) {
+        throw Object.assign(new Error('ASSESSMENT_REVISION_EXHAUSTED'), {
+          code: 'ASSESSMENT_REVISION_EXHAUSTED',
+        });
+      }
+      if (status === 'ambiguous' && acknowledgePossibleProviderRepeat !== true) {
+        throw new Error('EGE_MOCK_WRITING_AMBIGUOUS_RETRY_ACK_REQUIRED');
+      }
+      if (!state.assessmentCommand) {
+        state.assessmentCommand = {
+          action: 'retry', idempotencyKey: uuid(), createdAt: nextLocalTime(),
+          acknowledgePossibleProviderRepeat: status === 'ambiguous',
+        };
+      }
+      state.saveStatus = 'queued';
+      await withAuthorityCommit(() => persist());
+      notify();
+      return true;
+    });
+    if (!queued) return snapshot();
+    return sync();
+  }
+
+  async function runAssessmentAfterRenewal() {
+    const queued = await withDurableLock(async () => {
+      mergeStoredState();
+      const assessment = state.result?.writingAssessment;
+      if (state.phase !== 'written_submitted' || assessment?.status !== 'pending'
+        || assessment?.runDisposition !== 'subscription_required') {
+        throw new Error('EGE_MOCK_WRITING_ASSESSMENT_RENEWAL_NOT_ALLOWED');
+      }
+      if (assessmentRevisionExhausted()) {
+        throw Object.assign(new Error('ASSESSMENT_REVISION_EXHAUSTED'), {
+          code: 'ASSESSMENT_REVISION_EXHAUSTED',
+        });
+      }
+      if (state.assessmentCommand?.explicitRenewal !== true) {
+        if (state.assessmentCommand) {
+          state.assessmentCommandThrough = newerWatermark(
+            state.assessmentCommandThrough, state.assessmentCommand,
+          );
+        }
+        state.assessmentCommand = {
+          action: 'run', idempotencyKey: uuid(), createdAt: nextLocalTime(),
+          acknowledgePossibleProviderRepeat: false,
+          explicitRenewal: true,
+        };
+      }
+      state.saveStatus = 'queued';
+      await withAuthorityCommit(() => persist());
+      notify();
+      return true;
+    });
+    if (!queued) return snapshot();
+    return sync();
+  }
+
   async function queueSubmit() {
     const queued = await withDurableLock(async () => {
       mergeStoredState();
-      if (!['running', 'asset_blocked', 'objective_queued', 'objective_completed', 'submit_queued'].includes(state.phase)) {
+      if (!['running', 'writing', 'asset_blocked', 'objective_queued', 'objective_completed', 'submit_queued'].includes(state.phase)) {
         return false;
       }
       const previous = copy(state);
@@ -1105,6 +1618,49 @@ function createEgeMockWrittenRunner(options = {}) {
         notify();
         return false;
       }
+      notify();
+      return true;
+    });
+    if (!queued) return snapshot();
+    return sync();
+  }
+
+  async function continueWriting() {
+    return withDurableLock(async () => {
+      mergeStoredState();
+      if (state.phase === 'writing') return notify();
+      if (state.phase !== 'objective_completed') throw new Error('EGE_MOCK_OBJECTIVE_CHECKPOINT_REQUIRED');
+      const previous = copy(state);
+      state.phase = 'writing';
+      state.currentPosition = 37;
+      try { await withAuthorityCommit(() => persist()); } catch (error) { state = previous; throw error; }
+      return notify();
+    });
+  }
+
+  async function completeWritten() {
+    const queued = await withDurableLock(async () => {
+      mergeStoredState();
+      if (state.phase !== 'writing') throw new Error('EGE_MOCK_WRITING_NOT_READY');
+      const previous = copy(state);
+      const dirtyPositions = [...new Set(state.queue.filter((candidate) => candidate.type === 'draft')
+        .flatMap((candidate) => Array.isArray(candidate.dirtyPositions) ? candidate.dirtyPositions : []))];
+      const dirtyVersions = Object.fromEntries(dirtyPositions.flatMap((position) => {
+        const version = state.answerVersions[String(position)]?.id;
+        return typeof version === 'string' ? [[String(position), version]] : [];
+      }));
+      state.queue = state.queue.filter((event) => !(event.type === 'draft' && event.attempted !== true));
+      state.queue = compactQueue([...state.queue, {
+        type: 'draft', idempotencyKey: uuid(), expectedRevision: state.revision,
+        answers: copy(state.answers), createdAt: nextLocalTime(), attempted: false,
+        dirtyPositions, dirtyVersions,
+      }, {
+        type: 'submit', manual: true, idempotencyKey: uuid(), expectedRevision: state.revision + 1,
+        createdAt: nextLocalTime(), attempted: false,
+      }], state.compactedThrough);
+      state.phase = 'submit_queued';
+      state.saveStatus = 'queued';
+      try { await withAuthorityCommit(() => persist()); } catch (error) { state = previous; throw error; }
       notify();
       return true;
     });
@@ -1146,7 +1702,7 @@ function createEgeMockWrittenRunner(options = {}) {
     let expired = false;
     await withDurableLock(async () => {
       mergeStoredState();
-      expired = ['running', 'asset_blocked', 'objective_queued', 'objective_completed'].includes(state.phase)
+      expired = ['running', 'writing', 'asset_blocked', 'objective_queued', 'objective_completed'].includes(state.phase)
         && remainingSeconds() === 0;
       await withAuthorityCommit(() => persist());
     });
@@ -1195,6 +1751,12 @@ function createEgeMockWrittenRunner(options = {}) {
     if (command.type === 'sync') return sync();
     if (command.type === 'submit') return queueSubmit();
     if (command.type === 'completeObjective') return completeObjective();
+    if (command.type === 'continueWriting') return continueWriting();
+    if (command.type === 'completeWritten') return completeWritten();
+    if (command.type === 'retryAssessment') {
+      return retryAssessment(command.acknowledgePossibleProviderRepeat === true);
+    }
+    if (command.type === 'runAssessmentAfterRenewal') return runAssessmentAfterRenewal();
     if (command.type === 'tick') return tick();
     if (command.type === 'audioStart') return audioStart(String(command.group || ''));
     if (command.type === 'audioFinish') return audioFinish(String(command.token || ''));
@@ -1213,5 +1775,6 @@ function createEgeMockWrittenRunner(options = {}) {
 }
 
 export {
-  WRITTEN_POSITIONS, createEgeMockWrittenRunner, egeMockLocalContinuation, normalizeEgeMockSelection,
+  OBJECTIVE_POSITIONS, WRITTEN_POSITIONS, createEgeMockWrittenRunner,
+  egeMockLocalContinuation, normalizeEgeMockSelection,
 };

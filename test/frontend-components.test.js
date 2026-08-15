@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
+import { AUTOMATIC_ASSESSMENT_WARNING } from '../public/automatic-assessment-contract.js';
 
 const source = await fs.readFile(new URL('../public/components.js', import.meta.url), 'utf8');
+const executableSource = source.replace(/^import[^;]+;\r?\n/u, '');
 
 function createElement(tagName = 'DIV') {
   const attributes = new Map();
@@ -40,7 +42,14 @@ function createComponents() {
     createElement: (tagName) => createElement(tagName.toUpperCase()),
   };
   const window = { document, setTimeout, clearTimeout };
-  vm.runInNewContext(source, { window, Object, String, Number, Math });
+  vm.runInNewContext(executableSource, {
+    window,
+    Object,
+    String,
+    Number,
+    Math,
+    AUTOMATIC_ASSESSMENT_WARNING,
+  });
   return { components: window.EasyBoostComponents, elements };
 }
 
@@ -63,6 +72,7 @@ test('frontend components safely render text, progress and HTML values', () => {
   assert.equal(ring.getAttribute('stroke-dashoffset'), '150');
   assert.equal(bar.style.animation, 'appear .32s cubic-bezier(.25,.75,.35,1)');
   assert.equal(components.escapeHtml(`<a title="'">&`), '&lt;a title=&quot;&#39;&quot;&gt;&amp;');
+  assert.equal(components.AI_DISCLAIMER, AUTOMATIC_ASSESSMENT_WARNING);
 });
 
 test('frontend components provide keyboard-accessible interactions and live notifications', () => {

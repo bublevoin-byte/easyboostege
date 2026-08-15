@@ -35,7 +35,7 @@ function egeMockLocalContinuation(storage, candidateOwner, form) {
       || saved.owner?.generation !== owner.generation || saved.formIdentity !== form?.identity
       || saved.catalogFingerprint !== form?.fingerprint
       || (Number.isSafeInteger(saved.invalidationWatermark) ? saved.invalidationWatermark : 0) !== invalidationWatermark
-      || !['running', 'asset_blocked', 'objective_queued', 'objective_completed', 'submit_queued', 'written_submitted'].includes(saved.phase)
+      || !['running', 'writing', 'asset_blocked', 'objective_queued', 'objective_completed', 'submit_queued', 'written_submitted'].includes(saved.phase)
       || typeof saved.attemptId !== 'string'
       || typeof saved.attemptOwnerGeneration !== 'string' || !saved.attemptOwnerGeneration
       || !validEgeMockWrittenTiming(saved) || !Array.isArray(saved.queue)

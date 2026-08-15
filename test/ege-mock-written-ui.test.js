@@ -22,13 +22,14 @@ test('written mock exposes one accessible responsive runner without score or key
   assert.match(markup, /\.ege-mock button,[^{]*\.ege-mock input,[^{]*\.ege-mock select\{min-height:44px\}/u);
   assert.match(markup, /\.ege-mock\{[^}]*overflow-x:hidden/u);
   assert.match(markup, /@media\(prefers-reduced-motion:reduce\)\{\.ege-mock \*\{/u);
-  assert.match(screen, /Array\.from\(\{ length: 36 \}/u);
   assert.match(screen, /blankPositions/u);
   assert.match(screen, /currentEgeMockOwnerBinding/u);
   assert.match(screen, /apiResponseOwner\(result\) !== owner\.username/u);
   assert.match(screen, /apiResponseServerTime/u);
   assert.match(screen, /'Idempotency-Key': input\.idempotencyKey/u);
   assert.match(screen, /type: 'completeObjective'/u);
+  assert.match(screen, /dataset\.egeAction === 'run-assessment-after-renewal'[\s\S]*?type: 'runAssessmentAfterRenewal'/u,
+    'the canonical subscription block exposes only an explicit post-renewal command');
   assert.match(screen, /apiIsAuthorityFailure/u);
   assert.match(screen, /invalidateLearningAuthority/u);
   assert.match(screen, /refreshRunningProjection/u);
@@ -40,7 +41,6 @@ test('written mock exposes one accessible responsive runner without score or key
   assert.match(screen, /apiGet\(`\/api\/v1\/ege-mocks\/attempts\/\$\{attemptId\}`/u);
   assert.match(screen, /before\.phase === 'asset_blocked' \? 'restore' : 'sync'/u);
   assert.match(screen, /Exact-кэш этой формы недоступен/u);
-  assert.doesNotMatch(screen, /written\/submit/u);
   assert.doesNotMatch(screen, /answerKey|correctAnswer|showHint|showScore/u);
   assert.doesNotMatch(runnerSource, /writerId/u);
 });

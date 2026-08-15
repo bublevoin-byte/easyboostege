@@ -12,6 +12,10 @@ import { advanceFullSpeakingSessionStage, applyGrammarMasteryEvent, assignFullSp
 import { applyGrammarMasteryEvents } from './db.js';
 import {
   getCurrentEgeMockAttempt, getEgeMockAttempt, getEgeMockResult,
+  beginEgeMockAssessmentRun, settleEgeMockAssessmentRun,
+  claimEgeMockWritingAssessment, renewEgeMockWritingAssessmentClaim, completeEgeMockWritingAssessmentItem,
+  failEgeMockWritingAssessment, prepareEgeMockWritingAssessmentItemOutcome,
+  recordEgeMockWritingAssessmentItemOutcome,
   retryEgeMockAssessment, saveEgeMockDraft, startEgeMockAttempt,
   startEgeMockOral, submitEgeMockOral, submitEgeMockWritten,
 } from './db.js';
@@ -62,6 +66,11 @@ import { createMediaRoutes } from './routes/media.js';
 import { createTaskRoutes, seedBuiltinTasks } from './routes/tasks.js';
 import { createVoiceTutorRoutes, rebuildSourceCapsule } from './routes/voice-tutor.js';
 import { createEgeMockRoutes } from './routes/ege-mocks.js';
+import {
+  createEgeMockWritingAssessmentService,
+  createEgeMockWritingConsentAuthority,
+  createEgeMockWritingProviderEvaluator,
+} from './ege-mock/writing-assessment-service.js';
 import { createAiTextTutor } from './voice-tutor/text-fallback.js';
 import { createVoiceTutorRealtimeProxy } from './voice-tutor/realtime-proxy.js';
 import { createProviderClient } from './ai/provider-client.js';
@@ -78,6 +87,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
    инлайновых скриптов для CSP. Считать политику по одной разметке, а отдавать другую нельзя:
    политика и разметка разъедутся, и приложение перестанет запускаться в production. */
 const buildDirectory = path.join(__dirname, 'dist', 'public');
+const sharedFrontendDirectory = path.join(__dirname, 'shared');
 const frontendDirectory = fs.existsSync(path.join(buildDirectory, 'index.html'))
   ? buildDirectory
   : path.join(__dirname, 'public');
@@ -184,6 +194,10 @@ app.get('/', async (req, res, next) => {
     return next();
   } catch (error) { next(error); }
 });
+app.use('/shared', express.static(sharedFrontendDirectory, {
+  fallthrough: false,
+  index: false,
+}));
 app.use(express.static(frontendDirectory, {
   setHeaders(res, filePath) {
     if (path.basename(filePath) === 'index.html') res.setHeader('Cache-Control', 'no-store');
@@ -247,7 +261,11 @@ const dbApi = {
   completeFullSpeakingSessionEvaluation,
   startEgeMockAttempt, getCurrentEgeMockAttempt, getEgeMockAttempt, saveEgeMockDraft,
   submitEgeMockWritten, startEgeMockOral, submitEgeMockOral, getEgeMockResult,
-  retryEgeMockAssessment,
+  beginEgeMockAssessmentRun, settleEgeMockAssessmentRun, retryEgeMockAssessment,
+  claimEgeMockWritingAssessment, renewEgeMockWritingAssessmentClaim,
+  prepareEgeMockWritingAssessmentItemOutcome,
+  recordEgeMockWritingAssessmentItemOutcome, completeEgeMockWritingAssessmentItem,
+  failEgeMockWritingAssessment,
   getGeneratedTask, getSharedGeneratedTask, saveGeneratedTask, logAiRequest, claimAiOperationSlot, settleAiOperationSlot,
   upsertBankTask, getBankTask, getBankTaskByExternalId, claimUnseenBankTask, recordTaskDelivery, listBankTaskContents,
 };
@@ -353,7 +371,26 @@ const access = {
   createOperationLimiter, ttsLimiter, sttLimiter, hasAiBudget,
   requireAiBudget, requireActiveSubscription, requirePrivacyConsent,
 };
-app.use(createEgeMockRoutes({ authentication, access, db: dbApi }));
+const egeMockWritingProviderClient = createProviderClient();
+const egeMockWritingProviderEvaluator = createEgeMockWritingProviderEvaluator({
+  providerClient: egeMockWritingProviderClient,
+});
+const egeMockWritingAssessment = createEgeMockWritingAssessmentService({
+  repository: dbApi,
+  evaluator: egeMockWritingProviderEvaluator,
+  consentAuthority: createEgeMockWritingConsentAuthority({
+    getPrivacyConsent,
+    policyVersion: PRIVACY_POLICY_VERSION,
+  }),
+  claimAiOperation: claimAiOperationSlot,
+  settleAiOperation: settleAiOperationSlot,
+  limitsFor: egeMockWritingProviderEvaluator.limitsFor,
+  dailyLimit: config.ai.dailyRequestBudget,
+});
+app.use(createEgeMockRoutes({
+  authentication, access, db: dbApi, writingAssessment: egeMockWritingAssessment,
+  logger: { error: (entry) => console.error(JSON.stringify(entry)) },
+}));
 const speakingPronunciationProvider = createAzurePronunciationProvider({
   subscriptionKey: config.speakingPronunciation.enabled ? config.speakingPronunciation.azureKey : '',
   region: config.speakingPronunciation.enabled ? config.speakingPronunciation.azureRegion : '',

@@ -1,10 +1,11 @@
+import { AUTOMATIC_ASSESSMENT_WARNING } from './automatic-assessment-contract.js';
+
+const AI_DISCLAIMER = AUTOMATIC_ASSESSMENT_WARNING;
+
 (function initEasyBoostComponents(global) {
   'use strict';
 
   let notificationTimer = null;
-
-  // Sections 10.9 and 11.3: every free-response AI grade carries this wording verbatim.
-  const AI_DISCLAIMER = 'Экспериментальная ИИ-оценка. Балл ориентировочный, может содержать ошибки и не является экспертным заключением.';
 
   function byId(id) {
     return global.document.getElementById(id);

@@ -48,7 +48,11 @@ import { assertFullSpeakingSessionRepositoryContract } from './support/speaking-
 import { assertSpeakingAssessmentQuotaContract } from './support/speaking-assessment-quota-contract.js';
 import { assertSpeakingAccentCalibrationRepositoryContract } from './support/speaking-accent-calibration-contract.js';
 import { assertGrammarMasteryProgressContract } from './support/grammar-mastery-progress-contract.js';
-import { assertEgeMockAttemptRepositoryContract } from './support/ege-mock-attempt-contract.js';
+import {
+  assertEgeMockAssessmentRevisionExhaustionContract,
+  assertEgeMockAssessmentRunSubscriptionContract,
+  assertEgeMockAttemptRepositoryContract,
+} from './support/ege-mock-attempt-contract.js';
 import { EGE_MOCK_FORM_ID, EGE_MOCK_FORM_REVISION, getEgeMockForm } from '../ege-mock/catalog.js';
 import { READING_TASK10_SETS } from '../public/content/reading/task10-v1.js';
 import { READING_TASK11_SETS } from '../public/content/reading/task11-v1.js';
@@ -75,6 +79,128 @@ test('PostgreSQL EGE mock attempts match the shared lifecycle, concurrency, expo
   const repository = createPostgresRepository(connectionString);
   try { await assertEgeMockAttemptRepositoryContract(assert, repository, 92_603_000); }
   finally { await repository.close(); }
+});
+
+test('PostgreSQL assessment-run subscription command matches the shared repository contract', {
+  skip: !connectionString,
+}, async () => {
+  const repository = createPostgresRepository(connectionString);
+  const raw = new pg.Client({ connectionString });
+  try {
+    await raw.connect();
+    await assertEgeMockAssessmentRunSubscriptionContract(
+      assert, repository, 92_603_012,
+      async (owners) => {
+        await raw.query(
+          `UPDATE users SET subscription_until = clock_timestamp() - INTERVAL '1 minute'
+           WHERE username = ANY($1::text[])`,
+          [owners.map(({ username }) => username)],
+        );
+      },
+    );
+  } finally {
+    await raw.end().catch(() => {});
+    await repository.close();
+  }
+});
+
+test('PostgreSQL assessment revision exhaustion matches the shared repository contract', {
+  skip: !connectionString,
+}, async () => {
+  const repository = createPostgresRepository(connectionString);
+  const raw = new pg.Client({ connectionString });
+  try {
+    await raw.connect();
+    await assertEgeMockAssessmentRevisionExhaustionContract(assert, {
+      repository: () => repository,
+      async seedAssessmentRevision({ username, attemptId, revision }) {
+        await raw.query(
+          `UPDATE ege_mock_attempts
+           SET writing_assessment = jsonb_set(
+             writing_assessment, '{assessment_revision}', to_jsonb($3::bigint), false
+           )
+           WHERE username = $1 AND id = $2`,
+          [username, attemptId, revision],
+        );
+      },
+      async expireSubscription(owner) {
+        await raw.query(
+          `UPDATE users SET subscription_until = clock_timestamp() - INTERVAL '1 minute'
+           WHERE username = $1`,
+          [owner.username],
+        );
+        return {};
+      },
+      async assessmentRunMutationCount({ username, attemptId, idempotencyKey }) {
+        const { rows } = await raw.query(
+          `SELECT COUNT(*)::integer AS count
+           FROM ege_mock_mutations
+           WHERE username = $1 AND attempt_id = $2 AND operation = 'assessment_run'
+             AND idempotency_key = $3`,
+          [username, attemptId, idempotencyKey],
+        );
+        return rows[0].count;
+      },
+    }, 92_603_014);
+  } finally {
+    await raw.end().catch(() => {});
+    await repository.close();
+  }
+});
+
+test('PostgreSQL reclaims an expired writing lease from the frozen subscribed authorization', {
+  skip: !connectionString,
+}, async () => {
+  const repository = createPostgresRepository(connectionString);
+  const raw = new pg.Client({ connectionString });
+  const telegramId = 92_603_010;
+  let username;
+  try {
+    await raw.connect();
+    username = await repository.createTelegramUser(telegramId, 'EGE writing authorization PG');
+    await repository.grantDays(telegramId, 45, 'EGE writing authorization PG');
+    const form = getEgeMockForm(EGE_MOCK_FORM_ID, EGE_MOCK_FORM_REVISION);
+    const started = await repository.startEgeMockAttempt(username, {
+      formId: form.id, formRevision: form.revision, catalogFingerprint: form.fingerprint,
+      idempotencyKey: crypto.randomUUID(), requestHash: 'a'.repeat(64),
+    });
+    await repository.submitEgeMockWritten(username, started.attempt.id, {
+      expectedRevision: 0, idempotencyKey: crypto.randomUUID(), requestHash: 'b'.repeat(64),
+    });
+    await repository.setPrivacyConsent(username, {
+      text_processing: true, voice_processing: false, policy_version: 'privacy-v1',
+    });
+    const first = await repository.claimEgeMockWritingAssessment(username, started.attempt.id, {
+      claimToken: crypto.randomUUID(),
+      authorization: { textProcessingConsent: true, consentPolicyVersion: 'privacy-v1' },
+    });
+    assert.equal(first.claimed, true);
+    await raw.query(
+      `UPDATE users SET subscription_until = clock_timestamp() - INTERVAL '1 minute'
+       WHERE username = $1`,
+      [username],
+    );
+    await raw.query(
+      `UPDATE ege_mock_attempts
+       SET writing_assessment = jsonb_set(
+         writing_assessment, '{claim_expires_at}',
+         to_jsonb((clock_timestamp() - INTERVAL '1 minute')::text)
+       )
+       WHERE username = $1 AND id = $2`,
+      [username, started.attempt.id],
+    );
+
+    const reclaimed = await repository.claimEgeMockWritingAssessment(username, started.attempt.id, {
+      claimToken: crypto.randomUUID(),
+      authorization: { textProcessingConsent: false, consentPolicyVersion: null },
+    });
+    assert.equal(reclaimed.claimed, true);
+    assert.deepEqual(reclaimed.work.authorization, first.work.authorization);
+  } finally {
+    await raw.end().catch(() => {});
+    if (username) await repository.deleteUserData(username).catch(() => {});
+    await repository.close();
+  }
 });
 
 test('PostgreSQL EGE mock persists deadline reconciliation when a late draft is rejected', {
@@ -2979,6 +3105,7 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
       '051_adaptive_profile_evidence_fingerprint.sql',
       '052_adaptive_plan_evidence_fingerprint.sql',
       '053_ege_mock_attempts.sql',
+      '054_ege_mock_writing_assessment.sql',
     ]);
 
     const username = await repository.createTelegramUser(telegramId, `Integration ${suffix}`);

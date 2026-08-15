@@ -6,10 +6,14 @@
 //   * markers  — evidence found by pattern, never proof of absence (comparisons, problem/solution).
 // The prompt presents them under different headings for exactly that reason.
 
-const GREETING = /^\s*(?:dear|hi|hello|hey)\b/iu;
+import {
+  countEgeWritingWords, egeWritingAssessableText, egeWritingLetterStructure,
+  egeWritingPublishedSourceOverlap,
+  takeEgeWritingEvaluationFragment,
+} from '../shared/ege-writing-text.js';
+
 const THANKS = /\b(?:thanks?(?:\s+(?:a\s+lot|so\s+much|for))?|thank\s+you|(?:great|glad|nice|lovely)\s+to\s+hear)\b/iu;
 const CLOSING = /\b(?:hope\s+to\s+hear|write\s+back|see\s+you|take\s+care|looking\s+forward|keep\s+in\s+touch|got\s+to\s+go|have\s+to\s+go)\b/iu;
-const SIGN_OFF = /^\s*(?:best\s+wishes|yours(?:\s+\w+)?|kind\s+regards|regards|love|all\s+the\s+best|take\s+care|cheers)\s*,?\s*$/imu;
 
 const COMPARISON = [
   /\b\w+er\s+than\b/iu,
@@ -24,19 +28,14 @@ const COMPARISON = [
 const PROBLEM = /\b(?:problem|issue|challenge|drawback|disadvantage|difficulty|risk|concern)\b/iu;
 const SOLUTION = /\b(?:solution|solve|resolve|a\s+way\s+(?:to|out)|one\s+way|could\s+be|should\s+be|recommend|suggest|advise|help\s+to)\b/iu;
 
-export function countWords(text) {
-  const value = String(text ?? '').trim();
-  return value ? value.split(/\s+/u).filter(Boolean).length : 0;
+export function countWords(text, context) {
+  return countEgeWritingWords(text, context);
 }
 
-// Uses the same whitespace-delimited word boundary as countWords while retaining the student's
-// punctuation and line breaks up to the last word that may be evaluated.
-export function takeFirstWords(text, limit) {
-  const value = String(text ?? '').trim();
-  const matches = [...value.matchAll(/\S+/gu)];
-  if (matches.length <= limit) return value;
-  const last = matches[limit - 1];
-  return value.slice(0, last.index + last[0].length);
+// Uses the same official token boundary as countWords while retaining the student's source text
+// and applying the task-specific question/sentence cutoff from FIPI Appendix 3.
+export function takeFirstWords(text, limit, taskType = null, assignment = null) {
+  return takeEgeWritingEvaluationFragment(text, { limit, taskType, assignment });
 }
 
 // Two shapes are possible: real blank-line paragraphs, or a single block with line breaks.
@@ -57,17 +56,13 @@ export function countQuestionSentences(text) {
 
 export function findLetterParts(text) {
   const value = String(text ?? '');
-  const lines = value.split(/\n/u).map((line) => line.trim()).filter(Boolean);
-  const last = lines[lines.length - 1] || '';
-  const signOffIndex = lines.findIndex((line) => SIGN_OFF.test(line));
+  const structure = egeWritingLetterStructure(value);
   return {
-    greeting: lines.length > 0 && GREETING.test(lines[0]),
+    greeting: structure.greeting,
     thanks: THANKS.test(value),
     closing: CLOSING.test(value),
-    signOff: signOffIndex !== -1,
-    // A signature is the bare name after the closing phrase: one or two words, no full stop.
-    signature: signOffIndex !== -1 && signOffIndex < lines.length - 1
-      && /^[^.!?]{1,40}$/u.test(last) && countWords(last) <= 2,
+    signOff: structure.signOff,
+    signature: structure.signature,
   };
 }
 
@@ -94,21 +89,24 @@ export function findProblemAndSolution(text) {
 
 export function analyzeWriting(input) {
   const answer = String(input?.answer ?? '');
-  const blocks = countBlocks(answer);
+  const assessableAnswer = input?.taskType === 'writing_37'
+    ? egeWritingAssessableText(answer, { taskType: input.taskType }) : answer;
+  const blocks = countBlocks(assessableAnswer);
   const facts = {
-    words: countWords(answer),
+    words: countWords(answer, { taskType: input?.taskType, assignment: input?.assignment }),
     paragraphs: blocks.paragraphs,
     lines: blocks.lines,
-    questionSentences: countQuestionSentences(answer),
+    questionSentences: countQuestionSentences(assessableAnswer),
   };
   if (input?.taskType === 'writing_37') {
-    return { ...facts, letterParts: findLetterParts(answer) };
+    return { ...facts, letterParts: findLetterParts(assessableAnswer) };
   }
   return {
     ...facts,
     tableFigures: findTableFigures(answer, input?.assignment?.rows),
     comparisonMarkers: findComparisons(answer),
     problemAndSolution: findProblemAndSolution(answer),
+    publishedSourceOverlap: egeWritingPublishedSourceOverlap(answer, input?.assignment),
   };
 }
 
@@ -134,6 +132,7 @@ export function describeFacts(facts, taskType) {
     const figures = facts.tableFigures;
     verified.push(`числа из таблицы использованы: ${figures.used.length ? figures.used.map((value) => value + '%').join(', ') : 'нет'}`);
     verified.push(`числа из таблицы не упомянуты: ${figures.missing.length ? figures.missing.map((value) => value + '%').join(', ') : 'нет'}`);
+    verified.push(`точных совпадений с опубликованным источником блоками от 10 слов: ${facts.publishedSourceOverlap.matchedWords} из ${facts.publishedSourceOverlap.totalWords} слов`);
     hints.push(`маркеров сравнения: ${facts.comparisonMarkers}`);
     hints.push(`упоминание проблемы: ${facts.problemAndSolution.problem ? 'найдено' : 'не найдено'}`);
     hints.push(`упоминание решения: ${facts.problemAndSolution.solution ? 'найдено' : 'не найдено'}`);

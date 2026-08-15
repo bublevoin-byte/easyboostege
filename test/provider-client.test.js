@@ -30,7 +30,7 @@ function refusal(message, status = 503) {
 function stubFetch(reply) {
   const calls = [];
   globalThis.fetch = async (url, init) => {
-    const call = { url, body: JSON.parse(init.body) };
+    const call = { url, headers: structuredClone(init.headers), body: JSON.parse(init.body) };
     calls.push(call);
     return reply(call, calls.length);
   };
@@ -86,6 +86,20 @@ test('a failing primary provider hands the request to the spare', async () => {
   assert.equal(calls.length, 2);
 });
 
+test('provider transport receives the durable idempotency key and recovery is explicitly unsupported by default', async () => {
+  const client = createProviderClient({ provider: 'grok' });
+  const calls = stubFetch(() => answer('{"ok":true}'));
+  const idempotencyKey = 'd518b708-e4e6-4bc1-a51a-9a0312933828';
+  await client.askWithFallback('system', 'user', 'writing_37', {
+    beforeAttempt: async () => ({ idempotencyKey }),
+  });
+  assert.equal(calls[0].headers['Idempotency-Key'], idempotencyKey);
+  assert.deepEqual(await client.recoverByIdempotencyKey(idempotencyKey, {
+    operation: 'writing_37',
+  }), { status: 'unsupported' });
+  assert.equal(calls.length, 1, 'unsupported recovery must not issue another provider request');
+});
+
 test('a pinned provider is the only one offered', () => {
   assert.deepEqual(createProviderClient().aiProviders().map((item) => item.name), ['grok', 'groq']);
   assert.deepEqual(createProviderClient({ provider: 'groq' }).aiProviders().map((item) => item.name), ['groq']);
@@ -133,6 +147,62 @@ test('a contract violation buys exactly one corrected attempt', async () => {
   assert.equal(calls.length, 1);
   /* The repair call quotes the rejected output back, labelled as data rather than instruction. */
   assert.match(calls[0].body.messages.at(-1).content, /ОТКЛОНЁННЫЙ_ОТВЕТ/u);
+});
+
+test('fallback and format repair expose every physical provider call to one durable meter', async () => {
+  const client = createProviderClient();
+  const calls = stubFetch((call, number) => {
+    if (number === 1) return refusal('primary unavailable');
+    if (number === 2) return answer('invalid contract', { promptTokens: 20, completionTokens: 7 });
+    return answer('valid contract', { promptTokens: 30, completionTokens: 9 });
+  });
+  const events = [];
+  const controls = (phase) => ({
+    async beforeAttempt(provider, { attempt }) {
+      const token = `${phase}:${attempt}:${provider.name}`;
+      events.push({ token, event: 'claimed' });
+      return token;
+    },
+    async afterAttempt(token, outcome) {
+      events.push({
+        token,
+        event: outcome.status,
+        promptTokens: outcome.value?.promptTokens ?? null,
+        completionTokens: outcome.value?.completionTokens ?? null,
+      });
+    },
+  });
+
+  const first = await client.askWithFallback(
+    'system text', 'user text', 'writing_37', controls('provider'),
+  );
+  const provider = client.aiProviders().find((candidate) => candidate.name === first.provider);
+  const repaired = await client.parseWithOneRepair({
+    provider,
+    text: first.text,
+    parse(text) {
+      if (text !== 'valid contract') throw new Error('AI_RESPONSE_INVALID_SCHEMA');
+      return text;
+    },
+    system: 'system text',
+    user: 'user text',
+    operation: 'writing_37',
+    callControls: controls('repair'),
+  });
+
+  assert.equal(repaired.value, 'valid contract');
+  assert.equal(calls.length, 3);
+  assert.deepEqual(events.map(({ token, event }) => `${token}:${event}`), [
+    'provider:1:grok:claimed',
+    'provider:1:grok:failed',
+    'provider:2:groq:claimed',
+    'provider:2:groq:completed',
+    'repair:1:groq:claimed',
+    'repair:1:groq:completed',
+  ]);
+  assert.deepEqual(events.filter(({ event }) => event === 'completed').map((event) => (
+    [event.promptTokens, event.completionTokens]
+  )), [[20, 7], [30, 9]]);
 });
 
 test('a second violation is not repaired again', async () => {

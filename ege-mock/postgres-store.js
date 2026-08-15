@@ -15,7 +15,22 @@ import {
   egeMockStartDecision,
   reconcileEgeMockAttempt,
 } from './attempt.js';
+import {
+  applyEgeMockAssessmentRunDisposition,
+  egeMockAssessmentRunBeginDecision,
+  egeMockAssessmentRunCanSettleTerminalSnapshot,
+  egeMockAssessmentRunSettlement,
+} from './assessment-run-command.js';
 import { getEgeMockForm } from './catalog.js';
+import {
+  assertEgeMockWritingAssessmentRevisionAvailable,
+  applyEgeMockWritingAssessmentClaim,
+  applyEgeMockWritingAssessmentClaimRenewal,
+  applyEgeMockWritingAssessmentFailure,
+  applyEgeMockWritingAssessmentItemCompletion,
+  applyEgeMockWritingAssessmentItemOutcome,
+  applyEgeMockWritingAssessmentItemOutcomePreparation,
+} from './writing-assessment.js';
 
 function attemptRow(row) {
   if (!row) return null;
@@ -57,13 +72,15 @@ async function writeAttempt(client, row) {
        oral_available_until = $7, oral_started_at = $8, oral_deadline_at = $9,
        oral_submitted_at = $10, oral_recordings = $11::jsonb, oral_receipt = $12::jsonb,
        assessment_status = $13, assessment_retry_count = $14,
-       assessment_error_code = $15, result = $16::jsonb, updated_at = $17
+       assessment_error_code = $15, result = $16::jsonb,
+       writing_assessment = $17::jsonb, updated_at = $18
      WHERE id = $1`,
     [row.id, row.state, row.revision, JSON.stringify(row.draft || {}), row.written_submitted_at,
       JSON.stringify(row.written_receipt ?? null), row.oral_available_until, row.oral_started_at,
       row.oral_deadline_at, row.oral_submitted_at, JSON.stringify(row.oral_recordings || {}),
       JSON.stringify(row.oral_receipt ?? null), row.assessment_status, row.assessment_retry_count,
-      row.assessment_error_code ?? null, JSON.stringify(row.result ?? null), row.updated_at],
+      row.assessment_error_code ?? null, JSON.stringify(row.result ?? null),
+      row.writing_assessment == null ? null : JSON.stringify(row.writing_assessment), row.updated_at],
   );
 }
 
@@ -108,6 +125,28 @@ async function saveMutation(client, username, attemptId, operation, candidate, r
     [username, candidate.idempotencyKey, operation, attemptId, candidate.requestHash,
       JSON.stringify(response), now],
   );
+}
+
+async function findAssessmentRunMutation(client, username, attemptId, candidate) {
+  const start = await client.query(
+    `SELECT id FROM ege_mock_attempts
+     WHERE username = $1 AND start_idempotency_key = $2`,
+    [username, candidate.idempotencyKey],
+  );
+  if (start.rowCount) throw new EgeMockAttemptError('EGE_MOCK_IDEMPOTENCY_CONFLICT');
+  const result = await client.query(
+    `SELECT operation, attempt_id, request_hash, response_snapshot
+     FROM ege_mock_mutations
+     WHERE username = $1 AND idempotency_key = $2 FOR UPDATE`,
+    [username, candidate.idempotencyKey],
+  );
+  if (!result.rowCount) return null;
+  const mutation = result.rows[0];
+  if (mutation.attempt_id !== attemptId || mutation.operation !== 'assessment_run'
+    || mutation.request_hash !== candidate.requestHash) {
+    throw new EgeMockAttemptError('EGE_MOCK_IDEMPOTENCY_CONFLICT');
+  }
+  return mutation;
 }
 
 async function lockedAttempt(client, username, attemptId) {
@@ -300,6 +339,92 @@ export function createPostgresEgeMockStore(pool) {
     });
   }
 
+  async function beginEgeMockAssessmentRun(username, attemptId, candidate) {
+    return transaction(pool, async (client) => {
+      const { owner, now } = await lockOwner(client, username);
+      const existing = await findAssessmentRunMutation(client, username, attemptId, candidate);
+      if (existing && existing.response_snapshot?.commandStatus !== 'pending') {
+        const replay = egeMockAssessmentRunBeginDecision({
+          responseSnapshot: existing.response_snapshot,
+        });
+        return { finalized: replay.finalized, response: replay.response };
+      }
+      const row = await lockedAttempt(client, username, attemptId);
+      if (!row) throw new EgeMockAttemptError('EGE_MOCK_ATTEMPT_NOT_FOUND');
+      const reconciled = reconcileEgeMockAttempt(row, now);
+      if (!row.writing_assessment) {
+        throw new EgeMockAttemptError('EGE_MOCK_ASSESSMENT_STATE_INVALID');
+      }
+      const publicAttempt = egeMockAttemptPublicDto(row);
+      if (!egeMockAssessmentRunCanSettleTerminalSnapshot({
+        responseSnapshot: existing?.response_snapshot || null,
+        attempt: publicAttempt,
+      })) assertEgeMockWritingAssessmentRevisionAvailable(row.writing_assessment);
+      const decision = egeMockAssessmentRunBeginDecision({
+        responseSnapshot: existing?.response_snapshot || null,
+        attempt: publicAttempt,
+        subscriptionActive: Boolean(owner.subscription_until)
+          && new Date(owner.subscription_until) > now,
+        hasFrozenAuthorization: Boolean(row.writing_assessment.authorization),
+        explicitRenewal: candidate.explicitRenewal === true,
+      });
+      const dispositionChanged = applyEgeMockAssessmentRunDisposition(row, decision, { now });
+      if (reconciled || dispositionChanged) await writeAttempt(client, row);
+      if (decision.kind === 'start') {
+        await saveMutation(
+          client, username, attemptId, 'assessment_run', candidate, decision.responseSnapshot, now,
+        );
+      } else if (decision.kind === 'finalize') {
+        if (existing) {
+          await client.query(
+            `UPDATE ege_mock_mutations SET response_snapshot = $4::jsonb
+             WHERE username = $1 AND idempotency_key = $2 AND operation = $3`,
+            [username, candidate.idempotencyKey, 'assessment_run',
+              JSON.stringify(decision.responseSnapshot)],
+          );
+        } else {
+          await saveMutation(
+            client, username, attemptId, 'assessment_run', candidate, decision.responseSnapshot, now,
+          );
+        }
+      }
+      return decision.finalized
+        ? { finalized: true, response: decision.response }
+        : { finalized: false };
+    });
+  }
+
+  async function settleEgeMockAssessmentRun(username, attemptId, candidate) {
+    return transaction(pool, async (client) => {
+      const { now } = await lockOwner(client, username);
+      const mutation = await findAssessmentRunMutation(client, username, attemptId, candidate);
+      if (!mutation) throw new EgeMockAttemptError('EGE_MOCK_ASSESSMENT_STATE_INVALID');
+      if (mutation.response_snapshot?.commandStatus !== 'pending') {
+        return egeMockAssessmentRunSettlement({
+          responseSnapshot: mutation.response_snapshot,
+        }).response;
+      }
+      const row = await lockedAttempt(client, username, attemptId);
+      if (!row) throw new EgeMockAttemptError('EGE_MOCK_ATTEMPT_NOT_FOUND');
+      const reconciled = reconcileEgeMockAttempt(row, now);
+      const publicAttempt = egeMockAttemptPublicDto(row);
+      const decision = egeMockAssessmentRunSettlement({
+        responseSnapshot: mutation.response_snapshot,
+        attempt: publicAttempt,
+        attemptChanged: reconciled,
+      });
+      if (decision.persistAttempt) await writeAttempt(client, row);
+      if (decision.kind === 'finalize') {
+        await client.query(
+          `UPDATE ege_mock_mutations SET response_snapshot = $4::jsonb
+           WHERE username = $1 AND idempotency_key = $2 AND operation = $3`,
+          [username, candidate.idempotencyKey, 'assessment_run', JSON.stringify(decision.response)],
+        );
+      }
+      return decision.response;
+    });
+  }
+
   async function markEgeMockAssessmentRetryable(username, attemptId, { reason } = {}) {
     return transaction(pool, async (client) => {
       const { now } = await lockOwner(client, username);
@@ -311,9 +436,107 @@ export function createPostgresEgeMockStore(pool) {
     });
   }
 
+  async function claimEgeMockWritingAssessment(username, attemptId, {
+    claimToken, authorization = null,
+  } = {}) {
+    return transaction(pool, async (client) => {
+      const { owner, now } = await lockOwner(client, username);
+      const row = await lockedAttempt(client, username, attemptId);
+      if (!row) throw new EgeMockAttemptError('EGE_MOCK_ATTEMPT_NOT_FOUND');
+      let frozenAuthorization = authorization;
+      if (!row.writing_assessment?.authorization) {
+        if (!owner.subscription_until || new Date(owner.subscription_until) <= now) {
+          throw new EgeMockAttemptError('SUBSCRIPTION_REQUIRED');
+        }
+        const requiredPolicyVersion = typeof authorization?.consentPolicyVersion === 'string'
+          && authorization.consentPolicyVersion ? authorization.consentPolicyVersion : null;
+        const consent = await client.query(
+          `SELECT text_processing, policy_version
+           FROM privacy_consents WHERE username = $1 FOR UPDATE`,
+          [username],
+        );
+        const currentConsent = consent.rows[0] || null;
+        frozenAuthorization = {
+          textProcessingConsent: requiredPolicyVersion != null
+            && currentConsent?.text_processing === true
+            && currentConsent.policy_version === requiredPolicyVersion,
+          consentPolicyVersion: requiredPolicyVersion,
+          subscriptionExpiresAt: new Date(owner.subscription_until).toISOString(),
+        };
+      }
+      reconcileEgeMockAttempt(row, now);
+      const response = applyEgeMockWritingAssessmentClaim(row, {
+        form: getEgeMockForm(row.form_id, row.form_revision), claimToken,
+        authorization: frozenAuthorization, now,
+      });
+      await writeAttempt(client, row);
+      return response;
+    });
+  }
+
+  async function renewEgeMockWritingAssessmentClaim(username, attemptId, { claimToken } = {}) {
+    return transaction(pool, async (client) => {
+      const { now } = await lockOwner(client, username);
+      const row = await lockedAttempt(client, username, attemptId);
+      if (!row) throw new EgeMockAttemptError('EGE_MOCK_ATTEMPT_NOT_FOUND');
+      const response = applyEgeMockWritingAssessmentClaimRenewal(row, { claimToken, now });
+      await writeAttempt(client, row);
+      return response;
+    });
+  }
+
+  async function completeEgeMockWritingAssessmentItem(username, attemptId, candidate = {}) {
+    return transaction(pool, async (client) => {
+      const { now } = await lockOwner(client, username);
+      const row = await lockedAttempt(client, username, attemptId);
+      if (!row) throw new EgeMockAttemptError('EGE_MOCK_ATTEMPT_NOT_FOUND');
+      const response = applyEgeMockWritingAssessmentItemCompletion(row, { ...candidate, now });
+      await writeAttempt(client, row);
+      return response;
+    });
+  }
+
+  async function prepareEgeMockWritingAssessmentItemOutcome(username, attemptId, candidate = {}) {
+    return transaction(pool, async (client) => {
+      const { now } = await lockOwner(client, username);
+      const row = await lockedAttempt(client, username, attemptId);
+      if (!row) throw new EgeMockAttemptError('EGE_MOCK_ATTEMPT_NOT_FOUND');
+      const response = applyEgeMockWritingAssessmentItemOutcomePreparation(row, {
+        ...candidate, now,
+      });
+      await writeAttempt(client, row);
+      return response;
+    });
+  }
+
+  async function recordEgeMockWritingAssessmentItemOutcome(username, attemptId, candidate = {}) {
+    return transaction(pool, async (client) => {
+      const { now } = await lockOwner(client, username);
+      const row = await lockedAttempt(client, username, attemptId);
+      if (!row) throw new EgeMockAttemptError('EGE_MOCK_ATTEMPT_NOT_FOUND');
+      const response = applyEgeMockWritingAssessmentItemOutcome(row, { ...candidate, now });
+      await writeAttempt(client, row);
+      return response;
+    });
+  }
+
+  async function failEgeMockWritingAssessment(username, attemptId, candidate = {}) {
+    return transaction(pool, async (client) => {
+      const { now } = await lockOwner(client, username);
+      const row = await lockedAttempt(client, username, attemptId);
+      if (!row) throw new EgeMockAttemptError('EGE_MOCK_ATTEMPT_NOT_FOUND');
+      const response = applyEgeMockWritingAssessmentFailure(row, { ...candidate, now });
+      await writeAttempt(client, row);
+      return response;
+    });
+  }
+
   const retryEgeMockAssessment = (username, attemptId, candidate) => mutate(
     username, attemptId, 'assessment_retry', candidate,
-    (row, now) => applyEgeMockAssessmentRetryMutation(row, { now }),
+    (row, now) => applyEgeMockAssessmentRetryMutation(row, {
+      now,
+      acknowledgePossibleProviderRepeat: candidate?.acknowledgePossibleProviderRepeat,
+    }),
   );
 
   async function exportEgeMockAttempts(username) {
@@ -341,7 +564,15 @@ export function createPostgresEgeMockStore(pool) {
     startEgeMockOral,
     submitEgeMockOral,
     getEgeMockResult,
+    beginEgeMockAssessmentRun,
+    settleEgeMockAssessmentRun,
     markEgeMockAssessmentRetryable,
+    claimEgeMockWritingAssessment,
+    renewEgeMockWritingAssessmentClaim,
+    prepareEgeMockWritingAssessmentItemOutcome,
+    recordEgeMockWritingAssessmentItemOutcome,
+    completeEgeMockWritingAssessmentItem,
+    failEgeMockWritingAssessment,
     retryEgeMockAssessment,
     exportEgeMockAttempts,
   };

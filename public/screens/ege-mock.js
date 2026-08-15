@@ -2,6 +2,12 @@ import { loadEgeMockPublicForm } from '../ege-mock-catalog-contract.js';
 import { createEgeMockAssetPreflight, egeMockAssetPlaybackUrl } from '../ege-mock-written-assets.js';
 import { egeMockWrittenInvalidationKey } from '../ege-mock-written-continuation.js';
 import { createEgeMockWrittenRunner, normalizeEgeMockSelection } from '../ege-mock-written-runner.js';
+import { countEgeWritingWords, sanitizeEgeWritingText } from '../ege-writing-text.js';
+import {
+  renderEgeMockWritingAssessmentActions,
+  renderEgeMockWritingAssessmentStatus,
+} from '../ege-mock-writing-assessment-ui.js';
+import { AUTOMATIC_ASSESSMENT_WARNING } from '../automatic-assessment-contract.js';
 import {
   apiGet, apiIsAuthorityFailure, apiMessage, apiPostIdempotent, apiPut, apiResponseOwner, apiResponseServerTime,
   commitEgeMockOwnerMutation,
@@ -12,8 +18,9 @@ import { registerRouteHook } from '../router.js';
 
 const SECTION_LABELS = Object.freeze({
   listening: 'Аудирование', reading: 'Чтение', grammar_lexis: 'Грамматика и лексика',
+  writing: 'Письменная речь',
 });
-const SECTION_STARTS = Object.freeze({ listening: 1, reading: 10, grammar_lexis: 19 });
+const SECTION_STARTS = Object.freeze({ listening: 1, reading: 10, grammar_lexis: 19, writing: 37 });
 
 let runner = null;
 let runnerOwnerKey = '';
@@ -110,6 +117,27 @@ function transportFor(owner) {
         expectedRevision: input.expectedRevision, answers: input.answers,
       }, { ...ownerHeaders(owner), 'Idempotency-Key': input.idempotencyKey }), owner);
     },
+    async submitWritten(input) {
+      return timedOwnedResponse(await apiPostIdempotent(
+        `/api/v1/ege-mocks/attempts/${input.attemptId}/written/submit`,
+        { expectedRevision: input.expectedRevision }, input.idempotencyKey, ownerHeaders(owner),
+      ), owner);
+    },
+    async runAssessment(input) {
+      return timedOwnedResponse(await apiPostIdempotent(
+        `/api/v1/ege-mocks/attempts/${input.attemptId}/assessment/run`,
+        input.explicitRenewal === true ? { explicitRenewal: true } : {},
+        input.idempotencyKey, ownerHeaders(owner),
+      ), owner);
+    },
+    async retryAssessment(input) {
+      return timedOwnedResponse(await apiPostIdempotent(
+        `/api/v1/ege-mocks/attempts/${input.attemptId}/assessment/retry`,
+        input.acknowledgePossibleProviderRepeat
+          ? { acknowledgePossibleProviderRepeat: true } : {},
+        input.idempotencyKey, ownerHeaders(owner),
+      ), owner);
+    },
   });
 }
 
@@ -205,7 +233,7 @@ function formatTime(seconds) {
 function renderTimer(snapshot) {
   const element = document.getElementById('ege_mock_timer');
   if (!element) return;
-  const running = ['running', 'asset_blocked', 'objective_queued', 'objective_completed', 'submit_queued'].includes(snapshot.phase);
+  const running = ['running', 'writing', 'asset_blocked', 'objective_queued', 'objective_completed', 'submit_queued'].includes(snapshot.phase);
   element.innerHTML = `${running ? formatTime(snapshot.remainingSeconds) : '—'}<small>${running ? 'до сдачи' : '190 минут'}</small>`;
   const warning = running && snapshot.timerWarningMinutes != null;
   element.classList.toggle('ege-mock__timer--warning', warning);
@@ -223,10 +251,10 @@ function introMarkup(snapshot) {
   const ready = snapshot.phase === 'ready';
   return `${visibleError ? `<p class="ege-mock__error" role="alert">${escapeHtml(visibleError)}</p>` : ''}<section class="ege-mock__card ege-mock__intro">
     <p class="ege-mock__status" role="status">${working ? 'Проверяем и сохраняем 20 аудиофайлов…' : ready ? 'Техническая проверка завершена. Таймер ещё не запущен.' : 'Один эталонный авторский вариант по структуре ЕГЭ-2026.'}</p>
-    <h2>Задания 1–36 в единой строгой попытке</h2>
+    <h2>Задания 1–38 в единой строгой письменной части</h2>
     <p>До старта приложение загрузит и сверит все записи. После запуска сервер отсчитает 190 минут: перезагрузка и отсутствие сети не ставят время на паузу.</p>
     <div class="ege-mock__facts">
-      <div class="ege-mock__fact"><strong>36</strong> объективных позиций</div>
+      <div class="ege-mock__fact"><strong>38</strong> заданий, включая письмо и эссе</div>
       <div class="ege-mock__fact"><strong>190 мин</strong> общий письменный таймер</div>
       <div class="ege-mock__fact"><strong>20 аудио</strong> exact digest preflight</div>
       <div class="ege-mock__fact"><strong>Без подсказок</strong> ключи и баллы скрыты</div>
@@ -303,7 +331,30 @@ function taskFields(item, answer) {
     const prompt = presentation.prompt || `Поставьте слово ${presentation.base} в нужную форму.`;
     return `${stimulusMarkup(item)}<label class="ege-mock__field"><span>${escapeHtml(prompt)}</span><input type="text" data-ege-text value="${escapeHtml(answer || '')}" autocomplete="off" spellcheck="false" aria-label="Ответ на задание ${item.position}"><small>Исходное слово: ${escapeHtml(presentation.base)}</small></label>`;
   }
+  if (presentation.kind === 'writing_email') {
+    return `<article class="ege-mock__stimulus"><strong>Письмо от ${escapeHtml(presentation.from)}</strong><p>${escapeHtml(presentation.stimulus)}</p></article>
+      <p class="ege-mock__prompt">Ответьте на три вопроса и задайте три вопроса по теме «${escapeHtml(presentation.questionsTopic)}».</p>
+      <p class="ege-mock__status"><strong>Объём: 100–140 слов.</strong> ${escapeHtml(AUTOMATIC_ASSESSMENT_WARNING)}</p>
+      <label class="ege-mock__field"><span>Ваш ответ на задание 37</span><textarea data-ege-writing maxlength="12000" spellcheck="true" aria-label="Ответ на задание 37" aria-describedby="ege_mock_word_count">${escapeHtml(answer || '')}</textarea><small id="ege_mock_word_count" role="status">Слов: ${countEgeWritingWords(sanitizeEgeWritingText(answer), { taskType: 'writing_37', assignment: presentation })}</small></label>`;
+  }
+  if (presentation.kind === 'writing_report') {
+    return `<article class="ege-mock__stimulus"><strong>${escapeHtml(presentation.topic)}</strong><table><tbody>${presentation.rows.map((row) => `<tr><th scope="row">${escapeHtml(row.label)}</th><td>${row.percent}%</td></tr>`).join('')}</tbody></table></article>
+      <p class="ege-mock__prompt">Опишите 2–3 факта, сравните данные, обозначьте проблему и решение, завершите обоснованным мнением.</p>
+      <p class="ege-mock__status"><strong>Объём: 200–250 слов.</strong> ${escapeHtml(AUTOMATIC_ASSESSMENT_WARNING)}</p>
+      <label class="ege-mock__field"><span>Ваш ответ на задание 38</span><textarea data-ege-writing maxlength="20000" spellcheck="true" aria-label="Ответ на задание 38" aria-describedby="ege_mock_word_count">${escapeHtml(answer || '')}</textarea><small id="ege_mock_word_count" role="status">Слов: ${countEgeWritingWords(sanitizeEgeWritingText(answer), { taskType: 'writing_38', assignment: presentation })}</small></label>`;
+  }
   return '<p class="ege-mock__error">Формат задания не поддерживается.</p>';
+}
+
+function writingCriteriaMarkup(kind) {
+  const criteria = kind === 'writing_email'
+    ? 'решение коммуникативной задачи, организация текста и языковое оформление'
+    : kind === 'writing_report'
+      ? 'решение коммуникативной задачи, организация, лексика, грамматика, орфография и пунктуация'
+      : null;
+  return criteria
+    ? `<p class="ege-mock__criteria" aria-label="Критерии оценивания"><strong>Оцениваются:</strong> ${criteria}.</p>`
+    : '';
 }
 
 function runningMarkup(snapshot) {
@@ -312,15 +363,25 @@ function runningMarkup(snapshot) {
   const answer = snapshot.answers[String(snapshot.currentPosition)];
   const previous = snapshot.currentPosition - 1;
   const next = snapshot.currentPosition + 1;
-  return `${visibleError ? `<p class="ege-mock__error" role="alert">${escapeHtml(visibleError)}</p>` : ''}<div class="ege-mock__layout">
+  const writingPhase = snapshot.phase === 'writing';
+  const positionCount = writingPhase ? 38 : 36;
+  const answeredCount = writingPhase ? snapshot.writtenAnsweredCount : snapshot.answeredCount;
+  const blankPositions = writingPhase ? snapshot.writtenBlankPositions : snapshot.blankPositions;
+  const sectionEntries = Object.entries(SECTION_STARTS).filter(([id]) => writingPhase || id !== 'writing');
+  const finish = writingPhase
+    ? `Сдать письменную часть${blankPositions.length ? ` · пропущено ${blankPositions.length}` : ''}`
+    : `Завершить задания 1–36${blankPositions.length ? ` · пропущено ${blankPositions.length}` : ''}`;
+  const writingDraftRecovery = snapshot.writingDraftRecovery?.positions?.length
+    ? `<p class="ege-mock__status" role="status">Черновик задания ${snapshot.writingDraftRecovery.positions.join(', ')} восстановлен из устаревшего формата. Проверьте его перед сдачей.</p>` : '';
+  return `${visibleError ? `<p class="ege-mock__error" role="alert">${escapeHtml(visibleError)}</p>` : ''}${writingDraftRecovery}<div class="ege-mock__layout">
     <aside class="ege-mock__side">
-      <section class="ege-mock__card ege-mock__progress"><p><span>Заполнено</span><strong>${snapshot.answeredCount} из 36</strong></p><progress max="36" value="${snapshot.answeredCount}"></progress><p id="ege_mock_save" role="status"><span>Сохранение</span><strong>${snapshot.saveStatus === 'saved' ? 'на сервере' : snapshot.saveStatus === 'queued' ? 'в очереди' : 'локально'}</strong></p></section>
-      <nav class="ege-mock__card" aria-label="Разделы"><div class="ege-mock__sections">${Object.entries(SECTION_STARTS).map(([id, start]) => `<button type="button" data-ege-position="${start}" aria-current="${id === section}">${SECTION_LABELS[id]}</button>`).join('')}</div><div class="ege-mock__review" aria-label="Обзор ответов">${Array.from({ length: 36 }, (_, index) => { const position = index + 1; const blank = snapshot.blankPositions.includes(position); return `<button type="button" data-ege-position="${position}" data-blank="${blank}" aria-current="${position === snapshot.currentPosition}" aria-label="Задание ${position}${blank ? ', пропущено' : ', отвечено'}">${position}</button>`; }).join('')}</div></nav>
+      <section class="ege-mock__card ege-mock__progress"><p><span>Заполнено</span><strong>${answeredCount} из ${positionCount}</strong></p><progress max="${positionCount}" value="${answeredCount}"></progress><p id="ege_mock_save" role="status"><span>Сохранение</span><strong>${snapshot.saveStatus === 'saved' ? 'на сервере' : snapshot.saveStatus === 'queued' ? 'в очереди' : 'локально'}</strong></p></section>
+      <nav class="ege-mock__card" aria-label="Разделы"><div class="ege-mock__sections">${sectionEntries.map(([id, start]) => `<button type="button" data-ege-position="${start}" aria-current="${id === section}">${SECTION_LABELS[id]}</button>`).join('')}</div><div class="ege-mock__review" aria-label="Обзор ответов">${Array.from({ length: positionCount }, (_, index) => { const position = index + 1; const blank = blankPositions.includes(position); return `<button type="button" data-ege-position="${position}" data-blank="${blank}" aria-current="${position === snapshot.currentPosition}" aria-label="Задание ${position}${blank ? ', пропущено' : ', отвечено'}">${position}</button>`; }).join('')}</div></nav>
     </aside>
     <section class="ege-mock__card ege-mock__task">
       <header class="ege-mock__task-head"><div><p>${SECTION_LABELS[section]}</p><h2 tabindex="-1">Задание ${item.position}</h2></div><p>Ответ сохраняется</p></header>
-      ${audioMarkup(item, snapshot)}${taskFields(item, answer)}
-      <div class="ege-mock__nav"><button class="ege-mock__action ege-mock__action--secondary" type="button" data-ege-position="${previous}" ${previous < 1 ? 'disabled' : ''}>Назад</button><button class="ege-mock__action" type="button" data-ege-position="${next}" ${next > 36 ? 'disabled' : ''}>Далее</button><button class="ege-mock__action ege-mock__action--secondary ege-mock__submit" type="button" data-ege-action="complete-objective">Завершить задания 1–36${snapshot.blankPositions.length ? ` · пропущено ${snapshot.blankPositions.length}` : ''}</button></div>
+      ${audioMarkup(item, snapshot)}${writingCriteriaMarkup(item.presentation.kind)}${taskFields(item, answer)}
+      <div class="ege-mock__nav"><button class="ege-mock__action ege-mock__action--secondary" type="button" data-ege-position="${previous}" ${previous < 1 ? 'disabled' : ''}>Назад</button><button class="ege-mock__action" type="button" data-ege-position="${next}" ${next > positionCount ? 'disabled' : ''}>Далее</button><button class="ege-mock__action ege-mock__action--secondary ege-mock__submit" type="button" data-ege-action="${writingPhase ? 'complete-written' : 'complete-objective'}">${finish}</button></div>
     </section>
   </div>`;
 }
@@ -332,12 +393,22 @@ function render() {
   const alert = visibleError ? `<p class="ege-mock__error" role="alert">${escapeHtml(visibleError)}</p>` : '';
   renderTimer(snapshot);
   if (['idle', 'preflighting', 'ready', 'error'].includes(snapshot.phase)) area.innerHTML = introMarkup(snapshot);
-  else if (snapshot.phase === 'running') area.innerHTML = runningMarkup(snapshot);
+  else if (['running', 'writing'].includes(snapshot.phase)) area.innerHTML = runningMarkup(snapshot);
   else if (snapshot.phase === 'asset_blocked') area.innerHTML = `${alert}<section class="ege-mock__card ege-mock__error" role="alert"><h2>Нужны проверенные аудиофайлы</h2><p>Exact-кэш этой формы недоступен. Ответы и навигация заблокированы до подключения к сети и повторной проверки файлов; строгий письменный таймер продолжает идти.</p></section>`;
   else if (snapshot.phase === 'objective_queued') area.innerHTML = `${alert}<section class="ege-mock__card ege-mock__success"><h2>Сохраняем задания 1–36</h2><p>Checkpoint надёжно записан на этом устройстве и будет подтверждён сервером после восстановления сети. Общий письменный таймер продолжает идти.</p></section>`;
-  else if (snapshot.phase === 'objective_completed') area.innerHTML = `${alert}<section class="ege-mock__card ege-mock__success"><h2>Задания 1–36 сохранены</h2><p>Сервер подтвердил objective checkpoint. Письменная часть ещё не сдана: общий таймер продолжает идти для заданий 37–38.</p></section>`;
-  else if (snapshot.phase === 'submit_queued') area.innerHTML = `${alert}<section class="ege-mock__card ege-mock__success"><h2>Время письменной части истекло</h2><p>Ожидаем авторитетное подтверждение сервера. Локальная очередь сохранена и не создаст повторную сдачу.</p></section>`;
-  else if (snapshot.phase === 'written_submitted') area.innerHTML = `<section class="ege-mock__card ege-mock__success"><h2>Задания 1–36 сданы</h2><p>Сервер принял ответы и пропуски. Баллы и ключи не раскрываются до завершения обеих частей пробника.</p>${snapshot.result?.offlineChangesNotAccepted ? '<p class="ege-mock__error" role="alert">После истечения времени сервер уже закрыл письменную часть. Изменения, оставшиеся только на этом устройстве, не вошли в принятую работу.</p>' : ''}</section>`;
+  else if (snapshot.phase === 'objective_completed') area.innerHTML = `${alert}<section class="ege-mock__card ege-mock__success"><h2>Задания 1–36 сохранены</h2><p>Сервер подтвердил checkpoint. Письменная часть ещё не сдана: общий таймер продолжает идти для заданий 37–38.</p><button class="ege-mock__action" type="button" data-ege-action="continue-writing">Перейти к заданиям 37–38</button></section>`;
+  else if (snapshot.phase === 'submit_queued') area.innerHTML = `${alert}<section class="ege-mock__card ege-mock__success"><h2>Сохраняем всю письменную часть</h2><p>Ожидаем авторитетное подтверждение сервера. Локальная очередь сохранена и не создаст повторную сдачу.</p></section>`;
+  else if (snapshot.phase === 'written_submitted') {
+    const retryWarning = snapshot.result?.writingAssessment?.retryWarning;
+    const retryActions = renderEgeMockWritingAssessmentActions(
+      snapshot.result?.writingAssessment,
+      {
+        queued: snapshot.assessmentRetryQueued || snapshot.assessmentRunQueued,
+        revisionBlocked: snapshot.assessmentRunBlocked,
+      },
+    );
+    area.innerHTML = `<section class="ege-mock__card ege-mock__success"><h2>Задания 1–38 сданы</h2>${renderEgeMockWritingAssessmentStatus(snapshot.result?.writingAssessment)}${retryWarning ? `<p class="ege-mock__error" role="alert">${escapeHtml(retryWarning)}</p>` : ''}${retryActions}<p>Сервер принял ответы и пропуски. Баллы, критерии и ключи не раскрываются до завершения обеих частей пробника.</p>${snapshot.result?.offlineChangesNotAccepted ? '<p class="ege-mock__error" role="alert">После истечения времени сервер уже закрыл письменную часть. Изменения, оставшиеся только на этом устройстве, не вошли в принятую работу.</p>' : ''}</section>`;
+  }
 }
 
 function scheduleSave() {
@@ -363,25 +434,38 @@ function scheduleSave() {
 function refreshRunningProjection(snapshot) {
   const area = document.getElementById('ege_mock_area');
   if (!area) return;
+  const writingPhase = snapshot.phase === 'writing';
+  const answeredCount = writingPhase ? snapshot.writtenAnsweredCount : snapshot.answeredCount;
+  const positionCount = writingPhase ? 38 : 36;
+  const blankPositions = writingPhase ? snapshot.writtenBlankPositions : snapshot.blankPositions;
   const progress = area.querySelector('.ege-mock__progress progress');
-  if (progress) progress.value = snapshot.answeredCount;
+  if (progress) progress.value = answeredCount;
   const count = area.querySelector('.ege-mock__progress p:first-child strong');
-  if (count) count.textContent = `${snapshot.answeredCount} из 36`;
+  if (count) count.textContent = `${answeredCount} из ${positionCount}`;
   const save = area.querySelector('#ege_mock_save strong');
   if (save) save.textContent = snapshot.saveStatus === 'saved' ? 'на сервере' : 'в очереди';
   area.querySelectorAll('.ege-mock__review [data-ege-position]').forEach((button) => {
     const position = Number(button.dataset.egePosition);
-    const blank = snapshot.blankPositions.includes(position);
+    const blank = blankPositions.includes(position);
     button.dataset.blank = String(blank);
     button.setAttribute('aria-label', `Задание ${position}${blank ? ', пропущено' : ', отвечено'}`);
   });
-  const complete = area.querySelector('[data-ege-action="complete-objective"]');
-  if (complete) complete.textContent = `Завершить задания 1–36${snapshot.blankPositions.length ? ` · пропущено ${snapshot.blankPositions.length}` : ''}`;
-  if (snapshot.phase !== 'running') return;
+  const complete = area.querySelector('[data-ege-action="complete-objective"],[data-ege-action="complete-written"]');
+  if (complete) complete.textContent = writingPhase
+    ? `Сдать письменную часть${blankPositions.length ? ` · пропущено ${blankPositions.length}` : ''}`
+    : `Завершить задания 1–36${blankPositions.length ? ` · пропущено ${blankPositions.length}` : ''}`;
+  if (!['running', 'writing'].includes(snapshot.phase)) return;
   const active = document.activeElement;
   const answer = snapshot.answers[String(snapshot.currentPosition)];
   const text = area.querySelector('[data-ege-text]');
   if (text && text !== active) text.value = typeof answer === 'string' ? answer : '';
+  const writing = area.querySelector('[data-ege-writing]');
+  if (writing && writing !== active) writing.value = typeof answer === 'string' ? answer : '';
+  const wordStatus = area.querySelector('#ege_mock_word_count');
+  const item = form?.positions[snapshot.currentPosition - 1];
+  if (wordStatus) wordStatus.textContent = `Слов: ${countEgeWritingWords(sanitizeEgeWritingText(answer), {
+    taskType: `writing_${snapshot.currentPosition}`, assignment: item?.presentation,
+  })}`;
   area.querySelectorAll('input[type=radio]').forEach((field) => {
     if (field !== active) field.checked = field.value === answer;
   });
@@ -466,6 +550,28 @@ async function handleAction(event) {
       if (!confirm(`Завершить задания 1–36?${omissions ? ` Пропущено: ${omissions}.` : ''} Письменный таймер продолжит идти для заданий 37–38.`)) return;
       await operation.runner.dispatch({ type: 'completeObjective' });
     }
+    if (button.dataset.egeAction === 'continue-writing') {
+      await operation.runner.dispatch({ type: 'continueWriting' });
+    }
+    if (button.dataset.egeAction === 'complete-written') {
+      const omissions = operation.runner.snapshot().writtenBlankPositions.length;
+      if (!confirm(`Сдать всю письменную часть?${omissions ? ` Пропущено: ${omissions}.` : ''} После сдачи изменить ответы нельзя.`)) return;
+      await operation.runner.dispatch({ type: 'completeWritten' });
+    }
+    if (button.dataset.egeAction === 'retry-assessment') {
+      await operation.runner.dispatch({ type: 'retryAssessment' });
+    }
+    if (button.dataset.egeAction === 'run-assessment-after-renewal') {
+      await operation.runner.dispatch({ type: 'runAssessmentAfterRenewal' });
+    }
+    if (button.dataset.egeAction === 'retry-assessment-ambiguous') {
+      const warning = operation.runner.snapshot().result?.writingAssessment?.retryWarning
+        || 'Предыдущую работу провайдера нельзя подтвердить. Повтор может создать ещё один вызов.';
+      if (!confirm(`${warning} Продолжить?`)) return;
+      await operation.runner.dispatch({
+        type: 'retryAssessment', acknowledgePossibleProviderRepeat: true,
+      });
+    }
     if (!runnerOperationCurrent(operation)) return;
     visibleError = '';
   } catch (error) {
@@ -482,7 +588,7 @@ async function handleAnswer(event) {
   const item = operation.form?.positions[operation.runner.snapshot().currentPosition - 1];
   if (!item) return;
   let answer;
-  if (event.target.matches('[data-ege-text]')) answer = event.target.value;
+  if (event.target.matches('[data-ege-text],[data-ege-writing]')) answer = event.target.value;
   else if (event.target.matches('input[type=radio]')) answer = event.target.value;
   else if (event.target.matches('[data-ege-array-index]')) {
     const before = operation.runner.snapshot().answers[String(item.position)];

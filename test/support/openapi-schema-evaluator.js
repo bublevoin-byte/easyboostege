@@ -16,6 +16,33 @@ function exactGrammarTransfers(items, catalog) {
   });
 }
 
+const EGE_WRITING_RUBRICS = Object.freeze({
+  task37: Object.freeze({
+    position: 37,
+    maximum: 6,
+    criteriaRef: 'writing-ege-2026-task37-v1',
+    criteriaFingerprint: 'sha256:a64921436b50ba9a9578cb73d7639ca3035f98174ffb2d2c616530de9da9b5f2',
+    criteria: Object.freeze([
+      ['Решение коммуникативной задачи', 2],
+      ['Организация текста', 2],
+      ['Языковое оформление', 2],
+    ]),
+  }),
+  task38: Object.freeze({
+    position: 38,
+    maximum: 14,
+    criteriaRef: 'writing-ege-2026-task38-v1',
+    criteriaFingerprint: 'sha256:dac7eea22d6ec506444c764ac348fb9ddc982048d8b43d951f86bb7c986b0171',
+    criteria: Object.freeze([
+      ['Решение коммуникативной задачи', 3],
+      ['Организация текста', 3],
+      ['Лексика', 3],
+      ['Грамматика', 3],
+      ['Орфография и пунктуация', 2],
+    ]),
+  }),
+});
+
 function splitFlow(source, separator = ',') {
   const parts = [];
   let quote = null;
@@ -197,6 +224,36 @@ export function compileOpenApiSchema(openapi, name) {
     }
     if (schema.not && matches(schema.not, value, path, [])) {
       errors.push(`${path} matches a forbidden branch`); return false;
+    }
+    if (schema['x-easyboost-ege-writing-rubric']) {
+      const rubric = EGE_WRITING_RUBRICS[schema['x-easyboost-ege-writing-rubric']];
+      const exactCriteria = rubric && Array.isArray(value?.criteria)
+        && value.criteria.length === rubric.criteria.length
+        && value.criteria.every((criterion, index) => (
+          criterion?.name === rubric.criteria[index][0]
+          && criterion?.max === rubric.criteria[index][1]
+          && Number.isInteger(criterion?.got)
+          && criterion.got >= 0
+          && criterion.got <= criterion.max
+        ));
+      const score = exactCriteria
+        ? value.criteria.reduce((total, criterion) => total + criterion.got, 0) : null;
+      if (!rubric || value?.position !== rubric.position || value?.maximum !== rubric.maximum
+        || value?.criteriaRef !== rubric.criteriaRef
+        || value?.criteriaFingerprint !== rubric.criteriaFingerprint
+        || score !== value?.score) {
+        errors.push(`${path} must equal the pinned EGE writing rubric and criterion sum`);
+        return false;
+      }
+    }
+    if (schema['x-easyboost-ege-writing-total'] === 'completed') {
+      const items = value?.items;
+      const exactTotal = Array.isArray(items) && items.length === 2
+        && items.every((item) => item?.status === 'completed' && Number.isInteger(item.score))
+        && items.reduce((total, item) => total + item.score, 0) === value?.score;
+      if (!exactTotal) {
+        errors.push(`${path}/score must equal the completed writing item sum`); return false;
+      }
     }
     if (schema['x-easyboost-grammar-type-scores'] === 'session-items') {
       const items = value?.session?.items;
@@ -388,6 +445,10 @@ export function compileOpenApiSchema(openapi, name) {
       if (schema.minLength != null && value.length < schema.minLength) return false;
       if (schema.maxLength != null && value.length > schema.maxLength) return false;
       if (schema.pattern && !(new RegExp(schema.pattern, 'u')).test(value)) return false;
+    }
+    if (typeof value === 'number') {
+      if (schema.minimum != null && value < schema.minimum) return false;
+      if (schema.maximum != null && value > schema.maximum) return false;
     }
     if (Array.isArray(value)) {
       if (schema.minItems != null && value.length < schema.minItems) return false;

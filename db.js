@@ -156,6 +156,14 @@ export const completeAdaptiveDiagnostic = (...args) => repository.completeAdapti
 export const startEgeMockAttempt = (...args) => repository.startEgeMockAttempt(...args);
 export const getCurrentEgeMockAttempt = (...args) => repository.getCurrentEgeMockAttempt(...args);
 export const getEgeMockAttempt = (...args) => repository.getEgeMockAttempt(...args);
+export const beginEgeMockAssessmentRun = (...args) => repository.beginEgeMockAssessmentRun(...args);
+export const settleEgeMockAssessmentRun = (...args) => repository.settleEgeMockAssessmentRun(...args);
+export const claimEgeMockWritingAssessment = (...args) => repository.claimEgeMockWritingAssessment(...args);
+export const renewEgeMockWritingAssessmentClaim = (...args) => repository.renewEgeMockWritingAssessmentClaim(...args);
+export const prepareEgeMockWritingAssessmentItemOutcome = (...args) => repository.prepareEgeMockWritingAssessmentItemOutcome(...args);
+export const recordEgeMockWritingAssessmentItemOutcome = (...args) => repository.recordEgeMockWritingAssessmentItemOutcome(...args);
+export const completeEgeMockWritingAssessmentItem = (...args) => repository.completeEgeMockWritingAssessmentItem(...args);
+export const failEgeMockWritingAssessment = (...args) => repository.failEgeMockWritingAssessment(...args);
 export const saveEgeMockDraft = (...args) => repository.saveEgeMockDraft(...args);
 export const submitEgeMockWritten = (...args) => repository.submitEgeMockWritten(...args);
 export const startEgeMockOral = (...args) => repository.startEgeMockOral(...args);

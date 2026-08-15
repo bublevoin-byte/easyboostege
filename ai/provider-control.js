@@ -11,27 +11,47 @@ function describeSkipped(skipped) {
   return skipped.length ? skipped.map(({ name, reason }) => `${name}: ${reason}`).join('; ') : null;
 }
 
-export async function runProviderFallback(providers, invoke) {
+export async function runProviderFallback(providers, invoke, {
+  beforeAttempt = null, afterAttempt = null,
+} = {}) {
   if (!providers.length) throw Object.assign(new Error('AI_NOT_CONFIGURED'), { status: 503 });
   let lastError = null;
   let attempts = 0;
   const skipped = [];
   for (const provider of providers) {
     attempts += 1;
+    const startedAt = Date.now();
+    const context = typeof beforeAttempt === 'function'
+      ? await beforeAttempt(provider, { attempt: attempts }) : null;
+    let value;
     try {
-      return {
-        ...await invoke(provider),
-        provider: provider.name,
-        model: provider.model,
-        attempts,
-        fallbackReason: describeSkipped(skipped),
-      };
+      value = await invoke(provider, context);
     } catch (error) {
+      if (typeof afterAttempt === 'function') {
+        await afterAttempt(context, {
+          status: 'failed', error, provider, attempt: attempts,
+          durationMs: Date.now() - startedAt,
+        });
+      }
       lastError = error;
       lastError.provider = provider.name;
       lastError.model = provider.model;
       skipped.push({ name: provider.name, reason: String(error?.message || 'unknown').slice(0, 120) });
+      continue;
     }
+    if (typeof afterAttempt === 'function') {
+      await afterAttempt(context, {
+        status: 'completed', value, provider, attempt: attempts,
+        durationMs: Date.now() - startedAt,
+      });
+    }
+    return {
+      ...value,
+      provider: provider.name,
+      model: provider.model,
+      attempts,
+      fallbackReason: describeSkipped(skipped),
+    };
   }
   throw Object.assign(new Error('AI_UNAVAILABLE'), {
     status: 502,

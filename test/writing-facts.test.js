@@ -84,6 +84,30 @@ test('task 37 analysis carries the letter parts and no table data', () => {
   assert.equal(facts.tableFigures, undefined);
 });
 
+test('task 37 facts analyze the shared greeting-through-signature span after an envelope', () => {
+  const facts = analyzeWriting({
+    taskType: 'writing_37',
+    answer: [
+      'From: anna@example.test',
+      'To: ben@example.test',
+      'Subject: My reply',
+      '14 August 2026',
+      '12 Green Street, Omsk',
+      'Dear Ben,',
+      'Thank you for your email.',
+      'Best wishes,',
+      'Anna',
+      'THIS TRAILING TEXT IS NOT PART OF THE LETTER',
+    ].join('\n'),
+  });
+
+  assert.equal(facts.words, 10);
+  assert.equal(facts.letterParts.greeting, true);
+  assert.equal(facts.letterParts.signOff, true);
+  assert.equal(facts.letterParts.signature, true);
+  assert.equal(facts.lines, 4);
+});
+
 test('task 38 analysis carries the table data and no letter parts', () => {
   const facts = analyzeWriting({
     taskType: 'writing_38',
@@ -117,7 +141,7 @@ test('the prompt ships the pre-check results and says so in its version', () => 
   });
 
   // Version string only: v5 means overlength answers are scoped before the provider call.
-  assert.equal(WRITING_PROMPT_VERSION, 'writing-v5');
+  assert.equal(WRITING_PROMPT_VERSION, 'writing-v8');
   assert.match(prompt.user, /Проверено программно/u);
   assert.equal(prompt.facts.questionSentences, 3);
   assert.equal(prompt.facts.words, countWords(LETTER));

@@ -6,7 +6,12 @@ import test from 'node:test';
 
 import { EGE_MOCK_FORM_ID, EGE_MOCK_FORM_REVISION, getEgeMockForm } from '../ege-mock/catalog.js';
 import { createFileRepository } from '../storage/file-repository.js';
-import { assertEgeMockAttemptRepositoryContract } from './support/ege-mock-attempt-contract.js';
+import { AUTOMATIC_ASSESSMENT_PUBLIC_CONTRACT } from '../public/automatic-assessment-contract.js';
+import {
+  assertEgeMockAssessmentRevisionExhaustionContract,
+  assertEgeMockAssessmentRunSubscriptionContract,
+  assertEgeMockAttemptRepositoryContract,
+} from './support/ege-mock-attempt-contract.js';
 
 const START_KEY = 'd250e109-6b0c-4ccd-9c47-c80bdf0627b4';
 
@@ -33,6 +38,158 @@ test('EGE mock domain owns every pure lifecycle mutation used by storage adapter
     'normalizeEgeMockOralRecordings',
     'submitEgeMockOralPart',
   ]) assert.equal(Object.hasOwn(domain, internal), false, internal);
+});
+
+test('one pure domain policy owns assessment-run begin, rejection, settlement and replay decisions', async () => {
+  const {
+    applyEgeMockAssessmentRunDisposition,
+    egeMockAssessmentRunBeginDecision,
+    egeMockAssessmentRunCanSettleTerminalSnapshot,
+    egeMockAssessmentRunSettlement,
+  } = await import('../ege-mock/assessment-run-command.js');
+  const attempt = {
+    id: '9ed93fa6-29c0-47b0-a86e-2234a2255a44',
+    writingAssessment: { status: 'pending' },
+  };
+  const active = egeMockAssessmentRunBeginDecision({
+    responseSnapshot: null, attempt, subscriptionActive: true, hasFrozenAuthorization: false,
+  });
+  assert.deepEqual(active, {
+    kind: 'start', finalized: false, responseSnapshot: { commandStatus: 'pending' },
+  });
+  assert.equal(egeMockAssessmentRunCanSettleTerminalSnapshot({
+    responseSnapshot: active.responseSnapshot, attempt,
+  }), false);
+  assert.equal(egeMockAssessmentRunCanSettleTerminalSnapshot({
+    responseSnapshot: active.responseSnapshot,
+    attempt: { ...attempt, writingAssessment: { status: 'retryable' } },
+  }), true, 'only an existing pending UUID with a terminal assessment bypasses revision mutation');
+  const blockedAttempt = {
+    ...attempt,
+    writingAssessment: { ...attempt.writingAssessment, runDisposition: 'subscription_required' },
+  };
+  const staleAfterRenewal = egeMockAssessmentRunBeginDecision({
+    responseSnapshot: { commandStatus: 'pending' }, attempt: blockedAttempt,
+    subscriptionActive: true, hasFrozenAuthorization: false, explicitRenewal: false,
+  });
+  assert.equal(staleAfterRenewal.kind, 'finalize');
+  assert.equal(staleAfterRenewal.response.disposition, 'subscription_required',
+    'a stale pre-block UUID cannot resume merely because entitlement was renewed');
+  const unmarkedAfterRenewal = egeMockAssessmentRunBeginDecision({
+    responseSnapshot: null, attempt: blockedAttempt,
+    subscriptionActive: true, hasFrozenAuthorization: false, explicitRenewal: false,
+  });
+  assert.equal(unmarkedAfterRenewal.kind, 'finalize',
+    'a fresh UUID without the explicit renewal marker cannot clear the durable block');
+  const explicitAfterRenewal = egeMockAssessmentRunBeginDecision({
+    responseSnapshot: null, attempt: blockedAttempt,
+    subscriptionActive: true, hasFrozenAuthorization: false, explicitRenewal: true,
+  });
+  assert.deepEqual(explicitAfterRenewal, {
+    kind: 'start', finalized: false, responseSnapshot: { commandStatus: 'pending' },
+  });
+  const durable = {
+    writing_assessment: { status: 'pending', run_disposition: 'subscription_required' },
+    updated_at: '2026-08-13T06:00:00.000Z',
+  };
+  assert.equal(applyEgeMockAssessmentRunDisposition(durable, explicitAfterRenewal, {
+    now: new Date('2026-08-13T06:01:00.000Z'),
+  }), true);
+  assert.equal(durable.writing_assessment.run_disposition, undefined,
+    'a new accepted command after renewal explicitly clears the terminal block');
+  assert.equal(durable.writing_assessment.assessment_revision, 1);
+  assert.deepEqual(egeMockAssessmentRunBeginDecision({
+    responseSnapshot: { commandStatus: 'pending' }, attempt,
+    subscriptionActive: false, hasFrozenAuthorization: true,
+  }), { kind: 'resume', finalized: false });
+
+  const rejected = egeMockAssessmentRunBeginDecision({
+    responseSnapshot: { commandStatus: 'pending' }, attempt,
+    subscriptionActive: false, hasFrozenAuthorization: false,
+  });
+  assert.equal(rejected.kind, 'finalize');
+  assert.equal(rejected.finalized, true);
+  assert.deepEqual(rejected.response, {
+    applied: true, replayed: false, disposition: 'subscription_required',
+    attempt: {
+      ...attempt,
+      writingAssessment: {
+        ...attempt.writingAssessment, assessmentRevision: 1,
+        runDisposition: 'subscription_required',
+      },
+    },
+  });
+  assert.equal(applyEgeMockAssessmentRunDisposition(durable, rejected, {
+    now: new Date('2026-08-13T06:02:00.000Z'),
+  }), true);
+  assert.equal(durable.writing_assessment.run_disposition, 'subscription_required');
+  assert.equal(durable.writing_assessment.assessment_revision, 2);
+  assert.deepEqual(rejected.responseSnapshot, rejected.response);
+  assert.deepEqual(egeMockAssessmentRunBeginDecision({
+    responseSnapshot: rejected.responseSnapshot, attempt: null,
+    subscriptionActive: false, hasFrozenAuthorization: false,
+  }), {
+    kind: 'replay', finalized: true,
+    response: { ...rejected.response, applied: true, replayed: true },
+  });
+
+  assert.deepEqual(egeMockAssessmentRunSettlement({
+    responseSnapshot: { commandStatus: 'pending' }, attempt,
+  }), {
+    kind: 'pending', persistAttempt: false,
+    response: { applied: false, replayed: false, attempt },
+  });
+  const completedAttempt = { ...attempt, writingAssessment: { status: 'completed' } };
+  assert.deepEqual(egeMockAssessmentRunSettlement({
+    responseSnapshot: { commandStatus: 'pending' }, attempt: completedAttempt,
+  }), {
+    kind: 'finalize', persistAttempt: false,
+    response: { applied: true, replayed: false, attempt: completedAttempt },
+  });
+});
+
+test('assessment revision reaches MAX_SAFE_INTEGER once and then fails before any disposition mutation', async () => {
+  const {
+    applyEgeMockAssessmentRunDisposition,
+    egeMockAssessmentRunBeginDecision,
+  } = await import('../ege-mock/assessment-run-command.js');
+  const almostExhausted = {
+    writing_assessment: {
+      status: 'pending', assessment_revision: Number.MAX_SAFE_INTEGER - 1,
+      run_disposition: 'subscription_required',
+    },
+    updated_at: '2026-08-13T06:00:00.000Z',
+  };
+  const explicit = egeMockAssessmentRunBeginDecision({
+    attempt: {
+      id: '9ed93fa6-29c0-47b0-a86e-2234a2255a45',
+      writingAssessment: {
+        status: 'pending', assessmentRevision: Number.MAX_SAFE_INTEGER - 1,
+        runDisposition: 'subscription_required',
+      },
+    },
+    subscriptionActive: true, hasFrozenAuthorization: false, explicitRenewal: true,
+  });
+  assert.equal(applyEgeMockAssessmentRunDisposition(almostExhausted, explicit, {
+    now: new Date('2026-08-13T06:01:00.000Z'),
+  }), true);
+  assert.equal(almostExhausted.writing_assessment.assessment_revision, Number.MAX_SAFE_INTEGER);
+  assert.equal(almostExhausted.writing_assessment.run_disposition, undefined);
+
+  almostExhausted.writing_assessment.run_disposition = 'subscription_required';
+  const before = structuredClone(almostExhausted);
+  await assert.rejects(async () => applyEgeMockAssessmentRunDisposition(
+    almostExhausted, explicit, { now: new Date('2026-08-13T06:02:00.000Z') },
+  ), { code: 'ASSESSMENT_REVISION_EXHAUSTED' });
+  assert.deepEqual(almostExhausted, before,
+    'revision exhaustion rejects before clearing the disposition or changing timestamps');
+  assert.throws(() => egeMockAssessmentRunBeginDecision({
+    attempt: {
+      id: '9ed93fa6-29c0-47b0-a86e-2234a2255a46',
+      writingAssessment: { status: 'pending', assessmentRevision: Number.MAX_SAFE_INTEGER },
+    },
+    subscriptionActive: false, hasFrozenAuthorization: false,
+  }), { code: 'ASSESSMENT_REVISION_EXHAUSTED' });
 });
 
 test('EGE mock domain alone selects an active restore or next diagnostic/training identity', async () => {
@@ -371,6 +528,12 @@ test('file EGE mock reveals no result before both parts and replays explicit ora
       now: new Date('2026-08-13T06:01:00.000Z'),
     }), {
       available: false, state: 'written_in_progress', keysRevealed: false,
+      writingAssessment: {
+        status: 'not_started', assessmentRevision: 0,
+        ...AUTOMATIC_ASSESSMENT_PUBLIC_CONTRACT,
+        label: 'Предварительная автоматическая оценка',
+        retryAllowed: false, retryCount: 0,
+      },
     });
     const written = await repository.submitEgeMockWritten(username, started.attempt.id, {
       expectedRevision: 0, idempotencyKey: '28232177-c98f-4813-9438-3582fa2283d8',
@@ -400,8 +563,21 @@ test('file EGE mock reveals no result before both parts and replays explicit ora
       available: true,
       state: 'assessment_pending',
       keysRevealed: true,
+      writingAssessment: {
+        status: 'pending', assessmentRevision: 1,
+        ...AUTOMATIC_ASSESSMENT_PUBLIC_CONTRACT,
+        label: 'Предварительная автоматическая оценка',
+        retryAllowed: false, retryCount: 0,
+      },
       assessment: { status: 'not_started', retryAllowed: false, retryCount: 0 },
-      result: null,
+      result: {
+        writing: {
+          status: 'pending', assessmentRevision: 1,
+          ...AUTOMATIC_ASSESSMENT_PUBLIC_CONTRACT,
+          label: 'Предварительная автоматическая оценка',
+          score: null, maximum: 20, items: [],
+        },
+      },
     });
   } finally {
     await repository.close();
@@ -498,6 +674,61 @@ test('file EGE mock lifecycle matches the shared repository contract', async () 
   const repository = createFileRepository(path.join(directory, 'data.json'));
   try { await assertEgeMockAttemptRepositoryContract(assert, repository, 9_260_300); }
   finally {
+    await repository.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('file assessment-run subscription command matches the shared repository contract', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-ege-mock-run-subscription-'));
+  const repository = createFileRepository(path.join(directory, 'data.json'));
+  try {
+    await assertEgeMockAssessmentRunSubscriptionContract(
+      assert, repository, 9_260_320,
+      async (owners) => Object.fromEntries(owners.map(({ username, sub_until: subUntil }) => [
+        username, { now: new Date(Number(subUntil) + 1_000) },
+      ])),
+    );
+  } finally {
+    await repository.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('file assessment revision exhaustion matches the shared repository contract', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-ege-mock-revision-limit-'));
+  const filePath = path.join(directory, 'data.json');
+  let repository = createFileRepository(filePath);
+  const adapter = {
+    repository: () => repository,
+    async seedAssessmentRevision({ username, attemptId, revision }) {
+      await repository.close();
+      const data = JSON.parse(await fs.readFile(filePath, 'utf8'));
+      const attempt = data.ege_mock_attempts.find((candidate) => (
+        candidate.username === username && candidate.id === attemptId
+      ));
+      assert.ok(attempt?.writing_assessment);
+      attempt.writing_assessment.assessment_revision = revision;
+      await fs.writeFile(filePath, JSON.stringify(data), 'utf8');
+      repository = createFileRepository(filePath);
+    },
+    async expireSubscription(owner) {
+      return { now: new Date(Number(owner.sub_until) + 1_000) };
+    },
+    async assessmentRunMutationCount({ username, attemptId, idempotencyKey }) {
+      const data = JSON.parse(await fs.readFile(filePath, 'utf8'));
+      return data.ege_mock_mutations.filter((candidate) => (
+        candidate.username === username && candidate.attempt_id === attemptId
+        && candidate.operation === 'assessment_run'
+        && candidate.idempotency_key === idempotencyKey
+      )).length;
+    },
+  };
+  try {
+    await assertEgeMockAssessmentRevisionExhaustionContract(
+      assert, adapter, 9_260_340,
+    );
+  } finally {
     await repository.close();
     await fs.rm(directory, { recursive: true, force: true });
   }

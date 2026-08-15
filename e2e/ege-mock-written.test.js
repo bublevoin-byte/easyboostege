@@ -11,6 +11,7 @@ import {
 } from './browser-server-harness.js';
 import { EGE_MOCK_FORM_1_V1_PUBLIC as egeForm } from '../public/ege-mock-form-1-v1.js';
 import { egeMockAssetPlaybackUrl } from '../public/ege-mock-written-assets.js';
+import { AUTOMATIC_ASSESSMENT_WARNING } from '../public/automatic-assessment-contract.js';
 
 const projectDirectory = fileURLToPath(new URL('..', import.meta.url));
 const serverPath = fileURLToPath(new URL('../server.js', import.meta.url));
@@ -281,7 +282,10 @@ try {
   const result = await context.request.get(`${baseUrl}/api/v1/ege-mocks/attempts/${currentPayload.attempt.id}/result`, {
     headers: { 'X-EasyBoost-Expected-Owner': username },
   });
-  assert.deepEqual(await result.json(), { available: false, state: 'written_in_progress', keysRevealed: false });
+  assert.deepEqual(await result.json(), {
+    available: false, state: 'written_in_progress', keysRevealed: false,
+    writingAssessment: currentPayload.attempt.writingAssessment,
+  });
 
   const authorityHarness = await createActiveSubscriptionPage(browser, {
     baseUrl, username, jwtSecret, contextOptions: { viewport: { width: 375, height: 812 } },
@@ -309,8 +313,142 @@ try {
   assert.equal(await authorityPage.locator('#frame.ege-mock-expanded').count(), 0);
   await authorityContext.close();
   authorityContext = null;
+  await page.locator('[data-ege-action="continue-writing"]').press('Enter');
+  await page.getByRole('heading', { name: 'Задание 37', exact: true }).waitFor({ timeout: 20_000 });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.locator('#scr1.on').waitFor({ state: 'visible', timeout: 8_000 });
+  await page.locator('#examBtn').press('Enter');
+  try {
+    await page.getByRole('heading', { name: 'Задание 37', exact: true }).waitFor({ timeout: 20_000 });
+  } catch (error) {
+    const diagnostic = await page.evaluate(() => ({
+      active: document.querySelector('.screen.on')?.id,
+      area: document.querySelector('#ege_mock_area')?.textContent,
+      state: Object.entries(localStorage).find(([key]) => key.startsWith('easyboost-ege-mock-written-v1:')),
+    }));
+    throw new Error(`${error.message}\n${JSON.stringify(diagnostic)}`);
+  }
+  const task37Text = await page.locator('#ege_mock_area').innerText();
+  assert.match(task37Text, /Оцениваются:.*коммуникативной задачи/isu);
+  assert.match(task37Text, /100–140 слов/u);
+  assert.equal(task37Text.includes(AUTOMATIC_ASSESSMENT_WARNING), true);
+  assert.doesNotMatch(task37Text, /criteriaRef|criteriaFingerprint|answerKey|correctAnswer/iu);
+  const answer37 = Array.from({ length: 110 }, (_, index) => `letter${index + 1}`).join(' ');
+  const rawAnswer37 = `<b> ${answer37} </b>`;
+  const answer38 = Array.from({ length: 210 }, (_, index) => `report${index + 1}`).join(' ');
+  await page.locator('[data-ege-writing]').fill(rawAnswer37);
+  await page.waitForFunction(() => /110/u.test(document.querySelector('#ege_mock_word_count')?.textContent || ''));
+  await page.locator('.ege-mock__review [data-ege-position="38"]').press('Enter');
+  await page.getByRole('heading', { name: 'Задание 38', exact: true }).waitFor();
+  const task38Text = await page.locator('#ege_mock_area').innerText();
+  assert.match(task38Text, /200–250 слов/u);
+  assert.match(task38Text, /орфография и пунктуация/iu);
+  await page.locator('[data-ege-writing]').fill(answer38);
+  assert.equal(await page.locator('[data-ege-writing]').evaluate((field) => field.getBoundingClientRect().height >= 44), true);
+  await page.setViewportSize({ width: 320, height: 720 });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true,
+    'writing editors must not overflow at 320px');
+  await page.setViewportSize({ width: 375, height: 812 });
+
+  await context.setOffline(true);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.locator('#scr16.on [data-ege-writing]').waitFor({ state: 'visible', timeout: 20_000 });
+  assert.equal(await page.locator('[data-ege-writing]').inputValue(), answer38,
+    'the exact task 38 draft must survive an offline reload');
+  assert.match(await page.locator('#ege_mock_word_count').innerText(), /210/u);
+  await context.setOffline(false);
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.locator('[data-ege-action="complete-written"]').press('Enter');
+  await page.getByRole('heading', { name: 'Задания 1–38 сданы' }).waitFor({ timeout: 15_000 });
+  try {
+    await page.waitForFunction(() => (
+      /experimental \/ approximate\): retryable/iu.test(
+        document.querySelector('#ege_mock_area')?.textContent || '',
+      )
+    ), null, { timeout: 15_000 });
+  } catch (error) {
+    const diagnostic = await page.evaluate(() => ({
+      area: document.querySelector('#ege_mock_area')?.textContent,
+      state: Object.entries(localStorage).find(([key]) => (
+        key.startsWith('easyboost-ege-mock-written-v1:')
+      )),
+    }));
+    throw new Error(`${error.message}\n${JSON.stringify(diagnostic)}\n${output.join('').slice(-4_000)}`);
+  }
+  const terminalText = await page.locator('#ege_mock_area').innerText();
+  assert.match(terminalText,
+    /Предварительная автоматическая оценка \(experimental \/ approximate\): retryable/iu);
+  assert.equal(terminalText.includes(AUTOMATIC_ASSESSMENT_WARNING), true,
+    'the terminal must render the exact shared experimental approximate warning');
+  assert.doesNotMatch(terminalText, /ваш балл|правильный ответ|criteriaRef/iu);
+  const finalCurrent = await context.request.get(`${baseUrl}/api/v1/ege-mocks/attempts/current`, {
+    headers: { 'X-EasyBoost-Expected-Owner': username },
+  });
+  const finalAttempt = (await finalCurrent.json()).attempt;
+  assert.equal(finalAttempt.state, 'oral_ready');
+  assert.equal(finalAttempt.draft['37'], answer37);
+  assert.equal(finalAttempt.draft['38'], answer38);
+  assert.equal(finalAttempt.writingAssessment.status, 'retryable');
+  assert.equal(finalAttempt.writingAssessment.mode, 'experimental');
+  assert.equal(finalAttempt.writingAssessment.scoreKind, 'approximate');
+
+  const blockedWritingAssessment = structuredClone(finalAttempt.writingAssessment);
+  blockedWritingAssessment.status = 'pending';
+  blockedWritingAssessment.assessmentRevision += 1;
+  blockedWritingAssessment.retryAllowed = false;
+  blockedWritingAssessment.runDisposition = 'subscription_required';
+  delete blockedWritingAssessment.retryWarning;
+  delete blockedWritingAssessment.items;
+  const blockedAttempt = {
+    ...finalAttempt,
+    writingAssessment: blockedWritingAssessment,
+  };
+  const assessmentRunBodies = [];
+  await page.route(`**/api/v1/ege-mocks/attempts/${finalAttempt.id}`, (route) => route.fulfill({
+    status: 200,
+    headers: {
+      'content-type': 'application/json',
+      'x-easyboost-response-owner': username,
+      date: 'Thu, 13 Aug 2026 06:30:00 GMT',
+    },
+    body: JSON.stringify({ attempt: blockedAttempt }),
+  }));
+  await page.route(`**/api/v1/ege-mocks/attempts/${finalAttempt.id}/assessment/run`, (route) => {
+    assessmentRunBodies.push(route.request().postDataJSON());
+    const writingAssessment = {
+      ...blockedWritingAssessment, status: 'in_progress',
+      assessmentRevision: blockedWritingAssessment.assessmentRevision + 1,
+    };
+    delete writingAssessment.runDisposition;
+    return route.fulfill({
+      status: 200,
+      headers: {
+        'content-type': 'application/json',
+        'x-easyboost-response-owner': username,
+        date: 'Thu, 13 Aug 2026 06:31:00 GMT',
+      },
+      body: JSON.stringify({
+        applied: false, replayed: false,
+        attempt: { ...blockedAttempt, writingAssessment },
+      }),
+    });
+  });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.locator('#scr1.on').waitFor({ state: 'visible', timeout: 8_000 });
+  await page.locator('#examBtn').press('Enter');
+  await page.getByRole('button', {
+    name: 'Запустить проверку после продления подписки',
+  }).waitFor({ timeout: 15_000 });
+  await page.getByRole('button', {
+    name: 'Запустить проверку после продления подписки',
+  }).press('Enter');
+  await page.waitForFunction(() => !document.querySelector(
+    '[data-ege-action="run-assessment-after-renewal"]',
+  ));
+  assert.deepEqual(assessmentRunBodies, [{ explicitRenewal: true }],
+    'the built production screen transport must preserve the explicit renewal marker');
   assert.deepEqual(pageErrors, []);
-  console.log('EGE mock written E2E passed: exact preflight, 320/desktop, live omissions, owner switch, offline reload/CAS and durable 1–36 checkpoint');
+  console.log('EGE mock written E2E passed: exact preflight, 320/desktop, owner switch, offline drafts, durable checkpoint and explicit provisional 1–38 submission');
 } finally {
   if (context) await context.close();
   if (authorityContext) await authorityContext.close();

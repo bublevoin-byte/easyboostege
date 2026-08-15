@@ -23,6 +23,7 @@ import { build } from 'vite';
 
 const projectDirectory = fileURLToPath(new URL('..', import.meta.url));
 const sourceDirectory = path.join(projectDirectory, 'public');
+const sharedSourceDirectory = path.join(projectDirectory, 'shared');
 const outputDirectory = path.join(projectDirectory, 'dist', 'public');
 const stagingDirectory = path.join(projectDirectory, 'dist', 'public.building');
 const configFile = path.join(projectDirectory, 'vite.config.js');
@@ -47,7 +48,18 @@ async function listFiles(directory, prefix = '') {
   return files;
 }
 
-const sourceFiles = (await listFiles(sourceDirectory)).sort();
+const publicSourceFiles = (await listFiles(sourceDirectory)).sort();
+const sharedSourceFiles = (await listFiles(sharedSourceDirectory))
+  .map((name) => `../shared/${name}`);
+const sourceFiles = [...publicSourceFiles, ...sharedSourceFiles].sort();
+
+function sourceFilePath(name) {
+  return path.resolve(sourceDirectory, name);
+}
+
+function sourceUrl(name) {
+  return name.startsWith('../shared/') ? name.slice(2) : `/${name}`;
+}
 
 /*
  * Импорт — всегда инструкция верхнего уровня, поэтому статические ищем от начала строки: иначе
@@ -81,7 +93,7 @@ async function walkModuleGraph(entry, { staticOnly = false } = {}) {
     if (seen.has(name)) continue;
     seen.add(name);
     if (!sourceFiles.includes(name)) throw new Error(`Missing frontend module: ${name}`);
-    const source = await fs.readFile(path.join(sourceDirectory, name), 'utf8');
+    const source = await fs.readFile(sourceFilePath(name), 'utf8');
     const { statics, dynamics } = importsOf(source, name);
     queue.push(...statics);
     if (!staticOnly) queue.push(...dynamics);
@@ -102,6 +114,15 @@ for (const entry of entryPoints) {
   for (const name of await walkModuleGraph(entry)) reachable.add(name);
   for (const name of await walkModuleGraph(entry, { staticOnly: true })) shellModules.add(name);
 }
+const egeMockSourceEntry = 'screens/ege-mock.js';
+const egeMockStaticClosure = await walkModuleGraph(egeMockSourceEntry, { staticOnly: true });
+const sourceEgeMockExecModules = [
+  egeMockSourceEntry,
+  ...[...egeMockStaticClosure]
+    .filter((name) => name !== egeMockSourceEntry && !shellModules.has(name))
+    .sort(),
+];
+const sourceEgeMockExecPaths = sourceEgeMockExecModules.map(sourceUrl);
 
 /*
  * Файл, до которого не дотягивается ни один импорт, не попадёт ни в бандл, ни в кэш оболочки —
@@ -112,7 +133,7 @@ const orphaned = sourceFiles.filter((name) => name.endsWith('.js') && name !== '
 if (orphaned.length) throw new Error(`Эти модули не подключены ни статически, ни динамически: ${orphaned.join(', ')}`);
 
 /* Статика, которую никто не импортирует: разметку собирает Vite, остальное копируется как есть. */
-const staticAssets = sourceFiles.filter((name) => !name.endsWith('.js') && name !== 'index.html');
+const staticAssets = publicSourceFiles.filter((name) => !name.endsWith('.js') && name !== 'index.html');
 
 /*
  * Большие listening MP3 — runtime-данные, а не оболочка приложения. Их всё равно нужно положить в
@@ -148,8 +169,12 @@ const modules = {};
 for (const chunk of chunks) {
   for (const id of Object.keys(chunk.modules)) {
     const normalized = path.resolve(id);
-    if (!normalized.startsWith(sourceDirectory + path.sep)) continue;
-    modules[path.relative(sourceDirectory, normalized).split(path.sep).join('/')] = chunk.fileName;
+    if (normalized.startsWith(sourceDirectory + path.sep)) {
+      modules[path.relative(sourceDirectory, normalized).split(path.sep).join('/')] = chunk.fileName;
+    } else if (normalized.startsWith(sharedSourceDirectory + path.sep)) {
+      const relative = path.relative(sharedSourceDirectory, normalized).split(path.sep).join('/');
+      modules[`../shared/${relative}`] = chunk.fileName;
+    }
   }
 }
 
@@ -161,7 +186,7 @@ if (!builtEgeMockFormModule) throw new Error('Exact EGE mock form module не п
 const builtEgeMockFormPath = `/${builtEgeMockFormModule}`;
 const builtEgeMockScreenModule = modules['screens/ege-mock.js'];
 if (!builtEgeMockScreenModule) throw new Error('Lazy EGE mock executable не попал в сборку');
-const builtEgeMockExecPaths = [`/${builtEgeMockScreenModule}`];
+const builtEgeMockExecPaths = [...new Set(sourceEgeMockExecModules.map((name) => `/${modules[name]}`))];
 
 const entryChunk = chunks.find((chunk) => chunk.isEntry);
 if (!entryChunk) throw new Error('Сборка не дала точки входа');
@@ -194,7 +219,7 @@ for (const name of staticAssets) {
 }
 
 function shellFrom(files) {
-  return ['/', ...files.map((name) => `/${name}`).sort()];
+  return ['/', ...files.map(sourceUrl).sort()];
 }
 
 const workerSource = await fs.readFile(path.join(sourceDirectory, 'service-worker.js'), 'utf8');
@@ -237,7 +262,8 @@ if (egeMockExecStart === -1 || egeMockExecEnd === -1) {
   throw new Error('public/service-worker.js потерял markers build:ege-mock-exec');
 }
 const sourceEgeMockExecBlock = workerBuilt.slice(egeMockExecStart, egeMockExecEnd);
-if (!sourceEgeMockExecBlock.includes("const EGE_MOCK_EXEC_PATHS=['/screens/ege-mock.js','/ege-mock-written-assets.js','/ege-mock-written-runner.js'];")) {
+const sourceEgeMockExecDeclaration = `const EGE_MOCK_EXEC_PATHS=${JSON.stringify(sourceEgeMockExecPaths).replaceAll('"', "'")};`;
+if (!sourceEgeMockExecBlock.includes(sourceEgeMockExecDeclaration)) {
   throw new Error('Source service worker потерял EGE executable paths');
 }
 workerBuilt = `${workerBuilt.slice(0, egeMockExecStart)}${EGE_MOCK_EXEC_MARKER_START}\nconst EGE_MOCK_EXEC_PATHS=${JSON.stringify(builtEgeMockExecPaths).replaceAll('"', "'")};\n${workerBuilt.slice(egeMockExecEnd)}`;

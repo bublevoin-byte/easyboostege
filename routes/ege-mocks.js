@@ -5,6 +5,7 @@ import { EGE_MOCK_FORM_ID, EGE_MOCK_FORM_REVISION, getEgeMockPublicForm } from '
 import { egeMockPublicFormWithPolicy } from '../ege-mock/policy.js';
 import { bindResponseOwner, requireExpectedOwner } from '../middleware/expected-owner.js';
 import {
+  egeMockAssessmentRunSchema,
   egeMockAttemptIdSchema,
   egeMockDraftSchema,
   egeMockIdempotencyKeySchema,
@@ -38,13 +39,16 @@ function sendAttemptError(error, res, next) {
   }
   if (code === 'EGE_MOCK_DRAFT_INVALID' || code === 'EGE_MOCK_ORAL_PAYLOAD_INVALID'
     || code === 'EGE_MOCK_TIME_INVALID') return validationError(res);
-  if (typeof code === 'string' && (code.startsWith('EGE_MOCK_') || code === 'OWNER_CHANGED')) {
+  if (typeof code === 'string' && (code.startsWith('EGE_MOCK_')
+    || code === 'OWNER_CHANGED' || code === 'ASSESSMENT_REVISION_EXHAUSTED')) {
     return res.status(409).json({ error: { code, message: 'Состояние попытки изменилось.' } });
   }
   return next(error);
 }
 
-export function createEgeMockRoutes({ authentication, access, db, now = () => new Date() }) {
+export function createEgeMockRoutes({
+  authentication, access, db, writingAssessment = null, logger = null, now = () => new Date(),
+}) {
   const router = express.Router();
   const { auth } = authentication;
   const { requireActiveSubscription } = access;
@@ -53,6 +57,34 @@ export function createEgeMockRoutes({ authentication, access, db, now = () => ne
     if (!requireExpectedOwner(req, res)) return undefined;
     bindResponseOwner(res, req.user);
     return next();
+  }
+
+  async function dispatchPendingWriting(username, attempt, requestId = null) {
+    if (!writingAssessment || !attempt?.id
+      || !['pending', 'in_progress'].includes(attempt.writingAssessment?.status)) return attempt;
+    try {
+      await writingAssessment.dispatch(username, attempt.id);
+      return await db.getEgeMockAttempt(username, attempt.id, { now });
+    } catch (error) {
+      const code = error?.code || error?.message;
+      const expected = typeof code === 'string'
+        && (code.startsWith('EGE_MOCK_') || ['OWNER_CHANGED', 'SUBSCRIPTION_REQUIRED'].includes(code));
+      if (!expected && typeof logger?.error === 'function') {
+        logger.error({
+          timestamp: new Date(now()).toISOString(),
+          level: 'error',
+          type: 'ege_mock_writing_dispatch_failed',
+          requestId: typeof requestId === 'string' && requestId.length <= 120 ? requestId : 'unavailable',
+          attemptId: /^[0-9a-f-]{36}$/iu.test(attempt.id) ? attempt.id : 'unavailable',
+          errorCode: typeof code === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/u.test(code)
+            ? code : 'INTERNAL_ERROR',
+        });
+      }
+      try {
+        return await db.getEgeMockAttempt(username, attempt.id, { now });
+      } catch (_) {}
+      return attempt;
+    }
   }
 
   router.get('/api/v1/ege-mocks/forms', auth, ownerBoundary, (req, res) => {
@@ -84,7 +116,8 @@ export function createEgeMockRoutes({ authentication, access, db, now = () => ne
     try {
       bindResponseOwner(res, req.user);
       res.setHeader('Cache-Control', 'no-store');
-      return res.json({ attempt: await db.getCurrentEgeMockAttempt(req.user, { now }) });
+      const attempt = await db.getCurrentEgeMockAttempt(req.user, { now });
+      return res.json({ attempt });
     } catch (error) { return sendAttemptError(error, res, next); }
   });
 
@@ -99,17 +132,23 @@ export function createEgeMockRoutes({ authentication, access, db, now = () => ne
     } catch (error) { return sendAttemptError(error, res, next); }
   });
 
-  function mutationRoute(path, method, operation, schema, repositoryMethod) {
+  function mutationRoute(path, method, operation, schema, repositoryMethod, { dispatchWriting = false } = {}) {
     router[method](path, auth, ownerBoundary, requireActiveSubscription, async (req, res, next) => {
       if (!egeMockAttemptIdSchema.safeParse(req.params.attemptId).success) return validationError(res);
       const input = mutationInput(req, schema);
       if (!input) return validationError(res);
       try {
-        const result = await db[repositoryMethod](req.user, req.params.attemptId, {
+        let result = await db[repositoryMethod](req.user, req.params.attemptId, {
           ...input.body,
           idempotencyKey: input.idempotencyKey,
           requestHash: requestHash(operation, req.params.attemptId, input.body),
         }, { now });
+        if (dispatchWriting && result?.attempt) {
+          result = {
+            ...result,
+            attempt: await dispatchPendingWriting(req.user, result.attempt, req.requestId),
+          };
+        }
         res.setHeader('Cache-Control', 'no-store');
         return res.json(result);
       } catch (error) { return sendAttemptError(error, res, next); }
@@ -120,14 +159,47 @@ export function createEgeMockRoutes({ authentication, access, db, now = () => ne
   mutationRoute('/api/v1/ege-mocks/attempts/:attemptId/written/submit', 'post', 'written_submit', egeMockMutationSchema, 'submitEgeMockWritten');
   mutationRoute('/api/v1/ege-mocks/attempts/:attemptId/oral/start', 'post', 'oral_start', egeMockMutationSchema, 'startEgeMockOral');
   mutationRoute('/api/v1/ege-mocks/attempts/:attemptId/oral/submit', 'post', 'oral_submit', egeMockOralSubmitSchema, 'submitEgeMockOral');
-  mutationRoute('/api/v1/ege-mocks/attempts/:attemptId/assessment/retry', 'post', 'assessment_retry', egeMockRetrySchema, 'retryEgeMockAssessment');
+  mutationRoute('/api/v1/ege-mocks/attempts/:attemptId/assessment/retry', 'post', 'assessment_retry', egeMockRetrySchema, 'retryEgeMockAssessment', { dispatchWriting: true });
+
+  // Assessment execution is an explicit unsafe operation. Safe restore/result GETs never call
+  // this seam; the browser durably replays this owner-bound POST after written submission.
+  router.post('/api/v1/ege-mocks/attempts/:attemptId/assessment/run', auth, ownerBoundary,
+    async (req, res, next) => {
+      if (!egeMockAttemptIdSchema.safeParse(req.params.attemptId).success) return validationError(res);
+      const input = mutationInput(req, egeMockAssessmentRunSchema);
+      if (!input) return validationError(res);
+      try {
+        const candidate = {
+          idempotencyKey: input.idempotencyKey,
+          requestHash: requestHash('assessment_run', req.params.attemptId, input.body),
+          explicitRenewal: input.body.explicitRenewal === true,
+        };
+        const command = await db.beginEgeMockAssessmentRun(
+          req.user, req.params.attemptId, candidate, { now },
+        );
+        if (command.finalized) {
+          res.setHeader('Cache-Control', 'no-store');
+          return res.json(command.response);
+        }
+        const attempt = await db.getEgeMockAttempt(req.user, req.params.attemptId, { now });
+        if (!attempt) return res.status(404).json({ error: { code: 'EGE_MOCK_ATTEMPT_NOT_FOUND', message: 'Попытка не найдена.' } });
+        await dispatchPendingWriting(req.user, attempt, req.requestId);
+        const result = await db.settleEgeMockAssessmentRun(
+          req.user, req.params.attemptId, candidate, { now },
+        );
+        res.setHeader('Cache-Control', 'no-store');
+        return res.json(result);
+      } catch (error) { return sendAttemptError(error, res, next); }
+    });
 
   router.get('/api/v1/ege-mocks/attempts/:attemptId/result', auth, ownerBoundary,
     async (req, res, next) => {
       if (!egeMockAttemptIdSchema.safeParse(req.params.attemptId).success) return validationError(res);
       try {
+        const attempt = await db.getEgeMockAttempt(req.user, req.params.attemptId, { now });
+        if (!attempt) return res.status(404).json({ error: { code: 'EGE_MOCK_ATTEMPT_NOT_FOUND', message: 'Попытка не найдена.' } });
         const result = await db.getEgeMockResult(req.user, req.params.attemptId, { now });
-      if (!result) return res.status(404).json({ error: { code: 'EGE_MOCK_ATTEMPT_NOT_FOUND', message: 'Попытка не найдена.' } });
+        if (!result) return res.status(404).json({ error: { code: 'EGE_MOCK_ATTEMPT_NOT_FOUND', message: 'Попытка не найдена.' } });
         bindResponseOwner(res, req.user);
         res.setHeader('Cache-Control', 'no-store');
         return res.json(result);

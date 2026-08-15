@@ -5,18 +5,76 @@ import {
   createEgeMockWrittenRunner as createRawEgeMockWrittenRunner,
   egeMockLocalContinuation, normalizeEgeMockSelection,
 } from '../public/ege-mock-written-runner.js';
+import {
+  AUTOMATIC_ASSESSMENT_WARNING,
+  EGE_MOCK_WRITING_AMBIGUOUS_RETRY_WARNING,
+  EGE_MOCK_WRITING_ASSESSMENT_LABEL,
+} from '../public/automatic-assessment-contract.js';
 
 const SERVER_OWNER_GENERATION = 'account:2026-08-13T06:00:00.000Z';
 
 function createEgeMockWrittenRunner(options) {
+  let fallbackAssessmentRevision = 0;
+  let fallbackAssessmentProjection = null;
   const transport = Object.fromEntries(Object.entries(options.transport || {}).map(([name, method]) => [
     name, async (...args) => {
       const result = await method(...args);
-      return result?.attempt && result.attempt.ownerGeneration == null
-        ? { ...result, attempt: { ownerGeneration: SERVER_OWNER_GENERATION, ...result.attempt } } : result;
+      if (!result?.attempt) return result;
+      const candidate = result.attempt.writingAssessment || { status: 'not_started' };
+      let assessmentRevision = candidate.assessmentRevision;
+      if (candidate.assessmentRevision == null) {
+        const encoded = JSON.stringify(candidate);
+        if (encoded !== fallbackAssessmentProjection) {
+          fallbackAssessmentProjection = encoded;
+          fallbackAssessmentRevision += 1;
+        }
+        assessmentRevision = fallbackAssessmentRevision;
+      }
+      const writingAssessment = assessmentState(
+        candidate.status || 'not_started', assessmentRevision, candidate,
+      );
+      return {
+        ...result,
+        attempt: {
+          ownerGeneration: SERVER_OWNER_GENERATION,
+          ...result.attempt,
+          writingAssessment,
+        },
+      };
     },
   ]));
   return createRawEgeMockWrittenRunner({ ...options, transport });
+}
+
+function assessmentState(status, assessmentRevision, extra = {}) {
+  const retryCount = Number.isInteger(extra.retryCount) ? extra.retryCount : 0;
+  return {
+    status, assessmentRevision, mode: 'experimental', scoreKind: 'approximate',
+    warning: AUTOMATIC_ASSESSMENT_WARNING, label: EGE_MOCK_WRITING_ASSESSMENT_LABEL,
+    retryAllowed: ['retryable', 'ambiguous'].includes(status) && retryCount < 3,
+    retryCount,
+    ...(status === 'ambiguous'
+      ? { retryWarning: EGE_MOCK_WRITING_AMBIGUOUS_RETRY_WARNING } : {}),
+    ...extra,
+  };
+}
+
+function durableSubmittedState({ owner, attemptId, writingAssessment, extra = {} }) {
+  return {
+    version: 1, owner, phase: 'written_submitted', formIdentity: form.identity,
+    catalogFingerprint: form.fingerprint, attemptId,
+    attemptOwnerGeneration: SERVER_OWNER_GENERATION, revision: 2,
+    policyId: ATTEMPT_POLICY_ID,
+    writtenStartedAt: '2026-08-13T06:00:00.000Z',
+    writtenDeadlineAt: '2026-08-13T09:10:00.000Z',
+    answers: {}, answerVersions: {}, audioPlays: {}, currentPosition: 38,
+    preflight: null, pendingStartId: null, saveStatus: 'saved', queue: [],
+    compactedThrough: null, canceledSubmit: null, assessmentCommand: null,
+    assessmentCommandThrough: null, assetBlockedAt: 0, assetReadyAt: 0,
+    assetResumePhase: null, audioLease: null, audioLeaseThrough: null,
+    result: { kind: 'written_submission', state: 'oral_ready', writingAssessment },
+    ...extra,
+  };
 }
 
 function memoryStorage() {
@@ -56,9 +114,708 @@ function serialLockManager() {
 }
 
 const ATTEMPT_POLICY_ID = 'ege-mock-attempt-policy-v1';
+const wordsForRunner = (count, prefix) => (
+  Array.from({ length: count }, (_, index) => `${prefix}${index + 1}`).join(' ')
+);
 
 test('shared unique-selection nulls normalize to durable empty slots', () => {
   assert.deepEqual(normalizeEgeMockSelection(['1', null, '3']), ['1', '', '3']);
+});
+
+test('pending automatic assessment run survives offline reload and uses the explicit POST transport', async () => {
+  const storage = memoryStorage();
+  let online = false;
+  const owner = { username: 'learner', generation: 4 };
+  const attemptId = '00500000-0000-4000-8000-000000000097';
+  const key = 'easyboost-ege-mock-written-v1:learner:4';
+  const pending = {
+    status: 'pending', assessmentRevision: 1,
+    mode: 'experimental', scoreKind: 'approximate',
+    warning: AUTOMATIC_ASSESSMENT_WARNING, label: EGE_MOCK_WRITING_ASSESSMENT_LABEL,
+    retryAllowed: false, retryCount: 0,
+  };
+  const attempt = (writingAssessment) => ({
+    id: attemptId, state: 'oral_ready', revision: 2, draft: {},
+    formId: form.id, formRevision: form.revision, catalogFingerprint: form.fingerprint,
+    ownerGeneration: SERVER_OWNER_GENERATION, policyId: ATTEMPT_POLICY_ID,
+    writtenStartedAt: '2026-08-13T06:00:00.000Z',
+    writtenDeadlineAt: '2026-08-13T09:10:00.000Z',
+    writtenSubmittedAt: '2026-08-13T06:20:00.000Z', writingAssessment,
+  });
+  storage.setItem(key, JSON.stringify({
+    version: 1, owner, phase: 'written_submitted', formIdentity: form.identity,
+    catalogFingerprint: form.fingerprint, attemptId,
+    attemptOwnerGeneration: SERVER_OWNER_GENERATION, revision: 2,
+    policyId: ATTEMPT_POLICY_ID,
+    writtenStartedAt: '2026-08-13T06:00:00.000Z',
+    writtenDeadlineAt: '2026-08-13T09:10:00.000Z',
+    answers: {}, answerVersions: {}, audioPlays: {}, currentPosition: 38,
+    preflight: null, pendingStartId: null, saveStatus: 'saved', queue: [],
+    compactedThrough: null, canceledSubmit: null, assetBlockedAt: 0, assetReadyAt: 0,
+    assetResumePhase: null, audioLease: null, audioLeaseThrough: null,
+    result: { kind: 'written_submission', state: 'oral_ready', writingAssessment: pending },
+  }));
+  const runs = [];
+  const dependencies = {
+    owner, storage, online: () => online,
+    clock: () => Date.parse('2026-08-13T06:20:00.000Z'),
+    uuid: () => '653d49bf-b1c0-4db2-8459-b276dc5f950d', assets: {},
+    transport: {
+      async runAssessment(candidate) {
+        runs.push(structuredClone(candidate));
+        if (runs.length === 1) {
+          return {
+            applied: false, replayed: false,
+            attempt: attempt({ ...pending, status: 'in_progress', assessmentRevision: 2 }),
+          };
+        }
+        return {
+          applied: true, replayed: false,
+          attempt: attempt({ ...pending, status: 'completed', assessmentRevision: 3 }),
+        };
+      },
+    },
+  };
+
+  const first = createEgeMockWrittenRunner(dependencies);
+  const queued = await first.dispatch({ type: 'restore', form });
+  assert.equal(queued.assessmentRunQueued, true);
+  assert.equal(runs.length, 0);
+
+  const restored = createEgeMockWrittenRunner(dependencies);
+  const offline = await restored.dispatch({ type: 'restore', form });
+  assert.equal(offline.assessmentRunQueued, true);
+  online = true;
+  const stillPending = await restored.dispatch({ type: 'sync' });
+  assert.equal(stillPending.assessmentRunQueued, true,
+    'a nonterminal response keeps the exact durable run command');
+  assert.equal(stillPending.saveStatus, 'queued');
+  const completed = await restored.dispatch({ type: 'sync' });
+  assert.deepEqual(runs, [{
+    attemptId, idempotencyKey: '653d49bf-b1c0-4db2-8459-b276dc5f950d',
+  }, {
+    attemptId, idempotencyKey: '653d49bf-b1c0-4db2-8459-b276dc5f950d',
+  }]);
+  assert.equal(completed.assessmentRunQueued, false);
+  assert.equal(completed.result.writingAssessment.status, 'completed');
+});
+
+test('malformed terminal assessment acknowledgement preserves the durable run command and local state', async () => {
+  const storage = memoryStorage();
+  let online = false;
+  const owner = { username: 'learner', generation: 4 };
+  const attemptId = '00500000-0000-4000-8000-000000000096';
+  const idempotencyKey = '653d49bf-b1c0-4db2-8459-b276dc5f950c';
+  const key = 'easyboost-ege-mock-written-v1:learner:4';
+  const pending = {
+    status: 'pending', assessmentRevision: 1, mode: 'experimental', scoreKind: 'approximate',
+    warning: AUTOMATIC_ASSESSMENT_WARNING, label: EGE_MOCK_WRITING_ASSESSMENT_LABEL,
+    retryAllowed: false, retryCount: 0,
+  };
+  const attempt = (writingAssessment) => ({
+    id: attemptId, state: 'oral_ready', revision: 2, draft: {},
+    formId: form.id, formRevision: form.revision, catalogFingerprint: form.fingerprint,
+    ownerGeneration: SERVER_OWNER_GENERATION, policyId: ATTEMPT_POLICY_ID,
+    writtenStartedAt: '2026-08-13T06:00:00.000Z',
+    writtenDeadlineAt: '2026-08-13T09:10:00.000Z',
+    writtenSubmittedAt: '2026-08-13T06:20:00.000Z', writingAssessment,
+  });
+  storage.setItem(key, JSON.stringify({
+    version: 1, owner, phase: 'written_submitted', formIdentity: form.identity,
+    catalogFingerprint: form.fingerprint, attemptId,
+    attemptOwnerGeneration: SERVER_OWNER_GENERATION, revision: 2,
+    policyId: ATTEMPT_POLICY_ID,
+    writtenStartedAt: '2026-08-13T06:00:00.000Z',
+    writtenDeadlineAt: '2026-08-13T09:10:00.000Z',
+    answers: {}, answerVersions: {}, audioPlays: {}, currentPosition: 38,
+    preflight: null, pendingStartId: null, saveStatus: 'saved', queue: [],
+    compactedThrough: null, canceledSubmit: null, assetBlockedAt: 0, assetReadyAt: 0,
+    assetResumePhase: null, audioLease: null, audioLeaseThrough: null,
+    assessmentRetry: {
+      action: 'run', idempotencyKey, createdAt: 1,
+      acknowledgePossibleProviderRepeat: false,
+    },
+    assessmentRetryThrough: null,
+    result: { kind: 'written_submission', state: 'oral_ready', writingAssessment: pending },
+  }));
+  const deliveries = [];
+  const runner = createEgeMockWrittenRunner({
+    owner, storage, online: () => online,
+    clock: () => Date.parse('2026-08-13T06:20:00.000Z'),
+    uuid: () => { throw new Error('the durable command must keep its UUID'); }, assets: {},
+    transport: {
+      async runAssessment(candidate) {
+        deliveries.push(structuredClone(candidate));
+        if (deliveries.length === 1) {
+          return {
+            applied: false, replayed: false,
+            attempt: attempt(assessmentState('completed', 2)),
+          };
+        }
+        return {
+          applied: true, replayed: true,
+          attempt: attempt(assessmentState('completed', 2)),
+        };
+      },
+    },
+  });
+
+  await runner.dispatch({ type: 'restore', form });
+  online = true;
+  await assert.rejects(runner.dispatch({ type: 'sync' }), {
+    code: 'EGE_MOCK_ASSESSMENT_RESPONSE_INVALID',
+  });
+  const preserved = runner.snapshot();
+  assert.equal(preserved.assessmentRunQueued, true);
+  assert.equal(preserved.saveStatus, 'queued');
+  assert.equal(preserved.result.writingAssessment.status, 'pending',
+    'an unacknowledged terminal body cannot mutate the observational state');
+
+  const completed = await runner.dispatch({ type: 'sync' });
+  assert.deepEqual(deliveries, [
+    { attemptId, idempotencyKey }, { attemptId, idempotencyKey },
+  ]);
+  assert.equal(completed.assessmentRunQueued, false);
+  assert.equal(completed.result.writingAssessment.status, 'completed');
+});
+
+test('an acknowledged subscription rejection retires the exact automatic-run UUID without retrying it', async () => {
+  const storage = memoryStorage();
+  let online = false;
+  const owner = { username: 'learner', generation: 4 };
+  const attemptId = '00500000-0000-4000-8000-000000000095';
+  const idempotencyKey = '653d49bf-b1c0-4db2-8459-b276dc5f950b';
+  const key = 'easyboost-ege-mock-written-v1:learner:4';
+  const pending = {
+    status: 'pending', assessmentRevision: 1,
+    mode: 'experimental', scoreKind: 'approximate',
+    warning: AUTOMATIC_ASSESSMENT_WARNING, label: EGE_MOCK_WRITING_ASSESSMENT_LABEL,
+    retryAllowed: false, retryCount: 0,
+  };
+  const attempt = {
+    id: attemptId, state: 'oral_ready', revision: 2, draft: {},
+    formId: form.id, formRevision: form.revision, catalogFingerprint: form.fingerprint,
+    ownerGeneration: SERVER_OWNER_GENERATION, policyId: ATTEMPT_POLICY_ID,
+    writtenStartedAt: '2026-08-13T06:00:00.000Z',
+    writtenDeadlineAt: '2026-08-13T09:10:00.000Z',
+    writtenSubmittedAt: '2026-08-13T06:20:00.000Z',
+    writingAssessment: {
+      ...pending, assessmentRevision: 2, runDisposition: 'subscription_required',
+    },
+  };
+  storage.setItem(key, JSON.stringify({
+    version: 1, owner, phase: 'written_submitted', formIdentity: form.identity,
+    catalogFingerprint: form.fingerprint, attemptId,
+    attemptOwnerGeneration: SERVER_OWNER_GENERATION, revision: 2,
+    policyId: ATTEMPT_POLICY_ID,
+    writtenStartedAt: '2026-08-13T06:00:00.000Z',
+    writtenDeadlineAt: '2026-08-13T09:10:00.000Z',
+    answers: {}, answerVersions: {}, audioPlays: {}, currentPosition: 38,
+    preflight: null, pendingStartId: null, saveStatus: 'queued', queue: [],
+    compactedThrough: null, canceledSubmit: null, assetBlockedAt: 0, assetReadyAt: 0,
+    assetResumePhase: null, audioLease: null, audioLeaseThrough: null,
+    assessmentCommand: {
+      action: 'run', idempotencyKey, createdAt: 1,
+      acknowledgePossibleProviderRepeat: false,
+    },
+    assessmentCommandThrough: null,
+    result: { kind: 'written_submission', state: 'oral_ready', writingAssessment: pending },
+  }));
+  const deliveries = [];
+  const runner = createEgeMockWrittenRunner({
+    owner, storage, online: () => online,
+    clock: () => Date.parse('2026-08-13T06:20:00.000Z'),
+    uuid: () => { throw new Error('the rejected command must not mint another UUID'); }, assets: {},
+    transport: {
+      async runAssessment(candidate) {
+        deliveries.push(structuredClone(candidate));
+        if (deliveries.length === 1) {
+          return {
+            applied: true, replayed: false, disposition: 'subscription_required',
+            attempt: { ...attempt, writingAssessment: pending },
+          };
+        }
+        return {
+          applied: true, replayed: false, disposition: 'subscription_required', attempt,
+        };
+      },
+    },
+  });
+  await runner.dispatch({ type: 'restore', form });
+  online = true;
+  await assert.rejects(runner.dispatch({ type: 'sync' }), {
+    code: 'EGE_MOCK_ASSESSMENT_RESPONSE_INVALID',
+  });
+  assert.equal(runner.snapshot().assessmentRunQueued, true,
+    'a subscription terminal without the authoritative attempt disposition is not acknowledged');
+  assert.equal(runner.snapshot().result.writingAssessment.runDisposition, undefined);
+  const rejected = await runner.dispatch({ type: 'sync' });
+  assert.deepEqual(deliveries, [
+    { attemptId, idempotencyKey }, { attemptId, idempotencyKey },
+  ]);
+  assert.equal(rejected.assessmentRunQueued, false);
+  assert.equal(rejected.saveStatus, 'saved');
+  assert.equal(rejected.result.writingAssessment.status, 'pending');
+  assert.equal(rejected.result.writingAssessment.runDisposition, 'subscription_required');
+  const durable = JSON.parse(storage.getItem(key));
+  assert.equal(durable.assessmentCommand, null);
+  assert.equal(durable.assessmentCommandThrough.idempotencyKey, idempotencyKey);
+
+  const staleAutomaticKey = '1e9ac1ce-e78d-40fc-bf1a-79661c1ec8dd';
+  const offlineRenewalKey = '12fe61dc-786b-4692-a7cc-9cd40fb89b1f';
+  const offlineRenewalStorage = memoryStorage();
+  offlineRenewalStorage.setItem(key, JSON.stringify({
+    ...durable,
+    assessmentCommand: {
+      action: 'run', idempotencyKey: staleAutomaticKey, createdAt: 2,
+      acknowledgePossibleProviderRepeat: false,
+    },
+    assessmentCommandThrough: null,
+  }));
+  let offlineMinted = 0;
+  const offlineRenewal = createEgeMockWrittenRunner({
+    owner, storage: offlineRenewalStorage, online: () => false, assets: {},
+    uuid() { offlineMinted += 1; return offlineRenewalKey; },
+    transport: { async runAssessment() { throw new Error('offline'); } },
+  });
+  await offlineRenewal.dispatch({ type: 'restore', form });
+  const explicitlyRearmed = await offlineRenewal.dispatch({ type: 'runAssessmentAfterRenewal' });
+  assert.equal(offlineMinted, 1, 'the explicit action replaces a stale automatic UUID with a new UUID');
+  assert.equal(explicitlyRearmed.assessmentRunQueued, true);
+  const explicitDurable = JSON.parse(offlineRenewalStorage.getItem(key));
+  assert.equal(explicitDurable.assessmentCommand.idempotencyKey, offlineRenewalKey);
+  assert.equal(explicitDurable.assessmentCommand.explicitRenewal, true);
+  assert.equal(explicitDurable.assessmentCommandThrough.idempotencyKey, staleAutomaticKey);
+
+  let entitlementRestored = false;
+  let minted = 0;
+  const renewalKey = '653d49bf-b1c0-4db2-8459-b276dc5f951c';
+  const reloaded = createEgeMockWrittenRunner({
+    owner, storage, online: () => true,
+    clock: () => Date.parse('2026-08-13T06:21:00.000Z'), assets: {},
+    uuid() {
+      assert.equal(entitlementRestored, true,
+        'restore and observational GET must not mint a new automatic command');
+      minted += 1;
+      return renewalKey;
+    },
+    transport: {
+      async attempt() { return { attempt }; },
+      async runAssessment(candidate) {
+        deliveries.push(structuredClone(candidate));
+        return {
+          applied: false, replayed: false,
+          attempt: {
+            ...attempt,
+            writingAssessment: {
+              ...pending, status: 'in_progress', assessmentRevision: 3,
+            },
+          },
+        };
+      },
+    },
+  });
+  const restored = await reloaded.dispatch({ type: 'restore', form });
+  assert.equal(minted, 0);
+  assert.equal(restored.assessmentRunQueued, false);
+  assert.equal(restored.result.writingAssessment.runDisposition, 'subscription_required');
+  assert.equal(deliveries.length, 2);
+
+  entitlementRestored = true;
+  const resumed = await reloaded.dispatch({ type: 'runAssessmentAfterRenewal' });
+  assert.equal(minted, 1, 'only the explicit post-renewal action mints a new UUID');
+  assert.deepEqual(deliveries.at(-1), {
+    attemptId, idempotencyKey: renewalKey, explicitRenewal: true,
+  });
+  assert.equal(resumed.assessmentRunQueued, true);
+  assert.equal(resumed.result.writingAssessment.runDisposition, undefined);
+});
+
+test('an older terminal replay retires its UUID without regressing a newer attempt or assessment projection', async () => {
+  const storage = memoryStorage();
+  const owner = { username: 'learner', generation: 4 };
+  const attemptId = '00500000-0000-4000-8000-000000000094';
+  const oldKey = '653d49bf-b1c0-4db2-8459-b276dc5f950a';
+  const nextKey = '653d49bf-b1c0-4db2-8459-b276dc5f951a';
+  const key = 'easyboost-ege-mock-written-v1:learner:4';
+  const attempt = (writingAssessment, overrides = {}) => ({
+    id: attemptId, state: 'oral_ready', revision: 2, draft: {},
+    formId: form.id, formRevision: form.revision, catalogFingerprint: form.fingerprint,
+    ownerGeneration: SERVER_OWNER_GENERATION, policyId: ATTEMPT_POLICY_ID,
+    writtenStartedAt: '2026-08-13T06:00:00.000Z',
+    writtenDeadlineAt: '2026-08-13T09:10:00.000Z',
+    writtenSubmittedAt: '2026-08-13T06:20:00.000Z', writingAssessment,
+    ...overrides,
+  });
+  const blocked = assessmentState('pending', 4, { runDisposition: 'subscription_required' });
+  const current = assessmentState('in_progress', 5);
+  storage.setItem(key, JSON.stringify({
+    version: 1, owner, phase: 'written_submitted', formIdentity: form.identity,
+    catalogFingerprint: form.fingerprint, attemptId,
+    attemptOwnerGeneration: SERVER_OWNER_GENERATION, revision: 2,
+    policyId: ATTEMPT_POLICY_ID,
+    writtenStartedAt: '2026-08-13T06:00:00.000Z',
+    writtenDeadlineAt: '2026-08-13T09:10:00.000Z',
+    answers: {}, answerVersions: {}, audioPlays: {}, currentPosition: 38,
+    preflight: null, pendingStartId: null, saveStatus: 'queued', queue: [],
+    compactedThrough: null, canceledSubmit: null, assetBlockedAt: 0, assetReadyAt: 0,
+    assetResumePhase: null, audioLease: null, audioLeaseThrough: null,
+    assessmentCommand: {
+      action: 'run', idempotencyKey: oldKey, createdAt: 1,
+      acknowledgePossibleProviderRepeat: false,
+    },
+    assessmentCommandThrough: null,
+    result: { kind: 'written_submission', state: 'oral_ready', writingAssessment: blocked },
+  }));
+  let minted = 0;
+  let staleReplayCalls = 0;
+  const runner = createEgeMockWrittenRunner({
+    owner, storage, online: () => true, assets: {},
+    uuid() { minted += 1; return nextKey; },
+    transport: {
+      async attempt() {
+        return {
+          attempt: attempt(current, {
+            state: 'oral_in_progress', revision: 3, draft: { 37: 'Current server draft.' },
+          }),
+        };
+      },
+      async runAssessment(candidate) {
+        staleReplayCalls += 1;
+        assert.equal(candidate.idempotencyKey, oldKey);
+        return {
+          applied: true, replayed: true, disposition: 'subscription_required',
+          attempt: attempt(blocked),
+        };
+      },
+    },
+  });
+
+  const restored = await runner.dispatch({ type: 'restore', form });
+  assert.equal(staleReplayCalls, 1, 'the regression exercises the immutable stale response');
+  assert.equal(restored.revision, 3,
+    'an immutable response cannot roll back the newer attempt lifecycle revision');
+  assert.equal(restored.result.state, 'oral_in_progress',
+    'an immutable response cannot restore an older lifecycle state');
+  assert.deepEqual(restored.answers, { 37: 'Current server draft.' },
+    'an immutable response cannot restore an older server draft');
+  assert.equal(restored.result.writingAssessment.assessmentRevision, 5);
+  assert.equal(restored.result.writingAssessment.status, 'in_progress');
+  assert.equal(restored.result.writingAssessment.runDisposition, undefined,
+    'the immutable older replay cannot overwrite the newer GET projection');
+  const durable = JSON.parse(storage.getItem(key));
+  assert.equal(durable.assessmentCommandThrough.idempotencyKey, oldKey,
+    'the acknowledged stale command is still durably retired');
+  assert.equal(durable.assessmentCommand, null,
+    'retiring the stale run does not manufacture another command');
+  assert.equal(minted, 0);
+});
+
+test('decimal revision rollover cannot let a stale assessment replay replace newer server answers', async () => {
+  for (const [staleRevision, currentRevision] of [[9, 10], [99, 100]]) {
+    const storage = memoryStorage();
+    const owner = { username: `rollover-${currentRevision}`, generation: 4 };
+    const attemptId = `00500000-0000-4000-8000-${String(currentRevision).padStart(12, '0')}`;
+    const oldKey = `653d49bf-b1c0-4db2-8459-${String(currentRevision).padStart(12, '0')}`;
+    const currentAssessment = assessmentState('in_progress', 5);
+    const staleAssessment = assessmentState('pending', 4, {
+      runDisposition: 'subscription_required',
+    });
+    const attempt = (revision, draft, writingAssessment) => ({
+      id: attemptId, state: revision === currentRevision ? 'oral_in_progress' : 'oral_ready',
+      revision, draft,
+      formId: form.id, formRevision: form.revision, catalogFingerprint: form.fingerprint,
+      ownerGeneration: SERVER_OWNER_GENERATION, policyId: ATTEMPT_POLICY_ID,
+      writtenStartedAt: '2026-08-13T06:00:00.000Z',
+      writtenDeadlineAt: '2026-08-13T09:10:00.000Z',
+      writtenSubmittedAt: '2026-08-13T06:20:00.000Z', writingAssessment,
+    });
+    storage.setItem(`easyboost-ege-mock-written-v1:${owner.username}:4`, JSON.stringify(
+      durableSubmittedState({
+        owner, attemptId, writingAssessment: staleAssessment,
+        extra: {
+          assessmentCommand: {
+            action: 'run', idempotencyKey: oldKey, createdAt: 1,
+            acknowledgePossibleProviderRepeat: false,
+          },
+          result: {
+            kind: 'written_submission', state: 'oral_ready', writingAssessment: staleAssessment,
+          },
+        },
+      }),
+    ));
+    const runner = createEgeMockWrittenRunner({
+      owner, storage, online: () => true, assets: {},
+      transport: {
+        async attempt() {
+          return { attempt: attempt(currentRevision, { 37: `Current revision ${currentRevision}.` }, currentAssessment) };
+        },
+        async runAssessment() {
+          return {
+            applied: true, replayed: true, disposition: 'subscription_required',
+            attempt: attempt(staleRevision, { 37: `Stale revision ${staleRevision}.` }, staleAssessment),
+          };
+        },
+      },
+    });
+
+    const restored = await runner.dispatch({ type: 'restore', form });
+    assert.deepEqual(restored.answers, { 37: `Current revision ${currentRevision}.` },
+      `server revision ${staleRevision} must not replace revision ${currentRevision}`);
+  }
+});
+
+test('a same-revision assessment replay with different content is rejected without retiring its UUID', async () => {
+  const storage = memoryStorage();
+  const owner = { username: 'learner', generation: 4 };
+  const attemptId = '00500000-0000-4000-8000-000000000093';
+  const idempotencyKey = '653d49bf-b1c0-4db2-8459-b276dc5f9509';
+  const key = 'easyboost-ege-mock-written-v1:learner:4';
+  const current = assessmentState('completed', 7);
+  const conflicting = assessmentState('pending', 7, { runDisposition: 'subscription_required' });
+  const attempt = (writingAssessment) => ({
+    id: attemptId, state: 'oral_ready', revision: 2, draft: {},
+    formId: form.id, formRevision: form.revision, catalogFingerprint: form.fingerprint,
+    ownerGeneration: SERVER_OWNER_GENERATION, policyId: ATTEMPT_POLICY_ID,
+    writtenStartedAt: '2026-08-13T06:00:00.000Z',
+    writtenDeadlineAt: '2026-08-13T09:10:00.000Z',
+    writtenSubmittedAt: '2026-08-13T06:20:00.000Z', writingAssessment,
+  });
+  storage.setItem(key, JSON.stringify({
+    version: 1, owner, phase: 'written_submitted', formIdentity: form.identity,
+    catalogFingerprint: form.fingerprint, attemptId,
+    attemptOwnerGeneration: SERVER_OWNER_GENERATION, revision: 2,
+    policyId: ATTEMPT_POLICY_ID,
+    writtenStartedAt: '2026-08-13T06:00:00.000Z',
+    writtenDeadlineAt: '2026-08-13T09:10:00.000Z', answers: {}, answerVersions: {},
+    audioPlays: {}, currentPosition: 38, preflight: null, pendingStartId: null,
+    saveStatus: 'queued', queue: [], compactedThrough: null, canceledSubmit: null,
+    assetBlockedAt: 0, assetReadyAt: 0, assetResumePhase: null,
+    audioLease: null, audioLeaseThrough: null,
+    assessmentCommand: {
+      action: 'run', idempotencyKey, createdAt: 1,
+      acknowledgePossibleProviderRepeat: false,
+    },
+    assessmentCommandThrough: null,
+    result: { kind: 'written_submission', state: 'oral_ready', writingAssessment: current },
+  }));
+  const runner = createEgeMockWrittenRunner({
+    owner, storage, online: () => true, assets: {},
+    uuid: () => { throw new Error('no replacement is allowed'); },
+    transport: {
+      async attempt() { return { attempt: attempt(current) }; },
+      async runAssessment() {
+        return {
+          applied: true, replayed: true, disposition: 'subscription_required',
+          attempt: attempt(conflicting),
+        };
+      },
+    },
+  });
+
+  await assert.rejects(runner.dispatch({ type: 'restore', form }), {
+    code: 'EGE_MOCK_ASSESSMENT_RESPONSE_INVALID',
+  });
+  assert.equal(runner.snapshot().result.writingAssessment.status, 'completed');
+  assert.equal(runner.snapshot().assessmentRunQueued, true);
+});
+
+test('ambiguous writing-assessment retry requires acknowledgement and survives offline reload', async () => {
+  const storage = memoryStorage();
+  let online = false;
+  const owner = { username: 'learner', generation: 4 };
+  const attemptId = '00500000-0000-4000-8000-000000000099';
+  const key = 'easyboost-ege-mock-written-v1:learner:4';
+  const writingAssessment = {
+    status: 'ambiguous', assessmentRevision: 0,
+    mode: 'experimental', scoreKind: 'approximate',
+    warning: AUTOMATIC_ASSESSMENT_WARNING, label: EGE_MOCK_WRITING_ASSESSMENT_LABEL,
+    retryAllowed: true, retryCount: 0,
+    retryWarning: EGE_MOCK_WRITING_AMBIGUOUS_RETRY_WARNING,
+  };
+  storage.setItem(key, JSON.stringify({
+    version: 1, owner, phase: 'written_submitted', formIdentity: form.identity,
+    catalogFingerprint: form.fingerprint, attemptId,
+    attemptOwnerGeneration: SERVER_OWNER_GENERATION, revision: 2,
+    policyId: ATTEMPT_POLICY_ID,
+    writtenStartedAt: '2026-08-13T06:00:00.000Z',
+    writtenDeadlineAt: '2026-08-13T09:10:00.000Z',
+    answers: {}, answerVersions: {}, audioPlays: {}, currentPosition: 38,
+    preflight: null, pendingStartId: null, saveStatus: 'saved', queue: [],
+    compactedThrough: null, canceledSubmit: null, assetBlockedAt: 0, assetReadyAt: 0,
+    assetResumePhase: null, audioLease: null, audioLeaseThrough: null,
+    result: { kind: 'written_submission', state: 'oral_ready', writingAssessment },
+  }));
+  const retries = [];
+  const dependencies = {
+    owner, storage, online: () => online,
+    clock: () => Date.parse('2026-08-13T06:20:00.000Z'),
+    uuid: () => '653d49bf-b1c0-4db2-8459-b276dc5f950e',
+    assets: {},
+    transport: {
+      async retryAssessment(candidate) {
+        retries.push(structuredClone(candidate));
+        return { applied: true, replayed: false, attempt: {
+          id: attemptId, state: 'oral_ready', revision: 2, draft: {},
+          formId: form.id, formRevision: form.revision, catalogFingerprint: form.fingerprint,
+          ownerGeneration: SERVER_OWNER_GENERATION, policyId: ATTEMPT_POLICY_ID,
+          writtenStartedAt: '2026-08-13T06:00:00.000Z',
+          writtenDeadlineAt: '2026-08-13T09:10:00.000Z',
+          writtenSubmittedAt: '2026-08-13T06:20:00.000Z',
+          writingAssessment: assessmentState('pending', 1, { retryCount: 1 }),
+        } };
+      },
+    },
+  };
+  const first = createEgeMockWrittenRunner(dependencies);
+  await first.dispatch({ type: 'restore', form });
+  await assert.rejects(first.dispatch({ type: 'retryAssessment' }),
+    /EGE_MOCK_WRITING_AMBIGUOUS_RETRY_ACK_REQUIRED/u);
+  const queued = await first.dispatch({
+    type: 'retryAssessment', acknowledgePossibleProviderRepeat: true,
+  });
+  assert.equal(queued.assessmentRetryQueued, true);
+  assert.equal(retries.length, 0);
+
+  const restored = createEgeMockWrittenRunner(dependencies);
+  const offline = await restored.dispatch({ type: 'restore', form });
+  assert.equal(offline.assessmentRetryQueued, true);
+  online = true;
+  const replayed = await restored.dispatch({ type: 'sync' });
+  assert.equal(retries.length, 1);
+  assert.deepEqual(retries[0], {
+    attemptId, idempotencyKey: '653d49bf-b1c0-4db2-8459-b276dc5f950e',
+    acknowledgePossibleProviderRepeat: true,
+  });
+  assert.equal(replayed.assessmentRetryQueued, false);
+  assert.equal(replayed.result.writingAssessment.status, 'pending');
+});
+
+test('retry acknowledgement keeps a descending-UUID automatic run durable after server answer restore', async () => {
+  const storage = memoryStorage();
+  const owner = { username: 'logical-clock-rollover', generation: 4 };
+  const attemptId = '00500000-0000-4000-8000-000000000096';
+  const key = 'easyboost-ege-mock-written-v1:logical-clock-rollover:4';
+  const ambiguous = assessmentState('ambiguous', 7, {
+    retryAllowed: true, retryWarning: EGE_MOCK_WRITING_AMBIGUOUS_RETRY_WARNING,
+  });
+  const pending = assessmentState('pending', 8);
+  storage.setItem(key, JSON.stringify(durableSubmittedState({
+    owner, attemptId, writingAssessment: ambiguous,
+  })));
+  const attempt = (writingAssessment) => ({
+    id: attemptId, state: 'oral_ready', revision: 10, draft: { 37: 'Current server draft.' },
+    formId: form.id, formRevision: form.revision, catalogFingerprint: form.fingerprint,
+    ownerGeneration: SERVER_OWNER_GENERATION, policyId: ATTEMPT_POLICY_ID,
+    writtenStartedAt: '2026-08-13T06:00:00.000Z',
+    writtenDeadlineAt: '2026-08-13T09:10:00.000Z',
+    writtenSubmittedAt: '2026-08-13T06:20:00.000Z', writingAssessment,
+  });
+  const ids = [
+    'ffffffff-ffff-4fff-8fff-ffffffffffff',
+    '00000000-0000-4000-8000-000000000001',
+  ];
+  let retryCalls = 0;
+  let runCalls = 0;
+  const runner = createEgeMockWrittenRunner({
+    owner, storage, online: () => true, assets: {}, uuid: () => ids.shift(),
+    transport: {
+      async attempt() { return { attempt: attempt(ambiguous) }; },
+      async retryAssessment() {
+        retryCalls += 1;
+        return { applied: true, replayed: false, attempt: attempt(pending) };
+      },
+      async runAssessment() {
+        runCalls += 1;
+        return { applied: false, replayed: false, attempt: attempt(pending) };
+      },
+    },
+  });
+
+  await runner.dispatch({ type: 'restore', form });
+  const acknowledged = await runner.dispatch({
+    type: 'retryAssessment', acknowledgePossibleProviderRepeat: true,
+  });
+  assert.equal(retryCalls, 1);
+  assert.equal(acknowledged.assessmentRunQueued, true,
+    'the automatic run must survive normalization even when its UUID sorts below the retry UUID');
+  await runner.dispatch({ type: 'sync' });
+  assert.equal(runCalls, 1);
+});
+
+test('observational terminal reconciliation preserves the retry UUID until an acknowledged replay', async () => {
+  const storage = memoryStorage();
+  let online = false;
+  const owner = { username: 'learner', generation: 4 };
+  const attemptId = '00500000-0000-4000-8000-000000000098';
+  const key = 'easyboost-ege-mock-written-v1:learner:4';
+  const ambiguous = {
+    status: 'ambiguous', assessmentRevision: 0,
+    mode: 'experimental', scoreKind: 'approximate',
+    warning: AUTOMATIC_ASSESSMENT_WARNING, label: EGE_MOCK_WRITING_ASSESSMENT_LABEL,
+    retryAllowed: true, retryCount: 2,
+    retryWarning: EGE_MOCK_WRITING_AMBIGUOUS_RETRY_WARNING,
+  };
+  storage.setItem(key, JSON.stringify({
+    version: 1, owner, phase: 'written_submitted', formIdentity: form.identity,
+    catalogFingerprint: form.fingerprint, attemptId,
+    attemptOwnerGeneration: SERVER_OWNER_GENERATION, revision: 2,
+    policyId: ATTEMPT_POLICY_ID,
+    writtenStartedAt: '2026-08-13T06:00:00.000Z',
+    writtenDeadlineAt: '2026-08-13T09:10:00.000Z',
+    answers: {}, answerVersions: {}, audioPlays: {}, currentPosition: 38,
+    preflight: null, pendingStartId: null, saveStatus: 'saved', queue: [],
+    compactedThrough: null, canceledSubmit: null, assetBlockedAt: 0, assetReadyAt: 0,
+    assetResumePhase: null, audioLease: null, audioLeaseThrough: null,
+    result: { kind: 'written_submission', state: 'oral_ready', writingAssessment: ambiguous },
+  }));
+  const terminal = {
+    ...ambiguous, assessmentRevision: 1, retryAllowed: false, retryCount: 3,
+  };
+  const attempt = {
+    id: attemptId, state: 'oral_ready', revision: 2, draft: {},
+    formId: form.id, formRevision: form.revision, catalogFingerprint: form.fingerprint,
+    ownerGeneration: SERVER_OWNER_GENERATION, policyId: ATTEMPT_POLICY_ID,
+    writtenStartedAt: '2026-08-13T06:00:00.000Z',
+    writtenDeadlineAt: '2026-08-13T09:10:00.000Z',
+    writtenSubmittedAt: '2026-08-13T06:20:00.000Z', writingAssessment: terminal,
+  };
+  let retryCalls = 0;
+  const runner = createEgeMockWrittenRunner({
+    owner, storage, online: () => online,
+    clock: () => Date.parse('2026-08-13T06:20:00.000Z'),
+    uuid: () => '653d49bf-b1c0-4db2-8459-b276dc5f950f', assets: {},
+    transport: {
+      async retryAssessment() {
+        retryCalls += 1;
+        if (retryCalls === 1) throw Object.assign(new Error('retry limit reached'), { status: 409 });
+        return { applied: true, replayed: true, attempt };
+      },
+      async attempt() { return { attempt }; },
+    },
+  });
+  await runner.dispatch({ type: 'restore', form });
+  const queued = await runner.dispatch({
+    type: 'retryAssessment', acknowledgePossibleProviderRepeat: true,
+  });
+  assert.equal(queued.assessmentRetryQueued, true);
+  online = true;
+  await assert.rejects(runner.dispatch({ type: 'sync' }), /retry limit reached/u);
+  const observed = runner.snapshot();
+  assert.equal(observed.assessmentRetryQueued, true,
+    'a safe GET cannot acknowledge or retire the exact durable POST command');
+  assert.equal(observed.saveStatus, 'queued');
+  assert.deepEqual(observed.result.writingAssessment, terminal);
+  const pendingDurable = JSON.parse(storage.getItem(key));
+  assert.equal(pendingDurable.assessmentCommand.idempotencyKey,
+    '653d49bf-b1c0-4db2-8459-b276dc5f950f');
+
+  const acknowledged = await runner.dispatch({ type: 'sync' });
+  assert.equal(acknowledged.assessmentRetryQueued, false);
+  assert.equal(acknowledged.saveStatus, 'saved');
+  assert.deepEqual(acknowledged.result.writingAssessment, terminal);
+  const settledDurable = JSON.parse(storage.getItem(key));
+  assert.equal(settledDurable.assessmentCommand, null);
 });
 
 test('manual 1–36 completion checkpoints the exact draft without submitting positions 37–38', async () => {
@@ -102,6 +859,343 @@ test('manual 1–36 completion checkpoints the exact draft without submitting po
   assert.equal(checkpoint.result.state, 'written_in_progress');
   assert.equal(checkpoint.result.blankPositions.length, 35);
   assert.equal(checkpoint.remainingSeconds, 180 * 60);
+});
+
+test('the same strict written attempt continues through 37–38 and submits only after explicit completion', async () => {
+  const storage = memoryStorage();
+  const saves = [];
+  const submits = [];
+  let revision = 0;
+  let serverDraft = {};
+  const base = {
+    id: '02500000-0000-4000-8000-000000000002', state: 'written_in_progress',
+    formId: form.id, formRevision: form.revision, catalogFingerprint: form.fingerprint,
+    ownerGeneration: SERVER_OWNER_GENERATION, policyId: ATTEMPT_POLICY_ID,
+    writtenStartedAt: '2026-08-13T06:00:00.000Z', writtenDeadlineAt: '2026-08-13T09:10:00.000Z',
+    writingAssessment: assessmentState('not_started', 0),
+  };
+  const runner = createEgeMockWrittenRunner({
+    owner: { username: 'learner', generation: 4 }, storage, online: () => true,
+    clock: () => Date.parse('2026-08-13T06:20:00.000Z'),
+    uuid: (() => { let index = 0; return () => `01500000-0000-4000-8000-${String(++index).padStart(12, '0')}`; })(),
+    assets: { async preflight() { return { identity: form.identity, fingerprint: form.fingerprint, assetCount: 20 }; } },
+    transport: {
+      async start() { return { attempt: { ...base, revision, draft: serverDraft } }; },
+      async saveDraft(input) {
+        saves.push(structuredClone(input));
+        revision += 1;
+        serverDraft = structuredClone(input.answers);
+        return { attempt: { ...base, revision, draft: serverDraft } };
+      },
+      async submitWritten(input) {
+        submits.push(structuredClone(input));
+        revision += 1;
+        return { attempt: {
+          ...base, state: 'oral_ready', revision, draft: serverDraft,
+          writtenSubmittedAt: '2026-08-13T06:20:00.000Z',
+          writingAssessment: {
+            status: 'pending', mode: 'experimental', scoreKind: 'approximate',
+            label: 'Предварительная автоматическая оценка', retryAllowed: false, retryCount: 0,
+          },
+        } };
+      },
+    },
+  });
+  await runner.dispatch({ type: 'prepare', form });
+  await runner.dispatch({ type: 'start' });
+  await runner.dispatch({ type: 'answer', position: 19, answer: 'went' });
+  await runner.dispatch({ type: 'completeObjective' });
+  const writing = await runner.dispatch({ type: 'continueWriting' });
+  assert.equal(writing.phase, 'writing');
+  assert.equal(writing.currentPosition, 37);
+
+  await assert.rejects(
+    runner.dispatch({ type: 'answer', position: 37, answer: ['legacy', 'array'] }),
+    /EGE_MOCK_WRITTEN_ANSWER_INVALID/u,
+  );
+  assert.equal(Object.hasOwn(runner.snapshot().answers, '37'), false);
+
+  const answer37 = wordsForRunner(88, 'letter');
+  const rawAnswer37 = `<b> ${answer37} </b>`;
+  const answer38 = wordsForRunner(230, 'report');
+  await runner.dispatch({ type: 'answer', position: 37, answer: rawAnswer37 });
+  assert.equal(runner.snapshot().answers['37'], answer37,
+    'the browser runner stores the same sanitized writing string the server assesses');
+  await runner.dispatch({ type: 'answer', position: 38, answer: answer38 });
+  const submitted = await runner.dispatch({ type: 'completeWritten' });
+
+  assert.equal(saves.length, 2, 'objective checkpoint and final writing draft share the CAS seam');
+  assert.equal(saves.at(-1).answers['37'], answer37);
+  assert.equal(saves.at(-1).answers['38'], answer38);
+  assert.equal(submits.length, 1);
+  assert.equal(submits[0].expectedRevision, 2);
+  assert.equal(submitted.phase, 'written_submitted');
+  assert.equal(submitted.result.kind, 'written_submission');
+  assert.deepEqual(submitted.result.submittedPositions, Array.from({ length: 38 }, (_, index) => index + 1));
+  assert.equal(submitted.result.writingAssessment.status, 'pending');
+  assert.equal(Object.hasOwn(submitted.result, 'score'), false);
+});
+
+test('offline restore converts a legacy writing array into one reviewable string before persistence', async () => {
+  const storage = memoryStorage();
+  const key = 'easyboost-ege-mock-written-v1:learner:4';
+  const saved = {
+    version: 1, owner: { username: 'learner', generation: 4 }, phase: 'writing',
+    formIdentity: form.identity, catalogFingerprint: form.fingerprint,
+    attemptId: '02500000-0000-4000-8000-000000000099',
+    attemptOwnerGeneration: SERVER_OWNER_GENERATION, revision: 1,
+    policyId: ATTEMPT_POLICY_ID,
+    writtenStartedAt: '2026-08-13T06:00:00.000Z', writtenDeadlineAt: '2026-08-13T09:10:00.000Z',
+    answers: { 37: ['Dear Sam,', 'This draft must survive.'] },
+    answerVersions: {
+      37: { id: 'legacy-writing-array', recordedAt: 1, value: ['Dear Sam,', 'This draft must survive.'] },
+    },
+    audioPlays: {}, currentPosition: 37,
+    preflight: { identity: form.identity, fingerprint: form.fingerprint, assetCount: 20 },
+    pendingStartId: null, saveStatus: 'queued', compactedThrough: null, canceledSubmit: null,
+    assetBlockedAt: 0, assetReadyAt: 1, audioLease: null, audioLeaseThrough: null,
+    queue: [{
+      type: 'draft', idempotencyKey: '02500000-0000-4000-8000-000000000098',
+      expectedRevision: 1, answers: { 37: ['Dear Sam,', 'This draft must survive.'] },
+      createdAt: 1, attempted: false, dirtyPositions: [37],
+      dirtyVersions: { 37: 'legacy-writing-array' },
+    }],
+  };
+  storage.setItem(key, JSON.stringify(saved));
+  const restored = createEgeMockWrittenRunner({
+    owner: saved.owner, storage, online: () => false,
+    clock: () => Date.parse('2026-08-13T06:20:00.000Z'),
+    assets: { async isReady() { return true; } }, transport: {},
+  });
+
+  const snapshot = await restored.dispatch({ type: 'restore', form });
+  assert.equal(snapshot.answers['37'], 'Dear Sam,\nThis draft must survive.');
+  assert.deepEqual(snapshot.writingDraftRecovery, { positions: [37], kind: 'legacy_array' });
+  const durable = JSON.parse(storage.getItem(key));
+  assert.equal(durable.answers['37'], 'Dear Sam,\nThis draft must survive.');
+  assert.equal(durable.answerVersions['37'].value, 'Dear Sam,\nThis draft must survive.');
+  assert.equal(durable.queue[0].answers['37'], 'Dear Sam,\nThis draft must survive.');
+});
+
+test('the strict 190-minute deadline queues the whole written submit while the editor is on task 37', async () => {
+  const storage = memoryStorage();
+  let online = true;
+  let now = Date.parse('2026-08-13T06:20:00.000Z');
+  let revision = 0;
+  const attempt = (draft = {}) => ({
+    id: '02500000-0000-4000-8000-000000000003', state: 'written_in_progress',
+    revision, draft, formId: form.id, formRevision: form.revision,
+    catalogFingerprint: form.fingerprint, ownerGeneration: SERVER_OWNER_GENERATION,
+    policyId: ATTEMPT_POLICY_ID, writtenStartedAt: '2026-08-13T06:00:00.000Z',
+    writtenDeadlineAt: '2026-08-13T09:10:00.000Z',
+  });
+  const runner = createEgeMockWrittenRunner({
+    owner: { username: 'learner', generation: 4 }, storage,
+    online: () => online, clock: () => now,
+    uuid: (() => { let index = 0; return () => `01700000-0000-4000-8000-${String(++index).padStart(12, '0')}`; })(),
+    assets: { async preflight() { return { identity: form.identity, fingerprint: form.fingerprint, assetCount: 20 }; } },
+    transport: {
+      async start() { return { attempt: attempt() }; },
+      async saveDraft(input) { revision += 1; return { attempt: attempt(input.answers) }; },
+    },
+  });
+  await runner.dispatch({ type: 'prepare', form });
+  await runner.dispatch({ type: 'start' });
+  await runner.dispatch({ type: 'completeObjective' });
+  assert.equal((await runner.dispatch({ type: 'continueWriting' })).phase, 'writing');
+
+  online = false;
+  now = Date.parse('2026-08-13T09:10:00.000Z');
+  const expired = await runner.dispatch({ type: 'tick' });
+  assert.equal(expired.phase, 'submit_queued');
+  assert.equal(expired.remainingSeconds, 0);
+  assert.equal(expired.saveStatus, 'queued');
+});
+
+test('offline writing completion reloads exactly and replays the same final submit UUID', async () => {
+  const storage = memoryStorage();
+  let online = true;
+  let revision = 0;
+  let serverDraft = {};
+  let submitApplied = false;
+  const submits = [];
+  const ids = [
+    '01600000-0000-4000-8000-000000000001',
+    '01600000-0000-4000-8000-000000000002',
+    '01600000-0000-4000-8000-000000000003',
+    '01600000-0000-4000-8000-000000000004',
+    '01600000-0000-4000-8000-000000000005',
+    '01600000-0000-4000-8000-000000000006',
+  ];
+  let idIndex = 0;
+  const base = {
+    id: '02600000-0000-4000-8000-000000000002', formId: form.id, formRevision: form.revision,
+    catalogFingerprint: form.fingerprint, ownerGeneration: SERVER_OWNER_GENERATION,
+    policyId: ATTEMPT_POLICY_ID, writtenStartedAt: '2026-08-13T06:00:00.000Z',
+    writtenDeadlineAt: '2026-08-13T09:10:00.000Z',
+  };
+  const currentAttempt = () => ({
+    ...base, revision, draft: structuredClone(serverDraft),
+    state: submitApplied ? 'oral_ready' : 'written_in_progress',
+    ...(submitApplied ? {
+      writtenSubmittedAt: '2026-08-13T06:20:00.000Z',
+      writingAssessment: assessmentState('pending', 1),
+    } : {}),
+  });
+  const dependencies = {
+    owner: { username: 'learner', generation: 4 }, storage, online: () => online,
+    clock: () => Date.parse('2026-08-13T06:20:00.000Z'), uuid: () => ids[idIndex++],
+    assets: {
+      async preflight() { return { identity: form.identity, fingerprint: form.fingerprint, assetCount: 20 }; },
+      async isReady() { return true; },
+    },
+    transport: {
+      async start() { return { attempt: currentAttempt() }; },
+      async attempt() { return { attempt: currentAttempt() }; },
+      async saveDraft(input) {
+        revision += 1;
+        serverDraft = structuredClone(input.answers);
+        return { attempt: currentAttempt() };
+      },
+      async submitWritten(input) {
+        submits.push(structuredClone(input));
+        if (!submitApplied) {
+          submitApplied = true;
+          revision += 1;
+          throw Object.assign(new Error('connection dropped after submit'), { code: 'NETWORK_ERROR', status: 0 });
+        }
+        assert.equal(input.idempotencyKey, submits[0].idempotencyKey);
+        return { replayed: true, attempt: currentAttempt() };
+      },
+    },
+  };
+  const first = createEgeMockWrittenRunner(dependencies);
+  await first.dispatch({ type: 'prepare', form });
+  await first.dispatch({ type: 'start' });
+  await first.dispatch({ type: 'completeObjective' });
+  await first.dispatch({ type: 'continueWriting' });
+  const answer37 = wordsForRunner(120, 'letter');
+  const answer38 = wordsForRunner(230, 'report');
+  await first.dispatch({ type: 'answer', position: 37, answer: answer37 });
+  await first.dispatch({ type: 'answer', position: 38, answer: answer38 });
+  online = false;
+  assert.equal((await first.dispatch({ type: 'completeWritten' })).phase, 'submit_queued');
+
+  const restored = createEgeMockWrittenRunner(dependencies);
+  await restored.dispatch({ type: 'restore', form });
+  assert.equal(restored.snapshot().phase, 'submit_queued');
+  assert.equal(restored.snapshot().answers['37'], answer37);
+  assert.equal(restored.snapshot().answers['38'], answer38);
+  online = true;
+  const ambiguous = await restored.dispatch({ type: 'sync' });
+  assert.equal(ambiguous.phase, 'submit_queued');
+  const completed = await restored.dispatch({ type: 'sync' });
+  assert.equal(completed.phase, 'written_submitted');
+  assert.equal(completed.result.kind, 'written_submission');
+  assert.equal(submits.length, 2);
+});
+
+test('manual final submission remains manual after a revision-conflict rebase', async () => {
+  const storage = memoryStorage();
+  let revision = 0;
+  let serverDraft = {};
+  let conflicted = false;
+  let submitCalls = 0;
+  const base = {
+    id: '02700000-0000-4000-8000-000000000002', state: 'written_in_progress',
+    formId: form.id, formRevision: form.revision, catalogFingerprint: form.fingerprint,
+    ownerGeneration: SERVER_OWNER_GENERATION, policyId: ATTEMPT_POLICY_ID,
+    writtenStartedAt: '2026-08-13T06:00:00.000Z', writtenDeadlineAt: '2026-08-13T09:10:00.000Z',
+    writingAssessment: assessmentState('not_started', 0),
+  };
+  const runner = createEgeMockWrittenRunner({
+    owner: { username: 'learner', generation: 4 }, storage, online: () => true,
+    clock: () => Date.parse('2026-08-13T06:20:00.000Z'),
+    uuid: (() => { let index = 0; return () => `01700000-0000-4000-8000-${String(++index).padStart(12, '0')}`; })(),
+    assets: { async preflight() { return { identity: form.identity, fingerprint: form.fingerprint, assetCount: 20 }; } },
+    transport: {
+      async start() { return { attempt: { ...base, revision, draft: serverDraft } }; },
+      async attempt() { return { attempt: { ...base, revision, draft: serverDraft } }; },
+      async saveDraft(input) {
+        revision += 1;
+        serverDraft = structuredClone(input.answers);
+        return { attempt: { ...base, revision, draft: serverDraft } };
+      },
+      async submitWritten() {
+        submitCalls += 1;
+        if (!conflicted) {
+          conflicted = true;
+          revision += 1;
+          throw Object.assign(new Error('stale'), { code: 'EGE_MOCK_REVISION_CONFLICT', status: 409 });
+        }
+        revision += 1;
+        return { attempt: {
+          ...base, state: 'oral_ready', revision, draft: serverDraft,
+          writtenSubmittedAt: '2026-08-13T06:20:00.000Z',
+          writingAssessment: assessmentState('pending', 1),
+        } };
+      },
+    },
+  });
+  await runner.dispatch({ type: 'prepare', form });
+  await runner.dispatch({ type: 'start' });
+  await runner.dispatch({ type: 'completeObjective' });
+  await runner.dispatch({ type: 'continueWriting' });
+  await runner.dispatch({ type: 'answer', position: 37, answer: wordsForRunner(120, 'letter') });
+  await runner.dispatch({ type: 'answer', position: 38, answer: wordsForRunner(230, 'report') });
+  const submitted = await runner.dispatch({ type: 'completeWritten' });
+
+  assert.equal(submitCalls, 2);
+  assert.equal(submitted.phase, 'written_submitted');
+  assert.equal(submitted.result.kind, 'written_submission');
+});
+
+test('temporary asset loss restores the writing editor phase instead of objective running', async () => {
+  const storage = memoryStorage();
+  let online = true;
+  let assetsReady = true;
+  let revision = 0;
+  let serverDraft = {};
+  const base = {
+    id: '02800000-0000-4000-8000-000000000002', state: 'written_in_progress',
+    formId: form.id, formRevision: form.revision, catalogFingerprint: form.fingerprint,
+    ownerGeneration: SERVER_OWNER_GENERATION, policyId: ATTEMPT_POLICY_ID,
+    writtenStartedAt: '2026-08-13T06:00:00.000Z', writtenDeadlineAt: '2026-08-13T09:10:00.000Z',
+    writingAssessment: assessmentState('not_started', 0),
+  };
+  const dependencies = {
+    owner: { username: 'learner', generation: 4 }, storage, online: () => online,
+    clock: () => Date.parse('2026-08-13T06:20:00.000Z'),
+    uuid: (() => { let index = 0; return () => `01800000-0000-4000-8000-${String(++index).padStart(12, '0')}`; })(),
+    assets: {
+      async preflight() { assetsReady = true; return { identity: form.identity, fingerprint: form.fingerprint, assetCount: 20 }; },
+      async isReady() { return assetsReady; },
+    },
+    transport: {
+      async start() { return { attempt: { ...base, revision, draft: serverDraft } }; },
+      async saveDraft(input) {
+        revision += 1;
+        serverDraft = structuredClone(input.answers);
+        return { attempt: { ...base, revision, draft: serverDraft } };
+      },
+      async attempt() { return { attempt: { ...base, revision, draft: serverDraft } }; },
+    },
+  };
+  const first = createEgeMockWrittenRunner(dependencies);
+  await first.dispatch({ type: 'prepare', form });
+  await first.dispatch({ type: 'start' });
+  await first.dispatch({ type: 'completeObjective' });
+  await first.dispatch({ type: 'continueWriting' });
+  assetsReady = false;
+  online = false;
+  const blocked = createEgeMockWrittenRunner(dependencies);
+  await blocked.dispatch({ type: 'restore', form });
+  assert.equal(blocked.snapshot().phase, 'asset_blocked');
+  online = true;
+  const recovered = createEgeMockWrittenRunner(dependencies);
+  await recovered.dispatch({ type: 'restore', form });
+  assert.equal(recovered.snapshot().phase, 'writing');
+  assert.equal(recovered.snapshot().currentPosition, 37);
 });
 
 test('failed exact-asset preflight never asks the server to start a timer', async () => {
@@ -370,8 +1464,8 @@ test('strict deadline waits for authoritative current reconciliation and never t
   assert.equal(submits, 0);
   assert.equal(completed.phase, 'written_submitted');
   assert.equal(completed.result.kind, 'objective_written_submission');
-  assert.deepEqual(completed.result.submittedPositions, Array.from({ length: 36 }, (_, index) => index + 1));
-  assert.equal(completed.result.blankPositions.length, 35);
+  assert.deepEqual(completed.result.submittedPositions, Array.from({ length: 38 }, (_, index) => index + 1));
+  assert.equal(completed.result.blankPositions.length, 37);
   assert.equal(Object.hasOwn(completed.result, 'score'), false);
   assert.equal(Object.hasOwn(completed.result, 'keys'), false);
 });
@@ -444,6 +1538,14 @@ test('offline continuation discovery is exact-owner and form bound', async () =>
 
   assert.deepEqual(egeMockLocalContinuation(storage, owner, form), {
     attemptId: 'c0000000-0000-4000-8000-00000000000c', phase: 'running',
+  });
+  const storageKey = 'easyboost-ege-mock-written-v1:learner:4';
+  const writing = JSON.parse(storage.getItem(storageKey));
+  writing.phase = 'writing';
+  writing.currentPosition = 37;
+  storage.setItem(storageKey, JSON.stringify(writing));
+  assert.deepEqual(egeMockLocalContinuation(storage, owner, form), {
+    attemptId: 'c0000000-0000-4000-8000-00000000000c', phase: 'writing',
   });
   assert.equal(egeMockLocalContinuation(storage, { username: 'learner', generation: 5 }, form), null);
   assert.equal(egeMockLocalContinuation(storage, owner, { ...form, fingerprint: `sha256:${'f'.repeat(64)}` }), null);
@@ -1279,6 +2381,500 @@ test('a newer terminal envelope atomically replaces an older terminal result acr
   assert.equal(older.snapshot().result.state, 'expired');
 });
 
+test('a focused stale tab atomically adopts a higher assessment revision from shared storage', async () => {
+  const storage = memoryStorage();
+  const owner = { username: 'learner', generation: 4 };
+  const attemptId = 'cf000000-0000-4000-8000-000000000010';
+  const key = 'easyboost-ege-mock-written-v1:learner:4';
+  const blocked = assessmentState('pending', 4, { runDisposition: 'subscription_required' });
+  const renewed = assessmentState('in_progress', 5);
+  const attempt = (writingAssessment) => ({
+    id: attemptId, state: 'oral_ready', revision: 2, draft: {},
+    formId: form.id, formRevision: form.revision, catalogFingerprint: form.fingerprint,
+    ownerGeneration: SERVER_OWNER_GENERATION, policyId: ATTEMPT_POLICY_ID,
+    writtenStartedAt: '2026-08-13T06:00:00.000Z',
+    writtenDeadlineAt: '2026-08-13T09:10:00.000Z',
+    writtenSubmittedAt: '2026-08-13T06:20:00.000Z', writingAssessment,
+  });
+  storage.setItem(key, JSON.stringify({
+    version: 1, owner, phase: 'written_submitted', formIdentity: form.identity,
+    catalogFingerprint: form.fingerprint, attemptId,
+    attemptOwnerGeneration: SERVER_OWNER_GENERATION, revision: 2,
+    policyId: ATTEMPT_POLICY_ID,
+    writtenStartedAt: '2026-08-13T06:00:00.000Z',
+    writtenDeadlineAt: '2026-08-13T09:10:00.000Z',
+    answers: {}, answerVersions: {}, audioPlays: {}, currentPosition: 38,
+    preflight: null, pendingStartId: null, saveStatus: 'saved', queue: [],
+    compactedThrough: null, canceledSubmit: null, assessmentCommand: null,
+    assessmentCommandThrough: null, assetBlockedAt: 0, assetReadyAt: 0,
+    assetResumePhase: null, audioLease: null, audioLeaseThrough: null,
+    result: { kind: 'written_submission', state: 'oral_ready', writingAssessment: blocked },
+  }));
+  let online = false;
+  const dependencies = {
+    owner, storage, online: () => online, assets: {},
+    transport: { async attempt() { return { attempt: attempt(renewed) }; } },
+  };
+  const focused = createEgeMockWrittenRunner(dependencies);
+  await focused.dispatch({ type: 'restore', form });
+  const focusedBefore = focused.snapshot();
+  assert.equal(focusedBefore.result.writingAssessment.assessmentRevision, 4);
+
+  online = true;
+  const background = createEgeMockWrittenRunner(dependencies);
+  const advanced = await background.dispatch({ type: 'restore', form });
+  assert.equal(advanced.result.writingAssessment.assessmentRevision, 5);
+  assert.equal(advanced.result.writingAssessment.runDisposition, undefined);
+
+  const refreshed = await focused.dispatch({ type: 'refreshLocal' });
+  assert.equal(refreshed.phase, focusedBefore.phase,
+    'a storage/focus refresh does not replace the active screen phase');
+  assert.equal(refreshed.currentPosition, focusedBefore.currentPosition,
+    'a storage/focus refresh preserves the learner focus position');
+  assert.deepEqual(refreshed.result, advanced.result,
+    'the higher assessment revision wins as one complete result projection');
+});
+
+test('a divergent equal assessment revision fails closed during a cross-tab refresh', async () => {
+  const storage = memoryStorage();
+  const owner = { username: 'learner', generation: 4 };
+  const attemptId = 'cf000000-0000-4000-8000-000000000011';
+  const key = 'easyboost-ege-mock-written-v1:learner:4';
+  const current = assessmentState('in_progress', 5);
+  const base = {
+    version: 1, owner, phase: 'written_submitted', formIdentity: form.identity,
+    catalogFingerprint: form.fingerprint, attemptId,
+    attemptOwnerGeneration: SERVER_OWNER_GENERATION, revision: 2,
+    policyId: ATTEMPT_POLICY_ID,
+    writtenStartedAt: '2026-08-13T06:00:00.000Z',
+    writtenDeadlineAt: '2026-08-13T09:10:00.000Z',
+    answers: {}, answerVersions: {}, audioPlays: {}, currentPosition: 38,
+    preflight: null, pendingStartId: null, saveStatus: 'saved', queue: [],
+    compactedThrough: null, canceledSubmit: null, assessmentCommand: null,
+    assessmentCommandThrough: null, assetBlockedAt: 0, assetReadyAt: 0,
+    assetResumePhase: null, audioLease: null, audioLeaseThrough: null,
+    result: { kind: 'written_submission', state: 'oral_ready', writingAssessment: current },
+  };
+  storage.setItem(key, JSON.stringify(base));
+  const focused = createEgeMockWrittenRunner({ owner, storage, online: () => false, assets: {} });
+  await focused.dispatch({ type: 'restore', form });
+  const before = focused.snapshot();
+  storage.setItem(key, JSON.stringify({
+    ...base,
+    result: {
+      ...base.result,
+      writingAssessment: assessmentState('retryable', 5, { retryAllowed: true }),
+    },
+  }));
+
+  await assert.rejects(focused.dispatch({ type: 'refreshLocal' }), {
+    code: 'EGE_MOCK_ASSESSMENT_RESPONSE_INVALID',
+  });
+  assert.deepEqual(focused.snapshot(), before,
+    'equal-version disagreement cannot partially overwrite the focused tab');
+  assert.equal(JSON.parse(storage.getItem(key)).result.writingAssessment.status, 'retryable',
+    'the failing tab does not overwrite the conflicting durable projection');
+});
+
+test('a rejected equal-revision cross-tab merge leaves every live runner clock byte unchanged', async () => {
+  const storage = memoryStorage();
+  const owner = { username: 'learner', generation: 4 };
+  const attemptId = 'cf000000-0000-4000-8000-000000000012';
+  const key = 'easyboost-ege-mock-written-v1:learner:4';
+  const current = assessmentState('ambiguous', 5, {
+    retryAllowed: true, retryWarning: EGE_MOCK_WRITING_AMBIGUOUS_RETRY_WARNING,
+  });
+  const base = durableSubmittedState({ owner, attemptId, writingAssessment: current });
+  storage.setItem(key, JSON.stringify(base));
+  const runner = createEgeMockWrittenRunner({
+    owner, storage, online: () => false, localNow: () => 1, assets: {},
+    uuid: () => 'cf000000-0000-4000-8000-000000000013',
+  });
+  await runner.dispatch({ type: 'restore', form });
+  const before = runner.snapshot();
+
+  storage.setItem(key, JSON.stringify({
+    ...base,
+    queue: [{
+      type: 'draft', idempotencyKey: 'cf000000-0000-4000-8000-000000000014',
+      createdAt: 9_000, expectedRevision: 2, answers: {}, dirtyPositions: [],
+      dirtyVersions: {},
+    }],
+    result: {
+      ...base.result,
+      writingAssessment: assessmentState('retryable', 5, { retryAllowed: true }),
+    },
+  }));
+  await assert.rejects(runner.dispatch({ type: 'refreshLocal' }), {
+    code: 'EGE_MOCK_ASSESSMENT_RESPONSE_INVALID',
+  });
+  assert.deepEqual(runner.snapshot(), before);
+
+  storage.setItem(key, JSON.stringify(base));
+  await runner.dispatch({
+    type: 'retryAssessment', acknowledgePossibleProviderRepeat: true,
+  });
+  const durable = JSON.parse(storage.getItem(key));
+  assert.equal(durable.assessmentCommand.createdAt, 1,
+    'normalizing a rejected detached candidate cannot advance the live logical clock');
+});
+
+test('durable assessment commands accept only the known action enum and one legacy missing-action shape', async () => {
+  const owner = { username: 'learner', generation: 4 };
+  const attemptId = 'cf000000-0000-4000-8000-000000000015';
+  const key = 'easyboost-ege-mock-written-v1:learner:4';
+  const retryable = assessmentState('retryable', 2, { retryAllowed: true });
+  const invalidStorage = memoryStorage();
+  invalidStorage.setItem(key, JSON.stringify(durableSubmittedState({
+    owner, attemptId, writingAssessment: retryable,
+    extra: {
+      assessmentCommand: {
+        action: 'unknown_future_action',
+        idempotencyKey: 'cf000000-0000-4000-8000-000000000016', createdAt: 1,
+        acknowledgePossibleProviderRepeat: false,
+      },
+    },
+  })));
+  const invalid = createEgeMockWrittenRunner({
+    owner, storage: invalidStorage, online: () => false, assets: {},
+  });
+  await assert.rejects(invalid.dispatch({ type: 'restore', form }), {
+    code: 'EGE_MOCK_WRITTEN_LOCAL_STATE_INVALID',
+  });
+
+  const legacyStorage = memoryStorage();
+  const legacyState = durableSubmittedState({
+    owner, attemptId, writingAssessment: retryable,
+    extra: {
+      assessmentRetry: {
+        idempotencyKey: 'cf000000-0000-4000-8000-000000000017', createdAt: 1,
+        acknowledgePossibleProviderRepeat: false,
+      },
+    },
+  });
+  delete legacyState.assessmentCommand;
+  legacyStorage.setItem(key, JSON.stringify(legacyState));
+  const legacy = createEgeMockWrittenRunner({
+    owner, storage: legacyStorage, online: () => false, assets: {},
+  });
+  const restored = await legacy.dispatch({ type: 'restore', form });
+  assert.equal(restored.assessmentRetryQueued, true,
+    'only the unreleased assessmentRetry shape without action migrates to retry');
+  await legacy.dispatch({ type: 'retryAssessment' });
+  assert.equal(JSON.parse(legacyStorage.getItem(key)).assessmentCommand.action, 'retry');
+});
+
+test('restore fails closed for every malformed recognized durable assessment command', async () => {
+  const owner = { username: 'learner', generation: 4 };
+  const attemptId = 'cf000000-0000-4000-8000-000000000024';
+  const key = 'easyboost-ege-mock-written-v1:learner:4';
+  const pending = assessmentState('pending', 1);
+  const validRun = {
+    action: 'run', idempotencyKey: 'cf000000-0000-4000-8000-000000000025',
+    createdAt: 2, acknowledgePossibleProviderRepeat: false,
+  };
+  const cases = [
+    ['missing UUID', { ...validRun, idempotencyKey: undefined }],
+    ['invalid UUID', { ...validRun, idempotencyKey: 'not-a-uuid' }],
+    ['negative ordering', { ...validRun, createdAt: -1 }],
+    ['fractional ordering', { ...validRun, createdAt: 1.5 }],
+    ['unsafe ordering', { ...validRun, createdAt: Number.MAX_SAFE_INTEGER + 1 }],
+    ['missing acknowledgement flag', (() => {
+      const command = { ...validRun };
+      delete command.acknowledgePossibleProviderRepeat;
+      return command;
+    })()],
+    ['run acknowledgement is not false', {
+      ...validRun, acknowledgePossibleProviderRepeat: true,
+    }],
+    ['invalid explicit renewal marker', { ...validRun, explicitRenewal: 'yes' }],
+    ['not after the durable watermark', validRun, {
+      createdAt: 2, idempotencyKey: validRun.idempotencyKey,
+    }],
+  ];
+
+  for (const [label, assessmentCommand, assessmentCommandThrough = null] of cases) {
+    const storage = memoryStorage();
+    storage.setItem(key, JSON.stringify(durableSubmittedState({
+      owner, attemptId, writingAssessment: pending,
+      extra: { assessmentCommand, assessmentCommandThrough },
+    })));
+    const before = storage.getItem(key);
+    let minted = 0;
+    let transported = 0;
+    const runner = createRawEgeMockWrittenRunner({
+      owner, storage, online: () => false, assets: {},
+      uuid() {
+        minted += 1;
+        return 'cf000000-0000-4000-8000-000000000026';
+      },
+      transport: {
+        async runAssessment() {
+          transported += 1;
+          throw new Error('must not run');
+        },
+      },
+    });
+
+    await assert.rejects(runner.dispatch({ type: 'restore', form }), {
+      code: 'EGE_MOCK_WRITTEN_LOCAL_STATE_INVALID',
+    }, label);
+    assert.equal(minted, 0, `${label}: restore cannot replace the paid-call UUID`);
+    assert.equal(transported, 0, `${label}: restore cannot dispatch provider work`);
+    assert.equal(storage.getItem(key), before, `${label}: durable bytes remain unchanged`);
+  }
+});
+
+test('a malformed higher-revision assessment response preserves the prior projection and UUID', async () => {
+  const owner = { username: 'learner', generation: 4 };
+  const attemptId = 'cf000000-0000-4000-8000-000000000027';
+  const commandId = 'cf000000-0000-4000-8000-000000000028';
+  const key = 'easyboost-ege-mock-written-v1:learner:4';
+  const pending = assessmentState('pending', 1);
+  const storage = memoryStorage();
+  let online = false;
+  storage.setItem(key, JSON.stringify(durableSubmittedState({
+    owner, attemptId, writingAssessment: pending,
+    extra: {
+      saveStatus: 'queued',
+      assessmentCommand: {
+        action: 'run', idempotencyKey: commandId, createdAt: 1,
+        acknowledgePossibleProviderRepeat: false,
+      },
+    },
+  })));
+  const invalidAssessment = {
+    status: 'retryable', assessmentRevision: 2, mode: 'official', scoreKind: 'final',
+    warning: '', label: 'Final assessment', retryAllowed: false, retryCount: 0,
+  };
+  const runner = createRawEgeMockWrittenRunner({
+    owner, storage, online: () => online, assets: {},
+    transport: {
+      async runAssessment() {
+        return {
+          applied: true, replayed: false,
+          attempt: {
+            id: attemptId, state: 'oral_ready', revision: 2, draft: {},
+            formId: form.id, formRevision: form.revision,
+            catalogFingerprint: form.fingerprint,
+            ownerGeneration: SERVER_OWNER_GENERATION, policyId: ATTEMPT_POLICY_ID,
+            writtenStartedAt: '2026-08-13T06:00:00.000Z',
+            writtenDeadlineAt: '2026-08-13T09:10:00.000Z',
+            writtenSubmittedAt: '2026-08-13T06:20:00.000Z',
+            writingAssessment: invalidAssessment,
+          },
+        };
+      },
+    },
+  });
+
+  await runner.dispatch({ type: 'restore', form });
+  online = true;
+  await assert.rejects(runner.dispatch({ type: 'sync' }), {
+    code: 'EGE_MOCK_ASSESSMENT_RESPONSE_INVALID',
+  });
+  assert.deepEqual(runner.snapshot().result.writingAssessment, pending);
+  assert.equal(runner.snapshot().assessmentRunQueued, true);
+  assert.equal(JSON.parse(storage.getItem(key)).assessmentCommand.idempotencyKey, commandId,
+    'an invalid body cannot acknowledge or replace the durable command UUID');
+});
+
+test('assessment acknowledgements preserve applied on exact replay and reject replay without apply', async () => {
+  const owner = { username: 'learner', generation: 4 };
+  const attemptId = 'cf000000-0000-4000-8000-000000000018';
+  const key = 'easyboost-ege-mock-written-v1:learner:4';
+  const pending = assessmentState('pending', 1);
+  const completed = assessmentState('completed', 2);
+  const attempt = {
+    id: attemptId, state: 'oral_ready', revision: 2, draft: {},
+    formId: form.id, formRevision: form.revision, catalogFingerprint: form.fingerprint,
+    ownerGeneration: SERVER_OWNER_GENERATION, policyId: ATTEMPT_POLICY_ID,
+    writtenStartedAt: '2026-08-13T06:00:00.000Z',
+    writtenDeadlineAt: '2026-08-13T09:10:00.000Z',
+    writtenSubmittedAt: '2026-08-13T06:20:00.000Z', writingAssessment: completed,
+  };
+
+  async function deliver(flags, suffix) {
+    const storage = memoryStorage();
+    let online = false;
+    storage.setItem(key, JSON.stringify(durableSubmittedState({
+      owner, attemptId, writingAssessment: pending,
+      extra: {
+        saveStatus: 'queued',
+        assessmentCommand: {
+          action: 'run', idempotencyKey: `cf000000-0000-4000-8000-0000000000${suffix}`,
+          createdAt: 1, acknowledgePossibleProviderRepeat: false,
+        },
+      },
+    })));
+    const runner = createEgeMockWrittenRunner({
+      owner, storage, online: () => online, assets: {},
+      transport: { async runAssessment() { return { ...flags, attempt }; } },
+    });
+    await runner.dispatch({ type: 'restore', form });
+    online = true;
+    return { runner, storage, delivered: runner.dispatch({ type: 'sync' }) };
+  }
+
+  const first = await deliver({ applied: true, replayed: false }, '19');
+  assert.equal((await first.delivered).assessmentRunQueued, false);
+
+  const replay = await deliver({ applied: true, replayed: true }, '20');
+  assert.equal((await replay.delivered).assessmentRunQueued, false,
+    'an exact replay retains applied=true and retires the matching durable UUID');
+
+  const invalid = await deliver({ applied: false, replayed: true }, '21');
+  await assert.rejects(invalid.delivered, { code: 'EGE_MOCK_ASSESSMENT_RESPONSE_INVALID' });
+  assert.equal(invalid.runner.snapshot().assessmentRunQueued, true,
+    'a replay flag without applied cannot retire the durable UUID');
+
+  const exhaustedStorage = memoryStorage();
+  let exhaustedOnline = false;
+  const assessmentRequestIds = [];
+  exhaustedStorage.setItem(key, JSON.stringify(durableSubmittedState({
+    owner, attemptId, writingAssessment: {
+      ...pending, assessmentRevision: 4,
+    },
+    extra: {
+      saveStatus: 'queued',
+      assessmentCommand: {
+        action: 'run', idempotencyKey: 'cf000000-0000-4000-8000-000000000022',
+        createdAt: 1, acknowledgePossibleProviderRepeat: false,
+      },
+    },
+  })));
+  const exhausted = createEgeMockWrittenRunner({
+    owner, storage: exhaustedStorage, online: () => exhaustedOnline, assets: {},
+    transport: {
+      async runAssessment({ idempotencyKey }) {
+        assessmentRequestIds.push(idempotencyKey);
+        throw Object.assign(new Error('ASSESSMENT_REVISION_EXHAUSTED'), {
+          code: 'ASSESSMENT_REVISION_EXHAUSTED', status: 409,
+        });
+      },
+    },
+  });
+  await exhausted.dispatch({ type: 'restore', form });
+  exhaustedOnline = true;
+  const blocked = await exhausted.dispatch({ type: 'sync' });
+  assert.equal(blocked.assessmentRunQueued, false);
+  assert.equal(blocked.assessmentRunBlocked, true,
+    'a bounded nonretryable exhaustion retires and durably blocks the automatic UUID');
+  const maximumAttempt = {
+    ...attempt,
+    writingAssessment: { ...pending, assessmentRevision: Number.MAX_SAFE_INTEGER },
+  };
+  const reloaded = createEgeMockWrittenRunner({
+    owner, storage: exhaustedStorage, online: () => true, assets: {},
+    uuid: () => 'cf000000-0000-4000-8000-000000000023',
+    transport: {
+      async attempt() { return { attempt: maximumAttempt }; },
+      async runAssessment({ idempotencyKey }) {
+        assessmentRequestIds.push(idempotencyKey);
+        throw Object.assign(new Error('ASSESSMENT_REVISION_EXHAUSTED'), {
+          code: 'ASSESSMENT_REVISION_EXHAUSTED', status: 409,
+        });
+      },
+    },
+  });
+  const restoredBlock = await reloaded.dispatch({ type: 'restore', form });
+  assert.equal(restoredBlock.assessmentRunBlocked, true);
+  assert.equal(restoredBlock.assessmentRunQueued, false,
+    'MAX reconciliation cannot manufacture another exhausted assessment command');
+  assert.deepEqual(assessmentRequestIds, ['cf000000-0000-4000-8000-000000000022'],
+    'stale-device reconciliation keeps the original exhausted UUID as the only POST');
+});
+
+test('durable assessment exhaustion atomically retires pending commands across restore and merge', async () => {
+  const owner = { username: 'learner', generation: 4 };
+  const attemptId = 'cf000000-0000-4000-8000-000000000018';
+  const key = 'easyboost-ege-mock-written-v1:learner:4';
+  const pending = assessmentState('pending', 5);
+
+  async function restoreBlockedCommand(blockedRevision, commandId) {
+    const storage = memoryStorage();
+    let calls = 0;
+    storage.setItem(key, JSON.stringify(durableSubmittedState({
+      owner, attemptId, writingAssessment: pending,
+      extra: {
+        saveStatus: 'queued', assessmentCommandBlockedRevision: blockedRevision,
+        assessmentCommand: {
+          action: 'run', idempotencyKey: commandId, createdAt: 2,
+          acknowledgePossibleProviderRepeat: false,
+        },
+      },
+    })));
+    const runner = createEgeMockWrittenRunner({
+      owner, storage, online: () => true, assets: {},
+      transport: {
+        async runAssessment() {
+          calls += 1;
+          throw Object.assign(new Error('NETWORK_ERROR'), { code: 'NETWORK_ERROR', status: 503 });
+        },
+      },
+    });
+    const restored = await runner.dispatch({ type: 'restore', form });
+    const durable = JSON.parse(storage.getItem(key));
+    return {
+      blocked: restored.assessmentRunBlocked, queued: restored.assessmentRunQueued, calls,
+      command: durable.assessmentCommand,
+      through: durable.assessmentCommandThrough?.idempotencyKey,
+    };
+  }
+
+  const currentCommandId = 'cf000000-0000-4000-8000-000000000024';
+  const legacyCommandId = 'cf000000-0000-4000-8000-000000000025';
+  const current = await restoreBlockedCommand(Number.MAX_SAFE_INTEGER, currentCommandId);
+  const legacy = await restoreBlockedCommand(4, legacyCommandId);
+
+  const crossTabStorage = memoryStorage();
+  const crossTabCommandId = 'cf000000-0000-4000-8000-000000000027';
+  let online = false;
+  let calls = 0;
+  crossTabStorage.setItem(key, JSON.stringify(durableSubmittedState({
+    owner, attemptId, writingAssessment: pending,
+    extra: {
+      saveStatus: 'queued', assessmentCommand: {
+        action: 'run', idempotencyKey: crossTabCommandId, createdAt: 2,
+        acknowledgePossibleProviderRepeat: false,
+      },
+    },
+  })));
+  const crossTab = createEgeMockWrittenRunner({
+    owner, storage: crossTabStorage, online: () => online, assets: {},
+    transport: {
+      async runAssessment() {
+        calls += 1;
+        throw Object.assign(new Error('NETWORK_ERROR'), { code: 'NETWORK_ERROR', status: 503 });
+      },
+    },
+  });
+  await crossTab.dispatch({ type: 'restore', form });
+  crossTabStorage.setItem(key, JSON.stringify(durableSubmittedState({
+    owner, attemptId, writingAssessment: pending,
+    extra: {
+      assessmentCommandBlockedRevision: Number.MAX_SAFE_INTEGER,
+      assessmentCommandThrough: {
+        createdAt: 1, idempotencyKey: 'cf000000-0000-4000-8000-000000000026',
+      },
+    },
+  })));
+  online = true;
+  const merged = await crossTab.dispatch({ type: 'sync' });
+  const mergedDurable = JSON.parse(crossTabStorage.getItem(key));
+  const crossTabResult = {
+    blocked: merged.assessmentRunBlocked, queued: merged.assessmentRunQueued, calls,
+    command: mergedDurable.assessmentCommand,
+    through: mergedDurable.assessmentCommandThrough?.idempotencyKey,
+  };
+
+  assert.deepEqual([current, legacy, crossTabResult], [
+    { blocked: true, queued: false, calls: 0, command: null, through: currentCommandId },
+    { blocked: true, queued: false, calls: 0, command: null, through: legacyCommandId },
+    { blocked: true, queued: false, calls: 0, command: null, through: crossTabCommandId },
+  ]);
+});
+
 test('a CAS rebase keeps newer server answers at positions untouched by the local draft', async () => {
   const storage = memoryStorage();
   const base = {
@@ -1355,6 +2951,53 @@ test('a durable cross-tab asset block overrides a stale running tab until exact 
   cacheReady = true;
   await stale.dispatch({ type: 'restore', form });
   assert.equal(stale.snapshot().phase, 'running');
+});
+
+test('cross-tab merge keeps the resume phase bound to the winning asset timestamp', async () => {
+  const storage = memoryStorage();
+  let online = true;
+  let cacheReady = true;
+  const base = {
+    id: 'd6000000-0000-4000-8000-000000000006', state: 'written_in_progress', revision: 0,
+    draft: {}, formId: form.id, formRevision: form.revision, catalogFingerprint: form.fingerprint,
+    policyId: ATTEMPT_POLICY_ID, writtenStartedAt: '2026-08-13T06:00:00.000Z',
+    writtenDeadlineAt: '2026-08-13T09:10:00.000Z',
+  };
+  let localNow = Date.parse('2026-08-13T06:10:00.000Z');
+  const dependencies = {
+    owner: { username: 'learner', generation: 4 }, storage, online: () => online,
+    clock: () => localNow, localNow: () => localNow,
+    assets: {
+      async isReady() { return cacheReady; },
+      async preflight() { return { identity: form.identity, fingerprint: form.fingerprint, assetCount: 20 }; },
+    },
+    transport: { async start() { return { attempt: base }; }, async attempt() { return { attempt: base }; } },
+  };
+  const stale = createEgeMockWrittenRunner(dependencies);
+  await stale.dispatch({ type: 'prepare', form });
+  await stale.dispatch({ type: 'start' });
+  online = false;
+  cacheReady = false;
+  await stale.dispatch({ type: 'restore', form });
+  assert.equal(stale.snapshot().phase, 'asset_blocked');
+
+  const key = 'easyboost-ege-mock-written-v1:learner:4';
+  const newer = JSON.parse(storage.getItem(key));
+  newer.phase = 'asset_blocked';
+  newer.assetBlockedAt += 100;
+  newer.assetResumePhase = 'writing';
+  storage.setItem(key, JSON.stringify(newer));
+
+  await stale.dispatch({ type: 'refreshLocal' });
+  localNow += 1_000;
+  await stale.dispatch({ type: 'tick' });
+  assert.equal(JSON.parse(storage.getItem(key)).assetResumePhase, 'writing');
+
+  online = true;
+  cacheReady = true;
+  const recovered = createEgeMockWrittenRunner(dependencies);
+  await recovered.dispatch({ type: 'restore', form });
+  assert.equal(recovered.snapshot().phase, 'writing');
 });
 
 test('failed cache revalidation makes an ambiguous pending start non-startable', async () => {
@@ -1666,6 +3309,7 @@ test('an empty browser adopts the exact active server attempt before offering a 
   const base = {
     id: 'eb000000-0000-4000-8000-00000000000b', ownerGeneration: SERVER_OWNER_GENERATION,
     state: 'written_in_progress', revision: 2, draft: { 19: 'went' }, policyId: ATTEMPT_POLICY_ID,
+    writingAssessment: assessmentState('not_started', 0),
     formId: form.id, formRevision: form.revision, catalogFingerprint: form.fingerprint,
     writtenStartedAt: '2026-08-13T06:00:00.000Z', writtenDeadlineAt: '2026-08-13T09:10:00.000Z',
   };
@@ -1722,6 +3366,7 @@ test('a definitive invalidation watermark prevents stale persistence or deletion
   const base = {
     id: 'ec100000-0000-4000-8000-00000000000c', ownerGeneration: SERVER_OWNER_GENERATION,
     state: 'written_in_progress', revision: 0, draft: {}, policyId: ATTEMPT_POLICY_ID,
+    writingAssessment: assessmentState('not_started', 0),
     formId: form.id, formRevision: form.revision, catalogFingerprint: form.fingerprint,
     writtenStartedAt: '2026-08-13T06:00:00.000Z', writtenDeadlineAt: '2026-08-13T09:10:00.000Z',
   };
@@ -1822,6 +3467,7 @@ test('owner deletion during an awaited restore cannot recreate the purged exact 
   const base = {
     id: 'ed000000-0000-4000-8000-00000000000d', ownerGeneration: SERVER_OWNER_GENERATION,
     state: 'written_in_progress', revision: 0, draft: { 19: 'went' }, policyId: ATTEMPT_POLICY_ID,
+    writingAssessment: assessmentState('not_started', 0),
     formId: form.id, formRevision: form.revision, catalogFingerprint: form.fingerprint,
     writtenStartedAt: '2026-08-13T06:00:00.000Z', writtenDeadlineAt: '2026-08-13T09:10:00.000Z',
   };

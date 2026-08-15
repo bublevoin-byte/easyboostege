@@ -422,7 +422,7 @@ test('file storage atomically claims and observably settles paid AI rate/budget 
     const exported = await repository.exportUserData(student);
     assert.equal(exported.ai_requests.length, 1);
     assert.equal(exported.ai_requests[0].status, 'failed');
-    assert.equal(exported.ai_requests[0].errorCode, 'TRUSTED_RULE_SEARCH_FAILED');
+    assert.equal(exported.ai_requests[0].error_code, 'TRUSTED_RULE_SEARCH_FAILED');
   } finally {
     await repository.close();
     await fs.rm(directory, { recursive: true, force: true });
