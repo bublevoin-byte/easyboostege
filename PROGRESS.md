@@ -1,3 +1,30 @@
+# Aisy.space — learner UX redesign
+
+Спека: [.scratch/aisy-ux-redesign/spec.md](.scratch/aisy-ux-redesign/spec.md)
+Тикеты: [.scratch/aisy-ux-redesign/issues/](.scratch/aisy-ux-redesign/issues/)
+
+Overall status: `in-progress` — learner-first UX; parent/teacher roles remain separate future releases.
+
+| № | Что даёт | Статус |
+|---|---|---|
+| 01 | Бренд Aisy.space и общий design foundation | done |
+| 02 | Оболочка ученика: Сегодня / Практика / ЕГЭ / Прогресс / Профиль | blocked by 01 |
+| 03 | Персональный экран Сегодня и диагностический маршрут | blocked by 02 |
+| 04 | Practice hub поверх существующих учебных модулей | blocked by 02, 03 |
+| 05 | Отдельный EGE hub поверх строгого пробника | blocked by 02, 03 |
+| 06 | Честные Progress/Profile и только Free/Premium в public copy | blocked by 01–05 |
+| 07 | Контекстная Ася и честные microphone/wake states | blocked by 01–06 |
+| 08 | Accessibility/offline/themes и initial JS <=150 KB gzip | blocked by 01–07 |
+| 09 | Сквозной learner release contour и ZERO×2 review | blocked by 01–08 |
+
+Принятые продуктовые решения: платформа `Aisy.space` («Эйси»), продукт `Aisy ЕГЭ — Английский`,
+ассистент `Ася`; ученик 10–11 класса занимается преимущественно с телефона 20–40 минут. Архитектура
+резервирует learner/parent/teacher, но текущий выпуск реализует только learner. Public plans — Free и
+Premium; внутренний Base может сохраниться только как compatibility detail. Wake name работает лишь в
+явно открытой microphone session приложения, а не глобально как системный ассистент.
+
+---
+
 # Прогресс — активное изучение слов
 
 Спека: [.scratch/active-vocabulary-system/spec.md](.scratch/active-vocabulary-system/spec.md)

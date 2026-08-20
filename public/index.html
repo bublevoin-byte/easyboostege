@@ -2,9 +2,9 @@
 <html lang="ru"><head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="apple-mobile-web-app-capable" content="yes"><meta name="theme-color" content="#F2683F">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="theme-color" content="#5846C7">
 <link rel="manifest" href="/manifest.json"><link rel="icon" href="/pwa-icon.svg" type="image/svg+xml">
-<title>Easy Boost</title>
+<title>Aisy ЕГЭ — Английский · Aisy.space</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;800;900&display=swap" rel="stylesheet">
@@ -207,7 +207,7 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
 .glow-input{animation:inputGlow 3.5s ease-in-out infinite}
 @media(prefers-reduced-motion:reduce){.glowin::before,.glowin::after,.glow-input{animation:none}}
 
-/* Reading 2.0 stays inside the Easy Boost clay/token language, but can use a wider study canvas. */
+/* Reading 2.0 keeps its legacy clay layout until the shared Aisy learner shell reaches this screen. */
 .reading2{width:100%;max-width:1100px;margin:0 auto;padding:0 0 24px;color:#2B2B2B;font-size:16px;line-height:1.6;overflow-x:hidden}
 .reading2 h1,.reading2 h2,.reading2 h3,.reading2 p,.reading2 dl,.reading2 dd{margin:0}.reading2 h1,.reading2 h2,.reading2 h3{font-family:Nunito,Manrope,sans-serif}.reading2 h1{font-size:clamp(24px,4vw,34px);font-weight:900;line-height:1.15}.reading2 h2{font-size:19px;line-height:1.25}.reading2 h3{font-size:16px;line-height:1.3}
 .reading-kicker{color:#96401F;font-size:11px;font-weight:850;letter-spacing:1.15px}.reading-title{display:grid;gap:7px;margin-bottom:16px}.reading-title>p:not(.reading-kicker){max-width:70ch;color:#5F5951;font-weight:600}.reading-title small{max-width:72ch;color:#5F5951;font-size:12px;font-weight:650}
@@ -232,7 +232,9 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
 @media(max-width:359px){.ege-mock__top{grid-template-columns:44px minmax(0,1fr);padding-inline:8px}.ege-mock__timer{grid-column:1/-1;width:100%}.ege-mock__facts{grid-template-columns:1fr}.ege-mock__review{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media(prefers-reduced-motion:reduce){.ege-mock *{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
 .ege-mock textarea{min-height:176px;width:100%;resize:vertical;border:1px solid #CFC4B9;border-radius:13px;padding:12px;color:#2B2B2B;font:650 16px/1.55 Manrope,sans-serif}.ege-mock textarea:focus-visible{outline:3px solid #175CD3;outline-offset:3px}.ege-mock__stimulus table{width:100%;margin-top:10px;border-collapse:collapse}.ege-mock__stimulus th,.ege-mock__stimulus td{border-bottom:1px solid #DDD2C7;padding:8px;text-align:left;overflow-wrap:anywhere}
-</style></head><body>
+</style>
+<link rel="stylesheet" href="/aisy-theme.css">
+</head><body>
 <button id="navfab" onclick="document.getElementById('navmenu').classList.toggle('open')">Экраны ▾</button>
 <div id="navmenu"></div>
 <div id="frame">
@@ -255,10 +257,11 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
     <!-- brand -->
     <div style="position:absolute;top:118px;left:0;right:0;display:flex;flex-direction:column;align-items:center;z-index:5;">
       <div style="width:82px;height:82px;border-radius:26px;background:#fff;display:grid;place-items:center;box-shadow:0 20px 44px rgba(150,45,12,.36);">
-        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z"/></svg>
+        <img class="aisy-mark" src="/pwa-icon.svg" alt="Ася — голосовой помощник Aisy.space" width="56" height="56">
       </div>
-      <div style="margin-top:18px;font-weight:800;font-size:30px;color:#fff;letter-spacing:-.5px;">Easy Boost</div>
-      <div style="margin-top:6px;font-weight:600;font-size:14px;color:rgba(255,255,255,.88);">Английский к ЕГЭ — играючи</div>
+      <div style="margin-top:18px;font-weight:800;font-size:30px;color:#fff;letter-spacing:-.5px;">Aisy.space</div>
+      <div style="margin-top:6px;font-weight:700;font-size:14px;color:#fff;">Aisy ЕГЭ — Английский</div>
+      <div style="margin-top:4px;font-weight:600;font-size:12px;color:rgba(255,255,255,.88);">«Эйси» · личный маршрут к экзамену</div>
     </div>
     <!-- звёздочки по всему экрану -->
     <svg style="position:absolute;inset:0;width:100%;height:100%;z-index:1;pointer-events:none;" viewBox="0 0 390 844" preserveAspectRatio="xMidYMid slice" fill="#fff">

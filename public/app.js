@@ -585,7 +585,7 @@ async function tgClick(e){
   }catch(err){ lgMsg(apiMessage(err,'telegram')); return false; }
   try{ if(typeof tgPoll==='function') tgPoll(); }catch(_){}
   var m=document.getElementById('lg_msg');
-  if(m) m.innerHTML='<a href="'+TG_URL+'" style="display:inline-block;margin-top:2px;color:#B54E2F;font-weight:800;text-decoration:underline;font-size:14.5px;">Открыть Telegram-бот</a><div style="margin-top:5px;font-size:12.5px;color:#6A6E75;">нажми ссылку → Start → кнопка «Открыть Easy Boost»</div>';
+  if(m) m.innerHTML='<a href="'+TG_URL+'" style="display:inline-block;margin-top:2px;color:#B54E2F;font-weight:800;text-decoration:underline;font-size:14.5px;">Открыть Telegram-бот</a><div style="margin-top:5px;font-size:12.5px;color:#6A6E75;">нажми ссылку → Start → кнопка «Открыть Aisy.space»</div>';
   try{ window.location.href=TG_URL; }catch(_){}
   return false;
 }

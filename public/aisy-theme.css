@@ -1,0 +1,192 @@
+/*
+ * Aisy.space public theme contract.
+ *
+ * Product modules consume semantic tokens from this file. Legacy EasyBoost identifiers remain
+ * compatibility details and are deliberately unrelated to the public theme names below.
+ */
+:root {
+  color-scheme: light dark;
+  --aisy-color-background: light-dark(#f7f7fc, #11121f);
+  --aisy-color-surface: light-dark(#ffffff, #1b1d2d);
+  --aisy-color-surface-muted: light-dark(#efeff9, #25283c);
+  --aisy-color-text: light-dark(#15162a, #f5f5fa);
+  --aisy-color-text-muted: light-dark(#575b74, #c4c7da);
+  --aisy-color-primary: light-dark(#5846c7, #aa9bff);
+  --aisy-color-primary-hover: light-dark(#4937b4, #c2b8ff);
+  --aisy-color-on-primary: light-dark(#ffffff, #17112f);
+  --aisy-color-accent: light-dark(#0d7189, #74d3f2);
+  --aisy-color-accent-soft: light-dark(#e4f5f8, #173844);
+  --aisy-color-border: light-dark(#b7bacd, #62677f);
+  --aisy-color-focus: light-dark(#0b73e0, #68b5ff);
+  --aisy-color-success: light-dark(#1f6f4a, #64d69b);
+  --aisy-color-warning: light-dark(#8a5100, #f4c46a);
+  --aisy-color-danger: light-dark(#b42318, #ff8c87);
+  --aisy-color-info: light-dark(#176b87, #74d3f2);
+  --aisy-color-scrim: light-dark(rgb(15 16 31 / 56%), rgb(0 0 0 / 64%));
+
+  --aisy-font-interface: Manrope, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --aisy-font-friendly: Nunito, Manrope, system-ui, sans-serif;
+  --aisy-font-size-body: 16px;
+  --aisy-line-height-body: 1.6;
+  --aisy-weight-regular: 500;
+  --aisy-weight-strong: 750;
+
+  --aisy-space-1: 4px;
+  --aisy-space-2: 8px;
+  --aisy-space-3: 12px;
+  --aisy-space-4: 16px;
+  --aisy-space-6: 24px;
+  --aisy-space-8: 32px;
+  --aisy-space-12: 48px;
+  --aisy-radius-control: 14px;
+  --aisy-radius-card: 22px;
+  --aisy-radius-round: 999px;
+  --aisy-touch-target: 44px;
+  --aisy-content-width: 720px;
+
+  --aisy-shadow-1: light-dark(0 4px 14px rgb(39 34 80 / 8%), 0 4px 14px rgb(0 0 0 / 24%));
+  --aisy-shadow-2: light-dark(0 12px 34px rgb(39 34 80 / 14%), 0 12px 34px rgb(0 0 0 / 36%));
+  --aisy-motion-fast: 160ms;
+  --aisy-motion-standard: 240ms;
+  --aisy-motion-slow: 300ms;
+  --aisy-motion-ease: cubic-bezier(0.2, 0, 0, 1);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+  }
+}
+
+.aisy-document {
+  margin: 0;
+  min-block-size: 100dvh;
+  background: var(--aisy-color-background);
+  color: var(--aisy-color-text);
+  font: var(--aisy-weight-regular) var(--aisy-font-size-body) / var(--aisy-line-height-body) var(--aisy-font-interface);
+  -webkit-font-smoothing: antialiased;
+}
+
+.aisy-reading-canvas {
+  inline-size: min(100% - (2 * var(--aisy-space-4)), var(--aisy-content-width));
+  margin-inline: auto;
+}
+
+.aisy-surface {
+  border: 1px solid var(--aisy-color-border);
+  border-radius: var(--aisy-radius-card);
+  background: var(--aisy-color-surface);
+  box-shadow: var(--aisy-shadow-1);
+}
+
+.aisy-mark {
+  display: block;
+  inline-size: 72px;
+  block-size: 72px;
+}
+
+.aisy-offline-page {
+  display: grid;
+  place-items: center;
+  padding: var(--aisy-space-6);
+}
+
+.aisy-offline-card {
+  inline-size: min(100%, 420px);
+  padding: var(--aisy-space-8) var(--aisy-space-6);
+  text-align: center;
+}
+
+.aisy-offline-card .aisy-mark {
+  margin-inline: auto;
+}
+
+.aisy-offline-card h1 {
+  margin: var(--aisy-space-6) 0 var(--aisy-space-2);
+  font: 800 24px/1.25 var(--aisy-font-friendly);
+}
+
+.aisy-offline-card p {
+  margin: 0 0 var(--aisy-space-6);
+  color: var(--aisy-color-text-muted);
+}
+
+.aisy-privacy-page .aisy-reading-canvas {
+  padding-block: var(--aisy-space-8) var(--aisy-space-12);
+}
+
+.aisy-privacy-page h1,
+.aisy-privacy-page h2 {
+  color: var(--aisy-color-text);
+  font-family: var(--aisy-font-friendly);
+  line-height: 1.25;
+}
+
+.aisy-privacy-page a:not(.aisy-button) {
+  color: var(--aisy-color-primary);
+  font-weight: var(--aisy-weight-strong);
+}
+
+.aisy-privacy-page .notice {
+  border: 1px solid var(--aisy-color-warning);
+  border-radius: var(--aisy-radius-control);
+  background: var(--aisy-color-surface-muted);
+  padding: var(--aisy-space-3) var(--aisy-space-4);
+}
+
+.aisy-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--aisy-space-2);
+  border: 0;
+  border-radius: var(--aisy-radius-control);
+  background: var(--aisy-color-primary);
+  color: var(--aisy-color-on-primary);
+  padding: var(--aisy-space-3) var(--aisy-space-4);
+  font: var(--aisy-weight-strong) var(--aisy-font-size-body) / 1.25 var(--aisy-font-interface);
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color var(--aisy-motion-fast) var(--aisy-motion-ease),
+    box-shadow var(--aisy-motion-fast) var(--aisy-motion-ease),
+    opacity var(--aisy-motion-fast) var(--aisy-motion-ease);
+}
+
+.aisy-button:hover {
+  background: var(--aisy-color-primary-hover);
+}
+
+:where(button, [role="button"], a, input, select, textarea, summary) {
+  min-block-size: var(--aisy-touch-target);
+  touch-action: manipulation;
+}
+
+:where(button, [role="button"], a, input, select, textarea, summary):focus-visible {
+  outline: 3px solid var(--aisy-color-focus) !important;
+  outline-offset: 3px !important;
+}
+
+:where(button, [role="button"], input, select, textarea):disabled,
+:where([aria-disabled="true"]) {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

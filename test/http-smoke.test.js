@@ -130,11 +130,18 @@ test('application starts and serves health, security headers and PWA assets', { 
     assert.match(home.headers.get('content-security-policy') || '', /default-src 'self'/u);
     assert.match(home.headers.get('cache-control') || '', /no-store/u);
     const homeMarkup = await home.text();
-    assert.match(homeMarkup, /<title>Easy Boost<\/title>/u);
+    assert.match(homeMarkup, /<title>Aisy ЕГЭ — Английский · Aisy\.space<\/title>/u);
 
     const manifest = await fetch(`${baseUrl}/manifest.json`);
     assert.equal(manifest.status, 200);
-    assert.equal((await manifest.json()).display, 'standalone');
+    const manifestPayload = await manifest.json();
+    assert.equal(manifestPayload.display, 'standalone');
+    assert.equal(manifestPayload.name, 'Aisy ЕГЭ — Английский');
+    assert.equal(manifestPayload.short_name, 'Aisy.space');
+
+    const theme = await fetch(`${baseUrl}/aisy-theme.css`);
+    assert.equal(theme.status, 200);
+    assert.match(await theme.text(), /--aisy-color-primary:\s*light-dark\(#5846c7,\s*#aa9bff\)/u);
 
     const serviceWorker = await fetch(`${baseUrl}/service-worker.js`);
     assert.equal(serviceWorker.status, 200);
