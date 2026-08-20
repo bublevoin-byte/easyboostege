@@ -390,9 +390,21 @@ const egeMockWritingAssessment = createEgeMockWritingAssessmentService({
   limitsFor: egeMockWritingProviderEvaluator.limitsFor,
   dailyLimit: config.ai.dailyRequestBudget,
 });
+const egeMockTestClockFile = config.nodeEnv === 'test'
+  ? process.env.EGE_MOCK_TEST_NOW_FILE : null;
+const egeMockRouteNow = egeMockTestClockFile ? () => {
+  const timestamp = Date.parse(fs.readFileSync(egeMockTestClockFile, 'utf8').trim());
+  if (!Number.isFinite(timestamp)) {
+    const error = new Error('EGE_MOCK_TEST_CLOCK_INVALID');
+    error.code = 'EGE_MOCK_TEST_CLOCK_INVALID';
+    throw error;
+  }
+  return timestamp;
+} : null;
 app.use(createEgeMockRoutes({
   authentication, access, db: dbApi, writingAssessment: egeMockWritingAssessment,
   logger: { error: (entry) => console.error(JSON.stringify(entry)) },
+  now: egeMockRouteNow,
 }));
 const speakingPronunciationProvider = createAzurePronunciationProvider({
   subscriptionKey: config.speakingPronunciation.enabled ? config.speakingPronunciation.azureKey : '',

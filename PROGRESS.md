@@ -19,7 +19,55 @@
 
 Спека: `.scratch/ege-full-mock-2026/spec.md`
 
-Overall status: `done` — Tickets 01–06 complete; Ticket 07 remains untouched and is the next separately scoped ticket.
+Overall status: `done` — Tickets 01–07 complete; Ticket 99 remains `needs-triage` after release hardening.
+
+Ticket 07 pre-freeze evidence: настоящая home card уже открывает `scr16`, placeholder отсутствует. Публичный
+release-contract RED `0/2` зафиксировал два оставшихся разрыва: общий gate не включал один сквозной Chromium
+контур той же попытки, а EGE-specific operator contract отсутствовал. GREEN `2/2` добавляет
+`e2e/ege-mock-release.test.js` в оба EGE/default gate и `docs/EGE_MOCK_OPERATIONS.md` с exact
+`ege-en-2026-form-1@1`, server timers `190 + 17`, PWA/offline/reconnect, normalized `:id` monitoring,
+privacy, incident/rollback, retention и локальной release boundary.
+
+Новый E2E начинает diagnostic с home card клавишей Enter, посещает позиции `1–38`, сохраняет offline draft через
+reload/reconnect и проводит все `26` oral-команд и `11` response stages позиций `39–42` через настоящий
+browser -> `/oral/stage` -> domain -> file-storage контур с тестовым composition clock. При чередовании
+`320/1440 px` он проверяет reduced motion, screen-reader timer/status и controls `>=44 px`, делает реальный oral
+submit/result, перезагружает тот же `42`-item baseline и подтверждает, что history по-прежнему содержит ровно одну
+строку этой попытки. Узкий EGE-набор written/oral/result/release и полный последовательный Chromium зелёные;
+adaptive Chromium также зелёный.
+
+Первый строгий frozen review обнаружил заменённую in-memory oral machine/direct repository finalization,
+недостаточную проверку post-reload history, возможный дочерний процесс при readiness failure и устаревшие статусы
+Tickets 05/06 в нижней таблице. Публичный real-route RED получил `409 EGE_MOCK_ORAL_STAGE_TOO_EARLY`; минимальный
+test-only server clock seam дал GREEN без изменения production clock, fake oral machine и прямой repository
+finalization удалены, readiness failure теперь останавливает созданный процесс, post-reload history проверяется как
+`length === 1`, а Tickets 05/06 отмечены `done`. Ticket 99 не менялся.
+
+Следующий frozen Spec review вернул literal `ZERO_FINDINGS`, а Standards обнаружил implementation-coupled
+`onclick` source assertion вместо публичного seam, недостижимую диагностическую ветку из-за двойного submit wait и
+мёртвые import/clock state. Source assertion удалён: home card/Enter остаётся проверен только через настоящий
+Chromium UI; единственный guarded wait теперь сохраняет diagnostic, а stale scaffolding удалён. Повторные release
+contract `2/2` и real home-to-result Chromium зелёные.
+
+Полный unit: `1863 total / 1815 pass / 48` ожидаемых PostgreSQL skips / `0 fail` в `38826.3768 ms`.
+`lint`, generated/executable OpenAPI, `check` (`428` JavaScript files / `211` handlers / `126` names), build
+(`485` assets / `649.3 KB` unpacked shell JavaScript / `12` lazy chunks), secrets (`1216` tracked files), history
+(`314` commits) и `git diff --check` зелёные. Performance operational metrics зелёные: LCP `296 ms`, CLS `0`, INP
+`96 ms`, AI indicator `38 ms`, adaptive overview `112 ms`, preview `39 ms`; известный унаследованный first-load
+JavaScript остаётся `182.9 KB > 150 KB`, EGE screen/form/result при этом сохраняют lazy boundary.
+
+Fresh post-remediation PostgreSQL project `easyboost-postgres-integration-33300` применил миграции `001–055` и
+прошёл literal `48/48`, `0 fail` в `14650.6133 ms`. Compose удалил container, volume и network; точные
+project-label фильтры `com.docker.compose.project=easyboost-postgres-integration-33300` пусты для всех трёх
+ресурсов. Docker остановлен владельцем, pipe/backend/Desktop отсутствуют. Provider/paid call, install, push,
+deploy и production audit не выполнялись; dependency declarations и lockfile не менялись. Ticket 99 остаётся явным обязательным
+напоминанием после Ticket 07: существенно расширить проверенный авторский банк и формы.
+
+Финальный strict freeze на exact ordered allowlist из `8` файлов имел `540523` raw bytes и SHA-256
+`454aa6a18a69c136c1214386470c6a5a8d3510069dd0ff8e8602475f7b28860a`; HEAD/base оставался
+`190a06fa7cc65b6457708b505316537a167f6a98`, index был пуст. Два brand-new read-only review независимо вернули
+literal `ZERO_FINDINGS` для Standards и Spec при совпавших PRE=POST identity. Ticket 07 закрыт metadata-only;
+push/deploy отсутствуют, Ticket 99 сохранён как обязательный post-release reminder.
 
 Ticket 06 pre-freeze evidence: после обеих частей один server-authoritative domain-модуль выдаёт canonical
 42-позиционный безопасный результат с breakdown `12/12/18/20/20` и максимумом `82`. Один shared contract владеет
@@ -1128,9 +1176,9 @@ read-only literal `ZERO_FINDINGS` reviews. Ticket 99 remains the explicit bank-e
 | 02 | Owner-bound попытка, строгие таймеры и persistence/API | done |
 | 03 | Единый письменный runner заданий 1–36 | done |
 | 04 | Задания 37–38 и честная предварительная оценка | done |
-| 05 | Устная часть 1–4 и предварительная оценка | in-progress |
-| 06 | Итог 82, прогноз, разбор и тренировочный повтор | ready-for-agent |
-| 07 | PWA/E2E/release hardening полного пробника | ready-for-agent |
+| 05 | Устная часть 1–4 и предварительная оценка | done |
+| 06 | Итог 82, прогноз, разбор и тренировочный повтор | done |
+| 07 | PWA/E2E/release hardening полного пробника | done |
 | 99 | Существенно расширить проверенный авторский банк | needs-triage; после 07 |
 
 Решения 2026-08-13: полный формат; одна попытка с раздельно запускаемыми письменной и устной частями; строгие deadlines 190 и 17 минут; только проверенный авторский контент; один эталонный form в первом релизе; развёрнутые ответы получают явно предварительную автоматическую оценку; первый проход диагностический, повторы после раскрытия ключей тренировочные. В финале серии обязательно напомнить владельцу о Ticket 99.

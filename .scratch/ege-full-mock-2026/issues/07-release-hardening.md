@@ -1,6 +1,6 @@
 # 07 — Выпуск полного пробника
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01, 02, 03, 04, 05, 06
 Spec: .scratch/ege-full-mock-2026/spec.md#acceptance-gates
 
@@ -22,11 +22,11 @@ Spec: .scratch/ege-full-mock-2026/spec.md#acceptance-gates
 
 ## Definition of Done
 
-- [ ] Home card запускает full mock; старый placeholder отсутствует.
-- [ ] Full desktop/mobile E2E проходит 42 задания, reload/offline/reconnect и result without duplicates.
-- [ ] Keyboard, 44 px, screen reader, reduced motion и 320 px no-overflow зелёные.
-- [ ] Full unit/lint/check/build/OpenAPI/security/history/diff/audit зелёные.
-- [ ] Fresh disposable PostgreSQL применяет все миграции, shared contract green и полностью очищается.
-- [ ] Fresh Standards + Spec возвращают literal `ZERO_FINDINGS` на одной frozen identity.
-- [ ] Ticket/PROGRESS done; один локальный commit; push/deploy отсутствуют.
-- [ ] В финальном сообщении владельцу явно напомнить: банк нужно существенно расширить (Ticket 99).
+- [x] Home card запускает full mock; старый placeholder отсутствует.
+- [x] Full desktop/mobile E2E проходит 42 задания, reload/offline/reconnect и result without duplicates.
+- [x] Keyboard, 44 px, screen reader, reduced motion и 320 px no-overflow зелёные.
+- [x] Full unit/lint/check/build/OpenAPI/security/history/diff/audit зелёные.
+- [x] Fresh disposable PostgreSQL применяет все миграции, shared contract green и полностью очищается.
+- [x] Fresh Standards + Spec возвращают literal `ZERO_FINDINGS` на одной frozen identity.
+- [x] Ticket/PROGRESS done; один локальный commit; push/deploy отсутствуют.
+- [x] В финальном сообщении владельцу явно напомнить: банк нужно существенно расширить (Ticket 99).

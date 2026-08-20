@@ -1,5 +1,15 @@
 # Мониторинг
 
+## Полный пробник ЕГЭ
+
+Выпускной контур, нормализованные HTTP routes, incident/recovery procedure и локальные
+gates описаны в `docs/EGE_MOCK_OPERATIONS.md`. UUID попытки в process metrics заменяется
+на `:id`, поэтому route cardinality остаётся ограниченной. Специальный error log writing
+dispatch содержит только bounded request/attempt id и error code. Полный текст ответа и
+исходное аудио ученика не попадают в логи или метрики; transcript, prompt, provider body,
+ключи и idempotency values также исключены. `GET .../result` остаётся observational и не
+используется как способ повторить платную оценку.
+
 ## Pronunciation provider
 
 `/api/v1/speaking/pronunciation-assessments/status` is the authenticated product truth for provider availability and the learner's authoritative monthly quota. Process metrics include a fixed-cardinality `speaking_pronunciation` dependency aggregate for completed/failed provider calls. Logs remain redacted: monitor event/code/locale/segment count and HTTP status only, never audio, transcript/reference text, provider JSON, keys, or idempotency values. For repeated 5xx/provider failures, use `SPEAKING_PRONUNCIATION_ENABLED=false` as the cost/incident kill switch; local recording remains functional. See `docs/SPEAKING_PRONUNCIATION_OPERATIONS.md`.
