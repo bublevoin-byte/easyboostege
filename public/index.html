@@ -234,6 +234,7 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
 .ege-mock textarea{min-height:176px;width:100%;resize:vertical;border:1px solid #CFC4B9;border-radius:13px;padding:12px;color:#2B2B2B;font:650 16px/1.55 Manrope,sans-serif}.ege-mock textarea:focus-visible{outline:3px solid #175CD3;outline-offset:3px}.ege-mock__stimulus table{width:100%;margin-top:10px;border-collapse:collapse}.ege-mock__stimulus th,.ege-mock__stimulus td{border-bottom:1px solid #DDD2C7;padding:8px;text-align:left;overflow-wrap:anywhere}
 </style>
 <link rel="stylesheet" href="/aisy-theme.css">
+<link rel="stylesheet" href="/aisy-shell.css">
 </head><body>
 <button id="navfab" onclick="document.getElementById('navmenu').classList.toggle('open')">Экраны ▾</button>
 <div id="navmenu"></div>
@@ -370,6 +371,24 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
       <button style="width:100%;height:56px;border:none;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:18px;font-family:Manrope;font-weight:700;font-size:16px;color:#fff;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;box-shadow:0 14px 28px rgba(242,104,63,.32);">Поехали<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></button>
     </div>
   
+</div>
+<div class="screen" id="aisy-practice" data-name="Практика" data-aisy-shell-host>
+  <main class="aisy-shell-placeholder aisy-reading-canvas" tabindex="-1" aria-labelledby="aisy-practice-title">
+    <section class="aisy-surface aisy-shell-placeholder__card">
+      <p class="aisy-shell-placeholder__kicker">Aisy ЕГЭ — Английский</p>
+      <h1 id="aisy-practice-title">Практика</h1>
+      <p>Здесь появится выбор тренировок по навыкам. Экран пока не заменяет существующие учебные модули.</p>
+    </section>
+  </main>
+</div>
+<div class="screen" id="aisy-ege" data-name="ЕГЭ" data-aisy-shell-host>
+  <main class="aisy-shell-placeholder aisy-reading-canvas" tabindex="-1" aria-labelledby="aisy-ege-title">
+    <section class="aisy-surface aisy-shell-placeholder__card">
+      <p class="aisy-shell-placeholder__kicker">Aisy ЕГЭ — Английский</p>
+      <h1 id="aisy-ege-title">ЕГЭ</h1>
+      <p>Здесь появятся разделы экзамена, пробный вариант и результаты. Запуск строгого пробника остаётся отдельным маршрутом.</p>
+    </section>
+  </main>
 </div>
 <div class="screen" id="scr1" data-name="Главная" style="background:#F6F3EF;overflow:hidden;">
 

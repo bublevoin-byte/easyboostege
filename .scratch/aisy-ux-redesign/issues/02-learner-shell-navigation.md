@@ -1,6 +1,6 @@
 # 02 — Оболочка ученика и пять разделов
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 Spec: `.scratch/aisy-ux-redesign/spec.md#4-information-architecture`
 

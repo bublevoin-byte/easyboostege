@@ -1268,8 +1268,14 @@ async function runE2E() {
     console.log('e2e: microphone denial handled without losing the task');
 
     await authenticatedPage.getByRole('button', { name: '← К заданиям' }).click();
-    await authenticatedPage.getByRole('button', { name: 'Главная' }).click();
-    const profileButton = authenticatedPage.locator('#scr1.on [role="button"][aria-label="Профиль"]');
+    await authenticatedPage.getByRole('button', { name: 'Назад в раздел Сегодня', exact: true }).press('Enter');
+    await authenticatedPage.locator('#scr1.on').waitFor({ state: 'visible', timeout: 5_000 });
+    assert.equal(
+      await authenticatedPage.evaluate(() => document.activeElement === document.getElementById('scr1')),
+      true,
+      'deep back should move focus to the Today content',
+    );
+    const profileButton = authenticatedPage.locator('#aisy-shell-nav').getByRole('button', { name: 'Профиль', exact: true });
     assert.equal(await profileButton.count(), 1);
     await profileButton.press('Enter');
     console.log('e2e: profile opened by keyboard');
@@ -1362,7 +1368,7 @@ async function runE2E() {
             };
           });
         const homeScroll = document.querySelector('#scr1 .homeScroll');
-        const homeNav = document.querySelector('#scr1 .navclay');
+        const homeNav = document.querySelector('#aisy-shell-nav');
         homeScroll.scrollTop = homeScroll.scrollHeight;
         const lastContent = homeScroll.lastElementChild.getBoundingClientRect();
         const navigation = homeNav.getBoundingClientRect();
@@ -1377,6 +1383,8 @@ async function runE2E() {
           undersized: interactive.filter((item) => item.width < 44 || item.height < 44),
           lastContentBottom: lastContent.bottom,
           navigationTop: navigation.top,
+          navigationRight: navigation.right,
+          navigationIsRail: navigation.height > navigation.width,
         };
       });
       assert.ok(layout.documentWidth <= layout.viewportWidth);
@@ -1384,7 +1392,11 @@ async function runE2E() {
       assert.ok(layout.screenLeft >= -0.5 && layout.screenRight <= layout.viewportWidth + 0.5);
       assert.ok(layout.frameWidth <= 720, `content line length is too wide at ${viewport.width}px`);
       assert.deepEqual(layout.undersized, [], `undersized controls at ${viewport.width}px`);
-      assert.ok(layout.lastContentBottom <= layout.navigationTop, `content overlaps navigation at ${viewport.width}px`);
+      if (layout.navigationIsRail) {
+        assert.ok(layout.screenLeft >= layout.navigationRight, `content overlaps navigation rail at ${viewport.width}px`);
+      } else {
+        assert.ok(layout.lastContentBottom <= layout.navigationTop, `content overlaps navigation at ${viewport.width}px`);
+      }
       await viewportContext.close();
     }
     console.log('e2e: responsive matrix 320–1440 px has no horizontal overflow');

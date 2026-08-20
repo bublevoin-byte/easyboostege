@@ -23,6 +23,7 @@ import './sync.js';
 import './store.js';
 import './components.js';
 import * as router from './router.js';
+import {installLearnerShell} from './aisy-shell.js';
 import './learning.js';
 import './modules/words.js';
 import './modules/grammar.js';
@@ -69,3 +70,12 @@ exposeGlobals(wordsScreen);
 exposeGlobals(grammarScreen);
 exposeGlobals(progressScreen);
 exposeGlobals(profileScreen);
+
+installLearnerShell({
+  document,
+  navigateTopLevel:router.navigateTopLevel,
+  navigateBackToHub:router.backToHub,
+  currentScreen:router.cur,
+  registerRouteHook:router.registerRouteHook,
+  registerBackAdapter:router.registerBackAdapter,
+});

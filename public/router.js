@@ -4,6 +4,7 @@ const ui=window.EasyBoostComponents;
 const api=window.EasyBoostApi;
 /* Код предметного экрана приезжает чанком; источник подключает screens.js. */
 let SCREEN_SOURCE=null;
+let BACK_ADAPTER=null;
 let NAVIGATION_REVISION=0;
 let NAVIGATION_SCREEN_STATE_REVISION=null;
 /* Сколько ждём чанк молча. На быстром соединении он приходит раньше, и ученик не видит ничего
@@ -47,9 +48,11 @@ function clearNavigationScreenState(revision=null){if(NAVIGATION_SCREEN_STATE_RE
 function showNavigationScreenState(revision,state){if(revision!==NAVIGATION_REVISION)return false;
   clearNavigationScreenState();NAVIGATION_SCREEN_STATE_REVISION=revision;ui.screenState(state);return true}
 function show(id){NAVIGATION_REVISION+=1;clearNavigationScreenState();return showScreen(id)}
+function registerBackAdapter(adapter){BACK_ADAPTER=typeof adapter==='function'?adapter:null}
 function registerRouteHook(hook){ROUTE_HOOKS.push(hook)}
 function registerScreenSource(source){SCREEN_SOURCE=source}
-function enter(id,previous){if(id!==previous&&previous!=='scr5'&&previous!=='scr6')HIST.push(previous);showScreen(id)}
+function enter(id,previous,options={}){if(options.resetHistory)HIST.length=0;
+  else if(id!==previous&&previous!=='scr5'&&previous!=='scr6')HIST.push(previous);showScreen(id)}
 /* Экранам маршрутизатор ничего не должен: подготовку экрана делает хук, который регистрирует
    сам экран, — свои хуки чанк регистрирует, пока грузится, и они срабатывают на этом же переходе. */
 function runRouteHooks(id,previous){ROUTE_HOOKS.forEach(function(hook){try{hook(id,previous)}catch(e){console.error('Route hook failed',e)}})}
@@ -76,13 +79,13 @@ function tab(id,after,options={}){
   if(options.signal?.aborted){cancelNavigation();return false}
   if(typeof options.signal?.addEventListener==='function')options.signal.addEventListener('abort',cancelNavigation,{once:true});
   const pending=SCREEN_SOURCE?SCREEN_SOURCE(id):null;
-  if(!pending){if(!canCommit()){cancel();return false}enter(id,previous);runRouteHooks(id,previous);if(after)after(canCommit);return true}
+  if(!pending){if(!canCommit()){cancel();return false}enter(id,previous,options);runRouteHooks(id,previous);if(after)after(canCommit);return true}
   const waiting=setTimeout(function(){if(!canCommit()){cancel();return}
     showNavigationScreenState(navigationRevision,{kind:'loading',title:'Открываем экран',description:'Загружаем задания'})},SCREEN_STATE_DELAY);
   pending.then(function(){
     clearTimeout(waiting);
     if(!canCommit()){cancel();return}
-    clearNavigationScreenState(navigationRevision);enter(id,previous);
+    clearNavigationScreenState(navigationRevision);enter(id,previous,options);
     runRouteHooks(id,previous);
     if(after)after(canCommit);
   },function(error){
@@ -95,8 +98,14 @@ function tab(id,after,options={}){
   return{cancel:cancelNavigation,isCurrent:canCommit}
 }
 function nav(id,after,options){return tab(id,after,options)}
-function back(){NAVIGATION_REVISION+=1;clearNavigationScreenState();const previous=cur();let id=HIST.pop()||'scr1';if(id==='scr5'||id==='scr6')id='scr1';showScreen(id);runRouteHooks(id,previous)}
+function navigateTopLevel(id){return tab(id,null,{resetHistory:true})}
+function back(){NAVIGATION_REVISION+=1;clearNavigationScreenState();const previous=cur();
+  let fallback=null;try{fallback=BACK_ADAPTER?BACK_ADAPTER(previous):null}catch(error){console.error('Back adapter failed',error)}
+  let id=HIST.pop()||fallback||'scr1';if(id==='scr5'||id==='scr6')id='scr1';showScreen(id);runRouteHooks(id,previous)}
+function backToHub(){NAVIGATION_REVISION+=1;clearNavigationScreenState();const previous=cur();
+  let id=null;try{id=BACK_ADAPTER?BACK_ADAPTER(previous):null}catch(error){console.error('Back adapter failed',error)}
+  if(!id)return back();HIST.length=0;showScreen(id);runRouteHooks(id,previous)}
 
 (function buildDebugNavigation(){const menu=document.getElementById('navmenu');document.querySelectorAll('.screen').forEach(function(screen){const button=document.createElement('button');button.type='button';button.textContent=screen.id.replace('scr','')+' · '+screen.dataset.name;button.setAttribute('aria-label','Открыть экран '+(screen.dataset.name||screen.id));button.onclick=function(){HIST.length=0;tab(screen.id)};menu.appendChild(button)})})();
 
-export {HIST,back,cur,nav,prepareScreen,registerRouteHook,registerScreenSource,show,showScreen,tab};
+export {HIST,back,backToHub,cur,nav,navigateTopLevel,prepareScreen,registerBackAdapter,registerRouteHook,registerScreenSource,show,showScreen,tab};
