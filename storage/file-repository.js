@@ -98,6 +98,13 @@ import {
 } from '../ege-mock/assessment-run-command.js';
 import { getEgeMockForm } from '../ege-mock/catalog.js';
 import {
+  buildEgeMockHistory,
+  egeMockAdaptiveEvidenceAttempts,
+  egeMockErrorFocusEntries,
+  refreshEgeMockStoredResult,
+  selectEgeMockHistoryRows,
+} from '../ege-mock/result.js';
+import {
   applyEgeMockSpeakingBridgeEvaluation,
   syncEgeMockFullSpeakingSession,
 } from '../ege-mock/speaking-bridge.js';
@@ -961,7 +968,9 @@ export function createFileRepository(filePath, {
       const exactFormAttempts = state.ege_mock_attempts.filter((attempt) => (
         attempt.username === username && attempt.form_id === form.id && attempt.form_revision === form.revision
       ));
-      for (const attempt of exactFormAttempts) reconcileEgeMockAttempt(attempt, instant);
+      for (const attempt of exactFormAttempts) {
+        reconcileEgeMockAttemptWithDerivedProjections(username, attempt, instant);
+      }
       const decision = egeMockStartDecision(exactFormAttempts);
       const { active } = decision;
       if (active) {
@@ -998,7 +1007,9 @@ export function createFileRepository(filePath, {
       const instant = egeMockInstant(now);
       let changed = false;
       for (const entry of state.ege_mock_attempts) {
-        if (entry.username === username) changed = reconcileEgeMockAttempt(entry, instant) || changed;
+        if (entry.username === username) {
+          changed = reconcileEgeMockAttemptWithDerivedProjections(username, entry, instant) || changed;
+        }
       }
       if (changed) await persist();
       const attempts = state.ege_mock_attempts.filter((entry) => entry.username === username)
@@ -1014,7 +1025,9 @@ export function createFileRepository(filePath, {
       const attempt = state.ege_mock_attempts.find((entry) => (
         entry.username === username && entry.id === attemptId
       ));
-      if (attempt && reconcileEgeMockAttempt(attempt, instant)) await persist();
+      if (attempt && reconcileEgeMockAttemptWithDerivedProjections(username, attempt, instant)) {
+        await persist();
+      }
       return egeMockAttemptPublicDto(attempt);
     });
   }
@@ -1065,6 +1078,47 @@ export function createFileRepository(filePath, {
     return instant;
   }
 
+  function syncEgeMockErrorFocus(username, attempt) {
+    const entries = egeMockErrorFocusEntries(
+      attempt, getEgeMockForm(attempt.form_id, attempt.form_revision),
+    );
+    let changed = false;
+    for (const item of entries) {
+      const existing = state.error_bank.find((entry) => entry.username === username
+        && entry.module === item.module && entry.item_key === item.itemKey
+        && entry.error_type === item.errorType);
+      if (existing) continue;
+      const observedAt = Date.parse(attempt.oral_submitted_at);
+      state.error_bank.push({
+        id: Math.max(0, ...state.error_bank.map(({ id }) => Number(id) || 0)) + 1,
+        username,
+        module: item.module,
+        item_key: item.itemKey,
+        error_type: item.errorType,
+        details: structuredClone(item.details),
+        occurrence_count: 1,
+        first_seen_at: observedAt,
+        last_seen_at: observedAt,
+        resolved_at: null,
+      });
+      changed = true;
+    }
+    return changed;
+  }
+
+  function syncEgeMockDerivedProjections(username, attempt, { focus = true } = {}) {
+    const form = getEgeMockForm(attempt.form_id, attempt.form_revision);
+    const resultChanged = refreshEgeMockStoredResult(attempt, form);
+    const focusChanged = focus ? syncEgeMockErrorFocus(username, attempt) : false;
+    return resultChanged || focusChanged;
+  }
+
+  function reconcileEgeMockAttemptWithDerivedProjections(username, attempt, instant) {
+    const reconciled = reconcileEgeMockAttempt(attempt, instant);
+    if (reconciled) syncEgeMockDerivedProjections(username, attempt);
+    return reconciled;
+  }
+
   async function mutateEgeMockAttempt(
     username, attemptId, operation, candidate, { now = () => new Date() } = {}, apply,
   ) {
@@ -1079,16 +1133,21 @@ export function createFileRepository(filePath, {
         entry.username === username && entry.id === attemptId
       ));
       if (!attempt) throw new EgeMockAttemptError('EGE_MOCK_ATTEMPT_NOT_FOUND');
-      const reconciled = shouldSettleEgeMockOralStageBeforeReconcile(
+      const settlementDeferred = shouldSettleEgeMockOralStageBeforeReconcile(
         attempt, operation, candidate, instant,
-      ) ? false : reconcileEgeMockAttempt(attempt, instant);
+      );
+      const reconciled = settlementDeferred
+        ? false : reconcileEgeMockAttemptWithDerivedProjections(username, attempt, instant);
       let response;
       try {
         response = await apply(attempt, instant, reconciled);
       } catch (error) {
-        if (reconciled) await persist();
+        const reconciledAfterRejectedSettlement = settlementDeferred
+          ? reconcileEgeMockAttemptWithDerivedProjections(username, attempt, instant) : false;
+        if (reconciled || reconciledAfterRejectedSettlement) await persist();
         throw error;
       }
+      syncEgeMockDerivedProjections(username, attempt);
       state.ege_mock_mutations.push({
         username, attempt_id: attempt.id, operation,
         idempotency_key: candidate.idempotencyKey, request_hash: candidate.requestHash,
@@ -1178,16 +1237,36 @@ export function createFileRepository(filePath, {
     });
   }
 
-  async function getEgeMockResult(username, attemptId, { now = () => new Date() } = {}) {
+  async function getEgeMockResult(username, attemptId) {
     return serializeCoordinatedMutation(async () => {
       await load();
-      const instant = egeMockInstant(now);
       const attempt = state.ege_mock_attempts.find((entry) => (
         entry.username === username && entry.id === attemptId
       ));
       if (!attempt) return null;
-      if (reconcileEgeMockAttempt(attempt, instant)) await persist();
       return egeMockResultPublicDto(attempt);
+    });
+  }
+
+  async function getEgeMockHistory(username, {
+    now = () => new Date(), includeAttemptId = null,
+  } = {}) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      if (!state.users[username]) return { baselineAttemptId: null, attempts: [] };
+      const instant = egeMockInstant(now);
+      let changed = false;
+      for (const entry of state.ege_mock_attempts) {
+        if (entry.username === username) {
+          changed = reconcileEgeMockAttemptWithDerivedProjections(username, entry, instant) || changed;
+        }
+      }
+      if (changed) await persist();
+      const attempts = selectEgeMockHistoryRows(
+        state.ege_mock_attempts.filter((entry) => entry.username === username),
+        { includeAttemptId },
+      );
+      return buildEgeMockHistory(attempts, getEgeMockForm, { includeAttemptId });
     });
   }
 
@@ -1208,7 +1287,7 @@ export function createFileRepository(filePath, {
         entry.username === username && entry.id === attemptId
       ));
       if (!attempt) throw new EgeMockAttemptError('EGE_MOCK_ATTEMPT_NOT_FOUND');
-      const reconciled = reconcileEgeMockAttempt(attempt, instant);
+      const reconciled = reconcileEgeMockAttemptWithDerivedProjections(username, attempt, instant);
       if (!attempt.writing_assessment) {
         throw new EgeMockAttemptError('EGE_MOCK_ASSESSMENT_STATE_INVALID');
       }
@@ -1265,7 +1344,7 @@ export function createFileRepository(filePath, {
         entry.username === username && entry.id === attemptId
       ));
       if (!attempt) throw new EgeMockAttemptError('EGE_MOCK_ATTEMPT_NOT_FOUND');
-      const reconciled = reconcileEgeMockAttempt(attempt, instant);
+      const reconciled = reconcileEgeMockAttemptWithDerivedProjections(username, attempt, instant);
       const publicAttempt = egeMockAttemptPublicDto(attempt);
       const decision = egeMockAssessmentRunSettlement({
         responseSnapshot: mutation.response_snapshot,
@@ -1291,6 +1370,7 @@ export function createFileRepository(filePath, {
       const instant = egeMockInstant(now);
       if (!attempt) throw new EgeMockAttemptError('EGE_MOCK_ASSESSMENT_STATE_INVALID');
       const response = applyEgeMockAssessmentRetryable(attempt, { reason, now: instant });
+      syncEgeMockDerivedProjections(username, attempt);
       await persist();
       return response;
     });
@@ -1331,11 +1411,12 @@ export function createFileRepository(filePath, {
           subscriptionExpiresAt: new Date(subscriptionUntil).toISOString(),
         };
       }
-      reconcileEgeMockAttempt(attempt, instant);
+      reconcileEgeMockAttemptWithDerivedProjections(username, attempt, instant);
       const response = applyEgeMockWritingAssessmentClaim(attempt, {
         form: getEgeMockForm(attempt.form_id, attempt.form_revision), claimToken,
         authorization: frozenAuthorization, now: instant,
       });
+      syncEgeMockDerivedProjections(username, attempt, { focus: false });
       await persist();
       return response;
     });
@@ -1354,6 +1435,7 @@ export function createFileRepository(filePath, {
       const response = applyEgeMockWritingAssessmentClaimRenewal(attempt, {
         claimToken, now: instant,
       });
+      syncEgeMockDerivedProjections(username, attempt, { focus: false });
       await persist();
       return response;
     });
@@ -1372,6 +1454,7 @@ export function createFileRepository(filePath, {
       const response = applyEgeMockWritingAssessmentItemCompletion(attempt, {
         claimToken, position, outcomeToken, now: instant,
       });
+      syncEgeMockDerivedProjections(username, attempt);
       await persist();
       return response;
     });
@@ -1390,6 +1473,7 @@ export function createFileRepository(filePath, {
       const response = applyEgeMockWritingAssessmentItemOutcomePreparation(attempt, {
         claimToken, position, outcomeToken, now: instant,
       });
+      syncEgeMockDerivedProjections(username, attempt, { focus: false });
       await persist();
       return response;
     });
@@ -1406,6 +1490,7 @@ export function createFileRepository(filePath, {
       const response = applyEgeMockWritingAssessmentItemOutcome(attempt, {
         ...candidate, now: instant,
       });
+      syncEgeMockDerivedProjections(username, attempt);
       await persist();
       return response;
     });
@@ -1424,6 +1509,7 @@ export function createFileRepository(filePath, {
       const response = applyEgeMockWritingAssessmentFailure(attempt, {
         claimToken, reason, discardPreparedOutcome, now: instant,
       });
+      syncEgeMockDerivedProjections(username, attempt);
       await persist();
       return response;
     });
@@ -3504,6 +3590,7 @@ export function createFileRepository(filePath, {
       const result = applyFullSpeakingEvaluation(session, attempts, effectiveNow);
       if (session.selection_reason === 'ege_mock') {
         applyEgeMockSpeakingBridgeEvaluation(egeAttempt, result, effectiveNow);
+        syncEgeMockDerivedProjections(username, egeAttempt);
       }
       await persist();
       return { session: structuredClone(session), result };
@@ -3694,6 +3781,10 @@ export function createFileRepository(filePath, {
         ...speakingAdaptiveEvidenceAttempts(boundedSpeakingEvidenceRows(state.speaking_attempts, username)
           .map(buildSpeakingLearningAttempt)
           .filter(Boolean)),
+        ...egeMockAdaptiveEvidenceAttempts(
+          state.ege_mock_attempts.filter((entry) => entry.username === username),
+          getEgeMockForm,
+        ),
       ],
       recoveries,
       repeatAttempts: state.voice_tutor_repeat_attempts
@@ -5224,7 +5315,9 @@ export function createFileRepository(filePath, {
       const instant = new Date();
       const changed = state.ege_mock_attempts
         .filter((item) => item.username === username)
-        .reduce((anyChanged, item) => reconcileEgeMockAttempt(item, instant) || anyChanged, false);
+        .reduce((anyChanged, item) => (
+          reconcileEgeMockAttemptWithDerivedProjections(username, item, instant) || anyChanged
+        ), false);
       if (changed) await persist();
       const adaptiveExport = adaptiveLearningProfileExportDto(
         state.adaptive_learning_profiles[username] || null,
@@ -5638,6 +5731,7 @@ export function createFileRepository(filePath, {
     submitEgeMockOral,
     syncEgeMockSpeakingBridge,
     getEgeMockResult,
+    getEgeMockHistory,
     beginEgeMockAssessmentRun,
     settleEgeMockAssessmentRun,
     markEgeMockAssessmentRetryable,

@@ -1,9 +1,79 @@
+import {
+  EGE_MOCK_FORECAST_METADATA,
+  egeMockDashboardSummaryMatchesPolicy,
+} from '../shared/ege-mock-forecast-metadata.js';
+
 const STORAGE_KEY = 'easyboost.adaptive.overview.v1';
-const STORAGE_VERSION = 'adaptive-overview-cache-v3';
-const LEGACY_STORAGE_VERSIONS = Object.freeze(['adaptive-overview-cache-v2', 'adaptive-overview-cache-v1']);
+const STORAGE_VERSION = 'adaptive-overview-cache-v4';
+const LEGACY_STORAGE_VERSIONS = Object.freeze([
+  'adaptive-overview-cache-v3', 'adaptive-overview-cache-v2', 'adaptive-overview-cache-v1',
+]);
 const MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const MAX_SNAPSHOT_CHARS = 120_000;
-const PUBLIC_FIELDS = Object.freeze(['goal', 'profile', 'plan', 'retention', 'access', 'grammarRecommendation']);
+const PUBLIC_FIELDS = Object.freeze([
+  'goal', 'profile', 'plan', 'retention', 'access', 'grammarRecommendation', 'egeMock',
+]);
+
+function boundedInteger(value, minimum, maximum) {
+  return Number.isInteger(value) && value >= minimum && value <= maximum;
+}
+
+function validUuid(value) {
+  return typeof value === 'string'
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value);
+}
+
+function safeRange(value, maximum) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    && boundedInteger(value.minimum, 0, maximum)
+    && boundedInteger(value.maximum, value.minimum, maximum)
+    ? { minimum: value.minimum, maximum: value.maximum } : null;
+}
+
+export function safeEgeMockProjection(value) {
+  if (value == null) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || !boundedInteger(value.displayedAttempts, 0, 20)
+    || !egeMockDashboardSummaryMatchesPolicy(value)) return undefined;
+  if (value.baseline == null) {
+    return value.baselineAttemptId == null && value.displayedAttempts === 0
+      ? { baselineAttemptId: null, displayedAttempts: value.displayedAttempts, baseline: null }
+      : undefined;
+  }
+  const baseline = value.baseline;
+  const primaryRange = safeRange(baseline.range, 82);
+  const forecastRange = safeRange(baseline.forecast?.range, 100);
+  const primaryTotalValid = baseline.primaryTotal == null
+    || boundedInteger(baseline.primaryTotal, 0, 82);
+  const forecastScoreValid = baseline.forecast?.score == null
+    || boundedInteger(baseline.forecast.score, 0, 100);
+  if (value.displayedAttempts < 1
+    || !validUuid(value.baselineAttemptId) || baseline.attemptId !== value.baselineAttemptId
+    || baseline.maximum !== 82 || !primaryTotalValid || !primaryRange
+    || !baseline.forecast || baseline.forecast.policyId !== EGE_MOCK_FORECAST_METADATA.id
+    || baseline.forecast.label !== EGE_MOCK_FORECAST_METADATA.label
+    || baseline.forecast.disclaimer !== EGE_MOCK_FORECAST_METADATA.disclaimer
+    || baseline.forecast.baselineEligible !== true || !forecastScoreValid
+    || !forecastRange) return undefined;
+  return {
+    baselineAttemptId: value.baselineAttemptId,
+    displayedAttempts: value.displayedAttempts,
+    baseline: {
+      attemptId: baseline.attemptId,
+      primaryTotal: baseline.primaryTotal,
+      maximum: 82,
+      range: primaryRange,
+      forecast: {
+        policyId: EGE_MOCK_FORECAST_METADATA.id,
+        label: EGE_MOCK_FORECAST_METADATA.label,
+        score: baseline.forecast.score,
+        range: forecastRange,
+        disclaimer: EGE_MOCK_FORECAST_METADATA.disclaimer,
+        baselineEligible: true,
+      },
+    },
+  };
+}
 
 function storageKey(owner, ownerGeneration) {
   return `${STORAGE_KEY}:${encodeURIComponent(owner)}:g${ownerGeneration}`;
@@ -17,11 +87,15 @@ function validOwner(owner) {
 function publicProjection(payload, { legacy = false } = {}) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
   if (PUBLIC_FIELDS.some((field) => !Object.prototype.hasOwnProperty.call(payload, field)
-    && !(legacy && field === 'grammarRecommendation'))) return null;
+    && !(legacy && ['grammarRecommendation', 'egeMock'].includes(field)))) return null;
   if (!payload.access || typeof payload.access !== 'object' || Array.isArray(payload.access)
     || !payload.retention || typeof payload.retention !== 'object' || Array.isArray(payload.retention)) return null;
+  const egeMock = safeEgeMockProjection(payload.egeMock ?? null);
+  if (egeMock === undefined) return null;
   const projection = {};
-  for (const field of PUBLIC_FIELDS) projection[field] = payload[field] ?? null;
+  for (const field of PUBLIC_FIELDS) {
+    projection[field] = field === 'egeMock' ? egeMock : payload[field] ?? null;
+  }
   return projection;
 }
 

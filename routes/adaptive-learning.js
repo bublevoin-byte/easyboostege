@@ -31,6 +31,7 @@ import {
   buildAdaptiveRetentionState,
 } from '../adaptive-learning/retention.js';
 import { buildAdaptiveDetailedReport } from '../adaptive-learning/report.js';
+import { buildEgeMockDashboardSummary } from '../ege-mock/result.js';
 import {
   ADAPTIVE_EXECUTION_CLAIM_TTL_MS,
   adaptiveCompletedBlockDto,
@@ -283,12 +284,15 @@ export function createAdaptiveLearningRoutes({
   }
 
   async function overview(username, { remainingPlanRetries = 2, includePlan = enabled } = {}) {
+    const egeMockHistory = typeof db.getEgeMockHistory === 'function'
+      ? await db.getEgeMockHistory(username) : { baselineAttemptId: null, attempts: [] };
     const [goal, sources, access, grammarMastery] = await Promise.all([
       db.getAdaptiveLearningGoal(username),
       db.getAdaptiveLearningEvidenceSources(username),
       adaptiveAccess(username),
       typeof db.migrateGrammarMastery === 'function' ? db.migrateGrammarMastery(username) : {},
     ]);
+    const egeMock = buildEgeMockDashboardSummary(egeMockHistory);
     const grammarRecommendation = buildGrammarRecommendation({
       mastery: grammarMastery,
       catalog: GRAMMAR_CATALOG,
@@ -325,6 +329,7 @@ export function createAdaptiveLearningRoutes({
           grammarRecommendation,
           retention,
           access,
+          egeMock,
         };
       }
       const basePlanRevision = previousPlan?.revision ?? null;
@@ -383,6 +388,7 @@ export function createAdaptiveLearningRoutes({
       grammarRecommendation,
       retention,
       access,
+      egeMock,
     };
   }
 

@@ -68,6 +68,24 @@ function overview() {
       },
       reasonCodes: ['recent_weakness'], observedErrorCount: 2, observedAt: 1_000,
     },
+    egeMock: {
+      baselineAttemptId: '11111111-1111-4111-8111-111111111111',
+      displayedAttempts: 20,
+      baseline: {
+        attemptId: '11111111-1111-4111-8111-111111111111',
+        primaryTotal: null,
+        maximum: 82,
+        range: { minimum: 40, maximum: 80 },
+        forecast: {
+          policyId: 'ege-mock-forecast-2026-v1',
+          label: 'Прогноз тестового балла',
+          score: null,
+          range: { minimum: 49, maximum: 98 },
+          disclaimer: 'Ориентировочный прогноз Easy Boost, а не официальный результат ЕГЭ.',
+          baselineEligible: true,
+        },
+      },
+    },
     debug: { username: 'must-not-be-cached' },
   };
 }
@@ -79,14 +97,55 @@ test('offline overview cache is owner-bound, bounded and contains only the publi
   assert.equal(await writeAdaptiveOverviewCache(storage, 'learner-one', overview(), now), true);
 
   const cached = readAdaptiveOverviewCache(storage, 'learner-one', now + 60_000);
-  assert.deepEqual(Object.keys(cached).sort(), ['access', 'goal', 'grammarRecommendation', 'plan', 'profile', 'retention']);
+  assert.deepEqual(Object.keys(cached).sort(), ['access', 'egeMock', 'goal', 'grammarRecommendation', 'plan', 'profile', 'retention']);
   assert.equal(cached.plan.allocation.modules[0].percentage, 35);
   assert.equal(cached.grammarRecommendation.pointer.errorCode, 'word_or_verb_form');
+  assert.equal(cached.egeMock.baseline.attemptId, cached.egeMock.baselineAttemptId);
+  assert.equal(cached.egeMock.displayedAttempts, 20,
+    'the bounded count must stay labelled as the displayed history window');
   assert.equal(JSON.stringify(cached).includes('must-not-be-cached'), false);
 
   assert.equal(readAdaptiveOverviewCache(storage, 'learner-two', now + 60_000), null);
   assert.deepEqual(readAdaptiveOverviewCache(storage, 'learner-one', now + 60_000), cached,
     'a different tab cannot destroy the owning account cache merely by reading it');
+});
+
+test('offline overview cache rejects a diagnostic baseline without its required forecast range', async () => {
+  ownerGenerations.clear(); deletedOwners.clear();
+  const storage = memoryStorage();
+  const now = Date.parse('2026-08-04T12:00:00.000Z');
+  const safe = overview();
+  assert.equal(await writeAdaptiveOverviewCache(storage, 'learner-one', safe, now), true);
+  const cached = readAdaptiveOverviewCache(storage, 'learner-one', now);
+  const malformed = overview();
+  malformed.egeMock.baseline.forecast.range = null;
+
+  assert.equal(await writeAdaptiveOverviewCache(storage, 'learner-one', malformed, now + 1), false);
+  assert.deepEqual(readAdaptiveOverviewCache(storage, 'learner-one', now + 1), cached,
+    'a malformed baseline cannot replace the last dashboard-safe offline projection');
+});
+
+test('dashboard sanitizer binds baseline presence to a non-empty displayed history window', async () => {
+  ownerGenerations.clear(); deletedOwners.clear();
+  const storage = memoryStorage();
+  const now = Date.parse('2026-08-04T12:00:00.000Z');
+  const malformedBaseline = overview();
+  malformedBaseline.egeMock.displayedAttempts = 0;
+  assert.equal(await writeAdaptiveOverviewCache(storage, 'learner-one', malformedBaseline, now), false,
+    'a visible baseline cannot exist outside the displayed retained history window');
+
+  const malformedEmpty = overview();
+  malformedEmpty.egeMock = { baselineAttemptId: null, displayedAttempts: 1, baseline: null };
+  assert.equal(await writeAdaptiveOverviewCache(storage, 'learner-one', malformedEmpty, now + 1), false,
+    'an empty dashboard cannot claim a retained result row');
+
+  const contradictory = overview();
+  contradictory.egeMock.baseline.primaryTotal = 82;
+  contradictory.egeMock.baseline.range = { minimum: 0, maximum: 82 };
+  contradictory.egeMock.baseline.forecast.score = 0;
+  contradictory.egeMock.baseline.forecast.range = { minimum: 100, maximum: 100 };
+  assert.equal(await writeAdaptiveOverviewCache(storage, 'learner-one', contradictory, now + 2), false,
+    'a dashboard snapshot must preserve the versioned score and forecast correlation');
 });
 
 test('offline overview cache exposes its saved timestamp without marking the payload fresh', async () => {
@@ -97,7 +156,9 @@ test('offline overview cache exposes its saved timestamp without marking the pay
 
   const snapshot = readAdaptiveOverviewCacheSnapshot(storage, 'learner-one', savedAt + 60_000);
   assert.equal(snapshot.savedAt, savedAt);
-  assert.deepEqual(Object.keys(snapshot.payload).sort(), ['access', 'goal', 'grammarRecommendation', 'plan', 'profile', 'retention']);
+  assert.deepEqual(Object.keys(snapshot.payload).sort(), ['access', 'egeMock', 'goal', 'grammarRecommendation', 'plan', 'profile', 'retention']);
+  assert.equal(snapshot.payload.egeMock.baseline.forecast.baselineEligible, true,
+    'offline reload retains the immutable diagnostic baseline without learner answers');
   assert.equal(Object.hasOwn(snapshot.payload, 'fresh'), false);
 });
 

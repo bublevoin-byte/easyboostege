@@ -133,6 +133,21 @@ export function createEgeMockRoutes({
     } catch (error) { return sendAttemptError(error, res, next); }
   });
 
+  router.get('/api/v1/ege-mocks/attempts/history', auth, ownerBoundary, async (req, res, next) => {
+    const includeAttemptId = req.query.attemptId;
+    if (includeAttemptId != null
+      && (typeof includeAttemptId !== 'string'
+        || !egeMockAttemptIdSchema.safeParse(includeAttemptId).success)) return validationError(res);
+    try {
+      bindResponseOwner(res, req.user);
+      res.setHeader('Cache-Control', 'no-store');
+      return res.json(await db.getEgeMockHistory(req.user, {
+        ...repositoryOptions,
+        ...(includeAttemptId ? { includeAttemptId } : {}),
+      }));
+    } catch (error) { return sendAttemptError(error, res, next); }
+  });
+
   router.get('/api/v1/ege-mocks/attempts/:attemptId', auth, ownerBoundary, async (req, res, next) => {
     if (!egeMockAttemptIdSchema.safeParse(req.params.attemptId).success) return validationError(res);
     try {

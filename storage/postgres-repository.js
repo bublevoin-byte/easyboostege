@@ -70,12 +70,16 @@ import {
   speakingAdaptiveEvidenceMatchesTarget,
 } from '../speaking/learning-loop.js';
 import { isMonotonicAdaptiveRetentionRefresh } from '../adaptive-learning/retention.js';
-import { createPostgresEgeMockStore } from '../ege-mock/postgres-store.js';
+import {
+  createPostgresEgeMockStore,
+  persistEgeMockDerivedProjections,
+} from '../ege-mock/postgres-store.js';
 import {
   applyEgeMockSpeakingBridgeEvaluation,
   syncEgeMockFullSpeakingSession,
 } from '../ege-mock/speaking-bridge.js';
 import { getEgeMockForm } from '../ege-mock/catalog.js';
+import { egeMockAdaptiveEvidenceAttempts } from '../ege-mock/result.js';
 import { adaptiveRepeatExecutionMatches } from '../adaptive-learning/repeat-execution.js';
 import {
   adaptiveLearningSessionPublicDto,
@@ -3537,15 +3541,7 @@ export function createPostgresRepository(connectionString, {
       const updatedEge = applyEgeMockSpeakingBridgeEvaluation(
         egeAttempt.rows[0], result, effectiveNow,
       );
-      await client.query(
-        `UPDATE ege_mock_attempts
-         SET state = $3, revision = $4, assessment_status = $5,
-             assessment_retry_count = $6, speaking_assessment = $7::jsonb, updated_at = $8
-         WHERE username = $1 AND id = $2`,
-        [username, id, updatedEge.state, updatedEge.revision, updatedEge.assessment_status,
-          updatedEge.assessment_retry_count, JSON.stringify(updatedEge.speaking_assessment),
-          updatedEge.updated_at],
-      );
+      await persistEgeMockDerivedProjections(client, username, updatedEge);
       const updatedSession = await updateFullSpeakingSession(client, username, id, session);
       await client.query('COMMIT');
       return { session: updatedSession.rows[0], result };
@@ -3830,7 +3826,20 @@ export function createPostgresRepository(connectionString, {
            ) ORDER BY completed_at)
            FROM adaptive_diagnostic_sessions
            WHERE username = $1 AND status = 'completed'
-         ), '[]'::jsonb) AS diagnostic_completions`,
+         ), '[]'::jsonb) AS diagnostic_completions,
+         COALESCE((
+           SELECT jsonb_agg(to_jsonb(source_ege) ORDER BY source_ege.created_at, source_ege.id)
+           FROM (
+             SELECT id, form_id, form_revision, catalog_fingerprint, mode, attempt_number,
+                    state, draft, oral_submitted_at, writing_assessment, speaking_assessment,
+                    created_at
+             FROM ege_mock_attempts
+             WHERE username = $1 AND mode = 'diagnostic' AND oral_submitted_at IS NOT NULL
+               AND state IN ('assessment_pending', 'completed')
+             ORDER BY created_at, id
+             LIMIT 1
+           ) source_ege
+         ), '[]'::jsonb) AS ege_mock_attempts`,
       [username, SPEAKING_ADAPTIVE_EVIDENCE_ATTEMPT_LIMIT],
     );
     const sources = {
@@ -3839,6 +3848,7 @@ export function createPostgresRepository(connectionString, {
         ...speakingAdaptiveEvidenceAttempts(
           result.rows[0].speaking_attempts.map(buildSpeakingLearningAttempt).filter(Boolean),
         ),
+        ...egeMockAdaptiveEvidenceAttempts(result.rows[0].ege_mock_attempts, getEgeMockForm),
       ],
       recoveries: result.rows[0].recoveries,
       repeatAttempts: result.rows[0].repeat_attempts,

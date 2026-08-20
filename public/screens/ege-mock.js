@@ -16,13 +16,19 @@ import {
 } from '../ege-mock-writing-assessment-ui.js';
 import { AUTOMATIC_ASSESSMENT_WARNING } from '../automatic-assessment-contract.js';
 import {
+  claimEgeMockResultLoad,
+  createEgeMockResultLoadAuthority,
+  egeMockResultTupleIsConsistent,
+  renderEgeMockResult,
+} from '../ege-mock-result.js';
+import {
   apiGet, apiIsAuthorityFailure, apiMessage, apiPost, apiPostBinary, apiPostIdempotent, apiPut,
   apiResponseOwner, apiResponseServerTime,
   commitEgeMockOwnerMutation,
   currentEgeMockOwnerBinding, invalidateLearningAuthority, listeningModule, readingModule,
   registerAuthorityReset,
 } from '../app.js';
-import { registerRouteHook } from '../router.js';
+import { registerRouteHook, tab } from '../router.js';
 
 const SECTION_LABELS = Object.freeze({
   listening: 'Аудирование', reading: 'Чтение', grammar_lexis: 'Грамматика и лексика',
@@ -55,6 +61,17 @@ let oralAssessing = false;
 let oralProviderRepeatAckRequired = false;
 let oralStorageKey = '';
 let oralRetryAt = 0;
+let finalResult = null;
+let finalHistory = null;
+let finalResultAttemptId = '';
+let finalResultLoading = false;
+let finalResultLoadingAttemptId = '';
+let finalResultLoadFailedAttemptId = '';
+let finalResultFocusedAttemptId = '';
+let finalResultReloadQueuedAttemptId = '';
+let finalResultRequiredAttemptId = '';
+let finalResultRequiredAssessmentRevision = -1;
+const finalResultLoadAuthority = createEgeMockResultLoadAuthority();
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/gu, (character) => ({
@@ -133,9 +150,24 @@ function transportFor(owner) {
       }), owner);
     },
     async current() {
-      return timedOwnedResponse(await apiGet('/api/v1/ege-mocks/attempts/current', {
+      const current = timedOwnedResponse(await apiGet('/api/v1/ege-mocks/attempts/current', {
         headers: ownerHeaders(owner),
       }), owner);
+      if (current.attempt) return current;
+      const history = timedOwnedResponse(await apiGet('/api/v1/ege-mocks/attempts/history', {
+        headers: ownerHeaders(owner),
+      }), owner);
+      const latest = history.attempts?.[0];
+      if (!latest?.id) return current;
+      const restored = timedOwnedResponse(await apiGet(
+        `/api/v1/ege-mocks/attempts/${latest.id}`,
+        { headers: ownerHeaders(owner) },
+      ), owner);
+      if (restored.attempt?.id !== latest.id
+        || !['assessment_pending', 'completed'].includes(restored.attempt?.state)) {
+        throw new Error('EGE_MOCK_HISTORY_RESTORE_INVALID');
+      }
+      return restored;
     },
     async start(input) {
       return timedOwnedResponse(await apiPostIdempotent('/api/v1/ege-mocks/attempts', {
@@ -237,6 +269,17 @@ function resetRunnerState(keepOpening = false, invalidateOpening = true) {
   oralProviderRepeatAckRequired = false;
   oralStorageKey = '';
   oralRetryAt = 0;
+  finalResult = null;
+  finalHistory = null;
+  finalResultAttemptId = '';
+  finalResultLoading = false;
+  finalResultLoadingAttemptId = '';
+  finalResultLoadFailedAttemptId = '';
+  finalResultFocusedAttemptId = '';
+  finalResultReloadQueuedAttemptId = '';
+  finalResultRequiredAttemptId = '';
+  finalResultRequiredAssessmentRevision = -1;
+  finalResultLoadAuthority.reset();
   form = null;
   if (!keepOpening) {
     opening = null;
@@ -246,6 +289,175 @@ function resetRunnerState(keepOpening = false, invalidateOpening = true) {
   announcedOralWarning = null;
   visibleError = '';
   document.getElementById('frame')?.classList.remove('ege-mock-expanded');
+}
+
+async function loadFinalResult(operation, attemptId) {
+  if (!operation || !attemptId) return false;
+  const claim = claimEgeMockResultLoad(
+    finalResultLoadAuthority,
+    attemptId,
+    finalResultLoading ? (finalResultLoadingAttemptId || attemptId) : '',
+  );
+  if (claim.queued) {
+    finalResultReloadQueuedAttemptId = attemptId;
+    const snapshot = runner?.snapshot();
+    const mergedRevision = snapshot?.attemptId === attemptId
+      ? assessmentRevision(snapshot?.result?.writingAssessment) : -1;
+    if (mergedRevision >= 0) {
+      const requiredRevision = finalResultRequiredAttemptId === attemptId
+        ? finalResultRequiredAssessmentRevision : -1;
+      finalResultRequiredAttemptId = attemptId;
+      finalResultRequiredAssessmentRevision = Math.max(
+        requiredRevision, mergedRevision,
+      );
+    }
+    return false;
+  }
+  finalResultLoading = true;
+  finalResultLoadingAttemptId = attemptId;
+  const loadAuthority = claim.token;
+  let loaded = false;
+  try {
+    const [result, history] = await Promise.all([
+      apiGet(`/api/v1/ege-mocks/attempts/${attemptId}/result`, {
+        headers: ownerHeaders(operation.owner),
+      }),
+      apiGet(`/api/v1/ege-mocks/attempts/history?attemptId=${encodeURIComponent(attemptId)}`, {
+        headers: ownerHeaders(operation.owner),
+      }),
+    ]);
+    if (!openOperationCurrent(operation) || runner?.snapshot().attemptId !== attemptId) return;
+    assertOwnedResponse(result, operation.owner);
+    assertOwnedResponse(history, operation.owner);
+    if (result.available !== true || result.keysRevealed !== true
+      || result.result?.canonical?.attemptId !== attemptId) {
+      throw new Error('EGE_MOCK_RESULT_INVALID');
+    }
+    const loadedAssessmentRevision = assessmentRevision(result.writingAssessment);
+    if (finalResultRequiredAttemptId === attemptId
+      && loadedAssessmentRevision < finalResultRequiredAssessmentRevision) {
+      throw new Error('EGE_MOCK_RESULT_STALE');
+    }
+    if (!egeMockResultTupleIsConsistent(result, history, attemptId)) {
+      finalResultLoadAuthority.invalidate(attemptId);
+      finalResultReloadQueuedAttemptId = attemptId;
+      throw new Error('EGE_MOCK_RESULT_STALE');
+    }
+    if (!finalResultLoadAuthority.canCommit(loadAuthority)) {
+      throw new Error('EGE_MOCK_RESULT_STALE');
+    }
+    finalResult = result;
+    finalHistory = history;
+    finalResultAttemptId = attemptId;
+    finalResultRequiredAssessmentRevision = finalResultRequiredAttemptId === attemptId
+      ? Math.max(finalResultRequiredAssessmentRevision, loadedAssessmentRevision)
+      : loadedAssessmentRevision;
+    finalResultRequiredAttemptId = attemptId;
+    finalResultLoadFailedAttemptId = '';
+    visibleError = '';
+    loaded = true;
+  } catch (error) {
+    const superseded = error?.message === 'EGE_MOCK_RESULT_STALE'
+      && finalResultReloadQueuedAttemptId === attemptId;
+    if (!superseded && openOperationCurrent(operation)) {
+      finalResultLoadFailedAttemptId = attemptId;
+      await handleRunnerError(error, operation);
+    }
+  } finally {
+    finalResultLoading = false;
+    if (finalResultLoadingAttemptId === attemptId) finalResultLoadingAttemptId = '';
+    const queuedAttemptId = finalResultReloadQueuedAttemptId;
+    if (queuedAttemptId && openOperationCurrent(operation)
+      && runner?.snapshot().attemptId === queuedAttemptId) {
+      finalResultReloadQueuedAttemptId = '';
+      queueMicrotask(() => loadFinalResult(operation, queuedAttemptId));
+    }
+    if (openOperationCurrent(operation)) render();
+  }
+  return loaded;
+}
+
+function assessmentRevision(assessment) {
+  const revision = Number(assessment?.assessmentRevision);
+  return Number.isSafeInteger(revision) && revision >= 0 ? revision : -1;
+}
+
+function speakingAssessmentIdentity(assessment) {
+  if (!assessment || typeof assessment !== 'object') return '';
+  const items = Object.values(assessment.items || {}).map((item) => ([
+    Number(item?.position), item?.status ?? null, item?.score ?? null,
+    item?.errorCode ?? null,
+  ])).sort((left, right) => left[0] - right[0]);
+  return JSON.stringify([
+    assessment.status ?? null, assessment.retryCount ?? null,
+    assessment.updatedAt ?? null, items,
+  ]);
+}
+
+async function reloadFinalResultAfterAssessmentMerge(operation, snapshot) {
+  const attemptId = snapshot?.attemptId;
+  const loadedRevision = finalResultAttemptId === attemptId
+    ? assessmentRevision(finalResult?.writingAssessment) : -1;
+  const mergedRevision = assessmentRevision(snapshot?.result?.writingAssessment);
+  const requiredRevision = Math.max(loadedRevision,
+    finalResultRequiredAttemptId === attemptId ? finalResultRequiredAssessmentRevision : -1);
+  const mergedSpeakingAssessment = snapshot?.speakingAssessment
+    ?? snapshot?.result?.speakingAssessment ?? null;
+  const speakingChanged = mergedSpeakingAssessment != null
+    && speakingAssessmentIdentity(mergedSpeakingAssessment)
+      !== speakingAssessmentIdentity(finalResult?.speakingAssessment);
+  const writingChanged = mergedRevision > requiredRevision;
+  const tracksAttempt = finalResultAttemptId === attemptId
+    || finalResultLoadingAttemptId === attemptId
+    || finalResultRequiredAttemptId === attemptId;
+  if (!runnerOperationCurrent(operation) || !tracksAttempt
+    || (!writingChanged && !speakingChanged)) return false;
+  finalResultLoadAuthority.invalidate(attemptId);
+  finalResult = null;
+  finalHistory = null;
+  finalResultLoadFailedAttemptId = '';
+  finalResultRequiredAttemptId = attemptId;
+  finalResultRequiredAssessmentRevision = Math.max(requiredRevision, mergedRevision);
+  finalResultReloadQueuedAttemptId = attemptId;
+  if (!finalResultLoading) {
+    finalResultReloadQueuedAttemptId = '';
+    await loadFinalResult(operation, attemptId);
+  }
+  return true;
+}
+
+function finalAssessmentControls(writtenSnapshot, oralSnapshot) {
+  const writingAssessment = finalResult?.writingAssessment;
+  const writingActions = renderEgeMockWritingAssessmentActions(writingAssessment, {
+    queued: writtenSnapshot.assessmentRetryQueued || writtenSnapshot.assessmentRunQueued,
+    revisionBlocked: writtenSnapshot.assessmentRunBlocked,
+  });
+  const speakingPending = finalResult?.speakingAssessment?.status !== 'completed';
+  if (!writingActions && !speakingPending) return '';
+  return `<section class="ege-mock__card"><h3>Предварительная оценка</h3>${renderEgeMockWritingAssessmentStatus(writingAssessment)}${writingActions}${speakingPending ? oralMarkup(oralSnapshot) : ''}</section>`;
+}
+
+async function startTrainingRepeat() {
+  const operation = currentRunnerOperation();
+  const canonical = finalResult?.result?.canonical;
+  if (!operation || !canonical || canonical.attemptId !== operation.runner.snapshot().attemptId
+  ) return;
+  const idempotencyKey = globalThis.crypto.randomUUID();
+  const started = timedOwnedResponse(await apiPostIdempotent('/api/v1/ege-mocks/attempts', {
+    formId: canonical.formId,
+    formRevision: canonical.formRevision,
+    catalogFingerprint: canonical.catalogFingerprint,
+  }, idempotencyKey, ownerHeaders(operation.owner)), operation.owner);
+  if (started.attempt?.mode !== 'training' || started.attempt?.id === canonical.attemptId
+    || started.attempt?.formId !== canonical.formId
+    || Number(started.attempt?.formRevision) !== Number(canonical.formRevision)
+    || started.attempt?.catalogFingerprint !== canonical.catalogFingerprint) {
+    throw new Error('EGE_MOCK_REPEAT_INVALID');
+  }
+  await operation.runner.dispatch({ type: 'invalidate' });
+  localStorage.removeItem(`easyboost-ege-mock-oral-v1:${operation.owner.username}:${operation.owner.generation}`);
+  resetRunnerState(true, false);
+  await beginOpenRunner();
 }
 
 function resetRunner() { resetRunnerState(); }
@@ -691,6 +903,11 @@ async function assessOralRecordings(acknowledgePossibleProviderRepeat = false) {
       `/api/v1/speaking/full-sessions/${snapshot.attemptId}/evaluation`, { attemptIds },
     );
     await oralRunner.dispatch({ type: 'restore', form });
+    const operation = currentRunnerOperation();
+    if (operation) {
+      const refreshed = await loadFinalResult(operation, snapshot.attemptId);
+      if (!refreshed) return;
+    }
     oralProviderRepeatAckRequired = false;
     visibleError = '';
   } catch (error) {
@@ -885,7 +1102,32 @@ function render() {
     if (oralRunner) {
       const oralSnapshot = oralRunner.snapshot();
       renderOralHeader(oralSnapshot);
-      area.innerHTML = oralMarkup(oralSnapshot);
+      if (oralSnapshot.phase === 'submitted'
+        && finalResultAttemptId === snapshot.attemptId && finalResult) {
+        try {
+          const staleResult = finalResultLoadFailedAttemptId === snapshot.attemptId
+            ? `<p class="ege-mock__error" role="alert">${escapeHtml(visibleError)}</p><button class="ege-mock__action" type="button" data-ege-action="result-refresh">Повторить загрузку результата</button>`
+            : visibleError ? `<p class="ege-mock__error" role="alert">${escapeHtml(visibleError)}</p>` : '';
+          area.innerHTML = `${staleResult}${renderEgeMockResult(finalResult, finalHistory)}${finalAssessmentControls(snapshot, oralSnapshot)}`;
+          if (finalResultFocusedAttemptId !== snapshot.attemptId) {
+            finalResultFocusedAttemptId = snapshot.attemptId;
+            requestAnimationFrame(() => document.getElementById('ege_mock_result_title')?.focus?.());
+          }
+        } catch (error) {
+          visibleError = apiMessage(error);
+          area.innerHTML = `<p class="ege-mock__error" role="alert">${escapeHtml(visibleError)}</p>`;
+        }
+      } else {
+        const resultFailure = oralSnapshot.phase === 'submitted'
+          && finalResultLoadFailedAttemptId === snapshot.attemptId
+          ? `<p class="ege-mock__error" role="alert">${escapeHtml(visibleError)}</p><button class="ege-mock__action" type="button" data-ege-action="result-refresh">Повторить загрузку результата</button>` : '';
+        area.innerHTML = `${oralMarkup(oralSnapshot)}${oralSnapshot.phase === 'submitted' && finalResultLoading ? '<p class="ege-mock__status" role="status">Собираем итоговый результат…</p>' : ''}${resultFailure}`;
+        if (oralSnapshot.phase === 'submitted' && !finalResultLoading
+          && finalResultLoadFailedAttemptId !== snapshot.attemptId) {
+          const operation = currentRunnerOperation();
+          if (operation) queueMicrotask(() => loadFinalResult(operation, snapshot.attemptId));
+        }
+      }
       return;
     }
     const retryWarning = snapshot.result?.writingAssessment?.retryWarning;
@@ -1023,11 +1265,32 @@ async function handleAction(event) {
     document.querySelector('.ege-mock__task h2')?.focus?.();
     return;
   }
+  const resultScreen = event.target.closest('[data-ege-result-screen]');
+  if (resultScreen) {
+    tab(resultScreen.dataset.egeResultScreen);
+    return;
+  }
   const button = event.target.closest('[data-ege-action]');
   if (!button) return;
+  if (button.dataset.egeAction === 'result-repeat') {
+    if (!confirm('Начать тренировочный повтор? Исходная диагностика останется без изменений.')) return;
+    button.disabled = true;
+    try { await startTrainingRepeat(); }
+    catch (error) { visibleError = apiMessage(error); render(); }
+    finally { if (button.isConnected) button.disabled = false; }
+    return;
+  }
   button.disabled = true;
   if (button.dataset.egeAction === 'retry-open') {
     await beginOpenRunner();
+    return;
+  }
+  if (button.dataset.egeAction === 'result-refresh') {
+    const operation = currentRunnerOperation();
+    if (operation) {
+      finalResultLoadFailedAttemptId = '';
+      await loadFinalResult(operation, operation.runner.snapshot().attemptId);
+    }
     return;
   }
   if (button.dataset.egeAction.startsWith('oral-')) {
@@ -1105,6 +1368,10 @@ async function handleAction(event) {
       });
     }
     if (!runnerOperationCurrent(operation)) return;
+    if (finalResultAttemptId === operation.runner.snapshot().attemptId) {
+      const refreshed = await loadFinalResult(operation, finalResultAttemptId);
+      if (!refreshed) return;
+    }
     visibleError = '';
   } catch (error) {
     if (!runnerOperationCurrent(operation)) return;
@@ -1244,8 +1511,10 @@ async function openRunner(operation) {
   runnerInvalidationKey = invalidationKey;
   form = localForm;
   committed = true;
-  if (runner.snapshot().phase === 'written_submitted'
-    && hasLocalOralState(owner)) {
+  const restored = runner.snapshot();
+  if (restored.phase === 'written_submitted'
+    && (hasLocalOralState(owner)
+      || ['assessment_pending', 'completed'].includes(restored.result?.state))) {
     await ensureOralRunner();
   } else render();
   startClock();
@@ -1300,6 +1569,8 @@ window.addEventListener('online', () => {
       });
       if (oralRunner !== candidateRunner || oralMedia !== candidateMedia) return;
       await beginAutomaticOralRecording(snapshot, candidateMedia);
+      const operation = currentRunnerOperation();
+      if (operation && await reloadFinalResultAfterAssessmentMerge(operation, snapshot)) return;
       render();
     })().catch((error) => { visibleError = apiMessage(error); render(); });
   }
@@ -1307,9 +1578,10 @@ window.addEventListener('online', () => {
   if (!operation) return;
   const before = operation.runner.snapshot();
   operation.runner.dispatch({ type: before.phase === 'asset_blocked' ? 'restore' : 'sync', form: operation.form })
-    .then((snapshot) => {
+    .then(async (snapshot) => {
       if (!runnerOperationCurrent(operation)) return;
       visibleError = '';
+      if (await reloadFinalResultAfterAssessmentMerge(operation, snapshot)) return;
       if (snapshot.phase === before.phase && snapshot.currentPosition === before.currentPosition) {
         renderTimer(snapshot);
         refreshRunningProjection(snapshot);
@@ -1338,6 +1610,8 @@ window.addEventListener('storage', (event) => {
       if (oralRunner !== candidateRunner || oralMedia !== candidateMedia) return;
       await ensureOralRecordingLease(snapshot, candidateMedia);
       await beginAutomaticOralRecording(snapshot, candidateMedia);
+      const operation = currentRunnerOperation();
+      if (operation && await reloadFinalResultAfterAssessmentMerge(operation, snapshot)) return;
       render();
     })().catch((error) => { visibleError = apiMessage(error); render(); });
   }
@@ -1345,8 +1619,9 @@ window.addEventListener('storage', (event) => {
     const operation = currentRunnerOperation();
     if (!operation) return;
     const before = operation.runner.snapshot();
-    operation.runner.dispatch({ type: 'refreshLocal' }).then((snapshot) => {
+    operation.runner.dispatch({ type: 'refreshLocal' }).then(async (snapshot) => {
       if (!runnerOperationCurrent(operation)) return;
+      if (await reloadFinalResultAfterAssessmentMerge(operation, snapshot)) return;
       if (snapshot.phase === before.phase && snapshot.currentPosition === before.currentPosition) {
         renderTimer(snapshot);
         refreshRunningProjection(snapshot);

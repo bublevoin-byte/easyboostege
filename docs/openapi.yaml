@@ -1896,6 +1896,24 @@ paths:
                   attempt: { $ref: '#/components/schemas/EgeMockNullableAttempt' }
                 additionalProperties: false
         '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/ege-mocks/attempts/history:
+    get:
+      summary: Read owner-bound completed full EGE history and immutable diagnostic baseline
+      description: Observational no-store projection only. It never claims assessment work, calls a provider, changes the diagnostic baseline, or treats a training repeat as independent mastery evidence.
+      parameters:
+        - { $ref: '#/components/parameters/ExpectedOwner' }
+        - name: attemptId
+          in: query
+          required: false
+          description: Exact terminal attempt to retain in the bounded history snapshot while restoring its result
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Completed diagnostic and training attempts with one immutable baseline pointer
+          headers: { X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/EgeMockHistory' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '400': { $ref: '#/components/responses/BadRequest' }
   /api/v1/ege-mocks/attempts/{attemptId}:
     get:
       summary: Restore one exact owner-bound attempt
@@ -2061,7 +2079,7 @@ paths:
     get:
       summary: Export the authenticated user's account, progress and attempt data
       responses:
-        '200': { description: JSON export including adaptive goals/structured estimates/plan revisions/learning sessions/diagnostic sessions and bounded responses, Voice Tutor sessions, recovery/repeat outcomes, Speaking accent setup lifecycle metadata and bounded provider/model/prompt metadata; no accent evidence keys, raw audio, temporary captions, full Voice Tutor transcript, nonce hash, idempotency replay snapshots or answer key }
+        '200': { description: JSON export including adaptive goals/structured estimates/plan revisions/learning sessions/diagnostic sessions and bounded responses, Voice Tutor sessions, recovery/repeat outcomes, Speaking accent setup lifecycle metadata and bounded provider/model/prompt metadata; revealed `correctAnswer` keys for completed EGE attempts may appear only after both parts finish, while accent evidence keys, raw audio, temporary captions, full Voice Tutor transcripts, nonce hashes and idempotency replay snapshots remain excluded }
         '401': { $ref: '#/components/responses/Unauthorized' }
   /api/v1/account:
     delete:
@@ -3729,13 +3747,219 @@ components:
           maxItems: 2
           items: { $ref: '#/components/schemas/EgeMockWritingResultItem' }
       additionalProperties: false
+    EgeMockResultContentRef:
+      type: object
+      required: [catalogId, id, revision]
+      properties:
+        catalogId: { type: string, minLength: 1, maxLength: 160 }
+        id: { type: string, minLength: 1, maxLength: 240 }
+        revision: { type: integer, minimum: 1, maximum: 9007199254740991 }
+      additionalProperties: false
+    EgeMockCanonicalResultItem:
+      type: object
+      required: [position, section, status, scoreKind, score, maximum, learnerAnswer, responseState, correctAnswer, contentRef]
+      allOf:
+        - oneOf:
+            - type: object
+              required: [position]
+              properties:
+                position: { type: integer, minimum: 1, maximum: 36 }
+            - type: object
+              required: [position, status, score]
+              properties:
+                position: { type: integer, enum: [37, 38] }
+                status: { type: string, enum: [not_started, pending, retryable, ambiguous] }
+                score: { type: integer, nullable: true, enum: [null] }
+            - type: object
+              required: [position, status, score, criteria, feedback, evidence]
+              properties:
+                position: { type: integer, enum: [37, 38] }
+                status: { type: string, enum: [completed] }
+                score: { type: integer, minimum: 0, maximum: 14 }
+                criteria: { type: array, minItems: 3, maxItems: 5 }
+                feedback: { type: object }
+                evidence: { type: array, maxItems: 5 }
+            - type: object
+              required: [position, status, score]
+              properties:
+                position: { type: integer, enum: [39, 40, 41, 42] }
+                status: { type: string, enum: [not_started, pending, retryable] }
+                score: { type: integer, nullable: true, enum: [null] }
+            - type: object
+              required: [position, status, score, criteria, feedback]
+              properties:
+                position: { type: integer, enum: [39, 40, 41, 42] }
+                status: { type: string, enum: [completed] }
+                score: { type: integer, minimum: 0, maximum: 10 }
+                criteria: { type: array, minItems: 1, maxItems: 5 }
+                feedback: { type: object }
+      properties:
+        position: { type: integer, minimum: 1, maximum: 42 }
+        section: { type: string, enum: [listening, reading, grammar_lexis, writing, speaking] }
+        status: { type: string, enum: [not_started, pending, in_progress, retryable, ambiguous, technical_issue, completed] }
+        scoreKind: { type: string, enum: [exact, approximate] }
+        score: { type: integer, minimum: 0, maximum: 14, nullable: true }
+        maximum: { type: integer, minimum: 1, maximum: 14 }
+        correct: { type: boolean }
+        learnerAnswer:
+          oneOf:
+            - { type: string, maxLength: 20000 }
+            - { type: array, maxItems: 20, items: { type: string, maxLength: 500 } }
+            - { type: object, nullable: true, enum: [null] }
+        responseState: { type: string, enum: [provided, submitted_hidden, technical, blank] }
+        correctAnswer:
+          oneOf:
+            - { type: string, maxLength: 20000 }
+            - { type: array, maxItems: 20, items: { type: string, maxLength: 500 } }
+            - { type: object, nullable: true, enum: [null] }
+        criteriaRef: { type: string, minLength: 1, maxLength: 160 }
+        criteriaFingerprint: { type: string, pattern: '^sha256:[a-f0-9]{64}$' }
+        contentRef: { $ref: '#/components/schemas/EgeMockResultContentRef' }
+        criteria:
+          type: array
+          minItems: 1
+          maxItems: 5
+          items: { $ref: '#/components/schemas/EgeMockWritingCriterion' }
+        feedback:
+          type: object
+          required: [verdict, nextStep]
+          properties:
+            verdict: { type: string, minLength: 1, maxLength: 160 }
+            nextStep: { type: string, minLength: 1, maxLength: 500 }
+          additionalProperties: false
+        evidence:
+          type: array
+          maxItems: 5
+          items: { $ref: '#/components/schemas/EgeMockWritingEvidence' }
+      additionalProperties: false
+    EgeMockCanonicalRecommendation:
+      type: object
+      required: [id, skillId, module, label, href, evidencePositions, evidenceKind, masteryCredit]
+      properties:
+        id: { type: string, pattern: '^ege\.(?:listening|reading|grammar|vocabulary|writing|speaking)\.[a-z_]+$' }
+        skillId: { type: string, pattern: '^ege\.(?:listening|reading|grammar|vocabulary|writing|speaking)\.[a-z_]+$' }
+        module: { type: string, enum: [listening, reading, grammar, vocabulary, writing, speaking] }
+        label: { type: string, minLength: 1, maxLength: 160 }
+        href: { type: string, pattern: '^#scr(?:2|3|4|7|8|9)$' }
+        evidencePositions:
+          type: array
+          minItems: 1
+          maxItems: 18
+          uniqueItems: true
+          items: { type: integer, minimum: 1, maximum: 42 }
+        evidenceKind: { type: string, enum: [objective_error, provisional_low_score] }
+        masteryCredit: { type: boolean, enum: [false] }
+      additionalProperties: false
+    EgeMockCanonicalResult:
+      type: object
+      description: Server-authoritative 82-primary-point result. Exact objective evidence is never relabeled preliminary; missing or technical subjective evidence remains null. The forecast is versioned and explicitly non-official.
+      x-easyboost-ege-result: canonical-v1
+      required: [schemaVersion, attemptId, formId, formRevision, catalogFingerprint, mode, attemptNumber, label, score, sections, forecast, assessmentWarning, items, recommendations, masteryCredit]
+      properties:
+        schemaVersion: { type: string, enum: [ege-mock-result-v1] }
+        attemptId: { type: string, format: uuid }
+        formId: { type: string, enum: [ege-en-2026-form-1] }
+        formRevision: { type: integer, enum: [1] }
+        catalogFingerprint: { type: string, pattern: '^sha256:[a-f0-9]{64}$' }
+        mode: { type: string, enum: [diagnostic, training] }
+        attemptNumber: { type: integer, minimum: 1, maximum: 9007199254740991 }
+        label: { type: string, enum: [Диагностический, Тренировочный повтор] }
+        score:
+          type: object
+          required: [objectivePrimary, provisionalSubjectivePrimary, primaryTotal, maximum, range]
+          properties:
+            objectivePrimary: { type: integer, minimum: 0, maximum: 42 }
+            provisionalSubjectivePrimary: { type: integer, minimum: 0, maximum: 40, nullable: true }
+            primaryTotal: { type: integer, minimum: 0, maximum: 82, nullable: true }
+            maximum: { type: integer, enum: [82] }
+            range:
+              type: object
+              required: [minimum, maximum]
+              properties:
+                minimum: { type: integer, minimum: 0, maximum: 82 }
+                maximum: { type: integer, minimum: 0, maximum: 82 }
+              additionalProperties: false
+          additionalProperties: false
+        sections:
+          type: array
+          minItems: 5
+          maxItems: 5
+          items:
+            type: object
+            required: [id, score, maximum, scoreKind, status]
+            properties:
+              id: { type: string, enum: [listening, reading, grammar_lexis, writing, speaking] }
+              score: { type: integer, minimum: 0, maximum: 20, nullable: true }
+              maximum: { type: integer, minimum: 12, maximum: 20 }
+              scoreKind: { type: string, enum: [exact, approximate] }
+              status: { type: string, enum: [not_started, pending, in_progress, retryable, ambiguous, technical_issue, completed] }
+            additionalProperties: false
+        forecast:
+          type: object
+          required: [policyId, label, score, range, disclaimer, baselineEligible]
+          properties:
+            policyId: { type: string, enum: [ege-mock-forecast-2026-v1] }
+            label: { type: string, enum: [Прогноз тестового балла] }
+            score: { type: integer, minimum: 0, maximum: 100, nullable: true }
+            range:
+              type: object
+              nullable: true
+              required: [minimum, maximum]
+              properties:
+                minimum: { type: integer, minimum: 0, maximum: 100 }
+                maximum: { type: integer, minimum: 0, maximum: 100 }
+              additionalProperties: false
+            disclaimer: { type: string, enum: ['Ориентировочный прогноз Easy Boost, а не официальный результат ЕГЭ.'] }
+            baselineEligible: { type: boolean }
+          additionalProperties: false
+        assessmentWarning: { type: string, enum: ['Экспериментальная ИИ-оценка. Балл ориентировочный, может содержать ошибки и не является экспертным заключением.'] }
+        items:
+          type: array
+          minItems: 42
+          maxItems: 42
+          items: { $ref: '#/components/schemas/EgeMockCanonicalResultItem' }
+        recommendations:
+          type: array
+          maxItems: 13
+          items: { $ref: '#/components/schemas/EgeMockCanonicalRecommendation' }
+        masteryCredit: { type: boolean, enum: [false] }
+      additionalProperties: false
+    EgeMockHistoryAttempt:
+      type: object
+      required: [id, formId, formRevision, mode, attemptNumber, label, state, completedAt, isBaseline, replacesBaseline, result]
+      properties:
+        id: { type: string, format: uuid }
+        formId: { type: string, enum: [ege-en-2026-form-1] }
+        formRevision: { type: integer, enum: [1] }
+        mode: { type: string, enum: [diagnostic, training] }
+        attemptNumber: { type: integer, minimum: 1, maximum: 9007199254740991 }
+        label: { type: string, enum: [Диагностический, Тренировочный повтор] }
+        state: { type: string, enum: [assessment_pending, completed] }
+        completedAt: { type: string, format: date-time }
+        isBaseline: { type: boolean }
+        replacesBaseline: { type: boolean, enum: [false] }
+        result: { $ref: '#/components/schemas/EgeMockCanonicalResult' }
+      additionalProperties: false
+    EgeMockHistory:
+      type: object
+      x-easyboost-ege-result-history: baseline-v1
+      required: [baselineAttemptId, attempts]
+      properties:
+        baselineAttemptId: { type: string, format: uuid, nullable: true }
+        attempts:
+          type: array
+          maxItems: 20
+          items: { $ref: '#/components/schemas/EgeMockHistoryAttempt' }
+      additionalProperties: false
     EgeMockCompositeResult:
       type: object
-      required: [writing, speaking]
+      x-easyboost-ege-composite-result: canonical-v1
+      required: [canonical, writing, speaking]
       properties:
+        canonical: { $ref: '#/components/schemas/EgeMockCanonicalResult' }
         writing: { $ref: '#/components/schemas/EgeMockWritingResult' }
         speaking: { $ref: '#/components/schemas/EgeMockSpeakingResult' }
-      additionalProperties: true
+      additionalProperties: false
     EgeMockResultUnblockedWritingAssessment:
       allOf:
         - { $ref: '#/components/schemas/EgeMockWritingAssessmentState' }
@@ -3762,6 +3986,7 @@ components:
       additionalProperties: false
     EgeMockAvailableResult:
       type: object
+      x-easyboost-ege-result-envelope: canonical-v1
       required: [available, state, keysRevealed, writingAssessment, speakingAssessment, assessment, result]
       properties:
         available: { type: boolean, enum: [true] }
@@ -3771,10 +3996,7 @@ components:
         speakingAssessment: { $ref: '#/components/schemas/EgeMockSpeakingAssessmentState' }
         assessmentRunDisposition: { type: string, enum: [subscription_required] }
         assessment: { $ref: '#/components/schemas/EgeMockAssessmentState' }
-        result:
-          oneOf:
-            - { type: object, nullable: true, enum: [null] }
-            - { $ref: '#/components/schemas/EgeMockCompositeResult' }
+        result: { $ref: '#/components/schemas/EgeMockCompositeResult' }
       allOf:
         - oneOf:
             - properties:
@@ -5313,7 +5535,7 @@ components:
       additionalProperties: false
     AdaptiveOverview:
       type: object
-      required: [goal, profile, plan, grammarRecommendation, retention, access]
+      required: [goal, profile, plan, grammarRecommendation, retention, access, egeMock]
       properties:
         goal:
           allOf:
@@ -5327,6 +5549,60 @@ components:
         grammarRecommendation: { $ref: '#/components/schemas/GrammarRecommendation' }
         retention: { $ref: '#/components/schemas/AdaptiveRetention' }
         access: { $ref: '#/components/schemas/AdaptiveAccess' }
+        egeMock: { $ref: '#/components/schemas/EgeMockDashboardSummary' }
+      additionalProperties: false
+    EgeMockDashboardSummary:
+      type: object
+      x-easyboost-ege-dashboard: baseline-v1
+      description: Bounded owner-only dashboard projection of the immutable first diagnostic full-mock result. displayedAttempts is the retained history-window count, never a lifetime total. Training repeats never replace or recalculate the baseline forecast.
+      required: [baselineAttemptId, displayedAttempts, baseline]
+      properties:
+        baselineAttemptId: { type: string, format: uuid, nullable: true }
+        displayedAttempts: { type: integer, minimum: 0, maximum: 20 }
+        baseline:
+          type: object
+          nullable: true
+          required: [attemptId, primaryTotal, maximum, range, forecast]
+          properties:
+            attemptId: { type: string, format: uuid }
+            primaryTotal: { type: integer, minimum: 0, maximum: 82, nullable: true }
+            maximum: { type: integer, enum: [82] }
+            range:
+              type: object
+              required: [minimum, maximum]
+              properties:
+                minimum: { type: integer, minimum: 0, maximum: 82 }
+                maximum: { type: integer, minimum: 0, maximum: 82 }
+              additionalProperties: false
+            forecast:
+              type: object
+              required: [policyId, label, score, range, disclaimer, baselineEligible]
+              properties:
+                policyId: { type: string, enum: [ege-mock-forecast-2026-v1] }
+                label: { type: string, enum: [Прогноз тестового балла] }
+                score: { type: integer, minimum: 0, maximum: 100, nullable: true }
+                range:
+                  type: object
+                  required: [minimum, maximum]
+                  properties:
+                    minimum: { type: integer, minimum: 0, maximum: 100 }
+                    maximum: { type: integer, minimum: 0, maximum: 100 }
+                  additionalProperties: false
+                disclaimer: { type: string, enum: ['Ориентировочный прогноз Easy Boost, а не официальный результат ЕГЭ.'] }
+                baselineEligible: { type: boolean, enum: [true] }
+              additionalProperties: false
+          additionalProperties: false
+      oneOf:
+        - title: No completed diagnostic baseline
+          properties:
+            baselineAttemptId: { type: object, nullable: true, enum: [null] }
+            displayedAttempts: { type: integer, enum: [0] }
+            baseline: { type: object, nullable: true, enum: [null] }
+        - title: Retained immutable diagnostic baseline
+          properties:
+            baselineAttemptId: { type: string, format: uuid }
+            displayedAttempts: { type: integer, minimum: 1, maximum: 20 }
+            baseline: { type: object }
       additionalProperties: false
     AdaptiveAccess:
       type: object

@@ -10,6 +10,7 @@ import { createEgeMockRoutes } from '../routes/ege-mocks.js';
 import { createFileRepository } from '../storage/file-repository.js';
 import { createEgeMockAttempt, egeMockAttemptPublicDto } from '../ege-mock/attempt.js';
 import { EGE_MOCK_FORM_ID, EGE_MOCK_FORM_REVISION, getEgeMockForm } from '../ege-mock/catalog.js';
+import { buildEgeMockCanonicalResult } from '../ege-mock/result.js';
 import { compileOpenApiSchema } from './support/openapi-schema-evaluator.js';
 import { EGE_MOCK_FORM_1_V1_PUBLIC } from '../public/ege-mock-form-1-v1.js';
 import { createEgeMockWrittenRunner } from '../public/ege-mock-written-runner.js';
@@ -136,6 +137,70 @@ test('explicit assessment run POST executes deterministic zeros and exact replay
       uuid: (() => { let value = 0; return () => `67f6d408-f796-4a25-8000-${String(++value).padStart(12, '0')}`; })(),
       now: () => new Date('2026-08-13T06:01:00.000Z'),
     }),
+  });
+});
+
+test('result history keeps the diagnostic baseline while a repeat starts in training mode', async () => {
+  await withServer(async ({ owner, other, repository, request }) => {
+    const form = getEgeMockForm(EGE_MOCK_FORM_ID, EGE_MOCK_FORM_REVISION);
+    const started = await (await request(owner, '/api/v1/ege-mocks/attempts', {
+      method: 'POST', idempotencyKey: 'ec272abf-bdae-44ef-a1f5-cba9f083e1b3',
+      body: { formId: form.id, formRevision: form.revision, catalogFingerprint: form.fingerprint },
+    })).json();
+    const written = await repository.submitEgeMockWritten(owner, started.attempt.id, {
+      expectedRevision: 0, idempotencyKey: '5e629ce6-29d4-422c-8ce6-78ee7b37c82c',
+      requestHash: 'a'.repeat(64),
+    });
+    const oral = await repository.startEgeMockOral(owner, started.attempt.id, {
+      expectedRevision: written.attempt.revision,
+      idempotencyKey: 'c86fc910-63fe-4ca7-a6b0-ceb94fa8d173', requestHash: 'b'.repeat(64),
+    });
+    const completedOral = await completeEgeMockOralStageLedger(repository, owner, oral);
+    await repository.submitEgeMockOral(owner, started.attempt.id, {
+      expectedRevision: completedOral.attempt.revision,
+      idempotencyKey: 'c225b9d1-9574-4163-816a-d41bf6a06935', requestHash: 'c'.repeat(64),
+    });
+
+    const resultResponse = await request(
+      owner, `/api/v1/ege-mocks/attempts/${started.attempt.id}/result`,
+    );
+    assert.equal(resultResponse.status, 200);
+    assert.equal(resultResponse.headers.get('cache-control'), 'no-store');
+    const result = await resultResponse.json();
+    assert.equal(result.available, true);
+    assert.equal(result.result.canonical.label, 'Диагностический');
+    assert.equal(result.result.canonical.score.primaryTotal, null);
+    assert.equal(result.result.canonical.forecast.baselineEligible, true);
+
+    const historyResponse = await request(owner, '/api/v1/ege-mocks/attempts/history');
+    assert.equal(historyResponse.status, 200);
+    assert.equal(historyResponse.headers.get('cache-control'), 'no-store');
+    const history = await historyResponse.json();
+    assert.equal(history.baselineAttemptId, started.attempt.id);
+    assert.deepEqual(history.attempts.map(({ id, isBaseline }) => ({ id, isBaseline })), [
+      { id: started.attempt.id, isBaseline: true },
+    ]);
+
+    const repeat = await (await request(owner, '/api/v1/ege-mocks/attempts', {
+      method: 'POST', idempotencyKey: '7550306a-df74-4b2b-a7bd-1eca81e95037',
+      body: { formId: form.id, formRevision: form.revision, catalogFingerprint: form.fingerprint },
+    })).json();
+    assert.equal(repeat.attempt.mode, 'training');
+    assert.notEqual(repeat.attempt.id, started.attempt.id);
+    const historyAfterRepeat = await (await request(
+      owner, '/api/v1/ege-mocks/attempts/history',
+    )).json();
+    assert.equal(historyAfterRepeat.baselineAttemptId, started.attempt.id);
+    assert.equal(historyAfterRepeat.attempts.length, 1,
+      'an unfinished repeat is not presented as a completed historical result');
+
+    assert.equal((await request(other, '/api/v1/ege-mocks/attempts/history')).status, 200);
+    assert.deepEqual(await (await request(other, '/api/v1/ege-mocks/attempts/history')).json(), {
+      baselineAttemptId: null, attempts: [],
+    });
+    assert.equal((await request(
+      owner, '/api/v1/ege-mocks/attempts/history?attemptId=not-a-uuid',
+    )).status, 400, 'the optional history pin is a bounded attempt UUID, not an arbitrary selector');
   });
 });
 
@@ -758,9 +823,13 @@ test('EGE mock HTTP lifecycle is answer-free, owner-bound and restores exact aut
       `/api/v1/ege-mocks/attempts/${started.attempt.id}/result`)).json();
     assert.equal(result.available, true);
     assert.equal(result.keysRevealed, true);
-    assert.deepEqual(objectKeys(result).filter((key) => (
-      ['accepted', 'criteriaRef', 'contentRef'].includes(key)
-    )), []);
+    assert.deepEqual(objectKeys(result).filter((key) => key === 'accepted'), []);
+    assert.equal(result.result.canonical.items.length, 42);
+    assert.deepEqual(
+      [...new Set(result.result.canonical.items.flatMap((item) => Object.keys(item.contentRef)))].sort(),
+      ['catalogId', 'id', 'revision'],
+      'revealed review exposes only the allowlisted authored-content identity',
+    );
     assert.equal((await request(owner,
       `/api/v1/ege-mocks/attempts/${started.attempt.id}/assessment/retry`, {
         method: 'POST', idempotencyKey: '9306517d-03a2-416c-85f1-3d3a4b3206af', body: {},
@@ -948,7 +1017,8 @@ test('EGE mock executable OpenAPI matches runtime forms, attempts and strict mut
     'OpenAPI 3.0 schemas must express null through nullable instead of type: null');
   for (const endpoint of [
     '/api/v1/ege-mocks/forms:', '/api/v1/ege-mocks/attempts:',
-    '/api/v1/ege-mocks/attempts/current:', '/api/v1/ege-mocks/attempts/{attemptId}:',
+    '/api/v1/ege-mocks/attempts/current:', '/api/v1/ege-mocks/attempts/history:',
+    '/api/v1/ege-mocks/attempts/{attemptId}:',
     '/api/v1/ege-mocks/attempts/{attemptId}/draft:',
     '/api/v1/ege-mocks/attempts/{attemptId}/written/submit:',
     '/api/v1/ege-mocks/attempts/{attemptId}/oral/start:',
@@ -957,6 +1027,26 @@ test('EGE mock executable OpenAPI matches runtime forms, attempts and strict mut
     '/api/v1/ege-mocks/attempts/{attemptId}/assessment/retry:',
     '/api/v1/ege-mocks/attempts/{attemptId}/result:',
   ]) assert.match(specification, new RegExp(endpoint.replace(/[{}]/gu, '\\$&'), 'u'));
+  const historyOperation = specification.slice(
+    specification.indexOf('/api/v1/ege-mocks/attempts/history:'),
+    specification.indexOf('/api/v1/ege-mocks/attempts/{attemptId}:'),
+  );
+  assert.match(historyOperation, /name: attemptId[\s\S]*?in: query[\s\S]*?format: uuid/u,
+    'OpenAPI documents the optional exact-attempt history pin used by result tuple loading');
+  const formsOperation = specification.slice(
+    specification.indexOf('/api/v1/ege-mocks/forms:'),
+    specification.indexOf('/api/v1/ege-mocks/attempts:'),
+  );
+  assert.doesNotMatch(formsOperation, /name: attemptId/u,
+    'the history-only exact-attempt selector is not advertised on the forms operation');
+  const exportOperation = specification.slice(
+    specification.indexOf('/api/v1/account/export:'),
+    specification.indexOf('/api/v1/account:'),
+  );
+  assert.match(exportOperation, /revealed `correctAnswer`[\s\S]*?completed EGE/u,
+    'account export documents post-completion objective keys precisely');
+  assert.doesNotMatch(exportOperation, /or answer key/u,
+    'the export contract cannot promise to omit keys it intentionally exports after reveal');
 
   const start = compileOpenApiSchema(specification, 'EgeMockStartRequest');
   assert.equal(start({
@@ -1288,6 +1378,26 @@ test('EGE mock executable OpenAPI matches runtime forms, attempts and strict mut
   const startResponse = compileOpenApiSchema(specification, 'EgeMockStartResponse');
   assert.equal(startResponse({ created: true, replayed: false, attempt }), true,
     JSON.stringify(startResponse.errors));
+  const canonicalPending = buildEgeMockCanonicalResult({
+    id: attempt.id, form_id: runtimeForm.id, form_revision: runtimeForm.revision,
+    catalog_fingerprint: runtimeForm.fingerprint,
+    mode: 'diagnostic', attempt_number: 1, state: 'assessment_pending', draft: {},
+    oral_submitted_at: '2026-08-13T06:37:00.000Z',
+    writing_assessment: null, speaking_assessment: null,
+  }, catalog.getEgeMockForm('ege-en-2026-form-1', 1));
+  canonicalPending.sections.find(({ id }) => id === 'speaking').status = 'pending';
+  canonicalPending.items.filter(({ position }) => position >= 39)
+    .forEach((item) => { item.status = 'pending'; });
+  const pendingComposite = {
+    canonical: canonicalPending,
+    writing: egeMockWritingResultPublicDto({ writing_assessment: null }),
+    speaking: { ...pendingSpeakingState, score: null, maximum: 20 },
+  };
+  const pendingWritingState = {
+    ...completedWritingState,
+    status: 'not_started',
+    assessmentRevision: pendingComposite.writing.assessmentRevision,
+  };
   const result = compileOpenApiSchema(specification, 'EgeMockResult');
   assert.equal(result({
     available: false, state: 'written_in_progress', keysRevealed: false,
@@ -1315,25 +1425,31 @@ test('EGE mock executable OpenAPI matches runtime forms, attempts and strict mut
   }), false, 'safe result projection only exposes the canonical durable disposition');
   assert.equal(result({
     available: true, state: 'assessment_pending', keysRevealed: true,
-    writingAssessment: { ...completedWritingState, status: 'not_started' },
+    writingAssessment: pendingWritingState,
     speakingAssessment: pendingSpeakingState,
-    assessment: { status: 'pending', retryAllowed: false, retryCount: 0 }, result: null,
+    assessment: { status: 'pending', retryAllowed: false, retryCount: 0 }, result: pendingComposite,
   }), true, JSON.stringify(result.errors));
   assert.equal(result({
     available: true, state: 'assessment_pending', keysRevealed: true,
+    writingAssessment: completedWritingState,
+    speakingAssessment: pendingSpeakingState,
+    assessment: { status: 'pending', retryAllowed: false, retryCount: 0 }, result: pendingComposite,
+  }), false, 'top-level controls cannot contradict the nested provisional result status');
+  assert.equal(result({
+    available: true, state: 'assessment_pending', keysRevealed: true,
     writingAssessment: { ...completedWritingState, status: 'not_started' },
-    assessment: { status: 'not_started', retryAllowed: false, retryCount: 0 }, result: null,
+    assessment: { status: 'not_started', retryAllowed: false, retryCount: 0 }, result: pendingComposite,
   }), false, 'an available oral result always includes its provisional speaking state');
   assert.equal(result({
     available: true, state: 'assessment_pending', keysRevealed: true,
     writingAssessment: subscriptionBlockedWritingState,
-    assessment: { status: 'pending', retryAllowed: false, retryCount: 0 }, result: null,
+    assessment: { status: 'pending', retryAllowed: false, retryCount: 0 }, result: pendingComposite,
   }), false, 'a blocked available result must expose its durable subscription disposition');
   assert.equal(result({
     available: true, state: 'assessment_pending', keysRevealed: true,
     writingAssessment: { ...completedWritingState, status: 'not_started' },
     assessmentRunDisposition: 'subscription_required',
-    assessment: { status: 'not_started', retryAllowed: false, retryCount: 0 }, result: null,
+    assessment: { status: 'not_started', retryAllowed: false, retryCount: 0 }, result: pendingComposite,
   }), false, 'an unblocked available result must not invent a subscription disposition');
   const writingResult = egeMockWritingResultPublicDto({
     writing_assessment: {
@@ -1373,30 +1489,160 @@ test('EGE mock executable OpenAPI matches runtime forms, attempts and strict mut
     },
   });
   assert.equal(writingResult.assessmentRevision, 7);
+  const writingResultByPosition = new Map(writingResult.items.map((item) => [item.position, item]));
+  const canonicalCompleted = {
+    ...canonicalPending,
+    score: {
+      objectivePrimary: canonicalPending.score.objectivePrimary,
+      provisionalSubjectivePrimary: 40, primaryTotal: 40, maximum: 82,
+      range: { minimum: 40, maximum: 40 },
+    },
+    sections: canonicalPending.sections.map((section) => ['writing', 'speaking'].includes(section.id)
+      ? { ...section, score: 20, status: 'completed' } : section),
+    forecast: { ...canonicalPending.forecast, score: 49, range: { minimum: 49, maximum: 49 } },
+    items: canonicalPending.items.map((item) => {
+      if (item.position <= 36) return item;
+      const writingItem = writingResultByPosition.get(item.position);
+      return {
+        ...item,
+        status: 'completed',
+        score: item.maximum,
+        ...(writingItem ? {
+          criteria: writingItem.criteria,
+          feedback: writingItem.feedback,
+          evidence: writingItem.evidence,
+        } : {
+          criteria: [{ name: 'Критерии устной части', got: item.maximum, max: item.maximum }],
+          feedback: {
+            verdict: 'Ответ предварительно соответствует критериям.',
+            nextStep: 'Сохраните качество и проверьте ответ по авторскому критерию.',
+          },
+        }),
+      };
+    }),
+  };
   assert.equal(result({
     available: true, state: 'assessment_pending', keysRevealed: true,
     writingAssessment: completedWritingState,
     speakingAssessment: pendingSpeakingState,
     assessment: { status: 'pending', retryAllowed: false, retryCount: 0 },
     result: {
+      canonical: canonicalPending,
       writing: writingResult,
       speaking: { ...pendingSpeakingState, score: null, maximum: 20 },
     },
-  }), true, JSON.stringify(result.errors));
+  }), false, 'a completed writing projection cannot contradict pending canonical Writing items');
   const completedSpeakingResult = { ...speakingState, score: 20, maximum: 20 };
   assert.equal(result({
     available: true, state: 'completed', keysRevealed: true,
     writingAssessment: completedWritingState,
     speakingAssessment: speakingState,
     assessment: { status: 'completed', retryAllowed: false, retryCount: 0 },
-    result: { writing: writingResult, speaking: completedSpeakingResult },
+    result: { canonical: canonicalCompleted, writing: writingResult, speaking: completedSpeakingResult },
   }), true, JSON.stringify(result.errors));
+  for (const [position, responseState] of [[1, 'submitted_hidden'], [37, 'provided']]) {
+    const mismatchedCanonical = structuredClone(canonicalCompleted);
+    mismatchedCanonical.items[position - 1].responseState = responseState;
+    assert.equal(result({
+      available: true, state: 'completed', keysRevealed: true,
+      writingAssessment: completedWritingState,
+      speakingAssessment: speakingState,
+      assessment: { status: 'completed', retryAllowed: false, retryCount: 0 },
+      result: { canonical: mismatchedCanonical, writing: writingResult, speaking: completedSpeakingResult },
+    }), false, `position ${position} cannot expose the responseState of the other answer kind`);
+  }
+  assert.equal(result({
+    available: true, state: 'completed', keysRevealed: true,
+    writingAssessment: completedWritingState,
+    speakingAssessment: speakingState,
+    assessment: { status: 'completed', retryAllowed: false, retryCount: 0 },
+    result: {
+      canonical: canonicalCompleted,
+      writing: {
+        ...writingResult,
+        items: writingResult.items.map((item) => item.position === 37 ? {
+          ...item, feedback: { ...item.feedback, verdict: 'Contradictory safe review.' },
+        } : item),
+      },
+      speaking: completedSpeakingResult,
+    },
+  }), false, 'composite Writing review must equal the canonical safe review');
+  assert.equal(result({
+    available: true, state: 'completed', keysRevealed: true,
+    writingAssessment: completedWritingState,
+    speakingAssessment: speakingState,
+    assessment: { status: 'completed', retryAllowed: true, retryCount: 0 },
+    result: { canonical: canonicalCompleted, writing: writingResult, speaking: completedSpeakingResult },
+  }), false, 'aggregate retry availability must equal the Writing assessment controls');
+  assert.equal(result({
+    available: true, state: 'completed', keysRevealed: true,
+    writingAssessment: completedWritingState,
+    speakingAssessment: speakingState,
+    assessment: { status: 'completed', retryAllowed: false, retryCount: 1 },
+    result: { canonical: canonicalCompleted, writing: writingResult, speaking: completedSpeakingResult },
+  }), false, 'aggregate retry count must equal the Writing assessment controls');
+  assert.equal(result({
+    available: true, state: 'completed', keysRevealed: true,
+    writingAssessment: completedWritingState,
+    speakingAssessment: speakingState,
+    assessment: { status: 'completed', retryAllowed: false, retryCount: 0 },
+    result: {
+      canonical: canonicalCompleted,
+      writing: writingResult,
+      speaking: { ...completedSpeakingResult, score: 0 },
+    },
+  }), false, 'a completed speaking projection score must equal its canonical section score');
+  assert.equal(result({
+    available: true, state: 'completed', keysRevealed: true,
+    writingAssessment: { ...completedWritingState, assessmentRevision: 6 },
+    speakingAssessment: speakingState,
+    assessment: { status: 'completed', retryAllowed: false, retryCount: 0 },
+    result: { canonical: canonicalCompleted, writing: writingResult, speaking: completedSpeakingResult },
+  }), false, 'top-level writing controls must identify the exact nested assessment revision');
+  assert.equal(result({
+    available: true, state: 'completed', keysRevealed: true,
+    writingAssessment: completedWritingState,
+    speakingAssessment: {
+      ...speakingState,
+      items: { ...speakingState.items, 39: { ...speakingState.items[39], score: 0 } },
+    },
+    assessment: { status: 'completed', retryAllowed: false, retryCount: 0 },
+    result: { canonical: canonicalCompleted, writing: writingResult, speaking: completedSpeakingResult },
+  }), false, 'top-level speaking controls must identify the exact nested item assessment');
+  const retryableCanonical = structuredClone(canonicalPending);
+  retryableCanonical.sections.find(({ id }) => id === 'speaking').status = 'retryable';
+  retryableCanonical.items.filter(({ position }) => position >= 39)
+    .forEach((item) => { item.status = 'retryable'; });
+  const retryableSpeakingItems = Object.fromEntries(Object.entries(pendingSpeakingState.items)
+    .map(([position, item]) => [position, {
+      ...item, status: 'retryable', errorCode: 'provider_timeout',
+    }]));
+  const retryableSpeakingState = {
+    ...pendingSpeakingState, status: 'retryable', retryCount: 1, items: retryableSpeakingItems,
+  };
+  assert.equal(result({
+    available: true, state: 'assessment_pending', keysRevealed: true,
+    writingAssessment: pendingWritingState,
+    speakingAssessment: {
+      ...retryableSpeakingState,
+      items: {
+        ...retryableSpeakingItems,
+        39: { ...retryableSpeakingItems[39], errorCode: 'provider_unavailable' },
+      },
+    },
+    assessment: { status: 'retryable', retryAllowed: false, retryCount: 0 },
+    result: {
+      canonical: retryableCanonical,
+      writing: pendingComposite.writing,
+      speaking: { ...retryableSpeakingState, score: null, maximum: 20 },
+    },
+  }), false, 'top-level Speaking controls must preserve the exact nested failure reason');
   assert.equal(result({
     available: true, state: 'completed', keysRevealed: true,
     writingAssessment: completedWritingState,
     speakingAssessment: pendingSpeakingState,
     assessment: { status: 'completed', retryAllowed: false, retryCount: 0 },
-    result: { writing: writingResult, speaking: completedSpeakingResult },
+    result: { canonical: canonicalCompleted, writing: writingResult, speaking: completedSpeakingResult },
   }), false, 'a completed result cannot expose a pending provisional speaking state');
   const writingItem = compileOpenApiSchema(specification, 'EgeMockWritingResultItem');
   const writingResultSchema = compileOpenApiSchema(specification, 'EgeMockWritingResult');

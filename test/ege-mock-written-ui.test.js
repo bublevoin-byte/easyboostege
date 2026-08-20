@@ -134,6 +134,20 @@ test('oral cross-tab UI has one durable capture owner and storage adoption canno
     /type: 'restore'/u, 'a peer storage event must not perform GET + persist + another storage event');
 });
 
+test('oral cross-tab and reconnect merges reload the complete result projection', () => {
+  const onlineHandler = screen.slice(
+    screen.indexOf("window.addEventListener('online'"),
+    screen.indexOf("window.addEventListener('storage'"),
+  );
+  assert.match(onlineHandler,
+    /candidateRunner\.dispatch\([\s\S]*?reloadFinalResultAfterAssessmentMerge\(operation, snapshot\)/u,
+    'oral reconnect cannot retain a stale total, forecast, recommendations or history');
+  const storageHandler = screen.slice(screen.indexOf("window.addEventListener('storage'"));
+  assert.match(storageHandler,
+    /candidateRunner\.dispatch\(\{ type: 'refreshLocal' \}\)[\s\S]*?reloadFinalResultAfterAssessmentMerge\(operation, snapshot\)/u,
+    'oral cross-tab adoption reloads the same complete result projection as same-tab assessment');
+});
+
 test('oral stage countdown is quiet and the verified task-42 composite spans the mobile grid', () => {
   assert.match(screen, /<p><span>Этап<\/span><strong>/u);
   assert.doesNotMatch(screen, /<p role="status"><span>Этап<\/span>/u);
@@ -142,6 +156,51 @@ test('oral stage countdown is quiet and the verified task-42 composite spans the
 
 test('a failed oral reopen preserves its actionable error instead of returning to a silent written card', () => {
   assert.match(screen, /const opened = await ensureOralRunner\(\);[\s\S]*?if \(!opened\) return/u);
+});
+
+test('a failed result refresh keeps stale authority explicit and retryable', () => {
+  const loader = screen.slice(
+    screen.indexOf('async function loadFinalResult'),
+    screen.indexOf('function finalAssessmentControls'),
+  );
+  assert.match(loader, /await handleRunnerError\(error, operation\)/u,
+    'owner failures must invalidate through the shared authority seam');
+  assert.match(loader, /return false/u);
+  assert.match(loader,
+    /attempts\/history\?attemptId=\$\{encodeURIComponent\(attemptId\)\}/u,
+    'the paired history snapshot pins the exact restored terminal attempt inside its bounded window');
+  assert.match(screen,
+    /finalResultLoadFailedAttemptId === snapshot\.attemptId[\s\S]*?data-ege-action="result-refresh"/u,
+    'a stale rendered result exposes a retry action instead of only an error string');
+  assert.match(screen,
+    /const refreshed = await loadFinalResult\(operation, finalResultAttemptId\);[\s\S]*?if \(!refreshed\) return;[\s\S]*?visibleError = ''/u,
+    'assessment completion cannot erase a failed authoritative refresh');
+});
+
+test('a higher cross-tab assessment revision invalidates and reloads the complete result projection', () => {
+  assert.match(screen, /let finalResultLoadingAttemptId = ''/u,
+    'the first in-flight result request records which attempt it belongs to');
+  const refresh = screen.slice(
+    screen.indexOf('async function reloadFinalResultAfterAssessmentMerge'),
+    screen.indexOf('function finalAssessmentControls'),
+  );
+  assert.match(refresh,
+    /finalResultLoadingAttemptId === attemptId[\s\S]*?writingChanged[\s\S]*?speakingChanged[\s\S]*?finalResultLoadAuthority\.invalidate\(attemptId\)[\s\S]*?finalResult = null[\s\S]*?finalHistory = null[\s\S]*?finalResultReloadQueuedAttemptId = attemptId[\s\S]*?await loadFinalResult\(operation, attemptId\)/u,
+    'one higher assessment revision reloads score, forecast, recommendations and history together');
+  const loader = screen.slice(
+    screen.indexOf('async function loadFinalResult'),
+    screen.indexOf('function finalAssessmentControls'),
+  );
+  assert.match(loader,
+    /finalResultLoading = false[\s\S]*?queuedAttemptId[\s\S]*?queueMicrotask\(\(\) => loadFinalResult\(operation, queuedAttemptId\)\)/u,
+    'a storage merge during an older in-flight GET always schedules one authoritative follow-up');
+  assert.match(loader,
+    /finalResultRequiredAttemptId === attemptId[\s\S]*?loadedAssessmentRevision < finalResultRequiredAssessmentRevision/u,
+    'an outdated first response cannot overwrite the higher cross-tab assessment revision');
+  const storageHandler = screen.slice(screen.indexOf("window.addEventListener('storage'"));
+  assert.match(storageHandler,
+    /dispatch\(\{ type: 'refreshLocal' \}\)\.then\(async \(snapshot\)[\s\S]*?reloadFinalResultAfterAssessmentMerge\(operation, snapshot\)/u,
+    'the cross-tab merge seam cannot keep the already-rendered pending result');
 });
 
 test('route startup failures stay handled and the native Back action runs leave hooks', () => {

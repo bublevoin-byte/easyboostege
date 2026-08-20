@@ -45,8 +45,16 @@ export async function completeEgeMockOralStageLedger(
 export async function assertEgeMockAttemptRepositoryContract(assert, repository, telegramBase) {
   const owner = await repository.createTelegramUser(telegramBase, `EGE mock ${telegramBase}`);
   const other = await repository.createTelegramUser(telegramBase + 1, `EGE mock other ${telegramBase}`);
+  const deadlineOwner = await repository.createTelegramUser(
+    telegramBase + 2, `EGE mock deadline ${telegramBase}`,
+  );
+  const settlementOwner = await repository.createTelegramUser(
+    telegramBase + 3, `EGE mock settlement ${telegramBase}`,
+  );
   await repository.grantDays(telegramBase, 45, `EGE mock ${telegramBase}`);
   await repository.grantDays(telegramBase + 1, 45, `EGE mock other ${telegramBase}`);
+  await repository.grantDays(telegramBase + 2, 45, `EGE mock deadline ${telegramBase}`);
+  await repository.grantDays(telegramBase + 3, 45, `EGE mock settlement ${telegramBase}`);
   const form = getEgeMockForm(EGE_MOCK_FORM_ID, EGE_MOCK_FORM_REVISION);
   const startKey = crypto.randomUUID();
   const startInput = {
@@ -221,8 +229,53 @@ export async function assertEgeMockAttemptRepositoryContract(assert, repository,
     assert.equal(submitted.attempt.state, 'assessment_pending');
     assert.deepEqual(submitted.receipt.orderedPositions, [39, 40, 41, 42]);
     assert.match(submitted.receipt.payloadDigest, /^sha256:[a-f0-9]{64}$/u);
-    assert.equal((await repository.getEgeMockResult(owner, first.attempt.id)).keysRevealed, true);
-    assert.equal((await repository.getEgeMockResult(owner, first.attempt.id)).result.writing.score, 0);
+    const pendingResult = await repository.getEgeMockResult(owner, first.attempt.id);
+    assert.equal(pendingResult.keysRevealed, true);
+    assert.equal(pendingResult.result.writing.score, 0);
+    assert.equal(pendingResult.result.canonical.schemaVersion, 'ege-mock-result-v1');
+    assert.equal(pendingResult.result.canonical.score.maximum, 82);
+    assert.equal(pendingResult.result.canonical.score.provisionalSubjectivePrimary, 0,
+      'the known writing score stays visible while missing speaking evidence remains excluded');
+    assert.equal(pendingResult.result.canonical.score.primaryTotal, null);
+    assert.deepEqual(pendingResult.result.canonical.sections.map(({ id, maximum }) => [id, maximum]), [
+      ['listening', 12], ['reading', 12], ['grammar_lexis', 18], ['writing', 20], ['speaking', 20],
+    ]);
+    assert.equal(pendingResult.result.canonical.forecast.policyId, 'ege-mock-forecast-2026-v1');
+    assert.equal(pendingResult.result.canonical.forecast.label, 'Прогноз тестового балла');
+    assert.equal(pendingResult.result.canonical.masteryCredit, false);
+    assert.ok(pendingResult.result.canonical.recommendations.every((item) => (
+      item.masteryCredit === false && new Set(item.evidencePositions).size === item.evidencePositions.length
+    )));
+
+    const diagnosticHistory = await repository.getEgeMockHistory(owner);
+    assert.equal(diagnosticHistory.baselineAttemptId, first.attempt.id);
+    assert.deepEqual(diagnosticHistory.attempts.map(({ id, isBaseline, replacesBaseline }) => ({
+      id, isBaseline, replacesBaseline,
+    })), [{ id: first.attempt.id, isBaseline: true, replacesBaseline: false }]);
+    const diagnosticEvidence = (await repository.getAdaptiveLearningEvidenceSources(owner)).attempts
+      .filter(({ id }) => id.startsWith(`ege-mock:${first.attempt.id}:`));
+    assert.ok(diagnosticEvidence.length > 0);
+    assert.ok(diagnosticEvidence.every((item) => item.evidence_quality === 'server_verified_assisted'
+      && item.metadata?.source_attempt_id === first.attempt.id
+      && item.metadata?.mastery_credit === false));
+    assert.equal(new Set(diagnosticEvidence.map(({ activity }) => activity)).size,
+      diagnosticEvidence.length, 'one full mock cannot multiply a weak skill by error frequency');
+    const firstExport = await repository.exportUserData(owner);
+    const diagnosticErrorFocus = firstExport.error_bank.filter((entry) => (
+      entry.error_type === 'ege_mock_diagnostic_weak_skill'
+        && entry.details?.source_attempt_id === first.attempt.id
+    ));
+    assert.equal(diagnosticErrorFocus.length, pendingResult.result.canonical.recommendations.length);
+    assert.ok(diagnosticErrorFocus.every((entry) => entry.occurrence_count === 1
+      && entry.details.mastery_credit === false));
+    await repository.getEgeMockResult(owner, first.attempt.id);
+    await repository.getEgeMockHistory(owner);
+    const replayedFocus = (await repository.exportUserData(owner)).error_bank.filter((entry) => (
+      entry.error_type === 'ege_mock_diagnostic_weak_skill'
+        && entry.details?.source_attempt_id === first.attempt.id
+    ));
+    assert.ok(replayedFocus.every((entry) => entry.occurrence_count === 1),
+      'result/history reloads cannot multiply diagnostic error focus');
 
     await repository.markEgeMockAssessmentRetryable(owner, first.attempt.id, {
       reason: 'provider_unavailable',
@@ -240,6 +293,10 @@ export async function assertEgeMockAttemptRepositoryContract(assert, repository,
     assert.equal(training.created, true);
     assert.equal(training.attempt.mode, 'training');
     assert.equal(training.attempt.attemptNumber, 2);
+    const afterTrainingStart = (await repository.getAdaptiveLearningEvidenceSources(owner)).attempts
+      .filter(({ id }) => id.startsWith('ege-mock:'));
+    assert.deepEqual(afterTrainingStart, diagnosticEvidence,
+      'starting a training repeat cannot replace or multiply diagnostic evidence');
     await assert.rejects(repository.beginEgeMockAssessmentRun(
       owner, training.attempt.id, assessmentRunInput,
     ), { code: 'EGE_MOCK_IDEMPOTENCY_CONFLICT' }, 'the run key is owner-global and attempt-bound');
@@ -287,11 +344,119 @@ export async function assertEgeMockAttemptRepositoryContract(assert, repository,
     ].sort(), 'file and PostgreSQL exports use one exact allowlisted AI request DTO');
     assert.equal(/(?:username|claim_key|contextFingerprint)/u.test(JSON.stringify(exported.ai_requests)), false);
     assert.equal(/(?:idempotency|request_hash|username)/u.test(JSON.stringify(exported.ege_mock_attempts)), false);
+
+    const deadlineStarted = await repository.startEgeMockAttempt(deadlineOwner, {
+      ...startInput, idempotencyKey: crypto.randomUUID(), requestHash: 'f'.repeat(64),
+    });
+    const deadlineWritten = await repository.submitEgeMockWritten(
+      deadlineOwner, deadlineStarted.attempt.id, {
+        expectedRevision: deadlineStarted.attempt.revision,
+        idempotencyKey: crypto.randomUUID(), requestHash: '0'.repeat(64),
+      },
+    );
+    const deadlineOral = await repository.startEgeMockOral(
+      deadlineOwner, deadlineStarted.attempt.id, {
+        expectedRevision: deadlineWritten.attempt.revision,
+        idempotencyKey: crypto.randomUUID(), requestHash: 'a'.repeat(64),
+      },
+    );
+    const deadlineHistory = await repository.getEgeMockHistory(deadlineOwner, {
+      now: () => new Date(deadlineOral.attempt.oralDeadlineAt),
+    });
+    assert.equal(deadlineHistory.baselineAttemptId, deadlineStarted.attempt.id);
+    assert.deepEqual(deadlineHistory.attempts.map(({ id }) => id), [deadlineStarted.attempt.id],
+      'history alone reconciles an expired oral attempt into its terminal result');
+    assert.equal((await repository.getEgeMockResult(
+      deadlineOwner, deadlineStarted.attempt.id,
+    )).available, true);
+    await assert.rejects(repository.saveEgeMockDraft(
+      deadlineOwner, deadlineStarted.attempt.id, {
+        expectedRevision: deadlineOral.attempt.revision, answers: {},
+        idempotencyKey: crypto.randomUUID(), requestHash: 'b'.repeat(64),
+      }, { now: () => new Date(deadlineOral.attempt.oralDeadlineAt) },
+    ), { code: 'EGE_MOCK_WRITTEN_CLOSED' });
+    const deadlineFocus = (await repository.exportUserData(deadlineOwner)).error_bank.filter((entry) => (
+      entry.error_type === 'ege_mock_diagnostic_weak_skill'
+        && entry.details?.source_attempt_id === deadlineStarted.attempt.id
+    ));
+    assert.ok(deadlineFocus.length > 0,
+      'deadline reconciliation persists diagnostic focus even when the requested mutation conflicts');
+    assert.ok(deadlineFocus.every((entry) => entry.occurrence_count === 1
+      && entry.details.mastery_credit === false));
+
+    const settlementCandidate = (body) => ({
+      ...body,
+      idempotencyKey: crypto.randomUUID(),
+      requestHash: crypto.randomBytes(32).toString('hex'),
+    });
+    const settlementStarted = await repository.startEgeMockAttempt(settlementOwner, {
+      ...startInput, idempotencyKey: crypto.randomUUID(), requestHash: 'c'.repeat(64),
+    });
+    const settlementWritten = await repository.submitEgeMockWritten(
+      settlementOwner, settlementStarted.attempt.id,
+      settlementCandidate({ expectedRevision: settlementStarted.attempt.revision }),
+    );
+    let settlementOral = await repository.startEgeMockOral(
+      settlementOwner, settlementStarted.attempt.id,
+      settlementCandidate({ expectedRevision: settlementWritten.attempt.revision }),
+    );
+    let settlementCursorAt = settlementOral.attempt.oralStartedAt;
+    while (!(settlementOral.attempt.oralProgress.position === 42
+      && settlementOral.attempt.oralProgress.phase === 'recording')) {
+      const progress = settlementOral.attempt.oralProgress;
+      const finalTaskAnchor = progress.position === 42 && progress.responseNumber === 1
+        && progress.phase === 'ready'
+        ? new Date(new Date(settlementOral.attempt.oralDeadlineAt).getTime() - 330_000).toISOString()
+        : null;
+      const now = progress.stageDeadlineAt || finalTaskAnchor || settlementCursorAt;
+      if (progress.phase === 'ready' || progress.phase === 'preparing') {
+        settlementOral = await repository.advanceEgeMockOralStage(
+          settlementOwner, settlementStarted.attempt.id,
+          settlementCandidate({
+            action: 'advance', expectedRevision: settlementOral.attempt.revision,
+            position: progress.position, responseNumber: progress.responseNumber,
+          }), { now: () => new Date(now) },
+        );
+      } else {
+        settlementOral = await repository.advanceEgeMockOralStage(
+          settlementOwner, settlementStarted.attempt.id,
+          settlementCandidate({
+            action: 'complete', expectedRevision: settlementOral.attempt.revision,
+            position: progress.position, responseNumber: progress.responseNumber,
+            recording: {
+              recordingId: crypto.randomUUID(), status: 'completed',
+              durationSeconds: { 39: 90, 40: 20, 41: 40, 42: 180 }[progress.position],
+              sha256: crypto.randomBytes(32).toString('hex'),
+            },
+          }), { now: () => new Date(now) },
+        );
+        settlementCursorAt = now;
+      }
+    }
+    const finalProgress = settlementOral.attempt.oralProgress;
+    await assert.rejects(repository.advanceEgeMockOralStage(
+      settlementOwner, settlementStarted.attempt.id,
+      settlementCandidate({
+        action: 'complete', expectedRevision: settlementOral.attempt.revision - 1,
+        position: finalProgress.position, responseNumber: finalProgress.responseNumber,
+        recording: {
+          recordingId: crypto.randomUUID(), status: 'completed', durationSeconds: 180,
+          sha256: crypto.randomBytes(32).toString('hex'),
+        },
+      }), { now: () => new Date(settlementOral.attempt.oralDeadlineAt) },
+    ), { code: 'EGE_MOCK_REVISION_CONFLICT' });
+    assert.equal((await repository.getEgeMockResult(
+      settlementOwner, settlementStarted.attempt.id,
+    )).available, true,
+    'a rejected final oral-stage settlement still persists deadline reconciliation');
+
     assert.equal(await repository.deleteUserData(owner), true);
     assert.equal(await repository.getEgeMockAttempt(owner, first.attempt.id), null);
   } finally {
     await repository.deleteUserData(owner).catch(() => {});
     await repository.deleteUserData(other).catch(() => {});
+    await repository.deleteUserData(deadlineOwner).catch(() => {});
+    await repository.deleteUserData(settlementOwner).catch(() => {});
   }
 }
 

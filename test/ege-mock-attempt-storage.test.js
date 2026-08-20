@@ -516,10 +516,54 @@ test('file EGE mock starts a separate 17-minute oral timer and auto-submits it',
   }
 });
 
-test('file EGE mock reveals no result before both parts and replays explicit oral submit', async () => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-ege-mock-result-gate-'));
+test('file EGE mock persists diagnostic error focus when deadline reconciliation rejects the requested mutation', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-ege-mock-deadline-focus-'));
   const repository = createFileRepository(path.join(directory, 'data.json'));
   try {
+    const { username } = await repository.grantDays(9_260_252, 30, 'Mock deadline focus');
+    const form = getEgeMockForm(EGE_MOCK_FORM_ID, EGE_MOCK_FORM_REVISION);
+    const started = await repository.startEgeMockAttempt(username, {
+      formId: form.id, formRevision: form.revision, catalogFingerprint: form.fingerprint,
+      idempotencyKey: START_KEY, requestHash: 'a'.repeat(64),
+    }, { now: new Date('2026-08-13T06:00:00.000Z') });
+    const written = await repository.submitEgeMockWritten(username, started.attempt.id, {
+      expectedRevision: started.attempt.revision,
+      idempotencyKey: '4e5510b1-b303-41da-8c2e-cdad0a50554d', requestHash: 'b'.repeat(64),
+    }, { now: new Date('2026-08-13T06:10:00.000Z') });
+    const oral = await repository.startEgeMockOral(username, started.attempt.id, {
+      expectedRevision: written.attempt.revision,
+      idempotencyKey: 'd434f5d2-7143-4a42-8c78-fdd73c8bf848', requestHash: 'c'.repeat(64),
+    }, { now: new Date('2026-08-13T07:00:00.000Z') });
+
+    await assert.rejects(repository.saveEgeMockDraft(username, started.attempt.id, {
+      expectedRevision: oral.attempt.revision, answers: {},
+      idempotencyKey: '03473662-2532-45c3-b733-158cd7dd88aa', requestHash: 'd'.repeat(64),
+    }, { now: new Date('2026-08-13T07:17:00.000Z') }), {
+      code: 'EGE_MOCK_WRITTEN_CLOSED',
+    });
+
+    const exported = await repository.exportUserData(username);
+    const focus = exported.error_bank.filter((entry) => (
+      entry.error_type === 'ege_mock_diagnostic_weak_skill'
+        && entry.details?.source_attempt_id === started.attempt.id
+    ));
+    assert.ok(focus.length > 0, 'deadline completion must durably project diagnostic weak skills');
+    assert.ok(focus.every((entry) => entry.occurrence_count === 1
+      && entry.details.mastery_credit === false));
+  } finally {
+    await repository.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('file EGE mock reveals no result before both parts and replays explicit oral submit', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-ege-mock-result-gate-'));
+  const dataFile = path.join(directory, 'data.json');
+  const repository = createFileRepository(dataFile);
+  try {
+    assert.deepEqual(await repository.getEgeMockHistory('missing-owner'), {
+      baselineAttemptId: null, attempts: [],
+    }, 'missing owners share the documented empty-history response across adapters');
     const { username } = await repository.grantDays(9_260_261, 30, 'Mock result gate');
     const form = getEgeMockForm(EGE_MOCK_FORM_ID, EGE_MOCK_FORM_REVISION);
     const started = await repository.startEgeMockAttempt(username, {
@@ -561,7 +605,11 @@ test('file EGE mock reveals no result before both parts and replays explicit ora
     assert.equal(submitted.receipt.operation, 'oral_submit');
     assert.deepEqual(submitted.receipt.orderedPositions, [39, 40, 41, 42]);
     assert.deepEqual(replay, { ...submitted, replayed: true });
+    const beforeObservations = await fs.readFile(dataFile);
     const result = await repository.getEgeMockResult(username, started.attempt.id);
+    await repository.getEgeMockHistory(username);
+    assert.deepEqual(await fs.readFile(dataFile), beforeObservations,
+      'result/history GET repository seams are byte-for-byte observational');
     const automaticAssessment = {
       ...AUTOMATIC_ASSESSMENT_PUBLIC_CONTRACT,
       label: 'Предварительная автоматическая оценка',
@@ -588,7 +636,14 @@ test('file EGE mock reveals no result before both parts and replays explicit ora
       status: 'pending', ...automaticAssessment,
       retryAllowed: false, retryCount: 0, items: speakingItems,
     };
-    assert.deepEqual(result, {
+    const { canonical, ...legacyResult } = result.result;
+    assert.equal(canonical.attemptId, started.attempt.id);
+    assert.equal(canonical.items.length, 42);
+    assert.equal(canonical.score.primaryTotal, null);
+    assert.deepEqual(canonical.score.range, { minimum: 0, maximum: 40 });
+    assert.equal(canonical.forecast.score, null);
+    assert.equal(canonical.masteryCredit, false);
+    assert.deepEqual({ ...result, result: legacyResult }, {
       available: true,
       state: 'assessment_pending',
       keysRevealed: true,

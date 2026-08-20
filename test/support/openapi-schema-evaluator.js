@@ -1,4 +1,18 @@
 import { GRAMMAR_CATALOG, getGrammarCatalogRuntime } from '../../public/grammar-catalog.js';
+import { egeMockDashboardSummaryMatchesPolicy } from '../../shared/ege-mock-forecast-metadata.js';
+import {
+  EGE_MOCK_FORECAST_POLICY,
+  EGE_MOCK_RESULT_HISTORY_LIMIT,
+  EGE_MOCK_RESULT_ITEM_MAXIMUMS,
+  EGE_MOCK_RESULT_RECOMMENDATION_DEFINITIONS,
+  EGE_MOCK_RESULT_SECTION_MATRIX,
+  egeMockAvailableResultMatchesComposite,
+  egeMockCanonicalResponseStatesMatchItemKinds,
+  egeMockCanonicalSectionStatusesMatchItems,
+  egeMockCompositeResultMatchesCanonical,
+  egeMockForecastScore,
+  egeMockResultSkillForPosition,
+} from '../../shared/ege-mock-result-contract.js';
 
 function exactGrammarTransfers(items, catalog) {
   const runtime = getGrammarCatalogRuntime(catalog?.version, catalog?.revision);
@@ -42,6 +56,134 @@ const EGE_WRITING_RUBRICS = Object.freeze({
     ]),
   }),
 });
+
+function exactEgeCanonicalResult(value) {
+  if (!Array.isArray(value?.sections) || value.sections.length !== 5
+    || !Array.isArray(value?.items) || value.items.length !== 42
+    || value.masteryCredit !== false
+    || !egeMockCanonicalResponseStatesMatchItemKinds(value)
+    || !egeMockCanonicalSectionStatusesMatchItems(value)) return false;
+  const itemScores = new Map(EGE_MOCK_RESULT_SECTION_MATRIX.map(([id]) => [id, []]));
+  const weak = new Map();
+  for (let index = 0; index < value.items.length; index += 1) {
+    const item = value.items[index];
+    const position = index + 1;
+    const section = position <= 9 ? 'listening' : position <= 18 ? 'reading'
+      : position <= 36 ? 'grammar_lexis' : position <= 38 ? 'writing' : 'speaking';
+    const scoreKind = position <= 36 ? 'exact' : 'approximate';
+    const scoredWritingReviewInvalid = position <= 38 && item?.score != null
+      && (!Array.isArray(item.criteria) || item.criteria.length < 3
+        || item.feedback == null || !Array.isArray(item.evidence));
+    const scoredSpeakingReviewInvalid = position >= 39 && item?.score != null
+      && (!Array.isArray(item.criteria) || item.criteria.length < 1 || item.feedback == null);
+    const writingStatusInvalid = position >= 37 && position <= 38 && (item?.score == null
+      ? !['not_started', 'pending', 'retryable', 'ambiguous'].includes(item.status)
+      : item.status !== 'completed');
+    const speakingStatusInvalid = position >= 39 && (item?.score == null
+      ? !['not_started', 'pending', 'retryable'].includes(item.status)
+      : item.status !== 'completed');
+    if (item?.position !== position || item.section !== section || item.scoreKind !== scoreKind
+      || item.maximum !== EGE_MOCK_RESULT_ITEM_MAXIMUMS[index]
+      || writingStatusInvalid
+      || speakingStatusInvalid
+      || (scoreKind === 'exact' && (item.status !== 'completed'
+        || !Number.isInteger(item.score) || item.correctAnswer == null
+        || item.correct !== (item.score === item.maximum)))
+      || (scoreKind === 'approximate' && (item.learnerAnswer !== null || item.correctAnswer !== null
+        || !item.criteriaRef || !/^sha256:[a-f0-9]{64}$/u.test(item.criteriaFingerprint || '')
+        || scoredWritingReviewInvalid || scoredSpeakingReviewInvalid))
+      || (item.score != null && (!Number.isInteger(item.score)
+        || item.score < 0 || item.score > item.maximum))) return false;
+    itemScores.get(section).push(item.score);
+    if (item.score != null && item.score < item.maximum) {
+      const skill = egeMockResultSkillForPosition(position);
+      const evidence = weak.get(skill) || [];
+      evidence.push(position);
+      weak.set(skill, evidence);
+    }
+  }
+  let objective = 0;
+  let provisional = 0;
+  let missing = 0;
+  let scoredSubjectiveItems = 0;
+  for (let index = 0; index < EGE_MOCK_RESULT_SECTION_MATRIX.length; index += 1) {
+    const [id, maximum, scoreKind] = EGE_MOCK_RESULT_SECTION_MATRIX[index];
+    const section = value.sections[index];
+    const scores = itemScores.get(id);
+    const known = scores.filter((score) => score != null);
+    const score = known.length ? known.reduce((sum, itemScore) => sum + itemScore, 0) : null;
+    if (section?.id !== id || section.maximum !== maximum || section.scoreKind !== scoreKind
+      || section.score !== score || (scoreKind === 'exact' && score == null)) return false;
+    if (scoreKind === 'exact') {
+      if (known.length !== scores.length) return false;
+      objective += score;
+    } else {
+      provisional += known.reduce((sum, itemScore) => sum + itemScore, 0);
+      scoredSubjectiveItems += known.length;
+      const positions = value.items.filter((item) => item.section === id);
+      missing += positions.filter((item) => item.score == null)
+        .reduce((sum, item) => sum + item.maximum, 0);
+    }
+  }
+  const complete = missing === 0;
+  const minimum = objective + provisional;
+  const maximum = minimum + missing;
+  if (value.score?.objectivePrimary !== objective
+    || value.score?.provisionalSubjectivePrimary !== (scoredSubjectiveItems ? provisional : null)
+    || value.score?.primaryTotal !== (complete ? minimum : null)
+    || value.score?.maximum !== 82
+    || value.score?.range?.minimum !== minimum || value.score?.range?.maximum !== maximum
+    || value.forecast?.policyId !== EGE_MOCK_FORECAST_POLICY.id
+    || value.forecast?.score !== (value.mode === 'diagnostic' && complete
+      ? egeMockForecastScore(minimum) : null)
+    || (value.mode === 'diagnostic' && (value.forecast?.range?.minimum
+      !== egeMockForecastScore(minimum)
+      || value.forecast?.range?.maximum !== egeMockForecastScore(maximum)))
+    || (value.mode === 'training' && value.forecast?.range !== null)
+    || value.forecast?.baselineEligible !== (value.mode === 'diagnostic')
+    || value.label !== (value.mode === 'diagnostic' ? 'Диагностический' : 'Тренировочный повтор')) {
+    return false;
+  }
+  const actual = value.recommendations;
+  if (!Array.isArray(actual) || actual.length !== weak.size) return false;
+  const seen = new Set();
+  for (const recommendation of actual) {
+    const definition = EGE_MOCK_RESULT_RECOMMENDATION_DEFINITIONS[recommendation?.skillId];
+    const positions = weak.get(recommendation?.skillId);
+    const provisionalEvidence = positions?.some((position) => position >= 37);
+    if (!definition || seen.has(recommendation.skillId) || recommendation.id !== recommendation.skillId
+      || recommendation.module !== definition.module || recommendation.href !== definition.href
+      || recommendation.masteryCredit !== false
+      || recommendation.evidenceKind !== (provisionalEvidence
+        ? 'provisional_low_score' : 'objective_error')
+      || JSON.stringify(recommendation.evidencePositions) !== JSON.stringify(positions)) return false;
+    seen.add(recommendation.skillId);
+  }
+  return true;
+}
+
+function exactEgeResultHistory(value) {
+  if (!Array.isArray(value?.attempts)
+    || value.attempts.length > EGE_MOCK_RESULT_HISTORY_LIMIT) return false;
+  const ids = new Set();
+  const baselines = value.attempts.filter((attempt) => attempt?.isBaseline === true);
+  for (const attempt of value.attempts) {
+    if (!attempt?.id || ids.has(attempt.id) || attempt.replacesBaseline !== false
+      || attempt.result?.attemptId !== attempt.id || attempt.result?.mode !== attempt.mode
+      || attempt.result?.attemptNumber !== attempt.attemptNumber
+      || attempt.result?.formId !== attempt.formId
+      || attempt.result?.formRevision !== attempt.formRevision
+      || attempt.isBaseline !== (attempt.id === value.baselineAttemptId)
+      || (attempt.isBaseline && attempt.mode !== 'diagnostic')) return false;
+    ids.add(attempt.id);
+  }
+  return value.baselineAttemptId == null
+    ? baselines.length === 0 : baselines.length === 1 && baselines[0].id === value.baselineAttemptId;
+}
+
+function exactEgeDashboardSummary(value) {
+  return egeMockDashboardSummaryMatchesPolicy(value);
+}
 
 function splitFlow(source, separator = ',') {
   const parts = [];
@@ -224,6 +366,31 @@ export function compileOpenApiSchema(openapi, name) {
     }
     if (schema.not && matches(schema.not, value, path, [])) {
       errors.push(`${path} matches a forbidden branch`); return false;
+    }
+    if (schema['x-easyboost-ege-result'] === 'canonical-v1'
+      && !exactEgeCanonicalResult(value)) {
+      errors.push(`${path} must preserve exact EGE result totals, review and recommendations`);
+      return false;
+    }
+    if (schema['x-easyboost-ege-result-history'] === 'baseline-v1'
+      && !exactEgeResultHistory(value)) {
+      errors.push(`${path} must bind one immutable diagnostic baseline without replacement`);
+      return false;
+    }
+    if (schema['x-easyboost-ege-dashboard'] === 'baseline-v1'
+      && !exactEgeDashboardSummary(value)) {
+      errors.push(`${path} must bind one immutable EGE dashboard baseline to its displayed history window`);
+      return false;
+    }
+    if (schema['x-easyboost-ege-composite-result'] === 'canonical-v1'
+      && !egeMockCompositeResultMatchesCanonical(value)) {
+      errors.push(`${path} must match canonical Writing and Speaking statuses`);
+      return false;
+    }
+    if (schema['x-easyboost-ege-result-envelope'] === 'canonical-v1'
+      && !egeMockAvailableResultMatchesComposite(value)) {
+      errors.push(`${path} must match top-level assessment controls to the canonical result`);
+      return false;
     }
     if (schema['x-easyboost-ege-writing-rubric']) {
       const rubric = EGE_WRITING_RUBRICS[schema['x-easyboost-ege-writing-rubric']];
@@ -442,29 +609,43 @@ export function compileOpenApiSchema(openapi, name) {
       }
     }
     if (typeof value === 'string') {
-      if (schema.minLength != null && value.length < schema.minLength) return false;
-      if (schema.maxLength != null && value.length > schema.maxLength) return false;
-      if (schema.pattern && !(new RegExp(schema.pattern, 'u')).test(value)) return false;
+      if (schema.minLength != null && value.length < schema.minLength) {
+        errors.push(`${path} is shorter than ${schema.minLength}`); return false;
+      }
+      if (schema.maxLength != null && value.length > schema.maxLength) {
+        errors.push(`${path} is longer than ${schema.maxLength}`); return false;
+      }
+      if (schema.pattern && !(new RegExp(schema.pattern, 'u')).test(value)) {
+        errors.push(`${path} does not match ${schema.pattern}`); return false;
+      }
     }
     if (typeof value === 'number') {
       if (schema.minimum != null && value < schema.minimum) return false;
       if (schema.maximum != null && value > schema.maximum) return false;
     }
     if (Array.isArray(value)) {
-      if (schema.minItems != null && value.length < schema.minItems) return false;
-      if (schema.maxItems != null && value.length > schema.maxItems) return false;
+      if (schema.minItems != null && value.length < schema.minItems) {
+        errors.push(`${path} has fewer than ${schema.minItems} items`); return false;
+      }
+      if (schema.maxItems != null && value.length > schema.maxItems) {
+        errors.push(`${path} has more than ${schema.maxItems} items`); return false;
+      }
       if (schema.uniqueItems && new Set(value.map((item) => JSON.stringify(item))).size !== value.length) return false;
       if (schema.items && !value.every((item, index) => matches(schema.items, item, `${path}/${index}`, errors))) return false;
     }
     if (value && typeof value === 'object' && !Array.isArray(value)) {
       if (schema.minProperties != null && Object.keys(value).length < schema.minProperties) return false;
       if (schema.maxProperties != null && Object.keys(value).length > schema.maxProperties) return false;
-      if (schema.required && !schema.required.every((key) => Object.hasOwn(value, key))) return false;
+      if (schema.required && !schema.required.every((key) => Object.hasOwn(value, key))) {
+        errors.push(`${path} misses required properties`); return false;
+      }
       if (schema.properties && !Object.entries(schema.properties).every(([key, child]) => (
         !Object.hasOwn(value, key) || matches(child, value[key], `${path}/${key}`, errors)
       ))) return false;
       if (schema.additionalProperties === false
-        && Object.keys(value).some((key) => !Object.hasOwn(schema.properties || {}, key))) return false;
+        && Object.keys(value).some((key) => !Object.hasOwn(schema.properties || {}, key))) {
+        errors.push(`${path} has unsupported properties`); return false;
+      }
     }
     return true;
   }

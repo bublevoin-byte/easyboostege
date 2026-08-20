@@ -177,7 +177,7 @@ const LEARN_MODS=[
  ['🎧','Аудирование','слушай и отвечай','scr4','linear-gradient(135deg,#5FB6C9,#3E93A8)'],
  ['✍️','Письмо','задания 37 / 38 + ИИ','scr8','linear-gradient(135deg,#FF9E8A,#E26A56)'],
  ['🎤','Говорение','таймер + запись','scr9','linear-gradient(135deg,#FFB07A,#F2683F)'],
- ['⏱','Пробный ЕГЭ','задания 1–36 · строгий таймер','scr16','linear-gradient(135deg,#F47C55,#C94628)']
+ ['⏱','Пробный ЕГЭ','полный вариант · итог и повтор','scr16','linear-gradient(135deg,#F47C55,#C94628)']
 ];
 const EXAM_TRAININGS=[
  {screen:'scr3',start:'gExam',icon:'✎',label:'Грамматика · задания 19–24',background:'#FFEDE4'},

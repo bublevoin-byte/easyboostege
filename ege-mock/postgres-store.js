@@ -25,6 +25,12 @@ import {
 } from './assessment-run-command.js';
 import { getEgeMockForm } from './catalog.js';
 import {
+  buildEgeMockHistory,
+  egeMockErrorFocusEntries,
+  refreshEgeMockStoredResult,
+} from './result.js';
+import { EGE_MOCK_RESULT_HISTORY_LIMIT } from '../shared/ege-mock-result-contract.js';
+import {
   assertEgeMockWritingAssessmentRevisionAvailable,
   applyEgeMockWritingAssessmentClaim,
   applyEgeMockWritingAssessmentClaimRenewal,
@@ -87,6 +93,33 @@ async function writeAttempt(client, row) {
       row.writing_assessment == null ? null : JSON.stringify(row.writing_assessment),
       row.speaking_assessment == null ? null : JSON.stringify(row.speaking_assessment), row.updated_at],
   );
+}
+
+export async function persistEgeMockDerivedProjections(
+  client, username, row, { focus = true } = {},
+) {
+  refreshEgeMockStoredResult(row, getEgeMockForm(row.form_id, row.form_revision));
+  if (focus) {
+    for (const item of egeMockErrorFocusEntries(
+      row, getEgeMockForm(row.form_id, row.form_revision),
+    )) {
+      await client.query(
+        `INSERT INTO error_bank (username, module, item_key, error_type, details,
+                                 first_seen_at, last_seen_at)
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6, $6)
+         ON CONFLICT (username, module, item_key, error_type) DO NOTHING`,
+        [username, item.module, item.itemKey, item.errorType,
+          JSON.stringify(item.details), row.oral_submitted_at],
+      );
+    }
+  }
+  await writeAttempt(client, row);
+}
+
+async function reconcileAndPersistEgeMockDerivedProjections(client, username, row, now) {
+  const reconciled = reconcileEgeMockAttempt(row, now);
+  if (reconciled) await persistEgeMockDerivedProjections(client, username, row);
+  return reconciled;
 }
 
 async function transaction(pool, run) {
@@ -205,7 +238,7 @@ export function createPostgresEgeMockStore(pool) {
       );
       const rows = attempts.rows.map(attemptRow);
       for (const row of rows) {
-        if (reconcileEgeMockAttempt(row, now)) await writeAttempt(client, row);
+        await reconcileAndPersistEgeMockDerivedProjections(client, username, row, now);
       }
       const decision = egeMockStartDecision(rows);
       const { active } = decision;
@@ -249,7 +282,7 @@ export function createPostgresEgeMockStore(pool) {
       const now = typeof suppliedNow === 'function' ? new Date(suppliedNow()) : locked.now;
       if (!Number.isFinite(now.getTime())) throw new EgeMockAttemptError('EGE_MOCK_TIME_INVALID');
       const row = await lockedAttempt(client, username, attemptId);
-      if (row && reconcileEgeMockAttempt(row, now)) await writeAttempt(client, row);
+      if (row) await reconcileAndPersistEgeMockDerivedProjections(client, username, row, now);
       return egeMockAttemptPublicDto(row);
     });
   }
@@ -263,10 +296,10 @@ export function createPostgresEgeMockStore(pool) {
         `SELECT * FROM ege_mock_attempts WHERE username = $1
          ORDER BY created_at DESC, id DESC FOR UPDATE`, [username],
       );
-      let changed = false;
       const rows = result.rows.map(attemptRow);
-      for (const row of rows) changed = reconcileEgeMockAttempt(row, now) || changed;
-      if (changed) for (const row of rows) await writeAttempt(client, row);
+      for (const row of rows) {
+        await reconcileAndPersistEgeMockDerivedProjections(client, username, row, now);
+      }
       return egeMockAttemptPublicDto(egeMockStartDecision(rows).active);
     });
   }
@@ -282,18 +315,22 @@ export function createPostgresEgeMockStore(pool) {
       if (replay) return { ...replay, replayed: true };
       const row = await lockedAttempt(client, username, attemptId);
       if (!row) throw new EgeMockAttemptError('EGE_MOCK_ATTEMPT_NOT_FOUND');
-      const reconciled = shouldSettleEgeMockOralStageBeforeReconcile(
+      const settlementDeferred = shouldSettleEgeMockOralStageBeforeReconcile(
         row, operation, candidate, now,
-      ) ? false : reconcileEgeMockAttempt(row, now);
+      );
+      const reconciled = settlementDeferred ? false
+        : await reconcileAndPersistEgeMockDerivedProjections(client, username, row, now);
       let result;
       try {
         result = await apply(row, now, reconciled);
       } catch (error) {
-        if (!reconciled) throw error;
-        await writeAttempt(client, row);
+        const reconciledAfterRejectedSettlement = settlementDeferred
+          ? await reconcileAndPersistEgeMockDerivedProjections(client, username, row, now)
+          : false;
+        if (!reconciled && !reconciledAfterRejectedSettlement) throw error;
         return { deferredError: error };
       }
-      await writeAttempt(client, row);
+      await persistEgeMockDerivedProjections(client, username, row);
       await saveMutation(client, username, row.id, operation, candidate, result, now);
       return result;
     });
@@ -301,13 +338,13 @@ export function createPostgresEgeMockStore(pool) {
     return outcome;
   }
 
-  const saveEgeMockDraft = (username, attemptId, candidate) => mutate(
+  const saveEgeMockDraft = (username, attemptId, candidate, options = {}) => mutate(
     username, attemptId, 'draft', candidate, (row, now) => applyEgeMockDraftMutation(row, {
       form: getEgeMockForm(row.form_id, row.form_revision),
       expectedRevision: candidate.expectedRevision,
       answers: candidate.answers,
       now,
-    }),
+    }), options,
   );
 
   const submitEgeMockWritten = (username, attemptId, candidate) => mutate(
@@ -355,14 +392,64 @@ export function createPostgresEgeMockStore(pool) {
   );
 
   async function getEgeMockResult(username, attemptId) {
+    const result = await pool.query(
+      'SELECT * FROM ege_mock_attempts WHERE username = $1 AND id = $2',
+      [username, attemptId],
+    );
+    return egeMockResultPublicDto(attemptRow(result.rows[0]));
+  }
+
+  async function getEgeMockHistory(username, {
+    now: suppliedNow, includeAttemptId = null,
+  } = {}) {
     return transaction(pool, async (client) => {
       const locked = await lockOwner(client, username, { missingReturnsNull: true });
-      if (!locked) return null;
-      const { now } = locked;
-      const row = await lockedAttempt(client, username, attemptId);
-      if (!row) return null;
-      if (reconcileEgeMockAttempt(row, now)) await writeAttempt(client, row);
-      return egeMockResultPublicDto(row);
+      if (!locked) return { baselineAttemptId: null, attempts: [] };
+      const now = typeof suppliedNow === 'function' ? new Date(suppliedNow()) : locked.now;
+      if (!Number.isFinite(now.getTime())) throw new EgeMockAttemptError('EGE_MOCK_TIME_INVALID');
+      const active = await client.query(
+        `SELECT * FROM ege_mock_attempts
+         WHERE username = $1 AND oral_submitted_at IS NULL
+           AND state NOT IN ('expired', 'completed')
+         ORDER BY created_at DESC, id DESC FOR UPDATE`,
+        [username],
+      );
+      for (const row of active.rows.map(attemptRow)) {
+        await reconcileAndPersistEgeMockDerivedProjections(client, username, row, now);
+      }
+      const result = await client.query(
+        `SELECT * FROM ege_mock_attempts
+         WHERE username = $1 AND id IN (
+           (SELECT id FROM ege_mock_attempts
+            WHERE username = $1 AND oral_submitted_at IS NOT NULL
+              AND state IN ('assessment_pending', 'completed')
+            ORDER BY created_at DESC, id DESC LIMIT $2)
+           UNION
+           (SELECT id FROM ege_mock_attempts
+            WHERE username = $1 AND oral_submitted_at IS NULL
+              AND state NOT IN ('expired', 'completed')
+            ORDER BY created_at DESC, id DESC LIMIT 1)
+           UNION
+           (SELECT id FROM ege_mock_attempts
+            WHERE username = $1 AND mode = 'diagnostic' AND oral_submitted_at IS NOT NULL
+              AND state IN ('assessment_pending', 'completed')
+            ORDER BY created_at, id LIMIT 1)
+         )
+         ORDER BY created_at DESC, id DESC`,
+        [username, EGE_MOCK_RESULT_HISTORY_LIMIT],
+      );
+      const rows = result.rows.map(attemptRow);
+      if (includeAttemptId && !rows.some(({ id }) => id === includeAttemptId)) {
+        const included = await client.query(
+          `SELECT * FROM ege_mock_attempts
+           WHERE username = $1 AND id = $2 AND oral_submitted_at IS NOT NULL
+             AND state IN ('assessment_pending', 'completed')
+           LIMIT 1`,
+          [username, includeAttemptId],
+        );
+        if (included.rows[0]) rows.push(attemptRow(included.rows[0]));
+      }
+      return buildEgeMockHistory(rows, getEgeMockForm, { includeAttemptId });
     });
   }
 
@@ -378,7 +465,9 @@ export function createPostgresEgeMockStore(pool) {
       }
       const row = await lockedAttempt(client, username, attemptId);
       if (!row) throw new EgeMockAttemptError('EGE_MOCK_ATTEMPT_NOT_FOUND');
-      const reconciled = reconcileEgeMockAttempt(row, now);
+      const reconciled = await reconcileAndPersistEgeMockDerivedProjections(
+        client, username, row, now,
+      );
       if (!row.writing_assessment) {
         throw new EgeMockAttemptError('EGE_MOCK_ASSESSMENT_STATE_INVALID');
       }
@@ -396,7 +485,7 @@ export function createPostgresEgeMockStore(pool) {
         explicitRenewal: candidate.explicitRenewal === true,
       });
       const dispositionChanged = applyEgeMockAssessmentRunDisposition(row, decision, { now });
-      if (reconciled || dispositionChanged) await writeAttempt(client, row);
+      if (dispositionChanged) await writeAttempt(client, row);
       if (decision.kind === 'start') {
         await saveMutation(
           client, username, attemptId, 'assessment_run', candidate, decision.responseSnapshot, now,
@@ -433,7 +522,9 @@ export function createPostgresEgeMockStore(pool) {
       }
       const row = await lockedAttempt(client, username, attemptId);
       if (!row) throw new EgeMockAttemptError('EGE_MOCK_ATTEMPT_NOT_FOUND');
-      const reconciled = reconcileEgeMockAttempt(row, now);
+      const reconciled = await reconcileAndPersistEgeMockDerivedProjections(
+        client, username, row, now,
+      );
       const publicAttempt = egeMockAttemptPublicDto(row);
       const decision = egeMockAssessmentRunSettlement({
         responseSnapshot: mutation.response_snapshot,
@@ -458,7 +549,7 @@ export function createPostgresEgeMockStore(pool) {
       const row = await lockedAttempt(client, username, attemptId);
       if (!row) throw new EgeMockAttemptError('EGE_MOCK_ASSESSMENT_STATE_INVALID');
       const response = applyEgeMockAssessmentRetryable(row, { reason, now });
-      await writeAttempt(client, row);
+      await persistEgeMockDerivedProjections(client, username, row);
       return response;
     });
   }
@@ -491,12 +582,12 @@ export function createPostgresEgeMockStore(pool) {
           subscriptionExpiresAt: new Date(owner.subscription_until).toISOString(),
         };
       }
-      reconcileEgeMockAttempt(row, now);
+      await reconcileAndPersistEgeMockDerivedProjections(client, username, row, now);
       const response = applyEgeMockWritingAssessmentClaim(row, {
         form: getEgeMockForm(row.form_id, row.form_revision), claimToken,
         authorization: frozenAuthorization, now,
       });
-      await writeAttempt(client, row);
+      await persistEgeMockDerivedProjections(client, username, row, { focus: false });
       return response;
     });
   }
@@ -507,7 +598,7 @@ export function createPostgresEgeMockStore(pool) {
       const row = await lockedAttempt(client, username, attemptId);
       if (!row) throw new EgeMockAttemptError('EGE_MOCK_ATTEMPT_NOT_FOUND');
       const response = applyEgeMockWritingAssessmentClaimRenewal(row, { claimToken, now });
-      await writeAttempt(client, row);
+      await persistEgeMockDerivedProjections(client, username, row, { focus: false });
       return response;
     });
   }
@@ -518,7 +609,7 @@ export function createPostgresEgeMockStore(pool) {
       const row = await lockedAttempt(client, username, attemptId);
       if (!row) throw new EgeMockAttemptError('EGE_MOCK_ATTEMPT_NOT_FOUND');
       const response = applyEgeMockWritingAssessmentItemCompletion(row, { ...candidate, now });
-      await writeAttempt(client, row);
+      await persistEgeMockDerivedProjections(client, username, row);
       return response;
     });
   }
@@ -531,7 +622,7 @@ export function createPostgresEgeMockStore(pool) {
       const response = applyEgeMockWritingAssessmentItemOutcomePreparation(row, {
         ...candidate, now,
       });
-      await writeAttempt(client, row);
+      await persistEgeMockDerivedProjections(client, username, row, { focus: false });
       return response;
     });
   }
@@ -542,7 +633,7 @@ export function createPostgresEgeMockStore(pool) {
       const row = await lockedAttempt(client, username, attemptId);
       if (!row) throw new EgeMockAttemptError('EGE_MOCK_ATTEMPT_NOT_FOUND');
       const response = applyEgeMockWritingAssessmentItemOutcome(row, { ...candidate, now });
-      await writeAttempt(client, row);
+      await persistEgeMockDerivedProjections(client, username, row);
       return response;
     });
   }
@@ -553,7 +644,7 @@ export function createPostgresEgeMockStore(pool) {
       const row = await lockedAttempt(client, username, attemptId);
       if (!row) throw new EgeMockAttemptError('EGE_MOCK_ATTEMPT_NOT_FOUND');
       const response = applyEgeMockWritingAssessmentFailure(row, { ...candidate, now });
-      await writeAttempt(client, row);
+      await persistEgeMockDerivedProjections(client, username, row);
       return response;
     });
   }
@@ -576,7 +667,7 @@ export function createPostgresEgeMockStore(pool) {
       );
       const rows = result.rows.map(attemptRow);
       for (const row of rows) {
-        if (reconcileEgeMockAttempt(row, locked.now)) await writeAttempt(client, row);
+        await reconcileAndPersistEgeMockDerivedProjections(client, username, row, locked.now);
       }
       return rows.map(egeMockAttemptExportDto);
     });
@@ -592,6 +683,7 @@ export function createPostgresEgeMockStore(pool) {
     advanceEgeMockOralStage,
     submitEgeMockOral,
     getEgeMockResult,
+    getEgeMockHistory,
     beginEgeMockAssessmentRun,
     settleEgeMockAssessmentRun,
     markEgeMockAssessmentRetryable,

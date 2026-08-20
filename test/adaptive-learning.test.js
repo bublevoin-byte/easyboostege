@@ -803,6 +803,53 @@ test('disabled plan rollout keeps the owner-bound evidence overview but no plan 
   }, { enabled: false });
 });
 
+test('adaptive overview exposes a safe owner-bound full-mock dashboard projection', async () => {
+  await withAdaptiveApp(async ({ repository, owner, stranger, request }) => {
+    repository.getEgeMockHistory = async (username) => username === owner ? {
+      baselineAttemptId: '11111111-1111-4111-8111-111111111111',
+      attempts: [{
+        id: '11111111-1111-4111-8111-111111111111', isBaseline: true,
+        result: {
+          score: { primaryTotal: null, maximum: 82, range: { minimum: 40, maximum: 80 } },
+          forecast: {
+            policyId: 'ege-mock-forecast-2026-v1', label: 'Прогноз тестового балла',
+            score: null, range: { minimum: 49, maximum: 98 },
+            disclaimer: 'Ориентировочный прогноз Easy Boost, а не официальный результат ЕГЭ.',
+            baselineEligible: true,
+          },
+        },
+      }],
+    } : { baselineAttemptId: null, attempts: [] };
+
+    const ownerOverview = await (await request(owner, '/api/v1/adaptive-learning/overview')).json();
+    const strangerOverview = await (await request(stranger, '/api/v1/adaptive-learning/overview')).json();
+
+    assert.equal(ownerOverview.egeMock.baselineAttemptId,
+      '11111111-1111-4111-8111-111111111111');
+    assert.deepEqual(ownerOverview.egeMock.baseline.range, { minimum: 40, maximum: 80 });
+    assert.equal(strangerOverview.egeMock.baseline, null);
+  });
+});
+
+test('adaptive overview reconciles EGE history before reading its profile evidence snapshot', async () => {
+  await withAdaptiveApp(async ({ repository, owner, request }) => {
+    const getSources = repository.getAdaptiveLearningEvidenceSources.bind(repository);
+    let historyReconciled = false;
+    repository.getEgeMockHistory = async () => {
+      historyReconciled = true;
+      return { baselineAttemptId: null, attempts: [] };
+    };
+    repository.getAdaptiveLearningEvidenceSources = async (...args) => {
+      assert.equal(historyReconciled, true,
+        'the profile snapshot must start only after deadline reconciliation can commit EGE evidence');
+      return getSources(...args);
+    };
+
+    const response = await request(owner, '/api/v1/adaptive-learning/overview');
+    assert.equal(response.status, 200);
+  });
+});
+
 test('adaptive overview exposes the same owner-bound exact grammar focus as the resolver API', async () => {
   await withAdaptiveApp(async ({ owner, stranger, request }) => {
     const goal = await request(owner, '/api/v1/adaptive-learning/goal', {

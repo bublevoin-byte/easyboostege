@@ -27,6 +27,8 @@ import {
   egeMockSpeakingResultPublicDto,
   reconcileEgeMockSubjectiveAssessmentState,
 } from './speaking-assessment.js';
+import { buildEgeMockCanonicalResult } from './result.js';
+import { getEgeMockForm } from './catalog.js';
 
 export class EgeMockAttemptError extends Error {
   constructor(code) {
@@ -793,6 +795,8 @@ export function egeMockResultPublicDto(row) {
         ? { speakingAssessment: egeMockSpeakingAssessmentPublicDto(row) } : {}),
     } : null;
   }
+  const form = getEgeMockForm(row.form_id, row.form_revision);
+  const canonical = buildEgeMockCanonicalResult(row, form);
   return {
     available: true,
     state: row.state,
@@ -807,7 +811,7 @@ export function egeMockResultPublicDto(row) {
       retryCount: Number(row.assessment_retry_count),
     },
     result: {
-      ...(row.result && typeof row.result === 'object' ? structuredClone(row.result) : {}),
+      canonical,
       writing: egeMockWritingResultPublicDto(row),
       ...(row.speaking_assessment
         ? { speaking: egeMockSpeakingResultPublicDto(row) } : {}),
@@ -844,7 +848,9 @@ export function egeMockAttemptExportDto(row) {
     assessment_retry_count: Number(row.assessment_retry_count),
     writing_assessment: structuredClone(row.writing_assessment || null),
     speaking_assessment: structuredClone(row.speaking_assessment || null),
-    result: structuredClone(row.result),
+    result: row.oral_submitted_at == null ? null : buildEgeMockCanonicalResult(
+      row, getEgeMockForm(row.form_id, row.form_revision),
+    ),
     created_at: iso(row.created_at),
     updated_at: iso(row.updated_at),
   };

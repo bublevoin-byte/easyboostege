@@ -37,7 +37,9 @@ function resultForScalar(canonical, accepted) {
   return Object.freeze({ canonical, correctness, correctCount: correctness ? 1 : 0, isAccepted: correctness });
 }
 
-export function normalizeEgeMockAnswer({ formId, formRevision, position, value }) {
+export function normalizeEgeMockAnswer({
+  formId, formRevision, position, value, allowIncomplete = false,
+}) {
   const form = getEgeMockForm(formId, formRevision);
   const item = form?.positions?.find((candidate) => candidate.position === Number(position));
   if (!item) invalid('form or position is unknown');
@@ -58,9 +60,15 @@ export function normalizeEgeMockAnswer({ formId, formRevision, position, value }
     invalid('ordered answer has the wrong shape');
   }
   const allowed = allowedChoiceIds(item);
-  const canonical = value.map(canonicalChoice);
-  if (canonical.some((choice) => !allowed.has(choice))) invalid('ordered answer contains an unknown choice');
-  if (item.presentation.kind !== 'listening_true_false' && new Set(canonical).size !== canonical.length) {
+  const canonical = value.map((entry) => (allowIncomplete === true
+    && (entry == null || (typeof entry === 'string' && entry.trim() === ''))
+    ? null : canonicalChoice(entry)));
+  if (canonical.some((choice) => choice != null && !allowed.has(choice))) {
+    invalid('ordered answer contains an unknown choice');
+  }
+  const provided = canonical.filter((choice) => choice != null);
+  if (item.presentation.kind !== 'listening_true_false'
+    && new Set(provided).size !== provided.length) {
     invalid('ordered answer must not repeat a choice');
   }
   const expected = assessment.accepted.map(canonicalChoice);

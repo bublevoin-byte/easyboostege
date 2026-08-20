@@ -164,6 +164,31 @@ test('progress screen owns an accessible evidence summary and labels cached data
   assert.match(screen, /savedAt/u);
 });
 
+test('progress dashboard renders the immutable EGE diagnostic baseline and clears it on owner reset', async () => {
+  const [markup, screen, forecastContract] = await Promise.all([
+    fs.readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../public/screens/progress.js', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../shared/ege-mock-forecast-metadata.js', import.meta.url), 'utf8'),
+  ]);
+
+  assert.match(markup, /id="ege_mock_dashboard"[^>]*aria-labelledby="ege_mock_dashboard_title"[^>]*aria-live="polite"/u);
+  assert.match(screen, /function drawEgeMockDashboard\(summary/u);
+  assert.match(screen, /safeEgeMockProjection\(summary\)/u,
+    'online dashboard data must pass the same exact baseline identity sanitizer as the offline cache');
+  assert.match(screen, /EGE_MOCK_FORECAST_METADATA/u);
+  assert.doesNotMatch(screen, /const expectedDisclaimer='Ориентировочный прогноз Easy Boost/u,
+    'dashboard copy must consume the shared versioned forecast contract');
+  assert.match(screen, /Показано завершённых попыток/u,
+    'the bounded history window is not mislabeled as a lifetime count');
+  assert.match(screen, /drawEgeMockDashboard\(payload\.egeMock\)/u);
+  assert.match(screen, /const refreshed=await adaptiveGet\('\/api\/v1\/adaptive-learning\/overview',goalAuthority\)[\s\S]*?drawEgeMockDashboard\(refreshed\.egeMock\)[\s\S]*?writeAdaptiveOverviewCache/u,
+    'a goal-save refresh must redraw a newly reconciled immutable baseline before caching it');
+  assert.match(screen, /Исходная диагностика/u);
+  assert.match(forecastContract, /не официальный результат ЕГЭ/u);
+  assert.match(screen, /drawEgeMockDashboard\(null\)/u,
+    'an owner reset must clear the previous learner dashboard');
+});
+
 test('progress async overview and recovery continuations are exact-owner guarded before cache or redraw', async () => {
   const screen = await fs.readFile(new URL('../public/screens/progress.js', import.meta.url), 'utf8');
   assert.match(screen, /function captureAdaptiveAuthority/u);
@@ -271,7 +296,8 @@ test('adaptive authority reset clears only the matching owner recovery view and 
     adaptiveAccessState: {}, adaptiveSessionPreview: {}, adaptiveCurrentSession: {}, adaptiveCurrentExecution: {},
     sameAdaptiveOwner(a, b) { return Boolean(a && b && a.owner === b.owner && a.ownerGeneration === b.ownerGeneration); },
     document: { getElementById: node },
-    drawAdaptiveSession() {}, drawAdaptiveDiagnostic() {}, drawEvidenceProgressSummary() {}, setAdaptiveReadOnly() {},
+    drawAdaptiveSession() {}, drawAdaptiveDiagnostic() {}, drawEgeMockDashboard() {},
+    drawEvidenceProgressSummary() {}, setAdaptiveReadOnly() {},
   });
   vm.runInContext(`${resetSource}\nthis.clearAdaptivePrivateUi=clearAdaptivePrivateUi;`, context);
 
