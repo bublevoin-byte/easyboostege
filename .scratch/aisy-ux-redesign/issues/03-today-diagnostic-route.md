@@ -1,6 +1,6 @@
 # 03 — Сегодня и первый персональный маршрут
 
-Status: ready-for-agent
+Status: done
 Blocked by: 02
 Spec: `.scratch/aisy-ux-redesign/spec.md#52-today`
 
@@ -24,9 +24,9 @@ Spec: `.scratch/aisy-ux-redesign/spec.md#52-today`
 
 ## Definition of Done
 
-- [ ] Главный экран приводит к занятию максимум за два решения.
-- [ ] Duration 10/20/30/40 имеет label, selected state и сохраняет допустимое предпочтение.
-- [ ] Diagnostic skip создаёт только честный provisional UX, не фальшивую оценку.
-- [ ] Loading/empty/offline/access/error состояния имеют recovery.
-- [ ] `npm test`, `npm run lint`, `npm run check`, build и focused Chromium проходят.
-- [ ] Один коммит: `feat(aisy): add personalized today route`.
+- [x] Главный экран приводит к занятию максимум за два решения.
+- [x] Duration 10/20/30/40 имеет label, selected state и сохраняет допустимое предпочтение.
+- [x] Diagnostic skip создаёт только честный provisional UX, не фальшивую оценку.
+- [x] Loading/empty/offline/access/error состояния имеют recovery.
+- [x] `npm test`, `npm run lint`, `npm run check`, build и focused Chromium проходят.
+- [x] Один коммит: `feat(aisy): add personalized today route`.

@@ -102,14 +102,11 @@ function setUsers(u){localStorage.setItem('eb_users',JSON.stringify(u))}
 
 /* ---------- NAV WIRING (tabs/back/tiles/flows) ---------- */
 const TABROUTE={'Главная':'scr1','Учить':'scr2','Прогресс':'scr10','Профиль':'scr11'};
-const TILEROUTE={'Слова':'scr2','Грамматика':'scr3','Чтение':'scr7','Аудирование':'scr4','Письмо':'scr8','Говорение':'scr9'};
 function wire(){
   document.querySelectorAll('.screen').forEach(scr=>{
     scr.querySelectorAll('div,span,a').forEach(el=>{const t=txt(el);if(TABROUTE[t]&&el.children.length<=1&&t.length<11){const control=el.closest('.navit')||el;makeInteractive(control,t,()=>nav(TABROUTE[t]))}});
     scr.querySelectorAll('svg').forEach(sv=>{const h=(sv.innerHTML||'').toLowerCase();if(h.includes('14 6 8 12 14 18')){const p=sv.parentElement||sv;makeInteractive(p,'Назад',()=>back())}});
   });
-  const s1=document.getElementById('scr1');
-  if(s1)s1.querySelectorAll('div,span').forEach(el=>{const t=txt(el);if(TILEROUTE[t]&&el.children.length===0){const card=el.closest('.clayCard')||el;makeInteractive(card,t,()=>nav(TILEROUTE[t]))}});
   bindText('scr5','Войти',()=>doLogin());bindText('scr5','Создать',()=>doRegister());
   bindText('scr6','Поехали',()=>startApp());bindText('scr6','Пропустить',()=>startApp());
   bindText('scr14','Повторить',()=>tab('scr8'));bindText('scr14','Учить офлайн',()=>tab('scr2'));
@@ -149,24 +146,11 @@ async function trWord(w,encodedContext=''){lastWord=w;try{lastWordContext=decode
 
 
 
-/* ===== DASHBOARD / PROGRESS / PROFILE (real data) ===== */
-const RING_IDS={words:'ring_words',gram:'ring_gram',read:'ring_read',listen:'ring_listen',write:'ring_write',speak:'ring_speak'};
-const METRIC_IDS={words:'m_words',gram:'m_gram',read:'m_read',listen:'m_listen',write:'m_write',speak:'m_speak'};
-function daysLeft(){return progressModule.daysLeft(Date.now())}
-function renderHome(){if(!S)return;const view=progressModule.overview(S,Date.now());
-  setTxt('h_hello',profileModule.greeting(currentUser));
-  setTxt('h_days','До ЕГЭ — '+view.daysLeft+' дней · строгий пробник 190 минут');
-  setTxt('h_ava',profileModule.initial(currentUser||'друг'));
-  setTxt('h_min',view.daily.minutes);setTxt('h_pct',view.daily.percent+'%');ringOff('h_ring',263.9,view.daily.percent);
-  setTxt('h_streak',progressModule.streakLabel(view.streak,true));
-  progressModule.MODULES.forEach(function(name){
-    setTxt(METRIC_IDS[name],view.modules[name]);ringOff(RING_IDS[name],113.1,view.modules[name])});
-  setTxt('sub_words',progressModule.learnedLabel(view.learned))}
+/* ===== PROGRESS / PROFILE (real data) ===== */
 const PROFILE_HOOKS=[];
 function registerProfileHook(hook){PROFILE_HOOKS.push(hook)}
 function runProfileHooks(){PROFILE_HOOKS.forEach(function(hook){try{hook()}catch(e){console.error('Profile hook failed',e)}})}
-/* Прогресс и профиль рисуют свои чанки: они регистрируют хук сами, когда приезжают. */
-registerRouteHook(function(id){if(id==='scr1')renderHome()});
+/* Сегодня, прогресс и профиль регистрируют свои route hooks в модулях экранов. */
 
 
 /* ===== FIX TABBAR HIT-AREA + LEARN SHEET ===== */

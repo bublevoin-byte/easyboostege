@@ -9,7 +9,7 @@ Overall status: `in-progress` — learner-first UX; parent/teacher roles remain 
 |---|---|---|
 | 01 | Бренд Aisy.space и общий design foundation | done |
 | 02 | Оболочка ученика: Сегодня / Практика / ЕГЭ / Прогресс / Профиль | done |
-| 03 | Персональный экран Сегодня и диагностический маршрут | blocked by 02 |
+| 03 | Персональный экран Сегодня и диагностический маршрут | done |
 | 04 | Practice hub поверх существующих учебных модулей | blocked by 02, 03 |
 | 05 | Отдельный EGE hub поверх строгого пробника | blocked by 02, 03 |
 | 06 | Честные Progress/Profile и только Free/Premium в public copy | blocked by 01–05 |

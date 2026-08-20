@@ -451,16 +451,15 @@ async function runE2E() {
     await authenticatedPage.locator('#scr1.on').waitFor({ state: 'visible', timeout: 5_000 });
 
     await authenticatedContext.setOffline(true);
-    await authenticatedPage.getByRole('button', { name: 'Слова', exact: true }).press('Enter');
+    await authenticatedPage.getByRole('button', { name: 'Начать практику', exact: true }).press('Enter');
     await authenticatedPage.locator('#scr2.on').waitFor({ state: 'visible', timeout: 5_000 });
-    await authenticatedPage.getByRole('button', { name: /^Начать ·/u }).click();
     await authenticatedPage.getByRole('heading', { name: 'Познакомься со словом' }).waitFor();
     await authenticatedPage.getByRole('button', { name: 'Начать вспоминать' }).click();
     await authenticatedPage.getByRole('heading', { name: 'Выбери значение' }).waitFor();
     assert.ok(await authenticatedPage.locator('#w_opts .vocab-choice').count() >= 2);
     await authenticatedPage.evaluate(() => window.tab('scr1'));
     await authenticatedPage.locator('#scr1.on').waitFor({ state: 'visible', timeout: 5_000 });
-    await authenticatedPage.getByRole('button', { name: 'Грамматика', exact: true }).press('Enter');
+    await authenticatedPage.evaluate(() => window.nav('scr3'));
     await authenticatedPage.locator('#scr3.on').waitFor({ state: 'visible', timeout: 5_000 });
     assert.ok(await authenticatedPage.locator('#g_area button').count() >= 1);
     await authenticatedPage.evaluate(() => {
@@ -494,7 +493,8 @@ async function runE2E() {
     assert.equal(await authenticatedPage.evaluate(() => window.S.grammarRunner.masteryAssisted), true);
     await authenticatedPage.waitForTimeout(750);
     await authenticatedPage.reload({ waitUntil: 'networkidle' });
-    await authenticatedPage.getByRole('button', { name: 'Грамматика', exact: true }).press('Enter');
+    await authenticatedPage.locator('#scr1.on').waitFor({ state: 'visible', timeout: 5_000 });
+    await authenticatedPage.evaluate(() => window.nav('scr3'));
     await authenticatedPage.locator('#scr3.on').waitFor({ state: 'visible', timeout: 5_000 });
     const assistedAfterReload = await authenticatedPage.evaluate(() => ({
       currentId: window.S.grammarRunner.queue[window.S.grammarRunner.i].id,
@@ -621,7 +621,8 @@ async function runE2E() {
     }, 'the wrong result and unseen transfer are committed synchronously before the explanation timer');
 
     await authenticatedPage.reload({ waitUntil: 'networkidle' });
-    await authenticatedPage.getByRole('button', { name: 'Грамматика', exact: true }).press('Enter');
+    await authenticatedPage.locator('#scr1.on').waitFor({ state: 'visible', timeout: 5_000 });
+    await authenticatedPage.evaluate(() => window.nav('scr3'));
     await authenticatedPage.locator('#scr3.on').waitFor({ state: 'visible', timeout: 5_000 });
     await authenticatedPage.getByText('РАЗБОР ОШИБКИ', { exact: true }).waitFor({ state: 'visible', timeout: 5_000 });
     assert.equal(await authenticatedPage.locator('#g_card[aria-live="polite"]').count(), 1,
@@ -813,7 +814,8 @@ async function runE2E() {
     await authenticatedPage.locator('#g_card[role="status"][aria-live="polite"]').waitFor({ state: 'visible' });
     // Crash boundary: reload while the exact completion event is locally durable but its POST is stalled.
     await authenticatedPage.reload({ waitUntil: 'domcontentloaded' });
-    await authenticatedPage.getByRole('button', { name: 'Грамматика', exact: true }).press('Enter');
+    await authenticatedPage.locator('#scr1.on').waitFor({ state: 'visible', timeout: 5_000 });
+    await authenticatedPage.evaluate(() => window.nav('scr3'));
     await authenticatedPage.locator('#scr3.on').waitFor({ state: 'visible', timeout: 5_000 });
     // Recovery boundary: the restored completion_pending snapshot retries the same UUID and clears on apply/replay.
     await authenticatedPage.waitForTimeout(1_500);
@@ -839,7 +841,8 @@ async function runE2E() {
     assert.equal(authoritativeGrammar.grammarMastery['2'].masteryHistory.at(-1).session.items.length, 16);
     await authenticatedPage.waitForTimeout(750);
     await authenticatedPage.reload({ waitUntil: 'networkidle' });
-    await authenticatedPage.getByRole('button', { name: 'Грамматика', exact: true }).press('Enter');
+    await authenticatedPage.locator('#scr1.on').waitFor({ state: 'visible', timeout: 5_000 });
+    await authenticatedPage.evaluate(() => window.nav('scr3'));
     await authenticatedPage.locator('#scr3.on').waitFor({ state: 'visible', timeout: 5_000 });
     assert.equal(await authenticatedPage.evaluate(() => window.S.grammarRunner), null,
       'a completed runner snapshot cannot resurrect after server reload');
@@ -915,7 +918,7 @@ async function runE2E() {
 
     await authenticatedPage.evaluate(() => window.tab('scr1'));
 
-    await authenticatedPage.getByRole('button', { name: 'Письмо', exact: true }).press('Enter');
+    await authenticatedPage.evaluate(() => window.nav('scr8'));
     await authenticatedPage.locator('#scr8.on').waitFor({ state: 'visible', timeout: 5_000 });
     await authenticatedPage.getByRole('button', { name: '37 · Письмо другу' }).click();
     await authenticatedPage.getByRole('textbox', { name: 'Письменный ответ' }).fill(
@@ -1244,7 +1247,7 @@ async function runE2E() {
       URL.revokeObjectURL = () => {};
     });
 
-    await authenticatedPage.getByRole('button', { name: 'Говорение', exact: true }).press('Enter');
+    await authenticatedPage.evaluate(() => window.nav('scr9'));
     const speakingTask = authenticatedPage.getByRole('button', { name: /Чтение вслух/ });
     await speakingTask.waitFor({ state: 'visible', timeout: 5_000 });
     await speakingTask.press('Enter');

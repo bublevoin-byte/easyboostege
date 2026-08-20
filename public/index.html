@@ -235,6 +235,7 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
 </style>
 <link rel="stylesheet" href="/aisy-theme.css">
 <link rel="stylesheet" href="/aisy-shell.css">
+<link rel="stylesheet" href="/today.css">
 </head><body>
 <button id="navfab" onclick="document.getElementById('navmenu').classList.toggle('open')">Экраны ▾</button>
 <div id="navmenu"></div>
@@ -390,153 +391,80 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
     </section>
   </main>
 </div>
-<div class="screen" id="scr1" data-name="Главная" style="background:#F6F3EF;overflow:hidden;">
+<div class="screen today-screen" id="scr1" data-name="Сегодня">
+  <main class="homeScroll today aisy-reading-canvas" aria-labelledby="today-title">
+    <header class="today__header">
+      <p class="today__eyebrow">Aisy ЕГЭ · Сегодня</p>
+      <h1 id="today-title">Здравствуйте</h1>
+      <p id="today-context" class="today__context">Собираем контекст на сегодня</p>
+    </header>
 
-    <!-- status bar (dark) -->
-    <div style="position:absolute;top:0;left:0;right:0;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 7px;z-index:6;">
-      <span style="font-weight:700;font-size:15px;color:#2B2B2B;">9:41</span>
-      <div style="display:flex;gap:7px;align-items:center;">
-        <svg width="17" height="11" viewBox="0 0 17 11" fill="#2B2B2B"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.7" y="5" width="3" height="6" rx="1"/><rect x="9.3" y="2.5" width="3" height="8.5" rx="1"/><rect x="14" y="0" width="3" height="11" rx="1"/></svg>
-        <svg width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="#2B2B2B" stroke-width="1.6" stroke-linecap="round"><path d="M2 5a8 8 0 0 1 12 0"/><path d="M4.5 7.4a4.4 4.4 0 0 1 7 0"/><circle cx="8" cy="9.8" r="1" fill="#2B2B2B" stroke="none"/></svg>
-        <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3" stroke="#2B2B2B" opacity=".4"/><rect x="2.4" y="2.4" width="15" height="7.2" rx="1.6" fill="#2B2B2B"/><rect x="23" y="4" width="2" height="4" rx="1" fill="#2B2B2B"/></svg>
+    <section id="today-state" class="today-state aisy-surface" aria-labelledby="today-state-title" aria-live="polite">
+      <span class="today-state__pulse" aria-hidden="true"></span>
+      <div>
+        <h2 id="today-state-title">Собираем план на сегодня</h2>
+        <p id="today-state-message">Проверяем прогресс и незавершённые занятия.</p>
       </div>
-    </div>
-    <!-- content -->
-    <div class="homeScroll" style="position:absolute;top:52px;left:0;right:0;bottom:0;padding:8px 20px 118px;">
-      <!-- exam CTA -->
-      <button type="button" id="examBtn" class="sq clk cardbtn" onclick="nav('scr16')" style="display:flex;align-items:center;gap:13px;margin-bottom:18px;background:linear-gradient(150deg,#3A3532,#2B2B2B);border-radius:22px;padding:12px 16px;box-shadow:0 14px 28px rgba(43,35,30,.32),inset 0 2px 3px rgba(255,255,255,.14),inset 0 -5px 10px rgba(0,0,0,.35);cursor:pointer;">
-        <div style="width:44px;height:44px;flex:none;border-radius:15px;background:linear-gradient(145deg,#FFC861,#F2683F);display:grid;place-items:center;box-shadow:0 6px 12px rgba(242,104,63,.4),inset 0 2px 3px rgba(255,255,255,.5),inset 0 -3px 6px rgba(190,55,18,.3);">
-          <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m2 9 10-4 10 4-10 4L2 9Z"/><path d="M6 11v4.5c0 1.2 2.7 2.5 6 2.5s6-1.3 6-2.5V11"/><path d="M22 9v5"/></svg>
-        </div>
-        <div style="flex:1;min-width:0;">
-          <div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:16.5px;color:#fff;">Пробный ЕГЭ · полный вариант</div>
-          <div id="h_days" style="font-weight:600;font-size:11.5px;color:rgba(255,255,255,.62);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Строгая письменная часть · 190 минут</div>
-        </div>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.75)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><path d="m9 6 6 6-6 6"/></svg>
-      </button>
-      <button type="button" id="home_adaptive_plan" class="adaptive-entry" style="margin-bottom:18px;" hidden>
-        <span class="adaptive-entry__icon" aria-hidden="true"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V9m6 10V5m6 14v-7m4 7H2"/><path d="m4 7 6-4 6 7 4-3"/></svg></span>
-        <span class="adaptive-entry__copy"><strong>Мой учебный план</strong><span>Занятие на доступное время с фокусом на пробелах</span></span>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-left:auto;flex:none;"><path d="m9 6 6 6-6 6"/></svg>
-      </button>
-      <!-- hero: goal of the day (clay) -->
-      <div class="clayHero heroFloat">
-        <div style="position:absolute;top:-46px;right:-30px;width:150px;height:150px;border-radius:50%;background:rgba(255,255,255,.13);"></div>
-        <div style="position:absolute;bottom:-64px;left:-40px;width:170px;height:170px;border-radius:50%;background:rgba(255,255,255,.08);"></div>
-        <svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;" viewBox="0 0 350 260" preserveAspectRatio="xMidYMid slice" fill="rgba(255,255,255,.9)">
-          <path class="eb5sp" style="animation-delay:0s" d="M36,30 Q36,35 41,35 Q36,35 36,40 Q36,35 31,35 Q36,35 36,30 Z"/>
-          <path class="eb5sp" style="animation-delay:.7s" d="M172,16 Q172,20 176,20 Q172,20 172,24 Q172,20 168,20 Q172,20 172,16 Z"/>
-          <path class="eb5sp" style="animation-delay:1.3s" d="M318,42 Q318,47 323,47 Q318,47 318,52 Q318,47 313,47 Q318,47 318,42 Z"/>
-          <path class="eb5sp" style="animation-delay:.4s" d="M338,120 Q338,124 342,124 Q338,124 338,128 Q338,124 334,124 Q338,124 338,120 Z"/>
-          <path class="eb5sp" style="animation-delay:1.8s" d="M20,105 Q20,109 24,109 Q20,109 20,113 Q20,109 16,109 Q20,109 20,105 Z"/>
-          <path class="eb5sp" style="animation-delay:1s" d="M200,88 Q200,91.5 203.5,91.5 Q200,91.5 200,95 Q200,91.5 196.5,91.5 Q200,91.5 200,88 Z"/>
-          <path class="eb5sp" style="animation-delay:2.2s" d="M150,140 Q150,144 154,144 Q150,144 150,148 Q150,144 146,144 Q150,144 150,140 Z"/>
-        </svg>
-        <div style="position:relative;display:flex;align-items:center;justify-content:space-between;">
+      <button id="today-state-action" class="today-secondary" type="button">Повторить</button>
+    </section>
+
+    <div id="today-ready" class="today__ready" hidden>
+      <p id="today-source-note" class="today-source" role="status" hidden></p>
+      <article class="today-plan aisy-surface" role="region" aria-labelledby="today-recommendation-label">
+        <div class="today-plan__intro">
           <div>
-            <div style="font-weight:800;font-size:11px;letter-spacing:1.8px;color:rgba(255,255,255,.9);">ЦЕЛЬ ДНЯ</div>
-            <div style="margin-top:7px;display:flex;align-items:baseline;gap:6px;color:#fff;"><span id="h_min" style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:42px;letter-spacing:-1px;">18</span><span style="font-weight:700;font-size:16px;opacity:.85;">/ 30 мин</span></div>
-            <div id="h_streak" style="margin-top:13px;display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,.24);border-radius:30px;padding:7px 13px;font-weight:800;font-size:12.5px;color:#fff;box-shadow:inset 0 2px 3px rgba(255,255,255,.35),inset 0 -3px 6px rgba(190,55,18,.22);">🔥 7 дней подряд</div>
+            <p id="today-recommendation-label" class="today-plan__label">Рекомендация на сегодня</p>
+            <h2 id="today-recommendation-title">—</h2>
           </div>
-          <svg width="96" height="96" viewBox="0 0 100 100" style="filter:drop-shadow(0 6px 10px rgba(190,55,18,.25));">
-            <circle cx="50" cy="50" r="42" fill="none" stroke="rgba(190,55,18,.28)" stroke-width="10"/>
-            <circle cx="50" cy="50" r="42" fill="none" stroke="#fff" stroke-width="10" stroke-linecap="round" stroke-dasharray="263.9" stroke-dashoffset="105.6" transform="rotate(-90 50 50)" id="h_ring"/>
-            <text x="50" y="56" text-anchor="middle" font-family="Nunito,Manrope" font-weight="800" font-size="20" fill="#fff" id="h_pct">60%</text>
-          </svg>
+          <span id="today-estimate" class="today-plan__estimate">—</span>
         </div>
-        <!-- week activity -->
-        <div style="position:relative;margin-top:14px;display:flex;align-items:flex-end;justify-content:space-between;height:42px;padding:0 3px;">
-          <div class="wcol"><div class="wbar" style="height:22px;"></div><span>П</span></div>
-          <div class="wcol"><div class="wbar" style="height:30px;"></div><span>В</span></div>
-          <div class="wcol"><div class="wbar dim" style="height:14px;"></div><span>С</span></div>
-          <div class="wcol"><div class="wbar" style="height:34px;"></div><span>Ч</span></div>
-          <div class="wcol"><div class="wbar" style="height:26px;"></div><span>П</span></div>
-          <div class="wcol"><div class="wbar dim" style="height:18px;"></div><span>С</span></div>
-          <div class="wcol on"><div class="wbar now" style="height:22px;"></div><span>В</span></div>
-        </div>
-        <button type="button" class="heroCta sq clk cardbtn" onclick="openLearn()">Продолжить занятие <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#E44E20" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></button>
-      </div>
-      <!-- modules -->
-      <div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:12px;letter-spacing:1.8px;color:#6F695E;margin:20px 2px 12px;">МОДУЛИ</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:13px;">
-        <!-- Слова -->
-        <div class="clayCard sq" style="padding:16px;">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;">
-            <div class="iconBlob" style="background:#FFEDE4;"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="13" rx="2.5"/><path d="M8 5V3.5M16 5V3.5M4 9h16"/></svg></div>
-            <svg width="46" height="46" viewBox="0 0 44 44"><defs><linearGradient id="r1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFA570"/><stop offset="1" stop-color="#F2683F"/></linearGradient></defs><circle cx="22" cy="22" r="18" fill="none" stroke="#F1EDE7" stroke-width="5.5"/><circle cx="22" cy="22" r="18" fill="none" stroke="url(#r1)" stroke-width="5.5" stroke-linecap="round" stroke-dasharray="113.1" stroke-dashoffset="40.7" id="ring_words" transform="rotate(-90 22 22)"/><text x="22" y="26" text-anchor="middle" font-family="Nunito,Manrope" font-weight="800" font-size="11" fill="#2B2B2B" id="m_words">64</text></svg>
+        <p id="today-recommendation-reason" class="today-plan__reason">—</p>
+        <p id="today-recommendation-outcome" class="today-plan__outcome">—</p>
+
+        <div class="today-duration">
+          <div class="today-duration__heading">
+            <span id="today-duration-label">Сколько времени есть?</span>
+            <span>мин</span>
           </div>
-          <span style="display:block;margin-top:12px;font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:16.5px;color:#2B2B2B;">Слова</span>
-          <div id="sub_words" style="font-weight:600;font-size:12px;color:#777163;margin-top:2px;">учу · 320 / 500</div>
+          <div id="today-duration-options" class="today-duration__options" role="radiogroup" aria-labelledby="today-duration-label"></div>
+          <p id="today-duration-help" class="today-duration__help"></p>
         </div>
-        <!-- Грамматика -->
-        <div class="clayCard sq" style="padding:16px;">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;">
-            <div class="iconBlob" style="background:#E5F4EC;"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#1F9E5A" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h14v16H5z"/><path d="M9 9h6M9 13h6M9 17h3"/></svg></div>
-            <svg width="46" height="46" viewBox="0 0 44 44"><defs><linearGradient id="r2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6FC2B0"/><stop offset="1" stop-color="#1F9E5A"/></linearGradient></defs><circle cx="22" cy="22" r="18" fill="none" stroke="#F1EDE7" stroke-width="5.5"/><circle cx="22" cy="22" r="18" fill="none" stroke="url(#r2)" stroke-width="5.5" stroke-linecap="round" stroke-dasharray="113.1" stroke-dashoffset="65.6" id="ring_gram" transform="rotate(-90 22 22)"/><text x="22" y="26" text-anchor="middle" font-family="Nunito,Manrope" font-weight="800" font-size="11" fill="#2B2B2B" id="m_gram">42</text></svg>
-          </div>
-          <span style="display:block;margin-top:12px;font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:16.5px;color:#2B2B2B;">Грамматика</span>
-          <div id="sub_gram" style="font-weight:600;font-size:12px;color:#777163;margin-top:2px;">закреплено 0 из 20 тем</div>
+
+        <button id="today-primary" class="aisy-button today-plan__primary" type="button">Начать занятие</button>
+        <p id="today-action-notice" class="today-plan__notice" role="status" aria-live="polite"></p>
+      </article>
+
+      <section class="today-facts" aria-label="Учебный ритм">
+        <article class="today-fact aisy-surface">
+          <p>Ритм недели</p>
+          <strong id="today-rhythm">—</strong>
+          <span id="today-rhythm-detail">—</span>
+        </article>
+        <article class="today-fact aisy-surface">
+          <p>До экзамена</p>
+          <strong id="today-countdown">—</strong>
+          <span>ЕГЭ · английский</span>
+        </article>
+      </section>
+
+      <section id="today-diagnostic" class="today-diagnostic aisy-surface" aria-labelledby="today-diagnostic-title" hidden>
+        <div>
+          <p class="today-diagnostic__label">Точность маршрута</p>
+          <h2 id="today-diagnostic-title">—</h2>
+          <p id="today-diagnostic-copy">—</p>
         </div>
-        <!-- Чтение -->
-        <div class="clayCard sq" style="padding:16px;">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;">
-            <div class="iconBlob" style="background:#FFF4DE;"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#E8730A" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6c-2-1.3-4.5-1.5-7-1v13c2.5-.5 5-.3 7 1 2-1.3 4.5-1.5 7-1V5c-2.5-.5-5-.3-7 1Z"/><path d="M12 6v13"/></svg></div>
-            <svg width="46" height="46" viewBox="0 0 44 44"><defs><linearGradient id="r3" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFC861"/><stop offset="1" stop-color="#E8730A"/></linearGradient></defs><circle cx="22" cy="22" r="18" fill="none" stroke="#F1EDE7" stroke-width="5.5"/><circle cx="22" cy="22" r="18" fill="none" stroke="url(#r3)" stroke-width="5.5" stroke-linecap="round" stroke-dasharray="113.1" stroke-dashoffset="24.9" id="ring_read" transform="rotate(-90 22 22)"/><text x="22" y="26" text-anchor="middle" font-family="Nunito,Manrope" font-weight="800" font-size="11" fill="#2B2B2B" id="m_read">78</text></svg>
-          </div>
-          <span style="display:block;margin-top:12px;font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:16.5px;color:#2B2B2B;">Чтение</span>
-          <div id="sub_read" style="font-weight:600;font-size:12px;color:#777163;margin-top:2px;">начни с первого текста</div>
+        <div class="today-diagnostic__actions">
+          <button id="today-diagnostic-action" class="today-secondary" type="button">Пройти диагностику</button>
+          <button id="today-diagnostic-skip" class="today-link" type="button">Отложить на сейчас</button>
         </div>
-        <!-- Аудирование -->
-        <div class="clayCard sq" style="padding:16px;">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;">
-            <div class="iconBlob" style="background:#E3F1F5;"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#5FB6C9" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13v-1a8 8 0 0 1 16 0v1"/><rect x="3" y="13" width="4.2" height="6.5" rx="1.8"/><rect x="16.8" y="13" width="4.2" height="6.5" rx="1.8"/></svg></div>
-            <svg width="46" height="46" viewBox="0 0 44 44"><defs><linearGradient id="r4" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5FB6C9"/><stop offset="1" stop-color="#3E93A8"/></linearGradient></defs><circle cx="22" cy="22" r="18" fill="none" stroke="#F1EDE7" stroke-width="5.5"/><circle cx="22" cy="22" r="18" fill="none" stroke="url(#r4)" stroke-width="5.5" stroke-linecap="round" stroke-dasharray="113.1" stroke-dashoffset="79.2" id="ring_listen" transform="rotate(-90 22 22)"/><text x="22" y="26" text-anchor="middle" font-family="Nunito,Manrope" font-weight="800" font-size="11" fill="#2B2B2B" id="m_listen">30</text></svg>
-          </div>
-          <span style="display:block;margin-top:12px;font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:16.5px;color:#2B2B2B;">Аудирование</span>
-          <div id="sub_listen" style="font-weight:600;font-size:12px;color:#777163;margin-top:2px;">начни с первого диалога</div>
-        </div>
-        <!-- Письмо -->
-        <div class="clayCard sq" style="padding:16px;">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;">
-            <div class="iconBlob" style="background:#FBE9EF;"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#D4537E" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></div>
-            <svg width="46" height="46" viewBox="0 0 44 44"><defs><linearGradient id="r5" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F0997B"/><stop offset="1" stop-color="#D4537E"/></linearGradient></defs><circle cx="22" cy="22" r="18" fill="none" stroke="#F1EDE7" stroke-width="5.5"/><circle cx="22" cy="22" r="18" fill="none" stroke="url(#r5)" stroke-width="5.5" stroke-linecap="round" stroke-dasharray="113.1" stroke-dashoffset="67.9" id="ring_write" transform="rotate(-90 22 22)"/><text x="22" y="26" text-anchor="middle" font-family="Nunito,Manrope" font-weight="800" font-size="11" fill="#2B2B2B" id="m_write">40</text></svg>
-          </div>
-          <span style="display:block;margin-top:12px;font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:16.5px;color:#2B2B2B;">Письмо</span>
-          <div id="sub_write" style="font-weight:600;font-size:12px;color:#777163;margin-top:2px;">задания 37–38 · ИИ</div>
-        </div>
-        <!-- Говорение -->
-        <div class="clayCard sq" style="padding:16px;">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;">
-            <div class="iconBlob" style="background:#E7F3F1;"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#3E93A8" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3Z"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg></div>
-            <svg width="46" height="46" viewBox="0 0 44 44"><defs><linearGradient id="r6" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6FC2B0"/><stop offset="1" stop-color="#3E93A8"/></linearGradient></defs><circle cx="22" cy="22" r="18" fill="none" stroke="#F1EDE7" stroke-width="5.5"/><circle cx="22" cy="22" r="18" fill="none" stroke="url(#r6)" stroke-width="5.5" stroke-linecap="round" stroke-dasharray="113.1" stroke-dashoffset="58.8" id="ring_speak" transform="rotate(-90 22 22)"/><text x="22" y="26" text-anchor="middle" font-family="Nunito,Manrope" font-weight="800" font-size="11" fill="#2B2B2B" id="m_speak">48</text></svg>
-          </div>
-          <span style="display:block;margin-top:12px;font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:16.5px;color:#2B2B2B;">Говорение</span>
-          <div id="sub_speak" style="font-weight:600;font-size:12px;color:#777163;margin-top:2px;">устная часть · запись</div>
-        </div>
-      </div>
-      <!-- mascot tip -->
-      <sc-if value="{{ showMascot }}" hint-placeholder-val="{{ true }}">
-        <div class="clayCard" style="display:flex;align-items:center;gap:14px;padding:14px 16px;margin-top:15px;">
-          <div style="width:56px;height:56px;flex:none;border-radius:19px;background:linear-gradient(145deg,#FFA570,#F2683F);display:grid;place-items:center;box-shadow:0 8px 16px rgba(242,104,63,.3),inset 0 2px 3px rgba(255,255,255,.5),inset 0 -4px 8px rgba(190,55,18,.26);">
-            <svg width="32" height="32" viewBox="0 0 38 38" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6a9 9 0 0 0-6 15.7c1 .9 1.4 1.6 1.5 2.8h9c.1-1.2.5-1.9 1.5-2.8A9 9 0 0 0 19 6Z"/><circle cx="15.6" cy="16" r="1.1" fill="#fff" stroke="none"/><circle cx="22.4" cy="16" r="1.1" fill="#fff" stroke="none"/><path d="M15.7 19.4c1.3 1.2 5.3 1.2 6.6 0"/><path d="M15.5 27.5h7M16.5 30.5h5"/></svg>
-          </div>
-          <div>
-            <div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:11px;letter-spacing:1.4px;color:#B54E2F;">СОВЕТ ДНЯ</div>
-            <div style="font-weight:600;font-size:13.5px;color:#2B2B2B;line-height:1.35;margin-top:3px;">Учи по 5 слов утром — на свежую голову запоминается легче 🧠</div>
-          </div>
-        </div>
-      </sc-if>
-    </div>
-    <!-- bottom nav (floating clay pill) -->
-    <div style="position:absolute;left:0;right:0;bottom:0;padding:10px 14px 14px;z-index:6;background:linear-gradient(to top,rgba(246,243,239,.95) 55%,rgba(246,243,239,0));">
-      <div class="navclay">
-        <div class="navit on"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span style="font-weight:800;font-size:10.5px;color:#B54E2F;">Главная</span></div>
-        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.3 8 5 5.5 5.4 4.6 5.5 4 6.3 4 7.2V18c0 .6.5 1 1.1.9 2.2-.3 4.5 0 6.4 1.4 1.9-1.4 4.2-1.7 6.4-1.4.6.1 1.1-.3 1.1-.9V7.2c0-.9-.6-1.7-1.5-1.8C15.5 5 13.7 5.3 12 6.5Z"/><path d="M12 6.5V20"/></svg><span style="font-weight:700;font-size:10.5px;color:#6F695E;">Учить</span></div>
-        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg><span style="font-weight:700;font-size:10.5px;color:#6F695E;">Прогресс</span></div>
-        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#6F695E;">Профиль</span></div>
+      </section>
+
+      <div class="today__secondary-actions" aria-label="Другие действия">
+        <button id="today-open-practice" class="today-link" type="button">Открыть всю практику</button>
+        <button id="home_adaptive_plan" class="today-link" type="button" hidden>Подробный учебный план</button>
       </div>
     </div>
-  
+  </main>
 </div>
 <div class="screen" id="scr2" data-name="Слова">
 

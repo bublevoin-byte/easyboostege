@@ -37,7 +37,8 @@ import './modules/profile.js';
 import * as app from './app.js';
 import * as voiceTutor from './voice-tutor.js';
 /*
- * Четыре экрана грузятся сразу, а не чанком: без сети должны работать словарные
+ * Пять экранов грузятся сразу, а не чанком: Сегодня должен показать сохранённый маршрут,
+ * а без сети также должны работать словарные
  * карточки, интервальное повторение, встроенные грамматические тесты и просмотр сохранённого
  * прогресса, а тикет учебных предпочтений обещает офлайн-изменение профиля. Ученик может уйти в
  * офлайн, ни разу их не открыв, — и обещание всё равно наступает.
@@ -52,6 +53,7 @@ import * as voiceTutor from './voice-tutor.js';
  */
 import * as wordsScreen from './screens/words.js';
 import * as grammarScreen from './screens/grammar.js';
+import {} from './screens/today.js';
 import * as progressScreen from './screens/progress.js';
 import * as profileScreen from './screens/profile.js';
 import './privacy.js';
