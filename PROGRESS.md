@@ -4,12 +4,12 @@
 Тикеты: [.scratch/aisy-visual-concept/issues/](.scratch/aisy-visual-concept/issues/)
 Ветка: `prototype/aisy-today-visual-v1`
 
-Overall status: `in progress` — candidate design system and read-only Today prototype; production UI unchanged.
+Overall status: `done` — candidate design system and read-only Today prototype captured; production UI unchanged.
 
 | № | Что даёт | Статус |
 |---|---|---|
 | 01 | Будущая коралловая visual system v2 и исполняемые токены | done |
-| 02 | Три интерактивных Today-концепта для выбора | pending |
+| 02 | Три интерактивных Today-концепта для выбора | done |
 
 ---
 

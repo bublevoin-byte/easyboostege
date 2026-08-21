@@ -93,7 +93,8 @@ not remain on main.
 - The Today concept is read-only and uses representative state shaped like the existing Today projection. It
   does not call production mutations, write preferences or fabricate new backend fields.
 - The concept is a separate local prototype surface with `?variant=A|B|C`, a clearly non-product switcher and
-  keyboard left/right switching. It is not included in the PWA application shell.
+  keyboard left/right switching. The local runner serves it from the source tree; production builds exclude
+  `public/prototypes/**` from both `dist` and the asset manifest, not only from the PWA application shell.
 - Production Today, Progress, Practice, Asya and EGE screens remain unchanged during this concept phase.
 - The prototype is built with the repository's current vanilla HTML/CSS/ES-module stack and no new dependency.
 
@@ -106,8 +107,8 @@ not remain on main.
   inspected in a real browser with its three URL-stable variants.
 - Browser verification covers 320/375/768/1440 widths, light and dark themes, keyboard switching, visible
   focus, 44 px controls, no horizontal overflow, reduced motion and absence of network/provider calls.
-- Static verification confirms the prototype is outside the service-worker application shell and does not
-  replace the current Today route.
+- Static verification confirms the prototype is absent from the production build and service-worker application
+  shell and does not replace the current Today route.
 - Existing `npm run lint`, `npm run check`, build and focused production Today contracts remain green because
   the prototype must not weaken the released learner UX.
 

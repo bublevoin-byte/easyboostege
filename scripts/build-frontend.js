@@ -143,9 +143,9 @@ function previewOnlyAsset(name) {
 const orphaned = sourceFiles.filter((name) => name.endsWith('.js') && name !== 'service-worker.js' && !previewOnlyAsset(name) && !reachable.has(name));
 if (orphaned.length) throw new Error(`Эти модули не подключены ни статически, ни динамически: ${orphaned.join(', ')}`);
 
-/* Статика, которую никто не импортирует: разметку собирает Vite, остальное копируется как есть. */
+/* Статика, которую никто не импортирует: prototype-only файлы остаются только в исходном дереве. */
 function copiedStaticAsset(name) {
-  return previewOnlyAsset(name) || (!name.endsWith('.js') && name !== 'index.html');
+  return !previewOnlyAsset(name) && !name.endsWith('.js') && name !== 'index.html';
 }
 const staticAssets = publicSourceFiles.filter(copiedStaticAsset);
 
@@ -161,8 +161,8 @@ function runtimeManagedAsset(name) {
     || (name.startsWith('assets/speaking/task4-v1/') && name.endsWith('.png'));
 }
 
-/* Локальные visual prototypes собираются для preview, но не являются исполняемой offline-оболочкой. */
-const shellStaticAssets = staticAssets.filter((name) => !runtimeManagedAsset(name) && !previewOnlyAsset(name));
+/* Prototype-only assets уже исключены; из production-оболочки остаётся отделить runtime-каталоги. */
+const shellStaticAssets = staticAssets.filter((name) => !runtimeManagedAsset(name));
 
 /* ---------- сборка ---------- */
 

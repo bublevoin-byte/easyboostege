@@ -9,6 +9,7 @@
     "start:production": "npm run db:migrate && node server.js",
     "lint": "eslint .",
     "build:frontend": "node scripts/build-frontend.js",
+    "prototype:today": "node scripts/serve-today-prototype.js",
     "check": "node scripts/check-syntax.js && node scripts/check-inline-handlers.js",
     "openapi:grammar:sync": "node scripts/sync-grammar-openapi-contract.js",
     "openapi:grammar:check": "node scripts/sync-grammar-openapi-contract.js --check",

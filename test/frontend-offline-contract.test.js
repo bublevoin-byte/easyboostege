@@ -1633,7 +1633,7 @@ test('an in-flight progress response only clears the owner and values it actuall
 
 /* ---------- service worker ---------- */
 
-test('local prototype previews are copied without joining the executable offline shell', () => {
+test('local prototype previews stay in source and never enter the production build', () => {
   const sourceShell = workerSource.match(/const APP_SHELL=(\[[^\]]*\]);/u)?.[1] || '';
   assert.doesNotMatch(sourceShell, /\/prototypes\//u);
 
@@ -1649,13 +1649,13 @@ test('local prototype previews are copied without joining the executable offline
   }
 
   const copiedDefinition = frontendBuildSource.match(/function copiedStaticAsset\(name\)\s*\{[\s\S]*?\n\}/u)?.[0];
-  assert.ok(copiedDefinition, 'frontend build must copy every preview asset, including ES modules');
+  assert.ok(copiedDefinition, 'frontend build must own the production static-asset boundary');
   vm.runInContext(`${copiedDefinition}; this.copiedStaticAsset = copiedStaticAsset;`, context);
   for (const previewAsset of [
     'prototypes/today-v1/index.html',
     'prototypes/today-v1/visual-tokens.css',
     'prototypes/today-v1/prototype.js',
-  ]) assert.equal(context.copiedStaticAsset(previewAsset), true, `${previewAsset} must be copied for preview`);
+  ]) assert.equal(context.copiedStaticAsset(previewAsset), false, `${previewAsset} must remain source-only`);
   assert.equal(context.copiedStaticAsset('main.js'), false, 'production modules remain in the executable graph');
   assert.equal(context.copiedStaticAsset('index.html'), false, 'Vite still owns the production entry document');
   assert.equal(context.copiedStaticAsset('offline.html'), true, 'ordinary production static assets stay copied');
@@ -1664,7 +1664,7 @@ test('local prototype previews are copied without joining the executable offline
   assert.match(frontendBuildSource, /const staticAssets = publicSourceFiles\.filter\(copiedStaticAsset\);/u);
   assert.match(
     frontendBuildSource,
-    /const shellStaticAssets = staticAssets\.filter\(\(name\) => !runtimeManagedAsset\(name\)\s*&&\s*!previewOnlyAsset\(name\)\);/u,
+    /const shellStaticAssets = staticAssets\.filter\(\(name\) => !runtimeManagedAsset\(name\)\);/u,
   );
 });
 
