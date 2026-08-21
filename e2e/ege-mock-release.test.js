@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
 import {
-  availablePort, chromeExecutable, createActiveSubscriptionPage, stopProcess, waitForReady,
+  availablePort, chromeExecutable, createActiveSubscriptionPage, openEgeHub, openEgeMock,
+  openLatestEgeResult, stopProcess, waitForReady,
 } from './browser-server-harness.js';
 
 const projectDirectory = fileURLToPath(new URL('..', import.meta.url));
@@ -145,9 +146,10 @@ try {
     return Boolean(navigator.serviceWorker.controller);
   }, null, { timeout: 15_000 });
 
-  const homeEntry = page.locator('#examBtn');
-  assert.match(await homeEntry.innerText(), /Пробный ЕГЭ.*полный вариант/isu);
-  await homeEntry.press('Enter');
+  await openEgeHub(page);
+  await page.waitForFunction(() => document.querySelectorAll('#ege-hub-sections > li').length === 5);
+  assert.match(await page.locator('#ege-hub-full-mock').innerText(), /Полный пробный вариант/isu);
+  await openEgeMock(page);
   await page.locator('#scr16.on .ege-mock__intro').waitFor({ state: 'visible' });
   assert.equal(await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches), true);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
@@ -262,7 +264,7 @@ try {
     if (action === 'complete') {
       await page.reload({ waitUntil: 'domcontentloaded' });
       await page.locator('#scr1.on').waitFor({ state: 'visible', timeout: 15_000 });
-      await page.locator('#examBtn').press('Enter');
+      await openEgeMock(page);
       const reopenOral = page.getByRole('button', { name: 'Перейти к устной части' });
       if (await reopenOral.count()) await reopenOral.press('Enter');
       await page.locator('#scr16.on').waitFor({ state: 'visible', timeout: 20_000 });
@@ -300,7 +302,7 @@ try {
 
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.locator('#scr1.on').waitFor({ state: 'visible', timeout: 10_000 });
-  await page.locator('#examBtn').press('Enter');
+  await openLatestEgeResult(page);
   const resultHeading = page.getByRole('heading', { name: /^\d+–\d+ из 82$/u });
   try {
     await resultHeading.waitFor({ timeout: 20_000 });
@@ -345,7 +347,7 @@ try {
   assert.equal(history.attempts[0].id, startedAttempt.id);
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.locator('#scr1.on').waitFor({ state: 'visible', timeout: 15_000 });
-  await page.locator('#examBtn').press('Enter');
+  await openLatestEgeResult(page);
   await resultHeading.waitFor({ timeout: 20_000 });
   const historyAfterReloadResponse = await context.request.get(
     `${baseUrl}/api/v1/ege-mocks/attempts/history`, { headers: ownerHeaders },

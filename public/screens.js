@@ -18,6 +18,7 @@ import {registerScreenSource} from './router.js';
 
 const SCREEN_SOURCES={
   'aisy-practice':function(){return import('./screens/practice.js')},
+  'aisy-ege':function(){return import('./screens/ege-hub.js')},
   scr4:function(){return import('./screens/listening.js')},
   scr7:function(){return import('./screens/reading.js')},
   scr8:function(){return import('./screens/writing.js')},

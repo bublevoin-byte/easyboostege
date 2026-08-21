@@ -7,7 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
 import {
-  availablePort, chromeExecutable, createActiveSubscriptionPage, stopProcess, waitForReady,
+  availablePort, chromeExecutable, createActiveSubscriptionPage, openEgeMock, stopProcess,
+  waitForReady,
 } from './browser-server-harness.js';
 import { EGE_MOCK_FORM_1_V1_PUBLIC as egeForm } from '../public/ege-mock-form-1-v1.js';
 
@@ -139,7 +140,7 @@ try {
     await navigator.serviceWorker.ready;
     return Boolean(navigator.serviceWorker.controller);
   }, null, { timeout: 15_000 });
-  await page.locator('#examBtn').press('Enter');
+  await openEgeMock(page);
   await page.getByRole('button', { name: 'Перейти к устной части' }).press('Enter');
   try {
     await page.getByRole('button', { name: 'Проверить микрофон и материалы' }).press('Enter', { timeout: 8_000 });
@@ -228,14 +229,14 @@ try {
   } catch {
     // Existing consent can legitimately keep the sheet closed in a peer tab.
   }
-  await peer.locator('#examBtn').click();
+  await openEgeMock(peer);
   try {
     await peer.locator('#scr16.on').waitFor({ state: 'visible', timeout: 5_000 });
   } catch (error) {
     const peerState = await peer.evaluate(() => ({
       active: document.querySelector('.screen.on')?.id,
       body: document.body.innerText.slice(0, 1_000),
-      examButton: document.querySelector('#examBtn')?.outerHTML,
+      egeDestination: document.querySelector('[data-destination="ege"]')?.outerHTML,
     }));
     throw new Error(`${error.message}\npeer=${JSON.stringify(peerState)}`);
   }
@@ -357,7 +358,7 @@ try {
     // Existing consent can legitimately keep the sheet closed after reload.
   }
   if (!await page.locator('#scr16.on').count()) {
-    await page.locator('#examBtn').click();
+    await openEgeMock(page);
   }
   await page.locator('#scr16.on').waitFor({ state: 'visible', timeout: 20_000 });
   const reopenAccelerated = page.getByRole('button', { name: 'Перейти к устной части' });

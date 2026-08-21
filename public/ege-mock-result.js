@@ -299,7 +299,7 @@ export function egeMockResultTupleIsConsistent(envelope, history, attemptId) {
     && JSON.stringify(canonical) === JSON.stringify(current[0].result);
 }
 
-export function renderEgeMockResult(envelope, history = null) {
+export function renderEgeMockResult(envelope, history = null, options = {}) {
   if (envelope?.available !== true || envelope.keysRevealed !== true
     || !egeMockAvailableResultMatchesComposite(envelope)) invalid();
   const result = assertCanonical(envelope.result?.canonical);
@@ -318,12 +318,15 @@ export function renderEgeMockResult(envelope, history = null) {
     : '<p>По доступным данным отдельный слабый раздел не выделен.</p>';
   const baseline = history?.baselineAttemptId === result.attemptId
     ? '<p class="ege-mock__status">Этот результат закреплён как исходная диагностика.</p>' : '';
+  const repeat = options.allowRepeat !== false
+    ? '<section class="ege-mock__card"><h3>Повтор</h3><p>Новый проход раскрытого варианта будет тренировочным и не заменит исходную диагностику.</p><button type="button" class="ege-mock__action" data-ege-action="result-repeat">Начать тренировочный повтор</button></section>'
+    : '';
   return `<section class="ege-mock__result" aria-labelledby="ege_mock_result_title">
     <header class="ege-mock__card ege-mock__result-summary"><p>${escapeHtml(result.label)}</p><h2 id="ege_mock_result_title" tabindex="-1">${total} из 82</h2>${baseline}${pending}<p><strong>${escapeHtml(result.forecast.label)}: ${escapeHtml(predicted)}</strong><br>${escapeHtml(result.forecast.disclaimer)} · ${escapeHtml(result.forecast.policyId)}</p><p>${escapeHtml(result.assessmentWarning)}</p></header>
     <section class="ege-mock__card"><h3>Баллы по разделам</h3><ul class="ege-mock__result-sections">${sections}</ul></section>
     ${historyMarkup(history)}
     <section class="ege-mock__card"><h3>Разбор заданий</h3><ol class="ege-mock__result-review">${result.items.map(resultItem).join('')}</ol></section>
     <section class="ege-mock__card"><h3>Что потренировать дальше</h3>${recommendations}<p>Ошибки пробника направляют тренировку, но не засчитываются как освоение темы.</p></section>
-    <section class="ege-mock__card"><h3>Повтор</h3><p>Новый проход раскрытого варианта будет тренировочным и не заменит исходную диагностику.</p><button type="button" class="ege-mock__action" data-ege-action="result-repeat">Начать тренировочный повтор</button></section>
+    ${repeat}
   </section>`;
 }

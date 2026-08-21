@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
 import {
-  availablePort, chromeExecutable, createActiveSubscriptionPage, stopProcess, waitForReady,
+  availablePort, chromeExecutable, createActiveSubscriptionPage, openLatestEgeResult,
+  stopProcess, waitForReady,
 } from './browser-server-harness.js';
 import { getEgeMockForm } from '../ege-mock/catalog.js';
 import { createFileRepository } from '../storage/file-repository.js';
@@ -31,7 +32,7 @@ async function waitForResultAfterReload(page) {
   while (Date.now() < deadline) {
     if (await heading.isVisible().catch(() => false)) return;
     if (await page.locator('#scr1.on').count()) {
-      await page.locator('#examBtn').press('Enter');
+      await openLatestEgeResult(page);
     }
     await page.waitForTimeout(100);
   }
@@ -99,7 +100,7 @@ try {
     await navigator.serviceWorker.ready;
     return Boolean(navigator.serviceWorker.controller);
   }, null, { timeout: 15_000 });
-  await page.locator('#examBtn').press('Enter');
+  await openLatestEgeResult(page);
   try {
     await page.getByRole('heading', { name: /^0–(?:20|40) из 82$/u }).waitFor({ timeout: 15_000 });
   } catch (error) {
@@ -135,21 +136,32 @@ try {
   await page.setViewportSize({ width: 375, height: 812 });
 
   await context.setOffline(true);
-  await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.waitForFunction(() => Boolean(document.querySelector('.screen.on')), null, { timeout: 15_000 });
-  if (await page.locator('#scr1.on').count()) await page.locator('#examBtn').press('Enter');
-  await page.locator('#ege_mock_area').waitFor({ state: 'visible', timeout: 10_000 });
+  await page.evaluate(() => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.egeAction = 'result-refresh';
+    button.textContent = 'Test offline authoritative refresh';
+    document.getElementById('ege_mock_area').appendChild(button);
+  });
+  await page.getByRole('button', { name: 'Test offline authoritative refresh' }).press('Enter');
+  await page.getByRole('button', { name: 'Повторить загрузку' }).waitFor();
+  assert.equal(await page.locator('#scr16.on').count(), 1,
+    'offline recovery must remain in the explicit fail-closed EGE runner');
   const offlineText = await page.locator('#ege_mock_area').innerText();
-  assert.match(offlineText, /пробник|состояние|устная|сеть|готовност/iu);
+  assert.match(offlineText, /Результат не загрузился/u);
+  assert.doesNotMatch(offlineText, /войти через Telegram/iu,
+    'offline EGE recovery must not pass on an unrelated authentication screen');
   assert.doesNotMatch(offlineText, /из 82/u,
-    'offline reload must not invent or reuse an unconfirmed result');
+    'offline recovery must not invent or reuse an unconfirmed result');
   await context.setOffline(false);
+  await page.getByRole('button', { name: 'Повторить загрузку' }).press('Enter');
+  await waitForResultAfterReload(page);
   await page.reload({ waitUntil: 'domcontentloaded' });
   await waitForResultAfterReload(page);
 
   const secondPage = await context.newPage();
   await secondPage.goto(baseUrl, { waitUntil: 'networkidle' });
-  await secondPage.locator('#examBtn').press('Enter');
+  await openLatestEgeResult(secondPage);
   await secondPage.getByRole('heading', { name: /^0–(?:20|40) из 82$/u }).waitFor({ timeout: 15_000 });
   page.once('dialog', (dialog) => dialog.dismiss());
   await page.getByRole('button', { name: 'Начать тренировочный повтор' }).press('Enter');
@@ -166,11 +178,13 @@ try {
     document.getElementById('ege_mock_area').appendChild(button);
   });
   await page.getByRole('button', { name: 'Test authoritative refresh' }).press('Enter');
-  await page.getByRole('button', { name: 'Повторить загрузку результата' }).waitFor();
-  assert.match(await page.locator('#ege_mock_area').innerText(), /из 82/u,
-    'the prior result may remain visible only with an explicit stale error and retry action');
+  await page.getByRole('button', { name: 'Повторить загрузку' }).waitFor();
+  assert.doesNotMatch(await page.locator('#ege_mock_area').innerText(), /из 82/u,
+    'a standalone history view must fail closed instead of showing an unconfirmed stale tuple');
   await page.unroute('**/api/v1/ege-mocks/attempts/*/result');
   await page.unroute('**/api/v1/ege-mocks/attempts/history');
+  await page.getByRole('button', { name: 'Повторить загрузку' }).press('Enter');
+  await page.getByRole('button', { name: 'Начать тренировочный повтор' }).waitFor({ timeout: 15_000 });
 
   page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: 'Начать тренировочный повтор' }).press('Enter');

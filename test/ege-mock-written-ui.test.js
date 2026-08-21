@@ -159,6 +159,10 @@ test('a failed oral reopen preserves its actionable error instead of returning t
 });
 
 test('a failed result refresh keeps stale authority explicit and retryable', () => {
+  const authoritativeLoader = screen.slice(
+    screen.indexOf('async function loadAuthoritativeResultTuple'),
+    screen.indexOf('async function loadFinalResult'),
+  );
   const loader = screen.slice(
     screen.indexOf('async function loadFinalResult'),
     screen.indexOf('function finalAssessmentControls'),
@@ -166,9 +170,14 @@ test('a failed result refresh keeps stale authority explicit and retryable', () 
   assert.match(loader, /await handleRunnerError\(error, operation\)/u,
     'owner failures must invalidate through the shared authority seam');
   assert.match(loader, /return false/u);
-  assert.match(loader,
+  assert.match(authoritativeLoader,
     /attempts\/history\?attemptId=\$\{encodeURIComponent\(attemptId\)\}/u,
     'the paired history snapshot pins the exact restored terminal attempt inside its bounded window');
+  assert.match(loader, /loadAuthoritativeResultTuple\(operation\.owner, attemptId\)/u,
+    'the live runner consumes the shared owner-bound result and history tuple');
+  assert.match(loader,
+    /const \{ result, history, consistent \} = tuple;[\s\S]*?if \(!openOperationCurrent\(operation\) \|\| runner\?\.snapshot\(\)\.attemptId !== attemptId\) return;[\s\S]*?if \(!consistent\) \{[\s\S]*?finalResultLoadAuthority\.invalidate\(attemptId\)/u,
+    'a stale route, owner or runner response cannot mutate the current result-load authority');
   assert.match(screen,
     /finalResultLoadFailedAttemptId === snapshot\.attemptId[\s\S]*?data-ege-action="result-refresh"/u,
     'a stale rendered result exposes a retry action instead of only an error string');

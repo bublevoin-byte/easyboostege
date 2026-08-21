@@ -237,6 +237,7 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
 <link rel="stylesheet" href="/aisy-shell.css">
 <link rel="stylesheet" href="/today.css">
 <link rel="stylesheet" href="/practice.css">
+<link rel="stylesheet" href="/ege-hub.css">
 </head><body>
 <button id="navfab" onclick="document.getElementById('navmenu').classList.toggle('open')">Экраны ▾</button>
 <div id="navmenu"></div>
@@ -388,11 +389,34 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
   </main>
 </div>
 <div class="screen" id="aisy-ege" data-name="ЕГЭ" data-aisy-shell-host>
-  <main class="aisy-shell-placeholder aisy-reading-canvas" tabindex="-1" aria-labelledby="aisy-ege-title">
-    <section class="aisy-surface aisy-shell-placeholder__card">
-      <p class="aisy-shell-placeholder__kicker">Aisy ЕГЭ — Английский</p>
+  <main class="ege-hub aisy-reading-canvas" tabindex="-1" aria-labelledby="aisy-ege-title">
+    <header class="ege-hub__header">
+      <p class="ege-hub__eyebrow">Aisy ЕГЭ — Английский</p>
       <h1 id="aisy-ege-title">ЕГЭ</h1>
-      <p>Здесь появятся разделы экзамена, пробный вариант и результаты. Запуск строгого пробника остаётся отдельным маршрутом.</p>
+      <p>Раздельная тренировка разделов, строгий полный пробник и ваши точные результаты.</p>
+    </header>
+    <p id="ege-hub-state" class="ege-hub__state" role="status" aria-live="polite">Проверяем попытки и результаты…</p>
+    <section id="ege-hub-current" class="ege-hub__card aisy-surface" aria-label="Текущая попытка" hidden></section>
+    <section id="ege-hub-full-mock" class="ege-hub__card aisy-surface" aria-labelledby="ege-hub-full-title">
+      <div>
+        <h2 id="ege-hub-full-title">Полный пробный вариант</h2>
+        <p data-ege-hub-full-description>Готовим правила строгого пробника.</p>
+        <p class="ege-hub__rationale" data-ege-hub-rationale></p>
+      </div>
+      <p class="ege-hub__assessment" data-ege-hub-assessment></p>
+      <p class="ege-hub__reason" data-ege-hub-start-reason hidden></p>
+      <button type="button" class="aisy-button ege-hub__action" data-ege-hub-start>Открыть подготовку к пробнику</button>
+    </section>
+    <ul id="ege-hub-latest" class="ege-hub__latest" aria-label="Последний результат" hidden></ul>
+    <section id="ege-hub-history" class="ege-hub__history" aria-labelledby="ege-hub-history-title" hidden>
+      <h2 id="ege-hub-history-title" class="ege-hub__section-heading">История пробников</h2>
+      <ol id="ege-hub-history-list" class="ege-hub__history-list"></ol>
+    </section>
+    <section aria-labelledby="ege-hub-sections-title">
+      <h2 id="ege-hub-sections-title" class="ege-hub__section-heading">Тренировка разделов</h2>
+      <ul id="ege-hub-sections" class="ege-hub__sections">
+        <li class="ege-hub-section aisy-surface" role="status">Готовим разделы…</li>
+      </ul>
     </section>
   </main>
 </div>

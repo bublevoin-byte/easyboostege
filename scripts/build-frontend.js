@@ -114,8 +114,10 @@ for (const entry of entryPoints) {
   for (const name of await walkModuleGraph(entry)) reachable.add(name);
   for (const name of await walkModuleGraph(entry, { staticOnly: true })) shellModules.add(name);
 }
-const practiceOfflineClosure = await walkModuleGraph('screens/practice.js', { staticOnly: true });
-const offlineLazyModules = [...practiceOfflineClosure].filter((name) => !shellModules.has(name));
+const offlineHubEntries = ['screens/practice.js', 'screens/ege-hub.js'];
+const offlineLazyModules = [...new Set((await Promise.all(offlineHubEntries.map(
+  (entry) => walkModuleGraph(entry, { staticOnly: true }),
+))).flatMap((closure) => [...closure]))].filter((name) => !shellModules.has(name));
 const egeMockSourceEntry = 'screens/ege-mock.js';
 const egeMockStaticClosure = await walkModuleGraph(egeMockSourceEntry, { staticOnly: true });
 const sourceEgeMockExecModules = [

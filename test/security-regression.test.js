@@ -13,7 +13,7 @@ const frontendAuthPath = new URL('../public/auth.js', import.meta.url);
  * Чанки экранов идут следом: в точку входа они не подключены, но это тот же код приложения,
  * и требования к нему не меняются от того, что он приезжает позже.
  */
-const frontendScriptNames = ['main.js', 'globals.js', 'auth.js', 'access.js', 'owner-incarnation.js', 'sync.js', 'store.js', 'components.js', 'router.js', 'aisy-shell.js', 'learning.js', 'vocabulary-domain.js', 'learning-activity-contract.js', 'learning-activity-recorder.js', 'grammar-domain-contract.js', 'reading-catalog-contract.js', 'listening-catalog-contract.js', 'listening-pilot-v1.js', 'listening-audio-contract.js', 'speaking-catalog-contract.js', 'content/speaking/task1-v1.js', 'content/speaking/task2-v1.js', 'speaking-local-recording.js', 'speaking-task1-runtime.js', 'speaking-task2-runtime.js', 'modules/words.js', 'modules/grammar.js', 'modules/reading.js', 'modules/listening.js', 'modules/writing.js', 'modules/speaking.js', 'modules/exam.js', 'modules/progress.js', 'modules/profile.js', 'modules/today.js', 'app.js', 'voice-tutor.js', 'realtime-transport.js', 'screens.js', 'screens/words.js', 'screens/grammar.js', 'screens/reading.js', 'screens/listening.js', 'screens/writing.js', 'screens/speaking.js', 'screens/today.js', 'screens/progress.js', 'screens/profile.js', 'privacy.js', 'tts.js', 'pwa.js'];
+const frontendScriptNames = ['main.js', 'globals.js', 'auth.js', 'access.js', 'owner-incarnation.js', 'sync.js', 'store.js', 'components.js', 'router.js', 'aisy-shell.js', 'learning.js', 'vocabulary-domain.js', 'learning-activity-contract.js', 'learning-activity-recorder.js', 'grammar-domain-contract.js', 'reading-catalog-contract.js', 'listening-catalog-contract.js', 'listening-pilot-v1.js', 'listening-audio-contract.js', 'speaking-catalog-contract.js', 'content/speaking/task1-v1.js', 'content/speaking/task2-v1.js', 'speaking-local-recording.js', 'speaking-task1-runtime.js', 'speaking-task2-runtime.js', 'modules/words.js', 'modules/grammar.js', 'modules/reading.js', 'modules/listening.js', 'modules/writing.js', 'modules/speaking.js', 'modules/exam.js', 'modules/progress.js', 'modules/profile.js', 'modules/today.js', 'modules/ege-hub.js', 'app.js', 'voice-tutor.js', 'realtime-transport.js', 'screens.js', 'screens/words.js', 'screens/grammar.js', 'screens/reading.js', 'screens/listening.js', 'screens/writing.js', 'screens/speaking.js', 'screens/today.js', 'screens/progress.js', 'screens/profile.js', 'screens/ege-hub.js', 'privacy.js', 'tts.js', 'pwa.js'];
 const frontendScriptPaths = frontendScriptNames.map((name) => new URL(`../public/${name}`, import.meta.url));
 const serverPath = new URL('../server.js', import.meta.url);
 const usersRoutePath = new URL('../routes/users.js', import.meta.url);
@@ -103,7 +103,7 @@ test('frontend loads through a single module entry point that keeps the previous
    * сети словарные карточки, интервальное повторение, встроенные грамматические тесты, просмотр
    * сохранённого прогресса и изменение предпочтений, а Сегодня даёт офлайн-маршрут. Поэтому эти пять экранов обязаны быть в оболочке.
    *
-   * Practice и остальные пять экранов обязаны остаться ленивыми: на них держится бюджет раздела 19. Уже открытый
+   * Practice, ЕГЭ hub и остальные пять экранов обязаны остаться ленивыми: на них держится бюджет раздела 19. Уже открытый
    * пробник продолжает работу из runtime-cache, который его exact preflight успел заполнить до старта.
    * Ни один список не должен молча съехать в другую сторону, поэтому проверяются оба.
    */
@@ -114,7 +114,7 @@ test('frontend loads through a single module entry point that keeps the previous
   const loader = await fs.readFile(new URL('../public/screens.js', import.meta.url), 'utf8');
   const lazy = [...loader.matchAll(/import\(\s*'\.\/(screens\/[^']+)'\s*\)/gu)].map((match) => match[1]);
   assert.deepEqual(lazy, [
-    'screens/practice.js', 'screens/listening.js', 'screens/reading.js',
+    'screens/practice.js', 'screens/ege-hub.js', 'screens/listening.js', 'screens/reading.js',
     'screens/writing.js', 'screens/speaking.js', 'screens/ege-mock.js',
   ]);
   for (const screen of eagerScreens) {

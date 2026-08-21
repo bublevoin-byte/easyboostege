@@ -1,6 +1,6 @@
 # 05 — ЕГЭ hub без смешивания с попыткой
 
-Status: ready-for-agent
+Status: done
 Blocked by: 02, 03
 Spec: `.scratch/aisy-ux-redesign/spec.md#54-ege`
 
@@ -23,9 +23,9 @@ mock остаётся отдельным строгим экраном и исп
 
 ## Definition of Done
 
-- [ ] Nav “ЕГЭ” открывает hub, а не немедленно running mock.
-- [ ] Active attempt/continue, start, latest result and section practice are distinct actions.
-- [ ] No answer assistance appears in strict mock.
-- [ ] Existing written/oral/result/release E2E remain green.
-- [ ] `npm test`, lint/check/build and focused Chromium pass.
-- [ ] Один коммит: `feat(aisy): add ege learner hub`.
+- [x] Nav “ЕГЭ” открывает hub, а не немедленно running mock.
+- [x] Active attempt/continue, start, latest result and section practice are distinct actions.
+- [x] No answer assistance appears in strict mock.
+- [x] Existing written/oral/result/release E2E remain green.
+- [x] `npm test`, lint/check/build and focused Chromium pass.
+- [x] Один коммит: `feat(aisy): add ege learner hub`.

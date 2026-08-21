@@ -1730,6 +1730,18 @@ test('the app shell still comes from the cache offline, so the previous test is 
   assert.equal((await navigation.responded).fromCache, true);
 });
 
+test('the EGE hub is offline-ready without preloading the strict mock runner', () => {
+  const shell = workerSource.match(/const APP_SHELL=(\[[^\]]*\]);/u)?.[1] || '';
+  for (const entry of ['/ege-hub.css', '/modules/ege-hub.js', '/screens/ege-hub.js']) {
+    assert.ok(shell.includes(`'${entry}'`), `${entry} must be available on the first offline hub visit`);
+  }
+  for (const entry of [
+    '/screens/ege-mock.js', '/ege-mock-written-runner.js', '/ege-mock-oral-runner.js',
+  ]) {
+    assert.equal(shell.includes(`'${entry}'`), false, `${entry} must stay behind the explicit strict action`);
+  }
+});
+
 test('a loaded listening catalog joins the runtime cache and remains available offline', async () => {
   const url = `${ORIGIN}/listening-pilot-v1.js`;
   const online = createWorker({ networkFails: false });

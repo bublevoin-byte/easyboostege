@@ -7,7 +7,8 @@ import { fileURLToPath } from 'node:url';
 import jwt from 'jsonwebtoken';
 import { chromium } from 'playwright';
 import {
-  availablePort, chromeExecutable, createActiveSubscriptionPage, stopProcess, waitForReady,
+  availablePort, chromeExecutable, createActiveSubscriptionPage, openEgeHub, openEgeMock,
+  stopProcess, waitForReady,
 } from './browser-server-harness.js';
 import { EGE_MOCK_FORM_1_V1_PUBLIC as egeForm } from '../public/ege-mock-form-1-v1.js';
 import { egeMockAssetPlaybackUrl } from '../public/ege-mock-written-assets.js';
@@ -64,7 +65,7 @@ try {
   await failurePage.route(exactFormChunk, (route) => route.abort('failed'));
   await failurePage.goto(baseUrl, { waitUntil: 'networkidle' });
   await failurePage.locator('#scr1.on').waitFor({ state: 'visible', timeout: 8_000 });
-  await failurePage.locator('#examBtn').press('Enter');
+  await openEgeMock(failurePage);
   await failurePage.getByRole('heading', { name: 'Вариант не загрузился' }).waitFor();
   assert.match(await failurePage.getByRole('alert').innerText(), /не удалось|ошибк|сеть/iu);
   assert.match(await failurePage.locator('#ege_mock_timer').innerText(), /^—/u,
@@ -82,15 +83,21 @@ try {
   currentFailureContext = currentFailureHarness.context;
   const currentFailurePage = currentFailureHarness.page;
   let failedCurrentCalls = 0;
+  await currentFailurePage.goto(baseUrl, { waitUntil: 'networkidle' });
+  await currentFailurePage.locator('#scr1.on').waitFor({ state: 'visible', timeout: 8_000 });
+  await openEgeHub(currentFailurePage);
+  await currentFailurePage.waitForFunction(() => (
+    document.querySelectorAll('#ege-hub-sections > li').length === 5
+  ));
   await currentFailurePage.route('**/api/v1/ege-mocks/attempts/current', (route) => {
     failedCurrentCalls += 1;
     return route.fulfill({
       status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'temporarily unavailable' }),
     });
   });
-  await currentFailurePage.goto(baseUrl, { waitUntil: 'networkidle' });
-  await currentFailurePage.locator('#scr1.on').waitFor({ state: 'visible', timeout: 8_000 });
-  await currentFailurePage.locator('#examBtn').press('Enter');
+  await currentFailurePage.getByRole('button', {
+    name: 'Открыть подготовку к пробнику',
+  }).press('Enter');
   try {
     await currentFailurePage.getByRole('heading', { name: 'Состояние попытки не подтверждено' }).waitFor({ timeout: 8_000 });
   } catch (error) {
@@ -126,7 +133,7 @@ try {
   }, null, { timeout: 15_000 });
   await page.locator('#scr1.on').waitFor({ state: 'visible', timeout: 8_000 });
 
-  await page.locator('#examBtn').press('Enter');
+  await openEgeMock(page);
   await page.locator('#scr16.on .ege-mock__intro').waitFor({ state: 'visible' });
   for (const width of [320, 1440]) {
     await page.setViewportSize({ width, height: width === 320 ? 720 : 900 });
@@ -140,10 +147,10 @@ try {
     .filter((control) => control.height < 44)), []);
 
   await page.getByRole('button', { name: 'Назад', exact: true }).press('Enter');
-  await page.locator('#scr1.on').waitFor({ state: 'visible' });
+  await page.locator('#aisy-ege.on').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#frame.ege-mock-expanded').count(), 0,
     'the native EGE Back action must run the route leave hook');
-  await page.locator('#examBtn').press('Enter');
+  await openEgeMock(page);
   await page.locator('#scr16.on .ege-mock__intro').waitFor({ state: 'visible' });
 
   await page.getByRole('button', { name: 'Проверить готовность' }).press('Enter');
@@ -297,7 +304,7 @@ try {
     await navigator.serviceWorker.ready;
     return Boolean(navigator.serviceWorker.controller);
   }, null, { timeout: 15_000 });
-  await authorityPage.locator('#examBtn').press('Enter');
+  await openEgeMock(authorityPage);
   await authorityPage.getByRole('heading', { name: /Задание \d+/u }).waitFor({ timeout: 30_000 });
   await authorityPage.getByRole('button', { name: 'Грамматика и лексика', exact: true }).press('Enter');
   const switchedPage = await authorityContext.newPage();
@@ -317,7 +324,7 @@ try {
   await page.getByRole('heading', { name: 'Задание 37', exact: true }).waitFor({ timeout: 20_000 });
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.locator('#scr1.on').waitFor({ state: 'visible', timeout: 8_000 });
-  await page.locator('#examBtn').press('Enter');
+  await openEgeMock(page);
   try {
     await page.getByRole('heading', { name: 'Задание 37', exact: true }).waitFor({ timeout: 20_000 });
   } catch (error) {
@@ -435,7 +442,7 @@ try {
   });
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.locator('#scr1.on').waitFor({ state: 'visible', timeout: 8_000 });
-  await page.locator('#examBtn').press('Enter');
+  await openEgeMock(page);
   await page.getByRole('button', {
     name: 'Запустить проверку после продления подписки',
   }).waitFor({ timeout: 15_000 });

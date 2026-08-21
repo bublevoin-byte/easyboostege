@@ -46,6 +46,7 @@ let timer = null;
 let autosave = null;
 let opening = null;
 let openingOwnerKey = '';
+let openIntent = null;
 let openEpoch = 0;
 let announcedWarning = null;
 let announcedOralWarning = null;
@@ -71,12 +72,34 @@ let finalResultFocusedAttemptId = '';
 let finalResultReloadQueuedAttemptId = '';
 let finalResultRequiredAttemptId = '';
 let finalResultRequiredAssessmentRevision = -1;
+let historicalResultAttemptId = '';
+let historicalResultOwnerKey = '';
 const finalResultLoadAuthority = createEgeMockResultLoadAuthority();
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/gu, (character) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   })[character]);
+}
+
+export function setEgeMockOpenIntent(intent) {
+  if (intent == null) {
+    openIntent = null;
+    return;
+  }
+  if (intent.kind === 'start') {
+    openIntent = Object.freeze({ kind: 'start' });
+    return;
+  }
+  if (intent.kind !== 'result' || typeof intent.attemptId !== 'string'
+    || intent.attemptId.length === 0) throw new Error('EGE_MOCK_OPEN_INTENT_INVALID');
+  openIntent = Object.freeze({ kind: 'result', attemptId: intent.attemptId });
+}
+
+function consumeEgeMockOpenIntent() {
+  const intent = openIntent;
+  openIntent = null;
+  return intent;
 }
 
 function ownerKey(owner) { return owner ? `${owner.username}\u0000${owner.generation}` : ''; }
@@ -142,7 +165,7 @@ async function handleRunnerError(error, operation = currentRunnerOperation()) {
   return false;
 }
 
-function transportFor(owner) {
+function transportFor(owner, { restoreCompleted = true } = {}) {
   return Object.freeze({
     async attempt(attemptId) {
       return timedOwnedResponse(await apiGet(`/api/v1/ege-mocks/attempts/${attemptId}`, {
@@ -153,7 +176,7 @@ function transportFor(owner) {
       const current = timedOwnedResponse(await apiGet('/api/v1/ege-mocks/attempts/current', {
         headers: ownerHeaders(owner),
       }), owner);
-      if (current.attempt) return current;
+      if (current.attempt || !restoreCompleted) return current;
       const history = timedOwnedResponse(await apiGet('/api/v1/ege-mocks/attempts/history', {
         headers: ownerHeaders(owner),
       }), owner);
@@ -279,16 +302,38 @@ function resetRunnerState(keepOpening = false, invalidateOpening = true) {
   finalResultReloadQueuedAttemptId = '';
   finalResultRequiredAttemptId = '';
   finalResultRequiredAssessmentRevision = -1;
+  historicalResultAttemptId = '';
+  historicalResultOwnerKey = '';
   finalResultLoadAuthority.reset();
   form = null;
   if (!keepOpening) {
     opening = null;
     openingOwnerKey = '';
+    openIntent = null;
   }
   announcedWarning = null;
   announcedOralWarning = null;
   visibleError = '';
   document.getElementById('frame')?.classList.remove('ege-mock-expanded');
+}
+
+async function loadAuthoritativeResultTuple(owner, attemptId) {
+  const [result, history] = await Promise.all([
+    apiGet(`/api/v1/ege-mocks/attempts/${attemptId}/result`, {
+      headers: ownerHeaders(owner),
+    }),
+    apiGet(`/api/v1/ege-mocks/attempts/history?attemptId=${encodeURIComponent(attemptId)}`, {
+      headers: ownerHeaders(owner),
+    }),
+  ]);
+  assertOwnedResponse(result, owner);
+  assertOwnedResponse(history, owner);
+  if (result.available !== true || result.keysRevealed !== true
+    || result.result?.canonical?.attemptId !== attemptId) {
+    throw new Error('EGE_MOCK_RESULT_INVALID');
+  }
+  const consistent = egeMockResultTupleIsConsistent(result, history, attemptId);
+  return { result, history, consistent };
 }
 
 async function loadFinalResult(operation, attemptId) {
@@ -318,29 +363,17 @@ async function loadFinalResult(operation, attemptId) {
   const loadAuthority = claim.token;
   let loaded = false;
   try {
-    const [result, history] = await Promise.all([
-      apiGet(`/api/v1/ege-mocks/attempts/${attemptId}/result`, {
-        headers: ownerHeaders(operation.owner),
-      }),
-      apiGet(`/api/v1/ege-mocks/attempts/history?attemptId=${encodeURIComponent(attemptId)}`, {
-        headers: ownerHeaders(operation.owner),
-      }),
-    ]);
+    const tuple = await loadAuthoritativeResultTuple(operation.owner, attemptId);
+    const { result, history, consistent } = tuple;
     if (!openOperationCurrent(operation) || runner?.snapshot().attemptId !== attemptId) return;
-    assertOwnedResponse(result, operation.owner);
-    assertOwnedResponse(history, operation.owner);
-    if (result.available !== true || result.keysRevealed !== true
-      || result.result?.canonical?.attemptId !== attemptId) {
-      throw new Error('EGE_MOCK_RESULT_INVALID');
+    if (!consistent) {
+      finalResultLoadAuthority.invalidate(attemptId);
+      finalResultReloadQueuedAttemptId = attemptId;
+      throw new Error('EGE_MOCK_RESULT_STALE');
     }
     const loadedAssessmentRevision = assessmentRevision(result.writingAssessment);
     if (finalResultRequiredAttemptId === attemptId
       && loadedAssessmentRevision < finalResultRequiredAssessmentRevision) {
-      throw new Error('EGE_MOCK_RESULT_STALE');
-    }
-    if (!egeMockResultTupleIsConsistent(result, history, attemptId)) {
-      finalResultLoadAuthority.invalidate(attemptId);
-      finalResultReloadQueuedAttemptId = attemptId;
       throw new Error('EGE_MOCK_RESULT_STALE');
     }
     if (!finalResultLoadAuthority.canCommit(loadAuthority)) {
@@ -440,22 +473,28 @@ function finalAssessmentControls(writtenSnapshot, oralSnapshot) {
 async function startTrainingRepeat() {
   const operation = currentRunnerOperation();
   const canonical = finalResult?.result?.canonical;
-  if (!operation || !canonical || canonical.attemptId !== operation.runner.snapshot().attemptId
-  ) return;
+  const owner = operation?.owner || currentEgeMockOwnerBinding();
+  const runnerResult = operation && canonical?.attemptId === operation.runner.snapshot().attemptId;
+  const historicalResult = !operation && canonical?.attemptId === historicalResultAttemptId
+    && historicalResultOwnerKey === ownerKey(owner);
+  if (!owner || !canonical || (!runnerResult && !historicalResult)) return;
   const idempotencyKey = globalThis.crypto.randomUUID();
   const started = timedOwnedResponse(await apiPostIdempotent('/api/v1/ege-mocks/attempts', {
     formId: canonical.formId,
     formRevision: canonical.formRevision,
     catalogFingerprint: canonical.catalogFingerprint,
-  }, idempotencyKey, ownerHeaders(operation.owner)), operation.owner);
+  }, idempotencyKey, ownerHeaders(owner)), owner);
   if (started.attempt?.mode !== 'training' || started.attempt?.id === canonical.attemptId
     || started.attempt?.formId !== canonical.formId
     || Number(started.attempt?.formRevision) !== Number(canonical.formRevision)
     || started.attempt?.catalogFingerprint !== canonical.catalogFingerprint) {
     throw new Error('EGE_MOCK_REPEAT_INVALID');
   }
-  await operation.runner.dispatch({ type: 'invalidate' });
-  localStorage.removeItem(`easyboost-ege-mock-oral-v1:${operation.owner.username}:${operation.owner.generation}`);
+  if (operation) await operation.runner.dispatch({ type: 'invalidate' });
+  else localStorage.removeItem(
+    `easyboost-ege-mock-written-v1:${owner.username}:${owner.generation}`,
+  );
+  localStorage.removeItem(`easyboost-ege-mock-oral-v1:${owner.username}:${owner.generation}`);
   resetRunnerState(true, false);
   await beginOpenRunner();
 }
@@ -1282,6 +1321,9 @@ async function handleAction(event) {
   }
   button.disabled = true;
   if (button.dataset.egeAction === 'retry-open') {
+    if (button.dataset.egeResultAttempt) {
+      setEgeMockOpenIntent({ kind: 'result', attemptId: button.dataset.egeResultAttempt });
+    }
     await beginOpenRunner();
     return;
   }
@@ -1290,6 +1332,10 @@ async function handleAction(event) {
     if (operation) {
       finalResultLoadFailedAttemptId = '';
       await loadFinalResult(operation, operation.runner.snapshot().attemptId);
+    } else if (historicalResultAttemptId
+      && historicalResultOwnerKey === ownerKey(currentEgeMockOwnerBinding())) {
+      setEgeMockOpenIntent({ kind: 'result', attemptId: historicalResultAttemptId });
+      await beginOpenRunner();
     }
     return;
   }
@@ -1468,12 +1514,17 @@ async function openRunner(operation) {
   const owner = operation.owner;
   const area = document.getElementById('ege_mock_area');
   if (!owner || !area || !openOperationCurrent(operation)) return;
+  if (operation.intent?.kind === 'result') {
+    await openHistoricalResult(operation);
+    return;
+  }
   document.getElementById('frame')?.classList.add('ege-mock-expanded');
   resetRunnerState(true, false);
   if (!openOperationCurrent(operation)) return;
   document.getElementById('frame')?.classList.add('ege-mock-expanded');
   const storageKey = `easyboost-ege-mock-written-v1:${owner.username}:${owner.generation}`;
   const invalidationKey = egeMockWrittenInvalidationKey(owner);
+  if (operation.intent?.kind === 'start') localStorage.removeItem(storageKey);
   const localForm = await loadEgeMockPublicForm();
   if (!openOperationCurrent(operation)) return;
   let committed = false;
@@ -1489,7 +1540,8 @@ async function openRunner(operation) {
   };
   localRunner = createEgeMockWrittenRunner({
     owner, storage: localStorage, online: () => navigator.onLine,
-    assets: createEgeMockAssetPreflight(), transport: transportFor(owner),
+    assets: createEgeMockAssetPreflight(),
+    transport: transportFor(owner, { restoreCompleted: operation.intent?.kind !== 'start' }),
     authority: {
       commit: (commit) => commitEgeMockOwnerMutation(
         owner, authorityCurrent, commit,
@@ -1520,6 +1572,45 @@ async function openRunner(operation) {
   startClock();
 }
 
+async function openHistoricalResult(operation) {
+  const { owner, intent } = operation;
+  const area = document.getElementById('ege_mock_area');
+  if (!owner || !area || !intent?.attemptId || !openOperationCurrent(operation)) return;
+  resetRunnerState(true, false);
+  if (!openOperationCurrent(operation)) return;
+  document.getElementById('frame')?.classList.add('ege-mock-expanded');
+  const part = document.getElementById('ege_mock_part');
+  const clock = document.getElementById('ege_mock_timer');
+  const notice = document.getElementById('ege_mock_timer_notice');
+  if (part) part.textContent = 'ЕГЭ-2026 · РЕЗУЛЬТАТ';
+  if (clock) {
+    clock.innerHTML = '—<small>попытка завершена</small>';
+    clock.classList.remove('ege-mock__timer--warning');
+    clock.setAttribute('aria-label', 'Попытка завершена');
+  }
+  if (notice) notice.textContent = '';
+  area.innerHTML = '<p class="ege-mock__status" role="status">Загружаем точный результат…</p>';
+  const attemptId = intent.attemptId;
+  const [current, tuple] = await Promise.all([
+    apiGet('/api/v1/ege-mocks/attempts/current', {
+      headers: ownerHeaders(owner),
+    }),
+    loadAuthoritativeResultTuple(owner, attemptId),
+  ]);
+  if (!openOperationCurrent(operation)) return;
+  const { result, history, consistent } = tuple;
+  assertOwnedResponse(current, owner);
+  if (!consistent) throw new Error('EGE_MOCK_RESULT_INVALID');
+  finalResult = result;
+  finalHistory = history;
+  historicalResultAttemptId = attemptId;
+  historicalResultOwnerKey = operation.ownerKey;
+  area.innerHTML = renderEgeMockResult(result, history, {
+    allowRepeat: current.attempt == null,
+  });
+  requestAnimationFrame(() => document.getElementById('ege_mock_result_title')?.focus?.());
+}
+
 async function handleOpenFailure(error, operation) {
   if (!openOperationCurrent(operation) || await handleRunnerError(error, operation)) return;
   if (!openOperationCurrent(operation)) return;
@@ -1532,7 +1623,9 @@ async function handleOpenFailure(error, operation) {
   if (!openOperationCurrent(operation)) return;
   document.getElementById('frame')?.classList.add('ege-mock-expanded');
   const area = document.getElementById('ege_mock_area');
-  if (area) area.innerHTML = `<p class="ege-mock__error" role="alert">${escapeHtml(visibleError)}</p><section class="ege-mock__card ege-mock__intro"><h2>Вариант не загрузился</h2><p>Точный файл формы сейчас недоступен. Таймер не запущен, ответы не изменены.</p><button class="ege-mock__action" type="button" data-ege-action="retry-open">Повторить загрузку</button></section>`;
+  if (area) area.innerHTML = operation.intent?.kind === 'result'
+    ? `<p class="ege-mock__error" role="alert">${escapeHtml(visibleError)}</p><section class="ege-mock__card ege-mock__intro"><h2>Результат не загрузился</h2><p>Показываем только согласованный точный результат и историю этой попытки. Попробуйте снова после восстановления связи.</p><button class="ege-mock__action" type="button" data-ege-action="retry-open" data-ege-result-attempt="${escapeHtml(operation.intent.attemptId)}">Повторить загрузку</button></section>`
+    : `<p class="ege-mock__error" role="alert">${escapeHtml(visibleError)}</p><section class="ege-mock__card ege-mock__intro"><h2>Вариант не загрузился</h2><p>Точный файл формы сейчас недоступен. Таймер не запущен, ответы не изменены.</p><button class="ege-mock__action" type="button" data-ege-action="retry-open">Повторить загрузку</button></section>`;
 }
 
 function beginOpenRunner() {
@@ -1540,7 +1633,9 @@ function beginOpenRunner() {
   const nextOwnerKey = ownerKey(owner);
   if (!owner || !nextOwnerKey) return Promise.resolve();
   if (opening && openingOwnerKey === nextOwnerKey) return opening;
-  const operation = { epoch: ++openEpoch, owner, ownerKey: nextOwnerKey };
+  const operation = {
+    epoch: ++openEpoch, owner, ownerKey: nextOwnerKey, intent: consumeEgeMockOpenIntent(),
+  };
   const task = openRunner(operation).catch((error) => handleOpenFailure(error, operation)).finally(() => {
     if (opening === task) {
       opening = null;

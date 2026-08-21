@@ -76,4 +76,32 @@ async function createActiveSubscriptionPage(browser,{baseUrl,username,jwtSecret,
   return{context,page:await context.newPage(),session};
 }
 
-export { availablePort, chromeExecutable, createActiveSubscriptionPage, stopProcess, waitForReady };
+async function openEgeHub(page) {
+  if (!await page.locator('#aisy-ege.on').count()) {
+    await page.locator('#aisy-shell-nav [data-destination="ege"]').press('Enter');
+  }
+  await page.locator('#aisy-ege.on').waitFor({ state: 'visible' });
+}
+
+async function openEgeMock(page) {
+  if (await page.locator('#scr16.on').count()) return;
+  await openEgeHub(page);
+  await page.waitForFunction(() => document.querySelectorAll('#ege-hub-sections > li').length === 5);
+  const resume = page.getByRole('button', { name: 'Продолжить пробник' });
+  if (await resume.count()) await resume.press('Enter');
+  else await page.getByRole('button', { name: 'Открыть подготовку к пробнику' }).press('Enter');
+  await page.locator('#scr16.on').waitFor({ state: 'visible' });
+}
+
+async function openLatestEgeResult(page) {
+  if (await page.locator('#scr16.on').count()) return;
+  await openEgeHub(page);
+  await page.waitForFunction(() => document.querySelectorAll('#ege-hub-sections > li').length === 5);
+  await page.getByRole('button', { name: /^Открыть результат:/u }).first().press('Enter');
+  await page.locator('#scr16.on').waitFor({ state: 'visible' });
+}
+
+export {
+  availablePort, chromeExecutable, createActiveSubscriptionPage, openEgeHub, openEgeMock,
+  openLatestEgeResult, stopProcess, waitForReady,
+};
