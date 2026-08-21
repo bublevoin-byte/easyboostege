@@ -83,8 +83,9 @@ test('typed and keyboard alternatives classify strict-safe requests without send
 });
 
 test('assistant surface is contextual, token-driven, offline-safe and makes no persistence or provider calls', async () => {
-  const [source, styles, main, markup, worker, privacy] = await Promise.all([
+  const [source, launcher, styles, main, markup, worker, privacy] = await Promise.all([
     fs.readFile(new URL('../public/asya-assistant.js', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../public/asya-launcher.js', import.meta.url), 'utf8'),
     fs.readFile(new URL('../public/asya-assistant.css', import.meta.url), 'utf8'),
     fs.readFile(new URL('../public/main.js', import.meta.url), 'utf8'),
     fs.readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
@@ -109,7 +110,9 @@ test('assistant surface is contextual, token-driven, offline-safe and makes no p
   assert.match(styles, /padding-inline:\s*calc\(var\(--aisy-space-4\) \+ env\(safe-area-inset-left\)\)\s+calc\(var\(--aisy-space-4\) \+ env\(safe-area-inset-right\)\)/u);
   assert.doesNotMatch(styles, /padding:\s*(?:9|10|11|14|20)px|margin:\s*0 0 2px/u);
   assert.doesNotMatch(styles, /#[0-9a-f]{3,8}\b/iu);
-  assert.match(main, /installAsyaAssistant/u);
+  assert.match(main, /installAsyaLauncher/u);
+  assert.doesNotMatch(main, /installAsyaAssistant/u);
+  assert.match(launcher, /import\('\.\/asya-assistant\.js'\)/u);
   assert.match(markup, /href="\/asya-assistant\.css"/u);
   for (const path of ['/asya-assistant.css', '/asya-assistant.js']) assert.match(worker, new RegExp(`'${path}'`, 'u'));
   assert.match(privacy, /имя «Ася»[\s\S]*?работает[\s\S]*?открыто/iu);

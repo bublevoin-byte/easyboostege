@@ -83,6 +83,13 @@ async function openEgeHub(page) {
   await page.locator('#aisy-ege.on').waitFor({ state: 'visible' });
 }
 
+async function openPracticeSkill(page, skill) {
+  await page.getByRole('navigation', { name: 'Основные разделы' })
+    .getByRole('button', { name: 'Практика', exact: true }).press('Enter');
+  await page.locator('#aisy-practice.on').waitFor({ state: 'visible', timeout: 5_000 });
+  await page.locator(`.practice-row[data-skill="${skill}"] button`).press('Enter');
+}
+
 async function openEgeMock(page) {
   if (await page.locator('#scr16.on').count()) return;
   await openEgeHub(page);
@@ -103,5 +110,5 @@ async function openLatestEgeResult(page) {
 
 export {
   availablePort, chromeExecutable, createActiveSubscriptionPage, openEgeHub, openEgeMock,
-  openLatestEgeResult, stopProcess, waitForReady,
+  openLatestEgeResult, openPracticeSkill, stopProcess, waitForReady,
 };

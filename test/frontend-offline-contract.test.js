@@ -1416,10 +1416,12 @@ test('profile submit can durably queue preferences before its deferred network f
   assert.equal(posts.length, 0, 'durable queueing must not itself start the deferred network flush');
 });
 
-test('the learner preferences screen is available on a first offline open', () => {
-  assert.match(entrySource, /import \* as profileScreen from '\.\/screens\/profile\.js'/u);
-  assert.doesNotMatch(screenLoaderSource, /import\('\.\/screens\/profile\.js'\)/u);
+test('the learner preferences screen is lazy in initial JS but available on a first offline open', () => {
+  assert.doesNotMatch(entrySource, /from '\.\/screens\/profile\.js'/u);
+  assert.match(screenLoaderSource, /import\('\.\/screens\/profile\.js'\)/u);
   assert.match(workerSource, /'\/screens\/profile\.js'/u);
+  assert.match(workerSource, /'\/modules\/profile\.js'/u);
+  assert.match(workerSource, /'\/privacy\.js'/u);
 });
 
 test('a failed online attempt keeps the change queued rather than dropping it', async () => {
@@ -1740,6 +1742,18 @@ test('the EGE hub is offline-ready without preloading the strict mock runner', (
   ]) {
     assert.equal(shell.includes(`'${entry}'`), false, `${entry} must stay behind the explicit strict action`);
   }
+});
+
+test('the service-worker closure preserves lazy top-level routes without moving them into initial JS', () => {
+  const shell = workerSource.match(/const APP_SHELL=(\[[^\]]*\]);/u)?.[1] || '';
+  for (const entry of [
+    '/asya-assistant.js', '/privacy.js', '/adaptive-session-runtime.js',
+    '/screens/practice.js', '/screens/ege-hub.js', '/screens/progress.js', '/screens/profile.js',
+  ]) assert.ok(shell.includes(`'${entry}'`), `${entry} must be in the measurable offline closure`);
+  for (const entry of [
+    '/voice-tutor.js', '/realtime-transport.js', '/screens/reading.js', '/screens/listening.js',
+    '/screens/writing.js', '/screens/speaking.js', '/screens/ege-mock.js',
+  ]) assert.equal(shell.includes(`'${entry}'`), false, `${entry} must stay runtime-cached after explicit use`);
 });
 
 test('a loaded listening catalog joins the runtime cache and remains available offline', async () => {

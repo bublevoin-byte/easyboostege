@@ -1,8 +1,5 @@
-import {
-  adaptiveRuntimeSnapshot,
-  completeAdaptiveModuleActivity,
-} from './adaptive-session-runtime.js';
 import { GRAMMAR_PRACTICE_MODES, isGrammarErrorCode, parseGrammarConfusionPair } from './grammar-domain-contract.js';
+import { loadAdaptiveSessionRuntime } from './adaptive-session-loader.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const ACTIVITY_ID = /^[a-z0-9_]{1,80}$/u;
@@ -93,8 +90,13 @@ export function createLearningActivityEvidence({ id = crypto.randomUUID(), modul
   };
 }
 
+export function prepareLearningActivityRecording() {
+  return loadAdaptiveSessionRuntime();
+}
+
 export async function recordCompletedLearningActivity(completion = {}) {
   const attempt = ordinaryAttempt(completion);
+  const { adaptiveRuntimeSnapshot, completeAdaptiveModuleActivity } = await loadAdaptiveSessionRuntime();
   const active = adaptiveRuntimeSnapshot().active;
   if (active) {
     if (active.module !== attempt.module || active.activityId !== attempt.activity) {

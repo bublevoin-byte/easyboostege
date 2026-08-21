@@ -176,10 +176,17 @@ try {
   assert.doesNotMatch(await page.locator('#ege_mock_area').innerText(), /правильн(?:ый|ого) ответ|ваш балл|подсказк/iu);
   await page.locator('[data-ege-array-index="0"]').selectOption('1');
   await page.locator('[data-ege-array-index="1"]').selectOption('1');
-  await page.waitForFunction(() => {
-    const fields = [...document.querySelectorAll('[data-ege-array-index]')].slice(0, 2);
-    return fields[0]?.value === '' && fields[1]?.value === '1';
-  });
+  try {
+    await page.waitForFunction(() => {
+      const fields = [...document.querySelectorAll('[data-ege-array-index]')].slice(0, 2);
+      return fields[0]?.value === '' && fields[1]?.value === '1';
+    }, null, { timeout: 5_000 });
+  } catch (error) {
+    const diagnostic = await page.locator('[data-ege-array-index]').evaluateAll((fields) => (
+      fields.slice(0, 2).map((field) => field.value)
+    ));
+    throw new Error(`${error.message}\nfields=${JSON.stringify(diagnostic)}\npageErrors=${JSON.stringify(pageErrors)}`);
+  }
   assert.deepEqual(await page.locator('[data-ege-array-index]').evaluateAll((fields) => (
     fields.slice(0, 2).map((field) => field.value)
   )), ['', '1'], 'shared unique-selection contract must move an already used answer');

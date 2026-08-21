@@ -163,9 +163,11 @@ test('built output preserves the derived oral and written EGE closure and neutra
     'screens/ege-mock.js', 'ege-mock-writing-assessment-ui.js', 'ege-mock-written-assets.js',
     'ege-mock-written-runner.js', 'ege-writing-text.js', 'ege-mock-oral-media.js',
     'ege-mock-oral-runner.js', 'ege-mock-oral-contract.js',
+    'modules/listening.js', 'modules/reading.js', 'reading-catalog-contract.js',
+    'reading-pilot-v1.js',
     'speaking-local-recording.js', 'speaking-pronunciation-audio.js',
   ];
-  assert.equal(egeModules.length, 10);
+  assert.equal(egeModules.length, 14);
   const sourceClosure = [
     ...egeModules, '../shared/ege-mock-oral-contract.js', '../shared/ege-writing-text.js',
     '../shared/ege-writing-text-sanitizer.js', '../shared/semantic-json.js',

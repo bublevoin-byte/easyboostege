@@ -386,7 +386,9 @@ try {
       );
       assert.equal(undersized, 0, 'oral controls retain a 44px target on mobile and desktop');
       if (position === 42) {
-        task42ImageWidth = (await page.locator('.ege-mock__oral-photos img').boundingBox())?.width || 0;
+        const task42Image = page.locator('.ege-mock__oral-photos img');
+        await task42Image.waitFor({ state: 'visible', timeout: 5_000 });
+        task42ImageWidth = (await task42Image.boundingBox())?.width || 0;
       }
     }
     const advance = page.locator('[data-ege-action="oral-advance"]');

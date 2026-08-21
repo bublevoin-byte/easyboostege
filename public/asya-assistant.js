@@ -193,13 +193,15 @@ function installAsyaAssistant({
   }
   if (document.getElementById('asya-assistant')) return null;
 
-  const launcher = document.createElement('button');
-  launcher.id = 'asya-launcher';
-  launcher.className = 'asya-launcher';
-  launcher.type = 'button';
-  launcher.setAttribute('aria-label', 'Открыть Асю');
-  launcher.setAttribute('aria-haspopup', 'dialog');
-  launcher.innerHTML = '<svg viewBox="0 0 32 32" aria-hidden="true" focusable="false"><path d="M4 17c3-8 6-8 9 0s6 8 9 0 6-8 8 0"/><path d="M4 12c3-5 6-5 9 0s6 5 9 0 6-5 8 0"/></svg><span>Ася</span>';
+  const launcher = document.getElementById('asya-launcher') || document.createElement('button');
+  if (!launcher.id) {
+    launcher.id = 'asya-launcher';
+    launcher.className = 'asya-launcher';
+    launcher.type = 'button';
+    launcher.setAttribute('aria-label', 'Открыть Асю');
+    launcher.setAttribute('aria-haspopup', 'dialog');
+    launcher.innerHTML = '<svg viewBox="0 0 32 32" aria-hidden="true" focusable="false"><path d="M4 17c3-8 6-8 9 0s6 8 9 0 6-8 8 0"/><path d="M4 12c3-5 6-5 9 0s6 5 9 0 6-5 8 0"/></svg><span>Ася</span>';
+  }
 
   const root = document.createElement('div');
   root.id = 'asya-assistant';
@@ -228,7 +230,8 @@ function installAsyaAssistant({
       <p id="asya-reply" class="asya-assistant__reply" role="status" aria-live="polite"></p>
       <button id="asya-finish" class="aisy-button aisy-button--secondary asya-assistant__finish" type="button">Завершить разговор</button>
     </section>`;
-  frame.append(launcher, root);
+  if (!launcher.isConnected) frame.append(launcher);
+  frame.append(root);
 
   const stateNode = root.querySelector('#asya-state');
   const contextNode = root.querySelector('#asya-context');
@@ -310,6 +313,7 @@ function installAsyaAssistant({
     context = contextNow();
     if (!context.available) return;
     root.hidden = false;
+    launcher.setAttribute('aria-expanded', 'true');
     conversation = reduceAsyaConversation(conversation, { type: 'open' }, now());
     replyNode.textContent = '';
     render();
@@ -322,6 +326,7 @@ function installAsyaAssistant({
     conversation = reduceAsyaConversation(conversation, { type }, now());
     stopTimer();
     root.hidden = true;
+    launcher.setAttribute('aria-expanded', 'false');
     replyNode.textContent = '';
     input.value = '';
     const target = restoreFocus ? returnFocus : null;

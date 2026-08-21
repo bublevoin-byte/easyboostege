@@ -188,3 +188,13 @@ test('Progress and Profile presentation assets stay in the eager offline and sec
   }
   assert.match(security, /'commercial-copy\.js'/u);
 });
+
+test('profile hooks observe rejected lazy controls without delaying synchronous hooks', async () => {
+  const [appSource, privacyLoaderSource] = await Promise.all([
+    fs.readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../public/privacy-loader.js', import.meta.url), 'utf8'),
+  ]);
+  assert.match(appSource, /Promise\.resolve\(hook\(\)\)\.catch/u);
+  assert.doesNotMatch(appSource, /forEach\(function\(hook\)\{try\{hook\(\)\}/u);
+  assert.match(privacyLoaderSource, /registerProfileHook\(async function/u);
+});

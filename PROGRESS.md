@@ -14,7 +14,7 @@ Overall status: `in-progress` — learner-first UX; parent/teacher roles remain 
 | 05 | Отдельный EGE hub поверх строгого пробника | done |
 | 06 | Честные Progress/Profile и только Free/Premium в public copy | done |
 | 07 | Контекстная Ася и честные microphone/wake states | done |
-| 08 | Accessibility/offline/themes и initial JS <=150 KB gzip | blocked by 01–07 |
+| 08 | Accessibility/offline/themes и initial JS <=150 KB gzip | done |
 | 09 | Сквозной learner release contour и ZERO×2 review | blocked by 01–08 |
 
 Принятые продуктовые решения: платформа `Aisy.space` («Эйси»), продукт `Aisy ЕГЭ — Английский`,

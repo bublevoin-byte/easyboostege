@@ -5,7 +5,7 @@
  * чтения и аудирования.
  */
 import {registerRouteHook,tab} from '../router.js';
-import {registerVoiceTutorError,voiceTutorButton} from '../voice-tutor.js';
+import {registerVoiceTutorError,voiceTutorButton} from '../voice-tutor-loader.js';
 import {
   S,SRV,TOKEN,WBTN,apiGet,apiPost,examModule,gExamFmt,gSync,generateAiContent,grammarModule,
   registerScreenGenerator,save,setTxt,ui,wDeco,
@@ -13,6 +13,7 @@ import {
 import {recordCompletedLearningActivity} from '../learning-activity-recorder.js';
 import {GRAMMAR_CATALOG,getGrammarCatalogRuntime,validateGeneratedGrammarSupplement} from '../grammar-catalog.js';
 import {GENERATED_GRAMMAR_REVISION,GRAMMAR_ACTIVE_PRACTICE_TYPES,GRAMMAR_PRACTICE_MODES,GRAMMAR_PREACTIVATION_LEGACY_TOPIC_IDS,GRAMMAR_RECOMMENDATION_VERSION,isBuiltinGrammarDiagnosticId,isGrammarConfusionPair,isGrammarErrorCode,parseGrammarConfusionPair,parseGeneratedGrammarItemReference} from '../grammar-domain-contract.js';
+import '../modules/exam.js';
 
 const GRAM_Q=[
  {t:['She ','_____',' already finished her homework.'],o:['have','has','had','is'],a:1,e:'<b>She/he/it</b> — третье лицо, поэтому <b>has</b>.'},

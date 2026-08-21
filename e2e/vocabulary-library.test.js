@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
-import { availablePort, chromeExecutable, createActiveSubscriptionPage, stopProcess, waitForReady } from './browser-server-harness.js';
+import { availablePort, chromeExecutable, createActiveSubscriptionPage, openPracticeSkill, stopProcess, waitForReady } from './browser-server-harness.js';
 
 const projectDirectory = fileURLToPath(new URL('..', import.meta.url));
 const serverPath = fileURLToPath(new URL('../server.js', import.meta.url));
@@ -67,7 +67,7 @@ try {
   page.on('pageerror', (error) => pageErrors.push(error.message));
   await page.goto(baseUrl, { waitUntil: 'networkidle' });
   await page.locator('#scr1.on').waitFor({state:'visible',timeout:5_000});
-  await page.getByRole('button', { name: 'Чтение', exact: true }).press('Enter');
+  await openPracticeSkill(page, 'reading');
   await page.locator('#scr7.on').waitFor();
   await page.getByRole('heading', { name: 'Каталог чтения' }).waitFor({ timeout: 8_000 });
   await page.evaluate(async () => {
@@ -115,12 +115,12 @@ try {
   assert.equal(readingCards.progress.dimensions.meaning.attempts, 1);
   assert.equal(readingCards.progress.dimensions.meaning.independentSuccesses, 0);
   assert.equal(readingCards.progress.lastMode, 'russian_reveal');
-  await page.getByRole('button', { name: 'Главная', exact: true }).last().press('Enter');
-  await page.getByRole('button', { name: 'Слова', exact: true }).press('Enter');
+  await page.getByRole('button', { name: 'Назад в раздел Практика', exact: true }).press('Enter');
+  await openPracticeSkill(page, 'vocabulary');
   await page.locator('#scr2.on').waitFor();
   await page.getByRole('heading', { name: 'Сегодня' }).waitFor();
 
-  const summary = page.getByLabel('План на сегодня');
+  const summary = page.getByLabel('План на сегодня', { exact: true });
   assert.match(await summary.innerText(), /к сроку/u);
   assert.match(await summary.innerText(), /новых/u);
   assert.match(await summary.innerText(), /минут/u);
@@ -435,7 +435,7 @@ try {
   const authenticatedPage=authenticatedHarness.page;
   await authenticatedPage.goto(baseUrl, { waitUntil: 'networkidle' });
   await authenticatedPage.locator('#scr1.on').waitFor({ state: 'visible', timeout: 5_000 });
-  await authenticatedPage.getByRole('button', { name: 'Слова', exact: true }).press('Enter');
+  await openPracticeSkill(authenticatedPage, 'vocabulary');
   await authenticatedPage.locator('#scr2.on').waitFor();
   await authenticatedPage.evaluate(() => {
     const now = Date.now() - 1_000;

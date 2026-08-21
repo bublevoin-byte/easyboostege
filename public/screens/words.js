@@ -7,9 +7,9 @@
  */
 import {registerRouteHook} from '../router.js';
 import {wSpeak} from '../tts.js';
-import {registerVoiceTutorError,voiceTutorButton} from '../voice-tutor.js';
+import {registerVoiceTutorError,voiceTutorButton} from '../voice-tutor-loader.js';
 import {coreVocabularyVoice} from '../modules/core-voice-catalog.js';
-import {completeAdaptiveModuleActivity} from '../adaptive-session-runtime.js';
+import {completeAdaptiveModuleActivity} from '../adaptive-session-loader.js';
 import {createVocabularySessionView} from '../vocabulary-session-view.js';
 import {
   appendVocabularySessionHistory,buildVocabularyModuleAttempt,buildVocabularyQueue,buildVocabularyRecognitionOptions,

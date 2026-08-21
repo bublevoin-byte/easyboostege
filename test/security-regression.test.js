@@ -13,7 +13,7 @@ const frontendAuthPath = new URL('../public/auth.js', import.meta.url);
  * Чанки экранов идут следом: в точку входа они не подключены, но это тот же код приложения,
  * и требования к нему не меняются от того, что он приезжает позже.
  */
-const frontendScriptNames = ['main.js', 'globals.js', 'auth.js', 'access.js', 'commercial-copy.js', 'owner-incarnation.js', 'sync.js', 'store.js', 'components.js', 'router.js', 'aisy-shell.js', 'asya-assistant.js', 'learning.js', 'vocabulary-domain.js', 'learning-activity-contract.js', 'learning-activity-recorder.js', 'grammar-domain-contract.js', 'reading-catalog-contract.js', 'listening-catalog-contract.js', 'listening-pilot-v1.js', 'listening-audio-contract.js', 'speaking-catalog-contract.js', 'content/speaking/task1-v1.js', 'content/speaking/task2-v1.js', 'speaking-local-recording.js', 'speaking-task1-runtime.js', 'speaking-task2-runtime.js', 'modules/words.js', 'modules/grammar.js', 'modules/reading.js', 'modules/listening.js', 'modules/writing.js', 'modules/speaking.js', 'modules/exam.js', 'modules/progress.js', 'modules/profile.js', 'modules/today.js', 'modules/ege-hub.js', 'app.js', 'voice-tutor.js', 'realtime-transport.js', 'screens.js', 'screens/words.js', 'screens/grammar.js', 'screens/reading.js', 'screens/listening.js', 'screens/writing.js', 'screens/speaking.js', 'screens/today.js', 'screens/progress.js', 'screens/profile.js', 'screens/ege-hub.js', 'privacy.js', 'tts.js', 'pwa.js'];
+const frontendScriptNames = ['main.js', 'globals.js', 'auth.js', 'access.js', 'commercial-copy.js', 'owner-incarnation.js', 'sync.js', 'store.js', 'components.js', 'router.js', 'aisy-shell.js', 'asya-launcher.js', 'asya-assistant.js', 'learning.js', 'vocabulary-domain.js', 'learning-activity-contract.js', 'learning-activity-recorder.js', 'grammar-domain-contract.js', 'reading-catalog-contract.js', 'listening-catalog-contract.js', 'listening-pilot-v1.js', 'listening-audio-contract.js', 'speaking-catalog-contract.js', 'content/speaking/task1-v1.js', 'content/speaking/task2-v1.js', 'speaking-local-recording.js', 'speaking-task1-runtime.js', 'speaking-task2-runtime.js', 'adaptive-session-loader.js', 'adaptive-session-runtime.js', 'modules/words.js', 'modules/grammar.js', 'modules/reading.js', 'modules/listening.js', 'modules/writing.js', 'modules/speaking.js', 'modules/exam.js', 'modules/progress.js', 'modules/profile.js', 'modules/today.js', 'modules/ege-hub.js', 'app.js', 'voice-tutor-contract.js', 'voice-tutor-loader.js', 'voice-tutor.js', 'realtime-transport.js', 'screens.js', 'screens/words.js', 'screens/grammar.js', 'screens/reading.js', 'screens/listening.js', 'screens/writing.js', 'screens/speaking.js', 'screens/today.js', 'screens/progress.js', 'screens/profile.js', 'screens/ege-hub.js', 'privacy-loader.js', 'privacy.js', 'tts.js', 'pwa.js'];
 const frontendScriptPaths = frontendScriptNames.map((name) => new URL(`../public/${name}`, import.meta.url));
 const serverPath = new URL('../server.js', import.meta.url);
 const usersRoutePath = new URL('../routes/users.js', import.meta.url);
@@ -84,24 +84,22 @@ test('frontend loads through a single module entry point that keeps the previous
   assert.doesNotMatch(html, /<script(?![^>]*\bsrc\s*=)(?:\s[^>]*)?>/iu);
 
   /*
-   * Порядок выполнения модулей — часть контракта, а не деталь оформления: модули предметных
-   * экранов кладут себя в window.EasyBoostЧто-то, а app.js читает эти имена на верхнем уровне.
+   * Порядок выполнения оболочки — часть контракта. Тяжёлые экранные реализации остаются за
+   * маленькими loader-seams, а общие Words/Grammar/Profile domains готовы до app.js.
    */
   const entry = await fs.readFile(new URL('../public/main.js', import.meta.url), 'utf8');
   const imported = [...entry.matchAll(/^import\s+(?:[^;']*from\s*)?'\.\/([^']+)'/gmu)].map((match) => match[1]);
   assert.deepEqual(imported, [
-    'globals.js', 'api.js', 'auth.js', 'owner-incarnation.js', 'sync.js', 'store.js', 'components.js', 'router.js', 'aisy-shell.js', 'asya-assistant.js',
-    'learning.js', 'modules/words.js', 'modules/grammar.js', 'modules/reading.js',
-    'modules/listening.js', 'modules/writing.js', 'modules/speaking.js', 'modules/exam.js',
-    'modules/progress.js', 'modules/profile.js', 'app.js', 'voice-tutor.js',
-    'screens/words.js', 'screens/grammar.js', 'screens/today.js', 'screens/progress.js', 'screens/profile.js',
-    'privacy.js', 'tts.js', 'pwa.js',
+    'globals.js', 'api.js', 'auth.js', 'owner-incarnation.js', 'sync.js', 'store.js', 'components.js', 'router.js', 'aisy-shell.js', 'asya-launcher.js',
+    'learning.js', 'modules/words.js', 'modules/grammar.js', 'modules/profile.js', 'app.js',
+    'voice-tutor-loader.js', 'screens/words.js', 'screens/grammar.js', 'screens/today.js',
+    'privacy-loader.js', 'tts.js', 'pwa.js',
   ]);
 
   /*
    * Разделение экранов на статические и ленивые — требование, а не вкус. Раздел 6.1 ТЗ обещает без
-   * сети словарные карточки, интервальное повторение, встроенные грамматические тесты, просмотр
-   * сохранённого прогресса и изменение предпочтений, а Сегодня даёт офлайн-маршрут. Поэтому эти пять экранов обязаны быть в оболочке.
+   * сети словарные карточки и встроенные грамматические тесты. Остальные top-level routes лежат в
+   * измеряемом service-worker closure, но не входят в initial JS.
    *
    * Practice, ЕГЭ hub и остальные пять экранов обязаны остаться ленивыми: на них держится бюджет раздела 19. Уже открытый
    * пробник продолжает работу из runtime-cache, который его exact preflight успел заполнить до старта.
@@ -109,14 +107,18 @@ test('frontend loads through a single module entry point that keeps the previous
    */
   const eagerScreens = imported.filter((name) => name.startsWith('screens/'));
   assert.deepEqual(eagerScreens, [
-    'screens/words.js', 'screens/grammar.js', 'screens/today.js', 'screens/progress.js', 'screens/profile.js',
+    'screens/words.js', 'screens/grammar.js', 'screens/today.js',
   ]);
   const loader = await fs.readFile(new URL('../public/screens.js', import.meta.url), 'utf8');
   const lazy = [...loader.matchAll(/import\(\s*'\.\/(screens\/[^']+)'\s*\)/gu)].map((match) => match[1]);
   assert.deepEqual(lazy, [
-    'screens/practice.js', 'screens/ege-hub.js', 'screens/listening.js', 'screens/reading.js',
-    'screens/writing.js', 'screens/speaking.js', 'screens/ege-mock.js',
+    'screens/practice.js', 'screens/ege-hub.js', 'screens/progress.js', 'screens/profile.js',
+    'screens/listening.js', 'screens/reading.js', 'screens/writing.js', 'screens/speaking.js',
+    'screens/ege-mock.js',
   ]);
+  for (const heavy of ['asya-assistant.js', 'voice-tutor.js', 'privacy.js']) {
+    assert.ok(!imported.includes(heavy), `${heavy} must stay out of initial JavaScript`);
+  }
   for (const screen of eagerScreens) {
     assert.ok(!lazy.includes(screen), `${screen} не может быть одновременно в оболочке и чанком`);
   }

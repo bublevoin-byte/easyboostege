@@ -430,7 +430,7 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
       <p id="today-context" class="today__context">Собираем контекст на сегодня</p>
     </header>
 
-    <section id="today-state" class="today-state aisy-surface" aria-labelledby="today-state-title" aria-live="polite">
+    <section id="today-state" class="today-state aisy-surface" aria-labelledby="today-state-title" aria-live="polite" aria-busy="true" data-skeleton>
       <span class="today-state__pulse" aria-hidden="true"></span>
       <div>
         <h2 id="today-state-title">Собираем план на сегодня</h2>
@@ -950,7 +950,7 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
     </div>
   
 </div>
-<div class="screen" id="scr10" data-name="Прогресс">
+<div class="screen" id="scr10" data-name="Прогресс" role="main" aria-labelledby="progress_page_title">
 
     <div style="position:absolute;top:0;left:0;right:0;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 7px;z-index:6;">
       <span style="font-weight:700;font-size:15px;color:#2B2B2B;">9:41</span>
@@ -1112,7 +1112,7 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
     </div>
   
 </div>
-<div class="screen" id="scr11" data-name="Профиль">
+<div class="screen" id="scr11" data-name="Профиль" role="main" aria-labelledby="profile_page_title">
 
     <div style="position:absolute;top:0;left:0;right:0;height:200px;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:0 0 30px 30px;z-index:1;"></div>
     <div style="position:absolute;top:0;left:0;right:0;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 7px;z-index:6;">

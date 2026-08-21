@@ -204,11 +204,13 @@ function createSubjectHarness(subject, { offline = false, slow = false, listenin
     loadTrueFalseCatalog,
     matchingSetForLegacyScreen,
     trueFalseSetForLegacyScreen,
-    adaptiveRuntimeSnapshot: () => ({ active }),
-    completeAdaptiveModuleActivity: async (completion) => {
-      adaptive.push(JSON.parse(JSON.stringify(completion)));
-      return { execution: { revision: 2 } };
-    },
+    loadAdaptiveSessionRuntime: async () => ({
+      adaptiveRuntimeSnapshot: () => ({ active }),
+      completeAdaptiveModuleActivity: async (completion) => {
+        adaptive.push(JSON.parse(JSON.stringify(completion)));
+        return { execution: { revision: 2 } };
+      },
+    }),
     S,
     currentUser: 'learner-a',
     PILOT_CATALOG: readingPilotCatalog,

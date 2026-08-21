@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
 import {
-  availablePort, chromeExecutable, createActiveSubscriptionPage, stopProcess, waitForReady,
+  availablePort, chromeExecutable, createActiveSubscriptionPage, openPracticeSkill, stopProcess, waitForReady,
 } from './browser-server-harness.js';
 
 const projectDirectory = fileURLToPath(new URL('..', import.meta.url));
@@ -127,7 +127,7 @@ try {
 
     await page.goto(baseUrl, { waitUntil: 'networkidle' });
     await page.locator('#scr1.on').waitFor({ state: 'visible', timeout: 5_000 });
-    await page.getByRole('button', { name: 'Говорение', exact: true }).press('Enter');
+    await openPracticeSkill(page, 'speaking');
     await page.locator('#scr9.on').waitFor({ state: 'visible', timeout: 5_000 });
     await page.getByRole('button', { name: /Монолог по фото/ }).press('Enter');
 

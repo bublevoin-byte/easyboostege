@@ -3,7 +3,7 @@
  * В модуле их не видно, а `typeof SRV === 'undefined'` тихо отключил бы согласия целиком,
  * поэтому зависимости приходят импортом и остаются живыми при смене серверной сессии.
  */
-import {SRV, registerProfileHook, registerStartHook} from './app.js';
+import {SRV} from './app.js';
 
 (function initializePrivacyControls(global) {
   'use strict';
@@ -46,7 +46,7 @@ import {SRV, registerProfileHook, registerStartHook} from './app.js';
     sheet.addEventListener('keydown', (event) => { if (event.key === 'Escape') closePrivacy(); });
   }
 
-  function openPrivacy() {
+  function renderPrivacy() {
     ensureSheet();
     document.getElementById('privacyText').checked = Boolean(current?.text_processing);
     document.getElementById('privacyVoice').checked = Boolean(current?.voice_processing);
@@ -54,6 +54,10 @@ import {SRV, registerProfileHook, registerStartHook} from './app.js';
     updateCalibrationPrivacy();
     document.getElementById('privacySheet').classList.add('open');
     document.getElementById('privacyText').focus();
+  }
+  async function openPrivacy() {
+    await Promise.all([loadPrivacy(false), loadCalibrationConsent()]);
+    renderPrivacy();
   }
   function updateCalibrationPrivacy() {
     const state = document.getElementById('privacyCalibrationState');
@@ -67,6 +71,7 @@ import {SRV, registerProfileHook, registerStartHook} from './app.js';
   }
   async function loadCalibrationConsent() {
     if (!SRV) return null;
+    calibrationConsent = null;
     try {
       const payload = await api.get('/api/v1/speaking/calibration-consent');
       calibrationConsent = payload?.consent || null;
@@ -91,9 +96,7 @@ import {SRV, registerProfileHook, registerStartHook} from './app.js';
     finally { button.disabled = false; }
   }
   async function openCalibrationPrivacy() {
-    ensureSheet();
-    await Promise.all([loadPrivacy(false), loadCalibrationConsent()]);
-    openPrivacy();
+    await openPrivacy();
     const revoke = document.getElementById('privacyCalibrationRevoke');
     if (revoke && !revoke.hidden) revoke.focus();
   }
@@ -113,7 +116,8 @@ import {SRV, registerProfileHook, registerStartHook} from './app.js';
   }
   async function loadPrivacy(showIfNew) {
     if (!SRV) return;
-    try { current = await api.get('/api/v1/privacy/consent'); updateProfile(); if (showIfNew && current.policy_version !== current.current_policy_version) openPrivacy(); } catch (_) {}
+    current = null;
+    try { current = await api.get('/api/v1/privacy/consent'); updateProfile(); if (showIfNew && current.policy_version !== current.current_policy_version) renderPrivacy(); } catch (_) {}
   }
   function addProfileControls() {
     const privacyHost = document.getElementById('profile_privacy_actions');
@@ -136,8 +140,14 @@ import {SRV, registerProfileHook, registerStartHook} from './app.js';
       global.location.reload(); }
     catch (error) { global.alert(api.messageFor(error)); }
   }
-  global.openPrivacy = openPrivacy;
-  global.openCalibrationPrivacy = openCalibrationPrivacy;
-  registerProfileHook(addProfileControls);
-  registerStartHook(() => Promise.all([loadPrivacy(true), loadCalibrationConsent()]));
+  global.EasyBoostPrivacy = Object.freeze({
+    addProfileControls, loadCalibrationConsent, loadPrivacy, openCalibrationPrivacy, openPrivacy,
+  });
 })(window);
+
+const controls=window.EasyBoostPrivacy;
+export const addProfileControls=controls.addProfileControls;
+export const loadCalibrationConsent=controls.loadCalibrationConsent;
+export const loadPrivacy=controls.loadPrivacy;
+export const openCalibrationPrivacy=controls.openCalibrationPrivacy;
+export const openPrivacy=controls.openPrivacy;

@@ -1,4 +1,5 @@
 import { readAdaptiveOverviewCacheSnapshot } from '../adaptive-overview-cache.js';
+import '../modules/reading.js';
 import { S, currentOwnerBinding, readingModule } from '../app.js';
 import { projectPractice } from '../modules/practice.js';
 import { cur, nav, registerRouteHook } from '../router.js';

@@ -4,6 +4,7 @@
  * Локальные streak/word counters остаются частью оболочки, а сводка разделов читает server profile.
  */
 import {registerRouteHook} from '../router.js';
+import '../modules/progress.js';
 import {clearAdaptiveOverviewCache,readAdaptiveOverviewCacheSnapshot,safeEgeMockProjection,writeAdaptiveOverviewCache} from '../adaptive-overview-cache.js';
 import {adaptiveRuntimeSnapshot,adaptiveSessionReplacementAvailable,advanceAdaptiveBreak,beginAdaptiveBlock,completeAdaptiveVoiceTutorRepeat,finishAdaptiveSession,resumeAdaptiveExecution} from '../adaptive-session-runtime.js';
 import {GRAMMAR_CATALOG} from '../grammar-catalog.js';

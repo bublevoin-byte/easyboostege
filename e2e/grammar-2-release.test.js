@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { GRAMMAR_CATALOG } from '../public/grammar-catalog.js';
 import {
-  availablePort, chromeExecutable, createActiveSubscriptionPage, stopProcess, waitForReady,
+  availablePort, chromeExecutable, createActiveSubscriptionPage, openPracticeSkill, stopProcess, waitForReady,
 } from './browser-server-harness.js';
 
 const projectDirectory = fileURLToPath(new URL('..', import.meta.url));
@@ -19,6 +19,7 @@ let browser;
 let child;
 let context;
 let temporaryDirectory;
+
 try {
   temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-grammar-2-release-'));
   const port = await availablePort();
@@ -64,7 +65,7 @@ try {
   page.on('pageerror', (error) => pageErrors.push(error.message));
   await page.goto(baseUrl, { waitUntil: 'networkidle' });
   await page.locator('#scr1.on').waitFor({ state: 'visible', timeout: 5_000 });
-  await page.getByRole('button', { name: 'Грамматика', exact: true }).press('Enter');
+  await openPracticeSkill(page, 'grammar');
   await page.locator('#scr3.on').waitFor({ state: 'visible', timeout: 5_000 });
   await page.locator('[data-grammar-dashboard]').waitFor();
   assert.match(await page.locator('[data-grammar-dashboard]').innerText(), /Grammar 2\.0 · 20 тем/u);
@@ -123,7 +124,7 @@ try {
   }));
   await context.setOffline(true);
   await page.evaluate(() => window.tab('scr1'));
-  await page.getByRole('button', { name: 'Грамматика', exact: true }).press('Enter');
+  await openPracticeSkill(page, 'grammar');
   await page.locator('#g_ex_0').waitFor();
   assert.equal(await page.locator('#g_ex_0').inputValue(), 'offline draft one');
   assert.equal(await page.locator('#g_ex_1').inputValue(), 'offline draft two');
@@ -136,7 +137,7 @@ try {
     'the restored in-memory exam remains editable after route hooks finish');
   await context.setOffline(false);
   await page.reload({ waitUntil: 'networkidle' });
-  await page.getByRole('button', { name: 'Грамматика', exact: true }).press('Enter');
+  await openPracticeSkill(page, 'grammar');
   await page.locator('#g_ex_0').waitFor();
   assert.equal(await page.locator('#g_ex_0').inputValue(), 'editable offline draft');
   assert.equal(await page.evaluate(() => window.S.grammarRunner.sessionId), resumeIdentity.sessionId,

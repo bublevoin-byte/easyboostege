@@ -6,12 +6,14 @@
  */
 import {registerRouteHook} from '../router.js';
 import {lPlayListeningSet,lStop} from '../tts.js';
-import {prepareVoiceTutorContextResult,registerVoiceTutorContextResult} from '../voice-tutor.js';
+import '../modules/listening.js';
+import '../modules/exam.js';
+import {prepareVoiceTutorContextResult,registerVoiceTutorContextResult} from '../voice-tutor-loader.js';
 import {
   LSLOW,L_PLAYSVG,S,SRV,TOKEN,WBTN,currentOwnerBinding,examModule,gExamFmt,generateAiContent,lSetSlow,lSt,
   lSync,listeningModule,registerAuthorityReset,registerScreenGenerator,rWordsHtml,save,setTxt,toast,ui,wDeco,
 } from '../app.js';
-import {createLearningActivityEvidence,recordLearningActivityEvidence} from '../learning-activity-recorder.js';
+import {createLearningActivityEvidence,prepareLearningActivityRecording,recordLearningActivityEvidence} from '../learning-activity-recorder.js';
 import {
   interviewSetForLegacyScreen,loadInterviewCatalog,loadMatchingCatalog,loadTrueFalseCatalog,
   matchingSetForLegacyScreen,trueFalseSetForLegacyScreen,
@@ -182,7 +184,7 @@ function lSetInterviewCatalog(sets){
   L_INTERVIEW_CATALOG=sets.map(function(set){return set.qs?set:interviewSetForLegacyScreen(set)});
   L_INTERVIEW_CATALOG_READY=true;
   return L_INTERVIEW_CATALOG}
-function initListening(){if(!S)return;lSync();Promise.all([
+function initListening(){if(!S)return;void prepareLearningActivityRecording().catch(()=>{});lSync();Promise.all([
   lLoadMatchingCatalog(),lLoadTrueFalseCatalog(),lLoadInterviewCatalog(),
 ]).then(function(){if(LE&&lExamResume())return;if(!LM&&!LT&&!LI&&!LE)lHub()})}
 function lHub(){var area=document.getElementById('l_area');if(!area)return;LM=null;LT=null;LI=null;L_OWNER=null;lStop();

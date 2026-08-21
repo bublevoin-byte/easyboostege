@@ -3,17 +3,14 @@
  * Общая Aisy-тема подключена как обычный stylesheet в public documents и лежит в offline closure:
  * CSS import здесь нарушил бы прямой запуск нативных ES-модулей без Vite.
  *
- * Порядок импортов повторяет порядок прежних тегов <script defer>, и менять его нельзя.
- * Модули предметных экранов публикуют себя как window.EasyBoostЧто-то, а app.js читает эти имена
- * на верхнем уровне — перестановка превратит их в undefined ещё до первого экрана.
+ * Порядок общих domain-модулей менять нельзя: app.js читает Words, Grammar и Profile на верхнем
+ * уровне. Тяжёлые предметные реализации получают тот же public contract через lazy proxy/loader.
  *
  * Исключение одно и оно безопасное: tts.js выполняется раньше своего места в списке, потому что
  * app.js импортирует из него озвучку. На верхнем уровне tts.js только объявляет функции и пустой
  * кэш, ничего ни у кого не спрашивая, поэтому от переноса вперёд ничего не зависит.
  *
  * globals.js стоит первым по той же причине: он ничего не спрашивает, только объявляет функцию.
- * Четыре предметных экрана сюда не входят — они приезжают динамическим import() при первом
- * переходе. Четыре оставшихся объяснены ниже, у своих импортов.
  */
 import {exposeGlobals} from './globals.js';
 import './api.js';
@@ -24,40 +21,23 @@ import './store.js';
 import './components.js';
 import * as router from './router.js';
 import {installLearnerShell} from './aisy-shell.js';
-import {installAsyaAssistant} from './asya-assistant.js';
+import {installAsyaLauncher} from './asya-launcher.js';
 import './learning.js';
 import './modules/words.js';
 import './modules/grammar.js';
-import './modules/reading.js';
-import './modules/listening.js';
-import './modules/writing.js';
-import './modules/speaking.js';
-import './modules/exam.js';
-import './modules/progress.js';
 import './modules/profile.js';
 import * as app from './app.js';
-import * as voiceTutor from './voice-tutor.js';
+import * as voiceTutor from './voice-tutor-loader.js';
 /*
- * Пять экранов грузятся сразу, а не чанком: Сегодня должен показать сохранённый маршрут,
- * а без сети также должны работать словарные
- * карточки, интервальное повторение, встроенные грамматические тесты и просмотр сохранённого
- * прогресса, а тикет учебных предпочтений обещает офлайн-изменение профиля. Ученик может уйти в
- * офлайн, ни разу их не открыв, — и обещание всё равно наступает.
- *
- * Кэш service worker эту роль взять не может: офлайн-гарантия, которая держится на нём,
- * перестаёт существовать там, где service worker недоступен или ещё не установился. Именно так
- * и проверяет `e2e/demo.test.js` — контекст с `serviceWorkers: 'block'`.
- *
- * Остальные пять экранов, включая пробный ЕГЭ, приезжают по требованию; открытый экран попадает в
- * runtime-cache, а exact preflight не запускает попытку до готовности form/audio. Размер оболочки
- * проверяет frontend build.
+ * Сегодня, Слова и Грамматика нужны до первого перехода. Practice, ЕГЭ, Прогресс и Профиль
+ * загружаются по маршруту, но входят в проверяемый install-closure service worker: это сохраняет
+ * первое офлайн-открытие после установки PWA, не заставляя каждую сессию разбирать их JavaScript.
+ * Глубокие предметные экраны и exact-пробник остаются runtime-cached только после явного открытия.
  */
 import * as wordsScreen from './screens/words.js';
 import * as grammarScreen from './screens/grammar.js';
-import {} from './screens/today.js';
-import * as progressScreen from './screens/progress.js';
-import * as profileScreen from './screens/profile.js';
-import './privacy.js';
+import * as todayScreen from './screens/today.js';
+import './privacy-loader.js';
 import * as tts from './tts.js';
 import './pwa.js';
 
@@ -71,8 +51,7 @@ exposeGlobals(app);
 exposeGlobals(voiceTutor);
 exposeGlobals(wordsScreen);
 exposeGlobals(grammarScreen);
-exposeGlobals(progressScreen);
-exposeGlobals(profileScreen);
+exposeGlobals(todayScreen);
 
 installLearnerShell({
   document,
@@ -83,7 +62,7 @@ installLearnerShell({
   registerBackAdapter:router.registerBackAdapter,
 });
 
-installAsyaAssistant({
+installAsyaLauncher({
   document,
   currentScreen:router.cur,
   registerRouteHook:router.registerRouteHook,

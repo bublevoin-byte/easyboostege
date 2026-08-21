@@ -1,11 +1,12 @@
 /* Reading 2.0: lazy canonical catalog, owner-bound rotation and one full-section flow. */
 import {registerRouteHook} from '../router.js';
-import {prepareVoiceTutorContextResult,registerVoiceTutorContextResult} from '../voice-tutor.js';
+import '../modules/reading.js';
+import {prepareVoiceTutorContextResult,registerVoiceTutorContextResult} from '../voice-tutor-loader.js';
 import {
   EGE_WORDS,S,apiGet,currentOwnerBinding,lastWord,lastWordContext,readingModule,rEsc,rSync,rWordsHtml,
   registerAuthorityReset,registerScreenGenerator,save,setTxt,srsRecordVocabularyOutcome,toast,verifyLearningAccessForLaunch,wBase,wSync,
 } from '../app.js';
-import {createLearningActivityEvidence,recordLearningActivityEvidence} from '../learning-activity-recorder.js';
+import {createLearningActivityEvidence,prepareLearningActivityRecording,recordLearningActivityEvidence} from '../learning-activity-recorder.js';
 import {
   normalizeVocabularyWord,personalVocabularyCardId,upsertReadingVocabularyCard,
 } from '../vocabulary-domain.js';
@@ -406,6 +407,7 @@ function restoreDraft(){
   full={authority,attempt:restored.attempt,resumedAt:Date.now(),result:null};RE=full;renderFullAttempt(true);return true;
 }
 async function initReading(force=false){
+  void prepareLearningActivityRecording().catch(()=>{});
   document.getElementById('frame')?.classList.add('reading-expanded');
   const authority=ownerBinding(),owner=authority?.username;
   if(!owner){renderOwnerError();return}

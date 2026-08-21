@@ -6,9 +6,9 @@
  * переходе на него — и только тогда его имена появляются на window, потому что обработчики,
  * которые их зовут, существуют лишь в разметке, отрисованной этим же экраном.
  *
- * Здесь нет «Слов», «Грамматики», «Прогресса» и «Профиля»: требования обещают их первое открытие без сети, а
- * обещание, отложенное до первого перехода, ученик, ушедший в офлайн раньше, не получит. Эти три
- * учебных экрана и профиль импортирует main.js статически — причина расписана там.
+ * «Слова», «Грамматика» и «Сегодня» остаются в initial graph. Top-level Practice, ЕГЭ, Прогресс и
+ * Профиль ленивы для страницы, но их static closure заранее кладёт в install-cache service worker.
+ * Глубокие предметные экраны приезжают только после явного открытия.
  *
  * Путь чанка написан литералом внутри import() намеренно: так его видит и сборщик, и
  * scripts/check-inline-handlers.js, который разбирает экспорты экранов статически.
@@ -19,6 +19,8 @@ import {registerScreenSource} from './router.js';
 const SCREEN_SOURCES={
   'aisy-practice':function(){return import('./screens/practice.js')},
   'aisy-ege':function(){return import('./screens/ege-hub.js')},
+  scr10:function(){return import('./screens/progress.js')},
+  scr11:function(){return import('./screens/profile.js')},
   scr4:function(){return import('./screens/listening.js')},
   scr7:function(){return import('./screens/reading.js')},
   scr8:function(){return import('./screens/writing.js')},

@@ -2,15 +2,22 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import test from 'node:test';
 
-import { canStartVoiceTutor, eventForVoiceTutorState, voiceTutorButton } from '../public/voice-tutor.js';
+import { canStartVoiceTutor, eventForVoiceTutorState, voiceTutorButton } from '../public/voice-tutor-contract.js';
 
 const source = await fs.readFile(new URL('../public/voice-tutor.js', import.meta.url), 'utf8');
+const loaderSource = await fs.readFile(new URL('../public/voice-tutor-loader.js', import.meta.url), 'utf8');
+const contractSource = await fs.readFile(new URL('../public/voice-tutor-contract.js', import.meta.url), 'utf8');
 const readingSource = await fs.readFile(new URL('../public/screens/reading.js', import.meta.url), 'utf8');
 const listeningSource = await fs.readFile(new URL('../public/screens/listening.js', import.meta.url), 'utf8');
 const writingSource = await fs.readFile(new URL('../public/screens/writing.js', import.meta.url), 'utf8');
 const speakingSource = await fs.readFile(new URL('../public/screens/speaking.js', import.meta.url), 'utf8');
 
 test('voice tutor trigger is a Premium-only real button with bounded data attributes', () => {
+  for (const consumer of [source, loaderSource]) {
+    assert.match(consumer, /from '\.\/voice-tutor-contract\.js'/u);
+    assert.doesNotMatch(consumer, /function (?:canStartVoiceTutor|eventForVoiceTutorState|voiceTutorButton|voiceTutorResultSlot)\b/u);
+  }
+  assert.match(contractSource, /function voiceTutorButton/u);
   assert.equal(canStartVoiceTutor({ entitlements: { voice_tutor: false } }), false);
   assert.equal(voiceTutorButton({ profile: { entitlements: { voice_tutor: false } } }), '');
   const markup = voiceTutorButton({
@@ -58,11 +65,11 @@ test('writing and speaking reviews mount the shared tutor and keep only server-i
     speakingSource.indexOf('/* ---- фоновая ИИ-генерация комплектов говорения ---- */'),
   );
 
-  assert.match(writingSource, /import \{voiceTutorButton\} from '\.\.\/voice-tutor\.js'/u);
+  assert.match(writingSource, /import \{voiceTutorButton\} from '\.\.\/voice-tutor-loader\.js'/u);
   assert.match(writingSource, /renderReview\(d,response\.evaluationScope,response\.voiceTutor\)/u);
   assert.match(writingSource, /voiceTutorButton\(voiceTutor\)/u);
 
-  assert.match(speakingSource, /import \{voiceTutorButton\} from '\.\.\/voice-tutor\.js'/u);
+  assert.match(speakingSource, /import \{voiceTutorButton\} from '\.\.\/voice-tutor-loader\.js'/u);
   assert.doesNotMatch(speakingSource, /spShowEval\(d,tr,response\.voiceTutor\)/u,
     'the evaluation response must not authorize a Voice Tutor control after the subscription can change');
   assert.match(speakingSource, /freshVoiceReport=await apiGet\('\/api\/v1\/speaking\/learning-report'\)/u,
@@ -190,13 +197,13 @@ test('the shared sheet exposes bounded transient clarification and structured le
 });
 
 test('reading and listening result screens register completed canonical sets before mounting the shared bottom-sheet trigger', () => {
-  assert.match(readingSource, /import \{prepareVoiceTutorContextResult,registerVoiceTutorContextResult\} from '\.\.\/voice-tutor\.js'/u);
+  assert.match(readingSource, /import \{prepareVoiceTutorContextResult,registerVoiceTutorContextResult\} from '\.\.\/voice-tutor-loader\.js'/u);
   assert.match(readingSource, /readingModule\.voiceSet\(item\.set\)/u);
   assert.match(readingSource, /function renderFullResult\(\)[\s\S]*KINDS\.map[\s\S]*readingModule\.voiceSet[\s\S]*prepareVoiceTutorContextResult[\s\S]*KINDS\.forEach[\s\S]*registerVoiceTutorContextResult/u);
   assert.match(readingSource, /function renderTrainingResult\(\)[\s\S]*prepareVoiceTutorContextResult[\s\S]*registerVoiceTutorContextResult\(voiceResult\)/u);
   assert.doesNotMatch(readingSource, /generateAiContent\('reading_questions'/u);
 
-  assert.match(listeningSource, /import \{prepareVoiceTutorContextResult,registerVoiceTutorContextResult\} from '\.\.\/voice-tutor\.js'/u);
+  assert.match(listeningSource, /import \{prepareVoiceTutorContextResult,registerVoiceTutorContextResult\} from '\.\.\/voice-tutor-loader\.js'/u);
   assert.match(listeningSource, /listening\.alex-swimming\.reason/u);
   assert.match(listeningSource, /listening\.exam\.interview\.alex/u);
   assert.match(listeningSource, /generateAiContent\('listening_interview'\)[\s\S]*d\.voice_tutor[\s\S]*voice:\{id:String\(voice\.item_ids\[i\]\),revision:1\}/u);

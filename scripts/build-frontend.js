@@ -114,8 +114,11 @@ for (const entry of entryPoints) {
   for (const name of await walkModuleGraph(entry)) reachable.add(name);
   for (const name of await walkModuleGraph(entry, { staticOnly: true })) shellModules.add(name);
 }
-const offlineHubEntries = ['screens/practice.js', 'screens/ege-hub.js'];
-const offlineLazyModules = [...new Set((await Promise.all(offlineHubEntries.map(
+const offlineEntryModules = [
+  'screens/practice.js', 'screens/ege-hub.js', 'screens/progress.js', 'screens/profile.js',
+  'asya-assistant.js', 'privacy.js', 'adaptive-session-runtime.js',
+];
+const offlineLazyModules = [...new Set((await Promise.all(offlineEntryModules.map(
   (entry) => walkModuleGraph(entry, { staticOnly: true }),
 ))).flatMap((closure) => [...closure]))].filter((name) => !shellModules.has(name));
 const egeMockSourceEntry = 'screens/ege-mock.js';
@@ -269,7 +272,7 @@ if (egeMockExecStart === -1 || egeMockExecEnd === -1) {
 const sourceEgeMockExecBlock = workerBuilt.slice(egeMockExecStart, egeMockExecEnd);
 const sourceEgeMockExecDeclaration = `const EGE_MOCK_EXEC_PATHS=${JSON.stringify(sourceEgeMockExecPaths).replaceAll('"', "'")};`;
 if (!sourceEgeMockExecBlock.includes(sourceEgeMockExecDeclaration)) {
-  throw new Error('Source service worker потерял EGE executable paths');
+  throw new Error(`Source service worker потерял EGE executable paths: ${sourceEgeMockExecDeclaration}`);
 }
 workerBuilt = `${workerBuilt.slice(0, egeMockExecStart)}${EGE_MOCK_EXEC_MARKER_START}\nconst EGE_MOCK_EXEC_PATHS=${JSON.stringify(builtEgeMockExecPaths).replaceAll('"', "'")};\n${workerBuilt.slice(egeMockExecEnd)}`;
 await fs.writeFile(path.join(stagingDirectory, 'service-worker.js'), workerBuilt, 'utf8');

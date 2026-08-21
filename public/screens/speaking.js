@@ -12,7 +12,8 @@ import {
 } from '../app.js';
 import {adaptiveRuntimeSnapshot,completeAdaptiveServerAttempt,openAdaptivePlan} from '../adaptive-session-runtime.js';
 import {adaptiveSpeakingTask} from '../adaptive-speaking-tasks.js';
-import {voiceTutorButton} from '../voice-tutor.js';
+import '../modules/speaking.js';
+import {voiceTutorButton} from '../voice-tutor-loader.js';
 import {createSpeakingTask1BrowserFlow} from '../speaking-task1-runtime.js';
 import {createSpeakingTask2BrowserFlow} from '../speaking-task2-runtime.js';
 import {createSpeakingTask3BrowserFlow} from '../speaking-task3-runtime.js';

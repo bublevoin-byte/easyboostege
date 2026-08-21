@@ -1,4 +1,6 @@
 import { loadEgeMockPublicForm } from '../ege-mock-catalog-contract.js';
+import '../modules/listening.js';
+import '../modules/reading.js';
 import { createEgeMockAssetPreflight, egeMockAssetPlaybackUrl } from '../ege-mock-written-assets.js';
 import { egeMockWrittenInvalidationKey } from '../ege-mock-written-continuation.js';
 import { createEgeMockWrittenRunner, normalizeEgeMockSelection } from '../ege-mock-written-runner.js';
@@ -74,6 +76,7 @@ let finalResultRequiredAttemptId = '';
 let finalResultRequiredAssessmentRevision = -1;
 let historicalResultAttemptId = '';
 let historicalResultOwnerKey = '';
+let answerDispatch = Promise.resolve();
 const finalResultLoadAuthority = createEgeMockResultLoadAuthority();
 
 function escapeHtml(value) {
@@ -1427,15 +1430,15 @@ async function handleAction(event) {
   }
 }
 
-async function handleAnswer(event) {
+async function handleAnswer({ target, value }) {
   const operation = currentRunnerOperation();
   if (!operation) return;
   const item = operation.form?.positions[operation.runner.snapshot().currentPosition - 1];
   if (!item) return;
   let answer;
-  if (event.target.matches('[data-ege-text],[data-ege-writing]')) answer = event.target.value;
-  else if (event.target.matches('input[type=radio]')) answer = event.target.value;
-  else if (event.target.matches('[data-ege-array-index]')) {
+  if (target.matches('[data-ege-text],[data-ege-writing]')) answer = value;
+  else if (target.matches('input[type=radio]')) answer = value;
+  else if (target.matches('[data-ege-array-index]')) {
     const before = operation.runner.snapshot().answers[String(item.position)];
     const presentation = item.presentation;
     const count = presentation.kind === 'listening_matching' ? item.assetIds.length
@@ -1443,15 +1446,15 @@ async function handleAnswer(event) {
         : presentation.kind === 'reading_headings' ? presentation.texts.length
           : presentation.segments.length - 1;
     answer = Array.from({ length: count }, (_, index) => Array.isArray(before) ? (before[index] || '') : '');
-    const index = Number(event.target.dataset.egeArrayIndex);
-    const value = event.target.value || '';
+    const index = Number(target.dataset.egeArrayIndex);
+    const selectedValue = value || '';
     if (presentation.kind === 'listening_matching') answer = normalizeEgeMockSelection(
-      listeningModule.selectUnique(answer, index, value),
+      listeningModule.selectUnique(answer, index, selectedValue),
     );
     else if (['reading_headings', 'reading_gaps'].includes(presentation.kind)) answer = normalizeEgeMockSelection(
-      readingModule.selectUnique(answer, index, value),
+      readingModule.selectUnique(answer, index, selectedValue),
     );
-    else answer[index] = value;
+    else answer[index] = selectedValue;
   } else return;
   try {
     await operation.runner.dispatch({ type: 'answer', position: item.position, answer });
@@ -1649,7 +1652,11 @@ function beginOpenRunner() {
 
 const area = document.getElementById('ege_mock_area');
 area?.addEventListener('click', (event) => { handleAction(event); });
-area?.addEventListener('input', (event) => { handleAnswer(event); });
+area?.addEventListener('input', (event) => {
+  const input = { target: event.target, value: event.target.value };
+  const current = answerDispatch.then(() => handleAnswer(input));
+  answerDispatch = current.catch((error) => queueMicrotask(() => { throw error; }));
+});
 window.addEventListener('online', () => {
   if (oralRunner) {
     const candidateRunner = oralRunner;

@@ -8,7 +8,8 @@ import {
   S,SRV,TOKEN,W37,W38,apiMessage,apiPost,ringOff,save,setTxt,toast,ui,writingModule,
 } from '../app.js';
 import {adaptiveRuntimeSnapshot,completeAdaptiveServerAttempt,openAdaptivePlan} from '../adaptive-session-runtime.js';
-import {voiceTutorButton} from '../voice-tutor.js';
+import '../modules/writing.js';
+import {voiceTutorButton} from '../voice-tutor-loader.js';
 
 const WRITE={
  37:{label:'ЗАДАНИЕ 37 · ПИСЬМО ДРУГУ',range:'100–140',min:100,max:140,table:false,

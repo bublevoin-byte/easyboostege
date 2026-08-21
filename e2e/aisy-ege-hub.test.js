@@ -79,10 +79,9 @@ try {
   const pageErrors = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
   await page.goto(baseUrl, { waitUntil: 'networkidle' });
-  await page.waitForFunction(async () => {
-    await navigator.serviceWorker.ready;
-    return Boolean(navigator.serviceWorker.controller);
-  }, null, { timeout: 15_000 });
+  await page.evaluate(() => navigator.serviceWorker.ready.then(() => true));
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller), null, { timeout: 15_000 });
 
   await page.route('**/api/v1/ege-mocks/attempts/current', (route) => route.fulfill({
     status: 503, contentType: 'application/json',
@@ -122,7 +121,11 @@ try {
   await page.getByRole('button', { name: 'Открыть подготовку к пробнику' }).press('Enter');
   await page.locator('#scr16.on').waitFor();
   await page.getByRole('button', { name: 'Проверить готовность' }).press('Enter');
-  await page.getByRole('button', { name: 'Начать письменную часть' }).waitFor({ timeout: 15_000 });
+  try {
+    await page.getByRole('button', { name: 'Начать письменную часть' }).waitFor({ timeout: 15_000 });
+  } catch (error) {
+    throw new Error(`${error.message}\nEGE runner: ${await page.locator('#ege_mock_area').innerText()}\nPage errors: ${pageErrors.join(' | ')}`);
+  }
   await page.getByRole('button', { name: 'Начать письменную часть' }).press('Enter');
   await page.getByRole('button', { name: 'Задание 1, пропущено' }).waitFor({ timeout: 15_000 });
   await page.getByRole('button', { name: 'Назад в раздел ЕГЭ' }).press('Enter');

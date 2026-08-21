@@ -92,7 +92,17 @@ try {
   }
   await context.setOffline(true);
   await page.getByRole('button', { name: 'Завершить тренировку', exact: true }).press('Enter');
-  await page.waitForFunction(() => window.EasyBoostSync.pendingModuleAttempts().length === 1);
+  try {
+    await page.waitForFunction(() => window.EasyBoostSync.pendingModuleAttempts().length === 1,
+      null, { timeout: 5_000 });
+  } catch (error) {
+    const diagnostic = await page.evaluate(() => ({
+      active: document.querySelector('.screen.on')?.id,
+      queue: window.EasyBoostSync.pendingModuleAttempts(),
+      area: document.querySelector('#r_area')?.textContent,
+    }));
+    throw new Error(`${error.message}\n${JSON.stringify(diagnostic)}\npageErrors=${JSON.stringify(pageErrors)}`);
+  }
   const queued = await page.evaluate(() => window.EasyBoostSync.pendingModuleAttempts()[0]);
   assert.equal(queued.module, 'reading');
   assert.equal(queued.activity, 'reading_headings');
@@ -181,7 +191,9 @@ try {
   assert.doesNotMatch(JSON.stringify(history), /correct answer|audio\/listening|Speaker [A-F]/iu);
 
   const adaptiveOverview = await page.evaluate(async () => {
-    const response = await fetch('/api/v1/adaptive-learning/overview', { credentials: 'same-origin' });
+    const response = await fetch('/api/v1/adaptive-learning/overview', {
+      credentials: 'same-origin', headers: { 'X-EasyBoost-Expected-Owner': 'evidence-user' },
+    });
     return { status: response.status, body: await response.json() };
   });
   assert.equal(adaptiveOverview.status, 200);

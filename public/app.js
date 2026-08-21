@@ -3,7 +3,7 @@ import {back,cur,nav,prepareScreen,registerRouteHook,show,tab} from './router.js
 import {configureTts,lStop} from './tts.js';
 import {decorateCoreVocabulary} from './modules/core-voice-catalog.js';
 import {clearAdaptiveOverviewCache} from './adaptive-overview-cache.js';
-import {clearAdaptiveRuntime} from './adaptive-session-runtime.js';
+import {clearAdaptiveRuntime} from './adaptive-session-loader.js';
 import {classifyLearningAccess,LEARNING_ACCESS_STATES} from './access.js';
 import {presentProfilePlan} from './commercial-copy.js';
 import {
@@ -57,12 +57,13 @@ const ringOff=ui.setRingOffset;
 const toast=ui.notify;
 const wordModule=window.EasyBoostWords;
 const grammarModule=window.EasyBoostGrammar;
-const readingModule=window.EasyBoostReading;
-const listeningModule=window.EasyBoostListening;
-const writingModule=window.EasyBoostWriting;
-const speakingModule=window.EasyBoostSpeaking;
-const examModule=window.EasyBoostExam;
-const progressModule=window.EasyBoostProgress;
+function lazyLegacyModule(name){return new Proxy({}, {get:function(_target,key){return window[name]?.[key]}})}
+const readingModule=lazyLegacyModule('EasyBoostReading');
+const listeningModule=lazyLegacyModule('EasyBoostListening');
+const writingModule=lazyLegacyModule('EasyBoostWriting');
+const speakingModule=lazyLegacyModule('EasyBoostSpeaking');
+const examModule=lazyLegacyModule('EasyBoostExam');
+const progressModule=lazyLegacyModule('EasyBoostProgress');
 const profileModule=window.EasyBoostProfile;
 function applySyncedGrammarMastery(update){
   if(!S||!update||update.owner!==currentUser||!Array.isArray(update.records))return false;
@@ -150,7 +151,10 @@ async function trWord(w,encodedContext=''){lastWord=w;try{lastWordContext=decode
 /* ===== PROGRESS / PROFILE (real data) ===== */
 const PROFILE_HOOKS=[];
 function registerProfileHook(hook){PROFILE_HOOKS.push(hook)}
-function runProfileHooks(){PROFILE_HOOKS.forEach(function(hook){try{hook()}catch(e){console.error('Profile hook failed',e)}})}
+function profileHookFailed(error){console.error('Profile hook failed',error)}
+function runProfileHooks(){return Promise.all(PROFILE_HOOKS.map(function(hook){
+  try{return Promise.resolve(hook()).catch(profileHookFailed)}catch(error){profileHookFailed(error);return Promise.resolve()}
+}))}
 /* Сегодня, прогресс и профиль регистрируют свои route hooks в модулях экранов. */
 
 
@@ -1020,7 +1024,7 @@ function rWordsHtml(text){var sentences=String(text||'').match(/[^.!?]+(?:[.!?]+
   }).join('')}
 /* FAB прячем и на чтении; синк при старте */
 registerRouteHook(function(id){if(id==='scr7'){var f=document.getElementById('genfab');if(f)f.style.display='none'}});
-registerStartHook(function(){return rSync()});
+registerStartHook(function(){return window.EasyBoostReading?rSync():null});
 
 /* legacy block 8 */
 /* Замедленная озвучка — настройка проигрывателя, а не экрана: её читает tts.js, который
@@ -1074,7 +1078,7 @@ function lToggleSlow(button){LSLOW=!LSLOW;button.style.background=LSLOW?'#FFEDE4
 function lSetSlow(value){LSLOW=Boolean(value)}
 /* FAB прячем, звук глушим при уходе, синк при старте */
 registerRouteHook(function(id){lStop();if(id==='scr4'){var f=document.getElementById('genfab');if(f)f.style.display='none'}});
-registerStartHook(function(){return lSync()});
+registerStartHook(function(){return window.EasyBoostListening?lSync():null});
 
 /* legacy block 10 */
 var W37=[],W38=[];
@@ -1091,7 +1095,7 @@ function wrSyncTile(){if(!S)return;var sum=writingModule.summary(S.works);
   if(!sum.count){setTxt('sub_write','задания 37–38 · ИИ');return}
   S.prog=S.prog||{};S.prog.write=sum.average;
   setTxt('sub_write','работ: '+sum.count+' · средний '+sum.average+'%')}
-registerStartHook(function(){return wrSyncTile()});
+registerStartHook(function(){return window.EasyBoostWriting?wrSyncTile():null});
 
 /* legacy block 11 */
 /* ===== GLOW: переливающаяся рамка при вводе ===== */
@@ -1116,7 +1120,7 @@ function spSync(){if(!S)return;var sum=speakingModule.summary(S.spkScores,spSt()
     setTxt('s9_sumline',tot?('Тренировок: '+tot+' · 4 задания'):'Четыре задания — как на экзамене');}
   var bar=document.getElementById('s9_bar');if(bar)bar.style.width=Math.max(2,Math.min(100,S.prog.speak||0))+'%';
   try{setTxt('m_speak',S.prog.speak);ringOff('ring_speak',113.1,S.prog.speak)}catch(e){}}
-registerStartHook(function(){return spSync()});
+registerStartHook(function(){return window.EasyBoostSpeaking?spSync():null});
 
 /* ---------- ГРАНИЦА МОДУЛЯ ---------- */
 /* Озвучка живёт отдельным модулем и не имеет доступа к состоянию приложения.

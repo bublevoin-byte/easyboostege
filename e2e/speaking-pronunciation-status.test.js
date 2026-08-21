@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
 import {
-  availablePort, chromeExecutable, createActiveSubscriptionPage, stopProcess, waitForReady,
+  availablePort, chromeExecutable, createActiveSubscriptionPage, openPracticeSkill, stopProcess, waitForReady,
 } from './browser-server-harness.js';
 
 const projectDirectory = fileURLToPath(new URL('..', import.meta.url));
@@ -70,7 +70,7 @@ try {
   const pageErrors = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
   await page.goto(baseUrl, { waitUntil: 'networkidle' });
-  await page.getByRole('button', { name: 'Говорение', exact: true }).press('Enter');
+  await openPracticeSkill(page, 'speaking');
   const status = page.locator('#speaking_pronunciation_status');
   await status.waitFor({ state: 'visible', timeout: 5_000 });
   await status.getByText('Оценка произношения пока недоступна', { exact: true }).waitFor();

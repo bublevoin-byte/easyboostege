@@ -19,6 +19,7 @@ const BUDGET = {
   lcpMs: 2500, cls: 0.1, inpMs: 200, firstLoadKb: 150,
   adaptiveOverviewMs: 1500, adaptivePreviewMs: 1500,
 };
+const FIRST_LOAD_ONLY = process.argv.includes('--first-load-only');
 
 // Раздел 4.2 спеки: код этих экранов приезжает по требованию, при первом переходе на него, и не
 // имеет права участвовать в первой загрузке — на этом держится её вес.
@@ -29,7 +30,20 @@ const LAZY_SCREENS = [
 // А эти обязаны приехать сразу: раздел 6.1 ТЗ обещает словарные карточки, интервальное повторение,
 // встроенные грамматические тесты и просмотр сохранённого прогресса без сети. Ученик может уйти в
 // офлайн, ни разу их не открыв. Проверяются оба списка, чтобы ни один не съехал молча в свою сторону.
-const SHELL_SCREENS = ['screens/words.js', 'screens/grammar.js', 'screens/progress.js', 'screens/profile.js'];
+const SHELL_SCREENS = ['screens/words.js', 'screens/grammar.js', 'modules/exam.js'];
+// These capabilities remain reachable and offline-honest, but their implementation is below the
+// first learner screen. Keeping this list executable prevents a later static import from silently
+// making Practice, EGE, Asya or the heavy subject domains part of every session.
+const LAZY_FIRST_LOAD_MODULES = [
+  'asya-assistant.js', 'voice-tutor.js', 'realtime-transport.js',
+  'screens/practice.js', 'modules/practice.js',
+  'screens/ege-hub.js', 'modules/ege-hub.js',
+  'modules/reading.js', 'modules/listening.js', 'modules/writing.js',
+  'modules/speaking.js',
+  'screens/progress.js', 'modules/progress.js',
+  'screens/profile.js', 'privacy.js',
+  'adaptive-session-runtime.js',
+];
 
 /*
  * Сервер отдаёт `dist/public`, если сборка есть, и `public/` иначе — замер должен идти по тому же
@@ -42,7 +56,7 @@ const SHELL_SCREENS = ['screens/words.js', 'screens/grammar.js', 'screens/progre
  * тоже. Оба списка проверяются, чтобы ни один не съехал молча в свою сторону.
  */
 async function servedScreenFiles() {
-  const screens = [...LAZY_SCREENS, ...SHELL_SCREENS];
+  const screens = [...LAZY_SCREENS, ...SHELL_SCREENS, ...LAZY_FIRST_LOAD_MODULES];
   let modules = null;
   try {
     const manifest = await fs.readFile(new URL('../dist/public/asset-manifest.json', import.meta.url), 'utf8');
@@ -180,7 +194,11 @@ async function measureFirstLoad(browser, baseUrl) {
 // Opens a real session, makes the review call take a second, and times how long the interface
 // waits before telling the student that something is happening.
 async function measureAiLoadingState(browser, baseUrl, jwtSecret) {
-  const harness=await createActiveSubscriptionPage(browser,{baseUrl,username:'perfuser',jwtSecret});
+  // This probe measures live interaction latency, not cache behavior. Blocking the worker also
+  // prevents the first-install controllerchange reload from destroying an in-flight measurement.
+  const harness=await createActiveSubscriptionPage(browser,{
+    baseUrl,username:'perfuser',jwtSecret,contextOptions:{serviceWorkers:'block'},
+  });
   const context=harness.context;
   try {
     const page=harness.page;
@@ -243,7 +261,8 @@ async function measureAiLoadingState(browser, baseUrl, jwtSecret) {
     });
     assert.equal(diagnostic.status, 201, `adaptive performance diagnostic failed: ${JSON.stringify(diagnostic.body)}`);
     const overviewStartedAt = Date.now();
-    await page.locator('#home_adaptive_plan').click();
+    await page.getByRole('navigation', { name: 'Основные разделы' })
+      .getByRole('button', { name: 'Прогресс', exact: true }).click();
     await page.locator('#adaptive_forecast:not([hidden])').waitFor({ state: 'visible', timeout: 5_000 });
     await page.waitForFunction(() => document.querySelectorAll('#adaptive_weekly_allocation > div').length === 6);
     const adaptiveOverviewMs = Date.now() - overviewStartedAt;
@@ -263,7 +282,10 @@ async function measureAiLoadingState(browser, baseUrl, jwtSecret) {
     await page.evaluate(() => window.tab('scr1'));
     await page.locator('#scr1.on').waitFor({ state: 'visible', timeout: 5_000 });
 
-    await page.getByRole('button', { name: 'Письмо', exact: true }).click();
+    await page.getByRole('navigation', { name: 'Основные разделы' })
+      .getByRole('button', { name: 'Практика', exact: true }).click();
+    await page.locator('#aisy-practice.on').waitFor({ state: 'visible', timeout: 5_000 });
+    await page.locator('.practice-row[data-skill="writing"] button').click();
     await page.locator('#scr8.on').waitFor({ state: 'visible', timeout: 5_000 });
     await page.getByRole('textbox', { name: 'Письменный ответ' })
       .fill(Array.from({ length: 105 }, (_, index) => `word${index + 1}`).join(' '));
@@ -345,8 +367,24 @@ async function run() {
     // Первым делом — вес первой загрузки, на чистом контексте, пока ни один экран не открывали.
     const { files: screenFiles, built } = await servedScreenFiles();
     const firstLoad = await measureFirstLoad(browser, baseUrl);
-    const screensAtStart = [...LAZY_SCREENS, ...SHELL_SCREENS]
+    const screensAtStart = [...LAZY_SCREENS, ...SHELL_SCREENS, ...LAZY_FIRST_LOAD_MODULES]
       .filter((screen) => firstLoad.requestedScripts.has(screenFiles.get(screen)));
+
+    report('JavaScript первой загрузки', firstLoad.bytes / 1024, BUDGET.firstLoadKb, ' КБ', 1);
+    console.log(`performance: первая загрузка — ${firstLoad.files} файлов, ${(firstLoad.unpackedBytes / 1024).toFixed(0)} КБ без сжатия, источник: ${built ? 'сборка dist/public' : 'исходники public'}, экраны/модули: ${screensAtStart.join(', ') || 'ни одного'}`);
+    assert.deepEqual(
+      [...LAZY_SCREENS, ...LAZY_FIRST_LOAD_MODULES].filter((screen) => screensAtStart.includes(screen)), [],
+      'при первой загрузке запрошен ленивый экран/модуль',
+    );
+    assert.deepEqual(
+      SHELL_SCREENS.filter((screen) => !screensAtStart.includes(screen)), [],
+      'eager offline-экран не приехал при первой загрузке',
+    );
+    if (FIRST_LOAD_ONLY) {
+      if (exceeded.length) throw new Error(`Бюджеты раздела 19 превышены:\n  - ${exceeded.join('\n  - ')}`);
+      console.log('e2e: first-load JavaScript и граф ленивых модулей в бюджете');
+      return;
+    }
 
     await page.goto(baseUrl, { waitUntil: 'load' });
     await page.locator('#scr1.on').waitFor({ state: 'visible', timeout: 15_000 });
@@ -355,13 +393,16 @@ async function run() {
     // close the reporting window while the observer callback is still queued.
     await page.waitForFunction(() => window.__vitals.lcp > 0, null, { timeout: 5_000 });
 
-    // Walk the screens a student opens first, so layout shifts and slow handlers show up.
-    // The module tiles are cards made operable by the shared helper, hence role and label.
-    for (const module of ['Слова', 'Грамматика', 'Чтение', 'Аудирование']) {
-      await page.getByRole('button', { name: module, exact: true }).click();
+    // Walk the learner route students open first, so layout shifts and slow handlers show up.
+    const practiceNavigation = page.getByRole('navigation', { name: 'Основные разделы' })
+      .getByRole('button', { name: 'Практика', exact: true });
+    await practiceNavigation.click();
+    await page.locator('#aisy-practice.on').waitFor({ state: 'visible', timeout: 5_000 });
+    for (const skill of ['vocabulary', 'grammar', 'reading', 'listening']) {
+      await page.locator(`.practice-row[data-skill="${skill}"] button`).click();
       await page.waitForTimeout(400);
-      await page.evaluate(() => window.tab('scr1'));
-      await page.locator('#scr1.on').waitFor({ state: 'visible', timeout: 5_000 });
+      await page.getByRole('button', { name: 'Назад в раздел Практика', exact: true }).click();
+      await page.locator('#aisy-practice.on').waitFor({ state: 'visible', timeout: 5_000 });
     }
     // Give the observers a moment to flush the last entries.
     await page.waitForTimeout(500);
@@ -381,8 +422,6 @@ async function run() {
     report('LCP', vitals.lcp, BUDGET.lcpMs, 'ms');
     report('CLS', vitals.cls, BUDGET.cls, '');
     report('INP', inp, BUDGET.inpMs, 'ms');
-    report('JavaScript первой загрузки', firstLoad.bytes / 1024, BUDGET.firstLoadKb, ' КБ', 1);
-    console.log(`performance: первая загрузка — ${firstLoad.files} файлов, ${(firstLoad.unpackedBytes / 1024).toFixed(0)} КБ без сжатия, источник: ${built ? 'сборка dist/public' : 'исходники public'}, экраны: ${screensAtStart.join(', ') || 'ни одного'}`);
     // Этот проход идёт с работающим service worker, поэтому число здесь — несжатый объём всего
     // разобранного JavaScript, а не байты по сети. Оно сравнимо с базовой линией, снятой так же.
     console.log(`performance: JavaScript разобрано к концу обхода ${(vitals.scriptBytes / 1024).toFixed(0)} КБ без сжатия, взаимодействий измерено ${vitals.interactions.length}`);
@@ -406,7 +445,7 @@ async function run() {
     // Состав первой загрузки — правило, а не наблюдение. Лишний экран в ней возвращает вес,
     // пропавший — офлайн-обещание раздела 6.1.
     assert.deepEqual(
-      LAZY_SCREENS.filter((screen) => screensAtStart.includes(screen)), [],
+      [...LAZY_SCREENS, ...LAZY_FIRST_LOAD_MODULES].filter((screen) => screensAtStart.includes(screen)), [],
       'при первой загрузке запрошен ленивый экран: его код должен приезжать при первом переходе',
     );
     assert.deepEqual(

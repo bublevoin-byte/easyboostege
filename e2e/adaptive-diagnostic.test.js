@@ -89,9 +89,23 @@ async function chromeExecutable() {
 
 async function openProgress(page) {
   await page.locator('#scr1.on').waitFor({ state: 'visible', timeout: 5_000 });
-  await page.evaluate(() => window.tab('scr10'));
+  await page.getByRole('navigation', { name: 'Основные разделы' })
+    .getByRole('button', { name: 'Прогресс', exact: true }).press('Enter');
   await page.locator('#scr10.on').waitFor({ state: 'visible', timeout: 5_000 });
   await page.locator('#adaptive_plan:not([hidden])').waitFor({ state: 'visible', timeout: 5_000 });
+}
+
+async function adaptiveRuntimeDiagnostic(page) {
+  return page.evaluate(() => {
+    const key = Object.keys(localStorage).find((candidate) => candidate.includes('adaptive.execution'));
+    const envelope = key ? JSON.parse(localStorage.getItem(key) || 'null') : null;
+    return {
+      revision: envelope?.revision ?? null,
+      module: envelope?.active?.module ?? null,
+      activityId: envelope?.active?.activityId ?? null,
+      pendingPhase: envelope?.active?.pending?.phase ?? null,
+    };
+  });
 }
 
 async function replayPublicRequest(page, pathName, key, body) {
@@ -338,15 +352,15 @@ async function runAdaptiveDiagnosticE2E() {
     });
     const page = await context.newPage();
     await page.goto(baseUrl, { waitUntil: 'networkidle' });
-    const primaryHomeEntry = page.locator('#home_adaptive_plan');
-    await primaryHomeEntry.waitFor({ state: 'visible', timeout: 5_000 });
-    assert.ok((await primaryHomeEntry.boundingBox()).height >= 44);
-    await primaryHomeEntry.focus();
-    await primaryHomeEntry.press('Enter');
+    const progressEntry = page.getByRole('navigation', { name: 'Основные разделы' })
+      .getByRole('button', { name: 'Прогресс', exact: true });
+    await progressEntry.waitFor({ state: 'visible', timeout: 5_000 });
+    assert.ok((await progressEntry.boundingBox()).height >= 44);
+    await progressEntry.focus();
+    await progressEntry.press('Enter');
     await page.locator('#scr10.on').waitFor({ state: 'visible', timeout: 5_000 });
     await page.locator('#adaptive_plan:not([hidden])').waitFor({ state: 'visible', timeout: 5_000 });
-    await page.waitForFunction(() => document.activeElement?.id === 'adaptive_plan_title');
-    await page.locator('#adaptive_access[data-tier="base"]').waitFor({ state: 'visible', timeout: 5_000 });
+    await page.locator('#adaptive_access[data-tier="premium"]').waitFor({ state: 'visible', timeout: 5_000 });
     await page.evaluate(() => window.tab('scr11'));
     const profileEntry = page.locator('#profile_adaptive_plan');
     await profileEntry.waitFor({ state: 'visible', timeout: 5_000 });
@@ -367,15 +381,15 @@ async function runAdaptiveDiagnosticE2E() {
     }]);
     const commercialPage = await commercialContext.newPage();
     await commercialPage.goto(baseUrl, { waitUntil: 'networkidle' });
-    const homeEntry = commercialPage.locator('#home_adaptive_plan');
-    await homeEntry.focus();
-    assert.notEqual(await homeEntry.evaluate((element) => getComputedStyle(element).outlineStyle), 'none');
-    await homeEntry.press('Enter');
+    const commercialProgressEntry = commercialPage.getByRole('navigation', { name: 'Основные разделы' })
+      .getByRole('button', { name: 'Прогресс', exact: true });
+    await commercialProgressEntry.focus();
+    assert.notEqual(await commercialProgressEntry.evaluate((element) => getComputedStyle(element).outlineStyle), 'none');
+    await commercialProgressEntry.press('Enter');
     await commercialPage.locator('#adaptive_plan:not([hidden])').waitFor({ state: 'visible', timeout: 5_000 });
-    await commercialPage.waitForFunction(() => document.activeElement?.id === 'adaptive_plan_title');
-    await commercialPage.locator('#adaptive_access[data-tier="base"]').waitFor({ state: 'visible', timeout: 5_000 });
+    await commercialPage.locator('#adaptive_access[data-tier="premium"]').waitFor({ state: 'visible', timeout: 5_000 });
     assert.equal(await commercialPage.getByRole('heading', { name: 'Мой план подготовки' }).count(), 1);
-    assert.match(await commercialPage.locator('#adaptive_access').innerText(), /Base/u);
+    assert.match(await commercialPage.locator('#adaptive_access').innerText(), /Premium/u);
     assert.equal(await commercialPage.locator('input[name="adaptive_session_duration"][value="15"]').isEnabled(), true);
     assert.equal(await commercialPage.locator('input[name="adaptive_session_duration"][value="30"]').isEnabled(), true);
     assert.equal(await commercialPage.locator('#adaptive_session_custom').isEnabled(), true);
@@ -384,7 +398,7 @@ async function runAdaptiveDiagnosticE2E() {
       documentWidth: document.documentElement.scrollWidth,
       screenWidth: document.getElementById('scr10').scrollWidth,
       screenClientWidth: document.getElementById('scr10').clientWidth,
-      animationDuration: getComputedStyle(document.querySelector('.heroFloat')).animationDuration,
+      animationDuration: getComputedStyle(document.getElementById('asya-launcher')).transitionDuration,
     }));
     assert.deepEqual({
       viewport: responsiveState.viewport,
@@ -582,8 +596,7 @@ async function runAdaptiveDiagnosticE2E() {
       },
     );
     assert.equal(adjustmentCreate.status, 201);
-    const adjustmentHomeEntry = adjustmentPage.locator('#home_adaptive_plan');
-    await adjustmentHomeEntry.press('Enter');
+    await openProgress(adjustmentPage);
     await adjustmentPage.locator('#adaptive_session_start').waitFor({ state: 'visible', timeout: 5_000 });
     assert.equal(await adjustmentPage.getByText('Почему изменить блок?', { exact: true }).count(), 1);
     const replacementSelect = adjustmentPage.getByLabel('Почему изменить блок?', { exact: true });
@@ -1086,11 +1099,13 @@ async function runAdaptiveDiagnosticE2E() {
       sameSite: 'Lax',
     }]);
     const examPage = await examContext.newPage();
+    const examConsole = [];
+    examPage.on('console', (message) => examConsole.push(`${message.type()}: ${message.text()}`));
     await examPage.goto(baseUrl, { waitUntil: 'networkidle' });
     await completePublicShortDiagnostic(examPage, 'existing-exam', { incorrectModules: ['grammar'] });
     await examPage.reload({ waitUntil: 'networkidle' });
     await openProgress(examPage);
-    await examPage.locator('#adaptive_access[data-tier="base"]').waitFor({ state: 'visible', timeout: 5_000 });
+    await examPage.locator('#adaptive_access[data-tier="premium"]').waitFor({ state: 'visible', timeout: 5_000 });
     const existingOverview = await browserApiRequest(examPage, '/api/v1/adaptive-learning/overview');
     assert.equal(existingOverview.status, 200);
     assert.equal(existingOverview.body.profile.needsDiagnostic, false);
@@ -1138,13 +1153,22 @@ async function runAdaptiveDiagnosticE2E() {
       response.request().method() === 'POST'
         && response.url().endsWith('/api/v1/module-attempts')
         && response.request().postDataJSON().adaptiveExecutionClaim
-    ));
+    )).catch((error) => error);
     const examAdvancePromise = examPage.waitForResponse((response) => (
       response.request().method() === 'POST' && response.url().endsWith('/advance')
-    ));
+    )).catch((error) => error);
     await examPage.getByRole('button', { name: 'Проверить', exact: true }).press('Enter');
-    assert.equal((await examAttemptPromise).status(), 201);
+    const examAttemptResponse = await examAttemptPromise;
+    if (examAttemptResponse instanceof Error) {
+      const runtimeState = await adaptiveRuntimeDiagnostic(examPage);
+      throw new Error(`${examAttemptResponse.message}\nAdaptive runtime state: ${JSON.stringify(runtimeState)}\nConsole: ${examConsole.join(' | ')}`);
+    }
+    assert.equal(examAttemptResponse.status(), 201);
     const examAdvanceResponse = await examAdvancePromise;
+    if (examAdvanceResponse instanceof Error) {
+      const runtimeState = await adaptiveRuntimeDiagnostic(examPage);
+      throw new Error(`${examAdvanceResponse.message}\nAdaptive runtime state: ${JSON.stringify(runtimeState)}`);
+    }
     assert.equal(examAdvanceResponse.status(), 200);
     const examAdvance = await examAdvanceResponse.json();
     assert.equal(examAdvance.completedBlock.activityId, examBlock.activityId);
@@ -1316,8 +1340,8 @@ async function runAdaptiveDiagnosticE2E() {
     );
     await writerPage.locator('#adaptive_report:not([hidden])').waitFor({ state: 'visible' });
     assert.ok(await writerPage.locator('#adaptive_report_rows tr').count() >= 1);
-    assert.match(await writerPage.locator('#adaptive_orientation').innerText(), /Примерный ориентир/u);
-    assert.match(await writerPage.locator('#adaptive_report_disclaimer').innerText(), /не является официальным/u);
+    assert.match(await writerPage.locator('#adaptive_orientation').innerText(), /Примерный языковой ориентир/u);
+    assert.match(await writerPage.locator('#adaptive_report_disclaimer').innerText(), /неофициальный.*не сертификат.*не официальный результат/u);
     assert.ok(providerCalls.length >= 1);
     assert.equal(blockedExternalUrls.some((url) => /x\.ai|groq|openai/u.test(url)), false);
     console.log('adaptive e2e: diagnostic plus client module, exam launch and exact writing execution passed');

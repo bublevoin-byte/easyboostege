@@ -71,11 +71,13 @@ function recorderHarness(active = null) {
     window,
     GRAMMAR_CATALOG, GRAMMAR_CATALOG_V1, GRAMMAR_CATALOG_V2, getGrammarCatalogRuntime, validateGeneratedGrammarSupplement,
     GRAMMAR_PRACTICE_MODES, isGrammarErrorCode, parseGrammarConfusionPair,
-    adaptiveRuntimeSnapshot: () => ({ active }),
-    completeAdaptiveModuleActivity: async (completion) => {
-      adaptive.push(completion);
-      return { execution: { revision: 2 } };
-    },
+    loadAdaptiveSessionRuntime: async () => ({
+      adaptiveRuntimeSnapshot: () => ({ active }),
+      completeAdaptiveModuleActivity: async (completion) => {
+        adaptive.push(completion);
+        return { execution: { revision: 2 } };
+      },
+    }),
     Object, Array, String, Number, Boolean, JSON, Math, Promise, RegExp, Error, TypeError,
   });
   return { recorder: window.__learningActivityRecorderTest, adaptive, ordinary };
@@ -168,11 +170,13 @@ function grammarScreenHarness(options = {}) {
     GRAMMAR_TARGETED_MIN_ERROR_ITEMS, GRAMMAR_TARGETED_MIN_EXACT_ITEMS,
     isBuiltinGrammarDiagnosticId, isGrammarConfusionPair, isGrammarErrorCode, parseGrammarConfusionPair,
     parseGeneratedGrammarItemId, parseGeneratedGrammarItemReference,
-    adaptiveRuntimeSnapshot: () => ({ active }),
-    completeAdaptiveModuleActivity: async (completion) => {
-      adaptive.push(JSON.parse(JSON.stringify(completion)));
-      return { execution: { revision: 2 } };
-    },
+    loadAdaptiveSessionRuntime: async () => ({
+      adaptiveRuntimeSnapshot: () => ({ active }),
+      completeAdaptiveModuleActivity: async (completion) => {
+        adaptive.push(JSON.parse(JSON.stringify(completion)));
+        return { execution: { revision: 2 } };
+      },
+    }),
     S, SRV: false, TOKEN: '', WBTN: 'background:#fff;color:#2B2B2B;border:1px solid #F0EAE2;',
     apiGet: async (path) => { apiCalls.push({ method: 'GET', path }); return options.apiGet ? options.apiGet(path) : {}; },
     apiPost: async (path, body) => { apiCalls.push({ method: 'POST', path, body: JSON.parse(JSON.stringify(body || null)) }); return options.apiPost ? options.apiPost(path, body) : {}; },
@@ -204,6 +208,7 @@ function grammarScreenHarness(options = {}) {
   context.recordCompletedLearningActivity = window.__learningActivityRecorderTest.recordCompletedLearningActivity;
   const executableScreen = grammarScreenSource
     .replace(/^import(?:[\s\S]*?)from '[^']+';\r?\n/gmu, '')
+    .replace(/^import '[^']+';\r?\n/gmu, '')
     .replace(/^export \{[\s\S]*?\};\r?\n?/mu, '')
     .concat(`
       window.__grammarScreenTest={
@@ -1446,8 +1451,9 @@ test('grammar topic, filtered review and exam completions emit observable owner-
   harness.screen.gExamStart('builtin:exam:grammar:19-24:v1');
   harness.advance(2_000);
   await harness.screen.gExamCheck();
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(harness.ordinary.length, 3, 'adaptive exam does not emit an ordinary duplicate');
-  assert.deepEqual(harness.adaptive, [{
+  assert.deepEqual(JSON.parse(JSON.stringify(harness.adaptive)), [{
     module: 'grammar', activityId: 'grammar_forms_exam_19_24', score: 0, maxScore: 6, durationMs: 2_000,
   }]);
 });

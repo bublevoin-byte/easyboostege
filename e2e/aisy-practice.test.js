@@ -227,6 +227,10 @@ try{
   await offlineFirst.page.goto(baseUrl,{waitUntil:'networkidle'});
   await offlineFirst.page.locator('#scr1.on').waitFor({state:'visible',timeout:5_000});
   await offlineFirst.page.evaluate(()=>navigator.serviceWorker.ready.then(()=>true));
+  if(!await offlineFirst.page.evaluate(()=>Boolean(navigator.serviceWorker.controller))){
+    await offlineFirst.page.reload({waitUntil:'networkidle'});
+    await offlineFirst.page.locator('#scr1.on').waitFor({state:'visible',timeout:5_000});
+  }
   await offlineFirst.page.waitForFunction(()=>Boolean(navigator.serviceWorker.controller),null,{timeout:10_000});
   assert.equal(await offlineFirst.page.locator('#aisy-practice.on').count(),0,'offline contour must not warm Practice by opening it online');
   await offlineFirst.context.setOffline(true);

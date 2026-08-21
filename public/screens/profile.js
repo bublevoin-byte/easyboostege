@@ -4,6 +4,7 @@
  * поэтому экран только рисует шапку и зовёт хуки.
  */
 import {nav,registerRouteHook} from '../router.js';
+import '../modules/profile.js';
 import {SRV,S,TOKEN,apiGet,apiIsAuthorityFailure,apiResponseOwner,currentUser,invalidateLearningAuthority,profileModule,registerAuthorityReset,runProfileHooks,save,setTxt} from '../app.js';
 import {presentProfilePlan} from '../commercial-copy.js';
 

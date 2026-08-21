@@ -4,9 +4,9 @@ import {
   beginAdaptiveBlock,
   finishAdaptiveSession,
   resumeAdaptiveExecution,
-} from '../adaptive-session-runtime.js';
+} from '../adaptive-session-loader.js';
 import {projectToday} from '../modules/today.js';
-import {nav,navigateTopLevel,registerRouteHook} from '../router.js';
+import {cur,nav,navigateTopLevel,registerRouteHook} from '../router.js';
 import {
   S,
   apiCanUseOfflineFallback,
@@ -96,10 +96,12 @@ function renderState(status,description=''){
   const view=projectToday(currentInput(status));todayView=view;
   const state=document.getElementById('today-state');const ready=document.getElementById('today-ready');
   if(!state||!ready)return;
+  const loading=status==='loading';state.setAttribute('aria-busy',String(loading));
+  if(loading)state.dataset.skeleton='';else delete state.dataset.skeleton;
   ready.hidden=true;state.hidden=false;
   text('today-title',view.greeting);text('today-context',view.context);
   text('today-state-title',view.state.title);text('today-state-message',description||view.state.message);
-  const action=document.getElementById('today-state-action');if(action){const loading=status==='loading';action.textContent=view.state.recovery.label;action.dataset.action=view.state.recovery.kind;action.hidden=loading;action.disabled=loading}
+  const action=document.getElementById('today-state-action');if(action){action.textContent=view.state.recovery.label;action.dataset.action=view.state.recovery.kind;action.hidden=loading;action.disabled=loading}
   const pulse=state.querySelector('.today-state__pulse');if(pulse)pulse.hidden=status!=='loading';
 }
 
@@ -140,6 +142,7 @@ function renderReady(){
   const view=projectToday(currentInput());todayView=view;
   if(view.status!=='ready'){renderState(view.status);return}
   const state=document.getElementById('today-state');const ready=document.getElementById('today-ready');if(!state||!ready)return;
+  state.setAttribute('aria-busy','false');delete state.dataset.skeleton;
   state.hidden=true;ready.hidden=false;
   text('today-title',view.greeting);text('today-context',view.context);
   text('today-recommendation-title',view.recommendation.title);
@@ -254,3 +257,4 @@ function bindToday(){
 bindToday();
 registerAuthorityReset(function(authority){if(!sameOwner(authority,todayAuthority))return;todayLoadController?.abort();todayLoadController=null;todayToken+=1;todayAuthority=null;todayData=null;todayView=null;pendingStart=null;selectedMinutes=null;renderState('access')});
 registerRouteHook(function(id){if(id==='scr1')loadToday()});
+if(cur()==='scr1')void loadToday();
