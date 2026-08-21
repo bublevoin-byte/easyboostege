@@ -24,6 +24,7 @@ import './store.js';
 import './components.js';
 import * as router from './router.js';
 import {installLearnerShell} from './aisy-shell.js';
+import {installAsyaAssistant} from './asya-assistant.js';
 import './learning.js';
 import './modules/words.js';
 import './modules/grammar.js';
@@ -80,4 +81,10 @@ installLearnerShell({
   currentScreen:router.cur,
   registerRouteHook:router.registerRouteHook,
   registerBackAdapter:router.registerBackAdapter,
+});
+
+installAsyaAssistant({
+  document,
+  currentScreen:router.cur,
+  registerRouteHook:router.registerRouteHook,
 });

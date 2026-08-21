@@ -1,6 +1,6 @@
 # 07 — Контекстная Ася и честные voice states
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01, 02, 03, 04, 05, 06
 Spec: `.scratch/aisy-ux-redesign/spec.md#6-asya-interaction-contract`
 
