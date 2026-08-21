@@ -236,6 +236,7 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
 <link rel="stylesheet" href="/aisy-theme.css">
 <link rel="stylesheet" href="/aisy-shell.css">
 <link rel="stylesheet" href="/today.css">
+<link rel="stylesheet" href="/practice.css">
 </head><body>
 <button id="navfab" onclick="document.getElementById('navmenu').classList.toggle('open')">Экраны ▾</button>
 <div id="navmenu"></div>
@@ -374,12 +375,16 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
   
 </div>
 <div class="screen" id="aisy-practice" data-name="Практика" data-aisy-shell-host>
-  <main class="aisy-shell-placeholder aisy-reading-canvas" tabindex="-1" aria-labelledby="aisy-practice-title">
-    <section class="aisy-surface aisy-shell-placeholder__card">
-      <p class="aisy-shell-placeholder__kicker">Aisy ЕГЭ — Английский</p>
+  <main class="practice aisy-reading-canvas" tabindex="-1" aria-labelledby="aisy-practice-title">
+    <header class="practice__header">
+      <p class="practice__eyebrow">Aisy ЕГЭ — Английский</p>
       <h1 id="aisy-practice-title">Практика</h1>
-      <p>Здесь появится выбор тренировок по навыкам. Экран пока не заменяет существующие учебные модули.</p>
-    </section>
+      <p class="practice__intro" id="practice-intro">Выберите навык для дополнительной работы. Незавершённые задания останутся на месте.</p>
+    </header>
+    <p id="practice-network-state" class="practice__network" role="status" aria-live="polite" hidden></p>
+    <ul id="practice-skills" class="practice__list" aria-label="Навыки английского">
+      <li class="practice-row aisy-surface" role="status">Готовим список навыков…</li>
+    </ul>
   </main>
 </div>
 <div class="screen" id="aisy-ege" data-name="ЕГЭ" data-aisy-shell-host>

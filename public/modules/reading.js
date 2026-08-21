@@ -1,6 +1,7 @@
 import { learningActivityPool, learningActivitySource, readingActivityId, splitLearningActivityDuration } from '../learning-activity-contract.js';
 import {
   READING_CATALOG_ID,
+  READING_FULL_ATTEMPT_VERSION,
   READING_KINDS,
   READING_KIND_RULES,
   adaptLegacyReadingFallback,
@@ -29,7 +30,6 @@ import {
   const HISTORY_VERSION = 2;
   const HISTORY_LIMIT = 200;
   const SUBMISSION_LIMIT = 100;
-  const FULL_ATTEMPT_VERSION = 1;
   const DAY_MS = 86_400_000;
   const KINDS = READING_KINDS;
   const SAFE_OWNER_ID = /^[^\s][^\r\n]{0,127}$/u;
@@ -637,7 +637,7 @@ import {
       return { id: reference.id, revision: reference.revision, kind };
     });
     return {
-      version: FULL_ATTEMPT_VERSION,
+      version: READING_FULL_ATTEMPT_VERSION,
       id: attempt.id,
       ownerId: owner,
       catalogId: section.catalogId,
@@ -653,7 +653,7 @@ import {
 
   function restoreFullAttempt(snapshot, catalog, ownerId) {
     const owner = ownerIdOf(ownerId);
-    if (!snapshot || snapshot.version !== FULL_ATTEMPT_VERSION) return { ok: false, reason: 'attempt-version-mismatch' };
+    if (!snapshot || snapshot.version !== READING_FULL_ATTEMPT_VERSION) return { ok: false, reason: 'attempt-version-mismatch' };
     if (snapshot.ownerId !== owner) return { ok: false, reason: 'owner-mismatch' };
     if (snapshot.catalogId !== catalog?.id) return { ok: false, reason: 'catalog-version-mismatch' };
     if (snapshot.catalogRevision !== catalog?.revision) return { ok: false, reason: 'catalog-revision-mismatch' };

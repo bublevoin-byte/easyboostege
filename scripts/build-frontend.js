@@ -114,6 +114,8 @@ for (const entry of entryPoints) {
   for (const name of await walkModuleGraph(entry)) reachable.add(name);
   for (const name of await walkModuleGraph(entry, { staticOnly: true })) shellModules.add(name);
 }
+const practiceOfflineClosure = await walkModuleGraph('screens/practice.js', { staticOnly: true });
+const offlineLazyModules = [...practiceOfflineClosure].filter((name) => !shellModules.has(name));
 const egeMockSourceEntry = 'screens/ege-mock.js';
 const egeMockStaticClosure = await walkModuleGraph(egeMockSourceEntry, { staticOnly: true });
 const sourceEgeMockExecModules = [
@@ -234,7 +236,7 @@ if (shellStart === -1 || shellEnd === -1) {
  * Чтобы он не разъехался с реальным графом импортов, сборка его сверяет: набор тот же, что в
  * dist, только без хешей.
  */
-const sourceShell = shellFrom([...shellModules, ...shellStaticAssets]);
+const sourceShell = shellFrom([...shellModules, ...offlineLazyModules, ...shellStaticAssets]);
 const declaredShell = JSON.parse(workerSource.slice(shellStart, shellEnd).match(/const APP_SHELL=(\[[^\]]*\]);/u)[1].replaceAll("'", '"'));
 const declaredSorted = [...declaredShell].sort();
 const expectedSorted = [...sourceShell].sort();
@@ -244,7 +246,8 @@ if (declaredSorted.join('\n') !== expectedSorted.join('\n')) {
   throw new Error(`APP_SHELL в public/service-worker.js разошёлся с графом импортов main.js.${missing.length ? `\n  не хватает: ${missing.join(', ')}` : ''}${extra.length ? `\n  лишнее: ${extra.join(', ')}` : ''}`);
 }
 
-const builtShell = shellFrom([...shellChunks, ...shellStaticAssets]);
+const offlineLazyChunks = new Set(offlineLazyModules.map((name) => modules[name]));
+const builtShell = shellFrom([...shellChunks, ...offlineLazyChunks, ...shellStaticAssets]);
 let workerBuilt = `${workerSource.slice(0, shellStart)}${SHELL_MARKER_START}\nconst APP_SHELL=${JSON.stringify(builtShell).replaceAll('"', "'")};\n${workerSource.slice(shellEnd)}`;
 const egeMockFormStart = workerBuilt.indexOf(EGE_MOCK_FORM_MARKER_START);
 const egeMockFormEnd = workerBuilt.indexOf(EGE_MOCK_FORM_MARKER_END);

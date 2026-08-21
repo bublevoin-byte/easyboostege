@@ -164,6 +164,18 @@
   background: var(--aisy-color-primary-hover);
 }
 
+.aisy-button--secondary {
+  border: 1px solid var(--aisy-color-primary);
+  background: var(--aisy-color-surface);
+  color: var(--aisy-color-primary);
+}
+
+.aisy-button--secondary:hover,
+.aisy-button--secondary:active {
+  background: var(--aisy-color-surface-muted);
+  color: var(--aisy-color-text);
+}
+
 :where(button, [role="button"], a, input, select, textarea, summary) {
   min-block-size: var(--aisy-touch-target);
   touch-action: manipulation;

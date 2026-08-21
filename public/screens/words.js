@@ -18,7 +18,7 @@ import {
   summarizeVocabularySession,
 } from '../vocabulary-domain.js';
 import {
-  EGE_WORDS,S,SRV,TOKEN,WBTN,generateAiContent,registerScreenGenerator,save,srsFail,srsOk,
+  EGE_WORDS,S,SRV,TOKEN,WBTN,currentOwnerBinding,generateAiContent,registerAuthorityReset,registerScreenGenerator,save,srsFail,srsOk,
   srsRecordVocabularyOutcome,syncModuleAttempt,toast,todayStr,ui,wBase,wDeco,wMergeAi,wMigrate,wStats,wSync,wordModule,
 } from '../app.js';
 
@@ -30,11 +30,13 @@ const W_PROVENANCE_LABELS={core:'Проверенная база',personal:'Ли
 let WQ=[],WI=0,WDONE=0,WCORRECT=0,W_ADAPTIVE_MODE=null,W_ADAPTIVE_ACTIVITY=null,W_ADAPTIVE_REPORTED=false;
 let W_VIEW='home',W_LIBRARY_SCROLL=0,W_DETAIL_RETURN_WORD='';
 let W_EVENTS=[],W_REPEAT_COUNTS={},W_PENDING_ANSWER='',W_SUMMARY_SAVED=false,W_LAST_SUMMARY=null;
-let W_SESSION_ATTEMPT_ID='',W_SESSION_STARTED_AT=0,W_MODULE_ATTEMPT_REPORTED=false;
+let W_SESSION_ATTEMPT_ID='',W_SESSION_OWNER=null,W_SESSION_STARTED_AT=0,W_MODULE_ATTEMPT_REPORTED=false;
 let W_SESSION_VIEW=null;
+function wSameOwner(left,right){return Boolean(left&&right&&left.username===right.username&&left.generation===right.generation)}
 function wAttemptId(){return globalThis.crypto&&typeof globalThis.crypto.randomUUID==='function'
   ?globalThis.crypto.randomUUID():('00000000-0000-4000-8000-'+Date.now().toString(16).padStart(12,'0').slice(-12))}
 function wArea(){return document.getElementById('w_area')}
+function hasActiveVocabularyPractice(){return W_VIEW==='practice'&&WQ.length>WI&&wSameOwner(W_SESSION_OWNER,currentOwnerBinding())}
 function wResetToday(){if(S.wday!==todayStr()){S.wday=todayStr();S.wnewUsed=0}}
 function wStoredProgress(word){
   return wordModule.progressRecord(S.srs,word);
@@ -103,8 +105,12 @@ function wRenderFailure(){
     description:'Попробуй ещё раз — сохранённые слова не потерялись.',
     actionLabel:'Повторить',onAction:initWords});
 }
-function initWords(){if(!S)return;W_ADAPTIVE_MODE=null;W_ADAPTIVE_ACTIVITY=null;W_ADAPTIVE_REPORTED=false;
-  W_VIEW='loading';var area=wArea();if(area)ui.renderState(area,{kind:'loading',title:'Готовим словарь',description:'Считаем повторения и новые слова'});
+function initWords(){if(!S)return;var area=wArea();
+  if(hasActiveVocabularyPractice()&&area){
+    wHeading('Тренировка');wProgress();return
+  }
+  W_ADAPTIVE_MODE=null;W_ADAPTIVE_ACTIVITY=null;W_ADAPTIVE_REPORTED=false;
+  W_VIEW='loading';if(area)ui.renderState(area,{kind:'loading',title:'Готовим словарь',description:'Считаем повторения и новые слова'});
   Promise.resolve().then(function(){wMigrate();wMergeAi();wResetToday();
     S.vocabularyNewBudget=wordModule.normalizeNewWordBudget(S.vocabularyNewBudget);
     wSync();if(W_VIEW==='loading')wShowHome()}).catch(function(error){console.error('Vocabulary screen failed',error);wRenderFailure()})}
@@ -187,7 +193,7 @@ function wBeginSession(items,forcedMode){
   var progressByWord={};items.forEach(function(item){var progress=wStoredProgress(item.w);if(progress)progressByWord[item.w]=progress});
   WQ=composeVocabularySession(items,{progressByWord:progressByWord,forcedMode:forcedMode});WI=0;WDONE=0;WCORRECT=0;
   W_EVENTS=[];W_REPEAT_COUNTS={};W_PENDING_ANSWER='';W_SUMMARY_SAVED=false;W_LAST_SUMMARY=null;W_VIEW='practice';
-  W_SESSION_ATTEMPT_ID=wAttemptId();W_SESSION_STARTED_AT=Date.now();W_MODULE_ATTEMPT_REPORTED=false;
+  W_SESSION_ATTEMPT_ID=wAttemptId();W_SESSION_OWNER=currentOwnerBinding();W_SESSION_STARTED_AT=Date.now();W_MODULE_ATTEMPT_REPORTED=false;
   var area=wArea();if(!area)return;
   area.innerHTML='<div id="w_card" class="vocab-practice-card"></div><div id="w_opts" class="vocab-practice-options"></div>';
   wHeading('Тренировка');wRender()}
@@ -487,6 +493,11 @@ async function genWords(){
 
 registerRouteHook(function(id){if(id==='scr2')initWords()});
 registerScreenGenerator('scr2',genWords);
+registerAuthorityReset(function(authority){
+  if(!W_SESSION_OWNER||authority?.owner!==W_SESSION_OWNER.username||authority?.ownerGeneration!==W_SESSION_OWNER.generation)return;
+  WQ=[];WI=0;WDONE=0;WCORRECT=0;W_EVENTS=[];W_REPEAT_COUNTS={};W_PENDING_ANSWER='';W_SESSION_VIEW=null;
+  W_SESSION_ATTEMPT_ID='';W_SESSION_OWNER=null;W_SESSION_STARTED_AT=0;W_MODULE_ATTEMPT_REPORTED=false;W_VIEW='home';
+});
 document.addEventListener('keydown',function(event){
   var screen=document.getElementById('scr2');
   if(event.key==='Escape'&&W_VIEW==='detail'&&screen&&screen.classList.contains('on')){
@@ -495,7 +506,7 @@ document.addEventListener('keydown',function(event){
 
 /* Имена для обработчиков этого экрана: загрузчик кладёт их на window вместе с чанком. */
 export {
-  WI,WQ,initWords,launchVocabularyPractice,wChooseRecognition,wClearLibraryFilters,wDeletePersonalWord,
+  WI,WQ,W_SESSION_OWNER,hasActiveVocabularyPractice,initWords,launchVocabularyPractice,wChooseRecognition,wClearLibraryFilters,wDeletePersonalWord,
   wCompleteBridge,wCompleteIntroduction,wExtra,wNext,wNotKnown,wPick,wPracticeDifficult,wRateRussian,wRender,
   wRevealRussian,wSessionNext,wSetBudget,wSetLibraryFilter,wSetLibrarySearch,wShowHome,wShowKnown,
   wShowLibrary,wShowWord,wSpeakLibraryValue,wStartPractice,wSubmit,wSubmitSession,wToggleExampleTranslation,

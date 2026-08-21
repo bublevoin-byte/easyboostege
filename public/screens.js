@@ -17,6 +17,7 @@ import {exposeGlobals} from './globals.js';
 import {registerScreenSource} from './router.js';
 
 const SCREEN_SOURCES={
+  'aisy-practice':function(){return import('./screens/practice.js')},
   scr4:function(){return import('./screens/listening.js')},
   scr7:function(){return import('./screens/reading.js')},
   scr8:function(){return import('./screens/writing.js')},

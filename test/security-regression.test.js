@@ -103,7 +103,7 @@ test('frontend loads through a single module entry point that keeps the previous
    * сети словарные карточки, интервальное повторение, встроенные грамматические тесты, просмотр
    * сохранённого прогресса и изменение предпочтений, а Сегодня даёт офлайн-маршрут. Поэтому эти пять экранов обязаны быть в оболочке.
    *
-   * Остальные пять экранов обязаны остаться ленивыми: на них держится бюджет раздела 19. Уже открытый
+   * Practice и остальные пять экранов обязаны остаться ленивыми: на них держится бюджет раздела 19. Уже открытый
    * пробник продолжает работу из runtime-cache, который его exact preflight успел заполнить до старта.
    * Ни один список не должен молча съехать в другую сторону, поэтому проверяются оба.
    */
@@ -114,7 +114,7 @@ test('frontend loads through a single module entry point that keeps the previous
   const loader = await fs.readFile(new URL('../public/screens.js', import.meta.url), 'utf8');
   const lazy = [...loader.matchAll(/import\(\s*'\.\/(screens\/[^']+)'\s*\)/gu)].map((match) => match[1]);
   assert.deepEqual(lazy, [
-    'screens/listening.js', 'screens/reading.js',
+    'screens/practice.js', 'screens/listening.js', 'screens/reading.js',
     'screens/writing.js', 'screens/speaking.js', 'screens/ege-mock.js',
   ]);
   for (const screen of eagerScreens) {

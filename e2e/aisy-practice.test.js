@@ -1,0 +1,243 @@
+import assert from 'node:assert/strict';
+import {spawn} from 'node:child_process';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {chromium} from 'playwright';
+import {
+  availablePort,
+  chromeExecutable,
+  createActiveSubscriptionPage,
+  stopProcess,
+  waitForReady,
+} from './browser-server-harness.js';
+
+const projectDirectory=fileURLToPath(new URL('..',import.meta.url));
+const serverPath=fileURLToPath(new URL('../server.js',import.meta.url));
+const jwtSecret='aisy-practice-e2e-secret-at-least-32-chars';
+const expectedSkills=['Слова','Грамматика','Чтение','Аудирование','Письмо','Говорение'];
+
+async function openPractice(page){
+  await page.getByRole('navigation',{name:'Основные разделы'}).getByRole('button',{name:'Практика'}).press('Enter');
+  await page.locator('#aisy-practice.on').waitFor({state:'visible',timeout:5_000});
+  await page.locator('#practice-skills .practice-row').first().waitFor({state:'visible',timeout:5_000});
+}
+
+let browser;
+let child;
+let temporaryDirectory;
+try{
+  temporaryDirectory=await fs.mkdtemp(path.join(os.tmpdir(),'aisy-practice-e2e-'));
+  const port=await availablePort();
+  const baseUrl=`http://127.0.0.1:${port}`;
+  const now=Date.now();
+  const dataFile=path.join(temporaryDirectory,'data.json');
+  await fs.writeFile(dataFile,JSON.stringify({
+    users:{learner:{created:now,sub_until:now+86_400_000}},
+    progress:{learner:{}},
+  }),'utf8');
+  const output=[];
+  child=spawn(process.execPath,[serverPath],{
+    cwd:projectDirectory,
+    env:{
+      ...process.env,NODE_ENV:'test',PORT:String(port),APP_URL:baseUrl,
+      DATABASE_PROVIDER:'file',DATA_FILE:dataFile,JWT_SECRET:jwtSecret,
+      TELEGRAM_BOT_TOKEN:'',ADMIN_TELEGRAM_ID:'',XAI_ENABLED:'false',
+      VOICE_TUTOR_ENABLED:'false',ADAPTIVE_LEARNING_ENABLED:'false',
+    },
+    stdio:['ignore','pipe','pipe'],
+  });
+  child.stdout.on('data',chunk=>output.push(chunk.toString()));
+  child.stderr.on('data',chunk=>output.push(chunk.toString()));
+  await waitForReady(baseUrl,child,output);
+  browser=await chromium.launch({headless:true,executablePath:await chromeExecutable()});
+
+  const mobile=await createActiveSubscriptionPage(browser,{
+    baseUrl,username:'learner',jwtSecret,
+    contextOptions:{viewport:{width:320,height:568},reducedMotion:'reduce',serviceWorkers:'block'},
+  });
+  const browserErrors=[];
+  mobile.page.on('pageerror',error=>browserErrors.push(error.message));
+  await mobile.page.goto(baseUrl,{waitUntil:'networkidle'});
+  await mobile.page.locator('#scr1.on').waitFor({state:'visible',timeout:5_000});
+  await openPractice(mobile.page);
+
+  const rows=mobile.page.locator('#practice-skills .practice-row');
+  assert.equal(await rows.count(),6);
+  assert.deepEqual(await rows.locator('h2').allTextContents(),expectedSkills);
+  assert.equal(await rows.locator('button').count(),6,'each skill row must expose exactly one action');
+  assert.equal(await rows.locator('.aisy-button:not(.aisy-button--secondary)').count(),1,'Practice must expose one primary action');
+  assert.equal(await rows.locator('svg[stroke="currentColor"][stroke-width="2"]').count(),6);
+  assert.equal(await rows.evaluateAll(items=>items.every(item=>item.querySelectorAll('button').length===1)),true);
+
+  for(const viewport of [{width:320,height:568},{width:375,height:667},{width:768,height:1024}]){
+    await mobile.page.setViewportSize(viewport);
+    const layout=await mobile.page.evaluate(()=>({
+      viewport:innerWidth,
+      documentWidth:document.documentElement.scrollWidth,
+      controls:[...document.querySelectorAll('#practice-skills button')].map(button=>{
+        const rect=button.getBoundingClientRect();return{width:rect.width,height:rect.height};
+      }),
+    }));
+    assert.ok(layout.documentWidth<=layout.viewport,`Practice must not overflow at ${viewport.width}px`);
+    assert.equal(layout.controls.every(control=>control.width>=44&&control.height>=44),true);
+  }
+
+  const vocabulary=rows.filter({has:mobile.page.getByRole('heading',{name:'Слова',exact:true})});
+  await vocabulary.getByRole('button',{name:'Открыть: Слова'}).press('Enter');
+  await mobile.page.locator('#scr2.on').waitFor({state:'visible',timeout:5_000});
+  assert.equal(await mobile.page.evaluate(()=>document.activeElement?.closest('#scr2')!==null),true);
+  await mobile.page.getByRole('button',{name:/^Начать ·/u}).press('Enter');
+  await mobile.page.locator('#scr2 .vocab-practice-card').waitFor({state:'visible',timeout:5_000});
+  const wordProgress=await mobile.page.evaluate(()=>({
+    index:window.WI,
+    length:window.WQ?.length,
+    word:window.WQ?.[window.WI]?.word,
+  }));
+  assert.ok(wordProgress.length>0);
+
+  await mobile.page.getByRole('button',{name:'Назад в раздел Практика',exact:true}).press('Enter');
+  await mobile.page.locator('#aisy-practice.on').waitFor({state:'visible',timeout:5_000});
+  const continuingVocabulary=mobile.page.locator('.practice-row[data-skill="vocabulary"][data-state="continue"]');
+  await continuingVocabulary.waitFor({state:'visible',timeout:5_000});
+  await continuingVocabulary.getByRole('button',{name:'Продолжить: Слова'}).press('Enter');
+  await mobile.page.locator('#scr2.on .vocab-practice-card').waitFor({state:'visible',timeout:5_000});
+  assert.deepEqual(await mobile.page.evaluate(()=>({
+    index:window.WI,
+    length:window.WQ?.length,
+    word:window.WQ?.[window.WI]?.word,
+  })),wordProgress,'Practice must reopen the active vocabulary card without resetting it');
+
+  await mobile.page.getByRole('button',{name:'Назад в раздел Практика',exact:true}).press('Enter');
+  const reading=mobile.page.locator('.practice-row[data-skill="reading"]');
+  await reading.getByRole('button',{name:'Открыть: Чтение'}).press('Enter');
+  await mobile.page.locator('#scr7.on .reading-hub').waitFor({state:'visible',timeout:5_000});
+  await mobile.page.getByRole('button',{name:'Начать Task 12–18'}).press('Enter');
+  await mobile.page.locator('#scr7.on .reading-practice').waitFor({state:'visible',timeout:5_000});
+  const firstReadingAnswer=mobile.page.locator('#scr7 [data-reading-answer]').first();
+  await firstReadingAnswer.press('Space');
+  const readingProgress=await mobile.page.locator('#scr7 [data-reading-answer]').evaluateAll(fields=>fields.map(field=>({value:field.value,checked:field.checked})));
+  await mobile.page.getByRole('button',{name:'Назад в раздел Практика',exact:true}).press('Enter');
+  const continuingReading=mobile.page.locator('.practice-row[data-skill="reading"][data-state="continue"]');
+  await continuingReading.waitFor({state:'visible',timeout:5_000});
+  await continuingReading.getByRole('button',{name:'Продолжить: Чтение'}).press('Enter');
+  await mobile.page.locator('#scr7.on .reading-practice').waitFor({state:'visible',timeout:5_000});
+  assert.deepEqual(
+    await mobile.page.locator('#scr7 [data-reading-answer]').evaluateAll(fields=>fields.map(field=>({value:field.value,checked:field.checked}))),
+    readingProgress,
+    'Practice must reopen the active reading set without resetting its answers',
+  );
+
+  await mobile.page.getByRole('button',{name:'Назад в раздел Практика',exact:true}).press('Enter');
+  const writing=mobile.page.locator('.practice-row[data-skill="writing"]');
+  await writing.getByRole('button',{name:'Открыть: Письмо'}).press('Enter');
+  await mobile.page.locator('#scr8.on').waitFor({state:'visible',timeout:5_000});
+  const editor=mobile.page.locator('#w_editor');
+  await editor.waitFor({state:'visible',timeout:5_000});
+  const savedDraft='Dear Ben,\nThank you for your message. This is my saved draft.';
+  await editor.fill(savedDraft);
+  await mobile.page.getByRole('button',{name:'Назад в раздел Практика',exact:true}).press('Enter');
+  const continuingWriting=mobile.page.locator('.practice-row[data-skill="writing"][data-state="continue"]');
+  await continuingWriting.waitFor({state:'visible',timeout:5_000});
+  await continuingWriting.getByRole('button',{name:'Продолжить: Письмо'}).press('Enter');
+  await mobile.page.locator('#scr8.on #w_editor').waitFor({state:'visible',timeout:5_000});
+  assert.equal(await mobile.page.locator('#w_editor').innerText(),savedDraft);
+
+  await mobile.page.getByRole('button',{name:'Назад в раздел Практика',exact:true}).press('Enter');
+  const listeningRow=mobile.page.locator('.practice-row[data-skill="listening"]');
+  await listeningRow.getByRole('button',{name:/Аудирование$/u}).press('Enter');
+  await mobile.page.locator('#scr4.on').waitFor({state:'visible',timeout:5_000});
+  await mobile.page.getByRole('button',{name:/Экзамен · задания 1–9/u}).press('Enter');
+  await mobile.page.getByRole('button',{name:'Начать',exact:true}).press('Enter');
+  const firstListeningAnswer=mobile.page.getByRole('button',{name:'Говорящий A, утверждение 1'});
+  await firstListeningAnswer.press('Enter');
+  const listeningProgress=await mobile.page.evaluate(()=>({stage:window.LE?.stage,selections:window.LE?.selM?.slice(),startedAt:window.LE?.t0}));
+  assert.equal(listeningProgress.selections[0]!==null,true);
+  await mobile.page.getByRole('button',{name:'Назад в раздел Практика',exact:true}).press('Enter');
+  const continuingListening=mobile.page.locator('.practice-row[data-skill="listening"][data-state="continue"]');
+  await continuingListening.waitFor({state:'visible',timeout:5_000});
+  await mobile.page.waitForTimeout(300);
+  await continuingListening.getByRole('button',{name:'Продолжить: Аудирование'}).press('Enter');
+  await mobile.page.getByRole('button',{name:'Говорящий A, утверждение 1'}).waitFor({state:'visible',timeout:5_000});
+  const resumedListening=await mobile.page.evaluate(()=>({
+    stage:window.LE?.stage,selections:window.LE?.selM?.slice(),startedAt:window.LE?.t0,
+    pausedAt:window.LE?.pausedAt,interval:window.LE?.iv,
+  }));
+  assert.deepEqual(
+    {stage:resumedListening.stage,selections:resumedListening.selections},
+    {stage:listeningProgress.stage,selections:listeningProgress.selections},
+    'Practice must resume the paused listening exam without resetting its answers',
+  );
+  assert.ok(resumedListening.startedAt>listeningProgress.startedAt+150,'paused hub time must be excluded from the exam timer');
+  assert.equal(resumedListening.pausedAt,null);
+  assert.equal(resumedListening.interval!=null,true);
+
+  await mobile.page.getByRole('button',{name:'Назад в раздел Практика',exact:true}).press('Enter');
+  await mobile.context.setOffline(true);
+  await mobile.page.locator('#practice-network-state:not([hidden])').waitFor({state:'visible',timeout:5_000});
+  assert.equal(await mobile.page.locator('.practice-row[data-skill="vocabulary"]').getAttribute('data-availability'),'offline-ready');
+  assert.equal(await mobile.page.locator('.practice-row[data-skill="writing"]').getAttribute('data-availability'),'cached');
+  const listening=mobile.page.locator('.practice-row[data-skill="listening"]');
+  await listening.waitFor({state:'visible',timeout:5_000});
+  assert.match(await listening.locator('.practice-row__availability').textContent(),/загружен|доступ/u);
+  await mobile.context.setOffline(false);
+  const authorityCleanup=await mobile.page.evaluate(async()=>{
+    const marker=window.EasyBoostStore.readCurrentOwner();
+    const active={words:window.WQ?.length||0,reading:Boolean(window.RQ),listening:Boolean(window.LE)};
+    await window.EasyBoostAuthority.invalidate(marker);
+    return{
+      active,
+      cleared:{words:window.WQ?.length||0,reading:Boolean(window.RQ),listening:Boolean(window.LE)},
+    };
+  });
+  assert.equal(authorityCleanup.active.words>0,true);
+  assert.deepEqual(authorityCleanup.active,{words:authorityCleanup.active.words,reading:true,listening:true});
+  assert.deepEqual(authorityCleanup.cleared,{words:0,reading:false,listening:false},'authority reset must clear every subject transient');
+  assert.deepEqual(browserErrors,[]);
+  await mobile.context.close();
+
+  const desktop=await createActiveSubscriptionPage(browser,{
+    baseUrl,username:'learner',jwtSecret,
+    contextOptions:{viewport:{width:1440,height:900},reducedMotion:'reduce',serviceWorkers:'block'},
+  });
+  await desktop.page.goto(baseUrl,{waitUntil:'networkidle'});
+  await desktop.page.locator('#scr1.on').waitFor({state:'visible',timeout:5_000});
+  await openPractice(desktop.page);
+  const desktopLayout=await desktop.page.evaluate(()=>{
+    const frame=document.getElementById('frame').getBoundingClientRect();
+    return{
+      viewport:innerWidth,
+      documentWidth:document.documentElement.scrollWidth,
+      frameWidth:frame.width,
+      controls:[...document.querySelectorAll('#practice-skills button')].map(button=>{
+        const rect=button.getBoundingClientRect();return{width:rect.width,height:rect.height};
+      }),
+    };
+  });
+  assert.ok(desktopLayout.documentWidth<=desktopLayout.viewport);
+  assert.ok(desktopLayout.frameWidth<=720);
+  assert.equal(desktopLayout.controls.every(control=>control.width>=44&&control.height>=44),true);
+  await desktop.context.close();
+
+  const offlineFirst=await createActiveSubscriptionPage(browser,{
+    baseUrl,username:'learner',jwtSecret,
+    contextOptions:{viewport:{width:375,height:667},reducedMotion:'reduce'},
+  });
+  await offlineFirst.page.goto(baseUrl,{waitUntil:'networkidle'});
+  await offlineFirst.page.locator('#scr1.on').waitFor({state:'visible',timeout:5_000});
+  await offlineFirst.page.evaluate(()=>navigator.serviceWorker.ready.then(()=>true));
+  await offlineFirst.page.waitForFunction(()=>Boolean(navigator.serviceWorker.controller),null,{timeout:10_000});
+  assert.equal(await offlineFirst.page.locator('#aisy-practice.on').count(),0,'offline contour must not warm Practice by opening it online');
+  await offlineFirst.context.setOffline(true);
+  await openPractice(offlineFirst.page);
+  assert.equal(await offlineFirst.page.locator('#practice-skills .practice-row').count(),6);
+  await offlineFirst.page.locator('#practice-network-state:not([hidden])').waitFor({state:'visible',timeout:5_000});
+  await offlineFirst.context.setOffline(false);
+  await offlineFirst.context.close();
+  console.log('Aisy Practice Chromium E2E passed.');
+}finally{
+  if(browser)await browser.close();
+  await stopProcess(child);
+  if(temporaryDirectory)await fs.rm(temporaryDirectory,{recursive:true,force:true});
+}

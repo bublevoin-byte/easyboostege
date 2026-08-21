@@ -1,5 +1,6 @@
 import {
   READING_CATALOG_ID,
+  READING_CATALOG_REVISION,
   READING_CONTRACT_VERSION,
   assertReadingCatalog,
   deepFreezeReadingCatalog,
@@ -18,7 +19,7 @@ function completeShard(shards, kind) {
 export function assembleReadingPilotCatalog(shards) {
   const catalog = {
     id: READING_CATALOG_ID,
-    revision: 1,
+    revision: READING_CATALOG_REVISION,
     validation: { contract: READING_CONTRACT_VERSION },
     sets: SHARD_KINDS.flatMap((kind) => completeShard(shards, kind)),
   };

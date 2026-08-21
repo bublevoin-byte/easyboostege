@@ -13,6 +13,7 @@ import {
 } from '../public/learning-activity-contract.js';
 import {
   READING_CATALOG_ID,
+  READING_FULL_ATTEMPT_VERSION,
   READING_KINDS,
   READING_KIND_RULES,
   adaptLegacyReadingFallback,
@@ -45,7 +46,7 @@ function createReadingModule() {
     assertReadingCatalog, loadReadingCatalog, parseReadingAdaptiveContentRef,
     readingLearningActivityContract, readingSourceContext, readingSourceContextFromSets,
     readingSetForLegacyScreen, readingSetForVoiceTutor,
-    READING_CATALOG_ID, READING_KINDS, READING_KIND_RULES, assertReadingSet, readingSetReference,
+    READING_CATALOG_ID, READING_FULL_ATTEMPT_VERSION, READING_KINDS, READING_KIND_RULES, assertReadingSet, readingSetReference,
     adaptLegacyReadingFallback, assembleReadingPilotCatalog, loadReadingPilotCatalog,
     loadReadingTask10Shard, loadReadingTask11Shard, loadReadingTask12Shard,
     Object, Number, Math, Array, Set, String,

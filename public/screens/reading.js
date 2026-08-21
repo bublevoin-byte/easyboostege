@@ -2,8 +2,8 @@
 import {registerRouteHook} from '../router.js';
 import {prepareVoiceTutorContextResult,registerVoiceTutorContextResult} from '../voice-tutor.js';
 import {
-  EGE_WORDS,S,apiGet,currentUser,lastWord,lastWordContext,readingModule,rEsc,rSync,rWordsHtml,
-  registerScreenGenerator,save,setTxt,srsRecordVocabularyOutcome,toast,verifyLearningAccessForLaunch,wBase,wSync,
+  EGE_WORDS,S,apiGet,currentOwnerBinding,lastWord,lastWordContext,readingModule,rEsc,rSync,rWordsHtml,
+  registerAuthorityReset,registerScreenGenerator,save,setTxt,srsRecordVocabularyOutcome,toast,verifyLearningAccessForLaunch,wBase,wSync,
 } from '../app.js';
 import {createLearningActivityEvidence,recordLearningActivityEvidence} from '../learning-activity-recorder.js';
 import {
@@ -38,10 +38,13 @@ let launchPending=false;
 let RE=null,RQ=null;
 
 function area(){return document.getElementById('r_area')}
-function ownerId(){
-  const session=window.__sub;
-  return currentUser&&session?.authenticated===true&&session?.active===true&&session.username===currentUser
-    ? currentUser:null;
+function sameOwner(left,right){return Boolean(left&&right&&left.username===right.username&&left.generation===right.generation)}
+function ownerBinding(){return currentOwnerBinding()}
+function ownerId(){return ownerBinding()?.username||null}
+function hasActiveReadingPractice(){
+  const owner=ownerBinding();
+  return Boolean(owner&&((training&&sameOwner(training.authority,owner)&&!training.result)
+    ||(full&&sameOwner(full.authority,owner)&&!full.result)));
 }
 function state(){
   const owner=ownerId();
@@ -254,7 +257,7 @@ async function startTraining(kind,{technical=false,preferredCefr=null,adaptiveCo
     if(!await verifyLearningAccessForLaunch({signal}))return false;
     if(!authorized())return false;
     if(!technical&&(!catalog||!KINDS.includes(kind)))return false;
-    const owner=ownerId(),current=state();if(!owner||!current){renderOwnerError();return false}
+    const authority=ownerBinding(),owner=authority?.username,current=state();if(!authority||!owner||!current){renderOwnerError();return false}
     const pool=technical?[]:(adaptiveContentRef?catalog.sets.filter((item)=>item.kind===kind&&item.cefr===preferredCefr):catalog.sets);
     const set=technical?TECHNICAL_SET:readingModule.selectNextSet(pool,owner,current.history,kind,{now:Date.now(),preferredCefr});
     if(!set)return false;
@@ -262,7 +265,7 @@ async function startTraining(kind,{technical=false,preferredCefr=null,adaptiveCo
     if(!authorized())return false;
     if(!technical){current.history=readingModule.rememberSelection(owner,current.history,kind,set,Date.now());save()}
     const startedAt=Date.now();
-    training={kind,set,answers:emptyAnswers(kind,set),startedAt,result:null,evidence:technical?null:trainingEvidence(set,startedAt)};
+    training={owner,authority,kind,set,answers:emptyAnswers(kind,set),startedAt,result:null,evidence:technical?null:trainingEvidence(set,startedAt)};
     RQ=kind==='task12_18'?training:null;
     if(!authorized()){training=null;RQ=null;return false}renderTraining();
     return true;
@@ -329,11 +332,11 @@ async function startFullAttempt(){
   if(launchPending)return false;launchPending=true;
   try{
     if(!await verifyLearningAccessForLaunch())return false;
-    const owner=ownerId(),current=state();if(!catalog||!owner||!current)return false;
+    const authority=ownerBinding(),owner=authority?.username,current=state();if(!catalog||!authority||!owner||!current)return false;
     const selected=readingModule.selectFullSection(catalog,owner,current.history,{now:Date.now()});current.history=selected.history;
     const now=Date.now();
     const attempt={id:'reading-full-'+(crypto.randomUUID?crypto.randomUUID():now),ownerId:owner,section:{catalogId:selected.catalogId,catalogRevision:selected.catalogRevision,sets:selected.sets},answers:Object.fromEntries(KINDS.map((kind)=>[kind,emptyAnswers(kind,selected.sets[kind])])),currentKind:'task10',currentPosition:0,startedAt:now,durationMs:0};
-    full={attempt,resumedAt:now,result:null};RE=full;persistFull();renderFullAttempt();return true;
+    full={authority,attempt,resumedAt:now,result:null};RE=full;persistFull();renderFullAttempt();return true;
   }finally{launchPending=false}
 }
 function focusPosition(kind,position){
@@ -397,14 +400,19 @@ function renderFullResult(){
 }
 function restoreDraft(){
   if(!S.readingPilotDraft)return false;
-  const restored=readingModule.restoreFullAttempt(S.readingPilotDraft,catalog,ownerId());
+  const authority=ownerBinding();
+  const restored=readingModule.restoreFullAttempt(S.readingPilotDraft,catalog,authority?.username);
   if(!restored.ok){delete S.readingPilotDraft;save();notice='Сохранённая попытка устарела или принадлежит другому аккаунту. Она удалена; начните новый раздел.';return false}
-  full={attempt:restored.attempt,resumedAt:Date.now(),result:null};RE=full;renderFullAttempt(true);return true;
+  full={authority,attempt:restored.attempt,resumedAt:Date.now(),result:null};RE=full;renderFullAttempt(true);return true;
 }
 async function initReading(force=false){
   document.getElementById('frame')?.classList.add('reading-expanded');
-  if(!ownerId()){renderOwnerError();return}
-  if(full&&!full.result){full.resumedAt=Date.now();renderFullAttempt();return}
+  const authority=ownerBinding(),owner=authority?.username;
+  if(!owner){renderOwnerError();return}
+  if(training&&sameOwner(training.authority,authority)&&!training.result){renderTraining();return}
+  if(training&&!sameOwner(training.authority,authority)){training=null;RQ=null}
+  if(full&&sameOwner(full.authority,authority)&&!full.result){full.resumedAt=Date.now();renderFullAttempt();return}
+  if(full&&!sameOwner(full.authority,authority)){stopFullTimer();full=null;RE=null}
   if(catalog&&!force){renderHub();return}
   renderLoading();
   if(force)catalog=null;
@@ -462,5 +470,10 @@ registerRouteHook((id)=>{
   if(id==='scr7')initReading();else{frame?.classList.remove('reading-expanded');pauseFull()}
 });
 registerScreenGenerator('scr7',()=>initReading(true));
+registerAuthorityReset((authority)=>{
+  const active=training?.authority||full?.authority;
+  if(!active||authority?.owner!==active.username||authority?.ownerGeneration!==active.generation)return;
+  stopFullTimer();training=null;full=null;RE=null;RQ=null;launchPending=false;
+});
 
-export {RE,RQ,initReading,launchReadingPractice,rExam,rExamStart,rGp,rHl,rHub,rQs,r_add};
+export {RE,RQ,hasActiveReadingPractice,initReading,launchReadingPractice,rExam,rExamStart,rGp,rHl,rHub,rQs,r_add};

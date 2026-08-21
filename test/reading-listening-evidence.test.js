@@ -19,6 +19,8 @@ import {
 } from '../public/listening-catalog-contract.js';
 import {
   READING_CATALOG_ID,
+  READING_CATALOG_REVISION,
+  READING_FULL_ATTEMPT_VERSION,
   READING_KINDS,
   READING_KIND_RULES,
   adaptLegacyReadingFallback,
@@ -181,6 +183,8 @@ function createSubjectHarness(subject, { offline = false, slow = false, listenin
     readingSetForLegacyScreen,
     readingSetForVoiceTutor,
     READING_CATALOG_ID,
+    READING_CATALOG_REVISION,
+    READING_FULL_ATTEMPT_VERSION,
     READING_KINDS,
     READING_KIND_RULES,
     assertReadingSet,
@@ -234,7 +238,9 @@ function createSubjectHarness(subject, { offline = false, slow = false, listenin
     clearInterval() {},
     setTimeout: (callback) => { callback(); return 1; },
     registerRouteHook() {},
+    registerAuthorityReset() {},
     registerScreenGenerator() {},
+    currentOwnerBinding: () => ({ username: 'learner-a', generation: 0 }),
     verifyLearningAccessForLaunch: async () => true,
     prepareVoiceTutorContextResult: ({ module, set, selections }) => ({
       module,

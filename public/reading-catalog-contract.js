@@ -1,4 +1,6 @@
 export const READING_CATALOG_ID = 'reading-pilot-v1';
+export const READING_CATALOG_REVISION = 1;
+export const READING_FULL_ATTEMPT_VERSION = 1;
 export const READING_CONTRACT_VERSION = 'reading-catalog-v1';
 export const READING_KIND_RULES = Object.freeze({
   task10: Object.freeze({ rawMaxScore: 7, officialMaxScore: 3, answerUpperBound: 7 }),

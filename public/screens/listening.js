@@ -8,8 +8,8 @@ import {registerRouteHook} from '../router.js';
 import {lPlayListeningSet,lStop} from '../tts.js';
 import {prepareVoiceTutorContextResult,registerVoiceTutorContextResult} from '../voice-tutor.js';
 import {
-  LSLOW,L_PLAYSVG,S,SRV,TOKEN,WBTN,examModule,gExamFmt,generateAiContent,lSetSlow,lSt,
-  lSync,listeningModule,registerScreenGenerator,rWordsHtml,save,setTxt,toast,ui,wDeco,
+  LSLOW,L_PLAYSVG,S,SRV,TOKEN,WBTN,currentOwnerBinding,examModule,gExamFmt,generateAiContent,lSetSlow,lSt,
+  lSync,listeningModule,registerAuthorityReset,registerScreenGenerator,rWordsHtml,save,setTxt,toast,ui,wDeco,
 } from '../app.js';
 import {createLearningActivityEvidence,recordLearningActivityEvidence} from '../learning-activity-recorder.js';
 import {
@@ -26,7 +26,11 @@ async function genListening(){
   LIS={title:d.title||'Новый диалог',dialog:d.dialog,q1:{q:d.q1.q||'1.',o:d.q1.o,a:d.q1.a||0},q2:{q:d.q2.q||'2.',o:d.q2.o,a:d.q2.a||0}};
   initListening()}
 /* Состояние трёх заданий и счётчик прослушиваний живут вместе с экраном. */
-let LM=null,LT=null,LI=null,LPLAYS=0;
+let LM=null,LT=null,LI=null,LPLAYS=0,L_OWNER=null;
+function lSameOwner(left,right){return Boolean(left&&right&&left.username===right.username&&left.generation===right.generation)}
+function lCaptureOwner(){L_OWNER=currentOwnerBinding();return L_OWNER}
+function hasActiveListeningPractice(){return Boolean(lSameOwner(L_OWNER,currentOwnerBinding())
+  &&((LM&&!LM.done)||(LT&&!LT.done)||(LI&&!LI.done)||LE))}
 /* ===== LISTENING v2: задания 1, 2, 3-9 + озвучка по ролям ===== */
 const L_M=[
 {st:['Music helps this speaker to relax.','This speaker prefers active holidays.','This speaker enjoys cooking for the family.','This speaker spends a lot of time reading.','This speaker dreams of travelling abroad.'],
@@ -180,8 +184,8 @@ function lSetInterviewCatalog(sets){
   return L_INTERVIEW_CATALOG}
 function initListening(){if(!S)return;lSync();Promise.all([
   lLoadMatchingCatalog(),lLoadTrueFalseCatalog(),lLoadInterviewCatalog(),
-]).then(function(){if(!LM&&!LT&&!LI&&!LE)lHub()})}
-function lHub(){var area=document.getElementById('l_area');if(!area)return;LM=null;LT=null;LI=null;lStop();
+]).then(function(){if(LE&&lExamResume())return;if(!LM&&!LT&&!LI&&!LE)lHub()})}
+function lHub(){var area=document.getElementById('l_area');if(!area)return;LM=null;LT=null;LI=null;L_OWNER=null;lStop();
   var r=lSt();var GA=0;function ga(){return 'animation:win .34s '+((GA++)*0.06)+'s cubic-bezier(.25,.75,.35,1) both;'}
   var examMax=lExamMaxScore();
   function acc(x){return x.tot?Math.round(x.ok/x.tot*100)+'%':'—'}
@@ -234,6 +238,7 @@ function lExamMaxScore(){
 /* ---- задание 1: соответствия ---- */
 function lMt(){if(!L_MATCHING_CATALOG_READY){lLoadMatchingCatalog().then(function(){lMt()});return}
   var set=lShufM(lSelectCatalogSet(lMatchingPool(),'matching'));
+  lCaptureOwner();
   LM={set:set,sel:set.sp.map(function(){return null}),done:false,help:lHelp(),evidence:lAttemptEvidence('matching',set)};LPLAYS=0;lMtRender()}
 function lMtLines(){return LM.set.sp.map(function(sp,i){return {s:i%2,t:'Speaker '+lSpeakerLabel(i)+'. '+sp.t}})}
 function lMtRender(){var area=document.getElementById('l_area');var set=LM.set;
@@ -282,6 +287,7 @@ function lMtCheck(){if(LM.done)return;LM.done=true;lStop();var set=LM.set,r=lSt(
 /* ---- задание 2: True/False/Not stated ---- */
 function lTf(){if(!L_TRUE_FALSE_CATALOG_READY){lLoadTrueFalseCatalog().then(function(){lTf()});return}
   var set=lSelectCatalogSet(lTrueFalsePool(),'true_false');
+  lCaptureOwner();
   LT={set:set,sel:set.st.map(function(){return null}),done:false,help:lHelp(),evidence:lAttemptEvidence('true_false',set)};LPLAYS=0;lTfRender()}
 function lTfRender(){var area=document.getElementById('l_area');var set=LT.set;
   var LBL=['Верно','Неверно','Не сказано'];
@@ -323,6 +329,7 @@ function lTfCheck(){if(LT.done)return;LT.done=true;lStop();var set=LT.set,r=lSt(
 /* ---- задания 3-9: интервью ---- */
 function lIq(){if(!L_INTERVIEW_CATALOG_READY){lLoadInterviewCatalog().then(function(){lIq()});return}
   var set=lSelectCatalogSet(lInterviewPool(),'interview');
+  lCaptureOwner();
   LI={set:set,sel:set.qs.map(function(){return null}),done:false,help:lHelp(),evidence:lAttemptEvidence('interview',set)};LPLAYS=0;lIqRender()}
 function lIqRender(){var area=document.getElementById('l_area');var set=LI.set;
   var h='<div id="l_card" class="clayCard" style="position:relative;overflow:hidden;padding:16px 18px;margin-bottom:12px;">'+wDeco()
@@ -380,6 +387,7 @@ function lExamStart(){
   var pm=lMatchingPool(),pt=lTrueFalsePool(),pi=lInterviewPool();
   var startedAt=Date.now(),m=lShufM(lSelectCatalogSet(pm,'matching')),
       tf=lSelectCatalogSet(pt,'true_false'),iq=lSelectCatalogSet(pi,'interview');
+  lCaptureOwner();
   LE={m:m,tf:tf,iq:iq,stage:0,selM:m.a.map(function(){return null}),plays:[0,0,0],t0:startedAt,
       help:{matching:lHelp(),true_false:lHelp(),interview:lHelp()},
       evidence:{gist:lAttemptEvidence('matching',m,startedAt),
@@ -393,6 +401,12 @@ function lExamStart(){
   lSetSlow(false);
   LE.iv=setInterval(function(){if(LE)setTxt('l_today',gExamFmt(Math.floor((Date.now()-LE.t0)/1000)))},1000);
   lExamRender()}
+function lExamPause(){if(!LE)return false;if(LE.iv)clearInterval(LE.iv);LE.iv=null;
+  if(!Number.isFinite(LE.pausedAt))LE.pausedAt=Date.now();lStop();return true}
+function lExamResume(){if(!LE)return false;if(!lSameOwner(L_OWNER,currentOwnerBinding())){LE=null;L_OWNER=null;return false}
+  var now=Date.now();if(Number.isFinite(LE.pausedAt)){LE.t0+=Math.max(0,now-LE.pausedAt);LE.pausedAt=null}
+  if(!LE.iv)LE.iv=setInterval(function(){if(LE)setTxt('l_today',gExamFmt(Math.floor((Date.now()-LE.t0)/1000)))},1000);
+  lExamRender();return true}
 function lExamPlay(){if(!LE)return;
   if(!listeningModule.registerPlay(LE.plays,LE.stage,2)){try{toast('На ЕГЭ запись звучит только дважды')}catch(e){}return}
   var evidence=LE.stage===0?LE.evidence.gist:LE.evidence.detail;
@@ -424,7 +438,7 @@ function lExamRender(){var area=document.getElementById('l_area');if(!area||!LE)
         +'<span style="flex:none;font-weight:800;font-size:12px;color:#C2421B;width:82px;">Говорящий '+L+'</span>'
         +'<div style="flex:1;display:flex;gap:7px;">'
         +set.st.map(function(_,ti){var on=LE.selM[si]===ti;
-          return '<button onclick="LE.selM['+si+']='+ti+';lExamDedup(\'selM\','+si+','+ti+');lExamRender()" style="flex:1;height:36px;border-radius:11px;border:1.5px solid '+(on?'#F2683F':'#F0EAE2')+';background:'+(on?'#FFEDE4':'#fff')+';font-family:Manrope,sans-serif;font-weight:800;font-size:13px;color:'+(on?'#E44E20':'#8A8F98')+';cursor:pointer;">'+(ti+1)+'</button>'}).join('')+'</div></div>'});
+          return '<button aria-label="Говорящий '+L+', утверждение '+(ti+1)+'" onclick="LE.selM['+si+']='+ti+';lExamDedup(\'selM\','+si+','+ti+');lExamRender()" style="flex:1;height:36px;border-radius:11px;border:1.5px solid '+(on?'#F2683F':'#F0EAE2')+';background:'+(on?'#FFEDE4':'#fff')+';font-family:Manrope,sans-serif;font-weight:800;font-size:13px;color:'+(on?'#E44E20':'#8A8F98')+';cursor:pointer;">'+(ti+1)+'</button>'}).join('')+'</div></div>'});
     h+=lExamNextBtn(LE.selM.every(function(x){return x!==null}),'Дальше → верно/неверно','lStop();LE.stage=1;lExamRender()');
     area.innerHTML=h;return}
   if(LE.stage===1){var set=LE.tf,LBL=['Верно','Неверно','Не сказано'];
@@ -538,12 +552,17 @@ async function lGen(){
     if(need)setTimeout(lGen,4000)}catch(e){}}
 registerRouteHook(function(id){if(id==='scr4')initListening()});
 /* Экзамен по аудированию не должен тикать в фоне после ухода с экрана. */
-registerRouteHook(function(id){if(LE&&LE.iv){clearInterval(LE.iv);LE=null}});
+registerRouteHook(function(id){if(id!=='scr4')lExamPause()});
 registerScreenGenerator('scr4',genListening);
+registerAuthorityReset(function(authority){
+  if(!L_OWNER||authority?.owner!==L_OWNER.username||authority?.ownerGeneration!==L_OWNER.generation)return;
+  if(LE?.iv)clearInterval(LE.iv);lStop();LM=null;LT=null;LI=null;LE=null;L_OWNER=null;LPLAYS=0;
+});
 
 /* Имена для обработчиков этого экрана: загрузчик кладёт их на window вместе с чанком. */
 export {
   LE,LI,LT,
+  hasActiveListeningPractice,
   lExam,lExamDedup,lExamFinish,lExamPlay,lExamRender,lExamStart,lHub,lIq,lIqCheck,lIqPick,
   lMt,lMtCheck,lMtLines,lMtPick,lPlay,lTf,lTfCheck,lTfPick,
 };
