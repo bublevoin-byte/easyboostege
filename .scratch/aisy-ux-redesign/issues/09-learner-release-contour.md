@@ -1,6 +1,6 @@
 # 09 — Сквозной выпуск learner UX
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01, 02, 03, 04, 05, 06, 07, 08
 Spec: `.scratch/aisy-ux-redesign/spec.md#11-acceptance-criteria`
 
@@ -23,9 +23,9 @@ Spec: `.scratch/aisy-ux-redesign/spec.md#11-acceptance-criteria`
 
 ## Definition of Done
 
-- [ ] Real learner contour covers all five hubs, reload/offline/cross-tab and 320/1440 a11y.
-- [ ] Full `npm test`, lint/check/build, full/adaptive/EGE/release Chromium, performance, security and diff-check pass.
-- [ ] Fresh PostgreSQL runs only if server/storage changed, after explicit owner approval.
-- [ ] Fresh independent Standards and Spec reviews return `ZERO_FINDINGS` on one frozen identity.
-- [ ] Ticket 99 is preserved; no push/deploy/provider/install.
-- [ ] Один коммит: `test(aisy): add learner ux release contour`.
+- [x] Real learner contour covers all five hubs, reload/offline/cross-tab and 320/1440 a11y.
+- [x] Full `npm test`, lint/check/build, full/adaptive/EGE/release Chromium, performance, security and diff-check pass.
+- [x] Fresh PostgreSQL runs only if server/storage changed, after explicit owner approval.
+- [x] Fresh independent Standards and Spec reviews return `ZERO_FINDINGS` on one frozen identity.
+- [x] Ticket 99 is preserved; no push/deploy/provider/install.
+- [x] Один коммит: `test(aisy): add learner ux release contour`.

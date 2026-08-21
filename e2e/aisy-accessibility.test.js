@@ -12,6 +12,9 @@ import {
   stopProcess,
   waitForReady,
 } from './browser-server-harness.js';
+import {
+  createReleaseServerEnvironment, prepareReleaseBrowserBoundary,
+} from './aisy-learner-release-safety.js';
 
 const projectDirectory=fileURLToPath(new URL('..',import.meta.url));
 const serverPath=fileURLToPath(new URL('../server.js',import.meta.url));
@@ -49,12 +52,11 @@ try{
   const output=[];
   child=spawn(process.execPath,[serverPath],{
     cwd:projectDirectory,
-    env:{
-      ...process.env,NODE_ENV:'test',PORT:String(port),APP_URL:baseUrl,
+    env:createReleaseServerEnvironment({
+      NODE_ENV:'test',PORT:String(port),APP_URL:baseUrl,
       DATABASE_PROVIDER:'file',DATA_FILE:dataFile,JWT_SECRET:jwtSecret,
-      TELEGRAM_BOT_TOKEN:'',ADMIN_TELEGRAM_ID:'',XAI_ENABLED:'false',
-      VOICE_TUTOR_ENABLED:'false',ADAPTIVE_LEARNING_ENABLED:'false',
-    },
+      ADAPTIVE_LEARNING_ENABLED:'false',
+    }),
     stdio:['ignore','pipe','pipe'],
   });
   child.stdout.on('data',chunk=>output.push(chunk.toString()));
@@ -66,18 +68,14 @@ try{
     contextOptions:{viewport:{width:375,height:667},reducedMotion:'reduce'},
   });
   const {context,page}=harness;
-  const browserFailures=[];
-  const externalFontRequest=url=>/^https:\/\/fonts\.(?:googleapis|gstatic)\.com\//u.test(url);
-  page.on('pageerror',error=>browserFailures.push(`pageerror: ${error.stack||error.message}`));
-  page.on('console',message=>{
-    if(message.type()==='error'&&!message.text().startsWith('Failed to load resource:'))browserFailures.push(`console: ${message.text()}`)
-  });
-  page.on('requestfailed',request=>{
-    if(!externalFontRequest(request.url()))browserFailures.push(`request: ${request.url()} ${request.failure()?.errorText||''}`)
-  });
-  page.on('response',response=>{
-    const url=new URL(response.url());
-    if(response.status()>=400&&url.origin===baseUrl&&!url.pathname.startsWith('/api/'))browserFailures.push(`response: ${response.status()} ${url.pathname}`)
+  const {
+    browserFailures,networkGuard,paidBoundaryCalls,
+  }=await prepareReleaseBrowserBoundary(context,{
+    applicationOrigin:baseUrl,
+    allowedHttpResponses:[
+      {method:'GET',path:'/api/v1/adaptive-learning/sessions/current',status:404},
+      {method:'GET',path:'/api/v1/adaptive-learning/goal',status:404},
+    ],
   });
   await page.goto(baseUrl,{waitUntil:'networkidle'});
   await page.locator('#scr1.on').waitFor({state:'visible',timeout:10_000});
@@ -192,10 +190,13 @@ try{
   assert.equal(persistedConsentBody.voice_processing,true,'saving an unchanged dialog must preserve voice consent');
 
   assert.deepEqual(browserFailures,[],'online accessibility matrix must not hide browser failures');
+  assert.deepEqual(networkGuard.failures,[],'online accessibility matrix must not hide network failures');
+  assert.deepEqual(paidBoundaryCalls,[],'accessibility gate must not cross a paid-provider boundary');
   browserFailures.length=0;
 
   try{await page.waitForFunction(async()=>{await navigator.serviceWorker.ready;return Boolean(navigator.serviceWorker.controller)},null,{timeout:15_000})}
   catch(error){throw new Error(`Service worker did not control the page:\n${browserFailures.join('\n')}`,{cause:error})}
+  networkGuard.setOffline(true);
   await context.setOffline(true);
   assert.equal(await page.evaluate(()=>navigator.onLine),false);
   await page.getByRole('navigation',{name:'Основные разделы'}).getByRole('button',{name:'Практика',exact:true}).click();
@@ -208,6 +209,9 @@ try{
   await page.locator('#access_gate[data-state="network-unknown"]').waitFor({state:'visible',timeout:10_000});
   assert.equal(await page.locator('#scr1.on').count(),0,'offline reload must not claim unverified learning access');
   assert.match(await page.locator('#access_gate_copy').textContent(),/нет связи с сервером|Проверьте сеть/u);
+  assert.deepEqual(browserFailures,[],'offline accessibility checks must not hide page failures');
+  assert.deepEqual(networkGuard.failures,[],'offline accessibility checks must not hide app errors');
+  assert.deepEqual(paidBoundaryCalls,[],'offline accessibility checks must not cross provider boundaries');
 
   await context.close();
   console.log('Aisy accessibility, responsive themes and offline truth Chromium E2E passed.');

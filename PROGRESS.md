@@ -3,7 +3,7 @@
 Спека: [.scratch/aisy-ux-redesign/spec.md](.scratch/aisy-ux-redesign/spec.md)
 Тикеты: [.scratch/aisy-ux-redesign/issues/](.scratch/aisy-ux-redesign/issues/)
 
-Overall status: `in-progress` — learner-first UX; parent/teacher roles remain separate future releases.
+Overall status: `done` — learner-first UX complete; parent/teacher roles remain separate future releases.
 
 | № | Что даёт | Статус |
 |---|---|---|
@@ -15,7 +15,7 @@ Overall status: `in-progress` — learner-first UX; parent/teacher roles remain 
 | 06 | Честные Progress/Profile и только Free/Premium в public copy | done |
 | 07 | Контекстная Ася и честные microphone/wake states | done |
 | 08 | Accessibility/offline/themes и initial JS <=150 KB gzip | done |
-| 09 | Сквозной learner release contour и ZERO×2 review | blocked by 01–08 |
+| 09 | Сквозной learner release contour и ZERO×2 review | done |
 
 Принятые продуктовые решения: платформа `Aisy.space` («Эйси»), продукт `Aisy ЕГЭ — Английский`,
 ассистент `Ася`; ученик 10–11 класса занимается преимущественно с телефона 20–40 минут. Архитектура
