@@ -1,6 +1,6 @@
 # 06 — Прогресс, профиль и два публичных тарифа
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01, 02, 03, 04, 05
 Spec: `.scratch/aisy-ux-redesign/spec.md#55-progress`
 
@@ -25,9 +25,9 @@ Spec: `.scratch/aisy-ux-redesign/spec.md#55-progress`
 
 ## Definition of Done
 
-- [ ] Progress начинается с next action, а не несопоставимых процентов.
-- [ ] Profile имеет понятные study/Asya/privacy/subscription/data группы.
-- [ ] UI содержит только Free/Premium; capability locks remain honest.
-- [ ] No IELTS/official-score drift and no raw private evidence leak.
-- [ ] Full adaptive/profile tests, `npm test`, lint/check/build pass.
-- [ ] Один коммит: `feat(aisy): clarify progress and profile`.
+- [x] Progress начинается с next action, а не несопоставимых процентов.
+- [x] Profile имеет понятные study/Asya/privacy/subscription/data группы.
+- [x] UI содержит только Free/Premium; capability locks remain honest.
+- [x] No IELTS/official-score drift and no raw private evidence leak.
+- [x] Full adaptive/profile tests, `npm test`, lint/check/build pass.
+- [x] Один коммит: `feat(aisy): clarify progress and profile`.

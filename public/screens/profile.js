@@ -5,6 +5,7 @@
  */
 import {nav,registerRouteHook} from '../router.js';
 import {SRV,S,TOKEN,apiGet,apiIsAuthorityFailure,apiResponseOwner,currentUser,invalidateLearningAuthority,profileModule,registerAuthorityReset,runProfileHooks,save,setTxt} from '../app.js';
+import {presentProfilePlan} from '../commercial-copy.js';
 
 let profileGoal=null;
 let profileGoalAvailable=true;
@@ -39,6 +40,10 @@ function bindStudySettings(){
   })}
 }
 
+function drawProfilePlan(session){
+  const plan=presentProfilePlan(session);setTxt('pf_plan_name',plan.label);setTxt('pf_plan_summary',plan.summary);
+}
+
 async function loadAdaptiveGoal(authority){
   const owner=authority&&authority.owner,generation=authority&&authority.ownerGeneration;if(!owner||!Number.isSafeInteger(generation))return;
   try{
@@ -51,6 +56,7 @@ async function loadAdaptiveGoal(authority){
 
 function renderProfile(){
   const u=profileModule.displayName(currentUser);setTxt('pf_ava',profileModule.initial(u));setTxt('pf_name',u);setTxt('pf_ai','через сервер ✓');
+  drawProfilePlan(window.__sub);
   const authority=currentProfileAuthority();if(!sameProfileAuthority(profileGoalAuthority,authority)){profileGoalAuthority=authority;profileGoal=null;profileGoalAvailable=true}
   bindStudySettings();drawStudySettings();if(SRV&&TOKEN&&authority)loadAdaptiveGoal(authority);runProfileHooks();
 }
@@ -58,4 +64,4 @@ function renderProfile(){
 registerAuthorityReset(function(authority){resetProfileAuthority(authority)});
 registerRouteHook(function(id){if(id==='scr11')renderProfile()});
 
-export {drawStudySettings,renderProfile};
+export {drawProfilePlan,drawStudySettings,renderProfile};

@@ -104,13 +104,13 @@
       const requestCode = paymentRequest?.id ? String(paymentRequest.id).slice(0, 8) : '';
       return {
         state: pending ? 'pending' : 'paywall',
-        title: 'Voice Tutor · Premium',
+        title: 'Голосовой разбор Аси',
         text: pending
           ? `Заявка #${requestCode} · статус: ожидает подтверждения`
           : rejected
             ? `Заявка #${requestCode} · статус: отклонена`
-            : 'Голосовой разбор ошибок доступен в Premium',
-        actionLabel: pending ? '' : (rejected ? 'Отправить заявку снова' : 'Запросить Premium'),
+            : 'Не входит в текущий доступ',
+        actionLabel: pending ? '' : (rejected ? 'Отправить заявку снова' : 'Запросить доступ'),
         color: '#8A4B00',
         background: '#FFF4DE',
       };
@@ -120,7 +120,7 @@
     const monthlyMinutes = Math.ceil(Math.max(0, Number(voice.monthly_remaining_seconds) || 0) / 60);
     return {
       state: 'premium',
-      title: 'Voice Tutor · Premium',
+      title: 'Голосовой разбор Аси',
       text: 'Осталось ' + dailyMinutes + ' мин сегодня · ' + monthlyMinutes + ' мин в этом месяце',
       actionLabel: '',
       color: '#1D7F4A',

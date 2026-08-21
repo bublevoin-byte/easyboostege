@@ -238,6 +238,7 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
 <link rel="stylesheet" href="/today.css">
 <link rel="stylesheet" href="/practice.css">
 <link rel="stylesheet" href="/ege-hub.css">
+<link rel="stylesheet" href="/progress-profile.css">
 </head><body>
 <button id="navfab" onclick="document.getElementById('navmenu').classList.toggle('open')">Экраны ▾</button>
 <div id="navmenu"></div>
@@ -959,7 +960,29 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
       </div>
     </div>
     <div style="position:absolute;top:52px;left:0;right:0;bottom:86px;padding:8px 20px 14px;z-index:5;overflow-y:auto;overflow-x:hidden;">
-      <div style="font-weight:800;font-size:22px;color:#2B2B2B;letter-spacing:-.3px;">Мой прогресс</div>
+      <h1 id="progress_page_title" class="aisy-route-title">Прогресс</h1>
+      <section id="progress_guidance" class="progress-guidance" aria-labelledby="progress_next_heading" aria-live="polite" aria-busy="true">
+        <article class="progress-guidance__next aisy-surface">
+          <p class="progress-guidance__eyebrow">Следующий шаг</p>
+          <h2 id="progress_next_heading"><span id="progress_next_title">Подбираем действие…</span></h2>
+          <p id="progress_next_copy">Сверяем последние подтверждённые результаты.</p>
+          <button id="progress_next_action" class="aisy-button" type="button" disabled>Подождите…</button>
+        </article>
+        <div class="progress-guidance__signals">
+          <article class="aisy-surface">
+            <h2>Что улучшилось</h2>
+            <p id="progress_improved_copy">Для честного сравнения нужны результаты занятий.</p>
+          </article>
+          <article class="aisy-surface">
+            <h2>Что требует внимания</h2>
+            <p id="progress_needs_work_copy">Собираем данные по учебным разделам.</p>
+          </article>
+        </div>
+        <section class="progress-evidence aisy-surface" aria-labelledby="progress_evidence_title">
+          <h2 id="progress_evidence_title">Как читать результаты</h2>
+          <ul id="progress_evidence_legend" role="list" aria-label="Качество учебных результатов"></ul>
+        </section>
+      </section>
       <div style="margin-top:16px;display:flex;gap:12px;">
         <div style="flex:1;background:#fff;border-radius:16px;padding:12px 14px;box-shadow:0 8px 20px rgba(20,20,30,.05);"><div id="p_streak" style="font-weight:800;font-size:22px;color:#2B2B2B;">—</div><div style="font-weight:600;font-size:11px;color:#6A6E75;margin-top:1px;">дней серия</div></div>
         <div style="flex:1;background:#fff;border-radius:16px;padding:12px 14px;box-shadow:0 8px 20px rgba(20,20,30,.05);"><div id="p_words" style="font-weight:800;font-size:22px;color:#2B2B2B;">—</div><div style="font-weight:600;font-size:11px;color:#6A6E75;margin-top:1px;">слов выучено</div></div>
@@ -995,7 +1018,7 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
             <label for="adaptive_weekly_minutes" style="display:block;font-weight:700;font-size:10.5px;color:#52565E;">Минут в неделю</label>
             <input id="adaptive_weekly_minutes" name="weeklyMinutes" type="number" min="30" max="2520" step="5" value="300" inputmode="numeric" required aria-label="Доступные минуты в неделю" style="width:100%;margin-top:4px;border:1px solid #DDD8CF;border-radius:11px;padding:8px 9px;font:650 12px Manrope;background:#fff;">
           </div>
-          <button type="submit" class="adaptive-action adaptive-action--primary adaptive-field--wide">Сохранить цель</button>
+          <button type="submit" class="adaptive-action adaptive-action--secondary adaptive-field--wide">Сохранить цель</button>
         </form>
         <div id="adaptive_goal_errors" class="adaptive-error" role="alert" aria-live="assertive"></div>
         <div id="adaptive_goal_notice" role="status" style="min-height:16px;margin-top:7px;font-weight:600;font-size:10.5px;color:#6A6E75;"></div>
@@ -1026,8 +1049,8 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
           <button id="adaptive_session_preview" class="adaptive-action adaptive-action--secondary" type="button" style="width:100%;margin-top:9px;">Показать план занятия</button>
           <div id="adaptive_session_notice" role="status" aria-live="polite" style="min-height:16px;margin-top:7px;font-weight:600;font-size:10.5px;line-height:1.4;color:#6A6E75;"></div>
           <ol id="adaptive_session_blocks" aria-live="polite" aria-label="План занятия по шагам" style="display:grid;gap:7px;margin:7px 0 0;padding:0;list-style:none;"></ol>
-          <button id="adaptive_session_create" class="adaptive-action adaptive-action--primary" type="button" hidden style="width:100%;margin-top:9px;">Создать занятие</button>
-          <button id="adaptive_session_start" class="adaptive-action adaptive-action--primary" type="button" hidden style="width:100%;margin-top:9px;background:#1F7A48;">Начать первое задание</button>
+          <button id="adaptive_session_create" class="adaptive-action adaptive-action--secondary" type="button" hidden style="width:100%;margin-top:9px;">Создать занятие</button>
+          <button id="adaptive_session_start" class="adaptive-action adaptive-action--secondary" type="button" hidden style="width:100%;margin-top:9px;">Начать первое задание</button>
         </section>
         <div style="margin-top:8px;font-weight:650;font-size:10.5px;line-height:1.4;color:#6A6E75;">Короткая диагностика подстроится под ответы. Точное время и предел заданий появятся после старта.</div>
         <div class="adaptive-actions">
@@ -1052,7 +1075,7 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
         </section>
         <section id="adaptive_commercial" class="adaptive-card" aria-labelledby="adaptive_commercial_title">
           <h3 id="adaptive_commercial_title">Подробный разбор прогресса</h3>
-          <p style="margin:5px 0 0;font:600 10.5px/1.45 Manrope;color:#6A6E75;">Premium показывает динамику по модулям и примерный языковой ориентир. Это не официальный результат IELTS.</p>
+          <p style="margin:5px 0 0;font:600 10.5px/1.45 Manrope;color:#6A6E75;">Premium показывает динамику по модулям и примерный языковой ориентир. Это не сертификат и не официальный результат экзамена.</p>
           <button id="adaptive_detailed_report" class="adaptive-action adaptive-action--quiet" type="button" style="width:100%;margin-top:9px;">Открыть подробный отчёт</button>
           <div id="adaptive_report_notice" class="adaptive-live" role="status" aria-live="polite"></div>
           <div id="adaptive_report" class="adaptive-report" hidden>
@@ -1060,7 +1083,7 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
             <div class="adaptive-report__scroll">
               <table id="adaptive_report_table">
                 <caption style="text-align:left;padding:9px 0 5px;font-weight:800;">Работа по разделам</caption>
-                <thead><tr><th scope="col">Раздел</th><th scope="col">Блоки</th><th scope="col">Минуты</th><th scope="col">Самостоятельно</th></tr></thead>
+                <thead><tr><th scope="col">Раздел</th><th scope="col">Блоки</th><th scope="col">Минуты</th><th scope="col">Самостоятельно</th><th scope="col">С помощью</th><th scope="col">Ориентировочно</th></tr></thead>
                 <tbody id="adaptive_report_rows"></tbody>
               </table>
             </div>
@@ -1069,8 +1092,8 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
         </section>
         <aside id="adaptive_paywall" class="adaptive-paywall" hidden aria-labelledby="adaptive_paywall_title">
           <h3 id="adaptive_paywall_title">Продолжить персональный план</h3>
-          <div id="adaptive_paywall_copy" class="adaptive-access__copy">Base открывает постоянный план и занятия любой доступной длительности. Premium добавляет глубокую диагностику и подробные отчёты.</div>
-          <button id="adaptive_upgrade" class="adaptive-action adaptive-action--primary" type="button" onclick="tab('scr11')">Посмотреть подписку</button>
+          <div id="adaptive_paywall_copy" class="adaptive-access__copy">Premium открывает постоянный план и занятия любой доступной длительности. Доступность глубокой диагностики и подробных отчётов показана отдельно.</div>
+          <button id="adaptive_upgrade" class="adaptive-action adaptive-action--secondary" type="button" onclick="tab('scr11')">Посмотреть подписку</button>
         </aside>
       </section>
       <section id="voice_recovery_map" aria-label="Карта освоенных ошибок" aria-live="polite" style="margin-top:14px;background:#fff;border-radius:20px;padding:16px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
@@ -1099,7 +1122,7 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
         <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3" stroke="#fff" opacity=".5"/><rect x="2.4" y="2.4" width="15" height="7.2" rx="1.6" fill="#fff"/><rect x="23" y="4" width="2" height="4" rx="1" fill="#fff"/></svg>
       </div>
     </div>
-    <div style="position:absolute;top:64px;left:0;right:0;text-align:center;z-index:6;font-weight:800;font-size:18px;color:#fff;">Профиль</div>
+    <h1 id="profile_page_title" style="position:absolute;top:64px;left:0;right:0;margin:0;text-align:center;z-index:6;font-weight:800;font-size:18px;color:#fff;">Профиль</h1>
     <!-- avatar card -->
     <div style="position:absolute;top:112px;left:20px;right:20px;background:#fff;border-radius:22px;padding:18px;display:flex;align-items:center;gap:14px;box-shadow:0 14px 30px rgba(20,20,30,.10);z-index:5;">
       <div style="width:58px;height:58px;border-radius:18px;background:linear-gradient(135deg,#FFC861,#F2683F);display:grid;place-items:center;font-weight:800;font-size:24px;color:#fff;" id="pf_ava">А</div>
@@ -1111,8 +1134,9 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
     </div>
     <!-- settings list -->
     <div style="position:absolute;top:206px;left:0;right:0;bottom:86px;padding:14px 20px;z-index:5;overflow-y:auto;overflow-x:hidden;">
-      <div style="font-weight:700;font-size:11px;letter-spacing:1.4px;color:#6A6E75;margin:4px 2px 10px;">ЗАНЯТИЯ</div>
-      <div style="background:#fff;border-radius:18px;box-shadow:0 8px 22px rgba(20,20,30,.05);overflow:hidden;">
+      <section class="profile-group" data-profile-group="study" aria-labelledby="profile_study_title">
+      <h2 id="profile_study_title" class="profile-group__title">Учёба</h2>
+      <div class="profile-group__surface aisy-surface">
         <button type="button" id="profile_adaptive_plan" class="clk cardbtn" style="display:flex;align-items:center;gap:13px;padding:15px 16px;border-bottom:1px solid #F4F5F6;cursor:pointer;" hidden>
           <span style="width:34px;height:34px;border-radius:11px;background:#FFEDE4;color:#B33A18;display:grid;place-items:center;" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V9m6 10V5m6 14v-7m4 7H2"/><path d="m4 7 6-4 6 7 4-3"/></svg></span>
           <span style="flex:1;font-weight:700;font-size:14px;color:#2B2B2B;">Мой учебный план</span>
@@ -1148,14 +1172,31 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#C4C8CE" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
         </button>
       </div>
-      <div style="font-weight:700;font-size:11px;letter-spacing:1.4px;color:#6A6E75;margin:18px 2px 10px;">ИИ И АККАУНТ</div>
-      <div style="background:#fff;border-radius:18px;box-shadow:0 8px 22px rgba(20,20,30,.05);overflow:hidden;">
+      </section>
+      <section class="profile-group" data-profile-group="asya-privacy" aria-labelledby="profile_asya_title">
+      <h2 id="profile_asya_title" class="profile-group__title">Ася и приватность</h2>
+      <div class="profile-group__surface aisy-surface">
+        <p class="profile-group__notice">Ася использует микрофон только после вашего действия в открытом приложении. Во время разговора голос передаётся внешнему AI-провайдеру; разрешение можно отозвать.</p>
         <div style="display:flex;align-items:center;gap:13px;padding:15px 16px;border-bottom:1px solid #F4F5F6;">
           <span style="width:34px;height:34px;border-radius:11px;background:#E5F4EC;display:grid;place-items:center;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1F9E5A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 1.9 4.6L19 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"/></svg></span>
           <span style="flex:1;font-weight:700;font-size:14px;color:#2B2B2B;">Проверка эссе ИИ</span>
           <span id="pf_ai" style="font-weight:700;font-size:11.5px;color:#1D7F4A;background:#EAF7F0;padding:4px 10px;border-radius:20px;">вкл</span>
         </div>
+        <div id="profile_privacy_actions"></div>
       </div>
+      </section>
+      <section class="profile-group" data-profile-group="subscription" aria-labelledby="profile_subscription_title">
+        <h2 id="profile_subscription_title" class="profile-group__title">Подписка</h2>
+        <div class="profile-group__surface profile-plan aisy-surface" aria-live="polite">
+          <div class="profile-plan__heading"><span id="pf_plan_name">Free</span><span id="pf_sub">Проверяем статус…</span></div>
+          <p id="pf_plan_summary">Основная практика доступна без оплаты.</p>
+          <p class="profile-plan__note">Публичные тарифы Aisy.space: Free и Premium. Доступность каждой возможности показана отдельно.</p>
+        </div>
+      </section>
+      <section class="profile-group" data-profile-group="account-data" aria-labelledby="profile_data_title">
+        <h2 id="profile_data_title" class="profile-group__title">Аккаунт и данные</h2>
+        <div id="profile_data_actions" class="profile-group__surface aisy-surface"></div>
+      </section>
       <!-- logout -->
       <button onclick="logout()" style="margin-top:18px;width:100%;height:50px;border:1.6px solid #F3D2C8;background:#fff;border-radius:16px;font-family:Manrope;font-weight:700;font-size:14.5px;color:#DB392A;display:flex;align-items:center;justify-content:center;gap:9px;cursor:pointer;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#E23B2B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>Выйти</button>
     </div>

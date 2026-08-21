@@ -12,7 +12,7 @@ Overall status: `in-progress` — learner-first UX; parent/teacher roles remain 
 | 03 | Персональный экран Сегодня и диагностический маршрут | done |
 | 04 | Practice hub поверх существующих учебных модулей | done |
 | 05 | Отдельный EGE hub поверх строгого пробника | done |
-| 06 | Честные Progress/Profile и только Free/Premium в public copy | blocked by 01–05 |
+| 06 | Честные Progress/Profile и только Free/Premium в public copy | done |
 | 07 | Контекстная Ася и честные microphone/wake states | blocked by 01–06 |
 | 08 | Accessibility/offline/themes и initial JS <=150 KB gzip | blocked by 01–07 |
 | 09 | Сквозной learner release contour и ZERO×2 review | blocked by 01–08 |

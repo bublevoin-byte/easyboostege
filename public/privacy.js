@@ -116,11 +116,12 @@ import {SRV, registerProfileHook, registerStartHook} from './app.js';
     try { current = await api.get('/api/v1/privacy/consent'); updateProfile(); if (showIfNew && current.policy_version !== current.current_policy_version) openPrivacy(); } catch (_) {}
   }
   function addProfileControls() {
-    const label = document.getElementById('pf_ai'); const card = label?.closest('div[style*="display:flex"]')?.parentElement;
-    if (!card || document.getElementById('privacyProfileButton')) return;
-    const button = document.createElement('button'); button.id = 'privacyProfileButton'; button.type = 'button'; button.className = 'privacyProfileBtn'; button.textContent = 'Настройки приватности'; button.onclick = openPrivacy; card.appendChild(button);
-    const exportButton = document.createElement('button'); exportButton.type = 'button'; exportButton.className = 'privacyProfileBtn'; exportButton.textContent = 'Скачать мои данные'; exportButton.onclick = () => { global.location.href = '/api/v1/account/export'; }; card.appendChild(exportButton);
-    const deleteButton = document.createElement('button'); deleteButton.type = 'button'; deleteButton.className = 'privacyProfileBtn'; deleteButton.style.color = 'var(--aisy-color-danger)'; deleteButton.textContent = 'Удалить аккаунт'; deleteButton.onclick = deleteAccount; card.appendChild(deleteButton);
+    const privacyHost = document.getElementById('profile_privacy_actions');
+    const dataHost = document.getElementById('profile_data_actions');
+    if (!privacyHost || !dataHost || document.getElementById('privacyProfileButton')) return;
+    const button = document.createElement('button'); button.id = 'privacyProfileButton'; button.type = 'button'; button.className = 'privacyProfileBtn'; button.textContent = 'Приватность и микрофон'; button.onclick = openPrivacy; privacyHost.appendChild(button);
+    const exportButton = document.createElement('button'); exportButton.type = 'button'; exportButton.className = 'privacyProfileBtn'; exportButton.textContent = 'Скачать мои данные'; exportButton.onclick = () => { global.location.href = '/api/v1/account/export'; }; dataHost.appendChild(exportButton);
+    const deleteButton = document.createElement('button'); deleteButton.type = 'button'; deleteButton.className = 'privacyProfileBtn'; deleteButton.style.color = 'var(--aisy-color-danger)'; deleteButton.textContent = 'Удалить аккаунт'; deleteButton.onclick = deleteAccount; dataHost.appendChild(deleteButton);
     loadPrivacy(false);
   }
   async function deleteAccount() {

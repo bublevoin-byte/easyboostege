@@ -165,21 +165,31 @@ try {
   assert.equal(await reading.getAttribute('data-state'), 'preliminary');
   assert.equal(await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches), true);
 
-  await context.setOffline(false);
-  await authenticate(context, baseUrl, 'established-user');
-  await page.reload({ waitUntil: 'networkidle' });
-  const establishedOverview = page.waitForResponse((response) => (
+  await context.close();
+  const establishedContext = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    reducedMotion: 'reduce',
+    serviceWorkers: 'block',
+  });
+  await authenticate(establishedContext, baseUrl, 'established-user');
+  const establishedPage = await establishedContext.newPage();
+  const establishedPageErrors = [];
+  establishedPage.on('pageerror', (error) => establishedPageErrors.push(error.message));
+  await establishedPage.goto(baseUrl, { waitUntil: 'networkidle' });
+  await establishedPage.locator('#scr1.on').waitFor({ state: 'visible', timeout: 5_000 });
+  const establishedOverview = establishedPage.waitForResponse((response) => (
     response.request().method() === 'GET'
       && response.url().endsWith('/api/v1/adaptive-learning/overview')
   ));
-  await page.evaluate(() => window.tab('scr10'));
+  await establishedPage.evaluate(() => window.tab('scr10'));
   await establishedOverview;
-  const grammar = page.locator('#evidence_progress_summary [data-module="grammar"]');
+  const grammar = establishedPage.locator('#evidence_progress_summary [data-module="grammar"]');
   await grammar.locator('text=Оценка подтверждена').waitFor({ state: 'visible', timeout: 5_000 });
   assert.equal(await grammar.getAttribute('data-state'), 'established');
   assert.match(await grammar.innerText(), /Освоение:\s*80%.*Свидетельств:\s*4/su);
   assert.deepEqual(pageErrors, []);
-  await context.close();
+  assert.deepEqual(establishedPageErrors, []);
+  await establishedContext.close();
   console.log('Evidence-backed learning progress Chromium E2E passed.');
 } finally {
   if (browser) await browser.close();

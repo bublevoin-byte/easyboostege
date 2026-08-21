@@ -118,7 +118,7 @@ test('profile module shows a Premium paywall or the remaining voice minutes', ()
     voice_tutor: { daily_remaining_seconds: 0, monthly_remaining_seconds: 0, active_session: false },
   });
   assert.equal(base.state, 'paywall');
-  assert.equal(base.actionLabel, 'Запросить Premium');
+  assert.equal(base.actionLabel, 'Запросить доступ');
 
   const pending = profile.voiceTutorStatus({ entitlements: { voice_tutor: false } }, { id: '7ee5be14-d2b6-4f73-b5af-339131231985', status: 'new' });
   assert.equal(pending.state, 'pending');
@@ -126,15 +126,15 @@ test('profile module shows a Premium paywall or the remaining voice minutes', ()
   assert.match(pending.text, /Заявка/u);
   assert.match(pending.text, /#7ee5be14/u);
   assert.match(pending.text, /статус/u);
-  assert.equal(base.title, 'Voice Tutor · Premium');
-  assert.match(base.text, /доступен в Premium/u);
+  assert.equal(base.title, 'Голосовой разбор Аси');
+  assert.equal(base.text, 'Не входит в текущий доступ');
 
   const premium = profile.voiceTutorStatus({
     entitlements: { voice_tutor: true },
     voice_tutor: { daily_remaining_seconds: 600, monthly_remaining_seconds: 7_200, active_session: false },
   });
   assert.equal(premium.state, 'premium');
-  assert.equal(premium.title, 'Voice Tutor · Premium');
+  assert.equal(premium.title, 'Голосовой разбор Аси');
   assert.equal(premium.text, 'Осталось 10 мин сегодня · 120 мин в этом месяце');
   assert.equal('daily_limit_seconds' in premium, false);
   assert.equal(premium.actionLabel, '');

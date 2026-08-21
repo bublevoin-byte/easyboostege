@@ -4,6 +4,7 @@
  * загружать не нужно.
  */
 import {registerRouteHook} from '../router.js';
+import {presentPublicPlan} from '../commercial-copy.js';
 import {lPlayRaw,lStop} from '../tts.js';
 import {
   S,SRV,TOKEN,WBTN,apiGet,apiMessage,apiPost,apiPostBinary,apiPut,generateAiContent,save,
@@ -109,7 +110,7 @@ async function spSaveCalibrationConsent(granted){var age=document.getElementById
   try{SP_CALIBRATION_CONSENT=await apiPut('/api/v1/speaking/calibration-consent',{granted:Boolean(granted),ageGroup:ageGroup,guardianConfirmed:guardianConfirmed});spHub();toast(granted?'Согласие сохранено. Его можно отозвать в любой момент.':'Согласие отозвано; незавершённые сырые записи удалены.');return true}catch(error){try{toast(apiMessage(error,'request'))}catch(_){}return false}}
 async function spLoadPronunciationStatus(){var box=document.getElementById('speaking_pronunciation_status');if(!box)return;
   try{var payload=await apiGet('/api/v1/speaking/pronunciation-assessments/status');var view=speakingModule.pronunciationStatusView(payload);box=document.getElementById('speaking_pronunciation_status');if(!box)return;
-    if(view.available){box.style.background='#EAF7F0';box.style.color='#1D6944';box.innerHTML='<b>Оценка произношения доступна</b><br><span style="font-size:11.5px;">Осталось '+spFmt(view.remainingSeconds)+' из '+spFmt(view.limitSeconds)+' в этом месяце · '+(view.tier==='premium'?'Premium':'Base')+'. Локальная запись и прослушивание не расходуют лимит.</span>';return}
+    if(view.available){box.style.background='#EAF7F0';box.style.color='#1D6944';box.innerHTML='<b>Оценка произношения доступна</b><br><span style="font-size:11.5px;">Осталось '+spFmt(view.remainingSeconds)+' из '+spFmt(view.limitSeconds)+' в этом месяце · '+presentPublicPlan({tier:view.tier}).label+'. Локальная запись и прослушивание не расходуют лимит.</span>';return}
     box.style.background='#FFF4E6';box.style.color='#714515';box.innerHTML='<b>Оценка произношения пока недоступна</b><br><span style="font-size:11.5px;">Можно записывать и прослушивать ответы локально — это не расходует лимит.</span>'}
   catch(_){box=document.getElementById('speaking_pronunciation_status');if(!box)return;box.style.background='#FFF4E6';box.style.color='#714515';box.innerHTML='<b>Оценка произношения пока недоступна</b><br><span style="font-size:11.5px;">Локальная запись и прослушивание не расходуют лимит.</span>'}}
 function spLearningList(title,items){if(!items||!items.length)return '';return '<div style="margin-top:9px;font-size:12px;"><b>'+ui.escapeHtml(title)+':</b><ul style="margin:5px 0 0;padding-left:18px;line-height:1.45;">'+items.map(function(item){return '<li>'+ui.escapeHtml(item)+'</li>'}).join('')+'</ul></div>'}
@@ -118,7 +119,7 @@ function spSpeakingSkillLabel(skillId){var labels={'ege.speaking.reading_aloud':
 function spSpeakingTargetFocus(focus){if(!focus)return '';if(focus.kind==='word')return 'слово «'+focus.value+'»';if(focus.kind==='phoneme')return 'фонема /'+focus.value+'/ в слове «'+focus.anchorWord+'»';return ''}
 function spVoiceTutorOptions(voice){if(!voice||!voice.attemptSummary)return null;if(voice.attemptSummary.attemptId===voice.attemptId){var base={profile:{entitlements:{voice_tutor:true}},source:'speaking',attemptId:voice.attemptId,revision:voice.revision};if(voice.criterion)return Object.assign(base,{criterionChoices:[{index:voice.criterion.index,label:voice.criterion.label}]});if(voice.pronunciationError)return Object.assign(base,{pronunciationError:{ref:voice.pronunciationError.ref,label:voice.pronunciationError.label}})}return null}
 function spLearningReportMarkup(report){var safe=ui.escapeHtml,current=report&&report.currentAttempt,access=report&&report.access;if(!report||!access)return '';
-  var header='<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;"><b style="font-size:14px;">Личный прогресс Speaking</b><span style="font-size:11px;font-weight:900;color:#B54E2F;background:#FFEDE4;padding:6px 9px;border-radius:12px;">'+(access.tier==='premium'?'PREMIUM':'BASE')+(report.activeAccentLocale?' · '+safe(report.activeAccentLocale):'')+' · '+Math.round(access.remainingSeconds/60)+' мин</span></div>';
+  var header='<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;"><b style="font-size:14px;">Личный прогресс Speaking</b><span style="font-size:11px;font-weight:900;color:#B54E2F;background:#FFEDE4;padding:6px 9px;border-radius:12px;">'+safe(presentPublicPlan({tier:access.tier}).label)+(report.activeAccentLocale?' · '+safe(report.activeAccentLocale):'')+' · '+Math.round(access.remainingSeconds/60)+' мин</span></div>';
   var next=report.nextStep?'<div style="margin-top:9px;padding:9px 11px;border-radius:12px;background:#FFF4DE;font-size:12px;color:#714515;"><b>Следующий шаг:</b> '+safe(report.nextStep.label)+'</div>':'';
   var timeline=(report.attemptTimeline||[]).slice(-10).map(function(item){return 'Попытка '+item.attemptId+' · задание '+item.taskType+' · '+(item.status==='scored'?(item.score+' / '+item.maxScore):'нужна новая запись')+(item.masteryEligible?'':' · не меняет освоение')});
   var history=spLearningList('История попыток',timeline);

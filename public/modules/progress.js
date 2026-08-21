@@ -115,8 +115,95 @@
       voiceLabel: (Number.isInteger(used) ? used : used.toFixed(1)) + ' из ' + (Number.isInteger(monthlyLimit) ? monthlyLimit : monthlyLimit.toFixed(1)) + ' мин использовано',
       dueLabel: due + (due === 1 ? ' повтор готов' : ' повторов готово'),
       potentialLabel: 'до ' + potential + ' учебных баллов потенциала*',
-      notice: value.potential_points_notice || 'Оценка Easy Boost — не официальный балл ЕГЭ.',
+      notice: value.potential_points_notice || 'Оценка Aisy.space — не официальный балл ЕГЭ.',
       nextBest: value.next_best_review || null,
+    };
+  }
+
+  function safeCount(value) {
+    return Math.max(0, Math.floor(Number(value) || 0));
+  }
+
+  function narrative(payload) {
+    const value = payload && typeof payload === 'object' ? payload : {};
+    const profile = value.profile && typeof value.profile === 'object' ? value.profile : {};
+    const modules = (Array.isArray(profile.modules) ? profile.modules : [])
+      .filter((module) => module && safeCount(module.evidenceCount) > 0)
+      .map((module) => ({
+        id: module.id,
+        label: EVIDENCE_MODULE_LABELS[module.id] || 'Навык',
+        mastery: boundedPercent(module.mastery),
+        uncertainty: boundedPercent(module.uncertainty),
+        established: module.status === 'established',
+      }));
+    const strongest = modules.filter((module) => module.established)
+      .sort((first, second) => second.mastery - first.mastery)[0] || null;
+    const weakest = modules.slice().sort((first, second) => (
+      first.mastery - second.mastery || second.uncertainty - first.uncertainty
+    ))[0] || null;
+    const retention = value.retention && typeof value.retention === 'object' ? value.retention : {};
+    const review = retention.next_best_review || retention.nextBestReview || null;
+    let next;
+    if (profile.needsDiagnostic) {
+      next = {
+        kind: 'diagnostic', title: 'Уточнить учебный профиль',
+        text: 'Короткая диагностика сделает следующий маршрут точнее.',
+        actionLabel: 'Открыть диагностику',
+      };
+    } else if (review && review.skill_label) {
+      next = {
+        kind: 'review', title: 'Повторить ' + String(review.skill_label).slice(0, 80),
+        text: 'Проверим, сохранился ли навык после предыдущей работы.',
+        actionLabel: 'Открыть повтор',
+      };
+    } else if (weakest) {
+      next = {
+        kind: 'practice', title: 'Потренировать: ' + weakest.label,
+        text: 'Здесь сейчас меньше всего подтверждённых самостоятельных результатов.',
+        actionLabel: 'Открыть Практику',
+      };
+    } else {
+      next = {
+        kind: 'practice', title: 'Начать первое занятие',
+        text: 'После самостоятельной работы здесь появятся подтверждённые изменения.',
+        actionLabel: 'Открыть Практику',
+      };
+    }
+    return {
+      next,
+      improved: strongest ? {
+        title: 'Что улучшилось',
+        text: strongest.label + ' уже подтверждено: ' + strongest.mastery
+          + '%. Изменение относительно прошлого периода появится после сопоставимой новой попытки.',
+      } : {
+        title: 'Что улучшилось',
+        text: 'Для честного сравнения нужны две сопоставимые самостоятельные попытки.',
+      },
+      needsWork: weakest ? {
+        title: 'Что требует внимания',
+        text: weakest.label + ': текущая оценка ' + weakest.mastery
+          + '% и остаётся ' + (weakest.established ? 'подтверждённой.' : 'предварительной.'),
+      } : {
+        title: 'Что требует внимания',
+        text: 'Сначала соберём самостоятельные результаты по учебным разделам.',
+      },
+      evidence: [
+        {
+          id: 'independent', label: 'Самостоятельно',
+          count: safeCount(profile.independentEvidenceCount),
+          detail: 'Может подтверждать владение навыком.',
+        },
+        {
+          id: 'assisted', label: 'С помощью',
+          count: safeCount(profile.assistedEvidenceCount),
+          detail: 'Подсказки и помощь не подтверждают самостоятельное владение.',
+        },
+        {
+          id: 'approximate', label: 'Ориентировочно',
+          count: safeCount(profile.clientReportedEvidenceCount),
+          detail: 'Автоматическая или ИИ-оценка, если используется, экспериментальна и не является официальным результатом ЕГЭ.',
+        },
+      ],
     };
   }
 
@@ -130,6 +217,7 @@
     overview,
     evidenceSummary,
     recoveryOverview,
+    narrative,
     EXAM_DATE,
     MODULES,
     EVIDENCE_MODULE_LABELS,

@@ -5,6 +5,7 @@ import {decorateCoreVocabulary} from './modules/core-voice-catalog.js';
 import {clearAdaptiveOverviewCache} from './adaptive-overview-cache.js';
 import {clearAdaptiveRuntime} from './adaptive-session-runtime.js';
 import {classifyLearningAccess,LEARNING_ACCESS_STATES} from './access.js';
+import {presentProfilePlan} from './commercial-copy.js';
 import {
   EGE_MOCK_PUBLIC_FORM_FINGERPRINT,EGE_MOCK_PUBLIC_FORM_ID,EGE_MOCK_PUBLIC_FORM_REVISION,
 } from './ege-mock-catalog-contract.js';
@@ -604,14 +605,14 @@ async function tgClick(e){
     var aiStatus=document.getElementById('pf_ai');var voiceRow=document.getElementById('pf_voice_row');
     if(aiStatus&&!voiceRow){var list=aiStatus.parentElement&&aiStatus.parentElement.parentElement;
       if(list){voiceRow=document.createElement('div');voiceRow.id='pf_voice_row';voiceRow.setAttribute('style','display:flex;align-items:center;gap:13px;padding:15px 16px;border-bottom:1px solid #F4F5F6;');
-        var icon=document.createElement('span');icon.setAttribute('style','width:34px;height:34px;border-radius:11px;background:#FFF4DE;display:grid;place-items:center;font-size:17px;flex:0 0 auto;');icon.textContent='🎙️';
+        var icon=document.createElement('span');icon.setAttribute('style','width:34px;height:34px;border-radius:11px;background:var(--aisy-color-surface-muted);color:var(--aisy-color-accent);display:grid;place-items:center;flex:0 0 auto;');icon.setAttribute('aria-hidden','true');icon.innerHTML='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5M8 22h8"/></svg>';
         var copy=document.createElement('span');copy.setAttribute('style','flex:1;min-width:0;');
         var title=document.createElement('span');title.id='pf_voice_title';title.setAttribute('style','display:block;font-weight:700;font-size:14px;color:#2B2B2B;');
         var detail=document.createElement('span');detail.id='pf_voice_detail';detail.setAttribute('role','status');detail.setAttribute('style','display:inline-block;margin-top:4px;font-weight:700;font-size:11.5px;padding:4px 8px;border-radius:12px;line-height:1.35;');
-        var action=document.createElement('button');action.id='pf_voice_action';action.type='button';action.setAttribute('aria-label','Запросить доступ к Voice Tutor Premium');action.setAttribute('style','display:none;min-height:44px;border:0;border-radius:14px;padding:8px 11px;background:#F2683F;color:#fff;font:700 11px Manrope,sans-serif;cursor:pointer;');
+        var action=document.createElement('button');action.id='pf_voice_action';action.type='button';action.setAttribute('aria-label','Запросить доступ к голосовому разбору Аси');action.setAttribute('style','display:none;min-height:44px;border:0;border-radius:14px;padding:8px 11px;background:#F2683F;color:#fff;font:700 11px Manrope,sans-serif;cursor:pointer;');
         copy.appendChild(title);copy.appendChild(detail);voiceRow.appendChild(icon);voiceRow.appendChild(copy);voiceRow.appendChild(action);list.insertBefore(voiceRow,aiStatus.parentElement.nextSibling);}}
     var paymentRequest=null;
-    var renderProfileStatuses=function(profile){var subscriptionStatus=profileModule.subscriptionStatus(profile,Date.now());el.textContent=subscriptionStatus.text;el.style.color=subscriptionStatus.color;el.style.background=subscriptionStatus.background;
+    var renderProfileStatuses=function(profile){var subscriptionStatus=profileModule.subscriptionStatus(profile,Date.now());el.textContent=subscriptionStatus.text;el.style.color=subscriptionStatus.color;el.style.background=subscriptionStatus.background;var plan=presentProfilePlan(profile);setTxt('pf_plan_name',plan.label);setTxt('pf_plan_summary',plan.summary);
       var voiceTutorStatus=profileModule.voiceTutorStatus(profile,paymentRequest);var title=document.getElementById('pf_voice_title');var detail=document.getElementById('pf_voice_detail');var action=document.getElementById('pf_voice_action');
       if(title)title.textContent=voiceTutorStatus.title;if(detail){detail.textContent=voiceTutorStatus.text;detail.style.color=voiceTutorStatus.color;detail.style.background=voiceTutorStatus.background}
       if(action){action.textContent=voiceTutorStatus.actionLabel;action.style.display=voiceTutorStatus.actionLabel?'block':'none';action.disabled=false;action.onclick=voiceTutorStatus.actionLabel?async function(){action.disabled=true;try{var result=await EasyBoostApi.post('/api/v1/payments/requests',{product:'premium_voice'});paymentRequest=result.request;renderProfileStatuses(profile)}catch(error){action.disabled=false;detail.textContent=EasyBoostApi.messageFor(error)}}:null}};

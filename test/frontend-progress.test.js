@@ -296,7 +296,7 @@ test('adaptive authority reset clears only the matching owner recovery view and 
     adaptiveAccessState: {}, adaptiveSessionPreview: {}, adaptiveCurrentSession: {}, adaptiveCurrentExecution: {},
     sameAdaptiveOwner(a, b) { return Boolean(a && b && a.owner === b.owner && a.ownerGeneration === b.ownerGeneration); },
     document: { getElementById: node },
-    drawAdaptiveSession() {}, drawAdaptiveDiagnostic() {}, drawEgeMockDashboard() {},
+    drawAdaptiveSession() {}, drawAdaptiveDiagnostic() {}, drawEgeMockDashboard() {}, drawProgressNarrative() {},
     drawEvidenceProgressSummary() {}, setAdaptiveReadOnly() {},
   });
   vm.runInContext(`${resetSource}\nthis.clearAdaptivePrivateUi=clearAdaptivePrivateUi;`, context);
