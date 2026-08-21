@@ -1,0 +1,364 @@
+/*
+ * Aisy visual system v2 candidate — Coral Editorial Intelligence.
+ *
+ * This contract is isolated to prototypes/today-v1. It is not the accepted production theme and
+ * must not be imported by production Today or the PWA application shell.
+ */
+@layer aisy-v2-primitives, aisy-v2-semantic, aisy-v2-components;
+
+/* === PRIMITIVE TOKENS ================================================================ */
+@layer aisy-v2-primitives {
+  :root {
+    /* Light palette */
+    --aisy-v2-primitive-canvas-light: #fff8f2;
+    --aisy-v2-primitive-surface-light: #fffdf9;
+    --aisy-v2-primitive-surface-raised-light: #ffffff;
+    --aisy-v2-primitive-surface-coral-light: #ffe9df;
+    --aisy-v2-primitive-surface-neutral-light: #f6ebe5;
+    --aisy-v2-primitive-ink-light: #211816;
+    --aisy-v2-primitive-ink-muted-light: #66524e;
+    --aisy-v2-primitive-coral-energy-light: #e85d4a;
+    --aisy-v2-primitive-coral-chart-light: #cf4335;
+    --aisy-v2-primitive-coral-action-light: #b5332b;
+    --aisy-v2-primitive-on-coral-light: #fffdf9;
+    --aisy-v2-primitive-violet-light: #6e43bf;
+    --aisy-v2-primitive-teal-light: #076b63;
+    --aisy-v2-primitive-border-light: #9d7770;
+    --aisy-v2-primitive-focus-light: #176b87;
+    --aisy-v2-primitive-warning-light: #875100;
+    --aisy-v2-primitive-danger-light: #ad241a;
+
+    /* Dark palette: tonal companions, not inverted light colours. */
+    --aisy-v2-primitive-canvas-dark: #171211;
+    --aisy-v2-primitive-surface-dark: #211a18;
+    --aisy-v2-primitive-surface-raised-dark: #2a201e;
+    --aisy-v2-primitive-surface-coral-dark: #432822;
+    --aisy-v2-primitive-surface-neutral-dark: #2b2421;
+    --aisy-v2-primitive-ink-dark: #fff7f2;
+    --aisy-v2-primitive-ink-muted-dark: #d8c3bc;
+    --aisy-v2-primitive-coral-energy-dark: #ff9a88;
+    --aisy-v2-primitive-coral-chart-dark: #ff9a88;
+    --aisy-v2-primitive-coral-action-dark: #ff9a88;
+    --aisy-v2-primitive-on-coral-dark: #211816;
+    --aisy-v2-primitive-violet-dark: #c5adff;
+    --aisy-v2-primitive-teal-dark: #67d9ca;
+    --aisy-v2-primitive-border-dark: #94756c;
+    --aisy-v2-primitive-focus-dark: #70d7ed;
+    --aisy-v2-primitive-warning-dark: #f2c269;
+    --aisy-v2-primitive-danger-dark: #ff958f;
+
+    /* Type: locally available product families only; no remote font dependency. */
+    --aisy-v2-primitive-font-interface: Manrope, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --aisy-v2-primitive-font-editorial: Nunito, Manrope, system-ui, sans-serif;
+    --aisy-v2-primitive-font-size-caption: 0.875rem;
+    --aisy-v2-primitive-font-size-body: 1rem;
+    --aisy-v2-primitive-font-size-title: clamp(1.5rem, 4vw, 2rem);
+    --aisy-v2-primitive-font-size-display: clamp(2.75rem, 12vw, 6.5rem);
+    --aisy-v2-primitive-line-height-tight: 1.08;
+    --aisy-v2-primitive-line-height-body: 1.6;
+    --aisy-v2-primitive-weight-regular: 500;
+    --aisy-v2-primitive-weight-strong: 750;
+    --aisy-v2-primitive-weight-display: 850;
+
+    /* A 4/8 px rhythm with flat, generously rounded surfaces. */
+    --aisy-v2-primitive-space-1: 4px;
+    --aisy-v2-primitive-space-2: 8px;
+    --aisy-v2-primitive-space-3: 12px;
+    --aisy-v2-primitive-space-4: 16px;
+    --aisy-v2-primitive-space-5: 20px;
+    --aisy-v2-primitive-space-6: 24px;
+    --aisy-v2-primitive-space-8: 32px;
+    --aisy-v2-primitive-space-10: 40px;
+    --aisy-v2-primitive-space-12: 48px;
+    --aisy-v2-primitive-radius-20: 20px;
+    --aisy-v2-primitive-radius-24: 24px;
+    --aisy-v2-primitive-radius-28: 28px;
+    --aisy-v2-primitive-radius-round: 999px;
+    --aisy-v2-primitive-size-touch: 44px;
+    --aisy-v2-primitive-size-content: 1180px;
+    --aisy-v2-primitive-size-reading: 720px;
+    --aisy-v2-primitive-coral-expressive-min: 15%;
+    --aisy-v2-primitive-coral-expressive-max: 25%;
+    --aisy-v2-primitive-coral-working-min: 5%;
+    --aisy-v2-primitive-coral-working-max: 12%;
+    --aisy-v2-primitive-coral-strict-min: 2%;
+    --aisy-v2-primitive-coral-strict-max: 5%;
+
+    /* Fast response + soft continuation. */
+    --aisy-v2-primitive-duration-response: 160ms;
+    --aisy-v2-primitive-duration-continuation: 240ms;
+    --aisy-v2-primitive-duration-reveal: 300ms;
+    --aisy-v2-primitive-ease-response: cubic-bezier(0.2, 0, 0, 1);
+    --aisy-v2-primitive-focus-width: 3px;
+    --aisy-v2-primitive-shadow-none: none;
+    --aisy-v2-primitive-shadow-soft-light: 0 12px 32px rgb(88 43 32 / 12%);
+    --aisy-v2-primitive-shadow-soft-dark: 0 16px 40px rgb(0 0 0 / 32%);
+  }
+}
+
+/* === SEMANTIC TOKENS ================================================================= */
+@layer aisy-v2-semantic {
+  :root {
+    color-scheme: light dark;
+
+    --aisy-v2-color-canvas: light-dark(var(--aisy-v2-primitive-canvas-light), var(--aisy-v2-primitive-canvas-dark));
+    --aisy-v2-color-surface: light-dark(var(--aisy-v2-primitive-surface-light), var(--aisy-v2-primitive-surface-dark));
+    --aisy-v2-color-surface-raised: light-dark(var(--aisy-v2-primitive-surface-raised-light), var(--aisy-v2-primitive-surface-raised-dark));
+    --aisy-v2-color-surface-coral: light-dark(var(--aisy-v2-primitive-surface-coral-light), var(--aisy-v2-primitive-surface-coral-dark));
+    --aisy-v2-color-surface-neutral: light-dark(var(--aisy-v2-primitive-surface-neutral-light), var(--aisy-v2-primitive-surface-neutral-dark));
+    --aisy-v2-color-ink: light-dark(var(--aisy-v2-primitive-ink-light), var(--aisy-v2-primitive-ink-dark));
+    --aisy-v2-color-ink-muted: light-dark(var(--aisy-v2-primitive-ink-muted-light), var(--aisy-v2-primitive-ink-muted-dark));
+    --aisy-v2-color-coral-energy: light-dark(var(--aisy-v2-primitive-coral-energy-light), var(--aisy-v2-primitive-coral-energy-dark));
+    --aisy-v2-color-action: light-dark(var(--aisy-v2-primitive-coral-action-light), var(--aisy-v2-primitive-coral-action-dark));
+    --aisy-v2-color-on-action: light-dark(var(--aisy-v2-primitive-on-coral-light), var(--aisy-v2-primitive-on-coral-dark));
+    --aisy-v2-color-asya: light-dark(var(--aisy-v2-primitive-violet-light), var(--aisy-v2-primitive-violet-dark));
+    --aisy-v2-color-verified: light-dark(var(--aisy-v2-primitive-teal-light), var(--aisy-v2-primitive-teal-dark));
+    --aisy-v2-color-warning: light-dark(var(--aisy-v2-primitive-warning-light), var(--aisy-v2-primitive-warning-dark));
+    --aisy-v2-color-danger: light-dark(var(--aisy-v2-primitive-danger-light), var(--aisy-v2-primitive-danger-dark));
+    --aisy-v2-color-border-strong: light-dark(var(--aisy-v2-primitive-border-light), var(--aisy-v2-primitive-border-dark));
+    --aisy-v2-color-focus: light-dark(var(--aisy-v2-primitive-focus-light), var(--aisy-v2-primitive-focus-dark));
+    --aisy-v2-color-chart-primary: light-dark(var(--aisy-v2-primitive-coral-chart-light), var(--aisy-v2-primitive-coral-chart-dark));
+    --aisy-v2-color-chart-secondary: var(--aisy-v2-color-asya);
+    --aisy-v2-color-chart-verified: var(--aisy-v2-color-verified);
+    --aisy-v2-color-chart-grid: var(--aisy-v2-color-border-strong);
+
+    /* Coral is a hierarchy signal, never a page wash. Values guide composition coverage. */
+    --aisy-v2-coral-expressive-min: var(--aisy-v2-primitive-coral-expressive-min);
+    --aisy-v2-coral-expressive-max: var(--aisy-v2-primitive-coral-expressive-max);
+    --aisy-v2-coral-working-min: var(--aisy-v2-primitive-coral-working-min);
+    --aisy-v2-coral-working-max: var(--aisy-v2-primitive-coral-working-max);
+    --aisy-v2-coral-strict-min: var(--aisy-v2-primitive-coral-strict-min);
+    --aisy-v2-coral-strict-max: var(--aisy-v2-primitive-coral-strict-max);
+
+    --aisy-v2-font-interface: var(--aisy-v2-primitive-font-interface);
+    --aisy-v2-font-display: var(--aisy-v2-primitive-font-editorial);
+    --aisy-v2-text-caption: var(--aisy-v2-primitive-font-size-caption);
+    --aisy-v2-text-body: var(--aisy-v2-primitive-font-size-body);
+    --aisy-v2-text-title: var(--aisy-v2-primitive-font-size-title);
+    --aisy-v2-text-display: var(--aisy-v2-primitive-font-size-display);
+    --aisy-v2-line-tight: var(--aisy-v2-primitive-line-height-tight);
+    --aisy-v2-line-body: var(--aisy-v2-primitive-line-height-body);
+    --aisy-v2-weight-regular: var(--aisy-v2-primitive-weight-regular);
+    --aisy-v2-weight-strong: var(--aisy-v2-primitive-weight-strong);
+    --aisy-v2-weight-display: var(--aisy-v2-primitive-weight-display);
+
+    --aisy-v2-space-inline: var(--aisy-v2-primitive-space-4);
+    --aisy-v2-space-control-gap: var(--aisy-v2-primitive-space-2);
+    --aisy-v2-space-card: var(--aisy-v2-primitive-space-6);
+    --aisy-v2-space-section: var(--aisy-v2-primitive-space-8);
+    --aisy-v2-radius-control: var(--aisy-v2-primitive-radius-20);
+    --aisy-v2-radius-surface: var(--aisy-v2-primitive-radius-24);
+    --aisy-v2-radius-hero: var(--aisy-v2-primitive-radius-28);
+    --aisy-v2-radius-pill: var(--aisy-v2-primitive-radius-round);
+    --aisy-v2-touch-target: var(--aisy-v2-primitive-size-touch);
+    --aisy-v2-content-width: var(--aisy-v2-primitive-size-content);
+    --aisy-v2-reading-width: var(--aisy-v2-primitive-size-reading);
+    --aisy-v2-space-focus-offset: var(--aisy-v2-primitive-space-1);
+    --aisy-v2-motion-distance: var(--aisy-v2-primitive-space-2);
+    --aisy-v2-elevation-flat: var(--aisy-v2-primitive-shadow-none);
+    --aisy-v2-elevation-float: light-dark(var(--aisy-v2-primitive-shadow-soft-light), var(--aisy-v2-primitive-shadow-soft-dark));
+
+    --aisy-v2-motion-response: var(--aisy-v2-primitive-duration-response);
+    --aisy-v2-motion-continuation: var(--aisy-v2-primitive-duration-continuation);
+    --aisy-v2-motion-reveal: var(--aisy-v2-primitive-duration-reveal);
+    --aisy-v2-motion-ease: var(--aisy-v2-primitive-ease-response);
+    --aisy-v2-focus-width: var(--aisy-v2-primitive-focus-width);
+  }
+}
+
+/* === COMPONENT TOKENS AND PROTOTYPE RECIPES ========================================= */
+@layer aisy-v2-components {
+  :root {
+    --aisy-v2-canvas-bg: var(--aisy-v2-color-canvas);
+    --aisy-v2-canvas-fg: var(--aisy-v2-color-ink);
+
+    --aisy-v2-surface-bg: var(--aisy-v2-color-surface);
+    --aisy-v2-surface-fg: var(--aisy-v2-color-ink);
+    --aisy-v2-surface-border: var(--aisy-v2-color-border-strong);
+    --aisy-v2-surface-radius: var(--aisy-v2-radius-surface);
+    --aisy-v2-surface-shadow: var(--aisy-v2-elevation-flat);
+    --aisy-v2-surface-padding: var(--aisy-v2-space-card);
+
+    --aisy-v2-button-bg: var(--aisy-v2-color-action);
+    --aisy-v2-button-fg: var(--aisy-v2-color-on-action);
+    --aisy-v2-button-radius: var(--aisy-v2-radius-control);
+    --aisy-v2-button-min-size: var(--aisy-v2-touch-target);
+    --aisy-v2-button-gap: var(--aisy-v2-space-control-gap);
+    --aisy-v2-button-duration: var(--aisy-v2-motion-response);
+
+    --aisy-v2-focus-color: var(--aisy-v2-color-focus);
+    --aisy-v2-focus-offset: var(--aisy-v2-space-focus-offset);
+
+    --aisy-v2-chart-primary: var(--aisy-v2-color-chart-primary);
+    --aisy-v2-chart-secondary: var(--aisy-v2-color-chart-secondary);
+    --aisy-v2-chart-verified: var(--aisy-v2-color-chart-verified);
+    --aisy-v2-chart-grid: var(--aisy-v2-color-chart-grid);
+    --aisy-v2-chart-label: var(--aisy-v2-color-ink);
+
+    --aisy-v2-asya-bg: var(--aisy-v2-color-surface-neutral);
+    --aisy-v2-asya-fg: var(--aisy-v2-color-asya);
+    --aisy-v2-asya-accent: var(--aisy-v2-color-asya);
+
+    --aisy-v2-ege-bg: var(--aisy-v2-color-surface);
+    --aisy-v2-ege-fg: var(--aisy-v2-color-ink);
+    --aisy-v2-ege-border: var(--aisy-v2-color-border-strong);
+    --aisy-v2-ege-accent: var(--aisy-v2-color-action);
+
+    --aisy-v2-object-bg: var(--aisy-v2-color-surface-coral);
+    --aisy-v2-object-accent: var(--aisy-v2-color-coral-energy);
+    --aisy-v2-object-shadow: var(--aisy-v2-elevation-float);
+  }
+
+  .aisy-v2-canvas {
+    min-block-size: 100dvh;
+    margin: 0;
+    background: var(--aisy-v2-canvas-bg);
+    color: var(--aisy-v2-canvas-fg);
+    font: var(--aisy-v2-weight-regular) var(--aisy-v2-text-body) / var(--aisy-v2-line-body) var(--aisy-v2-font-interface);
+  }
+
+  .aisy-v2-composition {
+    inline-size: min(calc(100% - (2 * var(--aisy-v2-space-inline))), var(--aisy-v2-content-width));
+    margin-inline: auto;
+  }
+
+  .aisy-v2-display {
+    margin: 0;
+    font: var(--aisy-v2-weight-display) var(--aisy-v2-text-display) / var(--aisy-v2-line-tight) var(--aisy-v2-font-display);
+    letter-spacing: -0.035em;
+  }
+
+  .aisy-v2-surface {
+    border: 1px solid var(--aisy-v2-surface-border);
+    border-radius: var(--aisy-v2-surface-radius);
+    background: var(--aisy-v2-surface-bg);
+    color: var(--aisy-v2-surface-fg);
+    box-shadow: var(--aisy-v2-surface-shadow);
+    padding: var(--aisy-v2-surface-padding);
+  }
+
+  .aisy-v2-button,
+  .aisy-v2-duration-choice,
+  .aisy-v2-chart-control {
+    min-inline-size: var(--aisy-v2-button-min-size);
+    min-block-size: var(--aisy-v2-button-min-size);
+    touch-action: manipulation;
+  }
+
+  .aisy-v2-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--aisy-v2-button-gap);
+    border: 0;
+    border-radius: var(--aisy-v2-button-radius);
+    background: var(--aisy-v2-button-bg);
+    color: var(--aisy-v2-button-fg);
+    font: var(--aisy-v2-weight-strong) var(--aisy-v2-text-body) / 1.25 var(--aisy-v2-font-interface);
+    cursor: pointer;
+    transition: filter var(--aisy-v2-button-duration) var(--aisy-v2-motion-ease),
+      opacity var(--aisy-v2-button-duration) var(--aisy-v2-motion-ease);
+  }
+
+  .aisy-v2-button:hover {
+    filter: brightness(0.92);
+  }
+
+  .aisy-v2-button:active {
+    filter: brightness(0.84);
+  }
+
+  :where(.aisy-v2-button, .aisy-v2-duration-choice, .aisy-v2-chart-control):focus-visible {
+    outline: var(--aisy-v2-focus-width) solid var(--aisy-v2-focus-color);
+    outline-offset: var(--aisy-v2-focus-offset);
+  }
+
+  :where(.aisy-v2-button, .aisy-v2-duration-choice, .aisy-v2-chart-control):disabled,
+  :where(.aisy-v2-button, .aisy-v2-duration-choice, .aisy-v2-chart-control)[aria-disabled="true"] {
+    opacity: 0.48;
+    cursor: not-allowed;
+  }
+
+  .aisy-v2-chart-series--primary {
+    fill: var(--aisy-v2-chart-primary);
+    stroke: var(--aisy-v2-chart-primary);
+  }
+
+  .aisy-v2-chart-series--secondary {
+    fill: var(--aisy-v2-chart-secondary);
+    stroke: var(--aisy-v2-chart-secondary);
+  }
+
+  .aisy-v2-chart-grid {
+    stroke: var(--aisy-v2-chart-grid);
+  }
+
+  .aisy-v2-chart-label,
+  .aisy-v2-chart-summary {
+    color: var(--aisy-v2-chart-label);
+    fill: var(--aisy-v2-chart-label);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .aisy-v2-asya-moment {
+    border-color: var(--aisy-v2-asya-accent);
+    background: var(--aisy-v2-asya-bg);
+    color: var(--aisy-v2-asya-fg);
+  }
+
+  .aisy-v2-ege-surface {
+    border-color: var(--aisy-v2-ege-border);
+    background: var(--aisy-v2-ege-bg);
+    color: var(--aisy-v2-ege-fg);
+  }
+
+  .aisy-v2-study-object {
+    border-radius: var(--aisy-v2-radius-hero);
+    background: var(--aisy-v2-object-bg);
+    color: var(--aisy-v2-object-accent);
+    box-shadow: var(--aisy-v2-object-shadow);
+  }
+
+  .aisy-v2-motion-reveal {
+    animation: aisy-v2-soft-reveal var(--aisy-v2-motion-reveal) var(--aisy-v2-motion-ease) both;
+  }
+
+  @keyframes aisy-v2-soft-reveal {
+    from {
+      opacity: 0;
+      transform: translateY(var(--aisy-v2-motion-distance));
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aisy-v2-motion-reveal,
+  .aisy-v2-button {
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+    transition-duration: 0.01ms;
+  }
+
+  .aisy-v2-motion-reveal {
+    animation-name: none;
+  }
+}

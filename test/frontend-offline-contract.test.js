@@ -19,6 +19,7 @@ const apiSource = await fs.readFile(new URL('../public/api.js', import.meta.url)
 const syncSource = await fs.readFile(new URL('../public/sync.js', import.meta.url), 'utf8');
 const ownerIncarnationSource = await fs.readFile(new URL('../public/owner-incarnation.js', import.meta.url), 'utf8');
 const workerSource = await fs.readFile(new URL('../public/service-worker.js', import.meta.url), 'utf8');
+const frontendBuildSource = await fs.readFile(new URL('../scripts/build-frontend.js', import.meta.url), 'utf8');
 const readingPilotSource = await fs.readFile(new URL('../public/reading-pilot-v1.js', import.meta.url), 'utf8');
 const entrySource = await fs.readFile(new URL('../public/main.js', import.meta.url), 'utf8');
 const screenLoaderSource = await fs.readFile(new URL('../public/screens.js', import.meta.url), 'utf8');
@@ -1631,6 +1632,41 @@ test('an in-flight progress response only clears the owner and values it actuall
 });
 
 /* ---------- service worker ---------- */
+
+test('local prototype previews are copied without joining the executable offline shell', () => {
+  const sourceShell = workerSource.match(/const APP_SHELL=(\[[^\]]*\]);/u)?.[1] || '';
+  assert.doesNotMatch(sourceShell, /\/prototypes\//u);
+
+  const definition = frontendBuildSource.match(/function previewOnlyAsset\(name\)\s*\{[\s\S]*?\n\}/u)?.[0];
+  assert.ok(definition, 'frontend build must classify preview-only assets explicitly');
+  const context = vm.createContext({});
+  vm.runInContext(`${definition}; this.previewOnlyAsset = previewOnlyAsset;`, context);
+  assert.equal(context.previewOnlyAsset('prototypes/today-v1/visual-tokens.css'), true);
+  assert.equal(context.previewOnlyAsset('prototypes/future/nested/preview.svg'), true);
+  assert.equal(context.previewOnlyAsset('prototypes/today-v1/prototype.js'), true);
+  for (const productionAsset of ['aisy-theme.css', 'offline.html', 'assets/task.svg']) {
+    assert.equal(context.previewOnlyAsset(productionAsset), false, `${productionAsset} must remain in shell policy`);
+  }
+
+  const copiedDefinition = frontendBuildSource.match(/function copiedStaticAsset\(name\)\s*\{[\s\S]*?\n\}/u)?.[0];
+  assert.ok(copiedDefinition, 'frontend build must copy every preview asset, including ES modules');
+  vm.runInContext(`${copiedDefinition}; this.copiedStaticAsset = copiedStaticAsset;`, context);
+  for (const previewAsset of [
+    'prototypes/today-v1/index.html',
+    'prototypes/today-v1/visual-tokens.css',
+    'prototypes/today-v1/prototype.js',
+  ]) assert.equal(context.copiedStaticAsset(previewAsset), true, `${previewAsset} must be copied for preview`);
+  assert.equal(context.copiedStaticAsset('main.js'), false, 'production modules remain in the executable graph');
+  assert.equal(context.copiedStaticAsset('index.html'), false, 'Vite still owns the production entry document');
+  assert.equal(context.copiedStaticAsset('offline.html'), true, 'ordinary production static assets stay copied');
+
+  assert.match(frontendBuildSource, /const orphaned = sourceFiles\.filter\([^;]+!previewOnlyAsset\(name\)[^;]+\);/u);
+  assert.match(frontendBuildSource, /const staticAssets = publicSourceFiles\.filter\(copiedStaticAsset\);/u);
+  assert.match(
+    frontendBuildSource,
+    /const shellStaticAssets = staticAssets\.filter\(\(name\) => !runtimeManagedAsset\(name\)\s*&&\s*!previewOnlyAsset\(name\)\);/u,
+  );
+});
 
 function createWorker({ cached = {}, networkFails = true, networkResponses = {} } = {}) {
   const listeners = new Map();
