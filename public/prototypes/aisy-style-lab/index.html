@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#fff9f3">
+  <title>Aisy ЕГЭ — Style Lab</title>
+  <link rel="stylesheet" href="./styles/tokens.css?v=6">
+  <link rel="stylesheet" href="./styles/lab.css?v=17">
+</head>
+<body>
+  <header class="lab-toolbar" aria-label="Панель сравнения Aisy">
+    <div class="lab-toolbar__intro">
+      <span class="lab-kicker">Aisy Style Lab</span>
+      <strong>Один маршрут · три стилистики</strong>
+    </div>
+    <div class="lab-control" role="group" aria-label="Стилистика">
+      <button type="button" data-set-direction="a">A · Бумага</button>
+      <button type="button" data-set-direction="b">B · Виджеты</button>
+      <button type="button" data-set-direction="c">C · Сюжет</button>
+    </div>
+    <div class="lab-control" role="group" aria-label="Режим просмотра">
+      <button type="button" data-set-panel="flow">Экраны</button>
+      <button type="button" data-set-panel="components">Компоненты</button>
+      <button type="button" data-set-panel="motion">Анимации</button>
+    </div>
+    <a class="lab-reference" href="../onboarding-v1/index.html?reset=1">Логотип → onboarding → вход</a>
+  </header>
+
+  <main class="review-stage">
+    <section class="phone" data-phone aria-label="Телефонный прототип Aisy">
+      <div class="phone__status" aria-hidden="true">
+        <span>08:08</span>
+        <span class="phone__status-icons">● ◒</span>
+      </div>
+      <div id="app" class="app-frame" aria-live="polite"></div>
+    </section>
+  </main>
+
+  <script type="module" src="./app.js?v=9"></script>
+</body>
+</html>

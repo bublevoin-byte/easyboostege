@@ -4,18 +4,18 @@
 Тикеты: [.scratch/aisy-style-lab/issues/](.scratch/aisy-style-lab/issues/)
 Ветка: `prototype/aisy-today-visual-v1`
 
-Overall status: `in-progress` — три portrait-only направления сравниваются на одном учебном контуре; production UI не изменяется.
+Overall status: `in-progress` — foundation/shell закрыт; начато направление A; production UI не изменяется.
 
 | № | Что даёт | Статус |
 |---|---|---|
 | 01 | Общая трёхслойная дизайн-система и fixture/state-контракт | done |
-| 02 | Телефонный comparison hub, components/states и motion lab | ready-for-agent |
-| 03 | A — бумажный маршрут | blocked by 02 |
-| 04 | B — тактильные виджеты | blocked by 02 |
-| 05 | C — сюжетный маршрут | blocked by 02 |
+| 02 | Телефонный comparison hub, components/states и motion lab | done — round 22 |
+| 03 | A — бумажный маршрут | in-progress — round 0 |
+| 04 | B — тактильные виджеты | ready-for-agent |
+| 05 | C — сюжетный маршрут | ready-for-agent |
 | 06 | Независимая визуальная QA и лист выбора | blocked by 03–05 |
 
-Design-loop: foundation `круг 0` (готов к первому рендеру в тикете 02); A `круг 0`; B `круг 0`; C `круг 0`.
+Design-loop: foundation `круг 22 — ПРОЙДЕНО` на `9` compact + `4` canonical live URL; A `круг 0 — реализация`; B `круг 0`; C `круг 0`.
 
 ---
 

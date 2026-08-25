@@ -84,7 +84,7 @@ shadow direction remain shared.
 
 ## 7. Color and emphasis rules
 
-- Each screen has one coral primary CTA or one coral active answer state, not competing coral panels.
+- Each screen has at most one solid coral primary CTA. Selection uses plum; coral nav/step indicators stay compact.
 - Above the fold, at most two extra chromatic accents are visible beyond the primary action.
 - Goal orange marks a target/milestone. Aqua marks explanation/info. Neither becomes a primary action.
 - State never relies on color alone: icon/shape and copy accompany correct, incorrect, offline and error states.
@@ -108,8 +108,8 @@ Ghost actions are used for back/skip only and retain a 44 px hit area.
 
 ### 8.3 Duration control
 
-One `radiogroup` with 10/20/30/40 minute options. Exactly one option is selected. A selected option uses coral
-outline/soft fill and a text/shape cue. Changing duration updates estimated route content in-place and does not
+One `radiogroup` with 10/20/30/40 minute options. Exactly one option is selected. A selected option uses plum
+outline/raised fill and a text/shape cue. Changing duration updates estimated route content in-place and does not
 navigate.
 
 ### 8.4 Recommendation hero
@@ -125,7 +125,7 @@ Native radio semantics inside a group. Minimum 48 px high.
 | State | Observable treatment |
 |---|---|
 | Default | raised paper, plum boundary |
-| Selected | coral boundary + soft coral surface + selected marker |
+| Selected | plum boundary + soft plum surface + selected marker |
 | Submitted correct | green surface + check + “Верно” text |
 | Submitted incorrect | red surface + cross + selected/correct labels both remain visible |
 | Focus | shared external focus ring |

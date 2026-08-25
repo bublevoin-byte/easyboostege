@@ -111,13 +111,17 @@
   --primitive-size-control: 3rem;
   --primitive-size-cta: 3.625rem;
   --primitive-size-nav: 4.75rem;
+  --primitive-size-phone-compact-width: 22.5rem;
+  --primitive-size-phone-compact-height: 45rem;
   --primitive-size-phone: 24.375rem;
+  --primitive-size-phone-canonical-height: 52.75rem;
 
   --primitive-font-display: "Aisy Nunito", "Aisy Acrom", system-ui, sans-serif;
   --primitive-font-interface: "Aisy Acrom", system-ui, sans-serif;
   --primitive-font-size-label: 0.75rem;
   --primitive-font-size-body: 0.9375rem;
   --primitive-font-size-body-lg: 1rem;
+  --primitive-font-size-title-compact: 1.875rem;
   --primitive-font-size-title: 2rem;
   --primitive-font-size-number: 2.125rem;
   --primitive-font-weight-regular: 400;
@@ -171,6 +175,9 @@
   --color-primary-hover: var(--primitive-color-coral-700);
   --color-primary-soft: var(--primitive-color-coral-150);
   --color-primary-foreground: var(--primitive-color-paper-0);
+  --color-selection: var(--primitive-color-plum-700);
+  --color-selection-soft: var(--primitive-color-plum-100);
+  --color-selection-foreground: var(--primitive-color-paper-0);
   --color-accent: var(--primitive-color-orange-500);
   --color-accent-soft: var(--primitive-color-orange-150);
   --color-support: var(--primitive-color-aqua-700);
@@ -188,6 +195,7 @@
   --font-display: var(--primitive-font-display);
   --font-interface: var(--primitive-font-interface);
   --text-title-size: var(--primitive-font-size-title);
+  --text-title-size-compact: var(--primitive-font-size-title-compact);
   --text-title-leading: var(--primitive-leading-tight);
   --text-title-weight: var(--primitive-font-weight-heavy);
   --text-body-size: var(--primitive-font-size-body);
@@ -202,7 +210,10 @@
   --space-group: var(--primitive-space-4);
   --space-control: var(--primitive-space-3);
   --size-touch-min: var(--primitive-size-touch);
+  --size-phone-compact-width: var(--primitive-size-phone-compact-width);
+  --size-phone-compact-height: var(--primitive-size-phone-compact-height);
   --size-phone-max: var(--primitive-size-phone);
+  --size-phone-canonical-height: var(--primitive-size-phone-canonical-height);
 
   --radius-surface: var(--primitive-radius-xl);
   --radius-control: var(--primitive-radius-md);
@@ -266,7 +277,11 @@
 :root {
   --phone-bg: var(--color-canvas);
   --phone-fg: var(--color-text);
+  --phone-compact-width: var(--size-phone-compact-width);
+  --phone-compact-height: var(--size-phone-compact-height);
   --phone-max-width: var(--size-phone-max);
+  --phone-canonical-height: var(--size-phone-canonical-height);
+  --header-padding-x: calc(var(--space-page-x) + var(--primitive-space-2));
 
   --hero-bg: var(--color-surface-soft);
   --hero-fg: var(--color-text-strong);
@@ -299,8 +314,10 @@
   --choice-bg: var(--color-surface-raised);
   --choice-fg: var(--color-text);
   --choice-border: var(--color-border-strong);
-  --choice-selected-bg: var(--color-primary-soft);
-  --choice-selected-border: var(--color-primary);
+  --choice-selected-bg: var(--color-selection-soft);
+  --choice-selected-border: var(--color-selection);
+  --choice-selected-fg: var(--color-selection);
+  --choice-selected-marker-fg: var(--color-selection-foreground);
   --choice-correct-bg: var(--color-success-soft);
   --choice-correct-fg: var(--color-success);
   --choice-incorrect-bg: var(--color-danger-soft);
@@ -329,6 +346,11 @@
   --alert-error-bg: var(--color-danger-soft);
   --alert-error-fg: var(--color-danger);
   --alert-radius: var(--radius-control);
+
+  --motion-stage-height: 17rem;
+  --motion-stage-height-compact: 14.5rem;
+  --motion-stage-margin-y: var(--primitive-space-5);
+  --motion-stage-margin-y-compact: var(--primitive-space-3);
 
   --nav-bg: var(--color-surface-raised);
   --nav-fg: var(--color-text-muted);
