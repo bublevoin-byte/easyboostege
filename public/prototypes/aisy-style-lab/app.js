@@ -2,6 +2,7 @@ import {
   DIRECTIONS,
   FLOW_SCREENS,
   LAB_FIXTURE,
+  normalizeDecisionState,
   normalizeLabState,
   projectScreen,
   stateFromSearch,
@@ -13,7 +14,7 @@ const phone = document.querySelector('[data-phone]');
 const toolbar = document.querySelector('.lab-toolbar');
 const params = new URLSearchParams(location.search);
 
-const validPanels = new Set(['flow', 'components', 'motion', 'nav']);
+const validPanels = new Set(['flow', 'components', 'motion', 'nav', 'decision']);
 const flowScreenIndex = new Map(FLOW_SCREENS.map(({ id }, index) => [id, index]));
 const initialCarrier = params.get('carrier');
 const initialFocus = params.get('focus');
@@ -22,6 +23,11 @@ let state = {
   panel: validPanels.has(params.get('panel')) ? params.get('panel') : 'flow',
   embed: params.get('embed') === '1',
 };
+let decision = normalizeDecisionState({
+  base: params.get('base'),
+  borrowings: params.getAll('borrow'),
+});
+if (decision.base) state.direction = decision.base;
 let runtime = {
   duration: LAB_FIXTURE.today.duration,
   selectedOptionId: LAB_FIXTURE.task.selectedOptionId,
@@ -49,6 +55,10 @@ function updateUrl({ push = false } = {}) {
   next.searchParams.set('screen', state.screen);
   next.searchParams.set('state', state.fixtureState);
   next.searchParams.set('panel', state.panel);
+  if (decision.base) next.searchParams.set('base', decision.base);
+  else next.searchParams.delete('base');
+  next.searchParams.delete('borrow');
+  decision.borrowings.forEach((id) => next.searchParams.append('borrow', id));
   if (state.embed) next.searchParams.set('embed', '1');
   else next.searchParams.delete('embed');
   history[push ? 'pushState' : 'replaceState'](state, '', next);
@@ -189,7 +199,8 @@ async function render() {
   app.dataset.paperChromeTransitioning = paperOutgoing ? 'true' : 'false';
   app.dataset.cRouteTransition = isStoryForwardTransition ? 'forward' : 'static';
 
-  if (state.panel === 'components') app.innerHTML = foundation.renderComponents(viewModel);
+  if (state.panel === 'decision') app.innerHTML = foundation.renderDecision(viewModel, decision);
+  else if (state.panel === 'components') app.innerHTML = foundation.renderComponents(viewModel);
   else if (state.panel === 'nav') app.innerHTML = foundation.renderNavProof(viewModel);
   else if (state.panel === 'motion') app.innerHTML = foundation.renderMotion(viewModel, motionPlaying);
   else app.innerHTML = renderer.renderScreen(viewModel, runtime);
@@ -281,12 +292,44 @@ document.addEventListener('click', (event) => {
 
   if (button.dataset.setDirection) {
     clearBNavigation();
+    if (state.panel === 'decision') {
+      decision = normalizeDecisionState({
+        base: button.dataset.setDirection,
+        borrowings: decision.borrowings,
+      });
+    }
     setPartial({ direction: button.dataset.setDirection });
     return;
   }
   if (button.dataset.setPanel) {
     clearBNavigation();
     setPartial({ panel: button.dataset.setPanel });
+    return;
+  }
+  if (button.dataset.setBase) {
+    decision = normalizeDecisionState({
+      base: button.dataset.setBase,
+      borrowings: decision.borrowings,
+    });
+    queueFocus(`[data-set-base="${CSS.escape(decision.base)}"]`);
+    setPartial({ direction: decision.base, panel: 'decision' });
+    return;
+  }
+  if (button.dataset.toggleBorrowing) {
+    const borrowingId = button.dataset.toggleBorrowing;
+    const nextBorrowings = decision.borrowings.includes(borrowingId)
+      ? decision.borrowings.filter((id) => id !== borrowingId)
+      : [...decision.borrowings, borrowingId];
+    decision = normalizeDecisionState({ base: decision.base, borrowings: nextBorrowings });
+    queueFocus(`[data-toggle-borrowing="${CSS.escape(borrowingId)}"]`);
+    updateUrl({ push: true });
+    render();
+    return;
+  }
+  if (button.hasAttribute('data-reset-decision')) {
+    decision = normalizeDecisionState();
+    queueFocus('[data-set-base="a"]');
+    setPartial({ direction: 'a', panel: 'decision' });
     return;
   }
   if (button.dataset.setScreen) {
@@ -355,6 +398,11 @@ window.addEventListener('popstate', () => {
     panel: validPanels.has(nextParams.get('panel')) ? nextParams.get('panel') : 'flow',
     embed: nextParams.get('embed') === '1',
   };
+  decision = normalizeDecisionState({
+    base: nextParams.get('base'),
+    borrowings: nextParams.getAll('borrow'),
+  });
+  if (decision.base) state.direction = decision.base;
   document.body.dataset.embed = String(state.embed);
   const nextCarrier = nextParams.get('carrier');
   document.body.dataset.carrier = String(Boolean(nextCarrier));

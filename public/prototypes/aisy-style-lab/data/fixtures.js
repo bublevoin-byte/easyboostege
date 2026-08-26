@@ -6,9 +6,18 @@ const deepFreeze = (value) => {
 };
 
 export const DIRECTIONS = deepFreeze([
-  { id: 'a', label: 'A', name: 'Бумажный маршрут', signature: 'paper-layers' },
-  { id: 'b', label: 'B', name: 'Тактильные виджеты', signature: 'tactile-press' },
-  { id: 'c', label: 'C', name: 'Сюжетный маршрут', signature: 'route-draw' },
+  { id: 'a', label: 'A', name: 'Бумажный маршрут', signature: 'paper-layers', decisionHint: 'Ближе всего к onboarding' },
+  { id: 'b', label: 'B', name: 'Тактильные виджеты', signature: 'tactile-press', decisionHint: 'Самый предметный и игровой' },
+  { id: 'c', label: 'C', name: 'Сюжетный маршрут', signature: 'route-draw', decisionHint: 'Самый эмоциональный путь' },
+]);
+
+export const BORROWINGS = deepFreeze([
+  { id: 'a-route-map', direction: 'a', label: 'Карта на бумаге', detail: 'Сложенный маршрут внутри Today' },
+  { id: 'a-paper-transition', direction: 'a', label: 'Смена листов', detail: 'Мягкий переход между шагами' },
+  { id: 'b-tactile-controls', direction: 'b', label: 'Тактильные контролы', detail: 'Физичное нажатие и выбор' },
+  { id: 'b-seat-release', direction: 'b', label: 'Seat / release', detail: 'Короткий отклик перед переходом' },
+  { id: 'c-story-landmarks', direction: 'c', label: 'Ориентиры пути', detail: 'Флаг, задача, разбор и цель' },
+  { id: 'c-route-draw', direction: 'c', label: 'Прорисовка маршрута', detail: 'Продвижение к следующему шагу' },
 ]);
 
 export const FLOW_SCREENS = deepFreeze([
@@ -121,8 +130,19 @@ export const LAB_FIXTURE = deepFreeze({
 });
 
 const validDirectionIds = new Set(DIRECTIONS.map(({ id }) => id));
+const validBorrowingIds = new Set(BORROWINGS.map(({ id }) => id));
 const validScreenIds = new Set(FLOW_SCREENS.map(({ id }) => id));
 const validFixtureStates = new Set(Object.keys(LAB_FIXTURE.states));
+
+export function normalizeDecisionState(input = {}) {
+  const base = validDirectionIds.has(input.base) ? input.base : '';
+  if (!base) return { base: '', borrowings: [] };
+  const borrowings = [...new Set(Array.isArray(input.borrowings) ? input.borrowings : [])]
+    .filter((id) => validBorrowingIds.has(id))
+    .filter((id) => BORROWINGS.find((item) => item.id === id)?.direction !== base)
+    .slice(0, 2);
+  return { base, borrowings };
+}
 
 export function normalizeLabState(input = {}) {
   return {

@@ -11,6 +11,7 @@ import {
   routeBlocksForDuration,
   wrapFlow,
 } from './common.js';
+import { BORROWINGS, DIRECTIONS } from '../data/fixtures.js';
 
 const surfaceClassName = (base, extra = '') => [base, extra].filter(Boolean).join(' ');
 
@@ -156,6 +157,66 @@ export function renderNavProof(viewModel) {
       <section class="nav-proof-card">
         <small>Пять разделов в полном размере</small>
         <div class="nav-specimen">${renderBottomNav('today')}</div>
+      </section>
+    </div>${renderBottomNav('today')}`;
+}
+
+export function renderDecision(viewModel, decision = { base: '', borrowings: [] }) {
+  const selectedBorrowings = new Set(decision.borrowings);
+  const selectedBase = DIRECTIONS.find(({ id }) => id === decision.base);
+  const borrowingLimitReached = selectedBorrowings.size >= 2;
+  const availableBorrowings = selectedBase
+    ? BORROWINGS.filter((item) => item.direction !== selectedBase.id)
+    : BORROWINGS;
+  const baseOptions = DIRECTIONS.map((direction) => {
+    const selected = direction.id === decision.base;
+    const tabStop = selected || (!decision.base && direction.id === DIRECTIONS[0].id);
+    return `<button class="decision-base-card${selected ? ' is-selected' : ''}" type="button" role="radio" aria-checked="${selected}" tabindex="${tabStop ? '0' : '-1'}" data-set-base="${escapeHTML(direction.id)}">
+      <span>${escapeHTML(direction.label)}</span>
+      <strong>${escapeHTML(direction.name)}</strong>
+      <small>${escapeHTML(direction.decisionHint)}</small>
+    </button>`;
+  }).join('');
+  const borrowingOptions = availableBorrowings.map((item) => {
+    const selected = selectedBorrowings.has(item.id);
+    const disabled = !decision.base || (borrowingLimitReached && !selected);
+    const direction = DIRECTIONS.find(({ id }) => id === item.direction);
+    const stateLabel = selected
+      ? 'Выбрано'
+      : !decision.base
+          ? 'Сначала основа'
+          : borrowingLimitReached
+            ? 'Лимит 2 из 2'
+            : `Из ${direction.label}`;
+    return `<button class="decision-borrow${selected ? ' is-selected' : ''}" type="button" role="checkbox" aria-checked="${selected}" data-toggle-borrowing="${escapeHTML(item.id)}"${disabled ? ' disabled aria-disabled="true"' : ''}>
+      <span><b>${escapeHTML(direction.label)}</b><strong>${escapeHTML(item.label)}</strong></span>
+      <small>${escapeHTML(item.detail)}</small>
+      <em>${escapeHTML(stateLabel)}</em>
+    </button>`;
+  }).join('');
+  const selectedLabels = decision.borrowings.map((id) => BORROWINGS.find((item) => item.id === id)?.label).filter(Boolean);
+  const summaryTitle = selectedBase ? `${selectedBase.label} · ${selectedBase.name}` : 'Основа ещё не выбрана';
+
+  return `${renderPhoneHeader(viewModel)}
+    <div class="app-scroll decision-scroll">
+      <div class="gallery-heading decision-heading"><span class="eyebrow">Лист решения</span><h1>Зафиксируй стилистику</h1><p>Одна основа и максимум два точных заимствования.</p></div>
+      <section class="decision-section" aria-labelledby="decision-base-title">
+        <div class="decision-section__heading"><span><b>1</b><strong id="decision-base-title">Выбери основу</strong></span><small>Обязательный выбор</small></div>
+        <div class="decision-base-group" role="radiogroup" aria-label="Основная стилистика">${baseOptions}</div>
+      </section>
+      <section class="decision-section" aria-labelledby="decision-borrow-title">
+        <div class="decision-section__heading"><span><b>2</b><strong id="decision-borrow-title">Добавь детали</strong></span><small class="decision-counter" role="status">${selectedBorrowings.size} из 2</small></div>
+        <div class="decision-borrow-group" role="group" aria-label="Заимствования из других направлений">${borrowingOptions}</div>
+      </section>
+      <section class="decision-summary" data-complete="${Boolean(selectedBase)}" aria-label="Итог выбора">
+        <small>Твой выбор</small>
+        <strong>${escapeHTML(summaryTitle)}</strong>
+        <p>${selectedBase
+          ? selectedLabels.length
+            ? `Заимствования: ${selectedLabels.map(escapeHTML).join(' · ')}`
+            : 'Без заимствований — чистое направление.'
+          : 'Сначала выбери A, B или C. Ссылка обновится автоматически.'}</p>
+        <button class="secondary-button" type="button" data-reset-decision${selectedBase || selectedBorrowings.size ? '' : ' disabled'}>Сбросить выбор</button>
       </section>
     </div>${renderBottomNav('today')}`;
 }

@@ -10,8 +10,9 @@ const directionAUrl = new URL('public/prototypes/aisy-style-lab/renderers/a.js',
 const directionBUrl = new URL('public/prototypes/aisy-style-lab/renderers/b.js', root);
 const directionCUrl = new URL('public/prototypes/aisy-style-lab/renderers/c.js', root);
 const commonRendererUrl = new URL('public/prototypes/aisy-style-lab/renderers/common.js', root);
+const openingReviewUrl = new URL('public/prototypes/aisy-style-lab/opening.html', root);
 
-const [tokens, labCss, fixtureSource, appSource, directionASource, directionBSource, directionCSource, commonRendererSource] = await Promise.all([
+const [tokens, labCss, fixtureSource, appSource, directionASource, directionBSource, directionCSource, commonRendererSource, openingReviewSource] = await Promise.all([
   readFile(tokenUrl, 'utf8'),
   readFile(labCssUrl, 'utf8'),
   readFile(fixtureUrl, 'utf8'),
@@ -20,6 +21,7 @@ const [tokens, labCss, fixtureSource, appSource, directionASource, directionBSou
   readFile(directionBUrl, 'utf8'),
   readFile(directionCUrl, 'utf8'),
   readFile(commonRendererUrl, 'utf8'),
+  readFile(openingReviewUrl, 'utf8'),
 ]);
 
 const semanticMarker = tokens.indexOf('LAYER 2');
@@ -37,6 +39,12 @@ assert.match(tokens, /@media\s*\(prefers-reduced-motion:\s*reduce\)/, 'reduced-m
 assert.match(appSource, /searchParams\.set\('direction'/, 'direction is not persisted in the URL');
 assert.match(appSource, /searchParams\.set\('screen'/, 'screen is not persisted in the URL');
 assert.match(appSource, /searchParams\.set\('state'/, 'fixture state is not persisted in the URL');
+assert.match(appSource, /searchParams\.set\('base'/, 'decision base is not persisted in the URL');
+assert.match(appSource, /searchParams\.append\('borrow'/, 'decision borrowings are not persisted as repeatable URL values');
+assert.match(appSource, /renderDecision/, 'phone-only decision worksheet is missing');
+assert.match(openingReviewSource, /VK — placeholder; backend авторизации ещё не подключён/, 'login review must visibly disclose the VK placeholder');
+assert.match(openingReviewSource, /onboarding-v1\/index\.html\?reset=1/, 'opening review must preserve the approved logo/onboarding/login flow');
+assert.match(labCss, /\.opening-review-note\s*\{[^}]*position:\s*sticky/s, 'login disclosure must remain visible when the opening wrapper scrolls');
 assert.match(appSource, /dataset\.targetScreen/, 'fixture CTA targets are not used for flow navigation');
 assert.match(appSource, /capturePaperOutgoing/, 'Direction A has no outgoing paper transition seam');
 assert.match(directionASource, /a-route-map/, 'Direction A folded route map is missing');
@@ -85,7 +93,21 @@ assert.match(
 
 const fixtureModule = await import(fixtureUrl.href);
 assert.equal(fixtureModule.DIRECTIONS.length, 3, 'comparison must have exactly three directions');
+assert.equal(fixtureModule.BORROWINGS.length, 6, 'decision worksheet must expose two mechanics per direction');
 assert.equal(fixtureModule.FLOW_SCREENS.length, 4, 'comparison flow must have exactly four screens');
+assert.deepEqual(
+  fixtureModule.normalizeDecisionState({
+    base: 'a',
+    borrowings: ['a-route-map', 'b-tactile-controls', 'b-tactile-controls', 'c-route-draw', 'c-story-landmarks'],
+  }),
+  { base: 'a', borrowings: ['b-tactile-controls', 'c-route-draw'] },
+  'decision state must reject same-base mechanics, deduplicate and cap borrowings at two',
+);
+assert.deepEqual(
+  fixtureModule.normalizeDecisionState({ base: 'z', borrowings: ['b-tactile-controls', 'c-route-draw'] }),
+  { base: '', borrowings: [] },
+  'decision state must clear even valid borrowings when the base is unknown',
+);
 assert.deepEqual(
   fixtureModule.NAV_ITEMS.map(({ label }) => label),
   ['Сегодня', 'Практика', 'ЕГЭ', 'Прогресс', 'Профиль'],

@@ -4,7 +4,7 @@
 Тикеты: [.scratch/aisy-style-lab/issues/](.scratch/aisy-style-lab/issues/)
 Ветка: `prototype/aisy-today-visual-v1`
 
-Overall status: `in-progress` — foundation/shell и направления A/B/C закрыты; собирается финальный лист выбора; production UI не изменяется.
+Overall status: `ready-for-owner-selection` — comparison lab, A/B/C, первый запуск и лист решения проверены; production UI не изменён.
 
 | № | Что даёт | Статус |
 |---|---|---|
@@ -13,9 +13,9 @@ Overall status: `in-progress` — foundation/shell и направления A/B
 | 03 | A — бумажный маршрут | done — round 7 |
 | 04 | B — тактильные виджеты | done — round 4 |
 | 05 | C — сюжетный маршрут | done — round 2 |
-| 06 | Независимая визуальная QA и лист выбора | ready-for-agent |
+| 06 | Независимая визуальная QA и лист выбора | ready-for-human — round 3 |
 
-Design-loop: foundation `круг 22 — ПРОЙДЕНО`; A `круг 7 — ПРОЙДЕНО`; B `круг 4 — ПРОЙДЕНО`; C `круг 2 — ПРОЙДЕНО`.
+Design-loop: foundation `круг 22 — ПРОЙДЕНО`; A `круг 7 — ПРОЙДЕНО`; B `круг 4 — ПРОЙДЕНО`; C `круг 2 — ПРОЙДЕНО`; финальное сравнение `круг 3 — ПРОЙДЕНО`.
 
 ---
 
