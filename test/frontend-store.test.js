@@ -13,7 +13,7 @@ const applyDeletedOwnerSource = appSource.match(
   /function applyDeletedOwner\(update\)\{[\s\S]*?\n\}/u,
 )[0];
 const invalidateLearningAuthoritySource = appSource.match(
-  /async function invalidateLearningAuthority\(authority\)\{[\s\S]*?\n\}/u,
+  /async function invalidateLearningAuthority\(authority,\{deferPresentation=false\}=\{\}\)\{[\s\S]*?\n\}/u,
 )[0];
 const clearNoSessionAuthoritySource = appSource.match(
   /async function clearNoSessionAuthority\(authGuard\)\{[\s\S]*?\n\}/u,
@@ -55,6 +55,7 @@ function createStartLearningHarness({
     ADOPTED_OWNER_GENERATION: 0,
     classifyLearningAccess() { return { state: 'active' }; },
     applyLearningAccess() {},
+    authorizeLearningShell() {},
     currentOwnerAuthorityCurrent() { return true; },
     adoptServerSession(session) {
       context.AUTH_SESSION_GENERATION += 1;
@@ -272,8 +273,10 @@ test('server session adoption stays inside the durable owner-incarnation lock', 
     'a stale or timed-out /me response cannot commit after logout, deletion or deadline');
   assert.match(appSource, /commit:function\(committedGeneration\)\{return adoptServerSession\(current,committedGeneration\)\}/u,
     'app session state is written only by the adoption lock callback');
-  assert.match(appSource, /if\(adopted!==sessionOwner\)return\{state:LEARNING_ACCESS_STATES\.NETWORK_UNKNOWN,session:null,stale:true\}/u,
-    'failed or stale adoption must not open a learner session');
+  assert.match(appSource, /if\(adopted!==sessionOwner\)return failClosedStaleAuthority\(\)/u,
+    'failed or stale adoption must revoke any prior learner presentation');
+  assert.match(appSource, /if\(authGuard\.owner&&sessionOwner!==authGuard\.owner\)return failClosedStaleAuthority\(\)/u,
+    'an unbound owner mismatch must fail closed before any new adoption');
   assert.doesNotMatch(appSource, /auth\.(?:login|register|startTelegramLogin|checkTelegramLogin)\(/u,
     'removed password and Telegram learner flows cannot bypass the canonical /me adoption seam');
 });
@@ -281,7 +284,7 @@ test('server session adoption stays inside the durable owner-incarnation lock', 
 test('authoritative no-session clears only the generation-bound current-owner marker', () => {
   assert.match(clearNoSessionAuthoritySource, /previousOwner=authGuard\.owner,previousGeneration=authGuard\.ownerGeneration/u);
   assert.match(clearNoSessionAuthoritySource, /store\.clearCurrentOwner\?\.\(previousOwner,previousGeneration\)/u);
-  assert.match(clearNoSessionAuthoritySource, /currentUser=null;S=null;window\.__sub=null/u);
+  assert.match(clearNoSessionAuthoritySource, /currentUser=null;currentDisplayName=null;S=null;window\.__sub=null/u);
   assert.doesNotMatch(appSource, /else\{[^}]*deleteUserData/u,
     'natural session expiry must not delete the previous learner data partition');
 });
@@ -307,7 +310,9 @@ test('a real 401 /me response clears the stale marker before another VK account 
     classifyLearningAccess() { return { state: 'no-session', session: null }; },
     LEARNING_ACCESS_STATES: { NETWORK_UNKNOWN: 'network-unknown', NO_SESSION: 'no-session' },
     offlineEgeMockContinuation() { return null; },
-    closeAccessGate() {}, hideLearningShell() {}, queueMicrotask() {}, tab() {}, applyLearningAccess() {},
+    closeAccessGate() {}, hideLearningShell() { calls.push('hide-shell'); },
+    firstLaunch: { showLogin() { calls.push('show-login'); } },
+    queueMicrotask() {}, tab() {}, applyLearningAccess() {},
     Number, Boolean, Object, String, Date, Promise,
   });
   vm.runInContext(`${clearNoSessionAuthoritySource}\n${checkLearningAccessSource}\nthis.checkLearningAccess=checkLearningAccess;`, context);
@@ -317,7 +322,53 @@ test('a real 401 /me response clears the stale marker before another VK account 
   assert.equal(context.ADOPTED_OWNER_GENERATION, null);
   assert.equal(context.TOKEN, '');
   assert.equal(context.S, null);
-  assert.deepEqual(calls, ['remember:null:null', 'set-owner:null', 'clear:owner-a:3']);
+  assert.deepEqual(calls, [
+    'remember:null:null', 'set-owner:null', 'hide-shell', 'clear:owner-a:3',
+  ]);
+});
+
+test('an authenticated /me owner mismatch closes the prior learner before returning unknown authority', async () => {
+  for (const deferPresentation of [false, true]) {
+    const calls = [];
+    const context = vm.createContext({
+      SRV: true,
+      currentUser: 'owner-a', ADOPTED_OWNER_GENERATION: 3, AUTH_SESSION_GENERATION: 7,
+      TOKEN: 'cookie', S: { learned: 19 }, OFFLINE_EGE_MOCK_CONTINUATION: false,
+      window: { __sub: { username: 'owner-a' } },
+      auth: { async currentSession() { return { authenticated: true, active: true, username: 'owner-b' }; } },
+      store: {
+        sync: {
+          ownerAuthSnapshot(owner) {
+            return owner ? { ownerGeneration: owner === 'owner-a' ? 3 : 0, deleted: false }
+              : { globalGeneration: 8 };
+          },
+        },
+      },
+      normalizedAuthOwner(value) { return String(value || '').trim() || null; },
+      classifyLearningAccess(session) { return { state: 'active', session }; },
+      LEARNING_ACCESS_STATES: { ACTIVE: 'active', NETWORK_UNKNOWN: 'network-unknown', NO_SESSION: 'no-session' },
+      async invalidateLearningAuthority(authority, options) {
+        calls.push(`invalidate:${authority.owner}:${authority.ownerGeneration}:${options.deferPresentation}`);
+        context.currentUser = null; context.ADOPTED_OWNER_GENERATION = null; context.TOKEN = '';
+        return true;
+      },
+      applyLearningAccess(result) { calls.push(`apply:${result.state}`); },
+      closeAccessGate() {}, hideLearningShell() { calls.push('hide-shell'); },
+      Number, Boolean, Object, String, Date, Promise,
+    });
+    vm.runInContext(`${clearNoSessionAuthoritySource}\n${checkLearningAccessSource}\nthis.checkLearningAccess=checkLearningAccess;`, context);
+    const result = await context.checkLearningAccess(null, { deferPresentation });
+
+    assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+      state: 'network-unknown', session: null, stale: true,
+    });
+    assert.deepEqual(calls, [
+      `invalidate:owner-a:3:${deferPresentation}`,
+      ...(deferPresentation ? [] : ['apply:network-unknown']),
+    ]);
+    assert.equal(context.currentUser, null);
+    assert.equal(context.TOKEN, '');
+  }
 });
 
 test('owner deletion logs out only the matching session while durable sync authority invalidates every pending auth', () => {

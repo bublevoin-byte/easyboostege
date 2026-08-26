@@ -48,7 +48,9 @@ test('Reading 2 exposes accessible status, review and responsive styling contrac
   assert.match(html, /\.reading2[^}]*overflow-x:hidden/su);
   assert.match(html, /\.reading-text[^}]*max-width:7[02]ch/su);
   assert.match(html, /\.reading-(?:action|answer)[^}]*min-height:4[48]px/su);
-  assert.match(html, /@media\(min-width:768px\)[^{]*\{[^}]*reading/su);
+  assert.match(html, /\.reading2\{[^}]*max-width:100%/su);
+  assert.doesNotMatch(html, /@media\(min-width:[^)]+\)[^{]*\{[^}]*reading/su,
+    'Reading must keep the portrait-phone layout instead of widening at desktop viewports');
   assert.match(html, /@media\(prefers-reduced-motion:reduce\)[^{]*\{[^}]*reading/su);
 });
 

@@ -18,7 +18,7 @@ function createProgressModule() {
   return window.EasyBoostProgress;
 }
 
-test('public plan presentation collapses the internal base tier into honest Premium capability copy', () => {
+test('public plan presentation keeps internal tiers out of strict active-access copy', () => {
   const presentation = presentPublicPlan({
     tier: 'base',
     capabilities: {
@@ -29,8 +29,8 @@ test('public plan presentation collapses the internal base tier into honest Prem
   });
 
   assert.deepEqual(presentation, {
-    id: 'premium',
-    label: 'Premium',
+    id: 'active',
+    label: 'Активный доступ',
     summary: 'Персональный план доступен. Глубокая диагностика и подробные отчёты не входят в текущий доступ.',
     capabilities: [
       { id: 'personal-plan', label: 'Персональный план', available: true },
@@ -38,7 +38,7 @@ test('public plan presentation collapses the internal base tier into honest Prem
       { id: 'detailed-reports', label: 'Подробные отчёты', available: false },
     ],
   });
-  assert.doesNotMatch(JSON.stringify(presentation), /Base/u);
+  assert.doesNotMatch(JSON.stringify(presentation), /Base|Free|Premium|демо/iu);
 });
 
 test('progress narrative leads with a private aggregate next action and separates evidence quality', () => {
@@ -80,30 +80,30 @@ test('progress narrative leads with a private aggregate next action and separate
   assert.match(publicCopy, /если используется, экспериментальна.*не является официальным результатом ЕГЭ/u);
 });
 
-test('profile and adaptive errors expose only Free and Premium terminology', () => {
+test('profile and adaptive errors expose strict access and an honest operator next step', () => {
   assert.deepEqual(presentProfilePlan({
     active: true,
     entitlements: { voice_tutor: false },
   }), {
-    id: 'premium',
-    label: 'Premium',
+    id: 'active',
+    label: 'Активный доступ',
     summary: 'Основной учебный доступ активен. Голосовой разбор Аси не входит в текущий доступ.',
     voiceTutorAvailable: false,
   });
   assert.deepEqual(presentProfilePlan(null), {
-    id: 'free',
-    label: 'Free',
-    summary: 'Основная практика доступна без оплаты.',
+    id: 'inactive',
+    label: 'Доступ не активирован',
+    summary: 'Обратитесь к оператору, который выдал доступ.',
     voiceTutorAvailable: false,
   });
   assert.equal(
     presentCommercialError({ code: 'ADAPTIVE_BASE_REQUIRED' }),
-    'Для постоянного персонального плана нужен Premium.',
+    'Текущего доступа недостаточно. Обратитесь к оператору, который выдал доступ.',
   );
   assert.doesNotMatch([
     presentCommercialError({ code: 'ADAPTIVE_BASE_REQUIRED' }),
     presentCommercialError({ code: 'ADAPTIVE_FREE_DIAGNOSTIC_USED' }),
-  ].join(' '), /Base/u);
+  ].join(' '), /Base|Free|Premium|демо|checkout/iu);
 });
 
 test('versioned legacy disclaimers are presented with the current public brand', () => {
@@ -136,6 +136,7 @@ test('Progress and Profile expose the approved learner information hierarchy wit
   assert.match(progressScreen, /presentPublicBrand\(EGE_MOCK_FORECAST_METADATA\.disclaimer\)/u);
   assert.match(progressScreen, /navigateTopLevel\('aisy-practice'\)/u);
   assert.doesNotMatch(progressMarkup, />[^<]*Base[^<]*</u);
+  assert.doesNotMatch(progressMarkup, />[^<]*(?:Free|демо|checkout|без оплаты)[^<]*</iu);
   assert.doesNotMatch(progressMarkup, />[^<]*IELTS[^<]*</u);
   assert.doesNotMatch(progressScreen, /['"`][^'"`]*Base[^'"`]*['"`]/u);
   assert.doesNotMatch(progressScreen, /['"`][^'"`]*IELTS[^'"`]*['"`]/u);
@@ -156,6 +157,8 @@ test('Progress and Profile expose the approved learner information hierarchy wit
   assert.match(profileMarkup, /Ася[^<]*микрофон|микрофон[^<]*Ася/iu);
   assert.doesNotMatch(profileMarkup, /родител|преподавател|учител/iu);
   assert.doesNotMatch(profileMarkup, />[^<]*Base[^<]*</u);
+  assert.doesNotMatch(profileMarkup, />[^<]*(?:Free|демо|checkout|без оплаты)[^<]*</iu);
+  assert.doesNotMatch(progressScreen, /['"`][^'"`]*(?:Free-демо|бесплатное пробное|нужен Premium)[^'"`]*['"`]/iu);
   assert.match(profileScreen, /presentProfilePlan/u);
   assert.match(privacy, /getElementById\('profile_privacy_actions'\)/u);
   assert.match(privacy, /getElementById\('profile_data_actions'\)/u);

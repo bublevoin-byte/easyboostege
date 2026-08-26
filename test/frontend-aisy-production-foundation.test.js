@@ -128,7 +128,14 @@ test('shared production components expose full-width, loading, disabled and non-
 });
 
 test('production shell keeps one 390px phone and bottom navigation at every viewport width', async () => {
-  const css = await readPublic('aisy-shell.css');
+  const [css, html, practice, ege, progress, assistant] = await Promise.all([
+    readPublic('aisy-shell.css'),
+    readPublic('index.html'),
+    readPublic('practice.css'),
+    readPublic('ege-hub.css'),
+    readPublic('progress-profile.css'),
+    readPublic('asya-assistant.css'),
+  ]);
 
   assert.match(css, /#frame\s*\{[^}]*inline-size:\s*min\(100vw,\s*var\(--aisy-phone-inline-size\)\)/su);
   assert.match(css, /#frame\s*>\s*\.screen\s*\{[^}]*inline-size:\s*100%[^}]*block-size:\s*100%/su);
@@ -136,4 +143,9 @@ test('production shell keeps one 390px phone and bottom navigation at every view
   assert.match(css, /\.aisy-shell-nav__list\s*\{[^}]*grid-template-columns:\s*repeat\(5,\s*minmax\(0,\s*1fr\)\)/su);
   assert.doesNotMatch(css, /@media\s*\(min-width:\s*900px\)/u);
   assert.doesNotMatch(css, /grid-template-columns:\s*1fr\s*;\s*grid-template-rows:\s*repeat\(5/iu);
+  const composed = [html, practice, ege, progress, assistant].join('\n');
+  assert.doesNotMatch(composed, /#frame\.(?:reading|ege-mock)-expanded[^}]*\b(?:1100|1180)px/u,
+    'deep routes must not widen the production phone canvas');
+  assert.doesNotMatch(composed, /@media\s*\(min-width/u,
+    'wide viewports must not mutate the inner portrait-phone composition');
 });

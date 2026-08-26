@@ -76,7 +76,7 @@
 
   function subscriptionStatus(session, now) {
     if (!session || !session.sub_until) {
-      return { state: 'none', daysLeft: 0, text: 'Доступ не активирован — открой бота', ...SUBSCRIPTION_STYLES.none };
+      return { state: 'none', daysLeft: 0, text: 'Доступ не активирован — обратитесь к оператору', ...SUBSCRIPTION_STYLES.none };
     }
     const until = Number(session.sub_until) || 0;
     const daysLeft = Math.max(0, Math.ceil((until - (Number(now) || 0)) / DAY_MS));

@@ -87,6 +87,20 @@ async function chromeExecutable() {
   throw new Error('Chrome/Chromium executable was not found. Set CHROME_PATH.');
 }
 
+async function returningLearnerContext(browser, options = {}) {
+  const context = await browser.newContext(options);
+  await context.addInitScript(() => {
+    try {
+      if (!localStorage.getItem('aisy.onboarding.completion')) {
+        localStorage.setItem('aisy.onboarding.completion', JSON.stringify({
+          version: 1, completedAt: '2026-08-26T00:00:00.000Z',
+        }));
+      }
+    } catch {}
+  });
+  return context;
+}
+
 async function openProgress(page) {
   await page.locator('#scr1.on').waitFor({ state: 'visible', timeout: 5_000 });
   await page.getByRole('navigation', { name: 'Основные разделы' })
@@ -315,7 +329,7 @@ async function runAdaptiveDiagnosticE2E() {
     await waitForReady(baseUrl, child, output);
 
     browser = await chromium.launch({ headless: true, executablePath: await chromeExecutable() });
-    context = await browser.newContext({ serviceWorkers: 'block' });
+    context = await returningLearnerContext(browser, { serviceWorkers: 'block' });
     const blockedExternalUrls = [];
     await context.route('https://**', async (route) => {
       blockedExternalUrls.push(route.request().url());
@@ -360,7 +374,7 @@ async function runAdaptiveDiagnosticE2E() {
     await progressEntry.press('Enter');
     await page.locator('#scr10.on').waitFor({ state: 'visible', timeout: 5_000 });
     await page.locator('#adaptive_plan:not([hidden])').waitFor({ state: 'visible', timeout: 5_000 });
-    await page.locator('#adaptive_access[data-tier="premium"]').waitFor({ state: 'visible', timeout: 5_000 });
+    await page.locator('#adaptive_access[data-tier="active"]').waitFor({ state: 'visible', timeout: 5_000 });
     await page.evaluate(() => window.tab('scr11'));
     const profileEntry = page.locator('#profile_adaptive_plan');
     await profileEntry.waitFor({ state: 'visible', timeout: 5_000 });
@@ -368,7 +382,7 @@ async function runAdaptiveDiagnosticE2E() {
     await profileEntry.press('Enter');
     await page.waitForFunction(() => document.activeElement?.id === 'adaptive_plan_title');
 
-    commercialContext = await browser.newContext({
+    commercialContext = await returningLearnerContext(browser, {
       serviceWorkers: 'block', viewport: { width: 375, height: 812 }, reducedMotion: 'reduce',
     });
     await commercialContext.route('https://**', (route) => route.abort('blockedbyclient'));
@@ -387,9 +401,10 @@ async function runAdaptiveDiagnosticE2E() {
     assert.notEqual(await commercialProgressEntry.evaluate((element) => getComputedStyle(element).outlineStyle), 'none');
     await commercialProgressEntry.press('Enter');
     await commercialPage.locator('#adaptive_plan:not([hidden])').waitFor({ state: 'visible', timeout: 5_000 });
-    await commercialPage.locator('#adaptive_access[data-tier="premium"]').waitFor({ state: 'visible', timeout: 5_000 });
+    await commercialPage.locator('#adaptive_access[data-tier="active"]').waitFor({ state: 'visible', timeout: 5_000 });
     assert.equal(await commercialPage.getByRole('heading', { name: 'Мой план подготовки' }).count(), 1);
-    assert.match(await commercialPage.locator('#adaptive_access').innerText(), /Premium/u);
+    assert.match(await commercialPage.locator('#adaptive_access').innerText(), /Активный доступ/u);
+    assert.doesNotMatch(await commercialPage.locator('#adaptive_access').innerText(), /Free|demo|Premium|checkout/iu);
     assert.equal(await commercialPage.locator('input[name="adaptive_session_duration"][value="15"]').isEnabled(), true);
     assert.equal(await commercialPage.locator('input[name="adaptive_session_duration"][value="30"]').isEnabled(), true);
     assert.equal(await commercialPage.locator('#adaptive_session_custom').isEnabled(), true);
@@ -439,7 +454,7 @@ async function runAdaptiveDiagnosticE2E() {
     await commercialPage.locator('#adaptive_detailed_report').press('Enter');
     assert.equal((await lockedReportPromise).status(), 403);
     await commercialPage.locator('#adaptive_paywall:not([hidden])').waitFor({ state: 'visible' });
-    assert.match(await commercialPage.locator('#adaptive_report_notice').innerText(), /Premium/u);
+    assert.match(await commercialPage.locator('#adaptive_report_notice').innerText(), /не входит в выданный доступ/iu);
 
     await commercialPage.locator('#adaptive_target_score').fill('75');
     await commercialPage.locator('#adaptive_exam_date').fill('2027-06-01');
@@ -552,7 +567,7 @@ async function runAdaptiveDiagnosticE2E() {
     assert.equal(secondFreePreview.status, 200);
     assert.equal(secondFreePreview.body.preview.durationMinutes, 15);
 
-    adjustmentContext = await browser.newContext({ serviceWorkers: 'block' });
+    adjustmentContext = await returningLearnerContext(browser, { serviceWorkers: 'block' });
     await adjustmentContext.route('https://**', async (route) => {
       blockedExternalUrls.push(route.request().url());
       await route.abort('blockedbyclient');
@@ -1086,7 +1101,7 @@ async function runAdaptiveDiagnosticE2E() {
     assert.match(await page.locator('#g_card').innerText(), /ЗАДАНИЯ 19–24/u);
     assert.equal(await page.locator('[id^="g_ex_"]').count(), 6);
 
-    examContext = await browser.newContext({ serviceWorkers: 'block' });
+    examContext = await returningLearnerContext(browser, { serviceWorkers: 'block' });
     await examContext.route('https://**', async (route) => {
       blockedExternalUrls.push(route.request().url());
       await route.abort('blockedbyclient');
@@ -1105,7 +1120,7 @@ async function runAdaptiveDiagnosticE2E() {
     await completePublicShortDiagnostic(examPage, 'existing-exam', { incorrectModules: ['grammar'] });
     await examPage.reload({ waitUntil: 'networkidle' });
     await openProgress(examPage);
-    await examPage.locator('#adaptive_access[data-tier="premium"]').waitFor({ state: 'visible', timeout: 5_000 });
+    await examPage.locator('#adaptive_access[data-tier="active"]').waitFor({ state: 'visible', timeout: 5_000 });
     const existingOverview = await browserApiRequest(examPage, '/api/v1/adaptive-learning/overview');
     assert.equal(existingOverview.status, 200);
     assert.equal(existingOverview.body.profile.needsDiagnostic, false);
@@ -1191,7 +1206,7 @@ async function runAdaptiveDiagnosticE2E() {
 
     await page.waitForLoadState('networkidle');
     const providerCallsBeforeAdaptiveWriter = providerCalls.length;
-    writerContext = await browser.newContext({ serviceWorkers: 'block' });
+    writerContext = await returningLearnerContext(browser, { serviceWorkers: 'block' });
     await writerContext.route('https://**', async (route) => {
       blockedExternalUrls.push(route.request().url());
       await route.abort('blockedbyclient');
@@ -1208,7 +1223,7 @@ async function runAdaptiveDiagnosticE2E() {
     await completePublicShortDiagnostic(writerPage, 'existing-writer', { incorrectModules: ['writing'] });
     await writerPage.reload({ waitUntil: 'networkidle' });
     await openProgress(writerPage);
-    await writerPage.locator('#adaptive_access[data-tier="premium"]').waitFor({ state: 'visible', timeout: 5_000 });
+    await writerPage.locator('#adaptive_access[data-tier="active"]').waitFor({ state: 'visible', timeout: 5_000 });
     await writerPage.locator('#adaptive_target_score').fill('85');
     await writerPage.locator('#adaptive_exam_date').fill('2027-06-01');
     await writerPage.locator('#adaptive_weekly_minutes').fill('300');

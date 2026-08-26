@@ -81,11 +81,12 @@ function installLearnerShell({document,navigateTopLevel,navigateBackToHub,curren
     if(direct.topLevel)entryDestination=direct.activeDestination;
     else if(previousTop.topLevel)entryDestination=previousTop.activeDestination;
     currentProjection=projectLearnerShell(screenId,{entryDestination});
-    navigation.hidden=!currentProjection.topLevel;
-    navigation.inert=!currentProjection.topLevel;
+    const authorized=document.body?.dataset.learningAccess==='active';
+    navigation.hidden=!authorized||!currentProjection.topLevel;
+    navigation.inert=!authorized||!currentProjection.topLevel;
     const backDestination=DESTINATION_BY_ID.get(currentProjection.activeDestination);
-    backControl.hidden=!currentProjection.backTarget;
-    backControl.inert=!currentProjection.backTarget;
+    backControl.hidden=!authorized||!currentProjection.backTarget;
+    backControl.inert=!authorized||!currentProjection.backTarget;
     if(backDestination){
       const backLabel=`Назад в раздел ${backDestination.label}`;
       backControl.setAttribute('aria-label',backLabel);

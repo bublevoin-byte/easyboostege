@@ -1,6 +1,7 @@
 const PUBLIC_PLAN_LABELS = Object.freeze({
-  free: 'Free',
-  premium: 'Premium',
+  active: 'Активный доступ',
+  limited: 'Ограниченный доступ',
+  inactive: 'Доступ не активирован',
 });
 
 function capability(id, label, available) {
@@ -28,23 +29,23 @@ function presentPublicPlan(access) {
 
   if (!premium) {
     return {
-      id: 'free',
-      label: PUBLIC_PLAN_LABELS.free,
-      summary: 'Основная практика доступна. Персональный план и расширенные возможности требуют Premium.',
+      id: 'limited',
+      label: PUBLIC_PLAN_LABELS.limited,
+      summary: 'Часть возможностей не входит в выданный доступ. Для изменения обратитесь к оператору.',
       capabilities: items,
     };
   }
   if (deepDiagnostic && detailedReports) {
     return {
-      id: 'premium',
-      label: PUBLIC_PLAN_LABELS.premium,
+      id: 'active',
+      label: PUBLIC_PLAN_LABELS.active,
       summary: 'Персональный план, глубокая диагностика и подробные отчёты доступны.',
       capabilities: items,
     };
   }
   return {
-    id: 'premium',
-    label: PUBLIC_PLAN_LABELS.premium,
+    id: 'active',
+    label: PUBLIC_PLAN_LABELS.active,
     summary: 'Персональный план доступен. Глубокая диагностика и подробные отчёты не входят в текущий доступ.',
     capabilities: items,
   };
@@ -56,15 +57,15 @@ function presentProfilePlan(session) {
   const premium = source.active === true || voiceTutorAvailable;
   if (!premium) {
     return {
-      id: 'free',
-      label: PUBLIC_PLAN_LABELS.free,
-      summary: 'Основная практика доступна без оплаты.',
+      id: 'inactive',
+      label: PUBLIC_PLAN_LABELS.inactive,
+      summary: 'Обратитесь к оператору, который выдал доступ.',
       voiceTutorAvailable: false,
     };
   }
   return {
-    id: 'premium',
-    label: PUBLIC_PLAN_LABELS.premium,
+    id: 'active',
+    label: PUBLIC_PLAN_LABELS.active,
     summary: voiceTutorAvailable
       ? 'Основной учебный доступ и голосовой разбор Аси активны.'
       : 'Основной учебный доступ активен. Голосовой разбор Аси не входит в текущий доступ.',
@@ -73,10 +74,10 @@ function presentProfilePlan(session) {
 }
 
 const COMMERCIAL_ERROR_COPY = Object.freeze({
-  ADAPTIVE_FREE_DEMO_USED: 'Бесплатное пробное занятие уже использовано. Для следующих персональных занятий нужен Premium.',
-  ADAPTIVE_BASE_REQUIRED: 'Для постоянного персонального плана нужен Premium.',
-  ADAPTIVE_PREMIUM_REQUIRED: 'Глубокая диагностика и подробные отчёты доступны с Premium.',
-  ADAPTIVE_FREE_DIAGNOSTIC_USED: 'Бесплатная короткая диагностика уже пройдена. Продолжение доступно с Premium.',
+  ADAPTIVE_FREE_DEMO_USED: 'Текущего доступа недостаточно. Обратитесь к оператору, который выдал доступ.',
+  ADAPTIVE_BASE_REQUIRED: 'Текущего доступа недостаточно. Обратитесь к оператору, который выдал доступ.',
+  ADAPTIVE_PREMIUM_REQUIRED: 'Эта возможность не входит в выданный доступ. Обратитесь к оператору.',
+  ADAPTIVE_FREE_DIAGNOSTIC_USED: 'Текущего доступа недостаточно. Обратитесь к оператору, который выдал доступ.',
 });
 
 function presentCommercialError(error, fallback = 'Не удалось проверить доступ. Повторите попытку.') {

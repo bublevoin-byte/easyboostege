@@ -1,4 +1,13 @@
 const TODAY_DURATIONS = Object.freeze([10, 20, 30, 40]);
+const MIN_ADAPTIVE_DURATION = 15;
+const MAX_ADAPTIVE_DURATION = 120;
+
+function isAdaptiveDuration(value) {
+  return Number.isInteger(value)
+    && value >= MIN_ADAPTIVE_DURATION
+    && value <= MAX_ADAPTIVE_DURATION
+    && value % 5 === 0;
+}
 
 const MODULE_LABELS = Object.freeze({
   vocabulary: 'Слова',
@@ -49,9 +58,15 @@ const RECOVERY_STATES = Object.freeze({
 });
 
 function selectedDuration(value, fallback) {
-  if (TODAY_DURATIONS.includes(value)) return value;
-  if (TODAY_DURATIONS.includes(fallback)) return fallback;
+  if (value === 10 || isAdaptiveDuration(value)) return value;
+  if (fallback === 10 || isAdaptiveDuration(fallback)) return fallback;
   return 20;
+}
+
+function durationChoices(selected) {
+  return TODAY_DURATIONS.includes(selected)
+    ? [...TODAY_DURATIONS]
+    : [...TODAY_DURATIONS, selected].sort((left, right) => left - right);
 }
 
 function dateTimeFormat(locale, options, timeZone) {
@@ -164,10 +179,19 @@ function recommendationProjection(input, minutes, diagnostic) {
   };
 
   const allocations = input.overview?.plan?.allocation?.modules || [];
-  const allocation = allocations.reduce(function(priority, candidate) {
-    return Number(candidate?.percentage) > Number(priority?.percentage) ? candidate : priority;
-  }, allocations[0]);
-  const moduleLabel = MODULE_LABELS[allocation?.id] || 'Персональный маршрут';
+  const allocation = allocations.filter((candidate) => MODULE_LABELS[candidate?.id]
+    && Number(candidate?.percentage) > 0).reduce(function(priority, candidate) {
+    return !priority||Number(candidate?.percentage) > Number(priority?.percentage) ? candidate : priority;
+  }, null);
+  if (!allocation) return {
+    title: 'Быстрая практика слов',
+    reason: 'План пока не назвал следующий учебный блок, поэтому показываем нейтральную практику без догадок о составе занятия.',
+    estimatedMinutes: minutes,
+    ctaLabel: 'Начать практику',
+    outcome: 'Результат сохранится и даст плану данные для следующей рекомендации.',
+    action: { kind: 'quick-practice', adaptiveMinutes: null },
+  };
+  const moduleLabel = MODULE_LABELS[allocation.id];
   const reasonCode = allocation?.reasonCodes?.[0];
   return {
     title: `${moduleLabel} в фокусе`,
@@ -177,6 +201,63 @@ function recommendationProjection(input, minutes, diagnostic) {
     outcome: 'После завершения результаты обновят план и его следующий фокус.',
     action: { kind: 'adaptive-session', adaptiveMinutes: minutes },
   };
+}
+
+function sessionRoute(input) {
+  const blocks = Array.isArray(input.session?.blocks) ? input.session.blocks : [];
+  if (!blocks.length) return null;
+  const completed = new Set(Array.isArray(input.execution?.completedBlockIds)
+    ? input.execution.completedBlockIds : []);
+  const currentId = input.execution?.currentBlockId || input.session?.currentBlockId || null;
+  const currentIndex = Math.max(0, blocks.findIndex((block) => block.id === currentId));
+  const start = Math.min(Math.max(0, currentIndex - 1), Math.max(0, blocks.length - 3));
+  const steps = blocks.slice(start, start + 3).map((block, index) => {
+    const state = completed.has(block.id) ? 'complete' : block.id === currentId ? 'current' : 'next';
+    const status = state === 'complete' ? 'готово' : state === 'current' ? 'сейчас' : 'дальше';
+    const minutes = Number.isFinite(Number(block.plannedMinutes)) ? `${Number(block.plannedMinutes)} мин` : 'по плану';
+    return {
+      position: Number.isInteger(block.position) ? block.position : start + index + 1,
+      label: block.kind === 'break'
+        ? 'Перерыв'
+        : String(block.activityLabel || MODULE_LABELS[block.module] || 'Учебный блок'),
+      detail: `${minutes} · ${status}`,
+      state,
+    };
+  });
+  return {
+    label: `Маршрут текущего занятия на ${input.session.durationMinutes || '—'} минут`,
+    steps,
+  };
+}
+
+function plannedRoute(input, minutes, recommendation) {
+  const current = sessionRoute(input);
+  if (current) return current;
+  if (recommendation.action.kind === 'quick-practice') return {
+    label: `Маршрут быстрой практики на ${recommendation.estimatedMinutes || minutes} минут`,
+    steps: [
+      { position: 1, label: 'Повторение слов', detail: `${recommendation.estimatedMinutes || minutes} мин · сейчас`, state: 'current' },
+      { position: 2, label: 'Сохранение результата', detail: 'Ритм и план получат новые данные', state: 'next' },
+    ],
+  };
+  const allocations = (input.overview?.plan?.allocation?.modules || [])
+    .filter((item) => MODULE_LABELS[item?.id] && Number(item?.percentage) > 0)
+    .slice()
+    .sort((left, right) => Number(right.percentage) - Number(left.percentage))
+    .slice(0, 2);
+  const steps = allocations.map((item, index) => ({
+    position: index + 1,
+    label: MODULE_LABELS[item.id],
+    detail: `${Number(item.percentage)}% недельного плана`,
+    state: index === 0 ? 'current' : 'next',
+  }));
+  steps.push({
+    position: steps.length + 1,
+    label: 'Итог занятия',
+    detail: 'Прогресс обновит следующий шаг',
+    state: 'next',
+  });
+  return { label: `Ориентир по недельному плану на ${minutes} минут`, steps };
 }
 
 export function projectToday(input = {}) {
@@ -194,7 +275,7 @@ export function projectToday(input = {}) {
 
   if (status !== 'ready') return {
     status,
-    greeting: `Здравствуйте${input.username ? `, ${input.username}` : ''}`,
+    greeting: `Здравствуйте${input.displayName ? `, ${input.displayName}` : ''}`,
     context: calendarContext(input.now, input.timeZone),
     state: RECOVERY_STATES[status],
   };
@@ -205,10 +286,10 @@ export function projectToday(input = {}) {
 
   return {
     status,
-    greeting: `Здравствуйте${input.username ? `, ${input.username}` : ''}`,
+    greeting: `Здравствуйте${input.displayName ? `, ${input.displayName}` : ''}`,
     context: calendarContext(input.now, input.timeZone),
     duration: {
-      choices: [...TODAY_DURATIONS],
+      choices: durationChoices(minutes),
       selected: minutes,
       preferenceMinutes: isQuickPractice ? null : minutes,
       help: isQuickPractice
@@ -222,6 +303,7 @@ export function projectToday(input = {}) {
         : `План занятия на ${minutes} минут.`,
     },
     recommendation,
+    route: plannedRoute(input, minutes, recommendation),
     diagnostic,
     rhythm: {
       todayMinutes: Math.max(0, Number(input.localProgress?.dayMin) || 0),

@@ -38,6 +38,10 @@
 .aisy-shell-nav[hidden],
 .aisy-shell-back[hidden] { display: none !important; }
 
+body[data-learning-access="locked"] #aisy-shell-nav,
+body[data-learning-access="locked"] #aisy-shell-back,
+body[data-learning-access="locked"] #asya-launcher { display: none !important; }
+
 .aisy-shell-nav {
   position: absolute;
   inset: auto 0 0;

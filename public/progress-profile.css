@@ -157,14 +157,3 @@
   color: var(--aisy-color-text-muted);
   font: 600 16px/1.5 var(--aisy-font-interface);
 }
-
-@media (min-width: 768px) {
-  .progress-guidance__signals,
-  #progress_evidence_legend {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  #progress_evidence_legend li:last-child {
-    grid-column: 1 / -1;
-  }
-}

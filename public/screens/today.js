@@ -16,10 +16,11 @@ import {
   apiPost,
   apiPostIdempotent,
   apiResponseOwner,
+  currentDisplayName,
   currentOwnerBinding,
-  currentUser,
   invalidateLearningAuthority,
   profileModule,
+  recheckLearningAccess,
   registerAuthorityReset,
   save,
   verifyLearningAccessForLaunch,
@@ -34,6 +35,10 @@ let todayData=null;
 let todayView=null;
 let pendingStart=null;
 let todayLoadController=null;
+let startInFlight=false;
+let actionNotice='';
+let animationRevision=0;
+let announcementRevision=0;
 
 function ownerAuthority(){
   const binding=currentOwnerBinding();
@@ -50,7 +55,6 @@ function expectedOwnerHeaders(authority){return{headers:{'X-EasyBoost-Expected-O
 function expectedOwnerHeader(authority){return{'X-EasyBoost-Expected-Owner':authority.owner}}
 function deferredStorageKey(authority){return DEFERRED_KEY+':'+encodeURIComponent(authority.owner)+':g'+authority.ownerGeneration}
 function diagnosticDeferred(authority){try{return sessionStorage.getItem(deferredStorageKey(authority))==='true'}catch(_){return false}}
-function setDiagnosticDeferred(authority,value){try{if(value)sessionStorage.setItem(deferredStorageKey(authority),'true');else sessionStorage.removeItem(deferredStorageKey(authority))}catch(_){} }
 function idempotencyKey(){return globalThis.crypto&&typeof globalThis.crypto.randomUUID==='function'
   ?globalThis.crypto.randomUUID():'today-session-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)}
 
@@ -75,11 +79,31 @@ function ownedPostIdempotent(path,body,key,authority){
 }
 
 function text(id,value){const node=document.getElementById(id);if(node)node.textContent=value==null?'':String(value)}
+function announce(message){
+  const live=document.getElementById('today-live');if(!live)return;
+  const revision=++announcementRevision;live.textContent='';
+  requestAnimationFrame(function(){if(live.isConnected&&revision===announcementRevision)live.textContent=message})
+}
+function transitionHero(status,busy=false){
+  const hero=document.getElementById('today-hero');const ready=document.getElementById('today-ready');
+  if(!hero||!ready)return false;
+  const changed=hero.dataset.state!==status;
+  hero.dataset.state=status;ready.dataset.state=status;hero.setAttribute('aria-busy',String(busy));
+  if(status==='loading')hero.dataset.skeleton='';else delete hero.dataset.skeleton;
+  if(changed){hero.classList.remove('is-settling');const revision=++animationRevision;
+    requestAnimationFrame(function(){if(hero.isConnected&&hero.dataset.state===status&&revision===animationRevision)hero.classList.add('is-settling')})}
+  return changed
+}
+function configurePrimary({label,kind='',disabled=false,busy=false}){
+  const primary=document.getElementById('today-primary');if(!primary)return;
+  primary.textContent=label;primary.dataset.action=kind;primary.disabled=disabled;
+  if(busy)primary.setAttribute('aria-busy','true');else primary.removeAttribute('aria-busy')
+}
 function currentInput(status='ready',extra={}){return{
   status,
   now:Date.now(),
   timeZone:Intl.DateTimeFormat().resolvedOptions().timeZone,
-  username:currentUser,
+  displayName:currentDisplayName,
   selectedMinutes,
   preferences:S?.learnerPreferences,
   localProgress:S,
@@ -94,15 +118,21 @@ function currentInput(status='ready',extra={}){return{
 
 function renderState(status,description=''){
   const view=projectToday(currentInput(status));todayView=view;
-  const state=document.getElementById('today-state');const ready=document.getElementById('today-ready');
-  if(!state||!ready)return;
-  const loading=status==='loading';state.setAttribute('aria-busy',String(loading));
-  if(loading)state.dataset.skeleton='';else delete state.dataset.skeleton;
-  ready.hidden=true;state.hidden=false;
+  const state=document.getElementById('today-state');const content=document.getElementById('today-content');
+  const support=document.getElementById('today-support');if(!state||!content||!support)return;
+  const loading=status==='loading';const changed=transitionHero(status,loading);
+  state.hidden=false;content.hidden=true;support.hidden=true;
   text('today-title',view.greeting);text('today-context',view.context);
   text('today-state-title',view.state.title);text('today-state-message',description||view.state.message);
-  const action=document.getElementById('today-state-action');if(action){action.textContent=view.state.recovery.label;action.dataset.action=view.state.recovery.kind;action.hidden=loading;action.disabled=loading}
   const pulse=state.querySelector('.today-state__pulse');if(pulse)pulse.hidden=status!=='loading';
+  actionNotice='';text('today-action-notice','');
+  configurePrimary({
+    label:loading?'Собираем маршрут':view.state.recovery.label,
+    kind:loading?'':view.state.recovery.kind,
+    disabled:loading,
+    busy:loading,
+  });
+  if(changed)announce(description||view.state.title+'. '+view.state.message)
 }
 
 function persistDuration(minutes){
@@ -113,6 +143,7 @@ function persistDuration(minutes){
   S.learnerPreferences=next;save({queueNow:true});
 }
 function selectDuration(minutes,{focus=false}={}){
+  if(startInFlight)return;
   selectedMinutes=minutes;persistDuration(minutes);renderReady();
   if(focus)document.querySelector(`#today-duration-options [data-minutes="${minutes}"]`)?.focus();
 }
@@ -126,39 +157,59 @@ function durationKeydown(event){
 }
 function renderDurations(view){
   const root=document.getElementById('today-duration-options');if(!root)return;
-  if(root.children.length!==view.duration.choices.length){root.replaceChildren(...view.duration.choices.map(function(minutes){
+  const signature=view.duration.choices.join(',');
+  if(root.dataset.choices!==signature){root.dataset.choices=signature;root.replaceChildren(...view.duration.choices.map(function(minutes){
     const button=document.createElement('button');button.type='button';button.className='today-duration__option';button.setAttribute('role','radio');
-    button.textContent=minutes+' минут';button.dataset.minutes=String(minutes);
+    button.setAttribute('aria-label',minutes+' минут');button.dataset.minutes=String(minutes);
+    const value=document.createElement('strong');value.textContent=String(minutes);
+    const unit=document.createElement('span');unit.textContent='мин';button.append(value,unit);
     button.addEventListener('click',function(){selectDuration(minutes)});button.addEventListener('keydown',durationKeydown);return button;
   }))}
-  Array.from(root.children).forEach(function(button){const selected=Number(button.dataset.minutes)===view.duration.selected;button.setAttribute('aria-checked',String(selected));button.tabIndex=selected?0:-1});
+  Array.from(root.children).forEach(function(button){const selected=Number(button.dataset.minutes)===view.duration.selected;button.setAttribute('aria-checked',String(selected));button.tabIndex=selected?0:-1;button.disabled=startInFlight});
   text('today-duration-help',view.duration.help);
 }
 function rhythmLabel(view){return view.rhythm.streakDays>0?view.rhythm.streakDays+' дн. подряд':'Начало ритма'}
 function rhythmDetail(view){const today=view.rhythm.todayMinutes+' мин сегодня';return view.rhythm.weeklyTargetMinutes>0?today+' · цель '+view.rhythm.weeklyTargetMinutes+' мин/нед.':today}
+function renderRoute(view){
+  const route=document.getElementById('today-route');const list=document.getElementById('today-route-steps');
+  if(!route||!list)return;
+  text('today-route-label',view.route.label);route.setAttribute('aria-label',view.route.label);
+  list.replaceChildren(...view.route.steps.map(function(step){
+    const item=document.createElement('li');item.className='today-route__step';item.dataset.state=step.state;
+    if(step.state==='current')item.setAttribute('aria-current','step');
+    const marker=document.createElement('span');marker.className='today-route__marker';marker.setAttribute('aria-hidden','true');marker.textContent=step.state==='complete'?'✓':String(step.position);
+    const label=document.createElement('strong');label.textContent=step.label;
+    const detail=document.createElement('small');detail.textContent=step.detail;
+    item.append(marker,label,detail);return item
+  }))
+}
 
 function renderReady(){
   if(!todayData)return;
   const view=projectToday(currentInput());todayView=view;
   if(view.status!=='ready'){renderState(view.status);return}
-  const state=document.getElementById('today-state');const ready=document.getElementById('today-ready');if(!state||!ready)return;
-  state.setAttribute('aria-busy','false');delete state.dataset.skeleton;
-  state.hidden=true;ready.hidden=false;
+  const state=document.getElementById('today-state');const content=document.getElementById('today-content');const support=document.getElementById('today-support');if(!state||!content||!support)return;
+  const presentation=view.source==='offline'?'offline':view.recommendation.action.kind==='continue-adaptive-session'?'resume':'ready';
+  const changed=transitionHero(presentation,startInFlight);
+  state.hidden=true;content.hidden=false;support.hidden=false;
   text('today-title',view.greeting);text('today-context',view.context);
   text('today-recommendation-title',view.recommendation.title);
   text('today-recommendation-reason',view.recommendation.reason);
   text('today-recommendation-outcome',view.recommendation.outcome);
   text('today-estimate',view.recommendation.estimatedMinutes?view.recommendation.estimatedMinutes+' мин':'по плану');
   renderDurations(view);
-  const primary=document.getElementById('today-primary');if(primary){primary.textContent=view.recommendation.ctaLabel;primary.disabled=false}
-  text('today-action-notice','');
+  renderRoute(view);
+  configurePrimary({label:view.recommendation.ctaLabel,kind:'recommendation',disabled:startInFlight,busy:startInFlight});
+  text('today-action-notice',actionNotice);
   text('today-rhythm',rhythmLabel(view));text('today-rhythm-detail',rhythmDetail(view));text('today-countdown',view.countdown.label);
   const source=document.getElementById('today-source-note');if(source){source.hidden=view.source!=='offline';source.textContent=view.source==='offline'
-    ?'Показана сохранённая копия. Персональное занятие не запустится без сети; быстрая практика доступна.':''}
+    ?'Показана сохранённая копия. Новое занятие не запустится без сети; быстрая практика доступна.':''}
   const diagnostic=document.getElementById('today-diagnostic');if(diagnostic){diagnostic.hidden=!view.diagnostic.visible;diagnostic.dataset.state=view.diagnostic.state;
     text('today-diagnostic-title',view.diagnostic.title);text('today-diagnostic-copy',view.diagnostic.copy);
-    const action=document.getElementById('today-diagnostic-action');if(action){action.hidden=!view.diagnostic.action;action.disabled=!view.diagnostic.action;if(view.diagnostic.action)action.textContent=view.diagnostic.action.label}
-    const skip=document.getElementById('today-diagnostic-skip');if(skip)skip.hidden=view.diagnostic.state!=='recommended'}
+  }
+  if(changed)announce((presentation==='offline'
+    ?'Нет сети. Показана сохранённая копия. '
+    :presentation==='resume'?'Можно продолжить занятие. ':'Маршрут на сегодня готов. ')+view.recommendation.title)
 }
 
 function fallbackOverview(){return{
@@ -166,11 +217,11 @@ function fallbackOverview(){return{
   retention:{rediagnostic:{due:false}},access:{capabilities:{adaptivePlan:false}},
 }}
 async function loadToday(){
-  const authority=beginTodayView();pendingStart=null;todayData=null;
+  const authority=beginTodayView();pendingStart=null;startInFlight=false;actionNotice='';todayData=null;
   if(!authority){renderState('access');return}
   if(!sameOwner(authority,todayAuthority))return;
   const preferred=profileModule.studyPreferences(S?.learnerPreferences).preferredSessionMinutes;
-  selectedMinutes=[20,30,40].includes(preferred)?preferred:20;
+  selectedMinutes=Number.isInteger(preferred)&&preferred>=15&&preferred<=120&&preferred%5===0?preferred:20;
   renderState('loading');
   if(window.__sub?.features?.adaptive_learning!==true){
     commitToday(authority,function(){todayData={overview:fallbackOverview(),session:null,execution:null,diagnostic:null,source:'online'};renderReady()});return;
@@ -200,13 +251,12 @@ async function loadToday(){
       if(cached){commitToday(authority,function(){todayData={overview:cached.payload,session:null,execution:null,diagnostic:null,source:'offline'};renderReady()});return}
       renderState('offline');return;
     }
-    if([402,403].includes(Number(error?.status))){renderState('access',apiMessage(error,'request'));return}
+    if([402,403].includes(Number(error?.status))){await recheckLearningAccess();return}
     renderState('error',apiMessage(error,'request'));
   }finally{clearTimeout(timeout);if(todayLoadController===controller)todayLoadController=null}
 }
 
 function openQuickPractice(){nav('scr2',function(canCommit){if(canCommit()&&typeof window.wStartPractice==='function')window.wStartPractice()})}
-function openDiagnostic(){nav('scr10',function(canCommit){if(!canCommit())return;requestAnimationFrame(function(){const target=document.getElementById('adaptive_diagnostic_title');if(target&&!target.closest('[hidden]')){target.focus();target.scrollIntoView({block:'start'})}})})}
 function openPlan(){nav('scr10',function(canCommit){if(!canCommit())return;requestAnimationFrame(function(){const target=document.getElementById('adaptive_goal_form');if(!target||target.closest('[hidden]'))return;target.querySelector('input,button')?.focus();target.scrollIntoView({block:'start'})})})}
 async function launchCurrentSession(session,execution,authority){
   if(!session||!execution)return nav('scr10');
@@ -234,27 +284,33 @@ async function launchAdaptive(minutes,authority){
   return launchCurrentSession(todayData.session,todayData.execution,authority);
 }
 async function runPrimary(){
+  if(startInFlight)return;
+  const primary=document.getElementById('today-primary');const recovery=primary?.dataset.action;
+  if(recovery!=='recommendation'){
+    if(recovery==='retry')void loadToday();
+    else if(recovery==='quick-practice')openQuickPractice();
+    else if(recovery==='open-plan')openPlan();
+    else if(recovery==='open-profile')navigateTopLevel('scr11');
+    return
+  }
   const action=todayView?.recommendation?.action;if(!action)return;
   if(action.kind==='quick-practice'){openQuickPractice();return}
   const authority=Object.freeze({...todayAuthority,token:todayToken});if(!todayAuthorityCurrent(authority))return;
-  const button=document.getElementById('today-primary');if(button)button.disabled=true;text('today-action-notice','Открываем занятие…');
+  startInFlight=true;actionNotice='Открываем занятие…';renderReady();announce(actionNotice);
   try{await launchAdaptive(action.adaptiveMinutes,authority)}catch(error){
     if(!todayAuthorityCurrent(authority))return;
     if(apiIsAuthorityFailure(error)){await invalidateLearningAuthority(authority);return}
-    text('today-action-notice',apiMessage(error,'request'));
-  }finally{if(todayAuthorityCurrent(authority)&&button)button.disabled=false}
+    actionNotice=apiMessage(error,'request');announce(actionNotice);
+  }finally{if(todayAuthorityCurrent(authority)){startInFlight=false;renderReady()}}
 }
 
 function bindToday(){
   const primary=document.getElementById('today-primary');if(!primary||primary.dataset.bound)return;primary.dataset.bound='true';
   primary.addEventListener('click',runPrimary);
-  document.getElementById('today-state-action')?.addEventListener('click',function(event){const kind=event.currentTarget.dataset.action;if(kind==='retry')loadToday();else if(kind==='quick-practice')openQuickPractice();else if(kind==='open-plan')openPlan();else if(kind==='open-profile')navigateTopLevel('scr11')});
-  document.getElementById('today-diagnostic-action')?.addEventListener('click',openDiagnostic);
-  document.getElementById('today-diagnostic-skip')?.addEventListener('click',function(){const authority=ownerAuthority();if(!sameOwner(authority,todayAuthority))return;setDiagnosticDeferred(authority,true);renderReady()});
-  document.getElementById('today-open-practice')?.addEventListener('click',function(){navigateTopLevel('aisy-practice')});
 }
 
 bindToday();
-registerAuthorityReset(function(authority){if(!sameOwner(authority,todayAuthority))return;todayLoadController?.abort();todayLoadController=null;todayToken+=1;todayAuthority=null;todayData=null;todayView=null;pendingStart=null;selectedMinutes=null;renderState('access')});
-registerRouteHook(function(id){if(id==='scr1')loadToday()});
+function resetToday(){todayLoadController?.abort();todayLoadController=null;todayToken+=1;todayAuthority=null;todayData=null;todayView=null;pendingStart=null;startInFlight=false;actionNotice='';selectedMinutes=null}
+registerAuthorityReset(function(authority){if(!sameOwner(authority,todayAuthority))return;resetToday();renderState('access')});
+registerRouteHook(function(id,previous){if(id==='scr1'){void loadToday();return}if(previous==='scr1')resetToday()});
 if(cur()==='scr1')void loadToday();

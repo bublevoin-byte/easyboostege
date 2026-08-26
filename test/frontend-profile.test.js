@@ -81,7 +81,7 @@ test('profile module reports an unactivated subscription', () => {
   const status = profile.subscriptionStatus(null, Date.now());
 
   assert.equal(status.state, 'none');
-  assert.equal(status.text, 'Доступ не активирован — открой бота');
+  assert.equal(status.text, 'Доступ не активирован — обратитесь к оператору');
   assert.equal(status.color, '#A56000');
   assert.equal(status.background, '#FFF4DE');
   assert.equal(profile.subscriptionStatus({ active: true }, Date.now()).state, 'none');

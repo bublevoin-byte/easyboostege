@@ -104,7 +104,3 @@
 .asya-assistant__keyboard > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--aisy-space-2); }
 .asya-assistant__keyboard input { width: 100%; min-height: var(--aisy-touch-target); border: 1px solid var(--aisy-color-border); border-radius: var(--aisy-radius-control); padding: var(--aisy-space-2) var(--aisy-space-3); background: var(--aisy-color-surface); color: var(--aisy-color-text); font: 600 16px/1.4 var(--aisy-font-interface); }
 .asya-assistant__reply { min-height: var(--aisy-space-6); margin: 0; color: var(--aisy-color-text); font: 700 16px/1.5 var(--aisy-font-interface); }
-
-@media (min-width: 768px) {
-  .asya-assistant__panel { left: auto; width: min(520px, 100%); border-radius: var(--aisy-radius-card) 0 0 0; }
-}

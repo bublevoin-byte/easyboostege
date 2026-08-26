@@ -11,6 +11,14 @@ import {
   availablePort, chromeExecutable, stopProcess, waitForReady,
 } from './browser-server-harness.js';
 import { createReleaseServerEnvironment } from './aisy-learner-release-safety.js';
+import {
+  EGE_MOCK_PUBLIC_FORM_FINGERPRINT,
+  EGE_MOCK_PUBLIC_FORM_ID,
+  EGE_MOCK_PUBLIC_FORM_REVISION,
+} from '../public/ege-mock-catalog-contract.js';
+import {
+  ATTEMPT_POLICY_ID, WRITTEN_DURATION_MS,
+} from '../public/ege-mock-written-continuation.js';
 
 const projectDirectory = fileURLToPath(new URL('..', import.meta.url));
 const serverPath = fileURLToPath(new URL('../server.js', import.meta.url));
@@ -63,6 +71,38 @@ async function seedCompletedOnboarding(browserContext) {
       completedAt: '2026-08-26T00:00:00.000Z',
     }));
   }, { key: onboardingKey });
+}
+
+async function seedOwnerBoundMockContinuation(page) {
+  return page.evaluate(({ formIdentity, fingerprint, policyId, durationMs }) => {
+    const owner = window.EasyBoostStore.readCurrentOwner();
+    const startedAt = new Date(Date.now() - 60_000);
+    const deadlineAt = new Date(startedAt.getTime() + durationMs);
+    localStorage.setItem(
+      `easyboost-ege-mock-written-v1:${owner.owner}:${owner.ownerGeneration}`,
+      JSON.stringify({
+        version: 1,
+        owner: { username: owner.owner, generation: owner.ownerGeneration },
+        formIdentity,
+        catalogFingerprint: fingerprint,
+        invalidationWatermark: 0,
+        phase: 'running',
+        attemptId: '00000000-0000-4000-8000-000000000003',
+        attemptOwnerGeneration: 'ticket-03-seeded-owner-generation',
+        policyId,
+        writtenStartedAt: startedAt.toISOString(),
+        writtenDeadlineAt: deadlineAt.toISOString(),
+        queue: [],
+        answers: {},
+      }),
+    );
+    return owner;
+  }, {
+    formIdentity: `${EGE_MOCK_PUBLIC_FORM_ID}@${EGE_MOCK_PUBLIC_FORM_REVISION}`,
+    fingerprint: EGE_MOCK_PUBLIC_FORM_FINGERPRINT,
+    policyId: ATTEMPT_POLICY_ID,
+    durationMs: WRITTEN_DURATION_MS,
+  });
 }
 
 async function openingLayout(page) {
@@ -596,13 +636,30 @@ try {
   assert.deepEqual(darkGateAfterReload, darkGateBeforeReload,
     'forced-dark access-gate styles remain stable across reload');
 
+  const lateSessionOwner = await seedOwnerBoundMockContinuation(page);
   hangNextSessionCheck = true;
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.locator('#access_gate[data-state="network-unknown"]')
     .waitFor({ state: 'visible', timeout: 9_000 });
   assert.equal(await page.locator('#access_gate_status').innerText(), '',
     'the initial dialog description is not duplicated into the live status');
-  await Promise.all(stalledRoutes.splice(0).map((route) => route.abort('failed').catch(() => {})));
+  const lateSessionRoutes = stalledRoutes.splice(0);
+  assert.equal(lateSessionRoutes.length, 1);
+  await lateSessionRoutes[0].fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      authenticated: true,
+      username: lateSessionOwner.owner,
+      displayName: 'Мария Тестова',
+      active: true,
+      sub_until: Date.now() + 86_400_000,
+      features: { adaptive_learning: false },
+    }),
+  }).catch(() => {});
+  await page.waitForTimeout(250);
+  assert.equal(await page.locator('#scr1.on,#scr16.on').count(), 0,
+    'a late active /me response cannot reopen Today or a seeded mock after the deadline');
   const inactiveRetryRequest = page.waitForRequest((request) => new URL(request.url()).pathname === '/api/v1/me');
   await page.locator('#access_gate_retry').click();
   await inactiveRetryRequest;
@@ -787,7 +844,10 @@ try {
     }, { once: true });
   });
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.locator('#scr1.on #today-ready:not([hidden])').waitFor({ state: 'visible', timeout: 12_000 });
+  await page.locator('#scr1.on #today-hero[data-state="ready"]').waitFor({ state: 'visible', timeout: 12_000 });
+  assert.equal(await page.locator('#today-title').innerText(), 'Здравствуйте, Мария Тестова');
+  assert.doesNotMatch(await page.locator('#scr1').innerText(), new RegExp(session.username, 'u'),
+    'Today must never render the opaque internal owner key');
   assert.equal(await page.evaluate(() => sessionStorage.getItem('first-launch-login-seen')), null,
     'a returning active learner never sees the login screen');
   const privacyDialog = page.locator('#privacySheet.open');
@@ -800,6 +860,64 @@ try {
     await privacyDialog.waitFor({ state: 'hidden', timeout: 3_000 });
   }
   await dismissPrivacyOffer({ persist: true });
+
+  async function assertFailClosedActiveSession(status) {
+    const failureContext = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      serviceWorkers: 'block',
+    });
+    try {
+      await seedCompletedOnboarding(failureContext);
+      await failureContext.addCookies([authCookie]);
+      const failurePage = await failureContext.newPage();
+      await failurePage.goto(baseUrl, { waitUntil: 'networkidle' });
+      await failurePage.locator('#scr1.on #today-hero[data-state="ready"]')
+        .waitFor({ state: 'visible', timeout: 12_000 });
+      const seededOwner = await seedOwnerBoundMockContinuation(failurePage);
+      assert.equal(seededOwner.owner, session.username);
+      await failurePage.route('**/api/v1/me', (route) => route.fulfill({
+        status,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: { code: status === 401 ? 'SESSION_REVOKED' : 'SERVICE_UNAVAILABLE' },
+        }),
+      }));
+      await failurePage.evaluate(() => window.checkSub());
+      if (status === 503) {
+        await failurePage.locator('#access_gate[data-state="network-unknown"]')
+          .waitFor({ state: 'visible', timeout: 8_000 });
+      } else {
+        await failurePage.getByRole('button', { name: 'Войти через VK ID', exact: true })
+          .waitFor({ state: 'visible', timeout: 8_000 });
+        assert.equal(await failurePage.locator('#access_gate').count(), 0);
+      }
+      assert.equal(await failurePage.locator('.screen.on:not(#scr5)').count(), 0,
+        `${status} must leave only the login/recovery surface active`);
+      assert.equal(await failurePage.locator('#scr16.on').count(), 0,
+        `${status} must not revive the seeded EGE mock`);
+      assert.equal(await failurePage.locator('#today-content').isVisible(), false,
+        `${status} must not expose private Today copy`);
+      const controls = await failurePage.evaluate(() => (
+        ['aisy-shell-nav', 'aisy-shell-back', 'asya-launcher'].map((id) => {
+          const element = document.getElementById(id);
+          return { id, hidden: element.hidden, inert: element.inert, rendered: element.getClientRects().length };
+        })
+      ));
+      assert.deepEqual(controls, [
+        { id: 'aisy-shell-nav', hidden: true, inert: true, rendered: 0 },
+        { id: 'aisy-shell-back', hidden: true, inert: true, rendered: 0 },
+        { id: 'asya-launcher', hidden: true, inert: true, rendered: 0 },
+      ]);
+      await failurePage.waitForTimeout(250);
+      assert.equal(await failurePage.locator('#scr1.on,#scr16.on').count(), 0,
+        `${status} must remain fail-closed after queued UI work settles`);
+    } finally {
+      await failureContext.close();
+    }
+  }
+
+  await assertFailClosedActiveSession(503);
+  await assertFailClosedActiveSession(401);
 
   const taskBankBody = await fs.readFile(path.join(projectDirectory, 'public', 'task-bank.json'), 'utf8');
   const progressFixtureResponse = await context.request.get(`${baseUrl}/api/v1/progress`, {
@@ -842,7 +960,7 @@ try {
     const [retryRoute] = stalledRoutes.splice(retryRouteIndex, 1);
     await retryRoute.fulfill(fulfill);
     await gate.waitFor({ state: 'detached', timeout: 10_000 });
-    await page.locator('#scr1.on #today-ready:not([hidden])')
+    await page.locator('#scr1.on #today-hero[data-state="ready"]')
       .waitFor({ state: 'visible', timeout: 12_000 });
     await page.waitForFunction(() => document.activeElement?.id === 'today-title');
     assert.equal(await page.evaluate(() => document.activeElement?.id), 'today-title',
@@ -908,7 +1026,7 @@ try {
   assert.equal((await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), onboardingKey)).version, 1,
     'starting a profile replay keeps the durable completion marker');
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.locator('#scr1.on #today-ready:not([hidden])').waitFor({ state: 'visible', timeout: 12_000 });
+  await page.locator('#scr1.on #today-hero[data-state="ready"]').waitFor({ state: 'visible', timeout: 12_000 });
   assert.equal(await page.locator('#scr5.on').count(), 0,
     'reloading mid-replay returns an authenticated learner to Today instead of first-time onboarding');
   await dismissPrivacyOffer();
@@ -1068,8 +1186,12 @@ try {
     localDisplayName: localDisplayNameB,
   }));
   await ownerBPage.reload({ waitUntil: 'domcontentloaded' });
-  await ownerBPage.locator('#scr1.on #today-ready:not([hidden])')
+  await ownerBPage.locator('#scr1.on #today-hero[data-state="ready"]')
     .waitFor({ state: 'visible', timeout: 12_000 });
+  assert.equal(await ownerBPage.locator('#today-title').innerText(),
+    `Здравствуйте, ${localDisplayNameB}`);
+  assert.doesNotMatch(await ownerBPage.locator('#scr1').innerText(), new RegExp(ownerBSession.username, 'u'),
+    'owner switch must replace the prior display identity without exposing the internal key');
   assert.equal(await ownerBPage.getByRole('navigation', { name: 'Основные разделы' }).isVisible(), true);
   assert.deepEqual(await ownerBPage.evaluate(() => JSON.parse(localStorage.getItem('eb_current'))), {
     version: 1,

@@ -20,6 +20,7 @@ import { completeEgeMockOralStageLedger } from '../test/support/ege-mock-attempt
 const projectDirectory = fileURLToPath(new URL('..', import.meta.url));
 const serverPath = fileURLToPath(new URL('../server.js', import.meta.url));
 const username = 'aisy-learner-release-user';
+const displayName = 'Мария Тестова';
 const jwtSecret = 'aisy-learner-release-e2e-secret-32-characters';
 const mutation = (body) => ({
   ...body,
@@ -72,7 +73,7 @@ async function startReleaseServer({ baseUrl, dataFile, port }) {
 }
 
 const destinations = [
-  { name: 'Сегодня', screen: '#scr1.on', ready: '#today-ready:not([hidden])' },
+  { name: 'Сегодня', screen: '#scr1.on', ready: '#today-content:not([hidden])' },
   { name: 'Практика', screen: '#aisy-practice.on', ready: '#practice-skills .practice-row' },
   { name: 'ЕГЭ', screen: '#aisy-ege.on', ready: '#ege-hub-sections > li' },
   { name: 'Прогресс', screen: '#scr10.on', ready: '#progress_guidance[aria-busy="false"]' },
@@ -129,7 +130,11 @@ async function assertTopLevelAccessibility(page, destination, viewport) {
   assert.ok(state.documentWidth <= state.viewportWidth,
     `${destination.name} has horizontal overflow at ${viewport.width}px`);
   assert.ok(state.frameLeft >= -0.5 && state.frameRight <= state.viewportWidth + 0.5);
-  assert.ok(state.frameWidth <= 720.5, `${destination.name} must use the bounded learner canvas`);
+  assert.ok(state.frameWidth <= 390.5, `${destination.name} must use the portrait-phone learner canvas`);
+  if (viewport.width > 390) {
+    assert.ok(Math.abs(state.frameLeft - ((state.viewportWidth - state.frameWidth) / 2)) <= 1,
+      `${destination.name} phone canvas must remain centered`);
+  }
   assert.equal(state.mainLabel, state.headingId, `${destination.name} main must reference its h1`);
   assert.ok(state.headingText, `${destination.name} must expose a named h1`);
   assert.equal(state.currentNavigation, 1);
@@ -152,6 +157,7 @@ try {
       [username]: {
         created: now,
         sub_until: now + 7 * 86_400_000,
+        display_name: displayName,
         privacy_consent: {
           text_processing: true,
           voice_processing: true,
@@ -189,8 +195,9 @@ try {
   });
 
   await page.goto(baseUrl, { waitUntil: 'networkidle' });
-  await page.locator('#scr1.on #today-ready:not([hidden])').waitFor({ state: 'visible', timeout: 10_000 });
-  assert.match(await page.locator('#today-title').innerText(), new RegExp(`Здравствуйте, ${username}`, 'u'));
+  await page.locator('#scr1.on #today-content:not([hidden])').waitFor({ state: 'visible', timeout: 10_000 });
+  assert.equal(await page.locator('#today-title').innerText(), `Здравствуйте, ${displayName}`);
+  assert.doesNotMatch(await page.locator('#scr1').innerText(), new RegExp(username, 'u'));
   assert.match(await page.locator('#scr1').innerText(), /план пока предварительный.*ЕГЭ · английский/isu);
   assert.equal(await page.locator('#scr1 .clayCard').count(), 0);
   const cleanFirstStartOverview = await browserGet(page, '/api/v1/adaptive-learning/overview');
@@ -204,9 +211,9 @@ try {
   const recommendation = page.getByRole('region', { name: 'Рекомендация на сегодня' });
   const diagnostic = page.locator('#today-diagnostic[data-state="recommended"]');
   await diagnostic.waitFor({ state: 'visible', timeout: 10_000 });
-  await diagnostic.getByRole('button', { name: 'Отложить на сейчас' }).press('Enter');
-  await page.locator('#today-diagnostic[data-state="deferred"]').waitFor({ state: 'visible' });
-  assert.match(await page.locator('#today-diagnostic-copy').innerText(), /это не оценка/u);
+  assert.equal(await diagnostic.getByRole('button').count(), 0,
+    'diagnostic context must not compete with the one Today route CTA');
+  assert.match(await page.locator('#today-diagnostic-copy').innerText(), /короткая диагностика.*можно отложить/isu);
 
   const firstPreferenceSaved = page.waitForResponse((response) => (
     response.request().method() === 'POST'
@@ -217,7 +224,7 @@ try {
 
   crossTab = await context.newPage();
   await crossTab.goto(baseUrl, { waitUntil: 'networkidle' });
-  await crossTab.locator('#scr1.on #today-ready:not([hidden])').waitFor({ state: 'visible', timeout: 10_000 });
+  await crossTab.locator('#scr1.on #today-content:not([hidden])').waitFor({ state: 'visible', timeout: 10_000 });
   assert.equal(
     await crossTab.getByRole('region', { name: 'Рекомендация на сегодня' })
       .getByRole('radio', { name: '30 минут' }).getAttribute('aria-checked'),
@@ -234,14 +241,14 @@ try {
   crossTab = null;
 
   await page.reload({ waitUntil: 'networkidle' });
-  await page.locator('#scr1.on #today-ready:not([hidden])').waitFor({ state: 'visible', timeout: 10_000 });
+  await page.locator('#scr1.on #today-content:not([hidden])').waitFor({ state: 'visible', timeout: 10_000 });
   assert.equal(
     await page.getByRole('region', { name: 'Рекомендация на сегодня' })
       .getByRole('radio', { name: '40 минут' }).getAttribute('aria-checked'),
     'true',
     'a second tab must persist the exact owner-bound preference',
   );
-  await page.locator('#today-diagnostic[data-state="deferred"]').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#today-primary').count(), 1);
 
   await openDestination(page, destinations[1]);
   assert.deepEqual(await page.locator('#practice-skills h2').allTextContents(), [
@@ -255,7 +262,7 @@ try {
   await page.evaluate(() => navigator.serviceWorker.ready.then(() => true));
   if (!await page.evaluate(() => Boolean(navigator.serviceWorker.controller))) {
     await page.reload({ waitUntil: 'networkidle' });
-    await page.locator('#scr1.on #today-ready:not([hidden])').waitFor({ state: 'visible', timeout: 10_000 });
+    await page.locator('#scr1.on #today-content:not([hidden])').waitFor({ state: 'visible', timeout: 10_000 });
   }
   await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller), null, { timeout: 15_000 });
   networkGuard.setOffline(true);
@@ -271,7 +278,7 @@ try {
   await context.setOffline(false);
   networkGuard.setOffline(false);
   await page.reload({ waitUntil: 'networkidle' });
-  await page.locator('#scr1.on #today-ready:not([hidden])').waitFor({ state: 'visible', timeout: 10_000 });
+  await page.locator('#scr1.on #today-content:not([hidden])').waitFor({ state: 'visible', timeout: 10_000 });
 
   await stopProcess(child);
   child = null;
@@ -297,7 +304,7 @@ try {
   expectedScore = scoreLabel(seededResult.result.canonical.score);
   child = await startReleaseServer({ baseUrl, dataFile, port });
   await page.reload({ waitUntil: 'networkidle' });
-  await page.locator('#scr1.on #today-ready:not([hidden])').waitFor({ state: 'visible', timeout: 10_000 });
+  await page.locator('#scr1.on #today-content:not([hidden])').waitFor({ state: 'visible', timeout: 10_000 });
 
   await openDestination(page, destinations[2]);
   assert.equal(await page.locator('#ege-hub-sections > li').count(), 5);
@@ -333,8 +340,8 @@ try {
 
   await openDestination(page, destinations[4]);
   assert.equal(await page.locator('#scr11 [data-profile-group]').count(), 4);
-  assert.equal(await page.locator('#pf_plan_name').innerText(), 'Premium');
-  assert.doesNotMatch(await page.locator('#scr11').innerText(), /Base|родител|преподавател|учител/iu);
+  assert.equal(await page.locator('#pf_plan_name').innerText(), 'Активный доступ');
+  assert.doesNotMatch(await page.locator('#scr11').innerText(), /Free|demo|Premium|Base|родител|преподавател|учител/iu);
   const launcher = page.getByRole('button', { name: 'Открыть Асю' });
   await launcher.press('Enter');
   const assistant = page.locator('#asya-assistant');

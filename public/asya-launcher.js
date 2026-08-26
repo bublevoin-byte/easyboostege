@@ -11,7 +11,8 @@ function installAsyaLauncher({document,currentScreen,registerRouteHook,assistant
   }
   let assistant=null,pending=null;
   function available(){const id=currentScreen();const screen=document.getElementById(id);
-    return Boolean(id&&screen&&!screen.matches('[data-first-launch-screen]')&&id!=='scr6')}
+    return Boolean(document.body?.dataset.learningAccess==='active'
+      &&id&&screen&&!screen.matches('[data-first-launch-screen]')&&id!=='scr6')}
   function onLauncherClick(){void open()}
   function ensureAssistant(){
     if(assistant)return Promise.resolve(assistant);

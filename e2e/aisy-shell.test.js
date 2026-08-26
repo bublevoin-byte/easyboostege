@@ -16,6 +16,12 @@ import {
 const projectDirectory=fileURLToPath(new URL('..',import.meta.url));
 const serverPath=fileURLToPath(new URL('../server.js',import.meta.url));
 const jwtSecret='aisy-shell-e2e-secret-at-least-32-chars';
+const viewports=[
+  {width:320,height:720},{width:720,height:320},
+  {width:375,height:812},{width:812,height:375},
+  {width:768,height:1024},{width:1024,height:768},
+  {width:1440,height:900},{width:900,height:1440},
+];
 
 let browser;
 let child;
@@ -27,7 +33,13 @@ try{
   const now=Date.now();
   const dataFile=path.join(temporaryDirectory,'data.json');
   await fs.writeFile(dataFile,JSON.stringify({
-    users:{learner:{created:now,sub_until:now+86_400_000}},
+    users:{learner:{
+      created:now,sub_until:now+86_400_000,
+      privacy_consent:{
+        text_processing:true,voice_processing:true,
+        policy_version:'2026-08-26-vk-id-v1',updated_at:new Date(now).toISOString(),
+      },
+    }},
     progress:{learner:{}},
   }),'utf8');
   const output=[];
@@ -48,7 +60,7 @@ try{
 
   const mobile=await createActiveSubscriptionPage(browser,{
     baseUrl,username:'learner',jwtSecret,
-    contextOptions:{viewport:{width:375,height:667},reducedMotion:'reduce',serviceWorkers:'block'},
+    contextOptions:{viewport:{width:375,height:812},reducedMotion:'reduce',serviceWorkers:'block'},
   });
   await mobile.page.goto(baseUrl,{waitUntil:'networkidle'});
   await mobile.page.locator('#scr1.on').waitFor({state:'visible',timeout:5_000});
@@ -91,13 +103,17 @@ try{
     'deep back should restore focus to the owning hub',
   );
 
-  for(const viewport of [{width:320,height:568},{width:375,height:667},{width:768,height:1024}]){
+  for(const viewport of viewports){
     await mobile.page.setViewportSize(viewport);
     const layout=await mobile.page.evaluate(()=>{
       const frame=document.getElementById('frame').getBoundingClientRect();
+      const nav=document.getElementById('aisy-shell-nav').getBoundingClientRect();
+      const navList=document.querySelector('.aisy-shell-nav__list');
       return{
         viewport:innerWidth,documentWidth:document.documentElement.scrollWidth,
-        frameLeft:frame.left,frameRight:frame.right,
+        frameLeft:frame.left,frameRight:frame.right,frameBottom:frame.bottom,frameWidth:frame.width,
+        navLeft:nav.left,navRight:nav.right,navBottom:nav.bottom,navWidth:nav.width,navHeight:nav.height,
+        navColumns:getComputedStyle(navList).gridTemplateColumns.split(' ').filter(Boolean).length,
         controls:[...document.querySelectorAll('#aisy-shell-nav button')].map(button=>{
           const rect=button.getBoundingClientRect();return{width:rect.width,height:rect.height};
         }),
@@ -105,32 +121,18 @@ try{
     });
     assert.ok(layout.documentWidth<=layout.viewport,`horizontal overflow at ${viewport.width}px`);
     assert.ok(layout.frameLeft>=-0.5&&layout.frameRight<=layout.viewport+0.5);
+    assert.ok(layout.frameWidth<=390.5,`learner canvas exceeds 390px at ${viewport.width}×${viewport.height}`);
+    assert.ok(Math.abs(layout.frameLeft-(layout.viewport-layout.frameWidth)/2)<=1,
+      `learner canvas is not centered at ${viewport.width}×${viewport.height}`);
+    assert.ok(Math.abs(layout.navLeft-layout.frameLeft)<=1&&Math.abs(layout.navRight-layout.frameRight)<=1,
+      `bottom navigation left the learner canvas at ${viewport.width}×${viewport.height}`);
+    assert.ok(Math.abs(layout.navBottom-layout.frameBottom)<=1,
+      `navigation left the bottom edge at ${viewport.width}×${viewport.height}`);
+    assert.equal(layout.navColumns,5,`navigation must keep five columns at ${viewport.width}×${viewport.height}`);
+    assert.ok(layout.navWidth>layout.navHeight,`navigation became a side rail at ${viewport.width}×${viewport.height}`);
     assert.equal(layout.controls.every(control=>control.width>=44&&control.height>=44),true);
   }
   await mobile.context.close();
-
-  const desktop=await createActiveSubscriptionPage(browser,{
-    baseUrl,username:'learner',jwtSecret,
-    contextOptions:{viewport:{width:1440,height:900},reducedMotion:'reduce',serviceWorkers:'block'},
-  });
-  await desktop.page.goto(baseUrl,{waitUntil:'networkidle'});
-  await desktop.page.locator('#scr1.on').waitFor({state:'visible',timeout:5_000});
-  const desktopLayout=await desktop.page.evaluate(()=>{
-    const frame=document.getElementById('frame').getBoundingClientRect();
-    const nav=document.getElementById('aisy-shell-nav').getBoundingClientRect();
-    return{
-      viewport:innerWidth,documentWidth:document.documentElement.scrollWidth,
-      frameWidth:frame.width,navWidth:nav.width,navHeight:nav.height,
-      controls:[...document.querySelectorAll('#aisy-shell-nav button')].map(button=>{
-        const rect=button.getBoundingClientRect();return{width:rect.width,height:rect.height};
-      }),
-    };
-  });
-  assert.ok(desktopLayout.documentWidth<=desktopLayout.viewport);
-  assert.ok(desktopLayout.frameWidth<=720);
-  assert.ok(desktopLayout.navHeight>desktopLayout.navWidth,'desktop navigation should adapt to a bounded rail');
-  assert.equal(desktopLayout.controls.every(control=>control.width>=44&&control.height>=44),true);
-  await desktop.context.close();
   console.log('Aisy learner shell Chromium E2E passed.');
 }finally{
   if(browser)await browser.close();

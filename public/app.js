@@ -33,7 +33,7 @@ import './screens.js';
 /* ---------- STATE ---------- */
 const todayStr=()=>new Date().toISOString().slice(0,10);
 const INITIAL_OWNER_MARKER=window.EasyBoostStore?.readCurrentOwner?.()||null;
-let currentUser=INITIAL_OWNER_MARKER&&INITIAL_OWNER_MARKER.owner||null,S=null;
+let currentUser=INITIAL_OWNER_MARKER&&INITIAL_OWNER_MARKER.owner||null,currentDisplayName=null,S=null;
 let OFFLINE_EGE_MOCK_CONTINUATION=false;
 let AUTH_SESSION_GENERATION=0;
 const AUTHORITY_RESET_HOOKS=new Set();
@@ -90,7 +90,7 @@ function applyDeletedOwner(update){
   if(Number.isSafeInteger(deletedGeneration)&&Number.isSafeInteger(ADOPTED_OWNER_GENERATION)
     &&deletedGeneration<=ADOPTED_OWNER_GENERATION&&update.deleted!==true)return false;
   AUTH_SESSION_GENERATION+=1;OFFLINE_EGE_MOCK_CONTINUATION=false;
-  TOKEN='';currentUser=null;S=null;window.__sub=null;ADOPTED_OWNER_GENERATION=null;rememberSessionOwnerGeneration(null,null);store.sync.setOwner(null);
+  TOKEN='';currentUser=null;currentDisplayName=null;S=null;window.__sub=null;ADOPTED_OWNER_GENERATION=null;rememberSessionOwnerGeneration(null,null);store.sync.setOwner(null);
   void notifyAuthorityReset(resetAuthority);
   try{localStorage.removeItem('eb_tg_code')}catch(_){}
   hideLearningShell();try{firstLaunch.showLogin()}catch(_){show('scr5')}
@@ -276,11 +276,19 @@ function runAuthTransition(action){
 }
 
 function hideLearningShell(){
-  const bar=document.getElementById('tabbar');if(bar)bar.style.display='none';
+  document.body.dataset.learningAccess='locked';
+  document.querySelectorAll('#aisy-shell-nav,#aisy-shell-back,#asya-launcher,#tabbar').forEach(function(element){
+    element.hidden=true;element.inert=true
+  });
+}
+function authorizeLearningShell(){
+  document.body.dataset.learningAccess='active';
 }
 function setAccessBackgroundInert(inert){
-  document.querySelectorAll('.screen,#tabbar,#genfab,#learnSheet').forEach(function(element){
-    element.inert=!inert&&element.matches('[data-first-launch-screen][hidden]')?true:inert
+  document.querySelectorAll('.screen,#tabbar,#genfab,#learnSheet,#aisy-shell-nav,#aisy-shell-back,#asya-launcher').forEach(function(element){
+    const privateControl=element.matches('#tabbar,#aisy-shell-nav,#aisy-shell-back,#asya-launcher');
+    element.inert=Boolean(inert||privateControl&&document.body.dataset.learningAccess!=='active'
+      ||!inert&&element.matches('[data-first-launch-screen][hidden]'))
   });
 }
 function closeAccessGate(focusLogin=false){
@@ -317,7 +325,7 @@ function applyLearningAccess(result){
   firstLaunch.showLogin();const gate=accessGate();setAccessBackgroundInert(true);const previousState=gate.dataset.state||'';gate.dataset.state=state;
   const title=document.getElementById('access_gate_title');const copy=document.getElementById('access_gate_copy');const privacy=document.getElementById('access_gate_privacy');
   if(state===LEARNING_ACCESS_STATES.INACTIVE){
-    title.textContent='Нужен активный доступ';copy.textContent='Сессия подтверждена, но подписка неактивна или закончилась. Учебные разделы откроются после активации доступа.';
+    title.textContent='Нужен активный доступ';copy.textContent='Сессия подтверждена, но подписка неактивна или закончилась. Обратитесь к оператору, который выдал доступ, и затем повторите проверку.';
     privacy.hidden=false;
   }else{
     title.textContent='Не удалось проверить доступ';copy.textContent='Сейчас нет связи с сервером, поэтому мы не можем подтвердить подписку. Учебные разделы не открыты. Проверьте сеть и повторите попытку.';privacy.hidden=true;
@@ -333,7 +341,8 @@ function adoptServerSession(session,ownerGeneration){
   const authority=store.sync.ownerAuthSnapshot?.(sessionOwner)||{ownerGeneration:0,deleted:false};
   if(authority.deleted||authority.ownerGeneration!==ownerGeneration)return false;
   AUTH_SESSION_GENERATION+=1;
-  TOKEN='cookie';OFFLINE_EGE_MOCK_CONTINUATION=false;window.__sub=session;currentUser=sessionOwner;ADOPTED_OWNER_GENERATION=ownerGeneration;
+  TOKEN='cookie';OFFLINE_EGE_MOCK_CONTINUATION=false;window.__sub=session;currentUser=sessionOwner;
+  currentDisplayName=String(session.displayName||'').trim()||null;ADOPTED_OWNER_GENERATION=ownerGeneration;
   rememberSessionOwnerGeneration(currentUser,ADOPTED_OWNER_GENERATION);
   return true
 }
@@ -368,15 +377,25 @@ async function commitEgeMockOwnerMutation(owner,canCommit,commit){
 async function clearNoSessionAuthority(authGuard){
   if(!authGuard||authGuard.sessionGeneration!==AUTH_SESSION_GENERATION)return false;
   const previousOwner=authGuard.owner,previousGeneration=authGuard.ownerGeneration;
-  AUTH_SESSION_GENERATION+=1;TOKEN='';OFFLINE_EGE_MOCK_CONTINUATION=false;currentUser=null;S=null;window.__sub=null;
+  AUTH_SESSION_GENERATION+=1;TOKEN='';OFFLINE_EGE_MOCK_CONTINUATION=false;currentUser=null;currentDisplayName=null;S=null;window.__sub=null;
   ADOPTED_OWNER_GENERATION=null;rememberSessionOwnerGeneration(null,null);store.sync.setOwner(null);
+  hideLearningShell();if(!authGuard.deferPresentation)try{firstLaunch.showLogin()}catch(_){show('scr5')}
   if(previousOwner&&Number.isSafeInteger(previousGeneration))await store.clearCurrentOwner?.(previousOwner,previousGeneration);
   return true
 }
 async function checkLearningAccess(session=null,{preserveActiveShell=false,deferPresentation=false,signal=null}={}){
   if(!SRV){const result=classifyLearningAccess(null,new Error('server mode required'));if(!deferPresentation)applyLearningAccess(result);return result}
-  const authGuard={sessionGeneration:AUTH_SESSION_GENERATION,owner:currentUser,ownerGeneration:ADOPTED_OWNER_GENERATION,
+  const authGuard={sessionGeneration:AUTH_SESSION_GENERATION,owner:currentUser,ownerGeneration:ADOPTED_OWNER_GENERATION,deferPresentation,
     globalGeneration:store.sync.ownerAuthSnapshot?.()?.globalGeneration??0};
+  async function failClosedStaleAuthority(){
+    const result={state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,stale:true};
+    if(authGuard.sessionGeneration!==AUTH_SESSION_GENERATION)return result;
+    if(authGuard.owner&&Number.isSafeInteger(authGuard.ownerGeneration))await invalidateLearningAuthority({
+      owner:authGuard.owner,ownerGeneration:authGuard.ownerGeneration,
+    },{deferPresentation});
+    else await clearNoSessionAuthority(authGuard);
+    if(!deferPresentation)applyLearningAccess(result);return result
+  }
   try{
     if(signal?.aborted)return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,aborted:true};
     const current=session||await auth.currentSession({signal,cache:'no-store'});
@@ -386,10 +405,10 @@ async function checkLearningAccess(session=null,{preserveActiveShell=false,defer
     if(current&&current.authenticated===true){
       const sessionOwner=normalizedAuthOwner(current.username);let generation=authGuard.ownerGeneration;
       if(Number.isSafeInteger(generation)){
-        if(sessionOwner!==authGuard.owner||store.sync.ownerAuthSnapshot?.(sessionOwner)?.ownerGeneration!==generation)return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,stale:true}
+        if(sessionOwner!==authGuard.owner||store.sync.ownerAuthSnapshot?.(sessionOwner)?.ownerGeneration!==generation)return failClosedStaleAuthority()
       }else{
-        if(authGuard.owner&&sessionOwner!==authGuard.owner)return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,stale:true};
-        if(store.sync.ownerAuthSnapshot?.()?.globalGeneration!==authGuard.globalGeneration)return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,stale:true};
+        if(authGuard.owner&&sessionOwner!==authGuard.owner)return failClosedStaleAuthority();
+        if(store.sync.ownerAuthSnapshot?.()?.globalGeneration!==authGuard.globalGeneration)return failClosedStaleAuthority();
         generation=store.sync.ownerAuthSnapshot?.(sessionOwner)?.ownerGeneration??0
       }
       const adopted=await store.sync.adoptOwner?.(sessionOwner,generation,{
@@ -397,16 +416,12 @@ async function checkLearningAccess(session=null,{preserveActiveShell=false,defer
         commit:function(committedGeneration){return adoptServerSession(current,committedGeneration)},
       });
       if(signal?.aborted)return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,aborted:true};
-      if(adopted!==sessionOwner)return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,stale:true}
+      if(adopted!==sessionOwner)return failClosedStaleAuthority()
     }else if(!await clearNoSessionAuthority(authGuard))return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,stale:true};
     if(signal?.aborted)return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,aborted:true};
     if(!deferPresentation){if(preserveActiveShell&&result.state===LEARNING_ACCESS_STATES.ACTIVE)closeAccessGate();else applyLearningAccess(result)}return result;
   }catch(error){
     if(signal?.aborted)return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,aborted:true};
-    const status=Number(error&&error.status)||0;
-    const offlineMock=(status===0||status>=500)?offlineEgeMockContinuation():null;
-    if(offlineMock){OFFLINE_EGE_MOCK_CONTINUATION=true;if(!deferPresentation){closeAccessGate();hideLearningShell();queueMicrotask(function(){tab('scr16')})}
-      return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,offlineEgeMock:true}}
     const result=classifyLearningAccess(null,error);
     if(result.state===LEARNING_ACCESS_STATES.NO_SESSION&&!await clearNoSessionAuthority(authGuard))return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,stale:true};
     if(signal?.aborted)return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,aborted:true};
@@ -429,17 +444,18 @@ function save(options={}){
   /* локальный снимок держит слова, SRS, грамматику и прогресс доступными без сети */
   store.saveLocal(currentUser,S,ADOPTED_OWNER_GENERATION);
   if(SRV){clearTimeout(_saveT);if(options.queueNow)store.sync.queueProgress(S);_saveT=setTimeout(()=>{if(currentOwnerAuthorityCurrent())store.sync.saveProgress(S)},600)}}
-async function invalidateLearningAuthority(authority){
+async function invalidateLearningAuthority(authority,{deferPresentation=false}={}){
   var owner=authority&&authority.owner,ownerGeneration=authority&&authority.ownerGeneration;
   if(currentUser!==owner||ADOPTED_OWNER_GENERATION!==ownerGeneration)return false;
-  AUTH_SESSION_GENERATION+=1;TOKEN='';OFFLINE_EGE_MOCK_CONTINUATION=false;currentUser=null;S=null;window.__sub=null;ADOPTED_OWNER_GENERATION=null;rememberSessionOwnerGeneration(null,null);store.sync.setOwner(null);
+  AUTH_SESSION_GENERATION+=1;TOKEN='';OFFLINE_EGE_MOCK_CONTINUATION=false;currentUser=null;currentDisplayName=null;S=null;window.__sub=null;ADOPTED_OWNER_GENERATION=null;rememberSessionOwnerGeneration(null,null);store.sync.setOwner(null);
+  hideLearningShell();if(!deferPresentation)try{firstLaunch.showLogin()}catch(_){show('scr5')}
   await notifyAuthorityReset(authority);
   await Promise.all([
     store.clearCurrentOwner?.(owner,ownerGeneration),
     clearAdaptiveRuntime({owner:owner,ownerGeneration:ownerGeneration}),
     clearAdaptiveOverviewCache(localStorage,{owner:owner,ownerGeneration:ownerGeneration}),
   ]);
-  hideLearningShell();try{firstLaunch.showLogin()}catch(_){show('scr5')}return true;
+  return true;
 }
 window.EasyBoostAuthority=Object.freeze({invalidate:invalidateLearningAuthority});
 async function startLearningWithVerifiedSession(session,{signal=null}={}){
@@ -473,6 +489,7 @@ async function startLearningWithVerifiedSession(session,{signal=null}={}){
     if(!served)try{toast('Нет сети — показан сохранённый прогресс')}catch(e){}}
   if(!startStillCurrent())return false;
   store.sync.setBaseline(S);
+  authorizeLearningShell();
   tab('scr1',function(){closeAccessGate();firstLaunch.release();focusTodayHeading()});
   void (async function(){for(const hook of START_HOOKS){if(!startStillCurrent())return;try{await hook()}catch(e){}if(!startStillCurrent())return}})();
   return true;
@@ -494,9 +511,11 @@ async function startApp(){
 async function logout(){
   return runAuthTransition(async function(){
     const logoutOwner=currentUser,logoutOwnerGeneration=ADOPTED_OWNER_GENERATION;
-    try{if(SRV)await auth.logout()}catch(_){}
+    hideLearningShell();try{firstLaunch.showLogin()}catch(_){show('scr5')}
     AUTH_SESSION_GENERATION+=1;OFFLINE_EGE_MOCK_CONTINUATION=false;
-    TOKEN='';ADOPTED_OWNER_GENERATION=null;rememberSessionOwnerGeneration(null,null);store.sync.setOwner(null);
+    TOKEN='';currentUser=null;currentDisplayName=null;S=null;window.__sub=null;
+    ADOPTED_OWNER_GENERATION=null;rememberSessionOwnerGeneration(null,null);store.sync.setOwner(null);
+    try{if(SRV)await auth.logout()}catch(_){}
     await Promise.all([
       store.clearCurrentOwner?.(logoutOwner,logoutOwnerGeneration),
       clearAdaptiveRuntime({owner:logoutOwner,ownerGeneration:logoutOwnerGeneration}),
@@ -523,8 +542,10 @@ prepareScreen('scr1');
 
 /* legacy block 2 */
 async function pwCheck(){
-  const pendingRetry=document.getElementById('access_gate_retry');
+  let pendingRetry=document.getElementById('access_gate_retry');
   if(pendingRetry?.disabled)return false;
+  applyLearningAccess({state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null});
+  pendingRetry=document.getElementById('access_gate_retry');
   if(pendingRetry){pendingRetry.disabled=true;pendingRetry.setAttribute('aria-busy','true')}
   try{return await runAuthTransition(async function(){
     const access=await runWithAbortDeadline(
@@ -532,13 +553,13 @@ async function pwCheck(){
       {timeoutMs:FIRST_LAUNCH_SESSION_TIMEOUT_MS},
     ).catch(function(){return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,timedOut:true}});
     if(access.state===LEARNING_ACCESS_STATES.ACTIVE)return startLearningWithDeadline(access.session);
-    if(access.offlineEgeMock){closeAccessGate();hideLearningShell();queueMicrotask(function(){tab('scr16')});return false}
     applyLearningAccess(access);return false;
   })}finally{
     const currentRetry=document.getElementById('access_gate_retry');
     if(currentRetry){currentRetry.disabled=false;currentRetry.removeAttribute('aria-busy')}
   }
 }
+async function recheckLearningAccess(){return pwCheck()}
 window.checkSub=pwCheck;
 
 /* legacy block 4 */
@@ -558,7 +579,6 @@ window.checkSub=pwCheck;
     await opening;
     const access=await accessCheck;
     if(access.state===LEARNING_ACCESS_STATES.ACTIVE)return startLearningWithDeadline(access.session);
-    if(access.offlineEgeMock){closeAccessGate();hideLearningShell();queueMicrotask(function(){tab('scr16')});return}
     applyLearningAccess(access);
   })();
   /* статус подписки в профиле */
@@ -1124,7 +1144,7 @@ export {SRV,registerProfileHook,registerStartHook,toast};
  */
 export {
   EGE_WORDS,LSLOW,L_PLAYSVG,S,TOKEN,W37,W38,WBTN,
-  apiCanUseOfflineFallback,apiGet,apiIsAuthorityFailure,apiMessage,apiPost,apiPostBinary,apiPostIdempotent,apiPut,apiResponseOwner,apiResponseServerTime,commitEgeMockOwnerMutation,currentEgeMockOwnerBinding,currentOwnerBinding,currentUser,examModule,gExamFmt,gSync,generateAiContent,invalidateLearningAuthority,registerAuthorityReset,
+  apiCanUseOfflineFallback,apiGet,apiIsAuthorityFailure,apiMessage,apiPost,apiPostBinary,apiPostIdempotent,apiPut,apiResponseOwner,apiResponseServerTime,commitEgeMockOwnerMutation,currentDisplayName,currentEgeMockOwnerBinding,currentOwnerBinding,currentUser,examModule,gExamFmt,gSync,generateAiContent,invalidateLearningAuthority,recheckLearningAccess,registerAuthorityReset,
   grammarModule,lSetSlow,lSt,lSync,listeningModule,profileModule,progressModule,readingModule,
   rEsc,rSt,rWordsHtml,registerScreenGenerator,ringOff,runProfileHooks,setTxt,spSt,spSync,
   speakingModule,srsFail,srsOk,srsRecordVocabularyOutcome,syncModuleAttempt,todayStr,ui,wBase,wDeco,wMergeAi,wMigrate,wRec,wStats,wSync,

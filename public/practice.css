@@ -20,4 +20,3 @@
 .practice-row[data-state="continue"] .practice-row__state{border-color:var(--aisy-color-info);color:var(--aisy-color-info)}
 .practice-row[data-state="review"] .practice-row__state{border-color:var(--aisy-color-warning);color:var(--aisy-color-warning)}
 .practice-row__action{min-width:116px}
-@media(min-width:600px){.practice{padding:64px 24px 48px}.practice-row{grid-template-columns:44px minmax(0,1fr) auto}.practice-row__controls{grid-column:auto;align-self:center;flex-direction:column;align-items:flex-end}}

@@ -20,16 +20,16 @@ const projectDirectory=fileURLToPath(new URL('..',import.meta.url));
 const serverPath=fileURLToPath(new URL('../server.js',import.meta.url));
 const jwtSecret='aisy-accessibility-e2e-secret-at-least-32-chars';
 const viewports=[
-  {label:'320 portrait',width:320,height:568},{label:'320 landscape',width:568,height:320},
-  {label:'375 portrait',width:375,height:667},{label:'375 landscape',width:667,height:375},
-  {label:'768 portrait',width:768,height:1024},{label:'768 landscape',width:1024,height:768},
-  {label:'1440 portrait',width:1440,height:1920},{label:'1440 landscape',width:1440,height:900},
+  {label:'320×720 portrait',width:320,height:720},{label:'720×320 landscape',width:720,height:320},
+  {label:'375×812 portrait',width:375,height:812},{label:'812×375 landscape',width:812,height:375},
+  {label:'768×1024 portrait',width:768,height:1024},{label:'1024×768 landscape',width:1024,height:768},
+  {label:'1440×900 landscape',width:1440,height:900},{label:'900×1440 portrait',width:900,height:1440},
 ];
 
 const indexSource=await fs.readFile(new URL('../public/index.html',import.meta.url),'utf8');
 const todayCss=await fs.readFile(new URL('../public/today.css',import.meta.url),'utf8');
-assert.match(indexSource,/id="today-state"[^>]*aria-busy="true"[^>]*data-skeleton/u,'Today must expose its initial no-CLS skeleton');
-assert.match(todayCss,/\.today-state\[data-skeleton\][^{]*\{[^}]*min-block-size\s*:/su,'Today skeleton must reserve block size');
+assert.match(indexSource,/id="today-hero"[^>]*aria-busy="true"[^>]*data-skeleton/u,'Today must expose its initial no-CLS skeleton');
+assert.match(todayCss,/\.today-hero\[data-skeleton\][^{]*\{[^}]*min-block-size\s*:/su,'Today skeleton must reserve block size');
 
 let browser;
 let child;
@@ -65,7 +65,7 @@ try{
   browser=await chromium.launch({headless:true,executablePath:await chromeExecutable()});
   const harness=await createActiveSubscriptionPage(browser,{
     baseUrl,username:'learner',jwtSecret,
-    contextOptions:{viewport:{width:375,height:667},reducedMotion:'reduce'},
+    contextOptions:{viewport:{width:375,height:812},reducedMotion:'reduce'},
   });
   const {context,page}=harness;
   const {
@@ -79,8 +79,13 @@ try{
   });
   await page.goto(baseUrl,{waitUntil:'networkidle'});
   await page.locator('#scr1.on').waitFor({state:'visible',timeout:10_000});
-  try{await page.locator('#today-ready:not([hidden])').waitFor({state:'visible',timeout:10_000})}
-  catch(error){const state=await page.evaluate(()=>({cur:window.cur?.(),currentUser:window.currentUser,context:document.getElementById('today-context')?.textContent,state:document.getElementById('today-state-message')?.textContent,busy:document.getElementById('today-state')?.getAttribute('aria-busy')}));throw new Error(`Today did not settle: ${JSON.stringify(state)}\n${browserFailures.join('\n')}`,{cause:error})}
+  const settledToday=page.locator([
+    '#today-hero[data-state="ready"] #today-content:not([hidden])',
+    '#today-hero[data-state="resume"] #today-content:not([hidden])',
+    '#today-hero[data-state="offline"] #today-content:not([hidden])',
+  ].join(','));
+  try{await settledToday.waitFor({state:'visible',timeout:10_000})}
+  catch(error){const state=await page.evaluate(()=>({cur:window.cur?.(),currentUser:window.currentUser,context:document.getElementById('today-context')?.textContent,state:document.getElementById('today-state-message')?.textContent,busy:document.getElementById('today-hero')?.getAttribute('aria-busy'),heroState:document.getElementById('today-hero')?.dataset.state}));throw new Error(`Today did not settle: ${JSON.stringify(state)}\n${browserFailures.join('\n')}`,{cause:error})}
   const navigation=page.getByRole('navigation',{name:'Основные разделы'});
   await navigation.waitFor({state:'visible'});
 
@@ -128,8 +133,8 @@ try{
           const motion=getComputedStyle(document.getElementById('asya-launcher')).transitionDuration;
           return{
             viewport:document.documentElement.clientWidth,documentWidth:document.documentElement.scrollWidth,
-            frameLeft:frame.left,frameRight:frame.right,frameWidth:frame.width,
-            navLeft:nav.left,navRight:nav.right,navWidth:nav.width,
+            frameLeft:frame.left,frameRight:frame.right,frameBottom:frame.bottom,frameWidth:frame.width,
+            navLeft:nav.left,navRight:nav.right,navBottom:nav.bottom,navWidth:nav.width,navHeight:nav.height,
             navColumns:getComputedStyle(navList).gridTemplateColumns.split(' ').filter(Boolean).length,
             controls,motion,colorScheme:rootStyle.colorScheme,theme:document.documentElement.dataset.theme,
             headingId:heading?.id||'',headingText:heading?.textContent||'',
@@ -143,10 +148,10 @@ try{
         assert.ok(Math.abs(layout.navLeft-layout.frameLeft)<=1&&Math.abs(layout.navRight-layout.frameRight)<=1,
           `${destination.name} bottom navigation must stay inside the phone at ${viewport.label}/${theme}`);
         assert.equal(layout.navColumns,5,`${destination.name} navigation became a side rail at ${viewport.label}/${theme}`);
-        if(viewport.width>390){
-          assert.ok(Math.abs(layout.frameLeft-(layout.viewport-layout.frameWidth)/2)<=1,
-            `${destination.name} phone is not centered at ${viewport.label}/${theme}`);
-        }
+        assert.ok(layout.navWidth>layout.navHeight,`${destination.name} navigation became a side rail at ${viewport.label}/${theme}`);
+        assert.ok(Math.abs(layout.navBottom-layout.frameBottom)<=1,`${destination.name} navigation left the bottom edge at ${viewport.label}/${theme}`);
+        assert.ok(Math.abs(layout.frameLeft-(layout.viewport-layout.frameWidth)/2)<=1,
+          `${destination.name} phone is not centered at ${viewport.label}/${theme}`);
         assert.deepEqual(layout.controls.filter(control=>control.width<44||control.height<44),[],`${destination.name} touch target below 44px at ${viewport.label}/${theme}`);
         if(destination.heading)assert.match(layout.headingText,new RegExp(destination.heading,'u'));
         else assert.ok(layout.headingText.trim(),`${destination.name} must expose a non-empty h1`);
@@ -160,7 +165,7 @@ try{
     }
   }
 
-  await page.setViewportSize({width:375,height:667});
+  await page.setViewportSize({width:375,height:812});
   await page.getByRole('button',{name:'Сегодня',exact:true}).focus();
   await page.keyboard.press('Tab');
   const focus=await page.getByRole('button',{name:'Практика',exact:true}).evaluate(element=>{
@@ -223,6 +228,23 @@ try{
   await page.locator('#access_gate[data-state="network-unknown"]').waitFor({state:'visible',timeout:10_000});
   assert.equal(await page.locator('#scr1.on').count(),0,'offline reload must not claim unverified learning access');
   assert.match(await page.locator('#access_gate_copy').textContent(),/нет связи с сервером|Проверьте сеть/u);
+  const lockedShell=await page.evaluate(()=>({
+    access:document.body.dataset.learningAccess,
+    visibleLearnerScreens:['scr1','aisy-practice','aisy-ege','scr10','scr11'].filter(id=>{
+      const screen=document.getElementById(id);return screen?.classList.contains('on')&&screen.getClientRects().length>0;
+    }),
+    controls:['aisy-shell-nav','aisy-shell-back','asya-launcher'].map(id=>{
+      const control=document.getElementById(id);
+      return{id,exists:Boolean(control),hidden:control?.hidden,inert:control?.inert,rendered:Boolean(control?.getClientRects().length)};
+    }),
+  }));
+  assert.equal(lockedShell.access,'locked','unverified access must lock the learner shell');
+  assert.deepEqual(lockedShell.visibleLearnerScreens,[],'offline gate must not reveal a learner destination');
+  assert.deepEqual(lockedShell.controls,[
+    {id:'aisy-shell-nav',exists:true,hidden:true,inert:true,rendered:false},
+    {id:'aisy-shell-back',exists:true,hidden:true,inert:true,rendered:false},
+    {id:'asya-launcher',exists:true,hidden:true,inert:true,rendered:false},
+  ],'offline gate must hide and inert every learner shell control');
   assert.deepEqual(browserFailures,[],'offline accessibility checks must not hide page failures');
   assert.deepEqual(networkGuard.failures,[],'offline accessibility checks must not hide app errors');
   assert.deepEqual(paidBoundaryCalls,[],'offline accessibility checks must not cross provider boundaries');

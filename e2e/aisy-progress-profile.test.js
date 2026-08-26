@@ -24,7 +24,16 @@ try {
   const now = Date.now();
   await fs.writeFile(dataFile, JSON.stringify({
     users: {
-      learner: { created: now, sub_until: now + 7 * 86_400_000 },
+      learner: {
+        created: now,
+        sub_until: now + 7 * 86_400_000,
+        privacy_consent: {
+          text_processing: true,
+          voice_processing: true,
+          policy_version: '2026-08-26-vk-id-v1',
+          updated_at: new Date(now).toISOString(),
+        },
+      },
     },
     progress: { learner: {} },
   }), 'utf8');
@@ -102,7 +111,7 @@ try {
   await profile.waitFor({ state: 'visible' });
   await profile.locator('#privacyProfileButton').waitFor({ state: 'visible' });
   assert.equal(await profile.locator('[data-profile-group]').count(), 4);
-  assert.equal(await profile.locator('#pf_plan_name').innerText(), 'Premium');
+  assert.equal(await profile.locator('#pf_plan_name').innerText(), 'Активный доступ');
   assert.match(await profile.locator('#pf_plan_summary').innerText(), /учебный доступ активен/u);
   const profileText = await profile.innerText();
   assert.match(profileText, /Учёба.*Ася и приватность.*Подписка.*Аккаунт и данные/sui);

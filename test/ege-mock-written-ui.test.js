@@ -65,9 +65,10 @@ test('the written runner and exact revision caches are reachable after an app re
   );
   assert.doesNotMatch(exactAssetMatcher, /for\(const name of names\)/u);
   assert.doesNotMatch(worker, /\/api\/v1\/ege-mocks[^\n]*cache/u);
-  assert.match(app, /offlineEgeMockContinuation\(\)/u);
-  assert.match(app, /offlineEgeMock:true/u);
-  assert.match(app, /tab\('scr16'\)/u);
+  assert.match(app, /function offlineEgeMockContinuation\(\)/u,
+    'an already-authorized learner can still restore the exact local runner');
+  assert.doesNotMatch(app, /offlineEgeMock:true/u,
+    'a failed authority check must not open the exact local runner');
   assert.match(screen, /listeningModule\.registerPlay\(plays, group, 2\)/u);
   assert.match(screen, /normalizeEgeMockSelection/u);
   assert.match(screen, /type: 'refreshLocal'/u);
