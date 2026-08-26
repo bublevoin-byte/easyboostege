@@ -1412,6 +1412,342 @@ button:disabled {
   color: var(--color-primary-hover);
 }
 
+/* Direction B — one tactile learning instrument, not a homescreen grid. */
+.app-frame[data-direction="b"][data-transitioning="true"] .flow-screen {
+  opacity: 1;
+  transform: none;
+}
+
+.app-frame[data-direction="b"] .b-instrument,
+.app-frame[data-direction="b"] .flow-screen > .mini-proof {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+  transition: opacity var(--motion-feedback-duration) var(--motion-screen-ease), transform var(--motion-feedback-duration) var(--motion-screen-ease);
+}
+
+.app-frame[data-direction="b"][data-b-phase="seat"] .b-instrument,
+.app-frame[data-direction="b"][data-b-phase="seat"] .flow-screen > .mini-proof {
+  opacity: 1;
+  transform: translate3d(0, var(--widget-seat-y), 0);
+  transition-duration: var(--motion-press-duration);
+}
+
+.app-frame[data-direction="b"][data-b-phase="release"] .b-instrument,
+.app-frame[data-direction="b"][data-b-phase="release"] .flow-screen > .mini-proof,
+.app-frame[data-direction="b"][data-transitioning="true"][data-b-phase="idle"] .b-instrument,
+.app-frame[data-direction="b"][data-transitioning="true"][data-b-phase="idle"] .flow-screen > .mini-proof {
+  opacity: 1;
+  transform: translate3d(0, var(--widget-release-y), 0);
+  transition-duration: 0ms;
+}
+
+.app-frame[data-direction="b"][aria-busy="true"] {
+  pointer-events: none;
+}
+
+.app-frame[data-direction="b"] .b-instrument {
+  isolation: isolate;
+  border-color: var(--color-border-strong);
+  background: linear-gradient(145deg, var(--color-surface-soft), var(--color-surface-raised));
+  box-shadow: var(--hero-shadow);
+}
+
+.app-frame[data-direction="b"] .hero__ornament {
+  width: var(--primitive-space-10);
+  height: var(--primitive-space-10);
+  border: var(--primitive-border-thin) solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-accent-soft);
+  box-shadow: var(--widget-key-shadow);
+  color: var(--color-warning);
+  transform: none;
+}
+
+.app-frame[data-direction="b"] .duration {
+  margin: var(--primitive-space-3) 0;
+  padding: var(--primitive-space-1);
+  border-color: var(--color-border-strong);
+  border-radius: var(--radius-control);
+  background: var(--widget-well-bg);
+  box-shadow: var(--widget-well-shadow);
+}
+
+.app-frame[data-direction="b"] .duration__option {
+  min-height: var(--primitive-size-control);
+  border-color: var(--color-border);
+  background: var(--widget-key-bg);
+  box-shadow: var(--widget-key-shadow);
+}
+
+.app-frame[data-direction="b"] .duration__option[aria-checked="true"] {
+  border-color: var(--color-selection);
+  background: var(--choice-selected-bg);
+  box-shadow: var(--widget-key-shadow-pressed);
+  transform: translate3d(0, var(--widget-seat-y), 0);
+}
+
+.app-frame[data-direction="b"] .route-list {
+  overflow: hidden;
+  margin-bottom: var(--primitive-space-3);
+  padding: var(--primitive-space-1) var(--primitive-space-3);
+  gap: 0;
+  border: var(--primitive-border-thin) solid var(--color-border-strong);
+  border-radius: var(--radius-control);
+  background: var(--widget-well-bg);
+  box-shadow: var(--widget-well-shadow);
+}
+
+.app-frame[data-direction="b"] .route-list li {
+  min-height: var(--primitive-space-10);
+  grid-template-columns: var(--primitive-space-7) minmax(0, 1fr);
+  gap: var(--primitive-space-2);
+}
+
+.app-frame[data-direction="b"] .route-list li:not(:last-child) {
+  border-bottom: var(--primitive-border-thin) solid var(--color-border);
+}
+
+.app-frame[data-direction="b"] .route-list li > i {
+  width: var(--primitive-space-7);
+  height: var(--primitive-space-7);
+  border-radius: var(--radius-control);
+  box-shadow: var(--widget-key-shadow);
+}
+
+.app-frame[data-direction="b"] .route-list li[data-block-state="recommended"] > i {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+  color: var(--color-warning);
+}
+
+.app-frame[data-direction="b"] .route-list strong,
+.app-frame[data-direction="b"] .route-list small {
+  font-size: 0.6875rem;
+}
+
+.app-frame[data-direction="b"] .flow-screen > .mini-proof {
+  width: calc(100% - var(--primitive-space-6));
+  min-height: var(--size-touch-min);
+  margin-top: calc(0px - var(--primitive-space-5));
+  justify-self: center;
+  padding: 0 var(--primitive-space-3);
+  grid-template-columns: var(--primitive-space-6) minmax(0, 1fr) auto;
+  gap: var(--primitive-space-2);
+  border-radius: 0 0 var(--radius-control) var(--radius-control);
+  background: var(--widget-well-bg);
+  box-shadow: var(--widget-well-shadow);
+}
+
+.app-frame[data-direction="b"] .flow-screen > .mini-proof > span {
+  width: var(--primitive-space-6);
+  height: var(--primitive-space-6);
+  background: var(--color-surface-raised);
+}
+
+.app-frame[data-direction="b"] .flow-screen > .mini-proof .icon {
+  width: var(--primitive-space-4);
+  height: var(--primitive-space-4);
+}
+
+.app-frame[data-direction="b"] .task-sheet,
+.app-frame[data-direction="b"] .review-sheet {
+  gap: var(--primitive-space-2);
+}
+
+.app-frame[data-direction="b"] .task-prompt {
+  padding: var(--primitive-space-2);
+  border: var(--primitive-border-thin) solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--widget-well-bg);
+  box-shadow: var(--widget-well-shadow);
+}
+
+.app-frame[data-direction="b"] .task-sheet > .progress,
+.app-frame[data-direction="b"] .progress-hero > .progress {
+  height: calc(var(--progress-height) + var(--primitive-space-1));
+  box-shadow: var(--widget-well-shadow);
+}
+
+.app-frame[data-direction="b"] .choices {
+  gap: var(--primitive-space-2);
+}
+
+.app-frame[data-direction="b"] .choice {
+  min-height: var(--primitive-size-control);
+  border-color: var(--color-border-strong);
+  box-shadow: var(--widget-key-shadow);
+}
+
+.app-frame[data-direction="b"] .answer-compare,
+.app-frame[data-direction="b"] .rule-card,
+.app-frame[data-direction="b"] .score-change,
+.app-frame[data-direction="b"] .next-step {
+  border: var(--primitive-border-thin) solid var(--color-border);
+  background: var(--widget-well-bg);
+  box-shadow: var(--widget-well-shadow);
+}
+
+.app-frame[data-direction="b"] .rule-card {
+  padding: var(--primitive-space-2) var(--primitive-space-3);
+  border-left-width: var(--primitive-border-thin);
+}
+
+.app-frame[data-direction="b"] .evidence-row {
+  min-height: var(--size-touch-min);
+  padding-block: var(--primitive-space-1);
+  border-width: var(--primitive-border-thin) 0 0;
+  border-radius: 0;
+  background: var(--primitive-color-transparent);
+  box-shadow: none;
+}
+
+.app-frame[data-direction="b"] .score-change {
+  margin: var(--primitive-space-3) 0 var(--primitive-space-2);
+  padding: var(--primitive-space-3);
+  border-radius: var(--radius-control);
+}
+
+.app-frame[data-direction="b"] .progress-copy {
+  margin: var(--primitive-space-3) 0;
+  gap: var(--primitive-space-1);
+}
+
+.app-frame[data-direction="b"] .next-step {
+  color: var(--color-support);
+}
+
+.app-frame[data-direction="b"] .primary-button,
+.app-frame[data-direction="b"] .deep-dock__primary,
+.app-frame[data-direction="b"] .deep-dock__back,
+.app-frame[data-direction="b"] .choice,
+.app-frame[data-direction="b"] .duration__option,
+.app-frame[data-direction="b"] .bottom-nav button {
+  transition: transform var(--motion-press-duration) var(--motion-press-ease), box-shadow var(--motion-press-duration) var(--motion-press-ease), background var(--motion-feedback-duration) var(--motion-press-ease);
+}
+
+.app-frame[data-direction="b"] .primary-button,
+.app-frame[data-direction="b"] .deep-dock__primary,
+.app-frame[data-direction="b"] .deep-dock__back {
+  box-shadow: var(--widget-key-shadow);
+}
+
+.app-frame[data-direction="b"] .primary-button:active,
+.app-frame[data-direction="b"] .deep-dock__primary:active,
+.app-frame[data-direction="b"] .deep-dock__back:active,
+.app-frame[data-direction="b"] .choice:active,
+.app-frame[data-direction="b"] .duration__option:active,
+.app-frame[data-direction="b"] .bottom-nav button:active {
+  box-shadow: var(--widget-key-shadow-pressed);
+  transform: translate3d(0, var(--widget-seat-y), 0);
+}
+
+.app-frame[data-direction="b"] .bottom-nav,
+.app-frame[data-direction="b"] .deep-dock {
+  border-top-color: var(--color-border-strong);
+  background: var(--color-surface-soft);
+  box-shadow: var(--widget-key-shadow);
+}
+
+.app-frame[data-direction="b"] .deep-dock__primary {
+  font-size: var(--text-body-size);
+}
+
+.app-frame[data-direction="b"] .deep-dock {
+  padding-block: 0 calc(var(--primitive-space-2) + env(safe-area-inset-bottom));
+}
+
+.app-frame[data-direction="b"] .next-step strong {
+  font-size: var(--text-body-size);
+}
+
+.app-frame[data-direction="b"] :is(
+  .app-header small,
+  .flow-stepper button span,
+  .flow-stepper button small,
+  .duration__option span,
+  .route-list li > i,
+  .route-list strong,
+  .route-list small,
+  .mini-proof strong,
+  .mini-proof small,
+  .bottom-nav button small,
+  .state-strip,
+  .state-strip button,
+  .task-meta > strong,
+  .badge,
+  .choice > i,
+  .choice small,
+  .task-assistance,
+  .result-mark,
+  .rule-card small,
+  .progress-copy small,
+  .next-step small,
+  .evidence-row strong,
+  .evidence-row small,
+  .score-change > em
+) {
+  font-size: var(--text-label-size);
+}
+
+.app-frame[data-direction="b"] .bottom-nav button.is-active > span {
+  background: var(--widget-well-bg);
+  box-shadow: var(--widget-well-shadow);
+}
+
+.app-frame[data-direction="b"] .bottom-nav button.is-active::before {
+  position: absolute;
+  bottom: var(--primitive-space-1);
+  width: var(--primitive-space-3);
+  height: var(--primitive-border-strong);
+  border-radius: var(--radius-pill);
+  background: currentColor;
+  content: '';
+}
+
+body[data-carrier-size="compact"] .app-frame[data-direction="b"] .b-instrument {
+  padding: var(--primitive-space-4);
+}
+
+body[data-carrier-size="compact"] .app-frame[data-direction="b"] .duration {
+  margin-block: var(--primitive-space-2);
+}
+
+body[data-carrier-size="compact"] .app-frame[data-direction="b"] .route-list {
+  margin-bottom: var(--primitive-space-2);
+}
+
+body[data-carrier-size="compact"] .app-frame[data-direction="b"] .route-list li {
+  min-height: 2.25rem;
+}
+
+body[data-carrier-size="compact"] .app-frame[data-direction="b"] .score-change,
+body[data-carrier-size="compact"] .app-frame[data-direction="b"] .progress-copy {
+  margin-block: var(--primitive-space-2);
+}
+
+@media (max-height: 45rem) {
+  .app-frame[data-direction="b"] .b-instrument {
+    padding: var(--primitive-space-4);
+  }
+
+  .app-frame[data-direction="b"] .duration {
+    margin-block: var(--primitive-space-2);
+  }
+
+  .app-frame[data-direction="b"] .route-list {
+    margin-bottom: var(--primitive-space-2);
+  }
+
+  .app-frame[data-direction="b"] .route-list li {
+    min-height: 2.25rem;
+  }
+
+  .app-frame[data-direction="b"] .score-change,
+  .app-frame[data-direction="b"] .progress-copy {
+    margin-block: var(--primitive-space-2);
+  }
+}
+
 .gallery-scroll,
 .motion-scroll {
   padding-top: var(--primitive-space-3);
@@ -1859,6 +2195,16 @@ a:focus-visible:focus {
   box-shadow: var(--shadow-focus);
 }
 
+.app-frame[data-direction="b"] button:focus-visible:focus,
+.app-frame[data-direction="b"] a:focus-visible:focus {
+  box-shadow: var(--shadow-focus);
+}
+
+.app-frame[data-direction="b"] .duration__option[aria-checked="true"]:focus-visible:focus,
+.app-frame[data-direction="b"] .choice[aria-checked="true"]:focus-visible:focus {
+  box-shadow: var(--shadow-focus);
+}
+
 @media (max-width: 48rem) {
   .lab-toolbar {
     align-items: stretch;
@@ -1978,5 +2324,26 @@ a:focus-visible:focus {
   .app-frame[data-direction="a"][data-paper-chrome-transitioning="true"] .bottom-nav,
   .app-frame[data-direction="a"][data-paper-chrome-transitioning="true"] .deep-dock {
     transform: none;
+  }
+
+  .app-frame[data-direction="b"] .b-instrument,
+  .app-frame[data-direction="b"] .flow-screen > .mini-proof,
+  .app-frame[data-direction="b"][data-b-phase="seat"] .b-instrument,
+  .app-frame[data-direction="b"][data-b-phase="seat"] .flow-screen > .mini-proof,
+  .app-frame[data-direction="b"][data-b-phase="release"] .b-instrument,
+  .app-frame[data-direction="b"][data-b-phase="release"] .flow-screen > .mini-proof {
+    transform: none;
+    transition-duration: var(--motion-feedback-duration);
+    transition-property: opacity, box-shadow, background;
+  }
+
+  .app-frame[data-direction="b"][data-b-phase="seat"] .b-instrument,
+  .app-frame[data-direction="b"][data-b-phase="seat"] .flow-screen > .mini-proof {
+    opacity: 0.92;
+  }
+
+  .app-frame[data-direction="b"][data-b-phase="release"] .b-instrument,
+  .app-frame[data-direction="b"][data-b-phase="release"] .flow-screen > .mini-proof {
+    opacity: 0.84;
   }
 }

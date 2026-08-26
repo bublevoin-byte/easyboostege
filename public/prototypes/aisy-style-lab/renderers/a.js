@@ -3,6 +3,7 @@ import {
   icon,
   renderDuration,
   renderStatus,
+  routeBlocksForDuration,
   wrapFlow,
 } from './common.js';
 import {
@@ -11,8 +12,8 @@ import {
   renderTask,
 } from './foundation.js';
 
-function renderPaperMap(blocks) {
-  return `<section class="a-route-map" aria-label="Этапы сегодняшнего маршрута">
+function renderPaperMap(blocks, duration) {
+  return `<section class="a-route-map" aria-live="polite" aria-label="Маршрут на ${duration} минут">
     <svg class="a-route-map__line" viewBox="0 0 300 56" preserveAspectRatio="none" aria-hidden="true">
       <path d="M48 28C82 7 112 49 150 28S218 11 252 28"/>
     </svg>
@@ -37,6 +38,7 @@ function renderGoalLandmark() {
 function renderToday(viewModel, runtime) {
   const { content, status } = viewModel;
   const duration = runtime.duration || content.duration;
+  const routeBlocks = routeBlocksForDuration(content, duration);
   const isResume = viewModel.fixtureState === 'resume';
   const cta = isResume ? content.resumeCta : content.cta;
   const body = `
@@ -46,7 +48,7 @@ function renderToday(viewModel, runtime) {
       <h1>${escapeHTML(content.title)}</h1>
       <p>${escapeHTML(content.reason)}</p>
       ${renderDuration(content.durationOptions, duration)}
-      ${renderPaperMap(content.blocks)}
+      ${renderPaperMap(routeBlocks, duration)}
       <button class="primary-button" type="button" data-action="next" data-target-screen="${escapeHTML(cta.target)}"><span>${escapeHTML(cta.label)}</span>${icon('arrow')}</button>
     </section>
     <section class="a-week-tail" aria-label="${escapeHTML(content.rhythm.label)}. До ЕГЭ ${viewModel.meta.egeCountdownDays} день">

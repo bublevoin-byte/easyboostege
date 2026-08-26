@@ -32,12 +32,15 @@ let renderedState = null;
 let pendingFocusSelector = '';
 let activePaperOutgoing = null;
 let paperTransitionTimeout = 0;
+let bNavigationTimer = 0;
+let bNavigationLocked = false;
 
 document.body.dataset.embed = String(state.embed);
 document.body.dataset.carrier = String(Boolean(initialCarrier));
 document.body.dataset.carrierSize = initialCarrier || 'none';
 document.body.dataset.focus = initialFocus || 'none';
 toolbar.hidden = state.embed;
+app.dataset.bPhase = 'idle';
 
 function updateUrl({ push = false } = {}) {
   const next = new URL(location.href);
@@ -81,6 +84,21 @@ function clearPaperOutgoing() {
   activePaperOutgoing?.remove();
   activePaperOutgoing = null;
   app.dataset.paperChromeTransitioning = 'false';
+}
+
+function motionDuration(name, fallback) {
+  const value = getComputedStyle(app).getPropertyValue(name).trim();
+  const amount = Number.parseFloat(value);
+  if (!Number.isFinite(amount)) return fallback;
+  return value.endsWith('ms') ? amount : value.endsWith('s') ? amount * 1000 : fallback;
+}
+
+function clearBNavigation() {
+  if (bNavigationTimer) window.clearTimeout(bNavigationTimer);
+  bNavigationTimer = 0;
+  bNavigationLocked = false;
+  app.dataset.bPhase = 'idle';
+  app.removeAttribute('aria-busy');
 }
 
 function capturePaperOutgoing() {
@@ -192,21 +210,53 @@ function setPartial(next, { push = true } = {}) {
   state.screen = normalized.screen;
   state.fixtureState = normalized.fixtureState;
   updateUrl({ push });
-  render();
+  return render();
+}
+
+function navigateScreen(target) {
+  if (!target || target === state.screen) {
+    app.querySelector('.flow-screen')?.focus({ preventScroll: true });
+    return;
+  }
+
+  const usesTactileTransition = Boolean(
+    state.direction === 'b'
+    && state.panel === 'flow'
+    && app.querySelector('.b-instrument')
+  );
+  if (!usesTactileTransition) {
+    queueFocus('.flow-screen');
+    setPartial({ screen: target, panel: 'flow' });
+    return;
+  }
+  if (bNavigationLocked) return;
+
+  bNavigationLocked = true;
+  app.dataset.bPhase = 'seat';
+  app.setAttribute('aria-busy', 'true');
+  const seatDuration = motionDuration('--motion-press-duration', 180);
+  bNavigationTimer = window.setTimeout(async () => {
+    app.dataset.bPhase = 'release';
+    queueFocus('.flow-screen');
+    await setPartial({ screen: target, panel: 'flow' });
+    requestAnimationFrame(() => {
+      app.dataset.bPhase = 'idle';
+      const releaseDuration = motionDuration('--motion-feedback-duration', 220);
+      bNavigationTimer = window.setTimeout(clearBNavigation, releaseDuration + 40);
+    });
+  }, seatDuration);
 }
 
 function nextScreen() {
   const index = FLOW_SCREENS.findIndex(({ id }) => id === state.screen);
   const target = FLOW_SCREENS[(index + 1) % FLOW_SCREENS.length];
-  queueFocus('.flow-screen');
-  setPartial({ screen: target.id, panel: 'flow' });
+  navigateScreen(target.id);
 }
 
 function previousScreen() {
   const index = FLOW_SCREENS.findIndex(({ id }) => id === state.screen);
   const target = FLOW_SCREENS[Math.max(0, index - 1)];
-  queueFocus('.flow-screen');
-  setPartial({ screen: target.id, panel: 'flow' });
+  navigateScreen(target.id);
 }
 
 document.addEventListener('click', (event) => {
@@ -214,16 +264,17 @@ document.addEventListener('click', (event) => {
   if (!button) return;
 
   if (button.dataset.setDirection) {
+    clearBNavigation();
     setPartial({ direction: button.dataset.setDirection });
     return;
   }
   if (button.dataset.setPanel) {
+    clearBNavigation();
     setPartial({ panel: button.dataset.setPanel });
     return;
   }
   if (button.dataset.setScreen) {
-    queueFocus('.flow-screen');
-    setPartial({ screen: button.dataset.setScreen, panel: 'flow' });
+    navigateScreen(button.dataset.setScreen);
     return;
   }
   if (button.dataset.duration) {
@@ -239,8 +290,7 @@ document.addEventListener('click', (event) => {
     return;
   }
   if (button.dataset.targetScreen) {
-    queueFocus('.flow-screen');
-    setPartial({ screen: button.dataset.targetScreen, panel: 'flow' });
+    navigateScreen(button.dataset.targetScreen);
     return;
   }
   if (button.dataset.action === 'next') {
@@ -273,8 +323,7 @@ document.addEventListener('click', (event) => {
   }
   if (button.dataset.navTarget) {
     if (button.dataset.navTarget === 'today' || button.dataset.navTarget === 'progress') {
-      queueFocus('.flow-screen');
-      setPartial({ screen: button.dataset.navTarget, panel: 'flow' });
+      navigateScreen(button.dataset.navTarget);
     } else {
       button.dataset.previewed = 'true';
       button.setAttribute('aria-label', `${button.textContent.trim()}: раздел сохранён в навигации, вне контура сравнения`);
@@ -283,6 +332,7 @@ document.addEventListener('click', (event) => {
 });
 
 window.addEventListener('popstate', () => {
+  clearBNavigation();
   const nextParams = new URLSearchParams(location.search);
   state = {
     ...stateFromSearch(location.search),

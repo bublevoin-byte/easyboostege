@@ -39,6 +39,24 @@ export function renderDuration(options, selected) {
     </button>`).join('')}</div>`;
 }
 
+function minutesLabel(minutes) {
+  const mod10 = minutes % 10;
+  const mod100 = minutes % 100;
+  if (mod10 === 1 && mod100 !== 11) return 'минута';
+  if ([2, 3, 4].includes(mod10) && ![12, 13, 14].includes(mod100)) return 'минуты';
+  return 'минут';
+}
+
+export function routeBlocksForDuration(content, duration) {
+  const estimates = content.durationEstimates?.[duration];
+  if (!estimates) return content.blocks;
+  return content.blocks.map((block) => {
+    const minutes = estimates[block.id];
+    if (!Number.isFinite(minutes)) return block;
+    return { ...block, detail: `${minutes} ${minutesLabel(minutes)}` };
+  });
+}
+
 export function renderChoice(option, state = 'default') {
   const marker = state === 'correct' ? icon('check') : state === 'incorrect' ? icon('cross') : `<span>${escapeHTML(option.id.toUpperCase())}</span>`;
   const suffix = state === 'correct' ? '<small>Верно</small>' : state === 'incorrect' ? '<small>Твой ответ</small>' : '';

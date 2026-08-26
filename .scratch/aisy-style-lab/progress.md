@@ -4,7 +4,7 @@
 |---|---:|---|---|---|---|
 | Foundation / shell | 22 | ПРОЙДЕНО | ПРОЙДЕНО | ПРОЙДЕНО | завершено |
 | A — бумажный маршрут | 7 | ПРОЙДЕНО | ПРОЙДЕНО | ПРОЙДЕНО | завершено |
-| B — тактильные виджеты | 0 | — | — | — | ожидает |
+| B — тактильные виджеты | 4 | ПРОЙДЕНО | ПРОЙДЕНО | ПРОЙДЕНО | завершено |
 | C — сюжетный маршрут | 0 | — | — | — | ожидает |
 
 ## История дыр и исправлений
@@ -319,3 +319,68 @@
   один coral CTA, без scrapbook/dashboard/wide learner layout.
 - Обязательные repo gates перед коммитом: static QA и syntax зелёные; `lint` зелёный; `check` проверил `473`
   JavaScript-файла и `209` inline handlers; полный `npm test` — `1914 total / 1866 pass / 48 skip / 0 fail`.
+
+### B — тактильные виджеты · круг 1
+
+- Добавлен отдельный тонкий `renderers/b.js`; fixture, контент и порядок Today → Task → Review → Progress остаются
+  общими для A/B/C.
+- Каждый экран стал одним вертикальным учебным прибором: canvas → instrument → inset well/raised key. Today не
+  превращён в dashboard; week proof присоединён как узкий readout, а нижняя навигация остаётся единым chassis.
+- Direct `360×720` и canonical carrier `390×844` проверены на всех четырёх экранах: overflow/скрытого scroll нет,
+  controls `≥44px`, main instrument/readout не пересекаются с nav/dock.
+- Полный кликабельный flow, локальный choice без screen-motion, dock Back, browser Back/reload, radio keyboard и
+  focus проверены. CTA contrast `5.264:1`, inactive step `6.644:1`; console errors отсутствуют.
+- Фирменная анимация использует один `seat → release`: около `2px/180ms` для текущего прибора и `4px/220ms` для
+  входящего, без clone и двойного CTA. Reduced motion явно удаляет transform.
+- Критик ремесла: `ПРОЙДЕНО` — вся матрица читается как один сдержанный вертикальный прибор, без bento, crop,
+  двойного экрана или движения chassis.
+- Критик ТЗ: `НЕ ПРОЙДЕНО` — duration radio обновлял selection, но маршрут оставался `3+12+5`, поэтому варианты
+  10/30/40 минут были недостоверны.
+- Критик системы: `НЕ ПРОЙДЕНО` — B nav/dock наследовал направленную вверх тень `0 -5px`; labels/readouts/provenance
+  оставались `11px`, deep CTA `13px`; его внешнее focus-кольцо выходило ниже phone bottom.
+- Исправление данных: общий A/B/C projection пересчитывает этапы для 10/20/30/40 как `2+6+2`, `3+12+5`,
+  `5+18+7`, `6+24+10`, меняет live-region label in-place и не запускает screen motion.
+- Исправление B: chassis использует down-right `6px 8px` shadow; label role унифицирован на `12px`, deep CTA и
+  next-step body — `15px`; dock получил нижний резерв, его `3px/4px` focus заканчивается на `715.5` до phone bottom
+  `720`.
+- После исправления вся direct/canonical геометрия снова `8/8` без overflow; круг 2 получает новые exact URL.
+
+### B — тактильные виджеты · круг 2
+
+- Критики ТЗ и системы: `ПРОЙДЕНО` — 8/8 URL, duration parity/sums, typography, shadow direction, focus safety,
+  geometry, full flow, accessibility, contrast и reduced motion подтверждены.
+- Критик ремесла: `НЕ ПРОЙДЕНО` — при единственном входящем приборе release начинался с `opacity: 0.72`, поэтому
+  физическое отпускание визуально напоминало dissolve, хотя clone/двойного текста и движения chrome не было.
+- Исправление: normal-motion seat и release теперь всегда `opacity: 1`; покадрово Today при ~100ms и Task при
+  ~210ms полностью непрозрачны, один instrument, chrome stationary. Opacity `0.92/0.84` остаётся только внутри
+  reduced-motion media query как короткая `80ms` замена spatial movement.
+
+### B — тактильные виджеты · круг 3
+
+- Три свежих независимых live-browser критика повторно получают всю exact matrix и отдельный opaque seat/release
+  proof на одной замороженной версии.
+- Критики ТЗ и ремесла: `ПРОЙДЕНО / ПРОЙДЕНО`. Системный критик после полного text-role scan отозвал
+  предварительный PASS: доступная подпись направления в header вычислялась как `11px` вместо label-role `12px`.
+- Все `8/8` live URL сохраняют direct phone/document `360×720`; canonical phone находится в
+  `x=180,y=20,w=390,h=844` внутри `750×884`. Overflow, side rail и recovery scroll отсутствуют.
+- Normal motion покадрово показывает ровно один instrument с `opacity: 1`: seat ≈2px/180ms, incoming release
+  из 4px/220ms, chrome неподвижен. Reduced motion удаляет spatial offsets и оставляет короткий opacity feedback.
+- Touch targets `≥44px`, labels `12px`, body/CTA `15px`; CTA contrast `5.264:1`, inactive step `6.644:1`.
+  Deep focus-outline заканчивается на `715.5px` до нижней границы телефона `720px`.
+- Duration projection подтверждён для `10=2+6+2`, `20=3+12+5`, `30=5+18+7`, `40=6+24+10`; полный flow,
+  Back, browser Back/reload и keyboard radios сохраняют общий fixture и URL state.
+
+### B — тактильные виджеты · круг 4
+
+- Исправление: `.app-header small` включён в scoped B label-role и вычисляется как `12px` на всех экранах;
+  два декоративных текста mock status-bar остаются `aria-hidden` и не создают пользовательскую tiny-role.
+- Три свежих независимых критика повторно получают exact live-матрицу на новой замороженной версии.
+- Критики ТЗ, системы и ремесла: `ПРОЙДЕНО / ПРОЙДЕНО / ПРОЙДЕНО`; блокирующих замечаний нет.
+- Exhaustive live text-role scan на всех `8/8` URL: header caption `12px`, видимых/AX-доступных labels ниже
+  `12px` — `0`, body/CTA ниже `15px` — `0`. Все targets `≥44px`, горизонтальный overflow — `0`.
+- Direct и canonical geometry, common fixture, duration projection, nav/dock contract, keyboard/ARIA, contrasts,
+  safe focus и down-right elevation совпали с принятыми раундами 1–3.
+- Live Today → Task сохраняет один непрозрачный instrument: seat ≈2px/180ms, incoming release 4px/220ms;
+  clone/dissolve/crop нет. Reduced motion удаляет spatial offsets.
+- Обязательные repo gates: static QA, lint и check зелёные; полный unit rerun —
+  `1914 total / 1866 pass / 48 skip / 0 fail`.

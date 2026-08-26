@@ -41,6 +41,12 @@ export const LAB_FIXTURE = deepFreeze({
     reason: 'Вчера в заданиях 19–25 эта тема дала 2 ошибки подряд.',
     durationOptions: [10, 20, 30, 40],
     duration: 20,
+    durationEstimates: {
+      10: { warmup: 2, grammar: 6, recap: 2 },
+      20: { warmup: 3, grammar: 12, recap: 5 },
+      30: { warmup: 5, grammar: 18, recap: 7 },
+      40: { warmup: 6, grammar: 24, recap: 10 },
+    },
     completedMinutes: 0,
     blocks: [
       { id: 'warmup', label: 'Разминка', detail: '3 минуты', state: 'ready' },

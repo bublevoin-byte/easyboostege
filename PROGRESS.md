@@ -4,18 +4,18 @@
 Тикеты: [.scratch/aisy-style-lab/issues/](.scratch/aisy-style-lab/issues/)
 Ветка: `prototype/aisy-today-visual-v1`
 
-Overall status: `in-progress` — foundation/shell и направление A закрыты; следующим идёт B; production UI не изменяется.
+Overall status: `in-progress` — foundation/shell и направления A/B закрыты; следующим идёт C; production UI не изменяется.
 
 | № | Что даёт | Статус |
 |---|---|---|
 | 01 | Общая трёхслойная дизайн-система и fixture/state-контракт | done |
 | 02 | Телефонный comparison hub, components/states и motion lab | done — round 22 |
 | 03 | A — бумажный маршрут | done — round 7 |
-| 04 | B — тактильные виджеты | ready-for-agent |
+| 04 | B — тактильные виджеты | done — round 4 |
 | 05 | C — сюжетный маршрут | ready-for-agent |
 | 06 | Независимая визуальная QA и лист выбора | blocked by 03–05 |
 
-Design-loop: foundation `круг 22 — ПРОЙДЕНО`; A `круг 7 — ПРОЙДЕНО`; B `круг 0`; C `круг 0`.
+Design-loop: foundation `круг 22 — ПРОЙДЕНО`; A `круг 7 — ПРОЙДЕНО`; B `круг 4 — ПРОЙДЕНО`; C `круг 0`.
 
 ---
 

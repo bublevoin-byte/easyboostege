@@ -233,6 +233,8 @@
     inset -2px -2px 5px rgb(var(--primitive-shadow-plum-rgb) / 0.07);
   --shadow-pressed: 3px 4px 8px rgb(var(--primitive-shadow-plum-rgb) / 0.13),
     inset 2px 2px 5px rgb(var(--primitive-shadow-plum-rgb) / 0.1);
+  --shadow-sunken: inset 2px 2px 6px rgb(var(--primitive-shadow-plum-rgb) / 0.1),
+    inset -1px -1px 2px rgb(var(--primitive-white-rgb) / 0.45);
   --shadow-focus: 0 0 0 var(--primitive-focus-width) var(--color-canvas),
     0 0 0 calc(var(--primitive-focus-width) + 2px) var(--color-focus);
 
@@ -247,6 +249,8 @@
   --motion-paper-enter-x: 1rem;
   --motion-paper-exit-x: calc(-100% - var(--primitive-space-8));
   --motion-paper-exit-y: -0.5rem;
+  --motion-widget-seat-y: calc(var(--primitive-space-1) / 2);
+  --motion-widget-release-y: var(--primitive-space-1);
 }
 
 [data-direction="b"] {
@@ -263,6 +267,8 @@
   --shadow-raised: 9px 11px 18px rgb(var(--primitive-shadow-plum-rgb) / 0.2),
     inset 2px 2px 2px rgb(var(--primitive-white-rgb) / 0.5),
     inset -2px -2px 5px rgb(var(--primitive-shadow-plum-rgb) / 0.09);
+  --shadow-sunken: inset 3px 3px 7px rgb(var(--primitive-shadow-plum-rgb) / 0.12),
+    inset -1px -1px 2px rgb(var(--primitive-white-rgb) / 0.5);
   --motion-screen-x: 0rem;
   --motion-screen-y: 0.5rem;
 }
@@ -372,6 +378,14 @@
   --paper-exit-x: var(--motion-paper-exit-x);
   --paper-exit-y: var(--motion-paper-exit-y);
 
+  --widget-well-bg: var(--color-surface-sunken);
+  --widget-well-shadow: var(--shadow-sunken);
+  --widget-key-bg: var(--color-surface-raised);
+  --widget-key-shadow: var(--shadow-rest);
+  --widget-key-shadow-pressed: var(--shadow-pressed);
+  --widget-seat-y: var(--motion-widget-seat-y);
+  --widget-release-y: var(--motion-widget-release-y);
+
   --nav-bg: var(--color-surface-raised);
   --nav-fg: var(--color-text-muted);
   --nav-active: var(--color-primary);
@@ -392,5 +406,7 @@
     --motion-paper-enter-x: 0rem;
     --motion-paper-exit-x: 0rem;
     --motion-paper-exit-y: 0rem;
+    --motion-widget-seat-y: 0rem;
+    --motion-widget-release-y: 0rem;
   }
 }

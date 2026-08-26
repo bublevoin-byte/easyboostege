@@ -8,6 +8,7 @@ import {
   renderPhoneHeader,
   renderProgress,
   renderStatus,
+  routeBlocksForDuration,
   wrapFlow,
 } from './common.js';
 
@@ -16,6 +17,7 @@ const surfaceClassName = (base, extra = '') => [base, extra].filter(Boolean).joi
 export function renderToday(viewModel, runtime, { surfaceClass = '', surfaceDecoration = '' } = {}) {
   const { content, status } = viewModel;
   const duration = runtime.duration || content.duration;
+  const routeBlocks = routeBlocksForDuration(content, duration);
   const isResume = viewModel.fixtureState === 'resume';
   const cta = isResume ? content.resumeCta : content.cta;
   const body = `
@@ -27,7 +29,7 @@ export function renderToday(viewModel, runtime, { surfaceClass = '', surfaceDeco
       <h1>${escapeHTML(content.title)}</h1>
       <p>${escapeHTML(content.reason)}</p>
       ${renderDuration(content.durationOptions, duration)}
-      <ol class="route-list">${content.blocks.map((block, index) => `<li data-block-state="${escapeHTML(block.state)}"><i>${index + 1}</i><span><strong>${escapeHTML(block.label)}</strong><small>${escapeHTML(block.detail)}</small></span></li>`).join('')}</ol>
+      <ol class="route-list" aria-live="polite" aria-label="Маршрут на ${duration} минут">${routeBlocks.map((block, index) => `<li data-block-state="${escapeHTML(block.state)}"><i>${index + 1}</i><span><strong>${escapeHTML(block.label)}</strong><small>${escapeHTML(block.detail)}</small></span></li>`).join('')}</ol>
       <button class="primary-button" type="button" data-action="next" data-target-screen="${escapeHTML(cta.target)}"><span>${escapeHTML(cta.label)}</span>${icon('arrow')}</button>
     </section>
     <section class="mini-proof" aria-label="Ритм недели">
