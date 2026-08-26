@@ -8,15 +8,17 @@ const fixtureUrl = new URL('public/prototypes/aisy-style-lab/data/fixtures.js', 
 const appUrl = new URL('public/prototypes/aisy-style-lab/app.js', root);
 const directionAUrl = new URL('public/prototypes/aisy-style-lab/renderers/a.js', root);
 const directionBUrl = new URL('public/prototypes/aisy-style-lab/renderers/b.js', root);
+const directionCUrl = new URL('public/prototypes/aisy-style-lab/renderers/c.js', root);
 const commonRendererUrl = new URL('public/prototypes/aisy-style-lab/renderers/common.js', root);
 
-const [tokens, labCss, fixtureSource, appSource, directionASource, directionBSource, commonRendererSource] = await Promise.all([
+const [tokens, labCss, fixtureSource, appSource, directionASource, directionBSource, directionCSource, commonRendererSource] = await Promise.all([
   readFile(tokenUrl, 'utf8'),
   readFile(labCssUrl, 'utf8'),
   readFile(fixtureUrl, 'utf8'),
   readFile(appUrl, 'utf8'),
   readFile(directionAUrl, 'utf8'),
   readFile(directionBUrl, 'utf8'),
+  readFile(directionCUrl, 'utf8'),
   readFile(commonRendererUrl, 'utf8'),
 ]);
 
@@ -41,6 +43,12 @@ assert.match(directionASource, /a-route-map/, 'Direction A folded route map is m
 assert.match(directionASource, /a-paper-surface/, 'Direction A paper deck is missing');
 assert.match(directionBSource, /b-instrument/, 'Direction B tactile instrument is missing');
 assert.match(directionBSource, /renderFoundationScreen/, 'Direction B must project the shared fixture renderer');
+assert.match(directionCSource, /c-journey/, 'Direction C illustrated route is missing');
+assert.match(directionCSource, /renderFoundationScreen/, 'Direction C must project the shared fixture renderer');
+assert.match(directionCSource, /pathLength="1"/, 'Direction C route needs a normalized draw path');
+assert.match(directionCSource, /focusable="false"/, 'Direction C decorative SVG must stay outside keyboard focus');
+assert.match(commonRendererSource, /aria-hidden="true" focusable="false"/, 'Shared decorative SVG icons must stay outside keyboard focus');
+assert.equal(/cloneNode/.test(directionCSource), false, 'Direction C must not clone readable screens');
 assert.match(commonRendererSource, /routeBlocksForDuration/, 'duration choice must update route estimates in-place');
 assert.match(appSource, /dataset\.bPhase\s*=\s*'seat'/, 'Direction B seat phase is missing');
 assert.match(appSource, /dataset\.bPhase\s*=\s*'release'/, 'Direction B release phase is missing');
@@ -54,6 +62,18 @@ assert.match(
   labCss,
   /@media \(prefers-reduced-motion: reduce\)[\s\S]+data-direction="b"[\s\S]+transform:\s*none/,
   'Direction B reduced motion must remove spatial movement',
+);
+assert.match(
+  labCss,
+  /c-journey__trail--progress[\s\S]+stroke-dashoffset:\s*var\(--c-route-offset\)[\s\S]+var\(--story-route-duration\)/,
+  'Direction C normalized route-draw transition is missing',
+);
+assert.match(appSource, /dataset\.cRouteTransition\s*=\s*isStoryForwardTransition/, 'Direction C forward-only motion state is missing');
+assert.match(labCss, /data-c-route-transition="forward"[\s\S]+var\(--c-route-from-offset\)/, 'Direction C must draw only the next route leg');
+assert.match(
+  labCss,
+  /prefers-reduced-motion[\s\S]+data-direction="c"[\s\S]+stroke-dashoffset:\s*var\(--c-route-offset\)[\s\S]+transition:\s*none/,
+  'Direction C reduced motion must remove route drawing',
 );
 assert.match(labCss, /var\(--paper-enter-x\)/, 'Direction A incoming 16px paper displacement is missing');
 assert.match(labCss, /var\(--paper-exit-x\)/, 'Direction A outgoing paper displacement is missing');
@@ -90,6 +110,7 @@ console.log(JSON.stringify({
   navigation: fixtureModule.NAV_ITEMS.length,
   directionARenderer: true,
   directionBRenderer: true,
+  directionCRenderer: true,
   rawComponentColors: 0,
   desktopSideRail: false,
 }, null, 2));

@@ -5,7 +5,39 @@
 | Foundation / shell | 22 | ПРОЙДЕНО | ПРОЙДЕНО | ПРОЙДЕНО | завершено |
 | A — бумажный маршрут | 7 | ПРОЙДЕНО | ПРОЙДЕНО | ПРОЙДЕНО | завершено |
 | B — тактильные виджеты | 4 | ПРОЙДЕНО | ПРОЙДЕНО | ПРОЙДЕНО | завершено |
-| C — сюжетный маршрут | 0 | — | — | — | ожидает |
+| C — сюжетный маршрут | 2 | ПРОЙДЕНО | ПРОЙДЕНО | ПРОЙДЕНО | завершено |
+
+### C — сюжетный маршрут · круг 1
+
+- Добавлен отдельный `renderers/c.js`, который проецирует общий foundation fixture и добавляет только абсолютный
+  illustrated route layer; production UI не затронут.
+- Четыре stage-landmark используют разные учебные символы: стартовый флаг, практика, открытие правила и orange
+  goal-rosette с коротким dotted continuation на завтра. SVG декоративный, `aria-hidden`, `focusable=false`.
+- Direct `360×720` и canonical phone `390×844` проверены `8/8`: overflow/side rail нет, artwork не влияет на flow,
+  controls `≥44px`, labels `≥12px`, body/CTA `≥15px`, edge focus помещается внутри phone.
+- Forward-only route draw показывает только следующий участок (`1→.67→.33→0`) за `480ms`, incoming content
+  поднимается на `8px/420ms`; один screen/CTA, clone отсутствует. Back/skip/local changes остаются static.
+- Reduced-motion CSS сразу показывает итоговый route, удаляет translate/draw и оставляет opacity-only settlement.
+- Три свежих независимых live-browser критика получают exact round-1 matrix на замороженной версии.
+
+- Критики ТЗ и ремесла: `ПРОЙДЕНО`.
+- Критик системы: `ПРОВАЛ` — на Today нижний край текущего landmark оставлял только 3px до окрашенной области
+  заголовка и визуально читался как коллизия.
+- Исправление: заголовок Today опущен на 8px и теперь имеет 11px direct / 15px canonical просвет до landmark.
+  Заодно shared decorative SVG получили `focusable=false`, а пример правила поднят с 12px до body-роли 15px.
+
+### C — сюжетный маршрут · круг 2
+
+- Direct `360×720`: Today landmark заканчивается на `y=175`, title начинается на `y=186`; surface/proof
+  заканчиваются на `556.8/608.8`, nav начинается на `644`. Review surface заканчивается на `611.3`, dock — с
+  `646`; горизонтального или вертикального overflow нет.
+- Canonical `390×844`: landmark заканчивается на `y=208`, Today title начинается на `y=223`; Today
+  surface/proof заканчиваются на `680.1/760.1`, nav начинается на `787`. Review surface заканчивается на
+  `692.9`, dock — с `789`.
+- Static QA, lint и syntax/inline-handler check прошли; три свежих критика получают exact round-2 matrix.
+- Критики ТЗ, системы и ремесла: `ПРОЙДЕНО`. Они независимо подтвердили direct/canonical containment,
+  `11/15px` landmark-title clearance, один CTA, пять нижних разделов/deep dock, route/static/reduced motion и
+  сохранение общего fixture.
 
 ## История дыр и исправлений
 

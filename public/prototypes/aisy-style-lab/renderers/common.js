@@ -24,7 +24,7 @@ const iconPaths = {
 
 export function icon(name, className = '') {
   const path = iconPaths[name] || iconPaths.spark;
-  return `<svg class="icon ${escapeHTML(className)}" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${path}</svg>`;
+  return `<svg class="icon ${escapeHTML(className)}" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${path}</svg>`;
 }
 
 export function renderProgress(value, label, className = '') {

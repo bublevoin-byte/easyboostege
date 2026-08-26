@@ -969,7 +969,7 @@ button:disabled {
 
 .rule-card span {
   color: var(--color-text-muted);
-  font-size: 0.75rem;
+  font-size: var(--text-body-size);
   line-height: 1.45;
 }
 
@@ -1748,6 +1748,434 @@ body[data-carrier-size="compact"] .app-frame[data-direction="b"] .progress-copy 
   }
 }
 
+/* Direction C — one upward story route with abstract Aisy paper landmarks. */
+.app-frame[data-direction="c"] .flow-screen {
+  transform-origin: 50% 100%;
+}
+
+.app-frame[data-direction="c"][data-c-route-transition="forward"][data-transitioning="true"] .flow-screen {
+  opacity: var(--story-enter-opacity);
+  transform: translate3d(0, var(--motion-screen-y), 0);
+}
+
+.app-frame[data-direction="c"][data-c-route-transition="static"][data-transitioning="true"] .flow-screen {
+  opacity: 1;
+  transform: none;
+  transition: none;
+}
+
+.app-frame[data-direction="c"] .c-story-stage {
+  isolation: isolate;
+  overflow: hidden;
+  border-color: var(--story-stage-border);
+  background: linear-gradient(165deg, var(--story-stage-bg), var(--color-surface-raised));
+  box-shadow: var(--hero-shadow);
+}
+
+.app-frame[data-direction="c"] .c-story-stage > :not(.c-journey) {
+  position: relative;
+  z-index: 2;
+}
+
+.app-frame[data-direction="c"] .hero__ornament {
+  display: none;
+}
+
+.c-journey {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.c-journey__art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.c-journey__paper {
+  stroke: none;
+}
+
+.c-journey__paper--back {
+  fill: var(--story-paper-back);
+  opacity: 0.62;
+}
+
+.c-journey__paper--front {
+  fill: var(--story-paper-front);
+  opacity: 0.72;
+}
+
+.c-journey__trail {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.c-journey__trail--base {
+  stroke: var(--story-route-base);
+  stroke-dasharray: 0.02 0.035;
+  stroke-width: var(--primitive-border-strong);
+  opacity: 0.52;
+}
+
+.c-journey__trail--progress {
+  stroke: var(--story-route-progress);
+  stroke-dasharray: 1;
+  stroke-dashoffset: var(--c-route-offset);
+  stroke-width: var(--primitive-space-1);
+  transition: stroke-dashoffset var(--story-route-duration) var(--motion-screen-ease);
+}
+
+.app-frame[data-direction="c"][data-c-route-transition="forward"][data-transitioning="true"] .c-journey__trail--progress {
+  stroke-dashoffset: var(--c-route-from-offset);
+}
+
+.c-journey__stop {
+  position: absolute;
+  top: var(--primitive-space-1);
+  right: var(--primitive-space-2);
+  display: grid;
+  width: 1.75rem;
+  height: 1.75rem;
+  place-items: center;
+  border: var(--primitive-border-thin) solid var(--story-route-base);
+  border-radius: var(--radius-pill);
+  background: var(--story-landmark-bg);
+  box-shadow: var(--shadow-rest);
+  color: var(--color-text-subtle);
+}
+
+.c-journey__stop:not(.is-current) {
+  display: none;
+}
+
+.c-journey__stop svg {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: var(--primitive-border-strong);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.c-journey__stop.is-reached {
+  border-color: var(--story-route-progress);
+  color: var(--story-route-progress);
+}
+
+.c-journey__stop.is-current {
+  width: calc(var(--primitive-space-8) + var(--primitive-space-1));
+  height: calc(var(--primitive-space-8) + var(--primitive-space-1));
+  border-color: var(--color-primary-hover);
+  background: var(--story-landmark-current);
+  color: var(--color-primary-foreground);
+}
+
+.c-journey__stop.is-current svg {
+  width: var(--primitive-space-6);
+  height: var(--primitive-space-6);
+}
+
+.c-journey--progress .c-journey__stop.is-current {
+  border-color: var(--color-warning);
+  background: var(--story-landmark-goal);
+  color: var(--color-text-strong);
+}
+
+.c-journey__tomorrow {
+  fill: none;
+  stroke: var(--story-landmark-goal);
+  stroke-dasharray: var(--primitive-space-1) var(--primitive-space-2);
+  stroke-linecap: round;
+  stroke-width: var(--primitive-border-strong);
+  vector-effect: non-scaling-stroke;
+  opacity: 0.28;
+}
+
+.c-journey--progress .c-journey__tomorrow {
+  opacity: 1;
+}
+
+.app-frame[data-direction="c"] :is(.recommendation-hero, .progress-hero) > .eyebrow {
+  max-width: calc(100% - var(--primitive-space-10));
+}
+
+.app-frame[data-direction="c"] .c-story-stage--today > h1 {
+  margin-top: var(--primitive-space-4);
+}
+
+.app-frame[data-direction="c"] .task-meta {
+  padding-right: var(--primitive-space-10);
+}
+
+.app-frame[data-direction="c"] .duration,
+.app-frame[data-direction="c"] .task-prompt,
+.app-frame[data-direction="c"] .answer-compare,
+.app-frame[data-direction="c"] .rule-card,
+.app-frame[data-direction="c"] .next-step {
+  border: var(--primitive-border-thin) solid var(--story-stage-border);
+  background: var(--color-surface-raised);
+}
+
+.app-frame[data-direction="c"] .duration {
+  box-shadow: inset 2px 2px 5px rgb(var(--primitive-shadow-plum-rgb) / 0.08);
+}
+
+.app-frame[data-direction="c"] .route-list {
+  padding: var(--primitive-space-1);
+  gap: var(--primitive-space-1);
+  border: var(--primitive-border-thin) solid var(--story-stage-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface-raised);
+}
+
+.app-frame[data-direction="c"] .route-list li {
+  padding-inline: var(--primitive-space-2);
+  border-bottom: var(--primitive-border-thin) dashed var(--story-stage-border);
+}
+
+.app-frame[data-direction="c"] .route-list li:last-child {
+  border-bottom: 0;
+}
+
+.app-frame[data-direction="c"] .route-list li > i {
+  border-color: var(--story-route-progress);
+}
+
+.app-frame[data-direction="c"] .task-prompt {
+  padding: var(--primitive-space-2);
+  border-radius: var(--radius-control);
+  box-shadow: inset 2px 2px 5px rgb(var(--primitive-shadow-plum-rgb) / 0.08);
+}
+
+.app-frame[data-direction="c"] .progress-copy {
+  display: grid;
+  gap: var(--primitive-space-1);
+}
+
+.app-frame[data-direction="c"] .flow-stepper li:not(:last-child)::after {
+  display: none;
+}
+
+.app-frame[data-direction="c"] .flow-stepper button span {
+  border-color: var(--story-route-progress);
+}
+
+.app-frame[data-direction="c"] .bottom-nav,
+.app-frame[data-direction="c"] .deep-dock {
+  border-top-color: var(--story-stage-border);
+  background: var(--color-surface-soft);
+}
+
+.app-frame[data-direction="c"] .bottom-nav button {
+  height: 3.5rem;
+  min-height: 3.5rem;
+  align-self: center;
+}
+
+.app-frame[data-direction="c"] .deep-dock {
+  padding-block: 0 calc(var(--primitive-space-2) + env(safe-area-inset-bottom));
+}
+
+.app-frame[data-direction="c"] .flow-stepper button:focus-visible:focus {
+  outline-offset: calc(0px - var(--primitive-focus-width));
+  box-shadow: inset 0 0 0 var(--primitive-focus-width) var(--color-canvas),
+    inset 0 0 0 calc(var(--primitive-focus-width) + 2px) var(--color-focus);
+}
+
+.app-frame[data-direction="c"] .bottom-nav button.is-active > span {
+  background: var(--color-primary-soft);
+  box-shadow: var(--shadow-rest);
+}
+
+.app-frame[data-direction="c"] .deep-dock__primary,
+.app-frame[data-direction="c"] .next-step strong {
+  font-size: var(--text-body-size);
+}
+
+.app-frame[data-direction="c"] :is(
+  .app-header small,
+  .flow-stepper button span,
+  .flow-stepper button small,
+  .duration__option span,
+  .route-list li > i,
+  .route-list strong,
+  .route-list small,
+  .mini-proof strong,
+  .mini-proof small,
+  .bottom-nav button small,
+  .task-meta > strong,
+  .badge,
+  .choice > i,
+  .choice small,
+  .task-assistance,
+  .result-mark,
+  .rule-card small,
+  .progress-copy small,
+  .next-step small,
+  .evidence-row strong,
+  .evidence-row small,
+  .score-change > em
+) {
+  font-size: var(--text-label-size);
+}
+
+body[data-carrier-size="compact"] .app-frame[data-direction="c"] .c-story-stage {
+  padding: var(--primitive-space-4);
+}
+
+body[data-carrier-size="compact"] .app-frame[data-direction="c"] .flow-screen {
+  gap: var(--primitive-space-2);
+}
+
+body[data-carrier-size="compact"] .app-frame[data-direction="c"] :is(.task-sheet, .review-sheet) {
+  gap: var(--primitive-space-2);
+}
+
+body[data-carrier-size="compact"] .app-frame[data-direction="c"] .duration {
+  margin-block: var(--primitive-space-2);
+}
+
+body[data-carrier-size="compact"] .app-frame[data-direction="c"] .duration__option {
+  min-height: var(--size-touch-min);
+}
+
+body[data-carrier-size="compact"] .app-frame[data-direction="c"] .route-list {
+  padding-block: 0;
+  margin-bottom: var(--primitive-space-2);
+  gap: 0;
+}
+
+body[data-carrier-size="compact"] .app-frame[data-direction="c"] .route-list li {
+  min-height: calc(var(--primitive-space-8) - var(--primitive-border-thin));
+}
+
+body[data-carrier-size="compact"] .app-frame[data-direction="c"] .review-sheet > p {
+  line-height: 1.4;
+}
+
+body[data-carrier-size="compact"] .app-frame[data-direction="c"] .review-sheet .rule-card {
+  padding: var(--primitive-space-2);
+  gap: var(--primitive-space-1);
+}
+
+body[data-carrier-size="compact"] .app-frame[data-direction="c"] .review-sheet .evidence-row {
+  min-height: var(--size-touch-min);
+  padding: var(--primitive-space-1) var(--primitive-space-2);
+}
+
+body[data-carrier-size="compact"] .app-frame[data-direction="c"] .score-change,
+body[data-carrier-size="compact"] .app-frame[data-direction="c"] .progress-copy {
+  margin-block: var(--primitive-space-2);
+}
+
+body[data-carrier-size="compact"] .app-frame[data-direction="c"] .next-step {
+  min-height: var(--size-touch-min);
+  padding: var(--primitive-space-1) var(--primitive-space-2);
+  grid-template-columns: var(--primitive-space-6) minmax(0, 1fr) auto;
+  gap: var(--primitive-space-1);
+}
+
+body[data-carrier-size="compact"] .app-frame[data-direction="c"] .next-step > span {
+  width: var(--primitive-space-6);
+  height: var(--primitive-space-6);
+}
+
+body[data-carrier-size="compact"] .app-frame[data-direction="c"] .flow-screen > .mini-proof {
+  min-height: var(--size-touch-min);
+  padding: var(--primitive-space-1) var(--primitive-space-3);
+  grid-template-columns: var(--primitive-space-6) minmax(0, 1fr) auto;
+  gap: var(--primitive-space-2);
+}
+
+body[data-carrier-size="compact"] .app-frame[data-direction="c"] .flow-screen > .mini-proof > span {
+  width: var(--primitive-space-6);
+  height: var(--primitive-space-6);
+}
+
+@media (max-height: 45rem) {
+  .app-frame[data-direction="c"] .c-story-stage {
+    padding: var(--primitive-space-4);
+  }
+
+  .app-frame[data-direction="c"] .flow-screen {
+    gap: var(--primitive-space-2);
+  }
+
+  .app-frame[data-direction="c"] :is(.task-sheet, .review-sheet) {
+    gap: var(--primitive-space-2);
+  }
+
+  .app-frame[data-direction="c"] .duration {
+    margin-block: var(--primitive-space-2);
+  }
+
+  .app-frame[data-direction="c"] .duration__option {
+    min-height: var(--size-touch-min);
+  }
+
+  .app-frame[data-direction="c"] .route-list {
+    padding-block: 0;
+    margin-bottom: var(--primitive-space-2);
+    gap: 0;
+  }
+
+  .app-frame[data-direction="c"] .route-list li {
+    min-height: calc(var(--primitive-space-8) - var(--primitive-border-thin));
+  }
+
+  .app-frame[data-direction="c"] .review-sheet > p {
+    line-height: 1.4;
+  }
+
+  .app-frame[data-direction="c"] .review-sheet .rule-card {
+    padding: var(--primitive-space-2);
+    gap: var(--primitive-space-1);
+  }
+
+  .app-frame[data-direction="c"] .review-sheet .evidence-row {
+    min-height: var(--size-touch-min);
+    padding: var(--primitive-space-1) var(--primitive-space-2);
+  }
+
+  .app-frame[data-direction="c"] .score-change,
+  .app-frame[data-direction="c"] .progress-copy {
+    margin-block: var(--primitive-space-2);
+  }
+
+  .app-frame[data-direction="c"] .next-step {
+    min-height: var(--size-touch-min);
+    padding: var(--primitive-space-1) var(--primitive-space-2);
+    grid-template-columns: var(--primitive-space-6) minmax(0, 1fr) auto;
+    gap: var(--primitive-space-1);
+  }
+
+  .app-frame[data-direction="c"] .next-step > span {
+    width: var(--primitive-space-6);
+    height: var(--primitive-space-6);
+  }
+
+  .app-frame[data-direction="c"] .flow-screen > .mini-proof {
+    min-height: var(--size-touch-min);
+    padding: var(--primitive-space-1) var(--primitive-space-3);
+    grid-template-columns: var(--primitive-space-6) minmax(0, 1fr) auto;
+    gap: var(--primitive-space-2);
+  }
+
+  .app-frame[data-direction="c"] .flow-screen > .mini-proof > span {
+    width: var(--primitive-space-6);
+    height: var(--primitive-space-6);
+  }
+}
+
 .gallery-scroll,
 .motion-scroll {
   padding-top: var(--primitive-space-3);
@@ -2345,5 +2773,16 @@ a:focus-visible:focus {
   .app-frame[data-direction="b"][data-b-phase="release"] .b-instrument,
   .app-frame[data-direction="b"][data-b-phase="release"] .flow-screen > .mini-proof {
     opacity: 0.84;
+  }
+
+  .app-frame[data-direction="c"][data-c-route-transition="forward"][data-transitioning="true"] .flow-screen {
+    opacity: var(--story-reduced-enter-opacity);
+    transform: none;
+  }
+
+  .app-frame[data-direction="c"] .c-journey__trail--progress,
+  .app-frame[data-direction="c"][data-c-route-transition="forward"][data-transitioning="true"] .c-journey__trail--progress {
+    stroke-dashoffset: var(--c-route-offset);
+    transition: none;
   }
 }

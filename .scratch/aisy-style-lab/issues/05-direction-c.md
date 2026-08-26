@@ -4,11 +4,10 @@
 
 **Blocked by:** 02 — Телефонный comparison hub и системная галерея.
 
-**Status:** ready-for-agent
+**Status:** done — design-loop round 2
 
-- [ ] Контент, числа, ответ и порядок экранов совпадают с A/B и общим fixture.
-- [ ] Вертикальная staging-композиция не скрывает текущую задачу и primary action.
-- [ ] Маршрут использует Aisy plum/coral/paper, а не копирует чужой landscape-brand.
-- [ ] Route-draw signature имеет один главный эффект и reduced-motion замену.
-- [ ] Progress завершает визуальный путь и показывает следующий шаг без декоративного тупика.
-
+- [x] Контент, числа, ответ и порядок экранов совпадают с A/B и общим fixture.
+- [x] Вертикальная staging-композиция не скрывает текущую задачу и primary action.
+- [x] Маршрут использует Aisy plum/coral/paper, а не копирует чужой landscape-brand.
+- [x] Route-draw signature имеет один главный эффект и reduced-motion замену.
+- [x] Progress завершает визуальный путь и показывает следующий шаг без декоративного тупика.

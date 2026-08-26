@@ -14,6 +14,7 @@ const toolbar = document.querySelector('.lab-toolbar');
 const params = new URLSearchParams(location.search);
 
 const validPanels = new Set(['flow', 'components', 'motion', 'nav']);
+const flowScreenIndex = new Map(FLOW_SCREENS.map(({ id }, index) => [id, index]));
 const initialCarrier = params.get('carrier');
 const initialFocus = params.get('focus');
 let state = {
@@ -168,6 +169,14 @@ async function render() {
     && state.panel === 'flow'
     && renderedState.screen !== state.screen
   );
+  const isStoryForwardTransition = Boolean(
+    isViewTransition
+    && renderedState.direction === 'c'
+    && state.direction === 'c'
+    && renderedState.panel === 'flow'
+    && state.panel === 'flow'
+    && flowScreenIndex.get(state.screen) === flowScreenIndex.get(renderedState.screen) + 1
+  );
   if (!isPaperTransition) clearPaperOutgoing();
   const paperOutgoing = isPaperTransition ? capturePaperOutgoing() : null;
 
@@ -178,6 +187,7 @@ async function render() {
   app.dataset.fixtureState = state.fixtureState;
   app.dataset.transitioning = isViewTransition ? 'true' : 'false';
   app.dataset.paperChromeTransitioning = paperOutgoing ? 'true' : 'false';
+  app.dataset.cRouteTransition = isStoryForwardTransition ? 'forward' : 'static';
 
   if (state.panel === 'components') app.innerHTML = foundation.renderComponents(viewModel);
   else if (state.panel === 'nav') app.innerHTML = foundation.renderNavProof(viewModel);
@@ -188,10 +198,16 @@ async function render() {
     app.append(paperOutgoing);
     runPaperOutgoing(paperOutgoing);
   }
-  if (isViewTransition || pendingFocusSelector) requestAnimationFrame(() => {
+  const settleTransition = () => {
+    if (version !== renderVersion) return;
     app.dataset.transitioning = 'false';
     restorePendingFocus();
+  };
+  if (isStoryForwardTransition) requestAnimationFrame(() => {
+    if (version !== renderVersion) return;
+    requestAnimationFrame(settleTransition);
   });
+  else if (isViewTransition || pendingFocusSelector) requestAnimationFrame(settleTransition);
   else app.dataset.transitioning = 'false';
   hasRendered = true;
   renderedState = {

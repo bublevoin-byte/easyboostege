@@ -150,7 +150,7 @@
   --primitive-duration-press: 180ms;
   --primitive-duration-feedback: 220ms;
   --primitive-duration-screen: 420ms;
-  --primitive-duration-story: 500ms;
+  --primitive-duration-story: 480ms;
   --primitive-ease-press: cubic-bezier(0.2, 0.72, 0.24, 1);
   --primitive-ease-screen: cubic-bezier(0.22, 0.76, 0.25, 1);
 }
@@ -284,7 +284,7 @@
   --shadow-raised: 8px 13px 24px rgb(var(--primitive-shadow-ink-rgb) / 0.16),
     inset 1px 1px 1px rgb(var(--primitive-white-rgb) / 0.55);
   --motion-screen-x: 0rem;
-  --motion-screen-y: 1rem;
+  --motion-screen-y: var(--primitive-space-2);
 }
 
 /* ================================================================
@@ -385,6 +385,19 @@
   --widget-key-shadow-pressed: var(--shadow-pressed);
   --widget-seat-y: var(--motion-widget-seat-y);
   --widget-release-y: var(--motion-widget-release-y);
+
+  --story-stage-bg: var(--color-surface-soft);
+  --story-stage-border: var(--color-border);
+  --story-paper-back: var(--color-primary-soft);
+  --story-paper-front: var(--color-surface-sunken);
+  --story-route-base: var(--color-border-strong);
+  --story-route-progress: var(--color-support);
+  --story-landmark-bg: var(--color-surface-raised);
+  --story-landmark-current: var(--color-primary);
+  --story-landmark-goal: var(--color-accent);
+  --story-route-duration: var(--motion-signature-duration);
+  --story-enter-opacity: 0.36;
+  --story-reduced-enter-opacity: 0.86;
 
   --nav-bg: var(--color-surface-raised);
   --nav-fg: var(--color-text-muted);
