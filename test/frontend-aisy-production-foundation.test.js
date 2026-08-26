@@ -98,13 +98,21 @@ test('theme bootstrap applies light, dark and system preferences through one pub
   assert.equal(values.get('aisy.theme.preference.v1'), 'system');
 });
 
-test('CSS paints the system theme before the single CSP-safe module starts', async () => {
+test('a CSP-safe classic asset prepaints the theme before the single module starts', async () => {
   const [html, css] = await Promise.all([readPublic('index.html'), readPublic('aisy-theme.css')]);
+  const prepaint = '<script src="/theme-prepaint.js"></script>';
   const entry = '<script type="module" src="/main.js"></script>';
+  const prepaintOffset = html.indexOf(prepaint);
   const scriptOffset = html.indexOf(entry);
   const styleOffset = html.indexOf('<link rel="stylesheet" href="/aisy-theme.css">');
-  assert.ok(styleOffset > 0 && styleOffset < scriptOffset, 'system-aware theme CSS must precede the module entry');
-  assert.equal((html.match(/<script\b/gu) || []).length, 1, 'theme bootstrap must not add a second script entry');
+  assert.ok(prepaintOffset > 0 && prepaintOffset < styleOffset,
+    'stored theme must be applied before the first stylesheet can paint');
+  assert.ok(styleOffset < scriptOffset, 'system-aware theme CSS must precede the module entry');
+  const scripts = [...html.matchAll(/<script[^>]*>(?:[\s\S]*?<\/script>)?/gu)].map((match) => match[0]);
+  assert.deepEqual(scripts, [prepaint, entry]);
+  assert.equal(scripts.filter((tag) => /\btype="module"/u.test(tag)).length, 1);
+  assert.doesNotMatch(html, /<script(?![^>]*\bsrc\s*=)(?:\s[^>]*)?>/iu,
+    'theme prepaint must remain an external CSP-safe asset');
   assert.match(css, /:root\s*\{[^}]*color-scheme:\s*light dark/su);
   assert.match(css, /--aisy-color-background:\s*light-dark\(/u);
 });

@@ -3,8 +3,8 @@
 | Ticket | Status | Evidence |
 |---|---|---|
 | 01 — Production A foundation | done | Standards/Spec re-review zero findings; 1919 tests / 0 fail; build + Aisy E2E passed |
-| 02 — First launch + VK ID | in-progress | Official VK ID 2.6.1 contract researched; implementation started |
-| 03 — Access + Today shell | blocked by 02 | — |
+| 02 — First launch + VK ID | done | ZERO×2 review; 1966 unit / 0 fail; build + three Aisy E2E + security gates green; live VK not called |
+| 03 — Access + Today shell | ready-for-agent | — |
 | 04 — Practice + Words | blocked by 03 | — |
 | 05 — Grammar | blocked by 03 | — |
 | 06 — Reading + Listening | blocked by 03 | — |

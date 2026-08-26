@@ -10,6 +10,40 @@ import {SRV} from './app.js';
   const api = global.EasyBoostApi;
   let current = null;
   let calibrationConsent = null;
+  let privacyReturnFocus = null;
+  let privacyBackgroundState = [];
+
+  function privacyControls(sheet) {
+    return [...sheet.querySelectorAll('button:not(:disabled),input:not(:disabled),a[href],[tabindex]:not([tabindex="-1"])')]
+      .filter((control) => !control.hidden && control.offsetParent !== null);
+  }
+
+  function isolatePrivacyBackground(sheet) {
+    if (privacyBackgroundState.length) return;
+    privacyBackgroundState = [...document.body.children]
+      .filter((element) => element !== sheet)
+      .map((element) => ({
+        element,
+        hadInert: element.hasAttribute('inert'),
+        hadAriaHidden: element.hasAttribute('aria-hidden'),
+        ariaHidden: element.getAttribute('aria-hidden'),
+      }));
+    for (const { element } of privacyBackgroundState) {
+      element.inert = true;
+      element.setAttribute('aria-hidden', 'true');
+    }
+  }
+
+  function restorePrivacyBackground() {
+    for (const { element, hadInert, hadAriaHidden, ariaHidden } of privacyBackgroundState) {
+      if (!element.isConnected) continue;
+      if (hadInert) element.setAttribute('inert', '');
+      else element.removeAttribute('inert');
+      if (hadAriaHidden) element.setAttribute('aria-hidden', ariaHidden);
+      else element.removeAttribute('aria-hidden');
+    }
+    privacyBackgroundState = [];
+  }
 
   function ensureSheet() {
     if (document.getElementById('privacySheet')) return;
@@ -29,6 +63,7 @@ import {SRV} from './app.js';
     const sheet = document.createElement('div');
     sheet.id = 'privacySheet';
     sheet.setAttribute('role', 'dialog'); sheet.setAttribute('aria-modal', 'true'); sheet.setAttribute('aria-labelledby', 'privacyTitle');
+    sheet.setAttribute('aria-hidden', 'true');
     sheet.innerHTML = `<div class="privacyBackdrop"></div><section class="privacyPanel"><h2 id="privacyTitle">Приватность и ИИ</h2>
       <p>Обычные задания работают без передачи данных ИИ. Для дополнительных функций выберите, что разрешаете отправлять внешним провайдерам.</p>
       <ul><li>Текст ответа — для проверки через настроенного провайдера xAI или Groq.</li><li>Имя «Ася» действует только в явно открытой микрофонной сессии Aisy.space; приложение не слушает устройство в фоне.</li><li>Во время разговора с Асей (Voice Error Tutor) голос передаётся внешнему AI-провайдеру потоком в реальном времени.</li><li>Aisy.space не сохраняет исходное аудио, полный transcript или свободные голосовые реплики; сохраняется только структурированный учебный результат.</li><li>ИИ-оценка ориентировочная и не является официальной.</li></ul>
@@ -43,21 +78,36 @@ import {SRV} from './app.js';
     document.getElementById('privacyClose').onclick = closePrivacy;
     document.getElementById('privacySave').onclick = savePrivacy;
     document.getElementById('privacyCalibrationRevoke').onclick = revokeCalibrationConsent;
-    sheet.addEventListener('keydown', (event) => { if (event.key === 'Escape') closePrivacy(); });
+    sheet.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') { event.preventDefault(); closePrivacy(); return; }
+      if (event.key !== 'Tab') return;
+      const controls = privacyControls(sheet);
+      if (!controls.length) { event.preventDefault(); return; }
+      const first = controls[0]; const last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    });
   }
 
-  function renderPrivacy() {
+  function renderPrivacy(invoker = null) {
     ensureSheet();
+    const sheet = document.getElementById('privacySheet');
+    if (!sheet.classList.contains('open')) {
+      privacyReturnFocus = invoker && invoker !== document.body && !sheet.contains(invoker) ? invoker : null;
+    }
     document.getElementById('privacyText').checked = Boolean(current?.text_processing);
     document.getElementById('privacyVoice').checked = Boolean(current?.voice_processing);
     document.getElementById('privacyStatus').textContent = '';
     updateCalibrationPrivacy();
-    document.getElementById('privacySheet').classList.add('open');
+    isolatePrivacyBackground(sheet);
+    sheet.removeAttribute('aria-hidden');
+    sheet.classList.add('open');
     document.getElementById('privacyText').focus();
   }
   async function openPrivacy() {
+    const invoker = document.activeElement;
     await Promise.all([loadPrivacy(false), loadCalibrationConsent()]);
-    renderPrivacy();
+    renderPrivacy(invoker);
   }
   function updateCalibrationPrivacy() {
     const state = document.getElementById('privacyCalibrationState');
@@ -100,7 +150,16 @@ import {SRV} from './app.js';
     const revoke = document.getElementById('privacyCalibrationRevoke');
     if (revoke && !revoke.hidden) revoke.focus();
   }
-  function closePrivacy() { document.getElementById('privacySheet')?.classList.remove('open'); }
+  function closePrivacy() {
+    const sheet = document.getElementById('privacySheet');
+    if (!sheet?.classList.contains('open')) return;
+    sheet.classList.remove('open');
+    sheet.setAttribute('aria-hidden', 'true');
+    restorePrivacyBackground();
+    const target = privacyReturnFocus;
+    privacyReturnFocus = null;
+    if (target?.isConnected) queueMicrotask(() => target.focus());
+  }
   async function savePrivacy() {
     const button = document.getElementById('privacySave'); const status = document.getElementById('privacyStatus');
     button.disabled = true; status.textContent = 'Сохраняем…';

@@ -471,7 +471,7 @@ export async function assertEgeMockOralStageRepositoryContract(assert, repositor
     requestHash: crypto.createHash('sha256').update(`oral-stage:${telegramBase}:${counter += 1}`)
       .digest('hex'),
   });
-  const voiceConsentPolicyVersion = '2026-08-02-voice-v1';
+  const voiceConsentPolicyVersion = '2026-08-26-vk-id-v1';
   try {
     await repository.setPrivacyConsent(owner.username, {
       text_processing: false, voice_processing: true,

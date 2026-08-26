@@ -10,6 +10,48 @@ export function normalizeUsername(displayName, telegramId) {
   return base || fallback;
 }
 
+export function normalizeProviderIdentity({ provider, subject, displayName }) {
+  const normalizedProvider = String(provider || '').trim().toLowerCase();
+  const normalizedSubject = String(subject || '').trim();
+  const normalizedDisplayName = String(displayName || '').normalize('NFKC').trim();
+  if (!/^[a-z][a-z0-9_-]{0,31}$/u.test(normalizedProvider)
+    || !/^[A-Za-z0-9._:-]{1,128}$/u.test(normalizedSubject)
+    || !normalizedDisplayName || normalizedDisplayName.length > 160
+    || /[\u0000-\u001f\u007f]/u.test(normalizedDisplayName)) {
+    throw new Error('PROVIDER_IDENTITY_INVALID');
+  }
+  return { provider: normalizedProvider, subject: normalizedSubject, displayName: normalizedDisplayName };
+}
+
+export function normalizeOAuthTransaction({
+  provider, stateHash, verifierSealed, redirectUri, expiresAt, now = new Date(),
+}) {
+  const normalizedProvider = String(provider || '').trim().toLowerCase();
+  const normalizedStateHash = String(stateHash || '').trim().toLowerCase();
+  const normalizedVerifier = String(verifierSealed || '');
+  const expires = new Date(expiresAt);
+  const created = new Date(now);
+  let redirect;
+  try { redirect = new URL(String(redirectUri || '')); } catch { throw new Error('OAUTH_TRANSACTION_INVALID'); }
+  if (!/^[a-z][a-z0-9_-]{0,31}$/u.test(normalizedProvider)
+    || !/^[a-f0-9]{64}$/u.test(normalizedStateHash)
+    || !normalizedVerifier || normalizedVerifier.length > 1_024
+    || !Number.isFinite(expires.getTime()) || !Number.isFinite(created.getTime())
+    || expires.getTime() <= created.getTime()
+    || !['http:', 'https:'].includes(redirect.protocol)
+    || redirect.username || redirect.password || redirect.search || redirect.hash) {
+    throw new Error('OAUTH_TRANSACTION_INVALID');
+  }
+  return {
+    provider: normalizedProvider,
+    stateHash: normalizedStateHash,
+    verifierSealed: normalizedVerifier,
+    redirectUri: redirect.toString(),
+    expiresAt: expires,
+    createdAt: created,
+  };
+}
+
 export function subscriptionView(user) {
   if (!user) return { sub_until: 0, active: false, trial_used: false };
   const subUntil = Number(user.sub_until || 0);

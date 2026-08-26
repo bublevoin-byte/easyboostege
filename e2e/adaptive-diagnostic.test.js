@@ -241,35 +241,35 @@ async function runAdaptiveDiagnosticE2E() {
           created: Date.now(), sub_until: Date.now() + 86_400_000,
           privacy_consent: {
             text_processing: true, voice_processing: false,
-            policy_version: '2026-08-02-voice-v1', updated_at: new Date().toISOString(),
+            policy_version: '2026-08-26-vk-id-v1', updated_at: new Date().toISOString(),
           },
         },
         adaptivee2e: {
           created: Date.now(), sub_until: Date.now() + 86_400_000,
           privacy_consent: {
             text_processing: true, voice_processing: true,
-            policy_version: '2026-08-02-voice-v1', updated_at: new Date().toISOString(),
+            policy_version: '2026-08-26-vk-id-v1', updated_at: new Date().toISOString(),
           },
         },
         adaptiveadjust: {
           created: Date.now(), sub_until: Date.now() + 86_400_000,
           privacy_consent: {
             text_processing: true, voice_processing: false,
-            policy_version: '2026-08-02-voice-v1', updated_at: new Date().toISOString(),
+            policy_version: '2026-08-26-vk-id-v1', updated_at: new Date().toISOString(),
           },
         },
         adaptiveexam: {
           created: Date.now(), sub_until: Date.now() + 86_400_000,
           privacy_consent: {
             text_processing: true, voice_processing: true,
-            policy_version: '2026-08-02-voice-v1', updated_at: new Date().toISOString(),
+            policy_version: '2026-08-26-vk-id-v1', updated_at: new Date().toISOString(),
           },
         },
         adaptivewriter: {
           created: Date.now(), sub_until: Date.now() + 86_400_000,
           privacy_consent: {
             text_processing: true, voice_processing: true,
-            policy_version: '2026-08-02-voice-v1', updated_at: new Date().toISOString(),
+            policy_version: '2026-08-26-vk-id-v1', updated_at: new Date().toISOString(),
           },
         },
       },

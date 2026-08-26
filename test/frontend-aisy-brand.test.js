@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import test from 'node:test';
+import vm from 'node:vm';
 import { inflateSync } from 'node:zlib';
 import { cssLayer as layer } from './helpers/css.js';
 
@@ -41,6 +42,30 @@ function contrast(first, second) {
   const b = luminance(second);
   return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
 }
+
+test('stored theme bootstrap applies forced light or dark before stylesheets can paint', async () => {
+  const [html, source] = await Promise.all([readPublic('index.html'), readPublic('theme-prepaint.js')]);
+  assert.ok(html.indexOf('<script src="/theme-prepaint.js"></script>') < html.indexOf('/aisy-theme.css'));
+  for (const preference of ['light', 'dark']) {
+    const root = {
+      dataset: {},
+      removeAttribute(name) { if (name === 'data-theme') delete this.dataset.theme; },
+    };
+    const themeColor = { content: '' };
+    const window = {
+      localStorage: { getItem(key) { assert.equal(key, 'aisy.theme.preference.v1'); return preference; } },
+      matchMedia() { return { matches: preference !== 'dark' }; },
+    };
+    const document = {
+      documentElement: root,
+      querySelector(selector) { assert.equal(selector, 'meta[name="theme-color"]'); return themeColor; },
+    };
+    vm.runInContext(source, vm.createContext({ window, document }));
+    assert.equal(root.dataset.themePreference, preference);
+    assert.equal(root.dataset.theme, preference);
+    assert.equal(themeColor.content, preference === 'dark' ? '#171219' : '#fff9f3');
+  }
+});
 
 function paeth(left, up, upperLeft) {
   const estimate = left + up - upperLeft;
@@ -107,15 +132,18 @@ test('public documents and install metadata present the Aisy learner brand', asy
   assert.equal(manifest.short_name, 'Aisy.space');
   assert.match(manifest.description, /Aisy\.space/u);
   assert.match(html, /<title>Aisy ЕГЭ — Английский · Aisy\.space<\/title>/u);
-  assert.match(html, />Aisy\.space<\/div>/u);
-  assert.match(html, />Aisy ЕГЭ — Английский<\/div>/u);
-  assert.match(html, /«Эйси»/u);
+  assert.match(html, /src="\/assets\/opening\/logo\.webp"/u);
+  assert.match(html, />Aisy ЕГЭ — Английский<\/p>/u);
+  assert.match(html, /Войди — и продолжим с твоего шага/u);
   assert.match(offline, /Aisy\.space/u);
   assert.match(offline, /Ася/u);
   assert.match(privacy, /Aisy\.space/u);
   assert.match(privacy, /Ася/u);
   assert.match(pwa, /Доступна новая версия Aisy\.space/u);
   assert.match(pwa, /easyboost:update-ready/u, 'internal update event is a compatibility contract');
+  assert.match(pwa, /controllerSeen=Boolean\(navigator\.serviceWorker\.controller\)/u);
+  assert.match(pwa, /controllerchange[^\n]+if\(!controllerSeen\)\{controllerSeen=true;return\}location\.reload\(\)/u,
+    'a first service-worker claim must not reload an in-progress first launch');
 
   for (const [surface, source] of Object.entries({ html, manifestText, offline, privacy, pwa })) {
     assert.doesNotMatch(source, /Easy Boost/u, `${surface} exposes the retired public brand`);
@@ -159,11 +187,12 @@ test('shared Aisy theme keeps light and dark interaction states accessible', asy
 });
 
 test('the accessible Asya mark and shared theme stay inside the offline public shell', async () => {
-  const [html, offline, privacy, privacyScript, icon, worker] = await Promise.all([
+  const [html, offline, privacy, privacyScript, launcher, icon, worker] = await Promise.all([
     readPublic('index.html'),
     readPublic('offline.html'),
     readPublic('privacy.html'),
     readPublic('privacy.js'),
+    readPublic('asya-launcher.js'),
     readPublic('pwa-icon.svg'),
     readPublic('service-worker.js'),
   ]);
@@ -177,7 +206,9 @@ test('the accessible Asya mark and shared theme stay inside the offline public s
   assert.match(icon, /<title id="asya-mark-title">Абстрактный знак Аси<\/title>/u);
   assert.match(icon, /<desc id="asya-mark-description">[^<]*голосов[^<]*<\/desc>/u);
   assert.doesNotMatch(icon, /<text\b/u);
-  assert.match(html, /<img[^>]*src="\/pwa-icon\.svg"[^>]*alt="Ася — голосовой помощник Aisy\.space"/u);
+  assert.match(html, /<img[^>]*src="\/assets\/opening\/logo\.webp"/u);
+  assert.match(worker, /['"]\/assets\/opening\/logo\.webp['"]/u);
+  assert.match(launcher, /setAttribute\('aria-label','Открыть Асю'\)/u);
   assert.match(privacyScript, /разговора с Асей/u);
   assert.match(privacyScript, /global\.EasyBoostApi/u, 'internal frontend namespace must remain stable');
   assert.doesNotMatch(privacyScript, /Easy Boost не сохраняет/u);

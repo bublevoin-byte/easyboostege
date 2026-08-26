@@ -82,7 +82,7 @@ function importsOf(source, name) {
 }
 
 /*
- * Обход графа от точки входа. `staticOnly` отделяет оболочку от чанков: то, до чего можно дойти
+ * Обход module-графа от точки входа. `staticOnly` отделяет оболочку от чанков: то, до чего можно дойти
  * только динамическим import(), при первой загрузке не приезжает и в APP_SHELL не входит.
  */
 async function walkModuleGraph(entry, { staticOnly = false } = {}) {
@@ -102,7 +102,12 @@ async function walkModuleGraph(entry, { staticOnly = false } = {}) {
 }
 
 const html = await fs.readFile(path.join(sourceDirectory, 'index.html'), 'utf8');
-const entryPoints = [...html.matchAll(/<script[^>]+src="\/([^"]+)"/gu)].map((match) => match[1]);
+const scriptEntries = [...html.matchAll(/<script([^>]*)src="\/([^"]+)"[^>]*>/gu)]
+  .map((match) => ({ attributes: match[1], name: match[2] }));
+const entryPoints = scriptEntries.filter((entry) => /\btype="module"/u.test(entry.attributes))
+  .map((entry) => entry.name);
+const classicScriptAssets = scriptEntries.filter((entry) => !/\btype="module"/u.test(entry.attributes))
+  .map((entry) => entry.name);
 if (!entryPoints.length) throw new Error('index.html подключает ноль скриптов — приложение не запустится');
 for (const entry of entryPoints) {
   if (!sourceFiles.includes(entry)) throw new Error(`Missing frontend script: ${entry}`);
@@ -133,19 +138,21 @@ const sourceEgeMockExecPaths = sourceEgeMockExecModules.map(sourceUrl);
 
 /*
  * Файл, до которого не дотягивается ни один импорт, не попадёт ни в бандл, ни в кэш оболочки —
- * а выглядеть будет как рабочий код. Единственное исключение — сам service worker: его загружает
- * браузер, а не точка входа.
+ * а выглядеть будет как рабочий код. Исключения — service worker и прямые classic scripts из
+ * index.html: их загружает браузер, а не module-точка входа.
  */
 function previewOnlyAsset(name) {
   return name.startsWith('prototypes/');
 }
 
-const orphaned = sourceFiles.filter((name) => name.endsWith('.js') && name !== 'service-worker.js' && !previewOnlyAsset(name) && !reachable.has(name));
+const orphaned = sourceFiles.filter((name) => name.endsWith('.js') && name !== 'service-worker.js'
+  && !classicScriptAssets.includes(name) && !previewOnlyAsset(name) && !reachable.has(name));
 if (orphaned.length) throw new Error(`Эти модули не подключены ни статически, ни динамически: ${orphaned.join(', ')}`);
 
 /* Статика, которую никто не импортирует: prototype-only файлы остаются только в исходном дереве. */
 function copiedStaticAsset(name) {
-  return !previewOnlyAsset(name) && !name.endsWith('.js') && name !== 'index.html';
+  return !previewOnlyAsset(name) && (classicScriptAssets.includes(name) || !name.endsWith('.js')) && name !== 'index.html'
+    && name !== 'assets/opening/README.md';
 }
 const staticAssets = publicSourceFiles.filter(copiedStaticAsset);
 
@@ -247,8 +254,8 @@ if (shellStart === -1 || shellEnd === -1) {
 
 /*
  * Список в исходнике ведётся руками только потому, что сервер отдаёт `public/`, когда сборки нет.
- * Чтобы он не разъехался с реальным графом импортов, сборка его сверяет: набор тот же, что в
- * dist, только без хешей.
+ * Чтобы он не разъехался с реальной initial closure, сборка сверяет module-граф, прямые classic
+ * scripts из index.html и обязательные static assets: набор тот же, что в dist, только без хешей.
  */
 const sourceShell = shellFrom([...shellModules, ...offlineLazyModules, ...shellStaticAssets]);
 const declaredShell = JSON.parse(workerSource.slice(shellStart, shellEnd).match(/const APP_SHELL=(\[[^\]]*\]);/u)[1].replaceAll("'", '"'));
@@ -257,7 +264,7 @@ const expectedSorted = [...sourceShell].sort();
 if (declaredSorted.join('\n') !== expectedSorted.join('\n')) {
   const missing = expectedSorted.filter((name) => !declaredSorted.includes(name));
   const extra = declaredSorted.filter((name) => !expectedSorted.includes(name));
-  throw new Error(`APP_SHELL в public/service-worker.js разошёлся с графом импортов main.js.${missing.length ? `\n  не хватает: ${missing.join(', ')}` : ''}${extra.length ? `\n  лишнее: ${extra.join(', ')}` : ''}`);
+  throw new Error(`APP_SHELL в public/service-worker.js разошёлся с initial frontend closure.${missing.length ? `\n  не хватает: ${missing.join(', ')}` : ''}${extra.length ? `\n  лишнее: ${extra.join(', ')}` : ''}`);
 }
 
 const offlineLazyChunks = new Set(offlineLazyModules.map((name) => modules[name]));

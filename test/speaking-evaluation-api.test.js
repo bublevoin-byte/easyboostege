@@ -16,7 +16,7 @@ import { buildSpeakingLearningAttempt } from '../speaking/learning-loop.js';
 import { getEgeMockForm } from '../ege-mock/catalog.js';
 import { AUTOMATIC_ASSESSMENT_PUBLIC_CONTRACT } from '../shared/automatic-assessment-contract.js';
 
-const TEST_PRIVACY_POLICY_VERSION = '2026-08-02-voice-v1';
+const TEST_PRIVACY_POLICY_VERSION = '2026-08-26-vk-id-v1';
 
 function semanticTask2({ confidence = 0.95 } = {}) {
   return {

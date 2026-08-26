@@ -130,7 +130,7 @@ import {
   speakingCalibrationExpiresAt,
   speakingCalibrationReviewClaim,
 } from '../speaking/accent-calibration.js';
-import { hashAuthCode, normalizeUsername, normalizeVoiceTutorDeliveryMetadata, normalizeVoiceTutorProxyHash, subscriptionView, VoiceTutorError, voiceTutorAccessView, voiceTutorBillableSeconds, voiceTutorProxyUsage, voiceTutorQuotaPeriods, voiceTutorReservationSeconds } from './shared.js';
+import { hashAuthCode, normalizeOAuthTransaction, normalizeProviderIdentity, normalizeUsername, normalizeVoiceTutorDeliveryMetadata, normalizeVoiceTutorProxyHash, subscriptionView, VoiceTutorError, voiceTutorAccessView, voiceTutorBillableSeconds, voiceTutorProxyUsage, voiceTutorQuotaPeriods, voiceTutorReservationSeconds } from './shared.js';
 import {
   hasCanonicalMasteryRecords,
   migrateLegacyMasteryRecords,
@@ -165,6 +165,8 @@ function mapUser(row) {
     sub_until: row.subscription_until ? new Date(row.subscription_until).getTime() : 0,
     trial_used: row.trial_used,
     role: row.role || 'student',
+    display_name: row.display_name || undefined,
+    identity_managed: Boolean(row.identity_managed),
   };
 }
 
@@ -231,6 +233,147 @@ export function createPostgresRepository(connectionString, {
       if (error.code === '23505') throw new Error('USER_EXISTS');
       throw error;
     }
+  }
+
+  async function findOrCreateProviderUser(input) {
+    const identity = normalizeProviderIdentity(input);
+    const instant = new Date(input.now || Date.now());
+    if (!Number.isFinite(instant.getTime())) throw new Error('PROVIDER_IDENTITY_INVALID');
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`${identity.provider}:${identity.subject}`]);
+      const existing = await client.query(
+        `SELECT account.* FROM learner_identities li
+         JOIN users account ON account.username = li.username
+         WHERE li.provider = $1 AND li.subject = $2
+         FOR UPDATE OF account, li`,
+        [identity.provider, identity.subject],
+      );
+      if (existing.rowCount) {
+        const updated = existing.rows[0].display_name === identity.displayName
+          ? existing.rows[0]
+          : (await client.query(
+            `UPDATE users SET display_name = $2, updated_at = $3
+             WHERE username = $1 RETURNING *`,
+            [existing.rows[0].username, identity.displayName, instant],
+          )).rows[0];
+        if (existing.rows[0].display_name !== identity.displayName) {
+          await client.query(
+            `UPDATE learner_identities SET updated_at = $3
+             WHERE provider = $1 AND subject = $2`,
+            [identity.provider, identity.subject, instant],
+          );
+        }
+        await client.query('COMMIT');
+        return mapUser(updated);
+      }
+
+      let created = null;
+      for (let attempt = 0; attempt < 32 && !created; attempt += 1) {
+        const username = `learner_${crypto.randomBytes(12).toString('base64url')}`;
+        const result = await client.query(
+          `INSERT INTO users (username, display_name, identity_managed, created_at, updated_at)
+           VALUES ($1, $2, TRUE, $3, $3)
+           ON CONFLICT (username) DO NOTHING RETURNING *`,
+          [username, identity.displayName, instant],
+        );
+        created = result.rows[0] || null;
+      }
+      if (!created) throw new Error('PROVIDER_IDENTITY_USERNAME_EXHAUSTED');
+      await client.query(
+        `INSERT INTO learner_identities (provider, subject, username, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $4)`,
+        [identity.provider, identity.subject, created.username, instant],
+      );
+      await client.query('COMMIT');
+      return mapUser(created);
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async function createOAuthTransaction(input) {
+    const transaction = normalizeOAuthTransaction(input);
+    await pool.query(
+      `DELETE FROM oauth_auth_transactions
+       WHERE expires_at <= $1::timestamptz - INTERVAL '1 day'`,
+      [transaction.createdAt],
+    );
+    try {
+      await pool.query(
+        `INSERT INTO oauth_auth_transactions
+         (state_hash, provider, verifier_sealed, redirect_uri, expires_at, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [transaction.stateHash, transaction.provider, transaction.verifierSealed,
+          transaction.redirectUri, transaction.expiresAt, transaction.createdAt],
+      );
+      return true;
+    } catch (error) {
+      if (error.code === '23505') throw new Error('OAUTH_STATE_COLLISION');
+      throw error;
+    }
+  }
+
+  async function consumeOAuthTransaction(stateHash, { now = new Date() } = {}) {
+    const normalizedHash = String(stateHash || '').toLowerCase();
+    const instant = new Date(now);
+    if (!/^[a-f0-9]{64}$/u.test(normalizedHash) || !Number.isFinite(instant.getTime())) {
+      throw new Error('OAUTH_TRANSACTION_INVALID');
+    }
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await client.query(
+        'SELECT * FROM oauth_auth_transactions WHERE state_hash = $1 FOR UPDATE',
+        [normalizedHash],
+      );
+      const row = result.rows[0];
+      if (!row) {
+        await client.query('COMMIT');
+        return { status: 'missing' };
+      }
+      if (row.consumed_at) {
+        await client.query('COMMIT');
+        return { status: 'replayed' };
+      }
+      if (new Date(row.expires_at).getTime() <= instant.getTime()) {
+        await client.query('COMMIT');
+        return { status: 'expired' };
+      }
+      await client.query(
+        'UPDATE oauth_auth_transactions SET consumed_at = $2, verifier_sealed = NULL WHERE state_hash = $1',
+        [normalizedHash, instant],
+      );
+      await client.query('COMMIT');
+      return {
+        status: 'ready',
+        transaction: {
+          provider: row.provider,
+          verifierSealed: row.verifier_sealed,
+          redirectUri: row.redirect_uri,
+          expiresAt: new Date(row.expires_at).toISOString(),
+        },
+      };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async function purgeOAuthTransactions({ now = new Date() } = {}) {
+    const instant = new Date(now);
+    if (!Number.isFinite(instant.getTime())) throw new Error('OAUTH_TRANSACTION_INVALID');
+    const result = await pool.query(
+      'DELETE FROM oauth_auth_transactions WHERE expires_at <= $1 RETURNING state_hash',
+      [instant],
+    );
+    return result.rowCount;
   }
 
   async function getProgress(username) {
@@ -6313,7 +6456,15 @@ export function createPostgresRepository(connectionString, {
 
   async function exportUserData(username) {
     const [account, progress, privacyConsent, subscriptionEvents, subscriptionEntitlements, voiceTutorSessions, voiceTutorRecoveries, voiceTutorRepeats, voiceTutorRepeatAttempts, voiceTutorReports, ruleCards, paymentRequests, writingAttempts, speakingAttempts, speakingTask1Sessions, speakingTask2Sessions, speakingTask3Sessions, speakingTask4Sessions, speakingFullSessions, speakingAssessments, generatedTasks, moduleAttempts, progressSummary, wordProgress, errorBank, adaptiveGoals, adaptiveSnapshot, adaptivePlanRevisions, adaptiveSessions, adaptiveSessionExecutionEvents, adaptiveDiagnosticSessions, adaptiveDiagnosticResponses, egeMockAttempts, aiRequests, auditLog] = await Promise.all([
-      pool.query('SELECT username, telegram_id, role, trial_used, subscription_until, created_at, updated_at FROM users WHERE username = $1', [username]),
+      pool.query(
+        `SELECT account.username, account.telegram_id, account.role, account.trial_used,
+                account.subscription_until, account.display_name, account.created_at, account.updated_at,
+                identity.provider AS identity_provider, identity.subject AS identity_subject
+         FROM users account
+         LEFT JOIN learner_identities identity ON identity.username = account.username
+         WHERE account.username = $1`,
+        [username],
+      ),
       pool.query('SELECT data, updated_at FROM user_progress WHERE username = $1', [username]),
       pool.query('SELECT text_processing, voice_processing, policy_version, text_consented_at, voice_consented_at, updated_at FROM privacy_consents WHERE username = $1', [username]),
       pool.query('SELECT id, event_type, days, metadata, created_at FROM subscription_events WHERE username = $1 ORDER BY created_at', [username]),
@@ -6575,6 +6726,10 @@ export function createPostgresRepository(connectionString, {
     ...egeMockStore,
     getUser,
     createUser,
+    findOrCreateProviderUser,
+    createOAuthTransaction,
+    consumeOAuthTransaction,
+    purgeOAuthTransactions,
     getProgress,
     saveProgress,
     mergeProgress,

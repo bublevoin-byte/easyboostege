@@ -11,6 +11,11 @@ import {
 } from './ege-mock-catalog-contract.js';
 import {egeMockLocalContinuation} from './ege-mock-written-continuation.js';
 import {
+  createFirstLaunchController,
+  FIRST_LAUNCH_REQUEST_TIMEOUT_MS,
+  runWithAbortDeadline,
+} from './first-launch.js';
+import {
   applyVocabularyOutcome,
   localVocabularyProgress,
   mergeLegacyVocabularyProgress,
@@ -43,10 +48,6 @@ let ADOPTED_OWNER_GENERATION=readSessionOwnerGeneration(currentUser);
 if(ADOPTED_OWNER_GENERATION==null&&INITIAL_OWNER_MARKER&&INITIAL_OWNER_MARKER.owner===currentUser)
   ADOPTED_OWNER_GENERATION=INITIAL_OWNER_MARKER.ownerGeneration;
 function normalizedAuthOwner(value){var owner=String(value||'').trim();return owner||null}
-function captureExplicitAuth(owner=null){var ownerKey=normalizedAuthOwner(owner);
-  var authority=store.sync.ownerAuthSnapshot?.(ownerKey)||{ownerGeneration:0,globalGeneration:0};return{
-  sessionGeneration:AUTH_SESSION_GENERATION,owner:ownerKey,
-  ownerGeneration:ownerKey?authority.ownerGeneration:null,globalGeneration:authority.globalGeneration}}
 const store=window.EasyBoostStore;
 const ui=window.EasyBoostComponents;
 const txt=ui.elementText;
@@ -92,12 +93,10 @@ function applyDeletedOwner(update){
   TOKEN='';currentUser=null;S=null;window.__sub=null;ADOPTED_OWNER_GENERATION=null;rememberSessionOwnerGeneration(null,null);store.sync.setOwner(null);
   void notifyAuthorityReset(resetAuthority);
   try{localStorage.removeItem('eb_tg_code')}catch(_){}
-  hideLearningShell();show('scr5');
+  hideLearningShell();try{firstLaunch.showLogin()}catch(_){show('scr5')}
   return true
 }
 store.sync.onOwnerDeleted?.(applyDeletedOwner);
-function getUsers(){try{return JSON.parse(localStorage.getItem('eb_users'))||{}}catch(e){return{}}}
-function setUsers(u){localStorage.setItem('eb_users',JSON.stringify(u))}
 /* ---------- DATA ---------- */
 
 
@@ -109,13 +108,9 @@ function wire(){
     scr.querySelectorAll('div,span,a').forEach(el=>{const t=txt(el);if(TABROUTE[t]&&el.children.length<=1&&t.length<11){const control=el.closest('.navit')||el;makeInteractive(control,t,()=>nav(TABROUTE[t]))}});
     scr.querySelectorAll('svg').forEach(sv=>{const h=(sv.innerHTML||'').toLowerCase();if(h.includes('14 6 8 12 14 18')){const p=sv.parentElement||sv;makeInteractive(p,'Назад',()=>back())}});
   });
-  bindText('scr5','Войти',()=>doLogin());bindText('scr5','Создать',()=>doRegister());
-  bindText('scr6','Поехали',()=>startApp());bindText('scr6','Пропустить',()=>startApp());
   bindText('scr14','Повторить',()=>tab('scr8'));bindText('scr14','Учить офлайн',()=>tab('scr2'));
 }
 
-/* ---------- AUTH ---------- */
-function inputVal(scr,ph){const el=document.querySelector('#'+scr+' input[placeholder*="'+ph+'"]');return el?el.value.trim():''}
 document.addEventListener('DOMContentLoaded',()=>{wire();
 });
 wire();
@@ -257,9 +252,12 @@ async function genForCurrent(){const id=cur();const fab=document.getElementById(
 /* ===== SERVER CONNECT (Этап 5) ===== */
 const auth=window.EasyBoostAuth;
 const SRV=auth.isServerMode;
+const FIRST_LAUNCH_SESSION_TIMEOUT_MS=FIRST_LAUNCH_REQUEST_TIMEOUT_MS;
+const firstLaunch=createFirstLaunchController({
+  document:document,location:window.location,history:window.history,storage:window.localStorage,
+  fetchImpl:window.fetch.bind(window),showScreen:tab,matchMedia:window.matchMedia?.bind(window),
+});
 let TOKEN=''; // маркер активной cookie-сессии; сам JWT недоступен JavaScript
-function gv(id){var e=document.getElementById(id);return e?(e.value||'').trim():''}
-function lgMsg(t){var e=document.getElementById('lg_msg');if(e)e.textContent=t}
 const apiPost=EasyBoostApi.post;
 const apiPostIdempotent=EasyBoostApi.postIdempotent;
 const apiPut=EasyBoostApi.put;
@@ -281,24 +279,30 @@ function hideLearningShell(){
   const bar=document.getElementById('tabbar');if(bar)bar.style.display='none';
 }
 function setAccessBackgroundInert(inert){
-  document.querySelectorAll('.screen,#tabbar,#genfab,#learnSheet').forEach(function(element){element.inert=inert});
+  document.querySelectorAll('.screen,#tabbar,#genfab,#learnSheet').forEach(function(element){
+    element.inert=!inert&&element.matches('[data-first-launch-screen][hidden]')?true:inert
+  });
 }
 function closeAccessGate(focusLogin=false){
   document.getElementById('access_gate')?.remove();setAccessBackgroundInert(false);
   if(focusLogin)queueMicrotask(function(){document.querySelector('#scr5 input, #scr5 button, #scr5 a')?.focus()});
 }
+function focusTodayHeading(){requestAnimationFrame(function(){
+  const heading=document.getElementById('today-title');
+  if(heading&&!heading.closest('[hidden]'))heading.focus()
+})}
 function accessGate(){
   let gate=document.getElementById('access_gate');if(gate)return gate;
   gate=document.createElement('section');gate.id='access_gate';gate.setAttribute('role','dialog');gate.setAttribute('aria-modal','true');gate.setAttribute('aria-labelledby','access_gate_title');gate.setAttribute('aria-describedby','access_gate_copy');
-  gate.setAttribute('style','position:fixed;inset:0;z-index:100000;background:linear-gradient(160deg,#FFA570,#F2683F);display:grid;place-items:center;padding:24px;font-family:Manrope,system-ui,sans-serif;');
-  const card=document.createElement('div');card.setAttribute('style','width:min(100%,390px);box-sizing:border-box;border-radius:28px;background:#fff;padding:28px 24px;text-align:center;box-shadow:0 20px 55px rgba(20,20,30,.22);');
-  const title=document.createElement('h1');title.id='access_gate_title';title.setAttribute('style','margin:0;color:#2B2B2B;font:800 23px Nunito,Manrope,sans-serif;');
-  const copy=document.createElement('p');copy.id='access_gate_copy';copy.setAttribute('style','margin:10px 0 20px;color:#5D6168;font:600 14px/1.55 Manrope,system-ui,sans-serif;');
-  const bot=document.createElement('a');bot.id='access_gate_bot';bot.target='_blank';bot.rel='noopener';bot.setAttribute('style','display:none;min-height:50px;box-sizing:border-box;border-radius:15px;background:#F2683F;color:#fff;padding:14px 16px;font:800 14px Manrope,sans-serif;text-decoration:none;');bot.textContent='Открыть Telegram-бот';
-  const privacy=document.createElement('button');privacy.id='access_gate_privacy';privacy.type='button';privacy.setAttribute('style','display:none;width:100%;min-height:48px;margin-top:10px;border:1.5px solid #D9DCE1;border-radius:15px;background:#fff;color:#454950;font:800 14px Manrope,sans-serif;cursor:pointer;');privacy.textContent='Настройки приватности и данных';privacy.addEventListener('click',function(){window.openCalibrationPrivacy?.()});
-  const retry=document.createElement('button');retry.id='access_gate_retry';retry.type='button';retry.setAttribute('style','width:100%;min-height:48px;margin-top:10px;border:1.5px solid #F3D2C8;border-radius:15px;background:#fff;color:#B54E2F;font:800 14px Manrope,sans-serif;cursor:pointer;');retry.textContent='Повторить проверку';retry.addEventListener('click',function(){pwCheck()});
-  card.append(title,copy,bot,privacy,retry);gate.appendChild(card);gate.addEventListener('keydown',function(event){
-    if(event.key!=='Tab')return;const controls=[bot,privacy,retry].filter(function(control){return control.offsetParent!==null});
+  gate.className='aisy-access-gate';
+  const card=document.createElement('div');card.className='aisy-access-gate__card';
+  const title=document.createElement('h1');title.id='access_gate_title';title.className='aisy-access-gate__title';
+  const copy=document.createElement('p');copy.id='access_gate_copy';copy.className='aisy-access-gate__copy';
+  const status=document.createElement('p');status.id='access_gate_status';status.className='aisy-visually-hidden';status.setAttribute('role','status');status.setAttribute('aria-live','polite');status.setAttribute('aria-atomic','true');
+  const privacy=document.createElement('button');privacy.id='access_gate_privacy';privacy.type='button';privacy.className='aisy-button aisy-button--secondary aisy-access-gate__privacy';privacy.hidden=true;privacy.textContent='Настройки приватности и данных';privacy.addEventListener('click',function(){window.openCalibrationPrivacy?.()});
+  const retry=document.createElement('button');retry.id='access_gate_retry';retry.type='button';retry.className='aisy-button aisy-access-gate__retry';retry.textContent='Повторить проверку';retry.addEventListener('click',function(){pwCheck()});
+  card.append(title,copy,status,privacy,retry);gate.appendChild(card);gate.addEventListener('keydown',function(event){
+    if(event.key!=='Tab')return;const controls=[privacy,retry].filter(function(control){return control.offsetParent!==null});
     if(!controls.length)return;const first=controls[0],last=controls[controls.length-1];
     if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus()}
     else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus()}
@@ -308,17 +312,20 @@ function applyLearningAccess(result){
   const state=result.state;hideLearningShell();
   if(state===LEARNING_ACCESS_STATES.ACTIVE){closeAccessGate();return}
   if(state===LEARNING_ACCESS_STATES.NO_SESSION){
-    show('scr5');closeAccessGate(true);const login=document.getElementById('scr5');if(login)login.dataset.accessState=state;lgMsg('Войдите, чтобы проверить активный доступ.');return
+    firstLaunch.showLogin();closeAccessGate(true);const login=document.getElementById('scr5');if(login)login.dataset.accessState=state;return
   }
-  show('scr5');const gate=accessGate();setAccessBackgroundInert(true);gate.dataset.state=state;
-  const title=document.getElementById('access_gate_title');const copy=document.getElementById('access_gate_copy');const bot=document.getElementById('access_gate_bot');const privacy=document.getElementById('access_gate_privacy');
+  firstLaunch.showLogin();const gate=accessGate();setAccessBackgroundInert(true);const previousState=gate.dataset.state||'';gate.dataset.state=state;
+  const title=document.getElementById('access_gate_title');const copy=document.getElementById('access_gate_copy');const privacy=document.getElementById('access_gate_privacy');
   if(state===LEARNING_ACCESS_STATES.INACTIVE){
     title.textContent='Нужен активный доступ';copy.textContent='Сессия подтверждена, но подписка неактивна или закончилась. Учебные разделы откроются после активации доступа.';
-    if(result.session&&result.session.bot){bot.href='https://t.me/'+result.session.bot;bot.style.display='block'}else bot.style.display='none';
-    privacy.style.display='block';
+    privacy.hidden=false;
   }else{
-    title.textContent='Не удалось проверить доступ';copy.textContent='Сейчас нет связи с сервером, поэтому мы не можем подтвердить подписку. Учебные разделы не открыты. Проверьте сеть и повторите попытку.';bot.style.display='none';privacy.style.display='none';
-  }queueMicrotask(function(){document.getElementById('access_gate_retry')?.focus()})
+    title.textContent='Не удалось проверить доступ';copy.textContent='Сейчас нет связи с сервером, поэтому мы не можем подтвердить подписку. Учебные разделы не открыты. Проверьте сеть и повторите попытку.';privacy.hidden=true;
+  }if(previousState){const status=document.getElementById('access_gate_status');if(status){
+    const announcement=title.textContent+'. '+copy.textContent;status.textContent='';
+    requestAnimationFrame(function(){if(status.isConnected&&gate.dataset.state===state)status.textContent=announcement})
+  }}
+  queueMicrotask(function(){document.getElementById('access_gate_retry')?.focus()})
 }
 function adoptServerSession(session,ownerGeneration){
   const sessionOwner=normalizedAuthOwner(session&&session.username);
@@ -358,8 +365,16 @@ async function commitEgeMockOwnerMutation(owner,canCommit,commit){
   });
   if(result?.egeMockCommit!==true)throw changed();
 }
-async function checkLearningAccess(session=null,{preserveActiveShell=false,signal=null}={}){
-  if(!SRV){const result=classifyLearningAccess(null,new Error('server mode required'));applyLearningAccess(result);return result}
+async function clearNoSessionAuthority(authGuard){
+  if(!authGuard||authGuard.sessionGeneration!==AUTH_SESSION_GENERATION)return false;
+  const previousOwner=authGuard.owner,previousGeneration=authGuard.ownerGeneration;
+  AUTH_SESSION_GENERATION+=1;TOKEN='';OFFLINE_EGE_MOCK_CONTINUATION=false;currentUser=null;S=null;window.__sub=null;
+  ADOPTED_OWNER_GENERATION=null;rememberSessionOwnerGeneration(null,null);store.sync.setOwner(null);
+  if(previousOwner&&Number.isSafeInteger(previousGeneration))await store.clearCurrentOwner?.(previousOwner,previousGeneration);
+  return true
+}
+async function checkLearningAccess(session=null,{preserveActiveShell=false,deferPresentation=false,signal=null}={}){
+  if(!SRV){const result=classifyLearningAccess(null,new Error('server mode required'));if(!deferPresentation)applyLearningAccess(result);return result}
   const authGuard={sessionGeneration:AUTH_SESSION_GENERATION,owner:currentUser,ownerGeneration:ADOPTED_OWNER_GENERATION,
     globalGeneration:store.sync.ownerAuthSnapshot?.()?.globalGeneration??0};
   try{
@@ -378,19 +393,24 @@ async function checkLearningAccess(session=null,{preserveActiveShell=false,signa
         generation=store.sync.ownerAuthSnapshot?.(sessionOwner)?.ownerGeneration??0
       }
       const adopted=await store.sync.adoptOwner?.(sessionOwner,generation,{
-        canCommit:function(){return authGuard.sessionGeneration===AUTH_SESSION_GENERATION},
+        canCommit:function(){return authGuard.sessionGeneration===AUTH_SESSION_GENERATION&&signal?.aborted!==true},
         commit:function(committedGeneration){return adoptServerSession(current,committedGeneration)},
       });
+      if(signal?.aborted)return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,aborted:true};
       if(adopted!==sessionOwner)return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,stale:true}
-    }else{TOKEN='';ADOPTED_OWNER_GENERATION=null;rememberSessionOwnerGeneration(null,null)}
-    if(preserveActiveShell&&result.state===LEARNING_ACCESS_STATES.ACTIVE)closeAccessGate();else applyLearningAccess(result);return result;
+    }else if(!await clearNoSessionAuthority(authGuard))return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,stale:true};
+    if(signal?.aborted)return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,aborted:true};
+    if(!deferPresentation){if(preserveActiveShell&&result.state===LEARNING_ACCESS_STATES.ACTIVE)closeAccessGate();else applyLearningAccess(result)}return result;
   }catch(error){
     if(signal?.aborted)return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,aborted:true};
     const status=Number(error&&error.status)||0;
     const offlineMock=(status===0||status>=500)?offlineEgeMockContinuation():null;
-    if(offlineMock){OFFLINE_EGE_MOCK_CONTINUATION=true;closeAccessGate();hideLearningShell();queueMicrotask(function(){tab('scr16')});
+    if(offlineMock){OFFLINE_EGE_MOCK_CONTINUATION=true;if(!deferPresentation){closeAccessGate();hideLearningShell();queueMicrotask(function(){tab('scr16')})}
       return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,offlineEgeMock:true}}
-    const result=classifyLearningAccess(null,error);if(result.state===LEARNING_ACCESS_STATES.NO_SESSION)TOKEN='';applyLearningAccess(result);return result;
+    const result=classifyLearningAccess(null,error);
+    if(result.state===LEARNING_ACCESS_STATES.NO_SESSION&&!await clearNoSessionAuthority(authGuard))return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,stale:true};
+    if(signal?.aborted)return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,aborted:true};
+    if(!deferPresentation)applyLearningAccess(result);return result;
   }
 }
 async function verifyLearningAccessForLaunch({signal=null}={}){
@@ -419,23 +439,27 @@ async function invalidateLearningAuthority(authority){
     clearAdaptiveRuntime({owner:owner,ownerGeneration:ownerGeneration}),
     clearAdaptiveOverviewCache(localStorage,{owner:owner,ownerGeneration:ownerGeneration}),
   ]);
-  hideLearningShell();show('scr5');return true;
+  hideLearningShell();try{firstLaunch.showLogin()}catch(_){show('scr5')}return true;
 }
 window.EasyBoostAuthority=Object.freeze({invalidate:invalidateLearningAuthority});
-async function startLearningWithVerifiedSession(session){
-  const access=classifyLearningAccess(session);applyLearningAccess(access);
-  if(access.state!==LEARNING_ACCESS_STATES.ACTIVE||normalizedAuthOwner(session&&session.username)!==currentUser||!currentOwnerAuthorityCurrent())return false;
+async function startLearningWithVerifiedSession(session,{signal=null}={}){
+  if(signal?.aborted)return false;
+  const access=classifyLearningAccess(session);
+  if(access.state!==LEARNING_ACCESS_STATES.ACTIVE){applyLearningAccess(access);return false}
+  if(normalizedAuthOwner(session&&session.username)!==currentUser||!currentOwnerAuthorityCurrent())return false;
   var startOwner=currentUser,startGeneration=AUTH_SESSION_GENERATION,startOwnerGeneration=ADOPTED_OWNER_GENERATION;
-  function startStillCurrent(){return Boolean(TOKEN&&currentUser===startOwner
+  function startStillCurrent(){return Boolean(signal?.aborted!==true&&TOKEN&&currentUser===startOwner
     &&AUTH_SESSION_GENERATION===startGeneration&&currentOwnerAuthorityCurrent(startOwner))}
   /* Встроенные задания нужны до первого экрана письма и должны быть доступны офлайн,
      поэтому банк загружается из закэшированного /task-bank.json на старте. */
-  await loadTaskBank();
+  await loadTaskBank(signal);
   if(!startStillCurrent())return false;
   store.sync.setOwner(currentUser);
   if(SRV){
     var served=null,localWorkflow=store.loadLocal(currentUser,ADOPTED_OWNER_GENERATION);
-    try{served=await apiGet('/api/v1/progress',{headers:{'X-EasyBoost-Expected-Owner':startOwner}})}catch(e){
+    var progressOptions={headers:{'X-EasyBoost-Expected-Owner':startOwner}};if(signal)progressOptions.signal=signal;
+    try{served=await apiGet('/api/v1/progress',progressOptions)}catch(e){
+      if(signal?.aborted)return false;
       if(apiIsAuthorityFailure(e))await invalidateLearningAuthority({owner:startOwner,ownerGeneration:startOwnerGeneration});
       if(!apiCanUseOfflineFallback(e))return false;served=null}
     if(!startStillCurrent())return false;
@@ -449,46 +473,24 @@ async function startLearningWithVerifiedSession(session){
     if(!served)try{toast('Нет сети — показан сохранённый прогресс')}catch(e){}}
   if(!startStillCurrent())return false;
   store.sync.setBaseline(S);
-  tab('scr1');
-  for(const hook of START_HOOKS){if(!startStillCurrent())return false;try{await hook()}catch(e){}if(!startStillCurrent())return false}
+  tab('scr1',function(){closeAccessGate();firstLaunch.release();focusTodayHeading()});
+  void (async function(){for(const hook of START_HOOKS){if(!startStillCurrent())return;try{await hook()}catch(e){}if(!startStillCurrent())return}})();
   return true;
 }
-async function confirmExplicitServerOwner(session,authGuard){
-  var sessionOwner=normalizedAuthOwner(session&&session.username);
-  if(!authGuard||authGuard.sessionGeneration!==AUTH_SESSION_GENERATION||!sessionOwner)return false;
-  if(authGuard.owner&&authGuard.owner!==sessionOwner)return false;
-  const confirmed=await store.sync.confirmOwner?.(sessionOwner,{
-    ownerScoped:Boolean(authGuard.owner),ownerGeneration:authGuard.ownerGeneration,globalGeneration:authGuard.globalGeneration,
-  },{
-    canCommit:function(){return authGuard.sessionGeneration===AUTH_SESSION_GENERATION},
-    commit:function(){const generation=authGuard.owner?authGuard.ownerGeneration:store.sync.ownerAuthSnapshot?.(sessionOwner)?.ownerGeneration;
-      return adoptServerSession(session,generation)},
-  });
-  return confirmed===sessionOwner
+async function startLearningWithDeadline(session){
+  try{return await runWithAbortDeadline(
+    function(signal){return startLearningWithVerifiedSession(session,{signal})},
+    {timeoutMs:FIRST_LAUNCH_SESSION_TIMEOUT_MS},
+  )}catch(_){applyLearningAccess({state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,timedOut:true});return false}
 }
 async function startApp(){
   return runAuthTransition(async function(){
     const access=await checkLearningAccess();
     if(access.state!==LEARNING_ACCESS_STATES.ACTIVE)return false;
-    return startLearningWithVerifiedSession(access.session);
+    return startLearningWithDeadline(access.session);
   });
 }
 
-/* вход/регистрация */
-async function doLogin(){
-  if(!SRV){applyLearningAccess(classifyLearningAccess(null,new Error('server mode required')));return}
-  const u=gv('lg_user'),p=gv('lg_pass');if(!u||!p){lgMsg('Введите имя и пароль');return}
-  lgMsg('Вход…');
-  try{await runAuthTransition(async function(){var authGuard=captureExplicitAuth(u);const d=await auth.login(u,p);
-    if(!await confirmExplicitServerOwner(d,authGuard))return false;lgMsg('');await startLearningWithVerifiedSession(d)})}
-  catch(e){lgMsg(apiMessage(e,'auth'))}}
-async function doRegister(){
-  if(!SRV){applyLearningAccess(classifyLearningAccess(null,new Error('server mode required')));return}
-  const u=gv('lg_user'),p=gv('lg_pass');if(!u||!p){lgMsg('Введите имя и пароль');return}
-  lgMsg('Создаём аккаунт…');
-  try{await runAuthTransition(async function(){var authGuard=captureExplicitAuth(u);const d=await auth.register(u,p);
-    if(!await confirmExplicitServerOwner(d,authGuard))return false;lgMsg('');if(classifyLearningAccess(d).state===LEARNING_ACCESS_STATES.ACTIVE){show('scr6');hideLearningShell()}else applyLearningAccess(classifyLearningAccess(d))})}
-  catch(e){lgMsg(apiMessage(e,'auth'))}}
 async function logout(){
   return runAuthTransition(async function(){
     const logoutOwner=currentUser,logoutOwnerGeneration=ADOPTED_OWNER_GENERATION;
@@ -510,8 +512,8 @@ function generateAiContent(operation,payload){return EasyBoostApi.generateConten
 /* профиль: в серверном режиме ключ не нужен на клиенте */
 registerProfileHook(function(){var ai=document.getElementById('pf_ai');if(ai){ai.textContent='через сервер ✓';ai.style.color='#1D7F4A';ai.style.background='#EAF7F0'}})
 
-/* До серверной проверки всегда виден только вход, а учебная оболочка скрыта. */
-hideLearningShell();show('scr5');
+/* До завершения единого first-launch gate учебная оболочка скрыта. */
+hideLearningShell();
 /*
  * После подтверждённого входа ученик уходит на «Главную». Готовим её заранее: первая отрисовка
  * стоит около двухсот миллисекунд. Подготовка не показывает экран и не даёт доступ к навигации.
@@ -519,84 +521,45 @@ hideLearningShell();show('scr5');
 prepareScreen('scr1');
 
 
-/* ===== TELEGRAM LOGIN v2 (mobile-safe) ===== */
-let TG_URL='', TG_CODE='', TG_IV=null;
-async function tgInit(){
-  if(typeof SRV==='undefined'||!SRV)return;
-  try{const d=await auth.startTelegramLogin();TG_URL=d.url;TG_CODE=d.code;
-    var a=document.getElementById('tgbtn');if(a)a.href=TG_URL;tgPoll();}
-  catch(e){lgMsg(apiMessage(e,'telegram'));}
-}
-function tgPoll(){
-  if(!TG_CODE)return;try{localStorage.setItem('eb_tg_code',TG_CODE)}catch(_){};let tries=0;clearInterval(TG_IV);
-  TG_IV=setInterval(()=>{tries++;runAuthTransition(async function(){
-    try{var authGuard=captureExplicitAuth();const c=await auth.checkTelegramLogin(TG_CODE);
-      if(c&&c.authenticated){clearInterval(TG_IV);
-        if(!await confirmExplicitServerOwner(c,authGuard))return false;lgMsg('');await startLearningWithVerifiedSession(c);}
-    }catch(e){}
-    if(tries>300){clearInterval(TG_IV)}
-  })},2000);
-}
-// Telegram-код создаётся только после явного действия пользователя.
-
-
-/* ===== TELEGRAM login: настоящая ссылка (iOS-safe) ===== */
-try{clearInterval(TG_IV)}catch(e){}
-// Восстановление существующей cookie-сессии выполняется ниже через /api/v1/me.
-
-
 /* legacy block 2 */
 async function pwCheck(){
-  return runAuthTransition(async function(){
-    const access=await checkLearningAccess();
-    if(access.state!==LEARNING_ACCESS_STATES.ACTIVE)return false;
-    await startLearningWithVerifiedSession(access.session);return true;
-  });
+  const pendingRetry=document.getElementById('access_gate_retry');
+  if(pendingRetry?.disabled)return false;
+  if(pendingRetry){pendingRetry.disabled=true;pendingRetry.setAttribute('aria-busy','true')}
+  try{return await runAuthTransition(async function(){
+    const access=await runWithAbortDeadline(
+      function(signal){return checkLearningAccess(null,{deferPresentation:true,signal})},
+      {timeoutMs:FIRST_LAUNCH_SESSION_TIMEOUT_MS},
+    ).catch(function(){return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,timedOut:true}});
+    if(access.state===LEARNING_ACCESS_STATES.ACTIVE)return startLearningWithDeadline(access.session);
+    if(access.offlineEgeMock){closeAccessGate();hideLearningShell();queueMicrotask(function(){tab('scr16')});return false}
+    applyLearningAccess(access);return false;
+  })}finally{
+    const currentRetry=document.getElementById('access_gate_retry');
+    if(currentRetry){currentRetry.disabled=false;currentRetry.removeAttribute('aria-busy')}
+  }
 }
 window.checkSub=pwCheck;
-
-/* legacy block 3 */
-/* ===== Вход по ссылке из бота (magic link) — без всплывающих окон ===== */
-(function(){
-  try{
-    // Старые magic-link JWT обрабатываются сервером до загрузки страницы.
-    if(new URLSearchParams(location.search).has('t'))history.replaceState(null,'',location.pathname);
-  }catch(e){}
-})();
-/* Кнопка Telegram v9: берём ссылку по клику и сразу открываем бота + видимый запасной линк */
-try{var _tb=document.getElementById('tgbtn'); if(_tb)_tb.removeAttribute('target');}catch(_){}
-async function tgClick(e){
-  if(e&&e.preventDefault)e.preventDefault();
-  if(typeof SRV==='undefined'||!SRV){ lgMsg('Открой приложение по ссылке сервера.'); return false; }
-  lgMsg('Готовлю вход…');
-  try{
-    if(typeof TG_URL==='undefined'||!TG_URL){ var d=await auth.startTelegramLogin(); TG_URL=d.url; TG_CODE=d.code; }
-  }catch(err){ lgMsg(apiMessage(err,'telegram')); return false; }
-  try{ if(typeof tgPoll==='function') tgPoll(); }catch(_){}
-  var m=document.getElementById('lg_msg');
-  if(m) m.innerHTML='<a href="'+TG_URL+'" style="display:inline-block;margin-top:2px;color:#B54E2F;font-weight:800;text-decoration:underline;font-size:14.5px;">Открыть Telegram-бот</a><div style="margin-top:5px;font-size:12.5px;color:#6A6E75;">нажми ссылку → Start → кнопка «Открыть Aisy.space»</div>';
-  try{ window.location.href=TG_URL; }catch(_){}
-  return false;
-}
 
 /* legacy block 4 */
 /* ===== SESSION v2: постоянный вход, восстановление сессии, подписка ===== */
 (function(){
   async function me(){return runAuthTransition(function(){return auth.currentSession()})}
   window.ebMe=me;
-  /* вход через Telegram переживает перезагрузку страницы */
-  try{
-    var pc=localStorage.getItem('eb_tg_code');
-    if(!TOKEN&&pc){TG_CODE=pc;tgPoll();}
-  }catch(_){}
-  setInterval(function(){if(TOKEN){try{localStorage.removeItem('eb_tg_code')}catch(_){}}},3000);
-  /* восстановление сессии из cookie + продление токена при каждом заходе */
+  /* Один coordinator держит private gate, а minimum splash/onboarding и /me идут параллельно. */
   (async function(){
-    if(typeof SRV==='undefined'||!SRV)return;
-    await runAuthTransition(async function(){
-      const access=await checkLearningAccess();
-      if(access.state===LEARNING_ACCESS_STATES.ACTIVE){try{localStorage.removeItem('eb_tg_code')}catch(_){};await startLearningWithVerifiedSession(access.session)}
-    });
+    const opening=firstLaunch.start();
+    const accessCheck=typeof SRV!=='undefined'&&SRV
+      ?runAuthTransition(function(){return runWithAbortDeadline(
+        function(signal){return checkLearningAccess(null,{deferPresentation:true,signal})},
+        {timeoutMs:FIRST_LAUNCH_SESSION_TIMEOUT_MS},
+      ).catch(function(){return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,timedOut:true}})})
+      :Promise.resolve(classifyLearningAccess(null,new Error('server mode required')));
+    await opening;
+    const access=await accessCheck;
+    if(access.state===LEARNING_ACCESS_STATES.ACTIVE)return startLearningWithDeadline(access.session);
+    if(access.offlineEgeMock){closeAccessGate();hideLearningShell();queueMicrotask(function(){tab('scr16')});return}
+    applyLearningAccess(access);
   })();
   /* статус подписки в профиле */
   registerProfileHook(function(){
@@ -1088,8 +1051,8 @@ function applyTaskBank(bank){
   W38=(b.writing_task_38||[]).map(function(t){return {id:t.id,topic:t.topic,rows:t.rows}});
   return W37.length+W38.length;
 }
-function loadTaskBank(){
-  return EasyBoostApi.get('/task-bank.json').then(applyTaskBank).catch(function(){return 0});
+function loadTaskBank(signal=null){
+  return EasyBoostApi.get('/task-bank.json',signal?{signal:signal}:{}).then(applyTaskBank).catch(function(){return 0});
 }
 function wrSyncTile(){if(!S)return;var sum=writingModule.summary(S.works);
   if(!sum.count){setTxt('sub_write','задания 37–38 · ИИ');return}
@@ -1146,7 +1109,7 @@ configureTts({
 export {
   lastWord,lastWordContext,
   closeLearn,learnGo,logout,lToggleSlow,openLearn,pwCheck,rSync,save,startApp,
-  tgClick,trWord,
+  trWord,
 };
 
 /* Зависимости privacy.js и pwa.js, которые раньше находились через глобальную область. */

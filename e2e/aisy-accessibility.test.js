@@ -45,7 +45,7 @@ try{
       created:now,sub_until:now+86_400_000,
       privacy_consent:{
         text_processing:true,voice_processing:true,
-        policy_version:'2026-08-02-voice-v1',updated_at:new Date(now).toISOString(),
+        policy_version:'2026-08-26-vk-id-v1',updated_at:new Date(now).toISOString(),
       },
     }},progress:{learner:{}},
   }),'utf8');

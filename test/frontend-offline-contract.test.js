@@ -1650,6 +1650,7 @@ test('local prototype previews stay in source and never enter the production bui
 
   const copiedDefinition = frontendBuildSource.match(/function copiedStaticAsset\(name\)\s*\{[\s\S]*?\n\}/u)?.[0];
   assert.ok(copiedDefinition, 'frontend build must own the production static-asset boundary');
+  context.classicScriptAssets = ['theme-prepaint.js'];
   vm.runInContext(`${copiedDefinition}; this.copiedStaticAsset = copiedStaticAsset;`, context);
   for (const previewAsset of [
     'prototypes/today-v1/index.html',
@@ -1657,6 +1658,8 @@ test('local prototype previews stay in source and never enter the production bui
     'prototypes/today-v1/prototype.js',
   ]) assert.equal(context.copiedStaticAsset(previewAsset), false, `${previewAsset} must remain source-only`);
   assert.equal(context.copiedStaticAsset('main.js'), false, 'production modules remain in the executable graph');
+  assert.equal(context.copiedStaticAsset('theme-prepaint.js'), true,
+    'direct classic HTML scripts remain copied into the initial shell');
   assert.equal(context.copiedStaticAsset('index.html'), false, 'Vite still owns the production entry document');
   assert.equal(context.copiedStaticAsset('offline.html'), true, 'ordinary production static assets stay copied');
 

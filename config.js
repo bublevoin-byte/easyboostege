@@ -28,6 +28,20 @@ function readJson(name, fallback) {
   try { return JSON.parse(raw); } catch { throw new Error(`${name} must be valid JSON`); }
 }
 
+function readIntegerFrom(source, name, fallback, { min = 1, max = Number.MAX_SAFE_INTEGER } = {}) {
+  const raw = source[name];
+  if (raw == null || raw === '') return fallback;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < min || value > max) {
+    throw new Error(`${name} must be an integer between ${min} and ${max}`);
+  }
+  return value;
+}
+
+function isLoopbackHostname(hostname) {
+  return ['127.0.0.1', 'localhost', '[::1]'].includes(hostname);
+}
+
 const nodeEnv = process.env.NODE_ENV || 'development';
 const isProduction = nodeEnv === 'production';
 
@@ -50,6 +64,7 @@ function readProviderUrl(name, fallback) {
 
 const jwtSecret = process.env.JWT_SECRET || '';
 const databaseProvider = process.env.DATABASE_PROVIDER || (process.env.DATABASE_URL ? 'postgres' : 'file');
+const appUrl = process.env.APP_URL || 'http://localhost:3000';
 const voiceTutorDailySeconds = readInteger('VOICE_TUTOR_DAILY_SECONDS', 600, { min: 60, max: 86_400 });
 const voiceTutorMonthlySeconds = readInteger('VOICE_TUTOR_MONTHLY_SECONDS', 7_200, { min: 60, max: 2_678_400 });
 const voiceTutorSessionSeconds = readInteger('VOICE_TUTOR_SESSION_SECONDS', 300, { min: 60, max: 3_600 });
@@ -96,13 +111,92 @@ if (voiceTutorSessionSeconds > voiceTutorDailySeconds || voiceTutorSessionSecond
   throw new Error('VOICE_TUTOR_SESSION_SECONDS must not exceed daily or monthly voice limits');
 }
 
+export function readVkIdConfig(source = process.env, {
+  appUrl: configuredAppUrl = appUrl,
+} = {}) {
+  const environment = String(source.NODE_ENV || '').trim();
+  const mode = String(source.VK_ID_MODE || 'disabled').trim().toLowerCase();
+  if (!['disabled', 'live', 'local'].includes(mode)) {
+    throw new Error('VK_ID_MODE must be disabled, live or local');
+  }
+  if (mode === 'local' && !['development', 'test'].includes(environment)) {
+    throw new Error('VK_ID_MODE=local is allowed only with explicit NODE_ENV=development or test');
+  }
+
+  let applicationUrl;
+  try { applicationUrl = new URL(configuredAppUrl); } catch { throw new Error('APP_URL must be an absolute URL'); }
+  const applicationLoopback = isLoopbackHostname(applicationUrl.hostname);
+  if (mode === 'local' && !applicationLoopback) {
+    throw new Error('VK_ID_MODE=local requires a loopback APP_URL');
+  }
+  if (mode === 'local') {
+    const configuredServerPort = readIntegerFrom(source, 'PORT', 3000, { min: 1, max: 65_535 });
+    const applicationPort = applicationUrl.port ? Number(applicationUrl.port) : 80;
+    if (applicationUrl.protocol !== 'http:' || applicationPort !== configuredServerPort) {
+      throw new Error('VK_ID_MODE=local requires an HTTP APP_URL whose port exactly matches PORT');
+    }
+  }
+  const configuredRedirect = String(source.VK_ID_REDIRECT_URI || '').trim();
+  let redirectUri = configuredRedirect || (mode === 'local'
+    ? new URL('/api/v1/auth/vk/callback', applicationUrl).toString()
+    : '');
+  const appId = String(source.VK_ID_APP_ID || '').trim();
+  if (mode === 'live' && (!/^\d{1,20}$/u.test(appId) || !redirectUri)) {
+    throw new Error('VK_ID_APP_ID and VK_ID_REDIRECT_URI are required when VK_ID_MODE=live');
+  }
+
+  if (redirectUri) {
+    let callback;
+    try { callback = new URL(redirectUri); } catch { throw new Error('VK_ID_REDIRECT_URI must be an absolute URL'); }
+    const loopback = isLoopbackHostname(callback.hostname);
+    if ((callback.protocol !== 'https:' && !(environment !== 'production' && callback.protocol === 'http:' && loopback))
+      || callback.username || callback.password || callback.search || callback.hash) {
+      throw new Error('VK_ID_REDIRECT_URI must use HTTPS without credentials, query or fragment');
+    }
+    if (callback.origin !== applicationUrl.origin) {
+      throw new Error('VK_ID_REDIRECT_URI must use the same origin as APP_URL');
+    }
+    if (callback.pathname !== '/api/v1/auth/vk/callback') {
+      throw new Error('VK_ID_REDIRECT_URI must end with /api/v1/auth/vk/callback');
+    }
+    redirectUri = callback.toString();
+  }
+
+  const scope = String(source.VK_ID_SCOPE || '').trim();
+  if (scope) throw new Error('VK_ID_SCOPE must be empty; learner authentication requests no extended profile data');
+  const localSubject = String(source.VK_ID_LOCAL_SUBJECT || 'local-learner').trim();
+  const localDisplayName = String(source.VK_ID_LOCAL_DISPLAY_NAME || 'Локальная ученица').trim();
+  if (!/^[A-Za-z0-9._:-]{1,128}$/u.test(localSubject)) throw new Error('VK_ID_LOCAL_SUBJECT is invalid');
+  if (!localDisplayName || localDisplayName.length > 160) throw new Error('VK_ID_LOCAL_DISPLAY_NAME is invalid');
+
+  return Object.freeze({
+    mode,
+    enabled: mode !== 'disabled',
+    appId,
+    applicationOrigin: applicationUrl.origin,
+    secureCookies: environment === 'production' || applicationUrl.protocol === 'https:',
+    redirectUri,
+    localAuthority: mode === 'local' ? applicationUrl.host.toLowerCase() : '',
+    bindHost: mode === 'local' ? (applicationUrl.hostname === '[::1]' ? '::1' : '127.0.0.1') : '',
+    scope,
+    flowTtlSeconds: readIntegerFrom(source, 'VK_ID_FLOW_TTL_SECONDS', 600, { min: 60, max: 3_600 }),
+    startsPer15Minutes: readIntegerFrom(source, 'VK_ID_AUTH_STARTS_PER_15_MINUTES', 20, { min: 1, max: 100 }),
+    callbacksPer15Minutes: readIntegerFrom(source, 'VK_ID_AUTH_CALLBACKS_PER_15_MINUTES', 60, { min: 1, max: 500 }),
+    providerTimeoutMs: readIntegerFrom(source, 'VK_ID_PROVIDER_TIMEOUT_MS', 10_000, { min: 1_000, max: 30_000 }),
+    localSubject,
+    localDisplayName,
+  });
+}
+
+const vkId = readVkIdConfig();
+
 export const config = Object.freeze({
   nodeEnv,
   isProduction,
   port: readInteger('PORT', 3000, { min: 1, max: 65535 }),
   jwtSecret: jwtSecret || 'development-only-secret-change-before-production',
   sessionDays: readInteger('SESSION_DAYS', 30, { min: 1, max: 90 }),
-  appUrl: process.env.APP_URL || 'http://localhost:3000',
+  appUrl,
   monitoring: Object.freeze({
     token: process.env.MONITORING_TOKEN || '',
   }),
@@ -162,6 +256,7 @@ export const config = Object.freeze({
     authStartsPer15Minutes: readInteger('TELEGRAM_AUTH_STARTS_PER_15_MINUTES', 10, { min: 1, max: 100 }),
     authChecksPer15Minutes: readInteger('TELEGRAM_AUTH_CHECKS_PER_15_MINUTES', 300, { min: 10, max: 2000 }),
   }),
+  vkId,
   ai: Object.freeze({
     xaiKey: process.env.XAI_API_KEY || '',
     xaiEnabled: readBoolean('XAI_ENABLED'),

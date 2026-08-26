@@ -101,7 +101,7 @@ try {
       ...(name === adminUsername ? { role: 'admin', telegram_id: 987654321 } : {}),
       privacy_consent: {
         text_processing: true, voice_processing: true,
-        policy_version: '2026-08-02-voice-v1', updated_at: new Date().toISOString(),
+        policy_version: '2026-08-26-vk-id-v1', updated_at: new Date().toISOString(),
       },
     }])),
     progress: { [username]: {}, [premiumUsername]: {}, [adminUsername]: {} },

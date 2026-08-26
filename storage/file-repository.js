@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { aiRequestExportDto } from './ai-request-export.js';
-import { hashAuthCode, normalizeUsername, normalizeVoiceTutorDeliveryMetadata, normalizeVoiceTutorProxyHash, subscriptionView, VoiceTutorError, voiceTutorAccessView, voiceTutorBillableSeconds, voiceTutorProxyUsage, voiceTutorQuotaPeriods, voiceTutorReservationSeconds } from './shared.js';
+import { hashAuthCode, normalizeOAuthTransaction, normalizeProviderIdentity, normalizeUsername, normalizeVoiceTutorDeliveryMetadata, normalizeVoiceTutorProxyHash, subscriptionView, VoiceTutorError, voiceTutorAccessView, voiceTutorBillableSeconds, voiceTutorProxyUsage, voiceTutorQuotaPeriods, voiceTutorReservationSeconds } from './shared.js';
 import { transitionPedagogicalState } from '../voice-tutor/state-machine.js';
 import { transitionRuleCardReview } from '../voice-tutor/rule-card.js';
 import {
@@ -365,7 +365,7 @@ export function createFileRepository(filePath, {
   voiceTutorMutationNow = () => new Date(),
 } = {}) {
   let loaded = false;
-  let state = { users: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], speaking_task1_sessions: [], speaking_task2_sessions: [], speaking_task3_sessions: [], speaking_task4_sessions: [], speaking_full_sessions: [], speaking_assessments: [], speaking_accent_profiles: {}, speaking_accent_history: [], speaking_accent_calibrations: [], speaking_calibration_consents: {}, speaking_calibration_samples: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, subscription_entitlements: {}, voice_tutor_sessions: [], voice_tutor_recoveries: [], voice_tutor_repeats: [], voice_tutor_repeat_attempts: [], voice_tutor_reports: [], rule_cards: [], payment_requests: {}, subscription_events: [], adaptive_learning_goals: [], adaptive_learning_profiles: {}, adaptive_learning_skill_estimates: {}, adaptive_learning_plan_revisions: [], adaptive_learning_sessions: [], adaptive_learning_execution_claims: [], adaptive_learning_session_events: [], adaptive_learning_session_mutations: [], adaptive_diagnostic_sessions: [], adaptive_diagnostic_start_claims: [], adaptive_diagnostic_responses: [], ege_mock_attempts: [], ege_mock_mutations: [] };
+  let state = { users: {}, learner_identities: [], oauth_auth_transactions: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], speaking_task1_sessions: [], speaking_task2_sessions: [], speaking_task3_sessions: [], speaking_task4_sessions: [], speaking_full_sessions: [], speaking_assessments: [], speaking_accent_profiles: {}, speaking_accent_history: [], speaking_accent_calibrations: [], speaking_calibration_consents: {}, speaking_calibration_samples: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, subscription_entitlements: {}, voice_tutor_sessions: [], voice_tutor_recoveries: [], voice_tutor_repeats: [], voice_tutor_repeat_attempts: [], voice_tutor_reports: [], rule_cards: [], payment_requests: {}, subscription_events: [], adaptive_learning_goals: [], adaptive_learning_profiles: {}, adaptive_learning_skill_estimates: {}, adaptive_learning_plan_revisions: [], adaptive_learning_sessions: [], adaptive_learning_execution_claims: [], adaptive_learning_session_events: [], adaptive_learning_session_mutations: [], adaptive_diagnostic_sessions: [], adaptive_diagnostic_start_claims: [], adaptive_diagnostic_responses: [], ege_mock_attempts: [], ege_mock_mutations: [] };
   let writeQueue = Promise.resolve();
   let coordinatedMutationQueue = Promise.resolve();
   let ruleCardQueue = Promise.resolve();
@@ -379,6 +379,9 @@ export function createFileRepository(filePath, {
         let minimizedLegacyCapsule = false;
         state = {
           users: parsed.users && typeof parsed.users === 'object' ? parsed.users : {},
+          learner_identities: Array.isArray(parsed.learner_identities) ? parsed.learner_identities : [],
+          oauth_auth_transactions: parsed.oauth_auth_transactions && typeof parsed.oauth_auth_transactions === 'object'
+            ? parsed.oauth_auth_transactions : {},
           progress: parsed.progress && typeof parsed.progress === 'object' ? parsed.progress : {},
           progress_summary: parsed.progress_summary && typeof parsed.progress_summary === 'object' ? parsed.progress_summary : {},
           auth_codes: parsed.auth_codes && typeof parsed.auth_codes === 'object' ? parsed.auth_codes : {},
@@ -491,6 +494,117 @@ export function createFileRepository(filePath, {
     state.progress[username] ||= {};
     await persist();
     return { username, ...state.users[username] };
+  }
+
+  async function findOrCreateProviderUser(input) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      const identity = normalizeProviderIdentity(input);
+      const existingIdentity = state.learner_identities.find((entry) => (
+        entry.provider === identity.provider && entry.subject === identity.subject
+      ));
+      if (existingIdentity) {
+        const existingUser = state.users[existingIdentity.username];
+        if (!existingUser) throw new Error('PROVIDER_IDENTITY_ORPHANED');
+        if (existingUser.display_name !== identity.displayName) {
+          existingUser.display_name = identity.displayName;
+          existingIdentity.updated_at = new Date(input.now || Date.now()).toISOString();
+          await persist();
+        }
+        return { username: existingIdentity.username, ...structuredClone(existingUser) };
+      }
+
+      let username = '';
+      for (let attempt = 0; attempt < 32 && !username; attempt += 1) {
+        const candidate = `learner_${crypto.randomBytes(12).toString('base64url')}`;
+        if (!state.users[candidate]) username = candidate;
+      }
+      if (!username) throw new Error('PROVIDER_IDENTITY_USERNAME_EXHAUSTED');
+      const instant = new Date(input.now || Date.now()).toISOString();
+      state.users[username] = {
+        identity_managed: true,
+        display_name: identity.displayName,
+        role: 'student',
+        created: new Date(instant).getTime(),
+      };
+      state.learner_identities.push({
+        provider: identity.provider,
+        subject: identity.subject,
+        username,
+        created_at: instant,
+        updated_at: instant,
+      });
+      state.progress[username] ||= {};
+      await persist();
+      return { username, ...structuredClone(state.users[username]) };
+    });
+  }
+
+  async function createOAuthTransaction(input) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      const transaction = normalizeOAuthTransaction(input);
+      if (state.oauth_auth_transactions[transaction.stateHash]) throw new Error('OAUTH_STATE_COLLISION');
+      const retentionCutoff = transaction.createdAt.getTime() - 86_400_000;
+      for (const [stateHash, entry] of Object.entries(state.oauth_auth_transactions)) {
+        if (new Date(entry.expires_at).getTime() <= retentionCutoff) delete state.oauth_auth_transactions[stateHash];
+      }
+      state.oauth_auth_transactions[transaction.stateHash] = {
+        provider: transaction.provider,
+        verifier_sealed: transaction.verifierSealed,
+        redirect_uri: transaction.redirectUri,
+        expires_at: transaction.expiresAt.toISOString(),
+        created_at: transaction.createdAt.toISOString(),
+        consumed_at: null,
+      };
+      await persist();
+      return true;
+    });
+  }
+
+  async function consumeOAuthTransaction(stateHash, { now = new Date() } = {}) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      const normalizedHash = String(stateHash || '').toLowerCase();
+      const instant = new Date(now);
+      if (!/^[a-f0-9]{64}$/u.test(normalizedHash) || !Number.isFinite(instant.getTime())) {
+        throw new Error('OAUTH_TRANSACTION_INVALID');
+      }
+      const entry = state.oauth_auth_transactions[normalizedHash];
+      if (!entry) return { status: 'missing' };
+      if (entry.consumed_at) return { status: 'replayed' };
+      if (new Date(entry.expires_at).getTime() <= instant.getTime()) return { status: 'expired' };
+      const verifierSealed = entry.verifier_sealed;
+      entry.consumed_at = instant.toISOString();
+      entry.verifier_sealed = null;
+      await persist();
+      return {
+        status: 'ready',
+        transaction: {
+          provider: entry.provider,
+          verifierSealed,
+          redirectUri: entry.redirect_uri,
+          expiresAt: entry.expires_at,
+        },
+      };
+    });
+  }
+
+  async function purgeOAuthTransactions({ now = new Date() } = {}) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      const instant = new Date(now);
+      if (!Number.isFinite(instant.getTime())) throw new Error('OAUTH_TRANSACTION_INVALID');
+      let purged = 0;
+      for (const [stateHash, entry] of Object.entries(state.oauth_auth_transactions)) {
+        if (new Date(entry.expires_at).getTime() <= instant.getTime()) {
+          delete state.oauth_auth_transactions[stateHash];
+          purged += 1;
+        }
+      }
+      if (purged) await persist();
+      return purged;
+    });
   }
 
   async function getProgress(username) {
@@ -5323,11 +5437,15 @@ export function createFileRepository(filePath, {
         state.adaptive_learning_profiles[username] || null,
         state.adaptive_learning_skill_estimates[username] || [],
       );
+      const identity = state.learner_identities.find((entry) => entry.username === username) || null;
       return structuredClone({
       exported_at: new Date().toISOString(),
       account: {
         username,
         telegram_id: user.telegram_id ?? null,
+        identity_provider: identity?.provider ?? null,
+        identity_subject: identity?.subject ?? null,
+        display_name: user.display_name ?? null,
         role: user.role || 'student',
         trial_used: Boolean(user.trial_used),
         subscription_until: user.sub_until ?? null,
@@ -5467,6 +5585,7 @@ export function createFileRepository(filePath, {
           ? { ...entry, reviewer: null, reviewer_account_deleted: true }
           : entry));
       }
+      state.learner_identities = state.learner_identities.filter((entry) => entry.username !== username);
       delete state.users[username];
       delete state.progress[username];
       state.writing_attempts = state.writing_attempts.filter((item) => item.username !== username);
@@ -5572,6 +5691,10 @@ export function createFileRepository(filePath, {
   return {
     getUser,
     createUser,
+    findOrCreateProviderUser,
+    createOAuthTransaction,
+    consumeOAuthTransaction,
+    purgeOAuthTransactions,
     getProgress,
     saveProgress,
     mergeProgress,

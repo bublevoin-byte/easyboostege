@@ -160,7 +160,10 @@ test('callers without a session are bounded by address', async () => {
   ]);
   assert.match(middleware, /export function createAnonymousIpLimiter/u);
   // Authenticated traffic must not be counted twice: the per-user limiters already cover it.
-  assert.match(middleware, /skip: \(req\) => Boolean\(req\.user\)/u);
+  assert.match(middleware, /skip: \(req\) => \(req\.method === 'GET' && VK_AUTH_RATE_LIMIT_PATHS\.has\(originalPath\(req\)\)\)[\s\S]*Boolean\(req\.user\)/u,
+    'only GET navigation may bypass the generic limiter before the stricter VK route limiter');
+  assert.match(middleware, /'\/api\/v1\/auth\/vk\/start'[\s\S]*'\/api\/v1\/auth\/vk\/callback'/u,
+    'VK navigation must reach its stricter route-specific limiter');
   assert.match(middleware, /eb_token=/u);
   assert.match(server, /app\.use\('\/api', createAnonymousIpLimiter\(config\.security\.anonymousRequestsPer15Minutes\)\)/u);
 });

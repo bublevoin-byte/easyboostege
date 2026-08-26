@@ -13,7 +13,7 @@ const frontendAuthPath = new URL('../public/auth.js', import.meta.url);
  * Чанки экранов идут следом: в точку входа они не подключены, но это тот же код приложения,
  * и требования к нему не меняются от того, что он приезжает позже.
  */
-const frontendScriptNames = ['main.js', 'theme.js', 'globals.js', 'auth.js', 'access.js', 'commercial-copy.js', 'owner-incarnation.js', 'sync.js', 'store.js', 'components.js', 'router.js', 'aisy-shell.js', 'asya-launcher.js', 'asya-assistant.js', 'learning.js', 'vocabulary-domain.js', 'learning-activity-contract.js', 'learning-activity-recorder.js', 'grammar-domain-contract.js', 'reading-catalog-contract.js', 'listening-catalog-contract.js', 'listening-pilot-v1.js', 'listening-audio-contract.js', 'speaking-catalog-contract.js', 'content/speaking/task1-v1.js', 'content/speaking/task2-v1.js', 'speaking-local-recording.js', 'speaking-task1-runtime.js', 'speaking-task2-runtime.js', 'adaptive-session-loader.js', 'adaptive-session-runtime.js', 'modules/words.js', 'modules/grammar.js', 'modules/reading.js', 'modules/listening.js', 'modules/writing.js', 'modules/speaking.js', 'modules/exam.js', 'modules/progress.js', 'modules/profile.js', 'modules/today.js', 'modules/ege-hub.js', 'app.js', 'voice-tutor-contract.js', 'voice-tutor-loader.js', 'voice-tutor.js', 'realtime-transport.js', 'screens.js', 'screens/words.js', 'screens/grammar.js', 'screens/reading.js', 'screens/listening.js', 'screens/writing.js', 'screens/speaking.js', 'screens/today.js', 'screens/progress.js', 'screens/profile.js', 'screens/ege-hub.js', 'privacy-loader.js', 'privacy.js', 'tts.js', 'pwa.js'];
+const frontendScriptNames = ['theme-prepaint.js', 'main.js', 'theme.js', 'globals.js', 'auth.js', 'access.js', 'commercial-copy.js', 'owner-incarnation.js', 'sync.js', 'store.js', 'components.js', 'router.js', 'aisy-shell.js', 'asya-launcher.js', 'asya-assistant.js', 'learning.js', 'vocabulary-domain.js', 'learning-activity-contract.js', 'learning-activity-recorder.js', 'grammar-domain-contract.js', 'reading-catalog-contract.js', 'listening-catalog-contract.js', 'listening-pilot-v1.js', 'listening-audio-contract.js', 'speaking-catalog-contract.js', 'content/speaking/task1-v1.js', 'content/speaking/task2-v1.js', 'speaking-local-recording.js', 'speaking-task1-runtime.js', 'speaking-task2-runtime.js', 'adaptive-session-loader.js', 'adaptive-session-runtime.js', 'modules/words.js', 'modules/grammar.js', 'modules/reading.js', 'modules/listening.js', 'modules/writing.js', 'modules/speaking.js', 'modules/exam.js', 'modules/progress.js', 'modules/profile.js', 'modules/today.js', 'modules/ege-hub.js', 'first-launch.js', 'app.js', 'voice-tutor-contract.js', 'voice-tutor-loader.js', 'voice-tutor.js', 'realtime-transport.js', 'screens.js', 'screens/words.js', 'screens/grammar.js', 'screens/reading.js', 'screens/listening.js', 'screens/writing.js', 'screens/speaking.js', 'screens/today.js', 'screens/progress.js', 'screens/profile.js', 'screens/ege-hub.js', 'privacy-loader.js', 'privacy.js', 'tts.js', 'pwa.js'];
 const frontendScriptPaths = frontendScriptNames.map((name) => new URL(`../public/${name}`, import.meta.url));
 const serverPath = new URL('../server.js', import.meta.url);
 const usersRoutePath = new URL('../routes/users.js', import.meta.url);
@@ -63,6 +63,8 @@ test('startup logs do not expose the Telegram admin identifier', async () => {
   assert.doesNotMatch(server, /console\.log\(['"]Telegram admin id:/u);
   assert.doesNotMatch(telegram, /Telegram admin id:/u);
   assert.match(telegram, /Telegram admin notifications:/u);
+  assert.match(server, /config\.vkId\.applicationOrigin/u,
+    'startup URL must use the configured public origin, not the lower-level bind socket');
 });
 
 test('frontend contains no embedded or browser-managed AI credentials', async () => {
@@ -75,13 +77,18 @@ test('frontend contains no embedded or browser-managed AI credentials', async ()
   assert.match(frontend, /post\('\/api\/v1\/ai\/generate-content'/);
 });
 
-test('frontend loads through a single module entry point that keeps the previous order', async () => {
+test('frontend prepaints theme through one classic CSP-safe asset and keeps a single module entry point', async () => {
   const { html } = await readFrontend();
 
   /* Одна точка входа: всё остальное подключается импортами, а не тегами. */
   const tags = [...html.matchAll(/<script[^>]*>(?:[\s\S]*?<\/script>)?/giu)].map((match) => match[0]);
-  assert.deepEqual(tags, ['<script type="module" src="/main.js"></script>']);
+  assert.deepEqual(tags, [
+    '<script src="/theme-prepaint.js"></script>',
+    '<script type="module" src="/main.js"></script>',
+  ]);
   assert.doesNotMatch(html, /<script(?![^>]*\bsrc\s*=)(?:\s[^>]*)?>/iu);
+  assert.ok(html.indexOf('/theme-prepaint.js') < html.indexOf('/aisy-theme.css'),
+    'stored theme must be applied before the first stylesheet can paint');
 
   /*
    * Порядок выполнения оболочки — часть контракта. Тяжёлые экранные реализации остаются за
@@ -163,8 +170,8 @@ test('legacy application script has no duplicate top-level function declarations
   const { script } = await readFrontend();
   const guardedNames = [
     'startApp', 'tab', 'checkWriting', 'trWord', 'initReading', 'initGrammar', 'renderG',
-    'pickG', 'nextG', 'initListening', 'doLogin',
-    'doRegister', 'logout', 'renderProfile', 'tgInit', 'tgPoll', 'tgClick', 'save',
+    'pickG', 'nextG', 'initListening',
+    'logout', 'renderProfile', 'save',
     'genWords', 'initSpeaking', 'r_add', 'setTask', 'lStop',
     'lPlayRaw', 'wSpeak',
   ];
@@ -176,9 +183,14 @@ test('legacy application script has no duplicate top-level function declarations
   assert.match(script, /const START_HOOKS=\[\]/u);
   assert.doesNotMatch(script, /\btab\s*=\s*function/u);
   assert.match(script, /const ROUTE_HOOKS=\[\]/u);
-  for (const name of ['doLogin', 'doRegister', 'logout', 'renderProfile', 'tgInit', 'tgPoll', 'tgClick', 'save', 'checkWriting', 'initWords', 'genWords', 'initGrammar', 'initReading', 'r_add', 'initListening', 'setTask', 'initSpeaking', 'lStop', 'lPlayRaw', 'wSpeak']) {
+  for (const name of ['logout', 'renderProfile', 'save', 'checkWriting', 'initWords', 'genWords', 'initGrammar', 'initReading', 'r_add', 'initListening', 'setTask', 'initSpeaking', 'lStop', 'lPlayRaw', 'wSpeak']) {
     assert.doesNotMatch(script, new RegExp(`\\b${name}\\s*=\\s*(?:async\\s+)?function`, 'u'));
   }
+  for (const removed of ['doLogin', 'doRegister', 'tgInit', 'tgPoll', 'tgClick']) {
+    assert.doesNotMatch(script, new RegExp(`(?:async\\s+)?function\\s+${removed}\\s*\\(`, 'u'), `${removed} is removed learner auth UI`);
+  }
+  assert.doesNotMatch(script, /auth\.(?:startTelegramLogin|checkTelegramLogin)\(/u);
+  assert.doesNotMatch(script, /eb_tg_code[^\n]*(?:setInterval|setTimeout)/u);
   assert.match(script, /const PROFILE_HOOKS=\[\]/u);
 });
 
@@ -197,18 +209,39 @@ test('legacy prototype screens stay out of the production bundle', async () => {
   assert.doesNotMatch(script, /\bconst SPK_Q\s*=/u);
 });
 
-test('authentication endpoints are isolated behind the auth module', async () => {
-  const [auth, app] = await Promise.all([
+test('learner authentication exposes only the cookie session and VK ID first-launch seams', async () => {
+  const [auth, app, firstLaunch] = await Promise.all([
     fs.readFile(frontendAuthPath, 'utf8'),
     fs.readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../public/first-launch.js', import.meta.url), 'utf8'),
   ]);
-  for (const endpoint of ['/api/v1/login', '/api/v1/register', '/api/v1/logout', '/api/v1/me', '/api/v1/tg/start', '/api/v1/tg/check']) {
+  for (const endpoint of ['/api/v1/logout', '/api/v1/me']) {
     assert.match(auth, new RegExp(endpoint.replaceAll('/', '\\/'), 'u'));
     assert.doesNotMatch(app, new RegExp(`(?:apiGet|apiPost)\\(['"]${endpoint.replaceAll('/', '\\/')}`, 'u'));
   }
+  for (const endpoint of ['/api/v1/login', '/api/v1/register', '/api/v1/tg/start', '/api/v1/tg/check']) {
+    const pattern = new RegExp(endpoint.replaceAll('/', '\\/'), 'u');
+    assert.doesNotMatch(auth, pattern);
+    assert.doesNotMatch(app, pattern);
+    assert.doesNotMatch(firstLaunch, pattern);
+  }
+  assert.match(firstLaunch, /fetchImpl\('\/api\/v1\/auth\/providers',[\s\S]*credentials:\s*'same-origin',[\s\S]*cache:\s*'no-store'/u);
+  assert.match(firstLaunch, /VK_LOGIN_START_PATH\s*=\s*'\/api\/v1\/auth\/vk\/start\?response=json'/u);
+  assert.match(firstLaunch, /fetchImpl\(VK_LOGIN_START_PATH,[\s\S]*credentials:\s*'same-origin',[\s\S]*cache:\s*'no-store'/u);
+  assert.match(firstLaunch, /location\.assign\(authorizationUrl\)/u);
+  assert.match(firstLaunch, /target\.origin === VK_AUTHORIZE_ORIGIN && target\.pathname === VK_AUTHORIZE_PATH/u,
+    'the server-provided handoff remains constrained to the exact VK authorize endpoint');
   assert.match(auth, /global\.EasyBoostAuth = Object\.freeze/u);
   assert.match(app, /auth\.currentSession\(\)/u);
-  assert.match(app, /auth\.startTelegramLogin\(\)/u);
+  assert.doesNotMatch(app, /auth\.(?:login|register|startTelegramLogin|checkTelegramLogin)\(/u);
+});
+
+test('VK ID deployment guidance removes callback query secrets from every proxy access log', async () => {
+  const deploy = await fs.readFile(new URL('../README_DEPLOY.md', import.meta.url), 'utf8');
+  assert.match(deploy, /VK callback и access logs/u);
+  assert.match(deploy, /\$request_method \$uri \$server_protocol/u);
+  assert.match(deploy, /CDN\/LB\/proxy[\s\S]*без `\?`, `code`, `state` и `device_id`/u);
+  assert.match(deploy, /не используйте стандартный `\$request`\/`\$request_uri`/u);
 });
 
 test('frontend fonts have system fallbacks and PWA images stay optimized', async () => {
@@ -387,10 +420,12 @@ test('production documentation covers local setup, API, database and operations'
 });
 
 test('privacy UI separates text and voice consent and explains external processing', async () => {
-  const [script, policy, retention] = await Promise.all([
+  const [script, policy, retention, server, users] = await Promise.all([
     fs.readFile(new URL('../public/privacy.js', import.meta.url), 'utf8'),
     fs.readFile(new URL('../public/privacy.html', import.meta.url), 'utf8'),
     fs.readFile(new URL('../docs/DATA_RETENTION.md', import.meta.url), 'utf8'),
+    fs.readFile(serverPath, 'utf8'),
+    fs.readFile(usersRoutePath, 'utf8'),
   ]);
   assert.match(script, /id="privacyText" type="checkbox"/u);
   assert.match(script, /id="privacyVoice" type="checkbox"/u);
@@ -402,6 +437,24 @@ test('privacy UI separates text and voice consent and explains external processi
   assert.match(policy, /Сроки хранения/u);
   assert.match(policy, /не считаются анонимными/u);
   assert.match(policy, /не попадают автоматически в золотой набор/u);
+  assert.match(policy, /Версия раскрытия: 2026-08-26-vk-id-v1/u);
+  const pagePolicyVersion = policy.match(/Версия раскрытия: ([\w-]+)/u)?.[1];
+  const serverPolicyVersion = server.match(/const PRIVACY_POLICY_VERSION = '([^']+)'/u)?.[1];
+  assert.equal(pagePolicyVersion, serverPolicyVersion,
+    'published disclosure and consent API authority must use the same current policy version');
+  assert.match(users, /current_policy_version: privacyPolicyVersion/u);
+  assert.match(policy, /Проект документа[^<]*требуется юридическая проверка/u);
+  assert.match(policy, /голоса несовершеннолетних[^<]*профильным юристом/u);
+  assert.match(policy, /VK ID — внешний поставщик входа/u);
+  assert.match(policy, /стабильный идентификатор пользователя VK ID[\s\S]*отображаемое имя/u);
+  assert.match(policy, /не сохраняет access token или refresh token/u);
+  assert.match(policy, /данные идентификации VK ID[\s\S]*экспортировать/u);
+  assert.match(policy, /записью внешней идентификации[\s\S]*можно удалить/u);
+  assert.match(policy, /ранее созданных или связанных ученических аккаунтов[\s\S]*Telegram/u);
+  assert.match(policy, /отдельный Telegram-контур[\s\S]*администрирования/u);
+  assert.match(retention, /Идентификация VK ID[\s\S]*identity_subject[\s\S]*display_name/u);
+  assert.match(retention, /access token и refresh token не сохраняются/u);
+  assert.match(retention, /Одноразовые PKCE-транзакции VK ID/u);
   assert.match(retention, /псевдонимизац/u);
   assert.match(retention, /очистк[аи] свободного текста/u);
   assert.match(retention, /отдельн.*человеческ.*размет/u);

@@ -56,7 +56,7 @@ async function loadAdaptiveGoal(authority){
 }
 
 function renderProfile(){
-  const u=profileModule.displayName(currentUser);setTxt('pf_ava',profileModule.initial(u));setTxt('pf_name',u);setTxt('pf_ai','через сервер ✓');
+  const u=profileModule.displayName(window.__sub?.displayName||currentUser);setTxt('pf_ava',profileModule.initial(u));setTxt('pf_name',u);setTxt('pf_ai','через сервер ✓');
   drawProfilePlan(window.__sub);
   const authority=currentProfileAuthority();if(!sameProfileAuthority(profileGoalAuthority,authority)){profileGoalAuthority=authority;profileGoal=null;profileGoalAvailable=true}
   bindStudySettings();drawStudySettings();if(SRV&&TOKEN&&authority)loadAdaptiveGoal(authority);runProfileHooks();

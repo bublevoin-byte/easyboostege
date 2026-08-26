@@ -10,6 +10,7 @@ import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { advanceFullSpeakingSessionStage, applyGrammarMasteryEvent, assignFullSpeakingSession, claimAiOperationSlot, claimSpeakingEvaluation, claimUnseenBankTask, claimVoiceTutorRuleDiscovery, completeFullSpeakingSessionEvaluation, completeFullSpeakingSessionResponse, failVoiceTutorRuleDiscovery, getAdaptiveDiagnostic, getAdaptiveDiagnosticCompletionReplay, getBankTask, getBankTaskByExternalId, getFullSpeakingSession, listBankTaskContents, recordTaskDelivery, settleAiOperationSlot, submitFullSpeakingSessionResult, upsertBankTask, activateTrial, activateVoiceTutorProxySession, closeDatabase, confirmTelegramAuthCode, consumeTelegramAuthCode, consumeVoiceTutorProxyTicket, countAiRequestsSince, createPaymentRequest, createPaymentRequestForUser, createRuleCardForVoiceTutorSession, createSession, createSpeakingAttempt, createTelegramAuthCode, createVoiceTutorReport, createWritingAttempt, deleteUserData, exportUserData, finalizeVoiceTutorProxySession, finishSpeakingAttempt, finishVoiceTutorSession, finishWritingAttempt, getAdaptiveDiagnosticStartClaim, getAdaptiveLearningEvidenceSources, getAdaptiveLearningGoal, getAdaptiveLearningProfile, getCurrentAdaptiveLearningPlan, getAdaptiveLearningPlanRevision, getAdaptiveLearningSessionCreateReplay, createAdaptiveLearningSession, getCurrentAdaptiveLearningSession, getAdaptiveLearningSessionCommercialScope, getAdaptiveLearningSessionReplacementReplay, replaceAdaptiveLearningSessionBlock, getAdaptiveLearningSessionMutationReplay, startAdaptiveLearningSessionBlock, getAdaptiveLearningSessionExecution, getAdaptiveLearningSessionAdvanceContext, advanceAdaptiveLearningSession, getAdaptiveLearningSessionFinishContext, finishAdaptiveLearningSession, getAdaptiveLearningWeekUsage, getAdaptiveLearningCommercialUsage, getAdaptiveLearningCompletedSessionReports, getAdaptiveLearningMetrics, getAiUsageMetrics, getApprovedRuleCard, getGeneratedTask, getRuleCard, getSharedGeneratedTask, getModuleAttempt, getReadingCompletedAttempts, getPaymentRequestForUser, getPrivacyConsent, getProgress, getSpeakingAttempt, getUser, getVoiceTutorAccess, getVoiceTutorRecoveryMap, getVoiceTutorRecoveryMetrics, getVoiceTutorSession, getWordProgress, getWritingAttempt, healthCheck, isSessionActive, issueVoiceTutorProxyTicket, reissueVoiceTutorFallbackNonce, listPaymentRequests, listRuleCards, listVoiceTutorReports, recordModuleAttempt, recordModuleAttemptWithAdaptiveClaim, bindAdaptiveLearningServerAttempt, reserveVoiceTutorSession, resolvePaymentRequest, reviewRuleCard, reviewVoiceTutorReport, revokeEntitlement, revokeSession, saveAdaptiveLearningGoal, saveAdaptiveLearningProfile, saveAdaptiveLearningPlan, saveGeneratedTask, saveProgress, setPrivacyConsent, setUserRole, submitVoiceTutorRepeat, upsertErrorBank, upsertWordProgress, mergeProgress, getUserByTelegram, createTelegramUser, logAiRequest, getSub, advanceVoiceTutorSession, clarifyVoiceTutorSession, setVoiceTutorSessionDelivery, switchVoiceTutorSessionDelivery, startAdaptiveDiagnostic, getCurrentAdaptiveDiagnostic, answerAdaptiveDiagnostic, completeAdaptiveDiagnostic } from './db.js';
 import { applyGrammarMasteryEvents } from './db.js';
+import { consumeOAuthTransaction, createOAuthTransaction, findOrCreateProviderUser, purgeOAuthTransactions } from './db.js';
 import {
   getCurrentEgeMockAttempt, getEgeMockAttempt, getEgeMockResult, getEgeMockHistory,
   beginEgeMockAssessmentRun, settleEgeMockAssessmentRun,
@@ -55,6 +56,7 @@ import { createAccessControl, createAnonymousIpLimiter } from './middleware/subs
 import { createSubscriptionService } from './services/subscription.js';
 import { createTelegramService } from './services/telegram.js';
 import { createUserRoutes } from './routes/users.js';
+import { createVkAuthRoutes, createVkRateLimitHandler } from './routes/vk-auth.js';
 import { createProgressRoutes } from './routes/progress.js';
 import { createReadingRoutes } from './routes/reading.js';
 import { createSpeakingRoutes } from './routes/speaking.js';
@@ -80,6 +82,9 @@ import { createTrustedRuleFetcher } from './voice-tutor/trusted-rule-fetch.js';
 import { createConfiguredRuleSearchProvider } from './voice-tutor/trusted-rule-catalog.js';
 import { canUseXaiRuleSearch, createXaiRuleSearchProvider } from './voice-tutor/rule-search.js';
 import { createAiRuleEvidenceExtractor } from './voice-tutor/rule-evidence-extractor.js';
+import {
+  createLiveVkIdProvider, createLocalVkIdProvider, createVkFlowCipher, createVkTransactionRetention,
+} from './services/vk-id.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /* Собранный frontend предпочтительнее исходников, но не обязателен: на чистом клоне и в разработке
@@ -97,7 +102,7 @@ const frontendHtml = fs.readFileSync(frontendIndex, 'utf8');
 
 const SECRET = config.jwtSecret;
 const PORT = config.port;
-const PRIVACY_POLICY_VERSION = '2026-08-02-voice-v1';
+const PRIVACY_POLICY_VERSION = '2026-08-26-vk-id-v1';
 const logUserId = (username) => username
   ? crypto.createHmac('sha256', SECRET).update(String(username)).digest('hex').slice(0, 20)
   : null;
@@ -212,11 +217,13 @@ const authentication = createAuthentication({
   createSession,
   getUser,
   isSessionActive,
+  secureCookies: config.vkId.secureCookies,
 });
 const { issueToken, setAuthCookie } = authentication;
 // The routers receive the database as one object so each module lists only what it uses.
 const dbApi = {
   getUser,
+  findOrCreateProviderUser, createOAuthTransaction, consumeOAuthTransaction, purgeOAuthTransactions,
   createTelegramAuthCode, consumeTelegramAuthCode, getUserByTelegram, createTelegramUser, getSub,
   createPaymentRequestForUser, getPaymentRequestForUser, listPaymentRequests, resolvePaymentRequest, revokeEntitlement,
   getVoiceTutorAccess, reserveVoiceTutorSession, finishVoiceTutorSession, getVoiceTutorSession,
@@ -321,6 +328,50 @@ const telegramCheckLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: { code: 'RATE_LIMITED', message: 'Слишком много проверок входа. Начните вход заново.' } },
 });
+
+const vkIdRateLimitHandler = createVkRateLimitHandler();
+
+const vkIdStartLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: config.vkId.startsPer15Minutes,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { error: { code: 'RATE_LIMITED', message: 'Слишком много попыток входа. Попробуйте позже.' } },
+  handler: vkIdRateLimitHandler,
+});
+
+const vkIdCallbackLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: config.vkId.callbacksPer15Minutes,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { error: { code: 'RATE_LIMITED', message: 'Слишком много попыток входа. Начните вход заново.' } },
+  handler: vkIdRateLimitHandler,
+});
+
+const vkIdProvider = config.vkId.mode === 'live'
+  ? createLiveVkIdProvider({
+    appId: config.vkId.appId,
+    redirectUri: config.vkId.redirectUri,
+    scope: config.vkId.scope,
+    timeoutMs: config.vkId.providerTimeoutMs,
+  })
+  : config.vkId.mode === 'local'
+    ? createLocalVkIdProvider({
+      subject: config.vkId.localSubject,
+      displayName: config.vkId.localDisplayName,
+      redirectUri: config.vkId.redirectUri,
+    })
+    : null;
+
+app.use(createVkAuthRoutes({
+  config: config.vkId,
+  provider: vkIdProvider,
+  flowCipher: createVkFlowCipher(SECRET),
+  authentication,
+  db: dbApi,
+  limiters: { start: vkIdStartLimiter, callback: vkIdCallbackLimiter },
+}));
 
 app.use(createUserRoutes({
   secret: SECRET,
@@ -539,10 +590,13 @@ app.use((error, req, res, next) => {
   res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Внутренняя ошибка сервера.', requestId: req.requestId } });
 });
 
-const server = app.listen(PORT, () => console.log(
-  'Easy Boost server on http://localhost:' + PORT
+const onServerListening = () => console.log(
+  'Easy Boost server on ' + config.vkId.applicationOrigin
   + ' (frontend: ' + (frontendDirectory === buildDirectory ? 'dist/public' : 'public') + ')',
-));
+);
+const server = config.vkId.bindHost
+  ? app.listen(PORT, config.vkId.bindHost, onServerListening)
+  : app.listen(PORT, onServerListening);
 const voiceTutorRealtimeProxy = createVoiceTutorRealtimeProxy({
   authentication,
   db: dbApi,
@@ -577,6 +631,14 @@ const speakingCalibrationRetention = createSpeakingCalibrationRetentionService({
 });
 speakingCalibrationRetention.start();
 
+const vkIdTransactionRetention = createVkTransactionRetention({
+  purge: purgeOAuthTransactions,
+  onError: (entry) => console.error(JSON.stringify({
+    timestamp: new Date().toISOString(), level: 'error', type: 'vk_id_transaction_purge_failed', ...entry,
+  })),
+});
+vkIdTransactionRetention.start();
+
 /* Section 10.1: built-in tasks need rows in the bank, otherwise they have no identifier a client
    could send. Seeding is keyed on content, so a restart adds nothing. A failure here must not take
    the process down — the built-in tasks still work offline in the browser. */
@@ -594,6 +656,7 @@ async function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   speakingCalibrationRetention.stop();
+  vkIdTransactionRetention.stop();
   console.log(signal + ': shutting down');
   const forceExitTimer = setTimeout(() => process.exit(1), 10_000);
   forceExitTimer.unref();

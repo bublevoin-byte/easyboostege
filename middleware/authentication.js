@@ -2,7 +2,9 @@ import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 
 // Session handling lives here so routes never touch the JWT or the cookie directly.
-export function createAuthentication({ secret, sessionDays, monitoringToken, createSession, getUser, isSessionActive }) {
+export function createAuthentication({
+  secret, sessionDays, monitoringToken, createSession, getUser, isSessionActive, secureCookies = false,
+}) {
   async function issueToken(username) {
     const sid = crypto.randomUUID();
     const expiresAt = Date.now() + sessionDays * 86_400_000;
@@ -17,16 +19,23 @@ export function createAuthentication({ secret, sessionDays, monitoringToken, cre
   }
 
   function cookieSuffix(req) {
-    return (req.headers['x-forwarded-proto'] || req.protocol) === 'https' ? '; Secure' : '';
+    return secureCookies || req.secure === true || req.protocol === 'https' ? '; Secure' : '';
+  }
+
+  function appendCookie(res, cookie) {
+    const existing = res.getHeader('Set-Cookie');
+    if (!existing) res.setHeader('Set-Cookie', cookie);
+    else if (Array.isArray(existing)) res.setHeader('Set-Cookie', [...existing, cookie]);
+    else res.setHeader('Set-Cookie', [String(existing), cookie]);
   }
 
   function setAuthCookie(req, res, token) {
-    res.setHeader('Set-Cookie', 'eb_token=' + encodeURIComponent(token)
+    appendCookie(res, 'eb_token=' + encodeURIComponent(token)
       + '; Path=/; Max-Age=' + (sessionDays * 86400) + '; HttpOnly; SameSite=Lax' + cookieSuffix(req));
   }
 
   function clearAuthCookie(req, res) {
-    res.setHeader('Set-Cookie', 'eb_token=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax' + cookieSuffix(req));
+    appendCookie(res, 'eb_token=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax' + cookieSuffix(req));
   }
 
   async function authenticateRequest(req) {
@@ -79,5 +88,5 @@ export function createAuthentication({ secret, sessionDays, monitoringToken, cre
     next();
   }
 
-  return { issueToken, readCookie, setAuthCookie, clearAuthCookie, authenticateRequest, auth, requireRole, monitoringAuth };
+  return { issueToken, readCookie, appendCookie, setAuthCookie, clearAuthCookie, authenticateRequest, auth, requireRole, monitoringAuth };
 }

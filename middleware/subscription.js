@@ -1,14 +1,29 @@
 import { rateLimit } from 'express-rate-limit';
 
+const VK_AUTH_RATE_LIMIT_PATHS = new Set([
+  '/api/v1/auth/vk/start',
+  '/api/v1/auth/vk/callback',
+  '/api/auth/vk/start',
+  '/api/auth/vk/callback',
+]);
+
+function originalPath(req) {
+  const url = String(req.originalUrl || req.url || '');
+  const queryStart = url.indexOf('?');
+  return queryStart === -1 ? url : url.slice(0, queryStart);
+}
+
 // Section 10.8: a caller without a session is bounded by address, since there is no user to count
-// against. Authenticated traffic is left to the per-user limiters inside createAccessControl.
+// against. VK start/callback have stricter, navigation-aware route limiters and must reach those
+// authorities even while the generic anonymous bucket is exhausted.
 export function createAnonymousIpLimiter(limit = 120) {
   return rateLimit({
     windowMs: 15 * 60 * 1000,
     limit,
     standardHeaders: 'draft-8',
     legacyHeaders: false,
-    skip: (req) => Boolean(req.user)
+    skip: (req) => (req.method === 'GET' && VK_AUTH_RATE_LIMIT_PATHS.has(originalPath(req)))
+      || Boolean(req.user)
       || Boolean(req.headers.authorization)
       || /(?:^|;\s*)eb_token=/u.test(req.headers.cookie || ''),
     message: { error: { code: 'RATE_LIMITED', message: 'Слишком много запросов. Попробуйте позже.' } },

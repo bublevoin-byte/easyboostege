@@ -10,7 +10,8 @@ function installAsyaLauncher({document,currentScreen,registerRouteHook,assistant
     frame.append(launcher)
   }
   let assistant=null,pending=null;
-  function available(){const id=currentScreen();return Boolean(id&&id!=='scr5'&&id!=='scr6')}
+  function available(){const id=currentScreen();const screen=document.getElementById(id);
+    return Boolean(id&&screen&&!screen.matches('[data-first-launch-screen]')&&id!=='scr6')}
   function onLauncherClick(){void open()}
   function ensureAssistant(){
     if(assistant)return Promise.resolve(assistant);
@@ -28,7 +29,8 @@ function installAsyaLauncher({document,currentScreen,registerRouteHook,assistant
   document.addEventListener('keydown',function(event){
     if(event.altKey&&!event.ctrlKey&&!event.metaKey&&event.key.toLocaleLowerCase('en-US')==='a'&&!assistant){event.preventDefault();void open()}
   });
-  registerRouteHook(function(){launcher.hidden=!available()});launcher.hidden=!available();
+  function sync(){const enabled=available();launcher.hidden=!enabled;launcher.inert=!enabled}
+  registerRouteHook(sync);sync();
   return Object.freeze({launcher,open,loaded:()=>Boolean(assistant)})
 }
 

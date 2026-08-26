@@ -10,14 +10,6 @@
     catch (_) {}
   }
 
-  async function login(username, password) {
-    return api.post('/api/v1/login', { username, password });
-  }
-
-  async function register(username, password) {
-    return api.post('/api/v1/register', { username, password });
-  }
-
   async function requestLogout() {
     return api.post('/api/v1/logout', {});
   }
@@ -26,22 +18,10 @@
     return api.get('/api/v1/me', options);
   }
 
-  async function startTelegramLogin() {
-    return api.post('/api/v1/tg/start', {});
-  }
-
-  async function checkTelegramLogin(code) {
-    return api.get(`/api/v1/tg/check?code=${encodeURIComponent(code)}`);
-  }
-
   clearLegacySecrets();
   global.EasyBoostAuth = Object.freeze({
     isServerMode,
-    login,
-    register,
     logout: requestLogout,
     currentSession,
-    startTelegramLogin,
-    checkTelegramLogin,
   });
 })(window);

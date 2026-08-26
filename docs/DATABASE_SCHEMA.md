@@ -25,7 +25,9 @@ Migration `048` adds a bounded SHA-256 `evaluation_fingerprint`, `evaluation_cla
 | Таблица | Назначение | Ключевые данные |
 |---|---|---|
 | `schema_migrations` | применённые миграции | `version`, `applied_at` |
-| `users` | аккаунты Telegram/legacy и роли | `username`, `telegram_id`, `role`, subscription fields |
+| `users` | внутренние аккаунты Telegram/legacy/provider-managed и роли | opaque `username`, nullable legacy identity, `identity_managed`, `display_name`, role and subscription fields |
+| `learner_identities` | provider-agnostic связь внешнего subject с внутренним learner | `(provider, subject)`, opaque `username`, timestamps; один provider identity на learner |
+| `oauth_auth_transactions` | одноразовые server-side OAuth/PKCE транзакции | SHA-256 state, encrypted verifier до consume, exact redirect, expiry/consume timestamps; без username/provider token |
 | `sessions` | серверные пользовательские сессии | `id`, `username`, expiry, revoke timestamp |
 | `subscriptions` | текущее состояние доступа | `username`, status, source, start/end timestamps |
 | `subscription_events` | неизменяемая история выдачи и изменения тарифа | username, event type, bounded metadata and timestamp |
@@ -69,6 +71,24 @@ reservation authority (`username`, `claim_key`) are never exported, and no camel
 the public export contract.
 
 Связи привязаны к `users.username`; API всегда определяет пользователя из HttpOnly-сессии. Изменения схемы добавляются новой нумерованной миграцией и проверяются `npm run db:migrate`.
+
+## Provider-managed learner identity (`056`)
+
+Migration `056_vk_id_identity.sql` replaces the legacy `users_identity_check` so a managed identity may own a
+user without fabricating `password_hash` or `telegram_id`. Such a row has `identity_managed = true`, no legacy
+credential fields, a bounded optional `display_name`, and a fresh random opaque `username`. External identity is
+kept separately in `learner_identities` under unique `(provider, subject)`; profile fields are never used for
+automatic account linking. Existing Telegram, password, administrator, progress and subscription rows are left
+unchanged.
+
+`oauth_auth_transactions` stores only the SHA-256 state key, provider, exact redirect, expiry and an AES-GCM
+sealed PKCE verifier derived from `JWT_SECRET`. Consume is atomic and immediately replaces the verifier with
+`NULL`; expired/consumed rows are removed by startup and periodic retention. Access/refresh tokens and raw
+authorization codes are never persisted. The provider/subject pair is included only in the learner's explicitly
+requested privacy export; `/me` and learner UI never expose it. OAuth transactions, sealed verifiers and provider
+tokens are excluded from export. Account deletion cascades the learner identity; a later sign-in creates a new
+opaque username and cannot revive a deleted owner tombstone. File storage implements the same lifecycle, export
+and deletion rules.
 
 Миграция `040_word_mastery.sql` сохраняет прежние `stage`, счётчики и срок повторения, но добавляет
 `mastery_version=1` и четыре измерения. Старые оценки переносятся только как `preliminary`, с нулём

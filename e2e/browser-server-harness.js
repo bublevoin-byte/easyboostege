@@ -60,6 +60,18 @@ async function stopProcess(child) {
 
 async function createActiveSubscriptionPage(browser,{baseUrl,username,jwtSecret,contextOptions={}}){
   const context=await browser.newContext(contextOptions);
+  /* Existing release scenarios model a returning authenticated learner. Keep that boundary
+     explicit so the production first-launch gate does not turn unrelated shell tests into
+     onboarding tests. Fresh first-launch coverage creates its own unseeded context. */
+  await context.addInitScript(() => {
+    try {
+      if (!localStorage.getItem('aisy.onboarding.completion')) {
+        localStorage.setItem('aisy.onboarding.completion', JSON.stringify({
+          version: 1, completedAt: '2026-08-26T00:00:00.000Z',
+        }));
+      }
+    } catch {}
+  });
   await context.addCookies([{
     name:'eb_token',
     value:jwt.sign({u:username},jwtSecret,{expiresIn:'1h'}),

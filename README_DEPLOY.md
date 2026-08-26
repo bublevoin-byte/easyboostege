@@ -1,20 +1,26 @@
 # Easy Boost: production-развёртывание
 
-Приложение состоит из Node.js/Express-сервера, статического frontend, Telegram-входа, PostgreSQL и серверных интеграций xAI/Groq. В production файловое хранилище запрещено.
+Приложение состоит из Node.js/Express-сервера, статического frontend, ученического входа VK ID,
+отдельного Telegram/admin-контура, PostgreSQL и серверных интеграций xAI/Groq. В production файловое
+хранилище запрещено.
 
 Перед релизом пройдите `RELEASE_CHECKLIST.md`.
 
 ## Frontend-модули
 
-`index.html` подключает **одну** точку входа — `<script type="module" src="/main.js">`. Всё остальное
-`main.js` тянет сам, статическими импортами в том порядке, в котором они перечислены ниже. Порядок
-значим: модули публикуют свои имена через `window`, и перестановка превращает их в `undefined` ещё до
-первого экрана.
+До первого stylesheet `index.html` синхронно подключает CSP-safe classic asset
+`<script src="/theme-prepaint.js">`: он применяет сохранённую системную/светлую/тёмную тему до
+первой отрисовки и не содержит inline-кода. После стилей подключается **одна module-точка входа** —
+`<script type="module" src="/main.js">`. Остальные исполняемые модули `main.js` тянет сам,
+статическими импортами в указанном ниже порядке. Порядок значим: модули публикуют свои имена через
+`window`, и перестановка превращает их в `undefined` ещё до первого экрана.
 
 Оболочка — то, что приезжает при первой загрузке:
 
 - `globals.js` — публикация имён модуля на `window` геттерами; тем же механизмом пользуется загрузчик чанков;
-- `api.js` и `auth.js` — серверные запросы и cookie-сессия;
+- `theme-prepaint.js` — отдельный ранний classic asset первого paint; сборщик копирует и кэширует его как прямую зависимость HTML, а не как модульный импорт;
+- `api.js` и `auth.js` — серверные запросы и cookie-сессия; learner credentials браузеру недоступны;
+- `first-launch.js` — versioned splash/onboarding gate, provider discovery и переход на server-side VK ID flow;
 - `sync.js` и `store.js` — offline-синхронизация, локальный снимок прогресса и восстановление без сети;
 - `components.js` — общие безопасные UI-примитивы;
 - `router.js` и `learning.js` — навигация и общие алгоритмы обучения;
@@ -27,7 +33,7 @@
 - `modules/exam.js` — общие правила пробных экзаменов: запись попытки, длительность, разделы и слабое место, значок результата и тело `module-attempts`;
 - `modules/progress.js` — обратный отсчёт до ЕГЭ, дневная норма минут, нормализация показателей шести модулей и подписи серии и словаря;
 - `modules/profile.js` — отображаемое имя и инициал, приветствие и три состояния подписки с текстом и цветами;
-- `app.js` — запуск и общая конфигурация: вход, демо-режим, карты маршрутов, главный экран, сводки плиток и набор слов `EGE_WORDS`;
+- `app.js` — единый private startup coordinator: onboarding и `/me` идут параллельно, а login/strict access/Today выбираются только после обеих проверок;
 - `screens/words.js`, `screens/grammar.js`, `screens/progress.js` — экраны, которые раздел 6.1 ТЗ обещает без сети, поэтому они статические;
 - `privacy.js`, `tts.js`, `pwa.js` — согласия и экспорт данных, озвучка, регистрация service worker.
 
@@ -73,8 +79,10 @@ npm run build:frontend
 
 **Service worker и обновление.** Список файлов оболочки `APP_SHELL` в `public/service-worker.js`
 генерирует сборка: с хешированными именами вести его руками нельзя. В исходнике лежит вариант без
-хешей — для случая, когда сервер отдаёт `public/`; `npm run build:frontend` сверяет его с графом
-статических импортов `main.js` и падает при расхождении, так что и он не разъезжается молча.
+хешей — для случая, когда сервер отдаёт `public/`; `npm run build:frontend` сверяет его со всей
+оболочкой первого запуска: графом статических импортов module-entry, прямыми classic scripts из
+`index.html` (сейчас это `theme-prepaint.js`) и остальными обязательными статическими assets. При
+расхождении сборка падает, поэтому ранний prepaint не может молча исчезнуть из offline closure.
 Пяти ленивых чанков в списке нет намеренно: они попадают в кэш в обработчике `fetch`, когда ученик
 впервые открывает свой экран, — поэтому офлайн-запуск открывает уже виденные экраны. Имя кэша
 больше не поднимают руками: оно считается по самому списку, а в сборке любое изменение содержимого
@@ -88,10 +96,11 @@ npm run build:frontend
 `server.js` собирает приложение и владеет только конфигурацией, общими middleware и завершением работы:
 
 - `middleware/authentication.js` — сессионный JWT, HttpOnly cookie, роли и токен мониторинга;
+- `services/vk-id.js` и `routes/vk-auth.js` — VK ID Authorization Code + PKCE, одноразовая транзакция и минимальная provider identity;
 - `middleware/subscription.js` — активная подписка, согласия на обработку, дневной бюджет ИИ и почасовые лимиты;
 - `services/subscription.js` — правила пробного периода и оплаты, без обращений к Telegram;
 - `services/telegram.js` — транспорт бота: polling, сообщения и inline-кнопки;
-- `routes/users.js` — вход по Telegram, сессия, экспорт и удаление аккаунта, согласия, админ- и internal-метрики;
+- `routes/users.js` — cookie-сессия, сохранённый Telegram/admin-контур, экспорт и удаление аккаунта, согласия, админ- и internal-метрики;
 - `routes/progress.js` — прогресс, модульное слияние, попытки, словарь и банк ошибок;
 - `ai/operations.js` — реестр ИИ-операций: лимит токенов, таймаут, часовой лимит, правило fallback и версия промпта для каждой;
 - `routes/ai.js` — серверные ИИ-операции с выбором провайдера, кэшем, очередью и учётом стоимости;
@@ -102,7 +111,8 @@ npm run build:frontend
 - Docker Engine с Compose v2;
 - домен с HTTPS на reverse proxy;
 - PostgreSQL 17 (включён в `compose.production.yml`);
-- Telegram bot token;
+- зарегистрированное VK ID application для live learner login;
+- Telegram bot token для сохранённого admin/операторского контура;
 - минимум один AI API key: xAI или Groq.
 
 ## Настройка
@@ -116,10 +126,81 @@ JWT_SECRET=случайная-строка-минимум-32-символа
 POSTGRES_PASSWORD=отдельный-длинный-пароль
 TELEGRAM_BOT_TOKEN=...
 ADMIN_TELEGRAM_ID=...
+VK_ID_MODE=live
+VK_ID_APP_ID=123456
+VK_ID_REDIRECT_URI=https://example.ru/api/v1/auth/vk/callback
+VK_ID_SCOPE=
 XAI_API_KEY=...
 ```
 
 Не коммитьте `.env`. `APP_URL` должен точно совпадать с внешним origin: схема, домен и нестандартный порт, если он есть.
+
+## VK ID: настройка и проверка
+
+В кабинете VK ID зарегистрируйте **точный** callback
+`https://<ваш-origin>/api/v1/auth/vk/callback`. `APP_URL` и `VK_ID_REDIRECT_URI` должны иметь один origin;
+redirect не может содержать credentials, query или fragment. `VK_ID_APP_ID` — числовой идентификатор приложения,
+а `VK_ID_SCOPE` оставляется пустым: Aisy получает только стабильный subject и минимальное отображаемое имя, без
+email и телефона. Отдельный confidential credential этот PKCE-контракт не использует.
+
+Режимы fail-closed:
+
+- `VK_ID_MODE=disabled` — значение по умолчанию; `/api/v1/auth/providers` сообщает `enabled: false`, login
+  показывает «VK ID пока не подключён», а `/api/v1/auth/vk/start` отвечает `503 VK_ID_UNAVAILABLE`;
+- `VK_ID_MODE=live` — сервер отказывается стартовать при неполном APP_ID/callback, непустом scope или callback
+  другого origin;
+- `VK_ID_MODE=local` — только при явно заданном точном `NODE_ENV=development|test` и HTTP loopback `APP_URL`
+  (`localhost`, `127.0.0.1` или `[::1]`): сервер слушает точный loopback-сокет (`127.0.0.1`, либо `::1`
+  для `[::1]`), отбрасывает forwarded/public authority, не выполняет внешних сетевых вызовов и сохраняет те же one-time transaction,
+  identity и cookie-session seams. Local provider возвращает абсолютный configured callback; отсутствие
+  `NODE_ENV`, staging, preview и публичный origin fail closed.
+  Local-вход не выдаёт подписку.
+  Порт `APP_URL` обязан точно совпадать с `PORT`. Local listener нельзя публиковать через reverse proxy или tunnel:
+  он предназначен только для прямого доступа с той же машины и дополнительно требует точный configured `Host`
+  без forwarded-заголовков.
+
+### VK callback и access logs
+
+Live callback несёт одноразовые `code`, `state` и `device_id` в query string. Reverse proxy, load balancer и CDN
+не должны сохранять query для этого пути. В Nginx не используйте стандартный `$request`/`$request_uri` в access
+log; логируйте только метод и нормализованный `$uri`, оставляя исходный query доступным upstream-приложению:
+
+```nginx
+log_format aisy_safe '$remote_addr - $remote_user [$time_local] '
+                     '"$request_method $uri $server_protocol" $status $body_bytes_sent '
+                     '"$http_referer" "$http_user_agent"';
+access_log /var/log/nginx/aisy-access.log aisy_safe;
+
+location / {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+Перед live smoke отдельно проверьте access/error/audit logs каждого CDN/LB/proxy слоя: строка callback может
+содержать только `/api/v1/auth/vk/callback`, без `?`, `code`, `state` и `device_id`. Application logger уже
+использует только path; это не очищает журналы внешней инфраструктуры.
+
+Production рассчитан ровно на один доверенный reverse-proxy hop (`trust proxy = 1`); не убирайте
+`X-Forwarded-Proto` из конфигурации выше и не публикуйте upstream-порт. Cookie-политика дополнительно
+выводит `Secure` из канонического HTTPS `APP_URL`, поэтому отсутствие proxy header не может сделать
+production session/flow/replay cookie небезопасной.
+
+OAuth endpoints имеют отдельные rate limits, `no-store`, `Pragma: no-cache` и `Referrer-Policy: no-referrer`.
+Общий anonymous limiter не перехватывает exact `/api/v1/auth/vk/start|callback` и их legacy compatibility paths:
+эти запросы всегда доходят до navigation-aware route limiter. Flow-cookie имеет точный
+`Path=/api/v1/auth/vk/callback`, `HttpOnly`, `SameSite=Lax` и получает `Secure` на HTTPS. Provider tokens
+не возвращаются браузеру и не сохраняются. Для ручного smoke после регистрации приложения проверьте cancel,
+успешный callback, повтор callback, logout и отсутствие provider params в итоговом URL. Эта реализация проверена
+автоматически через local provider; живой VK ID вызов в рамках Ticket 02 не выполнялся и не заявляется.
+
+Обычный `GET /api/v1/auth/vk/start` остаётся browser redirect. Для программного handoff используйте
+`GET /api/v1/auth/vk/start?response=json`: успешный private/no-store ответ содержит только
+`{"authorizationUrl":"<absolute URL>"}` и устанавливает ту же callback-scoped flow-cookie. Затем клиент должен
+выполнить top-level navigation на этот URL. Ошибки handshake остаются JSON `429`/`503`, даже если клиент прислал
+navigation headers.
 
 ## Первый запуск
 
@@ -210,7 +291,9 @@ npm run db:restore -- /secure/easyboost.dump --confirm-restore
 docker compose -f compose.production.yml run --rm app npm run db:import-json -- /backup/data.json --dry-run
 ```
 
-Для реального импорта файл должен быть доступен внутри контейнера через read-only bind mount. Исходный файл скрипт не удаляет.
+Для реального импорта файл должен быть доступен внутри контейнера через read-only bind mount. Исходный файл
+скрипт не удаляет. Legacy-аккаунты и provider-managed ученики вместе с `learner_identities` и прогрессом
+переносятся одной транзакцией; временные OAuth/PKCE-транзакции и provider-токены не импортируются.
 
 ## Наблюдаемость
 

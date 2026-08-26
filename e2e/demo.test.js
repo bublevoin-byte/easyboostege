@@ -207,7 +207,7 @@ async function runE2E() {
           privacy_consent: {
             text_processing: true,
             voice_processing: true,
-            policy_version: '2026-08-02-voice-v1',
+            policy_version: '2026-08-26-vk-id-v1',
             updated_at: Date.now(),
           },
         },

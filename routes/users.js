@@ -64,7 +64,17 @@ export function createUserRoutes({
       res.setHeader('Cache-Control', 'no-store');
       const token = req.sessionId ? req.authToken : await issueToken(req.user);
       setAuthCookie(req, res, token);
-      res.json({ authenticated: true, username: req.user, role: req.role, bot: botUsername(), ...await currentSubscription(req.user) });
+      const [user, subscription] = await Promise.all([
+        db.getUser(req.user),
+        currentSubscription(req.user),
+      ]);
+      res.json({
+        authenticated: true,
+        username: req.user,
+        displayName: user?.display_name || req.user,
+        role: req.role,
+        ...subscription,
+      });
     } catch (error) { next(error); }
   });
 

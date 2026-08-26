@@ -82,8 +82,10 @@ function installLearnerShell({document,navigateTopLevel,navigateBackToHub,curren
     else if(previousTop.topLevel)entryDestination=previousTop.activeDestination;
     currentProjection=projectLearnerShell(screenId,{entryDestination});
     navigation.hidden=!currentProjection.topLevel;
+    navigation.inert=!currentProjection.topLevel;
     const backDestination=DESTINATION_BY_ID.get(currentProjection.activeDestination);
     backControl.hidden=!currentProjection.backTarget;
+    backControl.inert=!currentProjection.backTarget;
     if(backDestination){
       const backLabel=`Назад в раздел ${backDestination.label}`;
       backControl.setAttribute('aria-label',backLabel);

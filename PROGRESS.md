@@ -4,15 +4,24 @@
 Тикеты: [.scratch/aisy-production-ui-a/issues/](.scratch/aisy-production-ui-a/issues/)
 Ветка: `prototype/aisy-today-visual-v1`
 
-Overall status: `in-progress` — production-фундамент A готов; следующий frontier — первый запуск и VK ID.
+Overall status: `in-progress` — production-фундамент A и первый запуск/VK ID готовы; Ticket 03 готов к реализации.
 
 | № | Что даёт | Статус |
 |---|---|---|
 | 01 | Трёхслойная light/dark тема, локальные шрифты, CTA и phone-only shell | done |
-| 02 | Logo/onboarding и server-side VK ID с local provider | in-progress |
-| 03 | Strict access и production Today | blocked by 02 |
+| 02 | Logo/onboarding и server-side VK ID с local provider | done |
+| 03 | Strict access и production Today | ready-for-agent |
 | 04–10 | Все learner-модули, ЕГЭ, Прогресс и Профиль | blocked by 03 |
 | 11 | PWA/release evidence | blocked by 02–10 |
+
+Ticket 02: production `splash → 3 onboarding → VK ID login` собран в утверждённой A-стилистике; startup
+держит private gate и параллельно проверяет `/me`, поэтому активный вернувшийся learner не видит login flash.
+Server-side VK ID Authorization Code + PKCE использует one-time encrypted transaction, provider-agnostic
+identity, HttpOnly cookie-session, fail-closed live config и explicit zero-network local mode. File/PostgreSQL,
+export/delete, retention, cancel/replay/error и production-ban contracts покрыты тестами. Production browser E2E
+проходит весь local flow, inactive/active return, profile replay, logout marker, retry/disabled и phone/landscape
+layout без внешней сети. Финал: независимые security и spec/a11y review — `ZERO_FINDINGS`; `1966` unit / `0 fail`,
+production build, три Aisy E2E и security gates зелёные. Live VK application/callback не проверялись.
 
 Ticket 01: независимый Standards/Spec re-review — без замечаний в границах тикета. Обязательный gate:
 `npm run lint`, `npm run check`, `npm test` (`1919 total / 1871 passed / 48 skipped / 0 failed`), production build,

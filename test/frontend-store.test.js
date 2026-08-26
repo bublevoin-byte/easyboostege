@@ -7,16 +7,19 @@ const source = await fs.readFile(new URL('../public/store.js', import.meta.url),
 const ownerIncarnationSource = await fs.readFile(new URL('../public/owner-incarnation.js', import.meta.url), 'utf8');
 const appSource = await fs.readFile(new URL('../public/app.js', import.meta.url), 'utf8');
 const startLearningSource = appSource.match(
-  /async function startLearningWithVerifiedSession\(session\)\{[\s\S]*?\n\}\nasync function confirmExplicitServerOwner/u,
-)[0].replace(/\nasync function confirmExplicitServerOwner$/u, '');
-const confirmOwnerSource = appSource.match(
-  /async function confirmExplicitServerOwner\(session[^)]*\)\{[\s\S]*?\n\}/u,
-)[0];
+  /async function startLearningWithVerifiedSession\(session,\{signal=null\}=\{\}\)\{[\s\S]*?\n\}\nasync function startLearningWithDeadline/u,
+)[0].replace(/\nasync function startLearningWithDeadline$/u, '');
 const applyDeletedOwnerSource = appSource.match(
   /function applyDeletedOwner\(update\)\{[\s\S]*?\n\}/u,
 )[0];
 const invalidateLearningAuthoritySource = appSource.match(
   /async function invalidateLearningAuthority\(authority\)\{[\s\S]*?\n\}/u,
+)[0];
+const clearNoSessionAuthoritySource = appSource.match(
+  /async function clearNoSessionAuthority\(authGuard\)\{[\s\S]*?\n\}/u,
+)[0];
+const checkLearningAccessSource = appSource.match(
+  /async function checkLearningAccess\(session=null,[\s\S]*?\n\}/u,
 )[0];
 
 function deferred() {
@@ -98,7 +101,7 @@ function createStartLearningHarness({
   vm.runInContext(`${startLearningSource}\nthis.startLearningWithVerifiedSession=startLearningWithVerifiedSession;`, context);
   return {
     calls,
-    start: (session = { authenticated: true, username: 'grammar-owner' }) => context.startLearningWithVerifiedSession(session),
+    start: (session = { authenticated: true, username: 'grammar-owner' }, options) => context.startLearningWithVerifiedSession(session, options),
     resolveTaskBank: (value) => taskBank.resolve(value),
     resolveProgress: (value) => progress.resolve(value),
     progressRequest: () => progressRequest,
@@ -167,6 +170,25 @@ test('stale progress restore cannot replace a recreated same-name owner session'
   harness.resolveProgress({ learned: 99 });
   assert.equal(await started, false);
   assert.doesNotMatch(harness.calls.join(','), /restore|save|baseline|tab:scr1|hook/u);
+});
+
+test('startup aborted by its bootstrap deadline cannot commit after task-bank or progress waits', async () => {
+  for (const mode of ['task-bank', 'progress']) {
+    const harness = createStartLearningHarness({
+      deferTaskBank: mode === 'task-bank',
+      deferProgress: mode === 'progress',
+    });
+    const controller = new AbortController();
+    const started = harness.start(undefined, { signal: controller.signal });
+    await Promise.resolve();
+    await Promise.resolve();
+    controller.abort(Object.assign(new Error('deadline'), { code: 'REQUEST_TIMEOUT' }));
+    if (mode === 'task-bank') harness.resolveTaskBank();
+    else harness.resolveProgress({ learned: 99 });
+    assert.equal(await started, false);
+    assert.doesNotMatch(harness.calls.join(','), /restore|save|baseline|tab:scr1|hook/u,
+      `late ${mode} completion must not release Today`);
+  }
 });
 
 test('startup progress restore sends and verifies the captured owner contract', async () => {
@@ -243,38 +265,59 @@ test('startup overlays only the exact owner-generation local grammar workflow, n
   assert.deepEqual(JSON.parse(JSON.stringify(completed.savedState().grammarMastery)), { server: true });
 });
 
-test('a stale explicit-auth response cannot revive a newer deletion tombstone', async () => {
+test('server session adoption stays inside the durable owner-incarnation lock', () => {
+  assert.match(appSource, /const adopted=await store\.sync\.adoptOwner\?\.\(sessionOwner,generation,\{/u,
+    'the canonical /me bootstrap must adopt the opaque server owner through durable authority');
+  assert.match(appSource, /canCommit:function\(\)\{return authGuard\.sessionGeneration===AUTH_SESSION_GENERATION&&signal\?\.aborted!==true\}/u,
+    'a stale or timed-out /me response cannot commit after logout, deletion or deadline');
+  assert.match(appSource, /commit:function\(committedGeneration\)\{return adoptServerSession\(current,committedGeneration\)\}/u,
+    'app session state is written only by the adoption lock callback');
+  assert.match(appSource, /if\(adopted!==sessionOwner\)return\{state:LEARNING_ACCESS_STATES\.NETWORK_UNKNOWN,session:null,stale:true\}/u,
+    'failed or stale adoption must not open a learner session');
+  assert.doesNotMatch(appSource, /auth\.(?:login|register|startTelegramLogin|checkTelegramLogin)\(/u,
+    'removed password and Telegram learner flows cannot bypass the canonical /me adoption seam');
+});
+
+test('authoritative no-session clears only the generation-bound current-owner marker', () => {
+  assert.match(clearNoSessionAuthoritySource, /previousOwner=authGuard\.owner,previousGeneration=authGuard\.ownerGeneration/u);
+  assert.match(clearNoSessionAuthoritySource, /store\.clearCurrentOwner\?\.\(previousOwner,previousGeneration\)/u);
+  assert.match(clearNoSessionAuthoritySource, /currentUser=null;S=null;window\.__sub=null/u);
+  assert.doesNotMatch(appSource, /else\{[^}]*deleteUserData/u,
+    'natural session expiry must not delete the previous learner data partition');
+});
+
+test('a real 401 /me response clears the stale marker before another VK account can sign in', async () => {
   const calls = [];
-  const ownerGenerations = new Map([['grammar-owner', 1]]);
   const context = vm.createContext({
-    AUTH_SESSION_GENERATION: 4,
-    AUTH_DELETION_GENERATION: 1,
-    currentUser: null,
-    normalizedAuthOwner(value) { return String(value || '').trim() || null; },
-    adoptServerSession(session) { calls.push('adopt'); context.currentUser = session.username; },
-    ownerAuthGeneration(owner) { return ownerGenerations.get(owner) || 0; },
-    store: { sync: { async confirmOwner(owner, guard, callbacks) {
-      calls.push(`revive:${owner}:${guard.ownerGeneration}`);
-      if (guard.ownerGeneration !== 1) { calls.pop(); return null; }
-      if (callbacks?.canCommit?.() === false) return null;
-      callbacks?.commit?.();
-      return 'grammar-owner';
-    } } },
+    SRV: true,
+    currentUser: 'owner-a', ADOPTED_OWNER_GENERATION: 3, AUTH_SESSION_GENERATION: 7,
+    TOKEN: 'cookie', S: { learned: 19 }, OFFLINE_EGE_MOCK_CONTINUATION: false,
+    window: { __sub: { username: 'owner-a' } },
+    auth: { async currentSession() { throw Object.assign(new Error('expired'), { status: 401 }); } },
+    store: {
+      sync: {
+        ownerAuthSnapshot(owner) {
+          return owner ? { ownerGeneration: 3, deleted: false } : { globalGeneration: 8 };
+        },
+        setOwner(owner) { calls.push(`set-owner:${owner}`); },
+      },
+      async clearCurrentOwner(owner, generation) { calls.push(`clear:${owner}:${generation}`); return true; },
+    },
+    rememberSessionOwnerGeneration(owner, generation) { calls.push(`remember:${owner}:${generation}`); },
+    classifyLearningAccess() { return { state: 'no-session', session: null }; },
+    LEARNING_ACCESS_STATES: { NETWORK_UNKNOWN: 'network-unknown', NO_SESSION: 'no-session' },
+    offlineEgeMockContinuation() { return null; },
+    closeAccessGate() {}, hideLearningShell() {}, queueMicrotask() {}, tab() {}, applyLearningAccess() {},
+    Number, Boolean, Object, String, Date, Promise,
   });
-  vm.runInContext(`${confirmOwnerSource}\nthis.confirmExplicitServerOwner=confirmExplicitServerOwner;`, context);
-  const staleGuard = { sessionGeneration: 4, owner: 'grammar-owner', ownerGeneration: 0, globalGeneration: 0 };
-  assert.equal(await context.confirmExplicitServerOwner({ authenticated: true, username: 'grammar-owner' }, staleGuard), false);
-  assert.deepEqual(calls, []);
-  const currentGuard = { sessionGeneration: 4, owner: 'grammar-owner', ownerGeneration: 1, globalGeneration: 1 };
-  assert.equal(await context.confirmExplicitServerOwner({ authenticated: true, username: 'grammar-owner' }, currentGuard), true,
-    'a server-confirmed auth started after deletion is the only legitimate revival path');
-  assert.deepEqual(calls, ['revive:grammar-owner:1', 'adopt'], 'the tombstone must clear under the auth lock before app session state is adopted');
-  assert.match(appSource, /ownerAuthSnapshot\?\.\(ownerKey\)/u,
-    'auth capture must use the durable cross-tab owner generation');
-  assert.match(appSource, /await store\.sync\.confirmOwner\?\.\(/u,
-    'auth confirmation must await the same lock that owns deletion generation changes');
-  assert.match(appSource, /captureExplicitAuth\(u\)[^\n]*await auth\.login[\s\S]*confirmExplicitServerOwner\([^,]+,[^)]+\)/u);
-  assert.match(appSource, /captureExplicitAuth\(\)[^\n]*await auth\.checkTelegramLogin[\s\S]*confirmExplicitServerOwner\([^,]+,[^)]+\)/u);
+  vm.runInContext(`${clearNoSessionAuthoritySource}\n${checkLearningAccessSource}\nthis.checkLearningAccess=checkLearningAccess;`, context);
+  const result = await context.checkLearningAccess(null, { deferPresentation: true });
+  assert.equal(result.state, 'no-session');
+  assert.equal(context.currentUser, null);
+  assert.equal(context.ADOPTED_OWNER_GENERATION, null);
+  assert.equal(context.TOKEN, '');
+  assert.equal(context.S, null);
+  assert.deepEqual(calls, ['remember:null:null', 'set-owner:null', 'clear:owner-a:3']);
 });
 
 test('owner deletion logs out only the matching session while durable sync authority invalidates every pending auth', () => {
@@ -285,7 +328,7 @@ test('owner deletion logs out only the matching session while durable sync autho
   assert.equal(context.applyDeletedOwner({ owner: 'grammar-owner' }), false);
   context.currentUser = 'different-owner';
   assert.equal(context.applyDeletedOwner({ owner: 'second-owner' }), false);
-  assert.match(appSource, /store\.sync\.ownerAuthSnapshot\?\.\(ownerKey\)/u,
+  assert.match(appSource, /store\.sync\.ownerAuthSnapshot\?\.\(sessionOwner\)/u,
     'pending auth validity comes from shared durable authority, not currentUser or Broadcast timing');
 });
 
@@ -378,23 +421,18 @@ test('a delayed old-generation logout preserves the revived tab marker and clean
     'storage cleanup is completed by the serialized deletion operation before the app logout notification');
 });
 
-test('failed durable owner adoption leaves app and session state untouched', async () => {
-  const context = vm.createContext({
-    AUTH_SESSION_GENERATION: 7, TOKEN: '', currentUser: null, ADOPTED_OWNER_GENERATION: null,
-    normalizedAuthOwner(value) { return String(value || '').trim() || null; },
-    store: { sync: { async confirmOwner() { return null; } } },
-    window: { __sub: null },
-    rememberSessionOwnerGeneration() { throw new Error('session state must not be written'); },
-  });
-  vm.runInContext(`${confirmOwnerSource}\nthis.confirmExplicitServerOwner=confirmExplicitServerOwner;`, context);
-  assert.equal(await context.confirmExplicitServerOwner({ authenticated: true, username: 'grammar-owner' }, {
-    sessionGeneration: 7, owner: 'grammar-owner', ownerGeneration: 1, globalGeneration: 1,
-  }), false);
-  assert.equal(context.AUTH_SESSION_GENERATION, 7);
-  assert.equal(context.TOKEN, '');
-  assert.equal(context.currentUser, null);
-  assert.equal(context.ADOPTED_OWNER_GENERATION, null);
-  assert.equal(context.window.__sub, null);
+test('bootstrap keeps first launch and session authority parallel behind one private gate', () => {
+  assert.match(appSource, /const opening=firstLaunch\.start\(\);[\s\S]*const accessCheck=[\s\S]*await opening;[\s\S]*const access=await accessCheck/u);
+  assert.match(appSource, /runWithAbortDeadline\([\s\S]*checkLearningAccess\(null,\{deferPresentation:true,signal\}\)[\s\S]*FIRST_LAUNCH_SESSION_TIMEOUT_MS/u,
+    'the parallel /me request must stay private and terminate through a bounded abort deadline');
+  assert.match(appSource, /timedOut:true/u,
+    'an exhausted bootstrap deadline must become the deterministic network-unknown presentation');
+  assert.match(appSource, /if\(access\.state===LEARNING_ACCESS_STATES\.ACTIVE\)return startLearningWithDeadline\(access\.session\)/u,
+    'only the canonical coordinator may release an authenticated returning learner to Today');
+  assert.match(appSource, /async function startLearningWithDeadline\(session\)[\s\S]*runWithAbortDeadline\([\s\S]*startLearningWithVerifiedSession\(session,\{signal\}\)[\s\S]*NETWORK_UNKNOWN/u,
+    'task-bank and progress bootstrap must terminate in the recoverable network gate');
+  assert.match(startLearningSource, /tab\('scr1',function\(\)\{closeAccessGate\(\);firstLaunch\.release\(\);focusTodayHeading\(\)\}\)/u,
+    'the access gate and splash stay private until Today commits, then focus enters that destination');
 });
 
 test('exact authority invalidation clears the captured subscription before showing login', () => {
@@ -406,7 +444,7 @@ test('exact authority invalidation clears the captured subscription before showi
 test('production owner cleanup delegates compare-remove to the shared incarnation lock', () => {
   assert.match(source, /EasyBoostOwnerIncarnation/u);
   assert.match(source, /clearMatchingStorage/u);
-  assert.match(appSource, /commitOwnerAdoption|confirmOwner/u);
+  assert.match(appSource, /store\.sync\.adoptOwner\?\.\(/u);
 });
 
 test('local snapshots use generation-qualified keys and reject delete-revive resurrection', () => {

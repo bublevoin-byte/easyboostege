@@ -85,7 +85,7 @@ test('application starts and serves health, security headers and PWA assets', { 
   await fs.writeFile(dataFile, JSON.stringify({
     users: {
       expired: { created: Date.now(), sub_until: Date.now() - 60_000 },
-      active: { created: Date.now(), sub_until: Date.now() + 60_000, privacy_consent: { text_processing: true, voice_processing: true, policy_version: '2026-08-02-voice-v1', updated_at: new Date().toISOString() } },
+      active: { created: Date.now(), sub_until: Date.now() + 60_000, privacy_consent: { text_processing: true, voice_processing: true, policy_version: '2026-08-26-vk-id-v1', updated_at: new Date().toISOString() } },
       sessionuser: { created: Date.now(), sub_until: Date.now() + 60_000 },
       admin: { created: Date.now(), sub_until: Date.now() + 60_000, role: 'admin' },
     },
@@ -153,7 +153,7 @@ test('application starts and serves health, security headers and PWA assets', { 
 
     /* Точка входа называется по-разному в исходниках и в собранной версии, поэтому берётся из
        отданной разметки: сжатие проверяется на том файле, который страница действительно грузит. */
-    const entryScript = /<script[^>]+src="(\/[^"]+\.js)"/u.exec(homeMarkup);
+    const entryScript = /<script(?=[^>]*\btype="module")(?=[^>]*\bsrc="(\/[^"]+\.js)")[^>]*>/u.exec(homeMarkup);
     assert.ok(entryScript, 'отданная разметка обязана подключать точку входа');
     const compressedEntry = await rawGet(`${baseUrl}${entryScript[1]}`, { 'Accept-Encoding': 'gzip' });
     const plainEntry = await rawGet(`${baseUrl}${entryScript[1]}`, { 'Accept-Encoding': 'identity' });

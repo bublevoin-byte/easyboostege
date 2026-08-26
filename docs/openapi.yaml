@@ -36,6 +36,91 @@ paths:
       responses:
         '200': { description: Ready }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/v1/auth/providers:
+    get:
+      security: []
+      summary: Discover fail-closed learner identity providers
+      description: Returns only whether VK ID may be started. Configuration values and provider credentials are never exposed. The response is no-store.
+      responses:
+        '200':
+          description: Provider availability
+          headers:
+            Cache-Control: { schema: { type: string, enum: [no-store] } }
+            Pragma: { schema: { type: string, enum: [no-cache] } }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [vk]
+                properties:
+                  vk:
+                    type: object
+                    required: [enabled]
+                    properties: { enabled: { type: boolean } }
+                    additionalProperties: false
+                additionalProperties: false
+  /api/v1/auth/vk/start:
+    get:
+      security: []
+      summary: Start a one-time VK ID Authorization Code + PKCE flow
+      description: Creates a TTL-bound transaction keyed by hashed state, stores only an encrypted verifier and sets an HttpOnly SameSite=Lax flow cookie whose Path is exactly `/api/v1/auth/vk/callback`. A normal browser GET receives 302 to VK ID, while `response=json` receives the same absolute authorization URL in a private JSON handshake. Explicit local mode uses its configured absolute loopback callback without network access. The generic anonymous limiter defers exact versioned and legacy start/callback paths to these route-specific limits. For top-level HTML navigation, rate-limit and operational failures are converted to a sanitized 303 application redirect; the JSON handshake and other JSON clients retain the documented 429/503 status.
+      parameters:
+        - in: query
+          name: response
+          required: false
+          schema: { type: string, enum: [json] }
+          description: Return `{authorizationUrl}` instead of redirecting. This does not change transaction, cookie or rate-limit semantics.
+      responses:
+        '200':
+          description: Private JSON authorization handshake requested with `response=json`
+          headers:
+            Cache-Control: { schema: { type: string, enum: [no-store] } }
+            Pragma: { schema: { type: string, enum: [no-cache] } }
+            Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [authorizationUrl]
+                properties:
+                  authorizationUrl: { type: string, format: uri }
+                additionalProperties: false
+        '302':
+          description: Redirect to VK ID authorization or the explicit local callback
+          headers:
+            Location: { schema: { type: string } }
+            Cache-Control: { schema: { type: string, enum: [no-store] } }
+            Pragma: { schema: { type: string, enum: [no-cache] } }
+            Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }
+        '303':
+          description: Top-level browser rate-limit or operational failure redirects to `/?auth_error=<allowlisted-code>` without echoing provider input
+          headers:
+            Location: { schema: { type: string, pattern: '^/\?auth_error=[a-z_]+$' } }
+            Cache-Control: { schema: { type: string, enum: [no-store] } }
+            Pragma: { schema: { type: string, enum: [no-cache] } }
+            Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }
+        '429': { description: JSON client rate limit; top-level HTML navigation receives a sanitized 303 application redirect }
+        '503': { description: JSON client failure when VK ID is disabled or the flow cannot be created; top-level HTML navigation receives a sanitized 303 application redirect }
+  /api/v1/auth/vk/callback:
+    get:
+      security: []
+      summary: Consume VK ID callback and issue the existing cookie session
+      description: Clears the flow cookie on every outcome, consumes state exactly once, performs the server-side exchange, binds the minimal provider identity and redirects to a sanitized application URL. Provider tokens are never returned. Responses are no-store with Referrer-Policy no-referrer. A top-level callback rate limit is also converted to the same sanitized 303 application redirect; a JSON client retains 429.
+      parameters:
+        - { in: query, name: state, required: true, schema: { type: string, maxLength: 256 } }
+        - { in: query, name: code, required: false, schema: { type: string, maxLength: 2048 } }
+        - { in: query, name: device_id, required: false, schema: { type: string, maxLength: 256 } }
+        - { in: query, name: type, required: false, schema: { type: string, enum: [code_v2] } }
+        - { in: query, name: error, required: false, schema: { type: string, maxLength: 64 } }
+      responses:
+        '303':
+          description: Success redirects to `/`; cancellation and bounded failures redirect to `/?auth_error=<allowlisted-code>` without echoing provider parameters
+          headers:
+            Location: { schema: { type: string } }
+            Cache-Control: { schema: { type: string, enum: [no-store] } }
+            Pragma: { schema: { type: string, enum: [no-cache] } }
+            Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }
+        '429': { description: JSON client rate limit; top-level HTML navigation receives a sanitized 303 application redirect }
   /api/v1/tg/start:
     post:
       security: []
@@ -821,9 +906,28 @@ paths:
         '409': { description: Attempt evidence does not match the submitted owner-bound session }
   /api/v1/me:
     get:
-      summary: Current user, base subscription, Premium entitlements, remaining voice minutes and server-projected feature flags
+      summary: Current internal owner, safe display name, subscription, Premium entitlements, remaining voice minutes and feature flags
       responses:
-        '200': { description: User profile; `features.adaptive_learning` is true only when the server rollout flag is enabled }
+        '200':
+          description: User profile. `username` remains the opaque internal owner key; `displayName` is presentation-only and no provider subject is exposed. `features.adaptive_learning` is true only when the server rollout flag is enabled.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [authenticated, username, displayName, role, active, features]
+                properties:
+                  authenticated: { type: boolean, enum: [true] }
+                  username: { type: string, maxLength: 64 }
+                  displayName: { type: string, maxLength: 160 }
+                  role: { type: string }
+                  active: { type: boolean }
+                  sub_until: { type: integer, format: int64, minimum: 0 }
+                  trial_used: { type: boolean }
+                  features:
+                    type: object
+                    properties: { adaptive_learning: { type: boolean } }
+                    additionalProperties: true
+                additionalProperties: true
         '401': { $ref: '#/components/responses/Unauthorized' }
   /api/v1/payments/requests:
     post:
@@ -2079,7 +2183,14 @@ paths:
     get:
       summary: Export the authenticated user's account, progress and attempt data
       responses:
-        '200': { description: JSON export including adaptive goals/structured estimates/plan revisions/learning sessions/diagnostic sessions and bounded responses, Voice Tutor sessions, recovery/repeat outcomes, Speaking accent setup lifecycle metadata and bounded provider/model/prompt metadata; revealed `correctAnswer` keys for completed EGE attempts may appear only after both parts finish, while accent evidence keys, raw audio, temporary captions, full Voice Tutor transcripts, nonce hashes and idempotency replay snapshots remain excluded }
+        '200':
+          description: JSON export including the learner's bound identity, adaptive goals/structured estimates/plan revisions/learning sessions/diagnostic sessions and bounded responses, Voice Tutor sessions, recovery/repeat outcomes, Speaking accent setup lifecycle metadata and bounded provider/model/prompt metadata; revealed `correctAnswer` keys for completed EGE attempts may appear only after both parts finish, while accent evidence keys, raw audio, temporary captions, full Voice Tutor transcripts, nonce hashes and idempotency replay snapshots remain excluded
+          headers:
+            Cache-Control: { schema: { type: string, enum: [no-store] } }
+            Content-Disposition: { schema: { type: string, example: 'attachment; filename="easyboost-data.json"' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccountExport' }
         '401': { $ref: '#/components/responses/Unauthorized' }
   /api/v1/account:
     delete:
@@ -2659,6 +2770,32 @@ components:
       in: cookie
       name: eb_token
   schemas:
+    AccountExport:
+      type: object
+      required: [exported_at, account, progress]
+      properties:
+        exported_at: { type: string, format: date-time }
+        account:
+          type: object
+          required: [username, identity_provider, identity_subject, display_name]
+          properties:
+            username: { type: string, minLength: 1, maxLength: 128 }
+            telegram_id:
+              description: Numeric file-storage value or PostgreSQL BIGINT string; null for VK-only accounts.
+              oneOf:
+                - { type: integer }
+                - { type: string, pattern: '^[0-9]+$' }
+                - { type: object, nullable: true, enum: [null] }
+            identity_provider: { type: string, nullable: true, description: Minimal learner identity provider; `vk` for VK ID accounts. }
+            identity_subject: { type: string, nullable: true, description: Provider-scoped stable subject used for account binding. }
+            display_name: { type: string, nullable: true, maxLength: 160 }
+            role: { type: string }
+            trial_used: { type: boolean }
+            subscription_until: { nullable: true }
+            created_at: { nullable: true }
+          additionalProperties: true
+        progress: { type: object, additionalProperties: true }
+      additionalProperties: true
     EgeMockDraftAnswer:
       oneOf:
         - { type: string, maxLength: 20000 }

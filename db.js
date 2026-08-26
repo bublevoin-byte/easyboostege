@@ -8,6 +8,10 @@ const repository = config.database.provider === 'postgres'
 
 export const getUser = (...args) => repository.getUser(...args);
 export const createUser = (...args) => repository.createUser(...args);
+export const findOrCreateProviderUser = (...args) => repository.findOrCreateProviderUser(...args);
+export const createOAuthTransaction = (...args) => repository.createOAuthTransaction(...args);
+export const consumeOAuthTransaction = (...args) => repository.consumeOAuthTransaction(...args);
+export const purgeOAuthTransactions = (...args) => repository.purgeOAuthTransactions(...args);
 export const getProgress = (...args) => repository.getProgress(...args);
 export const saveProgress = (...args) => repository.saveProgress(...args);
 export const mergeProgress = (...args) => repository.mergeProgress(...args);

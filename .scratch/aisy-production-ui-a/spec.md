@@ -129,9 +129,10 @@ OAuth-токены не попадают в localStorage и не становя�
   HttpOnly/SameSite cookie-сессию. Браузер не получает provider access/refresh token как storage contract.
 - Идентичности хранятся provider-agnostic; Telegram association и отдельные admin credentials не смешиваются с
   VK subject. Миграция обратима на уровне данных и не меняет ownership существующего прогресса.
-- Конфигурация использует только имена переменных в документации: `VK_ID_APP_ID`, `VK_ID_REDIRECT_URI` и, если
-  выбранный тип приложения VK требует confidential exchange, `VK_ID_CLIENT_SECRET`. Значения секретов никогда
-  не записываются в репозиторий, логи, скриншоты или клиентский bundle.
+- Конфигурация live-flow использует `VK_ID_APP_ID` и точный `VK_ID_REDIRECT_URI`; `VK_ID_SCOPE` обязан оставаться
+  пустым. Проверенный VK ID Authorization Code + PKCE v2.6.1 contract не использует отдельный confidential
+  credential. Значения конфигурации не попадают в
+  browser storage, логи, скриншоты или клиентский bundle.
 - `PLACEHOLDER — владелец должен создать VK ID application, зарегистрировать точный callback URL и передать
   значения через secret storage окружения`. До этого production UI показывает «VK ID пока не подключён».
 - Local fake identity разрешается только явным dev/test flag, запрещается при `NODE_ENV=production`, не вызывает
