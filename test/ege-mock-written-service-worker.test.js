@@ -398,7 +398,13 @@ test('a clean first activation stays lazy when registration.active becomes the c
       const store = stores.get(name) || new Map(); stores.set(name, store);
       return {
         async addAll(paths) {
-          if (name.startsWith('easyboost-ege-mock-exec-v1-')) executableFetches += paths.length;
+          if (name.startsWith('easyboost-ege-mock-exec-v1-')) {
+            executableFetches += paths.length;
+            return;
+          }
+          for (const resourcePath of paths) {
+            store.set(`https://easyboost.test${resourcePath}`, new Response(`shell:${resourcePath}`));
+          }
         },
         async put(key, value) { store.set(typeof key === 'string' ? key : key.url, value); },
         async match(key) { return store.get(typeof key === 'string' ? key : key.url)?.clone(); },
@@ -407,7 +413,14 @@ test('a clean first activation stays lazy when registration.active becomes the c
     },
     async keys() { return [...stores.keys()]; },
     async delete(name) { return stores.delete(name); },
-    async match() { return undefined; },
+    async match(key) {
+      const cacheKey = typeof key === 'string' ? key : key.url;
+      for (const store of stores.values()) {
+        const value = store.get(cacheKey);
+        if (value) return value.clone();
+      }
+      return undefined;
+    },
   };
   const self = {
     location: { origin: 'https://easyboost.test' }, registration: { active: null }, navigator: { locks: immediateLocks },
@@ -434,6 +447,15 @@ test('a clean first activation stays lazy when registration.active becomes the c
   assert.equal(executableFetches, 0);
   const executableCache = [...stores.entries()].find(([name]) => name.startsWith('easyboost-ege-mock-exec-v1-'))?.[1];
   assert.equal(executableCache?.size || 0, 0);
+  for (const resourcePath of ['/modules/reading.js', '/learning-activity-contract.js']) {
+    let responsePromise;
+    activationListeners.get('fetch')({
+      request: { method: 'GET', mode: 'cors', url: `https://easyboost.test${resourcePath}` },
+      respondWith(value) { responsePromise = value; }, waitUntil() {},
+    });
+    assert.equal(await (await responsePromise).text(), `shell:${resourcePath}`,
+      `${resourcePath} must remain reachable from the fresh-install shell while offline`);
+  }
 });
 
 test('an update replaces a retained clean install decision before preserving its executable', async () => {

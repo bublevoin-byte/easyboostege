@@ -1,11 +1,13 @@
-function createVocabularySessionView({ escapeHtml, decoration, badge, speaker, handlerValue, requestFrame }) {
+function createVocabularySessionView({
+  escapeHtml, decoration, badge, speaker, handlerValue, requestFrame, setPrimaryAction,
+}) {
   const frame = (item, title, kicker, content) => decoration() + badge(item)
     + `<div class="vocab-task"><p class="vocab-kicker">${kicker}</p>`
     + `<h1 id="w_session_title" tabindex="-1">${title}</h1>${content}</div>`;
 
-  const answerInput = (label) => `<label class="vocab-answer-label" for="w_session_input">${label}</label>`
+  const answerInput = (label, token) => `<label class="vocab-answer-label" for="w_session_input">${label}</label>`
     + `<input id="w_session_input" class="vocab-answer-input" aria-label="${label}" autocapitalize="none" `
-    + 'autocomplete="off" spellcheck="false" onkeydown="if(event.key===\'Enter\')wSubmitSession()">';
+    + 'autocomplete="off" spellcheck="false" onkeydown="if(event.key===\'Enter\')wSubmitSession(' + token + ')">';
 
   const feedbackDetails = (item) => {
     const pronunciation = item.ipa
@@ -44,14 +46,15 @@ function createVocabularySessionView({ escapeHtml, decoration, badge, speaker, h
       + `<article><strong>${trend30.independentRate}%</strong><span>30 дней · ${trend30.attempts} попыток</span></article></div>${detail}</section>`;
   }
 
-  function renderTask(card, options, { task, item, choices = [], contextPrompt = '' }) {
+  function renderTask(card, options, { task, item, choices = [], contextPrompt = '', token }) {
     if (task.bridge) {
       const content = `<p class="vocab-cue" lang="en">${escapeHtml(item.w)}</p>`
         + `<p class="vocab-task-meaning">${escapeHtml(item.tr || 'Перевод пока не добавлен')}</p>`
         + `<p class="vocab-bridge-note">Без оценки — эта карточка только создаёт интервал перед повтором.</p>`
         + speaker(`Озвучить слово ${item.w}`, item.w);
       card.innerHTML = frame(item, 'Короткая пауза', 'ЗАКРЕПЛЕНИЕ', content);
-      options.innerHTML = '<button type="button" class="vocab-primary" onclick="wCompleteBridge()">Продолжить</button>';
+      options.innerHTML = '';
+      setPrimaryAction('Продолжить', `wCompleteBridge(${token})`);
       focusTask();
       return;
     }
@@ -61,59 +64,66 @@ function createVocabularySessionView({ escapeHtml, decoration, badge, speaker, h
         + `<div class="vocab-feedback-context">${feedbackDetails(item)}</div>`
         + speaker(`Озвучить слово ${item.w}`, item.w);
       card.innerHTML = frame(item, 'Познакомься со словом', 'ЗНАКОМСТВО', content);
-      options.innerHTML = '<button type="button" class="vocab-primary" onclick="wCompleteIntroduction()">Начать вспоминать</button>';
+      options.innerHTML = '';
+      setPrimaryAction('Начать вспоминать', `wCompleteIntroduction(${token})`);
       focusTask();
       return;
     }
     if (task.mode === 'receptive_meaning') {
       card.innerHTML = frame(item, 'Выбери значение', 'УЗНАВАНИЕ',
         `<p class="vocab-cue" lang="en">${escapeHtml(item.w)}</p>`);
-      options.innerHTML = choices.map((choice) => '<button type="button" class="vocab-choice" '
-        + 'onclick="wChooseRecognition(\'' + handlerValue(choice) + '\')">' + escapeHtml(choice) + '</button>').join('')
-        + '<button type="button" class="vocab-not-known" onclick="wNotKnown()">Не знаю</button>';
+      options.innerHTML = '<fieldset class="vocab-choice-group"><legend>Варианты значения</legend>'
+        + choices.map((choice) => '<label class="vocab-choice aisy-choice"><input type="radio" name="w_recognition_choice" '
+        + 'data-vocab-choice="' + handlerValue(choice) + '" value="' + handlerValue(choice) + '" '
+        + 'onchange="wChooseRecognition(\'' + handlerValue(choice) + '\',' + token + ')" '
+        + 'onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.click()}"><span>' + escapeHtml(choice) + '</span></label>').join('')
+        + '</fieldset><p id="w_choice_status" class="vocab-choice-status" role="status" aria-live="polite" aria-atomic="true"></p>'
+        + '<button type="button" class="vocab-not-known" onclick="wNotKnown(' + token + ')">Не знаю</button>';
+      setPrimaryAction('Проверить ответ', `wSubmitRecognition(${token})`, true);
       focusTask();
       return;
     }
     if (task.mode === 'russian_reveal') {
       card.innerHTML = frame(item, 'Вспомни значение', 'СМЫСЛ',
-        `<p class="vocab-cue" lang="en">${escapeHtml(item.w)}</p>${answerInput('Твой вариант значения по-русски')}`);
-      options.innerHTML = '<button type="button" class="vocab-primary" onclick="wRevealRussian()">Показать ответ</button>'
-        + '<button type="button" class="vocab-not-known" onclick="wNotKnown()">Не знаю</button>';
+        `<p class="vocab-cue" lang="en">${escapeHtml(item.w)}</p>${answerInput('Твой вариант значения по-русски', token)}`);
+      options.innerHTML = '<button type="button" class="vocab-not-known" onclick="wNotKnown(' + token + ')">Не знаю</button>';
+      setPrimaryAction('Показать ответ', `wRevealRussian(${token})`);
     } else if (task.mode === 'english_production') {
       card.innerHTML = frame(item, 'Напиши слово', 'АНГЛИЙСКИЙ',
-        `<p class="vocab-task-meaning">${escapeHtml(item.tr || 'Перевод пока не добавлен')}</p>${answerInput('Ответ по-английски')}`);
-      options.innerHTML = '<button type="button" class="vocab-primary" onclick="wSubmitSession()">Проверить</button>'
-        + '<button type="button" class="vocab-not-known" onclick="wNotKnown()">Не знаю</button>';
+        `<p class="vocab-task-meaning">${escapeHtml(item.tr || 'Перевод пока не добавлен')}</p>${answerInput('Ответ по-английски', token)}`);
+      options.innerHTML = '<button type="button" class="vocab-not-known" onclick="wNotKnown(' + token + ')">Не знаю</button>';
+      setPrimaryAction('Проверить', `wSubmitSession(${token})`);
     } else if (task.mode === 'contextual_production') {
       card.innerHTML = frame(item, 'Заполни пропуск', 'КОНТЕКСТ',
-        `<p class="vocab-context-prompt" lang="en">${escapeHtml(contextPrompt || 'Контекст пока не добавлен')}</p>${answerInput('Ответ по-английски')}`);
-      options.innerHTML = '<button type="button" class="vocab-primary" onclick="wSubmitSession()">Проверить</button>'
-        + '<button type="button" class="vocab-not-known" onclick="wNotKnown()">Не знаю</button>';
+        `<p class="vocab-context-prompt" lang="en">${escapeHtml(contextPrompt || 'Контекст пока не добавлен')}</p>${answerInput('Ответ по-английски', token)}`);
+      options.innerHTML = '<button type="button" class="vocab-not-known" onclick="wNotKnown(' + token + ')">Не знаю</button>';
+      setPrimaryAction('Проверить', `wSubmitSession(${token})`);
     } else {
       card.innerHTML = frame(item, 'Напиши на слух', 'АУДИРОВАНИЕ',
         '<button type="button" class="vocab-listen" onclick="wSpeakLibraryValue(\'' + handlerValue(item.w)
         + '\')">Прослушать ещё раз</button>'
-        + answerInput('Ответ по-английски'));
-      options.innerHTML = '<button type="button" class="vocab-primary" onclick="wSubmitSession()">Проверить</button>'
-        + '<button type="button" class="vocab-not-known" onclick="wNotKnown()">Не знаю</button>';
+        + answerInput('Ответ по-английски', token));
+      options.innerHTML = '<button type="button" class="vocab-not-known" onclick="wNotKnown(' + token + ')">Не знаю</button>';
+      setPrimaryAction('Проверить', `wSubmitSession(${token})`);
     }
     focusTask(true);
   }
 
-  function renderRussianReveal(card, options, item) {
+  function renderRussianReveal(card, options, item, token) {
     card.innerHTML = frame(item, 'Сверь значение', 'ЧЕСТНАЯ САМООЦЕНКА',
       `<p class="vocab-cue" lang="en">${escapeHtml(item.w)}</p>`
       + `<p class="vocab-reveal-answer" role="status" aria-live="polite" aria-atomic="true" `
       + `aria-label="${escapeHtml(item.tr || 'Перевод пока не добавлен')}">${escapeHtml(item.tr || 'Перевод пока не добавлен')}</p>`
       + `<div class="vocab-feedback-context">${feedbackDetails(item)}</div>`);
     options.innerHTML = '<fieldset class="vocab-self-rating"><legend>Насколько близко ты вспомнил(а)?</legend>'
-      + '<button type="button" class="vocab-primary" onclick="wRateRussian(\'knew\')">Знал(а)</button>'
-      + '<button type="button" class="vocab-secondary" onclick="wRateRussian(\'almost\')">Почти</button>'
-      + '<button type="button" class="vocab-not-known" onclick="wRateRussian(\'not_known\')">Не знал(а)</button></fieldset>';
+      + '<label class="vocab-choice aisy-choice"><input type="radio" name="w_russian_rating" data-vocab-rating="knew" value="knew" onchange="wChooseRussianRating(\'knew\',' + token + ')" onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.click()}"><span>Знал(а)</span></label>'
+      + '<label class="vocab-choice aisy-choice"><input type="radio" name="w_russian_rating" data-vocab-rating="almost" value="almost" onchange="wChooseRussianRating(\'almost\',' + token + ')" onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.click()}"><span>Почти</span></label>'
+      + '<label class="vocab-choice aisy-choice"><input type="radio" name="w_russian_rating" data-vocab-rating="not_known" value="not_known" onchange="wChooseRussianRating(\'not_known\',' + token + ')" onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.click()}"><span>Не знал(а)</span></label></fieldset>';
+    setPrimaryAction('Сохранить оценку', `wSubmitRussianRating(${token})`, true);
     focusTask();
   }
 
-  function renderFeedback(card, options, task, item, result) {
+  function renderFeedback(card, options, task, item, result, token) {
     const status = feedbackStatus(result);
     const full = result.outcome !== 'correct' || task.mode === 'russian_reveal';
     const details = feedbackDetails(item);
@@ -124,7 +134,8 @@ function createVocabularySessionView({ escapeHtml, decoration, badge, speaker, h
       + (full ? `<div class="vocab-feedback-context">${details}</div>`
         : `<details class="vocab-feedback-more"><summary>Контекст и произношение</summary>${details}</details>`)
       + '</section>';
-    options.innerHTML = '<button type="button" class="vocab-primary sq" onclick="wSessionNext()">Дальше</button>';
+    options.innerHTML = '';
+    setPrimaryAction('Дальше', `wSessionNext(${token})`);
     const heading = document.getElementById('w_feedback_title');
     if (heading) heading.focus();
   }
@@ -136,7 +147,7 @@ function createVocabularySessionView({ escapeHtml, decoration, badge, speaker, h
     return `${value} ${word}`;
   };
 
-  function renderSummary(card, options, summary) {
+  function renderSummary(card, options, summary, token) {
     const difficult = summary.difficultWords.length
       ? '<section class="vocab-difficult" aria-label="Сложные слова"><h2>Сложные слова</h2><ul>'
         + summary.difficultWords.map((word) => `<li><strong lang="en">${escapeHtml(word.word)}</strong>`
@@ -154,9 +165,9 @@ function createVocabularySessionView({ escapeHtml, decoration, badge, speaker, h
       + `<article><strong>${summary.independent}</strong><span>самостоятельно</span></article>`
       + `<article><strong>${summary.assisted}</strong><span>с подсказкой</span></article>`
       + `<article><strong>${summary.errors}</strong><span>${errorLabel}</span></article></div>${difficult}</section>`;
-    options.innerHTML = (summary.difficultWords.length
-      ? '<button type="button" class="vocab-secondary" onclick="wPracticeDifficult()">Потренировать сложные слова</button>' : '')
-      + '<button type="button" class="vocab-primary" onclick="wShowHome()">К плану на сегодня</button>';
+    options.innerHTML = summary.difficultWords.length
+      ? '<button type="button" class="vocab-secondary" onclick="wPracticeDifficult()">Потренировать сложные слова</button>' : '';
+    setPrimaryAction('К плану слов', `wShowHome(${token})`);
     const heading = document.getElementById('w_summary_title');
     if (heading) heading.focus();
   }

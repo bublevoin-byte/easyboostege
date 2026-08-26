@@ -94,10 +94,10 @@ const AI_DISCLAIMER = AUTOMATIC_ASSESSMENT_WARNING;
 
   // Every asynchronous operation needs its own visible state, not just a silent screen.
   const STATES = {
-    loading: { role: 'status', glyph: '', color: '#6A6E75', background: '#F1F2F4' },
-    success: { role: 'status', glyph: '✓', color: '#1D7F4A', background: '#EAF7F0' },
-    empty: { role: 'status', glyph: '·', color: '#75705F', background: '#FAF6F1' },
-    error: { role: 'alert', glyph: '!', color: '#A83226', background: '#FDEDEA' },
+    loading: { role: 'status', glyph: '' },
+    success: { role: 'status', glyph: '✓' },
+    empty: { role: 'status', glyph: '·' },
+    error: { role: 'alert', glyph: '!' },
   };
 
   function stateMarkup(options = {}) {
@@ -113,7 +113,7 @@ const AI_DISCLAIMER = AUTOMATIC_ASSESSMENT_WARNING;
       ? `<button type="button" class="ebstate-action sq">${escapeHtml(options.actionLabel)}</button>`
       : '';
     const live = state.role === 'status' ? ' aria-live="polite"' : '';
-    return `<div class="ebstate ebstate-${kind}" role="${state.role}"${live} style="color:${state.color};background:${state.background};">`
+    return `<div class="ebstate ebstate-${kind}" role="${state.role}"${live}>`
       + `${glyph}<strong class="ebstate-title">${escapeHtml(options.title ?? '')}</strong>${description}${action}</div>`;
   }
 

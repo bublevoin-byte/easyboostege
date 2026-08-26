@@ -22,6 +22,7 @@ const source = await fs.readFile(new URL('../public/components.js', import.meta.
 const executableSource = source.replace(/^import[^;]+;\r?\n/u, '');
 const appSource = await readApplicationSource();
 const htmlSource = await fs.readFile(new URL('../public/index.html', import.meta.url), 'utf8');
+const themeSource = await fs.readFile(new URL('../public/aisy-theme.css', import.meta.url), 'utf8');
 
 function createComponents() {
   const window = { document: { getElementById: () => null, createElement: () => ({ setAttribute() {} }) } };
@@ -83,6 +84,18 @@ test('an unknown kind falls back to loading instead of breaking the screen', () 
   const ui = createComponents();
   assert.match(ui.stateMarkup({ kind: 'nonsense', title: 'x' }), /ebstate-loading/u);
   assert.match(ui.stateMarkup(), /ebstate-loading/u);
+});
+
+test('shared states use semantic theme classes instead of light-only inline colors', () => {
+  const ui = createComponents();
+  for (const kind of ['loading', 'success', 'empty', 'error']) {
+    const markup = ui.stateMarkup({ kind, title: kind });
+    assert.doesNotMatch(markup, /style=/u);
+    assert.match(markup, new RegExp(`ebstate-${kind}`, 'u'));
+    assert.match(themeSource, new RegExp(`\\.ebstate-${kind}\\b`, 'u'));
+  }
+  const statesSource = source.slice(source.indexOf('const STATES'), source.indexOf('function renderState'));
+  assert.doesNotMatch(statesSource, /#[0-9a-f]{3,8}\b/iu);
 });
 
 test('the application wires all four states to real operations', () => {

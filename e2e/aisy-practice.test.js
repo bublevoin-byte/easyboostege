@@ -34,7 +34,13 @@ try{
   const now=Date.now();
   const dataFile=path.join(temporaryDirectory,'data.json');
   await fs.writeFile(dataFile,JSON.stringify({
-    users:{learner:{created:now,sub_until:now+86_400_000}},
+    users:{learner:{
+      created:now,sub_until:now+86_400_000,
+      privacy_consent:{
+        text_processing:true,voice_processing:false,
+        policy_version:'2026-08-26-vk-id-v1',updated_at:new Date(now).toISOString(),
+      },
+    }},
     progress:{learner:{}},
   }),'utf8');
   const output=[];
@@ -55,7 +61,7 @@ try{
 
   const mobile=await createActiveSubscriptionPage(browser,{
     baseUrl,username:'learner',jwtSecret,
-    contextOptions:{viewport:{width:320,height:568},reducedMotion:'reduce',serviceWorkers:'block'},
+    contextOptions:{viewport:{width:320,height:720},reducedMotion:'reduce',serviceWorkers:'block'},
   });
   const browserErrors=[];
   mobile.page.on('pageerror',error=>browserErrors.push(error.message));
@@ -67,11 +73,13 @@ try{
   assert.equal(await rows.count(),6);
   assert.deepEqual(await rows.locator('h2').allTextContents(),expectedSkills);
   assert.equal(await rows.locator('button').count(),6,'each skill row must expose exactly one action');
-  assert.equal(await rows.locator('.aisy-button:not(.aisy-button--secondary)').count(),1,'Practice must expose one primary action');
+  assert.equal(await rows.locator('.aisy-button:not(.aisy-button--secondary)').count(),0,'skill rows stay secondary');
+  assert.equal(await mobile.page.locator('#practice-recommendation .aisy-button:not(.aisy-button--secondary)').count(),1,
+    'Practice must expose exactly one projected primary action');
   assert.equal(await rows.locator('svg[stroke="currentColor"][stroke-width="2"]').count(),6);
   assert.equal(await rows.evaluateAll(items=>items.every(item=>item.querySelectorAll('button').length===1)),true);
 
-  for(const viewport of [{width:320,height:568},{width:375,height:667},{width:768,height:1024}]){
+  for(const viewport of [{width:320,height:720},{width:375,height:667},{width:768,height:1024}]){
     await mobile.page.setViewportSize(viewport);
     const layout=await mobile.page.evaluate(()=>({
       viewport:innerWidth,
@@ -87,6 +95,11 @@ try{
   const vocabulary=rows.filter({has:mobile.page.getByRole('heading',{name:'Слова',exact:true})});
   await vocabulary.getByRole('button',{name:'Открыть: Слова'}).press('Enter');
   await mobile.page.locator('#scr2.on').waitFor({state:'visible',timeout:5_000});
+  assert.deepEqual(await mobile.page.evaluate(()=>({
+    back:[...document.querySelectorAll('#aisy-shell-back:not([hidden])')].map(button=>button.getAttribute('aria-label')),
+    navHidden:document.getElementById('aisy-shell-nav').hidden,
+    navInert:document.getElementById('aisy-shell-nav').inert,
+  })),{back:['Назад в раздел Практика'],navHidden:true,navInert:true});
   assert.equal(await mobile.page.evaluate(()=>document.activeElement?.closest('#scr2')!==null),true);
   await mobile.page.getByRole('button',{name:/^Начать ·/u}).press('Enter');
   await mobile.page.locator('#scr2 .vocab-practice-card').waitFor({state:'visible',timeout:5_000});
@@ -94,8 +107,56 @@ try{
     index:window.WI,
     length:window.WQ?.length,
     word:window.WQ?.[window.WI]?.word,
+    attemptId:document.getElementById('w_area').dataset.sessionAttemptId,
+    phase:document.getElementById('w_area').dataset.sessionPhase,
   }));
   assert.ok(wordProgress.length>0);
+  assert.match(wordProgress.attemptId,/^[0-9a-f-]{36}$/u);
+  assert.equal(wordProgress.phase,'task');
+
+  for(const viewport of [{width:320,height:720},{width:720,height:320}]){
+    await mobile.page.setViewportSize(viewport);
+    const layout=await mobile.page.evaluate(()=>{
+      const screen=document.getElementById('scr2').getBoundingClientRect();
+      const frame=document.getElementById('frame').getBoundingClientRect();
+      const route=document.querySelector('#scr2 .words-route').getBoundingClientRect();
+      const area=document.getElementById('w_area');
+      const areaRect=area.getBoundingClientRect();
+      const dock=document.getElementById('w_action_dock').getBoundingClientRect();
+      const primary=document.querySelector('#w_action_dock .aisy-button');
+      const cta=primary.getBoundingClientRect();
+      const affordance=getComputedStyle(primary,'::after');
+      const frameStyle=getComputedStyle(document.getElementById('frame'));
+      const routeStyle=getComputedStyle(document.querySelector('#scr2 .words-route'));
+      const dockStyle=getComputedStyle(document.getElementById('w_action_dock'));
+      const controls=[...document.querySelectorAll('#scr2 button')].filter(button=>button.getClientRects().length)
+        .map(button=>{const rect=button.getBoundingClientRect();return{width:rect.width,height:rect.height}});
+      return{
+        viewportWidth:innerWidth,viewportHeight:innerHeight,documentWidth:document.documentElement.scrollWidth,
+        frameWidth:frame.width,frameHeight:frame.height,screenTop:screen.top,screenHeight:screen.height,
+        routeTop:route.top,routeBottom:route.bottom,routeHeight:route.height,
+        areaHeight:areaRect.height,areaBottom:areaRect.bottom,dockTop:dock.top,dockBottom:dock.bottom,
+        screenBottom:screen.bottom,ctaHeight:cta.height,affordanceWidth:affordance.width,
+        affordanceHeight:affordance.height,controls,
+        computed:{frameHeight:frameStyle.height,frameBlockSize:frameStyle.blockSize,
+          routeDisplay:routeStyle.display,routeRows:routeStyle.gridTemplateRows,
+          dockDisplay:dockStyle.display,dockHeight:dockStyle.height,dockBlockSize:dockStyle.blockSize,
+          dockPadding:dockStyle.padding,dockMinHeight:dockStyle.minHeight},
+      };
+    });
+    assert.ok(layout.documentWidth<=layout.viewportWidth,`Words must not overflow at ${viewport.width}×${viewport.height}`);
+    assert.ok(layout.frameWidth<=390.5,'Words remains a centered phone canvas without a side rail');
+    assert.ok(layout.areaHeight>0,'the scrollable answer area must not collapse');
+    assert.ok(layout.areaBottom<=layout.dockTop+1,'the action dock must not cover the answer area');
+    assert.ok(layout.dockBottom<=layout.screenBottom+1,
+      `the dock must stay inside the deep screen: ${JSON.stringify(layout)}`);
+    assert.equal(Math.round(layout.ctaHeight),58);
+    assert.equal(Math.round(Number.parseFloat(layout.affordanceWidth)),38);
+    assert.equal(Math.round(Number.parseFloat(layout.affordanceHeight)),38);
+    assert.equal(layout.controls.every(control=>control.width>=44&&control.height>=44),true,
+      'every visible Words control keeps a 44×44 touch target');
+  }
+  await mobile.page.setViewportSize({width:320,height:720});
 
   await mobile.page.getByRole('button',{name:'Назад в раздел Практика',exact:true}).press('Enter');
   await mobile.page.locator('#aisy-practice.on').waitFor({state:'visible',timeout:5_000});
@@ -107,6 +168,8 @@ try{
     index:window.WI,
     length:window.WQ?.length,
     word:window.WQ?.[window.WI]?.word,
+    attemptId:document.getElementById('w_area').dataset.sessionAttemptId,
+    phase:document.getElementById('w_area').dataset.sessionPhase,
   })),wordProgress,'Practice must reopen the active vocabulary card without resetting it');
 
   await mobile.page.getByRole('button',{name:'Назад в раздел Практика',exact:true}).press('Enter');
@@ -224,6 +287,9 @@ try{
     baseUrl,username:'learner',jwtSecret,
     contextOptions:{viewport:{width:375,height:667},reducedMotion:'reduce'},
   });
+  const offlineFirstErrors=[];
+  offlineFirst.page.on('pageerror',error=>offlineFirstErrors.push(`page: ${error.message}`));
+  offlineFirst.page.on('requestfailed',request=>offlineFirstErrors.push(`request: ${request.url()} ${request.failure()?.errorText||''}`));
   await offlineFirst.page.goto(baseUrl,{waitUntil:'networkidle'});
   await offlineFirst.page.locator('#scr1.on').waitFor({state:'visible',timeout:5_000});
   await offlineFirst.page.evaluate(()=>navigator.serviceWorker.ready.then(()=>true));
@@ -235,6 +301,7 @@ try{
   assert.equal(await offlineFirst.page.locator('#aisy-practice.on').count(),0,'offline contour must not warm Practice by opening it online');
   await offlineFirst.context.setOffline(true);
   await openPractice(offlineFirst.page);
+  assert.deepEqual(offlineFirstErrors,[],'Practice install-cache must resolve its transitive module graph offline');
   assert.equal(await offlineFirst.page.locator('#practice-skills .practice-row').count(),6);
   await offlineFirst.page.locator('#practice-network-state:not([hidden])').waitFor({state:'visible',timeout:5_000});
   await offlineFirst.context.setOffline(false);

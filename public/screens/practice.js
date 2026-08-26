@@ -88,7 +88,7 @@ function openSkill(screenId) {
   });
 }
 
-function skillRow(skill, primarySkillId) {
+function skillRow(skill) {
   const item = document.createElement('li');
   item.className = 'practice-row aisy-surface';
   item.dataset.skill = skill.id;
@@ -123,8 +123,7 @@ function skillRow(skill, primarySkillId) {
   state.textContent = skill.stateLabel;
   const action = document.createElement('button');
   action.type = 'button';
-  action.className = skill.id === primarySkillId
-    ? 'aisy-button practice-row__action' : 'aisy-button aisy-button--secondary practice-row__action';
+  action.className = 'aisy-button aisy-button--secondary practice-row__action';
   action.textContent = skill.action.label;
   action.setAttribute('aria-label', `${skill.action.label}: ${skill.label}`);
   action.addEventListener('click', () => openSkill(skill.action.screenId));
@@ -133,12 +132,40 @@ function skillRow(skill, primarySkillId) {
   return item;
 }
 
-function primarySkill(skills) {
-  for (const state of ['continue', 'review', 'recommended', 'available']) {
-    const skill = skills.find((candidate) => candidate.state === state);
-    if (skill) return skill.id;
+function renderRecommendation(nextAction) {
+  const host = document.getElementById('practice-recommendation');
+  if (!host || !nextAction) {
+    if (host) host.hidden = true;
+    return;
   }
-  return null;
+  host.hidden = false;
+  const eyebrow = document.createElement('p');
+  eyebrow.className = 'practice-recommendation__eyebrow';
+  eyebrow.textContent = 'Следующий шаг';
+  const title = document.createElement('h2');
+  title.id = 'practice-recommendation-title';
+  title.textContent = nextAction.title;
+  const reason = document.createElement('p');
+  reason.className = 'practice-recommendation__reason';
+  reason.textContent = nextAction.reason;
+  const outcome = document.createElement('p');
+  outcome.className = 'practice-recommendation__outcome';
+  outcome.textContent = nextAction.outcome;
+  const availability = document.createElement('p');
+  availability.id = 'practice-recommendation-availability';
+  availability.className = 'practice-recommendation__availability';
+  availability.dataset.availability = nextAction.availability;
+  availability.textContent = nextAction.availabilityLabel;
+  const action = document.createElement('button');
+  action.type = 'button';
+  action.className = 'aisy-button practice-recommendation__action';
+  action.textContent = nextAction.label;
+  action.setAttribute('aria-label', `${nextAction.label}: ${nextAction.title}`);
+  action.setAttribute('aria-describedby', availability.id);
+  action.disabled = nextAction.disabled;
+  action.setAttribute('aria-disabled', String(nextAction.disabled));
+  action.addEventListener('click', () => openSkill(nextAction.screenId));
+  host.replaceChildren(eyebrow, title, reason, outcome, availability, action);
 }
 
 function renderPractice() {
@@ -154,12 +181,12 @@ function renderPractice() {
     recommendedSkill: cachedPlanFocus(),
     online: navigator.onLine !== false,
   });
-  const primarySkillId = primarySkill(view.skills);
   const title = document.getElementById('aisy-practice-title');
   const intro = document.getElementById('practice-intro');
   if (title) title.textContent = view.title;
   if (intro) intro.textContent = view.description;
-  root.replaceChildren(...view.skills.map((skill) => skillRow(skill, primarySkillId)));
+  renderRecommendation(view.nextAction);
+  root.replaceChildren(...view.skills.map((skill) => skillRow(skill)));
   const network = document.getElementById('practice-network-state');
   if (network) {
     network.hidden = navigator.onLine !== false;

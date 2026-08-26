@@ -104,87 +104,6 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
 .navit{display:flex;flex-direction:column;align-items:center;gap:4px;width:74px;padding:8px 0;border-radius:18px;transition:transform .18s cubic-bezier(.34,1.56,.64,1)}
 .navit:active{transform:scale(.92)}
 .navit.on{background:#FFEDE4;box-shadow:inset 0 -3px 7px rgba(242,104,63,.14),inset 0 2px 3px rgba(255,255,255,.9)}
-#w_area{perspective:900px}
-.vocab{color:#2B2B2B;font-size:14px;line-height:1.5;padding-bottom:10px}
-.vocab h1,.vocab h2,.vocab p{margin:0}.vocab h1{font-family:Nunito,Manrope,sans-serif;font-size:25px;line-height:1.15;font-weight:900;letter-spacing:-.4px}
-.vocab h2{font-family:Nunito,Manrope,sans-serif;font-size:17px;font-weight:850}
-.vocab-kicker{font-size:10px;font-weight:800;letter-spacing:1.25px;color:#9A513B}
-.vocab-home{display:flex;flex-direction:column;gap:14px}
-.vocab-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
-.vocab-stats article{min-width:0;background:#fff;border:1px solid #F0EAE2;border-radius:18px;padding:13px 8px;text-align:center;box-shadow:0 8px 20px rgba(60,45,30,.06)}
-.vocab-stats strong{display:block;font-family:Nunito,Manrope,sans-serif;font-size:25px;line-height:1;font-weight:900;color:#B54E2F;font-variant-numeric:tabular-nums}
-.vocab-stats span{display:block;margin-top:5px;font-size:11px;font-weight:700;color:#676158}
-.vocab-note,.vocab-readonly-note{border-radius:14px;background:#FFF4DE;color:#654A24;padding:10px 12px;font-size:12px;font-weight:650}
-.vocab-budget,.vocab-filters fieldset{min-width:0;margin:0;border:0;padding:0}
-.vocab-budget{background:#fff;border:1px solid #F0EAE2;border-radius:20px;padding:14px;box-shadow:0 8px 20px rgba(60,45,30,.05)}
-.vocab-budget legend,.vocab-filters legend{padding:0;font-size:12px;font-weight:800;color:#4D4942}
-.vocab-budget-options{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:9px}
-.vocab-budget-btn{min-width:0;border:1px solid #E5DED6;border-radius:14px;background:#FAF8F5;color:#4B4741;font:800 14px Manrope,sans-serif;cursor:pointer}
-.vocab-budget-btn.is-selected{border-color:#C2421B;background:#FFEDE4;color:#A63A1C;box-shadow:inset 0 0 0 1px #C2421B}
-#w_budget_note{margin-top:8px;font-size:11px;font-weight:600;color:#6A655D}
-.vocab-primary,.vocab-library-link{width:100%;border:0;border-radius:18px;font:800 15px Manrope,sans-serif;cursor:pointer}
-.vocab-primary{min-height:54px;background:linear-gradient(135deg,#FFA570,#F2683F);color:#fff;box-shadow:0 12px 24px rgba(242,104,63,.3)}
-.vocab-primary:disabled{background:#D7D1CA;color:#68625C;box-shadow:none;cursor:not-allowed}
-.vocab-library-link{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#fff;border:1px solid #F0EAE2;padding:13px 15px;text-align:left;color:#2B2B2B;box-shadow:0 9px 21px rgba(60,45,30,.06)}
-.vocab-library-link span:first-child{display:flex;min-width:0;flex-direction:column}.vocab-library-link small{margin-top:2px;color:#706A61;font-size:11px;font-weight:600}
-.vocab-topic-overview{border-radius:18px;background:#FAF6F1;padding:13px}.vocab-topic-overview h2{font-size:14px}.vocab-topic-overview>div{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.vocab-topic-overview span{border-radius:12px;background:#fff;padding:5px 8px;color:#625A51;font-size:10px;font-weight:750}
-.vocab-view-head{display:flex;align-items:center;gap:12px;margin-bottom:14px}.vocab-view-head>div{min-width:0;flex:1}
-.vocab-back,.vocab-icon-btn{display:grid;place-items:center;flex:none;width:44px;height:44px;border:0;border-radius:14px;cursor:pointer}
-.vocab-back{background:#fff;color:#5D554C;font:900 20px Manrope,sans-serif;box-shadow:0 6px 18px rgba(60,45,30,.08)}
-.vocab-icon-btn{background:#FFF4DE;color:#A94A0B;padding:0}
-.vocab-search-label{display:block;margin-bottom:6px;font-size:12px;font-weight:800;color:#4D4942}
-.vocab-search{display:block;width:100%;height:48px;box-sizing:border-box;border:1px solid #DED7CE;border-radius:16px;background:#fff;padding:0 14px;color:#2B2B2B;font:700 16px Manrope,sans-serif}
-.vocab-filters{margin-top:10px;border:1px solid #E9E2D9;border-radius:16px;background:#fff;padding:0 12px}
-.vocab-filters summary{min-height:44px;display:flex;align-items:center;font-weight:800;cursor:pointer}
-.vocab-filters fieldset{padding:10px 0;border-top:1px solid #F1ECE6}
-.vocab-filter-grid{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
-.vocab-filter-chip{position:relative;display:flex;align-items:center;min-height:44px;cursor:pointer}
-.vocab-filter-chip input{position:absolute;opacity:0;pointer-events:none}
-.vocab-filter-chip span{display:flex;align-items:center;min-height:36px;border:1px solid #E2DCD4;border-radius:14px;background:#FAF8F5;padding:3px 10px;color:#59534C;font-size:11px;font-weight:750}
-.vocab-filter-chip input:checked+span{border-color:#C2421B;background:#FFEDE4;color:#993A20;box-shadow:inset 0 0 0 1px #C2421B}
-.vocab-filter-chip input:focus-visible+span{outline:3px solid #175cd3;outline-offset:3px}
-.vocab-clear,.vocab-example-toggle{min-height:44px;border:0;background:transparent;color:#A63A1C;font:800 12px Manrope,sans-serif;text-decoration:underline;cursor:pointer}
-.vocab-results-status{min-height:21px;margin:11px 2px 5px!important;color:#676158;font-size:12px;font-weight:700}
-.vocab-word-list,.vocab-examples,.vocab-meanings{list-style:none;margin:0;padding:0}
-.vocab-word-list{display:flex;flex-direction:column;gap:9px}
-.vocab-word-row{display:flex;align-items:center;gap:8px;border:1px solid #EEE7DF;border-left:4px solid #C4BDB4;border-radius:18px;background:#fff;padding:5px 7px 5px 0;box-shadow:0 7px 18px rgba(60,45,30,.05)}
-.vocab-word-row.vocab-source-core{border-left-color:#25825A}.vocab-word-row.vocab-source-personal{border-left-color:#B54E2F}.vocab-word-row.vocab-source-generated{border-left-color:#7D659B}.vocab-word-row.vocab-source-unknown{border-left-color:#6B7078}
-.vocab-word-open{min-width:0;flex:1;border:0;background:transparent;padding:9px 5px 9px 11px;text-align:left;cursor:pointer}
-.vocab-word-main{display:flex;min-width:0;flex-direction:column}.vocab-word-main strong{font-size:15px;font-weight:850;color:#292621}.vocab-word-main small{margin-top:2px;color:#625D56;font-size:12px;font-weight:650}
-.vocab-word-meta,.vocab-topic-tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
-.vocab-state,.vocab-provenance,.vocab-topic-tags span{border-radius:10px;padding:3px 7px;font-size:9.5px;font-weight:800;line-height:1.35}
-.vocab-state{background:#FFF1E9;color:#973D24}.vocab-provenance{background:#F0F1F3;color:#545960}.vocab-topic-tags span{background:#F8F4ED;color:#6B6258}
-.vocab-source-personal .vocab-provenance{background:#FFE8DD;color:#8E3219}.vocab-source-generated .vocab-provenance{background:#F0E8F8;color:#65477D}
-.vocab-metadata{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0}
-.vocab-metadata>div{min-width:0;border-radius:14px;background:#fff;border:1px solid #EEE7DF;padding:10px}
-.vocab-metadata dt{font-size:10px;font-weight:800;color:#736C63}.vocab-metadata dd{margin:3px 0 0;font-weight:750;overflow-wrap:anywhere}.vocab-metadata .is-missing,.vocab-missing,.vocab-example .is-missing{color:#6C665E;font-style:italic}
-.vocab-detail{display:flex;flex-direction:column;gap:13px}.vocab-detail-section{border-radius:18px;background:#fff;border:1px solid #EEE7DF;padding:14px}
-.vocab-personal-actions{border:1px solid #E8C8BA;border-radius:18px;background:#FFF8F4;padding:14px}.vocab-personal-actions h2{font-size:14px;color:#7E351F}.vocab-personal-actions p{margin-top:6px!important;color:#5F554E;font-size:12px;font-weight:650;line-height:1.55}.vocab-delete-personal{width:100%;min-height:48px;margin-top:12px;border:1px solid #B73B32;border-radius:15px;background:#fff;color:#9F2F28;font:800 13px Manrope,sans-serif;cursor:pointer}.vocab-delete-personal:hover{background:#FDEDEA}.vocab-delete-personal:active{background:#F8D9D5}
-.vocab-meanings{margin-top:8px}.vocab-meanings li+li{margin-top:5px}
-.vocab-examples{display:flex;flex-direction:column;gap:10px;margin-top:9px}.vocab-example{border-radius:14px;background:#FAF7F2;padding:11px}
-.vocab-example>div{display:flex;align-items:flex-start;gap:8px}.vocab-example>div p{min-width:0;flex:1;font-weight:700}.vocab-example>p{margin-top:6px!important;font-size:12px}
-.vocab-practice-card{position:relative;overflow:hidden;background:#fff;border-radius:26px;border:1px solid #F0EAE2;box-shadow:0 14px 30px rgba(60,45,30,.08),0 2px 6px rgba(60,45,30,.04),inset 0 2px 0 rgba(255,255,255,.9);padding:24px;min-height:200px;display:flex;flex-direction:column;flex:none}
-.vocab-practice-options{margin-top:12px;display:flex;flex-direction:column;gap:10px;padding-bottom:8px}
-.vocab-trend{border:1px solid #EEE7DF;border-radius:18px;background:#fff;padding:14px}.vocab-trend h2{font-size:14px}
-.vocab-trend-stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px}.vocab-trend-stats article{border-radius:14px;background:#FAF6F1;padding:9px}
-.vocab-trend-stats strong{display:block;color:#9A3F24;font-size:20px;font-variant-numeric:tabular-nums}.vocab-trend-stats span{display:block;color:#625D56;font-size:10px;font-weight:700}
-.vocab-trend-empty{margin-top:9px!important;color:#686159;font-size:11px;font-weight:650}.vocab-trend-bars{height:88px;display:flex;align-items:flex-end;gap:6px;margin-top:10px}
-.vocab-trend-bars>span{display:flex;min-width:0;flex:1;height:100%;flex-direction:column;justify-content:flex-end;gap:3px}.vocab-trend-bars i{display:block;min-height:3px;height:var(--vocab-rate);border-radius:8px 8px 3px 3px;background:#D45B36}
-.vocab-trend-bars small{font-size:10px;color:#696159;text-align:center;white-space:nowrap}
-.vocab-task{position:relative;display:flex;min-height:190px;flex:1;flex-direction:column;align-items:center;justify-content:center;text-align:center}.vocab-task h1{margin-top:5px}
-.vocab-cue{margin-top:18px!important;font:900 30px/1.2 Nunito,Manrope,sans-serif;overflow-wrap:anywhere}.vocab-task-meaning,.vocab-reveal-answer{margin-top:15px!important;color:#A94425;font:850 21px/1.35 Nunito,Manrope,sans-serif}
-.vocab-context-prompt{margin-top:16px!important;border-radius:14px;background:#FAF6F1;padding:12px;color:#4F4942;font-size:16px;font-weight:700;font-style:italic}
-.vocab-bridge-note{margin-top:12px!important;color:#686159;font-size:11px;font-weight:700;line-height:1.45}
-.vocab-answer-label{align-self:stretch;margin-top:18px;text-align:left;color:#4D4942;font-size:12px;font-weight:800}.vocab-answer-input{display:block;width:100%;height:50px;box-sizing:border-box;margin-top:6px;border:1px solid #DCD3C9;border-radius:16px;background:#fff;padding:0 14px;color:#2B2B2B;font:750 16px Manrope,sans-serif}
-.vocab-choice,.vocab-secondary,.vocab-not-known,.vocab-listen{width:100%;min-height:48px;border-radius:16px;font:800 14px Manrope,sans-serif;cursor:pointer}.vocab-choice,.vocab-secondary{border:1px solid #E5DED6;background:#fff;color:#35312C}.vocab-not-known{border:1px solid #D7CFC5;background:#F7F4F0;color:#625A52}.vocab-listen{margin-top:20px;border:1px solid #F3C7A4;background:#FFF4DE;color:#914311}
-.vocab-feedback{position:relative;display:flex;min-height:190px;flex:1;flex-direction:column;justify-content:center}.vocab-feedback h1{margin-top:5px}.vocab-feedback-answer{display:flex;align-items:center;gap:10px;margin-top:14px}.vocab-feedback-answer strong{min-width:0;flex:1;font:900 28px/1.2 Nunito,Manrope,sans-serif;overflow-wrap:anywhere}.vocab-feedback-meaning{margin-top:6px!important;color:#9A4127;font-weight:800}
-.vocab-feedback-context,.vocab-feedback-more{margin-top:13px;border-radius:14px;background:#FAF6F1;padding:11px;color:#575047;font-size:12px}.vocab-feedback-context p+.vocab-feedback-context p,.vocab-feedback-more p+ p{margin-top:6px!important}.vocab-feedback-more summary{min-height:44px;display:flex;align-items:center;color:#75442F;font-weight:800;cursor:pointer}
-.vocab-self-rating{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0;border:0;padding:0}.vocab-self-rating legend{grid-column:1/-1;margin-bottom:4px;color:#4D4942;font-size:12px;font-weight:800}.vocab-self-rating .vocab-not-known{grid-column:1/-1}
-.vocab-summary{position:relative}.vocab-summary h1{margin-top:5px}.vocab-summary-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:13px}.vocab-summary-grid article{min-width:0;border-radius:14px;background:#FAF6F1;padding:9px;text-align:center}.vocab-summary-grid strong{display:block;color:#A44225;font-size:20px;font-variant-numeric:tabular-nums}.vocab-summary-grid span{display:block;color:#625D56;font-size:11px;font-weight:750}
-.vocab-difficult{margin-top:13px}.vocab-difficult h2{font-size:14px}.vocab-difficult ul{display:flex;flex-direction:column;gap:6px;margin:8px 0 0;padding:0;list-style:none}.vocab-difficult li{display:flex;align-items:center;justify-content:space-between;gap:8px;border-radius:12px;background:#FFF0E8;padding:8px 10px}.vocab-difficult span{color:#85412F;font-size:11px;font-weight:750}.vocab-summary-success{margin-top:13px!important;border-radius:14px;background:#EAF7F0;padding:10px;color:#276444;font-weight:700}
-.vocab button:focus-visible,.vocab input:focus-visible,.vocab summary:focus-visible{outline:3px solid #175cd3;outline-offset:3px}
-@media(max-width:375px){.vocab{font-size:13px}.vocab-stats article{padding-inline:5px}.vocab-metadata{grid-template-columns:1fr}.vocab-filter-grid{gap:6px}.vocab-practice-card{padding:18px}.vocab-cue{font-size:27px}}
-@media(prefers-reduced-motion:reduce){.vocab *{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
 @keyframes wflip{0%{transform:rotateY(88deg);opacity:.25}100%{transform:rotateY(0);opacity:1}}
 @keyframes wshake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-8px)}40%,80%{transform:translateX(8px)}}
 @keyframes wpop{0%{transform:scale(1)}40%{transform:scale(1.045)}100%{transform:scale(1)}}
@@ -233,6 +152,7 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
 <link rel="stylesheet" href="/asya-assistant.css">
 <link rel="stylesheet" href="/today.css">
 <link rel="stylesheet" href="/practice.css">
+<link rel="stylesheet" href="/words.css">
 <link rel="stylesheet" href="/ege-hub.css">
 <link rel="stylesheet" href="/progress-profile.css">
 </head><body>
@@ -349,6 +269,11 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
       <p class="practice__intro" id="practice-intro">Выберите навык для дополнительной работы. Незавершённые задания останутся на месте.</p>
     </header>
     <p id="practice-network-state" class="practice__network" role="status" aria-live="polite" hidden></p>
+    <article id="practice-recommendation" class="practice-recommendation aisy-surface" aria-live="polite" aria-labelledby="practice-recommendation-title">
+      <p class="practice-recommendation__eyebrow">Следующий шаг</p>
+      <h2 id="practice-recommendation-title">Подбираем практику…</h2>
+    </article>
+    <h2 class="practice__section-title">Все навыки</h2>
     <ul id="practice-skills" class="practice__list" aria-label="Навыки английского">
       <li class="practice-row aisy-surface" role="status">Готовим список навыков…</li>
     </ul>
@@ -465,61 +390,24 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
   </main>
 </div>
 <div class="screen" id="scr2" data-name="Слова">
+  <main class="words-route" aria-labelledby="w_header_title">
 
-    <!-- gradient header -->
-    <div style="position:absolute;top:0;left:0;right:0;height:206px;background:linear-gradient(150deg,#FFA570 0%,#F2683F 62%,#E44E20 100%);border-radius:0 0 32px 32px;z-index:1;overflow:hidden;box-shadow:0 14px 30px rgba(242,104,63,.25),inset 0 -8px 18px rgba(190,55,18,.22);">
-      <svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;" viewBox="0 0 390 206" preserveAspectRatio="xMidYMid slice" fill="rgba(255,255,255,.85)">
-        <path class="eb5sp" style="animation-delay:.2s" d="M30,60 Q30,64 34,64 Q30,64 30,68 Q30,64 26,64 Q30,64 30,60 Z"/>
-        <path class="eb5sp" style="animation-delay:1s" d="M355,48 Q355,52 359,52 Q355,52 355,56 Q355,52 351,52 Q355,52 355,48 Z"/>
-        <path class="eb5sp" style="animation-delay:1.6s" d="M330,160 Q330,164 334,164 Q330,164 330,168 Q330,164 326,164 Q330,164 330,160 Z"/>
-        <path class="eb5sp" style="animation-delay:.6s" d="M45,150 Q45,154 49,154 Q45,154 45,158 Q45,154 41,154 Q45,154 45,150 Z"/>
-        <path class="eb5sp" style="animation-delay:2s" d="M200,40 Q200,43.5 203.5,43.5 Q200,43.5 200,47 Q200,43.5 196.5,43.5 Q200,43.5 200,40 Z"/>
-        <path class="eb5sp" style="animation-delay:.9s" d="M120,30 Q120,34.5 124.5,34.5 Q120,34.5 120,39 Q120,34.5 115.5,34.5 Q120,34.5 120,30 Z"/>
-        <path class="eb5sp" style="animation-delay:1.3s" d="M280,80 Q280,84 284,84 Q280,84 280,88 Q280,84 276,84 Q280,84 280,80 Z"/>
-        <path class="eb5sp" style="animation-delay:.4s" d="M150,120 Q150,123.5 153.5,123.5 Q150,123.5 150,127 Q150,123.5 146.5,123.5 Q150,123.5 150,120 Z"/>
-        <path class="eb5sp" style="animation-delay:1.8s" d="M245,150 Q245,154.5 249.5,154.5 Q245,154.5 245,159 Q245,154.5 240.5,154.5 Q245,154.5 245,150 Z"/>
-        <path class="eb5sp" style="animation-delay:2.4s" d="M75,95 Q75,98.5 78.5,98.5 Q75,98.5 75,102 Q75,98.5 71.5,98.5 Q75,98.5 75,95 Z"/>
-        <path class="eb5sp" style="animation-delay:.1s" d="M310,115 Q310,118.5 313.5,118.5 Q310,118.5 310,122 Q310,118.5 306.5,118.5 Q310,118.5 310,115 Z"/>
-        <path class="eb5sp" style="animation-delay:1.5s" d="M175,175 Q175,179 179,179 Q175,179 175,183 Q175,179 171,179 Q175,179 175,175 Z"/>
-      </svg>
-      <div style="position:absolute;top:-40px;right:-30px;width:130px;height:130px;border-radius:50%;background:rgba(255,255,255,.12);"></div>
-      <div style="position:absolute;bottom:-55px;left:-35px;width:150px;height:150px;border-radius:50%;background:rgba(255,255,255,.09);"></div>
-      <div style="position:absolute;top:70px;left:230px;width:70px;height:70px;border-radius:50%;background:rgba(255,255,255,.07);"></div>
-      
-    </div>
-    <!-- status bar (white) -->
-    <div style="position:absolute;top:0;left:0;right:0;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 7px;z-index:6;">
-      <span style="font-weight:700;font-size:15px;color:#fff;">9:41</span>
-      <div style="display:flex;gap:7px;align-items:center;">
-        <svg width="17" height="11" viewBox="0 0 17 11" fill="#fff"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.7" y="5" width="3" height="6" rx="1"/><rect x="9.3" y="2.5" width="3" height="8.5" rx="1"/><rect x="14" y="0" width="3" height="11" rx="1"/></svg>
-        <svg width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round"><path d="M2 5a8 8 0 0 1 12 0"/><path d="M4.5 7.4a4.4 4.4 0 0 1 7 0"/><circle cx="8" cy="9.8" r="1" fill="#fff" stroke="none"/></svg>
-        <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3" stroke="#fff" opacity=".5"/><rect x="2.4" y="2.4" width="15" height="7.2" rx="1.6" fill="#fff"/><rect x="23" y="4" width="2" height="4" rx="1" fill="#fff"/></svg>
+    <header class="words-route__header aisy-surface">
+      <div class="words-route__heading">
+        <p class="words-route__eyebrow">Практика · личный маршрут</p>
+        <p id="w_header_title" class="words-route__title">Слова</p>
       </div>
-    </div>
-    <!-- header content -->
-    <div style="position:absolute;top:54px;left:0;right:0;padding:0 22px;z-index:6;">
-      <div style="display:flex;align-items:center;justify-content:space-between;">
-        <button type="button" class="iconbtn clk" aria-label="На главную" onclick="nav('scr1')" style="display:grid;place-items:center;width:44px;height:44px;color:#fff;cursor:pointer;"><svg aria-hidden="true" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><polyline points="14 6 8 12 14 18"/></svg></button>
-        <div id="w_header_title" style="font-weight:800;font-size:18px;color:#fff;">Слова</div>
-        <button type="button" class="iconbtn clk" aria-label="Открыть библиотеку слов" onclick="wShowLibrary()" style="display:grid;place-items:center;width:44px;height:44px;color:#fff;cursor:pointer;"><svg aria-hidden="true" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><line x1="5" y1="8" x2="19" y2="8"/><line x1="5" y1="12" x2="19" y2="12"/><line x1="5" y1="16" x2="19" y2="16"/></svg></button>
-      </div>
-      <!-- сводка -->
-      <div id="w_sumline" style="margin-top:16px;font-weight:700;font-size:13px;color:rgba(255,255,255,.95);">Выучено 0 из 299 слов</div>
-      <div style="margin-top:7px;height:7px;border-radius:5px;background:rgba(255,255,255,.28);"><div id="w_bar" style="width:2%;height:100%;border-radius:5px;background:#fff;"></div></div>
-    </div>
+      <button type="button" class="words-route__library aisy-button aisy-button--secondary" aria-label="Открыть библиотеку слов" onclick="wShowLibrary()">Библиотека</button>
+      <p id="w_sumline" class="words-route__summary">Выучено 0 из 299 слов</p>
+      <div class="words-route__progress" role="progressbar" aria-label="Изучено слов" aria-valuemin="0" aria-valuemax="100" aria-valuenow="2"><span id="w_bar"></span></div>
+      <p id="w_today" class="words-route__session-progress" role="status" aria-live="polite">0 / 0 сегодня</p>
+    </header>
+    <p id="w_network_state" class="words-route__network aisy-alert aisy-alert--warning" role="status" aria-live="polite" hidden></p>
     <!-- exercise area -->
-    <div id="w_area" style="position:absolute;top:236px;left:22px;right:22px;bottom:104px;z-index:5;display:flex;flex-direction:column;overflow-y:auto;scrollbar-width:none;">
+    <div id="w_area" class="words-route__content">
     </div>
-    <!-- bottom nav (Учить active) -->
-    <div style="position:absolute;left:0;right:0;bottom:0;padding:10px 14px 14px;z-index:6;background:linear-gradient(to top,rgba(245,246,248,.95) 55%,rgba(245,246,248,0));">
-      <div class="navclay">
-        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#6F695E;">Главная</span></div>
-        <div class="navit on"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.3 8 5 5.5 5.4 4.6 5.5 4 6.3 4 7.2V18c0 .6.5 1 1.1.9 2.2-.3 4.5 0 6.4 1.4 1.9-1.4 4.2-1.7 6.4-1.4.6.1 1.1-.3 1.1-.9V7.2c0-.9-.6-1.7-1.5-1.8C15.5 5 13.7 5.3 12 6.5Z"/><path d="M12 6.5V20"/></svg><span style="font-weight:800;font-size:10.5px;color:#B54E2F;">Учить</span></div>
-        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg><span style="font-weight:700;font-size:10.5px;color:#6F695E;">Прогресс</span></div>
-        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#6F695E;">Профиль</span></div>
-      </div>
-    </div>
-  
+    <div id="w_action_dock" class="vocab-action-dock" aria-live="polite" hidden></div>
+  </main>
 </div>
 <div class="screen" id="scr3" data-name="Грамматика">
 

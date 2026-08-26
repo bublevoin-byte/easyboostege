@@ -255,7 +255,9 @@ test('Reading report UI has accessible loading, retry, Premium and non-colour ev
   assert.match(screen, /Premium добавляет только/u);
   assert.match(markup, /\.reading-report-action[^\{]*\{[^}]*min-height:44px/u);
   assert.match(markup, /\.reading-report-table/u);
-  assert.match(markup, /@media\(min-width:768px\)[\s\S]*\.reading-expanded-report/u);
+  assert.match(markup, /\.reading-expanded-report\{display:grid/u);
+  assert.match(markup, /\.reading2\{width:100%;max-width:100%/u);
+  assert.doesNotMatch(markup, /#frame\.reading-expanded\{[^}]*width:min\(100vw,1100px\)/u);
   assert.match(markup, /@media\(prefers-reduced-motion:reduce\)/u);
   assert.doesNotMatch(screen, /localStorage.*(?:premium|entitlement)|(?:premium|entitlement).*localStorage/iu);
 });

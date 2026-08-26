@@ -269,7 +269,7 @@ const apiResponseOwner=EasyBoostApi.responseOwner;
 const apiResponseServerTime=EasyBoostApi.responseServerTime;
 const apiIsAuthorityFailure=EasyBoostApi.isAuthorityFailure;
 const apiCanUseOfflineFallback=EasyBoostApi.canUseOfflineFallback;
-function syncModuleAttempt(attempt){return store.sync.saveModuleAttempt(attempt)}
+function syncModuleAttempt(attempt,guard){return store.sync.saveModuleAttempt(attempt,guard)}
 let authTransition=Promise.resolve();
 function runAuthTransition(action){
   const pending=authTransition.then(action,action);authTransition=pending.catch(function(){});return pending;
@@ -943,7 +943,9 @@ function srsRecordVocabularyOutcome(w,attempt){S.srs=S.srs||{};var current=wSet(
 function wStats(){return wordModule.calculateStats(EGE_WORDS,S.srs)}
 function wSync(){var st=wStats();S.learned=st.learned;S.prog=S.prog||{};S.prog.words=EasyBoostLearning.calculateProgress(st.learned,st.total);
   setTxt('w_know_n','Знаю '+st.learned);setTxt('pf_known_n',String(st.learned));setTxt('w_sumline','Выучено '+st.learned+' из '+st.total+' слов');
-  var bar=document.getElementById('w_bar');if(bar)bar.style.width=Math.max(2,Math.round(st.learned/st.total*100))+'%';
+  var percentage=st.total?Math.round(st.learned/st.total*100):0,bar=document.getElementById('w_bar');
+  if(bar){bar.style.width=Math.max(2,percentage)+'%';var progress=bar.parentElement;
+    if(progress&&progress.getAttribute('role')==='progressbar')progress.setAttribute('aria-valuenow',String(percentage))}
   setTxt('sub_words','учу · '+st.learned+' / '+st.total)}
 function wMigrate(){if(!S.srsMig){S.srsMig=1;S.srs=wordModule.migrateLegacy(EGE_WORDS,S.box,S.srs||{})}
   S.srs=migrateLocalVocabularyProgress(S.srs||{});S.srsMasteryVersion=1;
@@ -967,7 +969,7 @@ function wDeco(){return '<svg style="position:absolute;inset:0;width:100%;height
   +'<path class="eb5sp" style="animation-delay:1.1s" d="M25,130 Q25,133.5 28.5,133.5 Q25,133.5 25,137 Q25,133.5 21.5,133.5 Q25,133.5 25,130 Z"/>'
   +'</g></svg>'}
 const WBTN='width:100%;min-height:52px;border:1px solid #F0EAE2;background:#fff;border-radius:18px;font-family:Manrope,sans-serif;font-weight:700;font-size:15px;color:#2B2B2B;cursor:pointer;padding:13px 14px;text-align:center;box-shadow:0 10px 22px rgba(60,45,30,.07),inset 0 2px 0 rgba(255,255,255,.9);';
-function wMergeAi(){if(!S||!S.aiWords)return;wordModule.mergeGenerated(EGE_WORDS,S.aiWords)}
+function wMergeAi(){return S&&Array.isArray(S.aiWords)?S.aiWords.slice():[]}
 /* домашняя плитка при загрузке */
 try{if(S)wSync()}catch(e){}
 registerStartHook(function(){wMigrate();wMergeAi();return wSync()});

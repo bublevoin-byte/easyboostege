@@ -7,8 +7,6 @@
  */
 import {registerRouteHook} from '../router.js';
 import {wSpeak} from '../tts.js';
-import {registerVoiceTutorError,voiceTutorButton} from '../voice-tutor-loader.js';
-import {coreVocabularyVoice} from '../modules/core-voice-catalog.js';
 import {completeAdaptiveModuleActivity} from '../adaptive-session-loader.js';
 import {createVocabularySessionView} from '../vocabulary-session-view.js';
 import {
@@ -18,8 +16,8 @@ import {
   summarizeVocabularySession,
 } from '../vocabulary-domain.js';
 import {
-  EGE_WORDS,S,SRV,TOKEN,WBTN,currentOwnerBinding,generateAiContent,registerAuthorityReset,registerScreenGenerator,save,srsFail,srsOk,
-  srsRecordVocabularyOutcome,syncModuleAttempt,toast,todayStr,ui,wBase,wDeco,wMergeAi,wMigrate,wStats,wSync,wordModule,
+  EGE_WORDS,S,SRV,TOKEN,currentOwnerBinding,generateAiContent,registerAuthorityReset,registerScreenGenerator,save,
+  srsRecordVocabularyOutcome,syncModuleAttempt,toast,todayStr,ui,wBase,wMergeAi,wMigrate,wStats,wSync,wordModule,
 } from '../app.js';
 
 /* ===== WORDS v2: SRS-словарь ЕГЭ ===== */
@@ -29,13 +27,32 @@ const W_STATE_LABELS={new:'Новое',learning:'Изучаю',review:'Повт�
 const W_PROVENANCE_LABELS={core:'Проверенная база',personal:'Личное слово',generated:'Сгенерированное',unknown:'Источник не указан'};
 let WQ=[],WI=0,WDONE=0,WCORRECT=0,W_ADAPTIVE_MODE=null,W_ADAPTIVE_ACTIVITY=null,W_ADAPTIVE_REPORTED=false;
 let W_VIEW='home',W_LIBRARY_SCROLL=0,W_DETAIL_RETURN_WORD='';
-let W_EVENTS=[],W_REPEAT_COUNTS={},W_PENDING_ANSWER='',W_SUMMARY_SAVED=false,W_LAST_SUMMARY=null;
+let W_EVENTS=[],W_REPEAT_COUNTS={},W_PENDING_ANSWER='',W_PENDING_RESULT=null,W_SUMMARY_SAVED=false,W_LAST_SUMMARY=null;
+let W_SELECTED_CHOICE='',W_SELECTED_RATING='';
 let W_SESSION_ATTEMPT_ID='',W_SESSION_OWNER=null,W_SESSION_STARTED_AT=0,W_MODULE_ATTEMPT_REPORTED=false;
 let W_SESSION_VIEW=null;
+let W_TASK_TOKEN=0,W_TASK_COMMITTED=new Set(),W_TASK_ADVANCED=new Set(),W_TASK_REVIEWED=new Set();
+let W_REPORT_GENERATION=0;
 function wSameOwner(left,right){return Boolean(left&&right&&left.username===right.username&&left.generation===right.generation)}
 function wAttemptId(){return globalThis.crypto&&typeof globalThis.crypto.randomUUID==='function'
   ?globalThis.crypto.randomUUID():('00000000-0000-4000-8000-'+Date.now().toString(16).padStart(12,'0').slice(-12))}
 function wArea(){return document.getElementById('w_area')}
+function wDock(){return document.getElementById('w_action_dock')}
+function wSetPrimaryAction(label,handler,disabled){var dock=wDock();if(!dock)return;
+  if(!label){dock.replaceChildren();dock.hidden=true;return}
+  dock.hidden=false;dock.innerHTML='<button id="w_primary_action" type="button" class="aisy-button vocab-primary" aria-label="'+ui.escapeHtml(label)+'" '
+    +(disabled?'disabled aria-disabled="true" ':'')+'onclick="'+handler+'">'+ui.escapeHtml(label)+'</button>'}
+function wFocusPrimaryAction(){requestAnimationFrame(function(){var action=document.getElementById('w_primary_action');if(action)action.focus()})}
+function wTokenCurrent(token){return Number(token)===W_TASK_TOKEN&&wSameOwner(W_SESSION_OWNER,currentOwnerBinding())}
+function wClaimCommit(token){if(!wTokenCurrent(token)||W_TASK_COMMITTED.has(Number(token)))return false;
+  W_TASK_COMMITTED.add(Number(token));return true}
+function wClaimAdvance(token){if(!wTokenCurrent(token)||W_TASK_ADVANCED.has(Number(token)))return false;
+  W_TASK_ADVANCED.add(Number(token));return true}
+function wClaimReview(token){if(!wTokenCurrent(token)||W_TASK_REVIEWED.has(Number(token)))return false;
+  W_TASK_REVIEWED.add(Number(token));return true}
+function wRenderNetworkState(){var state=document.getElementById('w_network_state');if(!state)return;
+  var offline=navigator.onLine===false;state.hidden=!offline;
+  state.textContent=offline?'Нет сети. Загруженные слова и ответы останутся на устройстве; синхронизация продолжится после подключения.':''}
 function hasActiveVocabularyPractice(){return W_VIEW==='practice'&&WQ.length>WI&&wSameOwner(W_SESSION_OWNER,currentOwnerBinding())}
 function wResetToday(){if(S.wday!==todayStr()){S.wday=todayStr();S.wnewUsed=0}}
 function wStoredProgress(word){
@@ -56,8 +73,9 @@ function wProvenance(item){
   return wStatusFor(item.w)?'personal':'core';
 }
 function wStarted(item){return Boolean(wStoredProgress(item.w)||wStatusFor(item.w))}
+function wOwnerCatalog(){var catalog=EGE_WORDS.slice();wordModule.mergeGenerated(catalog,wMergeAi());return catalog}
 function wLibraryCatalog(){
-  var items=EGE_WORDS.slice();
+  var items=wOwnerCatalog();
   (Array.isArray(S.personalWords)?S.personalWords:[]).forEach(function(card){items.push(wordModule.personalCardItem(card))});
   var seen=new Set(items.map(function(item){return normalizeVocabularyWord(item.w)}));
   var tombstones=new Set(Array.isArray(S.personalWordTombstones)?S.personalWordTombstones:[]);
@@ -75,7 +93,7 @@ function wLibraryCatalog(){
 }
 function wPracticeCatalog(){var byWord=new Map();
   var tombstones=new Set(Array.isArray(S.personalWordTombstones)?S.personalWordTombstones:[]);
-  EGE_WORDS.filter(function(item){var provenance=wProvenance(item);
+  wOwnerCatalog().filter(function(item){var provenance=wProvenance(item);
     return (provenance==='core'||wStarted(item))
       &&!(provenance==='personal'&&tombstones.has(personalVocabularyCardId(item.w)))})
     .forEach(function(item){byWord.set(normalizeVocabularyWord(item.w),item)});
@@ -100,21 +118,20 @@ function wPlan(){
     minutes:wordModule.estimateSessionMinutes({due:due.length,weak:weak.length,fresh:fresh.length})};
 }
 function wRenderFailure(){
-  var area=wArea();if(!area)return;
+  var area=wArea();if(!area)return;wSetPrimaryAction(null);
   ui.renderState(area,{kind:'error',title:'Словарь не открылся',
     description:'Попробуй ещё раз — сохранённые слова не потерялись.',
     actionLabel:'Повторить',onAction:initWords});
 }
-function initWords(){if(!S)return;var area=wArea();
+function initWords(){if(!S)return;var area=wArea();wRenderNetworkState();
   if(hasActiveVocabularyPractice()&&area){
     wHeading('Тренировка');wProgress();return
   }
   W_ADAPTIVE_MODE=null;W_ADAPTIVE_ACTIVITY=null;W_ADAPTIVE_REPORTED=false;
-  W_VIEW='loading';if(area)ui.renderState(area,{kind:'loading',title:'Готовим словарь',description:'Считаем повторения и новые слова'});
+  W_VIEW='loading';wSetPrimaryAction(null);if(area)ui.renderState(area,{kind:'loading',title:'Готовим словарь',description:'Считаем повторения и новые слова'});
   Promise.resolve().then(function(){wMigrate();wMergeAi();wResetToday();
     S.vocabularyNewBudget=wordModule.normalizeNewWordBudget(S.vocabularyNewBudget);
     wSync();if(W_VIEW==='loading')wShowHome()}).catch(function(error){console.error('Vocabulary screen failed',error);wRenderFailure()})}
-function wModeFor(w){return W_ADAPTIVE_MODE==='lexical_choice'?'c1':wordModule.modeFor(wStoredProgress(w))}
 function launchVocabularyPractice(mode,topicId){
   var modes={
     lexical_choice:{forcedMode:'receptive_meaning',activity:'vocabulary_lexical_choice'},
@@ -125,7 +142,7 @@ function launchVocabularyPractice(mode,topicId){
   if(!config||!Number.isInteger(topicId)||topicId<1||topicId>10||!S)return false;
   wMigrate();wMergeAi();
   if(S.wday!==todayStr()){S.wday=todayStr();S.wnewUsed=0}
-  var pool=EGE_WORDS.filter(function(word){if(Number(word.t)!==topicId)return false;
+  var pool=wOwnerCatalog().filter(function(word){if(Number(word.t)!==topicId)return false;
     if(config.forcedMode==='contextual_production')return Boolean(String(word.ex||'').trim());
     return Boolean(String(word.w||'').trim()&&String(word.tr||'').trim())});
   if(!pool.length)return false;
@@ -137,14 +154,12 @@ function launchVocabularyPractice(mode,topicId){
   return true;
 }
 function wBadge(x){var pos=W_POS[x.p]||x.pos||'СЛОВО';var top=W_TOPICS[x.t]||'';
-  return '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'
-  +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#B54E2F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">'+pos+'</span>'
-  +(top?'<span style="font-weight:700;font-size:10px;letter-spacing:.6px;color:#6A6E75;background:#F1F2F4;padding:5px 10px;border-radius:20px;">'+top+'</span>':'')
-  +'<button type="button" class="iconbtn clk" aria-label="Озвучить слово" onclick="wSpeak(WQ[WI]?WQ[WI].w:\'\')" style="cursor:pointer;flex:none;display:grid;place-items:center;width:34px;height:34px;border-radius:12px;background:#FFF4DE;">'
-  +'<svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#E8730A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18 6a8.5 8.5 0 0 1 0 12"/></svg></button></div>'}
+  return '<div class="vocab-badge-row"><span class="vocab-badge vocab-badge--kind">'+ui.escapeHtml(pos)+'</span>'
+  +(top?'<span class="vocab-badge">'+ui.escapeHtml(top)+'</span>':'')
+  +'<button type="button" class="vocab-icon-btn" aria-label="Озвучить слово" onclick="wSpeak(WQ[WI]?WQ[WI].w:\'\')">'
+  +'<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18 6a8.5 8.5 0 0 1 0 12"/></svg></button></div>'}
 function wAnim(name,dur){ui.animate('w_card',name,dur)}
 function wProgress(){var t=document.getElementById('w_today');if(t)t.textContent=WDONE+' / '+WQ.length+' сегодня'}
-function wDistract(x,field){return wordModule.distractors(EGE_WORDS,x,field)}
 function wHeading(title){var heading=document.getElementById('w_header_title');if(heading)heading.textContent=title}
 function wHandlerValue(value){return encodeURIComponent(value).replace(/'/g,'%27')}
 function wSpeaker(label,value){
@@ -152,36 +167,40 @@ function wSpeaker(label,value){
     +'<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18 6a8.5 8.5 0 0 1 0 12"/></svg></button>';
 }
 function wSessionView(){if(!W_SESSION_VIEW)W_SESSION_VIEW=createVocabularySessionView({
-  escapeHtml:ui.escapeHtml,decoration:wDeco,badge:wBadge,speaker:wSpeaker,handlerValue:wHandlerValue,
+  escapeHtml:ui.escapeHtml,decoration:function(){return''},badge:wBadge,speaker:wSpeaker,handlerValue:wHandlerValue,
+  setPrimaryAction:wSetPrimaryAction,
   requestFrame:function(callback){requestAnimationFrame(callback)},
 });return W_SESSION_VIEW}
 function wSpeakLibraryValue(encoded){wSpeak(decodeURIComponent(encoded||''))}
-function wShowHome(){
-  var area=wArea();if(!area)return;W_VIEW='home';wHeading('Слова');
+function wShowHome(token){
+  if(token!==undefined&&!wTokenCurrent(token))return;var area=wArea();if(!area)return;
+  var focusHome=W_VIEW==='library'||W_VIEW==='practice';W_VIEW='home';wHeading('Слова');
   var plan=wPlan(),budget=wordModule.normalizeNewWordBudget(S.vocabularyNewBudget);
   var total=plan.items.length,entries=wLibraryEntries(),topicCounts={};
   var trend7=buildVocabularyTrend(S.vocabularyHistory,{days:7}),trend30=buildVocabularyTrend(S.vocabularyHistory,{days:30});
   entries.forEach(function(entry){entry.topicIds.forEach(function(id){if(W_TOPICS[id])topicCounts[id]=(topicCounts[id]||0)+1})});
   var topicOverview=Object.keys(topicCounts).sort(function(left,right){return topicCounts[right]-topicCounts[left]}).slice(0,3);
   area.innerHTML='<section class="vocab vocab-home" aria-labelledby="w_home_title">'
-    +'<p class="vocab-kicker">АКТИВНЫЙ СЛОВАРЬ</p><h1 id="w_home_title">Сегодня</h1>'
+    +'<p class="vocab-kicker">АКТИВНЫЙ СЛОВАРЬ</p><h1 id="w_home_title" tabindex="-1">Сегодня</h1>'
     +'<div class="vocab-stats" aria-label="План на сегодня">'
     +'<article><strong>'+plan.due.length+'</strong><span>к сроку</span></article>'
     +'<article><strong>'+plan.fresh.length+'</strong><span>новых</span></article>'
     +'<article><strong>'+plan.minutes+'</strong><span>минут</span></article></div>'
     +(plan.weak.length?'<p class="vocab-note">Ещё '+plan.weak.length+' '+(plan.weak.length===1?'слово требует':'слова требуют')+' внимания — они уже учтены во времени.</p>':'')
+    +(!total?'<section class="vocab-empty-plan" role="status" aria-live="polite" aria-labelledby="w_empty_plan_title">'
+      +'<strong id="w_empty_plan_title">На сегодня всё</strong><span>Следующие слова появятся здесь, когда подойдёт срок повторения.</span></section>':'')
     +'<fieldset class="vocab-budget"><legend>Новых слов за день</legend><div class="vocab-budget-options" role="group" aria-label="Количество новых слов">'
     +wordModule.newWordBudgets.map(function(value){var selected=value===budget;
       return '<button type="button" id="w_budget_'+value+'" class="vocab-budget-btn'+(selected?' is-selected':'')+'" aria-pressed="'+selected+'" onclick="wSetBudget('+value+')">'+value+'</button>'}).join('')
     +'</div><p id="w_budget_note" role="status" aria-live="polite">Если накопились повторения, новых слов будет меньше.</p></fieldset>'
-    +'<button type="button" class="vocab-primary sq" onclick="wStartPractice()"'+(total?'':' disabled')+'>'+(total?'Начать · '+total:'На сегодня всё')+'</button>'
     +wSessionView().trendMarkup(trend7,trend30)
     +'<button type="button" class="vocab-library-link" onclick="wShowLibrary()">'
     +'<span><strong>Библиотека</strong><small>Проверенная база и все начатые слова</small></span><span aria-hidden="true">'+entries.length+' ›</span></button>'
     +(topicOverview.length?'<section class="vocab-topic-overview" aria-labelledby="w_topic_overview_title"><h2 id="w_topic_overview_title">Темы библиотеки</h2><div>'
       +topicOverview.map(function(id){return'<span>'+ui.escapeHtml(W_TOPICS[id])+' · '+topicCounts[id]+'</span>'}).join('')+'</div></section>':'')
     +'</section>';
-  var start=area.querySelector('.vocab-primary');if(start&&start.disabled)start.setAttribute('aria-label','На сегодня нет запланированных слов')}
+  wSetPrimaryAction(total?'Начать · '+total:'На сегодня всё','wStartPractice()',!total);
+  if(focusHome)requestAnimationFrame(function(){var heading=document.getElementById('w_home_title');if(heading)heading.focus()})}
 function wSetBudget(value){
   S.vocabularyNewBudget=wordModule.normalizeNewWordBudget(value);save();wShowHome();
   var selected=document.getElementById('w_budget_'+S.vocabularyNewBudget);if(selected)selected.focus()}
@@ -192,9 +211,12 @@ function wStartPractice(){
 function wBeginSession(items,forcedMode){
   var progressByWord={};items.forEach(function(item){var progress=wStoredProgress(item.w);if(progress)progressByWord[item.w]=progress});
   WQ=composeVocabularySession(items,{progressByWord:progressByWord,forcedMode:forcedMode});WI=0;WDONE=0;WCORRECT=0;
-  W_EVENTS=[];W_REPEAT_COUNTS={};W_PENDING_ANSWER='';W_SUMMARY_SAVED=false;W_LAST_SUMMARY=null;W_VIEW='practice';
+  W_EVENTS=[];W_REPEAT_COUNTS={};W_PENDING_ANSWER='';W_PENDING_RESULT=null;W_SELECTED_CHOICE='';W_SELECTED_RATING='';W_SUMMARY_SAVED=false;W_LAST_SUMMARY=null;W_VIEW='practice';
+  W_TASK_TOKEN=0;W_TASK_COMMITTED=new Set();W_TASK_ADVANCED=new Set();W_TASK_REVIEWED=new Set();
   W_SESSION_ATTEMPT_ID=wAttemptId();W_SESSION_OWNER=currentOwnerBinding();W_SESSION_STARTED_AT=Date.now();W_MODULE_ATTEMPT_REPORTED=false;
+  W_REPORT_GENERATION+=1;
   var area=wArea();if(!area)return;
+  area.dataset.sessionAttemptId=W_SESSION_ATTEMPT_ID;area.dataset.sessionIndex='0';area.dataset.sessionPhase='task';
   area.innerHTML='<div id="w_card" class="vocab-practice-card"></div><div id="w_opts" class="vocab-practice-options"></div>';
   wHeading('Тренировка');wRender()}
 function wFilters(){
@@ -217,7 +239,7 @@ function wAvailableTopics(entries){
   return Array.from(ids).sort(function(left,right){return Number(left)-Number(right)})
 }
 function wShowLibrary(){
-  var area=wArea();if(!area)return;var returnWord=W_VIEW==='detail'?W_DETAIL_RETURN_WORD:'';
+  var area=wArea();if(!area)return;wSetPrimaryAction(null);var returnWord=W_VIEW==='detail'?W_DETAIL_RETURN_WORD:'';
   var announceLibrary=W_VIEW!=='library';W_VIEW='library';wHeading('Библиотека');
   var entries=wLibraryEntries(),filters=wFilters(),topics=wAvailableTopics(entries);
   area.innerHTML='<section class="vocab vocab-library" aria-labelledby="w_library_title">'
@@ -280,7 +302,7 @@ function wHonestDetailItem(item){
   return legacyPersonal?Object.assign({},item,{p:null,pos:null}):item;
 }
 function wShowWord(encoded){
-  var area=wArea();if(!area)return;W_LIBRARY_SCROLL=area.scrollTop;var item=wFindWord(encoded);
+  var area=wArea();if(!area)return;wSetPrimaryAction(null);W_LIBRARY_SCROLL=area.scrollTop;var item=wFindWord(encoded);
   if(!item){ui.renderState(area,{kind:'error',title:'Карточка не найдена',description:'Вернись в библиотеку и выбери слово снова.',
     actionLabel:'В библиотеку',onAction:wShowLibrary});return}
   var itemId=String(item.id||wProvenance(item)+':'+normalizeVocabularyWord(item.w));
@@ -332,9 +354,29 @@ function wBridgeCandidates(failedWord){var seen=new Set([normalizeVocabularyWord
     seen.add(normalized);candidates.push({id:normalized+':bridge',word:normalized,mode:'bridge',introduced:false,reviewed:false})}
   WQ.slice(0,WI).forEach(function(task){if(task.mode!=='introduction')add(task.word)});
   wPracticeCatalog().forEach(function(item){add(item.w)});return candidates}
-function wShowFeedback(task,item,result){var card=document.getElementById('w_card'),opts=document.getElementById('w_opts');if(!card||!opts)return;
-  wSessionView().renderFeedback(card,opts,task,item,result)}
-function wRecordSessionOutcome(task,item,result){
+function wShowFeedback(task,item,result,token){var card=document.getElementById('w_card'),opts=document.getElementById('w_opts');
+  if(!card||!opts||!wTokenCurrent(token))return;
+  var area=wArea();if(area)area.dataset.sessionPhase='review';
+  wSessionView().renderFeedback(card,opts,task,item,result,token)}
+function wMarkRecognitionResult(item,result,token){if(!wTokenCurrent(token))return;
+  var correctOutcome=result.outcome==='correct';
+  document.querySelectorAll('#w_opts [data-vocab-choice]').forEach(function(input){
+    var value=decodeURIComponent(input.dataset.vocabChoice||''),selected=value===W_SELECTED_CHOICE,correct=value===item.tr;
+    var choice=input.closest('.vocab-choice'),label=choice?.querySelector('span')?.textContent||value;
+    input.disabled=true;input.setAttribute('aria-disabled','true');input.classList.remove('is-selected');choice?.classList.remove('is-selected');
+    if(correct){input.classList.add('is-correct');choice?.classList.add('is-correct');input.setAttribute('aria-label',label+' — верно')}
+    else if(selected&&!correctOutcome){input.classList.add('is-incorrect');choice?.classList.add('is-incorrect');input.setAttribute('aria-label',label+' — ошибка')}
+  });
+  var status=document.getElementById('w_choice_status');if(status)status.textContent=correctOutcome
+    ?'Верно. Выбран ответ: '+W_SELECTED_CHOICE+'.'
+    :(W_SELECTED_CHOICE?'Ошибка. Выбран ответ: '+W_SELECTED_CHOICE+'. ':'Ответ не выбран. ')+'Верный ответ: '+item.tr+'.';
+  var area=wArea();if(area)area.dataset.sessionPhase='answer';
+  wSetPrimaryAction('Разобрать ответ','wShowRecognitionFeedback('+token+')',false);wFocusPrimaryAction()}
+function wShowRecognitionFeedback(token){var task=WQ[WI],item=task&&wSessionItem(task);
+  if(!task||!item||task.mode!=='receptive_meaning'||!W_PENDING_RESULT||!wClaimReview(token))return;
+  wShowFeedback(task,item,W_PENDING_RESULT,token)}
+function wRecordSessionOutcome(task,item,result,token){
+  if(!wClaimCommit(token))return false;
   srsRecordVocabularyOutcome(wProgressStorageKey(item.w),{mode:task.mode,outcome:result.outcome,now:Date.now()});
   W_EVENTS.push({word:task.word,mode:task.mode,outcome:result.outcome,
     independentSuccess:result.independentSuccess,introduced:false,reviewed:task.reviewed});
@@ -345,158 +387,123 @@ function wRecordSessionOutcome(task,item,result){
       fallbackItems:wBridgeCandidates(task.word)});
     WQ=repeated.items;W_REPEAT_COUNTS=repeated.repeatCounts;
   }
-  save();wSync();wShowFeedback(task,item,result)}
-function wCompleteIntroduction(){var task=WQ[WI],item=task&&wSessionItem(task);if(!task||!item||task.mode!=='introduction')return;
+  save();wSync();
+  W_PENDING_RESULT=result;
+  if(task.mode==='receptive_meaning')wMarkRecognitionResult(item,result,token);
+  else wShowFeedback(task,item,result,token);return true}
+function wCompleteIntroduction(token){var task=WQ[WI],item=task&&wSessionItem(task);if(!task||!item||task.mode!=='introduction'||!wClaimAdvance(token))return;
   W_EVENTS.push({word:task.word,mode:'introduction',introduced:true,reviewed:false});
-  S.wnewUsed=(S.wnewUsed||0)+1;save();wSessionNext()}
-function wCompleteBridge(){var task=WQ[WI];if(!task||!task.bridge)return;wSessionNext()}
-function wChooseRecognition(encoded){var task=WQ[WI],item=task&&wSessionItem(task);if(!task||!item||task.mode!=='receptive_meaning')return;
-  var answer=decodeURIComponent(encoded||'');var result=gradeVocabularyAnswer({mode:task.mode,answer:answer,acceptedAnswers:[item.tr]});
-  wRecordSessionOutcome(task,item,result)}
-function wRevealRussian(){var task=WQ[WI],item=task&&wSessionItem(task),input=document.getElementById('w_session_input');
-  if(!task||!item||task.mode!=='russian_reveal'||!input)return;W_PENDING_ANSWER=input.value||'';
+  S.wnewUsed=(S.wnewUsed||0)+1;save();WI++;W_PENDING_ANSWER='';wRender()}
+function wCompleteBridge(token){var task=WQ[WI];if(!task||!task.bridge||!wClaimAdvance(token))return;WI++;W_PENDING_ANSWER='';wRender()}
+function wChooseRecognition(encoded,token){var task=WQ[WI],item=task&&wSessionItem(task);if(!task||!item||task.mode!=='receptive_meaning'||!wTokenCurrent(token)||W_TASK_COMMITTED.has(Number(token)))return;
+  W_SELECTED_CHOICE=decodeURIComponent(encoded||'');
+  document.querySelectorAll('#w_opts [data-vocab-choice]').forEach(function(input){var selected=decodeURIComponent(input.dataset.vocabChoice||'')===W_SELECTED_CHOICE;
+    input.checked=selected;input.classList.toggle('is-selected',selected);input.closest('.vocab-choice')?.classList.toggle('is-selected',selected)});
+  wSetPrimaryAction('Проверить ответ','wSubmitRecognition('+token+')',false)}
+function wSubmitRecognition(token){var task=WQ[WI],item=task&&wSessionItem(task);
+  if(!task||!item||task.mode!=='receptive_meaning'||!W_SELECTED_CHOICE)return;
+  var result=gradeVocabularyAnswer({mode:task.mode,answer:W_SELECTED_CHOICE,acceptedAnswers:[item.tr]});
+  wRecordSessionOutcome(task,item,result,token)}
+function wRevealRussian(token){var task=WQ[WI],item=task&&wSessionItem(task),input=document.getElementById('w_session_input');
+  if(!task||!item||task.mode!=='russian_reveal'||!input||!wClaimReview(token))return;W_PENDING_ANSWER=input.value||'';
   var card=document.getElementById('w_card'),opts=document.getElementById('w_opts');
-  wSessionView().renderRussianReveal(card,opts,item)}
-function wRateRussian(rating){var task=WQ[WI],item=task&&wSessionItem(task);if(!task||!item||task.mode!=='russian_reveal')return;
-  var result=gradeVocabularyAnswer({mode:task.mode,answer:W_PENDING_ANSWER,acceptedAnswers:[item.tr],selfRating:rating});
-  wRecordSessionOutcome(task,item,result)}
-function wSubmitSession(){var task=WQ[WI],item=task&&wSessionItem(task),input=document.getElementById('w_session_input');
-  if(!task||!item||!input||input.dataset.done)return;
-  if(task.mode==='russian_reveal'){wRevealRussian();return}
+  var area=wArea();if(area)area.dataset.sessionPhase='answer';
+  wSessionView().renderRussianReveal(card,opts,item,token)}
+function wChooseRussianRating(rating,token){var task=WQ[WI];if(!task||task.mode!=='russian_reveal'||!wTokenCurrent(token)||W_TASK_COMMITTED.has(Number(token)))return;
+  if(!['knew','almost','not_known'].includes(rating))return;W_SELECTED_RATING=rating;
+  document.querySelectorAll('#w_opts [data-vocab-rating]').forEach(function(input){var selected=input.dataset.vocabRating===rating;
+    input.checked=selected;input.classList.toggle('is-selected',selected);input.closest('.vocab-choice')?.classList.toggle('is-selected',selected)});
+  wSetPrimaryAction('Сохранить оценку','wSubmitRussianRating('+token+')',false)}
+function wSubmitRussianRating(token){var task=WQ[WI],item=task&&wSessionItem(task);if(!task||!item||task.mode!=='russian_reveal'||!W_SELECTED_RATING)return;
+  var result=gradeVocabularyAnswer({mode:task.mode,answer:W_PENDING_ANSWER,acceptedAnswers:[item.tr],selfRating:W_SELECTED_RATING});
+  wRecordSessionOutcome(task,item,result,token)}
+function wSubmitSession(token){var task=WQ[WI],item=task&&wSessionItem(task),input=document.getElementById('w_session_input');
+  if(!task||!item||!input||input.dataset.done||!wTokenCurrent(token))return;
+  if(task.mode==='russian_reveal'){wRevealRussian(token);return}
   input.dataset.done='true';var result=gradeVocabularyAnswer({mode:task.mode,answer:input.value,acceptedAnswers:wAcceptedEnglish(item)});
-  wRecordSessionOutcome(task,item,result)}
-function wNotKnown(){var task=WQ[WI],item=task&&wSessionItem(task);if(!task||!item||task.mode==='introduction')return;
+  wRecordSessionOutcome(task,item,result,token)}
+function wNotKnown(token){var task=WQ[WI],item=task&&wSessionItem(task);if(!task||!item||task.mode==='introduction'||!wTokenCurrent(token))return;
   var input=document.getElementById('w_session_input'),answer=input?input.value:'';
   var result=gradeVocabularyAnswer({mode:task.mode,answer:answer,acceptedAnswers:task.mode==='receptive_meaning'?[item.tr]:wAcceptedEnglish(item),
     selfRating:task.mode==='russian_reveal'?'not_known':null,notKnown:true});
-  wRecordSessionOutcome(task,item,result)}
-function wSessionNext(){WI++;W_PENDING_ANSWER='';wRender()}
+  wRecordSessionOutcome(task,item,result,token)}
+function wSessionNext(token){if(!wClaimAdvance(token))return;WI++;W_PENDING_ANSWER='';W_PENDING_RESULT=null;W_SELECTED_CHOICE='';W_SELECTED_RATING='';wRender()}
 function wReportSessionAttempt(){if(W_MODULE_ATTEMPT_REPORTED||!W_SESSION_ATTEMPT_ID)return;
   var attempt=buildVocabularyModuleAttempt(W_EVENTS,{id:W_SESSION_ATTEMPT_ID,durationMs:Date.now()-W_SESSION_STARTED_AT,
     activity:W_ADAPTIVE_ACTIVITY||'vocabulary_active_recall_session'});
+  var owner=W_SESSION_OWNER,attemptId=W_SESSION_ATTEMPT_ID,reportGeneration=W_REPORT_GENERATION;
+  if(!wSameOwner(owner,currentOwnerBinding()))return;
+  function reportCurrent(){return reportGeneration===W_REPORT_GENERATION&&attemptId===W_SESSION_ATTEMPT_ID
+    &&wSameOwner(owner,W_SESSION_OWNER)&&wSameOwner(owner,currentOwnerBinding())}
   if(W_ADAPTIVE_ACTIVITY){W_MODULE_ATTEMPT_REPORTED=true;W_ADAPTIVE_REPORTED=true;
     Promise.resolve(completeAdaptiveModuleActivity({module:'vocabulary',activityId:W_ADAPTIVE_ACTIVITY,score:attempt.score,maxScore:attempt.maxScore,durationMs:attempt.durationMs}))
-      .then(function(result){if(!result){W_MODULE_ATTEMPT_REPORTED=false;W_ADAPTIVE_REPORTED=false}})
-      .catch(function(){W_MODULE_ATTEMPT_REPORTED=false;W_ADAPTIVE_REPORTED=false});return}
+      .then(function(result){if(!result&&reportCurrent()){W_MODULE_ATTEMPT_REPORTED=false;W_ADAPTIVE_REPORTED=false}})
+      .catch(function(){if(reportCurrent()){W_MODULE_ATTEMPT_REPORTED=false;W_ADAPTIVE_REPORTED=false}});return}
   if(typeof SRV==='undefined'||!SRV||!TOKEN)return;W_MODULE_ATTEMPT_REPORTED=true;
-  syncModuleAttempt(attempt)}
-function wRenderSummary(card,opts){var summary=summarizeVocabularySession(W_EVENTS);W_LAST_SUMMARY=summary;
+  void syncModuleAttempt(attempt,{owner:owner.username,ownerGeneration:owner.generation})}
+function wRenderSummary(card,opts,token){var summary=summarizeVocabularySession(W_EVENTS);W_LAST_SUMMARY=summary;
+  var area=wArea();if(area)area.dataset.sessionPhase='summary';
   if(!W_SUMMARY_SAVED){W_SUMMARY_SAVED=true;S.vocabularyHistory=appendVocabularySessionHistory(S.vocabularyHistory,summary);save();wSync()}
   wReportSessionAttempt();
-  wSessionView().renderSummary(card,opts,summary)}
+  wSessionView().renderSummary(card,opts,summary,token)}
 function wPracticeDifficult(){if(!W_LAST_SUMMARY)return;W_ADAPTIVE_MODE=null;W_ADAPTIVE_ACTIVITY=null;W_ADAPTIVE_REPORTED=false;
   var difficult=new Set(W_LAST_SUMMARY.difficultWords.map(function(item){return item.word}));
   var items=wPracticeCatalog().filter(function(item){return difficult.has(normalizeVocabularyWord(item.w))});if(items.length)wBeginSession(items)}
 function wRenderSession(){var card=document.getElementById('w_card'),opts=document.getElementById('w_opts');if(!card||!opts)return;
-  wProgress();var task=WQ[WI];if(!task){wRenderSummary(card,opts);return}var item=wSessionItem(task);if(!item){wSessionNext();return}
-  wAnim('win','.32s');wSessionView().renderTask(card,opts,{task:task,item:item,
+  W_TASK_TOKEN+=1;W_SELECTED_CHOICE='';W_SELECTED_RATING='';W_PENDING_RESULT=null;wProgress();var token=W_TASK_TOKEN,task=WQ[WI];
+  var area=wArea();if(area){area.dataset.sessionToken=String(token);area.dataset.sessionIndex=String(WI);area.dataset.sessionPhase=task?'task':'summary'}
+  if(!task){wRenderSummary(card,opts,token);return}var item=wSessionItem(task);if(!item){WI++;wRender();return}
+  wAnim('vocab-paper-settle','.36s');wSessionView().renderTask(card,opts,{task:task,item:item,
     choices:task.mode==='receptive_meaning'?buildVocabularyRecognitionOptions(wPracticeCatalog(),item):[],
-    contextPrompt:task.mode==='contextual_production'?wContextBlank(item):''});
+    contextPrompt:task.mode==='contextual_production'?wContextBlank(item):'',token:token});
   if(task.mode==='listening')wSpeak(item.w)}
 function wRender(){wRenderSession()}
-function wRenderLegacy(){var card=document.getElementById('w_card'),opts=document.getElementById('w_opts');
-  if(!card||!opts)return;wProgress();
-  wAnim('win','.32s');
-  var x=WQ[WI];
-  if(!x){var st=wStats(),n=S.wnewUsed||0;
-    if(W_ADAPTIVE_MODE&&!W_ADAPTIVE_REPORTED){W_ADAPTIVE_REPORTED=true;completeAdaptiveModuleActivity({module:'vocabulary',activityId:W_ADAPTIVE_ACTIVITY,score:WCORRECT,maxScore:Math.max(1,WDONE)}).catch(function(){W_ADAPTIVE_REPORTED=false})}
-    card.innerHTML=wDeco()+'<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:22px 0;">'
-      +'<div style="font-size:44px;">🎉</div>'
-      +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:22px;color:#2B2B2B;margin-top:10px;">'+(n>0?'Ура! Сегодня +'+n+' новых слов':'На сегодня всё!')+'</div>'
-      +'<div style="font-weight:600;font-size:13.5px;color:#777163;margin-top:8px;line-height:1.5;">Выучено полностью: '+st.learned+' из '+st.total+'<br>Слова вернутся на повторение в свой срок</div></div>';
-    opts.innerHTML='<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="wShowHome()">К плану на сегодня</button>'
-      +'<button class="sq" style="'+WBTN+'color:#B54E2F;" onclick="wShowLibrary()">Открыть библиотеку</button>';
-    return}
-  var mode=wModeFor(x.w);
-  if(mode==='c1'||mode==='c2'){
-    var q=mode==='c1'?x.w:x.tr, field=mode==='c1'?'tr':'w';
-    var right=x[field], all=wDistract(x,field).concat([right]).sort(function(){return Math.random()-.5});
-    card.innerHTML=wDeco()+wBadge(x)
-      +'<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:16px 0;">'
-      +'<div style="font-weight:600;font-size:11.5px;letter-spacing:1px;color:#777163;">'+(mode==='c1'?'ВЫБЕРИ ПЕРЕВОД':'ВЫБЕРИ СЛОВО')+'</div>'
-      +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:'+(mode==='c1'?'30':'24')+'px;color:#2B2B2B;margin-top:10px;letter-spacing:-.5px;">'+q+'</div></div>';
-    opts.innerHTML=all.map(function(v){return '<button class="sq" style="'+WBTN+'" onclick="wPick(this,\''+encodeURIComponent(v)+'\',\''+encodeURIComponent(right)+'\')">'+v+'</button>'}).join('');
-    if(mode==='c1')wSpeak(x.w);
-    return}
-  var blank=(x.ex||'').replace(new RegExp(wBase(x.w).replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'i'),'_____');
-  card.innerHTML=wDeco()+wBadge(x)
-    +'<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:16px 0;">'
-    +'<div style="font-weight:600;font-size:11.5px;letter-spacing:1px;color:#777163;">НАПИШИ СЛОВО</div>'
-    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:24px;color:#B54E2F;margin-top:8px;">'+x.tr+'</div>'
-    +'<div style="font-weight:500;font-size:13.5px;color:#777163;margin-top:10px;font-style:italic;line-height:1.5;">'+blank+'</div></div>';
-  opts.innerHTML='<input id="w_inp" aria-label="Введи слово по-английски" autocapitalize="none" autocomplete="off" spellcheck="false" placeholder="Введи слово по-английски" '
-    +'style="width:100%;box-sizing:border-box;height:52px;border:1px solid #F0EAE2;border-radius:18px;padding:0 16px;font-family:Manrope,sans-serif;font-weight:700;font-size:15px;color:#2B2B2B;outline:none;box-shadow:inset 0 2px 4px rgba(60,45,30,.05);" '
-    +'onkeydown="if(event.key===\'Enter\')wSubmit()">'
-    +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="wSubmit()">Проверить</button>'}
-/* карточка-переворот после ошибки */
-function wFlip(x,learnerAnswer,mode){var card=document.getElementById('w_card'),opts=document.getElementById('w_opts');
-  if(!card||!opts)return;
-  wAnim('wflip','.5s');
-  card.innerHTML=wDeco()+wBadge(x)
-    +'<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:16px 0;">'
-    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:30px;color:#2B2B2B;letter-spacing:-.6px;">'+x.w+'</div>'
-    +(x.ipa?'<div style="font-weight:500;font-size:14px;color:#777163;margin-top:5px;">'+x.ipa+'</div>':'')
-    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:20px;color:#B54E2F;margin-top:12px;">'+x.tr+'</div>'
-    +'<div style="font-weight:500;font-size:13.5px;color:#777163;margin-top:12px;font-style:italic;line-height:1.5;background:#FAF6F1;border-radius:14px;padding:10px 14px;">'+(x.ex||'')+'</div>'
-    +'<div style="font-weight:600;font-size:11.5px;color:#75705F;margin-top:10px;">Запомни — слово вернётся позже</div></div>';
-  opts.innerHTML='<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="wNext()">Понятно, дальше</button>';
-  var voice=coreVocabularyVoice(x,mode);
-  if(voice)registerVoiceTutorError({module:'vocabulary',itemId:voice.id,revision:voice.revision,learnerAnswer:learnerAnswer})
-    .then(function(recorded){if(recorded&&WQ[WI]===x&&opts.isConnected)opts.insertAdjacentHTML('afterbegin',voiceTutorButton(recorded))}).catch(function(){});
-  wSpeak(x.w)}
 /* Старая ссылка из профиля теперь открывает ту же постоянную библиотеку, уже с фильтром Strong. */
 function wShowKnown(){W_LIBRARY_SCROLL=0;wStoreFilters({query:'',topics:[],states:['strong'],provenances:[]});wShowLibrary()}
-function wNext(){if(!W_ADAPTIVE_MODE)return wSessionNext();WI++;wSync();save();wRender()}
-function wPick(btn,vEnc,rightEnc){var x=WQ[WI];if(!x||btn.dataset.done)return;
-  var v=decodeURIComponent(vEnc),right=decodeURIComponent(rightEnc),mode=wModeFor(x.w);
-  var all=btn.parentElement.querySelectorAll('button');all.forEach(function(b){b.dataset.done=1});
-  var progressKey=wProgressStorageKey(x.w),r0=wStoredProgress(x.w),isNew=!r0||!r0.s;
-  if(isNew)S.wnewUsed=(S.wnewUsed||0)+1;
-  if(v===right){ui.markAnswer(btn,'correct');srsOk(progressKey);WDONE++;WCORRECT++;wAnim('wpop','.35s');
-    setTimeout(wNext,650)}
-  else{ui.markAnswer(btn,'wrong');wAnim('wshake','.42s');
-    all.forEach(function(b){if(b.textContent===right)ui.markAnswer(b,'correct')});
-    srsFail(progressKey);WDONE++;WQ.push(x);
-    setTimeout(function(){wFlip(x,v,mode)},900)}}
-function wSubmit(){var x=WQ[WI];if(!x)return;var inp=document.getElementById('w_inp');if(!inp||inp.dataset.done)return;
-  var progressKey=wProgressStorageKey(x.w),val=(inp.value||'').toLowerCase().trim().replace(/^to /,'');
-  var ok=val===wBase(x.w);inp.dataset.done=1;
-  inp.style.borderColor=ok?'#1F9E5A':'#E24B4A';inp.style.background=ok?'#EAF7F0':'#FDEDEA';
-  if(!ok){inp.value=wBase(x.w);srsFail(progressKey);WQ.push(x)}else srsOk(progressKey);
-  WDONE++;if(ok){WCORRECT++;wSpeak(x.w);wAnim('wpop','.35s')}else wAnim('wshake','.42s');
-  setTimeout(ok?wNext:function(){wFlip(x,val,'type')},ok?650:900)}
 function wExtra(){wMergeAi();
-  var fresh=EGE_WORDS.filter(function(x){var r=wStoredProgress(x.w);return !r||!r.s});
+  var fresh=wOwnerCatalog().filter(function(x){var r=wStoredProgress(x.w);return !r||!r.s});
   wBeginSession(fresh.slice(0,30));
   if(fresh.length<40)wTopUp()}
 /* фоновая генерация: база сама пополняется, сверяясь с уже известными словами */
-var W_GEN=false;
+var W_GEN=false,W_TOPUP_GENERATION=0,W_SCREEN_GENERATION=0;
 async function wTopUp(){
   if(W_GEN)return;if(typeof SRV==='undefined'||!SRV||!TOKEN)return;
-  var fresh=EGE_WORDS.filter(function(x){var r=wStoredProgress(x.w);return !r||!r.s}).length;
-  if(fresh>=40)return;W_GEN=true;
+  var owner=currentOwnerBinding();if(!owner)return;
+  var fresh=wOwnerCatalog().filter(function(x){var r=wStoredProgress(x.w);return !r||!r.s}).length;
+  if(fresh>=40)return;W_GEN=true;var requestGeneration=++W_TOPUP_GENERATION;
   try{
-    var have=EGE_WORDS.map(function(x){return x.w}).slice(0,500);
+    var have=wOwnerCatalog().map(function(x){return x.w}).slice(0,500);
     var d=await generateAiContent('vocabulary_cards',{count:8,exclude:have});
-    if(Array.isArray(d)&&d.length){var have2={};EGE_WORDS.forEach(function(x){have2[x.w]=1});
+    if(requestGeneration!==W_TOPUP_GENERATION||!wSameOwner(owner,currentOwnerBinding()))return;
+    if(Array.isArray(d)&&d.length){var have2={};wOwnerCatalog().forEach(function(x){have2[x.w]=1});
       var added=[];
-      d.forEach(function(x){if(x.w&&x.tr&&!have2[x.w]&&(x.ex||'').toLowerCase().indexOf(x.w.replace(/^to /,'').toLowerCase())>=0){var it={w:x.w,p:x.p||'n',t:0,tr:x.tr,ex:x.ex||'',voice_tutor:x.voice_tutor||null};EGE_WORDS.push(it);added.push(it);have2[x.w]=1}});
+      d.forEach(function(x){if(x.w&&x.tr&&!have2[x.w]&&(x.ex||'').toLowerCase().indexOf(x.w.replace(/^to /,'').toLowerCase())>=0){var it={w:x.w,p:x.p||'n',t:0,tr:x.tr,ex:x.ex||'',voice_tutor:x.voice_tutor||null,provenance:'generated'};added.push(it);have2[x.w]=1}});
       if(added.length){S.aiWords=(S.aiWords||[]).concat(added);save();wSync()}}
   }catch(e){}
-  W_GEN=false}
+  finally{if(requestGeneration===W_TOPUP_GENERATION)W_GEN=false}}
 /* ИИ-набор слов теперь пополняет базу ЕГЭ */
 async function genWords(){
-  const d=await generateAiContent('vocabulary_cards',{count:8,exclude:EGE_WORDS.map(function(x){return x.w}).slice(0,500)});if(!Array.isArray(d)||!d.length)throw 0;
-  var have={};EGE_WORDS.forEach(function(x){have[x.w]=1});
-  d.forEach(function(x){if(x.w&&x.tr&&!have[x.w])EGE_WORDS.push({w:x.w,p:x.p||'n',t:0,tr:x.tr,ex:x.ex||'',voice_tutor:x.voice_tutor||null})});
-  initWords()}
+  var owner=currentOwnerBinding();if(!owner)throw new Error('Vocabulary owner is unavailable');
+  var requestGeneration=++W_SCREEN_GENERATION;
+  const d=await generateAiContent('vocabulary_cards',{count:8,exclude:wOwnerCatalog().map(function(x){return x.w}).slice(0,500)});
+  if(requestGeneration!==W_SCREEN_GENERATION||!wSameOwner(owner,currentOwnerBinding()))return false;
+  if(!Array.isArray(d)||!d.length)throw 0;
+  var have={};wOwnerCatalog().forEach(function(x){have[x.w]=1});var added=[];
+  d.forEach(function(x){if(x.w&&x.tr&&!have[x.w]){added.push({w:x.w,p:x.p||'n',t:0,tr:x.tr,ex:x.ex||'',voice_tutor:x.voice_tutor||null,provenance:'generated'});have[x.w]=1}});
+  if(added.length){S.aiWords=(S.aiWords||[]).concat(added);save()}
+  initWords();return true}
 
 registerRouteHook(function(id){if(id==='scr2')initWords()});
+window.addEventListener('online',wRenderNetworkState);
+window.addEventListener('offline',wRenderNetworkState);
 registerScreenGenerator('scr2',genWords);
 registerAuthorityReset(function(authority){
   if(!W_SESSION_OWNER||authority?.owner!==W_SESSION_OWNER.username||authority?.ownerGeneration!==W_SESSION_OWNER.generation)return;
-  WQ=[];WI=0;WDONE=0;WCORRECT=0;W_EVENTS=[];W_REPEAT_COUNTS={};W_PENDING_ANSWER='';W_SESSION_VIEW=null;
+  WQ=[];WI=0;WDONE=0;WCORRECT=0;W_EVENTS=[];W_REPEAT_COUNTS={};W_PENDING_ANSWER='';W_PENDING_RESULT=null;W_SELECTED_CHOICE='';W_SELECTED_RATING='';W_SESSION_VIEW=null;
   W_SESSION_ATTEMPT_ID='';W_SESSION_OWNER=null;W_SESSION_STARTED_AT=0;W_MODULE_ATTEMPT_REPORTED=false;W_VIEW='home';
+  W_REPORT_GENERATION+=1;W_TASK_TOKEN+=1;W_TASK_COMMITTED=new Set();W_TASK_ADVANCED=new Set();W_TASK_REVIEWED=new Set();wSetPrimaryAction(null);
+  var area=wArea();if(area){delete area.dataset.sessionAttemptId;delete area.dataset.sessionToken;delete area.dataset.sessionIndex;delete area.dataset.sessionPhase;area.replaceChildren()}
+  W_TOPUP_GENERATION+=1;W_SCREEN_GENERATION+=1;W_GEN=false;
 });
 document.addEventListener('keydown',function(event){
   var screen=document.getElementById('scr2');
@@ -506,8 +513,8 @@ document.addEventListener('keydown',function(event){
 
 /* Имена для обработчиков этого экрана: загрузчик кладёт их на window вместе с чанком. */
 export {
-  WI,WQ,W_SESSION_OWNER,hasActiveVocabularyPractice,initWords,launchVocabularyPractice,wChooseRecognition,wClearLibraryFilters,wDeletePersonalWord,
-  wCompleteBridge,wCompleteIntroduction,wExtra,wNext,wNotKnown,wPick,wPracticeDifficult,wRateRussian,wRender,
+  WI,WQ,W_SESSION_OWNER,genWords,hasActiveVocabularyPractice,initWords,launchVocabularyPractice,wChooseRecognition,wClearLibraryFilters,wDeletePersonalWord,
+  wChooseRussianRating,wCompleteBridge,wCompleteIntroduction,wExtra,wNotKnown,wPracticeDifficult,wRender,
   wRevealRussian,wSessionNext,wSetBudget,wSetLibraryFilter,wSetLibrarySearch,wShowHome,wShowKnown,
-  wShowLibrary,wShowWord,wSpeakLibraryValue,wStartPractice,wSubmit,wSubmitSession,wToggleExampleTranslation,
+  wShowLibrary,wShowRecognitionFeedback,wShowWord,wSpeakLibraryValue,wStartPractice,wSubmitRecognition,wSubmitRussianRating,wSubmitSession,wToggleExampleTranslation,
 };

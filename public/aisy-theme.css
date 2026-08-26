@@ -611,6 +611,30 @@ body,
   background: var(--aisy-alert-danger-background);
 }
 
+.ebstate {
+  border: 1px solid var(--aisy-color-border);
+  background: var(--aisy-color-info-soft);
+  box-shadow: var(--aisy-depth-control);
+  color: var(--aisy-color-text);
+}
+
+.ebstate-loading,
+.ebstate-empty { background: var(--aisy-color-surface-muted); color: var(--aisy-color-text-muted); }
+.ebstate-success { background: var(--aisy-color-success-soft); color: var(--aisy-color-success); }
+.ebstate-error { background: var(--aisy-color-danger-soft); color: var(--aisy-color-danger); }
+.ebstate-glyph { background: color-mix(in srgb, var(--aisy-color-surface) 84%, transparent); }
+.ebstate-spin {
+  border-color: color-mix(in srgb, currentColor 24%, transparent);
+  border-top-color: currentColor;
+}
+
+.ebstate-action {
+  border-color: currentColor;
+  background: var(--aisy-color-surface);
+  box-shadow: var(--aisy-depth-control);
+  color: inherit;
+}
+
 .aisy-sr-only {
   position: absolute;
   inline-size: 1px;

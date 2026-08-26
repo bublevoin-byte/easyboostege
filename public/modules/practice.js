@@ -138,10 +138,7 @@ export function projectPractice(input = {}) {
   const recommended = VALID_SKILLS.has(input.recommendedSkill) ? input.recommendedSkill : null;
   const online = input.online !== false;
 
-  return Object.freeze({
-    title: 'Практика',
-    description: 'Выберите навык для дополнительной работы. Незавершённые задания останутся на месте.',
-    skills: Object.freeze(PRACTICE_SKILLS.map((skill) => {
+  const skills = PRACTICE_SKILLS.map((skill) => {
       const state = active.has(skill.id) ? 'continue'
         : due.has(skill.id) ? 'review'
           : recommended === skill.id ? 'recommended' : 'available';
@@ -156,7 +153,26 @@ export function projectPractice(input = {}) {
         action: Object.freeze({ label: copy.label, screenId: skill.screenId }),
         ...availabilityFor(skill, online, loaded.has(skill.id)),
       });
-    })),
+    });
+  const nextSkill = ['continue', 'review', 'recommended', 'available']
+    .map((state) => skills.find((skill) => skill.state === state))
+    .find(Boolean);
+
+  return Object.freeze({
+    title: 'Практика',
+    description: 'Выберите навык для дополнительной работы. Незавершённые задания останутся на месте.',
+    skills: Object.freeze(skills),
+    nextAction: nextSkill ? Object.freeze({
+      skillId: nextSkill.id,
+      label: nextSkill.action.label,
+      screenId: nextSkill.action.screenId,
+      title: nextSkill.label,
+      reason: nextSkill.reason,
+      outcome: nextSkill.outcome,
+      availability: nextSkill.availability,
+      availabilityLabel: nextSkill.availabilityLabel,
+      disabled: nextSkill.availability === 'cache-required',
+    }) : null,
   });
 }
 

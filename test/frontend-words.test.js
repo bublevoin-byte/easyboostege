@@ -3,9 +3,14 @@ import fs from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
 
+import { createVocabularySessionView } from '../public/vocabulary-session-view.js';
+
 const source = await fs.readFile(new URL('../public/modules/words.js', import.meta.url), 'utf8');
 const screenSource = await fs.readFile(new URL('../public/screens/words.js', import.meta.url), 'utf8');
+const appSource = await fs.readFile(new URL('../public/app.js', import.meta.url), 'utf8');
 const indexSource = await fs.readFile(new URL('../public/index.html', import.meta.url), 'utf8');
+const wordsStyles = await fs.readFile(new URL('../public/words.css', import.meta.url), 'utf8').catch(() => '');
+const workerSource = await fs.readFile(new URL('../public/service-worker.js', import.meta.url), 'utf8');
 
 function createWordsModule() {
   const window = {};
@@ -165,15 +170,129 @@ test('Words screen wires an accessible home, persistent library and read-only de
   const detailEnd = screenSource.indexOf('\nfunction ', detailStart + 1);
   const detailSource = screenSource.slice(detailStart, detailEnd);
   assert.doesNotMatch(detailSource, /srsOk|srsFail|applyVocabularyOutcome/u);
-  assert.match(indexSource, /@media\(max-width:375px\).*\.vocab/u);
-  assert.match(indexSource, /@media\(prefers-reduced-motion:reduce\).*\.vocab/u);
+  assert.match(wordsStyles, /@media \(max-width: 359px\)/u);
+  assert.match(wordsStyles, /@media \(prefers-reduced-motion: reduce\)/u);
+  assert.match(screenSource, /class="vocab-empty-plan" role="status" aria-live="polite"/u);
+  assert.match(screenSource, /Следующие слова появятся здесь, когда подойдёт срок повторения/u);
+  assert.match(wordsStyles, /\.vocab-empty-plan[\s\S]*?var\(--aisy-color-success-soft\)/u);
+  assert.match(screenSource, /<h1 id="w_home_title" tabindex="-1">Сегодня<\/h1>/u);
+  assert.match(screenSource, /focusHome=W_VIEW==='library'\|\|W_VIEW==='practice'/u);
+  assert.match(screenSource, /if\(focusHome\)requestAnimationFrame\(function\(\)\{var heading=document\.getElementById\('w_home_title'\);if\(heading\)heading\.focus\(\)\}\)/u);
+});
+
+test('Words deep route uses the shared paper shell and a single production action dock', () => {
+  const wordsStart = indexSource.indexOf('<div class="screen" id="scr2"');
+  const wordsEnd = indexSource.indexOf('<div class="screen" id="scr3"', wordsStart);
+  const wordsMarkup = indexSource.slice(wordsStart, wordsEnd);
+
+  assert.match(indexSource, /<link rel="stylesheet" href="\/words\.css">/u);
+  assert.match(workerSource, /'\/words\.css'/u);
+  assert.match(indexSource, /<main class="words-route"[^>]*aria-labelledby="w_header_title"/u);
+  assert.match(indexSource, /id="w_action_dock" class="vocab-action-dock"/u);
+  assert.doesNotMatch(wordsMarkup, /class="navclay"/u);
+  assert.match(wordsStyles, /\.words-route/u);
+  assert.match(wordsStyles, /\.vocab-action-dock/u);
+  assert.match(wordsStyles, /var\(--aisy-color-background\)/u);
+  assert.match(wordsStyles, /var\(--aisy-button-height\)/u);
+  assert.doesNotMatch(wordsStyles, /#[0-9a-f]{3,8}\b/iu);
+  assert.match(screenSource, /class="aisy-button vocab-primary/u);
+  assert.doesNotMatch(wordsMarkup, /words-legacy|status bar|gradient header/u);
+  assert.doesNotMatch(wordsMarkup, /style=/u);
+});
+
+test('recognition renders native radio choices and requires an explicit dock commit', () => {
+  const card = { innerHTML: '' };
+  const options = { innerHTML: '' };
+  const actions = [];
+  const view = createVocabularySessionView({
+    escapeHtml: (value) => String(value), decoration: () => '', badge: () => '', speaker: () => '',
+    handlerValue: encodeURIComponent, requestFrame: () => {},
+    setPrimaryAction: (...args) => actions.push(args),
+  });
+
+  view.renderTask(card, options, {
+    token: 17,
+    task: { mode: 'receptive_meaning' },
+    item: { w: 'achievement', tr: 'достижение' },
+    choices: ['результат', 'достижение'],
+  });
+
+  assert.match(options.innerHTML, /<fieldset class="vocab-choice-group"><legend>Варианты значения<\/legend>/u);
+  assert.equal((options.innerHTML.match(/type="radio" name="w_recognition_choice"/gu) || []).length, 2);
+  assert.match(options.innerHTML, /id="w_choice_status"[^>]*role="status"[^>]*aria-live="polite"/u);
+  assert.match(options.innerHTML, /data-vocab-choice="%D0%B4%D0%BE%D1%81%D1%82%D0%B8%D0%B6%D0%B5%D0%BD%D0%B8%D0%B5"/u);
+  assert.match(options.innerHTML, /event\.key==='Enter'/u);
+  assert.deepEqual(actions.at(-1), ['Проверить ответ', 'wSubmitRecognition(17)', true]);
+});
+
+test('Russian answer review uses native radio ratings and one explicit primary commit', () => {
+  const card = { innerHTML: '' };
+  const options = { innerHTML: '' };
+  const actions = [];
+  const view = createVocabularySessionView({
+    escapeHtml: (value) => String(value), decoration: () => '', badge: () => '', speaker: () => '',
+    handlerValue: encodeURIComponent, requestFrame: () => {},
+    setPrimaryAction: (...args) => actions.push(args),
+  });
+
+  view.renderRussianReveal(card, options, { w: 'achievement', tr: 'достижение' }, 19);
+
+  assert.match(options.innerHTML, /<fieldset class="vocab-self-rating"><legend>Насколько близко ты вспомнил\(а\)\?<\/legend>/u);
+  assert.equal((options.innerHTML.match(/type="radio" name="w_russian_rating"/gu) || []).length, 3);
+  assert.match(options.innerHTML, /wChooseRussianRating\('not_known',19\)/u);
+  assert.match(options.innerHTML, /event\.key==='Enter'/u);
+  assert.deepEqual(actions.at(-1), ['Сохранить оценку', 'wSubmitRussianRating(19)', true]);
+});
+
+test('recognition answer state remains observable until the learner opens review', () => {
+  const answerStart = screenSource.indexOf('function wMarkRecognitionResult(');
+  const answerEnd = screenSource.indexOf('\nfunction wCompleteIntroduction(', answerStart);
+  const answerSource = screenSource.slice(answerStart, answerEnd);
+
+  assert.match(answerSource, /dataset\.sessionPhase='answer'/u);
+  assert.match(answerSource, /wSetPrimaryAction\('Разобрать ответ','wShowRecognitionFeedback\('/u);
+  assert.match(answerSource, /wFocusPrimaryAction\(\)/u);
+  assert.match(answerSource, /id\('w_choice_status'\)|getElementById\('w_choice_status'\)/u);
+  assert.doesNotMatch(answerSource, /setTimeout/u);
+});
+
+test('Words exposes visible keyboard focus for hidden filter and choice radio inputs', () => {
+  assert.match(wordsStyles, /\.vocab-filter-chip input:focus-visible \+ span/u);
+  assert.match(wordsStyles, /\.vocab-choice:has\(input:focus-visible\)/u);
+  assert.match(wordsStyles, /outline:\s*3px solid var\(--aisy-focus-color\)/u);
+});
+
+test('Words uses the approved horizontal paper settle and removes spatial motion when reduced', () => {
+  assert.match(screenSource, /wAnim\('vocab-paper-settle','\.36s'\)/u);
+  assert.match(wordsStyles, /@keyframes vocab-paper-settle[\s\S]*?translateX\(16px\)[\s\S]*?translateX\(0\)/u);
+  assert.match(wordsStyles, /@keyframes vocab-paper-fade[\s\S]*?opacity:\s*0[\s\S]*?transform:\s*none[\s\S]*?opacity:\s*1/u);
+  assert.match(wordsStyles, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?#w_card[\s\S]*?animation-name:\s*vocab-paper-fade !important[\s\S]*?animation-duration:\s*var\(--aisy-motion-reduced-opacity\) !important[\s\S]*?transform:\s*none !important/u);
+});
+
+test('Words guards every task commit and async mutation with attempt and owner generations', () => {
+  assert.match(screenSource, /function wClaimCommit\(token\)/u);
+  assert.match(screenSource, /function wClaimAdvance\(token\)/u);
+  assert.match(screenSource, /function wClaimReview\(token\)/u);
+  assert.match(screenSource, /W_TASK_COMMITTED\.has\(Number\(token\)\)/u);
+  assert.match(screenSource, /reportGeneration===W_REPORT_GENERATION/u);
+  assert.match(screenSource, /wSameOwner\(owner,currentOwnerBinding\(\)\)/u);
+  assert.match(screenSource, /requestGeneration!==W_TOPUP_GENERATION/u);
+  assert.match(screenSource, /requestGeneration!==W_SCREEN_GENERATION/u);
+  assert.match(screenSource, /dataset\.sessionAttemptId=W_SESSION_ATTEMPT_ID/u);
+  assert.match(screenSource, /dataset\.sessionPhase=task\?'task':'summary'/u);
+});
+
+test('generated words stay scoped to the current owner state instead of mutating the shared catalog', () => {
+  assert.match(appSource, /function wMergeAi\(\)\{return S&&Array\.isArray\(S\.aiWords\)\?S\.aiWords\.slice\(\):\[\]\}/u);
+  assert.match(screenSource, /function wOwnerCatalog\(\)\{var catalog=EGE_WORDS\.slice\(\);wordModule\.mergeGenerated\(catalog,wMergeAi\(\)\);return catalog\}/u);
+  assert.doesNotMatch(screenSource, /EGE_WORDS\.push/u);
 });
 
 test('ordinary vocabulary completion posts one stable bounded session summary', () => {
   assert.match(screenSource, /buildVocabularyModuleAttempt/u);
   assert.match(screenSource, /W_SESSION_ATTEMPT_ID/u);
   assert.match(screenSource, /W_MODULE_ATTEMPT_REPORTED/u);
-  assert.match(screenSource, /syncModuleAttempt\(attempt\)/u);
+  assert.match(screenSource, /syncModuleAttempt\(attempt,\{owner:owner\.username,ownerGeneration:owner\.generation\}\)/u);
   assert.match(screenSource, /completeAdaptiveModuleActivity\(\{module:'vocabulary',activityId:W_ADAPTIVE_ACTIVITY,score:attempt\.score,maxScore:attempt\.maxScore/u);
 });
 

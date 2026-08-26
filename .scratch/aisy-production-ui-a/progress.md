@@ -5,13 +5,13 @@
 | 01 — Production A foundation | done | Standards/Spec re-review zero findings; 1919 tests / 0 fail; build + Aisy E2E passed |
 | 02 — First launch + VK ID | done | ZERO×2 review; 1966 unit / 0 fail; build + three Aisy E2E + security gates green; live VK not called |
 | 03 — Access + Today shell | done | ZERO×2 re-review; 101 focused tests / 0 fail; build + affected Chromium E2E green; one full-suite run documented in ticket |
-| 04 — Practice + Words | blocked by 03 | — |
-| 05 — Grammar | blocked by 03 | — |
-| 06 — Reading + Listening | blocked by 03 | — |
-| 07 — Writing + AI review | blocked by 03 | — |
-| 08 — Speaking + Asya | blocked by 03 | — |
-| 09 — EGE + full mock | blocked by 03 | — |
-| 10 — Progress + Profile | blocked by 03 | — |
+| 04 — Practice + Words | done | Direction A Practice/Words; 50 focused + 6 Reading contract tests green; production browser matrix green; ZERO×2 re-review |
+| 05 — Grammar | ready-for-agent | Ticket 03 dependency complete |
+| 06 — Reading + Listening | ready-for-agent | Ticket 03 dependency complete |
+| 07 — Writing + AI review | ready-for-agent | Ticket 03 dependency complete |
+| 08 — Speaking + Asya | ready-for-agent | Ticket 03 dependency complete |
+| 09 — EGE + full mock | ready-for-agent | Ticket 03 dependency complete |
+| 10 — Progress + Profile | ready-for-agent | Ticket 03 dependency complete |
 | 11 — PWA + release evidence | blocked by 02–10 | — |
 
 ## Owner decisions already locked

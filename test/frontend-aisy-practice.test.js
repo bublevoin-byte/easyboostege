@@ -50,6 +50,35 @@ test('Practice gives continue, review and recommendation honest precedence', () 
   assert.match(byId.grammar.reason, /незаверш/u);
   assert.match(byId.vocabulary.reason, /повтор/u);
   assert.match(byId.listening.reason, /план/u);
+  assert.deepEqual(view.nextAction, {
+    skillId: 'grammar',
+    label: 'Продолжить',
+    screenId: 'scr3',
+    title: 'Грамматика',
+    reason: byId.grammar.reason,
+    outcome: byId.grammar.outcome,
+    availability: 'online',
+    availabilityLabel: byId.grammar.availabilityLabel,
+    disabled: false,
+  });
+});
+
+test('Practice projects exactly one recommended next action without hiding any module', () => {
+  const view = projectPractice({ recommendedSkill: 'speaking' });
+
+  assert.equal(view.skills.length, 6);
+  assert.deepEqual(view.nextAction, {
+    skillId: 'speaking',
+    label: 'Начать',
+    screenId: 'scr9',
+    title: 'Говорение',
+    reason: 'Текущий план выделяет этот навык как следующий фокус.',
+    outcome: 'После завершения запись можно прослушать; автоматическая оценка приблизительная.',
+    availability: 'online',
+    availabilityLabel: 'Задания открываются в приложении; запись и проверка используют сеть.',
+    disabled: false,
+  });
+  assert.equal(view.skills.filter((skill) => skill.id === view.nextAction.skillId).length, 1);
 });
 
 test('Practice derives only explicit due work from existing learner state', () => {
@@ -202,12 +231,30 @@ test('Practice describes offline limits without claiming online-only checks work
   assert.equal(onlineById.reading.availability, 'online');
 });
 
+test('Practice keeps an uncached offline recommendation honest and non-actionable', () => {
+  const view = projectPractice({ online: false, loadedSkills: [], recommendedSkill: 'listening' });
+
+  assert.deepEqual(view.nextAction, {
+    skillId: 'listening',
+    label: 'Начать',
+    screenId: 'scr4',
+    title: 'Аудирование',
+    reason: 'Текущий план выделяет этот навык как следующий фокус.',
+    outcome: 'После сдачи откроется разбор, а результат появится в прогрессе.',
+    availability: 'cache-required',
+    availabilityLabel: 'Для первого открытия нужно подключение; затем материалы сохранятся в кэше.',
+    disabled: true,
+  });
+});
+
 test('Practice stays lazy, keeps its visual shell offline and only navigates into subject screens', async () => {
-  const [mainSource, loaderSource, screenSource, workerSource] = await Promise.all([
+  const [mainSource, loaderSource, screenSource, workerSource, indexSource, styles] = await Promise.all([
     fs.readFile(new URL('../public/main.js', import.meta.url), 'utf8'),
     fs.readFile(new URL('../public/screens.js', import.meta.url), 'utf8'),
     fs.readFile(new URL('../public/screens/practice.js', import.meta.url), 'utf8'),
     fs.readFile(new URL('../public/service-worker.js', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../public/practice.css', import.meta.url), 'utf8'),
   ]);
 
   assert.match(loaderSource, /'aisy-practice':function\(\)\{return import\('\.\/screens\/practice\.js'\)\}/u);
@@ -217,5 +264,14 @@ test('Practice stays lazy, keeps its visual shell offline and only navigates int
   assert.match(shell, /'\/screens\/practice\.js'/u);
   assert.match(shell, /'\/modules\/practice\.js'/u);
   assert.match(screenSource, /nav\(screenId,/u);
+  assert.match(indexSource, /id="practice-recommendation"[^>]*aria-live="polite"/u);
+  assert.match(screenSource, /view\.nextAction/u);
+  assert.match(screenSource, /nextAction\.availabilityLabel/u);
+  assert.match(screenSource, /action\.disabled = nextAction\.disabled/u);
+  assert.doesNotMatch(screenSource, /function primarySkill/u);
+  assert.match(screenSource, /aisy-button--secondary practice-row__action/u);
+  assert.match(styles, /\.practice-recommendation/u);
+  assert.match(styles, /var\(--aisy-color-background\)/u);
+  assert.doesNotMatch(styles, /#[0-9a-f]{3,8}\b/iu);
   assert.doesNotMatch(screenSource, /wStartPractice|gStart\(|startTraining\(|lMt\(|checkWriting\(|initSpeaking\(/u);
 });

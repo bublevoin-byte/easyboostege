@@ -4,15 +4,24 @@
 Тикеты: [.scratch/aisy-production-ui-a/issues/](.scratch/aisy-production-ui-a/issues/)
 Ветка: `prototype/aisy-today-visual-v1`
 
-Overall status: `in-progress` — production-фундамент A и первый запуск/VK ID готовы; Ticket 03 готов к реализации.
+Overall status: `in-progress` — Tickets 01–04 готовы; Ticket 05 готов к реализации.
 
 | № | Что даёт | Статус |
 |---|---|---|
 | 01 | Трёхслойная light/dark тема, локальные шрифты, CTA и phone-only shell | done |
 | 02 | Logo/onboarding и server-side VK ID с local provider | done |
-| 03 | Strict access и production Today | ready-for-agent |
-| 04–10 | Все learner-модули, ЕГЭ, Прогресс и Профиль | blocked by 03 |
+| 03 | Strict access и production Today | done |
+| 04 | Practice hub и полный Words-контур | done |
+| 05–10 | Grammar, Reading/Listening, Writing, Speaking, ЕГЭ, Прогресс и Профиль | ready-for-agent |
 | 11 | PWA/release evidence | blocked by 02–10 |
+
+Ticket 04: Practice показывает все шесть реальных модулей и одно честное следующее действие; Words library,
+занятие, устойчивый результат, review и общие состояния перенесены в A «Бумажный маршрут» с одним 58 px dock CTA,
+deep Back без bottom nav, non-color choice semantics и безопасной геометрией 320×720/720×320. Сохранены SRS,
+персональные/adaptive слова, offline continuation, owner isolation, resume и at-most-once попытки. Focused suite `50/50`,
+исправленный Reading layout contract `6/6`, production Chromium matrix, lint/check/build/diff-check и независимые
+Standards/Spec review `ZERO_FINDINGS`×2 зелёные. Единственный полный `npm test` выявил только унаследованное от
+Ticket 03 ожидание уже удалённого desktop rail; тест приведён к утверждённому phone-only контракту и точечно зелёный.
 
 Ticket 02: production `splash → 3 onboarding → VK ID login` собран в утверждённой A-стилистике; startup
 держит private gate и параллельно проверяет `/me`, поэтому активный вернувшийся learner не видит login flash.

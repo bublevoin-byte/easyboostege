@@ -11,6 +11,12 @@
   block-size: 100%;
 }
 
+/* The legacy inline shell declares a fixed physical height. Mirror its narrow-screen
+   override with a logical size too, so viewport rotations/resizes cannot revive 844px. */
+@media (max-width: 430px) {
+  #frame { block-size: 100dvh; }
+}
+
 .aisy-visually-hidden {
   position: absolute !important;
   inline-size: 1px !important;

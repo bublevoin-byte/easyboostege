@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import jwt from 'jsonwebtoken';
 import { chromium } from 'playwright';
 import { availablePort, chromeExecutable, createActiveSubscriptionPage, openPracticeSkill, stopProcess, waitForReady } from './browser-server-harness.js';
 
@@ -30,8 +31,26 @@ try {
           updated_at: Date.now(),
         },
       },
+      'vocabulary-next-owner': {
+        created: Date.now(),
+        sub_until: Date.now() + 86_400_000,
+        privacy_consent: {
+          text_processing: true,
+          voice_processing: false,
+          policy_version: '2026-08-26-vk-id-v1',
+          updated_at: Date.now(),
+        },
+      },
     },
-    progress: { 'vocabulary-sync-user': {} },
+    progress: {
+      'vocabulary-sync-user': {},
+      'vocabulary-next-owner': {
+        aiWords: [{
+          w: 'owner-b-word', p: 'n', tr: 'слово владельца Б',
+          ex: 'Owner B keeps this generated word.', provenance: 'generated',
+        }],
+      },
+    },
   }), 'utf8');
   const output = [];
   child = spawn(process.execPath, [serverPath], {
@@ -130,7 +149,9 @@ try {
 
   await page.getByRole('button', { name: /^Начать ·/u }).press('Enter');
   await page.locator('#w_card').waitFor();
-  assert.equal(await page.locator('#w_card').evaluate((card) => getComputedStyle(card).animationName), 'none');
+  assert.deepEqual(await page.locator('#w_card').evaluate((card) => {
+    const style=getComputedStyle(card);return{name:style.animationName,duration:style.animationDuration,transform:style.transform};
+  }),{name:'vocab-paper-fade',duration:'0.1s',transform:'none'});
   await page.evaluate(() => window.wShowHome());
   await page.getByRole('heading', { name: 'Сегодня' }).waitFor();
 
@@ -158,6 +179,10 @@ try {
   await page.getByRole('button', { name: 'Открыть библиотеку слов' }).press('Enter');
   await page.getByRole('heading', { name: 'Библиотека' }).waitFor();
   assert.equal(await page.evaluate(() => document.activeElement?.id), 'w_library_title');
+  await page.getByRole('button', { name: 'Вернуться на главную словаря' }).press('Enter');
+  await page.waitForFunction(()=>document.activeElement?.id==='w_home_title');
+  await page.getByRole('button', { name: 'Открыть библиотеку слов' }).press('Enter');
+  await page.getByRole('heading', { name: 'Библиотека' }).waitFor();
   assert.equal(await page.locator('.vocab-source-personal').count(), 4);
   assert.equal(await page.locator('.vocab-source-generated').count(), 1);
   assert.equal(await page.locator('.vocab-source-unknown').filter({ hasText: 'To Orphan Started' }).count(), 1);
@@ -335,16 +360,34 @@ try {
     window.wShowHome();
   });
   await context.setOffline(true);
+  await page.locator('#w_network_state:not([hidden])').waitFor({ state: 'visible' });
+  assert.match(await page.locator('#w_network_state').innerText(), /ответы останутся на устройстве/u);
+  await page.emulateMedia({reducedMotion:'no-preference'});
   await page.getByRole('button', { name: /^Начать ·/u }).press('Enter');
 
   await page.getByRole('heading', { name: 'Вспомни значение' }).waitFor();
+  const paperMotion=await page.locator('#w_card').evaluate(card=>{
+    const style=getComputedStyle(card);return{name:style.animationName,duration:style.animationDuration,transform:style.transform};
+  });
+  assert.equal(paperMotion.name,'vocab-paper-settle');
+  assert.equal(paperMotion.duration,'0.36s');
+  assert.notEqual(paperMotion.transform,'none');
+  await page.emulateMedia({reducedMotion:'reduce'});
+  await page.evaluate(()=>window.wRender());
+  assert.deepEqual(await page.locator('#w_card').evaluate(card=>{
+    const style=getComputedStyle(card);return{name:style.animationName,duration:style.animationDuration,transform:style.transform};
+  }),{name:'vocab-paper-fade',duration:'0.1s',transform:'none'});
   await page.waitForFunction(() => document.activeElement?.id === 'w_session_input');
   await page.getByLabel('Твой вариант значения по-русски').fill('значение');
   await page.getByRole('button', { name: 'Показать ответ' }).press('Enter');
   await page.getByText('смысл', { exact: true }).waitFor();
   assert.equal(await page.getByRole('status', { name: 'смысл' }).getAttribute('aria-live'), 'polite');
   await page.waitForFunction(() => document.activeElement?.id === 'w_session_title');
-  await page.getByRole('button', { name: 'Знал(а)', exact: true }).press('Enter');
+  const knewRating=page.getByRole('radio', { name: 'Знал(а)', exact: true });
+  await knewRating.press('Enter');
+  assert.equal(await page.locator('input[data-vocab-rating="knew"]').isChecked(),true,
+    'Enter must select a native rating without breaking radio semantics');
+  await page.getByRole('button', { name: 'Сохранить оценку' }).press('Enter');
   await page.getByRole('button', { name: 'Дальше' }).press('Enter');
 
   await page.getByRole('heading', { name: 'Напиши слово' }).waitFor();
@@ -379,6 +422,7 @@ try {
   await page.getByRole('heading', { name: 'Выбери значение' }).waitFor();
   await page.waitForFunction(() => document.activeElement?.id === 'w_session_title');
   await page.getByRole('button', { name: 'Не знаю' }).press('Enter');
+  await page.getByRole('button', { name: 'Разобрать ответ' }).press('Enter');
   await page.getByRole('button', { name: 'Дальше' }).press('Enter');
 
   await page.getByRole('heading', { name: 'Короткая пауза' }).waitFor({ timeout: 5_000 });
@@ -392,8 +436,37 @@ try {
   // accessibility transition before pressing Enter so it cannot steal focus
   // between the answer button's keydown and keyup in a slower CI browser.
   await page.waitForFunction(() => document.activeElement?.id === 'w_session_title');
-  await page.getByRole('button', { name: 'новое слово' }).press('Enter');
-  await page.getByRole('button', { name: 'Дальше' }).press('Enter');
+  const firstChoice=page.getByRole('radio').first();
+  await firstChoice.focus();
+  await firstChoice.press('ArrowDown');
+  assert.equal(await page.locator('input[name="w_recognition_choice"]:checked').count(),1,
+    'native radio arrow navigation must select exactly one choice');
+  const correctChoice=page.getByRole('radio', { name: 'новое слово' });
+  if(!await correctChoice.isChecked())await correctChoice.press('Space');
+  assert.equal(await correctChoice.isChecked(),true);
+  assert.equal(await page.getByRole('button', { name: 'Проверить ответ' }).isEnabled(),true);
+  await page.getByRole('button', { name: 'Проверить ответ' }).press('Enter');
+  await page.waitForFunction(()=>document.activeElement?.id==='w_primary_action');
+  assert.equal(await page.locator('#w_primary_action').getAttribute('aria-label'),'Разобрать ответ');
+  await page.waitForTimeout(350);
+  assert.equal(await page.locator('#w_area').getAttribute('data-session-phase'),'answer');
+  assert.equal(await page.locator('[data-vocab-choice].is-correct').count(),1);
+  assert.equal(await page.locator('[data-vocab-choice]:disabled').count(),4);
+  assert.match(await page.locator('#w_choice_status').innerText(),/Верно/u);
+  const committedProgress=await page.evaluate(()=>JSON.stringify(window.S.srs['new word']));
+  await page.evaluate(()=>{
+    const token=Number(document.getElementById('w_area').dataset.sessionToken);
+    window.wSubmitRecognition(token);window.wSubmitRecognition(token);
+  });
+  assert.equal(await page.evaluate(()=>JSON.stringify(window.S.srs['new word'])),committedProgress,
+    'one task token must commit vocabulary mastery at most once');
+  await page.getByRole('button', { name: 'Разобрать ответ' }).press('Enter');
+  const beforeFinalAdvance=await page.evaluate(()=>(
+    {index:window.WI,token:Number(document.getElementById('w_area').dataset.sessionToken)}
+  ));
+  await page.evaluate((token)=>{window.wSessionNext(token);window.wSessionNext(token)},beforeFinalAdvance.token);
+  assert.equal(await page.evaluate(()=>window.WI),beforeFinalAdvance.index+1,
+    'one task token must advance the vocabulary queue at most once');
 
   await page.getByRole('heading', { name: 'Итоги тренировки' }).waitFor();
   const sessionSummary = page.getByLabel('Итоги сессии');
@@ -416,8 +489,9 @@ try {
   }), true);
   await context.setOffline(false);
 
-  await page.getByRole('button', { name: 'К плану на сегодня' }).press('Enter');
+  await page.getByRole('button', { name: 'К плану слов' }).press('Enter');
   await page.getByRole('heading', { name: 'Сегодня' }).waitFor();
+  assert.equal(await page.evaluate(()=>document.activeElement?.id),'w_home_title');
   const trend = page.getByRole('region', { name: 'Самостоятельное вспоминание' });
   assert.match(await trend.innerText(), /7 дней/u);
   assert.match(await trend.innerText(), /30 дней/u);
@@ -494,6 +568,47 @@ try {
   assert.equal(persistedAttempts[0].evidence_quality, 'client_reported');
   assert.equal(persistedAttempts[0].module, 'vocabulary');
   assert.equal(await authenticatedPage.evaluate(() => window.EasyBoostSync.hasPending()), false);
+
+  let pendingGeneration;
+  let generationSeenResolve;
+  const generationSeen=new Promise(resolve=>{generationSeenResolve=resolve});
+  await authenticatedPage.route('**/api/v1/ai/generate-content',route=>{
+    pendingGeneration=route;generationSeenResolve();
+  });
+  const catalogBeforeLateResponse=await authenticatedPage.evaluate(()=>window.EGE_WORDS.length);
+  await authenticatedPage.evaluate(()=>{
+    window.__lateVocabularyGeneration={settled:false,result:null};
+    void window.genWords().then(result=>{window.__lateVocabularyGeneration={settled:true,result}});
+  });
+  await generationSeen;
+  await authenticatedContext.addCookies([{
+    name:'eb_token',
+    value:jwt.sign({u:'vocabulary-next-owner'},'vocabulary-e2e-test-only-secret-32-characters',{expiresIn:'1h'}),
+    url:baseUrl,httpOnly:true,sameSite:'Lax',
+  }]);
+  const ownerSwitch=await authenticatedPage.evaluate(async()=>({
+    first:await window.checkSub(),
+    second:await window.checkSub(),
+    owner:window.EasyBoostStore.readCurrentOwner(),
+  }));
+  assert.equal(ownerSwitch.first,false,'the first check must fail closed when the server switches from owner A to B');
+  assert.equal(ownerSwitch.second,true,'a clean second check may adopt owner B');
+  assert.equal(ownerSwitch.owner.owner,'vocabulary-next-owner');
+  await authenticatedPage.locator('#scr1.on').waitFor({state:'visible',timeout:5_000});
+  await openPracticeSkill(authenticatedPage,'vocabulary');
+  await authenticatedPage.locator('#scr2.on').waitFor();
+  const ownerBBeforeLateResponse=await authenticatedPage.evaluate(()=>JSON.stringify(window.S.aiWords));
+  await pendingGeneration.fulfill({status:200,contentType:'application/json',body:JSON.stringify({data:Array.from({length:8},(_,index)=>(
+    {w:`late-owner-word-${index}`,p:'n',tr:`позднее слово ${index}`,ex:`The late-owner-word-${index} response must be ignored.`}
+  ))})});
+  await authenticatedPage.waitForFunction(()=>window.__lateVocabularyGeneration?.settled===true);
+  assert.deepEqual(await authenticatedPage.evaluate(()=>(
+    {result:window.__lateVocabularyGeneration.result,catalog:window.EGE_WORDS.length,
+      owner:window.EasyBoostStore.readCurrentOwner().owner,aiWords:JSON.stringify(window.S.aiWords),
+      lateSurface:/late-owner-word/u.test(document.getElementById('w_area').textContent)}
+  )),{result:false,catalog:catalogBeforeLateResponse,owner:'vocabulary-next-owner',
+    aiWords:ownerBBeforeLateResponse,lateSurface:false},
+  'owner A deferred generation cannot mutate the shared catalog or owner B state/surface');
   await authenticatedContext.close();
   console.log('vocabulary library e2e passed');
 } finally {
