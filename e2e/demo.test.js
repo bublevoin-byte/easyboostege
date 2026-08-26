@@ -112,6 +112,14 @@ function contextOptions(overrides = {}) {
   return { ...profile, ...overrides };
 }
 
+async function markOnboardingComplete(context) {
+  await context.addInitScript(() => {
+    localStorage.setItem('aisy.onboarding.completion', JSON.stringify({
+      version: 1, completedAt: '2026-08-26T00:00:00.000Z',
+    }));
+  });
+}
+
 async function runE2E() {
   let temporaryDirectory;
   let child;
@@ -273,6 +281,7 @@ async function runE2E() {
     child.stdout.on('data', (chunk) => output.push(chunk.toString()));
     child.stderr.on('data', (chunk) => output.push(chunk.toString()));
     await waitForReady(baseUrl, child, output);
+    await markOnboardingComplete(context);
     await page.goto(baseUrl, { waitUntil: 'networkidle' });
     console.log('e2e: login screen loaded');
     await page.locator('#scr5.on[data-access-state="no-session"]').waitFor({ state: 'visible', timeout: 5_000 });
@@ -282,6 +291,7 @@ async function runE2E() {
     await context.close();
 
     const unknownContext=await browser.newContext(contextOptions({serviceWorkers:'block'}));
+    await markOnboardingComplete(unknownContext);
     await unknownContext.route('**/api/v1/me',route=>route.abort('internetdisconnected'));
     const unknownPage=await unknownContext.newPage();
     await unknownPage.goto(baseUrl,{waitUntil:'networkidle'});
@@ -470,8 +480,8 @@ async function runE2E() {
     });
     const migratedGrammarTopic = authenticatedPage.locator('#g_area button').filter({ hasText: 'Present Simple' }).first();
     await migratedGrammarTopic.waitFor({ state: 'visible', timeout: 5_000 });
-    assert.match(await migratedGrammarTopic.innerText(), /ИЗУЧЕНО/u);
-    assert.doesNotMatch(await migratedGrammarTopic.innerText(), /ЗАКРЕПЛЕНА/u);
+    assert.match(await migratedGrammarTopic.innerText(), /Изучено/u);
+    assert.doesNotMatch(await migratedGrammarTopic.innerText(), /Закреплена/u);
     assert.equal(await authenticatedPage.evaluate(() => window.S.grammarMastery[1].stage), 'learned');
     console.log('e2e: built-in word and grammar tasks work offline');
     await authenticatedContext.setOffline(false);
@@ -489,7 +499,7 @@ async function runE2E() {
     assert.equal(new Set(assistedBeforeReload.queue.map(item => item.id)).size, 16);
     assert.doesNotMatch(JSON.stringify(await authenticatedPage.evaluate(() => window.S.grammarRunner)), /"(?:ans|o|a)"\s*:/u,
       'the reload snapshot contains pointers, not answer keys');
-    await authenticatedPage.getByRole('button', { name: 'ПРАВИЛО', exact: true }).click();
+    await authenticatedPage.getByRole('button', { name: 'Правило', exact: true }).click();
     assert.equal(await authenticatedPage.evaluate(() => window.S.grammarRunner.masteryAssisted), true);
     await authenticatedPage.waitForTimeout(750);
     await authenticatedPage.reload({ waitUntil: 'networkidle' });
@@ -514,7 +524,7 @@ async function runE2E() {
     const pastTopic = authenticatedPage.locator('#g_area button').filter({ hasText: 'Past Simple и Continuous' }).first();
     await pastTopic.click();
     await authenticatedPage.getByRole('button', { name: 'Начать практику' }).click();
-    await authenticatedPage.locator('#g_card[aria-live="polite"]').waitFor({ state: 'visible' });
+    await authenticatedPage.locator('#g_card').waitFor({ state: 'visible' });
     for (const reducedMotion of ['no-preference', 'reduce']) {
       await authenticatedPage.emulateMedia({ reducedMotion });
       for (const width of [320, 375, 768, 1440]) {
@@ -574,14 +584,20 @@ async function runE2E() {
     const pickProbe = await authenticatedPage.evaluate(index => {
       const buttons = document.querySelectorAll('#g_btns button');
       const button = buttons[index];
-      const before = { count: buttons.length, done: button?.dataset.done ?? null, text: button?.textContent ?? null };
+      const before = { count: buttons.length, done: window.S.grammarRunner.done,
+        text: button?.querySelector('.grammar-choice__label')?.textContent ?? null };
       window.gPick(button, index);
-      return { ...before, doneAfter: button?.dataset.done ?? null };
+      const selected = { done: window.S.grammarRunner.done, phase: window.S.grammarRunner.phase,
+        ariaChecked: button?.getAttribute('aria-checked') ?? null };
+      document.getElementById('g_primary_action')?.click();
+      return { ...before, selected, doneAfterSubmit: window.S.grammarRunner.done };
     }, wrong);
     assert.equal(pickProbe.count, failedQuestion.o.length);
-    assert.equal(pickProbe.done, null);
+    assert.equal(pickProbe.done, 0);
     assert.equal(pickProbe.text, failedQuestion.o[wrong]);
-    assert.equal(pickProbe.doneAfter, '1', 'the active gPick handler must consume the option');
+    assert.deepEqual(pickProbe.selected, { done: 0, phase: 'selected', ariaChecked: 'true' },
+      'choosing an option must not consume or score it');
+    assert.equal(pickProbe.doneAfterSubmit, 1, 'the explicit submit action consumes the selected option once');
     const failedAudit = {
       ...failedPointer,
       diagnosticId: failedDiagnostic.id,
@@ -618,15 +634,15 @@ async function runE2E() {
       diagnosticId: failedAudit.diagnosticId,
       transferId: committedWrong.transferId,
       transfer: true,
-    }, 'the wrong result and unseen transfer are committed synchronously before the explanation timer');
+    }, 'the wrong result and unseen transfer are committed synchronously by explicit submission');
 
     await authenticatedPage.reload({ waitUntil: 'networkidle' });
     await authenticatedPage.locator('#scr1.on').waitFor({ state: 'visible', timeout: 5_000 });
     await authenticatedPage.evaluate(() => window.nav('scr3'));
     await authenticatedPage.locator('#scr3.on').waitFor({ state: 'visible', timeout: 5_000 });
-    await authenticatedPage.getByText('РАЗБОР ОШИБКИ', { exact: true }).waitFor({ state: 'visible', timeout: 5_000 });
-    assert.equal(await authenticatedPage.locator('#g_card[aria-live="polite"]').count(), 1,
-      'the restored answer explanation is announced');
+    await authenticatedPage.getByText('Разбор ответа', { exact: true }).first().waitFor({ state: 'visible', timeout: 5_000 });
+    assert.equal(await authenticatedPage.locator('#g_feedback_status[role="status"][aria-live="polite"]').count(), 1,
+      'the restored answer explanation exposes one concise live status');
     const restoredWrong = await authenticatedPage.evaluate(() => {
       const snapshot = window.S.grammarRunner;
       const topicId = String(snapshot.topicId);
@@ -661,7 +677,7 @@ async function runE2E() {
     assert.equal(transferAudit.wasInitiallyReserved, false);
     assert.equal(transferAudit.transferPair, failedAudit.transferPair);
     assert.equal(transferAudit.supportsWeakness, true);
-    await authenticatedPage.getByRole('button', { name: 'Понятно, дальше' }).click();
+    await authenticatedPage.getByRole('button', { name: /Следующее задание|Завершить подход/u }).click();
     const transferLevel = authenticatedPage.locator(`#g_card [data-grammar-level="${transferQuestion.type}"]`);
     await transferLevel.waitFor({ state: 'visible' });
     assert.match(await transferLevel.innerText(), /ТРАНСФЕР/u);
@@ -691,11 +707,15 @@ async function runE2E() {
         const wrongAnswer = question.type === 'choice' ? question.diagnostics.findIndex(Boolean) : '__definitely_wrong__';
         const chosenDiagnostic = question.type === 'choice' ? question.diagnostics[wrongAnswer] : null;
         await authenticatedPage.evaluate(({ type, answer }) => {
-          if (type === 'choice') window.gPick(document.querySelectorAll('#g_btns button')[answer], answer);
+          if (type === 'choice') {
+            window.gPick(document.querySelectorAll('#g_btns button')[answer], answer);
+            document.getElementById('g_primary_action')?.click();
+          }
           else {
             const input = document.getElementById('g_inp');
             input.value = answer;
-            window.gSubmit();
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            document.getElementById('g_primary_action')?.click();
           }
         }, { type: question.type, answer: wrongAnswer });
         const wrongState = await authenticatedPage.evaluate(() => {
@@ -724,18 +744,21 @@ async function runE2E() {
         completedTypes.add(question.type);
         const explanationButton = authenticatedPage.locator('button[onclick="gAfterExplain()"]');
         await explanationButton.waitFor({ state: 'visible', timeout: 2_500 });
-        assert.equal(await authenticatedPage.locator('#g_card[aria-live="polite"]').count(), 1);
+        assert.equal(await authenticatedPage.locator('#g_feedback_status[role="status"][aria-live="polite"]').count(), 1);
         await explanationButton.click();
         continue;
       }
       await authenticatedPage.evaluate(({ type, answer }) => {
         if (type === 'choice') {
           window.gPick(document.querySelectorAll('#g_btns button')[answer], answer);
+          document.getElementById('g_primary_action')?.click();
         } else {
           const input = document.getElementById('g_inp');
           input.value = answer;
-          window.gSubmit();
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          document.getElementById('g_primary_action')?.click();
         }
+        window.gAfterExplain();
       }, { type: question.type, answer: question.type === 'choice' ? question.a : question.ans[0] });
       completedTypes.add(question.type);
       await authenticatedPage.waitForTimeout(700);
@@ -783,12 +806,17 @@ async function runE2E() {
         });
       }
       await authenticatedPage.evaluate(({ type, answer }) => {
-        if (type === 'choice') window.gPick(document.querySelectorAll('#g_btns button')[answer], answer);
+        if (type === 'choice') {
+          window.gPick(document.querySelectorAll('#g_btns button')[answer], answer);
+          document.getElementById('g_primary_action')?.click();
+        }
         else {
           const input = document.getElementById('g_inp');
           input.value = answer;
-          window.gSubmit();
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          document.getElementById('g_primary_action')?.click();
         }
+        window.gAfterExplain();
       }, { type: question.type, answer: question.type === 'choice' ? question.a : question.ans[0] });
       cleanTypes.add(question.type);
       await authenticatedPage.waitForTimeout(current.last ? 1_000 : 700);
@@ -846,8 +874,8 @@ async function runE2E() {
     await authenticatedPage.locator('#scr3.on').waitFor({ state: 'visible', timeout: 5_000 });
     assert.equal(await authenticatedPage.evaluate(() => window.S.grammarRunner), null,
       'a completed runner snapshot cannot resurrect after server reload');
-    assert.match(await authenticatedPage.locator('#g_area button').filter({ hasText: 'Past Simple и Continuous' }).first().innerText(), /ИЗУЧЕНО/u);
-    // A delayed explanation callback from an abandoned run cannot replace or advance a new run.
+    assert.match(await authenticatedPage.locator('#g_area button').filter({ hasText: 'Past Simple и Continuous' }).first().innerText(), /Изучено/u);
+    // An explicit action left over from an abandoned review cannot replace or advance a new run.
     const abandonedPointer = await authenticatedPage.evaluate(() => {
       window.gStart(3);
       const snapshot = window.S.grammarRunner;
@@ -855,7 +883,10 @@ async function runE2E() {
     });
     const abandonedQuestion = grammarItemsById.get(abandonedPointer);
     assert.equal(abandonedQuestion.type, 'choice');
-    await authenticatedPage.evaluate(index => window.gPick(document.querySelectorAll('#g_btns button')[index], index),
+    await authenticatedPage.evaluate(index => {
+      window.gPick(document.querySelectorAll('#g_btns button')[index], index);
+      document.getElementById('g_primary_action')?.click();
+    },
       (abandonedQuestion.a + 1) % abandonedQuestion.o.length);
     const replacementSession = await authenticatedPage.evaluate(() => {
       window.gToThemes();
@@ -870,7 +901,7 @@ async function runE2E() {
         queueIds: snapshot.queue.map(item => item.id),
       };
     });
-    await authenticatedPage.waitForTimeout(1_050);
+    await authenticatedPage.evaluate(() => window.gAfterExplain());
     assert.deepEqual(await authenticatedPage.evaluate(() => {
       const snapshot = window.S.grammarRunner;
       return {
@@ -881,7 +912,7 @@ async function runE2E() {
         currentId: snapshot.queue[snapshot.i].id,
         queueIds: snapshot.queue.map(item => item.id),
       };
-    }), replacementSession, 'a stale explanation timer cannot mutate its replacement session');
+    }), replacementSession, 'a stale explicit Next action cannot mutate its replacement session');
     const correctAbandonedId = await authenticatedPage.evaluate(() => {
       window.gStart(3);
       return window.S.grammarRunner.queue[0].id;
@@ -890,7 +921,9 @@ async function runE2E() {
     assert.equal(correctAbandoned.type, 'choice');
     const replacementAfterCorrect = await authenticatedPage.evaluate(answer => {
       window.gPick(document.querySelectorAll('#g_btns button')[answer], answer);
+      document.getElementById('g_primary_action')?.click();
       window.gStart(4);
+      window.gAfterExplain();
       const snapshot = window.S.grammarRunner;
       return {
         sessionId: snapshot.sessionId,
@@ -901,7 +934,6 @@ async function runE2E() {
         queueIds: snapshot.queue.map(item => item.id),
       };
     }, correctAbandoned.a);
-    await authenticatedPage.waitForTimeout(750);
     assert.deepEqual(await authenticatedPage.evaluate(() => {
       const snapshot = window.S.grammarRunner;
       return {
@@ -912,7 +944,7 @@ async function runE2E() {
         currentId: snapshot.queue[snapshot.i].id,
         queueIds: snapshot.queue.map(item => item.id),
       };
-    }), replacementAfterCorrect, 'a stale correct-answer timer cannot advance its replacement session');
+    }), replacementAfterCorrect, 'a stale correct-answer Next action cannot advance its replacement session');
     await authenticatedPage.evaluate(() => window.gToThemes());
     console.log('e2e: Grammar 2.0 reload, transfer, four levels and authoritative learned stage work');
 
@@ -1299,6 +1331,7 @@ async function runE2E() {
     await authenticatedContext.close();
 
     const expiredContext = await browser.newContext(contextOptions());
+    await markOnboardingComplete(expiredContext);
     await expiredContext.addCookies([{
       name: 'eb_token',
       value: jwt.sign({ u: 'expireduser' }, jwtSecret, { expiresIn: '1h' }),

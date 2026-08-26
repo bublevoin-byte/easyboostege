@@ -82,16 +82,21 @@ export function configureVoiceTutor(options = {}) {
   runtime = { ...runtime, ...options };
 }
 
-export async function registerVoiceTutorError({ module, itemId, revision, learnerAnswer } = {}) {
+export async function registerVoiceTutorError({ module, itemId, revision, learnerAnswer } = {}, authority = {}) {
   if (!canStartVoiceTutor() || !browser.crypto?.randomUUID) return null;
+  const owner = String(authority.owner || '').trim();
+  if (!owner) throw Object.assign(new Error('Expected account is required.'), { status: 400, code: 'EXPECTED_OWNER_REQUIRED' });
   const attemptId = browser.crypto.randomUUID();
-  await api().post('/api/v1/voice-tutor/errors', {
+  const result = await api().post('/api/v1/voice-tutor/errors', {
     attemptId,
     module,
     itemId,
     revision,
     learnerAnswer: String(learnerAnswer || '').slice(0, 200),
-  });
+  }, { 'X-EasyBoost-Expected-Owner': owner });
+  if (typeof api().responseOwner !== 'function' || api().responseOwner(result) !== owner) {
+    throw Object.assign(new Error('Authenticated account changed.'), { status: 409, code: 'OWNER_CHANGED' });
+  }
   return { attemptId, revision };
 }
 

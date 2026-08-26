@@ -574,6 +574,7 @@ test('transfer exhaustion is an explicit bounded due-next-session outcome', () =
 
 test('the production screen exposes four levels, assisted rule evidence and transfer feedback', async () => {
   const screen = await fs.readFile(new URL('../public/screens/grammar.js', import.meta.url), 'utf8');
+  const styles = await fs.readFile(new URL('../public/grammar.css', import.meta.url), 'utf8');
 
   assert.match(screen, /buildActiveTopicQueue/u);
   assert.match(screen, /checkPracticeAnswer/u);
@@ -583,10 +584,11 @@ test('the production screen exposes four levels, assisted rule evidence and tran
   assert.match(screen, /ТРАНСФЕР/u);
   assert.match(screen, /Результаты тем сверены с их доказательными сроками/u);
   assert.match(screen, /aria-live=["']polite["']/u);
-  assert.match(screen, /id="g_rule_btn"[^>]+box-sizing:border-box[^>]+min-block-size:48px[^>]+min-inline-size:48px[^>]+flex:0 0 auto[^>]+display:inline-flex/u,
-    'the rule control keeps an actual, non-shrinking touch target above 44px');
-  assert.match(screen, /function gExplain[\s\S]+?id="g_card"[^>]+aria-live="polite"/u,
-    'the dynamically inserted explanation is announced');
+  assert.match(screen, /id="g_rule_btn"[^>]+class="[^"]*\baisy-button--secondary\b[^"]*\bgrammar-rule-button\b[^"]*"/u);
+  assert.match(styles, /\.grammar-rule-button\s*\{[^}]+min-inline-size:\s*var\(--aisy-touch-target\)/u,
+    'the shared rule control keeps a non-shrinking touch target');
+  assert.match(screen, /function gExplain[\s\S]+?id="g_feedback_status"[^>]+role="status"[^>]+aria-live="polite"/u,
+    'the explanation announces one concise dedicated feedback message');
   assert.match(screen, /gMasteryDurable[\s\S]+?gClearRunner\(\)/u,
     'the workflow clears only after durable queue acceptance or server replay/application');
 });

@@ -242,10 +242,11 @@ test('application starts and serves health, security headers and PWA assets', { 
     assert.equal(wordSync.status, 200);
     assert.equal((await wordSync.json()).updated, 1);
     const errorSync = await fetch(`${baseUrl}/api/v1/error-bank`, {
-      method: 'POST', headers: activeAuthorization,
+      method: 'POST', headers: { ...activeAuthorization, 'X-EasyBoost-Expected-Owner': 'active' },
       body: JSON.stringify({ errors: [{ module: 'grammar', itemKey: 'grammar_19_24:go', errorType: 'incorrect_form', details: { expected: 'went' } }] }),
     });
     assert.equal(errorSync.status, 200);
+    assert.equal(errorSync.headers.get('x-easyboost-response-owner'), 'active');
     assert.equal((await errorSync.json()).updated, 1);
 
     const studentAdminRequest = await fetch(`${baseUrl}/api/v1/admin/status`, { headers: activeAuthorization });

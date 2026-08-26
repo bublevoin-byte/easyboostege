@@ -609,6 +609,8 @@ export function createVoiceTutorRoutes({
   });
 
   router.post('/api/v1/voice-tutor/errors', auth, async (req, res, next) => {
+    if (!requireExpectedOwner(req, res)) return;
+    bindResponseOwner(res, req.user);
     const parsed = parseErrorRequest(req.body);
     if (!parsed) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректные данные исходной ошибки.' } });
     try {

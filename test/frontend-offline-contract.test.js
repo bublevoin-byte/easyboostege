@@ -103,6 +103,27 @@ test('response-owner metadata is non-enumerable transport state and authority er
   assert.equal(api.canUseOfflineFallback(new Error('client bug')), false);
 });
 
+test('generated content forwards owner headers and keeps response-owner metadata on the returned data', async () => {
+  const generated = [{ id: 'grammar-generated-1' }];
+  const { api, attempts } = createApi({
+    offline: false,
+    responseOwner: 'Owner_A',
+    responseDate: 'Thu, 13 Aug 2026 06:00:00 GMT',
+    payload: { data: generated, provider: 'cache', cached: true },
+  });
+
+  const result = await api.generateContent(
+    'grammar_topic_set',
+    { topicId: 3 },
+    { 'X-EasyBoost-Expected-Owner': 'Owner_A' },
+  );
+
+  assert.deepEqual(result, generated);
+  assert.equal(attempts[0].headers['X-EasyBoost-Expected-Owner'], 'Owner_A');
+  assert.equal(api.responseOwner(result), 'Owner_A');
+  assert.equal(api.responseServerTime(result), Date.parse('2026-08-13T06:00:00.000Z'));
+});
+
 test('debounced word mastery is bound to one exact owner incarnation and response owner', async () => {
   const app = await fs.readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   assert.match(app, /function wAuthority\(/u);

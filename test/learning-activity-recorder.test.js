@@ -56,6 +56,23 @@ function generatedTopicSupplement() {
   });
 }
 
+function generatedExamSupplement() {
+  return {
+    tx: ['A ', ' B ', ' C ', ' D ', ' E ', ' F ', '.'],
+    gaps: Array.from({ length: 6 }, (_, index) => ({
+      b: `WORD${index}`, ans: [`answer${index}`], e: `Reason ${index}.`, t: index + 1,
+      voice: { id: `generated.g.e.${GENERATED_REQUEST_HASH}.${GENERATED_RESULT_HASH}.${index + 1}`, revision: 1 },
+    })),
+  };
+}
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((onResolve, onReject) => { resolve = onResolve; reject = onReject; });
+  return { promise, resolve, reject };
+}
+
 function recorderHarness(active = null) {
   const adaptive = [];
   const ordinary = [];
@@ -96,15 +113,23 @@ function grammarScreenHarness(options = {}) {
   const masteryEvents = [];
   const apiCalls = [];
   const voiceErrors = [];
+  const voiceAuthorities = [];
+  const voiceGuards = [];
+  const invalidatedAuthorities = [];
   const timers = [];
   const routeHooks = [];
+  const authorityResetHooks = [];
+  let owner = options.owner || { username: 'grammar-owner', generation: 1 };
   const elements = new Map();
   const element = (id) => {
     if (!elements.has(id)) {
       elements.set(id, {
-        id, innerHTML: '', textContent: '', value: '', style: {}, dataset: {}, children: [],
-        setAttribute() {}, querySelector() { return element(`${id}:child`); },
-        querySelectorAll() { return []; }, appendChild() {},
+        id, innerHTML: '', textContent: '', value: '', style: {}, dataset: {}, children: [], hidden: false, disabled: false,
+        attributes: {}, setAttribute(name, value) { this.attributes[name] = String(value); },
+        getAttribute(name) { return this.attributes[name] ?? null; }, removeAttribute(name) { delete this.attributes[name]; },
+        querySelector() { return element(`${id}:child`); }, querySelectorAll() { return []; }, appendChild() {},
+        replaceChildren() { this.innerHTML = ''; this.children = []; }, focus() { this.focused = true; },
+        scrollIntoView() {},
       });
     }
     return elements.get(id);
@@ -135,6 +160,7 @@ function grammarScreenHarness(options = {}) {
     return random;
   };
   const window = {
+    addEventListener() {},
     EasyBoostSync: {
       async saveModuleAttempt(attempt) {
         ordinary.push(JSON.parse(JSON.stringify(attempt)));
@@ -177,26 +203,43 @@ function grammarScreenHarness(options = {}) {
         return { execution: { revision: 2 } };
       },
     }),
-    S, SRV: false, TOKEN: '', WBTN: 'background:#fff;color:#2B2B2B;border:1px solid #F0EAE2;',
-    apiGet: async (path) => { apiCalls.push({ method: 'GET', path }); return options.apiGet ? options.apiGet(path) : {}; },
-    apiPost: async (path, body) => { apiCalls.push({ method: 'POST', path, body: JSON.parse(JSON.stringify(body || null)) }); return options.apiPost ? options.apiPost(path, body) : {}; },
+    S, SRV: Boolean(options.serverEnabled), TOKEN: options.serverEnabled ? 'test-token' : '',
+    apiGet: async (path, requestOptions) => { apiCalls.push({ method: 'GET', path, options: JSON.parse(JSON.stringify(requestOptions || {})) }); return options.apiGet ? options.apiGet(path, requestOptions) : {}; },
+    apiPost: async (path, body, headers) => { apiCalls.push({ method: 'POST', path, body: JSON.parse(JSON.stringify(body || null)), headers: JSON.parse(JSON.stringify(headers || {})) }); return options.apiPost ? options.apiPost(path, body, headers) : {}; },
+    apiResponseOwner: (payload) => options.apiResponseOwner ? options.apiResponseOwner(payload) : payload?.__responseOwner || owner?.username || '',
+    apiIsAuthorityFailure: (error) => options.apiIsAuthorityFailure
+      ? options.apiIsAuthorityFailure(error)
+      : error?.code === 'OWNER_CHANGED' || error?.status === 401 || (error?.status === 403 && error?.code === 'FORBIDDEN'),
+    currentOwnerBinding: () => owner ? { ...owner } : null,
+    invalidateLearningAuthority: async (authority) => { invalidatedAuthorities.push(JSON.parse(JSON.stringify(authority))); },
     examModule: {
       elapsedSeconds: (startedAt, endedAt) => Math.floor((endedAt - startedAt) / 1_000),
       record: (record, score) => ({ ...(record || {}), n: Number(record?.n || 0) + 1, last: score, best: Math.max(Number(record?.best || 0), score) }),
       badge: () => '',
     },
     gExamFmt: (seconds) => String(seconds),
-    gSync() {}, generateAiContent: async () => null,
+    gSync() {}, generateAiContent: (...args) => options.generateAiContent ? options.generateAiContent(...args) : Promise.resolve(null),
     registerScreenGenerator() {}, registerRouteHook(callback) { routeHooks.push(callback); },
-    registerVoiceTutorError: async (details) => { voiceErrors.push(JSON.parse(JSON.stringify(details))); return details; }, voiceTutorButton: () => '',
+    registerAuthorityReset(callback) { authorityResetHooks.push(callback); },
+    registerVoiceTutorError: async (details, authority, isCurrent) => {
+      voiceErrors.push(JSON.parse(JSON.stringify(details)));
+      voiceAuthorities.push(JSON.parse(JSON.stringify(authority || null)));
+      voiceGuards.push(isCurrent);
+      return options.registerVoiceTutorError ? options.registerVoiceTutorError(details, authority, isCurrent) : details;
+    }, voiceTutorButton: options.voiceTutorButton || (() => ''),
     save() {}, setTxt() {}, tab() {},
     ui: { animate() {}, markAnswer() {}, escapeHtml(value) { return String(value); } }, wDeco: () => '',
     decorateCoreGrammar() {},
-    document: { getElementById: (id) => (window.__skipGrammarArea && id === 'g_area' ? null : element(id)), createElement: () => element(`created:${elements.size}`) },
+    document: {
+      getElementById: (id) => (window.__skipGrammarArea && id === 'g_area' ? null : element(id)),
+      createElement: () => element(`created:${elements.size}`), querySelector: (selector) => element(`selector:${selector}`), querySelectorAll: () => [],
+    },
+    navigator: { onLine: true },
     crypto: { randomUUID: () => `10000000-0000-4000-8000-${String(++uuid).padStart(12, '0')}` },
     Date: TestDate, Math: testMath,
     setInterval: () => 1, clearInterval() {},
     setTimeout: (callback) => { if (options.deferTimers) timers.push(callback); else callback(); },
+    requestAnimationFrame: (callback) => callback(),
     console,
   });
   context.isGrammarErrorCode = isGrammarErrorCode;
@@ -215,13 +258,15 @@ function grammarScreenHarness(options = {}) {
         gStart:gStart,gReview:gReview,gTheory:gTheory,gResume:gResume,gExamStart:gExamStart,gExamCheck:gExamCheck,gExamInput:gExamInput,
         gStartMixed:function(){return gStartMixed()},
         gStartTargeted:function(){return gStartTargeted()},
+        generateTopic:function(topic){return gGen(topic)},generateExam:function(){return gExamGen()},generateScreen:function(){return genGrammar()},
         restore:initGrammar,
         finish:gFinish,finishReview:gFinishRev,sessionMode:function(){return GS&&GS.mode},sessionTopic:function(){return GS&&GS.t},
         sessionSnapshot:function(){var item=GS&&GS.queue[GS.i];return GS?{sessionId:GS.sessionId,topic:GS.t,index:GS.i,
           practiceMode:GS.practiceMode,scope:GS.scope,focus:GS.recommendation&&GS.recommendation.pointer||null,itemId:item&&item.q.id,phase:GS.phase,done:GS.done,ok:GS.ok,
           queue:GS.queue.map(function(entry){return{id:entry.q.id,topicId:entry.t||GS.t}})}:null},
-        markup:function(){return document.getElementById('g_area').innerHTML},
+        markup:function(){return document.getElementById('g_area').innerHTML+document.getElementById('g_action_dock').innerHTML},
         gToThemes:function(){window.__skipGrammarArea=true;try{gToThemes()}finally{window.__skipGrammarArea=false}},
+        next:function(){return gAfterExplain()},
         masteryAssisted:function(){return Boolean(GS&&GS.masteryAssisted)},masteryStage:function(topic){return gRec(topic).stage},
         commitCurrentAnswer:function(correct){var item=GS&&GS.queue[GS.i];if(item)gAnswer(correct,item)},
         ruleDisabled:function(){return Boolean(document.getElementById('g_rule_btn').disabled)},
@@ -233,18 +278,14 @@ function grammarScreenHarness(options = {}) {
           var question=levels[kind][0];GS={activeRunner:false,t:topic,queue:[{k:type,q:question,t:topic,transfer:true}],i:0,
             ok:0,done:0,phase:'question'};gRenderQ();return document.getElementById('g_area').innerHTML},
         answerCurrent:function(correct,advanceExplanation=true){var item=GS&&GS.queue[GS.i];if(!item)return;
-          if(['f','input','correction','transform'].includes(item.k)){var input=document.getElementById('g_inp');input.dataset={};input.style={};
-            input.value=correct?item.q.ans[0]:'definitely wrong';gSubmit()}
-          else{var buttons=item.q.o.map(function(){return{dataset:{},style:{},setAttribute:function(){},
-            querySelector:function(){return{setAttribute:function(){},innerHTML:''}}}});
-            buttons.forEach(function(button){button.parentElement={querySelectorAll:function(){return buttons}}});
-            var choice=correct?item.q.a:(item.q.a+1)%item.q.o.length;gPick(buttons[choice],choice)}
-          if(!correct&&advanceExplanation)gAfterExplain()}
+          var answer=['f','input','correction','transform'].includes(item.k)?(correct?item.q.ans[0]:'definitely wrong'):(correct?item.q.a:(item.q.a+1)%item.q.o.length);
+          var checked=grammarModule.checkPracticeAnswer(item,answer),accepted=gAnswer(checked.correct,item,checked);if(!accepted)return;
+          if(!checked.correct)gCommitWrongState(item,checked);else{GS.phase='explain';if(gIsPracticeSession())gPersistRunner()}
+          gExplain(item,String(answer),false,checked.correct);if(advanceExplanation)gAfterExplain()}
         ,answerChoice:function(choice){var item=GS&&GS.queue[GS.i];if(!item||!['c','c2','choice'].includes(item.k))return;
-          var buttons=item.q.o.map(function(){return{dataset:{},style:{},setAttribute:function(){},
-            querySelector:function(){return{setAttribute:function(){},innerHTML:''}}}});
-          buttons.forEach(function(button){button.parentElement={querySelectorAll:function(){return buttons}}});
-          var correct=choice===item.q.a;gPick(buttons[choice],choice);if(!correct)gAfterExplain()}
+          var checked=grammarModule.checkPracticeAnswer(item,choice),accepted=gAnswer(checked.correct,item,checked);if(!accepted)return;
+          if(!checked.correct)gCommitWrongState(item,checked);else{GS.phase='explain';if(gIsPracticeSession())gPersistRunner()}
+          gExplain(item,String(choice),false,checked.correct);gAfterExplain()}
       };
     `);
   vm.runInContext(executableScreen, context);
@@ -256,12 +297,22 @@ function grammarScreenHarness(options = {}) {
     masteryBatches,
     masteryEvents,
     voiceErrors,
+    voiceAuthorities,
+    voiceGuards,
+    invalidatedAuthorities,
     apiCalls,
     area: element('g_area'),
+    elementMarkup(id) { return element(id).innerHTML; },
     stateSnapshot() { return JSON.parse(JSON.stringify(S)); },
     runTimers() { while (timers.length) timers.shift()(); },
     advance(milliseconds) { now += milliseconds; },
     setActive(value) { active = value; },
+    setOnline(value) { context.navigator.onLine = Boolean(value); },
+    resetOwner(nextOwner) {
+      const previous = owner ? { owner: owner.username, ownerGeneration: owner.generation } : null;
+      owner = nextOwner ? { ...nextOwner } : null;
+      authorityResetHooks.forEach((hook) => hook(previous));
+    },
     navigate(id) { routeHooks.forEach((hook) => hook(id)); },
   };
 }
@@ -328,6 +379,8 @@ test('targeted browser practice resolves the exact server focus once and resumes
     'GET /api/v1/grammar/recommendation',
     'POST /api/v1/grammar/recommendation/resolve',
   ]);
+  assert.deepEqual(first.apiCalls[0].options.headers, { 'X-EasyBoost-Expected-Owner': 'grammar-owner' });
+  assert.deepEqual(first.apiCalls[1].headers, { 'X-EasyBoost-Expected-Owner': 'grammar-owner' });
   assert.deepEqual(first.apiCalls[1].body, { pointer });
   assert.match(first.screen.markup(), /Точечная практика/u);
   assert.doesNotMatch(first.screen.markup(), new RegExp(GRAMMAR_CATALOG.topics[pointer.topicId].n, 'u'));
@@ -338,6 +391,124 @@ test('targeted browser practice resolves the exact server focus once and resumes
   reloaded.screen.restore();
   assert.deepEqual(JSON.parse(JSON.stringify(reloaded.screen.sessionSnapshot())), JSON.parse(JSON.stringify(started)));
   assert.equal(reloaded.apiCalls.length, 0, 'an already authorized local queue resumes without network calls');
+});
+
+test('targeted recommendation fails closed on response-owner mismatch', async () => {
+  const harness = grammarScreenHarness({
+    apiGet: async () => ({ recommendation: {}, __responseOwner: 'different-owner' }),
+  });
+
+  await harness.screen.gStartTargeted();
+
+  assert.equal(harness.screen.sessionSnapshot(), null);
+  assert.deepEqual(harness.apiCalls.map((call) => call.method), ['GET']);
+  assert.deepEqual(harness.invalidatedAuthorities, [{ owner: 'grammar-owner', ownerGeneration: 1 }]);
+});
+
+test('targeted recommendation authority failure invalidates the learner shell instead of showing retry', async () => {
+  const failure = Object.assign(new Error('expired'), { status: 401, code: 'AUTH_REQUIRED' });
+  const harness = grammarScreenHarness({ apiGet: async () => { throw failure; } });
+
+  await harness.screen.gStartTargeted();
+
+  assert.equal(harness.screen.sessionSnapshot(), null);
+  assert.deepEqual(harness.invalidatedAuthorities, [{ owner: 'grammar-owner', ownerGeneration: 1 }]);
+  assert.doesNotMatch(harness.screen.markup(), /Повторить/u,
+    'an authority failure must not leave a retryable stale-owner screen behind');
+});
+
+test('delayed targeted recommendation from owner A cannot create a runner or DOM for owner B', async () => {
+  const issued = deferred();
+  const harness = grammarScreenHarness({ apiGet: () => issued.promise });
+  const pending = harness.screen.gStartTargeted();
+  assert.deepEqual(harness.apiCalls[0].options.headers, { 'X-EasyBoost-Expected-Owner': 'grammar-owner' });
+
+  harness.resetOwner({ username: 'owner-b', generation: 2 });
+  issued.resolve({ recommendation: {}, __responseOwner: 'grammar-owner' });
+  await pending;
+
+  assert.equal(harness.screen.sessionSnapshot(), null);
+  assert.equal(harness.stateSnapshot().grammarRunner, undefined);
+  assert.equal(harness.apiCalls.length, 1, 'stale owner A response cannot reach the resolver call');
+  assert.equal(harness.area.innerHTML, '', 'authority reset remains the last DOM write');
+});
+
+test('delayed topic and exam generation from owner A cannot write owner B state', async () => {
+  const topicRequest = deferred();
+  const examRequest = deferred();
+  const generationCalls = [];
+  const harness = grammarScreenHarness({
+    serverEnabled: true,
+    generateAiContent(operation, payload, headers) {
+      generationCalls.push({ operation, payload, headers });
+      if (operation === 'grammar_topic_set') return topicRequest.promise;
+      if (operation === 'grammar_exam_19_24') return examRequest.promise;
+      return Promise.resolve(null);
+    },
+  });
+  const topicPending = harness.screen.generateTopic(3);
+  const examPending = harness.screen.generateExam();
+  assert.deepEqual(JSON.parse(JSON.stringify(generationCalls.map((call) => call.headers))), [
+    { 'X-EasyBoost-Expected-Owner': 'grammar-owner' },
+    { 'X-EasyBoost-Expected-Owner': 'grammar-owner' },
+  ]);
+
+  harness.resetOwner({ username: 'owner-b', generation: 2 });
+  topicRequest.resolve(generatedTopicSupplement());
+  examRequest.resolve(generatedExamSupplement());
+  await Promise.all([topicPending, examPending]);
+
+  const state = harness.stateSnapshot();
+  assert.equal(state.gramAi[3], undefined);
+  assert.equal(state.examAi, undefined);
+  assert.equal(state.grammarRunner, undefined);
+  assert.equal(harness.area.innerHTML, '', 'stale generators cannot repaint after authority reset');
+});
+
+test('generated Grammar supplements reject a mismatched response owner before validation or storage', async () => {
+  const supplement = { ...generatedTopicSupplement(), __responseOwner: 'different-owner' };
+  const harness = grammarScreenHarness({
+    serverEnabled: true,
+    generateAiContent: async () => supplement,
+  });
+
+  await harness.screen.generateTopic(3);
+
+  assert.equal(harness.stateSnapshot().gramAi[3], undefined);
+  assert.deepEqual(harness.invalidatedAuthorities, [{ owner: 'grammar-owner', ownerGeneration: 1 }]);
+});
+
+test('delayed Grammar Voice Tutor registration cannot post or render across owner switch or route leave', async () => {
+  const ownerRequest = deferred();
+  const ownerHarness = grammarScreenHarness({
+    registerVoiceTutorError: () => ownerRequest.promise,
+    voiceTutorButton: () => '<button>Voice Tutor</button>',
+  });
+  ownerHarness.screen.gStart(3);
+  assert.ok(ownerHarness.screen.currentItem().voice, 'the canonical item exposes only its Voice Tutor pointer');
+  ownerHarness.screen.answerCurrent(false, false);
+  assert.deepEqual(ownerHarness.voiceAuthorities, [{ owner: 'grammar-owner' }]);
+
+  ownerHarness.resetOwner({ username: 'owner-b', generation: 2 });
+  assert.equal(ownerHarness.voiceGuards[0](), false, 'the lazy-loader guard becomes false before it may POST for owner A');
+  ownerRequest.resolve({ attemptId: 'voice-owner-a', revision: 1 });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(ownerHarness.elementMarkup('voice_tutor_grammar_practice'), '',
+    'owner A registration cannot populate a reused owner B slot');
+
+  const routeRequest = deferred();
+  const routeHarness = grammarScreenHarness({
+    registerVoiceTutorError: () => routeRequest.promise,
+    voiceTutorButton: () => '<button>Voice Tutor</button>',
+  });
+  routeHarness.screen.gStart(3);
+  routeHarness.screen.answerCurrent(false, false);
+  routeHarness.navigate('scr1');
+  assert.equal(routeHarness.voiceGuards[0](), false, 'the lazy-loader guard becomes false before it may POST for a departed route');
+  routeRequest.resolve({ attemptId: 'voice-old-route', revision: 1 });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(routeHarness.elementMarkup('voice_tutor_grammar_practice'), '',
+    'a departed Grammar route cannot receive a late Voice Tutor control');
 });
 
 test('mixed completion persists exact cross-topic history without granting a topic stage', async () => {
@@ -624,15 +795,15 @@ test('an explicitly null chosen confusion pair survives the client event, server
   ], 'canonical history preserves null instead of substituting the item-level confusion pair');
 });
 
-test('a stale correct-answer timer cannot advance a replacement Grammar session', () => {
-  const harness = grammarScreenHarness({ deferTimers: true });
+test('a stale explicit Next action cannot advance a replacement Grammar session', () => {
+  const harness = grammarScreenHarness();
   harness.screen.gStart(3);
-  harness.screen.answerCurrent(true);
-  assert.equal(harness.screen.sessionSnapshot().phase, 'advance');
+  harness.screen.answerCurrent(true, false);
+  assert.equal(harness.screen.sessionSnapshot().phase, 'explain');
   harness.screen.gStart(4);
   const replacement = harness.screen.sessionSnapshot();
 
-  harness.runTimers();
+  harness.screen.next();
 
   assert.deepEqual(harness.screen.sessionSnapshot(), replacement);
 });
@@ -762,7 +933,7 @@ test('an active v2 failure keeps its transfer, reload, Voice pointer and complet
   assert.equal(parsed.success, true, JSON.stringify(parsed.error?.issues));
 });
 
-test('a failed active answer durably snapshots explain and transfer before the delayed renderer', () => {
+test('a failed active answer durably snapshots explain and transfer before explicit Next', () => {
   const harness = grammarScreenHarness({
     state: { gram: {}, grammarMastery: {}, gramAi: {} }, deferTimers: true,
   });
@@ -1088,13 +1259,13 @@ test('transfer renderer keeps all four authored types labelled and natively keyb
   for (const [type, label] of Object.entries(labels)) {
     const html = harness.screen.renderTransfer(2, type);
     assert.match(html, new RegExp(`data-grammar-level="${type}"[^>]*>ТРАНСФЕР · ${label}`), type);
-    assert.doesNotMatch(html, /tabindex="-1"/u, `${type} is not removed from keyboard order`);
     if (type === 'choice') {
-      assert.match(html, /<button[^>]+onclick="gPick\(this,0\)"/u);
+      assert.match(html, /role="radiogroup"[^>]+aria-labelledby="g_task_title"/u);
+      assert.match(html, /<button[^>]+role="radio"[^>]+aria-checked="false"[^>]+tabindex="0"[^>]+onclick="gSelectChoice\(this,0,\d+\)"/u);
       assert.doesNotMatch(html, /id="g_inp"/u);
     } else {
-      assert.match(html, /<input id="g_inp" aria-label="[^"]+"/u, `${type} input label`);
-      assert.match(html, /onkeydown="if\(event\.key==='Enter'\)gSubmit\(\)"/u, `${type} Enter submit`);
+      assert.match(html, /<label class="grammar-label" for="g_inp">[^<]+<\/label>/u, `${type} input label`);
+      assert.match(html, /<input id="g_inp" class="grammar-answer-input"[^>]+onkeydown="if\(event\.key==='Enter'\)\{event\.preventDefault\(\);gSubmit\(\d+\)\}"/u, `${type} Enter submit`);
     }
   }
 });
@@ -1106,6 +1277,18 @@ test('a rule click after answer commitment cannot retroactively mark the answer 
   assert.equal(harness.screen.ruleDisabled(), true);
   harness.screen.gTheory(3);
   assert.equal(harness.screen.masteryAssisted(), false);
+});
+
+test('a correct answer after opening the rule is labelled as assisted in review copy', () => {
+  const harness = grammarScreenHarness();
+  harness.screen.gStart(3);
+  harness.screen.gTheory(3);
+  harness.screen.gResume();
+  harness.screen.answerCurrent(true, false);
+
+  assert.match(harness.screen.markup(), /ответ с опорой/u);
+  assert.doesNotMatch(harness.screen.markup(), /самостоятельный ответ/u);
+  assert.equal(harness.screen.masteryAssisted(), true);
 });
 
 test('single mastery submission selects its exact event result instead of the first batch sibling', async () => {
@@ -1141,8 +1324,8 @@ test('an assisted failed review never claims that the topic regressed', async ()
     'assisted evidence cannot claim a specific independent weakness');
   assert.equal(Object.hasOwn(assistedEvent, 'independentError'), false,
     'help before commitment cannot be turned into late-error regression evidence');
-  assert.doesNotMatch(harness.area.innerHTML, /СНОВА В РАБОТЕ/u);
-  assert.match(harness.area.innerHTML, /ИЗУЧЕНО/u);
+  assert.doesNotMatch(harness.area.innerHTML, /Снова в работе/u);
+  assert.match(harness.area.innerHTML, /Изучено/u);
 });
 
 test('assisted topic errors omit the independent regression reason', async () => {
@@ -1167,8 +1350,8 @@ test('an early passed review never reuses an older regression badge', async () =
   harness.screen.gReview();
   while (harness.screen.currentItem()) harness.screen.answerCurrent(true);
   await new Promise((resolve) => setImmediate(resolve));
-  assert.doesNotMatch(harness.area.innerHTML, /СНОВА В РАБОТЕ/u);
-  assert.match(harness.area.innerHTML, /ИЗУЧЕНО/u);
+  assert.doesNotMatch(harness.area.innerHTML, /Снова в работе/u);
+  assert.match(harness.area.innerHTML, /Изучено/u);
 });
 
 test('Grammar completion explicitly reports typed unsaved results instead of claiming success', async () => {
@@ -1199,7 +1382,7 @@ test('an offline queued Grammar error stays provisional instead of reusing the o
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.match(harness.area.innerHTML, /Результат ждёт синхронизации/u);
-  assert.match(harness.area.innerHTML, /СТАТУС ОБНОВИТСЯ ПОСЛЕ СИНХРОНИЗАЦИИ/u);
+  assert.match(harness.area.innerHTML, /Статус обновится после синхронизации/u);
   assert.doesNotMatch(harness.area.innerHTML, /Навык устойчив!/u);
   assert.doesNotMatch(harness.area.innerHTML, /\u{1F3C6}/u);
 });
@@ -1213,8 +1396,8 @@ test('an offline queued Grammar review shows only a provisional status badge', a
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.match(harness.area.innerHTML, /Результат ждёт синхронизации/u);
-  assert.match(harness.area.innerHTML, /ОЖИДАЕТ СИНХРОНИЗАЦИИ/u);
-  assert.doesNotMatch(harness.area.innerHTML, /ИЗУЧЕНО|УСТОЙЧИВО|СНОВА В РАБОТЕ/u);
+  assert.match(harness.area.innerHTML, /Ожидает синхронизации/u);
+  assert.doesNotMatch(harness.area.innerHTML, /Изучено|Устойчиво|Снова в работе/u);
 });
 
 test('a conflicted Grammar review remains explicitly unsaved instead of claiming completion', async () => {
@@ -1505,6 +1688,47 @@ test('grammar exam keeps its exact runner and evidence local until the atomic re
     'retry reuses the stable session UUID');
   assert.equal(harness.ordinary.length, 1,
     'ordinary learning evidence is emitted once, only after durable acceptance');
+});
+
+test('grammar exam error-bank evidence is owner-bound and stale responses cannot finalize another view', async () => {
+  for (const staleAction of ['owner-switch', 'route-leave']) {
+    const pending = deferred();
+    const harness = grammarScreenHarness({
+      serverEnabled: true,
+      saveGrammarMasteryEvent: (_topicId, event) => ({ eventId: event.id, applied: true }),
+      apiPost: (path) => path === '/api/v1/error-bank' ? pending.promise : {},
+    });
+    harness.screen.gExamStart('builtin:exam:grammar:19-24:v1');
+    const checking = harness.screen.gExamCheck();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const mutation = harness.apiCalls.find((call) => call.path === '/api/v1/error-bank');
+    assert.deepEqual(mutation?.headers, { 'X-EasyBoost-Expected-Owner': 'grammar-owner' });
+    if (staleAction === 'owner-switch') harness.resetOwner({ username: 'owner-b', generation: 2 });
+    else harness.navigate('scr1');
+    pending.resolve({ __responseOwner: 'grammar-owner' });
+    await checking;
+
+    assert.equal(harness.stateSnapshot().exam19, undefined,
+      `${staleAction} prevents the delayed owner-A response from finalizing local exam state`);
+    assert.equal(harness.ordinary.length, 0,
+      `${staleAction} prevents delayed evidence from being attributed to the replacement view`);
+  }
+});
+
+test('grammar exam rejects an error-bank response owned by another account', async () => {
+  const harness = grammarScreenHarness({
+    serverEnabled: true,
+    saveGrammarMasteryEvent: (_topicId, event) => ({ eventId: event.id, applied: true }),
+    apiPost: (path) => path === '/api/v1/error-bank' ? { __responseOwner: 'owner-b' } : {},
+  });
+  harness.screen.gExamStart('builtin:exam:grammar:19-24:v1');
+
+  await harness.screen.gExamCheck();
+
+  assert.deepEqual(harness.invalidatedAuthorities, [{ owner: 'grammar-owner', ownerGeneration: 1 }]);
+  assert.equal(harness.stateSnapshot().exam19, undefined);
+  assert.equal(harness.ordinary.length, 0);
 });
 
 test('route entry restores an exam that remains editable and submittable', () => {

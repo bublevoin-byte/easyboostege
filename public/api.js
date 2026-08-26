@@ -137,10 +137,17 @@
     return parseResponse(response);
   }
 
-  async function generateContent(operation, payload = {}) {
+  async function generateContent(operation, payload = {}, headers = {}) {
     if (!isServerMode) throw new ApiError('ИИ доступен только в серверной версии приложения');
-    const result = await post('/api/v1/ai/generate-content', { operation, ...payload });
-    return result.data;
+    const result = await post('/api/v1/ai/generate-content', { operation, ...payload }, headers);
+    const data = result.data;
+    if (data && typeof data === 'object') {
+      const owner = responseOwner(result);
+      const serverTime = responseServerTime(result);
+      if (owner) responseOwners.set(data, owner);
+      if (Number.isFinite(serverTime)) responseServerTimes.set(data, serverTime);
+    }
+    return data;
   }
 
   global.EasyBoostApi = Object.freeze({

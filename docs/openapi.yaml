@@ -2481,6 +2481,8 @@ paths:
   /api/v1/error-bank:
     post:
       summary: Aggregate a bounded batch of learning errors
+      parameters:
+      - $ref: '#/components/parameters/ExpectedOwner'
       requestBody:
         required: true
         content:
@@ -2502,8 +2504,12 @@ paths:
                       errorType: { type: string, maxLength: 60 }
                       details: { type: object, additionalProperties: true }
       responses:
-        '200': { description: Errors aggregated }
+        '200':
+          description: Errors aggregated
+          headers:
+            X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { description: OWNER_CHANGED; intended owner does not match the authenticated account }
         '429': { $ref: '#/components/responses/RateLimited' }
   /api/v1/ai/evaluate-writing:
     post:

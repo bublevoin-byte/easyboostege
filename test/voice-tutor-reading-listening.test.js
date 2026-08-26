@@ -83,7 +83,7 @@ async function withVoiceTutorApp(run) {
   });
   const request = (pathname, options = {}) => fetch(`http://127.0.0.1:${server.address().port}${pathname}`, {
     ...options,
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    headers: { 'Content-Type': 'application/json', 'X-EasyBoost-Expected-Owner': username, ...(options.headers || {}) },
   });
   try {
     await run({ repository, request, username });

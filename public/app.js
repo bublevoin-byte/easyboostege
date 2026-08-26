@@ -526,7 +526,7 @@ async function logout(){
   })
 }
 
-function generateAiContent(operation,payload){return EasyBoostApi.generateContent(operation,payload)}
+function generateAiContent(operation,payload,headers){return EasyBoostApi.generateContent(operation,payload,headers)}
 
 /* профиль: в серверном режиме ключ не нужен на клиенте */
 registerProfileHook(function(){var ai=document.getElementById('pf_ai');if(ai){ai.textContent='через сервер ✓';ai.style.color='#1D7F4A';ai.style.background='#EAF7F0'}})

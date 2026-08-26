@@ -339,9 +339,11 @@ export function createProgressRoutes({
 
   router.post('/api/v1/error-bank', auth, perUserLimiter(120, 'Слишком много обновлений банка ошибок.'), async (req, res, next) => {
     try {
+      if (!requireExpectedOwner(req, res)) return;
       const parsed = errorBankBatchSchema.safeParse(req.body);
       if (!parsed.success) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректные данные банка ошибок.' } });
-      res.json(await db.upsertErrorBank(req.user, parsed.data.errors));
+      const result = await db.upsertErrorBank(req.user, parsed.data.errors);
+      bindResponseOwner(res, req.user); res.json(result);
     } catch (error) { next(error); }
   });
 

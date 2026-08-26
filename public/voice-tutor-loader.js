@@ -28,7 +28,9 @@ function configureVoiceTutor(options={}){
   if(loadedRuntime)loadedRuntime.configureVoiceTutor(configuredOptions)
 }
 
-async function registerVoiceTutorError(details){return(await loadVoiceTutor()).registerVoiceTutorError(details)}
+async function registerVoiceTutorError(details,authority,isCurrent){const runtime=await loadVoiceTutor();
+  if(typeof isCurrent==='function'&& !isCurrent())return null;
+  return runtime.registerVoiceTutorError(details,authority)}
 async function registerVoiceTutorContextResult(details){return(await loadVoiceTutor()).registerVoiceTutorContextResult(details)}
 async function openVoiceTutorError(details){return(await loadVoiceTutor()).openVoiceTutorError(details)}
 async function finishVoiceTutor(){return(await loadVoiceTutor()).finishVoiceTutor()}

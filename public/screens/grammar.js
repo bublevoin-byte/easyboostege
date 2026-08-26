@@ -4,11 +4,11 @@
  * В оболочке остались только сводка плитки (gSync) и формат таймера, который делят экзамены
  * чтения и аудирования.
  */
-import {registerRouteHook,tab} from '../router.js';
+import {registerRouteHook} from '../router.js';
 import {registerVoiceTutorError,voiceTutorButton} from '../voice-tutor-loader.js';
 import {
-  S,SRV,TOKEN,WBTN,apiGet,apiPost,examModule,gExamFmt,gSync,generateAiContent,grammarModule,
-  registerScreenGenerator,save,setTxt,ui,wDeco,
+  S,SRV,TOKEN,apiGet,apiIsAuthorityFailure,apiPost,apiResponseOwner,currentOwnerBinding,examModule,gExamFmt,gSync,generateAiContent,grammarModule,
+  invalidateLearningAuthority,registerAuthorityReset,registerScreenGenerator,save,setTxt,ui,
 } from '../app.js';
 import {recordCompletedLearningActivity} from '../learning-activity-recorder.js';
 import {GRAMMAR_CATALOG,getGrammarCatalogRuntime,validateGeneratedGrammarSupplement} from '../grammar-catalog.js';
@@ -24,32 +24,19 @@ const GRAM_Q=[
 ];
 let gi=0,gScore=0,gAns=false;
 let GQ=GRAM_Q.slice();
-/* -- grammar fallback renderer -- */
-function renderG(){gAns=false;const q=GQ[gi];
-  document.getElementById('g_head').textContent='Грамматика · Вопрос '+(gi+1)+' из '+GQ.length;
-  document.getElementById('g_steps').innerHTML=GQ.map((_,i)=>'<div style="flex:1;height:5px;border-radius:3px;background:'+(i<=gi?'#fff':'rgba(255,255,255,.35)')+';"></div>').join('');
-  document.getElementById('g_q').innerHTML=q.t[0]+'<span style="display:inline-block;min-width:62px;border-bottom:2.5px dashed #F2683F;text-align:center;color:#B54E2F;">_____</span>'+q.t[2];
-  const op=document.getElementById('g_opts');op.innerHTML='';
-  q.o.forEach((opt,oi)=>{const d=document.createElement('div');d.setAttribute('data-i',oi);
-    d.setAttribute('style','display:flex;align-items:center;justify-content:space-between;background:#fff;border:1.5px solid #EDEEF0;border-radius:15px;padding:14px 16px;font-weight:700;font-size:15px;color:#6A6E75;cursor:pointer;');
-    d.innerHTML=opt+'<span style="width:22px;height:22px;border-radius:50%;border:2px solid #E1E3E6;"></span>';
-    d.onclick=()=>pickG(oi);op.appendChild(d)});
-  document.getElementById('g_exp').style.display='none';
-  const nx=document.getElementById('g_next');nx.style.opacity='.45';nx.textContent='Дальше'}
-function pickG(oi){if(gAns)return;gAns=true;const q=GQ[gi];
-  [...document.getElementById('g_opts').children].forEach(d=>{const i=+d.getAttribute('data-i');
-    if(i===q.a){d.setAttribute('style','display:flex;align-items:center;justify-content:space-between;background:#EAF7F0;border:1.5px solid #1F9E5A;border-radius:15px;padding:14px 16px;font-weight:800;font-size:15px;color:#1D7F4A;');d.querySelector('span').setAttribute('style','width:24px;height:24px;border-radius:50%;background:#1F9E5A;display:grid;place-items:center;');d.querySelector('span').innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 12 10 18 20 6"/></svg>'}
-    else if(i===oi){d.setAttribute('style','display:flex;align-items:center;justify-content:space-between;background:#FCEEEC;border:1.5px solid #E26A56;border-radius:15px;padding:14px 16px;font-weight:700;font-size:15px;color:#B94A37;');d.querySelector('span').setAttribute('style','width:24px;height:24px;border-radius:50%;background:#E26A56;display:grid;place-items:center;');d.querySelector('span').innerHTML='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>'}
-    else d.style.opacity='.55'});
-  if(oi===q.a)gScore++;
-  const ex=document.getElementById('g_exp');ex.style.display='flex';
-  ex.innerHTML='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1F9E5A" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:1px;"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg><div style="font-weight:600;font-size:12.5px;color:#1F7A47;line-height:1.4;">'+(oi===q.a?'Верно! ':'Правильный ответ: <b>'+q.o[q.a]+'</b>. ')+q.e+'</div>';
-  const nx=document.getElementById('g_next');nx.style.opacity='1';nx.textContent=(gi<GQ.length-1?'Дальше':'Завершить')}
-function nextG(){if(!gAns)return;if(gi<GQ.length-1){gi++;renderG()}else{alert('Результат: '+gScore+' из '+GQ.length+' 🎯');tab('scr1')}}
+/* Имена остаются для совместимости со старым loader-контрактом; production использует Grammar 2.0. */
+function renderG(){initGrammar()}
+function pickG(){return false}
+function nextG(){return false}
 async function genGrammar(){
-  const d=await generateAiContent('grammar_quiz');if(!Array.isArray(d)||!d.length)throw 0;
-  GQ=d.filter(x=>x.options&&x.options.length>=2).map(x=>({t:[x.before||'',' _____ ',x.after||''],o:x.options,a:x.answer||0,e:x.explain||''}));
-  if(!GQ.length){GQ=GRAM_Q.slice();throw 0}initGrammar()}
+  const owner=currentOwnerBinding();if(!owner)throw new Error('Grammar owner is unavailable');const requestGeneration=++G_SCREEN_GENERATION;
+  try{const expectedOwnerHeaders=gExpectedOwnerHeaders(owner),d=await generateAiContent('grammar_quiz',{},expectedOwnerHeaders);
+    if(requestGeneration!==G_SCREEN_GENERATION||!gSameOwner(owner,currentOwnerBinding()))return false;
+    if(!await gConfirmOwnerResponse(owner,d))return false;if(!Array.isArray(d)||!d.length)throw 0;
+    GQ=d.filter(x=>x.options&&x.options.length>=2).map(x=>({t:[x.before||'',' _____ ',x.after||''],o:x.options,a:x.answer||0,e:x.explain||''}));
+    if(!GQ.length){GQ=GRAM_Q.slice();throw 0}initGrammar();return true
+  }catch(error){if(requestGeneration!==G_SCREEN_GENERATION||!gSameOwner(owner,currentOwnerBinding()))return false;
+    if(apiIsAuthorityFailure(error)){await gInvalidateOwner(owner);return false}throw error}}
 /* ===== GRAMMAR v2: карта тем ЕГЭ + теория + 2 уровня практики ===== */
 const G_GROUPS=GRAMMAR_CATALOG.groups;
 const G_TOPICS=GRAMMAR_CATALOG.topics;
@@ -67,6 +54,36 @@ function gAddressableItem(t,id,catalogRuntime=G_CATALOG_RUNTIME){var entry=catal
 function gRunnerCatalogRuntime(runtime){return{catalogBank:runtime.catalog.bank,catalogTopics:runtime.catalog.topics,catalogRuntime:runtime}}
 /* --- состояние: S.gram = {tid:{masteryVersion,stage,reviewStep,eligibleAt,ok,err,...}} --- */
 let GS=null;
+let G_TASK_TOKEN=0,G_TARGET_REQUEST_GENERATION=0,G_EXAM_GENERATION=0,G_TOPIC_GENERATION=0,G_SCREEN_GENERATION=0,G_VIEW_GENERATION=0,G_TARGET_PENDING=false;
+function gSameOwner(left,right){return Boolean(left&&right&&left.username===right.username&&left.generation===right.generation)}
+function gExpectedOwnerHeaders(owner){return{'X-EasyBoost-Expected-Owner':owner.username}}
+function gInvalidateOwner(owner){return invalidateLearningAuthority({owner:owner.username,ownerGeneration:owner.generation})}
+async function gConfirmOwnerResponse(owner,payload){if(apiResponseOwner(payload)===owner.username)return true;await gInvalidateOwner(owner);return false}
+function gArea(){return document.getElementById('g_area')}
+function gDock(){return document.getElementById('g_action_dock')}
+function gSetPrimaryAction(label,handler,disabled=false){var dock=gDock();if(!dock)return;
+  if(!label){dock.replaceChildren();dock.hidden=true;return}
+  dock.hidden=false;dock.innerHTML='<button id="g_primary_action" type="button" class="aisy-button grammar-primary" aria-label="'+ui.escapeHtml(label)+'" '
+    +(disabled?'disabled aria-disabled="true" ':'')+'onclick="'+handler+'">'+ui.escapeHtml(label)+'</button>'}
+function gEnablePrimaryAction(enabled=true){var action=document.getElementById('g_primary_action');if(!action)return;
+  action.disabled=!enabled;action.setAttribute('aria-disabled',String(!enabled))}
+function gFocus(id){var target=document.getElementById(id),area=gArea();if(!target)return;
+  if(area)area.scrollTop=0;target.focus({preventScroll:true});
+  if(area&&typeof target.getBoundingClientRect==='function'&&typeof area.getBoundingClientRect==='function'&&typeof target.scrollIntoView==='function'){
+    var targetBox=target.getBoundingClientRect(),areaBox=area.getBoundingClientRect();
+    if(targetBox.top<areaBox.top||targetBox.bottom>areaBox.bottom)target.scrollIntoView({block:'nearest',inline:'nearest'})}}
+function gSetHeader(title,eyebrow){G_VIEW_GENERATION+=1;setTxt('g_header_title',title||'Грамматика');var label=document.querySelector('#scr3 .grammar-route__eyebrow');if(label)label.textContent=eyebrow||'Практика · бумажный маршрут'}
+function gSetProgress(label,value,summary){var percent=Math.max(0,Math.min(100,Math.round(Number(value)||0))),bar=document.getElementById('g_bar'),track=bar&&bar.parentElement;
+  setTxt('g_sumline',summary);if(bar)bar.style.width=Math.max(2,percent)+'%';if(track){track.setAttribute('aria-label',label);track.setAttribute('aria-valuenow',String(percent))}}
+function gVoiceRegistrationCurrent(owner,viewGeneration,session,taskToken){return Boolean(owner&&viewGeneration===G_VIEW_GENERATION&&gSameOwner(owner,currentOwnerBinding())
+  &&(!session||GS===session&&GS.uiToken===taskToken&&GS.phase==='explain'))}
+function gRegisterVoiceError(details,slotId,owner,viewGeneration,session=null,taskToken=null){if(!owner)return;
+  registerVoiceTutorError(details,{owner:owner.username},function(){return gVoiceRegistrationCurrent(owner,viewGeneration,session,taskToken)}).then(function(recorded){if(!recorded||!gVoiceRegistrationCurrent(owner,viewGeneration,session,taskToken))return;
+    var slot=document.getElementById(slotId);if(slot)slot.innerHTML=voiceTutorButton(recorded)
+  }).catch(function(error){if(gVoiceRegistrationCurrent(owner,viewGeneration,session,taskToken)&&apiIsAuthorityFailure(error))return gInvalidateOwner(owner)})}
+function gRenderNetworkState(){var state=document.getElementById('g_network_state');if(!state)return;
+  var offline=typeof navigator!=='undefined'&&navigator.onLine===false;state.hidden=!offline;
+  state.textContent=offline?'Без сети: сохранённые темы и текущий подход доступны. Новая точечная рекомендация потребует подключения.':''}
 function gEvidence(activityId,startedAt=Date.now()){return{id:crypto.randomUUID(),activityId:activityId,startedAt:startedAt,reported:false,score:0,maxScore:0,sources:{},helpUsed:false}}
 function gReportEvidence(evidence,metadata,durationMs){if(!evidence||evidence.reported)return;evidence.reported=true;
   recordCompletedLearningActivity({id:evidence.id,module:'grammar',activityId:evidence.activityId,
@@ -86,7 +103,7 @@ function gMarkHelp(topic,affectsMastery=true,answerDisclosed=false){if(!GS)retur
 function gRunnerSnapshot(){if(!gIsPracticeSession())return null;return{
   schema:'grammar-runner-v5',catalogVersion:GS.catalogVersion||GRAMMAR_CATALOG.version,catalogRevision:GS.catalogRevision||GRAMMAR_CATALOG.revision,sessionId:GS.sessionId,topicId:GS.t,scope:GS.scope||'topic',mode:GS.practiceMode,
   queue:GS.queue.map(function(item){return{id:item.q.id,topicId:item.t||GS.t,transfer:Boolean(item.transfer)}}),i:GS.i,ok:GS.ok,done:GS.done,
-  source:GS.source,helpUsed:Boolean(GS.helpUsed),masteryAssisted:Boolean(GS.masteryAssisted),phase:GS.phase||'question',
+  source:GS.source,helpUsed:Boolean(GS.helpUsed),masteryAssisted:Boolean(GS.masteryAssisted),phase:GS.phase||'question',selectedChoice:Number.isInteger(GS.selectedChoice)?GS.selectedChoice:null,draftAnswer:String(GS.draftAnswer||'').slice(0,500),
   answerAssisted:Boolean(GS.answerAssisted),errorReasons:{...(GS.errorReasons||{})},confusionPairs:{...(GS.confusionPairs||{})},independentErrors:JSON.parse(JSON.stringify(GS.independentErrors||{})),types:{...(GS.types||{})},typeScores:JSON.parse(JSON.stringify(GS.typeScores||{})),
   reservedItemIds:(GS.reservedItemIds||[]).slice(0,32),itemOutcomes:JSON.parse(JSON.stringify(GS.itemOutcomes||[])),evidence:JSON.parse(JSON.stringify(GS.evidence)),recommendation:GS.recommendation?JSON.parse(JSON.stringify(GS.recommendation)):null,completionEvent:GS.completionEvent?JSON.parse(JSON.stringify(GS.completionEvent)):null,
 }}
@@ -178,8 +195,8 @@ function gRestoreRunner(){var snapshot=S&&S.grammarRunner;if(!snapshot||!['gramm
   var evidence=gSafeRunnerEvidence(snapshot.evidence,t,practiceMode,source);
   var itemOutcomes=gSafeRunnerOutcomes(snapshot.itemOutcomes,queue,done,active,scope);if(!itemOutcomes)return null;
   var restored={activeRunner:active,practiceMode:practiceMode,scope:scope,catalogVersion:snapshot.catalogVersion,catalogRevision:snapshot.catalogRevision,...gRunnerCatalogRuntime(resolvedRuntime),sessionId:sessionId,t:t,queue:queue,i:snapshot.i,ok:ok,done:done,
-    source:source,helpUsed:Boolean(snapshot.helpUsed),masteryAssisted:Boolean(snapshot.masteryAssisted),answerCommitted:false,answerAssisted:Boolean(snapshot.answerAssisted),
-    phase:completionPending?'completion_pending':snapshot.phase==='explain'?'explain':snapshot.phase==='advance'?'advance':'question',errorReasons:scope==='mixed'?{}:gSafeRunnerErrors(snapshot.errorReasons,t),confusionPairs:scope==='mixed'?{}:gSafeRunnerPairs(snapshot.confusionPairs,t),independentErrors:scope==='mixed'?gSafeMixedIndependentErrors(snapshot.independentErrors,[...new Set(queue.map(function(item){return item.t}))],resolvedRuntime):gSafeIndependentErrors(snapshot.independentErrors,t,!active,resolvedRuntime),types:gSafeRunnerFlags(snapshot.types),
+    source:source,helpUsed:Boolean(snapshot.helpUsed),masteryAssisted:Boolean(snapshot.masteryAssisted),answerCommitted:false,answerAssisted:Boolean(snapshot.answerAssisted),selectedChoice:Number.isInteger(snapshot.selectedChoice)?snapshot.selectedChoice:null,draftAnswer:String(snapshot.draftAnswer||'').slice(0,500),
+    phase:completionPending?'completion_pending':snapshot.phase==='explain'?'explain':snapshot.phase==='selected'?'selected':snapshot.phase==='advance'?'advance':'question',errorReasons:scope==='mixed'?{}:gSafeRunnerErrors(snapshot.errorReasons,t),confusionPairs:scope==='mixed'?{}:gSafeRunnerPairs(snapshot.confusionPairs,t),independentErrors:scope==='mixed'?gSafeMixedIndependentErrors(snapshot.independentErrors,[...new Set(queue.map(function(item){return item.t}))],resolvedRuntime):gSafeIndependentErrors(snapshot.independentErrors,t,!active,resolvedRuntime),types:gSafeRunnerFlags(snapshot.types),
     typeScores:gSafeRunnerScores(snapshot.typeScores),reservedItemIds:active?[...seen]:Array.isArray(snapshot.reservedItemIds)?snapshot.reservedItemIds.filter(function(id){return Boolean(gAddressableItem(t,id,resolvedRuntime))}).slice(0,32):[...seen],itemOutcomes:itemOutcomes,evidence:evidence,recommendation:recommendation};
   if(restored.phase==='advance'){restored.i++;restored.phase='question'}
   if(restored.phase==='completion_pending'){restored.completionEvent=gSafeCompletionEvent(snapshot.completionEvent,restored);if(!restored.completionEvent)return null}
@@ -224,93 +241,71 @@ async function gSubmitMasteryBatch(entries){
     entries.forEach(function(entry){var item=byId.get(entry.event.id);if(item&&item.record)gSetRec(entry.topicId,item.record)})}
   return result
 }
-function gAnim(name,dur){ui.animate('g_card',name,dur)}
+function gAnim(){var card=document.getElementById('g_card');if(!card||!card.classList)return;
+  card.classList.add('aisy-paper-transition');card.classList.remove('grammar-paper-enter');requestAnimationFrame(function(){card.classList.add('grammar-paper-enter')})}
 function gStatusChip(record){var view=grammarModule.masteryView(record);
-  if(view.due)return '<span style="font-weight:800;font-size:10px;letter-spacing:.6px;color:#C2421B;background:#FFEDE4;padding:5px 10px;border-radius:20px;">'+view.nextLabel.toUpperCase()+'</span>';
-  if(view.stage==='stable')return '<span style="font-weight:800;font-size:10px;letter-spacing:.6px;color:#1D7F4A;background:#EAF7F0;padding:5px 10px;border-radius:20px;">УСТОЙЧИВО</span>';
-  if(view.stage==='confirmed')return '<span style="font-weight:800;font-size:10px;letter-spacing:.6px;color:#1D7F4A;background:#EAF7F0;padding:5px 10px;border-radius:20px;">ПОДТВЕРЖДЕНО</span>';
-  if(view.stage==='learned')return '<span style="font-weight:800;font-size:10px;letter-spacing:.6px;color:#2369A8;background:#EAF3FC;padding:5px 10px;border-radius:20px;">ИЗУЧЕНО</span>';
-  if(view.stage==='learning')return '<span style="font-weight:800;font-size:10px;letter-spacing:.6px;color:#A56000;background:#FFF4DE;padding:5px 10px;border-radius:20px;">ИЗУЧАЕТСЯ</span>';
-  return '<span style="font-weight:800;font-size:10px;letter-spacing:.6px;color:#6A6E75;background:#F1F2F4;padding:5px 10px;border-radius:20px;">НЕ НАЧАТА</span>'}
+  var state=view.due?'due':view.stage,label=view.due?view.nextLabel:view.stage==='stable'?'Устойчиво':view.stage==='confirmed'?'Подтверждено':view.stage==='learned'?'Изучено':view.stage==='learning'?'Изучается':'Не начата';
+  return '<span class="grammar-status" data-state="'+state+'">'+ui.escapeHtml(label)+'</span>'}
 function gDateLine(view){if(view.due)return view.nextLabel;
   if(view.eligibleAt!=null)return 'следующая проверка '+new Date(view.eligibleAt).toLocaleDateString('ru-RU',{day:'numeric',month:'short'});
   return view.nextLabel}
 function gRegressionLine(view){if(!view.regressionReason)return'';
-  return '<div style="margin-top:7px;font-weight:700;font-size:11px;color:#A56000;">Снова в работе: '+grammarModule.regressionReasonLabel(view.regressionReason)+'</div>'}
+  return '<p class="grammar-regression">Снова в работе: '+ui.escapeHtml(grammarModule.regressionReasonLabel(view.regressionReason))+'</p>'}
 function gMasteryQueueAvailable(required){return !window.EasyBoostSync||typeof window.EasyBoostSync.canQueueGrammarMasteryEvent!=='function'||window.EasyBoostSync.canQueueGrammarMasteryEvent(required||1)}
 function gShowMasteryQueueFull(){var area=document.getElementById('g_area');if(!area)return;
-  area.innerHTML='<div class="clayCard" style="padding:22px;text-align:center;"><div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:19px;color:#2B2B2B;">Подключитесь для синхронизации</div><div style="font-weight:600;font-size:13px;color:#777163;line-height:1.55;margin-top:8px;">Очередь результатов заполнена. После синхронизации можно продолжить тренировку.</div></div><button class="sq" style="'+WBTN+'color:#B54E2F;margin-top:12px;" onclick="gMap()">К темам</button>'}
-function initGrammar(){if(!S)return;gSync();GS=gRestoreRunner();if(GS){gResume();return}if(gRestoreExamRunner())return;if(S.grammarRunner){delete S.grammarRunner;save()}gMap()}
+  gSetHeader('Нужна синхронизация','Грамматика · состояние');area.innerHTML='<section class="grammar-view"><div class="grammar-paper grammar-state" role="alert"><span class="grammar-state__glyph" aria-hidden="true">!</span><h2 class="grammar-title">Подключитесь для синхронизации</h2><p class="grammar-copy">Очередь результатов заполнена. После синхронизации можно продолжить тренировку.</p></div></section>';gSetPrimaryAction('К темам','gMap()')}
+function initGrammar(){if(!S)return;gRenderNetworkState();gSync();GS=gRestoreRunner();if(GS){gResume();return}if(gRestoreExamRunner())return;if(S.grammarRunner){delete S.grammarRunner;save()}gMap()}
 /* Обработчик разметки не может присвоить переменную модуля, поэтому сброс темы — функция. */
 function gToThemes(){var preservePending=Boolean(GS&&GS.phase==='completion_pending'&&S&&S.grammarRunner);GS=null;if(!preservePending)gClearRunner();gMap()}
 function gRetryPendingCompletion(){var snapshot=S&&S.grammarRunner;if(!snapshot||snapshot.phase!=='completion_pending')return false;
   var pending=gRestoreRunner();if(!pending){gRenderCompletionPending();return true}GS=pending;gResume();return true}
-function gMap(){var area=document.getElementById('g_area');if(!area)return;
-  var due=gDue();
-  var GA=0;function ga(){return 'animation:win .34s '+((GA++)*0.05)+'s cubic-bezier(.25,.75,.35,1) both;'}
-  var h='';
-  var dashboard=examModule.grammarDashboard(S.grammarMastery||{},{now:Date.now()});
+function gMap(){var area=gArea();if(!area)return;
+  gSetHeader('Грамматика','Практика · 20 тем');gRenderNetworkState();
+  var due=gDue(),dashboard=examModule.grammarDashboard(S.grammarMastery||{},{now:Date.now()});
   var secured=(dashboard.stageCounts.confirmed||0)+(dashboard.stageCounts.stable||0);
   var weakLabels=dashboard.weakErrorTypes.slice(0,3).map(function(item){return grammarModule.regressionReasonLabel(item.errorCode)});
-  h+='<section data-grammar-dashboard role="status" class="clayCard" style="padding:16px 18px;margin-bottom:14px;">'
-    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;"><div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:17px;color:#2B2B2B;">Grammar 2.0 · 20 тем</div>'
-    +'<div style="font-weight:600;font-size:12px;color:#777163;margin-top:3px;">Подтверждено или устойчиво: '+secured+' · На повторение: '+dashboard.dueTopicIds.length+'</div></div>'
-    +'<span style="flex:none;font-weight:900;font-size:18px;color:#1D7F4A;">'+dashboard.stageCounts.stable+'</span></div>'
-    +'<div style="font-weight:700;font-size:11.5px;color:#A56000;margin-top:9px;">Слабые места: '+(weakLabels.length?weakLabels.join(' · '):'пока не выявлены')+'</div></section>';
-  var e19=S.exam19||{};
-  h+='<button type="button" class="sq clk cardbtn" onclick="gExam()" style="'+ga()+'position:relative;overflow:hidden;border-radius:24px;padding:16px 18px;margin-bottom:14px;cursor:pointer;background:linear-gradient(150deg,#3A3532,#2B2B2B);box-shadow:0 14px 28px rgba(43,35,30,.32),inset 0 2px 3px rgba(255,255,255,.14),inset 0 -5px 10px rgba(0,0,0,.35);">'
-    +'<svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;" viewBox="0 0 346 80" preserveAspectRatio="xMidYMid slice">'
-    +'<g fill="rgba(255,255,255,.75)">'
-    +'<path class="eb5sp" style="animation-delay:.3s" d="M22,14 Q22,17.5 25.5,17.5 Q22,17.5 22,21 Q22,17.5 18.5,17.5 Q22,17.5 22,14 Z"/>'
-    +'<path class="eb5sp" style="animation-delay:1.4s" d="M210,12 Q210,15 213,15 Q210,15 210,18 Q210,15 207,15 Q210,15 210,12 Z"/>'
-    +'<path class="eb5sp" style="animation-delay:.9s" d="M180,58 Q180,61 183,61 Q180,61 180,64 Q180,61 177,61 Q180,61 180,58 Z"/>'
-    +'</g><g fill="rgba(255,178,76,.85)">'
-    +'<path class="eb5sp" style="animation-delay:1.9s" d="M250,30 Q250,34 254,34 Q250,34 250,38 Q250,34 246,34 Q250,34 250,30 Z"/>'
-    +'<path class="eb5sp" style="animation-delay:.6s" d="M60,54 Q60,57.5 63.5,57.5 Q60,57.5 60,61 Q60,57.5 56.5,57.5 Q60,57.5 60,54 Z"/>'
-    +'<path class="eb5sp" style="animation-delay:2.3s" d="M120,20 Q120,23 123,23 Q120,23 120,26 Q120,23 117,23 Q120,23 120,20 Z"/>'
-    +'</g></svg>'
-    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'
-    +'<div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:15.5px;color:#fff;">Экзамен · задания 19–24</div>'
-    +'<div style="font-weight:600;font-size:12px;color:rgba(255,255,255,.62);margin-top:2px;">'+(e19.n?('лучший результат: '+e19.best+' из 6'):'текст с пропусками, без подсказок')+'</div></div>'
-    +'<span style="flex:none;background:linear-gradient(145deg,#FFC861,#F2683F);border-radius:14px;width:42px;height:42px;display:grid;place-items:center;box-shadow:0 6px 12px rgba(242,104,63,.4),inset 0 2px 3px rgba(255,255,255,.5);">'
-    +'<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span></div></button>';
-  if(due.length)h+='<button type="button" class="sq clk cardbtn" onclick="gReview()" style="'+ga()+'position:relative;overflow:hidden;border-radius:24px;padding:16px 18px;margin-bottom:14px;cursor:pointer;background:linear-gradient(135deg,#FFA570,#F2683F);box-shadow:0 14px 28px rgba(242,104,63,.32),inset 0 2px 4px rgba(255,255,255,.45),inset 0 -6px 14px rgba(190,55,18,.25);">'
-    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'
-    +'<div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:15.5px;color:#fff;">Пора повторить</div>'
-    +'<div style="font-weight:600;font-size:12px;color:rgba(255,255,255,.85);margin-top:2px;">'+due.length+' '+(due.length===1?'тема ждёт':(due.length<5?'темы ждут':'тем ждут'))+' проверки памяти</div></div>'
-    +'<span style="flex:none;background:rgba(255,255,255,.96);border-radius:14px;padding:9px 14px;font-weight:800;font-size:12.5px;color:#C2421B;">Начать</span></div></button>';
-  h+='<button type="button" class="sq clk cardbtn" onclick="gStartMixed()" style="'+ga()+'position:relative;overflow:hidden;border-radius:24px;padding:16px 18px;margin-bottom:14px;cursor:pointer;background:linear-gradient(145deg,#EAF3FC,#F5F0FF);border:1px solid #D9DDF1;">'
-    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;"><div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:15.5px;color:#2B2B2B;">Смешанная практика</div>'
-    +'<div style="font-weight:600;font-size:12px;color:#626B7A;margin-top:2px;">16 заданий · тема заранее не раскрывается</div></div><span style="flex:none;background:#fff;border-radius:14px;padding:9px 14px;font-weight:800;font-size:12.5px;color:#465B9B;">Начать</span></div></button>';
-  h+='<button type="button" class="sq clk cardbtn" onclick="gStartTargeted()" style="'+ga()+'position:relative;overflow:hidden;border-radius:24px;padding:16px 18px;margin-bottom:14px;cursor:pointer;background:#F2F8F4;border:1px solid #D7EADF;">'
-    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;"><div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:15.5px;color:#2B2B2B;">Точечная практика</div>'
-    +'<div style="font-weight:600;font-size:12px;color:#557064;margin-top:2px;">8 заданий по актуальной слабости</div></div><span style="flex:none;background:#fff;border-radius:14px;padding:9px 14px;font-weight:800;font-size:12.5px;color:#1D7F4A;">Подобрать</span></div></button>';
-  G_GROUPS.forEach(function(gr){
-    h+='<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:12px;letter-spacing:1.8px;color:#6F695E;margin:6px 2px 10px;">'+gr.n.toUpperCase()+'</div>';
-    gr.ids.forEach(function(t){var r=gRec(t),tp=G_TOPICS[t],view=grammarModule.masteryView(r);
-      var pct=view.stage==='learning'?Math.max(view.progress,Math.min(39,Math.round(r.stats.advancedStreak/4*40))):view.progress;
-      h+='<button type="button" class="clayCard sq clk cardbtn" onclick="gOpen('+t+')" style="'+ga()+'padding:14px 16px;margin-bottom:11px;cursor:pointer;">'
-        +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'
-        +'<div style="font-weight:800;font-size:14.5px;color:#2B2B2B;">'+tp.n+'</div>'+gStatusChip(r)+'</div>'
-        +'<div style="margin-top:10px;height:6px;border-radius:4px;background:#F1EDE7;"><div style="width:'+pct+'%;height:100%;border-radius:4px;background:linear-gradient(90deg,#FFA570,#F2683F);"></div></div>'
-        +(r.stats.correct+r.stats.errors>0?'<div style="margin-top:7px;font-weight:600;font-size:11px;color:#777163;">верно '+r.stats.correct+' · ошибок '+r.stats.errors+'</div>':'')
-        +'<div style="margin-top:6px;font-weight:600;font-size:11px;color:#777163;">'+gDateLine(view)+'</div>'+gRegressionLine(view)
-        +'</button>'});
-  });
-  area.innerHTML=h;setTxt('g_today','20 тем'+(due.length?' · '+due.length+' на повторение':''))}
+  var recommendation=due.length
+    ?{title:'Пора повторить',reason:due.length+' '+(due.length===1?'тема ждёт':due.length<5?'темы ждут':'тем ждут')+' проверки памяти',label:'Начать повторение',handler:'gReview()'}
+    :weakLabels.length
+      ?{title:'Точечная практика',reason:'Актуальный фокус: '+weakLabels[0],label:'Подобрать задания',handler:'gStartTargeted()'}
+      :{title:'Смешанная практика',reason:'16 заданий по разным темам без подсказки раздела',label:'Начать практику',handler:'gStartMixed()'};
+  var h='<div class="grammar-view">'
+    +'<section class="grammar-paper grammar-paper--hero grammar-recommendation" aria-labelledby="g_catalog_title">'
+    +'<p class="grammar-kicker">Рекомендация на сейчас</p><h2 id="g_catalog_title" class="grammar-title" tabindex="-1">'+ui.escapeHtml(recommendation.title)+'</h2>'
+    +'<p class="grammar-copy">'+ui.escapeHtml(recommendation.reason)+'</p><div class="grammar-recommendation__meta">'
+    +'<span class="grammar-data-pill">≈ 10–15 минут</span><span class="grammar-data-pill">Следующий шаг</span></div></section>'
+    +'<section data-grammar-dashboard role="status" class="grammar-paper grammar-dashboard" aria-label="Сводка освоения грамматики">'
+    +'<p class="grammar-kicker">Ваш маршрут</p><h2 class="grammar-title">Grammar 2.0 · 20 тем</h2>'
+    +'<p class="grammar-copy">Подтверждено или устойчиво: '+secured+' · На повторение: '+dashboard.dueTopicIds.length+'</p>'
+    +'<div class="grammar-dashboard__metrics"><span class="grammar-data-pill">Устойчиво: '+dashboard.stageCounts.stable+'</span>'
+    +'<span class="grammar-data-pill">Слабые места: '+ui.escapeHtml(weakLabels.length?weakLabels.join(' · '):'пока не выявлены')+'</span></div></section>'
+    +'<section aria-labelledby="g_routes_title"><h2 id="g_routes_title" class="grammar-section-title">Режимы практики</h2><div class="grammar-route-list">'
+    +'<button type="button" class="aisy-choice grammar-route-card" onclick="gExam()"><strong>Экзамен · задания 19–24</strong><small>'+((S.exam19||{}).n?'Лучший результат: '+S.exam19.best+' из 6':'Текст с пропусками, без подсказок')+'</small></button>'
+    +(due.length?'<button type="button" class="aisy-choice grammar-route-card" onclick="gReview()"><strong>Повторение по сроку</strong><small>'+due.length+' тем ждут проверки памяти</small></button>':'')
+    +'<button type="button" class="aisy-choice grammar-route-card" onclick="gStartMixed()"><strong>Смешанная практика</strong><small>Все четыре типа задания · 16 вопросов</small></button>'
+    +'<button type="button" class="aisy-choice grammar-route-card" onclick="gStartTargeted()"><strong>Точечная практика</strong><small>8 заданий по актуальной слабости</small></button></div></section>';
+  G_GROUPS.forEach(function(group){
+    h+='<section aria-labelledby="g_group_'+group.ids[0]+'"><h2 id="g_group_'+group.ids[0]+'" class="grammar-section-title">'+ui.escapeHtml(group.n)+'</h2><div class="grammar-topic-list">';
+    group.ids.forEach(function(t){var record=gRec(t),topic=G_TOPICS[t],view=grammarModule.masteryView(record);
+      var pct=view.stage==='learning'?Math.max(view.progress,Math.min(39,Math.round(record.stats.advancedStreak/4*40))):view.progress;
+      var stats=record.stats.correct+record.stats.errors>0?'Верно '+record.stats.correct+' · ошибок '+record.stats.errors+' · ':'';
+      h+='<button type="button" class="aisy-choice grammar-topic" onclick="gOpen('+t+')" aria-label="'+ui.escapeHtml(topic.n)+'. '+ui.escapeHtml(gDateLine(view))+'. Освоено '+pct+' процентов">'
+        +'<span class="grammar-topic__head"><strong>'+ui.escapeHtml(topic.n)+'</strong>'+gStatusChip(record)+'</span>'
+        +'<span class="grammar-topic__progress" role="progressbar" aria-label="Освоение темы '+ui.escapeHtml(topic.n)+'" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+pct+'"><span style="--grammar-progress:'+pct+'%"></span></span>'
+        +'<small class="grammar-topic__stats">'+stats+ui.escapeHtml(gDateLine(view))+'</small>'+gRegressionLine(view)+'</button>'});
+    h+='</div></section>'});
+  area.innerHTML=h+'</div>';setTxt('g_today','20 тем'+(due.length?' · '+due.length+' на повторение':''));
+  gSetProgress('Устойчиво освоенные темы',Math.round((dashboard.stageCounts.stable||0)/20*100),'Устойчиво освоено '+dashboard.stageCounts.stable+' из 20 тем');
+  gSetPrimaryAction(recommendation.label,recommendation.handler);gFocus('g_catalog_title')}
 function gOpen(t){gTheory(t,true)}
-function gTheory(t,fromMap){var area=document.getElementById('g_area');if(!area)return;if(!fromMap)gMarkHelp(t);var tp=(GS&&GS.catalogTopics||G_TOPICS)[t]||G_TOPICS[t];
-  area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:20px;">'
-    +wDeco()
-    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'
-    +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#1D7F4A;background:#EAF7F0;padding:5px 10px;border-radius:20px;">ПРАВИЛО</span>'
-    +gStatusChip(gRec(t))+'</div>'
-    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:19px;color:#2B2B2B;margin-top:12px;">'+tp.n+'</div>'
-    +'<div style="font-weight:600;font-size:13.5px;color:#4A453E;line-height:1.6;margin-top:10px;">'+tp.th+'</div></div>'
-    +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
-    +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="'+(fromMap?('gStart('+t+')'):'gResume()')+'">'+(fromMap?'Начать практику':'Продолжить практику')+'</button>'
-    +'<button class="sq" style="'+WBTN+'color:#B54E2F;" onclick="gMap()">← К темам</button></div>';
-  gAnim('win','.32s')}
+function gTheory(t,fromMap){var area=gArea();if(!area)return;if(!fromMap)gMarkHelp(t);var topic=(GS&&GS.catalogTopics||G_TOPICS)[t]||G_TOPICS[t];
+  gSetHeader(topic.n,'Грамматика · правило');
+  area.innerHTML='<div class="grammar-view"><section id="g_card" class="grammar-paper grammar-paper--hero" aria-labelledby="g_theory_title">'
+    +'<div class="grammar-task-head"><p class="grammar-label">Правило</p>'+gStatusChip(gRec(t))+'</div>'
+    +'<h2 id="g_theory_title" class="grammar-title" tabindex="-1">'+ui.escapeHtml(topic.n)+'</h2>'
+    +'<p class="grammar-copy">'+topic.th+'</p></section>'
+    +'<button type="button" class="aisy-button aisy-button--secondary grammar-secondary" onclick="gMap()">К каталогу тем</button></div>';
+  gSetPrimaryAction(fromMap?'Начать практику':'Продолжить практику',fromMap?'gStart('+t+')':'gResume()');gFocus('g_theory_title');gAnim('win','.32s')}
 function gShuffle(a){return grammarModule.shuffled(a)}
 function gBankEff(t){var b=G_BANK[t]||{};var ai=gGeneratedItems(t);
   return grammarModule.effectiveBank(b,ai)}
@@ -326,14 +321,33 @@ function gStartMixed(){if(gRetryPendingCompletion())return;if(!gMasteryQueueAvai
   var queue=grammarModule.buildMixedPracticeQueue(G_BANK,S.grammarMastery||{},{seed:GRAMMAR_CATALOG.version+':mixed:'+sessionId,now:Date.now()});if(queue.length!==16){gMap();return}
   var t=queue[0].t;GS={activeRunner:true,practiceMode:'mixed_practice',scope:'mixed',catalogVersion:GRAMMAR_CATALOG.version,catalogRevision:GRAMMAR_CATALOG.revision,...gRunnerCatalogRuntime(G_CATALOG_RUNTIME),sessionId:sessionId,t:t,queue:queue,i:0,ok:0,done:0,source:'builtin',helpUsed:false,masteryAssisted:false,answerCommitted:false,answerAssisted:false,phase:'question',reservedItemIds:queue.map(function(item){return item.q.id}),itemOutcomes:[],errorReasons:{},confusionPairs:{},independentErrors:{},types:{},typeScores:{},evidence:gEvidence(grammarModule.activityId(t,'mixed_practice'))};
   gPersistRunner();gRenderQ()}
-function gTargetedUnavailable(){var area=document.getElementById('g_area');if(!area)return;area.innerHTML='<div class="clayCard" role="status" style="padding:22px;text-align:center;"><div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:19px;color:#2B2B2B;">Точечная практика пока недоступна</div><div style="font-weight:600;font-size:13px;color:#777163;line-height:1.55;margin-top:8px;">Подключитесь к сети и обновите рекомендацию.</div></div><button class="sq" style="'+WBTN+'color:#B54E2F;margin-top:12px;" onclick="gMap()">К темам</button>'}
-async function gStartTargeted(){if(gRetryPendingCompletion())return;if(!gMasteryQueueAvailable()){gShowMasteryQueueFull();return}try{var issued=await apiGet('/api/v1/grammar/recommendation'),recommendation=issued&&issued.recommendation;
-    var resolved=await apiPost('/api/v1/grammar/recommendation/resolve',{pointer:recommendation&&recommendation.pointer}),pointer=resolved&&resolved.recommendation&&resolved.recommendation.pointer;
+function gTargetedUnavailable(){var area=gArea();if(!area)return;var offline=typeof navigator!=='undefined'&&navigator.onLine===false;
+  gSetHeader('Точечная практика','Грамматика · рекомендация');
+  area.innerHTML='<div class="grammar-view"><section class="grammar-paper grammar-state" role="alert"><span class="grammar-state__glyph" aria-hidden="true">!</span>'
+    +'<h2 id="g_targeted_error_title" class="grammar-title" tabindex="-1">'+(offline?'Для точечного подхода нужна сеть':'Рекомендацию не удалось подтвердить')+'</h2>'
+    +'<p class="grammar-copy">'+(offline?'Подключитесь к сети и повторите. Каталог и сохранённые подходы доступны без подключения.':'Повторите запрос. Мы не начнём подход, пока сервер не подтвердит владельца и актуальную рекомендацию.')+'</p></section></div>';
+  gSetPrimaryAction('Повторить','gStartTargeted()');gFocus('g_targeted_error_title')}
+async function gStartTargeted(){if(G_TARGET_PENDING||gRetryPendingCompletion())return;if(!gMasteryQueueAvailable()){gShowMasteryQueueFull();return}
+  var owner=currentOwnerBinding(),area=gArea();if(!owner||typeof navigator!=='undefined'&&navigator.onLine===false){gTargetedUnavailable();return}
+  G_TARGET_PENDING=true;var requestGeneration=++G_TARGET_REQUEST_GENERATION;
+  gSetHeader('Подбираем задания','Грамматика · рекомендация');
+  if(area)area.innerHTML='<div class="grammar-view"><section class="grammar-paper grammar-state" role="status" aria-live="polite"><span class="ebstate-spin" aria-hidden="true"></span><h2 class="grammar-title">Собираем точечный подход…</h2><p class="grammar-copy">Проверяем актуальную слабость и восемь подходящих заданий.</p></section></div>';
+  gSetPrimaryAction(null);
+  var expectedOwnerHeaders=gExpectedOwnerHeaders(owner);
+  try{var issued=await apiGet('/api/v1/grammar/recommendation',{headers:expectedOwnerHeaders});
+    if(requestGeneration!==G_TARGET_REQUEST_GENERATION||!gSameOwner(owner,currentOwnerBinding()))return;
+    if(!await gConfirmOwnerResponse(owner,issued))return;
+    var recommendation=issued&&issued.recommendation;
+    var resolved=await apiPost('/api/v1/grammar/recommendation/resolve',{pointer:recommendation&&recommendation.pointer},expectedOwnerHeaders),pointer=resolved&&resolved.recommendation&&resolved.recommendation.pointer;
+    if(requestGeneration!==G_TARGET_REQUEST_GENERATION||!gSameOwner(owner,currentOwnerBinding()))return;
+    if(!await gConfirmOwnerResponse(owner,resolved))return;
     if(!pointer||JSON.stringify(pointer)!==JSON.stringify(recommendation.pointer)||!resolved.catalog||resolved.catalog.version!==GRAMMAR_CATALOG.version||resolved.catalog.revision!==GRAMMAR_CATALOG.revision||!/^[A-Za-z0-9_-]{43}$/u.test(String(resolved.completionToken||'')))throw new Error('GRAMMAR_RECOMMENDATION_INVALID');
     var expected=grammarModule.buildTargetedPracticeQueue(G_BANK,pointer,{seed:pointer.ref}),ids=Array.isArray(resolved.itemIds)?resolved.itemIds:[];
     if(expected.length!==8||JSON.stringify(expected.map(function(item){return item.q.id}))!==JSON.stringify(ids))throw new Error('GRAMMAR_RECOMMENDATION_INVALID');
-    var sessionId=crypto.randomUUID(),t=pointer.topicId;GS={activeRunner:true,practiceMode:'targeted_practice',scope:'topic',catalogVersion:GRAMMAR_CATALOG.version,catalogRevision:GRAMMAR_CATALOG.revision,...gRunnerCatalogRuntime(G_CATALOG_RUNTIME),sessionId:sessionId,t:t,queue:expected,i:0,ok:0,done:0,source:'builtin',helpUsed:false,masteryAssisted:false,answerCommitted:false,answerAssisted:false,phase:'question',reservedItemIds:ids.slice(),itemOutcomes:[],errorReasons:{},confusionPairs:{},independentErrors:{},types:{},typeScores:{},recommendation:{pointer:pointer,itemIds:ids.slice(),completionToken:resolved.completionToken},evidence:gEvidence(grammarModule.activityId(t,'targeted_practice'))};
-    gPersistRunner();gRenderQ()}catch(error){gTargetedUnavailable()}}
+    var sessionId=crypto.randomUUID(),t=pointer.topicId;GS={activeRunner:true,practiceMode:'targeted_practice',scope:'topic',catalogVersion:GRAMMAR_CATALOG.version,catalogRevision:GRAMMAR_CATALOG.revision,...gRunnerCatalogRuntime(G_CATALOG_RUNTIME),sessionId:sessionId,t:t,queue:expected,i:0,ok:0,done:0,source:'builtin',helpUsed:false,masteryAssisted:false,answerCommitted:false,answerAssisted:false,phase:'question',selectedChoice:null,draftAnswer:'',reservedItemIds:ids.slice(),itemOutcomes:[],errorReasons:{},confusionPairs:{},independentErrors:{},types:{},typeScores:{},recommendation:{pointer:pointer,itemIds:ids.slice(),completionToken:resolved.completionToken},evidence:gEvidence(grammarModule.activityId(t,'targeted_practice'))};
+    gPersistRunner();gRenderQ()}catch(error){if(requestGeneration!==G_TARGET_REQUEST_GENERATION||!gSameOwner(owner,currentOwnerBinding()))return;
+    if(apiIsAuthorityFailure(error)){await gInvalidateOwner(owner);return}gTargetedUnavailable()}
+  finally{if(requestGeneration===G_TARGET_REQUEST_GENERATION)G_TARGET_PENDING=false}}
 function gResume(){if(!GS){gMap();return}if(GS.phase==='completion_pending'){gRenderCompletionPending();gFinish();return}if(GS.phase==='explain'){gExplain(GS.queue[GS.i],null,true);return}gRenderQ(true)}
 function gReview(){if(gRetryPendingCompletion())return;var due=gDue();if(!due.length){gMap();return}if(!gMasteryQueueAvailable(due.length)){gShowMasteryQueueFull();return}
   var items=[];
@@ -341,62 +355,85 @@ function gReview(){if(gRetryPendingCompletion())return;var due=gDue();if(!due.le
   var queue=gShuffle(items);
   GS={mode:'rev',revT:due.slice(),queue:queue,i:0,ok:0,done:0,errT:{},startedAt:Date.now(),source:grammarModule.queueSource(queue),helpUsed:false,answerCommitted:false,answerAssisted:false,errorReasons:{},independentErrors:{},helpActivities:{},evidence:{}};
   gRenderQ()}
-function gProgressLine(){setTxt('g_today',(GS.done)+' / '+GS.queue.length+' в подходе')}
-function gRenderQ(preserveAnswerState){var area=document.getElementById('g_area');if(!area||!GS)return;gProgressLine();
-  var it=GS.queue[GS.i];
-  if(!it){gFinish();return}
-  GS.answerCommitted=false;if(!preserveAnswerState)GS.answerAssisted=false;GS.phase='question';if(gIsPracticeSession())gPersistRunner();
-  var t=it.t||GS.t,tp=(GS.catalogTopics||G_TOPICS)[t]||G_TOPICS[t],mixed=GS.scope==='mixed',hiddenTopic=mixed||GS.practiceMode==='targeted_practice';
+function gProgressLine(){if(!GS)return;var total=Math.max(1,GS.queue.length),current=Math.min(total,GS.done+1),percent=Math.round(GS.done/total*100);
+  setTxt('g_today',current+' / '+total+' в подходе');gSetProgress('Завершено заданий в подходе',percent,'Завершено '+GS.done+' из '+total+' заданий')}
+function gTaskCurrent(token){return Boolean(GS&&GS.uiToken===Number(token)&&GS.queue[GS.i])}
+function gRenderQ(preserveAnswerState){var area=gArea();if(!area||!GS)return;gProgressLine();
+  var it=GS.queue[GS.i];if(!it){gFinish();return}
+  GS.answerCommitted=false;if(!preserveAnswerState){GS.answerAssisted=false;GS.selectedChoice=null;GS.draftAnswer=''}
+  var isChoice=['c','c2','choice'].includes(it.k);
+  if(!isChoice)GS.selectedChoice=null;
+  if(!Number.isInteger(GS.selectedChoice)||!isChoice||GS.selectedChoice<0||GS.selectedChoice>=it.q.o.length)GS.selectedChoice=null;
+  GS.phase=Number.isInteger(GS.selectedChoice)?'selected':'question';GS.uiToken=++G_TASK_TOKEN;if(gIsPracticeSession())gPersistRunner();
+  var token=GS.uiToken,t=it.t||GS.t,topic=(GS.catalogTopics||G_TOPICS)[t]||G_TOPICS[t],mixed=GS.scope==='mixed',hiddenTopic=mixed||GS.practiceMode==='targeted_practice';
   var labels={choice:'УРОВЕНЬ 1 · ВЫБОР',input:'УРОВЕНЬ 2 · ВВОД',correction:'УРОВЕНЬ 3 · ИСПРАВЛЕНИЕ',transform:'УРОВЕНЬ 4 · ПРЕОБРАЗОВАНИЕ'};
   var level=it.transfer?'ТРАНСФЕР · '+(labels[it.k]||'НОВОЕ ЗАДАНИЕ'):(labels[it.k]||(it.k==='c'?'УРОВЕНЬ 1 · ВЫБОР':'УРОВЕНЬ 2 · КАК НА ЕГЭ'));
-  var head='<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'
-    +'<span data-grammar-level="'+it.k+'" style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#B54E2F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">'+(GS.mode==='rev'?'ПОВТОРЕНИЕ':level)+'</span>'
-    +(hiddenTopic?'':'<button id="g_rule_btn" type="button" class="clk iconbtn" onclick="gTheory('+t+')" style="box-sizing:border-box;min-block-size:48px;min-inline-size:48px;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;font-weight:800;font-size:10px;letter-spacing:.6px;color:#1D7F4A;background:#EAF7F0;padding:5px 10px;border-radius:20px;cursor:pointer;">ПРАВИЛО</button>')+'</div>';
-  if(it.k==='c'||it.k==='c2'||it.k==='choice'){var q=it.q;
-    area.innerHTML='<div id="g_card" class="clayCard" aria-live="polite" style="position:relative;overflow:hidden;padding:20px;min-height:150px;">'+wDeco()+head
-      +'<div style="font-weight:600;font-size:11px;color:#777163;margin-top:14px;">'+(mixed?'Смешанная практика · определи правило сам':GS.practiceMode==='targeted_practice'?'Точечная практика · определи правило сам':tp.n)+'</div>'
-      +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:18px;color:#2B2B2B;line-height:1.5;margin-top:8px;">'
-      +q.t[0]+'<span style="display:inline-block;min-width:64px;border-bottom:2.5px dashed #F2683F;text-align:center;color:#B54E2F;">&nbsp;?&nbsp;</span>'+q.t[1]+'</div></div>'
-      +'<div id="g_btns" style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
-      +q.o.map(function(o,i){return '<button class="sq" style="'+WBTN+'" onclick="gPick(this,'+i+')">'+o+'</button>'}).join('')+'</div>';
-  }else{var q=it.q,isInput=it.k==='f'||it.k==='input',instruction=isInput?'впиши форму слова':it.k==='correction'?'перепиши предложение без ошибки':'выполни преобразование';
-    var prompt=isInput?q.s.replace('_____','<span style="display:inline-block;min-width:70px;border-bottom:2.5px dashed #F2683F;text-align:center;color:#B54E2F;">&nbsp;?&nbsp;</span>'):q.s;
-    var inputLabel=isInput?'Форма слова '+q.b:it.k==='correction'?'Исправленное предложение':'Преобразованное предложение';
-    area.innerHTML='<div id="g_card" class="clayCard" aria-live="polite" style="position:relative;overflow:hidden;padding:20px;min-height:150px;">'+wDeco()+head
-      +'<div style="font-weight:600;font-size:11px;color:#777163;margin-top:14px;">'+(mixed?'Смешанная практика · ':GS.practiceMode==='targeted_practice'?'Точечная практика · ':tp.n+' · ')+instruction+'</div>'
-      +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:17px;color:#2B2B2B;line-height:1.55;margin-top:8px;">'
-      +prompt+'</div></div>'
-      +'<div id="g_btns" style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
-      +'<input id="g_inp" aria-label="'+inputLabel+'" autocapitalize="sentences" autocomplete="off" spellcheck="false" placeholder="'+inputLabel+'" '
-      +'style="width:100%;box-sizing:border-box;height:52px;border:1px solid #F0EAE2;border-radius:18px;padding:0 16px;font-family:Manrope,sans-serif;font-weight:700;font-size:15px;color:#2B2B2B;outline:none;box-shadow:inset 0 2px 4px rgba(60,45,30,.05);" onkeydown="if(event.key===\'Enter\')gSubmit()">'
-      +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="gSubmit()">Проверить</button>'}
+  gSetHeader('Задание '+Math.min(GS.done+1,GS.queue.length)+' из '+GS.queue.length,mixed?'Грамматика · смешанный подход':GS.practiceMode==='targeted_practice'?'Грамматика · точечный подход':'Грамматика · '+topic.n);
+  var head='<div class="grammar-task-head"><p class="grammar-label" data-grammar-level="'+ui.escapeHtml(it.k)+'">'+ui.escapeHtml(GS.mode==='rev'?'Повторение':level)+'</p>'
+    +(hiddenTopic?'':'<button id="g_rule_btn" type="button" class="aisy-button aisy-button--secondary grammar-rule-button" onclick="gTheory('+t+')">Правило</button>')+'</div>';
+  var context=mixed?'Смешанная практика · определи правило сам':GS.practiceMode==='targeted_practice'?'Точечная практика · определи правило сам':topic.n;
+  if(isChoice){var question=it.q;
+    area.innerHTML='<div class="grammar-view"><section id="g_card" class="grammar-paper grammar-paper--hero" aria-labelledby="g_task_title">'+head
+      +'<p class="grammar-copy">'+ui.escapeHtml(context)+'</p><h2 id="g_task_title" class="grammar-title grammar-title--task" tabindex="-1">'
+      +ui.escapeHtml(question.t[0])+'<span class="grammar-gap">&nbsp;?&nbsp;</span>'+ui.escapeHtml(question.t[1])+'</h2></section>'
+      +'<div id="g_btns" class="grammar-choice-list" role="radiogroup" aria-labelledby="g_task_title">'
+      +question.o.map(function(option,index){var selected=index===GS.selectedChoice;return '<button id="g_choice_'+index+'" type="button" class="aisy-choice grammar-choice" role="radio" aria-checked="'+selected+'" tabindex="'+(selected||GS.selectedChoice==null&&index===0?'0':'-1')+'" onclick="gSelectChoice(this,'+index+','+token+')" onkeydown="gChoiceKey(event,'+index+','+token+')"><span class="grammar-choice__label">'+ui.escapeHtml(option)+'</span><span class="grammar-choice__state">'+(selected?'Выбрано':'')+'</span></button>'}).join('')+'</div>'
+      +'<p id="g_feedback_status" class="grammar-live" role="status" aria-live="polite" aria-atomic="true">'+(GS.selectedChoice==null?'':'Выбран ответ '+ui.escapeHtml(question.o[GS.selectedChoice]))+'</p></div>';
+    gSetPrimaryAction('Проверить ответ','gSubmitChoice('+token+')',GS.selectedChoice==null);
+    gFocus(GS.selectedChoice==null?'g_choice_0':'g_choice_'+GS.selectedChoice)
+  }else{var question=it.q,isInput=it.k==='f'||it.k==='input',instruction=isInput?'Впиши форму слова':it.k==='correction'?'Перепиши предложение без ошибки':'Выполни преобразование';
+    var prompt=isInput?ui.escapeHtml(question.s).replace('_____','<span class="grammar-gap">&nbsp;?&nbsp;</span>'):ui.escapeHtml(question.s);
+    var inputLabel=isInput?'Форма слова '+question.b:it.k==='correction'?'Исправленное предложение':'Преобразованное предложение';
+    area.innerHTML='<div class="grammar-view"><section id="g_card" class="grammar-paper grammar-paper--hero" aria-labelledby="g_task_title">'+head
+      +'<p class="grammar-copy">'+ui.escapeHtml(context+' · '+instruction)+'</p><h2 id="g_task_title" class="grammar-title grammar-title--task" tabindex="-1">'+prompt+'</h2></section>'
+      +'<label class="grammar-label" for="g_inp">'+ui.escapeHtml(inputLabel)+'</label>'
+      +'<input id="g_inp" class="grammar-answer-input" aria-describedby="g_feedback_status" autocapitalize="sentences" autocomplete="off" spellcheck="false" placeholder="'+ui.escapeHtml(inputLabel)+'" value="'+ui.escapeHtml(GS.draftAnswer||'')+'" oninput="gInputChanged(this.value,'+token+')" onkeydown="if(event.key===\'Enter\'){event.preventDefault();gSubmit('+token+')}">'
+      +'<p id="g_feedback_status" class="grammar-live" role="status" aria-live="polite" aria-atomic="true"></p></div>';
+    gSetPrimaryAction('Проверить ответ','gSubmit('+token+')',!String(GS.draftAnswer||'').trim());gFocus('g_inp')}
   gAnim('win','.32s')}
+function gSelectChoice(btn,index,token){if(!gTaskCurrent(token)||GS.answerCommitted)return;var choices=Array.from(document.querySelectorAll('#g_btns [role="radio"]'));
+  if(!Number.isInteger(index)||index<0||index>=choices.length)return;GS.selectedChoice=index;GS.phase='selected';
+  choices.forEach(function(choice,choiceIndex){var selected=choiceIndex===index,state=choice.querySelector('.grammar-choice__state');choice.setAttribute('aria-checked',String(selected));choice.tabIndex=selected?0:-1;if(state)state.textContent=selected?'Выбрано':''});
+  var status=document.getElementById('g_feedback_status');if(status)status.textContent='Выбран ответ '+String(GS.queue[GS.i].q.o[index]||'');
+  gEnablePrimaryAction(true);if(gIsPracticeSession())gPersistRunner()}
+function gPick(btn,i){gSelectChoice(btn,i,GS&&GS.uiToken)}
+function gChoiceKey(event,index,token){if(!gTaskCurrent(token)||!['ArrowLeft','ArrowUp','ArrowRight','ArrowDown','Home','End'].includes(event.key))return;
+  var choices=Array.from(document.querySelectorAll('#g_btns [role="radio"]'));if(!choices.length)return;event.preventDefault();
+  var next=event.key==='Home'?0:event.key==='End'?choices.length-1:(index+(event.key==='ArrowLeft'||event.key==='ArrowUp'?-1:1)+choices.length)%choices.length;
+  gSelectChoice(choices[next],next,token);choices[next].focus()}
+function gInputChanged(value,token){if(!gTaskCurrent(token)||GS.answerCommitted)return;GS.draftAnswer=String(value||'').slice(0,500);gEnablePrimaryAction(Boolean(GS.draftAnswer.trim()));if(gIsPracticeSession())gPersistRunner()}
 function gNorm(v){return grammarModule.normalizeAnswer(v)}
-function gExplain(it,userWrong,restoring){var q=it.q,t=it.t||GS.t;gMarkHelp(t,true,true);GS.phase='explain';if(gIsPracticeSession())gPersistRunner();
-  var textAnswer=it.k==='f'||it.k==='input'||it.k==='correction'||it.k==='transform';
-  var right=textAnswer?q.ans[0]:q.o[q.a];
-  var sent=it.k==='f'||it.k==='input'
-    ? q.s.replace('_____','<b style="color:#1D7F4A;">'+right+'</b>').replace(/\((?:[A-Z ]+)\)/,'')
-    : textAnswer?q.s+'<br><b style="color:#1D7F4A;">'+right+'</b>':q.t[0]+'<b style="color:#1D7F4A;">'+right+'</b>'+q.t[1];
-  var area=document.getElementById('g_area');
-  area.innerHTML='<div id="g_card" class="clayCard" aria-live="polite" style="position:relative;overflow:hidden;padding:20px;">'+wDeco()
-    +'<div style="display:flex;align-items:center;gap:8px;"><span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#A83226;background:#FDEDEA;padding:5px 10px;border-radius:20px;">РАЗБОР ОШИБКИ</span></div>'
-    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:22px;color:#1D7F4A;margin-top:14px;text-align:center;">'+right+'</div>'
-    +'<div style="font-weight:600;font-size:14px;color:#2B2B2B;line-height:1.6;margin-top:10px;text-align:center;font-style:italic;">'+sent+'</div>'
-    +'<div style="font-weight:600;font-size:13.5px;color:#4A453E;line-height:1.6;margin-top:12px;background:#FDF3EC;border-left:3px solid #F2683F;border-radius:0 14px 14px 0;padding:11px 14px;"><b>Почему:</b> '+(q.e||'')+'</div>'
-    +'<div style="margin-top:12px;background:#F2F8F4;border-radius:14px;padding:12px 14px;">'
-    +'<div style="font-weight:800;font-size:10px;letter-spacing:1.2px;color:#1D7F4A;">ПРАВИЛО · '+((GS.catalogTopics||G_TOPICS)[t]||G_TOPICS[t]).n.toUpperCase()+'</div>'
-    +'<div style="font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.6;margin-top:6px;">'+((GS.catalogTopics||G_TOPICS)[t]||G_TOPICS[t]).th+'</div></div>'
-    +'<div style="font-weight:600;font-size:11.5px;color:#75705F;margin-top:10px;text-align:center;">'+(GS.itemOutcomes&&GS.itemOutcomes.at(-1)&&GS.itemOutcomes.at(-1).transferStatus==='due_next_session'?'Одна transfer-попытка использована. Эта точная слабость сохранена на следующий подход.':it.transfer?'Следующее задание проверит перенос ещё раз':'Дальше будет отдельное новое задание на эту же слабость')+'</div><div id="voice_tutor_grammar_practice"></div></div>'
-    +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
-    +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="gAfterExplain()">Понятно, дальше</button></div>';
-  if(!restoring&&it.voice&&userWrong!=null)registerVoiceTutorError({module:'grammar',itemId:it.voice.id,revision:it.voice.revision,learnerAnswer:String(userWrong)})
-    .then(function(recorded){var slot=document.getElementById('voice_tutor_grammar_practice');if(slot&&recorded)slot.innerHTML=voiceTutorButton(recorded)}).catch(function(){});
-  gAnim('wflip','.5s')}
-function gAfterExplain(){GS.i++;GS.phase='question';if(gIsPracticeSession())gPersistRunner();gSync();save();gRenderQ()}
+function gExplain(it,userAnswer,restoring,knownCorrect){if(!GS||!it)return;var question=it.q,t=it.t||GS.t,lastOutcome=GS.itemOutcomes&&GS.itemOutcomes.at(-1);
+  var correct=typeof knownCorrect==='boolean'?knownCorrect:Boolean(lastOutcome&&lastOutcome.id===question.id&&lastOutcome.correct);
+  GS.phase='explain';if(gIsPracticeSession())gPersistRunner();
+  var textAnswer=['f','input','correction','transform'].includes(it.k),right=textAnswer?question.ans[0]:question.o[question.a],shownAnswer=userAnswer==null?(textAnswer?GS.draftAnswer:Number.isInteger(GS.selectedChoice)?question.o[GS.selectedChoice]:''):String(userAnswer);
+  var sentence=it.k==='f'||it.k==='input'
+    ?ui.escapeHtml(question.s).replace('_____', '<strong>'+ui.escapeHtml(right)+'</strong>').replace(/\((?:[A-Z ]+)\)/u,'')
+    :textAnswer?ui.escapeHtml(question.s)+'<br><strong>'+ui.escapeHtml(right)+'</strong>':ui.escapeHtml(question.t[0])+'<strong>'+ui.escapeHtml(right)+'</strong>'+ui.escapeHtml(question.t[1]);
+  var topic=(GS.catalogTopics||G_TOPICS)[t]||G_TOPICS[t],transferLine=lastOutcome&&lastOutcome.transferStatus==='due_next_session'
+    ?'Одна transfer-попытка использована. Эта точная слабость сохранена на следующий подход.'
+    :it.transfer?'Это задание проверило перенос правила на новый пример.':'Следующее задание продолжит тот же учебный маршрут.';
+  var assisted=Boolean(GS.answerAssisted||it.source==='generated'),answerProvenance=correct?(assisted?'ответ с опорой':'самостоятельный ответ'):'ответ показан';
+  var evidence=(it.source==='generated'?'Дополнительный материал':'Проверенная база')+' · '+answerProvenance;
+  var checkedControl=textAnswer
+    ?'<label class="grammar-label" for="g_review_input">Ваш ответ</label><input id="g_review_input" class="grammar-answer-input '+(correct?'is-correct':'is-incorrect')+'" value="'+ui.escapeHtml(shownAnswer)+'" disabled aria-describedby="g_review_control_state"><p id="g_review_control_state" class="grammar-choice__state">Ваш ответ — '+(correct?'верно':'неверно')+'</p>'
+    :'<div class="grammar-choice-list" role="radiogroup" aria-label="Проверенный ответ" aria-disabled="true">'+question.o.map(function(option,index){var chosen=index===GS.selectedChoice,isRight=index===question.a,state=isRight?(chosen?'Ваш ответ — верно':'Правильный ответ'):chosen?'Ваш ответ — неверно':'';return '<button type="button" class="aisy-choice grammar-choice '+(isRight?'is-correct':chosen?'is-incorrect':'')+'" role="radio" aria-checked="'+chosen+'" disabled aria-disabled="true"><span class="grammar-choice__label">'+ui.escapeHtml(option)+'</span><span class="grammar-choice__state">'+state+'</span></button>'}).join('')+'</div>';
+  var area=gArea();gSetHeader(correct?'Верно':'Разбор ответа','Грамматика · обратная связь');
+  area.innerHTML='<div class="grammar-view"><p id="g_feedback_status" class="grammar-live grammar-live--feedback" role="status" aria-live="polite" aria-atomic="true">'+(correct?'Ответ верный.':'Ответ неверный. Показан разбор.')+'</p><section id="g_card" class="grammar-feedback" data-verdict="'+(correct?'correct':'incorrect')+'" aria-labelledby="g_review_title">'
+    +'<p class="grammar-verdict">'+(correct?'✓ Верно':'✕ Неверно')+'</p><h2 id="g_review_title" class="grammar-feedback__answer" tabindex="-1">'+ui.escapeHtml(right)+'</h2>'
+    +checkedControl+'<div class="grammar-rule-sheet"><strong>Правило · '+ui.escapeHtml(topic.n)+'</strong><p>'+(question.e?ui.escapeHtml(question.e):topic.th)+'</p></div>'
+    +'<p class="grammar-feedback__example">'+sentence+'</p>'
+    +'<p class="grammar-feedback__evidence">'+ui.escapeHtml(evidence)+'</p><p class="grammar-feedback__evidence">'+ui.escapeHtml(transferLine)+'</p>'
+    +'<div id="voice_tutor_grammar_practice"></div></section></div>';
+  gSetPrimaryAction(GS.i<GS.queue.length-1?'Следующее задание':'Завершить подход','gAfterExplain()');gFocus('g_review_title');
+  if(!correct&&!restoring&&it.voice&&userAnswer!=null){var voiceOwner=currentOwnerBinding();
+    gRegisterVoiceError({module:'grammar',itemId:it.voice.id,revision:it.voice.revision,learnerAnswer:String(userAnswer)},'voice_tutor_grammar_practice',voiceOwner,G_VIEW_GENERATION,GS,GS.uiToken)}
+  gAnim('win','.32s')}
+function gAfterExplain(){if(!GS||GS.phase!=='explain')return;GS.phase='advance';GS.i++;GS.selectedChoice=null;GS.draftAnswer='';GS.answerCommitted=false;
+  if(gIsPracticeSession())gPersistRunner();gSync();save();gRenderQ()}
 function gErrorReason(it){if(GS&&GS.practiceMode==='legacy_practice')return it&&['f','input'].includes(it.k)?'word_or_verb_form':'construction_choice';var candidate=it&&((it.errorSkill)||(it.q&&it.q.errorSkill));if(isGrammarErrorCode(candidate))return candidate;
   return it&&['f','input'].includes(it.k)?'word_or_verb_form':'construction_choice'}
-function gAnswer(ok,it,checked){var topic=it.t||GS.t,type=it.k==='f'?'input':it.k==='c'||it.k==='c2'?'choice':it.k;GS.types=GS.types||{};GS.typeScores=GS.typeScores||{};GS.types[type]=true;
+function gAnswer(ok,it,checked){if(!GS||GS.answerCommitted)return false;var topic=it.t||GS.t,type=it.k==='f'?'input':it.k==='c'||it.k==='c2'?'choice':it.k;GS.types=GS.types||{};GS.typeScores=GS.typeScores||{};GS.types[type]=true;
   var committedWithoutHelp=!GS.answerAssisted;GS.answerCommitted=true;var rule=document.getElementById('g_rule_btn');if(rule){rule.disabled=true;rule.setAttribute('aria-disabled','true')}
   var score=GS.typeScores[type]||(GS.typeScores[type]={correct:0,total:0});score.total++;if(ok)score.correct++;
   var legacy=GS.practiceMode==='legacy_practice';var errorCode=ok?null:(legacy?gErrorReason(it):checked&&checked.errorCode||gErrorReason(it)),confusionPair=ok||legacy?null:(checked&&Object.hasOwn(checked,'confusionPair')?checked.confusionPair:it.q&&it.q.confusionPair||null);
@@ -407,37 +444,23 @@ function gAnswer(ok,it,checked){var topic=it.t||GS.t,type=it.k==='f'?'input':it.
   grammarModule.applyAnswer(gRec(topic),GS,it,ok);
   if(GS.mode==='rev'){var activityId=grammarModule.activityId(topic,'spaced_review');var evidence=GS.evidence[activityId];
     if(!evidence)evidence=GS.evidence[activityId]=gEvidence(activityId,GS.startedAt);
-    evidence.helpUsed=Boolean(GS.helpActivities[activityId]);gTrackEvidenceSource(evidence,it);evidence.maxScore++;if(ok)evidence.score++}}
-function gCommitWrongState(it,checked){
-  gMarkHelp(it.t||GS.t,true,true);
+    evidence.helpUsed=Boolean(GS.helpActivities[activityId]);gTrackEvidenceSource(evidence,it);evidence.maxScore++;if(ok)evidence.score++}
+  return true}
+function gCommitWrongState(it,checked){gMarkHelp(it.t||GS.t,true,true);
   if(GS.activeRunner){var topic=it.t||GS.t,transferResult=grammarModule.enqueueTransferAfterFailure(GS,(GS.catalogBank||G_BANK)[topic],it,GS.sessionId+':transfer:'+GS.done,{errorCode:checked&&checked.errorCode||gErrorReason(it),confusionPair:checked&&Object.hasOwn(checked,'confusionPair')?checked.confusionPair:it.q&&it.q.confusionPair||null});
     if(transferResult&&transferResult.status==='due_next_session'&&GS.itemOutcomes.length)GS.itemOutcomes[GS.itemOutcomes.length-1].transferStatus='due_next_session'}
-  GS.phase='explain';if(gIsPracticeSession())gPersistRunner()
-}
-function gScheduleWrongExplanation(it,userWrong){var sessionId=GS.sessionId,itemId=it.q.id;
-  setTimeout(function(){if(!GS||GS.sessionId!==sessionId||GS.phase!=='explain'||!GS.queue[GS.i]||GS.queue[GS.i].q.id!==itemId)return;gExplain(it,userWrong)},900)}
-function gScheduleCorrectAdvance(it){var session=GS,itemId=it.q.id;
-  setTimeout(function(){if(!GS||GS!==session||GS.phase!=='advance'||!GS.queue[GS.i]||GS.queue[GS.i].q.id!==itemId)return;GS.i++;GS.phase='question';if(gIsPracticeSession())gPersistRunner();gSync();save();gRenderQ()},600)}
-function gPick(btn,i){var it=GS.queue[GS.i];if(!it||btn.dataset.done)return;var q=it.q;
-  var all=btn.parentElement.querySelectorAll('button');all.forEach(function(b){b.dataset.done=1});
-  var checked=grammarModule.checkPracticeAnswer(it,i),ok=checked.correct;
-  gAnswer(ok,it,checked);
-  if(ok){ui.markAnswer(btn,'correct');gAnim('wpop','.35s');GS.phase='advance';if(gIsPracticeSession())gPersistRunner();
-    gScheduleCorrectAdvance(it)}
-  else{ui.markAnswer(btn,'wrong');
-    all.forEach(function(b,bi){if(bi===q.a)ui.markAnswer(b,'correct')});
-    gCommitWrongState(it,checked);gAnim('wshake','.42s');gScheduleWrongExplanation(it,q.o[i])}}
-function gSubmit(){var it=GS.queue[GS.i];if(!it)return;var inp=document.getElementById('g_inp');if(!inp||inp.dataset.done)return;
-  var q=it.q,userWrong=inp.value,checked=grammarModule.checkPracticeAnswer(it,userWrong),ok=checked.correct;
-  inp.dataset.done=1;
-  inp.style.borderColor=ok?'#1F9E5A':'#E24B4A';inp.style.background=ok?'#EAF7F0':'#FDEDEA';
-  gAnswer(ok,it,checked);
-  if(ok){gAnim('wpop','.35s');GS.phase='advance';if(gIsPracticeSession())gPersistRunner();gScheduleCorrectAdvance(it)}
-  else{inp.value=q.ans[0];gCommitWrongState(it,checked);gAnim('wshake','.42s');gScheduleWrongExplanation(it,userWrong)}}
+  GS.phase='explain';if(gIsPracticeSession())gPersistRunner()}
+function gSubmitChoice(token){if(!gTaskCurrent(token)||GS.answerCommitted||!Number.isInteger(GS.selectedChoice))return;gEnablePrimaryAction(false);
+  var it=GS.queue[GS.i],choice=GS.selectedChoice,checked=grammarModule.checkPracticeAnswer(it,choice),correct=checked.correct;
+  if(!gAnswer(correct,it,checked))return;if(!correct)gCommitWrongState(it,checked);else{GS.phase='explain';if(gIsPracticeSession())gPersistRunner()}
+  gExplain(it,it.q.o[choice],false,correct)}
+function gSubmit(token){if(!gTaskCurrent(token)||GS.answerCommitted)return;var input=document.getElementById('g_inp'),answer=String(input&&input.value||GS.draftAnswer||'').trim();
+  if(!answer){var status=document.getElementById('g_feedback_status');if(status)status.textContent='Введите ответ перед проверкой.';if(input)input.focus();return}
+  gEnablePrimaryAction(false);var it=GS.queue[GS.i],checked=grammarModule.checkPracticeAnswer(it,answer),correct=checked.correct;
+  if(!gAnswer(correct,it,checked))return;if(!correct)gCommitWrongState(it,checked);else{GS.phase='explain';if(gIsPracticeSession())gPersistRunner()}
+  gExplain(it,answer,false,correct)}
 function gRenderCompletionPending(){var area=document.getElementById('g_area');if(!area||!GS)return;
-  area.innerHTML='<div id="g_card" class="clayCard" role="status" aria-live="polite" style="position:relative;overflow:hidden;padding:24px;text-align:center;">'+wDeco()
-    +'<div style="font-size:44px;">⏳</div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:21px;color:#2B2B2B;margin-top:10px;">Сохраняем результат…</div>'
-    +'<div style="font-weight:600;font-size:13.5px;color:#777163;margin-top:8px;line-height:1.5;">Не закрывайте этот экран: точная сессия уже сохранена на устройстве и будет безопасно повторена.</div></div>'}
+  gSetHeader('Сохраняем результат','Грамматика · синхронизация');area.innerHTML='<div class="grammar-view"><section id="g_card" class="grammar-paper grammar-state" role="status" aria-live="polite"><span class="ebstate-spin" aria-hidden="true"></span><h2 class="grammar-title">Сохраняем результат…</h2><p class="grammar-copy">Точная сессия уже сохранена на устройстве и будет безопасно повторена.</p></section></div>';gSetPrimaryAction(null)}
 function gCompletionEvent(session){var current=gRec(session.t),mixed=session.scope==='mixed',independentError=mixed?null:session.independentErrors&&session.independentErrors[session.t],independentErrors=mixed?gMixedIndependentErrorList(session):[],topicExpectations=mixed?gMixedTopicIds(session).map(function(topic){return{topicId:topic,...gMasteryExpectation(gRec(topic))}}):null;
   return{type:'session_completed',id:session.sessionId,assisted:session.masteryAssisted,source:session.source,completedTypes:Object.keys(session.types||{}),typeScores:session.typeScores,session:{id:session.sessionId,scope:session.scope||'topic',mode:session.practiceMode,source:session.source,catalog:{version:session.catalogVersion||GRAMMAR_CATALOG.version,revision:session.catalogRevision||GRAMMAR_CATALOG.revision},items:session.itemOutcomes,startedAt:session.evidence.startedAt,assisted:session.masteryAssisted,...(mixed?{topicExpectations:topicExpectations}:{}),...(session.practiceMode==='targeted_practice'?{recommendation:session.recommendation}:{})},...(independentError?{independentError:independentError}:{}),...(independentErrors.length?{independentErrors:independentErrors}:{}),...gMasteryExpectation(current)}}
 async function gFinish(){if(GS&&GS.mode==='rev'){await gFinishRev();return}
@@ -457,18 +480,17 @@ async function gFinish(){if(GS&&GS.mode==='rev'){await gFinishRev();return}
   if(GS!==finishedSession)return;
   var area=document.getElementById('g_area');var r=gRec(finishedSession.t),tp=(finishedSession.catalogTopics||G_TOPICS)[finishedSession.t]||G_TOPICS[finishedSession.t],view=grammarModule.masteryView(r),mixed=finishedSession.scope==='mixed',targeted=finishedSession.practiceMode==='targeted_practice';
   var provisional=gMasteryProvisional(result),unsaved=gMasteryUnsaved(result),persistenceLine=gMasteryPersistenceLine(result),stable=!mixed&&!targeted&&!unsaved&&!provisional&&view.stage==='stable';
-  var sessionLabel=mixed?'Смешанная практика':targeted?'Точечная практика · '+tp.n:tp.n,statusLine=mixed?'Результаты тем сверены с их доказательными сроками':targeted?view.label+' · '+gDateLine(view)+gRegressionLine(view):view.label+' · '+gDateLine(view)+gRegressionLine(view),retryAction=mixed?'gStartMixed()':targeted?'gStartTargeted()':'gStart('+finishedSession.t+')';
-  area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:24px;">'+wDeco()
-    +'<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:14px 0;">'
-    +'<div style="font-size:44px;">'+(provisional?'⏳':stable?'🏆':'💪')+'</div>'
-    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:21px;color:#2B2B2B;margin-top:10px;">'+(unsaved?'Результат не сохранён':provisional?'Результат ждёт синхронизации':stable?'Навык устойчив!':'Подход завершён')+'</div>'
-    +'<div style="font-weight:600;font-size:13.5px;color:#777163;margin-top:8px;line-height:1.5;">'+sessionLabel+'<br>Верно: '+finishedSession.ok+' из '+finishedSession.done+'<br>'+(provisional?'СТАТУС ОБНОВИТСЯ ПОСЛЕ СИНХРОНИЗАЦИИ':statusLine)+(persistenceLine?'<br>'+persistenceLine:'')+(finishedSession.masteryAssisted?'<br>Ошибки и показанные ответы не повышают соответствующие темы':'')+'</div></div></div>'
-    +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
-    +(stable?'':'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="'+(durable?retryAction:'gFinish()')+'">'+(durable?'Ещё подход':'Повторить синхронизацию')+'</button>')
-    +'<button class="sq" style="'+WBTN+'color:#B54E2F;" onclick="gToThemes()">К темам</button></div>';
-  gAnim('win','.32s');gSync();save()}
-async function gFinishRev(){var reviewSession=GS,area=document.getElementById('g_area'),rows='',finishedAt=Date.now();
-  if(!reviewSession)return;
+  var regression=view.regressionReason?' · Снова в работе: '+grammarModule.regressionReasonLabel(view.regressionReason):'';
+  var sessionLabel=mixed?'Смешанная практика':targeted?'Точечная практика · '+tp.n:tp.n,statusLine=mixed?'Результаты тем сверены с их доказательными сроками':view.label+' · '+gDateLine(view)+regression,retryAction=mixed?'gStartMixed()':targeted?'gStartTargeted()':'gStart('+finishedSession.t+')';
+  var resultTitle=unsaved?'Результат не сохранён':provisional?'Результат ждёт синхронизации':stable?'Навык устойчив!':'Подход завершён';
+  gSetHeader(resultTitle,'Грамматика · результат');area.innerHTML='<div class="grammar-view"><section id="g_card" class="grammar-paper grammar-state" aria-labelledby="g_result_title">'
+    +'<span class="grammar-state__glyph" aria-hidden="true">'+(provisional?'…':stable?'✓':'•')+'</span><h2 id="g_result_title" class="grammar-title" tabindex="-1">'+resultTitle+'</h2>'
+    +'<p class="grammar-copy">'+ui.escapeHtml(sessionLabel)+'<br>Верно: '+finishedSession.ok+' из '+finishedSession.done+'<br>'+ui.escapeHtml(provisional?'Статус обновится после синхронизации':statusLine)+(persistenceLine?'<br>'+ui.escapeHtml(persistenceLine):'')+(finishedSession.masteryAssisted?'<br>Ошибки и показанные ответы не повышают соответствующие темы':'')+'</p></section>'
+    +(stable?'':'<button type="button" class="aisy-button aisy-button--secondary grammar-secondary" onclick="gToThemes()">К каталогу тем</button>')+'</div>';
+  gSetPrimaryAction(stable?'К темам':durable?'Ещё подход':'Повторить синхронизацию',stable?'gToThemes()':durable?retryAction:'gFinish()');gFocus('g_result_title');gAnim();gSync();
+  gSetProgress('Завершено заданий в подходе',100,'Завершено '+finishedSession.done+' из '+finishedSession.done+' заданий');setTxt('g_today','Результат · '+finishedSession.ok+' из '+finishedSession.done);save()}
+async function gFinishRev(){var reviewSession=GS,area=gArea(),rows='',finishedAt=Date.now();if(!reviewSession||!area)return;
+  gSetHeader('Сохраняем повторение','Грамматика · синхронизация');area.innerHTML='<div class="grammar-view"><section class="grammar-paper grammar-state" role="status" aria-live="polite"><span class="ebstate-spin" aria-hidden="true"></span><h2 class="grammar-title">Сверяем сроки тем…</h2></section></div>';gSetPrimaryAction(null);
   var durationMs=Math.max(0,finishedAt-reviewSession.startedAt);
   grammarModule.reviewEvidenceSlices(reviewSession.evidence,durationMs).forEach(function(evidence){
     gReportEvidence(evidence,{mode:'spaced_review',source:gEvidenceSource(evidence,reviewSession.source),helpUsed:evidence.helpUsed,hintsUsed:0},evidence.durationMs)});
@@ -480,25 +502,19 @@ async function gFinishRev(){var reviewSession=GS,area=document.getElementById('g
   if(GS!==reviewSession)return;
   var batchProvisional=gMasteryProvisional(batchResult),batchUnsaved=gMasteryUnsaved(batchResult),batchLine=gMasteryPersistenceLine(batchResult);
   var resultsById=new Map(results.map(function(item){return[item&&item.eventId,item]}));
-  for(let index=0;index<entries.length;index++){var t=entries[index].topicId,bad=reviewSession.errT[t],event=entries[index].event,result=resultsById.get(event.id)||batchResult,r=result&&result.record?result.record:gRec(t),line=gMasteryPersistenceLine(result)||batchLine,provisional=gMasteryProvisional(result)||batchProvisional;
-    var view=grammarModule.masteryView(r,{now:finishedAt});
-    var eventHistory=Array.isArray(r.masteryHistory)&&r.masteryHistory.find(function(item){return item&&item.eventId===event.id});
-    var regressed=Boolean(event.passed===false&&!event.assisted&&result&&(result.applied||result.replay)
-      &&eventHistory&&eventHistory.outcome==='regressed'&&r.lastRegressionReason);
-    rows+='<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 2px;border-bottom:1px solid #F4EFE9;">'
-      +'<div><div style="font-weight:700;font-size:13.5px;color:#2B2B2B;">'+G_TOPICS[t].n+'</div><div style="font-weight:600;font-size:11px;color:#777163;margin-top:4px;">'+(provisional?'СТАТУС ОБНОВИТСЯ ПОСЛЕ СИНХРОНИЗАЦИИ':gDateLine(view))+'</div>'+(provisional?'':gRegressionLine(view))+(line?'<div style="font-weight:700;font-size:11px;color:#A56000;margin-top:4px;">'+line+'</div>':'')+'</div>'
-      +(provisional?'<span style="flex:none;font-weight:800;font-size:10px;color:#A56000;background:#FFF4DE;padding:5px 10px;border-radius:20px;">ОЖИДАЕТ СИНХРОНИЗАЦИИ</span>'
-        :regressed?'<span style="flex:none;font-weight:800;font-size:10px;color:#A56000;background:#FFF4DE;padding:5px 10px;border-radius:20px;">СНОВА В РАБОТЕ</span>'
-           :'<span style="flex:none;font-weight:800;font-size:10px;color:#1D7F4A;background:#EAF7F0;padding:5px 10px;border-radius:20px;">'+view.label.toUpperCase()+'</span>')
-      +'</div>'}
-  area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;">'+wDeco()
-    +'<div style="text-align:center;"><div style="font-size:42px;">🧠</div>'
-    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:21px;color:#2B2B2B;margin-top:8px;">'+(batchUnsaved?'Результат не сохранён':batchProvisional?'Результат ждёт синхронизации':'Повторение завершено')+'</div>'
-    +'<div style="font-weight:600;font-size:13px;color:#777163;margin-top:5px;">Верно: '+reviewSession.ok+' из '+reviewSession.done+'</div></div>'
-    +'<div style="margin-top:12px;">'+rows+'</div></div>'
-    +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
-    +'<button class="sq" style="'+WBTN+'color:#B54E2F;" onclick="gToThemes()">К темам</button></div>';
-  GS=null;gSync();save();gAnim('win','.32s')}
+  for(let index=0;index<entries.length;index++){var t=entries[index].topicId,event=entries[index].event,result=resultsById.get(event.id)||batchResult,record=result&&result.record?result.record:gRec(t),line=gMasteryPersistenceLine(result)||batchLine,provisional=gMasteryProvisional(result)||batchProvisional;
+    var view=grammarModule.masteryView(record,{now:finishedAt}),eventHistory=Array.isArray(record.masteryHistory)&&record.masteryHistory.find(function(item){return item&&item.eventId===event.id});
+    var regressed=Boolean(event.passed===false&&!event.assisted&&result&&(result.applied||result.replay)&&eventHistory&&eventHistory.outcome==='regressed'&&record.lastRegressionReason);
+    var state=provisional?'learning':regressed?'due':view.stage,label=provisional?'Ожидает синхронизации':regressed?'Снова в работе':view.label;
+    rows+='<li class="grammar-result-row"><span class="grammar-topic__head"><strong>'+ui.escapeHtml(G_TOPICS[t].n)+'</strong><span class="grammar-status" data-state="'+state+'">'+ui.escapeHtml(label)+'</span></span>'
+      +'<small>'+(provisional?'Статус обновится после синхронизации':ui.escapeHtml(gDateLine(view)))+'</small>'+(provisional||!regressed?'':gRegressionLine(view))+(line?'<p class="grammar-regression">'+ui.escapeHtml(line)+'</p>':'')+'</li>'}
+  var resultTitle=batchUnsaved?'Результат не сохранён':batchProvisional?'Результат ждёт синхронизации':'Повторение завершено';
+  gSetHeader(resultTitle,'Грамматика · результат');area.innerHTML='<div class="grammar-view"><section id="g_card" class="grammar-paper" aria-labelledby="g_review_result_title">'
+    +'<p class="grammar-kicker">Повторение по сроку</p><h2 id="g_review_result_title" class="grammar-title" tabindex="-1">'+resultTitle+'</h2><p class="grammar-copy">Верно: '+reviewSession.ok+' из '+reviewSession.done+'</p>'
+    +'<ul class="grammar-result-list">'+rows+'</ul></section></div>';
+  GS=null;gSetPrimaryAction('К темам','gToThemes()');gSync();
+  gSetProgress('Завершено заданий в повторении',100,'Завершено '+reviewSession.done+' из '+reviewSession.done+' заданий');setTxt('g_today','Результат · '+reviewSession.ok+' из '+reviewSession.done);
+  save();gFocus('g_review_result_title');gAnim()}
 /* ===== ЭКЗАМЕН: задания 19–24 (текст с 6 пропусками) ===== */
 const G_EXAMS=GRAMMAR_CATALOG.exams;
 
@@ -516,113 +532,109 @@ function gRestoreExamRunner(){var snapshot=gExamSnapshot();if(!snapshot||snapsho
   var ex=gExamFormById(snapshot.formId,snapshot.source);if(!ex||ex.revision!==snapshot.formRevision)return false;
   EX={ex:ex,t0:snapshot.startedAt,sessionId:snapshot.sessionId,source:snapshot.source,answers:snapshot.answers.map(String),
     evidence:gEvidence(grammarModule.activityId(null,'exam_19_24'),snapshot.startedAt),iv:null};gExamRender();return true}
-function gExamInput(index,value){if(!EX||!Number.isInteger(index)||index<0||index>=6)return;EX.answers[index]=String(value||'').slice(0,200);gPersistExamRunner()}
-function gExam(){var area=document.getElementById('g_area');if(!area)return;
-  var st=S.exam19||{};
-  area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;">'+wDeco()
-    +'<div style="display:flex;align-items:center;gap:8px;"><span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#B54E2F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">КАК НА ЕГЭ</span></div>'
-    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:19px;color:#2B2B2B;margin-top:12px;">Задания 19–24</div>'
-    +'<div style="font-weight:600;font-size:13.5px;color:#4A453E;line-height:1.6;margin-top:8px;">Связный текст с шестью пропусками. Впиши правильную форму слов, данных ЗАГЛАВНЫМИ буквами — без вариантов ответа, как на настоящем экзамене. Идёт таймер.</div>'
-    +(st.n?'<div style="margin-top:12px;font-weight:700;font-size:12.5px;color:#777163;">Попыток: '+st.n+' · последний результат: '+st.last+' из 6 · лучший: '+st.best+' из 6</div>':'')
-    +'</div>'
-    +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
-    +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="gExamStart()">Начать</button>'
-    +'<button class="sq" style="'+WBTN+'color:#B54E2F;" onclick="gMap()">← К темам</button></div>';
-  gAnim('win','.32s');gExamGen()}
+function gExamProgress(){if(!EX)return;var filled=EX.answers.filter(function(answer){return String(answer||'').trim()}).length;
+  gSetProgress('Заполнено ответов экзамена',Math.round(filled/6*100),'Заполнено '+filled+' из 6 ответов')}
+function gExamInput(index,value){if(!EX||!Number.isInteger(index)||index<0||index>=6)return;EX.answers[index]=String(value||'').slice(0,200);gPersistExamRunner();gExamProgress()}
+async function gStoreExamErrors(errors,owner,viewGeneration,examSession){
+  if(!errors.length||typeof SRV==='undefined'||!SRV||!TOKEN)return true;
+  try{var response=await apiPost('/api/v1/error-bank',{errors:errors},gExpectedOwnerHeaders(owner));
+    if(EX!==examSession||viewGeneration!==G_VIEW_GENERATION||!gSameOwner(owner,currentOwnerBinding()))return false;
+    return gConfirmOwnerResponse(owner,response)
+  }catch(error){if(EX!==examSession||viewGeneration!==G_VIEW_GENERATION||!gSameOwner(owner,currentOwnerBinding()))return false;
+    if(apiIsAuthorityFailure(error)){await gInvalidateOwner(owner);return false}return true}}
+function gExam(){var area=gArea();if(!area)return;var stats=S.exam19||{};
+  gSetHeader('Задания 19–24','Грамматика · экзаменационный режим');
+  area.innerHTML='<div class="grammar-view"><section id="g_card" class="grammar-paper grammar-paper--hero" aria-labelledby="g_exam_intro_title">'
+    +'<p class="grammar-kicker">Как на ЕГЭ</p><h2 id="g_exam_intro_title" class="grammar-title" tabindex="-1">Задания 19–24</h2>'
+    +'<p class="grammar-copy">Связный текст с шестью пропусками. Впиши правильную форму слов, данных заглавными буквами, без вариантов ответа. Таймер начнётся вместе с заданием.</p>'
+    +(stats.n?'<div class="grammar-result__meta"><span class="grammar-data-pill">Попыток: '+stats.n+'</span><span class="grammar-data-pill">Последний: '+stats.last+' из 6</span><span class="grammar-data-pill">Лучший: '+stats.best+' из 6</span></div>':'')
+    +'</section><button type="button" class="aisy-button aisy-button--secondary grammar-secondary" onclick="gMap()">К каталогу тем</button></div>';
+  gSetProgress('Заполнено ответов экзамена',0,'Заполнено 0 из 6 ответов');setTxt('g_today','6 заданий');
+  gSetPrimaryAction('Начать','gExamStart()');gFocus('g_exam_intro_title');gAnim();gExamGen()}
 function gExamStart(contentRef){var adaptive=contentRef==='builtin:exam:grammar:19-24:v1';var pool=adaptive?G_EXAMS:gExamPool();
   if(!gMasteryQueueAvailable()){gShowMasteryQueueFull();return}
   S.examIdx=(S.examIdx||0);var ex=adaptive?G_EXAMS[0]:pool[S.examIdx%pool.length];if(!adaptive)S.examIdx++;
   if(EX&&EX.iv)clearInterval(EX.iv);
   var startedAt=Date.now();EX={ex:ex,t0:startedAt,sessionId:crypto.randomUUID(),source:adaptive||G_EXAMS.includes(ex)?'builtin':'generated',answers:['','','','','',''],
     evidence:gEvidence(grammarModule.activityId(null,'exam_19_24'),startedAt),iv:null};gPersistExamRunner();gExamRender()}
-function gExamRender(){if(!EX)return;if(EX.iv)clearInterval(EX.iv);EX.iv=setInterval(function(){if(EX)setTxt('g_today',gExamFmt(Math.floor((Date.now()-EX.t0)/1000)))},1000);
-  var ex=EX.ex;
-  var area=document.getElementById('g_area');
-  var txt='';
-  ex.tx.forEach(function(seg,i){txt+=seg;
-    if(i<6)txt+='<b style="color:#B54E2F;">'+(19+i)+'</b>&nbsp;<span style="display:inline-block;min-width:56px;border-bottom:2.5px dashed #F2683F;"></span>&nbsp;<b style="color:#777163;font-size:12px;">('+ex.gaps[i].b+')</b> '});
-  var inputs=ex.gaps.map(function(g,i){
-    return '<div style="display:flex;align-items:center;gap:10px;">'
-      +'<span style="flex:none;width:64px;font-weight:800;font-size:12.5px;color:#B54E2F;">'+(19+i)+' · '+g.b+'</span>'
-      +'<input id="g_ex_'+i+'" aria-label="Пропуск '+(19+i)+', форма слова '+g.b+'" value="'+ui.escapeHtml(EX.answers[i]||'')+'" oninput="gExamInput('+i+',this.value)" autocapitalize="none" autocomplete="off" spellcheck="false" style="flex:1;box-sizing:border-box;height:46px;border:1px solid #F0EAE2;border-radius:15px;padding:0 13px;font-family:Manrope,sans-serif;font-weight:700;font-size:14px;color:#2B2B2B;outline:none;box-shadow:inset 0 2px 4px rgba(60,45,30,.05);"></div>'}).join('');
-  area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:20px;">'+wDeco()
-    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#B54E2F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">ЗАДАНИЯ 19–24</span></div>'
-    +'<div style="font-weight:600;font-size:14px;color:#2B2B2B;line-height:1.7;margin-top:12px;">'+txt+'</div></div>'
-    +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:9px;">'+inputs
-    +'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);margin-top:3px;" onclick="gExamCheck()">Проверить</button></div>';
-  gAnim('win','.32s')}
-async function gExamCheck(){if(!EX||EX.submitting)return;EX.submitting=true;var ex=EX.ex,evidence=EX.evidence,source=EX.source;
-  clearInterval(EX.iv);var sec=examModule.elapsedSeconds(EX.t0,Date.now());
-  EX.answers=ex.gaps.map(function(_g,i){var inp=document.getElementById('g_ex_'+i);return inp?inp.value:EX.answers[i]||''});gPersistExamRunner();
-  var assessment;try{assessment=examModule.assessGrammar19To24({id:EX.sessionId,catalog:GRAMMAR_CATALOG,form:ex,answers:EX.answers,records:S.grammarMastery||{},startedAt:EX.t0,source:source})}
+function gExamRender(){if(!EX)return;if(EX.iv)clearInterval(EX.iv);EX.iv=setInterval(function(){if(EX)setTxt('g_exam_timer','Время: '+gExamFmt(Math.floor((Date.now()-EX.t0)/1000)))},1000);
+  var exam=EX.ex,area=gArea(),text='';
+  exam.tx.forEach(function(segment,index){text+=ui.escapeHtml(segment);if(index<6)text+='<b>'+(19+index)+'</b>&nbsp;<span class="grammar-gap"></span>&nbsp;<small>('+ui.escapeHtml(exam.gaps[index].b)+')</small> '});
+  var inputs=exam.gaps.map(function(gap,index){return '<div class="grammar-exam-field"><label for="g_ex_'+index+'">'+(19+index)+' · '+ui.escapeHtml(gap.b)+'</label>'
+      +'<input id="g_ex_'+index+'" class="grammar-exam-input" maxlength="200" aria-label="Пропуск '+(19+index)+', форма слова '+ui.escapeHtml(gap.b)+'" value="'+ui.escapeHtml(EX.answers[index]||'')+'" oninput="gExamInput('+index+',this.value)" autocapitalize="none" autocomplete="off" spellcheck="false"></div>'}).join('');
+  gSetHeader('Задания 19–24','Грамматика · экзаменационный режим');
+  area.innerHTML='<div class="grammar-view"><section id="g_card" class="grammar-paper grammar-paper--hero" aria-labelledby="g_exam_task_title"><p class="grammar-kicker">Задания 19–24</p>'
+    +'<h2 id="g_exam_task_title" class="grammar-title" tabindex="-1">Поставь слова в нужную форму</h2><p id="g_exam_timer" class="grammar-exam-timer">Время: '+gExamFmt(Math.floor((Date.now()-EX.t0)/1000))+'</p><p class="grammar-exam-text">'+text+'</p></section>'
+    +'<div class="grammar-exam-grid">'+inputs+'</div></div>';
+  gExamProgress();setTxt('g_today','В работе · 6 заданий');gSetPrimaryAction('Проверить','gExamCheck()');gFocus('g_ex_0');gAnim()}
+async function gExamCheck(){if(!EX||EX.submitting)return;var examSession=EX,owner=currentOwnerBinding();if(!owner)return;
+  var viewGeneration=G_VIEW_GENERATION;EX.submitting=true;gEnablePrimaryAction(false);var exam=EX.ex,evidence=EX.evidence,source=EX.source;clearInterval(EX.iv);var seconds=examModule.elapsedSeconds(EX.t0,Date.now());
+  EX.answers=exam.gaps.map(function(_gap,index){var input=document.getElementById('g_ex_'+index);return String(input?input.value:EX.answers[index]||'').slice(0,200)});gPersistExamRunner();
+  var assessment;try{assessment=examModule.assessGrammar19To24({id:EX.sessionId,catalog:GRAMMAR_CATALOG,form:exam,answers:EX.answers,records:S.grammarMastery||{},startedAt:EX.t0,source:source})}
   catch(_){EX.submitting=false;gExamRender();return}
-  var score=assessment.score,rows='',bank=assessment.errorBank,voiceErrors=[];
-  var masteryResult=await gSubmitMasteryEvent(assessment.event.topicId,assessment.event.event);
+  var score=assessment.score,rows='',bank=assessment.errorBank,voiceErrors=[],masteryResult=await gSubmitMasteryEvent(assessment.event.topicId,assessment.event.event);
+  if(EX!==examSession||viewGeneration!==G_VIEW_GENERATION||!gSameOwner(owner,currentOwnerBinding()))return;
   var provisional=gMasteryProvisional(masteryResult),unsaved=gMasteryUnsaved(masteryResult),persistenceLine=gMasteryPersistenceLine(masteryResult);
-  ex.gaps.forEach(function(g,i){var learnerAnswer=EX.answers[i]||'';var ok=g.ans.some(function(a){return examModule.normalizeGrammarAnswer(a)===examModule.normalizeGrammarAnswer(learnerAnswer)});
-    var voiceSlot='';
-    if(!ok&&g.voice){var slotId='voice_tutor_grammar_'+i;voiceSlot='<div id="'+slotId+'"></div>';voiceErrors.push({slotId:slotId,module:'grammar',itemId:g.voice.id,revision:g.voice.revision,learnerAnswer:learnerAnswer})}
-    rows+='<div style="padding:10px 2px;border-bottom:1px solid #F4EFE9;">'
-      +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'
-      +'<span style="font-weight:800;font-size:13px;color:'+(ok?'#1F8A50':'#C0392B')+';">'+(19+i)+' · '+g.b+' → '+g.ans[0]+'</span>'
-      +(ok?'<span style="font-weight:800;font-size:10px;color:#1D7F4A;background:#EAF7F0;padding:4px 9px;border-radius:20px;">ВЕРНО</span>'
-          :'<span style="font-weight:800;font-size:10px;color:#A83226;background:#FDEDEA;padding:4px 9px;border-radius:20px;">'+ui.escapeHtml(learnerAnswer||'—')+'</span>')
-      +'</div>'
-      +(ok?'':'<div style="font-weight:600;font-size:12px;color:#777163;margin-top:4px;">'+g.e+'</div>'+voiceSlot)
-      +'</div>'});
-  if(!unsaved){
-    S.exam19=examModule.record(S.exam19,score);
-    evidence.score=score;evidence.maxScore=6;
+  if(!unsaved&&!await gStoreExamErrors(bank,owner,viewGeneration,examSession))return;
+  if(EX!==examSession||viewGeneration!==G_VIEW_GENERATION||!gSameOwner(owner,currentOwnerBinding()))return;
+  exam.gaps.forEach(function(gap,index){var learnerAnswer=EX.answers[index]||'',correct=gap.ans.some(function(answer){return examModule.normalizeGrammarAnswer(answer)===examModule.normalizeGrammarAnswer(learnerAnswer)}),voiceSlot='';
+    if(!correct&&gap.voice){var slotId='voice_tutor_grammar_'+index;voiceSlot='<div id="'+slotId+'"></div>';voiceErrors.push({slotId:slotId,module:'grammar',itemId:gap.voice.id,revision:gap.voice.revision,learnerAnswer:learnerAnswer})}
+    rows+='<li class="grammar-result-row" data-verdict="'+(correct?'correct':'incorrect')+'"><span class="grammar-topic__head"><strong>'+(correct?'✓ Верно':'✕ Неверно')+' · '+(19+index)+' · '+ui.escapeHtml(gap.b)+' → '+ui.escapeHtml(gap.ans[0])+'</strong>'
+      +'<span class="grammar-status" data-state="'+(correct?'stable':'due')+'">'+(correct?'Верно':'Ваш ответ: '+ui.escapeHtml(learnerAnswer||'—'))+'</span></span>'
+      +(correct?'':'<small>'+ui.escapeHtml(gap.e)+'</small>'+voiceSlot)+'</li>'});
+  if(!unsaved){S.exam19=examModule.record(S.exam19,score);evidence.score=score;evidence.maxScore=6;
     gReportEvidence(evidence,{mode:'exam_19_24',source:source,helpUsed:false,hintsUsed:0});
-    if(bank.length&&typeof SRV!=='undefined'&&SRV&&TOKEN){apiPost('/api/v1/error-bank',{errors:bank}).catch(function(){})}
     EX=null;gClearRunner();save();gSync()
   }else{EX.submitting=false;gPersistExamRunner()}
-  var area=document.getElementById('g_area');
-  area.innerHTML='<div id="g_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;">'+wDeco()
-    +'<div style="text-align:center;"><div style="font-size:42px;">'+examModule.badge(score,6)+'</div>'
-    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:22px;color:#2B2B2B;margin-top:8px;">'+score+' из 6</div>'
-    +'<div style="font-weight:600;font-size:13px;color:#777163;margin-top:4px;">Время: '+gExamFmt(sec)+(score<6?' · слабые темы отмечены к повторению':'')+(provisional?' · статус обновится после синхронизации':'')+(unsaved?' · результат mastery не записан':'')+(persistenceLine?'<br>'+persistenceLine:'')+'</div></div>'
-    +'<div style="margin-top:12px;">'+rows+'</div></div>'
-    +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
-    +(unsaved?'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="gExamCheck()">Повторить сохранение</button>'
-      :(score<6?'<button class="sq" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#FFA570,#F2683F)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(242,104,63,.32);" onclick="gStartTargeted()">Точная практика по ошибке</button>':'')
-        +'<button class="sq" style="'+WBTN+'color:#B54E2F;" onclick="gExamStart()">Ещё текст</button>'
-        +'<button class="sq" style="'+WBTN+'color:#B54E2F;" onclick="gMap()">К темам</button>')+'</div>';
-  if(!unsaved)voiceErrors.forEach(function(details){registerVoiceTutorError(details).then(function(recorded){var slot=document.getElementById(details.slotId);if(slot&&recorded)slot.innerHTML=voiceTutorButton(recorded)}).catch(function(){})});
-  gAnim('win','.32s');if(!unsaved)gExamGen()}
+  var area=gArea(),resultCopy='Время: '+gExamFmt(seconds)+(score<6?' · слабые темы отмечены к повторению':'')+(provisional?' · статус обновится после синхронизации':'')+(unsaved?' · результат mastery не записан':'')+(persistenceLine?' · '+persistenceLine:'');
+  gSetHeader(score+' из 6','Грамматика · результат экзамена');area.innerHTML='<div class="grammar-view"><section id="g_card" class="grammar-paper" aria-labelledby="g_exam_result_title">'
+    +'<p class="grammar-kicker">Результат заданий 19–24</p><h2 id="g_exam_result_title" class="grammar-title" tabindex="-1">'+score+' из 6</h2><p class="grammar-copy">'+ui.escapeHtml(resultCopy)+'</p>'
+    +'<ul class="grammar-result-list">'+rows+'</ul></section>'
+    +(unsaved?'':score<6?'<button type="button" class="aisy-button aisy-button--secondary grammar-secondary" onclick="gExamStart()">Ещё текст</button>':'')
+    +'<button type="button" class="aisy-button aisy-button--secondary grammar-secondary" onclick="gMap()">К темам</button></div>';
+  gSetProgress('Проверено заданий экзамена',100,'Проверено 6 из 6 заданий');setTxt('g_today','Результат · '+score+' из 6');
+  gSetPrimaryAction(unsaved?'Повторить сохранение':score<6?'Точная практика по ошибке':'Ещё текст',unsaved?'gExamCheck()':score<6?'gStartTargeted()':'gExamStart()');gFocus('g_exam_result_title');
+  if(!unsaved)voiceErrors.forEach(function(details){gRegisterVoiceError(details,details.slotId,owner,G_VIEW_GENERATION)});
+  gAnim();if(!unsaved)gExamGen()}
 function launchGrammarExam(contentRef){if(contentRef!=='builtin:exam:grammar:19-24:v1')return false;gExamStart(contentRef);return true}
 /* фоновая генерация новых экзаменационных текстов */
 var G_EXGEN=false;
 async function gExamGen(){
   if(G_EXGEN)return;if(typeof SRV==='undefined'||!SRV||!TOKEN)return;
-  if(gExamPool().length>=8)return;G_EXGEN=true;
-  try{
-    var d=await generateAiContent('grammar_exam_19_24');
+  var owner=currentOwnerBinding();if(!owner)return;if(gExamPool().length>=8)return;G_EXGEN=true;var requestGeneration=++G_EXAM_GENERATION;
+  var expectedOwnerHeaders=gExpectedOwnerHeaders(owner);
+  try{var d=await generateAiContent('grammar_exam_19_24',{},expectedOwnerHeaders);
+    if(requestGeneration!==G_EXAM_GENERATION||!gSameOwner(owner,currentOwnerBinding()))return;
+    if(!await gConfirmOwnerResponse(owner,d))return;
     var ex=validateGeneratedGrammarSupplement('grammar_exam_19_24',d);
     S.examAi=(S.examAi||[]).concat([ex]);save()
-  }catch(e){}
-  G_EXGEN=false}
+  }catch(error){if(requestGeneration===G_EXAM_GENERATION&&gSameOwner(owner,currentOwnerBinding())&&apiIsAuthorityFailure(error))await gInvalidateOwner(owner)}
+  finally{if(requestGeneration===G_EXAM_GENERATION)G_EXGEN=false}}
 /* фоновая ИИ-догенерация заданий по теме */
 var G_GEN=false;
 async function gGen(t){
   if(G_GEN)return;if(typeof SRV==='undefined'||!SRV||!TOKEN)return;
-  var ai=(S.gramAi&&S.gramAi[t])||[];
-  if(ai.length>=15)return;G_GEN=true;
-  try{
-    var tp=G_TOPICS[t];
-    var d=validateGeneratedGrammarSupplement('grammar_topic_set',await generateAiContent('grammar_topic_set',{topicId:t,topic:tp.n}));var add=[];
-    d.c.forEach(function(q){add.push({k:'c',q:q,voice:q.voice||null})});
-    d.f.forEach(function(q){add.push({k:'f',q:q,voice:q.voice||null})});
+  var owner=currentOwnerBinding();if(!owner)return;var ai=(S.gramAi&&S.gramAi[t])||[];
+  if(ai.length>=15)return;G_GEN=true;var requestGeneration=++G_TOPIC_GENERATION;
+  var expectedOwnerHeaders=gExpectedOwnerHeaders(owner);
+  try{var tp=G_TOPICS[t],response=await generateAiContent('grammar_topic_set',{topicId:t,topic:tp.n},expectedOwnerHeaders);
+    if(requestGeneration!==G_TOPIC_GENERATION||!gSameOwner(owner,currentOwnerBinding()))return;
+    if(!await gConfirmOwnerResponse(owner,response))return;
+    var d=validateGeneratedGrammarSupplement('grammar_topic_set',response);
+    var add=[];d.c.forEach(function(q){add.push({k:'c',q:q,voice:q.voice||null})});d.f.forEach(function(q){add.push({k:'f',q:q,voice:q.voice||null})});
     if(add.length){S.gramAi=S.gramAi||{};S.gramAi[t]=((S.gramAi[t])||[]).concat(add);save()}
-  }catch(e){}
-  G_GEN=false}
+  }catch(error){if(requestGeneration===G_TOPIC_GENERATION&&gSameOwner(owner,currentOwnerBinding())&&apiIsAuthorityFailure(error))await gInvalidateOwner(owner)}
+  finally{if(requestGeneration===G_TOPIC_GENERATION)G_GEN=false}}
 registerRouteHook(function(id){if(id==='scr3')initGrammar()});
 /* Экзамен по грамматике не должен тикать в фоне после ухода с экрана. */
-registerRouteHook(function(id){if(id!=='scr3'){if(EX&&EX.iv)clearInterval(EX.iv);EX=null;GS=null}});
+registerRouteHook(function(id){if(id!=='scr3'){if(EX&&EX.iv)clearInterval(EX.iv);EX=null;GS=null;G_TASK_TOKEN+=1;G_TARGET_REQUEST_GENERATION+=1;G_EXAM_GENERATION+=1;G_TOPIC_GENERATION+=1;G_SCREEN_GENERATION+=1;G_VIEW_GENERATION+=1;G_TARGET_PENDING=false;G_EXGEN=false;G_GEN=false;gSetPrimaryAction(null)}});
+window.addEventListener('online',gRenderNetworkState);
+window.addEventListener('offline',gRenderNetworkState);
+registerAuthorityReset(function(){if(EX&&EX.iv)clearInterval(EX.iv);EX=null;GS=null;GQ=GRAM_Q.slice();G_TASK_TOKEN+=1;G_TARGET_REQUEST_GENERATION+=1;G_EXAM_GENERATION+=1;G_TOPIC_GENERATION+=1;G_SCREEN_GENERATION+=1;G_VIEW_GENERATION+=1;G_TARGET_PENDING=false;G_EXGEN=false;G_GEN=false;gSetPrimaryAction(null);var area=gArea();if(area)area.replaceChildren()});
 registerScreenGenerator('scr3',genGrammar);
 
 /* Имена для обработчиков этого экрана: загрузчик кладёт их на window вместе с чанком. */
 export {
-  gAfterExplain,gExam,gExamCheck,gExamInput,gExamStart,gFinish,gMap,gOpen,gPick,gResume,gReview,gStart,gStartMixed,gStartTargeted,gSubmit,launchGrammarExam,
+  gAfterExplain,gChoiceKey,gExam,gExamCheck,gExamInput,gExamStart,gFinish,gInputChanged,gMap,gOpen,gPick,gResume,gReview,gSelectChoice,gStart,gStartMixed,gStartTargeted,gSubmit,gSubmitChoice,launchGrammarExam,
   gTheory,gToThemes,
 };

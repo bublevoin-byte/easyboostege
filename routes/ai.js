@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import express from 'express';
 
 import { config } from '../config.js';
+import { bindResponseOwner, requireExpectedOwner } from '../middleware/expected-owner.js';
 import {
   parseAndValidateWritingReview, prepareWritingPrompt, WRITING_PROMPT_VERSION, writingRequestSchema,
 } from '../ai/writing.js';
@@ -503,6 +504,12 @@ export function createAiRoutes({
   }
 
   const dictionaryCache = new TtlCache(config.ai.dictionaryCacheTtlMs, 5000);
+  function bindOptionalExpectedOwner(req, res, next) {
+    if (req.get('x-easyboost-expected-owner') == null) return next();
+    if (!requireExpectedOwner(req, res)) return undefined;
+    bindResponseOwner(res, req.user);
+    return next();
+  }
   function serveCachedDictionary(req, res, next) {
     if (req.body?.operation !== 'dictionary_lookup') return next();
     const parsed = contentRequestSchema.safeParse(req.body);
@@ -775,7 +782,7 @@ export function createAiRoutes({
     });
   }
 
-  router.post('/api/v1/ai/generate-content', auth, requireActiveSubscription, requirePrivacyConsent('text_processing'), contentLimiter, serveCachedDictionary, async (req, res) => {
+  router.post('/api/v1/ai/generate-content', auth, bindOptionalExpectedOwner, requireActiveSubscription, requirePrivacyConsent('text_processing'), contentLimiter, serveCachedDictionary, async (req, res) => {
     const parsed = contentRequestSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректные параметры генерации.' } });
     try {

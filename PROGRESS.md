@@ -4,7 +4,7 @@
 Тикеты: [.scratch/aisy-production-ui-a/issues/](.scratch/aisy-production-ui-a/issues/)
 Ветка: `prototype/aisy-today-visual-v1`
 
-Overall status: `in-progress` — Tickets 01–04 готовы; Ticket 05 готов к реализации.
+Overall status: `in-progress` — Tickets 01–05 готовы; Ticket 06 готов к реализации.
 
 | № | Что даёт | Статус |
 |---|---|---|
@@ -12,8 +12,20 @@ Overall status: `in-progress` — Tickets 01–04 готовы; Ticket 05 гот
 | 02 | Logo/onboarding и server-side VK ID с local provider | done |
 | 03 | Strict access и production Today | done |
 | 04 | Practice hub и полный Words-контур | done |
-| 05–10 | Grammar, Reading/Listening, Writing, Speaking, ЕГЭ, Прогресс и Профиль | ready-for-agent |
+| 05 | Grammar catalog, adaptive practice, runner, review и задания 19–24 | done |
+| 06–10 | Reading/Listening, Writing, Speaking, ЕГЭ, Прогресс и Профиль | ready-for-agent |
 | 11 | PWA/release evidence | blocked by 02–10 |
+
+Ticket 05: Grammar полностью перенесена в Direction A: recommendation-first catalog всех 20 тем,
+topic/mixed/targeted practice, resume, четыре типа заданий, явные selection → submit → Next, review/result и
+задания 19–24 используют общие paper sheets, `.aisy-choice`, secondary controls и один 58 px safe-area dock.
+Сохранены catalog v3/rev3, transfer/mastery, exact targeted pointer, EGE 19–24, offline runner/queue и
+owner/generation isolation; AI, Voice Tutor и error-bank мутации fail-closed при A→B или route leave. Production
+Chromium зелёный на `320×720`, `720×320`, `375px` и desktop-stage с keyboard/focus, light/dark и reduced motion.
+Focused Grammar/security `63/63`, HTTP smoke `1/1`, AI owner boundary `1/1`, lint/check/build/diff-check зелёные;
+оба финальных review — `ZERO_FINDINGS`. Единственный полный `npm test` обнаружил только устаревший exact-class
+selector после перехода на общий secondary component; selector исправлен и точечно подтверждён `1/1`, полный
+suite согласно gate не перезапускался.
 
 Ticket 04: Practice показывает все шесть реальных модулей и одно честное следующее действие; Words library,
 занятие, устойчивый результат, review и общие состояния перенесены в A «Бумажный маршрут» с одним 58 px dock CTA,
