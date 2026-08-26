@@ -1,6 +1,6 @@
 # 07 — Согласовать кнопочную систему с утверждённым onboarding
 
-**Status:** ready-for-human
+**Status:** done — approved with direction A
 
 **What to build:** Заменить generic web-button treatment в Style Lab на одну общую кнопочную систему, буквально
 наследующую утверждённый onboarding CTA и светлые tactile keys из widget-reference. В первую очередь проверить
@@ -31,4 +31,6 @@
   `ПРОЙДЕНО / ПРОЙДЕНО / ПРОЙДЕНО`.
 - Актуальная matrix A/B × шесть состояний × два телефонных размера: `24/24`, failures `0`; targeted selected
   regression на обоих размерах: `2/2`. Static QA, focused lint, check и diff-check зелёные.
-- Production UI, API, storage и service worker не изменялись. Результат ждёт только визуального решения владельца.
+- Production UI, API, storage и service worker не изменялись. После round 3 результат был передан владельцу на
+  визуальное решение.
+- 2026-08-26: владелец выбрал направление A; кнопочная система закрыта как часть утверждённой основы.

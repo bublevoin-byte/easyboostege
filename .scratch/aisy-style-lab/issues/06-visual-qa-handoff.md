@@ -4,10 +4,16 @@
 
 **Blocked by:** 03 — A; 04 — B; 05 — C.
 
-**Status:** ready-for-human — final comparison round 3
+**Status:** done — owner selected A
 
 - [x] Для общего foundation и каждого направления три независимых критика вынесли `ПРОЙДЕНО` или зафиксирована остановка владельца.
 - [x] Сохранены рендеры 390×844 и компактные доказательства 360×720.
 - [x] Пройдены interaction, reload, overflow, focus, touch-target и reduced-motion проверки.
 - [x] Audit не обнаруживает side rail или raw component colors.
 - [x] Лист выбора ограничивает решение одной базой и максимум двумя заимствованиями.
+
+## Owner decision
+
+- 2026-08-26: владелец выбрал **A — Бумажный маршрут** как единственную основу.
+- Заимствования не выбраны; B/C не смешиваются с A автоматически.
+- Полная запись: `.scratch/aisy-style-lab/owner-decision.md`.
