@@ -14,8 +14,15 @@ Overall status: `ready-for-owner-selection` — comparison lab, A/B/C, перв�
 | 04 | B — тактильные виджеты | done — round 4 |
 | 05 | C — сюжетный маршрут | done — round 2 |
 | 06 | Независимая визуальная QA и лист выбора | ready-for-human — round 3 |
+| 07 | Кнопочная система по onboarding/widget references | ready-for-human — design-loop round 3 |
 
-Design-loop: foundation `круг 22 — ПРОЙДЕНО`; A `круг 7 — ПРОЙДЕНО`; B `круг 4 — ПРОЙДЕНО`; C `круг 2 — ПРОЙДЕНО`; финальное сравнение `круг 3 — ПРОЙДЕНО`.
+Design-loop: foundation `круг 22 — ПРОЙДЕНО`; A `круг 7 — ПРОЙДЕНО`; B `круг 4 — ПРОЙДЕНО`; C `круг 2 — ПРОЙДЕНО`; финальное сравнение `круг 3 — ПРОЙДЕНО`; кнопочная система A/B `круг 3 — ПРОЙДЕНО`.
+
+Кнопочная система A/B буквально наследует утверждённый onboarding CTA (`58 / 28 / 26 / 10 / 38`, coral
+gradient, cream orb) и tactile paper/widget keys. Три design-loop круга закрыли B outline choices, исчезающий
+disabled affordance и плоский selected state. Актуальная phone matrix — `24/24`, targeted selected regression —
+`2/2`; static QA, focused lint, syntax/inline-handler check и diff-check зелёные. Production UI/API/storage/service
+worker не затронуты; Ticket 07 готов к визуальному выбору владельца.
 
 ---
 

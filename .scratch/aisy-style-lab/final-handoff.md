@@ -10,6 +10,10 @@
   `http://127.0.0.1:4319/prototypes/aisy-style-lab/index.html?direction=a&screen=today&state=ready&panel=decision`
 - Визуальная история первого запуска:
   `http://127.0.0.1:4319/prototypes/aisy-style-lab/opening.html`
+- Кнопочная система A:
+  `http://127.0.0.1:4319/prototypes/aisy-style-lab/index.html?direction=a&screen=progress&state=ready&panel=components`
+- Кнопочная система B:
+  `http://127.0.0.1:4319/prototypes/aisy-style-lab/index.html?direction=b&screen=progress&state=ready&panel=components`
 
 Review-обёртка постоянно сообщает, что VK — визуальный placeholder и backend авторизации не подключён; sticky
 disclosure остаётся видимым даже когда фокус прокручивает wrapper к шагу входа. Сам существующий
@@ -55,6 +59,9 @@ logo/onboarding/login прототип внутри неё не изменяет
 - B: `ПРОЙДЕНО ×3`, round 4.
 - C: `ПРОЙДЕНО ×3`, round 2.
 - Финальное comparison/decision/opening: `ПРОЙДЕНО ×3`, round 3.
+- Кнопочная система A/B по onboarding/widget references: `ПРОЙДЕНО ×3`, round 3.
+- Primary/deep/disabled сохраняют `58 / 28 / 26 / 10 / 38`; secondary/duration/choice — raised keys, B selected
+  — sunken key без dominant outline. Button matrix: `24/24`; selected regression: `2/2`.
 - 26 настоящих PNG рендеров находятся в `final-renders/`; размеры только `390×844` и `360×720`.
 - 24 flow-комбинации на двух телефонах и 15 settled journey-состояний прошли без горизонтального overflow,
   side rail, потерянного CTA, неверного dock/nav или focus-разрыва.
@@ -68,3 +75,5 @@ logo/onboarding/login прототип внутри неё не изменяет
 - перенести выбранную тему в production router/shell без возврата desktop side rail;
 - оптимизировать и подтвердить права на raster assets onboarding;
 - после выбора основы составить отдельный production migration plan, не смешивая его с approval-прототипом.
+- отдельно утвердить production-accessibility ramp для coral CTA: текущий approval-прототип буквально сохраняет
+  светлый текст и gradient из визуального эталона.

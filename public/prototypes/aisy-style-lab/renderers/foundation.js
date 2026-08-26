@@ -115,7 +115,7 @@ export function renderComponents(viewModel) {
       <section class="gallery-section"><h2>Действия</h2>
         <button class="primary-button" type="button"><span>Продолжить маршрут</span>${icon('arrow')}</button>
         <button class="secondary-button" type="button">Изменить длительность</button>
-        <button class="primary-button" type="button" disabled aria-disabled="true"><span>Маршрут недоступен</span></button>
+        <button class="primary-button" type="button" disabled aria-disabled="true"><span>Маршрут недоступен</span>${icon('arrow')}</button>
       </section>
       <section class="gallery-section"><h2>Длительность</h2>${renderDuration([10, 20, 30, 40], 20)}</section>
       <section class="gallery-section"><h2>Ответ</h2><div class="choices">

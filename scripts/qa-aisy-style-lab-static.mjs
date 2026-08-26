@@ -10,9 +10,10 @@ const directionAUrl = new URL('public/prototypes/aisy-style-lab/renderers/a.js',
 const directionBUrl = new URL('public/prototypes/aisy-style-lab/renderers/b.js', root);
 const directionCUrl = new URL('public/prototypes/aisy-style-lab/renderers/c.js', root);
 const commonRendererUrl = new URL('public/prototypes/aisy-style-lab/renderers/common.js', root);
+const foundationRendererUrl = new URL('public/prototypes/aisy-style-lab/renderers/foundation.js', root);
 const openingReviewUrl = new URL('public/prototypes/aisy-style-lab/opening.html', root);
 
-const [tokens, labCss, fixtureSource, appSource, directionASource, directionBSource, directionCSource, commonRendererSource, openingReviewSource] = await Promise.all([
+const [tokens, labCss, fixtureSource, appSource, directionASource, directionBSource, directionCSource, commonRendererSource, foundationRendererSource, openingReviewSource] = await Promise.all([
   readFile(tokenUrl, 'utf8'),
   readFile(labCssUrl, 'utf8'),
   readFile(fixtureUrl, 'utf8'),
@@ -21,6 +22,7 @@ const [tokens, labCss, fixtureSource, appSource, directionASource, directionBSou
   readFile(directionBUrl, 'utf8'),
   readFile(directionCUrl, 'utf8'),
   readFile(commonRendererUrl, 'utf8'),
+  readFile(foundationRendererUrl, 'utf8'),
   readFile(openingReviewUrl, 'utf8'),
 ]);
 
@@ -36,6 +38,20 @@ assert.equal(/@media\s*\(\s*min-width[^}]+\.bottom-nav/is.test(labCss), false, '
 assert.match(labCss, /grid-template-columns:\s*repeat\(5,\s*1fr\)/, 'five-column bottom nav contract is missing');
 assert.match(labCss, /min\(100%,\s*var\(--phone-max-width\)\)/, 'phone canvas maximum is missing');
 assert.match(tokens, /@media\s*\(prefers-reduced-motion:\s*reduce\)/, 'reduced-motion token override is missing');
+assert.match(tokens, /--button-height:\s*var\(--primitive-size-cta\)/, 'primary CTA must retain the 58px height token');
+assert.match(tokens, /--button-radius:\s*var\(--primitive-radius-xl\)/, 'primary CTA must retain the 28px radius token');
+assert.match(tokens, /--button-padding-start:[^;]+--primitive-space-6[^;]+--primitive-space-0-5/, 'primary CTA needs the approved 26px label inset');
+assert.match(tokens, /--button-padding-end:[^;]+--primitive-space-2[^;]+--primitive-space-0-5/, 'primary CTA needs the approved 10px edge inset');
+assert.match(tokens, /--button-affordance-size:\s*var\(--primitive-size-cta-affordance\)/, 'primary CTA needs the approved 38px action circle');
+assert.match(labCss, /\.primary-button\s*>\s*\.icon,[\s\S]+\.deep-dock__primary\s*>\s*\.icon[\s\S]+var\(--button-affordance-size\)/, 'primary and deep CTA icons must render as the shared action circle');
+assert.match(labCss, /\.primary-button\s*\{[\s\S]+justify-content:\s*space-between/, 'primary CTA must keep label and action circle separated');
+assert.match(labCss, /prefers-reduced-motion[\s\S]+\.primary-button:active[\s\S]+transform:\s*none/, 'reduced motion must remove button press translation');
+assert.match(foundationRendererSource, /Маршрут недоступен<\/span>\$\{icon\('arrow'\)\}/, 'disabled primary must preserve the trailing action circle anatomy');
+assert.match(tokens, /--button-disabled-affordance-bg:\s*linear-gradient/, 'disabled primary must retain a visibly separate light action circle');
+assert.match(tokens, /--button-disabled-affordance-shadow:\s*var\(--shadow-key-rest\)/, 'disabled action circle must retain the tactile key edge');
+assert.match(labCss, /\.primary-button:disabled\s*>\s*\.icon\s*\{[^}]+border:[^}]+box-shadow:\s*var\(--button-disabled-affordance-shadow\)/s, 'disabled action circle must remain visible as a 38px key');
+assert.match(labCss, /data-direction="b"\]\s+\.choice\s*\{[^}]+border-color:\s*var\(--choice-border\)[^}]+background:\s*var\(--choice-bg\)[^}]+box-shadow:\s*var\(--choice-shadow\)/s, 'Direction B choices must use raised widget-key styling instead of a hard outline');
+assert.match(labCss, /data-direction="b"\]\s+\.choice\[data-choice-state="selected"\]\s*\{[^}]+border-color:\s*var\(--choice-border\)[^}]+box-shadow:\s*var\(--choice-shadow-selected\)/s, 'Direction B selected choice must seat into the surface without a dominant outline');
 assert.match(appSource, /searchParams\.set\('direction'/, 'direction is not persisted in the URL');
 assert.match(appSource, /searchParams\.set\('screen'/, 'screen is not persisted in the URL');
 assert.match(appSource, /searchParams\.set\('state'/, 'fixture state is not persisted in the URL');

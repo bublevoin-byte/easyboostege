@@ -413,9 +413,10 @@ button:disabled {
   min-height: 3rem;
   place-content: center;
   padding: var(--primitive-space-1);
-  border: var(--primitive-border-thin) solid var(--primitive-color-transparent);
+  border: var(--primitive-border-thin) solid var(--color-key-border);
   border-radius: var(--radius-control);
-  background: var(--primitive-color-transparent);
+  background: var(--button-secondary-bg);
+  box-shadow: var(--button-secondary-shadow);
   color: var(--color-text-muted);
   cursor: pointer;
   line-height: 1;
@@ -434,14 +435,14 @@ button:disabled {
 
 .duration__option[aria-checked="true"] {
   border-color: var(--color-selection);
-  background: var(--color-surface-raised);
-  box-shadow: var(--shadow-rest);
+  background: var(--choice-selected-bg);
+  box-shadow: var(--choice-shadow-selected);
   color: var(--color-selection);
 }
 
 .duration__option:active {
-  transform: translateY(1px);
-  box-shadow: var(--shadow-pressed);
+  transform: translateY(var(--button-press-y));
+  box-shadow: var(--button-secondary-shadow-pressed);
 }
 
 .route-list {
@@ -497,6 +498,7 @@ button:disabled {
 
 .primary-button,
 .secondary-button {
+  position: relative;
   display: flex;
   width: 100%;
   min-height: var(--button-height);
@@ -506,16 +508,41 @@ button:disabled {
   padding: 0 var(--button-padding-x);
   border-radius: var(--button-radius);
   cursor: pointer;
-  font-size: var(--primitive-font-size-body);
+  font-size: var(--button-font-size);
   font-weight: var(--primitive-font-weight-heavy);
+  line-height: 1;
   transition: transform var(--motion-press-duration) var(--motion-press-ease), box-shadow var(--motion-press-duration), background var(--motion-feedback-duration);
 }
 
 .primary-button {
+  isolation: isolate;
+  justify-content: space-between;
+  padding: 0 var(--button-padding-end) 0 var(--button-padding-start);
   border: 0;
   background: var(--button-primary-bg);
   box-shadow: var(--button-shadow);
   color: var(--button-primary-fg);
+}
+
+.primary-button > span,
+.deep-dock__primary > span {
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.primary-button > .icon,
+.deep-dock__primary > .icon {
+  width: var(--button-affordance-size);
+  height: var(--button-affordance-size);
+  flex: 0 0 var(--button-affordance-size);
+  padding: var(--button-affordance-padding);
+  border-radius: var(--radius-pill);
+  background: var(--button-primary-affordance-bg);
+  box-shadow: var(--button-primary-affordance-shadow);
+  color: var(--button-primary-affordance-fg);
 }
 
 .primary-button:hover {
@@ -524,21 +551,43 @@ button:disabled {
 
 .primary-button:active,
 .secondary-button:active {
-  transform: translateY(2px);
+  transform: translateY(var(--button-press-y));
+}
+
+.primary-button:active {
   box-shadow: var(--button-shadow-pressed);
 }
 
 .primary-button:disabled {
   background: var(--button-disabled-bg);
-  box-shadow: none;
+  box-shadow: var(--button-disabled-shadow);
   color: var(--button-disabled-fg);
+  cursor: not-allowed;
+}
+
+.primary-button:disabled > .icon {
+  border: var(--primitive-border-thin) solid var(--button-disabled-affordance-border);
+  background: var(--button-disabled-affordance-bg);
+  box-shadow: var(--button-disabled-affordance-shadow);
+  color: var(--button-disabled-affordance-fg);
 }
 
 .secondary-button {
+  min-height: var(--button-secondary-height);
   border: var(--primitive-border-thin) solid var(--button-secondary-border);
+  border-radius: var(--button-secondary-radius);
   background: var(--button-secondary-bg);
-  box-shadow: var(--shadow-rest);
+  box-shadow: var(--button-secondary-shadow);
   color: var(--button-secondary-fg);
+}
+
+.secondary-button:active {
+  box-shadow: var(--button-secondary-shadow-pressed);
+}
+
+:is(.hero, .gallery-section) > :is(.primary-button, .secondary-button) {
+  width: calc(100% + var(--button-bleed) + var(--button-bleed));
+  margin-inline: calc(0px - var(--button-bleed));
 }
 
 .mini-proof {
@@ -701,18 +750,20 @@ button:disabled {
 
 .deep-dock__primary {
   min-height: var(--button-height) !important;
+  justify-content: space-between !important;
   gap: var(--primitive-space-2);
-  padding: 0 var(--primitive-space-4);
+  padding: 0 var(--button-padding-end) 0 var(--button-padding-start);
   border: 0;
-  border-radius: var(--primitive-radius-lg);
+  border-radius: var(--button-radius);
   background: var(--button-primary-bg);
   box-shadow: var(--button-shadow);
   color: var(--button-primary-fg);
-  font-size: 0.8125rem;
+  font-size: var(--text-body-size);
+  line-height: 1;
 }
 
 .deep-dock__primary:active {
-  transform: translateY(1px);
+  transform: translateY(var(--button-press-y));
   box-shadow: var(--button-shadow-pressed);
 }
 
@@ -835,13 +886,13 @@ button:disabled {
   width: 100%;
   min-height: var(--choice-min-height);
   padding: var(--primitive-space-2) var(--primitive-space-3);
-  grid-template-columns: 2rem 1fr auto;
+  grid-template-columns: 2rem minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--primitive-space-3);
   border: var(--primitive-border-thin) solid var(--choice-border);
   border-radius: var(--choice-radius);
   background: var(--choice-bg);
-  box-shadow: var(--shadow-rest);
+  box-shadow: var(--choice-shadow);
   color: var(--choice-fg);
   cursor: pointer;
   text-align: left;
@@ -853,26 +904,33 @@ button:disabled {
   width: 2rem;
   height: 2rem;
   place-items: center;
-  border: var(--primitive-border-thin) solid var(--color-border-strong);
+  border: 0;
   border-radius: var(--radius-pill);
+  background: var(--choice-marker-bg);
+  box-shadow: var(--choice-marker-shadow);
   color: var(--color-text-muted);
   font: normal var(--primitive-font-weight-heavy) 0.6875rem/1 var(--font-display);
 }
 
 .choice > span {
+  overflow: hidden;
   font-size: var(--text-body-size);
   font-weight: var(--primitive-font-weight-bold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .choice small {
   font-size: 0.6875rem;
   font-weight: var(--primitive-font-weight-bold);
+  white-space: nowrap;
 }
 
 .choice[data-choice-state="selected"] {
   border-color: var(--choice-selected-border);
   background: var(--choice-selected-bg);
   color: var(--choice-selected-fg);
+  box-shadow: var(--choice-shadow-selected);
 }
 
 .choice[data-choice-state="selected"] > i {
@@ -894,8 +952,8 @@ button:disabled {
 }
 
 .choice:active {
-  transform: translateY(1px);
-  box-shadow: var(--shadow-pressed);
+  transform: translateY(var(--button-press-y));
+  box-shadow: var(--choice-shadow-pressed);
 }
 
 .task-assistance {
@@ -1574,8 +1632,16 @@ button:disabled {
 
 .app-frame[data-direction="b"] .choice {
   min-height: var(--primitive-size-control);
-  border-color: var(--color-border-strong);
-  box-shadow: var(--widget-key-shadow);
+  border-color: var(--choice-border);
+  background: var(--choice-bg);
+  box-shadow: var(--choice-shadow);
+}
+
+.app-frame[data-direction="b"] .choice[data-choice-state="selected"] {
+  border-color: var(--choice-border);
+  background: var(--choice-selected-bg);
+  box-shadow: var(--choice-shadow-selected);
+  transform: translate3d(0, var(--widget-seat-y), 0);
 }
 
 .app-frame[data-direction="b"] .answer-compare,
@@ -1625,14 +1691,10 @@ button:disabled {
   transition: transform var(--motion-press-duration) var(--motion-press-ease), box-shadow var(--motion-press-duration) var(--motion-press-ease), background var(--motion-feedback-duration) var(--motion-press-ease);
 }
 
-.app-frame[data-direction="b"] .primary-button,
-.app-frame[data-direction="b"] .deep-dock__primary,
 .app-frame[data-direction="b"] .deep-dock__back {
   box-shadow: var(--widget-key-shadow);
 }
 
-.app-frame[data-direction="b"] .primary-button:active,
-.app-frame[data-direction="b"] .deep-dock__primary:active,
 .app-frame[data-direction="b"] .deep-dock__back:active,
 .app-frame[data-direction="b"] .choice:active,
 .app-frame[data-direction="b"] .duration__option:active,
@@ -2003,7 +2065,10 @@ body[data-carrier-size="compact"] .app-frame[data-direction="b"] .progress-copy 
   box-shadow: var(--shadow-rest);
 }
 
-.app-frame[data-direction="c"] .deep-dock__primary,
+.app-frame[data-direction="c"] .deep-dock__primary {
+  font-size: var(--text-body-size);
+}
+
 .app-frame[data-direction="c"] .next-step strong {
   font-size: var(--text-body-size);
 }
@@ -3121,5 +3186,13 @@ a:focus-visible:focus {
   .app-frame[data-direction="c"][data-c-route-transition="forward"][data-transitioning="true"] .c-journey__trail--progress {
     stroke-dashoffset: var(--c-route-offset);
     transition: none;
+  }
+
+  .primary-button:active,
+  .secondary-button:active,
+  .deep-dock__primary:active,
+  .choice:active,
+  .duration__option:active {
+    transform: none;
   }
 }

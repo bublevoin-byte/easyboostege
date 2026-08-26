@@ -41,9 +41,11 @@
 
   --primitive-color-paper-0: #fffdf9;
   --primitive-color-paper-50: #fff9f3;
+  --primitive-color-paper-75: #fff7f0;
   --primitive-color-paper-100: #fff4ec;
   --primitive-color-paper-150: #fff1e8;
   --primitive-color-paper-200: #ffede4;
+  --primitive-color-paper-225: #fcebe2;
   --primitive-color-paper-250: #fbe8df;
   --primitive-color-paper-300: #f4ded7;
 
@@ -95,6 +97,7 @@
   --primitive-white-rgb: 255 255 255;
 
   --primitive-space-0: 0;
+  --primitive-space-0-5: 0.125rem;
   --primitive-space-1: 0.25rem;
   --primitive-space-2: 0.5rem;
   --primitive-space-3: 0.75rem;
@@ -111,6 +114,7 @@
   --primitive-size-touch: 2.75rem;
   --primitive-size-control: 3rem;
   --primitive-size-cta: 3.625rem;
+  --primitive-size-cta-affordance: 2.375rem;
   --primitive-size-nav: 4.75rem;
   --primitive-size-phone-compact-width: 22.5rem;
   --primitive-size-phone-compact-height: 45rem;
@@ -176,6 +180,16 @@
   --color-primary-hover: var(--primitive-color-coral-800);
   --color-primary-soft: var(--primitive-color-coral-150);
   --color-primary-foreground: var(--primitive-color-paper-0);
+  --color-action-start: var(--primitive-color-coral-400);
+  --color-action-end: var(--primitive-color-coral-500);
+  --color-action-hover-start: var(--primitive-color-coral-450);
+  --color-action-hover-end: var(--primitive-color-coral-600);
+  --color-action-foreground: var(--primitive-color-paper-50);
+  --color-action-affordance: var(--primitive-color-paper-150);
+  --color-action-affordance-foreground: var(--primitive-color-coral-500);
+  --color-key-start: var(--primitive-color-paper-75);
+  --color-key-end: var(--primitive-color-paper-225);
+  --color-key-border: rgb(var(--primitive-shadow-plum-rgb) / 0.1);
   --color-selection: var(--primitive-color-plum-700);
   --color-selection-soft: var(--primitive-color-plum-100);
   --color-selection-foreground: var(--primitive-color-paper-0);
@@ -192,6 +206,7 @@
   --color-focus: var(--primitive-color-plum-700);
   --color-disabled: var(--primitive-color-plum-100);
   --color-disabled-text: var(--primitive-color-plum-500);
+  --color-disabled-affordance: var(--primitive-color-plum-300);
   --color-paper-layer-one: var(--primitive-color-paper-100);
   --color-paper-layer-two: var(--primitive-color-paper-200);
   --color-paper-crease: var(--primitive-color-plum-200);
@@ -237,6 +252,20 @@
     inset -1px -1px 2px rgb(var(--primitive-white-rgb) / 0.45);
   --shadow-focus: 0 0 0 var(--primitive-focus-width) var(--color-canvas),
     0 0 0 calc(var(--primitive-focus-width) + 2px) var(--color-focus);
+  --shadow-action-rest: 10px 12px 20px rgb(var(--primitive-shadow-plum-rgb) / 0.22),
+    inset 2px 2px 2px rgb(var(--primitive-white-rgb) / 0.28),
+    inset -2px -2px 4px rgb(var(--primitive-shadow-plum-rgb) / 0.13);
+  --shadow-action-pressed: 6px 7px 12px rgb(var(--primitive-shadow-plum-rgb) / 0.18),
+    inset 2px 2px 4px rgb(var(--primitive-shadow-plum-rgb) / 0.12);
+  --shadow-action-affordance: 4px 5px 9px rgb(var(--primitive-shadow-plum-rgb) / 0.25),
+    inset 1px 1px 1px rgb(var(--primitive-white-rgb) / 0.3);
+  --shadow-key-rest: 4px 5px 8px rgb(var(--primitive-shadow-plum-rgb) / 0.17),
+    inset 1px 1px 1px rgb(var(--primitive-white-rgb) / 0.26),
+    inset -1px -1px 3px rgb(var(--primitive-shadow-plum-rgb) / 0.06);
+  --shadow-key-pressed: 2px 3px 5px rgb(var(--primitive-shadow-plum-rgb) / 0.12),
+    inset 2px 2px 5px rgb(var(--primitive-shadow-plum-rgb) / 0.1);
+  --shadow-key-sunken: inset 3px 3px 7px rgb(var(--primitive-shadow-plum-rgb) / 0.12),
+    inset -1px -1px 2px rgb(var(--primitive-white-rgb) / 0.5);
 
   --motion-press-duration: var(--primitive-duration-press);
   --motion-feedback-duration: var(--primitive-duration-feedback);
@@ -269,6 +298,10 @@
     inset -2px -2px 5px rgb(var(--primitive-shadow-plum-rgb) / 0.09);
   --shadow-sunken: inset 3px 3px 7px rgb(var(--primitive-shadow-plum-rgb) / 0.12),
     inset -1px -1px 2px rgb(var(--primitive-white-rgb) / 0.5);
+  --shadow-key-rest: var(--shadow-rest);
+  --shadow-key-pressed: var(--shadow-pressed);
+  --shadow-key-sunken: inset 4px 4px 9px rgb(var(--primitive-shadow-plum-rgb) / 0.18),
+    inset -2px -2px 4px rgb(var(--primitive-white-rgb) / 0.62);
   --motion-screen-x: 0rem;
   --motion-screen-y: 0.5rem;
 }
@@ -313,23 +346,47 @@
   --card-padding: var(--primitive-space-4);
   --card-shadow: var(--shadow-rest);
 
-  --button-primary-bg: var(--color-primary);
-  --button-primary-bg-hover: var(--color-primary-hover);
-  --button-primary-fg: var(--color-primary-foreground);
-  --button-secondary-bg: var(--color-surface-raised);
+  --button-primary-bg: linear-gradient(145deg, var(--color-action-start), var(--color-action-end));
+  --button-primary-bg-hover: linear-gradient(145deg, var(--color-action-hover-start), var(--color-action-hover-end));
+  --button-primary-fg: var(--color-action-foreground);
+  --button-primary-affordance-bg: var(--color-action-affordance);
+  --button-primary-affordance-fg: var(--color-action-affordance-foreground);
+  --button-primary-affordance-shadow: var(--shadow-action-affordance);
+  --button-secondary-bg: linear-gradient(145deg, var(--color-key-start), var(--color-key-end));
   --button-secondary-fg: var(--color-text-strong);
-  --button-secondary-border: var(--color-border-strong);
-  --button-disabled-bg: var(--color-disabled);
+  --button-secondary-border: var(--color-key-border);
+  --button-secondary-shadow: var(--shadow-key-rest);
+  --button-secondary-shadow-pressed: var(--shadow-key-pressed);
+  --button-disabled-bg: linear-gradient(145deg, var(--color-disabled), var(--color-surface-soft));
   --button-disabled-fg: var(--color-disabled-text);
+  --button-disabled-shadow: var(--shadow-sunken);
+  --button-disabled-affordance-bg: linear-gradient(145deg, var(--color-key-start), var(--color-key-end));
+  --button-disabled-affordance-border: var(--color-key-border);
+  --button-disabled-affordance-shadow: var(--shadow-key-rest);
+  --button-disabled-affordance-fg: var(--color-disabled-affordance);
   --button-height: var(--primitive-size-cta);
   --button-radius: var(--primitive-radius-xl);
+  --button-font-size: var(--primitive-font-size-body-lg);
   --button-padding-x: var(--primitive-space-5);
-  --button-shadow: var(--shadow-raised);
-  --button-shadow-pressed: var(--shadow-pressed);
+  --button-padding-start: calc(var(--primitive-space-6) + var(--primitive-space-0-5));
+  --button-padding-end: calc(var(--primitive-space-2) + var(--primitive-space-0-5));
+  --button-affordance-size: var(--primitive-size-cta-affordance);
+  --button-affordance-padding: calc(var(--primitive-space-2) + var(--primitive-border-thin));
+  --button-shadow: var(--shadow-action-rest);
+  --button-shadow-pressed: var(--shadow-action-pressed);
+  --button-secondary-height: var(--primitive-size-control);
+  --button-secondary-radius: var(--radius-control);
+  --button-press-y: var(--primitive-border-thin);
+  --button-bleed: var(--primitive-space-3);
 
-  --choice-bg: var(--color-surface-raised);
+  --choice-bg: linear-gradient(145deg, var(--color-key-start), var(--color-key-end));
   --choice-fg: var(--color-text);
-  --choice-border: var(--color-border-strong);
+  --choice-border: var(--color-key-border);
+  --choice-shadow: var(--shadow-key-rest);
+  --choice-shadow-pressed: var(--shadow-key-pressed);
+  --choice-shadow-selected: var(--shadow-key-sunken);
+  --choice-marker-bg: var(--color-surface-soft);
+  --choice-marker-shadow: var(--shadow-sunken);
   --choice-selected-bg: var(--color-selection-soft);
   --choice-selected-border: var(--color-selection);
   --choice-selected-fg: var(--color-selection);
@@ -338,8 +395,8 @@
   --choice-correct-fg: var(--color-success);
   --choice-incorrect-bg: var(--color-danger-soft);
   --choice-incorrect-fg: var(--color-danger);
-  --choice-radius: var(--radius-control);
-  --choice-min-height: var(--primitive-size-control);
+  --choice-radius: var(--primitive-radius-md);
+  --choice-min-height: calc(var(--primitive-size-control) + var(--primitive-space-1));
 
   --badge-bg: var(--color-accent-soft);
   --badge-fg: var(--color-warning);

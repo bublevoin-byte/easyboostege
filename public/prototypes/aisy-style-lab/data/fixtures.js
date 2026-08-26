@@ -63,7 +63,7 @@ export const LAB_FIXTURE = deepFreeze({
       { id: 'recap', label: 'Разбор', detail: '5 минут', state: 'locked' },
     ],
     cta: { label: 'Начать маршрут', target: 'task' },
-    resumeCta: { label: 'Продолжить · 8 минут осталось', target: 'task' },
+    resumeCta: { label: 'Продолжить · 8 минут', target: 'task' },
     rhythm: { completedDays: 3, goalDays: 5, label: '3 из 5 дней на этой неделе' },
   },
   task: {
@@ -97,7 +97,7 @@ export const LAB_FIXTURE = deepFreeze({
     reusableRule: 'If + had done, … would have done',
     example: 'If Kate had left earlier, she would have caught the train.',
     evidence: { kind: 'independent', label: 'Самостоятельная попытка', masteryDelta: 3 },
-    cta: { label: 'Продолжить маршрут', target: 'progress' },
+    cta: { label: 'Продолжить', target: 'progress' },
   },
   progress: {
     state: 'updated',
