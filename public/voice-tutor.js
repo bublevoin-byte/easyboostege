@@ -100,16 +100,24 @@ export async function registerVoiceTutorError({ module, itemId, revision, learne
   return { attemptId, revision };
 }
 
-export async function registerVoiceTutorContextResult({ module, setId, revision, answers } = {}) {
+export async function registerVoiceTutorContextResult({ module, setId, revision, answers } = {}, authority = {}, isCurrent) {
   if (!canStartVoiceTutor() || !browser.crypto?.randomUUID) return null;
+  const owner = String(authority.username || authority.owner || '').trim();
+  if (!owner) throw Object.assign(new Error('Expected account is required.'), { status: 400, code: 'EXPECTED_OWNER_REQUIRED' });
+  if (typeof isCurrent === 'function' && !isCurrent()) return null;
   const result = await api().post('/api/v1/voice-tutor/context-attempts', {
     attemptId: browser.crypto.randomUUID(),
     module,
     setId,
     revision,
     answers,
-  });
+  }, { 'X-EasyBoost-Expected-Owner': owner });
+  if (typeof api().responseOwner !== 'function' || api().responseOwner(result) !== owner) {
+    throw Object.assign(new Error('Authenticated account changed.'), { status: 409, code: 'OWNER_CHANGED' });
+  }
+  if (typeof isCurrent === 'function' && !isCurrent()) return null;
   for (const error of result?.errors || []) {
+    if (typeof isCurrent === 'function' && !isCurrent()) return null;
     const slot = browser.document?.getElementById(voiceTutorSlotId(error.item_id));
     if (slot) slot.innerHTML = voiceTutorButton({ attemptId: error.attempt_id, revision: error.revision });
   }

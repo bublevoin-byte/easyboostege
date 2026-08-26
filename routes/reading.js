@@ -1,4 +1,5 @@
 import express from 'express';
+import { bindResponseOwner, requireExpectedOwner } from '../middleware/expected-owner.js';
 
 import {
   buildReadingReport,
@@ -19,6 +20,8 @@ export function createReadingRoutes({
     if (!['base', 'expanded'].includes(scope)) {
       return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Неизвестный вид отчёта Reading.' } });
     }
+    if (!requireExpectedOwner(req, res)) return undefined;
+    bindResponseOwner(res, req.user);
     try {
       res.setHeader('Cache-Control', 'no-store');
       const subscription = await db.getSub(req.user);

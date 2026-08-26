@@ -1,6 +1,8 @@
 #frame {
   inline-size: min(100vw, var(--aisy-phone-inline-size));
   max-inline-size: var(--aisy-phone-inline-size);
+  height: min(844px, 100vh);
+  block-size: min(844px, 100vh);
   margin-inline: auto;
   background: var(--aisy-phone-background);
   box-shadow: var(--aisy-phone-shadow);
@@ -14,7 +16,7 @@
 /* The legacy inline shell declares a fixed physical height. Mirror its narrow-screen
    override with a logical size too, so viewport rotations/resizes cannot revive 844px. */
 @media (max-width: 430px) {
-  #frame { block-size: 100dvh; }
+  #frame { height: 100vh; block-size: 100vh; }
 }
 
 .aisy-visually-hidden {
@@ -34,7 +36,8 @@
    heading nor the action dock is clipped outside the document. The screen remains the scroller. */
 @media (max-height: 600px) {
   #frame {
-    block-size: 100dvh;
+    height: 100vh;
+    block-size: 100vh;
     border-radius: 0;
   }
 }

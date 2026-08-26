@@ -193,6 +193,8 @@
   function ownerAuthorityCurrent(ownerKey=owner){return ownerAuthorityMatches(ownerKey,ownerAuthGeneration)}
   function ownerBoundGeneration(ownerKey=owner){return ownerKey===owner&&Number.isSafeInteger(ownerAuthGeneration)
     &&durableOwnerAuthorityMatches(ownerKey,ownerAuthGeneration)?ownerAuthGeneration:null}
+  function currentOwnerBinding(){const generation=ownerBoundGeneration(owner);return owner&&Number.isSafeInteger(generation)
+    ?{username:owner,generation:generation}:null}
   function setOwner(value){
     const nextOwner=normalizedOwner(value);
     if(nextOwner!==owner)baseline={};
@@ -591,7 +593,7 @@
     return Boolean(owner)&&!isOwnerDeleted(owner)&&ownerAuthorityCurrent(owner)&&retryable.length+slots<=MAX_PENDING_GRAMMAR_EVENTS
   }
   global.EasyBoostSync=Object.freeze({
-    queueProgress:queueProgress,saveProgress:saveProgress,saveModuleAttempt:saveModuleAttempt,saveGrammarMasteryEvent:saveGrammarMasteryEvent,saveGrammarMasteryEvents:saveGrammarMasteryEvents,setBaseline:setBaseline,setOwner:setOwner,confirmOwner:confirmOwner,adoptOwner:adoptOwner,clearOwner:clearOwner,deleteOwner:deleteOwner,isOwnerDeleted:isOwnerDeleted,ownerAuthSnapshot:ownerAuthSnapshot,ownerBoundGeneration:ownerBoundGeneration,withOwnerIncarnationLock:withOwnerIncarnationLock,withDurableOwnerIncarnationLock:withDurableOwnerIncarnationLock,
+    queueProgress:queueProgress,saveProgress:saveProgress,saveModuleAttempt:saveModuleAttempt,saveGrammarMasteryEvent:saveGrammarMasteryEvent,saveGrammarMasteryEvents:saveGrammarMasteryEvents,setBaseline:setBaseline,setOwner:setOwner,confirmOwner:confirmOwner,adoptOwner:adoptOwner,clearOwner:clearOwner,deleteOwner:deleteOwner,isOwnerDeleted:isOwnerDeleted,ownerAuthSnapshot:ownerAuthSnapshot,ownerBoundGeneration:ownerBoundGeneration,currentOwnerBinding:currentOwnerBinding,withOwnerIncarnationLock:withOwnerIncarnationLock,withDurableOwnerIncarnationLock:withDurableOwnerIncarnationLock,
     flush:flush,pendingModules:pendingModules,pendingModuleAttempts:pendingModuleAttempts,pendingGrammarMasteryEvents:pendingGrammarMasteryEvents,canQueueGrammarMasteryEvent:canQueueGrammarMasteryEvent,onGrammarMasterySync:onGrammarMasterySync,onOwnerDeleted:onOwnerDeleted,
     hasPending:function(){return Object.keys(pendingModules()).length>0
       ||ownerAttempts(readAttemptStore()).some(function(item){return attemptGeneration(item)===ownerAuthGeneration})

@@ -73,13 +73,17 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-function recorderHarness(active = null) {
+function recorderHarness(active = null, options = {}) {
   const adaptive = [];
   const ordinary = [];
+  const ordinaryGuards = [];
+  let owner = Object.prototype.hasOwnProperty.call(options, 'owner') ? options.owner : { username: 'owner-a', generation: 1 };
   const window = {
     EasyBoostSync: {
-      async saveModuleAttempt(attempt) {
+      currentOwnerBinding() { return owner ? { ...owner } : null; },
+      async saveModuleAttempt(attempt, guard) {
         ordinary.push(attempt);
+        ordinaryGuards.push(guard);
         return false;
       },
     },
@@ -88,16 +92,25 @@ function recorderHarness(active = null) {
     window,
     GRAMMAR_CATALOG, GRAMMAR_CATALOG_V1, GRAMMAR_CATALOG_V2, getGrammarCatalogRuntime, validateGeneratedGrammarSupplement,
     GRAMMAR_PRACTICE_MODES, isGrammarErrorCode, parseGrammarConfusionPair,
-    loadAdaptiveSessionRuntime: async () => ({
+    loadAdaptiveSessionRuntime: async () => {
+      if (options.runtimeBarrier) await options.runtimeBarrier;
+      return ({
       adaptiveRuntimeSnapshot: () => ({ active }),
       completeAdaptiveModuleActivity: async (completion) => {
         adaptive.push(completion);
         return { execution: { revision: 2 } };
       },
-    }),
+      });
+    },
     Object, Array, String, Number, Boolean, JSON, Math, Promise, RegExp, Error, TypeError,
   });
-  return { recorder: window.__learningActivityRecorderTest, adaptive, ordinary };
+  return {
+    recorder: window.__learningActivityRecorderTest,
+    adaptive,
+    ordinary,
+    ordinaryGuards,
+    resetOwner(nextOwner) { owner = nextOwner ? { ...nextOwner } : null; },
+  };
 }
 
 function grammarScreenHarness(options = {}) {
@@ -162,6 +175,7 @@ function grammarScreenHarness(options = {}) {
   const window = {
     addEventListener() {},
     EasyBoostSync: {
+      currentOwnerBinding() { return owner ? { ...owner } : null; },
       async saveModuleAttempt(attempt) {
         ordinary.push(JSON.parse(JSON.stringify(attempt)));
         return true;
@@ -1475,6 +1489,52 @@ test('ordinary completion creates one bounded owner-synced attempt with the supp
     metadata: { mode: 'topic_practice', source: 'builtin', helpUsed: false, hintsUsed: 0 },
   });
   assert.equal(harness.ordinary[1].id, ATTEMPT_ID, 'retry must preserve the exact UUID');
+});
+
+test('a lazy runtime load cannot queue owner A evidence after the learner switches to owner B', async () => {
+  const runtime = deferred();
+  const harness = recorderHarness(null, { runtimeBarrier: runtime.promise });
+  const pending = harness.recorder.recordCompletedLearningActivity({
+    id: ATTEMPT_ID,
+    module: 'listening',
+    activityId: 'listening_interview',
+    score: 3,
+    maxScore: 4,
+    durationMs: 42_000,
+    metadata: { mode: 'listening_interview', source: 'catalog' },
+  });
+
+  harness.resetOwner({ username: 'owner-b', generation: 2 });
+  runtime.resolve();
+
+  assert.deepEqual(JSON.parse(JSON.stringify(await pending)), {
+    path: 'blocked', reason: 'owner_changed', recorded: false,
+  });
+  assert.equal(harness.adaptive.length, 0);
+  assert.equal(harness.ordinary.length, 0,
+    'owner A evidence cannot be enqueued in owner B offline storage');
+});
+
+test('a completion captured without an owner cannot be adopted by a later owner', async () => {
+  const runtime = deferred();
+  const harness = recorderHarness(null, { owner: null, runtimeBarrier: runtime.promise });
+  const pending = harness.recorder.recordCompletedLearningActivity({
+    id: ATTEMPT_ID,
+    module: 'listening',
+    activityId: 'listening_interview',
+    score: 3,
+    maxScore: 4,
+    durationMs: 42_000,
+    metadata: { mode: 'listening_interview', source: 'catalog' },
+  });
+
+  harness.resetOwner({ username: 'owner-b', generation: 2 });
+  runtime.resolve();
+  assert.deepEqual(JSON.parse(JSON.stringify(await pending)), {
+    path: 'blocked', reason: 'owner_unavailable', recorded: false,
+  });
+  assert.equal(harness.adaptive.length, 0);
+  assert.equal(harness.ordinary.length, 0, 'anonymous evidence cannot enter owner B storage');
 });
 
 test('an exact active adaptive block uses only its execution-claim path', async () => {

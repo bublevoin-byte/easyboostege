@@ -200,17 +200,24 @@ test('reading and listening result screens register completed canonical sets bef
   assert.match(readingSource, /import \{prepareVoiceTutorContextResult,registerVoiceTutorContextResult\} from '\.\.\/voice-tutor-loader\.js'/u);
   assert.match(readingSource, /readingModule\.voiceSet\(item\.set\)/u);
   assert.match(readingSource, /function renderFullResult\(\)[\s\S]*KINDS\.map[\s\S]*readingModule\.voiceSet[\s\S]*prepareVoiceTutorContextResult[\s\S]*KINDS\.forEach[\s\S]*registerVoiceTutorContextResult/u);
-  assert.match(readingSource, /function renderTrainingResult\(\)[\s\S]*prepareVoiceTutorContextResult[\s\S]*registerVoiceTutorContextResult\(voiceResult\)/u);
+  assert.match(readingSource, /function renderTrainingResult\(\)[\s\S]*prepareVoiceTutorContextResult[\s\S]*registerVoiceTutorContextResult\(voiceResult,resultAuthority,[\s\S]*readingRequestCurrent/u);
   assert.doesNotMatch(readingSource, /generateAiContent\('reading_questions'/u);
 
   assert.match(listeningSource, /import \{prepareVoiceTutorContextResult,registerVoiceTutorContextResult\} from '\.\.\/voice-tutor-loader\.js'/u);
   assert.match(listeningSource, /listening\.alex-swimming\.reason/u);
   assert.match(listeningSource, /listening\.exam\.interview\.alex/u);
-  assert.match(listeningSource, /generateAiContent\('listening_interview'\)[\s\S]*d\.voice_tutor[\s\S]*voice:\{id:String\(voice\.item_ids\[i\]\),revision:1\}/u);
-  assert.match(listeningSource, /function lExamFinish\(\)[\s\S]*prepareVoiceTutorContextResult[\s\S]*registerVoiceTutorContextResult\(voiceResult\)/u);
-  assert.match(listeningSource, /function lIqCheck\(\)[\s\S]*prepareVoiceTutorContextResult[\s\S]*registerVoiceTutorContextResult\(voiceResult\)/u);
+  assert.match(listeningSource, /generate\('listening_interview'\)[\s\S]*d\.voice_tutor[\s\S]*voice:\{id:String\(voice\.item_ids\[i\]\),revision:1\}/u);
+  assert.match(listeningSource, /function lExamFinish\(\)[\s\S]*prepareVoiceTutorContextResult[\s\S]*registerVoiceTutorContextResult\(voiceResult,session\.authority,[\s\S]*lRequestCurrent/u);
+  assert.match(listeningSource, /function lIqCheck\(\)[\s\S]*prepareVoiceTutorContextResult[\s\S]*registerVoiceTutorContextResult\(voiceResult,session\.authority,[\s\S]*L_CONTEXT_RESULT===session[\s\S]*lSessionCurrent/u);
 
   for (const screenSource of [readingSource, listeningSource]) {
     assert.doesNotMatch(screenSource, /sourceExcerpt|transcriptSegment|reference:/u);
   }
+});
+
+test('lazy context-result registration remains bound to the captured owner and current result view', () => {
+  assert.match(loaderSource, /registerVoiceTutorContextResult\(details,authority,isCurrent\)[\s\S]*await loadVoiceTutor\(\)[\s\S]*!isCurrent\(\)[\s\S]*runtime\.registerVoiceTutorContextResult\(details,authority,isCurrent\)/u);
+  assert.match(source, /registerVoiceTutorContextResult\([^)]*authority[^)]*isCurrent\)[\s\S]*X-EasyBoost-Expected-Owner/u);
+  assert.match(source, /responseOwner\(result\) !== owner/u);
+  assert.match(source, /for \(const error of result\?\.errors \|\| \[\]\)[\s\S]*!isCurrent\(\)[\s\S]*voiceTutorSlotId/u);
 });

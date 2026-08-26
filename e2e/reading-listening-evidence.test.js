@@ -4,9 +4,10 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import jwt from 'jsonwebtoken';
 import { chromium } from 'playwright';
-import { availablePort, chromeExecutable, stopProcess, waitForReady } from './browser-server-harness.js';
+import {
+  availablePort, chromeExecutable, createActiveSubscriptionPage, stopProcess, waitForReady,
+} from './browser-server-harness.js';
 
 const projectDirectory = fileURLToPath(new URL('..', import.meta.url));
 const serverPath = fileURLToPath(new URL('../server.js', import.meta.url));
@@ -57,19 +58,10 @@ try {
   await waitForReady(baseUrl, child, output);
 
   browser = await chromium.launch({ headless: true, executablePath: await chromeExecutable() });
-  const context = await browser.newContext({
-    viewport: { width: 390, height: 844 },
-    reducedMotion: 'reduce',
-    serviceWorkers: 'block',
+  const { context, page } = await createActiveSubscriptionPage(browser, {
+    baseUrl, username: 'evidence-user', jwtSecret,
+    contextOptions: { viewport: { width: 390, height: 844 }, reducedMotion: 'reduce', serviceWorkers: 'block' },
   });
-  await context.addCookies([{
-    name: 'eb_token',
-    value: jwt.sign({ u: 'evidence-user' }, jwtSecret, { expiresIn: '1h' }),
-    url: baseUrl,
-    httpOnly: true,
-    sameSite: 'Lax',
-  }]);
-  const page = await context.newPage();
   const pageErrors = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
   await page.goto(baseUrl, { waitUntil: 'networkidle' });
@@ -91,7 +83,7 @@ try {
       .selectOption(String(readingSet.answers[index]));
   }
   await context.setOffline(true);
-  await page.getByRole('button', { name: 'Завершить тренировку', exact: true }).press('Enter');
+  await page.locator('#r_action_dock [data-reading-action="submit-training"]').press('Enter');
   try {
     await page.waitForFunction(() => window.EasyBoostSync.pendingModuleAttempts().length === 1,
       null, { timeout: 5_000 });
@@ -136,7 +128,7 @@ try {
   ));
   await page.locator('button[onclick="lMtCheck()"]').press('Enter');
   assert.equal((await matchingResponsePromise).status(), 201);
-  await page.locator('button[onclick="lMt()"]').first().press('Enter');
+  await page.getByRole('button', { name: 'Следующий комплект' }).press('Enter');
   const secondMatchingId = await page.evaluate(() => window.S.listeningPilotHistory.lastSelected.matching.id);
   assert.notEqual(secondMatchingId, firstMatchingId);
   await page.locator('button[onclick="lHub()"]').last().press('Enter');
@@ -144,7 +136,7 @@ try {
   await page.locator('button[onclick="lTf()"]').first().press('Enter');
   await page.locator('#ltf_row_6').waitFor({ state: 'visible', timeout: 5_000 });
   const firstTrueFalseId = await page.evaluate(() => window.S.listeningPilotHistory.lastSelected.true_false.id);
-  await page.getByText('Тренировочная синтезированная озвучка', { exact: true })
+  await page.getByText('Источник определится при запуске. Готовая запись сохраняется после первого успешного использования.', { exact: true })
     .waitFor({ state: 'visible', timeout: 5_000 });
   for (let index = 0; index < 7; index += 1) {
     await page.locator(`#ltf_row_${index} button`).first().press('Enter');
@@ -152,10 +144,10 @@ try {
   const responsePromise = page.waitForResponse((response) => (
     response.request().method() === 'POST' && response.url().endsWith('/api/v1/module-attempts')
   ));
-  await page.getByRole('button', { name: 'Проверить', exact: true }).press('Enter');
+  await page.locator('#l_action_dock .learning-primary').press('Enter');
   assert.equal((await responsePromise).status(), 201);
 
-  await page.locator('button[onclick="lTf()"]').first().press('Enter');
+  await page.getByRole('button', { name: 'Следующий комплект' }).press('Enter');
   const secondTrueFalseId = await page.evaluate(() => window.S.listeningPilotHistory.lastSelected.true_false.id);
   assert.notEqual(secondTrueFalseId, firstTrueFalseId);
   await page.locator('button[onclick="lHub()"]').last().press('Enter');
@@ -177,10 +169,10 @@ try {
   const interviewResponsePromise = page.waitForResponse((response) => (
     response.request().method() === 'POST' && response.url().endsWith('/api/v1/module-attempts')
   ));
-  await page.getByRole('button', { name: 'Проверить', exact: true }).press('Enter');
+  await page.locator('#l_action_dock .learning-primary').press('Enter');
   assert.equal((await interviewResponsePromise).status(), 201);
-  await page.getByText('ТРАНСКРИПТ · тапни слово для перевода').waitFor({ state: 'visible', timeout: 5_000 });
-  await page.locator('button[onclick="lIq()"]').first().press('Enter');
+  await page.getByRole('heading', { name: 'Транскрипт · нажми слово для перевода' }).waitFor({ state: 'visible', timeout: 5_000 });
+  await page.getByRole('button', { name: 'Следующий комплект' }).press('Enter');
   const secondInterviewId = await page.evaluate(() => window.S.listeningPilotHistory.lastSelected.interview.id);
   assert.notEqual(secondInterviewId, firstInterviewId);
 

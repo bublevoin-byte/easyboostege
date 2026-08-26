@@ -288,6 +288,7 @@ function setAccessBackgroundInert(inert){
   document.querySelectorAll('.screen,#tabbar,#genfab,#learnSheet,#aisy-shell-nav,#aisy-shell-back,#asya-launcher').forEach(function(element){
     const privateControl=element.matches('#tabbar,#aisy-shell-nav,#aisy-shell-back,#asya-launcher');
     element.inert=Boolean(inert||privateControl&&document.body.dataset.learningAccess!=='active'
+      ||!inert&&privateControl&&element.hidden
       ||!inert&&element.matches('[data-first-launch-screen][hidden]'))
   });
 }
@@ -995,7 +996,8 @@ function rSync(){if(!S)return;var r=rSt();var stats=readingModule.summary(r),acc
   S.prog=S.prog||{};S.prog.read=acc;
   setTxt('sub_read',r.texts?('текстов: '+r.texts+' · точность '+acc+'%'):'начни с первого текста');
   setTxt('r_sumline',r.texts?('Прочитано '+r.texts+' · точность '+acc+'%'):'Два тренажёра — как на экзамене');
-  var bar=document.getElementById('r_bar');if(bar)bar.style.width=Math.max(2,acc)+'%'}
+  var bar=document.getElementById('r_bar');if(bar)bar.style.width=Math.max(2,acc)+'%';
+  var progress=bar&&bar.parentElement;if(progress)progress.setAttribute('aria-valuenow',String(acc))}
 function rEsc(w){return ui.escapeHtml(w)}
 function rWordsHtml(text){var sentences=String(text||'').match(/[^.!?]+(?:[.!?]+(?=\s|$)|$)\s*/gu)||[String(text||'')];
   return sentences.map(function(sentence){var context=sentence.trim(),encoded=encodeURIComponent(context).replace(/'/g,'%27');
@@ -1003,9 +1005,10 @@ function rWordsHtml(text){var sentences=String(text||'').match(/[^.!?]+(?:[.!?]+
       if(/^\s+$/.test(tok))return tok;
       var m=tok.match(/[A-Za-z][A-Za-z'-]*/);if(!m)return rEsc(tok);
       var clean=m[0].toLowerCase();
-      var st=S.wstatus&&S.wstatus[clean];
-      var bg=st==='learn'?'background:#FFEDE4;border-radius:5px;':(st==='know'?'background:#EAF7F0;border-radius:5px;':'');
-      return '<button type="button" class="clk iconbtn" data-w="'+clean+'" data-context="'+encoded+'" onclick="trWord(this.dataset.w,this.dataset.context)" style="cursor:pointer;'+bg+'">'+rEsc(tok)+'</button>'}).join('')
+      var st=S.wstatus&&S.wstatus[clean],stateClass='',stateLabel='';
+      if(st==='learn'){stateClass=' reading-word--learning';stateLabel=', в изучении'}
+      else if(st==='know'){stateClass=' reading-word--known';stateLabel=', знакомое слово'}
+      return '<button type="button" class="clk iconbtn reading-word'+stateClass+'" data-w="'+clean+'" data-context="'+encoded+'" data-word-state="'+(st||'new')+'"'+(stateLabel?' aria-label="'+rEsc(m[0]+stateLabel)+'"':'')+' onclick="trWord(this.dataset.w,this.dataset.context)">'+rEsc(tok)+'</button>'}).join('')
   }).join('')}
 /* FAB прячем и на чтении; синк при старте */
 registerRouteHook(function(id){if(id==='scr7'){var f=document.getElementById('genfab');if(f)f.style.display='none'}});
@@ -1020,8 +1023,11 @@ function lSync(){if(!S)return;var r=lSt(),sum=listeningModule.summary(r),acc=sum
   S.prog=S.prog||{};S.prog.listen=acc;
   setTxt('sub_listen',r.done?('подходов: '+r.done+' · точность '+acc+'%'):'начни с первого диалога');
   setTxt('l_sumline',r.done?('Пройдено '+r.done+' · точность '+acc+'%'):'Три формата — как на экзамене');
-  var bar=document.getElementById('l_bar');if(bar)bar.style.width=Math.max(2,acc)+'%'}
+  var bar=document.getElementById('l_bar');if(bar)bar.style.width=Math.max(2,acc)+'%';
+  var progress=bar&&bar.parentElement;if(progress)progress.setAttribute('aria-valuenow',String(acc))}
 function lStopFallback(){if(L_FALLBACK_FINISH){var finish=L_FALLBACK_FINISH;L_FALLBACK_FINISH=null;finish(false)}try{speechSynthesis.cancel()}catch(e){}}
+function lPauseFallback(){try{if(!('speechSynthesis'in window)||!speechSynthesis.speaking||speechSynthesis.paused)return false;speechSynthesis.pause();return true}catch(e){return false}}
+function lResumeFallback(){try{if(!('speechSynthesis'in window)||!speechSynthesis.paused)return false;speechSynthesis.resume();return true}catch(e){return false}}
 function lVoice(i){try{var vs=(speechSynthesis.getVoices()||[]).filter(function(v){return /^en[-_]/i.test(v.lang)});
   if(!vs.length)return null;
   var gb=vs.filter(function(v){return /GB/i.test(v.lang)});
@@ -1042,24 +1048,23 @@ function lPlayRawFallback(lines){
     try{lPlayBtn('play')}catch(e){}
     try{us.forEach(function(u){speechSynthesis.speak(u)})}catch(e){finish(false)}
   })}
-var L_PLAYSVG='<svg width="17" height="17" viewBox="0 0 24 24" fill="#fff"><path d="M7 5v14l12-7z"/></svg>';
-function lPlayBtn(st){var b=document.getElementById('l_playbtn'),ic=document.getElementById('l_playic'),tx=document.getElementById('l_playtx');
+var L_PLAYSVG='<svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M7 5v14l12-7z"/></svg>';
+function lPlayBtn(st){var b=document.getElementById('l_playbtn'),ic=document.getElementById('l_playic'),tx=document.getElementById('l_playtx'),status=document.getElementById('l_audio_status'),pause=document.getElementById('l_pausebtn');
   if(!b||!ic||!tx)return;
-  if(st==='load'){b.style.animation='lpulse 1.1s ease-in-out infinite';b.style.pointerEvents='none';
-    ic.innerHTML='<span style="display:block;width:18px;height:18px;border-radius:50%;border:2.5px solid rgba(255,255,255,.4);border-top-color:#fff;animation:lspin .8s linear infinite;"></span>';
-    tx.textContent='Готовлю озвучку…'}
-  else if(st==='play'){b.style.animation='';b.style.pointerEvents='';
-    ic.innerHTML='<span style="display:flex;align-items:flex-end;gap:2.5px;height:18px;">'
-      +[0,1,2,3].map(function(i){return '<span style="width:3.5px;height:18px;border-radius:2px;background:#fff;transform-origin:bottom;animation:leq '+(0.7+i*0.13)+'s ease-in-out infinite;"></span>'}).join('')+'</span>';
-    tx.textContent='Играет'}
-  else{b.style.animation='';b.style.pointerEvents='';ic.innerHTML=L_PLAYSVG;tx.textContent='Слушать'}}
+  var host=b.closest('[data-audio-state]');
+  function pauseState(active,disabled){if(!pause)return;pause.disabled=Boolean(disabled);pause.setAttribute('aria-pressed',String(Boolean(active)));pause.setAttribute('aria-label',active?'Продолжить воспроизведение':'Приостановить воспроизведение');pause.textContent=active?'▶':'Ⅱ'}
+  if(st==='load'){if(host)host.dataset.audioState='buffering';b.disabled=true;b.setAttribute('aria-busy','true');pauseState(false,true);ic.textContent='…';tx.textContent='Загружаем запись…';if(status)status.textContent='Буферизация'}
+  else if(st==='play'){if(host)host.dataset.audioState='playing';b.disabled=false;b.removeAttribute('aria-busy');pauseState(false,false);ic.textContent='●';tx.textContent='Играет';if(status)status.textContent='Играет'}
+  else if(st==='pause'){if(host)host.dataset.audioState='paused';b.disabled=false;b.removeAttribute('aria-busy');pauseState(true,false);ic.textContent='Ⅱ';tx.textContent='Приостановлено';if(status)status.textContent='Приостановлено'}
+  else if(st==='error'){if(host)host.dataset.audioState='error';b.disabled=false;b.removeAttribute('aria-busy');pauseState(false,true);ic.textContent='!';tx.textContent='Повторить';if(status)status.textContent='Ошибка воспроизведения'}
+  else{if(host)host.dataset.audioState='stopped';b.disabled=false;b.removeAttribute('aria-busy');pauseState(false,true);ic.innerHTML=L_PLAYSVG;tx.textContent='Слушать';if(status)status.textContent='Остановлено'}}
 function lAudioStatus(status){var el=document.getElementById('l_audio_source');if(!el)return;
-  if(status==='static'){el.textContent='Готовая экзаменационная запись';el.style.color='#1D7F4A';return}
-  if(status==='assisted-slow'){el.textContent='Замедленная тренировочная синтезированная озвучка · с помощью';el.style.color='#A56000';return}
-  el.textContent=status==='fallback-error'?'Запись недоступна · тренировочная синтезированная озвучка':'Тренировочная синтезированная озвучка';
-  el.style.color='#A56000'}
+  var host=el.closest('[data-audio-state]');if(host)host.dataset.audioSource=status;
+  if(status==='static'){el.textContent='Готовая экзаменационная запись';return}
+  if(status==='assisted-slow'){el.textContent='Замедленная тренировочная синтезированная озвучка · с помощью';return}
+  el.textContent=status==='fallback-error'?'Статическая запись недоступна · синтезированная озвучка с помощью':'Синтезированная озвучка · с помощью'}
 /* Переключение замедленной озвучки: переменную модуля ни разметка, ни чанк присвоить не могут. */
-function lToggleSlow(button){LSLOW=!LSLOW;button.style.background=LSLOW?'#FFEDE4':'#fff';button.style.color=LSLOW?'#C2421B':'#6A6E75'}
+function lToggleSlow(button){LSLOW=!LSLOW;button.classList.toggle('is-selected',LSLOW);button.setAttribute('aria-pressed',String(LSLOW))}
 function lSetSlow(value){LSLOW=Boolean(value)}
 /* FAB прячем, звук глушим при уходе, синк при старте */
 registerRouteHook(function(id){lStop();if(id==='scr4'){var f=document.getElementById('genfab');if(f)f.style.display='none'}});
@@ -1114,6 +1119,8 @@ configureTts({
   apiGetBlob:apiGetBlob,
   lPlayBtn:lPlayBtn,
   lStopFallback:lStopFallback,
+  lPauseFallback:lPauseFallback,
+  lResumeFallback:lResumeFallback,
   lPlayRawFallback:lPlayRawFallback,
   wSpeakFallback:wSpeakFallback,
   serverAvailable:function(){return Boolean(SRV&&TOKEN)},

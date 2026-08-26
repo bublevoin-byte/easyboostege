@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import test from 'node:test';
 
-const [screen, html, adaptiveLaunch, app, api, auth] = await Promise.all([
+const [screen, html, styles, adaptiveLaunch, app, api, auth] = await Promise.all([
   fs.readFile(new URL('../public/screens/reading.js', import.meta.url), 'utf8'),
   fs.readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
+  fs.readFile(new URL('../public/reading-listening.css', import.meta.url), 'utf8'),
   fs.readFile(new URL('../public/adaptive-activity-launch.js', import.meta.url), 'utf8'),
   fs.readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
   fs.readFile(new URL('../public/api.js', import.meta.url), 'utf8'),
@@ -43,15 +44,16 @@ test('Reading 2 exposes accessible status, review and responsive styling contrac
   assert.match(screen, /Правильный ответ/u);
   assert.match(screen, /Цитата-доказательство/u);
   assert.match(screen, /Объяснение/u);
-  assert.match(html, /\.reading2\b/u);
-  assert.match(html, /\.reading2[^}]*font-size:16px/su);
-  assert.match(html, /\.reading2[^}]*overflow-x:hidden/su);
-  assert.match(html, /\.reading-text[^}]*max-width:7[02]ch/su);
-  assert.match(html, /\.reading-(?:action|answer)[^}]*min-height:4[48]px/su);
-  assert.match(html, /\.reading2\{[^}]*max-width:100%/su);
-  assert.doesNotMatch(html, /@media\(min-width:[^)]+\)[^{]*\{[^}]*reading/su,
+  assert.match(html, /<link rel="stylesheet" href="\/reading-listening\.css">/u);
+  assert.match(styles, /\.reading2\b/u);
+  assert.match(styles, /\.reading2[^}]*font-size:\s*var\(--aisy-font-size-body\)/su);
+  assert.match(styles, /#scr7 #r_area\.learning-route__content[^}]*overflow-x:\s*hidden/su);
+  assert.match(styles, /\.reading-text[^}]*overflow-wrap:\s*anywhere/su);
+  assert.match(styles, /\.reading-(?:action|answer)[^}]*min-(?:block-size|height):\s*(?:48px|var\(--aisy-touch-target\))/su);
+  assert.match(styles, /\.reading2[^}]*max-inline-size:\s*100%/su);
+  assert.doesNotMatch(styles, /@media\s*\(min-width:[^)]+\)[^{]*\{[^}]*reading/su,
     'Reading must keep the portrait-phone layout instead of widening at desktop viewports');
-  assert.match(html, /@media\(prefers-reduced-motion:reduce\)[^{]*\{[^}]*reading/su);
+  assert.match(styles, /@media\s*\(prefers-reduced-motion:\s*reduce\)[^{]*\{[^}]*reading/su);
 });
 
 test('adaptive Reading launches an exact allowlisted kind and CEFR through the canonical screen seam', () => {
@@ -79,5 +81,5 @@ test('adaptive Reading cancellation reaches the fresh session fetch and releases
   assert.match(app, /async function verifyLearningAccessForLaunch\(\{signal=null\}=\{\}\)/u);
   assert.match(app, /auth\.currentSession\(\{signal,cache:'no-store'\}\)/u);
   assert.match(screen, /verifyLearningAccessForLaunch\(\{signal\}\)/u);
-  assert.match(screen, /finally\{launchPending=false\}/u);
+  assert.match(screen, /finally\{if\(launchPending===launch\)launchPending=null\}/u);
 });

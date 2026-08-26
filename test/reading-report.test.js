@@ -188,15 +188,16 @@ test('single Reading report endpoint keeps Base useful and gates expanded scope 
     server.once('error', reject);
     server.listen(0, '127.0.0.1', resolve);
   });
-  const request = (username, scope, suffix = '') => fetch(
+  const request = (username, scope, suffix = '', expectedOwner = username) => fetch(
     `http://127.0.0.1:${server.address().port}/api/v1/reading/report?scope=${scope}${suffix}`,
-    { headers: username ? { 'X-Test-User': username } : {} },
+    { headers: username ? { 'X-Test-User': username, 'X-EasyBoost-Expected-Owner': expectedOwner } : {} },
   );
   try {
     assert.equal((await request('', 'base')).status, 401);
     const baseResponse = await request(base, 'base');
     assert.equal(baseResponse.status, 200);
     assert.equal(baseResponse.headers.get('cache-control'), 'no-store');
+    assert.equal(baseResponse.headers.get('x-easyboost-response-owner'), base);
     const baseBody = await baseResponse.json();
     assert.equal(baseBody.scope, 'base');
     assert.equal(Object.hasOwn(baseBody, 'expanded'), false);
@@ -218,6 +219,9 @@ test('single Reading report endpoint keeps Base useful and gates expanded scope 
     assert.equal(expiredResponse.status, 403);
     assert.equal((await expiredResponse.json()).error.code, 'READING_PREMIUM_REQUIRED');
     assert.equal((await request(base, 'unknown')).status, 400);
+    const changedOwner = await request(base, 'base', '', premium);
+    assert.equal(changedOwner.status, 409);
+    assert.equal((await changedOwner.json()).error.code, 'OWNER_CHANGED');
   } finally {
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     await repository.close();
@@ -236,9 +240,10 @@ test('Reading report production facade and route wiring stay explicit', async ()
 });
 
 test('Reading report UI has accessible loading, retry, Premium and non-colour evidence states', async () => {
-  const [screen, markup] = await Promise.all([
+  const [screen, markup, styles] = await Promise.all([
     fs.readFile(new URL('../public/screens/reading.js', import.meta.url), 'utf8'),
     fs.readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../public/reading-listening.css', import.meta.url), 'utf8'),
   ]);
   assert.match(screen, /apiGet\('\/api\/v1\/reading\/report\?scope='/u);
   assert.match(screen, /aria-live="polite"/u);
@@ -253,11 +258,11 @@ test('Reading report UI has accessible loading, retry, Premium and non-colour ev
   assert.match(screen, /Формат, ключи, количество элементов и цитаты-доказательства проверены программно/u);
   assert.match(screen, /не официальный вариант ФИПИ и не ручная проверка методистом/u);
   assert.match(screen, /Premium добавляет только/u);
-  assert.match(markup, /\.reading-report-action[^\{]*\{[^}]*min-height:44px/u);
-  assert.match(markup, /\.reading-report-table/u);
-  assert.match(markup, /\.reading-expanded-report\{display:grid/u);
-  assert.match(markup, /\.reading2\{width:100%;max-width:100%/u);
+  assert.match(styles, /\.reading-report-action[^\{]*\{[^}]*min-block-size:\s*48px/u);
+  assert.match(styles, /\.reading-report-table/u);
+  assert.match(styles, /\.reading-expanded-report[^\{]*\{[^}]*display:\s*grid/u);
+  assert.match(styles, /\.reading2[^\{]*\{[^}]*inline-size:\s*100%[^}]*max-inline-size:\s*100%/u);
   assert.doesNotMatch(markup, /#frame\.reading-expanded\{[^}]*width:min\(100vw,1100px\)/u);
-  assert.match(markup, /@media\(prefers-reduced-motion:reduce\)/u);
+  assert.match(styles, /@media\s*\(prefers-reduced-motion:\s*reduce\)/u);
   assert.doesNotMatch(screen, /localStorage.*(?:premium|entitlement)|(?:premium|entitlement).*localStorage/iu);
 });

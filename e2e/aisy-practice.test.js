@@ -211,9 +211,14 @@ try{
   const listeningRow=mobile.page.locator('.practice-row[data-skill="listening"]');
   await listeningRow.getByRole('button',{name:/Аудирование$/u}).press('Enter');
   await mobile.page.locator('#scr4.on').waitFor({state:'visible',timeout:5_000});
-  await mobile.page.getByRole('button',{name:/Экзамен · задания 1–9/u}).press('Enter');
-  await mobile.page.getByRole('button',{name:'Начать',exact:true}).press('Enter');
-  const firstListeningAnswer=mobile.page.getByRole('button',{name:'Говорящий A, утверждение 1'});
+  await mobile.page.locator('#scr4.on .listening-launch-grid').waitFor({state:'visible',timeout:8_000});
+  const listeningPrimary=mobile.page.locator('#l_action_dock .learning-primary');
+  await listeningPrimary.waitFor({state:'visible',timeout:8_000});
+  assert.match(await listeningPrimary.innerText(),/Полный раздел 1–9/u);
+  await listeningPrimary.press('Enter');
+  assert.equal(await listeningPrimary.innerText(),'Начать полный раздел');
+  await listeningPrimary.press('Enter');
+  const firstListeningAnswer=mobile.page.getByRole('radio',{name:'Говорящий A, утверждение 1'});
   await firstListeningAnswer.press('Enter');
   const listeningProgress=await mobile.page.evaluate(()=>({stage:window.LE?.stage,selections:window.LE?.selM?.slice(),startedAt:window.LE?.t0}));
   assert.equal(listeningProgress.selections[0]!==null,true);
@@ -222,7 +227,7 @@ try{
   await continuingListening.waitFor({state:'visible',timeout:5_000});
   await mobile.page.waitForTimeout(300);
   await continuingListening.getByRole('button',{name:'Продолжить: Аудирование'}).press('Enter');
-  await mobile.page.getByRole('button',{name:'Говорящий A, утверждение 1'}).waitFor({state:'visible',timeout:5_000});
+  await mobile.page.getByRole('radio',{name:'Говорящий A, утверждение 1'}).waitFor({state:'visible',timeout:5_000});
   const resumedListening=await mobile.page.evaluate(()=>({
     stage:window.LE?.stage,selections:window.LE?.selM?.slice(),startedAt:window.LE?.t0,
     pausedAt:window.LE?.pausedAt,interval:window.LE?.iv,

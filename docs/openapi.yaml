@@ -1089,6 +1089,8 @@ paths:
   /api/v1/voice-tutor/context-attempts:
     post:
       summary: Validate a completed canonical reading or listening set and record its incorrect answers
+      parameters:
+        - $ref: '#/components/parameters/ExpectedOwner'
       requestBody:
         required: true
         content:
@@ -1108,11 +1110,18 @@ paths:
                   items: { type: string, minLength: 1, maxLength: 200 }
               additionalProperties: false
       responses:
-        '201': { description: Canonical result and deterministic child error attempts recorded }
-        '200': { description: Existing idempotent result returned with the same child error attempt ids }
+        '201':
+          description: Canonical result and deterministic child error attempts recorded
+          headers:
+            X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' }
+        '200':
+          description: Existing idempotent result returned with the same child error attempt ids
+          headers:
+            X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { description: The current subscription has no voice_tutor entitlement }
-        '409': { description: Canonical set revision is stale, or the result UUID was already bound to different answers }
+        '409': { description: Expected owner changed, canonical set revision is stale, or the result UUID was already bound to different answers }
         '422': { description: Set, answer count, or an answer option does not match server-owned content }
   /api/v1/voice-tutor/sessions:
     post:
@@ -2379,6 +2388,7 @@ paths:
       summary: Build the authenticated learner's deterministic Reading report
       description: Base is available with every active subscription. Expanded adds topic, CEFR, pace, repeat-error and time-allocation projections and requires a fresh server-side voice_tutor entitlement check. The response is derived from at most 120 persisted owner-bound completed canonical Reading rows; incomplete full sections, duplicates, legacy, generated and technical attempts are excluded. No learner answer, content, Voice payload or client entitlement is accepted or returned. The response is not cacheable.
       parameters:
+        - $ref: '#/components/parameters/ExpectedOwner'
         - in: query
           name: scope
           schema: { type: string, enum: [base, expanded], default: base }
@@ -2387,12 +2397,14 @@ paths:
           description: Base or currently entitled expanded Reading report, with explicit evidence counts and confidence states
           headers:
             Cache-Control: { schema: { type: string, enum: [no-store] } }
+            X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ReadingReport' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { description: SUBSCRIPTION_REQUIRED or READING_PREMIUM_REQUIRED }
+        '409': { description: OWNER_CHANGED; expected owner does not match the authenticated account }
   /api/v1/module-attempts:
     post:
       summary: Record an idempotent learning-module result

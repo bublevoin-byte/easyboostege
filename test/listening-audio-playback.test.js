@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { configureTts, lPlayListeningSet, lPlayRaw, lStop } from '../public/tts.js';
+import { configureTts, lPause, lPlayListeningSet, lPlayRaw, lResume, lStop } from '../public/tts.js';
 
 const set = {
   id: 'listening-pilot-v1.true-false.city-library',
@@ -126,6 +126,36 @@ test('stop during manifest loading prevents delayed static playback and fallback
   assert.equal(fallbackCalls, 0);
 });
 
+test('owner or route invalidation during manifest loading cannot start static or fallback audio', async () => {
+  let releaseManifest;
+  const pendingManifest = new Promise((resolve) => { releaseManifest = resolve; });
+  const transport = [];
+  let current = true;
+  let audioCreated = 0;
+  let fallbackCalls = 0;
+  configureTts({
+    loadListeningManifest: async () => pendingManifest,
+    createAudio() { audioCreated += 1; return { pause() {}, async play() {} }; },
+    lPlayRawFallback() { fallbackCalls += 1; },
+    serverAvailable() { return false; },
+    slow() { return false; },
+    lPlayBtn(status) { transport.push(status); },
+    listeningAudioStatus() {},
+  });
+
+  const playback = lPlayListeningSet(set, lines, undefined, { isCurrent: () => current });
+  assert.equal(transport.at(-1), 'load');
+  current = false;
+  releaseManifest(manifest());
+  assert.equal(await playback, false);
+  assert.equal(audioCreated, 0);
+  assert.equal(fallbackCalls, 0);
+
+  const transportBefore = transport.length;
+  assert.equal(await lPlayListeningSet(set, lines, undefined, { isCurrent: () => false }), false);
+  assert.equal(transport.length, transportBefore, 'a stale request must not mutate the current route transport UI');
+});
+
 test('raw TTS playback resolves only after the final audio segment ends', async () => {
   let announceAudio;
   const audioCreated = new Promise((resolve) => { announceAudio = resolve; });
@@ -152,4 +182,74 @@ test('raw TTS playback resolves only after the final audio segment ends', async 
 
   audio.onended();
   assert.equal(await playback, true);
+});
+
+test('active static audio exposes real pause and resume transport states', async () => {
+  const transport = [];
+  let playCalls = 0;
+  let pauseCalls = 0;
+  configureTts({
+    loadListeningManifest: async () => manifest(),
+    createAudio() {
+      return {
+        pause() { pauseCalls += 1; },
+        async play() { playCalls += 1; },
+      };
+    },
+    lPauseFallback() { return false; },
+    lResumeFallback() { return false; },
+    lPlayRawFallback: async () => false,
+    lPlayBtn(status) { transport.push(status); },
+    lStopFallback() {},
+    serverAvailable() { return false; },
+    slow() { return false; },
+    listeningAudioStatus() {},
+  });
+
+  await lPlayListeningSet(set, lines);
+  assert.equal(lPause(), true);
+  assert.equal(transport.at(-1), 'pause');
+  assert.equal(pauseCalls, 1);
+  assert.equal(await lResume(), true);
+  assert.equal(transport.at(-1), 'play');
+  assert.equal(playCalls, 2, 'resume calls play on the paused asset');
+  lStop();
+});
+
+test('terminal assisted playback failure reaches error without turning an explicit stop into error', async () => {
+  const transport = [];
+  configureTts({
+    lPlayRawFallback: async () => false,
+    lPlayBtn(status) { transport.push(status); },
+    lStopFallback() {},
+    serverAvailable() { return false; },
+  });
+  assert.equal(await lPlayRaw(lines), false);
+  assert.equal(transport.at(-1), 'error');
+
+  let finishFallback;
+  configureTts({ lPlayRawFallback: () => new Promise((resolve) => { finishFallback = resolve; }) });
+  const stoppedPlayback = lPlayRaw(lines);
+  lStop();
+  finishFallback(false);
+  assert.equal(await stoppedPlayback, false);
+  assert.notEqual(transport.at(-1), 'error', 'user stop remains a stopped state');
+});
+
+test('generated media decode or play failure falls back and reaches terminal error', async () => {
+  const transport = [];
+  let fallbackCalls = 0;
+  configureTts({
+    apiGetBlob: async () => new Blob(['broken audio'], { type: 'audio/mpeg' }),
+    createAudio() { return { pause() {}, play: async () => { throw new Error('decode failed'); } }; },
+    lPlayRawFallback: async () => { fallbackCalls += 1; return false; },
+    lPlayBtn(status) { transport.push(status); },
+    lStopFallback() {},
+    serverAvailable() { return true; },
+    slow() { return false; },
+  });
+
+  assert.equal(await lPlayRaw(lines), false);
+  assert.equal(fallbackCalls, 1);
+  assert.equal(transport.at(-1), 'error');
 });

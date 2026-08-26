@@ -75,6 +75,22 @@ function ordinaryAttempt(completion) {
   };
 }
 
+function recorderOwnerBinding() {
+  const binding = window.EasyBoostSync?.currentOwnerBinding?.();
+  return binding && typeof binding.username === 'string' && binding.username
+    && Number.isSafeInteger(binding.generation) && binding.generation >= 0
+    ? { username: binding.username, generation: binding.generation }
+    : null;
+}
+
+function sameOwnerBinding(left, right) {
+  return Boolean(left && right && left.username === right.username && left.generation === right.generation);
+}
+
+function ownerGuard(binding) {
+  return { owner: binding.username, ownerGeneration: binding.generation };
+}
+
 export function createLearningActivityEvidence({ id = crypto.randomUUID(), module, activityId, mode, source, startedAt = Date.now(), metadata = {} } = {}) {
   return {
     id,
@@ -87,6 +103,7 @@ export function createLearningActivityEvidence({ id = crypto.randomUUID(), modul
     helpUsed: false,
     hintsUsed: 0,
     metadata,
+    ownerBinding: recorderOwnerBinding(),
   };
 }
 
@@ -94,9 +111,14 @@ export function prepareLearningActivityRecording() {
   return loadAdaptiveSessionRuntime();
 }
 
-export async function recordCompletedLearningActivity(completion = {}) {
+export async function recordCompletedLearningActivity(completion = {}, options = {}) {
   const attempt = ordinaryAttempt(completion);
+  const authority = options.ownerBinding === undefined ? recorderOwnerBinding() : options.ownerBinding;
+  if (!authority) return { path: 'blocked', reason: 'owner_unavailable', recorded: false };
   const { adaptiveRuntimeSnapshot, completeAdaptiveModuleActivity } = await loadAdaptiveSessionRuntime();
+  if (!sameOwnerBinding(authority, recorderOwnerBinding())) {
+    return { path: 'blocked', reason: 'owner_changed', recorded: false };
+  }
   const active = adaptiveRuntimeSnapshot().active;
   if (active) {
     if (active.module !== attempt.module || active.activityId !== attempt.activity) {
@@ -121,7 +143,7 @@ export async function recordCompletedLearningActivity(completion = {}) {
   }
   return {
     path: 'ordinary',
-    saved: await window.EasyBoostSync.saveModuleAttempt(attempt),
+    saved: await window.EasyBoostSync.saveModuleAttempt(attempt, ownerGuard(authority)),
     attempt,
   };
 }
@@ -144,7 +166,7 @@ export async function recordLearningActivityEvidence(evidence, { score, maxScore
         hintsUsed: evidence.hintsUsed,
         ...(evidence.metadata || {}),
       },
-    });
+    }, { ownerBinding: evidence.ownerBinding });
   } catch (error) {
     evidence.reported = false;
     throw error;

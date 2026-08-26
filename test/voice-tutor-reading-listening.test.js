@@ -447,6 +447,7 @@ for (const example of [
         body: JSON.stringify(contextPayload),
       });
       assert.equal(recordedResponse.status, 201);
+      assert.equal(recordedResponse.headers.get('x-easyboost-response-owner'), username);
       const recorded = await recordedResponse.json();
       const sourceError = recorded.errors.find((error) => error.item_id === example.itemId);
       assert.ok(sourceError);
@@ -455,6 +456,14 @@ for (const example of [
       assert.equal(storedAttempt.metadata.item_id, example.itemId);
       assert.equal(storedAttempt.metadata.result_attempt_id, example.attemptId);
       assert.equal(storedAttempt.metadata.validation_source, 'voice_tutor_context_result');
+
+      const changedOwner = await request('/api/v1/voice-tutor/context-attempts', {
+        method: 'POST',
+        headers: { 'X-EasyBoost-Expected-Owner': 'different-owner' },
+        body: JSON.stringify({ ...contextPayload, attemptId: crypto.randomUUID() }),
+      });
+      assert.equal(changedOwner.status, 409);
+      assert.equal((await changedOwner.json()).error.code, 'OWNER_CHANGED');
 
       const replayResponse = await request('/api/v1/voice-tutor/context-attempts', {
         method: 'POST',

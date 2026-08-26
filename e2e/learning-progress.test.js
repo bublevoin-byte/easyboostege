@@ -32,6 +32,18 @@ function verifiedGrammarAttempts(username) {
 }
 
 async function authenticate(context, baseUrl, username) {
+  await context.addInitScript(() => {
+    try {
+      if (!localStorage.getItem('aisy.onboarding.completion')) {
+        localStorage.setItem('aisy.onboarding.completion', JSON.stringify({
+          version: 1,
+          completedAt: '2026-08-26T00:00:00.000Z',
+        }));
+      }
+    } catch {
+      // Storage can be unavailable in hardened browser profiles.
+    }
+  });
   await context.addCookies([{
     name: 'eb_token',
     value: jwt.sign({ u: username }, jwtSecret, { expiresIn: '1h' }),
@@ -52,8 +64,26 @@ try {
   const now = Date.now();
   await fs.writeFile(dataFile, JSON.stringify({
     users: {
-      'progress-user': { created: now, sub_until: now + 86_400_000 },
-      'established-user': { created: now, sub_until: now + 86_400_000 },
+      'progress-user': {
+        created: now,
+        sub_until: now + 86_400_000,
+        privacy_consent: {
+          text_processing: true,
+          voice_processing: false,
+          policy_version: '2026-08-26-vk-id-v1',
+          updated_at: new Date(now).toISOString(),
+        },
+      },
+      'established-user': {
+        created: now,
+        sub_until: now + 86_400_000,
+        privacy_consent: {
+          text_processing: true,
+          voice_processing: false,
+          policy_version: '2026-08-26-vk-id-v1',
+          updated_at: new Date(now).toISOString(),
+        },
+      },
     },
     progress: { 'progress-user': {}, 'established-user': {} },
     module_attempts: verifiedGrammarAttempts('established-user'),
@@ -126,7 +156,7 @@ try {
   const attemptResponse = page.waitForResponse((response) => (
     response.request().method() === 'POST' && response.url().endsWith('/api/v1/module-attempts')
   ));
-  await page.getByRole('button', { name: 'Завершить тренировку', exact: true }).press('Enter');
+  await page.locator('#r_action_dock [data-reading-action="submit-training"]').press('Enter');
   assert.equal((await attemptResponse).status(), 201);
 
   const updatedOverview = page.waitForResponse((response) => (

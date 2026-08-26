@@ -28,6 +28,8 @@ const HANDLER_BUILDERS = new Map([
   ['spBtn', [1]],
   ['lCtl', [0]],
   ['card', [0]],
+  ['lPrimary', [0]],
+  ['lSecondary', [0]],
   ['rExamBtnRow', [2]],
   ['lExamNextBtn', [2]],
 ]);

@@ -46,7 +46,9 @@ async function fillCurrentKindCorrectly(page, kind) {
   assert.equal(await fields.count(), kind === 'task12_18' ? answers.length * 4 : answers.length);
   for (let index = 0; index < answers.length; index += 1) {
     if (kind === 'task12_18') {
-      await page.locator(`[data-reading-kind="${kind}"] [data-reading-answer][data-position="${index}"][value="${answers[index]}"]`).check();
+      const choice = page.locator(`[data-reading-kind="${kind}"] [data-reading-answer][data-position="${index}"][value="${answers[index]}"]`);
+      await choice.focus();
+      await choice.press('Space');
     } else {
       await fields.nth(index).selectOption(String(answers[index]));
     }
@@ -64,7 +66,7 @@ async function launchAdaptiveReading(page, kind, cefr) {
   assert.equal(set.kind, kind);
   assert.equal(set.cefr, cefr);
   await fillCurrentKindCorrectly(page, kind);
-  await page.getByRole('button', { name: 'Завершить тренировку' }).click();
+  await page.getByRole('button', { name: 'Проверить ответы' }).click();
   await page.locator('[data-reading-review-row]').first().waitFor();
   assert.equal(await page.locator('[data-reading-review-row]').count(), kind === 'task11' ? 6 : 7);
   await page.getByRole('button', { name: 'К каталогу' }).click();
@@ -154,7 +156,9 @@ try {
   await page.getByRole('heading', { name: 'Краткий отчёт' }).waitFor({ timeout: 8_000 });
   assert.match(await page.locator('.reading-report').innerText(), /пока недостаточно данных/iu);
   assert.match(await page.locator('#r_area').innerText(), /Premium добавляет только/iu);
-  const baseExpanded = await page.request.get(`${baseUrl}/api/v1/reading/report?scope=expanded`);
+  const baseExpanded = await page.request.get(`${baseUrl}/api/v1/reading/report?scope=expanded`, {
+    headers: { 'X-EasyBoost-Expected-Owner': username },
+  });
   assert.equal(baseExpanded.status(), 403);
   assert.equal((await baseExpanded.json()).error.code, 'READING_PREMIUM_REQUIRED');
 
@@ -192,7 +196,7 @@ try {
   for (let index = 0; index < 7; index += 1) {
     await page.locator('[data-reading-answer]').nth(index).selectOption(String(index));
   }
-  await page.getByRole('button', { name: 'Завершить тренировку' }).click();
+  await page.getByRole('button', { name: 'Проверить ответы' }).click();
   await page.getByRole('heading', { name: 'Разбор задания 10' }).waitFor();
   assert.equal(await page.locator('[data-reading-review-row]').count(), 7);
   assert.equal(await page.locator('.voiceTutorTrigger').count(), 0, 'Base keeps the text review without Voice launch');
@@ -232,12 +236,16 @@ try {
   await page.evaluate(() => window.tab('scr7'));
   await page.getByText('Незавершённая попытка восстановлена', { exact: true }).waitFor({ timeout: 8_000 });
   assert.equal(await page.locator('.reading-overview [data-reading-overview-field]').count(), 20);
+  await page.getByRole('button', { name: 'Дальше: Task 11' }).click();
+  await page.getByRole('button', { name: 'Дальше: Task 12–18' }).click();
   await page.getByRole('button', { name: 'Сдать раздел' }).first().click();
   const dialog = page.getByRole('dialog', { name: 'В ответах есть пропуски' });
   await dialog.waitFor();
   await dialog.getByRole('button', { name: 'Вернуться к ответам' }).click();
   assert.equal(await dialog.isVisible(), false);
 
+  await page.getByRole('button', { name: 'Назад: Task 11' }).click();
+  await page.getByRole('button', { name: 'Назад: Task 10' }).click();
   await fillCurrentKindCorrectly(page, 'task10');
   await page.getByRole('button', { name: 'Дальше: Task 11' }).click();
   await fillCurrentKindCorrectly(page, 'task11');
@@ -315,7 +323,7 @@ try {
     await premiumFields.nth(index).selectOption(String((premiumSet.task.answers[index] + 1) % premiumSet.task.headings.length));
   }
   assert.equal(contextPayloads.length, 0, 'no Voice context is sent before submit');
-  await premiumSession.page.getByRole('button', { name: 'Завершить тренировку' }).click();
+  await premiumSession.page.getByRole('button', { name: 'Проверить ответы' }).click();
   await premiumSession.page.locator('.voiceTutorTrigger').first().waitFor({ timeout: 8_000 });
   assert.equal(await premiumSession.page.locator('.voiceTutorTrigger').count(), 7);
   assert.equal(contextPayloads.length, 1);
@@ -364,7 +372,7 @@ try {
   for (let index = 0; index < revokedSet.task.answers.length; index += 1) {
     await revokedFields.nth(index).selectOption(String((revokedSet.task.answers[index] + 1) % revokedSet.task.headings.length));
   }
-  await premiumSession.page.getByRole('button', { name: 'Завершить тренировку' }).click();
+  await premiumSession.page.getByRole('button', { name: 'Проверить ответы' }).click();
   assert.equal(await premiumSession.page.locator('.voiceTutorTrigger').count(), 0,
     'revoked entitlement prevents a new Voice launch');
   await premiumSession.context.close();
@@ -423,7 +431,7 @@ try {
   assert.equal(await fallbackSession.page.locator('[data-reading-heading]').count(), 3);
   await fallbackAnswers.nth(0).selectOption('1');
   await fallbackAnswers.nth(1).selectOption('2');
-  await fallbackSession.page.getByRole('button', { name: 'Завершить тренировку' }).click();
+  await fallbackSession.page.getByRole('button', { name: 'Проверить ответы' }).click();
   assert.match(await fallbackSession.page.locator('#r_area').innerText(), /Технический результат: 2 из 2/u);
   assert.match(await fallbackSession.page.locator('#r_area').innerText(), /Официальная шкала и прогресс не применяются/u);
   const afterFallback = await fallbackSession.page.evaluate(() => JSON.stringify(window.S.readingPilot?.history || null));

@@ -7,7 +7,7 @@
 | 03 — Access + Today shell | done | ZERO×2 re-review; 101 focused tests / 0 fail; build + affected Chromium E2E green; one full-suite run documented in ticket |
 | 04 — Practice + Words | done | Direction A Practice/Words; 50 focused + 6 Reading contract tests green; production browser matrix green; ZERO×2 re-review |
 | 05 — Grammar | done | Paper A catalog/runner/exam; owner-bound async seams; Chromium matrix; ZERO×2 review |
-| 06 — Reading + Listening | ready-for-agent | Ticket 03 dependency complete |
+| 06 — Reading + Listening | done | Paper A responsive matrix + owner-safe Reading/Listening; 120 focused tests and affected Chromium green; ZERO×2; full suite run once with 4 HEAD-proven inherited failures |
 | 07 — Writing + AI review | ready-for-agent | Ticket 03 dependency complete |
 | 08 — Speaking + Asya | ready-for-agent | Ticket 03 dependency complete |
 | 09 — EGE + full mock | ready-for-agent | Ticket 03 dependency complete |

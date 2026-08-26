@@ -632,6 +632,8 @@ export function createVoiceTutorRoutes({
   });
 
   router.post('/api/v1/voice-tutor/context-attempts', auth, async (req, res, next) => {
+    if (!requireExpectedOwner(req, res)) return;
+    bindResponseOwner(res, req.user);
     const parsed = parseContextAttemptRequest(req.body);
     if (!parsed) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректный завершённый результат.' } });
     try {
