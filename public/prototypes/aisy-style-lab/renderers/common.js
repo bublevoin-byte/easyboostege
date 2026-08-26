@@ -34,7 +34,7 @@ export function renderProgress(value, label, className = '') {
 
 export function renderDuration(options, selected) {
   return `<div class="duration" role="radiogroup" aria-label="Длительность маршрута">${options.map((minutes) => `
-    <button class="duration__option" type="button" role="radio" aria-checked="${minutes === selected}" data-duration="${minutes}">
+    <button class="duration__option" type="button" role="radio" aria-checked="${minutes === selected}" tabindex="${minutes === selected ? '0' : '-1'}" data-duration="${minutes}">
       <strong>${minutes}</strong><span>мин</span>
     </button>`).join('')}</div>`;
 }
@@ -42,7 +42,7 @@ export function renderDuration(options, selected) {
 export function renderChoice(option, state = 'default') {
   const marker = state === 'correct' ? icon('check') : state === 'incorrect' ? icon('cross') : `<span>${escapeHTML(option.id.toUpperCase())}</span>`;
   const suffix = state === 'correct' ? '<small>Верно</small>' : state === 'incorrect' ? '<small>Твой ответ</small>' : '';
-  return `<button class="choice" type="button" role="radio" aria-checked="${state === 'selected'}" data-choice-state="${escapeHTML(state)}" data-select-option="${escapeHTML(option.id)}">
+  return `<button class="choice" type="button" role="radio" aria-checked="${state === 'selected'}" tabindex="${state === 'selected' ? '0' : '-1'}" data-choice-state="${escapeHTML(state)}" data-select-option="${escapeHTML(option.id)}">
     <i>${marker}</i><span>${escapeHTML(option.label)}</span>${suffix}
   </button>`;
 }
@@ -74,15 +74,20 @@ export function renderPhoneHeader(viewModel, { deep = false } = {}) {
   </header>`;
 }
 
-export function wrapFlow(viewModel, content, { deep = false, activeNav, deepAction = 'Продолжить' } = {}) {
+export function wrapFlow(viewModel, content, {
+  deep = false,
+  activeNav,
+  deepAction = 'Продолжить',
+  deepTarget = '',
+} = {}) {
   const navId = activeNav || (viewModel.screen === 'progress' ? 'progress' : 'today');
   return `${renderPhoneHeader(viewModel, { deep })}
     <div class="app-scroll" data-screen-scroll>
       ${renderFlowStepper(viewModel.screen)}
-      <main class="flow-screen" data-flow-screen="${escapeHTML(viewModel.screen)}">${content}</main>
+      <main class="flow-screen" data-flow-screen="${escapeHTML(viewModel.screen)}" tabindex="-1">${content}</main>
     </div>
     ${deep ? `<div class="deep-dock">
       <button class="deep-dock__back" type="button" data-action="back" aria-label="Назад">${icon('back')}</button>
-      <button class="deep-dock__primary" type="button" data-action="next"><span>${escapeHTML(deepAction)}</span>${icon('arrow')}</button>
+      <button class="deep-dock__primary" type="button" data-action="next"${deepTarget ? ` data-target-screen="${escapeHTML(deepTarget)}"` : ''}><span>${escapeHTML(deepAction)}</span>${icon('arrow')}</button>
     </div>` : renderBottomNav(navId)}`;
 }

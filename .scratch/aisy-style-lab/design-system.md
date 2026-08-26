@@ -36,13 +36,13 @@ aliases, never by scattering color values inside components.
 |---|---|---|
 | Paper | `#FFFDF9`, `#FFF9F3`, `#FFF4EC`, `#FFEDE4`, `#FBE8DF` | canvas and nested surfaces |
 | Ink/plum | `#35263D`, `#402341`, `#6D365F`, `#8F6B8A` | copy, outline, secondary information |
-| Coral | `#B9433A`, `#D94F45`, `#F15C4F`, `#FF7563` | the single primary action and active route |
+| Coral | `#9F342F`, `#B9433A`, `#D94F45`, `#F15C4F`, `#FF7563` | the single primary action and active route |
 | Goal orange | `#C56F22`, `#F58B3D`, `#FFC36A` | milestones, not a second CTA |
 | Support aqua | `#326B68`, `#72AAA2`, `#DCECE8` | calm informational/support state |
 | Status | green, amber and red families with pale surface pairs | explicit success/warning/error |
 
-The darker coral `#D94F45` is the default button surface because warm white text on the previously used
-`#FF7563` did not meet normal-text contrast. The lighter coral remains illustration and soft-state material.
+The deep coral `#B9433A` is the default button surface: warm-white text measures `5.26:1`. Hover uses
+`#9F342F`; the lighter corals remain illustration and soft-state material, not normal-text button surfaces.
 
 ## 4. Typography
 

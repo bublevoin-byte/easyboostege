@@ -4,11 +4,13 @@
 
 **Blocked by:** 02 — Телефонный comparison hub и системная галерея.
 
-**Status:** ready-for-agent
+**Status:** done — design-loop round 7
 
-- [ ] Today → task → review → Progress полностью прокликивается и восстанавливается по URL.
-- [ ] Композиция сохраняет один hero и один primary CTA без сетки равных карточек.
-- [ ] Бумажные слои следуют общим токенам и visual bar.
-- [ ] Signature transition длится 320–520 ms и reduced-motion не двигает слои.
-- [ ] Все интерактивные состояния видимы с клавиатуры и имеют цели не меньше 44×44 px.
+**Current gate:** closed — три свежих независимых критика дали `ПРОЙДЕНО` на одной неизменённой exact
+direct-phone/canonical live matrix.
 
+- [x] Today → task → review → Progress полностью прокликивается и восстанавливается по URL.
+- [x] Композиция сохраняет один hero и один primary CTA без сетки равных карточек.
+- [x] Бумажные слои следуют общим токенам и visual bar.
+- [x] Signature transition длится 320–520 ms и reduced-motion не двигает слои.
+- [x] Все интерактивные состояния видимы с клавиатуры и имеют цели не меньше 44×44 px.

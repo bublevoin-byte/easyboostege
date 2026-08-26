@@ -3,7 +3,7 @@
 | Часть | Круг | Критик ТЗ | Критик системы | Критик ремесла | Состояние |
 |---|---:|---|---|---|---|
 | Foundation / shell | 22 | ПРОЙДЕНО | ПРОЙДЕНО | ПРОЙДЕНО | завершено |
-| A — бумажный маршрут | 0 | — | — | — | реализация начата |
+| A — бумажный маршрут | 7 | ПРОЙДЕНО | ПРОЙДЕНО | ПРОЙДЕНО | завершено |
 | B — тактильные виджеты | 0 | — | — | — | ожидает |
 | C — сюжетный маршрут | 0 | — | — | — | ожидает |
 
@@ -224,3 +224,98 @@
   A/B/C carrier и отсутствие crop/overlap подтверждены на всех `13` live-состояниях.
 - Обязательные repo gates: static QA, syntax, lint и check зелёные; полный unit rerun — `1914 total / 1866 pass /
   48` штатных skip / `0 fail`. Один предварительный suite-load timeout не воспроизвёлся `20/20` изолированно.
+
+### A — бумажный маршрут · круг 1
+
+- Добавлен отдельный `renderers/a.js`; A больше не использует молчаливый foundation fallback.
+- Today получил складную карту с тремя учебными остановками, hand-drawn route line и goal star в footprint прежнего
+  route-list. Task/Review получили вкладки следующего шага, Progress — конечный landmark.
+- Все четыре front sheets используют одну трёхслойную бумажную колоду; Review rule folded внутрь sheet, evidence
+  стал footer, Today/Progress week proof — компактный открытый хвост колоды.
+- Реальный flow transition сохраняет inert outgoing sheet, сдвигает его `−16px/−8px`, вводит следующий с `+16px`
+  за `420ms` и удаляет clone не позже `620ms`; reduced motion обнуляет transform и оставляет opacity `120ms`.
+- Direct PWA `360×720`: phone/document ровно `360×720`, horizontal overflow нет; Task заканчивается до dock на
+  `≈25px`, Review на `≈43px`; Today/Progress tails заканчиваются до nav. Canonical `390×844` также `4/4` без scroll.
+- Полный кликабельный контур и Back пройдены; URL восстановлен на каждом шаге. Roving-radio keyboard проверен для
+  duration и answers; все видимые кнопки `≥44×44`, focus переносится на новый `.flow-screen`.
+- Три свежих независимых live-browser критика получают exact round-1 matrix на замороженной версии.
+- Критики ТЗ и системы: `ПРОЙДЕНО` — восемь exact live URL, geometry, flow, focus, touch targets и tokens
+  подтверждены. Критик ремесла: `НЕ ПРОЙДЕНО` — полупрозрачные outgoing/incoming sheets давали двойной текст
+  и выглядели dissolve вместо цельной бумажной колоды.
+- Исправление: оба листа остаются полностью непрозрачными; верхний лист физически уходит за левый край на
+  `calc(-100% - 32px)` и открывает следующий, который спокойно садится из `+16px`. На измеренных кадрах оба
+  слоя имеют `opacity: 1`; outgoing проходит `0 → ≈−340px/−8px` за `420ms`, затем удаляется. Reduced motion
+  по-прежнему обнуляет spatial offsets и использует короткий `120ms` crossfade.
+- Круг 2 проверяет ту же exact live-матрицу на новой замороженной версии и отдельно судит исправленный физический
+  переход без двойного текста.
+
+### A — бумажный маршрут · круг 2
+
+- Критик ремесла: `ПРОЙДЕНО` — восемь live URL, физическая непрозрачная колода и отсутствие dissolve подтверждены.
+- Критик ТЗ: `НЕ ПРОЙДЕНО` — при Today → Task старый CTA частично оставался в уезжающем sheet, пока новый deep
+  CTA уже был виден в dock. Критик системы: `НЕ ПРОЙДЕНО` — selected duration перекрывал общий focus-shadow своей
+  более специфичной rest-shadow, поэтому keyboard focus не имел отдельного видимого контура.
+- Исправление chrome: новый bottom nav/deep dock остаётся `opacity: 0` и non-interactive, пока outgoing sheet не
+  удалён. Покадровая проверка: при старом CTA `right=311…18px` новый dock имеет `opacity: 0`; dock начинает
+  `220ms` появление только после `outgoing=0`.
+- Исправление focus: финальное high-specificity `:focus-visible:focus` правило даёт radio plum outline `3px`,
+  `outline-offset: 4px` и двухкольцевую token focus-shadow. После ArrowRight новый `30` одновременно checked,
+  единственный `tabindex=0`, focused и `:focus-visible=true`.
+- Круг 3 повторно проверяет всю exact live-матрицу и оба исправленных seam на одной замороженной версии.
+
+### A — бумажный маршрут · круг 3
+
+- Критик ТЗ: `ПРОЙДЕНО` — 8/8 URL, full flow, CTA sequencing, keyboard/reload/reduced motion и geometry прошли.
+- Критик системы: `НЕ ПРОЙДЕНО` — dock имел `opacity: 0`, но непосредственный child CTA вычислялся как
+  `opacity: 1`; визуально он был скрыт родителем, однако computed-style контракт оставался неоднозначным.
+- Критик ремесла: `НЕ ПРОЙДЕНО` — программный focus settle на неинтерактивном `.flow-screen` рисовал массивную
+  двухкольцевую рамку вокруг всей task sheet. Focus-ring самих radio был признан корректным и аккуратным.
+- Исправление chrome: во время paper transition `opacity: 0` теперь имеют и dock/nav, и их непосредственные
+  buttons. Измерение во всех кадрах с `outgoing=1`: old CTA `opacity:1`, new CTA `opacity:0`, dock `opacity:0`.
+- Исправление focus: `.flow-screen` остаётся программным focus-sink для screen reader, но без декоративной рамки;
+  интерактивные controls сохраняют solid plum outline `3px/4px` и token focus-shadow.
+- Круг 4 повторно проверяет exact live-матрицу на неизменённой версии.
+
+### A — бумажный маршрут · круг 4
+
+- Критики ТЗ и ремесла: `ПРОЙДЕНО`. Вся live-матрица, новая CTA sequencing, спокойный programmatic focus и
+  явный control focus подтверждены.
+- Критик системы: `НЕ ПРОЙДЕНО` — `.deep-dock__primary` менял press transform/shadow без transition, хотя общий
+  системный контракт требует `160–220ms` и token default равен `180ms`.
+- Исправление: все deep-dock buttons получили token transition; computed primary CTA теперь имеет
+  `transition-property: transform, box-shadow, background` и durations `180ms, 180ms, 220ms` с общей press easing.
+- Круг 5 проверяет неизменённую full matrix и физический press-контракт.
+
+### A — бумажный маршрут · круг 5
+
+- Критики ТЗ и ремесла: `ПРОЙДЕНО`; deep CTA press измерен как `180/180/220ms` и визуально принят.
+- Критик системы: `НЕ ПРОЙДЕНО` — warm-white `rgb(255,253,249)` на прежнем primary coral
+  `rgb(217,79,69)` давал только `4.01:1`, ниже normal-copy bar `4.5:1`.
+- Исправление token source: semantic primary теперь использует primitive coral `#B9433A` (`5.26:1`), hover —
+  новый более глубокий coral `#9F342F`. Лёгкие кораллы остаются для иллюстраций/soft states; component literals
+  не добавлены. Live CTA вычисляется как `rgb(185,67,58)` с прежним warm-white текстом.
+- Круг 6 повторно проверяет full matrix, визуальную иерархию и measured contrast на одной версии.
+
+### A — бумажный маршрут · круг 6
+
+- Критики ТЗ и ремесла: `ПРОЙДЕНО`; deeper coral CTA визуально принят. Критик системы независимо подтвердил
+  исправленный CTA contrast `5.264:1`, но вернул `НЕ ПРОЙДЕНО` по первому следующему контрастному разрыву.
+- Enabled inactive flow-stepper labels/numerals использовали subtle plum `#8F6B8A` в `11px`: `3.986:1` на
+  `#FFEDE4` и `4.333:1` на `#FFF9F3`. Это навигационные buttons, не disabled state.
+- Исправление semantic token: `--color-text-subtle` теперь plum `#7B496F`; live inactive step text вычисляется как
+  `rgb(123,73,111)`. Контраст стал `6.112:1` на folded paper и `6.644:1` на canvas. Disabled token не менялся.
+- Круг 7 повторно проверяет всю live-матрицу, оба исправленных contrast pair и сохранённую art direction.
+
+### A — бумажный маршрут · круг 7
+
+- Три свежих независимых критика на одной неизменённой версии: `ПРОЙДЕНО / ПРОЙДЕНО / ПРОЙДЕНО`.
+- Критики проверили 8/8 exact live URL: direct phone/document `360×720`; canonical phone
+  `x=180,y=20,w=390,h=844` внутри `750×884`; overflow/side rail отсутствуют.
+- Contrast-first scan не нашёл normal-text pair ниже `4.5:1`: inactive steps `6.112/6.644:1`, primary CTA
+  `5.264:1`. Низкоконтрастный orange остаётся только в `aria-hidden` goal-star decoration.
+- Full flow, Back/reload, URL state, opaque paper/chrome sequencing, programmatic/control focus split,
+  `180/180/220ms` press, `420ms` sheet transition, targets `≥44px` и reduced motion подтверждены.
+- Direction A visual/craft продолжает утверждённый onboarding: одна folded-paper колода, спокойный route rhythm,
+  один coral CTA, без scrapbook/dashboard/wide learner layout.
+- Обязательные repo gates перед коммитом: static QA и syntax зелёные; `lint` зелёный; `check` проверил `473`
+  JavaScript-файла и `209` inline handlers; полный `npm test` — `1914 total / 1866 pass / 48 skip / 0 fail`.

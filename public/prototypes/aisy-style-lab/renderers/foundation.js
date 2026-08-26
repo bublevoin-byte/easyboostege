@@ -11,21 +11,24 @@ import {
   wrapFlow,
 } from './common.js';
 
-function renderToday(viewModel, runtime) {
+const surfaceClassName = (base, extra = '') => [base, extra].filter(Boolean).join(' ');
+
+export function renderToday(viewModel, runtime, { surfaceClass = '', surfaceDecoration = '' } = {}) {
   const { content, status } = viewModel;
   const duration = runtime.duration || content.duration;
   const isResume = viewModel.fixtureState === 'resume';
   const cta = isResume ? content.resumeCta : content.cta;
   const body = `
     ${viewModel.fixtureState === 'ready' ? '' : renderStatus(status)}
-    <section class="hero recommendation-hero">
+    <section class="${surfaceClassName('hero recommendation-hero', surfaceClass)}">
+      ${surfaceDecoration}
       <div class="hero__ornament" aria-hidden="true">${icon('spark')}</div>
       <span class="eyebrow">${escapeHTML(content.eyebrow)}</span>
       <h1>${escapeHTML(content.title)}</h1>
       <p>${escapeHTML(content.reason)}</p>
       ${renderDuration(content.durationOptions, duration)}
       <ol class="route-list">${content.blocks.map((block, index) => `<li data-block-state="${escapeHTML(block.state)}"><i>${index + 1}</i><span><strong>${escapeHTML(block.label)}</strong><small>${escapeHTML(block.detail)}</small></span></li>`).join('')}</ol>
-      <button class="primary-button" type="button" data-action="next"><span>${escapeHTML(cta.label)}</span>${icon('arrow')}</button>
+      <button class="primary-button" type="button" data-action="next" data-target-screen="${escapeHTML(cta.target)}"><span>${escapeHTML(cta.label)}</span>${icon('arrow')}</button>
     </section>
     <section class="mini-proof" aria-label="Ритм недели">
       <span>${icon('sun')}</span><div><strong>${escapeHTML(content.rhythm.label)}</strong><small>До ЕГЭ ${viewModel.meta.egeCountdownDays} день</small></div>
@@ -34,11 +37,12 @@ function renderToday(viewModel, runtime) {
   return wrapFlow(viewModel, body);
 }
 
-function renderTask(viewModel, runtime) {
+export function renderTask(viewModel, runtime, { surfaceClass = '', surfaceDecoration = '' } = {}) {
   const { content } = viewModel;
   const selected = runtime.selectedOptionId || content.selectedOptionId;
   const body = `
-    <section class="task-sheet">
+    <section class="${surfaceClassName('task-sheet', surfaceClass)}">
+      ${surfaceDecoration}
       <div class="task-meta"><span class="badge">${escapeHTML(content.section)}</span><strong>${escapeHTML(content.progressLabel)}</strong></div>
       ${renderProgress(content.progress, content.progressLabel)}
       <span class="eyebrow">${escapeHTML(content.promptLead)}</span>
@@ -46,13 +50,18 @@ function renderTask(viewModel, runtime) {
       <div class="choices" role="radiogroup" aria-label="Варианты ответа">${content.options.map((option) => renderChoice(option, option.id === selected ? 'selected' : 'default')).join('')}</div>
       <div class="task-assistance">${icon('check')}<span>${escapeHTML(content.assistance.label)}</span></div>
     </section>`;
-  return wrapFlow({ ...viewModel, taskLabel: content.section }, body, { deep: true, deepAction: content.cta.label });
+  return wrapFlow({ ...viewModel, taskLabel: content.section }, body, {
+    deep: true,
+    deepAction: content.cta.label,
+    deepTarget: content.cta.target,
+  });
 }
 
-function renderReview(viewModel) {
+export function renderReview(viewModel, { surfaceClass = '', surfaceDecoration = '' } = {}) {
   const { content } = viewModel;
   const body = `
-    <section class="review-sheet">
+    <section class="${surfaceClassName('review-sheet', surfaceClass)}">
+      ${surfaceDecoration}
       <div class="result-mark">${icon('cross')}<span>${escapeHTML(content.resultLabel)}</span></div>
       <span class="eyebrow">${escapeHTML(content.eyebrow)}</span>
       <h1>${escapeHTML(content.title)}</h1>
@@ -61,30 +70,35 @@ function renderReview(viewModel) {
       <div class="rule-card"><small>Правило, которое пригодится снова</small><strong>${escapeHTML(content.reusableRule)}</strong><span>${escapeHTML(content.example)}</span></div>
       <div class="evidence-row"><span>${icon('spark')}</span><div><strong>${escapeHTML(content.evidence.label)}</strong><small>Прогресс изменён только по твоей попытке</small></div><b>+${content.evidence.masteryDelta}</b></div>
     </section>`;
-  return wrapFlow(viewModel, body, { deep: true, deepAction: content.cta.label });
+  return wrapFlow(viewModel, body, {
+    deep: true,
+    deepAction: content.cta.label,
+    deepTarget: content.cta.target,
+  });
 }
 
-function renderProgressScreen(viewModel) {
+export function renderProgressScreen(viewModel, { surfaceClass = '', surfaceDecoration = '' } = {}) {
   const { content } = viewModel;
   const body = `
-    <section class="hero progress-hero">
+    <section class="${surfaceClassName('hero progress-hero', surfaceClass)}">
+      ${surfaceDecoration}
       <span class="eyebrow">${escapeHTML(content.eyebrow)}</span>
       <h1>${escapeHTML(content.title)}</h1>
       <div class="score-change"><span>${content.before}</span>${icon('arrow')}<strong>${content.after}%</strong><em>${escapeHTML(content.scoreLabel)}</em></div>
       ${renderProgress(content.after / 100, `${content.skill}: ${content.after}%`)}
       <div class="progress-copy"><small>Что улучшилось</small><strong>${escapeHTML(content.skill)}</strong><p>${escapeHTML(content.improvement)}</p></div>
       <div class="next-step"><span>${icon('spark')}</span><div><small>Следующий шаг</small><strong>${escapeHTML(content.next)}</strong></div></div>
-      <button class="primary-button" type="button" data-action="next"><span>${escapeHTML(content.cta.label)}</span>${icon('arrow')}</button>
+      <button class="primary-button" type="button" data-action="next" data-target-screen="${escapeHTML(content.cta.target)}"><span>${escapeHTML(content.cta.label)}</span>${icon('arrow')}</button>
     </section>
     <section class="mini-proof"><span>${icon('chart')}</span><div><strong>${content.week.completedDays} из ${content.week.goalDays} дней</strong><small>${content.week.minutes} минут практики</small></div><b>${content.week.completedDays}/${content.week.goalDays}</b></section>`;
   return wrapFlow(viewModel, body, { activeNav: 'progress' });
 }
 
-export function renderScreen(viewModel, runtime = {}) {
-  if (viewModel.screen === 'task') return renderTask(viewModel, runtime);
-  if (viewModel.screen === 'review') return renderReview(viewModel);
-  if (viewModel.screen === 'progress') return renderProgressScreen(viewModel);
-  return renderToday(viewModel, runtime);
+export function renderScreen(viewModel, runtime = {}, options = {}) {
+  if (viewModel.screen === 'task') return renderTask(viewModel, runtime, options);
+  if (viewModel.screen === 'review') return renderReview(viewModel, options);
+  if (viewModel.screen === 'progress') return renderProgressScreen(viewModel, options);
+  return renderToday(viewModel, runtime, options);
 }
 
 export function renderComponents(viewModel) {

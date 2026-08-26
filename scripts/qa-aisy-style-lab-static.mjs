@@ -6,12 +6,14 @@ const tokenUrl = new URL('public/prototypes/aisy-style-lab/styles/tokens.css', r
 const labCssUrl = new URL('public/prototypes/aisy-style-lab/styles/lab.css', root);
 const fixtureUrl = new URL('public/prototypes/aisy-style-lab/data/fixtures.js', root);
 const appUrl = new URL('public/prototypes/aisy-style-lab/app.js', root);
+const directionAUrl = new URL('public/prototypes/aisy-style-lab/renderers/a.js', root);
 
-const [tokens, labCss, fixtureSource, appSource] = await Promise.all([
+const [tokens, labCss, fixtureSource, appSource, directionASource] = await Promise.all([
   readFile(tokenUrl, 'utf8'),
   readFile(labCssUrl, 'utf8'),
   readFile(fixtureUrl, 'utf8'),
   readFile(appUrl, 'utf8'),
+  readFile(directionAUrl, 'utf8'),
 ]);
 
 const semanticMarker = tokens.indexOf('LAYER 2');
@@ -29,6 +31,17 @@ assert.match(tokens, /@media\s*\(prefers-reduced-motion:\s*reduce\)/, 'reduced-m
 assert.match(appSource, /searchParams\.set\('direction'/, 'direction is not persisted in the URL');
 assert.match(appSource, /searchParams\.set\('screen'/, 'screen is not persisted in the URL');
 assert.match(appSource, /searchParams\.set\('state'/, 'fixture state is not persisted in the URL');
+assert.match(appSource, /dataset\.targetScreen/, 'fixture CTA targets are not used for flow navigation');
+assert.match(appSource, /capturePaperOutgoing/, 'Direction A has no outgoing paper transition seam');
+assert.match(directionASource, /a-route-map/, 'Direction A folded route map is missing');
+assert.match(directionASource, /a-paper-surface/, 'Direction A paper deck is missing');
+assert.match(labCss, /var\(--paper-enter-x\)/, 'Direction A incoming 16px paper displacement is missing');
+assert.match(labCss, /var\(--paper-exit-x\)/, 'Direction A outgoing paper displacement is missing');
+assert.match(
+  labCss,
+  /prefers-reduced-motion[\s\S]+a-paper-outgoing[\s\S]+transform:\s*none/,
+  'Direction A reduced-motion transform removal is missing',
+);
 
 const fixtureModule = await import(fixtureUrl.href);
 assert.equal(fixtureModule.DIRECTIONS.length, 3, 'comparison must have exactly three directions');
@@ -47,6 +60,7 @@ console.log(JSON.stringify({
   directions: fixtureModule.DIRECTIONS.length,
   screens: fixtureModule.FLOW_SCREENS.length,
   navigation: fixtureModule.NAV_ITEMS.length,
+  directionARenderer: true,
   rawComponentColors: 0,
   desktopSideRail: false,
 }, null, 2));
