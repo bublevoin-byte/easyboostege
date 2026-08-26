@@ -104,13 +104,18 @@ try{
     await page.setViewportSize({width:viewport.width,height:viewport.height});
     for(const theme of ['light','dark']){
       await page.emulateMedia({colorScheme:theme,reducedMotion:'reduce'});
-      await page.evaluate(value=>new Promise(resolve=>{document.documentElement.dataset.theme=value;requestAnimationFrame(()=>requestAnimationFrame(resolve))}),theme);
+      await page.evaluate(value=>new Promise(resolve=>{
+        window.AisyTheme.set(value);
+        requestAnimationFrame(()=>requestAnimationFrame(resolve));
+      }),theme);
       for(const destination of destinations){
         await navigation.getByRole('button',{name:destination.name,exact:true}).click();
         await page.locator(destination.screen).waitFor({state:'visible',timeout:8_000});
         const layout=await page.evaluate(screenSelector=>{
           const active=document.querySelector(screenSelector);
           const frame=document.getElementById('frame').getBoundingClientRect();
+          const nav=document.getElementById('aisy-shell-nav').getBoundingClientRect();
+          const navList=document.querySelector('.aisy-shell-nav__list');
           const controls=[...active.querySelectorAll('button,input,select,textarea,a[href]'),
             ...document.querySelectorAll('#aisy-shell-nav button,#asya-launcher')]
             .filter(control=>control.getClientRects().length&&!control.disabled).map(control=>{
@@ -124,6 +129,8 @@ try{
           return{
             viewport:document.documentElement.clientWidth,documentWidth:document.documentElement.scrollWidth,
             frameLeft:frame.left,frameRight:frame.right,frameWidth:frame.width,
+            navLeft:nav.left,navRight:nav.right,navWidth:nav.width,
+            navColumns:getComputedStyle(navList).gridTemplateColumns.split(' ').filter(Boolean).length,
             controls,motion,colorScheme:rootStyle.colorScheme,theme:document.documentElement.dataset.theme,
             headingId:heading?.id||'',headingText:heading?.textContent||'',
             mainLabel:labelledMain?.getAttribute('aria-labelledby')||'',
@@ -132,14 +139,21 @@ try{
         },destination.screen);
         assert.ok(layout.documentWidth<=layout.viewport,`${destination.name} horizontal overflow at ${viewport.label}/${theme}`);
         assert.ok(layout.frameLeft>=-0.5&&layout.frameRight<=layout.viewport+0.5,`${destination.name} frame overflow at ${viewport.label}/${theme}`);
-        assert.ok(layout.frameWidth<=720.5,`${destination.name} desktop frame is not bounded at ${viewport.label}/${theme}`);
+        assert.ok(layout.frameWidth<=390.5,`${destination.name} learner canvas exceeds the approved phone width at ${viewport.label}/${theme}`);
+        assert.ok(Math.abs(layout.navLeft-layout.frameLeft)<=1&&Math.abs(layout.navRight-layout.frameRight)<=1,
+          `${destination.name} bottom navigation must stay inside the phone at ${viewport.label}/${theme}`);
+        assert.equal(layout.navColumns,5,`${destination.name} navigation became a side rail at ${viewport.label}/${theme}`);
+        if(viewport.width>390){
+          assert.ok(Math.abs(layout.frameLeft-(layout.viewport-layout.frameWidth)/2)<=1,
+            `${destination.name} phone is not centered at ${viewport.label}/${theme}`);
+        }
         assert.deepEqual(layout.controls.filter(control=>control.width<44||control.height<44),[],`${destination.name} touch target below 44px at ${viewport.label}/${theme}`);
         if(destination.heading)assert.match(layout.headingText,new RegExp(destination.heading,'u'));
         else assert.ok(layout.headingText.trim(),`${destination.name} must expose a non-empty h1`);
         assert.equal(layout.mainLabel,layout.headingId,`${destination.name} main must reference its h1 at ${viewport.label}/${theme}`);
         assert.ok(layout.liveStates>=1,`${destination.name} must expose an assistive live state at ${viewport.label}/${theme}`);
         assert.equal(await navigation.locator('[aria-current="page"]').count(),1);
-        assert.ok(layout.motion==='0s'||Number.parseFloat(layout.motion)<=0.01,`reduced motion ignored at ${viewport.label}/${theme}`);
+        assert.ok(layout.motion==='0s'||Number.parseFloat(layout.motion)<=0.01,`reduced motion exceeds the existing 10ms accessibility contract at ${viewport.label}/${theme}`);
         assert.equal(layout.theme,theme,`theme attribute changed at ${viewport.label}`);
         assert.equal(layout.colorScheme,theme,`wrong ${theme} color scheme at ${viewport.label}: ${JSON.stringify(layout)}`);
       }

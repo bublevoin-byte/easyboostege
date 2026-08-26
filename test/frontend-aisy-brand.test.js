@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import test from 'node:test';
 import { inflateSync } from 'node:zlib';
+import { cssLayer as layer } from './helpers/css.js';
 
 const publicUrl = new URL('../public/', import.meta.url);
 
@@ -17,6 +18,14 @@ function rule(css, selector) {
 function customProperties(body) {
   return new Map([...body.matchAll(/(--[\w-]+)\s*:\s*(#[0-9a-f]{6}|[\d.]+(?:px|ms)|[^;]+)\s*;/giu)]
     .map((match) => [match[1], match[2].trim()]));
+}
+
+function semanticColorPair(value, primitives, name) {
+  const pair = value.match(/^light-dark\(var\((--[\w-]+)\),\s*var\((--[\w-]+)\)\)$/u);
+  assert.ok(pair, `canonical theme misses the primitive light/dark pair for ${name}`);
+  const colors = pair.slice(1).map((primitive) => primitives.get(primitive));
+  for (const color of colors) assert.match(color || '', /^#[0-9a-f]{6}$/iu, `${name} has a missing color primitive`);
+  return colors;
 }
 
 function luminance(hex) {
@@ -115,7 +124,8 @@ test('public documents and install metadata present the Aisy learner brand', asy
 
 test('shared Aisy theme keeps light and dark interaction states accessible', async () => {
   const css = await readPublic('aisy-theme.css');
-  const canonical = customProperties(rule(css, ':root'));
+  const primitives = customProperties(layer(css, 'aisy-primitives'));
+  const canonical = customProperties(layer(css, 'aisy-semantic'));
   const light = new Map();
   const dark = new Map();
   const requiredColors = [
@@ -125,10 +135,9 @@ test('shared Aisy theme keeps light and dark interaction states accessible', asy
   ];
 
   for (const name of requiredColors) {
-    const pair = (canonical.get(name) || '').match(/^light-dark\((#[0-9a-f]{6}),\s*(#[0-9a-f]{6})\)$/iu);
-    assert.ok(pair, `canonical theme misses the light/dark pair for ${name}`);
-    light.set(name, pair[1]);
-    dark.set(name, pair[2]);
+    const pair = semanticColorPair(canonical.get(name) || '', primitives, name);
+    light.set(name, pair[0]);
+    dark.set(name, pair[1]);
   }
   for (const theme of [light, dark]) {
     assert.ok(contrast(theme.get('--aisy-color-text'), theme.get('--aisy-color-background')) >= 4.5);
@@ -137,12 +146,13 @@ test('shared Aisy theme keeps light and dark interaction states accessible', asy
     assert.ok(contrast(theme.get('--aisy-color-focus'), theme.get('--aisy-color-background')) >= 3);
   }
 
-  assert.equal(canonical.get('--aisy-touch-target'), '44px');
+  assert.equal(primitives.get('--aisy-primitive-size-touch'), '44px');
+  assert.equal(canonical.get('--aisy-touch-target'), 'var(--aisy-primitive-size-touch)');
   assert.match(css, /:root\[data-theme="light"\]\s*\{\s*color-scheme:\s*light;/u);
   assert.match(css, /:root\[data-theme="dark"\]\s*\{\s*color-scheme:\s*dark;/u);
   assert.doesNotMatch(rule(css, ':root[data-theme="dark"]'), /--aisy-color-/u);
   assert.match(css, /@media\s*\(prefers-color-scheme:\s*dark\)[\s\S]*:root:not\(\[data-theme\]\)/u);
-  assert.match(css, /:focus-visible[\s\S]{0,180}outline:\s*3px solid var\(--aisy-color-focus\)/u);
+  assert.match(css, /:focus-visible[\s\S]{0,180}outline:\s*3px solid var\(--aisy-focus-color\)/u);
   assert.match(css, /min-block-size:\s*var\(--aisy-touch-target\)/u);
   assert.match(css, /touch-action:\s*manipulation/u);
   assert.match(css, /@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*animation-duration:\s*0\.01ms/u);

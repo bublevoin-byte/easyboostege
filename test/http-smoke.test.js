@@ -141,7 +141,9 @@ test('application starts and serves health, security headers and PWA assets', { 
 
     const theme = await fetch(`${baseUrl}/aisy-theme.css`);
     assert.equal(theme.status, 200);
-    assert.match(await theme.text(), /--aisy-color-primary:\s*light-dark\(#5846c7,\s*#aa9bff\)/u);
+    const themeSource = await theme.text();
+    assert.match(themeSource, /--aisy-primitive-coral-action:\s*#b9433a/u);
+    assert.match(themeSource, /--aisy-color-primary:\s*light-dark\(var\(--aisy-primitive-coral-action\),\s*var\(--aisy-primitive-coral-action-dark\)\)/u);
 
     const serviceWorker = await fetch(`${baseUrl}/service-worker.js`);
     assert.equal(serviceWorker.status, 200);

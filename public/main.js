@@ -1,3 +1,5 @@
+import './theme.js';
+
 /*
  * Единственная точка входа frontend: index.html подключает только её.
  * Общая Aisy-тема подключена как обычный stylesheet в public documents и лежит в offline closure:

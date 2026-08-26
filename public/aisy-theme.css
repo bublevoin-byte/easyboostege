@@ -1,90 +1,315 @@
 /*
- * Aisy.space public theme contract.
+ * Aisy production theme — «A: Бумажный маршрут».
  *
- * Product modules consume semantic tokens from this file. Legacy EasyBoost identifiers remain
- * compatibility details and are deliberately unrelated to the public theme names below.
+ * Tokens have one dependency direction: primitive -> semantic -> component. Product modules
+ * consume semantic or component names; palette literals stay in the primitive layer.
  */
-:root {
-  color-scheme: light dark;
-  --aisy-color-background: light-dark(#f7f7fc, #11121f);
-  --aisy-color-surface: light-dark(#ffffff, #1b1d2d);
-  --aisy-color-surface-muted: light-dark(#efeff9, #25283c);
-  --aisy-color-text: light-dark(#15162a, #f5f5fa);
-  --aisy-color-text-muted: light-dark(#575b74, #c4c7da);
-  --aisy-color-primary: light-dark(#5846c7, #aa9bff);
-  --aisy-color-primary-hover: light-dark(#4937b4, #c2b8ff);
-  --aisy-color-on-primary: light-dark(#ffffff, #17112f);
-  --aisy-color-accent: light-dark(#0d7189, #74d3f2);
-  --aisy-color-accent-soft: light-dark(#e4f5f8, #173844);
-  --aisy-color-border: light-dark(#b7bacd, #62677f);
-  --aisy-color-focus: light-dark(#0b73e0, #68b5ff);
-  --aisy-color-success: light-dark(#1f6f4a, #64d69b);
-  --aisy-color-warning: light-dark(#8a5100, #f4c46a);
-  --aisy-color-danger: light-dark(#b42318, #ff8c87);
-  --aisy-color-info: light-dark(#176b87, #74d3f2);
-  --aisy-color-scrim: light-dark(rgb(15 16 31 / 56%), rgb(0 0 0 / 64%));
+@layer aisy-primitives, aisy-semantic, aisy-components;
 
-  --aisy-font-interface: Manrope, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --aisy-font-friendly: Nunito, Manrope, system-ui, sans-serif;
-  --aisy-font-size-body: 16px;
-  --aisy-line-height-body: 1.6;
-  --aisy-weight-regular: 500;
-  --aisy-weight-strong: 750;
-
-  --aisy-space-1: 4px;
-  --aisy-space-2: 8px;
-  --aisy-space-3: 12px;
-  --aisy-space-4: 16px;
-  --aisy-space-6: 24px;
-  --aisy-space-8: 32px;
-  --aisy-space-12: 48px;
-  --aisy-radius-control: 14px;
-  --aisy-radius-card: 22px;
-  --aisy-radius-round: 999px;
-  --aisy-touch-target: 44px;
-  --aisy-content-width: 720px;
-
-  --aisy-shadow-1: light-dark(0 4px 14px rgb(39 34 80 / 8%), 0 4px 14px rgb(0 0 0 / 24%));
-  --aisy-shadow-2: light-dark(0 12px 34px rgb(39 34 80 / 14%), 0 12px 34px rgb(0 0 0 / 36%));
-  --aisy-motion-fast: 160ms;
-  --aisy-motion-standard: 240ms;
-  --aisy-motion-slow: 300ms;
-  --aisy-motion-ease: cubic-bezier(0.2, 0, 0, 1);
+@font-face {
+  font-family: "Aisy Manrope";
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url("/assets/fonts/manrope-cyrillic-variable.woff2") format("woff2");
+  unicode-range: U+0301, U+0400-045f, U+0490-0491, U+04b0-04b1, U+2116;
 }
 
-:root[data-theme="light"] {
-  color-scheme: light;
+@font-face {
+  font-family: "Aisy Manrope";
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url("/assets/fonts/manrope-latin-variable.woff2") format("woff2");
+  unicode-range: U+0000-00ff, U+0131, U+0152-0153, U+02bb-02bc, U+02c6, U+02da, U+02dc,
+    U+0304, U+0308, U+0329, U+2000-206f, U+20ac, U+2122, U+2191, U+2193, U+2212,
+    U+2215, U+feff, U+fffd;
 }
 
-:root[data-theme="dark"] {
-  color-scheme: dark;
+@font-face {
+  font-family: "Aisy Nunito";
+  font-style: normal;
+  font-weight: 700 900;
+  font-display: swap;
+  src: url("/assets/fonts/nunito-cyrillic-variable.woff2") format("woff2");
+  unicode-range: U+0301, U+0400-045f, U+0490-0491, U+04b0-04b1, U+2116;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme]) {
-    color-scheme: dark;
+@font-face {
+  font-family: "Aisy Nunito";
+  font-style: normal;
+  font-weight: 700 900;
+  font-display: swap;
+  src: url("/assets/fonts/nunito-latin-variable.woff2") format("woff2");
+  unicode-range: U+0000-00ff, U+0131, U+0152-0153, U+02bb-02bc, U+02c6, U+02da, U+02dc,
+    U+0304, U+0308, U+0329, U+2000-206f, U+20ac, U+2122, U+2191, U+2193, U+2212,
+    U+2215, U+feff, U+fffd;
+}
+
+@layer aisy-primitives {
+  :root {
+    /* Warm paper and plum ink. */
+    --aisy-primitive-paper-0: #fffdf9;
+    --aisy-primitive-paper-1: #fff9f3;
+    --aisy-primitive-paper-2: #fff4ec;
+    --aisy-primitive-paper-3: #ffede4;
+    --aisy-primitive-paper-4: #fbe8df;
+    --aisy-primitive-ink-plum: #35263d;
+    --aisy-primitive-ink-plum-strong: #402341;
+    --aisy-primitive-ink-muted: #665368;
+    --aisy-primitive-plum: #6d365f;
+    --aisy-primitive-plum-muted: #8f6b8a;
+
+    /* AA action and restrained accents. */
+    --aisy-primitive-coral-hover: #9f342f;
+    --aisy-primitive-coral-action: #b9433a;
+    --aisy-primitive-coral-action-dark: #b9433a;
+    --aisy-primitive-coral-active: #872924;
+    --aisy-primitive-goal: #c56f22;
+    --aisy-primitive-aqua: #326b68;
+
+    /* Explicit status pairs. */
+    --aisy-primitive-success: #256b4a;
+    --aisy-primitive-success-dark: #83d8ac;
+    --aisy-primitive-success-soft: #e3f2e9;
+    --aisy-primitive-success-soft-dark: #183c2d;
+    --aisy-primitive-warning: #845111;
+    --aisy-primitive-warning-dark: #f2c574;
+    --aisy-primitive-warning-soft: #fff1d5;
+    --aisy-primitive-warning-soft-dark: #493514;
+    --aisy-primitive-danger: #9c302b;
+    --aisy-primitive-danger-dark: #ff9b91;
+    --aisy-primitive-danger-soft: #fae5e1;
+    --aisy-primitive-danger-soft-dark: #4b2526;
+    --aisy-primitive-info-soft: #dcece8;
+    --aisy-primitive-info-soft-dark: #173b39;
+
+    /* Warm dark paper is a material mapping, not an inversion. */
+    --aisy-primitive-night-stage: #100c12;
+    --aisy-primitive-night-canvas: #171219;
+    --aisy-primitive-night-surface: #211a22;
+    --aisy-primitive-night-surface-raised: #2a212b;
+    --aisy-primitive-night-surface-muted: #302631;
+    --aisy-primitive-night-text: #fff9f3;
+    --aisy-primitive-night-text-muted: #dac9d4;
+    --aisy-primitive-border-light: #9c7a91;
+    --aisy-primitive-border-dark: #8f7185;
+    --aisy-primitive-focus-light: #6d365f;
+    --aisy-primitive-focus-dark: #f0a7d2;
+
+    /* Raw depth values keep every shadow down and to the right. */
+    --aisy-primitive-depth-control-light: 5px 7px 15px rgb(86 51 70 / 16%),
+      inset 2px 2px 0 rgb(255 255 255 / 78%), inset -2px -3px 7px rgb(109 54 95 / 8%);
+    --aisy-primitive-depth-control-dark: 5px 7px 15px rgb(0 0 0 / 36%),
+      inset 2px 2px 0 rgb(255 255 255 / 7%), inset -2px -3px 7px rgb(0 0 0 / 22%);
+    --aisy-primitive-depth-sheet-light: 10px 12px 30px rgb(86 51 70 / 16%),
+      inset 2px 2px 0 rgb(255 255 255 / 74%), inset -3px -4px 9px rgb(109 54 95 / 7%);
+    --aisy-primitive-depth-sheet-dark: 10px 12px 30px rgb(0 0 0 / 42%),
+      inset 2px 2px 0 rgb(255 255 255 / 6%), inset -3px -4px 9px rgb(0 0 0 / 24%);
+    --aisy-primitive-depth-action-light: 10px 12px 24px rgb(123 43 39 / 28%),
+      inset 2px 2px 0 rgb(255 255 255 / 24%), inset -3px -4px 8px rgb(80 18 25 / 18%);
+    --aisy-primitive-depth-action-dark: 10px 12px 24px rgb(0 0 0 / 46%),
+      inset 2px 2px 0 rgb(255 255 255 / 16%), inset -3px -4px 8px rgb(0 0 0 / 24%);
+    --aisy-primitive-depth-pressed-light: 3px 4px 9px rgb(86 51 70 / 18%),
+      inset 1px 2px 5px rgb(71 34 61 / 15%);
+    --aisy-primitive-depth-pressed-dark: 3px 4px 9px rgb(0 0 0 / 38%),
+      inset 1px 2px 5px rgb(0 0 0 / 28%);
+
+    /* 4 px rhythm, three type roles and bounded motion. */
+    --aisy-primitive-space-1: 4px;
+    --aisy-primitive-space-2: 8px;
+    --aisy-primitive-space-3: 12px;
+    --aisy-primitive-space-4: 16px;
+    --aisy-primitive-space-5: 20px;
+    --aisy-primitive-space-6: 24px;
+    --aisy-primitive-space-7: 28px;
+    --aisy-primitive-space-8: 32px;
+    --aisy-primitive-space-12: 48px;
+    --aisy-primitive-size-touch: 44px;
+    --aisy-primitive-size-phone: 390px;
+    --aisy-primitive-size-button: 58px;
+    --aisy-primitive-size-affordance: 38px;
+    --aisy-primitive-radius-control: 16px;
+    --aisy-primitive-radius-card: 24px;
+    --aisy-primitive-radius-action: 28px;
+    --aisy-primitive-radius-phone: 36px;
+    --aisy-primitive-radius-round: 999px;
+    --aisy-primitive-font-interface: "Aisy Manrope", Manrope, system-ui, -apple-system,
+      BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --aisy-primitive-font-display: "Aisy Nunito", Nunito, "Aisy Manrope", Manrope, system-ui,
+      sans-serif;
+    --aisy-primitive-font-body: 16px;
+    --aisy-primitive-font-label: 12px;
+    --aisy-primitive-font-display-size: 32px;
+    --aisy-primitive-leading-body: 1.5;
+    --aisy-primitive-weight-regular: 500;
+    --aisy-primitive-weight-strong: 750;
+    --aisy-primitive-motion-press: 180ms;
+    --aisy-primitive-motion-feedback: 220ms;
+    --aisy-primitive-motion-route: 420ms;
+    --aisy-primitive-motion-reduced: 0.01ms;
+    --aisy-primitive-motion-reduced-opacity: 100ms;
+    --aisy-primitive-ease: cubic-bezier(0.2, 0, 0, 1);
   }
 }
 
+@layer aisy-semantic {
+  :root {
+    color-scheme: light dark;
+    --aisy-color-stage: light-dark(var(--aisy-primitive-paper-4), var(--aisy-primitive-night-stage));
+    --aisy-color-background: light-dark(var(--aisy-primitive-paper-1), var(--aisy-primitive-night-canvas));
+    --aisy-color-surface: light-dark(var(--aisy-primitive-paper-0), var(--aisy-primitive-night-surface));
+    --aisy-color-surface-raised: light-dark(var(--aisy-primitive-paper-0), var(--aisy-primitive-night-surface-raised));
+    --aisy-color-surface-muted: light-dark(var(--aisy-primitive-paper-2), var(--aisy-primitive-night-surface-muted));
+    --aisy-color-text: light-dark(var(--aisy-primitive-ink-plum), var(--aisy-primitive-night-text));
+    --aisy-color-text-strong: light-dark(var(--aisy-primitive-ink-plum-strong), var(--aisy-primitive-night-text));
+    --aisy-color-text-muted: light-dark(var(--aisy-primitive-ink-muted), var(--aisy-primitive-night-text-muted));
+    --aisy-color-primary: light-dark(var(--aisy-primitive-coral-action), var(--aisy-primitive-coral-action-dark));
+    --aisy-color-primary-hover: light-dark(var(--aisy-primitive-coral-hover), var(--aisy-primitive-coral-hover));
+    --aisy-color-primary-active: light-dark(var(--aisy-primitive-coral-active), var(--aisy-primitive-coral-active));
+    --aisy-color-on-primary: light-dark(var(--aisy-primitive-paper-0), var(--aisy-primitive-paper-0));
+    --aisy-color-action-affordance: light-dark(var(--aisy-primitive-paper-0), var(--aisy-primitive-paper-0));
+    --aisy-color-action-affordance-disabled: light-dark(var(--aisy-primitive-plum-muted), var(--aisy-primitive-plum-muted));
+    --aisy-color-selection: light-dark(var(--aisy-primitive-plum), var(--aisy-primitive-focus-dark));
+    --aisy-color-selection-soft: light-dark(var(--aisy-primitive-paper-3), var(--aisy-primitive-night-surface-muted));
+    --aisy-color-accent: light-dark(var(--aisy-primitive-aqua), var(--aisy-primitive-success-dark));
+    --aisy-color-accent-soft: light-dark(var(--aisy-primitive-info-soft), var(--aisy-primitive-info-soft-dark));
+    --aisy-color-goal: light-dark(var(--aisy-primitive-goal), var(--aisy-primitive-warning-dark));
+    --aisy-color-border: light-dark(var(--aisy-primitive-border-light), var(--aisy-primitive-border-dark));
+    --aisy-color-focus: light-dark(var(--aisy-primitive-focus-light), var(--aisy-primitive-focus-dark));
+    --aisy-color-success: light-dark(var(--aisy-primitive-success), var(--aisy-primitive-success-dark));
+    --aisy-color-success-soft: light-dark(var(--aisy-primitive-success-soft), var(--aisy-primitive-success-soft-dark));
+    --aisy-color-warning: light-dark(var(--aisy-primitive-warning), var(--aisy-primitive-warning-dark));
+    --aisy-color-warning-soft: light-dark(var(--aisy-primitive-warning-soft), var(--aisy-primitive-warning-soft-dark));
+    --aisy-color-danger: light-dark(var(--aisy-primitive-danger), var(--aisy-primitive-danger-dark));
+    --aisy-color-danger-soft: light-dark(var(--aisy-primitive-danger-soft), var(--aisy-primitive-danger-soft-dark));
+    --aisy-color-info: var(--aisy-color-accent);
+    --aisy-color-info-soft: var(--aisy-color-accent-soft);
+    --aisy-color-scrim: light-dark(var(--aisy-primitive-ink-muted), var(--aisy-primitive-night-stage));
+
+    --aisy-depth-control: light-dark(var(--aisy-primitive-depth-control-light), var(--aisy-primitive-depth-control-dark));
+    --aisy-depth-sheet: light-dark(var(--aisy-primitive-depth-sheet-light), var(--aisy-primitive-depth-sheet-dark));
+    --aisy-depth-action: light-dark(var(--aisy-primitive-depth-action-light), var(--aisy-primitive-depth-action-dark));
+    --aisy-depth-pressed: light-dark(var(--aisy-primitive-depth-pressed-light), var(--aisy-primitive-depth-pressed-dark));
+
+    --aisy-font-interface: var(--aisy-primitive-font-interface);
+    --aisy-font-friendly: var(--aisy-primitive-font-display);
+    --aisy-font-size-body: var(--aisy-primitive-font-body);
+    --aisy-font-size-label: var(--aisy-primitive-font-label);
+    --aisy-font-size-display: var(--aisy-primitive-font-display-size);
+    --aisy-line-height-body: var(--aisy-primitive-leading-body);
+    --aisy-weight-regular: var(--aisy-primitive-weight-regular);
+    --aisy-weight-strong: var(--aisy-primitive-weight-strong);
+    --aisy-space-1: var(--aisy-primitive-space-1);
+    --aisy-space-2: var(--aisy-primitive-space-2);
+    --aisy-space-3: var(--aisy-primitive-space-3);
+    --aisy-space-4: var(--aisy-primitive-space-4);
+    --aisy-space-5: var(--aisy-primitive-space-5);
+    --aisy-space-6: var(--aisy-primitive-space-6);
+    --aisy-space-7: var(--aisy-primitive-space-7);
+    --aisy-space-8: var(--aisy-primitive-space-8);
+    --aisy-space-12: var(--aisy-primitive-space-12);
+    --aisy-radius-control: var(--aisy-primitive-radius-control);
+    --aisy-radius-card: var(--aisy-primitive-radius-card);
+    --aisy-radius-round: var(--aisy-primitive-radius-round);
+    --aisy-touch-target: var(--aisy-primitive-size-touch);
+    --aisy-content-width: var(--aisy-primitive-size-phone);
+    --aisy-shadow-1: var(--aisy-depth-control);
+    --aisy-shadow-2: var(--aisy-depth-sheet);
+    --aisy-motion-fast: var(--aisy-primitive-motion-press);
+    --aisy-motion-standard: var(--aisy-primitive-motion-feedback);
+    --aisy-motion-slow: var(--aisy-primitive-motion-route);
+    --aisy-motion-reduced: var(--aisy-primitive-motion-reduced);
+    --aisy-motion-reduced-opacity: var(--aisy-primitive-motion-reduced-opacity);
+    --aisy-motion-ease: var(--aisy-primitive-ease);
+  }
+
+  :root[data-theme="light"] {
+    color-scheme: light;
+  }
+
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme]) {
+      color-scheme: dark;
+    }
+  }
+}
+
+@layer aisy-components {
+  :root {
+    --aisy-phone-inline-size: var(--aisy-content-width);
+    --aisy-phone-radius: var(--aisy-radius-card);
+    --aisy-phone-background: var(--aisy-color-background);
+    --aisy-phone-shadow: var(--aisy-depth-sheet);
+    --aisy-surface-background: var(--aisy-color-surface-raised);
+    --aisy-surface-border: var(--aisy-color-border);
+    --aisy-surface-radius: var(--aisy-radius-card);
+    --aisy-surface-shadow: var(--aisy-depth-sheet);
+    --aisy-control-background: var(--aisy-color-surface);
+    --aisy-control-hover-background: var(--aisy-color-surface-muted);
+    --aisy-control-foreground: var(--aisy-color-text);
+    --aisy-control-border: var(--aisy-color-border);
+    --aisy-control-radius: var(--aisy-radius-control);
+    --aisy-control-shadow: var(--aisy-depth-control);
+    --aisy-button-height: var(--aisy-primitive-size-button);
+    --aisy-button-radius: var(--aisy-primitive-radius-action);
+    --aisy-button-padding-start: 26px;
+    --aisy-button-padding-end: 10px;
+    --aisy-button-affordance-size: var(--aisy-primitive-size-affordance);
+    --aisy-button-background: var(--aisy-color-primary);
+    --aisy-button-hover-background: var(--aisy-color-primary-hover);
+    --aisy-button-active-background: var(--aisy-color-primary-active);
+    --aisy-button-foreground: var(--aisy-color-on-primary);
+    --aisy-button-affordance-background: var(--aisy-color-action-affordance);
+    --aisy-button-affordance-foreground: var(--aisy-color-primary);
+    --aisy-button-shadow: var(--aisy-depth-action);
+    --aisy-choice-min-height: var(--aisy-touch-target);
+    --aisy-choice-background: var(--aisy-control-background);
+    --aisy-choice-selected-background: var(--aisy-color-selection-soft);
+    --aisy-choice-border: var(--aisy-control-border);
+    --aisy-choice-selected-border: var(--aisy-color-selection);
+    --aisy-alert-info-background: var(--aisy-color-info-soft);
+    --aisy-alert-success-background: var(--aisy-color-success-soft);
+    --aisy-alert-warning-background: var(--aisy-color-warning-soft);
+    --aisy-alert-danger-background: var(--aisy-color-danger-soft);
+    --aisy-focus-color: var(--aisy-color-focus);
+    --aisy-focus-offset-color: var(--aisy-color-background);
+    --aisy-focus-width: var(--aisy-space-1);
+    --aisy-focus-offset: var(--aisy-space-1);
+  }
+}
+
+html {
+  min-inline-size: 0;
+  background: var(--aisy-color-stage);
+}
+
+body,
 .aisy-document {
   margin: 0;
   min-block-size: 100dvh;
-  background: var(--aisy-color-background);
+  background: var(--aisy-color-stage);
   color: var(--aisy-color-text);
   font: var(--aisy-weight-regular) var(--aisy-font-size-body) / var(--aisy-line-height-body) var(--aisy-font-interface);
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 .aisy-reading-canvas {
-  inline-size: min(100% - (2 * var(--aisy-space-4)), var(--aisy-content-width));
+  inline-size: min(calc(100% - (2 * var(--aisy-space-5))), var(--aisy-content-width));
   margin-inline: auto;
 }
 
 .aisy-surface {
-  border: 1px solid var(--aisy-color-border);
-  border-radius: var(--aisy-radius-card);
-  background: var(--aisy-color-surface);
-  box-shadow: var(--aisy-shadow-1);
+  border: 1px solid var(--aisy-surface-border);
+  border-radius: var(--aisy-surface-radius);
+  background: var(--aisy-surface-background);
+  box-shadow: var(--aisy-surface-shadow);
+  color: var(--aisy-color-text);
 }
 
 .aisy-mark {
@@ -100,7 +325,7 @@
 }
 
 .aisy-offline-card {
-  inline-size: min(100%, 420px);
+  inline-size: min(100%, var(--aisy-content-width));
   padding: var(--aisy-space-8) var(--aisy-space-6);
   text-align: center;
 }
@@ -138,42 +363,212 @@
 .aisy-privacy-page .notice {
   border: 1px solid var(--aisy-color-warning);
   border-radius: var(--aisy-radius-control);
-  background: var(--aisy-color-surface-muted);
+  background: var(--aisy-color-warning-soft);
   padding: var(--aisy-space-3) var(--aisy-space-4);
+  color: var(--aisy-color-text);
 }
 
 .aisy-button {
   display: inline-flex;
+  inline-size: 100%;
+  min-block-size: var(--aisy-button-height);
   align-items: center;
-  justify-content: center;
-  gap: var(--aisy-space-2);
+  justify-content: space-between;
+  gap: var(--aisy-space-4);
   border: 0;
-  border-radius: var(--aisy-radius-control);
-  background: var(--aisy-color-primary);
-  color: var(--aisy-color-on-primary);
-  padding: var(--aisy-space-3) var(--aisy-space-4);
-  font: var(--aisy-weight-strong) var(--aisy-font-size-body) / 1.25 var(--aisy-font-interface);
+  border-radius: var(--aisy-button-radius);
+  background: var(--aisy-button-background);
+  box-shadow: var(--aisy-button-shadow);
+  color: var(--aisy-button-foreground);
+  padding: 0 var(--aisy-button-padding-end) 0 var(--aisy-button-padding-start);
+  font: 800 var(--aisy-font-size-body) / 1.25 var(--aisy-font-interface);
+  text-align: start;
   text-decoration: none;
   cursor: pointer;
+  touch-action: manipulation;
   transition: background-color var(--aisy-motion-fast) var(--aisy-motion-ease),
     box-shadow var(--aisy-motion-fast) var(--aisy-motion-ease),
-    opacity var(--aisy-motion-fast) var(--aisy-motion-ease);
+    color var(--aisy-motion-fast) var(--aisy-motion-ease),
+    transform var(--aisy-motion-fast) var(--aisy-motion-ease);
 }
 
-.aisy-button:hover {
-  background: var(--aisy-color-primary-hover);
+.aisy-button::after {
+  content: "→";
+  display: grid;
+  box-sizing: border-box;
+  inline-size: var(--aisy-button-affordance-size);
+  block-size: var(--aisy-button-affordance-size);
+  flex: 0 0 var(--aisy-button-affordance-size);
+  place-items: center;
+  border-radius: var(--aisy-radius-round);
+  background: var(--aisy-button-affordance-background);
+  box-shadow: var(--aisy-depth-control);
+  color: var(--aisy-button-affordance-foreground);
+  font: 900 20px/1 var(--aisy-font-friendly);
+}
+
+@media (hover: hover) {
+  .aisy-button:hover {
+    background: var(--aisy-button-hover-background);
+  }
+}
+
+.aisy-button:active {
+  background: var(--aisy-button-active-background);
+  box-shadow: var(--aisy-depth-pressed);
+  transform: translateY(2px);
 }
 
 .aisy-button--secondary {
-  border: 1px solid var(--aisy-color-primary);
-  background: var(--aisy-color-surface);
-  color: var(--aisy-color-primary);
+  inline-size: auto;
+  min-block-size: 48px;
+  justify-content: center;
+  border: 1px solid var(--aisy-control-border);
+  border-radius: var(--aisy-control-radius);
+  background: var(--aisy-control-background);
+  box-shadow: var(--aisy-control-shadow);
+  color: var(--aisy-control-foreground);
+  padding-inline: var(--aisy-space-5);
+  text-align: center;
+}
+
+.aisy-button--secondary::after {
+  content: none;
 }
 
 .aisy-button--secondary:hover,
 .aisy-button--secondary:active {
-  background: var(--aisy-color-surface-muted);
+  background: var(--aisy-control-hover-background);
   color: var(--aisy-color-text);
+}
+
+.aisy-button[aria-busy="true"] {
+  cursor: progress;
+}
+
+.aisy-button[aria-busy="true"]::after {
+  content: "";
+  border: 3px solid currentColor;
+  border-inline-end-color: transparent;
+  animation: aisy-button-spinner 800ms linear infinite;
+}
+
+@keyframes aisy-button-spinner {
+  to { transform: rotate(1turn); }
+}
+
+.aisy-button:is(:disabled, [aria-disabled="true"]) {
+  background: var(--aisy-color-surface-muted);
+  box-shadow: none;
+  color: var(--aisy-color-text-muted);
+  opacity: 1;
+  transform: none;
+}
+
+.aisy-button:is(:disabled, [aria-disabled="true"])::after {
+  background: var(--aisy-color-action-affordance);
+  box-shadow: none;
+  color: var(--aisy-color-action-affordance-disabled);
+}
+
+.aisy-choice {
+  display: flex;
+  min-block-size: 48px;
+  align-items: center;
+  gap: var(--aisy-space-3);
+  border: 1px solid var(--aisy-choice-border);
+  border-radius: var(--aisy-control-radius);
+  background: var(--aisy-choice-background);
+  box-shadow: var(--aisy-control-shadow);
+  color: var(--aisy-color-text);
+  padding: var(--aisy-space-3) var(--aisy-space-4);
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background-color var(--aisy-motion-standard) var(--aisy-motion-ease),
+    border-color var(--aisy-motion-standard) var(--aisy-motion-ease),
+    box-shadow var(--aisy-motion-standard) var(--aisy-motion-ease),
+    transform var(--aisy-motion-fast) var(--aisy-motion-ease);
+}
+
+.aisy-choice:is([aria-checked="true"], .is-selected),
+.aisy-choice:has(input:checked) {
+  border-color: var(--aisy-choice-selected-border);
+  background: var(--aisy-choice-selected-background);
+}
+
+.aisy-choice:is(:active, .is-pressed) {
+  box-shadow: var(--aisy-depth-pressed);
+  transform: translateY(1px);
+}
+
+.aisy-choice.is-correct {
+  border-color: var(--aisy-color-success);
+  background: var(--aisy-color-success-soft);
+}
+
+.aisy-choice.is-incorrect {
+  border-color: var(--aisy-color-danger);
+  background: var(--aisy-color-danger-soft);
+}
+
+.aisy-choice:is([aria-disabled="true"], :has(input:disabled)) {
+  cursor: not-allowed;
+  transform: none;
+}
+
+.aisy-choice:is([aria-disabled="true"], :has(input:disabled)):not(.is-correct):not(.is-incorrect) {
+  border-color: var(--aisy-color-border);
+  background: var(--aisy-color-surface-muted);
+  box-shadow: none;
+  color: var(--aisy-color-text-muted);
+}
+
+.aisy-choice.is-correct::after,
+.aisy-choice.is-incorrect::after {
+  margin-inline-start: auto;
+  font-weight: var(--aisy-weight-strong);
+  white-space: nowrap;
+}
+
+.aisy-choice.is-correct::after {
+  content: "✓ Верно";
+}
+
+.aisy-choice.is-incorrect::after {
+  content: "× Ошибка";
+}
+
+.aisy-alert {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--aisy-space-3);
+  border: 1px solid var(--aisy-color-border);
+  border-radius: var(--aisy-radius-control);
+  background: var(--aisy-alert-info-background);
+  padding: var(--aisy-space-4);
+  color: var(--aisy-color-text);
+}
+
+.aisy-alert--success {
+  background: var(--aisy-alert-success-background);
+}
+
+.aisy-alert--warning {
+  background: var(--aisy-alert-warning-background);
+}
+
+.aisy-alert--danger {
+  background: var(--aisy-alert-danger-background);
+}
+
+.aisy-sr-only {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
 }
 
 :where(button, [role="button"], a, input, select, textarea, summary) {
@@ -182,13 +577,12 @@
 }
 
 :where(button, [role="button"], a, input, select, textarea, summary):focus-visible {
-  outline: 3px solid var(--aisy-color-focus) !important;
+  outline: 3px solid var(--aisy-focus-color) !important;
   outline-offset: 3px !important;
 }
 
 :where(button, [role="button"], input, select, textarea):disabled,
 :where([aria-disabled="true"]) {
-  opacity: 0.48;
   cursor: not-allowed;
 }
 
@@ -199,6 +593,19 @@
     scroll-behavior: auto !important;
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    transition-duration: var(--aisy-motion-reduced) !important;
+  }
+
+  .aisy-button:active,
+  .aisy-choice:is(:active, .is-pressed) {
+    transform: none;
+  }
+
+  /* New A-route transitions opt into a brief opacity-only replacement; existing controls retain
+     the stricter 0.01 ms accessibility contract above. */
+  .aisy-paper-transition {
+    transition-property: opacity !important;
+    transition-duration: var(--aisy-motion-reduced-opacity) !important;
+    transform: none !important;
   }
 }

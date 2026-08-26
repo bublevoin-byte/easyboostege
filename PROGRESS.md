@@ -1,3 +1,25 @@
+# Aisy — production UI «Бумажный маршрут»
+
+Спека: [.scratch/aisy-production-ui-a/spec.md](.scratch/aisy-production-ui-a/spec.md)
+Тикеты: [.scratch/aisy-production-ui-a/issues/](.scratch/aisy-production-ui-a/issues/)
+Ветка: `prototype/aisy-today-visual-v1`
+
+Overall status: `in-progress` — production-фундамент A готов; следующий frontier — первый запуск и VK ID.
+
+| № | Что даёт | Статус |
+|---|---|---|
+| 01 | Трёхслойная light/dark тема, локальные шрифты, CTA и phone-only shell | done |
+| 02 | Logo/onboarding и server-side VK ID с local provider | in-progress |
+| 03 | Strict access и production Today | blocked by 02 |
+| 04–10 | Все learner-модули, ЕГЭ, Прогресс и Профиль | blocked by 03 |
+| 11 | PWA/release evidence | blocked by 02–10 |
+
+Ticket 01: независимый Standards/Spec re-review — без замечаний в границах тикета. Обязательный gate:
+`npm run lint`, `npm run check`, `npm test` (`1919 total / 1871 passed / 48 skipped / 0 failed`), production build,
+Aisy accessibility/offline E2E и diff-check — зелёные. Learner canvas ограничен 390 px; навигация остаётся снизу.
+
+---
+
 # Aisy ЕГЭ — Style Lab и дизайн-система для утверждения
 
 Спека: [.scratch/aisy-style-lab/spec.md](.scratch/aisy-style-lab/spec.md)
