@@ -39,34 +39,62 @@ async function askProvider({ url, key, model, name }, system, user, limits, {
 } = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), limits.timeoutMs);
-  let r;
+  let dispatched = false;
   try {
-    r = await gate.run(() => fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json', Authorization: 'Bearer ' + key,
-      ...(typeof idempotencyKey === 'string' && /^[a-zA-Z0-9._:-]{1,200}$/u.test(idempotencyKey)
-        ? { 'Idempotency-Key': idempotencyKey } : {}),
-    },
-    signal: controller.signal,
-    body: JSON.stringify({
-      model,
-      temperature: 0.3,
-      max_tokens: limits.maxTokens,
-      messages: [...(system ? [{ role: 'system', content: system }] : []), { role: 'user', content: user }],
-      ...(name === 'grok' && responseFormat ? { response_format: responseFormat } : {}),
-    }),
-  }));
+    return await gate.run(async () => {
+      dispatched = true;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json', Authorization: 'Bearer ' + key,
+          ...(typeof idempotencyKey === 'string' && /^[a-zA-Z0-9._:-]{1,200}$/u.test(idempotencyKey)
+            ? { 'Idempotency-Key': idempotencyKey } : {}),
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model,
+          temperature: 0.3,
+          max_tokens: limits.maxTokens,
+          messages: [...(system ? [{ role: 'system', content: system }] : []), { role: 'user', content: user }],
+          ...(name === 'grok' && responseFormat ? { response_format: responseFormat } : {}),
+        }),
+      });
+      let body;
+      try {
+        body = await response.json();
+      } catch (error) {
+        /* A 2xx acknowledges that the provider accepted the request. If its body cannot be read
+           or parsed, the paid result is unknown and no automatic fallback is safe. A non-2xx
+           status is itself a definitive refusal, even when its optional error body is broken. */
+        if (error) {
+          error.providerDispatch = response.ok ? 'possibly_dispatched' : 'definitive_response';
+          error.providerStatus = response.status;
+        }
+        throw error;
+      }
+      if (!response.ok) {
+        const error = new Error((body?.error && body.error.message) || ('HTTP ' + response.status));
+        error.providerDispatch = 'definitive_response';
+        error.providerStatus = response.status;
+        throw error;
+      }
+      return {
+        text: body?.choices?.[0]?.message?.content || '',
+        promptTokens: Number.isInteger(body?.usage?.prompt_tokens) ? body.usage.prompt_tokens : null,
+        completionTokens: Number.isInteger(body?.usage?.completion_tokens) ? body.usage.completion_tokens : null,
+      };
+    });
+  } catch (error) {
+    /* Queue rejection is known not to have left this process. A rejected fetch or an unreadable
+       successful response may represent paid work whose acknowledgement never reached us; those
+       cases need the manual paid-repeat protocol. */
+    if (error && !error.providerDispatch) {
+      error.providerDispatch = dispatched ? 'possibly_dispatched' : 'not_dispatched';
+    }
+    throw error;
   } finally {
     clearTimeout(timeout);
   }
-  const j = await r.json();
-  if (!r.ok) throw new Error((j.error && j.error.message) || ('HTTP ' + r.status));
-  return {
-    text: j.choices?.[0]?.message?.content || '',
-    promptTokens: Number.isInteger(j.usage?.prompt_tokens) ? j.usage.prompt_tokens : null,
-    completionTokens: Number.isInteger(j.usage?.completion_tokens) ? j.usage.completion_tokens : null,
-  };
 }
 
 function configuredProviders() {
@@ -145,8 +173,14 @@ export function createProviderClient({ provider: pinned = null, model = null, ti
       if (!provider) throw firstError;
 
       const startedAt = Date.now();
-      const context = typeof callControls.beforeAttempt === 'function'
-        ? await callControls.beforeAttempt(provider, { attempt: 1 }) : null;
+      let context;
+      try {
+        context = typeof callControls.beforeAttempt === 'function'
+          ? await callControls.beforeAttempt(provider, { attempt: 1 }) : null;
+      } catch (claimError) {
+        claimError.repairOf = firstError.message;
+        throw claimError;
+      }
       let retry;
       try {
         retry = await ask(

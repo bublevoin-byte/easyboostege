@@ -7,7 +7,7 @@
   const MAX_PENDING_GRAMMAR_EVENTS=20;
   const MAX_ATTEMPT_BYTES=20_000;
   const GRAMMAR_SYNC_CHANNEL='easyboost-grammar-mastery-sync-v1';
-  const NON_SYNC_PROGRESS_MODULES=new Set(['grammarMastery','grammarRunner']);
+  const NON_SYNC_PROGRESS_MODULES=new Set(['grammarMastery','grammarRunner','works','essays','writingAttemptIds']);
   let baseline={};
   const flushingByOwner=new Map();
   let owner=null;
@@ -159,7 +159,8 @@
     let snapshot=true;try{localStorage.removeItem('eb_data_'+ownerKey);localStorage.removeItem('eb_data_'+ownerKey+'_g'+ownerGeneration);
       localStorage.removeItem('easyboost-ege-mock-written-v1:'+ownerKey+':'+ownerGeneration);
       localStorage.removeItem('easyboost-ege-mock-written-v1:'+ownerKey+':'+ownerGeneration+':invalidation');
-      localStorage.removeItem('easyboost-ege-mock-oral-v1:'+ownerKey+':'+ownerGeneration)}catch(_){snapshot=false}
+      localStorage.removeItem('easyboost-ege-mock-oral-v1:'+ownerKey+':'+ownerGeneration);
+      localStorage.removeItem('easyboost.writing-evaluation.v1:'+encodeURIComponent(ownerKey)+':'+ownerGeneration)}catch(_){snapshot=false}
     const modulesCleared=writeModuleStore(moduleStore);
     const attemptsCleared=writeAttemptStore(attemptStore);
     const grammarCleared=writeGrammarEventStore(grammarStore);

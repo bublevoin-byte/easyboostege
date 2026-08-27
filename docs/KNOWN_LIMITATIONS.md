@@ -14,3 +14,15 @@ The verified Node SDK input accepts strict PCM16 mono 16 kHz WAV only. The offic
 - До ротации production AI-ключей релиз считается ограниченным pre-release.
 - Reading 2.0 закрывает отдельные тренировки и полный раздел чтения 10–18, но не является цельным пробником всей письменной и устной частей ЕГЭ; такой пробник остаётся следующим этапом.
 - Расширенный Reading-отчёт показывает наблюдаемые связи только по завершённым каноническим попыткам (не более 120 последних строк). Малые выборки явно помечаются; темы, CEFR-метки и рекомендации не доказывают освоение или причинную связь.
+
+## Ticket 07 controlled-update release dependency
+
+Ticket 07 intentionally fails closed with `CLIENT_UPDATE_REQUIRED` when an ordinary Writing task request lacks the
+new expected-owner/idempotency headers. The server performs no provider, quota, delivery or attempt mutation in
+that case. A pre-Ticket07 page already running from an old service-worker cache can still catch HTTP 428 in its old
+JavaScript and display the former fabricated local review; this server cannot repair text already embedded in that
+legacy client without weakening owner intent or exactly-once safety.
+
+Therefore Ticket 07 must not be deployed independently. Ticket 11 must first provide a controlled service-worker
+version activation/cutover that prevents old active pages from submitting across the server change. This is a
+release-order dependency only; Ticket 11 is not implemented here.

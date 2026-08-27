@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 
 import {
-  getWritingRules, parseAndValidateWritingReview, prepareWritingEvaluation, WRITING_PROMPT_VERSION,
+  getWritingRules, parseStoredWritingReview, prepareWritingEvaluation, WRITING_PROMPT_VERSION,
 } from '../ai/writing.js';
 import { sanitizeStudentText } from '../validation/student-text.js';
 import { resolveEgeMockCriteriaRef } from './criteria.js';
@@ -306,12 +306,12 @@ export function applyEgeMockWritingAssessmentClaimRenewal(row, { claimToken, now
 }
 
 function exactReview(item, review) {
-  const validated = parseAndValidateWritingReview(JSON.stringify(review), {
+  const validated = parseStoredWritingReview(review, {
     taskType: item.task_type,
     assignment: item.assignment,
     answer: item.full_answer,
     criteriaSnapshot: item.criteria_snapshot,
-  });
+  }, item.prompt_version);
   if (validated.overall_max !== item.maximum
     || validated.criteria.length !== item.criteria_snapshot.length
     || validated.criteria.some((criterion, index) => (

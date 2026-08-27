@@ -66,7 +66,7 @@ test('writing and speaking reviews mount the shared tutor and keep only server-i
   );
 
   assert.match(writingSource, /import \{voiceTutorButton\} from '\.\.\/voice-tutor-loader\.js'/u);
-  assert.match(writingSource, /renderReview\(d,response\.evaluationScope,response\.voiceTutor\)/u);
+  assert.match(writingSource, /renderReview\(d,response\.evaluationScope,response\.voiceTutor,\{progressStored\}\)/u);
   assert.match(writingSource, /voiceTutorButton\(voiceTutor\)/u);
 
   assert.match(speakingSource, /import \{voiceTutorButton\} from '\.\.\/voice-tutor-loader\.js'/u);

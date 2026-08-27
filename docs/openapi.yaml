@@ -2523,39 +2523,97 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '409': { description: OWNER_CHANGED; intended owner does not match the authenticated account }
         '429': { $ref: '#/components/responses/RateLimited' }
-  /api/v1/ai/evaluate-writing:
+  /api/v1/tasks/next:
     post:
-      summary: Evaluate EGE writing task 37 or 38
+      summary: Deliver the next unseen server-owned learning task
+      parameters:
+        - $ref: '#/components/parameters/ExpectedOwner'
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [taskType, taskId, answer]
+              required: [operation]
               properties:
-                taskType: { type: string, enum: [writing_37, writing_38] }
-                taskId: { type: string, maxLength: 120 }
-                answer: { type: string }
+                operation:
+                  type: string
+                  enum: [writing_task_37, writing_task_38]
               additionalProperties: false
       responses:
         '200':
-          description: Validated review with explicit experimental assessment metadata
+          description: Unseen built-in, shared-bank or newly generated task
+          headers:
+            X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' }
           content:
             application/json:
               schema:
                 type: object
-                required: [review, provider, attemptId, voiceTutor, assessment, evaluationScope]
+                required: [taskId, externalId, task, source]
                 properties:
-                  review: { type: object }
+                  taskId: { type: string }
+                  externalId: { type: string, nullable: true }
+                  task: { type: object, additionalProperties: true }
+                  source: { type: string, enum: [builtin, bank, generated] }
+                additionalProperties: false
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { description: SUBSCRIPTION_REQUIRED; active access is required }
+        '409': { description: OWNER_CHANGED; intended owner does not match the authenticated account }
+        '428': { description: CLIENT_UPDATE_REQUIRED; the installed client must refresh before this owner-bound request }
+        '503': { description: Task generation is unavailable after the bank is exhausted }
+  /api/v1/ai/evaluate-writing:
+    post:
+      summary: Evaluate EGE writing task 37 or 38
+      description: The owner-bound UUIDv4 key identifies the exact taskType/taskId/answer payload. Exact completed requests revalidate and prompt-version-aware upcast their stored review into the current public DTO, then attach a fresh server-authoritative Writing progress projection; unsafe archival formats fail closed. Exact failed requests replay their terminal error before current subscription, consent, AI-budget and rate gates. A different payload, or a still-pending claim, returns 409. The client must reuse the same key after an ambiguous network or settlement outcome. A deliberate repeat after WRITING_EVALUATION_SETTLEMENT_UNKNOWN uses a fresh Idempotency-Key and sends the old ambiguous UUID in X-EasyBoost-Acknowledge-Provider-Repeat only after the learner accepts that paid provider work may repeat.
+      parameters:
+        - $ref: '#/components/parameters/ExpectedOwner'
+        - { in: header, name: Idempotency-Key, required: true, schema: { type: string, format: uuid } }
+        - in: header
+          name: X-EasyBoost-Acknowledge-Provider-Repeat
+          required: false
+          description: Old ambiguous evaluation UUID acknowledged by the learner; valid only with a fresh Idempotency-Key for the identical payload.
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  required: [taskType, taskId, answer]
+                  properties:
+                    taskType: { type: string, enum: [writing_37] }
+                    taskId: { type: string, minLength: 1, maxLength: 120 }
+                    answer: { type: string, minLength: 20, maxLength: 12000 }
+                  additionalProperties: false
+                - type: object
+                  required: [taskType, taskId, answer]
+                  properties:
+                    taskType: { type: string, enum: [writing_38] }
+                    taskId: { type: string, minLength: 1, maxLength: 120 }
+                    answer: { type: string, minLength: 20, maxLength: 20000 }
+                  additionalProperties: false
+      responses:
+        '200':
+          description: Validated review with explicit experimental assessment metadata
+          headers:
+            X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [contractVersion, review, provider, attemptId, voiceTutor, assessment, evaluationScope, writingProgress]
+                properties:
+                  contractVersion: { type: string, enum: [writing-evaluation-response-v1] }
+                  review: { $ref: '#/components/schemas/WritingReview' }
                   provider: { type: string, nullable: true }
-                  attemptId: { type: integer }
+                  attemptId: { type: integer, minimum: 1, maximum: 9007199254740991 }
                   voiceTutor:
                     type: object
                     required: [source, attemptId, revision, criterionChoices]
                     properties:
                       source: { type: string, enum: [writing] }
-                      attemptId: { type: integer }
+                      attemptId: { type: integer, minimum: 1, maximum: 9007199254740991 }
                       revision: { type: integer, enum: [1] }
                       criterionChoices:
                         type: array
@@ -2564,13 +2622,20 @@ paths:
                           required: [index, label]
                           properties:
                             index: { type: integer, minimum: 0, maximum: 20 }
-                            label: { type: string, minLength: 1, maxLength: 160 }
+                            label: { type: string, minLength: 1, maxLength: 120 }
                           additionalProperties: false
                   assessment: { $ref: '#/components/schemas/ExperimentalAssessment' }
                   evaluationScope: { $ref: '#/components/schemas/WritingEvaluationScope' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '403': { $ref: '#/components/responses/Forbidden' }
+                  writingProgress: { $ref: '#/components/schemas/WritingProgress' }
+                additionalProperties: false
+        '400': { description: Invalid body, task type, Idempotency-Key, or malformed repeat-acknowledgement header }
+        '403': { description: SUBSCRIPTION_REQUIRED or PRIVACY_CONSENT_REQUIRED }
+        '404': { description: UNKNOWN_TASK; the server-owned assignment was not found }
+        '409': { description: OWNER_CHANGED, WRITING_EVALUATION_IDEMPOTENCY_CONFLICT, WRITING_EVALUATION_IN_PROGRESS, WRITING_EVALUATION_SETTLEMENT_UNKNOWN, WRITING_EVALUATION_REPEAT_ACK_INVALID, WRITING_EVALUATION_REPEAT_ACK_NOT_READY, or WRITING_EVALUATION_REPEAT_ACKNOWLEDGED }
+        '428': { description: CLIENT_UPDATE_REQUIRED; the installed client must refresh before this owner-bound idempotent operation }
         '429': { $ref: '#/components/responses/RateLimited' }
+        '502': { description: AI_RESPONSE_INVALID failed strict writing-review validation, or AI_UNAVAILABLE was durably stored for this exact attempt }
+        '503': { description: AI is not configured or the daily AI budget is unavailable; WRITING_PROGRESS_UNAVAILABLE means the attempt is already stored and only its exact-key status should be retried; WRITING_REPLAY_CONTRACT_UNAVAILABLE means an unsafe archival review failed closed; a provider response whose durable settlement cannot be confirmed is marked settlement-unknown and subsequently returns the 409 recovery contract }
   /api/v1/ai/generate-content:
     post:
       summary: Generate validated educational content with a server-owned prompt
@@ -3560,13 +3625,15 @@ components:
       additionalProperties: false
     EgeMockWritingEvidence:
       type: object
-      required: [title, wrong, right, kind, note]
+      description: Scored errors require a non-empty teaching example distinct from wrong/right; a non-corrective warning may explicitly use an empty example. Persisted pre-v9 feedback is exposed with an archival notice instead of an invented example.
+      required: [title, wrong, right, kind, note, example]
       properties:
         title: { type: string, minLength: 1, maxLength: 160 }
         wrong: { type: string, maxLength: 500 }
         right: { type: string, maxLength: 500 }
         kind: { type: string, enum: [err, warn] }
         note: { type: string, minLength: 1, maxLength: 1000 }
+        example: { type: string, maxLength: 500 }
       additionalProperties: false
     EgeMockWritingEvaluationScope:
       type: object
@@ -6483,9 +6550,21 @@ components:
       additionalProperties: false
     Progress:
       type: object
-      description: Extensible client progress document. grammarMastery is server-owned and rejected on both full and module progress writes.
+      description: Extensible progress document. grammarMastery plus Writing works, essays and prog.write are server-owned; works, essays, writingAttemptIds and nested prog.write are stripped from both full and module progress writes and rebuilt from completed Writing attempts on reads.
       properties:
         learnerPreferences: { $ref: '#/components/schemas/LearnerPreferences' }
+        works:
+          type: array
+          maxItems: 30
+          items: { $ref: '#/components/schemas/WritingProgressWork' }
+          readOnly: true
+        essays: { type: integer, minimum: 0, maximum: 9007199254740991, readOnly: true }
+        prog:
+          type: object
+          description: Extensible module percentages; write is a read-only server-authoritative Writing average.
+          properties:
+            write: { type: integer, minimum: 0, maximum: 100, readOnly: true }
+          additionalProperties: true
       additionalProperties: true
     GrammarRecommendationPointer:
       type: object
@@ -9626,7 +9705,10 @@ components:
       properties:
         mode: { type: string, enum: [experimental] }
         scoreKind: { type: string, enum: [approximate] }
-        warning: { type: string }
+        warning:
+          type: string
+          enum: ['Экспериментальная ИИ-оценка. Балл ориентировочный, может содержать ошибки и не является экспертным заключением.']
+      additionalProperties: false
     SpeakingAutomaticReview:
       type: object
       required: [status, got, max, verdict, criteria, good, fix, confidence, needsRetryReason, scoringVersion]
@@ -9686,6 +9768,33 @@ components:
         warning: { type: string }
         scoringVersion: { type: string, enum: [speaking-fipi-combiner-v2] }
       additionalProperties: false
+    WritingProgressWork:
+      type: object
+      required: [attemptId, t, taskId, g, m, n, ts]
+      properties:
+        attemptId: { type: integer, minimum: 1, maximum: 9007199254740991 }
+        t: { type: integer, enum: [37, 38] }
+        taskId: { type: string, nullable: true, maxLength: 120 }
+        g: { type: integer, minimum: 0, maximum: 14 }
+        m: { type: integer, enum: [6, 14] }
+        n: { type: integer, minimum: 0, maximum: 9007199254740991 }
+        ts: { type: integer, minimum: 0, maximum: 9007199254740991 }
+      additionalProperties: false
+    WritingProgress:
+      type: object
+      description: Server-authoritative total and recent history. confirmedAttempt identifies the exact completed claim even when that attempt is older than the bounded recent-30 works list.
+      required: [version, attemptCount, average, works, confirmedAttempt]
+      properties:
+        version: { type: string, enum: [writing-progress-v1] }
+        attemptCount: { type: integer, minimum: 1, maximum: 9007199254740991 }
+        average: { type: integer, minimum: 0, maximum: 100 }
+        works:
+          type: array
+          minItems: 1
+          maxItems: 30
+          items: { $ref: '#/components/schemas/WritingProgressWork' }
+        confirmedAttempt: { $ref: '#/components/schemas/WritingProgressWork' }
+      additionalProperties: false
     WritingEvaluationScope:
       type: object
       required: [fullWords, evaluatedWords, truncated, evaluatedLimit]
@@ -9694,6 +9803,40 @@ components:
         evaluatedWords: { type: integer, minimum: 0 }
         truncated: { type: boolean }
         evaluatedLimit: { type: integer, enum: [140, 250] }
+      additionalProperties: false
+    WritingReviewCriterion:
+      type: object
+      required: [name, got, max]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        got: { type: integer, minimum: 0, maximum: 14 }
+        max: { type: integer, minimum: 1, maximum: 14 }
+      additionalProperties: false
+    WritingReviewError:
+      type: object
+      description: Teaching feedback ordered in the UI as correction, reusable rule, distinct example and source evidence.
+      required: [title, wrong, right, kind, note, example]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 160 }
+        wrong: { type: string, maxLength: 500 }
+        right: { type: string, maxLength: 500 }
+        kind: { type: string, enum: [err, warn] }
+        note: { type: string, minLength: 1, maxLength: 1000 }
+        example: { type: string, maxLength: 500 }
+      additionalProperties: false
+    WritingReview:
+      type: object
+      required: [words, in_range, overall_got, overall_max, verdict, sub, criteria, errors]
+      properties:
+        words: { type: integer, minimum: 0 }
+        in_range: { type: boolean }
+        overall_got: { type: integer, minimum: 0, maximum: 14 }
+        overall_max: { type: integer, enum: [6, 14] }
+        verdict: { type: string, minLength: 1, maxLength: 160 }
+        sub: { type: string, minLength: 1, maxLength: 500 }
+        criteria: { type: array, minItems: 3, maxItems: 5, items: { $ref: '#/components/schemas/WritingReviewCriterion' } }
+        errors: { type: array, maxItems: 5, items: { $ref: '#/components/schemas/WritingReviewError' } }
+      additionalProperties: false
   responses:
     BadRequest: { description: Invalid request }
     Unauthorized: { description: Missing or expired session }

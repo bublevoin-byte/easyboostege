@@ -40,6 +40,17 @@ function contrast(foreground, background) {
   return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
 }
 
+function attributeValue(openingTag, name) {
+  const match = openingTag.match(new RegExp(`\\s${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, 'iu'));
+  return match?.[1] ?? match?.[2] ?? null;
+}
+
+function associatedLabelIds(source) {
+  return new Set([...source.matchAll(/<label\b([^>]*)>/giu)]
+    .map(([, attributes]) => attributeValue(attributes, 'for'))
+    .filter(Boolean));
+}
+
 test('contrast helper matches the WCAG reference values', () => {
   assert.equal(Math.round(contrast('#000000', '#FFFFFF')), 21);
   assert.equal(Math.round(contrast('#FFFFFF', '#FFFFFF')), 1);
@@ -71,11 +82,17 @@ test('interactive elements are real buttons, links or fields', async () => {
 test('every rendered text field carries a programmatic label', async () => {
   const { combined } = await readFrontend();
   const fields = combined.match(/<(?:input|textarea)\b[^>]*>/giu) || [];
+  const labelledControlIds = associatedLabelIds(combined);
   assert.ok(fields.length >= 3, 'expected the word, grammar and exam gap inputs');
   for (const field of fields) {
-    assert.match(field, /aria-label=|aria-labelledby=/u, `field without a label: ${field}`);
+    const directLabel = attributeValue(field, 'aria-label') || attributeValue(field, 'aria-labelledby');
+    const controlId = attributeValue(field, 'id');
+    assert.ok(directLabel || (controlId && labelledControlIds.has(controlId)), `field without a label: ${field}`);
   }
-  assert.match(combined, /id="w_editor"[^>]*aria-label="Письменный ответ"/u);
+  const writingLabel = [...combined.matchAll(/<label\b([^>]*)>([\s\S]*?)<\/label>/giu)]
+    .find(([, attributes]) => attributeValue(attributes, 'for') === 'w_editor');
+  assert.ok(writingLabel, 'Writing editor must retain its associated visible label');
+  assert.equal(writingLabel[2].trim(), 'Письменный ответ');
 });
 
 test('icon-only controls expose an accessible name', async () => {

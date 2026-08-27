@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import net from 'node:net';
@@ -47,7 +48,7 @@ function validReview(words) {
       { name: 'Организация текста', got: 1, max: 2 },
       { name: 'Языковое оформление', got: 1, max: 2 },
     ],
-    errors: [{ title: 'Артикль', wrong: 'a information', right: 'information', kind: 'err', note: 'неисчисляемое' }],
+    errors: [{ title: 'Артикль', wrong: 'a information', right: 'information', kind: 'err', note: 'неисчисляемое', example: 'This information is useful.' }],
   };
 }
 
@@ -214,6 +215,8 @@ async function startStack({ replies }) {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${jwt.sign({ u: 'student' }, JWT_SECRET)}`,
+          'Idempotency-Key': crypto.randomUUID(),
+          'X-EasyBoost-Expected-Owner': 'student',
         },
         body: JSON.stringify({
           taskType,
@@ -347,7 +350,7 @@ test('a second malformed answer ends the request instead of retrying forever', {
         status: 'failed',
         provider: 'grok',
         model: 'route-provenance-model',
-        promptVersion: 'writing-v8',
+        promptVersion: 'writing-v9',
         errorCode: 'AI_RESPONSE_INVALID',
       },
     );
@@ -495,7 +498,7 @@ test('writing keeps its approximate gate while legacy adaptive Speaking fails cl
     const attempts = await stack.attemptLog();
     assert.deepEqual(
       attempts.writing.map(({ provider, model, prompt_version: promptVersion }) => ({ provider, model, promptVersion })),
-      [{ provider: 'grok', model: 'route-provenance-model', promptVersion: 'writing-v8' }],
+      [{ provider: 'grok', model: 'route-provenance-model', promptVersion: 'writing-v9' }],
     );
     assert.deepEqual(attempts.speaking, []);
   } finally {
@@ -537,7 +540,7 @@ test('both calls of a repaired request are reported, so the budget stays truthfu
     assert.ok(rejected.completionTokens > 0, 'потраченные токены не должны потеряться');
     assert.ok(accepted, 'принятый разбор тоже записывается');
     // Version string only: v6 adds the official token and sentence/question boundary rules.
-    assert.equal(accepted.promptVersion, 'writing-v8');
+    assert.equal(accepted.promptVersion, 'writing-v9');
   } finally {
     await stack.stop();
   }

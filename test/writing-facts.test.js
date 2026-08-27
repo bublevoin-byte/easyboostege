@@ -141,7 +141,7 @@ test('the prompt ships the pre-check results and says so in its version', () => 
   });
 
   // Version string only: v5 means overlength answers are scoped before the provider call.
-  assert.equal(WRITING_PROMPT_VERSION, 'writing-v8');
+  assert.equal(WRITING_PROMPT_VERSION, 'writing-v9');
   assert.match(prompt.user, /Проверено программно/u);
   assert.equal(prompt.facts.questionSentences, 3);
   assert.equal(prompt.facts.words, countWords(LETTER));

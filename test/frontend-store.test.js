@@ -230,7 +230,7 @@ test('startup keeps a legitimate extensible owner progress field separate from r
   assert.deepEqual(JSON.parse(JSON.stringify(harness.restoredPayload())), { owner: { custom: 'kept' }, learned: 1 });
 });
 
-test('startup overlays only the exact owner-generation local grammar workflow, never mastery', async () => {
+test('startup overlays only the exact owner-generation local grammar workflow, never server-owned mastery or Writing progress', async () => {
   const localRunner = {
     schema: 'grammar-runner-v1', catalogVersion: 'grammar-core-v2', sessionId: 'local-session', queue: [],
   };
@@ -238,11 +238,17 @@ test('startup overlays only the exact owner-generation local grammar workflow, n
     localWorkflow: {
       grammarRunner: localRunner,
       grammarMastery: { 2: { stage: 'stable', forged: true } },
+      writingTaskType: 37,
+      writingDrafts: { d37_0: 'stale local draft' },
+      works: [{ attemptId: 3, g: 1, m: 6 }],
       learned: 999,
     },
     restoredState: {
       grammarRunner: { sessionId: 'stale-server-session' },
       grammarMastery: { 2: { stage: 'learning', masteryRevision: 4 } },
+      writingTaskType: 38,
+      writingDrafts: { d38_0: 'newer server draft' },
+      works: [{ attemptId: 8, g: 6, m: 6 }],
       learned: 7,
     },
   });
@@ -254,6 +260,9 @@ test('startup overlays only the exact owner-generation local grammar workflow, n
   assert.deepEqual(JSON.parse(JSON.stringify(harness.savedState())), {
     grammarRunner: localRunner,
     grammarMastery: { 2: { stage: 'learning', masteryRevision: 4 } },
+    writingTaskType: 38,
+    writingDrafts: { d38_0: 'newer server draft' },
+    works: [{ attemptId: 8, g: 6, m: 6 }],
     learned: 7,
   });
 
@@ -307,6 +316,7 @@ test('a real 401 /me response clears the stale marker before another VK account 
       async clearCurrentOwner(owner, generation) { calls.push(`clear:${owner}:${generation}`); return true; },
     },
     rememberSessionOwnerGeneration(owner, generation) { calls.push(`remember:${owner}:${generation}`); },
+    async notifyAuthorityReset(authority) { calls.push(`reset:${authority.owner}:${authority.ownerGeneration}`); },
     classifyLearningAccess() { return { state: 'no-session', session: null }; },
     LEARNING_ACCESS_STATES: { NETWORK_UNKNOWN: 'network-unknown', NO_SESSION: 'no-session' },
     offlineEgeMockContinuation() { return null; },
@@ -323,7 +333,7 @@ test('a real 401 /me response clears the stale marker before another VK account 
   assert.equal(context.TOKEN, '');
   assert.equal(context.S, null);
   assert.deepEqual(calls, [
-    'remember:null:null', 'set-owner:null', 'hide-shell', 'clear:owner-a:3',
+    'remember:null:null', 'set-owner:null', 'hide-shell', 'reset:owner-a:3', 'clear:owner-a:3',
   ]);
 });
 
@@ -352,6 +362,7 @@ test('an authenticated /me owner mismatch closes the prior learner before return
         context.currentUser = null; context.ADOPTED_OWNER_GENERATION = null; context.TOKEN = '';
         return true;
       },
+      async notifyAuthorityReset() {},
       applyLearningAccess(result) { calls.push(`apply:${result.state}`); },
       closeAccessGate() {}, hideLearningShell() { calls.push('hide-shell'); },
       Number, Boolean, Object, String, Date, Promise,

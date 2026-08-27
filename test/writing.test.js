@@ -6,6 +6,7 @@ import {
   countWords,
   getWritingRules,
   parseAndValidateWritingReview,
+  parseStoredWritingReview,
   prepareWritingEvaluation,
   writingRequestSchema,
 } from '../ai/writing.js';
@@ -592,6 +593,11 @@ test('task 38 published-source overlap above 30 percent deterministically forces
   assert.deepEqual(review.criteria.map(({ got }) => got), [0, 0, 0, 0, 0]);
   assert.equal(review.errors.some(({ title }) => /source|РёСЃС‚РѕС‡РЅРёРє/iu.test(title)), true);
   assert.match(buildWritingPrompt(input).user, /10[^\n]*30\s*%|30\s*%[^\n]*10/u);
+
+  const archived = parseStoredWritingReview(candidate, input, 'writing-v7');
+  assert.equal(archived.overall_got, 14,
+    'an exact historical replay preserves its stored score instead of applying the later v8 overlap rule');
+  assert.deepEqual(archived.criteria.map(({ got }) => got), [3, 3, 3, 3, 2]);
 });
 
 test('task 38 treats the exact authored table and percentages as one pinned published-source corpus', () => {

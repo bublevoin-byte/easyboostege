@@ -89,7 +89,7 @@ function validReview(user) {
     verdict: 'В целом неплохо',
     sub: 'Следите за артиклями',
     criteria,
-    errors: [{ title: 'Артикль', wrong: 'a laptop', right: 'the laptop', kind: 'err', note: 'Здесь нужен определённый артикль.' }],
+    errors: [{ title: 'Артикль', wrong: 'a laptop', right: 'the laptop', kind: 'err', note: 'Здесь нужен определённый артикль.', example: 'The laptop on my desk is new.' }],
   });
 }
 
@@ -450,7 +450,7 @@ test('два прогона дают две строки на готовую р�
     /* Разбор пишется целиком: таксономию ошибок и проверку формулировок выводят из журнала, а
      * не оплачивают вторым прогоном. */
     assert.equal(line.review.criteria.length, 3);
-    assert.deepEqual(Object.keys(line.review.errors[0]).sort(), ['kind', 'note', 'right', 'title', 'wrong']);
+    assert.deepEqual(Object.keys(line.review.errors[0]).sort(), ['example', 'kind', 'note', 'right', 'title', 'wrong']);
     assert.equal(line.review.verdict, 'В целом неплохо');
   }
 

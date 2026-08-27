@@ -12,6 +12,7 @@ process.env.XAI_MODEL = 'stub-grok';
 process.env.GROQ_API_KEY = 'stub-groq';
 process.env.GROQ_API_URL = 'https://groq.stub.test/v1/chat/completions';
 process.env.GROQ_MODEL = 'stub-llama';
+process.env.AI_MAX_CONCURRENT_REQUESTS = '1';
 
 const { createProviderClient } = await import('../ai/provider-client.js');
 const { AI_OPERATIONS } = await import('../ai/operations.js');
@@ -30,12 +31,82 @@ function refusal(message, status = 503) {
 function stubFetch(reply) {
   const calls = [];
   globalThis.fetch = async (url, init) => {
-    const call = { url, headers: structuredClone(init.headers), body: JSON.parse(init.body) };
+    const call = {
+      url, headers: structuredClone(init.headers), body: JSON.parse(init.body), signal: init.signal,
+    };
     calls.push(call);
     return reply(call, calls.length);
   };
   return calls;
 }
+
+test('the provider concurrency slot remains held until a successful response body is consumed', async () => {
+  const client = createProviderClient();
+  let releaseFirstBody;
+  const firstBody = new Promise((resolve) => { releaseFirstBody = resolve; });
+  const calls = stubFetch((_call, number) => (number === 1
+    ? { ok: true, status: 200, json: () => firstBody }
+    : answer('second')));
+
+  const first = client.askProvider(GROK, 'system', 'first', 'writing_37');
+  while (calls.length < 1) await new Promise((resolve) => setTimeout(resolve, 0));
+  const second = client.askProvider(GROK, 'system', 'second', 'writing_37');
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  assert.equal(calls.length, 1, 'the queued call cannot enter fetch while the first body is unread');
+  releaseFirstBody({ choices: [{ message: { content: 'first' } }] });
+  assert.equal((await first).text, 'first');
+  assert.equal((await second).text, 'second');
+  assert.equal(calls.length, 2);
+});
+
+test('a hanging successful response body is timed out as possibly dispatched', async () => {
+  const client = createProviderClient({ timeoutMs: 30 });
+  stubFetch((call) => ({
+    ok: true,
+    status: 200,
+    json: () => new Promise((_resolve, reject) => {
+      const guard = setTimeout(() => reject(new Error('successful body escaped the provider timeout')), 250);
+      call.signal.addEventListener('abort', () => {
+        clearTimeout(guard);
+        reject(new DOMException('The response body was aborted', 'AbortError'));
+      }, { once: true });
+    }),
+  }));
+
+  await assert.rejects(
+    () => client.askProvider(GROK, 'system', 'user', 'writing_37'),
+    (error) => error.name === 'AbortError' && error.providerDispatch === 'possibly_dispatched',
+  );
+});
+
+test('an aborted successful response body is possibly dispatched', async () => {
+  const client = createProviderClient();
+  stubFetch(() => ({
+    ok: true,
+    status: 200,
+    async json() { throw new DOMException('The response body was aborted', 'AbortError'); },
+  }));
+
+  await assert.rejects(
+    () => client.askProvider(GROK, 'system', 'user', 'writing_37'),
+    (error) => error.name === 'AbortError' && error.providerDispatch === 'possibly_dispatched',
+  );
+});
+
+test('invalid JSON in a successful provider response is possibly dispatched', async () => {
+  const client = createProviderClient();
+  stubFetch(() => ({
+    ok: true,
+    status: 200,
+    async json() { throw new SyntaxError('Unexpected end of JSON input'); },
+  }));
+
+  await assert.rejects(
+    () => client.askProvider(GROK, 'system', 'user', 'writing_37'),
+    (error) => error instanceof SyntaxError && error.providerDispatch === 'possibly_dispatched',
+  );
+});
 
 test('a call carries the limits of the operation it was made for', async () => {
   const client = createProviderClient();
@@ -75,14 +146,19 @@ test('xAI speaking evaluation sends the official strict json_schema response for
 test('a failing primary provider hands the request to the spare', async () => {
   const client = createProviderClient();
   const calls = stubFetch((call) => (call.url.startsWith('https://xai.') ? refusal('down for maintenance') : answer('from the spare')));
+  const failures = [];
 
-  const result = await client.askWithFallback('system text', 'user text', 'writing_37');
+  const result = await client.askWithFallback('system text', 'user text', 'writing_37', {
+    afterAttempt(_context, outcome) { if (outcome.status === 'failed') failures.push(outcome.error.providerDispatch); },
+  });
 
   assert.equal(result.provider, 'groq');
   assert.equal(result.model, 'stub-llama');
   assert.equal(result.attempts, 2);
   assert.equal(result.text, 'from the spare');
-  assert.match(result.fallbackReason, /grok: down for maintenance/u);
+  assert.equal(result.fallbackReason, 'grok: HTTP_503');
+  assert.doesNotMatch(result.fallbackReason, /down for maintenance/u);
+  assert.deepEqual(failures, ['definitive_response'], 'a real HTTP refusal is safe to send to the configured fallback');
   assert.equal(calls.length, 2);
 });
 
@@ -147,6 +223,23 @@ test('a contract violation buys exactly one corrected attempt', async () => {
   assert.equal(calls.length, 1);
   /* The repair call quotes the rejected output back, labelled as data rather than instruction. */
   assert.match(calls[0].body.messages.at(-1).content, /ОТКЛОНЁННЫЙ_ОТВЕТ/u);
+});
+
+test('a denied format-repair claim preserves the consumed primary contract error', async () => {
+  const client = createProviderClient();
+  await assert.rejects(() => client.parseWithOneRepair({
+    provider: GROK, text: 'bad',
+    parse() { throw new Error('AI_RESPONSE_INVALID_JSON'); },
+    system: 'system', user: 'user', operation: 'writing_37',
+    callControls: {
+      beforeAttempt() {
+        throw Object.assign(new Error('AI_BUDGET_EXHAUSTED'), {
+          code: 'AI_BUDGET_EXHAUSTED', status: 503,
+        });
+      },
+    },
+  }), (error) => error.code === 'AI_BUDGET_EXHAUSTED'
+    && error.repairOf === 'AI_RESPONSE_INVALID_JSON');
 });
 
 test('fallback and format repair expose every physical provider call to one durable meter', async () => {

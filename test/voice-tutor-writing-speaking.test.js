@@ -355,6 +355,7 @@ test('writing and speaking capsules use only completed validated server-owned re
       assignment: { topic: 'School clubs', rows: [{ label: 'Sports', percent: 50 }, { label: 'Music', percent: 30 }, { label: 'Science', percent: 20 }] },
       answer: writing38Answer,
       evaluated_answer: writing38Answer,
+      prompt_version: 'writing-v9',
       review: {
         words: 200, in_range: true, overall_got: 0, overall_max: 14, verdict: 'Нужна доработка.', sub: 'Проверь каждый критерий.',
         criteria: [
@@ -364,7 +365,10 @@ test('writing and speaking capsules use only completed validated server-owned re
           { name: 'Грамматика', got: 0, max: 3 },
           { name: 'Орфография и пунктуация', got: 0, max: 2 },
         ],
-        errors: [{ title: 'Язык', wrong: 'do a decision', right: 'make a decision', kind: 'err', note: 'Проверь лексику и грамматику.' }],
+        errors: [{
+          title: 'Язык', wrong: 'do a decision', right: 'make a decision', kind: 'err',
+          note: 'Use the verb make with the noun decision.', example: 'Students should make a decision together.',
+        }],
       },
     };
     assert.equal(buildWritingSpeakingCapsule({ source: 'writing', attempt: writing38, expectedRevision: 1, criterionIndex: 2 }).checks.transfer_task.answers[0], 'plays');

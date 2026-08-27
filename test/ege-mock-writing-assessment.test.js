@@ -274,7 +274,7 @@ test('a duplicate durable AI claim preserves the prepared token for non-paying r
     .map(([name, maximum]) => ({ name, maximum }));
   const item = {
     position: 37, taskType: 'writing_37', taskId: authored.contentRef.id, maximum: 6,
-    promptVersion: 'writing-v8',
+    promptVersion: 'writing-v9',
     formRef: { id: form.id, revision: form.revision, fingerprint: form.fingerprint },
     contentRef: structuredClone(authored.contentRef), assignment: structuredClone(authored.presentation),
     criteriaRef: authored.assessment.criteriaRef,
@@ -349,7 +349,7 @@ for (const rejection of [
       .map(([name, maximum]) => ({ name, maximum }));
     const item = {
       position: 37, taskType: 'writing_37', taskId: authored.contentRef.id, maximum: 6,
-      promptVersion: 'writing-v8',
+      promptVersion: 'writing-v9',
       formRef: { id: form.id, revision: form.revision, fingerprint: form.fingerprint },
       contentRef: structuredClone(authored.contentRef), assignment: structuredClone(authored.presentation),
       criteriaRef: authored.assessment.criteriaRef,
@@ -423,7 +423,7 @@ test('provider success survives the first post-success lease-renewal failure as 
     .map(([name, maximum]) => ({ name, maximum }));
   const item = {
     position: 37, taskType: 'writing_37', taskId: authored.contentRef.id, maximum: 6,
-    promptVersion: 'writing-v8',
+      promptVersion: 'writing-v9',
     formRef: { id: form.id, revision: form.revision, fingerprint: form.fingerprint },
     contentRef: structuredClone(authored.contentRef), assignment: structuredClone(authored.presentation),
     criteriaRef: authored.assessment.criteriaRef,
@@ -500,7 +500,7 @@ test('automatic prepared-result recovery is non-paying and unresolved work becom
     taskType: 'writing_37',
     taskId: authored.contentRef.id,
     maximum: 6,
-    promptVersion: 'writing-v8',
+      promptVersion: 'writing-v9',
     formRef: { id: form.id, revision: form.revision, fingerprint: form.fingerprint },
     contentRef: structuredClone(authored.contentRef),
     assignment: structuredClone(authored.presentation),
@@ -596,7 +596,7 @@ test('a provider failure after its durable reservation retains prepared-unknown 
   const authored = form.positions[36];
   const item = {
     position: 37, taskType: 'writing_37', taskId: authored.contentRef.id, maximum: 6,
-    promptVersion: 'writing-v8',
+      promptVersion: 'writing-v9',
     formRef: { id: form.id, revision: form.revision, fingerprint: form.fingerprint },
     contentRef: structuredClone(authored.contentRef), assignment: structuredClone(authored.presentation),
     criteriaRef: authored.assessment.criteriaRef,
@@ -939,7 +939,7 @@ test('validated writing reviews become a private replay-safe provisional result 
         { name: 'Организация текста', got: 2, max: 2 },
         { name: 'Языковое оформление', got: 1, max: 2 },
       ],
-      errors: [{ title: 'Грамматика', wrong: 'letter1', right: 'letter2', kind: 'err', note: 'Нужна другая форма.' }],
+      errors: [{ title: 'Грамматика', wrong: 'letter1', right: 'letter2', kind: 'err', note: 'Нужна другая форма.', example: 'A separate corrected sentence.' }],
     };
     const task38Review = {
       words: 220, in_range: true, overall_got: 11, overall_max: 14,

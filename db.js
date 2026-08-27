@@ -67,8 +67,12 @@ export const createTelegramAuthCode = (...args) => repository.createTelegramAuth
 export const confirmTelegramAuthCode = (...args) => repository.confirmTelegramAuthCode(...args);
 export const consumeTelegramAuthCode = (...args) => repository.consumeTelegramAuthCode(...args);
 export const createWritingAttempt = (...args) => repository.createWritingAttempt(...args);
+export const claimWritingEvaluation = (...args) => repository.claimWritingEvaluation(...args);
+export const getWritingEvaluationClaim = (...args) => repository.getWritingEvaluationClaim(...args);
+export const markWritingEvaluationAmbiguous = (...args) => repository.markWritingEvaluationAmbiguous(...args);
 export const finishWritingAttempt = (...args) => repository.finishWritingAttempt(...args);
 export const getWritingAttempt = (...args) => repository.getWritingAttempt(...args);
+export const getWritingProgressSummary = (...args) => repository.getWritingProgressSummary(...args);
 export const createSpeakingAttempt = (...args) => repository.createSpeakingAttempt(...args);
 export const claimSpeakingEvaluation = (...args) => repository.claimSpeakingEvaluation(...args);
 export const getSpeakingEvaluationClaim = (...args) => repository.getSpeakingEvaluationClaim(...args);

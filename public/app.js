@@ -378,9 +378,13 @@ async function commitEgeMockOwnerMutation(owner,canCommit,commit){
 async function clearNoSessionAuthority(authGuard){
   if(!authGuard||authGuard.sessionGeneration!==AUTH_SESSION_GENERATION)return false;
   const previousOwner=authGuard.owner,previousGeneration=authGuard.ownerGeneration;
+  const previousAuthority=previousOwner&&Number.isSafeInteger(previousGeneration)
+    ?{owner:previousOwner,ownerGeneration:previousGeneration}:null;
   AUTH_SESSION_GENERATION+=1;TOKEN='';OFFLINE_EGE_MOCK_CONTINUATION=false;currentUser=null;currentDisplayName=null;S=null;window.__sub=null;
   ADOPTED_OWNER_GENERATION=null;rememberSessionOwnerGeneration(null,null);store.sync.setOwner(null);
-  hideLearningShell();if(!authGuard.deferPresentation)try{firstLaunch.showLogin()}catch(_){show('scr5')}
+  hideLearningShell();
+  if(previousAuthority)await notifyAuthorityReset(previousAuthority);
+  if(!authGuard.deferPresentation)try{firstLaunch.showLogin()}catch(_){show('scr5')}
   if(previousOwner&&Number.isSafeInteger(previousGeneration))await store.clearCurrentOwner?.(previousOwner,previousGeneration);
   return true
 }
@@ -441,10 +445,12 @@ let _saveT=null;
 const START_HOOKS=[];
 function registerStartHook(hook){START_HOOKS.push(hook)}
 function save(options={}){
-  if(SRV&&(!TOKEN||!currentOwnerAuthorityCurrent())||!SRV&&store.sync.isOwnerDeleted?.(currentUser))return;
+  if(SRV&&(!TOKEN||!currentOwnerAuthorityCurrent())||!SRV&&store.sync.isOwnerDeleted?.(currentUser))return false;
   /* локальный снимок держит слова, SRS, грамматику и прогресс доступными без сети */
-  store.saveLocal(currentUser,S,ADOPTED_OWNER_GENERATION);
-  if(SRV){clearTimeout(_saveT);if(options.queueNow)store.sync.queueProgress(S);_saveT=setTimeout(()=>{if(currentOwnerAuthorityCurrent())store.sync.saveProgress(S)},600)}}
+  const stored=store.saveLocal(currentUser,S,ADOPTED_OWNER_GENERATION);
+  if(SRV){clearTimeout(_saveT);if(options.queueNow)store.sync.queueProgress(S);_saveT=setTimeout(()=>{if(currentOwnerAuthorityCurrent())store.sync.saveProgress(S)},600)}
+  return stored;
+}
 async function invalidateLearningAuthority(authority,{deferPresentation=false}={}){
   var owner=authority&&authority.owner,ownerGeneration=authority&&authority.ownerGeneration;
   if(currentUser!==owner||ADOPTED_OWNER_GENERATION!==ownerGeneration)return false;
@@ -1081,11 +1087,15 @@ function applyTaskBank(bank){
 function loadTaskBank(signal=null){
   return EasyBoostApi.get('/task-bank.json',signal?{signal:signal}:{}).then(applyTaskBank).catch(function(){return 0});
 }
-function wrSyncTile(){if(!S)return;var sum=writingModule.summary(S.works);
-  if(!sum.count){setTxt('sub_write','задания 37–38 · ИИ');return}
-  S.prog=S.prog||{};S.prog.write=sum.average;
-  setTxt('sub_write','работ: '+sum.count+' · средний '+sum.average+'%')}
-registerStartHook(function(){return window.EasyBoostWriting?wrSyncTile():null});
+function wrSyncTile(){if(!S)return;var works=(Array.isArray(S.works)?S.works:[]).filter(function(work){
+    return Number.isSafeInteger(Number(work&&work.attemptId))&&Number(work.attemptId)>0});
+  var restored=Number(S.essays),count=Number.isSafeInteger(restored)&&restored>=works.length?restored:works.length;
+  if(!count){setTxt('sub_write','задания 37–38 · ИИ');return}
+  var recent=works.slice(-5),computed=recent.length?Math.round(recent.reduce(function(total,work){return total+(Number(work.g)||0)/(Number(work.m)||1)},0)/recent.length*100):0;
+  var authorityAverage=Number(S.prog&&S.prog.write),average=Number.isInteger(authorityAverage)&&authorityAverage>=0&&authorityAverage<=100?authorityAverage:computed;
+  S.prog=S.prog||{};S.prog.write=average;
+  setTxt('sub_write','работ: '+count+' · средний '+average+'%')}
+registerStartHook(wrSyncTile);
 
 /* legacy block 11 */
 /* ===== GLOW: переливающаяся рамка при вводе ===== */
@@ -1157,5 +1167,5 @@ export {
   grammarModule,lSetSlow,lSt,lSync,listeningModule,profileModule,progressModule,readingModule,
   rEsc,rSt,rWordsHtml,registerScreenGenerator,ringOff,runProfileHooks,setTxt,spSt,spSync,
   speakingModule,srsFail,srsOk,srsRecordVocabularyOutcome,syncModuleAttempt,todayStr,ui,wBase,wDeco,wMergeAi,wMigrate,wRec,wStats,wSync,
-  verifyLearningAccessForLaunch,wordModule,writingModule,
+  verifyLearningAccessForLaunch,wordModule,writingModule,wrSyncTile,
 };

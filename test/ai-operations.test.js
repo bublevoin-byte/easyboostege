@@ -4,7 +4,7 @@ import test from 'node:test';
 
 import { AI_OPERATIONS, operationLimits, operationNames, providersFor } from '../ai/operations.js';
 import { createConcurrencyGate } from '../ai/provider-control.js';
-import { parseAndValidateWritingReview } from '../ai/writing.js';
+import { parseAndValidateWritingReview, parseStoredWritingReview } from '../ai/writing.js';
 
 const REVIEW = {
   words: 3,
@@ -64,13 +64,70 @@ test('a review carrying markup is rejected, not escaped and stored', () => {
     (review) => { review.verdict = 'Ошибка <b>тут</b>'; },
     (review) => { review.sub = 'Совет <script>x</script>'; },
     (review) => { review.criteria[0].name = 'Критерий <i>'; },
-    (review) => { review.errors = [{ title: 'a', wrong: '<b>x</b>', right: '', kind: 'err', note: 'n' }]; },
-    (review) => { review.errors = [{ title: 'a', wrong: '', right: '', kind: 'err', note: 'note <div>' }]; },
+    (review) => { review.errors = [{ title: 'a', wrong: '<b>x</b>', right: '', kind: 'err', note: 'n', example: 'Example sentence.' }]; },
+    (review) => { review.errors = [{ title: 'a', wrong: '', right: '', kind: 'err', note: 'note <div>', example: 'Example sentence.' }]; },
   ]) {
     const review = structuredClone(REVIEW);
     mutate(review);
     assert.throws(() => parseAndValidateWritingReview(JSON.stringify(review), INPUT), /AI_RESPONSE_INVALID_SCHEMA/u);
   }
+});
+
+test('a scored Writing error requires a distinct concrete teaching example', () => {
+  const parse = (error) => parseAndValidateWritingReview(JSON.stringify({
+    ...REVIEW,
+    errors: [error],
+  }), INPUT);
+  const base = {
+    title: 'Agreement', wrong: 'people is', right: 'people are', kind: 'err',
+    note: 'A plural subject takes a plural verb.',
+  };
+
+  assert.throws(() => parse(base), /AI_RESPONSE_INVALID_SCHEMA/u, 'missing example');
+  assert.throws(() => parse({ ...base, example: '' }), /AI_RESPONSE_INVALID_SCHEMA/u, 'empty example');
+  assert.throws(() => parse({ ...base, example: base.wrong }), /AI_RESPONSE_INVALID_SCHEMA/u, 'example repeats evidence');
+  assert.throws(() => parse({ ...base, example: `  ${base.right.toUpperCase()}  ` }), /AI_RESPONSE_INVALID_SCHEMA/u,
+    'example repeats the correction after normalization');
+  assert.doesNotThrow(() => parse({ ...base, example: 'These people are ready.' }));
+
+  assert.doesNotThrow(() => parse({
+    ...base, kind: 'warn', wrong: '', right: '', example: '',
+  }), 'a non-corrective warning may explicitly carry an empty example');
+});
+
+test('Writing criteria are canonicalized before a valid review is persisted or replayed', () => {
+  const reordered = { ...REVIEW, criteria: [REVIEW.criteria[2], REVIEW.criteria[0], REVIEW.criteria[1]] };
+  const parsed = parseAndValidateWritingReview(JSON.stringify(reordered), INPUT);
+  assert.deepEqual(parsed.criteria.map((criterion) => criterion.name), REVIEW.criteria.map((criterion) => criterion.name));
+});
+
+test('stored pre-v9 Writing feedback is truthfully upcast without weakening live v9 parsing', () => {
+  const legacy = {
+    ...REVIEW,
+    errors: [{
+      title: 'Agreement', wrong: 'people is', right: 'people are', kind: 'err',
+      note: 'A plural subject takes a plural verb.',
+    }],
+  };
+  assert.throws(
+    () => parseAndValidateWritingReview(JSON.stringify(legacy), INPUT),
+    /AI_RESPONSE_INVALID_SCHEMA/u,
+  );
+  const stored = parseStoredWritingReview(legacy, INPUT, 'writing-v8');
+  assert.match(stored.errors[0].example, /Архивный разбор до writing-v9/u);
+  assert.throws(
+    () => parseStoredWritingReview(legacy, INPUT, null),
+    /WRITING_STORED_PROMPT_VERSION_UNSUPPORTED/u,
+    'an unversioned archive fails closed instead of guessing a historical contract',
+  );
+  assert.throws(
+    () => parseStoredWritingReview(legacy, INPUT, 'writing-v9'),
+    /AI_RESPONSE_INVALID_SCHEMA/u,
+  );
+  assert.throws(
+    () => parseStoredWritingReview({ ...legacy, errors: [] }, INPUT, 'writing-v10'),
+    /WRITING_STORED_PROMPT_VERSION_UNSUPPORTED/u,
+  );
 });
 
 test('calls above the concurrency limit wait instead of piling onto the provider', async () => {
@@ -92,8 +149,10 @@ test('calls above the concurrency limit wait instead of piling onto the provider
 test('a caller that waits too long is refused rather than hanging', async () => {
   const gate = createConcurrencyGate(1, 20);
   const blocker = gate.run(() => new Promise((resolve) => setTimeout(resolve, 200)));
+  let invoked = false;
 
-  await assert.rejects(() => gate.run(() => 'never'), /AI_QUEUE_TIMEOUT/u);
+  await assert.rejects(() => gate.run(() => { invoked = true; return 'never'; }), /AI_QUEUE_TIMEOUT/u);
+  assert.equal(invoked, false, 'a queue timeout is definitively not dispatched to a provider');
   await blocker;
   assert.equal(gate.stats().waiting, 0, 'a timed-out caller leaves no entry behind');
 });
@@ -109,5 +168,5 @@ test('the deployment can clamp the registry but not raise it', async () => {
   assert.match(route, /Math\.min\(base\.requestsPerHour, config\.ai\.maxRequestsPerHour\)/u);
   assert.match(route, /Math\.min\(base\.timeoutMs, config\.ai\.maxTimeoutMs\)/u);
   assert.match(route, /max_tokens: limits\.maxTokens/u);
-  assert.match(route, /gate\.run\(\(\) => fetch\(url/u);
+  assert.match(route, /gate\.run\(async \(\) => \{[\s\S]{0,120}dispatched = true;[\s\S]{0,120}const response = await fetch\(url/u);
 });

@@ -19,6 +19,7 @@ import { assertAdaptivePlanRepositoryContract } from './support/adaptive-plan-co
 import { assertWordProgressRepositoryContract } from './support/word-progress-contract.js';
 import { assertPersonalWordsProgressRepositoryContract } from './support/personal-words-progress-contract.js';
 import { assertVocabularyAttemptRepositoryContract } from './support/vocabulary-attempt-contract.js';
+import { assertWritingEvaluationClaimContract } from './support/writing-evaluation-claim-contract.js';
 
 async function withRepository(run) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-db-'));
@@ -492,6 +493,164 @@ test('writing attempt and AI metadata are persisted without prompt text in the A
     assert.equal(stored.ai_requests[0].estimatedCostMicrousd, 25);
     assert.equal(JSON.stringify(stored.ai_requests).includes('Student answer text'), false);
   });
+});
+
+test('file Writing evaluation claims are atomic, owner-bound and privacy-safe on export', async () => {
+  await withRepository(async (repository, file) => {
+    const owner = await repository.createTelegramUser(3002, 'Writing Claim Owner');
+    const otherOwner = await repository.createTelegramUser(3003, 'Writing Claim Other');
+    await assertWritingEvaluationClaimContract(assert, repository, owner, otherOwner);
+    const stored = JSON.parse(await fs.readFile(file, 'utf8'));
+    assert.ok(stored.writing_evaluation_aliases.length >= 2);
+    assert.equal(stored.writing_evaluation_aliases.every((alias) => (
+      alias.username === owner && Number.isSafeInteger(alias.attempt_id)
+        && !Object.hasOwn(alias, 'answer') && !Object.hasOwn(alias, 'request_fingerprint')
+    )), true, 'durable losing-key aliases contain only owner/key/canonical-attempt metadata');
+    const reopened = createFileRepository(file);
+    try {
+      const alias = stored.writing_evaluation_aliases[0];
+      assert.equal((await reopened.getWritingEvaluationClaim(owner, alias.idempotency_key)).id, alias.attempt_id,
+        'a process restart resolves the losing UUID to its durable canonical attempt');
+    } finally { await reopened.close(); }
+  });
+});
+
+test('file Writing settlement is acknowledged only after durable persistence and the write queue recovers', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-writing-durability-'));
+  const file = path.join(directory, 'data.json');
+  let rejectWrites = false;
+  let blockNextWrite = false;
+  let releaseBlockedWrite;
+  let blockedWriteStarted;
+  const fileSystem = {
+    readFile: (...args) => fs.readFile(...args),
+    mkdir: (...args) => fs.mkdir(...args),
+    rename: (...args) => fs.rename(...args),
+    async writeFile(...args) {
+      if (blockNextWrite) {
+        blockNextWrite = false;
+        blockedWriteStarted?.();
+        await new Promise((resolve) => { releaseBlockedWrite = resolve; });
+      }
+      if (rejectWrites) throw Object.assign(new Error('INJECTED_WRITE_FAILURE'), { code: 'EIO' });
+      return fs.writeFile(...args);
+    },
+  };
+  const repository = createFileRepository(file, { fileSystem });
+  try {
+    const owner = await repository.createTelegramUser(3004, 'Writing durable owner');
+    await repository.activateTrial(3004, 30, 'Writing durable owner');
+    await repository.setPrivacyConsent(owner, {
+      text_processing: true, voice_processing: false, policy_version: 'writing-durable-v1',
+    });
+    const key = crypto.randomUUID();
+    const claim = await repository.claimWritingEvaluation(owner, {
+      taskType: 'writing_37', sourceTaskRef: 'durable-task',
+      assignment: { from: 'Emily', stimulus: 'Three questions?', questionsTopic: 'school' },
+      answer: 'A sufficiently long answer for durable settlement.',
+      evaluatedAnswer: 'A sufficiently long answer for durable settlement.',
+    }, 'writing-v9', 'e'.repeat(64), key, { consentPolicyVersion: 'writing-durable-v1' });
+
+    const writeStarted = new Promise((resolve) => { blockedWriteStarted = resolve; });
+    blockNextWrite = true;
+    const settlement = repository.finishWritingAttempt(claim.attempt.id, {
+      status: 'completed', provider: 'test', model: 'test', review: { overall_got: 4 },
+      responseSnapshot: { attemptId: claim.attempt.id, review: { overall_got: 4 } },
+    });
+    const rejectedSettlement = assert.rejects(settlement, /INJECTED_WRITE_FAILURE/u);
+    await writeStarted;
+    let concurrentReadSettled = false;
+    const concurrentRead = repository.getWritingEvaluationClaim(owner, key)
+      .then((value) => { concurrentReadSettled = true; return value; });
+    let voiceTutorReadSettled = false;
+    const voiceTutorRead = repository.getWritingAttempt(owner, claim.attempt.id)
+      .then((value) => { voiceTutorReadSettled = true; return value; });
+    let progressReadSettled = false;
+    const progressRead = repository.getProgress(owner)
+      .then((value) => { progressReadSettled = true; return value; });
+    let writingSummaryReadSettled = false;
+    const writingSummaryRead = repository.getWritingProgressSummary(owner)
+      .then((value) => { writingSummaryReadSettled = true; return value; });
+    await new Promise((resolve) => setImmediate(resolve));
+    const replayWasSpeculative = concurrentReadSettled;
+    const voiceTutorWasSpeculative = voiceTutorReadSettled;
+    const progressWasSpeculative = progressReadSettled;
+    const writingSummaryWasSpeculative = writingSummaryReadSettled;
+    rejectWrites = true;releaseBlockedWrite();
+    assert.equal(replayWasSpeculative, false,
+      'replay reads wait behind an uncommitted settlement instead of publishing mutable memory');
+    assert.equal(voiceTutorWasSpeculative, false,
+      'Voice Tutor reads wait behind an uncommitted settlement instead of seeing a speculative review');
+    assert.equal(progressWasSpeculative, false,
+      'the learner progress response waits behind an uncommitted Writing settlement');
+    assert.equal(writingSummaryWasSpeculative, false,
+      'the Writing summary response waits behind an uncommitted settlement');
+    await rejectedSettlement;
+    assert.equal((await concurrentRead).status, 'pending',
+      'a read queued during the failed settlement observes the durable rollback');
+    assert.equal((await voiceTutorRead).status, 'pending',
+      'Voice Tutor cannot derive a capsule from a review whose persistence rolled back');
+    assert.equal((await progressRead).essays, undefined,
+      'learner progress cannot publish a completed attempt whose persistence rolled back');
+    assert.equal((await writingSummaryRead).attemptCount, 0,
+      'Writing summary cannot publish a completed attempt whose persistence rolled back');
+    assert.equal((await repository.getWritingEvaluationClaim(owner, key)).status, 'pending',
+      'a rejected write must roll back the in-memory settlement too');
+
+    const diskAfterFailure = createFileRepository(file);
+    assert.equal((await diskAfterFailure.getWritingEvaluationClaim(owner, key)).status, 'pending');
+    await diskAfterFailure.close();
+
+    rejectWrites = false;
+    assert.equal(await repository.finishWritingAttempt(claim.attempt.id, {
+      status: 'completed', provider: 'test', model: 'test', review: { overall_got: 4 },
+      responseSnapshot: { attemptId: claim.attempt.id, review: { overall_got: 4 } },
+    }), true, 'a later persist runs after the injected failure instead of inheriting a rejected queue');
+    const diskAfterRecovery = createFileRepository(file);
+    assert.equal((await diskAfterRecovery.getWritingEvaluationClaim(owner, key)).status, 'completed');
+    await diskAfterRecovery.close();
+  } finally {
+    await repository.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('file write recovery cannot commit a rejected non-Writing mutation later', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-write-rollback-'));
+  const file = path.join(directory, 'data.json');
+  let rejectWrites = false;
+  const fileSystem = {
+    readFile: (...args) => fs.readFile(...args),
+    mkdir: (...args) => fs.mkdir(...args),
+    rename: (...args) => fs.rename(...args),
+    writeFile: (...args) => (rejectWrites
+      ? Promise.reject(Object.assign(new Error('INJECTED_WRITE_FAILURE'), { code: 'EIO' }))
+      : fs.writeFile(...args)),
+  };
+  const repository = createFileRepository(file, { fileSystem });
+  try {
+    const owner = await repository.createTelegramUser(3005, 'Global rollback owner');
+    await repository.saveProgress(owner, { durable: true });
+
+    rejectWrites = true;
+    await assert.rejects(
+      repository.saveProgress(owner, { rejected: true }),
+      /INJECTED_WRITE_FAILURE/u,
+    );
+    assert.deepEqual(await repository.getProgress(owner), { durable: true });
+
+    rejectWrites = false;
+    await repository.mergeProgress(owner, { recovered: true });
+    const reopened = createFileRepository(file);
+    try {
+      assert.deepEqual(await reopened.getProgress(owner), { durable: true, recovered: true });
+    } finally {
+      await reopened.close();
+    }
+  } finally {
+    await repository.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
 });
 
 test('speaking attempts persist transcript review metadata but never audio', async () => {

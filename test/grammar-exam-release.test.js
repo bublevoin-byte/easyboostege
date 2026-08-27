@@ -342,7 +342,7 @@ test('browser exam uses the owner-bound mastery seam and a device-local resumabl
   assert.match(examBlock, /oninput="gExamInput\(/u);
   assert.doesNotMatch(examBlock, /legacy\.err\+\+|S\.gram\[/u,
     'the old client-only counter cannot be the exam authority');
-  assert.match(sync, /NON_SYNC_PROGRESS_MODULES=new Set\(\['grammarMastery','grammarRunner'\]\)/u,
+  assert.match(sync, /NON_SYNC_PROGRESS_MODULES=new Set\(\['grammarMastery','grammarRunner','works','essays','writingAttemptIds'\]\)/u,
     'the resumable exam uses the already isolated device-local Grammar workflow slot');
 });
 

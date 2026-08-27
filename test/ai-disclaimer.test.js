@@ -25,9 +25,10 @@ async function readApplicationSource() {
   return sources.join('\n');
 }
 
-const [html, app] = await Promise.all([
+const [html, app, openapi] = await Promise.all([
   fs.readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
   readApplicationSource(),
+  fs.readFile(new URL('../docs/openapi.yaml', import.meta.url), 'utf8'),
 ]);
 
 function normalize(value) {
@@ -38,6 +39,16 @@ test('the public automatic-assessment warning equals the required wording', () =
   assert.equal(AUTOMATIC_ASSESSMENT_WARNING, REQUIRED, 'the canonical constant must match the specification');
   assert.equal(SHARED_AUTOMATIC_ASSESSMENT_PUBLIC_CONTRACT.warning, AUTOMATIC_ASSESSMENT_WARNING,
     'the browser adapter re-exports the neutral server/browser contract');
+});
+
+test('the ordinary Writing API documents the exact assessment warning and task-specific payload limits', () => {
+  const writing = openapi.match(/  \/api\/v1\/ai\/evaluate-writing:[\s\S]*?(?=\n  \/api\/v1\/ai\/generate-content:)/u)?.[0] || '';
+  const assessment = openapi.match(/    ExperimentalAssessment:[\s\S]*?(?=\n    [A-Z][A-Za-z]+:)/u)?.[0] || '';
+  assert.match(writing, /oneOf:[\s\S]*enum: \[writing_37\][\s\S]*maxLength: 12000[\s\S]*enum: \[writing_38\][\s\S]*maxLength: 20000/u);
+  assert.match(writing, /taskId: \{ type: string, minLength: 1, maxLength: 120 \}/u);
+  assert.match(writing, /WRITING_EVALUATION_REPEAT_ACKNOWLEDGED/u);
+  assert.match(assessment, new RegExp(REQUIRED.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'));
+  assert.match(assessment, /additionalProperties: false/u);
 });
 
 test('the browser-safe EGE writing projection validator matches every discriminated state', () => {
@@ -97,7 +108,7 @@ test('the written review screen shows the disclaimer', () => {
 test('the written review screen shows the server evaluation scope without replacing the disclaimer', () => {
   assert.match(html, /id="rv_scope_notice" hidden/u);
   assert.match(app, /writingModule\.evaluationNotice\(evaluationScope\)/u);
-  assert.match(app, /renderReview\(d,response\.evaluationScope,response\.voiceTutor\)/u);
+  assert.match(app, /renderReview\(d,response\.evaluationScope,response\.voiceTutor,\{progressStored\}\)/u);
   assert.match(app, /getElementById\('ai_disclaimer'\)\.textContent=ui\.AI_DISCLAIMER/u);
 });
 

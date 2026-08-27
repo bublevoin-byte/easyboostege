@@ -6,7 +6,7 @@ import {
   buildSpeakingLearningAttempt,
   speakingPronunciationErrorPointer,
 } from '../speaking/learning-loop.js';
-import { parseAndValidateWritingReview, writingAssignmentSchema } from '../ai/writing.js';
+import { parseStoredWritingReview, writingAssignmentSchema } from '../ai/writing.js';
 import { getCanonicalVoiceTutorItem, getCanonicalVoiceTutorResultSet } from './canonical-items.js';
 import {
   GRAMMAR_LEXICON_CAPSULE_VERSION,
@@ -264,7 +264,9 @@ function validatedReviewAttempt(source, attempt) {
       if (!assignment.success) throw new Error('assignment invalid');
       const answer = boundedString(attempt.answer, 20_000, 'VOICE_TUTOR_REVIEW_INVALID');
       const evaluatedAnswer = boundedString(attempt.evaluated_answer, 8_000, 'VOICE_TUTOR_CAPSULE_TOO_LARGE');
-      const review = parseAndValidateWritingReview(JSON.stringify(attempt.review), { taskType, answer, assignment: attempt.assignment });
+      const review = parseStoredWritingReview(attempt.review, {
+        taskType, answer, assignment: attempt.assignment,
+      }, attempt.prompt_version);
       return { taskType, assignment: assignment.data.assignment, learnerAnswer: evaluatedAnswer, review };
     }
     if (source === 'speaking') {

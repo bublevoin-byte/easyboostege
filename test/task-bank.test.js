@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import net from 'node:net';
@@ -54,11 +55,11 @@ function validReview(words) {
       { name: 'Организация текста', got: 1, max: 2 },
       { name: 'Языковое оформление', got: 1, max: 2 },
     ],
-    errors: [{ title: 'Артикль', wrong: 'a information', right: 'information', kind: 'err', note: 'неисчисляемое' }],
+    errors: [{ title: 'Артикль', wrong: 'a information', right: 'information', kind: 'err', note: 'неисчисляемое', example: 'This information is useful.' }],
   });
 }
 
-async function startStack({ replies = [], students = ['anna', 'boris'] } = {}) {
+async function startStack({ replies = [], students = ['anna', 'boris'], providerDelayMs = 0 } = {}) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-bank-'));
   const dataFile = path.join(directory, 'data.json');
   const port = await findAvailablePort();
@@ -79,8 +80,11 @@ async function startStack({ replies = [], students = ['anna', 'boris'] } = {}) {
         response.end(JSON.stringify({ error: { message: 'no reply queued' } }));
         return;
       }
-      response.writeHead(200, { 'Content-Type': 'application/json' });
-      response.end(JSON.stringify({ choices: [{ message: { content: reply } }], usage: { prompt_tokens: 90, completion_tokens: 40 } }));
+      const send = () => {
+        response.writeHead(200, { 'Content-Type': 'application/json' });
+        response.end(JSON.stringify({ choices: [{ message: { content: reply } }], usage: { prompt_tokens: 90, completion_tokens: 40 } }));
+      };
+      if (providerDelayMs > 0) setTimeout(send, providerDelayMs); else send();
     });
   });
   await new Promise((resolve) => providerServer.listen(providerPort, '127.0.0.1', resolve));
@@ -130,27 +134,33 @@ async function startStack({ replies = [], students = ['anna', 'boris'] } = {}) {
   /* Seeding runs after listen, so give it a moment before the first request. */
   await new Promise((resolve) => setTimeout(resolve, 300));
 
-  const headers = (user) => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${jwt.sign({ u: user }, JWT_SECRET)}` });
+  const headers = (user, expectedOwner, extra = {}) => ({
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${jwt.sign({ u: user }, JWT_SECRET)}`,
+    ...(expectedOwner === undefined ? {} : { 'X-EasyBoost-Expected-Owner': expectedOwner }),
+    ...extra,
+  });
 
   return {
     baseUrl,
     providerCalls,
     output,
-    async nextTask(user, operation = 'writing_task_37') {
+    async nextTask(user, operation = 'writing_task_37', { expectedOwner = user, legacy = false } = {}) {
       const response = await fetch(`${baseUrl}/api/v1/tasks/next`, {
-        method: 'POST', headers: headers(user), body: JSON.stringify({ operation }),
+        method: 'POST', headers: headers(user, legacy ? undefined : expectedOwner), body: JSON.stringify({ operation }),
       });
-      return { status: response.status, body: await response.json() };
+      return { status: response.status, body: await response.json(), responseOwner: response.headers.get('x-easyboost-response-owner') };
     },
-    async evaluate(user, payload) {
+    async evaluate(user, payload, { expectedOwner = user, idempotencyKey = crypto.randomUUID(), legacy = false } = {}) {
       const response = await fetch(`${baseUrl}/api/v1/ai/evaluate-writing`, {
-        method: 'POST', headers: headers(user), body: JSON.stringify(payload),
+        method: 'POST', headers: headers(user, legacy ? undefined : expectedOwner,
+          legacy ? {} : { 'Idempotency-Key': idempotencyKey }), body: JSON.stringify(payload),
       });
-      return { status: response.status, body: await response.json() };
+      return { status: response.status, body: await response.json(), responseOwner: response.headers.get('x-easyboost-response-owner') };
     },
     async bank() {
       const stored = JSON.parse(await fs.readFile(dataFile, 'utf8'));
-      return { tasks: stored.task_bank || [], deliveries: stored.task_deliveries || [] };
+      return { tasks: stored.task_bank || [], deliveries: stored.task_deliveries || [], attempts: stored.writing_attempts || [] };
     },
     async stop() {
       child.kill('SIGTERM');
@@ -287,6 +297,161 @@ test('an answer is marked against the task the server holds, not the one the cli
     const prompt = stack.providerCalls.at(-1).user;
     assert.match(prompt, new RegExp(served.body.task.from, 'u'));
     assert.match(prompt, new RegExp(served.body.task.ask.split(' ')[0], 'u'));
+  } finally {
+    await stack.stop();
+  }
+});
+
+test('Writing evaluation atomically claims and replays one idempotency key without a second paid attempt', { timeout: 40_000 }, async () => {
+  const stack = await startStack({ replies: [validReview(110), validReview(110)] });
+  try {
+    const task = readBuiltinTasks().find((item) => item.operation === 'writing_task_37');
+    const payload = { taskType: 'writing_37', taskId: task.externalId, answer: ANSWER };
+    const idempotencyKey = crypto.randomUUID().toUpperCase();
+    const [first, raced] = await Promise.all([
+      stack.evaluate('anna', payload, { idempotencyKey }),
+      stack.evaluate('anna', payload, { idempotencyKey }),
+    ]);
+    const completed = [first, raced].find((response) => response.status === 200);
+    assert.ok(completed, 'one claimant must complete the evaluation');
+    assert.ok([200, 409].includes(first.status));
+    assert.ok([200, 409].includes(raced.status));
+
+    const replay = await stack.evaluate('anna', payload, { idempotencyKey: idempotencyKey.toLowerCase() });
+    assert.equal(replay.status, 200);
+    assert.deepEqual(replay.body, completed.body, 'the accepted response is replayed byte-for-byte as public JSON');
+    assert.equal(stack.providerCalls.length, 1, 'same-key race and replay must not call the paid provider twice');
+    assert.equal((await stack.bank()).attempts.length, 1, 'same-key race and replay must create one writing attempt');
+
+    const conflict = await stack.evaluate('anna', { ...payload, answer: `${ANSWER} changed` }, { idempotencyKey });
+    assert.equal(conflict.status, 409);
+    assert.equal(conflict.body.error.code, 'WRITING_EVALUATION_IDEMPOTENCY_CONFLICT');
+    assert.equal(stack.providerCalls.length, 1);
+    assert.equal((await stack.bank()).attempts.length, 1);
+  } finally {
+    await stack.stop();
+  }
+});
+
+test('Writing definitive provider rejection is terminal and exact replay never repeats it', { timeout: 40_000 }, async () => {
+  const stack = await startStack();
+  try {
+    const task = readBuiltinTasks().find((item) => item.operation === 'writing_task_37');
+    const payload = { taskType: 'writing_37', taskId: task.externalId, answer: ANSWER };
+    const idempotencyKey = crypto.randomUUID();
+    const first = await stack.evaluate('anna', payload, { idempotencyKey });
+    const replay = await stack.evaluate('anna', payload, { idempotencyKey });
+
+    assert.equal(first.status, 502);
+    assert.equal(first.body.error.code, 'AI_UNAVAILABLE');
+    assert.equal(replay.status, 502);
+    assert.equal(replay.body.error.code, 'AI_UNAVAILABLE');
+    assert.equal(stack.providerCalls.length, 1);
+    assert.equal((await stack.bank()).attempts.length, 1);
+  } finally {
+    await stack.stop();
+  }
+});
+
+test('Writing canonical task identity coalesces external and numeric aliases', { timeout: 40_000 }, async () => {
+  const stack = await startStack({ replies: [validReview(110)] });
+  try {
+    const task = readBuiltinTasks().find((item) => item.operation === 'writing_task_37');
+    const storedTask = (await stack.bank()).tasks.find((item) => item.external_id === task.externalId
+      || item.externalId === task.externalId);
+    assert.ok(storedTask?.id);
+    const external = await stack.evaluate('anna', {
+      taskType: 'writing_37', taskId: task.externalId, answer: ANSWER,
+    });
+    const numeric = await stack.evaluate('anna', {
+      taskType: 'writing_37', taskId: String(storedTask.id), answer: ANSWER,
+    });
+    assert.equal(external.status, 200);
+    assert.equal(numeric.status, 200);
+    assert.deepEqual(numeric.body, external.body);
+    assert.equal(stack.providerCalls.length, 1);
+    assert.equal((await stack.bank()).attempts.length, 1);
+  } finally {
+    await stack.stop();
+  }
+});
+
+test('Writing evaluation coalesces simultaneous clients and a process-loss replay by exact owner payload', { timeout: 40_000 }, async () => {
+  const stack = await startStack({ replies: [validReview(110), validReview(110)], providerDelayMs: 150 });
+  try {
+    const task = readBuiltinTasks().find((item) => item.operation === 'writing_task_37');
+    const payload = { taskType: 'writing_37', taskId: task.externalId, answer: ANSWER };
+    const firstKey = crypto.randomUUID();
+    const secondKey = crypto.randomUUID();
+    const [first, concurrent] = await Promise.all([
+      stack.evaluate('anna', payload, { idempotencyKey: firstKey }),
+      stack.evaluate('anna', payload, { idempotencyKey: secondKey }),
+    ]);
+    const completed = [first, concurrent].find((response) => response.status === 200);
+    assert.ok(completed);
+    assert.ok([200, 409].includes(first.status));
+    assert.ok([200, 409].includes(concurrent.status));
+
+    const processLossReplay = await stack.evaluate('anna', payload, { idempotencyKey: crypto.randomUUID() });
+    assert.equal(processLossReplay.status, 200);
+    assert.deepEqual(processLossReplay.body, completed.body);
+    assert.equal(stack.providerCalls.length, 1);
+    assert.equal((await stack.bank()).attempts.length, 1);
+  } finally {
+    await stack.stop();
+  }
+});
+
+test('Writing task delivery and evaluation bind the expected owner before any mutation or provider call', { timeout: 40_000 }, async () => {
+  const stack = await startStack({ replies: [validReview(110)] });
+  try {
+    const before = await stack.bank();
+    const rejectedTask = await stack.nextTask('anna', 'writing_task_37', { expectedOwner: 'boris' });
+    assert.equal(rejectedTask.status, 409);
+    assert.equal(rejectedTask.body.error.code, 'OWNER_CHANGED');
+    assert.equal((await stack.bank()).deliveries.length, before.deliveries.length);
+    assert.equal(stack.providerCalls.length, 0);
+
+    const task = readBuiltinTasks().find((item) => item.operation === 'writing_task_37');
+    const rejectedEvaluation = await stack.evaluate('anna', {
+      taskType: 'writing_37', taskId: task.externalId, answer: ANSWER,
+    }, { expectedOwner: 'boris' });
+    assert.equal(rejectedEvaluation.status, 409);
+    assert.equal(rejectedEvaluation.body.error.code, 'OWNER_CHANGED');
+    assert.equal((await stack.bank()).attempts.length, before.attempts.length);
+    assert.equal(stack.providerCalls.length, 0);
+
+    const served = await stack.nextTask('anna', 'writing_task_37', { expectedOwner: 'anna' });
+    assert.equal(served.status, 200);
+    assert.equal(served.responseOwner, 'anna');
+    const evaluated = await stack.evaluate('anna', {
+      taskType: 'writing_37', taskId: task.externalId, answer: ANSWER,
+    }, { expectedOwner: 'anna' });
+    assert.equal(evaluated.status, 200);
+    assert.equal(evaluated.responseOwner, 'anna');
+  } finally {
+    await stack.stop();
+  }
+});
+
+test('legacy cached Writing requests fail at the client update gate before delivery, quota, attempt or provider mutation', { timeout: 40_000 }, async () => {
+  const stack = await startStack({ replies: [validReview(110)] });
+  try {
+    const before = await stack.bank();
+    const task = readBuiltinTasks().find((item) => item.operation === 'writing_task_37');
+    const legacyTask = await stack.nextTask('anna', 'writing_task_37', { legacy: true });
+    const legacyEvaluation = await stack.evaluate('anna', {
+      taskType: 'writing_37', taskId: task.externalId, answer: ANSWER,
+    }, { legacy: true });
+
+    assert.equal(legacyTask.status, 428);
+    assert.equal(legacyTask.body.error.code, 'CLIENT_UPDATE_REQUIRED');
+    assert.equal(legacyEvaluation.status, 428);
+    assert.equal(legacyEvaluation.body.error.code, 'CLIENT_UPDATE_REQUIRED');
+    const after = await stack.bank();
+    assert.deepEqual(after.deliveries, before.deliveries);
+    assert.deepEqual(after.attempts, before.attempts);
+    assert.equal(stack.providerCalls.length, 0);
   } finally {
     await stack.stop();
   }

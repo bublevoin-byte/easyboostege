@@ -457,7 +457,7 @@ test('learner preferences changed offline replay only for the same owner', async
   assert.equal(online.sync.hasPending(), false);
 });
 
-test('server-owned Grammar mastery and device-local runner are excluded from generic synchronization', async () => {
+test('server-owned Grammar and Writing progress are excluded from generic synchronization', async () => {
   const runner = { schema: 'grammar-runner-v1', sessionId: 'device-only' };
   const offline = createSync({ online: false });
   offline.sync.setOwner('grammar-owner');
@@ -465,6 +465,9 @@ test('server-owned Grammar mastery and device-local runner are excluded from gen
   assert.equal(await offline.sync.saveProgress({
     grammarMastery: { 1: { stage: 'stable' } },
     grammarRunner: runner,
+    works: [{ attemptId: 1, g: 6, m: 6 }],
+    essays: 1,
+    writingAttemptIds: Array.from({ length: 2_500 }, (_, index) => index + 1),
   }), true);
   assert.equal(Object.keys(offline.sync.pendingModules()).length, 0);
   assert.equal(offline.sync.hasPending(), false);
@@ -1015,6 +1018,19 @@ test('account deletion purges the exact EGE owner continuation and immutable cac
   assert.equal(active.values.has('easyboost-ege-mock-written-v1:grammar-owner:0'), false);
   assert.equal(active.values.has('easyboost-ege-mock-written-v1:other-owner:0'), true);
   assert.deepEqual([...active.cacheStore], ['easyboost-static-keep']);
+});
+
+test('account deletion purges the exact Writing retry payload without loading the Writing chunk', async () => {
+  const active = createSync({ online: true, failRequest: false });
+  active.sync.setOwner('writing owner');
+  const ownerKey = 'easyboost.writing-evaluation.v1:writing%20owner:0';
+  const otherKey = 'easyboost.writing-evaluation.v1:other-owner:0';
+  active.values.set(ownerKey, JSON.stringify({ records: [{ answer: 'private essay' }] }));
+  active.values.set(otherKey, JSON.stringify({ records: [{ answer: 'other essay' }] }));
+
+  assert.equal(await active.sync.deleteOwner(async () => {}), true);
+  assert.equal(active.values.has(ownerKey), false);
+  assert.equal(active.values.has(otherKey), true);
 });
 
 test('account deletion purges exact-owner oral WAV rows and ownerless legacy rows', async () => {

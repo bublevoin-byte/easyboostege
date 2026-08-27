@@ -1,6 +1,7 @@
 import express from 'express';
 import { z } from 'zod';
 
+import { bindResponseOwner, requireExpectedOwner } from '../middleware/expected-owner.js';
 import {
   BANK_OPERATIONS, describeForExclusion, isBankOperation, parseTaskContent, readBuiltinTasks, contentHash,
 } from '../ai/task-bank.js';
@@ -24,8 +25,20 @@ export function createTaskRoutes({ authentication, access, db, generateBankTask 
   const { auth } = authentication;
   const { requireActiveSubscription } = access;
   const { claimUnseenBankTask, upsertBankTask, recordTaskDelivery, listBankTaskContents } = db;
+  function bindRequiredExpectedOwner(req, res, next) {
+    if (req.get('x-easyboost-expected-owner') == null) {
+      return res.status(428).json({ error: {
+        code: 'CLIENT_UPDATE_REQUIRED',
+        message: 'Обновите приложение перед загрузкой новых письменных заданий.',
+        requestId: req.requestId,
+      } });
+    }
+    if (!requireExpectedOwner(req, res)) return undefined;
+    bindResponseOwner(res, req.user);
+    return next();
+  }
 
-  router.post('/api/v1/tasks/next', auth, requireActiveSubscription, async (req, res, next) => {
+  router.post('/api/v1/tasks/next', auth, bindRequiredExpectedOwner, requireActiveSubscription, async (req, res, next) => {
     const parsed = nextTaskSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Неизвестный тип задания.', requestId: req.requestId } });

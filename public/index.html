@@ -139,7 +139,8 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
 <link rel="stylesheet" href="/practice.css">
 <link rel="stylesheet" href="/words.css">
 <link rel="stylesheet" href="/grammar.css">
-<link rel="stylesheet" href="/reading-listening.css">
+  <link rel="stylesheet" href="/reading-listening.css">
+  <link rel="stylesheet" href="/writing.css">
 <link rel="stylesheet" href="/ege-hub.css">
 <link rel="stylesheet" href="/progress-profile.css">
 </head><body>
@@ -439,76 +440,40 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
   </main>
 </div>
 <div class="screen" id="scr8" data-name="Письмо">
-
-    <!-- starry gradient header -->
-    <div style="position:absolute;top:0;left:0;right:0;height:206px;background:linear-gradient(150deg,#FFA570 0%,#F2683F 62%,#E44E20 100%);border-radius:0 0 32px 32px;z-index:1;overflow:hidden;box-shadow:0 14px 30px rgba(242,104,63,.25),inset 0 -8px 18px rgba(190,55,18,.22);">
-      <svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;" viewBox="0 0 390 206" preserveAspectRatio="xMidYMid slice" fill="rgba(255,255,255,.85)">
-        <path class="eb5sp" style="animation-delay:.2s" d="M30,60 Q30,64 34,64 Q30,64 30,68 Q30,64 26,64 Q30,64 30,60 Z"/>
-        <path class="eb5sp" style="animation-delay:1s" d="M355,48 Q355,52 359,52 Q355,52 355,56 Q355,52 351,52 Q355,52 355,48 Z"/>
-        <path class="eb5sp" style="animation-delay:1.6s" d="M330,160 Q330,164 334,164 Q330,164 330,168 Q330,164 326,164 Q330,164 330,160 Z"/>
-        <path class="eb5sp" style="animation-delay:.6s" d="M45,150 Q45,154 49,154 Q45,154 45,158 Q45,154 41,154 Q45,154 45,150 Z"/>
-        <path class="eb5sp" style="animation-delay:2s" d="M200,40 Q200,43.5 203.5,43.5 Q200,43.5 200,47 Q200,43.5 196.5,43.5 Q200,43.5 200,40 Z"/>
-        <path class="eb5sp" style="animation-delay:.9s" d="M120,30 Q120,34.5 124.5,34.5 Q120,34.5 120,39 Q120,34.5 115.5,34.5 Q120,34.5 120,30 Z"/>
-        <path class="eb5sp" style="animation-delay:1.3s" d="M280,80 Q280,84 284,84 Q280,84 280,88 Q280,84 276,84 Q280,84 280,80 Z"/>
-        <path class="eb5sp" style="animation-delay:.4s" d="M150,120 Q150,123.5 153.5,123.5 Q150,123.5 150,127 Q150,123.5 146.5,123.5 Q150,123.5 150,120 Z"/>
-        <path class="eb5sp" style="animation-delay:1.8s" d="M245,150 Q245,154.5 249.5,154.5 Q245,154.5 245,159 Q245,154.5 240.5,154.5 Q245,154.5 245,150 Z"/>
-        <path class="eb5sp" style="animation-delay:.1s" d="M310,115 Q310,118.5 313.5,118.5 Q310,118.5 310,122 Q310,118.5 306.5,118.5 Q310,118.5 310,115 Z"/>
-      </svg>
-      <div style="position:absolute;top:-40px;right:-30px;width:130px;height:130px;border-radius:50%;background:rgba(255,255,255,.12);"></div>
-      <div style="position:absolute;bottom:-55px;left:-35px;width:150px;height:150px;border-radius:50%;background:rgba(255,255,255,.09);"></div>
+  <main class="learning-route writing-route" aria-labelledby="writing_title" tabindex="-1" data-aisy-shell-focus>
+    <header class="writing-route__header aisy-surface">
+      <p class="writing-route__eyebrow">Практика · бумажный маршрут</p>
+      <h1 id="writing_title" class="writing-route__title">Письмо</h1>
+      <p class="writing-route__summary">Черновик хранится на этом устройстве; синхронизация с аккаунтом выполняется отдельно</p>
+      <p id="w_route_status" class="writing-route__status">Задания 37–38 · проверка по критериям ЕГЭ</p>
+    </header>
+    <div class="writing-task-tabs" role="radiogroup" aria-label="Тип письменного задания">
+      <button type="button" id="w_seg37" class="writing-task-tab" role="radio" aria-checked="false">37 · Письмо</button>
+      <button type="button" id="w_seg38" class="writing-task-tab" role="radio" aria-checked="true">38 · Проект</button>
     </div>
-    <!-- status bar white -->
-    <div style="position:absolute;top:0;left:0;right:0;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 7px;z-index:6;">
-      <span style="font-weight:700;font-size:15px;color:#fff;">9:41</span>
-      <div style="display:flex;gap:7px;align-items:center;">
-        <svg width="17" height="11" viewBox="0 0 17 11" fill="#fff"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.7" y="5" width="3" height="6" rx="1"/><rect x="9.3" y="2.5" width="3" height="8.5" rx="1"/><rect x="14" y="0" width="3" height="11" rx="1"/></svg>
-        <svg width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round"><path d="M2 5a8 8 0 0 1 12 0"/><path d="M4.5 7.4a4.4 4.4 0 0 1 7 0"/><circle cx="8" cy="9.8" r="1" fill="#fff" stroke="none"/></svg>
-        <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3" stroke="#fff" opacity=".5"/><rect x="2.4" y="2.4" width="15" height="7.2" rx="1.6" fill="#fff"/><rect x="23" y="4" width="2" height="4" rx="1" fill="#fff"/></svg>
-      </div>
-    </div>
-    <!-- header -->
-    <div style="position:absolute;top:54px;left:0;right:0;padding:0 22px;z-index:6;">
-      <div style="display:flex;align-items:center;justify-content:space-between;">
-        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><polyline points="14 6 8 12 14 18"/></svg>
-        <div style="font-weight:800;font-size:18px;color:#fff;">Письмо</div>
-        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round"><line x1="5" y1="8" x2="19" y2="8"/><line x1="5" y1="12" x2="19" y2="12"/><line x1="5" y1="16" x2="19" y2="16"/></svg>
-      </div>
-      <div style="margin-top:16px;background:rgba(255,255,255,.22);border-radius:16px;padding:4px;display:flex;gap:4px;">
-        <button type="button" id="w_seg37" onclick="setTask(37)" style="flex:1;border:0;background:transparent;font:inherit;text-align:center;padding:8px 0;font-weight:700;font-size:13px;color:rgba(255,255,255,.92);cursor:pointer;">37 · Письмо другу</button>
-        <button type="button" id="w_seg38" onclick="setTask(38)" style="flex:1;border:0;font:inherit;text-align:center;padding:8px 0;font-weight:700;font-size:13px;color:#B54E2F;background:#fff;border-radius:11px;cursor:pointer;">38 · Проект</button>
-      </div>
-      <div style="margin-top:14px;display:flex;align-items:center;justify-content:space-between;font-weight:600;font-size:11.5px;color:rgba(255,255,255,.9);">
-        <span style="font-weight:700;letter-spacing:.5px;">ПИСЬМЕННАЯ ЧАСТЬ</span><span>письмо — 6 б. · проект — 14 б.</span>
+    <div id="w8_area">
+      <div class="writing-stack">
+        <section class="writing-card" aria-labelledby="w_tasklabel">
+          <p id="w_tasklabel" class="writing-card__eyebrow">ЗАДАНИЕ 38 · ПРОЕКТ С ДАННЫМИ</p>
+          <div id="w_prompt" class="writing-prompt"></div>
+          <span id="w_tablehint" hidden></span>
+        </section>
+        <section class="writing-card" id="w_edglow" aria-labelledby="w_editor_label">
+          <div class="writing-editor-head">
+            <label id="w_editor_label" for="w_editor">Письменный ответ</label>
+            <span id="w_count">0 / 200–250 слов · мало</span>
+            <span id="w_limit_status" class="aisy-visually-hidden" role="status" aria-live="polite" aria-atomic="true"></span>
+          </div>
+          <textarea id="w_editor" aria-describedby="w_count w_draft_status w_editor_error" placeholder="Пиши свой ответ здесь…" spellcheck="true"></textarea>
+          <p id="w_draft_status" role="status" aria-live="polite">Черновик сохраняется на этом устройстве</p>
+          <p id="w_editor_error" role="alert" hidden></p>
+        </section>
       </div>
     </div>
-    <!-- work area (scrollable) -->
-    <div id="w8_area" style="position:absolute;top:224px;left:22px;right:22px;bottom:104px;z-index:5;display:block;overflow-y:auto;scrollbar-width:none;">
-      <div class="clayCard" style="position:relative;overflow:hidden;padding:16px 18px;margin-bottom:12px;">
-        <div id="w_tasklabel" style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:11px;letter-spacing:1.4px;color:#B54E2F;">ЗАДАНИЕ 37 · ПИСЬМО ДРУГУ</div>
-        <div id="w_prompt" style="margin-top:9px;"></div>
-        <span id="w_tablehint" style="display:none;"></span>
-      </div>
-      <div class="clayCard glowin" id="w_edglow" style="position:relative;overflow:hidden;padding:16px 18px;margin-bottom:12px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;">
-          <span style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:11px;letter-spacing:1.4px;color:#1D7F4A;">ТВОЙ ОТВЕТ</span>
-          <span id="w_count" style="font-weight:700;font-size:12px;color:#6A6E75;">0 / 100–140 слов</span>
-        </div>
-        <div id="w_editor" contenteditable="true" role="textbox" aria-label="Письменный ответ" aria-multiline="true" oninput="countWords()" data-ph="Пиши свой ответ здесь…" style="margin-top:10px;font-weight:500;font-size:14px;line-height:1.65;color:#2B2B2B;min-height:200px;outline:none;"></div>
-      </div>
-      <button class="sq" onclick="checkWriting()" style="width:100%;min-height:54px;border:none;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:18px;font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:16px;color:#fff;display:flex;align-items:center;justify-content:center;gap:9px;cursor:pointer;box-shadow:0 12px 26px rgba(242,104,63,.35),inset 0 2px 3px rgba(255,255,255,.4),inset 0 -4px 8px rgba(190,55,18,.28);margin-bottom:10px;">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9Z"/></svg>
-        Проверить с ИИ</button>
+    <div id="writing_action_dock" class="learning-action-dock writing-action-dock">
+      <button type="button" id="w_primary_action" class="aisy-button writing-primary">Проверить с ИИ</button>
     </div>
-    
-<div style="position:absolute;left:0;right:0;bottom:0;padding:10px 14px 14px;z-index:6;background:linear-gradient(to top,rgba(245,246,248,.95) 55%,rgba(245,246,248,0));">
-      <div class="navclay">
-        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#6F695E;">Главная</span></div>
-        <div class="navit on"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.3 8 5 5.5 5.4 4.6 5.5 4 6.3 4 7.2V18c0 .6.5 1 1.1.9 2.2-.3 4.5 0 6.4 1.4 1.9-1.4 4.2-1.7 6.4-1.4.6.1 1.1-.3 1.1-.9V7.2c0-.9-.6-1.7-1.5-1.8C15.5 5 13.7 5.3 12 6.5Z"/><path d="M12 6.5V20"/></svg><span style="font-weight:800;font-size:10.5px;color:#B54E2F;">Учить</span></div>
-        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg><span style="font-weight:700;font-size:10.5px;color:#6F695E;">Прогресс</span></div>
-        <div class="navit"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#A59C8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5"/></svg><span style="font-weight:700;font-size:10.5px;color:#6F695E;">Профиль</span></div>
-      </div>
-    </div>
-  
+  </main>
 </div>
 <div class="screen" id="scr9" data-name="Говорение">
 
@@ -564,115 +529,84 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
   
 </div>
 <div class="screen" id="scr12" data-name="Разбор ИИ">
-
-    <div style="position:absolute;top:0;left:0;right:0;height:206px;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:0 0 30px 30px;z-index:1;"></div>
-    <div style="position:absolute;top:0;left:0;right:0;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 7px;z-index:6;">
-      <span style="font-weight:700;font-size:15px;color:#fff;">9:41</span>
-      <div style="display:flex;gap:7px;align-items:center;">
-        <svg width="17" height="11" viewBox="0 0 17 11" fill="#fff"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.7" y="5" width="3" height="6" rx="1"/><rect x="9.3" y="2.5" width="3" height="8.5" rx="1"/><rect x="14" y="0" width="3" height="11" rx="1"/></svg>
-        <svg width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round"><path d="M2 5a8 8 0 0 1 12 0"/><path d="M4.5 7.4a4.4 4.4 0 0 1 7 0"/><circle cx="8" cy="9.8" r="1" fill="#fff" stroke="none"/></svg>
-        <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3" stroke="#fff" opacity=".5"/><rect x="2.4" y="2.4" width="15" height="7.2" rx="1.6" fill="#fff"/><rect x="23" y="4" width="2" height="4" rx="1" fill="#fff"/></svg>
+  <main class="learning-route writing-route" aria-labelledby="writing_review_title" tabindex="-1" data-aisy-shell-focus>
+    <header class="writing-route__header aisy-surface">
+      <p class="writing-route__eyebrow">Письмо · серверная проверка</p>
+      <h1 id="writing_review_title" class="writing-route__title">Разбор работы</h1>
+      <p id="rv_saved_notice" class="writing-route__summary" hidden>Разбор сохранён на сервере · сводка прогресса готовится к синхронизации</p>
+      <p class="writing-route__status">Критерии, доказательства и исправления</p>
+    </header>
+    <p id="rv_status" class="writing-review-live" role="status" aria-live="polite"></p>
+    <div id="rv_content">
+      <div id="rv_result" class="writing-review">
+        <section class="writing-review__score" aria-labelledby="rv_verdict">
+          <div class="writing-score" aria-label="Балл за работу">
+            <strong id="rv_score">—</strong>
+            <span id="rv_max">из —</span>
+            <progress id="rv_ring" value="0" max="14" aria-label="Доля набранных баллов"></progress>
+          </div>
+          <div class="writing-review__summary">
+            <h2 id="rv_verdict">Разбор готов</h2>
+            <p id="rv_sub"></p>
+          </div>
+          <p id="ai_disclaimer" class="writing-review__warning"></p>
+          <p id="rv_scope_notice" hidden class="writing-review__warning"></p>
+        </section>
+        <section class="writing-review__criteria" aria-labelledby="rv_crit_title">
+          <h2 id="rv_crit_title" class="writing-section-label">Баллы по критериям</h2>
+          <div id="rv_crit"></div>
+        </section>
+        <section class="writing-review__errors" aria-labelledby="rv_errhdr">
+          <h2 id="rv_errhdr" class="writing-section-label">Разбор ошибок</h2>
+          <div id="rv_err"></div>
+        </section>
+      </div>
+      <section id="rv_error_state" class="writing-error" aria-labelledby="rv_error_title" hidden>
+        <span id="rv_error_kind" class="writing-error__kind">Проверка не выполнена</span>
+        <h2 id="rv_error_title">Разбор пока не готов</h2>
+        <p id="rv_error_copy">Черновик остаётся на этом устройстве.</p>
+      </section>
+    </div>
+    <div id="rv_action_dock" class="learning-action-dock writing-action-dock">
+      <div class="writing-dock-actions writing-dock-actions--review">
+        <button type="button" id="rv_edit_action" class="aisy-button aisy-button--secondary writing-secondary">Исправить</button>
+        <button type="button" id="rv_primary_action" class="aisy-button writing-primary">Новая работа</button>
       </div>
     </div>
-    <div style="position:absolute;top:54px;left:0;right:0;padding:0 22px;z-index:6;">
-      <div style="display:flex;align-items:center;justify-content:space-between;">
-        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><polyline points="14 6 8 12 14 18"/></svg>
-        <div style="font-weight:800;font-size:18px;color:#fff;">Разбор эссе</div>
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5 15.4 17.5M15.4 6.5 8.6 10.5"/></svg>
-      </div>
-      <!-- score banner -->
-      <div style="margin-top:16px;display:flex;align-items:center;gap:16px;">
-        <svg width="86" height="86" viewBox="0 0 86 86">
-          <circle cx="43" cy="43" r="36" fill="rgba(255,255,255,.22)"/>
-          <circle cx="43" cy="43" r="36" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round" stroke-dasharray="226" stroke-dashoffset="64" transform="rotate(-90 43 43)" id="rv_ring"/>
-          <text x="43" y="40" text-anchor="middle" font-family="Manrope" font-weight="800" font-size="24" fill="#fff" id="rv_score">11</text>
-          <text x="43" y="56" text-anchor="middle" font-family="Manrope" font-weight="700" font-size="11" fill="rgba(255,255,255,.85)" id="rv_max">из 14</text>
-        </svg>
-        <div style="color:#fff;">
-          <div style="font-weight:800;font-size:19px;letter-spacing:-.3px;" id="rv_verdict">Хороший результат!</div>
-          <div style="font-weight:600;font-size:13px;color:rgba(255,255,255,.9);margin-top:3px;line-height:1.4;" id="rv_sub">Близко к максимуму.</div>
-          <p id="ai_disclaimer" style="margin:7px 0 0;font-weight:600;font-size:10.5px;color:rgba(255,255,255,.92);line-height:1.35;"></p>
-          <p id="rv_scope_notice" hidden style="margin:7px 0 0;font-weight:700;font-size:11.5px;color:#FFF3C4;line-height:1.35;"></p>
-        </div>
-      </div>
-    </div>
-    <div style="position:absolute;top:226px;left:0;right:0;bottom:0;padding:0 22px 24px;z-index:5;overflow:hidden;">
-      <!-- criteria scores -->
-      <div style="font-weight:700;font-size:11px;letter-spacing:1.4px;color:#6A6E75;margin:2px 2px 11px;">БАЛЛЫ ПО КРИТЕРИЯМ</div>
-      <div style="background:#fff;border-radius:18px;padding:15px 16px;box-shadow:0 8px 22px rgba(20,20,30,.05);display:flex;flex-direction:column;gap:13px;" id="rv_crit">
-        <div style="display:flex;align-items:center;gap:12px;"><span style="flex:1;font-weight:600;font-size:13px;color:#2B2B2B;">Решение задачи</span><div style="width:96px;height:8px;border-radius:5px;background:#F1F1F3;"><div style="width:100%;height:100%;border-radius:5px;background:#1F9E5A;"></div></div><span style="font-weight:800;font-size:12.5px;color:#1D7F4A;width:30px;text-align:right;">3/3</span></div>
-        <div style="display:flex;align-items:center;gap:12px;"><span style="flex:1;font-weight:600;font-size:13px;color:#2B2B2B;">Организация текста</span><div style="width:96px;height:8px;border-radius:5px;background:#F1F1F3;"><div style="width:66%;height:100%;border-radius:5px;background:#E8A33C;"></div></div><span style="font-weight:800;font-size:12.5px;color:#A56000;width:30px;text-align:right;">2/3</span></div>
-        <div style="display:flex;align-items:center;gap:12px;"><span style="flex:1;font-weight:600;font-size:13px;color:#2B2B2B;">Лексика</span><div style="width:96px;height:8px;border-radius:5px;background:#F1F1F3;"><div style="width:100%;height:100%;border-radius:5px;background:#1F9E5A;"></div></div><span style="font-weight:800;font-size:12.5px;color:#1D7F4A;width:30px;text-align:right;">3/3</span></div>
-        <div style="display:flex;align-items:center;gap:12px;"><span style="flex:1;font-weight:600;font-size:13px;color:#2B2B2B;">Грамматика</span><div style="width:96px;height:8px;border-radius:5px;background:#F1F1F3;"><div style="width:66%;height:100%;border-radius:5px;background:#E8A33C;"></div></div><span style="font-weight:800;font-size:12.5px;color:#A56000;width:30px;text-align:right;">2/3</span></div>
-        <div style="display:flex;align-items:center;gap:12px;"><span style="flex:1;font-weight:600;font-size:13px;color:#2B2B2B;">Орфография</span><div style="width:96px;height:8px;border-radius:5px;background:#F1F1F3;"><div style="width:50%;height:100%;border-radius:5px;background:#E26A56;"></div></div><span style="font-weight:800;font-size:12.5px;color:#B94A37;width:30px;text-align:right;">1/2</span></div>
-      </div>
-      <!-- inline error breakdown -->
-      <div style="font-weight:700;font-size:11px;letter-spacing:1.4px;color:#6A6E75;margin:18px 2px 11px;" id="rv_errhdr">РАЗБОР ОШИБОК</div>
-      <div id="rv_err" style="background:#fff;border-radius:18px;padding:15px 16px;box-shadow:0 8px 22px rgba(20,20,30,.05);">
-        <div style="display:flex;gap:11px;">
-          <span style="width:26px;height:26px;flex:none;border-radius:9px;background:#FCEEEC;display:grid;place-items:center;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C9503C" stroke-width="2.4" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></span>
-          <div style="flex:1;">
-            <div style="font-weight:700;font-size:13.5px;color:#2B2B2B;">Грамматика · артикль</div>
-            <div style="margin-top:4px;font-weight:500;font-size:12.5px;color:#6A6E75;line-height:1.45;"><span style="text-decoration:line-through;color:#B94A37;">go to the school</span> → <span style="color:#1D7F4A;font-weight:700;">go to school</span></div>
-          </div>
-        </div>
-        <div style="height:1px;background:#F4F5F6;margin:13px 0;"></div>
-        <div style="display:flex;gap:11px;">
-          <span style="width:26px;height:26px;flex:none;border-radius:9px;background:#FCEEEC;display:grid;place-items:center;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C9503C" stroke-width="2.4" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></span>
-          <div style="flex:1;">
-            <div style="font-weight:700;font-size:13.5px;color:#2B2B2B;">Орфография</div>
-            <div style="margin-top:4px;font-weight:500;font-size:12.5px;color:#6A6E75;line-height:1.45;"><span style="text-decoration:line-through;color:#B94A37;">advanteges</span> → <span style="color:#1D7F4A;font-weight:700;">advantages</span></div>
-          </div>
-        </div>
-        <div style="height:1px;background:#F4F5F6;margin:13px 0;"></div>
-        <div style="display:flex;gap:11px;">
-          <span style="width:26px;height:26px;flex:none;border-radius:9px;background:#FFF4DE;display:grid;place-items:center;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C77400" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 2 18a2 2 0 0 0 1.7 3h16.6A2 2 0 0 0 22 18L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg></span>
-          <div style="flex:1;">
-            <div style="font-weight:700;font-size:13.5px;color:#2B2B2B;">Связки · совет</div>
-            <div style="margin-top:4px;font-weight:500;font-size:12.5px;color:#6A6E75;line-height:1.45;">Добавь <b style="color:#2B2B2B;">However</b> и <b style="color:#2B2B2B;">In conclusion</b> для связности.</div>
-          </div>
-        </div>
-      </div>
-      <!-- actions -->
-      <div style="margin-top:14px;display:flex;gap:12px;">
-        <button style="flex:1;height:52px;border:1.6px solid #F2683F;background:#fff;border-radius:16px;font-family:Manrope;font-weight:700;font-size:14px;color:#B54E2F;cursor:pointer;" onclick="tab('scr8')">Исправить</button>
-        <button style="flex:1;height:52px;border:none;background:linear-gradient(135deg,#FFA570,#F2683F);border-radius:16px;font-family:Manrope;font-weight:700;font-size:14px;color:#fff;cursor:pointer;box-shadow:0 12px 24px rgba(242,104,63,.3);" onclick="tab('scr10')">Сохранить в прогресс</button>
-      </div>
-    </div>
-  
+  </main>
 </div>
 <div class="screen" id="scr13" data-name="ИИ проверяет">
-
-    <div style="position:absolute;top:0;left:0;right:0;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 7px;z-index:6;">
-      <span style="font-weight:700;font-size:15px;color:#2B2B2B;">9:41</span>
-      <div style="display:flex;gap:7px;align-items:center;">
-        <svg width="17" height="11" viewBox="0 0 17 11" fill="#2B2B2B"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.7" y="5" width="3" height="6" rx="1"/><rect x="9.3" y="2.5" width="3" height="8.5" rx="1"/><rect x="14" y="0" width="3" height="11" rx="1"/></svg>
-        <svg width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="#2B2B2B" stroke-width="1.6" stroke-linecap="round"><path d="M2 5a8 8 0 0 1 12 0"/><path d="M4.5 7.4a4.4 4.4 0 0 1 7 0"/><circle cx="8" cy="9.8" r="1" fill="#2B2B2B" stroke="none"/></svg>
-        <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3" stroke="#2B2B2B" opacity=".4"/><rect x="2.4" y="2.4" width="15" height="7.2" rx="1.6" fill="#2B2B2B"/><rect x="23" y="4" width="2" height="4" rx="1" fill="#2B2B2B"/></svg>
+  <main class="learning-route writing-route" aria-labelledby="writing_waiting_title" aria-busy="true" tabindex="-1" data-aisy-shell-focus>
+    <header class="writing-route__header aisy-surface">
+      <p class="writing-route__eyebrow">Письмо · серверная проверка</p>
+      <h1 class="writing-route__title">Проверяем работу</h1>
+      <p id="writing_waiting_summary" class="writing-route__summary">Готовим безопасную отправку ответа</p>
+      <p class="writing-route__status">Можно вернуться назад — поздний ответ не изменит другой экран или аккаунт</p>
+    </header>
+    <p class="writing-review-live" aria-hidden="true"></p>
+    <div id="w_waiting_content" class="writing-waiting" role="status" aria-live="polite" aria-busy="true">
+      <div class="writing-waiting__card">
+        <span class="writing-waiting__mark" aria-hidden="true"></span>
+        <h2 id="writing_waiting_title">Готовим проверку</h2>
+        <p id="writing_waiting_copy">Проверяем безопасный повтор и возможность отправки. Ответ ещё не передан на проверку.</p>
       </div>
     </div>
-    <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 40px;text-align:center;">
-      <div style="position:relative;width:130px;height:130px;">
-        <svg width="130" height="130" viewBox="0 0 130 130">
-          <circle cx="65" cy="65" r="54" fill="none" stroke="#FCE3D6" stroke-width="10"/>
-          <circle cx="65" cy="65" r="54" fill="none" stroke="url(#ld)" stroke-width="10" stroke-linecap="round" stroke-dasharray="339" stroke-dashoffset="230" transform="rotate(-90 65 65)"/>
-          <defs><linearGradient id="ld" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFA570"/><stop offset="1" stop-color="#F2683F"/></linearGradient></defs>
-        </svg>
-        <div style="position:absolute;inset:0;display:grid;place-items:center;">
-          <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#F2683F" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 1.9 4.6L19 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"/><path d="M19 16l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></svg>
-        </div>
-      </div>
-      <div style="margin-top:30px;font-weight:800;font-size:21px;color:#2B2B2B;">ИИ проверяет эссе…</div>
-      <div style="margin-top:10px;font-weight:600;font-size:14px;color:#6A6E75;line-height:1.5;">Анализируем грамматику, лексику<br>и структуру. Это займёт ~15 секунд.</div>
-      <!-- step pills -->
-      <div style="margin-top:26px;display:flex;flex-direction:column;gap:10px;width:100%;max-width:250px;">
-        <div style="display:flex;align-items:center;gap:10px;background:#fff;border-radius:13px;padding:11px 14px;box-shadow:0 6px 16px rgba(20,20,30,.05);"><span style="width:20px;height:20px;border-radius:50%;background:#1F9E5A;display:grid;place-items:center;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 12 10 18 20 6"/></svg></span><span style="font-weight:600;font-size:13px;color:#2B2B2B;">Орфография проверена</span></div>
-        <div style="display:flex;align-items:center;gap:10px;background:#fff;border-radius:13px;padding:11px 14px;box-shadow:0 6px 16px rgba(20,20,30,.05);"><span style="width:20px;height:20px;border-radius:50%;border:2.5px solid #F2683F;border-right-color:transparent;"></span><span style="font-weight:600;font-size:13px;color:#2B2B2B;">Анализ грамматики…</span></div>
-        <div style="display:flex;align-items:center;gap:10px;background:#fff;border-radius:13px;padding:11px 14px;box-shadow:0 6px 16px rgba(20,20,30,.05);opacity:.5;"><span style="width:20px;height:20px;border-radius:50%;border:2px solid #D8DCE1;"></span><span style="font-weight:600;font-size:13px;color:#6A6E75;">Оценка по критериям</span></div>
-      </div>
+    <div id="w_waiting_action" class="learning-action-dock writing-action-dock">
+      <button type="button" id="w_waiting_primary" class="aisy-button writing-primary" aria-busy="true" disabled>Готовим…</button>
     </div>
-  
+  </main>
 </div>
+<dialog id="writing_confirm_dialog" class="writing-confirm" aria-modal="true" aria-labelledby="writing_confirm_title" aria-describedby="writing_confirm_copy">
+  <div class="writing-confirm__paper">
+    <p class="writing-confirm__eyebrow">Безопасная проверка</p>
+    <h2 id="writing_confirm_title">Подтвердите действие</h2>
+    <p id="writing_confirm_copy"></p>
+    <div class="writing-confirm__actions">
+      <button type="button" id="writing_confirm_cancel" class="aisy-button aisy-button--secondary">Отмена</button>
+      <button type="button" id="writing_confirm_accept" class="aisy-button writing-primary">Продолжить</button>
+    </div>
+  </div>
+</dialog>
 <div class="screen" id="scr10" data-name="Прогресс" role="main" aria-labelledby="progress_page_title">
 
     <div style="position:absolute;top:0;left:0;right:0;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 7px;z-index:6;">

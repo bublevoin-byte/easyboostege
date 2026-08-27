@@ -31,6 +31,16 @@ async function readFrontend() {
   return { html, api, scripts, script, combined: `${html}\n${api}\n${script}` };
 }
 
+function attributeValue(openingTag, name) {
+  const match = openingTag.match(new RegExp(`\\s${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, 'iu'));
+  return match?.[1] ?? match?.[2] ?? null;
+}
+
+function associatedLabel(source, controlId) {
+  return [...source.matchAll(/<label\b([^>]*)>([\s\S]*?)<\/label>/giu)]
+    .find(([, attributes]) => attributeValue(attributes, 'for') === controlId);
+}
+
 test('frontend never persists or sends the session JWT', async () => {
   const { combined: frontend } = await readFrontend();
   assert.doesNotMatch(frontend, /localStorage\.setItem\(['"]eb_token/);
@@ -305,7 +315,13 @@ test('frontend keeps zoom, keyboard focus and assistive announcements accessible
   assert.match(html, /viewport-fit=cover/u);
   assert.match(html, /:focus-visible/u);
   assert.match(html, /prefers-reduced-motion/u);
-  assert.match(html, /id="w_editor"[^>]*role="textbox"[^>]*aria-label="Письменный ответ"/u);
+  const editor = [...html.matchAll(/<textarea\b[^>]*>/giu)]
+    .map((match) => match[0])
+    .find((openingTag) => attributeValue(openingTag, 'id') === 'w_editor');
+  assert.ok(editor, 'Writing editor must remain a semantic textarea');
+  const editorLabel = associatedLabel(html, 'w_editor');
+  assert.ok(editorLabel, 'Writing editor must retain an associated visible label');
+  assert.equal(editorLabel[2].trim(), 'Письменный ответ');
   assert.match(script, /setAttribute\('aria-live',\s*'polite'\)/u);
 });
 

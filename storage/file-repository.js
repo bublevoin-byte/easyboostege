@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { aiRequestExportDto } from './ai-request-export.js';
+import { withoutClientWritingProgress, writingProgressSummary } from './writing-progress.js';
 import { hashAuthCode, normalizeOAuthTransaction, normalizeProviderIdentity, normalizeUsername, normalizeVoiceTutorDeliveryMetadata, normalizeVoiceTutorProxyHash, subscriptionView, VoiceTutorError, voiceTutorAccessView, voiceTutorBillableSeconds, voiceTutorProxyUsage, voiceTutorQuotaPeriods, voiceTutorReservationSeconds } from './shared.js';
 import { transitionPedagogicalState } from '../voice-tutor/state-machine.js';
 import { transitionRuleCardReview } from '../voice-tutor/rule-card.js';
@@ -363,9 +364,12 @@ export function createFileRepository(filePath, {
   adaptiveMutationNow = () => new Date(),
   speakingLearningNow = () => new Date(),
   voiceTutorMutationNow = () => new Date(),
+  fileSystem = fs,
 } = {}) {
   let loaded = false;
-  let state = { users: {}, learner_identities: [], oauth_auth_transactions: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], speaking_attempts: [], speaking_task1_sessions: [], speaking_task2_sessions: [], speaking_task3_sessions: [], speaking_task4_sessions: [], speaking_full_sessions: [], speaking_assessments: [], speaking_accent_profiles: {}, speaking_accent_history: [], speaking_accent_calibrations: [], speaking_calibration_consents: {}, speaking_calibration_samples: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, subscription_entitlements: {}, voice_tutor_sessions: [], voice_tutor_recoveries: [], voice_tutor_repeats: [], voice_tutor_repeat_attempts: [], voice_tutor_reports: [], rule_cards: [], payment_requests: {}, subscription_events: [], adaptive_learning_goals: [], adaptive_learning_profiles: {}, adaptive_learning_skill_estimates: {}, adaptive_learning_plan_revisions: [], adaptive_learning_sessions: [], adaptive_learning_execution_claims: [], adaptive_learning_session_events: [], adaptive_learning_session_mutations: [], adaptive_diagnostic_sessions: [], adaptive_diagnostic_start_claims: [], adaptive_diagnostic_responses: [], ege_mock_attempts: [], ege_mock_mutations: [] };
+  let state = { users: {}, learner_identities: [], oauth_auth_transactions: {}, progress: {}, progress_summary: {}, auth_codes: {}, writing_attempts: [], writing_evaluation_aliases: [], speaking_attempts: [], speaking_task1_sessions: [], speaking_task2_sessions: [], speaking_task3_sessions: [], speaking_task4_sessions: [], speaking_full_sessions: [], speaking_assessments: [], speaking_accent_profiles: {}, speaking_accent_history: [], speaking_accent_calibrations: [], speaking_calibration_consents: {}, speaking_calibration_samples: [], generated_tasks: [], task_bank: [], task_deliveries: [], module_attempts: [], word_progress: {}, error_bank: [], ai_requests: [], audit_log: [], sessions: {}, subscriptions: {}, subscription_entitlements: {}, voice_tutor_sessions: [], voice_tutor_recoveries: [], voice_tutor_repeats: [], voice_tutor_repeat_attempts: [], voice_tutor_reports: [], rule_cards: [], payment_requests: {}, subscription_events: [], adaptive_learning_goals: [], adaptive_learning_profiles: {}, adaptive_learning_skill_estimates: {}, adaptive_learning_plan_revisions: [], adaptive_learning_sessions: [], adaptive_learning_execution_claims: [], adaptive_learning_session_events: [], adaptive_learning_session_mutations: [], adaptive_diagnostic_sessions: [], adaptive_diagnostic_start_claims: [], adaptive_diagnostic_responses: [], ege_mock_attempts: [], ege_mock_mutations: [] };
+  let durableStateSnapshot = JSON.stringify(state);
+  let writeEpoch = 0;
   let writeQueue = Promise.resolve();
   let coordinatedMutationQueue = Promise.resolve();
   let ruleCardQueue = Promise.resolve();
@@ -374,9 +378,10 @@ export function createFileRepository(filePath, {
     if (loaded) return;
     loaded = true;
     try {
-      const parsed = JSON.parse(await fs.readFile(filePath, 'utf8'));
+      const parsed = JSON.parse(await fileSystem.readFile(filePath, 'utf8'));
       if (parsed && typeof parsed === 'object') {
         let minimizedLegacyCapsule = false;
+        let sanitizedWritingAliases = false;
         state = {
           users: parsed.users && typeof parsed.users === 'object' ? parsed.users : {},
           learner_identities: Array.isArray(parsed.learner_identities) ? parsed.learner_identities : [],
@@ -386,6 +391,8 @@ export function createFileRepository(filePath, {
           progress_summary: parsed.progress_summary && typeof parsed.progress_summary === 'object' ? parsed.progress_summary : {},
           auth_codes: parsed.auth_codes && typeof parsed.auth_codes === 'object' ? parsed.auth_codes : {},
           writing_attempts: Array.isArray(parsed.writing_attempts) ? normalizeWritingAttempts(parsed.writing_attempts) : [],
+          writing_evaluation_aliases: Array.isArray(parsed.writing_evaluation_aliases)
+            ? parsed.writing_evaluation_aliases : [],
           speaking_attempts: Array.isArray(parsed.speaking_attempts) ? normalizeSpeakingAttempts(parsed.speaking_attempts) : [],
           speaking_task1_sessions: Array.isArray(parsed.speaking_task1_sessions) ? normalizeSpeakingSessions(parsed.speaking_task1_sessions) : [],
           speaking_task2_sessions: Array.isArray(parsed.speaking_task2_sessions) ? normalizeSpeakingSessions(parsed.speaking_task2_sessions) : [],
@@ -457,11 +464,31 @@ export function createFileRepository(filePath, {
           ege_mock_attempts: Array.isArray(parsed.ege_mock_attempts) ? parsed.ege_mock_attempts : [],
           ege_mock_mutations: Array.isArray(parsed.ege_mock_mutations) ? parsed.ege_mock_mutations : [],
         };
+        const seenWritingAliases = new Set();
+        const aliasesBeforeSanitize = state.writing_evaluation_aliases.length;
+        state.writing_evaluation_aliases = state.writing_evaluation_aliases.filter((alias) => {
+          const key = `${String(alias?.username || '')}\u0000${String(alias?.idempotency_key || '')}`;
+          const attempt = state.writing_attempts.find((item) => item.id === Number(alias?.attempt_id));
+          const valid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
+            .test(String(alias?.idempotency_key || ''))
+            && attempt?.username === alias?.username
+            && attempt.idempotency_key !== alias.idempotency_key
+            && !state.writing_attempts.some((item) => (
+              item.username === alias.username && item.idempotency_key === alias.idempotency_key
+            ))
+            && !seenWritingAliases.has(key);
+          if (valid) seenWritingAliases.add(key);
+          return valid;
+        });
+        sanitizedWritingAliases = aliasesBeforeSanitize !== state.writing_evaluation_aliases.length;
+        /* This is the last state actually present on disk. Upgrade mutations below may create a
+         * newer candidate, but a failed upgrade write must still be able to return to this base. */
+        durableStateSnapshot = JSON.stringify(state);
         const reconciledLegacyCanonical = reconcileLegacyApprovedRuleCards(state.rule_cards);
         const sanitizedLegacyAdaptiveExecution = sanitizeLegacyAdaptiveExecution(state);
         const migratedWordProgress = migrateFileWordProgress(state.word_progress);
         state.word_progress = migratedWordProgress.wordProgress;
-        if (minimizedLegacyCapsule || reconciledLegacyCanonical || sanitizedLegacyAdaptiveExecution
+        if (minimizedLegacyCapsule || sanitizedWritingAliases || reconciledLegacyCanonical || sanitizedLegacyAdaptiveExecution
           || migratedWordProgress.changed) {
           await persist();
         }
@@ -473,13 +500,29 @@ export function createFileRepository(filePath, {
 
   function persist() {
     const snapshot = JSON.stringify(state, null, 2);
-    writeQueue = writeQueue.then(async () => {
-      await fs.mkdir(path.dirname(filePath), { recursive: true });
+    const candidateEpoch = writeEpoch;
+    const current = writeQueue.then(async () => {
+      /* A preceding write failed after this candidate was captured. Its snapshot may contain the
+       * rejected mutation, so it must not become the new durable base. A later caller will capture
+       * the restored state under the incremented epoch and can recover the repository safely. */
+      if (candidateEpoch !== writeEpoch) {
+        throw Object.assign(new Error('FILE_REPOSITORY_WRITE_BASE_INVALID'), {
+          code: 'FILE_REPOSITORY_WRITE_BASE_INVALID',
+        });
+      }
+      await fileSystem.mkdir(path.dirname(filePath), { recursive: true });
       const temporary = `${filePath}.${process.pid}.tmp`;
-      await fs.writeFile(temporary, snapshot, 'utf8');
-      await fs.rename(temporary, filePath);
+      await fileSystem.writeFile(temporary, snapshot, 'utf8');
+      await fileSystem.rename(temporary, filePath);
+      durableStateSnapshot = snapshot;
     });
-    return writeQueue;
+    writeQueue = current.catch(() => {
+      if (candidateEpoch === writeEpoch) {
+        writeEpoch += 1;
+        state = JSON.parse(durableStateSnapshot);
+      }
+    });
+    return current;
   }
 
   async function getUser(username) {
@@ -608,14 +651,28 @@ export function createFileRepository(filePath, {
   }
 
   async function getProgress(username) {
-    await migrateGrammarMastery(username);
-    return structuredClone(state.progress[username] || {});
+    return serializeCoordinatedMutation(async () => {
+      await migrateGrammarMasteryLocked(username);
+      const progress = withoutClientWritingProgress(state.progress[username] || {});
+      const writing = writingProgressSummary(state.writing_attempts.filter((attempt) => attempt.username === username));
+      return writing.attemptCount
+        ? { ...progress, prog: { ...(progress.prog || {}), write: writing.average },
+          works: writing.works, essays: writing.attemptCount }
+        : progress;
+    });
+  }
+
+  async function getWritingProgressSummary(username) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      return writingProgressSummary(state.writing_attempts.filter((attempt) => attempt.username === username));
+    });
   }
 
   async function saveProgress(username, data) {
     await load();
     const canonicalMastery = state.progress[username]?.grammarMastery;
-    const accepted = structuredClone(data || {});
+    const accepted = withoutClientWritingProgress(data);
     delete accepted.grammarMastery;
     delete accepted.grammarRunner;
     state.progress[username] = accepted;
@@ -625,7 +682,7 @@ export function createFileRepository(filePath, {
 
   async function mergeProgress(username, modules) {
     await load();
-    const accepted = structuredClone(modules || {});
+    const accepted = withoutClientWritingProgress(modules);
     delete accepted.grammarMastery;
     delete accepted.grammarRunner;
     const current = { ...(state.progress[username] || {}) };
@@ -635,22 +692,24 @@ export function createFileRepository(filePath, {
     return structuredClone(state.progress[username]);
   }
 
+  async function migrateGrammarMasteryLocked(username) {
+    await load();
+    const progress = state.progress[username] || {};
+    const canonicalOwnsTruth = hasCanonicalMasteryRecords(progress.grammarMastery);
+    const source = canonicalOwnsTruth ? progress.grammarMastery : progress.gram;
+    if (!source || typeof source !== 'object') return structuredClone(canonicalOwnsTruth ? progress.grammarMastery : {});
+    const migrated = canonicalOwnsTruth
+      ? migrateMasteryRecords(source, { now: Date.now() })
+      : migrateLegacyMasteryRecords(source, { now: Date.now() });
+    if (JSON.stringify(progress.grammarMastery) !== JSON.stringify(migrated)) {
+      state.progress[username] = { ...progress, grammarMastery: migrated };
+      await persist();
+    }
+    return structuredClone(migrated);
+  }
+
   async function migrateGrammarMastery(username) {
-    return serializeCoordinatedMutation(async () => {
-      await load();
-      const progress = state.progress[username] || {};
-      const canonicalOwnsTruth = hasCanonicalMasteryRecords(progress.grammarMastery);
-      const source = canonicalOwnsTruth ? progress.grammarMastery : progress.gram;
-      if (!source || typeof source !== 'object') return structuredClone(canonicalOwnsTruth ? progress.grammarMastery : {});
-      const migrated = canonicalOwnsTruth
-        ? migrateMasteryRecords(source, { now: Date.now() })
-        : migrateLegacyMasteryRecords(source, { now: Date.now() });
-      if (JSON.stringify(progress.grammarMastery) !== JSON.stringify(migrated)) {
-        state.progress[username] = { ...progress, grammarMastery: migrated };
-        await persist();
-      }
-      return structuredClone(migrated);
-    });
+    return serializeCoordinatedMutation(() => migrateGrammarMasteryLocked(username));
   }
 
   async function applyGrammarMasteryEvents(username, entries) {
@@ -3172,25 +3231,214 @@ export function createFileRepository(filePath, {
     return id;
   }
 
+  function writingAttemptForIdempotencyKey(username, idempotencyKey) {
+    const direct = state.writing_attempts.find((item) => (
+      item.username === username && item.idempotency_key === idempotencyKey
+    ));
+    if (direct) return direct;
+    const alias = state.writing_evaluation_aliases.find((item) => (
+      item.username === username && item.idempotency_key === idempotencyKey
+    ));
+    if (!alias) return null;
+    const attempt = state.writing_attempts.find((item) => (
+      item.id === Number(alias.attempt_id) && item.username === username
+    ));
+    if (!attempt) throw new Error('WRITING_EVALUATION_ALIAS_ORPHANED');
+    return attempt;
+  }
+
+  async function rememberWritingEvaluationAlias(username, idempotencyKey, attempt) {
+    if (attempt.idempotency_key === idempotencyKey) return false;
+    const direct = state.writing_attempts.find((item) => (
+      item.username === username && item.idempotency_key === idempotencyKey
+    ));
+    if (direct) {
+      if (direct.id === attempt.id) return false;
+      throw new Error('WRITING_EVALUATION_IDEMPOTENCY_CONFLICT');
+    }
+    const existing = state.writing_evaluation_aliases.find((item) => (
+      item.username === username && item.idempotency_key === idempotencyKey
+    ));
+    if (existing) {
+      if (Number(existing.attempt_id) === Number(attempt.id)) return false;
+      throw new Error('WRITING_EVALUATION_IDEMPOTENCY_CONFLICT');
+    }
+    const beforeAliases = structuredClone(state.writing_evaluation_aliases);
+    state.writing_evaluation_aliases.push({
+      username, idempotency_key: idempotencyKey, attempt_id: Number(attempt.id), created_at: Date.now(),
+    });
+    try { await persist(); } catch (error) {
+      state.writing_evaluation_aliases = beforeAliases;
+      throw error;
+    }
+    return true;
+  }
+
+  async function getWritingEvaluationClaim(username, idempotencyKey) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      const normalizedIdempotencyKey = String(idempotencyKey || '').toLowerCase();
+      const attempt = writingAttemptForIdempotencyKey(username, normalizedIdempotencyKey);
+      return attempt ? structuredClone(attempt) : null;
+    });
+  }
+
+  async function claimWritingEvaluation(username, input, promptVersion, requestFingerprint, idempotencyKey, {
+    consentPolicyVersion = null, now = null, acknowledgePossibleProviderRepeatKey = null,
+    prepareEvaluation = null,
+  } = {}) {
+    if (!/^[a-f0-9]{64}$/u.test(requestFingerprint)) throw new Error('WRITING_EVALUATION_FINGERPRINT_INVALID');
+    const normalizedIdempotencyKey = String(idempotencyKey || '').toLowerCase();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(normalizedIdempotencyKey)) {
+      throw new Error('WRITING_EVALUATION_IDEMPOTENCY_INVALID');
+    }
+    const normalizedAcknowledgedKey = acknowledgePossibleProviderRepeatKey == null
+      ? null : String(acknowledgePossibleProviderRepeatKey).toLowerCase();
+    if (normalizedAcknowledgedKey && (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
+      .test(normalizedAcknowledgedKey) || normalizedAcknowledgedKey === normalizedIdempotencyKey)) {
+      throw new Error('WRITING_EVALUATION_REPEAT_ACK_INVALID');
+    }
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      if (!state.users[username]) throw new Error('USER_NOT_FOUND');
+      const existing = writingAttemptForIdempotencyKey(username, normalizedIdempotencyKey);
+      if (existing) {
+        if (existing.request_fingerprint !== requestFingerprint) {
+          throw new Error('WRITING_EVALUATION_IDEMPOTENCY_CONFLICT');
+        }
+        return { created: false, attempt: structuredClone(existing) };
+      }
+      const claimedAt = new Date(typeof now === 'function' ? now() : (now ?? Date.now()));
+      if (!Number.isFinite(claimedAt.getTime())) throw new Error('WRITING_EVALUATION_CLAIM_TIME_INVALID');
+      let coalesced = state.writing_attempts.find((item) => (
+        item.username === username && item.request_fingerprint === requestFingerprint
+          && (item.status === 'pending'
+            || (item.status === 'completed' && item.prompt_version === promptVersion))
+      ));
+      const acknowledged = normalizedAcknowledgedKey
+        ? writingAttemptForIdempotencyKey(username, normalizedAcknowledgedKey) : null;
+      if (coalesced) {
+        if (!normalizedAcknowledgedKey) {
+          await rememberWritingEvaluationAlias(username, normalizedIdempotencyKey, coalesced);
+          return { created: false, attempt: structuredClone(coalesced) };
+        }
+        if (coalesced.status !== 'pending' || acknowledged?.id !== coalesced.id) {
+          if (['pending', 'completed'].includes(coalesced.status) && acknowledged?.status === 'failed'
+            && acknowledged.error_code === 'WRITING_EVALUATION_REPEAT_ACKNOWLEDGED'
+            && acknowledged.request_fingerprint === requestFingerprint
+            && coalesced.prompt_version === promptVersion) {
+            await rememberWritingEvaluationAlias(username, normalizedIdempotencyKey, coalesced);
+            return { created: false, attempt: structuredClone(coalesced) };
+          }
+          throw new Error('WRITING_EVALUATION_REPEAT_ACK_INVALID');
+        }
+      } else if (normalizedAcknowledgedKey) {
+        if (!acknowledged || acknowledged.status !== 'pending'
+          || acknowledged.request_fingerprint !== requestFingerprint) {
+          throw new Error('WRITING_EVALUATION_REPEAT_ACK_INVALID');
+        }
+        coalesced = acknowledged;
+      }
+      if (Number(state.users[username].sub_until || 0) <= claimedAt.getTime()) {
+        throw Object.assign(new Error('SUBSCRIPTION_REQUIRED'), {
+          code: 'SUBSCRIPTION_REQUIRED', status: 403,
+        });
+      }
+      const consent = state.users[username].privacy_consent || {};
+      if (!consentPolicyVersion || consent.policy_version !== consentPolicyVersion
+        || consent.text_processing !== true) {
+        throw Object.assign(new Error('PRIVACY_CONSENT_REQUIRED'), {
+          code: 'PRIVACY_CONSENT_REQUIRED', status: 403,
+        });
+      }
+      if (coalesced) {
+        const createdAt = new Date(coalesced.created_at).getTime();
+        const repeatEligible = Boolean(coalesced.provider_result_ambiguous_at)
+          || (Number.isFinite(createdAt) && claimedAt.getTime() - createdAt >= 5 * 60 * 1000);
+        if (!repeatEligible) throw new Error('WRITING_EVALUATION_REPEAT_ACK_NOT_READY');
+      }
+      const prepared = typeof prepareEvaluation === 'function' ? await prepareEvaluation() : null;
+      /* File mutations have no transaction rollback, so authorization must be decided before
+         fencing the acknowledged claim in shared memory. */
+      const beforeWritingAttempts = structuredClone(state.writing_attempts);
+      if (coalesced) {
+        coalesced.status = 'failed';
+        coalesced.error_code = 'WRITING_EVALUATION_REPEAT_ACKNOWLEDGED';
+        coalesced.evaluated_at = claimedAt.getTime();
+      }
+      const id = (state.writing_attempts.at(-1)?.id || 0) + 1;
+      const attempt = {
+        id,
+        username,
+        task_type: input.taskType,
+        source_task_ref: input.sourceTaskRef || null,
+        assignment: structuredClone(input.assignment),
+        answer: input.answer,
+        evaluated_answer: prepared?.evaluatedAnswer ?? input.evaluatedAnswer ?? input.answer,
+        prompt_version: promptVersion,
+        model: null,
+        status: 'pending',
+        idempotency_key: normalizedIdempotencyKey,
+        request_fingerprint: requestFingerprint,
+        response_snapshot: null,
+        provider_result_ambiguous_at: null,
+        created_at: claimedAt.getTime(),
+      };
+      state.writing_attempts.push(attempt);
+      try { await persist(); } catch (error) {
+        state.writing_attempts = beforeWritingAttempts;
+        throw error;
+      }
+      return { created: true, attempt: structuredClone(attempt), prepared };
+    });
+  }
+
   async function finishWritingAttempt(id, result) {
     return serializeCoordinatedMutation(async () => {
       await load();
       const attempt = state.writing_attempts.find((item) => item.id === Number(id));
       if (!attempt) throw new Error('WRITING_ATTEMPT_NOT_FOUND');
+      if (attempt.status !== 'pending') return false;
+      const before = structuredClone(attempt);
       attempt.status = result.status;
       attempt.review = result.review ? structuredClone(result.review) : null;
       attempt.provider = result.provider || null;
       attempt.model = result.model || null;
       attempt.error_code = result.errorCode || null;
+      attempt.response_snapshot = result.responseSnapshot ? structuredClone(result.responseSnapshot) : null;
       attempt.evaluated_at = Date.now();
-      await persist();
+      try { await persist(); } catch (error) {
+        Object.keys(attempt).forEach((key) => { delete attempt[key]; });
+        Object.assign(attempt, before);
+        throw error;
+      }
+      return true;
+    });
+  }
+
+  async function markWritingEvaluationAmbiguous(id) {
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      const attempt = state.writing_attempts.find((item) => item.id === Number(id));
+      if (!attempt) throw new Error('WRITING_ATTEMPT_NOT_FOUND');
+      if (attempt.status !== 'pending') return false;
+      const before = structuredClone(attempt);
+      attempt.provider_result_ambiguous_at ||= Date.now();
+      try { await persist(); } catch (error) {
+        Object.keys(attempt).forEach((key) => { delete attempt[key]; });
+        Object.assign(attempt, before);
+        throw error;
+      }
+      return true;
     });
   }
 
   async function getWritingAttempt(username, id) {
-    await load();
-    const attempt = state.writing_attempts.find((item) => item.username === username && item.id === Number(id));
-    return attempt ? structuredClone(attempt) : null;
+    return serializeCoordinatedMutation(async () => {
+      await load();
+      const attempt = state.writing_attempts.find((item) => item.username === username && item.id === Number(id));
+      return attempt ? structuredClone(attempt) : null;
+    });
   }
 
   async function createSpeakingAttempt(username, input, promptVersion) {
@@ -5344,7 +5592,8 @@ export function createFileRepository(filePath, {
 
   async function settleAiOperationSlot(username, claimId, {
     status, provider = null, model = null, durationMs = null, errorCode = null,
-    promptTokens = null, completionTokens = null, now = new Date(),
+    promptTokens = null, completionTokens = null, estimatedCostMicrousd = null,
+    fallbackReason = null, now = new Date(),
   }) {
     return serializeVoiceTutorMutation(async () => {
       await load();
@@ -5359,6 +5608,9 @@ export function createFileRepository(filePath, {
       entry.errorCode = errorCode;
       entry.promptTokens = Number.isFinite(promptTokens) ? Math.max(0, Math.round(promptTokens)) : null;
       entry.completionTokens = Number.isFinite(completionTokens) ? Math.max(0, Math.round(completionTokens)) : null;
+      entry.estimatedCostMicrousd = Number.isFinite(estimatedCostMicrousd)
+        ? Math.max(0, Math.round(estimatedCostMicrousd)) : null;
+      entry.fallbackReason = fallbackReason == null ? null : String(fallbackReason).slice(0, 500);
       entry.settled_at = new Date(now).getTime();
       await persist();
       return { applied: true, status: entry.status };
@@ -5477,7 +5729,11 @@ export function createFileRepository(filePath, {
         .map(({ username: owner, ...item }) => item),
       rule_cards: state.rule_cards.filter((item) => item.created_for_username === username),
       payment_requests: Object.values(state.payment_requests).filter((item) => item.username === username),
-      writing_attempts: state.writing_attempts.filter((item) => item.username === username),
+      writing_attempts: state.writing_attempts
+        .filter((item) => item.username === username)
+        .map(({
+          idempotency_key, request_fingerprint, response_snapshot, provider_result_ambiguous_at, ...item
+        }) => item),
       speaking_attempts: state.speaking_attempts
         .filter((item) => item.username === username)
         .map(({
@@ -5589,6 +5845,7 @@ export function createFileRepository(filePath, {
       delete state.users[username];
       delete state.progress[username];
       state.writing_attempts = state.writing_attempts.filter((item) => item.username !== username);
+      state.writing_evaluation_aliases = state.writing_evaluation_aliases.filter((item) => item.username !== username);
       state.speaking_attempts = state.speaking_attempts.filter((item) => item.username !== username);
       state.speaking_task1_sessions = state.speaking_task1_sessions.filter((item) => item.username !== username);
       state.speaking_task2_sessions = state.speaking_task2_sessions.filter((item) => item.username !== username);
@@ -5773,8 +6030,12 @@ export function createFileRepository(filePath, {
     confirmTelegramAuthCode,
     consumeTelegramAuthCode,
     createWritingAttempt,
+    claimWritingEvaluation,
+    getWritingEvaluationClaim,
+    markWritingEvaluationAmbiguous,
     finishWritingAttempt,
     getWritingAttempt,
+    getWritingProgressSummary,
     createSpeakingAttempt,
     claimSpeakingEvaluation,
     getSpeakingEvaluationClaim,

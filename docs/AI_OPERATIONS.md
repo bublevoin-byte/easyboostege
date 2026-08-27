@@ -35,6 +35,49 @@ or retention contract, and release verification makes no paid provider call.
 | Voice Error Tutor | `/api/v1/voice-tutor/context-attempts`, `/api/v1/voice-tutor/sessions` | reading/listening сначала сверяют полный завершённый canonical set; writing/speaking возвращают bounded названия и индексы потерянных критериев, затем заново загружают owner-bound completed attempt и валидируют выбранный индекс; transient capsule перечисляет все потери, но одна сессия тренирует один критерий по fail-closed матрице заданий | тот же capsule через AI-text или canonical-local rule; повторная evaluation работы не вызывается |
 | Trusted rule evidence | `/api/v1/voice-tutor/rule-discoveries` (`voice_tutor_rule_extract`) | Запрос принимает только owner-bound `session_id` с серверным `rule.discovery_required`; URL только из server allowlist; pinned public DNS address, HTTPS, path, redirects, общий deadline, MIME и bytes ограничены; fetched text передаётся как `untrusted_source_document`, output проходит bounded contract и должен совпасть у двух независимых authority/domain после redirects | один источник, конфликт, blocked URL, уже существующий approved canonical или ошибка fetch/extraction дают fail-closed без новой rule card |
 
+## Writing 37/38: owner-bound exactly-once evaluation
+
+`POST /api/v1/ai/evaluate-writing` принимает только точный `{taskType, taskId, answer}` и до доступа к
+квоте или провайдеру требует owner-generation header и UUID `Idempotency-Key`. Один owner/key навсегда
+связан с одним SHA-256 payload fingerprint. Exact completed replay до текущих subscription/consent/rate gates
+проверяет сохранённый review через version-aware archival contract, честно добавляет отсутствующий pre-v9
+`example`, сохраняет исходные scored facts и строит текущий публичный DTO заново; произвольный старый snapshot
+не переименовывается в новый контракт. К DTO присоединяются свежая server-authoritative сводка последних 30
+работ и отдельный `confirmedAttempt` exact claim. Неподдерживаемый/повреждённый архив закрывается без новой
+платной обработки. Exact failed replay возвращает сохранённую terminal error. Pending одинакового payload
+коалесцируется между всеми prompt versions, поэтому deploy не может автоматически повторить возможно уже
+оплаченную работу. После completed старая версия может быть явно проверена заново новым prompt; completed
+текущей версии коалесцируется. Owner lock и актуальные subscription/text-consent повторно проверяются внутри
+repository перед созданием новой paid claim.
+
+Transport помечает границу физической отправки как `not_dispatched`, `possibly_dispatched` или
+`definitive_response`. Ошибка очереди до fetch безопасно допускает обычный fallback. Timeout/rejection после
+возможной отправки оставляет pending claim с `provider_result_ambiguous_at`; никакая автоматическая ветка не
+создаёт второй платный вызов. Реальный HTTP-ответ, включая 5xx, является definitive и проходит обычный
+bounded fallback/terminal settlement. Если запись validated result или settlement не подтверждена, тот же
+claim также остаётся ambiguous. Повтор сначала переиспользует исходный key. Только после явного согласия
+ученика новый key может передать старый ambiguous UUID в
+`X-EasyBoost-Acknowledge-Provider-Repeat`; repository атомарно terminalizes старый claim и создаёт новый.
+Ранний, чужой или payload-mismatched acknowledgement закрывается без провайдера и без квотной мутации.
+
+Если конкурентный запрос с другим UUID коалесцировался к canonical attempt, его owner-bound UUID сохраняется
+как внутренний alias canonical attempt. Exact lookup разрешает primary key и alias до prompt/access gates. Поэтому
+проигравшая вкладка после process loss или prompt deploy получает тот же уже оплаченный результат, а не создаёт
+новую работу; то же правило действует для losing UUID согласованного ambiguous repeat. Alias не содержит текст,
+не входит в account export и удаляется вместе с canonical attempt.
+
+Успешный review остаётся строго server-validated: максимумы 6/14, FIPI zero cascades и assignment принадлежат
+серверу. Каждая feedback-запись разделяет исправление (`right`), переиспользуемое правило (`note`), отдельный
+пример (`example`) и evidence исходного фрагмента (`wrong`). Локальный fallback не придумывает score,
+completed evidence или пройденное adaptive learning. Offline, quota, access, consent, authority, task mismatch,
+client-update и ambiguity показываются отдельными recoverable/non-recoverable состояниями с сохранённым
+черновиком.
+
+Счётчик Writing, среднее и recent history выводятся только из completed server attempts. Клиентские `works`,
+`essays`, `writingAttemptIds` и вложенный `prog.write` отбрасываются на full/module progress writes; read path
+возвращает полный `attemptCount`, average последних пяти и максимум 30 recent work DTO. Поэтому холодный старт
+и восстановление после 30 работ не регрессируют к локальному счётчику.
+
 Ответы `reading_questions` и `listening_interview` получают server-issued `voice_tutor.set_id` и
 четыре `item_ids`, производные от request hash и digest сохранённого typed result. Shared cache
 перед выдачей копируется в owner-bound строку `generated_tasks`. Поэтому встроенные и
@@ -262,7 +305,7 @@ fake HTTP+WebSocket provider при выполнении настоящего ap
 решением вне автоматических gates. Операторский процесс описан в
 `docs/VOICE_TUTOR_OPERATIONS.md`.
 
-Для `writing-v8` сервер считает полный объём до вызова провайдера по правилам ФИПИ: числовые
+Для `writing-v9` сервер считает полный объём до вызова провайдера по правилам ФИПИ: числовые
 группы и проценты с пробелом, дефисные формы и slash-формы считаются одним словом. В задании 37 серия
 из трёх или более подряд одинаковых слов даёт в объём только первое слово, а повторяющиеся
 многословные фразы считаются полностью. В задании 38 уже две или более соседние копии одного слова
@@ -299,7 +342,7 @@ The canonical SHA-256 `context_fingerprint` is claimed before each primary, fall
 replayed claim with a different context is rejected. Recording and replay compare that complete JSON value
 semantically (object key order is irrelevant for PostgreSQL JSONB) and fail closed before applying any score if
 a value is missing or changed. Public evidence is also executable-contract bounded: at most five items, `kind` is only
-`err|warn`, `title` and `note` are non-empty bounded strings, and `wrong`/`right` are bounded strings. The
+`err|warn`, `title` and `note` are non-empty bounded strings, and `wrong`/`right`/`example` are bounded strings. The
 source-mode service worker preserves the writing normalizer as part of the statically derived EGE executable
 dependency closure, so an update cannot leave the runner cached without its shared word-boundary module.
 

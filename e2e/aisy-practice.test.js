@@ -196,16 +196,18 @@ try{
   const writing=mobile.page.locator('.practice-row[data-skill="writing"]');
   await writing.getByRole('button',{name:'Открыть: Письмо'}).press('Enter');
   await mobile.page.locator('#scr8.on').waitFor({state:'visible',timeout:5_000});
+  await mobile.page.locator('#w_seg37').press('Enter');
   const editor=mobile.page.locator('#w_editor');
   await editor.waitFor({state:'visible',timeout:5_000});
-  const savedDraft='Dear Ben,\nThank you for your message. This is my saved draft.';
+  const savedDraft='Dear Ben,\n\nThank you for your message.\nThis is my saved draft.\n\nBest wishes,\nAnn';
   await editor.fill(savedDraft);
   await mobile.page.getByRole('button',{name:'Назад в раздел Практика',exact:true}).press('Enter');
   const continuingWriting=mobile.page.locator('.practice-row[data-skill="writing"][data-state="continue"]');
   await continuingWriting.waitFor({state:'visible',timeout:5_000});
   await continuingWriting.getByRole('button',{name:'Продолжить: Письмо'}).press('Enter');
   await mobile.page.locator('#scr8.on #w_editor').waitFor({state:'visible',timeout:5_000});
-  assert.equal(await mobile.page.locator('#w_editor').innerText(),savedDraft);
+  assert.equal(await mobile.page.locator('#w_seg37').getAttribute('aria-checked'),'true','Continue must restore the exact task type');
+  assert.equal(await mobile.page.locator('#w_editor').inputValue(),savedDraft,'textarea resume must preserve every newline');
 
   await mobile.page.getByRole('button',{name:'Назад в раздел Практика',exact:true}).press('Enter');
   const listeningRow=mobile.page.locator('.practice-row[data-skill="listening"]');

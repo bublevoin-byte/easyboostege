@@ -310,7 +310,7 @@ export async function assertEgeMockAttemptRepositoryContract(assert, repository,
     const contextClaim = {
       claimId: contextClaimId,
       operation: 'writing_context_fixture',
-      promptVersion: 'writing-v8',
+      promptVersion: 'writing-v9',
       contextFingerprint,
       requestsPerHour: 3,
       dailyLimit: 1_000_000,

@@ -26,7 +26,8 @@ const studentAnswer = (max) => z.string().trim().min(20).max(max)
 // v7 adds slash forms, artificial-repeat and copied-stimulus exclusions and names the exact
 // server-selected official fragment instead of asking the provider to truncate it again.
 // v8 binds the official task-38 published-source overlap rule to the pinned assignment corpus.
-export const WRITING_PROMPT_VERSION = 'writing-v8';
+// v9 separates the reusable rule from a concrete teaching example in every feedback item.
+export const WRITING_PROMPT_VERSION = 'writing-v9';
 
 const task37AssignmentSchema = z.object({
   from: z.string().trim().min(1).max(40),
@@ -77,6 +78,8 @@ const reviewText = (max) => z.string().trim().min(1).max(max)
   .refine((value) => !/[<>]/u.test(value), { message: 'HTML markup is not allowed' });
 const optionalReviewText = (max) => z.string().max(max).default('')
   .refine((value) => !/[<>]/u.test(value), { message: 'HTML markup is not allowed' });
+const providedReviewText = (max) => z.string().max(max)
+  .refine((value) => !/[<>]/u.test(value), { message: 'HTML markup is not allowed' });
 
 const reviewCriterionSchema = z.object({
   name: reviewText(120),
@@ -90,7 +93,19 @@ const reviewErrorSchema = z.object({
   right: optionalReviewText(500),
   kind: z.enum(['err', 'warn']),
   note: reviewText(1000),
-}).strict();
+  example: providedReviewText(500),
+}).strict().superRefine((error, context) => {
+  const normalized = (value) => String(value || '').normalize('NFKC').trim().toLocaleLowerCase('en-US');
+  const example = normalized(error.example);
+  const correctionRequiresExample = error.kind === 'err' || Boolean(normalized(error.right));
+  if (correctionRequiresExample && !example) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['example'], message: 'teaching example is required' });
+    return;
+  }
+  if (example && [error.wrong, error.right].some((value) => normalized(value) === example)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['example'], message: 'teaching example must be distinct' });
+  }
+});
 
 export const writingReviewSchema = z.object({
   words: z.number().int().min(0),
@@ -235,7 +250,10 @@ export function buildWritingPrompt(input) {
     verdict: 'краткий итог',
     sub: 'главный совет',
     criteria: rules.criteria.map(([name, max]) => ({ name, got: 0, max })),
-    errors: [{ title: 'тип ошибки', wrong: 'фрагмент', right: 'исправление', kind: 'err', note: 'пояснение' }],
+    errors: [{
+      title: 'тип ошибки', wrong: 'фрагмент', right: 'исправление', kind: 'err',
+      note: 'краткое переиспользуемое правило', example: 'отдельный короткий пример по правилу',
+    }],
   };
 
   // The FIPI rules that force a zero. Their thresholds are derived from the same TASK_RULES
@@ -316,11 +334,45 @@ export function buildWritingPrompt(input) {
     // states the ban instead of leaving the model to trip over it.
     'Ни в одном текстовом поле не ставь угловые скобки — знаки «больше» и «меньше». Сравнения пиши словами: «объём превышен», «больше половины». Разбор с такими знаками отвергается целиком.',
     'Укажи не более пяти самых важных ошибок. Не придумывай фрагменты, которых нет в ответе.',
+    'В каждой ошибке поле note формулирует переиспользуемое правило, а example даёт один короткий пример применения этого правила, отличный от wrong и right. Для замечания без исправления example может быть пустой строкой.',
     'Поле kind принимает ровно два значения: "err" — нарушение, снижающее балл; "warn" — недочёт, балл за который не снижается. Третьего значения нет. Невыполненный пункт плана, неотвеченный вопрос и нарушение объёма — это kind: "err".',
     `Ответ ученика: ${JSON.stringify(input.answer)}`,
   ].join('\n');
 
   return { system, user, facts };
+}
+
+function validateWritingScoreContract(review, rules) {
+  const expectedCriteria = new Map(rules.criteria);
+  if (review.overall_max !== rules.overallMax) throw new Error('AI_RESPONSE_INVALID_MAX_SCORE');
+  if (review.criteria.length !== rules.criteria.length) throw new Error('AI_RESPONSE_INVALID_CRITERIA');
+
+  let total = 0;
+  const seenCriteria = new Set();
+  for (const criterion of review.criteria) {
+    const expectedMax = expectedCriteria.get(criterion.name);
+    if (expectedMax == null || seenCriteria.has(criterion.name)
+      || criterion.max !== expectedMax || criterion.got > criterion.max) {
+      throw new Error('AI_RESPONSE_INVALID_CRITERIA');
+    }
+    seenCriteria.add(criterion.name);
+    total += criterion.got;
+  }
+  /* The provider may return the exact unique criteria in a different array order. Persist and
+   * replay one canonical order so every client renders and validates the same contract. */
+  review.criteria = rules.criteria.map(([name]) => (
+    review.criteria.find((criterion) => criterion.name === name)
+  ));
+  if (review.overall_got !== total || total > rules.overallMax) {
+    throw new Error('AI_RESPONSE_INVALID_TOTAL');
+  }
+
+  const communicative = review.criteria[0];
+  if (communicative?.got === 0
+    && (review.overall_got !== 0 || review.criteria.some(({ got }) => got !== 0))) {
+    throw new Error('AI_RESPONSE_INVALID_COMMUNICATIVE_ZERO');
+  }
+  return review;
 }
 
 export function parseAndValidateWritingReview(raw, input) {
@@ -339,36 +391,11 @@ export function parseAndValidateWritingReview(raw, input) {
   const actualWords = countWords(input.answer, {
     taskType: input.taskType, assignment: input.assignment,
   });
-  const expectedCriteria = new Map(rules.criteria);
-
-  if (review.overall_max !== rules.overallMax) throw new Error('AI_RESPONSE_INVALID_MAX_SCORE');
   if (review.words !== actualWords) throw new Error('AI_RESPONSE_INVALID_WORD_COUNT');
   if (review.in_range !== isGradableWordCount(actualWords, rules)) {
     throw new Error('AI_RESPONSE_INVALID_WORD_RANGE');
   }
-  if (review.criteria.length !== rules.criteria.length) throw new Error('AI_RESPONSE_INVALID_CRITERIA');
-
-  let total = 0;
-  const seenCriteria = new Set();
-  for (const criterion of review.criteria) {
-    const expectedMax = expectedCriteria.get(criterion.name);
-    if (expectedMax == null || seenCriteria.has(criterion.name)
-      || criterion.max !== expectedMax || criterion.got > criterion.max) {
-      throw new Error('AI_RESPONSE_INVALID_CRITERIA');
-    }
-    seenCriteria.add(criterion.name);
-    total += criterion.got;
-  }
-  if (review.overall_got !== total || total > rules.overallMax) {
-    throw new Error('AI_RESPONSE_INVALID_TOTAL');
-  }
-
-  const [communicativeName] = rules.criteria[0];
-  const communicative = review.criteria.find(({ name }) => name === communicativeName);
-  if (communicative?.got === 0
-    && (review.overall_got !== 0 || review.criteria.some(({ got }) => got !== 0))) {
-    throw new Error('AI_RESPONSE_INVALID_COMMUNICATIVE_ZERO');
-  }
+  validateWritingScoreContract(review, rules);
 
   if (actualWords < Math.round(rules.minWords * 0.9)) {
     review.overall_got = 0;
@@ -384,11 +411,48 @@ export function parseAndValidateWritingReview(raw, input) {
       review.errors = [{
         title: 'Published-source overlap', wrong: '', right: '', kind: 'err',
         note: `Exact source matches cover ${overlap.matchedWords} of ${overlap.totalWords} assessable words, which is above 30 percent.`,
+        example: 'For example: The survey data can be paraphrased instead of copied word for word.',
       }, ...review.errors].slice(0, 5);
     }
   }
 
   return review;
+}
+
+const LEGACY_WRITING_EXAMPLE_NOTICE = 'Архивный разбор до writing-v9 не содержал отдельного примера.';
+
+/* Provider output is always parsed by the strict live contract above. Persisted v1-v8 reviews
+ * predate the dedicated example field, so read paths upcast only those explicitly versioned rows
+ * with an honest archival notice instead of inventing a teaching sentence. */
+export function parseStoredWritingReview(review, input, promptVersion) {
+  const version = String(promptVersion || '');
+  if (version === WRITING_PROMPT_VERSION) {
+    return parseAndValidateWritingReview(JSON.stringify(review), input);
+  }
+  if (!/^writing-v[1-8]$/u.test(version)) {
+    throw Object.assign(new Error('WRITING_STORED_PROMPT_VERSION_UNSUPPORTED'), {
+      code: 'WRITING_STORED_PROMPT_VERSION_UNSUPPORTED',
+    });
+  }
+  const candidate = structuredClone(review);
+  if (Array.isArray(candidate?.errors)) {
+    candidate.errors = candidate.errors.map((error) => {
+      if (!error || typeof error !== 'object') return error;
+      if (Object.hasOwn(error, 'example')) return error;
+      const requiresExample = error.kind === 'err' || Boolean(String(error.right || '').trim());
+      return { ...error, example: requiresExample ? LEGACY_WRITING_EXAMPLE_NOTICE : '' };
+    });
+  }
+  const parsed = writingReviewSchema.safeParse(candidate);
+  if (!parsed.success) throw new Error('AI_RESPONSE_INVALID_SCHEMA');
+  const archived = parsed.data;
+  const rules = rulesFor(input);
+  if (archived.in_range !== isGradableWordCount(archived.words, rules)) {
+    throw new Error('AI_RESPONSE_INVALID_WORD_RANGE');
+  }
+  /* Historical replay validates the stored score as evidence; it does not re-score the answer
+   * with newer truncation/source-overlap rules and therefore cannot rewrite a completed attempt. */
+  return validateWritingScoreContract(archived, rules);
 }
 
 export function getWritingRules(taskType) {

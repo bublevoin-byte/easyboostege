@@ -7,7 +7,8 @@ import express from 'express';
 import { config } from '../config.js';
 import { bindResponseOwner, requireExpectedOwner } from '../middleware/expected-owner.js';
 import {
-  parseAndValidateWritingReview, prepareWritingPrompt, WRITING_PROMPT_VERSION, writingRequestSchema,
+  parseAndValidateWritingReview, parseStoredWritingReview, prepareWritingEvaluation,
+  prepareWritingPrompt, WRITING_PROMPT_VERSION, writingRequestSchema,
 } from '../ai/writing.js';
 import { buildContentPrompt, CONTENT_PROMPT_VERSION, contentRequestSchema, parseContentResponse } from '../ai/content.js';
 import {
@@ -43,9 +44,32 @@ import {
   speakingEvaluationProviderRepeatPossible,
 } from '../speaking/evaluation-claim.js';
 import { AUTOMATIC_ASSESSMENT_PUBLIC_CONTRACT } from '../shared/automatic-assessment-contract.js';
+import { writingAttemptProgressConfirmation } from '../storage/writing-progress.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SPEAKING_TIMING_TOLERANCE_SECONDS = 0.05;
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const WRITING_EVALUATION_PENDING_TTL_MS = 5 * 60 * 1000;
+const WRITING_RESPONSE_CONTRACT_VERSION = 'writing-evaluation-response-v1';
+const SAFE_WRITING_OPERATION_ERRORS = new Set([
+  'AI_BUDGET_EXHAUSTED', 'RATE_LIMITED', 'AI_NOT_CONFIGURED', 'AI_QUEUE_TIMEOUT',
+  'AI_UNAVAILABLE', 'AI_OPERATION_METER_UNAVAILABLE',
+  'AI_RESPONSE_INVALID_JSON', 'AI_RESPONSE_INVALID_SCHEMA', 'AI_RESPONSE_INVALID_MAX_SCORE',
+  'AI_RESPONSE_INVALID_WORD_COUNT', 'AI_RESPONSE_INVALID_WORD_RANGE',
+  'AI_RESPONSE_INVALID_CRITERIA', 'AI_RESPONSE_INVALID_TOTAL',
+  'AI_RESPONSE_INVALID_COMMUNICATIVE_ZERO',
+]);
+
+function safeWritingOperationError(error) {
+  for (const candidate of [error?.code, error?.message]) {
+    if (SAFE_WRITING_OPERATION_ERRORS.has(candidate)) return candidate;
+  }
+  return 'AI_PROVIDER_UNAVAILABLE';
+}
+
+function safeWritingFallbackReason(value) {
+  return value ? 'provider fallback used; failed attempts are recorded separately' : null;
+}
 
 const EXPERIMENTAL_ASSESSMENT = Object.freeze({
   ...AUTOMATIC_ASSESSMENT_PUBLIC_CONTRACT,
@@ -74,6 +98,75 @@ function speakingEvaluationFingerprint(request) {
     pronunciationAssessmentKeys: request.pronunciationAssessmentKeys || null,
   };
   return crypto.createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
+}
+
+function writingEvaluationFingerprint(request) {
+  const canonical = {
+    contractVersion: 'writing-evaluation-v1',
+    taskType: request.taskType,
+    taskId: request.taskId,
+    answer: request.answer,
+  };
+  return crypto.createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
+}
+
+function writingProviderIdempotencyKey({ owner, attemptId, requestFingerprint, phase, attempt }) {
+  const digest = crypto.createHash('sha256').update(JSON.stringify({
+    contractVersion: 'writing-provider-call-v1', owner, attemptId, requestFingerprint, phase, attempt,
+  })).digest('hex');
+  return `writing:${digest}`;
+}
+
+function writingProviderClaimId({ owner, attemptId, requestFingerprint, phase, attempt, provider }) {
+  const bytes = crypto.createHash('sha256').update(JSON.stringify({
+    contractVersion: 'writing-provider-budget-v1', owner, attemptId, requestFingerprint,
+    phase, attempt, provider,
+  })).digest().subarray(0, 16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const value = bytes.toString('hex');
+  return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20)}`;
+}
+
+function writingReplayPayload(attempt) {
+  if (!attempt?.review || attempt.status !== 'completed') return null;
+  const attemptId = Number(attempt.id);
+  const input = {
+    taskType: attempt.task_type,
+    assignment: attempt.assignment,
+    answer: attempt.answer,
+  };
+  /* A stored snapshot is archival evidence, not proof that it implements today's public
+   * response contract. Rebuild the DTO from the authoritative attempt and validate/upcast the
+   * persisted review through the prompt-version-aware parser. Never relabel arbitrary JSON. */
+  const review = parseStoredWritingReview(attempt.review, input, attempt.prompt_version);
+  const promptVersion = String(attempt.prompt_version || '');
+  let scope;
+  if (promptVersion === WRITING_PROMPT_VERSION) {
+    scope = prepareWritingEvaluation(input).scope;
+  } else {
+    const evaluatedLimit = attempt.task_type === 'writing_37' ? 140 : 250;
+    const truncated = /^writing-v[5-8]$/u.test(promptVersion)
+      && review.words > Math.round(evaluatedLimit * 1.1);
+    scope = {
+      fullWords: review.words,
+      evaluatedWords: truncated ? evaluatedLimit : review.words,
+      truncated,
+      evaluatedLimit,
+    };
+  }
+  return {
+    contractVersion: WRITING_RESPONSE_CONTRACT_VERSION,
+    review,
+    provider: attempt.provider || null,
+    attemptId,
+    voiceTutor: {
+      source: 'writing', attemptId, revision: 1,
+      criterionChoices: reviewVoiceTutorCriterionChoices(review),
+    },
+    assessment: EXPERIMENTAL_ASSESSMENT,
+    evaluationScope: scope,
+  };
 }
 
 function speakingAssessmentContract(review, egeMock = false) {
@@ -144,6 +237,7 @@ export function createAiRoutes({
   access,
   db,
   providerClient = defaultProviderClient,
+  writingPromptPreparer = prepareWritingPrompt,
 }) {
   const router = express.Router();
   const { auth } = authentication;
@@ -158,9 +252,12 @@ export function createAiRoutes({
   const speakingEvalLimiter = perOperation(() => 'evaluate_speaking');
   const speakingSampleLimiter = perOperation(() => 'speaking_sample');
   const {
-    createWritingAttempt, finishWritingAttempt, claimSpeakingEvaluation, getSpeakingEvaluationClaim,
+    claimWritingEvaluation, getWritingEvaluationClaim, markWritingEvaluationAmbiguous, finishWritingAttempt,
+    getWritingProgressSummary,
+    claimSpeakingEvaluation, getSpeakingEvaluationClaim,
     finishSpeakingAttempt,
     getGeneratedTask, getSharedGeneratedTask, saveGeneratedTask, logAiRequest,
+    claimAiOperationSlot, settleAiOperationSlot,
     getBankTask, getBankTaskByExternalId,
   } = db;
   const { askProvider, aiProviders, askWithFallback, limitsFor, parseWithOneRepair } = providerClient;
@@ -510,6 +607,18 @@ export function createAiRoutes({
     bindResponseOwner(res, req.user);
     return next();
   }
+  function bindRequiredExpectedOwner(req, res, next) {
+    if (req.get('x-easyboost-expected-owner') == null || req.get('idempotency-key') == null) {
+      return res.status(428).json({ error: {
+        code: 'CLIENT_UPDATE_REQUIRED',
+        message: 'Обновите приложение перед проверкой письменной работы. Черновик останется на устройстве.',
+        requestId: req.requestId,
+      } });
+    }
+    if (!requireExpectedOwner(req, res)) return undefined;
+    bindResponseOwner(res, req.user);
+    return next();
+  }
   function serveCachedDictionary(req, res, next) {
     if (req.body?.operation !== 'dictionary_lookup') return next();
     const parsed = contentRequestSchema.safeParse(req.body);
@@ -545,7 +654,123 @@ export function createAiRoutes({
     };
   }
 
-  router.post('/api/v1/ai/evaluate-writing', auth, requireActiveSubscription, requirePrivacyConsent('text_processing'), requireAiBudget, writingLimiter, async (req, res, next) => {
+  async function respondToWritingClaim(req, res, attempt, requestFingerprint) {
+    if (attempt.request_fingerprint !== requestFingerprint) {
+      res.status(409).json({ error: {
+        code: 'WRITING_EVALUATION_IDEMPOTENCY_CONFLICT',
+        message: 'Этот Idempotency-Key уже относится к другому письменному ответу.',
+        requestId: req.requestId,
+      } });
+      return true;
+    }
+    let replay;
+    try {
+      replay = writingReplayPayload(attempt);
+    } catch (_) {
+      res.status(503).json({ error: {
+        code: 'WRITING_REPLAY_CONTRACT_UNAVAILABLE',
+        message: 'Разбор сохранён, но его архивный формат пока нельзя безопасно показать. Повторите проверку статуса позже.',
+        requestId: req.requestId,
+      } });
+      return true;
+    }
+    if (replay) {
+      try {
+        if (typeof getWritingProgressSummary !== 'function') throw new Error('WRITING_PROGRESS_AUTHORITY_UNAVAILABLE');
+        const summary = await getWritingProgressSummary(req.user);
+        const confirmedAttempt = writingAttemptProgressConfirmation(attempt);
+        if (!confirmedAttempt) throw new Error('WRITING_PROGRESS_AUTHORITY_INVALID');
+        res.json({ ...replay, writingProgress: { ...summary, confirmedAttempt } });
+      } catch (_) {
+        res.status(503).json({ error: {
+          code: 'WRITING_PROGRESS_UNAVAILABLE',
+          message: 'Разбор сохранён, но сводка прогресса пока недоступна. Повторите проверку статуса с тем же ключом.',
+          requestId: req.requestId,
+        } });
+      }
+      return true;
+    }
+    if (attempt.status === 'failed') {
+      const code = attempt.error_code || 'AI_UNAVAILABLE';
+      const acknowledged = code === 'WRITING_EVALUATION_REPEAT_ACKNOWLEDGED';
+      const status = acknowledged ? 409 : code === 'RATE_LIMITED' ? 429
+        : ['AI_NOT_CONFIGURED', 'AI_BUDGET_EXHAUSTED'].includes(code) ? 503 : 502;
+      res.status(status).json({ error: {
+        code,
+        message: acknowledged
+          ? 'Эта неопределённая проверка уже заменена подтверждённым повтором.'
+          : code === 'AI_BUDGET_EXHAUSTED' ? 'Дневной лимит ИИ исчерпан. Попробуйте завтра.'
+          : code === 'RATE_LIMITED' ? 'Слишком много запросов. Попробуйте позже.'
+          : code === 'AI_RESPONSE_INVALID'
+          ? 'ИИ вернул некорректный разбор. Попробуйте ещё раз.'
+          : code === 'AI_NOT_CONFIGURED' ? 'ИИ не настроен на сервере.' : 'ИИ временно недоступен.',
+        requestId: req.requestId,
+      } });
+      return true;
+    }
+    res.status(409).json({ error: {
+      code: 'WRITING_EVALUATION_IN_PROGRESS',
+      message: 'Этот письменный ответ уже проверяется. Повторите запрос с тем же ключом.',
+      requestId: req.requestId,
+    } });
+    return true;
+  }
+
+  function writingSettlementSnapshot(attempt, result) {
+    return {
+      ...attempt,
+      status: result.status,
+      review: result.review || null,
+      provider: result.provider || null,
+      model: result.model || null,
+      error_code: result.errorCode || null,
+      response_snapshot: result.responseSnapshot || null,
+    };
+  }
+
+  async function settleWritingEvaluation(attempt, result) {
+    const readCurrent = async () => {
+      try { return await getWritingEvaluationClaim(attempt.username, attempt.idempotency_key); } catch (_) { return null; }
+    };
+    try {
+      const applied = await finishWritingAttempt(attempt.id, result);
+      if (applied !== false) return writingSettlementSnapshot(attempt, result);
+      return await readCurrent();
+    } catch (_) {
+      const afterFirst = await readCurrent();
+      if (afterFirst && afterFirst.status !== 'pending') return afterFirst;
+      try {
+        const applied = await finishWritingAttempt(attempt.id, result);
+        if (applied !== false) return writingSettlementSnapshot(attempt, result);
+      } catch (_) { /* the exact claim remains pending and is never paid twice */ }
+      return await readCurrent();
+    }
+  }
+
+  function writingClaimIsStale(attempt) {
+    const createdAt = new Date(attempt?.created_at).getTime();
+    return attempt?.status === 'pending' && Number.isFinite(createdAt)
+      && Date.now() - createdAt >= WRITING_EVALUATION_PENDING_TTL_MS;
+  }
+
+  async function respondToExistingWritingClaim(req, res, attempt, requestFingerprint) {
+    if (attempt.request_fingerprint !== requestFingerprint) {
+      return await respondToWritingClaim(req, res, attempt, requestFingerprint);
+    }
+    if (attempt.provider_result_ambiguous_at || writingClaimIsStale(attempt)) {
+      /* A slow provider worker may still own this claim. Never terminalize it from a second
+       * request: doing so would discard a paid valid result and make a later retry pay twice.
+       * The client keeps this exact key and can observe the original worker's durable result. */
+      return res.status(409).json({ error: {
+        code: 'WRITING_EVALUATION_SETTLEMENT_UNKNOWN',
+        message: 'Результат ещё уточняется. Не отправляйте работу заново: повторите запрос с тем же черновиком.',
+        requestId: req.requestId,
+      } });
+    }
+    return await respondToWritingClaim(req, res, attempt, requestFingerprint);
+  }
+
+  async function prepareWritingEvaluationRequest(req, res, next) {
     const parsed = writingRequestSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({
@@ -556,31 +781,203 @@ export function createAiRoutes({
         },
       });
     }
-
-    /* Section 10.1: the assignment comes from the bank, never from the request body. */
-    let input;
+    const idempotencyKey = String(req.get('idempotency-key') || '').trim().toLowerCase();
+    if (!UUID_V4.test(idempotencyKey)) {
+      return res.status(400).json({ error: {
+        code: 'WRITING_EVALUATION_IDEMPOTENCY_INVALID',
+        message: 'Для проверки нужен корректный UUIDv4 Idempotency-Key.',
+        requestId: req.requestId,
+      } });
+    }
+    const acknowledgeRepeatKey = String(req.get('x-easyboost-acknowledge-provider-repeat') || '').trim().toLowerCase();
+    if (acknowledgeRepeatKey && (!UUID_V4.test(acknowledgeRepeatKey)
+      || acknowledgeRepeatKey === idempotencyKey)) {
+      return res.status(400).json({ error: {
+        code: 'WRITING_EVALUATION_REPEAT_ACK_INVALID',
+        message: 'Не удалось подтвердить осознанный повтор проверки.',
+        requestId: req.requestId,
+      } });
+    }
     try {
-      input = await resolveWritingTask(parsed.data);
+      const input = await resolveWritingTask(parsed.data);
+      res.locals.writingEvaluation = {
+        input,
+        idempotencyKey,
+        acknowledgeRepeatKey: acknowledgeRepeatKey || null,
+        requestFingerprint: writingEvaluationFingerprint({
+          taskType: input.taskType, taskId: input.taskId, answer: input.answer,
+        }),
+      };
+      return next();
     } catch (error) {
       return res.status(error.status || 400).json({
         error: { code: error.code || 'UNKNOWN_TASK', message: error.message, requestId: req.requestId },
       });
     }
+  }
+
+  async function replayExistingWritingEvaluation(req, res, next) {
+    try {
+      const prepared = res.locals.writingEvaluation;
+      const attempt = await getWritingEvaluationClaim(req.user, prepared.idempotencyKey);
+      if (!attempt) return next();
+      return await respondToExistingWritingClaim(req, res, attempt, prepared.requestFingerprint);
+    } catch (error) { return next(error); }
+  }
+
+  router.post('/api/v1/ai/evaluate-writing', auth, bindRequiredExpectedOwner,
+    prepareWritingEvaluationRequest, replayExistingWritingEvaluation,
+    requireActiveSubscription, requirePrivacyConsent('text_processing'),
+    requireAiBudget, writingLimiter, async (req, res, next) => {
+    const {
+      input, idempotencyKey, acknowledgeRepeatKey, requestFingerprint,
+    } = res.locals.writingEvaluation;
+    let claim;
+    try {
+      claim = await claimWritingEvaluation(req.user, input, WRITING_PROMPT_VERSION, requestFingerprint, idempotencyKey, {
+        consentPolicyVersion: privacyPolicyVersion,
+        acknowledgePossibleProviderRepeatKey: acknowledgeRepeatKey,
+        prepareEvaluation: () => writingPromptPreparer(input),
+      });
+    } catch (error) {
+      if (error.message === 'WRITING_EVALUATION_IDEMPOTENCY_CONFLICT') {
+        return res.status(409).json({ error: {
+          code: error.message,
+          message: 'Этот Idempotency-Key уже относится к другому письменному ответу.',
+          requestId: req.requestId,
+        } });
+      }
+      if (['WRITING_EVALUATION_REPEAT_ACK_INVALID', 'WRITING_EVALUATION_REPEAT_ACK_NOT_READY']
+        .includes(error.message)) {
+        return res.status(409).json({ error: {
+          code: error.message,
+          message: error.message === 'WRITING_EVALUATION_REPEAT_ACK_NOT_READY'
+            ? 'Предыдущая проверка ещё выполняется. Сначала проверьте её статус.'
+            : 'Старая неопределённая проверка больше не совпадает с этим ответом. Проверьте статус ещё раз.',
+          requestId: req.requestId,
+        } });
+      }
+      if (['SUBSCRIPTION_REQUIRED', 'PRIVACY_CONSENT_REQUIRED'].includes(error.code || error.message)) {
+        const code = error.code || error.message;
+        return res.status(403).json({ error: {
+          code,
+          message: code === 'SUBSCRIPTION_REQUIRED'
+            ? 'Для этой функции требуется активный доступ.'
+            : 'Перед отправкой данных подтвердите согласие в профиле.',
+          requestId: req.requestId,
+        } });
+      }
+      return next(error);
+    }
+    if (!claim.created) return await respondToExistingWritingClaim(req, res, claim.attempt, requestFingerprint);
+    const evaluation = claim.prepared || writingPromptPreparer(input);
 
     const startedAt = Date.now();
-    let attemptId;
+    const attemptId = Number(claim.attempt.id);
     let provider = null;
     let model = null;
     let promptTokens = null;
     let completionTokens = null;
+    const providerContexts = [];
+    async function settleProviderContext(context, {
+      status, errorCode = null, fallbackReason = null,
+    }) {
+      if (!context || context.settled) return;
+      const outcome = context.outcome || {};
+      try {
+        const settledOperation = await settleAiOperationSlot(req.user, context.claimId, {
+          status,
+          provider: outcome.provider?.name || null,
+          model: outcome.provider?.model || null,
+          durationMs: outcome.durationMs,
+          errorCode,
+          promptTokens: outcome.value?.promptTokens ?? null,
+          completionTokens: outcome.value?.completionTokens ?? null,
+          estimatedCostMicrousd: estimateCostMicrousd(outcome.value, outcome.provider),
+          fallbackReason,
+        });
+        if (settledOperation?.applied === false && settledOperation.status !== status) {
+          throw new Error('AI_OPERATION_SETTLEMENT_CONFLICT');
+        }
+        context.settled = true;
+      } catch (settlementError) {
+        context.settlementAmbiguous = true;
+        throw Object.assign(new Error('PROVIDER_RESULT_AMBIGUOUS'), {
+          code: 'PROVIDER_RESULT_AMBIGUOUS', cause: settlementError,
+          provider: outcome.provider?.name || null, model: outcome.provider?.model || null,
+        });
+      }
+    }
+    async function failDeferredProviderContexts(error) {
+      const rejectedResponse = error?.repairOf
+        ? { code: error.repairOf, message: error.repairOf }
+        : error;
+      const code = safeWritingOperationError(rejectedResponse);
+      for (const context of providerContexts) {
+        if (context.outcome?.status === 'completed' && !context.settled && !context.settlementAmbiguous) {
+          await settleProviderContext(context, {
+            status: 'failed', errorCode: code,
+            fallbackReason: `provider response rejected by Writing contract: ${code}`,
+          });
+        }
+      }
+    }
     try {
-      const evaluation = prepareWritingPrompt(input);
-      attemptId = await createWritingAttempt(req.user, {
-        ...input,
-        evaluatedAnswer: evaluation.evaluatedAnswer,
-      }, WRITING_PROMPT_VERSION);
       const { prompt } = evaluation;
-      const result = await askWithFallback(prompt.system, prompt.user, input.taskType);
+      const providerCallControls = (phase) => ({
+        async beforeAttempt(providerItem, { attempt }) {
+          if (typeof claimAiOperationSlot !== 'function' || typeof settleAiOperationSlot !== 'function') {
+            throw Object.assign(new Error('AI_OPERATION_METER_UNAVAILABLE'), {
+              code: 'AI_OPERATION_METER_UNAVAILABLE', status: 503,
+            });
+          }
+          const claimId = writingProviderClaimId({
+            owner: req.user, attemptId, requestFingerprint, phase, attempt,
+            provider: providerItem?.name || 'provider',
+          });
+          const claimResult = await claimAiOperationSlot(req.user, {
+            claimId,
+            operation: input.taskType,
+            promptVersion: WRITING_PROMPT_VERSION,
+            contextFingerprint: `sha256:${requestFingerprint}`,
+            requestsPerHour: limitsFor(input.taskType).requestsPerHour,
+            dailyLimit: config.ai.dailyRequestBudget,
+          });
+          if (claimResult?.applied === false) {
+            throw Object.assign(new Error('PROVIDER_RESULT_AMBIGUOUS'), {
+              code: 'PROVIDER_RESULT_AMBIGUOUS', provider: providerItem?.name || null,
+              model: providerItem?.model || null,
+            });
+          }
+          const context = {
+            claimId,
+            phase,
+            idempotencyKey: writingProviderIdempotencyKey({
+              owner: req.user, attemptId, requestFingerprint, phase, attempt,
+            }),
+          };
+          providerContexts.push(context);
+          return context;
+        },
+        async afterAttempt(context, outcome) {
+          context.outcome = outcome;
+          if (outcome.status !== 'failed') return;
+          const failureCode = safeWritingOperationError(outcome.error);
+          await settleProviderContext(context, {
+            status: 'failed', errorCode: failureCode,
+            fallbackReason: `provider call failed: ${failureCode}`,
+          });
+          if (outcome.error?.providerDispatch
+            && outcome.error.providerDispatch !== 'possibly_dispatched') return;
+          throw Object.assign(new Error('PROVIDER_RESULT_AMBIGUOUS'), {
+            code: 'PROVIDER_RESULT_AMBIGUOUS', cause: outcome.error,
+            provider: outcome.provider?.name || null, model: outcome.provider?.model || null,
+          });
+        },
+      });
+      const result = await askWithFallback(
+        prompt.system, prompt.user, input.taskType, providerCallControls('provider'),
+      );
       recordDependencyEvent('ai', 'success');
       if (result.attempts > 1) recordDependencyEvent('ai', 'fallback');
       provider = result.provider;
@@ -594,73 +991,94 @@ export function createAiRoutes({
         system: prompt.system,
         user: prompt.user,
         operation: input.taskType,
+        callControls: providerCallControls('repair'),
       });
       const review = outcome.value;
       if (outcome.repair) {
-        /* The rejected call is logged separately; the accepted answer came from the repair. */
-        await logRepairedAttempt({
-          username: req.user, operation: input.taskType, promptVersion: WRITING_PROMPT_VERSION, repair: outcome.repair, model,
-        });
         promptTokens = outcome.repair.usage.promptTokens;
         completionTokens = outcome.repair.usage.completionTokens;
+        const primaryContext = providerContexts.find((context) => context.phase === 'provider'
+          && context.outcome?.status === 'completed' && !context.settled);
+        const repairContext = providerContexts.find((context) => context.phase === 'repair'
+          && context.outcome?.status === 'completed' && !context.settled);
+        const repairReason = safeWritingOperationError({ code: outcome.repair.reason });
+        await settleProviderContext(primaryContext, {
+          status: 'failed', errorCode: repairReason,
+          fallbackReason: `format repair requested: ${repairReason}`,
+        });
+        await settleProviderContext(repairContext, {
+          status: 'completed', fallbackReason: 'format repair accepted',
+        });
+      } else {
+        const primaryContext = providerContexts.find((context) => context.phase === 'provider'
+          && context.outcome?.status === 'completed' && !context.settled);
+        await settleProviderContext(primaryContext, {
+          status: 'completed', fallbackReason: safeWritingFallbackReason(result.fallbackReason),
+        });
       }
-      const accepted = outcome.repair ? outcome.repair.usage : result;
-      await finishWritingAttempt(attemptId, { status: 'completed', review, provider, model });
-      await logAiRequest({
-        username: req.user,
-        operation: input.taskType,
-        provider,
-        model,
-        promptVersion: WRITING_PROMPT_VERSION,
-        status: 'completed',
-        durationMs: Date.now() - startedAt,
-        fallbackReason: result.fallbackReason,
-        promptTokens: accepted.promptTokens,
-        completionTokens: accepted.completionTokens,
-        estimatedCostMicrousd: estimateCostMicrousd(accepted, aiProviders().find((item) => item.name === provider)),
-      });
-      res.json({
+      const responseSnapshot = {
+        contractVersion: WRITING_RESPONSE_CONTRACT_VERSION,
         review,
         provider,
         attemptId,
-        voiceTutor: { source: 'writing', attemptId, revision: 1, criterionChoices: reviewVoiceTutorCriterionChoices(review) },
+        voiceTutor: {
+          source: 'writing', attemptId, revision: 1,
+          criterionChoices: reviewVoiceTutorCriterionChoices(review),
+        },
         assessment: EXPERIMENTAL_ASSESSMENT,
         evaluationScope: evaluation.scope,
+      };
+      const settled = await settleWritingEvaluation(claim.attempt, {
+        status: 'completed', review, provider, model, responseSnapshot,
       });
-    } catch (error) {
+      if (!settled || settled.status === 'pending') {
+        await markWritingEvaluationAmbiguous(attemptId).catch(() => {});
+        return res.status(503).json({ error: {
+          code: 'WRITING_EVALUATION_SETTLEMENT_UNKNOWN',
+          message: 'Ответ получен, но сохранение результата не подтверждено. Повторите запрос с тем же ключом.',
+          requestId: req.requestId,
+        } });
+      }
+      return await respondToWritingClaim(req, res, settled, requestFingerprint);
+    } catch (caught) {
+      let error = caught;
+      try { await failDeferredProviderContexts(error); } catch (settlementError) { error = settlementError; }
       recordDependencyEvent('ai', 'error');
-      if (!attemptId) return next(error);
       provider ||= error.provider || error.cause?.provider || null;
       model ||= error.model || error.cause?.model || null;
+      if (error.code === 'PROVIDER_RESULT_AMBIGUOUS'
+        || error.message === 'PROVIDER_RESULT_AMBIGUOUS') {
+        await markWritingEvaluationAmbiguous(attemptId).catch(() => {});
+        return res.status(503).json({ error: {
+          code: 'WRITING_EVALUATION_SETTLEMENT_UNKNOWN',
+          message: 'Провайдер мог принять работу, но результат не подтверждён. Повторите проверку статуса с тем же черновиком.',
+          requestId: req.requestId,
+        } });
+      }
       const invalidResponse = String(error.message).startsWith('AI_RESPONSE_');
-      const code = invalidResponse
+      const stableCode = String(error.code || error.message || '');
+      const code = ['AI_BUDGET_EXHAUSTED', 'RATE_LIMITED'].includes(stableCode)
+        ? stableCode : invalidResponse
         ? 'AI_RESPONSE_INVALID'
         : error.message === 'AI_NOT_CONFIGURED' ? 'AI_NOT_CONFIGURED' : 'AI_UNAVAILABLE';
-      const status = invalidResponse ? 502 : (error.status || 502);
-      const writes = [logAiRequest({
-        username: req.user,
-        operation: input.taskType,
-        provider,
-        model,
-        promptVersion: WRITING_PROMPT_VERSION,
-        status: 'failed',
-        durationMs: Date.now() - startedAt,
-        errorCode: code,
-        fallbackReason: error.fallbackReason || error.cause?.fallbackReason || null,
-        promptTokens,
-        completionTokens,
-        estimatedCostMicrousd: estimateCostMicrousd({ promptTokens, completionTokens }, aiProviders().find((item) => item.name === provider)),
-      })];
-      if (attemptId) writes.push(finishWritingAttempt(attemptId, {
+      const settled = await settleWritingEvaluation(claim.attempt, {
         status: 'failed', provider, model, errorCode: code,
-      }));
-      await Promise.allSettled(writes);
-      const message = code === 'AI_NOT_CONFIGURED'
-        ? 'ИИ не настроен на сервере.'
-        : code === 'AI_RESPONSE_INVALID'
-          ? 'ИИ вернул некорректный разбор. Попробуйте ещё раз.'
-          : 'ИИ временно недоступен.';
-      res.status(status).json({ error: { code, message } });
+      });
+      if (!settled || settled.status === 'pending') {
+        await markWritingEvaluationAmbiguous(attemptId).catch(() => {});
+        return res.status(503).json({ error: {
+          code: 'WRITING_EVALUATION_SETTLEMENT_UNKNOWN',
+          message: 'Состояние проверки не удалось надёжно сохранить. Повторите запрос с тем же ключом.',
+          requestId: req.requestId,
+        } });
+      }
+      if (code === 'AI_BUDGET_EXHAUSTED') return res.status(503).json({ error: {
+        code, message: 'Дневной лимит ИИ исчерпан. Попробуйте завтра.', requestId: req.requestId,
+      } });
+      if (code === 'RATE_LIMITED') return res.status(429).json({ error: {
+        code, message: 'Слишком много запросов. Попробуйте позже.', requestId: req.requestId,
+      } });
+      return await respondToWritingClaim(req, res, settled, requestFingerprint);
     }
   });
 

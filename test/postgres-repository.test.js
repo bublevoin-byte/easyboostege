@@ -47,6 +47,7 @@ import { assertSpeakingTask4SessionRepositoryContract } from './support/speaking
 import { assertFullSpeakingSessionRepositoryContract } from './support/speaking-full-session-contract.js';
 import { assertSpeakingAssessmentQuotaContract } from './support/speaking-assessment-quota-contract.js';
 import { assertSpeakingAccentCalibrationRepositoryContract } from './support/speaking-accent-calibration-contract.js';
+import { assertWritingEvaluationClaimContract } from './support/writing-evaluation-claim-contract.js';
 import { assertGrammarMasteryProgressContract } from './support/grammar-mastery-progress-contract.js';
 import {
   assertEgeMockAssessmentRevisionExhaustionContract,
@@ -73,6 +74,38 @@ const SPEAKING_CATALOGS = [
 ];
 
 const connectionString = process.env.TEST_DATABASE_URL;
+
+test('Writing idempotency migration requires a complete key/fingerprint pair', async () => {
+  const migration = await fs.readFile(new URL('../migrations/057_writing_evaluation_idempotency.sql', import.meta.url), 'utf8');
+  assert.match(migration, /idempotency_key IS NOT NULL AND request_fingerprint IS NOT NULL/u);
+  assert.match(migration, /UNIQUE INDEX[\s\S]+\(username, idempotency_key\)/u);
+  assert.match(migration, /UNIQUE INDEX writing_attempts_owner_pending_fingerprint_idx[\s\S]+\(username, request_fingerprint\)[\s\S]+status = 'pending'/u);
+  assert.match(migration, /UNIQUE INDEX writing_attempts_owner_completed_fingerprint_idx[\s\S]+\(username, request_fingerprint, prompt_version\)[\s\S]+status = 'completed'/u);
+});
+
+test('Writing losing-key aliases are owner-bound to their canonical attempt', async () => {
+  const migration = await fs.readFile(new URL('../migrations/058_writing_evaluation_idempotency_aliases.sql', import.meta.url), 'utf8');
+  assert.match(migration, /PRIMARY KEY \(username, idempotency_key\)/u);
+  assert.match(migration, /FOREIGN KEY \(attempt_id, username\)[\s\S]+REFERENCES writing_attempts \(id, username\)[\s\S]+ON DELETE CASCADE/u);
+});
+
+test('PostgreSQL Writing evaluation claims match the shared atomic replay contract', {
+  skip: !connectionString,
+}, async () => {
+  const repository = createPostgresRepository(connectionString);
+  const suffix = Number(Date.now().toString().slice(-7));
+  let owner;
+  let otherOwner;
+  try {
+    owner = await repository.createTelegramUser(73_000_000 + suffix, 'Writing Claim PG Owner');
+    otherOwner = await repository.createTelegramUser(74_000_000 + suffix, 'Writing Claim PG Other');
+    await assertWritingEvaluationClaimContract(assert, repository, owner, otherOwner);
+  } finally {
+    if (owner) await repository.deleteUserData(owner).catch(() => {});
+    if (otherOwner) await repository.deleteUserData(otherOwner).catch(() => {});
+    await repository.close();
+  }
+});
 
 test('PostgreSQL EGE mock attempts match the shared lifecycle, concurrency, export and deletion contract', {
   skip: !connectionString,
@@ -3116,6 +3149,9 @@ test('PostgreSQL repository persists the production data flow', { skip: !connect
       '053_ege_mock_attempts.sql',
       '054_ege_mock_writing_assessment.sql',
       '055_ege_mock_oral_progress.sql',
+      '056_vk_id_identity.sql',
+      '057_writing_evaluation_idempotency.sql',
+      '058_writing_evaluation_idempotency_aliases.sql',
     ]);
 
     const username = await repository.createTelegramUser(telegramId, `Integration ${suffix}`);

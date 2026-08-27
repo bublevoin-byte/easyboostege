@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import pg from 'pg';
 import { aiRequestExportDto } from './ai-request-export.js';
+import { withoutClientWritingProgress, writingProgressSummary } from './writing-progress.js';
 import { adaptiveAssistedMetadata, adaptiveReadingMetadata, requireModuleAttemptEvidenceQuality } from '../adaptive-learning/evidence-quality.js';
 import {
   adaptiveEvidenceFingerprintConflict,
@@ -378,12 +379,29 @@ export function createPostgresRepository(connectionString, {
 
   async function getProgress(username) {
     await migrateGrammarMastery(username);
-    const result = await pool.query('SELECT data FROM user_progress WHERE username = $1', [username]);
-    return result.rows[0]?.data || {};
+    const [result, writing] = await Promise.all([
+      pool.query('SELECT data FROM user_progress WHERE username = $1', [username]),
+      getWritingProgressSummary(username),
+    ]);
+    const progress = withoutClientWritingProgress(result.rows[0]?.data || {});
+    return writing.attemptCount
+      ? { ...progress, prog: { ...(progress.prog || {}), write: writing.average },
+        works: writing.works, essays: writing.attemptCount }
+      : progress;
+  }
+
+  async function getWritingProgressSummary(username) {
+    const result = await pool.query(
+      `SELECT id, task_type, source_task_ref, review, status, created_at, evaluated_at
+       FROM writing_attempts WHERE username = $1 AND status = 'completed' AND review IS NOT NULL
+       ORDER BY created_at, id`,
+      [username],
+    );
+    return writingProgressSummary(result.rows);
   }
 
   async function saveProgress(username, data) {
-    const accepted = structuredClone(data || {});
+    const accepted = withoutClientWritingProgress(data);
     delete accepted.grammarMastery;
     delete accepted.grammarRunner;
     await pool.query(
@@ -400,7 +418,7 @@ export function createPostgresRepository(connectionString, {
   }
 
   async function mergeProgress(username, modules) {
-    const accepted = structuredClone(modules || {});
+    const accepted = withoutClientWritingProgress(modules);
     delete accepted.grammarMastery;
     delete accepted.grammarRunner;
     const result = await pool.query(
@@ -2654,6 +2672,188 @@ export function createPostgresRepository(connectionString, {
     return Number(result.rows[0].id);
   }
 
+  async function selectWritingAttemptByIdempotencyKey(client, username, idempotencyKey, { lock = false } = {}) {
+    const result = await client.query(
+      `SELECT attempt.id, attempt.username, attempt.task_type, attempt.assignment, attempt.answer,
+              attempt.evaluated_answer, attempt.source_task_ref, attempt.review, attempt.provider,
+              attempt.model, attempt.prompt_version, attempt.status, attempt.error_code,
+              attempt.idempotency_key, attempt.request_fingerprint, attempt.response_snapshot,
+              attempt.provider_result_ambiguous_at, attempt.created_at, attempt.evaluated_at
+       FROM writing_attempts attempt
+       LEFT JOIN writing_evaluation_idempotency_aliases alias
+         ON alias.attempt_id = attempt.id AND alias.username = attempt.username
+        AND alias.idempotency_key = $2
+       WHERE attempt.username = $1
+         AND (attempt.idempotency_key = $2 OR alias.idempotency_key = $2)
+       LIMIT 1${lock ? '\n       FOR UPDATE OF attempt' : ''}`,
+      [username, idempotencyKey],
+    );
+    return result.rowCount ? result.rows[0] : null;
+  }
+
+  async function rememberWritingEvaluationAlias(client, username, idempotencyKey, attempt) {
+    if (String(attempt.idempotency_key).toLowerCase() === idempotencyKey) return false;
+    const inserted = await client.query(
+      `INSERT INTO writing_evaluation_idempotency_aliases
+       (username, idempotency_key, attempt_id)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (username, idempotency_key) DO NOTHING
+       RETURNING attempt_id`,
+      [username, idempotencyKey, attempt.id],
+    );
+    if (inserted.rowCount) return true;
+    const existing = await client.query(
+      `SELECT attempt_id FROM writing_evaluation_idempotency_aliases
+       WHERE username = $1 AND idempotency_key = $2
+       FOR UPDATE`,
+      [username, idempotencyKey],
+    );
+    if (Number(existing.rows[0]?.attempt_id) !== Number(attempt.id)) {
+      throw new Error('WRITING_EVALUATION_IDEMPOTENCY_CONFLICT');
+    }
+    return false;
+  }
+
+  async function getWritingEvaluationClaim(username, idempotencyKey) {
+    const normalizedIdempotencyKey = String(idempotencyKey || '').toLowerCase();
+    const attempt = await selectWritingAttemptByIdempotencyKey(pool, username, normalizedIdempotencyKey);
+    return attempt ? { ...attempt, id: Number(attempt.id) } : null;
+  }
+
+  async function claimWritingEvaluation(username, input, promptVersion, requestFingerprint, idempotencyKey, {
+    consentPolicyVersion = null, now = null, acknowledgePossibleProviderRepeatKey = null,
+    prepareEvaluation = null,
+  } = {}) {
+    if (!/^[a-f0-9]{64}$/u.test(requestFingerprint)) throw new Error('WRITING_EVALUATION_FINGERPRINT_INVALID');
+    const normalizedIdempotencyKey = String(idempotencyKey || '').toLowerCase();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(normalizedIdempotencyKey)) {
+      throw new Error('WRITING_EVALUATION_IDEMPOTENCY_INVALID');
+    }
+    const normalizedAcknowledgedKey = acknowledgePossibleProviderRepeatKey == null
+      ? null : String(acknowledgePossibleProviderRepeatKey).toLowerCase();
+    if (normalizedAcknowledgedKey && (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
+      .test(normalizedAcknowledgedKey) || normalizedAcknowledgedKey === normalizedIdempotencyKey)) {
+      throw new Error('WRITING_EVALUATION_REPEAT_ACK_INVALID');
+    }
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const owner = await client.query(
+        'SELECT username, subscription_until FROM users WHERE username = $1 FOR UPDATE', [username],
+      );
+      if (!owner.rowCount) throw new Error('USER_NOT_FOUND');
+      const existing = await selectWritingAttemptByIdempotencyKey(
+        client, username, normalizedIdempotencyKey, { lock: true },
+      );
+      if (existing) {
+        const attempt = existing;
+        if (attempt.request_fingerprint !== requestFingerprint) {
+          throw new Error('WRITING_EVALUATION_IDEMPOTENCY_CONFLICT');
+        }
+        await client.query('COMMIT');
+        return { created: false, attempt: { ...attempt, id: Number(attempt.id) } };
+      }
+      let coalesced = await client.query(
+        `SELECT id, username, task_type, assignment, answer, evaluated_answer, source_task_ref, review,
+                provider, model, prompt_version, status, error_code, idempotency_key, request_fingerprint,
+                response_snapshot, provider_result_ambiguous_at, created_at, evaluated_at
+         FROM writing_attempts
+         WHERE username = $1 AND request_fingerprint = $2
+           AND (status = 'pending' OR (status = 'completed' AND prompt_version = $3))
+         ORDER BY CASE WHEN status = 'pending' THEN 0 ELSE 1 END, id DESC
+         LIMIT 1
+         FOR UPDATE`,
+        [username, requestFingerprint, promptVersion],
+      );
+      const acknowledged = normalizedAcknowledgedKey
+        ? await selectWritingAttemptByIdempotencyKey(client, username, normalizedAcknowledgedKey, { lock: true })
+        : null;
+      if (!coalesced.rowCount && normalizedAcknowledgedKey) {
+        if (!acknowledged || acknowledged.status !== 'pending'
+          || acknowledged.request_fingerprint !== requestFingerprint) {
+          throw new Error('WRITING_EVALUATION_REPEAT_ACK_INVALID');
+        }
+        coalesced = { rowCount: 1, rows: [acknowledged] };
+      }
+      if (coalesced.rowCount) {
+        const attempt = coalesced.rows[0];
+        if (!normalizedAcknowledgedKey) {
+          await rememberWritingEvaluationAlias(client, username, normalizedIdempotencyKey, attempt);
+          await client.query('COMMIT');
+          return { created: false, attempt: { ...attempt, id: Number(attempt.id) } };
+        }
+        if (attempt.status !== 'pending' || Number(acknowledged?.id) !== Number(attempt.id)) {
+          if (['pending', 'completed'].includes(attempt.status) && acknowledged?.status === 'failed'
+            && acknowledged.error_code === 'WRITING_EVALUATION_REPEAT_ACKNOWLEDGED'
+            && acknowledged.request_fingerprint === requestFingerprint
+            && attempt.prompt_version === promptVersion) {
+            await rememberWritingEvaluationAlias(client, username, normalizedIdempotencyKey, attempt);
+            await client.query('COMMIT');
+            return { created: false, attempt: { ...attempt, id: Number(attempt.id) } };
+          }
+          throw new Error('WRITING_EVALUATION_REPEAT_ACK_INVALID');
+        }
+      }
+      const claimClock = now == null
+        ? (await client.query('SELECT clock_timestamp() AS now')).rows[0].now
+        : (typeof now === 'function' ? now() : now);
+      const claimedAt = new Date(claimClock);
+      if (!Number.isFinite(claimedAt.getTime())) throw new Error('WRITING_EVALUATION_CLAIM_TIME_INVALID');
+      if (!owner.rows[0].subscription_until
+        || new Date(owner.rows[0].subscription_until) <= claimedAt) {
+        throw Object.assign(new Error('SUBSCRIPTION_REQUIRED'), {
+          code: 'SUBSCRIPTION_REQUIRED', status: 403,
+        });
+      }
+      const consent = await client.query(
+        `SELECT text_processing, policy_version FROM privacy_consents
+         WHERE username = $1 FOR UPDATE`,
+        [username],
+      );
+      if (!consentPolicyVersion || consent.rows[0]?.policy_version !== consentPolicyVersion
+        || consent.rows[0]?.text_processing !== true) {
+        throw Object.assign(new Error('PRIVACY_CONSENT_REQUIRED'), {
+          code: 'PRIVACY_CONSENT_REQUIRED', status: 403,
+        });
+      }
+      if (coalesced.rowCount) {
+        const attempt = coalesced.rows[0];
+        const createdAt = new Date(attempt.created_at).getTime();
+        const repeatEligible = Boolean(attempt.provider_result_ambiguous_at)
+          || (Number.isFinite(createdAt) && claimedAt.getTime() - createdAt >= 5 * 60 * 1000);
+        if (!repeatEligible) throw new Error('WRITING_EVALUATION_REPEAT_ACK_NOT_READY');
+      }
+      const prepared = typeof prepareEvaluation === 'function' ? await prepareEvaluation() : null;
+      if (coalesced.rowCount) {
+        const attempt = coalesced.rows[0];
+        await client.query(
+          `UPDATE writing_attempts
+           SET status = 'failed', error_code = 'WRITING_EVALUATION_REPEAT_ACKNOWLEDGED',
+               evaluated_at = $3
+           WHERE id = $1 AND username = $2 AND status = 'pending'`,
+          [attempt.id, username, claimedAt],
+        );
+      }
+      const inserted = await client.query(
+        `INSERT INTO writing_attempts
+         (username, task_type, assignment, answer, evaluated_answer, source_task_ref, prompt_version,
+          status, idempotency_key, request_fingerprint)
+         VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, 'pending', $8, $9)
+         RETURNING id, username, task_type, assignment, answer, evaluated_answer, source_task_ref, review,
+                   provider, model, prompt_version, status, error_code, idempotency_key, request_fingerprint, response_snapshot,
+                   provider_result_ambiguous_at, created_at, evaluated_at`,
+        [username, input.taskType, JSON.stringify(input.assignment), input.answer,
+          prepared?.evaluatedAnswer ?? input.evaluatedAnswer ?? input.answer, input.sourceTaskRef || null, promptVersion,
+          normalizedIdempotencyKey, requestFingerprint],
+      );
+      await client.query('COMMIT');
+      return { created: true, attempt: { ...inserted.rows[0], id: Number(inserted.rows[0].id) }, prepared };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
   async function finishWritingAttempt(id, result) {
     const client = await pool.connect();
     try {
@@ -2670,18 +2870,38 @@ export function createPostgresRepository(connectionString, {
       const updated = await client.query(
         `UPDATE writing_attempts
          SET status = $2, review = $3::jsonb, provider = $4, model = $5,
-             error_code = $6, evaluated_at = NOW()
-         WHERE id = $1 AND username = $7
+             error_code = $6, response_snapshot = $8::jsonb, evaluated_at = NOW()
+         WHERE id = $1 AND username = $7 AND status = 'pending'
          RETURNING id`,
         [id, result.status, result.review ? JSON.stringify(result.review) : null, result.provider || null,
-          result.model || null, result.errorCode || null, username],
+          result.model || null, result.errorCode || null, username,
+          result.responseSnapshot ? JSON.stringify(result.responseSnapshot) : null],
       );
-      if (!updated.rowCount) throw new Error('WRITING_ATTEMPT_NOT_FOUND');
+      if (!updated.rowCount) {
+        const settled = await client.query(
+          'SELECT status FROM writing_attempts WHERE id = $1 AND username = $2', [id, username],
+        );
+        if (!settled.rowCount) throw new Error('WRITING_ATTEMPT_NOT_FOUND');
+        await client.query('COMMIT');
+        return false;
+      }
       await client.query('COMMIT');
+      return true;
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
     } finally { client.release(); }
+  }
+
+  async function markWritingEvaluationAmbiguous(id) {
+    const result = await pool.query(
+      `UPDATE writing_attempts
+       SET provider_result_ambiguous_at = COALESCE(provider_result_ambiguous_at, clock_timestamp())
+       WHERE id = $1 AND status = 'pending'
+       RETURNING id`,
+      [id],
+    );
+    return result.rowCount === 1;
   }
 
   async function getWritingAttempt(username, id) {
@@ -6027,7 +6247,8 @@ export function createPostgresRepository(connectionString, {
 
   async function settleAiOperationSlot(username, claimId, {
     status, provider = null, model = null, durationMs = null, errorCode = null,
-    promptTokens = null, completionTokens = null, now = new Date(),
+    promptTokens = null, completionTokens = null, estimatedCostMicrousd = null,
+    fallbackReason = null, now = new Date(),
   }) {
     if (!['completed', 'failed'].includes(status)) throw new VoiceTutorError('AI_OPERATION_SETTLEMENT_INVALID');
     const client = await pool.connect();
@@ -6047,13 +6268,16 @@ export function createPostgresRepository(connectionString, {
       const updated = await client.query(
         `UPDATE ai_requests
          SET status = $3, provider = $4, model = $5, duration_ms = $6,
-             error_code = $7, prompt_tokens = $8, completion_tokens = $9, settled_at = $10
+             error_code = $7, prompt_tokens = $8, completion_tokens = $9, settled_at = $10,
+             estimated_cost_microusd = $11, fallback_reason = $12
          WHERE username = $1 AND claim_key = $2
          RETURNING status`,
         [username, claimId, status, provider, model,
           Number.isFinite(durationMs) ? Math.max(0, Math.round(durationMs)) : null,
           errorCode, Number.isFinite(promptTokens) ? Math.max(0, Math.round(promptTokens)) : null,
-          Number.isFinite(completionTokens) ? Math.max(0, Math.round(completionTokens)) : null, new Date(now)],
+          Number.isFinite(completionTokens) ? Math.max(0, Math.round(completionTokens)) : null, new Date(now),
+          Number.isFinite(estimatedCostMicrousd) ? Math.max(0, Math.round(estimatedCostMicrousd)) : null,
+          fallbackReason == null ? null : String(fallbackReason).slice(0, 500)],
       );
       await client.query('COMMIT');
       return { applied: true, status: updated.rows[0].status };
@@ -6808,8 +7032,12 @@ export function createPostgresRepository(connectionString, {
     confirmTelegramAuthCode,
     consumeTelegramAuthCode,
     createWritingAttempt,
+    claimWritingEvaluation,
+    getWritingEvaluationClaim,
+    markWritingEvaluationAmbiguous,
     finishWritingAttempt,
     getWritingAttempt,
+    getWritingProgressSummary,
     createSpeakingAttempt,
     claimSpeakingEvaluation,
     getSpeakingEvaluationClaim,

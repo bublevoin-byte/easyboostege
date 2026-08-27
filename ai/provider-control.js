@@ -11,6 +11,17 @@ function describeSkipped(skipped) {
   return skipped.length ? skipped.map(({ name, reason }) => `${name}: ${reason}`).join('; ') : null;
 }
 
+function safeProviderFailureReason(error) {
+  const code = String(error?.code || '');
+  if (/^[A-Z][A-Z0-9_]{1,63}$/u.test(code)) return code;
+  const status = Number(error?.providerStatus);
+  if (Number.isInteger(status) && status >= 100 && status <= 599) return `HTTP_${status}`;
+  const exactHttp = /^HTTP ([1-5][0-9]{2})$/u.exec(String(error?.message || ''));
+  if (exactHttp) return `HTTP_${exactHttp[1]}`;
+  if (error?.name === 'AbortError') return 'PROVIDER_ABORTED';
+  return 'PROVIDER_ERROR';
+}
+
 export async function runProviderFallback(providers, invoke, {
   beforeAttempt = null, afterAttempt = null,
 } = {}) {
@@ -36,7 +47,9 @@ export async function runProviderFallback(providers, invoke, {
       lastError = error;
       lastError.provider = provider.name;
       lastError.model = provider.model;
-      skipped.push({ name: provider.name, reason: String(error?.message || 'unknown').slice(0, 120) });
+      /* Provider bodies are untrusted and may echo the learner's answer. The journal receives only
+       * a bounded operational code; the original Error remains in memory as the causal exception. */
+      skipped.push({ name: provider.name, reason: safeProviderFailureReason(error) });
       continue;
     }
     if (typeof afterAttempt === 'function') {

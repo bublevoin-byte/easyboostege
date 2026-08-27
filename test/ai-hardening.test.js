@@ -120,7 +120,7 @@ test('a successful call after a fallback records which provider was abandoned an
 
   assert.equal(result.provider, 'groq');
   assert.equal(result.attempts, 2);
-  assert.match(result.fallbackReason, /grok: HTTP 503/u);
+  assert.equal(result.fallbackReason, 'grok: HTTP_503');
 });
 
 test('the first provider succeeding leaves no fallback reason', async () => {
@@ -133,8 +133,9 @@ test('a total failure carries every reason on the error', async () => {
   await assert.rejects(
     () => runProviderFallback(providers, (provider) => { throw new Error(`down:${provider.name}`); }),
     (error) => {
-      assert.match(error.fallbackReason, /grok: down:grok/u);
-      assert.match(error.fallbackReason, /groq: down:groq/u);
+      assert.match(error.fallbackReason, /grok: PROVIDER_ERROR/u);
+      assert.match(error.fallbackReason, /groq: PROVIDER_ERROR/u);
+      assert.doesNotMatch(error.fallbackReason, /down:/u);
       return true;
     },
   );

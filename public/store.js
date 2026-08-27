@@ -46,7 +46,8 @@
     state.lastDay = state.lastDay || null;
     state.dayMin = state.dayMin == null ? 0 : state.dayMin;
     state.dayMinDate = state.dayMinDate || new Date().toISOString().slice(0, 10);
-    state.essays = state.essays || 0;
+    state.works = Array.isArray(state.works) ? state.works : [];
+    state.essays = Number.isSafeInteger(state.essays) && state.essays >= 0 ? state.essays : 0;
     state.speak = state.speak || 0;
     state.srs = state.srs || {};
     state.personalWords = Array.isArray(state.personalWords) ? state.personalWords : [];

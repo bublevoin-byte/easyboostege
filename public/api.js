@@ -95,12 +95,13 @@
     return parseResponse(response);
   }
 
-  async function postIdempotent(path, body, idempotencyKey, headers = {}) {
+  async function postIdempotent(path, body, idempotencyKey, headers = {}, options = {}) {
     const response = await request(baseUrl + path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Idempotency-Key': String(idempotencyKey || ''), ...headers },
       credentials: 'same-origin',
       body: JSON.stringify(body || {}),
+      signal: options.signal,
     });
     return parseResponse(response);
   }

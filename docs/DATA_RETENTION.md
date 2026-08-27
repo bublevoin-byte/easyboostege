@@ -98,7 +98,7 @@ task session and resulting attempt, not as a separate report record.
 | Одноразовые PKCE-транзакции VK ID | только SHA-256-хеш `state`, AES-256-GCM-зашифрованный verifier, callback URI и сроки создания/истечения; до однократного использования или TTL; provider tokens не сохраняются | verifier уничтожается атомарно при consume, истёкшие транзакции удаляются startup/периодическим retention |
 | Коды Telegram и истёкшие сессии | только до использования или истечения срока | удаляются автоматически при обращении к хранилищу |
 | Учебный прогресс и банк ошибок | пока существует аккаунт | каскадно удаляются по подтверждённому запросу владельца |
-| Журнал пользовательских прогонов: server-owned задания, полные и фактически оценённые ответы, транскрипты, strict semantic facts, versioned deterministic разборы/баллы, bounded normalized acoustic facts заданий 1–4, статусы retry/отказов и происхождение модели | пока существует аккаунт; входит в экспорт пользователя; raw xAI/Azure payload и audio не сохраняются | каскадно удаляется по подтверждённому запросу владельца |
+| Журнал пользовательских прогонов: server-owned задания, полные и фактически оценённые ответы, транскрипты, strict semantic facts, versioned deterministic разборы/баллы, bounded normalized acoustic facts заданий 1–4, статусы retry/отказов и происхождение модели | пока существует аккаунт; входит в экспорт пользователя; внутренние Writing idempotency keys/fingerprints/snapshots и owner-bound losing-key aliases не экспортируются, raw xAI/Azure payload и audio не сохраняются | canonical attempts и их внутренние aliases каскадно удаляются по подтверждённому запросу владельца |
 | Аудио устной части | не сохраняется в базе | временный файл удаляется после обработки |
 | Сессии тренировки Speaking 1–4 | пока существует аккаунт; сохраняются только server-owned catalog/task revision, причина ротации, статус, позиционный прогресс для заданий 2–3, длительность, mic-check/local-playback/self-rating и UTC timestamps; оригинальные фотопары задания 4 являются статическими публичными assets; audio, transcript, score и свободный ответ не принимаются и не сохраняются | безопасные metadata-сессии входят в экспорт владельца без `username` и каскадно удаляются вместе с аккаунтом; локальный browser audio освобождается при перезаписи, уходе с экрана или закрытии вкладки |
 | Полный устный раздел | пока существует аккаунт; закрепляются совместимые catalog/task revisions четырёх заданий, официальный прогресс 1+4+5+1, server deadlines, bounded recording status/duration/mic-check/technical issue metadata и canonical submission с максимумом 20; несовместимая попытка сохраняется как `abandoned`, просроченный ответ — как `response_timeout`; audio, transcript, score, ответ, rubric и analysis не принимаются и не сохраняются | metadata-сессии, включая безопасно заменённые, экспортируются владельцу без `username` и внутреннего submission key и каскадно удаляются вместе с аккаунтом; browser audio остаётся локальным, доступно для прослушивания только после submit и освобождается при уходе с экрана |
@@ -193,6 +193,34 @@ app tickets и завершает активный proxy; удаление ак�
 Любая будущая исследовательская выгрузка требует отдельной псевдонимизации идентификатора,
 очистки свободного текста от персональных данных и отдельной человеческой разметки; простая
 замена `username` псевдонимом для этого недостаточна.
+
+## Writing drafts and ordinary AI review
+
+Черновик Writing не является device-only данными. Браузер сразу сохраняет его в owner-generation-bound local
+progress snapshot и ставит изменённый `drafts` module в обычную синхронизацию аккаунта через
+`POST /api/v1/progress/modules`; UI прямо сообщает об этой синхронизации. Серверный progress и локальный snapshot
+сохраняют точный task type, индекс, текст и переводы строк для explicit resume. Они живут до изменения/очистки
+прогресса или подтверждённого удаления аккаунта; authority reset очищает видимый DOM другого владельца, но не
+выдаёт его черновик новой owner generation.
+
+Перед ordinary AI submit браузер отдельно хранит bounded retry envelope под точной owner generation: максимум
+четыре записи `{payload, UUID, optional acknowledged UUID}`. В нём нет prompt, provider response или score.
+Cooperating tabs сериализуют выбор/reuse через Web Locks. Обычный logout/authority reset сохраняет envelope, чтобы
+не потерять exactly-once recovery после неопределённого сетевого исхода; подтверждённое удаление аккаунта удаляет
+его exact owner-generation key. После применения подтверждённого terminal response браузер удаляет совпавший
+essay-bearing payload/key; более поздний identical request безопасно coalesces по server fingerprint, поэтому
+content-free tombstone в браузере не нужен.
+
+Серверная успешная попытка хранит sanitized full/evaluated answer, server-owned assignment, bounded validated
+review (исправление, правило, отдельный пример и evidence), provider/model/prompt version и внутренний response
+snapshot в течение жизни аккаунта. Replay не доверяет snapshot как текущему DTO: он version-aware валидирует
+сохранённые scored facts без повторного применения более новых score rules, безопасно upcast-ит только известные
+архивные версии и присоединяет свежую server-authoritative progress projection. Private idempotency key,
+request fingerprint, response snapshot internals и
+ambiguity marker не входят в экспорт, но удаляются вместе с owner. Failed/local-only состояние не создаёт scored
+attempt/evidence и не завершает adaptive learning. Для явно versioned pre-v9 review без отдельного `example`
+read path возвращает честную архивную пометку; новый provider output обязан передать distinct example и не
+использует compatibility-upcast.
 
 ## Локальный offline snapshot персонального плана
 

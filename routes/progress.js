@@ -47,6 +47,9 @@ function parseStructuredProgressModules(progress) {
     return { ok: false, code: 'SERVER_OWNED_GRAMMAR_MASTERY' };
   }
   delete data.grammarRunner;
+  delete data.works;
+  delete data.essays;
+  delete data.writingAttemptIds;
   for (const [key, schema, code] of [
     ['personalWords', personalVocabularyCardsSchema, 'INVALID_PERSONAL_WORDS'],
     ['personalWordTombstones', personalVocabularyTombstonesSchema, 'INVALID_PERSONAL_WORDS'],

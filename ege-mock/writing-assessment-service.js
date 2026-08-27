@@ -50,6 +50,7 @@ function deterministicZero(item) {
     errors: [{
       title: 'Недостаточный объём', wrong: '', right: '', kind: 'err',
       note: `Для задания требуется не менее ${rules.minWords} слов.`,
+      example: 'Например: раскройте каждый требуемый аспект отдельным полным предложением.',
     }],
   };
 }
