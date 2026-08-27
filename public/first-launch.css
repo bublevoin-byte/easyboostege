@@ -246,8 +246,18 @@
 
 .first-launch__login-actions { display: grid; gap: 2px; }
 .first-launch__vk-button { margin: 0; }
-.first-launch__vk-button::after {
-  content: "VK";
+.first-launch__vk-button::before,
+.first-launch__vk-button::after { display: none; }
+.first-launch__vk-mark {
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  inline-size: var(--aisy-button-affordance-size);
+  block-size: var(--aisy-button-affordance-size);
+  flex: 0 0 var(--aisy-button-affordance-size);
+  border-radius: var(--aisy-radius-round);
+  background: var(--aisy-button-affordance-background);
+  box-shadow: var(--aisy-depth-control);
   color: var(--aisy-button-affordance-foreground);
   font: 900 12px/1 var(--aisy-font-interface);
   letter-spacing: -.04em;

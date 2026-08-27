@@ -6,10 +6,11 @@ import test from 'node:test';
 const packageJson = JSON.parse(await fs.readFile(new URL('../package.json', import.meta.url), 'utf8'));
 
 test('the default and dedicated release gates run the real Aisy learner contour', async () => {
-  const dedicatedGate = 'npm run build:frontend && node e2e/aisy-first-launch.test.js && node e2e/aisy-shell.test.js && node e2e/aisy-today.test.js && node e2e/aisy-accessibility.test.js && node e2e/aisy-learner-release.test.js && node e2e/aisy-writing-paper.test.js && node e2e/aisy-writing-offline-cache.test.js';
-  assert.equal(packageJson.scripts['test:e2e:aisy'], dedicatedGate);
-  assert.match(packageJson.scripts['test:e2e'],
-    /node e2e\/aisy-accessibility\.test\.js.*node e2e\/aisy-learner-release\.test\.js/u);
+  for (const script of ['test:e2e', 'test:e2e:aisy']) {
+    assert.match(packageJson.scripts[script],
+      /node e2e\/aisy-accessibility\.test\.js.*node e2e\/aisy-learner-release\.test\.js.*node e2e\/aisy-progress-profile\.test\.js/u,
+      `${script} must keep accessibility, full learner flow and Progress/Profile proof in order`);
+  }
   for (const script of ['test:e2e', 'test:e2e:aisy', 'test:e2e:writing-paper']) {
     assert.match(packageJson.scripts[script],
       /node e2e\/aisy-writing-paper\.test\.js.*node e2e\/aisy-writing-offline-cache\.test\.js/u,

@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import express from 'express';
 import { z } from 'zod';
+import { bindResponseOwner, validateExpectedOwner } from '../middleware/expected-owner.js';
 
 import { SPEAKING_TASK1_CATALOG } from '../public/content/speaking/task1-v1.js';
 import { SPEAKING_TASK2_CATALOG } from '../public/content/speaking/task2-v1.js';
@@ -402,8 +403,10 @@ export function createSpeakingRoutes({
   });
 
   router.get('/api/v1/speaking/calibration-consent', auth, async (req, res, next) => {
+    if (!validateExpectedOwner(req, res)) return;
     try {
       res.setHeader('Cache-Control', 'no-store');
+      bindResponseOwner(res, req.user);
       return res.json({
         consent: await db.getSpeakingCalibrationConsent(req.user),
         currentPolicyVersion: SPEAKING_CALIBRATION_CONSENT_POLICY,
@@ -412,13 +415,16 @@ export function createSpeakingRoutes({
   });
 
   router.put('/api/v1/speaking/calibration-consent', auth, async (req, res, next) => {
+    if (!validateExpectedOwner(req, res)) return;
     const parsed = calibrationConsentSchema.safeParse(req.body);
     if (!parsed.success) return validationError(req, res, 'Настройки согласия не прошли проверку.');
     try {
       res.setHeader('Cache-Control', 'no-store');
-      return res.json(await db.setSpeakingCalibrationConsent(req.user, {
+      const consent = await db.setSpeakingCalibrationConsent(req.user, {
         ...parsed.data, policyVersion: SPEAKING_CALIBRATION_CONSENT_POLICY, now: now(),
-      }));
+      });
+      bindResponseOwner(res, req.user);
+      return res.json(consent);
     } catch (error) {
       if (accentCalibrationError(req, res, error)) return undefined;
       return next(error);

@@ -22,6 +22,7 @@ const jwtSecret='aisy-accessibility-e2e-secret-at-least-32-chars';
 const viewports=[
   {label:'320×720 portrait',width:320,height:720},{label:'720×320 landscape',width:720,height:320},
   {label:'375×812 portrait',width:375,height:812},{label:'812×375 landscape',width:812,height:375},
+  {label:'390×844 portrait',width:390,height:844},{label:'844×390 landscape',width:844,height:390},
   {label:'768×1024 portrait',width:768,height:1024},{label:'1024×768 landscape',width:1024,height:768},
   {label:'1440×900 landscape',width:1440,height:900},{label:'900×1440 portrait',width:900,height:1440},
 ];

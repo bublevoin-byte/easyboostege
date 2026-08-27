@@ -528,14 +528,18 @@ async function startApp(){
   });
 }
 
-async function logout(){
+async function logout(expectedAuthority=null){
   return runAuthTransition(async function(){
     const logoutOwner=currentUser,logoutOwnerGeneration=ADOPTED_OWNER_GENERATION;
+    if(expectedAuthority&&(expectedAuthority.owner!==logoutOwner||expectedAuthority.ownerGeneration!==logoutOwnerGeneration))throw Object.assign(new Error('Аккаунт изменился. Действие отменено.'),{code:'OWNER_CHANGED',status:409});
+    /* Keep the current owner authoritative until the server confirms that its HttpOnly session
+       was revoked. A network/server failure is surfaced by the caller's confirmation dialog and
+       must not erase local authority only to let the same cookie silently sign back in later. */
+    if(SRV){const result=await auth.logout({'X-EasyBoost-Expected-Owner':logoutOwner});if(apiResponseOwner(result)!==logoutOwner)throw Object.assign(new Error('Аккаунт изменился. Действие отменено.'),{code:'OWNER_CHANGED',status:409})}
     hideLearningShell();try{firstLaunch.showLogin()}catch(_){show('scr5')}
     AUTH_SESSION_GENERATION+=1;OFFLINE_EGE_MOCK_CONTINUATION=false;
     TOKEN='';currentUser=null;currentDisplayName=null;S=null;window.__sub=null;
     ADOPTED_OWNER_GENERATION=null;rememberSessionOwnerGeneration(null,null);store.sync.setOwner(null);
-    try{if(SRV)await auth.logout()}catch(_){}
     await Promise.all([
       store.clearCurrentOwner?.(logoutOwner,logoutOwnerGeneration),
       clearAdaptiveRuntime({owner:logoutOwner,ownerGeneration:logoutOwnerGeneration}),
@@ -549,7 +553,7 @@ async function logout(){
 function generateAiContent(operation,payload,headers){return EasyBoostApi.generateContent(operation,payload,headers)}
 
 /* профиль: в серверном режиме ключ не нужен на клиенте */
-registerProfileHook(function(){var ai=document.getElementById('pf_ai');if(ai){ai.textContent='через сервер ✓';ai.style.color='#1D7F4A';ai.style.background='#EAF7F0'}})
+registerProfileHook(function(){var ai=document.getElementById('pf_ai');if(ai){ai.textContent='Подключено к серверу';ai.dataset.state='active'}})
 
 /* До завершения единого first-launch gate учебная оболочка скрыта. */
 hideLearningShell();
@@ -585,47 +589,45 @@ window.checkSub=pwCheck;
 /* legacy block 4 */
 /* ===== SESSION v2: постоянный вход, восстановление сессии, подписка ===== */
 (function(){
-  async function me(){return runAuthTransition(function(){return auth.currentSession()})}
+  async function me(options={}){return runAuthTransition(function(){return auth.currentSession(options)})}
   window.ebMe=me;
-  /* Один coordinator держит private gate, а minimum splash/onboarding и /me идут параллельно. */
+  /* Один coordinator держит private gate, а minimum splash/onboarding и /me идут параллельно.
+     Auth transition stays owned through the eventual shell launch: otherwise a delayed initial
+     progress read can reopen Today after a newer offline access check has already locked it. */
   (async function(){
     const opening=firstLaunch.start();
-    const accessCheck=typeof SRV!=='undefined'&&SRV
-      ?runAuthTransition(function(){return runWithAbortDeadline(
+    if(typeof SRV==='undefined'||!SRV){
+      await opening;applyLearningAccess(classifyLearningAccess(null,new Error('server mode required')));return
+    }
+    return runAuthTransition(async function(){
+      const accessCheck=runWithAbortDeadline(
         function(signal){return checkLearningAccess(null,{deferPresentation:true,signal})},
         {timeoutMs:FIRST_LAUNCH_SESSION_TIMEOUT_MS},
-      ).catch(function(){return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,timedOut:true}})})
-      :Promise.resolve(classifyLearningAccess(null,new Error('server mode required')));
-    await opening;
-    const access=await accessCheck;
-    if(access.state===LEARNING_ACCESS_STATES.ACTIVE)return startLearningWithDeadline(access.session);
-    if(access.state===LEARNING_ACCESS_STATES.NETWORK_UNKNOWN&&startOfflineEgeMockContinuation())return;
-    applyLearningAccess(access);
+      ).catch(function(){return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,timedOut:true}});
+      await opening;
+      const access=await accessCheck;
+      if(access.state===LEARNING_ACCESS_STATES.ACTIVE)return startLearningWithDeadline(access.session);
+      if(access.state===LEARNING_ACCESS_STATES.NETWORK_UNKNOWN&&startOfflineEgeMockContinuation())return;
+      applyLearningAccess(access);
+    });
   })();
   /* статус подписки в профиле */
   registerProfileHook(function(){
     if(typeof SRV==='undefined'||!SRV)return;
-    var host=document.getElementById('pf_name');if(!host||!host.parentElement)return;
-    var el=document.getElementById('pf_sub');
-    if(!el){el=document.createElement('div');el.id='pf_sub';
-      el.setAttribute('style','display:inline-block;margin-top:6px;font:700 11.5px Manrope,sans-serif;padding:5px 10px;border-radius:20px;');
-      host.parentElement.appendChild(el);}
-    var aiStatus=document.getElementById('pf_ai');var voiceRow=document.getElementById('pf_voice_row');
-    if(aiStatus&&!voiceRow){var list=aiStatus.parentElement&&aiStatus.parentElement.parentElement;
-      if(list){voiceRow=document.createElement('div');voiceRow.id='pf_voice_row';voiceRow.setAttribute('style','display:flex;align-items:center;gap:13px;padding:15px 16px;border-bottom:1px solid #F4F5F6;');
-        var icon=document.createElement('span');icon.setAttribute('style','width:34px;height:34px;border-radius:11px;background:var(--aisy-color-surface-muted);color:var(--aisy-color-accent);display:grid;place-items:center;flex:0 0 auto;');icon.setAttribute('aria-hidden','true');icon.innerHTML='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5M8 22h8"/></svg>';
-        var copy=document.createElement('span');copy.setAttribute('style','flex:1;min-width:0;');
-        var title=document.createElement('span');title.id='pf_voice_title';title.setAttribute('style','display:block;font-weight:700;font-size:14px;color:#2B2B2B;');
-        var detail=document.createElement('span');detail.id='pf_voice_detail';detail.setAttribute('role','status');detail.setAttribute('style','display:inline-block;margin-top:4px;font-weight:700;font-size:11.5px;padding:4px 8px;border-radius:12px;line-height:1.35;');
-        var action=document.createElement('button');action.id='pf_voice_action';action.type='button';action.setAttribute('aria-label','Запросить доступ к голосовому разбору Аси');action.setAttribute('style','display:none;min-height:44px;border:0;border-radius:14px;padding:8px 11px;background:#F2683F;color:#fff;font:700 11px Manrope,sans-serif;cursor:pointer;');
-        copy.appendChild(title);copy.appendChild(detail);voiceRow.appendChild(icon);voiceRow.appendChild(copy);voiceRow.appendChild(action);list.insertBefore(voiceRow,aiStatus.parentElement.nextSibling);}}
-    var paymentRequest=null;
-    var renderProfileStatuses=function(profile){var subscriptionStatus=profileModule.subscriptionStatus(profile,Date.now());el.textContent=subscriptionStatus.text;el.style.color=subscriptionStatus.color;el.style.background=subscriptionStatus.background;var plan=presentProfilePlan(profile);setTxt('pf_plan_name',plan.label);setTxt('pf_plan_summary',plan.summary);
+    var el=document.getElementById('pf_sub');if(!el)return;
+    var profileOwner=currentUser;var profileGeneration=window.EasyBoostSync?.ownerBoundGeneration?.(profileOwner);
+    if(!profileOwner||!Number.isSafeInteger(profileGeneration))return;
+    var profileAuthorityCurrent=function(){return currentUser===profileOwner
+      &&window.EasyBoostSync?.ownerBoundGeneration?.(profileOwner)===profileGeneration};
+    var profileAuthority={owner:profileOwner,ownerGeneration:profileGeneration};var ownerHeaders={'X-EasyBoost-Expected-Owner':profileOwner};var paymentRequest=null;
+    var renderProfileUnknown=function(copy){if(!profileAuthorityCurrent())return false;el.textContent='Статус доступа временно недоступен';el.dataset.state='pending';setTxt('pf_plan_name','Не удалось проверить доступ');setTxt('pf_plan_summary',copy);setTxt('pf_voice_title','Голосовой разбор Аси');var unknownDetail=document.getElementById('pf_voice_detail');var unknownAction=document.getElementById('pf_voice_action');if(unknownDetail){unknownDetail.textContent='Статус временно недоступен. Повторите проверку позже.';unknownDetail.dataset.state='pending'}if(unknownAction){unknownAction.hidden=true;unknownAction.disabled=false;unknownAction.onclick=null}return true};
+    var renderProfileStatuses=function(profile,options={}){if(!profileAuthorityCurrent())return false;var subscriptionStatus=profileModule.subscriptionStatus(profile,Date.now());el.textContent=subscriptionStatus.text;el.dataset.state=subscriptionStatus.state==='active'?'active':subscriptionStatus.state==='expired'?'danger':'inactive';var plan=presentProfilePlan(profile);setTxt('pf_plan_name',plan.label);setTxt('pf_plan_summary',plan.summary);
       var voiceTutorStatus=profileModule.voiceTutorStatus(profile,paymentRequest);var title=document.getElementById('pf_voice_title');var detail=document.getElementById('pf_voice_detail');var action=document.getElementById('pf_voice_action');
-      if(title)title.textContent=voiceTutorStatus.title;if(detail){detail.textContent=voiceTutorStatus.text;detail.style.color=voiceTutorStatus.color;detail.style.background=voiceTutorStatus.background}
-      if(action){action.textContent=voiceTutorStatus.actionLabel;action.style.display=voiceTutorStatus.actionLabel?'block':'none';action.disabled=false;action.onclick=voiceTutorStatus.actionLabel?async function(){action.disabled=true;try{var result=await EasyBoostApi.post('/api/v1/payments/requests',{product:'premium_voice'});paymentRequest=result.request;renderProfileStatuses(profile)}catch(error){action.disabled=false;detail.textContent=EasyBoostApi.messageFor(error)}}:null}};
+      if(options.paymentUnknown){if(title)title.textContent='Голосовой разбор Аси';if(detail){detail.textContent='Статус заявки временно недоступен. Повторите проверку позже.';detail.dataset.state='pending'}if(action){action.hidden=true;action.disabled=false;action.onclick=null}return true}
+      if(title)title.textContent=voiceTutorStatus.title;if(detail){detail.textContent=voiceTutorStatus.text;detail.dataset.state=voiceTutorStatus.state==='premium'?'active':voiceTutorStatus.state==='pending'?'pending':'inactive'}
+      if(action){action.textContent=voiceTutorStatus.actionLabel;action.hidden=!voiceTutorStatus.actionLabel;action.disabled=false;action.onclick=voiceTutorStatus.actionLabel?async function(){action.disabled=true;try{var result=await EasyBoostApi.post('/api/v1/payments/requests',{product:'premium_voice'},ownerHeaders);if(!profileAuthorityCurrent())return;if(apiResponseOwner(result)!==profileOwner){await invalidateLearningAuthority(profileAuthority);return}paymentRequest=result.request;renderProfileStatuses(profile)}catch(error){if(!profileAuthorityCurrent())return;if(apiIsAuthorityFailure(error)){await invalidateLearningAuthority(profileAuthority);return}action.disabled=false;detail.textContent=EasyBoostApi.messageFor(error);detail.dataset.state='danger'}}:null}return true};
     if(window.__sub)renderProfileStatuses(window.__sub);
-    Promise.all([me(),EasyBoostApi.get('/api/v1/payments/requests?product=premium_voice').catch(function(){return{request:null}})]).then(function(values){var profile=values[0];paymentRequest=values[1]&&values[1].request;if(profile){window.__sub=profile;renderProfileStatuses(profile)}});
+    return Promise.all([me({headers:ownerHeaders,cache:'no-store'}),EasyBoostApi.get('/api/v1/payments/requests?product=premium_voice',{headers:ownerHeaders}).catch(function(error){return{request:null,error:error}})]).then(async function(values){if(!profileAuthorityCurrent())return;var profile=values[0],requestResult=values[1];if(!profileModule.sessionMatchesOwner(profile,profileOwner)||apiResponseOwner(profile)!==profileOwner||requestResult.error&&apiIsAuthorityFailure(requestResult.error)||!requestResult.error&&apiResponseOwner(requestResult)!==profileOwner){await invalidateLearningAuthority(profileAuthority);return}window.__sub=profile;if(profile.active!==true){paymentRequest=null;renderProfileStatuses(profile);applyLearningAccess(classifyLearningAccess(profile));return}if(requestResult.error){paymentRequest=null;renderProfileStatuses(profile,{paymentUnknown:true});return}paymentRequest=requestResult.request;renderProfileStatuses(profile)}).catch(async function(error){if(!profileAuthorityCurrent())return;if(apiIsAuthorityFailure(error)){await invalidateLearningAuthority(profileAuthority);return}renderProfileUnknown('Не удалось подтвердить текущий доступ. Проверьте сеть и повторите попытку.');applyLearningAccess({state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null})});
   });
 })();
 

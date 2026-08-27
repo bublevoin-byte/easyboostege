@@ -17,6 +17,20 @@ export function requireExpectedOwner(req, res) {
   return true;
 }
 
+// Compatibility seam for contracts that predate owner-bound browser projections. New UI callers
+// always send the captured owner; legacy authenticated clients keep working when the header is
+// absent, while any supplied mismatch still fails before private work starts.
+export function validateExpectedOwner(req, res) {
+  const raw = req.get(OWNER_HEADER);
+  if (raw == null) return true;
+  const expected = String(raw).trim();
+  if (!expected || expected.length > 64 || expected !== req.user) {
+    res.status(409).json({ error: { code: 'OWNER_CHANGED', message: 'Authenticated account changed.' } });
+    return false;
+  }
+  return true;
+}
+
 export function bindResponseOwner(res, owner) {
   res.setHeader('X-EasyBoost-Response-Owner', owner);
 }

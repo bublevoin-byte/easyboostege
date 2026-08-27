@@ -10,8 +10,8 @@
     catch (_) {}
   }
 
-  async function requestLogout() {
-    return api.post('/api/v1/logout', {});
+  async function requestLogout(headers = {}) {
+    return api.post('/api/v1/logout', {}, headers);
   }
 
   async function currentSession(options = {}) {

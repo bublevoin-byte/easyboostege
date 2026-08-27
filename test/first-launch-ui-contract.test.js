@@ -244,7 +244,9 @@ test('production first launch uses approved paper copy, four-step progress and V
     'provider and recovery status copy is body-sized, not a decorative label');
   assert.match(theme, /\.aisy-access-gate__copy\s*\{[^}]*font:\s*600 var\(--aisy-font-size-body\)\/1\.55/su,
     'subscription and network recovery copy consumes the 16px body token');
-  assert.match(css, /\.first-launch__vk-button::after\s*\{[^}]*color:\s*var\(--aisy-button-affordance-foreground\)/su);
+  assert.match(html, /first-launch__vk-mark" aria-hidden="true">VK<\/span>/u,
+    'the visible provider mark is excluded from the exact button name');
+  assert.match(css, /\.first-launch__vk-mark\s*\{[^}]*color:\s*var\(--aisy-button-affordance-foreground\)/su);
   assert.match(html, /first-launch__progress[\s\S]*data-first-launch-login-actions/u,
     'login progress precedes the provider action and legal/status footer');
   assert.match(source, /\.inert\s*=/u);
@@ -255,8 +257,8 @@ test('production first launch uses approved paper copy, four-step progress and V
     'first-launch transitions must run route hooks so the learner shell stays hidden');
   assert.match(asya, /matches\('\[data-first-launch-screen\]'\)/u);
   assert.match(asya, /launcher\.inert=!enabled/u);
-  assert.match(shell, /navigation\.inert=!currentProjection\.topLevel/u);
-  assert.match(shell, /backControl\.inert=!currentProjection\.backTarget/u);
+  assert.match(shell, /navigation\.inert=!authorized\|\|!currentProjection\.topLevel/u);
+  assert.match(shell, /backControl\.inert=!authorized\|\|!currentProjection\.backTarget\|\|ownsDeepChrome/u);
   assert.doesNotMatch(app, /showLogin\(\{message:'Войди, чтобы продолжить с сохранённого шага/u);
   assert.match(app, /runWithAbortDeadline\([\s\S]*checkLearningAccess\(null,\{deferPresentation:true,signal\}\)[\s\S]*FIRST_LAUNCH_SESSION_TIMEOUT_MS/u,
     'the canonical startup /me request must have a bounded abort deadline');

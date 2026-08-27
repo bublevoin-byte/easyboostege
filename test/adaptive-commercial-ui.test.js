@@ -38,6 +38,10 @@ async function withCommercialApp(run) {
     startsAt: new Date('2026-08-01T00:00:00.000Z'),
     endsAt: new Date('2026-09-01T00:00:00.000Z'),
   });
+  await repository.setEntitlement(free, 'voice_tutor', {
+    startsAt: new Date('2026-08-01T00:00:00.000Z'),
+    endsAt: new Date('2026-09-01T00:00:00.000Z'),
+  });
 
   const app = express();
   app.use(express.json());
@@ -160,9 +164,11 @@ test('server enforces Free demo, Base continuous plan and Premium depth at every
       detailedReports: freeOverview.access.capabilities.detailedReports,
       demoSessionUsed: freeOverview.access.usage.demoSessionUsed,
     }, {
-      tier: 'free', shortDiagnostic: false, demoSession: true, continuousPlan: false,
+      tier: 'free', shortDiagnostic: false, demoSession: false, continuousPlan: false,
       arbitrarySessions: false, detailedReports: false, demoSessionUsed: false,
     });
+    assert.equal(freeOverview.access.capabilities.premiumDepth, false,
+      'voice entitlement cannot revive inactive base access');
     const freeLong = await request(free, '/api/v1/adaptive-learning/sessions/preview', {
       method: 'POST', body: JSON.stringify({ durationMinutes: 30 }),
     });
@@ -285,9 +291,10 @@ test('detailed report is bounded and never copies learner content or source refe
 });
 
 test('commercial plan UI has complete labelled controls, paywall, accessible reports and responsive entries', async () => {
-  const [markup, screen] = await Promise.all([
+  const [markup, screen, styles] = await Promise.all([
     fs.readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
     fs.readFile(new URL('../public/screens/progress.js', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../public/progress-profile.css', import.meta.url), 'utf8'),
   ]);
   assert.doesNotMatch(markup, /id="(?:home|profile)_adaptive_plan"[^>]*onclick=/u);
   assert.match(markup, /<h2[^>]*id="adaptive_plan_title"[^>]*tabindex="-1"/u);
@@ -299,17 +306,17 @@ test('commercial plan UI has complete labelled controls, paywall, accessible rep
   assert.match(markup, /id="adaptive_upgrade"/u);
   assert.match(markup, /id="adaptive_detailed_report"/u);
   assert.match(markup, /<table[^>]*id="adaptive_report_table"/u);
-  assert.match(markup, /@media\(max-width:430px\)[\s\S]*\.adaptive-plan/u);
-  assert.doesNotMatch(markup, /@media\(min-width:[^)]+\)[\s\S]*\.adaptive-report/u);
-  assert.match(markup, /\.adaptive-action[^{]*\{[^}]*min-height:44px/u);
-  assert.match(markup, /@media\(prefers-reduced-motion:reduce\)/u);
+  assert.match(markup, /href="\/progress-profile\.css"/u);
+  assert.match(styles, /\.adaptive-plan\s*\{[^}]*min-inline-size:\s*0/u);
+  assert.doesNotMatch(styles, /@media\s*\(min-width:[^)]+\)[\s\S]*\.adaptive-report/u);
+  assert.match(styles, /\.adaptive-action,[\s\S]*?min-block-size:\s*var\(--aisy-touch-target\)/u);
   assert.doesNotMatch(markup, /name="adaptive_(?:module|skill)_percentage"/u);
   assert.match(screen, /ADAPTIVE_FREE_DEMO_USED/u);
   assert.match(screen, /ADAPTIVE_BASE_REQUIRED/u);
   assert.match(screen, /\['profile_adaptive_plan'\]/u);
   assert.doesNotMatch(markup, /id="home_adaptive_plan"/u);
   assert.match(markup, /id="profile_adaptive_plan"[^>]*hidden/u);
-  assert.match(markup, /\.adaptive-entry\[hidden\],#profile_adaptive_plan\[hidden\]\{display:none!important\}/u);
+  assert.match(styles, /\.adaptive-entry\[hidden\],[\s\S]*?#profile_adaptive_plan\[hidden\],[\s\S]*?display:\s*none\s*!important/u);
   assert.match(screen, /registerStartHook\(syncAdaptivePlanEntries\)/u);
   assert.match(screen, /features\?\.adaptive_learning===true/u);
   assert.doesNotMatch(screen, /writeAdaptiveOverviewCache\(localStorage,adaptiveOverviewOwner\(\),saved\)/u);
@@ -319,6 +326,7 @@ test('commercial plan UI has complete labelled controls, paywall, accessible rep
     'a stale adaptive continuation must not redraw another owner\'s session');
   assert.match(screen, /примерн/u);
   assert.match(screen, /неофициальн/u);
+  assert.doesNotMatch(screen, /Сейчас доступно занятие на 15 минут/u);
 });
 
 test('adaptive composer opens with the saved preferred duration and accepts goal-editor focus', async () => {

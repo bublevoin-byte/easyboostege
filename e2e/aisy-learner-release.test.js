@@ -336,10 +336,12 @@ try {
   assert.match(await page.locator('#ege_mock_dashboard_summary').innerText(),
     new RegExp(`Исходная диагностика: ${expectedScore.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}`, 'u'));
   assert.match(await page.locator('#progress_guidance').innerText(),
-    /Следующий шаг.*Что улучшилось.*Что требует внимания/isu);
+    /Изменение результата.*Что требует внимания.*Следующий шаг/isu);
 
   await openDestination(page, destinations[4]);
-  assert.equal(await page.locator('#scr11 [data-profile-group]').count(), 4);
+  assert.equal(await page.locator('#scr11 [data-profile-group]').count(), 5);
+  assert.match(await page.locator('#scr11').innerText(),
+    /Ученик.*Предпочтения.*Доступ.*Ася и приватность.*Аккаунт и данные/isu);
   assert.equal(await page.locator('#pf_plan_name').innerText(), 'Активный доступ');
   assert.doesNotMatch(await page.locator('#scr11').innerText(), /Free|demo|Premium|Base|родител|преподавател|учител/iu);
   const launcher = page.getByRole('button', { name: 'Открыть Асю' });

@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import express from 'express';
-import { bindResponseOwner, requireExpectedOwner } from '../middleware/expected-owner.js';
+import { bindResponseOwner, validateExpectedOwner } from '../middleware/expected-owner.js';
 import { GRAMMAR_CATALOG } from '../public/grammar-catalog.js';
 import { buildGrammarRecommendation } from '../services/grammar-recommendation.js';
 
@@ -156,7 +156,7 @@ export function createAdaptiveLearningRoutes({
   const router = express.Router();
   const { auth } = authentication;
   router.use('/api/v1/adaptive-learning', auth, (req, res, next) => {
-    if (!requireExpectedOwner(req, res)) return;
+    if (!validateExpectedOwner(req, res)) return;
     bindResponseOwner(res, req.user);
     next();
   });
@@ -178,16 +178,16 @@ export function createAdaptiveLearningRoutes({
           sessionsCreated: 0, sessionsCompleted: 0,
         },
     ]);
-    const premium = voice?.entitlements?.voice_tutor === true;
-    const base = subscription?.active === true || premium;
+    const base = subscription?.active === true;
+    const premium = base && voice?.entitlements?.voice_tutor === true;
     const tier = premium ? 'premium' : base ? 'base' : 'free';
     return {
       tier,
       capabilities: {
         resultSummary: true,
-        shortDiagnostic: tier !== 'free' || Number(usage.shortDiagnosticsCompleted) === 0,
+        shortDiagnostic: base,
         deepDiagnostic: premium,
-        demoSession: tier === 'free' && Number(usage.sessionsCreated) === 0,
+        demoSession: false,
         continuousPlan: base,
         arbitrarySessions: base,
         adaptivePlan: base,
@@ -393,7 +393,7 @@ export function createAdaptiveLearningRoutes({
   }
 
   router.get('/api/v1/adaptive-learning/overview', auth, async (req, res, next) => {
-    if (!requireExpectedOwner(req, res)) return;
+    if (!validateExpectedOwner(req, res)) return;
     try {
       res.setHeader('Cache-Control', 'no-store');
       res.json(await overview(req.user));
@@ -422,7 +422,7 @@ export function createAdaptiveLearningRoutes({
   });
 
   router.put('/api/v1/adaptive-learning/goal', auth, async (req, res, next) => {
-    if (!requireExpectedOwner(req, res)) return;
+    if (!validateExpectedOwner(req, res)) return;
     const parsed = adaptiveGoalSchema.safeParse(req.body);
     const idempotencyKey = String(req.headers['idempotency-key'] || '');
     if (!parsed.success || !IDEMPOTENCY_KEY.test(idempotencyKey)
@@ -652,7 +652,7 @@ export function createAdaptiveLearningRoutes({
   });
 
   router.get('/api/v1/adaptive-learning/sessions/current', auth, async (req, res, next) => {
-    if (!requireExpectedOwner(req, res)) return;
+    if (!validateExpectedOwner(req, res)) return;
     try {
       res.setHeader('Cache-Control', 'no-store');
       const session = await db.getCurrentAdaptiveLearningSession(req.user);
@@ -1041,7 +1041,7 @@ export function createAdaptiveLearningRoutes({
   });
 
   router.get('/api/v1/adaptive-learning/diagnostics/current', auth, async (req, res, next) => {
-    if (!requireExpectedOwner(req, res)) return;
+    if (!validateExpectedOwner(req, res)) return;
     try {
       res.setHeader('Cache-Control', 'no-store');
       const diagnostic = await db.getCurrentAdaptiveDiagnostic(req.user);

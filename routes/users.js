@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import express from 'express';
 import jwt from 'jsonwebtoken';
+import { bindResponseOwner, validateExpectedOwner } from '../middleware/expected-owner.js';
 
 // Session lifecycle, account data and the operator endpoints.
 export function createUserRoutes({
@@ -60,6 +61,7 @@ export function createUserRoutes({
   });
 
   router.get('/api/v1/me', auth, async (req, res, next) => {
+    if (!validateExpectedOwner(req, res)) return;
     try {
       res.setHeader('Cache-Control', 'no-store');
       const token = req.sessionId ? req.authToken : await issueToken(req.user);
@@ -68,6 +70,7 @@ export function createUserRoutes({
         db.getUser(req.user),
         currentSubscription(req.user),
       ]);
+      bindResponseOwner(res, req.user);
       res.json({
         authenticated: true,
         username: req.user,
@@ -83,26 +86,32 @@ export function createUserRoutes({
   }
 
   router.post('/api/v1/payments/requests', auth, async (req, res, next) => {
+    if (!validateExpectedOwner(req, res)) return;
     if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)
       || Object.keys(req.body).length !== 1 || req.body.product !== 'premium_voice') {
       return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректный тариф заявки.' } });
     }
     try {
+      res.setHeader('Cache-Control', 'no-store');
       const id = newPaymentRequestId();
       const request = await db.createPaymentRequestForUser(id, req.user, 'premium_voice', { now: now() });
+      bindResponseOwner(res, req.user);
       return res.status(request.id === id ? 201 : 200).json({ request: publicPaymentRequest(request) });
     } catch (error) { return next(error); }
   });
 
   router.get('/api/v1/payments/requests', auth, async (req, res, next) => {
+    if (!validateExpectedOwner(req, res)) return;
     if (String(req.query.product || '') !== 'premium_voice') {
       return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Некорректный тариф заявки.' } });
     }
     try {
+      res.setHeader('Cache-Control', 'no-store');
       const [request, access] = await Promise.all([
         db.getPaymentRequestForUser(req.user, 'premium_voice'),
         db.getVoiceTutorAccess(req.user, voiceTutorLimits, now()),
       ]);
+      bindResponseOwner(res, req.user);
       return res.json({ request: publicPaymentRequest(request), entitlement_active: access.entitlements.voice_tutor });
     } catch (error) { return next(error); }
   });
@@ -183,27 +192,43 @@ export function createUserRoutes({
   router.post('/api/v1/logout', async (req, res, next) => {
     try {
       const token = readCookie(req, 'eb_token') || String(req.headers.authorization || '').replace(/^Bearer\s+/u, '');
+      const rawExpectedOwner = req.get('x-easyboost-expected-owner');
+      const expectedOwner = rawExpectedOwner == null ? '' : String(rawExpectedOwner).trim();
+      if (rawExpectedOwner != null && (!expectedOwner || expectedOwner.length > 64)) {
+        return res.status(409).json({ error: { code: 'OWNER_CHANGED', message: 'Authenticated account changed.' } });
+      }
+      let responseOwner = expectedOwner;
       if (token) {
-        try {
-          const claims = jwt.verify(token, secret);
-          if (claims.sid && claims.u) await db.revokeSession(claims.sid, claims.u);
-        } catch (error) { /* expired or invalid cookies are cleared as well */ }
+        let claims = null;
+        try { claims = jwt.verify(token, secret); }
+        catch (error) { /* expired or invalid cookies are cleared as well */ }
+        if (claims) {
+          responseOwner = String(claims.u || '');
+          if (responseOwner && expectedOwner && expectedOwner !== responseOwner) {
+            return res.status(409).json({ error: { code: 'OWNER_CHANGED', message: 'Authenticated account changed.' } });
+          }
+          if (claims.sid && responseOwner) await db.revokeSession(claims.sid, responseOwner);
+        }
       }
       clearAuthCookie(req, res);
+      if (responseOwner) bindResponseOwner(res, responseOwner);
       res.json({ ok: true });
     } catch (error) { next(error); }
   });
 
   router.get('/api/v1/account/export', auth, async (req, res, next) => {
+    if (!validateExpectedOwner(req, res)) return;
     try {
       const data = await db.exportUserData(req.user);
       res.setHeader('Cache-Control', 'no-store');
       res.setHeader('Content-Disposition', 'attachment; filename="easyboost-data.json"');
+      bindResponseOwner(res, req.user);
       res.json(data);
     } catch (error) { next(error); }
   });
 
   router.delete('/api/v1/account', auth, async (req, res, next) => {
+    if (!validateExpectedOwner(req, res)) return;
     try {
       if (req.body?.confirmation !== 'DELETE') {
         return res.status(400).json({ error: { code: 'CONFIRMATION_REQUIRED', message: 'Подтвердите удаление аккаунта.' } });
@@ -220,26 +245,32 @@ export function createUserRoutes({
       }
       await db.deleteUserData(req.user);
       clearAuthCookie(req, res);
+      bindResponseOwner(res, req.user);
       res.json({ ok: true });
     } catch (error) { next(error); }
   });
 
   router.get('/api/v1/privacy/consent', auth, async (req, res, next) => {
-    try { res.json({ ...(await db.getPrivacyConsent(req.user)), current_policy_version: privacyPolicyVersion }); }
+    if (!validateExpectedOwner(req, res)) return;
+    try { res.setHeader('Cache-Control', 'no-store'); const consent = await db.getPrivacyConsent(req.user); bindResponseOwner(res, req.user); res.json({ ...consent, current_policy_version: privacyPolicyVersion }); }
     catch (error) { next(error); }
   });
 
   router.put('/api/v1/privacy/consent', auth, async (req, res, next) => {
+    if (!validateExpectedOwner(req, res)) return;
     try {
+      res.setHeader('Cache-Control', 'no-store');
       const body = req.body;
       if (!body || typeof body !== 'object' || typeof body.text_processing !== 'boolean' || typeof body.voice_processing !== 'boolean') {
         return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Укажите согласие на обработку текста и голоса.' } });
       }
-      res.json(await db.setPrivacyConsent(req.user, {
+      const consent = await db.setPrivacyConsent(req.user, {
         text_processing: body.text_processing,
         voice_processing: body.voice_processing,
         policy_version: privacyPolicyVersion,
-      }));
+      });
+      bindResponseOwner(res, req.user);
+      res.json(consent);
     } catch (error) { next(error); }
   });
 

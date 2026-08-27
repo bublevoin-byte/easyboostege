@@ -242,7 +242,7 @@ test('learner authentication exposes only the cookie session and VK ID first-lau
   assert.match(firstLaunch, /target\.origin === VK_AUTHORIZE_ORIGIN && target\.pathname === VK_AUTHORIZE_PATH/u,
     'the server-provided handoff remains constrained to the exact VK authorize endpoint');
   assert.match(auth, /global\.EasyBoostAuth = Object\.freeze/u);
-  assert.match(app, /auth\.currentSession\(\)/u);
+  assert.match(app, /auth\.currentSession\((?:\)|options\))/u);
   assert.doesNotMatch(app, /auth\.(?:login|register|startTelegramLogin|checkTelegramLogin)\(/u);
 });
 
@@ -291,7 +291,9 @@ test('PWA shell is installable and never caches API responses', async () => {
   assert.match(worker, /fetch\(request\).*catch\(\(\)=>caches\.match\(request\)\)/u);
   assert.match(worker, /self\.skipWaiting\(\)/u);
   assert.match(worker, /self\.clients\.claim\(\)/u);
-  assert.doesNotMatch(offline, /<script|onclick=/iu);
+  assert.equal((offline.match(/<script\b/giu) || []).length, 1);
+  assert.match(offline, /<script src="\/theme-prepaint\.js"><\/script>/u);
+  assert.doesNotMatch(offline.replace('<script src="/theme-prepaint.js"></script>', ''), /<script|onclick=/iu);
 });
 
 test('progress is snapshotted locally so an offline start is not a blank slate', async () => {
@@ -347,8 +349,8 @@ test('progress sync queues the latest state and retries when connectivity return
   assert.match(sync, /store\.owners\[ownerKey\]=attempts\.slice\(-MAX_PENDING_ATTEMPTS\)/u);
   assert.match(sync, /setOwner/u);
   assert.match(sync, /MAX_ATTEMPT_BYTES=20_000/u);
-  const privacy = await fs.readFile(new URL('../public/privacy.js', import.meta.url), 'utf8');
-  assert.match(privacy, /EasyBoostSync\?\.deleteOwner\(/u);
+  const profile = await fs.readFile(new URL('../public/screens/profile.js', import.meta.url), 'utf8');
+  assert.match(profile, /EasyBoostSync\?\.deleteOwner\(/u);
 });
 
 test('module progress endpoint merges validated keys instead of replacing the document', async () => {

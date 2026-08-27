@@ -162,6 +162,97 @@ test('offline overview cache exposes its saved timestamp without marking the pay
   assert.equal(Object.hasOwn(snapshot.payload, 'fresh'), false);
 });
 
+test('overview cache retains an ordered owner-bound comparison baseline across repeated writes', async () => {
+  ownerGenerations.clear(); deletedOwners.clear();
+  const storage = memoryStorage();
+  const now = Date.parse('2026-08-04T12:00:00.000Z');
+  const first = overview();
+  first.profile = {
+    evidenceFingerprint: 'first-independent', independentEvidenceCount: 2,
+    evidenceCount: 2, needsDiagnostic: false,
+    modules: [{
+      id: 'grammar', mastery: 45, evidenceCount: 2,
+      independentEvidenceCount: 2, status: 'established',
+    }],
+  };
+  const second = overview();
+  second.profile = {
+    evidenceFingerprint: 'second-independent', independentEvidenceCount: 3,
+    evidenceCount: 3, needsDiagnostic: false,
+    modules: [{
+      id: 'grammar', mastery: 58, evidenceCount: 3,
+      independentEvidenceCount: 3, status: 'established',
+    }],
+  };
+
+  assert.equal(await writeAdaptiveOverviewCache(storage, 'learner-one', first, now), true);
+  assert.equal(await writeAdaptiveOverviewCache(storage, 'learner-one', second, now + 1_000), true);
+  let snapshot = readAdaptiveOverviewCacheSnapshot(storage, 'learner-one', now + 1_100);
+  assert.equal(snapshot.previousSavedAt, now);
+  assert.equal(snapshot.previousProfile.evidenceFingerprint, 'first-independent');
+  assert.equal(snapshot.payload.profile.evidenceFingerprint, 'second-independent');
+
+  assert.equal(await writeAdaptiveOverviewCache(storage, 'learner-one', second, now + 2_000), true);
+  snapshot = readAdaptiveOverviewCacheSnapshot(storage, 'learner-one', now + 2_100);
+  assert.equal(snapshot.previousSavedAt, now);
+  assert.equal(snapshot.previousProfile.evidenceFingerprint, 'first-independent',
+    're-rendering the same current aggregate must not erase its comparison baseline');
+  assert.equal(readAdaptiveOverviewCacheSnapshot(storage, 'other-owner', now + 2_100), null);
+  assert.equal(readAdaptiveOverviewCacheSnapshot(storage, 'learner-one', now + 2_100, 1), null);
+});
+
+test('overview cache does not advance a delta baseline for an assisted-only or out-of-order change', async () => {
+  ownerGenerations.clear(); deletedOwners.clear();
+  const storage = memoryStorage();
+  const now = Date.parse('2026-08-04T12:00:00.000Z');
+  const first = overview();
+  first.profile = {
+    evidenceFingerprint: 'independent', independentEvidenceCount: 2,
+    evidenceCount: 2, needsDiagnostic: false, modules: [],
+  };
+  const assisted = overview();
+  assisted.profile = {
+    evidenceFingerprint: 'assisted-only-change', independentEvidenceCount: 2,
+    evidenceCount: 3, needsDiagnostic: false, modules: [],
+  };
+  assert.equal(await writeAdaptiveOverviewCache(storage, 'learner-one', first, now), true);
+  assert.equal(await writeAdaptiveOverviewCache(storage, 'learner-one', assisted, now + 1_000), true);
+  const snapshot = readAdaptiveOverviewCacheSnapshot(storage, 'learner-one', now + 1_100);
+  assert.equal(snapshot.previousProfile, undefined);
+  assert.equal(await writeAdaptiveOverviewCache(storage, 'learner-one', first, now - 1), false);
+  assert.equal(readAdaptiveOverviewCacheSnapshot(storage, 'learner-one', now + 1_100)
+    .payload.profile.evidenceFingerprint, 'assisted-only-change');
+});
+
+test('an expired comparison baseline does not invalidate a fresh offline overview', async () => {
+  ownerGenerations.clear(); deletedOwners.clear();
+  const storage = memoryStorage();
+  const now = Date.parse('2026-08-04T12:00:00.000Z');
+  const first = overview();
+  first.profile = {
+    evidenceFingerprint: 'old-independent', independentEvidenceCount: 2,
+    evidenceCount: 2, needsDiagnostic: false, modules: [],
+  };
+  const second = overview();
+  second.profile = {
+    evidenceFingerprint: 'fresh-independent', independentEvidenceCount: 3,
+    evidenceCount: 3, needsDiagnostic: false, modules: [],
+  };
+  assert.equal(await writeAdaptiveOverviewCache(
+    storage, 'learner-one', first, now - 23 * 60 * 60 * 1000,
+  ), true);
+  assert.equal(await writeAdaptiveOverviewCache(
+    storage, 'learner-one', second, now - 60 * 60 * 1000,
+  ), true);
+
+  const snapshot = readAdaptiveOverviewCacheSnapshot(
+    storage, 'learner-one', now + 2 * 60 * 60 * 1000,
+  );
+  assert.equal(snapshot.payload.profile.evidenceFingerprint, 'fresh-independent');
+  assert.equal(snapshot.previousProfile, undefined,
+    'an expired comparison is discarded without losing the fresh current projection');
+});
+
 test('offline overview cache survives stale cleanup from an older same-name incarnation', async () => {
   ownerGenerations.clear(); deletedOwners.clear(); ownerGenerations.set('learner-one', 1);
   const storage = memoryStorage();

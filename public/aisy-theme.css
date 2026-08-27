@@ -167,6 +167,7 @@
     --aisy-color-primary: light-dark(var(--aisy-primitive-coral-action), var(--aisy-primitive-coral-action-dark));
     --aisy-color-primary-hover: light-dark(var(--aisy-primitive-coral-hover), var(--aisy-primitive-coral-hover));
     --aisy-color-primary-active: light-dark(var(--aisy-primitive-coral-active), var(--aisy-primitive-coral-active));
+    --aisy-color-action-text: light-dark(var(--aisy-primitive-coral-action), var(--aisy-primitive-focus-dark));
     --aisy-color-on-primary: light-dark(var(--aisy-primitive-paper-0), var(--aisy-primitive-paper-0));
     --aisy-color-action-affordance: light-dark(var(--aisy-primitive-paper-0), var(--aisy-primitive-paper-0));
     --aisy-color-action-affordance-disabled: light-dark(var(--aisy-primitive-plum-muted), var(--aisy-primitive-plum-muted));
@@ -356,7 +357,10 @@ body,
 }
 
 .aisy-privacy-page a:not(.aisy-button) {
-  color: var(--aisy-color-primary);
+  display: inline-flex;
+  min-block-size: var(--aisy-touch-target);
+  align-items: center;
+  color: var(--aisy-color-action-text);
   font-weight: var(--aisy-weight-strong);
 }
 
@@ -369,6 +373,7 @@ body,
 }
 
 .aisy-button {
+  position: relative;
   display: inline-flex;
   inline-size: 100%;
   min-block-size: var(--aisy-button-height);
@@ -393,18 +398,29 @@ body,
 }
 
 .aisy-button::after {
-  content: "→";
-  display: grid;
+  content: "";
+  display: block;
   box-sizing: border-box;
   inline-size: var(--aisy-button-affordance-size);
   block-size: var(--aisy-button-affordance-size);
   flex: 0 0 var(--aisy-button-affordance-size);
-  place-items: center;
   border-radius: var(--aisy-radius-round);
   background: var(--aisy-button-affordance-background);
   box-shadow: var(--aisy-depth-control);
   color: var(--aisy-button-affordance-foreground);
-  font: 900 20px/1 var(--aisy-font-friendly);
+}
+
+.aisy-button::before {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  inset-inline-end: calc(var(--aisy-button-padding-end) + 14px);
+  inline-size: 10px;
+  block-size: 10px;
+  border-block-start: 2px solid var(--aisy-button-affordance-foreground);
+  border-inline-end: 2px solid var(--aisy-button-affordance-foreground);
+  pointer-events: none;
+  transform: rotate(45deg);
 }
 
 @media (hover: hover) {
@@ -432,6 +448,7 @@ body,
   text-align: center;
 }
 
+.aisy-button--secondary::before,
 .aisy-button--secondary::after {
   content: none;
 }
@@ -453,6 +470,10 @@ body,
   animation: aisy-button-spinner 800ms linear infinite;
 }
 
+.aisy-button[aria-busy="true"]::before {
+  content: none;
+}
+
 @keyframes aisy-button-spinner {
   to { transform: rotate(1turn); }
 }
@@ -469,6 +490,10 @@ body,
   background: var(--aisy-color-action-affordance);
   box-shadow: none;
   color: var(--aisy-color-action-affordance-disabled);
+}
+
+.aisy-button:is(:disabled, [aria-disabled="true"])::before {
+  border-color: var(--aisy-color-action-affordance-disabled);
 }
 
 .aisy-access-gate {

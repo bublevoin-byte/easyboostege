@@ -1170,18 +1170,15 @@
 }
 
 .speaking-action--primary::after {
-  content: "→";
-  display: grid;
+  content: "";
+  display: block;
   box-sizing: border-box;
   inline-size: var(--aisy-button-affordance-size);
   block-size: var(--aisy-button-affordance-size);
   flex: 0 0 var(--aisy-button-affordance-size);
-  place-items: center;
   border-radius: var(--aisy-radius-round);
   background: var(--aisy-button-affordance-background);
   box-shadow: var(--aisy-depth-control);
-  color: var(--aisy-button-affordance-foreground);
-  font: 900 20px / 1 var(--aisy-font-friendly);
 }
 
 .speaking-action--secondary {

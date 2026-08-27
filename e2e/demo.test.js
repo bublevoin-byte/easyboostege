@@ -11,6 +11,7 @@ import { chromium, devices, firefox, webkit } from 'playwright';
 import { WebSocketServer } from 'ws';
 import { createActiveSubscriptionPage } from './browser-server-harness.js';
 import { GRAMMAR_CATALOG } from '../public/grammar-catalog.js';
+import { AUTOMATIC_ASSESSMENT_WARNING } from '../shared/automatic-assessment-contract.js';
 
 const grammarItemsById = new Map(Object.values(GRAMMAR_CATALOG.bank).flatMap(levels => (
   ['c', 'c2', 'f', 'correction', 'transform'].flatMap(kind => levels[kind] || [])
@@ -365,12 +366,56 @@ async function runE2E() {
     console.log('e2e: profile session refresh is serialized before logout');
     await profileRaceContext.close();
 
+    // The bootstrap access check and its private-shell launch are one auth transition. Hold the
+    // initial progress read while a newer offline restart queues behind it: once the old read is
+    // released, it must not reopen Today over the newer network-unknown recovery surface.
+    const launchRaceHarness=await createActiveSubscriptionPage(browser,{
+      baseUrl,username:'e2euser',jwtSecret,contextOptions:contextOptions({serviceWorkers:'block'}),
+    });
+    const launchRaceContext=launchRaceHarness.context;
+    const launchRacePage=launchRaceHarness.page;
+    let releaseInitialProgress;
+    let initialProgressReached;
+    let initialProgressSettled;
+    const initialProgressReady=new Promise(resolve=>{initialProgressReached=resolve});
+    const releaseInitialProgressResponse=new Promise(resolve=>{releaseInitialProgress=resolve});
+    const initialProgressFinished=new Promise(resolve=>{initialProgressSettled=resolve});
+    let delayedInitialProgress=true;
+    await launchRacePage.route('**/api/v1/progress',async route=>{
+      if(!delayedInitialProgress||route.request().method()!=='GET'){await route.continue();return}
+      delayedInitialProgress=false;
+      const response=await route.fetch();initialProgressReached();await releaseInitialProgressResponse;
+      await route.fulfill({response});initialProgressSettled();
+    });
+    await launchRacePage.goto(baseUrl,{waitUntil:'load'});
+    await initialProgressReady;
+    await launchRaceContext.setOffline(true);
+    let offlineRestartSettled=false;
+    const offlineRestart=launchRacePage.evaluate(()=>window.startApp()).finally(()=>{offlineRestartSettled=true});
+    await launchRacePage.waitForTimeout(150);
+    assert.equal(offlineRestartSettled,false,
+      'the newer access transition stays queued until the initial shell launch commits');
+    releaseInitialProgress();
+    await Promise.all([initialProgressFinished,offlineRestart]);
+    await launchRacePage.locator('#access_gate[data-state="network-unknown"]').waitFor({
+      state:'visible',timeout:5_000,
+    });
+    await launchRacePage.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+    assert.deepEqual(await launchRacePage.evaluate(()=>(
+      [...document.querySelectorAll('.screen.on')].map(screen=>screen.id)
+    )),['scr5'],'a stale bootstrap launch cannot leave Today active over the recovery route');
+    assert.equal(await launchRacePage.locator('#access_gate[data-state="network-unknown"]').isVisible(),true);
+    assert.equal(await launchRacePage.evaluate(()=>document.body.dataset.learningAccess),'locked');
+    console.log('e2e: a queued offline restart supersedes the whole initial shell launch');
+    await launchRaceContext.close();
+
     const authenticatedHarness=await createActiveSubscriptionPage(browser,{
       baseUrl,username:'e2euser',jwtSecret,contextOptions:contextOptions({serviceWorkers:'block'}),
     });
     const authenticatedContext=authenticatedHarness.context;
     const authenticatedPage=authenticatedHarness.page;
     const evaluatedWritingTasks = [];
+    const evaluatedWritingWorks = [];
     await authenticatedPage.route('**/api/v1/ai/evaluate-writing', async (route) => {
       const request = route.request();
       const input = request.postDataJSON();
@@ -389,22 +434,57 @@ async function runE2E() {
             { name: 'Орфография и пунктуация', got: 2, max: 2 },
           ];
       evaluatedWritingTasks.push(input.taskType);
+      const words = input.answer.trim().split(/\s+/u).length;
+      const attemptId = task37 ? 101 : 102;
+      const overallMax = task37 ? 6 : 14;
+      const review = {
+        words,
+        in_range: true,
+        overall_got: overallMax,
+        overall_max: overallMax,
+        verdict: task37 ? 'Задание 37 проверено' : 'Задание 38 проверено',
+        sub: 'Изолированный E2E-разбор',
+        criteria,
+        errors: [],
+      };
+      const confirmedAttempt = {
+        attemptId,
+        t: task37 ? 37 : 38,
+        taskId: input.taskId,
+        g: overallMax,
+        m: overallMax,
+        n: words,
+        ts: attemptId,
+      };
+      evaluatedWritingWorks.push(confirmedAttempt);
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
+        headers: { 'X-EasyBoost-Response-Owner': request.headers()['x-easyboost-expected-owner'] },
         body: JSON.stringify({
-          review: {
-            words: input.answer.trim().split(/\s+/u).length,
-            in_range: true,
-            overall_got: criteria.reduce((total, criterion) => total + criterion.got, 0),
-            overall_max: task37 ? 6 : 14,
-            verdict: task37 ? 'Задание 37 проверено' : 'Задание 38 проверено',
-            sub: 'Изолированный E2E-разбор',
-            criteria,
-            errors: [],
-          },
+          contractVersion: 'writing-evaluation-response-v1',
+          review,
           provider: 'e2e',
-          attemptId: task37 ? 'writing-37-e2e' : 'writing-38-e2e',
+          attemptId,
+          voiceTutor: { source: 'writing', attemptId, revision: 1, criterionChoices: [] },
+          assessment: {
+            mode: 'experimental',
+            scoreKind: 'approximate',
+            warning: AUTOMATIC_ASSESSMENT_WARNING,
+          },
+          evaluationScope: {
+            fullWords: words,
+            evaluatedWords: words,
+            truncated: false,
+            evaluatedLimit: task37 ? 140 : 250,
+          },
+          writingProgress: {
+            version: 'writing-progress-v1',
+            attemptCount: evaluatedWritingWorks.length,
+            average: 100,
+            works: evaluatedWritingWorks,
+            confirmedAttempt,
+          },
         }),
       });
     });
@@ -451,6 +531,7 @@ async function runE2E() {
     await authenticatedContext.setOffline(true);
     await authenticatedPage.evaluate(() => window.startApp());
     await authenticatedPage.locator('#access_gate[data-state="network-unknown"]').waitFor({ state: 'visible', timeout: 5_000 });
+    await authenticatedPage.locator('#scr5.on').waitFor({ state: 'visible', timeout: 5_000 });
     assert.equal(await authenticatedPage.locator('#scr1.on').count(), 0);
     assert.equal(await authenticatedPage.evaluate(() => { const marker = window.EasyBoostStore.readCurrentOwner();
       return window.EasyBoostStore.loadLocal(marker.owner, marker.ownerGeneration).learned; }), 42);
@@ -767,7 +848,8 @@ async function runE2E() {
     assert.deepEqual([...failedTypes].sort(), ['choice', 'correction', 'input', 'transform']);
     assert.deepEqual([...renderedTransferTypes].sort(), ['choice', 'correction', 'input', 'transform']);
     assert.equal(pendingTransferTypes.size, 0);
-    await authenticatedPage.getByText('Подход завершён', { exact: true }).waitFor({ state: 'visible', timeout: 5_000 });
+    await authenticatedPage.locator('#g_result_title').waitFor({ state: 'visible', timeout: 5_000 });
+    assert.equal(await authenticatedPage.locator('#g_result_title').innerText(), 'Подход завершён');
     assert.doesNotMatch(await authenticatedPage.locator('#g_area').innerText(), /Изучено/u);
     const assistedGrammar = await authenticatedPage.evaluate(async () => {
       const marker = window.EasyBoostStore.readCurrentOwner();
@@ -952,12 +1034,13 @@ async function runE2E() {
 
     await authenticatedPage.evaluate(() => window.nav('scr8'));
     await authenticatedPage.locator('#scr8.on').waitFor({ state: 'visible', timeout: 5_000 });
-    await authenticatedPage.getByRole('button', { name: '37 · Письмо другу' }).click();
+    await authenticatedPage.getByRole('radio', { name: '37 · Письмо', exact: true }).click();
     await authenticatedPage.getByRole('textbox', { name: 'Письменный ответ' }).fill(
       Array.from({ length: 105 }, (_, index) => `word${index + 1}`).join(' '),
     );
     await authenticatedPage.getByRole('button', { name: 'Проверить с ИИ' }).click();
-    await authenticatedPage.locator('#scr12.on').waitFor({ state: 'visible', timeout: 5_000 });
+    await authenticatedPage.locator('#scr13.on').waitFor({ state: 'visible', timeout: 5_000 });
+    await authenticatedPage.locator('#scr12.on').waitFor({ state: 'visible', timeout: 10_000 });
     await authenticatedPage.waitForFunction(
       () => document.querySelector('#rv_score')?.textContent === '6',
       null,
@@ -967,12 +1050,13 @@ async function runE2E() {
     assert.equal(await authenticatedPage.locator('#rv_verdict').innerText(), 'Задание 37 проверено');
 
     await authenticatedPage.getByRole('button', { name: 'Исправить' }).click();
-    await authenticatedPage.getByRole('button', { name: '38 · Проект' }).click();
+    await authenticatedPage.getByRole('radio', { name: '38 · Проект', exact: true }).click();
     await authenticatedPage.getByRole('textbox', { name: 'Письменный ответ' }).fill(
       Array.from({ length: 205 }, (_, index) => `project${index + 1}`).join(' '),
     );
     await authenticatedPage.getByRole('button', { name: 'Проверить с ИИ' }).click();
-    await authenticatedPage.locator('#scr12.on').waitFor({ state: 'visible', timeout: 5_000 });
+    await authenticatedPage.locator('#scr13.on').waitFor({ state: 'visible', timeout: 5_000 });
+    await authenticatedPage.locator('#scr12.on').waitFor({ state: 'visible', timeout: 10_000 });
     await authenticatedPage.waitForFunction(
       () => document.querySelector('#rv_score')?.textContent === '14',
       null,
@@ -1028,7 +1112,7 @@ async function runE2E() {
       )),
       voiceButton.click(),
     ]);
-    const voiceSheet = authenticatedPage.getByRole('dialog', { name: 'Разбор ошибки с ИИ' });
+    const voiceSheet = authenticatedPage.getByRole('dialog', { name: 'Разбор проверенной ошибки' });
     await voiceSheet.waitFor({ state: 'visible', timeout: 5_000 });
     await authenticatedPage.evaluate(async () => {
       await fetch('/api/v1/privacy/consent', {
@@ -1053,13 +1137,17 @@ async function runE2E() {
     assert.equal(providerFallbackResponse.status(), 200);
     assert.equal((await providerFallbackResponse.json()).mode, 'local');
     await authenticatedPage.waitForFunction(async () => {
-      const exported = await (await fetch('/api/v1/account/export')).json();
+      const exported = await (await fetch('/api/v1/account/export', {
+        headers: { 'X-EasyBoost-Expected-Owner': window.currentUser },
+      })).json();
       const session = exported.voice_tutor_sessions?.[0];
       return session?.delivery_mode === 'local';
     });
     const voiceEvidence = await authenticatedPage.evaluate(async () => {
       const recovery = await (await fetch('/api/v1/voice-tutor/recovery-map', { headers: { 'X-EasyBoost-Expected-Owner': 'e2euser' } })).json();
-      const exported = await (await fetch('/api/v1/account/export')).json();
+      const exported = await (await fetch('/api/v1/account/export', {
+        headers: { 'X-EasyBoost-Expected-Owner': window.currentUser },
+      })).json();
       return {
         recovery,
         voiceExport: exported.voice_tutor_sessions,
@@ -1117,12 +1205,16 @@ async function runE2E() {
     await voiceSheet.getByRole('button', { name: 'Завершить и вернуться в упражнение' }).click();
     await voiceSheet.waitFor({ state: 'hidden', timeout: 5_000 });
     await authenticatedPage.waitForFunction(async () => {
-      const exported = await (await fetch('/api/v1/account/export')).json();
+      const exported = await (await fetch('/api/v1/account/export', {
+        headers: { 'X-EasyBoost-Expected-Owner': window.currentUser },
+      })).json();
       return exported.voice_tutor_sessions?.some((session) => session.proxy_finalization_reason === 'completed');
     });
     const cleanVoiceEvidence = await authenticatedPage.evaluate(async () => {
       const recovery = await (await fetch('/api/v1/voice-tutor/recovery-map', { headers: { 'X-EasyBoost-Expected-Owner': 'e2euser' } })).json();
-      const exported = await (await fetch('/api/v1/account/export')).json();
+      const exported = await (await fetch('/api/v1/account/export', {
+        headers: { 'X-EasyBoost-Expected-Owner': window.currentUser },
+      })).json();
       return { recovery, sessions: exported.voice_tutor_sessions };
     });
     const cleanVoiceSession = cleanVoiceEvidence.sessions.find((session) => session.proxy_finalization_reason === 'completed');
@@ -1142,7 +1234,9 @@ async function runE2E() {
       });
     });
     const priorVoiceSessionIds = await authenticatedPage.evaluate(async () => {
-      const exported = await (await fetch('/api/v1/account/export')).json();
+      const exported = await (await fetch('/api/v1/account/export', {
+        headers: { 'X-EasyBoost-Expected-Owner': window.currentUser },
+      })).json();
       return exported.voice_tutor_sessions.map((session) => session.id);
     });
     const microphoneFallbackResponsePromise = authenticatedPage.waitForResponse((response) => (
@@ -1156,7 +1250,9 @@ async function runE2E() {
     assert.equal(microphoneFallbackResponse.status(), 200);
     assert.equal((await microphoneFallbackResponse.json()).mode, 'local');
     await authenticatedPage.waitForFunction(async (priorIds) => {
-      const exported = await (await fetch('/api/v1/account/export')).json();
+      const exported = await (await fetch('/api/v1/account/export', {
+        headers: { 'X-EasyBoost-Expected-Owner': window.currentUser },
+      })).json();
       const session = exported.voice_tutor_sessions?.find((entry) => !priorIds.includes(entry.id));
       return session?.delivery_mode === 'local'
         && session?.proxy_finalization_reason === 'completed'
@@ -1164,7 +1260,9 @@ async function runE2E() {
     }, priorVoiceSessionIds);
     const deniedVoiceEvidence = await authenticatedPage.evaluate(async (priorIds) => {
       const recovery = await (await fetch('/api/v1/voice-tutor/recovery-map', { headers: { 'X-EasyBoost-Expected-Owner': 'e2euser' } })).json();
-      const exported = await (await fetch('/api/v1/account/export')).json();
+      const exported = await (await fetch('/api/v1/account/export', {
+        headers: { 'X-EasyBoost-Expected-Owner': window.currentUser },
+      })).json();
       return {
         recovery,
         session: exported.voice_tutor_sessions.find((entry) => !priorIds.includes(entry.id)),
@@ -1201,7 +1299,9 @@ async function runE2E() {
     );
     await voiceSheet.getByRole('button', { name: 'Завершить и вернуться в упражнение' }).click();
     const beforeCancelledOpen = await authenticatedPage.evaluate(async () => {
-      const exported = await (await fetch('/api/v1/account/export')).json();
+      const exported = await (await fetch('/api/v1/account/export', {
+        headers: { 'X-EasyBoost-Expected-Owner': window.currentUser },
+      })).json();
       return exported.voice_tutor_sessions.map((session) => session.id);
     });
     await authenticatedPage.evaluate(() => {
@@ -1224,7 +1324,9 @@ async function runE2E() {
     await voiceSheet.waitFor({ state: 'hidden', timeout: 5_000 });
     await authenticatedPage.evaluate(() => window.__releaseCancelledVoiceOpen());
     await authenticatedPage.waitForFunction(async (priorIds) => {
-      const exported = await (await fetch('/api/v1/account/export')).json();
+      const exported = await (await fetch('/api/v1/account/export', {
+        headers: { 'X-EasyBoost-Expected-Owner': window.currentUser },
+      })).json();
       const session = exported.voice_tutor_sessions.find((entry) => !priorIds.includes(entry.id));
       return session?.status === 'completed' && Number(session.billable_seconds) === 0;
     }, beforeCancelledOpen);
@@ -1302,7 +1404,7 @@ async function runE2E() {
     await authenticatedPage.getByRole('button', { name: 'Начать подготовку' }).waitFor({ state: 'visible' });
     console.log('e2e: microphone denial handled without losing the task');
 
-    await authenticatedPage.getByRole('button', { name: '← К заданиям' }).click();
+    await authenticatedPage.getByRole('button', { name: 'К заданиям', exact: true }).click();
     await authenticatedPage.getByRole('button', { name: 'Назад в раздел Сегодня', exact: true }).press('Enter');
     await authenticatedPage.locator('#scr1.on').waitFor({ state: 'visible', timeout: 5_000 });
     assert.equal(
@@ -1321,9 +1423,13 @@ async function runE2E() {
     }
     const logoutButton = authenticatedPage.locator('#scr11.on').getByRole('button', { name: 'Выйти', exact: true });
     await logoutButton.waitFor({ state: 'visible', timeout: 5_000 });
+    await logoutButton.click({ timeout: 5_000 });
+    const logoutDialog = authenticatedPage.locator('#profile_action_dialog[open]');
+    await logoutDialog.waitFor({ state: 'visible', timeout: 5_000 });
+    assert.equal(await authenticatedPage.evaluate(() => document.activeElement?.id), 'profile_action_cancel');
     await Promise.all([
       authenticatedPage.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15_000 }),
-      logoutButton.click({ timeout: 5_000 }),
+      logoutDialog.locator('#profile_action_accept').click({ timeout: 5_000 }),
     ]);
     await authenticatedPage.locator('#scr5.on[data-access-state="no-session"]').waitFor({ state: 'visible', timeout: 5_000 });
     assert.equal(await authenticatedPage.getByRole('button', { name: 'Попробовать демо' }).count(), 0);

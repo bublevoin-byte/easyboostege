@@ -124,7 +124,60 @@
     return Math.max(0, Math.floor(Number(value) || 0));
   }
 
-  function narrative(payload) {
+  function outcomeChange(profile, previousProfile) {
+    const previous = previousProfile && typeof previousProfile === 'object' ? previousProfile : null;
+    const currentFingerprint = typeof profile.evidenceFingerprint === 'string'
+      ? profile.evidenceFingerprint : '';
+    const previousFingerprint = typeof previous?.evidenceFingerprint === 'string'
+      ? previous.evidenceFingerprint : '';
+    const noBaseline = {
+      comparable: false,
+      direction: 'none',
+      text: 'Сравнение появится после второй сопоставимой самостоятельной попытки.',
+      detail: 'Пока показываем текущий подтверждённый срез без заявления о росте.',
+    };
+    if (!previous || !currentFingerprint || !previousFingerprint
+      || currentFingerprint === previousFingerprint
+      || safeCount(profile.independentEvidenceCount) <= safeCount(previous.independentEvidenceCount)
+      || safeCount(previous.independentEvidenceCount) === 0) return noBaseline;
+
+    const previousById = new Map((Array.isArray(previous.modules) ? previous.modules : [])
+      .filter((module) => module && safeCount(module.independentEvidenceCount) > 0)
+      .map((module) => [module.id, module]));
+    const comparisons = (Array.isArray(profile.modules) ? profile.modules : [])
+      .filter((module) => module && previousById.has(module.id)
+        && safeCount(module.independentEvidenceCount)
+          > safeCount(previousById.get(module.id).independentEvidenceCount))
+      .map((module) => {
+        const before = previousById.get(module.id);
+        const previousMastery = boundedPercent(before.mastery);
+        const currentMastery = boundedPercent(module.mastery);
+        return {
+          id: module.id,
+          label: EVIDENCE_MODULE_LABELS[module.id] || 'Навык',
+          previousMastery,
+          currentMastery,
+          delta: currentMastery - previousMastery,
+          evidenceCount: safeCount(module.independentEvidenceCount),
+        };
+      });
+    if (!comparisons.length) return noBaseline;
+    comparisons.sort((first, second) => {
+      return Math.abs(second.delta) - Math.abs(first.delta)
+        || second.evidenceCount - first.evidenceCount;
+    });
+    const selected = comparisons[0];
+    const sign = selected.delta > 0 ? '+' : '';
+    return {
+      comparable: true,
+      direction: selected.delta > 0 ? 'up' : selected.delta < 0 ? 'down' : 'steady',
+      text: selected.label + ': ' + sign + selected.delta + ' п. п.',
+      detail: 'Освоение ' + selected.previousMastery + '% → ' + selected.currentMastery
+        + '% по двум сопоставимым сохранённым срезам.',
+    };
+  }
+
+  function narrative(payload, { previousProfile = null } = {}) {
     const value = payload && typeof payload === 'object' ? payload : {};
     const profile = value.profile && typeof value.profile === 'object' ? value.profile : {};
     const modules = (Array.isArray(profile.modules) ? profile.modules : [])
@@ -135,9 +188,8 @@
         mastery: boundedPercent(module.mastery),
         uncertainty: boundedPercent(module.uncertainty),
         established: module.status === 'established',
+        independentEvidenceCount: safeCount(module.independentEvidenceCount),
       }));
-    const strongest = modules.filter((module) => module.established)
-      .sort((first, second) => second.mastery - first.mastery)[0] || null;
     const weakest = modules.slice().sort((first, second) => (
       first.mastery - second.mastery || second.uncertainty - first.uncertainty
     ))[0] || null;
@@ -159,7 +211,9 @@
     } else if (weakest) {
       next = {
         kind: 'practice', title: 'Потренировать: ' + weakest.label,
-        text: 'Здесь сейчас меньше всего подтверждённых самостоятельных результатов.',
+        text: weakest.independentEvidenceCount > 0
+          ? 'Здесь сейчас меньше всего подтверждённых самостоятельных результатов.'
+          : 'Самостоятельных подтверждений пока нет; самостоятельная практика уточнит слабое место.',
         actionLabel: 'Открыть Практику',
       };
     } else {
@@ -169,20 +223,17 @@
         actionLabel: 'Открыть Практику',
       };
     }
+    const change = outcomeChange(profile, previousProfile);
     return {
       next,
-      improved: strongest ? {
-        title: 'Что улучшилось',
-        text: strongest.label + ' уже подтверждено: ' + strongest.mastery
-          + '%. Изменение относительно прошлого периода появится после сопоставимой новой попытки.',
-      } : {
-        title: 'Что улучшилось',
-        text: 'Для честного сравнения нужны две сопоставимые самостоятельные попытки.',
-      },
+      change,
+      improved: { title: 'Изменение результата', text: change.text },
       needsWork: weakest ? {
         title: 'Что требует внимания',
         text: weakest.label + ': текущая оценка ' + weakest.mastery
-          + '% и остаётся ' + (weakest.established ? 'подтверждённой.' : 'предварительной.'),
+          + '% и остаётся ' + (weakest.independentEvidenceCount === 0
+            ? 'оценкой без самостоятельного подтверждения.'
+            : weakest.established ? 'подтверждённой.' : 'предварительной.'),
       } : {
         title: 'Что требует внимания',
         text: 'Сначала соберём самостоятельные результаты по учебным разделам.',

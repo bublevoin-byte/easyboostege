@@ -30,7 +30,10 @@ function installAsyaLauncher({document,currentScreen,registerRouteHook,assistant
   document.addEventListener('keydown',function(event){
     if(event.altKey&&!event.ctrlKey&&!event.metaKey&&event.key.toLocaleLowerCase('en-US')==='a'&&!assistant){event.preventDefault();void open()}
   });
-  function sync(){const enabled=available();launcher.hidden=!enabled;launcher.inert=!enabled}
+  function sync(){const screenId=currentScreen();const screen=document.getElementById(screenId);const enabled=available();
+    const paperHeader=(screenId==='scr10'||screenId==='scr11')&&screen?.querySelector?.('.paper-page-header');
+    const host=paperHeader||frame;if(launcher.parentElement!==host)host.append(launcher);
+    launcher.dataset.screen=screenId||'';launcher.hidden=!enabled;launcher.inert=!enabled}
   registerRouteHook(sync);sync();
   return Object.freeze({launcher,open,loaded:()=>Boolean(assistant)})
 }

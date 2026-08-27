@@ -19,8 +19,8 @@ test('profile module falls back to a guest name and initial', () => {
   assert.equal(profile.displayName(null), 'Гость');
   assert.equal(profile.initial('аня'), 'А');
   assert.equal(profile.initial(''), 'Г');
-  assert.equal(profile.greeting('Аня'), 'Привет, Аня 👋');
-  assert.equal(profile.greeting(null), 'Привет, друг 👋');
+  assert.equal(profile.greeting('Аня'), 'Привет, Аня');
+  assert.equal(profile.greeting(null), 'Привет, друг');
 });
 
 test('profile presents honest learner preference defaults and the existing adaptive goal', () => {
@@ -82,8 +82,8 @@ test('profile module reports an unactivated subscription', () => {
 
   assert.equal(status.state, 'none');
   assert.equal(status.text, 'Доступ не активирован — обратитесь к оператору');
-  assert.equal(status.color, '#A56000');
-  assert.equal(status.background, '#FFF4DE');
+  assert.equal('color' in status, false);
+  assert.equal('background' in status, false);
   assert.equal(profile.subscriptionStatus({ active: true }, Date.now()).state, 'none');
 });
 
@@ -95,8 +95,8 @@ test('profile module counts the days left on an active subscription', () => {
 
   assert.equal(status.state, 'active');
   assert.equal(status.daysLeft, 7);
-  assert.equal(status.text, 'Подписка до 01.08.2026 · осталось 7 дн.');
-  assert.equal(status.color, '#1D7F4A');
+  assert.equal(status.text, 'Доступ активен до 01.08.2026 · осталось 7 дн.');
+  assert.equal('color' in status, false);
 });
 
 test('profile module reports an expired subscription without a countdown', () => {
@@ -106,21 +106,22 @@ test('profile module reports an expired subscription without a countdown', () =>
 
   assert.equal(status.state, 'expired');
   assert.equal(status.daysLeft, 0);
-  assert.equal(status.text, 'Подписка закончилась 30.06.2026');
-  assert.equal(status.color, '#A83226');
-  assert.equal(status.background, '#FDEDEA');
+  assert.equal(status.text, 'Доступ закончился 30.06.2026');
+  assert.equal('color' in status, false);
+  assert.equal('background' in status, false);
 });
 
 test('profile module shows a Premium paywall or the remaining voice minutes', () => {
   const profile = createProfileModule();
   const base = profile.voiceTutorStatus({
+    active: true,
     entitlements: { voice_tutor: false },
     voice_tutor: { daily_remaining_seconds: 0, monthly_remaining_seconds: 0, active_session: false },
   });
   assert.equal(base.state, 'paywall');
   assert.equal(base.actionLabel, 'Запросить доступ');
 
-  const pending = profile.voiceTutorStatus({ entitlements: { voice_tutor: false } }, { id: '7ee5be14-d2b6-4f73-b5af-339131231985', status: 'new' });
+  const pending = profile.voiceTutorStatus({ active: true, entitlements: { voice_tutor: false } }, { id: '7ee5be14-d2b6-4f73-b5af-339131231985', status: 'new' });
   assert.equal(pending.state, 'pending');
   assert.equal(pending.actionLabel, '');
   assert.match(pending.text, /Заявка/u);
@@ -130,6 +131,7 @@ test('profile module shows a Premium paywall or the remaining voice minutes', ()
   assert.equal(base.text, 'Не входит в текущий доступ');
 
   const premium = profile.voiceTutorStatus({
+    active: true,
     entitlements: { voice_tutor: true },
     voice_tutor: { daily_remaining_seconds: 600, monthly_remaining_seconds: 7_200, active_session: false },
   });
@@ -138,12 +140,23 @@ test('profile module shows a Premium paywall or the remaining voice minutes', ()
   assert.equal(premium.text, 'Осталось 10 мин сегодня · 120 мин в этом месяце');
   assert.equal('daily_limit_seconds' in premium, false);
   assert.equal(premium.actionLabel, '');
+
+  assert.deepEqual(JSON.parse(JSON.stringify(profile.voiceTutorStatus({
+    active: false,
+    entitlements: { voice_tutor: true },
+    voice_tutor: { daily_remaining_seconds: 600, monthly_remaining_seconds: 7_200 },
+  }))), {
+    state: 'inactive',
+    title: 'Голосовой разбор Аси',
+    text: 'Доступ не активирован — обратитесь к оператору',
+    actionLabel: '',
+  });
 });
 
 test('profile Premium paywall is wired to the authenticated payment request API', async () => {
   const appSource = await fs.readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   assert.match(appSource, /\/api\/v1\/payments\/requests\?product=premium_voice/u);
-  assert.match(appSource, /post\('\/api\/v1\/payments\/requests',\{product:'premium_voice'\}\)/u);
+  assert.match(appSource, /post\('\/api\/v1\/payments\/requests',\{product:'premium_voice'\},ownerHeaders\)/u);
   assert.match(appSource, /pf_voice_action/u);
   assert.match(appSource, /aria-label/u);
 });
@@ -164,8 +177,8 @@ test('profile exposes working study controls and one adaptive goal editor withou
   assert.match(markup, /id="profile_goal_edit"/u);
   assert.doesNotMatch(markup, /11 класс · цель: 85\+ баллов/u);
   assert.doesNotMatch(markup, /Напоминания|Язык интерфейса/u);
-  assert.match(screen, /S\.learnerPreferences=/u);
-  assert.match(screen, /save\(\{queueNow:true\}\)/u);
+  assert.match(screen, /S\.learnerPreferences\s*=\s*preferences/u);
+  assert.match(screen, /save\(\{\s*queueNow:\s*true\s*\}\)/u);
   assert.match(screen, /apiGet\('\/api\/v1\/adaptive-learning\/goal'/u);
   assert.match(screen, /nav\('scr10'/u);
   assert.match(screen, /adaptive-goal-edit/u);
@@ -173,14 +186,14 @@ test('profile exposes working study controls and one adaptive goal editor withou
 
 test('profile goal request is bound to and verified against the captured owner', async () => {
   const screen = await fs.readFile(new URL('../public/screens/profile.js', import.meta.url), 'utf8');
-  assert.match(screen, /apiGet\('\/api\/v1\/adaptive-learning\/goal',\{headers:\{'X-EasyBoost-Expected-Owner':owner\}\}\)/u);
-  assert.match(screen, /apiResponseOwner\(payload\)!==owner/u);
-  assert.match(screen, /apiIsAuthorityFailure\(error\)[\s\S]*?invalidateLearningAuthority\(\{owner:owner,ownerGeneration:generation\}\)/u);
+  assert.match(screen, /apiGet\('\/api\/v1\/adaptive-learning\/goal',[\s\S]*?'X-EasyBoost-Expected-Owner': owner/u);
+  assert.match(screen, /apiResponseOwner\(payload\) !== owner/u);
+  assert.match(screen, /apiIsAuthorityFailure\(error\)[\s\S]*?invalidateLearningAuthority\(\{ owner, ownerGeneration: generation \}\)/u);
   assert.match(
     screen,
-    /catch\(error\)\{if\(currentUser!==owner\|\|window\.EasyBoostSync\?\.ownerBoundGeneration\?\.\(owner\)!==generation\)return;/u,
+    /catch \(error\) \{[\s\S]*?if \(!profileAuthorityCurrent\(authority\)\) return;/u,
   );
   assert.match(screen, /profileGoalAuthority/u);
-  assert.match(screen, /ownerGeneration:generation/u);
+  assert.match(screen, /ownerGeneration: generation/u);
   assert.match(screen, /registerAuthorityReset/u);
 });

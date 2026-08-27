@@ -7,8 +7,9 @@ import {registerRouteHook} from '../router.js';
 import {presentPublicPlan} from '../commercial-copy.js';
 import {lPlayRaw,lStop} from '../tts.js';
 import {
-  S,SRV,TOKEN,apiGet,apiMessage,apiPost,apiPostBinary,apiPut,generateAiContent,save,
-  setTxt,spSt,spSync,speakingModule,toast,ui,wDeco,
+  S,SRV,TOKEN,apiGet,apiIsAuthorityFailure,apiMessage,apiPost,apiPostBinary,apiPut,
+  apiResponseOwner,currentUser,generateAiContent,invalidateLearningAuthority,save,setTxt,spSt,
+  spSync,speakingModule,toast,ui,wDeco,
 } from '../app.js';
 import {adaptiveRuntimeSnapshot,completeAdaptiveServerAttempt,openAdaptivePlan} from '../adaptive-session-runtime.js';
 import {adaptiveSpeakingTask} from '../adaptive-speaking-tasks.js';
@@ -62,6 +63,9 @@ let SP_VIEW_CONTENT_ROOT=null;
 let SP_SETTINGS_BUSY=false,SP_SETTINGS_TOKEN=0;
 let SP_COMMIT_BUSY=false,SP_COMMIT_TOKEN=0,SP_COMMIT_LOCK=null;
 let SP_EVALUATION_BUSY=false,SP_EVALUATION_TOKEN=0,SP_EVALUATION_LOCK=null;
+function spCurrentAuthority(){var owner=currentUser,generation=window.EasyBoostSync?.ownerBoundGeneration?.(owner);return owner&&Number.isSafeInteger(generation)?{owner:owner,ownerGeneration:generation}:null}
+function spAuthorityCurrent(authority){return Boolean(authority&&currentUser===authority.owner&&window.EasyBoostSync?.ownerBoundGeneration?.(authority.owner)===authority.ownerGeneration)}
+function spOwnerHeaders(authority){return{'X-EasyBoost-Expected-Owner':authority.owner}}
 function spRoute(){return document.getElementById('scr9')}
 function spUiState(){
   if(SPE&&SPE.session){if(SPE.isRecording)return 'recording';if(SPE.session.phase==='preparing')return 'preparing';if(SPE.session.phase==='ready_to_submit')return 'ready-to-submit';if(SPE.recording)return 'playback';return SPE.session.phase||'ready'}
@@ -136,11 +140,14 @@ function task4RecoveryPointerInvalid(error){return Number(error&&error.status)==
 function adaptiveSpeakingLock(){try{var active=adaptiveRuntimeSnapshot().active;return active&&active.module==='speaking'?active:null}catch(_){return null}}
 function launchAdaptiveSpeakingLock(lock){if(!lock)return false;var descriptor=adaptiveSpeakingTask(lock.contentRef);if(!descriptor)return false;void spOpen(descriptor.taskNumber,{adaptiveLock:lock});return true}
 function initSpeaking(){if(!S)return;var lock=adaptiveSpeakingLock();spStopAll();spReleaseRecording();spDisposeTask1Flow();spDisposeTask2Flow();spDisposeTask3Flow();spDisposeTask4Flow();speFullDispose();SP=null;spSync();if(lock){launchAdaptiveSpeakingLock(lock);return}
-  var epoch=++SP_VIEW_EPOCH;var area=document.getElementById('s9_area');if(area)area.innerHTML='<div class="clayCard speaking-state" data-state="loading" role="status" aria-live="polite">Загружаем профиль произношения…</div>';spNormalizeView('loading');
-  Promise.all([apiGet('/api/v1/speaking/accent-profile'),apiGet('/api/v1/speaking/calibration-consent')]).then(function(results){
-    if(epoch!==SP_VIEW_EPOCH)return;
+  var epoch=++SP_VIEW_EPOCH,authority=spCurrentAuthority();var area=document.getElementById('s9_area');if(area)area.innerHTML='<div class="clayCard speaking-state" data-state="loading" role="status" aria-live="polite">Загружаем профиль произношения…</div>';spNormalizeView('loading');
+  if(SRV&&!authority){if(area)area.innerHTML='<div class="clayCard speaking-state" data-state="network-error" role="alert">Не удалось подтвердить текущий аккаунт. Вернитесь ко входу и повторите.</div>';spNormalizeView('retry');return}
+  var consentOptions=authority?{headers:spOwnerHeaders(authority)}:{};
+  Promise.all([apiGet('/api/v1/speaking/accent-profile'),apiGet('/api/v1/speaking/calibration-consent',consentOptions)]).then(async function(results){
+    if(epoch!==SP_VIEW_EPOCH||authority&&!spAuthorityCurrent(authority))return;
+    if(authority&&apiResponseOwner(results[1])!==authority.owner){await invalidateLearningAuthority(authority);return}
     SP_ACCENT=results[0]&&results[0].profile||null;SP_ACCENT_SETUP=results[0]&&results[0].calibration||null;SP_CALIBRATION_CONSENT=results[1]&&results[1].consent||null;
-    if(SP_ACCENT)spHub();else spAccentSetup()}).catch(function(error){if(epoch!==SP_VIEW_EPOCH)return;if(area)area.innerHTML='<div class="clayCard speaking-state" data-state="network-error" role="alert">Не удалось загрузить профиль произношения. Проверь сеть и повтори.</div>'+spBtn('Повторить','initSpeaking()',true);spNormalizeView('retry');try{toast(apiMessage(error,'request'))}catch(_){}})}
+    if(SP_ACCENT)spHub();else spAccentSetup()}).catch(async function(error){if(epoch!==SP_VIEW_EPOCH||authority&&!spAuthorityCurrent(authority))return;if(authority&&apiIsAuthorityFailure(error)){await invalidateLearningAuthority(authority);return}if(area)area.innerHTML='<div class="clayCard speaking-state" data-state="network-error" role="alert">Не удалось загрузить профиль произношения. Проверь сеть и повтори.</div>'+spBtn('Повторить','initSpeaking()',true);spNormalizeView('retry');try{toast(apiMessage(error,'request'))}catch(_){}})}
 function spAccentSetup(){var area=document.getElementById('s9_area');if(!area)return;SP_VIEW_EPOCH++;SP_SETTINGS_BUSY=false;if(area.setAttribute)area.setAttribute('aria-busy','false');
   var calibrationChoice=!SP_ACCENT
     ?'<button type="button" class="sq speaking-choice" data-speaking-setting onclick="spAccentStartUnknown()"><span>'+(SP_ACCENT_SETUP?'Продолжить короткую двойную калибровку':'Не знаю — короткая двойная калибровка')+'</span><span class="speaking-chip">en-GB + en-US</span></button>'
@@ -167,7 +174,8 @@ function spCalibrationConsentSetup(){var area=document.getElementById('s9_area')
     +(current&&current.granted?spBtn('Отозвать согласие и удалить сырой звук','spSaveCalibrationConsent(false)',false):'')
     +spBtn('Назад без изменений','spHub()',false)+'</div></div>';area.querySelectorAll('.speaking-action').forEach(function(button){button.dataset.speakingSetting=''});spNormalizeView('privacy-consent')}
 async function spSaveCalibrationConsent(granted){if(SP_SETTINGS_BUSY)return false;var epoch=SP_VIEW_EPOCH,token=++SP_SETTINGS_TOKEN;var age=document.getElementById('sp_cal_age');var guardian=document.getElementById('sp_cal_guardian');var ageGroup=age?age.value:(SP_CALIBRATION_CONSENT&&SP_CALIBRATION_CONSENT.age_group)||'adult';var guardianConfirmed=Boolean(guardian&&guardian.checked);if(!granted&&SP_CALIBRATION_CONSENT){ageGroup=SP_CALIBRATION_CONSENT.age_group;guardianConfirmed=Boolean(SP_CALIBRATION_CONSENT.guardian_confirmed)}spSetSettingsBusy(true);
-  try{var consent=await apiPut('/api/v1/speaking/calibration-consent',{granted:Boolean(granted),ageGroup:ageGroup,guardianConfirmed:guardianConfirmed});if(token!==SP_SETTINGS_TOKEN||epoch!==SP_VIEW_EPOCH||!spRoute()?.classList.contains('on'))return false;SP_CALIBRATION_CONSENT=consent;spHub();toast(granted?'Согласие сохранено. Его можно отозвать в любой момент.':'Согласие отозвано; незавершённые сырые записи удалены.');return true}catch(error){if(token!==SP_SETTINGS_TOKEN||epoch!==SP_VIEW_EPOCH)return false;try{toast(apiMessage(error,'request'))}catch(_){}return false}finally{if(token===SP_SETTINGS_TOKEN)spSetSettingsBusy(false)}}
+  var authority=spCurrentAuthority();if(SRV&&!authority){spSetSettingsBusy(false);return false}
+  try{var consent=await apiPut('/api/v1/speaking/calibration-consent',{granted:Boolean(granted),ageGroup:ageGroup,guardianConfirmed:guardianConfirmed},authority?spOwnerHeaders(authority):{});if(token!==SP_SETTINGS_TOKEN||epoch!==SP_VIEW_EPOCH||!spRoute()?.classList.contains('on')||authority&&!spAuthorityCurrent(authority))return false;if(authority&&apiResponseOwner(consent)!==authority.owner){await invalidateLearningAuthority(authority);return false}SP_CALIBRATION_CONSENT=consent;spHub();toast(granted?'Согласие сохранено. Его можно отозвать в любой момент.':'Согласие отозвано; незавершённые сырые записи удалены.');return true}catch(error){if(token!==SP_SETTINGS_TOKEN||epoch!==SP_VIEW_EPOCH||authority&&!spAuthorityCurrent(authority))return false;if(authority&&apiIsAuthorityFailure(error)){await invalidateLearningAuthority(authority);return false}try{toast(apiMessage(error,'request'))}catch(_){}return false}finally{if(token===SP_SETTINGS_TOKEN)spSetSettingsBusy(false)}}
 async function spLoadPronunciationStatus(){var box=document.getElementById('speaking_pronunciation_status');if(!box)return;
   var epoch=SP_VIEW_EPOCH;try{var payload=await apiGet('/api/v1/speaking/pronunciation-assessments/status');var view=speakingModule.pronunciationStatusView(payload);if(epoch!==SP_VIEW_EPOCH||document.getElementById('speaking_pronunciation_status')!==box)return;
     if(view.available&&view.remainingSeconds>0){box.dataset.state='ready';box.innerHTML='<b>Оценка произношения доступна</b><br><span>Осталось '+spFmt(view.remainingSeconds)+' из '+spFmt(view.limitSeconds)+' в этом месяце · '+presentPublicPlan({tier:view.tier}).label+'. Локальная запись и прослушивание не расходуют лимит.</span>';return}

@@ -63,7 +63,12 @@ async function withCommerceApp(run) {
   });
   const request = (user, pathname, options = {}) => fetch(`http://127.0.0.1:${server.address().port}${pathname}`, {
     ...options,
-    headers: { 'Content-Type': 'application/json', 'X-Test-User': user, ...(options.headers || {}) },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Test-User': user,
+      'X-EasyBoost-Expected-Owner': user === 'admin' ? admin : student,
+      ...(options.headers || {}),
+    },
   });
   try { await run({ repository, student, admin, request, clock }); }
   finally {

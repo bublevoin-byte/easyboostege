@@ -53,16 +53,18 @@ test('the private shell remains hidden and inert until active authority commits'
     'an unverified server response cannot revive an owner-bound mock route');
 });
 
-test('logout synchronously clears both owner identity fields before awaiting remote cleanup', async () => {
+test('logout preserves local authority until the server confirms HttpOnly session revocation', async () => {
   const app = await fs.readFile(new URL('../public/app.js', import.meta.url), 'utf8');
-  const logout = app.match(/async function logout\(\)\{([\s\S]*?)\n\}/u)?.[1] || '';
+  const logout = app.match(/async function logout\(expectedAuthority=null\)\{([\s\S]*?)\n\}/u)?.[1] || '';
   const identityClear = logout.indexOf('currentUser=null;currentDisplayName=null');
-  const remoteLogout = logout.indexOf('await auth.logout()');
+  const remoteLogout = logout.indexOf("await auth.logout({'X-EasyBoost-Expected-Owner':logoutOwner})");
 
   assert.ok(identityClear >= 0, 'logout must clear the internal owner and display identity together');
-  assert.ok(remoteLogout > identityClear,
-    'remote logout cannot leave either identity rendered while the request is pending');
+  assert.ok(remoteLogout >= 0 && remoteLogout < identityClear,
+    'a failed server revocation must not erase local authority and silently revive the cookie later');
   assert.match(logout, /hideLearningShell\(\);try\{firstLaunch\.showLogin\(\)\}/u);
+  assert.doesNotMatch(logout, /try\{if\(SRV\)await auth\.logout\(\)\}catch\(_\)\{\}/u);
+  assert.match(logout, /apiResponseOwner\(result\)!==logoutOwner/u);
 });
 
 test('an authoritative no-session result closes private UI before owner cleanup can await', async () => {

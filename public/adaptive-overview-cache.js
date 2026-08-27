@@ -4,9 +4,10 @@ import {
 } from '../shared/ege-mock-forecast-metadata.js';
 
 const STORAGE_KEY = 'easyboost.adaptive.overview.v1';
-const STORAGE_VERSION = 'adaptive-overview-cache-v4';
+const STORAGE_VERSION = 'adaptive-overview-cache-v5';
 const LEGACY_STORAGE_VERSIONS = Object.freeze([
-  'adaptive-overview-cache-v3', 'adaptive-overview-cache-v2', 'adaptive-overview-cache-v1',
+  'adaptive-overview-cache-v4', 'adaptive-overview-cache-v3',
+  'adaptive-overview-cache-v2', 'adaptive-overview-cache-v1',
 ]);
 const MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const MAX_SNAPSHOT_CHARS = 120_000;
@@ -99,6 +100,40 @@ function publicProjection(payload, { legacy = false } = {}) {
   return projection;
 }
 
+function independentCount(profile) {
+  return Math.max(0, Math.floor(Number(profile?.independentEvidenceCount) || 0));
+}
+
+function evidenceFingerprint(profile) {
+  return typeof profile?.evidenceFingerprint === 'string' ? profile.evidenceFingerprint : '';
+}
+
+function parseSnapshot(raw, owner, now, ownerGeneration) {
+  if (typeof raw !== 'string' || raw.length === 0 || raw.length > MAX_SNAPSHOT_CHARS) return null;
+  const value = JSON.parse(raw);
+  const age = Number(now) - Number(value?.savedAt);
+  const legacy = LEGACY_STORAGE_VERSIONS.includes(value?.version);
+  const generation = value?.version === 'adaptive-overview-cache-v1' ? 0 : value?.ownerGeneration;
+  if (![STORAGE_VERSION, ...LEGACY_STORAGE_VERSIONS].includes(value?.version)
+    || value.owner !== owner || generation !== ownerGeneration) return null;
+  if (!Number.isFinite(age) || age < -60_000 || age >= MAX_AGE_MS) return null;
+  const projected = publicProjection(value.payload, { legacy });
+  if (!projected) throw new Error('ADAPTIVE_OVERVIEW_CACHE_INVALID');
+  const snapshot = { savedAt: Number(value.savedAt), payload: projected };
+  if (value.version !== STORAGE_VERSION || value.comparison == null) return snapshot;
+  const comparisonSavedAt = Number(value.comparison?.savedAt);
+  const comparisonAge = Number(now) - comparisonSavedAt;
+  const previousProfile = value.comparison?.profile;
+  if (!Number.isFinite(comparisonSavedAt) || comparisonSavedAt >= snapshot.savedAt
+    || !Number.isFinite(comparisonAge) || comparisonAge < -60_000 || comparisonAge >= MAX_AGE_MS
+    || !previousProfile || typeof previousProfile !== 'object' || Array.isArray(previousProfile)) {
+    return snapshot;
+  }
+  snapshot.previousProfile = previousProfile;
+  snapshot.previousSavedAt = comparisonSavedAt;
+  return snapshot;
+}
+
 export async function writeAdaptiveOverviewCache(storage, owner, payload, now = Date.now(), ownerGeneration = 0) {
   if (!validOwner(owner) || !Number.isFinite(Number(now))
     || !Number.isSafeInteger(ownerGeneration) || ownerGeneration < 0) {
@@ -113,14 +148,39 @@ export async function writeAdaptiveOverviewCache(storage, owner, payload, now = 
       if (before.deleted || before.ownerGeneration !== ownerGeneration) return false;
       const projected = publicProjection(payload);
       if (!projected) throw new Error('ADAPTIVE_OVERVIEW_CACHE_INVALID');
+      const key = storageKey(owner, ownerGeneration);
+      const previousRaw = storage.getItem(key)
+        ?? (ownerGeneration === 0 ? storage.getItem(STORAGE_KEY) : null);
+      const previousSnapshot = parseSnapshot(previousRaw, owner, Number(now), ownerGeneration);
+      if (previousSnapshot && Number(now) < previousSnapshot.savedAt) return false;
+      const nextFingerprint = evidenceFingerprint(projected.profile);
+      const cachedFingerprint = evidenceFingerprint(previousSnapshot?.payload?.profile);
+      let comparison = null;
+      if (previousSnapshot && nextFingerprint && nextFingerprint === cachedFingerprint
+        && previousSnapshot.previousProfile
+        && previousSnapshot.previousSavedAt < Number(now)) {
+        comparison = {
+          savedAt: previousSnapshot.previousSavedAt,
+          profile: previousSnapshot.previousProfile,
+        };
+      } else if (previousSnapshot && nextFingerprint && cachedFingerprint
+        && nextFingerprint !== cachedFingerprint
+        && Number(now) > previousSnapshot.savedAt
+        && independentCount(projected.profile) > independentCount(previousSnapshot.payload.profile)) {
+        comparison = {
+          savedAt: previousSnapshot.savedAt,
+          profile: previousSnapshot.payload.profile,
+        };
+      }
       const serialized = JSON.stringify({
         version: STORAGE_VERSION,
         owner, ownerGeneration,
         savedAt: Number(now),
         payload: projected,
+        comparison,
       });
       if (serialized.length > MAX_SNAPSHOT_CHARS) throw new Error('ADAPTIVE_OVERVIEW_CACHE_TOO_LARGE');
-      const key = storageKey(owner, ownerGeneration); storage.setItem(key, serialized);
+      storage.setItem(key, serialized);
       const after = incarnation.snapshot(owner);
       if (after.deleted || after.ownerGeneration !== ownerGeneration) {
         if (storage.getItem(key) === serialized) storage.removeItem(key);
@@ -140,19 +200,7 @@ export function readAdaptiveOverviewCacheSnapshot(storage, owner, now = Date.now
       || !Number.isSafeInteger(ownerGeneration) || ownerGeneration < 0) throw new Error('ADAPTIVE_OVERVIEW_CACHE_INVALID');
     const raw = storage?.getItem(storageKey(owner, ownerGeneration))
       ?? (ownerGeneration === 0 ? storage?.getItem(STORAGE_KEY) : null);
-    if (typeof raw !== 'string' || raw.length === 0 || raw.length > MAX_SNAPSHOT_CHARS) {
-      return null;
-    }
-    const value = JSON.parse(raw);
-    const age = Number(now) - Number(value?.savedAt);
-    const legacy = LEGACY_STORAGE_VERSIONS.includes(value?.version);
-    const generation = value?.version === 'adaptive-overview-cache-v1' ? 0 : value?.ownerGeneration;
-    if (![STORAGE_VERSION, ...LEGACY_STORAGE_VERSIONS].includes(value?.version)
-      || value.owner !== owner || generation !== ownerGeneration) return null;
-    if (!Number.isFinite(age) || age < -60_000 || age >= MAX_AGE_MS) return null;
-    const projected = publicProjection(value.payload, { legacy });
-    if (!projected) throw new Error('ADAPTIVE_OVERVIEW_CACHE_INVALID');
-    return { savedAt: Number(value.savedAt), payload: projected };
+    return parseSnapshot(raw, owner, Number(now), ownerGeneration);
   } catch {
     return null;
   }

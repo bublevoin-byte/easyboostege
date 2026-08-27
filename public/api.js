@@ -113,18 +113,20 @@
     return parseResponse(response);
   }
 
-  async function remove(path, body) {
+  async function remove(path, body, headers = {}) {
     const response = await request(baseUrl + path, {
-      method: 'DELETE', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(body || {}),
+      method: 'DELETE', headers: { 'Content-Type': 'application/json', ...headers }, credentials: 'same-origin', body: JSON.stringify(body || {}),
     });
     return parseResponse(response);
   }
 
-  async function getBlob(path) {
-    const response = await request(baseUrl + path, { credentials: 'same-origin' });
+  async function getBlob(path, options = {}) {
+    const response = await request(baseUrl + path, { ...options, credentials: 'same-origin' });
     if (!response.ok) await parseResponse(response);
     const blob = await response.blob();
     if (!blob.size) throw new ApiError('Сервер вернул пустой файл', { status: response.status });
+    const owner = String(response.headers.get('x-easyboost-response-owner') || '').trim();
+    if (owner) responseOwners.set(blob, owner);
     return blob;
   }
 

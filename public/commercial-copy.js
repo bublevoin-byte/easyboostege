@@ -29,9 +29,9 @@ function presentPublicPlan(access) {
 
   if (!premium) {
     return {
-      id: 'limited',
-      label: PUBLIC_PLAN_LABELS.limited,
-      summary: 'Часть возможностей не входит в выданный доступ. Для изменения обратитесь к оператору.',
+      id: 'inactive',
+      label: PUBLIC_PLAN_LABELS.inactive,
+      summary: 'Обратитесь к оператору, который выдал доступ.',
       capabilities: items,
     };
   }
@@ -53,9 +53,9 @@ function presentPublicPlan(access) {
 
 function presentProfilePlan(session) {
   const source = session && typeof session === 'object' ? session : {};
-  const voiceTutorAvailable = source.entitlements?.voice_tutor === true;
-  const premium = source.active === true || voiceTutorAvailable;
-  if (!premium) {
+  const active = source.active === true;
+  const voiceTutorAvailable = active && source.entitlements?.voice_tutor === true;
+  if (!active) {
     return {
       id: 'inactive',
       label: PUBLIC_PLAN_LABELS.inactive,

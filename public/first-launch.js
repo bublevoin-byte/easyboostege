@@ -261,6 +261,13 @@ export function createFirstLaunchController({
     return error;
   }
 
+  function setLoginButtonLabel(button, label) {
+    const visible = button?.querySelector?.('[data-first-launch-login-label]');
+    if (visible) visible.textContent = label;
+    else if (button) button.textContent = label;
+    button?.setAttribute('aria-label', label);
+  }
+
   async function refreshProvider() {
     const ui = elements();
     if (!ui.login || !ui.retry) return false;
@@ -269,8 +276,7 @@ export function createFirstLaunchController({
     const controller = new AbortControllerImpl();
     providerAbortController = controller;
     ui.login.disabled = true;
-    ui.login.textContent = 'Проверяем VK ID…';
-    ui.login.setAttribute('aria-label', 'Проверяем VK ID…');
+    setLoginButtonLabel(ui.login, 'Проверяем VK ID…');
     ui.login.setAttribute('aria-busy', 'true');
     ui.retry.hidden = true;
     ui.retry.inert = true;
@@ -285,22 +291,19 @@ export function createFirstLaunchController({
       });
       if (revision !== providerRequest) return false;
       if (payload?.vk?.enabled !== true) {
-        ui.login.textContent = 'VK ID пока не подключён';
-        ui.login.setAttribute('aria-label', 'VK ID пока не подключён');
+        setLoginButtonLabel(ui.login, 'VK ID пока не подключён');
         setStatus('VK ID ещё не настроен на этом сервере. Войти сейчас не получится.', 'unavailable');
         ui.retry.hidden = false;
         ui.retry.inert = false;
         return false;
       }
       ui.login.disabled = false;
-      ui.login.textContent = LOGIN_LABEL;
-      ui.login.setAttribute('aria-label', LOGIN_LABEL);
+      setLoginButtonLabel(ui.login, LOGIN_LABEL);
       setStatus('VK ID готов к безопасному входу.', 'ready');
       return true;
     } catch {
       if (revision !== providerRequest) return false;
-      ui.login.textContent = LOGIN_LABEL;
-      ui.login.setAttribute('aria-label', LOGIN_LABEL);
+      setLoginButtonLabel(ui.login, LOGIN_LABEL);
       setStatus('Не удалось проверить VK ID. Проверь сеть и повтори.', 'error');
       ui.retry.hidden = false;
       ui.retry.inert = false;
@@ -322,8 +325,7 @@ export function createFirstLaunchController({
     loginAbortController = controller;
     button.setAttribute('aria-busy', 'true');
     button.disabled = true;
-    button.textContent = 'Открываем VK ID…';
-    button.setAttribute('aria-label', 'Открываем VK ID…');
+    setLoginButtonLabel(button, 'Открываем VK ID…');
     if (ui.retry) {
       ui.retry.hidden = true;
       ui.retry.inert = true;
@@ -340,8 +342,7 @@ export function createFirstLaunchController({
       location.assign(authorizationUrl);
     } catch (error) {
       button.disabled = false;
-      button.textContent = LOGIN_LABEL;
-      button.setAttribute('aria-label', LOGIN_LABEL);
+      setLoginButtonLabel(button, LOGIN_LABEL);
       button.removeAttribute('aria-busy');
       const authError = Object.hasOwn(AUTH_ERROR_MESSAGES, error?.authError) ? error.authError : 'start_failed';
       setStatus(AUTH_ERROR_MESSAGES[authError], 'error');

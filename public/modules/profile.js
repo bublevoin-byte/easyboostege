@@ -47,24 +47,22 @@
       ? 'цель не настроена' : 'цель: ' + targetScore + '+ баллов');
   }
 
-  // Text colours meet WCAG 2.1 AA (4.5:1) against their own tinted background.
-  const SUBSCRIPTION_STYLES = {
-    none: { color: '#A56000', background: '#FFF4DE' },
-    active: { color: '#1D7F4A', background: '#EAF7F0' },
-    expired: { color: '#A83226', background: '#FDEDEA' },
-  };
-
   function displayName(user, fallback) {
     const value = String(user == null ? '' : user).trim();
     return value || fallback || GUEST;
   }
 
   function greeting(user) {
-    return 'Привет, ' + displayName(user, GREETING_FALLBACK) + ' 👋';
+    return 'Привет, ' + displayName(user, GREETING_FALLBACK);
   }
 
   function initial(user) {
     return displayName(user).charAt(0).toUpperCase();
+  }
+
+  function sessionMatchesOwner(session, owner) {
+    return Boolean(session && session.authenticated === true && owner
+      && String(session.username || '') === String(owner));
   }
 
   function formatDate(timestamp) {
@@ -76,7 +74,7 @@
 
   function subscriptionStatus(session, now) {
     if (!session || !session.sub_until) {
-      return { state: 'none', daysLeft: 0, text: 'Доступ не активирован — обратитесь к оператору', ...SUBSCRIPTION_STYLES.none };
+      return { state: 'none', daysLeft: 0, text: 'Доступ не активирован — обратитесь к оператору' };
     }
     const until = Number(session.sub_until) || 0;
     const daysLeft = Math.max(0, Math.ceil((until - (Number(now) || 0)) / DAY_MS));
@@ -84,20 +82,27 @@
       return {
         state: 'active',
         daysLeft,
-        text: 'Подписка до ' + formatDate(until) + ' · осталось ' + daysLeft + ' дн.',
-        ...SUBSCRIPTION_STYLES.active,
+        text: 'Доступ активен до ' + formatDate(until) + ' · осталось ' + daysLeft + ' дн.',
       };
     }
     return {
       state: 'expired',
       daysLeft: 0,
-      text: 'Подписка закончилась ' + formatDate(until),
-      ...SUBSCRIPTION_STYLES.expired,
+      text: 'Доступ закончился ' + formatDate(until),
     };
   }
 
   function voiceTutorStatus(session, paymentRequest = null) {
-    const entitled = Boolean(session && session.entitlements && session.entitlements.voice_tutor);
+    const active = session?.active === true;
+    if (!active) {
+      return {
+        state: 'inactive',
+        title: 'Голосовой разбор Аси',
+        text: 'Доступ не активирован — обратитесь к оператору',
+        actionLabel: '',
+      };
+    }
+    const entitled = Boolean(session.entitlements && session.entitlements.voice_tutor);
     if (!entitled) {
       const pending = paymentRequest?.status === 'new';
       const rejected = paymentRequest?.status === 'rejected';
@@ -111,8 +116,6 @@
             ? `Заявка #${requestCode} · статус: отклонена`
             : 'Не входит в текущий доступ',
         actionLabel: pending ? '' : (rejected ? 'Отправить заявку снова' : 'Запросить доступ'),
-        color: '#8A4B00',
-        background: '#FFF4DE',
       };
     }
     const voice = session.voice_tutor || {};
@@ -123,8 +126,6 @@
       title: 'Голосовой разбор Аси',
       text: 'Осталось ' + dailyMinutes + ' мин сегодня · ' + monthlyMinutes + ' мин в этом месяце',
       actionLabel: '',
-      color: '#1D7F4A',
-      background: '#EAF7F0',
     };
   }
 
@@ -132,6 +133,7 @@
     displayName,
     greeting,
     initial,
+    sessionMatchesOwner,
     formatDate,
     subscriptionStatus,
     voiceTutorStatus,

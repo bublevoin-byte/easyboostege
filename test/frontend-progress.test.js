@@ -149,7 +149,9 @@ test('progress screen owns an accessible evidence summary and labels cached data
     fs.readFile(new URL('../public/screens/progress.js', import.meta.url), 'utf8'),
   ]);
 
-  assert.match(markup, /id="evidence_progress_summary"[^>]*aria-labelledby="evidence_progress_title"[^>]*aria-live="polite"/u);
+  assert.match(markup, /id="evidence_progress_summary"[^>]*aria-labelledby="evidence_progress_title"[^>]*aria-busy="true"/u);
+  assert.doesNotMatch(markup, /id="evidence_progress_summary"[^>]*aria-live=/u);
+  assert.match(markup, /id="evidence_progress_source"[^>]*role="status"[^>]*aria-live="polite"[^>]*aria-atomic="true"/u);
   assert.match(markup, /id="evidence_progress_modules"[^>]*aria-label="Прогресс по разделам"/u);
   assert.doesNotMatch(markup, /id="legacy_progress_state"/u);
   assert.match(screen, /progressModule\.evidenceSummary\(profile\)/u);
@@ -193,6 +195,9 @@ test('progress async overview and recovery continuations are exact-owner guarded
   const screen = await fs.readFile(new URL('../public/screens/progress.js', import.meta.url), 'utf8');
   assert.match(screen, /function captureAdaptiveAuthority/u);
   assert.match(screen, /function adaptiveAuthorityCurrent/u);
+  assert.match(screen, /function adaptiveOwnerGenerationCurrent/u);
+  assert.match(screen, /if\(!adaptiveAuthorityCurrent\(authority\)\)throw adaptiveViewError\(\);if\(apiResponseOwner\(result\)!==authority\.owner\)throw adaptiveOwnerError\(\)/u,
+    'a stale route continuation must be dropped without being treated as an owner-session mismatch');
   assert.match(screen, /async function loadAdaptiveOverview\(overviewAuthority=beginAdaptiveView\(\)\)[\s\S]*?await apiGet\('\/api\/v1\/adaptive-learning\/overview',adaptiveOwnerHeaders\(overviewAuthority\)\)[\s\S]*?adaptivePayloadOwned\(payload,overviewAuthority\)/u);
   assert.match(screen, /const goalAuthority=captureAdaptiveAuthority\(\)[\s\S]*?await adaptivePut\('\/api\/v1\/adaptive-learning\/goal'[\s\S]*?adaptiveAuthorityCurrent\(goalAuthority\)/u);
   assert.match(screen, /async function renderRecoveryMap\(\)\{[^}]*captureAdaptiveAuthority\(\)[\s\S]*?await adaptiveGet\('\/api\/v1\/voice-tutor\/recovery-map',recoveryAuthority\)[\s\S]*?drawRecoveryMap/u);
@@ -245,7 +250,8 @@ test('adaptive overview uses cached private data only for retryable offline fail
   assert.match(screen, /async function adaptiveBoundRequest\(request,authority\)[\s\S]*?invalidateAdaptiveAuthority\(authority\)/u,
     'every adaptive Progress request must globally invalidate an exact stale incarnation');
   assert.match(screen, /if\(!apiCanUseOfflineFallback\(error\)\)[\s\S]*?drawEvidenceProgressSummary\(null,\{source:'unavailable',unavailable:true\}\)/u);
-  assert.match(screen, /const cached=readAdaptiveOverviewCacheSnapshot/u);
+  assert.match(screen, /const previousSnapshot=readAdaptiveOverviewCacheSnapshot/u);
+  assert.match(screen, /cached\.previousProfile/u);
 });
 
 test('adaptive authority loss clears every owner-derived private view before logout', async () => {

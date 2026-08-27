@@ -528,9 +528,11 @@ try {
   await assertOpeningShellPrivate(page, 'onboarding step 3');
   await page.getByRole('button', { name: 'Начать', exact: true }).click();
 
-  const login = page.getByRole('button', { name: 'Войти через VK ID', exact: true });
+  const login = page.locator('[data-first-launch-login]');
   await login.waitFor({ state: 'visible', timeout: 5_000 });
   await page.waitForFunction(() => !document.querySelector('[data-first-launch-login]')?.disabled);
+  assert.equal((await login.ariaSnapshot()).trim(), '- button "Войти через VK ID"',
+    'the VK provider mark must not change the exact accessible button name');
   assert.equal(await page.locator('.first-launch__progress').getAttribute('aria-label'), 'Шаг 4 из 4');
   await assertOpeningShellPrivate(page, 'login');
   assert.equal(await page.locator('[data-first-launch-skip]').isVisible(), false);
@@ -545,7 +547,7 @@ try {
   const loginComposition = await page.evaluate(() => {
     const progress = document.querySelector('.first-launch__progress').getBoundingClientRect();
     const button = document.querySelector('[data-first-launch-login]').getBoundingClientRect();
-    const affordance = getComputedStyle(document.querySelector('[data-first-launch-login]'), '::after');
+    const affordance = getComputedStyle(document.querySelector('.first-launch__vk-mark'));
     return {
       progressBottom: progress.bottom,
       buttonTop: button.top,
@@ -636,7 +638,7 @@ try {
   assert.deepEqual(darkGateAfterReload, darkGateBeforeReload,
     'forced-dark access-gate styles remain stable across reload');
 
-  const lateSessionOwner = await seedOwnerBoundMockContinuation(page);
+  const lateSessionOwner = await page.evaluate(() => window.EasyBoostStore.readCurrentOwner());
   hangNextSessionCheck = true;
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.locator('#access_gate[data-state="network-unknown"]')
@@ -659,7 +661,7 @@ try {
   }).catch(() => {});
   await page.waitForTimeout(250);
   assert.equal(await page.locator('#scr1.on,#scr16.on').count(), 0,
-    'a late active /me response cannot reopen Today or a seeded mock after the deadline');
+    'a late active /me response cannot reopen a private route after the deadline');
   const inactiveRetryRequest = page.waitForRequest((request) => new URL(request.url()).pathname === '/api/v1/me');
   await page.locator('#access_gate_retry').click();
   await inactiveRetryRequest;
@@ -766,7 +768,13 @@ try {
   assert.equal(replayCookies.some((cookie) => cookie.name === 'eb_vk_replay'), true,
     'the successful callback leaves only the short replay classifier cookie');
   const replayLogoutStatus = await replayPage.evaluate(async () => (await fetch('/api/v1/logout', {
-    method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: '{}',
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {
+      'content-type': 'application/json',
+      'X-EasyBoost-Expected-Owner': window.currentUser,
+    },
+    body: '{}',
   })).status);
   assert.equal(replayLogoutStatus, 200);
   await replayPage.goto(replayCallbackUrl, { waitUntil: 'domcontentloaded' });
@@ -785,7 +793,7 @@ try {
   await seedCompletedOnboarding(expiredContext);
   const expiredPage = await expiredContext.newPage();
   await expiredPage.goto(baseUrl, { waitUntil: 'domcontentloaded' });
-  await expiredPage.getByRole('button', { name: 'Войти через VK ID', exact: true })
+  await expiredPage.locator('[data-first-launch-login]')
     .waitFor({ state: 'visible', timeout: 8_000 });
   const expiredStart = await expiredPage.evaluate(async () => {
     const response = await fetch('/api/v1/auth/vk/start?response=json', {
@@ -887,7 +895,7 @@ try {
         await failurePage.locator('#access_gate[data-state="network-unknown"]')
           .waitFor({ state: 'visible', timeout: 8_000 });
       } else {
-        await failurePage.getByRole('button', { name: 'Войти через VK ID', exact: true })
+        await failurePage.locator('[data-first-launch-login]')
           .waitFor({ state: 'visible', timeout: 8_000 });
         assert.equal(await failurePage.locator('#access_gate').count(), 0);
       }
@@ -1042,7 +1050,13 @@ try {
   assert.equal(await page.locator('#scr5.on').count(), 0, 'profile replay returns without forcing re-authentication');
 
   const logoutStatus = await page.evaluate(async () => (await fetch('/api/v1/logout', {
-    method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: '{}',
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {
+      'content-type': 'application/json',
+      'X-EasyBoost-Expected-Owner': window.currentUser,
+    },
+    body: '{}',
   })).status);
   assert.equal(logoutStatus, 200);
   assert.equal((await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), onboardingKey)).version, 1,
@@ -1076,7 +1090,7 @@ try {
   await page.locator('#access_gate_retry').click();
   await recoveredRetryRequest;
   await page.locator('#access_gate').waitFor({ state: 'detached', timeout: 5_000 });
-  await page.getByRole('button', { name: 'Войти через VK ID', exact: true }).waitFor({ state: 'visible' });
+  await page.locator('[data-first-launch-login]').waitFor({ state: 'visible' });
   await Promise.all(stalledRoutes.splice(0).map((route) => route.abort('failed').catch(() => {})));
 
   hangNextProviderDiscovery = true;
@@ -1088,7 +1102,7 @@ try {
   await page.getByRole('button', { name: 'Повторить', exact: true }).click();
   await page.waitForFunction(() => (
     document.querySelector('[data-first-launch-login]')?.disabled === false
-      && document.querySelector('[data-first-launch-login]')?.textContent.trim() === 'Войти через VK ID'
+      && document.querySelector('[data-first-launch-login]')?.getAttribute('aria-label') === 'Войти через VK ID'
   ));
 
   failNextProviderDiscovery = true;
@@ -1098,7 +1112,7 @@ try {
   await page.getByRole('button', { name: 'Повторить', exact: true }).click();
   await page.waitForFunction(() => (
     document.querySelector('[data-first-launch-login]')?.disabled === false
-      && document.querySelector('[data-first-launch-login]')?.textContent.trim() === 'Войти через VK ID'
+      && document.querySelector('[data-first-launch-login]')?.getAttribute('aria-label') === 'Войти через VK ID'
   ));
 
   await stopProcess(server);
@@ -1138,7 +1152,7 @@ try {
   }, { owner: session.username });
   const ownerBPage = await ownerBContext.newPage();
   await ownerBPage.goto(baseUrl, { waitUntil: 'domcontentloaded' });
-  const ownerBLogin = ownerBPage.getByRole('button', { name: 'Войти через VK ID', exact: true });
+  const ownerBLogin = ownerBPage.locator('[data-first-launch-login]');
   await ownerBLogin.waitFor({ state: 'visible', timeout: 8_000 });
   await ownerBPage.waitForFunction(() => document.querySelector('[data-first-launch-login]')?.disabled === false);
   assert.equal(await ownerBPage.evaluate(() => localStorage.getItem('eb_current')), null,

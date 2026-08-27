@@ -19,11 +19,13 @@ async function readApplicationSource() {
 }
 
 async function readFrontend() {
-  const [html, app] = await Promise.all([
+  const [html, app, speakingCss, themeCss] = await Promise.all([
     fs.readFile(htmlPath, 'utf8'),
     readApplicationSource(),
+    fs.readFile(new URL('../public/speaking.css', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../public/aisy-theme.css', import.meta.url), 'utf8'),
   ]);
-  return { html, app, combined: `${html}\n${app}` };
+  return { html, app, speakingCss, themeCss, combined: `${html}\n${app}` };
 }
 
 function relativeLuminance(hex) {
@@ -58,16 +60,17 @@ test('contrast helper matches the WCAG reference values', () => {
   assert.ok(contrast('#8A8F98', '#FFFFFF') < 4.5);
 });
 
-test('individual Speaking assessment action meets 4.5:1 at every gradient stop', async () => {
-  const { app } = await readFrontend();
-  const match = app.match(/assessmentAction[\s\S]{0,1600}?background:linear-gradient\(135deg,(#[0-9A-F]{6}),(#[0-9A-F]{6})\)[\s\S]{0,300}?color:#fff/iu);
-  assert.ok(match, 'individual Speaking assessment gradient was not found');
-  for (const background of match.slice(1)) {
-    assert.ok(
-      contrast('#FFFFFF', background) >= 4.5,
-      `individual Speaking assessment contrast is below 4.5:1 on ${background}`,
-    );
-  }
+test('individual Speaking assessment action uses the canonical AA primary tokens', async () => {
+  const { speakingCss, themeCss } = await readFrontend();
+  assert.match(speakingCss, /\.speaking-action--primary\s*\{[^}]*background:\s*var\(--aisy-button-background\)[^}]*color:\s*var\(--aisy-button-foreground\)/su);
+  assert.match(themeCss, /--aisy-button-background:\s*var\(--aisy-color-primary\)/u);
+  assert.match(themeCss, /--aisy-button-foreground:\s*var\(--aisy-color-on-primary\)/u);
+  assert.match(themeCss, /\.aisy-button::after\s*\{\s*content:\s*"";/u);
+  assert.match(themeCss, /\.aisy-button::before\s*\{[^}]*content:\s*"";[^}]*border-block-start:\s*2px solid var\(--aisy-button-affordance-foreground\)[^}]*border-inline-end:\s*2px solid var\(--aisy-button-affordance-foreground\)/su);
+  assert.match(speakingCss, /\.speaking-action--primary::after\s*\{\s*content:\s*"";/u);
+  assert.doesNotMatch(themeCss.match(/\.aisy-button::after\s*\{[^}]*\}/su)?.[0] ?? '', /gradient\(/u);
+  assert.doesNotMatch(speakingCss.match(/\.speaking-action--primary::after\s*\{[^}]*\}/su)?.[0] ?? '', /gradient\(/u);
+  assert.doesNotMatch(themeCss + speakingCss, /content:\s*["']→["']/u);
 });
 
 test('interactive elements are real buttons, links or fields', async () => {
@@ -83,11 +86,13 @@ test('every rendered text field carries a programmatic label', async () => {
   const { combined } = await readFrontend();
   const fields = combined.match(/<(?:input|textarea)\b[^>]*>/giu) || [];
   const labelledControlIds = associatedLabelIds(combined);
+  const wrappedFields = new Set([...combined.matchAll(/<label\b[^>]*>([\s\S]*?)<\/label>/giu)]
+    .flatMap(([, body]) => body.match(/<(?:input|textarea)\b[^>]*>/giu) || []));
   assert.ok(fields.length >= 3, 'expected the word, grammar and exam gap inputs');
   for (const field of fields) {
     const directLabel = attributeValue(field, 'aria-label') || attributeValue(field, 'aria-labelledby');
     const controlId = attributeValue(field, 'id');
-    assert.ok(directLabel || (controlId && labelledControlIds.has(controlId)), `field without a label: ${field}`);
+    assert.ok(directLabel || wrappedFields.has(field) || (controlId && labelledControlIds.has(controlId)), `field without a label: ${field}`);
   }
   const writingLabel = [...combined.matchAll(/<label\b([^>]*)>([\s\S]*?)<\/label>/giu)]
     .find(([, attributes]) => attributeValue(attributes, 'for') === 'w_editor');
@@ -109,11 +114,13 @@ test('icon-only controls expose an accessible name', async () => {
 
 test('status is never carried by colour alone', async () => {
   const { app } = await readFrontend();
-  // Answer verdicts go through the shared helper, which adds a glyph and a label.
+  // Every subject screen pairs semantic colour classes with visible verdict text or an accessible name.
   assert.doesNotMatch(app, /btn\.style\.background='#EAF7F0'/u);
   assert.doesNotMatch(app, /btn\.style\.background='#FDEDEA'/u);
-  const marks = (app.match(/ui\.markAnswer\(/gu) || []).length;
-  assert.ok(marks >= 6, `expected every answer verdict to use markAnswer, found ${marks}`);
+  assert.match(app, /grammar-verdict[^\n]*\?\s*'✓ Верно':'✕ Неверно'/u);
+  assert.match(app, /reading-review[\s\S]*?'✓':'×'[\s\S]*?'Верно':'Ошибка'/u);
+  assert.match(app, /listening-answer-state[^\n]*\?\s*'Верно':'Ошибка'/u);
+  assert.match(app, /setAttribute\('aria-label',label\+' — верно'\)/u);
   assert.match(app, /st\.count\+' \/ '\+st\.range\+' слов · '\+st\.hint/u);
 });
 

@@ -25,6 +25,7 @@ const entrySource = await fs.readFile(new URL('../public/main.js', import.meta.u
 const screenLoaderSource = await fs.readFile(new URL('../public/screens.js', import.meta.url), 'utf8');
 const appSource = await fs.readFile(new URL('../public/app.js', import.meta.url), 'utf8');
 const privacySource = await fs.readFile(new URL('../public/privacy.js', import.meta.url), 'utf8');
+const profileSource = await fs.readFile(new URL('../public/screens/profile.js', import.meta.url), 'utf8');
 const wordFlushSource = appSource.match(
   /async function wFlushServer\(authority\)\{[\s\S]*?\n\}\nfunction wQueueServer/u,
 )[0].replace(/\nfunction wQueueServer$/u, '');
@@ -959,7 +960,7 @@ test('Grammar batches carry owner generation and legacy generation-zero evidence
   assert.equal(recreated.posts.length, 0, 'pre-delete Grammar evidence cannot enter the recreated account');
 });
 
-test('account cleanup uses the Grammar queue lock and privacy waits before reload', async () => {
+test('account cleanup uses the Grammar queue lock and Profile waits before reload', async () => {
   const lockManager = createLockManager();
   const active = createSync({ online: false, lockManager });
   active.sync.setOwner('grammar-owner');
@@ -975,11 +976,11 @@ test('account cleanup uses the Grammar queue lock and privacy waits before reloa
     'easyboost-owner-incarnation:grammar-owner',
   ]);
   assert.equal(active.sync.pendingGrammarMasteryEvents().length, 0);
-  assert.doesNotMatch(privacySource, /api\.remove\('\/api\/v1\/account'[\s\S]*?clearOwner/u,
+  assert.doesNotMatch(profileSource, /EasyBoostApi\.remove\('\/api\/v1\/account'[\s\S]*?clearOwner/u,
     'the irreversible server call cannot happen before taking the owner-incarnation lock');
-  assert.match(privacySource, /EasyBoostSync\?\.deleteOwner\([\s\S]*?api\.remove\('\/api\/v1\/account'/u,
-    'privacy deletion must own the shared incarnation lock before the irreversible server call');
-  assert.match(privacySource, /deleteOwner\(\(expectedOwner\)[\s\S]*?confirmation:\s*'DELETE',\s*owner:\s*expectedOwner/u,
+  assert.match(profileSource, /EasyBoostSync\?\.deleteOwner\([\s\S]*?EasyBoostApi\.remove\('\/api\/v1\/account'/u,
+    'Profile deletion must own the shared incarnation lock before the irreversible server call');
+  assert.match(profileSource, /deleteOwner\(async\s*\(expectedOwner\)[\s\S]*?confirmation:\s*'DELETE',\s*owner:\s*expectedOwner/u,
     'the irreversible request must carry the owner captured under the incarnation lock');
 });
 
@@ -1132,7 +1133,7 @@ test('account deletion fails closed before the server call when Web Locks are un
   assert.equal(remoteCalls, 0);
   assert.equal(active.values.get('eb_data_grammar-owner'), '{"kept":true}');
   assert.equal(active.sync.ownerBoundGeneration('grammar-owner'), 0);
-  assert.match(privacySource, /GRAMMAR_MASTERY_QUEUE_LOCK_UNAVAILABLE[\s\S]*?Удаление не выполнено/u);
+  assert.match(profileSource, /GRAMMAR_MASTERY_QUEUE_LOCK_UNAVAILABLE[\s\S]*?Удаление не выполнено/u);
 });
 
 test('account deletion tombstones the owner, purges snapshots and blocks cross-tab resurrection', async () => {

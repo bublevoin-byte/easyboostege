@@ -207,12 +207,17 @@ paths:
     get:
       summary: Read the separate research-calibration consent
       description: This consent is independent from ordinary voice processing. Declining or revoking it does not restrict training or paid subscription features.
+      parameters:
+        - $ref: '#/components/parameters/OptionalExpectedOwner'
       responses:
-        '200': { description: Current consent and current policy version }
+        '200': { description: Current consent and current policy version, headers: { X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { description: OWNER_CHANGED; expected owner differs from the authenticated account }
     put:
       summary: Grant or revoke voluntary research-calibration consent
       description: A minor requires explicit guardian confirmation. Revocation immediately deletes retained owner-bound calibration audio.
+      parameters:
+        - $ref: '#/components/parameters/OptionalExpectedOwner'
       requestBody:
         required: true
         content:
@@ -226,10 +231,10 @@ paths:
                 guardianConfirmed: { type: boolean }
               additionalProperties: false
       responses:
-        '200': { description: Updated separate consent, content: { application/json: { schema: { $ref: '#/components/schemas/SpeakingCalibrationConsent' } } } }
+        '200': { description: Updated separate consent, headers: { X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' } }, content: { application/json: { schema: { $ref: '#/components/schemas/SpeakingCalibrationConsent' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '409': { description: Guardian confirmation is required }
+        '409': { description: Guardian confirmation is required or expected owner differs from the authenticated account }
   /api/v1/speaking/calibration-samples:
     post:
       summary: Voluntarily retain one finalized assessment recording for blinded calibration
@@ -907,9 +912,12 @@ paths:
   /api/v1/me:
     get:
       summary: Current internal owner, safe display name, subscription, Premium entitlements, remaining voice minutes and feature flags
+      parameters:
+        - $ref: '#/components/parameters/OptionalExpectedOwner'
       responses:
         '200':
           description: User profile. `username` remains the opaque internal owner key; `displayName` is presentation-only and no provider subject is exposed. `features.adaptive_learning` is true only when the server rollout flag is enabled.
+          headers: { X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' } }
           content:
             application/json:
               schema:
@@ -932,6 +940,8 @@ paths:
   /api/v1/payments/requests:
     post:
       summary: Create or return the current user's pending Premium Voice payment request
+      parameters:
+        - $ref: '#/components/parameters/OptionalExpectedOwner'
       requestBody:
         required: true
         content:
@@ -943,21 +953,24 @@ paths:
                 product: { type: string, enum: [premium_voice] }
               additionalProperties: false
       responses:
-        '201': { description: New request created; no subscription or entitlement is self-granted }
-        '200': { description: Existing pending request returned idempotently }
+        '201': { description: New request created; no subscription or entitlement is self-granted, headers: { X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' } } }
+        '200': { description: Existing pending request returned idempotently, headers: { X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { description: OWNER_CHANGED; expected owner differs from the authenticated account }
     get:
       summary: Read the current user's latest Premium Voice payment request and entitlement status
       parameters:
+        - $ref: '#/components/parameters/OptionalExpectedOwner'
         - in: query
           name: product
           required: true
           schema: { type: string, enum: [premium_voice] }
       responses:
-        '200': { description: Latest request or null plus current entitlement_active flag }
+        '200': { description: Latest request or null plus current entitlement_active flag, headers: { X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { description: OWNER_CHANGED; expected owner differs from the authenticated account }
   /api/v1/admin/payment-requests/{requestId}/resolve:
     post:
       summary: Idempotently approve or reject a payment request as an administrator
@@ -1427,12 +1440,16 @@ paths:
         '403': { description: Authenticated user does not have the admin role }
   /api/v1/logout:
     post:
-      summary: Clear authentication cookie
+      summary: Revoke and clear the exact captured authentication session
+      parameters:
+        - $ref: '#/components/parameters/OptionalExpectedOwner'
       responses:
-        '200': { description: Logged out }
+        '200': { description: Exact session revoked and authentication cookie cleared, headers: { X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { description: OWNER_CHANGED; captured owner differs from the cookie session and nothing is revoked }
   /api/v1/adaptive-learning/goal:
     parameters:
-      - $ref: '#/components/parameters/ExpectedOwner'
+      - $ref: '#/components/parameters/OptionalExpectedOwner'
     get:
       summary: Read the authenticated learner's current EGE goal
       responses:
@@ -1490,7 +1507,7 @@ paths:
         '404': { description: Adaptive Learning rollout is disabled; the route is not registered }
   /api/v1/adaptive-learning/overview:
     parameters:
-      - $ref: '#/components/parameters/ExpectedOwner'
+      - $ref: '#/components/parameters/OptionalExpectedOwner'
     get:
       summary: Read the current goal and an owner-bound profile bootstrapped from persisted attempts and Voice Tutor recoveries
       description: The overview remains available when the plan rollout is disabled so the authenticated learner can read the six-module evidence summary. In that mode goal and plan are null, while all goal, plan, diagnostic, report and session routes stay unavailable. This read does not bypass commercial capabilities. The complete evidence-profile-plan cycle runs at most three times. Exhausted profile CAS, plan save conflict, goal mismatch, goal/profile/evidence stale or recalculation conflict fails closed with one retryable 409 and Retry-After instead of returning a mixed snapshot. Evidence scoring fields are eligible only as finite JSON numbers with a positive maximum, and result flags only as JSON booleans; numeric-looking or boolean-looking strings do not affect mastery or the watermark.
@@ -1521,7 +1538,7 @@ paths:
                       retryable: { type: boolean, enum: [true] }
   /api/v1/adaptive-learning/plan:
     parameters:
-      - $ref: '#/components/parameters/ExpectedOwner'
+      - $ref: '#/components/parameters/OptionalExpectedOwner'
     get:
       summary: Read or idempotently refresh the authenticated learner's honest EGE forecast and weekly allocation
       description: Uses a transparent rule-based model, not calibrated IRT. The active score range is not a guarantee. The UTC start of recalculationBucket is the deterministic instant for forecast weeks, deadline/critical priority, allocation and calculatedAt; actual createdAt/updatedAt remain receipt timestamps. The preceding bucket keeps exactly 1/7 week before the exam-date bucket becomes action-required. A daily/evidence/base-revision fingerprint replays only after the complete normalized candidate envelope and plan semantics exactly match the retained revision, including exact retained old-goal candidates; regenerated identity and receipt timestamps are ignored. Unknown stale-goal fingerprints fail closed. New candidates are strictly validated and must match the current persisted profile vector under the owner lock. Compare-and-set retries concurrent recalculations against their actual winning base. Ordinary allocation changes are limited to 10 percentage points per visible skill and module. Only a goal revision reset or an owner/profile-bound critical retention window expiring within 24 hours may bypass the limit; the repository reconstructs the candidate from the authoritative persisted expiry and rejects invented scope.
@@ -1537,7 +1554,7 @@ paths:
         '404': { description: Adaptive Learning rollout is disabled; the route is not registered }
   /api/v1/adaptive-learning/orientation:
     parameters:
-      - $ref: '#/components/parameters/ExpectedOwner'
+      - $ref: '#/components/parameters/OptionalExpectedOwner'
     get:
       summary: Read a Premium-only approximate CEFR/IELTS orientation from independently established skills
       description: Secondary orientation only. It is based on EGE evidence, refuses assisted-only mastery and is not an official IELTS result or CEFR certificate.
@@ -1559,7 +1576,7 @@ paths:
         '404': { description: Adaptive Learning rollout is disabled; the route is not registered }
   /api/v1/adaptive-learning/reports/detailed:
     parameters:
-      - $ref: '#/components/parameters/ExpectedOwner'
+      - $ref: '#/components/parameters/OptionalExpectedOwner'
     get:
       summary: Read a Premium-only bounded report from completed adaptive session summaries
       description: Includes at most 12 recent completed sessions, aggregated module evidence and a secondary approximate CEFR/IELTS orientation. It never returns learner answers, essays, transcripts, audio, prompts or model responses and is not an official IELTS result.
@@ -1581,7 +1598,7 @@ paths:
         '404': { description: Adaptive Learning rollout is disabled; the route is not registered }
   /api/v1/adaptive-learning/sessions/preview:
     parameters:
-      - $ref: '#/components/parameters/ExpectedOwner'
+      - $ref: '#/components/parameters/OptionalExpectedOwner'
     post:
       summary: Deterministically preview an adaptive session against the current plan and rolling UTC-week budget
       description: The server selects only registered built-in activities. Durations are 15–120 minutes in five-minute increments; sessions longer than 60 minutes include one exact 10-minute break. The returned fingerprint binds the current plan revision, content registry, weekly budget snapshot and block sequence.
@@ -1615,7 +1632,7 @@ paths:
         '404': { description: Adaptive Learning rollout is disabled; the route is not registered }
   /api/v1/adaptive-learning/sessions:
     parameters:
-      - $ref: '#/components/parameters/ExpectedOwner'
+      - $ref: '#/components/parameters/OptionalExpectedOwner'
     post:
       summary: Persist one owner-bound adaptive session from an exact current preview
       parameters:
@@ -1644,7 +1661,7 @@ paths:
         '404': { description: Adaptive Learning rollout is disabled; the route is not registered }
   /api/v1/adaptive-learning/sessions/current:
     parameters:
-      - $ref: '#/components/parameters/ExpectedOwner'
+      - $ref: '#/components/parameters/OptionalExpectedOwner'
     get:
       summary: Restore the authenticated learner's current created or in-progress adaptive session
       responses:
@@ -1668,7 +1685,7 @@ paths:
         '404': { description: No current session belongs to the authenticated learner, or rollout is disabled }
   /api/v1/adaptive-learning/sessions/{sessionId}/replace:
     parameters:
-      - $ref: '#/components/parameters/ExpectedOwner'
+      - $ref: '#/components/parameters/OptionalExpectedOwner'
     post:
       summary: Replace or exclude one learning block once while preserving duration and block identities
       description: The alternative is selected from the same server-owned content registry and persisted plan revision. `excluded` removes the named block from this session and fills the same minutes with another useful skill, so the selected duration remains truthful. A session permits one replacement-or-exclusion total. Replacement is available only before execution starts; once a start is pending or any execution claim, started timestamp, positive execution revision, in-progress/completed state, or completion event exists, both a new request and an exact retry fail closed with `409 ADAPTIVE_SESSION_REPLACEMENT_LOCKED`.
@@ -1700,7 +1717,7 @@ paths:
         '409': { description: `ADAPTIVE_SESSION_REPLACEMENT_LOCKED` after execution has begun; otherwise the shared allowance was already used, no safe alternative exists, plan is unavailable, revision changed or the idempotency key conflicts }
   /api/v1/adaptive-learning/sessions/{sessionId}/start:
     parameters:
-      - $ref: '#/components/parameters/ExpectedOwner'
+      - $ref: '#/components/parameters/OptionalExpectedOwner'
     post:
       summary: Atomically start the exact current learning block and issue a short-lived opaque execution claim
       description: The claim is owner/session/block/launch/revision-bound and expires after two hours. Its plaintext value is reconstructed by a domain-separated server HMAC for an exact Idempotency-Key replay, is never stored in a mutation snapshot or claim row, and is never exported. Another live unconsumed claim and a stale compare-and-set revision fail closed; an expired unconsumed claim may be replaced. The response snapshot session revision, replacement state and exact launch fingerprint are validated against the owner-locked session before the claim is written, so a concurrent replacement yields a coherent current launch or 409 and never an old response paired with a new claim. If a claim was already consumed by an exact persisted attempt but its advance response was lost, the 200 response returns that attempt for a durable exact advance and never issues a second claim. A Premium-depth block rechecks active base plus voice entitlement inside the same owner-serialized repository mutation using time captured only after file queue acquisition or PostgreSQL `FOR UPDATE` (`clock_timestamp()`), never the request timestamp.
@@ -1734,7 +1751,7 @@ paths:
         '409': { description: Stale revision, wrong/current state, active claim or idempotency conflict }
   /api/v1/adaptive-learning/sessions/{sessionId}/bind-attempt:
     parameters:
-      - $ref: '#/components/parameters/ExpectedOwner'
+      - $ref: '#/components/parameters/OptionalExpectedOwner'
     post:
       summary: Bind a completed server-owned writing, speaking or day-1/day-7 repeat attempt to the active execution claim
       description: The browser supplies no score. The repository verifies owner, task/activity identity, completed status, creation after claim issuance and exact claim launch fingerprint. Repeat binding additionally verifies the exact owner recovery, repeat task, skill and module. Exact binding replay is safe. A Premium-depth block rechecks active base plus voice entitlement in the same owner-serialized mutation before consumed-claim replay or binding.
@@ -1778,7 +1795,7 @@ paths:
         '410': { description: Execution claim expired }
   /api/v1/adaptive-learning/sessions/{sessionId}/advance:
     parameters:
-      - $ref: '#/components/parameters/ExpectedOwner'
+      - $ref: '#/components/parameters/OptionalExpectedOwner'
     post:
       summary: Complete the exact current block from persisted evidence and recalculate the learner profile and plan
       description: Learning blocks require a claim-bound persisted module, writing, speaking or exact Voice Tutor day-1/day-7 repeat attempt. Breaks require null. The response contains an allowlisted evidence summary, profile/plan delta and next action; it never accepts a client-supplied completion or score. Compare-and-set and owner-global idempotency make concurrent/exact retries safe. A Premium-depth block rechecks active base plus voice entitlement inside the same owner-serialized replay or completion transaction.
@@ -1826,7 +1843,7 @@ paths:
         '409': { description: Stale revision, wrong block/state, missing/mismatched attempt or idempotency conflict }
   /api/v1/adaptive-learning/sessions/{sessionId}/finish:
     parameters:
-      - $ref: '#/components/parameters/ExpectedOwner'
+      - $ref: '#/components/parameters/OptionalExpectedOwner'
     post:
       summary: Explicitly finish a session only after every persisted block event exists
       parameters:
@@ -1856,7 +1873,7 @@ paths:
         '409': { description: Session is not ready, revision is stale or idempotency key conflicts }
   /api/v1/adaptive-learning/diagnostics/start:
     parameters:
-      - $ref: '#/components/parameters/ExpectedOwner'
+      - $ref: '#/components/parameters/OptionalExpectedOwner'
     post:
       summary: Start or resume a bounded short or Premium deep diagnostic with a durable owner-bound replay claim
       description: Short is the default. New sessions use the immutable ege-short-diagnostic-v2 or Premium ege-deep-diagnostic-v2 catalog-policy; saved v1 sessions remain resumable under their original definitions. Deep requires current Premium throughout the run. A Free learner may complete one short diagnostic. A scheduled 28/35/42-day short refresh is offered through retention.rediagnostic.due but does not block ordinary learning sessions. Every resumed session uses its stored catalog version's policy. A successful key owns its exact start snapshot for the 24-hour start-claim retention window. New keys are bounded by a per-user hourly rate and by a finite live-claim budget.
@@ -1885,7 +1902,7 @@ paths:
         '404': { description: Adaptive Learning rollout is disabled; the route is not registered }
   /api/v1/adaptive-learning/diagnostics/current:
     parameters:
-      - $ref: '#/components/parameters/ExpectedOwner'
+      - $ref: '#/components/parameters/OptionalExpectedOwner'
     get:
       summary: Resume the latest current or expired diagnostic without exposing an answer key
       description: Both in-progress and ready states share the stored catalog policy's deadline (the v1 policy has a 20-minute deadline); at or after it the session is expired and cannot create evidence. The response projects maxItems, estimatedMinutes, deadlineMinutes and expiresAt from that stored policy for browser copy and progress.
@@ -1896,7 +1913,7 @@ paths:
         '404': { description: Adaptive Learning rollout is disabled; the route is not registered }
   /api/v1/adaptive-learning/diagnostics/{diagnosticId}/answers:
     parameters:
-      - $ref: '#/components/parameters/ExpectedOwner'
+      - $ref: '#/components/parameters/OptionalExpectedOwner'
     post:
       summary: Idempotently answer the server-selected current diagnostic item
       description: Selection adapts privately from accepted responses using the stored catalog version's policy. Both in-progress and ready states share that policy's deadline (20 minutes for v1).
@@ -1929,7 +1946,7 @@ paths:
         '409': { description: Item was already answered, is not current, time expired, the key conflicts, or the stored catalog version is unsupported }
   /api/v1/adaptive-learning/diagnostics/{diagnosticId}/complete:
     parameters:
-      - $ref: '#/components/parameters/ExpectedOwner'
+      - $ref: '#/components/parameters/OptionalExpectedOwner'
     post:
       summary: Complete a ready diagnostic and return an explicitly preliminary profile result
       description: Ready does not pause time; ready sessions retain the stored policy deadline and cannot be completed after it. The first success atomically binds an allowlisted immutable completion response snapshot and preliminary profile to its idempotency key. Exact lost-response/concurrent retries replay it before any live profile calculation; a different completion key returns the same canonical snapshot without replacing the original claim.
@@ -2191,19 +2208,25 @@ paths:
   /api/v1/account/export:
     get:
       summary: Export the authenticated user's account, progress and attempt data
+      parameters:
+        - $ref: '#/components/parameters/OptionalExpectedOwner'
       responses:
         '200':
           description: JSON export including the learner's bound identity, adaptive goals/structured estimates/plan revisions/learning sessions/diagnostic sessions and bounded responses, Voice Tutor sessions, recovery/repeat outcomes, Speaking accent setup lifecycle metadata and bounded provider/model/prompt metadata; revealed `correctAnswer` keys for completed EGE attempts may appear only after both parts finish, while accent evidence keys, raw audio, temporary captions, full Voice Tutor transcripts, nonce hashes and idempotency replay snapshots remain excluded
           headers:
             Cache-Control: { schema: { type: string, enum: [no-store] } }
             Content-Disposition: { schema: { type: string, example: 'attachment; filename="easyboost-data.json"' } }
+            X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AccountExport' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { description: OWNER_CHANGED; captured owner differs from the authenticated account and no data is exported }
   /api/v1/account:
     delete:
       summary: Permanently delete the authenticated user and related data
+      parameters:
+        - $ref: '#/components/parameters/OptionalExpectedOwner'
       requestBody:
         required: true
         content:
@@ -2215,18 +2238,23 @@ paths:
                 confirmation: { type: string, enum: [DELETE] }
                 owner: { type: string, minLength: 1, maxLength: 128, description: Intended local account owner captured before deletion; must exactly match the authenticated username. }
       responses:
-        '200': { description: Account, Voice Tutor sessions/recoveries/repeats and pending/rejected rule reports are deleted; approved canonical cards survive without creator identity, and reviewer identity on retained cards is anonymized }
+        '200': { description: Account, Voice Tutor sessions/recoveries/repeats and pending/rejected rule reports are deleted; approved canonical cards survive without creator identity, and reviewer identity on retained cards is anonymized, headers: { X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '409': { description: OWNER_CHANGED; intended owner does not match the authenticated account and nothing is deleted }
   /api/v1/privacy/consent:
     get:
       summary: Read the user's text and realtime speech-to-speech processing choices and current policy version
+      parameters:
+        - $ref: '#/components/parameters/OptionalExpectedOwner'
       responses:
-        '200': { description: Consent state and current policy version }
+        '200': { description: Consent state and current policy version, headers: { X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { description: OWNER_CHANGED; expected owner differs from the authenticated account }
     put:
       summary: Grant or withdraw text and realtime speech-to-speech processing consent; an outdated policy version does not authorize a Voice Tutor connection
+      parameters:
+        - $ref: '#/components/parameters/OptionalExpectedOwner'
       requestBody:
         required: true
         content:
@@ -2238,9 +2266,10 @@ paths:
                 text_processing: { type: boolean }
                 voice_processing: { type: boolean }
       responses:
-        '200': { description: Updated consent state }
+        '200': { description: Updated consent state, headers: { X-EasyBoost-Response-Owner: { $ref: '#/components/headers/X-EasyBoost-Response-Owner' } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { description: OWNER_CHANGED; expected owner differs from the authenticated account }
   /api/v1/progress:
     get:
       summary: Read complete progress document
@@ -2830,6 +2859,12 @@ components:
       name: X-EasyBoost-Expected-Owner
       required: true
       description: Exact account captured before the request. Cookie-authenticated clients must send it; a mismatch fails closed with 409 OWNER_CHANGED before private data is read or mutated. Bearer integrations bind the same value through their Authorization identity.
+      schema: { type: string, minLength: 1, maxLength: 64 }
+    OptionalExpectedOwner:
+      in: header
+      name: X-EasyBoost-Expected-Owner
+      required: false
+      description: Optional compatibility header. New browser flows send the exact account captured before the request; when supplied, a mismatch fails closed with 409 OWNER_CHANGED before private work. Headerless authenticated legacy callers remain supported.
       schema: { type: string, minLength: 1, maxLength: 64 }
     EgeMockAttemptId:
       in: path

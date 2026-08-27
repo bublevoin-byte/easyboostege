@@ -55,9 +55,12 @@ async function withServer(run) {
   const server = app.listen(0, '127.0.0.1');
   await new Promise((resolve) => server.once('listening', resolve));
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
-  const json = (username, pathname, { method = 'GET', body } = {}) => fetch(`${baseUrl}${pathname}`, {
+  const json = (username, pathname, { method = 'GET', body, expectedOwner = username } = {}) => fetch(`${baseUrl}${pathname}`, {
     method,
-    headers: { 'content-type': 'application/json', 'x-test-user': username },
+    headers: {
+      'content-type': 'application/json', 'x-test-user': username,
+      'x-easyboost-expected-owner': expectedOwner,
+    },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   const binary = (username, pathname, audio, headers = {}) => fetch(`${baseUrl}${pathname}`, {

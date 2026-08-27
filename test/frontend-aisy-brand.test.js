@@ -44,8 +44,14 @@ function contrast(first, second) {
 }
 
 test('stored theme bootstrap applies forced light or dark before stylesheets can paint', async () => {
-  const [html, source] = await Promise.all([readPublic('index.html'), readPublic('theme-prepaint.js')]);
-  assert.ok(html.indexOf('<script src="/theme-prepaint.js"></script>') < html.indexOf('/aisy-theme.css'));
+  const [html, offline, privacy, source] = await Promise.all([
+    readPublic('index.html'), readPublic('offline.html'), readPublic('privacy.html'), readPublic('theme-prepaint.js'),
+  ]);
+  for (const [name, documentSource] of Object.entries({ html, offline, privacy })) {
+    assert.ok(documentSource.indexOf('<script src="/theme-prepaint.js"></script>') < documentSource.indexOf('/aisy-theme.css'),
+      `${name} must initialize the stored theme before render-blocking CSS`);
+    assert.match(documentSource, /<meta name="theme-color" content="#fff9f3">/u);
+  }
   for (const preference of ['light', 'dark']) {
     const root = {
       dataset: {},
@@ -158,7 +164,7 @@ test('shared Aisy theme keeps light and dark interaction states accessible', asy
   const dark = new Map();
   const requiredColors = [
     '--aisy-color-background', '--aisy-color-surface', '--aisy-color-text', '--aisy-color-text-muted',
-    '--aisy-color-primary', '--aisy-color-on-primary', '--aisy-color-focus', '--aisy-color-success',
+    '--aisy-color-primary', '--aisy-color-action-text', '--aisy-color-on-primary', '--aisy-color-focus', '--aisy-color-success',
     '--aisy-color-warning', '--aisy-color-danger',
   ];
 
@@ -171,6 +177,8 @@ test('shared Aisy theme keeps light and dark interaction states accessible', asy
     assert.ok(contrast(theme.get('--aisy-color-text'), theme.get('--aisy-color-background')) >= 4.5);
     assert.ok(contrast(theme.get('--aisy-color-text-muted'), theme.get('--aisy-color-surface')) >= 4.5);
     assert.ok(contrast(theme.get('--aisy-color-on-primary'), theme.get('--aisy-color-primary')) >= 4.5);
+    assert.ok(contrast(theme.get('--aisy-color-action-text'), theme.get('--aisy-color-surface')) >= 4.5);
+    assert.ok(contrast(theme.get('--aisy-color-action-text'), theme.get('--aisy-color-background')) >= 4.5);
     assert.ok(contrast(theme.get('--aisy-color-focus'), theme.get('--aisy-color-background')) >= 3);
   }
 
@@ -187,11 +195,12 @@ test('shared Aisy theme keeps light and dark interaction states accessible', asy
 });
 
 test('the accessible Asya mark and shared theme stay inside the offline public shell', async () => {
-  const [html, offline, privacy, privacyScript, launcher, icon, worker] = await Promise.all([
+  const [html, offline, privacy, privacyScript, privacyStyles, launcher, icon, worker] = await Promise.all([
     readPublic('index.html'),
     readPublic('offline.html'),
     readPublic('privacy.html'),
     readPublic('privacy.js'),
+    readPublic('progress-profile.css'),
     readPublic('asya-launcher.js'),
     readPublic('pwa-icon.svg'),
     readPublic('service-worker.js'),
@@ -209,13 +218,14 @@ test('the accessible Asya mark and shared theme stay inside the offline public s
   assert.match(html, /<img[^>]*src="\/assets\/opening\/logo\.webp"/u);
   assert.match(worker, /['"]\/assets\/opening\/logo\.webp['"]/u);
   assert.match(launcher, /setAttribute\('aria-label','Открыть Асю'\)/u);
-  assert.match(privacyScript, /разговора с Асей/u);
+  assert.match(privacyScript, /голосового разбора с Асей/u);
   assert.match(privacyScript, /global\.EasyBoostApi/u, 'internal frontend namespace must remain stable');
   assert.doesNotMatch(privacyScript, /Easy Boost не сохраняет/u);
-  const privacyFontSizes = [...privacyScript.matchAll(/font(?:-size)?\s*:[^;{}]*?(\d+(?:\.\d+)?)px/gu)]
-    .map((match) => Number(match[1]));
-  assert.ok(privacyFontSizes.length >= 8);
-  assert.equal(privacyFontSizes.every((size) => size >= 16), true, 'privacy body/control text must stay >=16px');
+  assert.doesNotMatch(privacyScript, /document\.createElement\(['"]style['"]\)|\.style\./u);
+  assert.match(privacyStyles, /#privacySheet p,[\s\S]*?#privacySheet li\s*\{[^}]*var\(--aisy-font-size-body\)/u);
+  assert.match(privacyStyles, /\.privacyChoice (?:b|span)\s*\{[^}]*font-size:\s*var\(--aisy-font-size-body\)/u);
+  assert.match(privacyStyles, /\.privacyBtn\s*\{[^}]*min-block-size:\s*var\(--aisy-touch-target\)[^}]*var\(--aisy-font-size-body\)/su);
+  assert.match(privacyStyles, /\.privacyLink\s*\{[^}]*min-block-size:\s*var\(--aisy-touch-target\)/su);
 });
 
 test('every declared raster install icon carries the Aisy indigo mark instead of the retired orange B', async () => {

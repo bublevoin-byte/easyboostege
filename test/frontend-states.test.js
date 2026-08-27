@@ -103,7 +103,7 @@ test('the application wires all four states to real operations', () => {
   assert.match(appSource, /kind:'success',title:'Готово — новое задание'/u);
   assert.match(appSource, /kind:'error',title:'ИИ недоступен'[\s\S]{0,200}actionLabel:'Повторить'/u);
   assert.match(appSource, /kind:'empty',title:'Пока пусто'/u);
-  assert.match(appSource, /kind:'empty',title:'Проверенных работ пока нет'/u);
+  assert.match(appSource, /Проверенных работ пока нет\. После настоящей серверной проверки/u);
   // Leaving the screen must not leave a stale banner behind.
   assert.match(appSource, /if\(!show\)genStateClear\(\)/u);
   assert.match(htmlSource, /\.ebstate\{/u);

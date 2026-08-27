@@ -59,7 +59,7 @@ test('error-bank mutation requires and returns the exact cookie owner', async ()
 
 test('error-bank OpenAPI documents strict owner request and response binding', async () => {
   const openapi = await fs.readFile(new URL('../docs/openapi.yaml', import.meta.url), 'utf8');
-  const contract = openapi.match(/  \/api\/v1\/error-bank:[\s\S]*?(?=\n  \/api\/v1\/ai\/evaluate-writing:)/u)?.[0] || '';
+  const contract = openapi.match(/  \/api\/v1\/error-bank:[\s\S]*?(?=\n  \/api\/v1\/)/u)?.[0] || '';
   assert.equal((contract.match(/#\/components\/parameters\/ExpectedOwner/gu) || []).length, 1);
   assert.equal((contract.match(/X-EasyBoost-Response-Owner/gu) || []).length, 2);
   assert.equal((contract.match(/OWNER_CHANGED/gu) || []).length, 1);
